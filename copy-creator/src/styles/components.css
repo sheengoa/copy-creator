@@ -475,7 +475,7 @@
   font-weight: var(--weight-semibold);
   cursor: pointer;
   transition: all 0.2s cubic-bezier(0.83, 0, 0.17, 1);
-  background: #111;
+  background: #333;
   color: white;
 }
 
@@ -678,9 +678,9 @@
 }
 
 .chip-base.active {
-  background: #111;
+  background: #333;
   color: white;
-  border-color: #111;
+  border-color: #333;
   box-shadow: 0 2px 8px rgba(0, 0, 0, 0.12);
 }
 

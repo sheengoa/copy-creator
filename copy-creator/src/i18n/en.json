@@ -1,4 +1,11 @@
 {
+  "brand": {
+    "name": "Copy Creator"
+  },
+  "sidebar": {
+    "features": "Features",
+    "tools": "Tools"
+  },
   "tabs": {
     "clipboard": "Clipboard",
     "phrases": "Quick Phrases",

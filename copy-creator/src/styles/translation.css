@@ -63,7 +63,7 @@
   padding: 6px 16px;
   border-radius: 8px;
   border: none;
-  background: #111;
+  background: #333;
   color: white;
   font-family: var(--font);
   font-size: var(--text-sm);
@@ -76,7 +76,7 @@
 
 [data-theme="dark"] .translate-btn {
   background: #fff;
-  color: #111;
+  color: #333;
 }
 
 .translate-btn:hover:not(:disabled) {
@@ -114,7 +114,7 @@
 
 [data-theme="dark"] .translate-spinner {
   border-color: rgba(0, 0, 0, 0.2);
-  border-top-color: #111;
+  border-top-color: #333;
 }
 
 .translation-lang-section {

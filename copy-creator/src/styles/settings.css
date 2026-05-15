@@ -76,14 +76,14 @@
 }
 
 .lang-toggle-btn.active {
-  background: #111;
+  background: #333;
   color: white;
   box-shadow: 0 2px 6px rgba(0, 0, 0, 0.15);
 }
 
 [data-theme="dark"] .lang-toggle-btn.active {
   background: #fff;
-  color: #111;
+  color: #333;
   box-shadow: 0 2px 6px rgba(255, 255, 255, 0.15);
 }
 
@@ -124,7 +124,7 @@
   padding: 8px 24px;
   border-radius: 10px;
   border: none;
-  background: #111;
+  background: #333;
   color: white;
   font-family: var(--font);
   font-size: var(--text-sm);
@@ -136,7 +136,7 @@
 
 [data-theme="dark"] .settings-save-btn {
   background: #fff;
-  color: #111;
+  color: #333;
   box-shadow: 0 2px 8px rgba(255, 255, 255, 0.1);
 }
 

@@ -1,11 +1,10 @@
-import React, { useEffect, useState } from "react";
+import React, { useCallback, useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import ClipboardPage from "./pages/ClipboardPage";
 import PhrasePage from "./pages/PhrasePage";
 import TranslationPage from "./pages/TranslationPage";
 import SettingsContent from "./components/SettingsContent";
-import GlassIcons from "./components/GlassIcons";
 import { useSettingsStore } from "./stores/settingsStore";
 import { Icons } from "./components/Icons";
 
@@ -15,26 +14,62 @@ const PANEL_MAP: Record<string, { titleKey: string; component: React.ReactNode }
   translate: { titleKey: "tabs.translate", component: <TranslationPage /> },
 };
 
+const NAV_ITEMS = [
+  { panelType: "clipboard" },
+  { panelType: "phrases" },
+  { panelType: "translate" },
+] as const;
+
 function App() {
   const { t } = useTranslation();
   const [activePanel, setActivePanel] = useState<string>("clipboard");
   const { themeMode, toggleTheme } = useSettingsStore();
 
+  const SIDEBAR_MIN = 60;
+  const SIDEBAR_MAX = 160;
+  const COLLAPSE_THRESHOLD = 120;
+  const [sidebarWidth, setSidebarWidth] = useState(SIDEBAR_MAX);
+  const [isCollapsed, setIsCollapsed] = useState(false);
+  const isDragging = useRef(false);
+  const dragStartX = useRef(0);
+  const dragStartWidth = useRef(0);
+
   useEffect(() => {
     document.documentElement.setAttribute("data-theme", themeMode);
   }, [themeMode]);
 
-  const navItems = [
-    { icon: Icons.clipboard, color: "blue", label: t("tabs.clipboard"), panelType: "clipboard", customClass: "clipboard" },
-    { icon: Icons.phrases, color: "purple", label: t("tabs.phrases"), panelType: "phrases", customClass: "phrases" },
-    { icon: Icons.translate, color: "green", label: t("tabs.translate"), panelType: "translate", customClass: "translate" },
-  ];
+  const handleResizeMouseDown = useCallback((e: React.MouseEvent) => {
+    e.preventDefault();
+    isDragging.current = true;
+    dragStartX.current = e.clientX;
+    dragStartWidth.current = sidebarWidth;
+    document.body.style.cursor = "col-resize";
+    document.body.style.userSelect = "none";
+  }, [sidebarWidth]);
 
-  const handleNavChange = (index: number | null) => {
-    if (index !== null) {
-      setActivePanel(navItems[index].panelType!);
-    }
-  };
+  useEffect(() => {
+    const handleMouseMove = (e: MouseEvent) => {
+      if (!isDragging.current) return;
+      const delta = e.clientX - dragStartX.current;
+      const newWidth = Math.min(SIDEBAR_MAX, Math.max(SIDEBAR_MIN, dragStartWidth.current + delta));
+      setSidebarWidth(newWidth);
+      setIsCollapsed(newWidth < COLLAPSE_THRESHOLD);
+    };
+
+    const handleMouseUp = () => {
+      if (!isDragging.current) return;
+      isDragging.current = false;
+      document.body.style.cursor = "";
+      document.body.style.userSelect = "";
+    };
+
+    document.addEventListener("mousemove", handleMouseMove);
+    document.addEventListener("mouseup", handleMouseUp);
+    return () => {
+      document.removeEventListener("mousemove", handleMouseMove);
+      document.removeEventListener("mouseup", handleMouseUp);
+    };
+  }, []);
 
   const handleSettingsClick = () => setActivePanel("settings");
 
@@ -47,31 +82,65 @@ function App() {
 
   return (
     <div className="app-container">
-      <div className="sidebar" data-tauri-drag-region>
+      <div
+        className={`sidebar ${isCollapsed ? "collapsed" : ""}`}
+        style={{ width: sidebarWidth, minWidth: sidebarWidth }}
+        data-tauri-drag-region
+      >
+        <div className="sidebar-header" data-tauri-drag-region>
+          <svg className="sidebar-logo" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+            <rect x="9" y="9" width="13" height="13" rx="2" ry="2" />
+            <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1" />
+          </svg>
+          <span className="sidebar-brand">{t("brand.name")}</span>
+        </div>
+
         <div className="sidebar-nav">
-          <GlassIcons
-            items={navItems}
-            activePanelType={isSettingsPanel ? null : activePanel}
-            onActiveChange={handleNavChange}
-          />
+          {NAV_ITEMS.map((item) => {
+            const iconKey = item.panelType as keyof typeof Icons;
+            const titleKey = `tabs.${item.panelType}`;
+            const isActive = !isSettingsPanel && activePanel === item.panelType;
+            return (
+              <button
+                key={item.panelType}
+                className={`sidebar-nav-item ${isActive ? "active" : ""}`}
+                onClick={() => setActivePanel(item.panelType)}
+                title={t(titleKey)}
+              >
+                <span className="sidebar-nav-icon">{Icons[iconKey]}</span>
+                <span className="sidebar-nav-label">{t(titleKey)}</span>
+              </button>
+            );
+          })}
         </div>
 
         <div className="sidebar-footer">
           <button
-            className={`sidebar-tool-btn ${isSettingsPanel ? "active" : ""}`}
+            className={`sidebar-footer-item ${isSettingsPanel ? "active" : ""}`}
             onClick={handleSettingsClick}
             title={t("settings.title")}
           >
-            {Icons.settings}
+            <span className="sidebar-footer-icon">{Icons.settings}</span>
+            <span className="sidebar-footer-label">{t("settings.title")}</span>
           </button>
           <button
-            className="sidebar-tool-btn"
+            className="sidebar-footer-item"
             onClick={toggleTheme}
-            title={themeMode === "light" ? t("settings.darkMode") : t("settings.lightMode")}
+            title={themeMode === "light" ? t("settings.dark") : t("settings.light")}
           >
-            {themeMode === "light" ? Icons.moon : Icons.sun}
+            <span className="sidebar-footer-icon">
+              {themeMode === "light" ? Icons.moon : Icons.sun}
+            </span>
+            <span className="sidebar-footer-label">
+              {themeMode === "light" ? t("settings.dark") : t("settings.light")}
+            </span>
           </button>
         </div>
+
+        <div
+          className="sidebar-resize-handle"
+          onMouseDown={handleResizeMouseDown}
+        />
       </div>
 
       <div className="panel-area">

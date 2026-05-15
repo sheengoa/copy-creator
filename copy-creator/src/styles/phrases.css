@@ -64,9 +64,9 @@
 }
 
 .group-chip.active {
-  background: #111;
+  background: #333;
   color: white;
-  border-color: #111;
+  border-color: #333;
   box-shadow: 0 2px 8px rgba(0, 0, 0, 0.12);
 }
 
@@ -103,7 +103,7 @@
 }
 
 .group-add-btn:hover {
-  background: #111;
+  background: #333;
   color: #fff;
   transform: scale(1.05);
 }
@@ -207,7 +207,7 @@
   padding: 5px 12px;
   border-radius: 7px;
   border: 0.5px solid var(--separator);
-  background: #111;
+  background: #333;
   color: white;
   font-size: 12px;
   font-weight: var(--weight-medium);

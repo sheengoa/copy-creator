@@ -1,4 +1,11 @@
 {
+  "brand": {
+    "name": "Copy Creator"
+  },
+  "sidebar": {
+    "features": "功能",
+    "tools": "工具"
+  },
   "tabs": {
     "clipboard": "剪切板",
     "phrases": "快捷短语",
