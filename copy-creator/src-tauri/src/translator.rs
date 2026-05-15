@@ -95,6 +95,13 @@ async fn translate_ai(
         return Err("AI 翻译未配置，请在设置中填写 API 地址和 Key".to_string());
     }
 
+    let full_url = if api_url.contains("/chat/completions") || api_url.contains("/completions") {
+        api_url.clone()
+    } else {
+        let base = api_url.trim_end_matches('/');
+        format!("{}/v1/chat/completions", base)
+    };
+
     let prompt = format!(
         "Translate the following text from {source} to {target}. Only output the translated text, nothing else.\n\nText: {text}",
         source = if source_lang == "auto" { "auto-detected language" } else { source_lang },
@@ -108,7 +115,7 @@ async fn translate_ai(
         .map_err(|e| format!("创建 HTTP 客户端失败: {}", e))?;
 
     let resp = client
-        .post(&api_url)
+        .post(&full_url)
         .header("Authorization", format!("Bearer {}", api_key))
         .header("Content-Type", "application/json")
         .json(&serde_json::json!({

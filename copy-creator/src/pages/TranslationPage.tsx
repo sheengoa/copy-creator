@@ -1,6 +1,8 @@
 import { useTranslation } from "react-i18next";
 import { useTranslationStore } from "../stores/translationStore";
-import { Icons } from "../icons";
+import { Icons } from "../components/Icons";
+import IosSelect from "../components/IosSelect";
+import { useState } from "react";
 
 const LANGUAGES = [
   { code: "zh", name: "中文", badge: "ZH" },
@@ -30,7 +32,18 @@ export default function TranslationPage() {
     translate,
   } = useTranslationStore();
 
-  const selectedLang = LANGUAGES.find((l) => l.code === targetLang);
+  const [copied, setCopied] = useState(false);
+
+  const handleCopy = async () => {
+    if (!result) return;
+    try {
+      await navigator.clipboard.writeText(result);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
+    } catch (err) {
+      console.error("Failed to copy:", err);
+    }
+  };
 
   return (
     <div className="translation-page">
@@ -63,18 +76,11 @@ export default function TranslationPage() {
       <div className="translation-lang-section">
         <span className="translation-lang-label">{t("translate.targetLang")}</span>
         <div className="translation-lang-select-wrapper">
-          <span className="lang-bar-badge">{selectedLang?.badge}</span>
-          <select
-            className="translation-lang-select"
+          <IosSelect
             value={targetLang}
-            onChange={(e) => setTargetLang(e.target.value)}
-          >
-            {LANGUAGES.map((l) => (
-              <option key={l.code} value={l.code}>
-                {l.name}
-              </option>
-            ))}
-          </select>
+            options={LANGUAGES.map((l) => ({ value: l.code, label: l.name }))}
+            onChange={setTargetLang}
+          />
         </div>
       </div>
 
@@ -88,11 +94,22 @@ export default function TranslationPage() {
       <div className="translation-result-card">
         <div className="translation-result-header">
           <span className="section-label">{t("translate.result")}</span>
-          {engine && (
-            <span className="engine-badge">
-              {engine === "ai" ? "AI" : engine === "google" ? "Google" : "Baidu"}
-            </span>
-          )}
+          <div className="translation-result-header-right">
+            {engine && (
+              <span className="engine-badge">
+                {engine === "ai" ? "AI" : engine === "google" ? "Google" : "Baidu"}
+              </span>
+            )}
+            {result && (
+              <button
+                className={`translation-copy-btn ${copied ? "copied" : ""}`}
+                onClick={handleCopy}
+                title={copied ? t("translate.copied") : t("translate.copy")}
+              >
+                {copied ? Icons.check : Icons.copy}
+              </button>
+            )}
+          </div>
         </div>
         <div className="translation-result">
           {result ? (

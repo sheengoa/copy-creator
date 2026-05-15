@@ -2,14 +2,14 @@ import { useState, useEffect, useRef, useCallback } from "react";
 import { useTranslation } from "react-i18next";
 import { invoke } from "@tauri-apps/api/core";
 import { useSettingsStore } from "../stores/settingsStore";
+import { StorageSection, LanguageSection, TranslationSection } from "./settings";
 
 interface Props {
   embedded?: boolean;
-  onClose?: () => void;
 }
 
-export default function SettingsContent({ embedded, onClose }: Props) {
-  const { t, i18n } = useTranslation();
+export default function SettingsContent({ embedded }: Props) {
+  const { i18n } = useTranslation();
   const settings = useSettingsStore();
 
   const [localRetention, setLocalRetention] = useState(settings.clipboardRetention);
@@ -121,139 +121,36 @@ export default function SettingsContent({ embedded, onClose }: Props) {
 
   const content = (
     <>
-      <div className="settings-section">
-        <div className="settings-section-title">{t("settings.storage")}</div>
-        <div className="settings-card">
-          <div className="settings-row vertical">
-            <div className="settings-row-label">{t("settings.storagePath")}</div>
-            <div className="settings-storage-row">
-              <span className="settings-storage-path">{storagePath}</span>
-              <button
-                className="settings-storage-btn"
-                onClick={async () => {
-                  try {
-                    const folder = await invoke<string>("select_storage_folder");
-                    await invoke("set_setting", { key: "storage_path", value: folder });
-                    setStoragePath(folder);
-                  } catch {}
-                }}
-              >
-                {t("settings.changeFolder")}
-              </button>
-            </div>
-          </div>
-        </div>
-      </div>
+      <StorageSection storagePath={storagePath} setStoragePath={setStoragePath} />
 
-      <div className="settings-section">
-        <div className="settings-section-title">{t("settings.language")}</div>
-        <div className="settings-card">
-          <div className="settings-row">
-            <div className="settings-row-label">{t("settings.language")}</div>
-            <div className="settings-lang-toggle">
-              <button
-                className={`lang-toggle-btn${localLang === "zh-CN" ? " active" : ""}`}
-                onClick={() => setLocalLang("zh-CN")}
-              >
-                ZH
-              </button>
-              <button
-                className={`lang-toggle-btn${localLang === "en" ? " active" : ""}`}
-                onClick={() => setLocalLang("en")}
-              >
-                EN
-              </button>
-            </div>
-          </div>
-          <div className="settings-row">
-            <div className="settings-row-label">{t("settings.shortcut")}</div>
-            <div className="shortcut-setting">
-              <div className="shortcut-keyboard-row">
-                <span className={`shortcut-display${recording ? " recording" : ""}`}>
-                  {recording ? t("settings.recording") : (localShortcutKey || t("settings.shortcutPlaceholder"))}
-                </span>
-                <button
-                  className="shortcut-record-btn"
-                  onClick={recording ? stopRecording : startRecording}
-                >
-                  {recording ? t("settings.stopRecord") : t("settings.recordShortcut")}
-                </button>
-              </div>
-            </div>
-          </div>
-          <div className="settings-row">
-            <div className="settings-row-label">{t("settings.clipboardRetention")}</div>
-            <select
-              className="settings-select"
-              value={localRetention}
-              onChange={(e) => setLocalRetention(e.target.value)}
-            >
-              <option value="1week">{t("settings.retention1week")}</option>
-              <option value="1month">{t("settings.retention1month")}</option>
-              <option value="3months">{t("settings.retention3months")}</option>
-            </select>
-          </div>
-        </div>
-      </div>
+      <LanguageSection
+        localLang={localLang}
+        setLocalLang={setLocalLang}
+        localRetention={localRetention}
+        setLocalRetention={setLocalRetention}
+        localShortcutKey={localShortcutKey}
+        setLocalShortcutKey={setLocalShortcutKey}
+        recording={recording}
+        startRecording={startRecording}
+        stopRecording={stopRecording}
+      />
 
-      <div className="settings-section">
-        <div className="settings-section-title">{t("settings.translation")}</div>
-        <div className="settings-card">
-          <div className="settings-row">
-            <div className="settings-row-label">{t("settings.defaultEngine")}</div>
-            <select
-              className="settings-select"
-              value={localEngine}
-              onChange={(e) => setLocalEngine(e.target.value)}
-            >
-              <option value="google">{t("settings.googleTranslation")}</option>
-              <option value="ai">{t("settings.aiTranslation")}</option>
-            </select>
-          </div>
-          <div className="settings-row vertical">
-            <div className="settings-row-label">{t("settings.googleApiKey")}</div>
-            <input
-              className="settings-input"
-              type="password"
-              value={localGoogleApiKey}
-              onChange={(e) => setLocalGoogleApiKey(e.target.value)}
-              placeholder={t("settings.googleNote")}
-            />
-          </div>
-          <div className="settings-row vertical">
-            <div className="settings-row-label">{t("settings.apiUrl")}</div>
-            <input
-              className="settings-input"
-              value={localApiUrl}
-              onChange={(e) => setLocalApiUrl(e.target.value)}
-              placeholder={t("settings.apiUrl")}
-            />
-          </div>
-          <div className="settings-row vertical">
-            <div className="settings-row-label">{t("settings.apiKey")}</div>
-            <input
-              className="settings-input"
-              type="password"
-              value={localApiKey}
-              onChange={(e) => setLocalApiKey(e.target.value)}
-              placeholder={t("settings.apiKey")}
-            />
-          </div>
-          <div className="settings-row vertical">
-            <div className="settings-row-label">{t("settings.model")}</div>
-            <input
-              className="settings-input"
-              value={localModel}
-              onChange={(e) => setLocalModel(e.target.value)}
-              placeholder={t("settings.model")}
-            />
-          </div>
-        </div>
-      </div>
+      <TranslationSection
+        localEngine={localEngine}
+        setLocalEngine={setLocalEngine}
+        localApiUrl={localApiUrl}
+        setLocalApiUrl={setLocalApiUrl}
+        localApiKey={localApiKey}
+        setLocalApiKey={setLocalApiKey}
+        localModel={localModel}
+        setLocalModel={setLocalModel}
+        localGoogleApiKey={localGoogleApiKey}
+        setLocalGoogleApiKey={setLocalGoogleApiKey}
+      />
 
       <div className="settings-actions">
         <button className={`settings-save-btn${saved ? " saved" : ""}`} onClick={handleSave}>
-          {saved ? "✓" : t("common.save")}
+          {saved ? "✓" : "保存"}
         </button>
       </div>
     </>

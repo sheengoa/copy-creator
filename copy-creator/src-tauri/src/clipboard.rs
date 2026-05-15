@@ -10,6 +10,17 @@ fn is_url(text: &str) -> bool {
         || lower.starts_with("ftps://")
 }
 
+fn is_image_file(path: &str) -> bool {
+    let lower = path.to_lowercase();
+    lower.ends_with(".png")
+        || lower.ends_with(".jpg")
+        || lower.ends_with(".jpeg")
+        || lower.ends_with(".gif")
+        || lower.ends_with(".bmp")
+        || lower.ends_with(".webp")
+        || lower.ends_with(".ico")
+}
+
 #[cfg(target_os = "windows")]
 fn read_clipboard_files() -> Option<Vec<String>> {
     use windows::Win32::System::DataExchange::*;
@@ -71,11 +82,37 @@ fn read_clipboard_files() -> Option<Vec<String>> {
 
 pub fn start_monitor(app: &AppHandle) -> Result<(), Box<dyn std::error::Error>> {
     let handle = app.clone();
-    let mut last_text = String::new();
-    let mut last_image_hash: u64 = 0;
-    let mut last_files_key = String::new();
+    
+    let initial_text = handle.clipboard().read_text()
+        .map(|s| s.trim().to_string())
+        .unwrap_or_default();
+    
+    let initial_image_hash: u64 = if let Ok(image) = handle.clipboard().read_image() {
+        let rgba = image.rgba();
+        if !rgba.is_empty() && image.width() > 0 && image.height() > 0 {
+            rgba.iter()
+                .take(400)
+                .fold(0u64, |acc, &b| acc.wrapping_mul(31).wrapping_add(b as u64))
+        } else {
+            0
+        }
+    } else {
+        0
+    };
+    
+    #[cfg(target_os = "windows")]
+    let initial_files_key = read_clipboard_files()
+        .map(|files| files.join("|"))
+        .unwrap_or_default();
+    #[cfg(not(target_os = "windows"))]
+    let initial_files_key = String::new();
 
-    std::thread::spawn(move || loop {
+    std::thread::spawn(move || {
+        let mut last_text = initial_text;
+        let mut last_image_hash = initial_image_hash;
+        let mut last_files_key = initial_files_key;
+
+        loop {
         std::thread::sleep(std::time::Duration::from_millis(800));
 
         if crate::paste::PASTING.swap(false, std::sync::atomic::Ordering::SeqCst) {
@@ -264,6 +301,97 @@ pub fn start_monitor(app: &AppHandle) -> Result<(), Box<dyn std::error::Error>> 
                                 continue;
                             }
 
+                            if is_image_file(&file_path) {
+                                if let Ok(img_bytes) = std::fs::read(&file_path) {
+                                    if let Ok(decoded) = image::load_from_memory(&img_bytes) {
+                                        let rgba = decoded.to_rgba8();
+                                        let img_w = decoded.width();
+                                        let img_h = decoded.height();
+
+                                        let mut png_bytes: Vec<u8> = Vec::new();
+                                        {
+                                            let encoder = image::codecs::png::PngEncoder::new(&mut png_bytes);
+                                            use image::ImageEncoder;
+                                            let _ = encoder.write_image(
+                                                &rgba,
+                                                img_w,
+                                                img_h,
+                                                image::ExtendedColorType::Rgba8,
+                                            );
+                                        }
+
+                                        if !png_bytes.is_empty() {
+                                            let mut dir = crate::db::get_storage_dir(&handle);
+                                            dir.push("images");
+                                            std::fs::create_dir_all(&dir).ok();
+
+                                            let filename = format!("{}.png", uuid::Uuid::new_v4());
+                                            let filepath = dir.join(&filename);
+
+                                            if let Ok(mut f) = std::fs::File::create(&filepath) {
+                                                if f.write_all(&png_bytes).is_ok() {
+                                                    let relative = format!("images/{}", filename);
+
+                                                    crate::paste::cache_image(relative.clone(), rgba.to_vec(), img_w, img_h, png_bytes.clone());
+
+                                                    let mut thumb_dir = dir.clone();
+                                                    thumb_dir.push("thumbs");
+                                                    std::fs::create_dir_all(&thumb_dir).ok();
+                                                    let thumb_path = thumb_dir.join(&filename);
+                                                    let (tw, th) = (decoded.width(), decoded.height());
+                                                    let max_thumb: u32 = 200;
+                                                    let scale = if tw > max_thumb || th > max_thumb {
+                                                        max_thumb as f32 / tw.max(th) as f32
+                                                    } else {
+                                                        1.0
+                                                    };
+                                                    let thumb = if scale < 1.0 {
+                                                        decoded.resize(
+                                                            (tw as f32 * scale) as u32,
+                                                            (th as f32 * scale) as u32,
+                                                            image::imageops::FilterType::Triangle,
+                                                        )
+                                                    } else {
+                                                        decoded
+                                                    };
+                                                    let mut thumb_buf = std::io::Cursor::new(Vec::new());
+                                                    if thumb.write_to(&mut thumb_buf, image::ImageFormat::Png).is_ok() {
+                                                        if let Ok(mut tf) = std::fs::File::create(&thumb_path) {
+                                                            let _ = tf.write_all(&thumb_buf.into_inner());
+                                                        }
+                                                    }
+
+                                                    let id = uuid::Uuid::new_v4().to_string();
+                                                    let now = chrono::Utc::now().to_rfc3339();
+                                                    let state = handle.state::<crate::db::DbState>();
+                                                    let conn = state.conn.lock().unwrap();
+                                                    conn.execute(
+                                                        "INSERT INTO clipboard_records (id, type, content, source_app, created_at) VALUES (?1, ?2, ?3, ?4, ?5)",
+                                                        rusqlite::params![id, "image", relative, "", &now],
+                                                    )
+                                                    .ok();
+
+                                                    handle
+                                                        .emit(
+                                                            "clipboard-update",
+                                                            serde_json::json!({
+                                                                "id": id,
+                                                                "type": "image",
+                                                                "content": relative,
+                                                                "source_app": "",
+                                                                "created_at": now,
+                                                            }),
+                                                        )
+                                                        .ok();
+
+                                                    continue;
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+
                             let id = uuid::Uuid::new_v4().to_string();
                             let now = chrono::Utc::now().to_rfc3339();
                             let state = handle.state::<crate::db::DbState>();
@@ -290,6 +418,7 @@ pub fn start_monitor(app: &AppHandle) -> Result<(), Box<dyn std::error::Error>> 
                     }
                 }
             }
+        }
         }
     });
 

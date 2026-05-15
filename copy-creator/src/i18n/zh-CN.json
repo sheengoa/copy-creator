@@ -22,6 +22,7 @@
     "baiduSecret": "百度密钥",
     "aiConfig": "AI 翻译配置",
     "apiUrl": "API 地址",
+    "apiUrlPlaceholder": "如 https://api.openai.com",
     "apiKey": "API Key",
     "model": "模型名称",
     "theme": "主题",
@@ -37,6 +38,7 @@
     "recording": "按下快捷键组合...",
     "storage": "存储",
     "storagePath": "文件存储位置",
+    "storageHint": "保存后，重启应用生效",
     "changeFolder": "更改",
     "translation": "翻译"
   },
@@ -47,7 +49,9 @@
     "translate": "翻译",
     "translating": "翻译中...",
     "targetLang": "目标语言",
-    "noResult": "翻译结果将显示在这里"
+    "noResult": "翻译结果将显示在这里",
+    "copy": "复制",
+    "copied": "已复制"
   },
   "clipboard": {
     "search": "搜索剪切板...",

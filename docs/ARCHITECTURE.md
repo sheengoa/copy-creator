@@ -6,7 +6,7 @@
 |------|------|------|
 | 桌面框架 | **Tauri 2.x** | 剪贴板监听、全局快捷键、系统托盘等需原生系统调用，Rust 层天然胜任；包体积极小 |
 | 前端框架 | **React 18 + TypeScript** | 生态成熟，组件化开发效率高 |
-| UI 组件库 | **MUI (Material UI)** | 直接匹配 Material Design 规范，组件齐全 |
+| UI 组件库 | **纯 CSS + CSS Variables** | iOS 风格设计，轻量无依赖，主题切换便捷 |
 | 状态管理 | **Zustand** | 轻量，无模板代码，适合中等复杂度 |
 | 本地存储 | **SQLite** (Rust: `rusqlite`) | 嵌入式关系数据库，零配置，Tauri 原生支持 |
 | 剪切板 | Tauri clipboard API + 原生扩展 | 文本和图片监听与写入 |
@@ -23,7 +23,7 @@
 ├─────────────────────────────────────────────────────┤
 │                                                      │
 │  ┌──────────────────────┐                           │
-│  │    React 前端         │  ← TypeScript + MUI       │
+│  │    React 前端         │  ← TypeScript + 纯 CSS    │
 │  │  ┌────┬────┬────┬──┐ │                           │
 │  │  │剪切│短语│翻译│设置│ │                           │
 │  │  │板页│页  │页  │页 │ │                           │
@@ -149,32 +149,56 @@
 
 ```
 src/
-├── main.tsx                    # 入口
-├── App.tsx                     # 主窗口布局 + 面板路由（URL param ?p=）
-├── components/
-│   ├── GlassIcons.tsx          # 玻璃拟态图标按钮栏（左侧导航）
-│   ├── GlassIcons.css          # 按钮栏样式（3D 玻璃拟态效果）
-│   ├── SettingsContent.tsx     # 设置表单（支持内嵌面板 / 对话框两种模式）
-│   └── SettingsDialog.tsx      # 设置弹窗模式（备用）
-├── pages/
-│   ├── ClipboardPage.tsx       # 剪切板页（搜索 + 列表）
-│   ├── PhrasePage.tsx          # 快捷短语页（场景组 + 短语列表）
-│   └── TranslationPage.tsx     # 翻译页（输入 + 结果展示）
-├── stores/
-│   ├── clipboardStore.ts       # 剪切板状态
-│   ├── phraseStore.ts          # 快捷短语状态
-│   ├── translationStore.ts     # 翻译状态
-│   └── settingsStore.ts        # 设置状态
-├── hooks/
-│   ├── useTauriEvent.ts        # 监听 Rust 后端事件
-│   └── usePaste.ts             # 粘贴操作
-├── i18n/
+├── main.tsx                        # 入口
+├── App.tsx                         # 主窗口布局 + 面板路由（React state）
+├── components/                     # 通用组件
+│   ├── GlassIcons.tsx              # 玻璃拟态图标按钮栏（左侧导航）
+│   ├── GlassIcons.css              # 按钮栏样式（3D 玻璃拟态效果）
+│   ├── Icons.tsx                   # 自定义 SVG 图标集（SF Symbols 风格）
+│   ├── SearchInput.tsx             # 搜索输入组件
+│   ├── IosSelect.tsx               # iOS 风格选择组件
+│   ├── SettingsContent.tsx         # 设置表单主组件
+│   ├── SettingsDialog.tsx          # 设置弹窗模式
+│   └── settings/                   # 设置子组件
+│       ├── index.ts                # 导出文件
+│       ├── LanguageSection.tsx     # 语言设置（语言切换 + 快捷键录制 + 剪切板保留时长）
+│       ├── StorageSection.tsx      # 存储设置（存储位置显示 + 自定义文件夹选择）
+│       └── TranslationSection.tsx  # 翻译引擎设置（百度/Google/AI 配置）
+├── pages/                          # 页面组件
+│   ├── ClipboardPage/              # 剪切板页
+│   │   ├── index.tsx               # 主组件（搜索 + 分类筛选 + 列表）
+│   │   ├── ImageThumb.tsx          # 图片缩略图组件（支持悬浮预览）
+│   │   └── utils.tsx               # 剪切板类型工具（分类图标 + 预览组件）
+│   ├── PhrasePage/                 # 快捷短语页
+│   │   ├── index.tsx               # 主组件（搜索 + 场景组 + 短语列表）
+│   │   ├── GroupChips.tsx          # 场景组标签组件
+│   │   ├── GroupDialog.tsx         # 新建/编辑场景组弹窗
+│   │   ├── PhraseList.tsx          # 短语列表组件
+│   │   ├── PhraseDialog.tsx        # 新建/编辑短语弹窗
+│   │   └── ManageGroupsDialog.tsx  # 管理场景组弹窗
+│   └── TranslationPage.tsx         # 翻译页（输入 + 结果展示）
+├── stores/                         # Zustand 状态管理
+│   ├── clipboardStore.ts           # 剪切板状态
+│   ├── phraseStore.ts              # 快捷短语状态
+│   ├── translationStore.ts         # 翻译状态
+│   └── settingsStore.ts            # 设置状态
+├── styles/                         # CSS 模块化样式
+│   ├── index.css                   # 主入口（导入所有模块）
+│   ├── base.css                    # 基础样式 + CSS 变量（主题色 + 动画）
+│   ├── layout.css                  # 布局样式（容器 + 侧边栏 + 面板）
+│   ├── components.css              # 通用组件样式（弹窗 + 按钮 + 表单）
+│   ├── clipboard.css               # 剪切板页面样式
+│   ├── phrases.css                 # 快捷短语页面样式
+│   ├── translation.css             # 翻译页面样式
+│   └── settings.css                # 设置页面样式
+├── utils/
+│   └── paste.ts                    # 粘贴操作工具函数
+├── i18n/                           # 国际化
 │   ├── index.ts
 │   ├── zh-CN.json
 │   └── en.json
-├── types/
-│   └── index.ts                # 公共类型定义
-└── icons.tsx                   # 自定义 SVG 图标集（SF Symbols 风格）
+└── types/
+    └── index.ts                    # 公共类型定义
 ```
 
 ## 4. 数据流
@@ -251,24 +275,33 @@ src/
 
 ```
 copy-creator/
-├── src-tauri/              # Rust 后端
+├── src-tauri/                  # Rust 后端
 │   ├── src/
 │   │   ├── main.rs
-│   │   ├── clipboard.rs    # 剪切板监听
-│   │   ├── tray.rs         # 系统托盘
-│   │   ├── shortcut.rs     # 全局快捷键
-│   │   ├── db.rs           # 数据库
-│   │   ├── translator.rs   # 翻译服务
-│   │   └── paste.rs        # 粘贴执行
+│   │   ├── lib.rs              # Tauri 命令注册
+│   │   ├── clipboard.rs        # 剪切板监听
+│   │   ├── tray.rs             # 系统托盘
+│   │   ├── shortcut.rs         # 全局快捷键
+│   │   ├── db.rs               # 数据库
+│   │   ├── translator.rs       # 翻译服务
+│   │   └── paste.rs            # 粘贴执行
 │   ├── Cargo.toml
 │   └── tauri.conf.json
-├── src/                    # React 前端
-│   ├── components/
-│   ├── pages/
-│   ├── stores/
-│   ├── hooks/
-│   ├── i18n/
-│   └── types/
+├── src/                        # React 前端
+│   ├── components/             # 通用组件
+│   │   └── settings/           # 设置子组件
+│   ├── pages/                  # 页面组件
+│   │   ├── ClipboardPage/      # 剪切板页
+│   │   └── PhrasePage/         # 快捷短语页
+│   ├── stores/                 # Zustand 状态管理
+│   ├── styles/                 # CSS 模块化样式
+│   ├── utils/                  # 工具函数
+│   ├── i18n/                   # 国际化
+│   └── types/                  # 类型定义
+├── docs/                       # 项目文档
+│   ├── PRD.md                  # 产品需求文档
+│   ├── ARCHITECTURE.md         # 产品架构文档
+│   └── project_process.md      # 开发日志
 ├── package.json
 ├── pnpm-lock.yaml
 ├── vite.config.ts

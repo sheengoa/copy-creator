@@ -67,6 +67,11 @@ Phase 2 — 完善与优化 🔄 (进行中)
 - [x] 图片粘贴优化（paste_with_defocus 改为后台线程 hide/paste/show，消除卡顿）
 - [x] 短语按钮 100% 不透明度（亮色 #fff / 暗色 #3a3a3c）
 - [x] 暗色模式短语卡片左侧竖条颜色修复（暗色下 #111 → #fff）
+- [x] 前端代码重构 — CSS 模块化拆分（2488 行 index.css → 7 个模块化文件）
+- [x] 前端代码重构 — 页面组件拆分（PhrasePage/ClipboardPage 拆分为多个子组件）
+- [x] 前端代码重构 — 设置组件拆分（SettingsContent 拆分为 Language/Storage/Translation 三个 Section）
+- [x] 前端代码重构 — 文件夹结构优化（pages 使用文件夹组织，新增 styles 目录）
+- [x] 前端代码重构 — TypeScript 类型修复（所有编译错误已解决）
 
 ## 粘贴聚焦问题记录
 
@@ -188,6 +193,10 @@ Phase 2 — 完善与优化 🔄 (进行中)
 - `prune_old_records()` 函数已实现但从未被调用，过期记录不会自动删除
 - 图片悬浮缩放 CSS `:hover` `transform: scale()` 在祖先容器有 `overflow-y: auto` 时被裁剪（overflow 强制作用于两轴），多次改 CSS 均无效，最终方案为 `onMouseEnter` 触发生成一个 fixed-position overlay（`pointer-events: none`），直接挂载到 DOM 顶层，完全绕过 overflow 和 stacking context 限制
 - 图片粘贴 `window.minimize()` 在 Windows 11 上有约 300ms 动画导致明显卡顿，改为 `window.hide()` 即时无动画，配合 `std::thread::spawn` 将 hide/paste/show 放入后台线程执行，Tauri command 在 clipboard write 完成后立即返回，前端不阻塞
+- 前端重构采用单一职责原则：每个组件只负责一个功能，页面组件负责组合子组件
+- CSS 模块化策略：按功能域拆分（base/layout/components/clipboard/phrases/translation/settings），index.css 仅作为入口导入
+- 页面文件夹组织：复杂页面使用文件夹（ClipboardPage/、PhrasePage/），简单页面保持单文件（TranslationPage.tsx）
+- 设置组件拆分：按功能域分为 LanguageSection（语言+快捷键+保留时长）、StorageSection（存储位置）、TranslationSection（翻译引擎）
 
 ---
 

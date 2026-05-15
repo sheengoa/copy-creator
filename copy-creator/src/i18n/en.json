@@ -22,6 +22,7 @@
     "baiduSecret": "Baidu Secret Key",
     "aiConfig": "AI Translation Config",
     "apiUrl": "API URL",
+    "apiUrlPlaceholder": "e.g. https://api.openai.com",
     "apiKey": "API Key",
     "model": "Model Name",
     "theme": "Theme",
@@ -37,6 +38,7 @@
     "recording": "Press shortcut combination...",
     "storage": "Storage",
     "storagePath": "File Storage Location",
+    "storageHint": "Restart the app after saving to take effect",
     "changeFolder": "Change",
     "translation": "Translation"
   },
@@ -47,7 +49,9 @@
     "translate": "Translate",
     "translating": "Translating...",
     "targetLang": "Target Language",
-    "noResult": "Translation result will appear here"
+    "noResult": "Translation result will appear here",
+    "copy": "Copy",
+    "copied": "Copied"
   },
   "clipboard": {
     "search": "Search clipboard...",

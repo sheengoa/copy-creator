@@ -18,7 +18,7 @@ export default function SettingsDialog({ open, onClose }: Props) {
         <div style={{ padding: "20px 20px 0" }}>
           <div className="modal-title">Settings</div>
         </div>
-        <SettingsContent onClose={onClose} />
+        <SettingsContent />
       </div>
     </div>
   );

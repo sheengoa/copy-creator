@@ -1,88 +1,17 @@
 import { useEffect, useState, useRef, useCallback } from "react";
 import { useTranslation } from "react-i18next";
-import { useClipboardStore } from "../stores/clipboardStore";
-import { Icons } from "../icons";
-import SearchInput from "../components/SearchInput";
+import { useClipboardStore } from "../../stores/clipboardStore";
+import { Icons } from "../../components/Icons";
+import SearchInput from "../../components/SearchInput";
+import { ImageThumb } from "./ImageThumb";
+import { formatTime, getFileName, TYPE_META } from "./utils";
 
 type ClipType = "all" | "text" | "image" | "link" | "file";
 
-function formatTime(dateStr: string): string {
-  const date = new Date(dateStr);
-  const month = date.getMonth() + 1;
-  const day = date.getDate();
-  const hours = date.getHours().toString().padStart(2, "0");
-  const minutes = date.getMinutes().toString().padStart(2, "0");
-  return `${month}/${day} ${hours}:${minutes}`;
-}
-
-const TYPE_META: Record<string, { icon: React.ReactElement; color: string }> = {
-  text: { icon: Icons.clipboard, color: "#007AFF" },
-  image: { icon: Icons.image, color: "#34C759" },
-  link: { icon: Icons.link, color: "#FF9500" },
-  file: { icon: Icons.file, color: "#AF52DE" },
-};
-
-function getFileName(path: string): string {
-  const parts = path.replace(/\\/g, "/").split("/");
-  return parts[parts.length - 1] || path;
-}
-
-function ImageThumb({ record, onHover, onLeave, onClick }: {
-  record: { id: string; content: string };
-  onHover: (src: string, rect: DOMRect) => void;
-  onLeave: () => void;
-  onClick: (e: React.MouseEvent) => void;
-}) {
-  const { getThumbnail, thumbnailCache } = useClipboardStore();
-  const [src, setSrc] = useState<string | null>(null);
-  const [visible, setVisible] = useState(false);
-  const ref = useRef<HTMLDivElement>(null);
-
-  useEffect(() => {
-    if (!visible) return;
-    const cached = thumbnailCache[record.id];
-    if (cached) {
-      setSrc(cached);
-      return;
-    }
-    getThumbnail(record as any).then((dataUrl) => {
-      if (dataUrl) setSrc(dataUrl);
-    });
-  }, [visible, record.id]);
-
-  useEffect(() => {
-    const el = ref.current;
-    if (!el) return;
-    const observer = new IntersectionObserver(
-      ([entry]) => {
-        if (entry.isIntersecting) setVisible(true);
-      },
-      { rootMargin: "200px" }
-    );
-    observer.observe(el);
-    return () => observer.disconnect();
-  }, []);
-
-  return (
-    <div
-      ref={ref}
-      className="clipboard-card-thumb"
-      onMouseEnter={(e) => {
-        if (!src) return;
-        const rect = e.currentTarget.getBoundingClientRect();
-        onHover(src, rect);
-      }}
-      onMouseLeave={onLeave}
-      onClick={onClick}
-    >
-      {src ? (
-        <img src={src} alt="" />
-      ) : (
-        <div className="thumb-spinner" />
-      )}
-    </div>
-  );
-}
+TYPE_META.text.icon = Icons.clipboard;
+TYPE_META.image.icon = Icons.image;
+TYPE_META.link.icon = Icons.link;
+TYPE_META.file.icon = Icons.file;
 
 export default function ClipboardPage() {
   const { t } = useTranslation();
@@ -109,6 +38,16 @@ export default function ClipboardPage() {
     { key: "link", label: t("clipboard.link") },
     { key: "file", label: t("clipboard.file") },
   ];
+
+  const getTypeLabel = (type: string): string => {
+    const labels: Record<string, string> = {
+      text: t("clipboard.text"),
+      image: t("clipboard.image"),
+      link: t("clipboard.link"),
+      file: t("clipboard.file"),
+    };
+    return labels[type] || t("clipboard.text");
+  };
 
   const filtered =
     category === "all" ? records : records.filter((r) => r.type === category);
@@ -189,22 +128,13 @@ export default function ClipboardPage() {
               >
                 <div className="notibar" />
                 <div className="noticontent">
-                  <div className="notititle">
+                  <div className="notititle clipboard-card-header">
                     <span className="noti-type-label">
                       <span className="noti-type-icon">{meta.icon}</span>
-                      {formatTime(r.created_at)}
+                      <span className="noti-type-text">{getTypeLabel(r.type)}</span>
                     </span>
-                    <button
-                      className="card-delete-btn"
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        deleteRecord(r.id);
-                      }}
-                    >
-                      {Icons.delete}
-                    </button>
                   </div>
-                  <div className="notibody">
+                  <div className="notibody clipboard-card-body">
                     {r.type === "image" ? (
                       <ImageThumb
                         record={r}
@@ -224,6 +154,20 @@ export default function ClipboardPage() {
                     ) : (
                       r.content
                     )}
+                  </div>
+                  <div className="notititle clipboard-card-footer">
+                    <span className="clipboard-card-time">{formatTime(r.created_at)}</span>
+                    <div className="clipboard-card-actions">
+                      <button
+                        className="card-delete-btn"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          deleteRecord(r.id);
+                        }}
+                      >
+                        {Icons.delete}
+                      </button>
+                    </div>
                   </div>
                 </div>
               </div>

@@ -7,8 +7,7 @@ import TranslationPage from "./pages/TranslationPage";
 import SettingsContent from "./components/SettingsContent";
 import GlassIcons from "./components/GlassIcons";
 import { useSettingsStore } from "./stores/settingsStore";
-import { useClipboardStore } from "./stores/clipboardStore";
-import { Icons } from "./icons";
+import { Icons } from "./components/Icons";
 
 const PANEL_MAP: Record<string, { titleKey: string; component: React.ReactNode }> = {
   clipboard: { titleKey: "tabs.clipboard", component: <ClipboardPage /> },
