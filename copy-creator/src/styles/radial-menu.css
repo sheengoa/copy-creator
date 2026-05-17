@@ -5,6 +5,15 @@
   z-index: 3000;
 }
 
+.radial-menu-overlay.radial-menu-hidden {
+  pointer-events: none;
+}
+
+.radial-menu-overlay.radial-menu-hidden .radial-menu-popup {
+  opacity: 0;
+  animation: none;
+}
+
 .radial-menu-popup {
   width: 100%;
   height: 100%;

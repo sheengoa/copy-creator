@@ -321,10 +321,6 @@ export default function RadialMenu() {
     }
   }, [visible, activeTab, phraseGroupId, phraseStore.groups, phraseStore.loadPhrases]);
 
-  if (!visible) {
-    return <div style={{ position: "fixed", inset: 0, pointerEvents: "none" }} />;
-  }
-
   const filteredRecords = clipboardCategory === "all"
     ? clipboardStore.records
     : clipboardStore.records.filter((r) => r.type === clipboardCategory);
@@ -363,7 +359,7 @@ export default function RadialMenu() {
   const activeCategory = activeTab === "clipboard" ? clipboardCategory : phraseGroupId;
 
   return (
-    <div className="radial-menu-overlay">
+    <div className={`radial-menu-overlay${visible ? "" : " radial-menu-hidden"}`}>
       <div className="radial-menu-popup">
         <div className="radial-menu-nav">
           {(["clipboard", "phrases"] as TabKey[]).map((tab) => (
