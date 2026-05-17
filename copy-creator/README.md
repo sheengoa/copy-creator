@@ -1,73 +1,38 @@
-# React + TypeScript + Vite
+# Copy Creator
 
-This template provides a minimal setup to get React working in Vite with HMR and some ESLint rules.
+PC 端效率辅助工具 —— 剪切板管理、快捷短语、翻译，桌面悬浮窗形态，关闭后驻留系统托盘。
 
-Currently, two official plugins are available:
+## 功能
 
-- [@vitejs/plugin-react](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react) uses [Oxc](https://oxc.rs)
-- [@vitejs/plugin-react-swc](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react-swc) uses [SWC](https://swc.rs/)
+- **剪切板管理** — 自动记录文本/图片复制历史，支持搜索和一键粘贴到当前光标位置，可设置保留时长自动清理
+- **快捷短语** — 按场景分组管理常用话术/代码片段，点击即粘贴
+- **翻译** — 支持 AI 翻译（兼容 OpenAI API 格式，可自定义端点和模型）和内置免费翻译，翻译结果本地缓存
+- **系统功能** — 全局快捷键唤起/隐藏、窗口置顶、亮色/暗色主题、开机自启
 
-## React Compiler
+## 技术栈
 
-The React Compiler is not enabled on this template because of its impact on dev & build performances. To add it, see [this documentation](https://react.dev/learn/react-compiler/installation).
+| 层 | 选型 |
+|---|---|
+| 桌面框架 | [Tauri 2.x](https://tauri.app/) (Rust) |
+| 前端 | React 19 + TypeScript + Vite |
+| UI | 纯 CSS（iOS 风格磨砂玻璃） |
+| 状态管理 | [Zustand](https://zustand-demo.pmnd.rs/) |
+| 本地存储 | SQLite (rusqlite, bundled) |
+| 国际化 | react-i18next（简体中文 / English） |
 
-## Expanding the ESLint configuration
+## 开发
 
-If you are developing a production application, we recommend updating the configuration to enable type-aware lint rules:
+```bash
+# 安装依赖
+pnpm install
 
-```js
-export default defineConfig([
-  globalIgnores(['dist']),
-  {
-    files: ['**/*.{ts,tsx}'],
-    extends: [
-      // Other configs...
+# 开发模式
+pnpm tauri dev
 
-      // Remove tseslint.configs.recommended and replace with this
-      tseslint.configs.recommendedTypeChecked,
-      // Alternatively, use this for stricter rules
-      tseslint.configs.strictTypeChecked,
-      // Optionally, add this for stylistic rules
-      tseslint.configs.stylisticTypeChecked,
-
-      // Other configs...
-    ],
-    languageOptions: {
-      parserOptions: {
-        project: ['./tsconfig.node.json', './tsconfig.app.json'],
-        tsconfigRootDir: import.meta.dirname,
-      },
-      // other options...
-    },
-  },
-])
+# 构建
+pnpm tauri build
 ```
 
-You can also install [eslint-plugin-react-x](https://github.com/Rel1cx/eslint-react/tree/main/packages/plugins/eslint-plugin-react-x) and [eslint-plugin-react-dom](https://github.com/Rel1cx/eslint-react/tree/main/packages/plugins/eslint-plugin-react-dom) for React-specific lint rules:
+## 许可
 
-```js
-// eslint.config.js
-import reactX from 'eslint-plugin-react-x'
-import reactDom from 'eslint-plugin-react-dom'
-
-export default defineConfig([
-  globalIgnores(['dist']),
-  {
-    files: ['**/*.{ts,tsx}'],
-    extends: [
-      // Other configs...
-      // Enable lint rules for React
-      reactX.configs['recommended-typescript'],
-      // Enable lint rules for React DOM
-      reactDom.configs.recommended,
-    ],
-    languageOptions: {
-      parserOptions: {
-        project: ['./tsconfig.node.json', './tsconfig.app.json'],
-        tsconfigRootDir: import.meta.dirname,
-      },
-      // other options...
-    },
-  },
-])
-```
+MIT
