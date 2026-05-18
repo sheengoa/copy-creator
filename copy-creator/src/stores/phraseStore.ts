@@ -29,6 +29,7 @@ interface PhraseState {
 
   setSearch: (s: string) => void;
   setSelectedGroup: (id: string | null) => void;
+  init: () => void;
   loadGroups: () => Promise<void>;
   loadPhrases: (groupId: string) => Promise<void>;
   createGroup: (name: string) => Promise<void>;
