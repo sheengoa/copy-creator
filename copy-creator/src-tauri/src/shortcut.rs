@@ -54,20 +54,37 @@ struct RadialMenuDownPayload {
 
 pub fn toggle_window(app: &AppHandle) {
     if TOGGLING.swap(true, Ordering::SeqCst) {
+        log::info!("[toggle_window] skipped (re-entrant)");
         return;
     }
     let _guard = ToggleGuard;
 
     if let Some(window) = app.get_webview_window("main") {
-        if window.is_visible().unwrap_or(false) {
+        let visible = window.is_visible().unwrap_or(false);
+        log::info!("[toggle_window] visible={}", visible);
+
+        if visible {
+            log::info!("[toggle_window] hiding window");
             let _ = window.hide();
         } else {
             #[cfg(target_os = "windows")]
-            crate::paste::save_foreground_window();
+            {
+                crate::paste::save_foreground_window();
+                // Allow our own process (or any process) to call SetForegroundWindow.
+                // The thread has temporary foreground permission from the hotkey / hook
+                // input, so this ASFW call makes SetForegroundWindow bulletproof.
+                unsafe {
+                    use windows::Win32::UI::WindowsAndMessaging::AllowSetForegroundWindow;
+                    let _ = AllowSetForegroundWindow(0xFFFFFFFF);
+                }
+            }
 
+            log::info!("[toggle_window] showing window");
             let _ = window.show();
             let _ = window.set_focus();
         }
+    } else {
+        log::warn!("[toggle_window] main window not found");
     }
 }
 
