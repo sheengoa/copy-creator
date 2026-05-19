@@ -1,7 +1,6 @@
 import React, { useCallback, useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { getCurrentWindow } from "@tauri-apps/api/window";
-import { emit } from "@tauri-apps/api/event";
 import ClipboardPage from "./pages/ClipboardPage";
 import PhrasePage from "./pages/PhrasePage";
 import TranslationPage from "./pages/TranslationPage";
@@ -38,10 +37,10 @@ function App() {
 
   const SIDEBAR_MIN = 60;
   const SIDEBAR_MAX = 130;
-  const SIDEBAR_DEFAULT = 80;
+  const SIDEBAR_DEFAULT = 60;
   const COLLAPSE_THRESHOLD = 80;
   const [sidebarWidth, setSidebarWidth] = useState(SIDEBAR_DEFAULT);
-  const [isCollapsed, setIsCollapsed] = useState(false);
+  const [isCollapsed, setIsCollapsed] = useState(true);
   const isDragging = useRef(false);
   const dragStartX = useRef(0);
   const dragStartWidth = useRef(0);
@@ -65,7 +64,7 @@ function App() {
       const delta = e.clientX - dragStartX.current;
       const newWidth = Math.min(SIDEBAR_MAX, Math.max(SIDEBAR_MIN, dragStartWidth.current + delta));
       setSidebarWidth(newWidth);
-      setIsCollapsed(newWidth < COLLAPSE_THRESHOLD);
+      setIsCollapsed(newWidth <= COLLAPSE_THRESHOLD);
     };
 
     const handleMouseUp = () => {
