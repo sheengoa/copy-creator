@@ -19,6 +19,7 @@ fn is_previewable_image_file(path: &str) -> bool {
 }
 
 const IMAGE_PREVIEW_MAX_BYTES: u64 = 3 * 1024 * 1024;
+const TEXT_EVENT_PREVIEW_CHARS: usize = 600;
 
 fn is_image_file(path: &str) -> bool {
     let lower = path.to_lowercase();
@@ -29,6 +30,19 @@ fn is_image_file(path: &str) -> bool {
         || lower.ends_with(".bmp")
         || lower.ends_with(".webp")
         || lower.ends_with(".ico")
+}
+
+fn make_text_event_content(record_type: &str, content: &str) -> (String, i64, bool) {
+    let total_chars = content.chars().count();
+    if record_type != "text" || total_chars <= TEXT_EVENT_PREVIEW_CHARS {
+        return (content.to_string(), total_chars as i64, false);
+    }
+
+    (
+        content.chars().take(TEXT_EVENT_PREVIEW_CHARS).collect(),
+        total_chars as i64,
+        true,
+    )
 }
 
 /// Import an image file from disk into the storage directory.
@@ -433,12 +447,17 @@ fn insert_and_emit(app: &AppHandle, record_type: &str, content: &str) {
             (false, String::new(), None::<String>)
         };
 
+    let (event_content, content_length, content_truncated) =
+        make_text_event_content(record_type, content);
+
     app.emit(
         "clipboard-update",
         serde_json::json!({
             "id": id,
             "type": record_type,
-            "content": content,
+            "content": event_content,
+            "content_length": content_length,
+            "content_truncated": content_truncated,
             "source_app": "",
             "created_at": now,
             "is_api_key": is_key,

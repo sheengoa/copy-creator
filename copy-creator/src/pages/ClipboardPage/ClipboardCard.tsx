@@ -33,12 +33,18 @@ function ClipboardCardInner({
   const [ctxMenu, setCtxMenu] = useState<{ x: number; y: number } | null>(null);
   const [labelOpen, setLabelOpen] = useState(false);
   const [textExpanded, setTextExpanded] = useState(false);
+  const [fullContent, setFullContent] = useState<string | null>(null);
+  const [loadingFullContent, setLoadingFullContent] = useState(false);
   const ctxRef = useRef<HTMLDivElement>(null);
   const loadRecords = useClipboardStore((s) => s.loadRecords);
-  const textLineCount = record.content.split(/\r\n|\r|\n/).length;
+  const getRecordContent = useClipboardStore((s) => s.getRecordContent);
+  const displayContent = fullContent ?? record.content;
+  const textLineCount = displayContent.split(/\r\n|\r|\n/).length;
   const canToggleText =
     record.type === "text" &&
-    (record.content.length > COLLAPSE_TEXT_LENGTH || textLineCount > COLLAPSE_LINE_COUNT);
+    (record.content_truncated ||
+      (record.content_length ?? displayContent.length) > COLLAPSE_TEXT_LENGTH ||
+      textLineCount > COLLAPSE_LINE_COUNT);
   const isTextExpanded = canToggleText && textExpanded;
 
   // Close context menu on outside click / ESC
@@ -72,10 +78,22 @@ function ClipboardCardInner({
     [onDelete, record.id],
   );
 
-  const handleToggleText = useCallback((e: React.MouseEvent) => {
+  const handleToggleText = useCallback(async (e: React.MouseEvent) => {
     e.stopPropagation();
-    setTextExpanded((value) => !value);
-  }, []);
+    const nextExpanded = !isTextExpanded;
+    setTextExpanded(nextExpanded);
+
+    if (!nextExpanded || !record.content_truncated || fullContent) return;
+
+    setLoadingFullContent(true);
+    try {
+      setFullContent(await getRecordContent(record));
+    } catch {
+      setTextExpanded(false);
+    } finally {
+      setLoadingFullContent(false);
+    }
+  }, [fullContent, getRecordContent, isTextExpanded, record]);
 
   const handleContextMenu = useCallback((e: React.MouseEvent) => {
     e.preventDefault();
@@ -108,14 +126,15 @@ function ClipboardCardInner({
       e.stopPropagation();
       setCtxMenu(null);
       if (!record.label) return;
-      const text = `# ${record.label.service} — ${record.label.api_base}\n${record.content}`;
       try {
+        const content = await getRecordContent(record);
+        const text = `# ${record.label.service} — ${record.label.api_base}\n${content}`;
         await navigator.clipboard.writeText(text);
       } catch {
         // Fallback: silently ignore; user can use regular copy
       }
     },
-    [record],
+    [getRecordContent, record],
   );
 
   const hasLabel = Boolean(record.is_api_key && record.label);
@@ -177,7 +196,7 @@ function ClipboardCardInner({
             <span className="clipboard-file-content">{getFileName(record.content)}</span>
           ) : (
             <span className="clipboard-text-content" aria-expanded={canToggleText ? isTextExpanded : undefined}>
-              {record.content}
+              {displayContent}
             </span>
           )}
         </div>
@@ -208,8 +227,9 @@ function ClipboardCardInner({
                 type="button"
                 aria-expanded={isTextExpanded}
                 aria-label={isTextExpanded ? "收起长文本" : "展示完整文本"}
+                disabled={loadingFullContent}
               >
-                <span>{isTextExpanded ? "收起" : "展示"}</span>
+                <span>{loadingFullContent ? "加载" : isTextExpanded ? "收起" : "展示"}</span>
               </button>
             )}
             <button className="card-delete-btn" onClick={handleDelete}>

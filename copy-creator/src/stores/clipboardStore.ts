@@ -18,6 +18,8 @@ interface ClipboardRecord {
   id: string;
   type: "text" | "image" | "link" | "file";
   content: string;
+  content_length?: number;
+  content_truncated?: boolean;
   source_app: string;
   created_at: string;
   is_api_key?: boolean;
@@ -42,13 +44,16 @@ interface ClipboardState {
   loadRecords: () => Promise<void>;
   deleteRecord: (id: string) => Promise<void>;
   pasteRecord: (record: ClipboardRecord) => Promise<void>;
-  getThumbnail: (record: ClipboardRecord) => Promise<string>;
-  getImageData: (record: ClipboardRecord) => Promise<string>;
+  getRecordContent: (record: ClipboardRecord) => Promise<string>;
+  getThumbnail: (record: Pick<ClipboardRecord, "id" | "content">) => Promise<string>;
+  getImageData: (record: Pick<ClipboardRecord, "id" | "content">) => Promise<string>;
 }
 
 let unlisten: UnlistenFn | null = null;
 
 const MAX_CONCURRENT = 3;
+const MAX_THUMBNAILS = 80;
+const MAX_FULL_IMAGES = 8;
 let running = 0;
 const queue: (() => void)[] = [];
 
@@ -74,6 +79,17 @@ function enqueue<T>(fn: () => Promise<T>): Promise<T> {
       queue.push(run);
     }
   });
+}
+
+function trimCache(cache: Record<string, string>, maxEntries: number) {
+  const entries = Object.entries(cache);
+  if (entries.length <= maxEntries) return cache;
+  return Object.fromEntries(entries.slice(entries.length - maxEntries));
+}
+
+async function getFullContent(record: ClipboardRecord): Promise<string> {
+  if (!record.content_truncated) return record.content;
+  return invoke<string>("get_clipboard_record_content", { id: record.id });
 }
 
 export const useClipboardStore = create<ClipboardState>((set, get) => ({
@@ -148,19 +164,22 @@ export const useClipboardStore = create<ClipboardState>((set, get) => ({
 
   pasteRecord: async (record: ClipboardRecord) => {
     try {
+      const content = await getFullContent(record);
       if (record.type === "image") {
-        await invoke("paste_image", { path: record.content });
+        await invoke("paste_image", { path: content });
       } else if (record.type === "file") {
-        await invoke("paste_file", { path: record.content });
+        await invoke("paste_file", { path: content });
       } else {
-        await invoke("paste_text", { text: record.content });
+        await invoke("paste_text", { text: content });
       }
     } catch (e) {
       console.error("Paste failed:", e);
     }
   },
 
-  getThumbnail: async (record: ClipboardRecord): Promise<string> => {
+  getRecordContent: getFullContent,
+
+  getThumbnail: async (record: Pick<ClipboardRecord, "id" | "content">): Promise<string> => {
     const cached = get().thumbnailCache[record.id];
     if (cached) return cached;
 
@@ -175,7 +194,7 @@ export const useClipboardStore = create<ClipboardState>((set, get) => ({
           maxSize: 200,
         });
         const url = `data:image/png;base64,${base64}`;
-        set({ thumbnailCache: { ...get().thumbnailCache, [record.id]: url } });
+        set({ thumbnailCache: trimCache({ ...get().thumbnailCache, [record.id]: url }, MAX_THUMBNAILS) });
         return url;
       } catch (e) {
         console.error("Failed to load thumbnail:", e);
@@ -184,7 +203,7 @@ export const useClipboardStore = create<ClipboardState>((set, get) => ({
     });
   },
 
-  getImageData: async (record: ClipboardRecord): Promise<string> => {
+  getImageData: async (record: Pick<ClipboardRecord, "id" | "content">): Promise<string> => {
     const cached = get().imageCache[record.id];
     if (cached) return cached;
 
@@ -193,7 +212,7 @@ export const useClipboardStore = create<ClipboardState>((set, get) => ({
         path: record.content,
       });
       const url = `data:image/png;base64,${base64}`;
-      set({ imageCache: { ...get().imageCache, [record.id]: url } });
+      set({ imageCache: trimCache({ ...get().imageCache, [record.id]: url }, MAX_FULL_IMAGES) });
       return url;
     } catch (e) {
       console.error("Failed to load image:", e);

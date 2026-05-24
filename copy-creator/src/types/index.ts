@@ -9,6 +9,8 @@ export interface ClipboardRecord {
   id: string;
   type: "text" | "image" | "link" | "file";
   content: string;
+  content_length?: number;
+  content_truncated?: boolean;
   source_app: string;
   created_at: string;
   is_api_key?: boolean;

@@ -10,21 +10,18 @@ interface ImageThumbProps {
 
 export function ImageThumb({ record, onHover, onLeave, onClick }: ImageThumbProps) {
   const { getThumbnail, thumbnailCache } = useClipboardStore();
-  const [src, setSrc] = useState<string | null>(null);
+  const [loadedSrc, setLoadedSrc] = useState<string | null>(null);
   const [visible, setVisible] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
+  const cachedSrc = thumbnailCache[record.id] ?? null;
+  const src = loadedSrc ?? cachedSrc;
 
   useEffect(() => {
-    if (!visible) return;
-    const cached = thumbnailCache[record.id];
-    if (cached) {
-      setSrc(cached);
-      return;
-    }
-    getThumbnail(record as any).then((dataUrl) => {
-      if (dataUrl) setSrc(dataUrl);
+    if (!visible || cachedSrc) return;
+    getThumbnail(record).then((dataUrl) => {
+      if (dataUrl) setLoadedSrc(dataUrl);
     });
-  }, [visible, record.id]);
+  }, [cachedSrc, getThumbnail, record, visible]);
 
   useEffect(() => {
     const el = ref.current;

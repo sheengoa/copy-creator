@@ -33,6 +33,30 @@
   background: rgba(255, 255, 255, 0.15);
 }
 
+.clipboard-load-more {
+  align-self: center;
+  padding: 7px 16px;
+  border: 1px solid var(--separator);
+  border-radius: 8px;
+  background: var(--card-inner-bg);
+  color: var(--text-secondary);
+  font-family: var(--font);
+  font-size: var(--text-sm);
+  font-weight: var(--weight-medium);
+  cursor: pointer;
+  box-shadow: 0 0.5px 0 0 rgba(255,255,255,0.25) inset;
+  transition: background 0.15s, color 0.15s, transform 0.15s;
+}
+
+.clipboard-load-more:hover {
+  background: var(--chip-bg);
+  color: var(--text-primary);
+}
+
+.clipboard-load-more:active {
+  transform: scale(0.96);
+}
+
 /* Clipboard Card */
 .clipboard-card.type-text {
   --color: #007AFF;
@@ -350,6 +374,12 @@
 
 .card-toggle-text-btn:active {
   transform: scale(0.96);
+}
+
+.card-toggle-text-btn:disabled {
+  cursor: default;
+  opacity: 0.6;
+  transform: none;
 }
 
 /* === API Key Badge === */

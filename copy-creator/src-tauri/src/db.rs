@@ -74,6 +74,55 @@ pub struct DbState {
     pub conn: Mutex<Connection>,
 }
 
+const CLIPBOARD_CONTENT_PREVIEW_CHARS: usize = 600;
+
+fn make_content_preview(content: &str) -> (String, i64, bool) {
+    let total_chars = content.chars().count();
+    if total_chars <= CLIPBOARD_CONTENT_PREVIEW_CHARS {
+        return (content.to_string(), total_chars as i64, false);
+    }
+
+    (
+        content
+            .chars()
+            .take(CLIPBOARD_CONTENT_PREVIEW_CHARS)
+            .collect::<String>(),
+        total_chars as i64,
+        true,
+    )
+}
+
+fn clipboard_record_json(
+    id: String,
+    rec_type: String,
+    content: String,
+    source_app: String,
+    created_at: String,
+    user_api_key: i64,
+) -> serde_json::Value {
+    let (list_content, content_length, content_truncated) = if rec_type == "text" {
+        make_content_preview(&content)
+    } else {
+        (content, 0, false)
+    };
+    let content_length = if content_length == 0 {
+        list_content.chars().count() as i64
+    } else {
+        content_length
+    };
+
+    serde_json::json!({
+        "id": id,
+        "type": rec_type,
+        "content": list_content,
+        "content_length": content_length,
+        "content_truncated": content_truncated,
+        "source_app": source_app,
+        "created_at": created_at,
+        "user_api_key": user_api_key,
+    })
+}
+
 fn db_path(app: &AppHandle) -> PathBuf {
     let default_dir = app
         .path()
@@ -333,14 +382,14 @@ pub fn get_clipboard_records(
             .map_err(|e| e.to_string())?;
         let rows = stmt
             .query_map(params![escaped, lim], |row| {
-                Ok(serde_json::json!({
-                    "id": row.get::<_, String>(0)?,
-                    "type": row.get::<_, String>(1)?,
-                    "content": row.get::<_, String>(2)?,
-                    "source_app": row.get::<_, String>(3)?,
-                    "created_at": row.get::<_, String>(4)?,
-                    "user_api_key": row.get::<_, i64>(5)?,
-                }))
+                Ok(clipboard_record_json(
+                    row.get::<_, String>(0)?,
+                    row.get::<_, String>(1)?,
+                    row.get::<_, String>(2)?,
+                    row.get::<_, String>(3)?,
+                    row.get::<_, String>(4)?,
+                    row.get::<_, i64>(5)?,
+                ))
             })
             .map_err(|e| e.to_string())?;
         for row in rows {
@@ -355,14 +404,14 @@ pub fn get_clipboard_records(
             .map_err(|e| e.to_string())?;
         let rows = stmt
             .query_map(params![lim], |row| {
-                Ok(serde_json::json!({
-                    "id": row.get::<_, String>(0)?,
-                    "type": row.get::<_, String>(1)?,
-                    "content": row.get::<_, String>(2)?,
-                    "source_app": row.get::<_, String>(3)?,
-                    "created_at": row.get::<_, String>(4)?,
-                    "user_api_key": row.get::<_, i64>(5)?,
-                }))
+                Ok(clipboard_record_json(
+                    row.get::<_, String>(0)?,
+                    row.get::<_, String>(1)?,
+                    row.get::<_, String>(2)?,
+                    row.get::<_, String>(3)?,
+                    row.get::<_, String>(4)?,
+                    row.get::<_, i64>(5)?,
+                ))
             })
             .map_err(|e| e.to_string())?;
         for row in rows {
@@ -435,6 +484,18 @@ pub fn get_clipboard_records(
         .collect();
 
     Ok(records)
+}
+
+#[tauri::command]
+pub fn get_clipboard_record_content(app: AppHandle, id: String) -> Result<String, String> {
+    let state = app.state::<DbState>();
+    let conn = state.conn.lock().map_err(|e| e.to_string())?;
+    conn.query_row(
+        "SELECT content FROM clipboard_records WHERE id = ?1",
+        params![id],
+        |row| row.get::<_, String>(0),
+    )
+    .map_err(|e| e.to_string())
 }
 
 #[tauri::command]
