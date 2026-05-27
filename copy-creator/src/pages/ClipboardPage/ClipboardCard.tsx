@@ -101,10 +101,9 @@ function ClipboardCardInner({
     setCtxMenu({ x: e.clientX, y: e.clientY });
   }, []);
 
-  const handleLabelSaved = useCallback(async () => {
+  const handleLabelSaved = useCallback(() => {
     setLabelOpen(false);
-    await loadRecords();
-  }, [loadRecords]);
+  }, []);
 
   const handleToggleUserApiKey = useCallback(
     async (e: React.MouseEvent) => {
@@ -140,6 +139,18 @@ function ClipboardCardInner({
   const hasLabel = Boolean(record.is_api_key && record.label);
   const isUnlabeled = Boolean(record.is_api_key && !record.label);
 
+  // Keep badge text in local state to ensure re-render on label change
+  const [badgeText, setBadgeText] = useState("");
+  useEffect(() => {
+    if (record.label?.note) {
+      setBadgeText(record.label.note);
+    } else if (record.guessed_service) {
+      setBadgeText(record.guessed_service);
+    } else if (record.is_api_key) {
+      setBadgeText("未标注");
+    }
+  }, [record.label?.note, record.guessed_service, record.is_api_key]);
+
   return (
     <div
       className={`notification clipboard-card type-${record.type}${record.is_api_key ? " has-api-key" : ""}${isUnlabeled ? " api-key-unlabeled" : ""}${hasLabel ? " api-key-labeled" : ""}`}
@@ -151,28 +162,18 @@ function ClipboardCardInner({
       <div className="noticontent">
         <div className="notititle clipboard-card-header">
           <span className="noti-type-label">
-            <span className="noti-type-icon">{meta.icon}</span>
-            <span className="noti-type-text">{getTypeLabel(record.type)}</span>
+            <span className="noti-type-icon">{record.is_api_key ? Icons.key : meta.icon}</span>
+            <span className="noti-type-text">{record.is_api_key ? "API Key" : getTypeLabel(record.type)}</span>
           </span>
           {record.is_api_key && (
             <span
-              className={`api-key-badge ${hasLabel ? "labeled" : "unlabeled"}`}
+              className="api-key-badge"
               onClick={(e) => {
                 e.stopPropagation();
                 setLabelOpen((v) => !v);
               }}
-              title={hasLabel ? record.label!.service : "点击标注来源"}
             >
-              <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
-                <path d="M21 2H3v16l4-4h14V2z" />
-                <line x1="9" y1="8" x2="15" y2="8" />
-                <line x1="9" y1="12" x2="13" y2="12" />
-              </svg>
-              {hasLabel ? (
-                <span>{record.label!.service}</span>
-              ) : (
-                <span>未标注</span>
-              )}
+              {badgeText || "未标注"}
             </span>
           )}
         </div>
@@ -201,14 +202,9 @@ function ClipboardCardInner({
           )}
         </div>
 
-        {record.is_api_key && !record.label && record.guessed_service && (
-          <div className="api-key-guess-hint">
-            可能是 <span>{record.guessed_service}</span>
-          </div>
-        )}
-
         {labelOpen && record.is_api_key && record.key_preview && (
           <ApiKeyLabelPanel
+            recordId={record.id}
             keyPreview={record.key_preview}
             existingLabel={record.label}
             guessedService={record.guessed_service}
@@ -226,10 +222,10 @@ function ClipboardCardInner({
                 onClick={handleToggleText}
                 type="button"
                 aria-expanded={isTextExpanded}
-                aria-label={isTextExpanded ? "收起长文本" : "展示完整文本"}
+                aria-label={isTextExpanded ? "收起长文本" : "展开完整文本"}
                 disabled={loadingFullContent}
               >
-                <span>{loadingFullContent ? "加载" : isTextExpanded ? "收起" : "展示"}</span>
+                <span>{loadingFullContent ? "加载" : isTextExpanded ? "收起" : "展开"}</span>
               </button>
             )}
             <button className="card-delete-btn" onClick={handleDelete}>

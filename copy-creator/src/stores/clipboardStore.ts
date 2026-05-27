@@ -29,10 +29,13 @@ interface ClipboardRecord {
   label?: ApiKeyLabel | null;
 }
 
+const PAGE_SIZE = 120;
+
 interface ClipboardState {
   records: ClipboardRecord[];
   search: string;
   loading: boolean;
+  hasMore: boolean;
   thumbnailCache: Record<string, string>;
   imageCache: Record<string, string>;
   category: ClipType;
@@ -41,7 +44,8 @@ interface ClipboardState {
   init: () => void;
   setSearch: (s: string) => void;
   setCategory: (c: ClipType) => void;
-  loadRecords: () => Promise<void>;
+  loadRecords: (append?: boolean) => Promise<void>;
+  updateRecordLabel: (id: string, label: ApiKeyLabel) => void;
   deleteRecord: (id: string) => Promise<void>;
   pasteRecord: (record: ClipboardRecord) => Promise<void>;
   getRecordContent: (record: ClipboardRecord) => Promise<string>;
@@ -96,6 +100,7 @@ export const useClipboardStore = create<ClipboardState>((set, get) => ({
   records: [],
   search: "",
   loading: false,
+  hasMore: true,
   thumbnailCache: {},
   imageCache: {},
   category: "all",
@@ -129,21 +134,42 @@ export const useClipboardStore = create<ClipboardState>((set, get) => ({
   setSearch: (s) => set({ search: s }),
   setCategory: (c) => set({ category: c }),
 
-  loadRecords: async () => {
+  loadRecords: async (append = false) => {
     set({ loading: true });
     try {
-      const s = get().search || undefined;
+      const state = get();
+      const s = state.search || undefined;
+      const cat = state.category !== "all" ? state.category : undefined;
+      const offset = append ? state.records.length : 0;
       const records = await invoke<ClipboardRecord[]>("get_clipboard_records", {
         search: s,
-        limit: 2000,
+        limit: PAGE_SIZE,
+        offset,
+        category: cat,
       });
-      set({ records });
+      if (append) {
+        set((prev) => ({
+          records: [...prev.records, ...records],
+          hasMore: records.length >= PAGE_SIZE,
+        }));
+      } else {
+        set({ records, hasMore: records.length >= PAGE_SIZE });
+      }
     } catch (e) {
       console.error("Failed to load clipboard records:", e);
     } finally {
       set({ loading: false });
     }
   },
+
+  updateRecordLabel: (id: string, label: ApiKeyLabel) =>
+    set((state) => {
+      const idx = state.records.findIndex((r) => r.id === id);
+      if (idx === -1) return state;
+      const updated = [...state.records];
+      updated[idx] = { ...updated[idx], label };
+      return { records: updated };
+    }),
 
   deleteRecord: async (id: string) => {
     try {

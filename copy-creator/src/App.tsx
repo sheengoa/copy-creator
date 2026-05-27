@@ -1,6 +1,7 @@
 import React, { useCallback, useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { getCurrentWindow } from "@tauri-apps/api/window";
+import { invoke } from "@tauri-apps/api/core";
 import ClipboardPage from "./pages/ClipboardPage";
 import PhrasePage from "./pages/PhrasePage";
 import TranslationPage from "./pages/TranslationPage";
@@ -26,6 +27,7 @@ function App() {
   const { t } = useTranslation();
   const [activePanel, setActivePanel] = useState<string>("clipboard");
   const { themeMode, toggleTheme, loadSettings } = useSettingsStore();
+  const [isPinned, setIsPinned] = useState(false);
 
   useEffect(() => {
     loadSettings().then(() => {
@@ -106,6 +108,15 @@ function App() {
     await getCurrentWindow().hide();
   };
 
+  const handleTogglePin = async () => {
+    try {
+      const next = await invoke<boolean>("toggle_always_on_top");
+      setIsPinned(next);
+    } catch (e) {
+      console.error("Failed to toggle pin:", e);
+    }
+  };
+
   const panelInfo = activePanel !== "settings" ? PANEL_MAP[activePanel] : null;
   const isSettingsPanel = activePanel === "settings";
 
@@ -161,6 +172,18 @@ function App() {
             </span>
             <span className="sidebar-footer-label">
               {themeMode === "light" ? t("settings.dark") : t("settings.light")}
+            </span>
+          </button>
+          <button
+            className={`sidebar-footer-item ${isPinned ? "active" : ""}`}
+            onClick={handleTogglePin}
+            title={isPinned ? t("common.unpinWindow") : t("common.pinWindow")}
+          >
+            <span className="sidebar-footer-icon">
+              {isPinned ? Icons.pin : Icons.pinOff}
+            </span>
+            <span className="sidebar-footer-label">
+              {isPinned ? t("common.unpinWindow") : t("common.pinWindow")}
             </span>
           </button>
         </div>

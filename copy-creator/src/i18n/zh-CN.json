@@ -73,7 +73,10 @@
     "image": "图片",
     "link": "链接",
     "file": "文件",
-    "apikey": "API Key"
+    "apikey": "API Key",
+    "apiKeyNote": "备注",
+    "apiKeyNotePlaceholder": "备注（最多10字）",
+    "apiKeySaving": "保存中..."
   },
   "phrases": {
     "search": "搜索短语...",
@@ -101,7 +104,9 @@
     "loading": "加载中...",
     "saved": "已保存",
     "on": "已开启",
-    "off": "已关闭"
+    "off": "已关闭",
+    "pinWindow": "固定窗口",
+    "unpinWindow": "取消固定"
   },
   "radialMenu": {
     "empty": "暂无内容"

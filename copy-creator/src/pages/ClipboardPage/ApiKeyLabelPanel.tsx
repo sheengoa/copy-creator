@@ -1,7 +1,8 @@
-import { useState, useEffect } from "react";
+import { useState } from "react";
+import { useTranslation } from "react-i18next";
 import { invoke } from "@tauri-apps/api/core";
-import IosSelect from "../../components/IosSelect";
 import type { ApiKeyLabel } from "../../types";
+import { useClipboardStore } from "../../stores/clipboardStore";
 
 const SERVICE_TEMPLATES = [
   { name: "OpenAI", apiBase: "https://api.openai.com/v1" },
@@ -15,9 +16,8 @@ const SERVICE_TEMPLATES = [
   { name: "自定义", apiBase: "" },
 ];
 
-const SERVICE_OPTIONS = SERVICE_TEMPLATES.map((t) => ({ value: t.name, label: t.name }));
-
 interface Props {
+  recordId: string;
   keyPreview: string;
   existingLabel: ApiKeyLabel | null | undefined;
   guessedService: string | null | undefined;
@@ -26,12 +26,15 @@ interface Props {
 }
 
 export default function ApiKeyLabelPanel({
+  recordId,
   keyPreview,
   existingLabel,
   guessedService,
   onSave,
   onCancel,
 }: Props) {
+  const { t } = useTranslation();
+  const updateRecordLabel = useClipboardStore((s) => s.updateRecordLabel);
   const defaultService =
     existingLabel?.service ||
     (guessedService && SERVICE_TEMPLATES.find((t) => t.name === guessedService)
@@ -43,79 +46,59 @@ export default function ApiKeyLabelPanel({
     SERVICE_TEMPLATES.find((t) => t.name === defaultService)?.apiBase ||
     "";
 
-  const [service, setService] = useState(defaultService);
-  const [apiBase, setApiBase] = useState(defaultApiBase);
   const [note, setNote] = useState(existingLabel?.note || "");
   const [saving, setSaving] = useState(false);
 
-  useEffect(() => {
-    if (!existingLabel) {
-      const tpl = SERVICE_TEMPLATES.find((t) => t.name === service);
-      if (tpl) setApiBase(tpl.apiBase);
-    }
-  }, [service, existingLabel]);
-
-  const handleServiceChange = (val: string) => {
-    setService(val);
-    if (!existingLabel) {
-      const tpl = SERVICE_TEMPLATES.find((t) => t.name === val);
-      if (tpl) setApiBase(tpl.apiBase);
-    }
-  };
-
   const handleSave = async () => {
-    if (!service.trim()) return;
     setSaving(true);
+    const trimmed = note.trim();
+    const label = {
+      service: defaultService,
+      api_base: defaultApiBase,
+      note: trimmed,
+      is_expired: false,
+    };
+
+    // Close panel and update store immediately
+    updateRecordLabel(recordId, label);
+    onSave();
+
     try {
       await invoke("save_api_key_label", {
+        recordId,
         keyPreview,
-        service: service.trim(),
-        apiBase: apiBase.trim(),
-        note: note.trim(),
+        service: label.service,
+        apiBase: label.api_base,
+        note: label.note,
       });
-      onSave();
     } catch (e) {
       console.error("Failed to save label:", e);
-    } finally {
-      setSaving(false);
     }
   };
 
   return (
     <div className="api-key-label-panel" onClick={(e) => e.stopPropagation()}>
       <div className="label-panel-row">
-        <span className="label-panel-field-name">服务</span>
-        <IosSelect value={service} options={SERVICE_OPTIONS} onChange={handleServiceChange} />
-      </div>
-      <div className="label-panel-row">
-        <span className="label-panel-field-name">地址</span>
-        <input
-          className="dialog-input label-panel-input"
-          value={apiBase}
-          onChange={(e) => setApiBase(e.target.value)}
-          placeholder="https://api.example.com/v1"
-        />
-      </div>
-      <div className="label-panel-row">
-        <span className="label-panel-field-name">备注</span>
+        <span className="label-panel-field-name">{t("clipboard.apiKeyNote")}</span>
         <input
           className="dialog-input label-panel-input"
           value={note}
           onChange={(e) => setNote(e.target.value)}
-          placeholder="备注（可选）"
+          placeholder={t("clipboard.apiKeyNotePlaceholder")}
+          maxLength={10}
         />
       </div>
       <div className="label-panel-actions">
-        <button className="dialog-btn secondary" onClick={onCancel} type="button">
-          取消
+        <button className="label-panel-chip-btn secondary" onClick={onCancel} type="button">
+          {t("common.cancel")}
         </button>
         <button
-          className="dialog-btn primary"
+          className="label-panel-chip-btn primary"
           onClick={handleSave}
-          disabled={saving || !service.trim()}
+          disabled={saving}
           type="button"
         >
-          {saving ? "保存中..." : "保存"}
+          {saving ? t("clipboard.apiKeySaving") : t("common.save")}
         </button>
       </div>
     </div>

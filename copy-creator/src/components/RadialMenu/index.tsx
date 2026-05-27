@@ -226,6 +226,8 @@ export default function RadialMenu() {
         startPosRef.current = { x: e.payload.x, y: e.payload.y };
         visibleRef.current = true;
         setVisible(true);
+        // Refresh records from backend to keep in sync with main window
+        useClipboardStore.getState().loadRecords();
       });
 
       const unMove = await listen<{ x: number; y: number }>("radial-menu-move", (e) => {
@@ -340,7 +342,9 @@ export default function RadialMenu() {
 
   const filteredRecords = clipboardCategory === "all"
     ? records
-    : records.filter((r) => r.type === clipboardCategory);
+    : clipboardCategory === "apikey"
+      ? records.filter((r) => r.is_api_key)
+      : records.filter((r) => r.type === clipboardCategory);
 
   const items = activeTab === "clipboard"
     ? filteredRecords.slice(0, MAX_ITEMS).map((r) => ({
@@ -349,8 +353,10 @@ export default function RadialMenu() {
           ? `[${t("clipboard.image")}]`
           : r.type === "file"
             ? r.content.replace(/\\/g, "/").split("/").pop() || r.content
-            : r.content,
-        type: r.type,
+            : r.is_api_key
+              ? r.key_preview || r.content
+              : r.content,
+        type: r.is_api_key ? "apikey" : r.type,
         createdAt: r.created_at,
       }))
     : phrases.map((p) => ({
@@ -367,6 +373,7 @@ export default function RadialMenu() {
         { key: "image", label: t("clipboard.image") },
         { key: "link", label: t("clipboard.link") },
         { key: "file", label: t("clipboard.file") },
+        { key: "apikey", label: t("clipboard.apikey") },
       ]
     : phraseGroups.map((g) => ({
         key: g.id,
@@ -424,8 +431,8 @@ export default function RadialMenu() {
                   <ImageThumb recordId={item.id} />
                 ) : (
                   <span className="radial-menu-item-text">
-                    {item.content.length > 80
-                      ? item.content.slice(0, 80) + "…"
+                    {item.content.length > 300
+                      ? item.content.slice(0, 300) + "…"
                       : item.content}
                   </span>
                 )}

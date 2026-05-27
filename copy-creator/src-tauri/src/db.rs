@@ -19,6 +19,9 @@ pub fn is_api_key(content: &str) -> bool {
 }
 
 pub fn guess_service(content: &str) -> Option<&'static str> {
+    if content.starts_with("sk-") {
+        return Some("OpenAI");
+    }
     if content.starts_with("AIza") {
         return Some("Gemini");
     }
@@ -40,6 +43,20 @@ pub fn make_key_preview(content: &str) -> String {
         format!("{}...{}", &c[..8], &c[c.len() - 4..])
     } else {
         c.to_string()
+    }
+}
+
+fn category_sql(category: &Option<String>) -> (String, String) {
+    match category.as_deref() {
+        Some("text") => ("WHERE type = 'text'".to_string(), "AND type = 'text'".to_string()),
+        Some("image") => ("WHERE type = 'image'".to_string(), "AND type = 'image'".to_string()),
+        Some("link") => ("WHERE type = 'link'".to_string(), "AND type = 'link'".to_string()),
+        Some("file") => ("WHERE type = 'file'".to_string(), "AND type = 'file'".to_string()),
+        Some("apikey") => (
+            "WHERE (user_api_key = 1 OR (type IN ('text', 'link') AND (content LIKE 'sk-%' OR content LIKE 'AIza%' OR content LIKE 'glpat-%' OR content LIKE 'ghp_%' OR content LIKE 'xai-%')))".to_string(),
+            "AND (user_api_key = 1 OR (type IN ('text', 'link') AND (content LIKE 'sk-%' OR content LIKE 'AIza%' OR content LIKE 'glpat-%' OR content LIKE 'ghp_%' OR content LIKE 'xai-%')))".to_string(),
+        ),
+        _ => ("".to_string(), "".to_string()),
     }
 }
 
@@ -263,8 +280,8 @@ pub fn init_db(app: &AppHandle) -> Result<(), Box<dyn std::error::Error>> {
         UPDATE settings SET value = 'google' WHERE key = 'default_translate_engine' AND value = 'builtin';
 
         CREATE TABLE IF NOT EXISTS api_key_labels (
-            id          INTEGER PRIMARY KEY AUTOINCREMENT,
-            key_preview TEXT NOT NULL UNIQUE,
+            record_id   TEXT PRIMARY KEY,
+            key_preview TEXT NOT NULL,
             service     TEXT NOT NULL,
             api_base    TEXT DEFAULT '',
             note        TEXT DEFAULT '',
@@ -278,6 +295,43 @@ pub fn init_db(app: &AppHandle) -> Result<(), Box<dyn std::error::Error>> {
         );
         ",
     )?;
+
+    // Migrate api_key_labels from old schema (no record_id PK) to new schema
+    {
+        let has_record_id_pk: bool = conn
+            .prepare("PRAGMA table_info(api_key_labels)")
+            .and_then(|mut stmt| {
+                let rows = stmt.query_map([], |row| {
+                    Ok((row.get::<_, String>(1)?, row.get::<_, i64>(5)?))
+                })?;
+                let mut found = false;
+                for row in rows.flatten() {
+                    if row.0 == "record_id" && row.1 != 0 {
+                        found = true;
+                    }
+                }
+                Ok(found)
+            })
+            .unwrap_or(true);
+        if !has_record_id_pk {
+            conn.execute("DROP TABLE IF EXISTS api_key_labels", [])
+                .map_err(|e| e.to_string())?;
+            conn.execute(
+                "CREATE TABLE api_key_labels (
+                    record_id   TEXT PRIMARY KEY,
+                    key_preview TEXT NOT NULL,
+                    service     TEXT NOT NULL,
+                    api_base    TEXT DEFAULT '',
+                    note        TEXT DEFAULT '',
+                    is_expired  INTEGER DEFAULT 0,
+                    created_at  TEXT NOT NULL,
+                    updated_at  TEXT NOT NULL
+                )",
+                [],
+            )
+            .map_err(|e| e.to_string())?;
+        }
+    }
 
     // Runtime migrations for existing databases
     conn.execute(
@@ -355,6 +409,20 @@ pub fn prune_old_records(app: &AppHandle) -> Result<(), Box<dyn std::error::Erro
         }
     }
 
+    // Clean up temp paste image files older than retention period
+    let paste_dir = std::env::temp_dir().join("copy_creator_paste");
+    if let Ok(entries) = std::fs::read_dir(&paste_dir) {
+        let cutoff = std::time::SystemTime::now()
+            - std::time::Duration::from_secs(days as u64 * 86400);
+        for entry in entries.flatten() {
+            if let Ok(meta) = entry.metadata() {
+                if meta.is_file() && meta.modified().is_ok_and(|t| t < cutoff) {
+                    let _ = std::fs::remove_file(entry.path());
+                }
+            }
+        }
+    }
+
     Ok(())
 }
 
@@ -365,23 +433,28 @@ pub fn get_clipboard_records(
     app: AppHandle,
     search: Option<String>,
     limit: Option<u32>,
+    offset: Option<u32>,
+    category: Option<String>,
 ) -> Result<Vec<serde_json::Value>, String> {
     let state = app.state::<DbState>();
     let conn = state.conn.lock().map_err(|e| e.to_string())?;
     let lim = limit.unwrap_or(200);
+    let off = offset.unwrap_or(0);
+
+    let cat_filter = category_sql(&category);
 
     let mut records: Vec<serde_json::Value> = Vec::new();
 
     if let Some(q) = search {
         let escaped = q.replace('\\', "\\\\").replace('%', "\\%").replace('_', "\\_");
-        let mut stmt = conn
-            .prepare(
-                "SELECT id, type, content, source_app, created_at, user_api_key FROM clipboard_records
-                 WHERE content LIKE '%' || ?1 || '%' ESCAPE '\\' ORDER BY created_at DESC LIMIT ?2",
-            )
-            .map_err(|e| e.to_string())?;
+        let sql = format!(
+            "SELECT id, type, content, source_app, created_at, user_api_key FROM clipboard_records
+             WHERE content LIKE '%' || ?1 || '%' ESCAPE '\\' {} ORDER BY created_at DESC LIMIT ?2 OFFSET ?3",
+            cat_filter.1
+        );
+        let mut stmt = conn.prepare(&sql).map_err(|e| e.to_string())?;
         let rows = stmt
-            .query_map(params![escaped, lim], |row| {
+            .query_map(params![escaped, lim, off], |row| {
                 Ok(clipboard_record_json(
                     row.get::<_, String>(0)?,
                     row.get::<_, String>(1)?,
@@ -396,14 +469,14 @@ pub fn get_clipboard_records(
             records.push(row.map_err(|e| e.to_string())?);
         }
     } else {
-        let mut stmt = conn
-            .prepare(
-                "SELECT id, type, content, source_app, created_at, user_api_key FROM clipboard_records
-                 ORDER BY created_at DESC LIMIT ?1",
-            )
-            .map_err(|e| e.to_string())?;
+        let sql = format!(
+            "SELECT id, type, content, source_app, created_at, user_api_key FROM clipboard_records
+             {} ORDER BY created_at DESC LIMIT ?1 OFFSET ?2",
+            cat_filter.0
+        );
+        let mut stmt = conn.prepare(&sql).map_err(|e| e.to_string())?;
         let rows = stmt
-            .query_map(params![lim], |row| {
+            .query_map(params![lim, off], |row| {
                 Ok(clipboard_record_json(
                     row.get::<_, String>(0)?,
                     row.get::<_, String>(1)?,
@@ -423,7 +496,7 @@ pub fn get_clipboard_records(
     let mut label_map: std::collections::HashMap<String, serde_json::Value> =
         std::collections::HashMap::new();
     if let Ok(mut stmt) = conn.prepare(
-        "SELECT key_preview, service, api_base, note, is_expired FROM api_key_labels",
+        "SELECT record_id, service, api_base, note, is_expired FROM api_key_labels",
     ) {
         if let Ok(rows) = stmt.query_map([], |row| {
             Ok((
@@ -435,9 +508,9 @@ pub fn get_clipboard_records(
             ))
         }) {
             for row in rows.flatten() {
-                let (preview, service, api_base, note, is_expired) = row;
+                let (record_id, service, api_base, note, is_expired) = row;
                 label_map.insert(
-                    preview,
+                    record_id,
                     serde_json::json!({
                         "service": service,
                         "api_base": api_base,
@@ -461,7 +534,8 @@ pub fn get_clipboard_records(
                     let g = guess_service(&content)
                         .map(|s| serde_json::Value::String(s.to_string()))
                         .unwrap_or(serde_json::Value::Null);
-                    let lbl = label_map.get(&kp).cloned().unwrap_or(serde_json::Value::Null);
+                    let rid = rec["id"].as_str().unwrap_or("");
+                    let lbl = label_map.get(rid).cloned().unwrap_or(serde_json::Value::Null);
                     (true, serde_json::Value::String(kp), g, lbl)
                 } else {
                     (
@@ -932,9 +1006,10 @@ fn migrate_storage(app: &AppHandle, new_path: &str) -> Result<(), String> {
                 key TEXT PRIMARY KEY,
                 value TEXT NOT NULL
             );
+            DROP TABLE IF EXISTS api_key_labels;
             CREATE TABLE IF NOT EXISTS api_key_labels (
-                id          INTEGER PRIMARY KEY AUTOINCREMENT,
-                key_preview TEXT NOT NULL UNIQUE,
+                record_id   TEXT PRIMARY KEY,
+                key_preview TEXT NOT NULL,
                 service     TEXT NOT NULL,
                 api_base    TEXT DEFAULT '',
                 note        TEXT DEFAULT '',
@@ -1068,6 +1143,7 @@ pub fn check_api_key(content: String) -> serde_json::Value {
 #[tauri::command]
 pub fn save_api_key_label(
     app: AppHandle,
+    record_id: String,
     key_preview: String,
     service: String,
     api_base: String,
@@ -1077,30 +1153,31 @@ pub fn save_api_key_label(
     let conn = state.conn.lock().map_err(|e| e.to_string())?;
     let now = chrono::Utc::now().to_rfc3339();
     conn.execute(
-        "INSERT INTO api_key_labels (key_preview, service, api_base, note, created_at, updated_at)
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6)
-         ON CONFLICT(key_preview) DO UPDATE SET service=?2, api_base=?3, note=?4, updated_at=?6",
-        params![key_preview, service, api_base, note, &now, &now],
+        "INSERT INTO api_key_labels (record_id, key_preview, service, api_base, note, created_at, updated_at)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)
+         ON CONFLICT(record_id) DO UPDATE SET service=?3, api_base=?4, note=?5, updated_at=?7",
+        params![record_id, key_preview, service, api_base, note, &now, &now],
     )
     .map_err(|e| e.to_string())?;
     Ok(())
 }
 
 #[tauri::command]
-pub fn get_api_key_label(app: AppHandle, key_preview: String) -> Option<serde_json::Value> {
+pub fn get_api_key_label(app: AppHandle, record_id: String) -> Option<serde_json::Value> {
     let state = app.state::<DbState>();
     let conn = state.conn.lock().ok()?;
     conn.query_row(
-        "SELECT service, api_base, note, is_expired, created_at FROM api_key_labels WHERE key_preview = ?1",
-        params![key_preview],
+        "SELECT key_preview, service, api_base, note, is_expired, created_at FROM api_key_labels WHERE record_id = ?1",
+        params![record_id],
         |row| {
             Ok(serde_json::json!({
-                "key_preview": key_preview,
-                "service": row.get::<_, String>(0)?,
-                "api_base": row.get::<_, String>(1)?,
-                "note": row.get::<_, String>(2)?,
-                "is_expired": row.get::<_, i64>(3)? != 0,
-                "created_at": row.get::<_, String>(4)?,
+                "record_id": record_id,
+                "key_preview": row.get::<_, String>(0)?,
+                "service": row.get::<_, String>(1)?,
+                "api_base": row.get::<_, String>(2)?,
+                "note": row.get::<_, String>(3)?,
+                "is_expired": row.get::<_, i64>(4)? != 0,
+                "created_at": row.get::<_, String>(5)?,
             }))
         },
     )
@@ -1108,12 +1185,12 @@ pub fn get_api_key_label(app: AppHandle, key_preview: String) -> Option<serde_js
 }
 
 #[tauri::command]
-pub fn delete_api_key_label(app: AppHandle, key_preview: String) -> Result<(), String> {
+pub fn delete_api_key_label(app: AppHandle, record_id: String) -> Result<(), String> {
     let state = app.state::<DbState>();
     let conn = state.conn.lock().map_err(|e| e.to_string())?;
     conn.execute(
-        "DELETE FROM api_key_labels WHERE key_preview = ?1",
-        params![key_preview],
+        "DELETE FROM api_key_labels WHERE record_id = ?1",
+        params![record_id],
     )
     .map_err(|e| e.to_string())?;
     Ok(())
@@ -1122,19 +1199,20 @@ pub fn delete_api_key_label(app: AppHandle, key_preview: String) -> Result<(), S
 fn list_labels_internal(conn: &Connection) -> Result<Vec<serde_json::Value>, String> {
     let mut stmt = conn
         .prepare(
-            "SELECT key_preview, service, api_base, note, is_expired, created_at \
+            "SELECT record_id, key_preview, service, api_base, note, is_expired, created_at \
              FROM api_key_labels ORDER BY created_at DESC",
         )
         .map_err(|e| e.to_string())?;
     let rows = stmt
         .query_map([], |row| {
             Ok(serde_json::json!({
-                "key_preview": row.get::<_, String>(0)?,
-                "service": row.get::<_, String>(1)?,
-                "api_base": row.get::<_, String>(2)?,
-                "note": row.get::<_, String>(3)?,
-                "is_expired": row.get::<_, i64>(4)? != 0,
-                "created_at": row.get::<_, String>(5)?,
+                "record_id": row.get::<_, String>(0)?,
+                "key_preview": row.get::<_, String>(1)?,
+                "service": row.get::<_, String>(2)?,
+                "api_base": row.get::<_, String>(3)?,
+                "note": row.get::<_, String>(4)?,
+                "is_expired": row.get::<_, i64>(5)? != 0,
+                "created_at": row.get::<_, String>(6)?,
             }))
         })
         .map_err(|e| e.to_string())?;
@@ -1153,12 +1231,12 @@ pub fn list_api_key_labels(app: AppHandle) -> Result<Vec<serde_json::Value>, Str
 }
 
 #[tauri::command]
-pub fn mark_expired(app: AppHandle, key_preview: String, expired: bool) -> Result<(), String> {
+pub fn mark_expired(app: AppHandle, record_id: String, expired: bool) -> Result<(), String> {
     let state = app.state::<DbState>();
     let conn = state.conn.lock().map_err(|e| e.to_string())?;
     conn.execute(
-        "UPDATE api_key_labels SET is_expired = ?1 WHERE key_preview = ?2",
-        params![expired as i64, key_preview],
+        "UPDATE api_key_labels SET is_expired = ?1 WHERE record_id = ?2",
+        params![expired as i64, record_id],
     )
     .map_err(|e| e.to_string())?;
     Ok(())

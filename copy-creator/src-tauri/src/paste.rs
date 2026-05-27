@@ -1,16 +1,62 @@
 use std::sync::atomic::{AtomicBool, AtomicPtr, Ordering};
 use std::ptr;
 
+use base64::Engine as _;
+
 pub static PASTING: AtomicBool = AtomicBool::new(false);
 
 #[cfg(target_os = "windows")]
 static LAST_FOREGROUND_HWND: AtomicPtr<core::ffi::c_void> = AtomicPtr::new(ptr::null_mut());
 
 #[cfg(target_os = "windows")]
+static OUR_HWND: AtomicPtr<core::ffi::c_void> = AtomicPtr::new(ptr::null_mut());
+
+#[cfg(target_os = "windows")]
 pub fn save_foreground_window() {
     use windows::Win32::UI::WindowsAndMessaging::GetForegroundWindow;
     unsafe {
         let hwnd = GetForegroundWindow();
+        if !hwnd.is_invalid() {
+            LAST_FOREGROUND_HWND.store(hwnd.0, Ordering::SeqCst);
+        }
+    }
+}
+
+#[cfg(target_os = "windows")]
+pub fn init_foreground_tracker(window: &tauri::WebviewWindow) {
+    use windows::Win32::UI::Accessibility::SetWinEventHook;
+    use windows::Win32::UI::WindowsAndMessaging::WINEVENT_OUTOFCONTEXT;
+
+    const EVENT_SYSTEM_FOREGROUND: u32 = 0x0003;
+
+    let our_hwnd = window.hwnd().unwrap_or_default();
+    OUR_HWND.store(our_hwnd.0, Ordering::SeqCst);
+
+    unsafe {
+        SetWinEventHook(
+            EVENT_SYSTEM_FOREGROUND,
+            EVENT_SYSTEM_FOREGROUND,
+            None,
+            Some(foreground_change_hook),
+            0,
+            0,
+            WINEVENT_OUTOFCONTEXT,
+        );
+    }
+}
+
+#[cfg(target_os = "windows")]
+unsafe extern "system" fn foreground_change_hook(
+    _hook: windows::Win32::UI::Accessibility::HWINEVENTHOOK,
+    _event: u32,
+    hwnd: windows::Win32::Foundation::HWND,
+    _id_object: i32,
+    _id_child: i32,
+    _event_thread: u32,
+    _event_time: u32,
+) {
+    let our = OUR_HWND.load(Ordering::SeqCst);
+    if hwnd.0 != our && !hwnd.is_invalid() {
         LAST_FOREGROUND_HWND.store(hwnd.0, Ordering::SeqCst);
     }
 }
@@ -88,16 +134,32 @@ fn paste_with_defocus(app: &AppHandle) -> Result<(), String> {
         .get_webview_window("main")
         .ok_or("no window")?;
 
-    window.hide().map_err(|e| e.to_string())?;
+    let is_pinned = window.is_always_on_top().unwrap_or(false);
+    if is_pinned {
+        // When pinned: switch focus without hiding to avoid flicker
+        #[cfg(target_os = "windows")]
+        {
+            use windows::Win32::Foundation::HWND;
+            use windows::Win32::UI::WindowsAndMessaging::SetForegroundWindow;
+            let last_hwnd = LAST_FOREGROUND_HWND.load(Ordering::SeqCst);
+            if !last_hwnd.is_null() {
+                unsafe {
+                    let _ = SetForegroundWindow(HWND(last_hwnd));
+                }
+            }
+        }
+    } else {
+        window.hide().map_err(|e| e.to_string())?;
 
-    #[cfg(target_os = "windows")]
-    {
-        use windows::Win32::Foundation::HWND;
-        use windows::Win32::UI::WindowsAndMessaging::SetForegroundWindow;
-        let last_hwnd = LAST_FOREGROUND_HWND.load(Ordering::SeqCst);
-        if !last_hwnd.is_null() {
-            unsafe {
-                let _ = SetForegroundWindow(HWND(last_hwnd));
+        #[cfg(target_os = "windows")]
+        {
+            use windows::Win32::Foundation::HWND;
+            use windows::Win32::UI::WindowsAndMessaging::SetForegroundWindow;
+            let last_hwnd = LAST_FOREGROUND_HWND.load(Ordering::SeqCst);
+            if !last_hwnd.is_null() {
+                unsafe {
+                    let _ = SetForegroundWindow(HWND(last_hwnd));
+                }
             }
         }
     }
@@ -156,12 +218,56 @@ fn paste_with_defocus(app: &AppHandle) -> Result<(), String> {
 }
 
 #[cfg(target_os = "windows")]
+fn build_image_html(png_bytes: &[u8]) -> Vec<u8> {
+    let b64 = base64::engine::general_purpose::STANDARD.encode(png_bytes);
+    let img_tag = format!("<img src=\"data:image/png;base64,{}\"/>", b64);
+    let fragment = format!("<!--StartFragment-->{}<!--EndFragment-->", img_tag);
+    let html_body = format!("<html><body>{}</body></html>", fragment);
+
+    // Build a template header with placeholder zeros to measure its exact length
+    let placeholder_header = "Version:0.9\r\nStartHTML:00000000\r\nEndHTML:00000000\r\nStartFragment:00000000\r\nEndFragment:00000000\r\n";
+    let header_len = placeholder_header.len();
+
+    // Offsets are byte positions in the combined data (header + body)
+    let start_html = header_len;
+    let end_html = header_len + html_body.len();
+    let start_frag = header_len + html_body.find(&fragment).unwrap_or(0);
+    let end_frag = header_len + html_body.find("<!--EndFragment-->").unwrap_or(0) + "<!--EndFragment-->".len();
+
+    let header = format!(
+        "Version:0.9\r\nStartHTML:{:08}\r\nEndHTML:{:08}\r\nStartFragment:{:08}\r\nEndFragment:{:08}\r\n",
+        start_html, end_html, start_frag, end_frag,
+    );
+
+    let mut result = header.into_bytes();
+    result.extend_from_slice(html_body.as_bytes());
+    result
+}
+
+#[cfg(target_os = "windows")]
 fn write_image_to_clipboard(rgba: &[u8], w: u32, h: u32, png_bytes: &[u8]) -> Result<(), String> {
     use windows::Win32::Foundation::{HWND, HANDLE};
     use windows::Win32::System::DataExchange::*;
     use windows::Win32::System::Memory::{GlobalAlloc, GlobalLock, GlobalUnlock, GMEM_MOVEABLE};
+    use windows::Win32::UI::Shell::DROPFILES;
 
     const CF_DIB: u32 = 8;
+    const CF_HDROP: u32 = 15;
+
+    // Write PNG to a temp file for CF_HDROP
+    let temp_png_path = {
+        let mut dir = std::env::temp_dir();
+        dir.push("copy_creator_paste");
+        std::fs::create_dir_all(&dir).ok();
+        dir.push(format!("paste_{}.png", uuid::Uuid::new_v4()));
+        std::fs::write(&dir, png_bytes).map_err(|e| format!("Temp file write: {}", e))?;
+        dir
+    };
+    let wide_path: Vec<u16> = temp_png_path
+        .to_string_lossy()
+        .encode_utf16()
+        .chain(std::iter::once(0u16))
+        .collect();
 
     unsafe {
         if OpenClipboard(HWND(std::ptr::null_mut())).is_err() {
@@ -229,6 +335,58 @@ fn write_image_to_clipboard(rgba: &[u8], w: u32, h: u32, png_bytes: &[u8]) -> Re
             if SetClipboardData(cf_png, HANDLE(hmem_png.0)).is_err() {
                 let _ = CloseClipboard();
                 return Err("SetClipboardData PNG failed".to_string());
+            }
+        }
+
+        // Write HTML format for Electron/Chromium-based apps (Feishu, DingTalk, etc.)
+        let html_data = build_image_html(png_bytes);
+        let html_format_name: Vec<u16> = "HTML Format\0".encode_utf16().collect();
+        let cf_html = RegisterClipboardFormatW(windows::core::PCWSTR(html_format_name.as_ptr()));
+        if cf_html != 0 {
+            let hmem_html = GlobalAlloc(GMEM_MOVEABLE, html_data.len()).map_err(|e| {
+                let _ = CloseClipboard();
+                format!("GlobalAlloc HTML failed: {}", e)
+            })?;
+            let ptr_html = GlobalLock(hmem_html);
+            if ptr_html.is_null() {
+                let _ = CloseClipboard();
+                return Err("GlobalLock HTML failed".to_string());
+            }
+            std::ptr::copy_nonoverlapping(html_data.as_ptr(), ptr_html as *mut u8, html_data.len());
+            let _ = GlobalUnlock(hmem_html);
+            if SetClipboardData(cf_html, HANDLE(hmem_html.0)).is_err() {
+                let _ = CloseClipboard();
+                return Err("SetClipboardData HTML failed".to_string());
+            }
+        }
+
+        // Write CF_HDROP (temp file path) — required by Electron/Chromium apps
+        {
+            let dropfiles_size = std::mem::size_of::<DROPFILES>();
+            let path_bytes = wide_path.len() * std::mem::size_of::<u16>();
+            let data_size = dropfiles_size + path_bytes;
+            let mut data: Vec<u8> = vec![0u8; data_size];
+            let df = data.as_mut_ptr() as *mut DROPFILES;
+            (*df).pFiles = dropfiles_size as u32;
+            (*df).pt = windows::Win32::Foundation::POINT { x: 0, y: 0 };
+            (*df).fNC = windows::Win32::Foundation::BOOL(0);
+            (*df).fWide = windows::Win32::Foundation::BOOL(1);
+            let dest = data.as_mut_ptr().add(dropfiles_size) as *mut u16;
+            std::ptr::copy_nonoverlapping(wide_path.as_ptr(), dest, wide_path.len());
+            let hmem_drop = GlobalAlloc(GMEM_MOVEABLE, data_size).map_err(|e| {
+                let _ = CloseClipboard();
+                format!("GlobalAlloc HDROP failed: {}", e)
+            })?;
+            let ptr_drop = GlobalLock(hmem_drop);
+            if ptr_drop.is_null() {
+                let _ = CloseClipboard();
+                return Err("GlobalLock HDROP failed".to_string());
+            }
+            std::ptr::copy_nonoverlapping(data.as_ptr(), ptr_drop as *mut u8, data_size);
+            let _ = GlobalUnlock(hmem_drop);
+            if SetClipboardData(CF_HDROP, HANDLE(hmem_drop.0)).is_err() {
+                let _ = CloseClipboard();
+                return Err("SetClipboardData HDROP failed".to_string());
             }
         }
 

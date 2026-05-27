@@ -7,8 +7,6 @@ import { ClipboardCard } from "./ClipboardCard";
 import { TYPE_META } from "./utils";
 
 type ClipType = "all" | "text" | "image" | "link" | "file" | "apikey";
-const INITIAL_VISIBLE_RECORDS = 120;
-const VISIBLE_RECORD_INCREMENT = 120;
 
 TYPE_META.text.icon = Icons.clipboard;
 TYPE_META.image.icon = Icons.image;
@@ -21,6 +19,7 @@ export default function ClipboardPage() {
     records,
     search,
     loading,
+    hasMore,
     category,
     init,
     setSearch,
@@ -31,7 +30,6 @@ export default function ClipboardPage() {
   } = useClipboardStore();
 
   const [hoverPreview, setHoverPreview] = useState<{ src: string; x: number; y: number } | null>(null);
-  const [visibleCount, setVisibleCount] = useState(INITIAL_VISIBLE_RECORDS);
   const hoverTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const categories: { key: ClipType; label: string }[] = [
@@ -70,7 +68,6 @@ export default function ClipboardPage() {
 
   const handleSearchChange = useCallback(
     (value: string) => {
-      setVisibleCount(INITIAL_VISIBLE_RECORDS);
       setSearch(value);
     },
     [setSearch],
@@ -78,10 +75,10 @@ export default function ClipboardPage() {
 
   const handleCategoryChange = useCallback(
     (value: ClipType) => {
-      setVisibleCount(INITIAL_VISIBLE_RECORDS);
       setCategory(value);
+      loadRecords();
     },
-    [setCategory],
+    [setCategory, loadRecords],
   );
 
   const filtered = useMemo(() => {
@@ -89,11 +86,6 @@ export default function ClipboardPage() {
     if (category === "apikey") return records.filter((r) => r.is_api_key);
     return records.filter((r) => r.type === category);
   }, [records, category]);
-
-  const visibleRecords = useMemo(
-    () => filtered.slice(0, visibleCount),
-    [filtered, visibleCount],
-  );
 
   useEffect(() => {
     init();
@@ -161,7 +153,7 @@ export default function ClipboardPage() {
         </div>
       ) : (
         <div className="clipboard-list">
-          {visibleRecords.map((r, i) => (
+          {filtered.map((r, i) => (
             <ClipboardCard
               key={r.id}
               record={r}
@@ -173,11 +165,11 @@ export default function ClipboardPage() {
               onThumbLeave={handleThumbLeave}
             />
           ))}
-          {visibleRecords.length < filtered.length && (
+          {hasMore && filtered.length > 0 && (
             <button
               className="clipboard-load-more"
               type="button"
-              onClick={() => setVisibleCount((count) => count + VISIBLE_RECORD_INCREMENT)}
+              onClick={() => loadRecords(true)}
             >
               显示更多
             </button>

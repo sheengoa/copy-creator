@@ -49,6 +49,17 @@ fn apply_backdrop_effect(window: &tauri::WebviewWindow) {
     }
 }
 
+#[tauri::command]
+fn toggle_always_on_top(app: tauri::AppHandle) -> Result<bool, String> {
+    let window = app
+        .get_webview_window("main")
+        .ok_or_else(|| "window not found".to_string())?;
+    let current = window.is_always_on_top().map_err(|e| e.to_string())?;
+    let next = !current;
+    window.set_always_on_top(next).map_err(|e| e.to_string())?;
+    Ok(next)
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
@@ -79,6 +90,7 @@ pub fn run() {
                 if let Some(window) = app.get_webview_window("main") {
                     let _ = window.set_background_color(Some(tauri::window::Color(0, 0, 0, 0)));
                     apply_backdrop_effect(&window);
+                    paste::init_foreground_tracker(&window);
                 }
             }
 
@@ -192,6 +204,7 @@ pub fn run() {
             db::mark_toast_shown,
             db::is_toast_shown,
             db::set_user_api_key,
+            toggle_always_on_top,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

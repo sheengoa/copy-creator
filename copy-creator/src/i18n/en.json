@@ -73,7 +73,10 @@
     "image": "Image",
     "link": "Link",
     "file": "File",
-    "apikey": "API Key"
+    "apikey": "API Key",
+    "apiKeyNote": "Note",
+    "apiKeyNotePlaceholder": "Note (max 10 chars)",
+    "apiKeySaving": "Saving..."
   },
   "phrases": {
     "search": "Search phrases...",
@@ -101,7 +104,9 @@
     "loading": "Loading...",
     "saved": "Saved",
     "on": "ON",
-    "off": "OFF"
+    "off": "OFF",
+    "pinWindow": "Pin Window",
+    "unpinWindow": "Unpin Window"
   },
   "radialMenu": {
     "empty": "No items"
