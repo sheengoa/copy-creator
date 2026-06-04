@@ -525,6 +525,7 @@ dependencies = [
 name = "copy-creator"
 version = "0.1.0"
 dependencies = [
+ "arboard",
  "base64 0.22.1",
  "chrono",
  "enigo",
@@ -544,7 +545,6 @@ dependencies = [
  "tauri-plugin-process",
  "tokio",
  "uuid",
- "windows 0.58.0",
 ]
 
 [[package]]
