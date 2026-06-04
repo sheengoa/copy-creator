@@ -8,47 +8,6 @@ mod tray;
 use tauri::Manager;
 use tauri_plugin_autostart::ManagerExt;
 
-#[cfg(target_os = "windows")]
-fn apply_backdrop_effect(window: &tauri::WebviewWindow) {
-    use windows::Win32::Foundation::HWND;
-    use windows::Win32::Graphics::Dwm::{DwmSetWindowAttribute, DWMWA_SYSTEMBACKDROP_TYPE, DWMWA_WINDOW_CORNER_PREFERENCE};
-
-    let hwnd = window.hwnd().unwrap_or_default();
-    if hwnd.is_invalid() {
-        return;
-    }
-
-    let hwnd = HWND(hwnd.0);
-
-    let backdrop_type: i32 = 3;
-    let result = unsafe {
-        DwmSetWindowAttribute(
-            hwnd,
-            DWMWA_SYSTEMBACKDROP_TYPE,
-            &backdrop_type as *const i32 as *const _,
-            std::mem::size_of::<i32>() as u32,
-        )
-    };
-
-    if let Err(e) = result {
-        log::warn!("Failed to set DWM backdrop type: {:?}", e);
-    }
-
-    let corner_preference: i32 = 2; // DWMWCP_ROUND
-    let result = unsafe {
-        DwmSetWindowAttribute(
-            hwnd,
-            DWMWA_WINDOW_CORNER_PREFERENCE,
-            &corner_preference as *const i32 as *const _,
-            std::mem::size_of::<i32>() as u32,
-        )
-    };
-
-    if let Err(e) = result {
-        log::warn!("Failed to set DWM corner preference: {:?}", e);
-    }
-}
-
 #[tauri::command]
 fn toggle_always_on_top(app: tauri::AppHandle) -> Result<bool, String> {
     let window = app
@@ -65,7 +24,7 @@ pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_clipboard_manager::init())
         .plugin(tauri_plugin_process::init())
-        .plugin(tauri_plugin_autostart::init(tauri_plugin_autostart::MacosLauncher::LaunchAgent, Some(vec!["--hidden"])))
+        .plugin(tauri_plugin_autostart::init(tauri_plugin_autostart::MacosLauncher::default(), Some(vec!["--hidden"])))
         .plugin(
             tauri_plugin_global_shortcut::Builder::new()
                 .with_handler(|app, _shortcut, event| {
@@ -83,15 +42,6 @@ pub fn run() {
                         .level(log::LevelFilter::Info)
                         .build(),
                 )?;
-            }
-
-            #[cfg(target_os = "windows")]
-            {
-                if let Some(window) = app.get_webview_window("main") {
-                    let _ = window.set_background_color(Some(tauri::window::Color(0, 0, 0, 0)));
-                    apply_backdrop_effect(&window);
-                    paste::init_foreground_tracker(&window);
-                }
             }
 
             let is_autostart = std::env::args().any(|a| a == "--hidden");
@@ -142,11 +92,6 @@ pub fn run() {
                 .resizable(false)
                 .build()?;
                 let _ = radial.set_background_color(Some(tauri::window::Color(0, 0, 0, 0)));
-                #[cfg(target_os = "windows")]
-                {
-                    apply_backdrop_effect(&radial);
-                    paste::register_radial_hwnd(&radial);
-                }
                 log::info!("Radial menu popup window created");
             }
 
