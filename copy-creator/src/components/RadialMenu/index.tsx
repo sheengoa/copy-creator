@@ -56,15 +56,11 @@ export default function RadialMenu() {
   const [clipboardCategory, setClipboardCategory] = useState<ClipType>("all");
   const [phraseGroupId, setPhraseGroupId] = useState<string | null>(null);
 
-  const isRightDownRef = useRef(false);
   const visibleRef = useRef(false);
-  const showTimestampRef = useRef(0);
-  const lastFocusRef = useRef(0);
   const selectedItemIdRef = useRef<string | null>(null);
   const activeTabRef = useRef<TabKey>("clipboard");
   const clipboardCategoryRef = useRef<ClipType>("all");
   const phraseGroupIdRef = useRef<string | null>(null);
-  const startPosRef = useRef({ x: 0, y: 0 });
 
   useEffect(() => { visibleRef.current = visible; }, [visible]);
   useEffect(() => { selectedItemIdRef.current = selectedItemId; }, [selectedItemId]);
@@ -153,7 +149,6 @@ export default function RadialMenu() {
   catLeaveRef.current = categorySwitch.handleLeave;
 
   const resetState = useCallback(() => {
-    isRightDownRef.current = false;
     visibleRef.current = false;
     setVisible(false);
     setSelectedItemId(null);
@@ -213,72 +208,85 @@ export default function RadialMenu() {
     }
   }, []);
 
+  const handleItemPaste = useCallback(async (itemId: string) => {
+    const { records, pasteRecord } = useClipboardStore.getState();
+    const record = records.find((r) => r.id === itemId);
+    if (record) {
+      await pasteRecord(record);
+    } else {
+      const { phrases, pastePhrase } = usePhraseStore.getState();
+      const phrase = phrases.find((p) => p.id === itemId);
+      if (phrase) {
+        await pastePhrase(phrase);
+      }
+    }
+    resetState();
+    getCurrentWindow().hide();
+  }, [resetState]);
+
+  // Main event setup: show/hide and interaction
   useEffect(() => {
     let unlisteners: UnlistenFn[] = [];
 
     const setup = async () => {
-      const unDown = await listen<{ x: number; y: number; theme: string }>("radial-menu-down", (e) => {
-        console.log("[RadialMenu] radial-menu-down:", e.payload);
-        // Apply theme synchronously from backend-provided value
+      // Listen for radial-menu-show event from backend (keyboard shortcut triggered)
+      const unShow = await listen<{ theme: string }>("radial-menu-show", (e) => {
         document.documentElement.setAttribute("data-theme", e.payload.theme);
-        isRightDownRef.current = true;
-        showTimestampRef.current = Date.now();
-        startPosRef.current = { x: e.payload.x, y: e.payload.y };
         visibleRef.current = true;
         setVisible(true);
-        // Refresh records from backend to keep in sync with main window
+        setSelectedItemId(null);
+        selectedItemIdRef.current = null;
+        // Reset to clipboard tab on each open
+        setActiveTab("clipboard");
+        activeTabRef.current = "clipboard";
+        setClipboardCategory("all");
+        clipboardCategoryRef.current = "all";
+        // Refresh data
         useClipboardStore.getState().loadRecords();
+        usePhraseStore.getState().loadGroups();
       });
 
-      const unMove = await listen<{ x: number; y: number }>("radial-menu-move", (e) => {
-        if (!isRightDownRef.current) return;
-
-        const cssX = e.payload.x;
-        const cssY = e.payload.y;
-
-        if (!visibleRef.current) {
-          showTimestampRef.current = Date.now();
-          visibleRef.current = true;
-          setVisible(true);
-        }
-
-        updateHoverFromPoint(cssX, cssY);
-      });
-
-      const unUp = await listen("radial-menu-up", async () => {
-        console.log("[RadialMenu] radial-menu-up, visible:", visibleRef.current, "selected:", selectedItemIdRef.current);
-        if (isRightDownRef.current) {
-          if (visibleRef.current && selectedItemIdRef.current) {
-            const itemId = selectedItemIdRef.current;
-            const { records, pasteRecord } = useClipboardStore.getState();
-            const record = records.find((r) => r.id === itemId);
-            if (record) {
-              await pasteRecord(record);
-            } else {
-              const { phrases, pastePhrase } = usePhraseStore.getState();
-              const phrase = phrases.find((p) => p.id === itemId);
-              if (phrase) {
-                await pastePhrase(phrase);
-              }
-            }
-          }
-          resetState();
-          // Hide the popup window after processing
-          getCurrentWindow().hide();
-        }
-      });
-
-      unlisteners = [unDown, unMove, unUp];
+      unlisteners = [unShow];
     };
 
     setup();
 
-    const handleContextMenu = (e: Event) => {
-      e.preventDefault();
+    // Mouse move: update hover state from cursor position (only when visible)
+    const handleMouseMove = (e: MouseEvent) => {
+      if (!visibleRef.current) return;
+      updateHoverFromPoint(e.clientX, e.clientY);
     };
 
+    // Click: select item or dismiss if clicked outside popup
+    const handleClick = (e: MouseEvent) => {
+      if (!visibleRef.current) return;
+      const itemEl = (e.target as HTMLElement).closest("[data-radial-item-id]");
+      if (itemEl) {
+        const itemId = itemEl.getAttribute("data-radial-item-id");
+        if (itemId) {
+          handleItemPaste(itemId);
+          return;
+        }
+      }
+      // Clicked outside the popup area — dismiss
+      const popup = (e.target as HTMLElement).closest(".radial-menu-popup");
+      if (!popup) {
+        resetState();
+        getCurrentWindow().hide();
+      }
+    };
+
+    // Keyboard: Escape to dismiss
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === "Escape" && visibleRef.current) {
+        resetState();
+        getCurrentWindow().hide();
+      }
+    };
+
+    // Wheel: scroll categories or item list (only when visible)
     const handleWheel = (e: WheelEvent) => {
-      if (!isRightDownRef.current || !visibleRef.current) return;
+      if (!visibleRef.current) return;
 
       e.preventDefault();
       e.stopPropagation();
@@ -298,33 +306,29 @@ export default function RadialMenu() {
       }
     };
 
-    const handleFocus = () => {
-      lastFocusRef.current = Date.now();
-    };
-
+    // Blur: dismiss when window loses focus
     const handleBlur = () => {
-      if (isRightDownRef.current) {
-        // Ignore blurs within 1s of show — compositor initialization
-        // can cause spurious focus/blur on first show of transparent window.
-        if (Date.now() - showTimestampRef.current < 1000) return;
+      if (visibleRef.current) {
         resetState();
         getCurrentWindow().hide();
       }
     };
 
-    document.addEventListener("contextmenu", handleContextMenu, true);
+    document.addEventListener("mousemove", handleMouseMove);
+    document.addEventListener("click", handleClick);
+    document.addEventListener("keydown", handleKeyDown);
     document.addEventListener("wheel", handleWheel, { passive: false });
-    window.addEventListener("focus", handleFocus);
     window.addEventListener("blur", handleBlur);
 
     return () => {
       unlisteners.forEach((fn) => fn());
-      document.removeEventListener("contextmenu", handleContextMenu, true);
+      document.removeEventListener("mousemove", handleMouseMove);
+      document.removeEventListener("click", handleClick);
+      document.removeEventListener("keydown", handleKeyDown);
       document.removeEventListener("wheel", handleWheel);
-      window.removeEventListener("focus", handleFocus);
       window.removeEventListener("blur", handleBlur);
     };
-  }, [resetState, updateHoverFromPoint]);
+  }, [resetState, updateHoverFromPoint, handleItemPaste]);
 
   const records = useClipboardStore((s) => s.records);
   const phraseGroups = usePhraseStore((s) => s.groups);

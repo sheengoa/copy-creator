@@ -348,23 +348,6 @@
   transform: scale(0.95);
 }
 
-.radial-shortcut-right {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-}
-
-.radial-shortcut-key {
-  font-size: var(--text-xs);
-  color: var(--text-secondary);
-  font-family: var(--font-mono);
-  background: var(--input-bg);
-  padding: 4px 10px;
-  border-radius: 6px;
-  border: 1px solid var(--card-border);
-  user-select: none;
-}
-
 .toggle-switch {
   width: 40px;
   height: 24px;

@@ -39,7 +39,7 @@
     "shortcut": "Shortcuts",
     "windowShortcut": "Show Window Shortcut",
     "radialShortcut": "Quick Menu Shortcut",
-    "radialShortcutDesc": "Ctrl+Alt+Right Click",
+    "radialShortcutDesc": "Press a key combination to open the quick menu",
     "rightClick": "Right Click",
     "shortcutPlaceholder": "Click record button to set keyboard shortcut",
     "recordShortcut": "Record",
