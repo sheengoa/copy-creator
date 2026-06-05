@@ -10,12 +10,12 @@ English | [中文](./README.md)
 
 # Copy Creator
 
-**Desktop Productivity Tool for Windows**
+**Desktop Productivity Tool for Linux**
 
 Clipboard Manager · Quick Phrases · Translation
 
 ![License](https://img.shields.io/badge/license-MIT-blue.svg)
-![Platform](https://img.shields.io/badge/platform-Windows%2010+-brightgreen.svg)
+![Platform](https://img.shields.io/badge/platform-Linux%20(Ubuntu%2024.04)-brightgreen.svg)
 ![Tauri](https://img.shields.io/badge/Tauri-2.x-ffc131.svg)
 ![React](https://img.shields.io/badge/React-19-61dafb.svg)
 
@@ -25,7 +25,7 @@ Clipboard Manager · Quick Phrases · Translation
 
 ## Overview
 
-Copy Creator is a lightweight Windows desktop productivity tool that appears as a floating window and minimizes to the system tray when closed. It integrates three core features: clipboard history management, quick phrases, and translation, helping users improve text processing efficiency in their daily work.
+Copy Creator is a lightweight Linux desktop productivity tool that appears as a floating window and minimizes to the system tray when closed. It integrates three core features: clipboard history management, quick phrases, and translation, helping users improve text processing efficiency in their daily work.
 
 ## Features
 
@@ -65,22 +65,36 @@ Copy Creator is a lightweight Windows desktop productivity tool that appears as 
 
 ## Download
 
-Go to the [Releases](https://github.com/hu-qi-jia/copy-creator/releases) page to download the latest installer:
+### System Requirements
 
-| Package | Description |
-|:---|:---|
-| `Copy Creator_x64-setup.exe` | NSIS Installer |
-| `Copy Creator_x64_zh-CN.msi` | MSI Installer (Chinese) |
+- Ubuntu 24.04 or compatible Linux distribution
+- Wayland (recommended) or X11 display server
 
-**System Requirements**: Windows 11
+### Option 1: AppImage (Recommended)
+
+Go to the [Releases](https://github.com/hu-qi-jia/copy-creator/releases) page and download the latest `Copy Creator.AppImage`:
+
+```bash
+chmod +x "Copy Creator.AppImage"
+./Copy\ Creator.AppImage
+```
+
+### Option 2: deb Package
+
+Download the `.deb` file and install via double-click or command line:
+
+```bash
+sudo dpkg -i copy-creator_*.deb
+```
 
 ## Usage Guide
 
 ### Getting Started
 
-1. **Launch the App**: Double-click the desktop icon after installation, the app will appear as a floating window
+1. **Launch the App**: Launch from the application menu after installation, the app will appear as a floating window
 2. **System Tray**: When you close the window, the app automatically minimizes to the system tray and continues running in the background
 3. **Show Window**: Use the global hotkey (configurable in settings) to quickly show/hide the window
+4. **Quick Menu**: Set an independent global hotkey to open a quick menu at the mouse cursor for fast selection and pasting
 
 ### Clipboard Feature
 
@@ -119,6 +133,13 @@ Go to the [Releases](https://github.com/hu-qi-jia/copy-creator/releases) page to
 - [pnpm](https://pnpm.io/)
 - [Rust](https://www.rust-lang.org/)
 - [Tauri CLI](https://tauri.app/)
+- Linux system dependencies:
+
+```bash
+# Ubuntu 24.04
+sudo apt install libwebkit2gtk-4.1-dev libgtk-3-dev \
+  libayatana-appindicator3-dev libxdo-dev
+```
 
 ### Local Development
 

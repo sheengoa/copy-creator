@@ -69,9 +69,10 @@
 
 #### ⏳ 待完成：打包配置
 
-- [ ] 配置 Linux 打包 (AppImage / deb)
+- [x] 配置 Linux 打包 (AppImage / deb) — `tauri.conf.json` 已更新
+- [ ] 实际打包验证（需在 Ubuntu 上运行 `pnpm tauri build`）
 - [ ] 验证开机自启动 (.desktop 文件)
-- [ ] 更新 README 中的平台说明和安装步骤
+- [x] 更新 README 中的平台说明和安装步骤 — 中文/英文 README 已更新
 
 ---
 
