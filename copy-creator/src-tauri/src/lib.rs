@@ -27,9 +27,16 @@ pub fn run() {
         .plugin(tauri_plugin_autostart::init(tauri_plugin_autostart::MacosLauncher::default(), Some(vec!["--hidden"])))
         .plugin(
             tauri_plugin_global_shortcut::Builder::new()
-                .with_handler(|app, _shortcut, event| {
+                .with_handler(|app, shortcut, event| {
                     if event.state == tauri_plugin_global_shortcut::ShortcutState::Pressed {
-                        shortcut::toggle_window(app);
+                        let key = format!("{}", shortcut);
+                        if shortcut::is_main_shortcut(&key) {
+                            shortcut::toggle_window(app);
+                        } else if shortcut::is_radial_shortcut(&key) {
+                            shortcut::show_radial_menu(app);
+                        } else {
+                            log::info!("[shortcut] unknown shortcut pressed: {}", key);
+                        }
                     }
                 })
                 .build(),
@@ -97,8 +104,19 @@ pub fn run() {
 
             if let Ok(key) = db::get_setting(app.handle().clone(), "shortcut_key".to_string()) {
                 if !key.is_empty() {
+                    *shortcut::MAIN_SHORTCUT_KEY.lock().unwrap() = key.clone();
                     if let Err(e) = shortcut::register_keyboard_shortcut(app.handle(), &key) {
                         log::warn!("Failed to register keyboard shortcut '{}': {}", key, e);
+                    }
+                }
+            }
+
+            // Register radial menu shortcut
+            if let Ok(key) = db::get_setting(app.handle().clone(), "shortcut_radial".to_string()) {
+                if !key.is_empty() {
+                    *shortcut::RADIAL_SHORTCUT_KEY.lock().unwrap() = key.clone();
+                    if let Err(e) = shortcut::register_keyboard_shortcut(app.handle(), &key) {
+                        log::warn!("Failed to register radial shortcut '{}': {}", key, e);
                     }
                 }
             }
@@ -140,6 +158,7 @@ pub fn run() {
             db::select_storage_folder,
             translator::translate,
             shortcut::update_shortcut,
+            shortcut::update_radial_shortcut,
             shortcut::set_radial_menu_enabled,
             tray::update_tray_language,
             db::check_api_key,

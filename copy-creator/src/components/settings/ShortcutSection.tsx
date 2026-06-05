@@ -6,8 +6,11 @@ interface ShortcutSectionProps {
   recording: boolean;
   startRecording: () => void;
   stopRecording: () => void;
-  localRadialMenuEnabled: boolean;
-  setLocalRadialMenuEnabled: (enabled: boolean) => void;
+  localRadialShortcutKey: string;
+  setLocalRadialShortcutKey: (key: string) => void;
+  radialRecording: boolean;
+  startRadialRecording: () => void;
+  stopRadialRecording: () => void;
 }
 
 export function ShortcutSection({
@@ -15,8 +18,10 @@ export function ShortcutSection({
   recording,
   startRecording,
   stopRecording,
-  localRadialMenuEnabled,
-  setLocalRadialMenuEnabled,
+  localRadialShortcutKey,
+  radialRecording,
+  startRadialRecording,
+  stopRadialRecording,
 }: ShortcutSectionProps) {
   const { t } = useTranslation();
 
@@ -42,15 +47,18 @@ export function ShortcutSection({
         </div>
         <div className="settings-row">
           <div className="settings-row-label">{t("settings.radialShortcut")}</div>
-          <div className="radial-shortcut-right">
-            <span className="radial-shortcut-key">{t("settings.radialShortcutDesc")}</span>
-            <button
-              className={`toggle-switch ${localRadialMenuEnabled ? "on" : "off"}`}
-              onClick={() => setLocalRadialMenuEnabled(!localRadialMenuEnabled)}
-              title={localRadialMenuEnabled ? t("common.on") : t("common.off")}
-            >
-              <span className="toggle-thumb" />
-            </button>
+          <div className="shortcut-setting">
+            <div className="shortcut-keyboard-row">
+              <span className={`shortcut-display${radialRecording ? " recording" : ""}`}>
+                {radialRecording ? t("settings.recording") : (localRadialShortcutKey || t("settings.shortcutPlaceholder"))}
+              </span>
+              <button
+                className="shortcut-record-btn"
+                onClick={radialRecording ? stopRadialRecording : startRadialRecording}
+              >
+                {radialRecording ? t("settings.stopRecord") : t("settings.recordShortcut")}
+              </button>
+            </div>
           </div>
         </div>
       </div>

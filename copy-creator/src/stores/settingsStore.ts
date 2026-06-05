@@ -18,6 +18,7 @@ interface SettingsState {
   translateProxy: string;
   language: string;
   shortcutKey: string;
+  radialShortcutKey: string;
   radialMenuEnabled: boolean;
   autostartEnabled: boolean;
 
@@ -41,6 +42,7 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
   translateProxy: "",
   language: "zh-CN",
   shortcutKey: "",
+  radialShortcutKey: "",
   radialMenuEnabled: true,
   autostartEnabled: false,
 
@@ -68,6 +70,7 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
         translateProxy: settings.translate_proxy || "",
         language: settings.language || "zh-CN",
         shortcutKey: settings.shortcut_key || "",
+        radialShortcutKey: settings.shortcut_radial || "",
         radialMenuEnabled: settings.radial_menu_enabled !== "0",
       });
 

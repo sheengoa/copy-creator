@@ -39,7 +39,7 @@
     "shortcut": "快捷键",
     "windowShortcut": "窗口呼出快捷键",
     "radialShortcut": "快捷菜单呼出快捷键",
-    "radialShortcutDesc": "Ctrl+Alt+鼠标右键",
+    "radialShortcutDesc": "按下快捷键组合打开快捷菜单",
     "rightClick": "鼠标右键",
     "shortcutPlaceholder": "点击录制按钮设置键盘快捷键",
     "recordShortcut": "录制",

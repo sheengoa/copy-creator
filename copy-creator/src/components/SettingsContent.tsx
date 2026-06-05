@@ -22,11 +22,15 @@ export default function SettingsContent({ embedded }: Props) {
   const [localTranslateProxy, setLocalTranslateProxy] = useState(settings.translateProxy);
   const [localLang, setLocalLang] = useState(i18n.language);
   const [localShortcutKey, setLocalShortcutKey] = useState(settings.shortcutKey);
+  const [localRadialShortcutKey, setLocalRadialShortcutKey] = useState(settings.radialShortcutKey);
   const [localRadialMenuEnabled, setLocalRadialMenuEnabled] = useState(settings.radialMenuEnabled);
   const [localAutostart, setLocalAutostart] = useState(settings.autostartEnabled);
   const [recording, setRecording] = useState(false);
   const recordingRef = useRef(false);
   const keydownHandlerRef = useRef<((e: KeyboardEvent) => void) | null>(null);
+  const [radialRecording, setRadialRecording] = useState(false);
+  const radialRecordingRef = useRef(false);
+  const radialKeydownHandlerRef = useRef<((e: KeyboardEvent) => void) | null>(null);
   const [storagePath, setStoragePath] = useState("");
   const [saved, setSaved] = useState(false);
 
@@ -45,6 +49,7 @@ export default function SettingsContent({ embedded }: Props) {
     setLocalTranslateProxy(settings.translateProxy);
     setLocalLang(i18n.language);
     setLocalShortcutKey(settings.shortcutKey);
+    setLocalRadialShortcutKey(settings.radialShortcutKey);
     setLocalRadialMenuEnabled(settings.radialMenuEnabled);
     setLocalAutostart(settings.autostartEnabled);
   }, [settings, i18n.language]);
@@ -119,6 +124,73 @@ export default function SettingsContent({ embedded }: Props) {
     }
   };
 
+  const startRadialRecording = () => {
+    radialRecordingRef.current = true;
+    setRadialRecording(true);
+    setLocalRadialShortcutKey("");
+
+    const cleanup = () => {
+      document.removeEventListener("keydown", handler, true);
+      radialKeydownHandlerRef.current = null;
+    };
+
+    const handler = (e: KeyboardEvent) => {
+      if (!radialRecordingRef.current) {
+        cleanup();
+        return;
+      }
+
+      if (["Control", "Alt", "Shift", "Meta", "CapsLock", "NumLock", "ScrollLock", "Dead"].includes(e.key)) {
+        return;
+      }
+
+      if (!e.ctrlKey && !e.altKey && !e.shiftKey && !e.metaKey) {
+        return;
+      }
+
+      e.preventDefault();
+      e.stopPropagation();
+
+      const parts: string[] = [];
+      if (e.ctrlKey) parts.push("Ctrl");
+      if (e.altKey) parts.push("Alt");
+      if (e.shiftKey) parts.push("Shift");
+      if (e.metaKey) parts.push("Super");
+
+      const code = e.code;
+      let keyName: string;
+      if (code.startsWith("Key")) {
+        keyName = code[3];
+      } else if (code.startsWith("Digit")) {
+        keyName = code[5];
+      } else if (code.startsWith("Numpad")) {
+        keyName = "NumPad" + code.substring(6);
+      } else {
+        keyName = e.key;
+        if (keyName === " ") keyName = "Space";
+      }
+      parts.push(keyName);
+
+      const shortcut = parts.join("+");
+      setLocalRadialShortcutKey(shortcut);
+      radialRecordingRef.current = false;
+      setRadialRecording(false);
+      cleanup();
+    };
+
+    radialKeydownHandlerRef.current = handler;
+    document.addEventListener("keydown", handler, true);
+  };
+
+  const stopRadialRecording = () => {
+    radialRecordingRef.current = false;
+    setRadialRecording(false);
+    if (radialKeydownHandlerRef.current) {
+      document.removeEventListener("keydown", radialKeydownHandlerRef.current, true);
+      radialKeydownHandlerRef.current = null;
+    }
+  };
+
   const handleSave = async () => {
     await settings.setSettingsBatch({
       clipboard_retention: localRetention,
@@ -139,6 +211,17 @@ export default function SettingsContent({ embedded }: Props) {
         await settings.setSetting("shortcut_key", newKey);
       } catch (e) {
         console.error("Failed to update shortcut:", e);
+      }
+    }
+
+    const oldRadialKey = settings.radialShortcutKey;
+    const newRadialKey = localRadialShortcutKey;
+    if (oldRadialKey !== newRadialKey) {
+      try {
+        await invoke("update_radial_shortcut", { oldShortcut: oldRadialKey, newShortcut: newRadialKey });
+        await settings.setSetting("shortcut_radial", newRadialKey);
+      } catch (e) {
+        console.error("Failed to update radial shortcut:", e);
       }
     }
 
@@ -180,8 +263,11 @@ export default function SettingsContent({ embedded }: Props) {
         recording={recording}
         startRecording={startRecording}
         stopRecording={stopRecording}
-        localRadialMenuEnabled={localRadialMenuEnabled}
-        setLocalRadialMenuEnabled={setLocalRadialMenuEnabled}
+        localRadialShortcutKey={localRadialShortcutKey}
+        setLocalRadialShortcutKey={setLocalRadialShortcutKey}
+        radialRecording={radialRecording}
+        startRadialRecording={startRadialRecording}
+        stopRadialRecording={stopRadialRecording}
       />
 
       <StartupSection
