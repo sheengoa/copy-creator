@@ -396,3 +396,50 @@
 .toggle-switch.on:active .toggle-thumb {
   transform: translateX(13px);
 }
+
+/* --- Shortcut Setup Guide --- */
+.settings-shortcut-guide {
+  margin-top: 14px;
+  padding: 14px 16px;
+  background: var(--card-inner-bg);
+  border: 0.5px solid var(--separator);
+  border-radius: 10px;
+}
+
+[data-theme="dark"] .settings-shortcut-guide {
+  background: rgba(255, 255, 255, 0.04);
+  border-color: rgba(255, 255, 255, 0.08);
+}
+
+.settings-shortcut-guide-title {
+  font-size: var(--text-sm);
+  font-weight: var(--weight-semibold);
+  color: var(--text-primary);
+  margin-bottom: 8px;
+}
+
+.settings-shortcut-guide-body {
+  font-size: var(--text-xs);
+  color: var(--text-secondary);
+  line-height: 1.6;
+}
+
+.settings-shortcut-guide-body p {
+  margin-bottom: 6px;
+}
+
+.settings-shortcut-guide-body ol {
+  padding-left: 18px;
+  margin-bottom: 8px;
+}
+
+.settings-shortcut-guide-body li {
+  margin-bottom: 2px;
+}
+
+.settings-shortcut-guide-hint {
+  color: var(--text-tertiary);
+  font-style: italic;
+  margin-top: 8px;
+  margin-bottom: 0;
+}
