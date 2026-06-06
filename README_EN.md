@@ -27,6 +27,8 @@ Clipboard Manager · Quick Phrases · Translation
 
 Copy Creator is a lightweight Linux desktop productivity tool that appears as a floating window and minimizes to the system tray when closed. It integrates three core features: clipboard history management, quick phrases, and translation, helping users improve text processing efficiency in their daily work.
 
+> **Acknowledgement**: This project is forked from [hu-qi-jia/copy-creator](https://github.com/hu-qi-jia/copy-creator). The original project was Windows-only. This repository is a complete Linux adaptation, including: removal of all Windows API calls, Wayland/X11 dual protocol support, Ubuntu native shortcut integration, clipboard compatibility fixes, and more. Thanks to the original author for the open-source contribution!
+
 ## Features
 
 ### 📋 Clipboard Manager
@@ -185,5 +187,11 @@ This project is licensed under the [MIT License](LICENSE).
 <div align="center">
 
 If you find this project helpful, feel free to give it a Star!
+
+---
+
+Forked from [hu-qi-jia/copy-creator](https://github.com/hu-qi-jia/copy-creator) · Original Windows version · This repo is the Linux adaptation
+
+Thanks to [baihejiangnan](https://github.com/baihejiangnan) for the contribution!
 
 </div>
