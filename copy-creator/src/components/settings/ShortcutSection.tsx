@@ -62,6 +62,25 @@ export function ShortcutSection({
           </div>
         </div>
       </div>
+
+      <div className="settings-shortcut-guide">
+        <div className="settings-shortcut-guide-title">
+          {t("settings.shortcutSetupGuide")}
+        </div>
+        <div className="settings-shortcut-guide-body">
+          <p>{t("settings.shortcutGuideIntro")}</p>
+          <ol>
+            <li>{t("settings.shortcutGuideStep1")}</li>
+            <li>{t("settings.shortcutGuideStep2")}</li>
+            <li>{t("settings.shortcutGuideStep3")}</li>
+            <li>{t("settings.shortcutGuideStep4")}</li>
+            <li>{t("settings.shortcutGuideStep5")}</li>
+          </ol>
+          <p className="settings-shortcut-guide-hint">
+            {t("settings.shortcutGuideHint")}
+          </p>
+        </div>
+      </div>
     </div>
   );
 }
