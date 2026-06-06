@@ -4,3 +4,4 @@ target/
 .claude/settings.local.json
 .agents/
 copy-creator/com.copycreator.app/
+.claude
