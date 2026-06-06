@@ -70,9 +70,9 @@
   --weight-normal: 400;
   --weight-medium: 500;
   --weight-semibold: 600;
-  --sidebar-bg: rgba(242, 242, 247, 0.88);
+  --sidebar-bg: #F2F2F7;
   --sidebar-border: rgba(0, 0, 0, 0.06);
-  --panel-bg: rgba(255, 255, 255, 0.90);
+  --panel-bg: rgba(255, 255, 255, 1);
   --panel-header-bg: rgba(255, 255, 255, 0.5);
   --nav-item-color: rgba(60, 60, 67, 0.5);
   --nav-item-hover-bg: rgba(0, 0, 0, 0.04);
@@ -111,9 +111,9 @@
   --separator: rgba(255, 255, 255, 0.08);
   --shadow: 0 1px 3px rgba(0,0,0,0.3);
   --glass-bg: rgba(0, 0, 0, 0.5);
-  --sidebar-bg: rgba(30, 30, 30, 0.78);
+  --sidebar-bg: #1E1E1E;
   --sidebar-border: rgba(255, 255, 255, 0.06);
-  --panel-bg: rgba(30, 30, 30, 0.82);
+  --panel-bg: rgba(30, 30, 30, 1);
   --panel-header-bg: transparent;
   --nav-item-color: rgba(255, 255, 255, 0.4);
   --nav-item-hover-bg: rgba(255, 255, 255, 0.06);
@@ -154,12 +154,18 @@ html, body, #root {
   font-family: var(--font);
   font-size: var(--text-base);
   color: var(--text-primary);
-  background: transparent;
+  background: #F2F2F7;
   user-select: none;
   -webkit-user-select: none;
   -webkit-font-smoothing: antialiased;
   -webkit-transform: translateZ(0);
   transform: translateZ(0);
+}
+
+[data-theme="dark"] html,
+[data-theme="dark"] body,
+[data-theme="dark"] #root {
+  background: #1E1E1E;
 }
 
 *::-webkit-scrollbar:horizontal {

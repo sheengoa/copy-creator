@@ -110,6 +110,7 @@ export default function RadialMenu() {
   const handleTabSwitch = useCallback((key: string) => {
     const tab = key as TabKey;
     setActiveTab(tab);
+    activeTabRef.current = tab;
     setSelectedItemId(null);
     selectedItemIdRef.current = null;
     if (tab === "phrases") {
@@ -123,7 +124,14 @@ export default function RadialMenu() {
     }
   }, []);
 
-  const handleCategorySwitch = useCallback((key: string) => {
+  const handleTabClick = useCallback((e: React.MouseEvent, key: string) => {
+    e.preventDefault();
+    e.stopPropagation();
+    handleTabSwitch(key);
+    navLeaveRef.current();
+  }, [handleTabSwitch]);
+
+  const applyCategorySwitch = useCallback((key: string) => {
     if (activeTabRef.current === "clipboard") {
       setClipboardCategory(key as ClipType);
       clipboardCategoryRef.current = key as ClipType;
@@ -135,6 +143,20 @@ export default function RadialMenu() {
     setSelectedItemId(null);
     selectedItemIdRef.current = null;
   }, []);
+
+  // Hover-based switching (2s delay — used by mouse hover on nav/category)
+  const handleCategorySwitch = useCallback((key: string) => {
+    applyCategorySwitch(key);
+  }, [applyCategorySwitch]);
+
+  // Click-based switching (instant — used by click on category chips)
+  const handleCategoryClick = useCallback((e: React.MouseEvent, key: string) => {
+    e.preventDefault();
+    e.stopPropagation();
+    applyCategorySwitch(key);
+    // Also cancel any pending hover timer
+    catLeaveRef.current();
+  }, [applyCategorySwitch]);
 
   const navSwitch = useHoverSwitch(handleTabSwitch, HOVER_DELAY);
   const categorySwitch = useHoverSwitch(handleCategorySwitch, HOVER_DELAY);
@@ -346,9 +368,7 @@ export default function RadialMenu() {
 
   const filteredRecords = clipboardCategory === "all"
     ? records
-    : clipboardCategory === "apikey"
-      ? records.filter((r) => r.is_api_key)
-      : records.filter((r) => r.type === clipboardCategory);
+    : records.filter((r) => r.type === clipboardCategory);
 
   const items = activeTab === "clipboard"
     ? filteredRecords.slice(0, MAX_ITEMS).map((r) => ({
@@ -360,7 +380,7 @@ export default function RadialMenu() {
             : r.is_api_key
               ? r.key_preview || r.content
               : r.content,
-        type: r.is_api_key ? "apikey" : r.type,
+        type: r.type,
         createdAt: r.created_at,
       }))
     : phrases.map((p) => ({
@@ -377,7 +397,6 @@ export default function RadialMenu() {
         { key: "image", label: t("clipboard.image") },
         { key: "link", label: t("clipboard.link") },
         { key: "file", label: t("clipboard.file") },
-        { key: "apikey", label: t("clipboard.apikey") },
       ]
     : phraseGroups.map((g) => ({
         key: g.id,
@@ -395,6 +414,7 @@ export default function RadialMenu() {
               key={tab}
               className={`radial-menu-nav-tab ${activeTab === tab ? "active" : ""}`}
               data-radial-nav={tab}
+              onClick={(e) => handleTabClick(e, tab)}
             >
               <span className="radial-menu-nav-label">{t(`tabs.${tab}`)}</span>
               {navSwitch.progressKey === tab && (
@@ -411,6 +431,7 @@ export default function RadialMenu() {
                 key={cat.key}
                 className={`radial-menu-category-chip ${activeCategory === cat.key ? "active" : ""}`}
                 data-radial-category={cat.key}
+                onClick={(e) => handleCategoryClick(e, cat.key)}
               >
                 {cat.label}
                 {categorySwitch.progressKey === cat.key && (

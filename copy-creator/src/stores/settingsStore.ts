@@ -59,6 +59,7 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
       const settings = await invoke<Record<string, string>>("get_all_settings");
 
       set({
+        themeMode: (settings.theme === "dark" ? "dark" : "light") as ThemeMode,
         clipboardRetention: settings.clipboard_retention || "1month",
         defaultEngine: settings.default_translate_engine || "google",
         apiUrl: settings.ai_api_url || "",

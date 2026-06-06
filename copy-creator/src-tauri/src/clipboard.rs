@@ -282,11 +282,33 @@ pub static LAST_CLIPBOARD_TEXT: std::sync::Mutex<String> = std::sync::Mutex::new
 pub static LAST_CLIPBOARD_IMAGE_HASH: std::sync::Mutex<u64> = std::sync::Mutex::new(0);
 pub static LAST_CLIPBOARD_FILES_KEY: std::sync::Mutex<String> = std::sync::Mutex::new(String::new());
 
+/// Capture the current clipboard image hash (if any) so we don't
+/// re-record an existing image on startup or after our own paste.
+fn capture_current_image_hash() -> u64 {
+    if let Ok(mut clipboard) = arboard::Clipboard::new() {
+        if let Ok(image) = clipboard.get_image() {
+            let rgba = &image.bytes;
+            if !rgba.is_empty() && image.width > 0 && image.height > 0 {
+                return rgba.iter()
+                    .step_by(64)
+                    .fold(0u64, |acc, &b| acc.wrapping_mul(31).wrapping_add(b as u64));
+            }
+        }
+    }
+    0
+}
+
 pub fn sync_monitor_cache(handle: &AppHandle) {
+    // Text
     if let Ok(text) = handle.clipboard().read_text() {
         *LAST_CLIPBOARD_TEXT.lock().unwrap() = text.trim().to_string();
     }
-    // Cache file URIs to prevent re-recording our own file paste
+    // Image
+    let hash = capture_current_image_hash();
+    if hash != 0 {
+        *LAST_CLIPBOARD_IMAGE_HASH.lock().unwrap() = hash;
+    }
+    // File URIs — prevent re-recording our own file paste
     if let Ok(text) = handle.clipboard().read_text() {
         let text = text.trim().to_string();
         if text.contains("file://") {
@@ -320,6 +342,13 @@ pub fn start_monitor(app: &AppHandle) -> Result<(), Box<dyn std::error::Error>> 
         *LAST_CLIPBOARD_FILES_KEY.lock().unwrap() = key;
     }
 
+    // Seed image hash so a hot restart doesn't re-record the
+    // image that was already in the clipboard.
+    {
+        let hash = capture_current_image_hash();
+        *LAST_CLIPBOARD_IMAGE_HASH.lock().unwrap() = hash;
+    }
+
     std::thread::spawn(move || {
         let mut poll_count: u32 = 0;
         loop {
@@ -341,9 +370,8 @@ pub fn start_monitor(app: &AppHandle) -> Result<(), Box<dyn std::error::Error>> 
         let mut image_recorded = false;
 
         let mut image_data: Option<(Vec<u8>, u32, u32)> = None;
-        let mut image_is_same = false;
 
-        // Image detection via arboard with stratified full-RGBA hash
+        // Image detection via arboard — only record when the image actually changes
         if let Ok(mut clipboard) = arboard::Clipboard::new() {
             if let Ok(image) = clipboard.get_image() {
                 let rgba = &image.bytes;
@@ -355,10 +383,8 @@ pub fn start_monitor(app: &AppHandle) -> Result<(), Box<dyn std::error::Error>> 
                     if hash != *cached_hash {
                         *cached_hash = hash;
                         image_data = Some((rgba.to_vec(), image.width as u32, image.height as u32));
-                    } else {
-                        // Hash matched — same image re-copied
-                        image_is_same = true;
                     }
+                    // If hash matches: image hasn't changed → skip (no re-insertion)
                 }
             }
         }
@@ -436,30 +462,16 @@ pub fn start_monitor(app: &AppHandle) -> Result<(), Box<dyn std::error::Error>> 
             }
         }
 
-        // Handle re-copy of same image: insert a new chronological record
-        if image_is_same {
-            if let Ok(mut clipboard) = arboard::Clipboard::new() {
-                if let Ok(image) = clipboard.get_image() {
-                    let content_hash: u64 = image.bytes.iter()
-                        .fold(0u64, |acc, &b| acc.wrapping_mul(31).wrapping_add(b as u64));
-                    let content_hash_str = format!("{:016x}", content_hash);
-                    let relative = format!("images/{}.png", content_hash_str);
-                    insert_and_emit(&handle, "image", &relative);
-                }
-            }
-            sync_monitor_cache(&handle);
-        } else if image_recorded {
+        if image_recorded {
             if let Ok(text) = handle.clipboard().read_text() {
                 *LAST_CLIPBOARD_TEXT.lock().unwrap() = text.trim().to_string();
             }
         } else {
+            // Text detection — only insert when content actually changed
             if let Ok(text) = handle.clipboard().read_text() {
                 let text = text.trim().to_string();
                 if !text.is_empty() && text != *LAST_CLIPBOARD_TEXT.lock().unwrap() {
                     *LAST_CLIPBOARD_TEXT.lock().unwrap() = text.clone();
-                    let record_type = if is_url(&text) { "link" } else { "text" };
-                    insert_and_emit(&handle, record_type, &text);
-                } else if !text.is_empty() {
                     let record_type = if is_url(&text) { "link" } else { "text" };
                     insert_and_emit(&handle, record_type, &text);
                 }

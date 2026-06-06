@@ -1,0 +1,101 @@
+#!/usr/bin/env python3
+"""Copy Creator — IPC control script.
+
+Bind to custom keyboard shortcuts in Ubuntu Settings:
+  Settings → Keyboard → Keyboard Shortcuts → Custom Shortcuts
+
+  Name:     Copy Creator — Show Window
+  Command:  /home/oa/.local/bin/copy-creator-ctl show
+  Shortcut: Ctrl+Shift+V
+"""
+import os
+import socket
+import sys
+import time
+
+CMD = sys.argv[1] if len(sys.argv) > 1 else ""
+if CMD not in ("show", "toggle", "radial", "ping"):
+    print(f"Usage: {sys.argv[0]} {{show|radial}}", file=sys.stderr)
+    sys.exit(1)
+
+
+def find_socket() -> str | None:
+    """Return the first existing socket path, or None."""
+    candidates = []
+    uid = os.getuid()
+    # Ordered by likelihood
+    if "XDG_RUNTIME_DIR" in os.environ:
+        candidates.append(os.path.join(os.environ["XDG_RUNTIME_DIR"], "copy-creator.sock"))
+    candidates.append(f"/run/user/{uid}/copy-creator.sock")
+    candidates.append(os.path.expanduser("~/.local/share/copy-creator/copy-creator.sock"))
+
+    for path in candidates:
+        if os.path.exists(path):
+            return path
+    return None
+
+
+def send_cmd(cmd: str) -> int:
+    """Send a command to the running app.  Returns 0 on success, 1 on failure."""
+    socket_path = find_socket()
+    if socket_path is None:
+        notify("Copy Creator 未运行", "请先启动 Copy Creator")
+        return 1
+
+    # Retry up to 3 times with a short delay (handles transient server
+    # restarts or socket re-binding).
+    last_err = ""
+    for attempt in range(3):
+        try:
+            sock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+            sock.settimeout(3)
+            sock.connect(socket_path)
+            sock.sendall(cmd.encode())
+            # Read the server's reply (drains the response so the server
+            # can close cleanly)
+            sock.shutdown(socket.SHUT_WR)  # signal we're done sending
+            reply = sock.recv(1024).decode().strip()
+            sock.close()
+
+            if reply in ("ok", "pong", ""):
+                return 0
+            if reply.startswith("error"):
+                notify("Copy Creator", f"错误: {reply}")
+                return 1
+            # Unexpected non-empty reply — log but treat as success
+            # since the command was sent.
+            return 0
+        except FileNotFoundError:
+            # Socket disappeared between find_socket and connect
+            socket_path = find_socket()
+            if socket_path is None:
+                notify("Copy Creator 未运行", "请先启动 Copy Creator")
+                return 1
+        except (ConnectionRefusedError, OSError) as e:
+            last_err = str(e)
+            if attempt < 2:
+                time.sleep(0.1)
+        except Exception as e:
+            last_err = str(e)
+            break
+
+    # All retries exhausted
+    notify("Copy Creator", f"无法连接: {last_err}" if last_err else "无法连接到应用")
+    return 1
+
+
+def notify(title: str, body: str) -> None:
+    """Show a desktop notification if notify-send is available."""
+    try:
+        import subprocess
+        subprocess.run(
+            ["notify-send", "--expire-time=3000", title, body],
+            timeout=3,
+            capture_output=True,
+        )
+    except Exception:
+        pass
+
+
+if __name__ == "__main__":
+    sys.exit(send_cmd(CMD))

@@ -26,6 +26,28 @@ export function StorageSection({
     { value: "3months", label: t("settings.retention3months") },
   ];
 
+  const handleChangeFolder = async () => {
+    try {
+      const folder = await invoke<string>("select_storage_folder");
+      if (!folder) return;
+
+      // Ask whether to migrate existing data
+      const migrate = window.confirm(t("settings.migratePrompt"));
+
+      if (migrate) {
+        await invoke("set_setting", { key: "storage_path", value: folder });
+      } else {
+        // Just update the path without migrating data
+        await invoke("set_setting_skip_migrate", { key: "storage_path", value: folder });
+      }
+
+      setStoragePath(folder);
+      setNeedRestart(true);
+    } catch {
+      // User cancelled folder picker
+    }
+  };
+
   return (
     <div className="settings-section">
       <div className="settings-section-title">{t("settings.storage")}</div>
@@ -36,14 +58,7 @@ export function StorageSection({
             <span className="settings-storage-path">{storagePath}</span>
             <button
               className="settings-storage-btn"
-              onClick={async () => {
-                try {
-                  const folder = await invoke<string>("select_storage_folder");
-                  await invoke("set_setting", { key: "storage_path", value: folder });
-                  setStoragePath(folder);
-                  setNeedRestart(true);
-                } catch {}
-              }}
+              onClick={handleChangeFolder}
             >
               {t("settings.changeFolder")}
             </button>

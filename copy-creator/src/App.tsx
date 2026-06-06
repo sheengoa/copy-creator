@@ -11,10 +11,10 @@ import { useSettingsStore } from "./stores/settingsStore";
 import { Icons } from "./components/Icons";
 import i18n from "./i18n";
 
-const PANEL_MAP: Record<string, { titleKey: string; component: React.ReactNode }> = {
-  clipboard: { titleKey: "tabs.clipboard", component: <ClipboardPage /> },
-  phrases: { titleKey: "tabs.phrases", component: <PhrasePage /> },
-  translate: { titleKey: "tabs.translate", component: <TranslationPage /> },
+const PANEL_MAP: Record<string, { titleKey: string; component: () => React.ReactNode }> = {
+  clipboard: { titleKey: "tabs.clipboard", component: () => <ClipboardPage /> },
+  phrases: { titleKey: "tabs.phrases", component: () => <PhrasePage /> },
+  translate: { titleKey: "tabs.translate", component: () => <TranslationPage /> },
 };
 
 const NAV_ITEMS = [
@@ -210,7 +210,7 @@ function App() {
           {isSettingsPanel ? (
             <SettingsContent embedded />
           ) : (
-            panelInfo?.component
+            panelInfo?.component()
           )}
         </div>
       </div>

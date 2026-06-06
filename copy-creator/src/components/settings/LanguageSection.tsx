@@ -1,4 +1,5 @@
 import { useTranslation } from "react-i18next";
+import { useSettingsStore } from "../../stores/settingsStore";
 
 interface LanguageSectionProps {
   localLang: string;
@@ -9,7 +10,14 @@ export function LanguageSection({
   localLang,
   setLocalLang,
 }: LanguageSectionProps) {
-  const { t } = useTranslation();
+  const { t, i18n } = useTranslation();
+  const setSetting = useSettingsStore((s) => s.setSetting);
+
+  const handleChangeLang = (lang: string) => {
+    setLocalLang(lang);
+    i18n.changeLanguage(lang);
+    setSetting("language", lang);
+  };
 
   return (
     <div className="settings-section">
@@ -20,13 +28,13 @@ export function LanguageSection({
           <div className="settings-lang-toggle">
             <button
               className={`lang-toggle-btn${localLang === "zh-CN" ? " active" : ""}`}
-              onClick={() => setLocalLang("zh-CN")}
+              onClick={() => handleChangeLang("zh-CN")}
             >
               ZH
             </button>
             <button
               className={`lang-toggle-btn${localLang === "en" ? " active" : ""}`}
-              onClick={() => setLocalLang("en")}
+              onClick={() => handleChangeLang("en")}
             >
               EN
             </button>

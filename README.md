@@ -93,8 +93,19 @@ sudo dpkg -i copy-creator_*.deb
 
 1. **启动应用**：安装后从应用菜单启动，或以悬浮窗形式显示
 2. **驻留托盘**：关闭窗口后，应用会自动最小化到系统托盘，继续在后台运行
-3. **唤起窗口**：使用全局快捷键（默认在设置中配置）快速唤起/隐藏窗口
-4. **快捷菜单**：设置独立的全局快捷键，在鼠标位置弹出快捷菜单，快速选择并粘贴
+3. **设置全局快捷键**（Ubuntu 原生方式）：
+
+   由于 Wayland 安全限制，全局快捷键需通过系统设置绑定。应用启动后会自动创建 Unix socket，外部脚本可控制应用。
+
+   **步骤**：打开 Ubuntu **设置 → 键盘 → 键盘快捷键 → 自定义快捷键**，添加：
+
+   | 名称 | 命令 | 建议快捷键 |
+   |:---|:---|:---|
+   | Copy Creator — 窗口 | `path/to/copy-creator-ctl show` | `Ctrl+Shift+V` |
+   | Copy Creator — 径向菜单 | `path/to/copy-creator-ctl radial` | `Ctrl+Shift+B` |
+
+   > `copy-creator-ctl` 脚本位于安装目录的 `scripts/` 文件夹中。复制到 `~/.local/bin/` 可直接使用。
+4. **快捷菜单**：触发径向菜单快捷键后，在鼠标位置弹出快捷菜单，可快速选择剪切板内容或短语粘贴
 
 ### 剪切板功能
 
@@ -138,7 +149,7 @@ sudo dpkg -i copy-creator_*.deb
 ```bash
 # Ubuntu 24.04
 sudo apt install libwebkit2gtk-4.1-dev libgtk-3-dev \
-  libayatana-appindicator3-dev libxdo-dev
+  libayatana-appindicator3-dev libxdo-dev xdotool xclip
 ```
 
 ### 本地开发

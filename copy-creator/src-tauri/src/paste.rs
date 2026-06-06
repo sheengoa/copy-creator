@@ -56,8 +56,67 @@ pub fn cache_image(path: String, rgba: Vec<u8>, width: u32, height: u32, png_byt
 use tauri::{AppHandle, Manager};
 use tauri_plugin_clipboard_manager::ClipboardExt;
 use enigo::{Enigo, Keyboard, Key, Direction, Settings};
+use std::process::Command;
 use std::thread;
 use std::time::Duration;
+
+/// Detect whether we are running under Wayland.
+fn is_wayland() -> bool {
+    std::env::var("WAYLAND_DISPLAY")
+        .map(|v| !v.is_empty())
+        .unwrap_or(false)
+}
+
+/// Try to locate an executable in PATH.
+fn which(cmd: &str) -> Option<String> {
+    Command::new("which")
+        .arg(cmd)
+        .output()
+        .ok()
+        .filter(|o| o.status.success())
+        .map(|o| String::from_utf8_lossy(&o.stdout).trim().to_string())
+}
+
+/// Write a URI list to the system clipboard so that Linux file managers
+/// recognise the paste as a file operation (rather than plain text).
+///
+/// On X11 this uses `xclip -t text/uri-list`; on Wayland it uses
+/// `wl-copy -t text/uri-list`.  Falls back to writing plain text via
+/// the Tauri clipboard plugin when neither tool is available.
+fn write_uri_list(handle: &AppHandle, uri: &str) {
+    let (cmd, args): (&str, &[&str]) = if is_wayland() {
+        ("wl-copy", &["-t", "text/uri-list"])
+    } else {
+        ("xclip", &["-selection", "clipboard", "-t", "text/uri-list"])
+    };
+
+    let result = Command::new(cmd)
+        .args(args)
+        .stdin(std::process::Stdio::piped())
+        .spawn()
+        .and_then(|mut child| {
+            use std::io::Write;
+            if let Some(mut stdin) = child.stdin.take() {
+                let _ = stdin.write_all(uri.as_bytes());
+            }
+            child.wait()
+        });
+
+    match result {
+        Ok(status) if status.success() => {
+            log::info!("paste_file: wrote text/uri-list via {}", cmd);
+        }
+        _ => {
+            log::warn!(
+                "paste_file: {} not available, falling back to plain-text URI; \
+                 install xclip (X11) or wl-clipboard (Wayland) for proper file paste",
+                cmd
+            );
+            // Last-resort fallback: plain-text file:// URI
+            let _ = handle.clipboard().write_text(uri);
+        }
+    }
+}
 
 fn paste_with_defocus(app: &AppHandle) -> Result<(), String> {
     // Hide radial popup if visible
@@ -77,14 +136,50 @@ fn paste_with_defocus(app: &AppHandle) -> Result<(), String> {
     // Simple settle time before paste (no foreground window tracking on Linux)
     thread::sleep(Duration::from_millis(200));
 
-    let mut enigo = Enigo::new(&Settings::default()).map_err(|e| format!("enigo init: {}", e))?;
-
-    // Ctrl+V via enigo (Linux uses Key::Unicode for letter keys)
-    enigo.key(Key::Control, Direction::Press).map_err(|e| e.to_string())?;
-    thread::sleep(Duration::from_millis(30));
-    enigo.key(Key::Unicode('v'), Direction::Click).map_err(|e| e.to_string())?;
-    thread::sleep(Duration::from_millis(10));
-    enigo.key(Key::Control, Direction::Release).map_err(|e| e.to_string())?;
+    // Simulate Ctrl+V — try enigo (X11/XWayland) first, then CLI fallback
+    match Enigo::new(&Settings::default()) {
+        Ok(mut enigo) => {
+            if let Err(e) = enigo.key(Key::Control, Direction::Press) {
+                log::warn!("enigo ctrl press failed: {}", e);
+            }
+            thread::sleep(Duration::from_millis(30));
+            if let Err(e) = enigo.key(Key::Unicode('v'), Direction::Click) {
+                log::warn!("enigo v click failed: {}", e);
+            }
+            thread::sleep(Duration::from_millis(10));
+            if let Err(e) = enigo.key(Key::Control, Direction::Release) {
+                log::warn!("enigo ctrl release failed: {}", e);
+            }
+        }
+        Err(e) => {
+            log::warn!("enigo init failed ({}), trying CLI fallback", e);
+            let result = if is_wayland() {
+                which("ydotool")
+                    .and_then(|_| {
+                        Command::new("ydotool")
+                            .args(["key", "29:1", "47:1", "47:0", "29:0"])
+                            .status().ok()
+                    })
+                    .or_else(|| {
+                        which("wtype").and_then(|_| {
+                            Command::new("wtype")
+                                .args(["-M", "ctrl", "-k", "v"])
+                                .status().ok()
+                        })
+                    })
+            } else {
+                which("xdotool").and_then(|_| {
+                    Command::new("xdotool")
+                        .args(["key", "--clearmodifiers", "ctrl+v"])
+                        .status().ok()
+                })
+            };
+            match result {
+                Some(status) if status.success() => {}
+                _ => log::error!("paste_with_defocus: no keyboard simulation method available; install xdotool (X11) or ydotool/wtype (Wayland)"),
+            }
+        }
+    }
 
     Ok(())
 }
@@ -197,12 +292,10 @@ pub fn paste_file(app: AppHandle, path: String) -> Result<(), String> {
     std::thread::spawn(move || {
         let _guard = PasteGuard;
 
-        // Write as file:// URI (standard text/uri-list format on Linux)
+        // Write file:// URI as text/uri-list MIME type so file managers
+        // recognise the paste as a file operation.
         let uri = format!("file://{}", path);
-        if let Err(e) = handle.clipboard().write_text(&uri) {
-            log::error!("paste_file: write clipboard error: {}", e);
-            return;
-        }
+        write_uri_list(&handle, &uri);
 
         crate::clipboard::sync_monitor_cache(&handle);
         paste_with_defocus(&handle).ok();

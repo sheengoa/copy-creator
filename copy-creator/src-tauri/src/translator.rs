@@ -190,7 +190,7 @@ async fn translate_google(
                 ("dt", "t"),
                 ("q", text),
             ])
-            .header("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36")
+            .header("User-Agent", "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36")
             .send().await.map_err(|e| fmt_reqwest_error(&e))?;
 
         let status = resp.status();
@@ -218,7 +218,7 @@ async fn translate_google(
     let resp = client
         .post("https://translation.googleapis.com/language/translate/v2")
         .query(&[("key", api_key.as_str())])
-        .header("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36")
+        .header("User-Agent", "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36")
         .json(&serde_json::json!({
             "q": text,
             "target": target_lang,

@@ -138,7 +138,7 @@ sudo dpkg -i copy-creator_*.deb
 ```bash
 # Ubuntu 24.04
 sudo apt install libwebkit2gtk-4.1-dev libgtk-3-dev \
-  libayatana-appindicator3-dev libxdo-dev
+  libayatana-appindicator3-dev libxdo-dev xdotool xclip
 ```
 
 ### Local Development
