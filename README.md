@@ -27,6 +27,8 @@
 
 Copy Creator 是一款轻量级的 Linux 桌面效率工具，以悬浮窗形式呈现，关闭后自动驻留系统托盘。它集成了剪切板历史管理、快捷短语和翻译三大核心功能，帮助用户在日常工作中提升文本处理效率。
 
+> **致谢**：本项目 Fork 自 [hu-qi-jia/copy-creator](https://github.com/hu-qi-jia/copy-creator)。原项目为 Windows 平台版本，本仓库在其基础上进行了完整的 Linux 适配重写，包括但不限于：移除全部 Windows API 调用、Wayland/X11 双协议支持、Ubuntu 原生快捷键集成、剪切板兼容修复等。感谢原作者的开源贡献！
+
 ## 主要功能
 
 ### 📋 剪切板管理
@@ -197,7 +199,10 @@ copy-creator/
 
 如果觉得这个项目对你有帮助，欢迎点个 Star 支持一下！
 
-感谢baihejiangnan的贡献！
+---
 
+Forked from [hu-qi-jia/copy-creator](https://github.com/hu-qi-jia/copy-creator) · 原项目作者 Windows 版本 · 本仓库为 Linux 适配版
+
+感谢 [baihejiangnan](https://github.com/baihejiangnan) 的贡献！
 
 </div>

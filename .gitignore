@@ -1,4 +1,5 @@
 releases/
+target/
 .trae/
 .claude/settings.local.json
 .agents/
