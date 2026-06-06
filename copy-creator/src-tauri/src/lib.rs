@@ -1,5 +1,6 @@
 mod clipboard;
 mod db;
+mod ipc;
 mod paste;
 mod shortcut;
 mod translator;
@@ -56,8 +57,11 @@ pub fn run() {
             db::init_db(app.handle())?;
             db::prune_old_records(app.handle()).ok();
 
-            // Always start with light theme
-            let _ = db::set_setting(app.handle().clone(), "theme".to_string(), "light".to_string());
+            // Restore persisted theme; DB init defaults to light, so
+            // the first-ever launch will be light mode.
+            let current_theme = db::get_setting_sync(app.handle(), "theme")
+                .unwrap_or_else(|| "light".to_string());
+            log::info!("Starting with theme: {}", current_theme);
 
             // Repair autostart registry entry to ensure --hidden arg is present
             let autostart = app.autolaunch();
@@ -77,13 +81,18 @@ pub fn run() {
             app.handle().manage(tray::TrayState { tray: std::sync::Mutex::new(None) });
             tray::create_tray(app.handle())?;
 
-            shortcut::install_mouse_hook(app.handle());
+            shortcut::init_radial_menu_state(app.handle());
+
+            // Start Unix-socket IPC so external scripts can control the app
+            // (used with Ubuntu Settings → Keyboard → Custom Shortcuts)
+            let ipc_socket = ipc::start_ipc_server(app.handle().clone());
+            log::info!("IPC socket ready — use: echo show | nc -U {}", ipc_socket.display());
 
             // Create hidden radial menu popup window
             {
                 use tauri::WebviewWindowBuilder;
                 use tauri::WebviewUrl;
-                let radial = WebviewWindowBuilder::new(
+                let _ = WebviewWindowBuilder::new(
                     app,
                     "radial-menu",
                     WebviewUrl::App("index.html?radial=1".into()),
@@ -91,15 +100,14 @@ pub fn run() {
                 .title("")
                 .inner_size(300.0, 420.0)
                 .decorations(false)
-                .transparent(true)
+                .transparent(false)
                 .always_on_top(true)
                 .visible(false)
-                .shadow(true)
+                .shadow(false)
                 .skip_taskbar(true)
                 .resizable(false)
                 .build()?;
-                let _ = radial.set_background_color(Some(tauri::window::Color(0, 0, 0, 0)));
-                log::info!("Radial menu popup window created");
+                log::info!("Radial menu popup window created (opaque, rounded via CSS)");
             }
 
             if let Ok(key) = db::get_setting(app.handle().clone(), "shortcut_key".to_string()) {
@@ -133,6 +141,7 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             db::get_clipboard_records,
             db::get_clipboard_record_content,
+            db::delete_all_clipboard_records,
             db::delete_clipboard_record,
             db::get_phrase_groups,
             db::create_phrase_group,
@@ -147,6 +156,7 @@ pub fn run() {
             db::get_setting,
             db::get_all_settings,
             db::set_setting,
+            db::set_setting_skip_migrate,
             db::set_settings_batch,
             paste::paste_text,
             paste::paste_image,

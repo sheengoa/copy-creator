@@ -52,6 +52,8 @@
     "restartHint": "Storage path changed, restart required to take effect",
     "restartNow": "Restart Now",
     "changeFolder": "Change",
+    "migrateTitle": "Migrate Data",
+    "migratePrompt": "Move existing clipboard records, phrases, and settings to the new location?\n\nChoose \"Migrate\": data will be copied to the new location\nChoose \"Cancel\": only update the path, existing data stays",
     "translation": "Translation"
   },
   "translate": {
@@ -73,7 +75,8 @@
     "image": "Image",
     "link": "Link",
     "file": "File",
-    "apikey": "API Key",
+    "deleteAll": "Delete All",
+    "confirmDeleteAll": "Delete all clipboard records? This action cannot be undone.",
     "apiKeyNote": "Note",
     "apiKeyNotePlaceholder": "Note (max 10 chars)",
     "apiKeySaving": "Saving..."

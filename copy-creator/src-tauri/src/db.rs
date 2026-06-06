@@ -573,6 +573,16 @@ pub fn get_clipboard_record_content(app: AppHandle, id: String) -> Result<String
 }
 
 #[tauri::command]
+pub fn delete_all_clipboard_records(app: AppHandle) -> Result<(), String> {
+    let state = app.state::<DbState>();
+    let conn = state.conn.lock().map_err(|e| e.to_string())?;
+    conn.execute("DELETE FROM clipboard_records", [])
+        .map_err(|e| e.to_string())?;
+    let _ = app.emit("clipboard-cleared", ());
+    Ok(())
+}
+
+#[tauri::command]
 pub fn delete_clipboard_record(app: AppHandle, id: String) -> Result<(), String> {
     let image_content: Option<String> = {
         let state = app.state::<DbState>();
@@ -912,7 +922,18 @@ pub fn set_setting(app: AppHandle, key: String, value: String) -> Result<(), Str
     if key == "storage_path" {
         return migrate_storage(&app, &value);
     }
+    set_setting_inner(&app, &key, &value)
+}
 
+/// Like `set_setting` but never triggers storage migration — even for
+/// `storage_path`.  Used when the user wants to change the storage
+/// directory without moving existing data.
+#[tauri::command]
+pub fn set_setting_skip_migrate(app: AppHandle, key: String, value: String) -> Result<(), String> {
+    set_setting_inner(&app, &key, &value)
+}
+
+fn set_setting_inner(app: &AppHandle, key: &str, value: &str) -> Result<(), String> {
     let state = app.state::<DbState>();
     let conn = state.conn.lock().map_err(|e| e.to_string())?;
     conn.execute(

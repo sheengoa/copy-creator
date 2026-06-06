@@ -4,7 +4,7 @@ import { listen } from "@tauri-apps/api/event";
 
 type UnlistenFn = () => void;
 
-export const CLIP_TYPES = ["all", "text", "image", "link", "file", "apikey"] as const;
+export const CLIP_TYPES = ["all", "text", "image", "link", "file"] as const;
 export type ClipType = (typeof CLIP_TYPES)[number];
 
 interface ApiKeyLabel {
@@ -47,6 +47,7 @@ interface ClipboardState {
   loadRecords: (append?: boolean) => Promise<void>;
   updateRecordLabel: (id: string, label: ApiKeyLabel) => void;
   deleteRecord: (id: string) => Promise<void>;
+  deleteAllRecords: () => Promise<void>;
   pasteRecord: (record: ClipboardRecord) => Promise<void>;
   getRecordContent: (record: ClipboardRecord) => Promise<string>;
   getThumbnail: (record: Pick<ClipboardRecord, "id" | "content">) => Promise<string>;
@@ -128,6 +129,10 @@ export const useClipboardStore = create<ClipboardState>((set, get) => ({
       }));
     });
 
+    listen("clipboard-cleared", () => {
+      set({ records: [], thumbnailCache: {}, imageCache: {} });
+    });
+
     get().loadRecords();
   },
 
@@ -185,6 +190,15 @@ export const useClipboardStore = create<ClipboardState>((set, get) => ({
       });
     } catch (e) {
       console.error("Failed to delete record:", e);
+    }
+  },
+
+  deleteAllRecords: async () => {
+    try {
+      await invoke("delete_all_clipboard_records");
+      set({ records: [], thumbnailCache: {}, imageCache: {} });
+    } catch (e) {
+      console.error("Failed to delete all records:", e);
     }
   },
 

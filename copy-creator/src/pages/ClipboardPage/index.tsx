@@ -6,7 +6,7 @@ import SearchInput from "../../components/SearchInput";
 import { ClipboardCard } from "./ClipboardCard";
 import { TYPE_META } from "./utils";
 
-type ClipType = "all" | "text" | "image" | "link" | "file" | "apikey";
+type ClipType = "all" | "text" | "image" | "link" | "file";
 
 TYPE_META.text.icon = Icons.clipboard;
 TYPE_META.image.icon = Icons.image;
@@ -26,6 +26,7 @@ export default function ClipboardPage() {
     setCategory,
     loadRecords,
     deleteRecord,
+    deleteAllRecords,
     pasteRecord,
   } = useClipboardStore();
 
@@ -38,7 +39,6 @@ export default function ClipboardPage() {
     { key: "image", label: t("clipboard.image") },
     { key: "link", label: t("clipboard.link") },
     { key: "file", label: t("clipboard.file") },
-    { key: "apikey", label: t("clipboard.apikey") },
   ];
 
   const labels: Record<string, string> = useMemo(
@@ -83,7 +83,6 @@ export default function ClipboardPage() {
 
   const filtered = useMemo(() => {
     if (category === "all") return records;
-    if (category === "apikey") return records.filter((r) => r.is_api_key);
     return records.filter((r) => r.type === category);
   }, [records, category]);
 
@@ -125,6 +124,19 @@ export default function ClipboardPage() {
             {c.label}
           </button>
         ))}
+        <div className="clipboard-categories-spacer" />
+        {records.length > 0 && (
+          <button
+            className="category-chip category-chip-danger"
+            onClick={() => {
+              if (confirm(t("clipboard.confirmDeleteAll"))) {
+                deleteAllRecords();
+              }
+            }}
+          >
+            {t("clipboard.deleteAll")}
+          </button>
+        )}
       </div>
 
       {loading && records.length === 0 ? (

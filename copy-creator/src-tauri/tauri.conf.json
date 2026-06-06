@@ -23,8 +23,8 @@
         "alwaysOnTop": false,
         "visible": false,
         "center": true,
-        "transparent": true,
-        "shadow": true
+        "transparent": false,
+        "shadow": false
       }
     ],
     "security": {
