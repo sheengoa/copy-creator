@@ -35,3 +35,9 @@ image = { version = "0.25", default-features = false, features = ["png"] }
 tauri-plugin-process = "2.3.1"
 tauri-plugin-autostart = "2.5.1"
 arboard = { version = "3", features = ["image-data"] }
+
+[profile.release]
+strip = true
+lto = true
+codegen-units = 1
+opt-level = "s"

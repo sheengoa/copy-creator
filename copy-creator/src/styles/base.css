@@ -1,42 +1,3 @@
-/* === PingFang Font === */
-@font-face {
-  font-family: 'PingFang';
-  src: url('/字体/PingFang Regular.ttf') format('truetype');
-  font-weight: 400;
-  font-style: normal;
-  font-display: swap;
-}
-@font-face {
-  font-family: 'PingFang';
-  src: url('/字体/PingFang Medium.ttf') format('truetype');
-  font-weight: 500;
-  font-style: normal;
-  font-display: swap;
-}
-@font-face {
-  font-family: 'PingFang';
-  src: url('/字体/PingFang Semibold.ttf') format('truetype');
-  font-weight: 600;
-  font-style: normal;
-  font-display: swap;
-}
-@font-face {
-  font-family: 'PingFang';
-  src: url('/字体/PingFang Light.ttf') format('truetype');
-  font-weight: 300;
-  font-style: normal;
-  font-display: swap;
-}
-
-/* === SF Pro Display Black (Brand) === */
-@font-face {
-  font-family: 'SF Pro Display';
-  src: url('/字体/SF-Pro-Display-Black.otf') format('opentype');
-  font-weight: 800;
-  font-style: normal;
-  font-display: swap;
-}
-
 /* === Design Tokens === */
 :root {
   --bg-primary: #F2F2F7;
@@ -58,9 +19,9 @@
   --header-height: 44px;
 
   /* Typography */
-  --font: "PingFang", -apple-system, BlinkMacSystemFont, "Segoe UI", "Helvetica Neue", sans-serif;
-  --font-mono: "SF Mono", "Menlo", "Consolas", monospace;
-  --font-brand: "SF Pro Display", "PingFang", -apple-system, BlinkMacSystemFont, sans-serif;
+  --font: "Noto Sans SC", "Noto Sans CJK SC", "PingFang SC", "Microsoft YaHei", "WenQuanYi Micro Hei", -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  --font-mono: "Noto Sans Mono", "Cascadia Code", "Fira Code", "SF Mono", "Menlo", "Consolas", monospace;
+  --font-brand: "Noto Sans SC", "Noto Sans CJK SC", "PingFang SC", -apple-system, BlinkMacSystemFont, sans-serif;
   --text-xs: 10.5px;
   --text-sm: 12px;
   --text-base: 14px;
