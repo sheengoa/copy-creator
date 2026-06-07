@@ -583,6 +583,69 @@ pub fn delete_all_clipboard_records(app: AppHandle) -> Result<(), String> {
 }
 
 #[tauri::command]
+pub fn delete_records_by_type(app: AppHandle, record_type: String) -> Result<(), String> {
+    let image_contents: Vec<String>;
+
+    {
+        let state = app.state::<DbState>();
+        let conn = state.conn.lock().map_err(|e| e.to_string())?;
+
+        // Collect image paths before deletion for file cleanup
+        if record_type == "image" {
+            let mut stmt = conn
+                .prepare("SELECT content FROM clipboard_records WHERE type = ?1")
+                .map_err(|e| e.to_string())?;
+            let rows = stmt
+                .query_map(rusqlite::params![record_type], |row| {
+                    row.get::<_, String>(0)
+                })
+                .map_err(|e| e.to_string())?;
+            image_contents = rows.filter_map(|r| r.ok()).collect();
+        } else {
+            image_contents = Vec::new();
+        }
+
+        conn.execute(
+            "DELETE FROM clipboard_records WHERE type = ?1",
+            rusqlite::params![record_type],
+        )
+        .map_err(|e| e.to_string())?;
+    }
+
+    // Clean up image files if no remaining records reference them
+    if !image_contents.is_empty() {
+        let base_dir = get_storage_dir(&app);
+        let state = app.state::<DbState>();
+        let conn = state.conn.lock().map_err(|e| e.to_string())?;
+        for content in &image_contents {
+            let still_referenced: bool = conn
+                .query_row(
+                    "SELECT COUNT(*) > 0 FROM clipboard_records WHERE content = ?1",
+                    rusqlite::params![content],
+                    |row| row.get(0),
+                )
+                .unwrap_or(false);
+            if still_referenced {
+                continue;
+            }
+            let file_path = base_dir.join(content);
+            let _ = std::fs::remove_file(&file_path);
+            if let Some(filename) = file_path.file_name() {
+                let thumb_path = file_path
+                    .parent()
+                    .unwrap_or(&base_dir)
+                    .join("thumbs")
+                    .join(filename);
+                let _ = std::fs::remove_file(&thumb_path);
+            }
+        }
+    }
+
+    // Notify frontend that records have changed (partial update — not clipboard-cleared)
+    Ok(())
+}
+
+#[tauri::command]
 pub fn delete_clipboard_record(app: AppHandle, id: String) -> Result<(), String> {
     let image_content: Option<String> = {
         let state = app.state::<DbState>();

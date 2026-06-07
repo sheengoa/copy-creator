@@ -196,23 +196,22 @@ fn import_image_file(app: &AppHandle, file_path: &str) -> bool {
 /// Skips insertion only if the most recent record has identical type and content
 /// AND was created within the last 2 seconds (debounce window).
 fn insert_and_emit(app: &AppHandle, record_type: &str, content: &str) {
-    let one_second_ago = chrono::Utc::now() - chrono::Duration::seconds(1);
-    let cutoff = one_second_ago.to_rfc3339();
+    let two_seconds_ago = chrono::Utc::now() - chrono::Duration::seconds(2);
+    let cutoff = two_seconds_ago.to_rfc3339();
 
+    // Check ANY recent record with same type+content (not just the last one)
+    // so that batches of files/images don't circumvent deduplication.
     let is_duplicate: bool = {
         let state = app.state::<crate::db::DbState>();
         let x = match state.conn.lock() {
-            Ok(conn) => conn.query_row(
-                "SELECT type, content, created_at FROM clipboard_records ORDER BY created_at DESC LIMIT 1",
-                [],
-                |row| {
-                    let last_type: String = row.get(0)?;
-                    let last_content: String = row.get(1)?;
-                    let last_created: String = row.get(2)?;
-                    Ok(last_type == record_type && last_content == content && last_created >= cutoff)
-                },
-            )
-            .unwrap_or(false),
+            Ok(conn) => conn
+                .query_row(
+                    "SELECT COUNT(*) FROM clipboard_records WHERE type = ?1 AND content = ?2 AND created_at >= ?3",
+                    rusqlite::params![record_type, content, cutoff],
+                    |row| row.get::<_, i64>(0),
+                )
+                .map(|count| count > 0)
+                .unwrap_or(false),
             Err(_) => false,
         };
         x
@@ -492,14 +491,8 @@ pub fn start_monitor(app: &AppHandle) -> Result<(), Box<dyn std::error::Error>> 
                         {
                             let mut cached = LAST_CLIPBOARD_FILES_KEY.lock().unwrap();
                             if key == *cached {
-                                for file_path in &files {
-                                    if file_path.trim().is_empty() { continue; }
-                                    if is_previewable_image_file(file_path) || is_image_file(file_path) {
-                                        import_image_file(&handle, file_path);
-                                        continue;
-                                    }
-                                    insert_and_emit(&handle, "file", file_path);
-                                }
+                                // File list unchanged — skip to avoid re-inserting
+                                // the same images/files on every poll cycle.
                                 continue;
                             }
                             *cached = key.clone();

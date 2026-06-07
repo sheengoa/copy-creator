@@ -27,6 +27,7 @@ export default function ClipboardPage() {
     loadRecords,
     deleteRecord,
     deleteAllRecords,
+    deleteRecordsByType,
     pasteRecord,
   } = useClipboardStore();
 
@@ -129,12 +130,21 @@ export default function ClipboardPage() {
           <button
             className="category-chip category-chip-danger"
             onClick={() => {
-              if (confirm(t("clipboard.confirmDeleteAll"))) {
-                deleteAllRecords();
+              if (category === "all") {
+                if (confirm(t("clipboard.confirmDeleteAll"))) {
+                  deleteAllRecords();
+                }
+              } else {
+                const typeLabel = t(`clipboard.${category}`);
+                if (confirm(t("clipboard.confirmDeleteType", { type: typeLabel }))) {
+                  deleteRecordsByType(category);
+                }
               }
             }}
           >
-            {t("clipboard.deleteAll")}
+            {category === "all"
+              ? t("clipboard.deleteAll")
+              : t("clipboard.deleteType", { type: t(`clipboard.${category}`) })}
           </button>
         )}
       </div>

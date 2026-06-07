@@ -23,6 +23,42 @@ function formatTime(dateStr: string): string {
   return `${month}/${day} ${hours}:${minutes}`;
 }
 
+function isTruncatedItem(itemId: string): boolean {
+  const { records } = useClipboardStore.getState();
+  const record = records.find((r) => r.id === itemId);
+  if (record) {
+    if (record.type === "image" || record.type === "file") return false;
+    const text = record.is_api_key ? (record.key_preview || record.content) : record.content;
+    return record.content_truncated === true || (text?.length ?? 0) > 300;
+  }
+  const { phrases } = usePhraseStore.getState();
+  const phrase = phrases.find((p) => p.id === itemId);
+  if (phrase) {
+    return phrase.content.length > 300;
+  }
+  return false;
+}
+
+async function fetchFullContent(itemId: string): Promise<string> {
+  const { records, getRecordContent } = useClipboardStore.getState();
+  const record = records.find((r) => r.id === itemId);
+  if (record) {
+    if (record.content_truncated) {
+      return getRecordContent(record);
+    }
+    if (record.is_api_key) {
+      return record.key_preview || record.content;
+    }
+    return record.content;
+  }
+  const { phrases } = usePhraseStore.getState();
+  const phrase = phrases.find((p) => p.id === itemId);
+  if (phrase) {
+    return phrase.content;
+  }
+  return "";
+}
+
 function ImageThumb({ recordId }: { recordId: string }) {
   const [src, setSrc] = useState("");
   const { records, getThumbnail } = useClipboardStore();
@@ -61,6 +97,12 @@ export default function RadialMenu() {
   const activeTabRef = useRef<TabKey>("clipboard");
   const clipboardCategoryRef = useRef<ClipType>("all");
   const phraseGroupIdRef = useRef<string | null>(null);
+
+  // Tooltip state for long-hover truncated content preview
+  const [tooltipItemId, setTooltipItemId] = useState<string | null>(null);
+  const [tooltipContent, setTooltipContent] = useState<string>('');
+  const tooltipTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const tooltipItemElRef = useRef<HTMLElement | null>(null);
 
   useEffect(() => { visibleRef.current = visible; }, [visible]);
   useEffect(() => { selectedItemIdRef.current = selectedItemId; }, [selectedItemId]);
@@ -177,6 +219,13 @@ export default function RadialMenu() {
     selectedItemIdRef.current = null;
     navLeaveRef.current();
     catLeaveRef.current();
+    // Clear tooltip
+    if (tooltipTimerRef.current) {
+      clearTimeout(tooltipTimerRef.current);
+      tooltipTimerRef.current = null;
+    }
+    setTooltipItemId(null);
+    setTooltipContent("");
   }, []);
 
   const updateHoverFromPoint = useCallback((cssX: number, cssY: number) => {
@@ -199,6 +248,26 @@ export default function RadialMenu() {
       setSelectedItemId(id);
       navLeaveRef.current();
       catLeaveRef.current();
+
+      // Tooltip: start 3s timer for truncated items
+      if (tooltipTimerRef.current) {
+        clearTimeout(tooltipTimerRef.current);
+        tooltipTimerRef.current = null;
+      }
+      setTooltipItemId(null);
+      setTooltipContent("");
+
+      if (id && isTruncatedItem(id)) {
+        tooltipItemElRef.current = itemEl as HTMLElement;
+        tooltipTimerRef.current = setTimeout(async () => {
+          const full = await fetchFullContent(id);
+          // Only show tooltip if still hovering the same item
+          if (selectedItemIdRef.current === id) {
+            setTooltipContent(full);
+            setTooltipItemId(id);
+          }
+        }, 3000);
+      }
     } else if (navEl) {
       const key = navEl.getAttribute("data-radial-nav");
       if (key && key !== activeTabRef.current) {
@@ -227,6 +296,13 @@ export default function RadialMenu() {
       setSelectedItemId(null);
       navLeaveRef.current();
       catLeaveRef.current();
+      // Clear tooltip timer when mouse leaves all items
+      if (tooltipTimerRef.current) {
+        clearTimeout(tooltipTimerRef.current);
+        tooltipTimerRef.current = null;
+      }
+      setTooltipItemId(null);
+      setTooltipContent("");
     }
   }, []);
 
@@ -279,7 +355,7 @@ export default function RadialMenu() {
       updateHoverFromPoint(e.clientX, e.clientY);
     };
 
-    // Click: select item or dismiss if clicked outside popup
+    // Click: select item to paste, or dismiss if clicked on empty space
     const handleClick = (e: MouseEvent) => {
       if (!visibleRef.current) return;
       const itemEl = (e.target as HTMLElement).closest("[data-radial-item-id]");
@@ -290,12 +366,11 @@ export default function RadialMenu() {
           return;
         }
       }
-      // Clicked outside the popup area — dismiss
-      const popup = (e.target as HTMLElement).closest(".radial-menu-popup");
-      if (!popup) {
-        resetState();
-        getCurrentWindow().hide();
-      }
+      // Clicked on empty space (not on an item) — dismiss the radial menu
+      // Note: clicks on nav tabs / category chips are intercepted by React
+      // with stopPropagation, so they never reach this handler.
+      resetState();
+      getCurrentWindow().hide();
     };
 
     // Keyboard: Escape to dismiss
@@ -471,6 +546,15 @@ export default function RadialMenu() {
             ))
           )}
         </div>
+
+        {/* Long-hover tooltip for truncated content */}
+        {tooltipItemId && tooltipContent && (
+          <div className="radial-menu-tooltip">
+            <div className="radial-menu-tooltip-content">
+              {tooltipContent}
+            </div>
+          </div>
+        )}
       </div>
     </div>
   );

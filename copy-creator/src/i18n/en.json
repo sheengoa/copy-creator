@@ -85,6 +85,8 @@
     "file": "File",
     "deleteAll": "Delete All",
     "confirmDeleteAll": "Delete all clipboard records? This action cannot be undone.",
+    "deleteType": "Delete {{type}}",
+    "confirmDeleteType": "Delete all {{type}} records? This action cannot be undone.",
     "apiKeyNote": "Note",
     "apiKeyNotePlaceholder": "Note (max 10 chars)",
     "apiKeySaving": "Saving..."
