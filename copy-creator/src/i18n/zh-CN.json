@@ -85,6 +85,8 @@
     "file": "文件",
     "deleteAll": "全部删除",
     "confirmDeleteAll": "确定要删除所有剪切板记录吗？此操作不可撤销。",
+    "deleteType": "删除{{type}}",
+    "confirmDeleteType": "确定要删除所有{{type}}记录吗？此操作不可撤销。",
     "apiKeyNote": "备注",
     "apiKeyNotePlaceholder": "备注（最多10字）",
     "apiKeySaving": "保存中..."

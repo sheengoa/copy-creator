@@ -142,6 +142,7 @@ pub fn run() {
             db::get_clipboard_records,
             db::get_clipboard_record_content,
             db::delete_all_clipboard_records,
+            db::delete_records_by_type,
             db::delete_clipboard_record,
             db::get_phrase_groups,
             db::create_phrase_group,
