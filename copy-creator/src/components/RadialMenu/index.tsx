@@ -322,7 +322,13 @@ export default function RadialMenu() {
     getCurrentWindow().hide();
   }, [resetState]);
 
-  // Main event setup: show/hide and interaction
+  // Popup click handler: dismiss when clicking on empty space.
+  // Items, nav tabs, and category chips all call stopPropagation on
+  // their own onClick, so this only fires for truly unhandled clicks.
+  const handlePopupClick = useCallback(() => {
+    resetState();
+    getCurrentWindow().hide();
+  }, [resetState]);
   useEffect(() => {
     let unlisteners: UnlistenFn[] = [];
 
@@ -353,24 +359,6 @@ export default function RadialMenu() {
     const handleMouseMove = (e: MouseEvent) => {
       if (!visibleRef.current) return;
       updateHoverFromPoint(e.clientX, e.clientY);
-    };
-
-    // Click: select item to paste, or dismiss if clicked on empty space
-    const handleClick = (e: MouseEvent) => {
-      if (!visibleRef.current) return;
-      const itemEl = (e.target as HTMLElement).closest("[data-radial-item-id]");
-      if (itemEl) {
-        const itemId = itemEl.getAttribute("data-radial-item-id");
-        if (itemId) {
-          handleItemPaste(itemId);
-          return;
-        }
-      }
-      // Clicked on empty space (not on an item) — dismiss the radial menu
-      // Note: clicks on nav tabs / category chips are intercepted by React
-      // with stopPropagation, so they never reach this handler.
-      resetState();
-      getCurrentWindow().hide();
     };
 
     // Keyboard: Escape to dismiss
@@ -412,7 +400,6 @@ export default function RadialMenu() {
     };
 
     document.addEventListener("mousemove", handleMouseMove);
-    document.addEventListener("click", handleClick);
     document.addEventListener("keydown", handleKeyDown);
     document.addEventListener("wheel", handleWheel, { passive: false });
     window.addEventListener("blur", handleBlur);
@@ -420,12 +407,11 @@ export default function RadialMenu() {
     return () => {
       unlisteners.forEach((fn) => fn());
       document.removeEventListener("mousemove", handleMouseMove);
-      document.removeEventListener("click", handleClick);
       document.removeEventListener("keydown", handleKeyDown);
       document.removeEventListener("wheel", handleWheel);
       window.removeEventListener("blur", handleBlur);
     };
-  }, [resetState, updateHoverFromPoint, handleItemPaste]);
+  }, [resetState, updateHoverFromPoint]);
 
   const records = useClipboardStore((s) => s.records);
   const phraseGroups = usePhraseStore((s) => s.groups);
@@ -482,7 +468,7 @@ export default function RadialMenu() {
 
   return (
     <div className={`radial-menu-overlay${visible ? "" : " radial-menu-hidden"}`}>
-      <div className="radial-menu-popup">
+      <div className="radial-menu-popup" onClick={handlePopupClick}>
         <div className="radial-menu-nav">
           {(["clipboard", "phrases"] as TabKey[]).map((tab) => (
             <button
@@ -526,6 +512,10 @@ export default function RadialMenu() {
                 key={item.id}
                 className={`radial-menu-item ${selectedItemId === item.id ? "selected" : ""}`}
                 data-radial-item-id={item.id}
+                onClick={(e) => {
+                  e.stopPropagation();
+                  handleItemPaste(item.id);
+                }}
               >
                 {item.type === "image" ? (
                   <ImageThumb recordId={item.id} />
