@@ -1,7 +1,6 @@
 import { create } from "zustand";
 import { invoke } from "@tauri-apps/api/core";
 import { emit } from "@tauri-apps/api/event";
-import { enable, disable, isEnabled } from "@tauri-apps/plugin-autostart";
 
 type ThemeMode = "light" | "dark";
 
@@ -26,7 +25,7 @@ interface SettingsState {
   loadSettings: () => Promise<void>;
   setSetting: (key: string, value: string) => Promise<void>;
   setSettingsBatch: (settings: Record<string, string>) => Promise<void>;
-  setAutostart: (enabled: boolean) => Promise<void>;
+  setAutostart: (enabled: boolean) => Promise<boolean>;
 }
 
 export const useSettingsStore = create<SettingsState>((set, get) => ({
@@ -75,11 +74,11 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
         radialMenuEnabled: settings.radial_menu_enabled !== "0",
       });
 
-      // Read autostart state from the OS (plugin)
+      // Read autostart state from the .desktop file
       try {
-        const auto = await isEnabled();
+        const auto = await invoke<boolean>("is_autostart_enabled");
         set({ autostartEnabled: auto });
-      } catch { /* plugin not available */ }
+      } catch { /* command not available (older backend) */ }
     } catch {
       // Settings not yet initialized, use defaults
     }
@@ -103,14 +102,15 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
 
   setAutostart: async (enabled: boolean) => {
     try {
-      if (enabled) {
-        await enable();
-      } else {
-        await disable();
-      }
-      set({ autostartEnabled: enabled });
+      const result = await invoke<boolean>("set_autostart", { enabled });
+      // Only update state if the backend confirmed success
+      set({ autostartEnabled: result === enabled });
+      return result === enabled;
     } catch (e) {
       console.error("Failed to set autostart:", e);
+      // Do NOT set autostartEnabled=true on failure — the caller
+      // should surface the error to the user
+      throw e;
     }
   },
 }));

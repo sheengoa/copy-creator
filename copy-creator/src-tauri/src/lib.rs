@@ -1,3 +1,4 @@
+mod autostart;
 mod clipboard;
 mod db;
 mod ipc;
@@ -7,7 +8,6 @@ mod translator;
 mod tray;
 
 use tauri::Manager;
-use tauri_plugin_autostart::ManagerExt;
 
 #[tauri::command]
 fn toggle_always_on_top(app: tauri::AppHandle) -> Result<bool, String> {
@@ -25,7 +25,6 @@ pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_clipboard_manager::init())
         .plugin(tauri_plugin_process::init())
-        .plugin(tauri_plugin_autostart::init(tauri_plugin_autostart::MacosLauncher::default(), Some(vec!["--hidden"])))
         .plugin(
             tauri_plugin_global_shortcut::Builder::new()
                 .with_handler(|app, shortcut, event| {
@@ -63,11 +62,11 @@ pub fn run() {
                 .unwrap_or_else(|| "light".to_string());
             log::info!("Starting with theme: {}", current_theme);
 
-            // Repair autostart registry entry to ensure --hidden arg is present
-            let autostart = app.autolaunch();
-            if autostart.is_enabled().unwrap_or(false) {
-                let _ = autostart.enable();
-            }
+            // Repair autostart entry if stale or broken
+            autostart::repair_autostart_if_needed();
+
+            // Diagnose paste environment (logs + notifies if tools missing)
+            paste::diagnose_paste_environment();
 
             // Periodic pruning every hour
             let prune_handle = app.handle().clone();
@@ -183,6 +182,9 @@ pub fn run() {
             db::is_toast_shown,
             db::set_user_api_key,
             toggle_always_on_top,
+            autostart::set_autostart,
+            autostart::is_autostart_enabled,
+            autostart::validate_autostart,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

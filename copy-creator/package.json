@@ -1,7 +1,7 @@
 {
   "name": "copy-creator",
   "private": true,
-  "version": "0.0.0",
+  "version": "0.1.1",
   "type": "module",
   "scripts": {
     "dev": "vite",
@@ -15,7 +15,7 @@
     "@mui/icons-material": "^9.0.1",
     "@mui/material": "^9.0.1",
     "@tauri-apps/api": "^2.11.0",
-    "@tauri-apps/plugin-autostart": "^2.5.1",
+
     "@tauri-apps/plugin-process": "^2.3.1",
     "i18next": "^26.1.0",
     "react": "^19.2.6",
