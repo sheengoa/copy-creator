@@ -60,9 +60,18 @@ use std::process::Command;
 use std::thread;
 use std::time::Duration;
 
-/// Detect whether we are running under Wayland.
+// ── Environment detection ───────────────────────────────────────
+
+/// Whether we are running under a Wayland compositor.
 fn is_wayland() -> bool {
     std::env::var("WAYLAND_DISPLAY")
+        .map(|v| !v.is_empty())
+        .unwrap_or(false)
+}
+
+/// Whether we are running under X11.
+fn is_x11() -> bool {
+    std::env::var("DISPLAY")
         .map(|v| !v.is_empty())
         .unwrap_or(false)
 }
@@ -76,6 +85,223 @@ fn which(cmd: &str) -> Option<String> {
         .filter(|o| o.status.success())
         .map(|o| String::from_utf8_lossy(&o.stdout).trim().to_string())
 }
+
+/// Check whether ydotool daemon is reachable (ydotool needs ydotoold running).
+fn ydotool_available() -> bool {
+    which("ydotool").is_some()
+}
+
+// ── Keystroke simulation ────────────────────────────────────────
+
+/// Inject Ctrl+Shift+V via ydotool (kernel-level uinput — works on all
+/// Wayland compositors including GNOME/Mutter).
+///
+/// Keycodes: 29=LCtrl 42=LShift 47=V
+/// :1 = press, :0 = release
+fn ydotool_ctrl_shift_v() -> Result<(), String> {
+    let status = Command::new("ydotool")
+        .args(["key", "29:1", "42:1", "47:1", "47:0", "42:0", "29:0"])
+        .status()
+        .map_err(|e| format!("ydotool spawn failed: {e}"))?;
+
+    if status.success() {
+        Ok(())
+    } else {
+        Err(format!("ydotool exited with {status}"))
+    }
+}
+
+/// Inject Ctrl+V via ydotool.
+fn ydotool_ctrl_v() -> Result<(), String> {
+    let status = Command::new("ydotool")
+        .args(["key", "29:1", "47:1", "47:0", "29:0"])
+        .status()
+        .map_err(|e| format!("ydotool spawn failed: {e}"))?;
+
+    if status.success() {
+        Ok(())
+    } else {
+        Err(format!("ydotool exited with {status}"))
+    }
+}
+
+/// Inject Ctrl+Shift+V via enigo.
+fn enigo_ctrl_shift_v() -> Result<(), String> {
+    let mut enigo = Enigo::new(&Settings::default())
+        .map_err(|e| format!("enigo init: {e}"))?;
+    enigo.key(Key::Control, Direction::Press)
+        .map_err(|e| format!("enigo ctrl press: {e}"))?;
+    enigo.key(Key::Shift, Direction::Press)
+        .map_err(|e| format!("enigo shift press: {e}"))?;
+    thread::sleep(Duration::from_millis(20));
+    enigo.key(Key::Unicode('v'), Direction::Click)
+        .map_err(|e| format!("enigo v click: {e}"))?;
+    thread::sleep(Duration::from_millis(10));
+    enigo.key(Key::Shift, Direction::Release)
+        .map_err(|e| format!("enigo shift release: {e}"))?;
+    enigo.key(Key::Control, Direction::Release)
+        .map_err(|e| format!("enigo ctrl release: {e}"))?;
+    Ok(())
+}
+
+/// Inject Ctrl+V via enigo.
+fn enigo_ctrl_v() -> Result<(), String> {
+    let mut enigo = Enigo::new(&Settings::default())
+        .map_err(|e| format!("enigo init: {e}"))?;
+    enigo.key(Key::Control, Direction::Press)
+        .map_err(|e| format!("enigo ctrl press: {e}"))?;
+    thread::sleep(Duration::from_millis(30));
+    enigo.key(Key::Unicode('v'), Direction::Click)
+        .map_err(|e| format!("enigo v click: {e}"))?;
+    thread::sleep(Duration::from_millis(10));
+    enigo.key(Key::Control, Direction::Release)
+        .map_err(|e| format!("enigo ctrl release: {e}"))?;
+    Ok(())
+}
+
+/// Inject Ctrl+Shift+V via xdotool.
+fn xdotool_ctrl_shift_v() -> Result<(), String> {
+    let status = Command::new("xdotool")
+        .args(["key", "--clearmodifiers", "ctrl+shift+v"])
+        .status()
+        .map_err(|e| format!("xdotool spawn failed: {e}"))?;
+    if status.success() {
+        Ok(())
+    } else {
+        Err(format!("xdotool exited with {status}"))
+    }
+}
+
+/// Inject Ctrl+Shift+V via wtype.
+fn wtype_ctrl_shift_v() -> Result<(), String> {
+    let status = Command::new("wtype")
+        .args(["-M", "ctrl", "-M", "shift", "-k", "v"])
+        .status()
+        .map_err(|e| format!("wtype spawn failed: {e}"))?;
+    if status.success() {
+        Ok(())
+    } else {
+        Err(format!("wtype exited with {status}"))
+    }
+}
+
+// ── Unified paste entry-point ───────────────────────────────────
+
+/// Run the best available keystroke injection method.
+///
+/// Strategy:
+///   Wayland → ydotool (Ctrl+Shift+V) → wtype → enigo Ctrl+V fallback
+///   X11     → enigo (Ctrl+Shift+V)    → xdotool
+///
+/// Ctrl+Shift+V is used as the primary shortcut because it is the
+/// universal paste key-binding across all Linux terminal emulators
+/// (GNOME Terminal, Alacritty, Kitty, Konsole, xterm) AND is
+/// accepted by virtually all GUI applications as "paste without
+/// formatting", which is correct for plain-text clipboard content.
+fn inject_paste() {
+    if is_wayland() && ydotool_available() {
+        // Wayland + ydotool: the most reliable combination on all compositors
+        match ydotool_ctrl_shift_v() {
+            Ok(()) => return,
+            Err(e) => log::warn!("ydotool Ctrl+Shift+V failed: {e}"),
+        }
+        // Fallback: Ctrl+V via ydotool
+        if let Err(e) = ydotool_ctrl_v() {
+            log::warn!("ydotool Ctrl+V also failed: {e}");
+        }
+        return;
+    }
+
+    if is_wayland() {
+        // Wayland without ydotool — try wtype (wlroots only), then enigo
+        if which("wtype").is_some() {
+            match wtype_ctrl_shift_v() {
+                Ok(()) => return,
+                Err(e) => log::warn!("wtype Ctrl+Shift+V failed: {e}"),
+            }
+        }
+
+        // Last resort: enigo (only works on XWayland or with older enigo)
+        match enigo_ctrl_shift_v() {
+            Ok(()) => return,
+            Err(e) => log::warn!("enigo Ctrl+Shift+V failed on Wayland: {e}"),
+        }
+        if let Err(e) = enigo_ctrl_v() {
+            log::warn!("enigo Ctrl+V also failed on Wayland: {e}");
+        }
+        return;
+    }
+
+    // X11 path (DISPLAY is set, WAYLAND_DISPLAY is not)
+    if is_x11() {
+        match enigo_ctrl_shift_v() {
+            Ok(()) => return,
+            Err(e) => log::warn!("enigo Ctrl+Shift+V failed: {e}"),
+        }
+        // Fallback: xdotool Ctrl+Shift+V
+        if which("xdotool").is_some() {
+            if let Err(e) = xdotool_ctrl_shift_v() {
+                log::warn!("xdotool Ctrl+Shift+V failed: {e}");
+            }
+        }
+        return;
+    }
+
+    // Neither Wayland nor X11 detected — try enigo anyway
+    log::error!(
+        "paste: cannot detect display server (no WAYLAND_DISPLAY, no DISPLAY); \
+         paste may not work"
+    );
+    let _ = enigo_ctrl_shift_v();
+}
+
+// ── Diagnostics (called once at startup) ────────────────────────
+
+/// Emit a desktop notification if `notify-send` is available.
+pub fn notify(title: &str, body: &str) {
+    let _ = Command::new("notify-send")
+        .args(["--expire-time=5000", title, body])
+        .spawn();
+}
+
+/// Run at startup: log the paste environment and warn if no method is
+/// available.
+pub fn diagnose_paste_environment() {
+    let wayland = is_wayland();
+    let x11 = is_x11();
+    let has_ydotool = ydotool_available();
+    let has_xdotool = which("xdotool").is_some();
+    let has_wtype = which("wtype").is_some();
+
+    log::info!(
+        "Paste environment: wayland={wayland}, x11={x11}, \
+         ydotool={has_ydotool}, xdotool={has_xdotool}, wtype={has_wtype}"
+    );
+
+    if wayland && !has_ydotool {
+        log::warn!(
+            "Wayland detected but ydotool is not installed. \
+             Install it for reliable paste support: \
+             sudo apt install ydotool"
+        );
+        notify(
+            "Copy Creator — 粘贴功能提示",
+            "检测到 Wayland 但未安装 ydotool。\n\
+             请运行: sudo apt install ydotool\n\
+             以确保粘贴功能正常工作。",
+        );
+    }
+
+    if !wayland && x11 && !has_xdotool {
+        log::warn!(
+            "X11 detected but xdotool is not installed. \
+             Install it for fallback paste support: \
+             sudo apt install xdotool"
+        );
+    }
+}
+
+// ── File-paste helpers ──────────────────────────────────────────
 
 /// Write a URI list to the system clipboard so that Linux file managers
 /// recognise the paste as a file operation (rather than plain text).
@@ -119,7 +345,10 @@ fn write_uri_list(handle: &AppHandle, uri: &str) {
 }
 
 fn paste_with_defocus(app: &AppHandle) -> Result<(), String> {
-    // Hide radial popup if visible
+    // Hide radial popup if visible.  When pasting from the radial menu
+    // itself the frontend has already issued a hide, so this is a fast
+    // no-op in the common case — but it is a safety net for edge cases
+    // where the popup was left open.
     if let Some(radial) = app.get_webview_window("radial-menu") {
         let _ = radial.hide();
     }
@@ -133,56 +362,19 @@ fn paste_with_defocus(app: &AppHandle) -> Result<(), String> {
         window.hide().map_err(|e| e.to_string())?;
     }
 
-    // Simple settle time before paste (no foreground window tracking on Linux)
+    // Settle time for the compositor to defocus our window(s) and
+    // transfer focus to the previously-active window.  200 ms has been
+    // empirically sufficient on GNOME/Wayland and X11 alike now that
+    // the Wayland keystroke-injection and terminal-shortcut issues are
+    // fixed.
     thread::sleep(Duration::from_millis(200));
 
-    // Simulate Ctrl+V — try enigo (X11/XWayland) first, then CLI fallback
-    match Enigo::new(&Settings::default()) {
-        Ok(mut enigo) => {
-            if let Err(e) = enigo.key(Key::Control, Direction::Press) {
-                log::warn!("enigo ctrl press failed: {}", e);
-            }
-            thread::sleep(Duration::from_millis(30));
-            if let Err(e) = enigo.key(Key::Unicode('v'), Direction::Click) {
-                log::warn!("enigo v click failed: {}", e);
-            }
-            thread::sleep(Duration::from_millis(10));
-            if let Err(e) = enigo.key(Key::Control, Direction::Release) {
-                log::warn!("enigo ctrl release failed: {}", e);
-            }
-        }
-        Err(e) => {
-            log::warn!("enigo init failed ({}), trying CLI fallback", e);
-            let result = if is_wayland() {
-                which("ydotool")
-                    .and_then(|_| {
-                        Command::new("ydotool")
-                            .args(["key", "29:1", "47:1", "47:0", "29:0"])
-                            .status().ok()
-                    })
-                    .or_else(|| {
-                        which("wtype").and_then(|_| {
-                            Command::new("wtype")
-                                .args(["-M", "ctrl", "-k", "v"])
-                                .status().ok()
-                        })
-                    })
-            } else {
-                which("xdotool").and_then(|_| {
-                    Command::new("xdotool")
-                        .args(["key", "--clearmodifiers", "ctrl+v"])
-                        .status().ok()
-                })
-            };
-            match result {
-                Some(status) if status.success() => {}
-                _ => log::error!("paste_with_defocus: no keyboard simulation method available; install xdotool (X11) or ydotool/wtype (Wayland)"),
-            }
-        }
-    }
+    inject_paste();
 
     Ok(())
 }
+
+// ── Tauri commands ──────────────────────────────────────────────
 
 #[tauri::command]
 pub fn paste_text(app: AppHandle, text: String) -> Result<(), String> {

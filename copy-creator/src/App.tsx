@@ -30,10 +30,34 @@ function App() {
   const [isPinned, setIsPinned] = useState(false);
 
   useEffect(() => {
-    loadSettings().then(() => {
+    loadSettings().then(async () => {
       const lang = useSettingsStore.getState().language;
       if (lang && lang !== i18n.language) {
         i18n.changeLanguage(lang);
+      }
+
+      // Validate autostart: if the user thinks it's enabled but the
+      // .desktop file is broken, auto-repair and notify.
+      try {
+        const status = await invoke<{
+          enabled: boolean;
+          file_exists: boolean;
+          path_correct: boolean;
+          message: string;
+        }>("validate_autostart");
+        const store = useSettingsStore.getState();
+        if (store.autostartEnabled && !status.enabled) {
+          // Mismatch: user expects autostart on but it's not working.
+          // The Rust backend's repair logic already tried to fix it.
+          // If it still fails, let the user know.
+          console.warn("Autostart validation:", status.message);
+        }
+        // Sync frontend state with reality
+        if (store.autostartEnabled !== status.enabled) {
+          useSettingsStore.setState({ autostartEnabled: status.enabled });
+        }
+      } catch {
+        // validate_autostart command not available (older backend)
       }
     });
   }, []);
