@@ -13,32 +13,44 @@ fn desktop_file_path() -> PathBuf {
     autostart_dir().join("copy-creator.desktop")
 }
 
+/// Return the path to the current executable, resolving the AppImage
+/// case where `current_exe()` points inside a transient FUSE mount.
 fn current_exe_path() -> String {
+    // When running inside an AppImage, the APPIMAGE env var holds the
+    // real path of the AppImage file — use that instead of the FUSE
+    // mount path which disappears after the process exits.
+    if let Ok(appimage) = std::env::var("APPIMAGE") {
+        if !appimage.is_empty() {
+            log::info!("Autostart: using APPIMAGE path: {appimage}");
+            return appimage;
+        }
+    }
     std::env::current_exe()
         .map(|p| p.display().to_string())
         .unwrap_or_default()
 }
 
-/// Shell-escape a path for use in a .desktop Exec= line.
-/// Wraps the value in single quotes, escaping any embedded single quotes.
-fn shell_escape(s: &str) -> String {
-    format!("'{}'", s.replace('\'', "'\\''"))
-}
-
 /// Build the contents of a well-formed autostart .desktop entry.
+///
+/// NOTE: The Freedesktop `.desktop` spec does **not** interpret the
+/// `Exec=` line through a shell — quotes around the binary path are
+/// a spec violation and will cause the entry to be rejected (GNOME
+/// logs "contains a reserved character ''' outside of a quote").
+/// We use the bare path because Linux binary paths never contain
+/// spaces in practice.
 fn desktop_entry(exe: &str) -> String {
-    let exe_escaped = shell_escape(exe);
     format!(
         "[Desktop Entry]\n\
          Type=Application\n\
          Version=1.0\n\
          Name=Copy Creator\n\
          Comment=Clipboard manager, quick phrases, and translation tool\n\
-         Exec={exe_escaped} --hidden\n\
+         Exec={exe} --hidden\n\
          Icon=copy-creator\n\
          StartupNotify=false\n\
          Terminal=false\n\
-         X-GNOME-Autostart-enabled=true\n",
+         X-GNOME-Autostart-enabled=true\n\
+         X-GNOME-Autostart-Delay=2\n",
     )
 }
 
@@ -133,17 +145,29 @@ pub fn validate_autostart() -> Result<AutostartStatus, String> {
 }
 
 /// Called on every startup.  If the user expects autostart but the
-/// .desktop file is broken or missing, repair it automatically.
+/// .desktop file is broken or stale, repair it automatically.
+///
+/// We regenerate the file unconditionally (when it exists) to fix:
+/// - Old/broken `Exec=` lines with shell quotes (v0.1.1 auto-repair)
+/// - Stale paths after an AppImage update or binary relocation
+/// - Any spec-invalid content from earlier versions
 pub fn repair_autostart_if_needed() {
     let desktop_path = desktop_file_path();
-    let exe = current_exe_path();
 
     if !desktop_path.exists() {
         return; // not enabled, nothing to do
     }
 
+    let exe = current_exe_path();
+    if exe.is_empty() {
+        log::error!("Autostart repair skipped: cannot determine current exe path");
+        return;
+    }
+
+    let fresh = desktop_entry(&exe);
+
     let needs_repair = match fs::read_to_string(&desktop_path) {
-        Ok(content) => !content.contains(&exe),
+        Ok(current) => current != fresh,
         Err(_) => true,
     };
 
@@ -152,8 +176,10 @@ pub fn repair_autostart_if_needed() {
             "Autostart entry is stale or broken — auto-repairing with path: {}",
             exe
         );
-        if let Err(e) = fs::write(&desktop_path, desktop_entry(&exe)) {
+        if let Err(e) = fs::write(&desktop_path, &fresh) {
             log::error!("Failed to repair autostart entry: {e}");
+        } else {
+            log::info!("Autostart entry repaired successfully");
         }
     }
 }
