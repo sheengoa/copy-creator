@@ -13,8 +13,9 @@ import {
   KeyboardSensor,
   useSensors,
   useSensor,
+  DragOverlay,
 } from "@dnd-kit/core";
-import type { DragEndEvent } from "@dnd-kit/core";
+import type { DragEndEvent, DragStartEvent } from "@dnd-kit/core";
 import {
   SortableContext,
   verticalListSortingStrategy,
@@ -68,8 +69,19 @@ export default function PhrasePage() {
     useSensor(KeyboardSensor)
   );
 
+  const [activePhraseId, setActivePhraseId] = useState<string | null>(null);
+
+  const handlePhraseDragStart = useCallback((event: DragStartEvent) => {
+    setActivePhraseId(String(event.active.id));
+  }, []);
+
+  const handlePhraseDragCancel = useCallback(() => {
+    setActivePhraseId(null);
+  }, []);
+
   const handlePhraseDragEnd = useCallback(
     (event: DragEndEvent) => {
+      setActivePhraseId(null);
       const { active, over } = event;
       if (!over || active.id === over.id) return;
       const oldIndex = phrases.findIndex((p) => p.id === active.id);
@@ -80,6 +92,8 @@ export default function PhrasePage() {
     },
     [phrases]
   );
+
+  const activePhrase = activePhraseId ? phrases.find(p => p.id === activePhraseId) : null;
 
   const openNewGroup = () => {
     setEditingId(null);
@@ -174,7 +188,7 @@ export default function PhrasePage() {
         onReorderGroups={(ids) => usePhraseStore.getState().reorderGroups(ids)}
       />
 
-      <DndContext sensors={sensors} onDragEnd={handlePhraseDragEnd}>
+      <DndContext sensors={sensors} onDragStart={handlePhraseDragStart} onDragEnd={handlePhraseDragEnd} onDragCancel={handlePhraseDragCancel}>
         <SortableContext items={phrases.map(p => p.id)} strategy={verticalListSortingStrategy}>
           <PhraseList
             phrases={phrases}
@@ -185,6 +199,16 @@ export default function PhrasePage() {
             onDelete={deletePhrase}
           />
         </SortableContext>
+        <DragOverlay dropAnimation={null}>
+          {activePhrase ? (
+            <div className="notification phrase-card drag-overlay-card">
+              <div className="notibar" />
+              <div className="noticontent">
+                <div className="notibody phrase-card-body">{activePhrase.content.slice(0, 80)}</div>
+              </div>
+            </div>
+          ) : null}
+        </DragOverlay>
       </DndContext>
 
       <GroupDialog

@@ -48,22 +48,22 @@ function PhraseCard({
       className={`notification phrase-card${isDragging ? " is-dragging" : ""}`}
       onClick={() => onPaste(phrase)}
     >
-      <div className="drag-handle" {...attributes} {...listeners}>
-        <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor">
-          <circle cx="9" cy="5" r="1.5" />
-          <circle cx="15" cy="5" r="1.5" />
-          <circle cx="9" cy="12" r="1.5" />
-          <circle cx="15" cy="12" r="1.5" />
-          <circle cx="9" cy="19" r="1.5" />
-          <circle cx="15" cy="19" r="1.5" />
-        </svg>
-      </div>
       <div className="notibar" />
       <div className="noticontent">
         <div className="notibody phrase-card-body">{phrase.content}</div>
         <div className="notititle phrase-card-footer">
           <span className="phrase-card-remark">{phrase.title}</span>
           <div className="phrase-card-actions">
+            <span className="drag-handle" {...attributes} {...listeners}>
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor">
+                <circle cx="9" cy="5" r="1.5" />
+                <circle cx="15" cy="5" r="1.5" />
+                <circle cx="9" cy="12" r="1.5" />
+                <circle cx="15" cy="12" r="1.5" />
+                <circle cx="9" cy="19" r="1.5" />
+                <circle cx="15" cy="19" r="1.5" />
+              </svg>
+            </span>
             <button className="card-edit-btn" onClick={(e) => { e.stopPropagation(); onEdit(phrase); }}>
               {Icons.edit}
             </button>

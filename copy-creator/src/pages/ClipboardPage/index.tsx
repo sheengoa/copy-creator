@@ -12,8 +12,9 @@ import {
   useSensors,
   useSensor,
   closestCenter,
+  DragOverlay,
 } from "@dnd-kit/core";
-import type { DragEndEvent } from "@dnd-kit/core";
+import type { DragEndEvent, DragStartEvent } from "@dnd-kit/core";
 import {
   SortableContext,
   verticalListSortingStrategy,
@@ -126,8 +127,19 @@ export default function ClipboardPage() {
 
   const isFiltered = category !== "all" || search.trim().length > 0;
 
+  const [activeId, setActiveId] = useState<string | null>(null);
+
+  const handleDragStart = useCallback((event: DragStartEvent) => {
+    setActiveId(String(event.active.id));
+  }, []);
+
+  const handleDragCancel = useCallback(() => {
+    setActiveId(null);
+  }, []);
+
   const handleDragEnd = useCallback(
     (event: DragEndEvent) => {
+      setActiveId(null);
       if (isFiltered) return;
       const { active, over } = event;
       if (!over || active.id === over.id) return;
@@ -141,6 +153,8 @@ export default function ClipboardPage() {
     },
     [filtered, isFiltered]
   );
+
+  const activeRecord = activeId ? filtered.find(r => r.id === activeId) : null;
 
   return (
     <div className="clipboard-page">
@@ -212,7 +226,7 @@ export default function ClipboardPage() {
         </div>
       ) : (
         <div className="clipboard-list">
-          <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={handleDragEnd}>
+          <DndContext sensors={sensors} collisionDetection={closestCenter} onDragStart={handleDragStart} onDragEnd={handleDragEnd} onDragCancel={handleDragCancel}>
             <SortableContext items={filtered.map(r => r.id)} strategy={verticalListSortingStrategy}>
               {filtered.map((r, i) => (
                 <ClipboardCard
@@ -227,6 +241,24 @@ export default function ClipboardPage() {
                 />
               ))}
             </SortableContext>
+            <DragOverlay dropAnimation={null}>
+              {activeRecord ? (
+                <div className="notification clipboard-card drag-overlay-card" style={{ "--color": TYPE_META[activeRecord.type]?.color } as React.CSSProperties}>
+                  <div className="notibar" />
+                  <div className="noticontent">
+                    <div className="notibody clipboard-card-body">
+                      {activeRecord.type === "image" ? (
+                        <span className="clipboard-text-content">图片</span>
+                      ) : activeRecord.type === "file" ? (
+                        <span className="clipboard-file-content">{activeRecord.content.split('/').pop()}</span>
+                      ) : (
+                        <span className="clipboard-text-content">{activeRecord.content.slice(0, 80)}</span>
+                      )}
+                    </div>
+                  </div>
+                </div>
+              ) : null}
+            </DragOverlay>
           </DndContext>
           {hasMore && filtered.length > 0 && (
             <button
