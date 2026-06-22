@@ -19,6 +19,7 @@ import {
   SortableContext,
   verticalListSortingStrategy,
 } from "@dnd-kit/sortable";
+import { restrictToVerticalAxis } from "@dnd-kit/modifiers";
 import { getChangedOrderIds, getDragPreviewOrder } from "../../utils/reorderPreview";
 
 type ClipType = "all" | "text" | "image" | "link" | "file";
@@ -246,7 +247,7 @@ export default function ClipboardPage() {
         </div>
       ) : (
         <div className="clipboard-list">
-          <DndContext sensors={sensors} collisionDetection={closestCenter} onDragStart={handleDragStart} onDragOver={handleDragOver} onDragEnd={handleDragEnd} onDragCancel={handleDragCancel}>
+          <DndContext sensors={sensors} collisionDetection={closestCenter} onDragStart={handleDragStart} onDragOver={handleDragOver} onDragEnd={handleDragEnd} onDragCancel={handleDragCancel} modifiers={[restrictToVerticalAxis]}>
             <SortableContext items={renderedRecords.map(r => r.id)} strategy={verticalListSortingStrategy}>
               {renderedRecords.map((r, i) => (
                 <ClipboardCard
