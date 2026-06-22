@@ -171,6 +171,7 @@ export default function PhrasePage() {
         onAddGroup={openNewGroup}
         onManageGroups={openManageGroups}
         onAddPhrase={openNewPhrase}
+        onReorderGroups={(ids) => usePhraseStore.getState().reorderGroups(ids)}
       />
 
       <DndContext sensors={sensors} onDragEnd={handlePhraseDragEnd}>
