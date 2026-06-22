@@ -301,3 +301,15 @@
   height: 30px;
   font-size: var(--text-sm);
 }
+
+/* ── Group Chip Drag ──────────────────────────────────── */
+.group-chip.is-dragging {
+  opacity: 0.5;
+  z-index: 999;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+  transform: scale(0.95);
+}
+
+[data-theme="dark"] .group-chip.is-dragging {
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
+}

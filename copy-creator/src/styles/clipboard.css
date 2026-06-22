@@ -727,3 +727,48 @@
   background: var(--chip-bg);
   color: var(--text-primary);
 }
+
+/* ── Drag Handle ──────────────────────────────────────── */
+.drag-handle {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  flex-shrink: 0;
+  cursor: grab;
+  color: var(--text-tertiary);
+  opacity: 0;
+  transition: opacity 0.15s;
+  user-select: none;
+}
+
+.notification:hover .drag-handle {
+  opacity: 0.6;
+}
+
+.notification .drag-handle:hover {
+  opacity: 1;
+  color: var(--text-primary);
+}
+
+.drag-handle:active {
+  cursor: grabbing;
+}
+
+/* ── Dragging State ──────────────────────────────────── */
+.clipboard-card.is-dragging,
+.phrase-card.is-dragging {
+  opacity: 0.45;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.12);
+  z-index: 999;
+}
+
+/* Sortable item occupying target position */
+.sortable-chosen {
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
+}
+
+[data-theme="dark"] .clipboard-card.is-dragging,
+[data-theme="dark"] .phrase-card.is-dragging {
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.4);
+}
