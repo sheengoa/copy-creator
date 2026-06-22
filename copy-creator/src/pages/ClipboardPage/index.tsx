@@ -5,6 +5,20 @@ import { Icons } from "../../components/Icons";
 import SearchInput from "../../components/SearchInput";
 import { ClipboardCard } from "./ClipboardCard";
 import { TYPE_META } from "./utils";
+import {
+  DndContext,
+  PointerSensor,
+  KeyboardSensor,
+  useSensors,
+  useSensor,
+  closestCenter,
+  DragEndEvent,
+} from "@dnd-kit/core";
+import {
+  SortableContext,
+  verticalListSortingStrategy,
+  arrayMove,
+} from "@dnd-kit/sortable";
 
 type ClipType = "all" | "text" | "image" | "link" | "file";
 
@@ -105,6 +119,28 @@ export default function ClipboardPage() {
     hoverTimerRef.current = setTimeout(() => setHoverPreview(null), 150);
   }, []);
 
+  const sensors = useSensors(
+    useSensor(PointerSensor, { activationConstraint: { distance: 4 } }),
+    useSensor(KeyboardSensor)
+  );
+
+  const isFiltered = category !== "all" || search.trim().length > 0;
+
+  const handleDragEnd = useCallback(
+    (event: DragEndEvent) => {
+      const { active, over } = event;
+      if (!over || active.id === over.id) return;
+
+      const oldIndex = filtered.findIndex((r) => r.id === active.id);
+      const newIndex = filtered.findIndex((r) => r.id === over.id);
+      if (oldIndex === -1 || newIndex === -1) return;
+
+      const newOrder = arrayMove(filtered, oldIndex, newIndex);
+      useClipboardStore.getState().reorderRecords(newOrder.map((r) => r.id));
+    },
+    [filtered]
+  );
+
   return (
     <div className="clipboard-page">
       <div className="page-search">
@@ -175,18 +211,37 @@ export default function ClipboardPage() {
         </div>
       ) : (
         <div className="clipboard-list">
-          {filtered.map((r, i) => (
-            <ClipboardCard
-              key={r.id}
-              record={r}
-              index={i}
-              getTypeLabel={getTypeLabel}
-              onPaste={handlePaste}
-              onDelete={handleDelete}
-              onThumbHover={handleThumbHover}
-              onThumbLeave={handleThumbLeave}
-            />
-          ))}
+          {isFiltered ? (
+            filtered.map((r, i) => (
+              <ClipboardCard
+                key={r.id}
+                record={r}
+                index={i}
+                getTypeLabel={getTypeLabel}
+                onPaste={handlePaste}
+                onDelete={handleDelete}
+                onThumbHover={handleThumbHover}
+                onThumbLeave={handleThumbLeave}
+              />
+            ))
+          ) : (
+            <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={handleDragEnd}>
+              <SortableContext items={filtered.map(r => r.id)} strategy={verticalListSortingStrategy}>
+                {filtered.map((r, i) => (
+                  <ClipboardCard
+                    key={r.id}
+                    record={r}
+                    index={i}
+                    getTypeLabel={getTypeLabel}
+                    onPaste={handlePaste}
+                    onDelete={handleDelete}
+                    onThumbHover={handleThumbHover}
+                    onThumbLeave={handleThumbLeave}
+                  />
+                ))}
+              </SortableContext>
+            </DndContext>
+          )}
           {hasMore && filtered.length > 0 && (
             <button
               className="clipboard-load-more"

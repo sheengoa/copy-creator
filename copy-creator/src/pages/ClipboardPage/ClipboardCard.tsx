@@ -1,3 +1,5 @@
+import { useSortable } from "@dnd-kit/sortable";
+import { CSS } from "@dnd-kit/utilities";
 import { memo, useCallback, useState, useEffect, useRef } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import type { ClipboardRecord } from "../../types";
@@ -29,6 +31,20 @@ function ClipboardCardInner({
   onThumbHover,
   onThumbLeave,
 }: ClipboardCardProps) {
+  const {
+    attributes,
+    listeners,
+    setNodeRef,
+    transform,
+    transition,
+    isDragging,
+  } = useSortable({ id: record.id });
+
+  const sortableStyle = {
+    transform: CSS.Transform.toString(transform),
+    transition,
+  };
+
   const meta = TYPE_META[record.type] || TYPE_META.text;
   const [ctxMenu, setCtxMenu] = useState<{ x: number; y: number } | null>(null);
   const [labelOpen, setLabelOpen] = useState(false);
@@ -153,11 +169,22 @@ function ClipboardCardInner({
 
   return (
     <div
-      className={`notification clipboard-card type-${record.type}${record.is_api_key ? " has-api-key" : ""}${isUnlabeled ? " api-key-unlabeled" : ""}${hasLabel ? " api-key-labeled" : ""}`}
-      style={{ "--color": meta.color, "--enter-delay": index } as React.CSSProperties}
+      ref={setNodeRef}
+      className={`notification clipboard-card type-${record.type}${record.is_api_key ? " has-api-key" : ""}${isUnlabeled ? " api-key-unlabeled" : ""}${hasLabel ? " api-key-labeled" : ""}${isDragging ? " is-dragging" : ""}`}
+      style={{ ...sortableStyle, "--color": meta.color, "--enter-delay": index } as React.CSSProperties}
       onClick={handlePaste}
       onContextMenu={handleContextMenu}
     >
+      <div className="drag-handle" {...attributes} {...listeners}>
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor">
+          <circle cx="9" cy="5" r="1.5" />
+          <circle cx="15" cy="5" r="1.5" />
+          <circle cx="9" cy="12" r="1.5" />
+          <circle cx="15" cy="12" r="1.5" />
+          <circle cx="9" cy="19" r="1.5" />
+          <circle cx="15" cy="19" r="1.5" />
+        </svg>
+      </div>
       <div className="notibar" />
       <div className="noticontent">
         <div className="notititle clipboard-card-header">
