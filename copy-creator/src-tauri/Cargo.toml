@@ -1,6 +1,6 @@
 [package]
 name = "copy-creator"
-version = "0.1.1"
+version = "0.1.2"
 description = "PC clipboard manager, quick phrases, and translation tool"
 authors = ["Copy Creator Contributors"]
 license = "MIT"
