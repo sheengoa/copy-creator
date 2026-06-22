@@ -484,7 +484,7 @@ pub fn get_clipboard_records(
         let escaped = q.replace('\\', "\\\\").replace('%', "\\%").replace('_', "\\_");
         let sql = format!(
             "SELECT id, type, content, source_app, created_at, user_api_key FROM clipboard_records
-             WHERE content LIKE '%' || ?1 || '%' ESCAPE '\\' {} ORDER BY created_at DESC LIMIT ?2 OFFSET ?3",
+             WHERE content LIKE '%' || ?1 || '%' ESCAPE '\\' {} ORDER BY sort_order DESC LIMIT ?2 OFFSET ?3",
             cat_filter.1
         );
         let mut stmt = conn.prepare(&sql).map_err(|e| e.to_string())?;
@@ -506,7 +506,7 @@ pub fn get_clipboard_records(
     } else {
         let sql = format!(
             "SELECT id, type, content, source_app, created_at, user_api_key FROM clipboard_records
-             {} ORDER BY created_at DESC LIMIT ?1 OFFSET ?2",
+             {} ORDER BY sort_order DESC LIMIT ?1 OFFSET ?2",
             cat_filter.0
         );
         let mut stmt = conn.prepare(&sql).map_err(|e| e.to_string())?;
@@ -1395,5 +1395,93 @@ pub fn set_user_api_key(app: AppHandle, id: String, value: bool) -> Result<(), S
         params![value as i64, id],
     )
     .map_err(|e| e.to_string())?;
+    Ok(())
+}
+
+// ── Reorder Commands ──────────────────────────────────────────
+
+#[tauri::command]
+pub fn reorder_clipboard_records(app: AppHandle, ids: Vec<String>) -> Result<(), String> {
+    let state = app.state::<DbState>();
+    let conn = state.conn.lock().map_err(|e| e.to_string())?;
+    let n = ids.len();
+
+    if ids.is_empty() {
+        return Ok(());
+    }
+
+    let mut case_clauses = String::new();
+    let mut id_list = String::new();
+    for (i, id) in ids.iter().enumerate() {
+        let escaped = id.replace('\'', "''");
+        case_clauses.push_str(&format!(" WHEN '{}' THEN {}", escaped, (n - i) * 10));
+        if i > 0 { id_list.push(','); }
+        id_list.push_str(&format!("'{}'", escaped));
+    }
+
+    let sql = format!(
+        "UPDATE clipboard_records SET sort_order = CASE id{} END WHERE id IN ({})",
+        case_clauses, id_list,
+    );
+
+    conn.execute(&sql, []).map_err(|e| e.to_string())?;
+    log::info!("reorder_clipboard_records: {} items", ids.len());
+    Ok(())
+}
+
+#[tauri::command]
+pub fn reorder_phrase_groups(app: AppHandle, ids: Vec<String>) -> Result<(), String> {
+    let state = app.state::<DbState>();
+    let conn = state.conn.lock().map_err(|e| e.to_string())?;
+    let n = ids.len();
+
+    if ids.is_empty() {
+        return Ok(());
+    }
+
+    let mut case_clauses = String::new();
+    let mut id_list = String::new();
+    for (i, id) in ids.iter().enumerate() {
+        let escaped = id.replace('\'', "''");
+        case_clauses.push_str(&format!(" WHEN '{}' THEN {}", escaped, (n - i) * 10));
+        if i > 0 { id_list.push(','); }
+        id_list.push_str(&format!("'{}'", escaped));
+    }
+
+    conn.execute(
+        &format!("UPDATE phrase_groups SET sort_order = CASE id{} END WHERE id IN ({})", case_clauses, id_list),
+        [],
+    ).map_err(|e| e.to_string())?;
+
+    let _ = app.emit("phrase-groups-changed", ());
+    log::info!("reorder_phrase_groups: {} items", ids.len());
+    Ok(())
+}
+
+#[tauri::command]
+pub fn reorder_phrases(app: AppHandle, ids: Vec<String>) -> Result<(), String> {
+    let state = app.state::<DbState>();
+    let conn = state.conn.lock().map_err(|e| e.to_string())?;
+    let n = ids.len();
+
+    if ids.is_empty() {
+        return Ok(());
+    }
+
+    let mut case_clauses = String::new();
+    let mut id_list = String::new();
+    for (i, id) in ids.iter().enumerate() {
+        let escaped = id.replace('\'', "''");
+        case_clauses.push_str(&format!(" WHEN '{}' THEN {}", escaped, (n - i) * 10));
+        if i > 0 { id_list.push(','); }
+        id_list.push_str(&format!("'{}'", escaped));
+    }
+
+    conn.execute(
+        &format!("UPDATE phrases SET sort_order = CASE id{} END WHERE id IN ({})", case_clauses, id_list),
+        [],
+    ).map_err(|e| e.to_string())?;
+
+    log::info!("reorder_phrases: {} items", ids.len());
     Ok(())
 }
