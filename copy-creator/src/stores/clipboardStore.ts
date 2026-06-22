@@ -255,9 +255,9 @@ export const useClipboardStore = create<ClipboardState>((set, get) => ({
     }));
     try {
       await invoke("reorder_clipboard_records", { ids });
+      get().loadRecords();
     } catch (e) {
       console.error("Failed to reorder clipboard records:", e);
-      // Revert: reload from backend
       get().loadRecords();
     }
   },

@@ -723,7 +723,7 @@ pub fn get_phrase_groups(app: AppHandle) -> Result<Vec<serde_json::Value>, Strin
     let state = app.state::<DbState>();
     let conn = state.conn.lock().map_err(|e| e.to_string())?;
     let mut stmt = conn
-        .prepare("SELECT id, name, sort_order, created_at, updated_at FROM phrase_groups ORDER BY sort_order")
+        .prepare("SELECT id, name, sort_order, created_at, updated_at FROM phrase_groups ORDER BY sort_order DESC")
         .map_err(|e| e.to_string())?;
     let rows = stmt
         .query_map([], |row| {
@@ -795,7 +795,7 @@ pub fn get_phrases(app: AppHandle, group_id: String) -> Result<Vec<serde_json::V
     let state = app.state::<DbState>();
     let conn = state.conn.lock().map_err(|e| e.to_string())?;
     let mut stmt = conn
-        .prepare("SELECT id, group_id, title, content, sort_order, created_at, updated_at FROM phrases WHERE group_id = ?1 ORDER BY sort_order")
+        .prepare("SELECT id, group_id, title, content, sort_order, created_at, updated_at FROM phrases WHERE group_id = ?1 ORDER BY sort_order DESC")
         .map_err(|e| e.to_string())?;
     let rows = stmt
         .query_map(params![group_id], |row| {

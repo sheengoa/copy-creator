@@ -128,6 +128,7 @@ export default function ClipboardPage() {
 
   const handleDragEnd = useCallback(
     (event: DragEndEvent) => {
+      if (isFiltered) return;
       const { active, over } = event;
       if (!over || active.id === over.id) return;
 
@@ -138,7 +139,7 @@ export default function ClipboardPage() {
       const newOrder = arrayMove(filtered, oldIndex, newIndex);
       useClipboardStore.getState().reorderRecords(newOrder.map((r) => r.id));
     },
-    [filtered]
+    [filtered, isFiltered]
   );
 
   return (
@@ -211,37 +212,22 @@ export default function ClipboardPage() {
         </div>
       ) : (
         <div className="clipboard-list">
-          {isFiltered ? (
-            filtered.map((r, i) => (
-              <ClipboardCard
-                key={r.id}
-                record={r}
-                index={i}
-                getTypeLabel={getTypeLabel}
-                onPaste={handlePaste}
-                onDelete={handleDelete}
-                onThumbHover={handleThumbHover}
-                onThumbLeave={handleThumbLeave}
-              />
-            ))
-          ) : (
-            <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={handleDragEnd}>
-              <SortableContext items={filtered.map(r => r.id)} strategy={verticalListSortingStrategy}>
-                {filtered.map((r, i) => (
-                  <ClipboardCard
-                    key={r.id}
-                    record={r}
-                    index={i}
-                    getTypeLabel={getTypeLabel}
-                    onPaste={handlePaste}
-                    onDelete={handleDelete}
-                    onThumbHover={handleThumbHover}
-                    onThumbLeave={handleThumbLeave}
-                  />
-                ))}
-              </SortableContext>
-            </DndContext>
-          )}
+          <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={handleDragEnd}>
+            <SortableContext items={filtered.map(r => r.id)} strategy={verticalListSortingStrategy}>
+              {filtered.map((r, i) => (
+                <ClipboardCard
+                  key={r.id}
+                  record={r}
+                  index={i}
+                  getTypeLabel={getTypeLabel}
+                  onPaste={handlePaste}
+                  onDelete={handleDelete}
+                  onThumbHover={handleThumbHover}
+                  onThumbLeave={handleThumbLeave}
+                />
+              ))}
+            </SortableContext>
+          </DndContext>
           {hasMore && filtered.length > 0 && (
             <button
               className="clipboard-load-more"
