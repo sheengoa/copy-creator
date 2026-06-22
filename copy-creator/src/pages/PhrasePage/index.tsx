@@ -205,6 +205,9 @@ export default function PhrasePage() {
               <div className="notibar" />
               <div className="noticontent">
                 <div className="notibody phrase-card-body">{activePhrase.content.slice(0, 80)}</div>
+                <div className="notititle phrase-card-footer">
+                  <span className="phrase-card-remark">{activePhrase.title}</span>
+                </div>
               </div>
             </div>
           ) : null}

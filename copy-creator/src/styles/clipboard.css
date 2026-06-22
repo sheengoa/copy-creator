@@ -739,6 +739,7 @@
   color: var(--text-tertiary);
   user-select: none;
   border-radius: 4px;
+  touch-action: none;
 }
 
 .drag-handle:hover {
@@ -760,6 +761,11 @@
   cursor: grabbing;
   box-shadow: 0 12px 32px rgba(0, 0, 0, 0.2);
   transform: scale(1.02);
+  animation: none !important;
+}
+
+.drag-overlay-card .notibody {
+  transform: none !important;
 }
 
 [data-theme="dark"] .drag-overlay-card {
@@ -782,6 +788,10 @@
 .phrase-card.is-dragging {
   opacity: 0.35;
   z-index: 999;
+}
+
+.is-dragging .notibody {
+  transform: none !important;
 }
 
 /* Sortable item occupying target position */

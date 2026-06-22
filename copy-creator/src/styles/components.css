@@ -160,11 +160,8 @@
   cursor: pointer;
   --color: #32a6ff;
   box-shadow: 0 0.5px 0 0 rgba(255,255,255,0.35) inset;
-  transition: box-shadow 300ms ease, transform 300ms ease, border-color 300ms ease;
   animation: cardEnter 0.45s cubic-bezier(0.22, 1, 0.36, 1) both;
   animation-delay: calc(var(--enter-delay, 0) * 55ms);
-  content-visibility: auto;
-  contain-intrinsic-size: auto 100px;
 }
 
 .notification:hover {
