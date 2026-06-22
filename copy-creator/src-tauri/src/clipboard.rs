@@ -223,12 +223,13 @@ fn insert_and_emit(app: &AppHandle, record_type: &str, content: &str) {
 
     let id = uuid::Uuid::new_v4().to_string();
     let now = chrono::Utc::now().to_rfc3339();
+    let sort_order = chrono::Utc::now().timestamp_millis();
     {
         let state = app.state::<crate::db::DbState>();
         let _x = match state.conn.lock() {
             Ok(conn) => conn.execute(
-                "INSERT INTO clipboard_records (id, type, content, source_app, created_at) VALUES (?1, ?2, ?3, ?4, ?5)",
-                rusqlite::params![id, record_type, content, "", &now],
+                "INSERT INTO clipboard_records (id, type, content, source_app, created_at, sort_order) VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+                rusqlite::params![id, record_type, content, "", &now, sort_order],
             ).ok(),
             Err(_) => None,
         };
