@@ -25,11 +25,13 @@ interface ClipboardCardProps {
 type ClipboardCardPreviewProps = {
   record: ClipboardRecord;
   getTypeLabel: (type: string) => string;
+  width: number | null;
 };
 
 function ClipboardCardBodyPreview({
   record,
   getTypeLabel,
+  width,
 }: ClipboardCardPreviewProps) {
   const meta = TYPE_META[record.type] || TYPE_META.text;
   const displayContent = record.content;
@@ -46,7 +48,7 @@ function ClipboardCardBodyPreview({
   return (
     <div
       className={`notification clipboard-card type-${record.type}${record.is_api_key ? " has-api-key" : ""}${isUnlabeled ? " api-key-unlabeled" : ""}${hasLabel ? " api-key-labeled" : ""} drag-overlay-card`}
-      style={{ "--color": meta.color } as React.CSSProperties}
+      style={{ "--color": meta.color, width: width ?? undefined } as React.CSSProperties}
     >
       <div className="notibar" />
       <div className="noticontent">

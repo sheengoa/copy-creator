@@ -130,15 +130,18 @@ export default function ClipboardPage() {
 
   const [activeId, setActiveId] = useState<string | null>(null);
   const [previewRecords, setPreviewRecords] = useState<typeof records | null>(null);
+  const [activeOverlayWidth, setActiveOverlayWidth] = useState<number | null>(null);
 
   const handleDragStart = useCallback((event: DragStartEvent) => {
     const id = String(event.active.id);
     setActiveId(id);
+    setActiveOverlayWidth(event.active.rect.current.initial?.width ?? null);
     setPreviewRecords(isFiltered ? null : filtered);
   }, [filtered, isFiltered]);
 
   const handleDragCancel = useCallback(() => {
     setActiveId(null);
+    setActiveOverlayWidth(null);
     setPreviewRecords(null);
   }, []);
 
@@ -162,6 +165,7 @@ export default function ClipboardPage() {
     () => {
       const finalPreview = previewRecords;
       setActiveId(null);
+      setActiveOverlayWidth(null);
       setPreviewRecords(null);
 
       if (isFiltered) return;
@@ -262,11 +266,12 @@ export default function ClipboardPage() {
                 />
               ))}
             </SortableContext>
-            <DragOverlay dropAnimation={null}>
+            <DragOverlay dropAnimation={null} style={{ width: activeOverlayWidth ?? undefined }}>
               {activeRecord ? (
                 <ClipboardCardDragPreview
                   record={activeRecord}
                   getTypeLabel={getTypeLabel}
+                  width={activeOverlayWidth}
                 />
               ) : null}
             </DragOverlay>
