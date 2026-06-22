@@ -52,7 +52,7 @@ function SortableGroupChip({
 
   const style = {
     transform: CSS.Transform.toString(transform),
-    transition,
+    transition: transition || "transform 200ms ease",
   };
 
   return (
