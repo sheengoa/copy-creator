@@ -14,12 +14,12 @@ import {
   closestCenter,
   DragOverlay,
 } from "@dnd-kit/core";
-import type { DragEndEvent, DragStartEvent } from "@dnd-kit/core";
+import type { DragEndEvent, DragOverEvent, DragStartEvent } from "@dnd-kit/core";
 import {
   SortableContext,
   verticalListSortingStrategy,
-  arrayMove,
 } from "@dnd-kit/sortable";
+import { getDragPreviewOrder } from "../../utils/reorderPreview";
 
 type ClipType = "all" | "text" | "image" | "link" | "file";
 
@@ -128,33 +128,57 @@ export default function ClipboardPage() {
   const isFiltered = category !== "all" || search.trim().length > 0;
 
   const [activeId, setActiveId] = useState<string | null>(null);
+  const [previewRecords, setPreviewRecords] = useState<typeof records | null>(null);
 
   const handleDragStart = useCallback((event: DragStartEvent) => {
-    setActiveId(String(event.active.id));
-  }, []);
+    const id = String(event.active.id);
+    setActiveId(id);
+    setPreviewRecords(isFiltered ? null : filtered);
+  }, [filtered, isFiltered]);
 
   const handleDragCancel = useCallback(() => {
     setActiveId(null);
+    setPreviewRecords(null);
   }, []);
+
+  const handleDragOver = useCallback(
+    (event: DragOverEvent) => {
+      if (isFiltered || !event.over) return;
+
+      const active = String(event.active.id);
+      const over = String(event.over.id);
+
+      setPreviewRecords((current) => {
+        const base = current ?? filtered;
+        const next = getDragPreviewOrder(base, active, over);
+        return next === base ? current : next;
+      });
+    },
+    [filtered, isFiltered],
+  );
 
   const handleDragEnd = useCallback(
     (event: DragEndEvent) => {
+      const finalPreview = previewRecords;
       setActiveId(null);
+      setPreviewRecords(null);
+
       if (isFiltered) return;
+
       const { active, over } = event;
-      if (!over || active.id === over.id) return;
+      if (!over || active.id === over.id || !finalPreview) return;
 
-      const oldIndex = filtered.findIndex((r) => r.id === active.id);
-      const newIndex = filtered.findIndex((r) => r.id === over.id);
-      if (oldIndex === -1 || newIndex === -1) return;
+      const originalIds = filtered.map((r) => r.id).join("|");
+      const nextIds = finalPreview.map((r) => r.id);
+      if (nextIds.join("|") === originalIds) return;
 
-      const newOrder = arrayMove(filtered, oldIndex, newIndex);
-      useClipboardStore.getState().reorderRecords(newOrder.map((r) => r.id));
+      useClipboardStore.getState().reorderRecords(nextIds);
     },
-    [filtered, isFiltered]
+    [filtered, isFiltered, previewRecords],
   );
 
-  const activeRecord = activeId ? filtered.find(r => r.id === activeId) : null;
+  const renderedRecords = previewRecords ?? filtered;
+  const activeRecord = activeId ? renderedRecords.find(r => r.id === activeId) : null;
 
   return (
     <div className="clipboard-page">
@@ -226,9 +250,9 @@ export default function ClipboardPage() {
         </div>
       ) : (
         <div className="clipboard-list">
-          <DndContext sensors={sensors} collisionDetection={closestCenter} onDragStart={handleDragStart} onDragEnd={handleDragEnd} onDragCancel={handleDragCancel}>
-            <SortableContext items={filtered.map(r => r.id)} strategy={verticalListSortingStrategy}>
-              {filtered.map((r, i) => (
+          <DndContext sensors={sensors} collisionDetection={closestCenter} onDragStart={handleDragStart} onDragOver={handleDragOver} onDragEnd={handleDragEnd} onDragCancel={handleDragCancel}>
+            <SortableContext items={renderedRecords.map(r => r.id)} strategy={verticalListSortingStrategy}>
+              {renderedRecords.map((r, i) => (
                 <ClipboardCard
                   key={r.id}
                   record={r}

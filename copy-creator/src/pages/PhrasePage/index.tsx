@@ -15,12 +15,12 @@ import {
   useSensor,
   DragOverlay,
 } from "@dnd-kit/core";
-import type { DragEndEvent, DragStartEvent } from "@dnd-kit/core";
+import type { DragEndEvent, DragOverEvent, DragStartEvent } from "@dnd-kit/core";
 import {
   SortableContext,
   verticalListSortingStrategy,
-  arrayMove,
 } from "@dnd-kit/sortable";
+import { getDragPreviewOrder } from "../../utils/reorderPreview";
 
 export default function PhrasePage() {
   const { t } = useTranslation();
@@ -70,30 +70,54 @@ export default function PhrasePage() {
   );
 
   const [activePhraseId, setActivePhraseId] = useState<string | null>(null);
+  const [previewPhrases, setPreviewPhrases] = useState<typeof phrases | null>(null);
 
   const handlePhraseDragStart = useCallback((event: DragStartEvent) => {
     setActivePhraseId(String(event.active.id));
-  }, []);
+    setPreviewPhrases(phrases);
+  }, [phrases]);
 
   const handlePhraseDragCancel = useCallback(() => {
     setActivePhraseId(null);
+    setPreviewPhrases(null);
   }, []);
+
+  const handlePhraseDragOver = useCallback(
+    (event: DragOverEvent) => {
+      if (!event.over) return;
+
+      const active = String(event.active.id);
+      const over = String(event.over.id);
+
+      setPreviewPhrases((current) => {
+        const base = current ?? phrases;
+        const next = getDragPreviewOrder(base, active, over);
+        return next === base ? current : next;
+      });
+    },
+    [phrases],
+  );
 
   const handlePhraseDragEnd = useCallback(
     (event: DragEndEvent) => {
+      const finalPreview = previewPhrases;
       setActivePhraseId(null);
+      setPreviewPhrases(null);
+
       const { active, over } = event;
-      if (!over || active.id === over.id) return;
-      const oldIndex = phrases.findIndex((p) => p.id === active.id);
-      const newIndex = phrases.findIndex((p) => p.id === over.id);
-      if (oldIndex === -1 || newIndex === -1) return;
-      const newOrder = arrayMove(phrases, oldIndex, newIndex);
-      usePhraseStore.getState().reorderPhrases(newOrder.map((p) => p.id));
+      if (!over || active.id === over.id || !finalPreview) return;
+
+      const originalIds = phrases.map((p) => p.id).join("|");
+      const nextIds = finalPreview.map((p) => p.id);
+      if (nextIds.join("|") === originalIds) return;
+
+      usePhraseStore.getState().reorderPhrases(nextIds);
     },
-    [phrases]
+    [phrases, previewPhrases],
   );
 
-  const activePhrase = activePhraseId ? phrases.find(p => p.id === activePhraseId) : null;
+  const renderedPhrases = previewPhrases ?? phrases;
+  const activePhrase = activePhraseId ? renderedPhrases.find(p => p.id === activePhraseId) : null;
 
   const openNewGroup = () => {
     setEditingId(null);
@@ -188,10 +212,10 @@ export default function PhrasePage() {
         onReorderGroups={(ids) => usePhraseStore.getState().reorderGroups(ids)}
       />
 
-      <DndContext sensors={sensors} onDragStart={handlePhraseDragStart} onDragEnd={handlePhraseDragEnd} onDragCancel={handlePhraseDragCancel}>
-        <SortableContext items={phrases.map(p => p.id)} strategy={verticalListSortingStrategy}>
+      <DndContext sensors={sensors} onDragStart={handlePhraseDragStart} onDragOver={handlePhraseDragOver} onDragEnd={handlePhraseDragEnd} onDragCancel={handlePhraseDragCancel}>
+        <SortableContext items={renderedPhrases.map(p => p.id)} strategy={verticalListSortingStrategy}>
           <PhraseList
-            phrases={phrases}
+            phrases={renderedPhrases}
             loading={loading}
             selectedGroupId={selectedGroupId}
             onPaste={pastePhrase}
