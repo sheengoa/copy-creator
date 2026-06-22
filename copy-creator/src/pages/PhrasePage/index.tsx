@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { usePhraseStore } from "../../stores/phraseStore";
 import SearchInput from "../../components/SearchInput";
@@ -7,6 +7,19 @@ import { PhraseList } from "./PhraseList";
 import { GroupDialog } from "./GroupDialog";
 import { PhraseDialog } from "./PhraseDialog";
 import { ManageGroupsDialog } from "./ManageGroupsDialog";
+import {
+  DndContext,
+  PointerSensor,
+  KeyboardSensor,
+  useSensors,
+  useSensor,
+  DragEndEvent,
+} from "@dnd-kit/core";
+import {
+  SortableContext,
+  verticalListSortingStrategy,
+  arrayMove,
+} from "@dnd-kit/sortable";
 
 export default function PhrasePage() {
   const { t } = useTranslation();
@@ -49,6 +62,24 @@ export default function PhrasePage() {
       loadPhrases(selectedGroupId);
     }
   }, [selectedGroupId]);
+
+  const sensors = useSensors(
+    useSensor(PointerSensor, { activationConstraint: { distance: 4 } }),
+    useSensor(KeyboardSensor)
+  );
+
+  const handlePhraseDragEnd = useCallback(
+    (event: DragEndEvent) => {
+      const { active, over } = event;
+      if (!over || active.id === over.id) return;
+      const oldIndex = phrases.findIndex((p) => p.id === active.id);
+      const newIndex = phrases.findIndex((p) => p.id === over.id);
+      if (oldIndex === -1 || newIndex === -1) return;
+      const newOrder = arrayMove(phrases, oldIndex, newIndex);
+      usePhraseStore.getState().reorderPhrases(newOrder.map((p) => p.id));
+    },
+    [phrases]
+  );
 
   const openNewGroup = () => {
     setEditingId(null);
@@ -142,14 +173,18 @@ export default function PhrasePage() {
         onAddPhrase={openNewPhrase}
       />
 
-      <PhraseList
-        phrases={phrases}
-        loading={loading}
-        selectedGroupId={selectedGroupId}
-        onPaste={pastePhrase}
-        onEdit={openEditPhrase}
-        onDelete={deletePhrase}
-      />
+      <DndContext sensors={sensors} onDragEnd={handlePhraseDragEnd}>
+        <SortableContext items={phrases.map(p => p.id)} strategy={verticalListSortingStrategy}>
+          <PhraseList
+            phrases={phrases}
+            loading={loading}
+            selectedGroupId={selectedGroupId}
+            onPaste={pastePhrase}
+            onEdit={openEditPhrase}
+            onDelete={deletePhrase}
+          />
+        </SortableContext>
+      </DndContext>
 
       <GroupDialog
         open={groupDialogOpen}

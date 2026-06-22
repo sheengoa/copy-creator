@@ -1,4 +1,6 @@
 import { Icons } from "../../components/Icons";
+import { useSortable } from "@dnd-kit/sortable";
+import { CSS } from "@dnd-kit/utilities";
 
 interface Phrase {
   id: string;
@@ -17,6 +19,62 @@ interface PhraseListProps {
   onPaste: (phrase: Phrase) => void;
   onEdit: (phrase: Phrase) => void;
   onDelete: (id: string) => void;
+}
+
+function PhraseCard({
+  phrase,
+  onPaste,
+  onEdit,
+  onDelete,
+}: {
+  phrase: Phrase;
+  onPaste: (p: Phrase) => void;
+  onEdit: (p: Phrase) => void;
+  onDelete: (id: string) => void;
+}) {
+  const {
+    attributes, listeners, setNodeRef, transform, transition, isDragging,
+  } = useSortable({ id: phrase.id });
+
+  const style = {
+    transform: CSS.Transform.toString(transform),
+    transition,
+  };
+
+  return (
+    <div
+      ref={setNodeRef}
+      style={style}
+      className={`notification phrase-card${isDragging ? " is-dragging" : ""}`}
+      onClick={() => onPaste(phrase)}
+    >
+      <div className="drag-handle" {...attributes} {...listeners}>
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor">
+          <circle cx="9" cy="5" r="1.5" />
+          <circle cx="15" cy="5" r="1.5" />
+          <circle cx="9" cy="12" r="1.5" />
+          <circle cx="15" cy="12" r="1.5" />
+          <circle cx="9" cy="19" r="1.5" />
+          <circle cx="15" cy="19" r="1.5" />
+        </svg>
+      </div>
+      <div className="notibar" />
+      <div className="noticontent">
+        <div className="notibody phrase-card-body">{phrase.content}</div>
+        <div className="notititle phrase-card-footer">
+          <span className="phrase-card-remark">{phrase.title}</span>
+          <div className="phrase-card-actions">
+            <button className="card-edit-btn" onClick={(e) => { e.stopPropagation(); onEdit(phrase); }}>
+              {Icons.edit}
+            </button>
+            <button className="card-delete-btn" onClick={(e) => { e.stopPropagation(); onDelete(phrase.id); }}>
+              {Icons.delete}
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
 }
 
 export function PhraseList({
@@ -66,41 +124,8 @@ export function PhraseList({
 
   return (
     <div className="phrase-list">
-      {phrases.map((p, i) => (
-        <div
-          key={p.id}
-          className="notification phrase-card"
-          style={{ "--enter-delay": i } as React.CSSProperties}
-          onClick={() => onPaste(p)}
-        >
-          <div className="notibar" />
-          <div className="noticontent">
-            <div className="notibody phrase-card-body">{p.content}</div>
-            <div className="notititle phrase-card-footer">
-              <span className="phrase-card-remark">{p.title}</span>
-              <div className="phrase-card-actions">
-                <button
-                  className="card-edit-btn"
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    onEdit(p);
-                  }}
-                >
-                  {Icons.edit}
-                </button>
-                <button
-                  className="card-delete-btn"
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    onDelete(p.id);
-                  }}
-                >
-                  {Icons.delete}
-                </button>
-              </div>
-            </div>
-          </div>
-        </div>
+      {phrases.map((p) => (
+        <PhraseCard key={p.id} phrase={p} onPaste={onPaste} onEdit={onEdit} onDelete={onDelete} />
       ))}
     </div>
   );
