@@ -15,12 +15,12 @@ import {
   useSensor,
   DragOverlay,
 } from "@dnd-kit/core";
-import type { DragEndEvent, DragOverEvent, DragStartEvent } from "@dnd-kit/core";
+import type { DragOverEvent, DragStartEvent } from "@dnd-kit/core";
 import {
   SortableContext,
   verticalListSortingStrategy,
 } from "@dnd-kit/sortable";
-import { getDragPreviewOrder } from "../../utils/reorderPreview";
+import { getChangedOrderIds, getDragPreviewOrder } from "../../utils/reorderPreview";
 
 export default function PhrasePage() {
   const { t } = useTranslation();
@@ -99,17 +99,13 @@ export default function PhrasePage() {
   );
 
   const handlePhraseDragEnd = useCallback(
-    (event: DragEndEvent) => {
+    () => {
       const finalPreview = previewPhrases;
       setActivePhraseId(null);
       setPreviewPhrases(null);
 
-      const { active, over } = event;
-      if (!over || active.id === over.id || !finalPreview) return;
-
-      const originalIds = phrases.map((p) => p.id).join("|");
-      const nextIds = finalPreview.map((p) => p.id);
-      if (nextIds.join("|") === originalIds) return;
+      const nextIds = getChangedOrderIds(phrases, finalPreview);
+      if (!nextIds) return;
 
       usePhraseStore.getState().reorderPhrases(nextIds);
     },

@@ -18,3 +18,15 @@ export function getDragPreviewOrder<T extends ReorderableItem>(
 
   return arrayMove(items, oldIndex, newIndex);
 }
+
+export function getChangedOrderIds<T extends ReorderableItem>(
+  originalItems: T[],
+  previewItems: T[] | null,
+): string[] | null {
+  if (!previewItems) return null;
+
+  const originalIds = originalItems.map((item) => item.id).join("|");
+  const previewIds = previewItems.map((item) => item.id);
+
+  return previewIds.join("|") === originalIds ? null : previewIds;
+}

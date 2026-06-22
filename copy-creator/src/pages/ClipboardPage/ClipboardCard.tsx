@@ -22,6 +22,91 @@ interface ClipboardCardProps {
   onThumbLeave: () => void;
 }
 
+type ClipboardCardPreviewProps = {
+  record: ClipboardRecord;
+  getTypeLabel: (type: string) => string;
+};
+
+function ClipboardCardBodyPreview({
+  record,
+  getTypeLabel,
+}: ClipboardCardPreviewProps) {
+  const meta = TYPE_META[record.type] || TYPE_META.text;
+  const displayContent = record.content;
+  const textLineCount = displayContent.split(/\r\n|\r|\n/).length;
+  const canToggleText =
+    record.type === "text" &&
+    (record.content_truncated ||
+      (record.content_length ?? displayContent.length) > COLLAPSE_TEXT_LENGTH ||
+      textLineCount > COLLAPSE_LINE_COUNT);
+  const hasLabel = Boolean(record.is_api_key && record.label);
+  const isUnlabeled = Boolean(record.is_api_key && !record.label);
+  const badgeText = record.label?.note || record.guessed_service || (record.is_api_key ? "未标注" : "");
+
+  return (
+    <div
+      className={`notification clipboard-card type-${record.type}${record.is_api_key ? " has-api-key" : ""}${isUnlabeled ? " api-key-unlabeled" : ""}${hasLabel ? " api-key-labeled" : ""} drag-overlay-card`}
+      style={{ "--color": meta.color } as React.CSSProperties}
+    >
+      <div className="notibar" />
+      <div className="noticontent">
+        <div className="notititle clipboard-card-header">
+          <span className="noti-type-label">
+            <span className="noti-type-icon">{record.is_api_key ? Icons.key : meta.icon}</span>
+            <span className="noti-type-text">{record.is_api_key ? "API Key" : getTypeLabel(record.type)}</span>
+          </span>
+          {record.is_api_key && (
+            <span className="api-key-badge">{badgeText || "未标注"}</span>
+          )}
+        </div>
+
+        <div
+          className={`notibody clipboard-card-body${canToggleText ? " is-toggleable is-collapsed" : ""}`}
+        >
+          {record.type === "image" ? (
+            <ImageThumb
+              record={record}
+              onHover={() => {}}
+              onLeave={() => {}}
+              onClick={(e) => e.stopPropagation()}
+            />
+          ) : record.type === "link" ? (
+            <span className="clipboard-link-content">{record.content}</span>
+          ) : record.type === "file" ? (
+            <span className="clipboard-file-content">{getFileName(record.content)}</span>
+          ) : (
+            <span className="clipboard-text-content">{displayContent}</span>
+          )}
+        </div>
+
+        <div className="notititle clipboard-card-footer">
+          <span className="clipboard-card-time">{formatTime(record.created_at)}</span>
+          <div className="clipboard-card-actions">
+            {canToggleText && (
+              <button className="card-toggle-text-btn" type="button" disabled>
+                <span>展开</span>
+              </button>
+            )}
+            <span className="drag-handle">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor">
+                <circle cx="9" cy="5" r="1.5" />
+                <circle cx="15" cy="5" r="1.5" />
+                <circle cx="9" cy="12" r="1.5" />
+                <circle cx="15" cy="12" r="1.5" />
+                <circle cx="9" cy="19" r="1.5" />
+                <circle cx="15" cy="19" r="1.5" />
+              </svg>
+            </span>
+            <button className="card-delete-btn" type="button" disabled>
+              {Icons.delete}
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function ClipboardCardInner({
   record,
   index,
@@ -351,4 +436,8 @@ function ClipboardCardInner({
 
 export function ClipboardCard(props: ClipboardCardProps) {
   return <ClipboardCardInner {...props} />;
+}
+
+export function ClipboardCardDragPreview(props: ClipboardCardPreviewProps) {
+  return <ClipboardCardBodyPreview {...props} />;
 }

@@ -3,7 +3,7 @@ import { useTranslation } from "react-i18next";
 import { useClipboardStore } from "../../stores/clipboardStore";
 import { Icons } from "../../components/Icons";
 import SearchInput from "../../components/SearchInput";
-import { ClipboardCard } from "./ClipboardCard";
+import { ClipboardCard, ClipboardCardDragPreview } from "./ClipboardCard";
 import { TYPE_META } from "./utils";
 import {
   DndContext,
@@ -14,12 +14,12 @@ import {
   closestCenter,
   DragOverlay,
 } from "@dnd-kit/core";
-import type { DragEndEvent, DragOverEvent, DragStartEvent } from "@dnd-kit/core";
+import type { DragOverEvent, DragStartEvent } from "@dnd-kit/core";
 import {
   SortableContext,
   verticalListSortingStrategy,
 } from "@dnd-kit/sortable";
-import { getDragPreviewOrder } from "../../utils/reorderPreview";
+import { getChangedOrderIds, getDragPreviewOrder } from "../../utils/reorderPreview";
 
 type ClipType = "all" | "text" | "image" | "link" | "file";
 
@@ -158,19 +158,15 @@ export default function ClipboardPage() {
   );
 
   const handleDragEnd = useCallback(
-    (event: DragEndEvent) => {
+    () => {
       const finalPreview = previewRecords;
       setActiveId(null);
       setPreviewRecords(null);
 
       if (isFiltered) return;
 
-      const { active, over } = event;
-      if (!over || active.id === over.id || !finalPreview) return;
-
-      const originalIds = filtered.map((r) => r.id).join("|");
-      const nextIds = finalPreview.map((r) => r.id);
-      if (nextIds.join("|") === originalIds) return;
+      const nextIds = getChangedOrderIds(filtered, finalPreview);
+      if (!nextIds) return;
 
       useClipboardStore.getState().reorderRecords(nextIds);
     },
@@ -267,29 +263,10 @@ export default function ClipboardPage() {
             </SortableContext>
             <DragOverlay dropAnimation={null}>
               {activeRecord ? (
-                <div className="notification clipboard-card drag-overlay-card" style={{ "--color": TYPE_META[activeRecord.type]?.color || "#8e8e93" } as React.CSSProperties}>
-                  <div className="notibar" />
-                  <div className="noticontent">
-                    <div className="notititle clipboard-card-header">
-                      <span className="noti-type-label">
-                        <span className="noti-type-icon">{activeRecord.is_api_key ? Icons.key : TYPE_META[activeRecord.type]?.icon}</span>
-                        <span className="noti-type-text">{activeRecord.is_api_key ? "API Key" : getTypeLabel(activeRecord.type)}</span>
-                      </span>
-                    </div>
-                    <div className="notibody clipboard-card-body">
-                      {activeRecord.type === "image" ? (
-                        <span className="clipboard-text-content">图片</span>
-                      ) : activeRecord.type === "file" ? (
-                        <span className="clipboard-file-content">{activeRecord.content.split('/').pop()}</span>
-                      ) : (
-                        <span className="clipboard-text-content">{activeRecord.content.slice(0, 120)}</span>
-                      )}
-                    </div>
-                    <div className="notititle clipboard-card-footer">
-                      <span className="clipboard-card-time">{activeRecord.created_at.slice(11, 19)}</span>
-                    </div>
-                  </div>
-                </div>
+                <ClipboardCardDragPreview
+                  record={activeRecord}
+                  getTypeLabel={getTypeLabel}
+                />
               ) : null}
             </DragOverlay>
           </DndContext>
