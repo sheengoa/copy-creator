@@ -1,6 +1,6 @@
 import { useSortable } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
-import { memo, useCallback, useState, useEffect, useRef } from "react";
+import { useCallback, useState, useEffect, useRef } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import type { ClipboardRecord } from "../../types";
 import { Icons } from "../../components/Icons";
@@ -42,7 +42,7 @@ function ClipboardCardInner({
 
   const sortableStyle = {
     transform: CSS.Transform.toString(transform),
-    transition,
+    transition: transition || "transform 200ms ease",
   };
 
   const meta = TYPE_META[record.type] || TYPE_META.text;
@@ -349,4 +349,6 @@ function ClipboardCardInner({
   );
 }
 
-export const ClipboardCard = memo(ClipboardCardInner);
+export function ClipboardCard(props: ClipboardCardProps) {
+  return <ClipboardCardInner {...props} />;
+}
