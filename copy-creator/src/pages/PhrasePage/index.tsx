@@ -20,6 +20,7 @@ import {
   SortableContext,
   verticalListSortingStrategy,
 } from "@dnd-kit/sortable";
+import { restrictToVerticalAxis } from "@dnd-kit/modifiers";
 import { getChangedOrderIds, getDragPreviewOrder } from "../../utils/reorderPreview";
 
 export default function PhrasePage() {
@@ -208,7 +209,7 @@ export default function PhrasePage() {
         onReorderGroups={(ids) => usePhraseStore.getState().reorderGroups(ids)}
       />
 
-      <DndContext sensors={sensors} onDragStart={handlePhraseDragStart} onDragOver={handlePhraseDragOver} onDragEnd={handlePhraseDragEnd} onDragCancel={handlePhraseDragCancel}>
+      <DndContext sensors={sensors} onDragStart={handlePhraseDragStart} onDragOver={handlePhraseDragOver} onDragEnd={handlePhraseDragEnd} onDragCancel={handlePhraseDragCancel} modifiers={[restrictToVerticalAxis]}>
         <SortableContext items={renderedPhrases.map(p => p.id)} strategy={verticalListSortingStrategy}>
           <PhraseList
             phrases={renderedPhrases}
