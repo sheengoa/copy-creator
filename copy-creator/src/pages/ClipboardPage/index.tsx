@@ -243,17 +243,26 @@ export default function ClipboardPage() {
             </SortableContext>
             <DragOverlay dropAnimation={null}>
               {activeRecord ? (
-                <div className="notification clipboard-card drag-overlay-card" style={{ "--color": TYPE_META[activeRecord.type]?.color } as React.CSSProperties}>
+                <div className="notification clipboard-card drag-overlay-card" style={{ "--color": TYPE_META[activeRecord.type]?.color || "#8e8e93" } as React.CSSProperties}>
                   <div className="notibar" />
                   <div className="noticontent">
+                    <div className="notititle clipboard-card-header">
+                      <span className="noti-type-label">
+                        <span className="noti-type-icon">{activeRecord.is_api_key ? Icons.key : TYPE_META[activeRecord.type]?.icon}</span>
+                        <span className="noti-type-text">{activeRecord.is_api_key ? "API Key" : getTypeLabel(activeRecord.type)}</span>
+                      </span>
+                    </div>
                     <div className="notibody clipboard-card-body">
                       {activeRecord.type === "image" ? (
                         <span className="clipboard-text-content">图片</span>
                       ) : activeRecord.type === "file" ? (
                         <span className="clipboard-file-content">{activeRecord.content.split('/').pop()}</span>
                       ) : (
-                        <span className="clipboard-text-content">{activeRecord.content.slice(0, 80)}</span>
+                        <span className="clipboard-text-content">{activeRecord.content.slice(0, 120)}</span>
                       )}
+                    </div>
+                    <div className="notititle clipboard-card-footer">
+                      <span className="clipboard-card-time">{activeRecord.created_at.slice(11, 19)}</span>
                     </div>
                   </div>
                 </div>
