@@ -1,4 +1,5 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import { useTranslation } from "react-i18next";
 import { usePhraseStore } from "../../stores/phraseStore";
 import SearchInput from "../../components/SearchInput";
@@ -72,15 +73,18 @@ export default function PhrasePage() {
 
   const [activePhraseId, setActivePhraseId] = useState<string | null>(null);
   const [previewPhrases, setPreviewPhrases] = useState<typeof phrases | null>(null);
+  const lastPhrasePreviewMoveRef = useRef<string | null>(null);
 
   const handlePhraseDragStart = useCallback((event: DragStartEvent) => {
     setActivePhraseId(String(event.active.id));
+    lastPhrasePreviewMoveRef.current = null;
     setPreviewPhrases(phrases);
   }, [phrases]);
 
   const handlePhraseDragCancel = useCallback(() => {
     setActivePhraseId(null);
     setPreviewPhrases(null);
+    lastPhrasePreviewMoveRef.current = null;
   }, []);
 
   const handlePhraseDragOver = useCallback(
@@ -89,6 +93,10 @@ export default function PhrasePage() {
 
       const active = String(event.active.id);
       const over = String(event.over.id);
+      const previewMoveKey = `${active}:${over}`;
+
+      if (lastPhrasePreviewMoveRef.current === previewMoveKey) return;
+      lastPhrasePreviewMoveRef.current = previewMoveKey;
 
       setPreviewPhrases((current) => {
         const base = current ?? phrases;
@@ -104,6 +112,7 @@ export default function PhrasePage() {
       const finalPreview = previewPhrases;
       setActivePhraseId(null);
       setPreviewPhrases(null);
+      lastPhrasePreviewMoveRef.current = null;
 
       const nextIds = getChangedOrderIds(phrases, finalPreview);
       if (!nextIds) return;
@@ -115,6 +124,21 @@ export default function PhrasePage() {
 
   const renderedPhrases = previewPhrases ?? phrases;
   const activePhrase = activePhraseId ? renderedPhrases.find(p => p.id === activePhraseId) : null;
+  const phraseDragOverlay = (
+    <DragOverlay dropAnimation={null}>
+      {activePhrase ? (
+        <div className="notification phrase-card drag-overlay-card">
+          <div className="notibar" />
+          <div className="noticontent">
+            <div className="notibody phrase-card-body">{activePhrase.content.slice(0, 80)}</div>
+            <div className="notititle phrase-card-footer">
+              <span className="phrase-card-remark">{activePhrase.title}</span>
+            </div>
+          </div>
+        </div>
+      ) : null}
+    </DragOverlay>
+  );
 
   const openNewGroup = () => {
     setEditingId(null);
@@ -220,19 +244,7 @@ export default function PhrasePage() {
             onDelete={deletePhrase}
           />
         </SortableContext>
-        <DragOverlay dropAnimation={null}>
-          {activePhrase ? (
-            <div className="notification phrase-card drag-overlay-card">
-              <div className="notibar" />
-              <div className="noticontent">
-                <div className="notibody phrase-card-body">{activePhrase.content.slice(0, 80)}</div>
-                <div className="notititle phrase-card-footer">
-                  <span className="phrase-card-remark">{activePhrase.title}</span>
-                </div>
-              </div>
-            </div>
-          ) : null}
-        </DragOverlay>
+        {createPortal(phraseDragOverlay, document.body)}
       </DndContext>
 
       <GroupDialog

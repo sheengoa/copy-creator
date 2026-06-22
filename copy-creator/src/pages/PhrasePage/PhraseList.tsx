@@ -33,7 +33,7 @@ function PhraseCard({
   onDelete: (id: string) => void;
 }) {
   const {
-    attributes, listeners, setNodeRef, transform, transition, isDragging,
+    attributes, listeners, setNodeRef, setActivatorNodeRef, transform, transition, isDragging,
   } = useSortable({ id: phrase.id });
 
   const style = {
@@ -54,7 +54,7 @@ function PhraseCard({
         <div className="notititle phrase-card-footer">
           <span className="phrase-card-remark">{phrase.title}</span>
           <div className="phrase-card-actions">
-            <span className="drag-handle" {...attributes} {...listeners}>
+            <span ref={setActivatorNodeRef} className="drag-handle" {...attributes} {...listeners}>
               <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor">
                 <circle cx="9" cy="5" r="1.5" />
                 <circle cx="15" cy="5" r="1.5" />

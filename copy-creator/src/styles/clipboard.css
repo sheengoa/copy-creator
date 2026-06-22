@@ -13,7 +13,6 @@
   overflow-y: auto;
   flex: 1;
   padding-bottom: 8px;
-  will-change: transform;
 }
 
 .clipboard-list::-webkit-scrollbar {

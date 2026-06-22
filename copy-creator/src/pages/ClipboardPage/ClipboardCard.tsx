@@ -122,6 +122,7 @@ function ClipboardCardInner({
     attributes,
     listeners,
     setNodeRef,
+    setActivatorNodeRef,
     transform,
     transition,
     isDragging,
@@ -332,7 +333,7 @@ function ClipboardCardInner({
                 <span>{loadingFullContent ? "加载" : isTextExpanded ? "收起" : "展开"}</span>
               </button>
             )}
-            <span className="drag-handle" {...attributes} {...listeners}>
+            <span ref={setActivatorNodeRef} className="drag-handle" {...attributes} {...listeners}>
               <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor">
                 <circle cx="9" cy="5" r="1.5" />
                 <circle cx="15" cy="5" r="1.5" />

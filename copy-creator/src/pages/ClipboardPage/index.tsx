@@ -1,4 +1,5 @@
 import { useEffect, useState, useRef, useCallback, useMemo } from "react";
+import { createPortal } from "react-dom";
 import { useTranslation } from "react-i18next";
 import { useClipboardStore } from "../../stores/clipboardStore";
 import { Icons } from "../../components/Icons";
@@ -49,6 +50,7 @@ export default function ClipboardPage() {
 
   const [hoverPreview, setHoverPreview] = useState<{ src: string; x: number; y: number } | null>(null);
   const hoverTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const clipboardListRef = useRef<HTMLDivElement>(null);
 
   const categories: { key: ClipType; label: string }[] = [
     { key: "all", label: t("clipboard.all") },
@@ -131,11 +133,13 @@ export default function ClipboardPage() {
   const [activeId, setActiveId] = useState<string | null>(null);
   const [previewRecords, setPreviewRecords] = useState<typeof records | null>(null);
   const [activeOverlayWidth, setActiveOverlayWidth] = useState<number | null>(null);
+  const lastPreviewMoveRef = useRef<string | null>(null);
 
   const handleDragStart = useCallback((event: DragStartEvent) => {
     const id = String(event.active.id);
     setActiveId(id);
-    setActiveOverlayWidth(event.active.rect.current.initial?.width ?? null);
+    setActiveOverlayWidth(clipboardListRef.current?.getBoundingClientRect().width ?? null);
+    lastPreviewMoveRef.current = null;
     setPreviewRecords(isFiltered ? null : filtered);
   }, [filtered, isFiltered]);
 
@@ -143,6 +147,7 @@ export default function ClipboardPage() {
     setActiveId(null);
     setActiveOverlayWidth(null);
     setPreviewRecords(null);
+    lastPreviewMoveRef.current = null;
   }, []);
 
   const handleDragOver = useCallback(
@@ -151,6 +156,10 @@ export default function ClipboardPage() {
 
       const active = String(event.active.id);
       const over = String(event.over.id);
+      const previewMoveKey = `${active}:${over}`;
+
+      if (lastPreviewMoveRef.current === previewMoveKey) return;
+      lastPreviewMoveRef.current = previewMoveKey;
 
       setPreviewRecords((current) => {
         const base = current ?? filtered;
@@ -167,6 +176,7 @@ export default function ClipboardPage() {
       setActiveId(null);
       setActiveOverlayWidth(null);
       setPreviewRecords(null);
+      lastPreviewMoveRef.current = null;
 
       if (isFiltered) return;
 
@@ -180,6 +190,17 @@ export default function ClipboardPage() {
 
   const renderedRecords = previewRecords ?? filtered;
   const activeRecord = activeId ? renderedRecords.find(r => r.id === activeId) : null;
+  const dragOverlay = (
+    <DragOverlay dropAnimation={null} style={{ width: activeOverlayWidth ?? undefined }}>
+      {activeRecord ? (
+        <ClipboardCardDragPreview
+          record={activeRecord}
+          getTypeLabel={getTypeLabel}
+          width={activeOverlayWidth}
+        />
+      ) : null}
+    </DragOverlay>
+  );
 
   return (
     <div className="clipboard-page">
@@ -250,7 +271,7 @@ export default function ClipboardPage() {
           <span>{t("clipboard.empty")}</span>
         </div>
       ) : (
-        <div className="clipboard-list">
+        <div className="clipboard-list" ref={clipboardListRef}>
           <DndContext sensors={sensors} collisionDetection={closestCenter} onDragStart={handleDragStart} onDragOver={handleDragOver} onDragEnd={handleDragEnd} onDragCancel={handleDragCancel} modifiers={[restrictToVerticalAxis]}>
             <SortableContext items={renderedRecords.map(r => r.id)} strategy={verticalListSortingStrategy}>
               {renderedRecords.map((r, i) => (
@@ -266,15 +287,7 @@ export default function ClipboardPage() {
                 />
               ))}
             </SortableContext>
-            <DragOverlay dropAnimation={null} style={{ width: activeOverlayWidth ?? undefined }}>
-              {activeRecord ? (
-                <ClipboardCardDragPreview
-                  record={activeRecord}
-                  getTypeLabel={getTypeLabel}
-                  width={activeOverlayWidth}
-                />
-              ) : null}
-            </DragOverlay>
+            {createPortal(dragOverlay, document.body)}
           </DndContext>
           {hasMore && filtered.length > 0 && (
             <button
