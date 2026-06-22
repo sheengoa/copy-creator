@@ -1,4 +1,4 @@
-import { useRef, useEffect } from "react";
+import { useState, useRef, useEffect } from "react";
 import { useTranslation } from "react-i18next";
 import { Icons } from "../../components/Icons";
 import {
@@ -7,8 +7,9 @@ import {
   useSensors,
   useSensor,
   closestCenter,
+  DragOverlay,
 } from "@dnd-kit/core";
-import type { DragEndEvent } from "@dnd-kit/core";
+import type { DragEndEvent, DragStartEvent } from "@dnd-kit/core";
 import {
   SortableContext,
   horizontalListSortingStrategy,
@@ -97,7 +98,18 @@ export function GroupChips({
     useSensor(PointerSensor, { activationConstraint: { distance: 4 } })
   );
 
+  const [activeGroupId, setActiveGroupId] = useState<string | null>(null);
+
+  const handleGroupDragStart = (event: DragStartEvent) => {
+    setActiveGroupId(String(event.active.id));
+  };
+
+  const handleGroupDragCancel = () => {
+    setActiveGroupId(null);
+  };
+
   const handleGroupDragEnd = (event: DragEndEvent, groups: PhraseGroup[]) => {
+    setActiveGroupId(null);
     const { active, over } = event;
     if (!over || active.id === over.id) return;
     const oldIndex = groups.findIndex((g) => g.id === active.id);
@@ -107,10 +119,12 @@ export function GroupChips({
     onReorderGroups(newOrder.map((g) => g.id));
   };
 
+  const activeGroup = activeGroupId ? groups.find(g => g.id === activeGroupId) : null;
+
   return (
     <div className="phrase-groups">
       <div className="groups-scroll" ref={groupsScrollRef}>
-        <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={(e) => handleGroupDragEnd(e, groups)} modifiers={[restrictToHorizontalAxis]}>
+        <DndContext sensors={sensors} collisionDetection={closestCenter} onDragStart={handleGroupDragStart} onDragEnd={(e) => handleGroupDragEnd(e, groups)} onDragCancel={handleGroupDragCancel} modifiers={[restrictToHorizontalAxis]}>
           <SortableContext items={groups.map(g => g.id)} strategy={horizontalListSortingStrategy}>
             {groups.map((g) => (
               <SortableGroupChip
@@ -121,6 +135,13 @@ export function GroupChips({
               />
             ))}
           </SortableContext>
+          <DragOverlay dropAnimation={null}>
+            {activeGroup ? (
+              <div className={`group-chip active drag-overlay-chip`}>
+                {activeGroup.name}
+              </div>
+            ) : null}
+          </DragOverlay>
         </DndContext>
       </div>
       <button className="group-add-btn" onClick={onAddGroup}>

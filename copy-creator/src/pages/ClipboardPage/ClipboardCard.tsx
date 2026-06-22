@@ -175,16 +175,6 @@ function ClipboardCardInner({
       onClick={handlePaste}
       onContextMenu={handleContextMenu}
     >
-      <div className="drag-handle" {...attributes} {...listeners}>
-        <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor">
-          <circle cx="9" cy="5" r="1.5" />
-          <circle cx="15" cy="5" r="1.5" />
-          <circle cx="9" cy="12" r="1.5" />
-          <circle cx="15" cy="12" r="1.5" />
-          <circle cx="9" cy="19" r="1.5" />
-          <circle cx="15" cy="19" r="1.5" />
-        </svg>
-      </div>
       <div className="notibar" />
       <div className="noticontent">
         <div className="notititle clipboard-card-header">
@@ -255,6 +245,16 @@ function ClipboardCardInner({
                 <span>{loadingFullContent ? "加载" : isTextExpanded ? "收起" : "展开"}</span>
               </button>
             )}
+            <span className="drag-handle" {...attributes} {...listeners}>
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor">
+                <circle cx="9" cy="5" r="1.5" />
+                <circle cx="15" cy="5" r="1.5" />
+                <circle cx="9" cy="12" r="1.5" />
+                <circle cx="15" cy="12" r="1.5" />
+                <circle cx="9" cy="19" r="1.5" />
+                <circle cx="15" cy="19" r="1.5" />
+              </svg>
+            </span>
             <button className="card-delete-btn" onClick={handleDelete}>
               {Icons.delete}
             </button>

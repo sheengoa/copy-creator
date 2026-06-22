@@ -730,36 +730,57 @@
 
 /* ── Drag Handle ──────────────────────────────────────── */
 .drag-handle {
-  display: flex;
+  display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 22px;
-  flex-shrink: 0;
+  width: 20px;
+  height: 20px;
   cursor: grab;
   color: var(--text-tertiary);
-  opacity: 0;
-  transition: opacity 0.15s;
   user-select: none;
+  border-radius: 4px;
 }
 
-.notification:hover .drag-handle {
-  opacity: 0.6;
-}
-
-.notification .drag-handle:hover {
-  opacity: 1;
+.drag-handle:hover {
   color: var(--text-primary);
+  background: var(--chip-hover-bg);
 }
 
 .drag-handle:active {
   cursor: grabbing;
 }
 
+.drag-handle svg {
+  width: 12px;
+  height: 12px;
+}
+
+/* ── Drag Overlay ────────────────────────────────────── */
+.drag-overlay-card {
+  cursor: grabbing;
+  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.2);
+  transform: scale(1.02);
+}
+
+[data-theme="dark"] .drag-overlay-card {
+  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.5);
+}
+
+.drag-overlay-chip {
+  cursor: grabbing;
+  box-shadow: 0 6px 16px rgba(0, 0, 0, 0.2);
+  transform: scale(1.04);
+  white-space: nowrap;
+}
+
+[data-theme="dark"] .drag-overlay-chip {
+  box-shadow: 0 6px 16px rgba(0, 0, 0, 0.45);
+}
+
 /* ── Dragging State ──────────────────────────────────── */
 .clipboard-card.is-dragging,
 .phrase-card.is-dragging {
-  opacity: 0.45;
-  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.12);
+  opacity: 0.35;
   z-index: 999;
 }
 
@@ -768,7 +789,6 @@
   box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
 }
 
-[data-theme="dark"] .clipboard-card.is-dragging,
-[data-theme="dark"] .phrase-card.is-dragging {
-  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.4);
+[data-theme="dark"] .sortable-chosen {
+  box-shadow: 0 4px 12px rgba(255, 255, 255, 0.08);
 }
