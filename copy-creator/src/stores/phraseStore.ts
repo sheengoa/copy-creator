@@ -47,6 +47,8 @@ interface PhraseState {
   ) => Promise<void>;
   deletePhrase: (id: string) => Promise<void>;
   pastePhrase: (phrase: Phrase) => Promise<void>;
+  reorderPhrases: (ids: string[]) => Promise<void>;
+  reorderGroups: (ids: string[]) => Promise<void>;
 }
 
 export const usePhraseStore = create<PhraseState>()((set, get) => {
@@ -172,6 +174,34 @@ export const usePhraseStore = create<PhraseState>()((set, get) => {
       await invoke("paste_text", { text: phrase.content });
     } catch (e) {
       console.error("Paste failed:", e);
+    }
+  },
+
+  reorderPhrases: async (ids: string[]) => {
+    const idOrder = new Map(ids.map((id, i) => [id, i]));
+    set((s) => ({
+      phrases: [...s.phrases].sort(
+        (a, b) => (idOrder.get(a.id) ?? Infinity) - (idOrder.get(b.id) ?? Infinity)
+      ),
+    }));
+    try {
+      await invoke("reorder_phrases", { ids });
+    } catch (e) {
+      console.error("Failed to reorder phrases:", e);
+    }
+  },
+
+  reorderGroups: async (ids: string[]) => {
+    const idOrder = new Map(ids.map((id, i) => [id, i]));
+    set((s) => ({
+      groups: [...s.groups].sort(
+        (a, b) => (idOrder.get(a.id) ?? Infinity) - (idOrder.get(b.id) ?? Infinity)
+      ),
+    }));
+    try {
+      await invoke("reorder_phrase_groups", { ids });
+    } catch (e) {
+      console.error("Failed to reorder groups:", e);
     }
   },
   };
