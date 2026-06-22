@@ -50,6 +50,7 @@ interface ClipboardState {
   deleteAllRecords: () => Promise<void>;
   deleteRecordsByType: (recordType: string) => Promise<void>;
   pasteRecord: (record: ClipboardRecord) => Promise<void>;
+  reorderRecords: (ids: string[]) => Promise<void>;
   getRecordContent: (record: ClipboardRecord) => Promise<string>;
   getThumbnail: (record: Pick<ClipboardRecord, "id" | "content">) => Promise<string>;
   getImageData: (record: Pick<ClipboardRecord, "id" | "content">) => Promise<string>;
@@ -242,6 +243,22 @@ export const useClipboardStore = create<ClipboardState>((set, get) => ({
       }
     } catch (e) {
       console.error("Paste failed:", e);
+    }
+  },
+
+  reorderRecords: async (ids: string[]) => {
+    const idOrder = new Map(ids.map((id, i) => [id, i]));
+    set((state) => ({
+      records: [...state.records].sort(
+        (a, b) => (idOrder.get(a.id) ?? Infinity) - (idOrder.get(b.id) ?? Infinity)
+      ),
+    }));
+    try {
+      await invoke("reorder_clipboard_records", { ids });
+    } catch (e) {
+      console.error("Failed to reorder clipboard records:", e);
+      // Revert: reload from backend
+      get().loadRecords();
     }
   },
 
