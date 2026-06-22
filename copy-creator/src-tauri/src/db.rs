@@ -339,6 +339,41 @@ pub fn init_db(app: &AppHandle) -> Result<(), Box<dyn std::error::Error>> {
         [],
     ).ok();
 
+    // ── sort_order migration for drag reorder ─────────────────────
+    conn.execute_batch(
+        "
+        ALTER TABLE clipboard_records ADD COLUMN sort_order REAL;
+
+        CREATE INDEX IF NOT EXISTS idx_clipboard_sort_order
+            ON clipboard_records(sort_order DESC);
+        ",
+    )
+    .ok();
+
+    // Seed sort_order for existing records that still have NULL
+    let seeded: bool = conn
+        .query_row(
+            "SELECT COUNT(*) > 0 FROM clipboard_records WHERE sort_order IS NOT NULL LIMIT 1",
+            [],
+            |row| row.get(0),
+        )
+        .unwrap_or(false);
+
+    if !seeded {
+        conn.execute_batch(
+            "
+            UPDATE clipboard_records
+            SET sort_order = CAST(
+                (julianday(created_at) - 2440587.5) * 86400000 AS INTEGER
+            )
+            WHERE sort_order IS NULL;
+            ",
+        )
+        .ok();
+        log::info!("db: seeded sort_order for {} clipboard records",
+            conn.changes());
+    }
+
     app.manage(DbState {
         conn: Mutex::new(conn),
     });
