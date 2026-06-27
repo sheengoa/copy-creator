@@ -171,6 +171,34 @@
   min-height: calc(1 * 1.5 * 14px);
 }
 
+.phrase-card .notibody.phrase-card-file-body {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.phrase-card-file-icon {
+  width: 16px;
+  height: 16px;
+  color: var(--text-secondary);
+  flex-shrink: 0;
+  display: inline-flex;
+}
+
+.phrase-card-file-name {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.phrase-card-file-size {
+  color: var(--text-secondary);
+  font-size: var(--text-xs);
+  flex-shrink: 0;
+}
+
 .phrase-card .notititle.phrase-card-footer {
   padding: 0.15rem 0.5rem 0.5rem 1rem;
   color: var(--text-secondary);
@@ -238,6 +266,76 @@
 
 .phrase-add-btn:active {
   transform: scale(0.95);
+}
+
+.quick-input-type-tabs {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 4px;
+  padding: 3px;
+  border-radius: 8px;
+  background: var(--input-bg);
+  border: 0.5px solid var(--separator);
+}
+
+.quick-input-type-btn {
+  border: none;
+  border-radius: 6px;
+  padding: 6px 10px;
+  background: transparent;
+  color: var(--text-secondary);
+  font-family: var(--font);
+  font-size: var(--text-sm);
+  cursor: pointer;
+}
+
+.quick-input-type-btn.active {
+  background: var(--card-bg);
+  color: var(--text-primary);
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.08);
+}
+
+.quick-input-file-box {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+  padding: 10px;
+  border: 0.5px solid var(--separator);
+  border-radius: 8px;
+  background: var(--input-bg);
+}
+
+.quick-input-file-box.error {
+  border-color: var(--danger, #ff3b30);
+}
+
+.quick-input-file-btn {
+  flex-shrink: 0;
+}
+
+.quick-input-file-meta {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.quick-input-file-name,
+.quick-input-file-size {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.quick-input-file-name {
+  color: var(--text-primary);
+  font-size: var(--text-sm);
+}
+
+.quick-input-file-size {
+  color: var(--text-secondary);
+  font-size: var(--text-xs);
 }
 
 /* Group management dialog */

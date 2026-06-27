@@ -8,7 +8,7 @@
   },
   "tabs": {
     "clipboard": "剪切板",
-    "phrases": "快捷短语",
+    "phrases": "快捷输入",
     "translate": "翻译"
   },
   "settings": {
@@ -61,7 +61,7 @@
     "restartNow": "立即重启",
     "changeFolder": "更改",
     "migrateTitle": "迁移数据",
-    "migratePrompt": "是否将现有剪切板记录、短语和设置迁移到新位置？\n\n选择「迁移」：数据将复制到新位置\n选择「取消」：仅更改存储路径，现有数据保留在原位置",
+    "migratePrompt": "是否将现有剪切板记录、快捷输入和设置迁移到新位置？\n\n选择「迁移」：数据将复制到新位置\n选择「取消」：仅更改存储路径，现有数据保留在原位置",
     "translation": "翻译"
   },
   "translate": {
@@ -92,16 +92,24 @@
     "apiKeySaving": "保存中..."
   },
   "phrases": {
-    "search": "搜索短语...",
+    "search": "搜索快捷输入...",
     "newGroup": "新建场景组",
     "groupName": "场景组名称",
-    "newPhrase": "新建短语",
+    "newPhrase": "新建输入",
+    "newInput": "新建快捷输入",
+    "textInput": "文本",
+    "fileInput": "文件",
+    "selectFile": "选择文件",
+    "changeFile": "更换文件",
+    "noFileSelected": "未选择文件",
+    "fileLimit": "单文件上限 {{size}}",
+    "fileRequired": "请选择文件",
     "remark": "备注",
     "content": "内容",
     "contentRequired": "内容未填写",
-    "empty": "选择一个场景组查看短语",
+    "empty": "选择一个场景组查看快捷输入",
     "emptyGroup": "还没有场景组，点击下方按钮创建",
-    "emptyGroupPhrases": "当前分组中无快捷短语",
+    "emptyGroupPhrases": "当前分组中无快捷输入",
     "manageGroups": "管理分组",
     "rename": "重命名"
   },
