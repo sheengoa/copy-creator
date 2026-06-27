@@ -159,6 +159,7 @@ pub fn run() {
             db::set_setting_skip_migrate,
             db::set_settings_batch,
             paste::paste_text,
+            paste::paste_text_terminal,
             paste::paste_image,
             paste::paste_file,
             db::get_image_base64,

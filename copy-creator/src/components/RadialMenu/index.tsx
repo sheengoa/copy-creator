@@ -306,16 +306,16 @@ export default function RadialMenu() {
     }
   }, []);
 
-  const handleItemPaste = useCallback(async (itemId: string) => {
-    const { records, pasteRecord } = useClipboardStore.getState();
+  const handleItemPaste = useCallback(async (itemId: string, terminal = false) => {
+    const { records, pasteRecord, pasteRecordTerminal } = useClipboardStore.getState();
     const record = records.find((r) => r.id === itemId);
     if (record) {
-      await pasteRecord(record);
+      await (terminal ? pasteRecordTerminal(record) : pasteRecord(record));
     } else {
-      const { phrases, pastePhrase } = usePhraseStore.getState();
+      const { phrases, pastePhrase, pastePhraseTerminal } = usePhraseStore.getState();
       const phrase = phrases.find((p) => p.id === itemId);
       if (phrase) {
-        await pastePhrase(phrase);
+        await (terminal ? pastePhraseTerminal(phrase) : pastePhrase(phrase));
       }
     }
     resetState();
@@ -514,7 +514,12 @@ export default function RadialMenu() {
                 data-radial-item-id={item.id}
                 onClick={(e) => {
                   e.stopPropagation();
-                  handleItemPaste(item.id);
+                  handleItemPaste(item.id, e.shiftKey);
+                }}
+                onContextMenu={(e) => {
+                  e.preventDefault();
+                  e.stopPropagation();
+                  handleItemPaste(item.id, true);
                 }}
               >
                 {item.type === "image" ? (

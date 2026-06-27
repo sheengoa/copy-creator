@@ -77,6 +77,8 @@ pub fn toggle_window(app: &AppHandle) {
     }
     let _guard = ToggleGuard;
 
+    crate::paste::remember_paste_target();
+
     let window = match app.get_webview_window("main") {
         Some(w) => w,
         None => {
@@ -107,6 +109,8 @@ pub fn toggle_window(app: &AppHandle) {
 // ---- radial menu ----
 
 pub fn show_radial_menu(app: &AppHandle) {
+    crate::paste::remember_paste_target();
+
     if let Some(radial) = app.get_webview_window("radial-menu") {
         if radial.is_visible().unwrap_or(false) {
             log::info!("[show_radial_menu] already visible, hiding");
