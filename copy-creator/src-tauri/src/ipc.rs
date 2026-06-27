@@ -98,6 +98,8 @@ fn cmd_show(app: &AppHandle) {
     }
     let _guard = ShowGuard;
 
+    crate::paste::remember_paste_target();
+
     let window = match app.get_webview_window("main") {
         Some(w) => w,
         None => {

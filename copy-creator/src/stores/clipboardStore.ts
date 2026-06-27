@@ -50,6 +50,7 @@ interface ClipboardState {
   deleteAllRecords: () => Promise<void>;
   deleteRecordsByType: (recordType: string) => Promise<void>;
   pasteRecord: (record: ClipboardRecord) => Promise<void>;
+  pasteRecordTerminal: (record: ClipboardRecord) => Promise<void>;
   reorderRecords: (ids: string[]) => Promise<void>;
   getRecordContent: (record: ClipboardRecord) => Promise<string>;
   getThumbnail: (record: Pick<ClipboardRecord, "id" | "content">) => Promise<string>;
@@ -243,6 +244,21 @@ export const useClipboardStore = create<ClipboardState>((set, get) => ({
       }
     } catch (e) {
       console.error("Paste failed:", e);
+    }
+  },
+
+  pasteRecordTerminal: async (record: ClipboardRecord) => {
+    try {
+      const content = await getFullContent(record);
+      if (record.type === "image") {
+        await invoke("paste_image", { path: content });
+      } else if (record.type === "file") {
+        await invoke("paste_file", { path: content });
+      } else {
+        await invoke("paste_text_terminal", { text: content });
+      }
+    } catch (e) {
+      console.error("Terminal paste failed:", e);
     }
   },
 

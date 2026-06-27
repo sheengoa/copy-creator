@@ -47,6 +47,7 @@ interface PhraseState {
   ) => Promise<void>;
   deletePhrase: (id: string) => Promise<void>;
   pastePhrase: (phrase: Phrase) => Promise<void>;
+  pastePhraseTerminal: (phrase: Phrase) => Promise<void>;
   reorderPhrases: (ids: string[]) => Promise<void>;
   reorderGroups: (ids: string[]) => Promise<void>;
 }
@@ -174,6 +175,14 @@ export const usePhraseStore = create<PhraseState>()((set, get) => {
       await invoke("paste_text", { text: phrase.content });
     } catch (e) {
       console.error("Paste failed:", e);
+    }
+  },
+
+  pastePhraseTerminal: async (phrase: Phrase) => {
+    try {
+      await invoke("paste_text_terminal", { text: phrase.content });
+    } catch (e) {
+      console.error("Terminal paste failed:", e);
     }
   },
 
