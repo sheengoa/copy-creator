@@ -676,45 +676,17 @@ pub fn diagnose_paste_environment() {
 
 // ── File-paste helpers ──────────────────────────────────────────
 
-/// Write a URI list to the system clipboard so that Linux file managers
-/// recognise the paste as a file operation (rather than plain text).
-///
-/// On X11 this uses `xclip -t text/uri-list`; on Wayland it uses
-/// `wl-copy -t text/uri-list`.  Falls back to writing plain text via
-/// the Tauri clipboard plugin when neither tool is available.
-fn write_uri_list(handle: &AppHandle, uri: &str) {
-    let (cmd, args): (&str, &[&str]) = if is_wayland() {
-        ("wl-copy", &["-t", "text/uri-list"])
-    } else {
-        ("xclip", &["-selection", "clipboard", "-t", "text/uri-list"])
-    };
-
-    let result = Command::new(cmd)
-        .args(args)
-        .stdin(std::process::Stdio::piped())
-        .spawn()
-        .and_then(|mut child| {
-            use std::io::Write;
-            if let Some(mut stdin) = child.stdin.take() {
-                let _ = stdin.write_all(uri.as_bytes());
-            }
-            child.wait()
-        });
-
-    match result {
-        Ok(status) if status.success() => {
-            log::info!("paste_file: wrote text/uri-list via {}", cmd);
-        }
-        _ => {
-            log::warn!(
-                "paste_file: {} not available, falling back to plain-text URI; \
-                 install xclip (X11) or wl-clipboard (Wayland) for proper file paste",
-                cmd
-            );
-            // Last-resort fallback: plain-text file:// URI
-            let _ = handle.clipboard().write_text(uri);
-        }
-    }
+/// Write a file list to the system clipboard so Linux apps receive
+/// `text/uri-list`, not a plain-text path.
+fn write_file_list(path: &std::path::Path) -> Result<(), String> {
+    let mut clipboard = arboard::Clipboard::new()
+        .map_err(|e| format!("初始化文件剪切板失败: {e:?}"))?;
+    clipboard
+        .set()
+        .file_list(&[path])
+        .map_err(|e| format!("写入文件剪切板失败: {e:?}"))?;
+    log::info!("paste_file: wrote file list to clipboard: {}", path.display());
+    Ok(())
 }
 
 fn paste_with_defocus(
@@ -881,14 +853,17 @@ pub fn paste_file(app: AppHandle, path: String) -> Result<(), String> {
         return Err(format!("File not found: {}", path));
     }
 
+    let file_path =
+        std::fs::canonicalize(&path).unwrap_or_else(|_| std::path::PathBuf::from(&path));
+    if let Err(e) = write_file_list(&file_path) {
+        log::error!("paste_file: {}", e);
+        PASTING.store(false, Ordering::SeqCst);
+        return Err(e);
+    }
+
     let handle = app.clone();
     std::thread::spawn(move || {
         let _guard = PasteGuard;
-
-        // Write file:// URI as text/uri-list MIME type so file managers
-        // recognise the paste as a file operation.
-        let uri = format!("file://{}", path);
-        write_uri_list(&handle, &uri);
 
         crate::clipboard::sync_monitor_cache(&handle);
         paste_with_defocus(&handle, Some(PasteShortcut::CtrlV)).ok();
