@@ -215,8 +215,15 @@ fn quick_input_files_dir(app: &AppHandle) -> PathBuf {
     dir
 }
 
-fn quick_input_relative_path(filename: &str) -> String {
-    format!("quick-input-files/{}", filename)
+fn quick_input_relative_path(dir_name: &str, filename: &str) -> String {
+    format!("quick-input-files/{}/{}", dir_name, filename)
+}
+
+fn is_legacy_quick_input_file_path(relative_path: &str) -> bool {
+    let Some(rest) = relative_path.strip_prefix("quick-input-files/") else {
+        return false;
+    };
+    !rest.is_empty() && !rest.contains('/')
 }
 
 fn quick_input_absolute_path(app: &AppHandle, relative_path: &str) -> PathBuf {
@@ -225,7 +232,13 @@ fn quick_input_absolute_path(app: &AppHandle, relative_path: &str) -> PathBuf {
 
 fn remove_quick_input_file(app: &AppHandle, relative_path: &str) {
     if relative_path.starts_with("quick-input-files/") {
-        let _ = std::fs::remove_file(quick_input_absolute_path(app, relative_path));
+        let path = quick_input_absolute_path(app, relative_path);
+        let _ = std::fs::remove_file(&path);
+        if let Some(parent) = path.parent() {
+            if parent != quick_input_files_dir(app) {
+                let _ = std::fs::remove_dir(parent);
+            }
+        }
     }
 }
 
@@ -243,15 +256,103 @@ fn copy_quick_input_file(app: &AppHandle, source_path: &str) -> Result<(String, 
         ));
     }
 
-    let ext = source
-        .extension()
+    let original_filename = source
+        .file_name()
         .and_then(|e| e.to_str())
-        .map(|e| format!(".{}", e))
-        .unwrap_or_default();
-    let filename = format!("{}{}", uuid::Uuid::new_v4(), ext);
-    let dest = quick_input_files_dir(app).join(&filename);
+        .ok_or_else(|| "文件名无效".to_string())?;
+    let dir_name = uuid::Uuid::new_v4().to_string();
+    let dest_dir = quick_input_files_dir(app).join(&dir_name);
+    std::fs::create_dir_all(&dest_dir).map_err(|e| format!("创建文件目录失败: {}", e))?;
+    let dest = dest_dir.join(original_filename);
     std::fs::copy(&source, &dest).map_err(|e| format!("复制文件失败: {}", e))?;
-    Ok((quick_input_relative_path(&filename), size))
+    Ok((quick_input_relative_path(&dir_name, original_filename), size))
+}
+
+fn legacy_quick_input_target_path(relative_path: &str, source_path: &str) -> Option<String> {
+    if !is_legacy_quick_input_file_path(relative_path) {
+        return None;
+    }
+
+    let stored_name = relative_path.strip_prefix("quick-input-files/")?;
+    let dir_name = std::path::Path::new(stored_name).file_stem()?.to_str()?;
+    let original_filename = std::path::Path::new(source_path).file_name()?.to_str()?;
+    if original_filename.is_empty() {
+        return None;
+    }
+
+    Some(quick_input_relative_path(dir_name, original_filename))
+}
+
+fn migrate_legacy_quick_input_file_names(app: &AppHandle) {
+    let storage_dir = get_storage_dir(app);
+    let state = app.state::<DbState>();
+    let conn = match state.conn.lock() {
+        Ok(conn) => conn,
+        Err(e) => {
+            log::warn!("quick input file migration skipped: {}", e);
+            return;
+        }
+    };
+
+    let rows: Vec<(String, String, String)> = {
+        let mut stmt = match conn.prepare(
+            "SELECT id, content, source_path FROM phrases WHERE input_type = 'file'",
+        ) {
+            Ok(stmt) => stmt,
+            Err(e) => {
+                log::warn!("quick input file migration query failed: {}", e);
+                return;
+            }
+        };
+        let rows = match stmt.query_map([], |row| {
+            Ok((
+                row.get::<_, String>(0)?,
+                row.get::<_, String>(1)?,
+                row.get::<_, String>(2)?,
+            ))
+        }) {
+            Ok(rows) => rows,
+            Err(e) => {
+                log::warn!("quick input file migration rows failed: {}", e);
+                return;
+            }
+        };
+        rows.filter_map(|row| row.ok()).collect()
+    };
+
+    for (id, old_relative_path, source_path) in rows {
+        let Some(new_relative_path) =
+            legacy_quick_input_target_path(&old_relative_path, &source_path)
+        else {
+            continue;
+        };
+        let old_path = storage_dir.join(&old_relative_path);
+        let new_path = storage_dir.join(&new_relative_path);
+        if !old_path.exists() {
+            continue;
+        }
+        if let Some(parent) = new_path.parent() {
+            if let Err(e) = std::fs::create_dir_all(parent) {
+                log::warn!("quick input file migration mkdir failed: {}", e);
+                continue;
+            }
+        }
+        let moved = std::fs::rename(&old_path, &new_path)
+            .or_else(|_| std::fs::copy(&old_path, &new_path).map(|_| ()))
+            .map(|_| {
+                let _ = std::fs::remove_file(&old_path);
+            });
+        if let Err(e) = moved {
+            log::warn!("quick input file migration move failed: {}", e);
+            continue;
+        }
+        if let Err(e) = conn.execute(
+            "UPDATE phrases SET content = ?1 WHERE id = ?2",
+            params![new_relative_path, id],
+        ) {
+            log::warn!("quick input file migration db update failed: {}", e);
+        }
+    }
 }
 
 #[tauri::command]
@@ -486,6 +587,7 @@ pub fn init_db(app: &AppHandle) -> Result<(), Box<dyn std::error::Error>> {
     app.manage(DbState {
         conn: Mutex::new(conn),
     });
+    migrate_legacy_quick_input_file_names(app);
 
     Ok(())
 }
@@ -1807,4 +1909,44 @@ pub fn reorder_phrases(app: AppHandle, ids: Vec<String>) -> Result<(), String> {
 
     log::info!("reorder_phrases: {} items", ids.len());
     Ok(())
+}
+
+#[cfg(test)]
+mod quick_input_file_tests {
+    use super::{
+        is_legacy_quick_input_file_path, legacy_quick_input_target_path,
+        quick_input_relative_path,
+    };
+
+    #[test]
+    fn quick_input_relative_path_preserves_original_filename() {
+        assert_eq!(
+            quick_input_relative_path("preset-1", "example.md"),
+            "quick-input-files/preset-1/example.md"
+        );
+    }
+
+    #[test]
+    fn legacy_quick_input_file_path_is_single_file_under_root() {
+        assert!(is_legacy_quick_input_file_path(
+            "quick-input-files/3fcb74c0-4738-4230-a5bc-51067b34ec0b.md"
+        ));
+        assert!(!is_legacy_quick_input_file_path(
+            "quick-input-files/preset-1/example.md"
+        ));
+    }
+
+    #[test]
+    fn legacy_quick_input_target_path_uses_original_filename() {
+        assert_eq!(
+            legacy_quick_input_target_path(
+                "quick-input-files/3fcb74c0-4738-4230-a5bc-51067b34ec0b.md",
+                "/home/ao/docs/original.md"
+            ),
+            Some(
+                "quick-input-files/3fcb74c0-4738-4230-a5bc-51067b34ec0b/original.md"
+                    .to_string()
+            )
+        );
+    }
 }
