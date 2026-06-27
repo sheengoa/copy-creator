@@ -8,7 +8,7 @@
   },
   "tabs": {
     "clipboard": "Clipboard",
-    "phrases": "Quick Phrases",
+    "phrases": "Quick Input",
     "translate": "Translate"
   },
   "settings": {
@@ -61,7 +61,7 @@
     "restartNow": "Restart Now",
     "changeFolder": "Change",
     "migrateTitle": "Migrate Data",
-    "migratePrompt": "Move existing clipboard records, phrases, and settings to the new location?\n\nChoose \"Migrate\": data will be copied to the new location\nChoose \"Cancel\": only update the path, existing data stays",
+    "migratePrompt": "Move existing clipboard records, quick input items, and settings to the new location?\n\nChoose \"Migrate\": data will be copied to the new location\nChoose \"Cancel\": only update the path, existing data stays",
     "translation": "Translation"
   },
   "translate": {
@@ -92,16 +92,24 @@
     "apiKeySaving": "Saving..."
   },
   "phrases": {
-    "search": "Search phrases...",
+    "search": "Search quick input...",
     "newGroup": "New Group",
     "groupName": "Group name",
-    "newPhrase": "New Phrase",
+    "newPhrase": "New Input",
+    "newInput": "New Quick Input",
+    "textInput": "Text",
+    "fileInput": "File",
+    "selectFile": "Select File",
+    "changeFile": "Change File",
+    "noFileSelected": "No file selected",
+    "fileLimit": "File limit {{size}}",
+    "fileRequired": "Select a file",
     "remark": "Remark",
     "content": "Content",
     "contentRequired": "Content is required",
-    "empty": "Select a group to view phrases",
+    "empty": "Select a group to view quick input",
     "emptyGroup": "No groups yet, create one below",
-    "emptyGroupPhrases": "No phrases in this group",
+    "emptyGroupPhrases": "No quick input in this group",
     "manageGroups": "Manage Groups",
     "rename": "Rename"
   },

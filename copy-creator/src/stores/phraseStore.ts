@@ -1,23 +1,19 @@
 import { create } from "zustand";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
+import type { Phrase, PhraseGroup } from "../types";
 
-interface PhraseGroup {
-  id: string;
-  name: string;
-  sort_order: number;
-  created_at: string;
-  updated_at: string;
-}
+const isAbsolutePath = (path: string) => /^([a-zA-Z]:[\\/]|[/\\])/.test(path);
 
-interface Phrase {
-  id: string;
-  group_id: string;
-  title: string;
-  content: string;
-  sort_order: number;
-  created_at: string;
-  updated_at: string;
+const resolveStoredFilePath = async (content: string) => {
+  if (isAbsolutePath(content)) return content;
+  const storagePath = await invoke<string>("get_storage_path");
+  return `${storagePath.replace(/[\\/]+$/, "")}/${content.replace(/^[\\/]+/, "")}`;
+};
+
+export interface QuickInputFileSelection {
+  path: string;
+  file_size: number;
 }
 
 interface PhraseState {
@@ -44,6 +40,18 @@ interface PhraseState {
     id: string,
     title: string,
     content: string
+  ) => Promise<void>;
+  selectQuickInputFile: () => Promise<QuickInputFileSelection>;
+  getQuickInputFileLimit: () => Promise<number>;
+  createFilePhrase: (
+    groupId: string,
+    sourcePath: string,
+    title: string
+  ) => Promise<void>;
+  updateFilePhrase: (
+    id: string,
+    sourcePath: string,
+    title: string
   ) => Promise<void>;
   deletePhrase: (id: string) => Promise<void>;
   pastePhrase: (phrase: Phrase) => Promise<void>;
@@ -153,11 +161,51 @@ export const usePhraseStore = create<PhraseState>()((set, get) => {
       await invoke("update_phrase", { id, title, content });
       set({
         phrases: get().phrases.map((p) =>
-          p.id === id ? { ...p, title, content } : p
+          p.id === id
+            ? { ...p, title, content, input_type: "text", source_path: "", file_size: 0 }
+            : p
         ),
       });
     } catch (e) {
       console.error("Failed to update phrase:", e);
+    }
+  },
+
+  selectQuickInputFile: async () => {
+    return invoke<QuickInputFileSelection>("select_quick_input_file");
+  },
+
+  getQuickInputFileLimit: async () => {
+    return invoke<number>("get_quick_input_file_limit");
+  },
+
+  createFilePhrase: async (groupId: string, sourcePath: string, title: string) => {
+    try {
+      const phrase = await invoke<Phrase>("create_file_phrase", {
+        groupId,
+        sourcePath,
+        title,
+      });
+      set({ phrases: [...get().phrases, phrase] });
+    } catch (e) {
+      console.error("Failed to create file phrase:", e);
+      throw e;
+    }
+  },
+
+  updateFilePhrase: async (id: string, sourcePath: string, title: string) => {
+    try {
+      const phrase = await invoke<Phrase>("update_file_phrase", {
+        id,
+        sourcePath,
+        title,
+      });
+      set({
+        phrases: get().phrases.map((p) => (p.id === id ? phrase : p)),
+      });
+    } catch (e) {
+      console.error("Failed to update file phrase:", e);
+      throw e;
     }
   },
 
@@ -172,7 +220,11 @@ export const usePhraseStore = create<PhraseState>()((set, get) => {
 
   pastePhrase: async (phrase: Phrase) => {
     try {
-      await invoke("paste_text", { text: phrase.content });
+      if (phrase.input_type === "file") {
+        await invoke("paste_file", { path: await resolveStoredFilePath(phrase.content) });
+      } else {
+        await invoke("paste_text", { text: phrase.content });
+      }
     } catch (e) {
       console.error("Paste failed:", e);
     }
@@ -180,7 +232,11 @@ export const usePhraseStore = create<PhraseState>()((set, get) => {
 
   pastePhraseTerminal: async (phrase: Phrase) => {
     try {
-      await invoke("paste_text_terminal", { text: phrase.content });
+      if (phrase.input_type === "file") {
+        await invoke("paste_file", { path: await resolveStoredFilePath(phrase.content) });
+      } else {
+        await invoke("paste_text_terminal", { text: phrase.content });
+      }
     } catch (e) {
       console.error("Terminal paste failed:", e);
     }

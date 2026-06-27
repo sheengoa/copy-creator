@@ -14,6 +14,8 @@ type TabKey = "clipboard" | "phrases";
 const HOVER_DELAY = 500;
 const MAX_ITEMS = 2000;
 
+const filenameFromPath = (path: string) => path.replace(/\\/g, "/").split("/").pop() || path;
+
 function formatTime(dateStr: string): string {
   const date = new Date(dateStr);
   const month = date.getMonth() + 1;
@@ -34,6 +36,7 @@ function isTruncatedItem(itemId: string): boolean {
   const { phrases } = usePhraseStore.getState();
   const phrase = phrases.find((p) => p.id === itemId);
   if (phrase) {
+    if (phrase.input_type === "file") return false;
     return phrase.content.length > 300;
   }
   return false;
@@ -446,8 +449,10 @@ export default function RadialMenu() {
       }))
     : phrases.map((p) => ({
         id: p.id,
-        content: p.content,
-        type: "phrase" as string,
+        content: p.input_type === "file"
+          ? filenameFromPath(p.source_path || p.content)
+          : p.content,
+        type: p.input_type === "file" ? "file" : "phrase",
         title: p.title,
       }));
 

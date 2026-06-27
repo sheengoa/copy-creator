@@ -1,16 +1,8 @@
 import { Icons } from "../../components/Icons";
 import { useSortable } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
-
-interface Phrase {
-  id: string;
-  group_id: string;
-  title: string;
-  content: string;
-  sort_order: number;
-  created_at: string;
-  updated_at: string;
-}
+import { useTranslation } from "react-i18next";
+import type { Phrase } from "../../types";
 
 interface PhraseListProps {
   phrases: Phrase[];
@@ -19,6 +11,15 @@ interface PhraseListProps {
   onPaste: (phrase: Phrase) => void;
   onEdit: (phrase: Phrase) => void;
   onDelete: (id: string) => void;
+}
+
+const filenameFromPath = (path: string) => path.replace(/\\/g, "/").split("/").pop() || path;
+
+function formatBytes(bytes: number) {
+  if (!bytes) return "";
+  const units = ["B", "KB", "MB", "GB"];
+  const index = Math.min(Math.floor(Math.log(bytes) / Math.log(1024)), units.length - 1);
+  return `${(bytes / 1024 ** index).toFixed(index === 0 ? 0 : 1)} ${units[index]}`;
 }
 
 function PhraseCard({
@@ -40,6 +41,8 @@ function PhraseCard({
     transform: CSS.Transform.toString(transform),
     transition: transition || "transform 200ms ease",
   };
+  const isFile = phrase.input_type === "file";
+  const fileName = filenameFromPath(phrase.source_path || phrase.content);
 
   return (
     <div
@@ -50,7 +53,17 @@ function PhraseCard({
     >
       <div className="notibar" />
       <div className="noticontent">
-        <div className="notibody phrase-card-body">{phrase.content}</div>
+        <div className={`notibody phrase-card-body${isFile ? " phrase-card-file-body" : ""}`}>
+          {isFile ? (
+            <>
+              <span className="phrase-card-file-icon">{Icons.file}</span>
+              <span className="phrase-card-file-name">{fileName}</span>
+              <span className="phrase-card-file-size">{formatBytes(phrase.file_size)}</span>
+            </>
+          ) : (
+            phrase.content
+          )}
+        </div>
         <div className="notititle phrase-card-footer">
           <span className="phrase-card-remark">{phrase.title}</span>
           <div className="phrase-card-actions">
@@ -85,6 +98,8 @@ export function PhraseList({
   onEdit,
   onDelete,
 }: PhraseListProps) {
+  const { t } = useTranslation();
+
   if (loading && phrases.length === 0) {
     return (
       <div className="phrase-list">
@@ -109,7 +124,7 @@ export function PhraseList({
     return (
       <div className="page-empty-compact">
         <div className="empty-icon-compact">{Icons.phrases}</div>
-        <span>选择一个场景组查看短语</span>
+        <span>{t("phrases.empty")}</span>
       </div>
     );
   }
@@ -117,7 +132,7 @@ export function PhraseList({
   if (phrases.length === 0 && !loading) {
     return (
       <div className="page-empty-compact">
-        <span>当前分组中无快捷短语</span>
+        <span>{t("phrases.emptyGroupPhrases")}</span>
       </div>
     );
   }

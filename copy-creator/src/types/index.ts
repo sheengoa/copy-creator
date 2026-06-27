@@ -33,6 +33,9 @@ export interface Phrase {
   group_id: string;
   title: string;
   content: string;
+  input_type: "text" | "file";
+  source_path: string;
+  file_size: number;
   sort_order: number;
   created_at: string;
   updated_at: string;

@@ -8,6 +8,7 @@ import { PhraseList } from "./PhraseList";
 import { GroupDialog } from "./GroupDialog";
 import { PhraseDialog } from "./PhraseDialog";
 import { ManageGroupsDialog } from "./ManageGroupsDialog";
+import type { Phrase } from "../../types";
 import {
   DndContext,
   PointerSensor,
@@ -24,6 +25,10 @@ import {
 import { restrictToVerticalAxis } from "@dnd-kit/modifiers";
 import { getChangedOrderIds, getDragPreviewOrder } from "../../utils/reorderPreview";
 
+type PhraseInputType = "text" | "file";
+
+const filenameFromPath = (path: string) => path.replace(/\\/g, "/").split("/").pop() || path;
+
 export default function PhrasePage() {
   const { t } = useTranslation();
   const [groupDialogOpen, setGroupDialogOpen] = useState(false);
@@ -32,6 +37,12 @@ export default function PhrasePage() {
   const [groupName, setGroupName] = useState("");
   const [phraseRemark, setPhraseRemark] = useState("");
   const [phraseContent, setPhraseContent] = useState("");
+  const [phraseInputType, setPhraseInputType] = useState<PhraseInputType>("text");
+  const [phraseFilePath, setPhraseFilePath] = useState("");
+  const [phraseFileName, setPhraseFileName] = useState("");
+  const [phraseFileSize, setPhraseFileSize] = useState(0);
+  const [phraseErrorMessage, setPhraseErrorMessage] = useState("");
+  const [quickInputFileLimit, setQuickInputFileLimit] = useState(50 * 1024 * 1024);
   const [phraseError, setPhraseError] = useState(false);
   const [manageGroupsOpen, setManageGroupsOpen] = useState(false);
   const [renameId, setRenameId] = useState<string | null>(null);
@@ -50,10 +61,14 @@ export default function PhrasePage() {
     createGroup,
     updateGroup,
     createPhrase,
+    createFilePhrase,
     updatePhrase,
+    updateFilePhrase,
     deletePhrase,
     deleteGroup,
     pastePhrase,
+    selectQuickInputFile,
+    getQuickInputFileLimit,
   } = usePhraseStore();
 
   useEffect(() => {
@@ -65,6 +80,12 @@ export default function PhrasePage() {
       loadPhrases(selectedGroupId);
     }
   }, [selectedGroupId]);
+
+  useEffect(() => {
+    getQuickInputFileLimit()
+      .then(setQuickInputFileLimit)
+      .catch(() => undefined);
+  }, [getQuickInputFileLimit]);
 
   const sensors = useSensors(
     useSensor(PointerSensor, { activationConstraint: { distance: 4 } }),
@@ -124,13 +145,16 @@ export default function PhrasePage() {
 
   const renderedPhrases = previewPhrases ?? phrases;
   const activePhrase = activePhraseId ? renderedPhrases.find(p => p.id === activePhraseId) : null;
+  const activePhraseBody = activePhrase?.input_type === "file"
+    ? filenameFromPath(activePhrase.source_path || activePhrase.content)
+    : activePhrase?.content.slice(0, 80);
   const phraseDragOverlay = (
     <DragOverlay dropAnimation={null}>
       {activePhrase ? (
         <div className="notification phrase-card drag-overlay-card">
           <div className="notibar" />
           <div className="noticontent">
-            <div className="notibody phrase-card-body">{activePhrase.content.slice(0, 80)}</div>
+            <div className="notibody phrase-card-body">{activePhraseBody}</div>
             <div className="notititle phrase-card-footer">
               <span className="phrase-card-remark">{activePhrase.title}</span>
             </div>
@@ -161,30 +185,82 @@ export default function PhrasePage() {
     setEditingId(null);
     setPhraseRemark("");
     setPhraseContent("");
+    setPhraseInputType("text");
+    setPhraseFilePath("");
+    setPhraseFileName("");
+    setPhraseFileSize(0);
     setPhraseError(false);
+    setPhraseErrorMessage("");
     setPhraseDialogOpen(true);
   };
 
-  const openEditPhrase = (p: { id: string; title: string; content: string }) => {
+  const openEditPhrase = (p: Phrase) => {
     setEditingId(p.id);
     setPhraseRemark(p.title);
-    setPhraseContent(p.content);
+    setPhraseInputType(p.input_type);
+    setPhraseContent(p.input_type === "text" ? p.content : "");
+    setPhraseFilePath("");
+    setPhraseFileName(p.input_type === "file" ? filenameFromPath(p.source_path || p.content) : "");
+    setPhraseFileSize(p.input_type === "file" ? p.file_size : 0);
     setPhraseError(false);
+    setPhraseErrorMessage("");
     setPhraseDialogOpen(true);
+  };
+
+  const handleSelectPhraseFile = async () => {
+    setPhraseError(false);
+    setPhraseErrorMessage("");
+    try {
+      const file = await selectQuickInputFile();
+      const fileName = filenameFromPath(file.path);
+      setPhraseFilePath(file.path);
+      setPhraseFileName(fileName);
+      setPhraseFileSize(file.file_size);
+      if (!phraseRemark.trim()) {
+        setPhraseRemark(fileName);
+      }
+    } catch (e) {
+      const message = String(e);
+      if (message !== "cancelled") {
+        setPhraseError(true);
+        setPhraseErrorMessage(message);
+      }
+    }
   };
 
   const handleSavePhrase = async () => {
-    if (!phraseContent.trim()) {
+    if (phraseInputType === "text" && !phraseContent.trim()) {
       setPhraseError(true);
+      setPhraseErrorMessage(t("phrases.contentRequired"));
+      return;
+    }
+    if (phraseInputType === "file" && !phraseFilePath && !phraseFileName) {
+      setPhraseError(true);
+      setPhraseErrorMessage(t("phrases.fileRequired"));
       return;
     }
     setPhraseError(false);
-    if (editingId) {
-      await updatePhrase(editingId, phraseRemark.trim(), phraseContent.trim());
-    } else if (selectedGroupId) {
-      await createPhrase(selectedGroupId, phraseRemark.trim(), phraseContent.trim());
+    setPhraseErrorMessage("");
+    try {
+      if (phraseInputType === "text") {
+        if (editingId) {
+          await updatePhrase(editingId, phraseRemark.trim(), phraseContent.trim());
+        } else if (selectedGroupId) {
+          await createPhrase(selectedGroupId, phraseRemark.trim(), phraseContent.trim());
+        }
+      } else {
+        const title = phraseRemark.trim() || phraseFileName;
+        if (editingId) {
+          await updateFilePhrase(editingId, phraseFilePath, title);
+        } else if (selectedGroupId) {
+          await createFilePhrase(selectedGroupId, phraseFilePath, title);
+        }
+      }
+      setPhraseDialogOpen(false);
+    } catch (e) {
+      setPhraseError(true);
+      setPhraseErrorMessage(String(e));
     }
-    setPhraseDialogOpen(false);
   };
 
   const openManageGroups = () => {
@@ -261,12 +337,22 @@ export default function PhrasePage() {
         editingId={editingId}
         phraseRemark={phraseRemark}
         phraseContent={phraseContent}
+        inputType={phraseInputType}
+        selectedFileName={phraseFileName}
+        selectedFileSize={phraseFileSize}
+        fileLimitBytes={quickInputFileLimit}
         phraseError={phraseError}
+        phraseErrorMessage={phraseErrorMessage}
+        setInputType={setPhraseInputType}
         setPhraseRemark={setPhraseRemark}
         setPhraseContent={(content) => {
           setPhraseContent(content);
-          if (content.trim()) setPhraseError(false);
+          if (content.trim()) {
+            setPhraseError(false);
+            setPhraseErrorMessage("");
+          }
         }}
+        onSelectFile={handleSelectPhraseFile}
         onSave={handleSavePhrase}
         onClose={() => setPhraseDialogOpen(false)}
       />

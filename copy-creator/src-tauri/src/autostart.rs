@@ -44,7 +44,7 @@ fn desktop_entry(exe: &str) -> String {
          Type=Application\n\
          Version=1.0\n\
          Name=Copy Creator\n\
-         Comment=Clipboard manager, quick phrases, and translation tool\n\
+         Comment=Clipboard manager, quick input, and translation tool\n\
          Exec={exe} --hidden\n\
          Icon=copy-creator\n\
          StartupNotify=false\n\
