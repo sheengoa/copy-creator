@@ -33,7 +33,7 @@ fn is_image_file(path: &str) -> bool {
 
 /// Decode percent-encoded characters in a file:// URI path component.
 fn percent_decode(s: &str) -> String {
-    let mut result = String::with_capacity(s.len());
+    let mut bytes_out = Vec::with_capacity(s.len());
     let mut bytes = s.bytes();
     while let Some(b) = bytes.next() {
         if b == b'%' {
@@ -43,20 +43,30 @@ fn percent_decode(s: &str) -> String {
                 b'0'..=b'9' => hi - b'0',
                 b'a'..=b'f' => hi - b'a' + 10,
                 b'A'..=b'F' => hi - b'A' + 10,
-                _ => { result.push('%'); result.push(hi as char); result.push(lo as char); continue; }
+                _ => {
+                    bytes_out.push(b'%');
+                    bytes_out.push(hi);
+                    bytes_out.push(lo);
+                    continue;
+                }
             };
             let l = match lo {
                 b'0'..=b'9' => lo - b'0',
                 b'a'..=b'f' => lo - b'a' + 10,
                 b'A'..=b'F' => lo - b'A' + 10,
-                _ => { result.push('%'); result.push(hi as char); result.push(lo as char); continue; }
+                _ => {
+                    bytes_out.push(b'%');
+                    bytes_out.push(hi);
+                    bytes_out.push(lo);
+                    continue;
+                }
             };
-            result.push(((h << 4) | l) as char);
+            bytes_out.push((h << 4) | l);
         } else {
-            result.push(b as char);
+            bytes_out.push(b);
         }
     }
-    result
+    String::from_utf8_lossy(&bytes_out).into_owned()
 }
 
 /// Parse a file:// URI into a local filesystem path.
@@ -93,6 +103,41 @@ fn make_text_event_content(record_type: &str, content: &str) -> (String, i64, bo
         total_chars as i64,
         true,
     )
+}
+
+fn clipboard_text_files(text: &str) -> Vec<String> {
+    let text = text.trim();
+    if text.is_empty() {
+        return Vec::new();
+    }
+
+    if text.contains("file://") {
+        return text
+            .lines()
+            .filter_map(|line| parse_file_uri(line.trim()))
+            .filter(|path| !path.is_empty())
+            .collect();
+    }
+
+    let paths: Vec<String> = text
+        .lines()
+        .map(str::trim)
+        .filter(|path| !path.is_empty())
+        .map(str::to_string)
+        .collect();
+
+    if paths.is_empty()
+        || paths
+            .iter()
+            .any(|path| !std::path::Path::new(path).is_absolute())
+        || paths
+            .iter()
+            .any(|path| !std::fs::metadata(path).map(|m| m.is_file()).unwrap_or(false))
+    {
+        return Vec::new();
+    }
+
+    paths
 }
 
 /// Import an image file from disk into the storage directory.
@@ -467,47 +512,35 @@ pub fn start_monitor(app: &AppHandle) -> Result<(), Box<dyn std::error::Error>> 
                 *LAST_CLIPBOARD_TEXT.lock().unwrap() = text.trim().to_string();
             }
         } else {
-            // Text detection — only insert when content actually changed
             if let Ok(text) = handle.clipboard().read_text() {
                 let text = text.trim().to_string();
-                if !text.is_empty() && text != *LAST_CLIPBOARD_TEXT.lock().unwrap() {
+                let files = clipboard_text_files(&text);
+
+                if !files.is_empty() {
+                    *LAST_CLIPBOARD_TEXT.lock().unwrap() = text;
+                    let key = files.join("|");
+                    {
+                        let mut cached = LAST_CLIPBOARD_FILES_KEY.lock().unwrap();
+                        if key == *cached {
+                            // File list unchanged — skip to avoid re-inserting
+                            // the same images/files on every poll cycle.
+                            continue;
+                        }
+                        *cached = key.clone();
+                    }
+
+                    for file_path in files {
+                        if file_path.trim().is_empty() { continue; }
+                        if is_previewable_image_file(&file_path) || is_image_file(&file_path) {
+                            if import_image_file(&handle, &file_path) { continue; }
+                            continue;
+                        }
+                        insert_and_emit(&handle, "file", &file_path);
+                    }
+                } else if !text.is_empty() && text != *LAST_CLIPBOARD_TEXT.lock().unwrap() {
                     *LAST_CLIPBOARD_TEXT.lock().unwrap() = text.clone();
                     let record_type = if is_url(&text) { "link" } else { "text" };
                     insert_and_emit(&handle, record_type, &text);
-                }
-            }
-
-            // Detect file:// URIs in clipboard text (text/uri-list)
-            if let Ok(text) = handle.clipboard().read_text() {
-                let text = text.trim().to_string();
-                if !text.is_empty() && text.contains("file://") {
-                    let files: Vec<String> = text
-                        .lines()
-                        .filter_map(|l| parse_file_uri(l.trim()))
-                        .filter(|p| !p.is_empty())
-                        .collect();
-
-                    if !files.is_empty() {
-                        let key = files.join("|");
-                        {
-                            let mut cached = LAST_CLIPBOARD_FILES_KEY.lock().unwrap();
-                            if key == *cached {
-                                // File list unchanged — skip to avoid re-inserting
-                                // the same images/files on every poll cycle.
-                                continue;
-                            }
-                            *cached = key.clone();
-                        }
-
-                        for file_path in files {
-                            if file_path.trim().is_empty() { continue; }
-                            if is_previewable_image_file(&file_path) || is_image_file(&file_path) {
-                                if import_image_file(&handle, &file_path) { continue; }
-                                continue;
-                            }
-                            insert_and_emit(&handle, "file", &file_path);
-                        }
-                    }
                 }
             }
         }
@@ -515,4 +548,46 @@ pub fn start_monitor(app: &AppHandle) -> Result<(), Box<dyn std::error::Error>> 
     });
 
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{clipboard_text_files, parse_file_uri};
+
+    #[test]
+    fn parses_local_file_uri_with_original_filename() {
+        assert_eq!(
+            parse_file_uri("file:///tmp/quick-input/%E6%B5%8B%E8%AF%95%20file.txt"),
+            Some("/tmp/quick-input/测试 file.txt".to_string())
+        );
+    }
+
+    #[test]
+    fn classifies_file_uri_clipboard_text_as_files_before_plain_text() {
+        let files = clipboard_text_files(
+            "file:///home/ao/.local/share/copy-creator/quick-input-files/123/report%20final.pdf\n",
+        );
+
+        assert_eq!(
+            files,
+            vec![
+                "/home/ao/.local/share/copy-creator/quick-input-files/123/report final.pdf"
+                    .to_string()
+            ]
+        );
+    }
+
+    #[test]
+    fn classifies_existing_absolute_path_clipboard_text_as_file() {
+        let path = std::env::temp_dir().join(format!(
+            "copy-creator-clipboard-file-test-{}.txt",
+            std::process::id()
+        ));
+        std::fs::write(&path, "file clipboard test").unwrap();
+
+        let files = clipboard_text_files(path.to_str().unwrap());
+
+        std::fs::remove_file(&path).unwrap();
+        assert_eq!(files, vec![path.to_string_lossy().into_owned()]);
+    }
 }
