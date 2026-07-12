@@ -1,7 +1,7 @@
 {
   "$schema": "../node_modules/@tauri-apps/cli/config.schema.json",
   "productName": "Copy Creator",
-  "version": "0.1.5",
+  "version": "0.1.6",
   "identifier": "com.copycreator.app",
   "build": {
     "frontendDist": "../dist",
@@ -23,7 +23,7 @@
         "alwaysOnTop": false,
         "visible": false,
         "center": true,
-        "transparent": false,
+        "transparent": true,
         "shadow": false
       }
     ],

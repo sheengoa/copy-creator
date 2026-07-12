@@ -1,11 +1,11 @@
+use enigo::{Enigo, Mouse, Settings};
+use std::process::Command;
+use std::str::FromStr;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Mutex;
 use tauri::{AppHandle, Emitter, Manager};
 use tauri_plugin_global_shortcut::GlobalShortcutExt;
 use tauri_plugin_global_shortcut::Shortcut as GsShortcut;
-use enigo::{Enigo, Mouse, Settings};
-use std::process::Command;
-use std::str::FromStr;
 
 /// Detect whether we are running under Wayland.
 fn is_wayland() -> bool {
@@ -20,6 +20,7 @@ static TOGGLING: AtomicBool = AtomicBool::new(false);
 
 pub static MAIN_SHORTCUT_KEY: Mutex<String> = Mutex::new(String::new());
 pub static RADIAL_SHORTCUT_KEY: Mutex<String> = Mutex::new(String::new());
+pub static CLIPBOARD_CREATE_SHORTCUT_KEY: Mutex<String> = Mutex::new(String::new());
 
 /// RAII guard that ensures TOGGLING is always reset, even on panic.
 struct ToggleGuard;
@@ -77,40 +78,27 @@ pub fn toggle_window(app: &AppHandle) {
     }
     let _guard = ToggleGuard;
 
-    crate::paste::remember_paste_target();
-
-    let window = match app.get_webview_window("main") {
-        Some(w) => w,
-        None => {
-            log::warn!("[toggle_window] main window not found");
-            return;
-        }
-    };
-
-    log::info!("[toggle_window] showing + focusing window");
-    let was_pinned = window.is_always_on_top().unwrap_or(false);
-    let _ = window.set_always_on_top(true);
-    let _ = window.unminimize();
-    let _ = window.show();
-    let _ = window.set_focus();
-
-    let handle = app.clone();
-    std::thread::spawn(move || {
-        std::thread::sleep(std::time::Duration::from_millis(200));
-        if let Some(w) = handle.get_webview_window("main") {
-            if !TOGGLING.load(Ordering::SeqCst) {
-                let _ = w.set_always_on_top(was_pinned);
-            }
-            let _ = w.set_focus();
-        }
-    });
+    crate::show_main_window(app, "shortcut", false);
 }
 
 // ---- radial menu ----
 
-pub fn show_radial_menu(app: &AppHandle) {
-    crate::paste::remember_paste_target();
+fn raise_always_on_top(window: &tauri::WebviewWindow) {
+    let _ = window.set_always_on_top(false);
+    let _ = window.set_always_on_top(true);
+    let _ = window.show();
+    let _ = window.set_focus();
+}
 
+fn refresh_always_on_top_if_visible(window: &tauri::WebviewWindow) {
+    if window.is_visible().unwrap_or(false) {
+        let _ = window.set_always_on_top(false);
+        let _ = window.set_always_on_top(true);
+        let _ = window.set_focus();
+    }
+}
+
+pub fn show_radial_menu(app: &AppHandle) {
     if let Some(radial) = app.get_webview_window("radial-menu") {
         if radial.is_visible().unwrap_or(false) {
             log::info!("[show_radial_menu] already visible, hiding");
@@ -126,18 +114,81 @@ pub fn show_radial_menu(app: &AppHandle) {
         let _ = radial.set_position(tauri::PhysicalPosition::new(px.max(0), py.max(0)));
 
         // Read theme from DB
-        let theme = crate::db::get_setting_sync(app, "theme")
-            .unwrap_or_else(|| "light".to_string());
+        let theme =
+            crate::db::get_setting_sync(app, "theme").unwrap_or_else(|| "light".to_string());
 
-        let _ = radial.show();
-        let _ = radial.set_focus();
+        raise_always_on_top(&radial);
 
-        let _ = app.emit("radial-menu-show", serde_json::json!({
-            "theme": theme
-        }));
+        let _ = app.emit(
+            "radial-menu-show",
+            serde_json::json!({
+                "theme": theme
+            }),
+        );
 
-        log::info!("[show_radial_menu] shown at ({}, {}) theme={}", px, py, theme);
+        let app_handle = app.clone();
+        std::thread::spawn(move || {
+            std::thread::sleep(std::time::Duration::from_millis(60));
+            if let Some(radial) = app_handle.get_webview_window("radial-menu") {
+                refresh_always_on_top_if_visible(&radial);
+            }
+        });
+
+        log::info!(
+            "[show_radial_menu] shown at ({}, {}) theme={}",
+            px,
+            py,
+            theme
+        );
     }
+}
+
+// ---- clipboard create dialog ----
+
+pub fn show_clipboard_create(app: &AppHandle) {
+    let window = match app.get_webview_window("clipboard-create") {
+        Some(w) => w,
+        None => {
+            log::warn!("[show_clipboard_create] clipboard-create window not found");
+            return;
+        }
+    };
+
+    // 已显示则隐藏（toggle 行为）
+    if window.is_visible().unwrap_or(false) {
+        log::info!("[show_clipboard_create] already visible, hiding");
+        let _ = window.hide();
+        return;
+    }
+
+    let (cursor_x, cursor_y) = get_cursor_position();
+
+    // 窗口 560×400，定位在鼠标附近（水平居中于光标，略偏上）
+    let win_w = 560i32;
+    let px = cursor_x.saturating_sub(win_w / 2);
+    let py = cursor_y.saturating_sub(40);
+
+    let _ = window.set_position(tauri::PhysicalPosition::new(px.max(0), py.max(0)));
+
+    // 读取主题
+    let theme = crate::db::get_setting_sync(app, "theme").unwrap_or_else(|| "light".to_string());
+
+    let _ = window.show();
+    let _ = window.set_focus();
+
+    let _ = app.emit(
+        "clipboard-create-show",
+        serde_json::json!({
+            "theme": theme
+        }),
+    );
+
+    log::info!(
+        "[show_clipboard_create] shown at ({}, {}) theme={}",
+        px,
+        py,
+        theme
+    );
 }
 
 /// Restore the radial-menu enabled flag from the database and log the
@@ -147,7 +198,9 @@ pub fn init_radial_menu_state(app: &AppHandle) {
     if let Ok(val) = crate::db::get_setting(app.clone(), "radial_menu_enabled".to_string()) {
         RADIAL_MENU_ENABLED.store(val == "1", Ordering::SeqCst);
     }
-    log::info!("Mouse hook not available on Linux; radial menu accessible via keyboard shortcuts only");
+    log::info!(
+        "Mouse hook not available on Linux; radial menu accessible via keyboard shortcuts only"
+    );
 }
 
 // ---- shortcut registration ----
@@ -200,6 +253,14 @@ pub fn is_radial_shortcut(s: &str) -> bool {
     normalize_shortcut(&key).as_deref() == normalize_shortcut(s).as_deref()
 }
 
+pub fn is_clipboard_create_shortcut(s: &str) -> bool {
+    let key = CLIPBOARD_CREATE_SHORTCUT_KEY.lock().unwrap();
+    if key.is_empty() {
+        return false;
+    }
+    normalize_shortcut(&key).as_deref() == normalize_shortcut(s).as_deref()
+}
+
 #[tauri::command]
 pub fn update_shortcut(
     app: AppHandle,
@@ -231,6 +292,23 @@ pub fn update_radial_shortcut(
             .map_err(|e| format!("Failed to register radial shortcut: {}", e))?;
     }
     *RADIAL_SHORTCUT_KEY.lock().unwrap() = new_shortcut;
+    Ok(())
+}
+
+#[tauri::command]
+pub fn update_clipboard_create_shortcut(
+    app: AppHandle,
+    old_shortcut: String,
+    new_shortcut: String,
+) -> Result<(), String> {
+    if !old_shortcut.is_empty() {
+        let _ = unregister_keyboard_shortcut(&app, &old_shortcut);
+    }
+    if !new_shortcut.is_empty() {
+        register_keyboard_shortcut(&app, &new_shortcut)
+            .map_err(|e| format!("Failed to register clipboard create shortcut: {}", e))?;
+    }
+    *CLIPBOARD_CREATE_SHORTCUT_KEY.lock().unwrap() = new_shortcut;
     Ok(())
 }
 

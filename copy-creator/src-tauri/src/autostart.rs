@@ -66,18 +66,15 @@ pub fn set_autostart(enabled: bool) -> Result<bool, String> {
             return Err("Cannot determine current executable path".to_string());
         }
         let content = desktop_entry(&exe);
-        fs::create_dir_all(autostart_dir()).map_err(|e| {
-            format!("Failed to create autostart directory: {e}")
-        })?;
-        fs::write(&desktop_path, content).map_err(|e| {
-            format!("Failed to write autostart file: {e}")
-        })?;
+        fs::create_dir_all(autostart_dir())
+            .map_err(|e| format!("Failed to create autostart directory: {e}"))?;
+        fs::write(&desktop_path, content)
+            .map_err(|e| format!("Failed to write autostart file: {e}"))?;
         log::info!("Autostart enabled → {}", desktop_path.display());
     } else {
         if desktop_path.exists() {
-            fs::remove_file(&desktop_path).map_err(|e| {
-                format!("Failed to remove autostart file: {e}")
-            })?;
+            fs::remove_file(&desktop_path)
+                .map_err(|e| format!("Failed to remove autostart file: {e}"))?;
             log::info!("Autostart disabled — removed {}", desktop_path.display());
         }
     }

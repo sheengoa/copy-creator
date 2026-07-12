@@ -20,10 +20,12 @@ struct ImageCache {
 static IMAGE_CACHE: OnceLock<Mutex<ImageCache>> = OnceLock::new();
 
 fn get_image_cache() -> &'static Mutex<ImageCache> {
-    IMAGE_CACHE.get_or_init(|| Mutex::new(ImageCache {
-        map: HashMap::new(),
-        order: Vec::new(),
-    }))
+    IMAGE_CACHE.get_or_init(|| {
+        Mutex::new(ImageCache {
+            map: HashMap::new(),
+            order: Vec::new(),
+        })
+    })
 }
 
 struct PasteGuard;
@@ -45,84 +47,28 @@ pub fn cache_image(path: String, rgba: Vec<u8>, width: u32, height: u32, png_byt
         }
     }
     cache.order.push(path.clone());
-    cache.map.insert(path, CachedImage {
-        rgba: Arc::new(rgba),
-        width,
-        height,
-        png_bytes: Arc::new(png_bytes),
-    });
+    cache.map.insert(
+        path,
+        CachedImage {
+            rgba: Arc::new(rgba),
+            width,
+            height,
+            png_bytes: Arc::new(png_bytes),
+        },
+    );
 }
 
-use tauri::{AppHandle, Manager};
-use tauri_plugin_clipboard_manager::ClipboardExt;
-use enigo::{Enigo, Keyboard, Key, Direction, Mouse, Settings};
+use enigo::{Direction, Enigo, Key, Keyboard, Settings};
 use std::process::Command;
 use std::thread;
 use std::time::Duration;
+use tauri::{AppHandle, Manager};
+use tauri_plugin_clipboard_manager::ClipboardExt;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum PasteShortcut {
     CtrlV,
     CtrlShiftV,
-}
-
-static LAST_PASTE_TARGET_CLASS: OnceLock<Mutex<Option<String>>> = OnceLock::new();
-
-fn paste_target_class_cache() -> &'static Mutex<Option<String>> {
-    LAST_PASTE_TARGET_CLASS.get_or_init(|| Mutex::new(None))
-}
-
-pub fn remember_paste_target() {
-    if let Ok(mut cached) = paste_target_class_cache().lock() {
-        *cached = active_window_class();
-    }
-}
-
-fn remembered_paste_target_class() -> Option<String> {
-    paste_target_class_cache()
-        .lock()
-        .ok()
-        .and_then(|c| c.clone())
-}
-
-fn paste_shortcut_for_window_class(class_name: Option<&str>) -> PasteShortcut {
-    let Some(class_name) = class_name else {
-        return PasteShortcut::CtrlV;
-    };
-
-    let class_name = class_name.to_lowercase();
-    let terminals = [
-        "alacritty",
-        "blackbox",
-        "com.mitchellh.ghostty",
-        "foot",
-        "gnome-terminal",
-        "gnome-terminal-server",
-        "io.elementary.terminal",
-        "kgx",
-        "kitty",
-        "konsole",
-        "mate-terminal",
-        "org.gnome.console",
-        "org.gnome.terminal",
-        "org.wezfurlong.wezterm",
-        "rio",
-        "terminal",
-        "terminator",
-        "tilix",
-        "wezterm",
-        "xfce4-terminal",
-        "xterm",
-    ];
-
-    if terminals
-        .iter()
-        .any(|terminal| class_name.contains(terminal))
-    {
-        PasteShortcut::CtrlShiftV
-    } else {
-        PasteShortcut::CtrlV
-    }
 }
 
 // ── Environment detection ───────────────────────────────────────
@@ -149,271 +95,6 @@ fn which(cmd: &str) -> Option<String> {
         .ok()
         .filter(|o| o.status.success())
         .map(|o| String::from_utf8_lossy(&o.stdout).trim().to_string())
-}
-
-fn command_stdout(cmd: &str, args: &[&str]) -> Option<String> {
-    Command::new(cmd)
-        .args(args)
-        .output()
-        .ok()
-        .filter(|o| o.status.success())
-        .map(|o| String::from_utf8_lossy(&o.stdout).trim().to_string())
-        .filter(|s| !s.is_empty())
-}
-
-fn command_stdout_with_env(cmd: &str, args: &[&str], envs: &[(&str, &str)]) -> Option<String> {
-    let mut command = Command::new(cmd);
-    command.args(args);
-    for (key, value) in envs {
-        command.env(key, value);
-    }
-    command
-        .output()
-        .ok()
-        .filter(|o| o.status.success())
-        .map(|o| String::from_utf8_lossy(&o.stdout).trim().to_string())
-        .filter(|s| !s.is_empty())
-}
-
-fn active_window_class_xdotool() -> Option<String> {
-    if which("xdotool").is_none() {
-        return None;
-    }
-    command_stdout("xdotool", &["getactivewindow", "getwindowclassname"])
-}
-
-fn parse_xprop_active_window_id(output: &str) -> Option<String> {
-    let id = output.split('#').nth(1)?.trim();
-    if id.is_empty() || id == "0x0" {
-        None
-    } else {
-        Some(id.to_string())
-    }
-}
-
-fn parse_xprop_wm_class(output: &str) -> Option<String> {
-    let value = output.split('=').nth(1)?.trim();
-    let classes = value
-        .split(',')
-        .map(|part| part.trim().trim_matches('"'))
-        .filter(|part| !part.is_empty())
-        .collect::<Vec<_>>();
-    if classes.is_empty() {
-        None
-    } else {
-        Some(classes.join(" "))
-    }
-}
-
-fn parse_xprop_pid(output: &str) -> Option<u32> {
-    output.split('=').nth(1)?.trim().parse().ok()
-}
-
-fn active_window_pid_xprop(window_id: &str) -> Option<u32> {
-    let output = command_stdout("xprop", &["-id", window_id, "_NET_WM_PID"])?;
-    parse_xprop_pid(&output)
-}
-
-fn parse_single_quoted_value(output: &str) -> Option<String> {
-    let start = output.find('\'')? + 1;
-    let end = output[start..].find('\'')? + start;
-    Some(output[start..end].to_string())
-}
-
-fn parse_bus_name_for_pid(output: &str, pid: u32) -> Option<String> {
-    for line in output.lines().skip(1) {
-        let mut parts = line.split_whitespace();
-        let name = parts.next()?;
-        let line_pid = parts.next()?.parse::<u32>().ok()?;
-        if line_pid == pid {
-            return Some(name.to_string());
-        }
-    }
-    None
-}
-
-fn parse_object_paths(output: &str) -> Vec<String> {
-    output
-        .split("objectpath '")
-        .skip(1)
-        .filter_map(|part| part.split('\'').next())
-        .filter(|path| !path.ends_with("/null"))
-        .map(str::to_string)
-        .collect()
-}
-
-fn cursor_position() -> Option<(i32, i32)> {
-    Enigo::new(&Settings::default()).ok()?.location().ok()
-}
-
-fn atspi_bus_address() -> Option<String> {
-    if which("gdbus").is_none() {
-        return None;
-    }
-    let output = command_stdout(
-        "gdbus",
-        &[
-            "call",
-            "--session",
-            "--dest",
-            "org.a11y.Bus",
-            "--object-path",
-            "/org/a11y/bus",
-            "--method",
-            "org.a11y.Bus.GetAddress",
-        ],
-    )?;
-    parse_single_quoted_value(&output)
-}
-
-fn atspi_bus_name_for_pid(address: &str, pid: u32) -> Option<String> {
-    if which("busctl").is_none() {
-        return None;
-    }
-    let output = command_stdout_with_env(
-        "busctl",
-        &["--user", "list"],
-        &[("DBUS_SESSION_BUS_ADDRESS", address)],
-    )?;
-    parse_bus_name_for_pid(&output, pid)
-}
-
-fn atspi_call(address: &str, dest: &str, path: &str, method: &str, args: &[String]) -> Option<String> {
-    let mut command_args = vec![
-        "call".to_string(),
-        "--session".to_string(),
-        "--dest".to_string(),
-        dest.to_string(),
-        "--object-path".to_string(),
-        path.to_string(),
-        "--method".to_string(),
-        method.to_string(),
-    ];
-    command_args.extend(args.iter().cloned());
-    let refs = command_args.iter().map(String::as_str).collect::<Vec<_>>();
-    command_stdout_with_env("gdbus", &refs, &[("DBUS_SESSION_BUS_ADDRESS", address)])
-}
-
-fn atspi_accessible_at_cursor_for_pid(pid: u32) -> Option<String> {
-    let address = atspi_bus_address()?;
-    let dest = atspi_bus_name_for_pid(&address, pid)?;
-    let (x, y) = cursor_position()?;
-    let children = atspi_call(
-        &address,
-        &dest,
-        "/org/a11y/atspi/accessible/root",
-        "org.a11y.atspi.Accessible.GetChildren",
-        &[],
-    )?;
-
-    for path in parse_object_paths(&children) {
-        let hit = atspi_call(
-            &address,
-            &dest,
-            &path,
-            "org.a11y.atspi.Component.GetAccessibleAtPoint",
-            &[x.to_string(), y.to_string(), "0".to_string()],
-        )?;
-        for hit_path in parse_object_paths(&hit) {
-            let role = atspi_call(
-                &address,
-                &dest,
-                &hit_path,
-                "org.a11y.atspi.Accessible.GetRoleName",
-                &[],
-            )
-            .and_then(|out| parse_single_quoted_value(&out))
-            .unwrap_or_default();
-            let name = command_stdout_with_env(
-                "gdbus",
-                &[
-                    "call",
-                    "--session",
-                    "--dest",
-                    &dest,
-                    "--object-path",
-                    &hit_path,
-                    "--method",
-                    "org.freedesktop.DBus.Properties.Get",
-                    "org.a11y.atspi.Accessible",
-                    "Name",
-                ],
-                &[("DBUS_SESSION_BUS_ADDRESS", &address)],
-            )
-            .and_then(|out| parse_single_quoted_value(&out))
-            .unwrap_or_default();
-            let descriptor = format!("{} {}", role, name).trim().to_string();
-            if !descriptor.is_empty() {
-                return Some(descriptor);
-            }
-        }
-    }
-    None
-}
-
-fn active_window_class_xprop() -> Option<String> {
-    if which("xprop").is_none() {
-        return None;
-    }
-    let active = command_stdout("xprop", &["-root", "_NET_ACTIVE_WINDOW"])?;
-    let window_id = parse_xprop_active_window_id(&active)?;
-    let wm_class = command_stdout("xprop", &["-id", window_id.as_str(), "WM_CLASS"])?;
-    let mut class_name = parse_xprop_wm_class(&wm_class)?;
-    if class_name.to_lowercase().contains("code") {
-        if let Some(pid) = active_window_pid_xprop(&window_id) {
-            if let Some(accessible) = atspi_accessible_at_cursor_for_pid(pid) {
-                class_name.push(' ');
-                class_name.push_str(&accessible);
-            }
-        }
-    }
-    Some(class_name)
-}
-
-fn active_window_class_hyprctl() -> Option<String> {
-    if which("hyprctl").is_none() {
-        return None;
-    }
-    let stdout = command_stdout("hyprctl", &["activewindow", "-j"])?;
-    serde_json::from_str::<serde_json::Value>(&stdout)
-        .ok()
-        .and_then(|json| {
-            json.get("class")
-                .and_then(|v| v.as_str())
-                .map(str::to_string)
-        })
-        .filter(|s| !s.is_empty())
-}
-
-fn active_window_class_gnome_shell() -> Option<String> {
-    if which("gdbus").is_none() {
-        return None;
-    }
-    let stdout = command_stdout(
-        "gdbus",
-        &[
-            "call",
-            "--session",
-            "--dest",
-            "org.gnome.Shell",
-            "--object-path",
-            "/org/gnome/Shell",
-            "--method",
-            "org.gnome.Shell.Eval",
-            "global.display.focus_window ? global.display.focus_window.get_wm_class() : ''",
-        ],
-    )?;
-
-    let start = stdout.find("'\"")? + 1;
-    let end = stdout[start..].find("\"'")? + start + 1;
-    serde_json::from_str::<String>(&stdout[start..end]).ok()
-}
-
-fn active_window_class() -> Option<String> {
-    active_window_class_hyprctl()
-        .or_else(active_window_class_xprop)
-        .or_else(active_window_class_xdotool)
-        .or_else(active_window_class_gnome_shell)
 }
 
 /// Check whether ydotool daemon is reachable (ydotool needs ydotoold running).
@@ -457,34 +138,40 @@ fn ydotool_ctrl_v() -> Result<(), String> {
 
 /// Inject Ctrl+Shift+V via enigo.
 fn enigo_ctrl_shift_v() -> Result<(), String> {
-    let mut enigo = Enigo::new(&Settings::default())
-        .map_err(|e| format!("enigo init: {e}"))?;
-    enigo.key(Key::Control, Direction::Press)
+    let mut enigo = Enigo::new(&Settings::default()).map_err(|e| format!("enigo init: {e}"))?;
+    enigo
+        .key(Key::Control, Direction::Press)
         .map_err(|e| format!("enigo ctrl press: {e}"))?;
-    enigo.key(Key::Shift, Direction::Press)
+    enigo
+        .key(Key::Shift, Direction::Press)
         .map_err(|e| format!("enigo shift press: {e}"))?;
     thread::sleep(Duration::from_millis(20));
-    enigo.key(Key::Unicode('v'), Direction::Click)
+    enigo
+        .key(Key::Unicode('v'), Direction::Click)
         .map_err(|e| format!("enigo v click: {e}"))?;
     thread::sleep(Duration::from_millis(10));
-    enigo.key(Key::Shift, Direction::Release)
+    enigo
+        .key(Key::Shift, Direction::Release)
         .map_err(|e| format!("enigo shift release: {e}"))?;
-    enigo.key(Key::Control, Direction::Release)
+    enigo
+        .key(Key::Control, Direction::Release)
         .map_err(|e| format!("enigo ctrl release: {e}"))?;
     Ok(())
 }
 
 /// Inject Ctrl+V via enigo.
 fn enigo_ctrl_v() -> Result<(), String> {
-    let mut enigo = Enigo::new(&Settings::default())
-        .map_err(|e| format!("enigo init: {e}"))?;
-    enigo.key(Key::Control, Direction::Press)
+    let mut enigo = Enigo::new(&Settings::default()).map_err(|e| format!("enigo init: {e}"))?;
+    enigo
+        .key(Key::Control, Direction::Press)
         .map_err(|e| format!("enigo ctrl press: {e}"))?;
     thread::sleep(Duration::from_millis(30));
-    enigo.key(Key::Unicode('v'), Direction::Click)
+    enigo
+        .key(Key::Unicode('v'), Direction::Click)
         .map_err(|e| format!("enigo v click: {e}"))?;
     thread::sleep(Duration::from_millis(10));
-    enigo.key(Key::Control, Direction::Release)
+    enigo
+        .key(Key::Control, Direction::Release)
         .map_err(|e| format!("enigo ctrl release: {e}"))?;
     Ok(())
 }
@@ -547,6 +234,7 @@ fn wtype_ctrl_shift_v() -> Result<(), String> {
 /// shortcut selected for the target app. Terminals use Ctrl+Shift+V;
 /// regular document editors and file managers use Ctrl+V.
 fn inject_paste_with_shortcut(shortcut: PasteShortcut) {
+    log::info!("[paste] inject_paste_with_shortcut: {:?}", shortcut);
     if is_wayland() && ydotool_available() {
         // Wayland + ydotool: the most reliable combination on all compositors
         match shortcut {
@@ -591,13 +279,17 @@ fn inject_paste_with_shortcut(shortcut: PasteShortcut) {
 
     // X11 path (DISPLAY is set, WAYLAND_DISPLAY is not)
     if is_x11() {
+        log::info!("[paste] X11 path — trying enigo for {:?}", shortcut);
         let result = match shortcut {
             PasteShortcut::CtrlShiftV => enigo_ctrl_shift_v(),
             PasteShortcut::CtrlV => enigo_ctrl_v(),
         };
         match result {
-            Ok(()) => return,
-            Err(e) => log::warn!("enigo paste failed: {e}"),
+            Ok(()) => {
+                log::info!("[paste] enigo succeeded for {:?}", shortcut);
+                return;
+            }
+            Err(e) => log::warn!("[paste] enigo failed for {:?}: {e}", shortcut),
         }
         if which("xdotool").is_some() {
             let result = match shortcut {
@@ -620,12 +312,6 @@ fn inject_paste_with_shortcut(shortcut: PasteShortcut) {
         PasteShortcut::CtrlShiftV => enigo_ctrl_shift_v(),
         PasteShortcut::CtrlV => enigo_ctrl_v(),
     };
-}
-
-fn inject_paste() {
-    let class_name = active_window_class().or_else(remembered_paste_target_class);
-    let shortcut = paste_shortcut_for_window_class(class_name.as_deref());
-    inject_paste_with_shortcut(shortcut);
 }
 
 // ── Diagnostics (called once at startup) ────────────────────────
@@ -679,20 +365,20 @@ pub fn diagnose_paste_environment() {
 /// Write a file list to the system clipboard so Linux apps receive
 /// `text/uri-list`, not a plain-text path.
 fn write_file_list(path: &std::path::Path) -> Result<(), String> {
-    let mut clipboard = arboard::Clipboard::new()
-        .map_err(|e| format!("初始化文件剪切板失败: {e:?}"))?;
+    let mut clipboard =
+        arboard::Clipboard::new().map_err(|e| format!("初始化文件剪切板失败: {e:?}"))?;
     clipboard
         .set()
         .file_list(&[path])
         .map_err(|e| format!("写入文件剪切板失败: {e:?}"))?;
-    log::info!("paste_file: wrote file list to clipboard: {}", path.display());
+    log::info!(
+        "paste_file: wrote file list to clipboard: {}",
+        path.display()
+    );
     Ok(())
 }
 
-fn paste_with_defocus(
-    app: &AppHandle,
-    shortcut_override: Option<PasteShortcut>,
-) -> Result<(), String> {
+fn paste_with_defocus(app: &AppHandle, shortcut: PasteShortcut) -> Result<(), String> {
     // Hide radial popup if visible.  When pasting from the radial menu
     // itself the frontend has already issued a hide, so this is a fast
     // no-op in the common case — but it is a safety net for edge cases
@@ -701,9 +387,7 @@ fn paste_with_defocus(
         let _ = radial.hide();
     }
 
-    let window = app
-        .get_webview_window("main")
-        .ok_or("no window")?;
+    let window = app.get_webview_window("main").ok_or("no window")?;
 
     let is_pinned = window.is_always_on_top().unwrap_or(false);
     if !is_pinned {
@@ -717,10 +401,7 @@ fn paste_with_defocus(
     // fixed.
     thread::sleep(Duration::from_millis(200));
 
-    match shortcut_override {
-        Some(shortcut) => inject_paste_with_shortcut(shortcut),
-        None => inject_paste(),
-    }
+    inject_paste_with_shortcut(shortcut);
 
     Ok(())
 }
@@ -729,7 +410,9 @@ fn paste_with_defocus(
 
 #[tauri::command]
 pub fn paste_text(app: AppHandle, text: String) -> Result<(), String> {
+    log::info!("[paste] paste_text called — CtrlV (普通粘贴)");
     if PASTING.swap(true, Ordering::SeqCst) {
+        log::warn!("[paste] PASTING flag already true, skipping");
         return Ok(());
     }
 
@@ -744,7 +427,7 @@ pub fn paste_text(app: AppHandle, text: String) -> Result<(), String> {
     let handle = app.clone();
     std::thread::spawn(move || {
         let _guard = PasteGuard;
-        paste_with_defocus(&handle, None).ok();
+        paste_with_defocus(&handle, PasteShortcut::CtrlV).ok();
     });
 
     Ok(())
@@ -752,7 +435,9 @@ pub fn paste_text(app: AppHandle, text: String) -> Result<(), String> {
 
 #[tauri::command]
 pub fn paste_text_terminal(app: AppHandle, text: String) -> Result<(), String> {
+    log::info!("[paste] paste_text_terminal called — CtrlShiftV (终端粘贴)");
     if PASTING.swap(true, Ordering::SeqCst) {
+        log::warn!("[paste] PASTING flag already true, skipping");
         return Ok(());
     }
 
@@ -766,7 +451,7 @@ pub fn paste_text_terminal(app: AppHandle, text: String) -> Result<(), String> {
     let handle = app.clone();
     std::thread::spawn(move || {
         let _guard = PasteGuard;
-        paste_with_defocus(&handle, Some(PasteShortcut::CtrlShiftV)).ok();
+        paste_with_defocus(&handle, PasteShortcut::CtrlShiftV).ok();
     });
 
     Ok(())
@@ -785,7 +470,12 @@ pub fn paste_image(app: AppHandle, path: String) -> Result<(), String> {
         let (rgba, w, h, _png) = {
             let cache = get_image_cache().lock().unwrap();
             if let Some(cached) = cache.map.get(&path) {
-                (cached.rgba.clone(), cached.width, cached.height, cached.png_bytes.clone())
+                (
+                    cached.rgba.clone(),
+                    cached.width,
+                    cached.height,
+                    cached.png_bytes.clone(),
+                )
             } else {
                 drop(cache);
 
@@ -794,21 +484,29 @@ pub fn paste_image(app: AppHandle, path: String) -> Result<(), String> {
 
                 let bytes = match std::fs::read(&base_dir) {
                     Ok(b) => b,
-                    Err(e) => { log::error!("paste_image: read error: {}", e); return; }
+                    Err(e) => {
+                        log::error!("paste_image: read error: {}", e);
+                        return;
+                    }
                 };
 
                 let png_arc = Arc::new(bytes.clone());
 
                 let (rgba, w, h) = {
                     use image::ImageDecoder;
-                    let decoder = match image::codecs::png::PngDecoder::new(std::io::Cursor::new(&bytes)) {
-                        Ok(d) => d,
-                        Err(e) => { log::error!("paste_image: decode error: {}", e); return; }
-                    };
+                    let decoder =
+                        match image::codecs::png::PngDecoder::new(std::io::Cursor::new(&bytes)) {
+                            Ok(d) => d,
+                            Err(e) => {
+                                log::error!("paste_image: decode error: {}", e);
+                                return;
+                            }
+                        };
                     let dims = decoder.dimensions();
                     let mut buf = vec![0; (dims.0 * dims.1 * 4) as usize];
                     if let Err(e) = decoder.read_image(&mut buf) {
-                        log::error!("paste_image: read pixels error: {}", e); return;
+                        log::error!("paste_image: read pixels error: {}", e);
+                        return;
                     }
                     (buf, dims.0, dims.1)
                 };
@@ -821,7 +519,10 @@ pub fn paste_image(app: AppHandle, path: String) -> Result<(), String> {
         // arboard writes proper image/png format that Linux apps understand
         let mut clipboard = match arboard::Clipboard::new() {
             Ok(c) => c,
-            Err(e) => { log::error!("paste_image: arboard init: {:?}", e); return; }
+            Err(e) => {
+                log::error!("paste_image: arboard init: {:?}", e);
+                return;
+            }
         };
         let img = arboard::ImageData {
             width: w as usize,
@@ -829,11 +530,14 @@ pub fn paste_image(app: AppHandle, path: String) -> Result<(), String> {
             bytes: std::borrow::Cow::Borrowed(&rgba),
         };
         if let Err(e) = clipboard.set_image(img) {
-            log::error!("paste_image: arboard set_image: {:?}", e); return;
+            log::error!("paste_image: arboard set_image: {:?}", e);
+            return;
         }
 
         crate::clipboard::sync_monitor_cache(&handle);
-        paste_with_defocus(&handle, None).ok();
+        // 图像粘贴总是用 Ctrl+V：CLI 工具（Claude Code/Codex）捕获 Ctrl+V 读取剪贴板图像，
+        // 普通应用也用 Ctrl+V 粘贴图像。Ctrl+Shift+V 是终端文本粘贴，对图像无效。
+        paste_with_defocus(&handle, PasteShortcut::CtrlV).ok();
     });
 
     Ok(())
@@ -866,64 +570,8 @@ pub fn paste_file(app: AppHandle, path: String) -> Result<(), String> {
         let _guard = PasteGuard;
 
         crate::clipboard::sync_monitor_cache(&handle);
-        paste_with_defocus(&handle, Some(PasteShortcut::CtrlV)).ok();
+        paste_with_defocus(&handle, PasteShortcut::CtrlV).ok();
     });
 
     Ok(())
-}
-
-#[cfg(test)]
-mod tests {
-    use super::{
-        parse_xprop_active_window_id,
-        parse_xprop_wm_class,
-        paste_shortcut_for_window_class,
-        PasteShortcut,
-    };
-
-    #[test]
-    fn uses_terminal_paste_shortcut_for_known_terminal_classes() {
-        for class_name in [
-            "gnome-terminal",
-            "Alacritty",
-            "kitty",
-            "org.wezfurlong.wezterm",
-        ] {
-            assert_eq!(
-                paste_shortcut_for_window_class(Some(class_name)),
-                PasteShortcut::CtrlShiftV
-            );
-        }
-    }
-
-    #[test]
-    fn uses_normal_paste_shortcut_for_documents_and_unknown_targets() {
-        for class_name in [
-            Some("Code"),
-            Some("org.gnome.Nautilus"),
-            Some("libreoffice-writer"),
-            None,
-        ] {
-            assert_eq!(
-                paste_shortcut_for_window_class(class_name),
-                PasteShortcut::CtrlV
-            );
-        }
-    }
-
-    #[test]
-    fn parses_xprop_active_window_id() {
-        assert_eq!(
-            parse_xprop_active_window_id("_NET_ACTIVE_WINDOW(WINDOW): window id # 0x6400004"),
-            Some("0x6400004".to_string())
-        );
-    }
-
-    #[test]
-    fn parses_xprop_wm_class() {
-        assert_eq!(
-            parse_xprop_wm_class("WM_CLASS(STRING) = \"gnome-terminal-server\", \"Gnome-terminal\""),
-            Some("gnome-terminal-server Gnome-terminal".to_string())
-        );
-    }
 }

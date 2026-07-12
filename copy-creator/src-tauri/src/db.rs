@@ -52,6 +52,10 @@ fn category_sql(category: &Option<String>) -> (String, String) {
         Some("image") => ("WHERE type = 'image'".to_string(), "AND type = 'image'".to_string()),
         Some("link") => ("WHERE type = 'link'".to_string(), "AND type = 'link'".to_string()),
         Some("file") => ("WHERE type = 'file'".to_string(), "AND type = 'file'".to_string()),
+        Some("stash") => (
+            "WHERE group_name IN ('stash', '暂存')".to_string(),
+            "AND group_name IN ('stash', '暂存')".to_string(),
+        ),
         Some("apikey") => (
             "WHERE (user_api_key = 1 OR (type IN ('text', 'link') AND (content LIKE 'sk-%' OR content LIKE 'AIza%' OR content LIKE 'glpat-%' OR content LIKE 'ghp_%' OR content LIKE 'xai-%')))".to_string(),
             "AND (user_api_key = 1 OR (type IN ('text', 'link') AND (content LIKE 'sk-%' OR content LIKE 'AIza%' OR content LIKE 'glpat-%' OR content LIKE 'ghp_%' OR content LIKE 'xai-%')))".to_string(),
@@ -117,6 +121,7 @@ fn clipboard_record_json(
     source_app: String,
     created_at: String,
     user_api_key: i64,
+    group_name: String,
 ) -> serde_json::Value {
     let (list_content, content_length, content_truncated) = if rec_type == "text" {
         make_content_preview(&content)
@@ -138,6 +143,7 @@ fn clipboard_record_json(
         "source_app": source_app,
         "created_at": created_at,
         "user_api_key": user_api_key,
+        "group_name": group_name,
     })
 }
 
@@ -265,7 +271,10 @@ fn copy_quick_input_file(app: &AppHandle, source_path: &str) -> Result<(String, 
     std::fs::create_dir_all(&dest_dir).map_err(|e| format!("创建文件目录失败: {}", e))?;
     let dest = dest_dir.join(original_filename);
     std::fs::copy(&source, &dest).map_err(|e| format!("复制文件失败: {}", e))?;
-    Ok((quick_input_relative_path(&dir_name, original_filename), size))
+    Ok((
+        quick_input_relative_path(&dir_name, original_filename),
+        size,
+    ))
 }
 
 fn legacy_quick_input_target_path(relative_path: &str, source_path: &str) -> Option<String> {
@@ -295,9 +304,9 @@ fn migrate_legacy_quick_input_file_names(app: &AppHandle) {
     };
 
     let rows: Vec<(String, String, String)> = {
-        let mut stmt = match conn.prepare(
-            "SELECT id, content, source_path FROM phrases WHERE input_type = 'file'",
-        ) {
+        let mut stmt = match conn
+            .prepare("SELECT id, content, source_path FROM phrases WHERE input_type = 'file'")
+        {
             Ok(stmt) => stmt,
             Err(e) => {
                 log::warn!("quick input file migration query failed: {}", e);
@@ -584,6 +593,13 @@ pub fn init_db(app: &AppHandle) -> Result<(), Box<dyn std::error::Error>> {
         );
     }
 
+    // ── group_name migration for manual stash entries ─────────────
+    conn.execute(
+        "ALTER TABLE clipboard_records ADD COLUMN group_name TEXT DEFAULT ''",
+        [],
+    )
+    .ok();
+
     app.manage(DbState {
         conn: Mutex::new(conn),
     });
@@ -701,7 +717,7 @@ pub fn get_clipboard_records(
             .replace('%', "\\%")
             .replace('_', "\\_");
         let sql = format!(
-            "SELECT id, type, content, source_app, created_at, user_api_key FROM clipboard_records
+            "SELECT id, type, content, source_app, created_at, user_api_key, group_name FROM clipboard_records
              WHERE content LIKE '%' || ?1 || '%' ESCAPE '\\' {} ORDER BY sort_order DESC LIMIT ?2 OFFSET ?3",
             cat_filter.1
         );
@@ -715,6 +731,7 @@ pub fn get_clipboard_records(
                     row.get::<_, String>(3)?,
                     row.get::<_, String>(4)?,
                     row.get::<_, i64>(5)?,
+                    row.get::<_, String>(6)?,
                 ))
             })
             .map_err(|e| e.to_string())?;
@@ -723,7 +740,7 @@ pub fn get_clipboard_records(
         }
     } else {
         let sql = format!(
-            "SELECT id, type, content, source_app, created_at, user_api_key FROM clipboard_records
+            "SELECT id, type, content, source_app, created_at, user_api_key, group_name FROM clipboard_records
              {} ORDER BY sort_order DESC LIMIT ?1 OFFSET ?2",
             cat_filter.0
         );
@@ -737,6 +754,7 @@ pub fn get_clipboard_records(
                     row.get::<_, String>(3)?,
                     row.get::<_, String>(4)?,
                     row.get::<_, i64>(5)?,
+                    row.get::<_, String>(6)?,
                 ))
             })
             .map_err(|e| e.to_string())?;
@@ -1486,9 +1504,12 @@ fn migrate_storage(app: &AppHandle, new_path: &str) -> Result<(), String> {
                 content TEXT NOT NULL,
                 source_app TEXT DEFAULT '',
                 created_at TEXT NOT NULL,
-                user_api_key INTEGER DEFAULT 0
+                user_api_key INTEGER DEFAULT 0,
+                sort_order REAL,
+                group_name TEXT DEFAULT ''
             );
             CREATE INDEX IF NOT EXISTS idx_clipboard_created_at ON clipboard_records(created_at);
+            CREATE INDEX IF NOT EXISTS idx_clipboard_sort_order ON clipboard_records(sort_order DESC);
             CREATE TABLE IF NOT EXISTS phrase_groups (
                 id TEXT PRIMARY KEY,
                 name TEXT NOT NULL,
@@ -1914,8 +1935,7 @@ pub fn reorder_phrases(app: AppHandle, ids: Vec<String>) -> Result<(), String> {
 #[cfg(test)]
 mod quick_input_file_tests {
     use super::{
-        is_legacy_quick_input_file_path, legacy_quick_input_target_path,
-        quick_input_relative_path,
+        is_legacy_quick_input_file_path, legacy_quick_input_target_path, quick_input_relative_path,
     };
 
     #[test]
@@ -1943,10 +1963,7 @@ mod quick_input_file_tests {
                 "quick-input-files/3fcb74c0-4738-4230-a5bc-51067b34ec0b.md",
                 "/home/ao/docs/original.md"
             ),
-            Some(
-                "quick-input-files/3fcb74c0-4738-4230-a5bc-51067b34ec0b/original.md"
-                    .to_string()
-            )
+            Some("quick-input-files/3fcb74c0-4738-4230-a5bc-51067b34ec0b/original.md".to_string())
         );
     }
 }

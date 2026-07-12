@@ -3,12 +3,15 @@ import { useSortable } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
 import { useTranslation } from "react-i18next";
 import type { Phrase } from "../../types";
+import { HighlightText } from "../../components/HighlightText";
 
 interface PhraseListProps {
   phrases: Phrase[];
   loading: boolean;
   selectedGroupId: string | null;
+  search?: string;
   onPaste: (phrase: Phrase) => void;
+  onSecondaryPaste: (phrase: Phrase) => void;
   onEdit: (phrase: Phrase) => void;
   onDelete: (id: string) => void;
 }
@@ -24,12 +27,16 @@ function formatBytes(bytes: number) {
 
 function PhraseCard({
   phrase,
+  search,
   onPaste,
+  onSecondaryPaste,
   onEdit,
   onDelete,
 }: {
   phrase: Phrase;
+  search?: string;
   onPaste: (p: Phrase) => void;
+  onSecondaryPaste: (p: Phrase) => void;
   onEdit: (p: Phrase) => void;
   onDelete: (id: string) => void;
 }) {
@@ -50,6 +57,11 @@ function PhraseCard({
       style={style}
       className={`notification phrase-card${isDragging ? " is-dragging" : ""}`}
       onClick={() => onPaste(phrase)}
+      onContextMenu={(e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        onSecondaryPaste(phrase);
+      }}
     >
       <div className="notibar" />
       <div className="noticontent">
@@ -57,15 +69,15 @@ function PhraseCard({
           {isFile ? (
             <>
               <span className="phrase-card-file-icon">{Icons.file}</span>
-              <span className="phrase-card-file-name">{fileName}</span>
+              <span className="phrase-card-file-name"><HighlightText text={fileName} search={search} /></span>
               <span className="phrase-card-file-size">{formatBytes(phrase.file_size)}</span>
             </>
           ) : (
-            phrase.content
+            <HighlightText text={phrase.content} search={search} />
           )}
         </div>
         <div className="notititle phrase-card-footer">
-          <span className="phrase-card-remark">{phrase.title}</span>
+          <span className="phrase-card-remark"><HighlightText text={phrase.title || ""} search={search} /></span>
           <div className="phrase-card-actions">
             <span ref={setActivatorNodeRef} className="drag-handle" {...attributes} {...listeners}>
               <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor">
@@ -94,7 +106,9 @@ export function PhraseList({
   phrases,
   loading,
   selectedGroupId,
+  search,
   onPaste,
+  onSecondaryPaste,
   onEdit,
   onDelete,
 }: PhraseListProps) {
@@ -140,7 +154,15 @@ export function PhraseList({
   return (
     <div className="phrase-list">
       {phrases.map((p) => (
-        <PhraseCard key={p.id} phrase={p} onPaste={onPaste} onEdit={onEdit} onDelete={onDelete} />
+        <PhraseCard
+          key={p.id}
+          phrase={p}
+          search={search}
+          onPaste={onPaste}
+          onSecondaryPaste={onSecondaryPaste}
+          onEdit={onEdit}
+          onDelete={onDelete}
+        />
       ))}
     </div>
   );

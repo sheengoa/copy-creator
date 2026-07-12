@@ -85,14 +85,66 @@
 
 .clipboard-categories {
   display: flex;
+  flex-direction: column;
   gap: 6px;
-  overflow-x: auto;
+  width: 100%;
   padding: 2px 0;
-  align-items: center;
 }
 
-.clipboard-categories-spacer {
-  flex: 1;
+.clipboard-categories-scroll {
+  display: flex;
+  flex-wrap: nowrap;
+  gap: 6px;
+  overflow-x: auto;
+  min-width: 0;
+}
+
+.clipboard-categories-actions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 6px;
+}
+
+.clipboard-delete-btn {
+  width: 28px;
+  height: 28px;
+  border-radius: 8px;
+  border: 0.5px solid var(--separator);
+  background: #fafaffaf;
+  color: #000;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  transition: all 0.2s cubic-bezier(0.22, 1, 0.36, 1);
+  flex-shrink: 0;
+}
+
+.clipboard-delete-btn:hover {
+  background: rgb(220, 38, 38);
+  color: #fff;
+  transform: scale(1.05);
+}
+
+.clipboard-delete-btn:active {
+  transform: scale(0.95);
+}
+
+.clipboard-delete-btn svg {
+  width: 14px;
+  height: 14px;
+}
+
+[data-theme="dark"] .clipboard-delete-btn {
+  background: var(--input-bg);
+  border-color: var(--card-border);
+  color: rgba(255, 255, 255, 0.7);
+}
+
+[data-theme="dark"] .clipboard-delete-btn:hover {
+  background: rgb(220, 38, 38);
+  color: #fff;
 }
 
 .category-chip-danger {
@@ -116,20 +168,20 @@
   border-color: rgba(255, 69, 58, 0.25);
 }
 
-.clipboard-categories::-webkit-scrollbar {
+.clipboard-categories-scroll::-webkit-scrollbar {
   height: 3px;
 }
 
-.clipboard-categories::-webkit-scrollbar-track {
+.clipboard-categories-scroll::-webkit-scrollbar-track {
   background: transparent;
 }
 
-.clipboard-categories::-webkit-scrollbar-thumb {
+.clipboard-categories-scroll::-webkit-scrollbar-thumb {
   background: rgba(0, 0, 0, 0.15);
   border-radius: 2px;
 }
 
-[data-theme="dark"] .clipboard-categories::-webkit-scrollbar-thumb {
+[data-theme="dark"] .clipboard-categories-scroll::-webkit-scrollbar-thumb {
   background: rgba(255, 255, 255, 0.2);
 }
 
@@ -800,4 +852,131 @@
 
 [data-theme="dark"] .sortable-chosen {
   box-shadow: 0 4px 12px rgba(255, 255, 255, 0.08);
+}
+/* ── Confirm Dialog Message ───────────────────────── */
+.dialog-message {
+  font-size: var(--text-sm);
+  color: var(--text-secondary);
+  line-height: 1.5;
+  margin: 0 0 14px 0;
+  text-align: center;
+  white-space: pre-line;
+}
+
+/* === Clipboard Create Dialog (standalone window) === */
+.clipboard-create-dialog {
+  display: flex;
+  flex-direction: column;
+  width: 100vw;
+  height: 100vh;
+  padding: 16px 18px;
+  box-sizing: border-box;
+  background: var(--panel-bg);
+  border-radius: var(--window-radius);
+  overflow: hidden;
+  isolation: isolate;
+}
+
+.clipboard-create-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 10px;
+  flex-shrink: 0;
+  -webkit-app-region: drag;
+  app-region: drag;
+}
+
+.clipboard-create-title {
+  font-size: var(--text-lg);
+  font-weight: var(--weight-semibold);
+  color: var(--text-primary);
+}
+
+.clipboard-create-close-btn {
+  background: transparent;
+  border: none;
+  width: 24px;
+  height: 24px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  color: var(--text-secondary);
+  border-radius: 6px;
+  transition: all 0.15s;
+  -webkit-app-region: no-drag;
+  app-region: no-drag;
+}
+
+.clipboard-create-close-btn:hover {
+  background: var(--chip-hover-bg);
+  color: var(--text-primary);
+}
+
+.clipboard-create-textarea {
+  flex: 1;
+  width: 100%;
+  border-radius: 10px;
+  border: 1px solid var(--card-border);
+  background: var(--input-bg);
+  color: var(--text-primary);
+  font-family: var(--font);
+  font-size: var(--text-base);
+  padding: 12px 14px;
+  outline: none;
+  resize: none;
+  line-height: 1.5;
+  box-shadow: 0 0.5px 0 0 rgba(255,255,255,0.25) inset;
+  transition: all 0.2s;
+  box-sizing: border-box;
+  -webkit-app-region: no-drag;
+  app-region: no-drag;
+}
+
+.clipboard-create-textarea:focus {
+  border-color: rgba(0, 0, 0, 0.25);
+  background: var(--input-focus-bg);
+  box-shadow: 0 0.5px 0 0 rgba(255,255,255,0.25) inset;
+}
+
+[data-theme="dark"] .clipboard-create-textarea {
+  background: var(--input-bg);
+  border-color: var(--card-border);
+  box-shadow: 0 0.5px 0 0 rgba(255,255,255,0.03) inset;
+}
+
+[data-theme="dark"] .clipboard-create-textarea:focus {
+  border-color: rgba(255, 255, 255, 0.4);
+  box-shadow: 0 0.5px 0 0 rgba(255,255,255,0.03) inset;
+}
+
+.clipboard-create-footer {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 12px;
+  margin-top: 10px;
+  flex-shrink: 0;
+}
+
+.clipboard-create-actions {
+  display: flex;
+  gap: 10px;
+  flex-shrink: 0;
+  -webkit-app-region: no-drag;
+  app-region: no-drag;
+}
+
+.clipboard-create-actions .dialog-btn {
+  display: inline-flex;
+  align-items: center;
+  min-width: 112px;
+  height: 34px;
+  padding: 8px 20px;
+  justify-content: center;
+}
+
+.clipboard-create-actions .dialog-btn.save {
+  min-width: 132px;
 }

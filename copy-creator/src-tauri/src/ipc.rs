@@ -43,11 +43,8 @@ fn socket_path() -> PathBuf {
     if let Ok(dir) = std::env::var("XDG_RUNTIME_DIR") {
         PathBuf::from(dir).join("copy-creator.sock")
     } else {
-        PathBuf::from(
-            std::env::var("HOME")
-                .unwrap_or_else(|_| "/tmp".into()),
-        )
-        .join(".local/share/copy-creator/copy-creator.sock")
+        PathBuf::from(std::env::var("HOME").unwrap_or_else(|_| "/tmp".into()))
+            .join(".local/share/copy-creator/copy-creator.sock")
     }
 }
 
@@ -77,6 +74,11 @@ fn handle_client(mut stream: UnixStream, app: &AppHandle) {
             crate::shortcut::show_radial_menu(app);
             let _ = writeln!(stream, "ok");
         }
+        "new-clipboard" => {
+            log::info!("[ipc] show clipboard create dialog");
+            crate::shortcut::show_clipboard_create(app);
+            let _ = writeln!(stream, "ok");
+        }
         "ping" => {
             let _ = writeln!(stream, "pong");
         }
@@ -97,8 +99,6 @@ fn cmd_show(app: &AppHandle) {
         return;
     }
     let _guard = ShowGuard;
-
-    crate::paste::remember_paste_target();
 
     let window = match app.get_webview_window("main") {
         Some(w) => w,

@@ -18,6 +18,7 @@ export interface ClipboardRecord {
   key_preview?: string;
   guessed_service?: string | null;
   label?: ApiKeyLabel | null;
+  group_name?: string;
 }
 
 export interface PhraseGroup {

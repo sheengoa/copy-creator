@@ -2,12 +2,15 @@ import { useSortable } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
 import { useCallback, useState, useEffect, useRef } from "react";
 import { invoke } from "@tauri-apps/api/core";
+import { useTranslation } from "react-i18next";
 import type { ClipboardRecord } from "../../types";
 import { Icons } from "../../components/Icons";
 import { ImageThumb } from "./ImageThumb";
 import { formatTime, getFileName, TYPE_META } from "./utils";
 import ApiKeyLabelPanel from "./ApiKeyLabelPanel";
+import { HighlightText } from "../../components/HighlightText";
 import { useClipboardStore } from "../../stores/clipboardStore";
+import { shouldUseTerminalPasteForMouseTrigger } from "../../utils/pasteMode";
 
 const COLLAPSE_TEXT_LENGTH = 160;
 const COLLAPSE_LINE_COUNT = 4;
@@ -16,7 +19,10 @@ interface ClipboardCardProps {
   record: ClipboardRecord;
   index: number;
   getTypeLabel: (type: string) => string;
-  onPaste: (r: ClipboardRecord) => void;
+  pasteLeftClick: "normal" | "terminal";
+  search?: string;
+  onPasteNormal: (r: ClipboardRecord) => void;
+  onPasteTerminal: (r: ClipboardRecord) => void;
   onDelete: (id: string) => void;
   onThumbHover: (thumbSrc: string, rect: DOMRect) => void;
   onThumbLeave: () => void;
@@ -26,12 +32,14 @@ type ClipboardCardPreviewProps = {
   record: ClipboardRecord;
   getTypeLabel: (type: string) => string;
   width: number | null;
+  search?: string;
 };
 
 function ClipboardCardBodyPreview({
   record,
   getTypeLabel,
   width,
+  search,
 }: ClipboardCardPreviewProps) {
   const meta = TYPE_META[record.type] || TYPE_META.text;
   const displayContent = record.content;
@@ -73,11 +81,11 @@ function ClipboardCardBodyPreview({
               onClick={(e) => e.stopPropagation()}
             />
           ) : record.type === "link" ? (
-            <span className="clipboard-link-content">{record.content}</span>
+            <span className="clipboard-link-content"><HighlightText text={record.content} search={search} /></span>
           ) : record.type === "file" ? (
-            <span className="clipboard-file-content">{getFileName(record.content)}</span>
+            <span className="clipboard-file-content"><HighlightText text={getFileName(record.content)} search={search} /></span>
           ) : (
-            <span className="clipboard-text-content">{displayContent}</span>
+            <span className="clipboard-text-content"><HighlightText text={displayContent} search={search} /></span>
           )}
         </div>
 
@@ -113,11 +121,15 @@ function ClipboardCardInner({
   record,
   index,
   getTypeLabel,
-  onPaste,
+  pasteLeftClick,
+  search,
+  onPasteNormal,
+  onPasteTerminal,
   onDelete,
   onThumbHover,
   onThumbLeave,
 }: ClipboardCardProps) {
+  const { t } = useTranslation();
   const {
     attributes,
     listeners,
@@ -171,8 +183,16 @@ function ClipboardCardInner({
   }, [ctxMenu]);
 
   const handlePaste = useCallback(() => {
-    if (!labelOpen) onPaste(record);
-  }, [onPaste, record, labelOpen]);
+    if (labelOpen) return;
+    if (shouldUseTerminalPasteForMouseTrigger(pasteLeftClick, "left")) onPasteTerminal(record);
+    else onPasteNormal(record);
+  }, [onPasteNormal, onPasteTerminal, pasteLeftClick, record, labelOpen]);
+
+  const handleSecondaryPaste = useCallback(() => {
+    if (labelOpen) return;
+    if (shouldUseTerminalPasteForMouseTrigger(pasteLeftClick, "right")) onPasteTerminal(record);
+    else onPasteNormal(record);
+  }, [onPasteNormal, onPasteTerminal, pasteLeftClick, record, labelOpen]);
 
   const handleDelete = useCallback(
     (e: React.MouseEvent) => {
@@ -293,16 +313,16 @@ function ClipboardCardInner({
               onLeave={onThumbLeave}
               onClick={(e) => {
                 e.stopPropagation();
-                onPaste(record);
+                handlePaste();
               }}
             />
           ) : record.type === "link" ? (
-            <span className="clipboard-link-content">{record.content}</span>
+            <span className="clipboard-link-content"><HighlightText text={record.content} search={search} /></span>
           ) : record.type === "file" ? (
-            <span className="clipboard-file-content">{getFileName(record.content)}</span>
+            <span className="clipboard-file-content"><HighlightText text={getFileName(record.content)} search={search} /></span>
           ) : (
             <span className="clipboard-text-content" aria-expanded={canToggleText ? isTextExpanded : undefined}>
-              {displayContent}
+              <HighlightText text={displayContent} search={search} />
             </span>
           )}
         </div>
@@ -407,14 +427,28 @@ function ClipboardCardInner({
             onClick={(e) => {
               e.stopPropagation();
               setCtxMenu(null);
-              onPaste(record);
+              handleSecondaryPaste();
             }}
           >
             <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
               <rect x="9" y="9" width="13" height="13" rx="2" ry="2" />
               <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1" />
             </svg>
-            粘贴
+            {pasteLeftClick === "terminal" ? t("clipboard.pasteNormal") : t("clipboard.pasteToTerminal")}
+          </button>
+          <button
+            className="ctx-menu-item"
+            onClick={(e) => {
+              e.stopPropagation();
+              setCtxMenu(null);
+              handlePaste();
+            }}
+          >
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <polyline points="4 17 10 11 4 5" />
+              <line x1="12" y1="19" x2="20" y2="19" />
+            </svg>
+            {pasteLeftClick === "terminal" ? t("clipboard.pasteToTerminal") : t("clipboard.pasteNormal")}
           </button>
           <div className="ctx-menu-sep" />
           <button

@@ -1,6 +1,8 @@
 /* === Design Tokens === */
 :root {
   --bg-primary: #F2F2F7;
+  --window-bg: #F2F2F7;
+  --window-radius: 18px;
   --bg-card: #FFFFFF;
   --bg-card-hover: #F2F2F7;
   --text-primary: #1C1C1E;
@@ -64,6 +66,7 @@
 
 [data-theme="dark"] {
   --bg-primary: #000000;
+  --window-bg: #1E1E1E;
   --bg-card: rgba(255, 255, 255, 0.06);
   --bg-card-hover: rgba(255, 255, 255, 0.1);
   --text-primary: #FFFFFF;
@@ -115,7 +118,7 @@ html, body, #root {
   font-family: var(--font);
   font-size: var(--text-base);
   color: var(--text-primary);
-  background: #F2F2F7;
+  background: transparent;
   user-select: none;
   -webkit-user-select: none;
   -webkit-font-smoothing: antialiased;
@@ -126,7 +129,7 @@ html, body, #root {
 [data-theme="dark"] html,
 [data-theme="dark"] body,
 [data-theme="dark"] #root {
-  background: #1E1E1E;
+  background: transparent;
 }
 
 *::-webkit-scrollbar:horizontal {

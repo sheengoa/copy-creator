@@ -77,15 +77,27 @@ async fn translate_ai(
     let state = app.state::<crate::db::DbState>();
     let (api_url, api_key, model) = {
         let conn = state.conn.lock().map_err(|e| e.to_string())?;
-        let url: String = conn.query_row(
-            "SELECT value FROM settings WHERE key = 'ai_api_url'", [], |r| r.get(0),
-        ).unwrap_or_default();
-        let key: String = conn.query_row(
-            "SELECT value FROM settings WHERE key = 'ai_api_key'", [], |r| r.get(0),
-        ).unwrap_or_default();
-        let m: String = conn.query_row(
-            "SELECT value FROM settings WHERE key = 'ai_model'", [], |r| r.get(0),
-        ).unwrap_or_else(|_| "gpt-3.5-turbo".to_string());
+        let url: String = conn
+            .query_row(
+                "SELECT value FROM settings WHERE key = 'ai_api_url'",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap_or_default();
+        let key: String = conn
+            .query_row(
+                "SELECT value FROM settings WHERE key = 'ai_api_key'",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap_or_default();
+        let m: String = conn
+            .query_row(
+                "SELECT value FROM settings WHERE key = 'ai_model'",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap_or_else(|_| "gpt-3.5-turbo".to_string());
         (url, key, m)
     };
 
@@ -127,14 +139,21 @@ async fn translate_ai(
         .send().await.map_err(|e| format!("AI 翻译请求失败: {}", e))?;
 
     let status = resp.status();
-    let body_text = resp.text().await.map_err(|e| format!("读取响应失败: {}", e))?;
+    let body_text = resp
+        .text()
+        .await
+        .map_err(|e| format!("读取响应失败: {}", e))?;
 
     if !status.is_success() {
-        return Err(format!("AI 翻译 HTTP {}: {}", status.as_u16(), &body_text[..body_text.len().min(80)]));
+        return Err(format!(
+            "AI 翻译 HTTP {}: {}",
+            status.as_u16(),
+            &body_text[..body_text.len().min(80)]
+        ));
     }
 
-    let json: serde_json::Value = serde_json::from_str(&body_text)
-        .map_err(|e| format!("解析响应失败: {}", e))?;
+    let json: serde_json::Value =
+        serde_json::from_str(&body_text).map_err(|e| format!("解析响应失败: {}", e))?;
 
     let translated = json["choices"][0]["message"]["content"]
         .as_str()
@@ -158,17 +177,24 @@ async fn translate_google(
     let state = app.state::<crate::db::DbState>();
     let (api_key, proxy_url): (String, String) = {
         let conn = state.conn.lock().map_err(|e| e.to_string())?;
-        let key: String = conn.query_row(
-            "SELECT value FROM settings WHERE key = 'google_api_key'", [], |r| r.get(0),
-        ).unwrap_or_default();
-        let proxy: String = conn.query_row(
-            "SELECT value FROM settings WHERE key = 'translate_proxy'", [], |r| r.get(0),
-        ).unwrap_or_default();
+        let key: String = conn
+            .query_row(
+                "SELECT value FROM settings WHERE key = 'google_api_key'",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap_or_default();
+        let proxy: String = conn
+            .query_row(
+                "SELECT value FROM settings WHERE key = 'translate_proxy'",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap_or_default();
         (key, proxy)
     };
 
-    let mut builder = reqwest::Client::builder()
-        .timeout(std::time::Duration::from_secs(15));
+    let mut builder = reqwest::Client::builder().timeout(std::time::Duration::from_secs(15));
 
     if !proxy_url.is_empty() {
         let proxy = reqwest::Proxy::all(&proxy_url)
@@ -194,19 +220,23 @@ async fn translate_google(
             .send().await.map_err(|e| fmt_reqwest_error(&e))?;
 
         let status = resp.status();
-        let body = resp.text().await.map_err(|e| format!("读取 Google 响应失败: {}", e))?;
+        let body = resp
+            .text()
+            .await
+            .map_err(|e| format!("读取 Google 响应失败: {}", e))?;
 
         if !status.is_success() {
-            return Err(format!("Google 翻译 HTTP {}: {}", status.as_u16(), &body[..body.len().min(80)]));
+            return Err(format!(
+                "Google 翻译 HTTP {}: {}",
+                status.as_u16(),
+                &body[..body.len().min(80)]
+            ));
         }
 
-        let json: serde_json::Value = serde_json::from_str(&body)
-            .map_err(|e| format!("解析 Google 响应失败: {}", e))?;
+        let json: serde_json::Value =
+            serde_json::from_str(&body).map_err(|e| format!("解析 Google 响应失败: {}", e))?;
 
-        let translated = json[0][0][0]
-            .as_str()
-            .unwrap_or("翻译失败")
-            .to_string();
+        let translated = json[0][0][0].as_str().unwrap_or("翻译失败").to_string();
 
         return Ok(TranslateResponse {
             source_text: text.to_string(),
@@ -226,7 +256,9 @@ async fn translate_google(
         }))
         .send().await.map_err(|e| fmt_reqwest_error(&e))?;
 
-    let json: serde_json::Value = resp.json().await
+    let json: serde_json::Value = resp
+        .json()
+        .await
         .map_err(|e| format!("解析 Google 响应失败: {}", e))?;
 
     if let Some(error) = json.get("error") {
@@ -255,5 +287,3 @@ fn fmt_reqwest_error(err: &reqwest::Error) -> String {
         format!("Google 翻译请求失败: {}", err)
     }
 }
-
-

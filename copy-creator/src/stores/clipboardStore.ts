@@ -4,7 +4,7 @@ import { listen } from "@tauri-apps/api/event";
 
 type UnlistenFn = () => void;
 
-export const CLIP_TYPES = ["all", "text", "image", "link", "file"] as const;
+export const CLIP_TYPES = ["all", "text", "image", "link", "file", "stash"] as const;
 export type ClipType = (typeof CLIP_TYPES)[number];
 
 interface ApiKeyLabel {
@@ -27,6 +27,7 @@ interface ClipboardRecord {
   key_preview?: string;
   guessed_service?: string | null;
   label?: ApiKeyLabel | null;
+  group_name?: string;
 }
 
 const PAGE_SIZE = 120;
@@ -46,6 +47,7 @@ interface ClipboardState {
   setCategory: (c: ClipType) => void;
   loadRecords: (append?: boolean) => Promise<void>;
   updateRecordLabel: (id: string, label: ApiKeyLabel) => void;
+  createRecord: (content: string, groupName?: string) => Promise<void>;
   deleteRecord: (id: string) => Promise<void>;
   deleteAllRecords: () => Promise<void>;
   deleteRecordsByType: (recordType: string) => Promise<void>;
@@ -95,6 +97,20 @@ function trimCache(cache: Record<string, string>, maxEntries: number) {
   return Object.fromEntries(entries.slice(entries.length - maxEntries));
 }
 
+function recordMatchesCategory(record: ClipboardRecord, category: ClipType) {
+  if (category === "all") return true;
+  if (category === "stash") {
+    return record.group_name === "暂存" || record.group_name === "stash";
+  }
+  return record.type === category;
+}
+
+function recordMatchesSearch(record: ClipboardRecord, search: string) {
+  const q = search.trim().toLowerCase();
+  if (!q) return true;
+  return record.content.toLowerCase().includes(q);
+}
+
 async function getFullContent(record: ClipboardRecord): Promise<string> {
   if (!record.content_truncated) return record.content;
   return invoke<string>("get_clipboard_record_content", { id: record.id });
@@ -119,6 +135,8 @@ export const useClipboardStore = create<ClipboardState>((set, get) => ({
       set((state) => {
         // Skip if record with same ID already exists (prevents loadRecords race)
         if (state.records.some((r) => r.id === newRecord.id)) return state;
+        if (!recordMatchesCategory(newRecord, state.category)) return state;
+        if (!recordMatchesSearch(newRecord, state.search)) return state;
         return { records: [newRecord, ...state.records].slice(0, 2000) };
       });
     }).then((fn) => {
@@ -178,6 +196,14 @@ export const useClipboardStore = create<ClipboardState>((set, get) => ({
       updated[idx] = { ...updated[idx], label };
       return { records: updated };
     }),
+
+  createRecord: async (content: string, groupName?: string) => {
+    try {
+      await invoke("create_clipboard_record", { content, groupName });
+    } catch (e) {
+      console.error("Failed to create record:", e);
+    }
+  },
 
   deleteRecord: async (id: string) => {
     try {

@@ -4,6 +4,9 @@
   position: fixed;
   inset: 0;
   z-index: 3000;
+  background: transparent;
+  border-radius: var(--window-radius);
+  overflow: hidden;
 }
 
 .radial-menu-overlay.radial-menu-hidden {
@@ -20,21 +23,20 @@
   width: 100%;
   height: 100%;
   background: #FFFFFF;
-  box-shadow:
-    0 20px 60px rgba(0, 0, 0, 0.25),
-    0 0 0 0.5px rgba(0, 0, 0, 0.06) inset;
+  box-shadow: 0 0 0 0.5px rgba(0, 0, 0, 0.06) inset;
+  border-radius: var(--window-radius);
   display: flex;
   flex-direction: column;
   overflow: hidden;
+  isolation: isolate;
+  clip-path: inset(0 round var(--window-radius));
   animation: radialMenuIn 0.2s cubic-bezier(0.22, 1, 0.36, 1);
   pointer-events: auto;
 }
 
 [data-theme="dark"] .radial-menu-popup {
   background: #1E1E1E;
-  box-shadow:
-    0 20px 60px rgba(0, 0, 0, 0.5),
-    0 0 0 0.5px rgba(255, 255, 255, 0.08) inset;
+  box-shadow: 0 0 0 0.5px rgba(255, 255, 255, 0.08) inset;
 }
 
 @keyframes radialMenuIn {
@@ -257,90 +259,4 @@
 
 [data-theme="dark"] .radial-menu-empty {
   color: rgba(255, 255, 255, 0.3);
-}
-
-/* --- Hover Progress --- */
-.hover-progress-track {
-  position: absolute;
-  bottom: 0;
-  left: 0;
-  right: 0;
-  height: 2px;
-  background: rgba(0, 0, 0, 0.06);
-  border-radius: 1px;
-  overflow: hidden;
-}
-
-[data-theme="dark"] .hover-progress-track {
-  background: rgba(255, 255, 255, 0.06);
-}
-
-.hover-progress-bar {
-  height: 100%;
-  background: rgba(0, 0, 0, 0.35);
-  border-radius: 1px;
-  transition: width 50ms linear;
-}
-
-[data-theme="dark"] .hover-progress-bar {
-  background: rgba(255, 255, 255, 0.6);
-}
-
-/* --- Long-Hover Tooltip --- */
-.radial-menu-tooltip {
-  position: absolute;
-  bottom: 12px;
-  left: 12px;
-  right: 12px;
-  max-height: 50%;
-  background: rgba(0, 0, 0, 0.88);
-  color: rgba(255, 255, 255, 0.95);
-  border-radius: 10px;
-  padding: 14px 16px;
-  z-index: 10;
-  animation: tooltipIn 0.15s ease;
-  pointer-events: none;
-  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.4);
-  backdrop-filter: blur(12px);
-  -webkit-backdrop-filter: blur(12px);
-}
-
-[data-theme="dark"] .radial-menu-tooltip {
-  background: rgba(30, 30, 30, 0.92);
-  color: rgba(255, 255, 255, 0.9);
-  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.6);
-}
-
-.radial-menu-tooltip-content {
-  font-family: var(--font);
-  font-size: var(--text-sm);
-  line-height: 1.6;
-  white-space: pre-wrap;
-  word-break: break-all;
-  overflow-y: auto;
-  max-height: 100%;
-}
-
-.radial-menu-tooltip-content::-webkit-scrollbar {
-  width: 4px;
-}
-
-.radial-menu-tooltip-content::-webkit-scrollbar-track {
-  background: transparent;
-}
-
-.radial-menu-tooltip-content::-webkit-scrollbar-thumb {
-  background: rgba(255, 255, 255, 0.2);
-  border-radius: 2px;
-}
-
-@keyframes tooltipIn {
-  from {
-    opacity: 0;
-    transform: translateY(6px);
-  }
-  to {
-    opacity: 1;
-    transform: translateY(0);
-  }
 }

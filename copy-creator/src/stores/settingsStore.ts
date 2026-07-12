@@ -1,6 +1,7 @@
 import { create } from "zustand";
 import { invoke } from "@tauri-apps/api/core";
 import { emit } from "@tauri-apps/api/event";
+import type { PasteMode } from "../utils/pasteMode";
 
 type ThemeMode = "light" | "dark";
 
@@ -18,13 +19,16 @@ interface SettingsState {
   language: string;
   shortcutKey: string;
   radialShortcutKey: string;
+  clipboardCreateShortcutKey: string;
   radialMenuEnabled: boolean;
   autostartEnabled: boolean;
+  pasteLeftClick: PasteMode;
 
   toggleTheme: () => void;
   loadSettings: () => Promise<void>;
   setSetting: (key: string, value: string) => Promise<void>;
   setSettingsBatch: (settings: Record<string, string>) => Promise<void>;
+  setPasteLeftClick: (mode: PasteMode) => Promise<void>;
   setAutostart: (enabled: boolean) => Promise<boolean>;
 }
 
@@ -42,8 +46,10 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
   language: "zh-CN",
   shortcutKey: "",
   radialShortcutKey: "",
+  clipboardCreateShortcutKey: "",
   radialMenuEnabled: true,
   autostartEnabled: false,
+  pasteLeftClick: "normal",
 
   toggleTheme: () => {
     const next = get().themeMode === "light" ? "dark" : "light";
@@ -71,7 +77,9 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
         language: settings.language || "zh-CN",
         shortcutKey: settings.shortcut_key || "",
         radialShortcutKey: settings.shortcut_radial || "",
+        clipboardCreateShortcutKey: settings.shortcut_clipboard_create || "",
         radialMenuEnabled: settings.radial_menu_enabled !== "0",
+        pasteLeftClick: (settings.paste_left_click === "terminal" ? "terminal" : "normal") as PasteMode,
       });
 
       // Read autostart state from the .desktop file
@@ -87,6 +95,11 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
   setSetting: async (key: string, value: string) => {
     try {
       await invoke("set_setting", { key, value });
+      const patch: Partial<SettingsState> = {};
+      if (key === "shortcut_key") patch.shortcutKey = value;
+      if (key === "shortcut_radial") patch.radialShortcutKey = value;
+      if (key === "shortcut_clipboard_create") patch.clipboardCreateShortcutKey = value;
+      if (Object.keys(patch).length > 0) set(patch);
     } catch (e) {
       console.error("Failed to save setting:", e);
     }
@@ -95,8 +108,38 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
   setSettingsBatch: async (settings: Record<string, string>) => {
     try {
       await invoke("set_settings_batch", { settings });
+      // 同步更新本地 state，避免 UI 组件读到旧值
+      const patch: Partial<SettingsState> = {};
+      if ("theme" in settings) {
+        patch.themeMode = (settings.theme === "dark" ? "dark" : "light") as ThemeMode;
+      }
+      if ("clipboard_retention" in settings) {
+        patch.clipboardRetention = settings.clipboard_retention || "1month";
+      }
+      if ("default_translate_engine" in settings) {
+        patch.defaultEngine = settings.default_translate_engine || "google";
+      }
+      if ("ai_api_url" in settings) patch.apiUrl = settings.ai_api_url || "";
+      if ("ai_api_key" in settings) patch.apiKey = settings.ai_api_key || "";
+      if ("ai_model" in settings) patch.model = settings.ai_model || "";
+      if ("google_api_key" in settings) patch.googleApiKey = settings.google_api_key || "";
+      if ("translate_proxy" in settings) patch.translateProxy = settings.translate_proxy || "";
+      if ("language" in settings) patch.language = settings.language || "zh-CN";
+      if ("paste_left_click" in settings) {
+        patch.pasteLeftClick = (settings.paste_left_click === "terminal" ? "terminal" : "normal") as PasteMode;
+      }
+      if (Object.keys(patch).length > 0) set(patch);
     } catch (e) {
       console.error("Failed to batch save settings:", e);
+    }
+  },
+
+  setPasteLeftClick: async (mode: PasteMode) => {
+    set({ pasteLeftClick: mode });
+    try {
+      await invoke("set_settings_batch", { settings: { paste_left_click: mode } });
+    } catch (e) {
+      console.error("Failed to save paste setting:", e);
     }
   },
 

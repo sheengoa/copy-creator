@@ -9,6 +9,47 @@ mod tray;
 
 use tauri::Manager;
 
+pub(crate) fn show_main_window(app: &tauri::AppHandle, reason: &str, center: bool) {
+    let Some(window) = app.get_webview_window("main") else {
+        log::error!("[show_main_window] main window not found ({reason})");
+        return;
+    };
+
+    log::info!("[show_main_window] showing main window ({reason})");
+
+    let was_pinned = window.is_always_on_top().unwrap_or(false);
+    if let Err(e) = window.set_always_on_top(true) {
+        log::warn!("[show_main_window] set_always_on_top(true) failed: {e}");
+    }
+    if center {
+        if let Err(e) = window.center() {
+            log::warn!("[show_main_window] center failed: {e}");
+        }
+    }
+    if let Err(e) = window.unminimize() {
+        log::warn!("[show_main_window] unminimize failed: {e}");
+    }
+    if let Err(e) = window.show() {
+        log::warn!("[show_main_window] show failed: {e}");
+    }
+    if let Err(e) = window.set_focus() {
+        log::warn!("[show_main_window] set_focus failed: {e}");
+    }
+
+    let app_handle = app.clone();
+    std::thread::spawn(move || {
+        std::thread::sleep(std::time::Duration::from_millis(250));
+        if let Some(window) = app_handle.get_webview_window("main") {
+            let _ = window.set_always_on_top(was_pinned);
+            if window.is_visible().unwrap_or(false) {
+                let _ = window.set_focus();
+            }
+        } else {
+            log::error!("[show_main_window] main window not found (delayed startup)");
+        }
+    });
+}
+
 #[tauri::command]
 fn toggle_always_on_top(app: tauri::AppHandle) -> Result<bool, String> {
     let window = app
@@ -34,6 +75,8 @@ pub fn run() {
                             shortcut::toggle_window(app);
                         } else if shortcut::is_radial_shortcut(&key) {
                             shortcut::show_radial_menu(app);
+                        } else if shortcut::is_clipboard_create_shortcut(&key) {
+                            shortcut::show_clipboard_create(app);
                         } else {
                             log::info!("[shortcut] unknown shortcut pressed: {}", key);
                         }
@@ -58,8 +101,8 @@ pub fn run() {
 
             // Restore persisted theme; DB init defaults to light, so
             // the first-ever launch will be light mode.
-            let current_theme = db::get_setting_sync(app.handle(), "theme")
-                .unwrap_or_else(|| "light".to_string());
+            let current_theme =
+                db::get_setting_sync(app.handle(), "theme").unwrap_or_else(|| "light".to_string());
             log::info!("Starting with theme: {}", current_theme);
 
             // Repair autostart entry if stale or broken
@@ -77,7 +120,9 @@ pub fn run() {
 
             clipboard::start_monitor(app.handle())?;
 
-            app.handle().manage(tray::TrayState { tray: std::sync::Mutex::new(None) });
+            app.handle().manage(tray::TrayState {
+                tray: std::sync::Mutex::new(None),
+            });
             tray::create_tray(app.handle())?;
 
             shortcut::init_radial_menu_state(app.handle());
@@ -85,12 +130,15 @@ pub fn run() {
             // Start Unix-socket IPC so external scripts can control the app
             // (used with Ubuntu Settings → Keyboard → Custom Shortcuts)
             let ipc_socket = ipc::start_ipc_server(app.handle().clone());
-            log::info!("IPC socket ready — use: echo show | nc -U {}", ipc_socket.display());
+            log::info!(
+                "IPC socket ready — use: echo show | nc -U {}",
+                ipc_socket.display()
+            );
 
             // Create hidden radial menu popup window
             {
-                use tauri::WebviewWindowBuilder;
                 use tauri::WebviewUrl;
+                use tauri::WebviewWindowBuilder;
                 let _ = WebviewWindowBuilder::new(
                     app,
                     "radial-menu",
@@ -99,14 +147,36 @@ pub fn run() {
                 .title("")
                 .inner_size(300.0, 420.0)
                 .decorations(false)
-                .transparent(false)
+                .transparent(true)
                 .always_on_top(true)
                 .visible(false)
                 .shadow(false)
                 .skip_taskbar(true)
                 .resizable(false)
                 .build()?;
-                log::info!("Radial menu popup window created (opaque, rounded via CSS)");
+                log::info!("Radial menu popup window created (transparent, rounded via CSS)");
+            }
+
+            // Create hidden standalone clipboard-create popup window.
+            {
+                use tauri::WebviewUrl;
+                use tauri::WebviewWindowBuilder;
+                let _ = WebviewWindowBuilder::new(
+                    app,
+                    "clipboard-create",
+                    WebviewUrl::App("index.html?clipboard-create=1".into()),
+                )
+                .title("新建")
+                .inner_size(560.0, 400.0)
+                .decorations(false)
+                .transparent(true)
+                .always_on_top(true)
+                .visible(false)
+                .shadow(false)
+                .skip_taskbar(true)
+                .resizable(false)
+                .build()?;
+                log::info!("Clipboard create popup window created");
             }
 
             if let Ok(key) = db::get_setting(app.handle().clone(), "shortcut_key".to_string()) {
@@ -128,17 +198,35 @@ pub fn run() {
                 }
             }
 
+            // Register standalone clipboard create shortcut
+            if let Ok(key) = db::get_setting(
+                app.handle().clone(),
+                "shortcut_clipboard_create".to_string(),
+            ) {
+                if !key.is_empty() {
+                    *shortcut::CLIPBOARD_CREATE_SHORTCUT_KEY.lock().unwrap() = key.clone();
+                    if let Err(e) = shortcut::register_keyboard_shortcut(app.handle(), &key) {
+                        log::warn!(
+                            "Failed to register clipboard create shortcut '{}': {}",
+                            key,
+                            e
+                        );
+                    }
+                }
+            }
+
             // Show main window when not auto-started (after all init is done)
             if !is_autostart {
-                if let Some(window) = app.get_webview_window("main") {
-                    let _ = window.show();
-                }
+                show_main_window(app.handle(), "startup", true);
+            } else {
+                log::info!("[show_main_window] startup hidden by --hidden");
             }
 
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
             db::get_clipboard_records,
+            clipboard::create_clipboard_record,
             db::get_clipboard_record_content,
             db::delete_all_clipboard_records,
             db::delete_records_by_type,
@@ -174,6 +262,7 @@ pub fn run() {
             translator::translate,
             shortcut::update_shortcut,
             shortcut::update_radial_shortcut,
+            shortcut::update_clipboard_create_shortcut,
             shortcut::set_radial_menu_enabled,
             tray::update_tray_language,
             db::check_api_key,

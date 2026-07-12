@@ -39,6 +39,7 @@
     "shortcut": "Shortcuts",
     "windowShortcut": "Show Window Shortcut",
     "radialShortcut": "Quick Menu Shortcut",
+    "clipboardCreateShortcut": "New clipboard input",
     "radialShortcutDesc": "Press a key combination to open the quick menu",
     "rightClick": "Right Click",
     "shortcutPlaceholder": "Click record button to set keyboard shortcut",
@@ -62,6 +63,12 @@
     "changeFolder": "Change",
     "migrateTitle": "Migrate Data",
     "migratePrompt": "Move existing clipboard records, quick input items, and settings to the new location?\n\nChoose \"Migrate\": data will be copied to the new location\nChoose \"Cancel\": only update the path, existing data stays",
+    "paste": "Paste",
+    "pasteLeftClick": "Left-click paste mode",
+    "pasteRightClick": "Right-click paste mode",
+    "pasteNormal": "Normal",
+    "pasteTerminal": "Terminal",
+    "pasteToTerminal": "Paste to terminal",
     "translation": "Translation"
   },
   "translate": {
@@ -83,7 +90,13 @@
     "image": "Image",
     "link": "Link",
     "file": "File",
+    "stash": "Stash",
+    "create": "Create",
+    "createPlaceholder": "Enter content to stash...",
+    "pasteNormal": "Normal paste",
+    "pasteToTerminal": "Paste to terminal",
     "deleteAll": "Delete All",
+    "confirmDelete": "Delete this record?",
     "confirmDeleteAll": "Delete all clipboard records? This action cannot be undone.",
     "deleteType": "Delete {{type}}",
     "confirmDeleteType": "Delete all {{type}} records? This action cannot be undone.",
@@ -111,7 +124,9 @@
     "emptyGroup": "No groups yet, create one below",
     "emptyGroupPhrases": "No quick input in this group",
     "manageGroups": "Manage Groups",
-    "rename": "Rename"
+    "rename": "Rename",
+    "confirmDelete": "Delete this quick input?",
+    "confirmDeleteGroup": "Delete this group and all its quick inputs? This action cannot be undone."
   },
   "common": {
     "search": "Search",
@@ -120,6 +135,7 @@
     "delete": "Delete",
     "edit": "Edit",
     "confirm": "Confirm",
+    "saving": "Saving",
     "close": "Close",
     "hide": "Hide",
     "loading": "Loading...",

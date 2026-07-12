@@ -2,15 +2,17 @@ import { useTranslation } from "react-i18next";
 
 interface ShortcutSectionProps {
   localShortcutKey: string;
-  setLocalShortcutKey: (key: string) => void;
   recording: boolean;
   startRecording: () => void;
   stopRecording: () => void;
   localRadialShortcutKey: string;
-  setLocalRadialShortcutKey: (key: string) => void;
   radialRecording: boolean;
   startRadialRecording: () => void;
   stopRadialRecording: () => void;
+  localClipboardCreateShortcutKey: string;
+  clipboardCreateRecording: boolean;
+  startClipboardCreateRecording: () => void;
+  stopClipboardCreateRecording: () => void;
 }
 
 export function ShortcutSection({
@@ -22,6 +24,10 @@ export function ShortcutSection({
   radialRecording,
   startRadialRecording,
   stopRadialRecording,
+  localClipboardCreateShortcutKey,
+  clipboardCreateRecording,
+  startClipboardCreateRecording,
+  stopClipboardCreateRecording,
 }: ShortcutSectionProps) {
   const { t } = useTranslation();
 
@@ -57,6 +63,22 @@ export function ShortcutSection({
                 onClick={radialRecording ? stopRadialRecording : startRadialRecording}
               >
                 {radialRecording ? t("settings.stopRecord") : t("settings.recordShortcut")}
+              </button>
+            </div>
+          </div>
+        </div>
+        <div className="settings-row">
+          <div className="settings-row-label">{t("settings.clipboardCreateShortcut")}</div>
+          <div className="shortcut-setting">
+            <div className="shortcut-keyboard-row">
+              <span className={`shortcut-display${clipboardCreateRecording ? " recording" : ""}`}>
+                {clipboardCreateRecording ? t("settings.recording") : (localClipboardCreateShortcutKey || t("settings.shortcutPlaceholder"))}
+              </span>
+              <button
+                className="shortcut-record-btn"
+                onClick={clipboardCreateRecording ? stopClipboardCreateRecording : startClipboardCreateRecording}
+              >
+                {clipboardCreateRecording ? t("settings.stopRecord") : t("settings.recordShortcut")}
               </button>
             </div>
           </div>

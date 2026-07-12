@@ -3,9 +3,11 @@
   height: 100vh;
   display: flex;
   flex-direction: row;
-  background: transparent;
+  background: var(--window-bg);
+  border-radius: var(--window-radius);
   overflow: hidden;
   position: relative;
+  isolation: isolate;
   border: none;
   outline: none;
 }

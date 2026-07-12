@@ -69,14 +69,16 @@ export function ManageGroupsDialog({
                 >
                   {Icons.edit}
                 </button>
-                <button
-                  className="card-delete-btn"
-                  style={{ opacity: 1 }}
-                  onClick={() => onDeleteGroup(g.id)}
-                  title={t("common.delete")}
-                >
-                  {Icons.delete}
-                </button>
+                {g.name !== "暂存" && (
+                  <button
+                    className="card-delete-btn"
+                    style={{ opacity: 1 }}
+                    onClick={() => onDeleteGroup(g.id)}
+                    title={t("common.delete")}
+                  >
+                    {Icons.delete}
+                  </button>
+                )}
               </div>
             </div>
           ))}

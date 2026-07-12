@@ -1,13 +1,16 @@
 use std::sync::Mutex;
-use tauri::{AppHandle, Manager};
 use tauri::menu::{MenuBuilder, MenuItemBuilder};
 use tauri::tray::TrayIconBuilder;
+use tauri::{AppHandle, Manager};
 
 pub struct TrayState {
     pub tray: Mutex<Option<tauri::tray::TrayIcon>>,
 }
 
-fn build_tray_menu(app: &AppHandle, lang: &str) -> Result<tauri::menu::Menu<tauri::Wry>, Box<dyn std::error::Error>> {
+fn build_tray_menu(
+    app: &AppHandle,
+    lang: &str,
+) -> Result<tauri::menu::Menu<tauri::Wry>, Box<dyn std::error::Error>> {
     let (show_text, quit_text) = if lang == "en" {
         ("Show Window", "Quit")
     } else {
@@ -16,7 +19,11 @@ fn build_tray_menu(app: &AppHandle, lang: &str) -> Result<tauri::menu::Menu<taur
 
     let show = MenuItemBuilder::with_id("show", show_text).build(app)?;
     let quit = MenuItemBuilder::with_id("quit", quit_text).build(app)?;
-    MenuBuilder::new(app).item(&show).item(&quit).build().map_err(Into::into)
+    MenuBuilder::new(app)
+        .item(&show)
+        .item(&quit)
+        .build()
+        .map_err(Into::into)
 }
 
 pub fn create_tray(app: &AppHandle) -> Result<(), Box<dyn std::error::Error>> {
@@ -37,10 +44,7 @@ pub fn create_tray(app: &AppHandle) -> Result<(), Box<dyn std::error::Error>> {
         .show_menu_on_left_click(false)
         .on_menu_event(|app, event| match event.id().as_ref() {
             "show" => {
-                if let Some(window) = app.get_webview_window("main") {
-                    window.show().ok();
-                    window.set_focus().ok();
-                }
+                crate::show_main_window(app, "tray-menu", false);
             }
             "quit" => {
                 app.exit(0);
@@ -48,7 +52,12 @@ pub fn create_tray(app: &AppHandle) -> Result<(), Box<dyn std::error::Error>> {
             _ => {}
         })
         .on_tray_icon_event(|tray, event| {
-            if let tauri::tray::TrayIconEvent::Click { button, button_state, .. } = event {
+            if let tauri::tray::TrayIconEvent::Click {
+                button,
+                button_state,
+                ..
+            } = event
+            {
                 if button_state != tauri::tray::MouseButtonState::Down {
                     return;
                 }
@@ -58,8 +67,7 @@ pub fn create_tray(app: &AppHandle) -> Result<(), Box<dyn std::error::Error>> {
                         if window.is_visible().unwrap_or(false) {
                             window.hide().ok();
                         } else {
-                            window.show().ok();
-                            window.set_focus().ok();
+                            crate::show_main_window(app, "tray-click", false);
                         }
                     }
                 }

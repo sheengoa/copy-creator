@@ -5,13 +5,12 @@ import { getCurrentWindow } from "@tauri-apps/api/window";
 import { invoke } from "@tauri-apps/api/core";
 import { useClipboardStore, type ClipType } from "../../stores/clipboardStore";
 import { usePhraseStore } from "../../stores/phraseStore";
-import { useHoverSwitch } from "./useHoverSwitch";
-import { HoverProgress } from "./HoverProgress";
+import { useSettingsStore } from "../../stores/settingsStore";
+import { shouldUseTerminalPasteForMouseTrigger } from "../../utils/pasteMode";
 import i18n from "../../i18n";
 
 type TabKey = "clipboard" | "phrases";
 
-const HOVER_DELAY = 500;
 const MAX_ITEMS = 2000;
 
 const filenameFromPath = (path: string) => path.replace(/\\/g, "/").split("/").pop() || path;
@@ -25,41 +24,15 @@ function formatTime(dateStr: string): string {
   return `${month}/${day} ${hours}:${minutes}`;
 }
 
-function isTruncatedItem(itemId: string): boolean {
-  const { records } = useClipboardStore.getState();
-  const record = records.find((r) => r.id === itemId);
-  if (record) {
-    if (record.type === "image" || record.type === "file") return false;
-    const text = record.is_api_key ? (record.key_preview || record.content) : record.content;
-    return record.content_truncated === true || (text?.length ?? 0) > 300;
+async function loadPasteLeftClickSetting() {
+  try {
+    const mode = await invoke<string>("get_setting", { key: "paste_left_click" });
+    useSettingsStore.setState({
+      pasteLeftClick: mode === "terminal" ? "terminal" : "normal",
+    });
+  } catch {
+    // Keep the default normal paste mode if the setting is unavailable.
   }
-  const { phrases } = usePhraseStore.getState();
-  const phrase = phrases.find((p) => p.id === itemId);
-  if (phrase) {
-    if (phrase.input_type === "file") return false;
-    return phrase.content.length > 300;
-  }
-  return false;
-}
-
-async function fetchFullContent(itemId: string): Promise<string> {
-  const { records, getRecordContent } = useClipboardStore.getState();
-  const record = records.find((r) => r.id === itemId);
-  if (record) {
-    if (record.content_truncated) {
-      return getRecordContent(record);
-    }
-    if (record.is_api_key) {
-      return record.key_preview || record.content;
-    }
-    return record.content;
-  }
-  const { phrases } = usePhraseStore.getState();
-  const phrase = phrases.find((p) => p.id === itemId);
-  if (phrase) {
-    return phrase.content;
-  }
-  return "";
 }
 
 function ImageThumb({ recordId }: { recordId: string }) {
@@ -101,12 +74,6 @@ export default function RadialMenu() {
   const clipboardCategoryRef = useRef<ClipType>("all");
   const phraseGroupIdRef = useRef<string | null>(null);
 
-  // Tooltip state for long-hover truncated content preview
-  const [tooltipItemId, setTooltipItemId] = useState<string | null>(null);
-  const [tooltipContent, setTooltipContent] = useState<string>('');
-  const tooltipTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const tooltipItemElRef = useRef<HTMLElement | null>(null);
-
   useEffect(() => { visibleRef.current = visible; }, [visible]);
   useEffect(() => { selectedItemIdRef.current = selectedItemId; }, [selectedItemId]);
   useEffect(() => { activeTabRef.current = activeTab; }, [activeTab]);
@@ -129,6 +96,7 @@ export default function RadialMenu() {
     }).catch(() => {});
 
     // Pre-load data so it's ready when the menu first shows
+    loadPasteLeftClickSetting();
     useClipboardStore.getState().init();
     usePhraseStore.getState().init();
 
@@ -173,7 +141,6 @@ export default function RadialMenu() {
     e.preventDefault();
     e.stopPropagation();
     handleTabSwitch(key);
-    navLeaveRef.current();
   }, [handleTabSwitch]);
 
   const applyCategorySwitch = useCallback((key: string) => {
@@ -189,46 +156,17 @@ export default function RadialMenu() {
     selectedItemIdRef.current = null;
   }, []);
 
-  // Hover-based switching (2s delay — used by mouse hover on nav/category)
-  const handleCategorySwitch = useCallback((key: string) => {
-    applyCategorySwitch(key);
-  }, [applyCategorySwitch]);
-
-  // Click-based switching (instant — used by click on category chips)
   const handleCategoryClick = useCallback((e: React.MouseEvent, key: string) => {
     e.preventDefault();
     e.stopPropagation();
     applyCategorySwitch(key);
-    // Also cancel any pending hover timer
-    catLeaveRef.current();
   }, [applyCategorySwitch]);
-
-  const navSwitch = useHoverSwitch(handleTabSwitch, HOVER_DELAY);
-  const categorySwitch = useHoverSwitch(handleCategorySwitch, HOVER_DELAY);
-
-  const navEnterRef = useRef(navSwitch.handleEnter);
-  navEnterRef.current = navSwitch.handleEnter;
-  const navLeaveRef = useRef(navSwitch.handleLeave);
-  navLeaveRef.current = navSwitch.handleLeave;
-  const catEnterRef = useRef(categorySwitch.handleEnter);
-  catEnterRef.current = categorySwitch.handleEnter;
-  const catLeaveRef = useRef(categorySwitch.handleLeave);
-  catLeaveRef.current = categorySwitch.handleLeave;
 
   const resetState = useCallback(() => {
     visibleRef.current = false;
     setVisible(false);
     setSelectedItemId(null);
     selectedItemIdRef.current = null;
-    navLeaveRef.current();
-    catLeaveRef.current();
-    // Clear tooltip
-    if (tooltipTimerRef.current) {
-      clearTimeout(tooltipTimerRef.current);
-      tooltipTimerRef.current = null;
-    }
-    setTooltipItemId(null);
-    setTooltipContent("");
   }, []);
 
   const updateHoverFromPoint = useCallback((cssX: number, cssY: number) => {
@@ -236,76 +174,16 @@ export default function RadialMenu() {
     if (!el) {
       selectedItemIdRef.current = null;
       setSelectedItemId(null);
-      navLeaveRef.current();
-      catLeaveRef.current();
       return;
     }
-
     const itemEl = (el as HTMLElement).closest("[data-radial-item-id]");
-    const navEl = (el as HTMLElement).closest("[data-radial-nav]");
-    const catEl = (el as HTMLElement).closest("[data-radial-category]");
-
     if (itemEl) {
       const id = itemEl.getAttribute("data-radial-item-id");
       selectedItemIdRef.current = id;
       setSelectedItemId(id);
-      navLeaveRef.current();
-      catLeaveRef.current();
-
-      // Tooltip: start 3s timer for truncated items
-      if (tooltipTimerRef.current) {
-        clearTimeout(tooltipTimerRef.current);
-        tooltipTimerRef.current = null;
-      }
-      setTooltipItemId(null);
-      setTooltipContent("");
-
-      if (id && isTruncatedItem(id)) {
-        tooltipItemElRef.current = itemEl as HTMLElement;
-        tooltipTimerRef.current = setTimeout(async () => {
-          const full = await fetchFullContent(id);
-          // Only show tooltip if still hovering the same item
-          if (selectedItemIdRef.current === id) {
-            setTooltipContent(full);
-            setTooltipItemId(id);
-          }
-        }, 3000);
-      }
-    } else if (navEl) {
-      const key = navEl.getAttribute("data-radial-nav");
-      if (key && key !== activeTabRef.current) {
-        navEnterRef.current(key);
-      } else {
-        navLeaveRef.current();
-      }
-      catLeaveRef.current();
-      selectedItemIdRef.current = null;
-      setSelectedItemId(null);
-    } else if (catEl) {
-      const key = catEl.getAttribute("data-radial-category");
-      const activeCat = activeTabRef.current === "clipboard"
-        ? clipboardCategoryRef.current
-        : phraseGroupIdRef.current;
-      if (key && key !== activeCat) {
-        catEnterRef.current(key);
-      } else {
-        catLeaveRef.current();
-      }
-      navLeaveRef.current();
-      selectedItemIdRef.current = null;
-      setSelectedItemId(null);
     } else {
       selectedItemIdRef.current = null;
       setSelectedItemId(null);
-      navLeaveRef.current();
-      catLeaveRef.current();
-      // Clear tooltip timer when mouse leaves all items
-      if (tooltipTimerRef.current) {
-        clearTimeout(tooltipTimerRef.current);
-        tooltipTimerRef.current = null;
-      }
-      setTooltipItemId(null);
-      setTooltipContent("");
     }
   }, []);
 
@@ -337,8 +215,9 @@ export default function RadialMenu() {
 
     const setup = async () => {
       // Listen for radial-menu-show event from backend (keyboard shortcut triggered)
-      const unShow = await listen<{ theme: string }>("radial-menu-show", (e) => {
+      const unShow = await listen<{ theme: string }>("radial-menu-show", async (e) => {
         document.documentElement.setAttribute("data-theme", e.payload.theme);
+        await loadPasteLeftClickSetting();
         visibleRef.current = true;
         setVisible(true);
         setSelectedItemId(null);
@@ -420,6 +299,7 @@ export default function RadialMenu() {
   const phraseGroups = usePhraseStore((s) => s.groups);
   const phrases = usePhraseStore((s) => s.phrases);
   const loadPhrases = usePhraseStore((s) => s.loadPhrases);
+  const pasteLeftClick = useSettingsStore((s) => s.pasteLeftClick);
 
   useEffect(() => {
     if (visible && activeTab === "phrases" && !phraseGroupId && phraseGroups.length > 0) {
@@ -432,7 +312,9 @@ export default function RadialMenu() {
 
   const filteredRecords = clipboardCategory === "all"
     ? records
-    : records.filter((r) => r.type === clipboardCategory);
+    : clipboardCategory === "stash"
+      ? records.filter((r) => r.group_name === "暂存" || r.group_name === "stash")
+      : records.filter((r) => r.type === clipboardCategory);
 
   const items = activeTab === "clipboard"
     ? filteredRecords.slice(0, MAX_ITEMS).map((r) => ({
@@ -463,6 +345,7 @@ export default function RadialMenu() {
         { key: "image", label: t("clipboard.image") },
         { key: "link", label: t("clipboard.link") },
         { key: "file", label: t("clipboard.file") },
+        { key: "stash", label: t("clipboard.stash") },
       ]
     : phraseGroups.map((g) => ({
         key: g.id,
@@ -483,9 +366,6 @@ export default function RadialMenu() {
               onClick={(e) => handleTabClick(e, tab)}
             >
               <span className="radial-menu-nav-label">{t(`tabs.${tab}`)}</span>
-              {navSwitch.progressKey === tab && (
-                <HoverProgress progress={navSwitch.progress} />
-              )}
             </button>
           ))}
         </div>
@@ -500,9 +380,6 @@ export default function RadialMenu() {
                 onClick={(e) => handleCategoryClick(e, cat.key)}
               >
                 {cat.label}
-                {categorySwitch.progressKey === cat.key && (
-                  <HoverProgress progress={categorySwitch.progress} />
-                )}
               </button>
             ))}
           </div>
@@ -519,12 +396,21 @@ export default function RadialMenu() {
                 data-radial-item-id={item.id}
                 onClick={(e) => {
                   e.stopPropagation();
-                  handleItemPaste(item.id, e.shiftKey);
+                  handleItemPaste(
+                    item.id,
+                    shouldUseTerminalPasteForMouseTrigger(
+                      pasteLeftClick,
+                      e.shiftKey ? "left-shift" : "left",
+                    ),
+                  );
                 }}
                 onContextMenu={(e) => {
                   e.preventDefault();
                   e.stopPropagation();
-                  handleItemPaste(item.id, true);
+                  handleItemPaste(
+                    item.id,
+                    shouldUseTerminalPasteForMouseTrigger(pasteLeftClick, "right"),
+                  );
                 }}
               >
                 {item.type === "image" ? (
@@ -547,14 +433,6 @@ export default function RadialMenu() {
           )}
         </div>
 
-        {/* Long-hover tooltip for truncated content */}
-        {tooltipItemId && tooltipContent && (
-          <div className="radial-menu-tooltip">
-            <div className="radial-menu-tooltip-content">
-              {tooltipContent}
-            </div>
-          </div>
-        )}
       </div>
     </div>
   );

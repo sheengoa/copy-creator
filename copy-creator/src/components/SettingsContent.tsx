@@ -3,7 +3,8 @@ import { useTranslation } from "react-i18next";
 import { invoke } from "@tauri-apps/api/core";
 import { emit } from "@tauri-apps/api/event";
 import { useSettingsStore } from "../stores/settingsStore";
-import { StorageSection, LanguageSection, ShortcutSection, TranslationSection, StartupSection } from "./settings";
+import { StorageSection, LanguageSection, ShortcutSection, TranslationSection, StartupSection, PasteSection } from "./settings";
+import { useShortcutRecording } from "./settings/useShortcutRecording";
 
 interface Props {
   embedded?: boolean;
@@ -12,6 +13,7 @@ interface Props {
 export default function SettingsContent({ embedded }: Props) {
   const { i18n, t } = useTranslation();
   const settings = useSettingsStore();
+  const loadSettings = settings.loadSettings;
 
   const [localRetention, setLocalRetention] = useState(settings.clipboardRetention);
   const [localEngine, setLocalEngine] = useState(settings.defaultEngine);
@@ -24,7 +26,10 @@ export default function SettingsContent({ embedded }: Props) {
   const [localShortcutKey, setLocalShortcutKey] = useState(settings.shortcutKey);
   const [localRadialShortcutKey, setLocalRadialShortcutKey] = useState(settings.radialShortcutKey);
   const [localRadialMenuEnabled, setLocalRadialMenuEnabled] = useState(settings.radialMenuEnabled);
+  const ccShortcut = useShortcutRecording();
+  const { setShortcut: setClipboardCreateShortcut } = ccShortcut;
   const [localAutostart, setLocalAutostart] = useState(settings.autostartEnabled);
+  const [localPasteLeftClick, setLocalPasteLeftClick] = useState<"normal" | "terminal">(settings.pasteLeftClick);
   const [recording, setRecording] = useState(false);
   const recordingRef = useRef(false);
   const keydownHandlerRef = useRef<((e: KeyboardEvent) => void) | null>(null);
@@ -33,26 +38,80 @@ export default function SettingsContent({ embedded }: Props) {
   const radialKeydownHandlerRef = useRef<((e: KeyboardEvent) => void) | null>(null);
   const [storagePath, setStoragePath] = useState("");
   const [saved, setSaved] = useState(false);
+  const syncedSettingsRef = useRef<{
+    clipboardRetention: string;
+    defaultEngine: string;
+    apiUrl: string;
+    apiKey: string;
+    model: string;
+    googleApiKey: string;
+    translateProxy: string;
+    language: string;
+    shortcutKey: string;
+    radialShortcutKey: string;
+    clipboardCreateShortcutKey: string;
+    radialMenuEnabled: boolean;
+    autostartEnabled: boolean;
+    pasteLeftClick: "normal" | "terminal";
+  } | null>(null);
 
   useEffect(() => {
-    settings.loadSettings();
+    loadSettings();
     invoke<string>("get_storage_path").then(setStoragePath).catch(console.error);
-  }, []);
+  }, [loadSettings]);
 
   useEffect(() => {
-    setLocalRetention(settings.clipboardRetention);
-    setLocalEngine(settings.defaultEngine);
-    setLocalApiUrl(settings.apiUrl);
-    setLocalApiKey(settings.apiKey);
-    setLocalModel(settings.model);
-    setLocalGoogleApiKey(settings.googleApiKey);
-    setLocalTranslateProxy(settings.translateProxy);
-    setLocalLang(i18n.language);
-    setLocalShortcutKey(settings.shortcutKey);
-    setLocalRadialShortcutKey(settings.radialShortcutKey);
-    setLocalRadialMenuEnabled(settings.radialMenuEnabled);
-    setLocalAutostart(settings.autostartEnabled);
-  }, [settings, i18n.language]);
+    const next = {
+      clipboardRetention: settings.clipboardRetention,
+      defaultEngine: settings.defaultEngine,
+      apiUrl: settings.apiUrl,
+      apiKey: settings.apiKey,
+      model: settings.model,
+      googleApiKey: settings.googleApiKey,
+      translateProxy: settings.translateProxy,
+      language: i18n.language,
+      shortcutKey: settings.shortcutKey,
+      radialShortcutKey: settings.radialShortcutKey,
+      clipboardCreateShortcutKey: settings.clipboardCreateShortcutKey,
+      radialMenuEnabled: settings.radialMenuEnabled,
+      autostartEnabled: settings.autostartEnabled,
+      pasteLeftClick: settings.pasteLeftClick,
+    };
+    const prev = syncedSettingsRef.current;
+
+    if (!prev || prev.clipboardRetention !== next.clipboardRetention) setLocalRetention(next.clipboardRetention);
+    if (!prev || prev.defaultEngine !== next.defaultEngine) setLocalEngine(next.defaultEngine);
+    if (!prev || prev.apiUrl !== next.apiUrl) setLocalApiUrl(next.apiUrl);
+    if (!prev || prev.apiKey !== next.apiKey) setLocalApiKey(next.apiKey);
+    if (!prev || prev.model !== next.model) setLocalModel(next.model);
+    if (!prev || prev.googleApiKey !== next.googleApiKey) setLocalGoogleApiKey(next.googleApiKey);
+    if (!prev || prev.translateProxy !== next.translateProxy) setLocalTranslateProxy(next.translateProxy);
+    if (!prev || prev.language !== next.language) setLocalLang(next.language);
+    if (!prev || prev.shortcutKey !== next.shortcutKey) setLocalShortcutKey(next.shortcutKey);
+    if (!prev || prev.radialShortcutKey !== next.radialShortcutKey) setLocalRadialShortcutKey(next.radialShortcutKey);
+    if (!prev || prev.clipboardCreateShortcutKey !== next.clipboardCreateShortcutKey) setClipboardCreateShortcut(next.clipboardCreateShortcutKey);
+    if (!prev || prev.radialMenuEnabled !== next.radialMenuEnabled) setLocalRadialMenuEnabled(next.radialMenuEnabled);
+    if (!prev || prev.autostartEnabled !== next.autostartEnabled) setLocalAutostart(next.autostartEnabled);
+    if (!prev || prev.pasteLeftClick !== next.pasteLeftClick) setLocalPasteLeftClick(next.pasteLeftClick);
+
+    syncedSettingsRef.current = next;
+  }, [
+    settings.clipboardRetention,
+    settings.defaultEngine,
+    settings.apiUrl,
+    settings.apiKey,
+    settings.model,
+    settings.googleApiKey,
+    settings.translateProxy,
+    i18n.language,
+    settings.shortcutKey,
+    settings.radialShortcutKey,
+    settings.clipboardCreateShortcutKey,
+    settings.radialMenuEnabled,
+    settings.autostartEnabled,
+    settings.pasteLeftClick,
+    setClipboardCreateShortcut,
+  ]);
 
   const startRecording = () => {
     recordingRef.current = true;
@@ -201,6 +260,7 @@ export default function SettingsContent({ embedded }: Props) {
       google_api_key: localGoogleApiKey,
       translate_proxy: localTranslateProxy,
       language: localLang,
+      paste_left_click: localPasteLeftClick,
     });
 
     const oldKey = settings.shortcutKey;
@@ -222,6 +282,20 @@ export default function SettingsContent({ embedded }: Props) {
         await settings.setSetting("shortcut_radial", newRadialKey);
       } catch (e) {
         console.error("Failed to update radial shortcut:", e);
+      }
+    }
+
+    const oldClipboardCreateKey = settings.clipboardCreateShortcutKey;
+    const newClipboardCreateKey = ccShortcut.shortcut;
+    if (oldClipboardCreateKey !== newClipboardCreateKey) {
+      try {
+        await invoke("update_clipboard_create_shortcut", {
+          oldShortcut: oldClipboardCreateKey,
+          newShortcut: newClipboardCreateKey,
+        });
+        await settings.setSetting("shortcut_clipboard_create", newClipboardCreateKey);
+      } catch (e) {
+        console.error("Failed to update clipboard create shortcut:", e);
       }
     }
 
@@ -265,20 +339,30 @@ export default function SettingsContent({ embedded }: Props) {
 
       <ShortcutSection
         localShortcutKey={localShortcutKey}
-        setLocalShortcutKey={setLocalShortcutKey}
         recording={recording}
         startRecording={startRecording}
         stopRecording={stopRecording}
         localRadialShortcutKey={localRadialShortcutKey}
-        setLocalRadialShortcutKey={setLocalRadialShortcutKey}
         radialRecording={radialRecording}
         startRadialRecording={startRadialRecording}
         stopRadialRecording={stopRadialRecording}
+        localClipboardCreateShortcutKey={ccShortcut.shortcut}
+        clipboardCreateRecording={ccShortcut.recording}
+        startClipboardCreateRecording={ccShortcut.startRecording}
+        stopClipboardCreateRecording={ccShortcut.stopRecording}
       />
 
       <StartupSection
         localAutostart={localAutostart}
         setLocalAutostart={setLocalAutostart}
+      />
+
+      <PasteSection
+        localPasteLeftClick={localPasteLeftClick}
+        setLocalPasteLeftClick={(mode) => {
+          setLocalPasteLeftClick(mode);
+          settings.setPasteLeftClick(mode);
+        }}
       />
 
       <TranslationSection

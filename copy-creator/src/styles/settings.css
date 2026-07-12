@@ -54,6 +54,12 @@
   white-space: nowrap;
 }
 
+.settings-row-value {
+  font-size: var(--text-sm);
+  color: var(--text-secondary);
+  white-space: nowrap;
+}
+
 .settings-lang-toggle {
   display: flex;
   gap: 4px;
@@ -362,7 +368,7 @@
 }
 
 .toggle-switch.on {
-  background: #34C759;
+  background: #333;
 }
 
 .toggle-switch.off {
@@ -371,6 +377,14 @@
 
 [data-theme="dark"] .toggle-switch.off {
   background: rgba(255, 255, 255, 0.15);
+}
+
+[data-theme="dark"] .toggle-switch.on {
+  background: #fff;
+}
+
+[data-theme="dark"] .toggle-switch.on .toggle-thumb {
+  background: #333;
 }
 
 .toggle-thumb {

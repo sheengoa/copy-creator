@@ -1,7 +1,8 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { useTranslation } from "react-i18next";
 import { usePhraseStore } from "../../stores/phraseStore";
+import { useSettingsStore } from "../../stores/settingsStore";
 import SearchInput from "../../components/SearchInput";
 import { GroupChips } from "./GroupChips";
 import { PhraseList } from "./PhraseList";
@@ -9,6 +10,7 @@ import { GroupDialog } from "./GroupDialog";
 import { PhraseDialog } from "./PhraseDialog";
 import { ManageGroupsDialog } from "./ManageGroupsDialog";
 import type { Phrase } from "../../types";
+import { shouldUseTerminalPasteForMouseTrigger } from "../../utils/pasteMode";
 import {
   DndContext,
   PointerSensor,
@@ -45,6 +47,7 @@ export default function PhrasePage() {
   const [quickInputFileLimit, setQuickInputFileLimit] = useState(50 * 1024 * 1024);
   const [phraseError, setPhraseError] = useState(false);
   const [manageGroupsOpen, setManageGroupsOpen] = useState(false);
+  const [confirmState, setConfirmState] = useState<{ message: string; onConfirm: () => void } | null>(null);
   const [renameId, setRenameId] = useState<string | null>(null);
   const [renameName, setRenameName] = useState("");
 
@@ -67,9 +70,11 @@ export default function PhrasePage() {
     deletePhrase,
     deleteGroup,
     pastePhrase,
+    pastePhraseTerminal,
     selectQuickInputFile,
     getQuickInputFileLimit,
   } = usePhraseStore();
+  const pasteLeftClick = useSettingsStore((s) => s.pasteLeftClick);
 
   useEffect(() => {
     init();
@@ -143,7 +148,31 @@ export default function PhrasePage() {
     [phrases, previewPhrases],
   );
 
+  const handlePaste = useCallback(
+    (p: Phrase) => {
+      if (shouldUseTerminalPasteForMouseTrigger(pasteLeftClick, "left")) pastePhraseTerminal(p);
+      else pastePhrase(p);
+    },
+    [pasteLeftClick, pastePhrase, pastePhraseTerminal],
+  );
+
+  const handleSecondaryPaste = useCallback(
+    (p: Phrase) => {
+      if (shouldUseTerminalPasteForMouseTrigger(pasteLeftClick, "right")) pastePhraseTerminal(p);
+      else pastePhrase(p);
+    },
+    [pasteLeftClick, pastePhrase, pastePhraseTerminal],
+  );
+
   const renderedPhrases = previewPhrases ?? phrases;
+  const searchedPhrases = useMemo(() => {
+    if (!search.trim()) return renderedPhrases;
+    const q = search.toLowerCase();
+    return renderedPhrases.filter(p =>
+      p.content.toLowerCase().includes(q) ||
+      (p.title && p.title.toLowerCase().includes(q))
+    );
+  }, [renderedPhrases, search]);
   const activePhrase = activePhraseId ? renderedPhrases.find(p => p.id === activePhraseId) : null;
   const activePhraseBody = activePhrase?.input_type === "file"
     ? filenameFromPath(activePhrase.source_path || activePhrase.content)
@@ -282,11 +311,26 @@ export default function PhrasePage() {
     setRenameName("");
   };
 
-  const handleDeleteGroup = async (id: string) => {
-    await deleteGroup(id);
-    if (groups.length <= 1) {
-      setManageGroupsOpen(false);
-    }
+  const handleDeletePhrase = useCallback(
+    (id: string) => {
+      setConfirmState({
+        message: t("phrases.confirmDelete"),
+        onConfirm: () => deletePhrase(id),
+      });
+    },
+    [deletePhrase, t],
+  );
+
+  const handleDeleteGroup = (id: string) => {
+    setConfirmState({
+      message: t("phrases.confirmDeleteGroup"),
+      onConfirm: async () => {
+        await deleteGroup(id);
+        if (groups.length <= 1) {
+          setManageGroupsOpen(false);
+        }
+      },
+    });
   };
 
   return (
@@ -312,12 +356,14 @@ export default function PhrasePage() {
       <DndContext sensors={sensors} onDragStart={handlePhraseDragStart} onDragOver={handlePhraseDragOver} onDragEnd={handlePhraseDragEnd} onDragCancel={handlePhraseDragCancel} modifiers={[restrictToVerticalAxis]}>
         <SortableContext items={renderedPhrases.map(p => p.id)} strategy={verticalListSortingStrategy}>
           <PhraseList
-            phrases={renderedPhrases}
+            phrases={searchedPhrases}
             loading={loading}
             selectedGroupId={selectedGroupId}
-            onPaste={pastePhrase}
+            search={search}
+            onPaste={handlePaste}
+            onSecondaryPaste={handleSecondaryPaste}
             onEdit={openEditPhrase}
-            onDelete={deletePhrase}
+            onDelete={handleDeletePhrase}
           />
         </SortableContext>
         {createPortal(phraseDragOverlay, document.body)}
@@ -368,6 +414,30 @@ export default function PhrasePage() {
         onDeleteGroup={handleDeleteGroup}
         onClose={() => setManageGroupsOpen(false)}
       />
+
+      {confirmState && (
+        <div className="dialog-overlay" onClick={() => setConfirmState(null)}>
+          <div className="dialog-content" onClick={(e) => e.stopPropagation()}>
+            <h3 className="dialog-title">{t("common.confirm")}</h3>
+            <p className="dialog-message">{confirmState.message}</p>
+            <div className="dialog-actions">
+              <button className="dialog-btn secondary" onClick={() => setConfirmState(null)}>
+                {t("common.cancel")}
+              </button>
+              <button
+                className="dialog-btn save"
+                onClick={() => {
+                  const fn = confirmState.onConfirm;
+                  setConfirmState(null);
+                  fn();
+                }}
+              >
+                {t("common.confirm")}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
