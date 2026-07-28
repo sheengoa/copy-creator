@@ -915,7 +915,8 @@
 }
 
 .clipboard-create-textarea {
-  flex: 1;
+  flex: 1 1 auto;
+  min-height: 130px;
   width: 100%;
   border-radius: 10px;
   border: 1px solid var(--card-border);
@@ -951,6 +952,159 @@
   box-shadow: 0 0.5px 0 0 rgba(255,255,255,0.03) inset;
 }
 
+.clipboard-create-stash-section {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-top: 10px;
+  flex-shrink: 0;
+}
+
+.clipboard-create-stash-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  min-height: 20px;
+  color: var(--text-secondary);
+  font-size: var(--text-sm);
+  font-weight: var(--weight-medium);
+}
+
+.clipboard-create-exit-edit {
+  border: 0;
+  padding: 2px 4px;
+  background: transparent;
+  color: var(--accent);
+  font: inherit;
+  cursor: pointer;
+}
+
+.clipboard-create-exit-edit:hover {
+  color: var(--text-primary);
+}
+
+.clipboard-create-stash-picker {
+  position: relative;
+  width: 100%;
+}
+
+.clipboard-create-stash-trigger {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  width: 100%;
+  min-height: 36px;
+  padding: 8px 10px;
+  border: 1px solid var(--card-border);
+  border-radius: var(--radius-sm);
+  background: var(--input-bg);
+  color: var(--text-primary);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+  transition: background 0.15s, border-color 0.15s;
+}
+
+.clipboard-create-stash-trigger:hover:not(:disabled),
+.clipboard-create-stash-picker.open .clipboard-create-stash-trigger {
+  background: var(--input-focus-bg);
+  border-color: rgba(0, 122, 255, 0.38);
+}
+
+.clipboard-create-stash-trigger:disabled {
+  cursor: default;
+  opacity: 0.72;
+}
+
+.clipboard-create-stash-trigger > span:first-child {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.clipboard-create-stash-trigger .placeholder {
+  color: var(--text-secondary);
+}
+
+.clipboard-create-stash-chevron {
+  flex-shrink: 0;
+  color: var(--text-secondary);
+  width: 16px;
+  height: 16px;
+  transition: transform 0.15s ease-out;
+}
+
+.clipboard-create-stash-picker.open .clipboard-create-stash-chevron {
+  transform: rotate(180deg);
+}
+
+.clipboard-create-stash-menu {
+  position: absolute;
+  bottom: calc(100% + 4px);
+  left: 0;
+  right: 0;
+  z-index: 20;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  max-height: 190px;
+  padding: 6px;
+  overflow-y: auto;
+  border: 1px solid var(--card-border);
+  border-radius: 10px;
+  background: var(--panel-bg);
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.14);
+}
+
+.clipboard-create-stash-option {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  min-height: 34px;
+  padding: 8px 10px;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--text-primary);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+  transition: background 0.12s, transform 0.12s;
+}
+
+.clipboard-create-stash-option:hover:not(:disabled),
+.clipboard-create-stash-option.selected {
+  background: var(--accent-bg);
+}
+
+.clipboard-create-stash-option:hover:not(:disabled) {
+  transform: scale(1.01);
+}
+
+.clipboard-create-stash-option:disabled {
+  cursor: wait;
+  opacity: 0.7;
+}
+
+.clipboard-create-stash-option-content {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  line-height: 1.35;
+  white-space: nowrap;
+}
+
+.clipboard-create-stash-check {
+  flex-shrink: 0;
+  margin-left: auto;
+  color: var(--accent);
+  font-size: var(--text-sm);
+  font-weight: var(--weight-semibold);
+}
+
 .clipboard-create-footer {
   display: flex;
   align-items: center;
@@ -958,6 +1112,14 @@
   gap: 12px;
   margin-top: 10px;
   flex-shrink: 0;
+}
+
+.clipboard-create-error {
+  flex: 1;
+  min-width: 0;
+  color: var(--danger);
+  font-size: var(--text-sm);
+  line-height: 1.35;
 }
 
 .clipboard-create-actions {

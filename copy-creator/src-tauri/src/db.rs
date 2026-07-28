@@ -851,6 +851,44 @@ pub fn get_clipboard_record_content(app: AppHandle, id: String) -> Result<String
 }
 
 #[tauri::command]
+pub fn update_clipboard_record(app: AppHandle, id: String, content: String) -> Result<(), String> {
+    let content = content.trim().to_string();
+    if content.is_empty() {
+        return Err("内容不能为空".to_string());
+    }
+
+    let state = app.state::<DbState>();
+    let conn = state.conn.lock().map_err(|e| e.to_string())?;
+    let group_name: String = conn
+        .query_row(
+            "SELECT group_name FROM clipboard_records WHERE id = ?1",
+            params![id],
+            |row| row.get(0),
+        )
+        .map_err(|e| format!("记录不存在: {}", e))?;
+
+    if group_name != "暂存" && group_name != "stash" {
+        return Err("只能编辑暂存分组的记录".to_string());
+    }
+
+    let record_type = crate::clipboard::classify_text_record(&content);
+    let sort_order = chrono::Utc::now().timestamp_millis();
+    conn.execute(
+        "UPDATE clipboard_records SET type = ?1, content = ?2, sort_order = ?3 WHERE id = ?4",
+        params![record_type, content, sort_order, id],
+    )
+    .map_err(|e| e.to_string())?;
+    conn.execute(
+        "DELETE FROM api_key_labels WHERE record_id = ?1",
+        params![id],
+    )
+    .map_err(|e| e.to_string())?;
+
+    let _ = app.emit("clipboard-record-updated", &id);
+    Ok(())
+}
+
+#[tauri::command]
 pub fn delete_all_clipboard_records(app: AppHandle) -> Result<(), String> {
     let state = app.state::<DbState>();
     let conn = state.conn.lock().map_err(|e| e.to_string())?;

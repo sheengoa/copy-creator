@@ -143,6 +143,10 @@ export const useClipboardStore = create<ClipboardState>((set, get) => ({
       unlisten = fn;
     });
 
+    listen<string>("clipboard-record-updated", () => {
+      get().loadRecords();
+    });
+
     listen<string>("clipboard-deleted", (event) => {
       const deletedId = event.payload;
       set((state) => ({

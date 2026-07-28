@@ -10,7 +10,7 @@ fn is_url(text: &str) -> bool {
         || lower.starts_with("ftps://")
 }
 
-fn classify_text_record(content: &str) -> &'static str {
+pub(crate) fn classify_text_record(content: &str) -> &'static str {
     if is_url(content) {
         "link"
     } else {

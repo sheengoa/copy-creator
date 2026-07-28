@@ -167,7 +167,7 @@ pub fn run() {
                     WebviewUrl::App("index.html?clipboard-create=1".into()),
                 )
                 .title("新建")
-                .inner_size(560.0, 400.0)
+                .inner_size(560.0, 520.0)
                 .decorations(false)
                 .transparent(true)
                 .always_on_top(true)
@@ -228,6 +228,7 @@ pub fn run() {
             db::get_clipboard_records,
             clipboard::create_clipboard_record,
             db::get_clipboard_record_content,
+            db::update_clipboard_record,
             db::delete_all_clipboard_records,
             db::delete_records_by_type,
             db::delete_clipboard_record,

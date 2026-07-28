@@ -56,6 +56,22 @@ describe("integration regressions", () => {
     expect(createBlock).toContain("\"type\": record_type");
   });
 
+  it("updates stash records and moves them to the top without changing creation time", () => {
+    const dbSource = readSource("../src-tauri/src/db.rs");
+    const updateBlock = dbSource.slice(
+      dbSource.indexOf("pub fn update_clipboard_record"),
+      dbSource.indexOf("pub fn delete_all_clipboard_records"),
+    );
+    const libSource = readSource("../src-tauri/src/lib.rs");
+
+    expect(updateBlock).toContain('group_name != "暂存" && group_name != "stash"');
+    expect(updateBlock).toContain("SET type = ?1, content = ?2, sort_order = ?3 WHERE id = ?4");
+    expect(updateBlock).not.toContain("created_at =");
+    expect(updateBlock).toContain("timestamp_millis");
+    expect(updateBlock).toContain('emit("clipboard-record-updated"');
+    expect(libSource).toContain("db::update_clipboard_record");
+  });
+
   it("keeps standalone clipboard create language in sync", () => {
     const componentSource = readSource("./components/ClipboardCreateDialog/index.tsx");
 

@@ -46,14 +46,21 @@ describe("standalone window chrome", () => {
     expect(saveButtonRule).toContain("min-width: 132px");
   });
 
-  it("keeps standalone clipboard create dialog focused on text and actions", () => {
+  it("keeps standalone clipboard create dialog limited to stash records", () => {
     const css = readStyle("clipboard.css");
     const componentSource = readSource("../components/ClipboardCreateDialog/index.tsx");
 
-    expect(css).not.toContain(".clipboard-create-group-select");
-    expect(componentSource).not.toContain("get_clipboard_groups");
-    expect(componentSource).not.toContain("selectedGroupName");
-    expect(componentSource).not.toContain("ClipboardGroup");
+    expect(css).toContain(".clipboard-create-stash-picker");
+    expect(componentSource).toContain('category: "stash"');
+    expect(componentSource).toContain('record.group_name === "暂存"');
+    expect(componentSource).toContain('record.group_name === "stash"');
+    expect(componentSource).toContain('aria-haspopup="listbox"');
+    expect(componentSource).toContain("setDropdownOpen");
+    expect(componentSource).not.toContain('listen("clipboard-update"');
+    expect(componentSource).not.toContain('listen("clipboard-record-updated"');
+    expect(css).toContain("bottom: calc(100% + 4px)");
+    expect(css).toContain("white-space: nowrap");
+    expect(componentSource).toContain('"update_clipboard_record"');
   });
 
   it("marks standalone clipboard create header as draggable", () => {
