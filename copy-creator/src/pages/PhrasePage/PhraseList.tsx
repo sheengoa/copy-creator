@@ -14,6 +14,9 @@ interface PhraseListProps {
   onSecondaryPaste: (phrase: Phrase) => void;
   onEdit: (phrase: Phrase) => void;
   onDelete: (id: string) => void;
+  selectionMode: boolean;
+  isSelected: (id: string) => boolean;
+  onToggleSelected: (id: string) => void;
 }
 
 const filenameFromPath = (path: string) => path.replace(/\\/g, "/").split("/").pop() || path;
@@ -32,6 +35,9 @@ function PhraseCard({
   onSecondaryPaste,
   onEdit,
   onDelete,
+  selectionMode,
+  selected,
+  onToggleSelected,
 }: {
   phrase: Phrase;
   search?: string;
@@ -39,10 +45,14 @@ function PhraseCard({
   onSecondaryPaste: (p: Phrase) => void;
   onEdit: (p: Phrase) => void;
   onDelete: (id: string) => void;
+  selectionMode: boolean;
+  selected: boolean;
+  onToggleSelected: (id: string) => void;
 }) {
+  const { t } = useTranslation();
   const {
     attributes, listeners, setNodeRef, setActivatorNodeRef, transform, transition, isDragging,
-  } = useSortable({ id: phrase.id });
+  } = useSortable({ id: phrase.id, disabled: selectionMode });
 
   const style = {
     transform: CSS.Transform.toString(transform),
@@ -55,15 +65,25 @@ function PhraseCard({
     <div
       ref={setNodeRef}
       style={style}
-      className={`notification phrase-card${isDragging ? " is-dragging" : ""}`}
-      onClick={() => onPaste(phrase)}
+      className={`notification phrase-card${isDragging ? " is-dragging" : ""}${selectionMode ? " is-selection-mode" : ""}${selected ? " is-selected" : ""}`}
+      onClick={selectionMode ? () => onToggleSelected(phrase.id) : () => onPaste(phrase)}
       onContextMenu={(e) => {
         e.preventDefault();
         e.stopPropagation();
-        onSecondaryPaste(phrase);
+        if (!selectionMode) onSecondaryPaste(phrase);
       }}
     >
       <div className="notibar" />
+      {selectionMode && (
+        <div className="card-selection-control" onClick={(e) => e.stopPropagation()}>
+          <input
+            type="checkbox"
+            checked={selected}
+            aria-label={t("common.selectItem")}
+            onChange={() => onToggleSelected(phrase.id)}
+          />
+        </div>
+      )}
       <div className="noticontent">
         <div className={`notibody phrase-card-body${isFile ? " phrase-card-file-body" : ""}`}>
           {isFile ? (
@@ -78,24 +98,26 @@ function PhraseCard({
         </div>
         <div className="notititle phrase-card-footer">
           <span className="phrase-card-remark"><HighlightText text={phrase.title || ""} search={search} /></span>
-          <div className="phrase-card-actions">
-            <span ref={setActivatorNodeRef} className="drag-handle" {...attributes} {...listeners}>
-              <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor">
-                <circle cx="9" cy="5" r="1.5" />
-                <circle cx="15" cy="5" r="1.5" />
-                <circle cx="9" cy="12" r="1.5" />
-                <circle cx="15" cy="12" r="1.5" />
-                <circle cx="9" cy="19" r="1.5" />
-                <circle cx="15" cy="19" r="1.5" />
-              </svg>
-            </span>
-            <button className="card-edit-btn" onClick={(e) => { e.stopPropagation(); onEdit(phrase); }}>
-              {Icons.edit}
-            </button>
-            <button className="card-delete-btn" onClick={(e) => { e.stopPropagation(); onDelete(phrase.id); }}>
-              {Icons.delete}
-            </button>
-          </div>
+          {!selectionMode && (
+            <div className="phrase-card-actions">
+              <span ref={setActivatorNodeRef} className="drag-handle" {...attributes} {...listeners}>
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor">
+                  <circle cx="9" cy="5" r="1.5" />
+                  <circle cx="15" cy="5" r="1.5" />
+                  <circle cx="9" cy="12" r="1.5" />
+                  <circle cx="15" cy="12" r="1.5" />
+                  <circle cx="9" cy="19" r="1.5" />
+                  <circle cx="15" cy="19" r="1.5" />
+                </svg>
+              </span>
+              <button className="card-edit-btn" onClick={(e) => { e.stopPropagation(); onEdit(phrase); }}>
+                {Icons.edit}
+              </button>
+              <button className="card-delete-btn" onClick={(e) => { e.stopPropagation(); onDelete(phrase.id); }}>
+                {Icons.delete}
+              </button>
+            </div>
+          )}
         </div>
       </div>
     </div>
@@ -111,6 +133,9 @@ export function PhraseList({
   onSecondaryPaste,
   onEdit,
   onDelete,
+  selectionMode,
+  isSelected,
+  onToggleSelected,
 }: PhraseListProps) {
   const { t } = useTranslation();
 
@@ -162,6 +187,9 @@ export function PhraseList({
           onSecondaryPaste={onSecondaryPaste}
           onEdit={onEdit}
           onDelete={onDelete}
+          selectionMode={selectionMode}
+          selected={isSelected(p.id)}
+          onToggleSelected={onToggleSelected}
         />
       ))}
     </div>

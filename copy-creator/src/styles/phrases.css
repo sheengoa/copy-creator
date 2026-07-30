@@ -171,6 +171,18 @@
   min-height: calc(1 * 1.5 * 14px);
 }
 
+.phrase-card.is-selection-mode .phrase-card-body {
+  padding-inline-start: 1rem;
+}
+
+.phrase-card.is-selection-mode .phrase-card-body:not(.phrase-card-file-body) {
+  text-indent: 26px;
+}
+
+.phrase-card.is-selection-mode .phrase-card-file-body {
+  padding-inline-start: 42px;
+}
+
 .phrase-card .notibody.phrase-card-file-body {
   display: flex;
   align-items: center;

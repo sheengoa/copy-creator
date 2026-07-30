@@ -106,47 +106,6 @@
   gap: 6px;
 }
 
-.clipboard-delete-btn {
-  width: 28px;
-  height: 28px;
-  border-radius: 8px;
-  border: 0.5px solid var(--separator);
-  background: #fafaffaf;
-  color: #000;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  cursor: pointer;
-  transition: all 0.2s cubic-bezier(0.22, 1, 0.36, 1);
-  flex-shrink: 0;
-}
-
-.clipboard-delete-btn:hover {
-  background: rgb(220, 38, 38);
-  color: #fff;
-  transform: scale(1.05);
-}
-
-.clipboard-delete-btn:active {
-  transform: scale(0.95);
-}
-
-.clipboard-delete-btn svg {
-  width: 14px;
-  height: 14px;
-}
-
-[data-theme="dark"] .clipboard-delete-btn {
-  background: var(--input-bg);
-  border-color: var(--card-border);
-  color: rgba(255, 255, 255, 0.7);
-}
-
-[data-theme="dark"] .clipboard-delete-btn:hover {
-  background: rgb(220, 38, 38);
-  color: #fff;
-}
-
 .category-chip-danger {
   background: transparent;
   color: var(--danger);
@@ -361,6 +320,10 @@
 
 .clipboard-card-header {
   padding: 0.65rem 0.5rem 0.3rem 1rem;
+}
+
+.clipboard-card.is-selection-mode .clipboard-card-header {
+  padding-inline-start: 42px;
 }
 
 .clipboard-card-body {

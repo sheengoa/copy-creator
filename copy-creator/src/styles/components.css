@@ -233,6 +233,137 @@
   transform: translateX(0.25rem);
 }
 
+.notification.is-selection-mode:hover .notititle,
+.notification.is-selection-mode:hover .notibody,
+.notification.is-selection-mode:hover .notibar {
+  transform: none;
+}
+
+.notification.is-selected {
+  border-color: color-mix(in srgb, var(--accent) 36%, var(--separator));
+  background: color-mix(in srgb, var(--accent) 3%, var(--card-inner-bg));
+}
+
+[data-theme="dark"] .notification.is-selected {
+  background: color-mix(in srgb, var(--accent) 7%, var(--card-inner-bg));
+}
+
+.card-selection-control {
+  position: absolute;
+  top: 12px;
+  left: 16px;
+  z-index: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.card-selection-control input,
+.batch-select-all input {
+  width: 16px;
+  height: 16px;
+  margin: 0;
+  accent-color: var(--accent);
+  cursor: pointer;
+}
+
+.selection-mode-btn {
+  background: var(--input-bg);
+  color: var(--text-primary);
+  border-color: var(--separator);
+}
+
+.selection-mode-btn:hover {
+  background: var(--chip-hover-bg);
+}
+
+[data-theme="dark"] .selection-mode-btn,
+[data-theme="dark"] .selection-mode-btn:hover {
+  background: var(--input-bg);
+  color: var(--text-primary);
+  border-color: var(--card-border);
+}
+
+.batch-selection-bar {
+  min-height: 36px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 3px 2px 6px;
+  border-bottom: 1px solid color-mix(in srgb, var(--separator) 75%, transparent);
+  background: transparent;
+}
+
+.batch-select-all {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--text-primary);
+  font-size: var(--text-sm);
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.batch-select-all:has(input:disabled) {
+  opacity: 0.45;
+  cursor: default;
+}
+
+.batch-selection-count {
+  flex: 1;
+  min-width: 0;
+  color: var(--text-secondary);
+  font-size: var(--text-sm);
+  white-space: nowrap;
+}
+
+.batch-selection-actions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.batch-delete-btn,
+.batch-cancel-btn {
+  height: 27px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  padding: 0 8px;
+  border-radius: 6px;
+  border: 1px solid var(--separator);
+  font-family: var(--font);
+  font-size: var(--text-sm);
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.batch-delete-btn {
+  background: color-mix(in srgb, rgb(220, 38, 38) 88%, transparent);
+  border-color: transparent;
+  color: #fff;
+}
+
+.batch-delete-btn:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+
+.batch-delete-btn svg {
+  width: 13px;
+  height: 13px;
+}
+
+.batch-cancel-btn {
+  background: transparent;
+  color: var(--text-primary);
+}
+
+.batch-cancel-btn:hover {
+  background: var(--chip-hover-bg);
+}
+
 .notification.skeleton {
   cursor: default;
   pointer-events: none;

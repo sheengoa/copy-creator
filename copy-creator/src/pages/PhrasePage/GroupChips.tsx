@@ -34,6 +34,9 @@ interface GroupChipsProps {
   onAddGroup: () => void;
   onManageGroups: () => void;
   onAddPhrase: () => void;
+  selectionMode: boolean;
+  canSelect: boolean;
+  onStartSelection: () => void;
   onReorderGroups: (ids: string[]) => void;
 }
 
@@ -76,6 +79,9 @@ export function GroupChips({
   onAddGroup,
   onManageGroups,
   onAddPhrase,
+  selectionMode,
+  canSelect,
+  onStartSelection,
   onReorderGroups,
 }: GroupChipsProps) {
   const { t } = useTranslation();
@@ -144,17 +150,27 @@ export function GroupChips({
           </DragOverlay>
         </DndContext>
       </div>
-      <button className="group-add-btn" onClick={onAddGroup}>
-        {Icons.add}
-      </button>
-      <button className="group-add-btn" onClick={onManageGroups} title={t("phrases.manageGroups")}>
-        {Icons.edit}
-      </button>
-      {selectedGroupId && (
-        <button className="phrase-add-btn" onClick={onAddPhrase}>
-          {Icons.add}
-          <span>{t("phrases.newPhrase")}</span>
-        </button>
+      {!selectionMode && (
+        <>
+          <button className="group-add-btn" onClick={onAddGroup}>
+            {Icons.add}
+          </button>
+          <button className="group-add-btn" onClick={onManageGroups} title={t("phrases.manageGroups")}>
+            {Icons.edit}
+          </button>
+          {selectedGroupId && (
+            <button className="phrase-add-btn" onClick={onAddPhrase}>
+              {Icons.add}
+              <span>{t("phrases.newPhrase")}</span>
+            </button>
+          )}
+          {canSelect && (
+            <button className="phrase-add-btn selection-mode-btn" onClick={onStartSelection}>
+              {Icons.check}
+              <span>{t("common.select")}</span>
+            </button>
+          )}
+        </>
       )}
     </div>
   );

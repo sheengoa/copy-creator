@@ -25,6 +25,7 @@ describe("phraseStore paste routing", () => {
   beforeEach(() => {
     invokeMock.mockReset();
     invokeMock.mockResolvedValue(undefined);
+    usePhraseStore.setState({ phrases: [] });
   });
 
   it("pastes text phrases with the text paste command", async () => {
@@ -86,6 +87,33 @@ describe("phraseStore paste routing", () => {
 
     expect(invokeMock).toHaveBeenCalledWith("paste_file", {
       path: "/stored/quick-input-files/example.md",
+    });
+  });
+
+  it("deletes selected quick inputs in one backend call", async () => {
+    const first = {
+      ...basePhrase,
+      content: "first",
+      input_type: "text" as const,
+      source_path: "",
+      file_size: 0,
+    };
+    const second = { ...first, id: "phrase-2", content: "second" };
+    usePhraseStore.setState({ phrases: [first, second] });
+
+    await usePhraseStore.getState().deletePhrases(["phrase-1"]);
+
+    expect(invokeMock).toHaveBeenCalledWith("delete_phrases", {
+      ids: ["phrase-1"],
+    });
+    expect(usePhraseStore.getState().phrases.map((phrase) => phrase.id)).toEqual(["phrase-2"]);
+  });
+
+  it("routes single quick input deletion through the batch command", async () => {
+    await usePhraseStore.getState().deletePhrase("phrase-1");
+
+    expect(invokeMock).toHaveBeenCalledWith("delete_phrases", {
+      ids: ["phrase-1"],
     });
   });
 });

@@ -53,6 +53,7 @@ interface PhraseState {
     sourcePath: string,
     title: string
   ) => Promise<void>;
+  deletePhrases: (ids: string[]) => Promise<void>;
   deletePhrase: (id: string) => Promise<void>;
   pastePhrase: (phrase: Phrase) => Promise<void>;
   pastePhraseTerminal: (phrase: Phrase) => Promise<void>;
@@ -209,14 +210,19 @@ export const usePhraseStore = create<PhraseState>()((set, get) => {
     }
   },
 
-  deletePhrase: async (id: string) => {
+  deletePhrases: async (ids: string[]) => {
+    if (ids.length === 0) return;
     try {
-      await invoke("delete_phrase", { id });
-      set({ phrases: get().phrases.filter((p) => p.id !== id) });
+      await invoke("delete_phrases", { ids });
+      const deletedIds = new Set(ids);
+      set({ phrases: get().phrases.filter((p) => !deletedIds.has(p.id)) });
     } catch (e) {
-      console.error("Failed to delete phrase:", e);
+      console.error("Failed to delete phrases:", e);
+      throw e;
     }
   },
+
+  deletePhrase: async (id: string) => get().deletePhrases([id]),
 
   pastePhrase: async (phrase: Phrase) => {
     try {

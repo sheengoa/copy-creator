@@ -48,9 +48,8 @@ interface ClipboardState {
   loadRecords: (append?: boolean) => Promise<void>;
   updateRecordLabel: (id: string, label: ApiKeyLabel) => void;
   createRecord: (content: string, groupName?: string) => Promise<void>;
+  deleteRecords: (ids: string[]) => Promise<void>;
   deleteRecord: (id: string) => Promise<void>;
-  deleteAllRecords: () => Promise<void>;
-  deleteRecordsByType: (recordType: string) => Promise<void>;
   pasteRecord: (record: ClipboardRecord) => Promise<void>;
   pasteRecordTerminal: (record: ClipboardRecord) => Promise<void>;
   reorderRecords: (ids: string[]) => Promise<void>;
@@ -209,58 +208,29 @@ export const useClipboardStore = create<ClipboardState>((set, get) => ({
     }
   },
 
-  deleteRecord: async (id: string) => {
+  deleteRecords: async (ids: string[]) => {
+    if (ids.length === 0) return;
     try {
-      await invoke("delete_clipboard_record", { id });
+      await invoke("delete_clipboard_records", { ids });
+      const deletedIds = new Set(ids);
       const thumbCache = { ...get().thumbnailCache };
-      delete thumbCache[id];
       const cache = { ...get().imageCache };
-      delete cache[id];
+      for (const id of deletedIds) {
+        delete thumbCache[id];
+        delete cache[id];
+      }
       set({
-        records: get().records.filter((r) => r.id !== id),
+        records: get().records.filter((r) => !deletedIds.has(r.id)),
         thumbnailCache: thumbCache,
         imageCache: cache,
       });
     } catch (e) {
-      console.error("Failed to delete record:", e);
+      console.error("Failed to delete clipboard records:", e);
+      throw e;
     }
   },
 
-  deleteAllRecords: async () => {
-    try {
-      await invoke("delete_all_clipboard_records");
-      set({ records: [], thumbnailCache: {}, imageCache: {} });
-    } catch (e) {
-      console.error("Failed to delete all records:", e);
-    }
-  },
-
-  deleteRecordsByType: async (recordType: string) => {
-    try {
-      await invoke("delete_records_by_type", { recordType });
-      // Immediately remove the deleted type from local state (no flash of empty state)
-      const thumbCache = { ...get().thumbnailCache };
-      const imgCache = { ...get().imageCache };
-      set((state) => {
-        const deletedIds = new Set(
-          state.records.filter((r) => r.type === recordType).map((r) => r.id)
-        );
-        for (const id of deletedIds) {
-          delete thumbCache[id];
-          delete imgCache[id];
-        }
-        return {
-          records: state.records.filter((r) => r.type !== recordType),
-          thumbnailCache: thumbCache,
-          imageCache: imgCache,
-        };
-      });
-      // Reload in background to stay in sync with the backend
-      get().loadRecords();
-    } catch (e) {
-      console.error("Failed to delete records by type:", e);
-    }
-  },
+  deleteRecord: async (id: string) => get().deleteRecords([id]),
 
   pasteRecord: async (record: ClipboardRecord) => {
     try {

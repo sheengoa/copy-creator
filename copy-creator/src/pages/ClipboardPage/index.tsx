@@ -23,6 +23,8 @@ import {
 } from "@dnd-kit/sortable";
 import { restrictToVerticalAxis } from "@dnd-kit/modifiers";
 import { getChangedOrderIds, getDragPreviewOrder } from "../../utils/reorderPreview";
+import BatchSelectionBar from "../../components/BatchSelectionBar";
+import { useMultiSelect } from "../../hooks/useMultiSelect";
 
 type ClipType = "all" | "text" | "image" | "link" | "file" | "stash";
 
@@ -43,9 +45,8 @@ export default function ClipboardPage() {
     setSearch,
     setCategory,
     loadRecords,
+    deleteRecords,
     deleteRecord,
-    deleteAllRecords,
-    deleteRecordsByType,
     pasteRecord,
     pasteRecordTerminal,
   } = useClipboardStore();
@@ -53,7 +54,10 @@ export default function ClipboardPage() {
   const createRecord = useClipboardStore((s) => s.createRecord);
   const [showCreate, setShowCreate] = useState(false);
   const [createContent, setCreateContent] = useState("");
-  const [confirmState, setConfirmState] = useState<{ message: string; onConfirm: () => void } | null>(null);
+  const [confirmState, setConfirmState] = useState<{
+    message: string;
+    onConfirm: () => void | Promise<void>;
+  } | null>(null);
 
   const [hoverPreview, setHoverPreview] = useState<{ src: string; x: number; y: number } | null>(null);
   const hoverTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -111,23 +115,6 @@ export default function ClipboardPage() {
     setShowCreate(false);
   }, [createContent, createRecord]);
 
-  const handleSearchChange = useCallback(
-    (value: string) => {
-      setSearch(value);
-    },
-    [setSearch],
-  );
-
-  const handleCategoryChange = useCallback(
-    (value: ClipType) => {
-      setCategory(value);
-      loadRecords();
-    },
-    [setCategory, loadRecords],
-  );
-
-  const isFixedCategory = ["text", "image", "link", "file"].includes(category);
-  const canDeleteCategory = category === "all" || isFixedCategory;
   const filtered = useMemo(() => {
     if (category === "all") return records;
     if (category === "stash") {
@@ -135,6 +122,47 @@ export default function ClipboardPage() {
     }
     return records.filter((r) => r.type === category);
   }, [records, category]);
+  const visibleIds = useMemo(() => filtered.map((record) => record.id), [filtered]);
+  const {
+    isSelecting,
+    selectedIds,
+    selectedCount,
+    allVisibleSelected,
+    startSelection,
+    exitSelection,
+    toggleSelected,
+    isSelected,
+    toggleAllVisible,
+  } = useMultiSelect(visibleIds);
+
+  const handleSearchChange = useCallback(
+    (value: string) => {
+      exitSelection();
+      setSearch(value);
+    },
+    [exitSelection, setSearch],
+  );
+
+  const handleCategoryChange = useCallback(
+    (value: ClipType) => {
+      exitSelection();
+      setCategory(value);
+      loadRecords();
+    },
+    [exitSelection, setCategory, loadRecords],
+  );
+
+  const handleDeleteSelected = useCallback(() => {
+    if (selectedCount === 0) return;
+    const ids = [...selectedIds];
+    setConfirmState({
+      message: t("clipboard.confirmDeleteSelected", { count: ids.length }),
+      onConfirm: async () => {
+        await deleteRecords(ids);
+        exitSelection();
+      },
+    });
+  }, [deleteRecords, exitSelection, selectedCount, selectedIds, t]);
 
   useEffect(() => {
     init();
@@ -167,12 +195,13 @@ export default function ClipboardPage() {
   const lastPreviewMoveRef = useRef<string | null>(null);
 
   const handleDragStart = useCallback((event: DragStartEvent) => {
+    if (isSelecting) return;
     const id = String(event.active.id);
     setActiveId(id);
     setActiveOverlayWidth(clipboardListRef.current?.getBoundingClientRect().width ?? null);
     lastPreviewMoveRef.current = null;
     setPreviewRecords(isFiltered ? null : filtered);
-  }, [filtered, isFiltered]);
+  }, [filtered, isFiltered, isSelecting]);
 
   const handleDragCancel = useCallback(() => {
     setActiveId(null);
@@ -183,7 +212,7 @@ export default function ClipboardPage() {
 
   const handleDragOver = useCallback(
     (event: DragOverEvent) => {
-      if (isFiltered || !event.over) return;
+      if (isSelecting || isFiltered || !event.over) return;
 
       const active = String(event.active.id);
       const over = String(event.over.id);
@@ -198,7 +227,7 @@ export default function ClipboardPage() {
         return next === base ? current : next;
       });
     },
-    [filtered, isFiltered],
+    [filtered, isFiltered, isSelecting],
   );
 
   const handleDragEnd = useCallback(
@@ -209,14 +238,14 @@ export default function ClipboardPage() {
       setPreviewRecords(null);
       lastPreviewMoveRef.current = null;
 
-      if (isFiltered) return;
+      if (isSelecting || isFiltered) return;
 
       const nextIds = getChangedOrderIds(filtered, finalPreview);
       if (!nextIds) return;
 
       useClipboardStore.getState().reorderRecords(nextIds);
     },
-    [filtered, isFiltered, previewRecords],
+    [filtered, isFiltered, isSelecting, previewRecords],
   );
 
   const renderedRecords = previewRecords ?? filtered;
@@ -257,36 +286,33 @@ export default function ClipboardPage() {
           ))}
         </div>
         <div className="clipboard-categories-actions">
-          <button className="phrase-add-btn" onClick={() => setShowCreate(true)}>
-            {Icons.add}
-            <span>{t("clipboard.create")}</span>
-          </button>
-          {records.length > 0 && canDeleteCategory && (
-            <button
-              className="clipboard-delete-btn"
-              title={category === "all"
-                ? t("clipboard.deleteAll")
-                : t("clipboard.deleteType", { type: t(`clipboard.${category}`) })}
-              onClick={() => {
-                if (category === "all") {
-                  setConfirmState({
-                    message: t("clipboard.confirmDeleteAll"),
-                    onConfirm: () => deleteAllRecords(),
-                  });
-                } else {
-                  const typeLabel = t(`clipboard.${category}`);
-                  setConfirmState({
-                    message: t("clipboard.confirmDeleteType", { type: typeLabel }),
-                    onConfirm: () => deleteRecordsByType(category),
-                  });
-                }
-              }}
-            >
-              {Icons.delete}
-            </button>
+          {!isSelecting && (
+            <>
+              <button className="phrase-add-btn" onClick={() => setShowCreate(true)}>
+                {Icons.add}
+                <span>{t("clipboard.create")}</span>
+              </button>
+              {filtered.length > 0 && (
+                <button className="phrase-add-btn selection-mode-btn" onClick={startSelection}>
+                  {Icons.check}
+                  <span>{t("common.select")}</span>
+                </button>
+              )}
+            </>
           )}
         </div>
       </div>
+
+      {isSelecting && (
+        <BatchSelectionBar
+          selectedCount={selectedCount}
+          totalCount={visibleIds.length}
+          allSelected={allVisibleSelected}
+          onToggleAll={toggleAllVisible}
+          onDelete={handleDeleteSelected}
+          onCancel={exitSelection}
+        />
+      )}
 
       {showCreate && (
         <div className="dialog-overlay" onClick={() => { setShowCreate(false); setCreateContent(""); }}>
@@ -323,7 +349,7 @@ export default function ClipboardPage() {
               <button
                 className="dialog-btn save"
                 onClick={() => {
-                  confirmState.onConfirm();
+                  void confirmState.onConfirm();
                   setConfirmState(null);
                 }}
               >
@@ -373,6 +399,9 @@ export default function ClipboardPage() {
                   onPasteNormal={handlePaste}
                   onPasteTerminal={handlePasteTerminal}
                   onDelete={handleDelete}
+                  selectionMode={isSelecting}
+                  selected={isSelected(r.id)}
+                  onToggleSelected={toggleSelected}
                   onThumbHover={handleThumbHover}
                   onThumbLeave={handleThumbLeave}
                 />

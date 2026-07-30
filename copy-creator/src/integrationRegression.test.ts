@@ -84,4 +84,27 @@ describe("integration regressions", () => {
 
     expect(pageSource).toContain("search={search}");
   });
+
+  it("keeps clipboard deletion on the shared cleanup path", () => {
+    const dbSource = readSource("../src-tauri/src/db.rs");
+    const deleteBlock = dbSource.slice(
+      dbSource.indexOf("fn delete_clipboard_records_internal"),
+      dbSource.indexOf("pub fn get_phrase_groups"),
+    );
+
+    expect(deleteBlock).toContain("DELETE FROM api_key_labels");
+    expect(deleteBlock).toContain("SELECT COUNT(*) > 0 FROM clipboard_records");
+    expect(deleteBlock).toContain("remove_file");
+  });
+
+  it("uses shared batch selection controls on both list pages", () => {
+    const clipboardPage = readSource("./pages/ClipboardPage/index.tsx");
+    const phrasePage = readSource("./pages/PhrasePage/index.tsx");
+    const libSource = readSource("../src-tauri/src/lib.rs");
+
+    expect(clipboardPage).toContain("<BatchSelectionBar");
+    expect(phrasePage).toContain("<BatchSelectionBar");
+    expect(libSource).toContain("db::delete_clipboard_records");
+    expect(libSource).toContain("db::delete_phrases");
+  });
 });

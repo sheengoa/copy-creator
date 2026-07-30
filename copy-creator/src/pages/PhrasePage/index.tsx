@@ -26,6 +26,8 @@ import {
 } from "@dnd-kit/sortable";
 import { restrictToVerticalAxis } from "@dnd-kit/modifiers";
 import { getChangedOrderIds, getDragPreviewOrder } from "../../utils/reorderPreview";
+import BatchSelectionBar from "../../components/BatchSelectionBar";
+import { useMultiSelect } from "../../hooks/useMultiSelect";
 
 type PhraseInputType = "text" | "file";
 
@@ -47,7 +49,10 @@ export default function PhrasePage() {
   const [quickInputFileLimit, setQuickInputFileLimit] = useState(50 * 1024 * 1024);
   const [phraseError, setPhraseError] = useState(false);
   const [manageGroupsOpen, setManageGroupsOpen] = useState(false);
-  const [confirmState, setConfirmState] = useState<{ message: string; onConfirm: () => void } | null>(null);
+  const [confirmState, setConfirmState] = useState<{
+    message: string;
+    onConfirm: () => void | Promise<void>;
+  } | null>(null);
   const [renameId, setRenameId] = useState<string | null>(null);
   const [renameName, setRenameName] = useState("");
 
@@ -67,6 +72,7 @@ export default function PhrasePage() {
     createFilePhrase,
     updatePhrase,
     updateFilePhrase,
+    deletePhrases,
     deletePhrase,
     deleteGroup,
     pastePhrase,
@@ -173,6 +179,21 @@ export default function PhrasePage() {
       (p.title && p.title.toLowerCase().includes(q))
     );
   }, [renderedPhrases, search]);
+  const visiblePhraseIds = useMemo(
+    () => searchedPhrases.map((phrase) => phrase.id),
+    [searchedPhrases],
+  );
+  const {
+    isSelecting,
+    selectedIds,
+    selectedCount,
+    allVisibleSelected,
+    startSelection,
+    exitSelection,
+    toggleSelected,
+    isSelected,
+    toggleAllVisible,
+  } = useMultiSelect(visiblePhraseIds);
   const activePhrase = activePhraseId ? renderedPhrases.find(p => p.id === activePhraseId) : null;
   const activePhraseBody = activePhrase?.input_type === "file"
     ? filenameFromPath(activePhrase.source_path || activePhrase.content)
@@ -321,6 +342,28 @@ export default function PhrasePage() {
     [deletePhrase, t],
   );
 
+  const handleDeleteSelected = useCallback(() => {
+    if (selectedCount === 0) return;
+    const ids = [...selectedIds];
+    setConfirmState({
+      message: t("phrases.confirmDeleteSelected", { count: ids.length }),
+      onConfirm: async () => {
+        await deletePhrases(ids);
+        exitSelection();
+      },
+    });
+  }, [deletePhrases, exitSelection, selectedCount, selectedIds, t]);
+
+  const handleSearchChange = useCallback((value: string) => {
+    exitSelection();
+    setSearch(value);
+  }, [exitSelection, setSearch]);
+
+  const handleSelectGroup = useCallback((id: string) => {
+    exitSelection();
+    setSelectedGroup(id);
+  }, [exitSelection, setSelectedGroup]);
+
   const handleDeleteGroup = (id: string) => {
     setConfirmState({
       message: t("phrases.confirmDeleteGroup"),
@@ -339,19 +382,33 @@ export default function PhrasePage() {
         <SearchInput
           placeholder={t("phrases.search")}
           value={search}
-          onChange={setSearch}
+          onChange={handleSearchChange}
         />
       </div>
 
       <GroupChips
         groups={groups}
         selectedGroupId={selectedGroupId}
-        onSelectGroup={setSelectedGroup}
+        onSelectGroup={handleSelectGroup}
         onAddGroup={openNewGroup}
         onManageGroups={openManageGroups}
         onAddPhrase={openNewPhrase}
+        selectionMode={isSelecting}
+        canSelect={searchedPhrases.length > 0}
+        onStartSelection={startSelection}
         onReorderGroups={(ids) => usePhraseStore.getState().reorderGroups(ids)}
       />
+
+      {isSelecting && (
+        <BatchSelectionBar
+          selectedCount={selectedCount}
+          totalCount={visiblePhraseIds.length}
+          allSelected={allVisibleSelected}
+          onToggleAll={toggleAllVisible}
+          onDelete={handleDeleteSelected}
+          onCancel={exitSelection}
+        />
+      )}
 
       <DndContext sensors={sensors} onDragStart={handlePhraseDragStart} onDragOver={handlePhraseDragOver} onDragEnd={handlePhraseDragEnd} onDragCancel={handlePhraseDragCancel} modifiers={[restrictToVerticalAxis]}>
         <SortableContext items={renderedPhrases.map(p => p.id)} strategy={verticalListSortingStrategy}>
@@ -364,6 +421,9 @@ export default function PhrasePage() {
             onSecondaryPaste={handleSecondaryPaste}
             onEdit={openEditPhrase}
             onDelete={handleDeletePhrase}
+            selectionMode={isSelecting}
+            isSelected={isSelected}
+            onToggleSelected={toggleSelected}
           />
         </SortableContext>
         {createPortal(phraseDragOverlay, document.body)}
@@ -429,7 +489,7 @@ export default function PhrasePage() {
                 onClick={() => {
                   const fn = confirmState.onConfirm;
                   setConfirmState(null);
-                  fn();
+                  void fn();
                 }}
               >
                 {t("common.confirm")}

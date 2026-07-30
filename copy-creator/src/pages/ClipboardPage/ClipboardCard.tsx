@@ -24,6 +24,9 @@ interface ClipboardCardProps {
   onPasteNormal: (r: ClipboardRecord) => void;
   onPasteTerminal: (r: ClipboardRecord) => void;
   onDelete: (id: string) => void;
+  selectionMode: boolean;
+  selected: boolean;
+  onToggleSelected: (id: string) => void;
   onThumbHover: (thumbSrc: string, rect: DOMRect) => void;
   onThumbLeave: () => void;
 }
@@ -126,6 +129,9 @@ function ClipboardCardInner({
   onPasteNormal,
   onPasteTerminal,
   onDelete,
+  selectionMode,
+  selected,
+  onToggleSelected,
   onThumbHover,
   onThumbLeave,
 }: ClipboardCardProps) {
@@ -138,7 +144,7 @@ function ClipboardCardInner({
     transform,
     transition,
     isDragging,
-  } = useSortable({ id: record.id });
+  } = useSortable({ id: record.id, disabled: selectionMode });
 
   const sortableStyle = {
     transform: CSS.Transform.toString(transform),
@@ -162,6 +168,12 @@ function ClipboardCardInner({
       (record.content_length ?? displayContent.length) > COLLAPSE_TEXT_LENGTH ||
       textLineCount > COLLAPSE_LINE_COUNT);
   const isTextExpanded = canToggleText && textExpanded;
+
+  useEffect(() => {
+    if (!selectionMode) return;
+    setCtxMenu(null);
+    setLabelOpen(false);
+  }, [selectionMode]);
 
   // Close context menu on outside click / ESC
   useEffect(() => {
@@ -278,12 +290,22 @@ function ClipboardCardInner({
   return (
     <div
       ref={setNodeRef}
-      className={`notification clipboard-card type-${record.type}${record.is_api_key ? " has-api-key" : ""}${isUnlabeled ? " api-key-unlabeled" : ""}${hasLabel ? " api-key-labeled" : ""}${isDragging ? " is-dragging" : ""}`}
+      className={`notification clipboard-card type-${record.type}${record.is_api_key ? " has-api-key" : ""}${isUnlabeled ? " api-key-unlabeled" : ""}${hasLabel ? " api-key-labeled" : ""}${isDragging ? " is-dragging" : ""}${selectionMode ? " is-selection-mode" : ""}${selected ? " is-selected" : ""}`}
       style={{ ...sortableStyle, "--color": meta.color, "--enter-delay": index } as React.CSSProperties}
-      onClick={handlePaste}
-      onContextMenu={handleContextMenu}
+      onClick={selectionMode ? () => onToggleSelected(record.id) : handlePaste}
+      onContextMenu={selectionMode ? (e) => { e.preventDefault(); e.stopPropagation(); } : handleContextMenu}
     >
       <div className="notibar" />
+      {selectionMode && (
+        <div className="card-selection-control" onClick={(e) => e.stopPropagation()}>
+          <input
+            type="checkbox"
+            checked={selected}
+            aria-label={t("common.selectItem")}
+            onChange={() => onToggleSelected(record.id)}
+          />
+        </div>
+      )}
       <div className="noticontent">
         <div className="notititle clipboard-card-header">
           <span className="noti-type-label">
@@ -295,7 +317,8 @@ function ClipboardCardInner({
               className="api-key-badge"
               onClick={(e) => {
                 e.stopPropagation();
-                setLabelOpen((v) => !v);
+                if (selectionMode) onToggleSelected(record.id);
+                else setLabelOpen((v) => !v);
               }}
             >
               {badgeText || "未标注"}
@@ -313,7 +336,8 @@ function ClipboardCardInner({
               onLeave={onThumbLeave}
               onClick={(e) => {
                 e.stopPropagation();
-                handlePaste();
+                if (selectionMode) onToggleSelected(record.id);
+                else handlePaste();
               }}
             />
           ) : record.type === "link" ? (
@@ -341,7 +365,7 @@ function ClipboardCardInner({
         <div className="notititle clipboard-card-footer">
           <span className="clipboard-card-time">{formatTime(record.created_at)}</span>
           <div className="clipboard-card-actions">
-            {canToggleText && (
+            {!selectionMode && canToggleText && (
               <button
                 className="card-toggle-text-btn"
                 onClick={handleToggleText}
@@ -353,25 +377,29 @@ function ClipboardCardInner({
                 <span>{loadingFullContent ? "加载" : isTextExpanded ? "收起" : "展开"}</span>
               </button>
             )}
-            <span ref={setActivatorNodeRef} className="drag-handle" {...attributes} {...listeners}>
-              <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor">
-                <circle cx="9" cy="5" r="1.5" />
-                <circle cx="15" cy="5" r="1.5" />
-                <circle cx="9" cy="12" r="1.5" />
-                <circle cx="15" cy="12" r="1.5" />
-                <circle cx="9" cy="19" r="1.5" />
-                <circle cx="15" cy="19" r="1.5" />
-              </svg>
-            </span>
-            <button className="card-delete-btn" onClick={handleDelete}>
-              {Icons.delete}
-            </button>
+            {!selectionMode && (
+              <>
+                <span ref={setActivatorNodeRef} className="drag-handle" {...attributes} {...listeners}>
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor">
+                    <circle cx="9" cy="5" r="1.5" />
+                    <circle cx="15" cy="5" r="1.5" />
+                    <circle cx="9" cy="12" r="1.5" />
+                    <circle cx="15" cy="12" r="1.5" />
+                    <circle cx="9" cy="19" r="1.5" />
+                    <circle cx="15" cy="19" r="1.5" />
+                  </svg>
+                </span>
+                <button className="card-delete-btn" onClick={handleDelete}>
+                  {Icons.delete}
+                </button>
+              </>
+            )}
           </div>
         </div>
       </div>
 
       {/* Context menu */}
-      {ctxMenu && (
+      {ctxMenu && !selectionMode && (
         <div
           ref={ctxRef}
           className="clipboard-ctx-menu"

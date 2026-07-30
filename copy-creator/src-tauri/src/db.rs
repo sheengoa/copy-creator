@@ -1,4 +1,4 @@
-use rusqlite::{params, Connection};
+use rusqlite::{params, Connection, OptionalExtension};
 use std::collections::HashSet;
 use std::path::PathBuf;
 use std::sync::Mutex;
@@ -890,9 +890,26 @@ pub fn update_clipboard_record(app: AppHandle, id: String, content: String) -> R
 
 #[tauri::command]
 pub fn delete_all_clipboard_records(app: AppHandle) -> Result<(), String> {
+    let ids = {
+        let state = app.state::<DbState>();
+        let conn = state.conn.lock().map_err(|e| e.to_string())?;
+        let mut stmt = conn
+            .prepare("SELECT id FROM clipboard_records")
+            .map_err(|e| e.to_string())?;
+        let rows = stmt
+            .query_map([], |row| row.get::<_, String>(0))
+            .map_err(|e| e.to_string())?;
+        rows.collect::<Result<Vec<_>, _>>()
+            .map_err(|e| e.to_string())?
+    };
+
+    delete_clipboard_records_internal(&app, &ids)?;
+
+    // Remove labels left behind by databases created before label cleanup
+    // was part of the clipboard deletion path.
     let state = app.state::<DbState>();
     let conn = state.conn.lock().map_err(|e| e.to_string())?;
-    conn.execute("DELETE FROM clipboard_records", [])
+    conn.execute("DELETE FROM api_key_labels", [])
         .map_err(|e| e.to_string())?;
     let _ = app.emit("clipboard-cleared", ());
     Ok(())
@@ -900,106 +917,112 @@ pub fn delete_all_clipboard_records(app: AppHandle) -> Result<(), String> {
 
 #[tauri::command]
 pub fn delete_records_by_type(app: AppHandle, record_type: String) -> Result<(), String> {
-    let image_contents: Vec<String>;
+    let ids = {
+        let state = app.state::<DbState>();
+        let conn = state.conn.lock().map_err(|e| e.to_string())?;
+        let mut stmt = conn
+            .prepare("SELECT id FROM clipboard_records WHERE type = ?1")
+            .map_err(|e| e.to_string())?;
+        let rows = stmt
+            .query_map(params![record_type], |row| row.get::<_, String>(0))
+            .map_err(|e| e.to_string())?;
+        rows.collect::<Result<Vec<_>, _>>()
+            .map_err(|e| e.to_string())?
+    };
+
+    delete_clipboard_records_internal(&app, &ids)
+}
+
+fn delete_clipboard_records_internal(app: &AppHandle, ids: &[String]) -> Result<(), String> {
+    if ids.is_empty() {
+        return Ok(());
+    }
+
+    let mut deleted_ids = Vec::new();
+    let mut image_contents = HashSet::new();
 
     {
         let state = app.state::<DbState>();
-        let conn = state.conn.lock().map_err(|e| e.to_string())?;
+        let mut conn = state.conn.lock().map_err(|e| e.to_string())?;
+        let tx = conn.transaction().map_err(|e| e.to_string())?;
 
-        // Collect image paths before deletion for file cleanup
-        if record_type == "image" {
-            let mut stmt = conn
-                .prepare("SELECT content FROM clipboard_records WHERE type = ?1")
-                .map_err(|e| e.to_string())?;
-            let rows = stmt
-                .query_map(rusqlite::params![record_type], |row| {
-                    row.get::<_, String>(0)
-                })
-                .map_err(|e| e.to_string())?;
-            image_contents = rows.filter_map(|r| r.ok()).collect();
-        } else {
-            image_contents = Vec::new();
-        }
-
-        conn.execute(
-            "DELETE FROM clipboard_records WHERE type = ?1",
-            rusqlite::params![record_type],
-        )
-        .map_err(|e| e.to_string())?;
-    }
-
-    // Clean up image files if no remaining records reference them
-    if !image_contents.is_empty() {
-        let base_dir = get_storage_dir(&app);
-        let state = app.state::<DbState>();
-        let conn = state.conn.lock().map_err(|e| e.to_string())?;
-        for content in &image_contents {
-            let still_referenced: bool = conn
+        for id in ids {
+            let record = tx
                 .query_row(
-                    "SELECT COUNT(*) > 0 FROM clipboard_records WHERE content = ?1",
-                    rusqlite::params![content],
-                    |row| row.get(0),
+                    "SELECT type, content FROM clipboard_records WHERE id = ?1",
+                    params![id],
+                    |row| Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?)),
                 )
-                .unwrap_or(false);
-            if still_referenced {
+                .optional()
+                .map_err(|e| e.to_string())?;
+
+            let Some((record_type, content)) = record else {
                 continue;
+            };
+
+            tx.execute(
+                "DELETE FROM api_key_labels WHERE record_id = ?1",
+                params![id],
+            )
+            .map_err(|e| e.to_string())?;
+            tx.execute("DELETE FROM clipboard_records WHERE id = ?1", params![id])
+                .map_err(|e| e.to_string())?;
+
+            if record_type == "image" {
+                image_contents.insert(content);
             }
-            let file_path = base_dir.join(content);
-            let _ = std::fs::remove_file(&file_path);
-            if let Some(filename) = file_path.file_name() {
-                let thumb_path = file_path
-                    .parent()
-                    .unwrap_or(&base_dir)
-                    .join("thumbs")
-                    .join(filename);
-                let _ = std::fs::remove_file(&thumb_path);
-            }
+            deleted_ids.push(id.clone());
         }
+
+        tx.commit().map_err(|e| e.to_string())?;
     }
 
-    // Notify frontend that records have changed (partial update — not clipboard-cleared)
-    Ok(())
-}
-
-#[tauri::command]
-pub fn delete_clipboard_record(app: AppHandle, id: String) -> Result<(), String> {
-    let image_content: Option<String> = {
+    let removable_images = {
         let state = app.state::<DbState>();
         let conn = state.conn.lock().map_err(|e| e.to_string())?;
-
-        let record: Option<(String, String)> = conn
-            .query_row(
-                "SELECT type, content FROM clipboard_records WHERE id = ?1",
-                params![id],
-                |row| Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?)),
-            )
-            .ok();
-
-        conn.execute("DELETE FROM clipboard_records WHERE id = ?1", params![id])
-            .map_err(|e| e.to_string())?;
-
-        let _ = app.emit("clipboard-deleted", &id);
-
-        match record {
-            Some((t, c)) if t == "image" => Some(c),
-            _ => None,
-        }
+        image_contents
+            .into_iter()
+            .filter(|content| {
+                !conn
+                    .query_row(
+                        "SELECT COUNT(*) > 0 FROM clipboard_records WHERE content = ?1",
+                        params![content],
+                        |row| row.get::<_, bool>(0),
+                    )
+                    .unwrap_or(false)
+            })
+            .collect::<Vec<_>>()
     };
 
-    if let Some(content) = image_content {
-        let file_path = get_storage_dir(&app).join(&content);
+    let base_dir = get_storage_dir(app);
+    for content in removable_images {
+        let file_path = base_dir.join(content);
         let _ = std::fs::remove_file(&file_path);
         if let Some(filename) = file_path.file_name() {
             let thumb_path = file_path
                 .parent()
-                .unwrap_or(std::path::Path::new("."))
+                .unwrap_or(&base_dir)
                 .join("thumbs")
                 .join(filename);
             let _ = std::fs::remove_file(&thumb_path);
         }
     }
 
+    for id in deleted_ids {
+        let _ = app.emit("clipboard-deleted", &id);
+    }
+
     Ok(())
+}
+
+#[tauri::command]
+pub fn delete_clipboard_records(app: AppHandle, ids: Vec<String>) -> Result<(), String> {
+    delete_clipboard_records_internal(&app, &ids)
+}
+
+#[tauri::command]
+pub fn delete_clipboard_record(app: AppHandle, id: String) -> Result<(), String> {
+    delete_clipboard_records_internal(&app, &[id])
 }
 
 #[tauri::command]
@@ -1298,23 +1321,45 @@ pub fn update_file_phrase(
 }
 
 #[tauri::command]
-pub fn delete_phrase(app: AppHandle, id: String) -> Result<(), String> {
-    let state = app.state::<DbState>();
-    let conn = state.conn.lock().map_err(|e| e.to_string())?;
-    let old_file: Option<String> = conn
-        .query_row(
-            "SELECT content FROM phrases WHERE id = ?1 AND input_type = 'file'",
-            params![&id],
-            |row| row.get(0),
-        )
-        .ok();
-    conn.execute("DELETE FROM phrases WHERE id = ?1", params![id])
-        .map_err(|e| e.to_string())?;
-    drop(conn);
-    if let Some(path) = old_file {
+pub fn delete_phrases(app: AppHandle, ids: Vec<String>) -> Result<(), String> {
+    if ids.is_empty() {
+        return Ok(());
+    }
+
+    let mut file_paths = HashSet::new();
+    {
+        let state = app.state::<DbState>();
+        let mut conn = state.conn.lock().map_err(|e| e.to_string())?;
+        let tx = conn.transaction().map_err(|e| e.to_string())?;
+
+        for id in &ids {
+            let old_file = tx
+                .query_row(
+                    "SELECT content FROM phrases WHERE id = ?1 AND input_type = 'file'",
+                    params![id],
+                    |row| row.get::<_, String>(0),
+                )
+                .optional()
+                .map_err(|e| e.to_string())?;
+            tx.execute("DELETE FROM phrases WHERE id = ?1", params![id])
+                .map_err(|e| e.to_string())?;
+            if let Some(path) = old_file {
+                file_paths.insert(path);
+            }
+        }
+
+        tx.commit().map_err(|e| e.to_string())?;
+    }
+
+    for path in file_paths {
         remove_quick_input_file(&app, &path);
     }
     Ok(())
+}
+
+#[tauri::command]
+pub fn delete_phrase(app: AppHandle, id: String) -> Result<(), String> {
+    delete_phrases(app, vec![id])
 }
 
 #[tauri::command]
