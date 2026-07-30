@@ -1,14 +1,15 @@
 {
   "name": "copy-creator",
   "private": true,
-  "version": "0.1.7",
+  "version": "0.1.8",
   "type": "module",
   "scripts": {
     "dev": "vite",
     "build": "tsc -b && vite build",
     "lint": "eslint .",
     "preview": "vite preview",
-    "test": "vitest run"
+    "test": "vitest run",
+    "tauri": "tauri"
   },
   "dependencies": {
     "@dnd-kit/core": "^6.3.1",
