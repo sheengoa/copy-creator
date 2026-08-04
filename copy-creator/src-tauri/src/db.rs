@@ -114,6 +114,7 @@ fn make_content_preview(content: &str) -> (String, i64, bool) {
     )
 }
 
+#[allow(clippy::too_many_arguments)]
 fn clipboard_record_json(
     id: String,
     rec_type: String,
@@ -122,7 +123,16 @@ fn clipboard_record_json(
     created_at: String,
     user_api_key: i64,
     group_name: String,
+    attachments: String,
 ) -> serde_json::Value {
+    let has_images = serde_json::from_str::<Vec<String>>(&attachments)
+        .map(|paths| !paths.is_empty())
+        .unwrap_or(false);
+    let content = if has_images && (group_name == "暂存" || group_name == "stash") {
+        crate::clipboard::stash_content_for_display(&content)
+    } else {
+        content
+    };
     let (list_content, content_length, content_truncated) = if rec_type == "text" {
         make_content_preview(&content)
     } else {
@@ -133,7 +143,6 @@ fn clipboard_record_json(
     } else {
         content_length
     };
-
     serde_json::json!({
         "id": id,
         "type": rec_type,
@@ -144,6 +153,7 @@ fn clipboard_record_json(
         "created_at": created_at,
         "user_api_key": user_api_key,
         "group_name": group_name,
+        "has_images": has_images,
     })
 }
 
@@ -422,7 +432,8 @@ pub fn init_db(app: &AppHandle) -> Result<(), Box<dyn std::error::Error>> {
             content TEXT NOT NULL,
             source_app TEXT DEFAULT '',
             created_at TEXT NOT NULL,
-            user_api_key INTEGER DEFAULT 0
+            user_api_key INTEGER DEFAULT 0,
+            attachments TEXT DEFAULT '[]'
         );
 
         CREATE INDEX IF NOT EXISTS idx_clipboard_created_at
@@ -599,6 +610,11 @@ pub fn init_db(app: &AppHandle) -> Result<(), Box<dyn std::error::Error>> {
         [],
     )
     .ok();
+    conn.execute(
+        "ALTER TABLE clipboard_records ADD COLUMN attachments TEXT DEFAULT '[]'",
+        [],
+    )
+    .ok();
 
     app.manage(DbState {
         conn: Mutex::new(conn),
@@ -610,7 +626,7 @@ pub fn init_db(app: &AppHandle) -> Result<(), Box<dyn std::error::Error>> {
 
 pub fn prune_old_records(app: &AppHandle) -> Result<(), Box<dyn std::error::Error>> {
     let days;
-    let image_contents: Vec<String>;
+    let mut image_contents: Vec<String>;
 
     {
         let state = app.state::<DbState>();
@@ -640,6 +656,19 @@ pub fn prune_old_records(app: &AppHandle) -> Result<(), Box<dyn std::error::Erro
             })?;
             image_contents = rows.filter_map(|r| r.ok()).collect();
         }
+        {
+            let mut stmt = conn.prepare(
+                "SELECT attachments FROM clipboard_records WHERE datetime(created_at) < datetime('now', ?1)",
+            )?;
+            let rows = stmt.query_map(params![format!("-{} days", days)], |row| {
+                row.get::<_, String>(0)
+            })?;
+            for attachments in rows.flatten() {
+                if let Ok(paths) = serde_json::from_str::<Vec<String>>(&attachments) {
+                    image_contents.extend(paths);
+                }
+            }
+        }
 
         conn.execute(
             "DELETE FROM clipboard_records WHERE datetime(created_at) < datetime('now', ?1)",
@@ -663,6 +692,7 @@ pub fn prune_old_records(app: &AppHandle) -> Result<(), Box<dyn std::error::Erro
         if still_referenced {
             continue;
         }
+        crate::paste::remove_cached_images(std::slice::from_ref(content));
         let file_path = base_dir.join(content);
         let _ = std::fs::remove_file(&file_path);
         if let Some(filename) = file_path.file_name() {
@@ -717,7 +747,7 @@ pub fn get_clipboard_records(
             .replace('%', "\\%")
             .replace('_', "\\_");
         let sql = format!(
-            "SELECT id, type, content, source_app, created_at, user_api_key, group_name FROM clipboard_records
+            "SELECT id, type, content, source_app, created_at, user_api_key, group_name, attachments FROM clipboard_records
              WHERE content LIKE '%' || ?1 || '%' ESCAPE '\\' {} ORDER BY sort_order DESC LIMIT ?2 OFFSET ?3",
             cat_filter.1
         );
@@ -732,6 +762,7 @@ pub fn get_clipboard_records(
                     row.get::<_, String>(4)?,
                     row.get::<_, i64>(5)?,
                     row.get::<_, String>(6)?,
+                    row.get::<_, String>(7)?,
                 ))
             })
             .map_err(|e| e.to_string())?;
@@ -740,7 +771,7 @@ pub fn get_clipboard_records(
         }
     } else {
         let sql = format!(
-            "SELECT id, type, content, source_app, created_at, user_api_key, group_name FROM clipboard_records
+            "SELECT id, type, content, source_app, created_at, user_api_key, group_name, attachments FROM clipboard_records
              {} ORDER BY sort_order DESC LIMIT ?1 OFFSET ?2",
             cat_filter.0
         );
@@ -755,6 +786,7 @@ pub fn get_clipboard_records(
                     row.get::<_, String>(4)?,
                     row.get::<_, i64>(5)?,
                     row.get::<_, String>(6)?,
+                    row.get::<_, String>(7)?,
                 ))
             })
             .map_err(|e| e.to_string())?;
@@ -949,14 +981,20 @@ fn delete_clipboard_records_internal(app: &AppHandle, ids: &[String]) -> Result<
         for id in ids {
             let record = tx
                 .query_row(
-                    "SELECT type, content FROM clipboard_records WHERE id = ?1",
+                    "SELECT type, content, attachments FROM clipboard_records WHERE id = ?1",
                     params![id],
-                    |row| Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?)),
+                    |row| {
+                        Ok((
+                            row.get::<_, String>(0)?,
+                            row.get::<_, String>(1)?,
+                            row.get::<_, String>(2)?,
+                        ))
+                    },
                 )
                 .optional()
                 .map_err(|e| e.to_string())?;
 
-            let Some((record_type, content)) = record else {
+            let Some((record_type, content, attachments)) = record else {
                 continue;
             };
 
@@ -970,6 +1008,9 @@ fn delete_clipboard_records_internal(app: &AppHandle, ids: &[String]) -> Result<
 
             if record_type == "image" {
                 image_contents.insert(content);
+            }
+            if let Ok(paths) = serde_json::from_str::<Vec<String>>(&attachments) {
+                image_contents.extend(paths);
             }
             deleted_ids.push(id.clone());
         }
@@ -995,6 +1036,7 @@ fn delete_clipboard_records_internal(app: &AppHandle, ids: &[String]) -> Result<
     };
 
     let base_dir = get_storage_dir(app);
+    crate::paste::remove_cached_images(&removable_images);
     for content in removable_images {
         let file_path = base_dir.join(content);
         let _ = std::fs::remove_file(&file_path);
@@ -1589,7 +1631,8 @@ fn migrate_storage(app: &AppHandle, new_path: &str) -> Result<(), String> {
                 created_at TEXT NOT NULL,
                 user_api_key INTEGER DEFAULT 0,
                 sort_order REAL,
-                group_name TEXT DEFAULT ''
+                group_name TEXT DEFAULT '',
+                attachments TEXT DEFAULT '[]'
             );
             CREATE INDEX IF NOT EXISTS idx_clipboard_created_at ON clipboard_records(created_at);
             CREATE INDEX IF NOT EXISTS idx_clipboard_sort_order ON clipboard_records(sort_order DESC);

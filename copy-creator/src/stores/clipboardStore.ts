@@ -28,6 +28,7 @@ interface ClipboardRecord {
   guessed_service?: string | null;
   label?: ApiKeyLabel | null;
   group_name?: string;
+  has_images?: boolean;
 }
 
 const PAGE_SIZE = 120;
@@ -234,6 +235,10 @@ export const useClipboardStore = create<ClipboardState>((set, get) => ({
 
   pasteRecord: async (record: ClipboardRecord) => {
     try {
+      if (record.has_images) {
+        await invoke("paste_stash_record", { id: record.id, terminal: false });
+        return;
+      }
       const content = await getFullContent(record);
       if (record.type === "image") {
         await invoke("paste_image", { path: content });
@@ -249,6 +254,10 @@ export const useClipboardStore = create<ClipboardState>((set, get) => ({
 
   pasteRecordTerminal: async (record: ClipboardRecord) => {
     try {
+      if (record.has_images) {
+        await invoke("paste_stash_record", { id: record.id, terminal: true });
+        return;
+      }
       const content = await getFullContent(record);
       if (record.type === "image") {
         await invoke("paste_image", { path: content });

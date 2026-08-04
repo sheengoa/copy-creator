@@ -60,7 +60,8 @@ describe("standalone window chrome", () => {
     expect(componentSource).not.toContain('listen("clipboard-record-updated"');
     expect(css).toContain("bottom: calc(100% + 4px)");
     expect(css).toContain("white-space: nowrap");
-    expect(componentSource).toContain('"update_clipboard_record"');
+    expect(componentSource).toContain('"save_stash_record"');
+    expect(componentSource).toContain("<StashEditor");
   });
 
   it("marks standalone clipboard create header as draggable", () => {

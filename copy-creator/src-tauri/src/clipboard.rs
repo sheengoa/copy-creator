@@ -1,3 +1,6 @@
+use base64::Engine;
+use rusqlite::OptionalExtension;
+use std::collections::HashSet;
 use std::io::Write;
 use tauri::{AppHandle, Emitter, Manager};
 use tauri_plugin_clipboard_manager::ClipboardExt;
@@ -173,6 +176,266 @@ pub fn create_clipboard_record(
     Ok(serde_json::json!({ "id": id }))
 }
 
+fn write_stash_images(
+    app: &AppHandle,
+    images: &[String],
+    reusable_paths: &HashSet<String>,
+) -> Result<(Vec<String>, Vec<String>), String> {
+    let relative_dir = "stash-images";
+    let storage_dir = crate::db::get_storage_dir(app);
+    let target_dir = storage_dir.join(relative_dir);
+    std::fs::create_dir_all(&target_dir).map_err(|e| e.to_string())?;
+
+    let mut paths = Vec::with_capacity(images.len());
+    let mut created_paths = Vec::new();
+    for image_data in images {
+        if reusable_paths.contains(image_data) {
+            if !storage_dir.join(image_data).is_file() {
+                remove_stash_images(app, &created_paths);
+                return Err("原暂存图片文件已不存在".to_string());
+            }
+            paths.push(image_data.clone());
+            continue;
+        }
+        if image_data.starts_with("stash-images/") {
+            remove_stash_images(app, &created_paths);
+            return Err("暂存图片路径无效".to_string());
+        }
+        let result = (|| -> Result<String, String> {
+            let encoded = image_data
+                .split_once(',')
+                .map(|(_, data)| data)
+                .unwrap_or(image_data);
+            let bytes = base64::engine::general_purpose::STANDARD
+                .decode(encoded)
+                .map_err(|e| format!("图片数据无效: {e}"))?;
+            let image =
+                image::load_from_memory(&bytes).map_err(|e| format!("图片格式无效: {e}"))?;
+            let width = image.width();
+            let height = image.height();
+            let rgba = image.to_rgba8().into_raw();
+            let filename = format!("{}.png", uuid::Uuid::new_v4());
+            let relative_path = format!("{relative_dir}/{filename}");
+            image
+                .save_with_format(target_dir.join(&filename), image::ImageFormat::Png)
+                .map_err(|e| format!("图片保存失败: {e}"))?;
+            crate::paste::cache_image(relative_path.clone(), rgba, width, height);
+            Ok(relative_path)
+        })();
+        match result {
+            Ok(path) => {
+                created_paths.push(path.clone());
+                paths.push(path);
+            }
+            Err(e) => {
+                remove_stash_images(app, &created_paths);
+                return Err(e);
+            }
+        }
+    }
+    Ok((paths, created_paths))
+}
+
+fn remove_stash_images(app: &AppHandle, paths: &[String]) {
+    crate::paste::remove_cached_images(paths);
+    let storage_dir = crate::db::get_storage_dir(app);
+    for path in paths {
+        let _ = std::fs::remove_file(storage_dir.join(path));
+    }
+}
+
+fn validate_stash_content(content: &str, image_count: usize) -> Result<(), String> {
+    let object_count = content
+        .chars()
+        .filter(|character| *character == crate::paste::STASH_IMAGE_PLACEHOLDER)
+        .count();
+    if object_count > 0 {
+        if object_count != image_count {
+            return Err(format!(
+                "图片位置数量为 {object_count}，附件数量为 {image_count}"
+            ));
+        }
+        return Ok(());
+    }
+
+    let mut remaining = content;
+    for index in 1..=image_count {
+        let token = format!("[Image #{index}]");
+        let position = remaining
+            .find(&token)
+            .ok_or_else(|| format!("缺少图片占位符 {token}"))?;
+        remaining = &remaining[position + token.len()..];
+    }
+    Ok(())
+}
+
+pub(crate) fn stash_content_for_display(content: &str) -> String {
+    let mut image_index = 0;
+    content
+        .chars()
+        .map(|character| {
+            if character == crate::paste::STASH_IMAGE_PLACEHOLDER {
+                image_index += 1;
+                format!("[Image #{image_index}]")
+            } else {
+                character.to_string()
+            }
+        })
+        .collect()
+}
+
+#[tauri::command]
+pub fn save_stash_record(
+    app: AppHandle,
+    id: Option<String>,
+    content: String,
+    images: Vec<String>,
+) -> Result<serde_json::Value, String> {
+    let content = content.trim().to_string();
+    if content.is_empty() {
+        return Err("内容不能为空".to_string());
+    }
+    validate_stash_content(&content, images.len())?;
+
+    let record_type = classify_text_record(&content);
+    let record_id = id.unwrap_or_else(|| uuid::Uuid::new_v4().to_string());
+    let now = chrono::Utc::now().to_rfc3339();
+    let sort_order = chrono::Utc::now().timestamp_millis();
+    let existing = {
+        let state = app.state::<crate::db::DbState>();
+        let conn = state.conn.lock().map_err(|e| e.to_string())?;
+        conn.query_row(
+            "SELECT group_name, attachments FROM clipboard_records WHERE id = ?1",
+            rusqlite::params![&record_id],
+            |row| Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?)),
+        )
+        .optional()
+        .map_err(|e| e.to_string())?
+    };
+    let old_paths = if let Some((group_name, attachments)) = &existing {
+        if group_name != "暂存" && group_name != "stash" {
+            return Err("只能编辑暂存分组的记录".to_string());
+        }
+        serde_json::from_str::<Vec<String>>(attachments).unwrap_or_default()
+    } else {
+        Vec::new()
+    };
+    let reusable_paths = old_paths.iter().cloned().collect::<HashSet<_>>();
+    let (new_paths, created_paths) = write_stash_images(&app, &images, &reusable_paths)?;
+    let attachments = serde_json::to_string(&new_paths).map_err(|e| e.to_string())?;
+    let updated = existing.is_some();
+
+    let result = (|| -> Result<(), String> {
+        let state = app.state::<crate::db::DbState>();
+        let conn = state.conn.lock().map_err(|e| e.to_string())?;
+        if updated {
+            let affected = conn.execute(
+                "UPDATE clipboard_records SET type = ?1, content = ?2, sort_order = ?3, attachments = ?4 WHERE id = ?5",
+                rusqlite::params![record_type, &content, sort_order, &attachments, &record_id],
+            )
+            .map_err(|e| e.to_string())?;
+            if affected == 0 {
+                return Err("暂存记录已不存在".to_string());
+            }
+            conn.execute(
+                "DELETE FROM api_key_labels WHERE record_id = ?1",
+                rusqlite::params![&record_id],
+            )
+            .map_err(|e| e.to_string())?;
+        } else {
+            conn.execute(
+                "INSERT INTO clipboard_records (id, type, content, source_app, created_at, sort_order, group_name, attachments) VALUES (?1, ?2, ?3, '', ?4, ?5, '暂存', ?6)",
+                rusqlite::params![&record_id, record_type, &content, &now, sort_order, &attachments],
+            )
+            .map_err(|e| e.to_string())?;
+        }
+        Ok(())
+    })();
+
+    if let Err(error) = result {
+        remove_stash_images(&app, &created_paths);
+        return Err(error);
+    }
+    let retained_paths = new_paths.iter().cloned().collect::<HashSet<_>>();
+    let obsolete_paths = old_paths
+        .into_iter()
+        .filter(|path| !retained_paths.contains(path))
+        .collect::<Vec<_>>();
+    remove_stash_images(&app, &obsolete_paths);
+
+    if updated {
+        app.emit("clipboard-record-updated", &record_id).ok();
+    } else {
+        let event_content = stash_content_for_display(&content);
+        app.emit(
+            "clipboard-update",
+            serde_json::json!({
+                "id": &record_id,
+                "type": record_type,
+                "content": &event_content,
+                "content_length": event_content.chars().count(),
+                "content_truncated": false,
+                "source_app": "",
+                "created_at": now,
+                "is_api_key": false,
+                "key_preview": "",
+                "guessed_service": null,
+                "label": null,
+                "group_name": "暂存",
+                "has_images": !new_paths.is_empty(),
+            }),
+        )
+        .ok();
+    }
+    Ok(serde_json::json!({ "id": record_id }))
+}
+
+#[tauri::command]
+pub fn get_stash_record_images(app: AppHandle, id: String) -> Result<Vec<String>, String> {
+    let state = app.state::<crate::db::DbState>();
+    let conn = state.conn.lock().map_err(|e| e.to_string())?;
+    let attachments = conn
+        .query_row(
+            "SELECT attachments FROM clipboard_records WHERE id = ?1 AND group_name IN ('暂存', 'stash')",
+            rusqlite::params![id],
+            |row| row.get::<_, String>(0),
+        )
+        .map_err(|e| e.to_string())?;
+    serde_json::from_str(&attachments).map_err(|e| e.to_string())
+}
+
+fn encode_rgba_png(rgba: &[u8], width: u32, height: u32) -> Result<String, String> {
+    use image::ImageEncoder;
+
+    let mut png = Vec::new();
+    image::codecs::png::PngEncoder::new_with_quality(
+        &mut png,
+        image::codecs::png::CompressionType::Fast,
+        image::codecs::png::FilterType::NoFilter,
+    )
+    .write_image(rgba, width, height, image::ColorType::Rgba8.into())
+    .map_err(|e| format!("图片编码失败: {e}"))?;
+    Ok(base64::engine::general_purpose::STANDARD.encode(png))
+}
+
+#[tauri::command]
+pub async fn read_clipboard_image_base64() -> Result<String, String> {
+    tauri::async_runtime::spawn_blocking(|| {
+        let mut clipboard =
+            arboard::Clipboard::new().map_err(|e| format!("无法读取系统剪切板: {e:?}"))?;
+        let image = clipboard
+            .get_image()
+            .map_err(|e| format!("系统剪切板中没有可读取的图片: {e:?}"))?;
+        encode_rgba_png(
+            image.bytes.as_ref(),
+            image.width as u32,
+            image.height as u32,
+        )
+    })
+    .await
+    .map_err(|e| format!("读取剪切板图片任务失败: {e}"))?
+}
+
 fn make_text_event_content(record_type: &str, content: &str) -> (String, i64, bool) {
     let total_chars = content.chars().count();
     if record_type != "text" || total_chars <= TEXT_EVENT_PREVIEW_CHARS {
@@ -279,13 +542,7 @@ fn import_image_file(app: &AppHandle, file_path: &str) -> bool {
         }
     }
 
-    crate::paste::cache_image(
-        relative.clone(),
-        rgba.to_vec(),
-        img_w,
-        img_h,
-        png_bytes.clone(),
-    );
+    crate::paste::cache_image(relative.clone(), rgba.to_vec(), img_w, img_h);
 
     let mut thumb_dir = dir.clone();
     thumb_dir.push("thumbs");
@@ -413,6 +670,17 @@ fn capture_current_image_hash() -> u64 {
     0
 }
 
+pub fn sync_monitor_text(text: &str) {
+    *LAST_CLIPBOARD_TEXT.lock().unwrap() = text.trim().to_string();
+}
+
+pub fn sync_monitor_image(rgba: &[u8]) {
+    let hash = rgba.iter().step_by(64).fold(0u64, |acc, &byte| {
+        acc.wrapping_mul(31).wrapping_add(byte as u64)
+    });
+    *LAST_CLIPBOARD_IMAGE_HASH.lock().unwrap() = hash;
+}
+
 pub fn sync_monitor_cache(handle: &AppHandle) {
     // Text
     if let Ok(text) = handle.clipboard().read_text() {
@@ -482,7 +750,6 @@ pub fn start_monitor(app: &AppHandle) -> Result<(), Box<dyn std::error::Error>> 
             }
 
             if crate::paste::PASTING.load(std::sync::atomic::Ordering::SeqCst) {
-                sync_monitor_cache(&handle);
                 continue;
             }
 
@@ -551,13 +818,7 @@ pub fn start_monitor(app: &AppHandle) -> Result<(), Box<dyn std::error::Error>> 
                         content_hash_str
                     );
 
-                    crate::paste::cache_image(
-                        relative.clone(),
-                        rgba_vec,
-                        img_w,
-                        img_h,
-                        png_bytes.clone(),
-                    );
+                    crate::paste::cache_image(relative.clone(), rgba_vec, img_w, img_h);
 
                     // Generate thumbnail if missing
                     let mut thumb_dir = dir.clone();
@@ -648,7 +909,11 @@ pub fn start_monitor(app: &AppHandle) -> Result<(), Box<dyn std::error::Error>> 
 
 #[cfg(test)]
 mod tests {
-    use super::{clipboard_text_files, parse_file_uri};
+    use super::{
+        clipboard_text_files, encode_rgba_png, parse_file_uri, stash_content_for_display,
+        validate_stash_content,
+    };
+    use base64::Engine;
 
     #[test]
     fn parses_local_file_uri_with_original_filename() {
@@ -685,5 +950,32 @@ mod tests {
 
         std::fs::remove_file(&path).unwrap();
         assert_eq!(files, vec![path.to_string_lossy().into_owned()]);
+    }
+
+    #[test]
+    fn encodes_clipboard_rgba_as_png() {
+        let encoded = encode_rgba_png(&[255, 0, 0, 255], 1, 1).unwrap();
+        let png = base64::engine::general_purpose::STANDARD
+            .decode(encoded)
+            .unwrap();
+
+        assert_eq!(&png[..8], b"\x89PNG\r\n\x1a\n");
+    }
+
+    #[test]
+    fn validates_object_placeholders_and_preserves_visible_tokens() {
+        let content = "字面 [Image #1]\u{FFFC}结束";
+
+        validate_stash_content(content, 1).unwrap();
+        assert_eq!(
+            stash_content_for_display(content),
+            "字面 [Image #1][Image #1]结束"
+        );
+    }
+
+    #[test]
+    fn rejects_mismatched_or_out_of_order_stash_placeholders() {
+        assert!(validate_stash_content("\u{FFFC}", 2).is_err());
+        assert!(validate_stash_content("[Image #2][Image #1]", 2).is_err());
     }
 }

@@ -59,3 +59,38 @@ describe("clipboardStore deletion", () => {
     });
   });
 });
+
+describe("clipboardStore stash image paste routing", () => {
+  beforeEach(() => {
+    invokeMock.mockReset();
+    invokeMock.mockResolvedValue(undefined);
+  });
+
+  const stashRecord = {
+    id: "stash-1",
+    type: "text" as const,
+    content: "说明\n[Image #1]",
+    source_app: "",
+    created_at: "2026-08-04T00:00:00Z",
+    group_name: "暂存",
+    has_images: true,
+  };
+
+  it("routes normal paste through the ordered stash command", async () => {
+    await useClipboardStore.getState().pasteRecord(stashRecord);
+
+    expect(invokeMock).toHaveBeenCalledWith("paste_stash_record", {
+      id: "stash-1",
+      terminal: false,
+    });
+  });
+
+  it("keeps terminal mode for text segments in an ordered stash", async () => {
+    await useClipboardStore.getState().pasteRecordTerminal(stashRecord);
+
+    expect(invokeMock).toHaveBeenCalledWith("paste_stash_record", {
+      id: "stash-1",
+      terminal: true,
+    });
+  });
+});

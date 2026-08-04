@@ -5,6 +5,7 @@ import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { resolveDoubleEnterSave } from "../../utils/doubleEnterShortcut";
 import i18n from "../../i18n";
+import StashEditor, { type StashEditorHandle, type StashImage } from "./StashEditor";
 
 interface StashRecord {
   id: string;
@@ -12,11 +13,14 @@ interface StashRecord {
   content: string;
   content_truncated?: boolean;
   group_name?: string;
+  has_images?: boolean;
 }
 
 export default function ClipboardCreateDialog() {
   const { t } = useTranslation();
   const [content, setContent] = useState("");
+  const [images, setImages] = useState<StashImage[]>([]);
+  const [editorVersion, setEditorVersion] = useState(0);
   const [saving, setSaving] = useState(false);
   const [stashRecords, setStashRecords] = useState<StashRecord[]>([]);
   const [loadingRecords, setLoadingRecords] = useState(true);
@@ -24,8 +28,15 @@ export default function ClipboardCreateDialog() {
   const [editingId, setEditingId] = useState<string | null>(null);
   const [dropdownOpen, setDropdownOpen] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const textareaRef = useRef<HTMLTextAreaElement>(null);
+  const editorRef = useRef<StashEditorHandle>(null);
   const lastEnterAtRef = useRef(0);
+
+  const resetDraft = useCallback((nextContent = "", nextImages: StashImage[] = []) => {
+    setContent(nextContent);
+    setImages(nextImages);
+    setEditorVersion((version) => version + 1);
+    lastEnterAtRef.current = 0;
+  }, []);
 
   const loadStashRecords = useCallback(async (showLoading = false) => {
     if (showLoading) setLoadingRecords(true);
@@ -74,12 +85,12 @@ export default function ClipboardCreateDialog() {
     let unlistenShow: UnlistenFn | undefined;
     listen<{ theme: string }>("clipboard-create-show", (e) => {
       document.documentElement.setAttribute("data-theme", e.payload.theme);
-      setContent("");
+      resetDraft();
       setEditingId(null);
       setError(null);
       setDropdownOpen(false);
       loadStashRecords();
-      setTimeout(() => textareaRef.current?.focus(), 50);
+      setTimeout(() => editorRef.current?.focus(), 50);
     }).then((fn) => { unlistenShow = fn; });
 
     loadStashRecords(true);
@@ -89,7 +100,7 @@ export default function ClipboardCreateDialog() {
       if (unlistenLang) unlistenLang();
       if (unlistenShow) unlistenShow();
     };
-  }, [loadStashRecords]);
+  }, [loadStashRecords, resetDraft]);
 
   const hideWindow = useCallback(() => {
     getCurrentWindow().hide();
@@ -97,16 +108,16 @@ export default function ClipboardCreateDialog() {
 
   const handleSave = useCallback(async () => {
     const trimmed = content.trim();
-    if (!trimmed || saving) return;
+    if (!trimmed || saving || images.some((image) => image.pending)) return;
     setSaving(true);
     setError(null);
     try {
-      if (editingId) {
-        await invoke("update_clipboard_record", { id: editingId, content: trimmed });
-      } else {
-        await invoke("create_clipboard_record", { content: trimmed });
-      }
-      setContent("");
+      await invoke("save_stash_record", {
+        id: editingId,
+        content: trimmed,
+        images: images.map((image) => image.sourcePath || image.dataUrl),
+      });
+      resetDraft();
       setEditingId(null);
       hideWindow();
     } catch (e) {
@@ -115,7 +126,7 @@ export default function ClipboardCreateDialog() {
     } finally {
       setSaving(false);
     }
-  }, [content, editingId, saving, hideWindow, t]);
+  }, [content, editingId, images, saving, hideWindow, resetDraft, t]);
 
   const handleSelectRecord = useCallback(async (record: StashRecord) => {
     if (loadingRecordId) return;
@@ -123,28 +134,34 @@ export default function ClipboardCreateDialog() {
     setLoadingRecordId(record.id);
     setError(null);
     try {
-      const fullContent = record.content_truncated
-        ? await invoke<string>("get_clipboard_record_content", { id: record.id })
-        : record.content;
+      const [fullContent, imagePaths] = await Promise.all([
+        record.content_truncated || record.has_images
+          ? invoke<string>("get_clipboard_record_content", { id: record.id })
+          : Promise.resolve(record.content),
+        invoke<string[]>("get_stash_record_images", { id: record.id }),
+      ]);
+      const imageData = await Promise.all(imagePaths.map(async (path, index) => ({
+        id: `${record.id}-${index}`,
+        dataUrl: `data:image/png;base64,${await invoke<string>("get_image_base64", { path })}`,
+        sourcePath: path,
+      })));
       setEditingId(record.id);
-      setContent(fullContent);
-      lastEnterAtRef.current = 0;
-      setTimeout(() => textareaRef.current?.focus(), 0);
+      resetDraft(fullContent, imageData);
+      setTimeout(() => editorRef.current?.focus(), 0);
     } catch (e) {
       console.error("Failed to load clipboard record content:", e);
       setError(t("clipboard.loadStashContentError"));
     } finally {
       setLoadingRecordId(null);
     }
-  }, [loadingRecordId, t]);
+  }, [loadingRecordId, resetDraft, t]);
 
   const handleExitEdit = useCallback(() => {
     setEditingId(null);
-    setContent("");
+    resetDraft();
     setError(null);
-    lastEnterAtRef.current = 0;
-    setTimeout(() => textareaRef.current?.focus(), 0);
-  }, []);
+    setTimeout(() => editorRef.current?.focus(), 0);
+  }, [resetDraft]);
 
   const handleKeyDown = useCallback((e: React.KeyboardEvent) => {
     if (e.key === "Escape") {
@@ -163,7 +180,8 @@ export default function ClipboardCreateDialog() {
       handleSave();
       return;
     }
-    if (e.target !== textareaRef.current) {
+    const editor = document.querySelector(".clipboard-create-editor");
+    if (!(e.target instanceof Node) || !editor?.contains(e.target)) {
       lastEnterAtRef.current = 0;
       return;
     }
@@ -202,15 +220,22 @@ export default function ClipboardCreateDialog() {
           </svg>
         </button>
       </div>
-      <textarea
-        ref={textareaRef}
-        className="clipboard-create-textarea"
-        value={content}
-        onChange={(e) => setContent(e.target.value)}
-        onFocus={() => setDropdownOpen(false)}
-        placeholder={t("clipboard.createPlaceholder")}
-        autoFocus
-      />
+      <div onFocus={() => setDropdownOpen(false)} className="clipboard-create-editor-wrap">
+        <StashEditor
+          key={editorVersion}
+          ref={editorRef}
+          initialContent={content}
+          initialImages={images}
+          placeholder={t("clipboard.createPlaceholder")}
+          previewAlt={t("clipboard.stashImagePreview")}
+          closePreviewLabel={t("clipboard.closeImagePreview")}
+          onChange={(nextContent, nextImages) => {
+            setContent(nextContent);
+            setImages(nextImages);
+          }}
+          onImageError={() => setError(t("clipboard.readStashImageError"))}
+        />
+      </div>
       <div className="clipboard-create-stash-section">
         <div className="clipboard-create-stash-header">
           <span>{t("clipboard.existingStash")}</span>
@@ -272,7 +297,7 @@ export default function ClipboardCreateDialog() {
           <button
             className="dialog-btn save"
             onClick={handleSave}
-            disabled={!content.trim() || saving || loadingRecordId !== null}
+            disabled={!content.trim() || saving || loadingRecordId !== null || images.some((image) => image.pending)}
           >
             {saving
               ? t("common.saving")

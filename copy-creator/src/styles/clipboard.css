@@ -877,9 +877,14 @@
   color: var(--text-primary);
 }
 
-.clipboard-create-textarea {
+.clipboard-create-editor-wrap {
   flex: 1 1 auto;
   min-height: 130px;
+  position: relative;
+}
+
+.clipboard-create-editor {
+  height: 100%;
   width: 100%;
   border-radius: 10px;
   border: 1px solid var(--card-border);
@@ -889,7 +894,9 @@
   font-size: var(--text-base);
   padding: 12px 14px;
   outline: none;
-  resize: none;
+  overflow-y: auto;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
   line-height: 1.5;
   box-shadow: 0 0.5px 0 0 rgba(255,255,255,0.25) inset;
   transition: all 0.2s;
@@ -898,21 +905,100 @@
   app-region: no-drag;
 }
 
-.clipboard-create-textarea:focus {
+.clipboard-create-editor:empty::before {
+  content: attr(data-placeholder);
+  color: var(--text-secondary);
+  pointer-events: none;
+}
+
+.clipboard-create-editor:focus {
   border-color: rgba(0, 0, 0, 0.25);
   background: var(--input-focus-bg);
   box-shadow: 0 0.5px 0 0 rgba(255,255,255,0.25) inset;
 }
 
-[data-theme="dark"] .clipboard-create-textarea {
+[data-theme="dark"] .clipboard-create-editor {
   background: var(--input-bg);
   border-color: var(--card-border);
   box-shadow: 0 0.5px 0 0 rgba(255,255,255,0.03) inset;
 }
 
-[data-theme="dark"] .clipboard-create-textarea:focus {
+[data-theme="dark"] .clipboard-create-editor:focus {
   border-color: rgba(255, 255, 255, 0.4);
   box-shadow: 0 0.5px 0 0 rgba(255,255,255,0.03) inset;
+}
+
+.clipboard-create-image-marker {
+  display: inline-block;
+  margin: 0 2px;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--accent);
+  font: inherit;
+  font-weight: var(--weight-medium);
+  line-height: inherit;
+  cursor: pointer;
+  user-select: none;
+}
+
+.clipboard-create-image-marker[data-pending="true"] {
+  cursor: wait;
+  opacity: 0.7;
+}
+
+.clipboard-create-image-marker:hover,
+.clipboard-create-image-marker:focus-visible {
+  color: var(--text-primary);
+  text-decoration: underline;
+  outline: none;
+}
+
+.clipboard-create-image-preview {
+  position: fixed;
+  inset: 0;
+  z-index: 50;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 42px 24px 24px;
+  background: rgba(0, 0, 0, 0.72);
+  outline: none;
+}
+
+.clipboard-create-image-preview img {
+  display: block;
+  max-width: 100%;
+  max-height: 100%;
+  object-fit: contain;
+  border-radius: 8px;
+  box-shadow: 0 12px 36px rgba(0, 0, 0, 0.3);
+}
+
+.clipboard-create-preview-close {
+  position: absolute;
+  top: 12px;
+  right: 14px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 30px;
+  height: 30px;
+  padding: 0;
+  border: 0;
+  border-radius: 6px;
+  background: rgba(255, 255, 255, 0.14);
+  color: #fff;
+  font: inherit;
+  font-size: 22px;
+  cursor: pointer;
+}
+
+.clipboard-create-preview-close:hover,
+.clipboard-create-preview-close:focus-visible {
+  background: rgba(255, 255, 255, 0.24);
+  outline: 2px solid rgba(255, 255, 255, 0.8);
+  outline-offset: 2px;
 }
 
 .clipboard-create-stash-section {

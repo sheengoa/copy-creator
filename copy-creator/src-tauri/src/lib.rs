@@ -227,6 +227,9 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             db::get_clipboard_records,
             clipboard::create_clipboard_record,
+            clipboard::save_stash_record,
+            clipboard::get_stash_record_images,
+            clipboard::read_clipboard_image_base64,
             db::get_clipboard_record_content,
             db::update_clipboard_record,
             db::delete_clipboard_records,
@@ -256,6 +259,7 @@ pub fn run() {
             paste::paste_text,
             paste::paste_text_terminal,
             paste::paste_image,
+            paste::paste_stash_record,
             paste::paste_file,
             db::get_image_base64,
             db::get_image_thumbnail,

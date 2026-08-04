@@ -19,6 +19,7 @@ export interface ClipboardRecord {
   guessed_service?: string | null;
   label?: ApiKeyLabel | null;
   group_name?: string;
+  has_images?: boolean;
 }
 
 export interface PhraseGroup {

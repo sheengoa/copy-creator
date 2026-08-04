@@ -9,21 +9,26 @@ struct CachedImage {
     rgba: Arc<Vec<u8>>,
     width: u32,
     height: u32,
-    png_bytes: Arc<Vec<u8>>,
 }
 
 struct ImageCache {
     map: HashMap<String, CachedImage>,
     order: Vec<String>,
+    total_bytes: usize,
 }
 
 static IMAGE_CACHE: OnceLock<Mutex<ImageCache>> = OnceLock::new();
+const IMAGE_CACHE_MAX_ENTRIES: usize = 30;
+const IMAGE_CACHE_MAX_BYTES: usize = 128 * 1024 * 1024;
+pub(crate) const STASH_IMAGE_PLACEHOLDER: char = '\u{FFFC}';
+const STASH_SEGMENT_DELAY_MS: u64 = 180;
 
 fn get_image_cache() -> &'static Mutex<ImageCache> {
     IMAGE_CACHE.get_or_init(|| {
         Mutex::new(ImageCache {
             map: HashMap::new(),
             order: Vec::new(),
+            total_bytes: 0,
         })
     })
 }
@@ -36,26 +41,48 @@ impl Drop for PasteGuard {
     }
 }
 
-pub fn cache_image(path: String, rgba: Vec<u8>, width: u32, height: u32, png_bytes: Vec<u8>) {
+pub fn cache_image(path: String, rgba: Vec<u8>, width: u32, height: u32) {
+    let image_bytes = rgba.len();
+    if image_bytes > IMAGE_CACHE_MAX_BYTES {
+        return;
+    }
     let mut cache = get_image_cache().lock().unwrap();
-    // Evict oldest entries (deterministic insertion order)
-    if cache.map.len() >= 30 {
-        let evict_count = 15.min(cache.order.len());
-        let evicted: Vec<String> = cache.order.drain(..evict_count).collect();
-        for k in &evicted {
-            cache.map.remove(k);
+    if let Some(previous) = cache.map.remove(&path) {
+        cache.total_bytes = cache.total_bytes.saturating_sub(previous.rgba.len());
+        cache.order.retain(|item| item != &path);
+    }
+    while cache.map.len() >= IMAGE_CACHE_MAX_ENTRIES
+        || cache.total_bytes + image_bytes > IMAGE_CACHE_MAX_BYTES
+    {
+        if cache.order.is_empty() {
+            break;
+        }
+        let evicted = cache.order.remove(0);
+        if let Some(previous) = cache.map.remove(&evicted) {
+            cache.total_bytes = cache.total_bytes.saturating_sub(previous.rgba.len());
         }
     }
     cache.order.push(path.clone());
+    cache.total_bytes += image_bytes;
     cache.map.insert(
         path,
         CachedImage {
             rgba: Arc::new(rgba),
             width,
             height,
-            png_bytes: Arc::new(png_bytes),
         },
     );
+}
+
+pub(crate) fn remove_cached_images(paths: &[String]) {
+    let mut cache = get_image_cache().lock().unwrap();
+    for path in paths {
+        if let Some(previous) = cache.map.remove(path) {
+            cache.total_bytes = cache.total_bytes.saturating_sub(previous.rgba.len());
+        }
+    }
+    let remaining: std::collections::HashSet<String> = cache.map.keys().cloned().collect();
+    cache.order.retain(|path| remaining.contains(path));
 }
 
 use enigo::{Direction, Enigo, Key, Keyboard, Settings};
@@ -406,6 +433,100 @@ fn paste_with_defocus(app: &AppHandle, shortcut: PasteShortcut) -> Result<(), St
     Ok(())
 }
 
+#[derive(Debug, PartialEq, Eq)]
+enum StashSegment {
+    Text(String),
+    Image(String),
+}
+
+fn parse_stash_segments(content: &str, images: &[String]) -> Result<Vec<StashSegment>, String> {
+    if content.contains(STASH_IMAGE_PLACEHOLDER) {
+        let placeholder_count = content
+            .chars()
+            .filter(|character| *character == STASH_IMAGE_PLACEHOLDER)
+            .count();
+        if placeholder_count != images.len() {
+            return Err(format!(
+                "暂存内容中的图片位置数量为 {placeholder_count}，附件数量为 {}",
+                images.len()
+            ));
+        }
+        return parse_stash_segments_with_tokens(
+            content,
+            images,
+            std::iter::repeat(STASH_IMAGE_PLACEHOLDER.to_string()).take(images.len()),
+        );
+    }
+
+    parse_stash_segments_with_tokens(
+        content,
+        images,
+        (1..=images.len()).map(|index| format!("[Image #{index}]")),
+    )
+}
+
+fn parse_stash_segments_with_tokens(
+    content: &str,
+    images: &[String],
+    tokens: impl Iterator<Item = String>,
+) -> Result<Vec<StashSegment>, String> {
+    let mut segments = Vec::new();
+    let mut remaining = content;
+    for (path, token) in images.iter().zip(tokens) {
+        let position = remaining
+            .find(&token)
+            .ok_or_else(|| format!("暂存内容缺少图片占位符 {token}"))?;
+        let text = &remaining[..position];
+        if !text.is_empty() {
+            segments.push(StashSegment::Text(text.to_string()));
+        }
+        segments.push(StashSegment::Image(path.clone()));
+        remaining = &remaining[position + token.len()..];
+    }
+    if !remaining.is_empty() {
+        segments.push(StashSegment::Text(remaining.to_string()));
+    }
+    Ok(segments)
+}
+
+fn write_stored_image(app: &AppHandle, path: &str) -> Result<(), String> {
+    let (rgba, width, height) = {
+        let cache = get_image_cache().lock().unwrap();
+        if let Some(cached) = cache.map.get(path) {
+            (cached.rgba.clone(), cached.width, cached.height)
+        } else {
+            drop(cache);
+            let bytes = std::fs::read(crate::db::get_storage_dir(app).join(path))
+                .map_err(|e| format!("读取图片失败: {e}"))?;
+            let (rgba, width, height) = {
+                use image::ImageDecoder;
+                let decoder = image::codecs::png::PngDecoder::new(std::io::Cursor::new(&bytes))
+                    .map_err(|e| format!("解析图片失败: {e}"))?;
+                let dimensions = decoder.dimensions();
+                let mut buffer = vec![0; (dimensions.0 * dimensions.1 * 4) as usize];
+                decoder
+                    .read_image(&mut buffer)
+                    .map_err(|e| format!("读取图片像素失败: {e}"))?;
+                (buffer, dimensions.0, dimensions.1)
+            };
+            cache_image(path.to_string(), rgba.clone(), width, height);
+            (Arc::new(rgba), width, height)
+        }
+    };
+
+    let mut clipboard =
+        arboard::Clipboard::new().map_err(|e| format!("初始化图片剪切板失败: {e:?}"))?;
+    clipboard
+        .set_image(arboard::ImageData {
+            width: width as usize,
+            height: height as usize,
+            bytes: std::borrow::Cow::Borrowed(&rgba),
+        })
+        .map_err(|e| format!("写入图片剪切板失败: {e:?}"))?;
+    crate::clipboard::sync_monitor_image(&rgba);
+    Ok(())
+}
+
 // ── Tauri commands ──────────────────────────────────────────────
 
 #[tauri::command]
@@ -416,13 +537,12 @@ pub fn paste_text(app: AppHandle, text: String) -> Result<(), String> {
         return Ok(());
     }
 
-    if let Err(e) = app.clipboard().write_text(text) {
+    if let Err(e) = app.clipboard().write_text(text.clone()) {
         PASTING.store(false, Ordering::SeqCst);
         return Err(e.to_string());
     }
 
-    // Sync monitor cache so the clipboard poller doesn't re-record our own paste
-    crate::clipboard::sync_monitor_cache(&app);
+    crate::clipboard::sync_monitor_text(&text);
 
     let handle = app.clone();
     std::thread::spawn(move || {
@@ -441,12 +561,12 @@ pub fn paste_text_terminal(app: AppHandle, text: String) -> Result<(), String> {
         return Ok(());
     }
 
-    if let Err(e) = app.clipboard().write_text(text) {
+    if let Err(e) = app.clipboard().write_text(text.clone()) {
         PASTING.store(false, Ordering::SeqCst);
         return Err(e.to_string());
     }
 
-    crate::clipboard::sync_monitor_cache(&app);
+    crate::clipboard::sync_monitor_text(&text);
 
     let handle = app.clone();
     std::thread::spawn(move || {
@@ -467,80 +587,81 @@ pub fn paste_image(app: AppHandle, path: String) -> Result<(), String> {
     std::thread::spawn(move || {
         let _guard = PasteGuard;
 
-        let (rgba, w, h, _png) = {
-            let cache = get_image_cache().lock().unwrap();
-            if let Some(cached) = cache.map.get(&path) {
-                (
-                    cached.rgba.clone(),
-                    cached.width,
-                    cached.height,
-                    cached.png_bytes.clone(),
-                )
-            } else {
-                drop(cache);
-
-                let mut base_dir = crate::db::get_storage_dir(&handle);
-                base_dir.push(&path);
-
-                let bytes = match std::fs::read(&base_dir) {
-                    Ok(b) => b,
-                    Err(e) => {
-                        log::error!("paste_image: read error: {}", e);
-                        return;
-                    }
-                };
-
-                let png_arc = Arc::new(bytes.clone());
-
-                let (rgba, w, h) = {
-                    use image::ImageDecoder;
-                    let decoder =
-                        match image::codecs::png::PngDecoder::new(std::io::Cursor::new(&bytes)) {
-                            Ok(d) => d,
-                            Err(e) => {
-                                log::error!("paste_image: decode error: {}", e);
-                                return;
-                            }
-                        };
-                    let dims = decoder.dimensions();
-                    let mut buf = vec![0; (dims.0 * dims.1 * 4) as usize];
-                    if let Err(e) = decoder.read_image(&mut buf) {
-                        log::error!("paste_image: read pixels error: {}", e);
-                        return;
-                    }
-                    (buf, dims.0, dims.1)
-                };
-
-                cache_image(path.clone(), rgba.clone(), w, h, bytes);
-                (Arc::new(rgba), w, h, png_arc)
-            }
-        };
-
-        // arboard writes proper image/png format that Linux apps understand
-        let mut clipboard = match arboard::Clipboard::new() {
-            Ok(c) => c,
-            Err(e) => {
-                log::error!("paste_image: arboard init: {:?}", e);
-                return;
-            }
-        };
-        let img = arboard::ImageData {
-            width: w as usize,
-            height: h as usize,
-            bytes: std::borrow::Cow::Borrowed(&rgba),
-        };
-        if let Err(e) = clipboard.set_image(img) {
-            log::error!("paste_image: arboard set_image: {:?}", e);
+        if let Err(e) = write_stored_image(&handle, &path) {
+            log::error!("paste_image: {e}");
             return;
         }
 
-        crate::clipboard::sync_monitor_cache(&handle);
         // 图像粘贴总是用 Ctrl+V：CLI 工具（Claude Code/Codex）捕获 Ctrl+V 读取剪贴板图像，
         // 普通应用也用 Ctrl+V 粘贴图像。Ctrl+Shift+V 是终端文本粘贴，对图像无效。
         paste_with_defocus(&handle, PasteShortcut::CtrlV).ok();
     });
 
     Ok(())
+}
+
+#[tauri::command]
+pub async fn paste_stash_record(app: AppHandle, id: String, terminal: bool) -> Result<(), String> {
+    let (content, attachments) = {
+        let state = app.state::<crate::db::DbState>();
+        let conn = state.conn.lock().map_err(|e| e.to_string())?;
+        conn.query_row(
+            "SELECT content, attachments FROM clipboard_records WHERE id = ?1 AND group_name IN ('暂存', 'stash')",
+            rusqlite::params![id],
+            |row| Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?)),
+        )
+        .map_err(|e| e.to_string())?
+    };
+    let images = serde_json::from_str::<Vec<String>>(&attachments).map_err(|e| e.to_string())?;
+    let segments = parse_stash_segments(&content, &images)?;
+
+    if PASTING.swap(true, Ordering::SeqCst) {
+        return Err("已有粘贴任务正在进行".to_string());
+    }
+    let handle = app.clone();
+    tauri::async_runtime::spawn_blocking(move || -> Result<(), String> {
+        let _guard = PasteGuard;
+        if let Some(radial) = handle.get_webview_window("radial-menu") {
+            let _ = radial.hide();
+        }
+        if let Some(window) = handle.get_webview_window("main") {
+            if !window.is_always_on_top().unwrap_or(false) {
+                let _ = window.hide();
+            }
+        }
+        thread::sleep(Duration::from_millis(200));
+
+        let segment_count = segments.len();
+        for (index, segment) in segments.into_iter().enumerate() {
+            let result = match segment {
+                StashSegment::Text(text) => handle
+                    .clipboard()
+                    .write_text(text.clone())
+                    .map_err(|e| e.to_string())
+                    .map(|_| {
+                        crate::clipboard::sync_monitor_text(&text);
+                        inject_paste_with_shortcut(if terminal {
+                            PasteShortcut::CtrlShiftV
+                        } else {
+                            PasteShortcut::CtrlV
+                        });
+                    }),
+                StashSegment::Image(path) => write_stored_image(&handle, &path).map(|_| {
+                    inject_paste_with_shortcut(PasteShortcut::CtrlV);
+                }),
+            };
+            if let Err(e) = result {
+                log::error!("paste_stash_record: {e}");
+                return Err(e);
+            }
+            if index + 1 < segment_count {
+                thread::sleep(Duration::from_millis(STASH_SEGMENT_DELAY_MS));
+            }
+        }
+        Ok(())
+    })
+    .await
+    .map_err(|error| format!("图文粘贴任务失败: {error}"))?
 }
 
 #[tauri::command]
@@ -574,4 +695,62 @@ pub fn paste_file(app: AppHandle, path: String) -> Result<(), String> {
     });
 
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{parse_stash_segments, StashSegment, STASH_IMAGE_PLACEHOLDER};
+
+    #[test]
+    fn parses_text_and_images_in_document_order() {
+        let segments = parse_stash_segments(
+            "开始\n[Image #1]\n中间[Image #2]结束",
+            &["first.png".to_string(), "second.png".to_string()],
+        )
+        .unwrap();
+
+        assert_eq!(
+            segments,
+            vec![
+                StashSegment::Text("开始\n".to_string()),
+                StashSegment::Image("first.png".to_string()),
+                StashSegment::Text("\n中间".to_string()),
+                StashSegment::Image("second.png".to_string()),
+                StashSegment::Text("结束".to_string()),
+            ]
+        );
+    }
+
+    #[test]
+    fn rejects_missing_image_placeholder() {
+        let error = parse_stash_segments("只有文字", &["first.png".to_string()]).unwrap_err();
+
+        assert!(error.contains("[Image #1]"));
+    }
+
+    #[test]
+    fn parses_object_placeholders_without_consuming_visible_text() {
+        let content = format!("字面 [Image #1]{STASH_IMAGE_PLACEHOLDER}结束");
+        let segments = parse_stash_segments(&content, &["first.png".to_string()]).unwrap();
+
+        assert_eq!(
+            segments,
+            vec![
+                StashSegment::Text("字面 [Image #1]".to_string()),
+                StashSegment::Image("first.png".to_string()),
+                StashSegment::Text("结束".to_string()),
+            ]
+        );
+    }
+
+    #[test]
+    fn rejects_mismatched_object_placeholder_count() {
+        let error = parse_stash_segments(
+            "\u{FFFC}",
+            &["first.png".to_string(), "second.png".to_string()],
+        )
+        .unwrap_err();
+
+        assert!(error.contains("附件数量"));
+    }
 }
