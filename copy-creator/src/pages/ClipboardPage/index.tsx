@@ -61,7 +61,21 @@ export default function ClipboardPage() {
 
   const [hoverPreview, setHoverPreview] = useState<{ src: string; x: number; y: number } | null>(null);
   const hoverTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const categoriesScrollRef = useRef<HTMLDivElement>(null);
   const clipboardListRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    const el = categoriesScrollRef.current;
+    if (!el) return;
+    const onWheel = (e: WheelEvent) => {
+      if (Math.abs(e.deltaY) > Math.abs(e.deltaX)) {
+        e.preventDefault();
+        el.scrollLeft += e.deltaY;
+      }
+    };
+    el.addEventListener("wheel", onWheel, { passive: false });
+    return () => el.removeEventListener("wheel", onWheel);
+  }, []);
 
   const categories: { key: ClipType; label: string }[] = [
     { key: "all", label: t("clipboard.all") },
@@ -274,7 +288,7 @@ export default function ClipboardPage() {
       </div>
 
       <div className="clipboard-categories">
-        <div className="clipboard-categories-scroll">
+        <div className="clipboard-categories-scroll" ref={categoriesScrollRef}>
           {categories.map((c) => (
             <button
               key={c.key}

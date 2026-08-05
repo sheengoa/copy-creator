@@ -38,6 +38,7 @@ export default function BatchSelectionBar({
           disabled={totalCount === 0}
           onChange={onToggleAll}
         />
+        <span className="selection-checkbox" aria-hidden="true" />
         <span>{allSelected ? t("common.deselectAll") : t("common.selectAll")}</span>
       </label>
       <span className="batch-selection-count" aria-live="polite">

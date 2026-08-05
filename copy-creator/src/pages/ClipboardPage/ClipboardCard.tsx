@@ -297,14 +297,15 @@ function ClipboardCardInner({
     >
       <div className="notibar" />
       {selectionMode && (
-        <div className="card-selection-control" onClick={(e) => e.stopPropagation()}>
+        <label className="card-selection-control" onClick={(e) => e.stopPropagation()}>
           <input
             type="checkbox"
             checked={selected}
             aria-label={t("common.selectItem")}
             onChange={() => onToggleSelected(record.id)}
           />
-        </div>
+          <span className="selection-checkbox" aria-hidden="true" />
+        </label>
       )}
       <div className="noticontent">
         <div className="notititle clipboard-card-header">
