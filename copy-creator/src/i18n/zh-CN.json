@@ -164,6 +164,9 @@
     "unpinWindow": "取消固定"
   },
   "radialMenu": {
-    "empty": "暂无内容"
+    "empty": "暂无内容",
+    "previewTitle": "完整内容",
+    "previewImage": "暂存内容中的图片",
+    "imageUnavailable": "图片无法加载"
   }
 }

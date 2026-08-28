@@ -842,6 +842,8 @@
   border-radius: var(--window-radius);
   overflow: hidden;
   isolation: isolate;
+  clip-path: inset(0 round var(--window-radius));
+  position: relative;
 }
 
 .clipboard-create-header {
@@ -861,24 +863,27 @@
 }
 
 .clipboard-create-close-btn {
-  background: transparent;
-  border: none;
-  width: 24px;
-  height: 24px;
   display: flex;
   align-items: center;
   justify-content: center;
-  cursor: pointer;
-  color: var(--text-secondary);
+  width: 24px;
+  height: 24px;
+  padding: 0;
+  border: 0;
   border-radius: 6px;
-  transition: all 0.15s;
+  background: transparent;
+  color: var(--text-secondary);
+  cursor: pointer;
+  transition: background 0.15s, color 0.15s;
   -webkit-app-region: no-drag;
   app-region: no-drag;
 }
 
-.clipboard-create-close-btn:hover {
+.clipboard-create-close-btn:hover,
+.clipboard-create-close-btn:focus-visible {
   background: var(--chip-hover-bg);
   color: var(--text-primary);
+  outline: none;
 }
 
 .clipboard-create-editor-wrap {
@@ -907,6 +912,8 @@
   box-sizing: border-box;
   -webkit-app-region: no-drag;
   app-region: no-drag;
+  user-select: text;
+  -webkit-user-select: text;
 }
 
 .clipboard-create-editor:empty::before {
@@ -1194,4 +1201,77 @@
 
 .clipboard-create-actions .dialog-btn.save {
   min-width: 132px;
+}
+
+.clipboard-create-resize-handle {
+  position: absolute;
+  z-index: 40;
+  -webkit-app-region: no-drag;
+  app-region: no-drag;
+}
+
+.clipboard-create-resize-handle.north,
+.clipboard-create-resize-handle.south {
+  left: 14px;
+  right: 14px;
+  height: 10px;
+}
+
+.clipboard-create-resize-handle.north {
+  top: 0;
+  cursor: ns-resize;
+}
+
+.clipboard-create-resize-handle.south {
+  bottom: 0;
+  cursor: ns-resize;
+}
+
+.clipboard-create-resize-handle.west,
+.clipboard-create-resize-handle.east {
+  top: 14px;
+  bottom: 14px;
+  width: 10px;
+}
+
+.clipboard-create-resize-handle.west {
+  left: 0;
+  cursor: ew-resize;
+}
+
+.clipboard-create-resize-handle.east {
+  right: 0;
+  cursor: ew-resize;
+}
+
+.clipboard-create-resize-handle.north-west,
+.clipboard-create-resize-handle.north-east,
+.clipboard-create-resize-handle.south-west,
+.clipboard-create-resize-handle.south-east {
+  width: 14px;
+  height: 14px;
+}
+
+.clipboard-create-resize-handle.north-west {
+  top: 0;
+  left: 0;
+  cursor: nwse-resize;
+}
+
+.clipboard-create-resize-handle.north-east {
+  top: 0;
+  right: 0;
+  cursor: nesw-resize;
+}
+
+.clipboard-create-resize-handle.south-west {
+  bottom: 0;
+  left: 0;
+  cursor: nesw-resize;
+}
+
+.clipboard-create-resize-handle.south-east {
+  right: 0;
+  bottom: 0;
+  cursor: nwse-resize;
 }

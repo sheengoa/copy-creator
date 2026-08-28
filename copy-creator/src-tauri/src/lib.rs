@@ -174,7 +174,8 @@ pub fn run() {
                 .visible(false)
                 .shadow(false)
                 .skip_taskbar(true)
-                .resizable(false)
+                .resizable(true)
+                .min_inner_size(480.0, 380.0)
                 .build()?;
                 log::info!("Clipboard create popup window created");
             }

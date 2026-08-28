@@ -16,6 +16,19 @@ interface StashRecord {
   has_images?: boolean;
 }
 
+const CLIPBOARD_RESIZE_HANDLES = [
+  { className: "north", direction: "North" },
+  { className: "south", direction: "South" },
+  { className: "west", direction: "West" },
+  { className: "east", direction: "East" },
+  { className: "north-west", direction: "NorthWest" },
+  { className: "north-east", direction: "NorthEast" },
+  { className: "south-west", direction: "SouthWest" },
+  { className: "south-east", direction: "SouthEast" },
+] as const;
+
+type ClipboardResizeDirection = (typeof CLIPBOARD_RESIZE_HANDLES)[number]["direction"];
+
 export default function ClipboardCreateDialog() {
   const { t } = useTranslation();
   const [content, setContent] = useState("");
@@ -30,6 +43,7 @@ export default function ClipboardCreateDialog() {
   const [error, setError] = useState<string | null>(null);
   const editorRef = useRef<StashEditorHandle>(null);
   const lastEnterAtRef = useRef(0);
+  const resizeSaveTimerRef = useRef<number | null>(null);
 
   const resetDraft = useCallback((nextContent = "", nextImages: StashImage[] = []) => {
     setContent(nextContent);
@@ -84,6 +98,10 @@ export default function ClipboardCreateDialog() {
     // 监听后端 clipboard-create-show 事件（快捷键触发时）
     let unlistenShow: UnlistenFn | undefined;
     listen<{ theme: string }>("clipboard-create-show", (e) => {
+      if (resizeSaveTimerRef.current !== null) {
+        window.clearTimeout(resizeSaveTimerRef.current);
+        resizeSaveTimerRef.current = null;
+      }
       document.documentElement.setAttribute("data-theme", e.payload.theme);
       resetDraft();
       setEditingId(null);
@@ -102,8 +120,78 @@ export default function ClipboardCreateDialog() {
     };
   }, [loadStashRecords, resetDraft]);
 
+  useEffect(() => {
+    const appWindow = getCurrentWindow();
+    let cancelled = false;
+    let unlistenResize: UnlistenFn | undefined;
+    appWindow.onResized(({ payload }) => {
+      if (resizeSaveTimerRef.current !== null) {
+        window.clearTimeout(resizeSaveTimerRef.current);
+      }
+      resizeSaveTimerRef.current = window.setTimeout(async () => {
+        resizeSaveTimerRef.current = null;
+        try {
+          const scaleFactor = await appWindow.scaleFactor();
+          await invoke("set_settings_batch", {
+            settings: {
+              clipboard_create_width: String(Math.round(payload.width / scaleFactor)),
+              clipboard_create_height: String(Math.round(payload.height / scaleFactor)),
+            },
+          });
+        } catch (e) {
+          console.error("保存暂存窗口尺寸失败:", e);
+        }
+      }, 300);
+    }).then((unlisten) => {
+      if (cancelled) {
+        unlisten();
+      } else {
+        unlistenResize = unlisten;
+      }
+    });
+
+    return () => {
+      cancelled = true;
+      if (unlistenResize) unlistenResize();
+      if (resizeSaveTimerRef.current !== null) {
+        window.clearTimeout(resizeSaveTimerRef.current);
+      }
+    };
+  }, []);
+
+  useEffect(() => {
+    const appWindow = getCurrentWindow();
+    let cancelled = false;
+    let unlistenClose: UnlistenFn | undefined;
+    appWindow.onCloseRequested((event) => {
+      event.preventDefault();
+      void appWindow.hide();
+    }).then((unlisten) => {
+      if (cancelled) {
+        unlisten();
+      } else {
+        unlistenClose = unlisten;
+      }
+    });
+
+    return () => {
+      cancelled = true;
+      if (unlistenClose) unlistenClose();
+    };
+  }, []);
+
   const hideWindow = useCallback(() => {
     getCurrentWindow().hide();
+  }, []);
+
+  const handleResizeMouseDown = useCallback((event: React.MouseEvent<HTMLDivElement>) => {
+    const direction = event.currentTarget.dataset.resizeDirection as ClipboardResizeDirection | undefined;
+    if (!direction) return;
+    event.preventDefault();
+    event.stopPropagation();
+    void getCurrentWindow().startResizeDragging(direction).catch((resizeError) => {
+      console.error("启动暂存窗口缩放失败:", resizeError);
+    });
   }, []);
 
   const handleSave = useCallback(async () => {
@@ -213,8 +301,14 @@ export default function ClipboardCreateDialog() {
         <span className="clipboard-create-title">
           {editingId ? t("clipboard.editStash") : t("clipboard.create")}
         </span>
-        <button className="clipboard-create-close-btn" onClick={hideWindow} title={t("common.cancel")}>
-          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round">
+        <button
+          type="button"
+          className="clipboard-create-close-btn"
+          onClick={hideWindow}
+          title={t("common.cancel")}
+          aria-label={t("common.cancel")}
+        >
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" aria-hidden="true">
             <line x1="18" y1="6" x2="6" y2="18" />
             <line x1="6" y1="6" x2="18" y2="18" />
           </svg>
@@ -307,6 +401,15 @@ export default function ClipboardCreateDialog() {
           </button>
         </div>
       </div>
+      {CLIPBOARD_RESIZE_HANDLES.map(({ className, direction }) => (
+        <div
+          key={direction}
+          className={`clipboard-create-resize-handle ${className}`}
+          data-resize-direction={direction}
+          onMouseDown={handleResizeMouseDown}
+          aria-hidden="true"
+        />
+      ))}
     </div>
   );
 }

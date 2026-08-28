@@ -54,20 +54,39 @@ const createImageMarker = (image: StashImage, index: number) => {
 const createCaretAnchor = () => document.createTextNode(CARET_ANCHOR);
 
 const getEditorContent = (editor: HTMLDivElement) => {
-  const markers = Array.from(editor.querySelectorAll<HTMLElement>("[data-image-id]"));
-  const labels = markers.map((marker) => marker.textContent || "");
-  markers.forEach((marker) => { marker.textContent = IMAGE_PLACEHOLDER; });
-  const content = editor.innerText.replaceAll(CARET_ANCHOR, "");
-  markers.forEach((marker, index) => { marker.textContent = labels[index]; });
+  const clone = editor.cloneNode(true) as HTMLDivElement;
+  clone.querySelectorAll<HTMLElement>("[data-image-id]").forEach((marker, index) => {
+    marker.textContent = `[Image #${index + 1}]`;
+  });
+  clone.contentEditable = "false";
+  clone.setAttribute("aria-hidden", "true");
+  clone.style.position = "fixed";
+  clone.style.left = "-100000px";
+  clone.style.top = "0";
+  clone.style.width = `${editor.clientWidth}px`;
+  clone.style.height = "auto";
+  clone.style.opacity = "0";
+  clone.style.pointerEvents = "none";
+  document.body.append(clone);
+  const content = clone.innerText.replaceAll(CARET_ANCHOR, "");
+  clone.remove();
   return content;
 };
 
+const stripAdjacentCaretAnchor = (node: ChildNode | null, edge: "start" | "end") => {
+  if (!(node instanceof Text)) return;
+  const hasAnchor = edge === "start"
+    ? node.data.startsWith(CARET_ANCHOR)
+    : node.data.endsWith(CARET_ANCHOR);
+  if (!hasAnchor) return;
+  const offset = edge === "start" ? 0 : node.length - CARET_ANCHOR.length;
+  node.deleteData(offset, CARET_ANCHOR.length);
+  if (node.length === 0) node.remove();
+};
+
 const removeImageMarker = (marker: HTMLElement) => {
-  const anchor = marker.nextSibling;
-  if (anchor instanceof Text && anchor.data.startsWith(CARET_ANCHOR)) {
-    anchor.data = anchor.data.slice(CARET_ANCHOR.length);
-    if (anchor.length === 0) anchor.remove();
-  }
+  stripAdjacentCaretAnchor(marker.previousSibling, "end");
+  stripAdjacentCaretAnchor(marker.nextSibling, "start");
   marker.remove();
 };
 
@@ -83,9 +102,31 @@ const removeOrphanCaretAnchors = (editor: HTMLDivElement) => {
     if (!node.data.includes(CARET_ANCHOR)) return;
     const followsMarker = node.previousSibling instanceof HTMLElement
       && node.previousSibling.matches("[data-image-id]");
+    const precedesMarker = node.nextSibling instanceof HTMLElement
+      && node.nextSibling.matches("[data-image-id]");
     const text = node.data.replaceAll(CARET_ANCHOR, "");
-    node.data = followsMarker ? `${CARET_ANCHOR}${text}` : text;
+    const normalized = `${followsMarker ? CARET_ANCHOR : ""}${text}${precedesMarker ? CARET_ANCHOR : ""}`;
+    if (node.data !== normalized) {
+      for (let index = node.length - CARET_ANCHOR.length; index >= 0; index -= 1) {
+        if (node.data.startsWith(CARET_ANCHOR, index)) {
+          node.deleteData(index, CARET_ANCHOR.length);
+        }
+      }
+      if (followsMarker) node.insertData(0, CARET_ANCHOR);
+      if (precedesMarker) node.insertData(node.length, CARET_ANCHOR);
+    }
     if (node.length === 0) node.remove();
+  });
+
+  editor.querySelectorAll<HTMLElement>("[data-image-id]").forEach((marker) => {
+    const previous = marker.previousSibling;
+    if (!(previous instanceof Text) || !previous.data.endsWith(CARET_ANCHOR)) {
+      marker.before(createCaretAnchor());
+    }
+    const next = marker.nextSibling;
+    if (!(next instanceof Text) || !next.data.startsWith(CARET_ANCHOR)) {
+      marker.after(createCaretAnchor());
+    }
   });
 };
 
@@ -137,14 +178,6 @@ const placeCaretInAnchor = (editor: HTMLDivElement, anchor: Text) => {
   editor.focus();
   applySelection();
   requestAnimationFrame(applySelection);
-};
-
-const getLastContentRect = (editor: HTMLDivElement) => {
-  const range = document.createRange();
-  range.selectNodeContents(editor);
-  const rects = Array.from(range.getClientRects()).filter((rect) => rect.width > 0 || rect.height > 0);
-  if (rects.length > 0) return rects[rects.length - 1];
-  return editor.querySelector<HTMLElement>("[data-image-id]:last-of-type")?.getBoundingClientRect() || null;
 };
 
 const cloneImages = (images: StashImage[]) => images.map((image) => ({ ...image }));
@@ -235,13 +268,10 @@ const findAdjacentImageMarker = (range: Range, key: "Backspace" | "Delete") => {
   let candidate: ChildNode | null;
 
   if (container instanceof Text) {
-    const isAfterAnchor = key === "Backspace"
-      && container.data.startsWith(CARET_ANCHOR)
-      && range.startOffset === CARET_ANCHOR.length;
-    const atBoundary = key === "Backspace"
-      ? range.startOffset === 0 || isAfterAnchor
-      : range.startOffset === container.length;
-    if (!atBoundary) return null;
+    const anchorOnlySide = key === "Backspace"
+      ? container.data.slice(0, range.startOffset).replaceAll(CARET_ANCHOR, "").length === 0
+      : container.data.slice(range.startOffset).replaceAll(CARET_ANCHOR, "").length === 0;
+    if (!anchorOnlySide) return null;
     candidate = moveSibling(container);
   } else {
     candidate = key === "Backspace"
@@ -249,7 +279,10 @@ const findAdjacentImageMarker = (range: Range, key: "Backspace" | "Delete") => {
       : container.childNodes[range.startOffset] || null;
   }
 
-  while (candidate instanceof Text && candidate.length === 0) {
+  while (
+    candidate instanceof Text
+    && candidate.data.replaceAll(CARET_ANCHOR, "").length === 0
+  ) {
     candidate = moveSibling(candidate);
   }
   return candidate instanceof HTMLElement && candidate.matches("[data-image-id]")
@@ -307,12 +340,14 @@ const StashEditor = forwardRef<StashEditorHandle, Props>(function StashEditor({
         return;
       }
       editor.append(document.createTextNode(remaining.slice(0, position)));
+      editor.append(createCaretAnchor());
       editor.append(createImageMarker(image, index));
       editor.append(createCaretAnchor());
       remaining = remaining.slice(position + token.length);
     });
     editor.append(document.createTextNode(remaining));
     missingImages.forEach(({ image, index }) => {
+      editor.append(createCaretAnchor());
       editor.append(createImageMarker(image, index));
       editor.append(createCaretAnchor());
     });
@@ -444,15 +479,19 @@ const StashEditor = forwardRef<StashEditorHandle, Props>(function StashEditor({
     }));
     const nextImages = [...imagesRef.current, ...added];
     imagesRef.current = nextImages;
-    const anchors: Text[] = [];
+    const trailingAnchors: Text[] = [];
     const nodes = added.flatMap((image) => {
-      const anchor = createCaretAnchor();
-      anchors.push(anchor);
-      return [createImageMarker(image, nextImages.indexOf(image)), anchor];
+      const trailingAnchor = createCaretAnchor();
+      trailingAnchors.push(trailingAnchor);
+      return [
+        createCaretAnchor(),
+        createImageMarker(image, nextImages.indexOf(image)),
+        trailingAnchor,
+      ];
     });
     insertNodes(nodes, range);
     const editor = editorRef.current;
-    const lastAnchor = anchors[anchors.length - 1];
+    const lastAnchor = trailingAnchors[trailingAnchors.length - 1];
     if (editor && lastAnchor) {
       placeCaretInAnchor(editor, lastAnchor);
       syncEditor();
@@ -539,27 +578,24 @@ const StashEditor = forwardRef<StashEditorHandle, Props>(function StashEditor({
   const handleMouseDown = useCallback((event: React.MouseEvent<HTMLDivElement>) => {
     finishInputBatch();
     const marker = (event.target as HTMLElement).closest<HTMLElement>("[data-image-id]");
+    if (!marker) return;
+    const image = imagesRef.current.find((item) => item.id === marker.dataset.imageId);
+    if (!image?.dataUrl) return;
     const editor = editorRef.current;
-    if (marker) {
-      const image = imagesRef.current.find((item) => item.id === marker.dataset.imageId);
-      if (image?.dataUrl) {
-        event.preventDefault();
-        previewSelectionRef.current = editor ? captureEditorSelection(editor) : null;
-        setPreviewImage(image);
-      }
-      return;
-    }
+    previewSelectionRef.current = editor ? captureEditorSelection(editor) : null;
+  }, [finishInputBatch]);
 
-    if (!editor) return;
-    const lastRect = getLastContentRect(editor);
-    if (!lastRect) return;
-    const isOnLastLineAfterContent = event.clientY >= lastRect.top
-      && event.clientY <= lastRect.bottom
-      && event.clientX >= lastRect.right;
-    const isBelowContent = event.clientY > lastRect.bottom;
-    if (!isOnLastLineAfterContent && !isBelowContent) return;
-    event.preventDefault();
-    placeCaretAtEnd(editor);
+  const handleClick = useCallback((event: React.MouseEvent<HTMLDivElement>) => {
+    const marker = (event.target as HTMLElement).closest<HTMLElement>("[data-image-id]");
+    if (!marker) return;
+    finishInputBatch();
+    const editor = editorRef.current;
+    const image = imagesRef.current.find((item) => item.id === marker.dataset.imageId);
+    if (!image?.dataUrl) return;
+    if (event.detail === 0) {
+      previewSelectionRef.current = editor ? captureEditorSelection(editor) : null;
+    }
+    setPreviewImage(image);
   }, [finishInputBatch]);
 
   const handleKeyDown = useCallback((event: React.KeyboardEvent<HTMLDivElement>) => {
@@ -609,12 +645,12 @@ const StashEditor = forwardRef<StashEditorHandle, Props>(function StashEditor({
 
     event.preventDefault();
     finishInputBatch();
-    const offset = Array.prototype.indexOf.call(parent.childNodes, marker) as number;
+    const caretRange = document.createRange();
+    caretRange.setStartBefore(marker);
+    caretRange.collapse(true);
     removeImageMarker(marker);
-    range.setStart(parent, offset);
-    range.collapse(true);
     selection.removeAllRanges();
-    selection.addRange(range);
+    selection.addRange(caretRange);
     syncEditor();
   }, [finishInputBatch, restoreSnapshot, syncEditor]);
 
@@ -627,6 +663,8 @@ const StashEditor = forwardRef<StashEditorHandle, Props>(function StashEditor({
   }, [pushHistorySnapshot]);
 
   const handleInput = useCallback(() => {
+    const editor = editorRef.current;
+    if (editor) removeOrphanCaretAnchors(editor);
     syncEditor(false);
     if (inputBatchTimerRef.current !== null) {
       window.clearTimeout(inputBatchTimerRef.current);
@@ -648,6 +686,7 @@ const StashEditor = forwardRef<StashEditorHandle, Props>(function StashEditor({
         onInput={handleInput}
         onPaste={handlePaste}
         onMouseDown={handleMouseDown}
+        onClick={handleClick}
         onKeyDown={handleKeyDown}
       />
       {previewImage ? (

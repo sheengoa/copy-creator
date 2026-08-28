@@ -34,6 +34,8 @@ describe("standalone window chrome", () => {
     const dialogRule = getRule(readStyle("clipboard.css"), ".clipboard-create-dialog");
 
     expect(dialogRule).toContain("background: var(--panel-bg)");
+    expect(dialogRule).toContain("border-radius: var(--window-radius)");
+    expect(dialogRule).toContain("clip-path: inset(0 round var(--window-radius))");
   });
 
   it("uses wider clipboard create action buttons", () => {
@@ -64,15 +66,51 @@ describe("standalone window chrome", () => {
     expect(componentSource).toContain("<StashEditor");
   });
 
-  it("marks standalone clipboard create header as draggable", () => {
-    const css = readStyle("clipboard.css");
-    const componentSource = readSource("../components/ClipboardCreateDialog/index.tsx");
-    const headerRule = getRule(css, ".clipboard-create-header");
-    const closeButtonRule = getRule(css, ".clipboard-create-close-btn");
+  it("keeps native stash editor selection and two-sided image caret anchors", () => {
+    const editorRule = getRule(readStyle("clipboard.css"), ".clipboard-create-editor");
+    const componentSource = readSource("../components/ClipboardCreateDialog/StashEditor.tsx");
+    const mouseDownBlock = componentSource.slice(
+      componentSource.indexOf("const handleMouseDown"),
+      componentSource.indexOf("const handleClick"),
+    );
 
-    expect(componentSource).toContain('data-tauri-drag-region');
-    expect(headerRule).toContain("-webkit-app-region: drag");
-    expect(closeButtonRule).toContain("-webkit-app-region: no-drag");
+    expect(editorRule).toContain("user-select: text");
+    expect(editorRule).toContain("-webkit-user-select: text");
+    expect(mouseDownBlock).not.toContain("preventDefault");
+    expect(componentSource).not.toContain("getLastContentRect");
+    expect(componentSource).toContain("marker.before(createCaretAnchor())");
+    expect(componentSource).toContain("marker.after(createCaretAnchor())");
+    expect(componentSource).toContain("if (editor) removeOrphanCaretAnchors(editor)");
+    expect(componentSource).toContain("node.deleteData(index, CARET_ANCHOR.length)");
+    expect(componentSource).toContain("node.insertData(node.length, CARET_ANCHOR)");
+    expect(componentSource).toContain('marker.textContent = `[Image #${index + 1}]`;');
+    expect(componentSource).toContain('.replaceAll(CARET_ANCHOR, "")');
+  });
+
+  it("uses custom rounded chrome for the standalone clipboard window", () => {
+    const componentSource = readSource("../components/ClipboardCreateDialog/index.tsx");
+    const css = readStyle("clipboard.css");
+    const libSource = readSource("../../src-tauri/src/lib.rs");
+    const createWindowBlock = libSource.slice(
+      libSource.indexOf('"clipboard-create"'),
+      libSource.indexOf("Clipboard create popup window created"),
+    );
+
+    expect(createWindowBlock).toContain(".decorations(false)");
+    expect(createWindowBlock).toContain(".transparent(true)");
+    expect(createWindowBlock).toContain(".resizable(true)");
+    expect(createWindowBlock).toContain(".min_inner_size(480.0, 380.0)");
+    expect(componentSource).toContain('className="clipboard-create-header" data-tauri-drag-region');
+    expect(componentSource).toContain('className="clipboard-create-close-btn"');
+    expect(getRule(css, ".clipboard-create-header")).toContain("-webkit-app-region: drag");
+    expect(getRule(css, ".clipboard-create-close-btn")).toContain("-webkit-app-region: no-drag");
+    expect(componentSource).toContain("startResizeDragging");
+    expect(componentSource).toContain('data-resize-direction={direction}');
+    for (const direction of ["North", "South", "West", "East", "NorthWest", "NorthEast", "SouthWest", "SouthEast"]) {
+      expect(componentSource).toContain(`direction: "${direction}"`);
+    }
+    expect(css).toContain(".clipboard-create-resize-handle");
+    expect(componentSource).toContain("onCloseRequested");
   });
 
   it("does not auto-hide standalone clipboard create dialog on blur", () => {

@@ -165,6 +165,9 @@
     "unpinWindow": "Unpin Window"
   },
   "radialMenu": {
-    "empty": "No items"
+    "empty": "No items",
+    "previewTitle": "Full content",
+    "previewImage": "Image in stashed content",
+    "imageUnavailable": "Image unavailable"
   }
 }
