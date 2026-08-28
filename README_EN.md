@@ -10,12 +10,12 @@ English | [中文](./README.md)
 
 # Copy Creator
 
-**Desktop Productivity Tool for Linux**
+**Desktop Productivity Tool for Windows & Linux**
 
 Clipboard Manager · Quick Phrases · Translation
 
 ![License](https://img.shields.io/badge/license-MIT-blue.svg)
-![Platform](https://img.shields.io/badge/platform-Linux%20(Ubuntu%2024.04)-brightgreen.svg)
+![Platform](https://img.shields.io/badge/platform-Windows%2010%2B%20%7C%20Linux%20(Ubuntu%2024.04)-brightgreen.svg)
 ![Tauri](https://img.shields.io/badge/Tauri-2.x-ffc131.svg)
 ![React](https://img.shields.io/badge/React-19-61dafb.svg)
 
@@ -25,9 +25,9 @@ Clipboard Manager · Quick Phrases · Translation
 
 ## Overview
 
-Copy Creator is a lightweight Linux desktop productivity tool that appears as a floating window and minimizes to the system tray when closed. It integrates three core features: clipboard history management, quick phrases, and translation, helping users improve text processing efficiency in their daily work.
+Copy Creator is a lightweight cross-platform (Windows / Linux) desktop productivity tool that appears as a floating window and minimizes to the system tray when closed. It integrates three core features: clipboard history management, quick phrases, and translation, helping users improve text processing efficiency in their daily work.
 
-> **Acknowledgement**: This project is forked from [hu-qi-jia/copy-creator](https://github.com/hu-qi-jia/copy-creator). The original project was Windows-only. This repository is a complete Linux adaptation, including: removal of all Windows API calls, Wayland/X11 dual protocol support, Ubuntu native shortcut integration, clipboard compatibility fixes, and more. Thanks to the original author for the open-source contribution!
+> **Acknowledgement**: This project is forked from [hu-qi-jia/copy-creator](https://github.com/hu-qi-jia/copy-creator). The original project was Windows-only. This repository is a complete Linux adaptation (including Wayland/X11 dual protocol support, Ubuntu native shortcut integration, clipboard compatibility fixes, and more) with Windows build support restored, now available on both platforms. Thanks to the original author for the open-source contribution!
 
 ## Features
 
@@ -69,12 +69,16 @@ Copy Creator is a lightweight Linux desktop productivity tool that appears as a 
 
 ### System Requirements
 
-- Ubuntu 24.04 or compatible Linux distribution
-- Wayland (recommended) or X11 display server
+- Windows 10 or later, or Ubuntu 24.04 / compatible Linux distribution
+- Linux requires Wayland (recommended) or X11 display server
+
+### Windows Installation
+
+Download and run `Copy Creator_x64-setup.exe` (NSIS installer) or `Copy Creator_x64_zh-CN.msi` from the [Releases](https://github.com/sheengoa/copy-creator/releases) page. Global shortcuts are registered by the app automatically — no manual setup needed.
 
 ### Option 1: AppImage (Recommended)
 
-Go to the [Releases](https://github.com/hu-qi-jia/copy-creator/releases) page and download the latest `Copy Creator.AppImage`:
+Go to the [Releases](https://github.com/sheengoa/copy-creator/releases) page and download the latest `Copy Creator.AppImage`:
 
 ```bash
 chmod +x "Copy Creator.AppImage"
@@ -190,7 +194,7 @@ If you find this project helpful, feel free to give it a Star!
 
 ---
 
-Forked from [hu-qi-jia/copy-creator](https://github.com/hu-qi-jia/copy-creator) · Original Windows version · This repo is the Linux adaptation
+Forked from [hu-qi-jia/copy-creator](https://github.com/hu-qi-jia/copy-creator) · Original Windows version · This repo is a Linux adaptation with Windows & Linux support
 
 Thanks to [baihejiangnan](https://github.com/baihejiangnan) for the contribution!
 

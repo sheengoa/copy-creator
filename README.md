@@ -15,7 +15,7 @@
 剪切板管理 · 快捷短语 · 翻译
 
 ![License](https://img.shields.io/badge/license-MIT-blue.svg)
-![Platform](https://img.shields.io/badge/platform-Linux%20(Ubuntu%2024.04)-brightgreen.svg)
+![Platform](https://img.shields.io/badge/platform-Windows%2010%2B%20%7C%20Linux%20(Ubuntu%2024.04)-brightgreen.svg)
 ![Tauri](https://img.shields.io/badge/Tauri-2.x-ffc131.svg)
 ![React](https://img.shields.io/badge/React-19-61dafb.svg)
 
@@ -25,9 +25,9 @@
 
 ## 项目简介
 
-Copy Creator 是一款轻量级的 Linux 桌面效率工具，以悬浮窗形式呈现，关闭后自动驻留系统托盘。它集成了剪切板历史管理、快捷短语和翻译三大核心功能，帮助用户在日常工作中提升文本处理效率。
+Copy Creator 是一款轻量级的跨平台桌面效率工具（Windows / Linux），以悬浮窗形式呈现，关闭后自动驻留系统托盘。它集成了剪切板历史管理、快捷短语和翻译三大核心功能，帮助用户在日常工作中提升文本处理效率。
 
-> **致谢**：本项目 Fork 自 [hu-qi-jia/copy-creator](https://github.com/hu-qi-jia/copy-creator)。原项目为 Windows 平台版本，本仓库在其基础上进行了完整的 Linux 适配重写，包括但不限于：移除全部 Windows API 调用、Wayland/X11 双协议支持、Ubuntu 原生快捷键集成、剪切板兼容修复等。感谢原作者的开源贡献！
+> **致谢**：本项目 Fork 自 [hu-qi-jia/copy-creator](https://github.com/hu-qi-jia/copy-creator)。原项目为 Windows 平台版本，本仓库在其基础上完成了完整的 Linux 适配（包括 Wayland/X11 双协议支持、Ubuntu 原生快捷键集成、剪切板兼容修复等），并恢复 Windows 构建支持，现已双平台可用。感谢原作者的开源贡献！
 
 ## 主要功能
 
@@ -69,12 +69,16 @@ Copy Creator 是一款轻量级的 Linux 桌面效率工具，以悬浮窗形式
 
 ### 系统要求
 
-- Ubuntu 24.04 或兼容的 Linux 发行版
-- Wayland（推荐）或 X11 显示服务
+- Windows 10 及以上，或 Ubuntu 24.04 等兼容的 Linux 发行版
+- Linux 侧需要 Wayland（推荐）或 X11 显示服务
+
+### Windows 安装
+
+前往 [Releases](https://github.com/sheengoa/copy-creator/releases) 页面下载并运行 `Copy Creator_x64-setup.exe`（NSIS 安装包）或 `Copy Creator_x64_zh-CN.msi`。全局快捷键由应用内自动注册，无需手动配置。
 
 ### 方式一：AppImage（推荐）
 
-前往 [Releases](https://github.com/hu-qi-jia/copy-creator/releases) 页面下载最新 `Copy Creator.AppImage`：
+前往 [Releases](https://github.com/sheengoa/copy-creator/releases) 页面下载最新 `Copy Creator.AppImage`：
 
 ```bash
 chmod +x "Copy Creator.AppImage"
@@ -201,7 +205,7 @@ copy-creator/
 
 ---
 
-Forked from [hu-qi-jia/copy-creator](https://github.com/hu-qi-jia/copy-creator) · 原项目作者 Windows 版本 · 本仓库为 Linux 适配版
+Forked from [hu-qi-jia/copy-creator](https://github.com/hu-qi-jia/copy-creator) · 原项目作者 Windows 版本 · 本仓库已完成 Linux 适配并支持 Windows / Linux 双平台
 
 感谢 [baihejiangnan](https://github.com/baihejiangnan) 的贡献！
 
