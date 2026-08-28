@@ -1,6 +1,7 @@
 mod autostart;
 mod clipboard;
 mod db;
+#[cfg(target_os = "linux")]
 mod ipc;
 mod paste;
 mod shortcut;
@@ -127,13 +128,17 @@ pub fn run() {
 
             shortcut::init_radial_menu_state(app.handle());
 
-            // Start Unix-socket IPC so external scripts can control the app
-            // (used with Ubuntu Settings → Keyboard → Custom Shortcuts)
-            let ipc_socket = ipc::start_ipc_server(app.handle().clone());
-            log::info!(
-                "IPC socket ready — use: echo show | nc -U {}",
-                ipc_socket.display()
-            );
+            // Linux-only: Unix-socket IPC lets external scripts control the
+            // app (Ubuntu Settings → Keyboard → Custom Shortcuts). Windows
+            // relies on native global hotkeys instead.
+            #[cfg(target_os = "linux")]
+            {
+                let ipc_socket = ipc::start_ipc_server(app.handle().clone());
+                log::info!(
+                    "IPC socket ready — use: echo show | nc -U {}",
+                    ipc_socket.display()
+                );
+            }
 
             // Create hidden radial menu popup window
             {
