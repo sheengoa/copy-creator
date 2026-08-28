@@ -1,6 +1,9 @@
 use serde::{Deserialize, Serialize};
 use tauri::Manager;
 
+// 双平台通用 UA；伪装 Windows Chrome，避免 Google 按平台差异返回结果或拦截
+const TRANSLATE_USER_AGENT: &str = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36";
+
 #[derive(Debug, Serialize, Deserialize)]
 pub struct TranslateResponse {
     pub source_text: String,
@@ -216,7 +219,7 @@ async fn translate_google(
                 ("dt", "t"),
                 ("q", text),
             ])
-            .header("User-Agent", "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36")
+            .header("User-Agent", TRANSLATE_USER_AGENT)
             .send().await.map_err(|e| fmt_reqwest_error(&e))?;
 
         let status = resp.status();
@@ -248,7 +251,7 @@ async fn translate_google(
     let resp = client
         .post("https://translation.googleapis.com/language/translate/v2")
         .query(&[("key", api_key.as_str())])
-        .header("User-Agent", "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36")
+        .header("User-Agent", TRANSLATE_USER_AGENT)
         .json(&serde_json::json!({
             "q": text,
             "target": target_lang,
