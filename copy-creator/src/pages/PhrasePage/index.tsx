@@ -3,6 +3,9 @@ import { createPortal } from "react-dom";
 import { useTranslation } from "react-i18next";
 import { convertFileSrc } from "@tauri-apps/api/core";
 import { usePhraseStore, isImageFilePath } from "../../stores/phraseStore";
+import type { QuickInputFileSelection } from "../../stores/phraseStore";
+
+const filenameFromPath = (path: string) => path.replace(/\\/g, "/").split("/").pop() || path;
 import { useSettingsStore } from "../../stores/settingsStore";
 import SearchInput from "../../components/SearchInput";
 import { GroupChips } from "./GroupChips";
@@ -30,10 +33,6 @@ import { getChangedOrderIds, getDragPreviewOrder } from "../../utils/reorderPrev
 import BatchSelectionBar from "../../components/BatchSelectionBar";
 import { useMultiSelect } from "../../hooks/useMultiSelect";
 
-type PhraseInputType = "text" | "file";
-
-const filenameFromPath = (path: string) => path.replace(/\\/g, "/").split("/").pop() || path;
-
 export default function PhrasePage() {
   const { t } = useTranslation();
   const [groupDialogOpen, setGroupDialogOpen] = useState(false);
@@ -42,7 +41,8 @@ export default function PhrasePage() {
   const [groupName, setGroupName] = useState("");
   const [phraseRemark, setPhraseRemark] = useState("");
   const [phraseContent, setPhraseContent] = useState("");
-  const [phraseInputType, setPhraseInputType] = useState<PhraseInputType>("text");
+  /** 编辑中的短语是否为文件类型：未更换文件时保存只更新备注。 */
+  const [editingFilePhrase, setEditingFilePhrase] = useState(false);
   const [phraseFilePath, setPhraseFilePath] = useState("");
   const [phraseFileName, setPhraseFileName] = useState("");
   const [phraseFileSize, setPhraseFileSize] = useState(0);
@@ -80,6 +80,7 @@ export default function PhrasePage() {
     pastePhrase,
     pastePhraseTerminal,
     selectQuickInputFile,
+    getQuickInputFileInfo,
     getQuickInputFileLimit,
   } = usePhraseStore();
   const pasteLeftClick = useSettingsStore((s) => s.pasteLeftClick);
@@ -235,9 +236,9 @@ export default function PhrasePage() {
 
   const openNewPhrase = () => {
     setEditingId(null);
+    setEditingFilePhrase(false);
     setPhraseRemark("");
     setPhraseContent("");
-    setPhraseInputType("text");
     setPhraseFilePath("");
     setPhraseFileName("");
     setPhraseFileSize(0);
@@ -249,9 +250,9 @@ export default function PhrasePage() {
 
   const openEditPhrase = (p: Phrase) => {
     setEditingId(p.id);
+    setEditingFilePhrase(p.input_type === "file");
     setPhraseRemark(p.title);
-    setPhraseInputType(p.input_type);
-    setPhraseContent(p.input_type === "text" ? p.content : "");
+    setPhraseContent(p.input_type === "file" ? "" : p.content);
     setPhraseFilePath("");
     setPhraseFileName(p.input_type === "file" ? filenameFromPath(p.source_path || p.content) : "");
     setPhraseFileSize(p.input_type === "file" ? p.file_size : 0);
@@ -266,19 +267,23 @@ export default function PhrasePage() {
     setPhraseDialogOpen(true);
   };
 
-  const handleSelectPhraseFile = async () => {
+  const applyQuickInputFile = useCallback((file: QuickInputFileSelection) => {
+    const fileName = filenameFromPath(file.path);
+    setPhraseFilePath(file.path);
+    setPhraseFileName(fileName);
+    setPhraseFileSize(file.file_size);
+    setPhraseFilePreviewSrc(isImageFilePath(file.path) ? convertFileSrc(file.path) : null);
+    if (!phraseRemark.trim()) {
+      setPhraseRemark(fileName);
+    }
+  }, [phraseRemark]);
+
+  const handleImportFile = async () => {
     setPhraseError(false);
     setPhraseErrorMessage("");
     try {
       const file = await selectQuickInputFile();
-      const fileName = filenameFromPath(file.path);
-      setPhraseFilePath(file.path);
-      setPhraseFileName(fileName);
-      setPhraseFileSize(file.file_size);
-      setPhraseFilePreviewSrc(isImageFilePath(file.path) ? convertFileSrc(file.path) : null);
-      if (!phraseRemark.trim()) {
-        setPhraseRemark(fileName);
-      }
+      applyQuickInputFile(file);
     } catch (e) {
       const message = String(e);
       if (message !== "cancelled") {
@@ -288,32 +293,50 @@ export default function PhrasePage() {
     }
   };
 
-  const handleSavePhrase = async () => {
-    if (phraseInputType === "text" && !phraseContent.trim()) {
-      setPhraseError(true);
-      setPhraseErrorMessage(t("phrases.contentRequired"));
-      return;
-    }
-    if (phraseInputType === "file" && !phraseFilePath && !phraseFileName) {
-      setPhraseError(true);
-      setPhraseErrorMessage(t("phrases.fileRequired"));
-      return;
-    }
+  const handleDropFile = async (path: string) => {
     setPhraseError(false);
     setPhraseErrorMessage("");
     try {
-      if (phraseInputType === "text") {
-        if (editingId) {
-          await updatePhrase(editingId, phraseRemark.trim(), phraseContent.trim());
-        } else if (selectedGroupId) {
-          await createPhrase(selectedGroupId, phraseRemark.trim(), phraseContent.trim());
-        }
-      } else {
+      const file = await getQuickInputFileInfo(path);
+      applyQuickInputFile(file);
+    } catch (e) {
+      setPhraseError(true);
+      setPhraseErrorMessage(String(e));
+    }
+  };
+
+  const handleRemoveFile = () => {
+    setPhraseFilePath("");
+    setPhraseFileName("");
+    setPhraseFileSize(0);
+    setPhraseFilePreviewSrc(null);
+  };
+
+  const handleSavePhrase = async () => {
+    setPhraseError(false);
+    setPhraseErrorMessage("");
+    try {
+      if (phraseFilePath) {
+        // 拖入或导入了新文件：按文件短语保存
         const title = phraseRemark.trim() || phraseFileName;
         if (editingId) {
           await updateFilePhrase(editingId, phraseFilePath, title);
         } else if (selectedGroupId) {
           await createFilePhrase(selectedGroupId, phraseFilePath, title);
+        }
+      } else if (editingFilePhrase) {
+        // 编辑文件短语且未更换文件：仅更新备注
+        await updateFilePhrase(editingId!, "", phraseRemark.trim() || phraseFileName);
+      } else {
+        if (!phraseContent.trim()) {
+          setPhraseError(true);
+          setPhraseErrorMessage(t("phrases.contentRequired"));
+          return;
+        }
+        if (editingId) {
+          await updatePhrase(editingId, phraseRemark.trim(), phraseContent.trim());
+        } else if (selectedGroupId) {
+          await createPhrase(selectedGroupId, phraseRemark.trim(), phraseContent.trim());
         }
       }
       setPhraseDialogOpen(false);
@@ -451,16 +474,15 @@ export default function PhrasePage() {
       <PhraseDialog
         open={phraseDialogOpen}
         editingId={editingId}
+        editingFilePhrase={editingFilePhrase}
         phraseRemark={phraseRemark}
         phraseContent={phraseContent}
-        inputType={phraseInputType}
         selectedFileName={phraseFileName}
         selectedFileSize={phraseFileSize}
         selectedFilePreviewSrc={phraseFilePreviewSrc}
         fileLimitBytes={quickInputFileLimit}
         phraseError={phraseError}
         phraseErrorMessage={phraseErrorMessage}
-        setInputType={setPhraseInputType}
         setPhraseRemark={setPhraseRemark}
         setPhraseContent={(content) => {
           setPhraseContent(content);
@@ -469,7 +491,9 @@ export default function PhrasePage() {
             setPhraseErrorMessage("");
           }
         }}
-        onSelectFile={handleSelectPhraseFile}
+        onImportFile={handleImportFile}
+        onDropFile={handleDropFile}
+        onRemoveFile={handleRemoveFile}
         onSave={handleSavePhrase}
         onClose={() => setPhraseDialogOpen(false)}
       />

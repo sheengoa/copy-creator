@@ -45,6 +45,7 @@ interface PhraseState {
     content: string
   ) => Promise<void>;
   selectQuickInputFile: () => Promise<QuickInputFileSelection>;
+  getQuickInputFileInfo: (path: string) => Promise<QuickInputFileSelection>;
   getQuickInputFileLimit: () => Promise<number>;
   createFilePhrase: (
     groupId: string,
@@ -181,6 +182,10 @@ export const usePhraseStore = create<PhraseState>()((set, get) => {
 
   getQuickInputFileLimit: async () => {
     return invoke<number>("get_quick_input_file_limit");
+  },
+
+  getQuickInputFileInfo: async (path: string) => {
+    return invoke<QuickInputFileSelection>("get_quick_input_file_info", { path });
   },
 
   createFilePhrase: async (groupId: string, sourcePath: string, title: string) => {

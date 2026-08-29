@@ -290,57 +290,46 @@
   transform: scale(0.95);
 }
 
-.quick-input-type-tabs {
-  display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: 4px;
-  padding: 3px;
-  border-radius: 8px;
-  background: var(--input-bg);
-  border: 0.5px solid var(--separator);
-}
-
-.quick-input-type-btn {
-  border: none;
-  border-radius: 6px;
-  padding: 6px 10px;
-  background: transparent;
-  color: var(--text-secondary);
-  font-family: var(--font);
-  font-size: var(--text-sm);
-  cursor: pointer;
-}
-
-.quick-input-type-btn.active {
-  background: var(--card-bg);
-  color: var(--text-primary);
-  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.08);
-}
-
-.quick-input-file-box {
+/* 统一快捷输入框：文件信息行与拖拽高亮 */
+.quick-input-file-row {
   display: flex;
   align-items: center;
   gap: 10px;
   min-width: 0;
-  padding: 10px;
-  border: 0.5px solid var(--separator);
-  border-radius: 8px;
-  background: var(--input-bg);
 }
 
-.quick-input-file-box.error {
-  border-color: var(--danger, #ff3b30);
+.quick-input-file-row .quick-input-file-name {
+  flex: 1;
 }
 
 .quick-input-file-btn {
   flex-shrink: 0;
 }
 
-.quick-input-file-meta {
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-  min-width: 0;
+.quick-input-file-remove {
+  border: none;
+  background: transparent;
+  color: var(--text-secondary);
+  font-size: 16px;
+  line-height: 1;
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  cursor: pointer;
+  flex-shrink: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.quick-input-file-remove:hover {
+  background: var(--card-inner-bg);
+  color: var(--text-primary);
+}
+
+.dialog-textarea.is-dragover {
+  border-color: var(--primary, #0a84ff);
+  box-shadow: 0 0 0 2px rgba(10, 132, 255, 0.2);
 }
 
 .quick-input-file-name,

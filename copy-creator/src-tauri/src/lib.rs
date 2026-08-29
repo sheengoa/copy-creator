@@ -273,6 +273,7 @@ pub fn run() {
             db::delete_phrase,
             db::select_quick_input_file,
             db::get_quick_input_file_limit,
+            db::get_quick_input_file_info,
             db::get_translation_history,
             db::clear_translation_history,
             db::get_setting,

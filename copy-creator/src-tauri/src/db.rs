@@ -416,6 +416,26 @@ pub fn get_quick_input_file_limit() -> u64 {
     QUICK_INPUT_FILE_LIMIT_BYTES
 }
 
+/// 拖入文件的元信息校验：确认是文件且不超过快捷输入的大小上限，
+/// 让拖入与"选择文件"入口的行为一致。
+#[tauri::command]
+pub fn get_quick_input_file_info(path: String) -> Result<serde_json::Value, String> {
+    let meta = std::fs::metadata(PathBuf::from(&path)).map_err(|e| format!("读取文件失败: {e}"))?;
+    if !meta.is_file() {
+        return Err("请选择一个文件".to_string());
+    }
+    if meta.len() > QUICK_INPUT_FILE_LIMIT_BYTES {
+        return Err(format!(
+            "文件不能超过 {} MB",
+            QUICK_INPUT_FILE_LIMIT_BYTES / 1024 / 1024
+        ));
+    }
+    Ok(serde_json::json!({
+        "path": path,
+        "file_size": meta.len(),
+    }))
+}
+
 pub fn init_db(app: &AppHandle) -> Result<(), Box<dyn std::error::Error>> {
     let path = db_path(app);
     let conn = Connection::open(&path)?;
