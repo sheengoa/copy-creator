@@ -9,7 +9,7 @@ import {
 } from "@tauri-apps/api/window";
 import { invoke } from "@tauri-apps/api/core";
 import { useClipboardStore, type ClipType } from "../../stores/clipboardStore";
-import { usePhraseStore } from "../../stores/phraseStore";
+import { usePhraseStore, isImageFilePath } from "../../stores/phraseStore";
 import { useSettingsStore } from "../../stores/settingsStore";
 import { shouldUseTerminalPasteForMouseTrigger } from "../../utils/pasteMode";
 import {
@@ -31,6 +31,8 @@ interface RadialItem {
   id: string;
   content: string;
   type: string;
+  /** file 短语指向图像文件时为相对存储路径：条目显示缩略图，悬浮展开大图预览。 */
+  imagePath?: string;
   createdAt?: string;
   title?: string;
   contentTruncated?: boolean;
@@ -69,15 +71,7 @@ async function loadPasteLeftClickSetting() {
   }
 }
 
-function ImageThumb({
-  recordId,
-  onHover,
-  onLeave,
-}: {
-  recordId: string;
-  onHover: (src: string) => void;
-  onLeave: () => void;
-}) {
+function ImageThumb({ recordId }: { recordId: string }) {
   const [src, setSrc] = useState("");
   const { records, getThumbnail } = useClipboardStore();
 
@@ -97,8 +91,30 @@ function ImageThumb({
       src={src}
       alt=""
       style={{ width: 48, height: 36, objectFit: "cover", borderRadius: 5 }}
-      onMouseEnter={() => onHover(src)}
-      onMouseLeave={onLeave}
+    />
+  );
+}
+
+/** 图像文件短语的缩略图（content 为相对存储目录的路径），加载失败回退文件名。 */
+function FileThumb({ path }: { path: string }) {
+  const [src, setSrc] = useState("");
+
+  useEffect(() => {
+    let cancelled = false;
+    invoke<string>("get_image_thumbnail", { path, maxSize: 200 })
+      .then((base64) => {
+        if (!cancelled) setSrc(`data:image/png;base64,${base64}`);
+      })
+      .catch(() => {});
+    return () => { cancelled = true; };
+  }, [path]);
+
+  if (!src) return <span className="radial-menu-item-text">{filenameFromPath(path)}</span>;
+  return (
+    <img
+      src={src}
+      alt=""
+      style={{ width: 48, height: 36, objectFit: "cover", borderRadius: 5 }}
     />
   );
 }
@@ -147,7 +163,6 @@ export default function RadialMenu() {
   const [phraseGroupId, setPhraseGroupId] = useState<string | null>(null);
   const [pendingPreviewId, setPendingPreviewId] = useState<string | null>(null);
   const [preview, setPreview] = useState<PreviewState | null>(null);
-  const [imageHoverSrc, setImageHoverSrc] = useState<string | null>(null);
 
   const visibleRef = useRef(false);
   const selectedItemIdRef = useRef<string | null>(null);
@@ -159,7 +174,6 @@ export default function RadialMenu() {
   const previewRef = useRef<PreviewState | null>(null);
   const originalWindowPositionRef = useRef<PhysicalPosition | null>(null);
   const previewCacheRef = useRef(new Map<string, RadialPreviewSegment[]>());
-  const imageHoverTimerRef = useRef<number | null>(null);
 
   useEffect(() => { visibleRef.current = visible; }, [visible]);
   useEffect(() => { selectedItemIdRef.current = selectedItemId; }, [selectedItemId]);
@@ -175,27 +189,6 @@ export default function RadialMenu() {
     }
     setPendingPreviewId(null);
   }, []);
-
-  const clearImageHoverTimer = useCallback(() => {
-    if (imageHoverTimerRef.current !== null) {
-      window.clearTimeout(imageHoverTimerRef.current);
-      imageHoverTimerRef.current = null;
-    }
-  }, []);
-
-  // 图像条目悬浮展示大图，交互与剪切板页的 thumb-hover-overlay 一致。
-  const handleImageThumbHover = useCallback((src: string) => {
-    clearImageHoverTimer();
-    setImageHoverSrc(src);
-  }, [clearImageHoverTimer]);
-
-  const handleImageThumbLeave = useCallback(() => {
-    clearImageHoverTimer();
-    imageHoverTimerRef.current = window.setTimeout(() => {
-      imageHoverTimerRef.current = null;
-      setImageHoverSrc(null);
-    }, 150);
-  }, [clearImageHoverTimer]);
 
   const collapsePreview = useCallback(() => {
     clearPreviewTimer();
@@ -282,16 +275,24 @@ export default function RadialMenu() {
     const record = useClipboardStore.getState().records.find((entry) => entry.id === item.id);
     let segments: RadialPreviewSegment[];
     if (record) {
-      const [content, imagePaths] = await Promise.all([
-        useClipboardStore.getState().getRecordContent(record),
-        record.has_images
-          ? invoke<string[]>("get_stash_record_images", { id: record.id })
-          : Promise.resolve([]),
-      ]);
-      segments = buildRadialPreviewSegments(content, imagePaths);
+      if (record.type === "image") {
+        segments = [{ type: "image", path: record.content }];
+      } else {
+        const [content, imagePaths] = await Promise.all([
+          useClipboardStore.getState().getRecordContent(record),
+          record.has_images
+            ? invoke<string[]>("get_stash_record_images", { id: record.id })
+            : Promise.resolve([]),
+        ]);
+        segments = buildRadialPreviewSegments(content, imagePaths);
+      }
     } else {
       const phrase = usePhraseStore.getState().phrases.find((entry) => entry.id === item.id);
-      segments = [{ type: "text", content: phrase?.content ?? item.content }];
+      if (phrase && phrase.input_type === "file" && isImageFilePath(phrase.content)) {
+        segments = [{ type: "image", path: phrase.content }];
+      } else {
+        segments = [{ type: "text", content: phrase?.content ?? item.content }];
+      }
     }
     previewCacheRef.current.set(item.id, segments);
     return segments;
@@ -322,7 +323,19 @@ export default function RadialMenu() {
   const schedulePreview = useCallback((item: RadialItem, element: HTMLElement) => {
     clearPreviewTimer();
     if (previewRef.current) collapsePreview();
-    if (item.type === "image" || item.type === "file") return;
+
+    const isImageItem = item.type === "image" || Boolean(item.imagePath);
+    if (isImageItem) {
+      // 图像缩略图信息量不足，悬浮一律展开预览面板（同长文本的交互）。
+      setPendingPreviewId(item.id);
+      previewTimerRef.current = window.setTimeout(() => {
+        previewTimerRef.current = null;
+        setPendingPreviewId(null);
+        void showPreview(item);
+      }, PREVIEW_DELAY_MS);
+      return;
+    }
+    if (item.type === "file") return;
 
     const text = element.querySelector<HTMLElement>(".radial-menu-item-text");
     const isClipped = Boolean(
@@ -426,14 +439,12 @@ export default function RadialMenu() {
   }, [applyCategorySwitch]);
 
   const resetState = useCallback(() => {
-    clearImageHoverTimer();
-    setImageHoverSrc(null);
     collapsePreview();
     visibleRef.current = false;
     setVisible(false);
     setSelectedItemId(null);
     selectedItemIdRef.current = null;
-  }, [clearImageHoverTimer, collapsePreview]);
+  }, [collapsePreview]);
 
   const updateHoverFromPoint = useCallback((cssX: number, cssY: number) => {
     const el = document.elementFromPoint(cssX, cssY);
@@ -484,8 +495,6 @@ export default function RadialMenu() {
       // Listen for radial-menu-show event from backend (keyboard shortcut triggered)
       const unShow = await listen<{ theme: string }>("radial-menu-show", async (e) => {
         originalWindowPositionRef.current = null;
-        clearImageHoverTimer();
-        setImageHoverSrc(null);
         collapsePreview();
         previewCacheRef.current.clear();
         document.documentElement.setAttribute("data-theme", e.payload.theme);
@@ -573,7 +582,7 @@ export default function RadialMenu() {
       document.removeEventListener("wheel", handleWheel);
       window.removeEventListener("blur", handleBlur);
     };
-  }, [clearImageHoverTimer, collapsePreview, resetState, updateHoverFromPoint]);
+  }, [collapsePreview, resetState, updateHoverFromPoint]);
 
   const records = useClipboardStore((s) => s.records);
   const phraseGroups = usePhraseStore((s) => s.groups);
@@ -616,6 +625,8 @@ export default function RadialMenu() {
           ? filenameFromPath(p.source_path || p.content)
           : p.content,
         type: p.input_type === "file" ? "file" : "phrase",
+        imagePath:
+          p.input_type === "file" && isImageFilePath(p.content) ? p.content : undefined,
         title: p.title,
       }));
 
@@ -707,11 +718,9 @@ export default function RadialMenu() {
                   }}
                 >
                   {item.type === "image" ? (
-                    <ImageThumb
-                      recordId={item.id}
-                      onHover={handleImageThumbHover}
-                      onLeave={handleImageThumbLeave}
-                    />
+                    <ImageThumb recordId={item.id} />
+                  ) : item.imagePath ? (
+                    <FileThumb path={item.imagePath} />
                   ) : (
                     <span className="radial-menu-item-text">
                       {item.content.length > 300
@@ -753,12 +762,6 @@ export default function RadialMenu() {
               )}
             </div>
           </section>
-        )}
-
-        {imageHoverSrc && (
-          <div className="thumb-hover-overlay">
-            <img src={imageHoverSrc} alt="" />
-          </div>
         )}
       </div>
     </div>
