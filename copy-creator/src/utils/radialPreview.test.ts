@@ -12,7 +12,7 @@ describe("calculateRadialExpansion", () => {
       workAreaX: 0,
       workAreaWidth: 1920,
       scaleFactor: 1,
-    })).toEqual({ direction: "right", previewWidth: 360, windowX: 200 });
+    })).toEqual({ direction: "right", previewWidth: 400, windowX: 200 });
   });
 
   it("expands left and keeps the original menu position stable near the right edge", () => {
@@ -21,7 +21,7 @@ describe("calculateRadialExpansion", () => {
       workAreaX: 0,
       workAreaWidth: 1920,
       scaleFactor: 1,
-    })).toEqual({ direction: "left", previewWidth: 360, windowX: 1140 });
+    })).toEqual({ direction: "left", previewWidth: 400, windowX: 1100 });
   });
 
   it("uses the remaining space on a constrained work area", () => {

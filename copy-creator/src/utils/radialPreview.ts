@@ -1,6 +1,6 @@
 export const RADIAL_MENU_WIDTH = 300;
 export const RADIAL_MENU_HEIGHT = 420;
-export const RADIAL_PREVIEW_WIDTH = 360;
+export const RADIAL_PREVIEW_WIDTH = 400;
 export const RADIAL_PREVIEW_MIN_WIDTH = 260;
 export const STASH_IMAGE_PLACEHOLDER = "\uFFFC";
 

@@ -341,9 +341,8 @@
 
 .radial-menu-preview-image {
   display: block;
-  width: auto;
-  max-width: 100%;
-  max-height: 220px;
+  width: 100%;
+  max-height: 300px;
   margin: 10px 0;
   border-radius: 6px;
   object-fit: contain;

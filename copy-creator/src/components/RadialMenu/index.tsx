@@ -126,7 +126,7 @@ function PreviewImage({ path }: { path: string }) {
 
   useEffect(() => {
     let cancelled = false;
-    invoke<string>("get_image_thumbnail", { path, maxSize: 480 })
+    invoke<string>("get_image_thumbnail", { path, maxSize: 720 })
       .then((base64) => {
         if (!cancelled) setSrc(`data:image/png;base64,${base64}`);
       })
