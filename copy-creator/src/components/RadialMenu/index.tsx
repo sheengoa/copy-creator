@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState, useCallback, type CSSProperties } from "react";
 import { useTranslation } from "react-i18next";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
+import { convertFileSrc } from "@tauri-apps/api/core";
 import {
   getCurrentWindow,
   currentMonitor,
@@ -119,15 +120,16 @@ function FileThumb({ path }: { path: string }) {
   );
 }
 
-// 原图 data URL 的 MIME 按文件扩展名确定；剪切板图片统一转存为 PNG。
-const IMAGE_MIME_TYPES: Record<string, string> = {
-  png: "image/png",
-  jpg: "image/jpeg",
-  jpeg: "image/jpeg",
-  gif: "image/gif",
-  webp: "image/webp",
-  bmp: "image/bmp",
-};
+// 存储目录进程内只查询一次，供相对路径拼接为绝对路径。
+let storageDirPromise: Promise<string> | null = null;
+
+async function resolveAssetUrl(path: string) {
+  if (!storageDirPromise) {
+    storageDirPromise = invoke<string>("get_storage_path");
+  }
+  const storageDir = (await storageDirPromise).replace(/[\\/]+$/, "");
+  return convertFileSrc(`${storageDir}/${path.replace(/^[\\/]+/, "")}`);
+}
 
 function PreviewImage({ path }: { path: string }) {
   const { t } = useTranslation();
@@ -136,12 +138,11 @@ function PreviewImage({ path }: { path: string }) {
 
   useEffect(() => {
     let cancelled = false;
-    // 直接加载原图而非缩略图，保证"完整内容"预览的清晰度。
-    const ext = path.split(".").pop()?.toLowerCase() ?? "";
-    const mime = IMAGE_MIME_TYPES[ext] ?? "image/png";
-    invoke<string>("get_image_base64", { path })
-      .then((base64) => {
-        if (!cancelled) setSrc(`data:${mime};base64,${base64}`);
+    // 通过 asset 协议直接加载原图：webview 按磁盘路径读取，
+    // 无 base64/IPC 中转；同一图片的重复展开命中 webview 图片缓存。
+    resolveAssetUrl(path)
+      .then((url) => {
+        if (!cancelled) setSrc(url);
       })
       .catch(() => {
         if (!cancelled) setFailed(true);
@@ -162,6 +163,7 @@ function PreviewImage({ path }: { path: string }) {
       className="radial-menu-preview-image"
       src={src}
       alt={t("radialMenu.previewImage")}
+      onError={() => setFailed(true)}
     />
   );
 }
