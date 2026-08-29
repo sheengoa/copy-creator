@@ -405,7 +405,12 @@ fn write_file_list(path: &std::path::Path) -> Result<(), String> {
     Ok(())
 }
 
-fn paste_with_defocus(app: &AppHandle, shortcut: PasteShortcut) -> Result<(), String> {
+/// 窗口隐藏后的合成器沉降时间：等待焦点切回先前激活的窗口。
+/// 200 ms 在 GNOME/Wayland 与 X11 上均已实测足够。
+const DEFOCUS_SETTLE_MS: u64 = 200;
+
+/// 隐藏本应用窗口，让合成器把焦点交还给先前激活的窗口。
+fn defocus_windows(app: &AppHandle) -> Result<(), String> {
     // Hide radial popup if visible.  When pasting from the radial menu
     // itself the frontend has already issued a hide, so this is a fast
     // no-op in the common case — but it is a safety net for edge cases
@@ -421,12 +426,13 @@ fn paste_with_defocus(app: &AppHandle, shortcut: PasteShortcut) -> Result<(), St
         window.hide().map_err(|e| e.to_string())?;
     }
 
-    // Settle time for the compositor to defocus our window(s) and
-    // transfer focus to the previously-active window.  200 ms has been
-    // empirically sufficient on GNOME/Wayland and X11 alike now that
-    // the Wayland keystroke-injection and terminal-shortcut issues are
-    // fixed.
-    thread::sleep(Duration::from_millis(200));
+    Ok(())
+}
+
+fn paste_with_defocus(app: &AppHandle, shortcut: PasteShortcut) -> Result<(), String> {
+    defocus_windows(app)?;
+
+    thread::sleep(Duration::from_millis(DEFOCUS_SETTLE_MS));
 
     inject_paste_with_shortcut(shortcut);
 
@@ -598,14 +604,15 @@ pub fn paste_image(app: AppHandle, path: String) -> Result<(), String> {
 }
 
 /// 快捷输入的图像文件预设：读取绝对路径的图片文件，以位图形式写入剪切板后
-/// 模拟 Ctrl+V。读文件与解码在前台同步完成，失败可直接返回给前端。
-/// 与 paste_file（文件引用 uri-list）不同，聊天框/编辑器能直接收到图像内容。
+/// 模拟 Ctrl+V。与 paste_file（文件引用 uri-list）不同，聊天框/编辑器能直接
+/// 收到图像内容。解码结果按路径缓存，重复粘贴无需再次解码。
 #[tauri::command]
 pub fn paste_image_file(app: AppHandle, path: String) -> Result<(), String> {
     if PASTING.swap(true, Ordering::SeqCst) {
         return Ok(());
     }
 
+    // 同步读文件：失败立刻反馈给前端，且此时窗口尚未隐藏。
     let bytes = match std::fs::read(&path) {
         Ok(bytes) => bytes,
         Err(e) => {
@@ -614,38 +621,65 @@ pub fn paste_image_file(app: AppHandle, path: String) -> Result<(), String> {
             return Err(format!("读取图片文件失败: {e}"));
         }
     };
-    let (rgba, width, height) = match decode_image_bytes(&bytes) {
-        Ok(result) => result,
-        Err(e) => {
-            PASTING.store(false, Ordering::SeqCst);
-            log::error!("paste_image_file: {path}: {e}");
-            return Err(e);
-        }
-    };
 
     let handle = app.clone();
     std::thread::spawn(move || {
         let _guard = PasteGuard;
 
-        let mut clipboard = match arboard::Clipboard::new() {
-            Ok(clipboard) => clipboard,
-            Err(e) => {
-                log::error!("paste_image_file: 初始化图片剪切板失败: {e:?}");
-                return;
-            }
-        };
-        if let Err(e) = clipboard.set_image(arboard::ImageData {
-            width: width as usize,
-            height: height as usize,
-            bytes: std::borrow::Cow::Owned(rgba.clone()),
-        }) {
-            log::error!("paste_image_file: 写入图片剪切板失败: {e:?}");
+        // 解码 + 写剪贴板与窗口失焦并行执行：解码是大头（RGBA 转换），
+        // 让它与合成器沉降窗口一起跑，总耗时从串行叠加变为两者取大。
+        let decode_thread = std::thread::spawn(move || -> Result<(), String> {
+            let (rgba, width, height) = {
+                let cache = get_image_cache().lock().unwrap();
+                if let Some(cached) = cache.map.get(&path) {
+                    (cached.rgba.clone(), cached.width, cached.height)
+                } else {
+                    drop(cache);
+                    let (rgba, width, height) = decode_image_bytes(&bytes)?;
+                    let rgba = Arc::new(rgba);
+                    cache_image(path.clone(), (*rgba).clone(), width, height);
+                    (rgba, width, height)
+                }
+            };
+
+            let mut clipboard = arboard::Clipboard::new()
+                .map_err(|e| format!("初始化图片剪切板失败: {e:?}"))?;
+            clipboard
+                .set_image(arboard::ImageData {
+                    width: width as usize,
+                    height: height as usize,
+                    bytes: std::borrow::Cow::Borrowed(&rgba),
+                })
+                .map_err(|e| format!("写入图片剪切板失败: {e:?}"))?;
+            crate::clipboard::sync_monitor_image(&rgba);
+            Ok(())
+        });
+
+        let defocus_start = std::time::Instant::now();
+        if let Err(e) = defocus_windows(&handle) {
+            log::error!("paste_image_file: {e}");
             return;
         }
-        crate::clipboard::sync_monitor_image(&rgba);
+        match decode_thread.join() {
+            Ok(Ok(())) => {}
+            Ok(Err(e)) => {
+                log::error!("paste_image_file: {e}");
+                return;
+            }
+            Err(join_error) => {
+                log::error!("paste_image_file: 解码线程崩溃: {join_error:?}");
+                return;
+            }
+        }
+
+        // 与 paste_with_defocus 相同的沉降时间，减去与解码并行的部分。
+        let elapsed = defocus_start.elapsed().as_millis() as u64;
+        if elapsed < DEFOCUS_SETTLE_MS {
+            thread::sleep(Duration::from_millis(DEFOCUS_SETTLE_MS - elapsed));
+        }
 
         // 图像粘贴总是用 Ctrl+V，同 paste_image。
-        paste_with_defocus(&handle, PasteShortcut::CtrlV).ok();
+        inject_paste_with_shortcut(PasteShortcut::CtrlV);
     });
 
     Ok(())
