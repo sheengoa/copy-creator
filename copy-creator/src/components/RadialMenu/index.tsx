@@ -69,7 +69,15 @@ async function loadPasteLeftClickSetting() {
   }
 }
 
-function ImageThumb({ recordId }: { recordId: string }) {
+function ImageThumb({
+  recordId,
+  onHover,
+  onLeave,
+}: {
+  recordId: string;
+  onHover: (src: string) => void;
+  onLeave: () => void;
+}) {
   const [src, setSrc] = useState("");
   const { records, getThumbnail } = useClipboardStore();
 
@@ -89,6 +97,8 @@ function ImageThumb({ recordId }: { recordId: string }) {
       src={src}
       alt=""
       style={{ width: 48, height: 36, objectFit: "cover", borderRadius: 5 }}
+      onMouseEnter={() => onHover(src)}
+      onMouseLeave={onLeave}
     />
   );
 }
@@ -137,6 +147,7 @@ export default function RadialMenu() {
   const [phraseGroupId, setPhraseGroupId] = useState<string | null>(null);
   const [pendingPreviewId, setPendingPreviewId] = useState<string | null>(null);
   const [preview, setPreview] = useState<PreviewState | null>(null);
+  const [imageHoverSrc, setImageHoverSrc] = useState<string | null>(null);
 
   const visibleRef = useRef(false);
   const selectedItemIdRef = useRef<string | null>(null);
@@ -148,6 +159,7 @@ export default function RadialMenu() {
   const previewRef = useRef<PreviewState | null>(null);
   const originalWindowPositionRef = useRef<PhysicalPosition | null>(null);
   const previewCacheRef = useRef(new Map<string, RadialPreviewSegment[]>());
+  const imageHoverTimerRef = useRef<number | null>(null);
 
   useEffect(() => { visibleRef.current = visible; }, [visible]);
   useEffect(() => { selectedItemIdRef.current = selectedItemId; }, [selectedItemId]);
@@ -163,6 +175,27 @@ export default function RadialMenu() {
     }
     setPendingPreviewId(null);
   }, []);
+
+  const clearImageHoverTimer = useCallback(() => {
+    if (imageHoverTimerRef.current !== null) {
+      window.clearTimeout(imageHoverTimerRef.current);
+      imageHoverTimerRef.current = null;
+    }
+  }, []);
+
+  // 图像条目悬浮展示大图，交互与剪切板页的 thumb-hover-overlay 一致。
+  const handleImageThumbHover = useCallback((src: string) => {
+    clearImageHoverTimer();
+    setImageHoverSrc(src);
+  }, [clearImageHoverTimer]);
+
+  const handleImageThumbLeave = useCallback(() => {
+    clearImageHoverTimer();
+    imageHoverTimerRef.current = window.setTimeout(() => {
+      imageHoverTimerRef.current = null;
+      setImageHoverSrc(null);
+    }, 150);
+  }, [clearImageHoverTimer]);
 
   const collapsePreview = useCallback(() => {
     clearPreviewTimer();
@@ -393,12 +426,14 @@ export default function RadialMenu() {
   }, [applyCategorySwitch]);
 
   const resetState = useCallback(() => {
+    clearImageHoverTimer();
+    setImageHoverSrc(null);
     collapsePreview();
     visibleRef.current = false;
     setVisible(false);
     setSelectedItemId(null);
     selectedItemIdRef.current = null;
-  }, [collapsePreview]);
+  }, [clearImageHoverTimer, collapsePreview]);
 
   const updateHoverFromPoint = useCallback((cssX: number, cssY: number) => {
     const el = document.elementFromPoint(cssX, cssY);
@@ -449,6 +484,8 @@ export default function RadialMenu() {
       // Listen for radial-menu-show event from backend (keyboard shortcut triggered)
       const unShow = await listen<{ theme: string }>("radial-menu-show", async (e) => {
         originalWindowPositionRef.current = null;
+        clearImageHoverTimer();
+        setImageHoverSrc(null);
         collapsePreview();
         previewCacheRef.current.clear();
         document.documentElement.setAttribute("data-theme", e.payload.theme);
@@ -536,7 +573,7 @@ export default function RadialMenu() {
       document.removeEventListener("wheel", handleWheel);
       window.removeEventListener("blur", handleBlur);
     };
-  }, [collapsePreview, resetState, updateHoverFromPoint]);
+  }, [clearImageHoverTimer, collapsePreview, resetState, updateHoverFromPoint]);
 
   const records = useClipboardStore((s) => s.records);
   const phraseGroups = usePhraseStore((s) => s.groups);
@@ -670,7 +707,11 @@ export default function RadialMenu() {
                   }}
                 >
                   {item.type === "image" ? (
-                    <ImageThumb recordId={item.id} />
+                    <ImageThumb
+                      recordId={item.id}
+                      onHover={handleImageThumbHover}
+                      onLeave={handleImageThumbLeave}
+                    />
                   ) : (
                     <span className="radial-menu-item-text">
                       {item.content.length > 300
@@ -712,6 +753,12 @@ export default function RadialMenu() {
               )}
             </div>
           </section>
+        )}
+
+        {imageHoverSrc && (
+          <div className="thumb-hover-overlay">
+            <img src={imageHoverSrc} alt="" />
+          </div>
         )}
       </div>
     </div>
