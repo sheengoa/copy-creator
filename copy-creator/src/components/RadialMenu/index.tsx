@@ -119,6 +119,16 @@ function FileThumb({ path }: { path: string }) {
   );
 }
 
+// 原图 data URL 的 MIME 按文件扩展名确定；剪切板图片统一转存为 PNG。
+const IMAGE_MIME_TYPES: Record<string, string> = {
+  png: "image/png",
+  jpg: "image/jpeg",
+  jpeg: "image/jpeg",
+  gif: "image/gif",
+  webp: "image/webp",
+  bmp: "image/bmp",
+};
+
 function PreviewImage({ path }: { path: string }) {
   const { t } = useTranslation();
   const [src, setSrc] = useState("");
@@ -126,9 +136,12 @@ function PreviewImage({ path }: { path: string }) {
 
   useEffect(() => {
     let cancelled = false;
-    invoke<string>("get_image_thumbnail", { path, maxSize: 720 })
+    // 直接加载原图而非缩略图，保证"完整内容"预览的清晰度。
+    const ext = path.split(".").pop()?.toLowerCase() ?? "";
+    const mime = IMAGE_MIME_TYPES[ext] ?? "image/png";
+    invoke<string>("get_image_base64", { path })
       .then((base64) => {
-        if (!cancelled) setSrc(`data:image/png;base64,${base64}`);
+        if (!cancelled) setSrc(`data:${mime};base64,${base64}`);
       })
       .catch(() => {
         if (!cancelled) setFailed(true);
