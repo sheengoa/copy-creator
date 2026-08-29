@@ -283,6 +283,7 @@ pub fn run() {
             paste::paste_text,
             paste::paste_text_terminal,
             paste::paste_image,
+            paste::paste_image_file,
             paste::paste_stash_record,
             paste::paste_file,
             db::get_image_base64,

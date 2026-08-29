@@ -489,6 +489,13 @@ fn parse_stash_segments_with_tokens(
     Ok(segments)
 }
 
+/// 解码任意常见格式（PNG/JPEG/WebP/GIF/BMP）的图片字节为 RGBA 像素。
+fn decode_image_bytes(bytes: &[u8]) -> Result<(Vec<u8>, u32, u32), String> {
+    let img = image::load_from_memory(bytes).map_err(|e| format!("解析图片失败: {e}"))?;
+    let (width, height) = (img.width(), img.height());
+    Ok((img.to_rgba8().into_raw(), width, height))
+}
+
 fn write_stored_image(app: &AppHandle, path: &str) -> Result<(), String> {
     let (rgba, width, height) = {
         let cache = get_image_cache().lock().unwrap();
@@ -498,17 +505,7 @@ fn write_stored_image(app: &AppHandle, path: &str) -> Result<(), String> {
             drop(cache);
             let bytes = std::fs::read(crate::db::get_storage_dir(app).join(path))
                 .map_err(|e| format!("读取图片失败: {e}"))?;
-            let (rgba, width, height) = {
-                use image::ImageDecoder;
-                let decoder = image::codecs::png::PngDecoder::new(std::io::Cursor::new(&bytes))
-                    .map_err(|e| format!("解析图片失败: {e}"))?;
-                let dimensions = decoder.dimensions();
-                let mut buffer = vec![0; (dimensions.0 * dimensions.1 * 4) as usize];
-                decoder
-                    .read_image(&mut buffer)
-                    .map_err(|e| format!("读取图片像素失败: {e}"))?;
-                (buffer, dimensions.0, dimensions.1)
-            };
+            let (rgba, width, height) = decode_image_bytes(&bytes)?;
             cache_image(path.to_string(), rgba.clone(), width, height);
             (Arc::new(rgba), width, height)
         }
@@ -594,6 +591,60 @@ pub fn paste_image(app: AppHandle, path: String) -> Result<(), String> {
 
         // 图像粘贴总是用 Ctrl+V：CLI 工具（Claude Code/Codex）捕获 Ctrl+V 读取剪贴板图像，
         // 普通应用也用 Ctrl+V 粘贴图像。Ctrl+Shift+V 是终端文本粘贴，对图像无效。
+        paste_with_defocus(&handle, PasteShortcut::CtrlV).ok();
+    });
+
+    Ok(())
+}
+
+/// 快捷输入的图像文件预设：读取绝对路径的图片文件，以位图形式写入剪切板后
+/// 模拟 Ctrl+V。读文件与解码在前台同步完成，失败可直接返回给前端。
+/// 与 paste_file（文件引用 uri-list）不同，聊天框/编辑器能直接收到图像内容。
+#[tauri::command]
+pub fn paste_image_file(app: AppHandle, path: String) -> Result<(), String> {
+    if PASTING.swap(true, Ordering::SeqCst) {
+        return Ok(());
+    }
+
+    let bytes = match std::fs::read(&path) {
+        Ok(bytes) => bytes,
+        Err(e) => {
+            PASTING.store(false, Ordering::SeqCst);
+            log::error!("paste_image_file: 读取文件失败 {path}: {e}");
+            return Err(format!("读取图片文件失败: {e}"));
+        }
+    };
+    let (rgba, width, height) = match decode_image_bytes(&bytes) {
+        Ok(result) => result,
+        Err(e) => {
+            PASTING.store(false, Ordering::SeqCst);
+            log::error!("paste_image_file: {path}: {e}");
+            return Err(e);
+        }
+    };
+
+    let handle = app.clone();
+    std::thread::spawn(move || {
+        let _guard = PasteGuard;
+
+        let mut clipboard = match arboard::Clipboard::new() {
+            Ok(clipboard) => clipboard,
+            Err(e) => {
+                log::error!("paste_image_file: 初始化图片剪切板失败: {e:?}");
+                return;
+            }
+        };
+        if let Err(e) = clipboard.set_image(arboard::ImageData {
+            width: width as usize,
+            height: height as usize,
+            bytes: std::borrow::Cow::Owned(rgba.clone()),
+        }) {
+            log::error!("paste_image_file: 写入图片剪切板失败: {e:?}");
+            return;
+        }
+        crate::clipboard::sync_monitor_image(&rgba);
+
+        // 图像粘贴总是用 Ctrl+V，同 paste_image。
         paste_with_defocus(&handle, PasteShortcut::CtrlV).ok();
     });
 

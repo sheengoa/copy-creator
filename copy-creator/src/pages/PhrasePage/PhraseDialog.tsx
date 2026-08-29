@@ -8,6 +8,8 @@ interface PhraseDialogProps {
   inputType: "text" | "file";
   selectedFileName: string;
   selectedFileSize: number;
+  /** 选中文件为图像时的预览地址（asset 协议），非图像或未选文件时为 null。 */
+  selectedFilePreviewSrc: string | null;
   fileLimitBytes: number;
   phraseError: boolean;
   phraseErrorMessage: string;
@@ -34,6 +36,7 @@ export function PhraseDialog({
   inputType,
   selectedFileName,
   selectedFileSize,
+  selectedFilePreviewSrc,
   fileLimitBytes,
   phraseError,
   phraseErrorMessage,
@@ -84,6 +87,14 @@ export function PhraseDialog({
           />
         ) : (
           <div className={`quick-input-file-box${phraseError ? " error" : ""}`}>
+            {selectedFilePreviewSrc && (
+              <img
+                className="quick-input-file-preview"
+                src={selectedFilePreviewSrc}
+                alt=""
+                onError={(e) => { e.currentTarget.style.display = "none"; }}
+              />
+            )}
             <button className="dialog-btn secondary quick-input-file-btn" onClick={onSelectFile} type="button">
               {selectedFileName ? t("phrases.changeFile") : t("phrases.selectFile")}
             </button>
@@ -98,6 +109,9 @@ export function PhraseDialog({
               </span>
             </div>
           </div>
+        )}
+        {inputType === "file" && selectedFilePreviewSrc && (
+          <span className="quick-input-file-hint">{t("phrases.imageFileHint")}</span>
         )}
         {phraseError && phraseErrorMessage && (
           <span className="dialog-error-text">{phraseErrorMessage}</span>

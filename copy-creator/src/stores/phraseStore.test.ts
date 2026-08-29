@@ -90,6 +90,40 @@ describe("phraseStore paste routing", () => {
     });
   });
 
+  it("pastes image file phrases as bitmap content", async () => {
+    invokeMock.mockImplementation(async (command: string) => {
+      if (command === "get_storage_path") return "/stored";
+      return undefined;
+    });
+
+    await usePhraseStore.getState().pastePhrase({
+      ...basePhrase,
+      content: "quick-input-files/photo.PNG",
+      input_type: "file",
+      source_path: "/home/ao/photo.PNG",
+      file_size: 2048,
+    });
+
+    expect(invokeMock).toHaveBeenCalledWith("paste_image_file", {
+      path: "/stored/quick-input-files/photo.PNG",
+    });
+    expect(invokeMock).not.toHaveBeenCalledWith("paste_file", expect.anything());
+  });
+
+  it("pastes image file phrases via bitmap in terminal mode too", async () => {
+    invokeMock.mockResolvedValue("/home/ao/pic.jpeg");
+
+    await usePhraseStore.getState().pastePhraseTerminal({
+      ...basePhrase,
+      content: "/home/ao/pic.jpeg",
+      input_type: "file",
+      source_path: "/home/ao/pic.jpeg",
+      file_size: 2048,
+    });
+
+    expect(invokeMock).toHaveBeenCalledWith("paste_image_file", { path: "/home/ao/pic.jpeg" });
+  });
+
   it("deletes selected quick inputs in one backend call", async () => {
     const first = {
       ...basePhrase,

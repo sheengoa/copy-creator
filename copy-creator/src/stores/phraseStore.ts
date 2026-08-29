@@ -11,6 +11,9 @@ const resolveStoredFilePath = async (content: string) => {
   return `${storagePath.replace(/[\\/]+$/, "")}/${content.replace(/^[\\/]+/, "")}`;
 };
 
+/** 文件短语是否指向图片文件：粘贴时走位图路径而非文件引用。 */
+export const isImageFilePath = (path: string) => /\.(png|jpe?g|webp|gif|bmp)$/i.test(path);
+
 export interface QuickInputFileSelection {
   path: string;
   file_size: number;
@@ -227,7 +230,13 @@ export const usePhraseStore = create<PhraseState>()((set, get) => {
   pastePhrase: async (phrase: Phrase) => {
     try {
       if (phrase.input_type === "file") {
-        await invoke("paste_file", { path: await resolveStoredFilePath(phrase.content) });
+        const path = await resolveStoredFilePath(phrase.content);
+        if (isImageFilePath(path)) {
+          // 图像文件以位图粘贴（图像只能 Ctrl+V），终端入口同普通入口。
+          await invoke("paste_image_file", { path });
+        } else {
+          await invoke("paste_file", { path });
+        }
       } else {
         await invoke("paste_text", { text: phrase.content });
       }
@@ -239,7 +248,12 @@ export const usePhraseStore = create<PhraseState>()((set, get) => {
   pastePhraseTerminal: async (phrase: Phrase) => {
     try {
       if (phrase.input_type === "file") {
-        await invoke("paste_file", { path: await resolveStoredFilePath(phrase.content) });
+        const path = await resolveStoredFilePath(phrase.content);
+        if (isImageFilePath(path)) {
+          await invoke("paste_image_file", { path });
+        } else {
+          await invoke("paste_file", { path });
+        }
       } else {
         await invoke("paste_text_terminal", { text: phrase.content });
       }

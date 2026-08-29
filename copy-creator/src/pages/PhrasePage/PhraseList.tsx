@@ -1,9 +1,12 @@
+import { useEffect, useState } from "react";
+import { invoke } from "@tauri-apps/api/core";
 import { Icons } from "../../components/Icons";
 import { useSortable } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
 import { useTranslation } from "react-i18next";
 import type { Phrase } from "../../types";
 import { HighlightText } from "../../components/HighlightText";
+import { isImageFilePath } from "../../stores/phraseStore";
 
 interface PhraseListProps {
   phrases: Phrase[];
@@ -26,6 +29,28 @@ function formatBytes(bytes: number) {
   const units = ["B", "KB", "MB", "GB"];
   const index = Math.min(Math.floor(Math.log(bytes) / Math.log(1024)), units.length - 1);
   return `${(bytes / 1024 ** index).toFixed(index === 0 ? 0 : 1)} ${units[index]}`;
+}
+
+/** 图像文件短语的缩略图：content 为相对存储目录的路径，加载失败回退图标。 */
+function PhraseFileImage({ content }: { content: string }) {
+  const [src, setSrc] = useState<string | null>(null);
+  const [failed, setFailed] = useState(false);
+
+  useEffect(() => {
+    let cancelled = false;
+    invoke<string>("get_image_thumbnail", { path: content, maxSize: 96 })
+      .then((base64) => {
+        if (!cancelled) setSrc(`data:image/png;base64,${base64}`);
+      })
+      .catch(() => {
+        if (!cancelled) setFailed(true);
+      });
+    return () => { cancelled = true; };
+  }, [content]);
+
+  if (failed) return <span className="phrase-card-file-icon">{Icons.image}</span>;
+  if (!src) return <span className="phrase-card-file-icon">{Icons.file}</span>;
+  return <img className="phrase-card-file-thumb" src={src} alt="" loading="lazy" />;
 }
 
 function PhraseCard({
@@ -89,7 +114,11 @@ function PhraseCard({
         <div className={`notibody phrase-card-body${isFile ? " phrase-card-file-body" : ""}`}>
           {isFile ? (
             <>
-              <span className="phrase-card-file-icon">{Icons.file}</span>
+              {isImageFilePath(phrase.source_path || phrase.content) ? (
+                <PhraseFileImage content={phrase.content} />
+              ) : (
+                <span className="phrase-card-file-icon">{Icons.file}</span>
+              )}
               <span className="phrase-card-file-name"><HighlightText text={fileName} search={search} /></span>
               <span className="phrase-card-file-size">{formatBytes(phrase.file_size)}</span>
             </>

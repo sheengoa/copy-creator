@@ -198,6 +198,16 @@
   display: inline-flex;
 }
 
+/* 图像文件短语的缩略图预览 */
+.phrase-card-file-thumb {
+  width: 28px;
+  height: 28px;
+  object-fit: cover;
+  border-radius: 6px;
+  border: 1px solid var(--card-border);
+  flex-shrink: 0;
+}
+
 .phrase-card-file-name {
   min-width: 0;
   overflow: hidden;
@@ -346,6 +356,21 @@
 }
 
 .quick-input-file-size {
+  color: var(--text-secondary);
+  font-size: var(--text-xs);
+}
+
+/* 图像文件预设：选择框内的预览图与粘贴行为提示 */
+.quick-input-file-preview {
+  width: 48px;
+  height: 48px;
+  object-fit: cover;
+  border-radius: 8px;
+  border: 1px solid var(--separator);
+  flex-shrink: 0;
+}
+
+.quick-input-file-hint {
   color: var(--text-secondary);
   font-size: var(--text-xs);
 }

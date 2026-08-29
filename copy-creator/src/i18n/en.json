@@ -130,6 +130,7 @@
     "noFileSelected": "No file selected",
     "fileLimit": "File limit {{size}}",
     "fileRequired": "Select a file",
+    "imageFileHint": "Image file: pasted as image content via the clipboard",
     "remark": "Remark",
     "content": "Content",
     "contentRequired": "Content is required",

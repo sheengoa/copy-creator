@@ -1,7 +1,8 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { useTranslation } from "react-i18next";
-import { usePhraseStore } from "../../stores/phraseStore";
+import { convertFileSrc } from "@tauri-apps/api/core";
+import { usePhraseStore, isImageFilePath } from "../../stores/phraseStore";
 import { useSettingsStore } from "../../stores/settingsStore";
 import SearchInput from "../../components/SearchInput";
 import { GroupChips } from "./GroupChips";
@@ -45,6 +46,7 @@ export default function PhrasePage() {
   const [phraseFilePath, setPhraseFilePath] = useState("");
   const [phraseFileName, setPhraseFileName] = useState("");
   const [phraseFileSize, setPhraseFileSize] = useState(0);
+  const [phraseFilePreviewSrc, setPhraseFilePreviewSrc] = useState<string | null>(null);
   const [phraseErrorMessage, setPhraseErrorMessage] = useState("");
   const [quickInputFileLimit, setQuickInputFileLimit] = useState(50 * 1024 * 1024);
   const [phraseError, setPhraseError] = useState(false);
@@ -239,6 +241,7 @@ export default function PhrasePage() {
     setPhraseFilePath("");
     setPhraseFileName("");
     setPhraseFileSize(0);
+    setPhraseFilePreviewSrc(null);
     setPhraseError(false);
     setPhraseErrorMessage("");
     setPhraseDialogOpen(true);
@@ -252,6 +255,12 @@ export default function PhrasePage() {
     setPhraseFilePath("");
     setPhraseFileName(p.input_type === "file" ? filenameFromPath(p.source_path || p.content) : "");
     setPhraseFileSize(p.input_type === "file" ? p.file_size : 0);
+    // 编辑时仅预览原文件（source_path 为原始绝对路径）；不写入 phraseFilePath，
+    // 避免保存时被误当作"更换文件"。
+    const sourcePath = p.source_path || p.content;
+    setPhraseFilePreviewSrc(
+      p.input_type === "file" && isImageFilePath(sourcePath) ? convertFileSrc(sourcePath) : null,
+    );
     setPhraseError(false);
     setPhraseErrorMessage("");
     setPhraseDialogOpen(true);
@@ -266,6 +275,7 @@ export default function PhrasePage() {
       setPhraseFilePath(file.path);
       setPhraseFileName(fileName);
       setPhraseFileSize(file.file_size);
+      setPhraseFilePreviewSrc(isImageFilePath(file.path) ? convertFileSrc(file.path) : null);
       if (!phraseRemark.trim()) {
         setPhraseRemark(fileName);
       }
@@ -446,6 +456,7 @@ export default function PhrasePage() {
         inputType={phraseInputType}
         selectedFileName={phraseFileName}
         selectedFileSize={phraseFileSize}
+        selectedFilePreviewSrc={phraseFilePreviewSrc}
         fileLimitBytes={quickInputFileLimit}
         phraseError={phraseError}
         phraseErrorMessage={phraseErrorMessage}
