@@ -106,6 +106,24 @@ pub fn run() {
                 db::get_setting_sync(app.handle(), "theme").unwrap_or_else(|| "light".to_string());
             log::info!("Starting with theme: {}", current_theme);
 
+            // Restore persisted main window size. Values are logical pixels
+            // saved by the frontend; clamp to tauri.conf.json's min size.
+            if let Some(window) = app.get_webview_window("main") {
+                let saved_width = db::get_setting_sync(app.handle(), "main_window_width")
+                    .and_then(|raw| raw.parse::<f64>().ok())
+                    .filter(|value| value.is_finite());
+                let saved_height = db::get_setting_sync(app.handle(), "main_window_height")
+                    .and_then(|raw| raw.parse::<f64>().ok())
+                    .filter(|value| value.is_finite());
+                if let (Some(width), Some(height)) = (saved_width, saved_height) {
+                    let width = width.max(440.0);
+                    let height = height.max(420.0);
+                    if let Err(e) = window.set_size(tauri::LogicalSize::new(width, height)) {
+                        log::warn!("restore main window size failed: {e}");
+                    }
+                }
+            }
+
             // Repair autostart entry if stale or broken
             autostart::repair_autostart_if_needed();
 

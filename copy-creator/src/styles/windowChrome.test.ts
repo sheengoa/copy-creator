@@ -104,13 +104,42 @@ describe("standalone window chrome", () => {
     expect(componentSource).toContain('className="clipboard-create-close-btn"');
     expect(getRule(css, ".clipboard-create-header")).toContain("-webkit-app-region: drag");
     expect(getRule(css, ".clipboard-create-close-btn")).toContain("-webkit-app-region: no-drag");
-    expect(componentSource).toContain("startResizeDragging");
-    expect(componentSource).toContain('data-resize-direction={direction}');
-    for (const direction of ["North", "South", "West", "East", "NorthWest", "NorthEast", "SouthWest", "SouthEast"]) {
-      expect(componentSource).toContain(`direction: "${direction}"`);
-    }
-    expect(css).toContain(".clipboard-create-resize-handle");
+    expect(componentSource).toContain("<WindowResizeHandles />");
+    expect(componentSource).toContain('usePersistWindowSize("clipboard_create_width", "clipboard_create_height")');
     expect(componentSource).toContain("onCloseRequested");
+  });
+
+  it("shares resizable window handles across borderless windows", () => {
+    const handlesSource = readSource("../components/WindowResizeHandles.tsx");
+    const componentsCss = readStyle("components.css");
+
+    expect(handlesSource).toContain("startResizeDragging");
+    expect(handlesSource).toContain('data-resize-direction={direction}');
+    for (const direction of ["North", "South", "West", "East", "NorthWest", "NorthEast", "SouthWest", "SouthEast"]) {
+      expect(handlesSource).toContain(`direction: "${direction}"`);
+    }
+    expect(getRule(componentsCss, ".window-resize-handle")).toContain("-webkit-app-region: no-drag");
+  });
+
+  it("supports drag-resize and persists the main window size", () => {
+    const appSource = readSource("../App.tsx");
+    const handlesSource = readSource("../components/WindowResizeHandles.tsx");
+    const libSource = readSource("../../src-tauri/src/lib.rs");
+
+    expect(appSource).toContain("<WindowResizeHandles />");
+    expect(appSource).toContain('usePersistWindowSize("main_window_width", "main_window_height")');
+
+    // Frontend saves logical pixels via the shared debounce hook.
+    expect(handlesSource).toContain("onResized");
+    expect(handlesSource).toContain("set_settings_batch");
+
+    // Backend restores the saved size on startup, clamped to the configured minimum.
+    expect(libSource).toContain('"main_window_width"');
+    expect(libSource).toContain('"main_window_height"');
+    expect(libSource).toContain("restore main window size failed");
+    expect(libSource).toContain("width.max(440.0)");
+    expect(libSource).toContain("height.max(420.0)");
+    expect(libSource).toContain("tauri::LogicalSize::new(width, height)");
   });
 
   it("does not auto-hide standalone clipboard create dialog on blur", () => {

@@ -894,3 +894,77 @@ input:focus-visible + .selection-checkbox {
   border-color: rgba(255, 255, 255, 0.25);
   box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.1);
 }
+
+/* 无边框窗口的八方向缩放手柄（主窗口、暂存窗口共用） */
+.window-resize-handle {
+  position: absolute;
+  z-index: 40;
+  -webkit-app-region: no-drag;
+  app-region: no-drag;
+}
+
+.window-resize-handle.north,
+.window-resize-handle.south {
+  left: 14px;
+  right: 14px;
+  height: 10px;
+}
+
+.window-resize-handle.north {
+  top: 0;
+  cursor: ns-resize;
+}
+
+.window-resize-handle.south {
+  bottom: 0;
+  cursor: ns-resize;
+}
+
+.window-resize-handle.west,
+.window-resize-handle.east {
+  top: 14px;
+  bottom: 14px;
+  width: 10px;
+}
+
+.window-resize-handle.west {
+  left: 0;
+  cursor: ew-resize;
+}
+
+.window-resize-handle.east {
+  right: 0;
+  cursor: ew-resize;
+}
+
+.window-resize-handle.north-west,
+.window-resize-handle.north-east,
+.window-resize-handle.south-west,
+.window-resize-handle.south-east {
+  width: 14px;
+  height: 14px;
+}
+
+.window-resize-handle.north-west {
+  top: 0;
+  left: 0;
+  cursor: nwse-resize;
+}
+
+.window-resize-handle.north-east {
+  top: 0;
+  right: 0;
+  cursor: nesw-resize;
+}
+
+.window-resize-handle.south-west {
+  bottom: 0;
+  left: 0;
+  cursor: nesw-resize;
+}
+
+.window-resize-handle.south-east {
+  right: 0;
+  bottom: 0;
+  cursor: nwse-resize;
+}

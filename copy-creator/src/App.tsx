@@ -7,6 +7,7 @@ import PhrasePage from "./pages/PhrasePage";
 import TranslationPage from "./pages/TranslationPage";
 import SettingsContent from "./components/SettingsContent";
 import ApiKeyToast from "./components/ApiKeyToast";
+import { WindowResizeHandles, usePersistWindowSize } from "./components/WindowResizeHandles";
 import { useSettingsStore } from "./stores/settingsStore";
 import { Icons } from "./components/Icons";
 import i18n from "./i18n";
@@ -28,6 +29,7 @@ function App() {
   const [activePanel, setActivePanel] = useState<string>("clipboard");
   const { themeMode, toggleTheme, loadSettings } = useSettingsStore();
   const [isPinned, setIsPinned] = useState(false);
+  usePersistWindowSize("main_window_width", "main_window_height");
 
   useEffect(() => {
     loadSettings().then(async () => {
@@ -238,6 +240,8 @@ function App() {
           )}
         </div>
       </div>
+
+      <WindowResizeHandles />
     </div>
     <ApiKeyToast />
     </>
