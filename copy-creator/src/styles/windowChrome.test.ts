@@ -123,15 +123,15 @@ describe("standalone window chrome", () => {
 
   it("supports drag-resize and persists the main window size", () => {
     const appSource = readSource("../App.tsx");
-    const handlesSource = readSource("../components/WindowResizeHandles.tsx");
+    const persistHookSource = readSource("../hooks/usePersistWindowSize.ts");
     const libSource = readSource("../../src-tauri/src/lib.rs");
 
     expect(appSource).toContain("<WindowResizeHandles />");
     expect(appSource).toContain('usePersistWindowSize("main_window_width", "main_window_height")');
 
     // Frontend saves logical pixels via the shared debounce hook.
-    expect(handlesSource).toContain("onResized");
-    expect(handlesSource).toContain("set_settings_batch");
+    expect(persistHookSource).toContain("onResized");
+    expect(persistHookSource).toContain("set_settings_batch");
 
     // Backend restores the saved size on startup, clamped to the configured minimum.
     expect(libSource).toContain('"main_window_width"');

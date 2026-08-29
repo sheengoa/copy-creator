@@ -6,7 +6,8 @@ import { getCurrentWindow } from "@tauri-apps/api/window";
 import { resolveDoubleEnterSave } from "../../utils/doubleEnterShortcut";
 import i18n from "../../i18n";
 import StashEditor, { type StashEditorHandle, type StashImage } from "./StashEditor";
-import { WindowResizeHandles, usePersistWindowSize } from "../WindowResizeHandles";
+import { WindowResizeHandles } from "../WindowResizeHandles";
+import { usePersistWindowSize } from "../../hooks/usePersistWindowSize";
 
 interface StashRecord {
   id: string;
@@ -104,9 +105,6 @@ export default function ClipboardCreateDialog() {
       if (unlistenShow) unlistenShow();
     };
   }, [cancelResizeSave, loadStashRecords, resetDraft]);
-
-  useEffect(() => {
-    const appWindow = getCurrentWindow();
 
   useEffect(() => {
     const appWindow = getCurrentWindow();
