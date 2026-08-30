@@ -78,7 +78,22 @@ pub fn toggle_window(app: &AppHandle) {
     }
     let _guard = ToggleGuard;
 
-    crate::show_main_window(app, "shortcut", false);
+    let Some(window) = app.get_webview_window("main") else {
+        log::warn!("[toggle_window] main window not found");
+        return;
+    };
+
+    let visible = window.is_visible().unwrap_or(false);
+    let minimized = window.is_minimized().unwrap_or(false);
+    log::info!("[toggle_window] visible={visible}, minimized={minimized}");
+
+    if visible && !minimized {
+        if let Err(error) = window.hide() {
+            log::warn!("[toggle_window] hide failed: {error}");
+        }
+    } else {
+        crate::show_main_window(app, "shortcut", false);
+    }
 }
 
 // ---- radial menu ----
@@ -324,6 +339,27 @@ pub fn open_clipboard_create(app: AppHandle) -> Result<(), String> {
 }
 
 #[cfg(test)]
+mod shortcut_matching_tests {
+    use super::*;
+
+    #[test]
+    fn matches_configured_shortcut_by_parsed_hotkey() {
+        let event = GsShortcut::from_str("shift+control+KeyA").unwrap();
+
+        assert!(matches_configured_shortcut("Ctrl+Shift+A", &event));
+        assert!(matches_configured_shortcut("control+shift+KeyA", &event));
+    }
+
+    #[test]
+    fn rejects_different_or_invalid_shortcuts() {
+        let event = GsShortcut::from_str("shift+control+KeyA").unwrap();
+
+        assert!(!matches_configured_shortcut("Ctrl+Shift+B", &event));
+        assert!(!matches_configured_shortcut("Ctrl+Shift+NotAKey", &event));
+    }
+}
+
+#[cfg(test)]
 mod clipboard_create_geometry_tests {
     use super::*;
 
@@ -410,10 +446,12 @@ pub fn register_keyboard_shortcut(
     app: &AppHandle,
     shortcut: &str,
 ) -> Result<(), Box<dyn std::error::Error>> {
+    let shortcut = shortcut.trim();
     if shortcut.is_empty() {
         return Ok(());
     }
-    app.global_shortcut().register(shortcut)?;
+    let parsed = GsShortcut::from_str(shortcut)?;
+    app.global_shortcut().register(parsed)?;
     Ok(())
 }
 
@@ -421,45 +459,94 @@ pub fn unregister_keyboard_shortcut(
     app: &AppHandle,
     shortcut: &str,
 ) -> Result<(), Box<dyn std::error::Error>> {
+    let shortcut = shortcut.trim();
     if shortcut.is_empty() {
         return Ok(());
     }
-    let _ = app.global_shortcut().unregister(shortcut);
+    let parsed = GsShortcut::from_str(shortcut)?;
+    if !app.global_shortcut().is_registered(parsed) {
+        return Ok(());
+    }
+    app.global_shortcut().unregister(parsed)?;
     Ok(())
 }
 
 // ---- shortcut matching ----
 
-/// Normalise a shortcut string into the canonical form returned by the
-/// global-hotkey crate so that user-facing display strings (e.g. `Ctrl+Shift+A`)
-/// can be compared with the strings emitted in shortcut events
-/// (e.g. `control+shift+KeyA`).
-fn normalize_shortcut(raw: &str) -> Option<String> {
-    GsShortcut::from_str(raw).ok().map(|s| s.into_string())
+/// 直接比较 global-hotkey 插件提供的快捷键对象。
+/// 展示字符串可能因平台不同而变化，解析后的快捷键和 ID 在各平台一致。
+fn matches_configured_shortcut(configured: &str, shortcut: &GsShortcut) -> bool {
+    !configured.trim().is_empty()
+        && GsShortcut::from_str(configured)
+            .map(|configured| configured == *shortcut)
+            .unwrap_or(false)
 }
 
-pub fn is_main_shortcut(s: &str) -> bool {
-    let key = MAIN_SHORTCUT_KEY.lock().unwrap();
-    if key.is_empty() {
-        return false;
-    }
-    normalize_shortcut(&key).as_deref() == normalize_shortcut(s).as_deref()
+pub fn is_main_shortcut(shortcut: &GsShortcut) -> bool {
+    let configured = MAIN_SHORTCUT_KEY.lock().unwrap();
+    matches_configured_shortcut(&configured, shortcut)
 }
 
-pub fn is_radial_shortcut(s: &str) -> bool {
-    let key = RADIAL_SHORTCUT_KEY.lock().unwrap();
-    if key.is_empty() {
-        return false;
-    }
-    normalize_shortcut(&key).as_deref() == normalize_shortcut(s).as_deref()
+pub fn is_radial_shortcut(shortcut: &GsShortcut) -> bool {
+    let configured = RADIAL_SHORTCUT_KEY.lock().unwrap();
+    matches_configured_shortcut(&configured, shortcut)
 }
 
-pub fn is_clipboard_create_shortcut(s: &str) -> bool {
-    let key = CLIPBOARD_CREATE_SHORTCUT_KEY.lock().unwrap();
-    if key.is_empty() {
-        return false;
+pub fn is_clipboard_create_shortcut(shortcut: &GsShortcut) -> bool {
+    let configured = CLIPBOARD_CREATE_SHORTCUT_KEY.lock().unwrap();
+    matches_configured_shortcut(&configured, shortcut)
+}
+
+fn replace_shortcut(
+    app: &AppHandle,
+    slot: &Mutex<String>,
+    old_shortcut: String,
+    new_shortcut: String,
+    name: &str,
+) -> Result<(), String> {
+    let old_shortcut = old_shortcut.trim();
+    let new_shortcut = new_shortcut.trim();
+
+    if old_shortcut == new_shortcut {
+        *slot.lock().unwrap() = new_shortcut.to_string();
+        return Ok(());
     }
-    normalize_shortcut(&key).as_deref() == normalize_shortcut(s).as_deref()
+
+    if new_shortcut.is_empty() {
+        if !old_shortcut.is_empty() {
+            unregister_keyboard_shortcut(app, old_shortcut)
+                .map_err(|e| format!("Failed to unregister {name} shortcut: {e}"))?;
+        }
+        *slot.lock().unwrap() = String::new();
+        return Ok(());
+    }
+
+    let parsed_new = GsShortcut::from_str(new_shortcut)
+        .map_err(|e| format!("Failed to parse {name} shortcut '{new_shortcut}': {e}"))?;
+
+    // Ctrl+A 和 control+KeyA 是同一个原生快捷键，只更新展示字符串即可。
+    if GsShortcut::from_str(old_shortcut)
+        .map(|parsed_old| parsed_old == parsed_new)
+        .unwrap_or(false)
+    {
+        *slot.lock().unwrap() = new_shortcut.to_string();
+        return Ok(());
+    }
+
+    // 先注册新快捷键，冲突或非法组合不会让用户失去原来可用的快捷键。
+    app.global_shortcut()
+        .register(parsed_new)
+        .map_err(|e| format!("Failed to register {name} shortcut '{new_shortcut}': {e}"))?;
+
+    if !old_shortcut.is_empty() {
+        if let Err(error) = unregister_keyboard_shortcut(app, old_shortcut) {
+            let _ = unregister_keyboard_shortcut(app, new_shortcut);
+            return Err(format!("Failed to replace {name} shortcut: {error}"));
+        }
+    }
+
+    *slot.lock().unwrap() = new_shortcut.to_string();
+    Ok(())
 }
 
 #[tauri::command]
@@ -468,15 +555,13 @@ pub fn update_shortcut(
     old_shortcut: String,
     new_shortcut: String,
 ) -> Result<(), String> {
-    if !old_shortcut.is_empty() {
-        let _ = unregister_keyboard_shortcut(&app, &old_shortcut);
-    }
-    if !new_shortcut.is_empty() {
-        register_keyboard_shortcut(&app, &new_shortcut)
-            .map_err(|e| format!("Failed to register shortcut: {}", e))?;
-    }
-    *MAIN_SHORTCUT_KEY.lock().unwrap() = new_shortcut;
-    Ok(())
+    replace_shortcut(
+        &app,
+        &MAIN_SHORTCUT_KEY,
+        old_shortcut,
+        new_shortcut,
+        "main window",
+    )
 }
 
 #[tauri::command]
@@ -485,15 +570,13 @@ pub fn update_radial_shortcut(
     old_shortcut: String,
     new_shortcut: String,
 ) -> Result<(), String> {
-    if !old_shortcut.is_empty() {
-        let _ = unregister_keyboard_shortcut(&app, &old_shortcut);
-    }
-    if !new_shortcut.is_empty() {
-        register_keyboard_shortcut(&app, &new_shortcut)
-            .map_err(|e| format!("Failed to register radial shortcut: {}", e))?;
-    }
-    *RADIAL_SHORTCUT_KEY.lock().unwrap() = new_shortcut;
-    Ok(())
+    replace_shortcut(
+        &app,
+        &RADIAL_SHORTCUT_KEY,
+        old_shortcut,
+        new_shortcut,
+        "radial menu",
+    )
 }
 
 #[tauri::command]
@@ -502,15 +585,13 @@ pub fn update_clipboard_create_shortcut(
     old_shortcut: String,
     new_shortcut: String,
 ) -> Result<(), String> {
-    if !old_shortcut.is_empty() {
-        let _ = unregister_keyboard_shortcut(&app, &old_shortcut);
-    }
-    if !new_shortcut.is_empty() {
-        register_keyboard_shortcut(&app, &new_shortcut)
-            .map_err(|e| format!("Failed to register clipboard create shortcut: {}", e))?;
-    }
-    *CLIPBOARD_CREATE_SHORTCUT_KEY.lock().unwrap() = new_shortcut;
-    Ok(())
+    replace_shortcut(
+        &app,
+        &CLIPBOARD_CREATE_SHORTCUT_KEY,
+        old_shortcut,
+        new_shortcut,
+        "clipboard create",
+    )
 }
 
 #[tauri::command]

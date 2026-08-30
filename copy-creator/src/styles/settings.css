@@ -25,6 +25,13 @@
   box-shadow: 0 0.5px 0 0 rgba(255,255,255,0.3) inset;
 }
 
+.settings-shortcut-error {
+  margin-top: 8px;
+  color: var(--danger);
+  font-size: var(--text-xs);
+  line-height: 1.4;
+}
+
 [data-theme="dark"] .settings-card {
   box-shadow: 0 0.5px 0 0 rgba(255,255,255,0.04) inset;
 }

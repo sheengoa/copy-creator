@@ -38,6 +38,7 @@ export default function SettingsContent({ embedded }: Props) {
   const radialKeydownHandlerRef = useRef<((e: KeyboardEvent) => void) | null>(null);
   const [storagePath, setStoragePath] = useState("");
   const [saved, setSaved] = useState(false);
+  const [shortcutError, setShortcutError] = useState(false);
   const syncedSettingsRef = useRef<{
     clipboardRetention: string;
     defaultEngine: string;
@@ -251,6 +252,9 @@ export default function SettingsContent({ embedded }: Props) {
   };
 
   const handleSave = async () => {
+    setShortcutError(false);
+    let shortcutUpdateFailed = false;
+
     await settings.setSettingsBatch({
       clipboard_retention: localRetention,
       default_translate_engine: localEngine,
@@ -271,6 +275,8 @@ export default function SettingsContent({ embedded }: Props) {
         await settings.setSetting("shortcut_key", newKey);
       } catch (e) {
         console.error("Failed to update shortcut:", e);
+        shortcutUpdateFailed = true;
+        setLocalShortcutKey(oldKey);
       }
     }
 
@@ -282,6 +288,8 @@ export default function SettingsContent({ embedded }: Props) {
         await settings.setSetting("shortcut_radial", newRadialKey);
       } catch (e) {
         console.error("Failed to update radial shortcut:", e);
+        shortcutUpdateFailed = true;
+        setLocalRadialShortcutKey(oldRadialKey);
       }
     }
 
@@ -296,6 +304,8 @@ export default function SettingsContent({ embedded }: Props) {
         await settings.setSetting("shortcut_clipboard_create", newClipboardCreateKey);
       } catch (e) {
         console.error("Failed to update clipboard create shortcut:", e);
+        shortcutUpdateFailed = true;
+        setClipboardCreateShortcut(oldClipboardCreateKey);
       }
     }
 
@@ -319,8 +329,13 @@ export default function SettingsContent({ embedded }: Props) {
       invoke("update_tray_language").catch(console.error);
     }
 
-    setSaved(true);
-    setTimeout(() => setSaved(false), 2000);
+    if (shortcutUpdateFailed) {
+      setShortcutError(true);
+      setSaved(false);
+    } else {
+      setSaved(true);
+      setTimeout(() => setSaved(false), 2000);
+    }
   };
 
   const content = (
@@ -351,6 +366,11 @@ export default function SettingsContent({ embedded }: Props) {
         startClipboardCreateRecording={ccShortcut.startRecording}
         stopClipboardCreateRecording={ccShortcut.stopRecording}
       />
+      {shortcutError && (
+        <div className="settings-shortcut-error" role="alert">
+          {t("settings.shortcutRegistrationFailed")}
+        </div>
+      )}
 
       <StartupSection
         localAutostart={localAutostart}

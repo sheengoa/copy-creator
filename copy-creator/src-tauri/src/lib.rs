@@ -71,15 +71,19 @@ pub fn run() {
             tauri_plugin_global_shortcut::Builder::new()
                 .with_handler(|app, shortcut, event| {
                     if event.state == tauri_plugin_global_shortcut::ShortcutState::Pressed {
-                        let key = format!("{}", shortcut);
-                        if shortcut::is_main_shortcut(&key) {
+                        log::info!("[shortcut] pressed {} (id={})", shortcut, shortcut.id());
+                        if shortcut::is_main_shortcut(shortcut) {
                             shortcut::toggle_window(app);
-                        } else if shortcut::is_radial_shortcut(&key) {
+                        } else if shortcut::is_radial_shortcut(shortcut) {
                             shortcut::show_radial_menu(app);
-                        } else if shortcut::is_clipboard_create_shortcut(&key) {
+                        } else if shortcut::is_clipboard_create_shortcut(shortcut) {
                             shortcut::show_clipboard_create(app);
                         } else {
-                            log::info!("[shortcut] unknown shortcut pressed: {}", key);
+                            log::warn!(
+                                "[shortcut] unhandled shortcut pressed: {} (id={})",
+                                shortcut,
+                                shortcut.id()
+                            );
                         }
                     }
                 })
@@ -204,20 +208,24 @@ pub fn run() {
             }
 
             if let Ok(key) = db::get_setting(app.handle().clone(), "shortcut_key".to_string()) {
+                let key = key.trim().to_string();
                 if !key.is_empty() {
-                    *shortcut::MAIN_SHORTCUT_KEY.lock().unwrap() = key.clone();
-                    if let Err(e) = shortcut::register_keyboard_shortcut(app.handle(), &key) {
-                        log::warn!("Failed to register keyboard shortcut '{}': {}", key, e);
+                    match shortcut::register_keyboard_shortcut(app.handle(), &key) {
+                        Ok(()) => *shortcut::MAIN_SHORTCUT_KEY.lock().unwrap() = key,
+                        Err(e) => {
+                            log::warn!("Failed to register keyboard shortcut '{}': {}", key, e)
+                        }
                     }
                 }
             }
 
             // Register radial menu shortcut
             if let Ok(key) = db::get_setting(app.handle().clone(), "shortcut_radial".to_string()) {
+                let key = key.trim().to_string();
                 if !key.is_empty() {
-                    *shortcut::RADIAL_SHORTCUT_KEY.lock().unwrap() = key.clone();
-                    if let Err(e) = shortcut::register_keyboard_shortcut(app.handle(), &key) {
-                        log::warn!("Failed to register radial shortcut '{}': {}", key, e);
+                    match shortcut::register_keyboard_shortcut(app.handle(), &key) {
+                        Ok(()) => *shortcut::RADIAL_SHORTCUT_KEY.lock().unwrap() = key,
+                        Err(e) => log::warn!("Failed to register radial shortcut '{}': {}", key, e),
                     }
                 }
             }
@@ -227,14 +235,15 @@ pub fn run() {
                 app.handle().clone(),
                 "shortcut_clipboard_create".to_string(),
             ) {
+                let key = key.trim().to_string();
                 if !key.is_empty() {
-                    *shortcut::CLIPBOARD_CREATE_SHORTCUT_KEY.lock().unwrap() = key.clone();
-                    if let Err(e) = shortcut::register_keyboard_shortcut(app.handle(), &key) {
-                        log::warn!(
+                    match shortcut::register_keyboard_shortcut(app.handle(), &key) {
+                        Ok(()) => *shortcut::CLIPBOARD_CREATE_SHORTCUT_KEY.lock().unwrap() = key,
+                        Err(e) => log::warn!(
                             "Failed to register clipboard create shortcut '{}': {}",
                             key,
                             e
-                        );
+                        ),
                     }
                 }
             }

@@ -44,6 +44,7 @@
     "radialShortcutDesc": "Press a key combination to open the quick menu",
     "rightClick": "Right Click",
     "shortcutPlaceholder": "Click record button to set keyboard shortcut",
+    "shortcutRegistrationFailed": "Shortcut registration failed, possibly due to a system or application conflict. Try another combination.",
     "recordShortcut": "Record",
     "stopRecord": "Stop",
     "recording": "Press shortcut combination...",
