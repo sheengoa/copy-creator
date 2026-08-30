@@ -3,12 +3,10 @@ import { useClipboardStore } from "../../stores/clipboardStore";
 
 interface ImageThumbProps {
   record: { id: string; content: string };
-  onHover: (src: string, rect: DOMRect) => void;
-  onLeave: () => void;
   onClick: (e: React.MouseEvent) => void;
 }
 
-export function ImageThumb({ record, onHover, onLeave, onClick }: ImageThumbProps) {
+export function ImageThumb({ record, onClick }: ImageThumbProps) {
   const { getThumbnail, thumbnailCache } = useClipboardStore();
   const [loadedSrc, setLoadedSrc] = useState<string | null>(null);
   const [visible, setVisible] = useState(false);
@@ -40,12 +38,6 @@ export function ImageThumb({ record, onHover, onLeave, onClick }: ImageThumbProp
     <div
       ref={ref}
       className="clipboard-card-thumb"
-      onMouseEnter={(e) => {
-        if (!src) return;
-        const rect = e.currentTarget.getBoundingClientRect();
-        onHover(src, rect);
-      }}
-      onMouseLeave={onLeave}
       onClick={onClick}
     >
       {src ? (

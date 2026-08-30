@@ -9,6 +9,7 @@
   "tabs": {
     "clipboard": "剪切板",
     "phrases": "快捷输入",
+    "resources": "资源",
     "translate": "翻译"
   },
   "settings": {
@@ -115,6 +116,10 @@
     "apiKeyNote": "备注",
     "apiKeyNotePlaceholder": "备注（最多10字）",
     "apiKeySaving": "保存中..."
+  },
+  "resources": {
+    "search": "搜索资源...",
+    "empty": "暂无资源"
   },
   "phrases": {
     "search": "搜索快捷输入...",

@@ -3,6 +3,7 @@ import { useTranslation } from "react-i18next";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { invoke } from "@tauri-apps/api/core";
 import ClipboardPage from "./pages/ClipboardPage";
+import ResourcePage from "./pages/ResourcePage";
 import PhrasePage from "./pages/PhrasePage";
 import TranslationPage from "./pages/TranslationPage";
 import SettingsContent from "./components/SettingsContent";
@@ -16,12 +17,14 @@ import i18n from "./i18n";
 const PANEL_MAP: Record<string, { titleKey: string; component: () => React.ReactNode }> = {
   clipboard: { titleKey: "tabs.clipboard", component: () => <ClipboardPage /> },
   phrases: { titleKey: "tabs.phrases", component: () => <PhrasePage /> },
+  resources: { titleKey: "tabs.resources", component: () => <ResourcePage /> },
   translate: { titleKey: "tabs.translate", component: () => <TranslationPage /> },
 };
 
 const NAV_ITEMS = [
   { panelType: "clipboard" },
   { panelType: "phrases" },
+  { panelType: "resources" },
   { panelType: "translate" },
 ] as const;
 

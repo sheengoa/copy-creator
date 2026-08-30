@@ -108,10 +108,10 @@ pub fn show_radial_menu(app: &AppHandle) {
 
         let (cursor_x, cursor_y) = get_cursor_position();
 
-        // 每次打开时恢复紧凑尺寸，并将窗口定位在鼠标附近。
-        let _ = radial.set_size(tauri::LogicalSize::new(300.0, 420.0));
-        let px = cursor_x.saturating_sub(150);
-        let py = cursor_y.saturating_sub(20);
+        // 每次打开时恢复标准尺寸，并将窗口定位在鼠标附近。
+        let _ = radial.set_size(tauri::LogicalSize::new(420.0, 650.0));
+        let px = cursor_x.saturating_sub(210);
+        let py = cursor_y.saturating_sub(24);
         let _ = radial.set_position(tauri::PhysicalPosition::new(px.max(0), py.max(0)));
 
         // Read theme from DB
@@ -315,6 +315,12 @@ pub fn show_clipboard_create(app: &AppHandle) {
         geometry.y,
         theme
     );
+}
+
+#[tauri::command]
+pub fn open_clipboard_create(app: AppHandle) -> Result<(), String> {
+    show_clipboard_create(&app);
+    Ok(())
 }
 
 #[cfg(test)]

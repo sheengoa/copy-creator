@@ -12,9 +12,6 @@ import { HighlightText } from "../../components/HighlightText";
 import { useClipboardStore } from "../../stores/clipboardStore";
 import { shouldUseTerminalPasteForMouseTrigger } from "../../utils/pasteMode";
 
-const COLLAPSE_TEXT_LENGTH = 160;
-const COLLAPSE_LINE_COUNT = 4;
-
 interface ClipboardCardProps {
   record: ClipboardRecord;
   index: number;
@@ -27,8 +24,9 @@ interface ClipboardCardProps {
   selectionMode: boolean;
   selected: boolean;
   onToggleSelected: (id: string) => void;
-  onThumbHover: (thumbSrc: string, rect: DOMRect) => void;
-  onThumbLeave: () => void;
+  previewPending: boolean;
+  onPreviewEnter: (record: ClipboardRecord, element: HTMLElement) => void;
+  onPreviewLeave: (event: React.MouseEvent<HTMLElement>) => void;
 }
 
 type ClipboardCardPreviewProps = {
@@ -45,13 +43,6 @@ function ClipboardCardBodyPreview({
   search,
 }: ClipboardCardPreviewProps) {
   const meta = TYPE_META[record.type] || TYPE_META.text;
-  const displayContent = record.content;
-  const textLineCount = displayContent.split(/\r\n|\r|\n/).length;
-  const canToggleText =
-    record.type === "text" &&
-    (record.content_truncated ||
-      (record.content_length ?? displayContent.length) > COLLAPSE_TEXT_LENGTH ||
-      textLineCount > COLLAPSE_LINE_COUNT);
   const hasLabel = Boolean(record.is_api_key && record.label);
   const isUnlabeled = Boolean(record.is_api_key && !record.label);
   const badgeText = record.label?.note || record.guessed_service || (record.is_api_key ? "未标注" : "");
@@ -73,14 +64,10 @@ function ClipboardCardBodyPreview({
           )}
         </div>
 
-        <div
-          className={`notibody clipboard-card-body${canToggleText ? " is-toggleable is-collapsed" : ""}`}
-        >
+        <div className={`notibody clipboard-card-body${record.type === "image" ? "" : " is-content-summary"}`}>
           {record.type === "image" ? (
             <ImageThumb
               record={record}
-              onHover={() => {}}
-              onLeave={() => {}}
               onClick={(e) => e.stopPropagation()}
             />
           ) : record.type === "link" ? (
@@ -88,18 +75,13 @@ function ClipboardCardBodyPreview({
           ) : record.type === "file" ? (
             <span className="clipboard-file-content"><HighlightText text={getFileName(record.content)} search={search} /></span>
           ) : (
-            <span className="clipboard-text-content"><HighlightText text={displayContent} search={search} /></span>
+            <span className="clipboard-text-content"><HighlightText text={record.content} search={search} /></span>
           )}
         </div>
 
         <div className="notititle clipboard-card-footer">
           <span className="clipboard-card-time">{formatTime(record.created_at)}</span>
           <div className="clipboard-card-actions">
-            {canToggleText && (
-              <button className="card-toggle-text-btn" type="button" disabled>
-                <span>展开</span>
-              </button>
-            )}
             <span className="drag-handle">
               <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor">
                 <circle cx="9" cy="5" r="1.5" />
@@ -132,8 +114,9 @@ function ClipboardCardInner({
   selectionMode,
   selected,
   onToggleSelected,
-  onThumbHover,
-  onThumbLeave,
+  previewPending,
+  onPreviewEnter,
+  onPreviewLeave,
 }: ClipboardCardProps) {
   const { t } = useTranslation();
   const {
@@ -154,20 +137,9 @@ function ClipboardCardInner({
   const meta = TYPE_META[record.type] || TYPE_META.text;
   const [ctxMenu, setCtxMenu] = useState<{ x: number; y: number } | null>(null);
   const [labelOpen, setLabelOpen] = useState(false);
-  const [textExpanded, setTextExpanded] = useState(false);
-  const [fullContent, setFullContent] = useState<string | null>(null);
-  const [loadingFullContent, setLoadingFullContent] = useState(false);
   const ctxRef = useRef<HTMLDivElement>(null);
   const loadRecords = useClipboardStore((s) => s.loadRecords);
   const getRecordContent = useClipboardStore((s) => s.getRecordContent);
-  const displayContent = fullContent ?? record.content;
-  const textLineCount = displayContent.split(/\r\n|\r|\n/).length;
-  const canToggleText =
-    record.type === "text" &&
-    (record.content_truncated ||
-      (record.content_length ?? displayContent.length) > COLLAPSE_TEXT_LENGTH ||
-      textLineCount > COLLAPSE_LINE_COUNT);
-  const isTextExpanded = canToggleText && textExpanded;
 
   useEffect(() => {
     if (!selectionMode) return;
@@ -213,23 +185,6 @@ function ClipboardCardInner({
     },
     [onDelete, record.id],
   );
-
-  const handleToggleText = useCallback(async (e: React.MouseEvent) => {
-    e.stopPropagation();
-    const nextExpanded = !isTextExpanded;
-    setTextExpanded(nextExpanded);
-
-    if (!nextExpanded || !record.content_truncated || fullContent) return;
-
-    setLoadingFullContent(true);
-    try {
-      setFullContent(await getRecordContent(record));
-    } catch {
-      setTextExpanded(false);
-    } finally {
-      setLoadingFullContent(false);
-    }
-  }, [fullContent, getRecordContent, isTextExpanded, record]);
 
   const handleContextMenu = useCallback((e: React.MouseEvent) => {
     e.preventDefault();
@@ -290,10 +245,11 @@ function ClipboardCardInner({
   return (
     <div
       ref={setNodeRef}
-      className={`notification clipboard-card type-${record.type}${record.is_api_key ? " has-api-key" : ""}${isUnlabeled ? " api-key-unlabeled" : ""}${hasLabel ? " api-key-labeled" : ""}${isDragging ? " is-dragging" : ""}${selectionMode ? " is-selection-mode" : ""}${selected ? " is-selected" : ""}`}
+      className={`notification clipboard-card type-${record.type}${record.is_api_key ? " has-api-key" : ""}${isUnlabeled ? " api-key-unlabeled" : ""}${hasLabel ? " api-key-labeled" : ""}${isDragging ? " is-dragging" : ""}${selectionMode ? " is-selection-mode" : ""}${selected ? " is-selected" : ""}${previewPending ? " preview-pending" : ""}`}
       style={{ ...sortableStyle, "--color": meta.color, "--enter-delay": index } as React.CSSProperties}
       onClick={selectionMode ? () => onToggleSelected(record.id) : handlePaste}
       onContextMenu={selectionMode ? (e) => { e.preventDefault(); e.stopPropagation(); } : handleContextMenu}
+      onMouseLeave={onPreviewLeave}
     >
       <div className="notibar" />
       {selectionMode && (
@@ -328,13 +284,14 @@ function ClipboardCardInner({
         </div>
 
         <div
-          className={`notibody clipboard-card-body${canToggleText ? " is-toggleable" : ""}${canToggleText && !isTextExpanded ? " is-collapsed" : ""}${isTextExpanded ? " is-expanded" : ""}`}
+          className={`notibody clipboard-card-body${record.type === "image" ? "" : " is-content-summary"}`}
+          onMouseEnter={(e) => {
+            if (!selectionMode && !isDragging) onPreviewEnter(record, e.currentTarget);
+          }}
         >
           {record.type === "image" ? (
             <ImageThumb
               record={record}
-              onHover={onThumbHover}
-              onLeave={onThumbLeave}
               onClick={(e) => {
                 e.stopPropagation();
                 if (selectionMode) onToggleSelected(record.id);
@@ -346,8 +303,8 @@ function ClipboardCardInner({
           ) : record.type === "file" ? (
             <span className="clipboard-file-content"><HighlightText text={getFileName(record.content)} search={search} /></span>
           ) : (
-            <span className="clipboard-text-content" aria-expanded={canToggleText ? isTextExpanded : undefined}>
-              <HighlightText text={displayContent} search={search} />
+            <span className="clipboard-text-content">
+              <HighlightText text={record.content} search={search} />
             </span>
           )}
         </div>
@@ -366,18 +323,6 @@ function ClipboardCardInner({
         <div className="notititle clipboard-card-footer">
           <span className="clipboard-card-time">{formatTime(record.created_at)}</span>
           <div className="clipboard-card-actions">
-            {!selectionMode && canToggleText && (
-              <button
-                className="card-toggle-text-btn"
-                onClick={handleToggleText}
-                type="button"
-                aria-expanded={isTextExpanded}
-                aria-label={isTextExpanded ? "收起长文本" : "展开完整文本"}
-                disabled={loadingFullContent}
-              >
-                <span>{loadingFullContent ? "加载" : isTextExpanded ? "收起" : "展开"}</span>
-              </button>
-            )}
             {!selectionMode && (
               <>
                 <span ref={setActivatorNodeRef} className="drag-handle" {...attributes} {...listeners}>

@@ -107,4 +107,55 @@ describe("integration regressions", () => {
     expect(libSource).toContain("db::delete_clipboard_records");
     expect(libSource).toContain("db::delete_phrases");
   });
+
+  it("keeps stash records under the resources navigation", () => {
+    const appSource = readSource("./App.tsx");
+    const clipboardPage = readSource("./pages/ClipboardPage/index.tsx");
+    const radialMenu = readSource("./components/RadialMenu/index.tsx");
+    const resourcePage = readSource("./pages/ResourcePage.tsx");
+
+    expect(appSource).toContain('titleKey: "tabs.resources"');
+    expect(appSource).toContain('{ panelType: "resources" }');
+    expect(clipboardPage).not.toContain('{ key: "stash", label: t("clipboard.stash") }');
+    expect(resourcePage).toContain("<ClipboardPage resourcesOnly />");
+    expect(radialMenu).toContain('["clipboard", "phrases", "resources"]');
+    expect(radialMenu).toContain('useClipboardStore.getState().loadRecords(false, "stash")');
+  });
+
+  it("uses the shared window-level panel instead of in-card previews", () => {
+    const pageSource = readSource("./pages/ClipboardPage/index.tsx");
+    const cardSource = readSource("./pages/ClipboardPage/ClipboardCard.tsx");
+    const radialMenu = readSource("./components/RadialMenu/index.tsx");
+    const previewLoader = readSource("./utils/contentPreview.ts");
+    const clipboardStyles = readSource("./styles/clipboard.css");
+    const persistWindowSize = readSource("./hooks/usePersistWindowSize.ts");
+
+    expect(pageSource).toContain('<ContentPreviewPanel');
+    expect(radialMenu).toContain('<ContentPreviewPanel');
+    expect(previewLoader).toContain("loadClipboardPreviewSegments");
+    expect(pageSource).toContain("appWindow.outerSize()");
+    expect(pageSource).toContain("calculatePreviewExpansion");
+    expect(pageSource).toContain("--main-content-preview-main-width");
+    expect(pageSource).toContain("mainContentPreviewState");
+    expect(pageSource).toContain('addEventListener("pointerleave"');
+    expect(pageSource).toContain('addEventListener("pointerout"');
+    expect(pageSource).toContain('addEventListener("mouseout"');
+    expect(pageSource).toContain("visibilitychange");
+    expect(pageSource).toContain("relatedTarget.closest(\".clipboard-card\")");
+    expect(pageSource).toContain("main-window-content-preview");
+    expect(clipboardStyles).toContain(':root[data-main-content-preview="right"] .app-container');
+    expect(clipboardStyles).toContain(':root[data-main-content-preview="left"] .app-container');
+    expect(clipboardStyles).toContain('data-main-content-preview-state="restoring"');
+    expect(clipboardStyles).not.toContain(".clipboard-content-preview");
+    expect(persistWindowSize).toContain('hasAttribute("data-main-content-preview")');
+    expect(cardSource).not.toContain("textExpanded");
+    expect(cardSource).not.toContain("card-toggle-text-btn");
+    expect(cardSource).toContain("onMouseLeave={onPreviewLeave}");
+    expect(pageSource).not.toContain("thumb-hover-overlay");
+    expect(clipboardStyles).not.toContain(".thumb-hover-overlay");
+    expect(clipboardStyles).not.toContain(".image-preview-overlay");
+    expect(clipboardStyles).not.toContain(".image-preview-backdrop");
+    expect(clipboardStyles).not.toContain(".image-preview-img");
+    expect(clipboardStyles).not.toContain(".card-toggle-text-btn");
+  });
 });

@@ -1,8 +1,9 @@
-export const RADIAL_MENU_WIDTH = 300;
-export const RADIAL_MENU_HEIGHT = 420;
-export const RADIAL_PREVIEW_WIDTH = 400;
+export const RADIAL_MENU_WIDTH = 420;
+export const RADIAL_MENU_HEIGHT = 650;
+export const RADIAL_PREVIEW_WIDTH = 440;
 export const RADIAL_PREVIEW_MIN_WIDTH = 260;
 export const STASH_IMAGE_PLACEHOLDER = "\uFFFC";
+export const CONTENT_PREVIEW_DELAY_MS = 800;
 
 export type RadialPreviewDirection = "left" | "right";
 
@@ -12,26 +13,45 @@ export type RadialPreviewSegment =
 
 interface ExpansionInput {
   windowX: number;
+  windowWidth: number;
   workAreaX: number;
   workAreaWidth: number;
   scaleFactor: number;
 }
 
-export interface RadialExpansion {
+export interface PreviewExpansion {
   direction: RadialPreviewDirection;
   previewWidth: number;
+  previewPhysicalWidth: number;
   windowX: number;
 }
 
-export function calculateRadialExpansion({
+export type RadialExpansion = Omit<PreviewExpansion, "previewPhysicalWidth">;
+
+interface ContentPreviewCandidate {
+  type: string;
+  contentTruncated?: boolean;
+  hasImages?: boolean;
+}
+
+export function shouldScheduleContentPreview(
+  candidate: ContentPreviewCandidate,
+  isClipped: boolean,
+) {
+  if (candidate.type === "image" || candidate.hasImages) return true;
+  if (candidate.type === "file") return false;
+  return Boolean(candidate.contentTruncated || isClipped);
+}
+
+export function calculatePreviewExpansion({
   windowX,
+  windowWidth,
   workAreaX,
   workAreaWidth,
   scaleFactor,
-}: ExpansionInput): RadialExpansion {
+}: ExpansionInput): PreviewExpansion {
   const scale = Math.max(scaleFactor, 0.1);
-  const menuWidth = RADIAL_MENU_WIDTH * scale;
-  const rightSpace = workAreaX + workAreaWidth - (windowX + menuWidth);
+  const rightSpace = workAreaX + workAreaWidth - (windowX + windowWidth);
   const leftSpace = windowX - workAreaX;
   const preferredWidth = RADIAL_PREVIEW_WIDTH * scale;
   const minimumWidth = RADIAL_PREVIEW_MIN_WIDTH * scale;
@@ -44,7 +64,28 @@ export function calculateRadialExpansion({
   return {
     direction,
     previewWidth,
+    previewPhysicalWidth,
     windowX: direction === "left" ? Math.round(windowX - previewPhysicalWidth) : windowX,
+  };
+}
+
+export function calculateRadialExpansion({
+  windowX,
+  workAreaX,
+  workAreaWidth,
+  scaleFactor,
+}: Omit<ExpansionInput, "windowWidth">): RadialExpansion {
+  const expansion = calculatePreviewExpansion({
+    windowX,
+    windowWidth: RADIAL_MENU_WIDTH * Math.max(scaleFactor, 0.1),
+    workAreaX,
+    workAreaWidth,
+    scaleFactor,
+  });
+  return {
+    direction: expansion.direction,
+    previewWidth: expansion.previewWidth,
+    windowX: expansion.windowX,
   };
 }
 

@@ -1,7 +1,6 @@
 import { useEffect, useRef, useState, useCallback, type CSSProperties } from "react";
 import { useTranslation } from "react-i18next";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
-import { convertFileSrc } from "@tauri-apps/api/core";
 import {
   getCurrentWindow,
   currentMonitor,
@@ -14,19 +13,21 @@ import { usePhraseStore, isImageFilePath } from "../../stores/phraseStore";
 import { useSettingsStore } from "../../stores/settingsStore";
 import { shouldUseTerminalPasteForMouseTrigger } from "../../utils/pasteMode";
 import {
-  buildRadialPreviewSegments,
   calculateRadialExpansion,
+  CONTENT_PREVIEW_DELAY_MS,
   RADIAL_MENU_HEIGHT,
   RADIAL_MENU_WIDTH,
+  shouldScheduleContentPreview,
   type RadialPreviewDirection,
   type RadialPreviewSegment,
 } from "../../utils/radialPreview";
+import { ContentPreviewPanel } from "../ContentPreviewPanel";
+import { loadClipboardPreviewSegments } from "../../utils/contentPreview";
 import i18n from "../../i18n";
 
-type TabKey = "clipboard" | "phrases";
+type TabKey = "clipboard" | "phrases" | "resources";
 
 const MAX_ITEMS = 2000;
-const PREVIEW_DELAY_MS = 800;
 
 interface RadialItem {
   id: string;
@@ -116,54 +117,6 @@ function FileThumb({ path }: { path: string }) {
       src={src}
       alt=""
       style={{ width: 48, height: 36, objectFit: "cover", borderRadius: 5 }}
-    />
-  );
-}
-
-// 存储目录进程内只查询一次，供相对路径拼接为绝对路径。
-let storageDirPromise: Promise<string> | null = null;
-
-async function resolveAssetUrl(path: string) {
-  if (!storageDirPromise) {
-    storageDirPromise = invoke<string>("get_storage_path");
-  }
-  const storageDir = (await storageDirPromise).replace(/[\\/]+$/, "");
-  return convertFileSrc(`${storageDir}/${path.replace(/^[\\/]+/, "")}`);
-}
-
-function PreviewImage({ path }: { path: string }) {
-  const { t } = useTranslation();
-  const [src, setSrc] = useState("");
-  const [failed, setFailed] = useState(false);
-
-  useEffect(() => {
-    let cancelled = false;
-    // 通过 asset 协议直接加载原图：webview 按磁盘路径读取，
-    // 无 base64/IPC 中转；同一图片的重复展开命中 webview 图片缓存。
-    resolveAssetUrl(path)
-      .then((url) => {
-        if (!cancelled) setSrc(url);
-      })
-      .catch(() => {
-        if (!cancelled) setFailed(true);
-      });
-    return () => { cancelled = true; };
-  }, [path]);
-
-  if (failed) {
-    return (
-      <span className="radial-menu-preview-image-error">
-        {t("radialMenu.imageUnavailable")}
-      </span>
-    );
-  }
-  if (!src) return <span className="radial-menu-preview-image-loading" aria-hidden="true" />;
-  return (
-    <img
-      className="radial-menu-preview-image"
-      src={src}
-      alt={t("radialMenu.previewImage")}
-      onError={() => setFailed(true)}
     />
   );
 }
@@ -290,17 +243,7 @@ export default function RadialMenu() {
     const record = useClipboardStore.getState().records.find((entry) => entry.id === item.id);
     let segments: RadialPreviewSegment[];
     if (record) {
-      if (record.type === "image") {
-        segments = [{ type: "image", path: record.content }];
-      } else {
-        const [content, imagePaths] = await Promise.all([
-          useClipboardStore.getState().getRecordContent(record),
-          record.has_images
-            ? invoke<string[]>("get_stash_record_images", { id: record.id })
-            : Promise.resolve([]),
-        ]);
-        segments = buildRadialPreviewSegments(content, imagePaths);
-      }
+      segments = await loadClipboardPreviewSegments(record);
     } else {
       const phrase = usePhraseStore.getState().phrases.find((entry) => entry.id === item.id);
       if (phrase && phrase.input_type === "file" && isImageFilePath(phrase.content)) {
@@ -339,33 +282,30 @@ export default function RadialMenu() {
     clearPreviewTimer();
     if (previewRef.current) collapsePreview();
 
-    const isImageItem = item.type === "image" || Boolean(item.imagePath);
-    if (isImageItem) {
-      // 图像缩略图信息量不足，悬浮一律展开预览面板（同长文本的交互）。
+    const record = useClipboardStore.getState().records.find((entry) => entry.id === item.id);
+    const text = element.querySelector<HTMLElement>(".radial-menu-item-text");
+    const isClipped = Boolean(text && text.scrollHeight > text.clientHeight + 1);
+    const shouldPreview = record
+      ? shouldScheduleContentPreview({
+          type: record.type,
+          contentTruncated: record.content_truncated,
+          hasImages: record.has_images,
+        }, isClipped)
+      : Boolean(item.imagePath)
+        || shouldScheduleContentPreview({
+          type: item.type,
+          contentTruncated: item.contentTruncated,
+        }, isClipped || item.content.length > 300);
+
+    if (shouldPreview) {
+      // 图片、图文资源和被截断的文本统一延迟展开。
       setPendingPreviewId(item.id);
       previewTimerRef.current = window.setTimeout(() => {
         previewTimerRef.current = null;
         setPendingPreviewId(null);
         void showPreview(item);
-      }, PREVIEW_DELAY_MS);
-      return;
+      }, CONTENT_PREVIEW_DELAY_MS);
     }
-    if (item.type === "file") return;
-
-    const text = element.querySelector<HTMLElement>(".radial-menu-item-text");
-    const isClipped = Boolean(
-      item.contentTruncated
-      || item.content.length > 300
-      || (text && text.scrollHeight > text.clientHeight + 1),
-    );
-    if (!isClipped) return;
-
-    setPendingPreviewId(item.id);
-    previewTimerRef.current = window.setTimeout(() => {
-      previewTimerRef.current = null;
-      setPendingPreviewId(null);
-      void showPreview(item);
-    }, PREVIEW_DELAY_MS);
   }, [clearPreviewTimer, collapsePreview, showPreview]);
 
   useEffect(() => {
@@ -416,7 +356,15 @@ export default function RadialMenu() {
     activeTabRef.current = tab;
     setSelectedItemId(null);
     selectedItemIdRef.current = null;
-    if (tab === "phrases") {
+    if (tab === "clipboard") {
+      setClipboardCategory("all");
+      clipboardCategoryRef.current = "all";
+      useClipboardStore.getState().loadRecords(false, "all");
+    } else if (tab === "resources") {
+      setClipboardCategory("stash");
+      clipboardCategoryRef.current = "stash";
+      useClipboardStore.getState().loadRecords(false, "stash");
+    } else {
       const { groups, loadPhrases } = usePhraseStore.getState();
       if (groups.length > 0) {
         const firstId = groups[0].id;
@@ -438,7 +386,8 @@ export default function RadialMenu() {
     if (activeTabRef.current === "clipboard") {
       setClipboardCategory(key as ClipType);
       clipboardCategoryRef.current = key as ClipType;
-    } else {
+      useClipboardStore.getState().loadRecords(false, key as ClipType);
+    } else if (activeTabRef.current === "phrases") {
       setPhraseGroupId(key);
       phraseGroupIdRef.current = key;
       usePhraseStore.getState().loadPhrases(key);
@@ -468,7 +417,7 @@ export default function RadialMenu() {
       setSelectedItemId(null);
       return;
     }
-    if ((el as HTMLElement).closest("[data-radial-preview]")) return;
+    if ((el as HTMLElement).closest("[data-content-preview]")) return;
     const itemEl = (el as HTMLElement).closest("[data-radial-item-id]");
     if (itemEl) {
       const id = itemEl.getAttribute("data-radial-item-id");
@@ -524,7 +473,7 @@ export default function RadialMenu() {
         setClipboardCategory("all");
         clipboardCategoryRef.current = "all";
         // Refresh data
-        useClipboardStore.getState().loadRecords();
+        useClipboardStore.getState().loadRecords(false, "all");
         usePhraseStore.getState().loadGroups();
       });
 
@@ -557,7 +506,7 @@ export default function RadialMenu() {
       const el = document.elementFromPoint(e.clientX, e.clientY);
       if (!el) return;
 
-      const previewContainer = (el as HTMLElement).closest("[data-radial-preview-scroll]");
+      const previewContainer = (el as HTMLElement).closest("[data-content-preview-scroll]");
       if (previewContainer) {
         previewContainer.scrollTop += e.deltaY;
         return;
@@ -634,7 +583,18 @@ export default function RadialMenu() {
         createdAt: r.created_at,
         contentTruncated: r.content_truncated,
       }))
-    : phrases.map((p) => ({
+    : activeTab === "resources"
+      ? records
+          .filter((r) => r.group_name === "暂存" || r.group_name === "stash")
+          .slice(0, MAX_ITEMS)
+          .map((r) => ({
+            id: r.id,
+            content: r.content,
+            type: r.type,
+            createdAt: r.created_at,
+            contentTruncated: r.content_truncated,
+          }))
+      : phrases.map((p) => ({
         id: p.id,
         content: p.input_type === "file"
           ? filenameFromPath(p.source_path || p.content)
@@ -652,12 +612,13 @@ export default function RadialMenu() {
         { key: "image", label: t("clipboard.image") },
         { key: "link", label: t("clipboard.link") },
         { key: "file", label: t("clipboard.file") },
-        { key: "stash", label: t("clipboard.stash") },
       ]
-    : phraseGroups.map((g) => ({
-        key: g.id,
-        label: g.name,
-      }));
+    : activeTab === "phrases"
+      ? phraseGroups.map((g) => ({
+          key: g.id,
+          label: g.name,
+      }))
+      : [];
 
   const activeCategory = activeTab === "clipboard" ? clipboardCategory : phraseGroupId;
 
@@ -673,7 +634,7 @@ export default function RadialMenu() {
       >
         <div className="radial-menu-main">
           <div className="radial-menu-nav">
-          {(["clipboard", "phrases"] as TabKey[]).map((tab) => (
+          {(["clipboard", "phrases", "resources"] as TabKey[]).map((tab) => (
             <button
               key={tab}
               className={`radial-menu-nav-tab ${activeTab === tab ? "active" : ""}`}
@@ -756,27 +717,11 @@ export default function RadialMenu() {
         </div>
 
         {preview && (
-          <section
+          <ContentPreviewPanel
             className="radial-menu-preview"
-            aria-label={t("radialMenu.previewTitle")}
-            data-radial-preview
+            segments={preview.segments}
             onClick={(e) => e.stopPropagation()}
-          >
-            <div className="radial-menu-preview-title">{t("radialMenu.previewTitle")}</div>
-            <div className="radial-menu-preview-body" data-radial-preview-scroll>
-              {preview.segments === null ? (
-                <div className="radial-menu-preview-loading">{t("common.loading")}</div>
-              ) : (
-                preview.segments.map((segment, index) => segment.type === "text" ? (
-                  <div className="radial-menu-preview-text" key={`text-${index}`}>
-                    {segment.content}
-                  </div>
-                ) : (
-                  <PreviewImage path={segment.path} key={`image-${index}-${segment.path}`} />
-                ))
-              )}
-            </div>
-          </section>
+          />
         )}
       </div>
     </div>

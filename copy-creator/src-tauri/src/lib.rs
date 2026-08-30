@@ -168,7 +168,7 @@ pub fn run() {
                     WebviewUrl::App("index.html?radial=1".into()),
                 )
                 .title("")
-                .inner_size(300.0, 420.0)
+                .inner_size(420.0, 650.0)
                 .decorations(false)
                 .transparent(true)
                 .always_on_top(true)
@@ -297,6 +297,7 @@ pub fn run() {
             shortcut::update_radial_shortcut,
             shortcut::update_clipboard_create_shortcut,
             shortcut::set_radial_menu_enabled,
+            shortcut::open_clipboard_create,
             tray::update_tray_language,
             db::check_api_key,
             db::save_api_key_label,

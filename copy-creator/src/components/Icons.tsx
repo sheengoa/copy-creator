@@ -124,6 +124,12 @@ export const Icons = {
       <polyline points="14 2 14 8 20 8" />
     </svg>
   ),
+  resources: (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+      <path d="M4 7.5h6l2 2h8v9a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2v-9a2 2 0 0 1 2-2Z" />
+      <path d="M2 9V5a2 2 0 0 1 2-2h5l2 2h5" />
+    </svg>
+  ),
   empty: (
     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
       <rect x="3" y="3" width="18" height="18" rx="2" />

@@ -43,10 +43,10 @@ interface ClipboardState {
   category: ClipType;
   initialized: boolean;
 
-  init: () => void;
+  init: (categoryOverride?: ClipType) => void;
   setSearch: (s: string) => void;
   setCategory: (c: ClipType) => void;
-  loadRecords: (append?: boolean) => Promise<void>;
+  loadRecords: (append?: boolean, categoryOverride?: ClipType) => Promise<void>;
   updateRecordLabel: (id: string, label: ApiKeyLabel) => void;
   createRecord: (content: string, groupName?: string) => Promise<void>;
   deleteRecords: (ids: string[]) => Promise<void>;
@@ -126,8 +126,9 @@ export const useClipboardStore = create<ClipboardState>((set, get) => ({
   category: "all",
   initialized: false,
 
-  init: () => {
+  init: (categoryOverride?: ClipType) => {
     if (get().initialized) return;
+    if (categoryOverride) set({ category: categoryOverride });
     set({ initialized: true });
 
     listen<ClipboardRecord>("clipboard-update", (event) => {
@@ -158,18 +159,19 @@ export const useClipboardStore = create<ClipboardState>((set, get) => ({
       set({ records: [], thumbnailCache: {}, imageCache: {} });
     });
 
-    get().loadRecords();
+    get().loadRecords(false, categoryOverride);
   },
 
   setSearch: (s) => set({ search: s }),
   setCategory: (c) => set({ category: c }),
 
-  loadRecords: async (append = false) => {
+  loadRecords: async (append = false, categoryOverride?: ClipType) => {
     set({ loading: true });
     try {
       const state = get();
       const s = state.search || undefined;
-      const cat = state.category !== "all" ? state.category : undefined;
+      const activeCategory = categoryOverride ?? state.category;
+      const cat = activeCategory !== "all" ? activeCategory : undefined;
       const offset = append ? state.records.length : 0;
       const records = await invoke<ClipboardRecord[]>("get_clipboard_records", {
         search: s,

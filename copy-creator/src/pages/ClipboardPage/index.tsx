@@ -1,6 +1,13 @@
 import { useEffect, useState, useRef, useCallback, useMemo } from "react";
 import { createPortal } from "react-dom";
 import { useTranslation } from "react-i18next";
+import { invoke } from "@tauri-apps/api/core";
+import {
+  currentMonitor,
+  getCurrentWindow,
+  PhysicalPosition,
+  PhysicalSize,
+} from "@tauri-apps/api/window";
 import { useClipboardStore } from "../../stores/clipboardStore";
 import { useSettingsStore } from "../../stores/settingsStore";
 import { Icons } from "../../components/Icons";
@@ -25,6 +32,15 @@ import { restrictToVerticalAxis } from "@dnd-kit/modifiers";
 import { getChangedOrderIds, getDragPreviewOrder } from "../../utils/reorderPreview";
 import BatchSelectionBar from "../../components/BatchSelectionBar";
 import { useMultiSelect } from "../../hooks/useMultiSelect";
+import { ContentPreviewPanel } from "../../components/ContentPreviewPanel";
+import { loadClipboardPreviewSegments } from "../../utils/contentPreview";
+import {
+  calculatePreviewExpansion,
+  CONTENT_PREVIEW_DELAY_MS,
+  shouldScheduleContentPreview,
+  type RadialPreviewDirection,
+  type RadialPreviewSegment,
+} from "../../utils/radialPreview";
 
 type ClipType = "all" | "text" | "image" | "link" | "file" | "stash";
 
@@ -33,7 +49,44 @@ TYPE_META.image.icon = Icons.image;
 TYPE_META.link.icon = Icons.link;
 TYPE_META.file.icon = Icons.file;
 
-export default function ClipboardPage() {
+interface ClipboardPageProps {
+  resourcesOnly?: boolean;
+}
+
+interface ClipboardPreviewState {
+  recordId: string;
+  segments: RadialPreviewSegment[] | null;
+  layout: PreviewLayout;
+}
+
+interface PreviewLayout {
+  direction: RadialPreviewDirection;
+  width: number;
+}
+
+interface OriginalWindowGeometry {
+  position: PhysicalPosition;
+  size: PhysicalSize;
+}
+
+function applyMainPreviewLayout(layout: PreviewLayout) {
+  document.documentElement.dataset.mainContentPreview = layout.direction;
+  delete document.documentElement.dataset.mainContentPreviewState;
+  document.documentElement.style.setProperty("--main-content-preview-width", `${layout.width}px`);
+}
+
+function markMainPreviewRestoring() {
+  document.documentElement.dataset.mainContentPreviewState = "restoring";
+}
+
+function clearMainPreviewLayout() {
+  delete document.documentElement.dataset.mainContentPreview;
+  delete document.documentElement.dataset.mainContentPreviewState;
+  document.documentElement.style.removeProperty("--main-content-preview-width");
+  document.documentElement.style.removeProperty("--main-content-preview-main-width");
+}
+
+export default function ClipboardPage({ resourcesOnly = false }: ClipboardPageProps) {
   const { t } = useTranslation();
   const {
     records,
@@ -59,10 +112,16 @@ export default function ClipboardPage() {
     onConfirm: () => void | Promise<void>;
   } | null>(null);
 
-  const [hoverPreview, setHoverPreview] = useState<{ src: string; x: number; y: number } | null>(null);
-  const hoverTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const categoriesScrollRef = useRef<HTMLDivElement>(null);
   const clipboardListRef = useRef<HTMLDivElement>(null);
+  const previewTimerRef = useRef<number | null>(null);
+  const previewRequestRef = useRef(0);
+  const previewRef = useRef<ClipboardPreviewState | null>(null);
+  const originalWindowGeometryRef = useRef<OriginalWindowGeometry | null>(null);
+  const windowRestoreRef = useRef<Promise<void> | null>(null);
+  const previewCacheRef = useRef(new Map<string, RadialPreviewSegment[]>());
+  const [pendingPreviewId, setPendingPreviewId] = useState<string | null>(null);
+  const [contentPreview, setContentPreview] = useState<ClipboardPreviewState | null>(null);
 
   useEffect(() => {
     const el = categoriesScrollRef.current;
@@ -77,14 +136,15 @@ export default function ClipboardPage() {
     return () => el.removeEventListener("wheel", onWheel);
   }, []);
 
-  const categories: { key: ClipType; label: string }[] = [
-    { key: "all", label: t("clipboard.all") },
-    { key: "text", label: t("clipboard.text") },
-    { key: "image", label: t("clipboard.image") },
-    { key: "link", label: t("clipboard.link") },
-    { key: "file", label: t("clipboard.file") },
-    { key: "stash", label: t("clipboard.stash") },
-  ];
+  const categories: { key: ClipType; label: string }[] = resourcesOnly
+    ? []
+    : [
+        { key: "all", label: t("clipboard.all") },
+        { key: "text", label: t("clipboard.text") },
+        { key: "image", label: t("clipboard.image") },
+        { key: "link", label: t("clipboard.link") },
+        { key: "file", label: t("clipboard.file") },
+      ];
 
   const labels: Record<string, string> = useMemo(
     () => ({
@@ -124,18 +184,25 @@ export default function ClipboardPage() {
   const handleSubmitCreate = useCallback(() => {
     const trimmed = createContent.trim();
     if (!trimmed) return;
-    createRecord(trimmed);
+    if (resourcesOnly) {
+      void invoke("save_stash_record", { id: null, content: trimmed, images: [] });
+    } else {
+      void createRecord(trimmed);
+    }
     setCreateContent("");
     setShowCreate(false);
-  }, [createContent, createRecord]);
+  }, [createContent, createRecord, resourcesOnly]);
 
   const filtered = useMemo(() => {
+    if (resourcesOnly) {
+      return records.filter((r) => r.group_name === "暂存" || r.group_name === "stash");
+    }
     if (category === "all") return records;
     if (category === "stash") {
       return records.filter((r) => r.group_name === "暂存" || r.group_name === "stash");
     }
     return records.filter((r) => r.type === category);
-  }, [records, category]);
+  }, [records, category, resourcesOnly]);
   const visibleIds = useMemo(() => filtered.map((record) => record.id), [filtered]);
   const {
     isSelecting,
@@ -161,7 +228,7 @@ export default function ClipboardPage() {
     (value: ClipType) => {
       exitSelection();
       setCategory(value);
-      loadRecords();
+      void loadRecords(false, value);
     },
     [exitSelection, setCategory, loadRecords],
   );
@@ -179,29 +246,237 @@ export default function ClipboardPage() {
   }, [deleteRecords, exitSelection, selectedCount, selectedIds, t]);
 
   useEffect(() => {
-    init();
-  }, []);
+    init(resourcesOnly ? "stash" : "all");
+    setCategory(resourcesOnly ? "stash" : "all");
+    void loadRecords(false, resourcesOnly ? "stash" : "all");
+  }, [init, loadRecords, resourcesOnly, setCategory]);
 
   useEffect(() => {
-    const timer = setTimeout(() => loadRecords(), 300);
+    const timer = setTimeout(() => loadRecords(false, resourcesOnly ? "stash" : undefined), 300);
     return () => clearTimeout(timer);
-  }, [search]);
+  }, [loadRecords, resourcesOnly, search]);
 
-  const handleThumbHover = useCallback((thumbSrc: string, rect: DOMRect) => {
-    if (hoverTimerRef.current) clearTimeout(hoverTimerRef.current);
-    setHoverPreview({ src: thumbSrc, x: rect.left + rect.width / 2, y: rect.top + rect.height / 2 });
+  const clearPreviewTimer = useCallback(() => {
+    if (previewTimerRef.current !== null) {
+      window.clearTimeout(previewTimerRef.current);
+      previewTimerRef.current = null;
+    }
+    setPendingPreviewId(null);
   }, []);
 
-  const handleThumbLeave = useCallback(() => {
-    hoverTimerRef.current = setTimeout(() => setHoverPreview(null), 150);
+  const restoreMainWindow = useCallback(async () => {
+    const geometry = originalWindowGeometryRef.current;
+    originalWindowGeometryRef.current = null;
+    if (!geometry) return;
+
+    const appWindow = getCurrentWindow();
+    try {
+      await appWindow.setSize(geometry.size);
+      await appWindow.setPosition(geometry.position);
+    } catch {
+      // 主窗口下次显示时仍会按已保存尺寸恢复。
+    }
   }, []);
+
+  const collapsePreview = useCallback(() => {
+    clearPreviewTimer();
+    const request = ++previewRequestRef.current;
+    previewRef.current = null;
+    setContentPreview(null);
+    markMainPreviewRestoring();
+
+    const restoreTask = windowRestoreRef.current ?? restoreMainWindow();
+    windowRestoreRef.current = restoreTask;
+    void restoreTask.finally(() => {
+      if (windowRestoreRef.current === restoreTask) windowRestoreRef.current = null;
+      if (request === previewRequestRef.current && !previewRef.current) {
+        clearMainPreviewLayout();
+      }
+    });
+  }, [clearPreviewTimer, restoreMainWindow]);
+
+  const expandPreviewWindow = useCallback(async (
+    request: number,
+    recordId: string,
+  ): Promise<PreviewLayout | null> => {
+    if (windowRestoreRef.current) await windowRestoreRef.current;
+    if (request !== previewRequestRef.current) return null;
+
+    const appWindow = getCurrentWindow();
+    try {
+      const [position, outerSize, innerSize, monitor, scaleFactor] = await Promise.all([
+        appWindow.outerPosition(),
+        appWindow.outerSize(),
+        appWindow.innerSize(),
+        currentMonitor(),
+        appWindow.scaleFactor(),
+      ]);
+      if (!monitor || request !== previewRequestRef.current) return null;
+
+      const geometry = { position, size: innerSize };
+      originalWindowGeometryRef.current = geometry;
+      const scale = Math.max(scaleFactor, 0.1);
+      const mainWidth = innerSize.width / scale;
+      const expansion = calculatePreviewExpansion({
+        windowX: position.x,
+        windowWidth: outerSize.width,
+        workAreaX: monitor.workArea.position.x,
+        workAreaWidth: monitor.workArea.size.width,
+        scaleFactor,
+      });
+      if (expansion.previewWidth <= 0) return null;
+
+      const layout = { direction: expansion.direction, width: expansion.previewWidth };
+      // 在调整原生窗口前锁定主页面宽度，避免收起时短暂按变化中的视口宽度重排。
+      document.documentElement.style.setProperty("--main-content-preview-main-width", `${mainWidth}px`);
+      applyMainPreviewLayout(layout);
+      const loadingState = { recordId, segments: null, layout };
+      previewRef.current = loadingState;
+      setContentPreview(loadingState);
+      await appWindow.setSize(new PhysicalSize(
+        innerSize.width + expansion.previewPhysicalWidth,
+        innerSize.height,
+      ));
+      if (expansion.direction === "left") {
+        await appWindow.setPosition(new PhysicalPosition(expansion.windowX, position.y));
+      }
+      if (request !== previewRequestRef.current) {
+        originalWindowGeometryRef.current = null;
+        await appWindow.setSize(innerSize);
+        await appWindow.setPosition(position);
+        return null;
+      }
+
+      return layout;
+    } catch {
+      const geometry = originalWindowGeometryRef.current;
+      originalWindowGeometryRef.current = null;
+      if (request === previewRequestRef.current) {
+        previewRef.current = null;
+        setContentPreview(null);
+      }
+      if (geometry) {
+        try {
+          await appWindow.setSize(geometry.size);
+          await appWindow.setPosition(geometry.position);
+        } catch {
+          // 主窗口下次显示时仍会按已保存尺寸恢复。
+        }
+      }
+      if (request === previewRequestRef.current) clearMainPreviewLayout();
+      return null;
+    }
+  }, []);
+
+  const showPreview = useCallback(async (record: typeof records[number]) => {
+    const request = ++previewRequestRef.current;
+    const layout = await expandPreviewWindow(request, record.id);
+    if (!layout || request !== previewRequestRef.current) return;
+
+    try {
+      let segments = previewCacheRef.current.get(record.id);
+      if (!segments) {
+        segments = await loadClipboardPreviewSegments(record);
+        previewCacheRef.current.set(record.id, segments);
+      }
+      if (request !== previewRequestRef.current) return;
+      const loadedState = { recordId: record.id, segments, layout };
+      previewRef.current = loadedState;
+      setContentPreview(loadedState);
+    } catch {
+      if (request !== previewRequestRef.current) return;
+      const fallbackState = {
+        recordId: record.id,
+        segments: [{ type: "text" as const, content: record.content }],
+        layout,
+      };
+      previewRef.current = fallbackState;
+      setContentPreview(fallbackState);
+    }
+  }, [expandPreviewWindow]);
+
+  const schedulePreview = useCallback((
+    record: typeof records[number],
+    element: HTMLElement,
+  ) => {
+    clearPreviewTimer();
+    if (previewRef.current?.recordId === record.id) return;
+    if (previewRef.current) collapsePreview();
+
+    const isClipped = element.scrollHeight > element.clientHeight + 1;
+    if (!shouldScheduleContentPreview({
+      type: record.type,
+      contentTruncated: record.content_truncated,
+      hasImages: record.has_images,
+    }, isClipped)) return;
+
+    setPendingPreviewId(record.id);
+    previewTimerRef.current = window.setTimeout(() => {
+      previewTimerRef.current = null;
+      setPendingPreviewId(null);
+      void showPreview(record);
+    }, CONTENT_PREVIEW_DELAY_MS);
+  }, [clearPreviewTimer, collapsePreview, showPreview]);
+
+  const handlePreviewLeave = useCallback((event: React.MouseEvent<HTMLElement>) => {
+    if (!previewRef.current) {
+      clearPreviewTimer();
+      return;
+    }
+
+    const relatedTarget = event.relatedTarget;
+    if (relatedTarget instanceof Element) {
+      if (relatedTarget.closest("[data-content-preview]")) return;
+      const currentCard = event.currentTarget.closest(".clipboard-card");
+      if (currentCard && relatedTarget.closest(".clipboard-card") === currentCard) return;
+    }
+    collapsePreview();
+  }, [clearPreviewTimer, collapsePreview]);
+
+  useEffect(() => {
+    const handleWindowExit = () => collapsePreview();
+    const handlePointerOut = (event: PointerEvent | MouseEvent) => {
+      if (event.relatedTarget === null) collapsePreview();
+    };
+    const handleVisibilityChange = () => {
+      if (document.visibilityState !== "visible") collapsePreview();
+    };
+    document.documentElement.addEventListener("mouseleave", handleWindowExit);
+    document.documentElement.addEventListener("pointerleave", handleWindowExit);
+    window.addEventListener("mouseleave", handleWindowExit);
+    document.addEventListener("pointerout", handlePointerOut);
+    document.addEventListener("mouseout", handlePointerOut);
+    window.addEventListener("mouseout", handlePointerOut);
+    window.addEventListener("blur", handleWindowExit);
+    document.addEventListener("visibilitychange", handleVisibilityChange);
+    return () => {
+      document.documentElement.removeEventListener("mouseleave", handleWindowExit);
+      document.documentElement.removeEventListener("pointerleave", handleWindowExit);
+      window.removeEventListener("mouseleave", handleWindowExit);
+      document.removeEventListener("pointerout", handlePointerOut);
+      document.removeEventListener("mouseout", handlePointerOut);
+      window.removeEventListener("mouseout", handlePointerOut);
+      window.removeEventListener("blur", handleWindowExit);
+      document.removeEventListener("visibilitychange", handleVisibilityChange);
+    };
+  }, [collapsePreview]);
+
+  useEffect(() => () => {
+    if (previewTimerRef.current !== null) window.clearTimeout(previewTimerRef.current);
+    previewRequestRef.current += 1;
+    void restoreMainWindow().finally(clearMainPreviewLayout);
+  }, [restoreMainWindow]);
+
+  useEffect(() => {
+    previewCacheRef.current.clear();
+  }, [records]);
 
   const sensors = useSensors(
     useSensor(PointerSensor, { activationConstraint: { distance: 4 } }),
     useSensor(KeyboardSensor)
   );
 
-  const isFiltered = category !== "all" || search.trim().length > 0;
+  const isFiltered = resourcesOnly || category !== "all" || search.trim().length > 0;
 
   const [activeId, setActiveId] = useState<string | null>(null);
   const [previewRecords, setPreviewRecords] = useState<typeof records | null>(null);
@@ -210,12 +485,17 @@ export default function ClipboardPage() {
 
   const handleDragStart = useCallback((event: DragStartEvent) => {
     if (isSelecting) return;
+    collapsePreview();
     const id = String(event.active.id);
     setActiveId(id);
     setActiveOverlayWidth(clipboardListRef.current?.getBoundingClientRect().width ?? null);
     lastPreviewMoveRef.current = null;
     setPreviewRecords(isFiltered ? null : filtered);
-  }, [filtered, isFiltered, isSelecting]);
+  }, [collapsePreview, filtered, isFiltered, isSelecting]);
+
+  useEffect(() => {
+    if (isSelecting) collapsePreview();
+  }, [collapsePreview, isSelecting]);
 
   const handleDragCancel = useCallback(() => {
     setActiveId(null);
@@ -278,10 +558,13 @@ export default function ClipboardPage() {
   );
 
   return (
-    <div className="clipboard-page">
+    <>
+    <div
+      className={`clipboard-page${resourcesOnly ? " resources-page" : ""}`}
+    >
       <div className="page-search">
         <SearchInput
-          placeholder={t("clipboard.search")}
+          placeholder={resourcesOnly ? t("resources.search") : t("clipboard.search")}
           value={search}
           onChange={handleSearchChange}
         />
@@ -302,7 +585,16 @@ export default function ClipboardPage() {
         <div className="clipboard-categories-actions">
           {!isSelecting && (
             <>
-              <button className="phrase-add-btn" onClick={() => setShowCreate(true)}>
+              <button
+                className="phrase-add-btn"
+                onClick={() => {
+                  if (resourcesOnly) {
+                    void invoke("open_clipboard_create");
+                  } else {
+                    setShowCreate(true);
+                  }
+                }}
+              >
                 {Icons.add}
                 <span>{t("clipboard.create")}</span>
               </button>
@@ -395,8 +687,8 @@ export default function ClipboardPage() {
         </div>
       ) : filtered.length === 0 ? (
         <div className="page-empty-compact">
-          <div className="empty-icon-compact">{Icons.clipboard}</div>
-          <span>{t("clipboard.empty")}</span>
+          <div className="empty-icon-compact">{resourcesOnly ? Icons.file : Icons.clipboard}</div>
+          <span>{resourcesOnly ? t("resources.empty") : t("clipboard.empty")}</span>
         </div>
       ) : (
         <div className="clipboard-list" ref={clipboardListRef}>
@@ -416,8 +708,9 @@ export default function ClipboardPage() {
                   selectionMode={isSelecting}
                   selected={isSelected(r.id)}
                   onToggleSelected={toggleSelected}
-                  onThumbHover={handleThumbHover}
-                  onThumbLeave={handleThumbLeave}
+                  previewPending={pendingPreviewId === r.id}
+                  onPreviewEnter={schedulePreview}
+                  onPreviewLeave={handlePreviewLeave}
                 />
               ))}
             </SortableContext>
@@ -435,12 +728,18 @@ export default function ClipboardPage() {
         </div>
       )}
 
-      {hoverPreview && (
-        <div className="thumb-hover-overlay">
-          <img src={hoverPreview.src} alt="" />
-        </div>
-      )}
-
     </div>
+    {contentPreview && createPortal(
+      <ContentPreviewPanel
+        className={`main-window-content-preview preview-${contentPreview.layout.direction}`}
+        segments={contentPreview.segments}
+        onClick={(e) => e.stopPropagation()}
+        onMouseLeave={(e) => {
+          if (e.relatedTarget === null) collapsePreview();
+        }}
+      />,
+      document.body,
+    )}
+    </>
   );
 }

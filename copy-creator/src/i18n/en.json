@@ -9,6 +9,7 @@
   "tabs": {
     "clipboard": "Clipboard",
     "phrases": "Quick Input",
+    "resources": "Resources",
     "translate": "Translate"
   },
   "settings": {
@@ -116,6 +117,10 @@
     "apiKeyNote": "Note",
     "apiKeyNotePlaceholder": "Note (max 10 chars)",
     "apiKeySaving": "Saving..."
+  },
+  "resources": {
+    "search": "Search resources...",
+    "empty": "No resources"
   },
   "phrases": {
     "search": "Search quick input...",
