@@ -64,7 +64,8 @@ describe("integration regressions", () => {
     );
     const libSource = readSource("../src-tauri/src/lib.rs");
 
-    expect(updateBlock).toContain('group_name != "暂存" && group_name != "stash"');
+    expect(updateBlock).toContain("resource_group_name_exists(&conn, &group_name)");
+    expect(updateBlock).not.toContain('group_name != "暂存" && group_name != "stash"');
     expect(updateBlock).toContain("SET type = ?1, content = ?2, sort_order = ?3 WHERE id = ?4");
     expect(updateBlock).not.toContain("created_at =");
     expect(updateBlock).toContain("timestamp_millis");
@@ -77,6 +78,32 @@ describe("integration regressions", () => {
 
     expect(componentSource).toContain('get_setting", { key: "language"');
     expect(componentSource).toContain("i18n.changeLanguage");
+  });
+
+  it("supports resource groups for resource records", () => {
+    const dbSource = readSource("../src-tauri/src/db.rs");
+    const clipboardSource = readSource("../src-tauri/src/clipboard.rs");
+    const pageSource = readSource("./pages/ClipboardPage/index.tsx");
+    const componentSource = readSource("./components/ClipboardCreateDialog/index.tsx");
+    const groupChipsSource = readSource("./pages/PhrasePage/GroupChips.tsx");
+    const manageGroupsSource = readSource("./pages/PhrasePage/ManageGroupsDialog.tsx");
+
+    expect(dbSource).toContain("CREATE TABLE IF NOT EXISTS resource_groups");
+    expect(dbSource).toContain("pub fn create_resource_group");
+    expect(dbSource).toContain("pub fn update_resource_group");
+    expect(dbSource).toContain("pub fn delete_resource_group");
+    expect(clipboardSource).toContain("group_name: Option<String>");
+    expect(clipboardSource).toContain("target_group_name");
+    expect(pageSource).toContain("useResourceGroupStore");
+    expect(pageSource).toContain("selectedGroupId={selectedResourceGroupId}");
+    expect(pageSource).toContain("onAddGroup={openNewResourceGroup}");
+    expect(groupChipsSource).not.toContain("onAddGroup");
+    expect(manageGroupsSource).toContain("onAddGroup");
+    expect(componentSource).toContain('category: "resources"');
+    expect(componentSource).toContain("clipboard-create-resource-group-section");
+    expect(componentSource).toContain("visibleStashRecords");
+    expect(componentSource).toContain("record.group_name === groupName");
+    expect(componentSource).not.toContain("clipboard-create-resource-group-select");
   });
 
   it("passes clipboard search into cards for highlighting", () => {
@@ -100,10 +127,22 @@ describe("integration regressions", () => {
   it("uses shared batch selection controls on both list pages", () => {
     const clipboardPage = readSource("./pages/ClipboardPage/index.tsx");
     const phrasePage = readSource("./pages/PhrasePage/index.tsx");
+    const batchBar = readSource("./components/BatchSelectionBar.tsx");
     const libSource = readSource("../src-tauri/src/lib.rs");
 
     expect(clipboardPage).toContain("<BatchSelectionBar");
     expect(phrasePage).toContain("<BatchSelectionBar");
+    expect(clipboardPage).toContain("loadAllRecords");
+    expect(clipboardPage).toContain("selectIds(allVisibleRecordIds)");
+    expect(clipboardPage).toContain("const clipboardRecords = records.filter((r) => !r.group_name)");
+    expect(clipboardPage).toContain(".filter((record) => !record.group_name)");
+    expect(clipboardPage).toContain('if (category === "stash") return []');
+    expect(clipboardPage).toContain('resourcesOnly ? "resources.confirmDeleteSelected" : "clipboard.confirmDeleteSelected"');
+    expect(clipboardPage).toContain("setDeletingSelected(true)");
+    expect(clipboardPage).toContain("busy={selectingAll || deletingSelected}");
+    expect(clipboardPage).toContain('busyLabel={deletingSelected ? t("common.deleting") : t("common.loading")}');
+    expect(batchBar).toContain("batch-selection-spinner");
+    expect(batchBar).toContain("disabled={selectedCount === 0 || busy}");
     expect(libSource).toContain("db::delete_clipboard_records");
     expect(libSource).toContain("db::delete_phrases");
   });
@@ -119,7 +158,29 @@ describe("integration regressions", () => {
     expect(clipboardPage).not.toContain('{ key: "stash", label: t("clipboard.stash") }');
     expect(resourcePage).toContain("<ClipboardPage resourcesOnly />");
     expect(radialMenu).toContain('["clipboard", "phrases", "resources"]');
-    expect(radialMenu).toContain('useClipboardStore.getState().loadRecords(false, "stash")');
+    expect(radialMenu).toContain('useClipboardStore.getState().loadRecords(false, "resources")');
+    expect(radialMenu).toContain('useClipboardStore.getState().setCategory("resources")');
+    expect(radialMenu).toContain('clipboardCategory === "resources"');
+    expect(radialMenu).toContain('.filter((r) => Boolean(r.group_name))');
+    expect(clipboardPage).toContain('hasMore && (resourcesOnly || filtered.length > 0)');
+    expect(clipboardPage).toContain('resourcesOnly && hasMore');
+  });
+
+  it("keeps resource group operation errors visible and preserves failed dialog state", () => {
+    const pageSource = readSource("./pages/ClipboardPage/index.tsx");
+    const storeSource = readSource("./stores/resourceGroupStore.ts");
+    const groupDialogSource = readSource("./pages/PhrasePage/GroupDialog.tsx");
+    const manageGroupsSource = readSource("./pages/PhrasePage/ManageGroupsDialog.tsx");
+
+    expect(storeSource).toContain("error: string | null");
+    expect(storeSource).toContain("clearError: () => void");
+    expect(storeSource).toContain("error: null");
+    expect(storeSource).toContain("return false;");
+    expect(pageSource).toContain("if (!group) return;");
+    expect(pageSource).toContain("if (!updated) return;");
+    expect(pageSource).toContain("error={resourceGroupError}");
+    expect(groupDialogSource).toContain('role="alert"');
+    expect(manageGroupsSource).toContain('role="alert"');
   });
 
   it("uses the shared window-level panel instead of in-card previews", () => {
@@ -137,6 +198,9 @@ describe("integration regressions", () => {
     expect(pageSource).toContain("calculatePreviewExpansion");
     expect(pageSource).toContain("--main-content-preview-main-width");
     expect(pageSource).toContain("mainContentPreviewState");
+    expect(pageSource).toContain("previewRestoringRef");
+    expect(pageSource).toContain("finishMainPreviewRestore");
+    expect(pageSource).toContain("useLayoutEffect");
     expect(pageSource).toContain('addEventListener("pointerleave"');
     expect(pageSource).toContain('addEventListener("pointerout"');
     expect(pageSource).toContain('addEventListener("mouseout"');
@@ -146,6 +210,7 @@ describe("integration regressions", () => {
     expect(clipboardStyles).toContain(':root[data-main-content-preview="right"] .app-container');
     expect(clipboardStyles).toContain(':root[data-main-content-preview="left"] .app-container');
     expect(clipboardStyles).toContain('data-main-content-preview-state="restoring"');
+    expect(clipboardStyles).toContain(':root[data-main-content-preview-state="restoring"] .main-window-content-preview');
     expect(clipboardStyles).not.toContain(".clipboard-content-preview");
     expect(persistWindowSize).toContain('hasAttribute("data-main-content-preview")');
     expect(cardSource).not.toContain("textExpanded");

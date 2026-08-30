@@ -4,7 +4,7 @@ import { listen } from "@tauri-apps/api/event";
 
 type UnlistenFn = () => void;
 
-export const CLIP_TYPES = ["all", "text", "image", "link", "file", "stash"] as const;
+export const CLIP_TYPES = ["all", "text", "image", "link", "file", "stash", "resources"] as const;
 export type ClipType = (typeof CLIP_TYPES)[number];
 
 interface ApiKeyLabel {
@@ -47,6 +47,7 @@ interface ClipboardState {
   setSearch: (s: string) => void;
   setCategory: (c: ClipType) => void;
   loadRecords: (append?: boolean, categoryOverride?: ClipType) => Promise<void>;
+  loadAllRecords: (categoryOverride?: ClipType) => Promise<ClipboardRecord[] | null>;
   updateRecordLabel: (id: string, label: ApiKeyLabel) => void;
   createRecord: (content: string, groupName?: string) => Promise<void>;
   deleteRecords: (ids: string[]) => Promise<void>;
@@ -101,6 +102,9 @@ function recordMatchesCategory(record: ClipboardRecord, category: ClipType) {
   if (category === "all") return true;
   if (category === "stash") {
     return record.group_name === "暂存" || record.group_name === "stash";
+  }
+  if ((category as string) === "resources") {
+    return Boolean(record.group_name);
   }
   return record.type === category;
 }
@@ -189,6 +193,42 @@ export const useClipboardStore = create<ClipboardState>((set, get) => ({
       }
     } catch (e) {
       console.error("Failed to load clipboard records:", e);
+    } finally {
+      set({ loading: false });
+    }
+  },
+
+  loadAllRecords: async (categoryOverride?: ClipType) => {
+    set({ loading: true });
+    try {
+      const state = get();
+      const search = state.search || undefined;
+      const activeCategory = categoryOverride ?? state.category;
+      const category = activeCategory !== "all" ? activeCategory : undefined;
+      const allRecords: ClipboardRecord[] = [];
+      let offset = 0;
+
+      while (true) {
+        const page = await invoke<ClipboardRecord[]>("get_clipboard_records", {
+          search,
+          limit: PAGE_SIZE,
+          offset,
+          category,
+        });
+        allRecords.push(...page);
+        if (page.length < PAGE_SIZE) break;
+        offset += page.length;
+      }
+
+      const latestState = get();
+      if (latestState.search !== state.search || latestState.category !== activeCategory) {
+        return null;
+      }
+      set({ records: allRecords, hasMore: false, category: activeCategory });
+      return allRecords;
+    } catch (e) {
+      console.error("Failed to load all clipboard records:", e);
+      return null;
     } finally {
       set({ loading: false });
     }

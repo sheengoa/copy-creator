@@ -1,4 +1,4 @@
-import { useEffect, useState, useCallback, useRef } from "react";
+import { useEffect, useState, useCallback, useRef, useMemo } from "react";
 import { useTranslation } from "react-i18next";
 import { invoke } from "@tauri-apps/api/core";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
@@ -8,6 +8,7 @@ import i18n from "../../i18n";
 import StashEditor, { type StashEditorHandle, type StashImage } from "./StashEditor";
 import { WindowResizeHandles } from "../WindowResizeHandles";
 import { usePersistWindowSize } from "../../hooks/usePersistWindowSize";
+import type { ResourceGroup } from "../../types";
 
 interface StashRecord {
   id: string;
@@ -25,10 +26,13 @@ export default function ClipboardCreateDialog() {
   const [editorVersion, setEditorVersion] = useState(0);
   const [saving, setSaving] = useState(false);
   const [stashRecords, setStashRecords] = useState<StashRecord[]>([]);
+  const [resourceGroups, setResourceGroups] = useState<ResourceGroup[]>([]);
+  const [groupName, setGroupName] = useState("暂存");
   const [loadingRecords, setLoadingRecords] = useState(true);
   const [loadingRecordId, setLoadingRecordId] = useState<string | null>(null);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [dropdownOpen, setDropdownOpen] = useState(false);
+  const [groupDropdownOpen, setGroupDropdownOpen] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const editorRef = useRef<StashEditorHandle>(null);
   const lastEnterAtRef = useRef(0);
@@ -47,17 +51,31 @@ export default function ClipboardCreateDialog() {
       const records = await invoke<StashRecord[]>("get_clipboard_records", {
         limit: 120,
         offset: 0,
-        category: "stash",
+        category: "resources",
       });
       setStashRecords(records.filter((record) =>
-        (record.group_name === "暂存" || record.group_name === "stash")
+        record.group_name
         && (record.type === "text" || record.type === "link")
       ));
     } catch (e) {
       console.error("Failed to load stash records:", e);
-      setError(i18n.t("clipboard.loadStashError"));
+      setError(i18n.t("resources.loadError"));
     } finally {
       setLoadingRecords(false);
+    }
+  }, []);
+
+  const loadResourceGroups = useCallback(async () => {
+    try {
+      const groups = await invoke<ResourceGroup[]>("get_resource_groups");
+      setResourceGroups(groups);
+      setGroupName((current) =>
+        groups.some((group) => group.name === current)
+          ? current
+          : groups[0]?.name || "暂存",
+      );
+    } catch (e) {
+      console.error("Failed to load resource groups:", e);
     }
   }, []);
 
@@ -86,25 +104,29 @@ export default function ClipboardCreateDialog() {
 
     // 监听后端 clipboard-create-show 事件（快捷键触发时）
     let unlistenShow: UnlistenFn | undefined;
-    listen<{ theme: string }>("clipboard-create-show", (e) => {
+    listen<{ theme: string; group_name?: string | null }>("clipboard-create-show", (e) => {
       cancelResizeSave();
       document.documentElement.setAttribute("data-theme", e.payload.theme);
       resetDraft();
       setEditingId(null);
+      setGroupName(e.payload.group_name || "暂存");
       setError(null);
       setDropdownOpen(false);
+      setGroupDropdownOpen(false);
       loadStashRecords();
+      loadResourceGroups();
       setTimeout(() => editorRef.current?.focus(), 50);
     }).then((fn) => { unlistenShow = fn; });
 
     loadStashRecords(true);
+    loadResourceGroups();
 
     return () => {
       if (unlistenTheme) unlistenTheme();
       if (unlistenLang) unlistenLang();
       if (unlistenShow) unlistenShow();
     };
-  }, [cancelResizeSave, loadStashRecords, resetDraft]);
+  }, [cancelResizeSave, loadResourceGroups, loadStashRecords, resetDraft]);
 
   useEffect(() => {
     const appWindow = getCurrentWindow();
@@ -141,17 +163,18 @@ export default function ClipboardCreateDialog() {
         id: editingId,
         content: trimmed,
         images: images.map((image) => image.sourcePath || image.dataUrl),
+        groupName,
       });
       resetDraft();
       setEditingId(null);
       hideWindow();
     } catch (e) {
       console.error("Failed to save clipboard record:", e);
-      setError(t("clipboard.saveStashError"));
+      setError(t("resources.saveError"));
     } finally {
       setSaving(false);
     }
-  }, [content, editingId, images, saving, hideWindow, resetDraft, t]);
+  }, [content, editingId, groupName, images, saving, hideWindow, resetDraft, t]);
 
   const handleSelectRecord = useCallback(async (record: StashRecord) => {
     if (loadingRecordId) return;
@@ -171,11 +194,12 @@ export default function ClipboardCreateDialog() {
         sourcePath: path,
       })));
       setEditingId(record.id);
+      setGroupName(record.group_name || "暂存");
       resetDraft(fullContent, imageData);
       setTimeout(() => editorRef.current?.focus(), 0);
     } catch (e) {
       console.error("Failed to load clipboard record content:", e);
-      setError(t("clipboard.loadStashContentError"));
+      setError(t("resources.loadContentError"));
     } finally {
       setLoadingRecordId(null);
     }
@@ -192,8 +216,9 @@ export default function ClipboardCreateDialog() {
     if (e.key === "Escape") {
       e.preventDefault();
       lastEnterAtRef.current = 0;
-      if (dropdownOpen) {
+      if (dropdownOpen || groupDropdownOpen) {
         setDropdownOpen(false);
+        setGroupDropdownOpen(false);
         return;
       }
       hideWindow();
@@ -230,13 +255,19 @@ export default function ClipboardCreateDialog() {
     if (shortcut.shouldSave) {
       handleSave();
     }
-  }, [content, dropdownOpen, hideWindow, handleSave]);
+  }, [content, dropdownOpen, groupDropdownOpen, hideWindow, handleSave]);
+
+  const visibleStashRecords = useMemo(
+    () => stashRecords.filter((record) => record.group_name === groupName),
+    [groupName, stashRecords],
+  );
+  const selectedStashRecord = visibleStashRecords.find((record) => record.id === editingId);
 
   return (
     <div className="clipboard-create-dialog" onKeyDown={handleKeyDown}>
       <div className="clipboard-create-header" data-tauri-drag-region>
         <span className="clipboard-create-title">
-          {editingId ? t("clipboard.editStash") : t("clipboard.create")}
+          {editingId ? t("resources.edit") : t("clipboard.create")}
         </span>
         <button
           type="button"
@@ -251,28 +282,72 @@ export default function ClipboardCreateDialog() {
           </svg>
         </button>
       </div>
-      <div onFocus={() => setDropdownOpen(false)} className="clipboard-create-editor-wrap">
+      <div onFocus={() => { setDropdownOpen(false); setGroupDropdownOpen(false); }} className="clipboard-create-editor-wrap">
         <StashEditor
           key={editorVersion}
           ref={editorRef}
           initialContent={content}
           initialImages={images}
-          placeholder={t("clipboard.createPlaceholder")}
-          previewAlt={t("clipboard.stashImagePreview")}
-          closePreviewLabel={t("clipboard.closeImagePreview")}
+          placeholder={t("resources.createPlaceholder")}
+          previewAlt={t("resources.imagePreview")}
+          closePreviewLabel={t("resources.closeImagePreview")}
           onChange={(nextContent, nextImages) => {
             setContent(nextContent);
             setImages(nextImages);
           }}
-          onImageError={() => setError(t("clipboard.readStashImageError"))}
+          onImageError={() => setError(t("resources.readImageError"))}
         />
+      </div>
+      <div className="clipboard-create-resource-group-section">
+        <div className="clipboard-create-stash-header">
+          <span>{t("resources.groupName")}</span>
+        </div>
+        <div className={`clipboard-create-stash-picker${groupDropdownOpen ? " open" : ""}`}>
+          <button
+            type="button"
+            className="clipboard-create-stash-trigger"
+            onClick={() => setGroupDropdownOpen((open) => !open)}
+            disabled={resourceGroups.length === 0}
+            aria-expanded={groupDropdownOpen}
+            aria-haspopup="listbox"
+          >
+            <span className={groupName ? "selected" : "placeholder"}>
+              {groupName || t("resources.selectGroup")}
+            </span>
+            <svg className="clipboard-create-stash-chevron" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+              <polyline points="6 9 12 15 18 9" />
+            </svg>
+          </button>
+          {groupDropdownOpen && resourceGroups.length > 0 && (
+            <div className="clipboard-create-stash-menu" role="listbox">
+              {resourceGroups.map((group) => (
+                <button
+                  key={group.id}
+                  type="button"
+                  className={`clipboard-create-stash-option${groupName === group.name ? " selected" : ""}`}
+                  onClick={() => {
+                    setGroupName(group.name);
+                    setGroupDropdownOpen(false);
+                    setDropdownOpen(false);
+                  }}
+                  role="option"
+                  aria-selected={groupName === group.name}
+                  title={group.name}
+                >
+                  <span className="clipboard-create-stash-option-content">{group.name}</span>
+                  {groupName === group.name && <span className="clipboard-create-stash-check">✓</span>}
+                </button>
+              ))}
+            </div>
+          )}
+        </div>
       </div>
       <div className="clipboard-create-stash-section">
         <div className="clipboard-create-stash-header">
-          <span>{t("clipboard.existingStash")}</span>
+          <span>{t("resources.existing")}</span>
           {editingId && (
             <button className="clipboard-create-exit-edit" onClick={handleExitEdit}>
-              {t("clipboard.exitEdit")}
+              {t("resources.exitEdit")}
             </button>
           )}
         </div>
@@ -281,26 +356,26 @@ export default function ClipboardCreateDialog() {
             type="button"
             className="clipboard-create-stash-trigger"
             onClick={() => setDropdownOpen((open) => !open)}
-            disabled={loadingRecords || stashRecords.length === 0 || loadingRecordId !== null}
+            disabled={loadingRecords || visibleStashRecords.length === 0 || loadingRecordId !== null}
             aria-expanded={dropdownOpen}
             aria-haspopup="listbox"
           >
-            <span className={editingId ? "selected" : "placeholder"}>
-              {editingId
-                ? stashRecords.find((record) => record.id === editingId)?.content
+            <span className={selectedStashRecord ? "selected" : "placeholder"}>
+              {selectedStashRecord
+                ? selectedStashRecord.content
                 : loadingRecords
                   ? t("common.loading")
-                  : stashRecords.length === 0
-                    ? t("clipboard.noStash")
-                    : t("clipboard.selectStash")}
+                  : visibleStashRecords.length === 0
+                    ? t("resources.noExisting")
+                    : t("resources.selectExisting")}
             </span>
             <svg className="clipboard-create-stash-chevron" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
               <polyline points="6 9 12 15 18 9" />
             </svg>
           </button>
-          {dropdownOpen && stashRecords.length > 0 && (
+          {dropdownOpen && visibleStashRecords.length > 0 && (
             <div className="clipboard-create-stash-menu" role="listbox">
-              {stashRecords.map((record) => (
+              {visibleStashRecords.map((record) => (
                 <button
                   key={record.id}
                   type="button"
@@ -333,7 +408,7 @@ export default function ClipboardCreateDialog() {
             {saving
               ? t("common.saving")
               : editingId
-                ? t("clipboard.updateStash")
+                ? t("resources.update")
                 : t("common.save")}
           </button>
         </div>

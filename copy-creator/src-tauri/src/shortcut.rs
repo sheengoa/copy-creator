@@ -222,7 +222,7 @@ fn calculate_clipboard_create_geometry(
     }
 }
 
-pub fn show_clipboard_create(app: &AppHandle) {
+pub fn show_clipboard_create(app: &AppHandle, group_name: Option<String>) {
     let window = match app.get_webview_window("clipboard-create") {
         Some(w) => w,
         None => {
@@ -320,7 +320,8 @@ pub fn show_clipboard_create(app: &AppHandle) {
     let _ = app.emit(
         "clipboard-create-show",
         serde_json::json!({
-            "theme": theme
+            "theme": theme,
+            "group_name": group_name,
         }),
     );
 
@@ -333,8 +334,8 @@ pub fn show_clipboard_create(app: &AppHandle) {
 }
 
 #[tauri::command]
-pub fn open_clipboard_create(app: AppHandle) -> Result<(), String> {
-    show_clipboard_create(&app);
+pub fn open_clipboard_create(app: AppHandle, group_name: Option<String>) -> Result<(), String> {
+    show_clipboard_create(&app, group_name);
     Ok(())
 }
 

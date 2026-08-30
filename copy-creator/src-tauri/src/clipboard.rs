@@ -290,6 +290,7 @@ pub fn save_stash_record(
     id: Option<String>,
     content: String,
     images: Vec<String>,
+    group_name: Option<String>,
 ) -> Result<serde_json::Value, String> {
     let content = content.trim().to_string();
     if content.is_empty() {
@@ -312,10 +313,29 @@ pub fn save_stash_record(
         .optional()
         .map_err(|e| e.to_string())?
     };
-    let old_paths = if let Some((group_name, attachments)) = &existing {
-        if group_name != "暂存" && group_name != "stash" {
-            return Err("只能编辑暂存分组的记录".to_string());
+    let current_group_name = existing.as_ref().map(|(name, _)| name.as_str());
+    if let Some(name) = current_group_name {
+        if !crate::db::is_resource_group_name(&app, name)? {
+            return Err("只能编辑资源分组的记录".to_string());
         }
+    }
+    let target_group_name = match group_name {
+        Some(name) => {
+            let name = name.trim().to_string();
+            if name.is_empty() {
+                return Err("资源分组不能为空".to_string());
+            }
+            name
+        }
+        None => current_group_name
+            .unwrap_or(crate::db::DEFAULT_RESOURCE_GROUP_NAME)
+            .to_string(),
+    };
+    if !crate::db::is_resource_group_name(&app, &target_group_name)? {
+        return Err("资源分组不存在".to_string());
+    }
+    let old_paths = if let Some((group_name, attachments)) = &existing {
+        let _ = group_name;
         serde_json::from_str::<Vec<String>>(attachments).unwrap_or_default()
     } else {
         Vec::new()
@@ -330,8 +350,8 @@ pub fn save_stash_record(
         let conn = state.conn.lock().map_err(|e| e.to_string())?;
         if updated {
             let affected = conn.execute(
-                "UPDATE clipboard_records SET type = ?1, content = ?2, sort_order = ?3, attachments = ?4 WHERE id = ?5",
-                rusqlite::params![record_type, &content, sort_order, &attachments, &record_id],
+                "UPDATE clipboard_records SET type = ?1, content = ?2, sort_order = ?3, group_name = ?4, attachments = ?5 WHERE id = ?6",
+                rusqlite::params![record_type, &content, sort_order, &target_group_name, &attachments, &record_id],
             )
             .map_err(|e| e.to_string())?;
             if affected == 0 {
@@ -344,8 +364,8 @@ pub fn save_stash_record(
             .map_err(|e| e.to_string())?;
         } else {
             conn.execute(
-                "INSERT INTO clipboard_records (id, type, content, source_app, created_at, sort_order, group_name, attachments) VALUES (?1, ?2, ?3, '', ?4, ?5, '暂存', ?6)",
-                rusqlite::params![&record_id, record_type, &content, &now, sort_order, &attachments],
+                "INSERT INTO clipboard_records (id, type, content, source_app, created_at, sort_order, group_name, attachments) VALUES (?1, ?2, ?3, '', ?4, ?5, ?6, ?7)",
+                rusqlite::params![&record_id, record_type, &content, &now, sort_order, &target_group_name, &attachments],
             )
             .map_err(|e| e.to_string())?;
         }
@@ -381,7 +401,7 @@ pub fn save_stash_record(
                 "key_preview": "",
                 "guessed_service": null,
                 "label": null,
-                "group_name": "暂存",
+                "group_name": &target_group_name,
                 "has_images": !new_paths.is_empty(),
             }),
         )
@@ -396,7 +416,7 @@ pub fn get_stash_record_images(app: AppHandle, id: String) -> Result<Vec<String>
     let conn = state.conn.lock().map_err(|e| e.to_string())?;
     let attachments = conn
         .query_row(
-            "SELECT attachments FROM clipboard_records WHERE id = ?1 AND group_name IN ('暂存', 'stash')",
+            "SELECT attachments FROM clipboard_records WHERE id = ?1 AND group_name <> ''",
             rusqlite::params![id],
             |row| row.get::<_, String>(0),
         )

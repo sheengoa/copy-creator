@@ -48,14 +48,14 @@ describe("standalone window chrome", () => {
     expect(saveButtonRule).toContain("min-width: 132px");
   });
 
-  it("keeps standalone clipboard create dialog limited to stash records", () => {
+  it("loads resource records and allows choosing a resource group", () => {
     const css = readStyle("clipboard.css");
     const componentSource = readSource("../components/ClipboardCreateDialog/index.tsx");
 
     expect(css).toContain(".clipboard-create-stash-picker");
-    expect(componentSource).toContain('category: "stash"');
-    expect(componentSource).toContain('record.group_name === "暂存"');
-    expect(componentSource).toContain('record.group_name === "stash"');
+    expect(componentSource).toContain('category: "resources"');
+    expect(componentSource).toContain("record.group_name");
+    expect(componentSource).toContain("clipboard-create-resource-group-section");
     expect(componentSource).toContain('aria-haspopup="listbox"');
     expect(componentSource).toContain("setDropdownOpen");
     expect(componentSource).not.toContain('listen("clipboard-update"');

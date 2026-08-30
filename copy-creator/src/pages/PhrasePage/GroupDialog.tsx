@@ -7,6 +7,9 @@ interface GroupDialogProps {
   setGroupName: (name: string) => void;
   onSave: () => void;
   onClose: () => void;
+  title?: string;
+  placeholder?: string;
+  error?: string | null;
 }
 
 export function GroupDialog({
@@ -16,6 +19,9 @@ export function GroupDialog({
   setGroupName,
   onSave,
   onClose,
+  title,
+  placeholder,
+  error,
 }: GroupDialogProps) {
   const { t } = useTranslation();
 
@@ -25,16 +31,17 @@ export function GroupDialog({
     <div className="dialog-overlay" onClick={onClose}>
       <div className="dialog-content" onClick={(e) => e.stopPropagation()}>
         <h3 className="dialog-title">
-          {editingId ? t("common.edit") : t("phrases.newGroup")}
+          {title || (editingId ? t("common.edit") : t("phrases.newGroup"))}
         </h3>
         <input
           className="dialog-input"
           autoFocus
-          placeholder={t("phrases.groupName")}
+          placeholder={placeholder || t("phrases.groupName")}
           value={groupName}
           onChange={(e) => setGroupName(e.target.value)}
           onKeyDown={(e) => e.key === "Enter" && onSave()}
         />
+        {error && <span className="dialog-error-text" role="alert">{error}</span>}
         <div className="dialog-actions">
           <button className="dialog-btn secondary" onClick={onClose}>
             {t("common.cancel")}

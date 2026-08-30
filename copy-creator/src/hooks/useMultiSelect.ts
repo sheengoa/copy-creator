@@ -44,6 +44,10 @@ export function useMultiSelect(visibleIds: string[]) {
     });
   }, [visibleIds]);
 
+  const selectIds = useCallback((ids: string[]) => {
+    setSelectedIds(new Set(ids));
+  }, []);
+
   useEffect(() => {
     if (!isSelecting) return;
     const handleKeyDown = (event: KeyboardEvent) => {
@@ -63,5 +67,6 @@ export function useMultiSelect(visibleIds: string[]) {
     toggleSelected,
     isSelected,
     toggleAllVisible,
+    selectIds,
   };
 }

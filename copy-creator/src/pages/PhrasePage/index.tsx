@@ -218,6 +218,7 @@ export default function PhrasePage() {
   );
 
   const openNewGroup = () => {
+    setManageGroupsOpen(false);
     setEditingId(null);
     setGroupName("");
     setGroupDialogOpen(true);
@@ -423,7 +424,6 @@ export default function PhrasePage() {
         groups={groups}
         selectedGroupId={selectedGroupId}
         onSelectGroup={handleSelectGroup}
-        onAddGroup={openNewGroup}
         onManageGroups={openManageGroups}
         onAddPhrase={openNewPhrase}
         selectionMode={isSelecting}
@@ -508,6 +508,7 @@ export default function PhrasePage() {
         onRename={handleRename}
         onDeleteGroup={handleDeleteGroup}
         onClose={() => setManageGroupsOpen(false)}
+        onAddGroup={openNewGroup}
       />
 
       {confirmState && (

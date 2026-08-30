@@ -94,3 +94,47 @@ describe("clipboardStore stash image paste routing", () => {
     });
   });
 });
+
+describe("clipboardStore full record loading", () => {
+  beforeEach(() => {
+    invokeMock.mockReset();
+    useClipboardStore.setState({
+      records: [],
+      search: "",
+      category: "all",
+      loading: false,
+      hasMore: true,
+    });
+  });
+
+  it("loads every page before returning records", async () => {
+    const makeRecord = (id: string) => ({
+      id,
+      type: "text" as const,
+      content: id,
+      source_app: "",
+      created_at: "2026-08-01T00:00:00Z",
+    });
+    const firstPage = Array.from({ length: 120 }, (_, index) => makeRecord(`clip-${index + 1}`));
+    const secondPage = [makeRecord("clip-121")];
+    invokeMock.mockResolvedValueOnce(firstPage).mockResolvedValueOnce(secondPage);
+
+    const loaded = await useClipboardStore.getState().loadAllRecords("all");
+
+    expect(loaded).toHaveLength(121);
+    expect(useClipboardStore.getState().records).toHaveLength(121);
+    expect(useClipboardStore.getState().hasMore).toBe(false);
+    expect(invokeMock).toHaveBeenNthCalledWith(1, "get_clipboard_records", {
+      search: undefined,
+      limit: 120,
+      offset: 0,
+      category: undefined,
+    });
+    expect(invokeMock).toHaveBeenNthCalledWith(2, "get_clipboard_records", {
+      search: undefined,
+      limit: 120,
+      offset: 120,
+      category: undefined,
+    });
+  });
+});

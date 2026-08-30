@@ -19,6 +19,12 @@ interface ManageGroupsDialogProps {
   onRename: () => void;
   onDeleteGroup: (id: string) => void;
   onClose: () => void;
+  onAddGroup?: () => void;
+  addGroupLabel?: string;
+  title?: string;
+  renameLabel?: string;
+  protectedGroupName?: string;
+  error?: string | null;
 }
 
 export function ManageGroupsDialog({
@@ -31,6 +37,12 @@ export function ManageGroupsDialog({
   onRename,
   onDeleteGroup,
   onClose,
+  onAddGroup,
+  addGroupLabel,
+  title,
+  renameLabel,
+  protectedGroupName = "暂存",
+  error,
 }: ManageGroupsDialogProps) {
   const { t } = useTranslation();
 
@@ -39,7 +51,20 @@ export function ManageGroupsDialog({
   return (
     <div className="dialog-overlay" onClick={onClose}>
       <div className="dialog-content large" onClick={(e) => e.stopPropagation()}>
-        <h3 className="dialog-title">{t("phrases.manageGroups")}</h3>
+        <div className="dialog-title-row">
+          <h3 className="dialog-title">{title || t("phrases.manageGroups")}</h3>
+          {onAddGroup && (
+            <button
+              className="group-add-btn group-manage-add-btn"
+              onClick={onAddGroup}
+              title={addGroupLabel || t("phrases.newGroup")}
+              aria-label={addGroupLabel || t("phrases.newGroup")}
+            >
+              {Icons.add}
+            </button>
+          )}
+        </div>
+        {error && <span className="dialog-error-text" role="alert">{error}</span>}
         <div className="phrase-group-manage-list">
           {groups.map((g) => (
             <div key={g.id} className="phrase-group-manage-row">
@@ -65,11 +90,11 @@ export function ManageGroupsDialog({
                   className="card-edit-btn"
                   style={{ opacity: 1 }}
                   onClick={() => onStartRename(g.id, g.name)}
-                  title={t("phrases.rename")}
+                  title={renameLabel || t("phrases.rename")}
                 >
                   {Icons.edit}
                 </button>
-                {g.name !== "暂存" && (
+                {g.name !== protectedGroupName && (
                   <button
                     className="card-delete-btn"
                     style={{ opacity: 1 }}

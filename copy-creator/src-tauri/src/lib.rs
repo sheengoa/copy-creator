@@ -77,7 +77,7 @@ pub fn run() {
                         } else if shortcut::is_radial_shortcut(shortcut) {
                             shortcut::show_radial_menu(app);
                         } else if shortcut::is_clipboard_create_shortcut(shortcut) {
-                            shortcut::show_clipboard_create(app);
+                            shortcut::show_clipboard_create(app, None);
                         } else {
                             log::warn!(
                                 "[shortcut] unhandled shortcut pressed: {} (id={})",
@@ -273,6 +273,10 @@ pub fn run() {
             db::create_phrase_group,
             db::update_phrase_group,
             db::delete_phrase_group,
+            db::get_resource_groups,
+            db::create_resource_group,
+            db::update_resource_group,
+            db::delete_resource_group,
             db::get_phrases,
             db::create_phrase,
             db::create_file_phrase,
@@ -320,6 +324,7 @@ pub fn run() {
             db::set_user_api_key,
             db::reorder_clipboard_records,
             db::reorder_phrase_groups,
+            db::reorder_resource_groups,
             db::reorder_phrases,
             toggle_always_on_top,
             autostart::set_autostart,

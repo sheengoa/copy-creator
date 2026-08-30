@@ -359,11 +359,13 @@ export default function RadialMenu() {
     if (tab === "clipboard") {
       setClipboardCategory("all");
       clipboardCategoryRef.current = "all";
+      useClipboardStore.getState().setCategory("all");
       useClipboardStore.getState().loadRecords(false, "all");
     } else if (tab === "resources") {
-      setClipboardCategory("stash");
-      clipboardCategoryRef.current = "stash";
-      useClipboardStore.getState().loadRecords(false, "stash");
+      setClipboardCategory("resources");
+      clipboardCategoryRef.current = "resources";
+      useClipboardStore.getState().setCategory("resources");
+      useClipboardStore.getState().loadRecords(false, "resources");
     } else {
       const { groups, loadPhrases } = usePhraseStore.getState();
       if (groups.length > 0) {
@@ -386,6 +388,7 @@ export default function RadialMenu() {
     if (activeTabRef.current === "clipboard") {
       setClipboardCategory(key as ClipType);
       clipboardCategoryRef.current = key as ClipType;
+      useClipboardStore.getState().setCategory(key as ClipType);
       useClipboardStore.getState().loadRecords(false, key as ClipType);
     } else if (activeTabRef.current === "phrases") {
       setPhraseGroupId(key);
@@ -473,6 +476,7 @@ export default function RadialMenu() {
         setClipboardCategory("all");
         clipboardCategoryRef.current = "all";
         // Refresh data
+        useClipboardStore.getState().setCategory("all");
         useClipboardStore.getState().loadRecords(false, "all");
         usePhraseStore.getState().loadGroups();
       });
@@ -567,6 +571,8 @@ export default function RadialMenu() {
     ? records
     : clipboardCategory === "stash"
       ? records.filter((r) => r.group_name === "暂存" || r.group_name === "stash")
+      : clipboardCategory === "resources"
+        ? records.filter((r) => Boolean(r.group_name))
       : records.filter((r) => r.type === clipboardCategory);
 
   const items: RadialItem[] = activeTab === "clipboard"
@@ -585,7 +591,7 @@ export default function RadialMenu() {
       }))
     : activeTab === "resources"
       ? records
-          .filter((r) => r.group_name === "暂存" || r.group_name === "stash")
+          .filter((r) => Boolean(r.group_name))
           .slice(0, MAX_ITEMS)
           .map((r) => ({
             id: r.id,

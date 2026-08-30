@@ -691,7 +691,7 @@ pub async fn paste_stash_record(app: AppHandle, id: String, terminal: bool) -> R
         let state = app.state::<crate::db::DbState>();
         let conn = state.conn.lock().map_err(|e| e.to_string())?;
         conn.query_row(
-            "SELECT content, attachments FROM clipboard_records WHERE id = ?1 AND group_name IN ('暂存', 'stash')",
+            "SELECT content, attachments FROM clipboard_records WHERE id = ?1 AND group_name <> ''",
             rusqlite::params![id],
             |row| Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?)),
         )

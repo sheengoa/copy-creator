@@ -350,6 +350,11 @@
   margin-left: var(--main-content-preview-width);
 }
 
+:root[data-main-content-preview-state="restoring"] .main-window-content-preview {
+  visibility: hidden;
+  pointer-events: none;
+}
+
 :root[data-main-content-preview="right"]:not([data-main-content-preview-state="restoring"]) .app-container {
   border-radius: var(--window-radius) 0 0 var(--window-radius);
 }
@@ -939,6 +944,14 @@
 }
 
 .clipboard-create-stash-section {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-top: 10px;
+  flex-shrink: 0;
+}
+
+.clipboard-create-resource-group-section {
   display: flex;
   flex-direction: column;
   gap: 6px;

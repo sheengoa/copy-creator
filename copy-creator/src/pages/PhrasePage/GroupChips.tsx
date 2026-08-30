@@ -18,22 +18,16 @@ import {
 } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
 import { restrictToHorizontalAxis } from "@dnd-kit/modifiers";
-
-interface PhraseGroup {
-  id: string;
-  name: string;
-  sort_order: number;
-  created_at: string;
-  updated_at: string;
-}
+import type { PhraseGroup } from "../../types";
 
 interface GroupChipsProps {
   groups: PhraseGroup[];
   selectedGroupId: string | null;
   onSelectGroup: (id: string) => void;
-  onAddGroup: () => void;
   onManageGroups: () => void;
-  onAddPhrase: () => void;
+  onAddPhrase?: () => void;
+  addPhraseLabel?: string;
+  manageGroupsLabel?: string;
   selectionMode: boolean;
   canSelect: boolean;
   onStartSelection: () => void;
@@ -76,9 +70,10 @@ export function GroupChips({
   groups,
   selectedGroupId,
   onSelectGroup,
-  onAddGroup,
   onManageGroups,
   onAddPhrase,
+  addPhraseLabel,
+  manageGroupsLabel,
   selectionMode,
   canSelect,
   onStartSelection,
@@ -152,16 +147,18 @@ export function GroupChips({
       </div>
       {!selectionMode && (
         <>
-          <button className="group-add-btn" onClick={onAddGroup}>
-            {Icons.add}
-          </button>
-          <button className="group-add-btn" onClick={onManageGroups} title={t("phrases.manageGroups")}>
+          <button
+            className="group-add-btn"
+            onClick={onManageGroups}
+            title={manageGroupsLabel || t("phrases.manageGroups")}
+            aria-label={manageGroupsLabel || t("phrases.manageGroups")}
+          >
             {Icons.edit}
           </button>
-          {selectedGroupId && (
+          {selectedGroupId && onAddPhrase && (
             <button className="phrase-add-btn" onClick={onAddPhrase}>
               {Icons.add}
-              <span>{t("phrases.newPhrase")}</span>
+              <span>{addPhraseLabel || t("phrases.newPhrase")}</span>
             </button>
           )}
           {canSelect && (

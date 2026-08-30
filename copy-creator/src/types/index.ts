@@ -30,6 +30,14 @@ export interface PhraseGroup {
   updated_at: string;
 }
 
+export interface ResourceGroup {
+  id: string;
+  name: string;
+  sort_order: number;
+  created_at: string;
+  updated_at: string;
+}
+
 export interface Phrase {
   id: string;
   group_id: string;

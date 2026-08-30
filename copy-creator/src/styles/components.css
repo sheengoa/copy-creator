@@ -419,6 +419,16 @@ input:focus-visible + .selection-checkbox {
   height: 13px;
 }
 
+.batch-selection-spinner {
+  width: 13px;
+  height: 13px;
+  flex: 0 0 auto;
+  border: 2px solid rgba(255, 255, 255, 0.45);
+  border-top-color: #fff;
+  border-radius: 50%;
+  animation: spin 0.7s linear infinite;
+}
+
 .batch-cancel-btn {
   background: transparent;
   color: var(--text-primary);
@@ -426,6 +436,11 @@ input:focus-visible + .selection-checkbox {
 
 .batch-cancel-btn:hover {
   background: var(--chip-hover-bg);
+}
+
+.batch-cancel-btn:disabled {
+  opacity: 0.55;
+  cursor: default;
 }
 
 .notification.skeleton {
