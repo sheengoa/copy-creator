@@ -4,6 +4,7 @@ mod db;
 #[cfg(target_os = "linux")]
 mod ipc;
 mod paste;
+mod radial_drag;
 mod shortcut;
 mod translator;
 mod tray;
@@ -184,6 +185,12 @@ pub fn run() {
                 log::info!("Radial menu popup window created (transparent, rounded via CSS)");
             }
 
+            #[cfg(target_os = "linux")]
+            if let Some(window) = app.get_webview_window("radial-menu") {
+                radial_drag::install_radial_file_drag_source(app.handle(), &window)
+                    .map_err(|error| format!("安装径向菜单文件拖动源失败: {error}"))?;
+            }
+
             // Create hidden standalone clipboard-create popup window.
             {
                 use tauri::WebviewUrl;
@@ -300,6 +307,7 @@ pub fn run() {
             paste::paste_image_file,
             paste::paste_stash_record,
             paste::paste_file,
+            radial_drag::start_radial_file_drag,
             db::get_image_base64,
             db::get_image_thumbnail,
             db::ensure_thumbnail,

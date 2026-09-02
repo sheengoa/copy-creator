@@ -1,6 +1,6 @@
 [package]
 name = "copy-creator"
-version = "0.1.15"
+version = "0.1.16"
 description = "PC clipboard manager, quick phrases, and translation tool"
 authors = ["Copy Creator Contributors"]
 license = "MIT"
@@ -35,6 +35,10 @@ image = { version = "0.25", default-features = false, features = ["png", "jpeg",
 tauri-plugin-process = "2.3.1"
 dirs = "5"
 arboard = { version = "3", features = ["image-data"] }
+drag = "2.1.1"
+
+[target.'cfg(target_os = "linux")'.dependencies]
+gtk = "0.18.2"
 
 [profile.release]
 strip = true

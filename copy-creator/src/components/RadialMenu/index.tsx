@@ -21,6 +21,12 @@ import {
   type RadialPreviewDirection,
   type RadialPreviewSegment,
 } from "../../utils/radialPreview";
+import {
+  getClipboardRadialDragKind,
+  getPhraseRadialDragKind,
+  type RadialDragKind,
+  type RadialDragSource,
+} from "../../utils/radialDrag";
 import { ContentPreviewPanel } from "../ContentPreviewPanel";
 import { loadClipboardPreviewSegments } from "../../utils/contentPreview";
 import i18n from "../../i18n";
@@ -28,6 +34,7 @@ import i18n from "../../i18n";
 type TabKey = "clipboard" | "phrases" | "resources";
 
 const MAX_ITEMS = 2000;
+const RADIAL_DRAG_THRESHOLD_PX = 6;
 
 interface RadialItem {
   id: string;
@@ -38,6 +45,9 @@ interface RadialItem {
   createdAt?: string;
   title?: string;
   contentTruncated?: boolean;
+  dragPath?: string;
+  dragKind: RadialDragKind;
+  dragSource: RadialDragSource;
 }
 
 interface PreviewLayout {
@@ -49,6 +59,17 @@ interface PreviewState {
   itemId: string;
   segments: RadialPreviewSegment[] | null;
   layout: PreviewLayout;
+}
+
+interface PendingNativeDrag {
+  itemId: string;
+  dragSource: RadialDragSource;
+  dragPath?: string;
+  pointerId: number;
+  startX: number;
+  startY: number;
+  thresholdCrossed: boolean;
+  startRequested: boolean;
 }
 
 const filenameFromPath = (path: string) => path.replace(/\\/g, "/").split("/").pop() || path;
@@ -92,6 +113,7 @@ function ImageThumb({ recordId }: { recordId: string }) {
     <img
       src={src}
       alt=""
+      draggable={false}
       style={{ width: 48, height: 36, objectFit: "cover", borderRadius: 5 }}
     />
   );
@@ -116,6 +138,7 @@ function FileThumb({ path }: { path: string }) {
     <img
       src={src}
       alt=""
+      draggable={false}
       style={{ width: 48, height: 36, objectFit: "cover", borderRadius: 5 }}
     />
   );
@@ -131,6 +154,8 @@ export default function RadialMenu() {
   const [phraseGroupId, setPhraseGroupId] = useState<string | null>(null);
   const [pendingPreviewId, setPendingPreviewId] = useState<string | null>(null);
   const [preview, setPreview] = useState<PreviewState | null>(null);
+  const [dragSessionItemId, setDragSessionItemId] = useState<string | null>(null);
+  const [draggingItemId, setDraggingItemId] = useState<string | null>(null);
 
   const visibleRef = useRef(false);
   const selectedItemIdRef = useRef<string | null>(null);
@@ -142,6 +167,9 @@ export default function RadialMenu() {
   const previewRef = useRef<PreviewState | null>(null);
   const originalWindowPositionRef = useRef<PhysicalPosition | null>(null);
   const previewCacheRef = useRef(new Map<string, RadialPreviewSegment[]>());
+  const dragActiveRef = useRef(false);
+  const suppressClickRef = useRef(false);
+  const nativeDragRef = useRef<PendingNativeDrag | null>(null);
 
   useEffect(() => { visibleRef.current = visible; }, [visible]);
   useEffect(() => { selectedItemIdRef.current = selectedItemId; }, [selectedItemId]);
@@ -158,9 +186,13 @@ export default function RadialMenu() {
     setPendingPreviewId(null);
   }, []);
 
-  const collapsePreview = useCallback(() => {
-    clearPreviewTimer();
+  const invalidatePreviewRequest = useCallback(() => {
     previewRequestRef.current += 1;
+    clearPreviewTimer();
+  }, [clearPreviewTimer]);
+
+  const collapsePreview = useCallback(() => {
+    invalidatePreviewRequest();
     setPreview(null);
     previewRef.current = null;
 
@@ -175,12 +207,19 @@ export default function RadialMenu() {
         // 后端会在菜单下次打开时恢复紧凑尺寸。
       }
     })();
-  }, [clearPreviewTimer]);
+  }, [invalidatePreviewRequest]);
+
+  const dismissPreviewForDrag = useCallback(() => {
+    invalidatePreviewRequest();
+    setPreview(null);
+    previewRef.current = null;
+  }, [invalidatePreviewRequest]);
 
   const expandPreviewWindow = useCallback(async (
     request: number,
-    itemId: string,
+    item: RadialItem,
   ): Promise<PreviewLayout | null> => {
+    if (dragActiveRef.current || nativeDragRef.current) return null;
     if (previewRef.current) return previewRef.current.layout;
     const appWindow = getCurrentWindow();
     try {
@@ -189,7 +228,12 @@ export default function RadialMenu() {
         currentMonitor(),
         appWindow.scaleFactor(),
       ]);
-      if (!monitor || request !== previewRequestRef.current) return null;
+      if (
+        !monitor
+        || request !== previewRequestRef.current
+        || dragActiveRef.current
+        || nativeDragRef.current
+      ) return null;
       originalWindowPositionRef.current = position;
       const expansion = calculateRadialExpansion({
         windowX: position.x,
@@ -200,7 +244,11 @@ export default function RadialMenu() {
       if (expansion.previewWidth <= 0) return null;
 
       const layout = { direction: expansion.direction, width: expansion.previewWidth };
-      const loadingState = { itemId, segments: null, layout };
+      const loadingState = {
+        itemId: item.id,
+        segments: null,
+        layout,
+      };
       previewRef.current = loadingState;
       setPreview(loadingState);
       await appWindow.setSize(new LogicalSize(
@@ -210,27 +258,36 @@ export default function RadialMenu() {
       if (expansion.direction === "left") {
         await appWindow.setPosition(new PhysicalPosition(expansion.windowX, position.y));
       }
-      if (request !== previewRequestRef.current) {
-        await appWindow.setSize(new LogicalSize(RADIAL_MENU_WIDTH, RADIAL_MENU_HEIGHT));
-        await appWindow.setPosition(position);
-        if (originalWindowPositionRef.current === position) {
-          originalWindowPositionRef.current = null;
+      if (
+        request !== previewRequestRef.current
+        || dragActiveRef.current
+        || nativeDragRef.current
+      ) {
+        if (!dragActiveRef.current && !nativeDragRef.current) {
+          await appWindow.setSize(new LogicalSize(RADIAL_MENU_WIDTH, RADIAL_MENU_HEIGHT));
+          await appWindow.setPosition(position);
+          if (originalWindowPositionRef.current === position) {
+            originalWindowPositionRef.current = null;
+          }
         }
         return null;
       }
       return layout;
     } catch {
+      const deferRestore = dragActiveRef.current || nativeDragRef.current;
       const originalPosition = originalWindowPositionRef.current;
-      originalWindowPositionRef.current = null;
+      if (!deferRestore) originalWindowPositionRef.current = null;
       if (request === previewRequestRef.current) {
         previewRef.current = null;
         setPreview(null);
       }
-      try {
-        await appWindow.setSize(new LogicalSize(RADIAL_MENU_WIDTH, RADIAL_MENU_HEIGHT));
-        if (originalPosition) await appWindow.setPosition(originalPosition);
-      } catch {
-        // 后端会在菜单下次打开时恢复紧凑尺寸。
+      if (!deferRestore) {
+        try {
+          await appWindow.setSize(new LogicalSize(RADIAL_MENU_WIDTH, RADIAL_MENU_HEIGHT));
+          if (originalPosition) await appWindow.setPosition(originalPosition);
+        } catch {
+          // 后端会在菜单下次打开时恢复紧凑尺寸。
+        }
       }
       return null;
     }
@@ -257,17 +314,35 @@ export default function RadialMenu() {
   }, []);
 
   const showPreview = useCallback(async (item: RadialItem) => {
+    if (dragActiveRef.current || nativeDragRef.current) return;
     const request = ++previewRequestRef.current;
-    const layout = await expandPreviewWindow(request, item.id);
-    if (!layout || request !== previewRequestRef.current) return;
+    const layout = await expandPreviewWindow(request, item);
+    if (
+      !layout
+      || request !== previewRequestRef.current
+      || dragActiveRef.current
+      || nativeDragRef.current
+    ) return;
     try {
       const segments = await loadPreviewSegments(item);
-      if (request !== previewRequestRef.current) return;
-      const loadedState = { itemId: item.id, segments, layout };
+      if (
+        request !== previewRequestRef.current
+        || dragActiveRef.current
+        || nativeDragRef.current
+      ) return;
+      const loadedState = {
+        itemId: item.id,
+        segments,
+        layout,
+      };
       previewRef.current = loadedState;
       setPreview(loadedState);
     } catch {
-      if (request !== previewRequestRef.current) return;
+      if (
+        request !== previewRequestRef.current
+        || dragActiveRef.current
+        || nativeDragRef.current
+      ) return;
       const failedState = {
         itemId: item.id,
         segments: [{ type: "text" as const, content: item.content }],
@@ -279,8 +354,9 @@ export default function RadialMenu() {
   }, [expandPreviewWindow, loadPreviewSegments]);
 
   const schedulePreview = useCallback((item: RadialItem, element: HTMLElement) => {
-    clearPreviewTimer();
-    if (previewRef.current) collapsePreview();
+    if (dragActiveRef.current || nativeDragRef.current) return;
+    invalidatePreviewRequest();
+    if (previewRef.current || originalWindowPositionRef.current) collapsePreview();
 
     const record = useClipboardStore.getState().records.find((entry) => entry.id === item.id);
     const text = element.querySelector<HTMLElement>(".radial-menu-item-text");
@@ -306,7 +382,7 @@ export default function RadialMenu() {
         void showPreview(item);
       }, CONTENT_PREVIEW_DELAY_MS);
     }
-  }, [clearPreviewTimer, collapsePreview, showPreview]);
+  }, [collapsePreview, invalidatePreviewRequest, showPreview]);
 
   useEffect(() => {
     // Initial theme load
@@ -405,22 +481,30 @@ export default function RadialMenu() {
     applyCategorySwitch(key);
   }, [applyCategorySwitch]);
 
-  const resetState = useCallback(() => {
+  const resetState = useCallback((preserveClickSuppression = false) => {
     collapsePreview();
+    dragActiveRef.current = false;
+    if (!preserveClickSuppression) suppressClickRef.current = false;
     visibleRef.current = false;
     setVisible(false);
     setSelectedItemId(null);
     selectedItemIdRef.current = null;
+    setDragSessionItemId(null);
+    setDraggingItemId(null);
+    nativeDragRef.current = null;
   }, [collapsePreview]);
 
   const updateHoverFromPoint = useCallback((cssX: number, cssY: number) => {
+    if (dragActiveRef.current || nativeDragRef.current) return;
     const el = document.elementFromPoint(cssX, cssY);
     if (!el) {
       selectedItemIdRef.current = null;
       setSelectedItemId(null);
       return;
     }
-    if ((el as HTMLElement).closest("[data-content-preview]")) return;
+    if ((el as HTMLElement).closest("[data-content-preview]")) {
+      return;
+    }
     const itemEl = (el as HTMLElement).closest("[data-radial-item-id]");
     if (itemEl) {
       const id = itemEl.getAttribute("data-radial-item-id");
@@ -448,6 +532,150 @@ export default function RadialMenu() {
     getCurrentWindow().hide();
   }, [resetState]);
 
+  const startRadialFileDrag = useCallback((pending: PendingNativeDrag) => {
+    if (pending.startRequested) return;
+
+    const next = { ...pending, startRequested: true };
+    nativeDragRef.current = next;
+    void invoke("start_radial_file_drag", {
+      source: next.dragSource,
+      id: next.itemId,
+      path: next.dragPath || null,
+    }).then(() => {
+      const current = nativeDragRef.current;
+      if (
+        !current
+        || current.pointerId !== next.pointerId
+        || current.itemId !== next.itemId
+      ) return;
+      void getCurrentWindow().hide();
+    }).catch((error) => {
+      const current = nativeDragRef.current;
+      if (
+        !current
+        || current.pointerId !== next.pointerId
+        || current.itemId !== next.itemId
+      ) return;
+      resetState(true);
+      void getCurrentWindow().hide();
+      console.error("Failed to start radial file drag:", error);
+    });
+  }, [resetState]);
+
+  const handleItemPointerDown = useCallback((
+    e: PointerEvent,
+  ) => {
+    if (
+      e.button !== 0
+      || !e.isPrimary
+      || dragActiveRef.current
+      || nativeDragRef.current
+    ) return;
+
+    const target = e.target instanceof Element
+      ? e.target.closest<HTMLElement>(
+          '[data-radial-item-id][data-radial-drag-kind="files"]',
+        )
+      : null;
+    const itemId = target?.dataset.radialItemId;
+    const dragSource = target?.dataset.radialDragSource as RadialDragSource | undefined;
+    if (
+      !target
+      || !itemId
+      || (dragSource !== "clipboard" && dragSource !== "phrase")
+    ) {
+      nativeDragRef.current = null;
+      setDragSessionItemId(null);
+      setDraggingItemId(null);
+      return;
+    }
+
+    suppressClickRef.current = false;
+    setDragSessionItemId(itemId);
+    const pending: PendingNativeDrag = {
+      itemId,
+      dragSource,
+      dragPath: target.dataset.radialDragPath || undefined,
+      pointerId: e.pointerId,
+      startX: e.clientX,
+      startY: e.clientY,
+      thresholdCrossed: false,
+      startRequested: false,
+    };
+    nativeDragRef.current = pending;
+    dismissPreviewForDrag();
+  }, [
+    dismissPreviewForDrag,
+  ]);
+
+  const handleItemPointerMove = useCallback((e: PointerEvent) => {
+    const pending = nativeDragRef.current;
+    if (!pending || pending.pointerId !== e.pointerId) return;
+    if (pending.thresholdCrossed) return;
+
+    const distance = Math.hypot(
+      e.clientX - pending.startX,
+      e.clientY - pending.startY,
+    );
+    if (distance < RADIAL_DRAG_THRESHOLD_PX) return;
+
+    suppressClickRef.current = true;
+    dragActiveRef.current = true;
+    const crossed = { ...pending, thresholdCrossed: true };
+    nativeDragRef.current = crossed;
+    setDraggingItemId(pending.itemId);
+    e.preventDefault();
+    startRadialFileDrag(crossed);
+  }, [startRadialFileDrag]);
+
+  const handleItemPointerUp = useCallback((e: PointerEvent) => {
+    const pending = nativeDragRef.current;
+    if (!pending || pending.pointerId !== e.pointerId) return;
+    if (pending.startRequested) return;
+
+    nativeDragRef.current = null;
+    dragActiveRef.current = false;
+    setDragSessionItemId(null);
+    setDraggingItemId(null);
+    if (previewRef.current || originalWindowPositionRef.current) {
+      collapsePreview();
+    }
+  }, [collapsePreview]);
+
+  const handleRadialDragFinished = useCallback(() => {
+    dragActiveRef.current = false;
+    nativeDragRef.current = null;
+    setDraggingItemId(null);
+    resetState(true);
+    void getCurrentWindow().hide();
+  }, [resetState]);
+
+  const handleDocumentPointerDown = useCallback((e: PointerEvent) => {
+    if (!visibleRef.current || e.button !== 0 || !e.isPrimary) return;
+    // 清掉上一次原生拖动为防止幽灵 click 留下的抑制标记。
+    suppressClickRef.current = false;
+    handleItemPointerDown(e);
+  }, [handleItemPointerDown]);
+
+  useEffect(() => {
+    document.addEventListener("pointerdown", handleDocumentPointerDown, {
+      capture: true,
+      passive: false,
+    });
+    document.addEventListener("pointermove", handleItemPointerMove, {
+      capture: true,
+      passive: false,
+    });
+    document.addEventListener("pointerup", handleItemPointerUp, true);
+    document.addEventListener("pointercancel", handleItemPointerUp, true);
+    return () => {
+      document.removeEventListener("pointerdown", handleDocumentPointerDown, true);
+      document.removeEventListener("pointermove", handleItemPointerMove, true);
+      document.removeEventListener("pointerup", handleItemPointerUp, true);
+      document.removeEventListener("pointercancel", handleItemPointerUp, true);
+    };
+  }, [handleDocumentPointerDown, handleItemPointerMove, handleItemPointerUp]);
+
   // Popup click handler: dismiss when clicking on empty space.
   // Items, nav tabs, and category chips all call stopPropagation on
   // their own onClick, so this only fires for truly unhandled clicks.
@@ -464,6 +692,11 @@ export default function RadialMenu() {
         originalWindowPositionRef.current = null;
         collapsePreview();
         previewCacheRef.current.clear();
+        dragActiveRef.current = false;
+        nativeDragRef.current = null;
+        suppressClickRef.current = false;
+        setDragSessionItemId(null);
+        setDraggingItemId(null);
         document.documentElement.setAttribute("data-theme", e.payload.theme);
         await loadPasteLeftClickSetting();
         visibleRef.current = true;
@@ -481,7 +714,8 @@ export default function RadialMenu() {
         usePhraseStore.getState().loadGroups();
       });
 
-      unlisteners = [unShow];
+      const unDragFinished = await listen("radial-drag-finished", handleRadialDragFinished);
+      unlisteners = [unShow, unDragFinished];
     };
 
     setup();
@@ -532,7 +766,11 @@ export default function RadialMenu() {
 
     // Blur: dismiss when window loses focus
     const handleBlur = () => {
-      if (visibleRef.current) {
+      if (
+        visibleRef.current
+        && !dragActiveRef.current
+        && !nativeDragRef.current
+      ) {
         resetState();
         getCurrentWindow().hide();
       }
@@ -550,7 +788,12 @@ export default function RadialMenu() {
       document.removeEventListener("wheel", handleWheel);
       window.removeEventListener("blur", handleBlur);
     };
-  }, [collapsePreview, resetState, updateHoverFromPoint]);
+  }, [
+    collapsePreview,
+    handleRadialDragFinished,
+    resetState,
+    updateHoverFromPoint,
+  ]);
 
   const records = useClipboardStore((s) => s.records);
   const phraseGroups = usePhraseStore((s) => s.groups);
@@ -588,6 +831,9 @@ export default function RadialMenu() {
         type: r.type,
         createdAt: r.created_at,
         contentTruncated: r.content_truncated,
+        dragKind: getClipboardRadialDragKind(r.type, r.has_images),
+        dragSource: "clipboard",
+        dragPath: r.drag_path,
       }))
     : activeTab === "resources"
       ? records
@@ -599,6 +845,9 @@ export default function RadialMenu() {
             type: r.type,
             createdAt: r.created_at,
             contentTruncated: r.content_truncated,
+            dragKind: getClipboardRadialDragKind(r.type, r.has_images),
+            dragSource: "clipboard",
+            dragPath: r.drag_path,
           }))
       : phrases.map((p) => ({
         id: p.id,
@@ -609,6 +858,9 @@ export default function RadialMenu() {
         imagePath:
           p.input_type === "file" && isImageFilePath(p.content) ? p.content : undefined,
         title: p.title,
+        dragKind: getPhraseRadialDragKind(p.input_type),
+        dragSource: "phrase",
+        dragPath: p.input_type === "file" ? p.content : undefined,
       }));
 
   const categories = activeTab === "clipboard"
@@ -631,12 +883,14 @@ export default function RadialMenu() {
   return (
     <div className={`radial-menu-overlay${visible ? "" : " radial-menu-hidden"}`}>
       <div
-        className={`radial-menu-popup${preview ? ` preview-open preview-${preview.layout.direction}` : ""}`}
+        className={`radial-menu-popup${preview ? ` preview-open preview-${preview.layout.direction}` : ""}${dragSessionItemId ? " drag-session" : ""}`}
         style={preview ? {
           "--radial-preview-width": `${preview.layout.width}px`,
         } as CSSProperties : undefined}
         onClick={handlePopupClick}
-        onMouseLeave={collapsePreview}
+        onMouseLeave={() => {
+          if (!dragActiveRef.current && !nativeDragRef.current) collapsePreview();
+        }}
       >
         <div className="radial-menu-main">
           <div className="radial-menu-nav">
@@ -674,14 +928,25 @@ export default function RadialMenu() {
               items.map((item) => (
                 <div
                   key={item.id}
-                  className={`radial-menu-item${selectedItemId === item.id ? " selected" : ""}${pendingPreviewId === item.id ? " preview-pending" : ""}`}
+                  className={`radial-menu-item${selectedItemId === item.id ? " selected" : ""}${pendingPreviewId === item.id ? " preview-pending" : ""}${draggingItemId === item.id ? " dragging" : ""}`}
                   data-radial-item-id={item.id}
-                  onMouseEnter={(e) => schedulePreview(item, e.currentTarget)}
+                  data-radial-drag-kind={item.dragKind}
+                  data-radial-drag-source={item.dragSource}
+                  data-radial-drag-path={item.dragPath}
+                  onMouseEnter={(e) => {
+                    schedulePreview(item, e.currentTarget);
+                  }}
                   onMouseLeave={() => {
-                    if (!previewRef.current) collapsePreview();
+                    if (!dragActiveRef.current && !nativeDragRef.current && !previewRef.current) {
+                      collapsePreview();
+                    }
                   }}
                   onClick={(e) => {
                     e.stopPropagation();
+                    if (suppressClickRef.current) {
+                      suppressClickRef.current = false;
+                      return;
+                    }
                     handleItemPaste(
                       item.id,
                       shouldUseTerminalPasteForMouseTrigger(

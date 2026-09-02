@@ -131,9 +131,15 @@ fn clipboard_record_json(
     group_name: String,
     attachments: String,
 ) -> serde_json::Value {
-    let has_images = serde_json::from_str::<Vec<String>>(&attachments)
-        .map(|paths| !paths.is_empty())
-        .unwrap_or(false);
+    let attachment_paths = serde_json::from_str::<Vec<String>>(&attachments).unwrap_or_default();
+    let has_images = !attachment_paths.is_empty();
+    let drag_path = attachment_paths.first().cloned().or_else(|| {
+        if rec_type == "image" || rec_type == "file" {
+            Some(content.clone())
+        } else {
+            None
+        }
+    });
     let content = if has_images && !group_name.is_empty() {
         crate::clipboard::stash_content_for_display(&content)
     } else {
@@ -160,6 +166,7 @@ fn clipboard_record_json(
         "user_api_key": user_api_key,
         "group_name": group_name,
         "has_images": has_images,
+        "drag_path": drag_path,
     })
 }
 

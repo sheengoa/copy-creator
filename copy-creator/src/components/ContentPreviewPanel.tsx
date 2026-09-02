@@ -50,6 +50,7 @@ function PreviewImage({ path }: { path: string }) {
       className="content-preview-image"
       src={src}
       alt={t("radialMenu.previewImage")}
+      draggable={false}
       onError={() => setFailed(true)}
     />
   );

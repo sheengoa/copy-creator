@@ -20,6 +20,7 @@ export interface ClipboardRecord {
   label?: ApiKeyLabel | null;
   group_name?: string;
   has_images?: boolean;
+  drag_path?: string;
 }
 
 export interface PhraseGroup {

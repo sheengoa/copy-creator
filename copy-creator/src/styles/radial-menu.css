@@ -204,6 +204,37 @@
   margin-bottom: 4px;
 }
 
+.radial-menu-item[data-radial-drag-kind="files"] {
+  position: relative;
+  align-self: stretch;
+  width: 100%;
+  box-sizing: border-box;
+  cursor: default;
+  touch-action: none;
+  user-select: none;
+  -webkit-user-drag: none;
+}
+
+.radial-menu-item[data-radial-drag-kind="files"] * {
+  cursor: default;
+  -webkit-user-drag: none;
+}
+
+.radial-menu-item[data-radial-drag-kind="files"].dragging {
+  cursor: grabbing;
+  opacity: 0.62;
+}
+
+.radial-menu-item[data-radial-drag-kind="files"].dragging * {
+  cursor: grabbing;
+}
+
+.radial-menu-popup.drag-session .content-preview-panel {
+  visibility: hidden;
+  pointer-events: none;
+  user-select: none;
+}
+
 .radial-menu-item:hover {
   background: var(--chip-hover-bg);
 }
