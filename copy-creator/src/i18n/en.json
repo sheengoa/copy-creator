@@ -200,6 +200,8 @@
   "radialMenu": {
     "empty": "No items",
     "previewTitle": "Full content",
+    "openPreview": "Open preview",
+    "closePreview": "Close preview",
     "previewImage": "Image in stashed content",
     "imageUnavailable": "Image unavailable"
   }

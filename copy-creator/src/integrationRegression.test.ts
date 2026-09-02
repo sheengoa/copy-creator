@@ -18,18 +18,9 @@ describe("integration regressions", () => {
     expect(delayedMainBlock).toContain("is_visible()");
 
     const shortcutSource = readSource("../src-tauri/src/shortcut.rs");
-    const refreshBlock = shortcutSource.slice(
-      shortcutSource.indexOf("fn refresh_always_on_top_if_visible"),
-      shortcutSource.indexOf("pub fn show_radial_menu"),
-    );
-    expect(refreshBlock).toContain("is_visible()");
-    expect(refreshBlock).not.toContain(".show()");
-
-    const delayedRadialBlock = shortcutSource.slice(
-      shortcutSource.indexOf("Duration::from_millis(60)"),
-      shortcutSource.indexOf("[show_radial_menu] shown"),
-    );
-    expect(delayedRadialBlock).toContain("refresh_always_on_top_if_visible");
+    expect(shortcutSource).not.toContain("refresh_always_on_top_if_visible");
+    expect(shortcutSource).not.toContain("Duration::from_millis(60)");
+    expect(shortcutSource).toContain("raise_always_on_top(&radial);");
   });
 
   it("keeps migrated clipboard schema compatible with current record fields", () => {
@@ -228,29 +219,65 @@ describe("integration regressions", () => {
     const dragSource = readSource("../src-tauri/src/radial_drag.rs");
     const libSource = readSource("../src-tauri/src/lib.rs");
     const radialMenu = readSource("./components/RadialMenu/index.tsx");
+    const pageSource = readSource("./pages/ClipboardPage/index.tsx");
+    const cardSource = readSource("./pages/ClipboardPage/ClipboardCard.tsx");
     const previewPanel = readSource("./components/ContentPreviewPanel.tsx");
     const radialStyles = readSource("./styles/radial-menu.css");
     const radialDrag = readSource("./utils/radialDrag.ts");
-    const startDragBlock = radialMenu.slice(
-      radialMenu.indexOf("const startRadialFileDrag"),
+    const pointerDownBlock = radialMenu.slice(
       radialMenu.indexOf("const handleItemPointerDown"),
+      radialMenu.indexOf("const handleItemPointerMove"),
+    );
+    const pointerMoveBlock = radialMenu.slice(
+      radialMenu.indexOf("const handleItemPointerMove"),
+      radialMenu.indexOf("const handleItemPointerUp"),
+    );
+    const pointerUpBlock = radialMenu.slice(
+      radialMenu.indexOf("const handleItemPointerUp"),
+      radialMenu.indexOf("const handleRadialDragStarted"),
+    );
+    const listenerBlock = radialMenu.slice(
+      radialMenu.indexOf("const setup = async () =>"),
+      radialMenu.indexOf("// Mouse move: update hover state"),
     );
     expect(dragSource).toContain("install_linux_drag_source");
     expect(dragSource).toContain("gtk_window()");
     expect(dragSource).toContain("connect_drag_end");
     expect(dragSource).toContain("connect_drag_begin");
-    expect(dragSource).toContain("window.drag_source_set(gdk::ModifierType::empty()");
+    expect(dragSource).not.toContain("drag_source_set(");
     expect(dragSource).not.toContain("connect_motion_notify_event");
     expect(dragSource).not.toContain("with_webview");
-    expect(dragSource).toContain("drag_source_add_uri_targets");
+    expect(dragSource).toContain("connect_event_after");
+    expect(dragSource).toContain("LINUX_POINTER_STATE");
+    expect(dragSource).toContain("begin_linux_drag_session");
+    expect(dragSource).toContain("seed_linux_pointer_press");
+    expect(dragSource).toContain("LinuxDragToken");
+    expect(dragSource).toContain("TargetList::new(&[])");
+    expect(dragSource).toContain("target_list.add_uri_targets(0)");
     expect(dragSource).not.toContain("TargetEntry::new");
     expect(dragSource).not.toContain("drag_source_set_target_list");
     expect(dragSource).toContain("gio::File::for_path");
     expect(dragSource).toContain("data.set_uris");
     expect(dragSource).toContain("gdk::DragAction::COPY");
     expect(dragSource).toContain("drag_begin_with_coordinates");
-    expect(dragSource).toContain("GDK_BUTTON1_MASK as i32");
+    expect(dragSource).toContain("claim_linux_drag");
+    expect(dragSource).toContain("pub async fn start_radial_file_drag");
+    expect(dragSource).toContain("run_on_main_thread");
+    expect(dragSource).toContain("tokio::sync::oneshot::channel");
+    expect(dragSource).toContain("GTK main-thread drag arm returned");
+    expect(dragSource).toContain(
+      "drag_begin_with_coordinates(&target_list, gdk::DragAction::COPY, 1, drag_event, -1, -1)",
+    );
+    expect(dragSource).toContain('"radial-drag-started"');
     expect(dragSource).not.toContain("text/plain");
+    expect(dragSource).toContain("screen_x: Option<f64>");
+    expect(dragSource).toContain("device_pixel_ratio: Option<f64>");
+    expect(dragSource).toContain("cancel_linux_drag(session_id)");
+    const cancelCommandBlock = dragSource.slice(
+      dragSource.indexOf("pub async fn cancel_radial_file_drag"),
+      dragSource.indexOf("pub async fn start_radial_file_drag"),
+    );
+    expect(cancelCommandBlock).not.toContain("run_on_main_thread");
     expect(radialMenu).not.toContain("getTextDragData");
     expect(radialMenu).not.toContain("onDragStart");
     expect(radialMenu).not.toContain("onDragEnd");
@@ -261,37 +288,95 @@ describe("integration regressions", () => {
     expect(radialMenu).toContain("document.addEventListener(\"pointerdown\"");
     expect(radialMenu).toContain("document.addEventListener(\"pointermove\"");
     expect(radialMenu).toContain("document.addEventListener(\"pointerup\"");
+    expect(radialMenu).not.toContain("const handleWheel");
+    expect(radialMenu).not.toContain('document.addEventListener("wheel"');
+    expect(radialMenu).not.toContain("scrollTop");
+    expect(radialMenu).toContain("e.preventDefault();");
+    expect(pointerMoveBlock.indexOf("e.preventDefault();")).toBeLessThan(
+      pointerMoveBlock.indexOf("if (pending.nativeStarted) return;"),
+    );
     expect(radialMenu).toContain("dismissPreviewForDrag");
-    expect(radialMenu).toContain("start_radial_file_drag");
-    expect(startDragBlock).not.toContain(".then(");
-    expect(startDragBlock).toContain(".catch(");
-    expect(radialMenu).not.toContain("arm_radial_file_drag");
-    expect(radialMenu).not.toContain("clear_radial_file_drag");
+    expect(radialMenu).toContain("startRadialFileDrag");
+    expect(radialMenu).toContain("nativeStarted");
+    expect(pointerMoveBlock).toContain("startRadialFileDrag(crossed)");
+    expect(pointerDownBlock).not.toContain("start_radial_file_drag");
+    expect(pointerDownBlock).toContain("sessionId:");
+    expect(pointerDownBlock).toContain("startScreenX:");
+    expect(pointerDownBlock).toContain("startScreenY:");
+    expect(pointerDownBlock).toContain("devicePixelRatio:");
+    expect(radialMenu).toContain("screenX: next.startScreenX");
+    expect(radialMenu).toContain("screenY: next.startScreenY");
+    expect(radialMenu).not.toContain("pendingReleaseTimerRef");
+    expect(pointerUpBlock).not.toContain("setTimeout");
+    expect(pointerMoveBlock).toContain("dragActiveRef.current = true");
+    expect(radialMenu).toContain("markRadialDragStarted");
+    expect(radialMenu).not.toContain("markRadialDragStarted(current)");
+    expect(listenerBlock).toContain("Promise.all");
+    expect(listenerBlock).toContain('"radial-drag-started"');
+    expect(listenerBlock).toContain('"radial-drag-finished"');
+    expect(listenerBlock).toContain("disposed");
+    expect(listenerBlock).not.toContain("await loadPasteLeftClickSetting()");
+    expect(listenerBlock).toContain("void loadPasteLeftClickSetting()");
+    expect(listenerBlock.indexOf("visibleRef.current = true;")).toBeLessThan(
+      listenerBlock.indexOf("void loadPasteLeftClickSetting();"),
+    );
+    expect(radialMenu).toContain(
+      "if (!dragActiveRef.current && !pending) return;",
+    );
     expect(radialMenu).not.toContain("syncDragCandidate");
     expect(radialMenu).not.toContain("radial-menu-drag-surface");
     expect(radialMenu).not.toContain("(e.buttons & 1)");
     expect(radialMenu).not.toContain("setPointerCapture");
     expect(radialMenu).not.toContain("releasePointerCapture");
+    expect(radialMenu).toContain("if (dragActiveRef.current || nativeDragRef.current)");
     expect(radialMenu).toContain("data-radial-drag-source={item.dragSource}");
     expect(radialMenu).toContain("data-radial-drag-path={item.dragPath}");
     expect(radialMenu).toContain('className="radial-menu-preview"');
+    expect(radialMenu).toContain("previewAvailable");
+    expect(radialMenu).toContain("data-radial-preview-trigger");
+    expect(radialMenu).toContain('closest("[data-radial-preview-trigger]")');
+    expect(radialMenu).toContain("{preview && (");
+    expect(radialMenu).toContain("const togglePreview = useCallback");
+    expect(radialMenu).toContain("aria-expanded={preview?.itemId === item.id}");
+    expect(radialMenu).not.toContain("schedulePreview");
+    expect(radialMenu).not.toContain("onMouseEnter={(e) =>");
+    expect(radialMenu).toContain("windowRestoreRef");
+    expect(pageSource).toContain("const togglePreview = useCallback");
+    expect(pageSource).toContain("onPreviewToggle={togglePreview}");
+    expect(pageSource).not.toContain("schedulePreview");
+    expect(cardSource).toContain("aria-expanded={previewOpen}");
+    expect(cardSource).toContain('className="notititle clipboard-card-footer"');
+    expect(cardSource.lastIndexOf('className="clipboard-preview-trigger"')).toBeGreaterThan(
+      cardSource.indexOf('className="notititle clipboard-card-footer"'),
+    );
+    const mainPreviewExpandBlock = pageSource.slice(
+      pageSource.indexOf("const expandPreviewWindow"),
+      pageSource.indexOf("const showPreview"),
+    );
+    expect(mainPreviewExpandBlock).toContain("if (windowRestoreRef.current) await windowRestoreRef.current;");
+    expect(mainPreviewExpandBlock).toContain("if (previewRestoringRef.current)");
+    expect(mainPreviewExpandBlock).not.toContain("await appWindow.setSize(innerSize);");
     expect(previewPanel).toContain("draggable={false}");
     expect(radialStyles).toContain("cursor: default");
     expect(radialStyles).toContain("touch-action: none");
+    expect(radialStyles).toContain("overscroll-behavior: contain");
     expect(radialStyles).toContain("align-self: stretch");
     expect(radialStyles).toContain("width: 100%");
     expect(radialStyles).not.toContain("cursor: grab;");
     expect(radialStyles).toContain("cursor: grabbing");
+    expect(radialStyles).toContain(".radial-menu-preview-trigger");
+    expect(radialStyles).toContain("bottom: 8px");
+    expect(radialStyles).not.toContain("top: 8px;\n  right: 8px;");
+    expect(radialStyles).toContain("padding-right: 48px");
+    expect(radialStyles).toContain("prefers-reduced-motion: reduce");
     expect(radialStyles).toContain(".radial-menu-popup.drag-session .content-preview-panel");
     expect(radialDrag).not.toContain('RadialDragKind = "text"');
     expect(libSource).toContain("start_radial_file_drag");
     expect(libSource).toContain("install_radial_file_drag_source");
     expect(libSource).not.toContain("prepare_radial_file_drag");
-    expect(libSource).not.toContain("reset_radial_drag_candidate");
-    expect(libSource).not.toContain("arm_radial_file_drag");
     expect(libSource).not.toContain("clear_radial_file_drag");
+    expect(libSource).not.toContain("reset_radial_drag_candidate");
     expect(libSource).not.toContain("initialize_linux_drag");
-    expect(libSource).not.toContain("cancel_radial_file_drag");
-    expect(dragSource).not.toContain("radial-drag-started");
+    expect(libSource).toContain("cancel_radial_file_drag");
   });
 });

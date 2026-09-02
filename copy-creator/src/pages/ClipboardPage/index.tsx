@@ -37,8 +37,6 @@ import { ContentPreviewPanel } from "../../components/ContentPreviewPanel";
 import { loadClipboardPreviewSegments } from "../../utils/contentPreview";
 import {
   calculatePreviewExpansion,
-  CONTENT_PREVIEW_DELAY_MS,
-  shouldScheduleContentPreview,
   type RadialPreviewDirection,
   type RadialPreviewSegment,
 } from "../../utils/radialPreview";
@@ -135,7 +133,6 @@ export default function ClipboardPage({ resourcesOnly = false }: ClipboardPagePr
 
   const categoriesScrollRef = useRef<HTMLDivElement>(null);
   const clipboardListRef = useRef<HTMLDivElement>(null);
-  const previewTimerRef = useRef<number | null>(null);
   const previewRequestRef = useRef(0);
   const previewRef = useRef<ClipboardPreviewState | null>(null);
   const previewRestoringRef = useRef(false);
@@ -144,7 +141,6 @@ export default function ClipboardPage({ resourcesOnly = false }: ClipboardPagePr
   const originalWindowGeometryRef = useRef<OriginalWindowGeometry | null>(null);
   const windowRestoreRef = useRef<Promise<void> | null>(null);
   const previewCacheRef = useRef(new Map<string, RadialPreviewSegment[]>());
-  const [pendingPreviewId, setPendingPreviewId] = useState<string | null>(null);
   const [contentPreview, setContentPreview] = useState<ClipboardPreviewState | null>(null);
 
   useEffect(() => {
@@ -396,14 +392,6 @@ export default function ClipboardPage({ resourcesOnly = false }: ClipboardPagePr
     return () => clearTimeout(timer);
   }, [loadRecords, resourcesOnly, search]);
 
-  const clearPreviewTimer = useCallback(() => {
-    if (previewTimerRef.current !== null) {
-      window.clearTimeout(previewTimerRef.current);
-      previewTimerRef.current = null;
-    }
-    setPendingPreviewId(null);
-  }, []);
-
   const finishMainPreviewRestore = useCallback(() => {
     if (!previewRestoringRef.current || !restoreFinishedRef.current) return;
     if (previewRef.current || contentPreviewRef.current) return;
@@ -433,17 +421,21 @@ export default function ClipboardPage({ resourcesOnly = false }: ClipboardPagePr
   }, []);
 
   const collapsePreview = useCallback(() => {
-    clearPreviewTimer();
-    if (previewRestoringRef.current) return;
-
     const request = ++previewRequestRef.current;
     previewRef.current = null;
+    setContentPreview(null);
+
+    const restoreTask = windowRestoreRef.current
+      ?? (originalWindowGeometryRef.current ? restoreMainWindow() : null);
+    if (!restoreTask) {
+      previewRestoringRef.current = false;
+      restoreFinishedRef.current = false;
+      clearMainPreviewLayout();
+      return;
+    }
     previewRestoringRef.current = true;
     restoreFinishedRef.current = false;
-    setContentPreview(null);
     markMainPreviewRestoring();
-
-    const restoreTask = windowRestoreRef.current ?? restoreMainWindow();
     windowRestoreRef.current = restoreTask;
     void restoreTask.finally(() => {
       if (windowRestoreRef.current === restoreTask) windowRestoreRef.current = null;
@@ -451,7 +443,7 @@ export default function ClipboardPage({ resourcesOnly = false }: ClipboardPagePr
       restoreFinishedRef.current = true;
       finishMainPreviewRestore();
     });
-  }, [clearPreviewTimer, finishMainPreviewRestore, restoreMainWindow]);
+  }, [finishMainPreviewRestore, restoreMainWindow]);
 
   const expandPreviewWindow = useCallback(async (
     request: number,
@@ -459,6 +451,12 @@ export default function ClipboardPage({ resourcesOnly = false }: ClipboardPagePr
   ): Promise<PreviewLayout | null> => {
     if (windowRestoreRef.current) await windowRestoreRef.current;
     if (request !== previewRequestRef.current) return null;
+    if (previewRestoringRef.current) {
+      previewRestoringRef.current = false;
+      restoreFinishedRef.current = false;
+      clearMainPreviewLayout();
+    }
+    if (previewRef.current) return previewRef.current.layout;
 
     const appWindow = getCurrentWindow();
     try {
@@ -471,8 +469,6 @@ export default function ClipboardPage({ resourcesOnly = false }: ClipboardPagePr
       ]);
       if (!monitor || request !== previewRequestRef.current) return null;
 
-      const geometry = { position, size: innerSize };
-      originalWindowGeometryRef.current = geometry;
       const scale = Math.max(scaleFactor, 0.1);
       const mainWidth = innerSize.width / scale;
       const expansion = calculatePreviewExpansion({
@@ -484,6 +480,8 @@ export default function ClipboardPage({ resourcesOnly = false }: ClipboardPagePr
       });
       if (expansion.previewWidth <= 0) return null;
 
+      const geometry = { position, size: innerSize };
+      originalWindowGeometryRef.current = geometry;
       const layout = { direction: expansion.direction, width: expansion.previewWidth };
       // 在调整原生窗口前锁定主页面宽度，避免收起时短暂按变化中的视口宽度重排。
       document.documentElement.style.setProperty("--main-content-preview-main-width", `${mainWidth}px`);
@@ -499,17 +497,14 @@ export default function ClipboardPage({ resourcesOnly = false }: ClipboardPagePr
         await appWindow.setPosition(new PhysicalPosition(expansion.windowX, position.y));
       }
       if (request !== previewRequestRef.current) {
-        originalWindowGeometryRef.current = null;
-        await appWindow.setSize(innerSize);
-        await appWindow.setPosition(position);
         return null;
       }
 
       return layout;
     } catch {
-      const geometry = originalWindowGeometryRef.current;
-      originalWindowGeometryRef.current = null;
       const isCurrentRequest = request === previewRequestRef.current;
+      const geometry = isCurrentRequest ? originalWindowGeometryRef.current : null;
+      if (isCurrentRequest) originalWindowGeometryRef.current = null;
       if (isCurrentRequest) {
         previewRef.current = null;
         previewRestoringRef.current = true;
@@ -534,7 +529,6 @@ export default function ClipboardPage({ resourcesOnly = false }: ClipboardPagePr
   }, [finishMainPreviewRestore]);
 
   const showPreview = useCallback(async (record: typeof records[number]) => {
-    if (previewRestoringRef.current) return;
     const request = ++previewRequestRef.current;
     const layout = await expandPreviewWindow(request, record.id);
     if (!layout || request !== previewRequestRef.current) return;
@@ -561,35 +555,16 @@ export default function ClipboardPage({ resourcesOnly = false }: ClipboardPagePr
     }
   }, [expandPreviewWindow]);
 
-  const schedulePreview = useCallback((
-    record: typeof records[number],
-    element: HTMLElement,
-  ) => {
-    clearPreviewTimer();
-    if (previewRestoringRef.current) return;
-    if (previewRef.current?.recordId === record.id) return;
-    if (previewRef.current) collapsePreview();
-
-    const isClipped = element.scrollHeight > element.clientHeight + 1;
-    if (!shouldScheduleContentPreview({
-      type: record.type,
-      contentTruncated: record.content_truncated,
-      hasImages: record.has_images,
-    }, isClipped)) return;
-
-    setPendingPreviewId(record.id);
-    previewTimerRef.current = window.setTimeout(() => {
-      previewTimerRef.current = null;
-      setPendingPreviewId(null);
-      void showPreview(record);
-    }, CONTENT_PREVIEW_DELAY_MS);
-  }, [clearPreviewTimer, collapsePreview, showPreview]);
-
-  const handlePreviewLeave = useCallback((event: React.MouseEvent<HTMLElement>) => {
-    if (!previewRef.current) {
-      clearPreviewTimer();
+  const togglePreview = useCallback((record: typeof records[number]) => {
+    if (previewRef.current?.recordId === record.id) {
+      collapsePreview();
       return;
     }
+    void showPreview(record);
+  }, [collapsePreview, showPreview]);
+
+  const handlePreviewLeave = useCallback((event: React.MouseEvent<HTMLElement>) => {
+    if (!previewRef.current) return;
 
     const relatedTarget = event.relatedTarget;
     if (relatedTarget instanceof Element) {
@@ -598,7 +573,7 @@ export default function ClipboardPage({ resourcesOnly = false }: ClipboardPagePr
       if (currentCard && relatedTarget.closest(".clipboard-card") === currentCard) return;
     }
     collapsePreview();
-  }, [clearPreviewTimer, collapsePreview]);
+  }, [collapsePreview]);
 
   useEffect(() => {
     const handleWindowExit = () => collapsePreview();
@@ -629,7 +604,6 @@ export default function ClipboardPage({ resourcesOnly = false }: ClipboardPagePr
   }, [collapsePreview]);
 
   useEffect(() => () => {
-    if (previewTimerRef.current !== null) window.clearTimeout(previewTimerRef.current);
     previewRequestRef.current += 1;
     void restoreMainWindow().finally(clearMainPreviewLayout);
   }, [restoreMainWindow]);
@@ -928,8 +902,8 @@ export default function ClipboardPage({ resourcesOnly = false }: ClipboardPagePr
                   selectionMode={isSelecting}
                   selected={isSelected(r.id)}
                   onToggleSelected={toggleSelected}
-                  previewPending={pendingPreviewId === r.id}
-                  onPreviewEnter={schedulePreview}
+                  previewOpen={contentPreview?.recordId === r.id}
+                  onPreviewToggle={togglePreview}
                   onPreviewLeave={handlePreviewLeave}
                 />
               ))}

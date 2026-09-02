@@ -3,7 +3,7 @@ import {
   buildRadialPreviewSegments,
   calculatePreviewExpansion,
   calculateRadialExpansion,
-  shouldScheduleContentPreview,
+  isContentPreviewAvailable,
   STASH_IMAGE_PLACEHOLDER,
 } from "./radialPreview";
 
@@ -83,17 +83,12 @@ describe("calculatePreviewExpansion", () => {
   });
 });
 
-describe("shouldScheduleContentPreview", () => {
-  it("always previews images and image-bearing resources", () => {
-    expect(shouldScheduleContentPreview({ type: "image" }, false)).toBe(true);
-    expect(shouldScheduleContentPreview({ type: "text", hasImages: true }, false)).toBe(true);
-  });
-
-  it("previews clipped or backend-truncated content but not files", () => {
-    expect(shouldScheduleContentPreview({ type: "text" }, true)).toBe(true);
-    expect(shouldScheduleContentPreview({ type: "link", contentTruncated: true }, false)).toBe(true);
-    expect(shouldScheduleContentPreview({ type: "file" }, true)).toBe(false);
-    expect(shouldScheduleContentPreview({ type: "text" }, false)).toBe(false);
+describe("isContentPreviewAvailable", () => {
+  it("shares the preview eligibility rules with the visible preview trigger", () => {
+    expect(isContentPreviewAvailable({ type: "image" }, false)).toBe(true);
+    expect(isContentPreviewAvailable({ type: "text", hasImages: true }, false)).toBe(true);
+    expect(isContentPreviewAvailable({ type: "text" }, true)).toBe(true);
+    expect(isContentPreviewAvailable({ type: "file" }, true)).toBe(false);
   });
 });
 

@@ -3,7 +3,6 @@ export const RADIAL_MENU_HEIGHT = 650;
 export const RADIAL_PREVIEW_WIDTH = 440;
 export const RADIAL_PREVIEW_MIN_WIDTH = 260;
 export const STASH_IMAGE_PLACEHOLDER = "\uFFFC";
-export const CONTENT_PREVIEW_DELAY_MS = 800;
 
 export type RadialPreviewDirection = "left" | "right";
 
@@ -34,7 +33,7 @@ interface ContentPreviewCandidate {
   hasImages?: boolean;
 }
 
-export function shouldScheduleContentPreview(
+export function isContentPreviewAvailable(
   candidate: ContentPreviewCandidate,
   isClipped: boolean,
 ) {

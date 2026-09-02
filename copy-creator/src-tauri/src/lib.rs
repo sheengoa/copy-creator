@@ -307,6 +307,8 @@ pub fn run() {
             paste::paste_image_file,
             paste::paste_stash_record,
             paste::paste_file,
+            radial_drag::arm_radial_file_drag,
+            radial_drag::cancel_radial_file_drag,
             radial_drag::start_radial_file_drag,
             db::get_image_base64,
             db::get_image_thumbnail,

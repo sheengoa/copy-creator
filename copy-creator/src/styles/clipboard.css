@@ -270,6 +270,50 @@
   padding: 0.65rem 0.5rem 0.3rem 1rem;
 }
 
+.clipboard-preview-trigger {
+  position: relative !important;
+  pointer-events: none;
+  transform: scale(0.78);
+}
+
+.clipboard-card:hover .clipboard-preview-trigger,
+.clipboard-card:focus-within .clipboard-preview-trigger {
+  opacity: 1;
+  transform: scale(1);
+  pointer-events: auto;
+}
+
+.clipboard-preview-trigger:hover {
+  background: var(--chip-hover-bg) !important;
+  color: var(--text-primary) !important;
+}
+
+.clipboard-preview-trigger:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+
+.clipboard-preview-trigger svg {
+  width: 15px;
+  height: 15px;
+}
+
+[data-theme="dark"] .clipboard-preview-trigger {
+  background: var(--card-inner-bg) !important;
+  color: rgba(255, 255, 255, 0.72) !important;
+}
+
+[data-theme="dark"] .clipboard-preview-trigger:hover {
+  background: var(--chip-hover-bg) !important;
+  color: #fff !important;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .clipboard-preview-trigger {
+    transition: none;
+  }
+}
+
 .clipboard-card.is-selection-mode .clipboard-card-header {
   padding-inline-start: 42px;
 }
@@ -282,10 +326,6 @@
 .clipboard-card-body.is-content-summary {
   max-height: calc(1.5em * 4);
   overflow: hidden;
-}
-
-.clipboard-card.preview-pending {
-  background: color-mix(in srgb, var(--accent) 4%, var(--card-inner-bg));
 }
 
 .clipboard-card-footer {
@@ -314,6 +354,58 @@
   align-items: center;
   flex-shrink: 0;
   gap: 2px;
+}
+
+.clipboard-card-actions > .clipboard-preview-trigger,
+.clipboard-card-actions > .drag-handle,
+.clipboard-card-actions > .card-delete-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  box-sizing: border-box;
+  flex: 0 0 28px;
+  width: 28px !important;
+  height: 28px;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  border-radius: 6px;
+  background: transparent !important;
+  color: var(--text-tertiary);
+  opacity: 0;
+  transition:
+    opacity 140ms ease-out,
+    transform 140ms cubic-bezier(0.16, 1, 0.3, 1),
+    background 120ms ease-out,
+    color 120ms ease-out;
+}
+
+.clipboard-card:hover .clipboard-card-actions > .clipboard-preview-trigger,
+.clipboard-card:hover .clipboard-card-actions > .drag-handle,
+.clipboard-card:hover .clipboard-card-actions > .card-delete-btn,
+.clipboard-card:focus-within .clipboard-card-actions > .clipboard-preview-trigger,
+.clipboard-card:focus-within .clipboard-card-actions > .drag-handle,
+.clipboard-card:focus-within .clipboard-card-actions > .card-delete-btn {
+  opacity: 0.5;
+}
+
+.clipboard-card-actions > .clipboard-preview-trigger:hover,
+.clipboard-card-actions > .drag-handle:hover,
+.clipboard-card-actions > .card-delete-btn:hover {
+  opacity: 1;
+  background: var(--chip-hover-bg) !important;
+  color: var(--text-primary);
+}
+
+.clipboard-card-actions > .card-delete-btn:hover {
+  color: rgb(220, 38, 38);
+}
+
+.clipboard-card-actions > .clipboard-preview-trigger svg,
+.clipboard-card-actions > .drag-handle svg,
+.clipboard-card-actions > .card-delete-btn svg {
+  width: 15px;
+  height: 15px;
 }
 
 .main-window-content-preview {

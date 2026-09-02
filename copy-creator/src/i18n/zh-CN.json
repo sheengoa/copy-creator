@@ -199,6 +199,8 @@
   "radialMenu": {
     "empty": "暂无内容",
     "previewTitle": "完整内容",
+    "openPreview": "展开预览",
+    "closePreview": "收起预览",
     "previewImage": "暂存内容中的图片",
     "imageUnavailable": "图片无法加载"
   }

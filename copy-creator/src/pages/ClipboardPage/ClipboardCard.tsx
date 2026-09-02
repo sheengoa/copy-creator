@@ -2,6 +2,9 @@ import { useSortable } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
 import { useCallback, useState, useEffect, useRef } from "react";
 import { invoke } from "@tauri-apps/api/core";
+import IconButton from "@mui/material/IconButton";
+import CloseFullscreenIcon from "@mui/icons-material/CloseFullscreen";
+import OpenInFullIcon from "@mui/icons-material/OpenInFull";
 import { useTranslation } from "react-i18next";
 import type { ClipboardRecord } from "../../types";
 import { Icons } from "../../components/Icons";
@@ -11,6 +14,7 @@ import ApiKeyLabelPanel from "./ApiKeyLabelPanel";
 import { HighlightText } from "../../components/HighlightText";
 import { useClipboardStore } from "../../stores/clipboardStore";
 import { shouldUseTerminalPasteForMouseTrigger } from "../../utils/pasteMode";
+import { isContentPreviewAvailable } from "../../utils/radialPreview";
 
 interface ClipboardCardProps {
   record: ClipboardRecord;
@@ -24,8 +28,8 @@ interface ClipboardCardProps {
   selectionMode: boolean;
   selected: boolean;
   onToggleSelected: (id: string) => void;
-  previewPending: boolean;
-  onPreviewEnter: (record: ClipboardRecord, element: HTMLElement) => void;
+  previewOpen: boolean;
+  onPreviewToggle: (record: ClipboardRecord) => void;
   onPreviewLeave: (event: React.MouseEvent<HTMLElement>) => void;
 }
 
@@ -114,8 +118,8 @@ function ClipboardCardInner({
   selectionMode,
   selected,
   onToggleSelected,
-  previewPending,
-  onPreviewEnter,
+  previewOpen,
+  onPreviewToggle,
   onPreviewLeave,
 }: ClipboardCardProps) {
   const { t } = useTranslation();
@@ -135,6 +139,11 @@ function ClipboardCardInner({
   };
 
   const meta = TYPE_META[record.type] || TYPE_META.text;
+  const previewAvailable = isContentPreviewAvailable({
+    type: record.type,
+    contentTruncated: record.content_truncated,
+    hasImages: record.has_images,
+  }, record.content.length > 300);
   const [ctxMenu, setCtxMenu] = useState<{ x: number; y: number } | null>(null);
   const [labelOpen, setLabelOpen] = useState(false);
   const ctxRef = useRef<HTMLDivElement>(null);
@@ -245,7 +254,7 @@ function ClipboardCardInner({
   return (
     <div
       ref={setNodeRef}
-      className={`notification clipboard-card type-${record.type}${record.is_api_key ? " has-api-key" : ""}${isUnlabeled ? " api-key-unlabeled" : ""}${hasLabel ? " api-key-labeled" : ""}${isDragging ? " is-dragging" : ""}${selectionMode ? " is-selection-mode" : ""}${selected ? " is-selected" : ""}${previewPending ? " preview-pending" : ""}`}
+      className={`notification clipboard-card type-${record.type}${record.is_api_key ? " has-api-key" : ""}${isUnlabeled ? " api-key-unlabeled" : ""}${hasLabel ? " api-key-labeled" : ""}${isDragging ? " is-dragging" : ""}${selectionMode ? " is-selection-mode" : ""}${selected ? " is-selected" : ""}${previewAvailable && !selectionMode ? " has-preview-trigger" : ""}`}
       style={{ ...sortableStyle, "--color": meta.color, "--enter-delay": index } as React.CSSProperties}
       onClick={selectionMode ? () => onToggleSelected(record.id) : handlePaste}
       onContextMenu={selectionMode ? (e) => { e.preventDefault(); e.stopPropagation(); } : handleContextMenu}
@@ -285,9 +294,6 @@ function ClipboardCardInner({
 
         <div
           className={`notibody clipboard-card-body${record.type === "image" ? "" : " is-content-summary"}`}
-          onMouseEnter={(e) => {
-            if (!selectionMode && !isDragging) onPreviewEnter(record, e.currentTarget);
-          }}
         >
           {record.type === "image" ? (
             <ImageThumb
@@ -325,6 +331,28 @@ function ClipboardCardInner({
           <div className="clipboard-card-actions">
             {!selectionMode && (
               <>
+                {previewAvailable && (
+                  <IconButton
+                    className="clipboard-preview-trigger"
+                    type="button"
+                    size="small"
+                    disableRipple
+                    aria-expanded={previewOpen}
+                    aria-label={t(previewOpen ? "radialMenu.closePreview" : "radialMenu.openPreview")}
+                    title={t(previewOpen ? "radialMenu.closePreview" : "radialMenu.openPreview")}
+                    onClick={(e) => {
+                      e.preventDefault();
+                      e.stopPropagation();
+                      onPreviewToggle(record);
+                    }}
+                  >
+                    {previewOpen ? (
+                      <CloseFullscreenIcon fontSize="inherit" />
+                    ) : (
+                      <OpenInFullIcon fontSize="inherit" />
+                    )}
+                  </IconButton>
+                )}
                 <span ref={setActivatorNodeRef} className="drag-handle" {...attributes} {...listeners}>
                   <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor">
                     <circle cx="9" cy="5" r="1.5" />

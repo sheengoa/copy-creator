@@ -105,14 +105,6 @@ fn raise_always_on_top(window: &tauri::WebviewWindow) {
     let _ = window.set_focus();
 }
 
-fn refresh_always_on_top_if_visible(window: &tauri::WebviewWindow) {
-    if window.is_visible().unwrap_or(false) {
-        let _ = window.set_always_on_top(false);
-        let _ = window.set_always_on_top(true);
-        let _ = window.set_focus();
-    }
-}
-
 pub fn show_radial_menu(app: &AppHandle) {
     if let Some(radial) = app.get_webview_window("radial-menu") {
         if radial.is_visible().unwrap_or(false) {
@@ -141,14 +133,6 @@ pub fn show_radial_menu(app: &AppHandle) {
                 "theme": theme
             }),
         );
-
-        let app_handle = app.clone();
-        std::thread::spawn(move || {
-            std::thread::sleep(std::time::Duration::from_millis(60));
-            if let Some(radial) = app_handle.get_webview_window("radial-menu") {
-                refresh_always_on_top_if_visible(&radial);
-            }
-        });
 
         log::info!(
             "[show_radial_menu] shown at ({}, {}) theme={}",

@@ -170,10 +170,7 @@
   overflow-y: auto;
   overflow-x: hidden;
   padding: 12px;
-}
-
-.radial-menu-item.preview-pending {
-  background: var(--chip-hover-bg);
+  overscroll-behavior: contain;
 }
 
 .radial-menu-list::-webkit-scrollbar {
@@ -195,6 +192,7 @@
 
 /* --- Item --- */
 .radial-menu-item {
+  position: relative;
   display: flex;
   flex-direction: column;
   padding: 12px 14px;
@@ -205,7 +203,6 @@
 }
 
 .radial-menu-item[data-radial-drag-kind="files"] {
-  position: relative;
   align-self: stretch;
   width: 100%;
   box-sizing: border-box;
@@ -217,7 +214,12 @@
 
 .radial-menu-item[data-radial-drag-kind="files"] * {
   cursor: default;
+  touch-action: none;
   -webkit-user-drag: none;
+}
+
+.radial-menu-item[data-radial-drag-kind="files"] .radial-menu-preview-trigger {
+  cursor: pointer;
 }
 
 .radial-menu-item[data-radial-drag-kind="files"].dragging {
@@ -262,6 +264,70 @@
 
 .radial-menu-item.selected .radial-menu-item-text {
   font-weight: var(--weight-medium);
+}
+
+.radial-menu-item.has-preview-trigger {
+  padding-right: 48px;
+}
+
+.radial-menu-preview-trigger {
+  position: absolute !important;
+  bottom: 8px;
+  right: 8px;
+  z-index: 2;
+  width: 28px !important;
+  height: 28px !important;
+  padding: 0 !important;
+  border: 0 !important;
+  border-radius: 6px !important;
+  background: var(--chip-bg) !important;
+  color: var(--text-secondary) !important;
+  opacity: 0;
+  transform: scale(0.78);
+  pointer-events: none;
+  transition:
+    opacity 140ms ease-out,
+    transform 140ms cubic-bezier(0.16, 1, 0.3, 1),
+    background 120ms ease-out,
+    color 120ms ease-out;
+}
+
+.radial-menu-item:hover .radial-menu-preview-trigger,
+.radial-menu-item:focus-within .radial-menu-preview-trigger {
+  opacity: 1;
+  transform: scale(1);
+  pointer-events: auto;
+}
+
+.radial-menu-preview-trigger:hover {
+  background: var(--chip-hover-bg) !important;
+  color: var(--text-primary) !important;
+}
+
+.radial-menu-preview-trigger:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+
+.radial-menu-preview-trigger svg {
+  width: 12px;
+  height: 12px;
+}
+
+[data-theme="dark"] .radial-menu-preview-trigger {
+  background: rgba(255, 255, 255, 0.1) !important;
+  color: rgba(255, 255, 255, 0.72) !important;
+}
+
+[data-theme="dark"] .radial-menu-preview-trigger:hover {
+  background: rgba(255, 255, 255, 0.16) !important;
+  color: #fff !important;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .radial-menu-preview-trigger {
+    transition: none;
+  }
 }
 
 /* --- Item Time & Remark --- */
