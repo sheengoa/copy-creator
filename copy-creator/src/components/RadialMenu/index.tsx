@@ -541,14 +541,6 @@ export default function RadialMenu() {
       source: next.dragSource,
       id: next.itemId,
       path: next.dragPath || null,
-    }).then(() => {
-      const current = nativeDragRef.current;
-      if (
-        !current
-        || current.pointerId !== next.pointerId
-        || current.itemId !== next.itemId
-      ) return;
-      void getCurrentWindow().hide();
     }).catch((error) => {
       const current = nativeDragRef.current;
       if (

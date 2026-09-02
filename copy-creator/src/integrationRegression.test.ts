@@ -231,6 +231,10 @@ describe("integration regressions", () => {
     const previewPanel = readSource("./components/ContentPreviewPanel.tsx");
     const radialStyles = readSource("./styles/radial-menu.css");
     const radialDrag = readSource("./utils/radialDrag.ts");
+    const startDragBlock = radialMenu.slice(
+      radialMenu.indexOf("const startRadialFileDrag"),
+      radialMenu.indexOf("const handleItemPointerDown"),
+    );
     expect(dragSource).toContain("install_linux_drag_source");
     expect(dragSource).toContain("gtk_window()");
     expect(dragSource).toContain("connect_drag_end");
@@ -259,6 +263,8 @@ describe("integration regressions", () => {
     expect(radialMenu).toContain("document.addEventListener(\"pointerup\"");
     expect(radialMenu).toContain("dismissPreviewForDrag");
     expect(radialMenu).toContain("start_radial_file_drag");
+    expect(startDragBlock).not.toContain(".then(");
+    expect(startDragBlock).toContain(".catch(");
     expect(radialMenu).not.toContain("arm_radial_file_drag");
     expect(radialMenu).not.toContain("clear_radial_file_drag");
     expect(radialMenu).not.toContain("syncDragCandidate");
