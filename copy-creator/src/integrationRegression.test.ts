@@ -227,7 +227,7 @@ describe("integration regressions", () => {
     expect(resourcePage).toContain("resource-library-page");
     expect(resourcePage).toContain("resource-mode-tabs");
     expect(resourcePage).toContain("<ResourceCard");
-    expect(resourcePage).toContain("<ResourceQuickPreview");
+    expect(resourcePage).not.toContain("ResourceQuickPreview");
     expect(resourcePage).toContain("<ResourceDetailPage");
     expect(resourcePage).toContain('loadRecords(false, "resources")');
     expect(radialMenu).toContain('["clipboard", "phrases", "resources"]');
@@ -239,18 +239,14 @@ describe("integration regressions", () => {
     expect(radialMenu).not.toContain("previewAvailable: true");
   });
 
-  it("keeps resource previews and batch selection aligned with current records", () => {
+  it("keeps resource detail flow and batch selection aligned with current records", () => {
     const pageSource = readSource("./pages/ResourcePage.tsx");
-    const quickPreviewSource = readSource("./pages/ResourcePage/ResourceQuickPreview.tsx");
+    const cardSource = readSource("./pages/ResourcePage/ResourceCard.tsx");
     const detailPageSource = readSource("./pages/ResourcePage/ResourceDetailPage.tsx");
     const clipboardSource = readSource("../src-tauri/src/clipboard.rs");
     const createBlock = clipboardSource.slice(
       clipboardSource.indexOf("pub fn create_clipboard_record"),
       clipboardSource.indexOf("fn make_text_event_content"),
-    );
-    const quickLoaderBlock = quickPreviewSource.slice(
-      quickPreviewSource.indexOf("async function loadPreviewData"),
-      quickPreviewSource.indexOf("function ResourceFilePreview"),
     );
     const detailLoaderBlock = detailPageSource.slice(
       detailPageSource.indexOf("useEffect(() =>"),
@@ -264,8 +260,8 @@ describe("integration regressions", () => {
     expect(pageSource).toContain("busy={selectingAll || deletingSelected}");
     expect(pageSource).toContain("index={renderedRecordIndexes.get(record.id) ?? 0}");
     expect(pageSource).toContain("{confirmDialog}");
-    expect(quickLoaderBlock).toContain('|| kind === "image"');
-    expect(quickPreviewSource).toContain("<ResourceImage");
+    expect(cardSource).toContain("onOpenDetail");
+    expect(cardSource).not.toContain("onTogglePreview");
     expect(detailLoaderBlock).toContain('|| kind === "image"');
     expect(detailPageSource).toContain("<ResourceImage");
     expect(createBlock).toContain("let group_name = group_name.unwrap_or_default();");
@@ -304,14 +300,14 @@ describe("integration regressions", () => {
     expect(createDialog).not.toContain("storageLocation");
   });
 
-  it("keeps the resource mode switch from leaking selection or preview state", () => {
+  it("keeps the resource mode switch from leaking selection state", () => {
     const pageSource = readSource("./pages/ResourcePage.tsx");
 
     expect(pageSource).toContain("const handleSwitchMode = useCallback((next: ResourceMode) => {");
     expect(pageSource).toContain("cancelResourceSelection();");
-    expect(pageSource).toContain("setExpandedRecordId(null);");
     expect(pageSource).toContain('const category = next === "temp" ? "temp" : "resources";');
     expect(pageSource).toContain("setCategory(category);");
+    expect(pageSource).not.toContain("setExpandedRecordId");
   });
 
   it("keeps the content panel for radial menu and uses inline previews on the main page", () => {

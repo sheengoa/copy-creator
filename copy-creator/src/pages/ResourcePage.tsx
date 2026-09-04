@@ -21,7 +21,6 @@ import BatchSelectionBar from "../components/BatchSelectionBar";
 import type { ClipboardRecord } from "../types";
 import ResourceDetailPage from "./ResourcePage/ResourceDetailPage";
 import { ResourceCard, ResourceCardDragPreview } from "./ResourcePage/ResourceCard";
-import { ResourceQuickPreview } from "./ResourcePage/ResourceQuickPreview";
 import {
   getChangedOrderIds,
   getDragPreviewOrder,
@@ -68,7 +67,6 @@ export default function ResourcePage() {
   const [mode, setMode] = useState<ResourceMode>("resource");
   const [typeFilter, setTypeFilter] = useState<ResourceTypeFilter>("all");
   const [sortOrder, setSortOrder] = useState<ResourceSortOrder>("newest");
-  const [expandedRecordId, setExpandedRecordId] = useState<string | null>(null);
   const [detailRecordId, setDetailRecordId] = useState<string | null>(null);
   const [detailRecord, setDetailRecord] = useState<ClipboardRecord | null>(null);
   const detailHistoryRef = useRef(false);
@@ -265,7 +263,6 @@ export default function ResourcePage() {
     setActiveDragId(String(event.active.id));
     setDragRecords(filteredRecords);
     lastDragMoveRef.current = null;
-    setExpandedRecordId(null);
   }, [filteredRecords, reorderEnabled]);
 
   const handleDragOver = useCallback((event: DragOverEvent) => {
@@ -296,14 +293,12 @@ export default function ResourcePage() {
 
   const handleSearchChange = useCallback((value: string) => {
     cancelResourceSelection();
-    setExpandedRecordId(null);
     setSearch(value);
   }, [cancelResourceSelection, setSearch]);
 
   const handleSwitchMode = useCallback((next: ResourceMode) => {
     if (next === mode) return;
     cancelResourceSelection();
-    setExpandedRecordId(null);
     setMode(next);
     const category = next === "temp" ? "temp" : "resources";
     setCategory(category);
@@ -312,13 +307,11 @@ export default function ResourcePage() {
 
   const handleSelectType = useCallback((next: ResourceTypeFilter) => {
     cancelResourceSelection();
-    setExpandedRecordId(null);
     setTypeFilter(next);
   }, [cancelResourceSelection]);
 
   const handleSortChange = useCallback((value: string) => {
     cancelResourceSelection();
-    setExpandedRecordId(null);
     setSortOrder(value as ResourceSortOrder);
   }, [cancelResourceSelection]);
 
@@ -343,7 +336,6 @@ export default function ResourcePage() {
       onConfirm: async () => {
         try {
           await deleteRecord(id);
-          setExpandedRecordId((current) => current === id ? null : current);
           if (detailRecordId === id) closeDetail();
         } catch {
           showFeedback("deleteFailed");
@@ -352,15 +344,10 @@ export default function ResourcePage() {
     });
   }, [closeDetail, deleteRecord, detailRecordId, showFeedback, t]);
 
-  const handleTogglePreview = useCallback((record: ClipboardRecord) => {
-    setExpandedRecordId((current) => current === record.id ? null : record.id);
-  }, []);
-
   const openDetail = useCallback((record: ClipboardRecord) => {
     pendingScrollTopRef.current = resourceListRef.current?.scrollTop ?? 0;
     setDetailRecord(record);
     detailHistoryRef.current = true;
-    setExpandedRecordId(null);
     setDetailRecordId(record.id);
     window.history.pushState({ resourceDetailId: record.id }, "", `#resource/${record.id}`);
   }, []);
@@ -440,7 +427,6 @@ export default function ResourcePage() {
         setDeletingSelected(true);
         try {
           await deleteRecords(ids);
-          setExpandedRecordId((current) => current && ids.includes(current) ? null : current);
           cancelResourceSelection();
         } catch {
           showFeedback("deleteFailed");
@@ -737,24 +723,14 @@ export default function ResourcePage() {
                             index={renderedRecordIndexes.get(record.id) ?? 0}
                             search={search}
                             typeLabel={(kind) => typeLabels[kind]}
-                            previewOpen={expandedRecordId === record.id}
                             selectionMode={isSelecting}
                             selected={isSelected(record.id)}
                             reorderEnabled={reorderEnabled}
-                            onTogglePreview={handleTogglePreview}
+                            onOpenDetail={openDetail}
                             onCopy={handleCopy}
                             onDelete={handleDeleteRecord}
                             onToggleSelected={toggleSelected}
                           />
-                          {expandedRecordId === record.id && (
-                            <ResourceQuickPreview
-                              record={record}
-                              typeLabel={(kind) => typeLabels[kind]}
-                              onClose={() => setExpandedRecordId(null)}
-                              onOpenDetail={openDetail}
-                              onCopy={handleCopy}
-                            />
-                          )}
                         </div>
                       ))}
                     </SortableContext>

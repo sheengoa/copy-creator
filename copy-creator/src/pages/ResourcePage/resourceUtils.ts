@@ -91,31 +91,6 @@ export function splitResourceColumns(records: ClipboardRecord[], columnCount: nu
   return columns;
 }
 
-export function calculateResourceScrollDelta({
-  previewTop,
-  previewBottom,
-  containerTop,
-  containerBottom,
-  padding,
-}: {
-  previewTop: number;
-  previewBottom: number;
-  containerTop: number;
-  containerBottom: number;
-  padding: number;
-}): number {
-  const safeTop = containerTop + padding;
-  const safeBottom = containerBottom - padding;
-  if (previewTop < safeTop) return previewTop - safeTop;
-  if (previewBottom > safeBottom) {
-    const previewHeight = previewBottom - previewTop;
-    const containerHeight = containerBottom - containerTop;
-    if (previewHeight + padding * 2 > containerHeight) return previewTop - safeTop;
-    return previewBottom - safeBottom;
-  }
-  return 0;
-}
-
 function normalizeLocalPath(value: string): string {
   const trimmed = value.trim();
   if (!/^file:\/\//i.test(trimmed)) return trimmed;

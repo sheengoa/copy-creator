@@ -12,7 +12,6 @@ vi.mock("@tauri-apps/api/core", () => ({
 }));
 
 import {
-  calculateResourceScrollDelta,
   getResourceFileName,
   inferResourceMediaKind,
   resolveResourceAssetUrl,
@@ -71,29 +70,5 @@ describe("resourceUtils", () => {
       ["a", "c", "e"],
       ["b", "d"],
     ]);
-  });
-
-  it("scrolls only by the minimum delta needed to reveal a preview", () => {
-    expect(calculateResourceScrollDelta({
-      previewTop: 150,
-      previewBottom: 350,
-      containerTop: 100,
-      containerBottom: 500,
-      padding: 14,
-    })).toBe(0);
-    expect(calculateResourceScrollDelta({
-      previewTop: 430,
-      previewBottom: 630,
-      containerTop: 100,
-      containerBottom: 500,
-      padding: 14,
-    })).toBe(144);
-    expect(calculateResourceScrollDelta({
-      previewTop: 80,
-      previewBottom: 680,
-      containerTop: 100,
-      containerBottom: 500,
-      padding: 14,
-    })).toBe(-34);
   });
 });

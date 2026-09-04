@@ -22,7 +22,6 @@
 }
 
 .resource-new-button,
-.resource-primary-button,
 .resource-secondary-button {
   min-height: 30px;
   display: inline-flex;
@@ -55,6 +54,7 @@
 
 .resource-settings-button {
   flex-shrink: 0;
+  min-height: 36px;
 }
 
 .resource-settings-popover {
@@ -150,18 +150,18 @@
 }
 
 .resource-mode-tab {
-  min-height: 29px;
   flex: 0 0 auto;
-  padding: 0 14px;
-  border: 1px solid var(--separator);
-  border-radius: 999px;
-  background: var(--card-inner-bg);
+  padding: 5px 14px;
+  border: 0.5px solid var(--separator);
+  border-radius: 7px;
+  background: #fafaffaf;
   color: var(--text-secondary);
   font-family: var(--font);
-  font-size: var(--text-sm);
+  font-size: 12px;
   font-weight: var(--weight-medium);
   cursor: pointer;
-  transition: background 0.15s ease, border-color 0.15s ease, color 0.15s ease, transform 0.15s ease;
+  transition: all 0.2s cubic-bezier(0.22, 1, 0.36, 1);
+  white-space: nowrap;
 }
 
 .resource-mode-tab:hover {
@@ -178,7 +178,13 @@
 }
 
 .resource-mode-tab:active {
-  transform: scale(0.97);
+  transform: scale(0.95);
+}
+
+[data-theme="dark"] .resource-mode-tab {
+  color: rgba(255, 255, 255, 0.6);
+  background: var(--card-inner-bg);
+  border-color: var(--card-border);
 }
 
 [data-theme="dark"] .resource-mode-tab.active {
@@ -189,13 +195,11 @@
 }
 
 .resource-new-button:active,
-.resource-primary-button:active,
 .resource-secondary-button:active {
   transform: scale(0.97);
 }
 
 .resource-new-button svg,
-.resource-primary-button svg,
 .resource-secondary-button svg {
   width: 14px;
   height: 14px;
@@ -231,9 +235,9 @@
 .resource-filter-chip {
   min-height: 27px;
   flex: 0 0 auto;
-  padding: 0 9px;
+  padding: 0 12px;
   border: 1px solid var(--separator);
-  border-radius: 999px;
+  border-radius: 7px;
   background: var(--card-inner-bg);
   color: var(--text-secondary);
   font-family: var(--font);
@@ -390,7 +394,6 @@
 
 .resource-card:hover,
 .resource-card:focus-visible,
-.resource-card.is-expanded,
 .resource-card.is-selected {
   border-color: color-mix(in srgb, var(--text-primary) 22%, var(--separator));
   box-shadow: 0 7px 22px rgba(0, 0, 0, 0.08);
@@ -401,7 +404,6 @@
   transform: translateY(-1px);
 }
 
-.resource-card.is-expanded,
 .resource-card.is-selected {
   box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent) 20%, transparent);
 }
@@ -424,7 +426,6 @@
 
 [data-theme="dark"] .resource-card:hover,
 [data-theme="dark"] .resource-card:focus-visible,
-[data-theme="dark"] .resource-card.is-expanded,
 [data-theme="dark"] .resource-card.is-selected {
   border-color: rgba(255, 255, 255, 0.18);
   box-shadow: 0 7px 22px rgba(0, 0, 0, 0.35);
@@ -746,88 +747,6 @@
   background: rgba(0, 0, 0, 0.3);
 }
 
-.resource-quick-preview {
-  display: flex;
-  min-width: 0;
-  max-height: min(420px, 68vh);
-  flex-direction: column;
-  overflow: hidden;
-  border: 1px solid color-mix(in srgb, var(--accent) 28%, var(--separator));
-  border-radius: 10px;
-  background: color-mix(in srgb, var(--accent) 3%, var(--card-inner-bg));
-  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.06);
-  animation: resourcePreviewEnter 0.22s cubic-bezier(0.22, 1, 0.36, 1) both;
-}
-
-@keyframes resourcePreviewEnter {
-  from {
-    opacity: 0;
-    transform: translateY(-8px);
-  }
-  to {
-    opacity: 1;
-    transform: none;
-  }
-}
-
-.resource-quick-preview-header,
-.resource-quick-preview-actions {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 8px;
-  flex-shrink: 0;
-  padding: 9px 10px;
-}
-
-.resource-quick-preview-header {
-  border-bottom: 1px solid var(--separator);
-}
-
-.resource-quick-preview-header > div {
-  display: flex;
-  min-width: 0;
-  flex-direction: column;
-  gap: 2px;
-}
-
-.resource-preview-eyebrow {
-  color: var(--text-secondary);
-  font-size: var(--text-xs);
-}
-
-.resource-quick-preview-header strong {
-  color: var(--text-primary);
-  font-size: var(--text-sm);
-  font-weight: var(--weight-semibold);
-}
-
-.resource-quick-preview-body {
-  min-height: 0;
-  overflow: auto;
-  padding: 10px;
-}
-
-.resource-quick-preview-actions {
-  justify-content: stretch;
-  border-top: 1px solid var(--separator);
-}
-
-.resource-quick-preview-actions > button {
-  flex: 1;
-}
-
-.resource-primary-button {
-  border-color: #333;
-  background: #333;
-  color: #fff;
-}
-
-.resource-primary-button:hover {
-  border-color: #555;
-  background: #555;
-}
-
 .resource-secondary-button {
   border-color: var(--separator);
   background: var(--card-inner-bg);
@@ -886,7 +805,6 @@
 }
 
 .resource-media-fallback,
-.resource-file-preview,
 .resource-preview-error,
 .resource-preview-loading {
   display: flex;
@@ -902,8 +820,7 @@
   text-align: center;
 }
 
-.resource-media-fallback svg,
-.resource-file-preview svg {
+.resource-media-fallback svg {
   width: 24px;
   height: 24px;
   flex-shrink: 0;
@@ -941,23 +858,8 @@
   text-align: center;
 }
 
-.resource-file-preview {
-  min-height: 150px;
-  flex-direction: column;
-}
 
-.resource-file-preview strong {
-  max-width: 100%;
-  overflow-wrap: anywhere;
-  color: var(--text-primary);
-  font-size: var(--text-sm);
-}
 
-.resource-file-preview span {
-  color: var(--text-secondary);
-  font-size: var(--text-xs);
-  line-height: 1.5;
-}
 
 .resource-load-error {
   display: flex;
@@ -1334,14 +1236,12 @@
   line-height: 1.5;
 }
 
-[data-theme="dark"] .resource-new-button,
-[data-theme="dark"] .resource-primary-button {
+[data-theme="dark"] .resource-new-button {
   border-color: rgba(255, 255, 255, 0.18);
   background: rgba(255, 255, 255, 0.16);
 }
 
-[data-theme="dark"] .resource-new-button:hover,
-[data-theme="dark"] .resource-primary-button:hover {
+[data-theme="dark"] .resource-new-button:hover {
   background: rgba(255, 255, 255, 0.24);
 }
 

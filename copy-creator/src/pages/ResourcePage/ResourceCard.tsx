@@ -20,11 +20,10 @@ interface ResourceCardProps {
   index: number;
   search: string;
   typeLabel: (kind: ResourceMediaKind) => string;
-  previewOpen: boolean;
   selectionMode: boolean;
   selected: boolean;
   reorderEnabled: boolean;
-  onTogglePreview: (record: ClipboardRecord) => void;
+  onOpenDetail: (record: ClipboardRecord) => void;
   onCopy: (record: ClipboardRecord) => void | Promise<void>;
   onDelete: (id: string) => void;
   onToggleSelected: (id: string) => void;
@@ -94,11 +93,10 @@ export function ResourceCard({
   index,
   search,
   typeLabel,
-  previewOpen,
   selectionMode,
   selected,
   reorderEnabled,
-  onTogglePreview,
+  onOpenDetail,
   onCopy,
   onDelete,
   onToggleSelected,
@@ -116,13 +114,13 @@ export function ResourceCard({
   const kind = inferResourceMediaKind(record);
   const title = getResourceTitle(record, kind);
 
-  const activatePreview = useCallback(() => {
+  const activateDetail = useCallback(() => {
     if (selectionMode) {
       onToggleSelected(record.id);
       return;
     }
-    onTogglePreview(record);
-  }, [onTogglePreview, onToggleSelected, record, selectionMode]);
+    onOpenDetail(record);
+  }, [onOpenDetail, onToggleSelected, record, selectionMode]);
 
   return (
     <article
@@ -132,14 +130,14 @@ export function ResourceCard({
         transition: transition || "transform 180ms ease",
         "--resource-enter-delay": index,
       } as React.CSSProperties}
-      className={`resource-card${previewOpen ? " is-expanded" : ""}${selected ? " is-selected" : ""}${isDragging ? " is-dragging" : ""}`}
-      onClick={activatePreview}
+      className={`resource-card${selected ? " is-selected" : ""}${isDragging ? " is-dragging" : ""}`}
+      onClick={activateDetail}
       tabIndex={0}
-      aria-label={t(previewOpen ? "resources.closePreview" : "resources.openPreview")}
+      aria-label={t("resources.openDetail")}
       onKeyDown={(event) => {
         if (event.key !== "Enter" && event.key !== " ") return;
         event.preventDefault();
-        activatePreview();
+        activateDetail();
       }}
     >
       {selectionMode && (
@@ -158,7 +156,7 @@ export function ResourceCard({
           record={record}
           search={search}
           typeLabel={typeLabel}
-          onActivate={activatePreview}
+          onActivate={activateDetail}
         />
         <span className="resource-card-kind">{typeLabel(kind)}</span>
       </div>
@@ -167,18 +165,6 @@ export function ResourceCard({
           <strong className="resource-card-title">
             <HighlightText text={title} search={search} />
           </strong>
-          <button
-            type="button"
-            className="resource-icon-button"
-            aria-label={t(previewOpen ? "resources.closePreview" : "resources.openPreview")}
-            title={t(previewOpen ? "resources.closePreview" : "resources.openPreview")}
-            onClick={(event) => {
-              event.stopPropagation();
-              onTogglePreview(record);
-            }}
-          >
-            {previewOpen ? Icons.close : Icons.expand}
-          </button>
         </div>
         <div className="resource-card-meta">
           <span>{typeLabel(kind)}</span>
