@@ -2,7 +2,6 @@ import { useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
 import type { ClipboardRecord } from "../../types";
 import { Icons } from "../../components/Icons";
-import { getResourceGroupName } from "../../utils/clipboardRecord";
 import { loadClipboardPreviewSegments } from "../../utils/contentPreview";
 import type { RadialPreviewSegment } from "../../utils/radialPreview";
 import {
@@ -96,7 +95,7 @@ export default function ResourceDetailPage({
           <span className="resource-detail-kind">{typeLabel(kind)}</span>
           <h1>{title}</h1>
           <p className="resource-detail-subtitle">
-            {typeLabel(kind)} · {getResourceGroupName(record)} · {record.source_app || t("resources.localSource")}
+            {typeLabel(kind)} · {record.source_app || t("resources.localSource")}
           </p>
           <div className={`resource-detail-stage resource-detail-stage-${kind}`}>
             {error ? (
@@ -134,10 +133,6 @@ export default function ResourceDetailPage({
             <div>
               <dt>{t("resources.type")}</dt>
               <dd>{typeLabel(kind)}</dd>
-            </div>
-            <div>
-              <dt>{t("resources.group")}</dt>
-              <dd>{getResourceGroupName(record)}</dd>
             </div>
             <div>
               <dt>{t("resources.createdAt")}</dt>

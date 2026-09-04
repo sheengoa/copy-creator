@@ -13,15 +13,11 @@ import {
 import type { DragEndEvent, DragOverEvent, DragStartEvent } from "@dnd-kit/core";
 import { SortableContext } from "@dnd-kit/sortable";
 import { useClipboardStore } from "../stores/clipboardStore";
-import { useResourceGroupStore } from "../stores/resourceGroupStore";
 import { useMultiSelect } from "../hooks/useMultiSelect";
 import { Icons } from "../components/Icons";
 import IosSelect from "../components/IosSelect";
 import SearchInput from "../components/SearchInput";
 import BatchSelectionBar from "../components/BatchSelectionBar";
-import { GroupChips } from "./PhrasePage/GroupChips";
-import { GroupDialog } from "./PhrasePage/GroupDialog";
-import { ManageGroupsDialog } from "./PhrasePage/ManageGroupsDialog";
 import type { ClipboardRecord } from "../types";
 import ResourceDetailPage from "./ResourcePage/ResourceDetailPage";
 import { ResourceCard, ResourceCardDragPreview } from "./ResourcePage/ResourceCard";
@@ -36,9 +32,10 @@ import {
   type ResourceMediaKind,
   type ResourceTypeFilter,
 } from "./ResourcePage/resourceUtils";
-import { getResourceGroupName, isResourceRecord } from "../utils/clipboardRecord";
+import { isResourceRecord, isTempRecord } from "../utils/clipboardRecord";
 
 type ResourceSortOrder = "newest" | "oldest";
+type ResourceMode = "temp" | "resource";
 
 const RESOURCE_TYPE_FILTERS: ResourceTypeFilter[] = [
   "all",
@@ -66,17 +63,9 @@ export default function ResourcePage() {
     pasteRecord,
     reorderRecords,
   } = useClipboardStore();
-  const resourceGroups = useResourceGroupStore((state) => state.groups);
-  const selectedResourceGroupId = useResourceGroupStore((state) => state.selectedGroupId);
-  const initResourceGroups = useResourceGroupStore((state) => state.init);
-  const setSelectedResourceGroup = useResourceGroupStore((state) => state.setSelectedGroup);
-  const createResourceGroup = useResourceGroupStore((state) => state.createGroup);
-  const updateResourceGroup = useResourceGroupStore((state) => state.updateGroup);
-  const deleteResourceGroup = useResourceGroupStore((state) => state.deleteGroup);
-  const reorderResourceGroups = useResourceGroupStore((state) => state.reorderGroups);
-  const resourceGroupError = useResourceGroupStore((state) => state.error);
-  const clearResourceGroupError = useResourceGroupStore((state) => state.clearError);
+  const setCategory = useClipboardStore((state) => state.setCategory);
 
+  const [mode, setMode] = useState<ResourceMode>("resource");
   const [typeFilter, setTypeFilter] = useState<ResourceTypeFilter>("all");
   const [sortOrder, setSortOrder] = useState<ResourceSortOrder>("newest");
   const [expandedRecordId, setExpandedRecordId] = useState<string | null>(null);
@@ -88,11 +77,8 @@ export default function ResourcePage() {
   const [feedback, setFeedback] = useState<"copied" | "copyFailed" | "deleteFailed" | "openFailed" | null>(null);
   const feedbackTimerRef = useRef<number | null>(null);
 
-  const [resourceGroupDialogOpen, setResourceGroupDialogOpen] = useState(false);
-  const [resourceGroupName, setResourceGroupName] = useState("");
-  const [resourceManageGroupsOpen, setResourceManageGroupsOpen] = useState(false);
-  const [resourceRenameId, setResourceRenameId] = useState<string | null>(null);
-  const [resourceRenameName, setResourceRenameName] = useState("");
+  const [deletingSelected, setDeletingSelected] = useState(false);
+  const [selectingAll, setSelectingAll] = useState(false);
   const [resourceLibraryPath, setResourceLibraryPath] = useState("");
   const [resourceLibraryPathLoading, setResourceLibraryPathLoading] = useState(true);
   const [resourceLibraryPathChanging, setResourceLibraryPathChanging] = useState(false);
@@ -100,8 +86,6 @@ export default function ResourcePage() {
   const [resourceSettingsOpen, setResourceSettingsOpen] = useState(false);
   const resourceSettingsButtonRef = useRef<HTMLButtonElement>(null);
   const resourceSettingsPopoverRef = useRef<HTMLElement>(null);
-  const [deletingSelected, setDeletingSelected] = useState(false);
-  const [selectingAll, setSelectingAll] = useState(false);
   const [confirmState, setConfirmState] = useState<{
     message: string;
     onConfirm: () => void | Promise<void>;
@@ -112,11 +96,6 @@ export default function ResourcePage() {
   const lastDragMoveRef = useRef<string | null>(null);
   const searchEffectInitializedRef = useRef(false);
   const selectAllRequestRef = useRef(0);
-
-  const selectedResourceGroup = resourceGroups.find(
-    (group) => group.id === selectedResourceGroupId,
-  );
-  const selectedResourceGroupName = selectedResourceGroup?.name;
 
   const typeLabels = useMemo<Record<ResourceMediaKind, string>>(
     () => ({
@@ -153,8 +132,7 @@ export default function ResourcePage() {
   useEffect(() => {
     setSearch("");
     init("resources");
-    initResourceGroups();
-  }, [init, initResourceGroups, setSearch]);
+  }, [init, setSearch]);
 
   useEffect(() => {
     let cancelled = false;
@@ -201,16 +179,15 @@ export default function ResourcePage() {
       return;
     }
     const timer = window.setTimeout(() => {
-      void loadRecords(false, "resources");
+      void loadRecords(false, mode === "temp" ? "temp" : "resources");
     }, 300);
     return () => window.clearTimeout(timer);
-  }, [loadRecords, search]);
+  }, [loadRecords, mode, search]);
 
   const filteredRecords = useMemo(() => {
+    const matchesMode = mode === "temp" ? isTempRecord : isResourceRecord;
     const next = records.filter((record) => (
-      isResourceRecord(record)
-      &&
-      getResourceGroupName(record) === selectedResourceGroupName
+      matchesMode(record)
       && matchesResourceType(record, typeFilter)
     ));
     if (sortOrder === "oldest") {
@@ -219,7 +196,7 @@ export default function ResourcePage() {
       ));
     }
     return next;
-  }, [records, selectedResourceGroupName, sortOrder, typeFilter]);
+  }, [mode, records, sortOrder, typeFilter]);
 
   const visibleIds = useMemo(
     () => filteredRecords.map((record) => record.id),
@@ -323,11 +300,15 @@ export default function ResourcePage() {
     setSearch(value);
   }, [cancelResourceSelection, setSearch]);
 
-  const handleSelectGroup = useCallback((id: string) => {
+  const handleSwitchMode = useCallback((next: ResourceMode) => {
+    if (next === mode) return;
     cancelResourceSelection();
     setExpandedRecordId(null);
-    setSelectedResourceGroup(id);
-  }, [cancelResourceSelection, setSelectedResourceGroup]);
+    setMode(next);
+    const category = next === "temp" ? "temp" : "resources";
+    setCategory(category);
+    void loadRecords(false, category);
+  }, [cancelResourceSelection, loadRecords, mode, setCategory]);
 
   const handleSelectType = useCallback((next: ResourceTypeFilter) => {
     cancelResourceSelection();
@@ -425,14 +406,13 @@ export default function ResourcePage() {
     const request = ++selectAllRequestRef.current;
     setSelectingAll(true);
     try {
-      const allRecords = await loadAllRecords("resources");
+      const allRecords = await loadAllRecords(mode === "temp" ? "temp" : "resources");
       if (!allRecords || request !== selectAllRequestRef.current) return;
+      const matchesMode = mode === "temp" ? isTempRecord : isResourceRecord;
       selectIds(
         allRecords
           .filter((record) => (
-            isResourceRecord(record)
-            &&
-            getResourceGroupName(record) === selectedResourceGroupName
+            matchesMode(record)
             && matchesResourceType(record, typeFilter)
           ))
           .map((record) => record.id),
@@ -444,9 +424,9 @@ export default function ResourcePage() {
     allVisibleSelected,
     hasMore,
     loadAllRecords,
+    mode,
     selectIds,
     selectingAll,
-    selectedResourceGroupName,
     toggleAllVisible,
     typeFilter,
   ]);
@@ -480,44 +460,6 @@ export default function ResourcePage() {
     t,
   ]);
 
-  const openNewResourceGroup = useCallback(() => {
-    setResourceManageGroupsOpen(false);
-    clearResourceGroupError();
-    setResourceGroupName("");
-    setResourceGroupDialogOpen(true);
-  }, [clearResourceGroupError]);
-
-  const handleSaveResourceGroup = useCallback(async () => {
-    const name = resourceGroupName.trim();
-    if (!name) return;
-    const group = await createResourceGroup(name);
-    if (!group) return;
-    setResourceGroupDialogOpen(false);
-    setResourceGroupName("");
-  }, [createResourceGroup, resourceGroupName]);
-
-  const openResourceManageGroups = useCallback(() => {
-    clearResourceGroupError();
-    setResourceRenameId(null);
-    setResourceRenameName("");
-    setResourceManageGroupsOpen(true);
-  }, [clearResourceGroupError]);
-
-  const startResourceRename = useCallback((id: string, name: string) => {
-    clearResourceGroupError();
-    setResourceRenameId(id);
-    setResourceRenameName(name);
-  }, [clearResourceGroupError]);
-
-  const handleResourceRename = useCallback(async () => {
-    if (resourceRenameId && resourceRenameName.trim()) {
-      const updated = await updateResourceGroup(resourceRenameId, resourceRenameName.trim());
-      if (!updated) return;
-    }
-    setResourceRenameId(null);
-    setResourceRenameName("");
-  }, [resourceRenameId, resourceRenameName, updateResourceGroup]);
-
   const handleChangeResourceLibraryPath = useCallback(async () => {
     if (resourceLibraryPathChanging) return;
     setResourceLibraryPathChanging(true);
@@ -540,26 +482,15 @@ export default function ResourcePage() {
     }
   }, [resourceLibraryPathChanging, t]);
 
-  const handleDeleteResourceGroup = useCallback((id: string) => {
-    setConfirmState({
-      message: t("resources.confirmDeleteGroup"),
-      onConfirm: async () => {
-        const deleted = await deleteResourceGroup(id);
-        if (deleted && resourceGroups.length <= 2) setResourceManageGroupsOpen(false);
-      },
-    });
-  }, [deleteResourceGroup, resourceGroups.length, t]);
-
   const openResourceCreate = useCallback(async () => {
     try {
       await invoke("open_clipboard_create", {
-        groupName: selectedResourceGroupName,
-        storageMode: "resource",
+        storageMode: mode === "temp" ? "database" : "resource",
       });
     } catch {
       showFeedback("openFailed");
     }
-  }, [selectedResourceGroupName, showFeedback]);
+  }, [mode, showFeedback]);
 
   const confirmDialog = confirmState ? (
     <div className="dialog-overlay" onClick={() => setConfirmState(null)}>
@@ -611,17 +542,19 @@ export default function ResourcePage() {
             onChange={handleSearchChange}
           />
         </div>
-        <button
-          type="button"
-          ref={resourceSettingsButtonRef}
-          className="resource-secondary-button resource-settings-button"
-          onClick={() => setResourceSettingsOpen((open) => !open)}
-          aria-expanded={resourceSettingsOpen}
-          aria-haspopup="dialog"
-        >
-          {Icons.settings}
-          <span>{t("resources.librarySettings")}</span>
-        </button>
+        {mode === "resource" && (
+          <button
+            type="button"
+            ref={resourceSettingsButtonRef}
+            className="resource-secondary-button resource-settings-button"
+            onClick={() => setResourceSettingsOpen((open) => !open)}
+            aria-expanded={resourceSettingsOpen}
+            aria-haspopup="dialog"
+          >
+            {Icons.settings}
+            <span>{t("resources.librarySettings")}</span>
+          </button>
+        )}
         <button type="button" className="resource-new-button" onClick={() => void openResourceCreate()}>
           {Icons.add}
           <span>{t("resources.new")}</span>
@@ -674,17 +607,34 @@ export default function ResourcePage() {
         </section>
       )}
 
-      <GroupChips
-        groups={resourceGroups}
-        selectedGroupId={selectedResourceGroupId}
-        onSelectGroup={handleSelectGroup}
-        onManageGroups={openResourceManageGroups}
-        manageGroupsLabel={t("resources.manageGroups")}
-        selectionMode={isSelecting}
-        canSelect={filteredRecords.length > 0}
-        onStartSelection={startResourceSelection}
-        onReorderGroups={(ids) => void reorderResourceGroups(ids)}
-      />
+      <div className="resource-mode-row">
+        <div className="resource-mode-tabs" role="tablist" aria-label={t("resources.modeTabs")}>
+          <button
+            type="button"
+            role="tab"
+            aria-selected={mode === "temp"}
+            className={`resource-mode-tab${mode === "temp" ? " active" : ""}`}
+            onClick={() => handleSwitchMode("temp")}
+          >
+            {t("resources.modeTemp")}
+          </button>
+          <button
+            type="button"
+            role="tab"
+            aria-selected={mode === "resource"}
+            className={`resource-mode-tab${mode === "resource" ? " active" : ""}`}
+            onClick={() => handleSwitchMode("resource")}
+          >
+            {t("resources.modeResource")}
+          </button>
+        </div>
+        {!isSelecting && filteredRecords.length > 0 && (
+          <button className="phrase-add-btn selection-mode-btn" onClick={startResourceSelection}>
+            {Icons.check}
+            <span>{t("common.select")}</span>
+          </button>
+        )}
+      </div>
 
       <div className="resource-filter-row">
         <span className="resource-filter-label">{t("resources.filterByType")}</span>
@@ -723,42 +673,12 @@ export default function ResourcePage() {
         />
       )}
 
-      <GroupDialog
-        open={resourceGroupDialogOpen}
-        editingId={null}
-        groupName={resourceGroupName}
-        setGroupName={setResourceGroupName}
-        title={t("resources.newGroup")}
-        placeholder={t("resources.groupName")}
-        error={resourceGroupError}
-        onSave={() => void handleSaveResourceGroup()}
-        onClose={() => setResourceGroupDialogOpen(false)}
-      />
-
-      <ManageGroupsDialog
-        open={resourceManageGroupsOpen}
-        groups={resourceGroups}
-        renameId={resourceRenameId}
-        renameName={resourceRenameName}
-        setRenameName={setResourceRenameName}
-        onStartRename={startResourceRename}
-        onRename={() => void handleResourceRename()}
-        onDeleteGroup={handleDeleteResourceGroup}
-        onClose={() => setResourceManageGroupsOpen(false)}
-        onAddGroup={openNewResourceGroup}
-        addGroupLabel={t("resources.newGroup")}
-        title={t("resources.manageGroups")}
-        renameLabel={t("resources.rename")}
-        protectedGroupName="暂存"
-        error={resourceGroupError}
-      />
-
       {confirmDialog}
 
       <section className="resource-list-area">
         <div className="resource-list-heading">
           <div>
-            <h2>{selectedResourceGroupName || t("resources.empty")}</h2>
+            <h2>{mode === "temp" ? t("resources.modeTemp") : t("resources.modeResource")}</h2>
             <span>{t("resources.itemCount", { count: filteredRecords.length })}</span>
           </div>
           {reorderEnabled && (
@@ -789,7 +709,7 @@ export default function ResourcePage() {
           <div className="resource-empty-state">
             <div className="empty-icon-compact">{Icons.resources}</div>
             <strong>{search.trim() || typeFilter !== "all" ? t("resources.noMatches") : t("resources.empty")}</strong>
-            <span>{selectedResourceGroupName || t("resources.selectGroup")}</span>
+            <span>{mode === "temp" ? t("resources.modeTempHint") : t("resources.modeResourceHint")}</span>
             {hasMore && (
               <button type="button" className="resource-secondary-button" onClick={() => void loadRecords(true, "resources")}>
                 {t("resources.loadMore")}

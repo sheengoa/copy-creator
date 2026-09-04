@@ -147,30 +147,25 @@ describe("integration regressions", () => {
     expect(componentSource).toContain("i18n.changeLanguage");
   });
 
-  it("supports resource groups for resource records", () => {
+  it("keeps resource modes simple without groups in the resource area", () => {
     const dbSource = readSource("../src-tauri/src/db.rs");
     const clipboardSource = readSource("../src-tauri/src/clipboard.rs");
     const pageSource = readSource("./pages/ResourcePage.tsx");
     const componentSource = readSource("./components/ClipboardCreateDialog/index.tsx");
-    const groupChipsSource = readSource("./pages/PhrasePage/GroupChips.tsx");
-    const manageGroupsSource = readSource("./pages/PhrasePage/ManageGroupsDialog.tsx");
 
     expect(dbSource).toContain("CREATE TABLE IF NOT EXISTS resource_groups");
     expect(dbSource).toContain("pub fn create_resource_group");
     expect(dbSource).toContain("pub fn update_resource_group");
     expect(dbSource).toContain("pub fn delete_resource_group");
-    expect(clipboardSource).toContain("group_name: Option<String>");
+    expect(dbSource).toContain("TEMP_STASH_GROUP_NAME");
     expect(clipboardSource).toContain("target_group_name");
-    expect(pageSource).toContain("useResourceGroupStore");
-    expect(pageSource).toContain("selectedGroupId={selectedResourceGroupId}");
-    expect(pageSource).toContain("onAddGroup={openNewResourceGroup}");
-    expect(groupChipsSource).not.toContain("onAddGroup");
-    expect(manageGroupsSource).toContain("onAddGroup");
+    expect(pageSource).toContain('type ResourceMode = "temp" | "resource"');
+    expect(pageSource).toContain("handleSwitchMode");
+    expect(pageSource).toContain("isTempRecord");
+    expect(pageSource).toContain("resource-mode-tabs");
+    expect(pageSource).not.toContain("useResourceGroupStore");
+    expect(pageSource).not.toContain("<GroupChips");
     expect(componentSource).toContain('category: "resources"');
-    expect(componentSource).toContain("clipboard-create-resource-group-section");
-    expect(componentSource).toContain("visibleStashRecords");
-    expect(componentSource).toContain("getResourceGroupName(record) === groupName");
-    expect(componentSource).not.toContain("clipboard-create-resource-group-select");
   });
 
   it("passes clipboard search into cards for highlighting", () => {
@@ -227,7 +222,7 @@ describe("integration regressions", () => {
     expect(clipboardPage).not.toContain("resourcesOnly");
     expect(clipboardPage).not.toContain("useResourceGroupStore");
     expect(resourcePage).toContain("resource-library-page");
-    expect(resourcePage).toContain("<GroupChips");
+    expect(resourcePage).toContain("resource-mode-tabs");
     expect(resourcePage).toContain("<ResourceCard");
     expect(resourcePage).toContain("<ResourceQuickPreview");
     expect(resourcePage).toContain("<ResourceDetailPage");
@@ -301,26 +296,19 @@ describe("integration regressions", () => {
     expect(resourcePage).toContain('get_resource_library_path"');
     expect(resourcePage).toContain('select_resource_library_folder"');
     expect(resourcePage).toContain('set_resource_library_path"');
-    expect(resourcePage).toContain('storageMode: "resource"');
+    expect(resourcePage).toContain('storageMode: mode === "temp" ? "database" : "resource"');
     expect(createDialog).toContain("storageDatabase");
     expect(createDialog).toContain("storageResource");
   });
 
-  it("keeps resource group operation errors visible and preserves failed dialog state", () => {
+  it("keeps the resource mode switch from leaking selection or preview state", () => {
     const pageSource = readSource("./pages/ResourcePage.tsx");
-    const storeSource = readSource("./stores/resourceGroupStore.ts");
-    const groupDialogSource = readSource("./pages/PhrasePage/GroupDialog.tsx");
-    const manageGroupsSource = readSource("./pages/PhrasePage/ManageGroupsDialog.tsx");
 
-    expect(storeSource).toContain("error: string | null");
-    expect(storeSource).toContain("clearError: () => void");
-    expect(storeSource).toContain("error: null");
-    expect(storeSource).toContain("return false;");
-    expect(pageSource).toContain("if (!group) return;");
-    expect(pageSource).toContain("if (!updated) return;");
-    expect(pageSource).toContain("error={resourceGroupError}");
-    expect(groupDialogSource).toContain('role="alert"');
-    expect(manageGroupsSource).toContain('role="alert"');
+    expect(pageSource).toContain("const handleSwitchMode = useCallback((next: ResourceMode) => {");
+    expect(pageSource).toContain("cancelResourceSelection();");
+    expect(pageSource).toContain("setExpandedRecordId(null);");
+    expect(pageSource).toContain('const category = next === "temp" ? "temp" : "resources";');
+    expect(pageSource).toContain("setCategory(category);");
   });
 
   it("keeps the content panel for radial menu and uses inline previews on the main page", () => {
