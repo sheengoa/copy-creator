@@ -110,16 +110,16 @@ describe("integration regressions", () => {
     expect(migrateBlock).toContain("idx_clipboard_sort_order");
   });
 
-  it("classifies and enriches manually created clipboard records", () => {
+  it("classifies manually saved content through the shared stash path", () => {
     const clipboardSource = readSource("../src-tauri/src/clipboard.rs");
-    const createBlock = clipboardSource.slice(
-      clipboardSource.indexOf("pub fn create_clipboard_record"),
-      clipboardSource.indexOf("fn make_text_event_content"),
+    const saveStart = clipboardSource.indexOf("pub fn save_stash_record");
+    const saveBlock = clipboardSource.slice(
+      saveStart,
+      clipboardSource.indexOf("#[tauri::command]", saveStart),
     );
 
-    expect(createBlock).toContain("classify_text_record(&content)");
-    expect(createBlock).toContain("api_key_metadata(&app, &id, record_type, &content)");
-    expect(createBlock).toContain("\"type\": record_type");
+    expect(saveBlock).toContain("classify_text_record(&content)");
+    expect(saveBlock).toContain('"type": record_type');
   });
 
   it("updates stash records and moves them to the top without changing creation time", () => {
@@ -130,9 +130,9 @@ describe("integration regressions", () => {
     );
     const libSource = readSource("../src-tauri/src/lib.rs");
 
-    expect(updateBlock).toContain("SELECT group_name, storage_mode FROM clipboard_records");
-    expect(updateBlock).toContain("is_resource_record(&group_name, &storage_mode)");
-    expect(updateBlock).not.toContain('group_name != "暂存" && group_name != "stash"');
+    expect(updateBlock).toContain("SELECT storage_mode FROM clipboard_records");
+    expect(updateBlock).toContain("is_resource_record(&storage_mode)");
+    expect(updateBlock).not.toContain("group_name");
     expect(updateBlock).toContain("SET type = ?1, content = ?2, sort_order = ?3 WHERE id = ?4");
     expect(updateBlock).not.toContain("created_at =");
     expect(updateBlock).toContain("timestamp_millis");
@@ -153,10 +153,13 @@ describe("integration regressions", () => {
     const pageSource = readSource("./pages/ResourcePage.tsx");
     const componentSource = readSource("./components/ClipboardCreateDialog/index.tsx");
 
-    expect(dbSource).toContain("CREATE TABLE IF NOT EXISTS resource_groups");
-    expect(dbSource).toContain("pub fn create_resource_group");
-    expect(dbSource).toContain("pub fn update_resource_group");
-    expect(dbSource).toContain("pub fn delete_resource_group");
+    expect(dbSource).toContain("DROP TABLE IF EXISTS resource_groups");
+    expect(dbSource).not.toContain("CREATE TABLE IF NOT EXISTS resource_groups");
+    expect(dbSource).not.toContain("pub fn get_resource_groups");
+    expect(dbSource).not.toContain("pub fn create_resource_group");
+    expect(dbSource).not.toContain("pub fn update_resource_group");
+    expect(dbSource).not.toContain("pub fn delete_resource_group");
+    expect(dbSource).not.toContain("pub fn reorder_resource_groups");
     expect(dbSource).not.toContain("TEMP_STASH_GROUP_NAME");
     expect(dbSource).toContain("WHERE group_name IN ('stash', '暂存', '默认', '临时')");
     expect(clipboardSource).toContain("target_group_name");
@@ -245,11 +248,6 @@ describe("integration regressions", () => {
     const pageSource = readSource("./pages/ResourcePage.tsx");
     const cardSource = readSource("./pages/ResourcePage/ResourceCard.tsx");
     const detailPageSource = readSource("./pages/ResourcePage/ResourceDetailPage.tsx");
-    const clipboardSource = readSource("../src-tauri/src/clipboard.rs");
-    const createBlock = clipboardSource.slice(
-      clipboardSource.indexOf("pub fn create_clipboard_record"),
-      clipboardSource.indexOf("fn make_text_event_content"),
-    );
     const detailLoaderBlock = detailPageSource.slice(
       detailPageSource.indexOf("useEffect(() =>"),
       detailPageSource.indexOf("const title"),
@@ -266,7 +264,6 @@ describe("integration regressions", () => {
     expect(cardSource).not.toContain("onTogglePreview");
     expect(detailLoaderBlock).toContain('|| kind === "image"');
     expect(detailPageSource).toContain("<ResourceImage");
-    expect(createBlock).toContain("let group_name = group_name.unwrap_or_default();");
   });
 
   it("keeps resource-library storage separate from the app database", () => {
@@ -289,7 +286,7 @@ describe("integration regressions", () => {
     expect(pruneBlock).not.toContain("resource_files");
     expect(dbSource).toContain("WHERE NOT ({RESOURCE_RECORD_CONDITION})");
     expect(dbSource).toContain("type = ?1 AND NOT ({RESOURCE_RECORD_CONDITION})");
-    expect(dbSource).toContain("is_resource_record(&group_name, &storage_mode)");
+    expect(dbSource).toContain("is_resource_record(&storage_mode)");
     expect(clipboardSource).toContain("let extension = if images.is_empty()");
     expect(clipboardSource).toContain('"txt"');
     expect(clipboardSource).toContain('"md"');

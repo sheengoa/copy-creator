@@ -120,14 +120,13 @@ pub struct DbState {
 const CLIPBOARD_CONTENT_PREVIEW_CHARS: usize = 600;
 const QUICK_INPUT_FILE_LIMIT_BYTES: u64 = 50 * 1024 * 1024;
 const QUICK_INPUT_TEXT_PREVIEW_LIMIT_BYTES: u64 = 1024 * 1024;
-pub(crate) const DEFAULT_RESOURCE_GROUP_ID: &str = "default-resource-group";
 pub(crate) const DATABASE_STORAGE_MODE: &str = "database";
 pub(crate) const RESOURCE_STORAGE_MODE: &str = "resource";
 const RESOURCE_LIBRARY_DIR_NAME: &str = "resource-library";
 const RESOURCE_LIBRARY_HISTORY_SETTING: &str = "resource_library_history";
 
-// 分组名不再参与资源判定，仅保留参数以兼容既有调用与回归检查。
-pub(crate) fn is_resource_record(_group_name: &str, storage_mode: &str) -> bool {
+// 分组与手动暂存均已废弃，仅凭存储模式判定资源记录。
+pub(crate) fn is_resource_record(storage_mode: &str) -> bool {
     storage_mode == RESOURCE_STORAGE_MODE
 }
 
@@ -849,14 +848,6 @@ pub fn init_db(app: &AppHandle) -> Result<(), Box<dyn std::error::Error>> {
             updated_at TEXT NOT NULL
         );
 
-        CREATE TABLE IF NOT EXISTS resource_groups (
-            id TEXT PRIMARY KEY,
-            name TEXT NOT NULL UNIQUE,
-            sort_order INTEGER DEFAULT 0,
-            created_at TEXT NOT NULL,
-            updated_at TEXT NOT NULL
-        );
-
         CREATE TABLE IF NOT EXISTS phrases (
             id TEXT PRIMARY KEY,
             group_id TEXT NOT NULL,
@@ -1061,6 +1052,8 @@ pub fn init_db(app: &AppHandle) -> Result<(), Box<dyn std::error::Error>> {
         [],
     )
     .ok();
+    // 分组功能已删除，连同旧库中的分组表一起清理。
+    conn.execute("DROP TABLE IF EXISTS resource_groups", []).ok();
 
     app.manage(DbState {
         conn: Mutex::new(conn),
@@ -1347,16 +1340,16 @@ pub fn update_clipboard_record(app: AppHandle, id: String, content: String) -> R
 
     let state = app.state::<DbState>();
     let conn = state.conn.lock().map_err(|e| e.to_string())?;
-    let (group_name, storage_mode): (String, String) = conn
+    let storage_mode: String = conn
         .query_row(
-            "SELECT group_name, storage_mode FROM clipboard_records WHERE id = ?1",
+            "SELECT storage_mode FROM clipboard_records WHERE id = ?1",
             params![id],
-            |row| Ok((row.get(0)?, row.get(1)?)),
+            |row| row.get(0),
         )
         .map_err(|e| format!("记录不存在: {}", e))?;
 
-    if !is_resource_record(&group_name, &storage_mode) {
-        return Err("只能编辑资源分组的记录".to_string());
+    if !is_resource_record(&storage_mode) {
+        return Err("只能编辑资源库中的记录".to_string());
     }
 
     let record_type = crate::clipboard::classify_text_record(&content);
@@ -1442,7 +1435,7 @@ fn delete_clipboard_records_internal(app: &AppHandle, ids: &[String]) -> Result<
         for id in ids {
             let record = tx
                 .query_row(
-                    "SELECT type, content, attachments, storage_mode, resource_path, group_name FROM clipboard_records WHERE id = ?1",
+                    "SELECT type, content, attachments, storage_mode, resource_path FROM clipboard_records WHERE id = ?1",
                     params![id],
                     |row| {
                         Ok((
@@ -1451,14 +1444,13 @@ fn delete_clipboard_records_internal(app: &AppHandle, ids: &[String]) -> Result<
                             row.get::<_, String>(2)?,
                             row.get::<_, String>(3)?,
                             row.get::<_, String>(4)?,
-                            row.get::<_, String>(5)?,
                         ))
                     },
                 )
                 .optional()
                 .map_err(|e| e.to_string())?;
 
-            let Some((record_type, content, attachments, storage_mode, resource_path, group_name)) =
+            let Some((record_type, content, attachments, storage_mode, resource_path)) =
                 record
             else {
                 continue;
@@ -1474,7 +1466,7 @@ fn delete_clipboard_records_internal(app: &AppHandle, ids: &[String]) -> Result<
 
             let attachment_paths =
                 serde_json::from_str::<Vec<String>>(&attachments).unwrap_or_default();
-            if is_resource_record(&group_name, &storage_mode) {
+            if is_resource_record(&storage_mode) {
                 resource_files.push((id.clone(), resource_path, attachment_paths));
             } else {
                 if record_type == "image" {
@@ -1541,152 +1533,6 @@ pub fn delete_clipboard_records(app: AppHandle, ids: Vec<String>) -> Result<(), 
 #[tauri::command]
 pub fn delete_clipboard_record(app: AppHandle, id: String) -> Result<(), String> {
     delete_clipboard_records_internal(&app, &[id])
-}
-
-fn resource_group_json(
-    id: String,
-    name: String,
-    sort_order: i32,
-    created_at: String,
-    updated_at: String,
-) -> serde_json::Value {
-    serde_json::json!({
-        "id": id,
-        "name": name,
-        "sort_order": sort_order,
-        "created_at": created_at,
-        "updated_at": updated_at,
-    })
-}
-
-fn normalized_resource_group_name(name: String) -> Result<String, String> {
-    let name = name.trim().to_string();
-    if name.is_empty() {
-        return Err("分组名称不能为空".to_string());
-    }
-    if name.chars().count() > 40 {
-        return Err("分组名称不能超过 40 个字符".to_string());
-    }
-    Ok(name)
-}
-
-fn resource_group_name_exists(conn: &Connection, name: &str) -> Result<bool, String> {
-    conn.query_row(
-        "SELECT EXISTS(SELECT 1 FROM resource_groups WHERE name = ?1)",
-        params![name],
-        |row| row.get(0),
-    )
-    .map_err(|e| e.to_string())
-}
-
-#[tauri::command]
-pub fn get_resource_groups(app: AppHandle) -> Result<Vec<serde_json::Value>, String> {
-    let state = app.state::<DbState>();
-    let conn = state.conn.lock().map_err(|e| e.to_string())?;
-    let mut stmt = conn
-        .prepare("SELECT id, name, sort_order, created_at, updated_at FROM resource_groups ORDER BY sort_order DESC, created_at ASC")
-        .map_err(|e| e.to_string())?;
-    let rows = stmt
-        .query_map([], |row| {
-            Ok(resource_group_json(
-                row.get::<_, String>(0)?,
-                row.get::<_, String>(1)?,
-                row.get::<_, i32>(2)?,
-                row.get::<_, String>(3)?,
-                row.get::<_, String>(4)?,
-            ))
-        })
-        .map_err(|e| e.to_string())?;
-    rows.collect::<Result<Vec<_>, _>>()
-        .map_err(|e| e.to_string())
-}
-
-#[tauri::command]
-pub fn create_resource_group(app: AppHandle, name: String) -> Result<serde_json::Value, String> {
-    let name = normalized_resource_group_name(name)?;
-    let state = app.state::<DbState>();
-    let conn = state.conn.lock().map_err(|e| e.to_string())?;
-    if resource_group_name_exists(&conn, &name)? {
-        return Err("分组名称已存在".to_string());
-    }
-    let id = uuid::Uuid::new_v4().to_string();
-    let now = chrono::Utc::now().to_rfc3339();
-    conn.execute(
-        "INSERT INTO resource_groups (id, name, sort_order, created_at, updated_at) VALUES (?1, ?2, 0, ?3, ?3)",
-        params![&id, &name, &now],
-    )
-    .map_err(|e| e.to_string())?;
-    let _ = app.emit("resource-groups-changed", ());
-    Ok(resource_group_json(id, name, 0, now.clone(), now))
-}
-
-#[tauri::command]
-pub fn update_resource_group(app: AppHandle, id: String, name: String) -> Result<(), String> {
-    let name = normalized_resource_group_name(name)?;
-    let state = app.state::<DbState>();
-    let conn = state.conn.lock().map_err(|e| e.to_string())?;
-    let old_name: String = conn
-        .query_row(
-            "SELECT name FROM resource_groups WHERE id = ?1",
-            params![&id],
-            |row| row.get(0),
-        )
-        .map_err(|e| format!("分组不存在: {e}"))?;
-    if id == DEFAULT_RESOURCE_GROUP_ID {
-        return Err("默认分组不能重命名".to_string());
-    }
-    if old_name != name && resource_group_name_exists(&conn, &name)? {
-        return Err("分组名称已存在".to_string());
-    }
-    let now = chrono::Utc::now().to_rfc3339();
-    conn.execute(
-        "UPDATE resource_groups SET name = ?1, updated_at = ?2 WHERE id = ?3",
-        params![&name, &now, &id],
-    )
-    .map_err(|e| e.to_string())?;
-    conn.execute(
-        "UPDATE clipboard_records SET group_name = ?1 WHERE group_name = ?2",
-        params![&name, &old_name],
-    )
-    .map_err(|e| e.to_string())?;
-    let _ = app.emit("resource-groups-changed", ());
-    let _ = app.emit("clipboard-record-updated", "");
-    Ok(())
-}
-
-#[tauri::command]
-pub fn delete_resource_group(app: AppHandle, id: String) -> Result<(), String> {
-    if id == DEFAULT_RESOURCE_GROUP_ID {
-        return Err("默认分组不能删除".to_string());
-    }
-    let (name, ids) = {
-        let state = app.state::<DbState>();
-        let conn = state.conn.lock().map_err(|e| e.to_string())?;
-        let name: String = conn
-            .query_row(
-                "SELECT name FROM resource_groups WHERE id = ?1",
-                params![&id],
-                |row| row.get(0),
-            )
-            .map_err(|e| format!("分组不存在: {e}"))?;
-        let mut stmt = conn
-            .prepare("SELECT id FROM clipboard_records WHERE group_name = ?1")
-            .map_err(|e| e.to_string())?;
-        let ids = stmt
-            .query_map(params![&name], |row| row.get::<_, String>(0))
-            .map_err(|e| e.to_string())?
-            .collect::<Result<Vec<_>, _>>()
-            .map_err(|e| e.to_string())?;
-        (name, ids)
-    };
-    delete_clipboard_records_internal(&app, &ids)?;
-    let state = app.state::<DbState>();
-    let conn = state.conn.lock().map_err(|e| e.to_string())?;
-    conn.execute("DELETE FROM resource_groups WHERE id = ?1", params![&id])
-        .map_err(|e| e.to_string())?;
-    let _ = app.emit("resource-groups-changed", ());
-    log::info!("delete_resource_group: {} ({})", id, name);
-    Ok(())
 }
 
 #[tauri::command]
@@ -2270,13 +2116,6 @@ fn migrate_storage(app: &AppHandle, new_path: &str) -> Result<(), String> {
                 created_at TEXT NOT NULL,
                 updated_at TEXT NOT NULL
             );
-            CREATE TABLE IF NOT EXISTS resource_groups (
-                id TEXT PRIMARY KEY,
-                name TEXT NOT NULL UNIQUE,
-                sort_order INTEGER DEFAULT 0,
-                created_at TEXT NOT NULL,
-                updated_at TEXT NOT NULL
-            );
             CREATE TABLE IF NOT EXISTS phrases (
                 id TEXT PRIMARY KEY,
                 group_id TEXT NOT NULL,
@@ -2318,8 +2157,6 @@ fn migrate_storage(app: &AppHandle, new_path: &str) -> Result<(), String> {
             CREATE TABLE IF NOT EXISTS toast_shown (
                 key_preview TEXT PRIMARY KEY
             );
-            INSERT OR IGNORE INTO resource_groups (id, name, sort_order, created_at, updated_at)
-            VALUES ('default-resource-group', '默认', 0, datetime('now'), datetime('now'));
             ",
         )
         .map_err(|e| format!("create schema: {}", e))?;
@@ -2743,41 +2580,6 @@ pub fn reorder_phrase_groups(app: AppHandle, ids: Vec<String>) -> Result<(), Str
 }
 
 #[tauri::command]
-pub fn reorder_resource_groups(app: AppHandle, ids: Vec<String>) -> Result<(), String> {
-    let state = app.state::<DbState>();
-    let conn = state.conn.lock().map_err(|e| e.to_string())?;
-    let n = ids.len();
-
-    if ids.is_empty() {
-        return Ok(());
-    }
-
-    let mut case_clauses = String::new();
-    let mut id_list = String::new();
-    for (i, id) in ids.iter().enumerate() {
-        let escaped = id.replace('\'', "''");
-        case_clauses.push_str(&format!(" WHEN '{}' THEN {}", escaped, (n - i) * 10));
-        if i > 0 {
-            id_list.push(',');
-        }
-        id_list.push_str(&format!("'{}'", escaped));
-    }
-
-    conn.execute(
-        &format!(
-            "UPDATE resource_groups SET sort_order = CASE id{} END WHERE id IN ({})",
-            case_clauses, id_list
-        ),
-        [],
-    )
-    .map_err(|e| e.to_string())?;
-
-    let _ = app.emit("resource-groups-changed", ());
-    log::info!("reorder_resource_groups: {} items", ids.len());
-    Ok(())
-}
-
-#[tauri::command]
 pub fn reorder_phrases(app: AppHandle, ids: Vec<String>) -> Result<(), String> {
     let state = app.state::<DbState>();
     let conn = state.conn.lock().map_err(|e| e.to_string())?;
@@ -2958,11 +2760,8 @@ mod record_classification_tests {
 
     #[test]
     fn treats_only_resource_storage_mode_as_resource() {
-        assert!(is_resource_record("", "resource"));
-        assert!(is_resource_record("旧资源", "resource"));
-        assert!(!is_resource_record("", "database"));
-        assert!(!is_resource_record("旧资源", "database"));
-        assert!(!is_resource_record("  ", "database"));
+        assert!(is_resource_record("resource"));
+        assert!(!is_resource_record("database"));
     }
 
     #[test]

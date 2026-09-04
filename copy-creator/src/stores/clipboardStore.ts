@@ -54,7 +54,6 @@ interface ClipboardState {
   loadRecords: (append?: boolean, categoryOverride?: ClipType) => Promise<void>;
   loadAllRecords: (categoryOverride?: ClipType) => Promise<ClipboardRecord[] | null>;
   updateRecordLabel: (id: string, label: ApiKeyLabel) => void;
-  createRecord: (content: string, groupName?: string) => Promise<void>;
   deleteRecords: (ids: string[]) => Promise<void>;
   deleteRecord: (id: string) => Promise<void>;
   pasteRecord: (record: ClipboardRecord) => Promise<boolean>;
@@ -299,14 +298,6 @@ export const useClipboardStore = create<ClipboardState>((set, get) => ({
       updated[idx] = { ...updated[idx], label };
       return { records: updated };
     }),
-
-  createRecord: async (content: string, groupName?: string) => {
-    try {
-      await invoke("create_clipboard_record", { content, groupName });
-    } catch (e) {
-      console.error("Failed to create record:", e);
-    }
-  },
 
   deleteRecords: async (ids: string[]) => {
     if (ids.length === 0) return;

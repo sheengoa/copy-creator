@@ -275,7 +275,6 @@ pub fn run() {
         })
         .invoke_handler(tauri::generate_handler![
             db::get_clipboard_records,
-            clipboard::create_clipboard_record,
             clipboard::save_stash_record,
             clipboard::get_stash_record_images,
             clipboard::read_clipboard_image_base64,
@@ -289,10 +288,6 @@ pub fn run() {
             db::create_phrase_group,
             db::update_phrase_group,
             db::delete_phrase_group,
-            db::get_resource_groups,
-            db::create_resource_group,
-            db::update_resource_group,
-            db::delete_resource_group,
             db::get_phrases,
             db::create_phrase,
             db::create_file_phrase,
@@ -348,7 +343,6 @@ pub fn run() {
             db::set_user_api_key,
             db::reorder_clipboard_records,
             db::reorder_phrase_groups,
-            db::reorder_resource_groups,
             db::reorder_phrases,
             toggle_always_on_top,
             autostart::set_autostart,

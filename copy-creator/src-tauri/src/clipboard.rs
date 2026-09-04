@@ -129,54 +129,6 @@ fn parse_file_uri(uri: &str) -> Option<String> {
     Some(decoded)
 }
 
-#[tauri::command]
-pub fn create_clipboard_record(
-    app: AppHandle,
-    content: String,
-    group_name: Option<String>,
-) -> Result<serde_json::Value, String> {
-    let content = content.trim().to_string();
-    if content.is_empty() {
-        return Err("内容不能为空".to_string());
-    }
-    let group_name = group_name.unwrap_or_default();
-    let record_type = classify_text_record(&content);
-    let id = uuid::Uuid::new_v4().to_string();
-    let now = chrono::Utc::now().to_rfc3339();
-    let sort_order = chrono::Utc::now().timestamp_millis();
-    {
-        let state = app.state::<crate::db::DbState>();
-        let conn = state.conn.lock().map_err(|e| e.to_string())?;
-        conn.execute(
-            "INSERT INTO clipboard_records (id, type, content, source_app, created_at, sort_order, group_name) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
-            rusqlite::params![id, record_type, &content, "", &now, sort_order, &group_name],
-        )
-        .map_err(|e| e.to_string())?;
-    }
-    let (is_key, key_preview, guessed_service) = api_key_metadata(&app, &id, record_type, &content);
-    let (event_content, content_length, content_truncated) =
-        make_text_event_content(record_type, &content);
-    app.emit(
-        "clipboard-update",
-        serde_json::json!({
-            "id": id,
-            "type": record_type,
-            "content": event_content,
-            "content_length": content_length,
-            "content_truncated": content_truncated,
-            "source_app": "",
-            "created_at": now,
-            "is_api_key": is_key,
-            "key_preview": key_preview,
-            "guessed_service": guessed_service,
-            "label": null,
-            "group_name": &group_name,
-        }),
-    )
-    .ok();
-    Ok(serde_json::json!({ "id": id }))
-}
-
 fn write_stash_images(
     app: &AppHandle,
     images: &[String],
@@ -464,7 +416,6 @@ pub fn save_stash_record(
     id: Option<String>,
     content: String,
     images: Vec<String>,
-    _group_name: Option<String>,
     storage_mode: Option<String>,
 ) -> Result<serde_json::Value, String> {
     let content = content.trim().to_string();
@@ -502,7 +453,7 @@ pub fn save_stash_record(
     let updated = existing.is_some();
     let current_is_resource = existing
         .as_ref()
-        .is_some_and(|(name, _, mode, _)| crate::db::is_resource_record(name, mode));
+        .is_some_and(|(_, _, mode, _)| crate::db::is_resource_record(mode));
     let target_storage_mode = match storage_mode.as_deref() {
         Some(crate::db::DATABASE_STORAGE_MODE) => crate::db::DATABASE_STORAGE_MODE,
         Some(crate::db::RESOURCE_STORAGE_MODE) => crate::db::RESOURCE_STORAGE_MODE,
