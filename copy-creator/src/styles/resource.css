@@ -188,11 +188,28 @@
   transition: background 0.15s ease, border-color 0.15s ease, color 0.15s ease;
 }
 
-.resource-filter-chip:hover,
-.resource-filter-chip.active {
-  border-color: color-mix(in srgb, var(--accent) 45%, var(--separator));
-  background: var(--accent-bg);
+.resource-filter-chip:hover {
+  border-color: rgba(0, 0, 0, 0.1);
+  background: var(--chip-hover-bg);
   color: var(--text-primary);
+}
+
+.resource-filter-chip.active {
+  border-color: #333;
+  background: #333;
+  color: white;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.12);
+}
+
+.resource-filter-chip:active {
+  transform: scale(0.95);
+}
+
+[data-theme="dark"] .resource-filter-chip.active {
+  background: rgba(255, 255, 255, 0.18);
+  color: #fff;
+  border-color: rgba(255, 255, 255, 0.25);
+  box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.1);
 }
 
 .resource-sort-control {
@@ -205,17 +222,8 @@
   white-space: nowrap;
 }
 
-.resource-sort-control select {
-  height: 29px;
-  max-width: 106px;
-  padding: 0 7px;
-  border: 1px solid var(--separator);
-  border-radius: 7px;
-  background: var(--card-inner-bg);
-  color: var(--text-primary);
-  font-family: var(--font);
-  font-size: var(--text-xs);
-  outline: none;
+.resource-sort-control .ios-select {
+  width: 96px;
 }
 
 .resource-list-area {

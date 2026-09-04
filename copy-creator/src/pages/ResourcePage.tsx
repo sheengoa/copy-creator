@@ -16,6 +16,7 @@ import { useClipboardStore } from "../stores/clipboardStore";
 import { useResourceGroupStore } from "../stores/resourceGroupStore";
 import { useMultiSelect } from "../hooks/useMultiSelect";
 import { Icons } from "../components/Icons";
+import IosSelect from "../components/IosSelect";
 import SearchInput from "../components/SearchInput";
 import BatchSelectionBar from "../components/BatchSelectionBar";
 import { GroupChips } from "./PhrasePage/GroupChips";
@@ -131,6 +132,10 @@ export default function ResourcePage() {
     (kind: ResourceTypeFilter) => kind === "all" ? t("resources.typeAll") : typeLabels[kind],
     [t, typeLabels],
   );
+  const sortOptions = useMemo(() => ([
+    { value: "newest", label: t("resources.sortNewest") },
+    { value: "oldest", label: t("resources.sortOldest") },
+  ]), [t]);
 
   const showFeedback = useCallback((next: "copied" | "copyFailed" | "deleteFailed" | "openFailed") => {
     if (feedbackTimerRef.current !== null) window.clearTimeout(feedbackTimerRef.current);
@@ -330,10 +335,10 @@ export default function ResourcePage() {
     setTypeFilter(next);
   }, [cancelResourceSelection]);
 
-  const handleSortChange = useCallback((event: React.ChangeEvent<HTMLSelectElement>) => {
+  const handleSortChange = useCallback((value: string) => {
     cancelResourceSelection();
     setExpandedRecordId(null);
-    setSortOrder(event.target.value as ResourceSortOrder);
+    setSortOrder(value as ResourceSortOrder);
   }, [cancelResourceSelection]);
 
   const handleCopy = useCallback(async (record: ClipboardRecord) => {
@@ -695,13 +700,14 @@ export default function ResourcePage() {
             </button>
           ))}
         </div>
-        <label className="resource-sort-control">
+        <div className="resource-sort-control">
           <span>{t("resources.sort")}</span>
-          <select value={sortOrder} onChange={handleSortChange}>
-            <option value="newest">{t("resources.sortNewest")}</option>
-            <option value="oldest">{t("resources.sortOldest")}</option>
-          </select>
-        </label>
+          <IosSelect
+            value={sortOrder}
+            options={sortOptions}
+            onChange={handleSortChange}
+          />
+        </div>
       </div>
 
       {isSelecting && (
