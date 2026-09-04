@@ -53,61 +53,40 @@
   border-color: #555;
 }
 
-.resource-library-location {
-  display: flex;
-  min-width: 0;
-  align-items: flex-start;
-  gap: 9px;
-  padding: 8px 2px 9px;
-  border-bottom: 1px solid var(--separator);
-}
-
-.resource-library-location-icon {
-  display: inline-flex;
-  width: 28px;
-  height: 28px;
+.resource-settings-button {
   flex-shrink: 0;
-  align-items: center;
-  justify-content: center;
-  border-radius: 7px;
-  background: var(--input-bg);
-  color: var(--text-secondary);
 }
 
-.resource-library-location-icon svg {
-  width: 16px;
-  height: 16px;
-}
-
-.resource-library-location-copy {
+.resource-settings-popover {
+  position: absolute;
+  top: 46px;
+  right: 0;
+  z-index: 40;
   display: flex;
-  min-width: 0;
-  flex: 1 1 auto;
+  width: min(300px, calc(100% - 16px));
   flex-direction: column;
-  gap: 2px;
-}
-
-.resource-library-location-title {
-  display: flex;
-  min-width: 0;
-  align-items: baseline;
   gap: 7px;
+  padding: 11px 13px 13px;
+  border: 1px solid var(--separator);
+  border-radius: var(--radius-sm);
+  background: var(--panel-bg);
+  box-shadow: 0 10px 28px rgba(0, 0, 0, 0.16);
 }
 
-.resource-library-location-title strong {
+.resource-settings-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.resource-settings-header strong {
   color: var(--text-primary);
   font-size: var(--text-sm);
   font-weight: var(--weight-semibold);
 }
 
-.resource-library-location-title span,
-.resource-library-location-copy p {
-  color: var(--text-secondary);
-  font-size: var(--text-xs);
-}
-
-.resource-library-location-path {
-  min-width: 0;
+.resource-settings-path {
   overflow-wrap: anywhere;
   color: var(--text-primary);
   font-family: var(--font-mono);
@@ -115,23 +94,24 @@
   line-height: 1.4;
 }
 
-.resource-library-location-copy p {
-  margin: 1px 0 0;
-  line-height: 1.4;
+.resource-settings-hint {
+  margin: 0;
+  color: var(--text-secondary);
+  font-size: var(--text-xs);
+  line-height: 1.45;
 }
 
-.resource-library-location-error {
+.resource-settings-error {
   color: var(--danger);
   font-size: var(--text-xs);
   line-height: 1.4;
 }
 
-.resource-library-location-button {
-  flex-shrink: 0;
-  min-height: 30px;
+.resource-settings-popover .resource-secondary-button {
+  align-self: flex-start;
 }
 
-.resource-library-location-button:disabled {
+.resource-settings-popover .resource-secondary-button:disabled {
   cursor: wait;
   opacity: 0.65;
 }

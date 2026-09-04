@@ -96,6 +96,9 @@ export default function ResourcePage() {
   const [resourceLibraryPathLoading, setResourceLibraryPathLoading] = useState(true);
   const [resourceLibraryPathChanging, setResourceLibraryPathChanging] = useState(false);
   const [resourceLibraryPathError, setResourceLibraryPathError] = useState<string | null>(null);
+  const [resourceSettingsOpen, setResourceSettingsOpen] = useState(false);
+  const resourceSettingsButtonRef = useRef<HTMLButtonElement>(null);
+  const resourceSettingsPopoverRef = useRef<HTMLElement>(null);
   const [deletingSelected, setDeletingSelected] = useState(false);
   const [selectingAll, setSelectingAll] = useState(false);
   const [confirmState, setConfirmState] = useState<{
@@ -167,6 +170,25 @@ export default function ResourcePage() {
       cancelled = true;
     };
   }, [t]);
+
+  useEffect(() => {
+    if (!resourceSettingsOpen) return;
+    const handlePointerDown = (event: MouseEvent) => {
+      const target = event.target as Node;
+      if (resourceSettingsPopoverRef.current?.contains(target)) return;
+      if (resourceSettingsButtonRef.current?.contains(target)) return;
+      setResourceSettingsOpen(false);
+    };
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") setResourceSettingsOpen(false);
+    };
+    document.addEventListener("mousedown", handlePointerDown);
+    document.addEventListener("keydown", handleKeyDown);
+    return () => {
+      document.removeEventListener("mousedown", handlePointerDown);
+      document.removeEventListener("keydown", handleKeyDown);
+    };
+  }, [resourceSettingsOpen]);
 
   useEffect(() => {
     if (!searchEffectInitializedRef.current) {
@@ -584,59 +606,74 @@ export default function ResourcePage() {
             onChange={handleSearchChange}
           />
         </div>
+        <button
+          type="button"
+          ref={resourceSettingsButtonRef}
+          className="resource-secondary-button resource-settings-button"
+          onClick={() => setResourceSettingsOpen((open) => !open)}
+          aria-expanded={resourceSettingsOpen}
+          aria-haspopup="dialog"
+        >
+          {Icons.settings}
+          <span>{t("resources.librarySettings")}</span>
+        </button>
         <button type="button" className="resource-new-button" onClick={() => void openResourceCreate()}>
           {Icons.add}
           <span>{t("resources.new")}</span>
         </button>
       </div>
 
-      <section
-        className="resource-library-location"
-        aria-label={t("resources.currentLibrary")}
-        aria-busy={resourceLibraryPathLoading || resourceLibraryPathChanging}
-      >
-        <span className="resource-library-location-icon" aria-hidden="true">
-          {Icons.resources}
-        </span>
-        <div className="resource-library-location-copy">
-          <div className="resource-library-location-title">
-            <strong>{t("resources.currentLibrary")}</strong>
-            <span>{t("resources.libraryPath")}</span>
+      {resourceSettingsOpen && (
+        <section
+          ref={resourceSettingsPopoverRef}
+          className="resource-settings-popover"
+          role="dialog"
+          aria-label={t("resources.librarySettings")}
+        >
+          <div className="resource-settings-header">
+            <strong>{t("resources.librarySettings")}</strong>
+            <button
+              type="button"
+              className="resource-icon-button"
+              onClick={() => setResourceSettingsOpen(false)}
+              aria-label={t("common.close")}
+              title={t("common.close")}
+            >
+              {Icons.close}
+            </button>
           </div>
-          <code className="resource-library-location-path" title={resourceLibraryPath}>
+          <code className="resource-settings-path" title={resourceLibraryPath}>
             {resourceLibraryPathLoading
               ? t("common.loading")
               : resourceLibraryPath || t("resources.libraryPathError")}
           </code>
-          <p>{t("resources.libraryPathHint")}</p>
+          <p className="resource-settings-hint">{t("resources.libraryPathHint")}</p>
           {resourceLibraryPathError && (
-            <span className="resource-library-location-error" role="alert">
+            <span className="resource-settings-error" role="alert">
               {resourceLibraryPathError}
             </span>
           )}
-        </div>
-        <button
-          type="button"
-          className="resource-secondary-button resource-library-location-button"
-          onClick={() => void handleChangeResourceLibraryPath()}
-          disabled={resourceLibraryPathLoading || resourceLibraryPathChanging}
-        >
-          {Icons.edit}
-          <span>
-            {resourceLibraryPathChanging
-              ? t("common.saving")
-              : t("resources.changeLibraryPath")}
-          </span>
-        </button>
-      </section>
+          <button
+            type="button"
+            className="resource-secondary-button"
+            onClick={() => void handleChangeResourceLibraryPath()}
+            disabled={resourceLibraryPathLoading || resourceLibraryPathChanging}
+          >
+            {Icons.edit}
+            <span>
+              {resourceLibraryPathChanging
+                ? t("common.saving")
+                : t("resources.changeLibraryPath")}
+            </span>
+          </button>
+        </section>
+      )}
 
       <GroupChips
         groups={resourceGroups}
         selectedGroupId={selectedResourceGroupId}
         onSelectGroup={handleSelectGroup}
         onManageGroups={openResourceManageGroups}
-        onAddPhrase={() => void openResourceCreate()}
-        addPhraseLabel={t("resources.new")}
         manageGroupsLabel={t("resources.manageGroups")}
         selectionMode={isSelecting}
         canSelect={filteredRecords.length > 0}
