@@ -186,6 +186,7 @@
   font-size: var(--text-base);
   color: var(--text-primary);
   line-height: 1.5;
+  white-space: pre-wrap;
   padding: 0.65rem 1rem 0.15rem;
   min-height: calc(1 * 1.5 * 14px);
 }

@@ -64,6 +64,7 @@ describe("integration regressions", () => {
     expect(phraseStyles).toContain(".phrase-card-body.is-toggleable");
     expect(phraseStyles).toContain(".phrase-card-body.is-collapsed");
     expect(phraseStyles).toContain(".phrase-card-body.is-expanded");
+    expect(phraseStyles).toContain("white-space: pre-wrap");
     expect(phraseStyles).toContain(".phrase-card-actions > .card-toggle-text-btn");
   });
 
