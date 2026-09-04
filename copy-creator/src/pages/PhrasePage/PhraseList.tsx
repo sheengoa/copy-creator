@@ -3,8 +3,6 @@ import { invoke } from "@tauri-apps/api/core";
 import { Icons } from "../../components/Icons";
 import { useSortable } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
-import CloseFullscreenIcon from "@mui/icons-material/CloseFullscreen";
-import OpenInFullIcon from "@mui/icons-material/OpenInFull";
 import { useTranslation } from "react-i18next";
 import type { Phrase } from "../../types";
 import { HighlightText } from "../../components/HighlightText";
@@ -179,11 +177,7 @@ function PhraseCard({
                   title={t(isTextExpanded ? "phrases.collapseText" : "phrases.expandText")}
                   onClick={handleToggleText}
                 >
-                  {isTextExpanded ? (
-                    <CloseFullscreenIcon fontSize="inherit" />
-                  ) : (
-                    <OpenInFullIcon fontSize="inherit" />
-                  )}
+                  {isTextExpanded ? Icons.collapse : Icons.expand}
                 </button>
               )}
               <span ref={setActivatorNodeRef} className="drag-handle" {...attributes} {...listeners}>

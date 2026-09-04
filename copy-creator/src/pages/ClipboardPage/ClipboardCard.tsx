@@ -2,9 +2,6 @@ import { useSortable } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
 import { useCallback, useState, useEffect, useRef } from "react";
 import { invoke } from "@tauri-apps/api/core";
-import IconButton from "@mui/material/IconButton";
-import CloseFullscreenIcon from "@mui/icons-material/CloseFullscreen";
-import OpenInFullIcon from "@mui/icons-material/OpenInFull";
 import { useTranslation } from "react-i18next";
 import type { ClipboardRecord } from "../../types";
 import { Icons } from "../../components/Icons";
@@ -424,22 +421,16 @@ function ClipboardCardInner({
             {!selectionMode && (
               <>
                 {canToggle && (
-                  <IconButton
+                  <button
                     className="card-toggle-text-btn"
                     type="button"
-                    size="small"
-                    disableRipple
                     aria-expanded={expanded}
                     aria-label={t(expanded ? "phrases.collapseText" : "phrases.expandText")}
                     title={t(expanded ? "phrases.collapseText" : "phrases.expandText")}
                     onClick={handleToggleExpanded}
                   >
-                    {expanded ? (
-                      <CloseFullscreenIcon fontSize="inherit" />
-                    ) : (
-                      <OpenInFullIcon fontSize="inherit" />
-                    )}
-                  </IconButton>
+                    {expanded ? Icons.collapse : Icons.expand}
+                  </button>
                 )}
                 <span ref={setActivatorNodeRef} className="drag-handle" {...attributes} {...listeners}>
                   <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor">

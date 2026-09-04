@@ -71,8 +71,8 @@ describe("integration regressions", () => {
     expect(phraseSource).toContain('className="card-toggle-text-btn"');
     expect(phraseSource).toContain("e.stopPropagation()");
     expect(phraseSource).toContain('t(isTextExpanded ? "phrases.collapseText" : "phrases.expandText")');
-    expect(phraseSource).toContain("OpenInFullIcon");
-    expect(phraseSource).toContain("CloseFullscreenIcon");
+    expect(phraseSource).toContain("Icons.expand");
+    expect(phraseSource).toContain("Icons.collapse");
     expect(phraseStyles).toContain(".phrase-card-body.is-toggleable");
     expect(phraseStyles).toContain(".phrase-card-body.is-collapsed");
     expect(phraseStyles).toContain(".phrase-card-body.is-expanded");

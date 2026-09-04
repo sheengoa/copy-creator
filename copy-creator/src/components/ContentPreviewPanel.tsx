@@ -1,9 +1,8 @@
 import { useEffect, useState } from "react";
-import IconButton from "@mui/material/IconButton";
-import CloseIcon from "@mui/icons-material/Close";
 import { useTranslation } from "react-i18next";
 import type { RadialPreviewSegment } from "../utils/radialPreview";
 import { resolveResourceAssetUrl } from "../pages/ResourcePage/resourceUtils";
+import { Icons } from "./Icons";
 
 interface ContentPreviewPanelProps {
   segments: RadialPreviewSegment[] | null;
@@ -71,11 +70,9 @@ export function ContentPreviewPanel({
       <div className="content-preview-header">
         <div className="content-preview-title">{t("radialMenu.previewTitle")}</div>
         {onClose && (
-          <IconButton
+          <button
             className="content-preview-close"
             type="button"
-            size="small"
-            disableRipple
             aria-label={t("radialMenu.closePreview")}
             title={t("radialMenu.closePreview")}
             onClick={(event) => {
@@ -84,8 +81,8 @@ export function ContentPreviewPanel({
               onClose();
             }}
           >
-            <CloseIcon fontSize="small" />
-          </IconButton>
+            {Icons.close}
+          </button>
         )}
       </div>
       <div className="content-preview-body" data-content-preview-scroll>

@@ -8,9 +8,7 @@ import {
   PhysicalPosition,
 } from "@tauri-apps/api/window";
 import { invoke } from "@tauri-apps/api/core";
-import IconButton from "@mui/material/IconButton";
-import CloseFullscreenIcon from "@mui/icons-material/CloseFullscreen";
-import OpenInFullIcon from "@mui/icons-material/OpenInFull";
+import { Icons } from "../Icons";
 import { useClipboardStore, type ClipType } from "../../stores/clipboardStore";
 import { usePhraseStore, isImageFilePath } from "../../stores/phraseStore";
 import { useSettingsStore } from "../../stores/settingsStore";
@@ -1166,12 +1164,10 @@ export default function RadialMenu() {
                       </div>
                       {item.previewAvailable && (
                         <div className="radial-menu-item-actions">
-                          <IconButton
+                          <button
                             className="radial-menu-preview-trigger"
                             data-radial-preview-trigger
                             type="button"
-                            size="small"
-                            disableRipple
                             aria-expanded={preview?.itemId === item.id}
                             aria-label={t(
                               preview?.itemId === item.id
@@ -1190,12 +1186,8 @@ export default function RadialMenu() {
                               togglePreview(item);
                             }}
                           >
-                            {preview?.itemId === item.id ? (
-                              <CloseFullscreenIcon fontSize="inherit" />
-                            ) : (
-                              <OpenInFullIcon fontSize="inherit" />
-                            )}
-                          </IconButton>
+                            {preview?.itemId === item.id ? Icons.collapse : Icons.expand}
+                          </button>
                         </div>
                       )}
                     </div>
