@@ -99,8 +99,14 @@ pub fn toggle_window(app: &AppHandle) {
 // ---- radial menu ----
 
 fn raise_always_on_top_without_focus(window: &tauri::WebviewWindow) {
-    let _ = window.set_always_on_top(false);
-    let _ = window.set_always_on_top(true);
+    // 隐藏窗口首次显示时已经由窗口配置保证置顶，不要先切换置顶状态，
+    // 否则窗口映射与置顶重排会在打开瞬间产生闪烁。
+    if window.is_visible().unwrap_or(false) {
+        let _ = window.set_always_on_top(false);
+        let _ = window.set_always_on_top(true);
+    } else {
+        let _ = window.set_always_on_top(true);
+    }
     let _ = window.show();
 }
 

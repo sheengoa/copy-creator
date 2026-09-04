@@ -21,6 +21,17 @@ describe("integration regressions", () => {
     expect(shortcutSource).not.toContain("refresh_always_on_top_if_visible");
     expect(shortcutSource).not.toContain("Duration::from_millis(60)");
     expect(shortcutSource).toContain("raise_always_on_top(&radial);");
+    expect(shortcutSource).toContain("if window.is_visible().unwrap_or(false)");
+    expect(shortcutSource).toContain("window.set_always_on_top(true)");
+  });
+
+  it("does not animate the radial popup during native window mapping", () => {
+    const radialStyles = readSource("./styles/radial-menu.css");
+
+    expect(radialStyles).toContain(".radial-menu-overlay.radial-menu-hidden");
+    expect(radialStyles).not.toContain("radial-menu-hidden .radial-menu-popup");
+    expect(radialStyles).not.toContain("animation: radialMenuIn");
+    expect(radialStyles).not.toContain("@keyframes radialMenuIn");
   });
 
   it("keeps a visible radial menu above the clipboard create dialog", () => {
