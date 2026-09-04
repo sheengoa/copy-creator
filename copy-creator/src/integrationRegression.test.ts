@@ -173,7 +173,7 @@ describe("integration regressions", () => {
     expect(componentSource).toContain('category: isResource ? "resources" : "all"');
     expect(componentSource).not.toContain("clipboard-create-storage-toggle");
     expect(componentSource).not.toContain("clipboard-create-resource-group-section");
-    expect(componentSource).toContain("visibleStashRecords");
+    expect(componentSource).toContain("stashRecords");
   });
 
   it("passes clipboard search into cards for highlighting", () => {

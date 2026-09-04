@@ -262,8 +262,7 @@ export default function ClipboardCreateDialog() {
     }
   }, [content, destOpen, dropdownOpen, hideWindow, handleSave]);
 
-  const visibleStashRecords = stashRecords;
-  const selectedStashRecord = visibleStashRecords.find((record) => record.id === editingId);
+  const selectedStashRecord = stashRecords.find((record) => record.id === editingId);
   const isResource = storageMode === "resource";
 
   return (
@@ -364,7 +363,7 @@ export default function ClipboardCreateDialog() {
               type="button"
               className="clipboard-create-stash-trigger"
               onClick={() => setDropdownOpen((open) => !open)}
-              disabled={loadingRecords || visibleStashRecords.length === 0 || loadingRecordId !== null}
+              disabled={loadingRecords || stashRecords.length === 0 || loadingRecordId !== null}
               aria-expanded={dropdownOpen}
               aria-haspopup="listbox"
             >
@@ -373,7 +372,7 @@ export default function ClipboardCreateDialog() {
                   ? selectedStashRecord.content
                   : loadingRecords
                     ? t("common.loading")
-                    : visibleStashRecords.length === 0
+                    : stashRecords.length === 0
                       ? isResource
                         ? t("resources.noExisting")
                         : t("resources.noExistingClipboard")
@@ -385,9 +384,9 @@ export default function ClipboardCreateDialog() {
                 <polyline points="6 9 12 15 18 9" />
               </svg>
             </button>
-            {dropdownOpen && visibleStashRecords.length > 0 && (
+            {dropdownOpen && stashRecords.length > 0 && (
               <div className="clipboard-create-stash-menu" role="listbox">
-                {visibleStashRecords.map((record) => (
+                {stashRecords.map((record) => (
                   <button
                     key={record.id}
                     type="button"

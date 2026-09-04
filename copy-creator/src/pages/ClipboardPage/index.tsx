@@ -2,7 +2,7 @@ import { useEffect, useState, useRef, useCallback, useMemo } from "react";
 import { createPortal } from "react-dom";
 import { useTranslation } from "react-i18next";
 import { invoke } from "@tauri-apps/api/core";
-import { useClipboardStore } from "../../stores/clipboardStore";
+import { useClipboardStore, type ClipboardFilter } from "../../stores/clipboardStore";
 import { useSettingsStore } from "../../stores/settingsStore";
 import { Icons } from "../../components/Icons";
 import SearchInput from "../../components/SearchInput";
@@ -28,7 +28,7 @@ import BatchSelectionBar from "../../components/BatchSelectionBar";
 import { useMultiSelect } from "../../hooks/useMultiSelect";
 import { isResourceRecord } from "../../utils/clipboardRecord";
 
-type ClipType = "all" | "text" | "image" | "link" | "file";
+type ClipType = ClipboardFilter;
 
 TYPE_META.text.icon = Icons.clipboard;
 TYPE_META.image.icon = Icons.image;

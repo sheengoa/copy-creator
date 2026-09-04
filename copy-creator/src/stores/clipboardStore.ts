@@ -7,6 +7,8 @@ type UnlistenFn = () => void;
 
 export const CLIP_TYPES = ["all", "text", "image", "link", "file", "resources"] as const;
 export type ClipType = (typeof CLIP_TYPES)[number];
+/** 剪贴板页的筛选范围：除资源外的全部类型。 */
+export type ClipboardFilter = Exclude<ClipType, "resources">;
 
 interface ApiKeyLabel {
   service: string;
@@ -64,7 +66,7 @@ interface ClipboardState {
   getImageData: (record: Pick<ClipboardRecord, "id" | "content">) => Promise<string>;
 }
 
-let unlisten: UnlistenFn | null = null;
+let unlisteners: UnlistenFn[] = [];
 let recordsLoadGeneration = 0;
 
 const MAX_CONCURRENT = 3;
@@ -158,11 +160,13 @@ export const useClipboardStore = create<ClipboardState>((set, get) => ({
         return { records: [newRecord, ...state.records].slice(0, 2000) };
       });
     }).then((fn) => {
-      unlisten = fn;
+      unlisteners.push(fn);
     });
 
     listen<string>("clipboard-record-updated", () => {
       get().loadRecords();
+    }).then((fn) => {
+      unlisteners.push(fn);
     });
 
     listen<string>("clipboard-deleted", (event) => {
@@ -173,6 +177,8 @@ export const useClipboardStore = create<ClipboardState>((set, get) => ({
         loading: false,
         loadError: null,
       }));
+    }).then((fn) => {
+      unlisteners.push(fn);
     });
 
     listen("clipboard-cleared", () => {
@@ -186,6 +192,8 @@ export const useClipboardStore = create<ClipboardState>((set, get) => ({
         thumbnailCache: {},
         imageCache: {},
       });
+    }).then((fn) => {
+      unlisteners.push(fn);
     });
 
     void get().loadRecords(false, categoryOverride);
@@ -429,6 +437,7 @@ export const useClipboardStore = create<ClipboardState>((set, get) => ({
 
 if (typeof window !== "undefined") {
   window.addEventListener("beforeunload", () => {
-    if (unlisten) unlisten();
+    unlisteners.forEach((fn) => fn());
+    unlisteners = [];
   });
 }
