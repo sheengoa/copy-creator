@@ -23,6 +23,18 @@ describe("integration regressions", () => {
     expect(shortcutSource).toContain("raise_always_on_top(&radial);");
   });
 
+  it("keeps a visible radial menu above the clipboard create dialog", () => {
+    const shortcutSource = readSource("../src-tauri/src/shortcut.rs");
+    const createBlock = shortcutSource.slice(
+      shortcutSource.indexOf("pub fn show_clipboard_create"),
+      shortcutSource.indexOf("#[tauri::command]", shortcutSource.indexOf("pub fn show_clipboard_create")),
+    );
+
+    expect(shortcutSource).toContain("fn raise_visible_radial_menu(app: &AppHandle)");
+    expect(shortcutSource).toContain("if radial.is_visible().unwrap_or(false)");
+    expect(createBlock).toContain("raise_visible_radial_menu(app);");
+  });
+
   it("keeps migrated clipboard schema compatible with current record fields", () => {
     const dbSource = readSource("../src-tauri/src/db.rs");
     const migrateBlock = dbSource.slice(
@@ -55,7 +67,8 @@ describe("integration regressions", () => {
     );
     const libSource = readSource("../src-tauri/src/lib.rs");
 
-    expect(updateBlock).toContain("resource_group_name_exists(&conn, &group_name)");
+    expect(updateBlock).toContain("SELECT group_name, storage_mode FROM clipboard_records");
+    expect(updateBlock).toContain("is_resource_record(&group_name, &storage_mode)");
     expect(updateBlock).not.toContain('group_name != "暂存" && group_name != "stash"');
     expect(updateBlock).toContain("SET type = ?1, content = ?2, sort_order = ?3 WHERE id = ?4");
     expect(updateBlock).not.toContain("created_at =");
@@ -74,7 +87,7 @@ describe("integration regressions", () => {
   it("supports resource groups for resource records", () => {
     const dbSource = readSource("../src-tauri/src/db.rs");
     const clipboardSource = readSource("../src-tauri/src/clipboard.rs");
-    const pageSource = readSource("./pages/ClipboardPage/index.tsx");
+    const pageSource = readSource("./pages/ResourcePage.tsx");
     const componentSource = readSource("./components/ClipboardCreateDialog/index.tsx");
     const groupChipsSource = readSource("./pages/PhrasePage/GroupChips.tsx");
     const manageGroupsSource = readSource("./pages/PhrasePage/ManageGroupsDialog.tsx");
@@ -93,7 +106,7 @@ describe("integration regressions", () => {
     expect(componentSource).toContain('category: "resources"');
     expect(componentSource).toContain("clipboard-create-resource-group-section");
     expect(componentSource).toContain("visibleStashRecords");
-    expect(componentSource).toContain("record.group_name === groupName");
+    expect(componentSource).toContain("getResourceGroupName(record) === groupName");
     expect(componentSource).not.toContain("clipboard-create-resource-group-select");
   });
 
@@ -125,10 +138,11 @@ describe("integration regressions", () => {
     expect(phrasePage).toContain("<BatchSelectionBar");
     expect(clipboardPage).toContain("loadAllRecords");
     expect(clipboardPage).toContain("selectIds(allVisibleRecordIds)");
-    expect(clipboardPage).toContain("const clipboardRecords = records.filter((r) => !r.group_name)");
-    expect(clipboardPage).toContain(".filter((record) => !record.group_name)");
+    expect(clipboardPage).toContain("const clipboardRecords = records.filter((r) => !isResourceRecord(r))");
+    expect(clipboardPage).toContain(".filter((record) => !isResourceRecord(record))");
     expect(clipboardPage).toContain('if (category === "stash") return []');
-    expect(clipboardPage).toContain('resourcesOnly ? "resources.confirmDeleteSelected" : "clipboard.confirmDeleteSelected"');
+    expect(clipboardPage).toContain('"clipboard.confirmDeleteSelected"');
+    expect(clipboardPage).not.toContain("resourcesOnly");
     expect(clipboardPage).toContain("setDeletingSelected(true)");
     expect(clipboardPage).toContain("busy={selectingAll || deletingSelected}");
     expect(clipboardPage).toContain('busyLabel={deletingSelected ? t("common.deleting") : t("common.loading")}');
@@ -138,7 +152,7 @@ describe("integration regressions", () => {
     expect(libSource).toContain("db::delete_phrases");
   });
 
-  it("keeps stash records under the resources navigation", () => {
+  it("keeps the resource library independent from clipboard history", () => {
     const appSource = readSource("./App.tsx");
     const clipboardPage = readSource("./pages/ClipboardPage/index.tsx");
     const radialMenu = readSource("./components/RadialMenu/index.tsx");
@@ -147,18 +161,90 @@ describe("integration regressions", () => {
     expect(appSource).toContain('titleKey: "tabs.resources"');
     expect(appSource).toContain('{ panelType: "resources" }');
     expect(clipboardPage).not.toContain('{ key: "stash", label: t("clipboard.stash") }');
-    expect(resourcePage).toContain("<ClipboardPage resourcesOnly />");
+    expect(clipboardPage).not.toContain("resourcesOnly");
+    expect(clipboardPage).not.toContain("useResourceGroupStore");
+    expect(resourcePage).toContain("resource-library-page");
+    expect(resourcePage).toContain("<GroupChips");
+    expect(resourcePage).toContain("<ResourceCard");
+    expect(resourcePage).toContain("<ResourceQuickPreview");
+    expect(resourcePage).toContain("<ResourceDetailPage");
+    expect(resourcePage).toContain('loadRecords(false, "resources")');
     expect(radialMenu).toContain('["clipboard", "phrases", "resources"]');
     expect(radialMenu).toContain('useClipboardStore.getState().loadRecords(false, "resources")');
     expect(radialMenu).toContain('useClipboardStore.getState().setCategory("resources")');
     expect(radialMenu).toContain('clipboardCategory === "resources"');
-    expect(radialMenu).toContain('.filter((r) => Boolean(r.group_name))');
-    expect(clipboardPage).toContain('hasMore && (resourcesOnly || filtered.length > 0)');
-    expect(clipboardPage).toContain('resourcesOnly && hasMore');
+    expect(radialMenu).toContain(".filter((r) => isResourceRecord(r))");
+    expect(radialMenu).toContain("isContentPreviewAvailable");
+    expect(radialMenu).not.toContain("previewAvailable: true");
+  });
+
+  it("keeps resource previews and batch selection aligned with current records", () => {
+    const pageSource = readSource("./pages/ResourcePage.tsx");
+    const quickPreviewSource = readSource("./pages/ResourcePage/ResourceQuickPreview.tsx");
+    const detailPageSource = readSource("./pages/ResourcePage/ResourceDetailPage.tsx");
+    const clipboardSource = readSource("../src-tauri/src/clipboard.rs");
+    const createBlock = clipboardSource.slice(
+      clipboardSource.indexOf("pub fn create_clipboard_record"),
+      clipboardSource.indexOf("fn make_text_event_content"),
+    );
+    const quickLoaderBlock = quickPreviewSource.slice(
+      quickPreviewSource.indexOf("async function loadPreviewData"),
+      quickPreviewSource.indexOf("function ResourceFilePreview"),
+    );
+    const detailLoaderBlock = detailPageSource.slice(
+      detailPageSource.indexOf("useEffect(() =>"),
+      detailPageSource.indexOf("const title"),
+    );
+
+    expect(pageSource).toContain("const selectAllRequestRef = useRef(0);");
+    expect(pageSource).toContain("if (selectingAll) return;");
+    expect(pageSource).toContain("request !== selectAllRequestRef.current");
+    expect(pageSource).toContain("cancelResourceSelection();");
+    expect(pageSource).toContain("busy={selectingAll || deletingSelected}");
+    expect(pageSource).toContain("index={renderedRecordIndexes.get(record.id) ?? 0}");
+    expect(pageSource).toContain("{confirmDialog}");
+    expect(quickLoaderBlock).toContain('|| kind === "image"');
+    expect(quickPreviewSource).toContain("<ResourceImage");
+    expect(detailLoaderBlock).toContain('|| kind === "image"');
+    expect(detailPageSource).toContain("<ResourceImage");
+    expect(createBlock).toContain("let group_name = group_name.unwrap_or_default();");
+  });
+
+  it("keeps resource-library storage separate from the app database", () => {
+    const dbSource = readSource("../src-tauri/src/db.rs");
+    const clipboardSource = readSource("../src-tauri/src/clipboard.rs");
+    const resourcePage = readSource("./pages/ResourcePage.tsx");
+    const createDialog = readSource("./components/ClipboardCreateDialog/index.tsx");
+    const pruneBlock = dbSource.slice(
+      dbSource.indexOf("pub fn prune_old_records"),
+      dbSource.indexOf("// ---- Tauri Commands ----"),
+    );
+
+    expect(dbSource).toContain("resource_library_path");
+    expect(dbSource).toContain("pub fn get_resource_library_path");
+    expect(dbSource).toContain("pub fn set_resource_library_path");
+    expect(dbSource).toContain("pub async fn select_resource_library_folder");
+    expect(dbSource).toContain("paths_overlap(&path, &storage_path)");
+    expect(pruneBlock).toContain("COALESCE(storage_mode, 'database') = 'resource'");
+    expect(pruneBlock).toContain("TRIM(COALESCE(group_name, '')) <> ''");
+    expect(pruneBlock).not.toContain("resource_files");
+    expect(dbSource).toContain("WHERE NOT ({RESOURCE_RECORD_CONDITION})");
+    expect(dbSource).toContain("type = ?1 AND NOT ({RESOURCE_RECORD_CONDITION})");
+    expect(dbSource).toContain("is_resource_record(&group_name, &storage_mode)");
+    expect(clipboardSource).toContain("let extension = if images.is_empty()");
+    expect(clipboardSource).toContain('"txt"');
+    expect(clipboardSource).toContain('"md"');
+    expect(clipboardSource).toContain(".copy-creator/attachments/");
+    expect(resourcePage).toContain('get_resource_library_path"');
+    expect(resourcePage).toContain('select_resource_library_folder"');
+    expect(resourcePage).toContain('set_resource_library_path"');
+    expect(resourcePage).toContain('storageMode: "resource"');
+    expect(createDialog).toContain("storageDatabase");
+    expect(createDialog).toContain("storageResource");
   });
 
   it("keeps resource group operation errors visible and preserves failed dialog state", () => {
-    const pageSource = readSource("./pages/ClipboardPage/index.tsx");
+    const pageSource = readSource("./pages/ResourcePage.tsx");
     const storeSource = readSource("./stores/resourceGroupStore.ts");
     const groupDialogSource = readSource("./pages/PhrasePage/GroupDialog.tsx");
     const manageGroupsSource = readSource("./pages/PhrasePage/ManageGroupsDialog.tsx");
@@ -178,6 +264,7 @@ describe("integration regressions", () => {
     const pageSource = readSource("./pages/ClipboardPage/index.tsx");
     const cardSource = readSource("./pages/ClipboardPage/ClipboardCard.tsx");
     const radialMenu = readSource("./components/RadialMenu/index.tsx");
+    const previewPanel = readSource("./components/ContentPreviewPanel.tsx");
     const previewLoader = readSource("./utils/contentPreview.ts");
     const clipboardStyles = readSource("./styles/clipboard.css");
     const persistWindowSize = readSource("./hooks/usePersistWindowSize.ts");
@@ -192,12 +279,20 @@ describe("integration regressions", () => {
     expect(pageSource).toContain("previewRestoringRef");
     expect(pageSource).toContain("finishMainPreviewRestore");
     expect(pageSource).toContain("useLayoutEffect");
-    expect(pageSource).toContain('addEventListener("pointerleave"');
-    expect(pageSource).toContain('addEventListener("pointerout"');
-    expect(pageSource).toContain('addEventListener("mouseout"');
-    expect(pageSource).toContain("visibilitychange");
-    expect(pageSource).toContain("relatedTarget.closest(\".clipboard-card\")");
     expect(pageSource).toContain("main-window-content-preview");
+    expect(pageSource).not.toContain("handlePreviewLeave");
+    expect(pageSource).not.toContain("onPreviewLeave");
+    expect(pageSource).not.toContain('addEventListener("mouseleave"');
+    expect(pageSource).not.toContain('addEventListener("pointerleave"');
+    expect(pageSource).not.toContain('addEventListener("pointerout"');
+    expect(pageSource).not.toContain('addEventListener("mouseout"');
+    expect(pageSource).not.toContain("visibilitychange");
+    expect(pageSource).not.toContain("handleDeletePreview");
+    expect(pageSource).toContain("onClose={collapsePreview}");
+    expect(radialMenu).toContain("onClose={collapsePreview}");
+    expect(previewPanel).toContain("onClose?: () => void;");
+    expect(previewPanel).toContain("content-preview-close");
+    expect(previewPanel).not.toContain("onDelete");
     expect(clipboardStyles).toContain(':root[data-main-content-preview="right"] .app-container');
     expect(clipboardStyles).toContain(':root[data-main-content-preview="left"] .app-container');
     expect(clipboardStyles).toContain('data-main-content-preview-state="restoring"');
@@ -206,18 +301,20 @@ describe("integration regressions", () => {
     expect(persistWindowSize).toContain('hasAttribute("data-main-content-preview")');
     expect(cardSource).not.toContain("textExpanded");
     expect(cardSource).not.toContain("card-toggle-text-btn");
-    expect(cardSource).toContain("onMouseLeave={onPreviewLeave}");
     expect(pageSource).not.toContain("thumb-hover-overlay");
     expect(clipboardStyles).not.toContain(".thumb-hover-overlay");
     expect(clipboardStyles).not.toContain(".image-preview-overlay");
     expect(clipboardStyles).not.toContain(".image-preview-backdrop");
     expect(clipboardStyles).not.toContain(".image-preview-img");
     expect(clipboardStyles).not.toContain(".card-toggle-text-btn");
+    expect(cardSource).not.toContain("onPreviewLeave");
+    expect(cardSource).not.toContain("onMouseLeave={onPreviewLeave}");
   });
 
   it("starts Linux file drags from the top-level GTK window", () => {
     const dragSource = readSource("../src-tauri/src/radial_drag.rs");
     const libSource = readSource("../src-tauri/src/lib.rs");
+    const shortcutSource = readSource("../src-tauri/src/shortcut.rs");
     const radialMenu = readSource("./components/RadialMenu/index.tsx");
     const pageSource = readSource("./pages/ClipboardPage/index.tsx");
     const cardSource = readSource("./pages/ClipboardPage/ClipboardCard.tsx");
@@ -239,6 +336,10 @@ describe("integration regressions", () => {
     const listenerBlock = radialMenu.slice(
       radialMenu.indexOf("const setup = async () =>"),
       radialMenu.indexOf("// Mouse move: update hover state"),
+    );
+    const blurBlock = radialMenu.slice(
+      radialMenu.indexOf("const handleBlur"),
+      radialMenu.indexOf('document.addEventListener("mousemove"'),
     );
     expect(dragSource).toContain("install_linux_drag_source");
     expect(dragSource).toContain("gtk_window()");
@@ -314,15 +415,16 @@ describe("integration regressions", () => {
     expect(listenerBlock).toContain("Promise.all");
     expect(listenerBlock).toContain('"radial-drag-started"');
     expect(listenerBlock).toContain('"radial-drag-finished"');
+    expect(listenerBlock).toContain("unlisteners = [unShow, unHide, unDragStarted, unDragFinished]");
     expect(listenerBlock).toContain("disposed");
     expect(listenerBlock).not.toContain("await loadPasteLeftClickSetting()");
     expect(listenerBlock).toContain("void loadPasteLeftClickSetting()");
     expect(listenerBlock.indexOf("visibleRef.current = true;")).toBeLessThan(
       listenerBlock.indexOf("void loadPasteLeftClickSetting();"),
     );
-    expect(radialMenu).toContain(
-      "if (!dragActiveRef.current && !pending) return;",
-    );
+    expect(blurBlock).toContain("&& previewRef.current");
+    expect(blurBlock).toContain("return;");
+    expect(blurBlock).toContain("resetState();");
     expect(radialMenu).not.toContain("syncDragCandidate");
     expect(radialMenu).not.toContain("radial-menu-drag-surface");
     expect(radialMenu).not.toContain("(e.buttons & 1)");
@@ -341,6 +443,18 @@ describe("integration regressions", () => {
     expect(radialMenu).not.toContain("schedulePreview");
     expect(radialMenu).not.toContain("onMouseEnter={(e) =>");
     expect(radialMenu).toContain("windowRestoreRef");
+    expect(radialMenu).toContain("onMouseLeave={handlePreviewLeave}");
+    const armDragCatchBlock = radialMenu.slice(
+      radialMenu.indexOf("const armRadialFileDrag"),
+      radialMenu.indexOf("const finishPendingPointerDrag"),
+    );
+    expect(armDragCatchBlock).toContain("if (current.thresholdCrossed)");
+    expect(armDragCatchBlock).toContain("collapsePreview();");
+    const radialItemBlock = radialMenu.slice(
+      radialMenu.indexOf('data-radial-item-id={item.id}'),
+      radialMenu.indexOf("onClick={(e) => {", radialMenu.indexOf('data-radial-item-id={item.id}')),
+    );
+    expect(radialItemBlock).not.toContain("onMouseLeave");
     expect(pageSource).toContain("const togglePreview = useCallback");
     expect(pageSource).toContain("onPreviewToggle={togglePreview}");
     expect(pageSource).not.toContain("schedulePreview");
@@ -365,11 +479,13 @@ describe("integration regressions", () => {
     expect(radialStyles).not.toContain("cursor: grab;");
     expect(radialStyles).toContain("cursor: grabbing");
     expect(radialStyles).toContain(".radial-menu-preview-trigger");
-    expect(radialStyles).toContain("bottom: 8px");
-    expect(radialStyles).not.toContain("top: 8px;\n  right: 8px;");
-    expect(radialStyles).toContain("padding-right: 48px");
+    expect(radialStyles).not.toContain("bottom: 8px");
+    expect(radialStyles).not.toContain("padding-right: 48px");
+    expect(radialStyles).toContain(".radial-menu-item-footer");
     expect(radialStyles).toContain("prefers-reduced-motion: reduce");
     expect(radialStyles).toContain(".radial-menu-popup.drag-session .content-preview-panel");
+    expect(radialMenu).toContain('listen("radial-menu-hide", resetStateForNativeHide)');
+    expect(shortcutSource).toContain('app.emit("radial-menu-hide", ())');
     expect(radialDrag).not.toContain('RadialDragKind = "text"');
     expect(libSource).toContain("start_radial_file_drag");
     expect(libSource).toContain("install_radial_file_drag_source");

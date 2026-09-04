@@ -54,7 +54,7 @@ describe("standalone window chrome", () => {
 
     expect(css).toContain(".clipboard-create-stash-picker");
     expect(componentSource).toContain('category: "resources"');
-    expect(componentSource).toContain("record.group_name");
+    expect(componentSource).toContain("getResourceGroupName(record)");
     expect(componentSource).toContain("clipboard-create-resource-group-section");
     expect(componentSource).toContain('aria-haspopup="listbox"');
     expect(componentSource).toContain("setDropdownOpen");
@@ -64,6 +64,21 @@ describe("standalone window chrome", () => {
     expect(css).toContain("white-space: nowrap");
     expect(componentSource).toContain('"save_stash_record"');
     expect(componentSource).toContain("<StashEditor");
+  });
+
+  it("keeps clipboard create resource fields on one row", () => {
+    const css = readStyle("clipboard.css");
+    const componentSource = readSource("../components/ClipboardCreateDialog/index.tsx");
+    const fieldsRule = getRule(css, ".clipboard-create-resource-fields");
+
+    expect(componentSource).toContain('className="clipboard-create-resource-fields"');
+    expect(fieldsRule).toContain("display: grid;");
+    expect(fieldsRule).toContain("grid-template-columns: minmax(0, 2fr) minmax(0, 5fr);");
+    expect(fieldsRule).toContain("gap: 2px;");
+    expect(css).toContain(
+      ".clipboard-create-stash-section,\n.clipboard-create-resource-group-section {",
+    );
+    expect(css).toContain("margin-top: 0;");
   });
 
   it("keeps native stash editor selection and two-sided image caret anchors", () => {

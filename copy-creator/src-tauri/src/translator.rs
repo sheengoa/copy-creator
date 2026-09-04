@@ -220,7 +220,9 @@ async fn translate_google(
                 ("q", text),
             ])
             .header("User-Agent", TRANSLATE_USER_AGENT)
-            .send().await.map_err(|e| fmt_reqwest_error(&e))?;
+            .send()
+            .await
+            .map_err(|e| fmt_reqwest_error(&e))?;
 
         let status = resp.status();
         let body = resp
@@ -257,7 +259,9 @@ async fn translate_google(
             "target": target_lang,
             "format": "text"
         }))
-        .send().await.map_err(|e| fmt_reqwest_error(&e))?;
+        .send()
+        .await
+        .map_err(|e| fmt_reqwest_error(&e))?;
 
     let json: serde_json::Value = resp
         .json()

@@ -2,6 +2,7 @@ use base64::Engine;
 use rusqlite::OptionalExtension;
 use std::collections::HashSet;
 use std::io::Write;
+use std::path::PathBuf;
 use tauri::{AppHandle, Emitter, Manager};
 use tauri_plugin_clipboard_manager::ClipboardExt;
 
@@ -138,7 +139,7 @@ pub fn create_clipboard_record(
     if content.is_empty() {
         return Err("内容不能为空".to_string());
     }
-    let group_name = group_name.unwrap_or_else(|| "暂存".to_string());
+    let group_name = group_name.unwrap_or_default();
     let record_type = classify_text_record(&content);
     let id = uuid::Uuid::new_v4().to_string();
     let now = chrono::Utc::now().to_rfc3339();
@@ -190,25 +191,16 @@ fn write_stash_images(
     let mut created_paths = Vec::new();
     for image_data in images {
         if reusable_paths.contains(image_data) {
-            if !storage_dir.join(image_data).is_file() {
+            let existing_path = crate::db::resolve_storage_path(app, image_data)?;
+            if !existing_path.is_file() {
                 remove_stash_images(app, &created_paths);
                 return Err("原暂存图片文件已不存在".to_string());
             }
             paths.push(image_data.clone());
             continue;
         }
-        if image_data.starts_with("stash-images/") {
-            remove_stash_images(app, &created_paths);
-            return Err("暂存图片路径无效".to_string());
-        }
         let result = (|| -> Result<String, String> {
-            let encoded = image_data
-                .split_once(',')
-                .map(|(_, data)| data)
-                .unwrap_or(image_data);
-            let bytes = base64::engine::general_purpose::STANDARD
-                .decode(encoded)
-                .map_err(|e| format!("图片数据无效: {e}"))?;
+            let bytes = read_image_source(app, image_data)?;
             let image =
                 image::load_from_memory(&bytes).map_err(|e| format!("图片格式无效: {e}"))?;
             let width = image.width();
@@ -238,10 +230,192 @@ fn write_stash_images(
 
 fn remove_stash_images(app: &AppHandle, paths: &[String]) {
     crate::paste::remove_cached_images(paths);
-    let storage_dir = crate::db::get_storage_dir(app);
     for path in paths {
-        let _ = std::fs::remove_file(storage_dir.join(path));
+        if let Some(path) = crate::db::resolve_managed_storage_path(app, path) {
+            let _ = std::fs::remove_file(path);
+        }
     }
+}
+
+fn read_image_source(app: &AppHandle, value: &str) -> Result<Vec<u8>, String> {
+    let value = value.trim();
+    if value.is_empty() {
+        return Err("图片数据为空".to_string());
+    }
+
+    if value.starts_with("data:") {
+        let encoded = value
+            .split_once(',')
+            .map(|(_, data)| data)
+            .ok_or_else(|| "图片数据无效".to_string())?;
+        return base64::engine::general_purpose::STANDARD
+            .decode(encoded)
+            .map_err(|e| format!("图片数据无效: {e}"));
+    }
+
+    let path = if value.starts_with("file://") {
+        parse_file_uri(value)
+            .map(PathBuf::from)
+            .ok_or_else(|| "图片路径无效".to_string())?
+    } else {
+        PathBuf::from(value)
+    };
+    let path = if path.is_absolute() {
+        path
+    } else {
+        crate::db::resolve_storage_path(app, value)?
+    };
+    if path.is_file() {
+        return std::fs::read(&path).map_err(|e| format!("读取图片失败: {e}"));
+    }
+
+    base64::engine::general_purpose::STANDARD
+        .decode(value)
+        .map_err(|e| format!("图片数据无效: {e}"))
+}
+
+fn sanitize_resource_file_stem(content: &str) -> String {
+    let cleaned_content = content
+        .replace(crate::paste::STASH_IMAGE_PLACEHOLDER, "")
+        .replace("[Image #1]", "");
+    let source = cleaned_content
+        .lines()
+        .map(str::trim)
+        .find(|line| !line.is_empty())
+        .unwrap_or("content");
+    let mut result = String::new();
+    let mut previous_separator = false;
+    for character in source.chars() {
+        let next = if character.is_whitespace() {
+            '-'
+        } else if matches!(
+            character,
+            '<' | '>' | ':' | '"' | '/' | '\\' | '|' | '?' | '*'
+        ) {
+            '_'
+        } else {
+            character
+        };
+        if next == '-' || next == '_' {
+            if previous_separator {
+                continue;
+            }
+            previous_separator = true;
+        } else {
+            previous_separator = false;
+        }
+        result.push(next);
+        if result.chars().count() >= 60 {
+            break;
+        }
+    }
+    let result = result.trim_matches(['-', '_']).to_string();
+    if result.is_empty() {
+        "content".to_string()
+    } else {
+        result
+    }
+}
+
+fn render_resource_markdown(
+    content: &str,
+    relative_image_paths: &[String],
+) -> Result<String, String> {
+    let mut output = String::new();
+    let mut remaining = content;
+    let uses_object_placeholders = content.contains(crate::paste::STASH_IMAGE_PLACEHOLDER);
+
+    for (index, relative_path) in relative_image_paths.iter().enumerate() {
+        let token = if uses_object_placeholders {
+            crate::paste::STASH_IMAGE_PLACEHOLDER.to_string()
+        } else {
+            format!("[Image #{}]", index + 1)
+        };
+        let position = remaining
+            .find(&token)
+            .ok_or_else(|| format!("缺少图片占位符 {}", index + 1))?;
+        output.push_str(&remaining[..position]);
+        output.push_str(&format!("![截图 {}]({relative_path})", index + 1));
+        remaining = &remaining[position + token.len()..];
+    }
+    output.push_str(remaining);
+    if !output.ends_with('\n') {
+        output.push('\n');
+    }
+    Ok(output)
+}
+
+struct ResourceWriteResult {
+    resource_path: String,
+    attachment_paths: Vec<String>,
+}
+
+fn write_resource_record(
+    app: &AppHandle,
+    record_id: &str,
+    content: &str,
+    images: &[String],
+) -> Result<ResourceWriteResult, String> {
+    let resource_dir = crate::db::get_resource_library_dir(app);
+    let transaction_id = uuid::Uuid::new_v4().to_string();
+    let attachment_dir_name = format!("{record_id}-{transaction_id}");
+    let attachment_dir = resource_dir
+        .join(".copy-creator")
+        .join("attachments")
+        .join(&attachment_dir_name);
+    let mut attachment_paths = Vec::with_capacity(images.len());
+
+    let result = (|| -> Result<ResourceWriteResult, String> {
+        if !images.is_empty() {
+            std::fs::create_dir_all(&attachment_dir)
+                .map_err(|e| format!("创建资源附件目录失败: {e}"))?;
+        }
+
+        for (index, image_data) in images.iter().enumerate() {
+            let target = attachment_dir.join(format!("image-{}.png", index + 1));
+            let target_string = target.to_string_lossy().to_string();
+            attachment_paths.push(target_string);
+            let bytes = read_image_source(app, image_data)?;
+            let image =
+                image::load_from_memory(&bytes).map_err(|e| format!("图片格式无效: {e}"))?;
+            image
+                .save_with_format(&target, image::ImageFormat::Png)
+                .map_err(|e| format!("资源图片保存失败: {e}"))?;
+        }
+
+        let extension = if images.is_empty() { "txt" } else { "md" };
+        let file_stem = format!(
+            "copy-creator-{record_id}-{transaction_id}-{}",
+            sanitize_resource_file_stem(content)
+        );
+        let resource_path = resource_dir.join(format!("{file_stem}.{extension}"));
+        let file_content = if images.is_empty() {
+            format!("{content}\n")
+        } else {
+            let relative_paths = (1..=images.len())
+                .map(|index| {
+                    format!(".copy-creator/attachments/{attachment_dir_name}/image-{index}.png")
+                })
+                .collect::<Vec<_>>();
+            render_resource_markdown(content, &relative_paths)?
+        };
+        let temp_path = resource_dir.join(format!(".{file_stem}.tmp"));
+        std::fs::write(&temp_path, file_content).map_err(|e| format!("资源文件写入失败: {e}"))?;
+        if let Err(error) = std::fs::rename(&temp_path, &resource_path) {
+            let _ = std::fs::remove_file(&temp_path);
+            return Err(format!("资源文件提交失败: {error}"));
+        }
+
+        Ok(ResourceWriteResult {
+            resource_path: resource_path.to_string_lossy().to_string(),
+            attachment_paths: attachment_paths.clone(),
+        })
+    })();
+
+    if result.is_err() {
+        crate::db::remove_resource_record_attachments(app, record_id, &attachment_paths);
+    }
+    result
 }
 
 fn validate_stash_content(content: &str, image_count: usize) -> Result<(), String> {
@@ -291,6 +465,7 @@ pub fn save_stash_record(
     content: String,
     images: Vec<String>,
     group_name: Option<String>,
+    storage_mode: Option<String>,
 ) -> Result<serde_json::Value, String> {
     let content = content.trim().to_string();
     if content.is_empty() {
@@ -306,52 +481,114 @@ pub fn save_stash_record(
         let state = app.state::<crate::db::DbState>();
         let conn = state.conn.lock().map_err(|e| e.to_string())?;
         conn.query_row(
-            "SELECT group_name, attachments FROM clipboard_records WHERE id = ?1",
+            "SELECT group_name, attachments, storage_mode, resource_path FROM clipboard_records WHERE id = ?1",
             rusqlite::params![&record_id],
-            |row| Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?)),
+            |row| {
+                Ok((
+                    row.get::<_, String>(0)?,
+                    row.get::<_, String>(1)?,
+                    row.get::<_, String>(2)?,
+                    row.get::<_, String>(3)?,
+                ))
+            },
         )
         .optional()
         .map_err(|e| e.to_string())?
     };
-    let current_group_name = existing.as_ref().map(|(name, _)| name.as_str());
-    if let Some(name) = current_group_name {
-        if !crate::db::is_resource_group_name(&app, name)? {
-            return Err("只能编辑资源分组的记录".to_string());
+    let current_group_name = existing.as_ref().map(|(name, _, _, _)| name.as_str());
+    let current_storage_mode = existing
+        .as_ref()
+        .map(|(_, _, mode, _)| mode.as_str())
+        .unwrap_or(crate::db::DATABASE_STORAGE_MODE);
+    let updated = existing.is_some();
+    let current_is_resource = existing
+        .as_ref()
+        .is_some_and(|(name, _, mode, _)| crate::db::is_resource_record(name, mode));
+    let target_storage_mode = match storage_mode.as_deref() {
+        Some(crate::db::DATABASE_STORAGE_MODE) => crate::db::DATABASE_STORAGE_MODE,
+        Some(crate::db::RESOURCE_STORAGE_MODE) => crate::db::RESOURCE_STORAGE_MODE,
+        Some(_) => return Err("保存位置无效".to_string()),
+        None if current_storage_mode == crate::db::RESOURCE_STORAGE_MODE => {
+            crate::db::RESOURCE_STORAGE_MODE
         }
-    }
-    let target_group_name = match group_name {
-        Some(name) => {
-            let name = name.trim().to_string();
-            if name.is_empty() {
-                return Err("资源分组不能为空".to_string());
-            }
-            name
-        }
-        None => current_group_name
-            .unwrap_or(crate::db::DEFAULT_RESOURCE_GROUP_NAME)
-            .to_string(),
+        None => crate::db::DATABASE_STORAGE_MODE,
     };
-    if !crate::db::is_resource_group_name(&app, &target_group_name)? {
-        return Err("资源分组不存在".to_string());
+    if current_is_resource && current_storage_mode == crate::db::RESOURCE_STORAGE_MODE {
+        if let Some(name) = current_group_name {
+            if !crate::db::is_resource_group_name(&app, name)? {
+                return Err("只能编辑资源分组的记录".to_string());
+            }
+        }
     }
-    let old_paths = if let Some((group_name, attachments)) = &existing {
-        let _ = group_name;
+    let target_group_name = if target_storage_mode == crate::db::DATABASE_STORAGE_MODE {
+        String::new()
+    } else {
+        let name = match group_name {
+            Some(name) => {
+                let name = name.trim().to_string();
+                if name.is_empty() {
+                    return Err("资源分组不能为空".to_string());
+                }
+                name
+            }
+            None => current_group_name
+                .filter(|name| !name.is_empty())
+                .unwrap_or(crate::db::DEFAULT_RESOURCE_GROUP_NAME)
+                .to_string(),
+        };
+        if !crate::db::is_resource_group_name(&app, &name)? {
+            return Err("资源分组不存在".to_string());
+        }
+        name
+    };
+    let old_paths = if let Some((_, attachments, _, _)) = &existing {
         serde_json::from_str::<Vec<String>>(attachments).unwrap_or_default()
     } else {
         Vec::new()
     };
-    let reusable_paths = old_paths.iter().cloned().collect::<HashSet<_>>();
-    let (new_paths, created_paths) = write_stash_images(&app, &images, &reusable_paths)?;
+    let old_resource_path = existing
+        .as_ref()
+        .map(|(_, _, _, path)| path.clone())
+        .unwrap_or_default();
+    let reusable_paths = if updated
+        && current_storage_mode == crate::db::DATABASE_STORAGE_MODE
+        && !current_is_resource
+    {
+        old_paths.iter().cloned().collect::<HashSet<_>>()
+    } else {
+        HashSet::new()
+    };
+    let (new_paths, created_stash_paths, new_resource_path, new_resource_paths) =
+        if target_storage_mode == crate::db::RESOURCE_STORAGE_MODE {
+            let result = write_resource_record(&app, &record_id, &content, &images)?;
+            (
+                result.attachment_paths.clone(),
+                Vec::new(),
+                result.resource_path,
+                result.attachment_paths,
+            )
+        } else {
+            let (paths, created_paths) = write_stash_images(&app, &images, &reusable_paths)?;
+            (paths, created_paths, String::new(), Vec::new())
+        };
     let attachments = serde_json::to_string(&new_paths).map_err(|e| e.to_string())?;
-    let updated = existing.is_some();
 
     let result = (|| -> Result<(), String> {
         let state = app.state::<crate::db::DbState>();
         let conn = state.conn.lock().map_err(|e| e.to_string())?;
         if updated {
             let affected = conn.execute(
-                "UPDATE clipboard_records SET type = ?1, content = ?2, sort_order = ?3, group_name = ?4, attachments = ?5 WHERE id = ?6",
-                rusqlite::params![record_type, &content, sort_order, &target_group_name, &attachments, &record_id],
+                "UPDATE clipboard_records SET type = ?1, content = ?2, sort_order = ?3, group_name = ?4, attachments = ?5, storage_mode = ?6, resource_path = ?7 WHERE id = ?8",
+                rusqlite::params![
+                    record_type,
+                    &content,
+                    sort_order,
+                    &target_group_name,
+                    &attachments,
+                    target_storage_mode,
+                    &new_resource_path,
+                    &record_id,
+                ],
             )
             .map_err(|e| e.to_string())?;
             if affected == 0 {
@@ -364,8 +601,18 @@ pub fn save_stash_record(
             .map_err(|e| e.to_string())?;
         } else {
             conn.execute(
-                "INSERT INTO clipboard_records (id, type, content, source_app, created_at, sort_order, group_name, attachments) VALUES (?1, ?2, ?3, '', ?4, ?5, ?6, ?7)",
-                rusqlite::params![&record_id, record_type, &content, &now, sort_order, &target_group_name, &attachments],
+                "INSERT INTO clipboard_records (id, type, content, source_app, created_at, sort_order, group_name, attachments, storage_mode, resource_path) VALUES (?1, ?2, ?3, '', ?4, ?5, ?6, ?7, ?8, ?9)",
+                rusqlite::params![
+                    &record_id,
+                    record_type,
+                    &content,
+                    &now,
+                    sort_order,
+                    &target_group_name,
+                    &attachments,
+                    target_storage_mode,
+                    &new_resource_path,
+                ],
             )
             .map_err(|e| e.to_string())?;
         }
@@ -373,15 +620,27 @@ pub fn save_stash_record(
     })();
 
     if let Err(error) = result {
-        remove_stash_images(&app, &created_paths);
+        remove_stash_images(&app, &created_stash_paths);
+        if !new_resource_path.is_empty() || !new_resource_paths.is_empty() {
+            crate::db::remove_resource_record_files(
+                &app,
+                &record_id,
+                &new_resource_path,
+                &new_resource_paths,
+            );
+        }
         return Err(error);
     }
     let retained_paths = new_paths.iter().cloned().collect::<HashSet<_>>();
-    let obsolete_paths = old_paths
-        .into_iter()
-        .filter(|path| !retained_paths.contains(path))
-        .collect::<Vec<_>>();
-    remove_stash_images(&app, &obsolete_paths);
+    if current_is_resource {
+        crate::db::remove_resource_record_files(&app, &record_id, &old_resource_path, &old_paths);
+    } else {
+        let obsolete_paths = old_paths
+            .into_iter()
+            .filter(|path| !retained_paths.contains(path))
+            .collect::<Vec<_>>();
+        remove_stash_images(&app, &obsolete_paths);
+    }
 
     if updated {
         app.emit("clipboard-record-updated", &record_id).ok();
@@ -403,11 +662,17 @@ pub fn save_stash_record(
                 "label": null,
                 "group_name": &target_group_name,
                 "has_images": !new_paths.is_empty(),
+                "storage_mode": target_storage_mode,
+                "resource_path": &new_resource_path,
             }),
         )
         .ok();
     }
-    Ok(serde_json::json!({ "id": record_id }))
+    Ok(serde_json::json!({
+        "id": record_id,
+        "storage_mode": target_storage_mode,
+        "resource_path": new_resource_path,
+    }))
 }
 
 #[tauri::command]
@@ -416,7 +681,7 @@ pub fn get_stash_record_images(app: AppHandle, id: String) -> Result<Vec<String>
     let conn = state.conn.lock().map_err(|e| e.to_string())?;
     let attachments = conn
         .query_row(
-            "SELECT attachments FROM clipboard_records WHERE id = ?1 AND group_name <> ''",
+            "SELECT attachments FROM clipboard_records WHERE id = ?1",
             rusqlite::params![id],
             |row| row.get::<_, String>(0),
         )
@@ -930,8 +1195,8 @@ pub fn start_monitor(app: &AppHandle) -> Result<(), Box<dyn std::error::Error>> 
 #[cfg(test)]
 mod tests {
     use super::{
-        clipboard_text_files, encode_rgba_png, parse_file_uri, stash_content_for_display,
-        validate_stash_content,
+        clipboard_text_files, encode_rgba_png, parse_file_uri, render_resource_markdown,
+        sanitize_resource_file_stem, stash_content_for_display, validate_stash_content,
     };
     use base64::Engine;
 
@@ -997,5 +1262,27 @@ mod tests {
     fn rejects_mismatched_or_out_of_order_stash_placeholders() {
         assert!(validate_stash_content("\u{FFFC}", 2).is_err());
         assert!(validate_stash_content("[Image #2][Image #1]", 2).is_err());
+    }
+
+    #[test]
+    fn renders_plain_resource_text_as_a_markdown_image_document() {
+        let markdown = render_resource_markdown(
+            "截图前\u{FFFC}截图后",
+            &[".copy-creator/attachments/item/image-1.png".to_string()],
+        )
+        .unwrap();
+
+        assert_eq!(
+            markdown,
+            "截图前![截图 1](.copy-creator/attachments/item/image-1.png)截图后\n"
+        );
+    }
+
+    #[test]
+    fn generates_a_safe_resource_file_stem_from_visible_content() {
+        assert_eq!(
+            sanitize_resource_file_stem("  一个/文件:标题\u{FFFC}"),
+            "一个_文件_标题"
+        );
     }
 }

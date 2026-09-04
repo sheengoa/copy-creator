@@ -5,6 +5,8 @@ export interface ApiKeyLabel {
   is_expired: boolean;
 }
 
+export type ClipboardStorageMode = "database" | "resource";
+
 export interface ClipboardRecord {
   id: string;
   type: "text" | "image" | "link" | "file";
@@ -21,6 +23,8 @@ export interface ClipboardRecord {
   group_name?: string;
   has_images?: boolean;
   drag_path?: string;
+  storage_mode?: ClipboardStorageMode;
+  resource_path?: string;
 }
 
 export interface PhraseGroup {

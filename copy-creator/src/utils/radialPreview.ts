@@ -37,8 +37,14 @@ export function isContentPreviewAvailable(
   candidate: ContentPreviewCandidate,
   isClipped: boolean,
 ) {
-  if (candidate.type === "image" || candidate.hasImages) return true;
-  if (candidate.type === "file") return false;
+  if (
+    candidate.hasImages
+    || candidate.type === "text"
+    || candidate.type === "image"
+    || candidate.type === "link"
+    || candidate.type === "file"
+    || candidate.type === "phrase"
+  ) return true;
   return Boolean(candidate.contentTruncated || isClipped);
 }
 

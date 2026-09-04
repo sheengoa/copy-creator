@@ -1,6 +1,7 @@
 import { create } from "zustand";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
+import { isResourceRecord } from "../utils/clipboardRecord";
 
 type UnlistenFn = () => void;
 
@@ -30,6 +31,8 @@ interface ClipboardRecord {
   group_name?: string;
   has_images?: boolean;
   drag_path?: string;
+  storage_mode?: "database" | "resource";
+  resource_path?: string;
 }
 
 const PAGE_SIZE = 120;
@@ -38,6 +41,7 @@ interface ClipboardState {
   records: ClipboardRecord[];
   search: string;
   loading: boolean;
+  loadError: string | null;
   hasMore: boolean;
   thumbnailCache: Record<string, string>;
   imageCache: Record<string, string>;
@@ -53,8 +57,8 @@ interface ClipboardState {
   createRecord: (content: string, groupName?: string) => Promise<void>;
   deleteRecords: (ids: string[]) => Promise<void>;
   deleteRecord: (id: string) => Promise<void>;
-  pasteRecord: (record: ClipboardRecord) => Promise<void>;
-  pasteRecordTerminal: (record: ClipboardRecord) => Promise<void>;
+  pasteRecord: (record: ClipboardRecord) => Promise<boolean>;
+  pasteRecordTerminal: (record: ClipboardRecord) => Promise<boolean>;
   reorderRecords: (ids: string[]) => Promise<void>;
   getRecordContent: (record: ClipboardRecord) => Promise<string>;
   getThumbnail: (record: Pick<ClipboardRecord, "id" | "content">) => Promise<string>;
@@ -62,6 +66,7 @@ interface ClipboardState {
 }
 
 let unlisten: UnlistenFn | null = null;
+let recordsLoadGeneration = 0;
 
 const MAX_CONCURRENT = 3;
 const MAX_THUMBNAILS = 80;
@@ -100,14 +105,14 @@ function trimCache(cache: Record<string, string>, maxEntries: number) {
 }
 
 function recordMatchesCategory(record: ClipboardRecord, category: ClipType) {
-  if (category === "all") return true;
+  if (category === "all") return !isResourceRecord(record);
   if (category === "stash") {
     return record.group_name === "暂存" || record.group_name === "stash";
   }
   if ((category as string) === "resources") {
-    return Boolean(record.group_name);
+    return isResourceRecord(record);
   }
-  return record.type === category;
+  return !isResourceRecord(record) && record.type === category;
 }
 
 function recordMatchesSearch(record: ClipboardRecord, search: string) {
@@ -125,6 +130,7 @@ export const useClipboardStore = create<ClipboardState>((set, get) => ({
   records: [],
   search: "",
   loading: false,
+  loadError: null,
   hasMore: true,
   thumbnailCache: {},
   imageCache: {},
@@ -132,8 +138,18 @@ export const useClipboardStore = create<ClipboardState>((set, get) => ({
   initialized: false,
 
   init: (categoryOverride?: ClipType) => {
-    if (get().initialized) return;
-    if (categoryOverride) set({ category: categoryOverride });
+    const initialized = get().initialized;
+    const previousCategory = get().category;
+    if (categoryOverride && previousCategory !== categoryOverride) {
+      recordsLoadGeneration++;
+      set({ category: categoryOverride });
+    }
+    if (initialized) {
+      if (categoryOverride) {
+        void get().loadRecords(false, categoryOverride);
+      }
+      return;
+    }
     set({ initialized: true });
 
     listen<ClipboardRecord>("clipboard-update", (event) => {
@@ -155,23 +171,42 @@ export const useClipboardStore = create<ClipboardState>((set, get) => ({
 
     listen<string>("clipboard-deleted", (event) => {
       const deletedId = event.payload;
+      recordsLoadGeneration++;
       set((state) => ({
         records: state.records.filter((r) => r.id !== deletedId),
+        loading: false,
+        loadError: null,
       }));
     });
 
     listen("clipboard-cleared", () => {
-      set({ records: [], thumbnailCache: {}, imageCache: {} });
+      if (get().category === "resources") return;
+      recordsLoadGeneration++;
+      set({
+        records: [],
+        hasMore: false,
+        loading: false,
+        loadError: null,
+        thumbnailCache: {},
+        imageCache: {},
+      });
     });
 
-    get().loadRecords(false, categoryOverride);
+    void get().loadRecords(false, categoryOverride);
   },
 
-  setSearch: (s) => set({ search: s }),
-  setCategory: (c) => set({ category: c }),
+  setSearch: (s) => {
+    recordsLoadGeneration++;
+    set({ search: s });
+  },
+  setCategory: (c) => {
+    recordsLoadGeneration++;
+    set({ category: c });
+  },
 
   loadRecords: async (append = false, categoryOverride?: ClipType) => {
-    set({ loading: true });
+    const request = ++recordsLoadGeneration;
+    set({ loading: true, loadError: null });
     try {
       const state = get();
       const s = state.search || undefined;
@@ -184,23 +219,37 @@ export const useClipboardStore = create<ClipboardState>((set, get) => ({
         offset,
         category: cat,
       });
+      if (request !== recordsLoadGeneration) return;
       if (append) {
         set((prev) => ({
           records: [...prev.records, ...records],
           hasMore: records.length >= PAGE_SIZE,
+          category: activeCategory,
+          loadError: null,
         }));
       } else {
-        set({ records, hasMore: records.length >= PAGE_SIZE });
+        set({
+          records,
+          hasMore: records.length >= PAGE_SIZE,
+          category: activeCategory,
+          loadError: null,
+        });
       }
     } catch (e) {
       console.error("Failed to load clipboard records:", e);
+      if (request === recordsLoadGeneration) {
+        set({
+          loadError: e instanceof Error && e.message ? e.message : String(e),
+        });
+      }
     } finally {
-      set({ loading: false });
+      if (request === recordsLoadGeneration) set({ loading: false });
     }
   },
 
   loadAllRecords: async (categoryOverride?: ClipType) => {
-    set({ loading: true });
+    const request = ++recordsLoadGeneration;
+    set({ loading: true, loadError: null });
     try {
       const state = get();
       const search = state.search || undefined;
@@ -210,28 +259,38 @@ export const useClipboardStore = create<ClipboardState>((set, get) => ({
       let offset = 0;
 
       while (true) {
+        if (request !== recordsLoadGeneration) return null;
         const page = await invoke<ClipboardRecord[]>("get_clipboard_records", {
           search,
           limit: PAGE_SIZE,
           offset,
           category,
         });
+        if (request !== recordsLoadGeneration) return null;
         allRecords.push(...page);
         if (page.length < PAGE_SIZE) break;
         offset += page.length;
       }
 
-      const latestState = get();
-      if (latestState.search !== state.search || latestState.category !== activeCategory) {
+      if (
+        request !== recordsLoadGeneration
+        || get().search !== state.search
+        || get().category !== activeCategory
+      ) {
         return null;
       }
-      set({ records: allRecords, hasMore: false, category: activeCategory });
+      set({ records: allRecords, hasMore: false, category: activeCategory, loadError: null });
       return allRecords;
     } catch (e) {
       console.error("Failed to load all clipboard records:", e);
+      if (request === recordsLoadGeneration) {
+        set({
+          loadError: e instanceof Error && e.message ? e.message : String(e),
+        });
+      }
       return null;
     } finally {
-      set({ loading: false });
+      if (request === recordsLoadGeneration) set({ loading: false });
     }
   },
 
@@ -254,6 +313,8 @@ export const useClipboardStore = create<ClipboardState>((set, get) => ({
 
   deleteRecords: async (ids: string[]) => {
     if (ids.length === 0) return;
+    recordsLoadGeneration++;
+    set({ loading: false, loadError: null });
     try {
       await invoke("delete_clipboard_records", { ids });
       const deletedIds = new Set(ids);
@@ -280,7 +341,7 @@ export const useClipboardStore = create<ClipboardState>((set, get) => ({
     try {
       if (record.has_images) {
         await invoke("paste_stash_record", { id: record.id, terminal: false });
-        return;
+        return true;
       }
       const content = await getFullContent(record);
       if (record.type === "image") {
@@ -290,8 +351,10 @@ export const useClipboardStore = create<ClipboardState>((set, get) => ({
       } else {
         await invoke("paste_text", { text: content });
       }
+      return true;
     } catch (e) {
       console.error("Paste failed:", e);
+      return false;
     }
   },
 
@@ -299,7 +362,7 @@ export const useClipboardStore = create<ClipboardState>((set, get) => ({
     try {
       if (record.has_images) {
         await invoke("paste_stash_record", { id: record.id, terminal: true });
-        return;
+        return true;
       }
       const content = await getFullContent(record);
       if (record.type === "image") {
@@ -309,8 +372,10 @@ export const useClipboardStore = create<ClipboardState>((set, get) => ({
       } else {
         await invoke("paste_text_terminal", { text: content });
       }
+      return true;
     } catch (e) {
       console.error("Terminal paste failed:", e);
+      return false;
     }
   },
 

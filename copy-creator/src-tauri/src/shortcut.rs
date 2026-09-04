@@ -98,11 +98,23 @@ pub fn toggle_window(app: &AppHandle) {
 
 // ---- radial menu ----
 
-fn raise_always_on_top(window: &tauri::WebviewWindow) {
+fn raise_always_on_top_without_focus(window: &tauri::WebviewWindow) {
     let _ = window.set_always_on_top(false);
     let _ = window.set_always_on_top(true);
     let _ = window.show();
+}
+
+fn raise_always_on_top(window: &tauri::WebviewWindow) {
+    raise_always_on_top_without_focus(window);
     let _ = window.set_focus();
+}
+
+fn raise_visible_radial_menu(app: &AppHandle) {
+    if let Some(radial) = app.get_webview_window("radial-menu") {
+        if radial.is_visible().unwrap_or(false) {
+            raise_always_on_top_without_focus(&radial);
+        }
+    }
 }
 
 pub fn show_radial_menu(app: &AppHandle) {
@@ -110,6 +122,7 @@ pub fn show_radial_menu(app: &AppHandle) {
         if radial.is_visible().unwrap_or(false) {
             log::info!("[show_radial_menu] already visible, hiding");
             let _ = radial.hide();
+            let _ = app.emit("radial-menu-hide", ());
             return;
         }
 
@@ -206,7 +219,11 @@ fn calculate_clipboard_create_geometry(
     }
 }
 
-pub fn show_clipboard_create(app: &AppHandle, group_name: Option<String>) {
+pub fn show_clipboard_create(
+    app: &AppHandle,
+    group_name: Option<String>,
+    storage_mode: Option<String>,
+) {
     let window = match app.get_webview_window("clipboard-create") {
         Some(w) => w,
         None => {
@@ -300,12 +317,15 @@ pub fn show_clipboard_create(app: &AppHandle, group_name: Option<String>) {
     if let Err(error) = window.set_focus() {
         log::warn!("[show_clipboard_create] set_focus failed: {error}");
     }
+    // 新建窗口打开时可能抢到置顶窗口的堆叠顺序，确保已显示的径向菜单回到最上层。
+    raise_visible_radial_menu(app);
 
     let _ = app.emit(
         "clipboard-create-show",
         serde_json::json!({
             "theme": theme,
             "group_name": group_name,
+            "storage_mode": storage_mode,
         }),
     );
 
@@ -318,8 +338,12 @@ pub fn show_clipboard_create(app: &AppHandle, group_name: Option<String>) {
 }
 
 #[tauri::command]
-pub fn open_clipboard_create(app: AppHandle, group_name: Option<String>) -> Result<(), String> {
-    show_clipboard_create(&app, group_name);
+pub fn open_clipboard_create(
+    app: AppHandle,
+    group_name: Option<String>,
+    storage_mode: Option<String>,
+) -> Result<(), String> {
+    show_clipboard_create(&app, group_name, storage_mode);
     Ok(())
 }
 

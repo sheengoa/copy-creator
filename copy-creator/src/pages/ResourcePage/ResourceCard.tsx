@@ -1,0 +1,256 @@
+import { useSortable } from "@dnd-kit/sortable";
+import { CSS } from "@dnd-kit/utilities";
+import { useCallback } from "react";
+import { useTranslation } from "react-i18next";
+import type { ClipboardRecord } from "../../types";
+import { Icons } from "../../components/Icons";
+import { HighlightText } from "../../components/HighlightText";
+import { ImageThumb } from "../ClipboardPage/ImageThumb";
+import { ResourceImage } from "./ResourceMedia";
+import {
+  formatResourceTime,
+  getResourceSummary,
+  getResourceTitle,
+  inferResourceMediaKind,
+  type ResourceMediaKind,
+} from "./resourceUtils";
+
+interface ResourceCardProps {
+  record: ClipboardRecord;
+  index: number;
+  search: string;
+  typeLabel: (kind: ResourceMediaKind) => string;
+  previewOpen: boolean;
+  selectionMode: boolean;
+  selected: boolean;
+  reorderEnabled: boolean;
+  onTogglePreview: (record: ClipboardRecord) => void;
+  onCopy: (record: ClipboardRecord) => void | Promise<void>;
+  onDelete: (id: string) => void;
+  onToggleSelected: (id: string) => void;
+}
+
+function ResourceCardVisual({
+  record,
+  search,
+  typeLabel,
+  onActivate,
+}: Pick<ResourceCardProps, "record" | "search" | "typeLabel"> & {
+  onActivate?: () => void;
+}) {
+  const kind = inferResourceMediaKind(record);
+  const summary = getResourceSummary(record);
+
+  if (kind === "image" && record.type === "image") {
+    return (
+      <ImageThumb
+        record={record}
+        onClick={(event) => {
+          event.stopPropagation();
+          onActivate?.();
+        }}
+      />
+    );
+  }
+
+  if (kind === "video" || kind === "audio") {
+    return (
+      <div className={`resource-card-visual resource-card-${kind}`}>
+        <span className="resource-card-visual-icon">{kind === "video" ? Icons.video : Icons.audio}</span>
+        <span>{typeLabel(kind)}</span>
+        {kind === "video" && <span className="resource-card-play">{Icons.play}</span>}
+      </div>
+    );
+  }
+
+  if (kind === "image") {
+    return (
+      <ResourceImage
+        path={record.content}
+        alt={getResourceTitle(record, kind)}
+        className="resource-card-file-image"
+      />
+    );
+  }
+
+  if (kind === "file") {
+    return (
+      <div className="resource-card-visual resource-card-file">
+        {Icons.file}
+        <span>{typeLabel(kind)}</span>
+      </div>
+    );
+  }
+
+  return (
+    <div className={`resource-card-text-preview${record.type === "link" ? " is-link" : ""}`}>
+      <HighlightText text={summary || " "} search={search} />
+    </div>
+  );
+}
+
+export function ResourceCard({
+  record,
+  index,
+  search,
+  typeLabel,
+  previewOpen,
+  selectionMode,
+  selected,
+  reorderEnabled,
+  onTogglePreview,
+  onCopy,
+  onDelete,
+  onToggleSelected,
+}: ResourceCardProps) {
+  const { t } = useTranslation();
+  const {
+    attributes,
+    listeners,
+    setNodeRef,
+    setActivatorNodeRef,
+    transform,
+    transition,
+    isDragging,
+  } = useSortable({ id: record.id, disabled: !reorderEnabled || selectionMode });
+  const kind = inferResourceMediaKind(record);
+  const title = getResourceTitle(record, kind);
+
+  const activatePreview = useCallback(() => {
+    if (selectionMode) {
+      onToggleSelected(record.id);
+      return;
+    }
+    onTogglePreview(record);
+  }, [onTogglePreview, onToggleSelected, record, selectionMode]);
+
+  return (
+    <article
+      ref={setNodeRef}
+      style={{
+        transform: CSS.Transform.toString(transform),
+        transition: transition || "transform 180ms ease",
+        "--resource-enter-delay": index,
+      } as React.CSSProperties}
+      className={`resource-card${previewOpen ? " is-expanded" : ""}${selected ? " is-selected" : ""}${isDragging ? " is-dragging" : ""}`}
+      onClick={activatePreview}
+    >
+      {selectionMode && (
+        <label className="resource-card-selection" onClick={(event) => event.stopPropagation()}>
+          <input
+            type="checkbox"
+            checked={selected}
+            aria-label={t("common.selectItem")}
+            onChange={() => onToggleSelected(record.id)}
+          />
+          <span className="selection-checkbox" aria-hidden="true" />
+        </label>
+      )}
+      <div className="resource-card-preview">
+        <ResourceCardVisual
+          record={record}
+          search={search}
+          typeLabel={typeLabel}
+          onActivate={activatePreview}
+        />
+        <span className="resource-card-kind">{typeLabel(kind)}</span>
+      </div>
+      <div className="resource-card-body">
+        <div className="resource-card-title-row">
+          <strong className="resource-card-title">
+            <HighlightText text={title} search={search} />
+          </strong>
+          <button
+            type="button"
+            className="resource-icon-button"
+            aria-label={t(previewOpen ? "resources.closePreview" : "resources.openPreview")}
+            title={t(previewOpen ? "resources.closePreview" : "resources.openPreview")}
+            onClick={(event) => {
+              event.stopPropagation();
+              onTogglePreview(record);
+            }}
+          >
+            {previewOpen ? Icons.close : Icons.expand}
+          </button>
+        </div>
+        <div className="resource-card-meta">
+          <span>{typeLabel(kind)}</span>
+          <span aria-hidden="true">·</span>
+          <time dateTime={record.created_at}>{formatResourceTime(record.created_at)}</time>
+        </div>
+        <div className="resource-card-footer">
+          <span className="resource-card-source">
+            {record.has_images ? t("resources.withImages") : record.source_app || t("resources.localSource")}
+          </span>
+          <div className="resource-card-actions">
+            {reorderEnabled && !selectionMode && (
+              <button
+                type="button"
+                ref={setActivatorNodeRef}
+                className="resource-drag-handle"
+                {...attributes}
+                {...listeners}
+                title={t("resources.reorder")}
+                aria-label={t("resources.reorder")}
+                onClick={(event) => event.stopPropagation()}
+              >
+                {Icons.drag}
+              </button>
+            )}
+            {!selectionMode && (
+              <>
+                <button
+                  type="button"
+                  className="resource-copy-button"
+                  onClick={(event) => {
+                    event.stopPropagation();
+                    void onCopy(record);
+                  }}
+                >
+                  {Icons.copy}
+                  <span>{t("resources.copy")}</span>
+                </button>
+                <button
+                  type="button"
+                  className="resource-delete-button"
+                  aria-label={t("common.delete")}
+                  title={t("common.delete")}
+                  onClick={(event) => {
+                    event.stopPropagation();
+                    onDelete(record.id);
+                  }}
+                >
+                  {Icons.delete}
+                </button>
+              </>
+            )}
+          </div>
+        </div>
+      </div>
+    </article>
+  );
+}
+
+export function ResourceCardDragPreview({
+  record,
+  search,
+  typeLabel,
+}: Pick<ResourceCardProps, "record" | "search" | "typeLabel">) {
+  const kind = inferResourceMediaKind(record);
+  return (
+    <article className="resource-card is-drag-overlay">
+      <div className="resource-card-preview">
+        <ResourceCardVisual record={record} search={search} typeLabel={typeLabel} />
+        <span className="resource-card-kind">{typeLabel(kind)}</span>
+      </div>
+      <div className="resource-card-body">
+        <strong className="resource-card-title">{getResourceTitle(record, kind)}</strong>
+        <div className="resource-card-meta">
+          <span>{typeLabel(kind)}</span>
+          <span aria-hidden="true">·</span>
+          <time dateTime={record.created_at}>{formatResourceTime(record.created_at)}</time>
+        </div>
+      </div>
+    </article>
+  );
+}

@@ -14,7 +14,7 @@ use tauri::{AppHandle, Emitter, Manager, WebviewWindow};
 #[cfg(target_os = "linux")]
 use gtk::{
     gdk,
-    glib::Propagation,
+    glib::{translate::ToGlibPtr, Propagation},
     prelude::{DeviceExt, DragContextExtManual, FileExt, SeatExt, WidgetExt, WidgetExtManual},
 };
 
@@ -56,13 +56,8 @@ fn canonical_file_path(path: PathBuf) -> Result<PathBuf, String> {
     Ok(path)
 }
 
-fn stored_file_path(app: &AppHandle, path: &str) -> PathBuf {
-    let path = PathBuf::from(path);
-    if path.is_absolute() {
-        path
-    } else {
-        crate::db::get_storage_dir(app).join(path)
-    }
+fn stored_file_path(app: &AppHandle, path: &str) -> Result<PathBuf, String> {
+    crate::db::resolve_storage_path(app, path)
 }
 
 fn clipboard_drag_paths(app: &AppHandle, id: &str) -> Result<Vec<PathBuf>, String> {
@@ -86,11 +81,11 @@ fn clipboard_drag_paths(app: &AppHandle, id: &str) -> Result<Vec<PathBuf>, Strin
     let attachment_paths = serde_json::from_str::<Vec<String>>(&attachments)
         .map_err(|error| format!("解析图片附件失败: {error}"))?;
     if let Some(path) = attachment_paths.first() {
-        return Ok(vec![canonical_file_path(stored_file_path(app, path))?]);
+        return Ok(vec![canonical_file_path(stored_file_path(app, path)?)?]);
     }
 
     match record_type.as_str() {
-        "image" => Ok(vec![canonical_file_path(stored_file_path(app, &content))?]),
+        "image" => Ok(vec![canonical_file_path(stored_file_path(app, &content)?)?]),
         "file" => Ok(vec![canonical_file_path(PathBuf::from(content))?]),
         _ => Err("只有图片和文件内容支持系统文件拖拽".to_string()),
     }
@@ -112,7 +107,7 @@ fn phrase_drag_paths(app: &AppHandle, id: &str) -> Result<Vec<PathBuf>, String> 
         return Err("只有文件快捷输入支持系统文件拖拽".to_string());
     }
 
-    Ok(vec![canonical_file_path(stored_file_path(app, &content))?])
+    Ok(vec![canonical_file_path(stored_file_path(app, &content)?)?])
 }
 
 fn resolve_drag_paths(
@@ -131,7 +126,7 @@ fn path_from_hint(app: &AppHandle, path: String) -> Result<PathBuf, String> {
     if path.is_empty() {
         return Err("拖拽文件路径为空".to_string());
     }
-    Ok(stored_file_path(app, path))
+    stored_file_path(app, path)
 }
 
 fn requested_drag_path(
@@ -368,6 +363,31 @@ fn pointer_root_position(window: &gtk::ApplicationWindow) -> Option<(f64, f64)> 
 }
 
 #[cfg(target_os = "linux")]
+fn pointer_button_is_down(window: &gtk::ApplicationWindow) -> bool {
+    let Some(pointer) = window
+        .display()
+        .default_seat()
+        .and_then(|seat| seat.pointer())
+    else {
+        return false;
+    };
+    let Some(gdk_window) = window.window() else {
+        return false;
+    };
+
+    let mut mask = 0_u32;
+    unsafe {
+        gdk::ffi::gdk_device_get_state(
+            pointer.to_glib_none().0,
+            gdk_window.to_glib_none().0,
+            std::ptr::null_mut(),
+            std::ptr::addr_of_mut!(mask),
+        );
+    }
+    gdk::ModifierType::from_bits_truncate(mask).contains(gdk::ModifierType::BUTTON1_MASK)
+}
+
+#[cfg(target_os = "linux")]
 fn event_root_position(event: &gdk::Event) -> Option<(f64, f64)> {
     if let Some(event) = event.downcast_ref::<gdk::EventButton>() {
         return Some(event.root());
@@ -398,12 +418,16 @@ fn seed_linux_pointer_press(
     screen_x: Option<f64>,
     screen_y: Option<f64>,
     device_pixel_ratio: Option<f64>,
-) {
+) -> bool {
+    if !pointer_button_is_down(window) {
+        return false;
+    }
+
     let (Some(screen_x), Some(screen_y)) = (screen_x, screen_y) else {
-        return;
+        return true;
     };
     if !screen_x.is_finite() || !screen_y.is_finite() {
-        return;
+        return true;
     }
     let scale = device_pixel_ratio
         .filter(|scale| scale.is_finite() && *scale > 0.0)
@@ -411,7 +435,7 @@ fn seed_linux_pointer_press(
     let root_x = screen_x * scale;
     let root_y = screen_y * scale;
     if !root_x.is_finite() || !root_y.is_finite() {
-        return;
+        return true;
     }
 
     LINUX_POINTER_STATE.with(|pointer| {
@@ -424,6 +448,7 @@ fn seed_linux_pointer_press(
             pointer.press_root_y = root_y;
         }
     });
+    true
 }
 
 #[cfg(target_os = "linux")]
@@ -456,6 +481,13 @@ fn record_linux_pointer_event(event: &gdk::Event) {
                 .state()
                 .contains(gdk::ModifierType::BUTTON1_MASK);
             let (root_x, root_y) = motion_event.root();
+            if !button_down {
+                LINUX_POINTER_STATE.with(|pointer| {
+                    *pointer.borrow_mut() = LinuxPointerState::default();
+                });
+                clear_unclaimed_linux_drag();
+                return;
+            }
             LINUX_POINTER_STATE.with(|pointer| {
                 let mut pointer = pointer.borrow_mut();
                 if pointer.pressed_button.is_none() && button_down {
@@ -490,6 +522,14 @@ fn try_start_linux_drag(
     window: &gtk::ApplicationWindow,
     event: Option<&gdk::Event>,
 ) -> Result<bool, (u64, String)> {
+    if !pointer_button_is_down(window) {
+        LINUX_POINTER_STATE.with(|pointer| {
+            *pointer.borrow_mut() = LinuxPointerState::default();
+        });
+        clear_unclaimed_linux_drag();
+        return Ok(false);
+    }
+
     let Some((start_x, start_y, saved_event)) = pointer_snapshot() else {
         return Ok(false);
     };
@@ -671,7 +711,10 @@ fn arm_linux_drag_on_main(
     device_pixel_ratio: Option<f64>,
 ) -> Result<(), String> {
     arm_linux_drag(path, item_id, token)?;
-    seed_linux_pointer_press(window, screen_x, screen_y, device_pixel_ratio);
+    if !seed_linux_pointer_press(window, screen_x, screen_y, device_pixel_ratio) {
+        abort_linux_drag(token);
+        return Err("鼠标左键已释放".to_string());
+    }
     // 候选到达时可能已经越过阈值，立即用 GTK 保存的最新事件补启动；
     // 否则交给后续 MotionNotify 在原生事件栈内启动。
     if let Err((_, error)) = try_start_linux_drag(window, None) {

@@ -1,6 +1,7 @@
 use rusqlite::{params, Connection, OptionalExtension};
 use std::collections::HashSet;
-use std::path::PathBuf;
+use std::ffi::OsStr;
+use std::path::{Component, Path, PathBuf};
 use std::sync::Mutex;
 use tauri::{AppHandle, Emitter, Manager};
 
@@ -46,25 +47,47 @@ pub fn make_key_preview(content: &str) -> String {
     }
 }
 
+const RESOURCE_RECORD_CONDITION: &str =
+    "COALESCE(storage_mode, 'database') = 'resource' OR TRIM(COALESCE(group_name, '')) <> ''";
+
 fn category_sql(category: &Option<String>) -> (String, String) {
     match category.as_deref() {
-        Some("text") => ("WHERE type = 'text'".to_string(), "AND type = 'text'".to_string()),
-        Some("image") => ("WHERE type = 'image'".to_string(), "AND type = 'image'".to_string()),
-        Some("link") => ("WHERE type = 'link'".to_string(), "AND type = 'link'".to_string()),
-        Some("file") => ("WHERE type = 'file'".to_string(), "AND type = 'file'".to_string()),
+        Some("text") => (
+            format!("WHERE type = 'text' AND NOT ({RESOURCE_RECORD_CONDITION})"),
+            format!("AND type = 'text' AND NOT ({RESOURCE_RECORD_CONDITION})"),
+        ),
+        Some("image") => (
+            format!("WHERE type = 'image' AND NOT ({RESOURCE_RECORD_CONDITION})"),
+            format!("AND type = 'image' AND NOT ({RESOURCE_RECORD_CONDITION})"),
+        ),
+        Some("link") => (
+            format!("WHERE type = 'link' AND NOT ({RESOURCE_RECORD_CONDITION})"),
+            format!("AND type = 'link' AND NOT ({RESOURCE_RECORD_CONDITION})"),
+        ),
+        Some("file") => (
+            format!("WHERE type = 'file' AND NOT ({RESOURCE_RECORD_CONDITION})"),
+            format!("AND type = 'file' AND NOT ({RESOURCE_RECORD_CONDITION})"),
+        ),
         Some("stash") => (
             "WHERE group_name IN ('stash', '暂存')".to_string(),
             "AND group_name IN ('stash', '暂存')".to_string(),
         ),
         Some("resources") => (
-            "WHERE group_name <> ''".to_string(),
-            "AND group_name <> ''".to_string(),
+            format!("WHERE ({RESOURCE_RECORD_CONDITION})"),
+            format!("AND ({RESOURCE_RECORD_CONDITION})"),
         ),
         Some("apikey") => (
-            "WHERE (user_api_key = 1 OR (type IN ('text', 'link') AND (content LIKE 'sk-%' OR content LIKE 'AIza%' OR content LIKE 'glpat-%' OR content LIKE 'ghp_%' OR content LIKE 'xai-%')))".to_string(),
-            "AND (user_api_key = 1 OR (type IN ('text', 'link') AND (content LIKE 'sk-%' OR content LIKE 'AIza%' OR content LIKE 'glpat-%' OR content LIKE 'ghp_%' OR content LIKE 'xai-%')))".to_string(),
+            format!(
+                "WHERE NOT ({RESOURCE_RECORD_CONDITION}) AND (user_api_key = 1 OR (type IN ('text', 'link') AND (content LIKE 'sk-%' OR content LIKE 'AIza%' OR content LIKE 'glpat-%' OR content LIKE 'ghp_%' OR content LIKE 'xai-%')))"
+            ),
+            format!(
+                "AND NOT ({RESOURCE_RECORD_CONDITION}) AND (user_api_key = 1 OR (type IN ('text', 'link') AND (content LIKE 'sk-%' OR content LIKE 'AIza%' OR content LIKE 'glpat-%' OR content LIKE 'ghp_%' OR content LIKE 'xai-%')))"
+            ),
         ),
-        _ => ("".to_string(), "".to_string()),
+        _ => (
+            format!("WHERE NOT ({RESOURCE_RECORD_CONDITION})"),
+            format!("AND NOT ({RESOURCE_RECORD_CONDITION})"),
+        ),
     }
 }
 
@@ -103,6 +126,14 @@ const CLIPBOARD_CONTENT_PREVIEW_CHARS: usize = 600;
 const QUICK_INPUT_FILE_LIMIT_BYTES: u64 = 50 * 1024 * 1024;
 pub(crate) const DEFAULT_RESOURCE_GROUP_ID: &str = "default-resource-group";
 pub(crate) const DEFAULT_RESOURCE_GROUP_NAME: &str = "暂存";
+pub(crate) const DATABASE_STORAGE_MODE: &str = "database";
+pub(crate) const RESOURCE_STORAGE_MODE: &str = "resource";
+const RESOURCE_LIBRARY_DIR_NAME: &str = "resource-library";
+const RESOURCE_LIBRARY_HISTORY_SETTING: &str = "resource_library_history";
+
+pub(crate) fn is_resource_record(group_name: &str, storage_mode: &str) -> bool {
+    storage_mode == RESOURCE_STORAGE_MODE || !group_name.trim().is_empty()
+}
 
 fn make_content_preview(content: &str) -> (String, i64, bool) {
     let total_chars = content.chars().count();
@@ -130,6 +161,8 @@ fn clipboard_record_json(
     user_api_key: i64,
     group_name: String,
     attachments: String,
+    storage_mode: String,
+    resource_path: String,
 ) -> serde_json::Value {
     let attachment_paths = serde_json::from_str::<Vec<String>>(&attachments).unwrap_or_default();
     let has_images = !attachment_paths.is_empty();
@@ -140,7 +173,7 @@ fn clipboard_record_json(
             None
         }
     });
-    let content = if has_images && !group_name.is_empty() {
+    let content = if has_images {
         crate::clipboard::stash_content_for_display(&content)
     } else {
         content
@@ -167,6 +200,12 @@ fn clipboard_record_json(
         "group_name": group_name,
         "has_images": has_images,
         "drag_path": drag_path,
+        "storage_mode": if storage_mode == RESOURCE_STORAGE_MODE {
+            RESOURCE_STORAGE_MODE
+        } else {
+            DATABASE_STORAGE_MODE
+        },
+        "resource_path": resource_path,
     })
 }
 
@@ -238,6 +277,234 @@ pub fn get_storage_dir(app: &AppHandle) -> PathBuf {
         .expect("failed to get app data dir")
 }
 
+fn normalize_relative_path(path: &Path) -> Option<PathBuf> {
+    let mut normalized = PathBuf::new();
+    for component in path.components() {
+        match component {
+            Component::Normal(part) => normalized.push(part),
+            Component::CurDir => {}
+            Component::ParentDir => {
+                if !normalized.pop() {
+                    return None;
+                }
+            }
+            Component::RootDir | Component::Prefix(_) => return None,
+        }
+    }
+    if normalized.as_os_str().is_empty() {
+        None
+    } else {
+        Some(normalized)
+    }
+}
+
+fn resolve_relative_storage_path(root: &Path, path: &str) -> Option<PathBuf> {
+    normalize_relative_path(Path::new(path)).map(|relative| root.join(relative))
+}
+
+fn resolve_storage_path_from_root(root: &Path, path: &str) -> Result<PathBuf, String> {
+    let path = PathBuf::from(path);
+    if path.is_absolute() {
+        return Ok(path);
+    }
+    resolve_relative_storage_path(root, path.to_string_lossy().as_ref())
+        .ok_or_else(|| "存储路径无效".to_string())
+}
+
+pub(crate) fn resolve_storage_path(app: &AppHandle, path: &str) -> Result<PathBuf, String> {
+    resolve_storage_path_from_root(&get_storage_dir(app), path)
+}
+
+pub(crate) fn resolve_managed_storage_path(app: &AppHandle, path: &str) -> Option<PathBuf> {
+    resolve_relative_storage_path(&get_storage_dir(app), path)
+}
+
+fn default_resource_library_dir(app: &AppHandle) -> PathBuf {
+    app.path()
+        .app_data_dir()
+        .expect("failed to get app data dir")
+        .join(RESOURCE_LIBRARY_DIR_NAME)
+}
+
+pub(crate) fn get_resource_library_dir(app: &AppHandle) -> PathBuf {
+    let configured_path = get_setting_sync(app, "resource_library_path")
+        .filter(|path| !path.trim().is_empty())
+        .map(PathBuf::from)
+        .filter(|path| path.is_absolute());
+    let dir = configured_path.unwrap_or_else(|| default_resource_library_dir(app));
+    if let Err(error) = std::fs::create_dir_all(&dir) {
+        log::warn!("无法创建资源库目录 {}: {}", dir.display(), error);
+    }
+    dir
+}
+
+fn resource_library_history(app: &AppHandle) -> Vec<PathBuf> {
+    get_setting_sync(app, RESOURCE_LIBRARY_HISTORY_SETTING)
+        .and_then(|value| serde_json::from_str::<Vec<String>>(&value).ok())
+        .unwrap_or_default()
+        .into_iter()
+        .map(PathBuf::from)
+        .filter(|path| path.is_absolute())
+        .collect()
+}
+
+fn resource_library_roots(app: &AppHandle) -> Vec<PathBuf> {
+    let mut roots = Vec::new();
+    for root in std::iter::once(get_resource_library_dir(app))
+        .chain(std::iter::once(default_resource_library_dir(app)))
+        .chain(resource_library_history(app))
+    {
+        if !roots.iter().any(|existing| existing == &root) {
+            roots.push(root);
+        }
+    }
+    roots
+}
+
+fn managed_resource_file_path(
+    resource_roots: &[PathBuf],
+    record_id: &str,
+    resource_path: &str,
+) -> Option<(PathBuf, PathBuf)> {
+    if record_id.is_empty() {
+        return None;
+    }
+    let path = PathBuf::from(resource_path);
+    if !path.is_absolute() {
+        return None;
+    }
+    let file_name = path.file_name()?.to_str()?;
+    let prefix = format!("copy-creator-{record_id}-");
+    if !file_name
+        .strip_prefix(&prefix)
+        .is_some_and(|suffix| !suffix.is_empty())
+    {
+        return None;
+    }
+    if !matches!(path.extension()?.to_str()?, "txt" | "md") {
+        return None;
+    }
+    let resource_root = resource_roots
+        .iter()
+        .find(|root| path.parent() == Some(root.as_path()))?
+        .clone();
+    Some((path, resource_root))
+}
+
+fn managed_resource_attachment_path(
+    resource_root: &Path,
+    record_id: &str,
+    attachment_path: &str,
+) -> Option<(PathBuf, PathBuf)> {
+    if record_id.is_empty() {
+        return None;
+    }
+    let path = PathBuf::from(attachment_path);
+    if !path.is_absolute() {
+        return None;
+    }
+
+    let attachments_root = resource_root.join(".copy-creator").join("attachments");
+    let relative = path.strip_prefix(&attachments_root).ok()?;
+    let mut components = relative.components();
+    let attachment_dir_name = components.next()?.as_os_str().to_str()?;
+    let file_name = components.next()?.as_os_str().to_str()?;
+    if components.next().is_some() {
+        return None;
+    }
+
+    let record_prefix = format!("{record_id}-");
+    if !attachment_dir_name
+        .strip_prefix(&record_prefix)
+        .is_some_and(|suffix| !suffix.is_empty())
+    {
+        return None;
+    }
+    let image_number = file_name
+        .strip_prefix("image-")
+        .and_then(|name| name.strip_suffix(".png"))?;
+    let image_number = image_number.parse::<usize>().ok()?;
+    if image_number == 0 {
+        return None;
+    }
+
+    let attachment_dir = attachments_root.join(attachment_dir_name);
+    if path.parent() != Some(attachment_dir.as_path()) {
+        return None;
+    }
+    Some((path, attachment_dir))
+}
+
+fn remove_resource_record_attachments_from_roots(
+    resource_roots: &[PathBuf],
+    record_id: &str,
+    attachment_paths: &[String],
+) {
+    for resource_root in resource_roots {
+        for attachment in attachment_paths {
+            let Some((path, parent)) =
+                managed_resource_attachment_path(&resource_root, record_id, attachment)
+            else {
+                continue;
+            };
+            let _ = std::fs::remove_file(&path);
+            let _ = std::fs::remove_dir(&parent);
+            if let Some(attachments_dir) = parent.parent() {
+                let _ = std::fs::remove_dir(attachments_dir);
+                if let Some(meta_dir) = attachments_dir.parent() {
+                    let _ = std::fs::remove_dir(meta_dir);
+                }
+            }
+        }
+    }
+}
+
+pub(crate) fn remove_resource_record_attachments(
+    app: &AppHandle,
+    record_id: &str,
+    attachment_paths: &[String],
+) {
+    let resource_roots = resource_library_roots(app);
+    remove_resource_record_attachments_from_roots(&resource_roots, record_id, attachment_paths);
+}
+
+pub(crate) fn remove_resource_record_files(
+    app: &AppHandle,
+    record_id: &str,
+    resource_path: &str,
+    attachment_paths: &[String],
+) {
+    let resource_roots = resource_library_roots(app);
+    if let Some((path, _)) = managed_resource_file_path(&resource_roots, record_id, resource_path) {
+        let _ = std::fs::remove_file(path);
+    } else if resource_path.trim().is_empty() {
+        let resource_file_prefix = format!("copy-creator-{record_id}-");
+        for resource_root in &resource_roots {
+            if let Ok(entries) = std::fs::read_dir(resource_root) {
+                for entry in entries.flatten() {
+                    let path = entry.path();
+                    let is_managed_resource_file = entry.file_type().is_ok_and(|file_type| {
+                        file_type.is_file()
+                            && path
+                                .file_name()
+                                .and_then(|name| name.to_str())
+                                .is_some_and(|name| name.starts_with(&resource_file_prefix))
+                            && path
+                                .extension()
+                                .and_then(|extension| extension.to_str())
+                                .is_some_and(|extension| matches!(extension, "txt" | "md"))
+                    });
+                    if is_managed_resource_file {
+                        let _ = std::fs::remove_file(path);
+                    }
+                }
+            }
+        }
+    }
+
+    remove_resource_record_attachments_from_roots(&resource_roots, record_id, attachment_paths);
+}
+
 fn quick_input_files_dir(app: &AppHandle) -> PathBuf {
     let dir = get_storage_dir(app).join("quick-input-files");
     let _ = std::fs::create_dir_all(&dir);
@@ -249,19 +516,32 @@ fn quick_input_relative_path(dir_name: &str, filename: &str) -> String {
 }
 
 fn is_legacy_quick_input_file_path(relative_path: &str) -> bool {
-    let Some(rest) = relative_path.strip_prefix("quick-input-files/") else {
-        return false;
-    };
-    !rest.is_empty() && !rest.contains('/')
+    quick_input_relative_component_count(relative_path) == Some(1)
 }
 
-fn quick_input_absolute_path(app: &AppHandle, relative_path: &str) -> PathBuf {
-    get_storage_dir(app).join(relative_path)
+fn quick_input_relative_component_count(relative_path: &str) -> Option<usize> {
+    let mut components = Path::new(relative_path).components();
+    if components.next()? != Component::Normal(OsStr::new("quick-input-files")) {
+        return None;
+    }
+    let rest = components.collect::<Vec<_>>();
+    if !(1..=2).contains(&rest.len())
+        || rest
+            .iter()
+            .any(|component| !matches!(component, Component::Normal(_)))
+    {
+        return None;
+    }
+    Some(rest.len())
+}
+
+fn quick_input_absolute_path(app: &AppHandle, relative_path: &str) -> Option<PathBuf> {
+    quick_input_relative_component_count(relative_path)?;
+    resolve_relative_storage_path(&get_storage_dir(app), relative_path)
 }
 
 fn remove_quick_input_file(app: &AppHandle, relative_path: &str) {
-    if relative_path.starts_with("quick-input-files/") {
-        let path = quick_input_absolute_path(app, relative_path);
+    if let Some(path) = quick_input_absolute_path(app, relative_path) {
         let _ = std::fs::remove_file(&path);
         if let Some(parent) = path.parent() {
             if parent != quick_input_files_dir(app) {
@@ -312,7 +592,8 @@ fn legacy_quick_input_target_path(relative_path: &str, source_path: &str) -> Opt
         return None;
     }
 
-    Some(quick_input_relative_path(dir_name, original_filename))
+    let target = quick_input_relative_path(dir_name, original_filename);
+    (quick_input_relative_component_count(&target) == Some(2)).then_some(target)
 }
 
 fn migrate_legacy_quick_input_file_names(app: &AppHandle) {
@@ -358,8 +639,12 @@ fn migrate_legacy_quick_input_file_names(app: &AppHandle) {
         else {
             continue;
         };
-        let old_path = storage_dir.join(&old_relative_path);
-        let new_path = storage_dir.join(&new_relative_path);
+        let (Some(old_path), Some(new_path)) = (
+            resolve_relative_storage_path(&storage_dir, &old_relative_path),
+            resolve_relative_storage_path(&storage_dir, &new_relative_path),
+        ) else {
+            continue;
+        };
         if !old_path.exists() {
             continue;
         }
@@ -466,7 +751,9 @@ pub fn init_db(app: &AppHandle) -> Result<(), Box<dyn std::error::Error>> {
             source_app TEXT DEFAULT '',
             created_at TEXT NOT NULL,
             user_api_key INTEGER DEFAULT 0,
-            attachments TEXT DEFAULT '[]'
+            attachments TEXT DEFAULT '[]',
+            storage_mode TEXT DEFAULT 'database',
+            resource_path TEXT DEFAULT ''
         );
 
         CREATE INDEX IF NOT EXISTS idx_clipboard_created_at
@@ -529,6 +816,8 @@ pub fn init_db(app: &AppHandle) -> Result<(), Box<dyn std::error::Error>> {
         INSERT OR IGNORE INTO settings (key, value) VALUES ('radial_menu_enabled', '1');
         INSERT OR IGNORE INTO settings (key, value) VALUES ('autostart', '0');
         INSERT OR IGNORE INTO settings (key, value) VALUES ('shortcut_key', '');
+        INSERT OR IGNORE INTO settings (key, value) VALUES ('resource_library_path', '');
+        INSERT OR IGNORE INTO settings (key, value) VALUES ('resource_library_history', '[]');
 
         UPDATE settings SET value = 'google' WHERE key = 'default_translate_engine' AND value = 'builtin';
 
@@ -656,6 +945,16 @@ pub fn init_db(app: &AppHandle) -> Result<(), Box<dyn std::error::Error>> {
         [],
     )
     .ok();
+    conn.execute(
+        "ALTER TABLE clipboard_records ADD COLUMN storage_mode TEXT DEFAULT 'database'",
+        [],
+    )
+    .ok();
+    conn.execute(
+        "ALTER TABLE clipboard_records ADD COLUMN resource_path TEXT DEFAULT ''",
+        [],
+    )
+    .ok();
 
     let now = chrono::Utc::now().to_rfc3339();
     conn.execute(
@@ -678,14 +977,13 @@ pub fn init_db(app: &AppHandle) -> Result<(), Box<dyn std::error::Error>> {
 }
 
 pub fn prune_old_records(app: &AppHandle) -> Result<(), Box<dyn std::error::Error>> {
-    let days;
-    let mut image_contents: Vec<String>;
+    let (days, image_contents) = {
+        let mut image_contents = Vec::new();
 
-    {
         let state = app.state::<DbState>();
         let conn = state.conn.lock().map_err(|e| e.to_string())?;
 
-        let retention: String = conn
+        let retention = conn
             .query_row(
                 "SELECT value FROM settings WHERE key = 'clipboard_retention'",
                 [],
@@ -693,60 +991,74 @@ pub fn prune_old_records(app: &AppHandle) -> Result<(), Box<dyn std::error::Erro
             )
             .unwrap_or_else(|_| "1month".to_string());
 
-        days = match retention.as_str() {
+        let days = match retention.as_str() {
             "1week" => 7,
             "3months" => 90,
             _ => 30,
         };
 
-        // Collect image records before deletion for file cleanup
-        {
-            let mut stmt = conn.prepare(
-                "SELECT content FROM clipboard_records WHERE type = 'image' AND datetime(created_at) < datetime('now', ?1)",
-            )?;
-            let rows = stmt.query_map(params![format!("-{} days", days)], |row| {
-                row.get::<_, String>(0)
-            })?;
-            image_contents = rows.filter_map(|r| r.ok()).collect();
-        }
-        {
-            let mut stmt = conn.prepare(
-                "SELECT attachments FROM clipboard_records WHERE datetime(created_at) < datetime('now', ?1)",
-            )?;
-            let rows = stmt.query_map(params![format!("-{} days", days)], |row| {
-                row.get::<_, String>(0)
-            })?;
-            for attachments in rows.flatten() {
-                if let Ok(paths) = serde_json::from_str::<Vec<String>>(&attachments) {
-                    image_contents.extend(paths);
-                }
+        let mut stmt = conn.prepare(
+            "SELECT type, content, attachments
+             FROM clipboard_records
+             WHERE datetime(created_at) < datetime('now', ?1)
+               AND NOT (
+                   COALESCE(storage_mode, 'database') = 'resource'
+                   OR TRIM(COALESCE(group_name, '')) <> ''
+               )",
+        )?;
+        let rows = stmt.query_map(params![format!("-{} days", days)], |row| {
+            Ok((
+                row.get::<_, String>(0)?,
+                row.get::<_, String>(1)?,
+                row.get::<_, String>(2)?,
+            ))
+        })?;
+        for row in rows {
+            let (record_type, content, attachments) = row?;
+            let attachment_paths =
+                serde_json::from_str::<Vec<String>>(&attachments).unwrap_or_default();
+            if record_type == "image" {
+                image_contents.push(content);
             }
+            image_contents.extend(attachment_paths);
         }
 
         conn.execute(
-            "DELETE FROM clipboard_records WHERE datetime(created_at) < datetime('now', ?1)",
+            "DELETE FROM clipboard_records
+             WHERE datetime(created_at) < datetime('now', ?1)
+               AND NOT (
+                   COALESCE(storage_mode, 'database') = 'resource'
+                   OR TRIM(COALESCE(group_name, '')) <> ''
+               )",
             params![format!("-{} days", days)],
         )?;
-    }
+        (days, image_contents)
+    };
 
     // Clean up image files and thumbnails only if no remaining records reference them.
     // Content-hash filenames mean multiple records can share the same file on disk.
     let base_dir = get_storage_dir(app);
     let state = app.state::<DbState>();
     let conn = state.conn.lock().map_err(|e| e.to_string())?;
-    for content in &image_contents {
-        let still_referenced: bool = conn
-            .query_row(
-                "SELECT COUNT(*) > 0 FROM clipboard_records WHERE content = ?1",
-                params![content],
-                |row| row.get(0),
-            )
-            .unwrap_or(false);
-        if still_referenced {
+    let removable_images = image_contents
+        .into_iter()
+        .filter(|content| {
+            !conn
+                .query_row(
+                    "SELECT COUNT(*) > 0 FROM clipboard_records WHERE content = ?1",
+                    params![content],
+                    |row| row.get(0),
+                )
+                .unwrap_or(false)
+        })
+        .collect::<Vec<_>>();
+    drop(conn);
+
+    for content in removable_images {
+        crate::paste::remove_cached_images(std::slice::from_ref(&content));
+        let Some(file_path) = resolve_relative_storage_path(&base_dir, &content) else {
             continue;
-        }
-        crate::paste::remove_cached_images(std::slice::from_ref(content));
-        let file_path = base_dir.join(content);
+        };
         let _ = std::fs::remove_file(&file_path);
         if let Some(filename) = file_path.file_name() {
             let thumb_path = file_path
@@ -757,7 +1069,6 @@ pub fn prune_old_records(app: &AppHandle) -> Result<(), Box<dyn std::error::Erro
             let _ = std::fs::remove_file(&thumb_path);
         }
     }
-
     // Clean up temp paste image files older than retention period
     let paste_dir = std::env::temp_dir().join("copy_creator_paste");
     if let Ok(entries) = std::fs::read_dir(&paste_dir) {
@@ -800,7 +1111,7 @@ pub fn get_clipboard_records(
             .replace('%', "\\%")
             .replace('_', "\\_");
         let sql = format!(
-            "SELECT id, type, content, source_app, created_at, user_api_key, group_name, attachments FROM clipboard_records
+            "SELECT id, type, content, source_app, created_at, user_api_key, group_name, attachments, storage_mode, resource_path FROM clipboard_records
              WHERE content LIKE '%' || ?1 || '%' ESCAPE '\\' {} ORDER BY sort_order DESC LIMIT ?2 OFFSET ?3",
             cat_filter.1
         );
@@ -816,6 +1127,8 @@ pub fn get_clipboard_records(
                     row.get::<_, i64>(5)?,
                     row.get::<_, String>(6)?,
                     row.get::<_, String>(7)?,
+                    row.get::<_, String>(8)?,
+                    row.get::<_, String>(9)?,
                 ))
             })
             .map_err(|e| e.to_string())?;
@@ -824,7 +1137,7 @@ pub fn get_clipboard_records(
         }
     } else {
         let sql = format!(
-            "SELECT id, type, content, source_app, created_at, user_api_key, group_name, attachments FROM clipboard_records
+            "SELECT id, type, content, source_app, created_at, user_api_key, group_name, attachments, storage_mode, resource_path FROM clipboard_records
              {} ORDER BY sort_order DESC LIMIT ?1 OFFSET ?2",
             cat_filter.0
         );
@@ -840,6 +1153,8 @@ pub fn get_clipboard_records(
                     row.get::<_, i64>(5)?,
                     row.get::<_, String>(6)?,
                     row.get::<_, String>(7)?,
+                    row.get::<_, String>(8)?,
+                    row.get::<_, String>(9)?,
                 ))
             })
             .map_err(|e| e.to_string())?;
@@ -944,15 +1259,15 @@ pub fn update_clipboard_record(app: AppHandle, id: String, content: String) -> R
 
     let state = app.state::<DbState>();
     let conn = state.conn.lock().map_err(|e| e.to_string())?;
-    let group_name: String = conn
+    let (group_name, storage_mode): (String, String) = conn
         .query_row(
-            "SELECT group_name FROM clipboard_records WHERE id = ?1",
+            "SELECT group_name, storage_mode FROM clipboard_records WHERE id = ?1",
             params![id],
-            |row| row.get(0),
+            |row| Ok((row.get(0)?, row.get(1)?)),
         )
         .map_err(|e| format!("记录不存在: {}", e))?;
 
-    if !resource_group_name_exists(&conn, &group_name)? {
+    if !is_resource_record(&group_name, &storage_mode) {
         return Err("只能编辑资源分组的记录".to_string());
     }
 
@@ -979,7 +1294,9 @@ pub fn delete_all_clipboard_records(app: AppHandle) -> Result<(), String> {
         let state = app.state::<DbState>();
         let conn = state.conn.lock().map_err(|e| e.to_string())?;
         let mut stmt = conn
-            .prepare("SELECT id FROM clipboard_records")
+            .prepare(&format!(
+                "SELECT id FROM clipboard_records WHERE NOT ({RESOURCE_RECORD_CONDITION})"
+            ))
             .map_err(|e| e.to_string())?;
         let rows = stmt
             .query_map([], |row| row.get::<_, String>(0))
@@ -1006,7 +1323,9 @@ pub fn delete_records_by_type(app: AppHandle, record_type: String) -> Result<(),
         let state = app.state::<DbState>();
         let conn = state.conn.lock().map_err(|e| e.to_string())?;
         let mut stmt = conn
-            .prepare("SELECT id FROM clipboard_records WHERE type = ?1")
+            .prepare(&format!(
+                "SELECT id FROM clipboard_records WHERE type = ?1 AND NOT ({RESOURCE_RECORD_CONDITION})"
+            ))
             .map_err(|e| e.to_string())?;
         let rows = stmt
             .query_map(params![record_type], |row| row.get::<_, String>(0))
@@ -1025,6 +1344,7 @@ fn delete_clipboard_records_internal(app: &AppHandle, ids: &[String]) -> Result<
 
     let mut deleted_ids = Vec::new();
     let mut image_contents = HashSet::new();
+    let mut resource_files: Vec<(String, String, Vec<String>)> = Vec::new();
 
     {
         let state = app.state::<DbState>();
@@ -1034,20 +1354,25 @@ fn delete_clipboard_records_internal(app: &AppHandle, ids: &[String]) -> Result<
         for id in ids {
             let record = tx
                 .query_row(
-                    "SELECT type, content, attachments FROM clipboard_records WHERE id = ?1",
+                    "SELECT type, content, attachments, storage_mode, resource_path, group_name FROM clipboard_records WHERE id = ?1",
                     params![id],
                     |row| {
                         Ok((
                             row.get::<_, String>(0)?,
                             row.get::<_, String>(1)?,
                             row.get::<_, String>(2)?,
+                            row.get::<_, String>(3)?,
+                            row.get::<_, String>(4)?,
+                            row.get::<_, String>(5)?,
                         ))
                     },
                 )
                 .optional()
                 .map_err(|e| e.to_string())?;
 
-            let Some((record_type, content, attachments)) = record else {
+            let Some((record_type, content, attachments, storage_mode, resource_path, group_name)) =
+                record
+            else {
                 continue;
             };
 
@@ -1059,11 +1384,15 @@ fn delete_clipboard_records_internal(app: &AppHandle, ids: &[String]) -> Result<
             tx.execute("DELETE FROM clipboard_records WHERE id = ?1", params![id])
                 .map_err(|e| e.to_string())?;
 
-            if record_type == "image" {
-                image_contents.insert(content);
-            }
-            if let Ok(paths) = serde_json::from_str::<Vec<String>>(&attachments) {
-                image_contents.extend(paths);
+            let attachment_paths =
+                serde_json::from_str::<Vec<String>>(&attachments).unwrap_or_default();
+            if is_resource_record(&group_name, &storage_mode) {
+                resource_files.push((id.clone(), resource_path, attachment_paths));
+            } else {
+                if record_type == "image" {
+                    image_contents.insert(content);
+                }
+                image_contents.extend(attachment_paths);
             }
             deleted_ids.push(id.clone());
         }
@@ -1091,7 +1420,9 @@ fn delete_clipboard_records_internal(app: &AppHandle, ids: &[String]) -> Result<
     let base_dir = get_storage_dir(app);
     crate::paste::remove_cached_images(&removable_images);
     for content in removable_images {
-        let file_path = base_dir.join(content);
+        let Some(file_path) = resolve_managed_storage_path(app, &content) else {
+            continue;
+        };
         let _ = std::fs::remove_file(&file_path);
         if let Some(filename) = file_path.file_name() {
             let thumb_path = file_path
@@ -1101,6 +1432,10 @@ fn delete_clipboard_records_internal(app: &AppHandle, ids: &[String]) -> Result<
                 .join(filename);
             let _ = std::fs::remove_file(&thumb_path);
         }
+    }
+
+    for (id, resource_path, attachment_paths) in resource_files {
+        remove_resource_record_files(app, &id, &resource_path, &attachment_paths);
     }
 
     for id in deleted_ids {
@@ -1180,7 +1515,8 @@ pub fn get_resource_groups(app: AppHandle) -> Result<Vec<serde_json::Value>, Str
             ))
         })
         .map_err(|e| e.to_string())?;
-    rows.collect::<Result<Vec<_>, _>>().map_err(|e| e.to_string())
+    rows.collect::<Result<Vec<_>, _>>()
+        .map_err(|e| e.to_string())
 }
 
 #[tauri::command]
@@ -1699,10 +2035,8 @@ pub fn get_all_settings(
 
 #[tauri::command]
 pub fn get_image_base64(app: AppHandle, path: String) -> Result<String, String> {
-    let mut base_dir = get_storage_dir(&app);
-    base_dir.push(&path);
-
-    let bytes = std::fs::read(&base_dir).map_err(|e| format!("read image file: {}", e))?;
+    let image_path = resolve_storage_path(&app, &path)?;
+    let bytes = std::fs::read(&image_path).map_err(|e| format!("read image file: {}", e))?;
 
     use base64::Engine;
     Ok(base64::engine::general_purpose::STANDARD.encode(&bytes))
@@ -1710,8 +2044,11 @@ pub fn get_image_base64(app: AppHandle, path: String) -> Result<String, String> 
 
 #[tauri::command]
 pub fn get_image_thumbnail(app: AppHandle, path: String, max_size: u32) -> Result<String, String> {
-    let base_dir = get_storage_dir(&app);
-    let image_path = base_dir.join(&path);
+    let image_path = resolve_storage_path(&app, &path)?;
+    let base_dir = image_path
+        .parent()
+        .map(Path::to_path_buf)
+        .unwrap_or_else(|| get_storage_dir(&app));
 
     // Try pre-generated thumbnail first (saved during clipboard capture)
     let thumb_dir = image_path.parent().unwrap_or(&base_dir).join("thumbs");
@@ -1784,14 +2121,16 @@ pub fn set_settings_batch(
     app: AppHandle,
     settings: std::collections::HashMap<String, String>,
 ) -> Result<(), String> {
+    if let Some(storage_path) = settings.get("storage_path") {
+        migrate_storage(&app, storage_path)?;
+    }
+
     let state = app.state::<DbState>();
     let conn = state.conn.lock().map_err(|e| e.to_string())?;
     for (key, value) in &settings {
         if key == "storage_path" {
-            return migrate_storage(&app, value);
+            continue;
         }
-    }
-    for (key, value) in &settings {
         conn.execute(
             "INSERT INTO settings (key, value) VALUES (?1, ?2) ON CONFLICT(key) DO UPDATE SET value = ?2",
             params![key, value],
@@ -1836,7 +2175,9 @@ fn migrate_storage(app: &AppHandle, new_path: &str) -> Result<(), String> {
                 user_api_key INTEGER DEFAULT 0,
                 sort_order REAL,
                 group_name TEXT DEFAULT '',
-                attachments TEXT DEFAULT '[]'
+                attachments TEXT DEFAULT '[]',
+                storage_mode TEXT DEFAULT 'database',
+                resource_path TEXT DEFAULT ''
             );
             CREATE INDEX IF NOT EXISTS idx_clipboard_created_at ON clipboard_records(created_at);
             CREATE INDEX IF NOT EXISTS idx_clipboard_sort_order ON clipboard_records(sort_order DESC);
@@ -1939,9 +2280,71 @@ pub fn get_storage_path(app: AppHandle) -> Result<String, String> {
 }
 
 #[tauri::command]
+pub fn get_resource_library_path(app: AppHandle) -> Result<String, String> {
+    Ok(get_resource_library_dir(&app).to_string_lossy().to_string())
+}
+
+fn validate_resource_library_path(app: &AppHandle, value: &str) -> Result<PathBuf, String> {
+    let value = value.trim();
+    if value.is_empty() {
+        return Err("资源库目录不能为空".to_string());
+    }
+
+    let path = PathBuf::from(value);
+    std::fs::create_dir_all(&path).map_err(|error| format!("创建资源库目录失败: {error}"))?;
+    let path =
+        std::fs::canonicalize(&path).map_err(|error| format!("读取资源库目录失败: {error}"))?;
+    if !path.is_dir() {
+        return Err("资源库路径不是目录".to_string());
+    }
+
+    let storage_path =
+        std::fs::canonicalize(get_storage_dir(app)).unwrap_or_else(|_| get_storage_dir(app));
+    if paths_overlap(&path, &storage_path) {
+        return Err("资源库目录不能与应用存储目录重叠".to_string());
+    }
+    Ok(path)
+}
+
+fn paths_overlap(left: &Path, right: &Path) -> bool {
+    left == right || left.starts_with(right) || right.starts_with(left)
+}
+
+#[tauri::command]
+pub fn set_resource_library_path(app: AppHandle, path: String) -> Result<String, String> {
+    let path = validate_resource_library_path(&app, &path)?;
+    let path_string = path.to_string_lossy().to_string();
+    let previous_path = get_setting_sync(&app, "resource_library_path")
+        .filter(|previous| !previous.trim().is_empty())
+        .map(PathBuf::from)
+        .filter(|previous| previous.is_absolute());
+    let mut history = resource_library_history(&app);
+    if let Some(previous_path) = previous_path {
+        if previous_path != path {
+            history.retain(|entry| entry != &previous_path && entry != &path);
+            history.insert(0, previous_path);
+        }
+    } else {
+        history.retain(|entry| entry != &path);
+    }
+    history.truncate(20);
+
+    let history_value = serde_json::to_string(
+        &history
+            .into_iter()
+            .map(|entry| entry.to_string_lossy().to_string())
+            .collect::<Vec<_>>(),
+    )
+    .map_err(|error| format!("保存资源库历史失败: {error}"))?;
+    set_setting_inner(&app, "resource_library_path", &path_string)?;
+    set_setting_inner(&app, RESOURCE_LIBRARY_HISTORY_SETTING, &history_value)?;
+    let _ = app.emit("resource-library-path-changed", &path_string);
+    Ok(path_string)
+}
+
+#[tauri::command]
 pub fn ensure_thumbnail(app: AppHandle, path: String) -> Result<String, String> {
-    let mut base = get_storage_dir(&app);
-    base.push(&path);
+    let base = resolve_storage_path(&app, &path)?;
 
     if !base.exists() {
         return Err("image file not found".to_string());
@@ -1994,6 +2397,26 @@ pub fn ensure_thumbnail(app: AppHandle, path: String) -> Result<String, String> 
 
 #[tauri::command]
 pub async fn select_storage_folder(app: AppHandle) -> Result<String, String> {
+    use tauri_plugin_dialog::DialogExt;
+    let (tx, rx) = std::sync::mpsc::channel();
+    app.dialog().file().pick_folder(move |path| {
+        let _ = tx.send(path);
+    });
+    let result =
+        tokio::task::spawn_blocking(move || rx.recv_timeout(std::time::Duration::from_secs(60)))
+            .await
+            .map_err(|e| format!("task error: {}", e))?;
+
+    match result {
+        Ok(Some(path)) => Ok(path.to_string()),
+        Ok(None) => Err("cancelled".to_string()),
+        Err(std::sync::mpsc::RecvTimeoutError::Timeout) => Err("timeout".to_string()),
+        Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => Err("cancelled".to_string()),
+    }
+}
+
+#[tauri::command]
+pub async fn select_resource_library_folder(app: AppHandle) -> Result<String, String> {
     use tauri_plugin_dialog::DialogExt;
     let (tx, rx) = std::sync::mpsc::channel();
     app.dialog().file().pick_folder(move |path| {
@@ -2309,8 +2732,10 @@ pub fn reorder_phrases(app: AppHandle, ids: Vec<String>) -> Result<(), String> {
 #[cfg(test)]
 mod quick_input_file_tests {
     use super::{
-        is_legacy_quick_input_file_path, legacy_quick_input_target_path, quick_input_relative_path,
+        is_legacy_quick_input_file_path, legacy_quick_input_target_path, paths_overlap,
+        quick_input_relative_path,
     };
+    use std::path::Path;
 
     #[test]
     fn quick_input_relative_path_preserves_original_filename() {
@@ -2339,5 +2764,115 @@ mod quick_input_file_tests {
             ),
             Some("quick-input-files/3fcb74c0-4738-4230-a5bc-51067b34ec0b/original.md".to_string())
         );
+    }
+
+    #[test]
+    fn storage_directories_cannot_overlap() {
+        let storage = Path::new("/home/user/.local/share/copy-creator");
+        assert!(paths_overlap(
+            storage,
+            Path::new("/home/user/.local/share/copy-creator/resources")
+        ));
+        assert!(paths_overlap(storage, Path::new("/home/user/.local/share")));
+        assert!(!paths_overlap(
+            storage,
+            Path::new("/home/user/Documents/resources")
+        ));
+    }
+}
+
+#[cfg(test)]
+mod resource_file_tests {
+    use super::{managed_resource_attachment_path, managed_resource_file_path};
+    use std::path::{Path, PathBuf};
+
+    #[test]
+    fn managed_resource_file_requires_generated_name_and_extension() {
+        let path =
+            PathBuf::from("/tmp/resource-library/copy-creator-record-1-transaction-title.md");
+        let roots = vec![PathBuf::from("/tmp/resource-library")];
+        assert_eq!(
+            managed_resource_file_path(&roots, "record-1", path.to_str().unwrap()),
+            Some((path.clone(), roots[0].clone()))
+        );
+        assert!(managed_resource_file_path(
+            &roots,
+            "record-1",
+            "/tmp/resource-library/copy-creator-record-1-transaction-title.md.bak",
+        )
+        .is_none());
+        assert!(managed_resource_file_path(
+            &roots,
+            "record-2",
+            "/tmp/resource-library/copy-creator-record-1-transaction-title.md",
+        )
+        .is_none());
+        assert!(managed_resource_file_path(
+            &roots,
+            "record-1",
+            "resource-library/copy-creator-record-1-transaction-title.md",
+        )
+        .is_none());
+    }
+
+    #[test]
+    fn managed_resource_attachment_must_be_direct_child_of_record_directory() {
+        let root = Path::new("/tmp/resource-library");
+        let path = root.join(".copy-creator/attachments/record-1-transaction/image-1.png");
+        let directory = root.join(".copy-creator/attachments/record-1-transaction");
+        assert_eq!(
+            managed_resource_attachment_path(root, "record-1", path.to_str().unwrap(),),
+            Some((path, directory))
+        );
+        assert!(managed_resource_attachment_path(
+            root,
+            "record-1",
+            "/tmp/resource-library/.copy-creator/attachments/record-2-transaction/image-1.png",
+        )
+        .is_none());
+        assert!(
+            managed_resource_attachment_path(
+                root,
+                "record-1",
+                "/tmp/resource-library/.copy-creator/attachments/record-1-transaction/nested/image-1.png",
+            )
+            .is_none()
+        );
+        assert!(managed_resource_attachment_path(
+            root,
+            "record-1",
+            "/tmp/other-library/.copy-creator/attachments/record-1-transaction/image-1.png",
+        )
+        .is_none());
+        assert!(managed_resource_attachment_path(
+            root,
+            "record-1",
+            "/tmp/resource-library/.copy-creator/attachments/record-1-transaction/image-0.png",
+        )
+        .is_none());
+    }
+}
+
+#[cfg(test)]
+mod record_classification_tests {
+    use super::{category_sql, is_resource_record};
+
+    #[test]
+    fn treats_resource_mode_or_nonempty_group_as_resource() {
+        assert!(is_resource_record("", "resource"));
+        assert!(is_resource_record("旧资源", "database"));
+        assert!(is_resource_record("  旧资源  ", "database"));
+        assert!(!is_resource_record("", "database"));
+        assert!(!is_resource_record("  ", "database"));
+    }
+
+    #[test]
+    fn resource_category_sql_matches_both_record_shapes() {
+        let (filter, search_filter) = category_sql(&Some("resources".to_string()));
+
+        assert!(filter.contains("COALESCE(storage_mode, 'database') = 'resource'"));
+        assert!(filter.contains("TRIM(COALESCE(group_name, '')) <> ''"));
+        assert!(search_filter.contains("COALESCE(storage_mode, 'database') = 'resource'"));
+        assert!(search_filter.contains("TRIM(COALESCE(group_name, '')) <> ''"));
     }
 }

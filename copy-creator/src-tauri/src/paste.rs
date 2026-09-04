@@ -509,7 +509,7 @@ fn write_stored_image(app: &AppHandle, path: &str) -> Result<(), String> {
             (cached.rgba.clone(), cached.width, cached.height)
         } else {
             drop(cache);
-            let bytes = std::fs::read(crate::db::get_storage_dir(app).join(path))
+            let bytes = std::fs::read(crate::db::resolve_storage_path(app, path)?)
                 .map_err(|e| format!("读取图片失败: {e}"))?;
             let (rgba, width, height) = decode_image_bytes(&bytes)?;
             cache_image(path.to_string(), rgba.clone(), width, height);
@@ -642,8 +642,8 @@ pub fn paste_image_file(app: AppHandle, path: String) -> Result<(), String> {
                 }
             };
 
-            let mut clipboard = arboard::Clipboard::new()
-                .map_err(|e| format!("初始化图片剪切板失败: {e:?}"))?;
+            let mut clipboard =
+                arboard::Clipboard::new().map_err(|e| format!("初始化图片剪切板失败: {e:?}"))?;
             clipboard
                 .set_image(arboard::ImageData {
                     width: width as usize,
@@ -691,7 +691,7 @@ pub async fn paste_stash_record(app: AppHandle, id: String, terminal: bool) -> R
         let state = app.state::<crate::db::DbState>();
         let conn = state.conn.lock().map_err(|e| e.to_string())?;
         conn.query_row(
-            "SELECT content, attachments FROM clipboard_records WHERE id = ?1 AND group_name <> ''",
+            "SELECT content, attachments FROM clipboard_records WHERE id = ?1",
             rusqlite::params![id],
             |row| Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?)),
         )

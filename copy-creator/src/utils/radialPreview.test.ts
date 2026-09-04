@@ -84,11 +84,18 @@ describe("calculatePreviewExpansion", () => {
 });
 
 describe("isContentPreviewAvailable", () => {
-  it("shares the preview eligibility rules with the visible preview trigger", () => {
+  it("makes every supported content type expandable", () => {
+    expect(isContentPreviewAvailable({ type: "text" }, false)).toBe(true);
     expect(isContentPreviewAvailable({ type: "image" }, false)).toBe(true);
-    expect(isContentPreviewAvailable({ type: "text", hasImages: true }, false)).toBe(true);
-    expect(isContentPreviewAvailable({ type: "text" }, true)).toBe(true);
-    expect(isContentPreviewAvailable({ type: "file" }, true)).toBe(false);
+    expect(isContentPreviewAvailable({ type: "link" }, false)).toBe(true);
+    expect(isContentPreviewAvailable({ type: "file" }, false)).toBe(true);
+    expect(isContentPreviewAvailable({ type: "phrase" }, false)).toBe(true);
+  });
+
+  it("keeps image attachments and clipped content expandable", () => {
+    expect(isContentPreviewAvailable({ type: "unknown", hasImages: true }, false)).toBe(true);
+    expect(isContentPreviewAvailable({ type: "unknown" }, true)).toBe(true);
+    expect(isContentPreviewAvailable({ type: "unknown" }, false)).toBe(false);
   });
 });
 

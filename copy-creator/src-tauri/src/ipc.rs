@@ -76,7 +76,7 @@ fn handle_client(mut stream: UnixStream, app: &AppHandle) {
         }
         "new-clipboard" => {
             log::info!("[ipc] show clipboard create dialog");
-            crate::shortcut::show_clipboard_create(app, None);
+            crate::shortcut::show_clipboard_create(app, None, None);
             let _ = writeln!(stream, "ok");
         }
         "ping" => {

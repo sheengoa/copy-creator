@@ -29,6 +29,14 @@ const records = [
   },
 ];
 
+function deferred<T>() {
+  let resolve!: (value: T) => void;
+  const promise = new Promise<T>((nextResolve) => {
+    resolve = nextResolve;
+  });
+  return { promise, resolve };
+}
+
 describe("clipboardStore deletion", () => {
   beforeEach(() => {
     invokeMock.mockReset();
@@ -57,6 +65,22 @@ describe("clipboardStore deletion", () => {
     expect(invokeMock).toHaveBeenCalledWith("delete_clipboard_records", {
       ids: ["clip-1"],
     });
+  });
+
+  it("does not let an older load restore a deleted record", async () => {
+    const olderLoad = deferred<typeof records>();
+    invokeMock
+      .mockImplementationOnce(() => olderLoad.promise)
+      .mockResolvedValueOnce(undefined);
+    useClipboardStore.setState({ loading: false });
+
+    const load = useClipboardStore.getState().loadRecords(false, "all");
+    await useClipboardStore.getState().deleteRecords(["clip-2"]);
+    olderLoad.resolve(records);
+    await load;
+
+    expect(useClipboardStore.getState().records.map((record) => record.id)).toEqual(["clip-1"]);
+    expect(useClipboardStore.getState().loading).toBe(false);
   });
 });
 
@@ -136,5 +160,64 @@ describe("clipboardStore full record loading", () => {
       offset: 120,
       category: undefined,
     });
+  });
+
+  it("ignores an older normal load when a newer load finishes first", async () => {
+    const older = deferred<typeof records>();
+    const newer = deferred<typeof records>();
+    invokeMock
+      .mockImplementationOnce(() => older.promise)
+      .mockImplementationOnce(() => newer.promise);
+
+    const olderLoad = useClipboardStore.getState().loadRecords(false, "all");
+    const newerLoad = useClipboardStore.getState().loadRecords(false, "all");
+
+    newer.resolve([records[1]]);
+    await newerLoad;
+    older.resolve([records[0]]);
+    await olderLoad;
+
+    expect(useClipboardStore.getState().records).toEqual([records[1]]);
+    expect(useClipboardStore.getState().loading).toBe(false);
+    expect(useClipboardStore.getState().loadError).toBeNull();
+  });
+
+  it("does not let an older append replace a newer result", async () => {
+    const olderAppend = deferred<typeof records>();
+    const newerReplace = deferred<typeof records>();
+    useClipboardStore.setState({ records: [records[0]] });
+    invokeMock
+      .mockImplementationOnce(() => olderAppend.promise)
+      .mockImplementationOnce(() => newerReplace.promise);
+
+    const appendLoad = useClipboardStore.getState().loadRecords(true, "all");
+    const replaceLoad = useClipboardStore.getState().loadRecords(false, "all");
+
+    newerReplace.resolve([records[1]]);
+    await replaceLoad;
+    olderAppend.resolve([records[0]]);
+    await appendLoad;
+
+    expect(useClipboardStore.getState().records).toEqual([records[1]]);
+    expect(useClipboardStore.getState().loading).toBe(false);
+  });
+
+  it("cancels an older full load when a newer page load starts", async () => {
+    const olderFullLoad = deferred<typeof records>();
+    const newerPageLoad = deferred<typeof records>();
+    invokeMock
+      .mockImplementationOnce(() => olderFullLoad.promise)
+      .mockImplementationOnce(() => newerPageLoad.promise);
+
+    const fullLoad = useClipboardStore.getState().loadAllRecords("all");
+    const pageLoad = useClipboardStore.getState().loadRecords(false, "all");
+
+    newerPageLoad.resolve([records[1]]);
+    await pageLoad;
+    olderFullLoad.resolve([records[0]]);
+    await fullLoad;
+
+    expect(useClipboardStore.getState().records).toEqual([records[1]]);
+    expect(useClipboardStore.getState().loading).toBe(false);
   });
 });

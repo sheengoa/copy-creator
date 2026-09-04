@@ -153,4 +153,52 @@ export const Icons = {
       <polyline points="20 6 9 17 4 12" />
     </svg>
   ),
+  close: (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round">
+      <line x1="18" y1="6" x2="6" y2="18" />
+      <line x1="6" y1="6" x2="18" y2="18" />
+    </svg>
+  ),
+  expand: (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+      <polyline points="15 3 21 3 21 9" />
+      <polyline points="9 21 3 21 3 15" />
+      <line x1="21" y1="3" x2="14" y2="10" />
+      <line x1="3" y1="21" x2="10" y2="14" />
+    </svg>
+  ),
+  arrowLeft: (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+      <line x1="19" y1="12" x2="5" y2="12" />
+      <polyline points="12 19 5 12 12 5" />
+    </svg>
+  ),
+  play: (
+    <svg viewBox="0 0 24 24" fill="currentColor" stroke="none">
+      <path d="M8 5.2v13.6a1 1 0 0 0 1.52.86l10.4-6.8a1 1 0 0 0 0-1.72L9.52 4.34A1 1 0 0 0 8 5.2Z" />
+    </svg>
+  ),
+  audio: (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+      <path d="M9 18V5l10-2v13" />
+      <circle cx="6" cy="18" r="3" />
+      <circle cx="16" cy="16" r="3" />
+    </svg>
+  ),
+  video: (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+      <rect x="3" y="5" width="13" height="14" rx="2" />
+      <path d="m16 10 5-3v10l-5-3" />
+    </svg>
+  ),
+  drag: (
+    <svg viewBox="0 0 24 24" fill="currentColor" stroke="none">
+      <circle cx="9" cy="5" r="1.5" />
+      <circle cx="15" cy="5" r="1.5" />
+      <circle cx="9" cy="12" r="1.5" />
+      <circle cx="15" cy="12" r="1.5" />
+      <circle cx="9" cy="19" r="1.5" />
+      <circle cx="15" cy="19" r="1.5" />
+    </svg>
+  ),
 };

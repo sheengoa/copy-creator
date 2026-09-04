@@ -30,7 +30,6 @@ interface ClipboardCardProps {
   onToggleSelected: (id: string) => void;
   previewOpen: boolean;
   onPreviewToggle: (record: ClipboardRecord) => void;
-  onPreviewLeave: (event: React.MouseEvent<HTMLElement>) => void;
 }
 
 type ClipboardCardPreviewProps = {
@@ -120,7 +119,6 @@ function ClipboardCardInner({
   onToggleSelected,
   previewOpen,
   onPreviewToggle,
-  onPreviewLeave,
 }: ClipboardCardProps) {
   const { t } = useTranslation();
   const {
@@ -258,7 +256,6 @@ function ClipboardCardInner({
       style={{ ...sortableStyle, "--color": meta.color, "--enter-delay": index } as React.CSSProperties}
       onClick={selectionMode ? () => onToggleSelected(record.id) : handlePaste}
       onContextMenu={selectionMode ? (e) => { e.preventDefault(); e.stopPropagation(); } : handleContextMenu}
-      onMouseLeave={onPreviewLeave}
     >
       <div className="notibar" />
       {selectionMode && (

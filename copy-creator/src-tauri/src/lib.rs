@@ -78,7 +78,7 @@ pub fn run() {
                         } else if shortcut::is_radial_shortcut(shortcut) {
                             shortcut::show_radial_menu(app);
                         } else if shortcut::is_clipboard_create_shortcut(shortcut) {
-                            shortcut::show_clipboard_create(app, None);
+                            shortcut::show_clipboard_create(app, None, None);
                         } else {
                             log::warn!(
                                 "[shortcut] unhandled shortcut pressed: {} (id={})",
@@ -315,6 +315,9 @@ pub fn run() {
             db::ensure_thumbnail,
             db::get_storage_path,
             db::select_storage_folder,
+            db::get_resource_library_path,
+            db::set_resource_library_path,
+            db::select_resource_library_folder,
             translator::translate,
             shortcut::update_shortcut,
             shortcut::update_radial_shortcut,

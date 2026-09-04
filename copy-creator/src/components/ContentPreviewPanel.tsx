@@ -1,23 +1,16 @@
 import { useEffect, useState } from "react";
-import { convertFileSrc, invoke } from "@tauri-apps/api/core";
+import IconButton from "@mui/material/IconButton";
+import CloseIcon from "@mui/icons-material/Close";
 import { useTranslation } from "react-i18next";
 import type { RadialPreviewSegment } from "../utils/radialPreview";
+import { resolveResourceAssetUrl } from "../pages/ResourcePage/resourceUtils";
 
 interface ContentPreviewPanelProps {
   segments: RadialPreviewSegment[] | null;
   className: string;
   onClick?: (event: React.MouseEvent<HTMLElement>) => void;
   onMouseLeave?: (event: React.MouseEvent<HTMLElement>) => void;
-}
-
-let storageDirPromise: Promise<string> | null = null;
-
-async function resolveAssetUrl(path: string) {
-  if (!storageDirPromise) {
-    storageDirPromise = invoke<string>("get_storage_path");
-  }
-  const storageDir = (await storageDirPromise).replace(/[\\/]+$/, "");
-  return convertFileSrc(`${storageDir}/${path.replace(/^[\\/]+/, "")}`);
+  onClose?: () => void;
 }
 
 function PreviewImage({ path }: { path: string }) {
@@ -27,7 +20,9 @@ function PreviewImage({ path }: { path: string }) {
 
   useEffect(() => {
     let cancelled = false;
-    resolveAssetUrl(path)
+    setSrc("");
+    setFailed(false);
+    resolveResourceAssetUrl(path)
       .then((url) => {
         if (!cancelled) setSrc(url);
       })
@@ -61,6 +56,7 @@ export function ContentPreviewPanel({
   className,
   onClick,
   onMouseLeave,
+  onClose,
 }: ContentPreviewPanelProps) {
   const { t } = useTranslation();
 
@@ -72,7 +68,26 @@ export function ContentPreviewPanel({
       onClick={onClick}
       onMouseLeave={onMouseLeave}
     >
-      <div className="content-preview-title">{t("radialMenu.previewTitle")}</div>
+      <div className="content-preview-header">
+        <div className="content-preview-title">{t("radialMenu.previewTitle")}</div>
+        {onClose && (
+          <IconButton
+            className="content-preview-close"
+            type="button"
+            size="small"
+            disableRipple
+            aria-label={t("radialMenu.closePreview")}
+            title={t("radialMenu.closePreview")}
+            onClick={(event) => {
+              event.preventDefault();
+              event.stopPropagation();
+              onClose();
+            }}
+          >
+            <CloseIcon fontSize="small" />
+          </IconButton>
+        )}
+      </div>
       <div className="content-preview-body" data-content-preview-scroll>
         {segments === null ? (
           <div className="content-preview-loading">{t("common.loading")}</div>
