@@ -540,6 +540,43 @@ input:focus-visible + .selection-checkbox {
   animation: windowScaleIn 0.35s cubic-bezier(0.34, 1.56, 0.64, 1);
 }
 
+.inline-preview-loading,
+.inline-preview-fallback,
+.inline-preview-error {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 72px;
+  color: var(--text-tertiary);
+  font-size: var(--text-xs);
+}
+
+.inline-preview-loading {
+  border-radius: 6px;
+  background: var(--chip-bg);
+}
+
+.inline-preview-fallback {
+  flex-direction: column;
+  gap: 5px;
+  border: 1px solid var(--separator);
+  border-radius: 8px;
+}
+
+.inline-preview-fallback svg {
+  width: 20px;
+  height: 20px;
+}
+
+.inline-text-file-preview {
+  margin: 10px 0 0;
+  color: var(--text-primary);
+  font: inherit;
+  line-height: 1.5;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
 [data-theme="dark"] .dialog-content {
   background: rgba(30, 30, 30, 0.92);
   box-shadow:

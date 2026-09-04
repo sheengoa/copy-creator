@@ -197,7 +197,7 @@
 }
 
 .phrase-card-body.is-collapsed {
-  max-height: calc(1.5em * 4);
+  max-height: calc(1.5em * 6);
 }
 
 .phrase-card-body.is-collapsed::after {
@@ -247,6 +247,10 @@
 }
 
 .phrase-card .notibody.phrase-card-file-body {
+  display: block;
+}
+
+.phrase-card-file-summary {
   display: flex;
   align-items: center;
   gap: 8px;
@@ -282,6 +286,15 @@
   color: var(--text-secondary);
   font-size: var(--text-xs);
   flex-shrink: 0;
+}
+
+.phrase-card-expanded-image {
+  display: block;
+  width: 100%;
+  max-height: 320px;
+  margin-top: 10px;
+  border-radius: 8px;
+  object-fit: contain;
 }
 
 .phrase-card .notititle.phrase-card-footer {

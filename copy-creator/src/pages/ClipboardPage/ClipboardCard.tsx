@@ -8,13 +8,19 @@ import OpenInFullIcon from "@mui/icons-material/OpenInFull";
 import { useTranslation } from "react-i18next";
 import type { ClipboardRecord } from "../../types";
 import { Icons } from "../../components/Icons";
+import { InlineImagePreview, InlineTextFilePreview } from "../../components/InlinePreview";
 import { ImageThumb } from "./ImageThumb";
 import { formatTime, getFileName, TYPE_META } from "./utils";
 import ApiKeyLabelPanel from "./ApiKeyLabelPanel";
 import { HighlightText } from "../../components/HighlightText";
 import { useClipboardStore } from "../../stores/clipboardStore";
 import { shouldUseTerminalPasteForMouseTrigger } from "../../utils/pasteMode";
-import { isContentPreviewAvailable } from "../../utils/radialPreview";
+import { loadClipboardPreviewSegments } from "../../utils/contentPreview";
+import type { RadialPreviewSegment } from "../../utils/radialPreview";
+import {
+  hasInlineTextPreviewExtension,
+  shouldShowInlineTextToggle,
+} from "../../utils/inlinePreview";
 
 interface ClipboardCardProps {
   record: ClipboardRecord;
@@ -28,8 +34,6 @@ interface ClipboardCardProps {
   selectionMode: boolean;
   selected: boolean;
   onToggleSelected: (id: string) => void;
-  previewOpen: boolean;
-  onPreviewToggle: (record: ClipboardRecord) => void;
 }
 
 type ClipboardCardPreviewProps = {
@@ -105,6 +109,64 @@ function ClipboardCardBodyPreview({
   );
 }
 
+function ClipboardExpandedPreview({
+  record,
+  search,
+}: {
+  record: ClipboardRecord;
+  search?: string;
+}) {
+  const { t } = useTranslation();
+  const [segments, setSegments] = useState<RadialPreviewSegment[] | null>(null);
+  const [failed, setFailed] = useState(false);
+
+  useEffect(() => {
+    let cancelled = false;
+    setSegments(null);
+    setFailed(false);
+    loadClipboardPreviewSegments(record)
+      .then((next) => {
+        if (!cancelled) setSegments(next);
+      })
+      .catch(() => {
+        if (!cancelled) setFailed(true);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [record]);
+
+  if (failed) {
+    return (
+      <div className="inline-preview-error" role="alert">
+        {t("resources.previewError")}
+      </div>
+    );
+  }
+  if (segments === null) {
+    return <div className="inline-preview-loading" aria-label={t("common.loading")} />;
+  }
+
+  return (
+    <div className="clipboard-card-expanded-content">
+      {segments.map((segment, index) =>
+        segment.type === "image" ? (
+          <InlineImagePreview
+            key={`image-${index}-${segment.path}`}
+            path={segment.path}
+            alt={t("radialMenu.previewImage")}
+            className="clipboard-card-expanded-image"
+          />
+        ) : (
+          <div className="clipboard-card-expanded-text" key={`text-${index}`}>
+            <HighlightText text={segment.content} search={search} />
+          </div>
+        ),
+      )}
+    </div>
+  );
+}
+
 function ClipboardCardInner({
   record,
   index,
@@ -117,8 +179,6 @@ function ClipboardCardInner({
   selectionMode,
   selected,
   onToggleSelected,
-  previewOpen,
-  onPreviewToggle,
 }: ClipboardCardProps) {
   const { t } = useTranslation();
   const {
@@ -137,11 +197,15 @@ function ClipboardCardInner({
   };
 
   const meta = TYPE_META[record.type] || TYPE_META.text;
-  const previewAvailable = isContentPreviewAvailable({
-    type: record.type,
-    contentTruncated: record.content_truncated,
-    hasImages: record.has_images,
-  }, record.content.length > 300);
+  const canPreviewFile = record.type === "file" && hasInlineTextPreviewExtension(record.content);
+  const canToggleText = record.type === "file"
+    ? canPreviewFile
+    : Boolean(record.has_images)
+      || shouldShowInlineTextToggle(record.content, record.content_truncated);
+  const canToggle = record.type === "image" || canToggleText;
+  const canCollapseText = record.type !== "image" && record.type !== "file"
+    && shouldShowInlineTextToggle(record.content, record.content_truncated);
+  const [expanded, setExpanded] = useState(false);
   const [ctxMenu, setCtxMenu] = useState<{ x: number; y: number } | null>(null);
   const [labelOpen, setLabelOpen] = useState(false);
   const ctxRef = useRef<HTMLDivElement>(null);
@@ -153,6 +217,10 @@ function ClipboardCardInner({
     setCtxMenu(null);
     setLabelOpen(false);
   }, [selectionMode]);
+
+  useEffect(() => {
+    setExpanded(false);
+  }, [record.id, record.content]);
 
   // Close context menu on outside click / ESC
   useEffect(() => {
@@ -201,6 +269,12 @@ function ClipboardCardInner({
 
   const handleLabelSaved = useCallback(() => {
     setLabelOpen(false);
+  }, []);
+
+  const handleToggleExpanded = useCallback((e: React.MouseEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setExpanded((value) => !value);
   }, []);
 
   const handleToggleUserApiKey = useCallback(
@@ -252,7 +326,7 @@ function ClipboardCardInner({
   return (
     <div
       ref={setNodeRef}
-      className={`notification clipboard-card type-${record.type}${record.is_api_key ? " has-api-key" : ""}${isUnlabeled ? " api-key-unlabeled" : ""}${hasLabel ? " api-key-labeled" : ""}${isDragging ? " is-dragging" : ""}${selectionMode ? " is-selection-mode" : ""}${selected ? " is-selected" : ""}${previewAvailable && !selectionMode ? " has-preview-trigger" : ""}`}
+      className={`notification clipboard-card type-${record.type}${record.is_api_key ? " has-api-key" : ""}${isUnlabeled ? " api-key-unlabeled" : ""}${hasLabel ? " api-key-labeled" : ""}${isDragging ? " is-dragging" : ""}${selectionMode ? " is-selection-mode" : ""}${selected ? " is-selected" : ""}`}
       style={{ ...sortableStyle, "--color": meta.color, "--enter-delay": index } as React.CSSProperties}
       onClick={selectionMode ? () => onToggleSelected(record.id) : handlePaste}
       onContextMenu={selectionMode ? (e) => { e.preventDefault(); e.stopPropagation(); } : handleContextMenu}
@@ -290,25 +364,46 @@ function ClipboardCardInner({
         </div>
 
         <div
-          className={`notibody clipboard-card-body${record.type === "image" ? "" : " is-content-summary"}`}
+          className={`notibody clipboard-card-body${canToggle ? " is-toggleable" : ""}${canCollapseText && !expanded ? " is-collapsed" : ""}${canToggle && expanded ? " is-expanded" : ""}${record.type === "file" && expanded ? " is-file-expanded" : ""}`}
         >
           {record.type === "image" ? (
-            <ImageThumb
-              record={record}
-              onClick={(e) => {
-                e.stopPropagation();
-                if (selectionMode) onToggleSelected(record.id);
-                else handlePaste();
-              }}
-            />
+            expanded ? (
+              <InlineImagePreview
+                path={record.content}
+                alt={t("radialMenu.previewImage")}
+                className="clipboard-card-expanded-image"
+              />
+            ) : (
+              <ImageThumb
+                record={record}
+                onClick={(e) => {
+                  e.stopPropagation();
+                  if (selectionMode) onToggleSelected(record.id);
+                  else handlePaste();
+                }}
+              />
+            )
           ) : record.type === "link" ? (
-            <span className="clipboard-link-content"><HighlightText text={record.content} search={search} /></span>
+            expanded ? (
+              <ClipboardExpandedPreview record={record} search={search} />
+            ) : (
+              <span className="clipboard-link-content"><HighlightText text={record.content} search={search} /></span>
+            )
           ) : record.type === "file" ? (
-            <span className="clipboard-file-content"><HighlightText text={getFileName(record.content)} search={search} /></span>
+            <>
+              <span className="clipboard-file-content"><HighlightText text={getFileName(record.content)} search={search} /></span>
+              {expanded && canPreviewFile && (
+                <InlineTextFilePreview recordId={record.id} search={search} />
+              )}
+            </>
           ) : (
-            <span className="clipboard-text-content">
-              <HighlightText text={record.content} search={search} />
-            </span>
+            expanded ? (
+              <ClipboardExpandedPreview record={record} search={search} />
+            ) : (
+              <span className="clipboard-text-content">
+                <HighlightText text={record.content} search={search} />
+              </span>
+            )
           )}
         </div>
 
@@ -328,22 +423,18 @@ function ClipboardCardInner({
           <div className="clipboard-card-actions">
             {!selectionMode && (
               <>
-                {previewAvailable && (
+                {canToggle && (
                   <IconButton
-                    className="clipboard-preview-trigger"
+                    className="card-toggle-text-btn"
                     type="button"
                     size="small"
                     disableRipple
-                    aria-expanded={previewOpen}
-                    aria-label={t(previewOpen ? "radialMenu.closePreview" : "radialMenu.openPreview")}
-                    title={t(previewOpen ? "radialMenu.closePreview" : "radialMenu.openPreview")}
-                    onClick={(e) => {
-                      e.preventDefault();
-                      e.stopPropagation();
-                      onPreviewToggle(record);
-                    }}
+                    aria-expanded={expanded}
+                    aria-label={t(expanded ? "phrases.collapseText" : "phrases.expandText")}
+                    title={t(expanded ? "phrases.collapseText" : "phrases.expandText")}
+                    onClick={handleToggleExpanded}
                   >
-                    {previewOpen ? (
+                    {expanded ? (
                       <CloseFullscreenIcon fontSize="inherit" />
                     ) : (
                       <OpenInFullIcon fontSize="inherit" />

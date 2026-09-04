@@ -27,7 +27,6 @@ export function usePersistWindowSize(widthKey: string, heightKey: string) {
       }
       saveTimerRef.current = window.setTimeout(async () => {
         saveTimerRef.current = null;
-        if (document.documentElement.hasAttribute("data-main-content-preview")) return;
         try {
           const scaleFactor = await appWindow.scaleFactor();
           await invoke("set_settings_batch", {

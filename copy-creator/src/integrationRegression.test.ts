@@ -50,12 +50,13 @@ describe("integration regressions", () => {
     expect(ipcSource).not.toContain("set_always_on_top(true)");
   });
 
-  it("adds long-text folding to quick input cards without changing paste clicks", () => {
+  it("uses the same six-line card folding for quick input and clipboard cards", () => {
     const phraseSource = readSource("./pages/PhrasePage/PhraseList.tsx");
+    const clipboardSource = readSource("./pages/ClipboardPage/ClipboardCard.tsx");
     const phraseStyles = readSource("./styles/phrases.css");
+    const clipboardStyles = readSource("./styles/clipboard.css");
+    const inlinePreview = readSource("./utils/inlinePreview.ts");
 
-    expect(phraseSource).toContain("COLLAPSE_TEXT_LENGTH = 160");
-    expect(phraseSource).toContain("COLLAPSE_LINE_COUNT = 4");
     expect(phraseSource).toContain('className="card-toggle-text-btn"');
     expect(phraseSource).toContain("e.stopPropagation()");
     expect(phraseSource).toContain('t(isTextExpanded ? "phrases.collapseText" : "phrases.expandText")');
@@ -66,6 +67,13 @@ describe("integration regressions", () => {
     expect(phraseStyles).toContain(".phrase-card-body.is-expanded");
     expect(phraseStyles).toContain("white-space: pre-wrap");
     expect(phraseStyles).toContain(".phrase-card-actions > .card-toggle-text-btn");
+    expect(clipboardSource).toContain('className="card-toggle-text-btn"');
+    expect(clipboardSource).toContain("shouldShowInlineTextToggle");
+    expect(clipboardSource).toContain('record.type === "file"');
+    expect(clipboardSource).toContain("? canPreviewFile");
+    expect(clipboardStyles).toContain(".clipboard-card-body.is-collapsed");
+    expect(clipboardStyles).toContain("calc(1.5em * 6)");
+    expect(inlinePreview).toContain("INLINE_PREVIEW_MAX_LINES = 6");
   });
 
   it("sizes the quick input editor dialog relative to the main window", () => {
@@ -304,7 +312,7 @@ describe("integration regressions", () => {
     expect(manageGroupsSource).toContain('role="alert"');
   });
 
-  it("uses the shared window-level panel instead of in-card previews", () => {
+  it("keeps the content panel for radial menu and uses inline previews on the main page", () => {
     const pageSource = readSource("./pages/ClipboardPage/index.tsx");
     const cardSource = readSource("./pages/ClipboardPage/ClipboardCard.tsx");
     const radialMenu = readSource("./components/RadialMenu/index.tsx");
@@ -312,47 +320,31 @@ describe("integration regressions", () => {
     const previewLoader = readSource("./utils/contentPreview.ts");
     const clipboardStyles = readSource("./styles/clipboard.css");
     const persistWindowSize = readSource("./hooks/usePersistWindowSize.ts");
+    const inlinePreview = readSource("./components/InlinePreview.tsx");
+    const dbSource = readSource("../src-tauri/src/db.rs");
+    const libSource = readSource("../src-tauri/src/lib.rs");
 
-    expect(pageSource).toContain('<ContentPreviewPanel');
     expect(radialMenu).toContain('<ContentPreviewPanel');
     expect(previewLoader).toContain("loadClipboardPreviewSegments");
-    expect(pageSource).toContain("appWindow.outerSize()");
-    expect(pageSource).toContain("calculatePreviewExpansion");
-    expect(pageSource).toContain("--main-content-preview-main-width");
-    expect(pageSource).toContain("mainContentPreviewState");
-    expect(pageSource).toContain("previewRestoringRef");
-    expect(pageSource).toContain("finishMainPreviewRestore");
-    expect(pageSource).toContain("useLayoutEffect");
-    expect(pageSource).toContain("main-window-content-preview");
-    expect(pageSource).not.toContain("handlePreviewLeave");
-    expect(pageSource).not.toContain("onPreviewLeave");
-    expect(pageSource).not.toContain('addEventListener("mouseleave"');
-    expect(pageSource).not.toContain('addEventListener("pointerleave"');
-    expect(pageSource).not.toContain('addEventListener("pointerout"');
-    expect(pageSource).not.toContain('addEventListener("mouseout"');
-    expect(pageSource).not.toContain("visibilitychange");
-    expect(pageSource).not.toContain("handleDeletePreview");
-    expect(pageSource).toContain("onClose={collapsePreview}");
-    expect(radialMenu).toContain("onClose={collapsePreview}");
+    expect(pageSource).not.toContain("<ContentPreviewPanel");
+    expect(pageSource).not.toContain("getCurrentWindow");
+    expect(pageSource).not.toContain("calculatePreviewExpansion");
     expect(previewPanel).toContain("onClose?: () => void;");
     expect(previewPanel).toContain("content-preview-close");
     expect(previewPanel).not.toContain("onDelete");
-    expect(clipboardStyles).toContain(':root[data-main-content-preview="right"] .app-container');
-    expect(clipboardStyles).toContain(':root[data-main-content-preview="left"] .app-container');
-    expect(clipboardStyles).toContain('data-main-content-preview-state="restoring"');
-    expect(clipboardStyles).toContain(':root[data-main-content-preview-state="restoring"] .main-window-content-preview');
-    expect(clipboardStyles).not.toContain(".clipboard-content-preview");
-    expect(persistWindowSize).toContain('hasAttribute("data-main-content-preview")');
-    expect(cardSource).not.toContain("textExpanded");
-    expect(cardSource).not.toContain("card-toggle-text-btn");
-    expect(pageSource).not.toContain("thumb-hover-overlay");
-    expect(clipboardStyles).not.toContain(".thumb-hover-overlay");
-    expect(clipboardStyles).not.toContain(".image-preview-overlay");
-    expect(clipboardStyles).not.toContain(".image-preview-backdrop");
-    expect(clipboardStyles).not.toContain(".image-preview-img");
-    expect(clipboardStyles).not.toContain(".card-toggle-text-btn");
-    expect(cardSource).not.toContain("onPreviewLeave");
-    expect(cardSource).not.toContain("onMouseLeave={onPreviewLeave}");
+    expect(cardSource).toContain("ClipboardExpandedPreview");
+    expect(cardSource).toContain("InlineImagePreview");
+    expect(cardSource).toContain("InlineTextFilePreview");
+    expect(cardSource).toContain("hasInlineTextPreviewExtension");
+    expect(clipboardStyles).not.toContain(".main-window-content-preview");
+    expect(persistWindowSize).not.toContain("data-main-content-preview");
+    expect(inlinePreview).toContain('read_quick_input_text_preview');
+    expect(inlinePreview).toContain('read_clipboard_text_preview');
+    expect(inlinePreview).toContain("resolveResourceAssetUrl");
+    expect(dbSource).toContain("read_quick_input_text_preview");
+    expect(dbSource).toContain("read_clipboard_text_preview");
+    expect(dbSource).toContain("仅支持预览 JSON、TXT 和 TOML 文件");
+    expect(libSource).toContain("db::read_quick_input_text_preview");
   });
 
   it("starts Linux file drags from the top-level GTK window", () => {
@@ -499,21 +491,15 @@ describe("integration regressions", () => {
       radialMenu.indexOf("onClick={(e) => {", radialMenu.indexOf('data-radial-item-id={item.id}')),
     );
     expect(radialItemBlock).not.toContain("onMouseLeave");
-    expect(pageSource).toContain("const togglePreview = useCallback");
-    expect(pageSource).toContain("onPreviewToggle={togglePreview}");
+    expect(pageSource).not.toContain("ContentPreviewPanel");
+    expect(pageSource).not.toContain("onPreviewToggle");
     expect(pageSource).not.toContain("schedulePreview");
-    expect(cardSource).toContain("aria-expanded={previewOpen}");
+    expect(cardSource).toContain("aria-expanded={expanded}");
+    expect(cardSource).toContain('className="card-toggle-text-btn"');
     expect(cardSource).toContain('className="notititle clipboard-card-footer"');
-    expect(cardSource.lastIndexOf('className="clipboard-preview-trigger"')).toBeGreaterThan(
+    expect(cardSource.lastIndexOf('className="card-toggle-text-btn"')).toBeGreaterThan(
       cardSource.indexOf('className="notititle clipboard-card-footer"'),
     );
-    const mainPreviewExpandBlock = pageSource.slice(
-      pageSource.indexOf("const expandPreviewWindow"),
-      pageSource.indexOf("const showPreview"),
-    );
-    expect(mainPreviewExpandBlock).toContain("if (windowRestoreRef.current) await windowRestoreRef.current;");
-    expect(mainPreviewExpandBlock).toContain("if (previewRestoringRef.current)");
-    expect(mainPreviewExpandBlock).not.toContain("await appWindow.setSize(innerSize);");
     expect(previewPanel).toContain("draggable={false}");
     expect(radialStyles).toContain("cursor: default");
     expect(radialStyles).toContain("touch-action: none");

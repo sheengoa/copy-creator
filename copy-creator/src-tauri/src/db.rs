@@ -124,6 +124,7 @@ pub struct DbState {
 
 const CLIPBOARD_CONTENT_PREVIEW_CHARS: usize = 600;
 const QUICK_INPUT_FILE_LIMIT_BYTES: u64 = 50 * 1024 * 1024;
+const QUICK_INPUT_TEXT_PREVIEW_LIMIT_BYTES: u64 = 1024 * 1024;
 pub(crate) const DEFAULT_RESOURCE_GROUP_ID: &str = "default-resource-group";
 pub(crate) const DEFAULT_RESOURCE_GROUP_NAME: &str = "暂存";
 pub(crate) const DATABASE_STORAGE_MODE: &str = "database";
@@ -732,6 +733,92 @@ pub fn get_quick_input_file_info(path: String) -> Result<serde_json::Value, Stri
         "path": path,
         "file_size": meta.len(),
     }))
+}
+
+fn is_quick_input_text_preview_path(path: &str) -> bool {
+    quick_input_relative_component_count(path).is_some()
+        && is_text_preview_extension(Path::new(path))
+}
+
+fn is_text_preview_extension(path: &Path) -> bool {
+    path.extension()
+        .and_then(OsStr::to_str)
+        .is_some_and(|extension| {
+            matches!(
+                extension.to_ascii_lowercase().as_str(),
+                "json" | "txt" | "toml"
+            )
+        })
+}
+
+fn read_text_preview_file(path: PathBuf) -> Result<String, String> {
+    if !is_text_preview_extension(&path) {
+        return Err("仅支持预览 JSON、TXT 和 TOML 文件".to_string());
+    }
+    let metadata = std::fs::metadata(&path).map_err(|e| format!("读取文件失败: {e}"))?;
+    if !metadata.is_file() {
+        return Err("请选择一个文件".to_string());
+    }
+    if metadata.len() > QUICK_INPUT_TEXT_PREVIEW_LIMIT_BYTES {
+        return Err("预览文件不能超过 1 MB".to_string());
+    }
+    std::fs::read_to_string(path).map_err(|e| format!("读取文件失败: {e}"))
+}
+
+fn resolve_quick_input_text_preview_path(app: &AppHandle, path: &str) -> Result<PathBuf, String> {
+    if !is_quick_input_text_preview_path(path) {
+        return Err("仅支持预览 JSON、TXT 和 TOML 文件".to_string());
+    }
+
+    let preview_root = quick_input_files_dir(app)
+        .canonicalize()
+        .map_err(|e| format!("读取预览目录失败: {e}"))?;
+    let preview_path = quick_input_absolute_path(app, path)
+        .ok_or_else(|| "快捷输入文件路径无效".to_string())?
+        .canonicalize()
+        .map_err(|e| format!("读取文件失败: {e}"))?;
+    if !preview_path.starts_with(&preview_root) {
+        return Err("快捷输入文件路径无效".to_string());
+    }
+
+    let metadata = std::fs::metadata(&preview_path).map_err(|e| format!("读取文件失败: {e}"))?;
+    if !metadata.is_file() {
+        return Err("请选择一个文件".to_string());
+    }
+    if metadata.len() > QUICK_INPUT_TEXT_PREVIEW_LIMIT_BYTES {
+        return Err("预览文件不能超过 1 MB".to_string());
+    }
+    Ok(preview_path)
+}
+
+#[tauri::command]
+pub fn read_quick_input_text_preview(app: AppHandle, path: String) -> Result<String, String> {
+    let preview_path = resolve_quick_input_text_preview_path(&app, &path)?;
+    read_text_preview_file(preview_path)
+}
+
+#[tauri::command]
+pub fn read_clipboard_text_preview(app: AppHandle, id: String) -> Result<String, String> {
+    let state = app.state::<DbState>();
+    let conn = state.conn.lock().map_err(|e| e.to_string())?;
+    let (record_type, content): (String, String) = conn
+        .query_row(
+            "SELECT type, content FROM clipboard_records WHERE id = ?1",
+            params![id],
+            |row| Ok((row.get(0)?, row.get(1)?)),
+        )
+        .map_err(|e| format!("读取剪切板记录失败: {e}"))?;
+    drop(conn);
+
+    if record_type != "file" {
+        return Err("当前记录不是文件".to_string());
+    }
+    let path = if Path::new(&content).is_absolute() {
+        PathBuf::from(content)
+    } else {
+        resolve_storage_path(&app, &content)?
+    };
+    read_text_preview_file(path)
 }
 
 pub fn init_db(app: &AppHandle) -> Result<(), Box<dyn std::error::Error>> {
@@ -2732,8 +2819,8 @@ pub fn reorder_phrases(app: AppHandle, ids: Vec<String>) -> Result<(), String> {
 #[cfg(test)]
 mod quick_input_file_tests {
     use super::{
-        is_legacy_quick_input_file_path, legacy_quick_input_target_path, paths_overlap,
-        quick_input_relative_path,
+        is_legacy_quick_input_file_path, is_quick_input_text_preview_path,
+        legacy_quick_input_target_path, paths_overlap, quick_input_relative_path,
     };
     use std::path::Path;
 
@@ -2743,6 +2830,23 @@ mod quick_input_file_tests {
             quick_input_relative_path("preset-1", "example.md"),
             "quick-input-files/preset-1/example.md"
         );
+    }
+
+    #[test]
+    fn quick_input_text_preview_accepts_only_supported_extensions() {
+        assert!(is_quick_input_text_preview_path(
+            "quick-input-files/preset-1/example.JSON"
+        ));
+        assert!(is_quick_input_text_preview_path(
+            "quick-input-files/preset-1/example.txt"
+        ));
+        assert!(is_quick_input_text_preview_path(
+            "quick-input-files/preset-1/example.toml"
+        ));
+        assert!(!is_quick_input_text_preview_path(
+            "quick-input-files/preset-1/example.md"
+        ));
+        assert!(!is_quick_input_text_preview_path("/tmp/example.json"));
     }
 
     #[test]

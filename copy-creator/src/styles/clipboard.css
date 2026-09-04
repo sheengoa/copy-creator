@@ -270,50 +270,6 @@
   padding: 0.65rem 0.5rem 0.3rem 1rem;
 }
 
-.clipboard-preview-trigger {
-  position: relative !important;
-  pointer-events: none;
-  transform: scale(0.78);
-}
-
-.clipboard-card:hover .clipboard-preview-trigger,
-.clipboard-card:focus-within .clipboard-preview-trigger {
-  opacity: 1;
-  transform: scale(1);
-  pointer-events: auto;
-}
-
-.clipboard-preview-trigger:hover {
-  background: var(--chip-hover-bg) !important;
-  color: var(--text-primary) !important;
-}
-
-.clipboard-preview-trigger:focus-visible {
-  outline: 2px solid var(--accent);
-  outline-offset: 1px;
-}
-
-.clipboard-preview-trigger svg {
-  width: 15px;
-  height: 15px;
-}
-
-[data-theme="dark"] .clipboard-preview-trigger {
-  background: var(--card-inner-bg) !important;
-  color: rgba(255, 255, 255, 0.72) !important;
-}
-
-[data-theme="dark"] .clipboard-preview-trigger:hover {
-  background: var(--chip-hover-bg) !important;
-  color: #fff !important;
-}
-
-@media (prefers-reduced-motion: reduce) {
-  .clipboard-preview-trigger {
-    transition: none;
-  }
-}
-
 .clipboard-card.is-selection-mode .clipboard-card-header {
   padding-inline-start: 42px;
 }
@@ -324,8 +280,71 @@
 }
 
 .clipboard-card-body.is-content-summary {
-  max-height: calc(1.5em * 4);
+  max-height: calc(1.5em * 6);
   overflow: hidden;
+}
+
+.clipboard-card-body.is-toggleable {
+  position: relative;
+  overflow: hidden;
+}
+
+.clipboard-card-body.is-collapsed {
+  max-height: calc(1.5em * 6);
+}
+
+.clipboard-card-body.is-collapsed::after {
+  content: "";
+  position: absolute;
+  right: 0.75rem;
+  bottom: 0;
+  left: 0.75rem;
+  height: 1.5em;
+  pointer-events: none;
+  background: linear-gradient(to bottom, transparent, var(--card-inner-bg) 86%);
+}
+
+.clipboard-card-body.is-expanded {
+  max-height: min(320px, 42vh);
+  overflow-y: auto;
+  padding-right: 0.75rem;
+}
+
+.clipboard-card-body.is-expanded::-webkit-scrollbar {
+  width: 4px;
+}
+
+.clipboard-card-body.is-expanded::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.clipboard-card-body.is-expanded::-webkit-scrollbar-thumb {
+  background: rgba(0, 0, 0, 0.15);
+  border-radius: 2px;
+}
+
+[data-theme="dark"] .clipboard-card-body.is-expanded::-webkit-scrollbar-thumb {
+  background: rgba(255, 255, 255, 0.18);
+}
+
+.clipboard-card-expanded-content {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding-bottom: 4px;
+}
+
+.clipboard-card-expanded-text {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.clipboard-card-expanded-image {
+  display: block;
+  width: 100%;
+  max-height: 320px;
+  border-radius: 8px;
+  object-fit: contain;
 }
 
 .clipboard-card-footer {
@@ -356,7 +375,7 @@
   gap: 2px;
 }
 
-.clipboard-card-actions > .clipboard-preview-trigger,
+.clipboard-card-actions > .card-toggle-text-btn,
 .clipboard-card-actions > .drag-handle,
 .clipboard-card-actions > .card-delete-btn {
   display: inline-flex;
@@ -380,16 +399,16 @@
     color 120ms ease-out;
 }
 
-.clipboard-card:hover .clipboard-card-actions > .clipboard-preview-trigger,
+.clipboard-card:hover .clipboard-card-actions > .card-toggle-text-btn,
 .clipboard-card:hover .clipboard-card-actions > .drag-handle,
 .clipboard-card:hover .clipboard-card-actions > .card-delete-btn,
-.clipboard-card:focus-within .clipboard-card-actions > .clipboard-preview-trigger,
+.clipboard-card:focus-within .clipboard-card-actions > .card-toggle-text-btn,
 .clipboard-card:focus-within .clipboard-card-actions > .drag-handle,
 .clipboard-card:focus-within .clipboard-card-actions > .card-delete-btn {
   opacity: 0.5;
 }
 
-.clipboard-card-actions > .clipboard-preview-trigger:hover,
+.clipboard-card-actions > .card-toggle-text-btn:hover,
 .clipboard-card-actions > .drag-handle:hover,
 .clipboard-card-actions > .card-delete-btn:hover {
   opacity: 1;
@@ -401,62 +420,11 @@
   color: rgb(220, 38, 38);
 }
 
-.clipboard-card-actions > .clipboard-preview-trigger svg,
+.clipboard-card-actions > .card-toggle-text-btn svg,
 .clipboard-card-actions > .drag-handle svg,
 .clipboard-card-actions > .card-delete-btn svg {
   width: 15px;
   height: 15px;
-}
-
-.main-window-content-preview {
-  position: fixed;
-  inset-block: 0;
-  z-index: 30;
-  width: var(--main-content-preview-width);
-  height: 100vh;
-  overflow: hidden;
-}
-
-.main-window-content-preview.preview-right {
-  right: 0;
-  border-inline-start: 0.5px solid var(--separator);
-  border-radius: 0 var(--window-radius) var(--window-radius) 0;
-}
-
-.main-window-content-preview.preview-left {
-  left: 0;
-  border-inline-end: 0.5px solid var(--separator);
-  border-radius: var(--window-radius) 0 0 var(--window-radius);
-}
-
-:root[data-main-content-preview="right"] .app-container {
-  width: var(--main-content-preview-main-width);
-  min-width: var(--main-content-preview-main-width);
-  max-width: var(--main-content-preview-main-width);
-}
-
-:root[data-main-content-preview="left"] .app-container {
-  width: var(--main-content-preview-main-width);
-  min-width: var(--main-content-preview-main-width);
-  max-width: var(--main-content-preview-main-width);
-  margin-left: var(--main-content-preview-width);
-}
-
-:root[data-main-content-preview-state="restoring"] .main-window-content-preview {
-  visibility: hidden;
-  pointer-events: none;
-}
-
-:root[data-main-content-preview="right"]:not([data-main-content-preview-state="restoring"]) .app-container {
-  border-radius: var(--window-radius) 0 0 var(--window-radius);
-}
-
-:root[data-main-content-preview="left"]:not([data-main-content-preview-state="restoring"]) .app-container {
-  border-radius: 0 var(--window-radius) var(--window-radius) 0;
-}
-
-:root[data-main-content-preview] .window-resize-handle {
-  display: none;
 }
 
 /* === API Key Badge === */

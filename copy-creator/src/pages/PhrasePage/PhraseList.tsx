@@ -8,7 +8,12 @@ import OpenInFullIcon from "@mui/icons-material/OpenInFull";
 import { useTranslation } from "react-i18next";
 import type { Phrase } from "../../types";
 import { HighlightText } from "../../components/HighlightText";
+import { InlineImagePreview, InlineTextFilePreview } from "../../components/InlinePreview";
 import { isImageFilePath } from "../../stores/phraseStore";
+import {
+  isInlineTextPreviewFilePath,
+  shouldShowInlineTextToggle,
+} from "../../utils/inlinePreview";
 
 interface PhraseListProps {
   phrases: Phrase[];
@@ -25,8 +30,6 @@ interface PhraseListProps {
 }
 
 const filenameFromPath = (path: string) => path.replace(/\\/g, "/").split("/").pop() || path;
-const COLLAPSE_TEXT_LENGTH = 160;
-const COLLAPSE_LINE_COUNT = 4;
 
 function formatBytes(bytes: number) {
   if (!bytes) return "";
@@ -90,10 +93,12 @@ function PhraseCard({
   const isFile = phrase.input_type === "file";
   const fileName = filenameFromPath(phrase.source_path || phrase.content);
   const [textExpanded, setTextExpanded] = useState(false);
-  const textLineCount = phrase.content.split(/\r\n|\r|\n/).length;
-  const canToggleText =
-    !isFile
-    && (phrase.content.length > COLLAPSE_TEXT_LENGTH || textLineCount > COLLAPSE_LINE_COUNT);
+  const imageFile = isFile && isImageFilePath(phrase.source_path || phrase.content);
+  const textFile = isFile && isInlineTextPreviewFilePath(phrase.content);
+  const canToggleText = isFile
+    ? imageFile || textFile
+    : shouldShowInlineTextToggle(phrase.content);
+  const canCollapseText = !isFile && shouldShowInlineTextToggle(phrase.content);
   const isTextExpanded = canToggleText && textExpanded;
 
   useEffect(() => {
@@ -131,17 +136,31 @@ function PhraseCard({
       )}
       <div className="noticontent">
         <div
-          className={`notibody phrase-card-body${isFile ? " phrase-card-file-body" : ""}${canToggleText ? " is-toggleable" : ""}${canToggleText && !isTextExpanded ? " is-collapsed" : ""}${isTextExpanded ? " is-expanded" : ""}`}
+          className={`notibody phrase-card-body${isFile ? " phrase-card-file-body" : ""}${canToggleText ? " is-toggleable" : ""}${canCollapseText && !isTextExpanded ? " is-collapsed" : ""}${isTextExpanded ? " is-expanded" : ""}${isFile && isTextExpanded ? " is-file-expanded" : ""}`}
         >
           {isFile ? (
             <>
-              {isImageFilePath(phrase.source_path || phrase.content) ? (
-                <PhraseFileImage content={phrase.content} />
-              ) : (
-                <span className="phrase-card-file-icon">{Icons.file}</span>
+              <div className="phrase-card-file-summary">
+                {imageFile && isTextExpanded ? (
+                  <span className="phrase-card-file-icon">{Icons.image}</span>
+                ) : imageFile ? (
+                  <PhraseFileImage content={phrase.content} />
+                ) : (
+                  <span className="phrase-card-file-icon">{Icons.file}</span>
+                )}
+                <span className="phrase-card-file-name"><HighlightText text={fileName} search={search} /></span>
+                <span className="phrase-card-file-size">{formatBytes(phrase.file_size)}</span>
+              </div>
+              {isTextExpanded && imageFile && (
+                <InlineImagePreview
+                  path={phrase.content}
+                  alt={t("resources.imagePreview")}
+                  className="phrase-card-expanded-image"
+                />
               )}
-              <span className="phrase-card-file-name"><HighlightText text={fileName} search={search} /></span>
-              <span className="phrase-card-file-size">{formatBytes(phrase.file_size)}</span>
+              {isTextExpanded && textFile && (
+                <InlineTextFilePreview path={phrase.content} search={search} />
+              )}
             </>
           ) : (
             <HighlightText text={phrase.content} search={search} />
