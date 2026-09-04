@@ -8,3 +8,9 @@ copy-creator/com.copycreator.app/
 CLAUDE.md
 AGENTS.md
 /docs
+
+# Local browser QA and prototype artifacts
+.playwright-cli/
+prototype/
+HANDOVER.md
+IMPLEMENTATION_PLAN.md
