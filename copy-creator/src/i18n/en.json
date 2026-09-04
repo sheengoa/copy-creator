@@ -149,6 +149,11 @@
     "modeResource": "Resources",
     "modeResourceHint": "Long-term resources kept in the resource library folder",
     "storageLocation": "Save to",
+    "existingClipboard": "Existing content",
+    "selectExistingClipboard": "Select content to edit",
+    "noExistingClipboard": "No content to edit yet",
+    "createPlaceholderClipboard": "Enter the content to save...",
+    "exitEditClipboard": "Exit edit",
     "destinationClipboard": "Clipboard",
     "destinationResource": "Resources"
   },

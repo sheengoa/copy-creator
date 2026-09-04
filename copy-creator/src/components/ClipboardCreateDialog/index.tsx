@@ -264,6 +264,7 @@ export default function ClipboardCreateDialog() {
 
   const visibleStashRecords = stashRecords;
   const selectedStashRecord = visibleStashRecords.find((record) => record.id === editingId);
+  const isResource = storageMode === "resource";
 
   return (
     <div className="clipboard-create-dialog" onKeyDown={handleKeyDown}>
@@ -290,7 +291,7 @@ export default function ClipboardCreateDialog() {
           ref={editorRef}
           initialContent={content}
           initialImages={images}
-          placeholder={t("resources.createPlaceholder")}
+          placeholder={isResource ? t("resources.createPlaceholder") : t("resources.createPlaceholderClipboard")}
           previewAlt={t("resources.imagePreview")}
           closePreviewLabel={t("resources.closeImagePreview")}
           onChange={(nextContent, nextImages) => {
@@ -351,10 +352,10 @@ export default function ClipboardCreateDialog() {
           </div>
           <div className="clipboard-create-option-field">
             <div className="clipboard-create-stash-header">
-              <span>{t("resources.existing")}</span>
+              <span>{isResource ? t("resources.existing") : t("resources.existingClipboard")}</span>
               {editingId && (
                 <button className="clipboard-create-exit-edit" onClick={handleExitEdit}>
-                  {t("resources.exitEdit")}
+                  {isResource ? t("resources.exitEdit") : t("resources.exitEditClipboard")}
                 </button>
               )}
             </div>
@@ -373,8 +374,12 @@ export default function ClipboardCreateDialog() {
                   : loadingRecords
                     ? t("common.loading")
                     : visibleStashRecords.length === 0
-                      ? t("resources.noExisting")
-                      : t("resources.selectExisting")}
+                      ? isResource
+                        ? t("resources.noExisting")
+                        : t("resources.noExistingClipboard")
+                      : isResource
+                        ? t("resources.selectExisting")
+                        : t("resources.selectExistingClipboard")}
               </span>
               <svg className="clipboard-create-stash-chevron" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
                 <polyline points="6 9 12 15 18 9" />
