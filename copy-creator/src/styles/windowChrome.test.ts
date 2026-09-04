@@ -53,8 +53,8 @@ describe("standalone window chrome", () => {
     const componentSource = readSource("../components/ClipboardCreateDialog/index.tsx");
 
     expect(css).toContain(".clipboard-create-stash-picker");
-    expect(componentSource).toContain('isResource ? "resources" : "temp"');
-    expect(componentSource).toContain("isTempRecord");
+    expect(componentSource).toContain('category: isResource ? "resources" : "all"');
+    expect(componentSource).not.toContain("isTempRecord");
     expect(componentSource).not.toContain("getResourceGroupName");
     expect(componentSource).toContain('aria-haspopup="listbox"');
     expect(componentSource).toContain("setDropdownOpen");

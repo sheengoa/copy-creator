@@ -31,7 +31,7 @@ import {
 } from "../../utils/radialDrag";
 import { ContentPreviewPanel } from "../ContentPreviewPanel";
 import { loadClipboardPreviewSegments } from "../../utils/contentPreview";
-import { isResourceRecord, isTempRecord } from "../../utils/clipboardRecord";
+import { isResourceRecord } from "../../utils/clipboardRecord";
 import i18n from "../../i18n";
 
 type TabKey = "clipboard" | "phrases" | "resources";
@@ -987,12 +987,10 @@ export default function RadialMenu() {
   }, [visible, activeTab, phraseGroupId, phraseGroups, loadPhrases]);
 
   const filteredRecords = clipboardCategory === "all"
-    ? records.filter((r) => !isResourceRecord(r) && !isTempRecord(r))
-    : clipboardCategory === "temp"
-      ? records.filter((r) => isTempRecord(r))
-      : clipboardCategory === "resources"
-        ? records.filter((r) => isResourceRecord(r))
-      : records.filter((r) => !isResourceRecord(r) && !isTempRecord(r) && r.type === clipboardCategory);
+    ? records.filter((r) => !isResourceRecord(r))
+    : clipboardCategory === "resources"
+      ? records.filter((r) => isResourceRecord(r))
+    : records.filter((r) => !isResourceRecord(r) && r.type === clipboardCategory);
 
   const items: RadialItem[] = activeTab === "clipboard"
     ? filteredRecords.slice(0, MAX_ITEMS).map((r) => ({

@@ -157,15 +157,17 @@ describe("integration regressions", () => {
     expect(dbSource).toContain("pub fn create_resource_group");
     expect(dbSource).toContain("pub fn update_resource_group");
     expect(dbSource).toContain("pub fn delete_resource_group");
-    expect(dbSource).toContain("TEMP_STASH_GROUP_NAME");
+    expect(dbSource).not.toContain("TEMP_STASH_GROUP_NAME");
+    expect(dbSource).toContain("WHERE group_name IN ('stash', '暂存', '默认', '临时')");
     expect(clipboardSource).toContain("target_group_name");
-    expect(pageSource).toContain('type ResourceMode = "temp" | "resource"');
-    expect(pageSource).toContain("handleSwitchMode");
-    expect(pageSource).toContain("isTempRecord");
-    expect(pageSource).toContain("resource-mode-tabs");
+    expect(pageSource).not.toContain("ResourceMode");
+    expect(pageSource).not.toContain("handleSwitchMode");
+    expect(pageSource).not.toContain("isTempRecord");
+    expect(pageSource).not.toContain("resource-mode-tab");
+    expect(pageSource).toContain('storageMode: "resource"');
     expect(pageSource).not.toContain("useResourceGroupStore");
     expect(pageSource).not.toContain("<GroupChips");
-    expect(componentSource).toContain('isResource ? "resources" : "temp"');
+    expect(componentSource).toContain('category: isResource ? "resources" : "all"');
     expect(componentSource).not.toContain("clipboard-create-storage-toggle");
     expect(componentSource).not.toContain("clipboard-create-resource-group-section");
     expect(componentSource).toContain("visibleStashRecords");
@@ -199,9 +201,9 @@ describe("integration regressions", () => {
     expect(phrasePage).toContain("<BatchSelectionBar");
     expect(clipboardPage).toContain("loadAllRecords");
     expect(clipboardPage).toContain("selectIds(allVisibleRecordIds)");
-    expect(clipboardPage).toContain("const clipboardRecords = records.filter((r) => !isResourceRecord(r) && !isTempRecord(r))");
-    expect(clipboardPage).toContain(".filter((record) => !isResourceRecord(record) && !isTempRecord(record))");
-    expect(clipboardPage).toContain('if (category === "temp") return []');
+    expect(clipboardPage).toContain("const clipboardRecords = records.filter((r) => !isResourceRecord(r))");
+    expect(clipboardPage).toContain(".filter((record) => !isResourceRecord(record))");
+    expect(clipboardPage).not.toContain('if (category === "temp") return []');
     expect(clipboardPage).toContain('"clipboard.confirmDeleteSelected"');
     expect(clipboardPage).not.toContain("resourcesOnly");
     expect(clipboardPage).toContain("setDeletingSelected(true)");
@@ -225,7 +227,7 @@ describe("integration regressions", () => {
     expect(clipboardPage).not.toContain("resourcesOnly");
     expect(clipboardPage).not.toContain("useResourceGroupStore");
     expect(resourcePage).toContain("resource-library-page");
-    expect(resourcePage).toContain("resource-mode-tabs");
+    expect(resourcePage).not.toContain("resource-mode-tab");
     expect(resourcePage).toContain("<ResourceCard");
     expect(resourcePage).not.toContain("ResourceQuickPreview");
     expect(resourcePage).toContain("<ResourceDetailPage");
@@ -295,19 +297,18 @@ describe("integration regressions", () => {
     expect(resourcePage).toContain('get_resource_library_path"');
     expect(resourcePage).toContain('select_resource_library_folder"');
     expect(resourcePage).toContain('set_resource_library_path"');
-    expect(resourcePage).toContain('storageMode: mode === "temp" ? "database" : "resource"');
+    expect(resourcePage).toContain('storageMode: "resource"');
     expect(createDialog).toContain("storageMode");
     expect(createDialog).not.toContain("storageLocation");
   });
 
-  it("keeps the resource mode switch from leaking selection state", () => {
+  it("keeps the resource area single-mode without a mode switch", () => {
     const pageSource = readSource("./pages/ResourcePage.tsx");
 
-    expect(pageSource).toContain("const handleSwitchMode = useCallback((next: ResourceMode) => {");
-    expect(pageSource).toContain("cancelResourceSelection();");
-    expect(pageSource).toContain('const category = next === "temp" ? "temp" : "resources";');
-    expect(pageSource).toContain("setCategory(category);");
+    expect(pageSource).not.toContain("handleSwitchMode");
+    expect(pageSource).not.toContain("ResourceMode");
     expect(pageSource).not.toContain("setExpandedRecordId");
+    expect(pageSource).toContain("cancelResourceSelection();");
   });
 
   it("keeps the content panel for radial menu and uses inline previews on the main page", () => {

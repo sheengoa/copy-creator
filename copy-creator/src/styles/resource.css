@@ -137,61 +137,9 @@
 .resource-mode-row {
   display: flex;
   align-items: center;
-  justify-content: space-between;
+  justify-content: flex-end;
   gap: 8px;
   flex-shrink: 0;
-}
-
-.resource-mode-tabs {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  min-width: 0;
-}
-
-.resource-mode-tab {
-  flex: 0 0 auto;
-  padding: 5px 14px;
-  border: 0.5px solid var(--separator);
-  border-radius: 7px;
-  background: #fafaffaf;
-  color: var(--text-secondary);
-  font-family: var(--font);
-  font-size: 12px;
-  font-weight: var(--weight-medium);
-  cursor: pointer;
-  transition: all 0.2s cubic-bezier(0.22, 1, 0.36, 1);
-  white-space: nowrap;
-}
-
-.resource-mode-tab:hover {
-  border-color: rgba(0, 0, 0, 0.1);
-  background: var(--chip-hover-bg);
-  color: var(--text-primary);
-}
-
-.resource-mode-tab.active {
-  border-color: #333;
-  background: #333;
-  color: white;
-  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.12);
-}
-
-.resource-mode-tab:active {
-  transform: scale(0.95);
-}
-
-[data-theme="dark"] .resource-mode-tab {
-  color: rgba(255, 255, 255, 0.6);
-  background: var(--card-inner-bg);
-  border-color: var(--card-border);
-}
-
-[data-theme="dark"] .resource-mode-tab.active {
-  background: rgba(255, 255, 255, 0.18);
-  color: #fff;
-  border-color: rgba(255, 255, 255, 0.25);
-  box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.1);
 }
 
 .resource-new-button:active,

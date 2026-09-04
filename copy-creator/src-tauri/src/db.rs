@@ -67,10 +67,6 @@ fn category_sql(category: &Option<String>) -> (String, String) {
             format!("WHERE type = 'file' AND NOT ({RESOURCE_RECORD_CONDITION})"),
             format!("AND type = 'file' AND NOT ({RESOURCE_RECORD_CONDITION})"),
         ),
-        Some("temp") => (
-            format!("WHERE group_name IN ('stash', '暂存', '{TEMP_STASH_GROUP_NAME}')"),
-            format!("AND group_name IN ('stash', '暂存', '{TEMP_STASH_GROUP_NAME}')"),
-        ),
         Some("resources") => (
             format!("WHERE ({RESOURCE_RECORD_CONDITION})"),
             format!("AND ({RESOURCE_RECORD_CONDITION})"),
@@ -125,7 +121,6 @@ const CLIPBOARD_CONTENT_PREVIEW_CHARS: usize = 600;
 const QUICK_INPUT_FILE_LIMIT_BYTES: u64 = 50 * 1024 * 1024;
 const QUICK_INPUT_TEXT_PREVIEW_LIMIT_BYTES: u64 = 1024 * 1024;
 pub(crate) const DEFAULT_RESOURCE_GROUP_ID: &str = "default-resource-group";
-pub(crate) const TEMP_STASH_GROUP_NAME: &str = "临时";
 pub(crate) const DATABASE_STORAGE_MODE: &str = "database";
 pub(crate) const RESOURCE_STORAGE_MODE: &str = "resource";
 const RESOURCE_LIBRARY_DIR_NAME: &str = "resource-library";
@@ -1043,9 +1038,9 @@ pub fn init_db(app: &AppHandle) -> Result<(), Box<dyn std::error::Error>> {
     )
     .ok();
 
-    // ── 内容模式迁移：临时（手动暂存）与资源（资源库）两种模式，分组概念废弃 ──
-    // 旧版本以“是否有分组”推断资源，手动暂存记在 group_name（'stash'/'暂存'）。
-    // 统一为：带真实分组名的旧记录升级为资源后清空分组；手动暂存统一打“临时”标记。
+    // ── 内容模式迁移：资源（资源库）与普通剪贴板两种模式，分组与“临时”标记废弃 ──
+    // 旧版本以“是否有分组”推断资源，手动暂存记在 group_name（'stash'/'暂存'/'临时'）。
+    // 统一为：带真实分组名的旧记录升级为资源后清空分组；手动暂存标记全部清除，并入剪贴板列表。
     conn.execute(
         "UPDATE clipboard_records SET storage_mode = ?1
          WHERE TRIM(COALESCE(group_name, '')) <> ''
@@ -1061,10 +1056,9 @@ pub fn init_db(app: &AppHandle) -> Result<(), Box<dyn std::error::Error>> {
     )
     .ok();
     conn.execute(
-        "UPDATE clipboard_records SET group_name = ?1
-         WHERE group_name IN ('stash', '暂存', '默认')
-           AND COALESCE(storage_mode, 'database') <> ?2",
-        params![TEMP_STASH_GROUP_NAME, RESOURCE_STORAGE_MODE],
+        "UPDATE clipboard_records SET group_name = ''
+         WHERE group_name IN ('stash', '暂存', '默认', '临时')",
+        [],
     )
     .ok();
 
@@ -2982,10 +2976,12 @@ mod record_classification_tests {
     }
 
     #[test]
-    fn temp_category_sql_matches_legacy_and_current_markers() {
+    fn temp_category_falls_back_to_plain_clipboard_filter() {
         let (filter, search_filter) = category_sql(&Some("temp".to_string()));
 
-        assert!(filter.contains("IN ('stash', '暂存', '临时')"));
-        assert!(search_filter.contains("IN ('stash', '暂存', '临时')"));
+        assert!(filter.contains("NOT (COALESCE(storage_mode, 'database') = 'resource')"));
+        assert!(!filter.contains("group_name"));
+        assert!(search_filter.contains("NOT (COALESCE(storage_mode, 'database') = 'resource')"));
+        assert!(!search_filter.contains("group_name"));
     }
 }

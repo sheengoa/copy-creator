@@ -512,12 +512,8 @@ pub fn save_stash_record(
         }
         None => crate::db::DATABASE_STORAGE_MODE,
     };
-    // 分组已废弃，目的地由入口注入：资源存资源库目录（不分组），临时统一打标记。
-    let target_group_name = if target_storage_mode == crate::db::RESOURCE_STORAGE_MODE {
-        String::new()
-    } else {
-        crate::db::TEMP_STASH_GROUP_NAME.to_string()
-    };
+    // 分组与临时标记均已废弃：资源存资源库目录，其余保存为普通剪贴板记录，并入剪贴板列表。
+    let target_group_name = String::new();
     let old_paths = if let Some((_, attachments, _, _)) = &existing {
         serde_json::from_str::<Vec<String>>(attachments).unwrap_or_default()
     } else {

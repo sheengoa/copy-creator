@@ -9,7 +9,7 @@ import StashEditor, { type StashEditorHandle, type StashImage } from "./StashEdi
 import { WindowResizeHandles } from "../WindowResizeHandles";
 import { usePersistWindowSize } from "../../hooks/usePersistWindowSize";
 import type { ClipboardStorageMode } from "../../types";
-import { isResourceRecord, isTempRecord } from "../../utils/clipboardRecord";
+import { isResourceRecord } from "../../utils/clipboardRecord";
 
 interface StashRecord {
   id: string;
@@ -46,6 +46,7 @@ export default function ClipboardCreateDialog() {
     lastEnterAtRef.current = 0;
   }, []);
 
+  // 剪贴板入口列出普通剪贴板记录（临时标记已废弃并迁移），资源入口列出资源记录。
   const loadStashRecords = useCallback(async (mode: ClipboardStorageMode, showLoading = false) => {
     if (showLoading) setLoadingRecords(true);
     try {
@@ -53,11 +54,10 @@ export default function ClipboardCreateDialog() {
       const records = await invoke<StashRecord[]>("get_clipboard_records", {
         limit: 120,
         offset: 0,
-        category: isResource ? "resources" : "temp",
+        category: isResource ? "resources" : "all",
       });
-      const matchesMode = isResource ? isResourceRecord : isTempRecord;
       setStashRecords(records.filter((record) =>
-        matchesMode(record)
+        (isResource ? isResourceRecord(record) : !isResourceRecord(record))
         && (record.type === "text" || record.type === "link")
       ));
     } catch (e) {

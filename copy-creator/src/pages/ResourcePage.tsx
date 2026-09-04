@@ -31,10 +31,9 @@ import {
   type ResourceMediaKind,
   type ResourceTypeFilter,
 } from "./ResourcePage/resourceUtils";
-import { isResourceRecord, isTempRecord } from "../utils/clipboardRecord";
+import { isResourceRecord } from "../utils/clipboardRecord";
 
 type ResourceSortOrder = "newest" | "oldest";
-type ResourceMode = "temp" | "resource";
 
 const RESOURCE_TYPE_FILTERS: ResourceTypeFilter[] = [
   "all",
@@ -62,9 +61,7 @@ export default function ResourcePage() {
     pasteRecord,
     reorderRecords,
   } = useClipboardStore();
-  const setCategory = useClipboardStore((state) => state.setCategory);
 
-  const [mode, setMode] = useState<ResourceMode>("resource");
   const [typeFilter, setTypeFilter] = useState<ResourceTypeFilter>("all");
   const [sortOrder, setSortOrder] = useState<ResourceSortOrder>("newest");
   const [detailRecordId, setDetailRecordId] = useState<string | null>(null);
@@ -177,15 +174,14 @@ export default function ResourcePage() {
       return;
     }
     const timer = window.setTimeout(() => {
-      void loadRecords(false, mode === "temp" ? "temp" : "resources");
+      void loadRecords(false, "resources");
     }, 300);
     return () => window.clearTimeout(timer);
-  }, [loadRecords, mode, search]);
+  }, [loadRecords, search]);
 
   const filteredRecords = useMemo(() => {
-    const matchesMode = mode === "temp" ? isTempRecord : isResourceRecord;
     const next = records.filter((record) => (
-      matchesMode(record)
+      isResourceRecord(record)
       && matchesResourceType(record, typeFilter)
     ));
     if (sortOrder === "oldest") {
@@ -194,7 +190,7 @@ export default function ResourcePage() {
       ));
     }
     return next;
-  }, [mode, records, sortOrder, typeFilter]);
+  }, [records, sortOrder, typeFilter]);
 
   const visibleIds = useMemo(
     () => filteredRecords.map((record) => record.id),
@@ -296,15 +292,6 @@ export default function ResourcePage() {
     setSearch(value);
   }, [cancelResourceSelection, setSearch]);
 
-  const handleSwitchMode = useCallback((next: ResourceMode) => {
-    if (next === mode) return;
-    cancelResourceSelection();
-    setMode(next);
-    const category = next === "temp" ? "temp" : "resources";
-    setCategory(category);
-    void loadRecords(false, category);
-  }, [cancelResourceSelection, loadRecords, mode, setCategory]);
-
   const handleSelectType = useCallback((next: ResourceTypeFilter) => {
     cancelResourceSelection();
     setTypeFilter(next);
@@ -393,13 +380,12 @@ export default function ResourcePage() {
     const request = ++selectAllRequestRef.current;
     setSelectingAll(true);
     try {
-      const allRecords = await loadAllRecords(mode === "temp" ? "temp" : "resources");
+      const allRecords = await loadAllRecords("resources");
       if (!allRecords || request !== selectAllRequestRef.current) return;
-      const matchesMode = mode === "temp" ? isTempRecord : isResourceRecord;
       selectIds(
         allRecords
           .filter((record) => (
-            matchesMode(record)
+            isResourceRecord(record)
             && matchesResourceType(record, typeFilter)
           ))
           .map((record) => record.id),
@@ -411,7 +397,6 @@ export default function ResourcePage() {
     allVisibleSelected,
     hasMore,
     loadAllRecords,
-    mode,
     selectIds,
     selectingAll,
     toggleAllVisible,
@@ -471,12 +456,12 @@ export default function ResourcePage() {
   const openResourceCreate = useCallback(async () => {
     try {
       await invoke("open_clipboard_create", {
-        storageMode: mode === "temp" ? "database" : "resource",
+        storageMode: "resource",
       });
     } catch {
       showFeedback("openFailed");
     }
-  }, [mode, showFeedback]);
+  }, [showFeedback]);
 
   const confirmDialog = confirmState ? (
     <div className="dialog-overlay" onClick={() => setConfirmState(null)}>
@@ -528,19 +513,17 @@ export default function ResourcePage() {
             onChange={handleSearchChange}
           />
         </div>
-        {mode === "resource" && (
-          <button
-            type="button"
-            ref={resourceSettingsButtonRef}
-            className="resource-secondary-button resource-settings-button"
-            onClick={() => setResourceSettingsOpen((open) => !open)}
-            aria-expanded={resourceSettingsOpen}
-            aria-haspopup="dialog"
-          >
-            {Icons.settings}
-            <span>{t("resources.librarySettings")}</span>
-          </button>
-        )}
+        <button
+          type="button"
+          ref={resourceSettingsButtonRef}
+          className="resource-secondary-button resource-settings-button"
+          onClick={() => setResourceSettingsOpen((open) => !open)}
+          aria-expanded={resourceSettingsOpen}
+          aria-haspopup="dialog"
+        >
+          {Icons.settings}
+          <span>{t("resources.librarySettings")}</span>
+        </button>
         <button type="button" className="resource-new-button" onClick={() => void openResourceCreate()}>
           {Icons.add}
           <span>{t("resources.new")}</span>
@@ -594,26 +577,6 @@ export default function ResourcePage() {
       )}
 
       <div className="resource-mode-row">
-        <div className="resource-mode-tabs" role="tablist" aria-label={t("resources.modeTabs")}>
-          <button
-            type="button"
-            role="tab"
-            aria-selected={mode === "temp"}
-            className={`resource-mode-tab${mode === "temp" ? " active" : ""}`}
-            onClick={() => handleSwitchMode("temp")}
-          >
-            {t("resources.modeTemp")}
-          </button>
-          <button
-            type="button"
-            role="tab"
-            aria-selected={mode === "resource"}
-            className={`resource-mode-tab${mode === "resource" ? " active" : ""}`}
-            onClick={() => handleSwitchMode("resource")}
-          >
-            {t("resources.modeResource")}
-          </button>
-        </div>
         {!isSelecting && filteredRecords.length > 0 && (
           <button className="phrase-add-btn selection-mode-btn" onClick={startResourceSelection}>
             {Icons.check}
@@ -664,7 +627,7 @@ export default function ResourcePage() {
       <section className="resource-list-area">
         <div className="resource-list-heading">
           <div>
-            <h2>{mode === "temp" ? t("resources.modeTemp") : t("resources.modeResource")}</h2>
+            <h2>{t("resources.modeResource")}</h2>
             <span>{t("resources.itemCount", { count: filteredRecords.length })}</span>
           </div>
           {reorderEnabled && (
@@ -695,7 +658,7 @@ export default function ResourcePage() {
           <div className="resource-empty-state">
             <div className="empty-icon-compact">{Icons.resources}</div>
             <strong>{search.trim() || typeFilter !== "all" ? t("resources.noMatches") : t("resources.empty")}</strong>
-            <span>{mode === "temp" ? t("resources.modeTempHint") : t("resources.modeResourceHint")}</span>
+            <span>{t("resources.modeResourceHint")}</span>
             {hasMore && (
               <button type="button" className="resource-secondary-button" onClick={() => void loadRecords(true, "resources")}>
                 {t("resources.loadMore")}
