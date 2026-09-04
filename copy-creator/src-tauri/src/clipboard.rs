@@ -464,7 +464,7 @@ pub fn save_stash_record(
     id: Option<String>,
     content: String,
     images: Vec<String>,
-    group_name: Option<String>,
+    _group_name: Option<String>,
     storage_mode: Option<String>,
 ) -> Result<serde_json::Value, String> {
     let content = content.trim().to_string();
@@ -495,7 +495,6 @@ pub fn save_stash_record(
         .optional()
         .map_err(|e| e.to_string())?
     };
-    let current_group_name = existing.as_ref().map(|(name, _, _, _)| name.as_str());
     let current_storage_mode = existing
         .as_ref()
         .map(|(_, _, mode, _)| mode.as_str())
@@ -513,33 +512,11 @@ pub fn save_stash_record(
         }
         None => crate::db::DATABASE_STORAGE_MODE,
     };
-    if current_is_resource && current_storage_mode == crate::db::RESOURCE_STORAGE_MODE {
-        if let Some(name) = current_group_name {
-            if !crate::db::is_resource_group_name(&app, name)? {
-                return Err("只能编辑资源分组的记录".to_string());
-            }
-        }
-    }
-    let target_group_name = if target_storage_mode == crate::db::DATABASE_STORAGE_MODE {
+    // 分组已废弃，目的地由入口注入：资源存资源库目录（不分组），临时统一打标记。
+    let target_group_name = if target_storage_mode == crate::db::RESOURCE_STORAGE_MODE {
         String::new()
     } else {
-        let name = match group_name {
-            Some(name) => {
-                let name = name.trim().to_string();
-                if name.is_empty() {
-                    return Err("资源分组不能为空".to_string());
-                }
-                name
-            }
-            None => current_group_name
-                .filter(|name| !name.is_empty())
-                .unwrap_or(crate::db::DEFAULT_RESOURCE_GROUP_NAME)
-                .to_string(),
-        };
-        if !crate::db::is_resource_group_name(&app, &name)? {
-            return Err("资源分组不存在".to_string());
-        }
-        name
+        crate::db::TEMP_STASH_GROUP_NAME.to_string()
     };
     let old_paths = if let Some((_, attachments, _, _)) = &existing {
         serde_json::from_str::<Vec<String>>(attachments).unwrap_or_default()

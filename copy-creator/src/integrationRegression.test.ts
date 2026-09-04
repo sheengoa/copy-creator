@@ -201,9 +201,9 @@ describe("integration regressions", () => {
     expect(phrasePage).toContain("<BatchSelectionBar");
     expect(clipboardPage).toContain("loadAllRecords");
     expect(clipboardPage).toContain("selectIds(allVisibleRecordIds)");
-    expect(clipboardPage).toContain("const clipboardRecords = records.filter((r) => !isResourceRecord(r))");
-    expect(clipboardPage).toContain(".filter((record) => !isResourceRecord(record))");
-    expect(clipboardPage).toContain('if (category === "stash") return []');
+    expect(clipboardPage).toContain("const clipboardRecords = records.filter((r) => !isResourceRecord(r) && !isTempRecord(r))");
+    expect(clipboardPage).toContain(".filter((record) => !isResourceRecord(record) && !isTempRecord(record))");
+    expect(clipboardPage).toContain('if (category === "temp") return []');
     expect(clipboardPage).toContain('"clipboard.confirmDeleteSelected"');
     expect(clipboardPage).not.toContain("resourcesOnly");
     expect(clipboardPage).toContain("setDeletingSelected(true)");

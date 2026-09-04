@@ -26,9 +26,9 @@ import { restrictToVerticalAxis } from "@dnd-kit/modifiers";
 import { getChangedOrderIds, getDragPreviewOrder } from "../../utils/reorderPreview";
 import BatchSelectionBar from "../../components/BatchSelectionBar";
 import { useMultiSelect } from "../../hooks/useMultiSelect";
-import { isResourceRecord } from "../../utils/clipboardRecord";
+import { isResourceRecord, isTempRecord } from "../../utils/clipboardRecord";
 
-type ClipType = "all" | "text" | "image" | "link" | "file" | "stash";
+type ClipType = "all" | "text" | "image" | "link" | "file" | "temp";
 
 TYPE_META.text.icon = Icons.clipboard;
 TYPE_META.image.icon = Icons.image;
@@ -119,9 +119,9 @@ export default function ClipboardPage() {
   }, []);
 
   const filtered = useMemo(() => {
-    const clipboardRecords = records.filter((r) => !isResourceRecord(r));
+    const clipboardRecords = records.filter((r) => !isResourceRecord(r) && !isTempRecord(r));
     if (category === "all") return clipboardRecords;
-    if (category === "stash") return [];
+    if (category === "temp") return [];
     return clipboardRecords.filter((r) => r.type === category);
   }, [records, category]);
   const visibleIds = useMemo(() => filtered.map((record) => record.id), [filtered]);
@@ -164,7 +164,7 @@ export default function ClipboardPage() {
       const allRecords = await loadAllRecords(category);
       if (!allRecords || request !== selectAllRequestRef.current) return;
       const allVisibleRecordIds = allRecords
-        .filter((record) => !isResourceRecord(record))
+        .filter((record) => !isResourceRecord(record) && !isTempRecord(record))
         .map((record) => record.id);
       selectIds(allVisibleRecordIds);
     } finally {

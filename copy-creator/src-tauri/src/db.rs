@@ -67,9 +67,9 @@ fn category_sql(category: &Option<String>) -> (String, String) {
             format!("WHERE type = 'file' AND NOT ({RESOURCE_RECORD_CONDITION})"),
             format!("AND type = 'file' AND NOT ({RESOURCE_RECORD_CONDITION})"),
         ),
-        Some("stash") => (
-            "WHERE group_name IN ('stash', '暂存')".to_string(),
-            "AND group_name IN ('stash', '暂存')".to_string(),
+        Some("temp") => (
+            format!("WHERE group_name IN ('stash', '暂存', '{TEMP_STASH_GROUP_NAME}')"),
+            format!("AND group_name IN ('stash', '暂存', '{TEMP_STASH_GROUP_NAME}')"),
         ),
         Some("resources") => (
             format!("WHERE ({RESOURCE_RECORD_CONDITION})"),
@@ -125,7 +125,7 @@ const CLIPBOARD_CONTENT_PREVIEW_CHARS: usize = 600;
 const QUICK_INPUT_FILE_LIMIT_BYTES: u64 = 50 * 1024 * 1024;
 const QUICK_INPUT_TEXT_PREVIEW_LIMIT_BYTES: u64 = 1024 * 1024;
 pub(crate) const DEFAULT_RESOURCE_GROUP_ID: &str = "default-resource-group";
-pub(crate) const DEFAULT_RESOURCE_GROUP_NAME: &str = "默认";
+pub(crate) const TEMP_STASH_GROUP_NAME: &str = "临时";
 pub(crate) const DATABASE_STORAGE_MODE: &str = "database";
 pub(crate) const RESOURCE_STORAGE_MODE: &str = "resource";
 const RESOURCE_LIBRARY_DIR_NAME: &str = "resource-library";
@@ -1043,39 +1043,28 @@ pub fn init_db(app: &AppHandle) -> Result<(), Box<dyn std::error::Error>> {
     )
     .ok();
 
-    let now = chrono::Utc::now().to_rfc3339();
-    conn.execute(
-        "INSERT OR IGNORE INTO resource_groups (id, name, sort_order, created_at, updated_at) VALUES (?1, ?2, 0, ?3, ?3)",
-        params![DEFAULT_RESOURCE_GROUP_ID, DEFAULT_RESOURCE_GROUP_NAME, &now],
-    )
-    .ok();
-    conn.execute(
-        "UPDATE clipboard_records SET group_name = '暂存' WHERE group_name = 'stash'",
-        [],
-    )
-    .ok();
-
-    // ── 资源与暂存边界：资源仅以 storage_mode = 'resource' 判定 ──
-    // 旧版本以“是否有分组”推断资源，这里为带真实分组名的旧记录补上资源存储模式；
-    // 旧“暂存”记录保持临时属性，不进入资源库。
+    // ── 内容模式迁移：临时（手动暂存）与资源（资源库）两种模式，分组概念废弃 ──
+    // 旧版本以“是否有分组”推断资源，手动暂存记在 group_name（'stash'/'暂存'）。
+    // 统一为：带真实分组名的旧记录升级为资源后清空分组；手动暂存统一打“临时”标记。
     conn.execute(
         "UPDATE clipboard_records SET storage_mode = ?1
          WHERE TRIM(COALESCE(group_name, '')) <> ''
-           AND group_name NOT IN ('stash', '暂存')
+           AND group_name NOT IN ('stash', '暂存', '默认', '临时')
            AND COALESCE(storage_mode, 'database') <> ?1",
         params![RESOURCE_STORAGE_MODE],
     )
     .ok();
-    // 默认资源分组由“暂存”更名为“默认”，与临时暂存内容划清边界。
     conn.execute(
-        "UPDATE resource_groups SET name = ?1 WHERE id = ?2 AND name = '暂存'",
-        params![DEFAULT_RESOURCE_GROUP_NAME, DEFAULT_RESOURCE_GROUP_ID],
+        "UPDATE clipboard_records SET group_name = ''
+         WHERE COALESCE(storage_mode, 'database') = ?1",
+        params![RESOURCE_STORAGE_MODE],
     )
     .ok();
     conn.execute(
         "UPDATE clipboard_records SET group_name = ?1
-         WHERE group_name = '暂存' AND COALESCE(storage_mode, 'database') = ?2",
-        params![DEFAULT_RESOURCE_GROUP_NAME, RESOURCE_STORAGE_MODE],
+         WHERE group_name IN ('stash', '暂存', '默认')
+           AND COALESCE(storage_mode, 'database') <> ?2",
+        params![TEMP_STASH_GROUP_NAME, RESOURCE_STORAGE_MODE],
     )
     .ok();
 
@@ -1594,12 +1583,6 @@ fn resource_group_name_exists(conn: &Connection, name: &str) -> Result<bool, Str
         |row| row.get(0),
     )
     .map_err(|e| e.to_string())
-}
-
-pub(crate) fn is_resource_group_name(app: &AppHandle, name: &str) -> Result<bool, String> {
-    let state = app.state::<DbState>();
-    let conn = state.conn.lock().map_err(|e| e.to_string())?;
-    resource_group_name_exists(&conn, name)
 }
 
 #[tauri::command]
@@ -2996,5 +2979,13 @@ mod record_classification_tests {
         assert!(!filter.contains("group_name"));
         assert!(search_filter.contains("COALESCE(storage_mode, 'database') = 'resource'"));
         assert!(!search_filter.contains("group_name"));
+    }
+
+    #[test]
+    fn temp_category_sql_matches_legacy_and_current_markers() {
+        let (filter, search_filter) = category_sql(&Some("temp".to_string()));
+
+        assert!(filter.contains("IN ('stash', '暂存', '临时')"));
+        assert!(search_filter.contains("IN ('stash', '暂存', '临时')"));
     }
 }

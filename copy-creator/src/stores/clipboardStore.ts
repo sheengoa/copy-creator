@@ -1,11 +1,11 @@
 import { create } from "zustand";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
-import { isResourceRecord } from "../utils/clipboardRecord";
+import { isResourceRecord, isTempRecord } from "../utils/clipboardRecord";
 
 type UnlistenFn = () => void;
 
-export const CLIP_TYPES = ["all", "text", "image", "link", "file", "stash", "resources"] as const;
+export const CLIP_TYPES = ["all", "text", "image", "link", "file", "temp", "resources"] as const;
 export type ClipType = (typeof CLIP_TYPES)[number];
 
 interface ApiKeyLabel {
@@ -105,14 +105,12 @@ function trimCache(cache: Record<string, string>, maxEntries: number) {
 }
 
 function recordMatchesCategory(record: ClipboardRecord, category: ClipType) {
-  if (category === "all") return !isResourceRecord(record);
-  if (category === "stash") {
-    return record.group_name === "暂存" || record.group_name === "stash";
-  }
+  if (category === "all") return !isResourceRecord(record) && !isTempRecord(record);
+  if (category === "temp") return isTempRecord(record);
   if ((category as string) === "resources") {
     return isResourceRecord(record);
   }
-  return !isResourceRecord(record) && record.type === category;
+  return !isResourceRecord(record) && !isTempRecord(record) && record.type === category;
 }
 
 function recordMatchesSearch(record: ClipboardRecord, search: string) {
