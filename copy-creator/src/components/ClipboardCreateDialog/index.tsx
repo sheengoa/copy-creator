@@ -1,4 +1,4 @@
-import { useEffect, useState, useCallback, useRef, useMemo } from "react";
+import { useEffect, useState, useCallback, useRef } from "react";
 import { useTranslation } from "react-i18next";
 import { invoke } from "@tauri-apps/api/core";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
@@ -8,12 +8,8 @@ import i18n from "../../i18n";
 import StashEditor, { type StashEditorHandle, type StashImage } from "./StashEditor";
 import { WindowResizeHandles } from "../WindowResizeHandles";
 import { usePersistWindowSize } from "../../hooks/usePersistWindowSize";
-import type { ClipboardStorageMode, ResourceGroup } from "../../types";
-import {
-  DEFAULT_RESOURCE_GROUP_NAME,
-  getResourceGroupName,
-  isResourceRecord,
-} from "../../utils/clipboardRecord";
+import type { ClipboardStorageMode } from "../../types";
+import { isResourceRecord, isTempRecord } from "../../utils/clipboardRecord";
 
 interface StashRecord {
   id: string;
@@ -33,14 +29,11 @@ export default function ClipboardCreateDialog() {
   const [editorVersion, setEditorVersion] = useState(0);
   const [saving, setSaving] = useState(false);
   const [stashRecords, setStashRecords] = useState<StashRecord[]>([]);
-  const [resourceGroups, setResourceGroups] = useState<ResourceGroup[]>([]);
-  const [groupName, setGroupName] = useState(DEFAULT_RESOURCE_GROUP_NAME);
   const [storageMode, setStorageMode] = useState<ClipboardStorageMode>("database");
   const [loadingRecords, setLoadingRecords] = useState(true);
   const [loadingRecordId, setLoadingRecordId] = useState<string | null>(null);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [dropdownOpen, setDropdownOpen] = useState(false);
-  const [groupDropdownOpen, setGroupDropdownOpen] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const editorRef = useRef<StashEditorHandle>(null);
   const lastEnterAtRef = useRef(0);
@@ -53,16 +46,18 @@ export default function ClipboardCreateDialog() {
     lastEnterAtRef.current = 0;
   }, []);
 
-  const loadStashRecords = useCallback(async (showLoading = false) => {
+  const loadStashRecords = useCallback(async (mode: ClipboardStorageMode, showLoading = false) => {
     if (showLoading) setLoadingRecords(true);
     try {
+      const isResource = mode === "resource";
       const records = await invoke<StashRecord[]>("get_clipboard_records", {
         limit: 120,
         offset: 0,
-        category: "resources",
+        category: isResource ? "resources" : "temp",
       });
+      const matchesMode = isResource ? isResourceRecord : isTempRecord;
       setStashRecords(records.filter((record) =>
-        isResourceRecord(record)
+        matchesMode(record)
         && (record.type === "text" || record.type === "link")
       ));
     } catch (e) {
@@ -70,20 +65,6 @@ export default function ClipboardCreateDialog() {
       setError(i18n.t("resources.loadError"));
     } finally {
       setLoadingRecords(false);
-    }
-  }, []);
-
-  const loadResourceGroups = useCallback(async () => {
-    try {
-      const groups = await invoke<ResourceGroup[]>("get_resource_groups");
-      setResourceGroups(groups);
-      setGroupName((current) =>
-        groups.some((group) => group.name === current)
-          ? current
-          : groups[0]?.name || DEFAULT_RESOURCE_GROUP_NAME,
-      );
-    } catch (e) {
-      console.error("Failed to load resource groups:", e);
     }
   }, []);
 
@@ -114,32 +95,28 @@ export default function ClipboardCreateDialog() {
     let unlistenShow: UnlistenFn | undefined;
     listen<{
       theme: string;
-      group_name?: string | null;
       storage_mode?: ClipboardStorageMode | null;
     }>("clipboard-create-show", (e) => {
       cancelResizeSave();
       document.documentElement.setAttribute("data-theme", e.payload.theme);
       resetDraft();
       setEditingId(null);
-      setGroupName(e.payload.group_name || DEFAULT_RESOURCE_GROUP_NAME);
-      setStorageMode(e.payload.storage_mode === "resource" ? "resource" : "database");
+      const mode: ClipboardStorageMode = e.payload.storage_mode === "resource" ? "resource" : "database";
+      setStorageMode(mode);
       setError(null);
       setDropdownOpen(false);
-      setGroupDropdownOpen(false);
-      loadStashRecords();
-      loadResourceGroups();
+      loadStashRecords(mode);
       setTimeout(() => editorRef.current?.focus(), 50);
     }).then((fn) => { unlistenShow = fn; });
 
-    loadStashRecords(true);
-    loadResourceGroups();
+    loadStashRecords("database", true);
 
     return () => {
       if (unlistenTheme) unlistenTheme();
       if (unlistenLang) unlistenLang();
       if (unlistenShow) unlistenShow();
     };
-  }, [cancelResizeSave, loadResourceGroups, loadStashRecords, resetDraft]);
+  }, [cancelResizeSave, loadStashRecords, resetDraft]);
 
   useEffect(() => {
     const appWindow = getCurrentWindow();
@@ -176,7 +153,6 @@ export default function ClipboardCreateDialog() {
         id: editingId,
         content: trimmed,
         images: images.map((image) => image.sourcePath || image.dataUrl),
-        groupName,
         storageMode,
       });
       resetDraft();
@@ -188,7 +164,7 @@ export default function ClipboardCreateDialog() {
     } finally {
       setSaving(false);
     }
-  }, [content, editingId, groupName, images, saving, storageMode, hideWindow, resetDraft, t]);
+  }, [content, editingId, images, saving, storageMode, hideWindow, resetDraft, t]);
 
   const handleSelectRecord = useCallback(async (record: StashRecord) => {
     if (loadingRecordId) return;
@@ -208,7 +184,6 @@ export default function ClipboardCreateDialog() {
         sourcePath: path,
       })));
       setEditingId(record.id);
-      setGroupName(getResourceGroupName(record));
       setStorageMode(record.storage_mode === "resource" ? "resource" : "database");
       resetDraft(fullContent, imageData);
       setTimeout(() => editorRef.current?.focus(), 0);
@@ -231,9 +206,8 @@ export default function ClipboardCreateDialog() {
     if (e.key === "Escape") {
       e.preventDefault();
       lastEnterAtRef.current = 0;
-      if (dropdownOpen || groupDropdownOpen) {
+      if (dropdownOpen) {
         setDropdownOpen(false);
-        setGroupDropdownOpen(false);
         return;
       }
       hideWindow();
@@ -270,12 +244,9 @@ export default function ClipboardCreateDialog() {
     if (shortcut.shouldSave) {
       handleSave();
     }
-  }, [content, dropdownOpen, groupDropdownOpen, hideWindow, handleSave]);
+  }, [content, dropdownOpen, hideWindow, handleSave]);
 
-  const visibleStashRecords = useMemo(
-    () => stashRecords.filter((record) => getResourceGroupName(record) === groupName),
-    [groupName, stashRecords],
-  );
+  const visibleStashRecords = stashRecords;
   const selectedStashRecord = visibleStashRecords.find((record) => record.id === editingId);
 
   return (
@@ -297,7 +268,7 @@ export default function ClipboardCreateDialog() {
           </svg>
         </button>
       </div>
-      <div onFocus={() => { setDropdownOpen(false); setGroupDropdownOpen(false); }} className="clipboard-create-editor-wrap">
+      <div onFocus={() => { setDropdownOpen(false); }} className="clipboard-create-editor-wrap">
         <StashEditor
           key={editorVersion}
           ref={editorRef}
@@ -313,75 +284,15 @@ export default function ClipboardCreateDialog() {
           onImageError={() => setError(t("resources.readImageError"))}
         />
       </div>
-      <div className="clipboard-create-storage-section">
+      <div className="clipboard-create-stash-section">
         <div className="clipboard-create-stash-header">
-          <span>{t("resources.storageLocation")}</span>
-        </div>
-        <div className="clipboard-create-storage-toggle" role="group" aria-label={t("resources.storageLocation")}>
-          <button
-            type="button"
-            className={`clipboard-create-storage-option${storageMode === "database" ? " active" : ""}`}
-            onClick={() => setStorageMode("database")}
-            aria-pressed={storageMode === "database"}
-          >
-            {t("resources.storageDatabase")}
-          </button>
-          <button
-            type="button"
-            className={`clipboard-create-storage-option${storageMode === "resource" ? " active" : ""}`}
-            onClick={() => setStorageMode("resource")}
-            aria-pressed={storageMode === "resource"}
-          >
-            {t("resources.storageResource")}
-          </button>
-        </div>
-      </div>
-      <div className="clipboard-create-resource-fields">
-        <div className="clipboard-create-resource-group-section">
-          <div className="clipboard-create-stash-header">
-            <span>{t("resources.groupName")}</span>
-          </div>
-          <div className={`clipboard-create-stash-picker${groupDropdownOpen ? " open" : ""}`}>
-            <button
-              type="button"
-              className="clipboard-create-stash-trigger"
-              onClick={() => setGroupDropdownOpen((open) => !open)}
-              disabled={resourceGroups.length === 0}
-              aria-expanded={groupDropdownOpen}
-              aria-haspopup="listbox"
-            >
-              <span className={groupName ? "selected" : "placeholder"}>
-                {groupName || t("resources.selectGroup")}
-              </span>
-              <svg className="clipboard-create-stash-chevron" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-                <polyline points="6 9 12 15 18 9" />
-              </svg>
+          <span>{t("resources.existing")}</span>
+          {editingId && (
+            <button className="clipboard-create-exit-edit" onClick={handleExitEdit}>
+              {t("resources.exitEdit")}
             </button>
-            {groupDropdownOpen && resourceGroups.length > 0 && (
-              <div className="clipboard-create-stash-menu" role="listbox">
-                {resourceGroups.map((group) => (
-                  <button
-                    key={group.id}
-                    type="button"
-                    className={`clipboard-create-stash-option${groupName === group.name ? " selected" : ""}`}
-                    onClick={() => {
-                      setGroupName(group.name);
-                      setGroupDropdownOpen(false);
-                      setDropdownOpen(false);
-                    }}
-                    role="option"
-                    aria-selected={groupName === group.name}
-                    title={group.name}
-                  >
-                    <span className="clipboard-create-stash-option-content">{group.name}</span>
-                    {groupName === group.name && <span className="clipboard-create-stash-check">✓</span>}
-                  </button>
-                ))}
-              </div>
-            )}
-          </div>
+          )}
         </div>
-        <div className="clipboard-create-stash-section">
           <div className="clipboard-create-stash-header">
             <span>{t("resources.existing")}</span>
             {editingId && (
@@ -432,7 +343,6 @@ export default function ClipboardCreateDialog() {
               </div>
             )}
           </div>
-        </div>
       </div>
       <div className="clipboard-create-footer">
         {error && <span className="clipboard-create-error" role="alert">{error}</span>}

@@ -48,14 +48,14 @@ describe("standalone window chrome", () => {
     expect(saveButtonRule).toContain("min-width: 132px");
   });
 
-  it("loads resource records and allows choosing a resource group", () => {
+  it("loads existing records for the injected destination mode", () => {
     const css = readStyle("clipboard.css");
     const componentSource = readSource("../components/ClipboardCreateDialog/index.tsx");
 
     expect(css).toContain(".clipboard-create-stash-picker");
-    expect(componentSource).toContain('category: "resources"');
-    expect(componentSource).toContain("getResourceGroupName(record)");
-    expect(componentSource).toContain("clipboard-create-resource-group-section");
+    expect(componentSource).toContain('isResource ? "resources" : "temp"');
+    expect(componentSource).toContain("isTempRecord");
+    expect(componentSource).not.toContain("getResourceGroupName");
     expect(componentSource).toContain('aria-haspopup="listbox"');
     expect(componentSource).toContain("setDropdownOpen");
     expect(componentSource).not.toContain('listen("clipboard-update"');
@@ -66,18 +66,16 @@ describe("standalone window chrome", () => {
     expect(componentSource).toContain("<StashEditor");
   });
 
-  it("keeps clipboard create resource fields on one row", () => {
+  it("keeps the clipboard create existing-records section standalone", () => {
     const css = readStyle("clipboard.css");
     const componentSource = readSource("../components/ClipboardCreateDialog/index.tsx");
-    const fieldsRule = getRule(css, ".clipboard-create-resource-fields");
+    const stashRule = getRule(css, ".clipboard-create-stash-section");
 
-    expect(componentSource).toContain('className="clipboard-create-resource-fields"');
-    expect(fieldsRule).toContain("display: grid;");
-    expect(fieldsRule).toContain("grid-template-columns: minmax(0, 2fr) minmax(0, 5fr);");
-    expect(fieldsRule).toContain("gap: 2px;");
-    expect(css).toContain(
-      ".clipboard-create-stash-section,\n.clipboard-create-resource-group-section {",
-    );
+    expect(componentSource).toContain('className="clipboard-create-stash-section"');
+    expect(componentSource).not.toContain("clipboard-create-resource-fields");
+    expect(componentSource).not.toContain("clipboard-create-resource-group-section");
+    expect(stashRule).toContain("display: flex;");
+    expect(stashRule).toContain("flex-direction: column;");
     expect(css).toContain("margin-top: 0;");
   });
 

@@ -165,7 +165,10 @@ describe("integration regressions", () => {
     expect(pageSource).toContain("resource-mode-tabs");
     expect(pageSource).not.toContain("useResourceGroupStore");
     expect(pageSource).not.toContain("<GroupChips");
-    expect(componentSource).toContain('category: "resources"');
+    expect(componentSource).toContain('isResource ? "resources" : "temp"');
+    expect(componentSource).not.toContain("clipboard-create-storage-toggle");
+    expect(componentSource).not.toContain("clipboard-create-resource-group-section");
+    expect(componentSource).toContain("visibleStashRecords");
   });
 
   it("passes clipboard search into cards for highlighting", () => {
@@ -297,8 +300,8 @@ describe("integration regressions", () => {
     expect(resourcePage).toContain('select_resource_library_folder"');
     expect(resourcePage).toContain('set_resource_library_path"');
     expect(resourcePage).toContain('storageMode: mode === "temp" ? "database" : "resource"');
-    expect(createDialog).toContain("storageDatabase");
-    expect(createDialog).toContain("storageResource");
+    expect(createDialog).toContain("storageMode");
+    expect(createDialog).not.toContain("storageLocation");
   });
 
   it("keeps the resource mode switch from leaking selection or preview state", () => {
