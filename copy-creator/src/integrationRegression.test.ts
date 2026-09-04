@@ -299,7 +299,9 @@ describe("integration regressions", () => {
     expect(resourcePage).toContain('set_resource_library_path"');
     expect(resourcePage).toContain('storageMode: "resource"');
     expect(createDialog).toContain("storageMode");
-    expect(createDialog).not.toContain("storageLocation");
+    expect(createDialog).toContain("handleDestChange");
+    expect(createDialog).toContain('t("resources.storageLocation")');
+    expect(createDialog).not.toContain("clipboard-create-storage-toggle");
   });
 
   it("keeps the resource area single-mode without a mode switch", () => {

@@ -34,6 +34,7 @@ export default function ClipboardCreateDialog() {
   const [loadingRecordId, setLoadingRecordId] = useState<string | null>(null);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [dropdownOpen, setDropdownOpen] = useState(false);
+  const [destOpen, setDestOpen] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const editorRef = useRef<StashEditorHandle>(null);
   const lastEnterAtRef = useRef(0);
@@ -202,10 +203,25 @@ export default function ClipboardCreateDialog() {
     setTimeout(() => editorRef.current?.focus(), 0);
   }, [resetDraft]);
 
+  // 切换保存位置：保留已输入内容，退出编辑态并按新模式刷新“已有”列表。
+  const handleDestChange = useCallback((mode: ClipboardStorageMode) => {
+    setDestOpen(false);
+    if (mode === storageMode) return;
+    setStorageMode(mode);
+    setEditingId(null);
+    setDropdownOpen(false);
+    setError(null);
+    loadStashRecords(mode);
+  }, [loadStashRecords, storageMode]);
+
   const handleKeyDown = useCallback((e: React.KeyboardEvent) => {
     if (e.key === "Escape") {
       e.preventDefault();
       lastEnterAtRef.current = 0;
+      if (destOpen) {
+        setDestOpen(false);
+        return;
+      }
       if (dropdownOpen) {
         setDropdownOpen(false);
         return;
@@ -244,7 +260,7 @@ export default function ClipboardCreateDialog() {
     if (shortcut.shouldSave) {
       handleSave();
     }
-  }, [content, dropdownOpen, hideWindow, handleSave]);
+  }, [content, destOpen, dropdownOpen, hideWindow, handleSave]);
 
   const visibleStashRecords = stashRecords;
   const selectedStashRecord = visibleStashRecords.find((record) => record.id === editingId);
@@ -268,7 +284,7 @@ export default function ClipboardCreateDialog() {
           </svg>
         </button>
       </div>
-      <div onFocus={() => { setDropdownOpen(false); }} className="clipboard-create-editor-wrap">
+      <div onFocus={() => { setDropdownOpen(false); setDestOpen(false); }} className="clipboard-create-editor-wrap">
         <StashEditor
           key={editorVersion}
           ref={editorRef}
@@ -285,14 +301,63 @@ export default function ClipboardCreateDialog() {
         />
       </div>
       <div className="clipboard-create-stash-section">
-        <div className="clipboard-create-stash-header">
-          <span>{t("resources.existing")}</span>
-          {editingId && (
-            <button className="clipboard-create-exit-edit" onClick={handleExitEdit}>
-              {t("resources.exitEdit")}
-            </button>
-          )}
-        </div>
+        <div className="clipboard-create-options-row">
+          <div className="clipboard-create-option-field">
+            <div className="clipboard-create-stash-header">
+              <span>{t("resources.storageLocation")}</span>
+            </div>
+            <div className={`clipboard-create-stash-picker${destOpen ? " open" : ""}`}>
+              <button
+                type="button"
+                className="clipboard-create-stash-trigger"
+                onClick={() => setDestOpen((open) => !open)}
+                aria-expanded={destOpen}
+                aria-haspopup="listbox"
+              >
+                <span>
+                  {storageMode === "resource"
+                    ? t("resources.destinationResource")
+                    : t("resources.destinationClipboard")}
+                </span>
+                <svg className="clipboard-create-stash-chevron" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                  <polyline points="6 9 12 15 18 9" />
+                </svg>
+              </button>
+              {destOpen && (
+                <div className="clipboard-create-stash-menu" role="listbox">
+                  <button
+                    type="button"
+                    className={`clipboard-create-stash-option${storageMode === "database" ? " selected" : ""}`}
+                    onClick={() => handleDestChange("database")}
+                    role="option"
+                    aria-selected={storageMode === "database"}
+                  >
+                    <span className="clipboard-create-stash-option-content">{t("resources.destinationClipboard")}</span>
+                    {storageMode === "database" && <span className="clipboard-create-stash-check">✓</span>}
+                  </button>
+                  <button
+                    type="button"
+                    className={`clipboard-create-stash-option${storageMode === "resource" ? " selected" : ""}`}
+                    onClick={() => handleDestChange("resource")}
+                    role="option"
+                    aria-selected={storageMode === "resource"}
+                  >
+                    <span className="clipboard-create-stash-option-content">{t("resources.destinationResource")}</span>
+                    {storageMode === "resource" && <span className="clipboard-create-stash-check">✓</span>}
+                  </button>
+                </div>
+              )}
+            </div>
+          </div>
+          <div className="clipboard-create-option-field">
+            <div className="clipboard-create-stash-header">
+              <span>{t("resources.existing")}</span>
+              {editingId && (
+                <button className="clipboard-create-exit-edit" onClick={handleExitEdit}>
+                  {t("resources.exitEdit")}
+                </button>
+              )}
+            </div>
           <div className={`clipboard-create-stash-picker${dropdownOpen ? " open" : ""}`}>
             <button
               type="button"
@@ -335,6 +400,8 @@ export default function ClipboardCreateDialog() {
               </div>
             )}
           </div>
+          </div>
+        </div>
       </div>
       <div className="clipboard-create-footer">
         {error && <span className="clipboard-create-error" role="alert">{error}</span>}
