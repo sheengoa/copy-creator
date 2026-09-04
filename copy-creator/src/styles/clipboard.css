@@ -1026,6 +1026,11 @@
   min-width: 0;
 }
 
+/* 保存位置列窄、已有资源列宽，约 1:2 */
+.clipboard-create-option-field:nth-child(2) {
+  flex: 2 1 0;
+}
+
 .clipboard-create-stash-header {
   display: flex;
   align-items: center;
