@@ -190,6 +190,49 @@
   min-height: calc(1 * 1.5 * 14px);
 }
 
+.phrase-card-body.is-toggleable {
+  position: relative;
+  overflow: hidden;
+}
+
+.phrase-card-body.is-collapsed {
+  max-height: calc(1.5em * 4);
+}
+
+.phrase-card-body.is-collapsed::after {
+  content: "";
+  position: absolute;
+  right: 0.75rem;
+  bottom: 0;
+  left: 0.75rem;
+  height: 1.5em;
+  pointer-events: none;
+  background: linear-gradient(to bottom, transparent, var(--card-inner-bg) 86%);
+}
+
+.phrase-card-body.is-expanded {
+  max-height: min(320px, 42vh);
+  overflow-y: auto;
+  padding-right: 0.75rem;
+}
+
+.phrase-card-body.is-expanded::-webkit-scrollbar {
+  width: 4px;
+}
+
+.phrase-card-body.is-expanded::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.phrase-card-body.is-expanded::-webkit-scrollbar-thumb {
+  background: rgba(0, 0, 0, 0.15);
+  border-radius: 2px;
+}
+
+[data-theme="dark"] .phrase-card-body.is-expanded::-webkit-scrollbar-thumb {
+  background: rgba(255, 255, 255, 0.18);
+}
+
 .phrase-card.is-selection-mode .phrase-card-body {
   padding-inline-start: 1rem;
 }
@@ -265,6 +308,48 @@
   display: flex;
   align-items: center;
   flex-shrink: 0;
+  gap: 2px;
+}
+
+.phrase-card-actions > .card-toggle-text-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  box-sizing: border-box;
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  border: none;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--text-secondary);
+  font-family: var(--font);
+  font-size: var(--text-xs);
+  font-weight: var(--weight-medium);
+  cursor: pointer;
+  transition: background 0.15s, color 0.15s, transform 0.15s;
+  flex-shrink: 0;
+  opacity: 0;
+}
+
+.phrase-card-actions > .card-toggle-text-btn svg {
+  width: 15px;
+  height: 15px;
+}
+
+.phrase-card:hover .phrase-card-actions > .card-toggle-text-btn,
+.phrase-card:focus-within .phrase-card-actions > .card-toggle-text-btn {
+  opacity: 0.5;
+}
+
+.phrase-card-actions > .card-toggle-text-btn:hover {
+  opacity: 1;
+  background: var(--chip-bg);
+  color: var(--text-primary);
+}
+
+.phrase-card-actions > .card-toggle-text-btn:active {
+  transform: scale(0.96);
 }
 
 .phrase-add-btn {

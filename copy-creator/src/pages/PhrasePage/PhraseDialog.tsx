@@ -92,7 +92,7 @@ export function PhraseDialog({
 
   return (
     <div className="dialog-overlay" onClick={onClose}>
-      <div className="dialog-content large" onClick={(e) => e.stopPropagation()}>
+      <div className="dialog-content large phrase-dialog-content" onClick={(e) => e.stopPropagation()}>
         <h3 className="dialog-title">
           {editingId ? t("common.edit") : t("phrases.newInput")}
         </h3>

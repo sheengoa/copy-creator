@@ -21,23 +21,10 @@ use std::io::{BufRead, BufReader, Write};
 use std::os::unix::fs::PermissionsExt;
 use std::os::unix::net::{UnixListener, UnixStream};
 use std::path::PathBuf;
-use std::sync::atomic::{AtomicBool, Ordering};
 use std::thread;
 use std::time::Duration;
 
-use tauri::{AppHandle, Manager};
-
-/// Prevent stacked show requests from piling up restore-pin threads.
-static SHOWING: AtomicBool = AtomicBool::new(false);
-
-/// RAII guard that resets SHOWING on drop, even if a thread panics.
-struct ShowGuard;
-
-impl Drop for ShowGuard {
-    fn drop(&mut self) {
-        SHOWING.store(false, Ordering::SeqCst);
-    }
-}
+use tauri::AppHandle;
 
 fn socket_path() -> PathBuf {
     if let Ok(dir) = std::env::var("XDG_RUNTIME_DIR") {
@@ -93,57 +80,7 @@ fn handle_client(mut stream: UnixStream, app: &AppHandle) {
 /// Show the main window reliably, breaking through GNOME's focus-stealing
 /// prevention by temporarily flagging the window as always-on-top.
 fn cmd_show(app: &AppHandle) {
-    // Guard against re-entrant / stacked calls
-    if SHOWING.swap(true, Ordering::SeqCst) {
-        log::info!("[ipc] show skipped — already in progress");
-        return;
-    }
-    let _guard = ShowGuard;
-
-    let window = match app.get_webview_window("main") {
-        Some(w) => w,
-        None => {
-            log::error!("[ipc] main window not found — webview not created yet?");
-            return;
-        }
-    };
-
-    log::info!("[ipc] showing main window");
-
-    // 1. Remember user's pin preference
-    let was_pinned = window.is_always_on_top().unwrap_or(false);
-
-    // 2. Force on-top to break through GNOME focus-stealing prevention
-    if let Err(e) = window.set_always_on_top(true) {
-        log::warn!("[ipc] set_always_on_top(true) failed: {}", e);
-    }
-
-    // 3. Unminimize if needed, then show
-    let _ = window.unminimize();
-    let _ = window.show();
-
-    // 4. Focus — first attempt
-    let _ = window.set_focus();
-
-    // 5. Delayed restore: wait for the window to surface, then restore
-    //    the user's pin preference and re-focus.
-    let handle = app.clone();
-    thread::spawn(move || {
-        thread::sleep(Duration::from_millis(200));
-        match handle.get_webview_window("main") {
-            Some(w) => {
-                // Only restore if SHOWING is false (no new show request arrived)
-                if !SHOWING.load(Ordering::SeqCst) {
-                    if let Err(e) = w.set_always_on_top(was_pinned) {
-                        log::warn!("[ipc] restore pin failed: {}", e);
-                    }
-                }
-                // Re-focus after the stacking order has settled
-                let _ = w.set_focus();
-            }
-            None => log::warn!("[ipc] main window gone before restore"),
-        }
-    });
+    crate::show_main_window(app, "ipc", false);
 }
 
 /// Start the IPC server in a background thread.

@@ -212,6 +212,8 @@
     "removeFile": "Remove File",
     "imageFileHint": "Image file: pasted as image content via the clipboard",
     "remark": "Remark",
+    "expandText": "Expand",
+    "collapseText": "Collapse",
     "content": "Content",
     "contentRequired": "Content is required",
     "empty": "Select a group to view quick input",

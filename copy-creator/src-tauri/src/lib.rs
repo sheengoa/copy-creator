@@ -19,6 +19,7 @@ pub(crate) fn show_main_window(app: &tauri::AppHandle, reason: &str, center: boo
 
     log::info!("[show_main_window] showing main window ({reason})");
 
+    let popup_visible = shortcut::has_visible_popup_window(app);
     let was_pinned = window.is_always_on_top().unwrap_or(false);
     if let Err(e) = window.set_always_on_top(true) {
         log::warn!("[show_main_window] set_always_on_top(true) failed: {e}");
@@ -34,8 +35,12 @@ pub(crate) fn show_main_window(app: &tauri::AppHandle, reason: &str, center: boo
     if let Err(e) = window.show() {
         log::warn!("[show_main_window] show failed: {e}");
     }
-    if let Err(e) = window.set_focus() {
-        log::warn!("[show_main_window] set_focus failed: {e}");
+    if !popup_visible {
+        if let Err(e) = window.set_focus() {
+            log::warn!("[show_main_window] set_focus failed: {e}");
+        }
+    } else {
+        shortcut::raise_visible_popup_windows(app);
     }
 
     let app_handle = app.clone();
@@ -44,7 +49,11 @@ pub(crate) fn show_main_window(app: &tauri::AppHandle, reason: &str, center: boo
         if let Some(window) = app_handle.get_webview_window("main") {
             let _ = window.set_always_on_top(was_pinned);
             if window.is_visible().unwrap_or(false) {
-                let _ = window.set_focus();
+                if shortcut::has_visible_popup_window(&app_handle) {
+                    shortcut::raise_visible_popup_windows(&app_handle);
+                } else {
+                    let _ = window.set_focus();
+                }
             }
         } else {
             log::error!("[show_main_window] main window not found (delayed startup)");

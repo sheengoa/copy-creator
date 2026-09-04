@@ -109,12 +109,31 @@ fn raise_always_on_top(window: &tauri::WebviewWindow) {
     let _ = window.set_focus();
 }
 
+pub(crate) fn has_visible_popup_window(app: &AppHandle) -> bool {
+    ["clipboard-create", "radial-menu"].iter().any(|label| {
+        app.get_webview_window(label)
+            .and_then(|window| window.is_visible().ok())
+            .unwrap_or(false)
+    })
+}
+
 fn raise_visible_radial_menu(app: &AppHandle) {
     if let Some(radial) = app.get_webview_window("radial-menu") {
         if radial.is_visible().unwrap_or(false) {
             raise_always_on_top_without_focus(&radial);
         }
     }
+}
+
+pub(crate) fn raise_visible_popup_windows(app: &AppHandle) {
+    // Both popup windows are always-on-top. Re-raise them in order so the
+    // radial menu remains above the clipboard-create window.
+    if let Some(create) = app.get_webview_window("clipboard-create") {
+        if create.is_visible().unwrap_or(false) {
+            raise_always_on_top_without_focus(&create);
+        }
+    }
+    raise_visible_radial_menu(app);
 }
 
 pub fn show_radial_menu(app: &AppHandle) {
@@ -317,8 +336,8 @@ pub fn show_clipboard_create(
     if let Err(error) = window.set_focus() {
         log::warn!("[show_clipboard_create] set_focus failed: {error}");
     }
-    // 新建窗口打开时可能抢到置顶窗口的堆叠顺序，确保已显示的径向菜单回到最上层。
-    raise_visible_radial_menu(app);
+    // 新建窗口打开时可能抢到置顶窗口的堆叠顺序，恢复两个弹窗的固定顺序。
+    raise_visible_popup_windows(app);
 
     let _ = app.emit(
         "clipboard-create-show",

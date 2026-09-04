@@ -25,14 +25,57 @@ describe("integration regressions", () => {
 
   it("keeps a visible radial menu above the clipboard create dialog", () => {
     const shortcutSource = readSource("../src-tauri/src/shortcut.rs");
+    const libSource = readSource("../src-tauri/src/lib.rs");
     const createBlock = shortcutSource.slice(
       shortcutSource.indexOf("pub fn show_clipboard_create"),
       shortcutSource.indexOf("#[tauri::command]", shortcutSource.indexOf("pub fn show_clipboard_create")),
     );
 
-    expect(shortcutSource).toContain("fn raise_visible_radial_menu(app: &AppHandle)");
+    expect(shortcutSource).toContain("pub(crate) fn has_visible_popup_window(app: &AppHandle)");
+    expect(shortcutSource).toContain("pub(crate) fn raise_visible_popup_windows(app: &AppHandle)");
+    expect(shortcutSource.indexOf('"clipboard-create"')).toBeLessThan(
+      shortcutSource.indexOf("raise_visible_radial_menu(app)"),
+    );
     expect(shortcutSource).toContain("if radial.is_visible().unwrap_or(false)");
-    expect(createBlock).toContain("raise_visible_radial_menu(app);");
+    expect(createBlock).toContain("raise_visible_popup_windows(app);");
+    expect(libSource).toContain("shortcut::has_visible_popup_window(app)");
+    expect(libSource).toContain("shortcut::raise_visible_popup_windows(&app_handle)");
+  });
+
+  it("uses the shared main-window show path for Linux IPC", () => {
+    const ipcSource = readSource("../src-tauri/src/ipc.rs");
+
+    expect(ipcSource).toContain('crate::show_main_window(app, "ipc", false);');
+    expect(ipcSource).not.toContain("static SHOWING");
+    expect(ipcSource).not.toContain("set_always_on_top(true)");
+  });
+
+  it("adds long-text folding to quick input cards without changing paste clicks", () => {
+    const phraseSource = readSource("./pages/PhrasePage/PhraseList.tsx");
+    const phraseStyles = readSource("./styles/phrases.css");
+
+    expect(phraseSource).toContain("COLLAPSE_TEXT_LENGTH = 160");
+    expect(phraseSource).toContain("COLLAPSE_LINE_COUNT = 4");
+    expect(phraseSource).toContain('className="card-toggle-text-btn"');
+    expect(phraseSource).toContain("e.stopPropagation()");
+    expect(phraseSource).toContain('t(isTextExpanded ? "phrases.collapseText" : "phrases.expandText")');
+    expect(phraseSource).toContain("OpenInFullIcon");
+    expect(phraseSource).toContain("CloseFullscreenIcon");
+    expect(phraseStyles).toContain(".phrase-card-body.is-toggleable");
+    expect(phraseStyles).toContain(".phrase-card-body.is-collapsed");
+    expect(phraseStyles).toContain(".phrase-card-body.is-expanded");
+    expect(phraseStyles).toContain(".phrase-card-actions > .card-toggle-text-btn");
+  });
+
+  it("sizes the quick input editor dialog relative to the main window", () => {
+    const dialogSource = readSource("./pages/PhrasePage/PhraseDialog.tsx");
+    const componentsStyles = readSource("./styles/components.css");
+
+    expect(dialogSource).toContain('className="dialog-content large phrase-dialog-content"');
+    expect(componentsStyles).toContain(".dialog-content.large.phrase-dialog-content");
+    expect(componentsStyles).toContain("width: clamp(360px, 72vw, 720px);");
+    expect(componentsStyles).toContain("max-width: calc(100vw - 32px);");
+    expect(componentsStyles).toContain("max-height: calc(100vh - 32px);");
   });
 
   it("keeps migrated clipboard schema compatible with current record fields", () => {

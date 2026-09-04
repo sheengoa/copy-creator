@@ -551,6 +551,13 @@ input:focus-visible + .selection-checkbox {
   width: 360px;
 }
 
+.dialog-content.large.phrase-dialog-content {
+  width: clamp(360px, 72vw, 720px);
+  max-width: calc(100vw - 32px);
+  max-height: calc(100vh - 32px);
+  overflow-y: auto;
+}
+
 .dialog-title {
   font-size: var(--text-lg);
   font-weight: var(--weight-semibold);

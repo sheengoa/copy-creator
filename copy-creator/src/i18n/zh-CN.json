@@ -211,6 +211,8 @@
     "removeFile": "移除文件",
     "imageFileHint": "图像文件：粘贴时以图片内容写入剪切板",
     "remark": "备注",
+    "expandText": "展开",
+    "collapseText": "收起",
     "content": "内容",
     "contentRequired": "内容未填写",
     "empty": "选择一个场景组查看快捷输入",

@@ -3,6 +3,8 @@ import { invoke } from "@tauri-apps/api/core";
 import { Icons } from "../../components/Icons";
 import { useSortable } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
+import CloseFullscreenIcon from "@mui/icons-material/CloseFullscreen";
+import OpenInFullIcon from "@mui/icons-material/OpenInFull";
 import { useTranslation } from "react-i18next";
 import type { Phrase } from "../../types";
 import { HighlightText } from "../../components/HighlightText";
@@ -23,6 +25,8 @@ interface PhraseListProps {
 }
 
 const filenameFromPath = (path: string) => path.replace(/\\/g, "/").split("/").pop() || path;
+const COLLAPSE_TEXT_LENGTH = 160;
+const COLLAPSE_LINE_COUNT = 4;
 
 function formatBytes(bytes: number) {
   if (!bytes) return "";
@@ -85,6 +89,21 @@ function PhraseCard({
   };
   const isFile = phrase.input_type === "file";
   const fileName = filenameFromPath(phrase.source_path || phrase.content);
+  const [textExpanded, setTextExpanded] = useState(false);
+  const textLineCount = phrase.content.split(/\r\n|\r|\n/).length;
+  const canToggleText =
+    !isFile
+    && (phrase.content.length > COLLAPSE_TEXT_LENGTH || textLineCount > COLLAPSE_LINE_COUNT);
+  const isTextExpanded = canToggleText && textExpanded;
+
+  useEffect(() => {
+    setTextExpanded(false);
+  }, [phrase.id, phrase.content]);
+
+  const handleToggleText = (e: React.MouseEvent) => {
+    e.stopPropagation();
+    setTextExpanded((expanded) => !expanded);
+  };
 
   return (
     <div
@@ -111,7 +130,9 @@ function PhraseCard({
         </label>
       )}
       <div className="noticontent">
-        <div className={`notibody phrase-card-body${isFile ? " phrase-card-file-body" : ""}`}>
+        <div
+          className={`notibody phrase-card-body${isFile ? " phrase-card-file-body" : ""}${canToggleText ? " is-toggleable" : ""}${canToggleText && !isTextExpanded ? " is-collapsed" : ""}${isTextExpanded ? " is-expanded" : ""}`}
+        >
           {isFile ? (
             <>
               {isImageFilePath(phrase.source_path || phrase.content) ? (
@@ -130,6 +151,22 @@ function PhraseCard({
           <span className="phrase-card-remark"><HighlightText text={phrase.title || ""} search={search} /></span>
           {!selectionMode && (
             <div className="phrase-card-actions">
+              {canToggleText && (
+                <button
+                  className="card-toggle-text-btn"
+                  type="button"
+                  aria-expanded={isTextExpanded}
+                  aria-label={t(isTextExpanded ? "phrases.collapseText" : "phrases.expandText")}
+                  title={t(isTextExpanded ? "phrases.collapseText" : "phrases.expandText")}
+                  onClick={handleToggleText}
+                >
+                  {isTextExpanded ? (
+                    <CloseFullscreenIcon fontSize="inherit" />
+                  ) : (
+                    <OpenInFullIcon fontSize="inherit" />
+                  )}
+                </button>
+              )}
               <span ref={setActivatorNodeRef} className="drag-handle" {...attributes} {...listeners}>
                 <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor">
                   <circle cx="9" cy="5" r="1.5" />
