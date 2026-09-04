@@ -293,14 +293,6 @@ export default function ClipboardCreateDialog() {
             </button>
           )}
         </div>
-          <div className="clipboard-create-stash-header">
-            <span>{t("resources.existing")}</span>
-            {editingId && (
-              <button className="clipboard-create-exit-edit" onClick={handleExitEdit}>
-                {t("resources.exitEdit")}
-              </button>
-            )}
-          </div>
           <div className={`clipboard-create-stash-picker${dropdownOpen ? " open" : ""}`}>
             <button
               type="button"
