@@ -134,6 +134,13 @@ export function ResourceCard({
       } as React.CSSProperties}
       className={`resource-card${previewOpen ? " is-expanded" : ""}${selected ? " is-selected" : ""}${isDragging ? " is-dragging" : ""}`}
       onClick={activatePreview}
+      tabIndex={0}
+      aria-label={t(previewOpen ? "resources.closePreview" : "resources.openPreview")}
+      onKeyDown={(event) => {
+        if (event.key !== "Enter" && event.key !== " ") return;
+        event.preventDefault();
+        activatePreview();
+      }}
     >
       {selectionMode && (
         <label className="resource-card-selection" onClick={(event) => event.stopPropagation()}>

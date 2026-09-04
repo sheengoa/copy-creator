@@ -62,14 +62,14 @@ describe("resourceUtils", () => {
     expect(invokeMock).toHaveBeenCalledTimes(2);
   });
 
-  it("splits records into independent columns while preserving order", () => {
+  it("interleaves records across columns so rows read in list order", () => {
     const records = ["a", "b", "c", "d", "e"].map((id) => record("text", id));
 
     expect(splitResourceColumns(records as ClipboardRecord[], 2).map((column) => (
       column.map((item) => item.content)
     ))).toEqual([
-      ["a", "b", "c"],
-      ["d", "e"],
+      ["a", "c", "e"],
+      ["b", "d"],
     ]);
   });
 

@@ -81,13 +81,12 @@ export function formatResourceTime(dateStr: string): string {
     .padStart(2, "0")}:${date.getMinutes().toString().padStart(2, "0")}`;
 }
 
+// 交错分配保证双列布局按行阅读时与时间顺序一致，配合拖拽预览的扁平排序。
 export function splitResourceColumns(records: ClipboardRecord[], columnCount: number): ClipboardRecord[][] {
   const count = Math.max(1, Math.floor(columnCount));
   const columns = Array.from({ length: count }, () => [] as ClipboardRecord[]);
-  const columnSize = Math.ceil(records.length / count);
   records.forEach((record, index) => {
-    const columnIndex = Math.min(Math.floor(index / columnSize), count - 1);
-    columns[columnIndex].push(record);
+    columns[index % count].push(record);
   });
   return columns;
 }
