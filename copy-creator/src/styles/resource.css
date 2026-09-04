@@ -1056,6 +1056,7 @@
 
 .resource-detail-delete {
   width: auto;
+  gap: 5px;
   padding: 0 8px;
   border-color: color-mix(in srgb, var(--danger) 30%, var(--separator));
   color: var(--danger);
