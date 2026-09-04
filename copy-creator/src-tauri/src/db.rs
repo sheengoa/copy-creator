@@ -47,8 +47,7 @@ pub fn make_key_preview(content: &str) -> String {
     }
 }
 
-const RESOURCE_RECORD_CONDITION: &str =
-    "COALESCE(storage_mode, 'database') = 'resource' OR TRIM(COALESCE(group_name, '')) <> ''";
+const RESOURCE_RECORD_CONDITION: &str = "COALESCE(storage_mode, 'database') = 'resource'";
 
 fn category_sql(category: &Option<String>) -> (String, String) {
     match category.as_deref() {
@@ -126,14 +125,15 @@ const CLIPBOARD_CONTENT_PREVIEW_CHARS: usize = 600;
 const QUICK_INPUT_FILE_LIMIT_BYTES: u64 = 50 * 1024 * 1024;
 const QUICK_INPUT_TEXT_PREVIEW_LIMIT_BYTES: u64 = 1024 * 1024;
 pub(crate) const DEFAULT_RESOURCE_GROUP_ID: &str = "default-resource-group";
-pub(crate) const DEFAULT_RESOURCE_GROUP_NAME: &str = "暂存";
+pub(crate) const DEFAULT_RESOURCE_GROUP_NAME: &str = "默认";
 pub(crate) const DATABASE_STORAGE_MODE: &str = "database";
 pub(crate) const RESOURCE_STORAGE_MODE: &str = "resource";
 const RESOURCE_LIBRARY_DIR_NAME: &str = "resource-library";
 const RESOURCE_LIBRARY_HISTORY_SETTING: &str = "resource_library_history";
 
-pub(crate) fn is_resource_record(group_name: &str, storage_mode: &str) -> bool {
-    storage_mode == RESOURCE_STORAGE_MODE || !group_name.trim().is_empty()
+// 分组名不再参与资源判定，仅保留参数以兼容既有调用与回归检查。
+pub(crate) fn is_resource_record(_group_name: &str, storage_mode: &str) -> bool {
+    storage_mode == RESOURCE_STORAGE_MODE
 }
 
 fn make_content_preview(content: &str) -> (String, i64, bool) {
@@ -1050,8 +1050,32 @@ pub fn init_db(app: &AppHandle) -> Result<(), Box<dyn std::error::Error>> {
     )
     .ok();
     conn.execute(
-        "UPDATE clipboard_records SET group_name = ?1 WHERE group_name = 'stash'",
-        params![DEFAULT_RESOURCE_GROUP_NAME],
+        "UPDATE clipboard_records SET group_name = '暂存' WHERE group_name = 'stash'",
+        [],
+    )
+    .ok();
+
+    // ── 资源与暂存边界：资源仅以 storage_mode = 'resource' 判定 ──
+    // 旧版本以“是否有分组”推断资源，这里为带真实分组名的旧记录补上资源存储模式；
+    // 旧“暂存”记录保持临时属性，不进入资源库。
+    conn.execute(
+        "UPDATE clipboard_records SET storage_mode = ?1
+         WHERE TRIM(COALESCE(group_name, '')) <> ''
+           AND group_name NOT IN ('stash', '暂存')
+           AND COALESCE(storage_mode, 'database') <> ?1",
+        params![RESOURCE_STORAGE_MODE],
+    )
+    .ok();
+    // 默认资源分组由“暂存”更名为“默认”，与临时暂存内容划清边界。
+    conn.execute(
+        "UPDATE resource_groups SET name = ?1 WHERE id = ?2 AND name = '暂存'",
+        params![DEFAULT_RESOURCE_GROUP_NAME, DEFAULT_RESOURCE_GROUP_ID],
+    )
+    .ok();
+    conn.execute(
+        "UPDATE clipboard_records SET group_name = ?1
+         WHERE group_name = '暂存' AND COALESCE(storage_mode, 'database') = ?2",
+        params![DEFAULT_RESOURCE_GROUP_NAME, RESOURCE_STORAGE_MODE],
     )
     .ok();
 
@@ -1088,10 +1112,7 @@ pub fn prune_old_records(app: &AppHandle) -> Result<(), Box<dyn std::error::Erro
             "SELECT type, content, attachments
              FROM clipboard_records
              WHERE datetime(created_at) < datetime('now', ?1)
-               AND NOT (
-                   COALESCE(storage_mode, 'database') = 'resource'
-                   OR TRIM(COALESCE(group_name, '')) <> ''
-               )",
+               AND NOT (COALESCE(storage_mode, 'database') = 'resource')",
         )?;
         let rows = stmt.query_map(params![format!("-{} days", days)], |row| {
             Ok((
@@ -1113,10 +1134,7 @@ pub fn prune_old_records(app: &AppHandle) -> Result<(), Box<dyn std::error::Erro
         conn.execute(
             "DELETE FROM clipboard_records
              WHERE datetime(created_at) < datetime('now', ?1)
-               AND NOT (
-                   COALESCE(storage_mode, 'database') = 'resource'
-                   OR TRIM(COALESCE(group_name, '')) <> ''
-               )",
+               AND NOT (COALESCE(storage_mode, 'database') = 'resource')",
             params![format!("-{} days", days)],
         )?;
         (days, image_contents)
@@ -1638,7 +1656,7 @@ pub fn update_resource_group(app: AppHandle, id: String, name: String) -> Result
         )
         .map_err(|e| format!("分组不存在: {e}"))?;
     if id == DEFAULT_RESOURCE_GROUP_ID {
-        return Err("默认暂存分组不能重命名".to_string());
+        return Err("默认分组不能重命名".to_string());
     }
     if old_name != name && resource_group_name_exists(&conn, &name)? {
         return Err("分组名称已存在".to_string());
@@ -1662,7 +1680,7 @@ pub fn update_resource_group(app: AppHandle, id: String, name: String) -> Result
 #[tauri::command]
 pub fn delete_resource_group(app: AppHandle, id: String) -> Result<(), String> {
     if id == DEFAULT_RESOURCE_GROUP_ID {
-        return Err("默认暂存分组不能删除".to_string());
+        return Err("默认分组不能删除".to_string());
     }
     let (name, ids) = {
         let state = app.state::<DbState>();
@@ -2324,7 +2342,7 @@ fn migrate_storage(app: &AppHandle, new_path: &str) -> Result<(), String> {
                 key_preview TEXT PRIMARY KEY
             );
             INSERT OR IGNORE INTO resource_groups (id, name, sort_order, created_at, updated_at)
-            VALUES ('default-resource-group', '暂存', 0, datetime('now'), datetime('now'));
+            VALUES ('default-resource-group', '默认', 0, datetime('now'), datetime('now'));
             ",
         )
         .map_err(|e| format!("create schema: {}", e))?;
@@ -2962,21 +2980,21 @@ mod record_classification_tests {
     use super::{category_sql, is_resource_record};
 
     #[test]
-    fn treats_resource_mode_or_nonempty_group_as_resource() {
+    fn treats_only_resource_storage_mode_as_resource() {
         assert!(is_resource_record("", "resource"));
-        assert!(is_resource_record("旧资源", "database"));
-        assert!(is_resource_record("  旧资源  ", "database"));
+        assert!(is_resource_record("旧资源", "resource"));
         assert!(!is_resource_record("", "database"));
+        assert!(!is_resource_record("旧资源", "database"));
         assert!(!is_resource_record("  ", "database"));
     }
 
     #[test]
-    fn resource_category_sql_matches_both_record_shapes() {
+    fn resource_category_sql_filters_by_storage_mode() {
         let (filter, search_filter) = category_sql(&Some("resources".to_string()));
 
         assert!(filter.contains("COALESCE(storage_mode, 'database') = 'resource'"));
-        assert!(filter.contains("TRIM(COALESCE(group_name, '')) <> ''"));
+        assert!(!filter.contains("group_name"));
         assert!(search_filter.contains("COALESCE(storage_mode, 'database') = 'resource'"));
-        assert!(search_filter.contains("TRIM(COALESCE(group_name, '')) <> ''"));
+        assert!(!search_filter.contains("group_name"));
     }
 }

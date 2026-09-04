@@ -289,7 +289,7 @@ describe("integration regressions", () => {
     expect(dbSource).toContain("pub async fn select_resource_library_folder");
     expect(dbSource).toContain("paths_overlap(&path, &storage_path)");
     expect(pruneBlock).toContain("COALESCE(storage_mode, 'database') = 'resource'");
-    expect(pruneBlock).toContain("TRIM(COALESCE(group_name, '')) <> ''");
+    expect(pruneBlock).not.toContain("TRIM(COALESCE(group_name, '')) <> ''");
     expect(pruneBlock).not.toContain("resource_files");
     expect(dbSource).toContain("WHERE NOT ({RESOURCE_RECORD_CONDITION})");
     expect(dbSource).toContain("type = ?1 AND NOT ({RESOURCE_RECORD_CONDITION})");
