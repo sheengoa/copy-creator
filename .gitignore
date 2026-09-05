@@ -1,13 +1,14 @@
 releases/
 target/
 .trae/
-.claude/settings.local.json
-.agents/
 copy-creator/com.copycreator.app/
-.claude
-CLAUDE.md
-AGENTS.md
 /docs
+
+# 本地代理规则和配置，不纳入版本控制
+**/.claude/
+**/.agents/
+**/AGENTS.md
+**/CLAUDE.md
 
 # Local browser QA and prototype artifacts
 .playwright-cli/
