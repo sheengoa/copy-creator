@@ -307,11 +307,21 @@ fn write_resource_record(
     record_id: &str,
     content: &str,
     images: &[String],
+    group_name: &str,
 ) -> Result<ResourceWriteResult, String> {
-    let resource_dir = crate::db::get_resource_library_dir(app);
+    let resource_root = crate::db::get_resource_library_dir(app);
+    let resource_dir = crate::db::resource_group_path(app, group_name)?;
+    if !resource_dir.exists() {
+        if group_name.is_empty() {
+            std::fs::create_dir_all(&resource_dir)
+                .map_err(|e| format!("创建资源库目录失败: {e}"))?;
+        } else {
+            return Err("资源分组不存在".to_string());
+        }
+    }
     let transaction_id = uuid::Uuid::new_v4().to_string();
     let attachment_dir_name = format!("{record_id}-{transaction_id}");
-    let attachment_dir = resource_dir
+    let attachment_dir = resource_root
         .join(".copy-creator")
         .join("attachments")
         .join(&attachment_dir_name);
@@ -346,7 +356,10 @@ fn write_resource_record(
         } else {
             let relative_paths = (1..=images.len())
                 .map(|index| {
-                    format!(".copy-creator/attachments/{attachment_dir_name}/image-{index}.png")
+                    let prefix = if group_name.is_empty() { "" } else { "../" };
+                    format!(
+                        "{prefix}.copy-creator/attachments/{attachment_dir_name}/image-{index}.png"
+                    )
                 })
                 .collect::<Vec<_>>();
             render_resource_markdown(content, &relative_paths)?
@@ -417,6 +430,7 @@ pub fn save_stash_record(
     content: String,
     images: Vec<String>,
     storage_mode: Option<String>,
+    group_name: Option<String>,
 ) -> Result<serde_json::Value, String> {
     let content = content.trim().to_string();
     if content.is_empty() {
@@ -463,8 +477,6 @@ pub fn save_stash_record(
         }
         None => crate::db::DATABASE_STORAGE_MODE,
     };
-    // 分组与临时标记均已废弃：资源存资源库目录，其余保存为普通剪贴板记录，并入剪贴板列表。
-    let target_group_name = String::new();
     let old_paths = if let Some((_, attachments, _, _)) = &existing {
         serde_json::from_str::<Vec<String>>(attachments).unwrap_or_default()
     } else {
@@ -474,6 +486,22 @@ pub fn save_stash_record(
         .as_ref()
         .map(|(_, _, _, path)| path.clone())
         .unwrap_or_default();
+    let target_group_name = if target_storage_mode == crate::db::RESOURCE_STORAGE_MODE {
+        let default_group = if current_is_resource {
+            crate::db::resource_group_for_path(
+                &crate::db::get_resource_library_dir(&app),
+                &old_resource_path,
+            )
+            .unwrap_or_default()
+        } else {
+            String::new()
+        };
+        crate::db::normalize_resource_group_name(
+            group_name.as_deref().or(Some(default_group.as_str())),
+        )?
+    } else {
+        String::new()
+    };
     let reusable_paths = if updated
         && current_storage_mode == crate::db::DATABASE_STORAGE_MODE
         && !current_is_resource
@@ -484,7 +512,8 @@ pub fn save_stash_record(
     };
     let (new_paths, created_stash_paths, new_resource_path, new_resource_paths) =
         if target_storage_mode == crate::db::RESOURCE_STORAGE_MODE {
-            let result = write_resource_record(&app, &record_id, &content, &images)?;
+            let result =
+                write_resource_record(&app, &record_id, &content, &images, &target_group_name)?;
             (
                 result.attachment_paths.clone(),
                 Vec::new(),
@@ -588,14 +617,19 @@ pub fn save_stash_record(
                 "has_images": !new_paths.is_empty(),
                 "storage_mode": target_storage_mode,
                 "resource_path": &new_resource_path,
+                "resource_group": &target_group_name,
             }),
         )
         .ok();
+    }
+    if target_storage_mode == crate::db::RESOURCE_STORAGE_MODE || current_is_resource {
+        app.emit("resource-groups-changed", ()).ok();
     }
     Ok(serde_json::json!({
         "id": record_id,
         "storage_mode": target_storage_mode,
         "resource_path": new_resource_path,
+        "resource_group": target_group_name,
     }))
 }
 

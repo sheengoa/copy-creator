@@ -1,5 +1,5 @@
 use rusqlite::{params, Connection, OptionalExtension};
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::ffi::OsStr;
 use std::path::{Component, Path, PathBuf};
 use std::sync::Mutex;
@@ -333,6 +333,58 @@ pub(crate) fn get_resource_library_dir(app: &AppHandle) -> PathBuf {
     dir
 }
 
+pub(crate) fn normalize_resource_group_name(value: Option<&str>) -> Result<String, String> {
+    let name = value.unwrap_or("").trim();
+    if name.is_empty() {
+        return Ok(String::new());
+    }
+    if name.chars().count() > 80 {
+        return Err("分组名称不能超过 80 个字符".to_string());
+    }
+    if name == "." || name == ".." || name.starts_with('.') {
+        return Err("分组名称不能以点号开头".to_string());
+    }
+    if name.contains('/') || name.contains('\\') {
+        return Err("分组名称不能包含路径分隔符".to_string());
+    }
+    let mut components = Path::new(name).components();
+    if !matches!(components.next(), Some(Component::Normal(_))) || components.next().is_some() {
+        return Err("分组名称无效".to_string());
+    }
+    Ok(name.to_string())
+}
+
+pub(crate) fn resource_group_path(app: &AppHandle, name: &str) -> Result<PathBuf, String> {
+    let normalized = normalize_resource_group_name(Some(name))?;
+    let root = get_resource_library_dir(app);
+    if normalized.is_empty() {
+        Ok(root)
+    } else {
+        Ok(root.join(normalized))
+    }
+}
+
+pub(crate) fn resource_group_for_path(root: &Path, resource_path: &str) -> Option<String> {
+    let path = Path::new(resource_path);
+    if !path.is_absolute() {
+        return None;
+    }
+    let parent = path.parent()?;
+    if parent == root {
+        return Some(String::new());
+    }
+    let relative_parent = parent.strip_prefix(root).ok()?;
+    let mut components = relative_parent.components();
+    let Component::Normal(group_name) = components.next()? else {
+        return None;
+    };
+    if components.next().is_some() {
+        return None;
+    }
+    let group_name = group_name.to_str()?.to_string();
+    normalize_resource_group_name(Some(&group_name)).ok()
+}
+
 fn resource_library_history(app: &AppHandle) -> Vec<PathBuf> {
     get_setting_sync(app, RESOURCE_LIBRARY_HISTORY_SETTING)
         .and_then(|value| serde_json::from_str::<Vec<String>>(&value).ok())
@@ -381,7 +433,7 @@ fn managed_resource_file_path(
     }
     let resource_root = resource_roots
         .iter()
-        .find(|root| path.parent() == Some(root.as_path()))?
+        .find(|root| resource_group_for_path(root, path.to_string_lossy().as_ref()).is_some())?
         .clone();
     Some((path, resource_root))
 }
@@ -478,19 +530,31 @@ pub(crate) fn remove_resource_record_files(
             if let Ok(entries) = std::fs::read_dir(resource_root) {
                 for entry in entries.flatten() {
                     let path = entry.path();
-                    let is_managed_resource_file = entry.file_type().is_ok_and(|file_type| {
-                        file_type.is_file()
-                            && path
-                                .file_name()
-                                .and_then(|name| name.to_str())
-                                .is_some_and(|name| name.starts_with(&resource_file_prefix))
-                            && path
+                    let candidates = if entry.file_type().is_ok_and(|file_type| file_type.is_dir())
+                        && resource_group_for_path(
+                            resource_root,
+                            path.join("placeholder.txt").to_string_lossy().as_ref(),
+                        )
+                        .is_some()
+                    {
+                        std::fs::read_dir(&path)
+                            .map(|children| children.flatten().map(|child| child.path()).collect())
+                            .unwrap_or_default()
+                    } else {
+                        vec![path]
+                    };
+                    for candidate in candidates {
+                        let is_managed_resource_file = candidate
+                            .file_name()
+                            .and_then(|name| name.to_str())
+                            .is_some_and(|name| name.starts_with(&resource_file_prefix))
+                            && candidate
                                 .extension()
                                 .and_then(|extension| extension.to_str())
-                                .is_some_and(|extension| matches!(extension, "txt" | "md"))
-                    });
-                    if is_managed_resource_file {
-                        let _ = std::fs::remove_file(path);
+                                .is_some_and(|extension| matches!(extension, "txt" | "md"));
+                        if is_managed_resource_file {
+                            let _ = std::fs::remove_file(candidate);
+                        }
                     }
                 }
             }
@@ -1053,7 +1117,8 @@ pub fn init_db(app: &AppHandle) -> Result<(), Box<dyn std::error::Error>> {
     )
     .ok();
     // 分组功能已删除，连同旧库中的分组表一起清理。
-    conn.execute("DROP TABLE IF EXISTS resource_groups", []).ok();
+    conn.execute("DROP TABLE IF EXISTS resource_groups", [])
+        .ok();
 
     app.manage(DbState {
         conn: Mutex::new(conn),
@@ -1176,6 +1241,7 @@ pub fn get_clipboard_records(
     limit: Option<u32>,
     offset: Option<u32>,
     category: Option<String>,
+    resource_group: Option<String>,
 ) -> Result<Vec<serde_json::Value>, String> {
     let state = app.state::<DbState>();
     let conn = state.conn.lock().map_err(|e| e.to_string())?;
@@ -1183,6 +1249,20 @@ pub fn get_clipboard_records(
     let off = offset.unwrap_or(0);
 
     let cat_filter = category_sql(&category);
+    let resource_group = if category.as_deref() == Some("resources") {
+        resource_group
+            .as_deref()
+            .map(|group| normalize_resource_group_name(Some(group)))
+            .transpose()?
+    } else {
+        None
+    };
+    let query_lim = if resource_group.is_some() {
+        u32::MAX
+    } else {
+        lim
+    };
+    let query_off = if resource_group.is_some() { 0 } else { off };
 
     let mut records: Vec<serde_json::Value> = Vec::new();
 
@@ -1198,7 +1278,7 @@ pub fn get_clipboard_records(
         );
         let mut stmt = conn.prepare(&sql).map_err(|e| e.to_string())?;
         let rows = stmt
-            .query_map(params![escaped, lim, off], |row| {
+            .query_map(params![escaped, query_lim, query_off], |row| {
                 Ok(clipboard_record_json(
                     row.get::<_, String>(0)?,
                     row.get::<_, String>(1)?,
@@ -1224,7 +1304,7 @@ pub fn get_clipboard_records(
         );
         let mut stmt = conn.prepare(&sql).map_err(|e| e.to_string())?;
         let rows = stmt
-            .query_map(params![lim, off], |row| {
+            .query_map(params![query_lim, query_off], |row| {
                 Ok(clipboard_record_json(
                     row.get::<_, String>(0)?,
                     row.get::<_, String>(1)?,
@@ -1242,6 +1322,32 @@ pub fn get_clipboard_records(
         for row in rows {
             records.push(row.map_err(|e| e.to_string())?);
         }
+    }
+
+    let resource_root = get_resource_library_dir(&app);
+    for record in &mut records {
+        if record["storage_mode"].as_str() != Some(RESOURCE_STORAGE_MODE) {
+            continue;
+        }
+        let group = record["resource_path"]
+            .as_str()
+            .and_then(|path| resource_group_for_path(&resource_root, path));
+        if let Some(object) = record.as_object_mut() {
+            object.insert(
+                "resource_group".to_string(),
+                group
+                    .map(serde_json::Value::String)
+                    .unwrap_or(serde_json::Value::Null),
+            );
+        }
+    }
+    if let Some(resource_group) = resource_group {
+        records.retain(|record| record["resource_group"].as_str() == Some(resource_group.as_str()));
+        records = records
+            .into_iter()
+            .skip(off as usize)
+            .take(lim as usize)
+            .collect();
     }
 
     // Build label map for API key enrichment
@@ -1450,8 +1556,7 @@ fn delete_clipboard_records_internal(app: &AppHandle, ids: &[String]) -> Result<
                 .optional()
                 .map_err(|e| e.to_string())?;
 
-            let Some((record_type, content, attachments, storage_mode, resource_path)) =
-                record
+            let Some((record_type, content, attachments, storage_mode, resource_path)) = record
             else {
                 continue;
             };
@@ -1514,12 +1619,16 @@ fn delete_clipboard_records_internal(app: &AppHandle, ids: &[String]) -> Result<
         }
     }
 
+    let had_resources = !resource_files.is_empty();
     for (id, resource_path, attachment_paths) in resource_files {
         remove_resource_record_files(app, &id, &resource_path, &attachment_paths);
     }
 
     for id in deleted_ids {
         let _ = app.emit("clipboard-deleted", &id);
+    }
+    if had_resources {
+        let _ = app.emit("resource-groups-changed", ());
     }
 
     Ok(())
@@ -2261,6 +2370,311 @@ pub fn set_resource_library_path(app: AppHandle, path: String) -> Result<String,
     Ok(path_string)
 }
 
+fn resource_record_paths_in_group(
+    app: &AppHandle,
+    group_name: &str,
+) -> Result<Vec<(String, String)>, String> {
+    let root = get_resource_library_dir(app);
+    let state = app.state::<DbState>();
+    let conn = state.conn.lock().map_err(|e| e.to_string())?;
+    let mut stmt = conn
+        .prepare(
+            "SELECT id, resource_path
+             FROM clipboard_records
+             WHERE COALESCE(storage_mode, 'database') = 'resource'",
+        )
+        .map_err(|e| e.to_string())?;
+    let rows = stmt
+        .query_map([], |row| {
+            Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
+        })
+        .map_err(|e| e.to_string())?;
+    let mut records = Vec::new();
+    for row in rows {
+        let (id, path) = row.map_err(|e| e.to_string())?;
+        if resource_group_for_path(&root, &path).as_deref() == Some(group_name) {
+            records.push((id, path));
+        }
+    }
+    Ok(records)
+}
+
+fn update_resource_record_paths(
+    app: &AppHandle,
+    updates: &[(String, String)],
+) -> Result<(), String> {
+    if updates.is_empty() {
+        return Ok(());
+    }
+    let state = app.state::<DbState>();
+    let mut conn = state.conn.lock().map_err(|e| e.to_string())?;
+    let tx = conn.transaction().map_err(|e| e.to_string())?;
+    for (id, path) in updates {
+        tx.execute(
+            "UPDATE clipboard_records
+             SET resource_path = ?1
+             WHERE id = ?2 AND COALESCE(storage_mode, 'database') = 'resource'",
+            params![path, id],
+        )
+        .map_err(|e| e.to_string())?;
+    }
+    tx.commit().map_err(|e| e.to_string())
+}
+
+fn resource_group_count_map(app: &AppHandle) -> Result<HashMap<String, u64>, String> {
+    let root = get_resource_library_dir(app);
+    let state = app.state::<DbState>();
+    let conn = state.conn.lock().map_err(|e| e.to_string())?;
+    let mut stmt = conn
+        .prepare(
+            "SELECT resource_path
+             FROM clipboard_records
+             WHERE COALESCE(storage_mode, 'database') = 'resource'",
+        )
+        .map_err(|e| e.to_string())?;
+    let rows = stmt
+        .query_map([], |row| row.get::<_, String>(0))
+        .map_err(|e| e.to_string())?;
+    let mut counts = HashMap::new();
+    for row in rows {
+        let path = row.map_err(|e| e.to_string())?;
+        if let Some(group_name) = resource_group_for_path(&root, &path) {
+            *counts.entry(group_name).or_insert(0) += 1;
+        }
+    }
+    Ok(counts)
+}
+
+#[tauri::command]
+pub fn get_resource_groups(app: AppHandle) -> Result<Vec<serde_json::Value>, String> {
+    let root = get_resource_library_dir(&app);
+    let counts = resource_group_count_map(&app)?;
+    let mut names = Vec::new();
+    let entries = std::fs::read_dir(&root).map_err(|e| format!("读取资源分组失败: {e}"))?;
+    for entry in entries {
+        let entry = entry.map_err(|e| format!("读取资源分组失败: {e}"))?;
+        if !entry
+            .file_type()
+            .map_err(|e| format!("读取资源分组失败: {e}"))?
+            .is_dir()
+        {
+            continue;
+        }
+        let Some(name) = entry.file_name().to_str().map(str::to_string) else {
+            continue;
+        };
+        if normalize_resource_group_name(Some(&name)).is_ok() {
+            names.push(name);
+        }
+    }
+    names.sort_by_key(|name| name.to_lowercase());
+
+    let mut groups = vec![serde_json::json!({
+        "name": "",
+        "count": counts.get("").copied().unwrap_or(0),
+    })];
+    groups.extend(names.into_iter().map(|name| {
+        serde_json::json!({
+            "name": name,
+            "count": counts.get(&name).copied().unwrap_or(0),
+        })
+    }));
+    Ok(groups)
+}
+
+#[tauri::command]
+pub fn create_resource_group(app: AppHandle, name: String) -> Result<serde_json::Value, String> {
+    let name = normalize_resource_group_name(Some(&name))?;
+    if name.is_empty() {
+        return Err("分组名称不能为空".to_string());
+    }
+    let path = resource_group_path(&app, &name)?;
+    std::fs::create_dir(&path).map_err(|e| format!("创建资源分组失败: {e}"))?;
+    let _ = app.emit("resource-groups-changed", ());
+    Ok(serde_json::json!({ "name": name, "count": 0 }))
+}
+
+#[tauri::command]
+pub fn update_resource_group(
+    app: AppHandle,
+    old_name: String,
+    new_name: String,
+) -> Result<(), String> {
+    let old_name = normalize_resource_group_name(Some(&old_name))?;
+    let new_name = normalize_resource_group_name(Some(&new_name))?;
+    if old_name.is_empty() || new_name.is_empty() {
+        return Err("分组名称不能为空".to_string());
+    }
+    if old_name == new_name {
+        return Ok(());
+    }
+
+    let old_path = resource_group_path(&app, &old_name)?;
+    let new_path = resource_group_path(&app, &new_name)?;
+    if !old_path.is_dir() {
+        return Err("资源分组不存在".to_string());
+    }
+    if new_path.exists() {
+        return Err("目标分组已存在".to_string());
+    }
+    let records = resource_record_paths_in_group(&app, &old_name)?;
+    let new_records = records
+        .iter()
+        .filter_map(|(id, path)| {
+            let filename = Path::new(path).file_name()?.to_os_string();
+            Some((
+                id.clone(),
+                new_path.join(filename).to_string_lossy().to_string(),
+            ))
+        })
+        .collect::<Vec<_>>();
+
+    std::fs::rename(&old_path, &new_path).map_err(|e| format!("重命名资源分组失败: {e}"))?;
+    if let Err(error) = update_resource_record_paths(&app, &new_records) {
+        let _ = std::fs::rename(&new_path, &old_path);
+        return Err(format!("更新资源路径失败: {error}"));
+    }
+    let _ = app.emit("resource-groups-changed", ());
+    Ok(())
+}
+
+fn rollback_moved_resource_files(moved: &[(PathBuf, PathBuf, Option<String>)]) {
+    for (from, to, original_content) in moved.iter().rev() {
+        if let Some(content) = original_content {
+            let _ = std::fs::write(to, content);
+        }
+        let _ = std::fs::rename(to, from);
+    }
+}
+
+#[tauri::command]
+pub fn delete_resource_group(app: AppHandle, name: String) -> Result<(), String> {
+    let name = normalize_resource_group_name(Some(&name))?;
+    if name.is_empty() {
+        return Err("未分组不能删除".to_string());
+    }
+    let root = get_resource_library_dir(&app);
+    let group_path = resource_group_path(&app, &name)?;
+    if !group_path.is_dir() {
+        return Err("资源分组不存在".to_string());
+    }
+
+    let mut entries = Vec::new();
+    for entry in std::fs::read_dir(&group_path).map_err(|e| format!("读取资源分组失败: {e}"))?
+    {
+        let entry = entry.map_err(|e| format!("读取资源分组失败: {e}"))?;
+        if !entry
+            .file_type()
+            .map_err(|e| format!("读取资源分组失败: {e}"))?
+            .is_file()
+        {
+            return Err("资源分组中不能包含子文件夹".to_string());
+        }
+        entries.push(entry.path());
+    }
+
+    for path in &entries {
+        let Some(filename) = path.file_name() else {
+            return Err("资源文件名无效".to_string());
+        };
+        if root.join(filename).exists() {
+            return Err(format!(
+                "资源库根目录已存在同名文件：{}",
+                filename.to_string_lossy()
+            ));
+        }
+    }
+
+    let records = resource_record_paths_in_group(&app, &name)?;
+    let new_records = records
+        .iter()
+        .filter_map(|(id, path)| {
+            let filename = Path::new(path).file_name()?.to_os_string();
+            Some((
+                id.clone(),
+                root.join(filename).to_string_lossy().to_string(),
+            ))
+        })
+        .collect::<Vec<_>>();
+    let mut moved = Vec::new();
+    for from in entries {
+        let filename = from
+            .file_name()
+            .ok_or_else(|| "资源文件名无效".to_string())?
+            .to_os_string();
+        let to = root.join(filename);
+        let original_content = if from
+            .extension()
+            .and_then(|extension| extension.to_str())
+            .is_some_and(|extension| extension.eq_ignore_ascii_case("md"))
+        {
+            Some(std::fs::read_to_string(&from).map_err(|e| format!("读取资源文件失败: {e}"))?)
+        } else {
+            None
+        };
+        std::fs::rename(&from, &to).map_err(|e| {
+            rollback_moved_resource_files(&moved);
+            format!("迁移资源文件失败: {e}")
+        })?;
+        moved.push((from, to.clone(), original_content.clone()));
+        if let Some(content) = original_content {
+            let updated = content.replace("../.copy-creator/", ".copy-creator/");
+            if updated != content {
+                if let Err(error) = std::fs::write(&to, updated) {
+                    rollback_moved_resource_files(&moved);
+                    return Err(format!("更新资源图片路径失败: {error}"));
+                }
+            }
+        }
+    }
+
+    if let Err(error) = update_resource_record_paths(&app, &new_records) {
+        rollback_moved_resource_files(&moved);
+        return Err(format!("更新资源路径失败: {error}"));
+    }
+    if let Err(error) = std::fs::remove_dir(&group_path) {
+        let old_records = records;
+        let _ = update_resource_record_paths(&app, &old_records);
+        rollback_moved_resource_files(&moved);
+        return Err(format!("删除资源分组失败: {error}"));
+    }
+    let _ = app.emit("resource-groups-changed", ());
+    Ok(())
+}
+
+#[tauri::command]
+pub fn open_resource_group(app: AppHandle, name: String) -> Result<(), String> {
+    let name = normalize_resource_group_name(Some(&name))?;
+    let path = resource_group_path(&app, &name)?;
+    if !path.is_dir() {
+        return Err("资源分组不存在".to_string());
+    }
+
+    #[cfg(target_os = "windows")]
+    return std::process::Command::new("explorer")
+        .arg(path)
+        .spawn()
+        .map(|_| ())
+        .map_err(|e| format!("打开资源文件夹失败: {e}"));
+
+    #[cfg(target_os = "macos")]
+    return std::process::Command::new("open")
+        .arg(path)
+        .spawn()
+        .map(|_| ())
+        .map_err(|e| format!("打开资源文件夹失败: {e}"));
+
+    #[cfg(target_os = "linux")]
+    return std::process::Command::new("xdg-open")
+        .arg(path)
+        .spawn()
+        .map(|_| ())
+        .map_err(|e| format!("打开资源文件夹失败: {e}"));
+
+    #[cfg(not(any(target_os = "windows", target_os = "macos", target_os = "linux")))]
+    Err("当前系统不支持打开资源文件夹".to_string())
+}
+
 #[tauri::command]
 pub fn ensure_thumbnail(app: AppHandle, path: String) -> Result<String, String> {
     let base = resolve_storage_path(&app, &path)?;
@@ -2684,7 +3098,10 @@ mod quick_input_file_tests {
 
 #[cfg(test)]
 mod resource_file_tests {
-    use super::{managed_resource_attachment_path, managed_resource_file_path};
+    use super::{
+        managed_resource_attachment_path, managed_resource_file_path,
+        normalize_resource_group_name, resource_group_for_path,
+    };
     use std::path::{Path, PathBuf};
 
     #[test]
@@ -2751,6 +3168,49 @@ mod resource_file_tests {
             "/tmp/resource-library/.copy-creator/attachments/record-1-transaction/image-0.png",
         )
         .is_none());
+    }
+
+    #[test]
+    fn resource_group_name_rejects_path_traversal_and_nested_paths() {
+        assert_eq!(
+            normalize_resource_group_name(Some("  References  ")).unwrap(),
+            "References"
+        );
+        assert!(normalize_resource_group_name(Some(".hidden")).is_err());
+        assert!(normalize_resource_group_name(Some("../outside")).is_err());
+        assert!(normalize_resource_group_name(Some("nested/group")).is_err());
+        assert!(normalize_resource_group_name(Some("nested\\group")).is_err());
+        assert!(normalize_resource_group_name(Some(&"x".repeat(81))).is_err());
+    }
+
+    #[test]
+    fn resource_group_for_path_distinguishes_root_and_first_level_folder() {
+        let root = Path::new("/tmp/resource-library");
+        assert_eq!(
+            resource_group_for_path(
+                root,
+                "/tmp/resource-library/copy-creator-record-1-title.txt",
+            ),
+            Some(String::new())
+        );
+        assert_eq!(
+            resource_group_for_path(
+                root,
+                "/tmp/resource-library/References/copy-creator-record-2-title.md",
+            ),
+            Some("References".to_string())
+        );
+        assert_eq!(
+            resource_group_for_path(
+                root,
+                "/tmp/resource-library/References/archive/copy-creator-record-3-title.md",
+            ),
+            None
+        );
+        assert_eq!(
+            resource_group_for_path(root, "/tmp/other-library/copy-creator-record-4-title.txt",),
+            None
+        );
     }
 }
 

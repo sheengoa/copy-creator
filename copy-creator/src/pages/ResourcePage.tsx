@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { invoke } from "@tauri-apps/api/core";
+import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import { useTranslation } from "react-i18next";
 import {
   DndContext,
@@ -18,7 +19,7 @@ import { Icons } from "../components/Icons";
 import IosSelect from "../components/IosSelect";
 import SearchInput from "../components/SearchInput";
 import BatchSelectionBar from "../components/BatchSelectionBar";
-import type { ClipboardRecord } from "../types";
+import type { ClipboardRecord, ResourceFolder } from "../types";
 import ResourceDetailPage from "./ResourcePage/ResourceDetailPage";
 import { ResourceCard, ResourceCardDragPreview } from "./ResourcePage/ResourceCard";
 import {
@@ -34,6 +35,10 @@ import {
 import { isResourceRecord } from "../utils/clipboardRecord";
 
 type ResourceSortOrder = "newest" | "oldest";
+type ResourceGroupDialogState = {
+  mode: "create" | "rename";
+  oldName?: string;
+} | null;
 
 const RESOURCE_TYPE_FILTERS: ResourceTypeFilter[] = [
   "all",
@@ -79,6 +84,14 @@ export default function ResourcePage() {
   const [resourceLibraryPathChanging, setResourceLibraryPathChanging] = useState(false);
   const [resourceLibraryPathError, setResourceLibraryPathError] = useState<string | null>(null);
   const [resourceSettingsOpen, setResourceSettingsOpen] = useState(false);
+  const [resourceGroups, setResourceGroups] = useState<ResourceFolder[]>([]);
+  const [resourceGroup, setResourceGroup] = useState<string | null>(null);
+  const [resourceGroupsLoading, setResourceGroupsLoading] = useState(true);
+  const [resourceGroupsError, setResourceGroupsError] = useState<string | null>(null);
+  const [resourceGroupManageOpen, setResourceGroupManageOpen] = useState(false);
+  const [resourceGroupDialog, setResourceGroupDialog] = useState<ResourceGroupDialogState>(null);
+  const [resourceGroupName, setResourceGroupName] = useState("");
+  const [resourceGroupSaving, setResourceGroupSaving] = useState(false);
   const resourceSettingsButtonRef = useRef<HTMLButtonElement>(null);
   const resourceSettingsPopoverRef = useRef<HTMLElement>(null);
   const [confirmState, setConfirmState] = useState<{
@@ -124,10 +137,58 @@ export default function ResourcePage() {
     if (feedbackTimerRef.current !== null) window.clearTimeout(feedbackTimerRef.current);
   }, []);
 
+  const loadResourceGroups = useCallback(async () => {
+    setResourceGroupsLoading(true);
+    try {
+      const groups = await invoke<ResourceFolder[]>("get_resource_groups");
+      setResourceGroups(groups);
+      setResourceGroupsError(null);
+      return groups;
+    } catch (error) {
+      console.error("Failed to load resource groups:", error);
+      setResourceGroupsError(t("resources.groupLoadError"));
+      return null;
+    } finally {
+      setResourceGroupsLoading(false);
+    }
+  }, [t]);
+
   useEffect(() => {
     setSearch("");
     init("resources");
   }, [init, setSearch]);
+
+  useEffect(() => {
+    void loadResourceGroups();
+  }, [loadResourceGroups]);
+
+  useEffect(() => {
+    let cancelled = false;
+    let unlisten: UnlistenFn | undefined;
+    listen("resource-groups-changed", () => {
+      void loadResourceGroups();
+    }).then((nextUnlisten) => {
+      if (cancelled) {
+        nextUnlisten();
+      } else {
+        unlisten = nextUnlisten;
+      }
+    });
+    return () => {
+      cancelled = true;
+      if (unlisten) unlisten();
+    };
+  }, [loadResourceGroups]);
+
+  useEffect(() => {
+    if (
+      resourceGroup !== null
+      && resourceGroup !== ""
+      && !resourceGroups.some((group) => group.name === resourceGroup)
+    ) {
+      setResourceGroup(null);
+    }
+  }, [resourceGroup, resourceGroups]);
 
   useEffect(() => {
     let cancelled = false;
@@ -174,10 +235,10 @@ export default function ResourcePage() {
       return;
     }
     const timer = window.setTimeout(() => {
-      void loadRecords(false, "resources");
+      void loadRecords(false, "resources", resourceGroup);
     }, 300);
     return () => window.clearTimeout(timer);
-  }, [loadRecords, search]);
+  }, [loadRecords, resourceGroup, search]);
 
   const filteredRecords = useMemo(() => {
     const next = records.filter((record) => (
@@ -302,6 +363,88 @@ export default function ResourcePage() {
     setSortOrder(value as ResourceSortOrder);
   }, [cancelResourceSelection]);
 
+  const resourceFolderGroups = useMemo(
+    () => resourceGroups.filter((group) => group.name !== ""),
+    [resourceGroups],
+  );
+  const resourceGroupCount = useMemo(
+    () => resourceGroups.reduce((total, group) => total + group.count, 0),
+    [resourceGroups],
+  );
+  const getResourceGroupLabel = useCallback((name: string) => (
+    name === "" ? t("resources.ungrouped") : name
+  ), [t]);
+
+  const handleSelectResourceGroup = useCallback((name: string | null) => {
+    cancelResourceSelection();
+    setResourceGroup(name);
+  }, [cancelResourceSelection]);
+
+  const openNewResourceGroup = useCallback(() => {
+    setResourceGroupManageOpen(false);
+    setResourceGroupName("");
+    setResourceGroupsError(null);
+    setResourceGroupDialog({ mode: "create" });
+  }, []);
+
+  const openRenameResourceGroup = useCallback((name: string) => {
+    setResourceGroupManageOpen(false);
+    setResourceGroupName(name);
+    setResourceGroupsError(null);
+    setResourceGroupDialog({ mode: "rename", oldName: name });
+  }, []);
+
+  const handleSaveResourceGroup = useCallback(async () => {
+    const name = resourceGroupName.trim();
+    if (!name || resourceGroupSaving) return;
+    setResourceGroupSaving(true);
+    setResourceGroupsError(null);
+    try {
+      if (resourceGroupDialog?.mode === "rename" && resourceGroupDialog.oldName) {
+        await invoke("update_resource_group", {
+          oldName: resourceGroupDialog.oldName,
+          newName: name,
+        });
+      } else {
+        await invoke("create_resource_group", { name });
+      }
+      await loadResourceGroups();
+      setResourceGroup(name);
+      setResourceGroupDialog(null);
+    } catch (error) {
+      console.error("Failed to save resource group:", error);
+      setResourceGroupsError(String(error));
+    } finally {
+      setResourceGroupSaving(false);
+    }
+  }, [loadResourceGroups, resourceGroupDialog, resourceGroupName, resourceGroupSaving]);
+
+  const handleOpenResourceGroup = useCallback(async (name: string) => {
+    try {
+      await invoke("open_resource_group", { name });
+    } catch (error) {
+      console.error("Failed to open resource group:", error);
+      setResourceGroupsError(String(error));
+    }
+  }, []);
+
+  const handleDeleteResourceGroup = useCallback((name: string) => {
+    setConfirmState({
+      message: t("resources.confirmDeleteGroup", { name }),
+      onConfirm: async () => {
+        try {
+          await invoke("delete_resource_group", { name });
+          await loadResourceGroups();
+          if (resourceGroup === name) setResourceGroup("");
+          setResourceGroupManageOpen(false);
+        } catch (error) {
+          console.error("Failed to delete resource group:", error);
+          setResourceGroupsError(String(error));
+        }
+      },
+    });
+  }, [loadResourceGroups, resourceGroup, t]);
+
   const handleCopy = useCallback(async (record: ClipboardRecord) => {
     const copied = await pasteRecord(record);
     showFeedback(copied ? "copied" : "copyFailed");
@@ -380,7 +523,7 @@ export default function ResourcePage() {
     const request = ++selectAllRequestRef.current;
     setSelectingAll(true);
     try {
-      const allRecords = await loadAllRecords("resources");
+      const allRecords = await loadAllRecords("resources", resourceGroup);
       if (!allRecords || request !== selectAllRequestRef.current) return;
       selectIds(
         allRecords
@@ -397,6 +540,7 @@ export default function ResourcePage() {
     allVisibleSelected,
     hasMore,
     loadAllRecords,
+    resourceGroup,
     selectIds,
     selectingAll,
     toggleAllVisible,
@@ -442,6 +586,8 @@ export default function ResourcePage() {
         path: selectedPath,
       });
       setResourceLibraryPath(savedPath);
+      setResourceGroup(null);
+      await loadResourceGroups();
     } catch (error) {
       const message = String(error).toLowerCase();
       if (!message.includes("cancelled") && !message.includes("canceled")) {
@@ -451,17 +597,18 @@ export default function ResourcePage() {
     } finally {
       setResourceLibraryPathChanging(false);
     }
-  }, [resourceLibraryPathChanging, t]);
+  }, [loadResourceGroups, resourceLibraryPathChanging, t]);
 
   const openResourceCreate = useCallback(async () => {
     try {
       await invoke("open_clipboard_create", {
         storageMode: "resource",
+        groupName: resourceGroup ?? "",
       });
     } catch {
       showFeedback("openFailed");
     }
-  }, [showFeedback]);
+  }, [resourceGroup, showFeedback]);
 
   const confirmDialog = confirmState ? (
     <div className="dialog-overlay" onClick={() => setConfirmState(null)}>
@@ -576,6 +723,68 @@ export default function ResourcePage() {
         </section>
       )}
 
+      <section
+        className="resource-group-section"
+        aria-label={t("resources.groups")}
+        aria-busy={resourceGroupsLoading}
+      >
+        <div className="resource-group-scroll">
+          <button
+            type="button"
+            className={`resource-group-chip${resourceGroup === null ? " active" : ""}`}
+            onClick={() => handleSelectResourceGroup(null)}
+          >
+            <span>{t("resources.allGroups")}</span>
+            <span className="resource-group-count">{resourceGroupCount}</span>
+          </button>
+          <button
+            type="button"
+            className={`resource-group-chip${resourceGroup === "" ? " active" : ""}`}
+            onClick={() => handleSelectResourceGroup("")}
+          >
+            <span>{t("resources.ungrouped")}</span>
+            <span className="resource-group-count">
+              {resourceGroups.find((group) => group.name === "")?.count ?? 0}
+            </span>
+          </button>
+          {resourceFolderGroups.map((group) => (
+            <button
+              key={group.name}
+              type="button"
+              className={`resource-group-chip${resourceGroup === group.name ? " active" : ""}`}
+              onClick={() => handleSelectResourceGroup(group.name)}
+              title={group.name}
+            >
+              <span>{group.name}</span>
+              <span className="resource-group-count">{group.count}</span>
+            </button>
+          ))}
+        </div>
+        <div className="resource-group-actions">
+          <button
+            type="button"
+            className="resource-group-action"
+            onClick={openNewResourceGroup}
+            aria-label={t("resources.newGroup")}
+            title={t("resources.newGroup")}
+          >
+            {Icons.add}
+          </button>
+          <button
+            type="button"
+            className="resource-group-action"
+            onClick={() => {
+              setResourceGroupsError(null);
+              setResourceGroupManageOpen(true);
+            }}
+            aria-label={t("resources.manageGroups")}
+            title={t("resources.manageGroups")}
+          >
+            {Icons.edit}
+          </button>
+        </div>
+      </section>
+
       <div className="resource-filter-row">
         <span className="resource-filter-label">{t("resources.filterByType")}</span>
         <div className="resource-filter-options">
@@ -614,6 +823,116 @@ export default function ResourcePage() {
       )}
 
       {confirmDialog}
+
+      {resourceGroupManageOpen && (
+        <div className="dialog-overlay" onClick={() => setResourceGroupManageOpen(false)}>
+          <div
+            className="dialog-content large resource-group-manage-dialog"
+            onClick={(event) => event.stopPropagation()}
+          >
+            <div className="dialog-title-row">
+              <h3 className="dialog-title">{t("resources.manageGroups")}</h3>
+              <button
+                type="button"
+                className="group-add-btn group-manage-add-btn"
+                onClick={openNewResourceGroup}
+                aria-label={t("resources.newGroup")}
+                title={t("resources.newGroup")}
+              >
+                {Icons.add}
+              </button>
+            </div>
+            {resourceGroupsError && (
+              <span className="dialog-error-text" role="alert">{resourceGroupsError}</span>
+            )}
+            <div className="resource-group-manage-list">
+              {resourceGroups.map((group) => (
+                <div key={group.name || "ungrouped"} className="resource-group-manage-row">
+                  <div className="resource-group-manage-name">
+                    <span>{getResourceGroupLabel(group.name)}</span>
+                    <span className="resource-group-manage-count">{group.count}</span>
+                  </div>
+                  <div className="resource-group-manage-actions">
+                    <button
+                      type="button"
+                      className="resource-icon-button"
+                      onClick={() => void handleOpenResourceGroup(group.name)}
+                      aria-label={t("resources.openGroup")}
+                      title={t("resources.openGroup")}
+                    >
+                      {Icons.resources}
+                    </button>
+                    {group.name && (
+                      <>
+                        <button
+                          type="button"
+                          className="resource-icon-button"
+                          onClick={() => openRenameResourceGroup(group.name)}
+                          aria-label={t("resources.renameGroup")}
+                          title={t("resources.renameGroup")}
+                        >
+                          {Icons.edit}
+                        </button>
+                        <button
+                          type="button"
+                          className="resource-delete-button"
+                          onClick={() => handleDeleteResourceGroup(group.name)}
+                          aria-label={t("common.delete")}
+                          title={t("common.delete")}
+                        >
+                          {Icons.delete}
+                        </button>
+                      </>
+                    )}
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {resourceGroupDialog && (
+        <div className="dialog-overlay" onClick={() => setResourceGroupDialog(null)}>
+          <div className="dialog-content" onClick={(event) => event.stopPropagation()}>
+            <h3 className="dialog-title">
+              {resourceGroupDialog.mode === "rename"
+                ? t("resources.renameGroup")
+                : t("resources.newGroup")}
+            </h3>
+            <input
+              className="dialog-input"
+              autoFocus
+              value={resourceGroupName}
+              placeholder={t("resources.groupName")}
+              onChange={(event) => setResourceGroupName(event.target.value)}
+              onKeyDown={(event) => {
+                if (event.key === "Enter") void handleSaveResourceGroup();
+              }}
+            />
+            {resourceGroupsError && (
+              <span className="dialog-error-text" role="alert">{resourceGroupsError}</span>
+            )}
+            <div className="dialog-actions">
+              <button
+                type="button"
+                className="dialog-btn secondary"
+                onClick={() => setResourceGroupDialog(null)}
+              >
+                {t("common.cancel")}
+              </button>
+              <button
+                type="button"
+                className="dialog-btn save"
+                onClick={() => void handleSaveResourceGroup()}
+                disabled={!resourceGroupName.trim() || resourceGroupSaving}
+              >
+                {resourceGroupSaving ? t("common.saving") : t("common.save")}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       <section className="resource-list-area">
         <div className="resource-list-heading">
@@ -657,7 +976,13 @@ export default function ResourcePage() {
         ) : filteredRecords.length === 0 ? (
           <div className="resource-empty-state">
             <div className="empty-icon-compact">{Icons.resources}</div>
-            <strong>{search.trim() || typeFilter !== "all" ? t("resources.noMatches") : t("resources.empty")}</strong>
+            <strong>
+              {search.trim() || typeFilter !== "all"
+                ? t("resources.noMatches")
+                : resourceGroup !== null
+                  ? t("resources.groupEmpty")
+                  : t("resources.empty")}
+            </strong>
             <span>{t("resources.modeResourceHint")}</span>
             {hasMore && (
               <button type="button" className="resource-secondary-button" onClick={() => void loadRecords(true, "resources")}>

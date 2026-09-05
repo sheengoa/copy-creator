@@ -20,6 +20,7 @@ interface StashRecord {
   has_images?: boolean;
   storage_mode?: ClipboardStorageMode;
   resource_path?: string;
+  resource_group?: string | null;
 }
 
 export default function ClipboardCreateDialog() {
@@ -30,6 +31,7 @@ export default function ClipboardCreateDialog() {
   const [saving, setSaving] = useState(false);
   const [stashRecords, setStashRecords] = useState<StashRecord[]>([]);
   const [storageMode, setStorageMode] = useState<ClipboardStorageMode>("database");
+  const [resourceGroupName, setResourceGroupName] = useState("");
   const [loadingRecords, setLoadingRecords] = useState(true);
   const [loadingRecordId, setLoadingRecordId] = useState<string | null>(null);
   const [editingId, setEditingId] = useState<string | null>(null);
@@ -48,7 +50,11 @@ export default function ClipboardCreateDialog() {
   }, []);
 
   // 剪贴板入口列出普通剪贴板记录（临时标记已废弃并迁移），资源入口列出资源记录。
-  const loadStashRecords = useCallback(async (mode: ClipboardStorageMode, showLoading = false) => {
+  const loadStashRecords = useCallback(async (
+    mode: ClipboardStorageMode,
+    showLoading = false,
+    groupName = "",
+  ) => {
     if (showLoading) setLoadingRecords(true);
     try {
       const isResource = mode === "resource";
@@ -56,6 +62,7 @@ export default function ClipboardCreateDialog() {
         limit: 120,
         offset: 0,
         category: isResource ? "resources" : "all",
+        ...(isResource ? { resource_group: groupName } : {}),
       });
       setStashRecords(records.filter((record) =>
         (isResource ? isResourceRecord(record) : !isResourceRecord(record))
@@ -97,6 +104,7 @@ export default function ClipboardCreateDialog() {
     listen<{
       theme: string;
       storage_mode?: ClipboardStorageMode | null;
+      group_name?: string | null;
     }>("clipboard-create-show", (e) => {
       cancelResizeSave();
       document.documentElement.setAttribute("data-theme", e.payload.theme);
@@ -104,9 +112,10 @@ export default function ClipboardCreateDialog() {
       setEditingId(null);
       const mode: ClipboardStorageMode = e.payload.storage_mode === "resource" ? "resource" : "database";
       setStorageMode(mode);
+      setResourceGroupName(mode === "resource" ? e.payload.group_name || "" : "");
       setError(null);
       setDropdownOpen(false);
-      loadStashRecords(mode);
+      loadStashRecords(mode, false, mode === "resource" ? e.payload.group_name || "" : "");
       setTimeout(() => editorRef.current?.focus(), 50);
     }).then((fn) => { unlistenShow = fn; });
 
@@ -155,6 +164,7 @@ export default function ClipboardCreateDialog() {
         content: trimmed,
         images: images.map((image) => image.sourcePath || image.dataUrl),
         storageMode,
+        ...(storageMode === "resource" ? { groupName: resourceGroupName } : {}),
       });
       resetDraft();
       setEditingId(null);
@@ -165,7 +175,7 @@ export default function ClipboardCreateDialog() {
     } finally {
       setSaving(false);
     }
-  }, [content, editingId, images, saving, storageMode, hideWindow, resetDraft, t]);
+  }, [content, editingId, images, resourceGroupName, saving, storageMode, hideWindow, resetDraft, t]);
 
   const handleSelectRecord = useCallback(async (record: StashRecord) => {
     if (loadingRecordId) return;
@@ -186,6 +196,7 @@ export default function ClipboardCreateDialog() {
       })));
       setEditingId(record.id);
       setStorageMode(record.storage_mode === "resource" ? "resource" : "database");
+      setResourceGroupName(record.storage_mode === "resource" ? record.resource_group || "" : "");
       resetDraft(fullContent, imageData);
       setTimeout(() => editorRef.current?.focus(), 0);
     } catch (e) {
@@ -211,8 +222,8 @@ export default function ClipboardCreateDialog() {
     setEditingId(null);
     setDropdownOpen(false);
     setError(null);
-    loadStashRecords(mode);
-  }, [loadStashRecords, storageMode]);
+    loadStashRecords(mode, false, mode === "resource" ? resourceGroupName : "");
+  }, [loadStashRecords, resourceGroupName, storageMode]);
 
   const handleKeyDown = useCallback((e: React.KeyboardEvent) => {
     if (e.key === "Escape") {

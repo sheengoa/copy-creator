@@ -25,6 +25,7 @@ export interface ClipboardRecord {
   drag_path?: string;
   storage_mode?: ClipboardStorageMode;
   resource_path?: string;
+  resource_group?: string | null;
 }
 
 export interface PhraseGroup {
@@ -41,6 +42,11 @@ export interface ResourceGroup {
   sort_order: number;
   created_at: string;
   updated_at: string;
+}
+
+export interface ResourceFolder {
+  name: string;
+  count: number;
 }
 
 export interface Phrase {

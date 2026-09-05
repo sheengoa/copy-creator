@@ -35,6 +35,7 @@ interface ClipboardRecord {
   drag_path?: string;
   storage_mode?: "database" | "resource";
   resource_path?: string;
+  resource_group?: string | null;
 }
 
 const PAGE_SIZE = 120;
@@ -49,12 +50,20 @@ interface ClipboardState {
   imageCache: Record<string, string>;
   category: ClipType;
   initialized: boolean;
+  resourceGroup: string | null;
 
   init: (categoryOverride?: ClipType) => void;
   setSearch: (s: string) => void;
   setCategory: (c: ClipType) => void;
-  loadRecords: (append?: boolean, categoryOverride?: ClipType) => Promise<void>;
-  loadAllRecords: (categoryOverride?: ClipType) => Promise<ClipboardRecord[] | null>;
+  loadRecords: (
+    append?: boolean,
+    categoryOverride?: ClipType,
+    resourceGroup?: string | null,
+  ) => Promise<void>;
+  loadAllRecords: (
+    categoryOverride?: ClipType,
+    resourceGroup?: string | null,
+  ) => Promise<ClipboardRecord[] | null>;
   updateRecordLabel: (id: string, label: ApiKeyLabel) => void;
   deleteRecords: (ids: string[]) => Promise<void>;
   deleteRecord: (id: string) => Promise<void>;
@@ -105,10 +114,15 @@ function trimCache(cache: Record<string, string>, maxEntries: number) {
   return Object.fromEntries(entries.slice(entries.length - maxEntries));
 }
 
-function recordMatchesCategory(record: ClipboardRecord, category: ClipType) {
+function recordMatchesCategory(
+  record: ClipboardRecord,
+  category: ClipType,
+  resourceGroup: string | null = null,
+) {
   if (category === "all") return !isResourceRecord(record);
   if ((category as string) === "resources") {
-    return isResourceRecord(record);
+    return isResourceRecord(record)
+      && (resourceGroup === null || record.resource_group === resourceGroup);
   }
   return !isResourceRecord(record) && record.type === category;
 }
@@ -134,13 +148,14 @@ export const useClipboardStore = create<ClipboardState>((set, get) => ({
   imageCache: {},
   category: "all",
   initialized: false,
+  resourceGroup: null,
 
   init: (categoryOverride?: ClipType) => {
     const initialized = get().initialized;
     const previousCategory = get().category;
     if (categoryOverride && previousCategory !== categoryOverride) {
       recordsLoadGeneration++;
-      set({ category: categoryOverride });
+      set({ category: categoryOverride, resourceGroup: null });
     }
     if (initialized) {
       if (categoryOverride) {
@@ -155,7 +170,7 @@ export const useClipboardStore = create<ClipboardState>((set, get) => ({
       set((state) => {
         // Skip if record with same ID already exists (prevents loadRecords race)
         if (state.records.some((r) => r.id === newRecord.id)) return state;
-        if (!recordMatchesCategory(newRecord, state.category)) return state;
+        if (!recordMatchesCategory(newRecord, state.category, state.resourceGroup)) return state;
         if (!recordMatchesSearch(newRecord, state.search)) return state;
         return { records: [newRecord, ...state.records].slice(0, 2000) };
       });
@@ -205,10 +220,14 @@ export const useClipboardStore = create<ClipboardState>((set, get) => ({
   },
   setCategory: (c) => {
     recordsLoadGeneration++;
-    set({ category: c });
+    set({ category: c, resourceGroup: null });
   },
 
-  loadRecords: async (append = false, categoryOverride?: ClipType) => {
+  loadRecords: async (
+    append = false,
+    categoryOverride?: ClipType,
+    resourceGroup?: string | null,
+  ) => {
     const request = ++recordsLoadGeneration;
     set({ loading: true, loadError: null });
     try {
@@ -216,19 +235,27 @@ export const useClipboardStore = create<ClipboardState>((set, get) => ({
       const s = state.search || undefined;
       const activeCategory = categoryOverride ?? state.category;
       const cat = activeCategory !== "all" ? activeCategory : undefined;
+      const activeResourceGroup = activeCategory === "resources"
+        ? resourceGroup !== undefined ? resourceGroup : state.resourceGroup
+        : null;
       const offset = append ? state.records.length : 0;
-      const records = await invoke<ClipboardRecord[]>("get_clipboard_records", {
+      const requestArgs = {
         search: s,
         limit: PAGE_SIZE,
         offset,
         category: cat,
-      });
+        ...(activeCategory === "resources" && resourceGroup !== undefined
+          ? { resource_group: resourceGroup }
+          : {}),
+      };
+      const records = await invoke<ClipboardRecord[]>("get_clipboard_records", requestArgs);
       if (request !== recordsLoadGeneration) return;
       if (append) {
         set((prev) => ({
           records: [...prev.records, ...records],
           hasMore: records.length >= PAGE_SIZE,
           category: activeCategory,
+          resourceGroup: activeResourceGroup,
           loadError: null,
         }));
       } else {
@@ -236,6 +263,7 @@ export const useClipboardStore = create<ClipboardState>((set, get) => ({
           records,
           hasMore: records.length >= PAGE_SIZE,
           category: activeCategory,
+          resourceGroup: activeResourceGroup,
           loadError: null,
         });
       }
@@ -251,7 +279,10 @@ export const useClipboardStore = create<ClipboardState>((set, get) => ({
     }
   },
 
-  loadAllRecords: async (categoryOverride?: ClipType) => {
+  loadAllRecords: async (
+    categoryOverride?: ClipType,
+    resourceGroup?: string | null,
+  ) => {
     const request = ++recordsLoadGeneration;
     set({ loading: true, loadError: null });
     try {
@@ -259,17 +290,24 @@ export const useClipboardStore = create<ClipboardState>((set, get) => ({
       const search = state.search || undefined;
       const activeCategory = categoryOverride ?? state.category;
       const category = activeCategory !== "all" ? activeCategory : undefined;
+      const activeResourceGroup = activeCategory === "resources"
+        ? resourceGroup !== undefined ? resourceGroup : state.resourceGroup
+        : null;
       const allRecords: ClipboardRecord[] = [];
       let offset = 0;
 
       while (true) {
         if (request !== recordsLoadGeneration) return null;
-        const page = await invoke<ClipboardRecord[]>("get_clipboard_records", {
+        const requestArgs = {
           search,
           limit: PAGE_SIZE,
           offset,
           category,
-        });
+          ...(activeCategory === "resources" && resourceGroup !== undefined
+            ? { resource_group: resourceGroup }
+            : {}),
+        };
+        const page = await invoke<ClipboardRecord[]>("get_clipboard_records", requestArgs);
         if (request !== recordsLoadGeneration) return null;
         allRecords.push(...page);
         if (page.length < PAGE_SIZE) break;
@@ -283,7 +321,13 @@ export const useClipboardStore = create<ClipboardState>((set, get) => ({
       ) {
         return null;
       }
-      set({ records: allRecords, hasMore: false, category: activeCategory, loadError: null });
+      set({
+        records: allRecords,
+        hasMore: false,
+        category: activeCategory,
+        resourceGroup: activeResourceGroup,
+        loadError: null,
+      });
       return allRecords;
     } catch (e) {
       console.error("Failed to load all clipboard records:", e);

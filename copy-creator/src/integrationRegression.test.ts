@@ -147,30 +147,40 @@ describe("integration regressions", () => {
     expect(componentSource).toContain("i18n.changeLanguage");
   });
 
-  it("keeps resource modes simple without groups in the resource area", () => {
+  it("supports resource groups through library subfolders", () => {
     const dbSource = readSource("../src-tauri/src/db.rs");
     const clipboardSource = readSource("../src-tauri/src/clipboard.rs");
     const pageSource = readSource("./pages/ResourcePage.tsx");
     const componentSource = readSource("./components/ClipboardCreateDialog/index.tsx");
 
     expect(dbSource).toContain("DROP TABLE IF EXISTS resource_groups");
-    expect(dbSource).not.toContain("CREATE TABLE IF NOT EXISTS resource_groups");
-    expect(dbSource).not.toContain("pub fn get_resource_groups");
-    expect(dbSource).not.toContain("pub fn create_resource_group");
-    expect(dbSource).not.toContain("pub fn update_resource_group");
-    expect(dbSource).not.toContain("pub fn delete_resource_group");
-    expect(dbSource).not.toContain("pub fn reorder_resource_groups");
-    expect(dbSource).not.toContain("TEMP_STASH_GROUP_NAME");
+    expect(dbSource).toContain("pub fn get_resource_groups");
+    expect(dbSource).toContain("pub fn create_resource_group");
+    expect(dbSource).toContain("pub fn update_resource_group");
+    expect(dbSource).toContain("pub fn delete_resource_group");
+    expect(dbSource).toContain("pub fn open_resource_group");
+    expect(dbSource).toContain("resource_group_for_path");
+    expect(dbSource).toContain("normalize_resource_group_name");
     expect(dbSource).toContain("WHERE group_name IN ('stash', '暂存', '默认', '临时')");
     expect(clipboardSource).toContain("target_group_name");
+    expect(clipboardSource).toContain("resource_group_path");
+    expect(clipboardSource).toContain("render_resource_markdown");
+    expect(clipboardSource).toContain('emit("resource-groups-changed"');
+    expect(dbSource).toContain('emit("resource-groups-changed"');
     expect(pageSource).not.toContain("ResourceMode");
     expect(pageSource).not.toContain("handleSwitchMode");
     expect(pageSource).not.toContain("isTempRecord");
     expect(pageSource).not.toContain("resource-mode-tab");
     expect(pageSource).toContain('storageMode: "resource"');
+    expect(pageSource).toContain("get_resource_groups");
+    expect(pageSource).toContain("resource-group-section");
+    expect(pageSource).toContain('listen("resource-groups-changed"');
+    expect(pageSource).toContain("resourceGroup");
     expect(pageSource).not.toContain("useResourceGroupStore");
     expect(pageSource).not.toContain("<GroupChips");
     expect(componentSource).toContain('category: isResource ? "resources" : "all"');
+    expect(componentSource).toContain("resource_group: groupName");
+    expect(componentSource).toContain("groupName: resourceGroupName");
     expect(componentSource).not.toContain("clipboard-create-storage-toggle");
     expect(componentSource).not.toContain("clipboard-create-resource-group-section");
     expect(componentSource).toContain("stashRecords");
