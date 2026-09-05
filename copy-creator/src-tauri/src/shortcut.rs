@@ -98,21 +98,137 @@ pub fn toggle_window(app: &AppHandle) {
 
 // ---- radial menu ----
 
+// ---- 窗口层级约定（最终定论，后续不得再更改窗口层级关系）----
+//
+// 本应用自有窗口的堆叠顺序自上而下固定为：
+//   1. 径向菜单（radial-menu）
+//   2. 编辑/新建窗口（clipboard-create）
+//   3. 主窗口（main）
+//
+// 实现约束（与层级约定绑定，一并冻结）：
+// * always_on_top 必须在窗口 show() 映射之后再设置。部分 Linux 窗口管理器
+//   （如 GNOME）对未映射（隐藏）窗口的置顶设置不生效，径向菜单会因此掉到
+//   普通层，被主窗口/编辑窗口完全遮住。
+// * keep-above 状态的切换在 mutter 上只改变层归属，不会在置顶层内部重新
+//   排序；窗口间（如径向菜单 vs 编辑窗口）的先后必须靠显式抬升
+//   （gdk_window_raise）决定，抬升顺序 = 堆叠顺序。
+// * mutter 还有"焦点窗口压制未聚焦窗口抬升"的堆叠约束：用户点击过编辑/
+//   主窗口后它持有焦点，径向菜单的常规抬升与 set_focus（防抢占策略拒绝）
+//   都会被压到焦点窗口之下。因此径向菜单显示时必须以 pager 来源发送
+//   _NET_ACTIVE_WINDOW 激活消息（mutter 对 pager 来源不做防抢占拦截），
+//   确定性获得焦点与置顶。粘贴流程不受影响：径向菜单隐藏后焦点自动
+//   落回先前窗口，合成 Ctrl+V 仍到达原窗口。
+// * raise_visible_popup_windows 的抬升顺序必须保持"先编辑窗口、后径向菜单"。
+
+#[cfg(target_os = "linux")]
+fn raise_gdk_window(window: &tauri::WebviewWindow) {
+    use gtk::prelude::*;
+    // GTK 调用必须落在主线程；gdk_window_raise 在 X11 下即 XRaiseWindow，
+    // 确定性把窗口顶到所在层最上面。
+    let window = window.clone();
+    let emitter = window.clone();
+    let _ = emitter.run_on_main_thread(move || {
+        if let Ok(gtk_window) = window.gtk_window() {
+            if let Some(gdk_window) = gtk_window.window() {
+                gdk_window.raise();
+            }
+        }
+    });
+}
+
 fn raise_always_on_top_without_focus(window: &tauri::WebviewWindow) {
-    // 隐藏窗口首次显示时已经由窗口配置保证置顶，不要先切换置顶状态，
-    // 否则窗口映射与置顶重排会在打开瞬间产生闪烁。
-    if window.is_visible().unwrap_or(false) {
-        let _ = window.set_always_on_top(false);
-        let _ = window.set_always_on_top(true);
-    } else {
-        let _ = window.set_always_on_top(true);
+    if !window.is_visible().unwrap_or(false) {
+        let _ = window.show();
     }
-    let _ = window.show();
+    // 窗口已处于映射状态，重新应用置顶以确保层级生效。
+    let _ = window.set_always_on_top(false);
+    let _ = window.set_always_on_top(true);
+    #[cfg(target_os = "linux")]
+    raise_gdk_window(window);
+}
+
+/// 以 pager 来源发送 _NET_ACTIVE_WINDOW 激活消息（仅 X11；Wayland 下无
+/// DISPLAY 时静默跳过，保持原有 set_focus 行为）。见顶部层级约定注释。
+#[cfg(target_os = "linux")]
+fn activate_window_via_x11(window: &tauri::WebviewWindow) {
+    use gtk::prelude::*;
+    use std::ffi::CString;
+    use std::os::raw::{c_char, c_int, c_long, c_ulong, c_void};
+
+    #[link(name = "X11")]
+    extern "C" {
+        fn XOpenDisplay(name: *const c_char) -> *mut c_void;
+        fn XCloseDisplay(display: *mut c_void);
+        fn XInternAtom(display: *mut c_void, name: *const c_char, only_if_exists: c_int) -> c_ulong;
+        fn XSendEvent(
+            display: *mut c_void,
+            w: c_long,
+            propagate: c_int,
+            event_mask: c_long,
+            event: *mut [c_long; 24],
+        ) -> c_int;
+        fn XFlush(display: *mut c_void);
+        fn XDefaultRootWindow(display: *mut c_void) -> c_ulong;
+    }
+    #[link(name = "gdk-3")]
+    extern "C" {
+        fn gdk_x11_window_get_xid(window: *mut c_void) -> c_ulong;
+    }
+
+    // 取 X 窗口 id 必须在主线程访问 GTK 对象。
+    let window = window.clone();
+    let emitter = window.clone();
+    let _ = emitter.run_on_main_thread(move || {
+        let Ok(gtk_window) = window.gtk_window() else {
+            return;
+        };
+        let Some(gdk_window) = gtk_window.window() else {
+            return;
+        };
+        let stash = <gtk::gdk::Window as gtk::glib::translate::ToGlibPtr<'_, *mut gtk::gdk::ffi::GdkWindow>>::to_glib_none(&gdk_window);
+        let xid = unsafe { gdk_x11_window_get_xid(stash.0 as *mut c_void) };
+        if xid == 0 {
+            return;
+        }
+        unsafe {
+            let display = XOpenDisplay(std::ptr::null());
+            if display.is_null() {
+                return;
+            }
+            let atom_active = CString::new("_NET_ACTIVE_WINDOW").unwrap();
+            let message_type = XInternAtom(display, atom_active.as_ptr(), 0);
+            // XEvent 按平台长字长度铺开；ClientMessage 字段依次为
+            // type/serial/send_event/display/window/message_type/format/data.l[5]。
+            let mut event: [c_long; 24] = [0; 24];
+            event[0] = 33; // ClientMessage
+            event[4] = xid as c_long;
+            event[5] = message_type as c_long;
+            event[6] = 32; // format
+            event[7] = 1; // source indication: pager
+            event[8] = 0; // timestamp: CurrentTime
+            event[9] = 0; // requestor's active window
+            const SUBSTRUCTURE_REDIRECT: c_long = 1 << 20;
+            const SUBSTRUCTURE_NOTIFY: c_long = 1 << 19;
+            XSendEvent(
+                display,
+                XDefaultRootWindow(display) as c_long,
+                0,
+                SUBSTRUCTURE_REDIRECT | SUBSTRUCTURE_NOTIFY,
+                &mut event,
+            );
+            XFlush(display);
+            XCloseDisplay(display);
+        }
+    });
 }
 
 fn raise_always_on_top(window: &tauri::WebviewWindow) {
     raise_always_on_top_without_focus(window);
     let _ = window.set_focus();
+    // X11 下 set_focus 会被 mutter 防抢占策略拒绝（焦点窗口压制约束），
+    // 改以 pager 激活消息确保焦点与置顶同时生效。
+    #[cfg(target_os = "linux")]
+    activate_window_via_x11(window);
 }
 
 pub(crate) fn has_visible_popup_window(app: &AppHandle) -> bool {
@@ -123,23 +239,21 @@ pub(crate) fn has_visible_popup_window(app: &AppHandle) -> bool {
     })
 }
 
-fn raise_visible_radial_menu(app: &AppHandle) {
-    if let Some(radial) = app.get_webview_window("radial-menu") {
-        if radial.is_visible().unwrap_or(false) {
-            raise_always_on_top_without_focus(&radial);
-        }
-    }
-}
-
 pub(crate) fn raise_visible_popup_windows(app: &AppHandle) {
-    // Both popup windows are always-on-top. Re-raise them in order so the
-    // radial menu remains above the clipboard-create window.
+    // 窗口层级约定（勿改）：两个弹窗均为 always-on-top，按"先编辑窗口、
+    // 后径向菜单"的顺序激活。激活是 X11 上唯一可靠的堆叠原语（mutter 会
+    // 用焦点约束压制未聚焦窗口的普通抬升），后激活者位于最上层，因此
+    // 焦点最终落在径向菜单。
     if let Some(create) = app.get_webview_window("clipboard-create") {
         if create.is_visible().unwrap_or(false) {
-            raise_always_on_top_without_focus(&create);
+            raise_always_on_top(&create);
         }
     }
-    raise_visible_radial_menu(app);
+    if let Some(radial) = app.get_webview_window("radial-menu") {
+        if radial.is_visible().unwrap_or(false) {
+            raise_always_on_top(&radial);
+        }
+    }
 }
 
 pub fn show_radial_menu(app: &AppHandle) {
@@ -336,12 +450,9 @@ pub fn show_clipboard_create(
     // 读取主题
     let theme = crate::db::get_setting_sync(app, "theme").unwrap_or_else(|| "light".to_string());
 
-    if let Err(error) = window.show() {
-        log::warn!("[show_clipboard_create] show failed: {error}");
-    }
-    if let Err(error) = window.set_focus() {
-        log::warn!("[show_clipboard_create] set_focus failed: {error}");
-    }
+    // 抬升并激活（含 X11 pager 激活），确保新建窗口位于主窗口之上；
+    // 主窗口持有焦点时普通抬升会被 mutter 焦点约束压制。
+    raise_always_on_top(&window);
     // 新建窗口打开时可能抢到置顶窗口的堆叠顺序，恢复两个弹窗的固定顺序。
     raise_visible_popup_windows(app);
 

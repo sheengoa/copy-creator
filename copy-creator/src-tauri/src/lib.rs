@@ -20,6 +20,10 @@ pub(crate) fn show_main_window(app: &tauri::AppHandle, reason: &str, center: boo
 
     log::info!("[show_main_window] showing main window ({reason})");
 
+    // 窗口层级约定（勿改）：径向菜单 > 编辑/新建窗口 > 主窗口。主窗口显示时
+    // 临时置顶只为压过其他应用的窗口，随后回落；自有弹窗可见时，始终通过
+    // shortcut::raise_visible_popup_windows 把弹窗顶回最上层。详见 shortcut.rs
+    // 顶部的"窗口层级约定"注释。
     let popup_visible = shortcut::has_visible_popup_window(app);
     let was_pinned = window.is_always_on_top().unwrap_or(false);
     if let Err(e) = window.set_always_on_top(true) {
