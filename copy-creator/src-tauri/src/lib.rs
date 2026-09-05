@@ -3,6 +3,7 @@ mod clipboard;
 mod db;
 #[cfg(target_os = "linux")]
 mod ipc;
+mod media_server;
 mod paste;
 mod radial_drag;
 mod shortcut;
@@ -113,6 +114,7 @@ pub fn run() {
 
             db::init_db(app.handle())?;
             db::prune_old_records(app.handle()).ok();
+            media_server::spawn(app.handle());
 
             // Restore persisted theme; DB init defaults to light, so
             // the first-ever launch will be light mode.
@@ -330,6 +332,9 @@ pub fn run() {
             db::update_resource_group,
             db::delete_resource_group,
             db::open_resource_group,
+            db::open_resource_file,
+            db::set_resource_note,
+            media_server::get_media_server_origin,
             translator::translate,
             shortcut::update_shortcut,
             shortcut::update_radial_shortcut,

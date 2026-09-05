@@ -1,8 +1,13 @@
 import { convertFileSrc, invoke } from "@tauri-apps/api/core";
-import type { ClipboardRecord } from "../../types";
+import type { ClipboardRecord, ResourceFolder } from "../../types";
 
 export type ResourceMediaKind = "text" | "image" | "video" | "audio" | "file";
 export type ResourceTypeFilter = "all" | ResourceMediaKind;
+
+export interface FlattenedResourceFolder {
+  folder: ResourceFolder;
+  depth: number;
+}
 
 const VIDEO_EXTENSIONS = new Set(["avi", "m4v", "mkv", "mov", "mp4", "ogv", "webm"]);
 const AUDIO_EXTENSIONS = new Set([
@@ -91,8 +96,6 @@ const TEXT_EXTENSIONS = new Set([
   "yml",
 ]);
 
-let storagePathPromise: Promise<string> | null = null;
-
 export function getResourceFileName(value: string): string {
   const normalized = value.replace(/\\/g, "/").replace(/[?#].*$/, "");
   const withoutScheme = normalized.replace(/^file:\/\/(?:localhost)?/i, "");
@@ -136,12 +139,13 @@ export function getResourceTitle(
   record: Pick<ClipboardRecord, "type" | "content" | "resource_kind" | "resource_path">,
   kind = inferResourceMediaKind(record),
 ): string {
+  const resourcePath = record.type === "file" ? record.resource_path || record.content : record.content;
   if (record.type === "file" && (record.resource_kind || kind === "text")) {
-    return getResourceFileName(record.resource_path || record.content);
+    return getResourceFileName(resourcePath);
   }
   if (kind === "image" && record.type === "image") return getResourceFileName(record.content);
   if (kind === "video" || kind === "audio" || kind === "file") {
-    return getResourceFileName(record.content);
+    return getResourceFileName(resourcePath);
   }
 
   const firstLine = record.content
@@ -152,6 +156,12 @@ export function getResourceTitle(
     .find(Boolean);
   if (firstLine) return firstLine.slice(0, 80);
   return record.type === "link" ? "链接内容" : "文本内容";
+}
+
+export function getResourcePath(
+  record: Pick<ClipboardRecord, "type" | "content" | "resource_path">,
+): string {
+  return record.type === "file" ? record.resource_path || record.content : record.content;
 }
 
 export function getResourceSummary(record: Pick<ClipboardRecord, "type" | "content">): string {
@@ -185,6 +195,79 @@ export function formatResourceFileSize(size?: number): string {
   return `${value.toFixed(precision)} ${units[unitIndex]}`;
 }
 
+// 列宽低于该值时保持最少两列（用户要求最低两排），随窗口变宽逐步增加列数。
+const RESOURCE_COLUMN_MIN_WIDTH = 460;
+const RESOURCE_COLUMN_GAP = 10;
+const RESOURCE_COLUMN_MAX = 5;
+
+export function computeResourceColumnCount(width: number): number {
+  if (!Number.isFinite(width) || width <= 0) return 2;
+  const usable = width + RESOURCE_COLUMN_GAP;
+  const columnSlot = RESOURCE_COLUMN_MIN_WIDTH + RESOURCE_COLUMN_GAP;
+  const count = Math.floor(usable / columnSlot);
+  return Math.min(RESOURCE_COLUMN_MAX, Math.max(2, count));
+}
+
+export function formatResourceDuration(seconds?: number): string {
+  if (seconds === undefined || !Number.isFinite(seconds) || seconds <= 0) return "";
+  const total = Math.round(seconds);
+  const hours = Math.floor(total / 3600);
+  const minutes = Math.floor((total % 3600) / 60);
+  const secs = total % 60;
+  const two = (value: number) => value.toString().padStart(2, "0");
+  return hours > 0
+    ? `${hours}:${two(minutes)}:${two(secs)}`
+    : `${minutes}:${two(secs)}`;
+}
+
+export function formatResourceBitrate(bytes?: number, seconds?: number): string {
+  if (
+    bytes === undefined
+    || !Number.isFinite(bytes)
+    || bytes <= 0
+    || seconds === undefined
+    || !Number.isFinite(seconds)
+    || seconds <= 0
+  ) {
+    return "";
+  }
+  const bitsPerSecond = (bytes * 8) / seconds;
+  if (bitsPerSecond >= 1_000_000) {
+    return `${(bitsPerSecond / 1_000_000).toFixed(1)} Mbps`;
+  }
+  return `${Math.max(1, Math.round(bitsPerSecond / 1000))} kbps`;
+}
+
+export function flattenResourceFolders(
+  folders: ResourceFolder[],
+  depth = 0,
+): FlattenedResourceFolder[] {
+  return folders.flatMap((folder) => [
+    { folder, depth },
+    ...flattenResourceFolders(folder.children ?? [], depth + 1),
+  ]);
+}
+
+export function findResourceFolder(
+  folders: ResourceFolder[],
+  path: string,
+): ResourceFolder | null {
+  for (const folder of folders) {
+    if (folder.path === path) return folder;
+    const found = findResourceFolder(folder.children ?? [], path);
+    if (found) return found;
+  }
+  return null;
+}
+
+export function isResourceFolderPath(path: string, ancestor: string): boolean {
+  return path === ancestor || path.startsWith(`${ancestor}/`);
+}
+
+export function getResourceFolderRoot(path: string): string {
+  return path.split("/")[0] || "";
+}
+
 // 交错分配保证双列布局按行阅读时与时间顺序一致，配合拖拽预览的扁平排序。
 export function splitResourceColumns(records: ClipboardRecord[], columnCount: number): ClipboardRecord[][] {
   const count = Math.max(1, Math.floor(columnCount));
@@ -211,18 +294,51 @@ function isAbsoluteLocalPath(value: string): boolean {
   return value.startsWith("/") || /^[A-Za-z]:[\\/]/.test(value);
 }
 
-export async function resolveResourceAssetUrl(path: string): Promise<string> {
-  const normalized = normalizeLocalPath(path);
-  if (!normalized) throw new Error("资源路径为空");
-  if (/^(?:https?:|data:|blob:|asset:)/i.test(normalized)) return normalized;
-  if (isAbsoluteLocalPath(normalized)) return convertFileSrc(normalized);
+let storagePathPromise: Promise<string> | null = null;
+let mediaServerPromise: Promise<{ origin: string; token: string }> | null = null;
 
+function getStoragePath(): Promise<string> {
   if (!storagePathPromise) {
     storagePathPromise = invoke<string>("get_storage_path").catch((error) => {
       storagePathPromise = null;
       throw error;
     });
   }
-  const storagePath = (await storagePathPromise).replace(/[\\/]+$/, "");
-  return convertFileSrc(`${storagePath}/${normalized.replace(/^[\\/]+/, "")}`);
+  return storagePathPromise;
+}
+
+function getMediaServer(): Promise<{ origin: string; token: string }> {
+  if (!mediaServerPromise) {
+    mediaServerPromise = invoke<{ origin: string; token: string }>(
+      "get_media_server_origin",
+    ).catch((error) => {
+      mediaServerPromise = null;
+      throw error;
+    });
+  }
+  return mediaServerPromise;
+}
+
+async function resolveAbsoluteResourcePath(path: string): Promise<string> {
+  const normalized = normalizeLocalPath(path);
+  if (!normalized) throw new Error("资源路径为空");
+  if (/^(?:https?:|data:|blob:|asset:)/i.test(normalized)) return normalized;
+  if (isAbsoluteLocalPath(normalized)) return normalized;
+
+  const storagePath = (await getStoragePath()).replace(/[\\/]+$/, "");
+  return `${storagePath}/${normalized.replace(/^[\\/]+/, "")}`;
+}
+
+export async function resolveResourceAssetUrl(path: string): Promise<string> {
+  const absolute = await resolveAbsoluteResourcePath(path);
+  return convertFileSrc(absolute);
+}
+
+// WebKitGTK 的 <video>/<audio> 无法播放 asset:// 协议地址（媒体协议白名单
+// 与 GStreamer 均不支持自定义协议），媒体预览需改走后端回环 HTTP 服务。
+export async function resolveResourceMediaUrl(path: string): Promise<string> {
+  const absolute = await resolveAbsoluteResourcePath(path);
+  if (!isAbsoluteLocalPath(absolute)) return absolute;
+  const { origin, token } = await getMediaServer();
+  return `${origin}/media?token=${encodeURIComponent(token)}&path=${encodeURIComponent(absolute)}`;
 }

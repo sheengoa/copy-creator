@@ -28,8 +28,10 @@ export interface ClipboardRecord {
   resource_group?: string | null;
   resource_kind?: "text" | "image" | "video" | "audio" | "file";
   resource_relative_path?: string;
+  resource_folder?: string | null;
   resource_file_size?: number;
   resource_managed?: boolean;
+  resource_note?: string | null;
 }
 
 export interface PhraseGroup {
@@ -50,7 +52,9 @@ export interface ResourceGroup {
 
 export interface ResourceFolder {
   name: string;
+  path: string;
   count: number;
+  children: ResourceFolder[];
 }
 
 export interface Phrase {

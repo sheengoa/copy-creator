@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
 import type { RadialPreviewSegment } from "../utils/radialPreview";
 import { resolveResourceAssetUrl } from "../pages/ResourcePage/resourceUtils";
+import { ResourceMediaPlayer } from "../pages/ResourcePage/ResourceMedia";
 import { Icons } from "./Icons";
 
 interface ContentPreviewPanelProps {
@@ -93,8 +94,14 @@ export function ContentPreviewPanel({
             <div className="content-preview-text" key={`text-${index}`}>
               {segment.content}
             </div>
-          ) : (
+          ) : segment.type === "image" ? (
             <PreviewImage path={segment.path} key={`image-${index}-${segment.path}`} />
+          ) : (
+            <ResourceMediaPlayer
+              kind={segment.type}
+              path={segment.path}
+              key={`media-${index}-${segment.path}`}
+            />
           ))
         )}
       </div>

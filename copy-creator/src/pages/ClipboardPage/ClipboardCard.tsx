@@ -154,11 +154,11 @@ function ClipboardExpandedPreview({
             alt={t("radialMenu.previewImage")}
             className="clipboard-card-expanded-image"
           />
-        ) : (
+        ) : segment.type === "text" ? (
           <div className="clipboard-card-expanded-text" key={`text-${index}`}>
             <HighlightText text={segment.content} search={search} />
           </div>
-        ),
+        ) : null,
       )}
     </div>
   );

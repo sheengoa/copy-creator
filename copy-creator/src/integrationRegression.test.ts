@@ -266,6 +266,9 @@ describe("integration regressions", () => {
     const pageSource = readSource("./pages/ResourcePage.tsx");
     const cardSource = readSource("./pages/ResourcePage/ResourceCard.tsx");
     const detailPageSource = readSource("./pages/ResourcePage/ResourceDetailPage.tsx");
+    const config = JSON.parse(readSource("../src-tauri/tauri.conf.json")) as {
+      app: { security: { csp: string } };
+    };
     const detailLoaderBlock = detailPageSource.slice(
       detailPageSource.indexOf("useEffect(() =>"),
       detailPageSource.indexOf("const title"),
@@ -282,7 +285,43 @@ describe("integration regressions", () => {
     expect(cardSource).not.toContain("onTogglePreview");
     expect(detailLoaderBlock).toContain('|| kind === "image"');
     expect(detailPageSource).toContain("<ResourceImage");
+    expect(detailPageSource).toContain("getResourcePath");
+    const mediaSource = readSource("./pages/ResourcePage/ResourceMedia.tsx");
+    const resourceStyles = readSource("./styles/resource.css");
+    expect(mediaSource).toContain('open_resource_file');
+    expect(mediaSource).toContain('errorName !== "AbortError"');
+    expect(mediaSource).toContain("if (failed || mediaFailed)");
+    expect(mediaSource).toContain("onLoadedMetadata");
+    expect(mediaSource).toContain("onCanPlay");
+    expect(mediaSource).toContain("onPlay");
+    expect(mediaSource).toContain("onError");
+    expect(mediaSource).toContain("event.currentTarget !== mediaRef.current");
+    expect(mediaSource).toContain("onMediaMetadata");
+    expect(mediaSource).toContain("onMetadata");
+    expect(mediaSource).toContain("resolveResourceMediaUrl");
+    expect(detailPageSource).toContain("resolveResourceMediaUrl(resourcePath)");
+    expect(detailPageSource).toContain("set_resource_note");
+    expect(detailPageSource).toContain("resource-note-input");
+    expect(detailPageSource).toContain("metaResolution");
+    expect(pageSource).toContain("computeResourceColumnCount");
+    expect(pageSource).toContain("resource-back-to-top");
+    expect(pageSource).toContain("resourceGroupScrollRef");
+    const libSource = readSource("../src-tauri/src/lib.rs");
+    const mediaServerSource = readSource("../src-tauri/src/media_server.rs");
+    const dbSource = readSource("../src-tauri/src/db.rs");
+    expect(libSource).toContain("media_server::spawn");
+    expect(mediaServerSource).toContain("Accept-Ranges: bytes");
+    expect(mediaServerSource).toContain("get_media_server_origin");
+    expect(dbSource).toContain("ADD COLUMN resource_note TEXT DEFAULT ''");
+    expect(dbSource).toContain("fn set_resource_note");
+    expect(resourceStyles).toContain(".resource-detail-stage-audio .resource-media-player");
+    expect(resourceStyles).toContain("height: 40px");
+    expect(config.app.security.csp).toContain(
+      "media-src 'self' asset: https://asset.localhost http://127.0.0.1:* data: blob:",
+    );
+    expect(config.app.security.csp).not.toContain("media-src *");
   });
+
 
   it("keeps resource-library storage separate from the app database", () => {
     const dbSource = readSource("../src-tauri/src/db.rs");

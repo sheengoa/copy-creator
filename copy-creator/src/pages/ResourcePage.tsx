@@ -27,6 +27,11 @@ import {
   getDragPreviewOrder,
 } from "../utils/reorderPreview";
 import {
+  computeResourceColumnCount,
+  findResourceFolder,
+  flattenResourceFolders,
+  getResourceFolderRoot,
+  isResourceFolderPath,
   matchesResourceType,
   splitResourceColumns,
   type ResourceMediaKind,
@@ -39,6 +44,10 @@ type ResourceGroupDialogState = {
   mode: "create" | "rename";
   oldName?: string;
 } | null;
+
+function formatResourceFolderPath(path: string): string {
+  return path.split("/").filter(Boolean).join(" / ");
+}
 
 const RESOURCE_TYPE_FILTERS: ResourceTypeFilter[] = [
   "all",
@@ -75,6 +84,10 @@ export default function ResourcePage() {
   const detailHistoryRef = useRef(false);
   const pendingScrollTopRef = useRef<number | null>(null);
   const resourceListRef = useRef<HTMLDivElement>(null);
+  const resourceGroupScrollRef = useRef<HTMLDivElement>(null);
+  const [listElement, setListElement] = useState<HTMLDivElement | null>(null);
+  const [columnCount, setColumnCount] = useState(2);
+  const [listScrolled, setListScrolled] = useState(false);
   const [feedback, setFeedback] = useState<"copied" | "copyFailed" | "deleteFailed" | "openFailed" | null>(null);
   const feedbackTimerRef = useRef<number | null>(null);
 
@@ -93,8 +106,15 @@ export default function ResourcePage() {
   const [resourceGroupDialog, setResourceGroupDialog] = useState<ResourceGroupDialogState>(null);
   const [resourceGroupName, setResourceGroupName] = useState("");
   const [resourceGroupSaving, setResourceGroupSaving] = useState(false);
+  const [resourceGroupMenuPath, setResourceGroupMenuPath] = useState<string | null>(null);
+  const [resourceGroupMenuPosition, setResourceGroupMenuPosition] = useState<{
+    left: number;
+    top: number;
+  } | null>(null);
   const resourceSettingsButtonRef = useRef<HTMLButtonElement>(null);
   const resourceSettingsPopoverRef = useRef<HTMLElement>(null);
+  const resourceGroupMenuRef = useRef<HTMLDivElement>(null);
+  const resourceGroupMenuAnchorRef = useRef<HTMLButtonElement>(null);
   const [confirmState, setConfirmState] = useState<{
     message: string;
     onConfirm: () => void | Promise<void>;
@@ -182,17 +202,6 @@ export default function ResourcePage() {
       if (unlisten) unlisten();
     };
   }, [loadRecords, loadResourceGroups, resourceGroup]);
-
-  useEffect(() => {
-    if (
-      resourceGroup !== null
-      && resourceGroup !== ""
-      && !resourceGroups.some((group) => group.name === resourceGroup)
-    ) {
-      setResourceGroup(null);
-      setStoreResourceGroup(null);
-    }
-  }, [resourceGroup, resourceGroups, setStoreResourceGroup]);
 
   useEffect(() => {
     let cancelled = false;
@@ -302,7 +311,44 @@ export default function ResourcePage() {
     && filteredRecords.every((record) => record.resource_managed !== false)
   );
   const renderedRecords = dragRecords ?? filteredRecords;
-  const columns = splitResourceColumns(renderedRecords, 2);
+  const columns = splitResourceColumns(renderedRecords, columnCount);
+
+  // 列数随列表宽度动态变化，窗口缩放时实时跟随（最少两列）。
+  useEffect(() => {
+    if (!listElement) return;
+    const update = () => setColumnCount(computeResourceColumnCount(listElement.clientWidth));
+    update();
+    const observer = new ResizeObserver(update);
+    observer.observe(listElement);
+    return () => observer.disconnect();
+  }, [listElement]);
+
+  // 下滑一定距离后显示“回到顶部”按钮。
+  useEffect(() => {
+    if (!listElement) return;
+    const handleScroll = () => setListScrolled(listElement.scrollTop > 240);
+    handleScroll();
+    listElement.addEventListener("scroll", handleScroll, { passive: true });
+    return () => listElement.removeEventListener("scroll", handleScroll);
+  }, [listElement]);
+
+  const scrollToResourceTop = useCallback(() => {
+    resourceListRef.current?.scrollTo({ top: 0, behavior: "smooth" });
+  }, []);
+
+  // 与剪切板区、快捷输入区一致：指针悬浮在分组栏上滚动滑轮即可横向滚动。
+  useEffect(() => {
+    const el = resourceGroupScrollRef.current;
+    if (!el) return;
+    const onWheel = (e: WheelEvent) => {
+      if (Math.abs(e.deltaY) > Math.abs(e.deltaX)) {
+        e.preventDefault();
+        el.scrollLeft += e.deltaY;
+      }
+    };
+    el.addEventListener("wheel", onWheel, { passive: false });
+    return () => el.removeEventListener("wheel", onWheel);
+  }, []);
   const activeDragRecord = activeDragId
     ? renderedRecords.find((record) => record.id === activeDragId)
     : null;
@@ -369,19 +415,128 @@ export default function ResourcePage() {
     () => resourceGroups.filter((group) => group.name !== ""),
     [resourceGroups],
   );
-  const resourceGroupCount = useMemo(
-    () => resourceGroups.reduce((total, group) => total + group.count, 0),
-    [resourceGroups],
+  const selectedResourceFolder = useMemo(
+    () => resourceGroup && resourceGroup !== ""
+      ? findResourceFolder(resourceFolderGroups, resourceGroup)
+      : null,
+    [resourceFolderGroups, resourceGroup],
+  );
+  const resourceGroupMenuFolder = useMemo(
+    () => resourceGroupMenuPath
+      ? findResourceFolder(resourceFolderGroups, resourceGroupMenuPath)
+      : null,
+    [resourceFolderGroups, resourceGroupMenuPath],
+  );
+  const resourceGroupMenuItems = useMemo(
+    () => resourceGroupMenuFolder
+      ? [
+        { folder: resourceGroupMenuFolder, depth: 0 },
+        ...flattenResourceFolders(resourceGroupMenuFolder.children ?? [], 1),
+      ]
+      : [],
+    [resourceGroupMenuFolder],
   );
   const getResourceGroupLabel = useCallback((name: string) => (
     name === "" ? t("resources.ungrouped") : name
   ), [t]);
+  const getResourceGroupControlLabel = useCallback((group: ResourceFolder) => {
+    if (resourceGroup && isResourceFolderPath(resourceGroup, group.path)) {
+      return formatResourceFolderPath(resourceGroup);
+    }
+    return group.name;
+  }, [resourceGroup]);
+
+  const closeResourceGroupMenu = useCallback(() => {
+    setResourceGroupMenuPath(null);
+    setResourceGroupMenuPosition(null);
+  }, []);
+
+  const updateResourceGroupMenuPosition = useCallback(() => {
+    const anchor = resourceGroupMenuAnchorRef.current;
+    if (!anchor) return;
+    const anchorRect = anchor.getBoundingClientRect();
+    const menuRect = resourceGroupMenuRef.current?.getBoundingClientRect();
+    const menuWidth = menuRect?.width ?? 220;
+    const menuHeight = menuRect?.height ?? 0;
+    const viewportPadding = 8;
+    const left = Math.max(
+      viewportPadding,
+      Math.min(anchorRect.left, window.innerWidth - menuWidth - viewportPadding),
+    );
+    const canOpenAbove = anchorRect.top - menuHeight - 6 >= viewportPadding;
+    const top = canOpenAbove && anchorRect.bottom + menuHeight + 6 > window.innerHeight
+      ? anchorRect.top - menuHeight - 6
+      : anchorRect.bottom + 6;
+    setResourceGroupMenuPosition({ left, top });
+  }, []);
+
+  useEffect(() => {
+    if (!resourceGroupMenuPath) return;
+
+    let frame: number | null = null;
+    const schedulePositionUpdate = () => {
+      if (frame !== null) window.cancelAnimationFrame(frame);
+      frame = window.requestAnimationFrame(() => {
+        frame = null;
+        updateResourceGroupMenuPosition();
+      });
+    };
+    const handlePointerDown = (event: MouseEvent) => {
+      const target = event.target as Node;
+      if (resourceGroupMenuRef.current?.contains(target)) return;
+      if (resourceGroupMenuAnchorRef.current?.contains(target)) return;
+      closeResourceGroupMenu();
+    };
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") {
+        event.preventDefault();
+        closeResourceGroupMenu();
+      }
+    };
+
+    document.addEventListener("mousedown", handlePointerDown);
+    document.addEventListener("keydown", handleKeyDown);
+    window.addEventListener("resize", schedulePositionUpdate);
+    window.addEventListener("scroll", schedulePositionUpdate, true);
+    schedulePositionUpdate();
+
+    return () => {
+      document.removeEventListener("mousedown", handlePointerDown);
+      document.removeEventListener("keydown", handleKeyDown);
+      window.removeEventListener("resize", schedulePositionUpdate);
+      window.removeEventListener("scroll", schedulePositionUpdate, true);
+      if (frame !== null) window.cancelAnimationFrame(frame);
+    };
+  }, [closeResourceGroupMenu, resourceGroupMenuPath, updateResourceGroupMenuPosition]);
+
+  useEffect(() => {
+    if (
+      resourceGroup === null
+      || resourceGroup === ""
+      || resourceGroupsLoading
+      || findResourceFolder(resourceFolderGroups, resourceGroup)
+    ) {
+      return;
+    }
+    closeResourceGroupMenu();
+    setResourceGroup(null);
+    setStoreResourceGroup(null);
+    void loadRecords(false, "resources", null);
+  }, [
+    closeResourceGroupMenu,
+    loadRecords,
+    resourceFolderGroups,
+    resourceGroup,
+    resourceGroupsLoading,
+    setStoreResourceGroup,
+  ]);
 
   const handleSelectResourceGroup = useCallback((name: string | null) => {
     cancelResourceSelection();
+    closeResourceGroupMenu();
     setResourceGroup(name);
     setStoreResourceGroup(name);
-  }, [cancelResourceSelection, setStoreResourceGroup]);
+  }, [cancelResourceSelection, closeResourceGroupMenu, setStoreResourceGroup]);
 
   const openNewResourceGroup = useCallback(() => {
     setResourceGroupManageOpen(false);
@@ -414,6 +569,7 @@ export default function ResourcePage() {
       await loadResourceGroups();
       setResourceGroup(name);
       setStoreResourceGroup(name);
+      closeResourceGroupMenu();
       setResourceGroupDialog(null);
     } catch (error) {
       console.error("Failed to save resource group:", error);
@@ -421,7 +577,14 @@ export default function ResourcePage() {
     } finally {
       setResourceGroupSaving(false);
     }
-  }, [loadResourceGroups, resourceGroupDialog, resourceGroupName, resourceGroupSaving, setStoreResourceGroup]);
+  }, [
+    closeResourceGroupMenu,
+    loadResourceGroups,
+    resourceGroupDialog,
+    resourceGroupName,
+    resourceGroupSaving,
+    setStoreResourceGroup,
+  ]);
 
   const handleOpenResourceGroup = useCallback(async (name: string) => {
     try {
@@ -439,7 +602,9 @@ export default function ResourcePage() {
         try {
           await invoke("delete_resource_group", { name });
           await loadResourceGroups();
-          const nextGroup = resourceGroup === name ? "" : resourceGroup;
+          const nextGroup = resourceGroup !== null && isResourceFolderPath(resourceGroup, name)
+            ? null
+            : resourceGroup;
           setResourceGroup(nextGroup);
           setStoreResourceGroup(nextGroup);
           await loadRecords(false, "resources", nextGroup);
@@ -512,10 +677,11 @@ export default function ResourcePage() {
 
   useEffect(() => {
     const handleKeyDown = (event: KeyboardEvent) => {
-      if (event.key === "Escape" && detailRecordId) {
-        event.preventDefault();
-        closeDetail();
-      }
+      if (event.key !== "Escape" || !detailRecordId) return;
+      const target = event.target as HTMLElement | null;
+      if (target && (target.tagName === "TEXTAREA" || target.tagName === "INPUT")) return;
+      event.preventDefault();
+      closeDetail();
     };
     document.addEventListener("keydown", handleKeyDown);
     return () => document.removeEventListener("keydown", handleKeyDown);
@@ -612,12 +778,45 @@ export default function ResourcePage() {
     try {
       await invoke("open_clipboard_create", {
         storageMode: "resource",
-        groupName: resourceGroup ?? "",
+        groupName: resourceGroup ? getResourceFolderRoot(resourceGroup) : "",
       });
     } catch {
       showFeedback("openFailed");
     }
   }, [resourceGroup, showFeedback]);
+
+  const resourceGroupMenu = resourceGroupMenuPath && resourceGroupMenuFolder
+    ? createPortal(
+      <div
+        ref={resourceGroupMenuRef}
+        className="resource-group-dropdown"
+        role="menu"
+        aria-label={t("resources.openSubfolders")}
+        style={{
+          left: resourceGroupMenuPosition?.left ?? 0,
+          top: resourceGroupMenuPosition?.top ?? 0,
+          visibility: resourceGroupMenuPosition ? "visible" : "hidden",
+        }}
+      >
+        {resourceGroupMenuItems.map(({ folder, depth }) => (
+          <button
+            key={folder.path}
+            type="button"
+            className={`resource-group-menu-item${depth > 0 ? " nested" : ""}${resourceGroup === folder.path ? " selected" : ""}`}
+            role="menuitem"
+            aria-current={resourceGroup === folder.path ? "page" : undefined}
+            title={folder.path}
+            style={{ paddingLeft: `${8 + depth * 14}px` }}
+            onClick={() => handleSelectResourceGroup(folder.path)}
+          >
+            {Icons.resources}
+            <span>{depth === 0 ? t("resources.allFiles") : folder.name}</span>
+          </button>
+        ))}
+      </div>,
+      document.body,
+    )
+    : null;
 
   const confirmDialog = confirmState ? (
     <div className="dialog-overlay" onClick={() => setConfirmState(null)}>
@@ -737,14 +936,13 @@ export default function ResourcePage() {
         aria-label={t("resources.groups")}
         aria-busy={resourceGroupsLoading}
       >
-        <div className="resource-group-scroll">
+        <div className="resource-group-scroll" ref={resourceGroupScrollRef}>
           <button
             type="button"
             className={`resource-group-chip${resourceGroup === null ? " active" : ""}`}
             onClick={() => handleSelectResourceGroup(null)}
           >
             <span>{t("resources.allGroups")}</span>
-            <span className="resource-group-count">{resourceGroupCount}</span>
           </button>
           <button
             type="button"
@@ -752,22 +950,63 @@ export default function ResourcePage() {
             onClick={() => handleSelectResourceGroup("")}
           >
             <span>{t("resources.ungrouped")}</span>
-            <span className="resource-group-count">
-              {resourceGroups.find((group) => group.name === "")?.count ?? 0}
-            </span>
           </button>
-          {resourceFolderGroups.map((group) => (
-            <button
-              key={group.name}
-              type="button"
-              className={`resource-group-chip${resourceGroup === group.name ? " active" : ""}`}
-              onClick={() => handleSelectResourceGroup(group.name)}
-              title={group.name}
-            >
-              <span>{group.name}</span>
-              <span className="resource-group-count">{group.count}</span>
-            </button>
-          ))}
+          {resourceFolderGroups.map((group) => {
+            const hasChildren = (group.children ?? []).length > 0;
+            const isActive = resourceGroup !== null
+              && isResourceFolderPath(resourceGroup, group.path);
+            const groupLabel = getResourceGroupControlLabel(group);
+            return hasChildren ? (
+              <div
+                key={group.path}
+                className={`resource-group-control${isActive ? " active" : ""}${resourceGroupMenuPath === group.path ? " open" : ""}`}
+              >
+                <button
+                  type="button"
+                  className="resource-group-chip-main"
+                  onClick={() => handleSelectResourceGroup(group.path)}
+                  title={groupLabel}
+                >
+                  <span>{groupLabel}</span>
+                </button>
+                <button
+                  type="button"
+                  className="resource-group-chevron"
+                  ref={(element) => {
+                    if (resourceGroupMenuPath === group.path) {
+                      resourceGroupMenuAnchorRef.current = element;
+                    }
+                  }}
+                  onClick={(event) => {
+                    event.stopPropagation();
+                    if (resourceGroupMenuPath === group.path) {
+                      closeResourceGroupMenu();
+                      return;
+                    }
+                    resourceGroupMenuAnchorRef.current = event.currentTarget;
+                    setResourceGroupMenuPosition(null);
+                    setResourceGroupMenuPath(group.path);
+                  }}
+                  aria-label={t("resources.openSubfolders")}
+                  aria-expanded={resourceGroupMenuPath === group.path}
+                  aria-haspopup="menu"
+                  title={t("resources.openSubfolders")}
+                >
+                  {Icons.chevronDown}
+                </button>
+              </div>
+            ) : (
+              <button
+                key={group.path}
+                type="button"
+                className={`resource-group-chip${isActive ? " active" : ""}`}
+                onClick={() => handleSelectResourceGroup(group.path)}
+                title={group.name}
+              >
+                <span>{group.name}</span>
+              </button>
+            );
+          })}
         </div>
         <div className="resource-group-actions">
           <button
@@ -857,7 +1096,6 @@ export default function ResourcePage() {
                 <div key={group.name || "ungrouped"} className="resource-group-manage-row">
                   <div className="resource-group-manage-name">
                     <span>{getResourceGroupLabel(group.name)}</span>
-                    <span className="resource-group-manage-count">{group.count}</span>
                   </div>
                   <div className="resource-group-manage-actions">
                     <button
@@ -946,7 +1184,11 @@ export default function ResourcePage() {
       <section className="resource-list-area">
         <div className="resource-list-heading">
           <div className="resource-list-heading-main">
-            <h2>{t("resources.modeResource")}</h2>
+            <h2>
+              {resourceGroup === ""
+                ? t("resources.ungrouped")
+                : selectedResourceFolder?.name ?? t("resources.modeResource")}
+            </h2>
             <span>{t("resources.itemCount", { count: filteredRecords.length })}</span>
           </div>
           <div className="resource-list-heading-actions">
@@ -1000,7 +1242,14 @@ export default function ResourcePage() {
             )}
           </div>
         ) : (
-          <div className="resource-list" ref={resourceListRef} data-resource-scroll>
+          <div
+            className="resource-list"
+            ref={(element) => {
+              resourceListRef.current = element;
+              setListElement(element);
+            }}
+            data-resource-scroll
+          >
             <DndContext
               sensors={sensors}
               collisionDetection={closestCenter}
@@ -1009,7 +1258,10 @@ export default function ResourcePage() {
               onDragEnd={handleDragEnd}
               onDragCancel={handleDragCancel}
             >
-              <div className="resource-columns">
+              <div
+                className="resource-columns"
+                style={{ gridTemplateColumns: `repeat(${columnCount}, minmax(0, 1fr))` }}
+              >
                 {columns.map((column, columnIndex) => (
                   <div className="resource-column" key={`column-${columnIndex}`}>
                     <SortableContext items={column.map((record) => record.id)}>
@@ -1051,6 +1303,18 @@ export default function ResourcePage() {
             )}
           </div>
         )}
+
+        {listScrolled && !isSelecting && (
+          <button
+            type="button"
+            className="resource-back-to-top"
+            onClick={scrollToResourceTop}
+            aria-label={t("resources.backToTop")}
+            title={t("resources.backToTop")}
+          >
+            {Icons.arrowUp}
+          </button>
+        )}
       </section>
 
       {feedback && (
@@ -1064,6 +1328,7 @@ export default function ResourcePage() {
                 : t("resources.openFailed")}
         </div>
       )}
+      {resourceGroupMenu}
     </div>
   );
 }

@@ -1,20 +1,29 @@
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { useTranslation } from "react-i18next";
 import type { ClipboardRecord } from "../../types";
+import { useClipboardStore } from "../../stores/clipboardStore";
 import { Icons } from "../../components/Icons";
 import { HighlightText } from "../../components/HighlightText";
 import { loadClipboardPreviewSegments } from "../../utils/contentPreview";
 import type { RadialPreviewSegment } from "../../utils/radialPreview";
 import {
+  formatResourceBitrate,
+  formatResourceDuration,
   formatResourceFileSize,
   getResourceFileName,
+  getResourcePath,
   getResourceTitle,
   inferResourceMediaKind,
-  resolveResourceAssetUrl,
+  resolveResourceMediaUrl,
   type ResourceMediaKind,
 } from "./resourceUtils";
-import { ResourceImage, ResourceMediaPlayer, ResourceSegments } from "./ResourceMedia";
+import {
+  ResourceImage,
+  ResourceMediaPlayer,
+  ResourceSegments,
+  type ResourceMediaMetadata,
+} from "./ResourceMedia";
 
 interface ResourceDetailPageProps {
   record: ClipboardRecord;
@@ -32,14 +41,83 @@ export default function ResourceDetailPage({
   onDelete,
 }: ResourceDetailPageProps) {
   const { t } = useTranslation();
+  const updateResourceNote = useClipboardStore((state) => state.updateResourceNote);
   const kind = inferResourceMediaKind(record);
+  const resourcePath = getResourcePath(record);
   const [segments, setSegments] = useState<RadialPreviewSegment[] | null>(null);
   const [textContent, setTextContent] = useState<string | null>(null);
   const [error, setError] = useState(false);
   const [mediaSource, setMediaSource] = useState<string | null>(null);
+  const [mediaMeta, setMediaMeta] = useState<ResourceMediaMetadata>({});
+  const [noteDraft, setNoteDraft] = useState(record.resource_note ?? "");
+  const [savedNote, setSavedNote] = useState(record.resource_note ?? "");
+  const [noteSaving, setNoteSaving] = useState(false);
+  const [noteSaved, setNoteSaved] = useState(false);
+  const [noteError, setNoteError] = useState(false);
+  const noteSavedTimerRef = useRef<number | null>(null);
   const externalTextPath = kind === "text" && record.type === "file"
-    ? record.resource_path || record.content
+    ? resourcePath
     : null;
+  const noteDirty = noteDraft.trim() !== savedNote;
+
+  useEffect(() => {
+    setMediaMeta({});
+    setNoteDraft(record.resource_note ?? "");
+    setSavedNote(record.resource_note ?? "");
+    setNoteSaved(false);
+    setNoteError(false);
+  }, [record.id, record.resource_note]);
+
+  useEffect(() => () => {
+    if (noteSavedTimerRef.current !== null) window.clearTimeout(noteSavedTimerRef.current);
+  }, []);
+
+  const handleSaveNote = async () => {
+    const note = noteDraft.trim();
+    if (noteSaving || note === savedNote) return;
+    setNoteSaving(true);
+    setNoteError(false);
+    try {
+      const saved = await invoke<string>("set_resource_note", {
+        id: record.id,
+        note,
+      });
+      setSavedNote(saved);
+      setNoteDraft(saved);
+      updateResourceNote(record.id, saved);
+      setNoteSaved(true);
+      if (noteSavedTimerRef.current !== null) window.clearTimeout(noteSavedTimerRef.current);
+      noteSavedTimerRef.current = window.setTimeout(() => {
+        setNoteSaved(false);
+        noteSavedTimerRef.current = null;
+      }, 2200);
+    } catch {
+      setNoteError(true);
+    } finally {
+      setNoteSaving(false);
+    }
+  };
+
+  const mediaMetaRows = useMemo(() => {
+    const rows: { label: string; value: string }[] = [];
+    if (mediaMeta.width && mediaMeta.height) {
+      rows.push({
+        label: t("resources.metaResolution"),
+        value: `${mediaMeta.width}×${mediaMeta.height}`,
+      });
+    }
+    if (mediaMeta.duration) {
+      rows.push({
+        label: t("resources.metaDuration"),
+        value: formatResourceDuration(mediaMeta.duration),
+      });
+    }
+    if (kind === "video" || kind === "audio") {
+      const bitrate = formatResourceBitrate(record.resource_file_size, mediaMeta.duration);
+      if (bitrate) rows.push({ label: t("resources.metaBitrate"), value: bitrate });
+    }
+    return rows;
+  }, [kind, mediaMeta, record.resource_file_size, t]);
 
   useEffect(() => {
     let cancelled = false;
@@ -49,7 +127,7 @@ export default function ResourceDetailPage({
     setMediaSource(null);
     if (kind === "video" || kind === "audio" || kind === "file" || kind === "image") {
       if (kind === "video" || kind === "audio") {
-        resolveResourceAssetUrl(record.content)
+        resolveResourceMediaUrl(resourcePath)
           .then((url) => {
             if (!cancelled) setMediaSource(url);
           })
@@ -85,7 +163,7 @@ export default function ResourceDetailPage({
     return () => {
       cancelled = true;
     };
-  }, [externalTextPath, kind, record]);
+  }, [externalTextPath, kind, record, resourcePath]);
 
   const title = getResourceTitle(record, kind);
   const detailReady = kind === "video" || kind === "audio"
@@ -131,17 +209,23 @@ export default function ResourceDetailPage({
             ) : !contentReady ? (
               <div className="resource-preview-loading" role="status">{t("common.loading")}</div>
             ) : kind === "video" || kind === "audio" ? (
-              <ResourceMediaPlayer kind={kind} path={record.content} resolvedSrc={mediaSource ?? undefined} />
+              <ResourceMediaPlayer
+                kind={kind}
+                path={resourcePath}
+                resolvedSrc={mediaSource ?? undefined}
+                onMediaMetadata={setMediaMeta}
+              />
             ) : kind === "image" ? (
               <ResourceImage
-                path={record.content}
+                path={resourcePath}
                 alt={title}
                 className="resource-segment-image"
+                onMetadata={({ width, height }) => setMediaMeta({ width, height })}
               />
             ) : kind === "file" ? (
               <div className="resource-detail-file">
                 {Icons.file}
-                <strong>{getResourceFileName(record.content)}</strong>
+                <strong>{getResourceFileName(resourcePath)}</strong>
                 <span>
                   {t("resources.fileDetailNote")}
                   {record.resource_file_size !== undefined && ` · ${formatResourceFileSize(record.resource_file_size)}`}
@@ -175,6 +259,12 @@ export default function ResourceDetailPage({
                 <dd>{formatResourceFileSize(record.resource_file_size)}</dd>
               </div>
             )}
+            {mediaMetaRows.map((row) => (
+              <div key={row.label}>
+                <dt>{row.label}</dt>
+                <dd>{row.value}</dd>
+              </div>
+            ))}
             {record.source_app && (
               <div>
                 <dt>{t("resources.sourceApp")}</dt>
@@ -182,6 +272,37 @@ export default function ResourceDetailPage({
               </div>
             )}
           </dl>
+          <div className="resource-note-block">
+            <label className="resource-note-label" htmlFor="resource-note-input">
+              {t("resources.note")}
+            </label>
+            <textarea
+              id="resource-note-input"
+              className="resource-note-input"
+              rows={3}
+              maxLength={1000}
+              value={noteDraft}
+              placeholder={t("resources.notePlaceholder")}
+              onChange={(event) => {
+                setNoteDraft(event.target.value);
+                setNoteError(false);
+              }}
+            />
+            <div className="resource-note-actions">
+              {noteSaved && <span className="resource-note-saved" role="status">{t("resources.noteSaved")}</span>}
+              {noteError && <span className="resource-note-error" role="alert">{t("resources.noteSaveFailed")}</span>}
+              {noteDirty && (
+                <button
+                  type="button"
+                  className="resource-secondary-button resource-note-save"
+                  onClick={() => void handleSaveNote()}
+                  disabled={noteSaving}
+                >
+                  {noteSaving ? t("common.saving") : t("common.save")}
+                </button>
+              )}
+            </div>
+          </div>
           <p>{t("resources.detailHint")}</p>
         </aside>
       </main>

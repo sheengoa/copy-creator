@@ -38,8 +38,10 @@ interface ClipboardRecord {
   resource_group?: string | null;
   resource_kind?: "text" | "image" | "video" | "audio" | "file";
   resource_relative_path?: string;
+  resource_folder?: string | null;
   resource_file_size?: number;
   resource_managed?: boolean;
+  resource_note?: string | null;
 }
 
 const PAGE_SIZE = 120;
@@ -70,6 +72,7 @@ interface ClipboardState {
     resourceGroup?: string | null,
   ) => Promise<ClipboardRecord[] | null>;
   updateRecordLabel: (id: string, label: ApiKeyLabel) => void;
+  updateResourceNote: (id: string, note: string) => void;
   deleteRecords: (ids: string[]) => Promise<void>;
   deleteRecord: (id: string) => Promise<void>;
   pasteRecord: (record: ClipboardRecord) => Promise<boolean>;
@@ -119,6 +122,22 @@ function trimCache(cache: Record<string, string>, maxEntries: number) {
   return Object.fromEntries(entries.slice(entries.length - maxEntries));
 }
 
+export function matchesResourceGroup(
+  record: Pick<ClipboardRecord, "resource_folder" | "resource_group">,
+  resourceGroup: string | null,
+) {
+  if (resourceGroup === null) return true;
+
+  const recordFolder = record.resource_folder ?? record.resource_group;
+  if (recordFolder === undefined || recordFolder === null) return false;
+
+  const normalizedFolder = recordFolder.replace(/\\/g, "/");
+  const normalizedGroup = resourceGroup.replace(/\\/g, "/");
+  if (normalizedGroup === "") return normalizedFolder === "";
+  return normalizedFolder === normalizedGroup
+    || normalizedFolder.startsWith(`${normalizedGroup}/`);
+}
+
 function recordMatchesCategory(
   record: ClipboardRecord,
   category: ClipType,
@@ -127,7 +146,7 @@ function recordMatchesCategory(
   if (category === "all") return !isResourceRecord(record);
   if ((category as string) === "resources") {
     return isResourceRecord(record)
-      && (resourceGroup === null || record.resource_group === resourceGroup);
+      && matchesResourceGroup(record, resourceGroup);
   }
   return !isResourceRecord(record) && record.type === category;
 }
@@ -357,6 +376,15 @@ export const useClipboardStore = create<ClipboardState>((set, get) => ({
       if (idx === -1) return state;
       const updated = [...state.records];
       updated[idx] = { ...updated[idx], label };
+      return { records: updated };
+    }),
+
+  updateResourceNote: (id: string, note: string) =>
+    set((state) => {
+      const idx = state.records.findIndex((r) => r.id === id);
+      if (idx === -1) return state;
+      const updated = [...state.records];
+      updated[idx] = { ...updated[idx], resource_note: note };
       return { records: updated };
     }),
 

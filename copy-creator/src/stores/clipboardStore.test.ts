@@ -10,7 +10,7 @@ vi.mock("@tauri-apps/api/event", () => ({
   listen: vi.fn(),
 }));
 
-const { useClipboardStore } = await import("./clipboardStore");
+const { matchesResourceGroup, useClipboardStore } = await import("./clipboardStore");
 
 const records = [
   {
@@ -36,6 +36,27 @@ function deferred<T>() {
   });
   return { promise, resolve };
 }
+
+describe("clipboardStore resource group matching", () => {
+  it("matches a selected folder and all of its descendants", () => {
+    const record = {
+      resource_folder: "References/archive/deep",
+      resource_group: "References",
+    };
+
+    expect(matchesResourceGroup(record, "References")).toBe(true);
+    expect(matchesResourceGroup(record, "References/archive")).toBe(true);
+    expect(matchesResourceGroup(record, "References/other")).toBe(false);
+    expect(matchesResourceGroup(record, "References/archive/deeper")).toBe(false);
+  });
+
+  it("keeps all and ungrouped selections mutually distinct", () => {
+    expect(matchesResourceGroup({ resource_folder: "" }, null)).toBe(true);
+    expect(matchesResourceGroup({ resource_folder: "" }, "")).toBe(true);
+    expect(matchesResourceGroup({ resource_folder: "References" }, "")).toBe(false);
+    expect(matchesResourceGroup({ resource_group: "References" }, "References")).toBe(true);
+  });
+});
 
 describe("clipboardStore deletion", () => {
   beforeEach(() => {
