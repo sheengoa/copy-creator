@@ -179,7 +179,7 @@ describe("integration regressions", () => {
     expect(pageSource).not.toContain("useResourceGroupStore");
     expect(pageSource).not.toContain("<GroupChips");
     expect(componentSource).toContain('category: isResource ? "resources" : "all"');
-    expect(componentSource).toContain("resource_group: groupName");
+    expect(componentSource).toContain("resourceGroup: groupName");
     expect(componentSource).toContain("groupName: resourceGroupName");
     expect(componentSource).not.toContain("clipboard-create-storage-toggle");
     expect(componentSource).not.toContain("clipboard-create-resource-group-section");
@@ -244,7 +244,15 @@ describe("integration regressions", () => {
     expect(resourcePage).toContain("<ResourceCard");
     expect(resourcePage).not.toContain("ResourceQuickPreview");
     expect(resourcePage).toContain("<ResourceDetailPage");
-    expect(resourcePage).toContain('loadRecords(false, "resources")');
+    expect(resourcePage).toContain('loadRecords(false, "resources", resourceGroup)');
+    expect(resourcePage).toContain('loadRecords(false, "resources", null)');
+    const confirmDialogIndex = resourcePage.lastIndexOf("{confirmDialog}");
+    expect(confirmDialogIndex).toBeGreaterThan(
+      resourcePage.indexOf("{resourceGroupManageOpen &&"),
+    );
+    expect(confirmDialogIndex).toBeGreaterThan(
+      resourcePage.indexOf("{resourceGroupDialog &&"),
+    );
     expect(radialMenu).toContain('["clipboard", "phrases", "resources"]');
     expect(radialMenu).toContain('useClipboardStore.getState().loadRecords(false, "resources")');
     expect(radialMenu).toContain('useClipboardStore.getState().setCategory("resources")');

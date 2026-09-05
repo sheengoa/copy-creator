@@ -61,6 +61,7 @@ export default function ResourcePage() {
     setSearch,
     loadRecords,
     loadAllRecords,
+    setResourceGroup: setStoreResourceGroup,
     deleteRecord,
     deleteRecords,
     pasteRecord,
@@ -155,8 +156,9 @@ export default function ResourcePage() {
 
   useEffect(() => {
     setSearch("");
+    setStoreResourceGroup(null);
     init("resources");
-  }, [init, setSearch]);
+  }, [init, setSearch, setStoreResourceGroup]);
 
   useEffect(() => {
     void loadResourceGroups();
@@ -167,6 +169,7 @@ export default function ResourcePage() {
     let unlisten: UnlistenFn | undefined;
     listen("resource-groups-changed", () => {
       void loadResourceGroups();
+      void loadRecords(false, "resources", resourceGroup);
     }).then((nextUnlisten) => {
       if (cancelled) {
         nextUnlisten();
@@ -178,7 +181,7 @@ export default function ResourcePage() {
       cancelled = true;
       if (unlisten) unlisten();
     };
-  }, [loadResourceGroups]);
+  }, [loadRecords, loadResourceGroups, resourceGroup]);
 
   useEffect(() => {
     if (
@@ -187,8 +190,9 @@ export default function ResourcePage() {
       && !resourceGroups.some((group) => group.name === resourceGroup)
     ) {
       setResourceGroup(null);
+      setStoreResourceGroup(null);
     }
-  }, [resourceGroup, resourceGroups]);
+  }, [resourceGroup, resourceGroups, setStoreResourceGroup]);
 
   useEffect(() => {
     let cancelled = false;
@@ -291,6 +295,7 @@ export default function ResourcePage() {
     !isSelecting
     && !detailRecordId
     && !search.trim()
+    && resourceGroup === null
     && typeFilter === "all"
     && sortOrder === "newest"
     && filteredRecords.length > 1
@@ -378,7 +383,8 @@ export default function ResourcePage() {
   const handleSelectResourceGroup = useCallback((name: string | null) => {
     cancelResourceSelection();
     setResourceGroup(name);
-  }, [cancelResourceSelection]);
+    setStoreResourceGroup(name);
+  }, [cancelResourceSelection, setStoreResourceGroup]);
 
   const openNewResourceGroup = useCallback(() => {
     setResourceGroupManageOpen(false);
@@ -410,6 +416,7 @@ export default function ResourcePage() {
       }
       await loadResourceGroups();
       setResourceGroup(name);
+      setStoreResourceGroup(name);
       setResourceGroupDialog(null);
     } catch (error) {
       console.error("Failed to save resource group:", error);
@@ -417,7 +424,7 @@ export default function ResourcePage() {
     } finally {
       setResourceGroupSaving(false);
     }
-  }, [loadResourceGroups, resourceGroupDialog, resourceGroupName, resourceGroupSaving]);
+  }, [loadResourceGroups, resourceGroupDialog, resourceGroupName, resourceGroupSaving, setStoreResourceGroup]);
 
   const handleOpenResourceGroup = useCallback(async (name: string) => {
     try {
@@ -435,7 +442,10 @@ export default function ResourcePage() {
         try {
           await invoke("delete_resource_group", { name });
           await loadResourceGroups();
-          if (resourceGroup === name) setResourceGroup("");
+          const nextGroup = resourceGroup === name ? "" : resourceGroup;
+          setResourceGroup(nextGroup);
+          setStoreResourceGroup(nextGroup);
+          await loadRecords(false, "resources", nextGroup);
           setResourceGroupManageOpen(false);
         } catch (error) {
           console.error("Failed to delete resource group:", error);
@@ -443,7 +453,7 @@ export default function ResourcePage() {
         }
       },
     });
-  }, [loadResourceGroups, resourceGroup, t]);
+  }, [loadRecords, loadResourceGroups, resourceGroup, setStoreResourceGroup, t]);
 
   const handleCopy = useCallback(async (record: ClipboardRecord) => {
     const copied = await pasteRecord(record);
@@ -587,7 +597,9 @@ export default function ResourcePage() {
       });
       setResourceLibraryPath(savedPath);
       setResourceGroup(null);
+      setStoreResourceGroup(null);
       await loadResourceGroups();
+      await loadRecords(false, "resources", null);
     } catch (error) {
       const message = String(error).toLowerCase();
       if (!message.includes("cancelled") && !message.includes("canceled")) {
@@ -597,7 +609,7 @@ export default function ResourcePage() {
     } finally {
       setResourceLibraryPathChanging(false);
     }
-  }, [loadResourceGroups, resourceLibraryPathChanging, t]);
+  }, [loadRecords, loadResourceGroups, resourceLibraryPathChanging, setStoreResourceGroup, t]);
 
   const openResourceCreate = useCallback(async () => {
     try {
@@ -822,8 +834,6 @@ export default function ResourcePage() {
         />
       )}
 
-      {confirmDialog}
-
       {resourceGroupManageOpen && (
         <div className="dialog-overlay" onClick={() => setResourceGroupManageOpen(false)}>
           <div
@@ -934,6 +944,8 @@ export default function ResourcePage() {
         </div>
       )}
 
+      {confirmDialog}
+
       <section className="resource-list-area">
         <div className="resource-list-heading">
           <div className="resource-list-heading-main">
@@ -957,7 +969,7 @@ export default function ResourcePage() {
         {loadError && (
           <div className="resource-load-error" role="alert">
             <span>{t("resources.loadError")}</span>
-            <button type="button" onClick={() => void loadRecords(false, "resources")}>
+            <button type="button" onClick={() => void loadRecords(false, "resources", resourceGroup)}>
               {t("common.retry")}
             </button>
           </div>
@@ -985,7 +997,7 @@ export default function ResourcePage() {
             </strong>
             <span>{t("resources.modeResourceHint")}</span>
             {hasMore && (
-              <button type="button" className="resource-secondary-button" onClick={() => void loadRecords(true, "resources")}>
+              <button type="button" className="resource-secondary-button" onClick={() => void loadRecords(true, "resources", resourceGroup)}>
                 {t("resources.loadMore")}
               </button>
             )}
@@ -1037,7 +1049,7 @@ export default function ResourcePage() {
               )}
             </DndContext>
             {hasMore && (
-              <button type="button" className="clipboard-load-more" onClick={() => void loadRecords(true, "resources")}>
+              <button type="button" className="clipboard-load-more" onClick={() => void loadRecords(true, "resources", resourceGroup)}>
                 {t("resources.loadMore")}
               </button>
             )}

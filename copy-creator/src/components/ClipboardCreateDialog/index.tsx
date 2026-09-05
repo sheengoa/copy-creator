@@ -62,7 +62,7 @@ export default function ClipboardCreateDialog() {
         limit: 120,
         offset: 0,
         category: isResource ? "resources" : "all",
-        ...(isResource ? { resource_group: groupName } : {}),
+        ...(isResource ? { resourceGroup: groupName } : {}),
       });
       setStashRecords(records.filter((record) =>
         (isResource ? isResourceRecord(record) : !isResourceRecord(record))

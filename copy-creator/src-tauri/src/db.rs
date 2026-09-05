@@ -3,7 +3,7 @@ use std::collections::{HashMap, HashSet};
 use std::ffi::OsStr;
 use std::path::{Component, Path, PathBuf};
 use std::sync::Mutex;
-use tauri::{AppHandle, Emitter, Manager};
+use tauri::{AppHandle, Emitter, Manager, Runtime};
 
 // === API Key Detection ===
 
@@ -314,14 +314,14 @@ pub(crate) fn resolve_managed_storage_path(app: &AppHandle, path: &str) -> Optio
     resolve_relative_storage_path(&get_storage_dir(app), path)
 }
 
-fn default_resource_library_dir(app: &AppHandle) -> PathBuf {
+fn default_resource_library_dir<R: Runtime>(app: &AppHandle<R>) -> PathBuf {
     app.path()
         .app_data_dir()
         .expect("failed to get app data dir")
         .join(RESOURCE_LIBRARY_DIR_NAME)
 }
 
-pub(crate) fn get_resource_library_dir(app: &AppHandle) -> PathBuf {
+pub(crate) fn get_resource_library_dir<R: Runtime>(app: &AppHandle<R>) -> PathBuf {
     let configured_path = get_setting_sync(app, "resource_library_path")
         .filter(|path| !path.trim().is_empty())
         .map(PathBuf::from)
@@ -354,7 +354,10 @@ pub(crate) fn normalize_resource_group_name(value: Option<&str>) -> Result<Strin
     Ok(name.to_string())
 }
 
-pub(crate) fn resource_group_path(app: &AppHandle, name: &str) -> Result<PathBuf, String> {
+pub(crate) fn resource_group_path<R: Runtime>(
+    app: &AppHandle<R>,
+    name: &str,
+) -> Result<PathBuf, String> {
     let normalized = normalize_resource_group_name(Some(name))?;
     let root = get_resource_library_dir(app);
     if normalized.is_empty() {
@@ -385,7 +388,7 @@ pub(crate) fn resource_group_for_path(root: &Path, resource_path: &str) -> Optio
     normalize_resource_group_name(Some(&group_name)).ok()
 }
 
-fn resource_library_history(app: &AppHandle) -> Vec<PathBuf> {
+fn resource_library_history<R: Runtime>(app: &AppHandle<R>) -> Vec<PathBuf> {
     get_setting_sync(app, RESOURCE_LIBRARY_HISTORY_SETTING)
         .and_then(|value| serde_json::from_str::<Vec<String>>(&value).ok())
         .unwrap_or_default()
@@ -395,7 +398,7 @@ fn resource_library_history(app: &AppHandle) -> Vec<PathBuf> {
         .collect()
 }
 
-fn resource_library_roots(app: &AppHandle) -> Vec<PathBuf> {
+fn resource_library_roots<R: Runtime>(app: &AppHandle<R>) -> Vec<PathBuf> {
     let mut roots = Vec::new();
     for root in std::iter::once(get_resource_library_dir(app))
         .chain(std::iter::once(default_resource_library_dir(app)))
@@ -490,7 +493,7 @@ fn remove_resource_record_attachments_from_roots(
     for resource_root in resource_roots {
         for attachment in attachment_paths {
             let Some((path, parent)) =
-                managed_resource_attachment_path(&resource_root, record_id, attachment)
+                managed_resource_attachment_path(resource_root, record_id, attachment)
             else {
                 continue;
             };
@@ -1243,6 +1246,19 @@ pub fn get_clipboard_records(
     category: Option<String>,
     resource_group: Option<String>,
 ) -> Result<Vec<serde_json::Value>, String> {
+    get_clipboard_records_inner(&app, search, limit, offset, category, resource_group)
+}
+
+fn get_clipboard_records_inner<R: Runtime>(
+    app: &AppHandle<R>,
+    search: Option<String>,
+    limit: Option<u32>,
+    offset: Option<u32>,
+    category: Option<String>,
+    resource_group: Option<String>,
+) -> Result<Vec<serde_json::Value>, String> {
+    // 资源分组来自文件系统路径；先读取配置，避免持有数据库锁时再次读取设置。
+    let resource_root = get_resource_library_dir(app);
     let state = app.state::<DbState>();
     let conn = state.conn.lock().map_err(|e| e.to_string())?;
     let lim = limit.unwrap_or(200);
@@ -1324,7 +1340,6 @@ pub fn get_clipboard_records(
         }
     }
 
-    let resource_root = get_resource_library_dir(&app);
     for record in &mut records {
         if record["storage_mode"].as_str() != Some(RESOURCE_STORAGE_MODE) {
             continue;
@@ -2037,7 +2052,7 @@ pub fn get_setting(app: AppHandle, key: String) -> Result<String, String> {
         .unwrap_or_default())
 }
 
-pub fn get_setting_sync(app: &AppHandle, key: &str) -> Option<String> {
+pub fn get_setting_sync<R: Runtime>(app: &AppHandle<R>, key: &str) -> Option<String> {
     let state = app.state::<DbState>();
     let conn = state.conn.lock().ok()?;
     conn.query_row(
@@ -2370,8 +2385,8 @@ pub fn set_resource_library_path(app: AppHandle, path: String) -> Result<String,
     Ok(path_string)
 }
 
-fn resource_record_paths_in_group(
-    app: &AppHandle,
+fn resource_record_paths_in_group<R: Runtime>(
+    app: &AppHandle<R>,
     group_name: &str,
 ) -> Result<Vec<(String, String)>, String> {
     let root = get_resource_library_dir(app);
@@ -2399,9 +2414,10 @@ fn resource_record_paths_in_group(
     Ok(records)
 }
 
-fn update_resource_record_paths(
-    app: &AppHandle,
+fn update_resource_record_paths<R: Runtime>(
+    app: &AppHandle<R>,
     updates: &[(String, String)],
+    group_name: &str,
 ) -> Result<(), String> {
     if updates.is_empty() {
         return Ok(());
@@ -2412,16 +2428,18 @@ fn update_resource_record_paths(
     for (id, path) in updates {
         tx.execute(
             "UPDATE clipboard_records
-             SET resource_path = ?1
-             WHERE id = ?2 AND COALESCE(storage_mode, 'database') = 'resource'",
-            params![path, id],
+             SET resource_path = ?1, group_name = ?2
+             WHERE id = ?3 AND COALESCE(storage_mode, 'database') = 'resource'",
+            params![path, group_name, id],
         )
         .map_err(|e| e.to_string())?;
     }
     tx.commit().map_err(|e| e.to_string())
 }
 
-fn resource_group_count_map(app: &AppHandle) -> Result<HashMap<String, u64>, String> {
+fn resource_group_count_map<R: Runtime>(
+    app: &AppHandle<R>,
+) -> Result<HashMap<String, u64>, String> {
     let root = get_resource_library_dir(app);
     let state = app.state::<DbState>();
     let conn = state.conn.lock().map_err(|e| e.to_string())?;
@@ -2500,6 +2518,14 @@ pub fn update_resource_group(
     old_name: String,
     new_name: String,
 ) -> Result<(), String> {
+    update_resource_group_inner(&app, old_name, new_name)
+}
+
+fn update_resource_group_inner<R: Runtime>(
+    app: &AppHandle<R>,
+    old_name: String,
+    new_name: String,
+) -> Result<(), String> {
     let old_name = normalize_resource_group_name(Some(&old_name))?;
     let new_name = normalize_resource_group_name(Some(&new_name))?;
     if old_name.is_empty() || new_name.is_empty() {
@@ -2509,15 +2535,15 @@ pub fn update_resource_group(
         return Ok(());
     }
 
-    let old_path = resource_group_path(&app, &old_name)?;
-    let new_path = resource_group_path(&app, &new_name)?;
+    let old_path = resource_group_path(app, &old_name)?;
+    let new_path = resource_group_path(app, &new_name)?;
     if !old_path.is_dir() {
         return Err("资源分组不存在".to_string());
     }
     if new_path.exists() {
         return Err("目标分组已存在".to_string());
     }
-    let records = resource_record_paths_in_group(&app, &old_name)?;
+    let records = resource_record_paths_in_group(app, &old_name)?;
     let new_records = records
         .iter()
         .filter_map(|(id, path)| {
@@ -2530,7 +2556,7 @@ pub fn update_resource_group(
         .collect::<Vec<_>>();
 
     std::fs::rename(&old_path, &new_path).map_err(|e| format!("重命名资源分组失败: {e}"))?;
-    if let Err(error) = update_resource_record_paths(&app, &new_records) {
+    if let Err(error) = update_resource_record_paths(app, &new_records, &new_name) {
         let _ = std::fs::rename(&new_path, &old_path);
         return Err(format!("更新资源路径失败: {error}"));
     }
@@ -2549,12 +2575,16 @@ fn rollback_moved_resource_files(moved: &[(PathBuf, PathBuf, Option<String>)]) {
 
 #[tauri::command]
 pub fn delete_resource_group(app: AppHandle, name: String) -> Result<(), String> {
+    delete_resource_group_inner(&app, name)
+}
+
+fn delete_resource_group_inner<R: Runtime>(app: &AppHandle<R>, name: String) -> Result<(), String> {
     let name = normalize_resource_group_name(Some(&name))?;
     if name.is_empty() {
         return Err("未分组不能删除".to_string());
     }
-    let root = get_resource_library_dir(&app);
-    let group_path = resource_group_path(&app, &name)?;
+    let root = get_resource_library_dir(app);
+    let group_path = resource_group_path(app, &name)?;
     if !group_path.is_dir() {
         return Err("资源分组不存在".to_string());
     }
@@ -2572,6 +2602,7 @@ pub fn delete_resource_group(app: AppHandle, name: String) -> Result<(), String>
         }
         entries.push(entry.path());
     }
+    entries.sort();
 
     for path in &entries {
         let Some(filename) = path.file_name() else {
@@ -2585,7 +2616,7 @@ pub fn delete_resource_group(app: AppHandle, name: String) -> Result<(), String>
         }
     }
 
-    let records = resource_record_paths_in_group(&app, &name)?;
+    let records = resource_record_paths_in_group(app, &name)?;
     let new_records = records
         .iter()
         .filter_map(|(id, path)| {
@@ -2598,17 +2629,26 @@ pub fn delete_resource_group(app: AppHandle, name: String) -> Result<(), String>
         .collect::<Vec<_>>();
     let mut moved = Vec::new();
     for from in entries {
-        let filename = from
-            .file_name()
-            .ok_or_else(|| "资源文件名无效".to_string())?
-            .to_os_string();
+        let filename = match from.file_name() {
+            Some(filename) => filename.to_os_string(),
+            None => {
+                rollback_moved_resource_files(&moved);
+                return Err("资源文件名无效".to_string());
+            }
+        };
         let to = root.join(filename);
         let original_content = if from
             .extension()
             .and_then(|extension| extension.to_str())
             .is_some_and(|extension| extension.eq_ignore_ascii_case("md"))
         {
-            Some(std::fs::read_to_string(&from).map_err(|e| format!("读取资源文件失败: {e}"))?)
+            match std::fs::read_to_string(&from) {
+                Ok(content) => Some(content),
+                Err(error) => {
+                    rollback_moved_resource_files(&moved);
+                    return Err(format!("读取资源文件失败: {error}"));
+                }
+            }
         } else {
             None
         };
@@ -2628,13 +2668,13 @@ pub fn delete_resource_group(app: AppHandle, name: String) -> Result<(), String>
         }
     }
 
-    if let Err(error) = update_resource_record_paths(&app, &new_records) {
+    if let Err(error) = update_resource_record_paths(app, &new_records, "") {
         rollback_moved_resource_files(&moved);
         return Err(format!("更新资源路径失败: {error}"));
     }
     if let Err(error) = std::fs::remove_dir(&group_path) {
         let old_records = records;
-        let _ = update_resource_record_paths(&app, &old_records);
+        let _ = update_resource_record_paths(app, &old_records, &name);
         rollback_moved_resource_files(&moved);
         return Err(format!("删除资源分组失败: {error}"));
     }
@@ -3242,5 +3282,272 @@ mod record_classification_tests {
         assert!(!filter.contains("group_name"));
         assert!(search_filter.contains("NOT (COALESCE(storage_mode, 'database') = 'resource')"));
         assert!(!search_filter.contains("group_name"));
+    }
+}
+
+#[cfg(test)]
+mod resource_command_tests {
+    use super::{
+        delete_resource_group_inner, get_clipboard_records_inner, update_resource_group_inner,
+        DbState,
+    };
+    use rusqlite::Connection;
+    use std::path::PathBuf;
+    use std::sync::Mutex;
+    use std::time::Duration;
+    use tauri::Manager;
+
+    fn test_app() -> (tauri::App<tauri::test::MockRuntime>, PathBuf) {
+        let app = tauri::test::mock_app();
+        let root = std::env::temp_dir().join(format!(
+            "copy-creator-resource-command-test-{}",
+            uuid::Uuid::new_v4()
+        ));
+        std::fs::create_dir_all(&root).unwrap();
+
+        let conn = Connection::open_in_memory().unwrap();
+        conn.execute_batch(
+            "CREATE TABLE settings (key TEXT PRIMARY KEY, value TEXT NOT NULL);
+             CREATE TABLE clipboard_records (
+                 id TEXT PRIMARY KEY,
+                 type TEXT NOT NULL,
+                 content TEXT NOT NULL,
+                 source_app TEXT DEFAULT '',
+                 created_at TEXT NOT NULL,
+                 user_api_key INTEGER DEFAULT 0,
+                 sort_order REAL,
+                 group_name TEXT DEFAULT '',
+                 attachments TEXT DEFAULT '[]',
+                 storage_mode TEXT DEFAULT 'database',
+                 resource_path TEXT DEFAULT ''
+             );
+             INSERT INTO settings (key, value) VALUES ('resource_library_path', '');",
+        )
+        .unwrap();
+        app.manage(DbState {
+            conn: Mutex::new(conn),
+        });
+        {
+            let state = app.state::<DbState>();
+            let conn = state.conn.lock().unwrap();
+            conn.execute(
+                "UPDATE settings SET value = ?1 WHERE key = 'resource_library_path'",
+                [&root.to_string_lossy().to_string()],
+            )
+            .unwrap();
+        }
+
+        (app, root)
+    }
+
+    fn insert_resource(
+        app: &tauri::App<tauri::test::MockRuntime>,
+        id: &str,
+        sort_order: f64,
+        group_name: &str,
+        resource_path: &str,
+    ) {
+        let state = app.state::<DbState>();
+        let conn = state.conn.lock().unwrap();
+        conn.execute(
+            "INSERT INTO clipboard_records
+             (id, type, content, created_at, sort_order, group_name, storage_mode, resource_path)
+             VALUES (?1, 'text', ?2, '2026-08-01T00:00:00Z', ?3, ?4, 'resource', ?5)",
+            (id, id, sort_order, group_name, resource_path),
+        )
+        .unwrap();
+    }
+
+    fn cleanup(root: &PathBuf) {
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn resource_record_query_returns_without_reentrant_database_lock() {
+        let (app, root) = test_app();
+        let group = root.join("References");
+        std::fs::create_dir_all(&group).unwrap();
+        let path = group.join("copy-creator-resource-1.txt");
+        std::fs::write(&path, "resource").unwrap();
+        insert_resource(
+            &app,
+            "resource-1",
+            10.0,
+            "References",
+            path.to_str().unwrap(),
+        );
+
+        let handle = app.handle().clone();
+        let (sender, receiver) = std::sync::mpsc::channel();
+        std::thread::spawn(move || {
+            let result = get_clipboard_records_inner(
+                &handle,
+                None,
+                Some(120),
+                Some(0),
+                Some("resources".to_string()),
+                Some("References".to_string()),
+            );
+            sender.send(result).unwrap();
+        });
+        let records = receiver
+            .recv_timeout(Duration::from_secs(2))
+            .expect("资源列表查询不应因重复获取数据库锁而阻塞")
+            .unwrap();
+
+        assert_eq!(records.len(), 1);
+        assert_eq!(records[0]["resource_group"], "References");
+        cleanup(&root);
+    }
+
+    #[test]
+    fn resource_group_filter_supports_pagination_and_ungrouped_records() {
+        let (app, root) = test_app();
+        let group = root.join("References");
+        std::fs::create_dir_all(&group).unwrap();
+        let root_path = root.join("copy-creator-resource-root.txt");
+        let first_group_path = group.join("copy-creator-resource-first.txt");
+        let second_group_path = group.join("copy-creator-resource-second.txt");
+        for path in [&root_path, &first_group_path, &second_group_path] {
+            std::fs::write(path, "resource").unwrap();
+        }
+        insert_resource(&app, "root", 30.0, "", root_path.to_str().unwrap());
+        insert_resource(
+            &app,
+            "first",
+            20.0,
+            "References",
+            first_group_path.to_str().unwrap(),
+        );
+        insert_resource(
+            &app,
+            "second",
+            10.0,
+            "References",
+            second_group_path.to_str().unwrap(),
+        );
+
+        let handle = app.handle().clone();
+        let page = get_clipboard_records_inner(
+            &handle,
+            None,
+            Some(1),
+            Some(1),
+            Some("resources".to_string()),
+            Some("References".to_string()),
+        )
+        .unwrap();
+        assert_eq!(page.len(), 1);
+        assert_eq!(page[0]["id"], "second");
+
+        let ungrouped = get_clipboard_records_inner(
+            &handle,
+            None,
+            Some(120),
+            Some(0),
+            Some("resources".to_string()),
+            Some(String::new()),
+        )
+        .unwrap();
+        assert_eq!(
+            ungrouped
+                .iter()
+                .map(|record| &record["id"])
+                .collect::<Vec<_>>(),
+            vec![&serde_json::json!("root")]
+        );
+        cleanup(&root);
+    }
+
+    #[test]
+    fn renaming_resource_group_updates_files_and_record_metadata() {
+        let (app, root) = test_app();
+        let old_path = root.join("Old");
+        std::fs::create_dir_all(&old_path).unwrap();
+        let file = old_path.join("copy-creator-resource-1.txt");
+        std::fs::write(&file, "resource").unwrap();
+        insert_resource(&app, "resource-1", 10.0, "Old", file.to_str().unwrap());
+
+        update_resource_group_inner(app.handle(), "Old".to_string(), "New".to_string()).unwrap();
+
+        let new_file = root.join("New/copy-creator-resource-1.txt");
+        assert!(new_file.is_file());
+        assert!(!old_path.exists());
+        let state = app.state::<DbState>();
+        let conn = state.conn.lock().unwrap();
+        let (group_name, resource_path): (String, String) = conn
+            .query_row(
+                "SELECT group_name, resource_path FROM clipboard_records WHERE id = 'resource-1'",
+                [],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )
+            .unwrap();
+        assert_eq!(group_name, "New");
+        assert_eq!(resource_path, new_file.to_string_lossy());
+        cleanup(&root);
+    }
+
+    #[test]
+    fn deleting_resource_group_moves_files_updates_markdown_and_clears_metadata() {
+        let (app, root) = test_app();
+        let group_path = root.join("References");
+        let attachments = root.join(".copy-creator/attachments/resource-1-transaction");
+        std::fs::create_dir_all(&attachments).unwrap();
+        std::fs::create_dir_all(&group_path).unwrap();
+        let file = group_path.join("copy-creator-resource-1.md");
+        std::fs::write(
+            &file,
+            "截图\n![截图 1](../.copy-creator/attachments/resource-1-transaction/image-1.png)\n",
+        )
+        .unwrap();
+        insert_resource(
+            &app,
+            "resource-1",
+            10.0,
+            "References",
+            file.to_str().unwrap(),
+        );
+
+        delete_resource_group_inner(app.handle(), "References".to_string()).unwrap();
+
+        let moved_file = root.join("copy-creator-resource-1.md");
+        assert!(moved_file.is_file());
+        assert!(!group_path.exists());
+        assert_eq!(
+            std::fs::read_to_string(&moved_file).unwrap(),
+            "截图\n![截图 1](.copy-creator/attachments/resource-1-transaction/image-1.png)\n",
+        );
+        let state = app.state::<DbState>();
+        let conn = state.conn.lock().unwrap();
+        let (group_name, resource_path): (String, String) = conn
+            .query_row(
+                "SELECT group_name, resource_path FROM clipboard_records WHERE id = 'resource-1'",
+                [],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )
+            .unwrap();
+        assert!(group_name.is_empty());
+        assert_eq!(resource_path, moved_file.to_string_lossy());
+        cleanup(&root);
+    }
+
+    #[test]
+    fn deleting_resource_group_rolls_back_previous_moves_when_markdown_read_fails() {
+        let (app, root) = test_app();
+        let group_path = root.join("References");
+        std::fs::create_dir_all(&group_path).unwrap();
+        let first = group_path.join("01-resource.txt");
+        let unreadable_markdown = group_path.join("02-resource.md");
+        std::fs::write(&first, "resource").unwrap();
+        std::fs::write(&unreadable_markdown, [0xff, 0xfe, 0xfd]).unwrap();
+
+        let error = delete_resource_group_inner(app.handle(), "References".to_string())
+            .expect_err("无效 UTF-8 的 Markdown 文件应使分组删除失败");
+        assert!(error.contains("读取资源文件失败"));
+        assert!(first.is_file());
+        assert!(unreadable_markdown.is_file());
+        assert!(!root.join("01-resource.txt").exists());
+        assert!(root.join("References").is_dir());
+        cleanup(&root);
     }
 }

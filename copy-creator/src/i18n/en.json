@@ -129,7 +129,6 @@
     "sortNewest": "Newest",
     "sortOldest": "Oldest",
     "itemCount": "{{count}} items",
-    "reorderHint": "Drag to reorder",
     "noMatches": "No matching resources",
     "loadMore": "Show more",
     "copied": "Pasted to the current app",

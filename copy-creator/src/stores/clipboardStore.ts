@@ -55,6 +55,7 @@ interface ClipboardState {
   init: (categoryOverride?: ClipType) => void;
   setSearch: (s: string) => void;
   setCategory: (c: ClipType) => void;
+  setResourceGroup: (group: string | null) => void;
   loadRecords: (
     append?: boolean,
     categoryOverride?: ClipType,
@@ -222,6 +223,10 @@ export const useClipboardStore = create<ClipboardState>((set, get) => ({
     recordsLoadGeneration++;
     set({ category: c, resourceGroup: null });
   },
+  setResourceGroup: (group) => {
+    recordsLoadGeneration++;
+    set({ resourceGroup: group });
+  },
 
   loadRecords: async (
     append = false,
@@ -244,8 +249,8 @@ export const useClipboardStore = create<ClipboardState>((set, get) => ({
         limit: PAGE_SIZE,
         offset,
         category: cat,
-        ...(activeCategory === "resources" && resourceGroup !== undefined
-          ? { resource_group: resourceGroup }
+        ...(activeCategory === "resources" && activeResourceGroup !== null
+          ? { resourceGroup: activeResourceGroup }
           : {}),
       };
       const records = await invoke<ClipboardRecord[]>("get_clipboard_records", requestArgs);
@@ -303,8 +308,8 @@ export const useClipboardStore = create<ClipboardState>((set, get) => ({
           limit: PAGE_SIZE,
           offset,
           category,
-          ...(activeCategory === "resources" && resourceGroup !== undefined
-            ? { resource_group: resourceGroup }
+          ...(activeCategory === "resources" && activeResourceGroup !== null
+            ? { resourceGroup: activeResourceGroup }
             : {}),
         };
         const page = await invoke<ClipboardRecord[]>("get_clipboard_records", requestArgs);

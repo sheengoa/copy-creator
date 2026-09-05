@@ -162,6 +162,79 @@ describe("clipboardStore full record loading", () => {
     });
   });
 
+  it("keeps the selected resource group for refresh and pagination", async () => {
+    const resourceRecord = {
+      id: "resource-1",
+      type: "text" as const,
+      content: "resource",
+      source_app: "",
+      created_at: "2026-08-01T00:00:00Z",
+      storage_mode: "resource" as const,
+      resource_group: "References",
+    };
+    useClipboardStore.setState({
+      records: [resourceRecord],
+      category: "resources",
+      resourceGroup: "References",
+    });
+    invokeMock.mockResolvedValue([resourceRecord]);
+
+    await useClipboardStore.getState().loadRecords(true, "resources");
+
+    expect(invokeMock).toHaveBeenCalledWith("get_clipboard_records", {
+      search: undefined,
+      limit: 120,
+      offset: 1,
+      category: "resources",
+      resourceGroup: "References",
+    });
+  });
+
+  it("uses the selected resource group for full selection loading", async () => {
+    const resourceRecord = {
+      id: "resource-1",
+      type: "text" as const,
+      content: "resource",
+      source_app: "",
+      created_at: "2026-08-01T00:00:00Z",
+      storage_mode: "resource" as const,
+      resource_group: "References",
+    };
+    useClipboardStore.setState({
+      category: "resources",
+      resourceGroup: "References",
+    });
+    invokeMock.mockResolvedValue([resourceRecord]);
+
+    await useClipboardStore.getState().loadAllRecords("resources");
+
+    expect(invokeMock).toHaveBeenCalledWith("get_clipboard_records", {
+      search: undefined,
+      limit: 120,
+      offset: 0,
+      category: "resources",
+      resourceGroup: "References",
+    });
+  });
+
+  it("sends an empty resource group when loading ungrouped resources", async () => {
+    useClipboardStore.setState({
+      category: "resources",
+      resourceGroup: "",
+    });
+    invokeMock.mockResolvedValue([]);
+
+    await useClipboardStore.getState().loadRecords(false, "resources");
+
+    expect(invokeMock).toHaveBeenCalledWith("get_clipboard_records", {
+      search: undefined,
+      limit: 120,
+      offset: 0,
+      category: "resources",
+      resourceGroup: "",
+    });
+  });
+
   it("ignores an older normal load when a newer load finishes first", async () => {
     const older = deferred<typeof records>();
     const newer = deferred<typeof records>();

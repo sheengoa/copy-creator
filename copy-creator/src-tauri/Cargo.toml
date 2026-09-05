@@ -37,6 +37,9 @@ dirs = "5"
 arboard = { version = "3", features = ["image-data"] }
 drag = "2.1.1"
 
+[dev-dependencies]
+tauri = { version = "2.11.1", features = ["test"] }
+
 [target.'cfg(target_os = "linux")'.dependencies]
 gtk = "0.18.2"
 

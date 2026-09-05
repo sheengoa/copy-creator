@@ -139,7 +139,6 @@
     "sortNewest": "最新",
     "sortOldest": "最早",
     "itemCount": "{{count}} 条",
-    "reorderHint": "可拖动排序",
     "noMatches": "没有匹配的资源",
     "loadMore": "显示更多",
     "copied": "已粘贴到当前应用",
