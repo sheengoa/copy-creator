@@ -69,6 +69,19 @@ describe("standalone window chrome", () => {
     expect(componentSource).toContain("<StashEditor");
   });
 
+  it("keeps resource selection beside the resource heading", () => {
+    const pageSource = readSource("../pages/ResourcePage.tsx");
+
+    expect(pageSource).not.toContain('className="resource-mode-row"');
+    expect(pageSource).toContain('className="resource-list-heading-actions"');
+    expect(pageSource).toContain(
+      'className="phrase-add-btn selection-mode-btn resource-selection-button"',
+    );
+    expect(pageSource.indexOf("resource-selection-button")).toBeGreaterThan(
+      pageSource.indexOf("resource-list-heading-actions"),
+    );
+  });
+
   it("keeps the clipboard create existing-records section standalone", () => {
     const css = readStyle("clipboard.css");
     const componentSource = readSource("../components/ClipboardCreateDialog/index.tsx");

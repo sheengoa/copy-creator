@@ -576,15 +576,6 @@ export default function ResourcePage() {
         </section>
       )}
 
-      <div className="resource-mode-row">
-        {!isSelecting && filteredRecords.length > 0 && (
-          <button className="phrase-add-btn selection-mode-btn" onClick={startResourceSelection}>
-            {Icons.check}
-            <span>{t("common.select")}</span>
-          </button>
-        )}
-      </div>
-
       <div className="resource-filter-row">
         <span className="resource-filter-label">{t("resources.filterByType")}</span>
         <div className="resource-filter-options">
@@ -626,13 +617,25 @@ export default function ResourcePage() {
 
       <section className="resource-list-area">
         <div className="resource-list-heading">
-          <div>
+          <div className="resource-list-heading-main">
             <h2>{t("resources.modeResource")}</h2>
             <span>{t("resources.itemCount", { count: filteredRecords.length })}</span>
           </div>
-          {reorderEnabled && (
-            <span className="resource-reorder-hint">{t("resources.reorderHint")}</span>
-          )}
+          <div className="resource-list-heading-actions">
+            {!isSelecting && filteredRecords.length > 0 && (
+              <button
+                type="button"
+                className="phrase-add-btn selection-mode-btn resource-selection-button"
+                onClick={startResourceSelection}
+              >
+                {Icons.check}
+                <span>{t("common.select")}</span>
+              </button>
+            )}
+            {reorderEnabled && (
+              <span className="resource-reorder-hint">{t("resources.reorderHint")}</span>
+            )}
+          </div>
         </div>
 
         {loadError && (
