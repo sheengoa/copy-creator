@@ -276,7 +276,7 @@ describe("integration regressions", () => {
     expect(pageSource).toContain("request !== selectAllRequestRef.current");
     expect(pageSource).toContain("cancelResourceSelection();");
     expect(pageSource).toContain("busy={selectingAll || deletingSelected}");
-    expect(pageSource).toContain("index={renderedRecordIndexes.get(record.id) ?? 0}");
+    expect(pageSource).toContain("record.resource_managed !== false");
     expect(pageSource).toContain("{confirmDialog}");
     expect(cardSource).toContain("onOpenDetail");
     expect(cardSource).not.toContain("onTogglePreview");

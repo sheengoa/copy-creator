@@ -56,16 +56,42 @@ export function InlineImagePreview({
   );
 }
 
-type InlineTextFilePreviewProps = (
-  | { path: string; recordId?: never }
-  | { path?: never; recordId: string }
-) & {
+interface InlineTextFilePreviewProps {
+  path?: string;
+  recordId?: string;
+  resourcePath?: string;
+  resourceVersion?: string;
   search?: string;
-};
+}
+
+const resourceTextPreviewCache = new Map<string, string>();
+const resourceTextPreviewRequests = new Map<string, Promise<string>>();
+
+function loadResourceTextPreview(path: string, version?: string): Promise<string> {
+  const cacheKey = `${path}\u0000${version ?? ""}`;
+  const cached = resourceTextPreviewCache.get(cacheKey);
+  if (cached !== undefined) return Promise.resolve(cached);
+
+  const pending = resourceTextPreviewRequests.get(cacheKey);
+  if (pending) return pending;
+
+  const request = invoke<string>("read_resource_text_preview", { path })
+    .then((text) => {
+      resourceTextPreviewCache.set(cacheKey, text);
+      return text;
+    })
+    .finally(() => {
+      resourceTextPreviewRequests.delete(cacheKey);
+    });
+  resourceTextPreviewRequests.set(cacheKey, request);
+  return request;
+}
 
 export function InlineTextFilePreview({
   path,
   recordId,
+  resourcePath,
+  resourceVersion,
   search,
 }: InlineTextFilePreviewProps) {
   const { t } = useTranslation();
@@ -76,11 +102,12 @@ export function InlineTextFilePreview({
     let cancelled = false;
     setContent(null);
     setFailed(false);
-    const command = recordId
-      ? "read_clipboard_text_preview"
-      : "read_quick_input_text_preview";
-    const args = recordId ? { id: recordId } : { path };
-    invoke<string>(command, args)
+    const request = resourcePath
+      ? loadResourceTextPreview(resourcePath, resourceVersion)
+      : recordId
+        ? invoke<string>("read_clipboard_text_preview", { id: recordId })
+        : invoke<string>("read_quick_input_text_preview", { path });
+    request
       .then((text) => {
         if (!cancelled) setContent(text);
       })
@@ -90,7 +117,7 @@ export function InlineTextFilePreview({
     return () => {
       cancelled = true;
     };
-  }, [path, recordId]);
+  }, [path, recordId, resourcePath, resourceVersion]);
 
   if (failed) {
     return (

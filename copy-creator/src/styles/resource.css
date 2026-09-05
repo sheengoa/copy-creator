@@ -507,8 +507,6 @@
   background: var(--card-inner-bg);
   box-shadow: 0 0.5px 0 0 rgba(255, 255, 255, 0.35) inset;
   cursor: pointer;
-  animation: cardEnter 0.35s cubic-bezier(0.22, 1, 0.36, 1) both;
-  animation-delay: calc(var(--resource-enter-delay, 0) * 45ms);
   transition: border-color 0.15s ease, box-shadow 0.15s ease, transform 0.15s ease, opacity 0.15s ease;
 }
 
@@ -681,6 +679,19 @@
 
 .resource-card-text-preview.is-link {
   color: var(--accent);
+}
+
+.resource-card-text-preview > .inline-text-file-preview,
+.resource-card-text-preview > .inline-preview-loading,
+.resource-card-text-preview > .inline-preview-error {
+  width: 100%;
+  min-height: 0;
+  margin: 0;
+}
+
+.resource-card-text-preview > .inline-text-file-preview {
+  max-height: 100%;
+  overflow: hidden;
 }
 
 .resource-card-kind {
@@ -1306,6 +1317,23 @@
   color: var(--text-secondary);
   font-size: var(--text-xs);
   line-height: 1.5;
+}
+
+.resource-detail-file code {
+  max-width: 100%;
+  overflow-wrap: anywhere;
+  color: var(--text-tertiary);
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
+  line-height: 1.45;
+  user-select: text;
+}
+
+.resource-detail-text-file {
+  width: 100%;
+  min-height: 260px;
+  margin: 0;
+  overflow: auto;
 }
 
 .resource-detail-aside {

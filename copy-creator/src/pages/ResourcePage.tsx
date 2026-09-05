@@ -299,13 +299,10 @@ export default function ResourcePage() {
     && typeFilter === "all"
     && sortOrder === "newest"
     && filteredRecords.length > 1
+    && filteredRecords.every((record) => record.resource_managed !== false)
   );
   const renderedRecords = dragRecords ?? filteredRecords;
   const columns = splitResourceColumns(renderedRecords, 2);
-  const renderedRecordIndexes = useMemo(
-    () => new Map(renderedRecords.map((record, index) => [record.id, index])),
-    [renderedRecords],
-  );
   const activeDragRecord = activeDragId
     ? renderedRecords.find((record) => record.id === activeDragId)
     : null;
@@ -1020,7 +1017,6 @@ export default function ResourcePage() {
                         <div className="resource-item" key={record.id}>
                           <ResourceCard
                             record={record}
-                            index={renderedRecordIndexes.get(record.id) ?? 0}
                             search={search}
                             typeLabel={(kind) => typeLabels[kind]}
                             selectionMode={isSelecting}

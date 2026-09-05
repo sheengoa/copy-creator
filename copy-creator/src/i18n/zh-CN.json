@@ -160,10 +160,11 @@
     "autoplayBlocked": "自动播放未成功，请点击播放器播放",
     "backToLibrary": "返回内容库",
     "detailError": "内容详情加载失败",
-    "fileDetailNote": "此文件暂无内置预览，可点击「使用」粘贴到当前应用",
+    "fileDetailNote": "当前格式以文件信息展示，可点击「使用」粘贴到当前应用",
     "info": "内容信息",
     "type": "类型",
     "createdAt": "创建时间",
+    "fileSize": "文件大小",
     "sourceApp": "来源应用",
     "detailHint": "这里显示内容的完整信息，可直接使用或播放。"
   },

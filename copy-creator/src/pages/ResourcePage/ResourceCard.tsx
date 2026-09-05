@@ -5,6 +5,7 @@ import { useTranslation } from "react-i18next";
 import type { ClipboardRecord } from "../../types";
 import { Icons } from "../../components/Icons";
 import { HighlightText } from "../../components/HighlightText";
+import { InlineTextFilePreview } from "../../components/InlinePreview";
 import { ImageThumb } from "../ClipboardPage/ImageThumb";
 import { ResourceImage } from "./ResourceMedia";
 import {
@@ -17,7 +18,6 @@ import {
 
 interface ResourceCardProps {
   record: ClipboardRecord;
-  index: number;
   search: string;
   typeLabel: (kind: ResourceMediaKind) => string;
   selectionMode: boolean;
@@ -81,6 +81,18 @@ function ResourceCardVisual({
     );
   }
 
+  if (record.type === "file" && record.resource_path) {
+    return (
+      <div className="resource-card-text-preview">
+        <InlineTextFilePreview
+          resourcePath={record.resource_path}
+          resourceVersion={record.created_at}
+          search={search}
+        />
+      </div>
+    );
+  }
+
   return (
     <div className={`resource-card-text-preview${record.type === "link" ? " is-link" : ""}`}>
       <HighlightText text={summary || " "} search={search} />
@@ -90,7 +102,6 @@ function ResourceCardVisual({
 
 export function ResourceCard({
   record,
-  index,
   search,
   typeLabel,
   selectionMode,
@@ -128,7 +139,6 @@ export function ResourceCard({
       style={{
         transform: CSS.Transform.toString(transform),
         transition: transition || "transform 180ms ease",
-        "--resource-enter-delay": index,
       } as React.CSSProperties}
       className={`resource-card${selected ? " is-selected" : ""}${isDragging ? " is-dragging" : ""}`}
       onClick={activateDetail}

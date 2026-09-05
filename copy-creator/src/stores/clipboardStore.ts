@@ -36,6 +36,10 @@ interface ClipboardRecord {
   storage_mode?: "database" | "resource";
   resource_path?: string;
   resource_group?: string | null;
+  resource_kind?: "text" | "image" | "video" | "audio" | "file";
+  resource_relative_path?: string;
+  resource_file_size?: number;
+  resource_managed?: boolean;
 }
 
 const PAGE_SIZE = 120;

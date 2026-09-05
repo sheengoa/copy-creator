@@ -1,10 +1,13 @@
 import { useEffect, useState } from "react";
+import { invoke } from "@tauri-apps/api/core";
 import { useTranslation } from "react-i18next";
 import type { ClipboardRecord } from "../../types";
 import { Icons } from "../../components/Icons";
+import { HighlightText } from "../../components/HighlightText";
 import { loadClipboardPreviewSegments } from "../../utils/contentPreview";
 import type { RadialPreviewSegment } from "../../utils/radialPreview";
 import {
+  formatResourceFileSize,
   getResourceFileName,
   getResourceTitle,
   inferResourceMediaKind,
@@ -31,12 +34,17 @@ export default function ResourceDetailPage({
   const { t } = useTranslation();
   const kind = inferResourceMediaKind(record);
   const [segments, setSegments] = useState<RadialPreviewSegment[] | null>(null);
+  const [textContent, setTextContent] = useState<string | null>(null);
   const [error, setError] = useState(false);
   const [mediaSource, setMediaSource] = useState<string | null>(null);
+  const externalTextPath = kind === "text" && record.type === "file"
+    ? record.resource_path || record.content
+    : null;
 
   useEffect(() => {
     let cancelled = false;
     setSegments(null);
+    setTextContent(null);
     setError(false);
     setMediaSource(null);
     if (kind === "video" || kind === "audio" || kind === "file" || kind === "image") {
@@ -54,6 +62,19 @@ export default function ResourceDetailPage({
       };
     }
 
+    if (externalTextPath) {
+      invoke<string>("read_resource_text_preview", { path: externalTextPath })
+        .then((content) => {
+          if (!cancelled) setTextContent(content);
+        })
+        .catch(() => {
+          if (!cancelled) setError(true);
+        });
+      return () => {
+        cancelled = true;
+      };
+    }
+
     loadClipboardPreviewSegments(record)
       .then((next) => {
         if (!cancelled) setSegments(next);
@@ -64,12 +85,14 @@ export default function ResourceDetailPage({
     return () => {
       cancelled = true;
     };
-  }, [kind, record]);
+  }, [externalTextPath, kind, record]);
 
   const title = getResourceTitle(record, kind);
   const detailReady = kind === "video" || kind === "audio"
     ? Boolean(mediaSource)
     : kind === "file" || kind === "image" || Boolean(segments);
+  const textDetailReady = externalTextPath ? textContent !== null : Boolean(segments);
+  const contentReady = externalTextPath ? textDetailReady : detailReady;
 
   return (
     <div className="resource-detail-page">
@@ -91,7 +114,7 @@ export default function ResourceDetailPage({
       </header>
 
       <main className="resource-detail-body">
-        <section className="resource-detail-main" aria-busy={!detailReady && !error}>
+        <section className="resource-detail-main" aria-busy={!(externalTextPath ? textDetailReady : detailReady) && !error}>
           <span className="resource-detail-kind">{typeLabel(kind)}</span>
           <h1>{title}</h1>
           <p className="resource-detail-subtitle">
@@ -105,7 +128,7 @@ export default function ResourceDetailPage({
                   {t("resources.backToLibrary")}
                 </button>
               </div>
-            ) : !detailReady ? (
+            ) : !contentReady ? (
               <div className="resource-preview-loading" role="status">{t("common.loading")}</div>
             ) : kind === "video" || kind === "audio" ? (
               <ResourceMediaPlayer kind={kind} path={record.content} resolvedSrc={mediaSource ?? undefined} />
@@ -119,8 +142,16 @@ export default function ResourceDetailPage({
               <div className="resource-detail-file">
                 {Icons.file}
                 <strong>{getResourceFileName(record.content)}</strong>
-                <span>{t("resources.fileDetailNote")}</span>
+                <span>
+                  {t("resources.fileDetailNote")}
+                  {record.resource_file_size !== undefined && ` · ${formatResourceFileSize(record.resource_file_size)}`}
+                </span>
+                <code>{record.resource_relative_path || record.resource_path || record.content}</code>
               </div>
+            ) : externalTextPath ? (
+              <pre className="resource-segment-text resource-detail-text-file">
+                <HighlightText text={textContent || ""} />
+              </pre>
             ) : (
               <ResourceSegments segments={segments || []} />
             )}
@@ -138,6 +169,12 @@ export default function ResourceDetailPage({
               <dt>{t("resources.createdAt")}</dt>
               <dd>{new Date(record.created_at).toLocaleString()}</dd>
             </div>
+            {record.resource_file_size !== undefined && (
+              <div>
+                <dt>{t("resources.fileSize")}</dt>
+                <dd>{formatResourceFileSize(record.resource_file_size)}</dd>
+              </div>
+            )}
             {record.source_app && (
               <div>
                 <dt>{t("resources.sourceApp")}</dt>

@@ -26,6 +26,10 @@ export interface ClipboardRecord {
   storage_mode?: ClipboardStorageMode;
   resource_path?: string;
   resource_group?: string | null;
+  resource_kind?: "text" | "image" | "video" | "audio" | "file";
+  resource_relative_path?: string;
+  resource_file_size?: number;
+  resource_managed?: boolean;
 }
 
 export interface PhraseGroup {

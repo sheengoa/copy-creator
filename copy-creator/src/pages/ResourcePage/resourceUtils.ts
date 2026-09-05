@@ -5,8 +5,91 @@ export type ResourceMediaKind = "text" | "image" | "video" | "audio" | "file";
 export type ResourceTypeFilter = "all" | ResourceMediaKind;
 
 const VIDEO_EXTENSIONS = new Set(["avi", "m4v", "mkv", "mov", "mp4", "ogv", "webm"]);
-const AUDIO_EXTENSIONS = new Set(["aac", "flac", "m4a", "mp3", "oga", "ogg", "wav", "weba"]);
-const IMAGE_EXTENSIONS = new Set(["avif", "bmp", "gif", "ico", "jpeg", "jpg", "png", "webp"]);
+const AUDIO_EXTENSIONS = new Set([
+  "aac",
+  "flac",
+  "m4a",
+  "mid",
+  "midi",
+  "mp3",
+  "oga",
+  "ogg",
+  "opus",
+  "wav",
+  "weba",
+]);
+const IMAGE_EXTENSIONS = new Set([
+  "avif",
+  "bmp",
+  "gif",
+  "heic",
+  "heif",
+  "ico",
+  "jpeg",
+  "jpg",
+  "png",
+  "svg",
+  "tif",
+  "tiff",
+  "webp",
+]);
+const TEXT_EXTENSIONS = new Set([
+  "bat",
+  "bash",
+  "c",
+  "cc",
+  "cfg",
+  "clj",
+  "conf",
+  "cpp",
+  "cs",
+  "css",
+  "cxx",
+  "env",
+  "fish",
+  "go",
+  "graphql",
+  "h",
+  "hh",
+  "hpp",
+  "htm",
+  "html",
+  "ini",
+  "java",
+  "js",
+  "json",
+  "jsonl",
+  "jsx",
+  "kt",
+  "kts",
+  "less",
+  "log",
+  "markdown",
+  "md",
+  "mjs",
+  "php",
+  "pl",
+  "properties",
+  "ps1",
+  "py",
+  "rb",
+  "rs",
+  "sass",
+  "scss",
+  "sh",
+  "sql",
+  "svelte",
+  "swift",
+  "tex",
+  "toml",
+  "ts",
+  "tsx",
+  "txt",
+  "vue",
+  "xml",
+  "yaml",
+  "yml",
+]);
 
 let storagePathPromise: Promise<string> | null = null;
 
@@ -27,28 +110,35 @@ export function getResourceExtension(value: string): string {
   return dotIndex >= 0 ? fileName.slice(dotIndex + 1) : "";
 }
 
-export function inferResourceMediaKind(record: Pick<ClipboardRecord, "type" | "content">): ResourceMediaKind {
+export function inferResourceMediaKind(
+  record: Pick<ClipboardRecord, "type" | "content" | "resource_kind">,
+): ResourceMediaKind {
   if (record.type === "image") return "image";
+  if (record.resource_kind) return record.resource_kind;
   if (record.type !== "file") return "text";
 
   const extension = getResourceExtension(record.content);
   if (VIDEO_EXTENSIONS.has(extension)) return "video";
   if (AUDIO_EXTENSIONS.has(extension)) return "audio";
   if (IMAGE_EXTENSIONS.has(extension)) return "image";
+  if (TEXT_EXTENSIONS.has(extension)) return "text";
   return "file";
 }
 
 export function matchesResourceType(
-  record: Pick<ClipboardRecord, "type" | "content">,
+  record: Pick<ClipboardRecord, "type" | "content" | "resource_kind">,
   filter: ResourceTypeFilter,
 ): boolean {
   return filter === "all" || inferResourceMediaKind(record) === filter;
 }
 
 export function getResourceTitle(
-  record: Pick<ClipboardRecord, "type" | "content">,
+  record: Pick<ClipboardRecord, "type" | "content" | "resource_kind" | "resource_path">,
   kind = inferResourceMediaKind(record),
 ): string {
+  if (record.type === "file" && (record.resource_kind || kind === "text")) {
+    return getResourceFileName(record.resource_path || record.content);
+  }
   if (kind === "image" && record.type === "image") return getResourceFileName(record.content);
   if (kind === "video" || kind === "audio" || kind === "file") {
     return getResourceFileName(record.content);
@@ -79,6 +169,20 @@ export function formatResourceTime(dateStr: string): string {
     .getHours()
     .toString()
     .padStart(2, "0")}:${date.getMinutes().toString().padStart(2, "0")}`;
+}
+
+export function formatResourceFileSize(size?: number): string {
+  if (size === undefined || !Number.isFinite(size) || size < 0) return "";
+  if (size < 1024) return `${size} B`;
+  const units = ["KB", "MB", "GB", "TB"];
+  let value = size;
+  let unitIndex = -1;
+  while (value >= 1024 && unitIndex < units.length - 1) {
+    value /= 1024;
+    unitIndex += 1;
+  }
+  const precision = value >= 10 || unitIndex === 0 ? 0 : 1;
+  return `${value.toFixed(precision)} ${units[unitIndex]}`;
 }
 
 // 交错分配保证双列布局按行阅读时与时间顺序一致，配合拖拽预览的扁平排序。
