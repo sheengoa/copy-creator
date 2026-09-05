@@ -632,9 +632,6 @@ export default function ResourcePage() {
                 <span>{t("common.select")}</span>
               </button>
             )}
-            {reorderEnabled && (
-              <span className="resource-reorder-hint">{t("resources.reorderHint")}</span>
-            )}
           </div>
         </div>
 

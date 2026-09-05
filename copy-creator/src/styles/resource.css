@@ -273,17 +273,10 @@
   white-space: nowrap;
 }
 
-.resource-list-heading span {
+.resource-list-heading-main > span {
   flex-shrink: 0;
   color: var(--text-secondary);
   font-size: var(--text-xs);
-}
-
-.resource-reorder-hint {
-  max-width: 46%;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
 }
 
 .resource-list {
@@ -1251,10 +1244,6 @@
   .resource-list-heading-actions {
     flex-wrap: wrap;
     gap: 6px 10px;
-  }
-
-  .resource-reorder-hint {
-    max-width: 100%;
   }
 
   .resource-columns,

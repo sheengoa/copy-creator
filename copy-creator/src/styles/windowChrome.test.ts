@@ -71,15 +71,20 @@ describe("standalone window chrome", () => {
 
   it("keeps resource selection beside the resource heading", () => {
     const pageSource = readSource("../pages/ResourcePage.tsx");
+    const resourceCss = readStyle("resource.css");
 
     expect(pageSource).not.toContain('className="resource-mode-row"');
     expect(pageSource).toContain('className="resource-list-heading-actions"');
+    expect(pageSource).not.toContain('t("resources.reorderHint")');
     expect(pageSource).toContain(
       'className="phrase-add-btn selection-mode-btn resource-selection-button"',
     );
     expect(pageSource.indexOf("resource-selection-button")).toBeGreaterThan(
       pageSource.indexOf("resource-list-heading-actions"),
     );
+    expect(resourceCss).toContain(".resource-list-heading-main > span");
+    expect(resourceCss).not.toContain(".resource-list-heading span");
+    expect(resourceCss).not.toContain(".resource-reorder-hint");
   });
 
   it("keeps the clipboard create existing-records section standalone", () => {
