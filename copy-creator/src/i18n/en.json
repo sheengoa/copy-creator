@@ -236,6 +236,7 @@
     "openPreview": "Open preview",
     "closePreview": "Close preview",
     "previewImage": "Image in stashed content",
-    "imageUnavailable": "Image unavailable"
+    "imageUnavailable": "Image unavailable",
+    "backToTop": "Back to top"
   }
 }

@@ -236,6 +236,7 @@
     "openPreview": "展开预览",
     "closePreview": "收起预览",
     "previewImage": "暂存内容中的图片",
-    "imageUnavailable": "图片无法加载"
+    "imageUnavailable": "图片无法加载",
+    "backToTop": "回到顶部"
   }
 }

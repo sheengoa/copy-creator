@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState, useCallback, type CSSProperties } from "react";
+import { createPortal } from "react-dom";
 import { useTranslation } from "react-i18next";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import {
@@ -28,8 +29,21 @@ import {
   type RadialDragSource,
 } from "../../utils/radialDrag";
 import { ContentPreviewPanel } from "../ContentPreviewPanel";
+import { InlineTextFilePreview } from "../InlinePreview";
 import { loadClipboardPreviewSegments } from "../../utils/contentPreview";
 import { isResourceRecord } from "../../utils/clipboardRecord";
+import type { ResourceFolder } from "../../types";
+import {
+  findResourceFolder,
+  flattenResourceFolders,
+  getResourcePath,
+  getResourceSummary,
+  getResourceTitle,
+  inferResourceMediaKind,
+  isResourceFolderPath,
+  type ResourceMediaKind,
+} from "../../pages/ResourcePage/resourceUtils";
+import { ResourceImage } from "../../pages/ResourcePage/ResourceMedia";
 import i18n from "../../i18n";
 
 type TabKey = "clipboard" | "phrases" | "resources";
@@ -53,6 +67,11 @@ interface RadialItem {
   dragPath?: string;
   dragKind: RadialDragKind;
   dragSource: RadialDragSource;
+  isResource?: boolean;
+  resourceKind?: ResourceMediaKind;
+  resourcePath?: string;
+  resourceTitle?: string;
+  resourceSummary?: string;
 }
 
 interface PreviewLayout {
@@ -89,6 +108,10 @@ interface RadialDragEvent {
 }
 
 const filenameFromPath = (path: string) => path.replace(/\\/g, "/").split("/").pop() || path;
+
+function formatResourceFolderPath(path: string): string {
+  return path.split("/").filter(Boolean).join(" / ");
+}
 
 function formatTime(dateStr: string): string {
   const date = new Date(dateStr);
@@ -160,6 +183,57 @@ function FileThumb({ path }: { path: string }) {
   );
 }
 
+function ResourceItemVisual({ item }: { item: RadialItem }) {
+  const { t } = useTranslation();
+  const kind = item.resourceKind;
+
+  if (!kind) return null;
+
+  if (kind === "image" && item.type === "image") {
+    return (
+      <div className="radial-menu-resource-visual">
+        <ImageThumb recordId={item.id} />
+      </div>
+    );
+  }
+
+  if (kind === "image" && item.resourcePath) {
+    return (
+      <ResourceImage
+        path={item.resourcePath}
+        alt={item.resourceTitle || t("resources.imagePreview")}
+        className="radial-menu-resource-image"
+      />
+    );
+  }
+
+  if (kind === "text" && item.type === "file" && item.resourcePath) {
+    return (
+      <div className="radial-menu-resource-text-file">
+        <InlineTextFilePreview
+          resourcePath={item.resourcePath}
+          resourceVersion={item.createdAt}
+        />
+      </div>
+    );
+  }
+
+  if (kind === "text") {
+    return (
+      <div className="radial-menu-resource-text">
+        {item.resourceSummary || t("resources.empty")}
+      </div>
+    );
+  }
+
+  return (
+    <div className={`radial-menu-resource-type radial-menu-resource-type-${kind}`}>
+      {kind === "video" ? Icons.video : kind === "audio" ? Icons.audio : Icons.file}
+      <span>{t(`resources.type${kind[0].toUpperCase()}${kind.slice(1)}`)}</span>
+    </div>
+  );
+}
+
 export default function RadialMenu() {
   const { t } = useTranslation();
 
@@ -167,15 +241,28 @@ export default function RadialMenu() {
   const [activeTab, setActiveTab] = useState<TabKey>("clipboard");
   const [selectedItemId, setSelectedItemId] = useState<string | null>(null);
   const [clipboardCategory, setClipboardCategory] = useState<ClipType>("all");
+  const [resourceGroups, setResourceGroups] = useState<ResourceFolder[]>([]);
+  const [resourceGroup, setResourceGroup] = useState<string | null>(null);
+  const [resourceGroupMenuPath, setResourceGroupMenuPath] = useState<string | null>(null);
+  const [resourceGroupMenuPosition, setResourceGroupMenuPosition] = useState<{
+    left: number;
+    top: number;
+  } | null>(null);
   const [phraseGroupId, setPhraseGroupId] = useState<string | null>(null);
   const [preview, setPreview] = useState<PreviewState | null>(null);
   const [dragSessionItemId, setDragSessionItemId] = useState<string | null>(null);
   const [draggingItemId, setDraggingItemId] = useState<string | null>(null);
+  const [showBackTop, setShowBackTop] = useState(false);
 
   const visibleRef = useRef(false);
   const selectedItemIdRef = useRef<string | null>(null);
   const activeTabRef = useRef<TabKey>("clipboard");
   const clipboardCategoryRef = useRef<ClipType>("all");
+  const resourceGroupRef = useRef<string | null>(null);
+  const resourceGroupMenuRef = useRef<HTMLDivElement>(null);
+  const resourceGroupMenuAnchorRef = useRef<HTMLButtonElement>(null);
+  const categoriesScrollRef = useRef<HTMLDivElement>(null);
+  const listRef = useRef<HTMLDivElement>(null);
   const phraseGroupIdRef = useRef<string | null>(null);
   const previewRequestRef = useRef(0);
   const previewRef = useRef<PreviewState | null>(null);
@@ -194,8 +281,113 @@ export default function RadialMenu() {
   useEffect(() => { selectedItemIdRef.current = selectedItemId; }, [selectedItemId]);
   useEffect(() => { activeTabRef.current = activeTab; }, [activeTab]);
   useEffect(() => { clipboardCategoryRef.current = clipboardCategory; }, [clipboardCategory]);
+  useEffect(() => { resourceGroupRef.current = resourceGroup; }, [resourceGroup]);
   useEffect(() => { phraseGroupIdRef.current = phraseGroupId; }, [phraseGroupId]);
   useEffect(() => { previewRef.current = preview; }, [preview]);
+
+  const updateBackTopVisibility = useCallback(() => {
+    const list = listRef.current;
+    if (!list) return;
+    setShowBackTop(list.scrollTop > list.clientHeight);
+  }, []);
+
+  const handleBackToTop = useCallback(() => {
+    listRef.current?.scrollTo({ top: 0, behavior: "smooth" });
+  }, []);
+
+  useEffect(() => {
+    const list = listRef.current;
+    if (!list) return;
+    list.addEventListener("scroll", updateBackTopVisibility, { passive: true });
+    return () => list.removeEventListener("scroll", updateBackTopVisibility);
+  }, [updateBackTopVisibility]);
+
+  const loadResourceGroups = useCallback(async () => {
+    try {
+      const groups = await invoke<ResourceFolder[]>("get_resource_groups");
+      setResourceGroups(groups);
+    } catch (error) {
+      console.error("Failed to load radial resource groups:", error);
+    }
+  }, []);
+
+  useEffect(() => {
+    const el = categoriesScrollRef.current;
+    if (!el) return;
+    const handleCategoriesWheel = (event: WheelEvent) => {
+      if (Math.abs(event.deltaY) > Math.abs(event.deltaX)) {
+        event.preventDefault();
+        el.scrollLeft += event.deltaY;
+      }
+    };
+    el.addEventListener("wheel", handleCategoriesWheel, { passive: false });
+    return () => el.removeEventListener("wheel", handleCategoriesWheel);
+  }, [activeTab]);
+
+  const resourceFolderGroups = resourceGroups.filter((group) => group.name !== "");
+  const resourceGroupMenuFolder = resourceGroupMenuPath
+    ? findResourceFolder(resourceFolderGroups, resourceGroupMenuPath)
+    : null;
+  const resourceGroupMenuItems = resourceGroupMenuFolder
+    ? [
+        { folder: resourceGroupMenuFolder, depth: 0 },
+        ...flattenResourceFolders(resourceGroupMenuFolder.children ?? [], 1),
+      ]
+    : [];
+
+  const closeResourceGroupMenu = useCallback(() => {
+    setResourceGroupMenuPath(null);
+    setResourceGroupMenuPosition(null);
+  }, []);
+
+  const updateResourceGroupMenuPosition = useCallback(() => {
+    const anchor = resourceGroupMenuAnchorRef.current;
+    if (!anchor) return;
+    const anchorRect = anchor.getBoundingClientRect();
+    const menuRect = resourceGroupMenuRef.current?.getBoundingClientRect();
+    const menuWidth = menuRect?.width ?? 220;
+    const menuHeight = menuRect?.height ?? 0;
+    const viewportPadding = 8;
+    const left = Math.max(
+      viewportPadding,
+      Math.min(anchorRect.left, window.innerWidth - menuWidth - viewportPadding),
+    );
+    const top = anchorRect.bottom + 6 + menuHeight <= window.innerHeight - viewportPadding
+      ? anchorRect.bottom + 6
+      : Math.max(viewportPadding, anchorRect.top - menuHeight - 6);
+    setResourceGroupMenuPosition({ left, top });
+  }, []);
+
+  useEffect(() => {
+    if (!resourceGroupMenuPath) return;
+
+    let frame: number | null = null;
+    const schedulePositionUpdate = () => {
+      if (frame !== null) window.cancelAnimationFrame(frame);
+      frame = window.requestAnimationFrame(() => {
+        frame = null;
+        updateResourceGroupMenuPosition();
+      });
+    };
+    const handlePointerDown = (event: MouseEvent) => {
+      const target = event.target as Node;
+      if (resourceGroupMenuRef.current?.contains(target)) return;
+      if (resourceGroupMenuAnchorRef.current?.contains(target)) return;
+      closeResourceGroupMenu();
+    };
+
+    document.addEventListener("mousedown", handlePointerDown);
+    window.addEventListener("resize", schedulePositionUpdate);
+    window.addEventListener("scroll", schedulePositionUpdate, true);
+    schedulePositionUpdate();
+
+    return () => {
+      document.removeEventListener("mousedown", handlePointerDown);
+      window.removeEventListener("resize", schedulePositionUpdate);
+      window.removeEventListener("scroll", schedulePositionUpdate, true);
+      if (frame !== null) window.cancelAnimationFrame(frame);
+    };
+  }, [closeResourceGroupMenu, resourceGroupMenuPath, updateResourceGroupMenuPosition]);
 
   const invalidatePreviewRequest = useCallback(() => {
     previewRequestRef.current += 1;
@@ -348,7 +540,27 @@ export default function RadialMenu() {
     const record = useClipboardStore.getState().records.find((entry) => entry.id === item.id);
     let segments: RadialPreviewSegment[];
     if (record) {
-      segments = await loadClipboardPreviewSegments(record);
+      if (isResourceRecord(record)) {
+        const kind = inferResourceMediaKind(record);
+        const resourcePath = getResourcePath(record);
+        if (kind === "image") {
+          segments = [{ type: "image", path: resourcePath }];
+        } else if (kind === "video" || kind === "audio") {
+          segments = [{ type: kind, path: resourcePath }];
+        } else if (kind === "text" && record.type === "file") {
+          const content = await invoke<string>("read_resource_text_preview", {
+            path: resourcePath,
+          });
+          segments = [{ type: "text", content }];
+        } else {
+          const content = kind === "text"
+            ? await useClipboardStore.getState().getRecordContent(record)
+            : item.resourceTitle || item.content;
+          segments = [{ type: "text", content }];
+        }
+      } else {
+        segments = await loadClipboardPreviewSegments(record);
+      }
     } else {
       const phrase = usePhraseStore.getState().phrases.find((entry) => entry.id === item.id);
       if (phrase && phrase.input_type === "file" && isImageFilePath(phrase.content)) {
@@ -440,6 +652,7 @@ export default function RadialMenu() {
     loadPasteLeftClickSetting();
     useClipboardStore.getState().init();
     usePhraseStore.getState().init();
+    void loadResourceGroups();
 
     // Listen for theme changes from the main window
     let unlistenTheme: UnlistenFn | undefined;
@@ -455,11 +668,35 @@ export default function RadialMenu() {
       }
     }).then((fn) => { unlistenLang = fn; });
 
+    let unlistenResourceGroups: UnlistenFn | undefined;
+    listen("resource-groups-changed", () => {
+      void loadResourceGroups();
+      if (activeTabRef.current === "resources") {
+        void useClipboardStore.getState().loadRecords(
+          false,
+          "resources",
+          resourceGroupRef.current,
+        );
+      }
+    }).then((fn) => { unlistenResourceGroups = fn; });
+
     return () => {
       if (unlistenTheme) unlistenTheme();
       if (unlistenLang) unlistenLang();
+      if (unlistenResourceGroups) unlistenResourceGroups();
     };
-  }, []);
+  }, [loadResourceGroups]);
+
+  const applyResourceGroupSwitch = useCallback((nextGroup: string | null) => {
+    collapsePreview();
+    closeResourceGroupMenu();
+    setResourceGroup(nextGroup);
+    resourceGroupRef.current = nextGroup;
+    useClipboardStore.getState().setResourceGroup(nextGroup);
+    useClipboardStore.getState().loadRecords(false, "resources", nextGroup);
+    setSelectedItemId(null);
+    selectedItemIdRef.current = null;
+  }, [closeResourceGroupMenu, collapsePreview]);
 
   const handleTabSwitch = useCallback((key: string) => {
     collapsePreview();
@@ -476,8 +713,13 @@ export default function RadialMenu() {
     } else if (tab === "resources") {
       setClipboardCategory("resources");
       clipboardCategoryRef.current = "resources";
+      setResourceGroup(null);
+      resourceGroupRef.current = null;
+      closeResourceGroupMenu();
       useClipboardStore.getState().setCategory("resources");
-      useClipboardStore.getState().loadRecords(false, "resources");
+      useClipboardStore.getState().setResourceGroup(null);
+      useClipboardStore.getState().loadRecords(false, "resources", null);
+      void loadResourceGroups();
     } else {
       const { groups, loadPhrases } = usePhraseStore.getState();
       if (groups.length > 0) {
@@ -487,7 +729,7 @@ export default function RadialMenu() {
         loadPhrases(firstId);
       }
     }
-  }, [collapsePreview]);
+  }, [closeResourceGroupMenu, collapsePreview, loadResourceGroups]);
 
   const handleTabClick = useCallback((e: React.MouseEvent, key: string) => {
     e.preventDefault();
@@ -520,6 +762,7 @@ export default function RadialMenu() {
   const resetState = useCallback((preserveClickSuppression = false) => {
     cancelPendingNativeDrag(nativeDragRef.current);
     collapsePreview();
+    closeResourceGroupMenu();
     dragActiveRef.current = false;
     if (!preserveClickSuppression) suppressClickRef.current = false;
     visibleRef.current = false;
@@ -530,7 +773,7 @@ export default function RadialMenu() {
     setDraggingItemId(null);
     nativeDragRef.current = null;
     activeDragSessionIdRef.current = null;
-  }, [cancelPendingNativeDrag, collapsePreview]);
+  }, [cancelPendingNativeDrag, closeResourceGroupMenu, collapsePreview]);
 
   const resetStateForNativeHide = useCallback(() => {
     // 原生窗口已经被后端隐藏，下一次显示会重新定位到鼠标处，
@@ -876,6 +1119,9 @@ export default function RadialMenu() {
           activeTabRef.current = "clipboard";
           setClipboardCategory("all");
           clipboardCategoryRef.current = "all";
+          setResourceGroup(null);
+          resourceGroupRef.current = null;
+          closeResourceGroupMenu();
           // Refresh data
           useClipboardStore.getState().setCategory("all");
           useClipboardStore.getState().loadRecords(false, "all");
@@ -959,11 +1205,13 @@ export default function RadialMenu() {
       window.removeEventListener("blur", handleBlur);
     };
   }, [
+    closeResourceGroupMenu,
     collapsePreview,
     cancelPendingNativeDrag,
     handleRadialDragFinished,
     handleRadialDragStarted,
     finishPendingPointerDrag,
+    loadResourceGroups,
     resetStateForNativeHide,
     resetState,
     updateHoverFromPoint,
@@ -1016,21 +1264,33 @@ export default function RadialMenu() {
       ? records
           .filter((r) => isResourceRecord(r))
           .slice(0, MAX_ITEMS)
-          .map((r) => ({
-            id: r.id,
-            content: r.content,
-            type: r.type,
-            createdAt: r.created_at,
-            contentTruncated: r.content_truncated,
-            previewAvailable: isContentPreviewAvailable({
+          .map((r) => {
+            const resourceKind = inferResourceMediaKind(r);
+            const resourcePath = getResourcePath(r);
+            const resourceTitle = getResourceTitle(r, resourceKind);
+            const resourceSummary = r.type === "file"
+              ? undefined
+              : getResourceSummary(r);
+            return {
+              id: r.id,
+              content: resourceTitle,
               type: r.type,
+              createdAt: r.created_at,
               contentTruncated: r.content_truncated,
-              hasImages: r.has_images,
-            }, r.content.length > 300),
-            dragKind: getClipboardRadialDragKind(r.type, r.has_images),
-            dragSource: "clipboard",
-            dragPath: r.drag_path,
-          }))
+              previewAvailable: resourceKind === "image"
+                || resourceKind === "text"
+                || resourceKind === "video"
+                || resourceKind === "audio",
+              dragKind: getClipboardRadialDragKind(r.type, r.has_images),
+              dragSource: "clipboard" as const,
+              dragPath: r.drag_path || (r.type === "file" ? resourcePath : undefined),
+              isResource: true,
+              resourceKind,
+              resourcePath,
+              resourceTitle,
+              resourceSummary,
+            };
+          })
       : phrases.map((p) => ({
           id: p.id,
           content: p.input_type === "file"
@@ -1064,6 +1324,49 @@ export default function RadialMenu() {
       : [];
 
   const activeCategory = activeTab === "clipboard" ? clipboardCategory : phraseGroupId;
+  const getResourceGroupControlLabel = (group: ResourceFolder) => (
+    resourceGroup && isResourceFolderPath(resourceGroup, group.path)
+      ? formatResourceFolderPath(resourceGroup)
+      : group.name
+  );
+
+  const resourceGroupMenu = resourceGroupMenuPath && resourceGroupMenuFolder
+    ? createPortal(
+      <div
+        ref={resourceGroupMenuRef}
+        className="radial-menu-resource-group-dropdown"
+        role="menu"
+        aria-label={t("resources.openSubfolders")}
+        style={{
+          left: resourceGroupMenuPosition?.left ?? 0,
+          top: resourceGroupMenuPosition?.top ?? 0,
+          visibility: resourceGroupMenuPosition ? "visible" : "hidden",
+        }}
+        onClick={(event) => event.stopPropagation()}
+      >
+        {resourceGroupMenuItems.map(({ folder, depth }) => (
+          <button
+            key={folder.path}
+            type="button"
+            className={`radial-menu-resource-group-menu-item${resourceGroup === folder.path ? " selected" : ""}`}
+            role="menuitem"
+            aria-current={resourceGroup === folder.path ? "page" : undefined}
+            title={folder.path}
+            style={{ paddingLeft: `${8 + depth * 14}px` }}
+            onClick={() => applyResourceGroupSwitch(folder.path)}
+          >
+            {Icons.resources}
+            <span>{depth === 0 ? t("resources.allFiles") : folder.name}</span>
+          </button>
+        ))}
+      </div>,
+      document.body,
+    )
+    : null;
+
+  useEffect(() => {
+    updateBackTopVisibility();
+  }, [activeTab, clipboardCategory, phraseGroupId, resourceGroup, items.length, updateBackTopVisibility]);
 
   return (
     <div className={`radial-menu-overlay${visible ? "" : " radial-menu-hidden"}`}>
@@ -1089,8 +1392,108 @@ export default function RadialMenu() {
           ))}
           </div>
 
-          {categories.length > 0 && (
-            <div className="radial-menu-categories" data-radial-categories>
+          {activeTab === "resources" ? (
+            <div
+              ref={categoriesScrollRef}
+              className="radial-menu-categories radial-menu-resource-groups"
+              data-radial-categories
+            >
+              <button
+                type="button"
+                className={`radial-menu-category-chip ${resourceGroup === null ? "active" : ""}`}
+                data-radial-category="all-resources"
+                onClick={(e) => {
+                  e.preventDefault();
+                  e.stopPropagation();
+                  applyResourceGroupSwitch(null);
+                }}
+              >
+                {t("resources.allGroups")}
+              </button>
+              <button
+                type="button"
+                className={`radial-menu-category-chip ${resourceGroup === "" ? "active" : ""}`}
+                data-radial-category="ungrouped-resources"
+                onClick={(e) => {
+                  e.preventDefault();
+                  e.stopPropagation();
+                  applyResourceGroupSwitch("");
+                }}
+              >
+                {t("resources.ungrouped")}
+              </button>
+              {resourceFolderGroups.map((group) => {
+                const hasChildren = (group.children ?? []).length > 0;
+                const isActive = resourceGroup !== null
+                  && isResourceFolderPath(resourceGroup, group.path);
+                const groupLabel = getResourceGroupControlLabel(group);
+                return hasChildren ? (
+                  <div
+                    key={group.path}
+                    className={`radial-menu-resource-group-control${isActive ? " active" : ""}${resourceGroupMenuPath === group.path ? " open" : ""}`}
+                  >
+                    <button
+                      type="button"
+                      className="radial-menu-resource-group-main"
+                      onClick={(e) => {
+                        e.preventDefault();
+                        e.stopPropagation();
+                        applyResourceGroupSwitch(group.path);
+                      }}
+                      title={groupLabel}
+                    >
+                      <span>{groupLabel}</span>
+                    </button>
+                    <button
+                      type="button"
+                      className="radial-menu-resource-group-chevron"
+                      ref={(element) => {
+                        if (resourceGroupMenuPath === group.path) {
+                          resourceGroupMenuAnchorRef.current = element;
+                        }
+                      }}
+                      onClick={(e) => {
+                        e.preventDefault();
+                        e.stopPropagation();
+                        if (resourceGroupMenuPath === group.path) {
+                          closeResourceGroupMenu();
+                          return;
+                        }
+                        resourceGroupMenuAnchorRef.current = e.currentTarget;
+                        setResourceGroupMenuPosition(null);
+                        setResourceGroupMenuPath(group.path);
+                      }}
+                      aria-label={t("resources.openSubfolders")}
+                      aria-expanded={resourceGroupMenuPath === group.path}
+                      aria-haspopup="menu"
+                      title={t("resources.openSubfolders")}
+                    >
+                      {Icons.chevronDown}
+                    </button>
+                  </div>
+                ) : (
+                  <button
+                    key={group.path}
+                    type="button"
+                    className={`radial-menu-category-chip ${isActive ? "active" : ""}`}
+                    onClick={(e) => {
+                      e.preventDefault();
+                      e.stopPropagation();
+                      applyResourceGroupSwitch(group.path);
+                    }}
+                    title={group.name}
+                  >
+                    {group.name}
+                  </button>
+                );
+              })}
+            </div>
+          ) : categories.length > 0 && (
+            <div
+              ref={categoriesScrollRef}
+              className="radial-menu-categories"
+              data-radial-categories
+            >
               {categories.map((cat) => (
                 <button
                   key={cat.key}
@@ -1104,7 +1507,7 @@ export default function RadialMenu() {
             </div>
           )}
 
-          <div className="radial-menu-list" data-radial-list>
+          <div ref={listRef} className="radial-menu-list" data-radial-list>
             {items.length === 0 ? (
               <div className="radial-menu-empty">{t("radialMenu.empty")}</div>
             ) : (
@@ -1139,8 +1542,10 @@ export default function RadialMenu() {
                     );
                   }}
                 >
-                  <div className="radial-menu-item-content">
-                    {item.type === "image" ? (
+                    <div className="radial-menu-item-content">
+                    {item.isResource ? (
+                      <ResourceItemVisual item={item} />
+                    ) : item.type === "image" ? (
                       <ImageThumb recordId={item.id} />
                     ) : item.imagePath ? (
                       <FileThumb path={item.imagePath} />
@@ -1152,13 +1557,18 @@ export default function RadialMenu() {
                       </span>
                     )}
                   </div>
-                  {(item.createdAt || item.title || item.previewAvailable) && (
+                  {(item.isResource
+                    ? (item.resourceTitle || item.createdAt || item.previewAvailable)
+                    : (item.createdAt || item.title || item.previewAvailable)) && (
                     <div className="radial-menu-item-footer">
                       <div className="radial-menu-item-meta">
+                        {item.isResource && item.resourceTitle && (
+                          <strong className="radial-menu-resource-title">{item.resourceTitle}</strong>
+                        )}
                         {item.createdAt && (
                           <span className="radial-menu-item-time">{formatTime(item.createdAt)}</span>
                         )}
-                        {item.title && (
+                        {!item.isResource && item.title && (
                           <span className="radial-menu-item-remark">{item.title}</span>
                         )}
                       </div>
@@ -1196,6 +1606,19 @@ export default function RadialMenu() {
               ))
             )}
           </div>
+
+          <button
+            type="button"
+            className={`radial-menu-back-top${showBackTop ? " visible" : ""}`}
+            aria-label={t("radialMenu.backToTop")}
+            title={t("radialMenu.backToTop")}
+            onClick={(e) => {
+              e.stopPropagation();
+              handleBackToTop();
+            }}
+          >
+            {Icons.arrowUp}
+          </button>
         </div>
 
         {preview && (
@@ -1207,6 +1630,7 @@ export default function RadialMenu() {
           />
         )}
       </div>
+      {resourceGroupMenu}
     </div>
   );
 }

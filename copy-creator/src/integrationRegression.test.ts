@@ -44,8 +44,13 @@ describe("integration regressions", () => {
 
     expect(shortcutSource).toContain("pub(crate) fn has_visible_popup_window(app: &AppHandle)");
     expect(shortcutSource).toContain("pub(crate) fn raise_visible_popup_windows(app: &AppHandle)");
-    expect(shortcutSource.indexOf('"clipboard-create"')).toBeLessThan(
-      shortcutSource.indexOf("raise_visible_radial_menu(app)"),
+    // 层级约定：弹窗激活顺序必须"先编辑窗口、后径向菜单"，保证径向菜单在最上。
+    const popupRaiseBlock = shortcutSource.slice(
+      shortcutSource.indexOf("pub(crate) fn raise_visible_popup_windows"),
+      shortcutSource.indexOf("pub fn show_radial_menu"),
+    );
+    expect(popupRaiseBlock.indexOf("raise_always_on_top(&create)")).toBeLessThan(
+      popupRaiseBlock.indexOf("raise_always_on_top(&radial)"),
     );
     expect(shortcutSource).toContain("if radial.is_visible().unwrap_or(false)");
     expect(createBlock).toContain("raise_visible_popup_windows(app);");
@@ -254,7 +259,7 @@ describe("integration regressions", () => {
       resourcePage.indexOf("{resourceGroupDialog &&"),
     );
     expect(radialMenu).toContain('["clipboard", "phrases", "resources"]');
-    expect(radialMenu).toContain('useClipboardStore.getState().loadRecords(false, "resources")');
+    expect(radialMenu).toContain('useClipboardStore.getState().loadRecords(false, "resources", null)');
     expect(radialMenu).toContain('useClipboardStore.getState().setCategory("resources")');
     expect(radialMenu).toContain('clipboardCategory === "resources"');
     expect(radialMenu).toContain(".filter((r) => isResourceRecord(r))");
@@ -482,7 +487,8 @@ describe("integration regressions", () => {
     expect(radialMenu).toContain("document.addEventListener(\"pointerup\"");
     expect(radialMenu).not.toContain("const handleWheel");
     expect(radialMenu).not.toContain('document.addEventListener("wheel"');
-    expect(radialMenu).not.toContain("scrollTop");
+    // 禁止劫持滚动导致闪烁：不允许直接赋值 scrollTop；读取（回顶按钮可见性）不受限
+    expect(radialMenu).not.toContain(".scrollTop =");
     expect(radialMenu).toContain("e.preventDefault();");
     expect(pointerMoveBlock.indexOf("e.preventDefault();")).toBeLessThan(
       pointerMoveBlock.indexOf("if (pending.nativeStarted) return;"),
@@ -564,7 +570,8 @@ describe("integration regressions", () => {
     expect(radialStyles).not.toContain("cursor: grab;");
     expect(radialStyles).toContain("cursor: grabbing");
     expect(radialStyles).toContain(".radial-menu-preview-trigger");
-    expect(radialStyles).not.toContain("bottom: 8px");
+    // 禁止预览按钮回退为绝对定位 bottom: 8px 的旧方案；锚定行首避免误伤 margin-bottom
+    expect(radialStyles).not.toMatch(/^\s*bottom: 8px;/m);
     expect(radialStyles).not.toContain("padding-right: 48px");
     expect(radialStyles).toContain(".radial-menu-item-footer");
     expect(radialStyles).toContain("prefers-reduced-motion: reduce");
