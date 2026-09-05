@@ -17,3 +17,6 @@ HANDOVER.md
 IMPLEMENTATION_PLAN.md
 output/
 .impeccable/
+
+# 本地手动下载的依赖安装包，不纳入版本控制
+/*.deb
