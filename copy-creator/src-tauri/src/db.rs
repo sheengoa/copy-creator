@@ -2797,6 +2797,106 @@ pub fn get_image_thumbnail(app: AppHandle, path: String, max_size: u32) -> Resul
     Ok(base64::engine::general_purpose::STANDARD.encode(&thumb_bytes))
 }
 
+fn fnv1a64(bytes: &[u8]) -> u64 {
+    let mut hash: u64 = 0xcbf2_9ce4_8422_2325;
+    for &byte in bytes {
+        hash ^= u64::from(byte);
+        hash = hash.wrapping_mul(0x0000_0100_0000_01b3);
+    }
+    hash
+}
+
+// 缓存条目超限后按修改时间裁剪最旧的一批，防止缩略图目录无限增长。
+fn trim_resource_thumbnail_cache(cache_dir: &Path) {
+    const MAX_ENTRIES: usize = 1000;
+    const TRIM_TO: usize = 800;
+    let Ok(entries) = std::fs::read_dir(cache_dir) else {
+        return;
+    };
+    let mut files: Vec<(std::time::SystemTime, PathBuf)> = entries
+        .flatten()
+        .filter(|entry| entry.path().extension().is_some_and(|ext| ext == "png"))
+        .filter_map(|entry| {
+            let modified = entry.metadata().ok()?.modified().ok()?;
+            Some((modified, entry.path()))
+        })
+        .collect();
+    if files.len() <= MAX_ENTRIES {
+        return;
+    }
+    files.sort_by_key(|(modified, _)| *modified);
+    let excess = files.len() - TRIM_TO;
+    for (_, path) in files.into_iter().take(excess) {
+        let _ = std::fs::remove_file(path);
+    }
+}
+
+/// 为任意本地图片文件生成缩略图（base64 PNG）。与 `get_image_thumbnail`
+/// 不同，本命令面向资源库里用户自选路径的图片文件：缓存集中存放在应用
+/// 缓存目录，key 由"路径哈希 + 文件大小 + 修改时间"组成，文件被覆盖后
+/// 自动失效。解码失败（svg/heic 等格式）交由前端回退原图。
+#[tauri::command]
+pub fn get_resource_file_thumbnail(
+    app: AppHandle,
+    path: String,
+    max_size: u32,
+) -> Result<String, String> {
+    let image_path = PathBuf::from(&path);
+    if !image_path.is_absolute() {
+        return Err("图片路径必须为绝对路径".to_string());
+    }
+    let metadata = std::fs::metadata(&image_path).map_err(|e| format!("stat image: {e}"))?;
+    let modified_secs = metadata
+        .modified()
+        .ok()
+        .and_then(|time| time.duration_since(std::time::UNIX_EPOCH).ok())
+        .map(|duration| duration.as_secs())
+        .unwrap_or(0);
+    let key = format!(
+        "{:016x}-{}-{}",
+        fnv1a64(path.as_bytes()),
+        metadata.len(),
+        modified_secs
+    );
+
+    let cache_dir = app
+        .path()
+        .app_cache_dir()
+        .map_err(|e| e.to_string())?
+        .join("resource-thumbs");
+    let cache_path = cache_dir.join(format!("{key}.png"));
+
+    let thumb_bytes = if let Ok(bytes) = std::fs::read(&cache_path) {
+        bytes
+    } else {
+        let bytes = std::fs::read(&image_path).map_err(|e| format!("read image file: {e}"))?;
+        let img = image::load_from_memory(&bytes).map_err(|e| format!("decode image: {e}"))?;
+        let (w, h) = (img.width(), img.height());
+        let thumb = if w > max_size || h > max_size {
+            let scale = max_size as f32 / w.max(h) as f32;
+            img.resize(
+                (w as f32 * scale) as u32,
+                (h as f32 * scale) as u32,
+                image::imageops::FilterType::Triangle,
+            )
+        } else {
+            img
+        };
+        let mut buf = std::io::Cursor::new(Vec::new());
+        thumb
+            .write_to(&mut buf, image::ImageFormat::Png)
+            .map_err(|e| format!("encode thumbnail: {e}"))?;
+        let data = buf.into_inner();
+        std::fs::create_dir_all(&cache_dir).ok();
+        let _ = std::fs::write(&cache_path, &data);
+        trim_resource_thumbnail_cache(&cache_dir);
+        data
+    };
+
+    use base64::Engine;
+    Ok(base64::engine::general_purpose::STANDARD.encode(&thumb_bytes))
+}
+
 #[tauri::command]
 pub fn set_setting(app: AppHandle, key: String, value: String) -> Result<(), String> {
     if key == "storage_path" {

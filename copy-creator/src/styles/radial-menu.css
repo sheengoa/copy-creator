@@ -418,6 +418,9 @@
   cursor: pointer;
   transition: background 0.12s, border-color 0.12s, transform 0.12s;
   margin-bottom: 8px;
+  /* 列表可达 2000 条：屏幕外的卡片跳过渲染，配合图片懒加载保证滚动流畅 */
+  content-visibility: auto;
+  contain-intrinsic-size: auto 120px;
 }
 
 .radial-menu-item[data-radial-drag-kind="files"] {

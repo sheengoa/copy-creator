@@ -341,6 +341,7 @@ pub fn run() {
             radial_drag::start_radial_file_drag,
             db::get_image_base64,
             db::get_image_thumbnail,
+            db::get_resource_file_thumbnail,
             db::ensure_thumbnail,
             db::get_storage_path,
             db::select_storage_folder,

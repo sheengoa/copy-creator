@@ -327,6 +327,30 @@ describe("integration regressions", () => {
     expect(config.app.security.csp).not.toContain("media-src *");
   });
 
+  it("renders resource list card images from backend thumbnails", () => {
+    const mediaSource = readSource("./pages/ResourcePage/ResourceMedia.tsx");
+    const cardSource = readSource("./pages/ResourcePage/ResourceCard.tsx");
+    const radialSource = readSource("./components/RadialMenu/index.tsx");
+    const radialStyles = readSource("./styles/radial-menu.css");
+    const resourceStyles = readSource("./styles/resource.css");
+    const libSource = readSource("../src-tauri/src/lib.rs");
+    const dbSource = readSource("../src-tauri/src/db.rs");
+
+    // 列表卡片必须走缩略图：原图直出会在滚动时全尺寸解码造成卡顿，
+    // 详情页与展开预览仍保留 ResourceImage 原图（见上方 detail 断言）。
+    expect(cardSource).toContain("<ResourceFileImage");
+    expect(radialSource).toContain("<ResourceFileImage");
+    expect(mediaSource).toContain('invoke<string>("get_resource_file_thumbnail"');
+    expect(mediaSource).toContain('loading="lazy"');
+    expect(mediaSource).toContain('decoding="async"');
+    expect(mediaSource).toContain("return <ResourceImage path={path} alt={alt} className={className} />;");
+    expect(libSource).toContain("db::get_resource_file_thumbnail");
+    expect(dbSource).toContain("pub fn get_resource_file_thumbnail");
+    expect(dbSource).toContain('join("resource-thumbs")');
+    // 屏幕外卡片跳过渲染，配合图片懒加载保持长列表滚动流畅。
+    expect(radialStyles).toContain("content-visibility: auto");
+    expect(resourceStyles).toContain("content-visibility: auto");
+  });
 
   it("keeps resource-library storage separate from the app database", () => {
     const dbSource = readSource("../src-tauri/src/db.rs");

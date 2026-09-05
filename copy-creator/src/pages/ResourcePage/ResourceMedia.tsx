@@ -48,6 +48,68 @@ export interface ResourceMediaMetadata {
   height?: number;
 }
 
+// 文件图片缩略图的进程内缓存（LRU），列表卡片滚动时避免重复请求后端。
+const fileThumbCache = new Map<string, string>();
+const MAX_FILE_THUMBS = 240;
+
+function rememberFileThumb(path: string, dataUrl: string) {
+  fileThumbCache.delete(path);
+  fileThumbCache.set(path, dataUrl);
+  if (fileThumbCache.size > MAX_FILE_THUMBS) {
+    const oldest = fileThumbCache.keys().next().value;
+    if (oldest !== undefined) fileThumbCache.delete(oldest);
+  }
+}
+
+/**
+ * 列表卡片专用的文件图片缩略图：后端按"路径+大小+修改时间"解码缩放缓存，
+ * 滚动时无需解码原图。后端解不了的格式（svg/heic 等）回退原图 ResourceImage。
+ */
+export function ResourceFileImage({
+  path,
+  alt,
+  className = "",
+}: {
+  path: string;
+  alt: string;
+  className?: string;
+}) {
+  const cached = fileThumbCache.get(path);
+  const [src, setSrc] = useState(cached ?? "");
+  const [failed, setFailed] = useState(false);
+
+  useEffect(() => {
+    const cachedUrl = fileThumbCache.get(path);
+    if (cachedUrl) {
+      setSrc(cachedUrl);
+      setFailed(false);
+      return;
+    }
+    let cancelled = false;
+    setSrc("");
+    setFailed(false);
+    invoke<string>("get_resource_file_thumbnail", { path, maxSize: 256 })
+      .then((base64) => {
+        if (cancelled) return;
+        const dataUrl = `data:image/png;base64,${base64}`;
+        rememberFileThumb(path, dataUrl);
+        setSrc(dataUrl);
+      })
+      .catch(() => {
+        if (!cancelled) setFailed(true);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [path]);
+
+  if (failed) {
+    return <ResourceImage path={path} alt={alt} className={className} />;
+  }
+  if (!src) return <div className={`resource-media-loading ${className}`} aria-hidden="true" />;
+  return <img className={className} src={src} alt={alt} draggable={false} decoding="async" />;
+}
+
 export function ResourceImage({
   path,
   alt,
@@ -84,6 +146,8 @@ export function ResourceImage({
       src={src}
       alt={alt}
       draggable={false}
+      loading="lazy"
+      decoding="async"
       onLoad={(event) => {
         const image = event.currentTarget;
         if (image.naturalWidth <= 0 || image.naturalHeight <= 0) return;

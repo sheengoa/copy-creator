@@ -676,6 +676,9 @@
   box-shadow: 0 0.5px 0 0 rgba(255, 255, 255, 0.35) inset;
   cursor: pointer;
   transition: border-color 0.15s ease, box-shadow 0.15s ease, transform 0.15s ease, opacity 0.15s ease;
+  /* 资源卡片含图片预览：屏幕外跳过渲染，配合图片懒加载保证滚动流畅 */
+  content-visibility: auto;
+  contain-intrinsic-size: auto 220px;
 }
 
 .resource-card:hover,

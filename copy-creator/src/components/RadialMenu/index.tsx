@@ -44,7 +44,7 @@ import {
   isResourceFolderPath,
   type ResourceMediaKind,
 } from "../../pages/ResourcePage/resourceUtils";
-import { ResourceImage } from "../../pages/ResourcePage/ResourceMedia";
+import { ResourceFileImage } from "../../pages/ResourcePage/ResourceMedia";
 import i18n from "../../i18n";
 
 type TabKey = "clipboard" | "phrases" | "resources";
@@ -200,7 +200,7 @@ function ResourceItemVisual({ item }: { item: RadialItem }) {
 
   if (kind === "image" && item.resourcePath) {
     return (
-      <ResourceImage
+      <ResourceFileImage
         path={item.resourcePath}
         alt={item.resourceTitle || t("resources.imagePreview")}
         className="radial-menu-resource-image"

@@ -7,9 +7,10 @@ import { Icons } from "../../components/Icons";
 import { HighlightText } from "../../components/HighlightText";
 import { InlineTextFilePreview } from "../../components/InlinePreview";
 import { ImageThumb } from "../ClipboardPage/ImageThumb";
-import { ResourceImage } from "./ResourceMedia";
+import { ResourceFileImage } from "./ResourceMedia";
 import {
   formatResourceTime,
+  getResourcePath,
   getResourceSummary,
   getResourceTitle,
   inferResourceMediaKind,
@@ -39,6 +40,7 @@ function ResourceCardVisual({
 }) {
   const kind = inferResourceMediaKind(record);
   const summary = getResourceSummary(record);
+  const resourcePath = getResourcePath(record);
 
   if (kind === "image" && record.type === "image") {
     return (
@@ -64,8 +66,8 @@ function ResourceCardVisual({
 
   if (kind === "image") {
     return (
-      <ResourceImage
-        path={record.content}
+      <ResourceFileImage
+        path={resourcePath}
         alt={getResourceTitle(record, kind)}
         className="resource-card-file-image"
       />
