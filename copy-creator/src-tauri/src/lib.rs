@@ -12,6 +12,12 @@ mod tray;
 
 use tauri::Manager;
 
+/// 窗口四周的透明阴影边距（逻辑像素）。透明窗口的 CSS 阴影会被窗口边界
+/// 裁剪，因此所有窗口实际尺寸比可见面板大一圈，阴影落在边距内。与前端
+/// `src/utils/radialPreview.ts` 的 RADIAL_SHADOW_MARGIN 及 CSS 变量
+/// `--window-shadow-margin` 保持一致，改动时必须同步。
+pub(crate) const WINDOW_SHADOW_MARGIN: f64 = 20.0;
+
 pub(crate) fn show_main_window(app: &tauri::AppHandle, reason: &str, center: bool) {
     let Some(window) = app.get_webview_window("main") else {
         log::error!("[show_main_window] main window not found ({reason})");
@@ -136,8 +142,9 @@ pub fn run() {
                     .and_then(|raw| raw.parse::<f64>().ok())
                     .filter(|value| value.is_finite());
                 if let (Some(width), Some(height)) = (saved_width, saved_height) {
-                    let width = width.max(440.0);
-                    let height = height.max(420.0);
+                    // 最小值与 tauri.conf.json 的 min 尺寸一致，均含阴影边距。
+                    let width = width.max(440.0 + 2.0 * WINDOW_SHADOW_MARGIN);
+                    let height = height.max(420.0 + 2.0 * WINDOW_SHADOW_MARGIN);
                     if let Err(e) = window.set_size(tauri::LogicalSize::new(width, height)) {
                         log::warn!("restore main window size failed: {e}");
                     }
@@ -188,7 +195,10 @@ pub fn run() {
                     WebviewUrl::App("index.html?radial=1".into()),
                 )
                 .title("")
-                .inner_size(420.0, 650.0)
+                .inner_size(
+                    420.0 + 2.0 * WINDOW_SHADOW_MARGIN,
+                    650.0 + 2.0 * WINDOW_SHADOW_MARGIN,
+                )
                 .decorations(false)
                 .transparent(true)
                 .always_on_top(true)
@@ -216,7 +226,10 @@ pub fn run() {
                     WebviewUrl::App("index.html?clipboard-create=1".into()),
                 )
                 .title("新建")
-                .inner_size(560.0, 520.0)
+                .inner_size(
+                    560.0 + 2.0 * WINDOW_SHADOW_MARGIN,
+                    520.0 + 2.0 * WINDOW_SHADOW_MARGIN,
+                )
                 .decorations(false)
                 .transparent(true)
                 .always_on_top(true)
@@ -224,7 +237,10 @@ pub fn run() {
                 .shadow(false)
                 .skip_taskbar(true)
                 .resizable(true)
-                .min_inner_size(480.0, 380.0)
+                .min_inner_size(
+                    480.0 + 2.0 * WINDOW_SHADOW_MARGIN,
+                    380.0 + 2.0 * WINDOW_SHADOW_MARGIN,
+                )
                 .build()?;
                 log::info!("Clipboard create popup window created");
             }

@@ -5,8 +5,8 @@
   inset: 0;
   z-index: 3000;
   background: transparent;
-  border-radius: var(--window-radius);
-  overflow: hidden;
+  /* 让出透明阴影边距，避免阴影被窗口边界裁剪。 */
+  padding: var(--window-shadow-margin);
 }
 
 .radial-menu-overlay.radial-menu-hidden {
@@ -18,7 +18,7 @@
   width: 100%;
   height: 100%;
   background: #FFFFFF;
-  box-shadow: 0 0 0 0.5px rgba(0, 0, 0, 0.06) inset;
+  box-shadow: var(--window-shadow), 0 0 0 0.5px rgba(0, 0, 0, 0.06) inset;
   border-radius: var(--window-radius);
   display: flex;
   flex-direction: row;
@@ -39,7 +39,7 @@
 
 [data-theme="dark"] .radial-menu-popup {
   background: #1E1E1E;
-  box-shadow: 0 0 0 0.5px rgba(255, 255, 255, 0.08) inset;
+  box-shadow: var(--window-shadow), 0 0 0 0.5px rgba(255, 255, 255, 0.08) inset;
 }
 
 /* --- Nav Tabs (segmented control) --- */

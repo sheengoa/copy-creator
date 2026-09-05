@@ -1,5 +1,9 @@
 export const RADIAL_MENU_WIDTH = 420;
 export const RADIAL_MENU_HEIGHT = 650;
+// 窗口四周的透明阴影边距（逻辑像素）：透明窗口的 CSS 阴影会被窗口边界裁剪，
+// 因此窗口实际尺寸比可见面板大一圈，阴影落在边距内。与 src-tauri 侧
+// WINDOW_SHADOW_MARGIN 保持一致，改动时必须同步。
+export const RADIAL_SHADOW_MARGIN = 20;
 export const RADIAL_PREVIEW_WIDTH = 440;
 export const RADIAL_PREVIEW_MIN_WIDTH = 260;
 export const STASH_IMAGE_PLACEHOLDER = "\uFFFC";

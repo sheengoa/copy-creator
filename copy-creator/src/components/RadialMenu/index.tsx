@@ -19,6 +19,7 @@ import {
   isContentPreviewAvailable,
   RADIAL_MENU_HEIGHT,
   RADIAL_MENU_WIDTH,
+  RADIAL_SHADOW_MARGIN,
   type RadialPreviewDirection,
   type RadialPreviewSegment,
 } from "../../utils/radialPreview";
@@ -420,7 +421,10 @@ export default function RadialMenu() {
     const nextRestoreTask = restoreTask ?? enqueueWindowOperation(async () => {
       const appWindow = getCurrentWindow();
       try {
-        await appWindow.setSize(new LogicalSize(RADIAL_MENU_WIDTH, RADIAL_MENU_HEIGHT));
+        await appWindow.setSize(new LogicalSize(
+          RADIAL_MENU_WIDTH + 2 * RADIAL_SHADOW_MARGIN,
+          RADIAL_MENU_HEIGHT + 2 * RADIAL_SHADOW_MARGIN,
+        ));
         if (originalPosition) await appWindow.setPosition(originalPosition);
       } catch {
         // 后端会在菜单下次打开时恢复紧凑尺寸。
@@ -476,8 +480,10 @@ export default function RadialMenu() {
         || dragActiveRef.current
         || nativeDragRef.current
       ) return null;
+      // position 是含阴影边距的窗口原点；展开计算按可见内容区域换算。
+      const marginPhysical = RADIAL_SHADOW_MARGIN * scaleFactor;
       const expansion = calculateRadialExpansion({
-        windowX: position.x,
+        windowX: position.x + marginPhysical,
         workAreaX: monitor.workArea.position.x,
         workAreaWidth: monitor.workArea.size.width,
         scaleFactor,
@@ -495,11 +501,15 @@ export default function RadialMenu() {
       setPreview(loadingState);
       await enqueueWindowOperation(async () => {
         await appWindow.setSize(new LogicalSize(
-          RADIAL_MENU_WIDTH + expansion.previewWidth,
-          RADIAL_MENU_HEIGHT,
+          RADIAL_MENU_WIDTH + 2 * RADIAL_SHADOW_MARGIN + expansion.previewWidth,
+          RADIAL_MENU_HEIGHT + 2 * RADIAL_SHADOW_MARGIN,
         ));
         if (expansion.direction === "left") {
-          await appWindow.setPosition(new PhysicalPosition(expansion.windowX, position.y));
+          // 展开计算给出的是内容原点，回写窗口位置时补回阴影边距。
+          await appWindow.setPosition(new PhysicalPosition(
+            expansion.windowX - marginPhysical,
+            position.y,
+          ));
         }
       });
       if (
@@ -522,7 +532,10 @@ export default function RadialMenu() {
       if (!deferRestore) {
         try {
           await enqueueWindowOperation(async () => {
-            await appWindow.setSize(new LogicalSize(RADIAL_MENU_WIDTH, RADIAL_MENU_HEIGHT));
+            await appWindow.setSize(new LogicalSize(
+              RADIAL_MENU_WIDTH + 2 * RADIAL_SHADOW_MARGIN,
+              RADIAL_MENU_HEIGHT + 2 * RADIAL_SHADOW_MARGIN,
+            ));
             if (originalPosition) await appWindow.setPosition(originalPosition);
           });
         } catch {

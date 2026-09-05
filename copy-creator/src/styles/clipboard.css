@@ -826,15 +826,16 @@
 .clipboard-create-dialog {
   display: flex;
   flex-direction: column;
-  width: 100vw;
-  height: 100vh;
+  width: calc(100vw - 2 * var(--window-shadow-margin));
+  height: calc(100vh - 2 * var(--window-shadow-margin));
+  margin: var(--window-shadow-margin);
   padding: 16px 18px;
   box-sizing: border-box;
   background: var(--panel-bg);
   border-radius: var(--window-radius);
   overflow: hidden;
   isolation: isolate;
-  clip-path: inset(0 round var(--window-radius));
+  box-shadow: var(--window-shadow);
   position: relative;
 }
 

@@ -3,6 +3,11 @@
   --bg-primary: #F2F2F7;
   --window-bg: #F2F2F7;
   --window-radius: 18px;
+  /* 窗口四周的透明阴影边距与外阴影：透明窗口的 CSS 阴影会被窗口边界裁剪，
+     因此各窗口实际尺寸比可见面板大一圈（与 src-tauri 的 WINDOW_SHADOW_MARGIN
+     保持一致，改动时必须同步）。三个窗口统一使用。 */
+  --window-shadow-margin: 20px;
+  --window-shadow: 0 4px 20px rgba(0, 0, 0, 0.16), 0 1px 4px rgba(0, 0, 0, 0.08);
   --bg-card: #FFFFFF;
   --bg-card-hover: #F2F2F7;
   --text-primary: #1C1C1E;
@@ -67,6 +72,7 @@
 [data-theme="dark"] {
   --bg-primary: #000000;
   --window-bg: #1E1E1E;
+  --window-shadow: 0 4px 20px rgba(0, 0, 0, 0.55), 0 1px 4px rgba(0, 0, 0, 0.45);
   --bg-card: rgba(255, 255, 255, 0.06);
   --bg-card-hover: rgba(255, 255, 255, 0.1);
   --text-primary: #FFFFFF;

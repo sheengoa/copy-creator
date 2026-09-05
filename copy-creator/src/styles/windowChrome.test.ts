@@ -20,6 +20,7 @@ function getRule(css: string, selector: string) {
 describe("standalone window chrome", () => {
   it("keeps radial menu corners clean on transparent windows", () => {
     const popupRule = getRule(readStyle("radial-menu.css"), ".radial-menu-popup");
+    const overlayRule = getRule(readStyle("radial-menu.css"), ".radial-menu-overlay");
     const libSource = readSource("../../src-tauri/src/lib.rs");
     const radialWindowBlock = libSource.slice(
       libSource.indexOf('"radial-menu"'),
@@ -28,6 +29,10 @@ describe("standalone window chrome", () => {
 
     expect(popupRule).not.toContain("0 20px 60px");
     expect(radialWindowBlock).toContain(".transparent(true)");
+    // 透明窗口的阴影必须落在窗口内预留的透明边距里，不能被边界裁剪。
+    expect(popupRule).toContain("box-shadow: var(--window-shadow)");
+    expect(overlayRule).toContain("padding: var(--window-shadow-margin)");
+    expect(radialWindowBlock).toContain("2.0 * WINDOW_SHADOW_MARGIN");
   });
 
   it("matches clipboard create window background with the main panel tone", () => {
@@ -35,7 +40,10 @@ describe("standalone window chrome", () => {
 
     expect(dialogRule).toContain("background: var(--panel-bg)");
     expect(dialogRule).toContain("border-radius: var(--window-radius)");
-    expect(dialogRule).toContain("clip-path: inset(0 round var(--window-radius))");
+    // 阴影画在窗口内预留的透明边距中（width/height 扣除边距），无需 clip-path。
+    expect(dialogRule).not.toContain("clip-path");
+    expect(dialogRule).toContain("box-shadow: var(--window-shadow)");
+    expect(dialogRule).toContain("margin: var(--window-shadow-margin)");
   });
 
   it("uses wider clipboard create action buttons", () => {
@@ -133,7 +141,8 @@ describe("standalone window chrome", () => {
     expect(createWindowBlock).toContain(".decorations(false)");
     expect(createWindowBlock).toContain(".transparent(true)");
     expect(createWindowBlock).toContain(".resizable(true)");
-    expect(createWindowBlock).toContain(".min_inner_size(480.0, 380.0)");
+    expect(createWindowBlock).toContain("480.0 + 2.0 * WINDOW_SHADOW_MARGIN");
+    expect(createWindowBlock).toContain("380.0 + 2.0 * WINDOW_SHADOW_MARGIN");
     expect(componentSource).toContain('className="clipboard-create-header" data-tauri-drag-region');
     expect(componentSource).toContain('className="clipboard-create-close-btn"');
     expect(getRule(css, ".clipboard-create-header")).toContain("-webkit-app-region: drag");
@@ -171,8 +180,8 @@ describe("standalone window chrome", () => {
     expect(libSource).toContain('"main_window_width"');
     expect(libSource).toContain('"main_window_height"');
     expect(libSource).toContain("restore main window size failed");
-    expect(libSource).toContain("width.max(440.0)");
-    expect(libSource).toContain("height.max(420.0)");
+    expect(libSource).toContain("width.max(440.0 + 2.0 * WINDOW_SHADOW_MARGIN)");
+    expect(libSource).toContain("height.max(420.0 + 2.0 * WINDOW_SHADOW_MARGIN)");
     expect(libSource).toContain("tauri::LogicalSize::new(width, height)");
   });
 

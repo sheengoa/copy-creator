@@ -1,6 +1,8 @@
 /* === Layout === */
 .app-container {
-  height: 100vh;
+  height: calc(100vh - 2 * var(--window-shadow-margin));
+  margin: var(--window-shadow-margin);
+  box-shadow: var(--window-shadow);
   display: flex;
   flex-direction: row;
   background: var(--window-bg);

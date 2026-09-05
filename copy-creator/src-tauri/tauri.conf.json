@@ -13,10 +13,10 @@
     "windows": [
       {
         "title": "Copy Creator",
-        "width": 520,
-        "height": 600,
-        "minWidth": 440,
-        "minHeight": 420,
+        "width": 560,
+        "height": 640,
+        "minWidth": 480,
+        "minHeight": 460,
         "resizable": true,
         "fullscreen": false,
         "decorations": false,

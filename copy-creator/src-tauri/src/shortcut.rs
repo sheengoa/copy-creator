@@ -268,9 +268,15 @@ pub fn show_radial_menu(app: &AppHandle) {
         let (cursor_x, cursor_y) = get_cursor_position();
 
         // 每次打开时恢复标准尺寸，并将窗口定位在鼠标附近。
-        let _ = radial.set_size(tauri::LogicalSize::new(420.0, 650.0));
-        let px = cursor_x.saturating_sub(210);
-        let py = cursor_y.saturating_sub(24);
+        // 窗口含透明阴影边距（层级与尺寸约定见文件顶部注释），定位偏移按
+        // 可见面板原点换算。
+        let margin = crate::WINDOW_SHADOW_MARGIN as i32;
+        let _ = radial.set_size(tauri::LogicalSize::new(
+            420.0 + 2.0 * crate::WINDOW_SHADOW_MARGIN,
+            650.0 + 2.0 * crate::WINDOW_SHADOW_MARGIN,
+        ));
+        let px = cursor_x.saturating_sub(210 + margin);
+        let py = cursor_y.saturating_sub(24 + margin);
         let _ = radial.set_position(tauri::PhysicalPosition::new(px.max(0), py.max(0)));
 
         // Read theme from DB
@@ -297,10 +303,11 @@ pub fn show_radial_menu(app: &AppHandle) {
 
 // ---- clipboard create dialog ----
 
-const CLIPBOARD_CREATE_DEFAULT_WIDTH: f64 = 560.0;
-const CLIPBOARD_CREATE_DEFAULT_HEIGHT: f64 = 520.0;
-const CLIPBOARD_CREATE_MIN_WIDTH: f64 = 480.0;
-const CLIPBOARD_CREATE_MIN_HEIGHT: f64 = 380.0;
+// 窗口尺寸均含透明阴影边距（见文件顶部"窗口层级约定"注释）。
+const CLIPBOARD_CREATE_DEFAULT_WIDTH: f64 = 560.0 + 2.0 * crate::WINDOW_SHADOW_MARGIN;
+const CLIPBOARD_CREATE_DEFAULT_HEIGHT: f64 = 520.0 + 2.0 * crate::WINDOW_SHADOW_MARGIN;
+const CLIPBOARD_CREATE_MIN_WIDTH: f64 = 480.0 + 2.0 * crate::WINDOW_SHADOW_MARGIN;
+const CLIPBOARD_CREATE_MIN_HEIGHT: f64 = 380.0 + 2.0 * crate::WINDOW_SHADOW_MARGIN;
 
 #[derive(Debug, PartialEq)]
 struct ClipboardCreateGeometry {
@@ -523,9 +530,9 @@ mod clipboard_create_geometry_tests {
                 CLIPBOARD_CREATE_DEFAULT_HEIGHT,
             ),
             ClipboardCreateGeometry {
-                width: 560.0,
-                height: 520.0,
-                x: 720,
+                width: 600.0,
+                height: 560.0,
+                x: 700,
                 y: 460
             }
         );
