@@ -1204,15 +1204,6 @@ export default function ResourcePage() {
           <button
             type="button"
             className="resource-group-action"
-            onClick={() => openNewResourceGroup()}
-            aria-label={t("resources.newGroup")}
-            title={t("resources.newGroup")}
-          >
-            {Icons.add}
-          </button>
-          <button
-            type="button"
-            className="resource-group-action"
             onClick={() => {
               setResourceGroupsError(null);
               setResourceGroupManageOpen(true);
