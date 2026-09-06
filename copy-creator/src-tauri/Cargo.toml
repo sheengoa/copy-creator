@@ -43,6 +43,9 @@ tauri = { version = "2.11.1", features = ["test"] }
 [target.'cfg(target_os = "linux")'.dependencies]
 gtk = "0.18.2"
 
+[target.'cfg(target_os = "windows")'.dependencies]
+winreg = "0.55"
+
 [profile.release]
 strip = true
 lto = true
