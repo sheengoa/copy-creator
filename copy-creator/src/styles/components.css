@@ -388,6 +388,7 @@ input:focus-visible + .selection-checkbox {
 }
 
 .batch-delete-btn,
+.batch-move-btn,
 .batch-cancel-btn {
   height: 27px;
   display: inline-flex;
@@ -401,6 +402,21 @@ input:focus-visible + .selection-checkbox {
   font-size: var(--text-sm);
   cursor: pointer;
   white-space: nowrap;
+}
+
+.batch-move-btn {
+  background: var(--accent-bg, rgba(0, 0, 0, 0.05));
+  color: var(--text-primary);
+}
+
+.batch-move-btn:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+
+.batch-move-btn svg {
+  width: 13px;
+  height: 13px;
 }
 
 .batch-delete-btn {

@@ -1,6 +1,6 @@
 import { useSortable } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
-import { useCallback } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import type { ClipboardRecord } from "../../types";
 import { Icons } from "../../components/Icons";
@@ -28,6 +28,7 @@ interface ResourceCardProps {
   onCopy: (record: ClipboardRecord) => void | Promise<void>;
   onDelete: (id: string) => void;
   onToggleSelected: (id: string) => void;
+  onMove?: (record: ClipboardRecord) => void;
 }
 
 function ResourceCardVisual({
@@ -113,6 +114,7 @@ export function ResourceCard({
   onCopy,
   onDelete,
   onToggleSelected,
+  onMove,
 }: ResourceCardProps) {
   const { t } = useTranslation();
   const {
@@ -126,6 +128,25 @@ export function ResourceCard({
   } = useSortable({ id: record.id, disabled: !reorderEnabled || selectionMode });
   const kind = inferResourceMediaKind(record);
   const title = getResourceTitle(record, kind);
+  const [menuOpen, setMenuOpen] = useState(false);
+  const menuRef = useRef<HTMLDivElement | null>(null);
+
+  useEffect(() => {
+    if (!menuOpen) return;
+    const handlePointerDown = (event: MouseEvent) => {
+      if (menuRef.current?.contains(event.target as Node)) return;
+      setMenuOpen(false);
+    };
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") setMenuOpen(false);
+    };
+    document.addEventListener("mousedown", handlePointerDown);
+    document.addEventListener("keydown", handleKeyDown);
+    return () => {
+      document.removeEventListener("mousedown", handlePointerDown);
+      document.removeEventListener("keydown", handleKeyDown);
+    };
+  }, [menuOpen]);
 
   const activateDetail = useCallback(() => {
     if (selectionMode) {
@@ -134,6 +155,11 @@ export function ResourceCard({
     }
     onOpenDetail(record);
   }, [onOpenDetail, onToggleSelected, record, selectionMode]);
+
+  const runMenuAction = (action: () => void) => {
+    setMenuOpen(false);
+    action();
+  };
 
   return (
     <article
@@ -171,6 +197,56 @@ export function ResourceCard({
           onActivate={activateDetail}
         />
         <span className="resource-card-kind">{typeLabel(kind)}</span>
+        {onMove && !selectionMode && (
+          <div className="resource-card-more" ref={menuRef}>
+            <button
+              type="button"
+              className="resource-card-more-button"
+              aria-label={t("resources.moreActions")}
+              aria-haspopup="menu"
+              aria-expanded={menuOpen}
+              title={t("resources.moreActions")}
+              onClick={(event) => {
+                event.stopPropagation();
+                setMenuOpen((open) => !open);
+              }}
+            >
+              {Icons.more}
+            </button>
+            {menuOpen && (
+              <div className="resource-card-menu" role="menu">
+                <button type="button" role="menuitem" onClick={(event) => {
+                  event.stopPropagation();
+                  runMenuAction(() => void onCopy(record));
+                }}>
+                  {Icons.copy}
+                  <span>{t("resources.copy")}</span>
+                </button>
+                <button type="button" role="menuitem" onClick={(event) => {
+                  event.stopPropagation();
+                  runMenuAction(() => onOpenDetail(record));
+                }}>
+                  {Icons.expand}
+                  <span>{t("resources.openDetail")}</span>
+                </button>
+                <button type="button" role="menuitem" className="is-primary" onClick={(event) => {
+                  event.stopPropagation();
+                  runMenuAction(() => onMove(record));
+                }}>
+                  {Icons.arrowRight}
+                  <span>{t("resources.moveToGroup")}</span>
+                </button>
+                <button type="button" role="menuitem" className="is-danger" onClick={(event) => {
+                  event.stopPropagation();
+                  runMenuAction(() => onDelete(record.id));
+                }}>
+                  {Icons.delete}
+                  <span>{t("common.delete")}</span>
+                </button>
+              </div>
+            )}
+          </div>
+        )}
       </div>
       <div className="resource-card-body">
         <div className="resource-card-title-row">

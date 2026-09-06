@@ -1438,6 +1438,240 @@
   font-size: var(--text-xs);
 }
 
+/* ---------- 卡片「⋯」操作菜单 ---------- */
+.resource-card-more {
+  position: absolute;
+  top: 6px;
+  right: 6px;
+  z-index: 3;
+}
+
+.resource-card-more-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  padding: 0;
+  border: 1px solid var(--separator);
+  border-radius: 7px;
+  background: rgba(255, 255, 255, 0.9);
+  color: var(--text-primary);
+  cursor: pointer;
+}
+
+.resource-card-more-button svg {
+  width: 14px;
+  height: 14px;
+}
+
+.resource-card-menu {
+  position: absolute;
+  top: 28px;
+  right: 0;
+  min-width: 158px;
+  padding: 4px;
+  border: 1px solid var(--separator);
+  border-radius: 10px;
+  background: rgba(255, 255, 255, 0.97);
+  box-shadow: 0 10px 24px rgba(0, 0, 0, 0.16);
+  z-index: 4;
+}
+
+.resource-card-menu button {
+  display: flex;
+  width: 100%;
+  align-items: center;
+  gap: 7px;
+  padding: 6px 8px;
+  border: none;
+  border-radius: 7px;
+  background: none;
+  color: var(--text-primary);
+  font-size: var(--text-xs);
+  text-align: left;
+  cursor: pointer;
+}
+
+.resource-card-menu button:hover {
+  background: rgba(0, 0, 0, 0.05);
+}
+
+.resource-card-menu button svg {
+  width: 13px;
+  height: 13px;
+  flex: 0 0 auto;
+  color: var(--text-secondary);
+}
+
+.resource-card-menu button.is-primary {
+  font-weight: var(--weight-semibold);
+}
+
+.resource-card-menu button.is-primary svg {
+  color: var(--text-primary);
+}
+
+.resource-card-menu button.is-danger {
+  color: var(--danger);
+}
+
+.resource-card-menu button.is-danger svg {
+  color: var(--danger);
+}
+
+/* ---------- 移动到分组对话框 ---------- */
+.resource-move-dialog {
+  width: 330px;
+  max-width: calc(100vw - 40px);
+}
+
+.resource-move-source {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 10px 0;
+  padding: 8px 10px;
+  border: 1px solid var(--separator);
+  border-radius: 9px;
+  background: var(--bg-secondary, rgba(0, 0, 0, 0.03));
+}
+
+.resource-move-source-icon {
+  display: inline-flex;
+  color: var(--text-secondary);
+}
+
+.resource-move-source-icon svg {
+  width: 15px;
+  height: 15px;
+}
+
+.resource-move-source-names {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.resource-move-source-names strong {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: var(--text-sm);
+}
+
+.resource-move-source-names span {
+  color: var(--text-secondary);
+  font-size: var(--text-xs);
+}
+
+.resource-move-tree {
+  max-height: 216px;
+  overflow-y: auto;
+  border: 1px solid var(--separator);
+  border-radius: 9px;
+  padding: 4px;
+}
+
+.resource-move-row {
+  display: flex;
+  width: 100%;
+  align-items: center;
+  gap: 7px;
+  padding: 6px 8px;
+  border: none;
+  border-radius: 7px;
+  background: none;
+  color: var(--text-primary);
+  font-size: var(--text-xs);
+  text-align: left;
+  cursor: pointer;
+}
+
+.resource-move-row:hover:not(:disabled) {
+  background: rgba(0, 0, 0, 0.05);
+}
+
+.resource-move-row.selected {
+  background: var(--accent-bg, rgba(0, 0, 0, 0.08));
+  font-weight: var(--weight-semibold);
+}
+
+.resource-move-row:disabled {
+  color: var(--text-muted);
+  cursor: default;
+}
+
+.resource-move-row .resource-move-icon {
+  display: inline-flex;
+  color: var(--text-secondary);
+}
+
+.resource-move-row .resource-move-icon svg {
+  width: 13px;
+  height: 13px;
+}
+
+.resource-move-current-tag {
+  margin-left: auto;
+  padding: 1px 6px;
+  border: 1px solid var(--separator);
+  border-radius: 5px;
+  color: var(--text-muted);
+  font-size: 10px;
+  white-space: nowrap;
+}
+
+.resource-move-hint {
+  margin: 8px 0 0;
+  color: var(--text-secondary);
+  font-size: 11px;
+  line-height: 1.6;
+}
+
+/* ---------- 详情页所属分组行 ---------- */
+.resource-group-line {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  margin-bottom: 10px;
+}
+
+.resource-group-line-label {
+  color: var(--text-secondary);
+  font-size: var(--text-xs);
+}
+
+.resource-group-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  align-self: flex-start;
+  max-width: 100%;
+  padding: 4px 9px;
+  border: 1px solid var(--separator);
+  border-radius: 999px;
+  font-size: var(--text-xs);
+}
+
+.resource-group-pill-name {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.resource-group-pill button {
+  border: none;
+  background: none;
+  padding: 0;
+  color: #0a66d0;
+  font-size: var(--text-xs);
+  text-decoration: underline;
+  cursor: pointer;
+}
+
 .resource-detail-subtitle {
   margin-top: 6px;
   color: var(--text-secondary);

@@ -11,6 +11,7 @@ interface BatchSelectionBarProps {
   onCancel: () => void;
   busy?: boolean;
   busyLabel?: string;
+  onMove?: () => void;
 }
 
 export default function BatchSelectionBar({
@@ -22,6 +23,7 @@ export default function BatchSelectionBar({
   onCancel,
   busy = false,
   busyLabel,
+  onMove,
 }: BatchSelectionBarProps) {
   const { t } = useTranslation();
   const checkboxRef = useRef<HTMLInputElement>(null);
@@ -51,6 +53,17 @@ export default function BatchSelectionBar({
         {t("common.selectedCount", { count: selectedCount })}
       </span>
       <div className="batch-selection-actions">
+        {onMove && (
+          <button
+            className="batch-move-btn"
+            type="button"
+            disabled={selectedCount === 0 || busy}
+            onClick={onMove}
+          >
+            {Icons.arrowRight}
+            <span>{t("resources.move")}</span>
+          </button>
+        )}
         <button
           className="batch-delete-btn"
           type="button"

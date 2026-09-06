@@ -113,6 +113,11 @@ export function getResourceExtension(value: string): string {
   return dotIndex >= 0 ? fileName.slice(dotIndex + 1) : "";
 }
 
+// 把多级分组路径格式化为「A / B」展示形式；空路径返回空串（未分组由调用方处理）。
+export function formatResourceFolderPath(path: string): string {
+  return path.split("/").filter(Boolean).join(" / ");
+}
+
 // 标题即文件名的记录（图片、文件）才支持重命名；文本/链接的标题取自正文首行，无文件名可改。
 export function isResourceTitleRenameable(
   record: Pick<ClipboardRecord, "type">,

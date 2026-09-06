@@ -30,13 +30,17 @@ import {
   computeResourceColumnCount,
   findResourceFolder,
   flattenResourceFolders,
+  formatResourceFolderPath,
   getResourceFolderRoot,
+  getResourceTitle,
+  inferResourceMediaKind,
   isResourceFolderPath,
   matchesResourceType,
   splitResourceColumns,
   type ResourceMediaKind,
   type ResourceTypeFilter,
 } from "./ResourcePage/resourceUtils";
+import ResourceMoveDialog from "./ResourcePage/ResourceMoveDialog";
 import { isResourceRecord } from "../utils/clipboardRecord";
 
 type ResourceSortOrder = "newest" | "oldest";
@@ -44,10 +48,12 @@ type ResourceGroupDialogState = {
   mode: "create" | "rename";
   oldName?: string;
 } | null;
-
-function formatResourceFolderPath(path: string): string {
-  return path.split("/").filter(Boolean).join(" / ");
-}
+type ResourceMoveDialogState = {
+  ids: string[];
+  label: string;
+  meta: string;
+  folders: string[];
+} | null;
 
 const RESOURCE_TYPE_FILTERS: ResourceTypeFilter[] = [
   "all",
@@ -93,6 +99,10 @@ export default function ResourcePage() {
 
   const [deletingSelected, setDeletingSelected] = useState(false);
   const [selectingAll, setSelectingAll] = useState(false);
+  const [moveDialog, setMoveDialog] = useState<ResourceMoveDialogState>(null);
+  const [movingResource, setMovingResource] = useState(false);
+  const [moveError, setMoveError] = useState<string | null>(null);
+  const [moveFeedback, setMoveFeedback] = useState<string | null>(null);
   const [resourceLibraryPath, setResourceLibraryPath] = useState("");
   const [resourceLibraryPathLoading, setResourceLibraryPathLoading] = useState(true);
   const [resourceLibraryPathChanging, setResourceLibraryPathChanging] = useState(false);
@@ -654,6 +664,73 @@ export default function ResourcePage() {
     window.history.pushState({ resourceDetailId: record.id }, "", `#resource/${record.id}`);
   }, []);
 
+  const openResourceMove = useCallback((ids: string[]) => {
+    if (ids.length === 0) return;
+    const selected = filteredRecords.filter((record) => ids.includes(record.id));
+    if (selected.length === 0) return;
+    const folders = [...new Set(selected.map((record) => record.resource_folder ?? ""))];
+    const label = selected.length === 1
+      ? getResourceTitle(selected[0], inferResourceMediaKind(selected[0]))
+      : t("resources.moveSelectedCount", { count: selected.length });
+    const meta = folders.length === 1
+      ? t("resources.moveCurrentLocation", {
+        name: folders[0] === "" ? t("resources.ungrouped") : formatResourceFolderPath(folders[0]),
+      })
+      : t("resources.moveMultipleLocations");
+    setMoveError(null);
+    setMoveDialog({ ids, label, meta, folders });
+  }, [filteredRecords, t]);
+
+  const handleMoveConfirm = useCallback(async (targetFolder: string) => {
+    if (!moveDialog || movingResource) return;
+    setMovingResource(true);
+    setMoveError(null);
+    try {
+      const results = await invoke<
+        Array<{
+          id: string;
+          resource_path?: string;
+          resource_relative_path?: string | null;
+          resource_folder?: string | null;
+          content?: string;
+        }>
+      >("move_resource_records", {
+        ids: moveDialog.ids,
+        targetFolder,
+      });
+      const targetLabel = targetFolder === ""
+        ? t("resources.ungrouped")
+        : formatResourceFolderPath(targetFolder);
+      setMoveFeedback(t("resources.moveSuccess", { count: moveDialog.ids.length, name: targetLabel }));
+      if (feedbackTimerRef.current !== null) window.clearTimeout(feedbackTimerRef.current);
+      feedbackTimerRef.current = window.setTimeout(() => {
+        setMoveFeedback(null);
+        feedbackTimerRef.current = null;
+      }, 2600);
+      setDetailRecord((current) => {
+        if (!current) return null;
+        const updated = results.find((entry) => entry.id === current.id);
+        if (!updated) return current;
+        return {
+          ...current,
+          ...(updated.resource_path ? { resource_path: updated.resource_path } : null),
+          ...(updated.resource_relative_path
+            ? { resource_relative_path: updated.resource_relative_path }
+            : null),
+          ...(updated.resource_folder !== undefined ? { resource_folder: updated.resource_folder } : null),
+          ...(updated.content ? { content: updated.content } : null),
+        };
+      });
+      setMoveDialog(null);
+      cancelResourceSelection();
+    } catch (error) {
+      console.error("Failed to move resource records:", error);
+      setMoveError(String(error));
+    } finally {
+      setMovingResource(false);
+    }
+  }, [cancelResourceSelection, moveDialog, movingResource, t]);
+
   useEffect(() => {
     const handlePopState = () => {
       if (!detailRecordId) return;
@@ -843,6 +920,29 @@ export default function ResourcePage() {
     </div>
   ) : null;
 
+  const moveDialogElement = (
+    <ResourceMoveDialog
+      open={moveDialog !== null}
+      itemsLabel={moveDialog?.label ?? ""}
+      itemsMeta={moveDialog?.meta ?? ""}
+      currentFolders={moveDialog?.folders ?? []}
+      groups={resourceGroups}
+      moving={movingResource}
+      error={moveError}
+      onClose={() => {
+        setMoveDialog(null);
+        setMoveError(null);
+      }}
+      onConfirm={(target) => void handleMoveConfirm(target)}
+    />
+  );
+
+  const moveFeedbackElement = moveFeedback ? (
+    <div className="resource-feedback success" role="status" aria-live="polite">
+      {moveFeedback}
+    </div>
+  ) : null;
+
   if (detailRecord) {
     return (
       <>
@@ -853,8 +953,11 @@ export default function ResourcePage() {
           onCopy={handleCopy}
           onDelete={handleDeleteRecord}
           onRecordUpdated={setDetailRecord}
+          onMoveRecord={(record) => openResourceMove([record.id])}
         />
         {confirmDialog}
+        {moveDialogElement}
+        {moveFeedbackElement}
       </>
     );
   }
@@ -1068,6 +1171,7 @@ export default function ResourcePage() {
           onCancel={cancelResourceSelection}
           busy={selectingAll || deletingSelected}
           busyLabel={deletingSelected ? t("common.deleting") : t("common.loading")}
+          onMove={() => openResourceMove([...selectedIds])}
         />
       )}
 
@@ -1279,6 +1383,7 @@ export default function ResourcePage() {
                             onCopy={handleCopy}
                             onDelete={handleDeleteRecord}
                             onToggleSelected={toggleSelected}
+                            onMove={(moveRecord) => openResourceMove([moveRecord.id])}
                           />
                         </div>
                       ))}
@@ -1329,6 +1434,8 @@ export default function ResourcePage() {
                 : t("resources.openFailed")}
         </div>
       )}
+      {moveDialogElement}
+      {moveFeedbackElement}
       {resourceGroupMenu}
     </div>
   );

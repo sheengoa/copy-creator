@@ -181,6 +181,19 @@ export const Icons = {
       <polyline points="12 19 5 12 12 5" />
     </svg>
   ),
+  arrowRight: (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+      <line x1="5" y1="12" x2="19" y2="12" />
+      <polyline points="12 5 19 12 12 19" />
+    </svg>
+  ),
+  more: (
+    <svg viewBox="0 0 24 24" fill="currentColor" stroke="none">
+      <circle cx="5" cy="12" r="1.7" />
+      <circle cx="12" cy="12" r="1.7" />
+      <circle cx="19" cy="12" r="1.7" />
+    </svg>
+  ),
   chevronDown: (
     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
       <polyline points="6 9 12 15 18 9" />

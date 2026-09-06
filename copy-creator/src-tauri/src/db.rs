@@ -3411,6 +3411,22 @@ fn rewrite_moved_resource_markdown_links(content: &str, from: &Path, group_path:
     content.replace(&old_prefix, &new_prefix)
 }
 
+/// 按文件所在目录相对资源库根的层级变化，重写 markdown 内指向 `.copy-creator/`
+/// 附件目录的相对链接（层级不变时原样返回）。单个文件内的附件链接层级与其
+/// 所在目录一致，因此整文件按前后缀替换是安全的。
+pub(crate) fn rewrite_resource_markdown_links_for_depth(
+    content: &str,
+    old_depth: usize,
+    new_depth: usize,
+) -> String {
+    if old_depth == new_depth {
+        return content.to_string();
+    }
+    let old_prefix = format!("{}{}", "../".repeat(old_depth), ".copy-creator/");
+    let new_prefix = format!("{}{}", "../".repeat(new_depth), ".copy-creator/");
+    content.replace(&old_prefix, &new_prefix)
+}
+
 #[tauri::command]
 pub fn delete_resource_group(app: AppHandle, name: String) -> Result<(), String> {
     delete_resource_group_inner(&app, name)
@@ -3720,6 +3736,227 @@ fn rename_resource_file_inner<R: Runtime>(
         "content": new_content,
         "name": new_file_name,
     }))
+}
+
+#[tauri::command]
+pub fn move_resource_records(
+    app: AppHandle,
+    ids: Vec<String>,
+    target_folder: String,
+) -> Result<Vec<serde_json::Value>, String> {
+    move_resource_records_inner(&app, ids, target_folder)
+}
+
+fn move_resource_records_inner<R: Runtime>(
+    app: &AppHandle<R>,
+    ids: Vec<String>,
+    target_folder: String,
+) -> Result<Vec<serde_json::Value>, String> {
+    let target_folder = normalize_resource_folder_path(Some(&target_folder))?;
+    let target_group = target_folder.split('/').next().unwrap_or("").to_string();
+
+    // 第一阶段：一次性读出待移动记录的存储路径（连接锁内不做文件 IO 与嵌套加锁）。
+    let rows: Vec<(String, Option<String>)> = {
+        let state = app.state::<DbState>();
+        let conn = state.conn.lock().map_err(|e| e.to_string())?;
+        let mut entries = Vec::with_capacity(ids.len());
+        for id in &ids {
+            let row = conn
+                .query_row(
+                    "SELECT resource_path FROM clipboard_records WHERE id = ?1",
+                    params![id],
+                    |row| row.get::<_, String>(0),
+                )
+                .optional()
+                .map_err(|e| e.to_string())?;
+            entries.push((id.clone(), row.filter(|path| !path.is_empty())));
+        }
+        entries
+    };
+
+    // 第二阶段：解析真实文件路径；数据库托管记录同时保留原存储路径文本供 content 比对。
+    let mut entries: Vec<(String, PathBuf, bool, Option<String>)> = Vec::with_capacity(rows.len());
+    for (id, stored_path) in rows {
+        if let Some(path) = &stored_path {
+            let resolved = resolve_resource_file_path(app, path)?;
+            entries.push((id, resolved, true, Some(path.clone())));
+        } else {
+            let path = resource_file_path_from_id(app, &id)?.ok_or("资源不存在")?;
+            entries.push((id, path, false, None));
+        }
+    }
+
+    let root = resource_path_key(&get_resource_library_dir(app));
+    let mut target_dir = root.clone();
+    if !target_folder.is_empty() {
+        for segment in target_folder.split('/') {
+            target_dir.push(segment);
+        }
+    }
+    let target_depth = if target_folder.is_empty() {
+        0
+    } else {
+        target_folder.split('/').count()
+    };
+
+    // 第三阶段：规划目标路径并预检冲突（磁盘已有同名文件，或选中内容之间同名）。
+    let mut seen_targets = HashSet::new();
+    let mut planned = Vec::with_capacity(entries.len());
+    for (id, old_path, db_backed, stored_path) in &entries {
+        let old_dir_depth = old_path
+            .parent()
+            .and_then(|parent| parent.strip_prefix(&root).ok())
+            .map(|relative| relative.components().count())
+            .unwrap_or(0);
+        let file_name = old_path
+            .file_name()
+            .ok_or_else(|| "资源文件路径无效".to_string())?
+            .to_os_string();
+        let new_path = target_dir.join(&file_name);
+        let unchanged = old_path.parent() == Some(target_dir.as_path());
+        if !unchanged && !seen_targets.insert(resource_path_key(&new_path)) {
+            return Err(format!(
+                "选择的内容中存在同名文件：{}",
+                file_name.to_string_lossy()
+            ));
+        }
+        planned.push((
+            id.clone(),
+            old_path.clone(),
+            new_path,
+            old_dir_depth,
+            *db_backed,
+            stored_path.clone(),
+            unchanged,
+        ));
+    }
+    for (_, _, new_path, _, _, _, unchanged) in &planned {
+        if *unchanged {
+            continue;
+        }
+        if new_path.exists() {
+            return Err(format!(
+                "目标分组已存在同名文件：{}",
+                new_path
+                    .file_name()
+                    .map(|name| name.to_string_lossy().to_string())
+                    .unwrap_or_default()
+            ));
+        }
+    }
+
+    // 第四阶段：移动文件，失败时回滚已移动部分；markdown 附件链接按层级重写。
+    let mut moved: Vec<(PathBuf, PathBuf, Option<String>)> = Vec::new();
+    for (_, old_path, new_path, old_depth, _, _, unchanged) in &planned {
+        if *unchanged {
+            continue;
+        }
+        let original_content = if old_path
+            .extension()
+            .and_then(OsStr::to_str)
+            .is_some_and(|extension| extension.eq_ignore_ascii_case("md"))
+        {
+            match std::fs::read_to_string(old_path) {
+                Ok(content) => Some(content),
+                Err(error) => {
+                    rollback_moved_resource_files(&moved);
+                    return Err(format!("读取资源文件失败: {error}"));
+                }
+            }
+        } else {
+            None
+        };
+        if let Some(parent) = new_path.parent() {
+            if let Err(error) = std::fs::create_dir_all(parent) {
+                rollback_moved_resource_files(&moved);
+                return Err(format!("创建资源目录失败: {error}"));
+            }
+        }
+        if let Err(error) = std::fs::rename(old_path, new_path) {
+            rollback_moved_resource_files(&moved);
+            return Err(format!("移动资源文件失败: {error}"));
+        }
+        moved.push((old_path.clone(), new_path.clone(), original_content.clone()));
+        if let Some(content) = original_content {
+            let updated =
+                rewrite_resource_markdown_links_for_depth(content.as_str(), *old_depth, target_depth);
+            if updated != content {
+                if let Err(error) = std::fs::write(new_path, updated) {
+                    rollback_moved_resource_files(&moved);
+                    return Err(format!("更新资源图片路径失败: {error}"));
+                }
+            }
+        }
+    }
+
+    // 第五阶段：同步数据库路径、分组与路径型 content，失败时回滚文件移动。
+    let db_updates: Vec<(String, String, String, String)> = {
+        let state = app.state::<DbState>();
+        let conn = state.conn.lock().map_err(|e| e.to_string())?;
+        let mut updates = Vec::new();
+        for (id, old_path, new_path, _, db_backed, stored_path, _) in &planned {
+            if !db_backed {
+                continue;
+            }
+            let row_content: String = conn
+                .query_row(
+                    "SELECT content FROM clipboard_records WHERE id = ?1",
+                    params![id],
+                    |row| row.get(0),
+                )
+                .map_err(|e| e.to_string())?;
+            let old_path_text = old_path.to_string_lossy().to_string();
+            let new_path_text = new_path.to_string_lossy().to_string();
+            let stored_old_text = stored_path.clone().unwrap_or_default();
+            // 自动发现/补充入库记录的 content 即完整路径，移动后同步替换。
+            let new_content = if row_content == old_path_text || row_content == stored_old_text {
+                new_path_text.clone()
+            } else {
+                row_content
+            };
+            updates.push((id.clone(), new_path_text, new_content, target_group.clone()));
+        }
+        updates
+    };
+    if !db_updates.is_empty() {
+        let update_result: Result<(), String> = {
+            let state = app.state::<DbState>();
+            let mut conn = state.conn.lock().map_err(|e| e.to_string())?;
+            let tx = conn.transaction().map_err(|e| e.to_string())?;
+            for (id, path, content, group) in &db_updates {
+                tx.execute(
+                    "UPDATE clipboard_records SET resource_path = ?1, content = ?2, group_name = ?3 WHERE id = ?4",
+                    params![path, content, group, id],
+                )
+                .map_err(|e| e.to_string())?;
+            }
+            tx.commit().map_err(|e| e.to_string())
+        };
+        if let Err(error) = update_result {
+            rollback_moved_resource_files(&moved);
+            return Err(format!("更新资源记录失败: {error}"));
+        }
+    }
+
+    let mut results = Vec::with_capacity(planned.len());
+    for (id, _, new_path, _, db_backed, _, _) in &planned {
+        let relative_path = new_path
+            .strip_prefix(&root)
+            .ok()
+            .map(|relative| relative.to_string_lossy().to_string());
+        results.push(serde_json::json!({
+            "id": if *db_backed { id.clone() } else { resource_file_id(new_path) },
+            "resource_path": new_path.to_string_lossy().to_string(),
+            "resource_relative_path": relative_path,
+            "group_name": target_group.clone(),
+            "resource_folder": target_folder.clone(),
+        }));
+    }
+
+    if !moved.is_empty() {
+        let _ = app.emit("resource-groups-changed", ());
+    }
+    Ok(results)
 }
 
 #[tauri::command]
@@ -4562,10 +4799,12 @@ mod record_classification_tests {
 mod resource_command_tests {
     use super::{
         delete_external_resource_file, delete_resource_group_inner, get_clipboard_records_inner,
-        read_resource_text_preview_file, rename_resource_file_inner, resolve_resource_file_path,
-        resource_file_id, resource_folder_tree, resource_group_count_map, set_resource_note_inner,
-        restore_staged_external_resource_files, stage_external_resource_files,
-        validate_resource_rename_stem, update_resource_group_inner, DbState,
+        move_resource_records_inner, read_resource_text_preview_file, rename_resource_file_inner,
+        resolve_resource_file_path, resource_file_id, resource_folder_tree,
+        resource_group_count_map, rewrite_resource_markdown_links_for_depth,
+        set_resource_note_inner, restore_staged_external_resource_files,
+        stage_external_resource_files, validate_resource_rename_stem, update_resource_group_inner,
+        DbState,
     };
     use rusqlite::Connection;
     use std::path::{Path, PathBuf};
@@ -5265,6 +5504,198 @@ mod resource_command_tests {
             validate_resource_rename_stem("名字", Path::new("/tmp/a.png")).unwrap(),
             "名字"
         );
+        cleanup(&root);
+    }
+
+    #[test]
+    fn moving_resource_records_updates_files_records_and_markdown_links() {
+        let (app, root) = test_app();
+        let attachments = root.join(".copy-creator/attachments/unit-1");
+        std::fs::create_dir_all(&attachments).unwrap();
+        std::fs::write(attachments.join("image-1.png"), [1_u8]).unwrap();
+        let md_file = root.join("工作资料/角色/note.md");
+        std::fs::create_dir_all(md_file.parent().unwrap()).unwrap();
+        std::fs::write(&md_file, "图：![img](../../.copy-creator/attachments/unit-1/image-1.png)\n")
+            .unwrap();
+        insert_typed_resource(
+            &app,
+            "resource-1",
+            "file",
+            md_file.to_str().unwrap(),
+            md_file.to_str().unwrap(),
+        );
+        let plain_file = root.join("工作资料/plain.txt");
+        std::fs::write(&plain_file, "text").unwrap();
+        insert_typed_resource(
+            &app,
+            "resource-2",
+            "file",
+            plain_file.to_str().unwrap(),
+            plain_file.to_str().unwrap(),
+        );
+
+        let results = move_resource_records_inner(
+            app.handle(),
+            vec!["resource-1".to_string(), "resource-2".to_string()],
+            String::new(),
+        )
+        .unwrap();
+
+        assert_eq!(results.len(), 2);
+        let moved_md = root.join("note.md");
+        let moved_plain = root.join("plain.txt");
+        assert!(moved_md.is_file());
+        assert!(moved_plain.is_file());
+        assert!(!md_file.exists());
+        let content = std::fs::read_to_string(&moved_md).unwrap();
+        assert_eq!(
+            content,
+            "图：![img](.copy-creator/attachments/unit-1/image-1.png)\n"
+        );
+
+        let state = app.state::<DbState>();
+        let conn = state.conn.lock().unwrap();
+        let (group_name, resource_path): (String, String) = conn
+            .query_row(
+                "SELECT group_name, resource_path FROM clipboard_records WHERE id = 'resource-2'",
+                [],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )
+            .unwrap();
+        assert_eq!(group_name, "");
+        assert_eq!(resource_path, moved_plain.to_string_lossy());
+        cleanup(&root);
+    }
+
+    #[test]
+    fn moving_resource_records_rejects_conflicts_and_rolls_back() {
+        let (app, root) = test_app();
+        let first = root.join("工作资料/a.txt");
+        let second = root.join("工作资料/b.txt");
+        std::fs::create_dir_all(first.parent().unwrap()).unwrap();
+        std::fs::create_dir_all(root.join("项目资料")).unwrap();
+        std::fs::write(&first, "a").unwrap();
+        std::fs::write(&second, "b").unwrap();
+        std::fs::write(root.join("项目资料/a.txt"), "conflict").unwrap();
+        insert_typed_resource(
+            &app,
+            "resource-1",
+            "file",
+            first.to_str().unwrap(),
+            first.to_str().unwrap(),
+        );
+        insert_typed_resource(
+            &app,
+            "resource-2",
+            "file",
+            second.to_str().unwrap(),
+            second.to_str().unwrap(),
+        );
+
+        let error = move_resource_records_inner(
+            app.handle(),
+            vec!["resource-1".to_string(), "resource-2".to_string()],
+            "项目资料".to_string(),
+        )
+        .unwrap_err();
+        assert!(error.contains("已存在同名文件"));
+        assert!(first.is_file());
+        assert!(second.is_file());
+        assert!(!root.join("项目资料/b.txt").exists());
+        let state = app.state::<DbState>();
+        let conn = state.conn.lock().unwrap();
+        let resource_path: String = conn
+            .query_row(
+                "SELECT resource_path FROM clipboard_records WHERE id = 'resource-1'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(resource_path, first.to_string_lossy());
+        cleanup(&root);
+    }
+
+    #[test]
+    fn moving_discovered_resource_files_returns_new_ids() {
+        let (app, root) = test_app();
+        let discovered = root.join("未入库.png");
+        std::fs::write(&discovered, [1_u8]).unwrap();
+
+        let results = move_resource_records_inner(
+            app.handle(),
+            vec![resource_file_id(&discovered)],
+            "工作资料/角色".to_string(),
+        )
+        .unwrap();
+
+        let moved = root.join("工作资料/角色/未入库.png");
+        assert!(moved.is_file());
+        assert!(!discovered.exists());
+        assert_eq!(results.len(), 1);
+        assert_eq!(results[0]["id"], resource_file_id(&moved));
+        assert_eq!(results[0]["resource_folder"], "工作资料/角色");
+        cleanup(&root);
+    }
+
+    #[test]
+    fn moving_resource_records_into_same_folder_is_a_no_op() {
+        let (app, root) = test_app();
+        let file = root.join("工作资料/a.txt");
+        std::fs::create_dir_all(file.parent().unwrap()).unwrap();
+        std::fs::write(&file, "a").unwrap();
+        insert_typed_resource(
+            &app,
+            "resource-1",
+            "file",
+            file.to_str().unwrap(),
+            file.to_str().unwrap(),
+        );
+
+        let results = move_resource_records_inner(
+            app.handle(),
+            vec!["resource-1".to_string()],
+            "工作资料".to_string(),
+        )
+        .unwrap();
+        assert_eq!(results.len(), 1);
+        assert!(file.is_file());
+        assert_eq!(results[0]["resource_relative_path"], "工作资料/a.txt");
+        cleanup(&root);
+    }
+
+    #[test]
+    fn moving_resource_records_rejects_duplicate_names_within_selection() {
+        let (app, root) = test_app();
+        let first = root.join("工作资料/a.txt");
+        let second = root.join("项目资料/a.txt");
+        std::fs::create_dir_all(first.parent().unwrap()).unwrap();
+        std::fs::create_dir_all(second.parent().unwrap()).unwrap();
+        std::fs::write(&first, "a").unwrap();
+        std::fs::write(&second, "b").unwrap();
+        insert_typed_resource(
+            &app,
+            "resource-1",
+            "file",
+            first.to_str().unwrap(),
+            first.to_str().unwrap(),
+        );
+        insert_typed_resource(
+            &app,
+            "resource-2",
+            "file",
+            second.to_str().unwrap(),
+            second.to_str().unwrap(),
+        );
+
+        let error = move_resource_records_inner(
+            app.handle(),
+            vec!["resource-1".to_string(), "resource-2".to_string()],
+            "归档".to_string(),
+        )
+        .unwrap_err();
+        assert!(error.contains("同名文件"));
+        assert!(first.is_file());
+        assert!(second.is_file());
         cleanup(&root);
     }
 

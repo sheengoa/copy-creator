@@ -11,6 +11,7 @@ import {
   formatResourceBitrate,
   formatResourceDuration,
   formatResourceFileSize,
+  formatResourceFolderPath,
   getResourceFileName,
   getResourcePath,
   getResourceTitle,
@@ -34,6 +35,7 @@ interface ResourceDetailPageProps {
   onCopy: (record: ClipboardRecord) => void | Promise<void>;
   onDelete: (id: string) => void;
   onRecordUpdated: (record: ClipboardRecord) => void;
+  onMoveRecord?: (record: ClipboardRecord) => void;
 }
 
 export default function ResourceDetailPage({
@@ -43,6 +45,7 @@ export default function ResourceDetailPage({
   onCopy,
   onDelete,
   onRecordUpdated,
+  onMoveRecord,
 }: ResourceDetailPageProps) {
   const { t } = useTranslation();
   const updateResourceNote = useClipboardStore((state) => state.updateResourceNote);
@@ -373,6 +376,21 @@ export default function ResourceDetailPage({
               </div>
             )}
           </dl>
+          {onMoveRecord && (
+            <div className="resource-group-line">
+              <span className="resource-group-line-label">{t("resources.currentGroup")}</span>
+              <span className="resource-group-pill">
+                <span className="resource-group-pill-name">
+                  {record.resource_folder
+                    ? formatResourceFolderPath(record.resource_folder)
+                    : t("resources.ungrouped")}
+                </span>
+                <button type="button" onClick={() => onMoveRecord(record)}>
+                  {t("resources.move")}
+                </button>
+              </span>
+            </div>
+          )}
           <div className="resource-note-block">
             <label className="resource-note-label" htmlFor="resource-note-input">
               {t("resources.note")}
