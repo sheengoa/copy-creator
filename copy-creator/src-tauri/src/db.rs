@@ -3539,6 +3539,183 @@ fn delete_resource_group_inner<R: Runtime>(app: &AppHandle<R>, name: String) -> 
     Ok(())
 }
 
+const RESOURCE_RENAME_MAX_LEN: usize = 120;
+
+/// 校验重命名输入并返回文件名主干（不含扩展名）。
+/// 扩展名始终沿用原文件：用户输入带不带原扩展名都可以，但不允许借改名更换扩展名。
+fn validate_resource_rename_stem(new_name: &str, old_path: &Path) -> Result<String, String> {
+    let trimmed = new_name.trim();
+    if trimmed.is_empty() {
+        return Err("文件名不能为空".to_string());
+    }
+    let trimmed_chars: Vec<char> = trimmed.chars().collect();
+    let stem = match old_path.extension().and_then(OsStr::to_str) {
+        Some(extension) => {
+            let suffix: Vec<char> = format!(".{}", extension.to_lowercase()).chars().collect();
+            let has_suffix = trimmed_chars.len() > suffix.len()
+                && trimmed_chars[trimmed_chars.len() - suffix.len()..]
+                    .iter()
+                    .collect::<String>()
+                    .to_lowercase()
+                    == suffix.iter().collect::<String>();
+            if has_suffix {
+                trimmed_chars[..trimmed_chars.len() - suffix.len()]
+                    .iter()
+                    .collect::<String>()
+            } else {
+                trimmed.to_string()
+            }
+        }
+        None => trimmed.to_string(),
+    };
+    let stem = stem.trim_end_matches(['.', ' ']).trim();
+    if stem.is_empty() {
+        return Err("文件名不能为空".to_string());
+    }
+    if stem.chars().count() > RESOURCE_RENAME_MAX_LEN {
+        return Err(format!("文件名不能超过 {RESOURCE_RENAME_MAX_LEN} 字"));
+    }
+    if stem.starts_with('.') {
+        return Err("文件名不能以点号开头".to_string());
+    }
+    // 同步沿用 Windows 的非法字符约束，避免资源库目录在双平台间同步时出错。
+    if stem.contains(['/', '\\', '<', '>', ':', '"', '|', '?', '*']) {
+        return Err("文件名包含非法字符".to_string());
+    }
+    const WINDOWS_RESERVED_STEMS: [&str; 22] = [
+        "CON", "PRN", "AUX", "NUL", "COM1", "COM2", "COM3", "COM4", "COM5", "COM6", "COM7",
+        "COM8", "COM9", "LPT1", "LPT2", "LPT3", "LPT4", "LPT5", "LPT6", "LPT7", "LPT8", "LPT9",
+    ];
+    if WINDOWS_RESERVED_STEMS
+        .iter()
+        .any(|reserved| stem.eq_ignore_ascii_case(reserved))
+    {
+        return Err("该文件名是系统保留名称".to_string());
+    }
+    Ok(stem.to_string())
+}
+
+#[tauri::command]
+pub fn rename_resource_file(
+    app: AppHandle,
+    id: String,
+    new_name: String,
+) -> Result<serde_json::Value, String> {
+    rename_resource_file_inner(&app, id, new_name)
+}
+
+fn rename_resource_file_inner<R: Runtime>(
+    app: &AppHandle<R>,
+    id: String,
+    new_name: String,
+) -> Result<serde_json::Value, String> {
+    // 路径解析与数据库访问各自加连接锁，必须串行执行避免重入死锁（同 set_resource_note_inner）。
+    let record = {
+        let state = app.state::<DbState>();
+        let conn = state.conn.lock().map_err(|e| e.to_string())?;
+        conn.query_row(
+            "SELECT type, content, resource_path FROM clipboard_records WHERE id = ?1",
+            params![&id],
+            |row| {
+                Ok((
+                    row.get::<_, String>(0)?,
+                    row.get::<_, String>(1)?,
+                    row.get::<_, String>(2)?,
+                ))
+            },
+        )
+        .optional()
+        .map_err(|e| e.to_string())?
+    };
+    // 仅标题即文件名的记录（图片、文件）可改名；自动发现的文件一律视为文件记录。
+    let (old_path, content, db_backed) = match record {
+        Some((record_type, content, resource_path)) => {
+            if record_type != "image" && record_type != "file" {
+                return Err("文本内容的标题来自正文，不支持重命名".to_string());
+            }
+            if resource_path.is_empty() {
+                return Err("该内容没有对应文件，无法重命名".to_string());
+            }
+            let path = resolve_resource_file_path(app, &resource_path)?;
+            (path, content, true)
+        }
+        None => {
+            let path = resource_file_path_from_id(app, &id)?.ok_or("资源不存在")?;
+            // 自动发现记录（无数据库行）在前端内存中的 content 即完整路径，
+            // 以完整路径为基准推导改名后的 content，返回给前端刷新内存记录。
+            let content = path.to_string_lossy().to_string();
+            (path, content, false)
+        }
+    };
+
+    let stem = validate_resource_rename_stem(&new_name, &old_path)?;
+    let new_file_name = match old_path.extension().and_then(OsStr::to_str) {
+        Some(extension) => format!("{stem}.{extension}"),
+        None => stem,
+    };
+    let parent = old_path.parent().ok_or("资源文件路径无效")?;
+    let new_path = parent.join(&new_file_name);
+    if new_path == old_path {
+        return Ok(serde_json::json!({ "id": id }));
+    }
+    if new_path.exists() {
+        return Err(format!("已存在同名文件：{new_file_name}"));
+    }
+
+    std::fs::rename(&old_path, &new_path).map_err(|e| format!("重命名文件失败: {e}"))?;
+
+    let new_path_text = new_path.to_string_lossy().to_string();
+    // 类型为 image/file 的记录标题与粘贴都依赖 content 中的文件路径，文件名变化时同步替换；
+    // 自动发现记录（无数据库行）的 content 即完整路径，同样需要新值返回给前端刷新内存记录。
+    let old_file_name = old_path
+        .file_name()
+        .map(|name| name.to_string_lossy().to_string())
+        .unwrap_or_default();
+    let new_content = if !old_file_name.is_empty() {
+        if content == old_file_name {
+            new_file_name.clone()
+        } else if let Some(prefix) = content
+            .strip_suffix(&old_file_name)
+            .filter(|prefix| prefix.ends_with('/') || prefix.ends_with('\\'))
+        {
+            format!("{prefix}{new_file_name}")
+        } else {
+            content.clone()
+        }
+    } else {
+        content.clone()
+    };
+    if db_backed {
+        let update_result = {
+            let state = app.state::<DbState>();
+            let conn = state.conn.lock().map_err(|e| e.to_string())?;
+            conn.execute(
+                "UPDATE clipboard_records SET content = ?1, resource_path = ?2 WHERE id = ?3",
+                params![&new_content, &new_path_text, &id],
+            )
+            .map_err(|e| e.to_string())
+        };
+        if let Err(error) = update_result {
+            let _ = std::fs::rename(&new_path, &old_path);
+            return Err(format!("更新资源记录失败: {error}"));
+        }
+    }
+
+    let root = resource_path_key(&get_resource_library_dir(app));
+    let relative_path = new_path
+        .strip_prefix(&root)
+        .ok()
+        .map(|relative| relative.to_string_lossy().to_string());
+    let _ = app.emit("resource-groups-changed", ());
+    Ok(serde_json::json!({
+        "id": id,
+        "resource_path": new_path_text,
+        "resource_relative_path": relative_path,
+        "content": new_content,
+        "name": new_file_name,
+    }))
+}
+
 #[tauri::command]
 pub fn open_resource_group(app: AppHandle, name: String) -> Result<(), String> {
     let name = normalize_resource_group_name(Some(&name))?;
@@ -4379,13 +4556,13 @@ mod record_classification_tests {
 mod resource_command_tests {
     use super::{
         delete_external_resource_file, delete_resource_group_inner, get_clipboard_records_inner,
-        read_resource_text_preview_file, resolve_resource_file_path, resource_file_id,
-        resource_folder_tree, resource_group_count_map, set_resource_note_inner,
+        read_resource_text_preview_file, rename_resource_file_inner, resolve_resource_file_path,
+        resource_file_id, resource_folder_tree, resource_group_count_map, set_resource_note_inner,
         restore_staged_external_resource_files, stage_external_resource_files,
-        update_resource_group_inner, DbState,
+        validate_resource_rename_stem, update_resource_group_inner, DbState,
     };
     use rusqlite::Connection;
-    use std::path::PathBuf;
+    use std::path::{Path, PathBuf};
     use std::sync::Mutex;
     use std::time::Duration;
     use tauri::Manager;
@@ -4448,6 +4625,24 @@ mod resource_command_tests {
              (id, type, content, created_at, sort_order, group_name, storage_mode, resource_path)
              VALUES (?1, 'text', ?2, '2026-08-01T00:00:00Z', ?3, ?4, 'resource', ?5)",
             (id, id, sort_order, group_name, resource_path),
+        )
+        .unwrap();
+    }
+
+    fn insert_typed_resource(
+        app: &tauri::App<tauri::test::MockRuntime>,
+        id: &str,
+        record_type: &str,
+        content: &str,
+        resource_path: &str,
+    ) {
+        let state = app.state::<DbState>();
+        let conn = state.conn.lock().unwrap();
+        conn.execute(
+            "INSERT INTO clipboard_records
+             (id, type, content, created_at, sort_order, group_name, storage_mode, resource_path)
+             VALUES (?1, ?2, ?3, '2026-08-01T00:00:00Z', 10.0, '', 'resource', ?4)",
+            (id, record_type, content, resource_path),
         )
         .unwrap();
     }
@@ -4893,6 +5088,176 @@ mod resource_command_tests {
             .unwrap();
         assert_eq!(group_name, "New");
         assert_eq!(resource_path, new_file.to_string_lossy());
+        cleanup(&root);
+    }
+
+    #[test]
+    fn renaming_resource_file_updates_file_and_record_paths() {
+        let (app, root) = test_app();
+        let file = root.join("三视图/image_00014_.png");
+        std::fs::create_dir_all(file.parent().unwrap()).unwrap();
+        std::fs::write(&file, [1_u8, 2, 3]).unwrap();
+        insert_typed_resource(
+            &app,
+            "resource-1",
+            "image",
+            file.to_str().unwrap(),
+            file.to_str().unwrap(),
+        );
+
+        let result = rename_resource_file_inner(
+            app.handle(),
+            "resource-1".to_string(),
+            "林黛玉三视图".to_string(),
+        )
+        .unwrap();
+
+        let renamed = root.join("三视图/林黛玉三视图.png");
+        assert!(renamed.is_file());
+        assert!(!file.exists());
+        assert_eq!(result["resource_path"], renamed.to_string_lossy().to_string());
+        assert_eq!(result["content"], renamed.to_string_lossy().to_string());
+        assert_eq!(result["name"], "林黛玉三视图.png");
+        assert_eq!(result["resource_relative_path"], "三视图/林黛玉三视图.png");
+        let state = app.state::<DbState>();
+        let conn = state.conn.lock().unwrap();
+        let (content, resource_path): (String, String) = conn
+            .query_row(
+                "SELECT content, resource_path FROM clipboard_records WHERE id = 'resource-1'",
+                [],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )
+            .unwrap();
+        assert_eq!(resource_path, renamed.to_string_lossy().to_string());
+        assert_eq!(content, renamed.to_string_lossy().to_string());
+        cleanup(&root);
+    }
+
+    #[test]
+    fn renaming_resource_file_keeps_extension_and_rejects_conflicts() {
+        let (app, root) = test_app();
+        let file = root.join("image_00014_.png");
+        std::fs::write(&file, [1_u8, 2, 3]).unwrap();
+        insert_typed_resource(
+            &app,
+            "resource-1",
+            "file",
+            file.to_str().unwrap(),
+            file.to_str().unwrap(),
+        );
+
+        rename_resource_file_inner(
+            app.handle(),
+            "resource-1".to_string(),
+            "林黛玉.PNG".to_string(),
+        )
+        .unwrap();
+        assert!(root.join("林黛玉.png").is_file());
+        assert!(!file.exists());
+
+        let second = root.join("second.png");
+        std::fs::write(&second, [4_u8, 5, 6]).unwrap();
+        insert_typed_resource(
+            &app,
+            "resource-2",
+            "file",
+            second.to_str().unwrap(),
+            second.to_str().unwrap(),
+        );
+        let error = rename_resource_file_inner(
+            app.handle(),
+            "resource-2".to_string(),
+            "林黛玉.png".to_string(),
+        )
+        .unwrap_err();
+        assert!(error.contains("已存在同名文件"));
+        assert!(second.is_file());
+        cleanup(&root);
+    }
+
+    #[test]
+    fn renaming_discovered_resource_file_updates_promoted_record_and_content() {
+        let (app, root) = test_app();
+        let discovered = root.join("discovered.png");
+        std::fs::write(&discovered, [1_u8, 2, 3]).unwrap();
+        let result = rename_resource_file_inner(
+            app.handle(),
+            resource_file_id(&discovered),
+            "新名字.png".to_string(),
+        )
+        .unwrap();
+        let renamed = root.join("新名字.png");
+        assert!(renamed.is_file());
+        assert_eq!(result["content"], renamed.to_string_lossy().to_string());
+
+        let promoted = root.join("promoted.png");
+        std::fs::write(&promoted, [4_u8, 5, 6]).unwrap();
+        insert_typed_resource(
+            &app,
+            &resource_file_id(&promoted),
+            "file",
+            promoted.to_str().unwrap(),
+            promoted.to_str().unwrap(),
+        );
+        rename_resource_file_inner(
+            app.handle(),
+            resource_file_id(&promoted),
+            "已入库.png".to_string(),
+        )
+        .unwrap();
+        assert!(root.join("已入库.png").is_file());
+        let state = app.state::<DbState>();
+        let conn = state.conn.lock().unwrap();
+        let resource_path: String = conn
+            .query_row(
+                "SELECT resource_path FROM clipboard_records WHERE id = ?1",
+                [&resource_file_id(&promoted)],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(resource_path, root.join("已入库.png").to_string_lossy());
+        cleanup(&root);
+    }
+
+    #[test]
+    fn renaming_resource_file_rejects_text_records_and_invalid_names() {
+        let (app, root) = test_app();
+        let file = root.join("note.txt");
+        std::fs::write(&file, "正文").unwrap();
+        insert_typed_resource(
+            &app,
+            "text-1",
+            "text",
+            "正文内容",
+            file.to_str().unwrap(),
+        );
+        assert!(rename_resource_file_inner(
+            app.handle(),
+            "text-1".to_string(),
+            "新标题".to_string(),
+        )
+        .unwrap_err()
+        .contains("不支持重命名"));
+
+        let image = root.join("image.png");
+        std::fs::write(&image, [1_u8]).unwrap();
+        assert!(validate_resource_rename_stem("", Path::new("/tmp/a.png")).is_err());
+        assert!(validate_resource_rename_stem("a/b", Path::new("/tmp/a.png")).is_err());
+        assert!(validate_resource_rename_stem("a\\b", Path::new("/tmp/a.png")).is_err());
+        assert!(validate_resource_rename_stem("CON", Path::new("/tmp/a.png")).is_err());
+        assert!(validate_resource_rename_stem(".hidden", Path::new("/tmp/a.png")).is_err());
+        assert_eq!(
+            validate_resource_rename_stem("三视图.png", Path::new("/tmp/a.png")).unwrap(),
+            "三视图"
+        );
+        assert_eq!(
+            validate_resource_rename_stem("  三视图  ", Path::new("/tmp/a.png")).unwrap(),
+            "三视图"
+        );
+        assert_eq!(
+            validate_resource_rename_stem("名字", Path::new("/tmp/a.png")).unwrap(),
+            "名字"
+        );
         cleanup(&root);
     }
 

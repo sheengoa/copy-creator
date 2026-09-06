@@ -354,6 +354,7 @@ pub fn run() {
             db::delete_resource_group,
             db::open_resource_group,
             db::open_resource_file,
+            db::rename_resource_file,
             db::set_resource_note,
             media_server::get_media_server_origin,
             translator::translate,
