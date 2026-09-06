@@ -185,8 +185,6 @@
     "groupLocationAt": "Located under: {{path}}",
     "collapseGroup": "Collapse subfolders",
     "expandGroup": "Expand subfolders",
-    "pasteAll": "Paste group",
-    "pasteAllTooltip": "Paste group: click to paste · hold and drag to drag all files out",
     "detailError": "Failed to load content details",
     "fileDetailNote": "This format is shown as file information. Click Use to paste it.",
     "info": "Content information",

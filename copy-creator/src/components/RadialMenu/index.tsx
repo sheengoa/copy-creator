@@ -1374,27 +1374,26 @@ export default function RadialMenu() {
       : group.name
   );
 
-  // 分组 chip 内的整组操作小图标：单击 = 粘贴该组，按住拖动 = 原生拖出该组
-  // 全部文件（走 data-radial-* 属性接入的通用拖拽会话，来源为 group）。
-  const renderGroupPasteButton = (groupPath: string) => (
-    <button
-      type="button"
-      className="radial-menu-resource-group-paste"
-      data-radial-item-id={groupPath}
-      data-radial-drag-kind="files"
-      data-radial-drag-source="group"
-      aria-label={t("resources.pasteAll")}
-      title={t("resources.pasteAllTooltip")}
-      onClick={(e) => {
-        e.preventDefault();
-        e.stopPropagation();
-        if (pasteLeftClick === "terminal") return;
-        void handlePasteGroup(groupPath);
-      }}
-    >
-      {Icons.copy}
-    </button>
+  // 分组 chip 本身即整组操作入口：单击切分组（保留）、Shift+单击 = 粘贴该组、
+  // 按住拖动 = 通过 data-radial-* 属性接入的通用拖拽会话原生拖出该组全部文件。
+  // 仅真实分组（非"全部"视图）且 groupCount > 0 时挂载拖拽与粘贴能力。
+  const groupChipDragProps = (groupPath: string, groupCount: number) => (
+    groupCount > 0
+      ? {
+        "data-radial-item-id": groupPath,
+        "data-radial-drag-kind": "files",
+        "data-radial-drag-source": "group",
+      }
+      : {}
   );
+
+  const handleGroupChipClick = (groupPath: string, groupCount: number, shiftKey: boolean) => {
+    if (shiftKey && groupCount > 0 && pasteLeftClick !== "terminal") {
+      void handlePasteGroup(groupPath);
+      return;
+    }
+    applyResourceGroupSwitch(groupPath);
+  };
 
   const resourceGroupMenu = resourceGroupMenuPath && resourceGroupMenuFolder
     ? createPortal(
@@ -1476,29 +1475,36 @@ export default function RadialMenu() {
               >
                 {t("resources.allGroups")}
               </button>
-              <div
-                className={`radial-menu-resource-group-control${resourceGroup === "" ? " active" : ""}`}
-              >
-                <button
-                  type="button"
-                  className="radial-menu-resource-group-main"
-                  onClick={(e) => {
-                    e.preventDefault();
-                    e.stopPropagation();
-                    applyResourceGroupSwitch("");
-                  }}
-                >
-                  <span>{t("resources.ungrouped")}</span>
-                </button>
-                {(resourceGroups.find((group) => group.name === "")?.count ?? 0) > 0
-                  && renderGroupPasteButton("")}
-              </div>
+              {(() => {
+                const ungroupedCount = resourceGroups.find((group) => group.name === "")?.count ?? 0;
+                return (
+                  <button
+                    type="button"
+                    className={`radial-menu-category-chip ${resourceGroup === "" ? "active" : ""}`}
+                    data-radial-category="ungrouped-resources"
+                    {...groupChipDragProps("", ungroupedCount)}
+                    onClick={(e) => {
+                      e.preventDefault();
+                      e.stopPropagation();
+                      handleGroupChipClick("", ungroupedCount, e.shiftKey);
+                    }}
+                  >
+                    {t("resources.ungrouped")}
+                  </button>
+                );
+              })()}
               {resourceFolderGroups.map((group) => {
                 const hasChildren = (group.children ?? []).length > 0;
                 const isActive = resourceGroup !== null
                   && isResourceFolderPath(resourceGroup, group.path);
                 const groupLabel = getResourceGroupControlLabel(group);
-                return (
+                const dragProps = groupChipDragProps(group.path, group.count);
+                const handleChipClick = (e: React.MouseEvent) => {
+                  e.preventDefault();
+                  e.stopPropagation();
+                  handleGroupChipClick(group.path, group.count, e.shiftKey);
+                };
+                return hasChildren ? (
                   <div
                     key={group.path}
                     className={`radial-menu-resource-group-control${isActive ? " active" : ""}${resourceGroupMenuPath === group.path ? " open" : ""}`}
@@ -1506,45 +1512,50 @@ export default function RadialMenu() {
                     <button
                       type="button"
                       className="radial-menu-resource-group-main"
-                      onClick={(e) => {
-                        e.preventDefault();
-                        e.stopPropagation();
-                        applyResourceGroupSwitch(group.path);
-                      }}
+                      {...dragProps}
+                      onClick={handleChipClick}
                       title={groupLabel}
                     >
                       <span>{groupLabel}</span>
                     </button>
-                    {group.count > 0 && renderGroupPasteButton(group.path)}
-                    {hasChildren && (
-                      <button
-                        type="button"
-                        className="radial-menu-resource-group-chevron"
-                        ref={(element) => {
-                          if (resourceGroupMenuPath === group.path) {
-                            resourceGroupMenuAnchorRef.current = element;
-                          }
-                        }}
-                        onClick={(e) => {
-                          e.preventDefault();
-                          e.stopPropagation();
-                          if (resourceGroupMenuPath === group.path) {
-                            closeResourceGroupMenu();
-                            return;
-                          }
-                          resourceGroupMenuAnchorRef.current = e.currentTarget;
-                          setResourceGroupMenuPosition(null);
-                          setResourceGroupMenuPath(group.path);
-                        }}
-                        aria-label={t("resources.openSubfolders")}
-                        aria-expanded={resourceGroupMenuPath === group.path}
-                        aria-haspopup="menu"
-                        title={t("resources.openSubfolders")}
-                      >
-                        {Icons.chevronDown}
-                      </button>
-                    )}
+                    <button
+                      type="button"
+                      className="radial-menu-resource-group-chevron"
+                      ref={(element) => {
+                        if (resourceGroupMenuPath === group.path) {
+                          resourceGroupMenuAnchorRef.current = element;
+                        }
+                      }}
+                      onClick={(e) => {
+                        e.preventDefault();
+                        e.stopPropagation();
+                        if (resourceGroupMenuPath === group.path) {
+                          closeResourceGroupMenu();
+                          return;
+                        }
+                        resourceGroupMenuAnchorRef.current = e.currentTarget;
+                        setResourceGroupMenuPosition(null);
+                        setResourceGroupMenuPath(group.path);
+                      }}
+                      aria-label={t("resources.openSubfolders")}
+                      aria-expanded={resourceGroupMenuPath === group.path}
+                      aria-haspopup="menu"
+                      title={t("resources.openSubfolders")}
+                    >
+                      {Icons.chevronDown}
+                    </button>
                   </div>
+                ) : (
+                  <button
+                    key={group.path}
+                    type="button"
+                    className={`radial-menu-category-chip ${isActive ? "active" : ""}`}
+                    {...dragProps}
+                    onClick={handleChipClick}
+                    title={group.name}
+                  >
+                    {group.name}
+                  </button>
                 );
               })}
             </div>
