@@ -113,6 +113,26 @@ export function getResourceExtension(value: string): string {
   return dotIndex >= 0 ? fileName.slice(dotIndex + 1) : "";
 }
 
+// 标题即文件名的记录（图片、文件）才支持重命名；文本/链接的标题取自正文首行，无文件名可改。
+export function isResourceTitleRenameable(
+  record: Pick<ClipboardRecord, "type">,
+): boolean {
+  return record.type === "image" || record.type === "file";
+}
+
+// 把文件名拆成主干与扩展名（含点号）。无扩展名或以点开头的隐藏文件名整体视为主干。
+export function splitResourceFileName(fileName: string): {
+  stem: string;
+  extension: string;
+} {
+  const dotIndex = fileName.lastIndexOf(".");
+  if (dotIndex <= 0) return { stem: fileName, extension: "" };
+  return {
+    stem: fileName.slice(0, dotIndex),
+    extension: fileName.slice(dotIndex),
+  };
+}
+
 export function inferResourceMediaKind(
   record: Pick<ClipboardRecord, "type" | "content" | "resource_kind">,
 ): ResourceMediaKind {

@@ -24,9 +24,11 @@ import {
   getResourceTitle,
   inferResourceMediaKind,
   isResourceFolderPath,
+  isResourceTitleRenameable,
   resolveResourceAssetUrl,
   resolveResourceMediaUrl,
   splitResourceColumns,
+  splitResourceFileName,
 } from "./resourceUtils";
 
 function record(type: ClipboardRecord["type"], content: string): Pick<ClipboardRecord, "type" | "content"> {
@@ -195,6 +197,32 @@ describe("resourceUtils", () => {
     ]);
     expect(findResourceFolder(folders, "人物三视图/放大后/细节")?.name).toBe("细节");
     expect(findResourceFolder(folders, "不存在")).toBeNull();
+  });
+
+  it("marks image and file records as renameable but not text or links", () => {
+    expect(isResourceTitleRenameable(record("image", "/tmp/a.png"))).toBe(true);
+    expect(isResourceTitleRenameable(record("file", "/tmp/a.zip"))).toBe(true);
+    expect(isResourceTitleRenameable(record("text", "正文"))).toBe(false);
+    expect(isResourceTitleRenameable(record("link", "https://example.com"))).toBe(false);
+  });
+
+  it("splits file names into stem and extension for inline rename", () => {
+    expect(splitResourceFileName("image_00014_.png")).toEqual({
+      stem: "image_00014_",
+      extension: ".png",
+    });
+    expect(splitResourceFileName("没有扩展名")).toEqual({
+      stem: "没有扩展名",
+      extension: "",
+    });
+    expect(splitResourceFileName(".hidden")).toEqual({
+      stem: ".hidden",
+      extension: "",
+    });
+    expect(splitResourceFileName("a.b.c.tar.gz")).toEqual({
+      stem: "a.b.c.tar",
+      extension: ".gz",
+    });
   });
 
   it("matches folder paths without confusing similarly named folders", () => {
