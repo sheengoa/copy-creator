@@ -322,8 +322,10 @@ describe("integration regressions", () => {
     expect(resourceStyles).toContain(".resource-detail-stage-audio .resource-media-player");
     expect(resourceStyles).toContain("height: 40px");
     expect(config.app.security.csp).toContain(
-      "media-src 'self' asset: https://asset.localhost http://127.0.0.1:* data: blob:",
+      "media-src 'self' asset: http://asset.localhost https://asset.localhost http://127.0.0.1:* data: blob:",
     );
+    // Windows 的 asset 协议走 http scheme，img-src 必须放行 http://asset.localhost
+    expect(config.app.security.csp).toContain("img-src 'self' asset: http://asset.localhost");
     expect(config.app.security.csp).not.toContain("media-src *");
   });
 
