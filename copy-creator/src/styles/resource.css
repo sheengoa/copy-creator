@@ -425,12 +425,14 @@
 }
 
 .resource-group-manage-dialog {
-  width: min(460px, calc(100vw - 32px));
+  /* 随主窗口尺寸自适应：小窗口不低于 440px，大窗口最多 780px，且不溢出视口。 */
+  width: min(clamp(440px, 60vw, 780px), calc(100vw - 48px));
 }
 
 .resource-group-manage-list {
   display: flex;
-  max-height: min(360px, calc(100vh - 220px));
+  /* 列表高度同样跟随窗口高度伸缩，留足标题与操作区的空间。 */
+  max-height: min(clamp(280px, 58vh, 560px), calc(100vh - 220px));
   flex-direction: column;
   gap: 6px;
   overflow-y: auto;
