@@ -262,6 +262,22 @@ fn wtype_ctrl_shift_v() -> Result<(), String> {
 /// regular document editors and file managers use Ctrl+V.
 fn inject_paste_with_shortcut(shortcut: PasteShortcut) {
     log::info!("[paste] inject_paste_with_shortcut: {:?}", shortcut);
+
+    // Windows 没有 Wayland/X11 概念，enigo 直接走 Win32 SendInput；
+    // 必须在显示服务器检测之前处理，否则会误报
+    // "cannot detect display server" 并多余地探测一遍 Linux 工具。
+    #[cfg(target_os = "windows")]
+    {
+        let result = match shortcut {
+            PasteShortcut::CtrlShiftV => enigo_ctrl_shift_v(),
+            PasteShortcut::CtrlV => enigo_ctrl_v(),
+        };
+        if let Err(e) = result {
+            log::warn!("enigo paste failed: {e}");
+        }
+        return;
+    }
+
     if is_wayland() && ydotool_available() {
         // Wayland + ydotool: the most reliable combination on all compositors
         match shortcut {
@@ -345,9 +361,15 @@ fn inject_paste_with_shortcut(shortcut: PasteShortcut) {
 
 /// Emit a desktop notification if `notify-send` is available.
 pub fn notify(title: &str, body: &str) {
+    #[cfg(target_os = "linux")]
     let _ = Command::new("notify-send")
         .args(["--expire-time=5000", title, body])
         .spawn();
+    #[cfg(not(target_os = "linux"))]
+    {
+        // 其他平台的桌面通知尚未实现；调用点仅为 Linux 工具缺失提示。
+        let _ = (title, body);
+    }
 }
 
 /// Run at startup: log the paste environment and warn if no method is
