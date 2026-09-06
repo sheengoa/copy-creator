@@ -835,9 +835,10 @@ export default function RadialMenu() {
 
   // 整组粘贴（方案 A）：分组内全部为文本时合并为一段文本粘贴，
   // 否则把分组内全部文件按文件列表一次写入剪切板再模拟 Ctrl+V。
-  const handlePasteGroup = useCallback(async () => {
+  // groupPath 为 null 时作用于当前选中的分组。
+  const handlePasteGroup = useCallback(async (groupPath: string | null) => {
     const store = useClipboardStore.getState();
-    const allRecords = await store.loadAllRecords("resources", resourceGroupRef.current);
+    const allRecords = await store.loadAllRecords("resources", groupPath ?? resourceGroupRef.current);
     const records = (allRecords ?? []).filter((record) => isResourceRecord(record));
     if (records.length > 0) {
       const allText = records.every((record) => inferResourceMediaKind(record) === "text");
@@ -998,7 +999,7 @@ export default function RadialMenu() {
     if (
       !target
       || !itemId
-      || (dragSource !== "clipboard" && dragSource !== "phrase")
+      || (dragSource !== "clipboard" && dragSource !== "phrase" && dragSource !== "group")
     ) {
       nativeDragRef.current = null;
       setDragSessionItemId(null);
@@ -1373,6 +1374,28 @@ export default function RadialMenu() {
       : group.name
   );
 
+  // 分组 chip 内的整组操作小图标：单击 = 粘贴该组，按住拖动 = 原生拖出该组
+  // 全部文件（走 data-radial-* 属性接入的通用拖拽会话，来源为 group）。
+  const renderGroupPasteButton = (groupPath: string) => (
+    <button
+      type="button"
+      className="radial-menu-resource-group-paste"
+      data-radial-item-id={groupPath}
+      data-radial-drag-kind="files"
+      data-radial-drag-source="group"
+      aria-label={t("resources.pasteAll")}
+      title={t("resources.pasteAllTooltip")}
+      onClick={(e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        if (pasteLeftClick === "terminal") return;
+        void handlePasteGroup(groupPath);
+      }}
+    >
+      {Icons.copy}
+    </button>
+  );
+
   const resourceGroupMenu = resourceGroupMenuPath && resourceGroupMenuFolder
     ? createPortal(
       <div
@@ -1453,24 +1476,29 @@ export default function RadialMenu() {
               >
                 {t("resources.allGroups")}
               </button>
-              <button
-                type="button"
-                className={`radial-menu-category-chip ${resourceGroup === "" ? "active" : ""}`}
-                data-radial-category="ungrouped-resources"
-                onClick={(e) => {
-                  e.preventDefault();
-                  e.stopPropagation();
-                  applyResourceGroupSwitch("");
-                }}
+              <div
+                className={`radial-menu-resource-group-control${resourceGroup === "" ? " active" : ""}`}
               >
-                {t("resources.ungrouped")}
-              </button>
+                <button
+                  type="button"
+                  className="radial-menu-resource-group-main"
+                  onClick={(e) => {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    applyResourceGroupSwitch("");
+                  }}
+                >
+                  <span>{t("resources.ungrouped")}</span>
+                </button>
+                {(resourceGroups.find((group) => group.name === "")?.count ?? 0) > 0
+                  && renderGroupPasteButton("")}
+              </div>
               {resourceFolderGroups.map((group) => {
                 const hasChildren = (group.children ?? []).length > 0;
                 const isActive = resourceGroup !== null
                   && isResourceFolderPath(resourceGroup, group.path);
                 const groupLabel = getResourceGroupControlLabel(group);
-                return hasChildren ? (
+                return (
                   <div
                     key={group.path}
                     className={`radial-menu-resource-group-control${isActive ? " active" : ""}${resourceGroupMenuPath === group.path ? " open" : ""}`}
@@ -1487,65 +1515,38 @@ export default function RadialMenu() {
                     >
                       <span>{groupLabel}</span>
                     </button>
-                    <button
-                      type="button"
-                      className="radial-menu-resource-group-chevron"
-                      ref={(element) => {
-                        if (resourceGroupMenuPath === group.path) {
-                          resourceGroupMenuAnchorRef.current = element;
-                        }
-                      }}
-                      onClick={(e) => {
-                        e.preventDefault();
-                        e.stopPropagation();
-                        if (resourceGroupMenuPath === group.path) {
-                          closeResourceGroupMenu();
-                          return;
-                        }
-                        resourceGroupMenuAnchorRef.current = e.currentTarget;
-                        setResourceGroupMenuPosition(null);
-                        setResourceGroupMenuPath(group.path);
-                      }}
-                      aria-label={t("resources.openSubfolders")}
-                      aria-expanded={resourceGroupMenuPath === group.path}
-                      aria-haspopup="menu"
-                      title={t("resources.openSubfolders")}
-                    >
-                      {Icons.chevronDown}
-                    </button>
+                    {group.count > 0 && renderGroupPasteButton(group.path)}
+                    {hasChildren && (
+                      <button
+                        type="button"
+                        className="radial-menu-resource-group-chevron"
+                        ref={(element) => {
+                          if (resourceGroupMenuPath === group.path) {
+                            resourceGroupMenuAnchorRef.current = element;
+                          }
+                        }}
+                        onClick={(e) => {
+                          e.preventDefault();
+                          e.stopPropagation();
+                          if (resourceGroupMenuPath === group.path) {
+                            closeResourceGroupMenu();
+                            return;
+                          }
+                          resourceGroupMenuAnchorRef.current = e.currentTarget;
+                          setResourceGroupMenuPosition(null);
+                          setResourceGroupMenuPath(group.path);
+                        }}
+                        aria-label={t("resources.openSubfolders")}
+                        aria-expanded={resourceGroupMenuPath === group.path}
+                        aria-haspopup="menu"
+                        title={t("resources.openSubfolders")}
+                      >
+                        {Icons.chevronDown}
+                      </button>
+                    )}
                   </div>
-                ) : (
-                  <button
-                    key={group.path}
-                    type="button"
-                    className={`radial-menu-category-chip ${isActive ? "active" : ""}`}
-                    onClick={(e) => {
-                      e.preventDefault();
-                      e.stopPropagation();
-                      applyResourceGroupSwitch(group.path);
-                    }}
-                    title={group.name}
-                  >
-                    {group.name}
-                  </button>
                 );
               })}
-              <button
-                type="button"
-                className="radial-menu-paste-all"
-                disabled={pasteLeftClick === "terminal"}
-                title={pasteLeftClick === "terminal"
-                  ? t("resources.pasteAllDisabled")
-                  : t("resources.pasteAll")}
-                onClick={(e) => {
-                  e.preventDefault();
-                  e.stopPropagation();
-                  void handlePasteGroup();
-                }}
-              >
-                {Icons.copy}
-                <span>{t("resources.pasteAll")}</span>
-              </button>
             </div>
           ) : categories.length > 0 && (
             <div

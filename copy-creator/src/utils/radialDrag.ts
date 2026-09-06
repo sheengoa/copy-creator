@@ -1,5 +1,5 @@
 export type RadialDragKind = "files" | "none";
-export type RadialDragSource = "clipboard" | "phrase";
+export type RadialDragSource = "clipboard" | "phrase" | "group";
 
 export function getClipboardRadialDragKind(
   type: string,

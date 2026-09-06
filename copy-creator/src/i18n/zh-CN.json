@@ -196,7 +196,7 @@
     "collapseGroup": "折叠子分组",
     "expandGroup": "展开子分组",
     "pasteAll": "整组粘贴",
-    "pasteAllDisabled": "终端粘贴模式下不可用",
+    "pasteAllTooltip": "整组粘贴：单击粘贴 · 按住拖出整组文件",
     "detailError": "内容详情加载失败",
     "fileDetailNote": "当前格式以文件信息展示，可点击「使用」粘贴到当前应用",
     "info": "内容信息",

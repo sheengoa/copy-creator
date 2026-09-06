@@ -45,6 +45,9 @@ thread_local! {
 pub enum RadialDragSource {
     Clipboard,
     Phrase,
+    /// 资源分组整组拖出：id 为分组的多级路径，拖动其目录下全部文件。
+    #[serde(rename = "group")]
+    ResourceGroup,
 }
 
 fn canonical_file_path(path: PathBuf) -> Result<PathBuf, String> {
@@ -118,7 +121,55 @@ fn resolve_drag_paths(
     match source {
         RadialDragSource::Clipboard => clipboard_drag_paths(app, id),
         RadialDragSource::Phrase => phrase_drag_paths(app, id),
+        RadialDragSource::ResourceGroup => resource_group_drag_paths(app, id),
     }
+}
+
+/// 收集资源分组目录下全部文件（递归，跳过点开头的隐藏目录与临时文件），
+/// 作为整组拖出 / 整组粘贴的数据源。
+fn resource_group_drag_paths(app: &AppHandle, folder: &str) -> Result<Vec<PathBuf>, String> {
+    let folder = crate::db::normalize_resource_folder_path(Some(folder))?;
+    let mut directory = crate::db::get_resource_library_dir(app);
+    for segment in folder.split('/').filter(|segment| !segment.is_empty()) {
+        directory.push(segment);
+    }
+    if !directory.is_dir() {
+        return Err("资源分组不存在".to_string());
+    }
+
+    let paths = collect_group_files(&directory);
+    if paths.is_empty() {
+        return Err("分组内没有可拖拽的文件".to_string());
+    }
+    Ok(paths)
+}
+
+fn collect_group_files(directory: &std::path::Path) -> Vec<PathBuf> {
+    fn collect(directory: &std::path::Path, paths: &mut Vec<PathBuf>) {
+        let Ok(children) = std::fs::read_dir(directory) else {
+            return;
+        };
+        let mut children = children.flatten().collect::<Vec<_>>();
+        children.sort_by_key(|entry| entry.file_name());
+        for entry in children {
+            let path = entry.path();
+            let Some(name) = path.file_name().and_then(|name| name.to_str()) else {
+                continue;
+            };
+            if name.starts_with('.') {
+                continue;
+            }
+            if path.is_dir() {
+                collect(&path, paths);
+            } else if path.is_file() {
+                paths.push(path);
+            }
+        }
+    }
+
+    let mut paths = Vec::new();
+    collect(directory, &mut paths);
+    paths
 }
 
 fn path_from_hint(app: &AppHandle, path: String) -> Result<PathBuf, String> {
@@ -129,20 +180,20 @@ fn path_from_hint(app: &AppHandle, path: String) -> Result<PathBuf, String> {
     stored_file_path(app, path)
 }
 
-fn requested_drag_path(
+fn requested_drag_paths(
     app: &AppHandle,
     source: RadialDragSource,
     id: &str,
     path: Option<String>,
-) -> Result<PathBuf, String> {
-    let path = match path.filter(|path| !path.trim().is_empty()) {
-        Some(path) => path_from_hint(app, path)?,
-        None => resolve_drag_paths(app, source, id)?
-            .into_iter()
-            .next()
-            .ok_or_else(|| "没有可拖拽的文件".to_string())?,
+) -> Result<Vec<PathBuf>, String> {
+    let paths = match path.filter(|path| !path.trim().is_empty()) {
+        Some(path) => vec![path_from_hint(app, path)?],
+        None => resolve_drag_paths(app, source, id)?,
     };
-    canonical_file_path(path)
+    paths
+        .into_iter()
+        .map(canonical_file_path)
+        .collect::<Result<Vec<_>, String>>()
 }
 
 fn finish_radial_drag(
@@ -165,7 +216,7 @@ fn finish_radial_drag(
 #[cfg(target_os = "linux")]
 #[derive(Clone)]
 struct LinuxDragCandidate {
-    path: PathBuf,
+    paths: Vec<PathBuf>,
     item_id: String,
     token: LinuxDragToken,
     armed_at: Instant,
@@ -223,7 +274,7 @@ fn begin_linux_drag_session(session_id: u64) -> Result<LinuxDragToken, String> {
 }
 
 #[cfg(target_os = "linux")]
-fn arm_linux_drag(path: PathBuf, item_id: String, token: LinuxDragToken) -> Result<(), String> {
+fn arm_linux_drag(paths: Vec<PathBuf>, item_id: String, token: LinuxDragToken) -> Result<(), String> {
     let state = linux_drag_state();
     let mut state = state.lock().map_err(|error| error.to_string())?;
 
@@ -235,7 +286,7 @@ fn arm_linux_drag(path: PathBuf, item_id: String, token: LinuxDragToken) -> Resu
     }
 
     state.candidate = Some(LinuxDragCandidate {
-        path,
+        paths,
         item_id,
         token,
         armed_at: Instant::now(),
@@ -604,24 +655,37 @@ fn install_linux_drag_source(
 
     let data_state = linux_drag_state().clone();
     window.connect_drag_data_get(move |_, _, data, _, _| {
-        let path = data_state.lock().ok().and_then(|state| {
+        let paths = data_state.lock().ok().and_then(|state| {
             state
                 .candidate
                 .as_ref()
-                .map(|candidate| candidate.path.clone())
+                .map(|candidate| candidate.paths.clone())
         });
-        let Some(path) = path.and_then(|path| canonical_file_path(path).ok()) else {
-            log::warn!("[radial_drag] 拖动数据请求时文件已不可用");
+        let Some(paths) = paths else {
+            log::warn!("[radial_drag] 拖动数据请求时缺少候选文件");
             return;
         };
-
-        let uri = gtk::gio::File::for_path(&path).uri().to_string();
+        // 逐个校验仍存在的文件；全部失效才放弃本次拖动。
+        let mut uris = Vec::with_capacity(paths.len());
+        for path in &paths {
+            let Ok(path) = canonical_file_path(path.clone()) else {
+                log::warn!("[radial_drag] 拖动数据请求时文件已不可用: {}", path.display());
+                continue;
+            };
+            let uri = gtk::gio::File::for_path(&path).uri().to_string();
+            uris.push(uri);
+        }
+        if uris.is_empty() {
+            log::warn!("[radial_drag] 拖动数据请求时文件已不可用");
+            return;
+        }
+        let uri_refs = uris.iter().map(|uri| uri.as_str()).collect::<Vec<_>>();
         let target = data.target().name();
-        let set_uris_result = data.set_uris(&[uri.as_str()]);
+        let set_uris_result = data.set_uris(&uri_refs);
         log::debug!(
-            "[radial_drag] drag_data_get target={} uri={} set_uris={}",
+            "[radial_drag] drag_data_get target={} uris={} set_uris={}",
             target,
-            uri,
+            uris.len(),
             set_uris_result
         );
     });
@@ -703,14 +767,14 @@ pub fn install_radial_file_drag_source(
 #[cfg(target_os = "linux")]
 fn arm_linux_drag_on_main(
     window: &gtk::ApplicationWindow,
-    path: PathBuf,
+    paths: Vec<PathBuf>,
     item_id: String,
     token: LinuxDragToken,
     screen_x: Option<f64>,
     screen_y: Option<f64>,
     device_pixel_ratio: Option<f64>,
 ) -> Result<(), String> {
-    arm_linux_drag(path, item_id, token)?;
+    arm_linux_drag(paths, item_id, token)?;
     if !seed_linux_pointer_press(window, screen_x, screen_y, device_pixel_ratio) {
         abort_linux_drag(token);
         return Err("鼠标左键已释放".to_string());
@@ -758,8 +822,8 @@ pub async fn arm_radial_file_drag(
     #[cfg(target_os = "linux")]
     {
         let token = begin_linux_drag_session(session_id)?;
-        let path = match requested_drag_path(&app, source, &id, path) {
-            Ok(path) => path,
+        let paths = match requested_drag_paths(&app, source, &id, path) {
+            Ok(paths) => paths,
             Err(error) => {
                 abort_linux_drag(token);
                 return Err(error);
@@ -786,7 +850,7 @@ pub async fn arm_radial_file_drag(
                         .map_err(|error| format!("获取 GTK 窗口失败: {error}"))?;
                     arm_linux_drag_on_main(
                         &gtk_window,
-                        path,
+                        paths,
                         item_id,
                         token,
                         screen_x,
@@ -875,11 +939,54 @@ pub async fn start_radial_file_drag(
 
     #[cfg(not(target_os = "linux"))]
     {
-        let paths = vec![requested_drag_path(&app, source, &id, path)?];
+        let paths = requested_drag_paths(&app, source, &id, path)?;
         let icon_path = paths
             .first()
             .cloned()
             .ok_or_else(|| "没有可拖拽的文件".to_string())?;
         start_platform_drag(&window, paths, icon_path, app, session_id)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::collect_group_files;
+
+    #[test]
+    fn group_files_are_collected_recursively_without_hidden_entries() {
+        let root = std::env::temp_dir().join(format!(
+            "copy-creator-radial-group-test-{}",
+            uuid::Uuid::new_v4()
+        ));
+        let nested = root.join("子目录");
+        std::fs::create_dir_all(&nested).unwrap();
+        std::fs::write(root.join("b.png"), [1_u8]).unwrap();
+        std::fs::write(root.join("a.txt"), [2_u8]).unwrap();
+        std::fs::write(nested.join("c.mp4"), [3_u8]).unwrap();
+        std::fs::create_dir_all(root.join(".copy-creator/attachments")).unwrap();
+        std::fs::write(root.join(".copy-creator/attachments/image-1.png"), [4_u8]).unwrap();
+        std::fs::write(root.join(".tmp-upload"), [5_u8]).unwrap();
+        std::fs::create_dir_all(root.join("空目录")).unwrap();
+
+        let paths = collect_group_files(&root);
+        let names = paths
+            .iter()
+            .map(|path| path.file_name().unwrap().to_string_lossy().to_string())
+            .collect::<Vec<_>>();
+        assert_eq!(names, vec!["a.txt", "b.png", "c.mp4"]);
+        assert!(paths.iter().all(|path| path.starts_with(&root)));
+
+        std::fs::remove_dir_all(&root).unwrap();
+    }
+
+    #[test]
+    fn empty_directories_collect_no_files() {
+        let root = std::env::temp_dir().join(format!(
+            "copy-creator-radial-group-empty-{}",
+            uuid::Uuid::new_v4()
+        ));
+        std::fs::create_dir_all(&root).unwrap();
+        assert!(collect_group_files(&root).is_empty());
+        std::fs::remove_dir_all(&root).unwrap();
     }
 }
