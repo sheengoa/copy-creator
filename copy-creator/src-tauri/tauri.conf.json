@@ -56,6 +56,9 @@
           "libayatana-appindicator3-1",
           "gstreamer1.0-libav"
         ]
+      },
+      "appimage": {
+        "bundleMediaFramework": true
       }
     }
   },
