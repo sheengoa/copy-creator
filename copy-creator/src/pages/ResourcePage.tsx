@@ -852,6 +852,7 @@ export default function ResourcePage() {
           onBack={closeDetail}
           onCopy={handleCopy}
           onDelete={handleDeleteRecord}
+          onRecordUpdated={setDetailRecord}
         />
         {confirmDialog}
       </>

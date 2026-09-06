@@ -171,6 +171,8 @@
     "metaDuration": "时长",
     "metaBitrate": "码率",
     "backToLibrary": "返回内容库",
+    "renameTitleHint": "双击重命名",
+    "nameRequired": "文件名不能为空",
     "detailError": "内容详情加载失败",
     "fileDetailNote": "当前格式以文件信息展示，可点击「使用」粘贴到当前应用",
     "info": "内容信息",

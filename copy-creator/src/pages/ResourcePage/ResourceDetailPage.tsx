@@ -15,7 +15,9 @@ import {
   getResourcePath,
   getResourceTitle,
   inferResourceMediaKind,
+  isResourceTitleRenameable,
   resolveResourceMediaUrl,
+  splitResourceFileName,
   type ResourceMediaKind,
 } from "./resourceUtils";
 import {
@@ -31,6 +33,7 @@ interface ResourceDetailPageProps {
   onBack: () => void;
   onCopy: (record: ClipboardRecord) => void | Promise<void>;
   onDelete: (id: string) => void;
+  onRecordUpdated: (record: ClipboardRecord) => void;
 }
 
 export default function ResourceDetailPage({
@@ -39,6 +42,7 @@ export default function ResourceDetailPage({
   onBack,
   onCopy,
   onDelete,
+  onRecordUpdated,
 }: ResourceDetailPageProps) {
   const { t } = useTranslation();
   const updateResourceNote = useClipboardStore((state) => state.updateResourceNote);
@@ -55,6 +59,9 @@ export default function ResourceDetailPage({
   const [noteSaved, setNoteSaved] = useState(false);
   const [noteError, setNoteError] = useState(false);
   const noteSavedTimerRef = useRef<number | null>(null);
+  const [renameDraft, setRenameDraft] = useState<string | null>(null);
+  const [renameSaving, setRenameSaving] = useState(false);
+  const [renameError, setRenameError] = useState<string | null>(null);
   const externalTextPath = kind === "text" && record.type === "file"
     ? resourcePath
     : null;
@@ -66,6 +73,8 @@ export default function ResourceDetailPage({
     setSavedNote(record.resource_note ?? "");
     setNoteSaved(false);
     setNoteError(false);
+    setRenameDraft(null);
+    setRenameError(null);
   }, [record.id, record.resource_note]);
 
   useEffect(() => () => {
@@ -166,6 +175,56 @@ export default function ResourceDetailPage({
   }, [externalTextPath, kind, record, resourcePath]);
 
   const title = getResourceTitle(record, kind);
+
+  const renameable = isResourceTitleRenameable(record);
+  const { stem: currentStem, extension: titleExtension } = splitResourceFileName(
+    getResourceFileName(getResourcePath(record)),
+  );
+
+  const cancelRename = () => {
+    setRenameDraft(null);
+    setRenameError(null);
+  };
+
+  const commitRename = async () => {
+    if (renameDraft === null || renameSaving) return;
+    const stem = renameDraft.trim();
+    if (!stem) {
+      setRenameError(t("resources.nameRequired"));
+      return;
+    }
+    if (stem === currentStem) {
+      cancelRename();
+      return;
+    }
+    setRenameSaving(true);
+    setRenameError(null);
+    try {
+      const updated = await invoke<{
+        id: string;
+        resource_path?: string;
+        resource_relative_path?: string | null;
+        content?: string;
+      }>("rename_resource_file", { id: record.id, newName: stem });
+      onRecordUpdated({
+        ...record,
+        ...(updated.id ? { id: updated.id } : null),
+        ...(updated.resource_path !== undefined
+          ? { resource_path: updated.resource_path }
+          : null),
+        ...(updated.content !== undefined ? { content: updated.content } : null),
+        ...(updated.resource_relative_path
+          ? { resource_relative_path: updated.resource_relative_path }
+          : null),
+      });
+      setRenameDraft(null);
+    } catch (error) {
+      setRenameError(String(error));
+    } finally {
+      setRenameSaving(false);
+    }
+  };
+
   const detailReady = kind === "video" || kind === "audio"
     ? Boolean(mediaSource)
     : kind === "file" || kind === "image" || Boolean(segments);
@@ -194,7 +253,49 @@ export default function ResourceDetailPage({
       <main className="resource-detail-body">
         <section className="resource-detail-main" aria-busy={!(externalTextPath ? textDetailReady : detailReady) && !error}>
           <span className="resource-detail-kind">{typeLabel(kind)}</span>
-          <h1>{title}</h1>
+          {renameDraft === null ? (
+            <h1
+              className={renameable ? "resource-detail-title" : undefined}
+              title={renameable ? t("resources.renameTitleHint") : undefined}
+              onDoubleClick={renameable ? () => {
+                setRenameDraft(currentStem);
+                setRenameError(null);
+              } : undefined}
+            >
+              {title}
+            </h1>
+          ) : (
+            <div className="resource-detail-title-editor">
+              <input
+                className="resource-detail-title-input"
+                autoFocus
+                value={renameDraft}
+                maxLength={120}
+                disabled={renameSaving}
+                aria-label={t("resources.renameTitleHint")}
+                onChange={(event) => {
+                  setRenameDraft(event.target.value);
+                  setRenameError(null);
+                }}
+                onKeyDown={(event) => {
+                  if (event.key === "Enter") {
+                    event.preventDefault();
+                    void commitRename();
+                  } else if (event.key === "Escape") {
+                    event.preventDefault();
+                    cancelRename();
+                  }
+                }}
+                onBlur={() => void commitRename()}
+              />
+              {titleExtension && (
+                <span className="resource-detail-title-extension">{titleExtension}</span>
+              )}
+              {renameError && (
+                <span className="resource-detail-title-error" role="alert">{renameError}</span>
+              )}
+            </div>
+          )}
           <p className="resource-detail-subtitle">
             {typeLabel(kind)} · {record.source_app || t("resources.localSource")}
           </p>

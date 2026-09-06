@@ -161,6 +161,8 @@
     "metaDuration": "Duration",
     "metaBitrate": "Bitrate",
     "backToLibrary": "Back to library",
+    "renameTitleHint": "Double-click to rename",
+    "nameRequired": "Name cannot be empty",
     "detailError": "Failed to load content details",
     "fileDetailNote": "This format is shown as file information. Click Use to paste it.",
     "info": "Content information",

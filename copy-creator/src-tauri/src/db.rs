@@ -3707,8 +3707,14 @@ fn rename_resource_file_inner<R: Runtime>(
         .ok()
         .map(|relative| relative.to_string_lossy().to_string());
     let _ = app.emit("resource-groups-changed", ());
+    // 自动发现记录的 id 由路径派生，改名后需返回新 id 供前端同步内存记录。
+    let result_id = if db_backed {
+        id
+    } else {
+        resource_file_id(&new_path)
+    };
     Ok(serde_json::json!({
-        "id": id,
+        "id": result_id,
         "resource_path": new_path_text,
         "resource_relative_path": relative_path,
         "content": new_content,
@@ -5188,6 +5194,7 @@ mod resource_command_tests {
         .unwrap();
         let renamed = root.join("新名字.png");
         assert!(renamed.is_file());
+        assert_eq!(result["id"], resource_file_id(&renamed));
         assert_eq!(result["content"], renamed.to_string_lossy().to_string());
 
         let promoted = root.join("promoted.png");
