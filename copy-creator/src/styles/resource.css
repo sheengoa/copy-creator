@@ -472,6 +472,47 @@
   gap: 1px;
 }
 
+.resource-group-twist {
+  display: inline-flex;
+  flex-shrink: 0;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  height: 20px;
+  padding: 0;
+  border: none;
+  border-radius: 5px;
+  background: none;
+  color: var(--text-secondary);
+  cursor: pointer;
+}
+
+.resource-group-twist:disabled {
+  cursor: default;
+}
+
+.resource-group-twist svg {
+  width: 13px;
+  height: 13px;
+  transition: transform 140ms ease;
+}
+
+.resource-group-twist.collapsed svg {
+  transform: rotate(-90deg);
+}
+
+.resource-group-manage-count {
+  flex-shrink: 0;
+  color: var(--text-muted);
+  font-size: var(--text-xs);
+}
+
+.resource-group-path-hint {
+  margin: 0 0 8px;
+  color: var(--text-secondary);
+  font-size: var(--text-xs);
+}
+
 .resource-new-button:active,
 .resource-secondary-button:active {
   transform: scale(0.97);

@@ -46,6 +46,7 @@ import { isResourceRecord } from "../utils/clipboardRecord";
 type ResourceSortOrder = "newest" | "oldest";
 type ResourceGroupDialogState = {
   mode: "create" | "rename";
+  parentPath?: string;
   oldName?: string;
 } | null;
 type ResourceMoveDialogState = {
@@ -53,6 +54,10 @@ type ResourceMoveDialogState = {
   label: string;
   meta: string;
   folders: string[];
+} | null;
+type ResourceGroupMoveState = {
+  path: string;
+  target: string | null;
 } | null;
 
 const RESOURCE_TYPE_FILTERS: ResourceTypeFilter[] = [
@@ -117,6 +122,10 @@ export default function ResourcePage() {
   const [resourceGroupName, setResourceGroupName] = useState("");
   const [resourceGroupSaving, setResourceGroupSaving] = useState(false);
   const [resourceGroupMenuPath, setResourceGroupMenuPath] = useState<string | null>(null);
+  const [collapsedGroupPaths, setCollapsedGroupPaths] = useState<string[]>([]);
+  const [resourceGroupMove, setResourceGroupMove] = useState<ResourceGroupMoveState>(null);
+  const [movingGroup, setMovingGroup] = useState(false);
+  const [movingGroupError, setMovingGroupError] = useState<string | null>(null);
   const [resourceGroupMenuPosition, setResourceGroupMenuPosition] = useState<{
     left: number;
     top: number;
@@ -446,6 +455,25 @@ export default function ResourcePage() {
       : [],
     [resourceGroupMenuFolder],
   );
+  // 管理对话框的树形行：折叠的分组不展示其后代；计数为含子级的总量（后端提供）。
+  const manageRows = useMemo(() => {
+    const rows: Array<{ folder: ResourceFolder; depth: number }> = [];
+    const collapsed = new Set(collapsedGroupPaths);
+    const walk = (folders: ResourceFolder[], depth: number) => {
+      for (const folder of folders) {
+        rows.push({ folder, depth });
+        if ((folder.children ?? []).length > 0 && !collapsed.has(folder.path)) {
+          walk(folder.children ?? [], depth + 1);
+        }
+      }
+    };
+    walk(resourceGroups, 0);
+    return rows;
+  }, [collapsedGroupPaths, resourceGroups]);
+  const groupMoveRows = useMemo(
+    () => flattenResourceFolders(resourceGroups.filter((group) => group.name !== "")),
+    [resourceGroups],
+  );
   const getResourceGroupLabel = useCallback((name: string) => (
     name === "" ? t("resources.ungrouped") : name
   ), [t]);
@@ -548,19 +576,71 @@ export default function ResourcePage() {
     setStoreResourceGroup(name);
   }, [cancelResourceSelection, closeResourceGroupMenu, setStoreResourceGroup]);
 
-  const openNewResourceGroup = useCallback(() => {
-    setResourceGroupManageOpen(false);
+  const openNewResourceGroup = useCallback((parentPath?: string) => {
     setResourceGroupName("");
     setResourceGroupsError(null);
-    setResourceGroupDialog({ mode: "create" });
+    setResourceGroupDialog({ mode: "create", parentPath });
   }, []);
 
   const openRenameResourceGroup = useCallback((name: string) => {
-    setResourceGroupManageOpen(false);
-    setResourceGroupName(name);
+    const segments = name.split("/");
+    setResourceGroupName(segments[segments.length - 1] ?? name);
     setResourceGroupsError(null);
     setResourceGroupDialog({ mode: "rename", oldName: name });
   }, []);
+
+  const toggleGroupCollapsed = useCallback((path: string) => {
+    setCollapsedGroupPaths((current) => (
+      current.includes(path)
+        ? current.filter((path2) => path2 !== path)
+        : [...current, path]
+    ));
+  }, []);
+
+  const openGroupMove = useCallback((path: string) => {
+    setResourceGroupManageOpen(false);
+    setMovingGroupError(null);
+    setResourceGroupMove({ path, target: null });
+  }, []);
+
+  const handleMoveGroupConfirm = useCallback(async () => {
+    if (!resourceGroupMove || resourceGroupMove.target === null || movingGroup) return;
+    const movedPath = resourceGroupMove.path;
+    const target = resourceGroupMove.target;
+    setMovingGroup(true);
+    setMovingGroupError(null);
+    try {
+      await invoke("move_resource_group", { path: movedPath, newParent: target });
+      await loadResourceGroups();
+      const baseName = movedPath.split("/").pop() ?? movedPath;
+      const nextMovedPath = target === "" ? baseName : `${target}/${baseName}`;
+      let nextGroup: string | null = resourceGroup;
+      if (resourceGroup !== null) {
+        if (resourceGroup === movedPath) {
+          nextGroup = nextMovedPath;
+        } else if (resourceGroup.startsWith(`${movedPath}/`)) {
+          const rest = resourceGroup.slice(movedPath.length + 1);
+          nextGroup = target === "" ? rest : `${target}/${rest}`;
+        }
+      }
+      setResourceGroup(nextGroup);
+      setStoreResourceGroup(nextGroup);
+      setResourceGroupMove(null);
+      await loadRecords(false, "resources", nextGroup);
+    } catch (error) {
+      console.error("Failed to move resource group:", error);
+      setMovingGroupError(String(error));
+    } finally {
+      setMovingGroup(false);
+    }
+  }, [
+    loadRecords,
+    loadResourceGroups,
+    movingGroup,
+    resourceGroup,
+    resourceGroupMove,
+    setStoreResourceGroup,
+  ]);
 
   const handleSaveResourceGroup = useCallback(async () => {
     const name = resourceGroupName.trim();
@@ -569,16 +649,24 @@ export default function ResourcePage() {
     setResourceGroupsError(null);
     try {
       if (resourceGroupDialog?.mode === "rename" && resourceGroupDialog.oldName) {
+        const segments = resourceGroupDialog.oldName.split("/");
+        segments[segments.length - 1] = name;
+        const newPath = segments.join("/");
         await invoke("update_resource_group", {
           oldName: resourceGroupDialog.oldName,
-          newName: name,
+          newName: newPath,
         });
+        await loadResourceGroups();
+        setResourceGroup(newPath);
+        setStoreResourceGroup(newPath);
       } else {
-        await invoke("create_resource_group", { name });
+        const parentPath = resourceGroupDialog?.parentPath;
+        const fullPath = parentPath ? `${parentPath}/${name}` : name;
+        await invoke("create_resource_group", { name: fullPath });
+        await loadResourceGroups();
+        setResourceGroup(fullPath);
+        setStoreResourceGroup(fullPath);
       }
-      await loadResourceGroups();
-      setResourceGroup(name);
-      setStoreResourceGroup(name);
       closeResourceGroupMenu();
       setResourceGroupDialog(null);
     } catch (error) {
@@ -1116,7 +1204,7 @@ export default function ResourcePage() {
           <button
             type="button"
             className="resource-group-action"
-            onClick={openNewResourceGroup}
+            onClick={() => openNewResourceGroup()}
             aria-label={t("resources.newGroup")}
             title={t("resources.newGroup")}
           >
@@ -1186,7 +1274,7 @@ export default function ResourcePage() {
               <button
                 type="button"
                 className="group-add-btn group-manage-add-btn"
-                onClick={openNewResourceGroup}
+                onClick={() => openNewResourceGroup()}
                 aria-label={t("resources.newGroup")}
                 title={t("resources.newGroup")}
               >
@@ -1197,46 +1285,89 @@ export default function ResourcePage() {
               <span className="dialog-error-text" role="alert">{resourceGroupsError}</span>
             )}
             <div className="resource-group-manage-list">
-              {resourceGroups.map((group) => (
-                <div key={group.name || "ungrouped"} className="resource-group-manage-row">
-                  <div className="resource-group-manage-name">
-                    <span>{getResourceGroupLabel(group.name)}</span>
-                  </div>
-                  <div className="resource-group-manage-actions">
+              {manageRows.map(({ folder, depth }) => {
+                const isRoot = folder.name === "";
+                const hasChildren = (folder.children ?? []).length > 0;
+                const collapsed = collapsedGroupPaths.includes(folder.path);
+                return (
+                  <div
+                    key={folder.path || "ungrouped"}
+                    className="resource-group-manage-row"
+                    style={{ paddingLeft: `${depth * 16}px` }}
+                  >
                     <button
                       type="button"
-                      className="resource-icon-button"
-                      onClick={() => void handleOpenResourceGroup(group.name)}
-                      aria-label={t("resources.openGroup")}
-                      title={t("resources.openGroup")}
+                      className={`resource-group-twist${collapsed ? " collapsed" : ""}`}
+                      disabled={!hasChildren}
+                      aria-label={
+                        hasChildren
+                          ? (collapsed ? t("resources.expandGroup") : t("resources.collapseGroup"))
+                          : undefined
+                      }
+                      onClick={() => hasChildren && toggleGroupCollapsed(folder.path)}
                     >
-                      {Icons.resources}
+                      {hasChildren && Icons.chevronDown}
                     </button>
-                    {group.name && (
-                      <>
-                        <button
-                          type="button"
-                          className="resource-icon-button"
-                          onClick={() => openRenameResourceGroup(group.name)}
-                          aria-label={t("resources.renameGroup")}
-                          title={t("resources.renameGroup")}
-                        >
-                          {Icons.edit}
-                        </button>
-                        <button
-                          type="button"
-                          className="resource-delete-button"
-                          onClick={() => handleDeleteResourceGroup(group.name)}
-                          aria-label={t("common.delete")}
-                          title={t("common.delete")}
-                        >
-                          {Icons.delete}
-                        </button>
-                      </>
-                    )}
+                    <div className="resource-group-manage-name" title={folder.path}>
+                      <span>{getResourceGroupLabel(folder.name)}</span>
+                    </div>
+                    <span className="resource-group-manage-count">
+                      {t("resources.itemCount", { count: folder.count })}
+                    </span>
+                    <div className="resource-group-manage-actions">
+                      <button
+                        type="button"
+                        className="resource-icon-button"
+                        onClick={() => void handleOpenResourceGroup(folder.path)}
+                        aria-label={t("resources.openGroup")}
+                        title={t("resources.openGroup")}
+                      >
+                        {Icons.resources}
+                      </button>
+                      {!isRoot && (
+                        <>
+                          <button
+                            type="button"
+                            className="resource-icon-button"
+                            onClick={() => openNewResourceGroup(folder.path)}
+                            aria-label={t("resources.newSubgroup")}
+                            title={t("resources.newSubgroup")}
+                          >
+                            {Icons.add}
+                          </button>
+                          <button
+                            type="button"
+                            className="resource-icon-button"
+                            onClick={() => openRenameResourceGroup(folder.path)}
+                            aria-label={t("resources.renameGroup")}
+                            title={t("resources.renameGroup")}
+                          >
+                            {Icons.edit}
+                          </button>
+                          <button
+                            type="button"
+                            className="resource-icon-button"
+                            onClick={() => openGroupMove(folder.path)}
+                            aria-label={t("resources.moveGroup")}
+                            title={t("resources.moveGroup")}
+                          >
+                            {Icons.arrowRight}
+                          </button>
+                          <button
+                            type="button"
+                            className="resource-delete-button"
+                            onClick={() => handleDeleteResourceGroup(folder.path)}
+                            aria-label={t("common.delete")}
+                            title={t("common.delete")}
+                          >
+                            {Icons.delete}
+                          </button>
+                        </>
+                      )}
+                    </div>
                   </div>
-                </div>
-              ))}
+                );
+              })}
             </div>
           </div>
         </div>
@@ -1250,6 +1381,22 @@ export default function ResourcePage() {
                 ? t("resources.renameGroup")
                 : t("resources.newGroup")}
             </h3>
+            {resourceGroupDialog.mode === "create" && resourceGroupDialog.parentPath && (
+              <p className="resource-group-path-hint">
+                {t("resources.groupCreateAt", {
+                  path: formatResourceFolderPath(resourceGroupDialog.parentPath),
+                })}
+              </p>
+            )}
+            {resourceGroupDialog.mode === "rename" && resourceGroupDialog.oldName && (
+              <p className="resource-group-path-hint">
+                {t("resources.groupLocationAt", {
+                  path: formatResourceFolderPath(
+                    resourceGroupDialog.oldName.split("/").slice(0, -1).join("/"),
+                  ),
+                })}
+              </p>
+            )}
             <input
               className="dialog-input"
               autoFocus
@@ -1278,6 +1425,86 @@ export default function ResourcePage() {
                 disabled={!resourceGroupName.trim() || resourceGroupSaving}
               >
                 {resourceGroupSaving ? t("common.saving") : t("common.save")}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {resourceGroupMove && (
+        <div className="dialog-overlay" onClick={() => !movingGroup && setResourceGroupMove(null)}>
+          <div
+            className="dialog-content resource-move-dialog"
+            onClick={(event) => event.stopPropagation()}
+          >
+            <h3 className="dialog-title">
+              {t("resources.moveGroupTitle", {
+                name: resourceGroupMove.path.split("/").pop() ?? resourceGroupMove.path,
+              })}
+            </h3>
+            <div className="resource-move-tree" role="listbox" aria-label={t("resources.moveGroup")}>
+              <button
+                type="button"
+                className={`resource-move-row${resourceGroupMove.target === "" ? " selected" : ""}`}
+                role="option"
+                aria-selected={resourceGroupMove.target === ""}
+                onClick={() => setResourceGroupMove({ ...resourceGroupMove, target: "" })}
+              >
+                <span className="resource-move-icon">{Icons.resources}</span>
+                <span>{t("resources.topLevel")}</span>
+              </button>
+              {groupMoveRows.map(({ folder, depth }) => {
+                const currentParent = resourceGroupMove.path
+                  .split("/")
+                  .slice(0, -1)
+                  .join("/");
+                const inSubtree = folder.path === resourceGroupMove.path
+                  || folder.path.startsWith(`${resourceGroupMove.path}/`);
+                const disabled = inSubtree || folder.path === currentParent;
+                return (
+                  <button
+                    key={folder.path}
+                    type="button"
+                    className={`resource-move-row${resourceGroupMove.target === folder.path ? " selected" : ""}${disabled ? " current" : ""}`}
+                    style={{ paddingLeft: `${8 + depth * 16}px` }}
+                    role="option"
+                    aria-selected={resourceGroupMove.target === folder.path}
+                    disabled={disabled}
+                    title={folder.path}
+                    onClick={() => !disabled && setResourceGroupMove({ ...resourceGroupMove, target: folder.path })}
+                  >
+                    <span className="resource-move-icon">{Icons.resources}</span>
+                    <span>{folder.name}</span>
+                    {folder.path === currentParent && (
+                      <span className="resource-move-current-tag">{t("resources.currentParentTag")}</span>
+                    )}
+                    {inSubtree && (
+                      <span className="resource-move-current-tag">{t("resources.selfTag")}</span>
+                    )}
+                  </button>
+                );
+              })}
+            </div>
+            <p className="resource-move-hint">{t("resources.moveGroupHint")}</p>
+            {movingGroupError && (
+              <span className="dialog-error-text" role="alert">{movingGroupError}</span>
+            )}
+            <div className="dialog-actions">
+              <button
+                type="button"
+                className="dialog-btn secondary"
+                onClick={() => setResourceGroupMove(null)}
+                disabled={movingGroup}
+              >
+                {t("common.cancel")}
+              </button>
+              <button
+                type="button"
+                className="dialog-btn save"
+                disabled={resourceGroupMove.target === null || movingGroup}
+                onClick={() => void handleMoveGroupConfirm()}
+              >
+                {movingGroup ? t("common.saving") : t("resources.move")}
               </button>
             </div>
           </div>

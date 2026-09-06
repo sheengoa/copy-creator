@@ -374,12 +374,16 @@ pub(crate) fn resource_group_path<R: Runtime>(
     app: &AppHandle<R>,
     name: &str,
 ) -> Result<PathBuf, String> {
-    let normalized = normalize_resource_group_name(Some(name))?;
+    let normalized = normalize_resource_folder_path(Some(name))?;
     let root = get_resource_library_dir(app);
     if normalized.is_empty() {
         Ok(root)
     } else {
-        Ok(root.join(normalized))
+        let mut path = root;
+        for segment in normalized.split('/') {
+            path.push(segment);
+        }
+        Ok(path)
     }
 }
 
@@ -3141,9 +3145,9 @@ pub fn set_resource_library_path(app: AppHandle, path: String) -> Result<String,
     Ok(path_string)
 }
 
-fn resource_record_paths_in_group<R: Runtime>(
+fn resource_record_paths_in_folder<R: Runtime>(
     app: &AppHandle<R>,
-    group_name: &str,
+    folder: &str,
 ) -> Result<Vec<(String, String)>, String> {
     let root = get_resource_library_dir(app);
     let state = app.state::<DbState>();
@@ -3160,10 +3164,17 @@ fn resource_record_paths_in_group<R: Runtime>(
             Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
         })
         .map_err(|e| e.to_string())?;
+    let nested_prefix = format!("{folder}/");
     let mut records = Vec::new();
     for row in rows {
         let (id, path) = row.map_err(|e| e.to_string())?;
-        if resource_group_for_path(&root, &path).as_deref() == Some(group_name) {
+        let matches_folder = match resource_folder_for_path(&root, &path) {
+            Some(record_folder) => {
+                record_folder == folder || record_folder.starts_with(&nested_prefix)
+            }
+            None => folder.is_empty(),
+        };
+        if matches_folder {
             records.push((id, path));
         }
     }
@@ -3214,8 +3225,8 @@ fn resource_group_count_map<R: Runtime>(
         let mut paths = HashSet::new();
         for row in rows {
             let path = row.map_err(|e| e.to_string())?;
-            if let Some(group_name) = resource_group_for_path(&root, &path) {
-                *counts.entry(group_name).or_insert(0) += 1;
+            if let Some(folder) = resource_folder_for_path(&root, &path) {
+                *counts.entry(folder).or_insert(0) += 1;
             }
             if !path.is_empty() {
                 paths.insert(resource_path_key(Path::new(&path)));
@@ -3227,9 +3238,21 @@ fn resource_group_count_map<R: Runtime>(
         if database_paths.contains(&resource_path_key(&entry.path)) {
             continue;
         }
-        *counts.entry(entry.group).or_insert(0) += 1;
+        let folder = resource_folder_for_path(&root, &entry.path.to_string_lossy().as_ref())
+            .unwrap_or_default();
+        *counts.entry(folder).or_insert(0) += 1;
     }
     Ok(counts)
+}
+
+/// 汇总某分组目录（含全部子级）的记录数，用于分组树的总量展示。
+fn resource_group_total_under(counts: &HashMap<String, u64>, folder: &str) -> u64 {
+    let nested_prefix = format!("{folder}/");
+    counts
+        .iter()
+        .filter(|(key, _)| key.as_str() == folder || key.starts_with(&nested_prefix))
+        .map(|(_, value)| value)
+        .sum()
 }
 
 fn is_ignored_resource_directory(path: &Path) -> bool {
@@ -3254,10 +3277,11 @@ fn resource_directory_relative_path(root: &Path, directory: &Path) -> Option<Str
 fn resource_folder_tree(
     root: &Path,
     directory: &Path,
-    count: u64,
+    counts: &HashMap<String, u64>,
 ) -> Option<serde_json::Value> {
     let name = directory.file_name()?.to_str()?.to_string();
     let path = resource_directory_relative_path(root, directory)?;
+    let count = resource_group_total_under(counts, &path);
     let mut child_directories = std::fs::read_dir(directory)
         .ok()?
         .flatten()
@@ -3272,7 +3296,7 @@ fn resource_folder_tree(
     child_directories.sort_by_key(|child| child.file_name().map(|name| name.to_os_string()));
     let children = child_directories
         .into_iter()
-        .filter_map(|child| resource_folder_tree(root, &child, 0))
+        .filter_map(|child| resource_folder_tree(root, &child, counts))
         .collect::<Vec<_>>();
 
     Some(serde_json::json!({
@@ -3285,8 +3309,14 @@ fn resource_folder_tree(
 
 #[tauri::command]
 pub fn get_resource_groups(app: AppHandle) -> Result<Vec<serde_json::Value>, String> {
-    let root = get_resource_library_dir(&app);
-    let counts = resource_group_count_map(&app)?;
+    get_resource_groups_inner(&app)
+}
+
+fn get_resource_groups_inner<R: Runtime>(
+    app: &AppHandle<R>,
+) -> Result<Vec<serde_json::Value>, String> {
+    let root = get_resource_library_dir(app);
+    let counts = resource_group_count_map(app)?;
     let mut directories = std::fs::read_dir(&root)
         .map_err(|e| format!("读取资源分组失败: {e}"))?
         .flatten()
@@ -3311,11 +3341,7 @@ pub fn get_resource_groups(app: AppHandle) -> Result<Vec<serde_json::Value>, Str
         "children": [],
     })];
     for directory in directories {
-        let Some(name) = directory.file_name().and_then(OsStr::to_str) else {
-            continue;
-        };
-        let count = counts.get(name).copied().unwrap_or(0);
-        if let Some(group) = resource_folder_tree(&root, &directory, count) {
+        if let Some(group) = resource_folder_tree(&root, &directory, &counts) {
             groups.push(group);
         }
     }
@@ -3324,12 +3350,23 @@ pub fn get_resource_groups(app: AppHandle) -> Result<Vec<serde_json::Value>, Str
 
 #[tauri::command]
 pub fn create_resource_group(app: AppHandle, name: String) -> Result<serde_json::Value, String> {
-    let name = normalize_resource_group_name(Some(&name))?;
+    create_resource_group_inner(&app, &name)
+}
+
+fn create_resource_group_inner<R: Runtime>(
+    app: &AppHandle<R>,
+    name: &str,
+) -> Result<serde_json::Value, String> {
+    // name 允许携带多级路径（如「工作资料/角色」），缺失的父级自动创建。
+    let name = normalize_resource_folder_path(Some(name))?;
     if name.is_empty() {
         return Err("分组名称不能为空".to_string());
     }
-    let path = resource_group_path(&app, &name)?;
-    std::fs::create_dir(&path).map_err(|e| format!("创建资源分组失败: {e}"))?;
+    let path = resource_group_path(app, &name)?;
+    if path.exists() {
+        return Err("分组已存在".to_string());
+    }
+    std::fs::create_dir_all(&path).map_err(|e| format!("创建资源分组失败: {e}"))?;
     let _ = app.emit("resource-groups-changed", ());
     Ok(serde_json::json!({ "name": name, "count": 0 }))
 }
@@ -3348,8 +3385,9 @@ fn update_resource_group_inner<R: Runtime>(
     old_name: String,
     new_name: String,
 ) -> Result<(), String> {
-    let old_name = normalize_resource_group_name(Some(&old_name))?;
-    let new_name = normalize_resource_group_name(Some(&new_name))?;
+    // old_name/new_name 为完整分组路径（如「工作资料/角色」），支持重命名任意层级的分组。
+    let old_name = normalize_resource_folder_path(Some(&old_name))?;
+    let new_name = normalize_resource_folder_path(Some(&new_name))?;
     if old_name.is_empty() || new_name.is_empty() {
         return Err("分组名称不能为空".to_string());
     }
@@ -3365,7 +3403,8 @@ fn update_resource_group_inner<R: Runtime>(
     if new_path.exists() {
         return Err("目标分组已存在".to_string());
     }
-    let records = resource_record_paths_in_group(app, &old_name)?;
+    let records = resource_record_paths_in_folder(app, &old_name)?;
+    let new_group = new_name.split('/').next().unwrap_or_default().to_string();
     let new_records = records
         .iter()
         .filter_map(|(id, path)| {
@@ -3378,7 +3417,7 @@ fn update_resource_group_inner<R: Runtime>(
         .collect::<Vec<_>>();
 
     std::fs::rename(&old_path, &new_path).map_err(|e| format!("重命名资源分组失败: {e}"))?;
-    if let Err(error) = update_resource_record_paths(app, &new_records, &new_name) {
+    if let Err(error) = update_resource_record_paths(app, &new_records, &new_group) {
         let _ = std::fs::rename(&new_path, &old_path);
         return Err(format!("更新资源路径失败: {error}"));
     }
@@ -3433,7 +3472,8 @@ pub fn delete_resource_group(app: AppHandle, name: String) -> Result<(), String>
 }
 
 fn delete_resource_group_inner<R: Runtime>(app: &AppHandle<R>, name: String) -> Result<(), String> {
-    let name = normalize_resource_group_name(Some(&name))?;
+    // name 为完整分组路径，支持删除任意层级；其中内容会保留并移动到未分组。
+    let name = normalize_resource_folder_path(Some(&name))?;
     if name.is_empty() {
         return Err("未分组不能删除".to_string());
     }
@@ -3483,7 +3523,7 @@ fn delete_resource_group_inner<R: Runtime>(app: &AppHandle<R>, name: String) -> 
         }
     }
 
-    let records = resource_record_paths_in_group(app, &name)?;
+    let records = resource_record_paths_in_folder(app, &name)?;
     let new_records = records
         .iter()
         .filter_map(|(id, path)| {
@@ -3959,9 +3999,160 @@ fn move_resource_records_inner<R: Runtime>(
     Ok(results)
 }
 
+/// 递归重写目录下全部 markdown 的附件相对链接（层级整体平移 delta），返回撤销信息。
+fn rewrite_folder_markdown_links(
+    root: &Path,
+    directory: &Path,
+    delta: isize,
+) -> Result<Vec<(PathBuf, String)>, String> {
+    fn visit(
+        root: &Path,
+        directory: &Path,
+        delta: isize,
+        undo: &mut Vec<(PathBuf, String)>,
+    ) -> Result<(), String> {
+        let children = std::fs::read_dir(directory)
+            .map_err(|e| format!("读取资源分组失败: {e}"))?
+            .collect::<Result<Vec<_>, _>>()
+            .map_err(|e| format!("读取资源分组失败: {e}"))?;
+        let mut children = children;
+        children.sort_by_key(|entry| entry.file_name());
+        for entry in children {
+            let path = entry.path();
+            let file_type = entry
+                .file_type()
+                .map_err(|e| format!("读取资源分组失败: {e}"))?;
+            if file_type.is_dir() {
+                if entry.file_name() == OsStr::new(".copy-creator") {
+                    continue;
+                }
+                visit(root, &path, delta, undo)?;
+                continue;
+            }
+            if !file_type.is_file() {
+                continue;
+            }
+            let is_markdown = path
+                .extension()
+                .and_then(OsStr::to_str)
+                .is_some_and(|extension| extension.eq_ignore_ascii_case("md"));
+            if !is_markdown {
+                continue;
+            }
+            let new_depth = path
+                .parent()
+                .and_then(|parent| parent.strip_prefix(root).ok())
+                .map(|relative| relative.components().count())
+                .unwrap_or(0);
+            let old_depth = (new_depth as isize - delta).max(0) as usize;
+            let content = std::fs::read_to_string(&path)
+                .map_err(|e| format!("读取资源文件失败: {e}"))?;
+            let updated = rewrite_resource_markdown_links_for_depth(&content, old_depth, new_depth);
+            if updated != content {
+                std::fs::write(&path, &updated)
+                    .map_err(|e| format!("更新资源图片路径失败: {e}"))?;
+                undo.push((path, content));
+            }
+        }
+        Ok(())
+    }
+
+    let mut undo = Vec::new();
+    visit(root, directory, delta, &mut undo)?;
+    Ok(undo)
+}
+
+#[tauri::command]
+pub fn move_resource_group(
+    app: AppHandle,
+    path: String,
+    new_parent: String,
+) -> Result<(), String> {
+    move_resource_group_inner(&app, path, new_parent)
+}
+
+fn move_resource_group_inner<R: Runtime>(
+    app: &AppHandle<R>,
+    path: String,
+    new_parent: String,
+) -> Result<(), String> {
+    let path = normalize_resource_folder_path(Some(&path))?;
+    let new_parent = normalize_resource_folder_path(Some(&new_parent))?;
+    if path.is_empty() {
+        return Err("未分组不能移动".to_string());
+    }
+    // 禁止把分组移动到自身或其子分组内，避免形成环。
+    if new_parent == path || new_parent.starts_with(&format!("{path}/")) {
+        return Err("不能把分组移动到它自身或其子分组内".to_string());
+    }
+    let base_name = path.split('/').last().unwrap_or_default().to_string();
+    let current_parent = path
+        .rsplit_once('/')
+        .map(|(parent, _)| parent.to_string())
+        .unwrap_or_default();
+    if current_parent == new_parent {
+        return Ok(());
+    }
+
+    let old_dir = resource_group_path(app, &path)?;
+    let mut new_dir = resource_group_path(app, &new_parent)?;
+    new_dir.push(&base_name);
+    if !old_dir.is_dir() {
+        return Err("资源分组不存在".to_string());
+    }
+    if new_dir.exists() {
+        return Err("目标位置已存在同名分组".to_string());
+    }
+    let new_path_text = if new_parent.is_empty() {
+        base_name.clone()
+    } else {
+        format!("{new_parent}/{base_name}")
+    };
+    let new_group = new_path_text.split('/').next().unwrap_or_default().to_string();
+    let old_group = path.split('/').next().unwrap_or_default().to_string();
+
+    let records = resource_record_paths_in_folder(app, &path)?;
+    let new_records = records
+        .iter()
+        .filter_map(|(id, file_path)| {
+            let relative = Path::new(file_path).strip_prefix(&old_dir).ok()?;
+            Some((
+                id.clone(),
+                new_dir.join(relative).to_string_lossy().to_string(),
+            ))
+        })
+        .collect::<Vec<_>>();
+
+    let old_folder_depth = path.split('/').count();
+    let new_folder_depth = new_path_text.split('/').count();
+    let depth_delta = new_folder_depth as isize - old_folder_depth as isize;
+
+    std::fs::rename(&old_dir, &new_dir).map_err(|e| format!("移动资源分组失败: {e}"))?;
+
+    if let Err(error) = update_resource_record_paths(app, &new_records, &new_group) {
+        let _ = std::fs::rename(&new_dir, &old_dir);
+        return Err(format!("更新资源路径失败: {error}"));
+    }
+
+    if depth_delta != 0 {
+        // 目录整体迁移后统一平移 markdown 附件链接层级；中途失败时恢复链接、
+        // 记录路径与目录位置，保证三处状态一致。
+        let root_dir = get_resource_library_dir(app);
+        let undo = rewrite_folder_markdown_links(&root_dir, &new_dir, depth_delta);
+        if let Err(error) = undo {
+            let _ = update_resource_record_paths(app, &records, &old_group);
+            let _ = std::fs::rename(&new_dir, &old_dir);
+            return Err(error);
+        }
+    }
+
+    let _ = app.emit("resource-groups-changed", ());
+    Ok(())
+}
+
 #[tauri::command]
 pub fn open_resource_group(app: AppHandle, name: String) -> Result<(), String> {
-    let name = normalize_resource_group_name(Some(&name))?;
+    let name = normalize_resource_folder_path(Some(&name))?;
     let path = resource_group_path(&app, &name)?;
     if !path.is_dir() {
         return Err("资源分组不存在".to_string());
@@ -4798,13 +4989,13 @@ mod record_classification_tests {
 #[cfg(test)]
 mod resource_command_tests {
     use super::{
-        delete_external_resource_file, delete_resource_group_inner, get_clipboard_records_inner,
+        create_resource_group_inner, delete_external_resource_file, delete_resource_group_inner,
+        get_clipboard_records_inner, get_resource_groups_inner, move_resource_group_inner,
         move_resource_records_inner, read_resource_text_preview_file, rename_resource_file_inner,
         resolve_resource_file_path, resource_file_id, resource_folder_tree,
-        resource_group_count_map, rewrite_resource_markdown_links_for_depth,
-        set_resource_note_inner, restore_staged_external_resource_files,
-        stage_external_resource_files, validate_resource_rename_stem, update_resource_group_inner,
-        DbState,
+        resource_group_count_map, set_resource_note_inner,
+        restore_staged_external_resource_files, stage_external_resource_files,
+        validate_resource_rename_stem, update_resource_group_inner, DbState,
     };
     use rusqlite::Connection;
     use std::path::{Path, PathBuf};
@@ -5138,7 +5329,7 @@ mod resource_command_tests {
         let group = resource_folder_tree(
             &root,
             &root.join("人物三视图"),
-            0,
+            &std::collections::HashMap::new(),
         )
         .unwrap();
         assert_eq!(group["name"], "人物三视图");
@@ -5146,6 +5337,156 @@ mod resource_command_tests {
         assert_eq!(
             group["children"][0]["children"][0]["path"],
             "人物三视图/放大后/细节"
+        );
+        cleanup(&root);
+    }
+
+    #[test]
+    fn nested_group_creation_creates_missing_parents_and_counts_descendants() {
+        let (app, root) = test_app();
+        let group = root.join("工作资料/角色");
+        std::fs::create_dir_all(&group).unwrap();
+        let file = group.join("林黛玉.png");
+        std::fs::write(&file, [1_u8]).unwrap();
+        insert_typed_resource(
+            &app,
+            "resource-1",
+            "file",
+            file.to_str().unwrap(),
+            file.to_str().unwrap(),
+        );
+
+        let groups = get_resource_groups_inner(app.handle()).unwrap();
+        let work = groups.iter().find(|group| group["name"] == "工作资料").unwrap();
+        assert_eq!(work["path"], "工作资料");
+        assert_eq!(work["count"], 1);
+        assert_eq!(work["children"][0]["name"], "角色");
+        assert_eq!(work["children"][0]["count"], 1);
+
+        let created = create_resource_group_inner(app.handle(), "工作资料/场景").unwrap();
+        assert_eq!(created["name"], "工作资料/场景");
+        assert!(root.join("工作资料/场景").is_dir());
+        assert!(create_resource_group_inner(app.handle(), "工作资料/场景").is_err());
+        cleanup(&root);
+    }
+
+    #[test]
+    fn renaming_nested_group_updates_paths_and_keeps_top_group() {
+        let (app, root) = test_app();
+        let file = root.join("工作资料/角色/林黛玉.png");
+        std::fs::create_dir_all(file.parent().unwrap()).unwrap();
+        std::fs::write(&file, [1_u8]).unwrap();
+        insert_typed_resource(
+            &app,
+            "resource-1",
+            "file",
+            file.to_str().unwrap(),
+            file.to_str().unwrap(),
+        );
+
+        update_resource_group_inner(
+            app.handle(),
+            "工作资料/角色".to_string(),
+            "工作资料/人物".to_string(),
+        )
+        .unwrap();
+
+        let renamed = root.join("工作资料/人物/林黛玉.png");
+        assert!(renamed.is_file());
+        let state = app.state::<DbState>();
+        let conn = state.conn.lock().unwrap();
+        let (group_name, resource_path): (String, String) = conn
+            .query_row(
+                "SELECT group_name, resource_path FROM clipboard_records WHERE id = 'resource-1'",
+                [],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )
+            .unwrap();
+        assert_eq!(group_name, "工作资料");
+        assert_eq!(resource_path, renamed.to_string_lossy());
+        cleanup(&root);
+    }
+
+    #[test]
+    fn moving_group_updates_records_and_markdown_depth() {
+        let (app, root) = test_app();
+        let attachments = root.join(".copy-creator/attachments/unit-1");
+        std::fs::create_dir_all(&attachments).unwrap();
+        std::fs::write(attachments.join("image-1.png"), [1_u8]).unwrap();
+        let md_file = root.join("工作资料/角色/note.md");
+        std::fs::create_dir_all(md_file.parent().unwrap()).unwrap();
+        std::fs::write(&md_file, "图：![img](../../.copy-creator/attachments/unit-1/image-1.png)\n")
+            .unwrap();
+        insert_typed_resource(
+            &app,
+            "resource-1",
+            "file",
+            md_file.to_str().unwrap(),
+            md_file.to_str().unwrap(),
+        );
+        std::fs::create_dir_all(root.join("项目资料")).unwrap();
+
+        move_resource_group_inner(
+            app.handle(),
+            "工作资料/角色".to_string(),
+            "项目资料".to_string(),
+        )
+        .unwrap();
+
+        let moved_md = root.join("项目资料/角色/note.md");
+        assert!(moved_md.is_file());
+        assert!(!md_file.exists());
+        // 移动前后都是二级目录，附件链接层级不变。
+        let content = std::fs::read_to_string(&moved_md).unwrap();
+        assert_eq!(
+            content,
+            "图：![img](../../.copy-creator/attachments/unit-1/image-1.png)\n"
+        );
+        let state = app.state::<DbState>();
+        let conn = state.conn.lock().unwrap();
+        let (group_name, resource_path): (String, String) = conn
+            .query_row(
+                "SELECT group_name, resource_path FROM clipboard_records WHERE id = 'resource-1'",
+                [],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )
+            .unwrap();
+        assert_eq!(group_name, "项目资料");
+        assert_eq!(resource_path, moved_md.to_string_lossy());
+
+        let error = move_resource_group_inner(
+            app.handle(),
+            "项目资料/角色".to_string(),
+            "项目资料/角色/更深层".to_string(),
+        )
+        .unwrap_err();
+        assert!(error.contains("不能把分组移动到"));
+        cleanup(&root);
+    }
+
+    #[test]
+    fn moving_group_to_top_level_restores_root_depth() {
+        let (app, root) = test_app();
+        let md_file = root.join("工作资料/角色/note.md");
+        std::fs::create_dir_all(md_file.parent().unwrap()).unwrap();
+        std::fs::write(&md_file, "图：![img](../../.copy-creator/attachments/unit-1/image-1.png)\n")
+            .unwrap();
+        insert_typed_resource(
+            &app,
+            "resource-1",
+            "file",
+            md_file.to_str().unwrap(),
+            md_file.to_str().unwrap(),
+        );
+
+        move_resource_group_inner(app.handle(), "工作资料/角色".to_string(), String::new()).unwrap();
+
+        let moved_md = root.join("角色/note.md");
+        assert!(moved_md.is_file());
+        let content = std::fs::read_to_string(&moved_md).unwrap();
+        assert_eq!(
+            content,
+            "图：![img](../.copy-creator/attachments/unit-1/image-1.png)\n"
         );
         cleanup(&root);
     }
@@ -5234,7 +5575,8 @@ mod resource_command_tests {
 
         let counts = resource_group_count_map(app.handle()).unwrap();
         assert_eq!(counts.get("").copied(), Some(1));
-        assert_eq!(counts.get("References").copied(), Some(5));
+        assert_eq!(counts.get("References").copied(), Some(2));
+        assert_eq!(counts.get("References/archive").copied(), Some(3));
         cleanup(&root);
     }
 

@@ -355,6 +355,7 @@ pub fn run() {
             db::open_resource_group,
             db::open_resource_file,
             db::move_resource_records,
+            db::move_resource_group,
             db::rename_resource_file,
             db::set_resource_note,
             media_server::get_media_server_origin,
