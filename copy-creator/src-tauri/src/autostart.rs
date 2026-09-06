@@ -1,16 +1,5 @@
 use serde::Serialize;
 
-fn autostart_dir() -> std::path::PathBuf {
-    dirs::home_dir()
-        .unwrap_or_default()
-        .join(".config")
-        .join("autostart")
-}
-
-fn desktop_file_path() -> std::path::PathBuf {
-    autostart_dir().join("copy-creator.desktop")
-}
-
 /// Return the path to the current executable, resolving the AppImage
 /// case where `current_exe()` points inside a transient FUSE mount.
 fn current_exe_path() -> String {
@@ -38,8 +27,20 @@ pub struct AutostartStatus {
 
 #[cfg(target_os = "linux")]
 mod platform {
-    use super::{autostart_dir, current_exe_path, desktop_file_path};
+    use super::current_exe_path;
     use std::fs;
+    use std::path::PathBuf;
+
+    fn autostart_dir() -> PathBuf {
+        dirs::home_dir()
+            .unwrap_or_default()
+            .join(".config")
+            .join("autostart")
+    }
+
+    fn desktop_file_path() -> PathBuf {
+        autostart_dir().join("copy-creator.desktop")
+    }
 
     /// Build the contents of a well-formed autostart .desktop entry.
     ///
