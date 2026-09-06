@@ -755,6 +755,10 @@ export default function ResourcePage() {
   const openResourceMove = useCallback((ids: string[]) => {
     if (ids.length === 0) return;
     const selected = filteredRecords.filter((record) => ids.includes(record.id));
+    // 详情页记录可能尚未出现在已加载的列表里（如刚改名/移动完），用详情记录兜底。
+    if (selected.length === 0 && detailRecord && ids.includes(detailRecord.id)) {
+      selected.push(detailRecord);
+    }
     if (selected.length === 0) return;
     const folders = [...new Set(selected.map((record) => record.resource_folder ?? ""))];
     const label = selected.length === 1
@@ -767,7 +771,7 @@ export default function ResourcePage() {
       : t("resources.moveMultipleLocations");
     setMoveError(null);
     setMoveDialog({ ids, label, meta, folders });
-  }, [filteredRecords, t]);
+  }, [detailRecord, filteredRecords, t]);
 
   const handleMoveConfirm = useCallback(async (targetFolder: string) => {
     if (!moveDialog || movingResource) return;
@@ -797,10 +801,13 @@ export default function ResourcePage() {
       }, 2600);
       setDetailRecord((current) => {
         if (!current) return null;
-        const updated = results.find((entry) => entry.id === current.id);
-        if (!updated) return current;
+        // 自动发现记录的 id 随路径变化，结果按请求下标对齐后整条修补。
+        const index = moveDialog.ids.indexOf(current.id);
+        if (index < 0 || index >= results.length) return current;
+        const updated = results[index];
         return {
           ...current,
+          ...(updated.id ? { id: updated.id } : null),
           ...(updated.resource_path ? { resource_path: updated.resource_path } : null),
           ...(updated.resource_relative_path
             ? { resource_relative_path: updated.resource_relative_path }

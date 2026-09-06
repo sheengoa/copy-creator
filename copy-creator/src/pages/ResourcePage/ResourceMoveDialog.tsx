@@ -58,13 +58,17 @@ export default function ResourceMoveDialog({
         <div className="resource-move-tree" role="listbox" aria-label={t("resources.moveTitle")}>
           <button
             type="button"
-            className={`resource-move-row${target === "" ? " selected" : ""}`}
+            className={`resource-move-row${target === "" ? " selected" : ""}${isCurrentFolder("") ? " current" : ""}`}
             role="option"
             aria-selected={target === ""}
+            disabled={isCurrentFolder("")}
             onClick={() => setTarget("")}
           >
             <span className="resource-move-icon">{Icons.resources}</span>
             <span>{t("resources.ungrouped")}</span>
+            {isCurrentFolder("") && (
+              <span className="resource-move-current-tag">{t("resources.moveCurrentTag")}</span>
+            )}
           </button>
           {rows.map(({ folder, depth }) =>
             folder ? (

@@ -3930,6 +3930,7 @@ fn move_resource_records_inner<R: Runtime>(
     }
 
     // 第五阶段：同步数据库路径、分组与路径型 content，失败时回滚文件移动。
+    let mut new_content_by_id: HashMap<String, String> = HashMap::new();
     let db_updates: Vec<(String, String, String, String)> = {
         let state = app.state::<DbState>();
         let conn = state.conn.lock().map_err(|e| e.to_string())?;
@@ -3954,6 +3955,7 @@ fn move_resource_records_inner<R: Runtime>(
             } else {
                 row_content
             };
+            new_content_by_id.insert(id.clone(), new_content.clone());
             updates.push((id.clone(), new_path_text, new_content, target_group.clone()));
         }
         updates
@@ -3984,10 +3986,17 @@ fn move_resource_records_inner<R: Runtime>(
             .strip_prefix(&root)
             .ok()
             .map(|relative| relative.to_string_lossy().to_string());
+        // 自动发现记录的 content 即文件完整路径；入库记录以数据库同步结果为准。
+        let content = if *db_backed {
+            new_content_by_id.get(id).cloned().unwrap_or_default()
+        } else {
+            new_path.to_string_lossy().to_string()
+        };
         results.push(serde_json::json!({
             "id": if *db_backed { id.clone() } else { resource_file_id(new_path) },
             "resource_path": new_path.to_string_lossy().to_string(),
             "resource_relative_path": relative_path,
+            "content": content,
             "group_name": target_group.clone(),
             "resource_folder": target_folder.clone(),
         }));
@@ -5976,6 +5985,7 @@ mod resource_command_tests {
         assert_eq!(results.len(), 1);
         assert_eq!(results[0]["id"], resource_file_id(&moved));
         assert_eq!(results[0]["resource_folder"], "工作资料/角色");
+        assert_eq!(results[0]["content"], moved.to_string_lossy().to_string());
         cleanup(&root);
     }
 

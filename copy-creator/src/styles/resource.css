@@ -1508,17 +1508,23 @@
   height: 14px;
 }
 
+/* 菜单通过 portal 挂在文档根节点，按触发按钮定位（卡片有 overflow 裁剪）。 */
 .resource-card-menu {
-  position: absolute;
-  top: 28px;
-  right: 0;
+  position: fixed;
+  z-index: 9000;
+  display: flex;
+  flex-direction: column;
   min-width: 158px;
   padding: 4px;
   border: 1px solid var(--separator);
   border-radius: 10px;
   background: rgba(255, 255, 255, 0.97);
   box-shadow: 0 10px 24px rgba(0, 0, 0, 0.16);
-  z-index: 4;
+}
+
+[data-theme="dark"] .resource-card-menu {
+  border-color: rgba(255, 255, 255, 0.14);
+  background: rgba(38, 38, 38, 0.97);
 }
 
 .resource-card-menu button {
