@@ -692,6 +692,22 @@ fn make_text_event_content(record_type: &str, content: &str) -> (String, i64, bo
     )
 }
 
+/// 从剪贴板文件格式读取文件路径列表（Windows CF_HDROP /
+/// Linux text/uri-list）。剪贴板没有文件格式时返回 None。
+fn clipboard_file_list() -> Option<Vec<String>> {
+    let mut clipboard = arboard::Clipboard::new().ok()?;
+    let paths = clipboard.get().file_list().ok()?;
+    if paths.is_empty() {
+        return None;
+    }
+    Some(
+        paths
+            .into_iter()
+            .map(|path| path.to_string_lossy().into_owned())
+            .collect(),
+    )
+}
+
 fn clipboard_text_files(text: &str) -> Vec<String> {
     let text = text.trim();
     if text.is_empty() {
@@ -934,15 +950,24 @@ pub fn sync_monitor_cache(handle: &AppHandle) {
     if hash != 0 {
         *LAST_CLIPBOARD_IMAGE_HASH.lock().unwrap() = hash;
     }
-    // File URIs — prevent re-recording our own file paste
-    if let Ok(text) = handle.clipboard().read_text() {
-        let text = text.trim().to_string();
-        if text.contains("file://") {
-            *LAST_CLIPBOARD_FILES_KEY.lock().unwrap() = text
-                .lines()
-                .filter_map(|l| parse_file_uri(l.trim()))
-                .collect::<Vec<_>>()
-                .join("|");
+    // File lists — prevent re-recording our own file paste.
+    // paste_file 与 Windows 资源管理器复制文件都写文件格式（CF_HDROP /
+    // uri-list），Windows 上读不到对应文本，因此优先从文件格式生成 key。
+    match clipboard_file_list() {
+        Some(files) => {
+            *LAST_CLIPBOARD_FILES_KEY.lock().unwrap() = files.join("|");
+        }
+        None => {
+            if let Ok(text) = handle.clipboard().read_text() {
+                let text = text.trim().to_string();
+                if text.contains("file://") {
+                    *LAST_CLIPBOARD_FILES_KEY.lock().unwrap() = text
+                        .lines()
+                        .filter_map(|l| parse_file_uri(l.trim()))
+                        .collect::<Vec<_>>()
+                        .join("|");
+                }
+            }
         }
     }
 }
@@ -960,16 +985,22 @@ pub fn start_monitor(app: &AppHandle) -> Result<(), Box<dyn std::error::Error>> 
     }
 
     {
-        let key = handle
-            .clipboard()
-            .read_text()
-            .map(|text| {
-                text.lines()
-                    .filter_map(|l| parse_file_uri(l.trim()))
-                    .collect::<Vec<_>>()
-                    .join("|")
-            })
-            .unwrap_or_default();
+        // 优先从文件格式生成 key（Windows 复制文件时没有文本格式），
+        // 没有文件格式时回退 file:// 文本启发式。
+        let key = clipboard_file_list()
+            .map(|files| files.join("|"))
+            .unwrap_or_else(|| {
+                handle
+                    .clipboard()
+                    .read_text()
+                    .map(|text| {
+                        text.lines()
+                            .filter_map(|l| parse_file_uri(l.trim()))
+                            .collect::<Vec<_>>()
+                            .join("|")
+                    })
+                    .unwrap_or_default()
+            });
         *LAST_CLIPBOARD_FILES_KEY.lock().unwrap() = key;
     }
 
@@ -1108,36 +1139,48 @@ pub fn start_monitor(app: &AppHandle) -> Result<(), Box<dyn std::error::Error>> 
                     *LAST_CLIPBOARD_TEXT.lock().unwrap() = text.trim().to_string();
                 }
             } else {
-                if let Ok(text) = handle.clipboard().read_text() {
+                // 优先读剪贴板文件格式：Windows 资源管理器复制文件只放
+                // CF_HDROP 不放文本，仅靠文本启发式会漏掉这类文件记录。
+                let mut files = clipboard_file_list().unwrap_or_default();
+
+                if files.is_empty() {
+                    if let Ok(text) = handle.clipboard().read_text() {
+                        let text = text.trim().to_string();
+                        files = clipboard_text_files(&text);
+
+                        if !files.is_empty() {
+                            *LAST_CLIPBOARD_TEXT.lock().unwrap() = text;
+                        }
+                    }
+                }
+
+                if !files.is_empty() {
+                    let key = files.join("|");
+                    {
+                        let mut cached = LAST_CLIPBOARD_FILES_KEY.lock().unwrap();
+                        if key == *cached {
+                            // File list unchanged — skip to avoid re-inserting
+                            // the same images/files on every poll cycle.
+                            continue;
+                        }
+                        *cached = key.clone();
+                    }
+
+                    for file_path in files {
+                        if file_path.trim().is_empty() {
+                            continue;
+                        }
+                        if is_previewable_image_file(&file_path) || is_image_file(&file_path) {
+                            if import_image_file(&handle, &file_path) {
+                                continue;
+                            }
+                            continue;
+                        }
+                        insert_and_emit(&handle, "file", &file_path);
+                    }
+                } else if let Ok(text) = handle.clipboard().read_text() {
                     let text = text.trim().to_string();
-                    let files = clipboard_text_files(&text);
-
-                    if !files.is_empty() {
-                        *LAST_CLIPBOARD_TEXT.lock().unwrap() = text;
-                        let key = files.join("|");
-                        {
-                            let mut cached = LAST_CLIPBOARD_FILES_KEY.lock().unwrap();
-                            if key == *cached {
-                                // File list unchanged — skip to avoid re-inserting
-                                // the same images/files on every poll cycle.
-                                continue;
-                            }
-                            *cached = key.clone();
-                        }
-
-                        for file_path in files {
-                            if file_path.trim().is_empty() {
-                                continue;
-                            }
-                            if is_previewable_image_file(&file_path) || is_image_file(&file_path) {
-                                if import_image_file(&handle, &file_path) {
-                                    continue;
-                                }
-                                continue;
-                            }
-                            insert_and_emit(&handle, "file", &file_path);
-                        }
-                    } else if !text.is_empty() && text != *LAST_CLIPBOARD_TEXT.lock().unwrap() {
+                    if !text.is_empty() && text != *LAST_CLIPBOARD_TEXT.lock().unwrap() {
                         *LAST_CLIPBOARD_TEXT.lock().unwrap() = text.clone();
                         let record_type = classify_text_record(&text);
                         insert_and_emit(&handle, record_type, &text);
