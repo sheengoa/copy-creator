@@ -140,7 +140,8 @@
   border-color: rgba(0, 0, 0, 0.1);
 }
 
-/* 资源区行尾的整组粘贴：强调当前选中分组的批量动作。 */
+/* 资源区行尾的整组粘贴：强调当前选中分组的批量动作。
+   文字色用显式配色——chip 变量是半透明色，不能当前景色用。 */
 .radial-menu-paste-all {
   display: inline-flex;
   flex-shrink: 0;
@@ -151,14 +152,19 @@
   padding: 6px 13px;
   border-radius: 6px;
   border: 0.5px solid var(--separator);
-  background: var(--text-primary);
-  color: var(--chip-bg, #fff);
+  background: #1a1a1a;
+  color: #fff;
   font-family: var(--font);
   font-size: var(--text-sm);
   font-weight: var(--weight-semibold);
   line-height: 1.2;
   cursor: pointer;
   white-space: nowrap;
+}
+
+[data-theme="dark"] .radial-menu-paste-all {
+  background: #ededed;
+  color: #161616;
 }
 
 .radial-menu-paste-all svg {
