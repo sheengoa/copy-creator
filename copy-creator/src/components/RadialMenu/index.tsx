@@ -833,6 +833,36 @@ export default function RadialMenu() {
     getCurrentWindow().hide();
   }, [resetState]);
 
+  // 整组粘贴（方案 A）：分组内全部为文本时合并为一段文本粘贴，
+  // 否则把分组内全部文件按文件列表一次写入剪切板再模拟 Ctrl+V。
+  const handlePasteGroup = useCallback(async () => {
+    const store = useClipboardStore.getState();
+    const allRecords = await store.loadAllRecords("resources", resourceGroupRef.current);
+    const records = (allRecords ?? []).filter((record) => isResourceRecord(record));
+    if (records.length > 0) {
+      const allText = records.every((record) => inferResourceMediaKind(record) === "text");
+      try {
+        if (allText) {
+          const parts: string[] = [];
+          for (const record of records) {
+            parts.push(await store.getRecordContent(record));
+          }
+          await invoke("paste_text", { text: parts.join("\n") });
+        } else {
+          const paths = records
+            .map((record) => record.resource_path)
+            .filter((path): path is string => Boolean(path));
+          if (paths.length === 0) throw new Error("分组内没有可粘贴的文件");
+          await invoke("paste_files", { paths });
+        }
+      } catch (error) {
+        console.error("Failed to paste resource group:", error);
+      }
+    }
+    resetState();
+    getCurrentWindow().hide();
+  }, [resetState]);
+
   const markRadialDragStarted = useCallback((pending: PendingNativeDrag) => {
     if (pending.nativeStarted) return;
     dragActiveRef.current = true;
@@ -1500,6 +1530,22 @@ export default function RadialMenu() {
                   </button>
                 );
               })}
+              <button
+                type="button"
+                className="radial-menu-paste-all"
+                disabled={pasteLeftClick === "terminal"}
+                title={pasteLeftClick === "terminal"
+                  ? t("resources.pasteAllDisabled")
+                  : t("resources.pasteAll")}
+                onClick={(e) => {
+                  e.preventDefault();
+                  e.stopPropagation();
+                  void handlePasteGroup();
+                }}
+              >
+                {Icons.copy}
+                <span>{t("resources.pasteAll")}</span>
+              </button>
             </div>
           ) : categories.length > 0 && (
             <div

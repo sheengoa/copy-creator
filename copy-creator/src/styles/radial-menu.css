@@ -140,6 +140,37 @@
   border-color: rgba(0, 0, 0, 0.1);
 }
 
+/* 资源区行尾的整组粘贴：强调当前选中分组的批量动作。 */
+.radial-menu-paste-all {
+  display: inline-flex;
+  flex-shrink: 0;
+  align-items: center;
+  gap: 5px;
+  min-height: 30px;
+  box-sizing: border-box;
+  padding: 6px 13px;
+  border-radius: 6px;
+  border: 0.5px solid var(--separator);
+  background: var(--text-primary);
+  color: var(--chip-bg, #fff);
+  font-family: var(--font);
+  font-size: var(--text-sm);
+  font-weight: var(--weight-semibold);
+  line-height: 1.2;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.radial-menu-paste-all svg {
+  width: 13px;
+  height: 13px;
+}
+
+.radial-menu-paste-all:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+
 .radial-menu-category-chip.active {
   background: #333;
   color: white;

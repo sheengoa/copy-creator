@@ -413,16 +413,16 @@ pub fn diagnose_paste_environment() {
 
 /// Write a file list to the system clipboard so Linux apps receive
 /// `text/uri-list`, not a plain-text path.
-fn write_file_list(path: &std::path::Path) -> Result<(), String> {
+fn write_file_list(paths: &[std::path::PathBuf]) -> Result<(), String> {
     let mut clipboard =
         arboard::Clipboard::new().map_err(|e| format!("初始化文件剪切板失败: {e:?}"))?;
     clipboard
         .set()
-        .file_list(&[path])
+        .file_list(paths)
         .map_err(|e| format!("写入文件剪切板失败: {e:?}"))?;
     log::info!(
-        "paste_file: wrote file list to clipboard: {}",
-        path.display()
+        "paste_file: wrote file list to clipboard: {} file(s)",
+        paths.len()
     );
     Ok(())
 }
@@ -773,22 +773,33 @@ pub async fn paste_stash_record(app: AppHandle, id: String, terminal: bool) -> R
 
 #[tauri::command]
 pub fn paste_file(app: AppHandle, path: String) -> Result<(), String> {
+    paste_files(app, vec![path])
+}
+
+/// 把多个文件作为文件列表写入剪切板后模拟 Ctrl+V，用于整组粘贴等批量场景。
+#[tauri::command]
+pub fn paste_files(app: AppHandle, paths: Vec<String>) -> Result<(), String> {
+    log::info!("[paste] paste_files called — {} file(s) (普通粘贴)", paths.len());
+    if paths.is_empty() {
+        return Err("没有可粘贴的文件".to_string());
+    }
     if PASTING.swap(true, Ordering::SeqCst) {
         return Ok(());
     }
 
-    // Verify the file still exists on disk before pasting
-    let file_meta = std::fs::metadata(&path);
-    if file_meta.is_err() {
-        log::error!("paste_file: file not found: {}", path);
-        PASTING.store(false, Ordering::SeqCst);
-        return Err(format!("File not found: {}", path));
+    let mut resolved = Vec::with_capacity(paths.len());
+    for path in &paths {
+        if std::fs::metadata(path).is_err() {
+            log::error!("paste_files: file not found: {path}");
+            PASTING.store(false, Ordering::SeqCst);
+            return Err(format!("File not found: {path}"));
+        }
+        resolved.push(
+            std::fs::canonicalize(path).unwrap_or_else(|_| std::path::PathBuf::from(path)),
+        );
     }
-
-    let file_path =
-        std::fs::canonicalize(&path).unwrap_or_else(|_| std::path::PathBuf::from(&path));
-    if let Err(e) = write_file_list(&file_path) {
-        log::error!("paste_file: {}", e);
+    if let Err(e) = write_file_list(&resolved) {
+        log::error!("paste_files: {e}");
         PASTING.store(false, Ordering::SeqCst);
         return Err(e);
     }
