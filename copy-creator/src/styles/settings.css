@@ -436,7 +436,28 @@
   font-size: var(--text-sm);
   font-weight: var(--weight-semibold);
   color: var(--text-primary);
-  margin-bottom: 8px;
+  cursor: pointer;
+  list-style: none;
+}
+
+.settings-shortcut-guide-title::-webkit-details-marker {
+  display: none;
+}
+
+.settings-shortcut-guide-title::before {
+  content: "\25B8";
+  display: inline-block;
+  width: 1em;
+  color: var(--text-secondary);
+  transition: transform 0.15s ease;
+}
+
+details[open] > .settings-shortcut-guide-title::before {
+  transform: rotate(90deg);
+}
+
+.settings-shortcut-guide-title:hover {
+  color: var(--accent);
 }
 
 .settings-shortcut-guide-body {

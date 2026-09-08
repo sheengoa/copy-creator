@@ -85,10 +85,10 @@ export function ShortcutSection({
         </div>
       </div>
 
-      <div className="settings-shortcut-guide">
-        <div className="settings-shortcut-guide-title">
+      <details className="settings-shortcut-guide">
+        <summary className="settings-shortcut-guide-title">
           {t("settings.shortcutSetupGuide")}
-        </div>
+        </summary>
         <div className="settings-shortcut-guide-body">
           <p>{t("settings.shortcutGuideIntro")}</p>
           <ol>
@@ -102,7 +102,7 @@ export function ShortcutSection({
             {t("settings.shortcutGuideHint")}
           </p>
         </div>
-      </div>
+      </details>
     </div>
   );
 }
