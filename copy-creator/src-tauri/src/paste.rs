@@ -280,6 +280,9 @@ fn wtype_ctrl_shift_v() -> Result<(), String> {
 /// Run the best available keystroke injection method using the
 /// shortcut selected for the target app. Terminals use Ctrl+Shift+V;
 /// regular document editors and file managers use Ctrl+V.
+// Windows 分支以 cfg 块提前 return，其后仅 Linux 可达的注入分支在
+// Windows 编译时会触发 unreachable_code；Linux 上它们是正常路径。
+#[allow(unreachable_code)]
 fn inject_paste_with_shortcut(shortcut: PasteShortcut) {
     log::info!("[paste] inject_paste_with_shortcut: {:?}", shortcut);
 
@@ -551,6 +554,7 @@ fn write_file_list_windows(paths: &[std::path::PathBuf]) -> Result<(), String> {
         let locked = GlobalLock(handle);
         if locked.is_null() {
             CloseClipboard();
+            GlobalFree(handle);
             return Err("锁定剪贴板内存失败".to_string());
         }
         std::ptr::copy_nonoverlapping(data.as_ptr(), locked, data.len());
