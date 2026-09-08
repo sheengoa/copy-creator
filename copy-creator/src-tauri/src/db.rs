@@ -4698,13 +4698,23 @@ mod resource_file_tests {
         resource_folder_for_path, resource_group_for_path, resource_media_kind_for_path,
         scan_resource_files,
     };
-    use std::path::{Path, PathBuf};
+    use std::path::PathBuf;
+
+    /// 函数契约要求绝对路径；Windows 上 "/tmp/..." 不是绝对路径，
+    /// 因此按平台构造合成根目录，路径一律用 join 保持原生分隔符。
+    fn synthetic_library_root() -> PathBuf {
+        if cfg!(windows) {
+            PathBuf::from("C:\\copy-creator-resource-library")
+        } else {
+            PathBuf::from("/tmp/copy-creator-resource-library")
+        }
+    }
 
     #[test]
     fn managed_resource_file_requires_generated_name_and_extension() {
-        let path =
-            PathBuf::from("/tmp/resource-library/copy-creator-record-1-transaction-title.md");
-        let roots = vec![PathBuf::from("/tmp/resource-library")];
+        let root = &synthetic_library_root();
+        let path = root.join("copy-creator-record-1-transaction-title.md");
+        let roots = vec![root.clone()];
         assert_eq!(
             managed_resource_file_path(&roots, "record-1", path.to_str().unwrap()),
             Some((path.clone(), roots[0].clone()))
@@ -4712,13 +4722,15 @@ mod resource_file_tests {
         assert!(managed_resource_file_path(
             &roots,
             "record-1",
-            "/tmp/resource-library/copy-creator-record-1-transaction-title.md.bak",
+            root.join("copy-creator-record-1-transaction-title.md.bak")
+                .to_str()
+                .unwrap(),
         )
         .is_none());
         assert!(managed_resource_file_path(
             &roots,
             "record-2",
-            "/tmp/resource-library/copy-creator-record-1-transaction-title.md",
+            path.to_str().unwrap(),
         )
         .is_none());
         assert!(managed_resource_file_path(
@@ -4731,7 +4743,7 @@ mod resource_file_tests {
 
     #[test]
     fn managed_resource_attachment_must_be_direct_child_of_record_directory() {
-        let root = Path::new("/tmp/resource-library");
+        let root = &synthetic_library_root();
         let path = root.join(".copy-creator/attachments/record-1-transaction/image-1.png");
         let directory = root.join(".copy-creator/attachments/record-1-transaction");
         assert_eq!(
@@ -4741,27 +4753,41 @@ mod resource_file_tests {
         assert!(managed_resource_attachment_path(
             root,
             "record-1",
-            "/tmp/resource-library/.copy-creator/attachments/record-2-transaction/image-1.png",
+            root.join(".copy-creator/attachments/record-2-transaction/image-1.png")
+                .to_str()
+                .unwrap(),
         )
         .is_none());
         assert!(
             managed_resource_attachment_path(
                 root,
                 "record-1",
-                "/tmp/resource-library/.copy-creator/attachments/record-1-transaction/nested/image-1.png",
+                root.join(".copy-creator/attachments/record-1-transaction/nested/image-1.png")
+                    .to_str()
+                    .unwrap(),
             )
             .is_none()
         );
+        let other = synthetic_library_root();
+        let other = if other == *root {
+            PathBuf::from("C:\\other-library")
+        } else {
+            other
+        };
         assert!(managed_resource_attachment_path(
             root,
             "record-1",
-            "/tmp/other-library/.copy-creator/attachments/record-1-transaction/image-1.png",
+            other.join(".copy-creator/attachments/record-1-transaction/image-1.png")
+                .to_str()
+                .unwrap(),
         )
         .is_none());
         assert!(managed_resource_attachment_path(
             root,
             "record-1",
-            "/tmp/resource-library/.copy-creator/attachments/record-1-transaction/image-0.png",
+            root.join(".copy-creator/attachments/record-1-transaction/image-0.png")
+                .to_str()
+                .unwrap(),
         )
         .is_none());
     }
@@ -4792,57 +4818,79 @@ mod resource_file_tests {
 
     #[test]
     fn resource_folder_for_path_returns_the_complete_relative_directory() {
-        let root = Path::new("/tmp/resource-library");
+        let root = &synthetic_library_root();
         assert_eq!(
             resource_folder_for_path(
                 root,
-                "/tmp/resource-library/copy-creator-record-1-title.txt",
+                root.join("copy-creator-record-1-title.txt").to_str().unwrap(),
             ),
             Some(String::new())
         );
         assert_eq!(
             resource_folder_for_path(
                 root,
-                "/tmp/resource-library/References/archive/deep/file.txt",
+                root.join("References/archive/deep/file.txt").to_str().unwrap(),
             ),
             Some("References/archive/deep".to_string())
         );
+        let other = synthetic_library_root();
+        let other = if other == *root {
+            PathBuf::from("C:\\other-library")
+        } else {
+            other
+        };
         assert_eq!(
-            resource_folder_for_path(root, "/tmp/other-library/file.txt"),
+            resource_folder_for_path(
+                root,
+                other.join("other-library/file.txt").to_str().unwrap(),
+            ),
             None
         );
     }
 
     #[test]
     fn resource_group_for_path_distinguishes_root_and_first_level_folder() {
-        let root = Path::new("/tmp/resource-library");
+        let root = &synthetic_library_root();
         assert_eq!(
             resource_group_for_path(
                 root,
-                "/tmp/resource-library/copy-creator-record-1-title.txt",
+                root.join("copy-creator-record-1-title.txt").to_str().unwrap(),
             ),
             Some(String::new())
         );
         assert_eq!(
             resource_group_for_path(
                 root,
-                "/tmp/resource-library/References/copy-creator-record-2-title.md",
+                root.join("References/copy-creator-record-2-title.md").to_str().unwrap(),
             ),
             Some("References".to_string())
         );
         assert_eq!(
             resource_group_for_path(
                 root,
-                "/tmp/resource-library/References/archive/copy-creator-record-3-title.md",
+                root.join("References/archive/copy-creator-record-3-title.md")
+                    .to_str()
+                    .unwrap(),
             ),
             Some("References".to_string())
         );
+        let other = synthetic_library_root();
+        let other = if other == *root {
+            PathBuf::from("C:\\other-library")
+        } else {
+            other
+        };
         assert_eq!(
-            resource_group_for_path(root, "/tmp/other-library/copy-creator-record-4-title.txt",),
+            resource_group_for_path(
+                root,
+                other.join("other-library/copy-creator-record-4-title.txt").to_str().unwrap(),
+            ),
             None
-        );
-        assert_eq!(
-            resource_group_for_path(root, "/tmp/resource-library/References/../outside/file.txt",),
+        );        assert_eq!(
+            resource_group_for_path(
+                root,
+                root.join("References/../outside/file.txt").to_str().unwrap(),
+            ),
             None
         );
     }
@@ -4866,6 +4914,7 @@ mod resource_file_tests {
         std::fs::write(root.join(".copy-creator/hidden.txt"), b"hidden").unwrap();
 
         let entries = scan_resource_files(&root);
+        // 断言以 `/` 分隔符书写；Windows 实际路径为 `\`，语义等价，归一后比较。
         let relative_paths = entries
             .iter()
             .map(|entry| {
@@ -4875,6 +4924,7 @@ mod resource_file_tests {
                     .unwrap()
                     .to_string_lossy()
                     .to_string()
+                    .replace('\\', "/")
             })
             .collect::<Vec<_>>();
         assert_eq!(
@@ -4898,7 +4948,8 @@ mod resource_file_tests {
                         .strip_prefix(&root)
                         .unwrap()
                         .to_string_lossy()
-                        .to_string(),
+                        .to_string()
+                        .replace('\\', "/"),
                     entry.group.clone(),
                     entry.media_kind
                 ))
@@ -4994,6 +5045,12 @@ mod resource_command_tests {
     use std::time::Duration;
     use tauri::Manager;
 
+    /// 断言前把路径分隔符归一为 `/`：期望值以 POSIX 风格书写，
+    /// 实际值在 Windows 上使用 `\`，语义等价。
+    fn slash_normalized(path: &str) -> String {
+        path.replace('\\', "/")
+    }
+
     fn test_app() -> (tauri::App<tauri::test::MockRuntime>, PathBuf) {
         let app = tauri::test::mock_app();
         let root = std::env::temp_dir().join(format!(
@@ -5001,6 +5058,10 @@ mod resource_command_tests {
             uuid::Uuid::new_v4()
         ));
         std::fs::create_dir_all(&root).unwrap();
+        // TEMP 环境变量在部分机器上是短路径名（如 GAOSHI~1）；与运行时
+        // validate_resource_library_path 的行为一致地取规范长路径，
+        // 保证夹具、扫描与 canonicalize 产物为同一路径形态。
+        let root = simplify_windows_path(&root.canonicalize().unwrap());
 
         let conn = Connection::open_in_memory().unwrap();
         conn.execute_batch(
@@ -5394,7 +5455,7 @@ mod resource_command_tests {
             )
             .unwrap();
         assert_eq!(group_name, "工作资料");
-        assert_eq!(resource_path, renamed.to_string_lossy());
+        assert_eq!(slash_normalized(&resource_path), slash_normalized(&renamed.to_string_lossy()));
         cleanup(&root);
     }
 
@@ -5443,7 +5504,10 @@ mod resource_command_tests {
             )
             .unwrap();
         assert_eq!(group_name, "项目资料");
-        assert_eq!(resource_path, moved_md.to_string_lossy());
+        assert_eq!(
+            slash_normalized(&resource_path),
+            slash_normalized(&moved_md.to_string_lossy())
+        );
 
         let error = move_resource_group_inner(
             app.handle(),
@@ -5485,11 +5549,11 @@ mod resource_command_tests {
     #[test]
     fn resource_query_includes_external_files_recursively_and_deduplicates_managed_files() {
         let (app, root) = test_app();
-        let nested = root.join("References/archive");
+        let nested = root.join("References").join("archive");
         std::fs::create_dir_all(&nested).unwrap();
-        let managed = root.join("References/managed.txt");
+        let managed = root.join("References").join("managed.txt");
         let root_text = root.join("root.txt");
-        let image = root.join("References/image.png");
+        let image = root.join("References").join("image.png");
         let video = nested.join("movie.mp4");
         let audio = nested.join("sound.ogg");
         let binary = nested.join("archive.bin");
@@ -5525,12 +5589,12 @@ mod resource_command_tests {
             .iter()
             .map(|record| {
                 (
-                    record["resource_relative_path"].as_str().unwrap(),
-                    record["resource_kind"].as_str().unwrap(),
+                    slash_normalized(record["resource_relative_path"].as_str().unwrap()),
+                    record["resource_kind"].as_str().unwrap().to_string(),
                 )
             })
             .collect::<Vec<_>>();
-        kinds.sort_by_key(|(path, _)| *path);
+        kinds.sort_by(|(a, _), (b, _)| a.cmp(b));
         assert_eq!(
             kinds,
             vec![
@@ -5541,6 +5605,9 @@ mod resource_command_tests {
                 ("References/managed.txt", "text"),
                 ("root.txt", "text"),
             ]
+            .into_iter()
+            .map(|(path, kind)| (path.to_string(), kind.to_string()))
+            .collect::<Vec<_>>()
         );
         let root_record = records
             .iter()
@@ -5557,12 +5624,13 @@ mod resource_command_tests {
         assert_eq!(nested_record["resource_group"], "References");
         assert_eq!(nested_record["resource_folder"], "References/archive");
         assert_eq!(
-            nested_record["resource_relative_path"],
+            slash_normalized(nested_record["resource_relative_path"].as_str().unwrap()),
             "References/archive/movie.mp4"
         );
         assert!(records
             .iter()
-            .all(|record| record["id"] != super::resource_file_id(&managed)));
+            .all(|record| slash_normalized(record["id"].as_str().unwrap())
+                != slash_normalized(&resource_file_id(&managed))));
 
         let counts = resource_group_count_map(app.handle()).unwrap();
         assert_eq!(counts.get("").copied(), Some(1));
@@ -5690,7 +5758,10 @@ mod resource_command_tests {
             )
             .unwrap();
         assert_eq!(group_name, "New");
-        assert_eq!(resource_path, new_file.to_string_lossy());
+        assert_eq!(
+            slash_normalized(&resource_path),
+            slash_normalized(&new_file.to_string_lossy())
+        );
         cleanup(&root);
     }
 
@@ -5718,10 +5789,19 @@ mod resource_command_tests {
         let renamed = root.join("三视图/林黛玉三视图.png");
         assert!(renamed.is_file());
         assert!(!file.exists());
-        assert_eq!(result["resource_path"], renamed.to_string_lossy().to_string());
-        assert_eq!(result["content"], renamed.to_string_lossy().to_string());
+        assert_eq!(
+            slash_normalized(result["resource_path"].as_str().unwrap()),
+            slash_normalized(&renamed.to_string_lossy())
+        );
+        assert_eq!(
+            slash_normalized(result["content"].as_str().unwrap()),
+            slash_normalized(&renamed.to_string_lossy())
+        );
         assert_eq!(result["name"], "林黛玉三视图.png");
-        assert_eq!(result["resource_relative_path"], "三视图/林黛玉三视图.png");
+        assert_eq!(
+            slash_normalized(result["resource_relative_path"].as_str().unwrap()),
+            "三视图/林黛玉三视图.png"
+        );
         let state = app.state::<DbState>();
         let conn = state.conn.lock().unwrap();
         let (content, resource_path): (String, String) = conn
@@ -5731,8 +5811,8 @@ mod resource_command_tests {
                 |row| Ok((row.get(0)?, row.get(1)?)),
             )
             .unwrap();
-        assert_eq!(resource_path, renamed.to_string_lossy().to_string());
-        assert_eq!(content, renamed.to_string_lossy().to_string());
+        assert_eq!(slash_normalized(&resource_path), slash_normalized(&renamed.to_string_lossy()));
+        assert_eq!(slash_normalized(&content), slash_normalized(&renamed.to_string_lossy()));
         cleanup(&root);
     }
 
@@ -5791,8 +5871,14 @@ mod resource_command_tests {
         .unwrap();
         let renamed = root.join("新名字.png");
         assert!(renamed.is_file());
-        assert_eq!(result["id"], resource_file_id(&renamed));
-        assert_eq!(result["content"], renamed.to_string_lossy().to_string());
+        assert_eq!(
+            slash_normalized(result["id"].as_str().unwrap()),
+            slash_normalized(&resource_file_id(&renamed))
+        );
+        assert_eq!(
+            slash_normalized(result["content"].as_str().unwrap()),
+            slash_normalized(&renamed.to_string_lossy())
+        );
 
         let promoted = root.join("promoted.png");
         std::fs::write(&promoted, [4_u8, 5, 6]).unwrap();
@@ -5921,7 +6007,7 @@ mod resource_command_tests {
             )
             .unwrap();
         assert_eq!(group_name, "");
-        assert_eq!(resource_path, moved_plain.to_string_lossy());
+        assert_eq!(slash_normalized(&resource_path), slash_normalized(&moved_plain.to_string_lossy()));
         cleanup(&root);
     }
 
@@ -5990,9 +6076,15 @@ mod resource_command_tests {
         assert!(moved.is_file());
         assert!(!discovered.exists());
         assert_eq!(results.len(), 1);
-        assert_eq!(results[0]["id"], resource_file_id(&moved));
+        assert_eq!(
+            slash_normalized(results[0]["id"].as_str().unwrap()),
+            slash_normalized(&resource_file_id(&moved))
+        );
         assert_eq!(results[0]["resource_folder"], "工作资料/角色");
-        assert_eq!(results[0]["content"], moved.to_string_lossy().to_string());
+        assert_eq!(
+            slash_normalized(results[0]["content"].as_str().unwrap()),
+            slash_normalized(&moved.to_string_lossy())
+        );
         cleanup(&root);
     }
 
@@ -6018,7 +6110,10 @@ mod resource_command_tests {
         .unwrap();
         assert_eq!(results.len(), 1);
         assert!(file.is_file());
-        assert_eq!(results[0]["resource_relative_path"], "工作资料/a.txt");
+        assert_eq!(
+            slash_normalized(results[0]["resource_relative_path"].as_str().unwrap()),
+            "工作资料/a.txt"
+        );
         cleanup(&root);
     }
 
