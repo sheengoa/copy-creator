@@ -3,6 +3,9 @@ use serde::{Deserialize, Serialize};
 #[cfg(target_os = "linux")]
 use std::cell::RefCell;
 use std::path::PathBuf;
+// 同步原语仅 GTK 拖动状态机使用；Windows 侧的看门狗在 windows_drag
+// 模块内自带导入，不门控会在 Windows 编译时报 unused_imports。
+#[cfg(target_os = "linux")]
 use std::sync::{
     atomic::{AtomicBool, Ordering},
     Arc, Mutex, OnceLock,
@@ -1109,7 +1112,7 @@ mod windows_drag {
             BOOL, COLORREF, DRAGDROP_S_CANCEL, DRAGDROP_S_DROP, DRAGDROP_S_USEDEFAULTCURSORS,
             POINT, SIZE,
         };
-        use windows::Win32::Graphics::Gdi::CreateBitmap;
+        use windows::Win32::Graphics::Gdi::{CreateBitmap, DeleteObject};
         use windows::Win32::System::Com::{CLSCTX_ALL, CoCreateInstance, IDataObject};
         use windows::Win32::System::Ole::{
             DoDragDrop, DROPEFFECT, DROPEFFECT_COPY, IDropSource, IDropSource_Impl,
@@ -1148,6 +1151,14 @@ mod windows_drag {
             }
         }
 
+        /// 统一释放已创建的 PIDL（系统句柄有限，剪贴板类应用长期驻留，
+        /// 任何错误路径都不得泄漏）。
+        fn free_pidls(pidls: &[*mut ITEMIDLIST]) {
+            for pidl in pidls {
+                unsafe { ILFree(Some(pidl.cast_const())) };
+            }
+        }
+
         /// 同步执行一次 OLE 文件拖出，返回 (是否落放, 光标 X, 光标 Y)。
         /// 必须在 UI 主线程（STA）上调用。
         pub(super) fn drag_files(
@@ -1183,22 +1194,33 @@ mod windows_drag {
                         path.as_os_str().encode_wide().chain(Some(0)).collect();
                     let pidl = ILCreateFromPathW(PCWSTR::from_raw(wide.as_ptr()));
                     if pidl.is_null() {
-                        for done in &pidls {
-                            ILFree(Some(*done as *const ITEMIDLIST));
-                        }
+                        free_pidls(&pidls);
                         return Err(format!("无法定位文件: {}", path.display()));
                     }
                     pidls.push(pidl);
                 }
                 let pidl_refs: Vec<*const ITEMIDLIST> =
                     pidls.iter().map(|p| p.cast_const()).collect();
-                let array: IShellItemArray = SHCreateShellItemArrayFromIDLists(&pidl_refs)
-                    .map_err(|e| format!("创建 shell 项数组失败: {e}"))?;
-                let data_object: IDataObject = array
-                    .BindToHandler(None, &BHID_DataObject)
-                    .map_err(|e| format!("创建拖拽数据对象失败: {e}"))?;
+                // 以下任一步失败都必须释放已创建的 PIDL。
+                let array: IShellItemArray =
+                    match SHCreateShellItemArrayFromIDLists(&pidl_refs) {
+                        Ok(array) => array,
+                        Err(e) => {
+                            free_pidls(&pidls);
+                            return Err(format!("创建 shell 项数组失败: {e}"));
+                        }
+                    };
+                let data_object: IDataObject =
+                    match array.BindToHandler(None, &BHID_DataObject) {
+                        Ok(data_object) => data_object,
+                        Err(e) => {
+                            free_pidls(&pidls);
+                            return Err(format!("创建拖拽数据对象失败: {e}"));
+                        }
+                    };
 
                 // 拖动虚影（可选）：缩放后的 32bpp BGRA 位图交给系统渲染。
+                // 虚影失败只降级为"无虚影"，不中止拖动本身。
                 if let Some(img) = image {
                     let hbmp = CreateBitmap(
                         img.width,
@@ -1208,28 +1230,39 @@ mod windows_drag {
                         Some(img.bgra.as_ptr() as *const core::ffi::c_void),
                     );
                     if !hbmp.is_invalid() {
-                        let helper: IDragSourceHelper =
-                            CoCreateInstance(&CLSID_DragDropHelper, None, CLSCTX_ALL)
-                                .map_err(|e| format!("创建 DragSourceHelper 失败: {e}"))?;
-                        let shdi = SHDRAGIMAGE {
-                            sizeDragImage: SIZE {
-                                cx: img.width,
-                                cy: img.height,
-                            },
-                            ptOffset: POINT { x: 0, y: 0 },
-                            hbmpDragImage: hbmp,
-                            crColorKey: COLORREF(0),
-                        };
-                        let _ = helper.InitializeFromBitmap(&shdi, &data_object);
+                        let helper: Result<IDragSourceHelper, _> =
+                            CoCreateInstance(&CLSID_DragDropHelper, None, CLSCTX_ALL);
+                        match helper {
+                            Ok(helper) => {
+                                let shdi = SHDRAGIMAGE {
+                                    sizeDragImage: SIZE {
+                                        cx: img.width,
+                                        cy: img.height,
+                                    },
+                                    ptOffset: POINT { x: 0, y: 0 },
+                                    hbmpDragImage: hbmp,
+                                    crColorKey: COLORREF(0),
+                                };
+                                if let Err(e) = helper.InitializeFromBitmap(&shdi, &data_object) {
+                                    log::warn!("[radial_drag] 设置拖动虚影失败（忽略）: {e}");
+                                }
+                            }
+                            Err(e) => {
+                                log::warn!(
+                                    "[radial_drag] 创建 DragSourceHelper 失败（本次无虚影）: {e}"
+                                );
+                            }
+                        }
+                        // InitializeFromBitmap 会自行拷贝位图数据，句柄仍归
+                        // 本进程所有；不释放则每次拖动泄漏一个 GDI 句柄。
+                        let _ = DeleteObject(hbmp);
                     }
                 }
 
                 let drop_source: IDropSource = OleDropSource.into();
                 let mut effect = DROPEFFECT::default();
                 let hr = DoDragDrop(&data_object, &drop_source, DROPEFFECT_COPY, &mut effect);
-                for pidl in &pidls {
-                    ILFree(Some(*pidl as *const ITEMIDLIST));
-                }
+                free_pidls(&pidls);
                 let dropped = hr == DRAGDROP_S_DROP;
                 let mut pos = POINT::default();
                 if GetCursorPos(&mut pos).is_err() {

@@ -316,9 +316,9 @@ export const useClipboardStore = create<ClipboardState>((set, get) => ({
     // silent 模式：整组粘贴等一次性取数专用。不参与 UI 加载代数竞争、
     // 不触碰共享状态，避免被并发的常规加载（如菜单打开时的 loadRecords
     // 或剪贴板推送触发的刷新）判定为过期而返回 null，导致粘贴静默失效。
+    // 也不带主窗口搜索词：整组粘贴取的是分组全量，搜索框是无关状态。
     if (options?.silent === true) {
       const state = get();
-      const search = state.search || undefined;
       const activeCategory = categoryOverride ?? state.category;
       const category = activeCategory !== "all" ? activeCategory : undefined;
       const activeResourceGroup = activeCategory === "resources"
@@ -328,7 +328,6 @@ export const useClipboardStore = create<ClipboardState>((set, get) => ({
       let offset = 0;
       while (true) {
         const requestArgs = {
-          search,
           limit: PAGE_SIZE,
           offset,
           category,
