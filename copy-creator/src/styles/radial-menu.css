@@ -530,7 +530,8 @@ html {
   width: 100%;
   max-height: 120px;
   border-radius: 6px;
-  object-fit: cover;
+  /* 完整展示图片内容，不做封面式裁切。 */
+  object-fit: contain;
 }
 
 .radial-menu-resource-text-file {
