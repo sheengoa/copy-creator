@@ -316,7 +316,14 @@ function normalizeLocalPath(value: string): string {
 }
 
 function isAbsoluteLocalPath(value: string): boolean {
-  return value.startsWith("/") || /^[A-Za-z]:[\\/]/.test(value);
+  // `\\\\` 开头覆盖 UNC（\\\\server\\share）与 Windows 扩展路径（\\\\?\\）。
+  return value.startsWith("/") || value.startsWith("\\\\") || /^[A-Za-z]:[\\/]/.test(value);
+}
+
+/** 剥离 Windows canonicalize 残留的扩展前缀，避免污染路径拼接与媒体 URL。 */
+function stripWindowsPathPrefix(value: string): string {
+  if (/^\\\\\?\\UNC\\/i.test(value)) return value.replace(/^\\\\\?\\UNC\\/i, "\\\\");
+  return value.replace(/^\\\\\?\\/, "");
 }
 
 let storagePathPromise: Promise<string> | null = null;
@@ -345,7 +352,7 @@ function getMediaServer(): Promise<{ origin: string; token: string }> {
 }
 
 async function resolveAbsoluteResourcePath(path: string): Promise<string> {
-  const normalized = normalizeLocalPath(path);
+  const normalized = stripWindowsPathPrefix(normalizeLocalPath(path));
   if (!normalized) throw new Error("资源路径为空");
   if (/^(?:https?:|data:|blob:|asset:)/i.test(normalized)) return normalized;
   if (isAbsoluteLocalPath(normalized)) return normalized;
