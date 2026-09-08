@@ -1,8 +1,7 @@
-import { StorageSection } from "./StorageSection";
-import { LanguageSection } from "./LanguageSection";
-import { ShortcutSection } from "./ShortcutSection";
-import { StartupSection } from "./StartupSection";
-import { PasteSection } from "./PasteSection";
+import { ClipboardSection } from "./ClipboardSection";
+import { GeneralSection } from "./GeneralSection";
 import { RadialSection } from "./RadialSection";
+import { ShortcutSection } from "./ShortcutSection";
+import { StorageSection } from "./StorageSection";
 
-export { StorageSection, LanguageSection, ShortcutSection, StartupSection, PasteSection, RadialSection };
+export { ClipboardSection, GeneralSection, RadialSection, ShortcutSection, StorageSection };

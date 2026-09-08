@@ -3,7 +3,7 @@ import { useTranslation } from "react-i18next";
 import { invoke } from "@tauri-apps/api/core";
 import { emit } from "@tauri-apps/api/event";
 import { useSettingsStore } from "../stores/settingsStore";
-import { StorageSection, LanguageSection, ShortcutSection, StartupSection, PasteSection, RadialSection } from "./settings";
+import { ClipboardSection, GeneralSection, ShortcutSection, RadialSection, StorageSection } from "./settings";
 import { useShortcutRecording } from "./settings/useShortcutRecording";
 
 interface Props {
@@ -310,16 +310,11 @@ export default function SettingsContent({ embedded }: Props) {
 
   const content = (
     <>
-      <StorageSection
-        storagePath={storagePath}
-        setStoragePath={setStoragePath}
-        localRetention={localRetention}
-        setLocalRetention={setLocalRetention}
-      />
-
-      <LanguageSection
+      <GeneralSection
         localLang={localLang}
         setLocalLang={setLocalLang}
+        localAutostart={localAutostart}
+        setLocalAutostart={setLocalAutostart}
       />
 
       <ShortcutSection
@@ -342,12 +337,9 @@ export default function SettingsContent({ embedded }: Props) {
         </div>
       )}
 
-      <StartupSection
-        localAutostart={localAutostart}
-        setLocalAutostart={setLocalAutostart}
-      />
-
-      <PasteSection
+      <ClipboardSection
+        localRetention={localRetention}
+        setLocalRetention={setLocalRetention}
         localPasteLeftClick={localPasteLeftClick}
         setLocalPasteLeftClick={(mode) => {
           setLocalPasteLeftClick(mode);
@@ -358,6 +350,11 @@ export default function SettingsContent({ embedded }: Props) {
       <RadialSection
         localRadialMenuScale={localRadialMenuScale}
         setLocalRadialMenuScale={setLocalRadialMenuScale}
+      />
+
+      <StorageSection
+        storagePath={storagePath}
+        setStoragePath={setStoragePath}
       />
 
       <div className="settings-actions">
