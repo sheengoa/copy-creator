@@ -328,10 +328,31 @@ pub(crate) fn get_resource_library_dir<R: Runtime>(app: &AppHandle<R>) -> PathBu
         .map(PathBuf::from)
         .filter(|path| path.is_absolute());
     let dir = configured_path.unwrap_or_else(|| default_resource_library_dir(app));
+    // 历史版本曾把 canonicalize 的 `\\?\` 扩展路径写入设置，读取时统一
+    // 还原成常规形态，避免旧数据继续向前端与媒体 URL 泄露扩展前缀。
+    let dir = simplify_windows_path(&dir);
     if let Err(error) = std::fs::create_dir_all(&dir) {
         log::warn!("无法创建资源库目录 {}: {}", dir.display(), error);
     }
     dir
+}
+
+/// 剥离 Windows `std::fs::canonicalize` 产生的 `\\?\` 扩展前缀，让路径在
+/// 设置存储、前端展示与媒体 URL 中保持常规形态；UNC 路径还原 `\\server\share`。
+pub(crate) fn simplify_windows_path(path: &Path) -> PathBuf {
+    let text = path.to_string_lossy();
+    if let Some(rest) = text.strip_prefix(r"\\?\UNC\") {
+        return PathBuf::from(format!(r"\\{rest}"));
+    }
+    if let Some(rest) = text.strip_prefix(r"\\?\") {
+        let mut chars = rest.chars();
+        if let (Some(first), Some(':')) = (chars.next(), chars.next()) {
+            if first.is_ascii_alphabetic() {
+                return PathBuf::from(rest.to_string());
+            }
+        }
+    }
+    path.to_path_buf()
 }
 
 pub(crate) fn normalize_resource_group_name(value: Option<&str>) -> Result<String, String> {
@@ -3052,14 +3073,16 @@ fn validate_resource_library_path(app: &AppHandle, value: &str) -> Result<PathBu
 
     let path = PathBuf::from(value);
     std::fs::create_dir_all(&path).map_err(|error| format!("创建资源库目录失败: {error}"))?;
-    let path =
-        std::fs::canonicalize(&path).map_err(|error| format!("读取资源库目录失败: {error}"))?;
+    let path = simplify_windows_path(
+        &std::fs::canonicalize(&path).map_err(|error| format!("读取资源库目录失败: {error}"))?,
+    );
     if !path.is_dir() {
         return Err("资源库路径不是目录".to_string());
     }
 
-    let storage_path =
-        std::fs::canonicalize(get_storage_dir(app)).unwrap_or_else(|_| get_storage_dir(app));
+    let storage_path = simplify_windows_path(
+        &std::fs::canonicalize(get_storage_dir(app)).unwrap_or_else(|_| get_storage_dir(app)),
+    );
     if paths_overlap(&path, &storage_path) {
         return Err("资源库目录不能与应用存储目录重叠".to_string());
     }
