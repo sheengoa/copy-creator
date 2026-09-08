@@ -6,8 +6,7 @@
   "tabs": {
     "clipboard": "剪切板",
     "phrases": "快捷输入",
-    "resources": "资源",
-    "translate": "翻译"
+    "resources": "资源"
   },
   "settings": {
     "title": "设置",
@@ -15,17 +14,6 @@
     "retention1week": "一周",
     "retention1month": "一个月",
     "retention3months": "三个月",
-    "defaultEngine": "默认翻译引擎",
-    "aiTranslation": "AI 翻译",
-    "googleTranslation": "Google 翻译",
-    "googleNote": "留空使用免费接口（可能不稳定），填写 API Key 使用 Google Cloud Translation",
-    "googleApiKey": "Google API Key (可选)",
-    "translateProxy": "翻译代理地址",
-    "translateProxyPlaceholder": "如 http://127.0.0.1:7890 或 socks5://127.0.0.1:7891",
-    "apiUrl": "API 地址",
-    "apiUrlPlaceholder": "如 https://api.openai.com",
-    "apiKey": "API Key",
-    "model": "模型名称",
     "theme": "主题",
     "light": "亮色",
     "dark": "暗色",
@@ -60,20 +48,10 @@
     "pasteRightClick": "右键粘贴模式",
     "pasteNormal": "普通粘贴",
     "pasteTerminal": "终端粘贴",
-    "translation": "翻译",
     "radialSection": "径向菜单",
     "radialMenuSize": "菜单尺寸",
     "radialMenuSizeReset": "默认",
     "radialMenuSizeHint": "按显示器分辨率调整径向菜单整体大小，始终保持原有比例；默认 100%（420×650），保存后下次唤起生效。"
-  },
-  "translate": {
-    "result": "结果",
-    "inputPlaceholder": "输入或粘贴要翻译的文本...",
-    "translate": "翻译",
-    "targetLang": "目标语言",
-    "noResult": "翻译结果将显示在这里",
-    "copy": "复制",
-    "copied": "已复制"
   },
   "clipboard": {
     "search": "搜索剪切板...",

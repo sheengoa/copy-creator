@@ -12,7 +12,7 @@ English | [中文](./README.md)
 
 **Desktop Productivity Tool for Windows & Linux**
 
-Clipboard Manager · Content Library · Quick Phrases · Translation
+Clipboard Manager · Content Library · Quick Phrases
 
 ![License](https://img.shields.io/badge/license-MIT-blue.svg)
 ![Platform](https://img.shields.io/badge/platform-Windows%2010%2B%20%7C%20Linux%20(Ubuntu%2024.04)-brightgreen.svg)
@@ -25,7 +25,7 @@ Clipboard Manager · Content Library · Quick Phrases · Translation
 
 ## Overview
 
-Copy Creator is a lightweight cross-platform (Windows / Linux) desktop productivity tool that appears as a floating window and minimizes to the system tray when closed. It integrates four core features: clipboard history management, a content library, quick phrases, and translation, helping users save, find, and reuse content efficiently in their daily work.
+Copy Creator is a lightweight cross-platform (Windows / Linux) desktop productivity tool that appears as a floating window and minimizes to the system tray when closed. It integrates three core features: clipboard history management, a content library, and quick phrases, helping users save, find, and reuse content efficiently in their daily work.
 
 > **Acknowledgement**: This project is forked from [hu-qi-jia/copy-creator](https://github.com/hu-qi-jia/copy-creator). The original project was Windows-only. This repository is a complete Linux adaptation (including Wayland/X11 dual protocol support, Ubuntu native shortcut integration, clipboard compatibility fixes, and more) with Windows build support restored, now available on both platforms. Thanks to the original author for the open-source contribution!
 
@@ -62,11 +62,6 @@ Copy Creator is a lightweight cross-platform (Windows / Linux) desktop productiv
 
   Paste-group semantics: when a group contains only text, everything is merged into a single text paste; when it contains images, audio/video, or other files, the whole group is pasted at once as a file list.
 - Groups with subfolders can be expanded via ▾ for subfolder navigation; list items also support click-to-paste and hold-to-drag
-
-### 🌐 Translation
-- **AI Translation**: Compatible with OpenAI API format, customizable endpoint and model
-- **Built-in Translation**: Free translation service, ready to use out of the box
-- Local caching of translation results to avoid redundant requests
 
 ### ⚙️ System Features
 - Global hotkey to show/hide window
@@ -144,14 +139,6 @@ sudo dpkg -i copy-creator_*.deb
 3. Add commonly used phrases to the group
 4. When needed, click a phrase to paste it to the current input position
 
-### Translation Feature
-
-1. Switch to the "Translation" tab
-2. Enter or paste the text to translate
-3. Select translation direction (e.g., Chinese → English)
-4. Click the translate button to get results
-5. For AI translation, please configure the API endpoint and key in settings
-
 ### Personalization Settings
 
 - **Hotkeys**: Customize global hotkeys
@@ -210,7 +197,7 @@ pnpm tauri build
 copy-creator/
 ├── src/                    # Frontend source code
 │   ├── components/         # React components (incl. RadialMenu)
-│   ├── pages/              # Page components (Clipboard / Phrases / Resources / Translation)
+│   ├── pages/              # Page components (Clipboard / Phrases / Resources)
 │   ├── stores/             # Zustand state management
 │   ├── styles/             # CSS style files
 │   ├── i18n/               # Internationalization config

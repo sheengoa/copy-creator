@@ -7,7 +7,6 @@ mod media_server;
 mod paste;
 mod radial_drag;
 mod shortcut;
-mod translator;
 mod tray;
 
 use tauri::Manager;
@@ -336,8 +335,6 @@ pub fn run() {
             db::read_quick_input_text_preview,
             db::read_clipboard_text_preview,
             db::read_resource_text_preview,
-            db::get_translation_history,
-            db::clear_translation_history,
             db::get_setting,
             db::get_all_settings,
             db::set_setting,
@@ -374,7 +371,6 @@ pub fn run() {
             db::rename_resource_file,
             db::set_resource_note,
             media_server::get_media_server_origin,
-            translator::translate,
             shortcut::update_shortcut,
             shortcut::update_radial_shortcut,
             shortcut::update_clipboard_create_shortcut,

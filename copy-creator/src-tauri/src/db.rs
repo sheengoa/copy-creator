@@ -2657,49 +2657,6 @@ pub fn delete_phrase(app: AppHandle, id: String) -> Result<(), String> {
 }
 
 #[tauri::command]
-pub fn get_translation_history(
-    app: AppHandle,
-    limit: Option<u32>,
-) -> Result<Vec<serde_json::Value>, String> {
-    let state = app.state::<DbState>();
-    let conn = state.conn.lock().map_err(|e| e.to_string())?;
-    let l = limit.unwrap_or(100);
-    let mut stmt = conn
-        .prepare(
-            "SELECT id, source_text, target_text, source_lang, target_lang, engine, created_at
-             FROM translation_history ORDER BY created_at DESC LIMIT ?1",
-        )
-        .map_err(|e| e.to_string())?;
-    let rows = stmt
-        .query_map(params![l], |row| {
-            Ok(serde_json::json!({
-                "id": row.get::<_, String>(0)?,
-                "source_text": row.get::<_, String>(1)?,
-                "target_text": row.get::<_, String>(2)?,
-                "source_lang": row.get::<_, String>(3)?,
-                "target_lang": row.get::<_, String>(4)?,
-                "engine": row.get::<_, String>(5)?,
-                "created_at": row.get::<_, String>(6)?,
-            }))
-        })
-        .map_err(|e| e.to_string())?;
-    let mut history = Vec::new();
-    for row in rows {
-        history.push(row.map_err(|e| e.to_string())?);
-    }
-    Ok(history)
-}
-
-#[tauri::command]
-pub fn clear_translation_history(app: AppHandle) -> Result<(), String> {
-    let state = app.state::<DbState>();
-    let conn = state.conn.lock().map_err(|e| e.to_string())?;
-    conn.execute("DELETE FROM translation_history", [])
-        .map_err(|e| e.to_string())?;
-    Ok(())
-}
-
-#[tauri::command]
 pub fn get_setting(app: AppHandle, key: String) -> Result<String, String> {
     let state = app.state::<DbState>();
     let conn = state.conn.lock().map_err(|e| e.to_string())?;
