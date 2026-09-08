@@ -464,3 +464,72 @@
   margin-top: 8px;
   margin-bottom: 0;
 }
+
+/* --- Radial menu scale (径向菜单尺寸) --- */
+.radial-scale-control {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.radial-scale-slider {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 160px;
+  height: 4px;
+  padding: 0;
+  border: none;
+  border-radius: 2px;
+  background: var(--separator);
+  outline: none;
+  cursor: pointer;
+}
+
+.radial-scale-slider::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  background: #FFFFFF;
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.25), 0 0 0 0.5px rgba(0, 0, 0, 0.04);
+  cursor: pointer;
+  transition: transform 0.15s cubic-bezier(0.83, 0, 0.17, 1);
+}
+
+.radial-scale-slider::-webkit-slider-thumb:active {
+  transform: scale(1.12);
+}
+
+.radial-scale-value {
+  min-width: 42px;
+  text-align: right;
+  font-family: var(--font);
+  font-size: var(--text-sm);
+  font-weight: var(--weight-semibold);
+  color: var(--text-primary);
+  font-variant-numeric: tabular-nums;
+}
+
+.radial-scale-reset {
+  padding: 3px 10px;
+  border: none;
+  border-radius: 6px;
+  background: var(--chip-bg);
+  color: var(--text-secondary);
+  font-family: var(--font);
+  font-size: var(--text-xs);
+  cursor: pointer;
+  transition: background 0.15s, color 0.15s;
+  white-space: nowrap;
+}
+
+.radial-scale-reset:hover:not(:disabled) {
+  background: var(--chip-hover-bg);
+  color: var(--text-primary);
+}
+
+.radial-scale-reset:disabled {
+  opacity: 0.4;
+  cursor: default;
+}

@@ -1005,55 +1005,72 @@
   outline-offset: 2px;
 }
 
-.clipboard-create-stash-section {
+.clipboard-create-action-bar {
   display: flex;
-  flex-direction: column;
-  gap: 6px;
-  min-width: 0;
-  margin-top: 0;
+  align-items: center;
+  gap: 12px;
+  margin-top: 10px;
+  padding-top: 12px;
+  border-top: 1px solid var(--card-border);
   flex-shrink: 0;
 }
 
-.clipboard-create-options-row {
-  display: flex;
-  gap: 10px;
-  min-width: 0;
-}
-
-.clipboard-create-option-field {
-  display: flex;
-  flex: 1 1 0;
-  flex-direction: column;
-  gap: 6px;
-  min-width: 0;
-}
-
-/* 保存位置列窄、已有资源列宽，约 1:2 */
-.clipboard-create-option-field:nth-child(2) {
-  flex: 2 1 0;
-}
-
-.clipboard-create-stash-header {
+.clipboard-create-bar-left {
   display: flex;
   align-items: center;
-  justify-content: space-between;
-  min-height: 20px;
+  gap: 10px;
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.clipboard-create-bar-caption {
+  flex-shrink: 0;
   color: var(--text-secondary);
   font-size: var(--text-sm);
   font-weight: var(--weight-medium);
 }
 
-.clipboard-create-exit-edit {
-  border: 0;
-  padding: 2px 4px;
-  background: transparent;
-  color: var(--accent);
-  font: inherit;
-  cursor: pointer;
+.clipboard-create-dest-seg {
+  display: flex;
+  gap: 2px;
+  flex-shrink: 0;
+  padding: 2px;
+  border: 1px solid var(--card-border);
+  border-radius: 9px;
+  background: var(--input-bg);
 }
 
-.clipboard-create-exit-edit:hover {
+.clipboard-create-dest-seg-item {
+  border: 0;
+  padding: 5px 14px;
+  border-radius: 7px;
+  background: transparent;
+  color: var(--text-secondary);
+  font: inherit;
+  font-size: var(--text-sm);
+  cursor: pointer;
+  transition: background 0.15s, color 0.15s, box-shadow 0.15s;
+  -webkit-app-region: no-drag;
+  app-region: no-drag;
+}
+
+.clipboard-create-dest-seg-item:hover:not(.on) {
   color: var(--text-primary);
+}
+
+.clipboard-create-dest-seg-item.on {
+  background: var(--panel-bg);
+  color: var(--text-primary);
+  font-weight: var(--weight-medium);
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.14);
+}
+
+/* 已有内容 chip：占据分段控件与动作按钮之间的剩余宽度 */
+.clipboard-create-bar-left .clipboard-create-stash-picker {
+  width: auto;
+  flex: 1 1 auto;
+  min-width: 140px;
+  max-width: 520px;
 }
 
 .clipboard-create-stash-picker {
@@ -1061,44 +1078,90 @@
   width: 100%;
 }
 
-.clipboard-create-stash-trigger {
+.clipboard-create-chip-trigger {
   display: flex;
   align-items: center;
-  justify-content: space-between;
   gap: 8px;
   width: 100%;
-  min-height: 36px;
-  padding: 8px 10px;
+  min-height: 32px;
+  padding: 6px 10px;
   border: 1px solid var(--card-border);
-  border-radius: var(--radius-sm);
+  border-radius: 9px;
   background: var(--input-bg);
   color: var(--text-primary);
   font: inherit;
+  font-size: var(--text-sm);
   text-align: left;
   cursor: pointer;
   transition: background 0.15s, border-color 0.15s;
 }
 
-.clipboard-create-stash-trigger:hover:not(:disabled),
-.clipboard-create-stash-picker.open .clipboard-create-stash-trigger {
+.clipboard-create-chip-trigger:hover:not(:disabled),
+.clipboard-create-stash-picker.open .clipboard-create-chip-trigger {
   background: var(--input-focus-bg);
   border-color: rgba(0, 122, 255, 0.38);
 }
 
-.clipboard-create-stash-trigger:disabled {
+.clipboard-create-chip-trigger:disabled {
   cursor: default;
   opacity: 0.72;
 }
 
-.clipboard-create-stash-trigger > span:first-child {
+.clipboard-create-chip-icon {
+  flex-shrink: 0;
+  width: 14px;
+  height: 14px;
+  color: var(--text-secondary);
+}
+
+.clipboard-create-chip-tag {
+  flex-shrink: 0;
+  padding: 1px 6px;
+  border-radius: 4px;
+  background: var(--accent-bg);
+  color: var(--accent);
+  font-size: 11px;
+  font-weight: var(--weight-semibold);
+}
+
+.clipboard-create-chip-content {
+  flex: 1 1 auto;
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
-.clipboard-create-stash-trigger .placeholder {
+.clipboard-create-chip-content.placeholder {
   color: var(--text-secondary);
+}
+
+/* 编辑态右侧有 ✕ 按钮，留出空间避免长文字从按钮下穿过 */
+.clipboard-create-chip-content.editing {
+  padding-right: 24px;
+}
+
+.clipboard-create-chip-exit {
+  position: absolute;
+  top: 50%;
+  right: 32px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  height: 20px;
+  padding: 0;
+  border: 0;
+  border-radius: 5px;
+  background: transparent;
+  color: var(--text-secondary);
+  cursor: pointer;
+  transform: translateY(-50%);
+}
+
+.clipboard-create-chip-exit:hover {
+  background: var(--chip-hover-bg);
+  color: var(--text-primary);
 }
 
 .clipboard-create-stash-chevron {
@@ -1178,18 +1241,9 @@
   font-weight: var(--weight-semibold);
 }
 
-.clipboard-create-footer {
-  display: flex;
-  align-items: center;
-  justify-content: flex-end;
-  gap: 12px;
-  margin-top: 10px;
-  flex-shrink: 0;
-}
-
 .clipboard-create-error {
-  flex: 1;
-  min-width: 0;
+  margin-top: 8px;
+  flex-shrink: 0;
   color: var(--danger);
   font-size: var(--text-sm);
   line-height: 1.35;

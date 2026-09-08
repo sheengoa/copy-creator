@@ -36,7 +36,6 @@ export default function ClipboardCreateDialog() {
   const [loadingRecordId, setLoadingRecordId] = useState<string | null>(null);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [dropdownOpen, setDropdownOpen] = useState(false);
-  const [destOpen, setDestOpen] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const editorRef = useRef<StashEditorHandle>(null);
   const lastEnterAtRef = useRef(0);
@@ -216,7 +215,6 @@ export default function ClipboardCreateDialog() {
 
   // 切换保存位置：保留已输入内容，退出编辑态并按新模式刷新“已有”列表。
   const handleDestChange = useCallback((mode: ClipboardStorageMode) => {
-    setDestOpen(false);
     if (mode === storageMode) return;
     setStorageMode(mode);
     setEditingId(null);
@@ -229,10 +227,6 @@ export default function ClipboardCreateDialog() {
     if (e.key === "Escape") {
       e.preventDefault();
       lastEnterAtRef.current = 0;
-      if (destOpen) {
-        setDestOpen(false);
-        return;
-      }
       if (dropdownOpen) {
         setDropdownOpen(false);
         return;
@@ -271,7 +265,7 @@ export default function ClipboardCreateDialog() {
     if (shortcut.shouldSave) {
       handleSave();
     }
-  }, [content, destOpen, dropdownOpen, hideWindow, handleSave]);
+  }, [content, dropdownOpen, hideWindow, handleSave]);
 
   const selectedStashRecord = stashRecords.find((record) => record.id === editingId);
   const isResource = storageMode === "resource";
@@ -295,7 +289,7 @@ export default function ClipboardCreateDialog() {
           </svg>
         </button>
       </div>
-      <div onFocus={() => { setDropdownOpen(false); setDestOpen(false); }} className="clipboard-create-editor-wrap">
+      <div onFocus={() => { setDropdownOpen(false); }} className="clipboard-create-editor-wrap">
         <StashEditor
           key={editorVersion}
           ref={editorRef}
@@ -311,74 +305,45 @@ export default function ClipboardCreateDialog() {
           onImageError={() => setError(t("resources.readImageError"))}
         />
       </div>
-      <div className="clipboard-create-stash-section">
-        <div className="clipboard-create-options-row">
-          <div className="clipboard-create-option-field">
-            <div className="clipboard-create-stash-header">
-              <span>{t("resources.storageLocation")}</span>
-            </div>
-            <div className={`clipboard-create-stash-picker${destOpen ? " open" : ""}`}>
-              <button
-                type="button"
-                className="clipboard-create-stash-trigger"
-                onClick={() => setDestOpen((open) => !open)}
-                aria-expanded={destOpen}
-                aria-haspopup="listbox"
-              >
-                <span>
-                  {storageMode === "resource"
-                    ? t("resources.destinationResource")
-                    : t("resources.destinationClipboard")}
-                </span>
-                <svg className="clipboard-create-stash-chevron" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-                  <polyline points="6 9 12 15 18 9" />
-                </svg>
-              </button>
-              {destOpen && (
-                <div className="clipboard-create-stash-menu" role="listbox">
-                  <button
-                    type="button"
-                    className={`clipboard-create-stash-option${storageMode === "database" ? " selected" : ""}`}
-                    onClick={() => handleDestChange("database")}
-                    role="option"
-                    aria-selected={storageMode === "database"}
-                  >
-                    <span className="clipboard-create-stash-option-content">{t("resources.destinationClipboard")}</span>
-                    {storageMode === "database" && <span className="clipboard-create-stash-check">✓</span>}
-                  </button>
-                  <button
-                    type="button"
-                    className={`clipboard-create-stash-option${storageMode === "resource" ? " selected" : ""}`}
-                    onClick={() => handleDestChange("resource")}
-                    role="option"
-                    aria-selected={storageMode === "resource"}
-                  >
-                    <span className="clipboard-create-stash-option-content">{t("resources.destinationResource")}</span>
-                    {storageMode === "resource" && <span className="clipboard-create-stash-check">✓</span>}
-                  </button>
-                </div>
-              )}
-            </div>
+      {error && <div className="clipboard-create-error" role="alert">{error}</div>}
+      <div className="clipboard-create-action-bar">
+        <div className="clipboard-create-bar-left">
+          <span className="clipboard-create-bar-caption">{t("resources.storageLocation")}</span>
+          <div className="clipboard-create-dest-seg" role="group" aria-label={t("resources.storageLocation")}>
+            <button
+              type="button"
+              className={`clipboard-create-dest-seg-item${storageMode === "database" ? " on" : ""}`}
+              aria-pressed={storageMode === "database"}
+              onClick={() => handleDestChange("database")}
+            >
+              {t("resources.destinationClipboard")}
+            </button>
+            <button
+              type="button"
+              className={`clipboard-create-dest-seg-item${storageMode === "resource" ? " on" : ""}`}
+              aria-pressed={storageMode === "resource"}
+              onClick={() => handleDestChange("resource")}
+            >
+              {t("resources.destinationResource")}
+            </button>
           </div>
-          <div className="clipboard-create-option-field">
-            <div className="clipboard-create-stash-header">
-              <span>{isResource ? t("resources.existing") : t("resources.existingClipboard")}</span>
-              {editingId && (
-                <button className="clipboard-create-exit-edit" onClick={handleExitEdit}>
-                  {isResource ? t("resources.exitEdit") : t("resources.exitEditClipboard")}
-                </button>
-              )}
-            </div>
           <div className={`clipboard-create-stash-picker${dropdownOpen ? " open" : ""}`}>
             <button
               type="button"
-              className="clipboard-create-stash-trigger"
+              className="clipboard-create-chip-trigger"
               onClick={() => setDropdownOpen((open) => !open)}
               disabled={loadingRecords || stashRecords.length === 0 || loadingRecordId !== null}
               aria-expanded={dropdownOpen}
               aria-haspopup="listbox"
             >
-              <span className={selectedStashRecord ? "selected" : "placeholder"}>
+              <svg className="clipboard-create-chip-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                <circle cx="12" cy="12" r="9" />
+                <polyline points="12 7 12 12 15 14" />
+              </svg>
+              {editingId && (
+                <span className="clipboard-create-chip-tag">{t("resources.editingTag")}</span>
+              )}
+              <span className={`clipboard-create-chip-content${selectedStashRecord ? "" : " placeholder"}${editingId ? " editing" : ""}`}>
                 {selectedStashRecord
                   ? selectedStashRecord.content
                   : loadingRecords
@@ -387,14 +352,26 @@ export default function ClipboardCreateDialog() {
                       ? isResource
                         ? t("resources.noExisting")
                         : t("resources.noExistingClipboard")
-                      : isResource
-                        ? t("resources.selectExisting")
-                        : t("resources.selectExistingClipboard")}
+                      : `${isResource ? t("resources.existing") : t("resources.existingClipboard")} · ${isResource ? t("resources.selectExisting") : t("resources.selectExistingClipboard")}`}
               </span>
               <svg className="clipboard-create-stash-chevron" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
                 <polyline points="6 9 12 15 18 9" />
               </svg>
             </button>
+            {editingId && (
+              <button
+                type="button"
+                className="clipboard-create-chip-exit"
+                title={isResource ? t("resources.exitEdit") : t("resources.exitEditClipboard")}
+                aria-label={isResource ? t("resources.exitEdit") : t("resources.exitEditClipboard")}
+                onClick={handleExitEdit}
+              >
+                <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" aria-hidden="true">
+                  <line x1="18" y1="6" x2="6" y2="18" />
+                  <line x1="6" y1="6" x2="18" y2="18" />
+                </svg>
+              </button>
+            )}
             {dropdownOpen && stashRecords.length > 0 && (
               <div className="clipboard-create-stash-menu" role="listbox">
                 {stashRecords.map((record) => (
@@ -415,11 +392,7 @@ export default function ClipboardCreateDialog() {
               </div>
             )}
           </div>
-          </div>
         </div>
-      </div>
-      <div className="clipboard-create-footer">
-        {error && <span className="clipboard-create-error" role="alert">{error}</span>}
         <div className="clipboard-create-actions">
           <button className="dialog-btn secondary" onClick={hideWindow}>
             {t("common.cancel")}

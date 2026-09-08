@@ -60,7 +60,11 @@
     "pasteRightClick": "右键粘贴模式",
     "pasteNormal": "普通粘贴",
     "pasteTerminal": "终端粘贴",
-    "translation": "翻译"
+    "translation": "翻译",
+    "radialSection": "径向菜单",
+    "radialMenuSize": "菜单尺寸",
+    "radialMenuSizeReset": "默认",
+    "radialMenuSizeHint": "按显示器分辨率调整径向菜单整体大小，始终保持原有比例；默认 100%（420×650），保存后下次唤起生效。"
   },
   "translate": {
     "result": "结果",
@@ -94,12 +98,13 @@
     "new": "新建资源",
     "modeResource": "资源",
     "modeResourceHint": "长期保存的资源，文件存放在资源库目录",
-    "storageLocation": "保存位置",
+    "storageLocation": "保存到",
     "existingClipboard": "已有内容",
     "selectExistingClipboard": "选择要编辑的内容",
     "noExistingClipboard": "当前没有可编辑的内容",
     "createPlaceholderClipboard": "输入要保存的内容...",
     "exitEditClipboard": "退出编辑",
+    "editingTag": "编辑中",
     "destinationClipboard": "剪切板",
     "destinationResource": "资源",
     "edit": "编辑资源",
