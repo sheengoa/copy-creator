@@ -1,24 +1,41 @@
 import { useTranslation } from "react-i18next";
+import IosSelect from "../IosSelect";
 
 type PasteMode = "normal" | "terminal";
 
-interface PasteSectionProps {
+interface ClipboardSectionProps {
+  localRetention: string;
+  setLocalRetention: (retention: string) => void;
   localPasteLeftClick: PasteMode;
   setLocalPasteLeftClick: (mode: PasteMode) => void;
 }
 
-export function PasteSection({
+export function ClipboardSection({
+  localRetention,
+  setLocalRetention,
   localPasteLeftClick,
   setLocalPasteLeftClick,
-}: PasteSectionProps) {
+}: ClipboardSectionProps) {
   const { t } = useTranslation();
-  const rightClickMode: PasteMode =
-    localPasteLeftClick === "normal" ? "terminal" : "normal";
+
+  const retentionOptions = [
+    { value: "1week", label: t("settings.retention1week") },
+    { value: "1month", label: t("settings.retention1month") },
+    { value: "3months", label: t("settings.retention3months") },
+  ];
 
   return (
     <div className="settings-section">
-      <div className="settings-section-title">{t("settings.paste")}</div>
+      <div className="settings-section-title">{t("settings.clipboardSection")}</div>
       <div className="settings-card">
+        <div className="settings-row">
+          <div className="settings-row-label">{t("settings.fileRetention")}</div>
+          <IosSelect
+            value={localRetention}
+            options={retentionOptions}
+            onChange={setLocalRetention}
+          />
+        </div>
         <div className="settings-row">
           <div className="settings-row-label">{t("settings.pasteLeftClick")}</div>
           <div className="settings-lang-toggle">
@@ -34,14 +51,6 @@ export function PasteSection({
             >
               {t("settings.pasteTerminal")}
             </button>
-          </div>
-        </div>
-        <div className="settings-row">
-          <div className="settings-row-label">{t("settings.pasteRightClick")}</div>
-          <div className="settings-row-value">
-            {rightClickMode === "normal"
-              ? t("settings.pasteNormal")
-              : t("settings.pasteTerminal")}
           </div>
         </div>
       </div>

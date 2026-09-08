@@ -1,15 +1,19 @@
 import { useTranslation } from "react-i18next";
 import { useSettingsStore } from "../../stores/settingsStore";
 
-interface LanguageSectionProps {
+interface GeneralSectionProps {
   localLang: string;
   setLocalLang: (lang: string) => void;
+  localAutostart: boolean;
+  setLocalAutostart: (enabled: boolean) => void;
 }
 
-export function LanguageSection({
+export function GeneralSection({
   localLang,
   setLocalLang,
-}: LanguageSectionProps) {
+  localAutostart,
+  setLocalAutostart,
+}: GeneralSectionProps) {
   const { t, i18n } = useTranslation();
   const setSetting = useSettingsStore((s) => s.setSetting);
 
@@ -21,7 +25,7 @@ export function LanguageSection({
 
   return (
     <div className="settings-section">
-      <div className="settings-section-title">{t("settings.language")}</div>
+      <div className="settings-section-title">{t("settings.generalSection")}</div>
       <div className="settings-card">
         <div className="settings-row">
           <div className="settings-row-label">{t("settings.language")}</div>
@@ -39,6 +43,16 @@ export function LanguageSection({
               EN
             </button>
           </div>
+        </div>
+        <div className="settings-row">
+          <div className="settings-row-label">{t("settings.startup")}</div>
+          <button
+            className={`toggle-switch ${localAutostart ? "on" : "off"}`}
+            onClick={() => setLocalAutostart(!localAutostart)}
+            title={localAutostart ? t("common.on") : t("common.off")}
+          >
+            <span className="toggle-thumb" />
+          </button>
         </div>
       </div>
     </div>
