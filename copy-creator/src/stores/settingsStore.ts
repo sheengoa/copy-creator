@@ -21,14 +21,6 @@ const parseRadialScale = (raw: string | undefined): number => {
 interface SettingsState {
   themeMode: ThemeMode;
   clipboardRetention: string;
-  defaultEngine: string;
-  apiUrl: string;
-  apiKey: string;
-  model: string;
-  baiduAppId: string;
-  baiduSecret: string;
-  googleApiKey: string;
-  translateProxy: string;
   language: string;
   shortcutKey: string;
   radialShortcutKey: string;
@@ -49,14 +41,6 @@ interface SettingsState {
 export const useSettingsStore = create<SettingsState>((set, get) => ({
   themeMode: "light",
   clipboardRetention: "1month",
-  defaultEngine: "google",
-  apiUrl: "",
-  apiKey: "",
-  model: "",
-  baiduAppId: "",
-  baiduSecret: "",
-  googleApiKey: "",
-  translateProxy: "",
   language: "zh-CN",
   shortcutKey: "",
   radialShortcutKey: "",
@@ -81,14 +65,6 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
       set({
         themeMode: (settings.theme === "dark" ? "dark" : "light") as ThemeMode,
         clipboardRetention: settings.clipboard_retention || "1month",
-        defaultEngine: settings.default_translate_engine || "google",
-        apiUrl: settings.ai_api_url || "",
-        apiKey: settings.ai_api_key || "",
-        model: settings.ai_model || "",
-        baiduAppId: settings.baidu_appid || "",
-        baiduSecret: settings.baidu_secret || "",
-        googleApiKey: settings.google_api_key || "",
-        translateProxy: settings.translate_proxy || "",
         language: settings.language || "zh-CN",
         shortcutKey: settings.shortcut_key || "",
         radialShortcutKey: settings.shortcut_radial || "",
@@ -133,14 +109,6 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
       if ("clipboard_retention" in settings) {
         patch.clipboardRetention = settings.clipboard_retention || "1month";
       }
-      if ("default_translate_engine" in settings) {
-        patch.defaultEngine = settings.default_translate_engine || "google";
-      }
-      if ("ai_api_url" in settings) patch.apiUrl = settings.ai_api_url || "";
-      if ("ai_api_key" in settings) patch.apiKey = settings.ai_api_key || "";
-      if ("ai_model" in settings) patch.model = settings.ai_model || "";
-      if ("google_api_key" in settings) patch.googleApiKey = settings.google_api_key || "";
-      if ("translate_proxy" in settings) patch.translateProxy = settings.translate_proxy || "";
       if ("language" in settings) patch.language = settings.language || "zh-CN";
       if ("radial_menu_scale" in settings) {
         patch.radialMenuScale = parseRadialScale(settings.radial_menu_scale);

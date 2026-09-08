@@ -6,8 +6,7 @@
   "tabs": {
     "clipboard": "Clipboard",
     "phrases": "Quick Input",
-    "resources": "Resources",
-    "translate": "Translate"
+    "resources": "Resources"
   },
   "settings": {
     "title": "Settings",
@@ -15,17 +14,6 @@
     "retention1week": "1 Week",
     "retention1month": "1 Month",
     "retention3months": "3 Months",
-    "defaultEngine": "Default Translation Engine",
-    "aiTranslation": "AI Translation",
-    "googleTranslation": "Google Translate",
-    "googleNote": "Leave empty for free API (may be unstable), enter API Key for Google Cloud Translation",
-    "googleApiKey": "Google API Key (Optional)",
-    "translateProxy": "Translation Proxy",
-    "translateProxyPlaceholder": "e.g. http://127.0.0.1:7890 or socks5://127.0.0.1:7891",
-    "apiUrl": "API URL",
-    "apiUrlPlaceholder": "e.g. https://api.openai.com",
-    "apiKey": "API Key",
-    "model": "Model Name",
     "theme": "Theme",
     "light": "Light",
     "dark": "Dark",
@@ -60,20 +48,10 @@
     "pasteRightClick": "Right-click paste mode",
     "pasteNormal": "Normal",
     "pasteTerminal": "Terminal",
-    "translation": "Translation",
     "radialSection": "Radial Menu",
     "radialMenuSize": "Menu Size",
     "radialMenuSizeReset": "Default",
     "radialMenuSizeHint": "Scale the whole radial menu to fit your display while keeping its aspect ratio. Default 100% (420×650); applies the next time the menu pops up."
-  },
-  "translate": {
-    "result": "Result",
-    "inputPlaceholder": "Enter or paste text to translate...",
-    "translate": "Translate",
-    "targetLang": "Target Language",
-    "noResult": "Translation result will appear here",
-    "copy": "Copy",
-    "copied": "Copied"
   },
   "clipboard": {
     "search": "Search clipboard...",

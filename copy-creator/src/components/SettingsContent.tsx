@@ -3,7 +3,7 @@ import { useTranslation } from "react-i18next";
 import { invoke } from "@tauri-apps/api/core";
 import { emit } from "@tauri-apps/api/event";
 import { useSettingsStore } from "../stores/settingsStore";
-import { StorageSection, LanguageSection, ShortcutSection, TranslationSection, StartupSection, PasteSection, RadialSection } from "./settings";
+import { StorageSection, LanguageSection, ShortcutSection, StartupSection, PasteSection, RadialSection } from "./settings";
 import { useShortcutRecording } from "./settings/useShortcutRecording";
 
 interface Props {
@@ -16,12 +16,6 @@ export default function SettingsContent({ embedded }: Props) {
   const loadSettings = settings.loadSettings;
 
   const [localRetention, setLocalRetention] = useState(settings.clipboardRetention);
-  const [localEngine, setLocalEngine] = useState(settings.defaultEngine);
-  const [localApiUrl, setLocalApiUrl] = useState(settings.apiUrl);
-  const [localApiKey, setLocalApiKey] = useState(settings.apiKey);
-  const [localModel, setLocalModel] = useState(settings.model);
-  const [localGoogleApiKey, setLocalGoogleApiKey] = useState(settings.googleApiKey);
-  const [localTranslateProxy, setLocalTranslateProxy] = useState(settings.translateProxy);
   const [localLang, setLocalLang] = useState(i18n.language);
   const [localShortcutKey, setLocalShortcutKey] = useState(settings.shortcutKey);
   const [localRadialShortcutKey, setLocalRadialShortcutKey] = useState(settings.radialShortcutKey);
@@ -42,12 +36,6 @@ export default function SettingsContent({ embedded }: Props) {
   const [shortcutError, setShortcutError] = useState(false);
   const syncedSettingsRef = useRef<{
     clipboardRetention: string;
-    defaultEngine: string;
-    apiUrl: string;
-    apiKey: string;
-    model: string;
-    googleApiKey: string;
-    translateProxy: string;
     language: string;
     shortcutKey: string;
     radialShortcutKey: string;
@@ -66,12 +54,6 @@ export default function SettingsContent({ embedded }: Props) {
   useEffect(() => {
     const next = {
       clipboardRetention: settings.clipboardRetention,
-      defaultEngine: settings.defaultEngine,
-      apiUrl: settings.apiUrl,
-      apiKey: settings.apiKey,
-      model: settings.model,
-      googleApiKey: settings.googleApiKey,
-      translateProxy: settings.translateProxy,
       language: i18n.language,
       shortcutKey: settings.shortcutKey,
       radialShortcutKey: settings.radialShortcutKey,
@@ -84,12 +66,6 @@ export default function SettingsContent({ embedded }: Props) {
     const prev = syncedSettingsRef.current;
 
     if (!prev || prev.clipboardRetention !== next.clipboardRetention) setLocalRetention(next.clipboardRetention);
-    if (!prev || prev.defaultEngine !== next.defaultEngine) setLocalEngine(next.defaultEngine);
-    if (!prev || prev.apiUrl !== next.apiUrl) setLocalApiUrl(next.apiUrl);
-    if (!prev || prev.apiKey !== next.apiKey) setLocalApiKey(next.apiKey);
-    if (!prev || prev.model !== next.model) setLocalModel(next.model);
-    if (!prev || prev.googleApiKey !== next.googleApiKey) setLocalGoogleApiKey(next.googleApiKey);
-    if (!prev || prev.translateProxy !== next.translateProxy) setLocalTranslateProxy(next.translateProxy);
     if (!prev || prev.language !== next.language) setLocalLang(next.language);
     if (!prev || prev.shortcutKey !== next.shortcutKey) setLocalShortcutKey(next.shortcutKey);
     if (!prev || prev.radialShortcutKey !== next.radialShortcutKey) setLocalRadialShortcutKey(next.radialShortcutKey);
@@ -102,12 +78,6 @@ export default function SettingsContent({ embedded }: Props) {
     syncedSettingsRef.current = next;
   }, [
     settings.clipboardRetention,
-    settings.defaultEngine,
-    settings.apiUrl,
-    settings.apiKey,
-    settings.model,
-    settings.googleApiKey,
-    settings.translateProxy,
     i18n.language,
     settings.shortcutKey,
     settings.radialShortcutKey,
@@ -262,12 +232,6 @@ export default function SettingsContent({ embedded }: Props) {
 
     await settings.setSettingsBatch({
       clipboard_retention: localRetention,
-      default_translate_engine: localEngine,
-      ai_api_url: localApiUrl,
-      ai_api_key: localApiKey,
-      ai_model: localModel,
-      google_api_key: localGoogleApiKey,
-      translate_proxy: localTranslateProxy,
       language: localLang,
       paste_left_click: localPasteLeftClick,
       radial_menu_scale: String(localRadialMenuScale),
@@ -394,21 +358,6 @@ export default function SettingsContent({ embedded }: Props) {
       <RadialSection
         localRadialMenuScale={localRadialMenuScale}
         setLocalRadialMenuScale={setLocalRadialMenuScale}
-      />
-
-      <TranslationSection
-        localEngine={localEngine}
-        setLocalEngine={setLocalEngine}
-        localApiUrl={localApiUrl}
-        setLocalApiUrl={setLocalApiUrl}
-        localApiKey={localApiKey}
-        setLocalApiKey={setLocalApiKey}
-        localModel={localModel}
-        setLocalModel={setLocalModel}
-        localGoogleApiKey={localGoogleApiKey}
-        setLocalGoogleApiKey={setLocalGoogleApiKey}
-        localTranslateProxy={localTranslateProxy}
-        setLocalTranslateProxy={setLocalTranslateProxy}
       />
 
       <div className="settings-actions">

@@ -69,13 +69,3 @@ export interface Phrase {
   created_at: string;
   updated_at: string;
 }
-
-export interface TranslationRecord {
-  id: string;
-  source_text: string;
-  target_text: string;
-  source_lang: string;
-  target_lang: string;
-  engine: "ai" | "google";
-  created_at: string;
-}

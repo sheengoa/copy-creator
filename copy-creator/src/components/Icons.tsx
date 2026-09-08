@@ -23,16 +23,6 @@ export const Icons = {
       <line x1="3" y1="18" x2="3.01" y2="18" />
     </svg>
   ),
-  translate: (
-    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-      <path d="M5 8l6 6" />
-      <path d="M4 14l6-6 2-3" />
-      <path d="M2 5h12" />
-      <path d="M7 2h1" />
-      <path d="M22 22l-5-10-5 10" />
-      <path d="M14 18h6" />
-    </svg>
-  ),
   pin: (
     <svg viewBox="0 0 24 24" fill="currentColor" stroke="none">
       <path d="M16 12V4h1a1 1 0 0 0 0-2H7a1 1 0 0 0 0 2h1v8l-2.5 3.5a1 1 0 0 0 .8 1.5h4.7v4.5a1 1 0 0 0 2 0V17h4.7a1 1 0 0 0 .8-1.5L16 12z" />
