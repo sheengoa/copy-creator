@@ -775,21 +775,32 @@
   aspect-ratio: 16 / 10;
 }
 
+/* 图片绝对定位填满 16:10 预览框：图片的固有尺寸会把 aspect-ratio 盒子
+   撑高、配合 overflow:hidden 退化成中心裁切；绝对定位元素不参与撑开，
+   盒子锁定 16:10，配合 contain 让图片完整展示。 */
 .resource-card-preview .clipboard-card-thumb {
+  position: absolute;
+  inset: 0;
   width: 100%;
   height: 100%;
   border-radius: 0;
   background: transparent;
 }
 
+.resource-card-preview > img.resource-card-file-image,
 .resource-card-preview .clipboard-card-thumb img {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
   border-radius: 0;
   /* 完整展示图片内容，不做封面式裁切。 */
   object-fit: contain;
   transition: transform 0.2s ease;
 }
 
-.resource-card:hover .resource-card-preview .clipboard-card-thumb img {
+.resource-card:hover .resource-card-preview .clipboard-card-thumb img,
+.resource-card:hover .resource-card-preview > img.resource-card-file-image {
   transform: scale(1.03);
 }
 
