@@ -148,7 +148,10 @@ fn ydotool_available() -> bool {
 /// :1 = press, :0 = release
 fn ydotool_ctrl_shift_v() -> Result<(), String> {
     let status = Command::new("ydotool")
-        .args(["key", "29:1", "42:1", "47:1", "47:0", "42:0", "29:0"])
+        .args([
+            "key", "56:0", "100:0", "125:0", "126:0", "29:1", "42:1", "47:1", "47:0", "42:0",
+            "29:0",
+        ])
         .status()
         .map_err(|e| format!("ydotool spawn failed: {e}"))?;
 
@@ -161,8 +164,13 @@ fn ydotool_ctrl_shift_v() -> Result<(), String> {
 
 /// Inject Ctrl+V via ydotool.
 fn ydotool_ctrl_v() -> Result<(), String> {
+    // 前置修饰键释放事件（42/54=左右Shift、56/100=左右Alt、125/126=左右Win），
+    // 尽力清掉 Shift+单击手势残留的物理修饰键。
     let status = Command::new("ydotool")
-        .args(["key", "29:1", "47:1", "47:0", "29:0"])
+        .args([
+            "key", "42:0", "54:0", "56:0", "100:0", "125:0", "126:0", "29:1", "47:1", "47:0",
+            "29:0",
+        ])
         .status()
         .map_err(|e| format!("ydotool spawn failed: {e}"))?;
 
@@ -171,6 +179,23 @@ fn ydotool_ctrl_v() -> Result<(), String> {
     } else {
         Err(format!("ydotool exited with {status}"))
     }
+}
+
+/// 预释放不属于注入组合键的修饰键：Shift+单击等手势触发粘贴时，物理
+/// Shift 可能仍被按住，会把合成的 Ctrl+V 叠加成 Ctrl+Shift+V。对未按下
+/// 的修饰键发送释放是无害 no-op；X11 的 XTEST 走虚拟核心设备，合成释放
+/// 可真实清除物理按住的修饰键。
+fn release_unused_modifiers(enigo: &mut Enigo, shortcut: PasteShortcut) -> Result<(), String> {
+    let keys: &[Key] = match shortcut {
+        PasteShortcut::CtrlV => &[Key::Shift, Key::Alt, Key::Meta],
+        PasteShortcut::CtrlShiftV => &[Key::Alt, Key::Meta],
+    };
+    for key in keys {
+        enigo
+            .key(key.clone(), Direction::Release)
+            .map_err(|e| format!("enigo modifier release: {e}"))?;
+    }
+    Ok(())
 }
 
 /// Inject Ctrl+Shift+V via enigo.
@@ -182,6 +207,7 @@ fn enigo_ctrl_shift_v() -> Result<(), String> {
     #[cfg(not(target_os = "windows"))]
     const MODIFIER_SETTLE_MS: u64 = 20;
     let mut enigo = Enigo::new(&Settings::default()).map_err(|e| format!("enigo init: {e}"))?;
+    release_unused_modifiers(&mut enigo, PasteShortcut::CtrlShiftV)?;
     enigo
         .key(Key::Control, Direction::Press)
         .map_err(|e| format!("enigo ctrl press: {e}"))?;
@@ -209,6 +235,7 @@ fn enigo_ctrl_v() -> Result<(), String> {
     #[cfg(not(target_os = "windows"))]
     const MODIFIER_SETTLE_MS: u64 = 30;
     let mut enigo = Enigo::new(&Settings::default()).map_err(|e| format!("enigo init: {e}"))?;
+    release_unused_modifiers(&mut enigo, PasteShortcut::CtrlV)?;
     enigo
         .key(Key::Control, Direction::Press)
         .map_err(|e| format!("enigo ctrl press: {e}"))?;
@@ -251,8 +278,9 @@ fn xdotool_ctrl_shift_v() -> Result<(), String> {
 
 /// Inject Ctrl+V via wtype.
 fn wtype_ctrl_v() -> Result<(), String> {
+    // -m 前置释放 shift/alt，尽力清掉 Shift+单击手势残留的物理修饰键。
     let status = Command::new("wtype")
-        .args(["-M", "ctrl", "-k", "v"])
+        .args(["-m", "shift", "-m", "alt", "-M", "ctrl", "-k", "v"])
         .status()
         .map_err(|e| format!("wtype spawn failed: {e}"))?;
     if status.success() {
@@ -265,7 +293,7 @@ fn wtype_ctrl_v() -> Result<(), String> {
 /// Inject Ctrl+Shift+V via wtype.
 fn wtype_ctrl_shift_v() -> Result<(), String> {
     let status = Command::new("wtype")
-        .args(["-M", "ctrl", "-M", "shift", "-k", "v"])
+        .args(["-m", "alt", "-M", "ctrl", "-M", "shift", "-k", "v"])
         .status()
         .map_err(|e| format!("wtype spawn failed: {e}"))?;
     if status.success() {
