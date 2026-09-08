@@ -1,3 +1,6 @@
+// Release 版为 Windows GUI 子系统，不分配控制台窗口；Debug 版保留控制台以便查看日志。
+#![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
+
 #[cfg(target_os = "linux")]
 fn should_disable_dmabuf_renderer(explicit_value: Option<&str>, nvidia_present: bool) -> bool {
     explicit_value.is_none() && nvidia_present
