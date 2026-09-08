@@ -444,20 +444,12 @@
   display: none;
 }
 
-.settings-shortcut-guide-title::before {
-  content: "\25B8";
-  display: inline-block;
-  width: 1em;
-  color: var(--text-secondary);
-  transition: transform 0.15s ease;
-}
-
-details[open] > .settings-shortcut-guide-title::before {
-  transform: rotate(90deg);
-}
-
 .settings-shortcut-guide-title:hover {
   color: var(--accent);
+}
+
+.settings-shortcut-guide[open] .settings-shortcut-guide-title {
+  margin-bottom: 8px;
 }
 
 .settings-shortcut-guide-body {
