@@ -55,6 +55,11 @@ const IS_LINUX = typeof navigator !== "undefined"
   && /Linux/i.test(navigator.userAgent)
   && !/Android/i.test(navigator.userAgent);
 
+// 诊断日志：转发到后端日志文件，排查仅真实交互可复现的拖动时序问题。
+const flog = (message: string) => {
+  void invoke("debug_log", { message }).catch(() => {});
+};
+
 interface RadialItem {
   id: string;
   content: string;
@@ -277,6 +282,9 @@ export default function RadialMenu() {
   const dragSessionIdRef = useRef(0);
   const activeDragSessionIdRef = useRef<number | null>(null);
   const cancelledDragSessionsRef = useRef(new Set<number>());
+  // 径向菜单 UI 缩放比（设置项，默认 1）。CSS 侧通过 --radial-ui-scale
+  // 对整窗 zoom，窗口尺寸与物理换算在这里同步乘同一系数。
+  const uiScaleRef = useRef(1);
 
   useEffect(() => { visibleRef.current = visible; }, [visible]);
   useEffect(() => { selectedItemIdRef.current = selectedItemId; }, [selectedItemId]);
@@ -285,6 +293,12 @@ export default function RadialMenu() {
   useEffect(() => { resourceGroupRef.current = resourceGroup; }, [resourceGroup]);
   useEffect(() => { phraseGroupIdRef.current = phraseGroupId; }, [phraseGroupId]);
   useEffect(() => { previewRef.current = preview; }, [preview]);
+
+  const applyUiScale = useCallback((scale: number) => {
+    const next = Math.min(2, Math.max(0.5, Number.isFinite(scale) ? scale : 1));
+    uiScaleRef.current = next;
+    document.documentElement.style.setProperty("--radial-ui-scale", String(next));
+  }, []);
 
   const updateBackTopVisibility = useCallback(() => {
     const list = listRef.current;
@@ -420,10 +434,11 @@ export default function RadialMenu() {
     originalWindowPositionRef.current = null;
     const nextRestoreTask = restoreTask ?? enqueueWindowOperation(async () => {
       const appWindow = getCurrentWindow();
+      const uiScale = uiScaleRef.current;
       try {
         await appWindow.setSize(new LogicalSize(
-          RADIAL_MENU_WIDTH + 2 * RADIAL_SHADOW_MARGIN,
-          RADIAL_MENU_HEIGHT + 2 * RADIAL_SHADOW_MARGIN,
+          (RADIAL_MENU_WIDTH + 2 * RADIAL_SHADOW_MARGIN) * uiScale,
+          (RADIAL_MENU_HEIGHT + 2 * RADIAL_SHADOW_MARGIN) * uiScale,
         ));
         if (originalPosition) await appWindow.setPosition(originalPosition);
       } catch {
@@ -481,12 +496,15 @@ export default function RadialMenu() {
         || nativeDragRef.current
       ) return null;
       // position 是含阴影边距的窗口原点；展开计算按可见内容区域换算。
-      const marginPhysical = RADIAL_SHADOW_MARGIN * scaleFactor;
+      // zoom 缩放后，物理边距与可见宽度都随 uiScale 放大。
+      const uiScale = uiScaleRef.current;
+      const marginPhysical = RADIAL_SHADOW_MARGIN * scaleFactor * uiScale;
       const expansion = calculateRadialExpansion({
         windowX: position.x + marginPhysical,
         workAreaX: monitor.workArea.position.x,
         workAreaWidth: monitor.workArea.size.width,
         scaleFactor,
+        uiScale,
       });
       if (expansion.previewWidth <= 0) return null;
 
@@ -501,8 +519,8 @@ export default function RadialMenu() {
       setPreview(loadingState);
       await enqueueWindowOperation(async () => {
         await appWindow.setSize(new LogicalSize(
-          RADIAL_MENU_WIDTH + 2 * RADIAL_SHADOW_MARGIN + expansion.previewWidth,
-          RADIAL_MENU_HEIGHT + 2 * RADIAL_SHADOW_MARGIN,
+          (RADIAL_MENU_WIDTH + 2 * RADIAL_SHADOW_MARGIN + expansion.previewWidth) * uiScale,
+          (RADIAL_MENU_HEIGHT + 2 * RADIAL_SHADOW_MARGIN) * uiScale,
         ));
         if (expansion.direction === "left") {
           // 展开计算给出的是内容原点，回写窗口位置时补回阴影边距。
@@ -533,8 +551,8 @@ export default function RadialMenu() {
         try {
           await enqueueWindowOperation(async () => {
             await appWindow.setSize(new LogicalSize(
-              RADIAL_MENU_WIDTH + 2 * RADIAL_SHADOW_MARGIN,
-              RADIAL_MENU_HEIGHT + 2 * RADIAL_SHADOW_MARGIN,
+              (RADIAL_MENU_WIDTH + 2 * RADIAL_SHADOW_MARGIN) * uiScaleRef.current,
+              (RADIAL_MENU_HEIGHT + 2 * RADIAL_SHADOW_MARGIN) * uiScaleRef.current,
             ));
             if (originalPosition) await appWindow.setPosition(originalPosition);
           });
@@ -661,6 +679,12 @@ export default function RadialMenu() {
       }
     }).catch(() => {});
 
+    // Initial radial UI scale load (kept in sync afterwards via events)
+    invoke<string>("get_setting", { key: "radial_menu_scale" }).then((raw) => {
+      const percent = Number.parseFloat(raw);
+      if (Number.isFinite(percent)) applyUiScale(percent / 100);
+    }).catch(() => {});
+
     // Pre-load data so it's ready when the menu first shows
     loadPasteLeftClickSetting();
     useClipboardStore.getState().init();
@@ -698,7 +722,7 @@ export default function RadialMenu() {
       if (unlistenLang) unlistenLang();
       if (unlistenResourceGroups) unlistenResourceGroups();
     };
-  }, [loadResourceGroups]);
+  }, [applyUiScale, loadResourceGroups]);
 
   const applyResourceGroupSwitch = useCallback((nextGroup: string | null) => {
     collapsePreview();
@@ -820,6 +844,10 @@ export default function RadialMenu() {
   const handleItemPaste = useCallback(async (itemId: string, terminal = false) => {
     const { records, pasteRecord, pasteRecordTerminal } = useClipboardStore.getState();
     const record = records.find((r) => r.id === itemId);
+    // 先收起菜单再触发粘贴：后端的焦点沉降等待与窗口隐藏并行，
+    // 点击到粘贴落地的延迟显著降低（原来串行等待粘贴命令返回后才隐藏）。
+    resetState();
+    void getCurrentWindow().hide();
     if (record) {
       await (terminal ? pasteRecordTerminal(record) : pasteRecord(record));
     } else {
@@ -829,8 +857,6 @@ export default function RadialMenu() {
         await (terminal ? pastePhraseTerminal(phrase) : pastePhrase(phrase));
       }
     }
-    resetState();
-    getCurrentWindow().hide();
   }, [resetState]);
 
   // 整组粘贴（方案 A）：分组内全部为文本时合并为一段文本粘贴，
@@ -838,8 +864,13 @@ export default function RadialMenu() {
   // groupPath 为 null 时作用于当前选中的分组。
   const handlePasteGroup = useCallback(async (groupPath: string | null) => {
     const store = useClipboardStore.getState();
-    const allRecords = await store.loadAllRecords("resources", groupPath ?? resourceGroupRef.current);
+    const allRecords = await store.loadAllRecords(
+      "resources",
+      groupPath ?? resourceGroupRef.current,
+      { silent: true },
+    );
     const records = (allRecords ?? []).filter((record) => isResourceRecord(record));
+    flog(`paste-group path=${groupPath ?? resourceGroupRef.current} records=${records.length}`);
     if (records.length > 0) {
       const allText = records.every((record) => inferResourceMediaKind(record) === "text");
       try {
@@ -885,12 +916,14 @@ export default function RadialMenu() {
 
     const next = { ...pending, startRequested: true };
     nativeDragRef.current = next;
+    flog(`invoking start_radial_file_drag session=${next.sessionId} item=${next.itemId}`);
     void invoke("start_radial_file_drag", {
       source: next.dragSource,
       id: next.itemId,
       path: next.dragPath || null,
       sessionId: next.sessionId,
     }).catch((error) => {
+      flog(`start_radial_file_drag rejected session=${next.sessionId}: ${error}`);
       const current = nativeDragRef.current;
       if (
         !current
@@ -982,6 +1015,16 @@ export default function RadialMenu() {
   const handleItemPointerDown = useCallback((
     e: PointerEvent,
   ) => {
+    const target = e.target instanceof Element
+      ? e.target.closest<HTMLElement>(
+          '[data-radial-item-id][data-radial-drag-kind="files"]',
+        )
+      : null;
+    flog(
+      `pointer-down btn=${e.button} primary=${e.isPrimary} dragActive=${dragActiveRef.current}`
+      + ` nativeDrag=${nativeDragRef.current ? nativeDragRef.current.sessionId : "none"}`
+      + ` matched=${target ? "yes" : "no"}`,
+    );
     if (
       e.button !== 0
       || !e.isPrimary
@@ -989,11 +1032,6 @@ export default function RadialMenu() {
       || nativeDragRef.current
     ) return;
 
-    const target = e.target instanceof Element
-      ? e.target.closest<HTMLElement>(
-          '[data-radial-item-id][data-radial-drag-kind="files"]',
-        )
-      : null;
     const itemId = target?.dataset.radialItemId;
     const dragSource = target?.dataset.radialDragSource as RadialDragSource | undefined;
     if (
@@ -1026,6 +1064,7 @@ export default function RadialMenu() {
       startRequested: false,
       nativeStarted: false,
     };
+    flog(`drag session armed item=${itemId} source=${dragSource} session=${pending.sessionId}`);
     nativeDragRef.current = pending;
     activeDragSessionIdRef.current = pending.sessionId;
     dismissPreviewForDrag();
@@ -1050,6 +1089,10 @@ export default function RadialMenu() {
     );
     if (distance < RADIAL_DRAG_THRESHOLD_PX) return;
 
+    flog(
+      `threshold crossed session=${pending.sessionId} dist=${distance.toFixed(1)}`
+      + ` client=(${e.clientX},${e.clientY}) screen=(${e.screenX},${e.screenY})`,
+    );
     suppressClickRef.current = true;
     dragActiveRef.current = true;
     setDraggingItemId(pending.itemId);
@@ -1133,10 +1176,15 @@ export default function RadialMenu() {
     let disposed = false;
 
     const setup = async () => {
+      // 诊断：径向窗口焦点丢失往往先于用户感知的"菜单消失"。
+      void getCurrentWindow().onFocusChanged(({ payload: focused }) => {
+        flog(`radial window focus changed: focused=${focused}`);
+      });
       // Listen for radial-menu-show event from backend (keyboard shortcut triggered)
-      const [unShow, unHide, unDragStarted, unDragFinished] = await Promise.all([
-        listen<{ theme: string }>("radial-menu-show", (e) => {
+      const [unShow, unHide, unDragStarted, unDragFinished, unScaleChanged] = await Promise.all([
+        listen<{ theme: string; scale?: number }>("radial-menu-show", (e) => {
           // 后端会先显示窗口再发事件，必须先同步开放前端交互，避免首次按下落在隐藏状态。
+          if (typeof e.payload.scale === "number") applyUiScale(e.payload.scale);
           const pending = nativeDragRef.current;
           if (pending && !pending.nativeStarted) {
             cancelPendingNativeDrag(pending);
@@ -1174,15 +1222,19 @@ export default function RadialMenu() {
         listen("radial-menu-hide", resetStateForNativeHide),
         listen("radial-drag-started", handleRadialDragStarted),
         listen("radial-drag-finished", handleRadialDragFinished),
+        listen<{ scale: number }>("radial-scale-changed", (e) => {
+          applyUiScale(e.payload.scale);
+        }),
       ]);
       if (disposed) {
         unShow();
         unHide();
         unDragStarted();
         unDragFinished();
+        unScaleChanged();
         return;
       }
-      unlisteners = [unShow, unHide, unDragStarted, unDragFinished];
+      unlisteners = [unShow, unHide, unDragStarted, unDragFinished, unScaleChanged];
     };
 
     void setup().catch((error) => {
@@ -1249,6 +1301,7 @@ export default function RadialMenu() {
       window.removeEventListener("blur", handleBlur);
     };
   }, [
+    applyUiScale,
     closeResourceGroupMenu,
     collapsePreview,
     cancelPendingNativeDrag,

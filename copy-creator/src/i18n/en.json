@@ -60,7 +60,11 @@
     "pasteRightClick": "Right-click paste mode",
     "pasteNormal": "Normal",
     "pasteTerminal": "Terminal",
-    "translation": "Translation"
+    "translation": "Translation",
+    "radialSection": "Radial Menu",
+    "radialMenuSize": "Menu Size",
+    "radialMenuSizeReset": "Default",
+    "radialMenuSizeHint": "Scale the whole radial menu to fit your display while keeping its aspect ratio. Default 100% (420×650); applies the next time the menu pops up."
   },
   "translate": {
     "result": "Result",
@@ -201,6 +205,7 @@
     "noExistingClipboard": "No content to edit yet",
     "createPlaceholderClipboard": "Enter the content to save...",
     "exitEditClipboard": "Exit edit",
+    "editingTag": "Editing",
     "destinationClipboard": "Clipboard",
     "destinationResource": "Resources"
   },

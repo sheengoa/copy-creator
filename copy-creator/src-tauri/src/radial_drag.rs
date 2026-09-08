@@ -788,24 +788,436 @@ fn arm_linux_drag_on_main(
     Ok(())
 }
 
+/// 拖动虚影位图：缩放后的 32bpp BGRA 像素（Windows 专用）。
+#[cfg(target_os = "windows")]
+pub(crate) struct DragImage {
+    width: i32,
+    height: i32,
+    bgra: Vec<u8>,
+}
+
+/// 生成拖动虚影位图：原图等比缩放到 128×128 以内。直接把原图当拖动
+/// 图像时，虚影按原始像素渲染，截图类内容会大到夸张（实测踩坑）。
+/// 非图片文件（zip 等）解码失败返回 None，拖动时表现为无虚影。
+#[cfg(target_os = "windows")]
+fn make_drag_image(source: &std::path::Path) -> Option<DragImage> {
+    const MAX_DIM: u32 = 128;
+    let img = image::open(source).ok()?;
+    let resized = if img.width() <= MAX_DIM && img.height() <= MAX_DIM {
+        img
+    } else {
+        img.resize(MAX_DIM, MAX_DIM, image::imageops::FilterType::Triangle)
+    };
+    let (width, height) = (resized.width() as i32, resized.height() as i32);
+    let mut bgra = resized.to_rgba8().into_raw();
+    for pixel in bgra.chunks_exact_mut(4) {
+        pixel.swap(0, 2); // RGBA → BGRA（Win32 32bpp 位图字节序）
+    }
+    Some(DragImage { width, height, bgra })
+}
+
 #[cfg(not(target_os = "linux"))]
 fn start_platform_drag(
     window: &WebviewWindow,
     paths: Vec<PathBuf>,
-    icon_path: PathBuf,
+    drag_image: Option<DragImage>,
     app: AppHandle,
     session_id: u64,
 ) -> Result<(), String> {
-    let callback_app = app.clone();
-    let callback = move |result: drag::DragResult, cursor_position: drag::CursorPosition| {
-        finish_radial_drag(&callback_app, result, cursor_position, session_id);
-    };
+    log::info!(
+        "[radial_drag] start_platform_drag session={session_id} paths={}",
+        paths.len()
+    );
 
-    let item = drag::DragItem::Files(paths);
-    let image = drag::Image::File(icon_path);
-    drag::start_drag(window, item, image, callback, drag::Options::default())
-        .map_err(|error| error.to_string())
+    #[cfg(target_os = "windows")]
+    {
+        start_windows_drag(window, paths, drag_image, app, session_id)
+    }
+
+    #[cfg(not(target_os = "windows"))]
+    {
+        let _ = drag_image;
+        let callback_app = app.clone();
+        let callback = move |result: drag::DragResult, cursor_position: drag::CursorPosition| {
+            finish_radial_drag(&callback_app, result, cursor_position, session_id);
+        };
+
+        let image = drag::Image::File(paths.first().cloned().ok_or("没有可拖拽的文件")?);
+        let item = drag::DragItem::Files(paths);
+        let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            drag::start_drag(window, item, image, callback, drag::Options::default())
+        }));
+        match result {
+            Ok(Ok(())) => {
+                log::info!("[radial_drag] start_drag returned (drag finished) session={session_id}");
+                Ok(())
+            }
+            Ok(Err(error)) => {
+                log::error!("[radial_drag] start_drag failed session={session_id}: {error}");
+                Err(error.to_string())
+            }
+            Err(panic) => {
+                let msg = panic
+                    .downcast_ref::<&str>()
+                    .map(|s| s.to_string())
+                    .or_else(|| panic.downcast_ref::<String>().cloned())
+                    .unwrap_or_else(|| "unknown panic".to_string());
+                log::error!("[radial_drag] start_drag panicked session={session_id}: {msg}");
+                Err(format!("拖动启动崩溃: {msg}"))
+            }
+        }
+    }
 }
+
+#[cfg(target_os = "windows")]
+mod windows_drag {
+    //! Windows 原生文件拖出的私有实现。
+    //!
+    //! 关键约束（实测踩坑 + 上游 issue crabnebula-dev/drag-rs#94）：
+    //! DoDragDrop 的模态循环依赖调用线程持续收到鼠标消息。若从后台线程
+    //! （如 tokio 工作线程）调用，OLE 无法把左键按下时的隐式鼠标捕获
+    //! 转移到拖动循环，循环收不到任何鼠标输入——释放按键也无人观察，
+    //! QueryContinueDrag 零调用，拖动永久挂死。因此必须在收到左键按下
+    //! 的 UI 主线程上执行（tauri-plugin-drag 上游同样用 run_on_main_thread）。
+    //!
+    //! 兜底：主线程被挂死的拖动循环占住 = 整个应用冻结。看门狗线程监控
+    //! "捕获被 CLIPBRDWNDCLASS 持有且无任何鼠标键按下"这一僵死特征
+    //! （issue #94 作者实测有效），向捕获窗口注入 ESC 强制走
+    //! QueryContinueDrag 的取消分支，拖动以 Cancel 收场，应用自动恢复。
+    use super::finish_radial_drag;
+    use super::DragImage;
+    use std::path::PathBuf;
+    use std::sync::atomic::{AtomicBool, Ordering};
+    use std::sync::Arc;
+    use std::time::{Duration, Instant};
+    use tauri::{AppHandle, Manager, WebviewWindow};
+
+    type Handle = *mut core::ffi::c_void;
+
+    const WM_KEYDOWN: u32 = 0x0100;
+    const WM_KEYUP: u32 = 0x0101;
+    const VK_ESCAPE: usize = 0x1B;
+    const VK_LBUTTON: i32 = 0x01;
+    const VK_RBUTTON: i32 = 0x02;
+    /// 捕获无键按下持续超过该时长即判定拖动循环僵死（过短会误杀
+    /// "松开后目标进程正在处理 IDropTarget::Drop"的正常慢场景）。
+    const WEDGE_GRACE: Duration = Duration::from_secs(5);
+
+    #[repr(C)]
+    struct Rect {
+        left: i32,
+        top: i32,
+        right: i32,
+        bottom: i32,
+    }
+
+    #[repr(C)]
+    struct GuiThreadInfo {
+        cb_size: u32,
+        flags: u32,
+        hwnd_active: Handle,
+        hwnd_capture: Handle,
+        hwnd_menu_owner: Handle,
+        hwnd_move_size: Handle,
+        hwnd_caret: Handle,
+        rc_caret: Rect,
+    }
+
+    #[link(name = "user32")]
+    unsafe extern "system" {
+        fn GetWindowThreadProcessId(hwnd: Handle, out_pid: *mut u32) -> u32;
+        fn GetGUIThreadInfo(thread_id: u32, info: *mut GuiThreadInfo) -> i32;
+        fn GetClassNameW(hwnd: Handle, buf: *mut u16, max_count: i32) -> i32;
+        fn GetAsyncKeyState(v_key: i32) -> i16;
+        fn PostMessageW(hwnd: Handle, msg: u32, w_param: usize, l_param: isize) -> i32;
+    }
+
+    fn mouse_button_down() -> bool {
+        unsafe {
+            (GetAsyncKeyState(VK_LBUTTON) as u16 & 0x8000) != 0
+                || (GetAsyncKeyState(VK_RBUTTON) as u16 & 0x8000) != 0
+        }
+    }
+
+    fn window_class_is(hwnd: Handle, expect: &[u16]) -> bool {
+        let mut buf = [0_u16; 32];
+        let n = unsafe { GetClassNameW(hwnd, buf.as_mut_ptr(), buf.len() as i32) };
+        n > 0 && buf[..n as usize] == *expect
+    }
+
+    /// OLE 拖动循环使用的窗口类名（宽字符，不含结尾 0）。
+    const CLIPBRDWNDCLASS: &[u16] = &[
+        b'C' as u16, b'L' as u16, b'I' as u16, b'P' as u16, b'B' as u16, b'R' as u16,
+        b'D' as u16, b'W' as u16, b'N' as u16, b'D' as u16, b'C' as u16, b'L' as u16,
+        b'A' as u16, b'S' as u16, b'S' as u16,
+    ];
+
+    /// 监控主线程拖动循环僵死；发现即注入 ESC 取消拖动并结束自身。
+    /// 窗口句柄以整数传递（裸指针不能跨线程）。
+    fn spawn_wedge_watchdog(main_hwnd: isize, stop: Arc<AtomicBool>) {
+        std::thread::Builder::new()
+            .name("radial-drag-watchdog".into())
+            .spawn(move || {
+                let main_hwnd = main_hwnd as Handle;
+                let mut pid = 0_u32;
+                let thread_id = unsafe { GetWindowThreadProcessId(main_hwnd, &mut pid) };
+                let start = Instant::now();
+                while !stop.load(Ordering::Acquire) {
+                    std::thread::sleep(Duration::from_millis(500));
+                    if start.elapsed() < WEDGE_GRACE {
+                        continue;
+                    }
+                    if mouse_button_down() {
+                        continue;
+                    }
+                    unsafe {
+                        let mut info: GuiThreadInfo = core::mem::zeroed();
+                        info.cb_size = core::mem::size_of::<GuiThreadInfo>() as u32;
+                        if GetGUIThreadInfo(thread_id, &mut info) == 0
+                            || info.hwnd_capture.is_null()
+                            || !window_class_is(info.hwnd_capture, CLIPBRDWNDCLASS)
+                        {
+                            continue;
+                        }
+                        // 僵死特征齐备：OLE 拖动窗口仍持有捕获，却没有任何
+                        // 鼠标键按下——循环永远等不到释放。注入 ESC 走取消分支。
+                        log::warn!(
+                            "[radial_drag] 检测到拖动循环僵死，注入 ESC 恢复 (session 主线程 thread={thread_id})"
+                        );
+                        PostMessageW(info.hwnd_capture, WM_KEYDOWN, VK_ESCAPE, 0);
+                        PostMessageW(info.hwnd_capture, WM_KEYUP, VK_ESCAPE, 0);
+                    }
+                    return;
+                }
+            })
+            .ok();
+    }
+
+    pub fn start_drag(
+        window: &WebviewWindow,
+        paths: Vec<PathBuf>,
+        drag_image: Option<DragImage>,
+        app: AppHandle,
+        session_id: u64,
+    ) -> Result<(), String> {
+        let main_app = app.clone();
+        let drag_window = window.clone();
+        app.run_on_main_thread(move || {
+            // 先隐藏径向窗口：给出"拖动开始"的视觉反馈，同时释放 WebView2
+            // 的隐式鼠标捕获。DoDragDrop 随后在主线程上接管输入。
+            if let Some(radial) = main_app.get_webview_window("radial-menu") {
+                let _ = radial.hide();
+            }
+
+            let Ok(hwnd) = drag_window.hwnd() else {
+                log::warn!("[radial_drag] 获取窗口句柄失败，看门狗降级为不启用");
+                return;
+            };
+            let main_hwnd = hwnd.0 as isize;
+            let stop_watchdog = Arc::new(AtomicBool::new(false));
+            let watchdog_stop = stop_watchdog.clone();
+            spawn_wedge_watchdog(main_hwnd, watchdog_stop);
+
+            // DoDragDrop 同步阻塞主线程直到拖动结束（内部自泵消息）。
+            let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                ole_drag::drag_files(&paths, drag_image.as_ref())
+            }));
+            stop_watchdog.store(true, Ordering::Release);
+            match result {
+                Ok(Ok((dropped, x, y))) => {
+                    log::info!(
+                        "[radial_drag] ole drag finished session={session_id} dropped={dropped} cursor=({x},{y})"
+                    );
+                    let result = if dropped {
+                        drag::DragResult::Dropped
+                    } else {
+                        drag::DragResult::Cancel
+                    };
+                    finish_radial_drag(
+                        &main_app,
+                        result,
+                        drag::CursorPosition { x, y },
+                        session_id,
+                    );
+                }
+                Ok(Err(error)) => {
+                    log::error!("[radial_drag] ole drag failed session={session_id}: {error}");
+                    finish_radial_drag(
+                        &main_app,
+                        drag::DragResult::Cancel,
+                        drag::CursorPosition { x: 0, y: 0 },
+                        session_id,
+                    );
+                }
+                Err(panic) => {
+                    let msg = panic
+                        .downcast_ref::<&str>()
+                        .map(|s| s.to_string())
+                        .or_else(|| panic.downcast_ref::<String>().cloned())
+                        .unwrap_or_else(|| "unknown panic".to_string());
+                    log::error!("[radial_drag] start_drag panicked session={session_id}: {msg}");
+                    finish_radial_drag(
+                        &main_app,
+                        drag::DragResult::Cancel,
+                        drag::CursorPosition { x: 0, y: 0 },
+                        session_id,
+                    );
+                }
+            }
+        })
+        .map_err(|error| format!("提交主线程拖动失败: {error}"))?;
+        Ok(())
+    }
+
+    /// 自研 OLE 文件拖出。不使用 drag crate：其 DataObject 包装层的
+    /// EnumFormatEtc 返回 E_NOTIMPL，Chromium 系浏览器靠枚举格式判断
+    /// 拖动内容，枚举失败即判定为空拖动——文件永远"拖不进"网页上传区
+    /// （资源管理器直接查 CF_HDROP 所以不受影响）。shell 原生数据对象
+    /// 自带完整格式枚举，浏览器/编辑器/终端全部兼容。
+    pub(crate) mod ole_drag {
+        use super::super::DragImage;
+        use std::os::windows::ffi::OsStrExt;
+        use std::path::PathBuf;
+
+        use windows::core::{implement, HRESULT, PCWSTR};
+        use windows::Win32::Foundation::{
+            BOOL, COLORREF, DRAGDROP_S_CANCEL, DRAGDROP_S_DROP, DRAGDROP_S_USEDEFAULTCURSORS,
+            POINT, SIZE,
+        };
+        use windows::Win32::Graphics::Gdi::CreateBitmap;
+        use windows::Win32::System::Com::{CLSCTX_ALL, CoCreateInstance, IDataObject};
+        use windows::Win32::System::Ole::{
+            DoDragDrop, DROPEFFECT, DROPEFFECT_COPY, IDropSource, IDropSource_Impl,
+            OleInitialize,
+        };
+        use windows::Win32::System::SystemServices::{MK_LBUTTON, MODIFIERKEYS_FLAGS};
+        use windows::Win32::UI::Shell::{
+            BHID_DataObject, CLSID_DragDropHelper, IDragSourceHelper, IShellItemArray,
+            ILCreateFromPathW, ILFree, SHCreateShellItemArrayFromIDLists, SHDRAGIMAGE,
+        };
+        use windows::Win32::UI::Shell::Common::ITEMIDLIST;
+        use windows::Win32::UI::WindowsAndMessaging::GetCursorPos;
+
+        #[implement(IDropSource)]
+        struct OleDropSource;
+
+        #[allow(non_snake_case)]
+        impl IDropSource_Impl for OleDropSource {
+            fn QueryContinueDrag(
+                &self,
+                f_escape_pressed: BOOL,
+                grf_key_state: MODIFIERKEYS_FLAGS,
+            ) -> HRESULT {
+                if f_escape_pressed.as_bool() {
+                    DRAGDROP_S_CANCEL
+                } else if (grf_key_state & MK_LBUTTON) == MODIFIERKEYS_FLAGS(0) {
+                    // 左键松开 → 落放。
+                    DRAGDROP_S_DROP
+                } else {
+                    HRESULT(0)
+                }
+            }
+
+            fn GiveFeedback(&self, _effect: DROPEFFECT) -> HRESULT {
+                DRAGDROP_S_USEDEFAULTCURSORS
+            }
+        }
+
+        /// 同步执行一次 OLE 文件拖出，返回 (是否落放, 光标 X, 光标 Y)。
+        /// 必须在 UI 主线程（STA）上调用。
+        pub(super) fn drag_files(
+            paths: &[PathBuf],
+            image: Option<&DragImage>,
+        ) -> Result<(bool, i32, i32), String> {
+            unsafe {
+                if let Err(e) = OleInitialize(Some(std::ptr::null_mut())) {
+                    return Err(format!("OLE 初始化失败: {e}"));
+                }
+
+                // ILCreateFromPathW 无法解析 `\\?\` 扩展路径前缀（canonicalize
+                // 的产物，实测必失败），先统一转回常规路径。
+                let paths: Vec<PathBuf> = paths
+                    .iter()
+                    .map(|path| {
+                        let raw = path.to_string_lossy();
+                        if let Some(rest) = raw.strip_prefix(r"\\?\UNC\") {
+                            std::path::PathBuf::from(format!(r"\\{rest}"))
+                        } else if let Some(rest) = raw.strip_prefix(r"\\?\") {
+                            std::path::PathBuf::from(rest)
+                        } else {
+                            path.clone()
+                        }
+                    })
+                    .collect();
+
+                // shell 数据对象：自带 CF_HDROP / FileGroupDescriptor 等
+                // 完整格式枚举，是浏览器上传兼容性的关键。
+                let mut pidls: Vec<*mut ITEMIDLIST> = Vec::with_capacity(paths.len());
+                for path in &paths {
+                    let wide: Vec<u16> =
+                        path.as_os_str().encode_wide().chain(Some(0)).collect();
+                    let pidl = ILCreateFromPathW(PCWSTR::from_raw(wide.as_ptr()));
+                    if pidl.is_null() {
+                        for done in &pidls {
+                            ILFree(Some(*done as *const ITEMIDLIST));
+                        }
+                        return Err(format!("无法定位文件: {}", path.display()));
+                    }
+                    pidls.push(pidl);
+                }
+                let pidl_refs: Vec<*const ITEMIDLIST> =
+                    pidls.iter().map(|p| p.cast_const()).collect();
+                let array: IShellItemArray = SHCreateShellItemArrayFromIDLists(&pidl_refs)
+                    .map_err(|e| format!("创建 shell 项数组失败: {e}"))?;
+                let data_object: IDataObject = array
+                    .BindToHandler(None, &BHID_DataObject)
+                    .map_err(|e| format!("创建拖拽数据对象失败: {e}"))?;
+
+                // 拖动虚影（可选）：缩放后的 32bpp BGRA 位图交给系统渲染。
+                if let Some(img) = image {
+                    let hbmp = CreateBitmap(
+                        img.width,
+                        img.height,
+                        1,
+                        32,
+                        Some(img.bgra.as_ptr() as *const core::ffi::c_void),
+                    );
+                    if !hbmp.is_invalid() {
+                        let helper: IDragSourceHelper =
+                            CoCreateInstance(&CLSID_DragDropHelper, None, CLSCTX_ALL)
+                                .map_err(|e| format!("创建 DragSourceHelper 失败: {e}"))?;
+                        let shdi = SHDRAGIMAGE {
+                            sizeDragImage: SIZE {
+                                cx: img.width,
+                                cy: img.height,
+                            },
+                            ptOffset: POINT { x: 0, y: 0 },
+                            hbmpDragImage: hbmp,
+                            crColorKey: COLORREF(0),
+                        };
+                        let _ = helper.InitializeFromBitmap(&shdi, &data_object);
+                    }
+                }
+
+                let drop_source: IDropSource = OleDropSource.into();
+                let mut effect = DROPEFFECT::default();
+                let hr = DoDragDrop(&data_object, &drop_source, DROPEFFECT_COPY, &mut effect);
+                for pidl in &pidls {
+                    ILFree(Some(*pidl as *const ITEMIDLIST));
+                }
+                let dropped = hr == DRAGDROP_S_DROP;
+                let mut pos = POINT::default();
+                if GetCursorPos(&mut pos).is_err() {
+                    (pos.x, pos.y) = (0, 0);
+                }
+                Ok((dropped, pos.x, pos.y))
+            }
+        }
+    }
+}
+
+#[cfg(target_os = "windows")]
+use windows_drag::start_drag as start_windows_drag;
 
 #[tauri::command]
 pub async fn arm_radial_file_drag(
@@ -939,18 +1351,23 @@ pub async fn start_radial_file_drag(
 
     #[cfg(not(target_os = "linux"))]
     {
+        log::info!(
+            "[radial_drag] start_radial_file_drag invoked session={session_id} source={source:?} id={id} path={path:?}"
+        );
         let paths = requested_drag_paths(&app, source, &id, path)?;
         let icon_path = paths
             .first()
             .cloned()
             .ok_or_else(|| "没有可拖拽的文件".to_string())?;
-        start_platform_drag(&window, paths, icon_path, app, session_id)
+        // 在异步工作线程上预生成缩略虚影，避免解码大图阻塞 UI 主线程。
+        let drag_image = make_drag_image(&icon_path);
+        start_platform_drag(&window, paths, drag_image, app, session_id)
     }
 }
 
 #[cfg(test)]
 mod tests {
-    use super::collect_group_files;
+    use super::{collect_group_files, make_drag_image_bytes};
 
     #[test]
     fn group_files_are_collected_recursively_without_hidden_entries() {

@@ -47,11 +47,11 @@ describe("standalone window chrome", () => {
   });
 
   it("uses wider clipboard create action buttons", () => {
-    const footerRule = getRule(readStyle("clipboard.css"), ".clipboard-create-footer");
+    const barRule = getRule(readStyle("clipboard.css"), ".clipboard-create-action-bar");
     const buttonRule = getRule(readStyle("clipboard.css"), ".clipboard-create-actions .dialog-btn");
     const saveButtonRule = getRule(readStyle("clipboard.css"), ".clipboard-create-actions .dialog-btn.save");
 
-    expect(footerRule).toContain("justify-content: flex-end");
+    expect(barRule).toContain("border-top: 1px solid var(--card-border)");
     expect(buttonRule).toContain("min-width: 112px");
     expect(saveButtonRule).toContain("min-width: 132px");
   });
@@ -61,7 +61,8 @@ describe("standalone window chrome", () => {
     const componentSource = readSource("../components/ClipboardCreateDialog/index.tsx");
 
     expect(css).toContain(".clipboard-create-stash-picker");
-    expect(css).toContain(".clipboard-create-options-row");
+    expect(css).toContain(".clipboard-create-dest-seg");
+    expect(css).toContain(".clipboard-create-chip-trigger");
     expect(componentSource).toContain('category: isResource ? "resources" : "all"');
     expect(componentSource).toContain("handleDestChange");
     expect(componentSource).toContain('t("resources.destinationClipboard")');
@@ -95,17 +96,16 @@ describe("standalone window chrome", () => {
     expect(resourceCss).not.toContain(".resource-reorder-hint");
   });
 
-  it("keeps the clipboard create existing-records section standalone", () => {
+  it("keeps the clipboard create action bar standalone", () => {
     const css = readStyle("clipboard.css");
     const componentSource = readSource("../components/ClipboardCreateDialog/index.tsx");
-    const stashRule = getRule(css, ".clipboard-create-stash-section");
+    const barRule = getRule(css, ".clipboard-create-action-bar");
 
-    expect(componentSource).toContain('className="clipboard-create-stash-section"');
+    expect(componentSource).toContain('className="clipboard-create-action-bar"');
     expect(componentSource).not.toContain("clipboard-create-resource-fields");
     expect(componentSource).not.toContain("clipboard-create-resource-group-section");
-    expect(stashRule).toContain("display: flex;");
-    expect(stashRule).toContain("flex-direction: column;");
-    expect(css).toContain("margin-top: 0;");
+    expect(barRule).toContain("display: flex;");
+    expect(barRule).toContain("align-items: center;");
   });
 
   it("keeps native stash editor selection and two-sided image caret anchors", () => {

@@ -83,6 +83,13 @@ fn toggle_always_on_top(app: tauri::AppHandle) -> Result<bool, String> {
     Ok(next)
 }
 
+/// 前端诊断日志桥：把 WebView 内的关键事件写进同一份日志文件，
+/// 便于排查只在真实交互中出现的时序问题。
+#[tauri::command]
+fn debug_log(message: String) {
+    log::info!("[frontend] {message}");
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
@@ -286,6 +293,12 @@ pub fn run() {
                 }
             }
 
+            // Windows: 含 Win 修饰键的快捷键（如 Win+V/Win+B）被系统组件
+            // 通过 RegisterHotKey 占用，注册必然失败；由低级键盘钩子接管。
+            // 拦截表为空（用户全部使用普通组合键）时不安装钩子。
+            #[cfg(target_os = "windows")]
+            shortcut::refresh_win_hook_combos(app.handle());
+
             // Show main window when not auto-started (after all init is done)
             if !is_autostart {
                 show_main_window(app.handle(), "startup", true);
@@ -340,6 +353,7 @@ pub fn run() {
             radial_drag::arm_radial_file_drag,
             radial_drag::cancel_radial_file_drag,
             radial_drag::start_radial_file_drag,
+            debug_log,
             db::get_image_base64,
             db::get_image_thumbnail,
             db::get_resource_file_thumbnail,

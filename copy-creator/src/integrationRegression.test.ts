@@ -538,7 +538,7 @@ describe("integration regressions", () => {
     expect(listenerBlock).toContain("Promise.all");
     expect(listenerBlock).toContain('"radial-drag-started"');
     expect(listenerBlock).toContain('"radial-drag-finished"');
-    expect(listenerBlock).toContain("unlisteners = [unShow, unHide, unDragStarted, unDragFinished]");
+    expect(listenerBlock).toContain("unlisteners = [unShow, unHide, unDragStarted, unDragFinished, unScaleChanged]");
     expect(listenerBlock).toContain("disposed");
     expect(listenerBlock).not.toContain("await loadPasteLeftClickSetting()");
     expect(listenerBlock).toContain("void loadPasteLeftClickSetting()");

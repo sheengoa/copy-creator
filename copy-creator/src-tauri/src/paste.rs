@@ -2,6 +2,16 @@ use std::sync::atomic::{AtomicBool, Ordering};
 
 pub static PASTING: AtomicBool = AtomicBool::new(false);
 
+/// 径向菜单呼出那一刻，焦点是否在本应用窗口上（主窗口 / 新建弹窗）。
+/// 为 true 且径向菜单仍可见时，粘贴目标是自家编辑器：defocus 不能把
+/// 主窗口藏掉，否则用户看到的是“一点内容整个窗口就消失”，Ctrl+V 也
+/// 会因为焦点无处可落而失效。每次 show_radial_menu 都会刷新此标记。
+pub static RADIAL_ORIGIN_OWN_WINDOW: AtomicBool = AtomicBool::new(false);
+
+pub fn set_radial_origin_own_window(value: bool) {
+    RADIAL_ORIGIN_OWN_WINDOW.store(value, Ordering::SeqCst);
+}
+
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex, OnceLock};
 
@@ -165,6 +175,12 @@ fn ydotool_ctrl_v() -> Result<(), String> {
 
 /// Inject Ctrl+Shift+V via enigo.
 fn enigo_ctrl_shift_v() -> Result<(), String> {
+    // SendInput(Win32) 是原子注入队列，按键间无需长沉降；
+    // Linux 的 enigo 后端依赖现有节奏，维持原值。
+    #[cfg(target_os = "windows")]
+    const MODIFIER_SETTLE_MS: u64 = 5;
+    #[cfg(not(target_os = "windows"))]
+    const MODIFIER_SETTLE_MS: u64 = 20;
     let mut enigo = Enigo::new(&Settings::default()).map_err(|e| format!("enigo init: {e}"))?;
     enigo
         .key(Key::Control, Direction::Press)
@@ -172,7 +188,7 @@ fn enigo_ctrl_shift_v() -> Result<(), String> {
     enigo
         .key(Key::Shift, Direction::Press)
         .map_err(|e| format!("enigo shift press: {e}"))?;
-    thread::sleep(Duration::from_millis(20));
+    thread::sleep(Duration::from_millis(MODIFIER_SETTLE_MS));
     enigo
         .key(Key::Unicode('v'), Direction::Click)
         .map_err(|e| format!("enigo v click: {e}"))?;
@@ -188,11 +204,15 @@ fn enigo_ctrl_shift_v() -> Result<(), String> {
 
 /// Inject Ctrl+V via enigo.
 fn enigo_ctrl_v() -> Result<(), String> {
+    #[cfg(target_os = "windows")]
+    const MODIFIER_SETTLE_MS: u64 = 5;
+    #[cfg(not(target_os = "windows"))]
+    const MODIFIER_SETTLE_MS: u64 = 30;
     let mut enigo = Enigo::new(&Settings::default()).map_err(|e| format!("enigo init: {e}"))?;
     enigo
         .key(Key::Control, Direction::Press)
         .map_err(|e| format!("enigo ctrl press: {e}"))?;
-    thread::sleep(Duration::from_millis(30));
+    thread::sleep(Duration::from_millis(MODIFIER_SETTLE_MS));
     enigo
         .key(Key::Unicode('v'), Direction::Click)
         .map_err(|e| format!("enigo v click: {e}"))?;
@@ -414,12 +434,40 @@ pub fn diagnose_paste_environment() {
 /// Write a file list to the system clipboard so Linux apps receive
 /// `text/uri-list`, not a plain-text path.
 fn write_file_list(paths: &[std::path::PathBuf]) -> Result<(), String> {
-    let mut clipboard =
-        arboard::Clipboard::new().map_err(|e| format!("初始化文件剪切板失败: {e:?}"))?;
-    clipboard
-        .set()
-        .file_list(paths)
-        .map_err(|e| format!("写入文件剪切板失败: {e:?}"))?;
+    // Windows 资源管理器对 CF_HDROP 里的 `\\?\` 扩展路径前缀兼容性差
+    // （粘贴菜单/目标窗口直接忽略），这里统一转回常规路径；UNC 设备
+    // 路径（\\?\UNC\host\share）还原为 \\host\share。Linux 分支无此
+    // 前缀，不受影响。
+    let normalized: Vec<std::path::PathBuf> = paths
+        .iter()
+        .map(|path| {
+            let raw = path.to_string_lossy();
+            if let Some(rest) = raw.strip_prefix(r"\\?\UNC\") {
+                std::path::PathBuf::from(format!(r"\\{rest}"))
+            } else if let Some(rest) = raw.strip_prefix(r"\\?\") {
+                std::path::PathBuf::from(rest)
+            } else {
+                path.clone()
+            }
+        })
+        .collect();
+
+    // Windows 必须走标准 Win32 序列（EmptyClipboard + CF_HDROP）：
+    // arboard 的 file_list 不先清空剪贴板，残留的旧文本格式会让
+    // 资源管理器走文本粘贴分支，文件永远粘不进去（实测踩坑）。
+    #[cfg(target_os = "windows")]
+    {
+        write_file_list_windows(&normalized)?;
+    }
+    #[cfg(not(target_os = "windows"))]
+    {
+        let mut clipboard =
+            arboard::Clipboard::new().map_err(|e| format!("初始化文件剪切板失败: {e:?}"))?;
+        clipboard
+            .set()
+            .file_list(&normalized)
+            .map_err(|e| format!("写入文件剪切板失败: {e:?}"))?;
+    }
     log::info!(
         "paste_file: wrote file list to clipboard: {} file(s)",
         paths.len()
@@ -427,33 +475,191 @@ fn write_file_list(paths: &[std::path::PathBuf]) -> Result<(), String> {
     Ok(())
 }
 
+/// 标准 Win32 CF_HDROP 写入：DROPFILES 结构 + 双 NUL 结尾的宽字符路径表。
+#[cfg(target_os = "windows")]
+fn write_file_list_windows(paths: &[std::path::PathBuf]) -> Result<(), String> {
+    use std::os::windows::ffi::OsStrExt;
+
+    const CF_HDROP: u32 = 15;
+    const GMEM_MOVEABLE: u32 = 0x0002;
+    const GMEM_ZEROINIT: u32 = 0x0040;
+
+    #[repr(C)]
+    struct Point {
+        x: i32,
+        y: i32,
+    }
+
+    #[repr(C)]
+    struct DropFiles {
+        p_files: u32,
+        pt: Point,
+        f_nc: u32,
+        f_wide: u32,
+    }
+
+    #[link(name = "user32")]
+    unsafe extern "system" {
+        fn OpenClipboard(hwnd_new_owner: *mut core::ffi::c_void) -> i32;
+        fn EmptyClipboard() -> i32;
+        fn SetClipboardData(format: u32, data: *mut core::ffi::c_void) -> *mut core::ffi::c_void;
+        fn CloseClipboard() -> i32;
+    }
+    #[link(name = "kernel32")]
+    unsafe extern "system" {
+        fn GlobalAlloc(flags: u32, bytes: usize) -> *mut core::ffi::c_void;
+        fn GlobalLock(h_mem: *mut core::ffi::c_void) -> *mut u8;
+        fn GlobalUnlock(h_mem: *mut core::ffi::c_void) -> i32;
+        fn GlobalFree(h_mem: *mut core::ffi::c_void) -> *mut core::ffi::c_void;
+    }
+
+    // DROPFILES 头 + 路径宽字符 + 双 NUL 结尾。
+    let mut data: Vec<u8> = Vec::new();
+    let header = DropFiles {
+        p_files: std::mem::size_of::<DropFiles>() as u32,
+        pt: Point { x: 0, y: 0 },
+        f_nc: 0,
+        f_wide: 1,
+    };
+    data.extend_from_slice(unsafe {
+        std::slice::from_raw_parts(
+            (&header as *const DropFiles) as *const u8,
+            std::mem::size_of::<DropFiles>(),
+        )
+    });
+    for path in paths {
+        for unit in path.as_os_str().encode_wide() {
+            data.extend_from_slice(&unit.to_le_bytes());
+        }
+        data.extend_from_slice(&[0, 0]);
+    }
+    data.extend_from_slice(&[0, 0]);
+
+    unsafe {
+        if OpenClipboard(core::ptr::null_mut()) == 0 {
+            return Err("打开剪贴板失败".to_string());
+        }
+        if EmptyClipboard() == 0 {
+            CloseClipboard();
+            return Err("清空剪贴板失败".to_string());
+        }
+        let handle = GlobalAlloc(GMEM_MOVEABLE | GMEM_ZEROINIT, data.len());
+        if handle.is_null() {
+            CloseClipboard();
+            return Err("分配剪贴板内存失败".to_string());
+        }
+        let locked = GlobalLock(handle);
+        if locked.is_null() {
+            CloseClipboard();
+            return Err("锁定剪贴板内存失败".to_string());
+        }
+        std::ptr::copy_nonoverlapping(data.as_ptr(), locked, data.len());
+        GlobalUnlock(handle);
+        // 成功后系统接管 handle，不再释放；失败时系统未接管，需自行归还。
+        if SetClipboardData(CF_HDROP, handle).is_null() {
+            CloseClipboard();
+            GlobalFree(handle);
+            return Err("写入 CF_HDROP 失败".to_string());
+        }
+        if CloseClipboard() == 0 {
+            return Err("关闭剪贴板失败".to_string());
+        }
+    }
+    Ok(())
+}
+
 /// 窗口隐藏后的合成器沉降时间：等待焦点切回先前激活的窗口。
 /// 200 ms 在 GNOME/Wayland 与 X11 上均已实测足够。
+/// Windows 走焦点轮询，不需要固定沉降值。
+#[cfg(not(target_os = "windows"))]
 const DEFOCUS_SETTLE_MS: u64 = 200;
 
-/// 隐藏本应用窗口，让合成器把焦点交还给先前激活的窗口。
-fn defocus_windows(app: &AppHandle) -> Result<(), String> {
+/// Windows 上轮询等待"焦点已离开本进程"的上限：目标窗口通常在隐藏后
+/// 10-40ms 内成为前台，轮询命中即刻注入，避免盲等 Linux 沉降时间。
+#[cfg(target_os = "windows")]
+const DEFOCUS_POLL_TIMEOUT_MS: u64 = 150;
+
+/// Windows: 轮询 GetForegroundWindow，直到前台进程不再是本进程
+/// （粘贴目标已接管焦点）或超时。粘贴目标为本应用自家窗口时，
+/// 前台始终是本进程，行为退化为等待上限——仍优于原固定 200ms。
+#[cfg(target_os = "windows")]
+fn wait_paste_target_ready(timeout_ms: u64) {
+    use std::time::Instant;
+
+    #[link(name = "user32")]
+    unsafe extern "system" {
+        fn GetForegroundWindow() -> *mut core::ffi::c_void;
+        fn GetWindowThreadProcessId(hwnd: *mut core::ffi::c_void, out_pid: *mut u32) -> u32;
+    }
+
+    let our_pid = std::process::id();
+    let start = Instant::now();
+    while start.elapsed().as_millis() < timeout_ms as u128 {
+        unsafe {
+            let foreground = GetForegroundWindow();
+            if !foreground.is_null() {
+                let mut pid = 0_u32;
+                GetWindowThreadProcessId(foreground, &mut pid);
+                if pid != our_pid {
+                    log::info!("[paste] focus left our process after {}ms", start.elapsed().as_millis());
+                    return;
+                }
+            }
+        }
+        thread::sleep(Duration::from_millis(5));
+    }
+    log::info!("[paste] focus wait timed out after {}ms", start.elapsed().as_millis());
+}
+
+/// 隐藏本应用窗口，让合成器/系统把焦点交还给目标窗口。
+/// 返回 true 表示粘贴目标是本应用自家窗口（主窗口保持可见且获得焦点）。
+fn defocus_windows(app: &AppHandle) -> Result<bool, String> {
     // Hide radial popup if visible.  When pasting from the radial menu
     // itself the frontend has already issued a hide, so this is a fast
     // no-op in the common case — but it is a safety net for edge cases
     // where the popup was left open.
-    if let Some(radial) = app.get_webview_window("radial-menu") {
+    let radial = app.get_webview_window("radial-menu");
+    if let Some(radial) = radial {
         let _ = radial.hide();
     }
 
-    let window = app.get_webview_window("main").ok_or("no window")?;
+    // 粘贴目标判定只用呼出时刻的标志，不依赖径向菜单当下的可见性：
+    // 前端现在"先藏菜单再触发粘贴"，可见性检查存在竞态。标志在每次
+    // show_radial_menu 刷新——从主窗口页面直接粘贴时它即使残留为 true，
+    // 焦点本就在主窗口，保留主窗口同样是正确行为。
+    let paste_into_own_window = RADIAL_ORIGIN_OWN_WINDOW.load(Ordering::SeqCst);
+    log::info!("[paste] defocus: paste_into_own={paste_into_own_window}");
 
-    let is_pinned = window.is_always_on_top().unwrap_or(false);
-    if !is_pinned {
-        window.hide().map_err(|e| e.to_string())?;
+    if !paste_into_own_window {
+        let window = app.get_webview_window("main").ok_or("no window")?;
+
+        let is_pinned = window.is_always_on_top().unwrap_or(false);
+        log::info!(
+            "[paste] defocus: main pinned={is_pinned} -> {}",
+            if is_pinned { "keep visible" } else { "hide" }
+        );
+        if !is_pinned {
+            window.hide().map_err(|e| e.to_string())?;
+        }
     }
 
-    Ok(())
+    Ok(paste_into_own_window)
 }
 
 fn paste_with_defocus(app: &AppHandle, shortcut: PasteShortcut) -> Result<(), String> {
-    defocus_windows(app)?;
+    let paste_into_own_window = defocus_windows(app)?;
 
+    #[cfg(target_os = "windows")]
+    {
+        // 自家窗口粘贴时焦点本就正确，无需等待焦点切换。
+        if !paste_into_own_window {
+            wait_paste_target_ready(DEFOCUS_POLL_TIMEOUT_MS);
+        }
+        // 焦点进程切换后，目标窗口内部的输入焦点（子控件）仍在恢复，
+        // 立刻注入会被吞掉（实测文件粘贴因此丢失）；给一个短沉降窗。
+        thread::sleep(Duration::from_millis(120));
+    }
+    #[cfg(not(target_os = "windows"))]
     thread::sleep(Duration::from_millis(DEFOCUS_SETTLE_MS));
 
     inject_paste_with_shortcut(shortcut);
@@ -677,11 +883,16 @@ pub fn paste_image_file(app: AppHandle, path: String) -> Result<(), String> {
             Ok(())
         });
 
+        // Linux 沉降按"defocus 起始"计时；Windows 用焦点轮询，无需起始点。
+        #[cfg(not(target_os = "windows"))]
         let defocus_start = std::time::Instant::now();
-        if let Err(e) = defocus_windows(&handle) {
-            log::error!("paste_image_file: {e}");
-            return;
-        }
+        let paste_into_own = match defocus_windows(&handle) {
+            Ok(own) => own,
+            Err(e) => {
+                log::error!("paste_image_file: {e}");
+                return;
+            }
+        };
         match decode_thread.join() {
             Ok(Ok(())) => {}
             Ok(Err(e)) => {
@@ -694,10 +905,20 @@ pub fn paste_image_file(app: AppHandle, path: String) -> Result<(), String> {
             }
         }
 
-        // 与 paste_with_defocus 相同的沉降时间，减去与解码并行的部分。
-        let elapsed = defocus_start.elapsed().as_millis() as u64;
-        if elapsed < DEFOCUS_SETTLE_MS {
-            thread::sleep(Duration::from_millis(DEFOCUS_SETTLE_MS - elapsed));
+        // 与 paste_with_defocus 相同的沉降策略，减去与解码并行的部分。
+        #[cfg(target_os = "windows")]
+        {
+            if !paste_into_own {
+                wait_paste_target_ready(DEFOCUS_POLL_TIMEOUT_MS);
+            }
+            thread::sleep(Duration::from_millis(120));
+        }
+        #[cfg(not(target_os = "windows"))]
+        {
+            let elapsed = defocus_start.elapsed().as_millis() as u64;
+            if elapsed < DEFOCUS_SETTLE_MS {
+                thread::sleep(Duration::from_millis(DEFOCUS_SETTLE_MS - elapsed));
+            }
         }
 
         // 图像粘贴总是用 Ctrl+V，同 paste_image。

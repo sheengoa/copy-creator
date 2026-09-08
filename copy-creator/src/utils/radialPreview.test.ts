@@ -34,6 +34,18 @@ describe("calculateRadialExpansion", () => {
       scaleFactor: 1,
     })).toEqual({ direction: "right", previewWidth: 130, windowX: 50 });
   });
+
+  it("returns design-pixel preview width when the menu is UI-scaled", () => {
+    // uiScale 只影响 CSS 缩放，预览面板的物理目标宽度不变；
+    // 返回的设计像素 = 物理宽 / (scaleFactor × uiScale)。
+    expect(calculateRadialExpansion({
+      windowX: 200,
+      workAreaX: 0,
+      workAreaWidth: 3840,
+      scaleFactor: 1,
+      uiScale: 1.5,
+    })).toEqual({ direction: "right", previewWidth: 293, windowX: 200 });
+  });
 });
 
 describe("calculatePreviewExpansion", () => {
@@ -77,6 +89,22 @@ describe("calculatePreviewExpansion", () => {
     })).toEqual({
       direction: "right",
       previewWidth: 440,
+      previewPhysicalWidth: 880,
+      windowX: 200,
+    });
+  });
+
+  it("divides UI scale out of the logical preview width on top of device scale", () => {
+    expect(calculatePreviewExpansion({
+      windowX: 200,
+      windowWidth: 1000,
+      workAreaX: 0,
+      workAreaWidth: 3840,
+      scaleFactor: 2,
+      uiScale: 1.5,
+    })).toEqual({
+      direction: "right",
+      previewWidth: 293,
       previewPhysicalWidth: 880,
       windowX: 200,
     });

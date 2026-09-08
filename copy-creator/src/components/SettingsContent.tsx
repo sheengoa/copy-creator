@@ -3,7 +3,7 @@ import { useTranslation } from "react-i18next";
 import { invoke } from "@tauri-apps/api/core";
 import { emit } from "@tauri-apps/api/event";
 import { useSettingsStore } from "../stores/settingsStore";
-import { StorageSection, LanguageSection, ShortcutSection, TranslationSection, StartupSection, PasteSection } from "./settings";
+import { StorageSection, LanguageSection, ShortcutSection, TranslationSection, StartupSection, PasteSection, RadialSection } from "./settings";
 import { useShortcutRecording } from "./settings/useShortcutRecording";
 
 interface Props {
@@ -26,6 +26,7 @@ export default function SettingsContent({ embedded }: Props) {
   const [localShortcutKey, setLocalShortcutKey] = useState(settings.shortcutKey);
   const [localRadialShortcutKey, setLocalRadialShortcutKey] = useState(settings.radialShortcutKey);
   const [localRadialMenuEnabled, setLocalRadialMenuEnabled] = useState(settings.radialMenuEnabled);
+  const [localRadialMenuScale, setLocalRadialMenuScale] = useState(settings.radialMenuScale);
   const ccShortcut = useShortcutRecording();
   const { setShortcut: setClipboardCreateShortcut } = ccShortcut;
   const [localAutostart, setLocalAutostart] = useState(settings.autostartEnabled);
@@ -52,6 +53,7 @@ export default function SettingsContent({ embedded }: Props) {
     radialShortcutKey: string;
     clipboardCreateShortcutKey: string;
     radialMenuEnabled: boolean;
+    radialMenuScale: number;
     autostartEnabled: boolean;
     pasteLeftClick: "normal" | "terminal";
   } | null>(null);
@@ -75,6 +77,7 @@ export default function SettingsContent({ embedded }: Props) {
       radialShortcutKey: settings.radialShortcutKey,
       clipboardCreateShortcutKey: settings.clipboardCreateShortcutKey,
       radialMenuEnabled: settings.radialMenuEnabled,
+      radialMenuScale: settings.radialMenuScale,
       autostartEnabled: settings.autostartEnabled,
       pasteLeftClick: settings.pasteLeftClick,
     };
@@ -92,6 +95,7 @@ export default function SettingsContent({ embedded }: Props) {
     if (!prev || prev.radialShortcutKey !== next.radialShortcutKey) setLocalRadialShortcutKey(next.radialShortcutKey);
     if (!prev || prev.clipboardCreateShortcutKey !== next.clipboardCreateShortcutKey) setClipboardCreateShortcut(next.clipboardCreateShortcutKey);
     if (!prev || prev.radialMenuEnabled !== next.radialMenuEnabled) setLocalRadialMenuEnabled(next.radialMenuEnabled);
+    if (!prev || prev.radialMenuScale !== next.radialMenuScale) setLocalRadialMenuScale(next.radialMenuScale);
     if (!prev || prev.autostartEnabled !== next.autostartEnabled) setLocalAutostart(next.autostartEnabled);
     if (!prev || prev.pasteLeftClick !== next.pasteLeftClick) setLocalPasteLeftClick(next.pasteLeftClick);
 
@@ -109,6 +113,7 @@ export default function SettingsContent({ embedded }: Props) {
     settings.radialShortcutKey,
     settings.clipboardCreateShortcutKey,
     settings.radialMenuEnabled,
+    settings.radialMenuScale,
     settings.autostartEnabled,
     settings.pasteLeftClick,
     setClipboardCreateShortcut,
@@ -265,6 +270,7 @@ export default function SettingsContent({ embedded }: Props) {
       translate_proxy: localTranslateProxy,
       language: localLang,
       paste_left_click: localPasteLeftClick,
+      radial_menu_scale: String(localRadialMenuScale),
     });
 
     const oldKey = settings.shortcutKey;
@@ -383,6 +389,11 @@ export default function SettingsContent({ embedded }: Props) {
           setLocalPasteLeftClick(mode);
           settings.setPasteLeftClick(mode);
         }}
+      />
+
+      <RadialSection
+        localRadialMenuScale={localRadialMenuScale}
+        setLocalRadialMenuScale={setLocalRadialMenuScale}
       />
 
       <TranslationSection

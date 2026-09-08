@@ -1,5 +1,15 @@
 /* === Radial Menu === */
 
+/*
+ * 径向菜单 UI 缩放（设置项「菜单尺寸」，默认 1）：
+ * Rust 侧按同一系数放大窗口逻辑尺寸，这里对根节点 zoom，让全部以
+ * 420×650 设计像素书写的布局整体等比缩放；该变量只在径向菜单窗口
+ * 被设置，主窗口保持默认 1 不受影响。
+ */
+html {
+  zoom: var(--radial-ui-scale, 1);
+}
+
 .radial-menu-overlay {
   position: fixed;
   inset: 0;

@@ -24,7 +24,9 @@
 
 /* --- Sidebar --- */
 .sidebar {
-  height: 100vh;
+  /* 高度跟随 .app-container（100vh 减去上下阴影边距），写 100vh 会被
+     容器的 overflow:hidden 裁掉底部 40px，footer 最后一个按钮显示不全。 */
+  height: 100%;
   max-width: 130px;
   display: flex;
   flex-direction: column;
@@ -268,8 +270,6 @@
   margin-top: auto;
   border-top: 0.5px solid var(--sidebar-border);
   margin-bottom: 0;
-  position: relative;
-  top: -14px;
 }
 
 .sidebar-footer-item {
@@ -372,7 +372,7 @@
 /* --- Panel Area --- */
 .panel-area {
   flex: 1;
-  height: 100vh;
+  height: 100%;
   display: flex;
   flex-direction: column;
   overflow: hidden;

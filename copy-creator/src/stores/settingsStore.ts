@@ -5,6 +5,19 @@ import type { PasteMode } from "../utils/pasteMode";
 
 type ThemeMode = "light" | "dark";
 
+/** 径向菜单缩放比（百分比），与 Rust 侧 radial_ui_scale 的取值范围保持一致。 */
+export const RADIAL_SCALE_MIN = 50;
+export const RADIAL_SCALE_MAX = 200;
+export const RADIAL_SCALE_DEFAULT = 100;
+
+export const clampRadialScale = (percent: number): number =>
+  Math.min(RADIAL_SCALE_MAX, Math.max(RADIAL_SCALE_MIN, Math.round(percent)));
+
+const parseRadialScale = (raw: string | undefined): number => {
+  const percent = Number.parseInt((raw ?? "").trim(), 10);
+  return Number.isFinite(percent) ? clampRadialScale(percent) : RADIAL_SCALE_DEFAULT;
+};
+
 interface SettingsState {
   themeMode: ThemeMode;
   clipboardRetention: string;
@@ -21,6 +34,7 @@ interface SettingsState {
   radialShortcutKey: string;
   clipboardCreateShortcutKey: string;
   radialMenuEnabled: boolean;
+  radialMenuScale: number;
   autostartEnabled: boolean;
   pasteLeftClick: PasteMode;
 
@@ -48,6 +62,7 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
   radialShortcutKey: "",
   clipboardCreateShortcutKey: "",
   radialMenuEnabled: true,
+  radialMenuScale: RADIAL_SCALE_DEFAULT,
   autostartEnabled: false,
   pasteLeftClick: "normal",
 
@@ -79,6 +94,7 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
         radialShortcutKey: settings.shortcut_radial || "",
         clipboardCreateShortcutKey: settings.shortcut_clipboard_create || "",
         radialMenuEnabled: settings.radial_menu_enabled !== "0",
+        radialMenuScale: parseRadialScale(settings.radial_menu_scale),
         pasteLeftClick: (settings.paste_left_click === "terminal" ? "terminal" : "normal") as PasteMode,
       });
 
@@ -99,6 +115,7 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
       if (key === "shortcut_key") patch.shortcutKey = value;
       if (key === "shortcut_radial") patch.radialShortcutKey = value;
       if (key === "shortcut_clipboard_create") patch.clipboardCreateShortcutKey = value;
+      if (key === "radial_menu_scale") patch.radialMenuScale = parseRadialScale(value);
       if (Object.keys(patch).length > 0) set(patch);
     } catch (e) {
       console.error("Failed to save setting:", e);
@@ -125,6 +142,12 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
       if ("google_api_key" in settings) patch.googleApiKey = settings.google_api_key || "";
       if ("translate_proxy" in settings) patch.translateProxy = settings.translate_proxy || "";
       if ("language" in settings) patch.language = settings.language || "zh-CN";
+      if ("radial_menu_scale" in settings) {
+        patch.radialMenuScale = parseRadialScale(settings.radial_menu_scale);
+        // 通知径向菜单窗口即时切换 zoom（该窗口不挂载设置页，只能靠事件同步）。
+        // payload 与 Rust 侧 radial-menu-show 的 scale 语义一致：小数系数。
+        void emit("radial-scale-changed", { scale: patch.radialMenuScale / 100 });
+      }
       if ("paste_left_click" in settings) {
         patch.pasteLeftClick = (settings.paste_left_click === "terminal" ? "terminal" : "normal") as PasteMode;
       }
