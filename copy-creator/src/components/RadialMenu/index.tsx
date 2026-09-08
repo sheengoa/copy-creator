@@ -189,7 +189,7 @@ function ImageThumb({ recordId }: { recordId: string }) {
       src={src}
       alt=""
       draggable={false}
-      style={{ width: 48, height: 36, objectFit: "cover", borderRadius: 5 }}
+      style={{ width: 48, height: 36, objectFit: "contain", borderRadius: 5 }}
     />
   );
 }
@@ -214,7 +214,7 @@ function FileThumb({ path }: { path: string }) {
       src={src}
       alt=""
       draggable={false}
-      style={{ width: 48, height: 36, objectFit: "cover", borderRadius: 5 }}
+      style={{ width: 48, height: 36, objectFit: "contain", borderRadius: 5 }}
     />
   );
 }
