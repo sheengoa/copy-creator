@@ -592,7 +592,9 @@ fn resource_file_path_from_id<R: Runtime>(
 }
 
 fn resource_path_key(path: &Path) -> PathBuf {
-    path.canonicalize().unwrap_or_else(|_| path.to_path_buf())
+    // canonicalize 在 Windows 上恒返回 `\\?\` 扩展形式；与常规形态的路径
+    // 做 strip_prefix/join 前先还原，避免混用两种形态导致比较失效。
+    simplify_windows_path(&path.canonicalize().unwrap_or_else(|_| path.to_path_buf()))
 }
 
 fn is_ignored_resource_file(path: &Path) -> bool {
@@ -689,7 +691,7 @@ fn resolve_resource_file_path<R: Runtime>(
     if !metadata.is_file() {
         return Err("请选择一个文件".to_string());
     }
-    Ok(candidate)
+    Ok(simplify_windows_path(&candidate))
 }
 
 pub(crate) fn resource_folder_for_path(root: &Path, resource_path: &str) -> Option<String> {
@@ -730,7 +732,7 @@ fn resource_library_history<R: Runtime>(app: &AppHandle<R>) -> Vec<PathBuf> {
         .and_then(|value| serde_json::from_str::<Vec<String>>(&value).ok())
         .unwrap_or_default()
         .into_iter()
-        .map(PathBuf::from)
+        .map(|entry| simplify_windows_path(Path::new(&entry)))
         .filter(|path| path.is_absolute())
         .collect()
 }
@@ -4982,7 +4984,7 @@ mod resource_command_tests {
         get_clipboard_records_inner, get_resource_groups_inner, move_resource_group_inner,
         move_resource_records_inner, read_resource_text_preview_file, rename_resource_file_inner,
         resolve_resource_file_path, resource_file_id, resource_folder_tree,
-        resource_group_count_map, set_resource_note_inner,
+        resource_group_count_map, set_resource_note_inner, simplify_windows_path,
         restore_staged_external_resource_files, stage_external_resource_files,
         validate_resource_rename_stem, update_resource_group_inner, DbState,
     };
@@ -5611,11 +5613,36 @@ mod resource_command_tests {
         std::fs::write(&retained, [4_u8, 5, 6]).unwrap();
         let resolved =
             resolve_resource_file_path(app.handle(), selected.to_string_lossy().as_ref()).unwrap();
-        assert_eq!(resolved, selected.canonicalize().unwrap());
+        // 解析结果保持常规形态（无 `\\?\` 扩展前缀），与扫描出的记录路径一致。
+        assert_eq!(resolved, simplify_windows_path(&selected.canonicalize().unwrap()));
         delete_external_resource_file(app.handle(), &resolved).unwrap();
         assert!(!selected.exists());
         assert!(retained.exists());
         cleanup(&root);
+    }
+
+    #[test]
+    fn simplify_windows_path_strips_verbatim_prefix_only_for_known_forms() {
+        use super::simplify_windows_path;
+        // 本地盘符：剥离扩展前缀。
+        assert_eq!(
+            simplify_windows_path(Path::new(r"\\?\C:\lib\x.png")),
+            Path::new(r"C:\lib\x.png")
+        );
+        // UNC：还原 \\server\share 形态。
+        assert_eq!(
+            simplify_windows_path(Path::new(r"\\?\UNC\srv\share\x.png")),
+            Path::new(r"\\srv\share\x.png")
+        );
+        // 常规路径保持不变。
+        assert_eq!(simplify_windows_path(Path::new(r"C:\lib\x.png")), Path::new(r"C:\lib\x.png"));
+        // 未知命名空间（如 Volume GUID）不误伤。
+        assert_eq!(
+            simplify_windows_path(Path::new(r"\\?\Volume{1234}")),
+            Path::new(r"\\?\Volume{1234}")
+        );
+        // 非 Windows 风格路径不受影响。
+        assert_eq!(simplify_windows_path(Path::new("/home/a/b.png")), Path::new("/home/a/b.png"));
     }
 
     #[test]
