@@ -801,8 +801,16 @@ pub(crate) struct DragImage {
 /// 非图片文件（zip 等）解码失败返回 None，拖动时表现为无虚影。
 #[cfg(target_os = "windows")]
 fn make_drag_image(source: &std::path::Path) -> Option<DragImage> {
+    let bytes = std::fs::read(source).ok()?;
+    make_drag_image_bytes(&bytes)
+}
+
+/// 从内存图片字节生成虚影位图。优先消费前端已渲染的缩略图：省掉
+/// 原图磁盘读取 + 全尺寸解码，拖动启动从 ~1s 降到毫秒级。
+#[cfg(target_os = "windows")]
+fn make_drag_image_bytes(bytes: &[u8]) -> Option<DragImage> {
     const MAX_DIM: u32 = 128;
-    let img = image::open(source).ok()?;
+    let img = image::load_from_memory(bytes).ok()?;
     let resized = if img.width() <= MAX_DIM && img.height() <= MAX_DIM {
         img
     } else {
@@ -902,6 +910,12 @@ mod windows_drag {
     /// 捕获无键按下持续超过该时长即判定拖动循环僵死（过短会误杀
     /// "松开后目标进程正在处理 IDropTarget::Drop"的正常慢场景）。
     const WEDGE_GRACE: Duration = Duration::from_secs(5);
+    /// 硬死线：拖动循环持有捕获超过该时长，无论按键状态一律注入 ESC。
+    /// 覆盖"左键按下状态被外部注入器卡死"的场景——此时
+    /// mouse_button_down 永远为真，仅凭 WEDGE_GRACE 判定的看门狗会
+    /// 永远沉默，应用整体卡死（实测踩坑）。真人拖动极少超过 30s，
+    /// 误杀代价只是拖动被取消。
+    const WEDGE_HARD_DEADLINE: Duration = Duration::from_secs(30);
 
     #[repr(C)]
     struct Rect {
@@ -964,28 +978,39 @@ mod windows_drag {
                 let start = Instant::now();
                 while !stop.load(Ordering::Acquire) {
                     std::thread::sleep(Duration::from_millis(500));
-                    if start.elapsed() < WEDGE_GRACE {
-                        continue;
-                    }
-                    if mouse_button_down() {
-                        continue;
+                    let hard_wedge = start.elapsed() >= WEDGE_HARD_DEADLINE;
+                    if !hard_wedge {
+                        if start.elapsed() < WEDGE_GRACE {
+                            continue;
+                        }
+                        if mouse_button_down() {
+                            continue;
+                        }
                     }
                     unsafe {
                         let mut info: GuiThreadInfo = core::mem::zeroed();
                         info.cb_size = core::mem::size_of::<GuiThreadInfo>() as u32;
-                        if GetGUIThreadInfo(thread_id, &mut info) == 0
-                            || info.hwnd_capture.is_null()
-                            || !window_class_is(info.hwnd_capture, CLIPBRDWNDCLASS)
-                        {
+                        let capture_held = GetGUIThreadInfo(thread_id, &mut info) != 0
+                            && !info.hwnd_capture.is_null()
+                            && window_class_is(info.hwnd_capture, CLIPBRDWNDCLASS);
+                        // 软判定（5s 且无按键）仍要求捕获特征，避免误杀
+                        // "松开后目标进程处理 Drop"的正常慢场景；硬死线
+                        // 不要求——实测存在"落放已送达目标、DoDragDrop
+                        // 却长期不返回"的第二种挂起（捕获已释放），看门狗
+                        // 必须照样介入，否则主线程被占住、应用整体卡死。
+                        if !hard_wedge && !capture_held {
                             continue;
                         }
-                        // 僵死特征齐备：OLE 拖动窗口仍持有捕获，却没有任何
-                        // 鼠标键按下——循环永远等不到释放。注入 ESC 走取消分支。
+                        // 僵死确认：向捕获窗口（或主窗口）注入 ESC 强制走
+                        // QueryContinueDrag 的取消分支。
+                        let target = if capture_held { info.hwnd_capture } else { main_hwnd };
                         log::warn!(
-                            "[radial_drag] 检测到拖动循环僵死，注入 ESC 恢复 (session 主线程 thread={thread_id})"
+                            "[radial_drag] 检测到拖动循环僵死（{}，capture={}），注入 ESC 恢复 (主线程 thread={thread_id})",
+                            if hard_wedge { "超过硬死线" } else { "捕获无按键" },
+                            capture_held
                         );
-                        PostMessageW(info.hwnd_capture, WM_KEYDOWN, VK_ESCAPE, 0);
-                        PostMessageW(info.hwnd_capture, WM_KEYUP, VK_ESCAPE, 0);
+                        PostMessageW(target, WM_KEYDOWN, VK_ESCAPE, 0);
+                        PostMessageW(target, WM_KEYUP, VK_ESCAPE, 0);
                     }
                     return;
                 }
@@ -1340,12 +1365,13 @@ pub async fn start_radial_file_drag(
     id: String,
     path: Option<String>,
     session_id: u64,
+    drag_image_base64: Option<String>,
 ) -> Result<(), String> {
     #[cfg(target_os = "linux")]
     {
         // Linux 的启动点是 GTK 的 MotionNotify；保留该命令作为旧前端
         // 兼容入口，但不再从异步 IPC 中调用 gtk_drag_begin。
-        let _ = (app, window, source, id, path, session_id);
+        let _ = (app, window, source, id, path, session_id, drag_image_base64);
         Ok(())
     }
 
@@ -1359,15 +1385,39 @@ pub async fn start_radial_file_drag(
             .first()
             .cloned()
             .ok_or_else(|| "没有可拖拽的文件".to_string())?;
-        // 在异步工作线程上预生成缩略虚影，避免解码大图阻塞 UI 主线程。
-        let drag_image = make_drag_image(&icon_path);
+        // 优先用前端已渲染的缩略图生成虚影（省掉大图磁盘读取 + 全尺寸
+        // 解码，这段耗时此前直接挂在"按住拖动无反应"上）；缺省或解码
+        // 失败再回退磁盘解码，非图片文件回退后仍返回 None（无虚影）。
+        let drag_image = match drag_image_base64.as_deref().map(str::trim) {
+            Some(encoded) => {
+                let encoded =
+                    encoded.trim_start_matches("data:image/png;base64,");
+                use base64::Engine as _;
+                match base64::engine::general_purpose::STANDARD
+                    .decode(encoded)
+                    .ok()
+                    .and_then(|bytes| make_drag_image_bytes(&bytes))
+                {
+                    Some(image) => Some(image),
+                    None => {
+                        log::warn!(
+                            "[radial_drag] 前端虚影解码失败，回退磁盘解码 session={session_id}"
+                        );
+                        make_drag_image(&icon_path)
+                    }
+                }
+            }
+            None => make_drag_image(&icon_path),
+        };
         start_platform_drag(&window, paths, drag_image, app, session_id)
     }
 }
 
 #[cfg(test)]
 mod tests {
-    use super::{collect_group_files, make_drag_image_bytes};
+    use super::collect_group_files;
+    #[cfg(target_os = "windows")]
+    use super::make_drag_image_bytes;
 
     #[test]
     fn group_files_are_collected_recursively_without_hidden_entries() {
@@ -1405,5 +1455,22 @@ mod tests {
         std::fs::create_dir_all(&root).unwrap();
         assert!(collect_group_files(&root).is_empty());
         std::fs::remove_dir_all(&root).unwrap();
+    }
+
+    #[cfg(target_os = "windows")]
+    #[test]
+    fn drag_image_bytes_decode_scale_to_128_and_bgra() {
+        let img = image::DynamicImage::new_rgb8(256, 64);
+        let mut png = std::io::Cursor::new(Vec::new());
+        img.write_to(&mut png, image::ImageFormat::Png).unwrap();
+        let ghost = make_drag_image_bytes(png.get_ref()).expect("PNG 应可解码");
+        assert_eq!((ghost.width, ghost.height), (128, 32));
+        assert_eq!(ghost.bgra.len(), (128 * 32 * 4) as usize);
+    }
+
+    #[cfg(target_os = "windows")]
+    #[test]
+    fn drag_image_bytes_reject_non_image() {
+        assert!(make_drag_image_bytes(b"not an image").is_none());
     }
 }
