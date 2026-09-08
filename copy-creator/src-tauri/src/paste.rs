@@ -184,18 +184,18 @@ fn ydotool_ctrl_v() -> Result<(), String> {
 /// 预释放不属于注入组合键的修饰键：Shift+单击等手势触发粘贴时，物理
 /// Shift 可能仍被按住，会把合成的 Ctrl+V 叠加成 Ctrl+Shift+V。对未按下
 /// 的修饰键发送释放是无害 no-op；X11 的 XTEST 走虚拟核心设备，合成释放
-/// 可真实清除物理按住的修饰键。
-fn release_unused_modifiers(enigo: &mut Enigo, shortcut: PasteShortcut) -> Result<(), String> {
+/// 可真实清除物理按住的修饰键。释放失败只记录、不中断——注入照常进行，
+/// 清理只是尽力而为。
+fn release_unused_modifiers(enigo: &mut Enigo, shortcut: PasteShortcut) {
     let keys: &[Key] = match shortcut {
         PasteShortcut::CtrlV => &[Key::Shift, Key::Alt, Key::Meta],
         PasteShortcut::CtrlShiftV => &[Key::Alt, Key::Meta],
     };
     for key in keys {
-        enigo
-            .key(key.clone(), Direction::Release)
-            .map_err(|e| format!("enigo modifier release: {e}"))?;
+        if let Err(e) = enigo.key(key.clone(), Direction::Release) {
+            log::warn!("enigo modifier release failed (continuing): {e}");
+        }
     }
-    Ok(())
 }
 
 /// Inject Ctrl+Shift+V via enigo.
@@ -207,7 +207,7 @@ fn enigo_ctrl_shift_v() -> Result<(), String> {
     #[cfg(not(target_os = "windows"))]
     const MODIFIER_SETTLE_MS: u64 = 20;
     let mut enigo = Enigo::new(&Settings::default()).map_err(|e| format!("enigo init: {e}"))?;
-    release_unused_modifiers(&mut enigo, PasteShortcut::CtrlShiftV)?;
+    release_unused_modifiers(&mut enigo, PasteShortcut::CtrlShiftV);
     enigo
         .key(Key::Control, Direction::Press)
         .map_err(|e| format!("enigo ctrl press: {e}"))?;
@@ -235,7 +235,7 @@ fn enigo_ctrl_v() -> Result<(), String> {
     #[cfg(not(target_os = "windows"))]
     const MODIFIER_SETTLE_MS: u64 = 30;
     let mut enigo = Enigo::new(&Settings::default()).map_err(|e| format!("enigo init: {e}"))?;
-    release_unused_modifiers(&mut enigo, PasteShortcut::CtrlV)?;
+    release_unused_modifiers(&mut enigo, PasteShortcut::CtrlV);
     enigo
         .key(Key::Control, Direction::Press)
         .map_err(|e| format!("enigo ctrl press: {e}"))?;
