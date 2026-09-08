@@ -582,6 +582,8 @@ const DEFOCUS_SETTLE_MS: u64 = 200;
 /// 10-40ms 内成为前台，轮询命中即刻注入，避免盲等 Linux 沉降时间。
 #[cfg(target_os = "windows")]
 const DEFOCUS_POLL_TIMEOUT_MS: u64 = 150;
+/// 等待用户松开残留修饰键（如 Shift+单击后的 Shift）的上限。
+const STRAY_MODIFIER_WAIT_MS: u64 = 400;
 
 /// Windows: 轮询 GetForegroundWindow，直到前台进程不再是本进程
 /// （粘贴目标已接管焦点）或超时。粘贴目标为本应用自家窗口时，
@@ -662,6 +664,9 @@ fn paste_with_defocus(app: &AppHandle, shortcut: PasteShortcut) -> Result<(), St
         // 焦点进程切换后，目标窗口内部的输入焦点（子控件）仍在恢复，
         // 立刻注入会被吞掉（实测文件粘贴因此丢失）；给一个短沉降窗。
         thread::sleep(Duration::from_millis(120));
+        // Shift+单击等手势触发粘贴时，物理 Shift 常仍被按住，会把合成
+        // Ctrl+V 叠加成 Ctrl+Shift+V 而被目标应用忽略（实测整组粘贴失效）。
+        release_stray_modifiers(shortcut);
     }
     #[cfg(not(target_os = "windows"))]
     thread::sleep(Duration::from_millis(DEFOCUS_SETTLE_MS));
@@ -669,6 +674,60 @@ fn paste_with_defocus(app: &AppHandle, shortcut: PasteShortcut) -> Result<(), St
     inject_paste_with_shortcut(shortcut);
 
     Ok(())
+}
+
+/// Windows：注入前等待不属于注入组合键的物理修饰键释放。
+/// 等待上限内自然松开最理想（物理按住期间的自动重复随时会再按下，
+/// 合成释放不保险）；超时仍被按住则发送合成释放兜底，保证注入必然发生。
+#[cfg(target_os = "windows")]
+fn release_stray_modifiers(shortcut: PasteShortcut) {
+    use std::time::Instant;
+
+    #[link(name = "user32")]
+    unsafe extern "system" {
+        fn GetAsyncKeyState(v_key: i32) -> i16;
+        fn keybd_event(b_vk: u8, b_scan: u8, dw_flags: u32, dw_extra_info: usize);
+    }
+
+    const VK_SHIFT: i32 = 0x10;
+    const VK_MENU: i32 = 0x12;
+    const VK_LSHIFT: i32 = 0xA0;
+    const VK_RSHIFT: i32 = 0xA1;
+    const VK_LMENU: i32 = 0xA4;
+    const VK_RMENU: i32 = 0xA5;
+    const VK_LWIN: i32 = 0x5B;
+    const VK_RWIN: i32 = 0x5C;
+    const KEYEVENTF_KEYUP: u32 = 0x0002;
+
+    // 注入组合键自身包含的修饰键（Ctrl、终端粘贴所需的 Shift）不清理。
+    let stray: &[i32] = match shortcut {
+        PasteShortcut::CtrlV => &[
+            VK_SHIFT, VK_LSHIFT, VK_RSHIFT, VK_MENU, VK_LMENU, VK_RMENU, VK_LWIN, VK_RWIN,
+        ],
+        PasteShortcut::CtrlShiftV => &[VK_MENU, VK_LMENU, VK_RMENU, VK_LWIN, VK_RWIN],
+    };
+    let is_down = |vk: i32| unsafe { GetAsyncKeyState(vk) as u16 & 0x8000 != 0 };
+
+    let start = Instant::now();
+    while stray.iter().any(|vk| is_down(*vk)) {
+        if start.elapsed().as_millis() >= STRAY_MODIFIER_WAIT_MS as u128 {
+            for vk in stray {
+                if is_down(*vk) {
+                    unsafe { keybd_event(*vk as u8, 0, KEYEVENTF_KEYUP, 0) };
+                }
+            }
+            thread::sleep(Duration::from_millis(10));
+            log::warn!(
+                "[paste] stray modifiers still held after {STRAY_MODIFIER_WAIT_MS}ms; sent synthetic releases"
+            );
+            return;
+        }
+        thread::sleep(Duration::from_millis(10));
+    }
+    let elapsed = start.elapsed().as_millis();
+    if elapsed > 0 {
+        log::info!("[paste] stray modifiers released after {elapsed}ms");
+    }
 }
 
 #[derive(Debug, PartialEq, Eq)]
