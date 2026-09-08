@@ -169,7 +169,14 @@ async function loadPasteLeftClickSetting() {
   }
 }
 
-function ImageThumb({ recordId }: { recordId: string }) {
+function ImageThumb({
+  recordId,
+  wide = false,
+}: {
+  recordId: string;
+  /** 资源列表内全宽完整展示；默认 48×36 小缩略图。 */
+  wide?: boolean;
+}) {
   const [src, setSrc] = useState("");
   const { records, getThumbnail } = useClipboardStore();
 
@@ -189,7 +196,9 @@ function ImageThumb({ recordId }: { recordId: string }) {
       src={src}
       alt=""
       draggable={false}
-      style={{ width: 48, height: 36, objectFit: "contain", borderRadius: 5 }}
+      style={wide
+        ? { display: "block", width: "100%", maxHeight: 120, objectFit: "contain", borderRadius: 6 }
+        : { width: 48, height: 36, objectFit: "contain", borderRadius: 5 }}
     />
   );
 }
@@ -226,11 +235,8 @@ function ResourceItemVisual({ item }: { item: RadialItem }) {
   if (!kind) return null;
 
   if (kind === "image" && item.type === "image") {
-    return (
-      <div className="radial-menu-resource-visual">
-        <ImageThumb recordId={item.id} />
-      </div>
-    );
+    // 与文件图片一致：全宽完整展示，不再使用 48×36 小缩略图。
+    return <ImageThumb recordId={item.id} wide />;
   }
 
   if (kind === "image" && item.resourcePath) {

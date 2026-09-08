@@ -508,23 +508,6 @@ html {
   min-width: 0;
 }
 
-.radial-menu-resource-visual {
-  display: flex;
-  min-height: 52px;
-  align-items: center;
-  justify-content: flex-start;
-}
-
-.radial-menu-resource-visual .clipboard-card-thumb {
-  width: 88px;
-  height: 58px;
-  border-radius: 6px;
-}
-
-.radial-menu-resource-visual .clipboard-card-thumb img {
-  border-radius: 6px;
-}
-
 .radial-menu-resource-image {
   display: block;
   width: 100%;
