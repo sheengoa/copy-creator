@@ -60,6 +60,36 @@ const flog = (message: string) => {
   void invoke("debug_log", { message }).catch(() => {});
 };
 
+// 拖动虚影上限：与后端 make_drag_image 的 MAX_DIM 保持一致。
+const RADIAL_DRAG_GHOST_PX = 128;
+
+// 抓取条目已渲染的缩略图交给后端当拖动虚影，避免后端解码原图
+// （大图会拖慢拖动启动 ~1s）。无图或未加载完成返回 null，由后端
+// 回退磁盘解码。
+const captureDragThumbnail = (itemId: string): string | null => {
+  try {
+    const img = document
+      .querySelector(`[data-radial-item-id="${CSS.escape(itemId)}"]`)
+      ?.querySelector("img");
+    if (!img || !img.complete || !img.naturalWidth) return null;
+    const scale = Math.min(
+      1,
+      RADIAL_DRAG_GHOST_PX / Math.max(img.naturalWidth, img.naturalHeight),
+    );
+    const width = Math.max(1, Math.round(img.naturalWidth * scale));
+    const height = Math.max(1, Math.round(img.naturalHeight * scale));
+    const canvas = document.createElement("canvas");
+    canvas.width = width;
+    canvas.height = height;
+    const ctx = canvas.getContext("2d");
+    if (!ctx) return null;
+    ctx.drawImage(img, 0, 0, width, height);
+    return canvas.toDataURL("image/png");
+  } catch {
+    return null;
+  }
+};
+
 interface RadialItem {
   id: string;
   content: string;
@@ -916,12 +946,16 @@ export default function RadialMenu() {
 
     const next = { ...pending, startRequested: true };
     nativeDragRef.current = next;
+    // 先隐藏窗口再启动拖动：视觉即时反馈，同时释放 WebView2 的隐式
+    // 鼠标捕获。此前要等后端解码完虚影才隐藏，期间界面毫无反应。
+    void getCurrentWindow().hide();
     flog(`invoking start_radial_file_drag session=${next.sessionId} item=${next.itemId}`);
     void invoke("start_radial_file_drag", {
       source: next.dragSource,
       id: next.itemId,
       path: next.dragPath || null,
       sessionId: next.sessionId,
+      dragImageBase64: captureDragThumbnail(next.itemId),
     }).catch((error) => {
       flog(`start_radial_file_drag rejected session=${next.sessionId}: ${error}`);
       const current = nativeDragRef.current;
