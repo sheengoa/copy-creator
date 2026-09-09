@@ -5588,7 +5588,8 @@ mod resource_command_tests {
             .map(|group| group["name"].as_str().unwrap())
             .collect();
         assert_eq!(names, vec!["甲", "丁", "戊"]);
-        assert_eq!(groups[2]["children"][0]["path"], "丁/乙/子");
+        assert_eq!(groups[2]["children"][0]["path"], "丁/乙");
+        assert_eq!(groups[2]["children"][0]["children"][0]["path"], "丁/乙/子");
 
         // 删除分组后其路径从顺序表中移除。
         delete_resource_group_inner(app.handle(), "丁".to_string()).unwrap();
