@@ -23,7 +23,7 @@ const AUDIO_EXTENSIONS = new Set([
   "wav",
   "weba",
 ]);
-const IMAGE_EXTENSIONS = new Set([
+export const IMAGE_EXTENSIONS = new Set([
   "avif",
   "bmp",
   "gif",

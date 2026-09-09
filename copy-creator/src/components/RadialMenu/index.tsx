@@ -616,6 +616,16 @@ export default function RadialMenu() {
       const phrase = usePhraseStore.getState().phrases.find((entry) => entry.id === item.id);
       if (phrase && phrase.input_type === "file" && isImageFilePath(phrase.content)) {
         segments = [{ type: "image", path: phrase.content }];
+      } else if (phrase && phrase.input_type === "file") {
+        // 文件短语：常见文本格式读取内容预览，与主窗口一致。
+        try {
+          const text = await invoke<string>("read_quick_input_text_preview", {
+            path: phrase.content,
+          });
+          segments = [{ type: "text", content: text }];
+        } catch {
+          segments = [{ type: "text", content: phrase.content }];
+        }
       } else {
         segments = [{ type: "text", content: phrase?.content ?? item.content }];
       }
