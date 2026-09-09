@@ -84,6 +84,7 @@ export default function PhrasePage() {
     selectQuickInputFile,
     getQuickInputFileInfo,
     getQuickInputFileLimit,
+    movePhrasesToTop,
   } = usePhraseStore();
   const pasteLeftClick = useSettingsStore((s) => s.pasteLeftClick);
 
@@ -445,6 +446,7 @@ export default function PhrasePage() {
           onToggleAll={toggleAllVisible}
           onDelete={handleDeleteSelected}
           onCancel={exitSelection}
+          onMoveTop={() => void movePhrasesToTop([...selectedIds])}
         />
       )}
 
@@ -460,6 +462,7 @@ export default function PhrasePage() {
             onSecondaryPaste={handleSecondaryPaste}
             onEdit={openEditPhrase}
             onDelete={handleDeletePhrase}
+            onMoveToTop={(id) => void movePhrasesToTop([id])}
             selectionMode={isSelecting}
             isSelected={isSelected}
             onToggleSelected={toggleSelected}

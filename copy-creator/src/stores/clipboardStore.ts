@@ -79,6 +79,7 @@ interface ClipboardState {
   pasteRecord: (record: ClipboardRecord) => Promise<boolean>;
   pasteRecordTerminal: (record: ClipboardRecord) => Promise<boolean>;
   reorderRecords: (ids: string[]) => Promise<void>;
+  moveRecordsToTop: (ids: string[]) => Promise<void>;
   getRecordContent: (record: ClipboardRecord) => Promise<string>;
   getThumbnail: (record: Pick<ClipboardRecord, "id" | "content">) => Promise<string>;
   getImageData: (record: Pick<ClipboardRecord, "id" | "content">) => Promise<string>;
@@ -502,6 +503,23 @@ export const useClipboardStore = create<ClipboardState>((set, get) => ({
       console.error("Failed to reorder clipboard records:", e);
       get().loadRecords();
     }
+  },
+
+  // 移到顶部：sort_order 提到全表最前，径向菜单与主窗口共用该顺序。
+  // 搜索状态下执行后按当前搜索词重载，置顶项保持在结果最前。
+  moveRecordsToTop: async (ids: string[]) => {
+    const idOrder = new Map(ids.map((id, i) => [id, i]));
+    set((state) => ({
+      records: [...state.records].sort(
+        (a, b) => (idOrder.get(a.id) ?? Infinity) - (idOrder.get(b.id) ?? Infinity)
+      ),
+    }));
+    try {
+      await invoke("move_clipboard_records_to_top", { ids });
+    } catch (e) {
+      console.error("Failed to move clipboard records to top:", e);
+    }
+    get().loadRecords();
   },
 
   getRecordContent: getFullContent,

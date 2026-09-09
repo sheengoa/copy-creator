@@ -12,6 +12,8 @@ interface BatchSelectionBarProps {
   busy?: boolean;
   busyLabel?: string;
   onMove?: () => void;
+  /** 可选：把选中内容移到列表顶部（径向菜单同步可见）。 */
+  onMoveTop?: () => void;
 }
 
 export default function BatchSelectionBar({
@@ -24,6 +26,7 @@ export default function BatchSelectionBar({
   busy = false,
   busyLabel,
   onMove,
+  onMoveTop,
 }: BatchSelectionBarProps) {
   const { t } = useTranslation();
   const checkboxRef = useRef<HTMLInputElement>(null);
@@ -53,6 +56,17 @@ export default function BatchSelectionBar({
         {t("common.selectedCount", { count: selectedCount })}
       </span>
       <div className="batch-selection-actions">
+        {onMoveTop && (
+          <button
+            className="batch-move-btn"
+            type="button"
+            disabled={selectedCount === 0 || busy}
+            onClick={onMoveTop}
+          >
+            {Icons.arrowUp}
+            <span>{t("common.moveToTop")}</span>
+          </button>
+        )}
         {onMove && (
           <button
             className="batch-move-btn"

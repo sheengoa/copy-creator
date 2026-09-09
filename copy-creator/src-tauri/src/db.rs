@@ -4782,6 +4782,108 @@ pub fn reorder_phrases(app: AppHandle, ids: Vec<String>) -> Result<(), String> {
     Ok(())
 }
 
+/// 将给定 id 的行按传入顺序依次置顶（第一个 id 最靠前）：sort_order 取
+/// 当前最大值之上的递减序。之后新写入的记录（sort_order 为时间戳）照常
+/// 插到最前面，被置顶内容随新内容积累自然下移。
+/// 表名来自内部常量调用点，不引入注入风险；id 值做转义。
+fn move_rows_to_top(conn: &Connection, table: &str, ids: &[String]) -> Result<(), String> {
+    if ids.is_empty() {
+        return Ok(());
+    }
+    let max: f64 = conn
+        .query_row(
+            &format!("SELECT COALESCE(MAX(sort_order), 0) FROM {table}"),
+            [],
+            |row| row.get(0),
+        )
+        .map_err(|e| e.to_string())?;
+
+    let n = ids.len();
+    let mut case_clauses = String::new();
+    let mut id_list = String::new();
+    for (i, id) in ids.iter().enumerate() {
+        let escaped = id.replace('\'', "''");
+        case_clauses.push_str(&format!(" WHEN '{}' THEN {}", escaped, max + (n - i) as f64));
+        if i > 0 {
+            id_list.push(',');
+        }
+        id_list.push_str(&format!("'{}'", escaped));
+    }
+
+    conn.execute(
+        &format!(
+            "UPDATE {table} SET sort_order = CASE id{} END WHERE id IN ({})",
+            case_clauses, id_list
+        ),
+        [],
+    )
+    .map_err(|e| e.to_string())?;
+    Ok(())
+}
+
+#[tauri::command]
+pub fn move_clipboard_records_to_top(app: AppHandle, ids: Vec<String>) -> Result<(), String> {
+    let state = app.state::<DbState>();
+    let conn = state.conn.lock().map_err(|e| e.to_string())?;
+    move_rows_to_top(&conn, "clipboard_records", &ids)?;
+    log::info!("move_clipboard_records_to_top: {} items", ids.len());
+    Ok(())
+}
+
+#[tauri::command]
+pub fn move_phrases_to_top(app: AppHandle, ids: Vec<String>) -> Result<(), String> {
+    let state = app.state::<DbState>();
+    let conn = state.conn.lock().map_err(|e| e.to_string())?;
+    move_rows_to_top(&conn, "phrases", &ids)?;
+    log::info!("move_phrases_to_top: {} items", ids.len());
+    Ok(())
+}
+
+#[cfg(test)]
+mod move_to_top_tests {
+    use super::{move_rows_to_top, Connection};
+
+    #[test]
+    fn move_rows_to_top_orders_selected_ids_above_all_existing() {
+        let conn = Connection::open_in_memory().unwrap();
+        conn.execute(
+            "CREATE TABLE t (id TEXT PRIMARY KEY, sort_order REAL)",
+            [],
+        )
+        .unwrap();
+        // 'b' 带时间戳级 sort_order（最新内容），'old' 是更早的记录。
+        conn.execute(
+            "INSERT INTO t (id, sort_order) VALUES ('b', 1700000000000.0), ('old', 1699999999999.0), ('x', 10.0)",
+            [],
+        )
+        .unwrap();
+
+        // 多选置顶：传入顺序即目标顺序（第一个最靠前）。
+        move_rows_to_top(&conn, "t", &["x".to_string(), "old".to_string()]).unwrap();
+
+        let mut stmt = conn
+            .prepare("SELECT id FROM t ORDER BY sort_order DESC")
+            .unwrap();
+        let ids: Vec<String> = stmt
+            .query_map([], |row| row.get::<_, String>(0))
+            .unwrap()
+            .collect::<Result<Vec<_>, _>>()
+            .unwrap();
+        assert_eq!(ids, vec!["x", "old", "b"]);
+    }
+
+    #[test]
+    fn move_rows_to_top_with_empty_ids_is_noop() {
+        let conn = Connection::open_in_memory().unwrap();
+        conn.execute(
+            "CREATE TABLE t (id TEXT PRIMARY KEY, sort_order REAL)",
+            [],
+        )
+        .unwrap();
+        move_rows_to_top(&conn, "t", &[]).unwrap();
+    }
+}
+
 #[cfg(test)]
 mod quick_input_file_tests {
     use super::{
