@@ -24,7 +24,7 @@ import {
   type ResourceMediaKind,
 } from "./resourceUtils";
 import {
-  ResourceImage,
+  ResourceImageGhost,
   ResourceMediaPlayer,
   ResourceSegments,
   type ResourceMediaMetadata,
@@ -471,7 +471,7 @@ export default function ResourceDetailPage({
                 onMediaMetadata={setMediaMeta}
               />
             ) : kind === "image" ? (
-              <ResourceImage
+              <ResourceImageGhost
                 path={resourcePath}
                 alt={title}
                 className="resource-segment-image"

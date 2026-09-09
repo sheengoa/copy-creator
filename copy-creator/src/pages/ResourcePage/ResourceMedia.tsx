@@ -173,6 +173,64 @@ export function ResourceImage({
   );
 }
 
+/**
+ * 原图虚影（详情页大图等大尺寸场景）：同图放大模糊铺底，前景完整展示，
+ * 与列表卡片的缩略图虚影同一视觉。className 施加于容器；
+ * 前景图的高度约束需在使用方的 CSS 中给定（如详情页的 62vh）。
+ */
+export function ResourceImageGhost({
+  path,
+  alt,
+  className = "",
+  onMetadata,
+}: {
+  path: string;
+  alt: string;
+  className?: string;
+  onMetadata?: (meta: ResourceImageMetadata) => void;
+}) {
+  const { src, failed } = useResourceAssetUrl(path);
+  const [imageFailed, setImageFailed] = useState(false);
+  const reportedSizeRef = useRef("");
+
+  useEffect(() => {
+    setImageFailed(false);
+    reportedSizeRef.current = "";
+  }, [src]);
+
+  if (failed || imageFailed) {
+    return (
+      <div className={`resource-media-fallback ${className}`} role="img" aria-label={alt}>
+        {Icons.image}
+        <span>{alt}</span>
+      </div>
+    );
+  }
+  if (!src) return <div className={`resource-media-loading ${className}`} aria-hidden="true" />;
+  return (
+    <div className={`resource-thumb-blur resource-image-ghost ${className}`.trim()}>
+      <img className="resource-thumb-blur-bg" src={src} alt="" aria-hidden="true" />
+      <img
+        className="resource-thumb-blur-fg"
+        src={src}
+        alt={alt}
+        draggable={false}
+        loading="lazy"
+        decoding="async"
+        onLoad={(event) => {
+          const image = event.currentTarget;
+          if (image.naturalWidth <= 0 || image.naturalHeight <= 0) return;
+          const sizeKey = `${image.naturalWidth}x${image.naturalHeight}`;
+          if (reportedSizeRef.current === sizeKey) return;
+          reportedSizeRef.current = sizeKey;
+          onMetadata?.({ width: image.naturalWidth, height: image.naturalHeight });
+        }}
+        onError={() => setImageFailed(true)}
+      />
+    </div>
+  );
+}
+
 export function ResourceSegments({
   segments,
   compact = false,
