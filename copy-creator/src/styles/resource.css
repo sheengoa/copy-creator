@@ -1312,6 +1312,16 @@
   object-fit: contain;
 }
 
+/* 资源详情页大图的原图虚影：前景图跟随容器的高度约束，
+   模糊铺底自动填满前景留白区域。 */
+.resource-segment-image > .resource-thumb-blur-fg {
+  max-height: 330px;
+}
+
+.resource-detail-stage-image .resource-segment-image > .resource-thumb-blur-fg {
+  max-height: 62vh;
+}
+
 .resource-media-loading {
   width: 100%;
   min-height: 120px;
