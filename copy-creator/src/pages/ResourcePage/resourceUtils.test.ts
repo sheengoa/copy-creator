@@ -22,6 +22,7 @@ import {
   getResourceFileName,
   getResourcePath,
   getResourceTitle,
+  hasCustomResourceFileName,
   inferResourceMediaKind,
   isResourceFolderPath,
   isResourceTitleRenameable,
@@ -204,6 +205,33 @@ describe("resourceUtils", () => {
     expect(isResourceTitleRenameable(record("file", "/tmp/a.zip"))).toBe(true);
     expect(isResourceTitleRenameable(record("text", "正文"))).toBe(false);
     expect(isResourceTitleRenameable(record("link", "https://example.com"))).toBe(false);
+  });
+
+  it("marks file-backed resource text as renameable via its file", () => {
+    expect(isResourceTitleRenameable({
+      type: "text",
+      resource_path: "/tmp/resources/正文.txt",
+    })).toBe(true);
+  });
+
+  it("falls back to the file name once a resource text has been renamed", () => {
+    const autoNamed = {
+      id: "record-1",
+      type: "text" as const,
+      content: "第一行正文\n第二行",
+      resource_path: "/tmp/resources/copy-creator-record-1-tx-1-第一行正文.txt",
+    };
+    expect(hasCustomResourceFileName(autoNamed)).toBe(false);
+    expect(getResourceTitle(autoNamed)).toBe("第一行正文");
+
+    const renamed = {
+      id: "record-1",
+      type: "text" as const,
+      content: "第一行正文\n第二行",
+      resource_path: "/tmp/resources/自定义标题.txt",
+    };
+    expect(hasCustomResourceFileName(renamed)).toBe(true);
+    expect(getResourceTitle(renamed)).toBe("自定义标题.txt");
   });
 
   it("splits file names into stem and extension for inline rename", () => {

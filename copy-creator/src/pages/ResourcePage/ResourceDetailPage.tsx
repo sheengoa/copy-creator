@@ -65,6 +65,13 @@ export default function ResourceDetailPage({
   const [renameDraft, setRenameDraft] = useState<string | null>(null);
   const [renameSaving, setRenameSaving] = useState(false);
   const [renameError, setRenameError] = useState<string | null>(null);
+  const [contentEditing, setContentEditing] = useState(false);
+  const [contentDraft, setContentDraft] = useState("");
+  const [savedContent, setSavedContent] = useState("");
+  const [contentSaving, setContentSaving] = useState(false);
+  const [contentSaved, setContentSaved] = useState(false);
+  const [contentSaveError, setContentSaveError] = useState(false);
+  const contentSavedTimerRef = useRef<number | null>(null);
   const externalTextPath = kind === "text" && record.type === "file"
     ? resourcePath
     : null;
@@ -78,10 +85,14 @@ export default function ResourceDetailPage({
     setNoteError(false);
     setRenameDraft(null);
     setRenameError(null);
+    setContentEditing(false);
+    setContentSaved(false);
+    setContentSaveError(false);
   }, [record.id, record.resource_note]);
 
   useEffect(() => () => {
     if (noteSavedTimerRef.current !== null) window.clearTimeout(noteSavedTimerRef.current);
+    if (contentSavedTimerRef.current !== null) window.clearTimeout(contentSavedTimerRef.current);
   }, []);
 
   const handleSaveNote = async () => {
@@ -180,8 +191,13 @@ export default function ResourceDetailPage({
   const title = getResourceTitle(record, kind);
 
   const renameable = isResourceTitleRenameable(record);
+  // 标题编辑基于文件名：文件记录的路径在 content/resource_path，文本资源记录的
+  // 路径只在 resource_path（content 是正文）。
+  const titlePath = record.type === "file" || record.type === "image"
+    ? getResourcePath(record)
+    : record.resource_path || "";
   const { stem: currentStem, extension: titleExtension } = splitResourceFileName(
-    getResourceFileName(getResourcePath(record)),
+    getResourceFileName(titlePath),
   );
 
   const cancelRename = () => {
@@ -234,6 +250,77 @@ export default function ResourceDetailPage({
   const textDetailReady = externalTextPath ? textContent !== null : Boolean(segments);
   const contentReady = externalTextPath ? textDetailReady : detailReady;
 
+  // 正文编辑仅面向纯文本资源（不含内嵌图片）：文件承载文本是事实来源，
+  // 数据库记录的 content 在保存时与文件同步。
+  const textEditPath = kind === "text"
+    ? (record.type === "file" ? externalTextPath : record.resource_path || null)
+    : null;
+  const fullTextContent = useMemo(() => {
+    if (externalTextPath) return textContent;
+    if (!segments) return null;
+    return segments
+      .filter((segment): segment is Extract<RadialPreviewSegment, { type: "text" }> =>
+        segment.type === "text")
+      .map((segment) => segment.content)
+      .join("\n");
+  }, [externalTextPath, segments, textContent]);
+  const contentEditable = Boolean(textEditPath) && !record.has_images && fullTextContent !== null;
+  // 正文加载完成后把当前内容作为「已保存」基准，进入编辑态时以此为草稿初值。
+  useEffect(() => {
+    if (fullTextContent === null) return;
+    setSavedContent(fullTextContent);
+  }, [fullTextContent]);
+  const contentDirty = contentDraft.trim() !== savedContent.trim();
+
+  const startContentEdit = () => {
+    setContentDraft(fullTextContent ?? "");
+    setContentSaved(false);
+    setContentSaveError(false);
+    setContentEditing(true);
+  };
+
+  const cancelContentEdit = () => {
+    setContentEditing(false);
+    setContentDraft("");
+    setContentSaveError(false);
+  };
+
+  const handleSaveContent = async () => {
+    if (!textEditPath || contentSaving || !contentDirty) return;
+    setContentSaving(true);
+    setContentSaveError(false);
+    try {
+      const saved = await invoke<{ content: string; record_type?: string }>(
+        "write_resource_text_content",
+        {
+          path: textEditPath,
+          content: contentDraft,
+          ...(record.resource_managed !== false ? { id: record.id } : {}),
+        },
+      );
+      setContentEditing(false);
+      setContentDraft("");
+      setSavedContent(saved.content);
+      setContentSaved(true);
+      if (contentSavedTimerRef.current !== null) window.clearTimeout(contentSavedTimerRef.current);
+      contentSavedTimerRef.current = window.setTimeout(() => {
+        setContentSaved(false);
+        contentSavedTimerRef.current = null;
+      }, 2200);
+      onRecordUpdated({
+        ...record,
+        content: saved.content,
+        ...(saved.record_type === "text" || saved.record_type === "link"
+          ? { type: saved.record_type }
+          : null),
+      });
+    } catch {
+      setContentSaveError(true);
+    } finally {
+      setContentSaving(false);
+    }
+  };
+
   return (
     <div className="resource-detail-page">
       <header className="resource-detail-header">
@@ -242,6 +329,38 @@ export default function ResourceDetailPage({
           <span>{t("resources.backToLibrary")}</span>
         </button>
         <div className="resource-detail-actions">
+          {contentEditable && !contentEditing && (
+            <button
+              type="button"
+              className="resource-secondary-button"
+              onClick={startContentEdit}
+            >
+              {Icons.edit}
+              <span>{t("resources.editContent")}</span>
+            </button>
+          )}
+          {contentEditing && (
+            <>
+              <button
+                type="button"
+                className="resource-secondary-button"
+                onClick={cancelContentEdit}
+                disabled={contentSaving}
+              >
+                <span>{t("resources.discardChanges")}</span>
+              </button>
+              <button
+                type="button"
+                className="resource-primary-button"
+                onClick={() => void handleSaveContent()}
+                disabled={contentSaving || !contentDirty}
+              >
+                <span>{contentSaving ? t("common.saving") : t("resources.saveChanges")}</span>
+              </button>
+            </>
+          )}
+          {contentSaved && <span className="resource-content-saved" role="status">{t("resources.contentSaved")}</span>}
+          {contentSaveError && <span className="resource-content-error" role="alert">{t("resources.contentSaveFailed")}</span>}
           <button type="button" className="resource-secondary-button" onClick={() => void onCopy(record)}>
             {Icons.copy}
             <span>{t("resources.copy")}</span>
@@ -336,6 +455,27 @@ export default function ResourceDetailPage({
                 </span>
                 <code>{record.resource_relative_path || record.resource_path || record.content}</code>
               </div>
+            ) : contentEditing && contentEditable ? (
+              <textarea
+                className="resource-detail-text-editor"
+                autoFocus
+                value={contentDraft}
+                maxLength={1_000_000}
+                disabled={contentSaving}
+                aria-label={t("resources.editContent")}
+                onChange={(event) => {
+                  setContentDraft(event.target.value);
+                  setContentSaveError(false);
+                }}
+                onKeyDown={(event) => {
+                  // Escape 只退出编辑（放弃改动），不触发页面级返回。
+                  if (event.key === "Escape") {
+                    event.preventDefault();
+                    event.stopPropagation();
+                    cancelContentEdit();
+                  }
+                }}
+              />
             ) : externalTextPath ? (
               <pre className="resource-segment-text resource-detail-text-file">
                 <HighlightText text={textContent || ""} />

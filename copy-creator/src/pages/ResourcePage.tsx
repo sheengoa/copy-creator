@@ -12,7 +12,9 @@ import {
   useSensors,
 } from "@dnd-kit/core";
 import type { DragEndEvent, DragOverEvent, DragStartEvent } from "@dnd-kit/core";
-import { SortableContext } from "@dnd-kit/sortable";
+import { SortableContext, arrayMove, useSortable, verticalListSortingStrategy } from "@dnd-kit/sortable";
+import { CSS } from "@dnd-kit/utilities";
+import { restrictToVerticalAxis } from "@dnd-kit/modifiers";
 import { useClipboardStore } from "../stores/clipboardStore";
 import { useMultiSelect } from "../hooks/useMultiSelect";
 import { Icons } from "../components/Icons";
@@ -21,6 +23,7 @@ import SearchInput from "../components/SearchInput";
 import BatchSelectionBar from "../components/BatchSelectionBar";
 import type { ClipboardRecord, ResourceFolder } from "../types";
 import ResourceDetailPage from "./ResourcePage/ResourceDetailPage";
+import ResourceGroupChips from "./ResourcePage/ResourceGroupChips";
 import { ResourceCard, ResourceCardDragPreview } from "./ResourcePage/ResourceCard";
 import {
   getChangedOrderIds,
@@ -29,13 +32,16 @@ import {
 import {
   computeResourceColumnCount,
   findResourceFolder,
+  flattenResourceFolderPaths,
   flattenResourceFolders,
   formatResourceFolderPath,
   getResourceFolderRoot,
+  getResourceFolderSiblings,
   getResourceTitle,
   inferResourceMediaKind,
   isResourceFolderPath,
   matchesResourceType,
+  reorderResourceFolderSiblings,
   splitResourceColumns,
   type ResourceMediaKind,
   type ResourceTypeFilter,
@@ -95,7 +101,6 @@ export default function ResourcePage() {
   const detailHistoryRef = useRef(false);
   const pendingScrollTopRef = useRef<number | null>(null);
   const resourceListRef = useRef<HTMLDivElement>(null);
-  const resourceGroupScrollRef = useRef<HTMLDivElement>(null);
   const [listElement, setListElement] = useState<HTMLDivElement | null>(null);
   const [columnCount, setColumnCount] = useState(2);
   const [listScrolled, setListScrolled] = useState(false);
@@ -121,19 +126,12 @@ export default function ResourcePage() {
   const [resourceGroupDialog, setResourceGroupDialog] = useState<ResourceGroupDialogState>(null);
   const [resourceGroupName, setResourceGroupName] = useState("");
   const [resourceGroupSaving, setResourceGroupSaving] = useState(false);
-  const [resourceGroupMenuPath, setResourceGroupMenuPath] = useState<string | null>(null);
   const [collapsedGroupPaths, setCollapsedGroupPaths] = useState<string[]>([]);
   const [resourceGroupMove, setResourceGroupMove] = useState<ResourceGroupMoveState>(null);
   const [movingGroup, setMovingGroup] = useState(false);
   const [movingGroupError, setMovingGroupError] = useState<string | null>(null);
-  const [resourceGroupMenuPosition, setResourceGroupMenuPosition] = useState<{
-    left: number;
-    top: number;
-  } | null>(null);
   const resourceSettingsButtonRef = useRef<HTMLButtonElement>(null);
   const resourceSettingsPopoverRef = useRef<HTMLElement>(null);
-  const resourceGroupMenuRef = useRef<HTMLDivElement>(null);
-  const resourceGroupMenuAnchorRef = useRef<HTMLButtonElement>(null);
   const [confirmState, setConfirmState] = useState<{
     message: string;
     onConfirm: () => void | Promise<void>;
@@ -355,19 +353,6 @@ export default function ResourcePage() {
     resourceListRef.current?.scrollTo({ top: 0, behavior: "smooth" });
   }, []);
 
-  // 与剪切板区、快捷输入区一致：指针悬浮在分组栏上滚动滑轮即可横向滚动。
-  useEffect(() => {
-    const el = resourceGroupScrollRef.current;
-    if (!el) return;
-    const onWheel = (e: WheelEvent) => {
-      if (Math.abs(e.deltaY) > Math.abs(e.deltaX)) {
-        e.preventDefault();
-        el.scrollLeft += e.deltaY;
-      }
-    };
-    el.addEventListener("wheel", onWheel, { passive: false });
-    return () => el.removeEventListener("wheel", onWheel);
-  }, []);
   const activeDragRecord = activeDragId
     ? renderedRecords.find((record) => record.id === activeDragId)
     : null;
@@ -379,6 +364,9 @@ export default function ResourcePage() {
   }, [filteredRecords]);
 
   const sensors = useSensors(
+    useSensor(PointerSensor, { activationConstraint: { distance: 4 } }),
+  );
+  const manageRowSensors = useSensors(
     useSensor(PointerSensor, { activationConstraint: { distance: 4 } }),
   );
 
@@ -440,21 +428,6 @@ export default function ResourcePage() {
       : null,
     [resourceFolderGroups, resourceGroup],
   );
-  const resourceGroupMenuFolder = useMemo(
-    () => resourceGroupMenuPath
-      ? findResourceFolder(resourceFolderGroups, resourceGroupMenuPath)
-      : null,
-    [resourceFolderGroups, resourceGroupMenuPath],
-  );
-  const resourceGroupMenuItems = useMemo(
-    () => resourceGroupMenuFolder
-      ? [
-        { folder: resourceGroupMenuFolder, depth: 0 },
-        ...flattenResourceFolders(resourceGroupMenuFolder.children ?? [], 1),
-      ]
-      : [],
-    [resourceGroupMenuFolder],
-  );
   // 管理对话框的树形行：折叠的分组不展示其后代；计数为含子级的总量（后端提供）。
   const manageRows = useMemo(() => {
     const rows: Array<{ folder: ResourceFolder; depth: number }> = [];
@@ -474,78 +447,25 @@ export default function ResourcePage() {
     () => flattenResourceFolders(resourceGroups.filter((group) => group.name !== "")),
     [resourceGroups],
   );
+  // 管理对话框拖拽用：分组路径 → 父分组路径（顶层为 null）。
+  const groupParentMap = useMemo(() => {
+    const map = new Map<string, string | null>();
+    const walk = (folders: ResourceFolder[], parent: string | null) => {
+      for (const folder of folders) {
+        map.set(folder.path, parent);
+        walk(folder.children ?? [], folder.path);
+      }
+    };
+    walk(resourceGroups, null);
+    return map;
+  }, [resourceGroups]);
+  const [activeGroupRowId, setActiveGroupRowId] = useState<string | null>(null);
+  const activeGroupRow = activeGroupRowId
+    ? manageRows.find(({ folder }) => folder.path === activeGroupRowId)?.folder ?? null
+    : null;
   const getResourceGroupLabel = useCallback((name: string) => (
     name === "" ? t("resources.ungrouped") : name
   ), [t]);
-  const getResourceGroupControlLabel = useCallback((group: ResourceFolder) => {
-    if (resourceGroup && isResourceFolderPath(resourceGroup, group.path)) {
-      return formatResourceFolderPath(resourceGroup);
-    }
-    return group.name;
-  }, [resourceGroup]);
-
-  const closeResourceGroupMenu = useCallback(() => {
-    setResourceGroupMenuPath(null);
-    setResourceGroupMenuPosition(null);
-  }, []);
-
-  const updateResourceGroupMenuPosition = useCallback(() => {
-    const anchor = resourceGroupMenuAnchorRef.current;
-    if (!anchor) return;
-    const anchorRect = anchor.getBoundingClientRect();
-    const menuRect = resourceGroupMenuRef.current?.getBoundingClientRect();
-    const menuWidth = menuRect?.width ?? 220;
-    const menuHeight = menuRect?.height ?? 0;
-    const viewportPadding = 8;
-    const left = Math.max(
-      viewportPadding,
-      Math.min(anchorRect.left, window.innerWidth - menuWidth - viewportPadding),
-    );
-    const canOpenAbove = anchorRect.top - menuHeight - 6 >= viewportPadding;
-    const top = canOpenAbove && anchorRect.bottom + menuHeight + 6 > window.innerHeight
-      ? anchorRect.top - menuHeight - 6
-      : anchorRect.bottom + 6;
-    setResourceGroupMenuPosition({ left, top });
-  }, []);
-
-  useEffect(() => {
-    if (!resourceGroupMenuPath) return;
-
-    let frame: number | null = null;
-    const schedulePositionUpdate = () => {
-      if (frame !== null) window.cancelAnimationFrame(frame);
-      frame = window.requestAnimationFrame(() => {
-        frame = null;
-        updateResourceGroupMenuPosition();
-      });
-    };
-    const handlePointerDown = (event: MouseEvent) => {
-      const target = event.target as Node;
-      if (resourceGroupMenuRef.current?.contains(target)) return;
-      if (resourceGroupMenuAnchorRef.current?.contains(target)) return;
-      closeResourceGroupMenu();
-    };
-    const handleKeyDown = (event: KeyboardEvent) => {
-      if (event.key === "Escape") {
-        event.preventDefault();
-        closeResourceGroupMenu();
-      }
-    };
-
-    document.addEventListener("mousedown", handlePointerDown);
-    document.addEventListener("keydown", handleKeyDown);
-    window.addEventListener("resize", schedulePositionUpdate);
-    window.addEventListener("scroll", schedulePositionUpdate, true);
-    schedulePositionUpdate();
-
-    return () => {
-      document.removeEventListener("mousedown", handlePointerDown);
-      document.removeEventListener("keydown", handleKeyDown);
-      window.removeEventListener("resize", schedulePositionUpdate);
-      window.removeEventListener("scroll", schedulePositionUpdate, true);
-      if (frame !== null) window.cancelAnimationFrame(frame);
-    };
-  }, [closeResourceGroupMenu, resourceGroupMenuPath, updateResourceGroupMenuPosition]);
 
   useEffect(() => {
     if (
@@ -556,12 +476,10 @@ export default function ResourcePage() {
     ) {
       return;
     }
-    closeResourceGroupMenu();
     setResourceGroup(null);
     setStoreResourceGroup(null);
     void loadRecords(false, "resources", null);
   }, [
-    closeResourceGroupMenu,
     loadRecords,
     resourceFolderGroups,
     resourceGroup,
@@ -571,10 +489,9 @@ export default function ResourcePage() {
 
   const handleSelectResourceGroup = useCallback((name: string | null) => {
     cancelResourceSelection();
-    closeResourceGroupMenu();
     setResourceGroup(name);
     setStoreResourceGroup(name);
-  }, [cancelResourceSelection, closeResourceGroupMenu, setStoreResourceGroup]);
+  }, [cancelResourceSelection, setStoreResourceGroup]);
 
   const openNewResourceGroup = useCallback((parentPath?: string) => {
     setResourceGroupName("");
@@ -667,7 +584,6 @@ export default function ResourcePage() {
         setResourceGroup(fullPath);
         setStoreResourceGroup(fullPath);
       }
-      closeResourceGroupMenu();
       setResourceGroupDialog(null);
     } catch (error) {
       console.error("Failed to save resource group:", error);
@@ -676,7 +592,6 @@ export default function ResourcePage() {
       setResourceGroupSaving(false);
     }
   }, [
-    closeResourceGroupMenu,
     loadResourceGroups,
     resourceGroupDialog,
     resourceGroupName,
@@ -692,6 +607,42 @@ export default function ResourcePage() {
       setResourceGroupsError(String(error));
     }
   }, []);
+
+  // 按新兄弟顺序重排分组树并持久化（扁平全路径列表）；失败时回退为后端顺序。
+  const commitGroupOrder = useCallback(async (nextGroups: ResourceFolder[]) => {
+    const ungrouped = nextGroups.find((group) => group.name === "");
+    setResourceGroups(nextGroups);
+    const ordered = nextGroups.filter((group) => group.name !== "");
+    try {
+      await invoke("reorder_resource_groups", {
+        ids: flattenResourceFolderPaths(ordered),
+      });
+    } catch (error) {
+      console.error("Failed to reorder resource groups:", error);
+      void loadResourceGroups();
+    }
+    return ungrouped ? [ungrouped, ...ordered] : ordered;
+  }, [loadResourceGroups]);
+
+  const handleReorderTopGroups = useCallback((orderedPaths: string[]) => {
+    void commitGroupOrder(reorderResourceFolderSiblings(resourceGroups, null, orderedPaths));
+  }, [commitGroupOrder, resourceGroups]);
+
+  const handleReorderManageRows = useCallback((event: DragEndEvent) => {
+    setActiveGroupRowId(null);
+    const { active, over } = event;
+    if (!over || active.id === over.id) return;
+    const activeParent = groupParentMap.get(String(active.id)) ?? null;
+    const overParent = groupParentMap.get(String(over.id)) ?? null;
+    // 只允许在同一父分组内排序，跨层级移动仍走「移动分组」对话框。
+    if (activeParent !== overParent) return;
+    const siblings = getResourceFolderSiblings(resourceGroups, activeParent);
+    const oldIndex = siblings.findIndex((group) => group.path === active.id);
+    const newIndex = siblings.findIndex((group) => group.path === over.id);
+    if (oldIndex === -1 || newIndex === -1) return;
+    const orderedPaths = arrayMove(siblings, oldIndex, newIndex).map((group) => group.path);
+    void commitGroupOrder(reorderResourceFolderSiblings(resourceGroups, activeParent, orderedPaths));
+  }, [commitGroupOrder, groupParentMap, resourceGroups]);
 
   const handleDeleteResourceGroup = useCallback((name: string) => {
     setConfirmState({
@@ -957,39 +908,6 @@ export default function ResourcePage() {
     }
   }, [resourceGroup, showFeedback]);
 
-  const resourceGroupMenu = resourceGroupMenuPath && resourceGroupMenuFolder
-    ? createPortal(
-      <div
-        ref={resourceGroupMenuRef}
-        className="resource-group-dropdown"
-        role="menu"
-        aria-label={t("resources.openSubfolders")}
-        style={{
-          left: resourceGroupMenuPosition?.left ?? 0,
-          top: resourceGroupMenuPosition?.top ?? 0,
-          visibility: resourceGroupMenuPosition ? "visible" : "hidden",
-        }}
-      >
-        {resourceGroupMenuItems.map(({ folder, depth }) => (
-          <button
-            key={folder.path}
-            type="button"
-            className={`resource-group-menu-item${depth > 0 ? " nested" : ""}${resourceGroup === folder.path ? " selected" : ""}`}
-            role="menuitem"
-            aria-current={resourceGroup === folder.path ? "page" : undefined}
-            title={folder.path}
-            style={{ paddingLeft: `${8 + depth * 14}px` }}
-            onClick={() => handleSelectResourceGroup(folder.path)}
-          >
-            {Icons.resources}
-            <span>{depth === 0 ? t("resources.allFiles") : folder.name}</span>
-          </button>
-        ))}
-      </div>,
-      document.body,
-    )
-    : null;
-
   const confirmDialog = confirmState ? (
     <div className="dialog-overlay" onClick={() => setConfirmState(null)}>
       <div className="dialog-content" onClick={(event) => event.stopPropagation()}>
@@ -1130,98 +1048,16 @@ export default function ResourcePage() {
         </section>
       )}
 
-      <section
-        className="resource-group-section"
-        aria-label={t("resources.groups")}
-        aria-busy={resourceGroupsLoading}
-      >
-        <div className="resource-group-scroll" ref={resourceGroupScrollRef}>
-          <button
-            type="button"
-            className={`resource-group-chip${resourceGroup === null ? " active" : ""}`}
-            onClick={() => handleSelectResourceGroup(null)}
-          >
-            <span>{t("resources.allGroups")}</span>
-          </button>
-          <button
-            type="button"
-            className={`resource-group-chip${resourceGroup === "" ? " active" : ""}`}
-            onClick={() => handleSelectResourceGroup("")}
-          >
-            <span>{t("resources.ungrouped")}</span>
-          </button>
-          {resourceFolderGroups.map((group) => {
-            const hasChildren = (group.children ?? []).length > 0;
-            const isActive = resourceGroup !== null
-              && isResourceFolderPath(resourceGroup, group.path);
-            const groupLabel = getResourceGroupControlLabel(group);
-            return hasChildren ? (
-              <div
-                key={group.path}
-                className={`resource-group-control${isActive ? " active" : ""}${resourceGroupMenuPath === group.path ? " open" : ""}`}
-              >
-                <button
-                  type="button"
-                  className="resource-group-chip-main"
-                  onClick={() => handleSelectResourceGroup(group.path)}
-                  title={groupLabel}
-                >
-                  <span>{groupLabel}</span>
-                </button>
-                <button
-                  type="button"
-                  className="resource-group-chevron"
-                  ref={(element) => {
-                    if (resourceGroupMenuPath === group.path) {
-                      resourceGroupMenuAnchorRef.current = element;
-                    }
-                  }}
-                  onClick={(event) => {
-                    event.stopPropagation();
-                    if (resourceGroupMenuPath === group.path) {
-                      closeResourceGroupMenu();
-                      return;
-                    }
-                    resourceGroupMenuAnchorRef.current = event.currentTarget;
-                    setResourceGroupMenuPosition(null);
-                    setResourceGroupMenuPath(group.path);
-                  }}
-                  aria-label={t("resources.openSubfolders")}
-                  aria-expanded={resourceGroupMenuPath === group.path}
-                  aria-haspopup="menu"
-                  title={t("resources.openSubfolders")}
-                >
-                  {Icons.chevronDown}
-                </button>
-              </div>
-            ) : (
-              <button
-                key={group.path}
-                type="button"
-                className={`resource-group-chip${isActive ? " active" : ""}`}
-                onClick={() => handleSelectResourceGroup(group.path)}
-                title={group.name}
-              >
-                <span>{group.name}</span>
-              </button>
-            );
-          })}
-        </div>
-        <div className="resource-group-actions">
-          <button
-            type="button"
-            className="resource-group-action"
-            onClick={() => {
-              setResourceGroupsError(null);
-              setResourceGroupManageOpen(true);
-            }}
-            aria-label={t("resources.manageGroups")}
-            title={t("resources.manageGroups")}
-          >
-            {Icons.edit}
-          </button>
-        </div>
-      </section>
+      <ResourceGroupChips
+        groups={resourceFolderGroups}
+        selectedGroup={resourceGroup}
+        onSelectGroup={handleSelectResourceGroup}
+        onReorderGroups={handleReorderTopGroups}
+        onManageGroups={() => {
+          setResourceGroupsError(null);
+          setResourceGroupManageOpen(true);
+        }}
+      />
 
       <div className="resource-filter-row">
         <span className="resource-filter-label">{t("resources.filterByType")}</span>
@@ -1283,89 +1119,52 @@ export default function ResourcePage() {
               <span className="dialog-error-text" role="alert">{resourceGroupsError}</span>
             )}
             <div className="resource-group-manage-list">
-              {manageRows.map(({ folder, depth }) => {
-                const isRoot = folder.name === "";
-                const hasChildren = (folder.children ?? []).length > 0;
-                const collapsed = collapsedGroupPaths.includes(folder.path);
-                return (
-                  <div
-                    key={folder.path || "ungrouped"}
-                    className="resource-group-manage-row"
-                    style={{ paddingLeft: `${depth * 16}px` }}
-                  >
-                    <button
-                      type="button"
-                      className={`resource-group-twist${collapsed ? " collapsed" : ""}`}
-                      disabled={!hasChildren}
-                      aria-label={
-                        hasChildren
-                          ? (collapsed ? t("resources.expandGroup") : t("resources.collapseGroup"))
-                          : undefined
-                      }
-                      onClick={() => hasChildren && toggleGroupCollapsed(folder.path)}
-                    >
-                      {hasChildren && Icons.chevronDown}
-                    </button>
-                    <div className="resource-group-manage-name" title={folder.path}>
-                      <span>{getResourceGroupLabel(folder.name)}</span>
+              <DndContext
+                sensors={manageRowSensors}
+                collisionDetection={closestCenter}
+                modifiers={[restrictToVerticalAxis]}
+                onDragStart={(event) => setActiveGroupRowId(String(event.active.id))}
+                onDragEnd={handleReorderManageRows}
+                onDragCancel={() => setActiveGroupRowId(null)}
+              >
+                <SortableContext
+                  items={manageRows.map(({ folder }) => folder.path)}
+                  strategy={verticalListSortingStrategy}
+                >
+                  {manageRows.map(({ folder, depth }) => {
+                    const isRoot = folder.name === "";
+                    const hasChildren = (folder.children ?? []).length > 0;
+                    const collapsed = collapsedGroupPaths.includes(folder.path);
+                    return (
+                      <SortableManageRow
+                        key={folder.path || "ungrouped"}
+                        folder={folder}
+                        depth={depth}
+                        label={getResourceGroupLabel(folder.name)}
+                        collapsed={collapsed}
+                        hasChildren={hasChildren}
+                        onToggleCollapsed={() => hasChildren && toggleGroupCollapsed(folder.path)}
+                        onOpen={() => void handleOpenResourceGroup(folder.path)}
+                        onNewSubgroup={() => openNewResourceGroup(folder.path)}
+                        onRename={() => openRenameResourceGroup(folder.path)}
+                        onMove={() => openGroupMove(folder.path)}
+                        onDelete={() => handleDeleteResourceGroup(folder.path)}
+                        hideRootControls={isRoot}
+                      />
+                    );
+                  })}
+                </SortableContext>
+                <DragOverlay dropAnimation={null}>
+                  {activeGroupRow && (
+                    <div className="resource-group-manage-row is-drag-overlay">
+                      <span className="resource-group-drag-handle is-static">{Icons.drag}</span>
+                      <span className="resource-group-manage-name">
+                        {getResourceGroupLabel(activeGroupRow.name)}
+                      </span>
                     </div>
-                    <span className="resource-group-manage-count">
-                      {t("resources.itemCount", { count: folder.count })}
-                    </span>
-                    <div className="resource-group-manage-actions">
-                      <button
-                        type="button"
-                        className="resource-icon-button"
-                        onClick={() => void handleOpenResourceGroup(folder.path)}
-                        aria-label={t("resources.openGroup")}
-                        title={t("resources.openGroup")}
-                      >
-                        {Icons.resources}
-                      </button>
-                      {!isRoot && (
-                        <>
-                          <button
-                            type="button"
-                            className="resource-icon-button"
-                            onClick={() => openNewResourceGroup(folder.path)}
-                            aria-label={t("resources.newSubgroup")}
-                            title={t("resources.newSubgroup")}
-                          >
-                            {Icons.add}
-                          </button>
-                          <button
-                            type="button"
-                            className="resource-icon-button"
-                            onClick={() => openRenameResourceGroup(folder.path)}
-                            aria-label={t("resources.renameGroup")}
-                            title={t("resources.renameGroup")}
-                          >
-                            {Icons.edit}
-                          </button>
-                          <button
-                            type="button"
-                            className="resource-icon-button"
-                            onClick={() => openGroupMove(folder.path)}
-                            aria-label={t("resources.moveGroup")}
-                            title={t("resources.moveGroup")}
-                          >
-                            {Icons.arrowRight}
-                          </button>
-                          <button
-                            type="button"
-                            className="resource-delete-button"
-                            onClick={() => handleDeleteResourceGroup(folder.path)}
-                            aria-label={t("common.delete")}
-                            title={t("common.delete")}
-                          >
-                            {Icons.delete}
-                          </button>
-                        </>
-                      )}
-                    </div>
-                  </div>
-                );
-              })}
+                  )}
+                </DragOverlay>
+              </DndContext>
             </div>
           </div>
         </div>
@@ -1661,7 +1460,142 @@ export default function ResourcePage() {
       )}
       {moveDialogElement}
       {moveFeedbackElement}
-      {resourceGroupMenu}
+    </div>
+  );
+}
+
+function SortableManageRow({
+  folder,
+  depth,
+  label,
+  collapsed,
+  hasChildren,
+  onToggleCollapsed,
+  onOpen,
+  onNewSubgroup,
+  onRename,
+  onMove,
+  onDelete,
+  hideRootControls,
+}: {
+  folder: ResourceFolder;
+  depth: number;
+  label: string;
+  collapsed: boolean;
+  hasChildren: boolean;
+  onToggleCollapsed: () => void;
+  onOpen: () => void;
+  onNewSubgroup: () => void;
+  onRename: () => void;
+  onMove: () => void;
+  onDelete: () => void;
+  hideRootControls: boolean;
+}) {
+  const { t } = useTranslation();
+  const {
+    attributes,
+    listeners,
+    setNodeRef,
+    setActivatorNodeRef,
+    transform,
+    transition,
+    isDragging,
+  } = useSortable({ id: folder.path, disabled: hideRootControls });
+
+  return (
+    <div
+      ref={setNodeRef}
+      className={`resource-group-manage-row${isDragging ? " is-dragging" : ""}`}
+      style={{
+        paddingLeft: `${depth * 16}px`,
+        transform: CSS.Transform.toString(transform),
+        transition: transition || "transform 180ms ease",
+      } as React.CSSProperties}
+    >
+      {!hideRootControls && (
+        <button
+          type="button"
+          ref={setActivatorNodeRef}
+          className="resource-group-drag-handle"
+          {...attributes}
+          {...listeners}
+          aria-label={t("resources.reorder")}
+          title={t("resources.reorder")}
+          onClick={(event) => event.stopPropagation()}
+        >
+          {Icons.drag}
+        </button>
+      )}
+      <button
+        type="button"
+        className={`resource-group-twist${collapsed ? " collapsed" : ""}`}
+        disabled={!hasChildren}
+        aria-label={
+          hasChildren
+            ? (collapsed ? t("resources.expandGroup") : t("resources.collapseGroup"))
+            : undefined
+        }
+        onClick={() => hasChildren && onToggleCollapsed()}
+      >
+        {hasChildren && Icons.chevronDown}
+      </button>
+      <div className="resource-group-manage-name" title={folder.path}>
+        <span>{label}</span>
+      </div>
+      <span className="resource-group-manage-count">
+        {t("resources.itemCount", { count: folder.count })}
+      </span>
+      <div className="resource-group-manage-actions">
+        <button
+          type="button"
+          className="resource-icon-button"
+          onClick={onOpen}
+          aria-label={t("resources.openGroup")}
+          title={t("resources.openGroup")}
+        >
+          {Icons.resources}
+        </button>
+        {!hideRootControls && (
+          <>
+            <button
+              type="button"
+              className="resource-icon-button"
+              onClick={onNewSubgroup}
+              aria-label={t("resources.newSubgroup")}
+              title={t("resources.newSubgroup")}
+            >
+              {Icons.add}
+            </button>
+            <button
+              type="button"
+              className="resource-icon-button"
+              onClick={onRename}
+              aria-label={t("resources.renameGroup")}
+              title={t("resources.renameGroup")}
+            >
+              {Icons.edit}
+            </button>
+            <button
+              type="button"
+              className="resource-icon-button"
+              onClick={onMove}
+              aria-label={t("resources.moveGroup")}
+              title={t("resources.moveGroup")}
+            >
+              {Icons.arrowRight}
+            </button>
+            <button
+              type="button"
+              className="resource-delete-button"
+              onClick={onDelete}
+              aria-label={t("common.delete")}
+              title={t("common.delete")}
+            >
+              {Icons.delete}
+            </button>
+          </>
+        )}
+      </div>
     </div>
   );
 }
