@@ -2,6 +2,11 @@ import { invoke } from "@tauri-apps/api/core";
 import type { ClipboardRecord } from "../types";
 import { useClipboardStore } from "../stores/clipboardStore";
 import {
+  IMAGE_EXTENSIONS,
+  TEXT_EXTENSIONS,
+  getResourceExtension,
+} from "../pages/ResourcePage/resourceUtils";
+import {
   buildRadialPreviewSegments,
   type RadialPreviewSegment,
 } from "./radialPreview";
@@ -11,6 +16,26 @@ export async function loadClipboardPreviewSegments(
 ): Promise<RadialPreviewSegment[]> {
   if (record.type === "image") {
     return [{ type: "image", path: record.content }];
+  }
+
+  // 文件记录：图片按图预览；常见文本格式读取内容预览（与主窗口一致）；
+  // 其余格式回退为路径展示。
+  if (record.type === "file") {
+    const extension = getResourceExtension(record.content);
+    if (IMAGE_EXTENSIONS.has(extension)) {
+      return [{ type: "image", path: record.content }];
+    }
+    if (TEXT_EXTENSIONS.has(extension)) {
+      try {
+        const text = await invoke<string>("read_clipboard_text_preview", {
+          id: record.id,
+        });
+        return [{ type: "text", content: text }];
+      } catch {
+        // 读取失败（文件已移动/删除等）时回退为路径展示。
+      }
+    }
+    return [{ type: "text", content: record.content }];
   }
 
   const [content, imagePaths] = await Promise.all([
