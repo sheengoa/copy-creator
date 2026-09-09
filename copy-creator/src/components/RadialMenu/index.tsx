@@ -792,6 +792,12 @@ export default function RadialMenu() {
       const next = typeof parsed === "string" ? parsed : null;
       setResourceGroup(next);
       resourceGroupRef.current = next;
+      // 用户在读取返回前已切到资源 tab：补同步 store 并按恢复值重载，
+      // 避免组件状态与列表内容不一致。
+      if (activeTabRef.current === "resources") {
+        useClipboardStore.getState().setResourceGroup(next);
+        useClipboardStore.getState().loadRecords(false, "resources", next);
+      }
     } catch {
       // 尚无记录或解析失败属正常情况，保持现状即可。
     }
