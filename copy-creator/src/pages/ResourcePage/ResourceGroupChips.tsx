@@ -302,13 +302,16 @@ export default function ResourceGroupChips({
               );
             })}
           </SortableContext>
-          <DragOverlay dropAnimation={null}>
-            {activeGroup ? (
+          {/* 主窗口内容容器带 transform/backdrop-filter，fixed 会以其为
+              包含块，虚影须 portal 到 body 才能跟随指针。 */}
+          {activeGroup ? createPortal(
+            <DragOverlay dropAnimation={null}>
               <div className="resource-group-chip active drag-overlay-chip">
                 {activeGroup.name}
               </div>
-            ) : null}
-          </DragOverlay>
+            </DragOverlay>,
+            document.body,
+          ) : null}
         </DndContext>
       </div>
       <div className="resource-group-actions">

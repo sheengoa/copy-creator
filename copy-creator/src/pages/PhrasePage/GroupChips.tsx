@@ -1,4 +1,5 @@
 import { useState, useRef, useEffect } from "react";
+import { createPortal } from "react-dom";
 import { useTranslation } from "react-i18next";
 import { Icons } from "../../components/Icons";
 import {
@@ -136,13 +137,16 @@ export function GroupChips({
               />
             ))}
           </SortableContext>
-          <DragOverlay dropAnimation={null}>
-            {activeGroup ? (
+          {/* 主窗口内容容器带 transform/backdrop-filter，fixed 会以其为
+              包含块，虚影须 portal 到 body 才能跟随指针。 */}
+          {activeGroup ? createPortal(
+            <DragOverlay dropAnimation={null}>
               <div className={`group-chip active drag-overlay-chip`}>
                 {activeGroup.name}
               </div>
-            ) : null}
-          </DragOverlay>
+            </DragOverlay>,
+            document.body,
+          ) : null}
         </DndContext>
       </div>
       {!selectionMode && (

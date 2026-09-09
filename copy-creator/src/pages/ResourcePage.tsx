@@ -1154,16 +1154,19 @@ export default function ResourcePage() {
                     );
                   })}
                 </SortableContext>
-                <DragOverlay dropAnimation={null}>
-                  {activeGroupRow && (
+                {/* 对话框带 backdrop-filter/transform 会让 fixed 以它为包含块，
+                    虚影飘出对话框；portal 到 body 才能跟随指针。 */}
+                {activeGroupRow && createPortal(
+                  <DragOverlay dropAnimation={null}>
                     <div className="resource-group-manage-row is-drag-overlay">
                       <span className="resource-group-drag-handle is-static">{Icons.drag}</span>
                       <span className="resource-group-manage-name">
                         {getResourceGroupLabel(activeGroupRow.name)}
                       </span>
                     </div>
-                  )}
-                </DragOverlay>
+                  </DragOverlay>,
+                  document.body,
+                )}
               </DndContext>
             </div>
           </div>
