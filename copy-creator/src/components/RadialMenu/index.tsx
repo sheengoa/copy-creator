@@ -769,7 +769,28 @@ export default function RadialMenu() {
     useClipboardStore.getState().loadRecords(false, "resources", nextGroup);
     setSelectedItemId(null);
     selectedItemIdRef.current = null;
+    // 分组浏览位置跨重启记忆。null（"全部"视图）与 ""（未分组）语义不同，
+    // 设置表只存字符串，故以 JSON 编码区分三种状态。
+    void invoke("set_setting", {
+      key: "radial_resource_group",
+      value: JSON.stringify(nextGroup),
+    }).catch((error) => console.error("Failed to persist radial resource group:", error));
   }, [closeResourceGroupMenu, collapsePreview]);
+
+  // 恢复上次资源分组浏览位置：打开菜单时从设置读取（跨重启记忆），
+  // 仅同步内存状态，列表加载推迟到真正切到资源 tab 时进行。
+  // 无记录或读取失败时保持当前内存值（本次运行内的上次位置或默认"全部"）。
+  const restoreResourceGroup = useCallback(async () => {
+    try {
+      const saved = await invoke<string>("get_setting", { key: "radial_resource_group" });
+      const parsed: unknown = JSON.parse(saved);
+      const next = typeof parsed === "string" ? parsed : null;
+      setResourceGroup(next);
+      resourceGroupRef.current = next;
+    } catch {
+      // 尚无记录或解析失败属正常情况，保持现状即可。
+    }
+  }, []);
 
   const handleTabSwitch = useCallback((key: string) => {
     collapsePreview();
@@ -784,14 +805,15 @@ export default function RadialMenu() {
       useClipboardStore.getState().setCategory("all");
       useClipboardStore.getState().loadRecords(false, "all");
     } else if (tab === "resources") {
+      // 回到资源 tab 时恢复记忆的分组浏览位置（打开菜单时已由
+      // restoreResourceGroup 填充，这里直接沿用内存值）。
+      const remembered = resourceGroupRef.current;
       setClipboardCategory("resources");
       clipboardCategoryRef.current = "resources";
-      setResourceGroup(null);
-      resourceGroupRef.current = null;
       closeResourceGroupMenu();
       useClipboardStore.getState().setCategory("resources");
-      useClipboardStore.getState().setResourceGroup(null);
-      useClipboardStore.getState().loadRecords(false, "resources", null);
+      useClipboardStore.getState().setResourceGroup(remembered);
+      useClipboardStore.getState().loadRecords(false, "resources", remembered);
       void loadResourceGroups();
     } else {
       const { groups, loadPhrases } = usePhraseStore.getState();
@@ -1251,9 +1273,9 @@ export default function RadialMenu() {
           activeTabRef.current = "clipboard";
           setClipboardCategory("all");
           clipboardCategoryRef.current = "all";
-          setResourceGroup(null);
-          resourceGroupRef.current = null;
           closeResourceGroupMenu();
+          // 资源分组浏览位置保留记忆：本次运行内沿用内存值，跨重启由设置恢复。
+          void restoreResourceGroup();
           // Refresh data
           useClipboardStore.getState().setCategory("all");
           useClipboardStore.getState().loadRecords(false, "all");
@@ -1351,6 +1373,7 @@ export default function RadialMenu() {
     loadResourceGroups,
     resetStateForNativeHide,
     resetState,
+    restoreResourceGroup,
     updateHoverFromPoint,
   ]);
 
