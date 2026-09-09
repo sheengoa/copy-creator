@@ -39,11 +39,13 @@ import type { ResourceFolder } from "../../types";
 import {
   findResourceFolder,
   flattenResourceFolders,
+  getResourceExtension,
   getResourcePath,
   getResourceSummary,
   getResourceTitle,
   inferResourceMediaKind,
   isResourceFolderPath,
+  TEXT_EXTENSIONS,
   type ResourceMediaKind,
 } from "../../pages/ResourcePage/resourceUtils";
 import { ResourceFileImage } from "../../pages/ResourcePage/ResourceMedia";
@@ -598,11 +600,20 @@ export default function RadialMenu() {
           segments = [{ type: "image", path: resourcePath }];
         } else if (kind === "video" || kind === "audio") {
           segments = [{ type: kind, path: resourcePath }];
-        } else if (kind === "text" && record.type === "file") {
-          const content = await invoke<string>("read_resource_text_preview", {
-            path: resourcePath,
-          });
-          segments = [{ type: "text", content }];
+        } else if (
+          record.type === "file"
+          && TEXT_EXTENSIONS.has(getResourceExtension(resourcePath))
+        ) {
+          // 文本文件按扩展名判定读取实际内容，不依赖 resource_kind；
+          // 读取失败时回退为路径展示。
+          try {
+            const text = await invoke<string>("read_resource_text_preview", {
+              path: resourcePath,
+            });
+            segments = [{ type: "text", content: text }];
+          } catch {
+            segments = [{ type: "text", content: resourcePath }];
+          }
         } else {
           const content = kind === "text"
             ? await useClipboardStore.getState().getRecordContent(record)

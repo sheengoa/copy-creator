@@ -1162,20 +1162,15 @@ fn is_quick_input_text_preview_path(path: &str) -> bool {
         && is_text_preview_extension(Path::new(path))
 }
 
+// 与资源区可预览文本共用同一份扩展名清单（md/json/yaml 及各类代码等），
+// 避免出现「资源区能预览、快捷输入/剪切板不能」的割裂。
 fn is_text_preview_extension(path: &Path) -> bool {
-    path.extension()
-        .and_then(OsStr::to_str)
-        .is_some_and(|extension| {
-            matches!(
-                extension.to_ascii_lowercase().as_str(),
-                "json" | "txt" | "toml"
-            )
-        })
+    is_resource_text_extension(path)
 }
 
 fn read_text_preview_file(path: PathBuf) -> Result<String, String> {
     if !is_text_preview_extension(&path) {
-        return Err("仅支持预览 JSON、TXT 和 TOML 文件".to_string());
+        return Err("当前文件不是可预览的文本文件".to_string());
     }
     let metadata = std::fs::metadata(&path).map_err(|e| format!("读取文件失败: {e}"))?;
     if !metadata.is_file() {
@@ -1203,7 +1198,7 @@ fn read_resource_text_preview_file(path: PathBuf) -> Result<String, String> {
 
 fn resolve_quick_input_text_preview_path(app: &AppHandle, path: &str) -> Result<PathBuf, String> {
     if !is_quick_input_text_preview_path(path) {
-        return Err("仅支持预览 JSON、TXT 和 TOML 文件".to_string());
+        return Err("当前文件不是可预览的文本文件".to_string());
     }
 
     let preview_root = quick_input_files_dir(app)
@@ -4901,7 +4896,7 @@ mod quick_input_file_tests {
     }
 
     #[test]
-    fn quick_input_text_preview_accepts_only_supported_extensions() {
+    fn quick_input_text_preview_accepts_common_text_extensions() {
         assert!(is_quick_input_text_preview_path(
             "quick-input-files/preset-1/example.JSON"
         ));
@@ -4911,8 +4906,15 @@ mod quick_input_file_tests {
         assert!(is_quick_input_text_preview_path(
             "quick-input-files/preset-1/example.toml"
         ));
-        assert!(!is_quick_input_text_preview_path(
+        // 与资源区一致的常见文本格式均可预览。
+        assert!(is_quick_input_text_preview_path(
             "quick-input-files/preset-1/example.md"
+        ));
+        assert!(is_quick_input_text_preview_path(
+            "quick-input-files/preset-1/example.yaml"
+        ));
+        assert!(!is_quick_input_text_preview_path(
+            "quick-input-files/preset-1/example.exe"
         ));
         assert!(!is_quick_input_text_preview_path("/tmp/example.json"));
     }
