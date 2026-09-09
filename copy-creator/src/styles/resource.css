@@ -863,6 +863,7 @@
   background: transparent;
 }
 
+.resource-card-preview > .resource-thumb-blur,
 .resource-card-preview > img.resource-card-file-image,
 .resource-card-preview .clipboard-card-thumb img {
   position: absolute;
@@ -870,14 +871,38 @@
   width: 100%;
   height: 100%;
   border-radius: 0;
-  /* 完整展示图片内容，不做封面式裁切。 */
+  /* 完整展示图片内容，不做封面式裁切（虚影前景同样 contain）。 */
   object-fit: contain;
   transition: transform 0.2s ease;
 }
 
 .resource-card:hover .resource-card-preview .clipboard-card-thumb img,
-.resource-card:hover .resource-card-preview > img.resource-card-file-image {
+.resource-card:hover .resource-card-preview > .resource-thumb-blur .resource-thumb-blur-fg {
   transform: scale(1.03);
+}
+
+/* 原图虚影：同图放大模糊铺底 + 前景完整展示，替代竖版媒体的纯色留白。 */
+.resource-thumb-blur {
+  position: relative;
+  overflow: hidden;
+}
+
+.resource-thumb-blur-bg {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  filter: blur(14px) saturate(1.15);
+  transform: scale(1.15);
+}
+
+.resource-thumb-blur-fg {
+  position: relative;
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
 }
 
 .resource-card-file-image {
@@ -966,6 +991,17 @@
   position: absolute;
   inset: 0;
   background: color-mix(in srgb, #5e5ce6 10%, var(--input-bg));
+}
+
+/* 视频代表帧画布：放大模糊铺底，与图片卡片的原图虚影一致。 */
+.resource-video-poster-bg {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  filter: blur(14px) saturate(1.15);
+  transform: scale(1.15);
 }
 
 .resource-video-poster-frame {

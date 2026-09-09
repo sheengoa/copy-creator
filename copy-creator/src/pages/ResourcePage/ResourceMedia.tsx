@@ -64,6 +64,7 @@ function rememberFileThumb(path: string, dataUrl: string) {
 /**
  * 列表卡片专用的文件图片缩略图：后端按"路径+大小+修改时间"解码缩放缓存，
  * 滚动时无需解码原图。后端解不了的格式（svg/heic 等）回退原图 ResourceImage。
+ * 视觉为「原图虚影」：同图放大模糊铺底，前景完整展示，替代纯色留白。
  */
 export function ResourceFileImage({
   path,
@@ -107,7 +108,18 @@ export function ResourceFileImage({
     return <ResourceImage path={path} alt={alt} className={className} />;
   }
   if (!src) return <div className={`resource-media-loading ${className}`} aria-hidden="true" />;
-  return <img className={className} src={src} alt={alt} draggable={false} decoding="async" />;
+  return (
+    <div className={`resource-thumb-blur ${className}`.trim()}>
+      <img className="resource-thumb-blur-bg" src={src} alt="" aria-hidden="true" />
+      <img
+        className="resource-thumb-blur-fg"
+        src={src}
+        alt={alt}
+        draggable={false}
+        decoding="async"
+      />
+    </div>
+  );
 }
 
 export function ResourceImage({
@@ -202,6 +214,7 @@ export function ResourceVideoPoster({
   fallbackLabel: string;
 }) {
   const containerRef = useRef<HTMLDivElement | null>(null);
+  const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const [inView, setInView] = useState(false);
   const { src, failed } = useResourceAssetUrl(path, undefined, resolveResourceMediaUrl);
   const [videoFailed, setVideoFailed] = useState(false);
@@ -228,6 +241,20 @@ export function ResourceVideoPoster({
     setHasFrame(false);
   }, [src]);
 
+  // 寻到代表性帧后画到低分辨率画布上：放大 + 模糊作为铺底虚影，
+  // 前景视频完整展示，替代纯色留白。仅绘制不读回像素，无跨源限制。
+  const handleSeeked = (event: React.SyntheticEvent<HTMLVideoElement>) => {
+    const media = event.currentTarget;
+    const canvas = canvasRef.current;
+    if (canvas) {
+      const context = canvas.getContext("2d");
+      if (context && media.videoWidth > 0 && media.videoHeight > 0) {
+        context.drawImage(media, 0, 0, canvas.width, canvas.height);
+      }
+    }
+    setHasFrame(true);
+  };
+
   const handleLoadedMetadata = (event: React.SyntheticEvent<HTMLVideoElement>) => {
     const media = event.currentTarget;
     // 首帧常为黑场，跳到约 10% 处取代表性画面；seek 失败则退回首帧。
@@ -237,7 +264,7 @@ export function ResourceVideoPoster({
     try {
       media.currentTime = target;
     } catch {
-      setHasFrame(true);
+      handleSeeked(event);
     }
   };
 
@@ -245,15 +272,18 @@ export function ResourceVideoPoster({
   return (
     <div ref={containerRef} className="resource-video-poster" aria-hidden="true">
       {inView && !failed && !videoFailed && src && (
-        <video
-          className={`resource-video-poster-frame${hasFrame ? " is-ready" : ""}`}
-          src={src}
-          muted
-          preload="metadata"
-          onLoadedMetadata={handleLoadedMetadata}
-          onSeeked={() => setHasFrame(true)}
-          onError={() => setVideoFailed(true)}
-        />
+        <>
+          <canvas ref={canvasRef} className="resource-video-poster-bg" width={48} height={27} />
+          <video
+            className={`resource-video-poster-frame${hasFrame ? " is-ready" : ""}`}
+            src={src}
+            muted
+            preload="metadata"
+            onLoadedMetadata={handleLoadedMetadata}
+            onSeeked={handleSeeked}
+            onError={() => setVideoFailed(true)}
+          />
+        </>
       )}
       {showPlaceholder && (
         <div className="resource-video-poster-placeholder">
