@@ -1,4 +1,5 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import { invoke } from "@tauri-apps/api/core";
 import { useTranslation } from "react-i18next";
 import type { ClipboardRecord } from "../../types";
@@ -110,6 +111,33 @@ export default function ResourceDetailPage({
     window.addEventListener("resize", syncHeight);
     return () => window.removeEventListener("resize", syncHeight);
   }, [contentDraft, contentEditing]);
+
+  // 详情页自身不滚动，滚动发生在窗口内容容器（祖先节点）上；
+  // 下滑一定距离后显示与资源列表一致的「回到顶部」按钮。
+  const pageRef = useRef<HTMLDivElement | null>(null);
+  const pageScrollerRef = useRef<HTMLElement | null>(null);
+  const [pageScrolled, setPageScrolled] = useState(false);
+  useEffect(() => {
+    let node: HTMLElement | null = pageRef.current?.parentElement ?? null;
+    while (node && node !== document.body) {
+      const overflowY = window.getComputedStyle(node).overflowY;
+      if (overflowY === "auto" || overflowY === "scroll") break;
+      node = node.parentElement;
+    }
+    const scroller = node;
+    if (!scroller) return;
+    pageScrollerRef.current = scroller;
+    const handleScroll = () => setPageScrolled(scroller.scrollTop > 240);
+    handleScroll();
+    scroller.addEventListener("scroll", handleScroll, { passive: true });
+    return () => {
+      scroller.removeEventListener("scroll", handleScroll);
+      pageScrollerRef.current = null;
+    };
+  }, []);
+  const scrollToPageTop = useCallback(() => {
+    pageScrollerRef.current?.scrollTo({ top: 0, behavior: "smooth" });
+  }, []);
 
   const handleSaveNote = async () => {
     const note = noteDraft.trim();
@@ -338,7 +366,7 @@ export default function ResourceDetailPage({
   };
 
   return (
-    <div className="resource-detail-page">
+    <div className="resource-detail-page" ref={pageRef}>
       <header className="resource-detail-header">
         <button type="button" className="resource-back-button" onClick={onBack}>
           {Icons.arrowLeft}
@@ -582,6 +610,19 @@ export default function ResourceDetailPage({
           <p>{t("resources.detailHint")}</p>
         </aside>
       </main>
+      {pageScrolled &&
+        createPortal(
+          <button
+            type="button"
+            className="resource-back-to-top resource-back-to-top-fixed"
+            onClick={scrollToPageTop}
+            aria-label={t("resources.backToTop")}
+            title={t("resources.backToTop")}
+          >
+            {Icons.arrowUp}
+          </button>,
+          document.body,
+        )}
     </div>
   );
 }
