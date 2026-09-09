@@ -54,6 +54,7 @@ export default function ClipboardPage() {
     deleteRecord,
     pasteRecord,
     pasteRecordTerminal,
+    moveRecordsToTop,
   } = useClipboardStore();
   const pasteLeftClick = useSettingsStore((s) => s.pasteLeftClick);
   const [confirmState, setConfirmState] = useState<{
@@ -387,6 +388,7 @@ export default function ClipboardPage() {
           onCancel={cancelClipboardSelection}
           busy={selectingAll || deletingSelected}
           busyLabel={deletingSelected ? t("common.deleting") : t("common.loading")}
+          onMoveTop={() => void moveRecordsToTop([...selectedIds])}
         />
       )}
 
@@ -460,6 +462,7 @@ export default function ClipboardPage() {
                   onPasteNormal={handlePaste}
                   onPasteTerminal={handlePasteTerminal}
                   onDelete={handleDelete}
+                  onMoveToTop={(id) => void moveRecordsToTop([id])}
                   selectionMode={isSelecting}
                   selected={isSelected(r.id)}
                   onToggleSelected={toggleSelected}

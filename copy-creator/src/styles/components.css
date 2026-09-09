@@ -482,7 +482,8 @@ input:focus-visible + .selection-checkbox {
 
 /* Card Action Buttons */
 .card-delete-btn,
-.card-edit-btn {
+.card-edit-btn,
+.card-move-top-btn {
   background: transparent;
   position: relative;
   border: none;
@@ -499,17 +500,20 @@ input:focus-visible + .selection-checkbox {
 }
 
 .notification:hover .card-delete-btn,
-.notification:hover .card-edit-btn {
+.notification:hover .card-edit-btn,
+.notification:hover .card-move-top-btn {
   opacity: 0.5;
 }
 
 .card-delete-btn:hover,
-.card-edit-btn:hover {
+.card-edit-btn:hover,
+.card-move-top-btn:hover {
   opacity: 1 !important;
 }
 
 .card-delete-btn svg,
-.card-edit-btn svg {
+.card-edit-btn svg,
+.card-move-top-btn svg {
   width: 15px;
   height: 15px;
   transition: transform 0.2s linear;

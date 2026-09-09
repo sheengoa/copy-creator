@@ -24,6 +24,8 @@ interface PhraseListProps {
   onSecondaryPaste: (phrase: Phrase) => void;
   onEdit: (phrase: Phrase) => void;
   onDelete: (id: string) => void;
+  /** 卡片「移到顶部」：组内置顶，径向菜单同步可见。 */
+  onMoveToTop?: (id: string) => void;
   selectionMode: boolean;
   isSelected: (id: string) => boolean;
   onToggleSelected: (id: string) => void;
@@ -67,6 +69,7 @@ function PhraseCard({
   onSecondaryPaste,
   onEdit,
   onDelete,
+  onMoveToTop,
   selectionMode,
   selected,
   onToggleSelected,
@@ -77,6 +80,7 @@ function PhraseCard({
   onSecondaryPaste: (p: Phrase) => void;
   onEdit: (p: Phrase) => void;
   onDelete: (id: string) => void;
+  onMoveToTop?: (id: string) => void;
   selectionMode: boolean;
   selected: boolean;
   onToggleSelected: (id: string) => void;
@@ -192,6 +196,20 @@ function PhraseCard({
                   <circle cx="15" cy="19" r="1.5" />
                 </svg>
               </span>
+              {onMoveToTop && (
+                <button
+                  className="card-move-top-btn"
+                  type="button"
+                  aria-label={t("common.moveToTop")}
+                  title={t("common.moveToTop")}
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    onMoveToTop(phrase.id);
+                  }}
+                >
+                  {Icons.arrowUp}
+                </button>
+              )}
               <button className="card-edit-btn" onClick={(e) => { e.stopPropagation(); onEdit(phrase); }}>
                 {Icons.edit}
               </button>
@@ -216,6 +234,7 @@ export function PhraseList({
   onSecondaryPaste,
   onEdit,
   onDelete,
+  onMoveToTop,
   selectionMode,
   isSelected,
   onToggleSelected,
@@ -270,6 +289,7 @@ export function PhraseList({
           onSecondaryPaste={onSecondaryPaste}
           onEdit={onEdit}
           onDelete={onDelete}
+          onMoveToTop={onMoveToTop}
           selectionMode={selectionMode}
           selected={isSelected(p.id)}
           onToggleSelected={onToggleSelected}

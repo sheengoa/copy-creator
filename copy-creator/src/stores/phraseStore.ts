@@ -62,6 +62,7 @@ interface PhraseState {
   pastePhrase: (phrase: Phrase) => Promise<void>;
   pastePhraseTerminal: (phrase: Phrase) => Promise<void>;
   reorderPhrases: (ids: string[]) => Promise<void>;
+  movePhrasesToTop: (ids: string[]) => Promise<void>;
   reorderGroups: (ids: string[]) => Promise<void>;
 }
 
@@ -278,6 +279,21 @@ export const usePhraseStore = create<PhraseState>()((set, get) => {
       await invoke("reorder_phrases", { ids });
     } catch (e) {
       console.error("Failed to reorder phrases:", e);
+    }
+  },
+
+  // 组内置顶：径向菜单快捷输入 tab 按组内顺序展示，置顶即第一屏可见。
+  movePhrasesToTop: async (ids: string[]) => {
+    const idOrder = new Map(ids.map((id, i) => [id, i]));
+    set((s) => ({
+      phrases: [...s.phrases].sort(
+        (a, b) => (idOrder.get(a.id) ?? Infinity) - (idOrder.get(b.id) ?? Infinity)
+      ),
+    }));
+    try {
+      await invoke("move_phrases_to_top", { ids });
+    } catch (e) {
+      console.error("Failed to move phrases to top:", e);
     }
   },
 

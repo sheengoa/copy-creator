@@ -240,7 +240,8 @@
     "off": "OFF",
     "pinWindow": "Pin Window",
     "unpinWindow": "Unpin Window",
-    "backToTop": "Back to top"
+    "backToTop": "Back to top",
+    "moveToTop": "Move to top"
   },
   "radialMenu": {
     "empty": "No items",

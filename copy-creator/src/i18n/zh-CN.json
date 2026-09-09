@@ -240,7 +240,8 @@
     "off": "已关闭",
     "pinWindow": "固定窗口",
     "unpinWindow": "取消固定",
-    "backToTop": "回到顶部"
+    "backToTop": "回到顶部",
+    "moveToTop": "移到顶部"
   },
   "radialMenu": {
     "empty": "暂无内容",

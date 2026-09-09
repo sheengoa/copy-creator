@@ -28,6 +28,8 @@ interface ClipboardCardProps {
   onPasteNormal: (r: ClipboardRecord) => void;
   onPasteTerminal: (r: ClipboardRecord) => void;
   onDelete: (id: string) => void;
+  /** 右键菜单「移到顶部」：搜索定位后一键置顶，径向菜单同步可见。 */
+  onMoveToTop?: (id: string) => void;
   selectionMode: boolean;
   selected: boolean;
   onToggleSelected: (id: string) => void;
@@ -173,6 +175,7 @@ function ClipboardCardInner({
   onPasteNormal,
   onPasteTerminal,
   onDelete,
+  onMoveToTop,
   selectionMode,
   selected,
   onToggleSelected,
@@ -531,6 +534,25 @@ function ClipboardCardInner({
             </svg>
             {pasteLeftClick === "terminal" ? t("clipboard.pasteToTerminal") : t("clipboard.pasteNormal")}
           </button>
+          {onMoveToTop && (
+            <>
+              <div className="ctx-menu-sep" />
+              <button
+                className="ctx-menu-item"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  setCtxMenu(null);
+                  onMoveToTop(record.id);
+                }}
+              >
+                <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                  <line x1="12" y1="19" x2="12" y2="5" />
+                  <polyline points="5 12 12 5 19 12" />
+                </svg>
+                {t("common.moveToTop")}
+              </button>
+            </>
+          )}
           <div className="ctx-menu-sep" />
           <button
             className="ctx-menu-item danger"

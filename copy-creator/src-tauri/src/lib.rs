@@ -392,6 +392,8 @@ pub fn run() {
             db::reorder_clipboard_records,
             db::reorder_phrase_groups,
             db::reorder_phrases,
+            db::move_clipboard_records_to_top,
+            db::move_phrases_to_top,
             toggle_always_on_top,
             autostart::set_autostart,
             autostart::is_autostart_enabled,
