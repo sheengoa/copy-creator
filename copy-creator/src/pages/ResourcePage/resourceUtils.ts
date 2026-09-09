@@ -38,7 +38,7 @@ const IMAGE_EXTENSIONS = new Set([
   "tiff",
   "webp",
 ]);
-const TEXT_EXTENSIONS = new Set([
+export const TEXT_EXTENSIONS = new Set([
   "bat",
   "bash",
   "c",

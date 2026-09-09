@@ -1,3 +1,5 @@
+import { getResourceExtension, TEXT_EXTENSIONS } from "../pages/ResourcePage/resourceUtils";
+
 export const INLINE_PREVIEW_MAX_LINES = 6;
 export const INLINE_PREVIEW_TEXT_LENGTH = 160;
 
@@ -21,8 +23,9 @@ export function isQuickInputFilePath(path: string): boolean {
   return normalized.startsWith("quick-input-files/");
 }
 
+// 与资源区共用同一份文本扩展名清单（md/json/代码等常见格式均可预览）。
 export function hasInlineTextPreviewExtension(path: string): boolean {
-  return /\.(json|txt|toml)$/i.test(path);
+  return TEXT_EXTENSIONS.has(getResourceExtension(path));
 }
 
 export function isInlineTextPreviewFilePath(path: string): boolean {
