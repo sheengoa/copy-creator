@@ -1928,12 +1928,10 @@
   width: 100%;
 }
 
-/* 详情页长文正文按「阅读版式」呈现：正文字体 + 舒适行高 + 限宽，
-   等宽字体只保留在列表卡片等紧凑预览场景。 */
+/* 详情页长文正文按「阅读版式」呈现：正文字体 + 舒适行高，
+   宽度撑满内容卡片、高度随内容伸缩；等宽字体只保留在列表卡片等紧凑预览场景。 */
 .resource-detail-stage-text .resource-segment-text,
 .resource-detail-text-file.resource-segment-text {
-  min-height: 260px;
-  max-width: 52em;
   padding: 22px;
   font-family: var(--font);
   font-size: var(--text-md);
@@ -2031,16 +2029,14 @@
 
 .resource-detail-text-file {
   width: 100%;
-  min-height: 260px;
   margin: 0;
   overflow: auto;
 }
 
-/* 正文编辑态：与阅读版式同源（字体、行高、限宽），聚焦态用强调色描边。 */
+/* 正文编辑态：与阅读版式同源（字体、行高、通栏宽度），
+   高度由组件按内容自动增长，聚焦态用强调色描边。 */
 .resource-detail-text-editor {
   width: 100%;
-  max-width: 52em;
-  min-height: 320px;
   padding: 22px;
   border: 1px solid color-mix(in srgb, var(--accent) 45%, var(--separator));
   border-radius: 7px;
@@ -2050,8 +2046,9 @@
   font-size: var(--text-md);
   line-height: 1.9;
   letter-spacing: 0.01em;
-  resize: vertical;
-  overflow: auto;
+  resize: none;
+  /* 内部永不滚动：高度由组件按内容计算，滚动统一交给主窗口页面层级。 */
+  overflow-y: hidden;
   user-select: text;
   white-space: pre-wrap;
   overflow-wrap: anywhere;

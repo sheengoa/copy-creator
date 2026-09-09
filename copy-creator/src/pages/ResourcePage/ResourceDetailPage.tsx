@@ -72,6 +72,7 @@ export default function ResourceDetailPage({
   const [contentSaved, setContentSaved] = useState(false);
   const [contentSaveError, setContentSaveError] = useState(false);
   const contentSavedTimerRef = useRef<number | null>(null);
+  const contentEditorRef = useRef<HTMLTextAreaElement | null>(null);
   const externalTextPath = kind === "text" && record.type === "file"
     ? resourcePath
     : null;
@@ -94,6 +95,21 @@ export default function ResourceDetailPage({
     if (noteSavedTimerRef.current !== null) window.clearTimeout(noteSavedTimerRef.current);
     if (contentSavedTimerRef.current !== null) window.clearTimeout(contentSavedTimerRef.current);
   }, []);
+
+  // 编辑器高度跟随内容伸缩，避免固定高度出现内部滚动条截断正文。
+  // 加 2px 余量：分数缩放下 scrollHeight 取整可能略小于实际内容，
+  // 否则会浮现一条内部滚动条（滚动统一交给主窗口页面层级）。
+  useEffect(() => {
+    const el = contentEditorRef.current;
+    if (!el) return;
+    const syncHeight = () => {
+      el.style.height = "auto";
+      el.style.height = `${el.scrollHeight + 2}px`;
+    };
+    syncHeight();
+    window.addEventListener("resize", syncHeight);
+    return () => window.removeEventListener("resize", syncHeight);
+  }, [contentDraft, contentEditing]);
 
   const handleSaveNote = async () => {
     const note = noteDraft.trim();
@@ -457,6 +473,7 @@ export default function ResourceDetailPage({
               </div>
             ) : contentEditing && contentEditable ? (
               <textarea
+                ref={contentEditorRef}
                 className="resource-detail-text-editor"
                 autoFocus
                 value={contentDraft}
