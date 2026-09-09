@@ -189,6 +189,82 @@ export function ResourceSegments({
   );
 }
 
+/**
+ * 列表卡片专用的视频封面帧：进入视口后才解析媒体地址并加载元数据，
+ * 加载到后跳到代表性时间点（约 10% 处）渲染画面。元数据/寻帧失败时
+ * 保持占位图标，不影响卡片其余交互。
+ */
+export function ResourceVideoPoster({
+  path,
+  fallbackLabel,
+}: {
+  path: string;
+  fallbackLabel: string;
+}) {
+  const containerRef = useRef<HTMLDivElement | null>(null);
+  const [inView, setInView] = useState(false);
+  const { src, failed } = useResourceAssetUrl(path, undefined, resolveResourceMediaUrl);
+  const [videoFailed, setVideoFailed] = useState(false);
+  const [hasFrame, setHasFrame] = useState(false);
+
+  useEffect(() => {
+    const element = containerRef.current;
+    if (!element) return;
+    const observer = new IntersectionObserver(
+      ([entry]) => {
+        if (entry.isIntersecting) {
+          setInView(true);
+          observer.disconnect();
+        }
+      },
+      { rootMargin: "200px" },
+    );
+    observer.observe(element);
+    return () => observer.disconnect();
+  }, []);
+
+  useEffect(() => {
+    setVideoFailed(false);
+    setHasFrame(false);
+  }, [src]);
+
+  const handleLoadedMetadata = (event: React.SyntheticEvent<HTMLVideoElement>) => {
+    const media = event.currentTarget;
+    // 首帧常为黑场，跳到约 10% 处取代表性画面；seek 失败则退回首帧。
+    const target = Number.isFinite(media.duration) && media.duration > 0
+      ? Math.min(media.duration * 0.1, 3)
+      : 0.04;
+    try {
+      media.currentTime = target;
+    } catch {
+      setHasFrame(true);
+    }
+  };
+
+  const showPlaceholder = !inView || failed || videoFailed || !src || !hasFrame;
+  return (
+    <div ref={containerRef} className="resource-video-poster" aria-hidden="true">
+      {inView && !failed && !videoFailed && src && (
+        <video
+          className={`resource-video-poster-frame${hasFrame ? " is-ready" : ""}`}
+          src={src}
+          muted
+          preload="metadata"
+          onLoadedMetadata={handleLoadedMetadata}
+          onSeeked={() => setHasFrame(true)}
+          onError={() => setVideoFailed(true)}
+        />
+      )}
+      {showPlaceholder && (
+        <div className="resource-video-poster-placeholder">
+          <span className="resource-card-visual-icon">{Icons.video}</span>
+          <span>{fallbackLabel}</span>
+        </div>
+      )}
+    </div>
+  );
+}
+
 export function ResourceMediaPlayer({
   kind,
   path,

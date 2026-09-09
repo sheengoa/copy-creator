@@ -118,11 +118,23 @@ export function formatResourceFolderPath(path: string): string {
   return path.split("/").filter(Boolean).join(" / ");
 }
 
-// 标题即文件名的记录（图片、文件）才支持重命名；文本/链接的标题取自正文首行，无文件名可改。
+// 标题即文件名的记录（图片、文件、资源库文本）才支持重命名；无文件的文本/链接
+// 的标题取自正文首行，无文件名可改。
 export function isResourceTitleRenameable(
-  record: Pick<ClipboardRecord, "type">,
+  record: Pick<ClipboardRecord, "type" | "resource_path">,
 ): boolean {
-  return record.type === "image" || record.type === "file";
+  return record.type === "image" || record.type === "file" || Boolean(record.resource_path);
+}
+
+// 新建窗口保存的文本资源由后端按「copy-creator-{记录id}-{事务id}-{首行}」自动命名，
+// 此时标题显示正文首行；用户重命名后文件名不再是自动格式，标题以文件名为准。
+export function hasCustomResourceFileName(
+  record: Pick<ClipboardRecord, "type" | "resource_path"> & { id?: string },
+): boolean {
+  if (record.type === "image" || record.type === "file" || !record.resource_path || !record.id) {
+    return false;
+  }
+  return !getResourceFileName(record.resource_path).startsWith(`copy-creator-${record.id}-`);
 }
 
 // 把文件名拆成主干与扩展名（含点号）。无扩展名或以点开头的隐藏文件名整体视为主干。
@@ -161,7 +173,7 @@ export function matchesResourceType(
 }
 
 export function getResourceTitle(
-  record: Pick<ClipboardRecord, "type" | "content" | "resource_kind" | "resource_path">,
+  record: (Pick<ClipboardRecord, "type" | "content" | "resource_kind" | "resource_path"> & { id?: string }),
   kind = inferResourceMediaKind(record),
 ): string {
   const resourcePath = record.type === "file" ? record.resource_path || record.content : record.content;
@@ -171,6 +183,11 @@ export function getResourceTitle(
   if (kind === "image" && record.type === "image") return getResourceFileName(record.content);
   if (kind === "video" || kind === "audio" || kind === "file") {
     return getResourceFileName(resourcePath);
+  }
+
+  // 文件承载的文本资源被用户重命名过后，标题以文件名为准（原首行不再是用户命名）。
+  if (hasCustomResourceFileName(record)) {
+    return getResourceFileName(record.resource_path ?? "");
   }
 
   const firstLine = record.content
@@ -271,6 +288,43 @@ export function flattenResourceFolders(
     { folder, depth },
     ...flattenResourceFolders(folder.children ?? [], depth + 1),
   ]);
+}
+
+// 求分组树扁平化后的全路径顺序（提交手动排序时按此持久化）。
+export function flattenResourceFolderPaths(folders: ResourceFolder[]): string[] {
+  return flattenResourceFolders(folders).map(({ folder }) => folder.path);
+}
+
+// 求指定父分组（null 为顶层）下的兄弟分组；找不到父分组时返回空数组。
+export function getResourceFolderSiblings(
+  folders: ResourceFolder[],
+  parentPath: string | null,
+): ResourceFolder[] {
+  if (parentPath === null) return folders;
+  return findResourceFolder(folders, parentPath)?.children ?? [];
+}
+
+// 按 orderedPaths 重排指定父分组下的兄弟（未提及的兄弟按原顺序排在其后），
+// 其余层级保持不变。返回新树，不修改入参。
+export function reorderResourceFolderSiblings(
+  folders: ResourceFolder[],
+  parentPath: string | null,
+  orderedPaths: string[],
+): ResourceFolder[] {
+  const reorder = (level: ResourceFolder[], depth: string | null): ResourceFolder[] => {
+    const mapped = level.map((folder) => ({
+      ...folder,
+      children: reorder(folder.children ?? [], folder.path),
+    }));
+    if (depth !== parentPath) return mapped;
+    const byPath = new Map(mapped.map((folder) => [folder.path, folder]));
+    const head = orderedPaths
+      .map((path) => byPath.get(path))
+      .filter((folder): folder is ResourceFolder => Boolean(folder));
+    const tail = mapped.filter((folder) => !orderedPaths.includes(folder.path));
+    return [...head, ...tail];
+  };
+  return reorder(folders, null);
 }
 
 export function findResourceFolder(

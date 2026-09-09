@@ -1263,6 +1263,51 @@ pub fn read_resource_text_preview(app: AppHandle, path: String) -> Result<String
     read_resource_text_preview_file(path)
 }
 
+/// 保存资源详情页编辑后的文本正文。文件承载的文本是唯一事实来源；
+/// 数据库记录（id 非空时）的 content 与文件同步。编辑不改动 sort_order，
+/// 避免卡片在列表里跳位。
+#[tauri::command]
+pub fn write_resource_text_content(
+    app: AppHandle,
+    path: String,
+    content: String,
+    id: Option<String>,
+) -> Result<serde_json::Value, String> {
+    let trimmed = content.trim().to_string();
+    if trimmed.is_empty() {
+        return Err("内容不能为空".to_string());
+    }
+    let target = resolve_resource_file_path(&app, &path)?;
+    if !is_resource_text_extension(&target) && !is_probably_text_file(&target) {
+        return Err("当前文件不是可编辑的文本文件".to_string());
+    }
+    let metadata = std::fs::metadata(&target).map_err(|e| format!("读取文件失败: {e}"))?;
+    if metadata.len() > QUICK_INPUT_TEXT_PREVIEW_LIMIT_BYTES {
+        return Err("文本内容不能超过 1 MB".to_string());
+    }
+    // 与新建窗口写入路径保持一致：正文末尾补一个换行。
+    std::fs::write(&target, format!("{trimmed}\n"))
+        .map_err(|e| format!("写入资源文件失败: {e}"))?;
+
+    let record_type = crate::clipboard::classify_text_record(&trimmed);
+    if let Some(id) = id.as_deref() {
+        let update_result = {
+            let state = app.state::<DbState>();
+            let conn = state.conn.lock().map_err(|e| e.to_string())?;
+            conn.execute(
+                "UPDATE clipboard_records SET content = ?1, type = ?2 WHERE id = ?3",
+                params![&trimmed, record_type, id],
+            )
+            .map_err(|e| e.to_string())
+        };
+        if let Err(error) = update_result {
+            return Err(format!("更新资源记录失败: {error}"));
+        }
+    }
+    let _ = app.emit("resource-groups-changed", ());
+    Ok(serde_json::json!({ "content": trimmed, "record_type": record_type }))
+}
+
 pub fn init_db(app: &AppHandle) -> Result<(), Box<dyn std::error::Error>> {
     let path = db_path(app);
     let conn = Connection::open(&path)?;
@@ -3260,6 +3305,7 @@ fn resource_folder_tree(
     root: &Path,
     directory: &Path,
     counts: &HashMap<String, u64>,
+    order: &HashMap<String, usize>,
 ) -> Option<serde_json::Value> {
     let name = directory.file_name()?.to_str()?.to_string();
     let path = resource_directory_relative_path(root, directory)?;
@@ -3275,10 +3321,10 @@ fn resource_folder_tree(
             Some(entry.path())
         })
         .collect::<Vec<_>>();
-    child_directories.sort_by_key(|child| child.file_name().map(|name| name.to_os_string()));
+    sort_resource_directories(root, &mut child_directories, order);
     let children = child_directories
         .into_iter()
-        .filter_map(|child| resource_folder_tree(root, &child, counts))
+        .filter_map(|child| resource_folder_tree(root, &child, counts, order))
         .collect::<Vec<_>>();
 
     Some(serde_json::json!({
@@ -3287,6 +3333,106 @@ fn resource_folder_tree(
         "count": count,
         "children": children,
     }))
+}
+
+/// 用户手动拖拽的分组顺序存于 settings（扁平的全路径列表，按位置即次序）。
+/// 未登记的分组排在其同级已登记分组之后，再按名称兜底排序，保证新增分组可见。
+const RESOURCE_GROUP_ORDER_KEY: &str = "resource_group_order";
+
+fn read_resource_group_order(conn: &Connection) -> Vec<String> {
+    conn.query_row(
+        "SELECT value FROM settings WHERE key = ?1",
+        params![RESOURCE_GROUP_ORDER_KEY],
+        |row| row.get::<_, String>(0),
+    )
+    .ok()
+    .and_then(|value| serde_json::from_str::<Vec<String>>(&value).ok())
+    .unwrap_or_default()
+}
+
+fn write_resource_group_order(conn: &Connection, order: &[String]) -> Result<(), String> {
+    let value = serde_json::to_string(order).map_err(|e| e.to_string())?;
+    conn.execute(
+        "INSERT INTO settings (key, value) VALUES (?1, ?2)
+         ON CONFLICT(key) DO UPDATE SET value = ?2",
+        params![RESOURCE_GROUP_ORDER_KEY, value],
+    )
+    .map_err(|e| e.to_string())?;
+    Ok(())
+}
+
+fn sort_resource_directories(
+    root: &Path,
+    directories: &mut [PathBuf],
+    order: &HashMap<String, usize>,
+) {
+    directories.sort_by_key(|path| {
+        let name = path
+            .file_name()
+            .map(|name| name.to_string_lossy().to_lowercase())
+            .unwrap_or_default();
+        let relative = resource_directory_relative_path(root, path).unwrap_or_default();
+        (order.get(&relative).copied().unwrap_or(usize::MAX), name)
+    });
+}
+
+/// 按调用方提供的变换维护顺序表；失败不阻断主流程（顺序退化为字母序，无功能影响）。
+fn rewrite_resource_group_order<R: Runtime>(
+    app: &AppHandle<R>,
+    rewrite: impl FnOnce(&mut Vec<String>),
+) {
+    let result = (|| -> Result<(), String> {
+        let state = app.state::<DbState>();
+        let conn = state.conn.lock().map_err(|e| e.to_string())?;
+        let mut order = read_resource_group_order(&conn);
+        rewrite(&mut order);
+        write_resource_group_order(&conn, &order)
+    })();
+    if let Err(error) = result {
+        log::warn!("维护资源分组顺序失败: {error}");
+    }
+}
+
+/// 分组改名/移动后同步替换顺序表中的路径（含全部子孙路径前缀）。
+fn rewrite_group_order_prefix(order: &mut [String], old_prefix: &str, new_prefix: &str) {
+    let nested_prefix = format!("{old_prefix}/");
+    for path in order.iter_mut() {
+        if path.as_str() == old_prefix {
+            *path = new_prefix.to_string();
+        } else if let Some(rest) = path.strip_prefix(&nested_prefix) {
+            *path = format!("{new_prefix}/{rest}");
+        }
+    }
+}
+
+fn remove_group_order_prefix(order: &mut Vec<String>, prefix: &str) {
+    let nested_prefix = format!("{prefix}/");
+    order.retain(|path| path.as_str() != prefix && !path.starts_with(&nested_prefix));
+}
+
+#[tauri::command]
+pub fn reorder_resource_groups(app: AppHandle, ids: Vec<String>) -> Result<(), String> {
+    reorder_resource_groups_inner(&app, ids)
+}
+
+fn reorder_resource_groups_inner<R: Runtime>(
+    app: &AppHandle<R>,
+    ids: Vec<String>,
+) -> Result<(), String> {
+    let mut order = Vec::with_capacity(ids.len());
+    for id in ids {
+        let normalized = normalize_resource_folder_path(Some(&id))?;
+        if !normalized.is_empty() && !order.contains(&normalized) {
+            order.push(normalized);
+        }
+    }
+    {
+        let state = app.state::<DbState>();
+        let conn = state.conn.lock().map_err(|e| e.to_string())?;
+        write_resource_group_order(&conn, &order)?;
+    }
+    let _ = app.emit("resource-groups-changed", ());
+    Ok(())
 }
 
 #[tauri::command]
@@ -3299,6 +3445,15 @@ fn get_resource_groups_inner<R: Runtime>(
 ) -> Result<Vec<serde_json::Value>, String> {
     let root = get_resource_library_dir(app);
     let counts = resource_group_count_map(app)?;
+    let order: HashMap<String, usize> = {
+        let state = app.state::<DbState>();
+        let conn = state.conn.lock().map_err(|e| e.to_string())?;
+        read_resource_group_order(&conn)
+    }
+    .into_iter()
+    .enumerate()
+    .map(|(index, path)| (path, index))
+    .collect();
     let mut directories = std::fs::read_dir(&root)
         .map_err(|e| format!("读取资源分组失败: {e}"))?
         .flatten()
@@ -3311,10 +3466,7 @@ fn get_resource_groups_inner<R: Runtime>(
             Some(entry.path())
         })
         .collect::<Vec<_>>();
-    directories.sort_by_key(|path| {
-        path.file_name()
-            .map(|name| name.to_string_lossy().to_lowercase())
-    });
+    sort_resource_directories(&root, &mut directories, &order);
 
     let mut groups = vec![serde_json::json!({
         "name": "",
@@ -3323,7 +3475,7 @@ fn get_resource_groups_inner<R: Runtime>(
         "children": [],
     })];
     for directory in directories {
-        if let Some(group) = resource_folder_tree(&root, &directory, &counts) {
+        if let Some(group) = resource_folder_tree(&root, &directory, &counts, &order) {
             groups.push(group);
         }
     }
@@ -3403,6 +3555,9 @@ fn update_resource_group_inner<R: Runtime>(
         let _ = std::fs::rename(&new_path, &old_path);
         return Err(format!("更新资源路径失败: {error}"));
     }
+    rewrite_resource_group_order(app, |order| {
+        rewrite_group_order_prefix(order, &old_name, &new_name)
+    });
     let _ = app.emit("resource-groups-changed", ());
     Ok(())
 }
@@ -3573,6 +3728,7 @@ fn delete_resource_group_inner<R: Runtime>(app: &AppHandle<R>, name: String) -> 
         rollback_moved_resource_files(&moved);
         return Err(format!("删除资源分组失败: {error}"));
     }
+    rewrite_resource_group_order(app, |order| remove_group_order_prefix(order, &name));
     let _ = app.emit("resource-groups-changed", ());
     Ok(())
 }
@@ -3665,10 +3821,12 @@ fn rename_resource_file_inner<R: Runtime>(
         .optional()
         .map_err(|e| e.to_string())?
     };
-    // 仅标题即文件名的记录（图片、文件）可改名；自动发现的文件一律视为文件记录。
+    // 图片/文件的标题即文件名；资源库文本记录（新建窗口写入的 .txt/.md）也有对应
+    // 文件，同样可改名（只改文件名，正文不变）；无文件的纯文本标题来自正文，不支
+    // 持重命名。自动发现的文件一律视为文件记录。
     let (old_path, content, db_backed) = match record {
         Some((record_type, content, resource_path)) => {
-            if record_type != "image" && record_type != "file" {
+            if record_type != "image" && record_type != "file" && resource_path.is_empty() {
                 return Err("文本内容的标题来自正文，不支持重命名".to_string());
             }
             if resource_path.is_empty() {
@@ -4137,6 +4295,9 @@ fn move_resource_group_inner<R: Runtime>(
         }
     }
 
+    rewrite_resource_group_order(app, |order| {
+        rewrite_group_order_prefix(order, &path, &new_path_text)
+    });
     let _ = app.emit("resource-groups-changed", ());
     Ok(())
 }
@@ -5034,10 +5195,11 @@ mod resource_command_tests {
         create_resource_group_inner, delete_external_resource_file, delete_resource_group_inner,
         get_clipboard_records_inner, get_resource_groups_inner, move_resource_group_inner,
         move_resource_records_inner, read_resource_text_preview_file, rename_resource_file_inner,
-        resolve_resource_file_path, resource_file_id, resource_folder_tree,
-        resource_group_count_map, set_resource_note_inner, simplify_windows_path,
-        restore_staged_external_resource_files, stage_external_resource_files,
-        validate_resource_rename_stem, update_resource_group_inner, DbState,
+        reorder_resource_groups_inner, resolve_resource_file_path, resource_file_id,
+        resource_folder_tree, resource_group_count_map, set_resource_note_inner,
+        simplify_windows_path, restore_staged_external_resource_files,
+        stage_external_resource_files, validate_resource_rename_stem, update_resource_group_inner,
+        DbState,
     };
     use rusqlite::Connection;
     use std::path::{Path, PathBuf};
@@ -5382,6 +5544,7 @@ mod resource_command_tests {
             &root,
             &root.join("人物三视图"),
             &std::collections::HashMap::new(),
+            &std::collections::HashMap::new(),
         )
         .unwrap();
         assert_eq!(group["name"], "人物三视图");
@@ -5390,6 +5553,52 @@ mod resource_command_tests {
             group["children"][0]["children"][0]["path"],
             "人物三视图/放大后/细节"
         );
+        cleanup(&root);
+    }
+
+    #[test]
+    fn resource_groups_follow_the_persisted_manual_order() {
+        let (app, root) = test_app();
+        std::fs::create_dir_all(root.join("甲")).unwrap();
+        std::fs::create_dir_all(root.join("乙/子")).unwrap();
+        std::fs::create_dir_all(root.join("丙")).unwrap();
+
+        reorder_resource_groups_inner(
+            app.handle(),
+            vec!["甲".to_string(), "丙".to_string(), "乙".to_string()],
+        )
+        .unwrap();
+        let groups = get_resource_groups_inner(app.handle()).unwrap();
+        let names: Vec<&str> = groups
+            .iter()
+            .skip(1)
+            .map(|group| group["name"].as_str().unwrap())
+            .collect();
+        assert_eq!(names, vec!["甲", "丙", "乙"]);
+        assert_eq!(groups[3]["children"][0]["path"], "乙/子");
+
+        // 改名与移动后顺序跟随新路径；未登记的新分组排在已登记分组之后。
+        update_resource_group_inner(app.handle(), "丙".to_string(), "丁".to_string()).unwrap();
+        move_resource_group_inner(app.handle(), "乙".to_string(), "丁".to_string()).unwrap();
+        std::fs::create_dir_all(root.join("戊")).unwrap();
+        let groups = get_resource_groups_inner(app.handle()).unwrap();
+        let names: Vec<&str> = groups
+            .iter()
+            .skip(1)
+            .map(|group| group["name"].as_str().unwrap())
+            .collect();
+        assert_eq!(names, vec!["甲", "丁", "戊"]);
+        assert_eq!(groups[2]["children"][0]["path"], "丁/乙/子");
+
+        // 删除分组后其路径从顺序表中移除。
+        delete_resource_group_inner(app.handle(), "丁".to_string()).unwrap();
+        let groups = get_resource_groups_inner(app.handle()).unwrap();
+        let names: Vec<&str> = groups
+            .iter()
+            .skip(1)
+            .map(|group| group["name"].as_str().unwrap())
+            .collect();
+        assert_eq!(names, vec!["甲", "戊"]);
         cleanup(&root);
     }
 
@@ -5910,8 +6119,9 @@ mod resource_command_tests {
     }
 
     #[test]
-    fn renaming_resource_file_rejects_text_records_and_invalid_names() {
+    fn renaming_resource_file_rejects_plain_text_but_renames_file_backed_text() {
         let (app, root) = test_app();
+        // 资源库文本记录（新建窗口写入的 .txt）：类型是 text，但有对应文件，可改名。
         let file = root.join("note.txt");
         std::fs::write(&file, "正文").unwrap();
         insert_typed_resource(
@@ -5921,13 +6131,43 @@ mod resource_command_tests {
             "正文内容",
             file.to_str().unwrap(),
         );
-        assert!(rename_resource_file_inner(
+        let result = rename_resource_file_inner(
             app.handle(),
             "text-1".to_string(),
+            "新标题.txt".to_string(),
+        )
+        .unwrap();
+        let renamed = root.join("新标题.txt");
+        assert!(renamed.is_file());
+        assert!(!file.exists());
+        // 正文（content）与标题解耦：改名只动文件名，不改写正文。
+        assert_eq!(result["content"], "正文内容");
+        let state = app.state::<DbState>();
+        let (content, resource_path): (String, String) = {
+            let conn = state.conn.lock().unwrap();
+            conn.query_row(
+                "SELECT content, resource_path FROM clipboard_records WHERE id = 'text-1'",
+                [],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )
+            .unwrap()
+        };
+        assert_eq!(content, "正文内容");
+        assert_eq!(
+            slash_normalized(&resource_path),
+            slash_normalized(&renamed.to_string_lossy())
+        );
+        drop(state);
+
+        // 没有对应文件的纯文本记录：标题来自正文，仍拒绝改名。
+        insert_typed_resource(&app, "text-2", "text", "纯文本", "");
+        let error = rename_resource_file_inner(
+            app.handle(),
+            "text-2".to_string(),
             "新标题".to_string(),
         )
-        .unwrap_err()
-        .contains("不支持重命名"));
+        .unwrap_err();
+        assert!(error.contains("不支持重命名"));
 
         let image = root.join("image.png");
         std::fs::write(&image, [1_u8]).unwrap();

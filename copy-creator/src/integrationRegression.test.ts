@@ -156,6 +156,7 @@ describe("integration regressions", () => {
     const dbSource = readSource("../src-tauri/src/db.rs");
     const clipboardSource = readSource("../src-tauri/src/clipboard.rs");
     const pageSource = readSource("./pages/ResourcePage.tsx");
+    const groupChipsSource = readSource("./pages/ResourcePage/ResourceGroupChips.tsx");
     const componentSource = readSource("./components/ClipboardCreateDialog/index.tsx");
 
     expect(dbSource).toContain("DROP TABLE IF EXISTS resource_groups");
@@ -178,7 +179,11 @@ describe("integration regressions", () => {
     expect(pageSource).not.toContain("resource-mode-tab");
     expect(pageSource).toContain('storageMode: "resource"');
     expect(pageSource).toContain("get_resource_groups");
-    expect(pageSource).toContain("resource-group-section");
+    // 分组栏（含拖拽排序与子分组菜单）内聚在 ResourceGroupChips 中。
+    expect(pageSource).toContain("<ResourceGroupChips");
+    expect(groupChipsSource).toContain("resource-group-section");
+    expect(groupChipsSource).toContain("resource-group-scroll");
+    expect(groupChipsSource).toContain("horizontalListSortingStrategy");
     expect(pageSource).toContain('listen("resource-groups-changed"');
     expect(pageSource).toContain("resourceGroup");
     expect(pageSource).not.toContain("useResourceGroupStore");
@@ -310,7 +315,9 @@ describe("integration regressions", () => {
     expect(detailPageSource).toContain("metaResolution");
     expect(pageSource).toContain("computeResourceColumnCount");
     expect(pageSource).toContain("resource-back-to-top");
-    expect(pageSource).toContain("resourceGroupScrollRef");
+    // 分组栏滚轮横向滚动随组件内聚（原 resourceGroupScrollRef 在 ResourcePage 上）。
+    const groupChipsSource = readSource("./pages/ResourcePage/ResourceGroupChips.tsx");
+    expect(groupChipsSource).toContain('addEventListener("wheel"');
     const libSource = readSource("../src-tauri/src/lib.rs");
     const mediaServerSource = readSource("../src-tauri/src/media_server.rs");
     const dbSource = readSource("../src-tauri/src/db.rs");

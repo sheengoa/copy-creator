@@ -8,7 +8,7 @@ import { Icons } from "../../components/Icons";
 import { HighlightText } from "../../components/HighlightText";
 import { InlineTextFilePreview } from "../../components/InlinePreview";
 import { ImageThumb } from "../ClipboardPage/ImageThumb";
-import { ResourceFileImage } from "./ResourceMedia";
+import { ResourceFileImage, ResourceVideoPoster } from "./ResourceMedia";
 import {
   formatResourceTime,
   getResourcePath,
@@ -56,12 +56,20 @@ function ResourceCardVisual({
     );
   }
 
-  if (kind === "video" || kind === "audio") {
+  if (kind === "video") {
     return (
       <div className={`resource-card-visual resource-card-${kind}`}>
-        <span className="resource-card-visual-icon">{kind === "video" ? Icons.video : Icons.audio}</span>
+        <ResourceVideoPoster path={resourcePath} fallbackLabel={typeLabel(kind)} />
+        <span className="resource-card-play">{Icons.play}</span>
+      </div>
+    );
+  }
+
+  if (kind === "audio") {
+    return (
+      <div className={`resource-card-visual resource-card-${kind}`}>
+        <span className="resource-card-visual-icon">{Icons.audio}</span>
         <span>{typeLabel(kind)}</span>
-        {kind === "video" && <span className="resource-card-play">{Icons.play}</span>}
       </div>
     );
   }
