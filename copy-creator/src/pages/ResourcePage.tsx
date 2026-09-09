@@ -451,6 +451,13 @@ export default function ResourcePage() {
     return map;
   }, [resourceGroups]);
   const [activeGroupRowId, setActiveGroupRowId] = useState<string | null>(null);
+  // 拖动虚影与被拖行等宽：fixed 定位的 DragOverlay 默认按内容收缩，
+  // 文字短时会缩成一小条（与剪贴板区 activeOverlayWidth 同一做法）。
+  const [activeGroupRowWidth, setActiveGroupRowWidth] = useState<number | null>(null);
+  const handleManageRowDragStart = useCallback((event: DragStartEvent) => {
+    setActiveGroupRowId(String(event.active.id));
+    setActiveGroupRowWidth(event.active.rect.current.initial?.width ?? null);
+  }, []);
   const activeGroupRow = activeGroupRowId
     ? manageRows.find(({ folder }) => folder.path === activeGroupRowId)?.folder ?? null
     : null;
@@ -621,6 +628,7 @@ export default function ResourcePage() {
 
   const handleReorderManageRows = useCallback((event: DragEndEvent) => {
     setActiveGroupRowId(null);
+    setActiveGroupRowWidth(null);
     const { active, over } = event;
     if (!over || active.id === over.id) return;
     const activeParent = groupParentMap.get(String(active.id)) ?? null;
@@ -1114,9 +1122,12 @@ export default function ResourcePage() {
                 sensors={manageRowSensors}
                 collisionDetection={closestCenter}
                 modifiers={[restrictToVerticalAxis]}
-                onDragStart={(event) => setActiveGroupRowId(String(event.active.id))}
+                onDragStart={handleManageRowDragStart}
                 onDragEnd={handleReorderManageRows}
-                onDragCancel={() => setActiveGroupRowId(null)}
+                onDragCancel={() => {
+                  setActiveGroupRowId(null);
+                  setActiveGroupRowWidth(null);
+                }}
               >
                 <SortableContext
                   items={manageRows.map(({ folder }) => folder.path)}
@@ -1148,7 +1159,10 @@ export default function ResourcePage() {
                 {/* 对话框带 backdrop-filter/transform 会让 fixed 以它为包含块，
                     虚影飘出对话框；portal 到 body 才能跟随指针。 */}
                 {activeGroupRow && createPortal(
-                  <DragOverlay dropAnimation={null}>
+                  <DragOverlay
+                    dropAnimation={null}
+                    style={activeGroupRowWidth ? { width: activeGroupRowWidth } : undefined}
+                  >
                     <div className="resource-group-manage-row is-drag-overlay">
                       <span className="resource-group-drag-handle is-static">{Icons.drag}</span>
                       <span className="resource-group-manage-name">
