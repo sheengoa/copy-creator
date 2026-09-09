@@ -1469,6 +1469,8 @@ export default function RadialMenu() {
 
   // 分组 chip 本身即整组操作入口：单击切分组（保留）、Shift+单击 = 粘贴该组、
   // 按住拖动 = 通过 data-radial-* 属性接入的通用拖拽会话原生拖出该组全部文件。
+  // 正在浏览某分组子级时，chip 标签显示当前浏览路径，粘贴/拖出同样只作用于
+  // 该路径而非顶层分组；单击切换仍回到 chip 对应的顶层分组。
   // 仅真实分组（非"全部"视图）且 groupCount > 0 时挂载拖拽与粘贴能力。
   const groupChipDragProps = (groupPath: string, groupCount: number) => (
     groupCount > 0
@@ -1480,9 +1482,16 @@ export default function RadialMenu() {
       : {}
   );
 
-  const handleGroupChipClick = (groupPath: string, groupCount: number, shiftKey: boolean) => {
+  // groupPath 是单击切换的目标（chip 对应的顶层分组），pastePath 是 Shift+单击
+  // 粘贴的目标分组，浏览子分组时两者可能不同。
+  const handleGroupChipClick = (
+    groupPath: string,
+    pastePath: string,
+    groupCount: number,
+    shiftKey: boolean,
+  ) => {
     if (shiftKey && groupCount > 0 && pasteLeftClick !== "terminal") {
-      void handlePasteGroup(groupPath);
+      void handlePasteGroup(pastePath);
       return;
     }
     applyResourceGroupSwitch(groupPath);
@@ -1579,7 +1588,7 @@ export default function RadialMenu() {
                     onClick={(e) => {
                       e.preventDefault();
                       e.stopPropagation();
-                      handleGroupChipClick("", ungroupedCount, e.shiftKey);
+                      handleGroupChipClick("", "", ungroupedCount, e.shiftKey);
                     }}
                   >
                     {t("resources.ungrouped")}
@@ -1591,11 +1600,17 @@ export default function RadialMenu() {
                 const isActive = resourceGroup !== null
                   && isResourceFolderPath(resourceGroup, group.path);
                 const groupLabel = getResourceGroupControlLabel(group);
-                const dragProps = groupChipDragProps(group.path, group.count);
+                // 标签显示当前浏览路径时，粘贴/拖出与空组判断同样只作用于该路径；
+                // 子树中查不到（数据不一致）时 count 视为 0，安全退化为普通切换。
+                const pastePath = isActive && resourceGroup !== null ? resourceGroup : group.path;
+                const pasteCount = pastePath === group.path
+                  ? group.count
+                  : findResourceFolder(group.children ?? [], pastePath)?.count ?? 0;
+                const dragProps = groupChipDragProps(pastePath, pasteCount);
                 const handleChipClick = (e: React.MouseEvent) => {
                   e.preventDefault();
                   e.stopPropagation();
-                  handleGroupChipClick(group.path, group.count, e.shiftKey);
+                  handleGroupChipClick(group.path, pastePath, pasteCount, e.shiftKey);
                 };
                 return hasChildren ? (
                   <div
