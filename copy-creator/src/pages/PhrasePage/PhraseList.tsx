@@ -18,6 +18,8 @@ interface PhraseListProps {
   loading: boolean;
   selectedGroupId: string | null;
   search?: string;
+  /** 列表滚动容器回调 ref，供页面级「回到顶部」监视滚动。 */
+  scrollRef?: (node: HTMLElement | null) => void;
   onPaste: (phrase: Phrase) => void;
   onSecondaryPaste: (phrase: Phrase) => void;
   onEdit: (phrase: Phrase) => void;
@@ -209,6 +211,7 @@ export function PhraseList({
   loading,
   selectedGroupId,
   search,
+  scrollRef,
   onPaste,
   onSecondaryPaste,
   onEdit,
@@ -257,7 +260,7 @@ export function PhraseList({
   }
 
   return (
-    <div className="phrase-list">
+    <div className="phrase-list" ref={scrollRef}>
       {phrases.map((p) => (
         <PhraseCard
           key={p.id}

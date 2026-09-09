@@ -32,6 +32,8 @@ import { restrictToVerticalAxis } from "@dnd-kit/modifiers";
 import { getChangedOrderIds, getDragPreviewOrder } from "../../utils/reorderPreview";
 import BatchSelectionBar from "../../components/BatchSelectionBar";
 import { useMultiSelect } from "../../hooks/useMultiSelect";
+import { BackToTopButton } from "../../components/BackToTop";
+import { useBackToTop } from "../../hooks/useBackToTop";
 
 export default function PhrasePage() {
   const { t } = useTranslation();
@@ -197,6 +199,9 @@ export default function PhrasePage() {
     isSelected,
     toggleAllVisible,
   } = useMultiSelect(visiblePhraseIds);
+
+  // 统一的「回到顶部」：监视快捷输入列表滚动容器，批量选择模式下隐藏。
+  const backToTop = useBackToTop({ enabled: !isSelecting });
   const activePhrase = activePhraseId ? renderedPhrases.find(p => p.id === activePhraseId) : null;
   const activePhraseBody = activePhrase?.input_type === "file"
     ? filenameFromPath(activePhrase.source_path || activePhrase.content)
@@ -450,6 +455,7 @@ export default function PhrasePage() {
             loading={loading}
             selectedGroupId={selectedGroupId}
             search={search}
+            scrollRef={backToTop.containerRef}
             onPaste={handlePaste}
             onSecondaryPaste={handleSecondaryPaste}
             onEdit={openEditPhrase}
@@ -461,6 +467,12 @@ export default function PhrasePage() {
         </SortableContext>
         {createPortal(phraseDragOverlay, document.body)}
       </DndContext>
+
+      <BackToTopButton
+        visible={backToTop.visible}
+        onTop={backToTop.scrollToTop}
+        label={t("common.backToTop")}
+      />
 
       <GroupDialog
         open={groupDialogOpen}

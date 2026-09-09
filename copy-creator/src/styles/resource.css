@@ -2164,49 +2164,6 @@
   font-size: var(--text-xs);
 }
 
-.resource-back-to-top {
-  position: absolute;
-  right: 18px;
-  bottom: 18px;
-  z-index: 20;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  width: 36px;
-  height: 36px;
-  padding: 0;
-  border: 1px solid var(--separator);
-  border-radius: 50%;
-  background: var(--card-inner-bg);
-  color: var(--text-primary);
-  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.16);
-  cursor: pointer;
-  transition: transform 0.15s ease, box-shadow 0.15s ease, background 0.15s ease;
-}
-
-.resource-back-to-top svg {
-  width: 18px;
-  height: 18px;
-}
-
-.resource-back-to-top:hover {
-  background: var(--bg-secondary, rgba(0, 0, 0, 0.04));
-  transform: translateY(-2px);
-  box-shadow: 0 6px 18px rgba(0, 0, 0, 0.2);
-}
-
-[data-theme="dark"] .resource-back-to-top {
-  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.5);
-}
-
-/* 详情页按钮 portal 到 body 渲染：窗口内容容器带 transform 等属性时，
-   fixed 会以它为包含块跟随滚动，挂到 body 才能真正固定在视口右下角。
-   视口比可见面板大一圈透明阴影边距，定位时需要一并扣除。 */
-.resource-back-to-top-fixed {
-  position: fixed;
-  right: calc(var(--window-shadow-margin, 0px) + 18px);
-  bottom: calc(var(--window-shadow-margin, 0px) + 18px);
-}
 
 [data-theme="dark"] .resource-new-button {
   border-color: rgba(255, 255, 255, 0.18);

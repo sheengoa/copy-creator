@@ -134,7 +134,6 @@
     "autoplayBlocked": "Autoplay was blocked. Click the player to play.",
     "openInSystemPlayer": "Open in system player",
     "openMediaFailed": "Failed to open system player",
-    "backToTop": "Back to top",
     "note": "Note",
     "notePlaceholder": "Add a note (e.g. a name) to find it via search later",
     "noteSaved": "Note saved",
@@ -240,7 +239,8 @@
     "on": "ON",
     "off": "OFF",
     "pinWindow": "Pin Window",
-    "unpinWindow": "Unpin Window"
+    "unpinWindow": "Unpin Window",
+    "backToTop": "Back to top"
   },
   "radialMenu": {
     "empty": "No items",
@@ -248,7 +248,6 @@
     "openPreview": "Open preview",
     "closePreview": "Close preview",
     "previewImage": "Image in stashed content",
-    "imageUnavailable": "Image unavailable",
-    "backToTop": "Back to top"
+    "imageUnavailable": "Image unavailable"
   }
 }

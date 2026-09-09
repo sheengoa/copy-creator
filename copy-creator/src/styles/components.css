@@ -1043,3 +1043,57 @@ input:focus-visible + .selection-checkbox {
   bottom: 0;
   cursor: nwse-resize;
 }
+
+/* --- 回到顶部（剪贴板/快捷输入/资源/径向菜单共用的统一按钮） --- */
+.back-to-top {
+  position: absolute;
+  right: 16px;
+  bottom: 16px;
+  z-index: 20;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 36px;
+  height: 36px;
+  padding: 0;
+  border: 1px solid var(--separator);
+  border-radius: 50%;
+  background: var(--card-inner-bg);
+  color: var(--text-primary);
+  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.16);
+  cursor: pointer;
+  opacity: 0;
+  transform: translateY(6px);
+  pointer-events: none;
+  transition: opacity 0.2s ease, transform 0.15s ease, box-shadow 0.15s ease,
+    background 0.15s ease;
+}
+
+.back-to-top.visible {
+  opacity: 1;
+  transform: translateY(0);
+  pointer-events: auto;
+}
+
+.back-to-top svg {
+  width: 18px;
+  height: 18px;
+}
+
+.back-to-top:hover {
+  background: var(--bg-secondary, rgba(0, 0, 0, 0.04));
+  transform: translateY(-2px);
+  box-shadow: 0 6px 18px rgba(0, 0, 0, 0.2);
+}
+
+[data-theme="dark"] .back-to-top {
+  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.5);
+}
+
+/* 滚动发生在祖先容器上的页面（资源详情）用：按钮 portal 到 body 后以
+   fixed 固定在视口右下角，扣除透明阴影边距。 */
+.back-to-top.back-to-top-fixed {
+  position: fixed;
+  right: calc(var(--window-shadow-margin, 0px) + 18px);
+  bottom: calc(var(--window-shadow-margin, 0px) + 18px);
+}

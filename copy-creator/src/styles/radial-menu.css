@@ -365,57 +365,6 @@ html {
   background: rgba(255, 255, 255, 0.15);
 }
 
-/* --- Back to Top --- */
-.radial-menu-back-top {
-  position: absolute;
-  right: 14px;
-  bottom: 14px;
-  z-index: 5;
-  display: grid;
-  width: 32px;
-  height: 32px;
-  place-items: center;
-  padding: 0;
-  border: 1px solid var(--separator);
-  border-radius: 50%;
-  background: var(--bg-card);
-  color: var(--text-secondary);
-  cursor: pointer;
-  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.16);
-  opacity: 0;
-  transform: translateY(6px);
-  pointer-events: none;
-  transition: opacity 0.18s ease, transform 0.18s ease, background 0.12s, color 0.12s;
-}
-
-.radial-menu-back-top.visible {
-  opacity: 1;
-  transform: translateY(0);
-  pointer-events: auto;
-}
-
-.radial-menu-back-top svg {
-  width: 16px;
-  height: 16px;
-}
-
-.radial-menu-back-top:hover {
-  background: var(--bg-card-hover);
-  color: var(--text-primary);
-}
-
-[data-theme="dark"] .radial-menu-back-top {
-  background: #2c2c2e;
-  border-color: rgba(255, 255, 255, 0.14);
-  color: rgba(255, 255, 255, 0.72);
-  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.5);
-}
-
-[data-theme="dark"] .radial-menu-back-top:hover {
-  background: #3a3a3c;
-  color: #fff;
-}
-
 /* --- Item --- */
 .radial-menu-item {
   position: relative;
