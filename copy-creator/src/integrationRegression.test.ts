@@ -264,7 +264,11 @@ describe("integration regressions", () => {
       resourcePage.indexOf("{resourceGroupDialog &&"),
     );
     expect(radialMenu).toContain('["clipboard", "phrases", "resources"]');
-    expect(radialMenu).toContain('useClipboardStore.getState().loadRecords(false, "resources", null)');
+    // 资源 tab 依据记忆的分组位置加载（跨重启持久化），不再强制重置为"全部"。
+    expect(radialMenu).toContain('useClipboardStore.getState().loadRecords(false, "resources", remembered)');
+    expect(radialMenu).not.toContain('loadRecords(false, "resources", null)');
+    expect(radialMenu).toContain('invoke("set_setting", {');
+    expect(radialMenu).toContain('key: "radial_resource_group"');
     expect(radialMenu).toContain('useClipboardStore.getState().setCategory("resources")');
     expect(radialMenu).toContain('clipboardCategory === "resources"');
     expect(radialMenu).toContain(".filter((r) => isResourceRecord(r))");
