@@ -321,7 +321,9 @@ describe("integration regressions", () => {
     // 管理分组对话框的拖拽虚影必须 portal 到 body：对话框的
     // backdrop-filter/transform 会把 fixed 虚影的包含块劫持到对话框上。
     expect(pageSource).toContain("activeGroupRow && createPortal(");
-    expect(pageSource).toContain("resource-back-to-top");
+    // 「回到顶部」统一走共享模块（剪贴板/快捷输入/资源/径向菜单共用）。
+    expect(pageSource).toContain("useBackToTop");
+    expect(readSource("./hooks/useBackToTop.ts")).toContain("export function useBackToTop");
     // 分组栏滚轮横向滚动随组件内聚（原 resourceGroupScrollRef 在 ResourcePage 上）。
     const groupChipsSource = readSource("./pages/ResourcePage/ResourceGroupChips.tsx");
     expect(groupChipsSource).toContain('addEventListener("wheel"');

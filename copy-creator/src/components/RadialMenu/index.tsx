@@ -30,6 +30,8 @@ import {
   type RadialDragSource,
 } from "../../utils/radialDrag";
 import { ContentPreviewPanel } from "../ContentPreviewPanel";
+import { BackToTopButton } from "../BackToTop";
+import { useBackToTop } from "../../hooks/useBackToTop";
 import { InlineTextFilePreview } from "../InlinePreview";
 import { loadClipboardPreviewSegments } from "../../utils/contentPreview";
 import { isResourceRecord } from "../../utils/clipboardRecord";
@@ -294,7 +296,6 @@ export default function RadialMenu() {
   const [preview, setPreview] = useState<PreviewState | null>(null);
   const [dragSessionItemId, setDragSessionItemId] = useState<string | null>(null);
   const [draggingItemId, setDraggingItemId] = useState<string | null>(null);
-  const [showBackTop, setShowBackTop] = useState(false);
 
   const visibleRef = useRef(false);
   const selectedItemIdRef = useRef<string | null>(null);
@@ -335,23 +336,6 @@ export default function RadialMenu() {
     uiScaleRef.current = next;
     document.documentElement.style.setProperty("--radial-ui-scale", String(next));
   }, []);
-
-  const updateBackTopVisibility = useCallback(() => {
-    const list = listRef.current;
-    if (!list) return;
-    setShowBackTop(list.scrollTop > list.clientHeight);
-  }, []);
-
-  const handleBackToTop = useCallback(() => {
-    listRef.current?.scrollTo({ top: 0, behavior: "smooth" });
-  }, []);
-
-  useEffect(() => {
-    const list = listRef.current;
-    if (!list) return;
-    list.addEventListener("scroll", updateBackTopVisibility, { passive: true });
-    return () => list.removeEventListener("scroll", updateBackTopVisibility);
-  }, [updateBackTopVisibility]);
 
   const loadResourceGroups = useCallback(async () => {
     try {
@@ -1470,6 +1454,11 @@ export default function RadialMenu() {
           dragPath: p.input_type === "file" ? p.content : undefined,
       }));
 
+  // 统一的「回到顶部」：tab / 分类 / 分组 / 内容变化后重新评估按钮可见性。
+  const backToTop = useBackToTop({
+    resetKey: `${activeTab}|${clipboardCategory}|${phraseGroupId}|${resourceGroup ?? ""}|${items.length}`,
+  });
+
   const categories = activeTab === "clipboard"
     ? [
         { key: "all", label: t("clipboard.all") },
@@ -1555,10 +1544,6 @@ export default function RadialMenu() {
       document.body,
     )
     : null;
-
-  useEffect(() => {
-    updateBackTopVisibility();
-  }, [activeTab, clipboardCategory, phraseGroupId, resourceGroup, items.length, updateBackTopVisibility]);
 
   return (
     <div className={`radial-menu-overlay${visible ? "" : " radial-menu-hidden"}`}>
@@ -1711,7 +1696,14 @@ export default function RadialMenu() {
             </div>
           )}
 
-          <div ref={listRef} className="radial-menu-list" data-radial-list>
+          <div
+            ref={(element) => {
+              listRef.current = element;
+              backToTop.containerRef(element);
+            }}
+            className="radial-menu-list"
+            data-radial-list
+          >
             {items.length === 0 ? (
               <div className="radial-menu-empty">{t("radialMenu.empty")}</div>
             ) : (
@@ -1811,18 +1803,11 @@ export default function RadialMenu() {
             )}
           </div>
 
-          <button
-            type="button"
-            className={`radial-menu-back-top${showBackTop ? " visible" : ""}`}
-            aria-label={t("radialMenu.backToTop")}
-            title={t("radialMenu.backToTop")}
-            onClick={(e) => {
-              e.stopPropagation();
-              handleBackToTop();
-            }}
-          >
-            {Icons.arrowUp}
-          </button>
+          <BackToTopButton
+            visible={backToTop.visible}
+            onTop={backToTop.scrollToTop}
+            label={t("common.backToTop")}
+          />
         </div>
 
         {preview && (

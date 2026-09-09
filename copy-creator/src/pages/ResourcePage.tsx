@@ -22,6 +22,8 @@ import IosSelect from "../components/IosSelect";
 import SearchInput from "../components/SearchInput";
 import BatchSelectionBar from "../components/BatchSelectionBar";
 import type { ClipboardRecord, ResourceFolder } from "../types";
+import { BackToTopButton } from "../components/BackToTop";
+import { useBackToTop } from "../hooks/useBackToTop";
 import ResourceDetailPage from "./ResourcePage/ResourceDetailPage";
 import ResourceGroupChips from "./ResourcePage/ResourceGroupChips";
 import { ResourceCard, ResourceCardDragPreview } from "./ResourcePage/ResourceCard";
@@ -103,7 +105,6 @@ export default function ResourcePage() {
   const resourceListRef = useRef<HTMLDivElement>(null);
   const [listElement, setListElement] = useState<HTMLDivElement | null>(null);
   const [columnCount, setColumnCount] = useState(2);
-  const [listScrolled, setListScrolled] = useState(false);
   const [feedback, setFeedback] = useState<"copied" | "copyFailed" | "deleteFailed" | "openFailed" | null>(null);
   const feedbackTimerRef = useRef<number | null>(null);
 
@@ -340,18 +341,8 @@ export default function ResourcePage() {
     return () => observer.disconnect();
   }, [listElement]);
 
-  // 下滑一定距离后显示“回到顶部”按钮。
-  useEffect(() => {
-    if (!listElement) return;
-    const handleScroll = () => setListScrolled(listElement.scrollTop > 240);
-    handleScroll();
-    listElement.addEventListener("scroll", handleScroll, { passive: true });
-    return () => listElement.removeEventListener("scroll", handleScroll);
-  }, [listElement]);
-
-  const scrollToResourceTop = useCallback(() => {
-    resourceListRef.current?.scrollTo({ top: 0, behavior: "smooth" });
-  }, []);
+  // 统一的「回到顶部」：批量选择模式下隐藏。
+  const backToTop = useBackToTop({ enabled: !isSelecting });
 
   const activeDragRecord = activeDragId
     ? renderedRecords.find((record) => record.id === activeDragId)
@@ -1379,6 +1370,7 @@ export default function ResourcePage() {
             ref={(element) => {
               resourceListRef.current = element;
               setListElement(element);
+              backToTop.containerRef(element);
             }}
             data-resource-scroll
           >
@@ -1437,17 +1429,11 @@ export default function ResourcePage() {
           </div>
         )}
 
-        {listScrolled && !isSelecting && (
-          <button
-            type="button"
-            className="resource-back-to-top"
-            onClick={scrollToResourceTop}
-            aria-label={t("resources.backToTop")}
-            title={t("resources.backToTop")}
-          >
-            {Icons.arrowUp}
-          </button>
-        )}
+        <BackToTopButton
+          visible={backToTop.visible}
+          onTop={backToTop.scrollToTop}
+          label={t("common.backToTop")}
+        />
       </section>
 
       {feedback && (

@@ -25,6 +25,8 @@ import {
 import { restrictToVerticalAxis } from "@dnd-kit/modifiers";
 import { getChangedOrderIds, getDragPreviewOrder } from "../../utils/reorderPreview";
 import BatchSelectionBar from "../../components/BatchSelectionBar";
+import { BackToTopButton } from "../../components/BackToTop";
+import { useBackToTop } from "../../hooks/useBackToTop";
 import { useMultiSelect } from "../../hooks/useMultiSelect";
 import { isResourceRecord } from "../../utils/clipboardRecord";
 
@@ -137,6 +139,9 @@ export default function ClipboardPage() {
     selectIds,
   } = useMultiSelect(visibleIds);
   const [selectingAll, setSelectingAll] = useState(false);
+
+  // 统一的「回到顶部」：监视剪贴板列表滚动容器，批量选择模式下隐藏。
+  const backToTop = useBackToTop({ enabled: !isSelecting });
   const selectAllRequestRef = useRef(0);
 
   const startClipboardSelection = useCallback(() => {
@@ -435,7 +440,13 @@ export default function ClipboardPage() {
           </div>
         </>
       ) : (
-        <div className="clipboard-list" ref={clipboardListRef}>
+        <div
+          className="clipboard-list"
+          ref={(el) => {
+            clipboardListRef.current = el;
+            backToTop.containerRef(el);
+          }}
+        >
           <DndContext sensors={sensors} collisionDetection={closestCenter} onDragStart={handleDragStart} onDragOver={handleDragOver} onDragEnd={handleDragEnd} onDragCancel={handleDragCancel} modifiers={[restrictToVerticalAxis]}>
             <SortableContext items={renderedRecords.map(r => r.id)} strategy={verticalListSortingStrategy}>
               {renderedRecords.map((r, i) => (
@@ -469,6 +480,11 @@ export default function ClipboardPage() {
         </div>
       )}
 
+      <BackToTopButton
+        visible={backToTop.visible}
+        onTop={backToTop.scrollToTop}
+        label={t("common.backToTop")}
+      />
     </div>
     </>
   );

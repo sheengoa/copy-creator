@@ -145,7 +145,6 @@
     "autoplayBlocked": "自动播放未成功，请点击播放器播放",
     "openInSystemPlayer": "使用系统播放器打开",
     "openMediaFailed": "打开系统播放器失败",
-    "backToTop": "回到顶部",
     "note": "备注",
     "notePlaceholder": "添加备注（如人物名、用途），保存后可直接搜索",
     "noteSaved": "备注已保存",
@@ -240,7 +239,8 @@
     "on": "已开启",
     "off": "已关闭",
     "pinWindow": "固定窗口",
-    "unpinWindow": "取消固定"
+    "unpinWindow": "取消固定",
+    "backToTop": "回到顶部"
   },
   "radialMenu": {
     "empty": "暂无内容",
@@ -248,7 +248,6 @@
     "openPreview": "展开预览",
     "closePreview": "收起预览",
     "previewImage": "暂存内容中的图片",
-    "imageUnavailable": "图片无法加载",
-    "backToTop": "回到顶部"
+    "imageUnavailable": "图片无法加载"
   }
 }
