@@ -46,8 +46,10 @@ jobs:
         if: matrix.os == 'ubuntu-latest'
         run: |
           # runner 自带的 Google Chrome apt 源元数据时常不一致，会卡死
-          # apt-get update（Hash Sum mismatch）；构建不需要 Chrome，先移除。
+          # apt-get update（Hash Sum mismatch）；构建不需要 Chrome，先移除
+          # （22.04 镜像为 .list，24.04 为 deb822 的 .sources）。
           sudo rm -f /etc/apt/sources.list.d/google-chrome.list
+          sudo rm -f /etc/apt/sources.list.d/google-chrome.sources
           sudo apt-get update
           sudo apt-get install -y libwebkit2gtk-4.1-dev build-essential curl wget file libxdo-dev libssl-dev libayatana-appindicator3-dev librsvg2-dev patchelf gstreamer1.0-plugins-base gstreamer1.0-plugins-good gstreamer1.0-libav
 
