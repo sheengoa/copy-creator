@@ -1226,13 +1226,15 @@ export default function RadialMenu() {
     };
   }, [handleDocumentPointerDown, handleItemPointerMove, handleItemPointerUp]);
 
-  // Popup click handler: dismiss when clicking on empty space.
-  // Items, nav tabs, and category chips all call stopPropagation on
-  // their own onClick, so this only fires for truly unhandled clicks.
+  // Popup 点击：点在菜单内空白（非按钮/非交互元素）时不再收起菜单，
+  // 仅收起预览、关闭分组下拉并清除选中。菜单收起只由点击窗口外部
+  // （后端失焦回收）或再次触发快捷键完成。
   const handlePopupClick = useCallback(() => {
-    resetState();
-    getCurrentWindow().hide();
-  }, [resetState]);
+    collapsePreview();
+    closeResourceGroupMenu();
+    setSelectedItemId(null);
+    selectedItemIdRef.current = null;
+  }, [collapsePreview, closeResourceGroupMenu]);
   useEffect(() => {
     let unlisteners: UnlistenFn[] = [];
     let disposed = false;
