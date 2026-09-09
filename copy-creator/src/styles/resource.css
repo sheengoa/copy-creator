@@ -517,7 +517,7 @@
 }
 
 .resource-group-manage-row.is-drag-overlay {
-  width: 260px;
+  /* 宽度由 DragOverlay 按被拖行初始宽度动态传入，不再硬编码。 */
   padding: 8px 10px;
   border: 1px solid color-mix(in srgb, var(--text-primary) 20%, var(--separator));
   background: var(--bg-card);
