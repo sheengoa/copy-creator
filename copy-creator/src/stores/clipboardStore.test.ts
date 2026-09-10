@@ -138,6 +138,47 @@ describe("clipboardStore stash image paste routing", () => {
       terminal: true,
     });
   });
+
+  it("records usage time after a successful paste", async () => {
+    await useClipboardStore.getState().pasteRecord(stashRecord);
+
+    expect(invokeMock).toHaveBeenCalledWith("touch_clipboard_usage", {
+      ids: ["stash-1"],
+    });
+  });
+
+  it("records usage time for plain text pastes", async () => {
+    await useClipboardStore.getState().pasteRecord({
+      id: "clip-1",
+      type: "text",
+      content: "first",
+      source_app: "",
+      created_at: "2026-07-30T00:00:00Z",
+    });
+
+    expect(invokeMock).toHaveBeenCalledWith("touch_clipboard_usage", {
+      ids: ["clip-1"],
+    });
+  });
+
+  it("does not record usage when the paste command fails", async () => {
+    invokeMock.mockImplementation((command: string) => {
+      if (command === "paste_text") return Promise.reject(new Error("boom"));
+      return Promise.resolve(undefined);
+    });
+
+    await useClipboardStore.getState().pasteRecord({
+      id: "clip-1",
+      type: "text",
+      content: "first",
+      source_app: "",
+      created_at: "2026-07-30T00:00:00Z",
+    });
+
+    expect(invokeMock).not.toHaveBeenCalledWith("touch_clipboard_usage", {
+      ids: ["clip-1"],
+    });
+  });
 });
 
 describe("clipboardStore full record loading", () => {

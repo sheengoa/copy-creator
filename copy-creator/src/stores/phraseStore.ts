@@ -14,6 +14,13 @@ const resolveStoredFilePath = async (content: string) => {
 /** 文件短语是否指向图片文件：粘贴时走位图路径而非文件引用。 */
 export const isImageFilePath = (path: string) => /\.(png|jpe?g|webp|gif|bmp)$/i.test(path);
 
+// 粘贴成功后记录使用时间（fire-and-forget），供径向菜单「最近使用」聚合查询。
+function touchPhraseUsage(id: string) {
+  void invoke("touch_phrase_usage", { id }).catch((e) => {
+    console.error("Failed to record phrase usage:", e);
+  });
+}
+
 export interface QuickInputFileSelection {
   path: string;
   file_size: number;
@@ -246,6 +253,7 @@ export const usePhraseStore = create<PhraseState>()((set, get) => {
       } else {
         await invoke("paste_text", { text: phrase.content });
       }
+      touchPhraseUsage(phrase.id);
     } catch (e) {
       console.error("Paste failed:", e);
     }
@@ -263,6 +271,7 @@ export const usePhraseStore = create<PhraseState>()((set, get) => {
       } else {
         await invoke("paste_text_terminal", { text: phrase.content });
       }
+      touchPhraseUsage(phrase.id);
     } catch (e) {
       console.error("Terminal paste failed:", e);
     }

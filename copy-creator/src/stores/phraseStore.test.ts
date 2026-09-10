@@ -38,6 +38,38 @@ describe("phraseStore paste routing", () => {
     });
 
     expect(invokeMock).toHaveBeenCalledWith("paste_text", { text: "hello" });
+    expect(invokeMock).toHaveBeenCalledWith("touch_phrase_usage", {
+      id: "phrase-1",
+    });
+  });
+
+  it("records usage time for terminal pastes and skips failures", async () => {
+    await usePhraseStore.getState().pastePhraseTerminal({
+      ...basePhrase,
+      content: "pwd",
+      input_type: "text",
+      source_path: "",
+      file_size: 0,
+    });
+    expect(invokeMock).toHaveBeenCalledWith("touch_phrase_usage", {
+      id: "phrase-1",
+    });
+
+    invokeMock.mockReset();
+    invokeMock.mockImplementation((command: string) => {
+      if (command === "paste_text") return Promise.reject(new Error("boom"));
+      return Promise.resolve(undefined);
+    });
+    await usePhraseStore.getState().pastePhrase({
+      ...basePhrase,
+      content: "hello",
+      input_type: "text",
+      source_path: "",
+      file_size: 0,
+    });
+    expect(invokeMock).not.toHaveBeenCalledWith("touch_phrase_usage", {
+      id: "phrase-1",
+    });
   });
 
   it("pastes file phrases with the file paste command", async () => {

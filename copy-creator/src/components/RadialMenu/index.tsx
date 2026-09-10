@@ -962,6 +962,12 @@ export default function RadialMenu() {
           if (paths.length === 0) throw new Error("分组内没有可粘贴的文件");
           await invoke("paste_files", { paths });
         }
+        // 整组粘贴成功后全组计入「最近使用」，与单条粘贴的记录口径一致。
+        void invoke("touch_clipboard_usage", {
+          ids: records.map((record) => record.id),
+        }).catch((error) => {
+          console.error("Failed to record group usage:", error);
+        });
       } catch (error) {
         console.error("Failed to paste resource group:", error);
       }
