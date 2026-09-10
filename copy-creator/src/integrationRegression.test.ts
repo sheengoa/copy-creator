@@ -263,7 +263,11 @@ describe("integration regressions", () => {
     expect(confirmDialogIndex).toBeGreaterThan(
       resourcePage.indexOf("{resourceGroupDialog &&"),
     );
-    expect(radialMenu).toContain('["clipboard", "phrases", "resources"]');
+    expect(radialMenu).toContain('["recent", "clipboard", "phrases", "resources"]');
+    // 「最近使用」为默认 tab：打开菜单即见高频条目，条目来自后端聚合查询。
+    expect(radialMenu).toContain('useState<TabKey>("recent")');
+    expect(radialMenu).toContain('invoke<RecentUsedItem[]>("get_recent_used_items"');
+    expect(radialMenu).toContain("recentItemByIdRef.current.get(itemId)");
     // 资源 tab 依据记忆的分组位置加载（跨重启持久化），不再强制重置为"全部"。
     expect(radialMenu).toContain('useClipboardStore.getState().loadRecords(false, "resources", remembered)');
     expect(radialMenu).not.toContain('loadRecords(false, "resources", null)');

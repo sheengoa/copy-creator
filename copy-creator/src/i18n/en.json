@@ -4,6 +4,7 @@
   },
   "sidebar": {},
   "tabs": {
+    "recent": "Recent",
     "clipboard": "Clipboard",
     "phrases": "Quick Input",
     "resources": "Resources"
@@ -245,6 +246,7 @@
   },
   "radialMenu": {
     "empty": "No items",
+    "recentEmpty": "No usage history yet. Pasted items will appear here.",
     "previewTitle": "Full content",
     "openPreview": "Open preview",
     "closePreview": "Close preview",

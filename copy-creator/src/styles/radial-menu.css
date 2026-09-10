@@ -646,6 +646,28 @@ html {
   color: rgba(255, 255, 255, 0.4);
 }
 
+/* 「最近使用」条目的来源标签：剪切板 / 快捷输入·分组 / 资源·分组 */
+.radial-menu-item-source {
+  align-self: flex-start;
+  font-size: var(--text-xs);
+  color: var(--text-secondary);
+  font-weight: var(--weight-normal);
+  margin-top: 4px;
+  padding: 0 6px;
+  border: 1px solid var(--border-color);
+  border-radius: 8px;
+  line-height: 1.5;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+[data-theme="dark"] .radial-menu-item-source {
+  color: rgba(255, 255, 255, 0.4);
+  border-color: rgba(255, 255, 255, 0.16);
+}
+
 /* --- Empty State --- */
 .radial-menu-empty {
   display: flex;

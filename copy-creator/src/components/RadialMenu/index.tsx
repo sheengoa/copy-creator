@@ -35,7 +35,7 @@ import { useBackToTop } from "../../hooks/useBackToTop";
 import { InlineTextFilePreview } from "../InlinePreview";
 import { loadClipboardPreviewSegments } from "../../utils/contentPreview";
 import { isResourceRecord } from "../../utils/clipboardRecord";
-import type { ResourceFolder } from "../../types";
+import type { ClipboardRecord, Phrase, ResourceFolder } from "../../types";
 import {
   findResourceFolder,
   flattenResourceFolders,
@@ -51,9 +51,11 @@ import {
 import { ResourceFileImage } from "../../pages/ResourcePage/ResourceMedia";
 import i18n from "../../i18n";
 
-type TabKey = "clipboard" | "phrases" | "resources";
+type TabKey = "recent" | "clipboard" | "phrases" | "resources";
 
 const MAX_ITEMS = 2000;
+// 「最近使用」tab 展示的条目数量：覆盖高频内容的数量，按最近使用时间倒序。
+const RECENT_ITEMS_LIMIT = 12;
 const RADIAL_DRAG_THRESHOLD_PX = 6;
 const IS_LINUX = typeof navigator !== "undefined"
   && /Linux/i.test(navigator.userAgent)
@@ -112,6 +114,16 @@ interface RadialItem {
   resourcePath?: string;
   resourceTitle?: string;
   resourceSummary?: string;
+  /** 「最近使用」条目的来源标签（剪切板 / 快捷输入·分组 / 资源·分组）。 */
+  sourceLabel?: string;
+}
+
+/** 「最近使用」聚合条目：后端按 last_used_at 混排剪贴板（含资源）与短语。 */
+interface RecentUsedItem {
+  origin: "clipboard" | "phrase";
+  last_used_at: string;
+  record?: ClipboardRecord;
+  phrase?: Phrase & { group_name?: string | null };
 }
 
 interface PreviewLayout {
@@ -284,9 +296,11 @@ export default function RadialMenu() {
   const { t } = useTranslation();
 
   const [visible, setVisible] = useState(false);
-  const [activeTab, setActiveTab] = useState<TabKey>("clipboard");
+  const [activeTab, setActiveTab] = useState<TabKey>("recent");
   const [selectedItemId, setSelectedItemId] = useState<string | null>(null);
   const [clipboardCategory, setClipboardCategory] = useState<ClipType>("all");
+  const [recentItems, setRecentItems] = useState<RecentUsedItem[]>([]);
+  const [recentLoaded, setRecentLoaded] = useState(false);
   const [resourceGroups, setResourceGroups] = useState<ResourceFolder[]>([]);
   const [resourceGroup, setResourceGroup] = useState<string | null>(null);
   const [resourceGroupMenuPath, setResourceGroupMenuPath] = useState<string | null>(null);
@@ -301,8 +315,10 @@ export default function RadialMenu() {
 
   const visibleRef = useRef(false);
   const selectedItemIdRef = useRef<string | null>(null);
-  const activeTabRef = useRef<TabKey>("clipboard");
+  const activeTabRef = useRef<TabKey>("recent");
   const clipboardCategoryRef = useRef<ClipType>("all");
+  const recentItemByIdRef = useRef(new Map<string, RecentUsedItem>());
+  const recentLoadSeqRef = useRef(0);
   const resourceGroupRef = useRef<string | null>(null);
   // 本次菜单会话内用户是否已手动切换过分组：防止打开菜单时的异步
   // 分组记忆恢复在返回后覆盖用户先一步的手动选择。
@@ -350,6 +366,35 @@ export default function RadialMenu() {
       console.error("Failed to load radial resource groups:", error);
     }
   }, []);
+
+  // 「最近使用」聚合查询：菜单打开落到该 tab 时刷新（使用记录可能在菜单
+  // 隐藏期间变化），挂载时也预取一次保证首次打开即有内容。
+  const loadRecentItems = useCallback(async () => {
+    const seq = ++recentLoadSeqRef.current;
+    try {
+      const entries = await invoke<RecentUsedItem[]>("get_recent_used_items", {
+        limit: RECENT_ITEMS_LIMIT,
+      });
+      if (seq !== recentLoadSeqRef.current) return;
+      const byId = new Map<string, RecentUsedItem>();
+      for (const entry of entries) {
+        const id = entry.record?.id ?? entry.phrase?.id;
+        if (id) byId.set(id, entry);
+      }
+      recentItemByIdRef.current = byId;
+      setRecentItems(entries);
+      setRecentLoaded(true);
+    } catch (error) {
+      console.error("Failed to load recent used items:", error);
+      if (seq === recentLoadSeqRef.current) setRecentLoaded(true);
+    }
+  }, []);
+
+  useEffect(() => {
+    if (visible && activeTab === "recent") {
+      void loadRecentItems();
+    }
+  }, [visible, activeTab, loadRecentItems]);
 
   useEffect(() => {
     const el = categoriesScrollRef.current;
@@ -593,7 +638,9 @@ export default function RadialMenu() {
     const cached = previewCacheRef.current.get(item.id);
     if (cached) return cached;
 
-    const record = useClipboardStore.getState().records.find((entry) => entry.id === item.id);
+    const recentEntry = recentItemByIdRef.current.get(item.id);
+    const record = useClipboardStore.getState().records.find((entry) => entry.id === item.id)
+      ?? recentEntry?.record;
     let segments: RadialPreviewSegment[];
     if (record) {
       if (isResourceRecord(record)) {
@@ -627,7 +674,8 @@ export default function RadialMenu() {
         segments = await loadClipboardPreviewSegments(record);
       }
     } else {
-      const phrase = usePhraseStore.getState().phrases.find((entry) => entry.id === item.id);
+      const phrase = usePhraseStore.getState().phrases.find((entry) => entry.id === item.id)
+        ?? recentEntry?.phrase;
       if (phrase && phrase.input_type === "file" && isImageFilePath(phrase.content)) {
         segments = [{ type: "image", path: phrase.content }];
       } else if (phrase && phrase.input_type === "file") {
@@ -734,6 +782,7 @@ export default function RadialMenu() {
     useClipboardStore.getState().init();
     usePhraseStore.getState().init();
     void loadResourceGroups();
+    void loadRecentItems();
 
     // Listen for theme changes from the main window
     let unlistenTheme: UnlistenFn | undefined;
@@ -766,7 +815,7 @@ export default function RadialMenu() {
       if (unlistenLang) unlistenLang();
       if (unlistenResourceGroups) unlistenResourceGroups();
     };
-  }, [applyUiScale, loadResourceGroups]);
+  }, [applyUiScale, loadResourceGroups, loadRecentItems]);
 
   const applyResourceGroupSwitch = useCallback((nextGroup: string | null) => {
     collapsePreview();
@@ -917,12 +966,25 @@ export default function RadialMenu() {
   }, []);
 
   const handleItemPaste = useCallback(async (itemId: string, terminal = false) => {
-    const { records, pasteRecord, pasteRecordTerminal } = useClipboardStore.getState();
-    const record = records.find((r) => r.id === itemId);
     // 先收起菜单再触发粘贴：后端的焦点沉降等待与窗口隐藏并行，
     // 点击到粘贴落地的延迟显著降低（原来串行等待粘贴命令返回后才隐藏）。
     resetState();
     void getCurrentWindow().hide();
+    // 「最近使用」条目按 origin 分发粘贴：其记录/短语不在当前
+    // store 列表里，直接用聚合查询返回的对象调用对应粘贴方法。
+    if (activeTabRef.current === "recent") {
+      const entry = recentItemByIdRef.current.get(itemId);
+      if (entry?.record) {
+        const { pasteRecord, pasteRecordTerminal } = useClipboardStore.getState();
+        await (terminal ? pasteRecordTerminal(entry.record) : pasteRecord(entry.record));
+      } else if (entry?.phrase) {
+        const { pastePhrase, pastePhraseTerminal } = usePhraseStore.getState();
+        await (terminal ? pastePhraseTerminal(entry.phrase) : pastePhrase(entry.phrase));
+      }
+      return;
+    }
+    const { records, pasteRecord, pasteRecordTerminal } = useClipboardStore.getState();
+    const record = records.find((r) => r.id === itemId);
     if (record) {
       await (terminal ? pasteRecordTerminal(record) : pasteRecord(record));
     } else {
@@ -1293,9 +1355,10 @@ export default function RadialMenu() {
           void loadPasteLeftClickSetting();
           setSelectedItemId(null);
           selectedItemIdRef.current = null;
-          // Reset to clipboard tab on each open
-          setActiveTab("clipboard");
-          activeTabRef.current = "clipboard";
+          // 每次打开菜单默认落在「最近使用」：高频粘贴一步可达，
+          // 低频内容仍走其余三个 tab 的原有路径。
+          setActiveTab("recent");
+          activeTabRef.current = "recent";
           setClipboardCategory("all");
           clipboardCategoryRef.current = "all";
           closeResourceGroupMenu();
@@ -1426,75 +1489,122 @@ export default function RadialMenu() {
       ? records.filter((r) => isResourceRecord(r))
     : records.filter((r) => !isResourceRecord(r) && r.type === clipboardCategory);
 
-  const items: RadialItem[] = activeTab === "clipboard"
-    ? filteredRecords.slice(0, MAX_ITEMS).map((r) => ({
+  // 三类来源统一映射为 RadialItem，「最近使用」复用同一套渲染、预览与拖出机制。
+  const recordToRadialItem = (r: ClipboardRecord): RadialItem => {
+    if (isResourceRecord(r)) {
+      const resourceKind = inferResourceMediaKind(r);
+      const resourcePath = getResourcePath(r);
+      const resourceTitle = getResourceTitle(r, resourceKind);
+      const resourceSummary = r.type === "file"
+        ? undefined
+        : getResourceSummary(r);
+      return {
         id: r.id,
-        content: r.type === "image"
-          ? `[${t("clipboard.image")}]`
-          : r.type === "file"
-            ? r.content.replace(/\\/g, "/").split("/").pop() || r.content
-            : r.is_api_key
-              ? r.key_preview || r.content
-              : r.content,
+        content: resourceTitle,
         type: r.type,
         createdAt: r.created_at,
         contentTruncated: r.content_truncated,
-        previewAvailable: isContentPreviewAvailable({
-          type: r.type,
-          contentTruncated: r.content_truncated,
-          hasImages: r.has_images,
-        }, r.content.length > 300),
+        previewAvailable: resourceKind === "image"
+          || resourceKind === "text"
+          || resourceKind === "video"
+          || resourceKind === "audio",
         dragKind: getClipboardRadialDragKind(r.type, r.has_images),
         dragSource: "clipboard",
-        dragPath: r.drag_path,
-      }))
+        dragPath: r.drag_path || (r.type === "file" ? resourcePath : undefined),
+        isResource: true,
+        resourceKind,
+        resourcePath,
+        resourceTitle,
+        resourceSummary,
+      };
+    }
+    return {
+      id: r.id,
+      content: r.type === "image"
+        ? `[${t("clipboard.image")}]`
+        : r.type === "file"
+          ? r.content.replace(/\\/g, "/").split("/").pop() || r.content
+          : r.is_api_key
+            ? r.key_preview || r.content
+            : r.content,
+      type: r.type,
+      createdAt: r.created_at,
+      contentTruncated: r.content_truncated,
+      previewAvailable: isContentPreviewAvailable({
+        type: r.type,
+        contentTruncated: r.content_truncated,
+        hasImages: r.has_images,
+      }, r.content.length > 300),
+      dragKind: getClipboardRadialDragKind(r.type, r.has_images),
+      dragSource: "clipboard",
+      dragPath: r.drag_path,
+    };
+  };
+
+  const phraseToRadialItem = (p: Phrase): RadialItem => ({
+    id: p.id,
+    content: p.input_type === "file"
+      ? filenameFromPath(p.source_path || p.content)
+      : p.content,
+    type: p.input_type === "file" ? "file" : "phrase",
+    imagePath:
+      p.input_type === "file" && isImageFilePath(p.content) ? p.content : undefined,
+    title: p.title,
+    previewAvailable: isContentPreviewAvailable({
+      type: p.input_type,
+    }, p.content.length > 300),
+    dragKind: getPhraseRadialDragKind(p.input_type),
+    dragSource: "phrase",
+    dragPath: p.input_type === "file" ? p.content : undefined,
+  });
+
+  const recentSourceLabel = (entry: RecentUsedItem): string => {
+    if (entry.phrase) {
+      const groupName = entry.phrase.group_name;
+      return groupName ? `${t("tabs.phrases")} · ${groupName}` : t("tabs.phrases");
+    }
+    const record = entry.record;
+    if (record && isResourceRecord(record)) {
+      // 分组为文件系统相对路径，标签取最末级目录名，完整路径放 title。
+      const group = record.resource_group;
+      if (!group) return `${t("tabs.resources")} · ${t("resources.ungrouped")}`;
+      const leaf = group.split("/").filter(Boolean).pop() || group;
+      return `${t("tabs.resources")} · ${leaf}`;
+    }
+    return t("tabs.clipboard");
+  };
+
+  const recentToRadialItem = (entry: RecentUsedItem): RadialItem | null => {
+    // 展示使用时间而非创建时间；使用即置顶由聚合查询的排序保证。
+    if (entry.record) {
+      return {
+        ...recordToRadialItem(entry.record),
+        createdAt: entry.last_used_at,
+        sourceLabel: recentSourceLabel(entry),
+      };
+    }
+    if (entry.phrase) {
+      return {
+        ...phraseToRadialItem(entry.phrase),
+        createdAt: entry.last_used_at,
+        sourceLabel: recentSourceLabel(entry),
+      };
+    }
+    return null;
+  };
+
+  const items: RadialItem[] = activeTab === "clipboard"
+    ? filteredRecords.slice(0, MAX_ITEMS).map(recordToRadialItem)
     : activeTab === "resources"
       ? records
           .filter((r) => isResourceRecord(r))
           .slice(0, MAX_ITEMS)
-          .map((r) => {
-            const resourceKind = inferResourceMediaKind(r);
-            const resourcePath = getResourcePath(r);
-            const resourceTitle = getResourceTitle(r, resourceKind);
-            const resourceSummary = r.type === "file"
-              ? undefined
-              : getResourceSummary(r);
-            return {
-              id: r.id,
-              content: resourceTitle,
-              type: r.type,
-              createdAt: r.created_at,
-              contentTruncated: r.content_truncated,
-              previewAvailable: resourceKind === "image"
-                || resourceKind === "text"
-                || resourceKind === "video"
-                || resourceKind === "audio",
-              dragKind: getClipboardRadialDragKind(r.type, r.has_images),
-              dragSource: "clipboard" as const,
-              dragPath: r.drag_path || (r.type === "file" ? resourcePath : undefined),
-              isResource: true,
-              resourceKind,
-              resourcePath,
-              resourceTitle,
-              resourceSummary,
-            };
-          })
-      : phrases.map((p) => ({
-          id: p.id,
-          content: p.input_type === "file"
-            ? filenameFromPath(p.source_path || p.content)
-            : p.content,
-          type: p.input_type === "file" ? "file" : "phrase",
-          imagePath:
-            p.input_type === "file" && isImageFilePath(p.content) ? p.content : undefined,
-          title: p.title,
-          previewAvailable: isContentPreviewAvailable({
-            type: p.input_type,
-          }, p.content.length > 300),
-          dragKind: getPhraseRadialDragKind(p.input_type),
-          dragSource: "phrase",
-          dragPath: p.input_type === "file" ? p.content : undefined,
-      }));
+          .map(recordToRadialItem)
+      : activeTab === "phrases"
+        ? phrases.map(phraseToRadialItem)
+        : recentItems
+            .map(recentToRadialItem)
+            .filter((item): item is RadialItem => item !== null);
 
   // 统一的「回到顶部」：tab / 分类 / 分组 / 内容变化后重新评估按钮可见性。
   const backToTop = useBackToTop({
@@ -1599,7 +1709,7 @@ export default function RadialMenu() {
       >
         <div className="radial-menu-main">
           <div className="radial-menu-nav">
-          {(["clipboard", "phrases", "resources"] as TabKey[]).map((tab) => (
+          {(["recent", "clipboard", "phrases", "resources"] as TabKey[]).map((tab) => (
             <button
               key={tab}
               className={`radial-menu-nav-tab ${activeTab === tab ? "active" : ""}`}
@@ -1747,7 +1857,11 @@ export default function RadialMenu() {
             data-radial-list
           >
             {items.length === 0 ? (
-              <div className="radial-menu-empty">{t("radialMenu.empty")}</div>
+              <div className="radial-menu-empty">
+                {activeTab === "recent"
+                  ? (recentLoaded ? t("radialMenu.recentEmpty") : "")
+                  : t("radialMenu.empty")}
+              </div>
             ) : (
               items.map((item) => (
                 <div
@@ -1808,6 +1922,14 @@ export default function RadialMenu() {
                         )}
                         {!item.isResource && item.title && (
                           <span className="radial-menu-item-remark">{item.title}</span>
+                        )}
+                        {item.sourceLabel && (
+                          <span
+                            className="radial-menu-item-source"
+                            title={item.sourceLabel}
+                          >
+                            {item.sourceLabel}
+                          </span>
                         )}
                       </div>
                       {item.previewAvailable && (
