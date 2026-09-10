@@ -263,9 +263,17 @@ describe("integration regressions", () => {
     expect(confirmDialogIndex).toBeGreaterThan(
       resourcePage.indexOf("{resourceGroupDialog &&"),
     );
-    expect(radialMenu).toContain('["recent", "clipboard", "phrases", "resources"]');
-    // 「最近使用」为默认 tab：打开菜单即见高频条目，条目来自后端聚合查询。
+    expect(radialMenu).toContain("RADIAL_TAB_KEYS");
+    // 「最近使用」为默认 tab：无记忆（首次使用）时打开菜单落在「最近」。
     expect(radialMenu).toContain('useState<TabKey>("recent")');
+    // tab 用图标表达，名称经 aria-label / title 提示。
+    expect(radialMenu).toContain("NAV_TAB_ICONS[tab]");
+    expect(radialMenu).toContain('aria-label={t(`tabs.${tab}`)}');
+    // 「记住上次模式」：手动切换即持久化，打开菜单恢复；用户先一步
+    // 手动切换时，异步返回的记忆 tab 不得覆盖用户选择。
+    expect(radialMenu).toContain('key: RADIAL_LAST_TAB_SETTING');
+    expect(radialMenu).toContain("restoreLastTab");
+    expect(radialMenu).toContain("if (tabTouchedRef.current) return;");
     expect(radialMenu).toContain('invoke<RecentUsedItem[]>("get_recent_used_items"');
     expect(radialMenu).toContain("recentItemByIdRef.current.get(itemId)");
     // 资源 tab 依据记忆的分组位置加载（跨重启持久化），不再强制重置为"全部"。
