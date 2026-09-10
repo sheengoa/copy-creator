@@ -69,15 +69,12 @@ html {
   display: flex;
   align-items: center;
   justify-content: center;
-  gap: 4px;
-  padding: 9px 0;
+  padding: 8px 0;
   border: none;
   outline: none;
   background: transparent;
   color: var(--text-secondary);
   font-family: var(--font);
-  font-size: var(--text-base);
-  font-weight: var(--weight-medium);
   cursor: pointer;
   border-radius: 8px;
   transition: background 0.15s, color 0.15s, box-shadow 0.15s;
@@ -92,7 +89,6 @@ html {
 .radial-menu-nav-tab.active {
   background: var(--bg-card);
   color: var(--text-primary);
-  font-weight: var(--weight-semibold);
   box-shadow: 0 1px 3px rgba(0, 0, 0, 0.12), 0 0 0 0.5px rgba(0, 0, 0, 0.04);
 }
 
@@ -102,9 +98,9 @@ html {
   box-shadow: 0 1px 4px rgba(0, 0, 0, 0.45);
 }
 
-.radial-menu-nav-label {
-  position: relative;
-  z-index: 1;
+.radial-menu-nav-tab svg {
+  width: 18px;
+  height: 18px;
 }
 
 /* --- Categories --- */

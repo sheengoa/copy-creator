@@ -54,6 +54,18 @@ import i18n from "../../i18n";
 
 type TabKey = "recent" | "clipboard" | "phrases" | "resources";
 
+// 径向菜单 tab 用图标表达（与主窗口侧栏同一套图标），悬停由 title 提示名称。
+const NAV_TAB_ICONS: Record<TabKey, typeof Icons.recent> = {
+  recent: Icons.recent,
+  clipboard: Icons.clipboard,
+  phrases: Icons.phrases,
+  resources: Icons.resources,
+};
+
+// 「记住上次模式」的设置键与合法取值。
+const RADIAL_LAST_TAB_SETTING = "radial_last_tab";
+const RADIAL_TAB_KEYS: TabKey[] = ["recent", "clipboard", "phrases", "resources"];
+
 const MAX_ITEMS = 2000;
 // 「最近使用」tab 展示的条目数量：覆盖高频内容的数量，按最近使用时间倒序。
 const RECENT_ITEMS_LIMIT = 12;
@@ -324,6 +336,9 @@ export default function RadialMenu() {
   // 本次菜单会话内用户是否已手动切换过分组：防止打开菜单时的异步
   // 分组记忆恢复在返回后覆盖用户先一步的手动选择。
   const resourceGroupTouchedRef = useRef(false);
+  // 同样用于「记住上次模式」恢复：打开菜单期间用户已手动切换 tab 时，
+  // 异步返回的记忆 tab 不得覆盖用户选择。
+  const tabTouchedRef = useRef(false);
   const resourceGroupMenuRef = useRef<HTMLDivElement>(null);
   const resourceGroupMenuAnchorRef = useRef<HTMLButtonElement>(null);
   const categoriesScrollRef = useRef<HTMLDivElement>(null);
@@ -859,7 +874,9 @@ export default function RadialMenu() {
     }
   }, []);
 
-  const handleTabSwitch = useCallback((key: string) => {
+  // 激活一个 tab 并保证对应数据就绪：手动切换与打开菜单恢复记忆共用。
+  // recent 的数据由 [visible, activeTab] effect 刷新，无需在此处理。
+  const activateTab = useCallback((key: string) => {
     collapsePreview();
     const tab = key as TabKey;
     setActiveTab(tab);
@@ -882,7 +899,7 @@ export default function RadialMenu() {
       useClipboardStore.getState().setResourceGroup(remembered);
       useClipboardStore.getState().loadRecords(false, "resources", remembered);
       void loadResourceGroups();
-    } else {
+    } else if (tab === "phrases") {
       const { groups, loadPhrases } = usePhraseStore.getState();
       if (groups.length > 0) {
         const firstId = groups[0].id;
@@ -892,6 +909,31 @@ export default function RadialMenu() {
       }
     }
   }, [closeResourceGroupMenu, collapsePreview, loadResourceGroups]);
+
+  const handleTabSwitch = useCallback((key: string) => {
+    activateTab(key);
+    // 手动切换即记住该模式：下次打开菜单（含跨重启）恢复到这里。
+    tabTouchedRef.current = true;
+    void invoke("set_setting", {
+      key: RADIAL_LAST_TAB_SETTING,
+      value: key,
+    }).catch((error) => console.error("Failed to persist radial last tab:", error));
+  }, [activateTab]);
+
+  // 恢复记住的上次 tab：打开菜单时从设置读取（跨重启记忆）。
+  // 无记忆或值非法时保持当前 tab（首次使用为初始「最近」）；
+  // 返回前用户已手动切换 tab 时尊重用户选择。
+  const restoreLastTab = useCallback(async () => {
+    try {
+      const saved = await invoke<string>("get_setting", { key: RADIAL_LAST_TAB_SETTING });
+      if (tabTouchedRef.current) return;
+      if ((RADIAL_TAB_KEYS as string[]).includes(saved)) {
+        activateTab(saved);
+      }
+    } catch {
+      // 尚无记录属正常情况（首次使用），保持初始「最近」。
+    }
+  }, [activateTab]);
 
   const handleTabClick = useCallback((e: React.MouseEvent, key: string) => {
     e.preventDefault();
@@ -1375,18 +1417,17 @@ export default function RadialMenu() {
           void loadPasteLeftClickSetting();
           setSelectedItemId(null);
           selectedItemIdRef.current = null;
-          // 每次打开菜单默认落在「最近使用」：高频粘贴一步可达，
-          // 低频内容仍走其余三个 tab 的原有路径。
-          setActiveTab("recent");
-          activeTabRef.current = "recent";
-          setClipboardCategory("all");
-          clipboardCategoryRef.current = "all";
+          // 每次打开菜单恢复「记住的上次模式」：手动切 tab 时已持久化，
+          // 无记忆（首次使用）时保持初始「最近」；异步返回前用户已手动
+          // 切换 tab 时以用户选择为准。
+          tabTouchedRef.current = false;
           closeResourceGroupMenu();
           // 资源分组浏览位置保留记忆：本次运行内沿用内存值，跨重启由设置恢复。
           // 每次打开菜单先重置"用户已手动切换分组"标记，再恢复记忆值；
           // 恢复期间用户的手动切换不会被异步返回的记忆值覆盖。
           resourceGroupTouchedRef.current = false;
           void restoreResourceGroup();
+          void restoreLastTab();
           // Refresh data
           useClipboardStore.getState().setCategory("all");
           useClipboardStore.getState().loadRecords(false, "all");
@@ -1484,6 +1525,7 @@ export default function RadialMenu() {
     loadResourceGroups,
     resetStateForNativeHide,
     resetState,
+    restoreLastTab,
     restoreResourceGroup,
     updateHoverFromPoint,
   ]);
@@ -1729,14 +1771,16 @@ export default function RadialMenu() {
       >
         <div className="radial-menu-main">
           <div className="radial-menu-nav">
-          {(["recent", "clipboard", "phrases", "resources"] as TabKey[]).map((tab) => (
+          {RADIAL_TAB_KEYS.map((tab) => (
             <button
               key={tab}
               className={`radial-menu-nav-tab ${activeTab === tab ? "active" : ""}`}
               data-radial-nav={tab}
+              aria-label={t(`tabs.${tab}`)}
+              title={t(`tabs.${tab}`)}
               onClick={(e) => handleTabClick(e, tab)}
             >
-              <span className="radial-menu-nav-label">{t(`tabs.${tab}`)}</span>
+              {NAV_TAB_ICONS[tab]}
             </button>
           ))}
           </div>
