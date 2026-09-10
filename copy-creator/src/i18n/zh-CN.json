@@ -69,7 +69,12 @@
     "confirmDeleteSelected": "确定要删除选中的 {{count}} 条剪切板记录吗？此操作不可撤销。",
     "apiKeyNote": "备注",
     "apiKeyNotePlaceholder": "备注（最多10字）",
-    "apiKeySaving": "保存中..."
+    "apiKeySaving": "保存中...",
+    "unlabeled": "未标注",
+    "labelApiSource": "标注 API 来源",
+    "copyWithComment": "复制含注释",
+    "markAsApiKey": "标记为 API Key",
+    "unmarkApiKey": "取消 API Key 标记"
   },
   "resources": {
     "search": "搜索资源...",

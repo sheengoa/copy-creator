@@ -12,7 +12,9 @@ import {
 } from "../../components/CardActionMenu";
 import { InlineImagePreview, InlineTextFilePreview } from "../../components/InlinePreview";
 import { ImageThumb } from "./ImageThumb";
-import { formatTime, getFileName, TYPE_META } from "./utils";
+import { TYPE_META } from "./utils";
+import { formatTime } from "../../utils/formatTime";
+import { fileNameFromPath } from "../../utils/fileName";
 import ApiKeyLabelPanel from "./ApiKeyLabelPanel";
 import { HighlightText } from "../../components/HighlightText";
 import { useClipboardStore } from "../../stores/clipboardStore";
@@ -53,10 +55,11 @@ function ClipboardCardBodyPreview({
   width,
   search,
 }: ClipboardCardPreviewProps) {
+  const { t } = useTranslation();
   const meta = TYPE_META[record.type] || TYPE_META.text;
   const hasLabel = Boolean(record.is_api_key && record.label);
   const isUnlabeled = Boolean(record.is_api_key && !record.label);
-  const badgeText = record.label?.note || record.guessed_service || (record.is_api_key ? "未标注" : "");
+  const badgeText = record.label?.note || record.guessed_service || (record.is_api_key ? t("clipboard.unlabeled") : "");
 
   return (
     <div
@@ -71,7 +74,7 @@ function ClipboardCardBodyPreview({
             <span className="noti-type-text">{record.is_api_key ? "API Key" : getTypeLabel(record.type)}</span>
           </span>
           {record.is_api_key && (
-            <span className="api-key-badge">{badgeText || "未标注"}</span>
+            <span className="api-key-badge">{badgeText || t("clipboard.unlabeled")}</span>
           )}
         </div>
 
@@ -84,7 +87,7 @@ function ClipboardCardBodyPreview({
           ) : record.type === "link" ? (
             <span className="clipboard-link-content"><HighlightText text={record.content} search={search} /></span>
           ) : record.type === "file" ? (
-            <span className="clipboard-file-content"><HighlightText text={getFileName(record.content)} search={search} /></span>
+            <span className="clipboard-file-content"><HighlightText text={fileNameFromPath(record.content)} search={search} /></span>
           ) : (
             <span className="clipboard-text-content"><HighlightText text={record.content} search={search} /></span>
           )}
@@ -94,14 +97,7 @@ function ClipboardCardBodyPreview({
           <span className="clipboard-card-time">{formatTime(record.created_at)}</span>
           <div className="clipboard-card-actions">
             <span className="drag-handle">
-              <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor">
-                <circle cx="9" cy="5" r="1.5" />
-                <circle cx="15" cy="5" r="1.5" />
-                <circle cx="9" cy="12" r="1.5" />
-                <circle cx="15" cy="12" r="1.5" />
-                <circle cx="9" cy="19" r="1.5" />
-                <circle cx="15" cy="19" r="1.5" />
-              </svg>
+              {Icons.drag}
             </span>
             <button className="card-delete-btn" type="button" disabled>
               {Icons.delete}
@@ -302,9 +298,9 @@ function ClipboardCardInner({
     } else if (record.guessed_service) {
       setBadgeText(record.guessed_service);
     } else if (record.is_api_key) {
-      setBadgeText("未标注");
+      setBadgeText(t("clipboard.unlabeled"));
     }
-  }, [record.label?.note, record.guessed_service, record.is_api_key]);
+  }, [record.label?.note, record.guessed_service, record.is_api_key, t]);
 
   return (
     <div
@@ -341,7 +337,7 @@ function ClipboardCardInner({
                 else setLabelOpen((v) => !v);
               }}
             >
-              {badgeText || "未标注"}
+              {badgeText || t("clipboard.unlabeled")}
             </span>
           )}
         </div>
@@ -374,7 +370,7 @@ function ClipboardCardInner({
             )
           ) : record.type === "file" ? (
             <>
-              <span className="clipboard-file-content"><HighlightText text={getFileName(record.content)} search={search} /></span>
+              <span className="clipboard-file-content"><HighlightText text={fileNameFromPath(record.content)} search={search} /></span>
               {expanded && canPreviewFile && (
                 <InlineTextFilePreview recordId={record.id} search={search} />
               )}
@@ -419,14 +415,7 @@ function ClipboardCardInner({
                   </button>
                 )}
                 <span ref={setActivatorNodeRef} className="drag-handle" {...attributes} {...listeners}>
-                  <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor">
-                    <circle cx="9" cy="5" r="1.5" />
-                    <circle cx="15" cy="5" r="1.5" />
-                    <circle cx="9" cy="12" r="1.5" />
-                    <circle cx="15" cy="12" r="1.5" />
-                    <circle cx="9" cy="19" r="1.5" />
-                    <circle cx="15" cy="19" r="1.5" />
-                  </svg>
+                  {Icons.drag}
                 </span>
                 {onMoveToTop && (
                   <button
@@ -468,7 +457,7 @@ function ClipboardCardInner({
                 <line x1="7" y1="7" x2="7.01" y2="7" />
               </svg>
             }
-            label="标注 API 来源"
+            label={t("clipboard.labelApiSource")}
             onClick={() => setLabelOpen(true)}
           />
         )}
@@ -481,7 +470,7 @@ function ClipboardCardInner({
                 <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1" />
               </svg>
             }
-            label="复制含注释"
+            label={t("clipboard.copyWithComment")}
             onClick={() => void handleCopyWithComment()}
           />
         )}
@@ -494,7 +483,7 @@ function ClipboardCardInner({
                 <line x1="7" y1="7" x2="7.01" y2="7" />
               </svg>
             }
-            label="标记为 API Key"
+            label={t("clipboard.markAsApiKey")}
             onClick={() => void handleToggleUserApiKey()}
           />
         )}
@@ -507,7 +496,7 @@ function ClipboardCardInner({
                 <line x1="6" y1="6" x2="18" y2="18" />
               </svg>
             }
-            label="取消 API Key 标记"
+            label={t("clipboard.unmarkApiKey")}
             onClick={() => void handleToggleUserApiKey()}
           />
         )}
