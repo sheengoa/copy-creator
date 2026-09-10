@@ -77,7 +77,8 @@
     "unmarkApiKey": "取消 API Key 标记",
     "toastTitle": "检测到 API Key",
     "toastHintLabeled": "可能是 {{guess}} · 可右键标注来源",
-    "toastHint": "可右键标注来源"
+    "toastHint": "可右键标注来源",
+    "loadMore": "显示更多"
   },
   "resources": {
     "search": "搜索资源...",

@@ -463,7 +463,7 @@ export default function ClipboardPage() {
               type="button"
               onClick={() => loadRecords(true)}
             >
-              显示更多
+              {t("clipboard.loadMore")}
             </button>
           )}
         </div>
