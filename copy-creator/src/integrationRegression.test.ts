@@ -269,6 +269,9 @@ describe("integration regressions", () => {
     expect(radialMenu).not.toContain('loadRecords(false, "resources", null)');
     expect(radialMenu).toContain('invoke("set_setting", {');
     expect(radialMenu).toContain('key: "radial_resource_group"');
+    // 恢复期间用户已手动切换过分组时，记忆值不得覆盖用户选择。
+    expect(radialMenu).toContain("resourceGroupTouchedRef.current = false");
+    expect(radialMenu).toContain("if (resourceGroupTouchedRef.current) return;");
     expect(radialMenu).toContain('useClipboardStore.getState().setCategory("resources")');
     expect(radialMenu).toContain('clipboardCategory === "resources"');
     expect(radialMenu).toContain(".filter((r) => isResourceRecord(r))");
