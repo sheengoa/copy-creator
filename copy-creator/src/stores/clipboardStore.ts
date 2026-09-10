@@ -2,6 +2,7 @@ import { create } from "zustand";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { isResourceRecord } from "../utils/clipboardRecord";
+import { getResourcePath, isFileBackedTextResource } from "../pages/ResourcePage/resourceUtils";
 
 type UnlistenFn = () => void;
 
@@ -465,6 +466,17 @@ export const useClipboardStore = create<ClipboardState>((set, get) => ({
       if (record.type === "image") {
         await invoke("paste_image", { path: content });
       } else if (record.type === "file") {
+        if (isFileBackedTextResource(record)) {
+          try {
+            // 文件承载的文本资源按内容粘贴；读取失败（超限、非 UTF-8
+            // 等）时回退为文件粘贴，保持不劣于旧行为。
+            await invoke("paste_text_file", { path: getResourcePath(record), terminal: false });
+            touchClipboardUsage([record.id]);
+            return true;
+          } catch (error) {
+            console.warn("文本资源按内容粘贴失败，回退为文件粘贴:", error);
+          }
+        }
         await invoke("paste_file", { path: content });
       } else {
         await invoke("paste_text", { text: content });
@@ -488,6 +500,15 @@ export const useClipboardStore = create<ClipboardState>((set, get) => ({
       if (record.type === "image") {
         await invoke("paste_image", { path: content });
       } else if (record.type === "file") {
+        if (isFileBackedTextResource(record)) {
+          try {
+            await invoke("paste_text_file", { path: getResourcePath(record), terminal: true });
+            touchClipboardUsage([record.id]);
+            return true;
+          } catch (error) {
+            console.warn("文本资源按内容粘贴失败，回退为文件粘贴:", error);
+          }
+        }
         await invoke("paste_file", { path: content });
       } else {
         await invoke("paste_text_terminal", { text: content });

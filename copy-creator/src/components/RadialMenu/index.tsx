@@ -44,6 +44,7 @@ import {
   getResourceSummary,
   getResourceTitle,
   inferResourceMediaKind,
+  isFileBackedTextResource,
   isResourceFolderPath,
   TEXT_EXTENSIONS,
   type ResourceMediaKind,
@@ -1011,11 +1012,30 @@ export default function RadialMenu() {
     if (records.length > 0) {
       const allText = records.every((record) => inferResourceMediaKind(record) === "text");
       try {
+        // 文件承载的文本资源（如自动发现的 .txt）的 content 是文件路径，
+        // 合并前需读取文件真实内容；任一读取失败则整组回退为文件列表粘贴。
+        const parts: string[] = [];
+        let allTextContentReady = allText;
         if (allText) {
-          const parts: string[] = [];
           for (const record of records) {
-            parts.push(await store.getRecordContent(record));
+            if (isFileBackedTextResource(record)) {
+              try {
+                parts.push(
+                  await invoke<string>("read_text_file_content", {
+                    path: getResourcePath(record),
+                  }),
+                );
+              } catch (error) {
+                console.error("Failed to read text resource for group paste:", error);
+                allTextContentReady = false;
+                break;
+              }
+            } else {
+              parts.push(await store.getRecordContent(record));
+            }
           }
+        }
+        if (allTextContentReady) {
           await invoke("paste_text", { text: parts.join("\n") });
         } else {
           const paths = records

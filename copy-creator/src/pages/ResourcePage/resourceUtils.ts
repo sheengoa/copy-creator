@@ -1,5 +1,6 @@
 import { convertFileSrc, invoke } from "@tauri-apps/api/core";
 import type { ClipboardRecord, ResourceFolder } from "../../types";
+import { isResourceRecord } from "../../utils/clipboardRecord";
 
 export type ResourceMediaKind = "text" | "image" | "video" | "audio" | "file";
 export type ResourceTypeFilter = "all" | ResourceMediaKind;
@@ -170,6 +171,18 @@ export function matchesResourceType(
   filter: ResourceTypeFilter,
 ): boolean {
   return filter === "all" || inferResourceMediaKind(record) === filter;
+}
+
+// 文件承载的文本资源：以文件形态存储、媒体类型为文本的资源记录（新建窗口
+// 保存的 .txt/.md 与资源库中自动发现的文本文件）。content 存的是文件路径
+// 或截断预览，再次使用时必须读取文件内容按文本粘贴，而不是把文件粘出去。
+export function isFileBackedTextResource(
+  record: Pick<
+    ClipboardRecord,
+    "type" | "content" | "resource_kind" | "storage_mode" | "group_name"
+  >,
+): boolean {
+  return record.type === "file" && isResourceRecord(record) && inferResourceMediaKind(record) === "text";
 }
 
 export function getResourceTitle(
