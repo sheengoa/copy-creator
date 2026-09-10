@@ -24,6 +24,7 @@ import {
   getResourceTitle,
   hasCustomResourceFileName,
   inferResourceMediaKind,
+  isFileBackedTextResource,
   isResourceFolderPath,
   isResourceTitleRenameable,
   resolveResourceAssetUrl,
@@ -54,6 +55,47 @@ describe("resourceUtils", () => {
       resource_kind: "text",
     })).toBe("text");
     expect(inferResourceMediaKind(record("file", "/tmp/README.md"))).toBe("text");
+  });
+
+  it("treats only resource-scope text files as file-backed text resources", () => {
+    // 自动发现的资源库文本文件（type=file、resource_kind=text）。
+    expect(isFileBackedTextResource({
+      type: "file",
+      content: "/lib/notes.txt",
+      resource_kind: "text",
+      storage_mode: "resource",
+      group_name: "",
+    })).toBe(true);
+    // 无 resource_kind 时按扩展名判定。
+    expect(isFileBackedTextResource({
+      type: "file",
+      content: "/lib/README.md",
+      storage_mode: "resource",
+      group_name: "",
+    })).toBe(true);
+    // 非文本文件不按内容粘贴。
+    expect(isFileBackedTextResource({
+      type: "file",
+      content: "/lib/movie.mp4",
+      resource_kind: "video",
+      storage_mode: "resource",
+      group_name: "",
+    })).toBe(false);
+    // 剪贴板里的文件记录（database）粘贴文件本身，不按内容粘贴。
+    expect(isFileBackedTextResource({
+      type: "file",
+      content: "/tmp/report.md",
+      storage_mode: "database",
+      group_name: "",
+    })).toBe(false);
+    // 数据库承载的文本资源已是文本类型，走普通文本粘贴。
+    expect(isFileBackedTextResource({
+      type: "text",
+      content: "正文内容",
+      resource_kind: "text",
+      storage_mode: "resource",
+      group_name: "",
+    })).toBe(false);
   });
 
   it("decodes local file names without changing unknown path values", () => {

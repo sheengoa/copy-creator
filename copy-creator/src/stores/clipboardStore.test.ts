@@ -179,6 +179,93 @@ describe("clipboardStore stash image paste routing", () => {
       ids: ["clip-1"],
     });
   });
+
+  it("pastes file-backed text resources by content instead of file", async () => {
+    const textFileRecord = {
+      id: "res-1",
+      type: "file" as const,
+      content: "/lib/copy-creator-notes.txt",
+      source_app: "",
+      created_at: "2026-09-01T00:00:00Z",
+      storage_mode: "resource" as const,
+      resource_path: "/lib/copy-creator-notes.txt",
+      resource_kind: "text" as const,
+      group_name: "",
+    };
+
+    await useClipboardStore.getState().pasteRecord(textFileRecord);
+
+    expect(invokeMock).toHaveBeenCalledWith("paste_text_file", {
+      path: "/lib/copy-creator-notes.txt",
+      terminal: false,
+    });
+    expect(invokeMock).not.toHaveBeenCalledWith("paste_file", {
+      path: "/lib/copy-creator-notes.txt",
+    });
+    expect(invokeMock).toHaveBeenCalledWith("touch_clipboard_usage", { ids: ["res-1"] });
+  });
+
+  it("keeps terminal mode when pasting file-backed text resources", async () => {
+    await useClipboardStore.getState().pasteRecordTerminal({
+      id: "res-2",
+      type: "file",
+      content: "/lib/notes.md",
+      source_app: "",
+      created_at: "2026-09-01T00:00:00Z",
+      storage_mode: "resource",
+      resource_path: "/lib/notes.md",
+      resource_kind: "text",
+      group_name: "",
+    });
+
+    expect(invokeMock).toHaveBeenCalledWith("paste_text_file", {
+      path: "/lib/notes.md",
+      terminal: true,
+    });
+  });
+
+  it("falls back to file paste when content reading fails", async () => {
+    invokeMock.mockImplementation((command: string) => {
+      if (command === "paste_text_file") return Promise.reject(new Error("too large"));
+      return Promise.resolve(undefined);
+    });
+
+    const result = await useClipboardStore.getState().pasteRecord({
+      id: "res-3",
+      type: "file",
+      content: "/lib/notes.txt",
+      source_app: "",
+      created_at: "2026-09-01T00:00:00Z",
+      storage_mode: "resource",
+      resource_path: "/lib/notes.txt",
+      resource_kind: "text",
+      group_name: "",
+    });
+
+    expect(result).toBe(true);
+    expect(invokeMock).toHaveBeenCalledWith("paste_file", { path: "/lib/notes.txt" });
+    expect(invokeMock).toHaveBeenCalledWith("touch_clipboard_usage", { ids: ["res-3"] });
+  });
+
+  it("pastes non-text resource files as files", async () => {
+    await useClipboardStore.getState().pasteRecord({
+      id: "res-4",
+      type: "file",
+      content: "/lib/movie.mp4",
+      source_app: "",
+      created_at: "2026-09-01T00:00:00Z",
+      storage_mode: "resource",
+      resource_path: "/lib/movie.mp4",
+      resource_kind: "video",
+      group_name: "",
+    });
+
+    expect(invokeMock).toHaveBeenCalledWith("paste_file", { path: "/lib/movie.mp4" });
+    expect(invokeMock).not.toHaveBeenCalledWith(
+      "paste_text_file",
+      expect.anything(),
+    );
+  });
 });
 
 describe("clipboardStore full record loading", () => {
