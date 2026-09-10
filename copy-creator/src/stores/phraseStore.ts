@@ -2,6 +2,13 @@ import { create } from "zustand";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import type { Phrase, PhraseGroup } from "../types";
+import { sortByIdOrder } from "../utils/reorder";
+
+// 置顶/重排序失败后按当前分组重载短语，恢复与后端一致的真实顺序。
+const reloadPhrasesAfterFailure = async (get: () => PhraseState) => {
+  const groupId = get().selectedGroupId;
+  if (groupId !== null) await get().loadPhrases(groupId);
+};
 
 const isAbsolutePath = (path: string) => /^([a-zA-Z]:[\\/]|[/\\])/.test(path);
 
@@ -278,45 +285,34 @@ export const usePhraseStore = create<PhraseState>()((set, get) => {
   },
 
   reorderPhrases: async (ids: string[]) => {
-    const idOrder = new Map(ids.map((id, i) => [id, i]));
-    set((s) => ({
-      phrases: [...s.phrases].sort(
-        (a, b) => (idOrder.get(a.id) ?? Infinity) - (idOrder.get(b.id) ?? Infinity)
-      ),
-    }));
+    set((s) => ({ phrases: sortByIdOrder(s.phrases, ids) }));
     try {
       await invoke("reorder_phrases", { ids });
     } catch (e) {
       console.error("Failed to reorder phrases:", e);
+      await reloadPhrasesAfterFailure(get);
     }
   },
 
   // 组内置顶：径向菜单快捷输入 tab 按组内顺序展示，置顶即第一屏可见。
+  // 失败时按当前分组重载，避免乐观顺序与后端持久化顺序不一致。
   movePhrasesToTop: async (ids: string[]) => {
-    const idOrder = new Map(ids.map((id, i) => [id, i]));
-    set((s) => ({
-      phrases: [...s.phrases].sort(
-        (a, b) => (idOrder.get(a.id) ?? Infinity) - (idOrder.get(b.id) ?? Infinity)
-      ),
-    }));
+    set((s) => ({ phrases: sortByIdOrder(s.phrases, ids) }));
     try {
       await invoke("move_phrases_to_top", { ids });
     } catch (e) {
       console.error("Failed to move phrases to top:", e);
+      await reloadPhrasesAfterFailure(get);
     }
   },
 
   reorderGroups: async (ids: string[]) => {
-    const idOrder = new Map(ids.map((id, i) => [id, i]));
-    set((s) => ({
-      groups: [...s.groups].sort(
-        (a, b) => (idOrder.get(a.id) ?? Infinity) - (idOrder.get(b.id) ?? Infinity)
-      ),
-    }));
+    set((s) => ({ groups: sortByIdOrder(s.groups, ids) }));
     try {
       await invoke("reorder_phrase_groups", { ids });
     } catch (e) {
       console.error("Failed to reorder groups:", e);
+      await get().loadGroups();
     }
   },
   };
