@@ -903,6 +903,8 @@
   width: 100%;
   height: 100%;
   object-fit: contain;
+  /* 卡片 hover 的前景缩放过渡：容器化后原 img 上的 transition 需在此补回。 */
+  transition: transform 0.2s ease;
 }
 
 .resource-card-file-image {
