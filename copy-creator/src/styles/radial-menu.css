@@ -668,6 +668,34 @@ html {
   border-color: rgba(255, 255, 255, 0.16);
 }
 
+/* 「最近使用」条目的元信息收进单行：时间 + 来源标签，不再纵向堆三行。 */
+.radial-menu-item.has-source .radial-menu-item-meta {
+  flex-direction: row;
+  align-items: center;
+  gap: 8px;
+}
+
+.radial-menu-item.has-source .radial-menu-item-time {
+  margin-top: 0;
+  flex-shrink: 0;
+}
+
+.radial-menu-item.has-source .radial-menu-item-remark {
+  display: none;
+}
+
+.radial-menu-item.has-source .radial-menu-resource-title {
+  flex-shrink: 1;
+  min-width: 0;
+}
+
+.radial-menu-item.has-source .radial-menu-item-source {
+  align-self: center;
+  margin-top: 0;
+  flex-shrink: 0;
+  max-width: 60%;
+}
+
 /* --- Empty State --- */
 .radial-menu-empty {
   display: flex;
