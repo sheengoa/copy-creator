@@ -2,6 +2,7 @@ import { create } from "zustand";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { isResourceRecord } from "../utils/clipboardRecord";
+import { sortByIdOrder } from "../utils/reorder";
 import { getResourcePath, isFileBackedTextResource } from "../pages/ResourcePage/resourceUtils";
 
 type UnlistenFn = () => void;
@@ -522,12 +523,7 @@ export const useClipboardStore = create<ClipboardState>((set, get) => ({
   },
 
   reorderRecords: async (ids: string[]) => {
-    const idOrder = new Map(ids.map((id, i) => [id, i]));
-    set((state) => ({
-      records: [...state.records].sort(
-        (a, b) => (idOrder.get(a.id) ?? Infinity) - (idOrder.get(b.id) ?? Infinity)
-      ),
-    }));
+    set((state) => ({ records: sortByIdOrder(state.records, ids) }));
     try {
       await invoke("reorder_clipboard_records", { ids });
       get().loadRecords();
@@ -540,12 +536,7 @@ export const useClipboardStore = create<ClipboardState>((set, get) => ({
   // 移到顶部：sort_order 提到全表最前，径向菜单与主窗口共用该顺序。
   // 搜索状态下执行后按当前搜索词重载，置顶项保持在结果最前。
   moveRecordsToTop: async (ids: string[]) => {
-    const idOrder = new Map(ids.map((id, i) => [id, i]));
-    set((state) => ({
-      records: [...state.records].sort(
-        (a, b) => (idOrder.get(a.id) ?? Infinity) - (idOrder.get(b.id) ?? Infinity)
-      ),
-    }));
+    set((state) => ({ records: sortByIdOrder(state.records, ids) }));
     try {
       await invoke("move_clipboard_records_to_top", { ids });
     } catch (e) {
