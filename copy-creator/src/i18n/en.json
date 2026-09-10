@@ -74,7 +74,10 @@
     "labelApiSource": "Label API Source",
     "copyWithComment": "Copy with Comment",
     "markAsApiKey": "Mark as API Key",
-    "unmarkApiKey": "Unmark API Key"
+    "unmarkApiKey": "Unmark API Key",
+    "toastTitle": "API Key detected",
+    "toastHintLabeled": "Looks like {{guess}} · right-click to label its source",
+    "toastHint": "Right-click to label its source"
   },
   "resources": {
     "search": "Search resources...",

@@ -1,5 +1,6 @@
 import { useEffect, useState, useCallback } from "react";
 import { listen } from "@tauri-apps/api/event";
+import { useTranslation } from "react-i18next";
 
 interface ToastItem {
   id: number;
@@ -11,6 +12,7 @@ interface ToastItem {
 let toastCounter = 0;
 
 export default function ApiKeyToast() {
+  const { t } = useTranslation();
   const [toasts, setToasts] = useState<ToastItem[]>([]);
 
   useEffect(() => {
@@ -53,10 +55,11 @@ export default function ApiKeyToast() {
             </svg>
           </div>
           <div className="api-toast-body">
-            <span className="api-toast-title">检测到 API Key</span>
+            <span className="api-toast-title">{t("clipboard.toastTitle")}</span>
             <span className="api-toast-sub">
-              {toast.guess ? `可能是 ${toast.guess} · ` : ""}
-              可右键标注来源
+              {toast.guess
+                ? t("clipboard.toastHintLabeled", { guess: toast.guess })
+                : t("clipboard.toastHint")}
             </span>
           </div>
           <button
