@@ -69,7 +69,12 @@
     "confirmDeleteSelected": "Delete the selected {{count}} clipboard records? This action cannot be undone.",
     "apiKeyNote": "Note",
     "apiKeyNotePlaceholder": "Note (max 10 chars)",
-    "apiKeySaving": "Saving..."
+    "apiKeySaving": "Saving...",
+    "unlabeled": "Unlabeled",
+    "labelApiSource": "Label API Source",
+    "copyWithComment": "Copy with Comment",
+    "markAsApiKey": "Mark as API Key",
+    "unmarkApiKey": "Unmark API Key"
   },
   "resources": {
     "search": "Search resources...",
