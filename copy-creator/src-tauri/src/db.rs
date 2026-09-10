@@ -1322,7 +1322,8 @@ pub fn init_db(app: &AppHandle) -> Result<(), Box<dyn std::error::Error>> {
             user_api_key INTEGER DEFAULT 0,
             attachments TEXT DEFAULT '[]',
             storage_mode TEXT DEFAULT 'database',
-            resource_path TEXT DEFAULT ''
+            resource_path TEXT DEFAULT '',
+            last_used_at TEXT DEFAULT ''
         );
 
         CREATE INDEX IF NOT EXISTS idx_clipboard_created_at
@@ -1347,6 +1348,7 @@ pub fn init_db(app: &AppHandle) -> Result<(), Box<dyn std::error::Error>> {
             sort_order INTEGER DEFAULT 0,
             created_at TEXT NOT NULL,
             updated_at TEXT NOT NULL,
+            last_used_at TEXT DEFAULT '',
             FOREIGN KEY (group_id) REFERENCES phrase_groups(id) ON DELETE CASCADE
         );
 
@@ -1518,6 +1520,18 @@ pub fn init_db(app: &AppHandle) -> Result<(), Box<dyn std::error::Error>> {
     .ok();
     conn.execute(
         "ALTER TABLE clipboard_records ADD COLUMN resource_note TEXT DEFAULT ''",
+        [],
+    )
+    .ok();
+
+    // ── last_used_at：粘贴成功时记录使用时间，供径向菜单「最近使用」聚合查询 ──
+    conn.execute(
+        "ALTER TABLE clipboard_records ADD COLUMN last_used_at TEXT DEFAULT ''",
+        [],
+    )
+    .ok();
+    conn.execute(
+        "ALTER TABLE phrases ADD COLUMN last_used_at TEXT DEFAULT ''",
         [],
     )
     .ok();
@@ -2014,6 +2028,17 @@ fn get_clipboard_records_inner<R: Runtime>(
             .collect();
     }
 
+    let records = enrich_api_key_records(&conn, records);
+
+    Ok(records)
+}
+
+/// 为剪贴板记录补充 API Key 标注（is_api_key / key_preview / guessed_service / label），
+/// 供剪贴板记录列表与「最近使用」聚合查询共用。
+fn enrich_api_key_records(
+    conn: &Connection,
+    records: Vec<serde_json::Value>,
+) -> Vec<serde_json::Value> {
     // Build label map for API key enrichment
     let mut label_map: std::collections::HashMap<String, serde_json::Value> =
         std::collections::HashMap::new();
@@ -2044,7 +2069,7 @@ fn get_clipboard_records_inner<R: Runtime>(
         }
     }
 
-    let records = records
+    records
         .into_iter()
         .map(|rec| {
             let rec_type = rec["type"].as_str().unwrap_or("").to_string();
@@ -2084,9 +2109,198 @@ fn get_clipboard_records_inner<R: Runtime>(
             }
             obj
         })
-        .collect();
+        .collect()
+}
 
+// ── 最近使用 ─────────────────────────────────────────────────
+// 粘贴成功时写入 last_used_at（touch_*_usage），
+// 径向菜单「最近使用」tab 打开时聚合查询两个来源混排展示。
+
+/// 查询按 last_used_at 倒序的最近使用剪贴板/资源记录。
+fn recent_clipboard_rows(conn: &Connection, limit: i64) -> Result<Vec<serde_json::Value>, String> {
+    let mut stmt = conn
+        .prepare(
+            "SELECT id, type, content, source_app, created_at, user_api_key, group_name,
+                    attachments, storage_mode, resource_path, last_used_at
+             FROM clipboard_records
+             WHERE COALESCE(last_used_at, '') <> ''
+             ORDER BY last_used_at DESC LIMIT ?1",
+        )
+        .map_err(|e| e.to_string())?;
+    let rows = stmt
+        .query_map(params![limit], |row| {
+            let last_used_at: String = row.get(10)?;
+            let mut record = clipboard_record_json(
+                row.get(0)?,
+                row.get(1)?,
+                row.get(2)?,
+                row.get(3)?,
+                row.get(4)?,
+                row.get(5)?,
+                row.get(6)?,
+                row.get(7)?,
+                row.get(8)?,
+                row.get(9)?,
+            );
+            if let Some(object) = record.as_object_mut() {
+                object.insert(
+                    "last_used_at".to_string(),
+                    serde_json::Value::String(last_used_at),
+                );
+            }
+            Ok(record)
+        })
+        .map_err(|e| e.to_string())?;
+    let mut records = Vec::new();
+    for row in rows {
+        records.push(row.map_err(|e| e.to_string())?);
+    }
     Ok(records)
+}
+
+/// 查询按 last_used_at 倒序的最近使用短语（LEFT JOIN 分组名供来源标签展示）。
+fn recent_phrase_rows(conn: &Connection, limit: i64) -> Result<Vec<serde_json::Value>, String> {
+    let mut stmt = conn
+        .prepare(
+            "SELECT p.id, p.group_id, p.title, p.content, p.input_type, p.source_path,
+                    p.file_size, p.sort_order, p.created_at, p.updated_at, p.last_used_at, g.name
+             FROM phrases p
+             LEFT JOIN phrase_groups g ON p.group_id = g.id
+             WHERE COALESCE(p.last_used_at, '') <> ''
+             ORDER BY p.last_used_at DESC LIMIT ?1",
+        )
+        .map_err(|e| e.to_string())?;
+    let rows = stmt
+        .query_map(params![limit], |row| {
+            Ok(serde_json::json!({
+                "id": row.get::<_, String>(0)?,
+                "group_id": row.get::<_, String>(1)?,
+                "title": row.get::<_, String>(2)?,
+                "content": row.get::<_, String>(3)?,
+                "input_type": row.get::<_, String>(4)?,
+                "source_path": row.get::<_, String>(5)?,
+                "file_size": row.get::<_, i64>(6)?,
+                "sort_order": row.get::<_, i32>(7)?,
+                "created_at": row.get::<_, String>(8)?,
+                "updated_at": row.get::<_, String>(9)?,
+                "last_used_at": row.get::<_, String>(10)?,
+                "group_name": row.get::<_, Option<String>>(11)?,
+            }))
+        })
+        .map_err(|e| e.to_string())?;
+    let mut phrases = Vec::new();
+    for row in rows {
+        phrases.push(row.map_err(|e| e.to_string())?);
+    }
+    Ok(phrases)
+}
+
+/// 合并剪贴板与短语两个来源并按 last_used_at 倒序截取前 limit 条。
+/// 时间戳均为 chrono RFC3339 UTC，字典序即时间序。
+fn merge_recent_items(
+    clipboard: Vec<serde_json::Value>,
+    phrases: Vec<serde_json::Value>,
+    limit: usize,
+) -> Vec<serde_json::Value> {
+    let mut merged: Vec<(String, &str, serde_json::Value)> = clipboard
+        .into_iter()
+        .map(|record| {
+            let used_at = record["last_used_at"].as_str().unwrap_or("").to_string();
+            (used_at, "clipboard", record)
+        })
+        .chain(phrases.into_iter().map(|phrase| {
+            let used_at = phrase["last_used_at"].as_str().unwrap_or("").to_string();
+            (used_at, "phrase", phrase)
+        }))
+        .collect();
+    merged.sort_by(|a, b| b.0.cmp(&a.0));
+    merged.truncate(limit);
+    merged
+        .into_iter()
+        .map(|(used_at, origin, payload)| {
+            let mut item = serde_json::Map::new();
+            item.insert(
+                "origin".to_string(),
+                serde_json::Value::String(origin.to_string()),
+            );
+            item.insert(
+                "last_used_at".to_string(),
+                serde_json::Value::String(used_at),
+            );
+            item.insert(
+                if origin == "clipboard" {
+                    "record"
+                } else {
+                    "phrase"
+                }
+                .to_string(),
+                payload,
+            );
+            serde_json::Value::Object(item)
+        })
+        .collect()
+}
+
+/// 径向菜单「最近使用」聚合查询：剪贴板（含资源）与短语按最近使用时间混排。
+#[tauri::command]
+pub fn get_recent_used_items(
+    app: AppHandle,
+    limit: Option<u32>,
+) -> Result<Vec<serde_json::Value>, String> {
+    let lim = limit.unwrap_or(12).clamp(1, 50) as i64;
+    // 资源分组来自文件系统路径；先读取配置，避免持有数据库锁时再次读取设置。
+    let resource_root = get_resource_library_dir(&app);
+    let state = app.state::<DbState>();
+    let conn = state.conn.lock().map_err(|e| e.to_string())?;
+    let mut clipboard = enrich_api_key_records(&conn, recent_clipboard_rows(&conn, lim)?);
+    for record in &mut clipboard {
+        if record["storage_mode"].as_str() != Some(RESOURCE_STORAGE_MODE) {
+            continue;
+        }
+        let group = record["resource_path"]
+            .as_str()
+            .and_then(|path| resource_group_for_path(&resource_root, path));
+        if let Some(object) = record.as_object_mut() {
+            object.insert(
+                "resource_group".to_string(),
+                group
+                    .map(serde_json::Value::String)
+                    .unwrap_or(serde_json::Value::Null),
+            );
+        }
+    }
+    let phrases = recent_phrase_rows(&conn, lim)?;
+    drop(conn);
+    Ok(merge_recent_items(clipboard, phrases, lim as usize))
+}
+
+/// 粘贴成功后记录剪贴板/资源记录的使用时间（整组粘贴一次记全部记录）。
+#[tauri::command]
+pub fn touch_clipboard_usage(app: AppHandle, ids: Vec<String>) -> Result<(), String> {
+    let state = app.state::<DbState>();
+    let conn = state.conn.lock().map_err(|e| e.to_string())?;
+    let now = chrono::Utc::now().to_rfc3339();
+    for id in &ids {
+        conn.execute(
+            "UPDATE clipboard_records SET last_used_at = ?1 WHERE id = ?2",
+            params![&now, id],
+        )
+        .map_err(|e| e.to_string())?;
+    }
+    Ok(())
+}
+
+/// 粘贴成功后记录短语的使用时间。
+#[tauri::command]
+pub fn touch_phrase_usage(app: AppHandle, id: String) -> Result<(), String> {
+    let state = app.state::<DbState>();
+    let conn = state.conn.lock().map_err(|e| e.to_string())?;
+    conn.execute(
+        "UPDATE phrases SET last_used_at = ?1 WHERE id = ?2",
+        params![chrono::Utc::now().to_rfc3339(), id],
+    )
+    .map_err(|e| e.to_string())?;
+    Ok(())
 }
 
 #[tauri::command]
@@ -3009,7 +3223,8 @@ fn migrate_storage(app: &AppHandle, new_path: &str) -> Result<(), String> {
                 group_name TEXT DEFAULT '',
                 attachments TEXT DEFAULT '[]',
                 storage_mode TEXT DEFAULT 'database',
-                resource_path TEXT DEFAULT ''
+                resource_path TEXT DEFAULT '',
+                last_used_at TEXT DEFAULT ''
             );
             CREATE INDEX IF NOT EXISTS idx_clipboard_created_at ON clipboard_records(created_at);
             CREATE INDEX IF NOT EXISTS idx_clipboard_sort_order ON clipboard_records(sort_order DESC);
@@ -3031,6 +3246,7 @@ fn migrate_storage(app: &AppHandle, new_path: &str) -> Result<(), String> {
                 sort_order INTEGER DEFAULT 0,
                 created_at TEXT NOT NULL,
                 updated_at TEXT NOT NULL,
+                last_used_at TEXT DEFAULT '',
                 FOREIGN KEY (group_id) REFERENCES phrase_groups(id) ON DELETE CASCADE
             );
             CREATE TABLE IF NOT EXISTS translation_history (
@@ -6585,5 +6801,146 @@ mod resource_command_tests {
         assert!(!root.join("01-resource.txt").exists());
         assert!(root.join("References").is_dir());
         cleanup(&root);
+    }
+}
+
+#[cfg(test)]
+mod recent_usage_tests {
+    use super::{merge_recent_items, recent_clipboard_rows, recent_phrase_rows, Connection};
+    use rusqlite::params;
+
+    fn setup_conn() -> Connection {
+        let conn = Connection::open_in_memory().unwrap();
+        conn.execute_batch(
+            "
+            CREATE TABLE clipboard_records (
+                id TEXT PRIMARY KEY,
+                type TEXT NOT NULL,
+                content TEXT NOT NULL,
+                source_app TEXT DEFAULT '',
+                created_at TEXT NOT NULL,
+                user_api_key INTEGER DEFAULT 0,
+                sort_order REAL,
+                group_name TEXT DEFAULT '',
+                attachments TEXT DEFAULT '[]',
+                storage_mode TEXT DEFAULT 'database',
+                resource_path TEXT DEFAULT '',
+                last_used_at TEXT DEFAULT ''
+            );
+            CREATE TABLE phrase_groups (
+                id TEXT PRIMARY KEY,
+                name TEXT NOT NULL,
+                sort_order INTEGER DEFAULT 0,
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL
+            );
+            CREATE TABLE phrases (
+                id TEXT PRIMARY KEY,
+                group_id TEXT NOT NULL,
+                title TEXT NOT NULL,
+                content TEXT NOT NULL,
+                input_type TEXT DEFAULT 'text',
+                source_path TEXT DEFAULT '',
+                file_size INTEGER DEFAULT 0,
+                sort_order INTEGER DEFAULT 0,
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL,
+                last_used_at TEXT DEFAULT '',
+                FOREIGN KEY (group_id) REFERENCES phrase_groups(id) ON DELETE CASCADE
+            );
+            ",
+        )
+        .unwrap();
+        conn
+    }
+
+    fn insert_record(conn: &Connection, id: &str, last_used_at: &str) {
+        conn.execute(
+            "INSERT INTO clipboard_records (id, type, content, created_at, last_used_at)
+             VALUES (?1, 'text', ?2, '2026-09-01T00:00:00+00:00', ?3)",
+            params![id, format!("content-{id}"), last_used_at],
+        )
+        .unwrap();
+    }
+
+    fn insert_phrase(conn: &Connection, id: &str, group_id: &str, last_used_at: &str) {
+        conn.execute(
+            "INSERT INTO phrase_groups (id, name, created_at, updated_at)
+             VALUES (?1, ?2, '2026-09-01T00:00:00+00:00', '2026-09-01T00:00:00+00:00')",
+            params![group_id, format!("group-{group_id}")],
+        )
+        .unwrap();
+        conn.execute(
+            "INSERT INTO phrases (id, group_id, title, content, created_at, updated_at, last_used_at)
+             VALUES (?1, ?2, 'title', ?3, '2026-09-01T00:00:00+00:00', '2026-09-01T00:00:00+00:00', ?4)",
+            params![id, group_id, format!("phrase-{id}"), last_used_at],
+        )
+        .unwrap();
+    }
+
+    #[test]
+    fn recent_clipboard_rows_orders_by_last_used_and_skips_unused() {
+        let conn = setup_conn();
+        insert_record(&conn, "a", "2026-09-03T10:00:00+00:00");
+        insert_record(&conn, "b", "2026-09-04T10:00:00+00:00");
+        insert_record(&conn, "unused", "");
+
+        let rows = recent_clipboard_rows(&conn, 12).unwrap();
+        let ids: Vec<String> = rows
+            .iter()
+            .map(|r| r["id"].as_str().unwrap_or("").to_string())
+            .collect();
+        assert_eq!(ids, vec!["b", "a"]);
+        assert_eq!(rows[0]["last_used_at"], "2026-09-04T10:00:00+00:00");
+    }
+
+    #[test]
+    fn recent_phrase_rows_joins_group_name() {
+        let conn = setup_conn();
+        insert_phrase(&conn, "p1", "g1", "2026-09-03T10:00:00+00:00");
+
+        let rows = recent_phrase_rows(&conn, 12).unwrap();
+        assert_eq!(rows.len(), 1);
+        assert_eq!(rows[0]["group_name"], "group-g1");
+        assert_eq!(rows[0]["last_used_at"], "2026-09-03T10:00:00+00:00");
+    }
+
+    #[test]
+    fn merge_recent_items_interleaves_origins_by_time_and_applies_limit() {
+        let conn = setup_conn();
+        // 剪贴板较新（c2 最新），短语次之，c1 最旧；limit=2 截取前两条。
+        insert_record(&conn, "c1", "2026-09-02T10:00:00+00:00");
+        insert_record(&conn, "c2", "2026-09-05T10:00:00+00:00");
+        insert_phrase(&conn, "p1", "g1", "2026-09-04T10:00:00+00:00");
+
+        let clipboard = recent_clipboard_rows(&conn, 12).unwrap();
+        let phrases = recent_phrase_rows(&conn, 12).unwrap();
+        let merged = merge_recent_items(clipboard, phrases, 2);
+
+        assert_eq!(merged.len(), 2);
+        assert_eq!(merged[0]["origin"], "clipboard");
+        assert_eq!(merged[0]["record"]["id"], "c2");
+        assert_eq!(merged[1]["origin"], "phrase");
+        assert_eq!(merged[1]["phrase"]["id"], "p1");
+    }
+
+    #[test]
+    fn merge_recent_items_touch_write_orders_subsequent_query() {
+        // 模拟 touch：UPDATE 后重新查询，被使用的条目应排到最前。
+        let conn = setup_conn();
+        insert_record(&conn, "a", "2026-09-03T10:00:00+00:00");
+        insert_record(&conn, "b", "2026-09-04T10:00:00+00:00");
+        conn.execute(
+            "UPDATE clipboard_records SET last_used_at = ?1 WHERE id = 'a'",
+            params!["2026-09-06T10:00:00+00:00"],
+        )
+        .unwrap();
+
+        let rows = recent_clipboard_rows(&conn, 12).unwrap();
+        let ids: Vec<String> = rows
+            .iter()
+            .map(|r| r["id"].as_str().unwrap_or("").to_string())
+            .collect();
+        assert_eq!(ids, vec!["a", "b"]);
     }
 }
