@@ -1,10 +1,13 @@
 import { useSortable } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
 import { useCallback, useEffect, useRef, useState } from "react";
-import { createPortal } from "react-dom";
 import { useTranslation } from "react-i18next";
 import type { ClipboardRecord } from "../../types";
 import { Icons } from "../../components/Icons";
+import {
+  CardActionMenu,
+  CardActionMenuItem,
+} from "../../components/CardActionMenu";
 import { HighlightText } from "../../components/HighlightText";
 import { InlineTextFilePreview } from "../../components/InlinePreview";
 import { ImageThumb } from "../ClipboardPage/ImageThumb";
@@ -138,52 +141,12 @@ export function ResourceCard({
   const kind = inferResourceMediaKind(record);
   const title = getResourceTitle(record, kind);
   const [menuOpen, setMenuOpen] = useState(false);
-  const [menuPosition, setMenuPosition] = useState<{ left: number; top: number } | null>(null);
   const moreButtonRef = useRef<HTMLButtonElement | null>(null);
-  const menuRef = useRef<HTMLDivElement | null>(null);
-
-  // 卡片有 overflow 裁剪，菜单挂在文档根节点上按按钮位置定位。
-  const updateMenuPosition = useCallback(() => {
-    const buttonRect = moreButtonRef.current?.getBoundingClientRect();
-    if (!buttonRect) return;
-    const menuRect = menuRef.current?.getBoundingClientRect();
-    const menuWidth = menuRect?.width ?? 158;
-    const menuHeight = menuRect?.height ?? 148;
-    const padding = 8;
-    const left = Math.max(
-      padding,
-      Math.min(buttonRect.right - menuWidth, window.innerWidth - menuWidth - padding),
-    );
-    const fitsBelow = buttonRect.bottom + menuHeight + 6 <= window.innerHeight - padding;
-    const top = fitsBelow
-      ? buttonRect.bottom + 4
-      : Math.max(padding, buttonRect.top - menuHeight - 4);
-    setMenuPosition({ left, top });
-  }, []);
 
   useEffect(() => {
-    if (!menuOpen) return;
-    const handlePointerDown = (event: MouseEvent) => {
-      if (menuRef.current?.contains(event.target as Node)) return;
-      if (moreButtonRef.current?.contains(event.target as Node)) return;
-      setMenuOpen(false);
-    };
-    const handleKeyDown = (event: KeyboardEvent) => {
-      if (event.key === "Escape") setMenuOpen(false);
-    };
-    document.addEventListener("mousedown", handlePointerDown);
-    document.addEventListener("keydown", handleKeyDown);
-    window.addEventListener("resize", updateMenuPosition);
-    window.addEventListener("scroll", updateMenuPosition, true);
-    const frame = requestAnimationFrame(updateMenuPosition);
-    return () => {
-      document.removeEventListener("mousedown", handlePointerDown);
-      document.removeEventListener("keydown", handleKeyDown);
-      window.removeEventListener("resize", updateMenuPosition);
-      window.removeEventListener("scroll", updateMenuPosition, true);
-      cancelAnimationFrame(frame);
-    };
-  }, [menuOpen, updateMenuPosition]);
+    if (!selectionMode) return;
+    setMenuOpen(false);
+  }, [selectionMode]);
 
   const activateDetail = useCallback(() => {
     if (selectionMode) {
@@ -192,11 +155,6 @@ export function ResourceCard({
     }
     onOpenDetail(record);
   }, [onOpenDetail, onToggleSelected, record, selectionMode]);
-
-  const runMenuAction = (action: () => void) => {
-    setMenuOpen(false);
-    action();
-  };
 
   return (
     <article
@@ -246,7 +204,6 @@ export function ResourceCard({
               title={t("resources.moreActions")}
               onClick={(event) => {
                 event.stopPropagation();
-                setMenuPosition(null);
                 setMenuOpen((open) => !open);
               }}
             >
@@ -255,46 +212,43 @@ export function ResourceCard({
           </div>
         )}
       </div>
-      {onMove && !selectionMode && menuOpen && createPortal(
-        <div
-          ref={menuRef}
+      {onMove && !selectionMode && (
+        <CardActionMenu
+          open={menuOpen}
+          align="end"
           className="resource-card-menu"
-          role="menu"
-          aria-label={t("resources.moreActions")}
-          style={{
-            left: menuPosition?.left ?? 0,
-            top: menuPosition?.top ?? 0,
-            visibility: menuPosition ? "visible" : "hidden",
+          ariaLabel={t("resources.moreActions")}
+          anchorEl={moreButtonRef}
+          getAnchor={() => {
+            const rect = moreButtonRef.current?.getBoundingClientRect();
+            if (!rect) return null;
+            return { left: rect.left, top: rect.top, right: rect.right, bottom: rect.bottom };
           }}
+          onClose={() => setMenuOpen(false)}
         >
-          <button type="button" role="menuitem" onClick={() => runMenuAction(() => void onCopy(record))}>
-            {Icons.copy}
-            <span>{t("resources.copy")}</span>
-          </button>
-          <button type="button" role="menuitem" onClick={() => runMenuAction(() => onOpenDetail(record))}>
-            {Icons.expand}
-            <span>{t("resources.openDetail")}</span>
-          </button>
-          <button
-            type="button"
-            role="menuitem"
+          <CardActionMenuItem
+            icon={Icons.copy}
+            label={t("resources.copy")}
+            onClick={() => void onCopy(record)}
+          />
+          <CardActionMenuItem
+            icon={Icons.expand}
+            label={t("resources.openDetail")}
+            onClick={() => onOpenDetail(record)}
+          />
+          <CardActionMenuItem
             className="is-primary"
-            onClick={() => runMenuAction(() => onMove(record))}
-          >
-            {Icons.arrowRight}
-            <span>{t("resources.moveToGroup")}</span>
-          </button>
-          <button
-            type="button"
-            role="menuitem"
+            icon={Icons.arrowRight}
+            label={t("resources.moveToGroup")}
+            onClick={() => onMove(record)}
+          />
+          <CardActionMenuItem
             className="is-danger"
-            onClick={() => runMenuAction(() => onDelete(record.id))}
-          >
-            {Icons.delete}
-            <span>{t("common.delete")}</span>
-          </button>
-        </div>,
-        document.body,
+            icon={Icons.delete}
+            label={t("common.delete")}
+            onClick={() => onDelete(record.id)}
+          />
+        </CardActionMenu>
       )}
       <div className="resource-card-body">
         <div className="resource-card-title-row">
