@@ -2274,13 +2274,15 @@ pub fn get_recent_used_items(
     Ok(merge_recent_items(clipboard, phrases, lim as usize))
 }
 
-/// 粘贴成功后记录剪贴板/资源记录的使用时间（整组粘贴一次记全部记录）。
-#[tauri::command]
-pub fn touch_clipboard_usage(app: AppHandle, ids: Vec<String>) -> Result<(), String> {
+/// 记录剪贴板/资源记录的使用时间：粘贴成功与拖出成功放下共用。
+pub(crate) fn touch_clipboard_usage_internal<R: Runtime>(
+    app: &AppHandle<R>,
+    ids: &[String],
+) -> Result<(), String> {
     let state = app.state::<DbState>();
     let conn = state.conn.lock().map_err(|e| e.to_string())?;
     let now = chrono::Utc::now().to_rfc3339();
-    for id in &ids {
+    for id in ids {
         conn.execute(
             "UPDATE clipboard_records SET last_used_at = ?1 WHERE id = ?2",
             params![&now, id],
@@ -2290,9 +2292,11 @@ pub fn touch_clipboard_usage(app: AppHandle, ids: Vec<String>) -> Result<(), Str
     Ok(())
 }
 
-/// 粘贴成功后记录短语的使用时间。
-#[tauri::command]
-pub fn touch_phrase_usage(app: AppHandle, id: String) -> Result<(), String> {
+/// 记录短语的使用时间：粘贴成功与拖出成功放下共用。
+pub(crate) fn touch_phrase_usage_internal<R: Runtime>(
+    app: &AppHandle<R>,
+    id: &str,
+) -> Result<(), String> {
     let state = app.state::<DbState>();
     let conn = state.conn.lock().map_err(|e| e.to_string())?;
     conn.execute(
@@ -2301,6 +2305,18 @@ pub fn touch_phrase_usage(app: AppHandle, id: String) -> Result<(), String> {
     )
     .map_err(|e| e.to_string())?;
     Ok(())
+}
+
+/// 粘贴成功后记录剪贴板/资源记录的使用时间（整组粘贴一次记全部记录）。
+#[tauri::command]
+pub fn touch_clipboard_usage(app: AppHandle, ids: Vec<String>) -> Result<(), String> {
+    touch_clipboard_usage_internal(&app, &ids)
+}
+
+/// 粘贴成功后记录短语的使用时间。
+#[tauri::command]
+pub fn touch_phrase_usage(app: AppHandle, id: String) -> Result<(), String> {
+    touch_phrase_usage_internal(&app, &id)
 }
 
 #[tauri::command]
