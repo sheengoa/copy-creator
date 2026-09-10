@@ -4,6 +4,7 @@
   },
   "sidebar": {},
   "tabs": {
+    "recent": "最近",
     "clipboard": "剪切板",
     "phrases": "快捷输入",
     "resources": "资源"
@@ -245,6 +246,7 @@
   },
   "radialMenu": {
     "empty": "暂无内容",
+    "recentEmpty": "还没有使用记录，粘贴过的内容会出现在这里",
     "previewTitle": "完整内容",
     "openPreview": "展开预览",
     "closePreview": "收起预览",
