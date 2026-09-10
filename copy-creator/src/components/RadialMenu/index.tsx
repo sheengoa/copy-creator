@@ -304,6 +304,9 @@ export default function RadialMenu() {
   const activeTabRef = useRef<TabKey>("clipboard");
   const clipboardCategoryRef = useRef<ClipType>("all");
   const resourceGroupRef = useRef<string | null>(null);
+  // 本次菜单会话内用户是否已手动切换过分组：防止打开菜单时的异步
+  // 分组记忆恢复在返回后覆盖用户先一步的手动选择。
+  const resourceGroupTouchedRef = useRef(false);
   const resourceGroupMenuRef = useRef<HTMLDivElement>(null);
   const resourceGroupMenuAnchorRef = useRef<HTMLButtonElement>(null);
   const categoriesScrollRef = useRef<HTMLDivElement>(null);
@@ -768,6 +771,7 @@ export default function RadialMenu() {
   const applyResourceGroupSwitch = useCallback((nextGroup: string | null) => {
     collapsePreview();
     closeResourceGroupMenu();
+    resourceGroupTouchedRef.current = true;
     setResourceGroup(nextGroup);
     resourceGroupRef.current = nextGroup;
     useClipboardStore.getState().setResourceGroup(nextGroup);
@@ -788,6 +792,8 @@ export default function RadialMenu() {
   const restoreResourceGroup = useCallback(async () => {
     try {
       const saved = await invoke<string>("get_setting", { key: "radial_resource_group" });
+      // 等待期间用户已手动切换过分组：尊重用户选择，不用记忆值覆盖。
+      if (resourceGroupTouchedRef.current) return;
       const parsed: unknown = JSON.parse(saved);
       const next = typeof parsed === "string" ? parsed : null;
       setResourceGroup(next);
@@ -1288,6 +1294,9 @@ export default function RadialMenu() {
           clipboardCategoryRef.current = "all";
           closeResourceGroupMenu();
           // 资源分组浏览位置保留记忆：本次运行内沿用内存值，跨重启由设置恢复。
+          // 每次打开菜单先重置"用户已手动切换分组"标记，再恢复记忆值；
+          // 恢复期间用户的手动切换不会被异步返回的记忆值覆盖。
+          resourceGroupTouchedRef.current = false;
           void restoreResourceGroup();
           // Refresh data
           useClipboardStore.getState().setCategory("all");
