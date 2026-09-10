@@ -94,6 +94,13 @@ const MAX_FULL_IMAGES = 8;
 let running = 0;
 const queue: (() => void)[] = [];
 
+// 粘贴成功后记录使用时间（fire-and-forget），供径向菜单「最近使用」聚合查询。
+function touchClipboardUsage(ids: string[]) {
+  void invoke("touch_clipboard_usage", { ids }).catch((e) => {
+    console.error("Failed to record usage:", e);
+  });
+}
+
 function enqueue<T>(fn: () => Promise<T>): Promise<T> {
   return new Promise((resolve, reject) => {
     const run = async () => {
@@ -451,6 +458,7 @@ export const useClipboardStore = create<ClipboardState>((set, get) => ({
     try {
       if (record.has_images) {
         await invoke("paste_stash_record", { id: record.id, terminal: false });
+        touchClipboardUsage([record.id]);
         return true;
       }
       const content = await getFullContent(record);
@@ -461,6 +469,7 @@ export const useClipboardStore = create<ClipboardState>((set, get) => ({
       } else {
         await invoke("paste_text", { text: content });
       }
+      touchClipboardUsage([record.id]);
       return true;
     } catch (e) {
       console.error("Paste failed:", e);
@@ -472,6 +481,7 @@ export const useClipboardStore = create<ClipboardState>((set, get) => ({
     try {
       if (record.has_images) {
         await invoke("paste_stash_record", { id: record.id, terminal: true });
+        touchClipboardUsage([record.id]);
         return true;
       }
       const content = await getFullContent(record);
@@ -482,6 +492,7 @@ export const useClipboardStore = create<ClipboardState>((set, get) => ({
       } else {
         await invoke("paste_text_terminal", { text: content });
       }
+      touchClipboardUsage([record.id]);
       return true;
     } catch (e) {
       console.error("Terminal paste failed:", e);
