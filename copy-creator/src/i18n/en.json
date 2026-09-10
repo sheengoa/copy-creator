@@ -77,7 +77,8 @@
     "unmarkApiKey": "Unmark API Key",
     "toastTitle": "API Key detected",
     "toastHintLabeled": "Looks like {{guess}} · right-click to label its source",
-    "toastHint": "Right-click to label its source"
+    "toastHint": "Right-click to label its source",
+    "loadMore": "Load more"
   },
   "resources": {
     "search": "Search resources...",
