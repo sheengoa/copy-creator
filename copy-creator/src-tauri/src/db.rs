@@ -5029,7 +5029,7 @@ pub fn move_phrases_to_top(app: AppHandle, ids: Vec<String>) -> Result<(), Strin
 
 #[cfg(test)]
 mod move_to_top_tests {
-    use super::{move_rows_to_top, Connection};
+    use super::{move_rows_to_top, write_id_order, Connection};
 
     #[test]
     fn move_rows_to_top_orders_selected_ids_above_all_existing() {
@@ -5069,6 +5069,51 @@ mod move_to_top_tests {
         )
         .unwrap();
         move_rows_to_top(&conn, "t", &[]).unwrap();
+    }
+
+    // 重排序命令使用的归一化取值路径（(n-i)*10）：传入顺序即降序位置，
+    // 未提及的行保持原 sort_order 不变（前端总是传全量可见列表）。
+    #[test]
+    fn write_id_order_normalized_values_match_given_order() {
+        let conn = Connection::open_in_memory().unwrap();
+        conn.execute(
+            "CREATE TABLE t (id TEXT PRIMARY KEY, sort_order REAL)",
+            [],
+        )
+        .unwrap();
+        conn.execute(
+            "INSERT INTO t (id, sort_order) VALUES ('a', 999.0), ('b', 998.0), ('c', 997.0)",
+            [],
+        )
+        .unwrap();
+
+        // 全量重排：传入顺序即最终顺序。
+        write_id_order(&conn, "t", &["c".to_string(), "a".to_string(), "b".to_string()], |i, n| {
+            ((n - i) * 10) as f64
+        })
+        .unwrap();
+        let mut stmt = conn
+            .prepare("SELECT id FROM t ORDER BY sort_order DESC")
+            .unwrap();
+        let ids: Vec<String> = stmt
+            .query_map([], |row| row.get::<_, String>(0))
+            .unwrap()
+            .collect::<Result<Vec<_>, _>>()
+            .unwrap();
+        assert_eq!(ids, vec!["c", "a", "b"]);
+
+        // 子集重排：未提及的行保持原值，可能排在被重排行之前或之后。
+        write_id_order(&conn, "t", &["b".to_string(), "c".to_string()], |i, n| {
+            ((n - i) * 10) as f64
+        })
+        .unwrap();
+        let ids: Vec<String> = stmt
+            .query_map([], |row| row.get::<_, String>(0))
+            .unwrap()
+            .collect::<Result<Vec<_>, _>>()
+            .unwrap();
+        // b=20、c=10、a 保持 30（上一轮全量重排的值）。
+        assert_eq!(ids, vec!["a", "b", "c"]);
     }
 }
 
