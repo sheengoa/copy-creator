@@ -899,6 +899,40 @@ pub fn paste_text_terminal(app: AppHandle, text: String) -> Result<(), String> {
     Ok(())
 }
 
+/// 文件承载的文本资源粘贴：读取资源库内文本文件的内容后按文本写入剪切板，
+/// 使「以文件方式存储的内容」再次使用时粘贴出来的仍是内容本身而非文件。
+/// 读取失败（路径无效、超过 10 MB、非 UTF-8）返回错误，由前端回退为文件粘贴。
+#[tauri::command]
+pub fn paste_text_file(app: AppHandle, path: String, terminal: Option<bool>) -> Result<(), String> {
+    let text = crate::db::read_text_file_content_inner(&app, &path)?;
+    let shortcut = if terminal.unwrap_or(false) {
+        log::info!("[paste] paste_text_file called — CtrlShiftV (文本文件终端粘贴)");
+        PasteShortcut::CtrlShiftV
+    } else {
+        log::info!("[paste] paste_text_file called — CtrlV (文本文件粘贴)");
+        PasteShortcut::CtrlV
+    };
+    if PASTING.swap(true, Ordering::SeqCst) {
+        log::warn!("[paste] PASTING flag already true, skipping");
+        return Ok(());
+    }
+
+    if let Err(e) = app.clipboard().write_text(text.clone()) {
+        PASTING.store(false, Ordering::SeqCst);
+        return Err(e.to_string());
+    }
+
+    crate::clipboard::sync_monitor_text(&text);
+
+    let handle = app.clone();
+    std::thread::spawn(move || {
+        let _guard = PasteGuard;
+        paste_with_defocus(&handle, shortcut).ok();
+    });
+
+    Ok(())
+}
+
 #[tauri::command]
 pub fn paste_image(app: AppHandle, path: String) -> Result<(), String> {
     if PASTING.swap(true, Ordering::SeqCst) {
