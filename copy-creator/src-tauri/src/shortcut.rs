@@ -682,9 +682,15 @@ pub fn init_radial_menu_state(app: &AppHandle) {
     if let Ok(val) = crate::db::get_setting(app.clone(), "radial_menu_enabled".to_string()) {
         RADIAL_MENU_ENABLED.store(val == "1", Ordering::SeqCst);
     }
+    // 按平台输出能力说明，避免 Linux 专属文案误导其他平台的日志排查。
+    // Linux 无全局鼠标钩子，径向菜单只能由快捷键呼出；Windows 同样仅
+    // 支持快捷键（含 Win 组合键时经低级键盘钩子拦截）。
+    #[cfg(target_os = "linux")]
     log::info!(
         "Mouse hook not available on Linux; radial menu accessible via keyboard shortcuts only"
     );
+    #[cfg(not(target_os = "linux"))]
+    log::info!("Radial menu enabled; triggered via global keyboard shortcut");
 }
 
 // ---- shortcut registration ----
