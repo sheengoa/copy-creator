@@ -5,6 +5,7 @@ import { invoke } from "@tauri-apps/api/core";
 import { useClipboardStore, type ClipboardFilter } from "../../stores/clipboardStore";
 import { useSettingsStore } from "../../stores/settingsStore";
 import { Icons } from "../../components/Icons";
+import { ConfirmDialog } from "../../components/ConfirmDialog";
 import SearchInput from "../../components/SearchInput";
 import { ClipboardCard, ClipboardCardDragPreview } from "./ClipboardCard";
 import { TYPE_META } from "./utils";
@@ -393,26 +394,11 @@ export default function ClipboardPage() {
       )}
 
       {confirmState && (
-        <div className="dialog-overlay" onClick={() => setConfirmState(null)}>
-          <div className="dialog-content" onClick={(e) => e.stopPropagation()}>
-            <h3 className="dialog-title">{t("common.confirm")}</h3>
-            <p className="dialog-message">{confirmState.message}</p>
-            <div className="dialog-actions">
-              <button className="dialog-btn secondary" onClick={() => setConfirmState(null)}>
-                {t("common.cancel")}
-              </button>
-              <button
-                className="dialog-btn save"
-                onClick={() => {
-                  void confirmState.onConfirm();
-                  setConfirmState(null);
-                }}
-              >
-                {t("common.confirm")}
-              </button>
-            </div>
-          </div>
-        </div>
+        <ConfirmDialog
+          message={confirmState.message}
+          onConfirm={confirmState.onConfirm}
+          onCancel={() => setConfirmState(null)}
+        />
       )}
 
       {loading && records.length === 0 ? (

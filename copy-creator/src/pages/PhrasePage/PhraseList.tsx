@@ -8,6 +8,7 @@ import type { Phrase } from "../../types";
 import { HighlightText } from "../../components/HighlightText";
 import { InlineImagePreview, InlineTextFilePreview } from "../../components/InlinePreview";
 import { isImageFilePath } from "../../stores/phraseStore";
+import { fileNameFromPath } from "../../utils/fileName";
 import {
   isInlineTextPreviewFilePath,
   shouldShowInlineTextToggle,
@@ -31,7 +32,6 @@ interface PhraseListProps {
   onToggleSelected: (id: string) => void;
 }
 
-const filenameFromPath = (path: string) => path.replace(/\\/g, "/").split("/").pop() || path;
 
 function formatBytes(bytes: number) {
   if (!bytes) return "";
@@ -95,7 +95,7 @@ function PhraseCard({
     transition: transition || "transform 200ms ease",
   };
   const isFile = phrase.input_type === "file";
-  const fileName = filenameFromPath(phrase.source_path || phrase.content);
+  const fileName = fileNameFromPath(phrase.source_path || phrase.content);
   const [textExpanded, setTextExpanded] = useState(false);
   const imageFile = isFile && isImageFilePath(phrase.source_path || phrase.content);
   const textFile = isFile && isInlineTextPreviewFilePath(phrase.content);
@@ -187,14 +187,7 @@ function PhraseCard({
                 </button>
               )}
               <span ref={setActivatorNodeRef} className="drag-handle" {...attributes} {...listeners}>
-                <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor">
-                  <circle cx="9" cy="5" r="1.5" />
-                  <circle cx="15" cy="5" r="1.5" />
-                  <circle cx="9" cy="12" r="1.5" />
-                  <circle cx="15" cy="12" r="1.5" />
-                  <circle cx="9" cy="19" r="1.5" />
-                  <circle cx="15" cy="19" r="1.5" />
-                </svg>
+                {Icons.drag}
               </span>
               {onMoveToTop && (
                 <button
