@@ -35,10 +35,13 @@ import { useBackToTop } from "../../hooks/useBackToTop";
 import { InlineTextFilePreview } from "../InlinePreview";
 import { loadClipboardPreviewSegments } from "../../utils/contentPreview";
 import { isResourceRecord } from "../../utils/clipboardRecord";
+import { formatTime } from "../../utils/formatTime";
+import { fileNameFromPath } from "../../utils/fileName";
 import type { ClipboardRecord, Phrase, ResourceFolder } from "../../types";
 import {
   findResourceFolder,
   flattenResourceFolders,
+  formatResourceFolderPath,
   getResourceExtension,
   getResourcePath,
   getResourceSummary,
@@ -172,21 +175,6 @@ interface RadialDragEvent {
   session_id: number;
 }
 
-const filenameFromPath = (path: string) => path.replace(/\\/g, "/").split("/").pop() || path;
-
-function formatResourceFolderPath(path: string): string {
-  return path.split("/").filter(Boolean).join(" / ");
-}
-
-function formatTime(dateStr: string): string {
-  const date = new Date(dateStr);
-  const month = date.getMonth() + 1;
-  const day = date.getDate();
-  const hours = date.getHours().toString().padStart(2, "0");
-  const minutes = date.getMinutes().toString().padStart(2, "0");
-  return `${month}/${day} ${hours}:${minutes}`;
-}
-
 async function loadPasteLeftClickSetting() {
   try {
     const mode = await invoke<string>("get_setting", { key: "paste_left_click" });
@@ -246,7 +234,7 @@ function FileThumb({ path }: { path: string }) {
     return () => { cancelled = true; };
   }, [path]);
 
-  if (!src) return <span className="radial-menu-item-text">{filenameFromPath(path)}</span>;
+  if (!src) return <span className="radial-menu-item-text">{fileNameFromPath(path)}</span>;
   return (
     <img
       src={src}
@@ -1585,7 +1573,7 @@ export default function RadialMenu() {
       content: r.type === "image"
         ? `[${t("clipboard.image")}]`
         : r.type === "file"
-          ? r.content.replace(/\\/g, "/").split("/").pop() || r.content
+          ? fileNameFromPath(r.content)
           : r.is_api_key
             ? r.key_preview || r.content
             : r.content,
@@ -1606,7 +1594,7 @@ export default function RadialMenu() {
   const phraseToRadialItem = (p: Phrase): RadialItem => ({
     id: p.id,
     content: p.input_type === "file"
-      ? filenameFromPath(p.source_path || p.content)
+      ? fileNameFromPath(p.source_path || p.content)
       : p.content,
     type: p.input_type === "file" ? "file" : "phrase",
     imagePath:

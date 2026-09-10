@@ -3,6 +3,11 @@ import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import type { Phrase, PhraseGroup } from "../types";
 import { sortByIdOrder } from "../utils/reorder";
+import {
+  DECODABLE_IMAGE_EXTENSIONS,
+  getResourceExtension,
+  resolveAbsoluteResourcePath,
+} from "../pages/ResourcePage/resourceUtils";
 
 // 置顶/重排序失败后按当前分组重载短语，恢复与后端一致的真实顺序。
 const reloadPhrasesAfterFailure = async (get: () => PhraseState) => {
@@ -10,16 +15,11 @@ const reloadPhrasesAfterFailure = async (get: () => PhraseState) => {
   if (groupId !== null) await get().loadPhrases(groupId);
 };
 
-const isAbsolutePath = (path: string) => /^([a-zA-Z]:[\\/]|[/\\])/.test(path);
-
-const resolveStoredFilePath = async (content: string) => {
-  if (isAbsolutePath(content)) return content;
-  const storagePath = await invoke<string>("get_storage_path");
-  return `${storagePath.replace(/[\\/]+$/, "")}/${content.replace(/^[\\/]+/, "")}`;
-};
-
-/** 文件短语是否指向图片文件：粘贴时走位图路径而非文件引用。 */
-export const isImageFilePath = (path: string) => /\.(png|jpe?g|webp|gif|bmp)$/i.test(path);
+/** 文件短语是否指向图片文件：粘贴时走位图路径而非文件引用。
+ *  可位图粘贴的扩展以资源区 DECODABLE_IMAGE_EXTENSIONS 为单一来源
+ *  （与后端 image 解码能力对应），避免两处判断漂移。 */
+export const isImageFilePath = (path: string) =>
+  DECODABLE_IMAGE_EXTENSIONS.has(getResourceExtension(path));
 
 // 粘贴成功后记录使用时间（fire-and-forget），供径向菜单「最近使用」聚合查询。
 function touchPhraseUsage(id: string) {
@@ -250,7 +250,7 @@ export const usePhraseStore = create<PhraseState>()((set, get) => {
   pastePhrase: async (phrase: Phrase) => {
     try {
       if (phrase.input_type === "file") {
-        const path = await resolveStoredFilePath(phrase.content);
+        const path = await resolveAbsoluteResourcePath(phrase.content);
         if (isImageFilePath(path)) {
           // 图像文件以位图粘贴（图像只能 Ctrl+V），终端入口同普通入口。
           await invoke("paste_image_file", { path });
@@ -269,7 +269,7 @@ export const usePhraseStore = create<PhraseState>()((set, get) => {
   pastePhraseTerminal: async (phrase: Phrase) => {
     try {
       if (phrase.input_type === "file") {
-        const path = await resolveStoredFilePath(phrase.content);
+        const path = await resolveAbsoluteResourcePath(phrase.content);
         if (isImageFilePath(path)) {
           await invoke("paste_image_file", { path });
         } else {

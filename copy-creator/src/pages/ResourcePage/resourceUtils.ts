@@ -1,6 +1,7 @@
 import { convertFileSrc, invoke } from "@tauri-apps/api/core";
 import type { ClipboardRecord, ResourceFolder } from "../../types";
 import { isResourceRecord } from "../../utils/clipboardRecord";
+import { fileNameFromPath } from "../../utils/fileName";
 
 export type ResourceMediaKind = "text" | "image" | "video" | "audio" | "file";
 export type ResourceTypeFilter = "all" | ResourceMediaKind;
@@ -39,6 +40,12 @@ export const IMAGE_EXTENSIONS = new Set([
   "tiff",
   "webp",
 ]);
+
+// 能被后端 image crate 解码为位图的图片扩展（对应 Cargo.toml 的 image
+// features：png/jpeg/webp/gif/bmp）。资源区展示用 IMAGE_EXTENSIONS 全集
+// （浏览器可显示 svg/avif/heic），位图粘贴必须限定在本集合内，否则
+// paste_image_file 解码失败。与 isImageFilePath 共用，避免两处判断漂移。
+export const DECODABLE_IMAGE_EXTENSIONS = new Set(["bmp", "gif", "jpeg", "jpg", "png", "webp"]);
 export const TEXT_EXTENSIONS = new Set([
   "bat",
   "bash",
@@ -98,9 +105,11 @@ export const TEXT_EXTENSIONS = new Set([
 ]);
 
 export function getResourceFileName(value: string): string {
-  const normalized = value.replace(/\\/g, "/").replace(/[?#].*$/, "");
+  // 资源标题语义：截断 #/查询串、剥 file:// 前缀后取末段并做 URL 解码；
+  // 纯路径取末段复用统一的 fileNameFromPath。
+  const normalized = value.replace(/[?#].*$/, "");
   const withoutScheme = normalized.replace(/^file:\/\/(?:localhost)?/i, "");
-  const fileName = withoutScheme.split("/").pop() || value;
+  const fileName = fileNameFromPath(withoutScheme);
   try {
     return decodeURIComponent(fileName);
   } catch {
@@ -225,15 +234,6 @@ export function getResourceSummary(record: Pick<ClipboardRecord, "type" | "conte
     .replace(/\s+/g, " ")
     .trim();
   return summary.length > 180 ? `${summary.slice(0, 180)}…` : summary;
-}
-
-export function formatResourceTime(dateStr: string): string {
-  const date = new Date(dateStr);
-  if (Number.isNaN(date.getTime())) return dateStr;
-  return `${date.getMonth() + 1}/${date.getDate()} ${date
-    .getHours()
-    .toString()
-    .padStart(2, "0")}:${date.getMinutes().toString().padStart(2, "0")}`;
 }
 
 export function formatResourceFileSize(size?: number): string {
@@ -418,7 +418,10 @@ function getMediaServer(): Promise<{ origin: string; token: string }> {
   return mediaServerPromise;
 }
 
-async function resolveAbsoluteResourcePath(path: string): Promise<string> {
+/** 把记录里的资源路径解析为绝对路径：file:// 与 Windows 扩展前缀先归一，
+ *  远程/数据地址原样返回，绝对路径直接返回，相对路径拼到存储根目录下。
+ *  资源区媒体地址与快捷输入的文件短语粘贴共用。 */
+export async function resolveAbsoluteResourcePath(path: string): Promise<string> {
   const normalized = stripWindowsPathPrefix(normalizeLocalPath(path));
   if (!normalized) throw new Error("资源路径为空");
   if (/^(?:https?:|data:|blob:|asset:)/i.test(normalized)) return normalized;

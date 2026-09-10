@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { ConfirmDialog } from "../components/ConfirmDialog";
 import { createPortal } from "react-dom";
 import { invoke } from "@tauri-apps/api/core";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
@@ -908,28 +909,11 @@ export default function ResourcePage() {
   }, [resourceGroup, showFeedback]);
 
   const confirmDialog = confirmState ? (
-    <div className="dialog-overlay" onClick={() => setConfirmState(null)}>
-      <div className="dialog-content" onClick={(event) => event.stopPropagation()}>
-        <h3 className="dialog-title">{t("common.confirm")}</h3>
-        <p className="dialog-message">{confirmState.message}</p>
-        <div className="dialog-actions">
-          <button type="button" className="dialog-btn secondary" onClick={() => setConfirmState(null)}>
-            {t("common.cancel")}
-          </button>
-          <button
-            type="button"
-            className="dialog-btn save"
-            onClick={() => {
-              const action = confirmState.onConfirm;
-              setConfirmState(null);
-              void action();
-            }}
-          >
-            {t("common.confirm")}
-          </button>
-        </div>
-      </div>
-    </div>
+    <ConfirmDialog
+      message={confirmState.message}
+      onConfirm={confirmState.onConfirm}
+      onCancel={() => setConfirmState(null)}
+    />
   ) : null;
 
   const moveDialogElement = (

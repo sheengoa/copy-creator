@@ -4,9 +4,10 @@ import { useTranslation } from "react-i18next";
 import { convertFileSrc } from "@tauri-apps/api/core";
 import { usePhraseStore, isImageFilePath } from "../../stores/phraseStore";
 import type { QuickInputFileSelection } from "../../stores/phraseStore";
+import { fileNameFromPath } from "../../utils/fileName";
 
-const filenameFromPath = (path: string) => path.replace(/\\/g, "/").split("/").pop() || path;
 import { useSettingsStore } from "../../stores/settingsStore";
+import { ConfirmDialog } from "../../components/ConfirmDialog";
 import SearchInput from "../../components/SearchInput";
 import { GroupChips } from "./GroupChips";
 import { PhraseList } from "./PhraseList";
@@ -205,7 +206,7 @@ export default function PhrasePage() {
   const backToTop = useBackToTop({ enabled: !isSelecting });
   const activePhrase = activePhraseId ? renderedPhrases.find(p => p.id === activePhraseId) : null;
   const activePhraseBody = activePhrase?.input_type === "file"
-    ? filenameFromPath(activePhrase.source_path || activePhrase.content)
+    ? fileNameFromPath(activePhrase.source_path || activePhrase.content)
     : activePhrase?.content.slice(0, 80);
   const phraseDragOverlay = (
     <DragOverlay dropAnimation={null}>
@@ -261,7 +262,7 @@ export default function PhrasePage() {
     setPhraseRemark(p.title);
     setPhraseContent(p.input_type === "file" ? "" : p.content);
     setPhraseFilePath("");
-    setPhraseFileName(p.input_type === "file" ? filenameFromPath(p.source_path || p.content) : "");
+    setPhraseFileName(p.input_type === "file" ? fileNameFromPath(p.source_path || p.content) : "");
     setPhraseFileSize(p.input_type === "file" ? p.file_size : 0);
     // 编辑时仅预览原文件（source_path 为原始绝对路径）；不写入 phraseFilePath，
     // 避免保存时被误当作"更换文件"。
@@ -275,7 +276,7 @@ export default function PhrasePage() {
   };
 
   const applyQuickInputFile = useCallback((file: QuickInputFileSelection) => {
-    const fileName = filenameFromPath(file.path);
+    const fileName = fileNameFromPath(file.path);
     setPhraseFilePath(file.path);
     setPhraseFileName(fileName);
     setPhraseFileSize(file.file_size);
@@ -527,27 +528,11 @@ export default function PhrasePage() {
       />
 
       {confirmState && (
-        <div className="dialog-overlay" onClick={() => setConfirmState(null)}>
-          <div className="dialog-content" onClick={(e) => e.stopPropagation()}>
-            <h3 className="dialog-title">{t("common.confirm")}</h3>
-            <p className="dialog-message">{confirmState.message}</p>
-            <div className="dialog-actions">
-              <button className="dialog-btn secondary" onClick={() => setConfirmState(null)}>
-                {t("common.cancel")}
-              </button>
-              <button
-                className="dialog-btn save"
-                onClick={() => {
-                  const fn = confirmState.onConfirm;
-                  setConfirmState(null);
-                  void fn();
-                }}
-              >
-                {t("common.confirm")}
-              </button>
-            </div>
-          </div>
-        </div>
+        <ConfirmDialog
+          message={confirmState.message}
+          onConfirm={confirmState.onConfirm}
+          onCancel={() => setConfirmState(null)}
+        />
       )}
     </div>
   );

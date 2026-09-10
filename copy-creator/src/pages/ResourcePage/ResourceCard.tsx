@@ -10,10 +10,10 @@ import {
 } from "../../components/CardActionMenu";
 import { HighlightText } from "../../components/HighlightText";
 import { InlineTextFilePreview } from "../../components/InlinePreview";
+import { formatTime } from "../../utils/formatTime";
 import { ImageThumb } from "../ClipboardPage/ImageThumb";
 import { ResourceFileImage, ResourceVideoPoster } from "./ResourceMedia";
 import {
-  formatResourceTime,
   getResourcePath,
   getResourceSummary,
   getResourceTitle,
@@ -259,7 +259,7 @@ export function ResourceCard({
         <div className="resource-card-meta">
           <span>{typeLabel(kind)}</span>
           <span aria-hidden="true">·</span>
-          <time dateTime={record.created_at}>{formatResourceTime(record.created_at)}</time>
+          <time dateTime={record.created_at}>{formatTime(record.created_at)}</time>
         </div>
         <div className="resource-card-footer">
           <span className="resource-card-source">
@@ -331,7 +331,7 @@ export function ResourceCardDragPreview({
         <div className="resource-card-meta">
           <span>{typeLabel(kind)}</span>
           <span aria-hidden="true">·</span>
-          <time dateTime={record.created_at}>{formatResourceTime(record.created_at)}</time>
+          <time dateTime={record.created_at}>{formatTime(record.created_at)}</time>
         </div>
       </div>
     </article>
