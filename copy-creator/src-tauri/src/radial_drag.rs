@@ -43,7 +43,7 @@ thread_local! {
         RefCell::new(LinuxPointerState::default());
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Clone, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum RadialDragSource {
     Clipboard,
@@ -118,7 +118,7 @@ fn phrase_drag_paths(app: &AppHandle, id: &str) -> Result<Vec<PathBuf>, String> 
 
 fn resolve_drag_paths(
     app: &AppHandle,
-    source: RadialDragSource,
+    source: &RadialDragSource,
     id: &str,
 ) -> Result<Vec<PathBuf>, String> {
     match source {
@@ -185,7 +185,7 @@ fn path_from_hint(app: &AppHandle, path: String) -> Result<PathBuf, String> {
 
 fn requested_drag_paths(
     app: &AppHandle,
-    source: RadialDragSource,
+    source: &RadialDragSource,
     id: &str,
     path: Option<String>,
 ) -> Result<Vec<PathBuf>, String> {
@@ -204,12 +204,29 @@ fn finish_radial_drag(
     result: drag::DragResult,
     cursor_position: drag::CursorPosition,
     session_id: u64,
+    usage: Option<(RadialDragSource, String)>,
 ) {
     log::info!(
         "[radial_drag] result={result:?}, session={session_id}, cursor=({}, {})",
         cursor_position.x,
         cursor_position.y
     );
+    // 拖出成功放下等同一次使用：与粘贴成功同一口径计入「最近使用」。
+    // 整组拖出不逐条记录——整组条目会一次淹没高频列表。
+    if matches!(result, drag::DragResult::Dropped) {
+        if let Some((source, id)) = &usage {
+            let touch_result = match source {
+                RadialDragSource::Clipboard => {
+                    crate::db::touch_clipboard_usage_internal(app, std::slice::from_ref(id))
+                }
+                RadialDragSource::Phrase => crate::db::touch_phrase_usage_internal(app, id),
+                RadialDragSource::ResourceGroup => Ok(()),
+            };
+            if let Err(error) = touch_result {
+                log::warn!("[radial_drag] 记录拖出使用时间失败 source={source:?} id={id}: {error}");
+            }
+        }
+    }
     if let Some(radial) = app.get_webview_window("radial-menu") {
         let _ = radial.hide();
     }
@@ -221,6 +238,7 @@ fn finish_radial_drag(
 struct LinuxDragCandidate {
     paths: Vec<PathBuf>,
     item_id: String,
+    source: RadialDragSource,
     token: LinuxDragToken,
     armed_at: Instant,
 }
@@ -277,7 +295,12 @@ fn begin_linux_drag_session(session_id: u64) -> Result<LinuxDragToken, String> {
 }
 
 #[cfg(target_os = "linux")]
-fn arm_linux_drag(paths: Vec<PathBuf>, item_id: String, token: LinuxDragToken) -> Result<(), String> {
+fn arm_linux_drag(
+    paths: Vec<PathBuf>,
+    item_id: String,
+    source: RadialDragSource,
+    token: LinuxDragToken,
+) -> Result<(), String> {
     let state = linux_drag_state();
     let mut state = state.lock().map_err(|error| error.to_string())?;
 
@@ -291,6 +314,7 @@ fn arm_linux_drag(paths: Vec<PathBuf>, item_id: String, token: LinuxDragToken) -
     state.candidate = Some(LinuxDragCandidate {
         paths,
         item_id,
+        source,
         token,
         armed_at: Instant::now(),
     });
@@ -651,6 +675,7 @@ fn install_linux_drag_source(
                     drag::DragResult::Cancel,
                     cursor_position(window),
                     session_id,
+                    None,
                 );
             }
         }
@@ -728,6 +753,7 @@ fn install_linux_drag_source(
                 drag::DragResult::Cancel,
                 cursor_position(window),
                 candidate.token.session_id,
+                None,
             );
         }
         Propagation::Stop
@@ -748,6 +774,7 @@ fn install_linux_drag_source(
             result,
             cursor_position(window),
             candidate.token.session_id,
+            Some((candidate.source, candidate.item_id)),
         );
     });
 
@@ -772,12 +799,13 @@ fn arm_linux_drag_on_main(
     window: &gtk::ApplicationWindow,
     paths: Vec<PathBuf>,
     item_id: String,
+    source: RadialDragSource,
     token: LinuxDragToken,
     screen_x: Option<f64>,
     screen_y: Option<f64>,
     device_pixel_ratio: Option<f64>,
 ) -> Result<(), String> {
-    arm_linux_drag(paths, item_id, token)?;
+    arm_linux_drag(paths, item_id, source, token)?;
     if !seed_linux_pointer_press(window, screen_x, screen_y, device_pixel_ratio) {
         abort_linux_drag(token);
         return Err("鼠标左键已释放".to_string());
@@ -834,6 +862,7 @@ fn start_platform_drag(
     drag_image: Option<DragImage>,
     app: AppHandle,
     session_id: u64,
+    usage: Option<(RadialDragSource, String)>,
 ) -> Result<(), String> {
     log::info!(
         "[radial_drag] start_platform_drag session={session_id} paths={}",
@@ -842,7 +871,7 @@ fn start_platform_drag(
 
     #[cfg(target_os = "windows")]
     {
-        start_windows_drag(window, paths, drag_image, app, session_id)
+        start_windows_drag(window, paths, drag_image, app, session_id, usage)
     }
 
     #[cfg(not(target_os = "windows"))]
@@ -850,7 +879,7 @@ fn start_platform_drag(
         let _ = drag_image;
         let callback_app = app.clone();
         let callback = move |result: drag::DragResult, cursor_position: drag::CursorPosition| {
-            finish_radial_drag(&callback_app, result, cursor_position, session_id);
+            finish_radial_drag(&callback_app, result, cursor_position, session_id, usage);
         };
 
         let image = drag::Image::File(paths.first().cloned().ok_or("没有可拖拽的文件")?);
@@ -897,6 +926,7 @@ mod windows_drag {
     //! QueryContinueDrag 的取消分支，拖动以 Cancel 收场，应用自动恢复。
     use super::finish_radial_drag;
     use super::DragImage;
+    use super::RadialDragSource;
     use std::path::PathBuf;
     use std::sync::atomic::{AtomicBool, Ordering};
     use std::sync::Arc;
@@ -1027,6 +1057,7 @@ mod windows_drag {
         drag_image: Option<DragImage>,
         app: AppHandle,
         session_id: u64,
+        usage: Option<(RadialDragSource, String)>,
     ) -> Result<(), String> {
         let main_app = app.clone();
         let drag_window = window.clone();
@@ -1066,6 +1097,7 @@ mod windows_drag {
                         result,
                         drag::CursorPosition { x, y },
                         session_id,
+                        usage,
                     );
                 }
                 Ok(Err(error)) => {
@@ -1075,6 +1107,7 @@ mod windows_drag {
                         drag::DragResult::Cancel,
                         drag::CursorPosition { x: 0, y: 0 },
                         session_id,
+                        None,
                     );
                 }
                 Err(panic) => {
@@ -1089,6 +1122,7 @@ mod windows_drag {
                         drag::DragResult::Cancel,
                         drag::CursorPosition { x: 0, y: 0 },
                         session_id,
+                        None,
                     );
                 }
             }
@@ -1292,7 +1326,7 @@ pub async fn arm_radial_file_drag(
     #[cfg(target_os = "linux")]
     {
         let token = begin_linux_drag_session(session_id)?;
-        let paths = match requested_drag_paths(&app, source, &id, path) {
+        let paths = match requested_drag_paths(&app, &source, &id, path) {
             Ok(paths) => paths,
             Err(error) => {
                 abort_linux_drag(token);
@@ -1322,6 +1356,7 @@ pub async fn arm_radial_file_drag(
                         &gtk_window,
                         paths,
                         item_id,
+                        source,
                         token,
                         screen_x,
                         screen_y,
@@ -1413,7 +1448,7 @@ pub async fn start_radial_file_drag(
         log::info!(
             "[radial_drag] start_radial_file_drag invoked session={session_id} source={source:?} id={id} path={path:?}"
         );
-        let paths = requested_drag_paths(&app, source, &id, path)?;
+        let paths = requested_drag_paths(&app, &source, &id, path)?;
         let icon_path = paths
             .first()
             .cloned()
@@ -1442,7 +1477,14 @@ pub async fn start_radial_file_drag(
             }
             None => make_drag_image(&icon_path),
         };
-        start_platform_drag(&window, paths, drag_image, app, session_id)
+        start_platform_drag(
+            &window,
+            paths,
+            drag_image,
+            app,
+            session_id,
+            Some((source, id)),
+        )
     }
 }
 
