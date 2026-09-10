@@ -1168,32 +1168,41 @@ fn is_text_preview_extension(path: &Path) -> bool {
     is_resource_text_extension(path)
 }
 
+/// 校验路径是不超过上限的文件，返回 metadata。预览读取、预检与写入
+/// 前置检查共用；超出上限的提示语由调用方按场景传入。
+fn ensure_capped_file(
+    path: &Path,
+    limit: u64,
+    over_limit_message: &str,
+) -> Result<std::fs::Metadata, String> {
+    let metadata = std::fs::metadata(path).map_err(|e| format!("读取文件失败: {e}"))?;
+    if !metadata.is_file() {
+        return Err("请选择一个文件".to_string());
+    }
+    if metadata.len() > limit {
+        return Err(over_limit_message.to_string());
+    }
+    Ok(metadata)
+}
+
+/// 读取不超过预览上限的文本文件内容（UTF-8）。
+fn read_capped_text_file(path: &Path) -> Result<String, String> {
+    ensure_capped_file(path, QUICK_INPUT_TEXT_PREVIEW_LIMIT_BYTES, "预览文件不能超过 1 MB")?;
+    std::fs::read_to_string(path).map_err(|e| format!("读取文件失败: {e}"))
+}
+
 fn read_text_preview_file(path: PathBuf) -> Result<String, String> {
     if !is_text_preview_extension(&path) {
         return Err("当前文件不是可预览的文本文件".to_string());
     }
-    let metadata = std::fs::metadata(&path).map_err(|e| format!("读取文件失败: {e}"))?;
-    if !metadata.is_file() {
-        return Err("请选择一个文件".to_string());
-    }
-    if metadata.len() > QUICK_INPUT_TEXT_PREVIEW_LIMIT_BYTES {
-        return Err("预览文件不能超过 1 MB".to_string());
-    }
-    std::fs::read_to_string(path).map_err(|e| format!("读取文件失败: {e}"))
+    read_capped_text_file(&path)
 }
 
 fn read_resource_text_preview_file(path: PathBuf) -> Result<String, String> {
-    let metadata = std::fs::metadata(&path).map_err(|e| format!("读取文件失败: {e}"))?;
-    if !metadata.is_file() {
-        return Err("请选择一个文件".to_string());
-    }
-    if metadata.len() > QUICK_INPUT_TEXT_PREVIEW_LIMIT_BYTES {
-        return Err("预览文件不能超过 1 MB".to_string());
-    }
     if !is_resource_text_extension(&path) && !is_probably_text_file(&path) {
         return Err("当前文件不是可预览的文本文件".to_string());
     }
-    std::fs::read_to_string(path).map_err(|e| format!("读取文件失败: {e}"))
+    read_capped_text_file(&path)
 }
 
 fn resolve_quick_input_text_preview_path(app: &AppHandle, path: &str) -> Result<PathBuf, String> {
@@ -1212,13 +1221,7 @@ fn resolve_quick_input_text_preview_path(app: &AppHandle, path: &str) -> Result<
         return Err("快捷输入文件路径无效".to_string());
     }
 
-    let metadata = std::fs::metadata(&preview_path).map_err(|e| format!("读取文件失败: {e}"))?;
-    if !metadata.is_file() {
-        return Err("请选择一个文件".to_string());
-    }
-    if metadata.len() > QUICK_INPUT_TEXT_PREVIEW_LIMIT_BYTES {
-        return Err("预览文件不能超过 1 MB".to_string());
-    }
+    ensure_capped_file(&preview_path, QUICK_INPUT_TEXT_PREVIEW_LIMIT_BYTES, "预览文件不能超过 1 MB")?;
     Ok(preview_path)
 }
 
@@ -1270,11 +1273,8 @@ pub fn read_text_file_content_inner<R: Runtime>(
     path: &str,
 ) -> Result<String, String> {
     let target = resolve_resource_file_path(app, path)?;
-    let metadata = std::fs::metadata(&target).map_err(|e| format!("读取文件失败: {e}"))?;
-    if metadata.len() > RESOURCE_TEXT_PASTE_LIMIT_BYTES {
-        return Err("文本文件超过 10 MB，无法按内容粘贴".to_string());
-    }
-    std::fs::read_to_string(&target).map_err(|e| format!("读取文本文件失败: {e}"))
+    ensure_capped_file(&target, RESOURCE_TEXT_PASTE_LIMIT_BYTES, "文本文件超过 10 MB，无法按内容粘贴")?;
+    std::fs::read_to_string(&target).map_err(|e| format!("读取文件失败: {e}"))
 }
 
 #[tauri::command]
@@ -1300,10 +1300,7 @@ pub fn write_resource_text_content(
     if !is_resource_text_extension(&target) && !is_probably_text_file(&target) {
         return Err("当前文件不是可编辑的文本文件".to_string());
     }
-    let metadata = std::fs::metadata(&target).map_err(|e| format!("读取文件失败: {e}"))?;
-    if metadata.len() > QUICK_INPUT_TEXT_PREVIEW_LIMIT_BYTES {
-        return Err("文本内容不能超过 1 MB".to_string());
-    }
+    ensure_capped_file(&target, QUICK_INPUT_TEXT_PREVIEW_LIMIT_BYTES, "文本内容不能超过 1 MB")?;
     // 与新建窗口写入路径保持一致：正文末尾补一个换行。
     std::fs::write(&target, format!("{trimmed}\n"))
         .map_err(|e| format!("写入资源文件失败: {e}"))?;
@@ -4937,29 +4934,7 @@ pub fn set_user_api_key(app: AppHandle, id: String, value: bool) -> Result<(), S
 pub fn reorder_clipboard_records(app: AppHandle, ids: Vec<String>) -> Result<(), String> {
     let state = app.state::<DbState>();
     let conn = state.conn.lock().map_err(|e| e.to_string())?;
-    let n = ids.len();
-
-    if ids.is_empty() {
-        return Ok(());
-    }
-
-    let mut case_clauses = String::new();
-    let mut id_list = String::new();
-    for (i, id) in ids.iter().enumerate() {
-        let escaped = id.replace('\'', "''");
-        case_clauses.push_str(&format!(" WHEN '{}' THEN {}", escaped, (n - i) * 10));
-        if i > 0 {
-            id_list.push(',');
-        }
-        id_list.push_str(&format!("'{}'", escaped));
-    }
-
-    let sql = format!(
-        "UPDATE clipboard_records SET sort_order = CASE id{} END WHERE id IN ({})",
-        case_clauses, id_list,
-    );
-
-    conn.execute(&sql, []).map_err(|e| e.to_string())?;
+    write_id_order(&conn, "clipboard_records", &ids, |i, n| ((n - i) * 10) as f64)?;
     log::info!("reorder_clipboard_records: {} items", ids.len());
     Ok(())
 }
@@ -4968,31 +4943,7 @@ pub fn reorder_clipboard_records(app: AppHandle, ids: Vec<String>) -> Result<(),
 pub fn reorder_phrase_groups(app: AppHandle, ids: Vec<String>) -> Result<(), String> {
     let state = app.state::<DbState>();
     let conn = state.conn.lock().map_err(|e| e.to_string())?;
-    let n = ids.len();
-
-    if ids.is_empty() {
-        return Ok(());
-    }
-
-    let mut case_clauses = String::new();
-    let mut id_list = String::new();
-    for (i, id) in ids.iter().enumerate() {
-        let escaped = id.replace('\'', "''");
-        case_clauses.push_str(&format!(" WHEN '{}' THEN {}", escaped, (n - i) * 10));
-        if i > 0 {
-            id_list.push(',');
-        }
-        id_list.push_str(&format!("'{}'", escaped));
-    }
-
-    conn.execute(
-        &format!(
-            "UPDATE phrase_groups SET sort_order = CASE id{} END WHERE id IN ({})",
-            case_clauses, id_list
-        ),
-        [],
-    )
-    .map_err(|e| e.to_string())?;
+    write_id_order(&conn, "phrase_groups", &ids, |i, n| ((n - i) * 10) as f64)?;
 
     let _ = app.emit("phrase-groups-changed", ());
     log::info!("reorder_phrase_groups: {} items", ids.len());
@@ -5003,40 +4954,46 @@ pub fn reorder_phrase_groups(app: AppHandle, ids: Vec<String>) -> Result<(), Str
 pub fn reorder_phrases(app: AppHandle, ids: Vec<String>) -> Result<(), String> {
     let state = app.state::<DbState>();
     let conn = state.conn.lock().map_err(|e| e.to_string())?;
-    let n = ids.len();
+    write_id_order(&conn, "phrases", &ids, |i, n| ((n - i) * 10) as f64)?;
 
-    if ids.is_empty() {
+    log::info!("reorder_phrases: {} items", ids.len());
+    Ok(())
+}
+
+/// 按传入顺序为 ids 写 sort_order：第 i 个 id 的 sort_order 由
+/// value(i, n) 计算。置顶与重排序共用的唯一写序实现；表名来自内部
+/// 常量调用点，不引入注入风险；id 值做转义。
+fn write_id_order(
+    conn: &Connection,
+    table: &str,
+    ids: &[String],
+    value: impl Fn(usize, usize) -> f64,
+) -> Result<(), String> {
+    let n = ids.len();
+    if n == 0 {
         return Ok(());
     }
-
     let mut case_clauses = String::new();
     let mut id_list = String::new();
     for (i, id) in ids.iter().enumerate() {
         let escaped = id.replace('\'', "''");
-        case_clauses.push_str(&format!(" WHEN '{}' THEN {}", escaped, (n - i) * 10));
+        case_clauses.push_str(&format!(" WHEN '{}' THEN {}", escaped, value(i, n)));
         if i > 0 {
             id_list.push(',');
         }
         id_list.push_str(&format!("'{}'", escaped));
     }
-
     conn.execute(
-        &format!(
-            "UPDATE phrases SET sort_order = CASE id{} END WHERE id IN ({})",
-            case_clauses, id_list
-        ),
+        &format!("UPDATE {table} SET sort_order = CASE id{case_clauses} END WHERE id IN ({id_list})"),
         [],
     )
     .map_err(|e| e.to_string())?;
-
-    log::info!("reorder_phrases: {} items", ids.len());
     Ok(())
 }
 
 /// 将给定 id 的行按传入顺序依次置顶（第一个 id 最靠前）：sort_order 取
 /// 当前最大值之上的递减序。之后新写入的记录（sort_order 为时间戳）照常
 /// 插到最前面，被置顶内容随新内容积累自然下移。
-/// 表名来自内部常量调用点，不引入注入风险；id 值做转义。
 fn move_rows_to_top(conn: &Connection, table: &str, ids: &[String]) -> Result<(), String> {
     if ids.is_empty() {
         return Ok(());
@@ -5049,27 +5006,7 @@ fn move_rows_to_top(conn: &Connection, table: &str, ids: &[String]) -> Result<()
         )
         .map_err(|e| e.to_string())?;
 
-    let n = ids.len();
-    let mut case_clauses = String::new();
-    let mut id_list = String::new();
-    for (i, id) in ids.iter().enumerate() {
-        let escaped = id.replace('\'', "''");
-        case_clauses.push_str(&format!(" WHEN '{}' THEN {}", escaped, max + (n - i) as f64));
-        if i > 0 {
-            id_list.push(',');
-        }
-        id_list.push_str(&format!("'{}'", escaped));
-    }
-
-    conn.execute(
-        &format!(
-            "UPDATE {table} SET sort_order = CASE id{} END WHERE id IN ({})",
-            case_clauses, id_list
-        ),
-        [],
-    )
-    .map_err(|e| e.to_string())?;
-    Ok(())
+    write_id_order(conn, table, ids, |i, n| max + (n - i) as f64)
 }
 
 #[tauri::command]
