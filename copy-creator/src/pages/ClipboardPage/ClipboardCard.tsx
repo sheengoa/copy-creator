@@ -1,10 +1,15 @@
 import { useSortable } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
-import { useCallback, useState, useEffect, useRef } from "react";
+import { useCallback, useState, useEffect } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { useTranslation } from "react-i18next";
 import type { ClipboardRecord } from "../../types";
 import { Icons } from "../../components/Icons";
+import {
+  CardActionMenu,
+  CardActionMenuItem,
+  CardActionMenuSeparator,
+} from "../../components/CardActionMenu";
 import { InlineImagePreview, InlineTextFilePreview } from "../../components/InlinePreview";
 import { ImageThumb } from "./ImageThumb";
 import { formatTime, getFileName, TYPE_META } from "./utils";
@@ -208,7 +213,6 @@ function ClipboardCardInner({
   const [expanded, setExpanded] = useState(false);
   const [ctxMenu, setCtxMenu] = useState<{ x: number; y: number } | null>(null);
   const [labelOpen, setLabelOpen] = useState(false);
-  const ctxRef = useRef<HTMLDivElement>(null);
   const loadRecords = useClipboardStore((s) => s.loadRecords);
   const getRecordContent = useClipboardStore((s) => s.getRecordContent);
 
@@ -221,25 +225,6 @@ function ClipboardCardInner({
   useEffect(() => {
     setExpanded(false);
   }, [record.id, record.content]);
-
-  // Close context menu on outside click / ESC
-  useEffect(() => {
-    if (!ctxMenu) return;
-    const handler = (e: MouseEvent) => {
-      if (ctxRef.current && !ctxRef.current.contains(e.target as Node)) {
-        setCtxMenu(null);
-      }
-    };
-    const keyHandler = (e: KeyboardEvent) => {
-      if (e.key === "Escape") setCtxMenu(null);
-    };
-    document.addEventListener("mousedown", handler);
-    document.addEventListener("keydown", keyHandler);
-    return () => {
-      document.removeEventListener("mousedown", handler);
-      document.removeEventListener("keydown", keyHandler);
-    };
-  }, [ctxMenu]);
 
   const handlePaste = useCallback(() => {
     if (labelOpen) return;
@@ -278,8 +263,7 @@ function ClipboardCardInner({
   }, []);
 
   const handleToggleUserApiKey = useCallback(
-    async (e: React.MouseEvent) => {
-      e.stopPropagation();
+    async () => {
       setCtxMenu(null);
       const newValue = !record.user_api_key;
       try {
@@ -293,8 +277,7 @@ function ClipboardCardInner({
   );
 
   const handleCopyWithComment = useCallback(
-    async (e: React.MouseEvent) => {
-      e.stopPropagation();
+    async () => {
       setCtxMenu(null);
       if (!record.label) return;
       try {
@@ -445,6 +428,20 @@ function ClipboardCardInner({
                     <circle cx="15" cy="19" r="1.5" />
                   </svg>
                 </span>
+                {onMoveToTop && (
+                  <button
+                    className="card-move-top-btn"
+                    type="button"
+                    aria-label={t("common.moveToTop")}
+                    title={t("common.moveToTop")}
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      onMoveToTop(record.id);
+                    }}
+                  >
+                    {Icons.arrowUp}
+                  </button>
+                )}
                 <button className="card-delete-btn" onClick={handleDelete}>
                   {Icons.delete}
                 </button>
@@ -454,122 +451,120 @@ function ClipboardCardInner({
         </div>
       </div>
 
-      {/* Context menu */}
-      {ctxMenu && !selectionMode && (
-        <div
-          ref={ctxRef}
-          className="clipboard-ctx-menu"
-          style={{ top: ctxMenu.y, left: ctxMenu.x }}
-          onClick={(e) => e.stopPropagation()}
-        >
-          {record.is_api_key && (
-            <button
-              className="ctx-menu-item"
-              onClick={(e) => {
-                e.stopPropagation();
-                setCtxMenu(null);
-                setLabelOpen(true);
-              }}
-            >
+      {/* Context menu：统一走 CardActionMenu（portal 定位），避免被卡片 transform 影响 */}
+      <CardActionMenu
+        open={ctxMenu !== null && !selectionMode}
+        getAnchor={() => ctxMenu
+          ? { left: ctxMenu.x, top: ctxMenu.y, right: ctxMenu.x, bottom: ctxMenu.y }
+          : null}
+        onClose={() => setCtxMenu(null)}
+      >
+        {record.is_api_key && (
+          <CardActionMenuItem
+            className="ctx-menu-item"
+            icon={
               <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                 <path d="M20.59 13.41l-7.17 7.17a2 2 0 0 1-2.83 0L2 12V2h10l8.59 8.59a2 2 0 0 1 0 2.82z" />
                 <line x1="7" y1="7" x2="7.01" y2="7" />
               </svg>
-              标注 API 来源
-            </button>
-          )}
-          {record.is_api_key && hasLabel && (
-            <button className="ctx-menu-item" onClick={handleCopyWithComment}>
+            }
+            label="标注 API 来源"
+            onClick={() => setLabelOpen(true)}
+          />
+        )}
+        {record.is_api_key && hasLabel && (
+          <CardActionMenuItem
+            className="ctx-menu-item"
+            icon={
               <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                 <rect x="9" y="9" width="13" height="13" rx="2" ry="2" />
                 <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1" />
               </svg>
-              复制含注释
-            </button>
-          )}
-          {record.type === "text" && !record.is_api_key && (
-            <button className="ctx-menu-item" onClick={handleToggleUserApiKey}>
+            }
+            label="复制含注释"
+            onClick={() => void handleCopyWithComment()}
+          />
+        )}
+        {record.type === "text" && !record.is_api_key && (
+          <CardActionMenuItem
+            className="ctx-menu-item"
+            icon={
               <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                 <path d="M20.59 13.41l-7.17 7.17a2 2 0 0 1-2.83 0L2 12V2h10l8.59 8.59a2 2 0 0 1 0 2.82z" />
                 <line x1="7" y1="7" x2="7.01" y2="7" />
               </svg>
-              标记为 API Key
-            </button>
-          )}
-          {record.user_api_key && (
-            <button className="ctx-menu-item" onClick={handleToggleUserApiKey}>
+            }
+            label="标记为 API Key"
+            onClick={() => void handleToggleUserApiKey()}
+          />
+        )}
+        {record.user_api_key && (
+          <CardActionMenuItem
+            className="ctx-menu-item"
+            icon={
               <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                 <line x1="18" y1="6" x2="6" y2="18" />
                 <line x1="6" y1="6" x2="18" y2="18" />
               </svg>
-              取消 API Key 标记
-            </button>
-          )}
-          {(record.is_api_key || (record.type === "text" && !record.is_api_key)) && <div className="ctx-menu-sep" />}
-          <button
-            className="ctx-menu-item"
-            onClick={(e) => {
-              e.stopPropagation();
-              setCtxMenu(null);
-              handleSecondaryPaste();
-            }}
-          >
+            }
+            label="取消 API Key 标记"
+            onClick={() => void handleToggleUserApiKey()}
+          />
+        )}
+        {(record.is_api_key || (record.type === "text" && !record.is_api_key)) && (
+          <CardActionMenuSeparator />
+        )}
+        <CardActionMenuItem
+          className="ctx-menu-item"
+          icon={
             <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
               <rect x="9" y="9" width="13" height="13" rx="2" ry="2" />
               <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1" />
             </svg>
-            {pasteLeftClick === "terminal" ? t("clipboard.pasteNormal") : t("clipboard.pasteToTerminal")}
-          </button>
-          <button
-            className="ctx-menu-item"
-            onClick={(e) => {
-              e.stopPropagation();
-              setCtxMenu(null);
-              handlePaste();
-            }}
-          >
+          }
+          label={pasteLeftClick === "terminal" ? t("clipboard.pasteNormal") : t("clipboard.pasteToTerminal")}
+          onClick={handleSecondaryPaste}
+        />
+        <CardActionMenuItem
+          className="ctx-menu-item"
+          icon={
             <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
               <polyline points="4 17 10 11 4 5" />
               <line x1="12" y1="19" x2="20" y2="19" />
             </svg>
-            {pasteLeftClick === "terminal" ? t("clipboard.pasteToTerminal") : t("clipboard.pasteNormal")}
-          </button>
-          {onMoveToTop && (
-            <>
-              <div className="ctx-menu-sep" />
-              <button
-                className="ctx-menu-item"
-                onClick={(e) => {
-                  e.stopPropagation();
-                  setCtxMenu(null);
-                  onMoveToTop(record.id);
-                }}
-              >
+          }
+          label={pasteLeftClick === "terminal" ? t("clipboard.pasteToTerminal") : t("clipboard.pasteNormal")}
+          onClick={handlePaste}
+        />
+        {onMoveToTop && (
+          <>
+            <CardActionMenuSeparator />
+            <CardActionMenuItem
+              className="ctx-menu-item"
+              icon={
                 <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                   <line x1="12" y1="19" x2="12" y2="5" />
                   <polyline points="5 12 12 5 19 12" />
                 </svg>
-                {t("common.moveToTop")}
-              </button>
-            </>
-          )}
-          <div className="ctx-menu-sep" />
-          <button
-            className="ctx-menu-item danger"
-            onClick={(e) => {
-              e.stopPropagation();
-              setCtxMenu(null);
-              onDelete(record.id);
-            }}
-          >
+              }
+              label={t("common.moveToTop")}
+              onClick={() => onMoveToTop(record.id)}
+            />
+          </>
+        )}
+        <CardActionMenuSeparator />
+        <CardActionMenuItem
+          className="ctx-menu-item danger"
+          icon={
             <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
               <polyline points="3 6 5 6 21 6" />
               <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2" />
             </svg>
-            删除
-          </button>
-        </div>
-      )}
+          }
+          label={t("common.delete")}
+          onClick={() => onDelete(record.id)}
+        />
+      </CardActionMenu>
     </div>
   );
 }
