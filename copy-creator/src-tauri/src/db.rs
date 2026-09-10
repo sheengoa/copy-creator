@@ -1258,6 +1258,30 @@ pub fn read_resource_text_preview(app: AppHandle, path: String) -> Result<String
     read_resource_text_preview_file(path)
 }
 
+/// 粘贴场景的文本文件大小上限；预览是给人看的用 1 MB，粘贴是完整使用
+/// 内容，放宽到 10 MB，超出仍按文件粘贴。
+const RESOURCE_TEXT_PASTE_LIMIT_BYTES: u64 = 10 * 1024 * 1024;
+
+/// 读取资源库内文本文件的完整内容，供「文件承载的文本资源」按内容粘贴使用。
+/// 路径必须是资源库内的文件；超过大小上限或内容不是有效 UTF-8 时返回错误，
+/// 由前端回退为文件粘贴。
+pub fn read_text_file_content_inner<R: Runtime>(
+    app: &AppHandle<R>,
+    path: &str,
+) -> Result<String, String> {
+    let target = resolve_resource_file_path(app, path)?;
+    let metadata = std::fs::metadata(&target).map_err(|e| format!("读取文件失败: {e}"))?;
+    if metadata.len() > RESOURCE_TEXT_PASTE_LIMIT_BYTES {
+        return Err("文本文件超过 10 MB，无法按内容粘贴".to_string());
+    }
+    std::fs::read_to_string(&target).map_err(|e| format!("读取文本文件失败: {e}"))
+}
+
+#[tauri::command]
+pub fn read_text_file_content(app: AppHandle, path: String) -> Result<String, String> {
+    read_text_file_content_inner(&app, &path)
+}
+
 /// 保存资源详情页编辑后的文本正文。文件承载的文本是唯一事实来源；
 /// 数据库记录（id 非空时）的 content 与文件同步。编辑不改动 sort_order，
 /// 避免卡片在列表里跳位。
@@ -5530,12 +5554,13 @@ mod resource_command_tests {
     use super::{
         create_resource_group_inner, delete_external_resource_file, delete_resource_group_inner,
         get_clipboard_records_inner, get_resource_groups_inner, move_resource_group_inner,
-        move_resource_records_inner, read_resource_text_preview_file, rename_resource_file_inner,
+        move_resource_records_inner, read_resource_text_preview_file, read_text_file_content_inner,
+        rename_resource_file_inner,
         reorder_resource_groups_inner, resolve_resource_file_path, resource_file_id,
         resource_folder_tree, resource_group_count_map, set_resource_note_inner,
         simplify_windows_path, restore_staged_external_resource_files,
         stage_external_resource_files, validate_resource_rename_stem, update_resource_group_inner,
-        DbState,
+        DbState, RESOURCE_TEXT_PASTE_LIMIT_BYTES,
     };
     use rusqlite::Connection;
     use std::path::{Path, PathBuf};
@@ -6214,6 +6239,46 @@ mod resource_command_tests {
                 .as_ref()
         )
         .is_err());
+        let _ = std::fs::remove_file(outside);
+        cleanup(&root);
+    }
+
+    #[test]
+    fn text_file_content_read_is_limited_to_library_text_files() {
+        let (app, root) = test_app();
+        let text = root.join("分镜提词/镜头.txt");
+        std::fs::create_dir_all(text.parent().unwrap()).unwrap();
+        std::fs::write(&text, "第一行\n第二行\n").unwrap();
+        assert_eq!(
+            read_text_file_content_inner(app.handle(), text.to_string_lossy().as_ref()).unwrap(),
+            "第一行\n第二行\n"
+        );
+
+        // 非 UTF-8 内容读取失败，交由前端回退为文件粘贴。
+        let binary = root.join("binary.txt");
+        std::fs::write(&binary, [0xff, 0xfe, 0xfd]).unwrap();
+        assert!(read_text_file_content_inner(app.handle(), binary.to_string_lossy().as_ref())
+            .is_err());
+
+        // 超过粘贴大小上限的文本文件拒绝读取。
+        let oversized = root.join("oversized.txt");
+        let oversized_text = "好".repeat((RESOURCE_TEXT_PASTE_LIMIT_BYTES / 3 + 1) as usize);
+        std::fs::write(&oversized, &oversized_text).unwrap();
+        assert!(
+            std::fs::metadata(&oversized).unwrap().len() > RESOURCE_TEXT_PASTE_LIMIT_BYTES
+        );
+        assert!(read_text_file_content_inner(app.handle(), oversized.to_string_lossy().as_ref())
+            .is_err());
+
+        // 资源库外的路径一律拒绝。
+        let outside = root.parent().unwrap().join(format!(
+            "copy-creator-resource-outside-{}.txt",
+            uuid::Uuid::new_v4()
+        ));
+        std::fs::write(&outside, "outside").unwrap();
+        assert!(
+            read_text_file_content_inner(app.handle(), outside.to_string_lossy().as_ref()).is_err()
+        );
         let _ = std::fs::remove_file(outside);
         cleanup(&root);
     }
