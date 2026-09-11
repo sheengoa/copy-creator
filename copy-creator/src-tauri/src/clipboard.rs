@@ -718,18 +718,34 @@ fn make_text_event_content(record_type: &str, content: &str) -> (String, i64, bo
 
 /// 从剪贴板文件格式读取文件路径列表（Windows CF_HDROP /
 /// Linux text/uri-list）。剪贴板没有文件格式时返回 None。
+/// arboard 在 Linux 解析 `text/uri-list` 时只按 `\n` 切分，而该格式以
+/// `\r\n` 分行，解析出的路径因此带上行尾 `\r`。脏字符会让图片扩展名
+/// 判断、文件读取与后续的粘贴、拖出全部失效，统一剥去首尾空白。
+fn sanitize_clipboard_file_paths(paths: Vec<String>) -> Vec<String> {
+    paths
+        .into_iter()
+        .map(|path| path.trim().to_string())
+        .filter(|path| !path.is_empty())
+        .collect()
+}
+
 fn clipboard_file_list() -> Option<Vec<String>> {
     let mut clipboard = arboard::Clipboard::new().ok()?;
     let paths = clipboard.get().file_list().ok()?;
     if paths.is_empty() {
         return None;
     }
-    Some(
+    let files = sanitize_clipboard_file_paths(
         paths
             .into_iter()
             .map(|path| path.to_string_lossy().into_owned())
             .collect(),
-    )
+    );
+    if files.is_empty() {
+        None
+    } else {
+        Some(files)
+    }
 }
 
 fn clipboard_text_files(text: &str) -> Vec<String> {
@@ -1221,9 +1237,25 @@ pub fn start_monitor(app: &AppHandle) -> Result<(), Box<dyn std::error::Error>> 
 mod tests {
     use super::{
         clipboard_text_files, encode_rgba_png, parse_file_uri, render_resource_markdown,
-        sanitize_resource_file_stem, stash_content_for_display, validate_stash_content,
+        sanitize_clipboard_file_paths, sanitize_resource_file_stem, stash_content_for_display,
+        validate_stash_content,
     };
     use base64::Engine;
+
+    #[test]
+    fn strips_carriage_returns_from_uri_list_file_paths() {
+        assert_eq!(
+            sanitize_clipboard_file_paths(vec![
+                "/home/ao/图片/微信图片.jpg\r".to_string(),
+                " /tmp/a b.png \r\n".to_string(),
+                "\r".to_string(),
+            ]),
+            vec![
+                "/home/ao/图片/微信图片.jpg".to_string(),
+                "/tmp/a b.png".to_string(),
+            ]
+        );
+    }
 
     #[test]
     fn parses_local_file_uri_with_original_filename() {
