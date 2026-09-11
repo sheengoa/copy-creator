@@ -774,9 +774,11 @@ fn clipboard_text_files(text: &str) -> Vec<String> {
 fn import_image_file(app: &AppHandle, file_path: &str) -> bool {
     let file_size = std::fs::metadata(file_path).map(|m| m.len()).unwrap_or(0);
 
-    let should_import = crate::media_kind::is_previewable_image_file(std::path::Path::new(file_path))
-        .then(|| file_size < IMAGE_PREVIEW_MAX_BYTES)
-        .unwrap_or(true);
+    let should_import = if crate::media_kind::is_previewable_image_file(std::path::Path::new(file_path)) {
+        file_size < IMAGE_PREVIEW_MAX_BYTES
+    } else {
+        true
+    };
 
     if !should_import {
         return false;

@@ -20,6 +20,18 @@ pub enum MediaKind {
     File,
 }
 
+impl MediaKind {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            MediaKind::Image => "image",
+            MediaKind::Video => "video",
+            MediaKind::Audio => "audio",
+            MediaKind::Text => "text",
+            MediaKind::File => "file",
+        }
+    }
+}
+
 /// 统一判定顺序：image → video → audio → text（与前端 domain/mediaKind 一致；
 /// 清单互斥，顺序仅影响可读性）。
 pub fn media_kind_for_path(path: &Path) -> MediaKind {
@@ -42,18 +54,6 @@ fn extension_matches(path: &Path, list: &[&str]) -> bool {
     path.extension()
         .and_then(OsStr::to_str)
         .is_some_and(|extension| list.contains(&extension.to_ascii_lowercase().as_str()))
-}
-
-pub fn is_image_extension(path: &Path) -> bool {
-    extension_matches(path, IMAGE_EXTENSIONS)
-}
-
-pub fn is_video_extension(path: &Path) -> bool {
-    extension_matches(path, VIDEO_EXTENSIONS)
-}
-
-pub fn is_audio_extension(path: &Path) -> bool {
-    extension_matches(path, AUDIO_EXTENSIONS)
 }
 
 pub fn is_text_extension(path: &Path) -> bool {

@@ -1,7 +1,6 @@
 use rusqlite::{params, Connection, OptionalExtension};
 use std::collections::{HashMap, HashSet};
 use std::ffi::OsStr;
-use std::io::Read;
 use std::path::{Component, Path, PathBuf};
 use std::sync::Mutex;
 use tauri::{AppHandle, Emitter, Manager, Runtime};
@@ -428,19 +427,7 @@ struct ResourceFileEntry {
 }
 
 fn resource_media_kind_for_path(path: &Path) -> &'static str {
-    if crate::media_kind::is_image_extension(path) {
-        return "image";
-    }
-    if crate::media_kind::is_video_extension(path) {
-        return "video";
-    }
-    if crate::media_kind::is_audio_extension(path) {
-        return "audio";
-    }
-    if crate::media_kind::is_text_extension(path) || crate::media_kind::is_probably_text_file(path) {
-        return "text";
-    }
-    "file"
+    crate::media_kind::media_kind_for_path(path).as_str()
 }
 
 fn resource_file_id(path: &Path) -> String {
