@@ -1,5 +1,5 @@
+import { getResourceFileThumbnail, openResourceFile } from "../../domain/mediaAssets";
 import { useEffect, useRef, useState } from "react";
-import { invoke } from "@tauri-apps/api/core";
 import { useTranslation } from "react-i18next";
 import type { RadialPreviewSegment } from "../../utils/radialPreview";
 import { Icons } from "../../components/Icons";
@@ -89,7 +89,7 @@ export function ResourceFileImage({
     let cancelled = false;
     setSrc("");
     setFailed(false);
-    invoke<string>("get_resource_file_thumbnail", { path, maxSize: 256 })
+    getResourceFileThumbnail(path, 256)
       .then((base64) => {
         if (cancelled) return;
         const dataUrl = `data:image/png;base64,${base64}`;
@@ -376,7 +376,7 @@ export function ResourceMediaPlayer({
   const openInSystemPlayer = async () => {
     setOpenFailed(false);
     try {
-      await invoke("open_resource_file", { path });
+      await openResourceFile(path);
     } catch {
       setOpenFailed(true);
     }

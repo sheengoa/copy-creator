@@ -29,7 +29,7 @@ function stripWindowsPathPrefix(value: string): string {
 let storagePathPromise: Promise<string> | null = null;
 let mediaServerPromise: Promise<{ origin: string; token: string }> | null = null;
 
-function getStoragePath(): Promise<string> {
+export function getStoragePath(): Promise<string> {
   if (!storagePathPromise) {
     storagePathPromise = invoke<string>("get_storage_path").catch((error) => {
       storagePathPromise = null;

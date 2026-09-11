@@ -1,3 +1,4 @@
+import { readResourceTextPreview } from "../../domain/mediaAssets";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { useTranslation } from "react-i18next";
@@ -188,7 +189,7 @@ export default function ResourceDetailPage({
     }
 
     if (externalTextPath) {
-      invoke<string>("read_resource_text_preview", { path: externalTextPath })
+      readResourceTextPreview(externalTextPath)
         .then((content) => {
           if (!cancelled) setTextContent(content);
         })

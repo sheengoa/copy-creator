@@ -1,5 +1,5 @@
+import { readClipboardTextPreviewById, readQuickInputTextPreview, readResourceTextPreview } from "../domain/mediaAssets";
 import { useEffect, useState } from "react";
-import { invoke } from "@tauri-apps/api/core";
 import { useTranslation } from "react-i18next";
 import { HighlightText } from "./HighlightText";
 import { Icons } from "./Icons";
@@ -75,7 +75,7 @@ function loadResourceTextPreview(path: string, version?: string): Promise<string
   const pending = resourceTextPreviewRequests.get(cacheKey);
   if (pending) return pending;
 
-  const request = invoke<string>("read_resource_text_preview", { path })
+  const request = readResourceTextPreview(path)
     .then((text) => {
       resourceTextPreviewCache.set(cacheKey, text);
       return text;
@@ -105,8 +105,8 @@ export function InlineTextFilePreview({
     const request = resourcePath
       ? loadResourceTextPreview(resourcePath, resourceVersion)
       : recordId
-        ? invoke<string>("read_clipboard_text_preview", { id: recordId })
-        : invoke<string>("read_quick_input_text_preview", { path });
+        ? readClipboardTextPreviewById(recordId)
+        : readQuickInputTextPreview(path ?? "");
     request
       .then((text) => {
         if (!cancelled) setContent(text);

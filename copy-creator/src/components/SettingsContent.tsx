@@ -1,3 +1,4 @@
+import { getStoragePath } from "../domain/mediaUrl";
 import { useState, useEffect, useRef } from "react";
 import { useTranslation } from "react-i18next";
 import { invoke } from "@tauri-apps/api/core";
@@ -50,7 +51,7 @@ export default function SettingsContent({ embedded }: Props) {
 
   useEffect(() => {
     loadSettings();
-    invoke<string>("get_storage_path").then(setStoragePath).catch(console.error);
+    getStoragePath().then(setStoragePath).catch(console.error);
   }, [loadSettings]);
 
   useEffect(() => {

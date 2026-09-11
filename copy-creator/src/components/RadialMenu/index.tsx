@@ -1,3 +1,4 @@
+import { getImageThumbnail, readResourceTextPreview, readTextFileContent } from "../../domain/mediaAssets";
 import { useEffect, useRef, useState, useCallback, type CSSProperties } from "react";
 import { createPortal } from "react-dom";
 import { useTranslation } from "react-i18next";
@@ -224,7 +225,7 @@ function FileThumb({ path }: { path: string }) {
 
   useEffect(() => {
     let cancelled = false;
-    invoke<string>("get_image_thumbnail", { path, maxSize: 200 })
+    getImageThumbnail(path, 200)
       .then((base64) => {
         if (!cancelled) setSrc(`data:image/png;base64,${base64}`);
       })
@@ -636,9 +637,7 @@ export default function RadialMenu() {
           // 文本文件按扩展名判定读取实际内容，不依赖 resource_kind；
           // 读取失败时回退为路径展示。
           try {
-            const text = await invoke<string>("read_resource_text_preview", {
-              path: resourcePath,
-            });
+            const text = await readResourceTextPreview(resourcePath);
             segments = [{ type: "text", content: text }];
           } catch {
             segments = [{ type: "text", content: resourcePath }];
@@ -1013,9 +1012,7 @@ export default function RadialMenu() {
             if (isFileBackedTextResource(record)) {
               try {
                 parts.push(
-                  await invoke<string>("read_text_file_content", {
-                    path: getResourcePath(record),
-                  }),
+                  await readTextFileContent(getResourcePath(record)),
                 );
               } catch (error) {
                 console.error("Failed to read text resource for group paste:", error);

@@ -73,12 +73,4 @@ export default defineConfig([
       'no-restricted-syntax': 'off',
     },
   },
-  {
-    // 过渡降级：UI 层仍有 6 处待收编（InlinePreview/RadialMenu/SettingsContent/
-    // ResourceDetailPage/ResourceMedia），收编完成后删掉本段恢复 error。
-    files: ['src/components/**', 'src/pages/**'],
-    rules: {
-      'no-restricted-syntax': 'warn',
-    },
-  },
 ])

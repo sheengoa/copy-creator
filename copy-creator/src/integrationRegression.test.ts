@@ -322,7 +322,7 @@ describe("integration regressions", () => {
     expect(detailPageSource).toContain("getResourcePath");
     const mediaSource = readSource("./pages/ResourcePage/ResourceMedia.tsx");
     const resourceStyles = readSource("./styles/resource.css");
-    expect(mediaSource).toContain('open_resource_file');
+    expect(mediaSource).toContain('openResourceFile(path)');
     expect(mediaSource).toContain('errorName !== "AbortError"');
     expect(mediaSource).toContain("if (failed || mediaFailed)");
     expect(mediaSource).toContain("onLoadedMetadata");
@@ -378,7 +378,7 @@ describe("integration regressions", () => {
     // 详情页与展开预览仍保留 ResourceImage 原图（见上方 detail 断言）。
     expect(cardSource).toContain("<ResourceFileImage");
     expect(radialSource).toContain("<ResourceFileImage");
-    expect(mediaSource).toContain('invoke<string>("get_resource_file_thumbnail"');
+    expect(mediaSource).toContain('getResourceFileThumbnail(path, 256)');
     expect(mediaSource).toContain('loading="lazy"');
     expect(mediaSource).toContain('decoding="async"');
     expect(mediaSource).toContain("return <ResourceImage path={path} alt={alt} className={className} />;");
@@ -460,8 +460,8 @@ describe("integration regressions", () => {
     expect(cardSource).toContain("view.expandPreview");
     expect(clipboardStyles).not.toContain(".main-window-content-preview");
     expect(persistWindowSize).not.toContain("data-main-content-preview");
-    expect(inlinePreview).toContain('read_quick_input_text_preview');
-    expect(inlinePreview).toContain('read_clipboard_text_preview');
+    expect(readSource('./domain/mediaAssets.ts')).toContain('read_quick_input_text_preview');
+    expect(inlinePreview).toContain('readClipboardTextPreviewById');
     expect(inlinePreview).toContain("resolveResourceAssetUrl");
     expect(dbSource).toContain("read_quick_input_text_preview");
     expect(dbSource).toContain("read_clipboard_text_preview");
