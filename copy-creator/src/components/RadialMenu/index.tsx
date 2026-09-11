@@ -38,7 +38,8 @@ import { FileMediaVisual } from "../FileMediaPreview";
 import { BackToTopButton } from "../BackToTop";
 import { useBackToTop } from "../../hooks/useBackToTop";
 import { InlineTextFilePreview } from "../InlinePreview";
-import { loadClipboardPreviewSegments } from "../../utils/contentPreview";
+import { loadRecordPreviewSegments } from "../../domain/preview";
+import { buildRecordView } from "../../domain/recordView";
 import { isResourceRecord } from "../../utils/clipboardRecord";
 import { formatTime, formatRelativeTime } from "../../utils/formatTime";
 import { fileNameFromPath } from "../../utils/fileName";
@@ -51,7 +52,6 @@ import {
   getResourceExtension,
   getResourcePath,
   getResourceSummary,
-  getResourceTitle,
   inferResourceMediaKind,
   isFileBackedTextResource,
   isResourceFolderPath,
@@ -126,6 +126,8 @@ interface RadialItem {
   imagePath?: string;
   /** 剪切板 file 记录的完整本地路径：条目据此渲染视频封面帧等媒体视觉。 */
   filePath?: string;
+  /** filePath 的媒体视觉判定（映射时经 domain 计算，渲染层只读不判）。 */
+  fileMediaKind?: "video" | "audio" | "image" | null;
   createdAt?: string;
   title?: string;
   contentTruncated?: boolean;
@@ -291,7 +293,7 @@ function ResourceItemVisual({ item }: { item: RadialItem }) {
     );
   }
 
-  if (kind === "video" && item.resourcePath && fileMediaKindFromPath(item.resourcePath)) {
+  if (kind === "video" && item.resourcePath) {
     return (
       <FileMediaVisual
         path={item.resourcePath}
@@ -658,7 +660,13 @@ export default function RadialMenu() {
           segments = [{ type: "text", content }];
         }
       } else {
-        segments = await loadClipboardPreviewSegments(record);
+        segments = await loadRecordPreviewSegments({
+          id: record.id,
+          recordType: record.type,
+          content: record.content,
+          contentTruncated: Boolean(record.content_truncated),
+          hasImages: Boolean(record.has_images),
+        });
       }
     } else {
       const phrase = usePhraseStore.getState().phrases.find((entry) => entry.id === item.id);
@@ -1497,9 +1505,10 @@ export default function RadialMenu() {
   // 三类来源统一映射为 RadialItem，「最近使用」复用同一套渲染、预览与拖出机制。
   const recordToRadialItem = (r: ClipboardRecord): RadialItem => {
     if (isResourceRecord(r)) {
-      const resourceKind = inferResourceMediaKind(r);
-      const resourcePath = getResourcePath(r);
-      const resourceTitle = getResourceTitle(r, resourceKind);
+      const item = buildRecordView(r);
+      const resourceKind = item.kind;
+      const resourcePath = item.resourcePath ?? r.content;
+      const resourceTitle = item.title;
       const resourceSummary = r.type === "file"
         ? undefined
         : getResourceSummary(r);
@@ -1535,6 +1544,7 @@ export default function RadialMenu() {
             : r.content,
       type: r.type,
       filePath: r.type === "file" ? r.content : undefined,
+      fileMediaKind: r.type === "file" ? fileMediaKindFromPath(r.content) : undefined,
       createdAt: r.created_at,
       contentTruncated: r.content_truncated,
       previewAvailable: isContentPreviewAvailable({
@@ -1912,7 +1922,7 @@ export default function RadialMenu() {
                       <ImageThumb recordId={item.id} />
                     ) : item.imagePath ? (
                       <FileThumb path={item.imagePath} />
-                    ) : item.filePath && fileMediaKindFromPath(item.filePath) ? (
+                    ) : item.filePath && item.fileMediaKind ? (
                       <FileMediaVisual
                         path={item.filePath}
                         className="radial-menu-file-media"
