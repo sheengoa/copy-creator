@@ -1,4 +1,5 @@
-import { getImageThumbnail, readResourceTextPreview, readTextFileContent } from "../../domain/mediaAssets";
+import { FileThumb } from "./FileThumb";
+import { readResourceTextPreview, readTextFileContent } from "../../domain/mediaAssets";
 import { useEffect, useRef, useState, useCallback, type CSSProperties } from "react";
 import { createPortal } from "react-dom";
 import { useTranslation } from "react-i18next";
@@ -215,31 +216,6 @@ function ImageThumb({
       style={wide
         ? { display: "block", width: "100%", maxHeight: 120, objectFit: "contain", borderRadius: 6 }
         : { width: 48, height: 36, objectFit: "contain", borderRadius: 5 }}
-    />
-  );
-}
-
-/** 图像文件短语的缩略图（content 为相对存储目录的路径），加载失败回退文件名。 */
-function FileThumb({ path }: { path: string }) {
-  const [src, setSrc] = useState("");
-
-  useEffect(() => {
-    let cancelled = false;
-    getImageThumbnail(path, 200)
-      .then((base64) => {
-        if (!cancelled) setSrc(`data:image/png;base64,${base64}`);
-      })
-      .catch(() => {});
-    return () => { cancelled = true; };
-  }, [path]);
-
-  if (!src) return <span className="radial-menu-item-text">{fileNameFromPath(path)}</span>;
-  return (
-    <img
-      src={src}
-      alt=""
-      draggable={false}
-      style={{ width: 48, height: 36, objectFit: "contain", borderRadius: 5 }}
     />
   );
 }
