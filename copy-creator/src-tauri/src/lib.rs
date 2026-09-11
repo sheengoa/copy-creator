@@ -3,7 +3,9 @@ mod clipboard;
 mod db;
 #[cfg(target_os = "linux")]
 mod ipc;
+mod media_kind;
 mod media_server;
+mod media_types_generated;
 mod paste;
 mod radial_drag;
 mod resource_watch;

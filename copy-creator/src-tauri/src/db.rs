@@ -427,156 +427,17 @@ struct ResourceFileEntry {
     sort_order: f64,
 }
 
-fn resource_file_extension(path: &Path) -> Option<String> {
-    path.extension()
-        .and_then(OsStr::to_str)
-        .map(|extension| extension.to_ascii_lowercase())
-}
-
-fn is_resource_text_extension(path: &Path) -> bool {
-    resource_file_extension(path).is_some_and(|extension| {
-        matches!(
-            extension.as_str(),
-            "bat"
-                | "bash"
-                | "c"
-                | "cc"
-                | "cfg"
-                | "clj"
-                | "conf"
-                | "cpp"
-                | "cs"
-                | "css"
-                | "cxx"
-                | "env"
-                | "fish"
-                | "go"
-                | "graphql"
-                | "h"
-                | "hh"
-                | "hpp"
-                | "htm"
-                | "html"
-                | "ini"
-                | "java"
-                | "js"
-                | "json"
-                | "jsonl"
-                | "jsx"
-                | "kt"
-                | "kts"
-                | "less"
-                | "log"
-                | "markdown"
-                | "md"
-                | "mjs"
-                | "php"
-                | "pl"
-                | "properties"
-                | "ps1"
-                | "py"
-                | "rb"
-                | "rs"
-                | "sass"
-                | "scss"
-                | "sh"
-                | "sql"
-                | "svg"
-                | "svelte"
-                | "swift"
-                | "tex"
-                | "toml"
-                | "ts"
-                | "tsx"
-                | "txt"
-                | "vue"
-                | "xml"
-                | "yaml"
-                | "yml"
-        )
-    })
-}
-
-fn is_resource_image_extension(path: &Path) -> bool {
-    resource_file_extension(path).is_some_and(|extension| {
-        matches!(
-            extension.as_str(),
-            "avif"
-                | "bmp"
-                | "gif"
-                | "heic"
-                | "heif"
-                | "ico"
-                | "jpeg"
-                | "jpg"
-                | "png"
-                | "svg"
-                | "tif"
-                | "tiff"
-                | "webp"
-        )
-    })
-}
-
-fn is_resource_video_extension(path: &Path) -> bool {
-    resource_file_extension(path).is_some_and(|extension| {
-        matches!(
-            extension.as_str(),
-            "avi" | "m4v" | "mkv" | "mov" | "mp4" | "ogv" | "ts" | "webm"
-        )
-    })
-}
-
-fn is_resource_audio_extension(path: &Path) -> bool {
-    resource_file_extension(path).is_some_and(|extension| {
-        matches!(
-            extension.as_str(),
-            "aac"
-                | "flac"
-                | "m4a"
-                | "mid"
-                | "midi"
-                | "mp3"
-                | "oga"
-                | "ogg"
-                | "opus"
-                | "wav"
-                | "weba"
-        )
-    })
-}
-
-fn is_probably_text_file(path: &Path) -> bool {
-    let Ok(metadata) = std::fs::metadata(path) else {
-        return false;
-    };
-    if !metadata.is_file() || metadata.len() == 0 {
-        return false;
-    }
-
-    let Ok(mut file) = std::fs::File::open(path) else {
-        return false;
-    };
-    let mut sample = [0_u8; 8192];
-    let Ok(bytes_read) = file.read(&mut sample) else {
-        return false;
-    };
-    bytes_read > 0
-        && !sample[..bytes_read].contains(&0)
-        && std::str::from_utf8(&sample[..bytes_read]).is_ok()
-}
-
 fn resource_media_kind_for_path(path: &Path) -> &'static str {
-    if is_resource_image_extension(path) {
+    if crate::media_kind::is_image_extension(path) {
         return "image";
     }
-    if is_resource_video_extension(path) {
+    if crate::media_kind::is_video_extension(path) {
         return "video";
     }
-    if is_resource_audio_extension(path) {
+    if crate::media_kind::is_audio_extension(path) {
         return "audio";
     }
-    if is_resource_text_extension(path) || is_probably_text_file(path) {
+    if crate::media_kind::is_text_extension(path) || crate::media_kind::is_probably_text_file(path) {
         return "text";
     }
     "file"
@@ -1173,7 +1034,7 @@ fn is_quick_input_text_preview_path(path: &str) -> bool {
 // 与资源区可预览文本共用同一份扩展名清单（md/json/yaml 及各类代码等），
 // 避免出现「资源区能预览、快捷输入/剪切板不能」的割裂。
 fn is_text_preview_extension(path: &Path) -> bool {
-    is_resource_text_extension(path)
+    crate::media_kind::is_text_extension(path)
 }
 
 /// 校验路径是不超过上限的文件，返回 metadata。预览读取、预检与写入
@@ -1207,7 +1068,7 @@ fn read_text_preview_file(path: PathBuf) -> Result<String, String> {
 }
 
 fn read_resource_text_preview_file(path: PathBuf) -> Result<String, String> {
-    if !is_resource_text_extension(&path) && !is_probably_text_file(&path) {
+    if !crate::media_kind::is_text_extension(&path) && !crate::media_kind::is_probably_text_file(&path) {
         return Err("当前文件不是可预览的文本文件".to_string());
     }
     read_capped_text_file(&path)
@@ -1305,7 +1166,7 @@ pub fn write_resource_text_content(
         return Err("内容不能为空".to_string());
     }
     let target = resolve_resource_file_path(&app, &path)?;
-    if !is_resource_text_extension(&target) && !is_probably_text_file(&target) {
+    if !crate::media_kind::is_text_extension(&target) && !crate::media_kind::is_probably_text_file(&target) {
         return Err("当前文件不是可编辑的文本文件".to_string());
     }
     ensure_capped_file(&target, QUICK_INPUT_TEXT_PREVIEW_LIMIT_BYTES, "文本内容不能超过 1 MB")?;
@@ -5385,7 +5246,7 @@ mod quick_input_file_tests {
 #[cfg(test)]
 mod resource_file_tests {
     use super::{
-        is_resource_text_extension, managed_resource_attachment_path, managed_resource_file_path,
+        managed_resource_attachment_path, managed_resource_file_path,
         normalize_resource_folder_path, normalize_resource_group_name,
         resource_folder_for_path, resource_group_for_path, resource_media_kind_for_path,
         scan_resource_files,
@@ -5680,7 +5541,7 @@ mod resource_file_tests {
                 ("root.txt".to_string(), "".to_string(), "text"),
             ]
         );
-        assert!(is_resource_text_extension(&root.join("README.MD")));
+        assert!(crate::media_kind::is_text_extension(&root.join("README.MD")));
         assert_eq!(
             resource_media_kind_for_path(&root.join("unknown.bin")),
             "file"

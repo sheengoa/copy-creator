@@ -83,25 +83,31 @@ function getStashImages(id: string): Promise<string[]> {
 }
 
 // 截断记录的完整内容（非截断记录直接用 content，无缓存语义）。
-async function getRecordFullContent(record: Pick<ClipboardRecord, "id" | "content" | "content_truncated">): Promise<string> {
-  if (!record.content_truncated) return record.content;
+async function getRecordFullContent(record: RecordPreviewInput): Promise<string> {
+  if (!record.contentTruncated) return record.content;
   return invoke<string>("get_clipboard_record_content", { id: record.id });
 }
 
+/** 预览输入：RecordView 与原始记录均可直接满足（判定字段来自 domain）。 */
+export interface RecordPreviewInput {
+  id: string;
+  recordType: ClipboardRecord["type"];
+  content: string;
+  contentTruncated: boolean;
+  hasImages: boolean;
+}
+
 export async function loadRecordPreviewSegments(
-  record: Pick<
-    ClipboardRecord,
-    "id" | "type" | "content" | "content_truncated" | "has_images"
-  >,
+  record: RecordPreviewInput,
 ): Promise<RadialPreviewSegment[]> {
-  if (record.type === "image") {
+  if (record.recordType === "image") {
     return [{ type: "image", path: record.content }];
   }
 
   // 文件记录：图片/视频/音频按媒体预览（径向菜单预览面板、资源详情页与
   // 主窗口展开预览共用此判定）；常见文本格式读取内容预览；其余格式回退
   // 为路径展示。
-  if (record.type === "file") {
+  if (record.recordType === "file") {
     const mediaKind = fileMediaKindFromPath(record.content);
     if (mediaKind) {
       return [{ type: mediaKind, path: record.content }];
@@ -121,7 +127,7 @@ export async function loadRecordPreviewSegments(
 
   const [content, imagePaths] = await Promise.all([
     getRecordFullContent(record),
-    record.has_images ? getStashImages(record.id) : Promise.resolve([]),
+    record.hasImages ? getStashImages(record.id) : Promise.resolve([]),
   ]);
   return buildRadialPreviewSegments(content, imagePaths);
 }

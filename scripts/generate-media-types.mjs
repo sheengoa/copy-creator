@@ -15,7 +15,7 @@ import { argv } from "node:process";
 const repoRoot = resolve(argv[2] ?? join(dirname(fileURLToPath(import.meta.url)), ".."));
 const configPath = join(repoRoot, "config", "media-types.json");
 const tsOutPath = join(repoRoot, "copy-creator", "src", "domain", "mediaTypes.generated.ts");
-const rsOutPath = join(repoRoot, "copy-creator", "src-tauri", "src", "media_types.generated.rs");
+const rsOutPath = join(repoRoot, "copy-creator", "src-tauri", "src", "media_types_generated.rs");
 
 // —— 配置严格校验：未知字段、空清单、重复/非法扩展名一律报错退出 ——
 // （"$" 前缀键是 JSON 惯例注释位，校验器放行。）

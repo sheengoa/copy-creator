@@ -49,24 +49,8 @@ fn api_key_metadata(
     }
 }
 
-fn is_previewable_image_file(path: &str) -> bool {
-    let lower = path.to_lowercase();
-    lower.ends_with(".jpg") || lower.ends_with(".jpeg") || lower.ends_with(".png")
-}
-
 const IMAGE_PREVIEW_MAX_BYTES: u64 = 3 * 1024 * 1024;
 const TEXT_EVENT_PREVIEW_CHARS: usize = 600;
-
-fn is_image_file(path: &str) -> bool {
-    let lower = path.to_lowercase();
-    lower.ends_with(".png")
-        || lower.ends_with(".jpg")
-        || lower.ends_with(".jpeg")
-        || lower.ends_with(".gif")
-        || lower.ends_with(".bmp")
-        || lower.ends_with(".webp")
-        || lower.ends_with(".ico")
-}
 
 /// Decode percent-encoded characters in a file:// URI path component.
 fn percent_decode(s: &str) -> String {
@@ -790,7 +774,7 @@ fn clipboard_text_files(text: &str) -> Vec<String> {
 fn import_image_file(app: &AppHandle, file_path: &str) -> bool {
     let file_size = std::fs::metadata(file_path).map(|m| m.len()).unwrap_or(0);
 
-    let should_import = is_previewable_image_file(file_path)
+    let should_import = crate::media_kind::is_previewable_image_file(std::path::Path::new(file_path))
         .then(|| file_size < IMAGE_PREVIEW_MAX_BYTES)
         .unwrap_or(true);
 
@@ -1211,7 +1195,8 @@ pub fn start_monitor(app: &AppHandle) -> Result<(), Box<dyn std::error::Error>> 
                             continue;
                         }
                         let is_image =
-                            is_previewable_image_file(&file_path) || is_image_file(&file_path);
+                            crate::media_kind::is_previewable_image_file(std::path::Path::new(&file_path))
+                                || crate::media_kind::is_importable_image_file(std::path::Path::new(&file_path));
                         if is_image && import_image_file(&handle, &file_path) {
                             continue;
                         }
