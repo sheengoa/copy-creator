@@ -275,7 +275,10 @@ function ClipboardCardInner({
             )
           ) : view.recordType === "file" ? (
             <>
-              <FileMediaVisual path={view.content} />
+              {/* 展开显示媒体/大图时隐藏封面帧：视觉上封面被"拉大"为预览，不再叠两个 */}
+              {(!expanded || view.expandPreview === null || view.expandPreview === "text") && (
+                <FileMediaVisual path={view.content} />
+              )}
               <span className="clipboard-file-content"><HighlightText text={view.displayName} search={search} /></span>
               {expanded && view.expandPreview !== null && (
                 view.expandPreview === "video" || view.expandPreview === "audio" ? (
