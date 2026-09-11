@@ -399,7 +399,6 @@ pub fn run() {
             db::mark_toast_shown,
             db::is_toast_shown,
             db::set_user_api_key,
-            db::reorder_clipboard_records,
             db::reorder_phrase_groups,
             db::reorder_phrases,
             db::move_clipboard_records_to_top,

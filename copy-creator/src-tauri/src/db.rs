@@ -7192,6 +7192,151 @@ mod resource_command_tests {
     }
 
     #[test]
+    fn full_user_journey_across_sort_and_sync_features() {
+        // 真人会话模拟：复制 → 粘贴 → 切排序模式 → 外部移入 → 外部删除
+        // → 自愈 → 短语粘贴 → 删除记录。逐步断言各优化点的行为。
+        let (app, root) = test_app();
+        let handle = app.handle().clone();
+        {
+            let state = app.state::<DbState>();
+            let conn = state.conn.lock().unwrap();
+            conn.execute_batch(
+                "CREATE TABLE api_key_labels (
+                     record_id TEXT PRIMARY KEY, service TEXT NOT NULL,
+                     api_base TEXT DEFAULT '', note TEXT DEFAULT '',
+                     is_expired INTEGER DEFAULT 0, created_at TEXT NOT NULL
+                 );
+                 CREATE TABLE phrase_groups (
+                     id TEXT PRIMARY KEY, name TEXT NOT NULL, sort_order INTEGER DEFAULT 0,
+                     created_at TEXT NOT NULL, updated_at TEXT NOT NULL
+                 );
+                 CREATE TABLE phrases (
+                     id TEXT PRIMARY KEY, group_id TEXT NOT NULL, title TEXT NOT NULL,
+                     content TEXT NOT NULL, input_type TEXT DEFAULT 'text',
+                     source_path TEXT DEFAULT '', file_size INTEGER DEFAULT 0,
+                     sort_order INTEGER DEFAULT 0, created_at TEXT NOT NULL,
+                     updated_at TEXT NOT NULL, last_used_at TEXT DEFAULT '',
+                     use_count INTEGER DEFAULT 0
+                 );
+                 INSERT INTO clipboard_records (id, type, content, created_at, sort_order)
+                 VALUES ('c1', 'text', '第一条', '2026-09-12T08:00:00Z', 1000.0),
+                        ('c2', 'text', '第二条', '2026-09-12T08:01:00Z', 2000.0),
+                        ('c3', 'text', '第三条', '2026-09-12T08:02:00Z', 3000.0);
+                 INSERT INTO phrase_groups (id, name, created_at, updated_at)
+                 VALUES ('g1', '客服话术', '2026-09-12T08:00:00Z', '2026-09-12T08:00:00Z');
+                 INSERT INTO phrases (id, group_id, title, content, created_at, updated_at)
+                 VALUES ('p1', 'g1', 't', '您好', '2026-09-12T08:00:00Z', '2026-09-12T08:00:00Z'),
+                        ('p2', 'g1', 't', '请查收', '2026-09-12T08:01:00Z', '2026-09-12T08:01:00Z');",
+            )
+            .unwrap();
+        }
+
+        let clipboard_ids = |sort_by: &str| -> Vec<String> {
+            ids_of(
+                &get_clipboard_records_inner(
+                    &handle,
+                    None,
+                    Some(50),
+                    Some(0),
+                    None,
+                    None,
+                    Some(sort_by.to_string()),
+                )
+                .unwrap(),
+            )
+        };
+        let resource_ids = |sort_by: &str| -> Vec<String> {
+            ids_of(
+                &get_clipboard_records_inner(
+                    &handle,
+                    None,
+                    Some(50),
+                    Some(0),
+                    Some("resources".to_string()),
+                    None,
+                    Some(sort_by.to_string()),
+                )
+                .unwrap(),
+            )
+        };
+
+        // ── 步骤 1：把第一条粘贴两次 ──
+        super::touch_clipboard_usage_internal(&handle, &["c1".to_string()]).unwrap();
+        std::thread::sleep(Duration::from_millis(3));
+        super::touch_clipboard_usage_internal(&handle, &["c1".to_string()]).unwrap();
+
+        // 最近使用：刚粘贴的置顶，其余按复制时间。
+        assert_eq!(clipboard_ids("recent"), vec!["c1", "c3", "c2"]);
+        // 最多使用：2 次的第一，未使用的按复制时间。
+        assert_eq!(clipboard_ids("count"), vec!["c1", "c3", "c2"]);
+
+        // ── 步骤 2：外部移入两个文件（复制与移动各一）──
+        let copied = root.join("copied.png");
+        let moved = root.join("moved.md");
+        std::fs::write(&copied, [1]).unwrap();
+        std::fs::write(&moved, b"md").unwrap();
+        super::discover_external_resource_files(&handle, &[copied.clone(), moved.clone()]);
+
+        let after_arrival = resource_ids("recent");
+        assert_eq!(after_arrival.len(), 2);
+        assert!(after_arrival.contains(&super::resource_file_id(&copied)));
+        assert!(after_arrival.contains(&super::resource_file_id(&moved)));
+        // 最多使用：零使用的移入文件在未使用区顶部（库内暂无其他资源）；
+        // 两者发现时间相同，先后由 id 决胜，断言集合即可。
+        let after_arrival_count = resource_ids("count");
+        assert_eq!(after_arrival_count.len(), 2);
+        assert!(after_arrival_count.contains(&super::resource_file_id(&copied)));
+        assert!(after_arrival_count.contains(&super::resource_file_id(&moved)));
+
+        // ── 步骤 3：文件管理器删除其中一个 → 下一次扫描自愈 ──
+        std::fs::remove_file(&copied).unwrap();
+        assert_eq!(
+            resource_ids("recent"),
+            vec![super::resource_file_id(&moved)]
+        );
+
+        // ── 步骤 4：使用剩下的资源一次 ──
+        let moved_id = super::resource_file_id(&moved);
+        super::touch_clipboard_usage_internal(&handle, &[moved_id.clone()]).unwrap();
+        assert_eq!(resource_ids("count"), vec![moved_id]);
+
+        // ── 步骤 5：粘贴一条短语两次，快捷输入「全部」两种模式 ──
+        super::touch_phrase_usage_internal(&handle, "p2").unwrap();
+        super::touch_phrase_usage_internal(&handle, "p2").unwrap();
+        let phrases_recent =
+            super::get_all_phrases(handle.clone(), None, Some("recent".into())).unwrap();
+        assert_eq!(
+            phrases_recent
+                .iter()
+                .map(|p| p["id"].as_str().unwrap())
+                .collect::<Vec<_>>(),
+            vec!["p2", "p1"]
+        );
+        let phrases_count =
+            super::get_all_phrases(handle.clone(), None, Some("count".into())).unwrap();
+        assert_eq!(
+            phrases_count
+                .iter()
+                .map(|p| p["id"].as_str().unwrap())
+                .collect::<Vec<_>>(),
+            vec!["p2", "p1"]
+        );
+
+        // ── 步骤 6：删除一条剪切板记录（含使用记录）──
+        super::delete_clipboard_records_internal(&handle, &["c2".to_string()]).unwrap();
+        assert_eq!(clipboard_ids("count"), vec!["c1", "c3"]);
+
+        cleanup(&root);
+    }
+
+    fn ids_of(records: &[serde_json::Value]) -> Vec<String> {
+        records
+            .iter()
+            .map(|r| r["id"].as_str().unwrap_or("").to_string())
+            .collect()
+    }
+
+    #[test]
     fn content_sort_applies_to_every_all_view() {
         // 全区「全部」视图的按面验证：剪切板全部、资源全部分组、快捷输入全部
         // 两种模式都必须按预期排序（分组浏览不在此列，前端不传偏好）。
