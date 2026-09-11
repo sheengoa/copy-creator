@@ -1,4 +1,4 @@
-import type { MouseEvent } from "react";
+import { useState, type MouseEvent } from "react";
 import { createPortal } from "react-dom";
 import { Icons } from "./Icons";
 
@@ -21,12 +21,17 @@ export function BackToTopButton({
   className,
   portal = false,
 }: BackToTopButtonProps) {
+  // 悬停期间保持可见：闲置淡出若把按钮从指针下方抽走，用户正要点它时
+  // 会扑空；移开指针后才真正淡出。
+  const [hovered, setHovered] = useState(false);
   const button = (
     <button
       type="button"
-      className={`back-to-top${visible ? " visible" : ""}${className ? ` ${className}` : ""}`}
+      className={`back-to-top${visible || hovered ? " visible" : ""}${className ? ` ${className}` : ""}`}
       aria-label={label}
       title={label}
+      onMouseEnter={() => setHovered(true)}
+      onMouseLeave={() => setHovered(false)}
       onClick={(event: MouseEvent) => {
         // 不冒泡：径向菜单等容器把点击视为空白区操作。
         event.stopPropagation();
