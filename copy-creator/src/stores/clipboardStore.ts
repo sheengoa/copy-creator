@@ -1,7 +1,7 @@
 import { create } from "zustand";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
-import { useSettingsStore } from "./settingsStore";
+import { useSettingsStore, parseContentSort } from "./settingsStore";
 import { isResourceRecord } from "../domain/records";
 import { sortByIdOrder } from "../utils/reorder";
 import { getResourcePath, isFileBackedTextResource } from "../domain/records";
@@ -287,8 +287,10 @@ export const useClipboardStore = create<ClipboardState>((set, get) => ({
       unlisteners.push(fn);
     });
 
-    listen<{ sortBy: string }>("content-sort-changed", () => {
-      // 排序偏好变化：按新排序重载当前视图（主窗口与径向菜单实例各自收到）。
+    listen<{ sortBy: string }>("content-sort-changed", (event) => {
+      // 排序偏好变化：径向菜单窗口的设置实例不经主窗口装载，
+      // 必须先用事件负载更新本窗口设置值，再按新排序重载当前视图。
+      useSettingsStore.setState({ contentSort: parseContentSort(event.payload.sortBy) });
       void get().loadRecords(false);
     }).then((fn) => {
       unlisteners.push(fn);
@@ -309,7 +311,11 @@ export const useClipboardStore = create<ClipboardState>((set, get) => ({
       unlisteners.push(fn);
     });
 
-    void get().loadRecords(false, categoryOverride);
+    // 首次加载前先装载设置：contentSort 参与请求参数，径向菜单窗口
+    // 没有 App 层的设置装载，必须在这里保证已从设置表读取。
+    void useSettingsStore.getState().loadSettings().then(() => {
+      void get().loadRecords(false, categoryOverride);
+    });
   },
 
   setSearch: (s) => {

@@ -1,7 +1,7 @@
 import { create } from "zustand";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
-import { useSettingsStore } from "./settingsStore";
+import { useSettingsStore, parseContentSort } from "./settingsStore";
 import type { Phrase, PhraseGroup } from "../types";
 import { sortByIdOrder } from "../utils/reorder";
 import { DECODABLE_IMAGE_EXTENSIONS, getResourceExtension } from "../domain/mediaKind";
@@ -117,14 +117,18 @@ export const usePhraseStore = create<PhraseState>()((set, get) => {
       get().loadGroups();
     });
 
-    listen("content-sort-changed", () => {
-      // 排序偏好变化：「全部」视图按新排序重载（分组视图手动排序不受影响）。
+    listen<{ sortBy: string }>("content-sort-changed", (event) => {
+      // 与剪切板同口径：先用事件负载更新本窗口设置值再重载。
+      useSettingsStore.setState({ contentSort: parseContentSort(event.payload.sortBy) });
       if (get().selectedGroupId === ALL_PHRASES_GROUP_ID) {
         void get().loadPhrases(ALL_PHRASES_GROUP_ID);
       }
     });
 
-    get().loadGroups();
+    // 与剪切板同口径：首次加载前先装载设置（径向菜单窗口无 App 层装载）。
+    void useSettingsStore.getState().loadSettings().then(() => {
+      get().loadGroups();
+    });
   },
 
   getImageThumbnail: async (path: string) => {
