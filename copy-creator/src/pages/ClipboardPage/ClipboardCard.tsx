@@ -12,6 +12,8 @@ import {
 } from "../../components/CardActionMenu";
 import { InlineImagePreview, InlineTextFilePreview } from "../../components/InlinePreview";
 import { FileMediaVisual } from "../../components/FileMediaPreview";
+import { ResourceMediaPlayer } from "../ResourcePage/ResourceMedia";
+import { fileMediaKindFromPath } from "../ResourcePage/resourceUtils";
 import { ImageThumb } from "./ImageThumb";
 import { TYPE_META } from "./utils";
 import { formatTime } from "../../utils/formatTime";
@@ -199,7 +201,11 @@ function ClipboardCardInner({
   };
 
   const meta = TYPE_META[record.type] || TYPE_META.text;
-  const canPreviewFile = record.type === "file" && hasInlineTextPreviewExtension(record.content);
+  // 文件记录的展开预览：视频/音频播放、图片大图、文本内容，判定规则与
+  // loadClipboardPreviewSegments 共用同一份扩展名规则。
+  const fileMediaKind = record.type === "file" ? fileMediaKindFromPath(record.content) : null;
+  const canPreviewFile = record.type === "file"
+    && (fileMediaKind !== null || hasInlineTextPreviewExtension(record.content));
   const canToggleText = record.type === "file"
     ? canPreviewFile
     : Boolean(record.has_images)
@@ -374,7 +380,17 @@ function ClipboardCardInner({
               <FileMediaVisual path={record.content} />
               <span className="clipboard-file-content"><HighlightText text={fileNameFromPath(record.content)} search={search} /></span>
               {expanded && canPreviewFile && (
-                <InlineTextFilePreview recordId={record.id} search={search} />
+                fileMediaKind === "video" || fileMediaKind === "audio" ? (
+                  <ResourceMediaPlayer kind={fileMediaKind} path={record.content} />
+                ) : fileMediaKind === "image" ? (
+                  <InlineImagePreview
+                    path={record.content}
+                    alt={t("radialMenu.previewImage")}
+                    className="clipboard-card-expanded-image"
+                  />
+                ) : (
+                  <InlineTextFilePreview recordId={record.id} search={search} />
+                )
               )}
             </>
           ) : (
