@@ -335,6 +335,7 @@ pub fn run() {
             db::touch_clipboard_usage,
             db::touch_phrase_usage,
             db::get_recent_used_items,
+            db::get_all_phrases,
             db::select_quick_input_file,
             db::get_quick_input_file_limit,
             db::get_quick_input_file_info,

@@ -2343,6 +2343,67 @@ pub fn get_recent_used_items(
     Ok(merge_recent_items(clipboard, phrases, lim as usize))
 }
 
+// ── 快捷输入「全部」视图 ─────────────────────────────────────
+// 跨分组聚合短语：排序依据是粘贴成功写入的 last_used_at（touch_phrase_usage）。
+
+/// 「全部」视图的单行映射：短语字段 + 分组名（供来源标签展示）。
+fn phrase_row_with_group(row: &rusqlite::Row) -> rusqlite::Result<serde_json::Value> {
+    Ok(serde_json::json!({
+        "id": row.get::<_, String>(0)?,
+        "group_id": row.get::<_, String>(1)?,
+        "title": row.get::<_, String>(2)?,
+        "content": row.get::<_, String>(3)?,
+        "input_type": row.get::<_, String>(4)?,
+        "source_path": row.get::<_, String>(5)?,
+        "file_size": row.get::<_, i64>(6)?,
+        "sort_order": row.get::<_, f64>(7)?,
+        "created_at": row.get::<_, String>(8)?,
+        "updated_at": row.get::<_, String>(9)?,
+        "last_used_at": row.get::<_, String>(10)?,
+        "group_name": row.get::<_, Option<String>>(11)?,
+    }))
+}
+
+/// 查询全部短语：有使用记录的按 last_used_at 倒序在前，未使用的按
+/// 「分组顺序 + 组内手动顺序」垫底（分组、手动均为 sort_order 越大越靠前）。
+/// 时间戳均为 chrono RFC3339 UTC，字典序即时间序；limit 传 i64::MAX 表示全量。
+fn all_phrase_rows(conn: &Connection, limit: i64) -> Result<Vec<serde_json::Value>, String> {
+    let mut stmt = conn
+        .prepare(
+            "SELECT p.id, p.group_id, p.title, p.content, p.input_type, p.source_path,
+                    p.file_size, p.sort_order, p.created_at, p.updated_at, p.last_used_at, g.name
+             FROM phrases p
+             LEFT JOIN phrase_groups g ON p.group_id = g.id
+             ORDER BY (COALESCE(p.last_used_at, '') = ''),
+                      p.last_used_at DESC,
+                      COALESCE(g.sort_order, 0) DESC,
+                      p.sort_order DESC
+             LIMIT ?1",
+        )
+        .map_err(|e| e.to_string())?;
+    let rows = stmt
+        .query_map(params![limit], phrase_row_with_group)
+        .map_err(|e| e.to_string())?;
+    let mut phrases = Vec::new();
+    for row in rows {
+        phrases.push(row.map_err(|e| e.to_string())?);
+    }
+    Ok(phrases)
+}
+
+/// 快捷输入「全部」视图：聚合全部分组的短语，径向菜单与主窗口共用。
+/// limit 仅径向菜单使用（首屏条数）；主窗口不传即全量加载。
+#[tauri::command]
+pub fn get_all_phrases(
+    app: AppHandle,
+    limit: Option<u32>,
+) -> Result<Vec<serde_json::Value>, String> {
+    let lim = limit.map_or(i64::MAX, |n| n.clamp(1, 2000) as i64);
+    let state = app.state::<DbState>();
+    let conn = state.conn.lock().map_err(|e| e.to_string())?;
+    all_phrase_rows(&conn, lim)
+}
+
 /// 记录剪贴板/资源记录的使用时间：粘贴成功与拖出成功放下共用。
 /// 自动发现（未入库）的资源记录不在数据库中，直接 UPDATE 会静默丢失；
 /// 对 `resource-file:` 虚拟 id 在持锁前先解析文件路径，未命中时按文件
@@ -7382,5 +7443,119 @@ mod recent_usage_tests {
             .map(|r| r["id"].as_str().unwrap_or("").to_string())
             .collect();
         assert_eq!(ids, vec!["a", "b"]);
+    }
+}
+
+#[cfg(test)]
+mod all_phrases_tests {
+    use super::{all_phrase_rows, Connection};
+    use rusqlite::params;
+
+    fn setup_conn() -> Connection {
+        let conn = Connection::open_in_memory().unwrap();
+        conn.execute_batch(
+            "
+            CREATE TABLE phrase_groups (
+                id TEXT PRIMARY KEY,
+                name TEXT NOT NULL,
+                sort_order INTEGER DEFAULT 0,
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL
+            );
+            CREATE TABLE phrases (
+                id TEXT PRIMARY KEY,
+                group_id TEXT NOT NULL,
+                title TEXT NOT NULL,
+                content TEXT NOT NULL,
+                input_type TEXT DEFAULT 'text',
+                source_path TEXT DEFAULT '',
+                file_size INTEGER DEFAULT 0,
+                sort_order INTEGER DEFAULT 0,
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL,
+                last_used_at TEXT DEFAULT '',
+                FOREIGN KEY (group_id) REFERENCES phrase_groups(id) ON DELETE CASCADE
+            );
+            ",
+        )
+        .unwrap();
+        conn
+    }
+
+    fn insert_group(conn: &Connection, id: &str, sort_order: i64) {
+        conn.execute(
+            "INSERT INTO phrase_groups (id, name, sort_order, created_at, updated_at)
+             VALUES (?1, ?2, ?3, '2026-09-01T00:00:00+00:00', '2026-09-01T00:00:00+00:00')",
+            params![id, format!("group-{id}"), sort_order],
+        )
+        .unwrap();
+    }
+
+    fn insert_phrase(
+        conn: &Connection,
+        id: &str,
+        group_id: &str,
+        sort_order: i64,
+        last_used_at: &str,
+    ) {
+        conn.execute(
+            "INSERT INTO phrases (id, group_id, title, content, sort_order, created_at, updated_at, last_used_at)
+             VALUES (?1, ?2, 'title', ?3, ?4, '2026-09-01T00:00:00+00:00', '2026-09-01T00:00:00+00:00', ?5)",
+            params![id, group_id, format!("phrase-{id}"), sort_order, last_used_at],
+        )
+        .unwrap();
+    }
+
+    fn query_ids(conn: &Connection, limit: i64) -> Vec<String> {
+        all_phrase_rows(conn, limit)
+            .unwrap()
+            .iter()
+            .map(|r| r["id"].as_str().unwrap_or("").to_string())
+            .collect()
+    }
+
+    #[test]
+    fn all_phrase_rows_orders_used_first_then_unused_by_group_and_manual() {
+        let conn = setup_conn();
+        // g1 分组顺序在前（sort_order 更大）；p3、p1 有使用记录且 p3 更近；
+        // 未使用的 p2（g1）、p4（g2）按分组顺序 + 组内手动顺序垫底。
+        insert_group(&conn, "g1", 2);
+        insert_group(&conn, "g2", 1);
+        insert_phrase(&conn, "p1", "g1", 2, "2026-09-04T10:00:00+00:00");
+        insert_phrase(&conn, "p2", "g1", 1, "");
+        insert_phrase(&conn, "p3", "g2", 1, "2026-09-05T10:00:00+00:00");
+        insert_phrase(&conn, "p4", "g2", 2, "");
+
+        assert_eq!(query_ids(&conn, i64::MAX), vec!["p3", "p1", "p2", "p4"]);
+    }
+
+    #[test]
+    fn all_phrase_rows_reflects_touch_after_the_fact() {
+        // 模拟 touch：UPDATE 后重查，刚使用的短语应排到最前。
+        let conn = setup_conn();
+        insert_group(&conn, "g1", 1);
+        insert_phrase(&conn, "a", "g1", 2, "2026-09-03T10:00:00+00:00");
+        insert_phrase(&conn, "b", "g1", 1, "2026-09-04T10:00:00+00:00");
+        conn.execute(
+            "UPDATE phrases SET last_used_at = ?1 WHERE id = 'a'",
+            params!["2026-09-06T10:00:00+00:00"],
+        )
+        .unwrap();
+
+        assert_eq!(query_ids(&conn, i64::MAX), vec!["a", "b"]);
+    }
+
+    #[test]
+    fn all_phrase_rows_applies_limit_and_joins_group_name() {
+        let conn = setup_conn();
+        insert_group(&conn, "g1", 1);
+        insert_phrase(&conn, "p1", "g1", 2, "2026-09-05T10:00:00+00:00");
+        insert_phrase(&conn, "p2", "g1", 1, "2026-09-04T10:00:00+00:00");
+
+        assert_eq!(query_ids(&conn, 1), vec!["p1"]);
+
+        let rows = all_phrase_rows(&conn, i64::MAX).unwrap();
+        assert_eq!(rows[0]["group_name"], "group-g1");
+        assert_eq!(rows[0]["last_used_at"], "2026-09-05T10:00:00+00:00");
     }
 }
