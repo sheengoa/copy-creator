@@ -368,6 +368,30 @@ describe("clipboardStore full record loading", () => {
     });
   });
 
+  it("keeps resource group views stable on paste regardless of sort mode", async () => {
+    const makeRecord = (id: string) => ({
+      id,
+      type: "text" as const,
+      content: id,
+      source_app: "",
+      created_at: "2026-08-01T00:00:00Z",
+      storage_mode: "resource" as const,
+      resource_group: "References",
+    });
+    const first = makeRecord("res-a");
+    const second = makeRecord("res-b");
+    useClipboardStore.setState({
+      records: [first, second],
+      category: "resources",
+      resourceGroup: "References",
+    });
+
+    await useClipboardStore.getState().pasteRecord(second);
+
+    // 分组浏览按时间排序，粘贴不改变顺序。
+    expect(useClipboardStore.getState().records.map((r) => r.id)).toEqual(["res-a", "res-b"]);
+  });
+
   it("applies the content sort preference only to the all-views", async () => {
     const makeRecord = (id: string) => ({
       id,

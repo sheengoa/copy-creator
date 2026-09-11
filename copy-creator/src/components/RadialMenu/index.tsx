@@ -1489,7 +1489,10 @@ export default function RadialMenu() {
           .slice(0, MAX_ITEMS)
           .map((r) => {
             const item = recordToRadialItem(r);
-            if (resourceGroup !== null) return item; // 分组浏览：保持原样
+            if (resourceGroup !== null) {
+              // 分组浏览保持原样：不带使用时间标签、来源标签与次数徽标。
+              return { ...item, useCount: undefined };
+            }
             const leaf = resourceGroupLeafLabel(r.resource_group);
             return {
               ...item,

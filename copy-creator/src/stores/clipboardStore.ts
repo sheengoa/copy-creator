@@ -13,12 +13,19 @@ type RecordsSetter = (
 ) => void;
 
 /** 粘贴成功的即时反馈：最近使用模式置顶；最多使用模式计数 +1 并按
- *  次数重排（并列按最近使用）。时间排序已移除，此处不再区分。 */
+ *  次数重排（并列按最近使用）。仅「全部」视图生效——资源分组浏览按
+ *  时间排序，不随使用变化。 */
 function applyPasteFeedback(
-  records: ClipboardRecord[],
+  state: {
+    records: ClipboardRecord[];
+    category: ClipType;
+    resourceGroup: string | null;
+  },
   recordId: string,
   set: RecordsSetter,
 ) {
+  if (state.category === "resources" && state.resourceGroup !== null) return;
+  const records = state.records;
   const index = records.findIndex((r) => r.id === recordId);
   if (index === -1) return;
   const target: ClipboardRecord = { ...records[index] };
@@ -535,7 +542,7 @@ export const useClipboardStore = create<ClipboardState>((set, get) => ({
       if (record.has_images) {
         await invoke("paste_stash_record", { id: record.id, terminal: false });
         touchClipboardUsage([record.id]);
-        applyPasteFeedback(get().records, record.id, set);
+        applyPasteFeedback(get(), record.id, set);
         return true;
       }
       const content = await getFullContent(record);
@@ -548,7 +555,7 @@ export const useClipboardStore = create<ClipboardState>((set, get) => ({
             // 等）时回退为文件粘贴，保持不劣于旧行为。
             await invoke("paste_text_file", { path: getResourcePath(record), terminal: false });
             touchClipboardUsage([record.id]);
-            applyPasteFeedback(get().records, record.id, set);
+            applyPasteFeedback(get(), record.id, set);
             return true;
           } catch (error) {
             console.warn("文本资源按内容粘贴失败，回退为文件粘贴:", error);
@@ -559,7 +566,7 @@ export const useClipboardStore = create<ClipboardState>((set, get) => ({
         await invoke("paste_text", { text: content });
       }
       touchClipboardUsage([record.id]);
-      applyPasteFeedback(get().records, record.id, set);
+      applyPasteFeedback(get(), record.id, set);
       return true;
     } catch (e) {
       console.error("Paste failed:", e);
@@ -572,7 +579,7 @@ export const useClipboardStore = create<ClipboardState>((set, get) => ({
       if (record.has_images) {
         await invoke("paste_stash_record", { id: record.id, terminal: true });
         touchClipboardUsage([record.id]);
-        applyPasteFeedback(get().records, record.id, set);
+        applyPasteFeedback(get(), record.id, set);
         return true;
       }
       const content = await getFullContent(record);
@@ -583,7 +590,7 @@ export const useClipboardStore = create<ClipboardState>((set, get) => ({
           try {
             await invoke("paste_text_file", { path: getResourcePath(record), terminal: true });
             touchClipboardUsage([record.id]);
-            applyPasteFeedback(get().records, record.id, set);
+            applyPasteFeedback(get(), record.id, set);
             return true;
           } catch (error) {
             console.warn("文本资源按内容粘贴失败，回退为文件粘贴:", error);
@@ -594,7 +601,7 @@ export const useClipboardStore = create<ClipboardState>((set, get) => ({
         await invoke("paste_text_terminal", { text: content });
       }
       touchClipboardUsage([record.id]);
-      applyPasteFeedback(get().records, record.id, set);
+      applyPasteFeedback(get(), record.id, set);
       return true;
     } catch (e) {
       console.error("Terminal paste failed:", e);

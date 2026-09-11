@@ -1670,6 +1670,13 @@ pub fn discover_external_resource_files<R: Runtime>(
         if !path.is_file() || !path.starts_with(&root) {
             continue;
         }
+        // 与扫描同一套忽略规则：应用自身的附件与临时文件不是内容，
+        // 否则保存图文暂存时会被当作新放入置顶成独立资源条目。
+        if path.components().any(|c| c.as_os_str() == OsStr::new(".copy-creator"))
+            || is_ignored_resource_file(path)
+        {
+            continue;
+        }
         let path_text = path.to_string_lossy().to_string();
         if by_path.contains_key(&resource_path_key(path)) {
             continue;

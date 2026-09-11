@@ -632,7 +632,7 @@ export default function ResourcePage() {
     detailHistoryRef.current = true;
     setDetailRecordId(record.id);
     window.history.pushState({ resourceDetailId: record.id }, "", `#resource/${record.id}`);
-  }, []);
+  }, [records]);
 
   const openResourceMove = useCallback((ids: string[]) => {
     if (ids.length === 0) return;
