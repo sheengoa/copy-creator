@@ -1,4 +1,4 @@
-import { useEffect, useState, useCallback, useRef } from "react";
+import { Fragment, useEffect, useState, useCallback, useMemo, useRef } from "react";
 import { useTranslation } from "react-i18next";
 import { invoke } from "@tauri-apps/api/core";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
@@ -8,7 +8,7 @@ import i18n from "../../i18n";
 import StashEditor, { type StashEditorHandle, type StashImage } from "./StashEditor";
 import { WindowResizeHandles } from "../WindowResizeHandles";
 import { usePersistWindowSize } from "../../hooks/usePersistWindowSize";
-import type { ClipboardStorageMode } from "../../types";
+import type { ClipboardStorageMode, ResourceFolder } from "../../types";
 import { isResourceRecord } from "../../utils/clipboardRecord";
 
 interface StashRecord {
@@ -32,6 +32,8 @@ export default function ClipboardCreateDialog() {
   const [stashRecords, setStashRecords] = useState<StashRecord[]>([]);
   const [storageMode, setStorageMode] = useState<ClipboardStorageMode>("database");
   const [resourceGroupName, setResourceGroupName] = useState("");
+  const [resourceGroups, setResourceGroups] = useState<ResourceFolder[]>([]);
+  const [groupMenuOpen, setGroupMenuOpen] = useState(false);
   const [loadingRecords, setLoadingRecords] = useState(true);
   const [loadingRecordId, setLoadingRecordId] = useState<string | null>(null);
   const [editingId, setEditingId] = useState<string | null>(null);
@@ -75,6 +77,34 @@ export default function ClipboardCreateDialog() {
     }
   }, []);
 
+  // 目标分组列表（后端首个节点为未分组），失败时保底仅剩「未分组」可选。
+  const loadResourceGroups = useCallback(async () => {
+    try {
+      const groups = await invoke<ResourceFolder[]>("get_resource_groups");
+      setResourceGroups(groups);
+    } catch (e) {
+      console.error("Failed to load resource groups:", e);
+    }
+  }, []);
+
+  // 拍平分组树为缩进行；未分组（path 为空）由后端固定放在首位。
+  const groupRows = useMemo(() => {
+    const rows: Array<{ path: string; label: string; count: number; depth: number }> = [];
+    const walk = (folders: ResourceFolder[], depth: number) => {
+      for (const folder of folders) {
+        rows.push({
+          path: folder.path,
+          label: folder.name === "" ? t("resources.ungrouped") : folder.name,
+          count: folder.count,
+          depth,
+        });
+        if ((folder.children ?? []).length > 0) walk(folder.children ?? [], depth + 1);
+      }
+    };
+    walk(resourceGroups, 0);
+    return rows;
+  }, [resourceGroups, t]);
+
   // 初始化：主题 + 语言 + 事件监听
   useEffect(() => {
     invoke<string>("get_setting", { key: "theme" }).then((theme) => {
@@ -114,18 +144,21 @@ export default function ClipboardCreateDialog() {
       setResourceGroupName(mode === "resource" ? e.payload.group_name || "" : "");
       setError(null);
       setDropdownOpen(false);
+      setGroupMenuOpen(false);
       loadStashRecords(mode, false, mode === "resource" ? e.payload.group_name || "" : "");
+      void loadResourceGroups();
       setTimeout(() => editorRef.current?.focus(), 50);
     }).then((fn) => { unlistenShow = fn; });
 
     loadStashRecords("database", true);
+    void loadResourceGroups();
 
     return () => {
       if (unlistenTheme) unlistenTheme();
       if (unlistenLang) unlistenLang();
       if (unlistenShow) unlistenShow();
     };
-  }, [cancelResizeSave, loadStashRecords, resetDraft]);
+  }, [cancelResizeSave, loadResourceGroups, loadStashRecords, resetDraft]);
 
   useEffect(() => {
     const appWindow = getCurrentWindow();
@@ -179,6 +212,7 @@ export default function ClipboardCreateDialog() {
   const handleSelectRecord = useCallback(async (record: StashRecord) => {
     if (loadingRecordId) return;
     setDropdownOpen(false);
+    setGroupMenuOpen(false);
     setLoadingRecordId(record.id);
     setError(null);
     try {
@@ -206,6 +240,11 @@ export default function ClipboardCreateDialog() {
     }
   }, [loadingRecordId, resetDraft, t]);
 
+  const handleGroupSelect = useCallback((path: string) => {
+    setResourceGroupName(path);
+    setGroupMenuOpen(false);
+  }, []);
+
   const handleExitEdit = useCallback(() => {
     setEditingId(null);
     resetDraft();
@@ -219,6 +258,7 @@ export default function ClipboardCreateDialog() {
     setStorageMode(mode);
     setEditingId(null);
     setDropdownOpen(false);
+    setGroupMenuOpen(false);
     setError(null);
     loadStashRecords(mode, false, mode === "resource" ? resourceGroupName : "");
   }, [loadStashRecords, resourceGroupName, storageMode]);
@@ -229,6 +269,10 @@ export default function ClipboardCreateDialog() {
       lastEnterAtRef.current = 0;
       if (dropdownOpen) {
         setDropdownOpen(false);
+        return;
+      }
+      if (groupMenuOpen) {
+        setGroupMenuOpen(false);
         return;
       }
       hideWindow();
@@ -265,7 +309,7 @@ export default function ClipboardCreateDialog() {
     if (shortcut.shouldSave) {
       handleSave();
     }
-  }, [content, dropdownOpen, hideWindow, handleSave]);
+  }, [content, dropdownOpen, groupMenuOpen, hideWindow, handleSave]);
 
   const selectedStashRecord = stashRecords.find((record) => record.id === editingId);
   const isResource = storageMode === "resource";
@@ -289,7 +333,7 @@ export default function ClipboardCreateDialog() {
           </svg>
         </button>
       </div>
-      <div onFocus={() => { setDropdownOpen(false); }} className="clipboard-create-editor-wrap">
+      <div onFocus={() => { setDropdownOpen(false); setGroupMenuOpen(false); }} className="clipboard-create-editor-wrap">
         <StashEditor
           key={editorVersion}
           ref={editorRef}
@@ -308,7 +352,6 @@ export default function ClipboardCreateDialog() {
       {error && <div className="clipboard-create-error" role="alert">{error}</div>}
       <div className="clipboard-create-action-bar">
         <div className="clipboard-create-bar-left">
-          <span className="clipboard-create-bar-caption">{t("resources.storageLocation")}</span>
           <div className="clipboard-create-dest-seg" role="group" aria-label={t("resources.storageLocation")}>
             <button
               type="button"
@@ -327,6 +370,54 @@ export default function ClipboardCreateDialog() {
               {t("resources.destinationResource")}
             </button>
           </div>
+          {isResource && (
+            <div className={`clipboard-create-stash-picker clipboard-create-group-picker${groupMenuOpen ? " open" : ""}`}>
+              <button
+                type="button"
+                className="clipboard-create-chip-trigger"
+                onClick={() => setGroupMenuOpen((open) => !open)}
+                aria-expanded={groupMenuOpen}
+                aria-haspopup="listbox"
+                title={t("resources.targetGroup")}
+              >
+                <svg className="clipboard-create-chip-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                  <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z" />
+                </svg>
+                <span className="clipboard-create-chip-content">
+                  {resourceGroupName ? resourceGroupName.split("/").join(" / ") : t("resources.ungrouped")}
+                </span>
+                <svg className="clipboard-create-stash-chevron" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                  <polyline points="6 9 12 15 18 9" />
+                </svg>
+              </button>
+              {groupMenuOpen && (
+                <div className="clipboard-create-stash-menu clipboard-create-group-menu" role="listbox" aria-label={t("resources.targetGroup")}>
+                  {groupRows.map((row) => (
+                    <Fragment key={row.path || "ungrouped"}>
+                      <button
+                        type="button"
+                        className={`clipboard-create-stash-option${resourceGroupName === row.path ? " selected" : ""}`}
+                        onClick={() => handleGroupSelect(row.path)}
+                        role="option"
+                        aria-selected={resourceGroupName === row.path}
+                        title={row.label}
+                      >
+                        <span
+                          className="clipboard-create-stash-option-content"
+                          style={row.depth > 0 ? { paddingLeft: row.depth * 14 } : undefined}
+                        >
+                          {row.label}
+                        </span>
+                        <span className="clipboard-create-group-count">{row.count > 0 ? row.count : ""}</span>
+                        {resourceGroupName === row.path && <span className="clipboard-create-stash-check">✓</span>}
+                      </button>
+                      {row.path === "" && <div className="clipboard-create-group-menu-sep" />}
+                    </Fragment>
+                  ))}
+                </div>
+              )}
+            </div>
+          )}
           <div className={`clipboard-create-stash-picker${dropdownOpen ? " open" : ""}`}>
             <button
               type="button"

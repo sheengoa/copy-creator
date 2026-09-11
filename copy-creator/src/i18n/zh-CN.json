@@ -119,6 +119,7 @@
     "groups": "分组",
     "allGroups": "全部",
     "ungrouped": "未分组",
+    "targetGroup": "目标分组",
     "newGroup": "新建分组",
     "manageGroups": "管理分组",
     "renameGroup": "重命名分组",
