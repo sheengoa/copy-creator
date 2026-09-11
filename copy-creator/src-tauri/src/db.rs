@@ -1636,33 +1636,59 @@ pub fn discover_external_resource_files<R: Runtime>(
     let Ok(conn) = state.conn.lock() else {
         return;
     };
+    // 去重与 touch 补建同口径：按归一化路径键比较（Windows 大小写、
+    // 分隔符形态差异不产生重复记录）。
+    let mut by_path: HashMap<PathBuf, String> = HashMap::new();
+    let mut stmt = match conn.prepare(
+        "SELECT id, resource_path FROM clipboard_records
+         WHERE COALESCE(storage_mode, 'database') = 'resource'
+           AND COALESCE(resource_path, '') <> ''",
+    ) {
+        Ok(stmt) => stmt,
+        Err(error) => {
+            log::warn!("读取资源记录路径失败: {error}");
+            return;
+        }
+    };
+    let rows = match stmt.query_map([], |row| {
+        Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
+    }) {
+        Ok(rows) => rows,
+        Err(error) => {
+            log::warn!("读取资源记录路径失败: {error}");
+            return;
+        }
+    };
+    for row in rows {
+        let Ok((id, resource_path)) = row else {
+            continue;
+        };
+        by_path.insert(resource_path_key(Path::new(&resource_path)), id);
+    }
+    drop(stmt);
     for path in paths {
         if !path.is_file() || !path.starts_with(&root) {
             continue;
         }
         let path_text = path.to_string_lossy().to_string();
-        let exists: bool = conn
-            .query_row(
-                "SELECT EXISTS(SELECT 1 FROM clipboard_records
-                 WHERE COALESCE(storage_mode, 'database') = 'resource' AND resource_path = ?1)",
-                [&path_text],
-                |row| row.get(0),
-            )
-            .unwrap_or(true);
-        if exists {
+        if by_path.contains_key(&resource_path_key(path)) {
             continue;
         }
         let id = resource_file_id(path);
-        if let Err(error) = conn.execute(
+        match conn.execute(
             "INSERT OR IGNORE INTO clipboard_records
              (id, type, content, source_app, created_at, storage_mode, resource_path,
               sort_order, use_count)
              VALUES (?1, 'file', ?2, '', ?3, 'resource', ?2, ?4, 0)",
             params![id, path_text, &now, now_ms],
         ) {
-            log::warn!("外部移入文件补建入库失败 {}: {error}", path.display());
-        } else {
-            log::info!("外部移入文件已按发现时间入库置顶: {}", path.display());
+            Err(error) => {
+                log::warn!("外部移入文件补建入库失败 {}: {error}", path.display());
+            }
+            Ok(_) => {
+                by_path.insert(resource_path_key(path), id);
+                log::info!("外部移入文件已按发现时间入库置顶: {}", path.display());
+            }
         }
     }
 }
