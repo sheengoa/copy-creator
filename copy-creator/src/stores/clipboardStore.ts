@@ -101,6 +101,8 @@ interface ClipboardRecord {
   resource_note?: string | null;
   /** 使用次数（粘贴/拖出成功自增），「最多使用」排序与次数徽标展示。 */
   use_count?: number;
+  /** 最近使用时间：使用时间标签展示（未使用过的条目回退创建时间）。 */
+  last_used_at?: string;
 }
 
 const PAGE_SIZE = 120;

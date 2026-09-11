@@ -39,12 +39,17 @@ interface SettingsState {
 
   toggleTheme: () => void;
   loadSettings: () => Promise<void>;
+  doLoadSettings: () => Promise<void>;
   setSetting: (key: string, value: string) => Promise<void>;
   setSettingsBatch: (settings: Record<string, string>) => Promise<void>;
   setPasteLeftClick: (mode: PasteMode) => Promise<void>;
   setContentSort: (mode: ContentSortMode) => Promise<void>;
   setAutostart: (enabled: boolean) => Promise<boolean>;
 }
+
+// 设置装载的窗口级缓存：径向菜单窗口没有 App 层的装载流程，各数据层
+// 首次加载前都要能拿到已装载的偏好；幂等复用避免重复读表。
+let settingsLoadPromise: Promise<void> | null = null;
 
 export const useSettingsStore = create<SettingsState>((set, get) => ({
   themeMode: "light",
@@ -67,7 +72,16 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
     emit("theme-changed", { theme: next });
   },
 
-  loadSettings: async () => {
+  // 窗口级幂等装载：首次真正读表，之后复用同一 Promise。
+  // 供主窗口 App 与各数据层（含径向菜单窗口）在首次加载前 await。
+  loadSettings: () => {
+    if (!settingsLoadPromise) {
+      settingsLoadPromise = get().doLoadSettings();
+    }
+    return settingsLoadPromise;
+  },
+
+  doLoadSettings: async () => {
     try {
       const settings = await invoke<Record<string, string>>("get_all_settings");
 

@@ -159,6 +159,7 @@ fn clipboard_record_json(
     storage_mode: String,
     resource_path: String,
     use_count: i64,
+    last_used_at: String,
 ) -> serde_json::Value {
     let attachment_paths = serde_json::from_str::<Vec<String>>(&attachments).unwrap_or_default();
     let has_images = !attachment_paths.is_empty();
@@ -203,6 +204,7 @@ fn clipboard_record_json(
         },
         "resource_path": resource_path,
         "use_count": use_count,
+        "last_used_at": last_used_at,
     })
 }
 
@@ -1720,7 +1722,8 @@ fn get_resource_records_inner<R: Runtime>(
                 "SELECT id, type, content, source_app, created_at, user_api_key,
                         group_name, attachments, storage_mode, resource_path,
                         COALESCE(sort_order, 0), COALESCE(resource_note, ''),
-                        COALESCE(use_count, 0), COALESCE(touched_ms, 0)
+                        COALESCE(use_count, 0), COALESCE(touched_ms, 0),
+                        COALESCE(last_used_at, '')
                  FROM clipboard_records
                  WHERE COALESCE(storage_mode, 'database') = 'resource'",
             )
@@ -1735,6 +1738,7 @@ fn get_resource_records_inner<R: Runtime>(
                 let resource_note = row.get::<_, String>(11)?;
                 let use_count = row.get::<_, i64>(12)?;
                 let touched_ms = row.get::<_, i64>(13)?;
+                let last_used_at = row.get::<_, String>(14)?;
                 let path = if resource_path.is_empty() {
                     None
                 } else {
@@ -1761,6 +1765,7 @@ fn get_resource_records_inner<R: Runtime>(
                     row.get::<_, String>(8)?,
                     resource_path,
                     use_count,
+                    last_used_at,
                 );
                 value["resource_note"] = serde_json::Value::String(resource_note);
                 Ok((
@@ -1806,6 +1811,7 @@ fn get_resource_records_inner<R: Runtime>(
             RESOURCE_STORAGE_MODE.to_string(),
             entry.path.to_string_lossy().to_string(),
             0,
+            String::new(),
         );
         records.push(ResourceRecordValue {
             value: resource_record_value(
@@ -1932,7 +1938,7 @@ fn get_clipboard_records_inner<R: Runtime>(
             .replace('%', "\\%")
             .replace('_', "\\_");
         let sql = format!(
-            "SELECT id, type, content, source_app, created_at, user_api_key, group_name, attachments, storage_mode, resource_path, COALESCE(use_count, 0) FROM clipboard_records
+            "SELECT id, type, content, source_app, created_at, user_api_key, group_name, attachments, storage_mode, resource_path, COALESCE(use_count, 0), COALESCE(last_used_at, '') FROM clipboard_records
              WHERE content LIKE '%' || ?1 || '%' ESCAPE '\\' {} ORDER BY {} LIMIT ?2 OFFSET ?3",
             cat_filter.1,
             clipboard_order_clause(sort_by.as_deref())
@@ -1952,6 +1958,7 @@ fn get_clipboard_records_inner<R: Runtime>(
                     row.get::<_, String>(8)?,
                     row.get::<_, String>(9)?,
                     row.get::<_, i64>(10)?,
+                    row.get::<_, String>(11)?,
                 ))
             })
             .map_err(|e| e.to_string())?;
@@ -1960,7 +1967,7 @@ fn get_clipboard_records_inner<R: Runtime>(
         }
     } else {
         let sql = format!(
-            "SELECT id, type, content, source_app, created_at, user_api_key, group_name, attachments, storage_mode, resource_path, COALESCE(use_count, 0) FROM clipboard_records
+            "SELECT id, type, content, source_app, created_at, user_api_key, group_name, attachments, storage_mode, resource_path, COALESCE(use_count, 0), COALESCE(last_used_at, '') FROM clipboard_records
              {} ORDER BY {} LIMIT ?1 OFFSET ?2",
             cat_filter.0,
             clipboard_order_clause(sort_by.as_deref())
@@ -1980,6 +1987,7 @@ fn get_clipboard_records_inner<R: Runtime>(
                     row.get::<_, String>(8)?,
                     row.get::<_, String>(9)?,
                     row.get::<_, i64>(10)?,
+                    row.get::<_, String>(11)?,
                 ))
             })
             .map_err(|e| e.to_string())?;

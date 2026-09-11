@@ -1136,6 +1136,20 @@
   color: inherit;
 }
 
+/* 「全部分组」视图的所属分组标签（来源标签，与快捷输入全部视图同形态）。 */
+.resource-card-group-tag {
+  flex-shrink: 0;
+  max-width: 45%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: var(--text-xs);
+  color: var(--text-secondary);
+  background: var(--chip-hover-bg);
+  border-radius: 6px;
+  padding: 0 6px;
+}
+
 .resource-card-meta {
   justify-content: flex-start;
   color: var(--text-secondary);

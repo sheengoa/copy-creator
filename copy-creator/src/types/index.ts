@@ -34,6 +34,8 @@ export interface ClipboardRecord {
   resource_note?: string | null;
   /** 使用次数（粘贴/拖出成功自增），「最多使用」排序与次数徽标展示。 */
   use_count?: number;
+  /** 最近使用时间：使用时间标签与排序展示（资源/剪切板共用）。 */
+  last_used_at?: string;
 }
 
 export interface PhraseGroup {

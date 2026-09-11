@@ -1480,13 +1480,32 @@ export default function RadialMenu() {
     ];
   };
 
+  // 「全部」视图条目形态全区一致：相对使用时间 + 来源标签
+  // （快捷输入 · 分组 / 资源 · 分组；剪切板无分组概念不显示标签）。
+  const usageTimeLabel = (r: ClipboardRecord): string =>
+    formatRelativeTime(r.last_used_at || r.created_at);
+
   const items: RadialItem[] = activeTab === "clipboard"
-    ? filteredRecords.slice(0, MAX_ITEMS).map(recordToRadialItem)
+    ? filteredRecords.slice(0, MAX_ITEMS).map((r) => ({
+        ...recordToRadialItem(r),
+        usedAtLabel: usageTimeLabel(r),
+      }))
     : activeTab === "resources"
       ? records
           .filter((r) => isResourceRecord(r))
           .slice(0, MAX_ITEMS)
-          .map(recordToRadialItem)
+          .map((r) => {
+            const item = recordToRadialItem(r);
+            if (resourceGroup !== null) return item; // 分组浏览：保持原样
+            const leaf = (r.resource_group ?? "").split("/").filter(Boolean).pop();
+            return {
+              ...item,
+              usedAtLabel: usageTimeLabel(r),
+              sourceLabel: leaf
+                ? `${t("tabs.resources")} · ${leaf}`
+                : t("tabs.resources"),
+            };
+          })
       : activeTab === "phrases"
         ? phraseGroupId === ALL_PHRASES_GROUP_ID
           ? buildAllPhraseItems(phrases).slice(0, PHRASES_ALL_LIMIT)

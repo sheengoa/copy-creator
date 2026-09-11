@@ -11,7 +11,7 @@ import { FileMediaVisual } from "../../components/FileMediaPreview";
 import { ResourceMediaPlayer } from "../ResourcePage/ResourceMedia";
 import { ImageThumb } from "./ImageThumb";
 import { TYPE_META } from "./utils";
-import { formatTime } from "../../utils/formatTime";
+import { formatRelativeTime } from "../../utils/formatTime";
 import { useSettingsStore } from "../../stores/settingsStore";
 import ApiKeyLabelPanel from "./ApiKeyLabelPanel";
 import { HighlightText } from "../../components/HighlightText";
@@ -312,7 +312,9 @@ function ClipboardCardInner({
         )}
 
         <div className="notititle clipboard-card-footer">
-          <span className="clipboard-card-time">{formatTime(view.createdAt)}</span>
+          <span className="clipboard-card-time">
+            {formatRelativeTime(view.lastUsedAt || view.createdAt)}
+          </span>
           {isCountSort && (
             <span className="usage-count-badge">
               {t("common.usageCount", { count: view.useCount })}

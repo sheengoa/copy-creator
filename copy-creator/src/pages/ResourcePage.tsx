@@ -1323,6 +1323,7 @@ export default function ResourcePage() {
                         typeLabel={(kind) => typeLabels[kind]}
                         selectionMode={isSelecting}
                         selected={isSelected(view.id)}
+                        showGroupTag={resourceGroup === null}
                         showUsageBadge={contentSort === "count" && resourceGroup === null}
                         onOpenDetail={openDetail}
                         onCopy={handleCopyCard}

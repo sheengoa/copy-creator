@@ -7,7 +7,7 @@ import {
 } from "../../components/CardActionMenu";
 import { HighlightText } from "../../components/HighlightText";
 import { InlineTextFilePreview } from "../../components/InlinePreview";
-import { formatTime } from "../../utils/formatTime";
+import { formatTime, formatRelativeTime } from "../../utils/formatTime";
 import { ImageThumb } from "../ClipboardPage/ImageThumb";
 import { ResourceFileImage, ResourceVideoPoster } from "./ResourceMedia";
 import { type ResourceMediaKind } from "../../domain/mediaKind";
@@ -21,6 +21,8 @@ interface ResourceCardProps {
   typeLabel: (kind: ResourceMediaKind) => string;
   selectionMode: boolean;
   selected: boolean;
+  /** 「全部分组」视图：显示所属分组标签与相对使用时间（分组浏览保持现状）。 */
+  showGroupTag?: boolean;
   /** 「最多使用」模式且处于「全部分组」时显示次数徽标；分组浏览不应用。 */
   showUsageBadge?: boolean;
   onOpenDetail: (view: RecordView) => void;
@@ -117,6 +119,7 @@ export function ResourceCard({
   typeLabel,
   selectionMode,
   selected,
+  showGroupTag,
   showUsageBadge,
   onOpenDetail,
   onCopy,
@@ -239,9 +242,18 @@ export function ResourceCard({
           </strong>
         </div>
         <div className="resource-card-meta">
+          {showGroupTag && view.resourceGroup && (
+            <span className="resource-card-group-tag" title={view.resourceGroup}>
+              {view.resourceGroup.split("/").filter(Boolean).pop()}
+            </span>
+          )}
           <span>{typeLabel(kind)}</span>
           <span aria-hidden="true">·</span>
-          <time dateTime={view.createdAt}>{formatTime(view.createdAt)}</time>
+          <time dateTime={view.createdAt}>
+            {showGroupTag
+              ? formatRelativeTime(view.lastUsedAt || view.createdAt)
+              : formatTime(view.createdAt)}
+          </time>
           {showUsageBadge && (
             <span className="usage-count-badge">
               {t("common.usageCount", { count: view.useCount })}
