@@ -1210,12 +1210,14 @@ pub fn start_monitor(app: &AppHandle) -> Result<(), Box<dyn std::error::Error>> 
                         if file_path.trim().is_empty() {
                             continue;
                         }
-                        if is_previewable_image_file(&file_path) || is_image_file(&file_path) {
-                            if import_image_file(&handle, &file_path) {
-                                continue;
-                            }
+                        let is_image =
+                            is_previewable_image_file(&file_path) || is_image_file(&file_path);
+                        if is_image && import_image_file(&handle, &file_path) {
                             continue;
                         }
+                        // 图片导入失败（如 jpg/png 超过预览导入大小上限、解码失败）
+                        // 时降级为文件记录，保证复制的内容可见、可粘贴，而不是
+                        // 静默丢失。
                         insert_and_emit(&handle, "file", &file_path);
                     }
                 } else if let Ok(text) = handle.clipboard().read_text() {

@@ -130,6 +130,7 @@ pub fn run() {
             let is_autostart = std::env::args().any(|a| a == "--hidden");
 
             db::init_db(app.handle())?;
+            db::sanitize_file_record_contents(app.handle());
             db::prune_old_records(app.handle()).ok();
             media_server::spawn(app.handle());
             resource_watch::spawn(app.handle());

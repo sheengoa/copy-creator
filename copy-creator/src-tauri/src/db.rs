@@ -1598,6 +1598,46 @@ pub fn init_db(app: &AppHandle) -> Result<(), Box<dyn std::error::Error>> {
     Ok(())
 }
 
+/// 启动时清洗文件记录的路径：历史版本从 `text/uri-list` 采集的路径可能带
+/// 行尾 `\r`（arboard 只按 `\n` 切分），脏字符会让图片导入判断失效，粘贴
+/// 与拖出也必然失败。只处理 file 记录；文本记录中间的 `\r\n` 是合法换行，
+/// 必须保持原样。
+pub fn sanitize_file_record_contents<R: Runtime>(app: &AppHandle<R>) {
+    let state = app.state::<DbState>();
+    let Ok(conn) = state.conn.lock() else {
+        return;
+    };
+    let dirty: Vec<(String, String)> = match conn
+        .prepare("SELECT id, content FROM clipboard_records WHERE type = 'file'")
+        .and_then(|mut stmt| {
+            stmt.query_map([], |row| {
+                Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
+            })
+            .map(|rows| {
+                rows.filter_map(|row| row.ok())
+                    .filter(|(_, content)| content.trim() != *content)
+                    .collect()
+            })
+        }) {
+        Ok(rows) => rows,
+        Err(error) => {
+            log::warn!("扫描待清洗的文件记录失败: {error}");
+            return;
+        }
+    };
+    for (id, content) in &dirty {
+        if let Err(error) = conn.execute(
+            "UPDATE clipboard_records SET content = ?1 WHERE id = ?2",
+            params![content.trim(), id],
+        ) {
+            log::warn!("清洗文件记录 {id} 失败: {error}");
+        }
+    }
+    if !dirty.is_empty() {
+        log::info!("已清洗 {} 条路径带空白字符的文件记录", dirty.len());
+    }
+}
+
 pub fn prune_old_records(app: &AppHandle) -> Result<(), Box<dyn std::error::Error>> {
     let (days, image_contents) = {
         let mut image_contents = Vec::new();
@@ -7158,6 +7198,49 @@ mod resource_command_tests {
             .unwrap();
         assert!(!last_used_at.is_empty());
         cleanup(&root);
+    }
+
+    #[test]
+    fn sanitizes_trailing_whitespace_only_from_file_record_contents() {
+        let (app, _root) = test_app();
+        {
+            let state = app.state::<DbState>();
+            let conn = state.conn.lock().unwrap();
+            conn.execute(
+                "INSERT INTO clipboard_records (id, type, content, created_at)
+                 VALUES ('dirty-file', 'file', '/home/ao/图片/微信图片.jpg\r', '2026-09-11T00:00:00Z')",
+                [],
+            )
+            .unwrap();
+            conn.execute(
+                "INSERT INTO clipboard_records (id, type, content, created_at)
+                 VALUES ('plain-text', 'text', '第一行\r\n第二行', '2026-09-11T00:00:01Z')",
+                [],
+            )
+            .unwrap();
+        }
+
+        super::sanitize_file_record_contents(app.handle());
+
+        let state = app.state::<DbState>();
+        let conn = state.conn.lock().unwrap();
+        let file_content: String = conn
+            .query_row(
+                "SELECT content FROM clipboard_records WHERE id = 'dirty-file'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        let text_content: String = conn
+            .query_row(
+                "SELECT content FROM clipboard_records WHERE id = 'plain-text'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        // 文件记录剥掉行尾回车；文本记录中间的 \r\n 是合法换行，保持原样。
+        assert_eq!(file_content, "/home/ao/图片/微信图片.jpg");
+        assert_eq!(text_content, "第一行\r\n第二行");
     }
 }
 
