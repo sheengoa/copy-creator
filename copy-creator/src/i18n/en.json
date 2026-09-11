@@ -231,8 +231,7 @@
     "confirmDelete": "Delete this quick input?",
     "confirmDeleteSelected": "Delete the selected {{count}} quick inputs? This action cannot be undone.",
     "confirmDeleteGroup": "Delete this group and all its quick inputs? This action cannot be undone.",
-    "neverUsed": "Never used",
-    "unusedDivider": "Not used yet"
+    "neverUsed": "Never used"
   },
   "common": {
     "search": "Search",

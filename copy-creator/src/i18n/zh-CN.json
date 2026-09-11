@@ -231,8 +231,7 @@
     "confirmDelete": "确定要删除此快捷输入吗？",
     "confirmDeleteSelected": "确定要删除选中的 {{count}} 条快捷输入吗？此操作不可撤销。",
     "confirmDeleteGroup": "确定要删除此分组及其中的全部快捷输入吗？此操作不可撤销。",
-    "neverUsed": "未使用过",
-    "unusedDivider": "以下未使用过"
+    "neverUsed": "未使用过"
   },
   "common": {
     "search": "搜索",

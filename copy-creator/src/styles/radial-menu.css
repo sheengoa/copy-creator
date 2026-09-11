@@ -692,30 +692,6 @@ html {
   max-width: 60%;
 }
 
-/* 「全部」视图的未使用分区线：隔开有使用记录与从未使用的短语。 */
-.radial-menu-unused-divider {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  margin: 10px 2px 8px;
-  font-size: var(--text-xs);
-  color: var(--text-secondary);
-  font-weight: var(--weight-normal);
-  user-select: none;
-}
-
-.radial-menu-unused-divider::before,
-.radial-menu-unused-divider::after {
-  content: "";
-  flex: 1;
-  height: 1px;
-  background: var(--border-color);
-}
-
-[data-theme="dark"] .radial-menu-unused-divider {
-  color: rgba(255, 255, 255, 0.4);
-}
-
 /* --- Empty State --- */
 .radial-menu-empty {
   display: flex;

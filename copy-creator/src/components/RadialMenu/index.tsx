@@ -137,8 +137,6 @@ interface RadialItem {
   usedAtLabel?: string;
   /** 使用次数：「最多使用」模式下条目尾部展示「N 次」。 */
   useCount?: number;
-  /** 分隔线伪条目（「全部」视图的未使用分区），不可悬停、不可粘贴。 */
-  isDivider?: boolean;
 }
 
 interface PreviewLayout {
@@ -1461,23 +1459,11 @@ export default function RadialMenu() {
       usedAtLabel: allViewUsedAtLabel(p),
       sourceLabel: phraseSourceLabel(p),
     });
+    // 未使用过的短语按「分组顺序 + 组内手动顺序」垫底（不加分隔线，
+    // 与剪切板 / 资源「全部」视图形态统一）。
     const used = list.filter((p) => (p.last_used_at ?? "") !== "");
     const unused = list.filter((p) => (p.last_used_at ?? "") === "");
-    return [
-      ...used.map(toItem),
-      ...(unused.length > 0
-        ? [{
-            id: "__phrase_unused_divider__",
-            content: t("phrases.unusedDivider"),
-            type: "divider",
-            previewAvailable: false,
-            dragKind: getPhraseRadialDragKind("text"),
-            dragSource: "phrase" as RadialDragSource,
-            isDivider: true,
-          }]
-        : []),
-      ...unused.map(toItem),
-    ];
+    return [...used.map(toItem), ...unused.map(toItem)];
   };
 
   // 「全部」视图条目形态全区一致：相对使用时间 + 来源标签
@@ -1770,11 +1756,7 @@ export default function RadialMenu() {
             {items.length === 0 ? (
               <div className="radial-menu-empty">{t("radialMenu.empty")}</div>
             ) : (
-              items.map((item) => item.isDivider ? (
-                <div key={item.id} className="radial-menu-unused-divider">
-                  {item.content}
-                </div>
-              ) : (
+              items.map((item) => (
                 <div
                   key={item.id}
                   className={`radial-menu-item${selectedItemId === item.id ? " selected" : ""}${draggingItemId === item.id ? " dragging" : ""}${item.sourceLabel ? " has-source" : ""}`}
