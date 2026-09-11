@@ -1,0 +1,331 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>低保真原型：新建窗口 · 资源分组选择</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    font-family: "Segoe UI", "Microsoft YaHei", system-ui, sans-serif;
+    background: #2b2d31;
+    color: #333;
+    padding: 32px 24px 64px;
+  }
+  .page { max-width: 1000px; margin: 0 auto; }
+  h1 { color: #fff; font-size: 20px; margin-bottom: 6px; }
+  .page-sub { color: #9a9ca3; font-size: 13px; margin-bottom: 28px; }
+
+  /* ===== 演示区 ===== */
+  .demo-wrap { display: flex; gap: 24px; align-items: flex-start; flex-wrap: wrap; }
+  .demo-stage { flex: 0 0 auto; }
+
+  /* 新建窗口（低保真线框，比例参考真实窗口 860×640） */
+  .win {
+    width: 640px; height: 500px;
+    background: #f5f5f4;
+    border: 1px solid #555;
+    border-radius: 10px;
+    display: flex; flex-direction: column;
+    overflow: hidden;
+    box-shadow: 0 12px 40px rgba(0,0,0,.45);
+    position: relative;
+  }
+  .win-header {
+    display: flex; align-items: center; justify-content: space-between;
+    padding: 12px 16px 8px;
+  }
+  .win-title { font-size: 13px; color: #444; }
+  .win-close { width: 22px; height: 22px; border: none; background: transparent; color: #888; font-size: 14px; cursor: pointer; }
+  .win-editor {
+    flex: 1; margin: 4px 14px;
+    background: #ececea;
+    border: 1px solid #ddd;
+    border-radius: 8px;
+    padding: 10px 12px;
+    color: #999; font-size: 12px;
+  }
+
+  /* 底部操作栏 */
+  .win-bar {
+    display: flex; align-items: center; gap: 8px;
+    padding: 10px 14px 12px;
+  }
+  .bar-caption { font-size: 12px; color: #666; white-space: nowrap; }
+  .seg { display: flex; border: 1px solid #ccc; border-radius: 7px; overflow: hidden; flex: 0 0 auto; }
+  .seg button {
+    border: none; background: #fff; padding: 5px 10px;
+    font-size: 12px; color: #666; cursor: pointer;
+  }
+  .seg button + button { border-left: 1px solid #ddd; }
+  .seg button.on { background: #3a3a3a; color: #fff; }
+
+  /* 通用下拉 chip（分组选择器 / 已有内容选择器 共用形态） */
+  .chip {
+    display: flex; align-items: center; gap: 6px;
+    border: 1px solid #ccc; background: #fff; border-radius: 7px;
+    padding: 5px 8px; font-size: 12px; color: #444;
+    cursor: pointer; position: relative;
+    min-width: 0;
+  }
+  .chip .label { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .chip .placeholder { color: #aaa; }
+  .chip .caret { color: #999; font-size: 10px; margin-left: auto; }
+  .chip:disabled { cursor: default; }
+  .chip-tag {
+    background: #e8e8e8; border-radius: 4px; padding: 1px 5px; font-size: 10px; color: #555;
+  }
+
+  /* 分组下拉菜单 */
+  .pop {
+    position: absolute; bottom: calc(100% + 6px); left: 0;
+    width: 240px; max-height: 260px; overflow: auto;
+    background: #fff; border: 1px solid #ccc; border-radius: 8px;
+    box-shadow: 0 8px 24px rgba(0,0,0,.18);
+    padding: 4px; z-index: 30;
+  }
+  .pop[hidden] { display: none; }
+  .opt {
+    display: flex; align-items: center; gap: 6px;
+    width: 100%; border: none; background: transparent;
+    padding: 6px 8px; border-radius: 6px;
+    font-size: 12px; color: #333; cursor: pointer; text-align: left;
+  }
+  .opt:hover { background: #f0f0ef; }
+  .opt .name { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .opt .cnt { color: #aaa; font-size: 11px; }
+  .opt .tick { color: #333; font-size: 11px; width: 12px; }
+  .opt .branch { color: #bbb; font-size: 10px; width: 10px; text-align: center; flex: 0 0 auto; }
+  .opt.child-l1 { padding-left: 24px; }
+  .opt.child-l2 { padding-left: 40px; }
+  .pop-sep { height: 1px; background: #eee; margin: 4px 6px; }
+
+  .bar-right { margin-left: auto; display: flex; gap: 8px; flex: 0 0 auto; }
+  .btn {
+    border: 1px solid #ccc; background: #fff; border-radius: 8px;
+    padding: 6px 16px; font-size: 12px; color: #555; cursor: pointer;
+  }
+  .btn.primary { background: #3a3a3a; color: #fff; border-color: #3a3a3a; }
+
+  /* 标注 */
+  .note-tag {
+    position: absolute; z-index: 40;
+    font-size: 11px; color: #c0392b; font-weight: 600;
+    background: #fdecea; border: 1px dashed #e0a49a;
+    border-radius: 4px; padding: 2px 6px;
+    pointer-events: none; white-space: nowrap;
+  }
+  .note-line { position: absolute; z-index: 39; pointer-events: none; }
+
+  /* ===== 状态画板 ===== */
+  .states { flex: 1; min-width: 280px; display: flex; flex-direction: column; gap: 18px; }
+  .state-card {
+    background: #f7f7f6; border: 1px solid #d8d8d5; border-radius: 10px;
+    padding: 14px 16px;
+  }
+  .state-card h3 { font-size: 13px; margin-bottom: 4px; }
+  .state-card p { font-size: 12px; color: #666; line-height: 1.7; }
+  .state-card .kbd {
+    background: #e9e9e7; border-radius: 4px; padding: 0 5px; font-size: 11px; color: #444;
+  }
+  .mini {
+    margin-top: 8px; background: #fff; border: 1px solid #d5d5d2; border-radius: 8px;
+    padding: 10px; font-size: 11px; color: #555;
+  }
+  .mini-row { display: flex; align-items: center; gap: 6px; padding: 4px 6px; border-radius: 5px; }
+  .mini-row.sel { background: #efefee; outline: 1px dashed #bbb; }
+  .mini-row .cnt { color: #aaa; margin-left: auto; }
+  .mini-row .indent1 { padding-left: 16px; }
+  .mini-row .indent2 { padding-left: 30px; }
+  .mini-row .branch { color: #bbb; width: 10px; text-align: center; }
+
+  /* 决策点 */
+  .decisions {
+    margin-top: 28px; background: #f7f7f6; border: 1px solid #d8d8d5;
+    border-radius: 10px; padding: 16px 20px;
+  }
+  .decisions h2 { font-size: 14px; margin-bottom: 10px; }
+  .decisions li { font-size: 12.5px; color: #555; line-height: 2; }
+
+  /* 保存反馈 toast（演示保存语义） */
+  .toast {
+    position: absolute; left: 50%; top: 46px; transform: translateX(-50%);
+    background: #333; color: #fff; font-size: 12px;
+    border-radius: 8px; padding: 8px 14px; z-index: 50;
+    opacity: 0; transition: opacity .2s; pointer-events: none;
+  }
+  .toast.show { opacity: .95; }
+</style>
+</head>
+<body>
+<div class="page">
+  <h1>低保真原型：新建窗口 · 资源分组选择</h1>
+  <div class="page-sub">目标：新建窗口切到「资源」时，可以选择保存到哪个资源分组（含多级子分组）。下方窗口可直接操作：切换 剪切板/资源、点开分组下拉、选择分组、点保存看保存语义。</div>
+
+  <div class="demo-wrap">
+    <!-- 可交互演示窗口 -->
+    <div class="demo-stage">
+      <div class="win" id="win">
+        <div class="win-header">
+          <span class="win-title">新建</span>
+          <button class="win-close" title="演示中不关闭">✕</button>
+        </div>
+        <div class="win-editor">输入要保存的资源内容...</div>
+
+        <div class="win-bar">
+          <span class="bar-caption">保存到</span>
+          <div class="seg" id="seg">
+            <button type="button" id="tabDb">剪切板</button>
+            <button type="button" id="tabRes" class="on">资源</button>
+          </div>
+
+          <!-- 新增：目标分组选择器（仅资源模式显示） -->
+          <div style="position:relative" id="groupPickerWrap">
+            <button type="button" class="chip" id="groupChip" aria-haspopup="listbox" aria-expanded="false">
+              <span class="label" id="groupLabel">未分组</span>
+              <span class="caret">▾</span>
+            </button>
+            <div class="pop" id="groupPop" hidden role="listbox" aria-label="选择目标分组">
+              <button class="opt" role="option" data-path="">
+                <span class="tick"></span><span class="name">未分组</span><span class="cnt">12</span>
+              </button>
+              <div class="pop-sep"></div>
+              <button class="opt" role="option" data-path="货物素材">
+                <span class="branch">▾</span><span class="tick"></span><span class="name">货物素材</span><span class="cnt">8</span>
+              </button>
+              <button class="opt child-l1" role="option" data-path="货物素材/模板">
+                <span class="branch">·</span><span class="tick"></span><span class="name">模板</span><span class="cnt">3</span>
+              </button>
+              <button class="opt child-l1" role="option" data-path="货物素材/图文">
+                <span class="branch">·</span><span class="tick"></span><span class="name">图文</span><span class="cnt">5</span>
+              </button>
+              <button class="opt" role="option" data-path="客服话术">
+                <span class="branch">▾</span><span class="tick"></span><span class="name">客服话术</span><span class="cnt">6</span>
+              </button>
+              <button class="opt" role="option" data-path="代码片段">
+                <span class="branch">·</span><span class="tick"></span><span class="name">代码片段</span><span class="cnt">4</span>
+              </button>
+            </div>
+          </div>
+
+          <!-- 既有：已有内容选择器（本原型中为禁用演示态） -->
+          <button type="button" class="chip" style="flex:1; min-width:120px" disabled>
+            <span class="label placeholder">🕐 当前没有可编辑的资源</span>
+            <span class="caret">▾</span>
+          </button>
+
+          <div class="bar-right">
+            <button class="btn">取消</button>
+            <button class="btn primary" id="saveBtn">保存</button>
+          </div>
+        </div>
+
+        <div class="toast" id="toast"></div>
+
+        <!-- 标注 -->
+        <div class="note-tag" id="note1" style="top: 452px; left: 178px;">① 新增：目标分组选择器（仅资源模式显示）</div>
+        <div class="note-tag" id="note2" style="top: 118px; right: 20px;">② 默认「未分组」；由资源页某分组发起时预选该分组</div>
+      </div>
+    </div>
+
+    <!-- 关键状态说明 -->
+    <div class="states">
+      <div class="state-card">
+        <h3>状态 A · 收起态（默认）</h3>
+        <p>「资源」模式下，「保存到」分段控件右侧出现分组选择器。默认显示 <span class="kbd">未分组</span>；若从资源页某个分组的「新建」入口打开，则预选该分组（保持现有行为）。</p>
+      </div>
+      <div class="state-card">
+        <h3>状态 B · 下拉展开（树形）</h3>
+        <div class="mini">
+          <div class="mini-row"><span class="branch" style="visibility:hidden">·</span>未分组<span class="cnt">12</span></div>
+          <div class="mini-row sel"><span class="branch">▾</span>货物素材<span class="cnt">8</span></div>
+          <div class="mini-row indent1"><span class="branch">·</span>模板<span class="cnt">3</span></div>
+          <div class="mini-row indent1"><span class="branch">·</span>图文<span class="cnt">5</span></div>
+          <div class="mini-row"><span class="branch">▾</span>客服话术<span class="cnt">6</span></div>
+          <div class="mini-row"><span class="branch">·</span>代码片段<span class="cnt">4</span></div>
+        </div>
+        <p style="margin-top:6px">子分组缩进展示，右侧显示条目数；当前选中项打 ✓。选择后 chip 显示完整路径，如 <span class="kbd">货物素材 / 模板</span>。</p>
+      </div>
+      <div class="state-card">
+        <h3>状态 C · 剪切板模式（对照）</h3>
+        <p>「剪切板」模式下不显示分组选择器，底部栏与现状完全一致：保存到 + 剪切板/资源 + 已有内容 + 取消/保存。</p>
+      </div>
+      <div class="state-card">
+        <h3>补充 · 编辑已有资源记录</h3>
+        <p>通过「已有内容」选择器进入编辑时，分组选择器同步显示该记录当前分组，可直接改选后保存（= 移动分组）。</p>
+      </div>
+    </div>
+  </div>
+
+  <div class="decisions">
+    <h2>待确认决策点</h2>
+    <ul>
+      <li><b>默认值</b>：无来源时默认「未分组」；是否要改为记住上次使用的分组？</li>
+      <li><b>下拉形态</b>：平铺缩进列表（本原型）即可覆盖现有层级深度；分组数量多时可再加顶部搜索过滤框，首版是否需要？</li>
+      <li><b>新建分组</b>：选择器内是否提供「新建分组」入口，还是维持去资源页管理？本原型按「仅选择」处理。</li>
+    </ul>
+  </div>
+</div>
+
+<script>
+  const tabDb = document.getElementById('tabDb');
+  const tabRes = document.getElementById('tabRes');
+  const groupPickerWrap = document.getElementById('groupPickerWrap');
+  const groupChip = document.getElementById('groupChip');
+  const groupPop = document.getElementById('groupPop');
+  const groupLabel = document.getElementById('groupLabel');
+  const saveBtn = document.getElementById('saveBtn');
+  const toast = document.getElementById('toast');
+  const note1 = document.getElementById('note1');
+  const note2 = document.getElementById('note2');
+  const win = document.getElementById('win');
+
+  let mode = 'resource';
+  let selected = '';
+
+  function render() {
+    tabDb.classList.toggle('on', mode === 'database');
+    tabRes.classList.toggle('on', mode === 'resource');
+    groupPickerWrap.style.display = mode === 'resource' ? '' : 'none';
+    groupLabel.textContent = selected ? selected.split('/').join(' / ') : '未分组';
+    groupLabel.classList.toggle('placeholder', false);
+    [...groupPop.querySelectorAll('.opt')].forEach(opt => {
+      opt.querySelector('.tick').textContent = opt.dataset.path === selected ? '✓' : '';
+    });
+    // 标注只在初始状态显示
+    if (mode !== 'resource' || selected || groupPop.open) {
+      note1.style.display = 'none'; note2.style.display = 'none';
+    }
+  }
+
+  tabDb.addEventListener('click', () => { mode = 'database'; closePop(); render(); });
+  tabRes.addEventListener('click', () => { mode = 'resource'; render(); });
+
+  function closePop() { groupPop.hidden = true; groupChip.setAttribute('aria-expanded', 'false'); }
+  groupChip.addEventListener('click', (e) => {
+    e.stopPropagation();
+    groupPop.hidden = !groupPop.hidden;
+    groupChip.setAttribute('aria-expanded', String(!groupPop.hidden));
+  });
+  groupPop.addEventListener('click', (e) => {
+    const opt = e.target.closest('.opt');
+    if (!opt) return;
+    selected = opt.dataset.path;
+    closePop(); render();
+  });
+  document.addEventListener('click', (e) => {
+    if (!groupPickerWrap.contains(e.target)) closePop();
+  });
+
+  saveBtn.addEventListener('click', () => {
+    if (mode !== 'resource') return;
+    const target = selected ? '资源 / ' + selected.split('/').join(' / ') : '资源 / 未分组';
+    toast.textContent = '演示：保存到「' + target + '」（传给后端 groupName="' + selected + '"）';
+    toast.classList.add('show');
+    setTimeout(() => toast.classList.remove('show'), 2200);
+  });
+
+  render();
+</script>
+</body>
+</html>
