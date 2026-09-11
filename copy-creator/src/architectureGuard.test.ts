@@ -68,9 +68,13 @@ describe("架构守卫：领域规则必须全局共享", () => {
 
   it("规则 4：已切换的列表容器必须消费 domain", () => {
     // ResourcePage/ResourceDetailPage 的同款断言随阶段 2c 一并启用。
-    for (const container of ["pages/ClipboardPage/index.tsx", "components/RadialMenu/index.tsx"]) {
+    for (const container of [
+      "pages/ClipboardPage/index.tsx",
+      "components/RadialMenu/index.tsx",
+      "pages/ResourcePage.tsx",
+    ]) {
       expect(readSource(container), `${container} 应 import domain`).toContain(
-        'from "../../domain/',
+        '/domain/',
       );
     }
   });

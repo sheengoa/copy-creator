@@ -30,6 +30,7 @@ import ResourceDetailPage from "./ResourcePage/ResourceDetailPage";
 import ResourceGroupChips from "./ResourcePage/ResourceGroupChips";
 import type { ResourceMediaKind as ResourceMediaKindLabel } from "../domain/mediaKind";
 import { ResourceCard } from "./ResourcePage/ResourceCard";
+import { buildRecordView, type RecordView } from "../domain/recordView";
 import { type ResourceTypeFilter } from "../domain/mediaKind";
 import { computeResourceColumnCount, splitResourceColumns } from "./ResourcePage/resourceUtils";
 import { findResourceFolder, flattenResourceFolderPaths, flattenResourceFolders, formatResourceFolderPath, getResourceFolderRoot, getResourceFolderSiblings, isResourceFolderPath, reorderResourceFolderSiblings } from "../domain/groups";
@@ -617,7 +618,15 @@ export default function ResourcePage() {
     });
   }, [closeDetail, deleteRecord, detailRecordId, showFeedback, t]);
 
-  const openDetail = useCallback((record: ClipboardRecord) => {
+  // 卡片叶子回合适配：view → 按 id 查原始记录
+  const handleCopyCard = useCallback((view: RecordView) => {
+    const record = records.find((r) => r.id === view.id);
+    if (record) void handleCopy(record);
+  }, [handleCopy, records]);
+
+  const openDetail = useCallback((view: RecordView) => {
+    const record = records.find((r) => r.id === view.id);
+    if (!record) return;
     pendingScrollTopRef.current = resourceListRef.current?.scrollTop ?? 0;
     setDetailRecord(record);
     detailHistoryRef.current = true;
@@ -1304,23 +1313,26 @@ export default function ResourcePage() {
             >
               {columns.map((column, columnIndex) => (
                 <div className="resource-column" key={`column-${columnIndex}`}>
-                  {column.map((record) => (
+                  {column.map((record) => {
+                    const view = buildRecordView(record);
+                    return (
                     <div className="resource-item" key={record.id}>
                       <ResourceCard
-                        record={record}
+                        view={view}
                         search={search}
                         typeLabel={(kind) => typeLabels[kind]}
                         selectionMode={isSelecting}
-                        selected={isSelected(record.id)}
+                        selected={isSelected(view.id)}
                         showUsageBadge={contentSort === "count" && resourceGroup === null}
                         onOpenDetail={openDetail}
-                        onCopy={handleCopy}
+                        onCopy={handleCopyCard}
                         onDelete={handleDeleteRecord}
                         onToggleSelected={toggleSelected}
-                        onMove={(moveRecord) => openResourceMove([moveRecord.id])}
+                        onMove={(moveView) => openResourceMove([moveView.id])}
                       />
                     </div>
-                  ))}
+                    );
+                  })}
                 </div>
               ))}
             </div>

@@ -1,6 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
-import type { ClipboardRecord } from "../../types";
 import { Icons } from "../../components/Icons";
 import {
   CardActionMenu,
@@ -11,41 +10,43 @@ import { InlineTextFilePreview } from "../../components/InlinePreview";
 import { formatTime } from "../../utils/formatTime";
 import { ImageThumb } from "../ClipboardPage/ImageThumb";
 import { ResourceFileImage, ResourceVideoPoster } from "./ResourceMedia";
-import { inferResourceMediaKind, type ResourceMediaKind } from "../../domain/mediaKind";
-import { getResourcePath, getResourceSummary, getResourceTitle } from "../../domain/records";
+import { type ResourceMediaKind } from "../../domain/mediaKind";
+import { getResourceSummary } from "../../domain/records";
+import type { RecordView } from "../../domain/recordView";
 
 interface ResourceCardProps {
-  record: ClipboardRecord;
+  /** 叶子合同：只收视图模型（DOMAIN_ARCHITECTURE_PLAN.md §3.10）。 */
+  view: RecordView;
   search: string;
   typeLabel: (kind: ResourceMediaKind) => string;
   selectionMode: boolean;
   selected: boolean;
   /** 「最多使用」模式且处于「全部分组」时显示次数徽标；分组浏览不应用。 */
   showUsageBadge?: boolean;
-  onOpenDetail: (record: ClipboardRecord) => void;
-  onCopy: (record: ClipboardRecord) => void | Promise<void>;
+  onOpenDetail: (view: RecordView) => void;
+  onCopy: (view: RecordView) => void | Promise<void>;
   onDelete: (id: string) => void;
   onToggleSelected: (id: string) => void;
-  onMove?: (record: ClipboardRecord) => void;
+  onMove?: (view: RecordView) => void;
 }
 
 function ResourceCardVisual({
-  record,
+  view,
   search,
   typeLabel,
   onActivate,
-}: Pick<ResourceCardProps, "record" | "search" | "typeLabel"> & {
+}: Pick<ResourceCardProps, "view" | "search" | "typeLabel"> & {
   onActivate?: () => void;
 }) {
-  const kind = inferResourceMediaKind(record);
-  const summary = getResourceSummary(record);
-  const resourcePath = getResourcePath(record);
+  const kind = view.kind;
+  const summary = getResourceSummary({ type: view.recordType, content: view.content });
+  const resourcePath = view.resourcePath ?? view.content;
 
-  if (kind === "image" && record.type === "image") {
+  if (kind === "image" && view.recordType === "image") {
     return (
       <ImageThumb
-        id={record.id}
-        content={record.content}
+        id={view.id}
+        content={view.content}
         onClick={(event) => {
           event.stopPropagation();
           onActivate?.();
@@ -76,7 +77,7 @@ function ResourceCardVisual({
     return (
       <ResourceFileImage
         path={resourcePath}
-        alt={getResourceTitle(record, kind)}
+        alt={view.title}
         className="resource-card-file-image"
       />
     );
@@ -91,12 +92,12 @@ function ResourceCardVisual({
     );
   }
 
-  if (record.type === "file" && record.resource_path) {
+  if (view.recordType === "file" && view.resourcePath) {
     return (
       <div className="resource-card-text-preview">
         <InlineTextFilePreview
-          resourcePath={record.resource_path}
-          resourceVersion={record.created_at}
+          resourcePath={view.resourcePath}
+          resourceVersion={view.createdAt}
           search={search}
         />
       </div>
@@ -104,14 +105,14 @@ function ResourceCardVisual({
   }
 
   return (
-    <div className={`resource-card-text-preview${record.type === "link" ? " is-link" : ""}`}>
+    <div className={`resource-card-text-preview${view.recordType === "link" ? " is-link" : ""}`}>
       <HighlightText text={summary || " "} search={search} />
     </div>
   );
 }
 
 export function ResourceCard({
-  record,
+  view,
   search,
   typeLabel,
   selectionMode,
@@ -124,8 +125,8 @@ export function ResourceCard({
   onMove,
 }: ResourceCardProps) {
   const { t } = useTranslation();
-  const kind = inferResourceMediaKind(record);
-  const title = getResourceTitle(record, kind);
+  const kind = view.kind;
+  const title = view.title;
   const [menuOpen, setMenuOpen] = useState(false);
   const moreButtonRef = useRef<HTMLButtonElement | null>(null);
 
@@ -136,11 +137,11 @@ export function ResourceCard({
 
   const activateDetail = useCallback(() => {
     if (selectionMode) {
-      onToggleSelected(record.id);
+      onToggleSelected(view.id);
       return;
     }
-    onOpenDetail(record);
-  }, [onOpenDetail, onToggleSelected, record, selectionMode]);
+    onOpenDetail(view);
+  }, [onOpenDetail, onToggleSelected, view, selectionMode]);
 
   return (
     <article
@@ -160,14 +161,14 @@ export function ResourceCard({
             type="checkbox"
             checked={selected}
             aria-label={t("common.selectItem")}
-            onChange={() => onToggleSelected(record.id)}
+            onChange={() => onToggleSelected(view.id)}
           />
           <span className="selection-checkbox" aria-hidden="true" />
         </label>
       )}
       <div className="resource-card-preview">
         <ResourceCardVisual
-          record={record}
+          view={view}
           search={search}
           typeLabel={typeLabel}
           onActivate={activateDetail}
@@ -210,24 +211,24 @@ export function ResourceCard({
           <CardActionMenuItem
             icon={Icons.copy}
             label={t("resources.copy")}
-            onClick={() => void onCopy(record)}
+            onClick={() => void onCopy(view)}
           />
           <CardActionMenuItem
             icon={Icons.expand}
             label={t("resources.openDetail")}
-            onClick={() => onOpenDetail(record)}
+            onClick={() => onOpenDetail(view)}
           />
           <CardActionMenuItem
             className="is-primary"
             icon={Icons.arrowRight}
             label={t("resources.moveToGroup")}
-            onClick={() => onMove(record)}
+            onClick={() => onMove(view)}
           />
           <CardActionMenuItem
             className="is-danger"
             icon={Icons.delete}
             label={t("common.delete")}
-            onClick={() => onDelete(record.id)}
+            onClick={() => onDelete(view.id)}
           />
         </CardActionMenu>
       )}
@@ -240,16 +241,16 @@ export function ResourceCard({
         <div className="resource-card-meta">
           <span>{typeLabel(kind)}</span>
           <span aria-hidden="true">·</span>
-          <time dateTime={record.created_at}>{formatTime(record.created_at)}</time>
+          <time dateTime={view.createdAt}>{formatTime(view.createdAt)}</time>
           {showUsageBadge && (
             <span className="usage-count-badge">
-              {t("common.usageCount", { count: record.use_count ?? 0 })}
+              {t("common.usageCount", { count: view.useCount })}
             </span>
           )}
         </div>
         <div className="resource-card-footer">
           <span className="resource-card-source">
-            {record.has_images ? t("resources.withImages") : record.source_app || t("resources.localSource")}
+            {view.hasImages ? t("resources.withImages") : view.sourceApp || t("resources.localSource")}
           </span>
           <div className="resource-card-actions">
             {!selectionMode && (
@@ -259,7 +260,7 @@ export function ResourceCard({
                   className="resource-copy-button"
                   onClick={(event) => {
                     event.stopPropagation();
-                    void onCopy(record);
+                    void onCopy(view);
                   }}
                 >
                   {Icons.copy}
@@ -272,7 +273,7 @@ export function ResourceCard({
                   title={t("common.delete")}
                   onClick={(event) => {
                     event.stopPropagation();
-                    onDelete(record.id);
+                    onDelete(view.id);
                   }}
                 >
                   {Icons.delete}
