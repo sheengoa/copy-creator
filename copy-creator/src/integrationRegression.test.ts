@@ -368,7 +368,9 @@ describe("integration regressions", () => {
   it("renders resource list card images from backend thumbnails", () => {
     const mediaSource = readSource("./pages/ResourcePage/ResourceMedia.tsx");
     const cardSource = readSource("./pages/ResourcePage/ResourceCard.tsx");
-    const radialSource = readSource("./components/RadialMenu/index.tsx");
+    const radialSource = readSource("./components/RadialMenu/index.tsx")
+      + readSource("./components/RadialMenu/ResourceItemVisual.tsx")
+      + readSource("./components/RadialMenu/FileThumb.tsx");
     const radialStyles = readSource("./styles/radial-menu.css");
     const resourceStyles = readSource("./styles/resource.css");
     const libSource = readSource("../src-tauri/src/lib.rs");
