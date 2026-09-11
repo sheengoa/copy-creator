@@ -49,6 +49,9 @@ fn watch_loop<R: Runtime>(app: AppHandle<R>) {
     let mut watch_failed = false;
     let mut last_event: Option<Instant> = None;
     let mut next_resolve = Instant::now();
+    // 新出现文件跨 tick 累积：事件与防抖结束往往不在同一个 200ms tick 里，
+    // 集合必须活到防抖触发被消费为止。
+    let mut arrived_paths: HashSet<PathBuf> = HashSet::new();
 
     loop {
         // 跟进资源库目录变化（含首次解析）。
@@ -90,7 +93,6 @@ fn watch_loop<R: Runtime>(app: AppHandle<R>) {
         // 汇聚监听事件，防抖后：新文件先按发现时间补建入库（置顶），
         // 再通知前端刷新。
         let mut saw_event = false;
-        let mut arrived_paths: HashSet<PathBuf> = HashSet::new();
         while let Ok(paths) = event_rx.try_recv() {
             saw_event = true;
             for path in paths {
