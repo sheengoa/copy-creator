@@ -87,7 +87,7 @@ export default function ClipboardCreateDialog() {
     }
   }, []);
 
-  // 拍平分组树为缩进行；未分组（path 为空）由后端固定放在首位。
+  // 拍平分组树为缩进行；未分组（path 为空）由后端固定放在首位，加载失败时至少保留该项可选。
   const groupRows = useMemo(() => {
     const rows: Array<{ path: string; label: string; count: number; depth: number }> = [];
     const walk = (folders: ResourceFolder[], depth: number) => {
@@ -102,6 +102,9 @@ export default function ClipboardCreateDialog() {
       }
     };
     walk(resourceGroups, 0);
+    if (rows.length === 0) {
+      rows.push({ path: "", label: t("resources.ungrouped"), count: 0, depth: 0 });
+    }
     return rows;
   }, [resourceGroups, t]);
 
@@ -240,10 +243,12 @@ export default function ClipboardCreateDialog() {
     }
   }, [loadingRecordId, resetDraft, t]);
 
+  // 切换目标分组后同步刷新「已有内容」列表，保持列表与所选分组一致。
   const handleGroupSelect = useCallback((path: string) => {
     setResourceGroupName(path);
     setGroupMenuOpen(false);
-  }, []);
+    loadStashRecords("resource", false, path);
+  }, [loadStashRecords]);
 
   const handleExitEdit = useCallback(() => {
     setEditingId(null);
@@ -375,7 +380,11 @@ export default function ClipboardCreateDialog() {
               <button
                 type="button"
                 className="clipboard-create-chip-trigger"
-                onClick={() => setGroupMenuOpen((open) => !open)}
+                onClick={() => {
+                  // 窗口隐藏复用期间分组可能在主窗口被改动，展开时重取一次保证列表新鲜。
+                  if (!groupMenuOpen) void loadResourceGroups();
+                  setGroupMenuOpen((open) => !open);
+                }}
                 aria-expanded={groupMenuOpen}
                 aria-haspopup="listbox"
                 title={t("resources.targetGroup")}
