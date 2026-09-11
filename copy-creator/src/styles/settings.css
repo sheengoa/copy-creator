@@ -238,6 +238,14 @@
   transform: scale(0.95);
 }
 
+/* 通用分区「内容列表排序」的说明行：辅助说明，弱于正文。 */
+.settings-row-hint {
+  padding: 2px 16px 10px;
+  font-size: var(--text-xs);
+  color: var(--text-secondary);
+  line-height: 1.5;
+}
+
 .settings-storage-hint {
   font-size: var(--text-xs);
   color: var(--text-secondary);
