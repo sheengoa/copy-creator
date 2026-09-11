@@ -40,24 +40,14 @@ import { useBackToTop } from "../../hooks/useBackToTop";
 import { InlineTextFilePreview } from "../InlinePreview";
 import { loadRecordPreviewSegments } from "../../domain/preview";
 import { buildRecordView } from "../../domain/recordView";
-import { isResourceRecord } from "../../utils/clipboardRecord";
+import { isResourceRecord } from "../../domain/records";
 import { formatTime, formatRelativeTime } from "../../utils/formatTime";
-import { fileNameFromPath } from "../../utils/fileName";
+import { fileNameFromPath } from "../../domain/fileName";
 import type { ClipboardRecord, Phrase, ResourceFolder } from "../../types";
-import {
-  fileMediaKindFromPath,
-  findResourceFolder,
-  flattenResourceFolders,
-  formatResourceFolderPath,
-  getResourceExtension,
-  getResourcePath,
-  getResourceSummary,
-  inferResourceMediaKind,
-  isFileBackedTextResource,
-  isResourceFolderPath,
-  TEXT_EXTENSIONS,
-  type ResourceMediaKind,
-} from "../../pages/ResourcePage/resourceUtils";
+import { type ResourceMediaKind } from "../../domain/mediaKind";
+import { findResourceFolder, flattenResourceFolders, formatResourceFolderPath, isResourceFolderPath } from "../../domain/groups";
+import { fileMediaKindFromPath, getResourceExtension, inferResourceMediaKind, TEXT_EXTENSIONS } from "../../domain/mediaKind";
+import { getResourcePath, getResourceSummary, isFileBackedTextResource } from "../../domain/records";
 import { ResourceFileImage } from "../../pages/ResourcePage/ResourceMedia";
 import i18n from "../../i18n";
 

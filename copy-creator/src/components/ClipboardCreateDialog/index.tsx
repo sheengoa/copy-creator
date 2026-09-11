@@ -9,7 +9,7 @@ import StashEditor, { type StashEditorHandle, type StashImage } from "./StashEdi
 import { WindowResizeHandles } from "../WindowResizeHandles";
 import { usePersistWindowSize } from "../../hooks/usePersistWindowSize";
 import type { ClipboardStorageMode, ResourceFolder } from "../../types";
-import { isResourceRecord } from "../../utils/clipboardRecord";
+import { isResourceRecord } from "../../domain/records";
 
 interface StashRecord {
   id: string;

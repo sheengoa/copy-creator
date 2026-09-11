@@ -11,13 +11,8 @@ import { InlineTextFilePreview } from "../../components/InlinePreview";
 import { formatTime } from "../../utils/formatTime";
 import { ImageThumb } from "../ClipboardPage/ImageThumb";
 import { ResourceFileImage, ResourceVideoPoster } from "./ResourceMedia";
-import {
-  getResourcePath,
-  getResourceSummary,
-  getResourceTitle,
-  inferResourceMediaKind,
-  type ResourceMediaKind,
-} from "./resourceUtils";
+import { inferResourceMediaKind, type ResourceMediaKind } from "../../domain/mediaKind";
+import { getResourcePath, getResourceSummary, getResourceTitle } from "../../domain/records";
 
 interface ResourceCardProps {
   record: ClipboardRecord;

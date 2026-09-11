@@ -4,11 +4,8 @@ import { listen } from "@tauri-apps/api/event";
 import { useSettingsStore } from "./settingsStore";
 import type { Phrase, PhraseGroup } from "../types";
 import { sortByIdOrder } from "../utils/reorder";
-import {
-  DECODABLE_IMAGE_EXTENSIONS,
-  getResourceExtension,
-  resolveAbsoluteResourcePath,
-} from "../pages/ResourcePage/resourceUtils";
+import { DECODABLE_IMAGE_EXTENSIONS, getResourceExtension } from "../domain/mediaKind";
+import { resolveAbsoluteResourcePath } from "../domain/mediaUrl";
 
 /** 「全部」跨分组视图的选择哨兵：真实分组 id 由后端生成，不会与之冲突。 */
 export const ALL_PHRASES_GROUP_ID = "__all__";

@@ -3,7 +3,7 @@ import { invoke } from "@tauri-apps/api/core";
 import { useTranslation } from "react-i18next";
 import { HighlightText } from "./HighlightText";
 import { Icons } from "./Icons";
-import { resolveResourceAssetUrl } from "../pages/ResourcePage/resourceUtils";
+import { resolveResourceAssetUrl } from "../domain/mediaUrl";
 
 interface InlineImagePreviewProps {
   path: string;

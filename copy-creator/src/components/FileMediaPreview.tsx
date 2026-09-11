@@ -1,10 +1,8 @@
 import { useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Icons } from "./Icons";
-import {
-  fileMediaKindFromPath,
-  resolveResourceMediaUrl,
-} from "../pages/ResourcePage/resourceUtils";
+import { fileMediaKindFromPath } from "../domain/mediaKind";
+import { resolveResourceMediaUrl } from "../domain/mediaUrl";
 import { ResourceFileImage } from "../pages/ResourcePage/ResourceMedia";
 
 /**

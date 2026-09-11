@@ -8,7 +8,7 @@ import {
   ALL_PHRASES_GROUP_ID,
 } from "../../stores/phraseStore";
 import type { QuickInputFileSelection } from "../../stores/phraseStore";
-import { fileNameFromPath } from "../../utils/fileName";
+import { fileNameFromPath } from "../../domain/fileName";
 
 import { useSettingsStore } from "../../stores/settingsStore";
 import { ConfirmDialog } from "../../components/ConfirmDialog";

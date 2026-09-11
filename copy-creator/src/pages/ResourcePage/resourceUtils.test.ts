@@ -11,27 +11,14 @@ vi.mock("@tauri-apps/api/core", () => ({
   invoke: invokeMock,
 }));
 
-import {
-  computeResourceColumnCount,
-  findResourceFolder,
-  flattenResourceFolders,
-  formatResourceBitrate,
-  formatResourceDuration,
-  formatResourceFileSize,
-  getResourceFolderRoot,
-  getResourceFileName,
-  getResourcePath,
-  getResourceTitle,
-  hasCustomResourceFileName,
-  inferResourceMediaKind,
-  isFileBackedTextResource,
-  isResourceFolderPath,
-  isResourceTitleRenameable,
-  resolveResourceAssetUrl,
-  resolveResourceMediaUrl,
-  splitResourceColumns,
-  splitResourceFileName,
-} from "./resourceUtils";
+import { computeResourceColumnCount, formatResourceBitrate, formatResourceDuration, formatResourceFileSize, splitResourceColumns } from "./resourceUtils";
+import { resolveResourceAssetUrl, resolveResourceMediaUrl } from "../../domain/mediaUrl";
+import { findResourceFolder, flattenResourceFolders } from "../../domain/groups";
+import { getResourceFileName, hasCustomResourceFileName, isResourceTitleRenameable, splitResourceFileName } from "../../domain/fileName";
+import { getResourcePath, getResourceTitle, isFileBackedTextResource } from "../../domain/records";
+import { getResourceFolderRoot, isResourceFolderPath } from "../../domain/groups";
+import { inferResourceMediaKind } from "../../domain/mediaKind";
+
 
 function record(type: ClipboardRecord["type"], content: string): Pick<ClipboardRecord, "type" | "content"> {
   return { type, content };

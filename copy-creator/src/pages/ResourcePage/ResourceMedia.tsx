@@ -3,7 +3,7 @@ import { invoke } from "@tauri-apps/api/core";
 import { useTranslation } from "react-i18next";
 import type { RadialPreviewSegment } from "../../utils/radialPreview";
 import { Icons } from "../../components/Icons";
-import { resolveResourceAssetUrl, resolveResourceMediaUrl } from "./resourceUtils";
+import { resolveResourceAssetUrl, resolveResourceMediaUrl } from "../../domain/mediaUrl";
 
 function useResourceAssetUrl(
   path: string,

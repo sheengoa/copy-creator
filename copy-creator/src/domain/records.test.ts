@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { isResourceRecord } from "./clipboardRecord";
+import { isResourceRecord } from "./records";
 
 describe("isResourceRecord", () => {
   it("recognizes records stored in the resource library", () => {

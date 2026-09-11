@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
 import type { ResourceFolder } from "../../types";
 import { Icons } from "../../components/Icons";
-import { flattenResourceFolders } from "./resourceUtils";
+import { flattenResourceFolders } from "../../domain/groups";
 
 interface ResourceMoveDialogProps {
   open: boolean;

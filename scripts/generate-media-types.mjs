@@ -10,9 +10,12 @@
 import { readFileSync, writeFileSync, mkdirSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
-import { argv } from "node:process";
+import { argv, exit } from "node:process";
 
-const repoRoot = resolve(argv[2] ?? join(dirname(fileURLToPath(import.meta.url)), ".."));
+// --check 模式：只比对生成物是否与配置同步，不写文件（架构守卫规则 7 调用）。
+const CHECK_ONLY = argv.includes("--check");
+const positional = argv.slice(2).filter((a) => !a.startsWith("--"))[0];
+const repoRoot = resolve(positional ?? join(dirname(fileURLToPath(import.meta.url)), ".."));
 const configPath = join(repoRoot, "config", "media-types.json");
 const tsOutPath = join(repoRoot, "copy-creator", "src", "domain", "mediaTypes.generated.ts");
 const rsOutPath = join(repoRoot, "copy-creator", "src-tauri", "src", "media_types_generated.rs");
@@ -91,6 +94,20 @@ const rsBody = [
   rsLines("IMPORTABLE_IMAGE_EXTENSIONS", config.importableImage),
   "",
 ].join("\n");
+
+mkdirSync(dirname(tsOutPath), { recursive: true });
+if (CHECK_ONLY) {
+  const tsCurrent = readFileSync(tsOutPath, "utf8");
+  const rsCurrent = readFileSync(rsOutPath, "utf8");
+  if (tsCurrent !== tsBody || rsCurrent !== rsBody) {
+    console.error(
+      "生成物与 config/media-types.json 不同步：请运行 node scripts/generate-media-types.mjs 后提交生成物。",
+    );
+    exit(1);
+  }
+  console.log("生成物与配置一致。");
+  exit(0);
+}
 
 mkdirSync(dirname(tsOutPath), { recursive: true });
 writeFileSync(tsOutPath, tsBody);

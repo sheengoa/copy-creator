@@ -20,12 +20,7 @@ import { CSS } from "@dnd-kit/utilities";
 import { restrictToHorizontalAxis } from "@dnd-kit/modifiers";
 import { Icons } from "../../components/Icons";
 import type { ResourceFolder } from "../../types";
-import {
-  findResourceFolder,
-  flattenResourceFolders,
-  formatResourceFolderPath,
-  isResourceFolderPath,
-} from "./resourceUtils";
+import { findResourceFolder, flattenResourceFolders, formatResourceFolderPath, isResourceFolderPath } from "../../domain/groups";
 
 interface ResourceGroupChipsProps {
   groups: ResourceFolder[];

@@ -28,26 +28,15 @@ import { BackToTopButton } from "../components/BackToTop";
 import { useBackToTop } from "../hooks/useBackToTop";
 import ResourceDetailPage from "./ResourcePage/ResourceDetailPage";
 import ResourceGroupChips from "./ResourcePage/ResourceGroupChips";
+import type { ResourceMediaKind as ResourceMediaKindLabel } from "../domain/mediaKind";
 import { ResourceCard } from "./ResourcePage/ResourceCard";
-import {
-  computeResourceColumnCount,
-  findResourceFolder,
-  flattenResourceFolderPaths,
-  flattenResourceFolders,
-  formatResourceFolderPath,
-  getResourceFolderRoot,
-  getResourceFolderSiblings,
-  getResourceTitle,
-  inferResourceMediaKind,
-  isResourceFolderPath,
-  matchesResourceType,
-  reorderResourceFolderSiblings,
-  splitResourceColumns,
-  type ResourceMediaKind,
-  type ResourceTypeFilter,
-} from "./ResourcePage/resourceUtils";
+import { type ResourceTypeFilter } from "../domain/mediaKind";
+import { computeResourceColumnCount, splitResourceColumns } from "./ResourcePage/resourceUtils";
+import { findResourceFolder, flattenResourceFolderPaths, flattenResourceFolders, formatResourceFolderPath, getResourceFolderRoot, getResourceFolderSiblings, isResourceFolderPath, reorderResourceFolderSiblings } from "../domain/groups";
+import { inferResourceMediaKind, matchesResourceType } from "../domain/mediaKind";
+import { getResourceTitle } from "../domain/records";
 import ResourceMoveDialog from "./ResourcePage/ResourceMoveDialog";
-import { isResourceRecord } from "../utils/clipboardRecord";
+import { isResourceRecord } from "../domain/records";
 
 type ResourceGroupDialogState = {
   mode: "create" | "rename";
@@ -137,7 +126,7 @@ export default function ResourcePage() {
   const searchEffectInitializedRef = useRef(false);
   const selectAllRequestRef = useRef(0);
 
-  const typeLabels = useMemo<Record<ResourceMediaKind, string>>(
+  const typeLabels = useMemo<Record<ResourceMediaKindLabel, string>>(
     () => ({
       text: t("resources.typeText"),
       image: t("resources.typeImage"),

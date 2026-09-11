@@ -13,7 +13,7 @@ import { BackToTopButton } from "../../components/BackToTop";
 import { useBackToTop } from "../../hooks/useBackToTop";
 import { useMultiSelect } from "../../hooks/useMultiSelect";
 import { buildRecordView, type RecordView } from "../../domain/recordView";
-import { isResourceRecord } from "../../utils/clipboardRecord";
+import { isResourceRecord } from "../../domain/records";
 
 type ClipType = ClipboardFilter;
 

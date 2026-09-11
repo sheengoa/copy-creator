@@ -7,22 +7,14 @@ import { Icons } from "../../components/Icons";
 import { BackToTopButton } from "../../components/BackToTop";
 import { useBackToTop } from "../../hooks/useBackToTop";
 import { HighlightText } from "../../components/HighlightText";
-import { loadClipboardPreviewSegments } from "../../utils/contentPreview";
-import type { RadialPreviewSegment } from "../../utils/radialPreview";
-import {
-  formatResourceBitrate,
-  formatResourceDuration,
-  formatResourceFileSize,
-  formatResourceFolderPath,
-  getResourceFileName,
-  getResourcePath,
-  getResourceTitle,
-  inferResourceMediaKind,
-  isResourceTitleRenameable,
-  resolveResourceMediaUrl,
-  splitResourceFileName,
-  type ResourceMediaKind,
-} from "./resourceUtils";
+import { loadRecordPreviewSegments, type RadialPreviewSegment } from "../../domain/preview";
+import { formatResourceBitrate, formatResourceDuration, formatResourceFileSize } from "./resourceUtils";
+import { type ResourceMediaKind } from "../../domain/mediaKind";
+import { getResourceFileName, isResourceTitleRenameable, splitResourceFileName } from "../../domain/fileName";
+import { formatResourceFolderPath } from "../../domain/groups";
+import { inferResourceMediaKind } from "../../domain/mediaKind";
+import { resolveResourceMediaUrl } from "../../domain/mediaUrl";
+import { getResourcePath, getResourceTitle } from "../../domain/records";
 import {
   ResourceImageGhost,
   ResourceMediaPlayer,
@@ -208,8 +200,14 @@ export default function ResourceDetailPage({
       };
     }
 
-    loadClipboardPreviewSegments(record)
-      .then((next) => {
+    loadRecordPreviewSegments({
+      id: record.id,
+      recordType: record.type,
+      content: record.content,
+      contentTruncated: Boolean(record.content_truncated),
+      hasImages: Boolean(record.has_images),
+    })
+      .then((next: RadialPreviewSegment[]) => {
         if (!cancelled) setSegments(next);
       })
       .catch(() => {

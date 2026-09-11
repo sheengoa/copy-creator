@@ -2,9 +2,9 @@ import { create } from "zustand";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { useSettingsStore } from "./settingsStore";
-import { isResourceRecord } from "../utils/clipboardRecord";
+import { isResourceRecord } from "../domain/records";
 import { sortByIdOrder } from "../utils/reorder";
-import { getResourcePath, isFileBackedTextResource } from "../pages/ResourcePage/resourceUtils";
+import { getResourcePath, isFileBackedTextResource } from "../domain/records";
 
 type UnlistenFn = () => void;
 

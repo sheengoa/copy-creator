@@ -8,11 +8,8 @@ import { HighlightText } from "../../components/HighlightText";
 import { InlineImagePreview, InlineTextFilePreview } from "../../components/InlinePreview";
 import { usePhraseStore, isImageFilePath } from "../../stores/phraseStore";
 import { useSettingsStore } from "../../stores/settingsStore";
-import { fileNameFromPath } from "../../utils/fileName";
-import {
-  isInlineTextPreviewFilePath,
-  shouldShowInlineTextToggle,
-} from "../../utils/inlinePreview";
+import { fileNameFromPath } from "../../domain/fileName";
+import { isInlineTextPreviewFilePath, shouldShowInlineTextToggle } from "../../domain/records";
 
 interface PhraseListProps {
   phrases: Phrase[];
