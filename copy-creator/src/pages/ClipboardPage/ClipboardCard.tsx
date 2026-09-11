@@ -282,7 +282,9 @@ function ClipboardCardInner({
               <span className="clipboard-file-content"><HighlightText text={view.displayName} search={search} /></span>
               {expanded && view.expandPreview !== null && (
                 view.expandPreview === "video" || view.expandPreview === "audio" ? (
-                  <ResourceMediaPlayer kind={view.expandPreview} path={view.content} />
+                  <div className={`clipboard-media-slot is-${view.expandPreview}`}>
+                    <ResourceMediaPlayer kind={view.expandPreview} path={view.content} />
+                  </div>
                 ) : view.expandPreview === "image" ? (
                   <InlineImagePreview
                     path={view.content}

@@ -1362,3 +1362,21 @@
   height: 14px;
   margin-left: 1px;
 }
+
+/* 展开的媒体槽位：固定占位高度消除"封面卸载→播放器加载"间的高度塌缩闪烁，
+   淡入软化切换。视频定高（与播放器 max-height 匹配的观感），音频随内容。 */
+.clipboard-media-slot {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  animation: clipboard-media-fade-in 0.25s ease;
+}
+
+.clipboard-media-slot.is-video {
+  min-height: 240px;
+}
+
+@keyframes clipboard-media-fade-in {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
