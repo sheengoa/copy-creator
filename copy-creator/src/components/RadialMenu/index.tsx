@@ -49,7 +49,14 @@ import type { ClipboardRecord, Phrase, ResourceFolder } from "../../types";
 import { type ResourceMediaKind } from "../../domain/mediaKind";
 import { findResourceFolder, flattenResourceFolders, formatResourceFolderPath, isResourceFolderPath } from "../../domain/groups";
 import { fileMediaKindFromPath, getResourceExtension, inferResourceMediaKind, TEXT_EXTENSIONS } from "../../domain/mediaKind";
-import { getResourcePath, getResourceSummary, isFileBackedTextResource } from "../../domain/records";
+import {
+  getResourcePath,
+  getResourceSummary,
+  isFileBackedTextResource,
+  recordUsageTime,
+  resourceGroupLeafLabel,
+} from "../../domain/records";
+import { UsageCountBadge } from "../UsageCountBadge";
 import i18n from "../../i18n";
 
 type TabKey = "clipboard" | "phrases" | "resources";
@@ -1469,7 +1476,7 @@ export default function RadialMenu() {
   // 「全部」视图条目形态全区一致：相对使用时间 + 来源标签
   // （快捷输入 · 分组 / 资源 · 分组；剪切板无分组概念不显示标签）。
   const usageTimeLabel = (r: ClipboardRecord): string =>
-    formatRelativeTime(r.last_used_at || r.created_at);
+    formatRelativeTime(recordUsageTime(r.last_used_at, r.created_at));
 
   const items: RadialItem[] = activeTab === "clipboard"
     ? filteredRecords.slice(0, MAX_ITEMS).map((r) => ({
@@ -1483,7 +1490,7 @@ export default function RadialMenu() {
           .map((r) => {
             const item = recordToRadialItem(r);
             if (resourceGroup !== null) return item; // 分组浏览：保持原样
-            const leaf = (r.resource_group ?? "").split("/").filter(Boolean).pop();
+            const leaf = resourceGroupLeafLabel(r.resource_group);
             return {
               ...item,
               usedAtLabel: usageTimeLabel(r),
@@ -1822,9 +1829,7 @@ export default function RadialMenu() {
                           </span>
                         )}
                         {countSortOn && item.useCount != null && (
-                          <span className="usage-count-badge">
-                            {t("common.usageCount", { count: item.useCount })}
-                          </span>
+                          <UsageCountBadge count={item.useCount} />
                         )}
                         {!item.isResource && item.title && (
                           <span className="radial-menu-item-remark">{item.title}</span>

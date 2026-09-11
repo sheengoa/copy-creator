@@ -64,6 +64,23 @@ export function getResourceTitle(
   return record.type === "link" ? "链接内容" : "文本内容";
 }
 
+/** 「全部」视图的使用时间来源：最近使用时间，从未使用过回退创建时间。
+ *  剪切板卡片、资源卡片与径向菜单条目的时间标签统一取值入口。 */
+export function recordUsageTime(
+  lastUsedAt: string | null | undefined,
+  createdAt: string,
+): string {
+  return lastUsedAt || createdAt;
+}
+
+/** 资源分组标签的末级名称（「货物素材/模板」→「模板」；未分组返回 null）。 */
+export function resourceGroupLeafLabel(
+  group: string | null | undefined,
+): string | null {
+  if (!group) return null;
+  return group.split("/").filter(Boolean).pop() ?? null;
+}
+
 export function getResourceSummary(record: Pick<ClipboardRecord, "type" | "content">): string {
   const summary = record.content
     .replaceAll("\uFFFC", "[图片]")

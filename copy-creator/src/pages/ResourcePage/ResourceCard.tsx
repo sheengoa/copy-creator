@@ -8,6 +8,8 @@ import {
 import { HighlightText } from "../../components/HighlightText";
 import { InlineTextFilePreview } from "../../components/InlinePreview";
 import { formatTime, formatRelativeTime } from "../../utils/formatTime";
+import { recordUsageTime, resourceGroupLeafLabel } from "../../domain/records";
+import { UsageCountBadge } from "../../components/UsageCountBadge";
 import { ImageThumb } from "../ClipboardPage/ImageThumb";
 import { ResourceFileImage, ResourceVideoPoster } from "./ResourceMedia";
 import { type ResourceMediaKind } from "../../domain/mediaKind";
@@ -244,21 +246,17 @@ export function ResourceCard({
         <div className="resource-card-meta">
           {showGroupTag && view.resourceGroup && (
             <span className="resource-card-group-tag" title={view.resourceGroup}>
-              {view.resourceGroup.split("/").filter(Boolean).pop()}
+              {resourceGroupLeafLabel(view.resourceGroup)}
             </span>
           )}
           <span>{typeLabel(kind)}</span>
           <span aria-hidden="true">·</span>
           <time dateTime={view.createdAt}>
             {showGroupTag
-              ? formatRelativeTime(view.lastUsedAt || view.createdAt)
+              ? formatRelativeTime(recordUsageTime(view.lastUsedAt, view.createdAt))
               : formatTime(view.createdAt)}
           </time>
-          {showUsageBadge && (
-            <span className="usage-count-badge">
-              {t("common.usageCount", { count: view.useCount })}
-            </span>
-          )}
+          {showUsageBadge && <UsageCountBadge count={view.useCount} />}
         </div>
         <div className="resource-card-footer">
           <span className="resource-card-source">

@@ -8,6 +8,7 @@ import { HighlightText } from "../../components/HighlightText";
 import { InlineImagePreview, InlineTextFilePreview } from "../../components/InlinePreview";
 import { usePhraseStore, isImageFilePath } from "../../stores/phraseStore";
 import { useSettingsStore } from "../../stores/settingsStore";
+import { UsageCountBadge } from "../../components/UsageCountBadge";
 import { fileNameFromPath } from "../../domain/fileName";
 import { isInlineTextPreviewFilePath, shouldShowInlineTextToggle } from "../../domain/records";
 
@@ -180,9 +181,7 @@ function PhraseCard({
             </span>
           )}
           {showGroupTag && isCountSort && (
-            <span className="usage-count-badge">
-              {t("common.usageCount", { count: phrase.use_count ?? 0 })}
-            </span>
+            <UsageCountBadge count={phrase.use_count ?? 0} />
           )}
           <span className="phrase-card-remark"><HighlightText text={phrase.title || ""} search={search} /></span>
           {!selectionMode && (
