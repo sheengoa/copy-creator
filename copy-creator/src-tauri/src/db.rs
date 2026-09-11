@@ -159,6 +159,7 @@ fn clipboard_record_json(
     attachments: String,
     storage_mode: String,
     resource_path: String,
+    use_count: i64,
 ) -> serde_json::Value {
     let attachment_paths = serde_json::from_str::<Vec<String>>(&attachments).unwrap_or_default();
     let has_images = !attachment_paths.is_empty();
@@ -202,6 +203,7 @@ fn clipboard_record_json(
             DATABASE_STORAGE_MODE
         },
         "resource_path": resource_path,
+        "use_count": use_count,
     })
 }
 
@@ -1350,7 +1352,9 @@ pub fn init_db(app: &AppHandle) -> Result<(), Box<dyn std::error::Error>> {
             attachments TEXT DEFAULT '[]',
             storage_mode TEXT DEFAULT 'database',
             resource_path TEXT DEFAULT '',
-            last_used_at TEXT DEFAULT ''
+            last_used_at TEXT DEFAULT '',
+            use_count INTEGER DEFAULT 0,
+            touched_ms INTEGER DEFAULT 0
         );
 
         CREATE INDEX IF NOT EXISTS idx_clipboard_created_at
@@ -1376,6 +1380,7 @@ pub fn init_db(app: &AppHandle) -> Result<(), Box<dyn std::error::Error>> {
             created_at TEXT NOT NULL,
             updated_at TEXT NOT NULL,
             last_used_at TEXT DEFAULT '',
+            use_count INTEGER DEFAULT 0,
             FOREIGN KEY (group_id) REFERENCES phrase_groups(id) ON DELETE CASCADE
         );
 
@@ -1559,6 +1564,25 @@ pub fn init_db(app: &AppHandle) -> Result<(), Box<dyn std::error::Error>> {
     .ok();
     conn.execute(
         "ALTER TABLE phrases ADD COLUMN last_used_at TEXT DEFAULT ''",
+        [],
+    )
+    .ok();
+
+    // ── use_count / touched_ms：使用次数与最近使用毫秒时间戳，供内容列表排序偏好 ──
+    // touched_ms 仅 touch 写入；「最近使用」排序键取 MAX(touched_ms, sort_order)，
+    // 未使用过的条目自然回退到复制/文件时间（新复制置顶不沉底）。
+    conn.execute(
+        "ALTER TABLE clipboard_records ADD COLUMN use_count INTEGER DEFAULT 0",
+        [],
+    )
+    .ok();
+    conn.execute(
+        "ALTER TABLE clipboard_records ADD COLUMN touched_ms INTEGER DEFAULT 0",
+        [],
+    )
+    .ok();
+    conn.execute(
+        "ALTER TABLE phrases ADD COLUMN use_count INTEGER DEFAULT 0",
         [],
     )
     .ok();
@@ -1752,13 +1776,27 @@ pub fn get_clipboard_records(
     offset: Option<u32>,
     category: Option<String>,
     resource_group: Option<String>,
+    sort_by: Option<String>,
 ) -> Result<Vec<serde_json::Value>, String> {
-    get_clipboard_records_inner(&app, search, limit, offset, category, resource_group)
+    get_clipboard_records_inner(&app, search, limit, offset, category, resource_group, sort_by)
+}
+
+/// 内容列表排序子句：created=现状时间序；recent=最近使用（touch 毫秒，
+/// 未使用回退 sort_order 即复制/文件时间，新复制置顶不沉底）；count=最多使用。
+fn clipboard_order_clause(sort_by: Option<&str>) -> &'static str {
+    match sort_by {
+        Some("count") => "(COALESCE(use_count, 0) = 0) ASC, use_count DESC,
+                MAX(COALESCE(touched_ms, 0), sort_order) DESC",
+        Some("recent") => "MAX(COALESCE(touched_ms, 0), sort_order) DESC",
+        _ => "sort_order DESC",
+    }
 }
 
 struct ResourceRecordValue {
     value: serde_json::Value,
     sort_order: f64,
+    use_count: i64,
+    touched_ms: i64,
 }
 
 fn resource_record_value(
@@ -1818,6 +1856,7 @@ fn get_resource_records_inner<R: Runtime>(
     limit: Option<u32>,
     offset: Option<u32>,
     resource_group: Option<String>,
+    sort_by: Option<String>,
 ) -> Result<Vec<serde_json::Value>, String> {
     let resource_root = get_resource_library_dir(app);
     let normalized_folder = resource_group
@@ -1832,7 +1871,8 @@ fn get_resource_records_inner<R: Runtime>(
             .prepare(
                 "SELECT id, type, content, source_app, created_at, user_api_key,
                         group_name, attachments, storage_mode, resource_path,
-                        COALESCE(sort_order, 0), COALESCE(resource_note, '')
+                        COALESCE(sort_order, 0), COALESCE(resource_note, ''),
+                        COALESCE(use_count, 0), COALESCE(touched_ms, 0)
                  FROM clipboard_records
                  WHERE COALESCE(storage_mode, 'database') = 'resource'",
             )
@@ -1845,6 +1885,8 @@ fn get_resource_records_inner<R: Runtime>(
                 let resource_path = row.get::<_, String>(9)?;
                 let sort_order = row.get::<_, f64>(10)?;
                 let resource_note = row.get::<_, String>(11)?;
+                let use_count = row.get::<_, i64>(12)?;
+                let touched_ms = row.get::<_, i64>(13)?;
                 let path = if resource_path.is_empty() {
                     None
                 } else {
@@ -1870,12 +1912,15 @@ fn get_resource_records_inner<R: Runtime>(
                     row.get::<_, String>(7)?,
                     row.get::<_, String>(8)?,
                     resource_path,
+                    use_count,
                 );
                 value["resource_note"] = serde_json::Value::String(resource_note);
                 Ok((
                     resource_record_value(value, &resource_root, path.as_deref(), media_kind, true),
                     sort_order,
                     path,
+                    use_count,
+                    touched_ms,
                 ))
             })
             .map_err(|e| e.to_string())?;
@@ -1885,11 +1930,16 @@ fn get_resource_records_inner<R: Runtime>(
 
     let database_paths = database_records
         .iter()
-        .filter_map(|(_, _, path)| path.as_deref().map(resource_path_key))
+        .filter_map(|(_, _, path, _, _)| path.as_deref().map(resource_path_key))
         .collect::<HashSet<_>>();
     let mut records = database_records
         .into_iter()
-        .map(|(value, sort_order, _)| ResourceRecordValue { value, sort_order })
+        .map(|(value, sort_order, _, use_count, touched_ms)| ResourceRecordValue {
+            value,
+            sort_order,
+            use_count,
+            touched_ms,
+        })
         .collect::<Vec<_>>();
 
     for entry in scan_resource_files(&resource_root) {
@@ -1907,6 +1957,7 @@ fn get_resource_records_inner<R: Runtime>(
             "[]".to_string(),
             RESOURCE_STORAGE_MODE.to_string(),
             entry.path.to_string_lossy().to_string(),
+            0,
         );
         records.push(ResourceRecordValue {
             value: resource_record_value(
@@ -1917,6 +1968,8 @@ fn get_resource_records_inner<R: Runtime>(
                 false,
             ),
             sort_order: entry.sort_order,
+            use_count: 0,
+            touched_ms: 0,
         });
     }
 
@@ -1953,16 +2006,28 @@ fn get_resource_records_inner<R: Runtime>(
         });
         matches_folder && matches_search
     });
+    // 排序键与 clipboard_order_clause 同语义（Rust 侧实现：库内记录与
+    // 文件扫描记录合并后统一比较）。
+    let effective_ms = |record: &ResourceRecordValue| {
+        (record.touched_ms as f64).max(record.sort_order)
+    };
     records.sort_by(|left, right| {
-        right
-            .sort_order
-            .partial_cmp(&left.sort_order)
-            .unwrap_or(std::cmp::Ordering::Equal)
-            .then_with(|| {
-                let left_id = left.value["id"].as_str().unwrap_or_default();
-                let right_id = right.value["id"].as_str().unwrap_or_default();
-                left_id.cmp(right_id)
-            })
+        let ordering = match sort_by.as_deref() {
+            Some("count") => (left.use_count == 0)
+                .cmp(&(right.use_count == 0))
+                .then_with(|| right.use_count.cmp(&left.use_count))
+                .then_with(|| effective_ms(right).total_cmp(&effective_ms(left))),
+            Some("recent") => effective_ms(right).total_cmp(&effective_ms(left)),
+            _ => right
+                .sort_order
+                .partial_cmp(&left.sort_order)
+                .unwrap_or(std::cmp::Ordering::Equal),
+        };
+        ordering.then_with(|| {
+            let left_id = left.value["id"].as_str().unwrap_or_default();
+            let right_id = right.value["id"].as_str().unwrap_or_default();
+            left_id.cmp(right_id)
+        })
     });
 
     let offset = offset.unwrap_or(0) as usize;
@@ -1982,9 +2047,10 @@ fn get_clipboard_records_inner<R: Runtime>(
     offset: Option<u32>,
     category: Option<String>,
     resource_group: Option<String>,
+    sort_by: Option<String>,
 ) -> Result<Vec<serde_json::Value>, String> {
     if category.as_deref() == Some("resources") {
-        return get_resource_records_inner(app, search, limit, offset, resource_group);
+        return get_resource_records_inner(app, search, limit, offset, resource_group, sort_by);
     }
 
     // 资源分组来自文件系统路径；先读取配置，避免持有数据库锁时再次读取设置。
@@ -2018,9 +2084,10 @@ fn get_clipboard_records_inner<R: Runtime>(
             .replace('%', "\\%")
             .replace('_', "\\_");
         let sql = format!(
-            "SELECT id, type, content, source_app, created_at, user_api_key, group_name, attachments, storage_mode, resource_path FROM clipboard_records
-             WHERE content LIKE '%' || ?1 || '%' ESCAPE '\\' {} ORDER BY sort_order DESC LIMIT ?2 OFFSET ?3",
-            cat_filter.1
+            "SELECT id, type, content, source_app, created_at, user_api_key, group_name, attachments, storage_mode, resource_path, COALESCE(use_count, 0) FROM clipboard_records
+             WHERE content LIKE '%' || ?1 || '%' ESCAPE '\\' {} ORDER BY {} LIMIT ?2 OFFSET ?3",
+            cat_filter.1,
+            clipboard_order_clause(sort_by.as_deref())
         );
         let mut stmt = conn.prepare(&sql).map_err(|e| e.to_string())?;
         let rows = stmt
@@ -2036,6 +2103,7 @@ fn get_clipboard_records_inner<R: Runtime>(
                     row.get::<_, String>(7)?,
                     row.get::<_, String>(8)?,
                     row.get::<_, String>(9)?,
+                    row.get::<_, i64>(10)?,
                 ))
             })
             .map_err(|e| e.to_string())?;
@@ -2044,9 +2112,10 @@ fn get_clipboard_records_inner<R: Runtime>(
         }
     } else {
         let sql = format!(
-            "SELECT id, type, content, source_app, created_at, user_api_key, group_name, attachments, storage_mode, resource_path FROM clipboard_records
-             {} ORDER BY sort_order DESC LIMIT ?1 OFFSET ?2",
-            cat_filter.0
+            "SELECT id, type, content, source_app, created_at, user_api_key, group_name, attachments, storage_mode, resource_path, COALESCE(use_count, 0) FROM clipboard_records
+             {} ORDER BY {} LIMIT ?1 OFFSET ?2",
+            cat_filter.0,
+            clipboard_order_clause(sort_by.as_deref())
         );
         let mut stmt = conn.prepare(&sql).map_err(|e| e.to_string())?;
         let rows = stmt
@@ -2062,6 +2131,7 @@ fn get_clipboard_records_inner<R: Runtime>(
                     row.get::<_, String>(7)?,
                     row.get::<_, String>(8)?,
                     row.get::<_, String>(9)?,
+                    row.get::<_, i64>(10)?,
                 ))
             })
             .map_err(|e| e.to_string())?;
@@ -2201,25 +2271,41 @@ fn phrase_row_with_group(row: &rusqlite::Row) -> rusqlite::Result<serde_json::Va
         "updated_at": row.get::<_, String>(9)?,
         "last_used_at": row.get::<_, String>(10)?,
         "group_name": row.get::<_, Option<String>>(11)?,
+        "use_count": row.get::<_, i64>(12)?,
     }))
+}
+
+/// 「全部」视图排序子句：recent=最近使用（未使用按分组 + 手动顺序垫底）；
+/// count=最多使用（次数倒序、并列按最近使用，未使用垫底规则相同）。
+fn phrases_all_order_clause(sort_by: Option<&str>) -> &'static str {
+    match sort_by {
+        Some("count") => "(COALESCE(p.use_count, 0) = 0) ASC, p.use_count DESC, p.last_used_at DESC,
+                COALESCE(g.sort_order, 0) DESC, p.sort_order DESC",
+        _ => "(COALESCE(p.last_used_at, '') = '') ASC,
+                      p.last_used_at DESC,
+                      COALESCE(g.sort_order, 0) DESC,
+                      p.sort_order DESC",
+    }
 }
 
 /// 查询全部短语：有使用记录的按 last_used_at 倒序在前，未使用的按
 /// 「分组顺序 + 组内手动顺序」垫底（分组、手动均为 sort_order 越大越靠前）。
 /// 时间戳均为 chrono RFC3339 UTC，字典序即时间序；limit 传 i64::MAX 表示全量。
-fn all_phrase_rows(conn: &Connection, limit: i64) -> Result<Vec<serde_json::Value>, String> {
+fn all_phrase_rows(
+    conn: &Connection,
+    limit: i64,
+    sort_by: Option<&str>,
+) -> Result<Vec<serde_json::Value>, String> {
     let mut stmt = conn
-        .prepare(
+        .prepare(&format!(
             "SELECT p.id, p.group_id, p.title, p.content, p.input_type, p.source_path,
-                    p.file_size, p.sort_order, p.created_at, p.updated_at, p.last_used_at, g.name
+                    p.file_size, p.sort_order, p.created_at, p.updated_at, p.last_used_at, g.name,
+                    COALESCE(p.use_count, 0)
              FROM phrases p
              LEFT JOIN phrase_groups g ON p.group_id = g.id
-             ORDER BY (COALESCE(p.last_used_at, '') = ''),
-                      p.last_used_at DESC,
-                      COALESCE(g.sort_order, 0) DESC,
-                      p.sort_order DESC
-             LIMIT ?1",
-        )
+             ORDER BY {} LIMIT ?1",
+            phrases_all_order_clause(sort_by)
+        ))
         .map_err(|e| e.to_string())?;
     let rows = stmt
         .query_map(params![limit], phrase_row_with_group)
@@ -2237,11 +2323,12 @@ fn all_phrase_rows(conn: &Connection, limit: i64) -> Result<Vec<serde_json::Valu
 pub fn get_all_phrases(
     app: AppHandle,
     limit: Option<u32>,
+    sort_by: Option<String>,
 ) -> Result<Vec<serde_json::Value>, String> {
     let lim = limit.map_or(i64::MAX, |n| n.clamp(1, 2000) as i64);
     let state = app.state::<DbState>();
     let conn = state.conn.lock().map_err(|e| e.to_string())?;
-    all_phrase_rows(&conn, lim)
+    all_phrase_rows(&conn, lim, sort_by.as_deref())
 }
 
 /// 记录剪贴板/资源记录的使用时间：粘贴成功与拖出成功放下共用。
@@ -2254,6 +2341,7 @@ pub(crate) fn touch_clipboard_usage_internal<R: Runtime>(
     ids: &[String],
 ) -> Result<(), String> {
     let now = chrono::Utc::now().to_rfc3339();
+    let now_ms = chrono::Utc::now().timestamp_millis();
     let mut discovered: HashMap<&str, PathBuf> = HashMap::new();
     for id in ids {
         if !id.starts_with(RESOURCE_FILE_ID_PREFIX) {
@@ -2266,9 +2354,15 @@ pub(crate) fn touch_clipboard_usage_internal<R: Runtime>(
     let state = app.state::<DbState>();
     let conn = state.conn.lock().map_err(|e| e.to_string())?;
     for id in ids {
+        if discovered.contains_key(id.as_str()) {
+            // 未入库资源（resource-file: 虚拟 id）由下方按路径去重处理，
+            // 这里跳过以免既有记录被重复计数。
+            continue;
+        }
         conn.execute(
-            "UPDATE clipboard_records SET last_used_at = ?1 WHERE id = ?2",
-            params![&now, id],
+            "UPDATE clipboard_records SET last_used_at = ?1, use_count = COALESCE(use_count, 0) + 1,
+                    touched_ms = ?2 WHERE id = ?3",
+            params![&now, now_ms, id],
         )
         .map_err(|e| e.to_string())?;
     }
@@ -2298,17 +2392,19 @@ pub(crate) fn touch_clipboard_usage_internal<R: Runtime>(
         let key = resource_path_key(path);
         if let Some(existing_id) = by_path.get(&key) {
             conn.execute(
-                "UPDATE clipboard_records SET last_used_at = ?1 WHERE id = ?2",
-                params![&now, existing_id],
+                "UPDATE clipboard_records SET last_used_at = ?1, use_count = COALESCE(use_count, 0) + 1,
+                        touched_ms = ?2 WHERE id = ?3",
+                params![&now, now_ms, existing_id],
             )
             .map_err(|e| e.to_string())?;
         } else {
             let path_text = path.to_string_lossy();
             conn.execute(
                 "INSERT INTO clipboard_records
-                 (id, type, content, source_app, created_at, storage_mode, resource_path, last_used_at)
-                 VALUES (?1, 'file', ?2, '', ?3, 'resource', ?2, ?3)",
-                params![id, path_text, &now],
+                 (id, type, content, source_app, created_at, storage_mode, resource_path,
+                  last_used_at, use_count, touched_ms)
+                 VALUES (?1, 'file', ?2, '', ?3, 'resource', ?2, ?3, 1, ?4)",
+                params![id, path_text, &now, now_ms],
             )
             .map_err(|e| e.to_string())?;
         }
@@ -2323,9 +2419,10 @@ pub(crate) fn touch_phrase_usage_internal<R: Runtime>(
 ) -> Result<(), String> {
     let state = app.state::<DbState>();
     let conn = state.conn.lock().map_err(|e| e.to_string())?;
+    let now = chrono::Utc::now().to_rfc3339();
     conn.execute(
-        "UPDATE phrases SET last_used_at = ?1 WHERE id = ?2",
-        params![chrono::Utc::now().to_rfc3339(), id],
+        "UPDATE phrases SET last_used_at = ?1, use_count = COALESCE(use_count, 0) + 1 WHERE id = ?2",
+        params![now, id],
     )
     .map_err(|e| e.to_string())?;
     Ok(())
@@ -3375,6 +3472,7 @@ fn migrate_storage(app: &AppHandle, new_path: &str) -> Result<(), String> {
                 created_at TEXT NOT NULL,
                 updated_at TEXT NOT NULL,
                 last_used_at TEXT DEFAULT '',
+                use_count INTEGER DEFAULT 0,
                 FOREIGN KEY (group_id) REFERENCES phrase_groups(id) ON DELETE CASCADE
             );
             CREATE TABLE IF NOT EXISTS translation_history (
@@ -5675,7 +5773,9 @@ mod resource_command_tests {
                  storage_mode TEXT DEFAULT 'database',
                  resource_path TEXT DEFAULT '',
                  resource_note TEXT DEFAULT '',
-                 last_used_at TEXT DEFAULT ''
+                 last_used_at TEXT DEFAULT '',
+                 use_count INTEGER DEFAULT 0,
+                 touched_ms INTEGER DEFAULT 0
              );
              INSERT INTO settings (key, value) VALUES ('resource_library_path', '');",
         )
@@ -5761,7 +5861,8 @@ mod resource_command_tests {
                 Some(0),
                 Some("resources".to_string()),
                 Some("References".to_string()),
-            );
+        None,
+    );
             sender.send(result).unwrap();
         });
         let records = receiver
@@ -5809,7 +5910,8 @@ mod resource_command_tests {
             Some(1),
             Some("resources".to_string()),
             Some("References".to_string()),
-        )
+        None,
+    )
         .unwrap();
         assert_eq!(page.len(), 1);
         assert_eq!(page[0]["id"], "second");
@@ -5821,7 +5923,8 @@ mod resource_command_tests {
             Some(0),
             Some("resources".to_string()),
             Some(String::new()),
-        )
+        None,
+    )
         .unwrap();
         assert_eq!(
             ungrouped
@@ -5873,6 +5976,7 @@ mod resource_command_tests {
             Some(0),
             Some("resources".to_string()),
             Some("References/archive".to_string()),
+            None,
         )
         .unwrap();
 
@@ -5907,6 +6011,7 @@ mod resource_command_tests {
             Some(0),
             Some("resources".to_string()),
             None,
+            None,
         )
         .unwrap();
         assert_eq!(
@@ -5925,7 +6030,8 @@ mod resource_command_tests {
             Some(0),
             Some("resources".to_string()),
             None,
-        )
+        None,
+    )
         .unwrap();
         assert!(none.is_empty());
         cleanup(&root);
@@ -5948,7 +6054,8 @@ mod resource_command_tests {
             Some(0),
             Some("resources".to_string()),
             None,
-        )
+        None,
+    )
         .unwrap();
         assert_eq!(records.len(), 1, "补建记录后不应与扫描结果重复");
         assert_eq!(records[0]["id"].as_str().unwrap(), id);
@@ -5964,7 +6071,8 @@ mod resource_command_tests {
             Some(0),
             Some("resources".to_string()),
             None,
-        )
+        None,
+    )
         .unwrap();
         assert!(records.is_empty());
         cleanup(&root);
@@ -6227,7 +6335,8 @@ mod resource_command_tests {
             Some(0),
             Some("resources".to_string()),
             None,
-        )
+        None,
+    )
         .unwrap();
         assert_eq!(records.len(), 6);
         let mut kinds = records
@@ -7102,6 +7211,92 @@ mod resource_command_tests {
     }
 
     #[test]
+    fn touch_clipboard_usage_increments_use_count_and_touched_ms() {
+        // 使用次数与最近使用毫秒时间戳随 touch 自增，供内容列表排序偏好使用。
+        let (app, root) = test_app();
+        let file = root.join("used-twice.png");
+        std::fs::write(&file, [1_u8, 2, 3]).unwrap();
+        let id = resource_file_id(&file);
+
+        super::touch_clipboard_usage_internal(app.handle(), &[id.clone()]).unwrap();
+        std::thread::sleep(Duration::from_millis(5));
+        super::touch_clipboard_usage_internal(app.handle(), &[id.clone()]).unwrap();
+
+        let state = app.state::<DbState>();
+        let conn = state.conn.lock().unwrap();
+        let (use_count, touched_ms): (i64, i64) = conn
+            .query_row(
+                "SELECT use_count, touched_ms FROM clipboard_records WHERE id = ?1",
+                [&id],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )
+            .unwrap();
+        assert_eq!(use_count, 2);
+        assert!(touched_ms > 0);
+        cleanup(&root);
+    }
+
+    #[test]
+    fn touch_phrase_usage_increments_use_count() {
+        let (app, root) = test_app();
+        {
+            let state = app.state::<DbState>();
+            let conn = state.conn.lock().unwrap();
+            conn.execute_batch(
+                "CREATE TABLE phrase_groups (
+                     id TEXT PRIMARY KEY,
+                     name TEXT NOT NULL,
+                     sort_order INTEGER DEFAULT 0,
+                     created_at TEXT NOT NULL,
+                     updated_at TEXT NOT NULL
+                 );
+                 CREATE TABLE phrases (
+                     id TEXT PRIMARY KEY,
+                     group_id TEXT NOT NULL,
+                     title TEXT NOT NULL,
+                     content TEXT NOT NULL,
+                     input_type TEXT DEFAULT 'text',
+                     source_path TEXT DEFAULT '',
+                     file_size INTEGER DEFAULT 0,
+                     sort_order INTEGER DEFAULT 0,
+                     created_at TEXT NOT NULL,
+                     updated_at TEXT NOT NULL,
+                     last_used_at TEXT DEFAULT '',
+                     use_count INTEGER DEFAULT 0
+                 );",
+            )
+            .unwrap();
+            conn.execute(
+                "INSERT INTO phrase_groups (id, name, created_at, updated_at)
+                 VALUES ('g1', '分组', '2026-09-01T00:00:00Z', '2026-09-01T00:00:00Z')",
+                [],
+            )
+            .unwrap();
+            conn.execute(
+                "INSERT INTO phrases (id, group_id, title, content, created_at, updated_at)
+                 VALUES ('p1', 'g1', '备注', '内容', '2026-09-01T00:00:00Z', '2026-09-01T00:00:00Z')",
+                [],
+            )
+            .unwrap();
+        }
+        super::touch_phrase_usage_internal(app.handle(), "p1").unwrap();
+        super::touch_phrase_usage_internal(app.handle(), "p1").unwrap();
+
+        let state = app.state::<DbState>();
+        let conn = state.conn.lock().unwrap();
+        let (use_count, last_used_at): (i64, String) = conn
+            .query_row(
+                "SELECT use_count, last_used_at FROM phrases WHERE id = 'p1'",
+                [],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )
+            .unwrap();
+        assert_eq!(use_count, 2);
+        assert!(!last_used_at.is_empty());
+        cleanup(&root);
+    }
+
+    #[test]
     fn sanitizes_trailing_whitespace_only_from_file_record_contents() {
         let (app, _root) = test_app();
         {
@@ -7174,6 +7369,7 @@ mod all_phrases_tests {
                 created_at TEXT NOT NULL,
                 updated_at TEXT NOT NULL,
                 last_used_at TEXT DEFAULT '',
+                use_count INTEGER DEFAULT 0,
                 FOREIGN KEY (group_id) REFERENCES phrase_groups(id) ON DELETE CASCADE
             );
             ",
@@ -7206,8 +7402,16 @@ mod all_phrases_tests {
         .unwrap();
     }
 
-    fn query_ids(conn: &Connection, limit: i64) -> Vec<String> {
-        all_phrase_rows(conn, limit)
+    fn set_use_count(conn: &Connection, id: &str, use_count: i64) {
+        conn.execute(
+            "UPDATE phrases SET use_count = ?1 WHERE id = ?2",
+            params![use_count, id],
+        )
+        .unwrap();
+    }
+
+    fn query_ids(conn: &Connection, limit: i64, sort_by: Option<&str>) -> Vec<String> {
+        all_phrase_rows(conn, limit, sort_by)
             .unwrap()
             .iter()
             .map(|r| r["id"].as_str().unwrap_or("").to_string())
@@ -7226,7 +7430,7 @@ mod all_phrases_tests {
         insert_phrase(&conn, "p3", "g2", 1, "2026-09-05T10:00:00+00:00");
         insert_phrase(&conn, "p4", "g2", 2, "");
 
-        assert_eq!(query_ids(&conn, i64::MAX), vec!["p3", "p1", "p2", "p4"]);
+        assert_eq!(query_ids(&conn, i64::MAX, None), vec!["p3", "p1", "p2", "p4"]);
     }
 
     #[test]
@@ -7242,7 +7446,28 @@ mod all_phrases_tests {
         )
         .unwrap();
 
-        assert_eq!(query_ids(&conn, i64::MAX), vec!["a", "b"]);
+        assert_eq!(query_ids(&conn, i64::MAX, None), vec!["a", "b"]);
+    }
+
+    #[test]
+    fn all_phrase_rows_count_mode_orders_by_use_count_then_recent() {
+        let conn = setup_conn();
+        // 次数倒序；并列次数按最近使用优先；零次数按分组 + 手动顺序垫底。
+        insert_group(&conn, "g1", 2);
+        insert_group(&conn, "g2", 1);
+        insert_phrase(&conn, "hot", "g1", 2, "2026-09-03T10:00:00+00:00");
+        insert_phrase(&conn, "warm", "g2", 1, "2026-09-05T10:00:00+00:00");
+        insert_phrase(&conn, "cold", "g1", 1, "2026-09-04T10:00:00+00:00");
+        insert_phrase(&conn, "unused-1", "g2", 2, "");
+        insert_phrase(&conn, "unused-2", "g1", 3, "");
+        set_use_count(&conn, "hot", 30);
+        set_use_count(&conn, "warm", 30);
+        set_use_count(&conn, "cold", 1);
+
+        assert_eq!(
+            query_ids(&conn, i64::MAX, Some("count")),
+            vec!["warm", "hot", "cold", "unused-2", "unused-1"]
+        );
     }
 
     #[test]
@@ -7252,10 +7477,87 @@ mod all_phrases_tests {
         insert_phrase(&conn, "p1", "g1", 2, "2026-09-05T10:00:00+00:00");
         insert_phrase(&conn, "p2", "g1", 1, "2026-09-04T10:00:00+00:00");
 
-        assert_eq!(query_ids(&conn, 1), vec!["p1"]);
+        assert_eq!(query_ids(&conn, 1, None), vec!["p1"]);
 
-        let rows = all_phrase_rows(&conn, i64::MAX).unwrap();
+        let rows = all_phrase_rows(&conn, i64::MAX, None).unwrap();
         assert_eq!(rows[0]["group_name"], "group-g1");
         assert_eq!(rows[0]["last_used_at"], "2026-09-05T10:00:00+00:00");
+        assert_eq!(rows[0]["use_count"], 0);
+    }
+}
+
+#[cfg(test)]
+mod content_sort_tests {
+    use super::{clipboard_order_clause, Connection};
+    use rusqlite::params;
+
+    fn setup_conn() -> Connection {
+        let conn = Connection::open_in_memory().unwrap();
+        conn.execute_batch(
+            "CREATE TABLE clipboard_records (
+                id TEXT PRIMARY KEY,
+                sort_order REAL,
+                touched_ms INTEGER DEFAULT 0,
+                use_count INTEGER DEFAULT 0
+            );",
+        )
+        .unwrap();
+        conn
+    }
+
+    fn insert(conn: &Connection, id: &str, sort_order: f64, touched_ms: i64, use_count: i64) {
+        conn.execute(
+            "INSERT INTO clipboard_records (id, sort_order, touched_ms, use_count)
+             VALUES (?1, ?2, ?3, ?4)",
+            params![id, sort_order, touched_ms, use_count],
+        )
+        .unwrap();
+    }
+
+    fn ordered_ids(conn: &Connection, sort_by: Option<&str>) -> Vec<String> {
+        let sql = format!(
+            "SELECT id FROM clipboard_records ORDER BY {}",
+            clipboard_order_clause(sort_by)
+        );
+        let mut stmt = conn.prepare(&sql).unwrap();
+        let rows = stmt.query_map([], |row| row.get::<_, String>(0)).unwrap();
+        rows.map(|r| r.unwrap()).collect()
+    }
+
+    #[test]
+    fn created_clause_keeps_current_sort_order_semantics() {
+        let conn = setup_conn();
+        insert(&conn, "old", 1000.0, 0, 5);
+        insert(&conn, "new", 2000.0, 0, 0);
+        assert_eq!(ordered_ids(&conn, None), vec!["new", "old"]);
+    }
+
+    #[test]
+    fn recent_clause_floats_touched_above_sort_order_and_keeps_fresh_copies_on_top() {
+        let conn = setup_conn();
+        // 刚复制（sort_order 最新、未使用）置顶；刚使用的旧记录上浮；
+        // 其余未使用条目按复制时间排。
+        insert(&conn, "fresh-copy", 3000.0, 0, 0);
+        insert(&conn, "just-used", 1000.0, 2500, 1);
+        insert(&conn, "old-copy", 2000.0, 0, 0);
+        assert_eq!(
+            ordered_ids(&conn, Some("recent")),
+            vec!["fresh-copy", "just-used", "old-copy"]
+        );
+    }
+
+    #[test]
+    fn count_clause_orders_by_use_count_then_recent_with_zero_partition() {
+        let conn = setup_conn();
+        // 次数倒序；并列次数最近者优先；零次数按时间序垫底。
+        insert(&conn, "hot", 1000.0, 0, 30);
+        insert(&conn, "warm", 2000.0, 0, 30);
+        insert(&conn, "cold", 3000.0, 0, 1);
+        insert(&conn, "fresh", 4000.0, 0, 0);
+        insert(&conn, "stale", 500.0, 0, 0);
+        assert_eq!(
+            ordered_ids(&conn, Some("count")),
+            vec!["warm", "hot", "cold", "fresh", "stale"]
+        );
     }
 }
