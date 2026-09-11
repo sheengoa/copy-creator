@@ -71,7 +71,7 @@ const RADIAL_TAB_KEYS: TabKey[] = ["recent", "clipboard", "phrases", "resources"
 
 const MAX_ITEMS = 2000;
 // 「最近使用」tab 展示的条目数量：覆盖高频内容的数量，按最近使用时间倒序。
-const RECENT_ITEMS_LIMIT = 12;
+const RECENT_ITEMS_LIMIT = 15;
 const RADIAL_DRAG_THRESHOLD_PX = 6;
 const IS_LINUX = typeof navigator !== "undefined"
   && /Linux/i.test(navigator.userAgent)
