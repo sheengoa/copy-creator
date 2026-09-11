@@ -1,7 +1,5 @@
 import { useCallback, useState, useEffect } from "react";
-import { invoke } from "@tauri-apps/api/core";
 import { useTranslation } from "react-i18next";
-import type { ClipboardRecord } from "../../types";
 import { Icons } from "../../components/Icons";
 import {
   CardActionMenu,
@@ -11,46 +9,41 @@ import {
 import { InlineImagePreview, InlineTextFilePreview } from "../../components/InlinePreview";
 import { FileMediaVisual } from "../../components/FileMediaPreview";
 import { ResourceMediaPlayer } from "../ResourcePage/ResourceMedia";
-import { fileMediaKindFromPath } from "../ResourcePage/resourceUtils";
 import { ImageThumb } from "./ImageThumb";
 import { TYPE_META } from "./utils";
 import { formatTime } from "../../utils/formatTime";
 import { useSettingsStore } from "../../stores/settingsStore";
-import { fileNameFromPath } from "../../utils/fileName";
 import ApiKeyLabelPanel from "./ApiKeyLabelPanel";
 import { HighlightText } from "../../components/HighlightText";
-import { useClipboardStore } from "../../stores/clipboardStore";
 import { shouldUseTerminalPasteForMouseTrigger } from "../../utils/pasteMode";
-import { loadClipboardPreviewSegments } from "../../utils/contentPreview";
-import type { RadialPreviewSegment } from "../../utils/radialPreview";
-import {
-  hasInlineTextPreviewExtension,
-  shouldShowInlineTextToggle,
-} from "../../utils/inlinePreview";
+import { loadRecordPreviewSegments, type RadialPreviewSegment } from "../../domain/preview";
+import type { RecordView } from "../../domain/recordView";
 
 interface ClipboardCardProps {
-  record: ClipboardRecord;
+  /** 叶子合同：只收视图模型（DOMAIN_ARCHITECTURE_PLAN.md §3.10）。 */
+  view: RecordView;
   index: number;
   getTypeLabel: (type: string) => string;
   pasteLeftClick: "normal" | "terminal";
   search?: string;
-  onPasteNormal: (r: ClipboardRecord) => void;
-  onPasteTerminal: (r: ClipboardRecord) => void;
+  onPasteNormal: (view: RecordView) => void;
+  onPasteTerminal: (view: RecordView) => void;
   onDelete: (id: string) => void;
   /** 右键菜单「移到顶部」：搜索定位后一键置顶，径向菜单同步可见。 */
   onMoveToTop?: (id: string) => void;
+  /** 数据/动作经容器回调进出（叶子禁 import stores/invoke）。 */
+  getRecordContent: (view: RecordView) => Promise<string>;
+  onToggleUserApiKey: (view: RecordView) => void;
   selectionMode: boolean;
   selected: boolean;
   onToggleSelected: (id: string) => void;
 }
 
-// 拖拽排序已移除：排序由内容排序偏好决定，拖拽仅保留快捷输入分组视图。
-
 function ClipboardExpandedPreview({
-  record,
+  view,
   search,
 }: {
-  record: ClipboardRecord;
+  view: RecordView;
   search?: string;
 }) {
   const { t } = useTranslation();
@@ -61,7 +54,7 @@ function ClipboardExpandedPreview({
     let cancelled = false;
     setSegments(null);
     setFailed(false);
-    loadClipboardPreviewSegments(record)
+    loadRecordPreviewSegments(view)
       .then((next) => {
         if (!cancelled) setSegments(next);
       })
@@ -71,7 +64,7 @@ function ClipboardExpandedPreview({
     return () => {
       cancelled = true;
     };
-  }, [record]);
+  }, [view]);
 
   if (failed) {
     return (
@@ -105,7 +98,7 @@ function ClipboardExpandedPreview({
 }
 
 function ClipboardCardInner({
-  record,
+  view,
   index,
   getTypeLabel,
   pasteLeftClick,
@@ -114,6 +107,8 @@ function ClipboardCardInner({
   onPasteTerminal,
   onDelete,
   onMoveToTop,
+  getRecordContent,
+  onToggleUserApiKey,
   selectionMode,
   selected,
   onToggleSelected,
@@ -121,24 +116,16 @@ function ClipboardCardInner({
   const { t } = useTranslation();
   const isCountSort = useSettingsStore((s) => s.contentSort === "count");
 
-  const meta = TYPE_META[record.type] || TYPE_META.text;
-  // 文件记录的展开预览：视频/音频播放、图片大图、文本内容，判定规则与
-  // loadClipboardPreviewSegments 共用同一份扩展名规则。
-  const fileMediaKind = record.type === "file" ? fileMediaKindFromPath(record.content) : null;
-  const canPreviewFile = record.type === "file"
-    && (fileMediaKind !== null || hasInlineTextPreviewExtension(record.content));
-  const canToggleText = record.type === "file"
-    ? canPreviewFile
-    : Boolean(record.has_images)
-      || shouldShowInlineTextToggle(record.content, record.content_truncated);
-  const canToggle = record.type === "image" || canToggleText;
-  const canCollapseText = record.type !== "image" && record.type !== "file"
-    && shouldShowInlineTextToggle(record.content, record.content_truncated);
+  const meta = TYPE_META[view.recordType] || TYPE_META.text;
+  // 展开能力/预览类型全部来自视图模型的判定字段（domain/records.ts）。
+  const canToggle = view.expandable;
+  const canCollapseText = view.recordType !== "image" && view.recordType !== "file"
+    && view.expandPreview === "text";
   const [expanded, setExpanded] = useState(false);
   const [ctxMenu, setCtxMenu] = useState<{ x: number; y: number } | null>(null);
   const [labelOpen, setLabelOpen] = useState(false);
-  const loadRecords = useClipboardStore((s) => s.loadRecords);
-  const getRecordContent = useClipboardStore((s) => s.getRecordContent);
+  const apiKey = view.apiKey;
+  const isApiKey = apiKey !== undefined;
 
   useEffect(() => {
     if (!selectionMode) return;
@@ -148,26 +135,26 @@ function ClipboardCardInner({
 
   useEffect(() => {
     setExpanded(false);
-  }, [record.id, record.content]);
+  }, [view.id, view.content]);
 
   const handlePaste = useCallback(() => {
     if (labelOpen) return;
-    if (shouldUseTerminalPasteForMouseTrigger(pasteLeftClick, "left")) onPasteTerminal(record);
-    else onPasteNormal(record);
-  }, [onPasteNormal, onPasteTerminal, pasteLeftClick, record, labelOpen]);
+    if (shouldUseTerminalPasteForMouseTrigger(pasteLeftClick, "left")) onPasteTerminal(view);
+    else onPasteNormal(view);
+  }, [onPasteNormal, onPasteTerminal, pasteLeftClick, view, labelOpen]);
 
   const handleSecondaryPaste = useCallback(() => {
     if (labelOpen) return;
-    if (shouldUseTerminalPasteForMouseTrigger(pasteLeftClick, "right")) onPasteTerminal(record);
-    else onPasteNormal(record);
-  }, [onPasteNormal, onPasteTerminal, pasteLeftClick, record, labelOpen]);
+    if (shouldUseTerminalPasteForMouseTrigger(pasteLeftClick, "right")) onPasteTerminal(view);
+    else onPasteNormal(view);
+  }, [onPasteNormal, onPasteTerminal, pasteLeftClick, view, labelOpen]);
 
   const handleDelete = useCallback(
     (e: React.MouseEvent) => {
       e.stopPropagation();
-      onDelete(record.id);
+      onDelete(view.id);
     },
-    [onDelete, record.id],
+    [onDelete, view.id],
   );
 
   const handleContextMenu = useCallback((e: React.MouseEvent) => {
@@ -186,55 +173,43 @@ function ClipboardCardInner({
     setExpanded((value) => !value);
   }, []);
 
-  const handleToggleUserApiKey = useCallback(
-    async () => {
-      setCtxMenu(null);
-      const newValue = !record.user_api_key;
-      try {
-        await invoke("set_user_api_key", { id: record.id, value: newValue });
-        await loadRecords();
-      } catch {
-        // ignore
-      }
-    },
-    [record.id, record.user_api_key, loadRecords],
-  );
+  const handleToggleUserApiKey = useCallback(() => {
+    setCtxMenu(null);
+    onToggleUserApiKey(view);
+  }, [onToggleUserApiKey, view]);
 
-  const handleCopyWithComment = useCallback(
-    async () => {
-      setCtxMenu(null);
-      if (!record.label) return;
-      try {
-        const content = await getRecordContent(record);
-        const text = `# ${record.label.service} — ${record.label.api_base}\n${content}`;
-        await navigator.clipboard.writeText(text);
-      } catch {
-        // Fallback: silently ignore; user can use regular copy
-      }
-    },
-    [getRecordContent, record],
-  );
+  const handleCopyWithComment = useCallback(async () => {
+    setCtxMenu(null);
+    if (!apiKey?.label) return;
+    try {
+      const content = await getRecordContent(view);
+      const text = `# ${apiKey.label.service} — ${apiKey.label.api_base}\n${content}`;
+      await navigator.clipboard.writeText(text);
+    } catch {
+      // Fallback: silently ignore; user can use regular copy
+    }
+  }, [getRecordContent, view, apiKey]);
 
-  const hasLabel = Boolean(record.is_api_key && record.label);
-  const isUnlabeled = Boolean(record.is_api_key && !record.label);
+  const hasLabel = Boolean(isApiKey && apiKey?.label);
+  const isUnlabeled = Boolean(isApiKey && !apiKey?.label);
 
   // Keep badge text in local state to ensure re-render on label change
   const [badgeText, setBadgeText] = useState("");
   useEffect(() => {
-    if (record.label?.note) {
-      setBadgeText(record.label.note);
-    } else if (record.guessed_service) {
-      setBadgeText(record.guessed_service);
-    } else if (record.is_api_key) {
+    if (apiKey?.label?.note) {
+      setBadgeText(apiKey.label.note);
+    } else if (apiKey?.guessedService) {
+      setBadgeText(apiKey.guessedService);
+    } else if (isApiKey) {
       setBadgeText(t("clipboard.unlabeled"));
     }
-  }, [record.label?.note, record.guessed_service, record.is_api_key, t]);
+  }, [apiKey?.label?.note, apiKey?.guessedService, isApiKey, t]);
 
   return (
     <div
-      className={`notification clipboard-card type-${record.type}${record.is_api_key ? " has-api-key" : ""}${isUnlabeled ? " api-key-unlabeled" : ""}${hasLabel ? " api-key-labeled" : ""}${selectionMode ? " is-selection-mode" : ""}${selected ? " is-selected" : ""}`}
+      className={`notification clipboard-card type-${view.recordType}${isApiKey ? " has-api-key" : ""}${isUnlabeled ? " api-key-unlabeled" : ""}${hasLabel ? " api-key-labeled" : ""}${selectionMode ? " is-selection-mode" : ""}${selected ? " is-selected" : ""}`}
       style={{ "--color": meta.color, "--enter-delay": index } as React.CSSProperties}
-      onClick={selectionMode ? () => onToggleSelected(record.id) : handlePaste}
+      onClick={selectionMode ? () => onToggleSelected(view.id) : handlePaste}
       onContextMenu={selectionMode ? (e) => { e.preventDefault(); e.stopPropagation(); } : handleContextMenu}
     >
       <div className="notibar" />
@@ -244,7 +219,7 @@ function ClipboardCardInner({
             type="checkbox"
             checked={selected}
             aria-label={t("common.selectItem")}
-            onChange={() => onToggleSelected(record.id)}
+            onChange={() => onToggleSelected(view.id)}
           />
           <span className="selection-checkbox" aria-hidden="true" />
         </label>
@@ -252,15 +227,15 @@ function ClipboardCardInner({
       <div className="noticontent">
         <div className="notititle clipboard-card-header">
           <span className="noti-type-label">
-            <span className="noti-type-icon">{record.is_api_key ? Icons.key : meta.icon}</span>
-            <span className="noti-type-text">{record.is_api_key ? "API Key" : getTypeLabel(record.type)}</span>
+            <span className="noti-type-icon">{isApiKey ? Icons.key : meta.icon}</span>
+            <span className="noti-type-text">{isApiKey ? "API Key" : getTypeLabel(view.recordType)}</span>
           </span>
-          {record.is_api_key && (
+          {isApiKey && (
             <span
               className="api-key-badge"
               onClick={(e) => {
                 e.stopPropagation();
-                if (selectionMode) onToggleSelected(record.id);
+                if (selectionMode) onToggleSelected(view.id);
                 else setLabelOpen((v) => !v);
               }}
             >
@@ -270,76 +245,77 @@ function ClipboardCardInner({
         </div>
 
         <div
-          className={`notibody clipboard-card-body${canToggle ? " is-toggleable" : ""}${canCollapseText && !expanded ? " is-collapsed" : ""}${canToggle && expanded ? " is-expanded" : ""}${record.type === "file" && expanded ? " is-file-expanded" : ""}`}
+          className={`notibody clipboard-card-body${canToggle ? " is-toggleable" : ""}${canCollapseText && !expanded ? " is-collapsed" : ""}${canToggle && expanded ? " is-expanded" : ""}${view.recordType === "file" && expanded ? " is-file-expanded" : ""}`}
         >
-          {record.type === "image" ? (
+          {view.recordType === "image" ? (
             expanded ? (
               <InlineImagePreview
-                path={record.content}
+                path={view.content}
                 alt={t("radialMenu.previewImage")}
                 className="clipboard-card-expanded-image"
               />
             ) : (
               <ImageThumb
-                record={record}
+                id={view.id}
+                content={view.content}
                 onClick={(e) => {
                   e.stopPropagation();
-                  if (selectionMode) onToggleSelected(record.id);
+                  if (selectionMode) onToggleSelected(view.id);
                   else handlePaste();
                 }}
               />
             )
-          ) : record.type === "link" ? (
+          ) : view.recordType === "link" ? (
             expanded ? (
-              <ClipboardExpandedPreview record={record} search={search} />
+              <ClipboardExpandedPreview view={view} search={search} />
             ) : (
-              <span className="clipboard-link-content"><HighlightText text={record.content} search={search} /></span>
+              <span className="clipboard-link-content"><HighlightText text={view.content} search={search} /></span>
             )
-          ) : record.type === "file" ? (
+          ) : view.recordType === "file" ? (
             <>
-              <FileMediaVisual path={record.content} />
-              <span className="clipboard-file-content"><HighlightText text={fileNameFromPath(record.content)} search={search} /></span>
-              {expanded && canPreviewFile && (
-                fileMediaKind === "video" || fileMediaKind === "audio" ? (
-                  <ResourceMediaPlayer kind={fileMediaKind} path={record.content} />
-                ) : fileMediaKind === "image" ? (
+              <FileMediaVisual path={view.content} />
+              <span className="clipboard-file-content"><HighlightText text={view.displayName} search={search} /></span>
+              {expanded && view.expandPreview !== null && (
+                view.expandPreview === "video" || view.expandPreview === "audio" ? (
+                  <ResourceMediaPlayer kind={view.expandPreview} path={view.content} />
+                ) : view.expandPreview === "image" ? (
                   <InlineImagePreview
-                    path={record.content}
+                    path={view.content}
                     alt={t("radialMenu.previewImage")}
                     className="clipboard-card-expanded-image"
                   />
                 ) : (
-                  <InlineTextFilePreview recordId={record.id} search={search} />
+                  <InlineTextFilePreview recordId={view.id} search={search} />
                 )
               )}
             </>
           ) : (
             expanded ? (
-              <ClipboardExpandedPreview record={record} search={search} />
+              <ClipboardExpandedPreview view={view} search={search} />
             ) : (
               <span className="clipboard-text-content">
-                <HighlightText text={record.content} search={search} />
+                <HighlightText text={view.content} search={search} />
               </span>
             )
           )}
         </div>
 
-        {labelOpen && record.is_api_key && record.key_preview && (
+        {labelOpen && apiKey?.preview && (
           <ApiKeyLabelPanel
-            recordId={record.id}
-            keyPreview={record.key_preview}
-            existingLabel={record.label}
-            guessedService={record.guessed_service}
+            recordId={view.id}
+            keyPreview={apiKey.preview}
+            existingLabel={apiKey.label}
+            guessedService={apiKey.guessedService}
             onSave={handleLabelSaved}
             onCancel={() => setLabelOpen(false)}
           />
         )}
 
         <div className="notititle clipboard-card-footer">
-          <span className="clipboard-card-time">{formatTime(record.created_at)}</span>
+          <span className="clipboard-card-time">{formatTime(view.createdAt)}</span>
           {isCountSort && (
             <span className="usage-count-badge">
-              {t("common.usageCount", { count: record.use_count ?? 0 })}
+              {t("common.usageCount", { count: view.useCount })}
             </span>
           )}
           <div className="clipboard-card-actions">
@@ -365,7 +341,7 @@ function ClipboardCardInner({
                     title={t("common.moveToTop")}
                     onClick={(e) => {
                       e.stopPropagation();
-                      onMoveToTop(record.id);
+                      onMoveToTop(view.id);
                     }}
                   >
                     {Icons.arrowUp}
@@ -388,7 +364,7 @@ function ClipboardCardInner({
           : null}
         onClose={() => setCtxMenu(null)}
       >
-        {record.is_api_key && (
+        {isApiKey && (
           <CardActionMenuItem
             className="ctx-menu-item"
             icon={
@@ -401,7 +377,7 @@ function ClipboardCardInner({
             onClick={() => setLabelOpen(true)}
           />
         )}
-        {record.is_api_key && hasLabel && (
+        {isApiKey && hasLabel && (
           <CardActionMenuItem
             className="ctx-menu-item"
             icon={
@@ -414,7 +390,7 @@ function ClipboardCardInner({
             onClick={() => void handleCopyWithComment()}
           />
         )}
-        {record.type === "text" && !record.is_api_key && (
+        {view.recordType === "text" && !isApiKey && (
           <CardActionMenuItem
             className="ctx-menu-item"
             icon={
@@ -424,10 +400,10 @@ function ClipboardCardInner({
               </svg>
             }
             label={t("clipboard.markAsApiKey")}
-            onClick={() => void handleToggleUserApiKey()}
+            onClick={handleToggleUserApiKey}
           />
         )}
-        {record.user_api_key && (
+        {apiKey?.userMarked && (
           <CardActionMenuItem
             className="ctx-menu-item"
             icon={
@@ -437,10 +413,10 @@ function ClipboardCardInner({
               </svg>
             }
             label={t("clipboard.unmarkApiKey")}
-            onClick={() => void handleToggleUserApiKey()}
+            onClick={handleToggleUserApiKey}
           />
         )}
-        {(record.is_api_key || (record.type === "text" && !record.is_api_key)) && (
+        {(isApiKey || (view.recordType === "text" && !isApiKey)) && (
           <CardActionMenuSeparator />
         )}
         <CardActionMenuItem
@@ -477,7 +453,7 @@ function ClipboardCardInner({
                 </svg>
               }
               label={t("common.moveToTop")}
-              onClick={() => onMoveToTop(record.id)}
+              onClick={() => onMoveToTop(view.id)}
             />
           </>
         )}
@@ -491,7 +467,7 @@ function ClipboardCardInner({
             </svg>
           }
           label={t("common.delete")}
-          onClick={() => onDelete(record.id)}
+          onClick={() => onDelete(view.id)}
         />
       </CardActionMenu>
     </div>

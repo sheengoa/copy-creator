@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { useTranslation } from "react-i18next";
-import { convertFileSrc } from "@tauri-apps/api/core";
+import { resolveResourceAssetUrl } from "../../domain/mediaUrl";
 import {
   usePhraseStore,
   isImageFilePath,
@@ -273,9 +273,11 @@ export default function PhrasePage() {
     // 编辑时仅预览原文件（source_path 为原始绝对路径）；不写入 phraseFilePath，
     // 避免保存时被误当作"更换文件"。
     const sourcePath = p.source_path || p.content;
-    setPhraseFilePreviewSrc(
-      p.input_type === "file" && isImageFilePath(sourcePath) ? convertFileSrc(sourcePath) : null,
-    );
+    if (p.input_type === "file" && isImageFilePath(sourcePath)) {
+      void resolveResourceAssetUrl(sourcePath).then(setPhraseFilePreviewSrc);
+    } else {
+      setPhraseFilePreviewSrc(null);
+    }
     setPhraseError(false);
     setPhraseErrorMessage("");
     setPhraseDialogOpen(true);
@@ -286,7 +288,11 @@ export default function PhrasePage() {
     setPhraseFilePath(file.path);
     setPhraseFileName(fileName);
     setPhraseFileSize(file.file_size);
-    setPhraseFilePreviewSrc(isImageFilePath(file.path) ? convertFileSrc(file.path) : null);
+    if (isImageFilePath(file.path)) {
+      void resolveResourceAssetUrl(file.path).then(setPhraseFilePreviewSrc);
+    } else {
+      setPhraseFilePreviewSrc(null);
+    }
     if (!phraseRemark.trim()) {
       setPhraseRemark(fileName);
     }

@@ -72,7 +72,7 @@ describe("integration regressions", () => {
     const clipboardSource = readSource("./pages/ClipboardPage/ClipboardCard.tsx");
     const phraseStyles = readSource("./styles/phrases.css");
     const clipboardStyles = readSource("./styles/clipboard.css");
-    const inlinePreview = readSource("./utils/inlinePreview.ts");
+    const recordsDomain = readSource("./domain/records.ts");
 
     expect(phraseSource).toContain('className="card-toggle-text-btn"');
     expect(phraseSource).toContain("e.stopPropagation()");
@@ -85,12 +85,14 @@ describe("integration regressions", () => {
     expect(phraseStyles).toContain("white-space: pre-wrap");
     expect(phraseStyles).toContain(".phrase-card-actions > .card-toggle-text-btn");
     expect(clipboardSource).toContain('className="card-toggle-text-btn"');
-    expect(clipboardSource).toContain("shouldShowInlineTextToggle");
-    expect(clipboardSource).toContain('record.type === "file"');
-    expect(clipboardSource).toContain("? canPreviewFile");
+    // 折叠判定收口 domain/records.ts，卡片只读视图模型的判定字段。
+    expect(clipboardSource).toContain("view.expandable");
+    expect(clipboardSource).toContain('view.recordType === "file"');
+    expect(clipboardSource).toContain("view.expandPreview");
+    expect(recordsDomain).toContain("shouldShowInlineTextToggle");
+    expect(recordsDomain).toContain("INLINE_PREVIEW_MAX_LINES = 6");
     expect(clipboardStyles).toContain(".clipboard-card-body.is-collapsed");
     expect(clipboardStyles).toContain("calc(1.5em * 6)");
-    expect(inlinePreview).toContain("INLINE_PREVIEW_MAX_LINES = 6");
   });
 
   it("sizes the quick input editor dialog relative to the main window", () => {
@@ -437,7 +439,7 @@ describe("integration regressions", () => {
     const cardSource = readSource("./pages/ClipboardPage/ClipboardCard.tsx");
     const radialMenu = readSource("./components/RadialMenu/index.tsx");
     const previewPanel = readSource("./components/ContentPreviewPanel.tsx");
-    const previewLoader = readSource("./utils/contentPreview.ts");
+    const previewLoader = readSource("./domain/preview.ts");
     const clipboardStyles = readSource("./styles/clipboard.css");
     const persistWindowSize = readSource("./hooks/usePersistWindowSize.ts");
     const inlinePreview = readSource("./components/InlinePreview.tsx");
@@ -445,7 +447,7 @@ describe("integration regressions", () => {
     const libSource = readSource("../src-tauri/src/lib.rs");
 
     expect(radialMenu).toContain('<ContentPreviewPanel');
-    expect(previewLoader).toContain("loadClipboardPreviewSegments");
+    expect(previewLoader).toContain("loadRecordPreviewSegments");
     expect(pageSource).not.toContain("<ContentPreviewPanel");
     expect(pageSource).not.toContain("getCurrentWindow");
     expect(pageSource).not.toContain("calculatePreviewExpansion");
@@ -455,7 +457,7 @@ describe("integration regressions", () => {
     expect(cardSource).toContain("ClipboardExpandedPreview");
     expect(cardSource).toContain("InlineImagePreview");
     expect(cardSource).toContain("InlineTextFilePreview");
-    expect(cardSource).toContain("hasInlineTextPreviewExtension");
+    expect(cardSource).toContain("view.expandPreview");
     expect(clipboardStyles).not.toContain(".main-window-content-preview");
     expect(persistWindowSize).not.toContain("data-main-content-preview");
     expect(inlinePreview).toContain('read_quick_input_text_preview');

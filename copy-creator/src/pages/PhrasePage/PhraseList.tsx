@@ -1,5 +1,4 @@
 import { useEffect, useState } from "react";
-import { invoke } from "@tauri-apps/api/core";
 import { Icons } from "../../components/Icons";
 import { useSortable } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
@@ -7,7 +6,7 @@ import { useTranslation } from "react-i18next";
 import type { Phrase } from "../../types";
 import { HighlightText } from "../../components/HighlightText";
 import { InlineImagePreview, InlineTextFilePreview } from "../../components/InlinePreview";
-import { isImageFilePath } from "../../stores/phraseStore";
+import { usePhraseStore, isImageFilePath } from "../../stores/phraseStore";
 import { useSettingsStore } from "../../stores/settingsStore";
 import { fileNameFromPath } from "../../utils/fileName";
 import {
@@ -45,12 +44,13 @@ function formatBytes(bytes: number) {
 
 /** 图像文件短语的缩略图：content 为相对存储目录的路径，加载失败回退图标。 */
 function PhraseFileImage({ content }: { content: string }) {
+  const getImageThumbnail = usePhraseStore((s) => s.getImageThumbnail);
   const [src, setSrc] = useState<string | null>(null);
   const [failed, setFailed] = useState(false);
 
   useEffect(() => {
     let cancelled = false;
-    invoke<string>("get_image_thumbnail", { path: content, maxSize: 96 })
+    getImageThumbnail(content)
       .then((base64) => {
         if (!cancelled) setSrc(`data:image/png;base64,${base64}`);
       })
@@ -58,7 +58,7 @@ function PhraseFileImage({ content }: { content: string }) {
         if (!cancelled) setFailed(true);
       });
     return () => { cancelled = true; };
-  }, [content]);
+  }, [content, getImageThumbnail]);
 
   if (failed) return <span className="phrase-card-file-icon">{Icons.image}</span>;
   if (!src) return <span className="phrase-card-file-icon">{Icons.file}</span>;

@@ -12,6 +12,7 @@ import BatchSelectionBar from "../../components/BatchSelectionBar";
 import { BackToTopButton } from "../../components/BackToTop";
 import { useBackToTop } from "../../hooks/useBackToTop";
 import { useMultiSelect } from "../../hooks/useMultiSelect";
+import { buildRecordView, type RecordView } from "../../domain/recordView";
 import { isResourceRecord } from "../../utils/clipboardRecord";
 
 type ClipType = ClipboardFilter;
@@ -87,13 +88,42 @@ export default function ClipboardPage() {
   );
 
   const handlePaste = useCallback(
-    (r: typeof records[number]) => pasteRecord(r),
-    [pasteRecord],
+    (view: RecordView) => {
+      const record = records.find((r) => r.id === view.id);
+      if (record) void pasteRecord(record);
+    },
+    [pasteRecord, records],
   );
 
   const handlePasteTerminal = useCallback(
-    (r: typeof records[number]) => pasteRecordTerminal(r),
-    [pasteRecordTerminal],
+    (view: RecordView) => {
+      const record = records.find((r) => r.id === view.id);
+      if (record) void pasteRecordTerminal(record);
+    },
+    [pasteRecordTerminal, records],
+  );
+
+  const getRecordContent = useCallback(
+    (view: RecordView) => {
+      const record = records.find((r) => r.id === view.id);
+      if (!record) return Promise.reject(new Error("record not found"));
+      return useClipboardStore.getState().getRecordContent(record);
+    },
+    [records],
+  );
+
+  const handleToggleUserApiKey = useCallback(
+    async (view: RecordView) => {
+      const record = records.find((r) => r.id === view.id);
+      if (!record) return;
+      try {
+        await invoke("set_user_api_key", { id: record.id, value: !record.user_api_key });
+        await loadRecords();
+      } catch {
+        // ignore
+      }
+    },
+    [loadRecords, records],
   );
 
   const openClipboardCreate = useCallback(async () => {
@@ -109,6 +139,8 @@ export default function ClipboardPage() {
     if (category === "all") return clipboardRecords;
     return clipboardRecords.filter((r) => r.type === category);
   }, [records, category]);
+  // 容器层组装视图模型（依赖 records 引用纪律，zustand 不可变更新保证稳定）。
+  const views = useMemo(() => filtered.map((record) => buildRecordView(record)), [filtered]);
   const visibleIds = useMemo(() => filtered.map((record) => record.id), [filtered]);
   const {
     isSelecting,
@@ -337,10 +369,10 @@ export default function ClipboardPage() {
             backToTop.containerRef(el);
           }}
         >
-          {filtered.map((r, i) => (
+          {views.map((view, i) => (
             <ClipboardCard
-              key={r.id}
-              record={r}
+              key={view.id}
+              view={view}
               index={i}
               getTypeLabel={getTypeLabel}
               pasteLeftClick={pasteLeftClick}
@@ -349,8 +381,10 @@ export default function ClipboardPage() {
               onPasteTerminal={handlePasteTerminal}
               onDelete={handleDelete}
               onMoveToTop={(id) => void moveRecordsToTop([id])}
+              getRecordContent={getRecordContent}
+              onToggleUserApiKey={(v) => void handleToggleUserApiKey(v)}
               selectionMode={isSelecting}
-              selected={isSelected(r.id)}
+              selected={isSelected(view.id)}
               onToggleSelected={toggleSelected}
             />
           ))}

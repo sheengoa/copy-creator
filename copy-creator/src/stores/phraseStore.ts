@@ -49,6 +49,8 @@ interface PhraseState {
   init: () => void;
   loadGroups: () => Promise<void>;
   loadPhrases: (groupId: string) => Promise<void>;
+  /** 图像文件短语的缩略图（收编 UI 层直接 invoke，规则见架构方案 §5.1）。 */
+  getImageThumbnail: (path: string) => Promise<string>;
   createGroup: (name: string) => Promise<void>;
   updateGroup: (id: string, name: string) => Promise<void>;
   deleteGroup: (id: string) => Promise<void>;
@@ -126,6 +128,10 @@ export const usePhraseStore = create<PhraseState>()((set, get) => {
     });
 
     get().loadGroups();
+  },
+
+  getImageThumbnail: async (path: string) => {
+    return invoke<string>("get_image_thumbnail", { path, maxSize: 96 });
   },
 
   loadPhrases: async (groupId: string) => {

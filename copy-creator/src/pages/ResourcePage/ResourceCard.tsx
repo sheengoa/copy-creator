@@ -49,7 +49,8 @@ function ResourceCardVisual({
   if (kind === "image" && record.type === "image") {
     return (
       <ImageThumb
-        record={record}
+        id={record.id}
+        content={record.content}
         onClick={(event) => {
           event.stopPropagation();
           onActivate?.();
