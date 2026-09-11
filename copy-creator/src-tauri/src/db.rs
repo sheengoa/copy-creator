@@ -1618,6 +1618,55 @@ pub fn prune_old_records(app: &AppHandle) -> Result<(), Box<dyn std::error::Erro
 
 // ---- Tauri Commands ----
 
+/// 外部移入资源库的新文件按发现时间补建入库：sort_order 取发现时刻，
+/// 使其在「全部」列表置顶（与刚复制的剪切板内容同待遇）。已存在记录的
+/// 路径（管理中 / 此前补建）不重复置顶；应用未运行期间放入的文件不追溯。
+/// 由资源库目录监听在防抖结束后调用，失败仅记日志，不阻塞常规重扫。
+pub fn discover_external_resource_files<R: Runtime>(
+    app: &AppHandle<R>,
+    paths: &[PathBuf],
+) {
+    if paths.is_empty() {
+        return;
+    }
+    let root = get_resource_library_dir(app);
+    let now = chrono::Utc::now().to_rfc3339();
+    let now_ms = chrono::Utc::now().timestamp_millis();
+    let state = app.state::<DbState>();
+    let Ok(conn) = state.conn.lock() else {
+        return;
+    };
+    for path in paths {
+        if !path.is_file() || !path.starts_with(&root) {
+            continue;
+        }
+        let path_text = path.to_string_lossy().to_string();
+        let exists: bool = conn
+            .query_row(
+                "SELECT EXISTS(SELECT 1 FROM clipboard_records
+                 WHERE COALESCE(storage_mode, 'database') = 'resource' AND resource_path = ?1)",
+                [&path_text],
+                |row| row.get(0),
+            )
+            .unwrap_or(true);
+        if exists {
+            continue;
+        }
+        let id = resource_file_id(path);
+        if let Err(error) = conn.execute(
+            "INSERT OR IGNORE INTO clipboard_records
+             (id, type, content, source_app, created_at, storage_mode, resource_path,
+              sort_order, use_count)
+             VALUES (?1, 'file', ?2, '', ?3, 'resource', ?2, ?4, 0)",
+            params![id, path_text, &now, now_ms],
+        ) {
+            log::warn!("外部移入文件补建入库失败 {}: {error}", path.display());
+        } else {
+            log::info!("外部移入文件已按发现时间入库置顶: {}", path.display());
+        }
+    }
+}
+
 #[tauri::command]
 pub fn get_clipboard_records(
     app: AppHandle,
@@ -7167,6 +7216,96 @@ mod resource_command_tests {
         let phrases_recent = super::get_all_phrases(handle, None, Some("recent".into())).unwrap();
         assert_eq!(ids(&phrases_recent), vec!["phrase-hot", "phrase-fresh"]);
 
+        cleanup(&root);
+    }
+
+    #[test]
+    fn discover_external_resource_files_pins_newcomers_at_top() {
+        // 外部移入资源库的新文件按发现时间入库置顶：库外路径、已存在记录、
+        // 不存在的路径跳过；重复调用不重复入库。
+        let (app, root) = test_app();
+        insert_resource(&app, "res-old", 3000.0, "", root.join("old.png").to_str().unwrap());
+        std::fs::write(root.join("old.png"), [1, 2, 3]).unwrap();
+
+        let moved = root.join("moved-in.md");
+        let grouped_dir = root.join("货物素材");
+        std::fs::create_dir_all(&grouped_dir).unwrap();
+        let grouped = grouped_dir.join("moved.bin");
+        std::fs::write(&moved, b"hello").unwrap();
+        std::fs::write(&grouped, [9, 8, 7]).unwrap();
+        let outside = std::env::temp_dir().join(format!("outside-{}.txt", uuid::Uuid::new_v4()));
+        std::fs::write(&outside, b"x").unwrap();
+
+        super::discover_external_resource_files(
+            app.handle(),
+            &[
+                moved.clone(),
+                grouped.clone(),
+                root.join("old.png"),
+                root.join("missing.png"),
+                outside.clone(),
+            ],
+        );
+
+        let ids = |records: &[serde_json::Value]| -> Vec<String> {
+            records
+                .iter()
+                .map(|r| r["id"].as_str().unwrap_or("").to_string())
+                .collect()
+        };
+
+        let recent = get_clipboard_records_inner(
+            &app.handle().clone(),
+            None,
+            Some(50),
+            Some(0),
+            Some("resources".to_string()),
+            None,
+            Some("recent".into()),
+        )
+        .unwrap();
+        let recent_ids = ids(&recent);
+        assert_eq!(recent_ids.len(), 3);
+        // 两个新移入的文件（发现时间相同，先后不限）都在最前，老资源垫底。
+        assert!(recent_ids[0] != "res-old" && recent_ids[1] != "res-old");
+        assert_eq!(recent_ids[2], "res-old");
+        // 分组子目录里的移入文件按路径归组。
+        let top_groups: Vec<String> = recent[..2]
+            .iter()
+            .map(|r| r["resource_group"].as_str().unwrap_or("").to_string())
+            .collect();
+        assert!(
+            top_groups.contains(&"货物素材".to_string()),
+            "分组子目录的移入文件应归入该分组: {top_groups:?}"
+        );
+
+        // 最多使用模式：新文件零使用，与新复制的剪切板内容同待遇（未使用区顶部）。
+        let count = get_clipboard_records_inner(
+            &app.handle().clone(),
+            None,
+            Some(50),
+            Some(0),
+            Some("resources".to_string()),
+            None,
+            Some("count".into()),
+        )
+        .unwrap();
+        assert_eq!(ids(&count).len(), 3);
+        assert_eq!(count[2]["id"], "res-old");
+
+        // 重复调用不重复入库。
+        super::discover_external_resource_files(app.handle(), &[moved, grouped, outside]);
+        let again = get_clipboard_records_inner(
+            &app.handle().clone(),
+            None,
+            Some(50),
+            Some(0),
+            Some("resources".to_string()),
+            None,
+            Some("recent".into()),
+        )
+        .unwrap();
+        assert_eq!(again.len(), 3);
         cleanup(&root);
     }
 

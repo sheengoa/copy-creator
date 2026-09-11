@@ -2,15 +2,22 @@
 //! `resource-groups-changed`，资源页与径向菜单已有的监听会自动重新扫描，
 //! 让「内容即文件」的外部变更实时反映到界面。
 //!
+//! 运行期间新出现的文件（从外部移入/复制进来）会按发现时间补建入库记录，
+//! 使其在「全部」列表置顶——与刚复制的剪切板内容同待遇；文件管理器的
+//! 「移动」保留原修改时间，若只靠扫描合成会按旧时间沉底，因此必须在
+//! 监听侧显式补建。应用未运行期间放入的文件不追溯。
+//!
 //! 监听目录通过周期性调用 `db::get_resource_library_dir` 解析，用户切换
 //! 资源库路径、迁移存储位置等所有变更途径都会被跟进；监听失败按退避
 //! 间隔重试。应用自身对资源库的写入同样会触发事件，但刷新是幂等重扫，
 //! 且与自身操作发出的事件在防抖窗口内合并，不会形成反馈循环。
 
+use std::collections::HashSet;
 use std::path::PathBuf;
 use std::sync::mpsc;
 use std::time::{Duration, Instant};
 
+use notify::event::{EventKind, ModifyKind};
 use notify::{RecommendedWatcher, RecursiveMode, Watcher};
 use tauri::{AppHandle, Emitter, Runtime};
 
@@ -32,7 +39,7 @@ pub fn spawn<R: Runtime>(app: &AppHandle<R>) {
 }
 
 fn watch_loop<R: Runtime>(app: AppHandle<R>) {
-    let (event_tx, event_rx) = mpsc::channel::<()>();
+    let (event_tx, event_rx) = mpsc::channel::<Vec<PathBuf>>();
     // 常驻发送端：重建 watcher 时把克隆交给回调，保证 event_rx 永不断开。
     let keeper = event_tx.clone();
     drop(event_tx);
@@ -80,10 +87,15 @@ fn watch_loop<R: Runtime>(app: AppHandle<R>) {
             }
         }
 
-        // 汇聚监听事件，防抖后发一次刷新。
+        // 汇聚监听事件，防抖后：新文件先按发现时间补建入库（置顶），
+        // 再通知前端刷新。
         let mut saw_event = false;
-        while event_rx.try_recv().is_ok() {
+        let mut arrived_paths: HashSet<PathBuf> = HashSet::new();
+        while let Ok(paths) = event_rx.try_recv() {
             saw_event = true;
+            for path in paths {
+                arrived_paths.insert(path);
+            }
         }
         if saw_event {
             last_event = Some(Instant::now());
@@ -91,6 +103,10 @@ fn watch_loop<R: Runtime>(app: AppHandle<R>) {
         if let Some(at) = last_event {
             if at.elapsed() >= DEBOUNCE {
                 last_event = None;
+                if !arrived_paths.is_empty() {
+                    let paths: Vec<PathBuf> = arrived_paths.drain().collect();
+                    db::discover_external_resource_files(&app, &paths);
+                }
                 log::info!("资源库外部变更，通知前端刷新");
                 let _ = app.emit("resource-groups-changed", ());
             }
@@ -101,14 +117,21 @@ fn watch_loop<R: Runtime>(app: AppHandle<R>) {
 }
 
 fn build_watcher(
-    event_tx: &mpsc::Sender<()>,
+    event_tx: &mpsc::Sender<Vec<PathBuf>>,
 ) -> Result<RecommendedWatcher, notify::Error> {
     notify::recommended_watcher({
         let tx = event_tx.clone();
         move |result: Result<notify::Event, notify::Error>| {
-            // 忽略事件内容与具体错误：任何变动都只需触发一次重扫。
-            if result.is_ok() {
-                let _ = tx.send(());
+            // 只收集「新出现的文件路径」（创建 / 改名落入监听目录）；
+            // 内容修改与删除不影响置顶语义，交给常规重扫。
+            if let Ok(event) = result {
+                let is_arrival = matches!(
+                    event.kind,
+                    EventKind::Create(_) | EventKind::Modify(ModifyKind::Name(_))
+                );
+                if is_arrival && !event.paths.is_empty() {
+                    let _ = tx.send(event.paths.clone());
+                }
             }
         }
     })
