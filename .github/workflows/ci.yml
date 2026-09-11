@@ -1,0 +1,58 @@
+# 持续集成：push/PR 即运行 lint、前端测试（含架构守卫）与 Rust 测试。
+# 发布构建（build.yml）保留测试步骤作为最后防线；本工作流保证日常开发
+# 中架构守卫真实生效（DOMAIN_ARCHITECTURE_PLAN.md §5.4）。
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: 安装 pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 9
+
+      - name: 安装 Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+          cache-dependency-path: copy-creator/pnpm-lock.yaml
+
+      - name: 安装 Rust 工具链
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: 缓存 Rust 编译产物
+        uses: swatinem/rust-cache@v2
+        with:
+          workspaces: copy-creator/src-tauri
+
+      - name: 安装 Linux 系统依赖（Tauri/Rust 测试需要）
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libwebkit2gtk-4.1-dev libgtk-3-dev \
+            libayatana-appindicator3-dev libxdo-dev
+
+      - name: 安装前端依赖
+        run: pnpm install --frozen-lockfile
+        working-directory: copy-creator
+
+      - name: Lint
+        run: pnpm lint
+        working-directory: copy-creator
+
+      - name: 前端测试（含架构守卫）
+        run: pnpm test
+        working-directory: copy-creator
+
+      - name: Rust 测试
+        run: cargo test
+        working-directory: copy-creator/src-tauri
