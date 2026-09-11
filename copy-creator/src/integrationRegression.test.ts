@@ -4,7 +4,8 @@ import { describe, expect, it } from "vitest";
 import { readFileSync } from "node:fs";
 
 function readSource(path: string) {
-  return readFileSync(new URL(path, import.meta.url), "utf8");
+  // Windows 检出（autocrlf）下源码为 CRLF，统一归一为 LF 再断言。
+  return readFileSync(new URL(path, import.meta.url), "utf8").replace(/\r\n/g, "\n");
 }
 
 describe("integration regressions", () => {
