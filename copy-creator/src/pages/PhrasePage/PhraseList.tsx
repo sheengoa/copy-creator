@@ -27,6 +27,8 @@ interface PhraseListProps {
   onDelete: (id: string) => void;
   /** 卡片「移到顶部」：组内置顶，径向菜单同步可见。 */
   onMoveToTop?: (id: string) => void;
+  /** 「全部」跨分组视图：卡片尾部显示所属分组标签。 */
+  showGroupTag?: boolean;
   selectionMode: boolean;
   isSelected: (id: string) => boolean;
   onToggleSelected: (id: string) => void;
@@ -70,6 +72,7 @@ function PhraseCard({
   onEdit,
   onDelete,
   onMoveToTop,
+  showGroupTag,
   selectionMode,
   selected,
   onToggleSelected,
@@ -81,6 +84,7 @@ function PhraseCard({
   onEdit: (p: Phrase) => void;
   onDelete: (id: string) => void;
   onMoveToTop?: (id: string) => void;
+  showGroupTag?: boolean;
   selectionMode: boolean;
   selected: boolean;
   onToggleSelected: (id: string) => void;
@@ -171,6 +175,11 @@ function PhraseCard({
           )}
         </div>
         <div className="notititle phrase-card-footer">
+          {showGroupTag && phrase.group_name && (
+            <span className="phrase-card-group-tag" title={phrase.group_name}>
+              {phrase.group_name}
+            </span>
+          )}
           <span className="phrase-card-remark"><HighlightText text={phrase.title || ""} search={search} /></span>
           {!selectionMode && (
             <div className="phrase-card-actions">
@@ -228,6 +237,7 @@ export function PhraseList({
   onEdit,
   onDelete,
   onMoveToTop,
+  showGroupTag,
   selectionMode,
   isSelected,
   onToggleSelected,
@@ -266,7 +276,9 @@ export function PhraseList({
   if (phrases.length === 0 && !loading) {
     return (
       <div className="page-empty-compact">
-        <span>{t("phrases.emptyGroupPhrases")}</span>
+        <span>
+          {showGroupTag ? t("phrases.emptyAll") : t("phrases.emptyGroupPhrases")}
+        </span>
       </div>
     );
   }
@@ -283,6 +295,7 @@ export function PhraseList({
           onEdit={onEdit}
           onDelete={onDelete}
           onMoveToTop={onMoveToTop}
+          showGroupTag={showGroupTag}
           selectionMode={selectionMode}
           selected={isSelected(p.id)}
           onToggleSelected={onToggleSelected}

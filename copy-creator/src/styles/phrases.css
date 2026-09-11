@@ -80,6 +80,12 @@
   border-color: var(--card-border);
 }
 
+/* 「全部」跨分组视图 chip：固定首位，虚线边框区别于普通分组 chip。 */
+.group-chip-all {
+  border-style: dashed;
+  margin-right: 2px;
+}
+
 [data-theme="dark"] .group-chip.active {
   background: rgba(255, 255, 255, 0.18);
   color: #fff;
@@ -305,6 +311,21 @@
   display: flex;
   align-items: center;
   justify-content: space-between;
+}
+
+/* 「全部」视图卡片尾部的所属分组标签。 */
+.phrase-card-group-tag {
+  flex-shrink: 0;
+  max-width: 40%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: var(--text-xs);
+  color: var(--text-secondary);
+  background: var(--chip-hover-bg);
+  border-radius: 6px;
+  padding: 0 6px;
+  margin-right: 6px;
 }
 
 .phrase-card-remark {

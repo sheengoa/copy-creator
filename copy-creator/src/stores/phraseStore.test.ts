@@ -10,7 +10,7 @@ vi.mock("@tauri-apps/api/event", () => ({
   listen: vi.fn(),
 }));
 
-const { usePhraseStore } = await import("./phraseStore");
+const { usePhraseStore, ALL_PHRASES_GROUP_ID } = await import("./phraseStore");
 
 const basePhrase = {
   id: "phrase-1",
@@ -181,5 +181,63 @@ describe("phraseStore paste routing", () => {
     expect(invokeMock).toHaveBeenCalledWith("delete_phrases", {
       ids: ["phrase-1"],
     });
+  });
+});
+
+describe("phraseStore all-phrases view", () => {
+  beforeEach(() => {
+    invokeMock.mockReset();
+    invokeMock.mockResolvedValue(undefined);
+    usePhraseStore.setState({ phrases: [], selectedGroupId: null, groups: [] });
+  });
+
+  const textPhrase = (id: string) => ({
+    ...basePhrase,
+    id,
+    content: id,
+    input_type: "text" as const,
+    source_path: "",
+    file_size: 0,
+  });
+
+  it("loads cross-group phrases via get_all_phrases for the all view", async () => {
+    const allPhrases = [
+      { ...textPhrase("phrase-1"), group_name: "客服话术", last_used_at: "2026-09-11T00:00:00Z" },
+    ];
+    invokeMock.mockResolvedValueOnce(allPhrases);
+
+    await usePhraseStore.getState().loadPhrases(ALL_PHRASES_GROUP_ID);
+
+    expect(invokeMock).toHaveBeenCalledWith("get_all_phrases", {});
+    expect(usePhraseStore.getState().phrases).toEqual(allPhrases);
+    expect(usePhraseStore.getState().selectedGroupId).toBe(ALL_PHRASES_GROUP_ID);
+  });
+
+  it("defaults group loading to the all view when nothing is selected", async () => {
+    invokeMock.mockImplementation(async (command: string) => {
+      if (command === "get_phrase_groups") {
+        return [{ id: "group-1", name: "客服话术" }];
+      }
+      return [];
+    });
+
+    await usePhraseStore.getState().loadGroups();
+
+    expect(invokeMock).toHaveBeenCalledWith("get_all_phrases", {});
+    expect(usePhraseStore.getState().selectedGroupId).toBe(ALL_PHRASES_GROUP_ID);
+  });
+
+  it("moves a pasted phrase to the front only in the all view", async () => {
+    const first = textPhrase("a");
+    const second = textPhrase("b");
+
+    usePhraseStore.setState({ phrases: [first, second], selectedGroupId: ALL_PHRASES_GROUP_ID });
+    await usePhraseStore.getState().pastePhrase(second);
+    expect(usePhraseStore.getState().phrases.map((p) => p.id)).toEqual(["b", "a"]);
+
+    // 分组视图按手动排序，粘贴不改变顺序。
+    usePhraseStore.setState({ phrases: [first, second], selectedGroupId: "group-1" });
+    await usePhraseStore.getState().pastePhrase(second);
+    expect(usePhraseStore.getState().phrases.map((p) => p.id)).toEqual(["a", "b"]);
   });
 });

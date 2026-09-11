@@ -33,6 +33,10 @@ interface GroupChipsProps {
   canSelect: boolean;
   onStartSelection: () => void;
   onReorderGroups: (ids: string[]) => void;
+  /** 「全部」跨分组视图：固定首位、不参与分组拖拽排序的 chip。 */
+  allViewActive: boolean;
+  onSelectAllView: () => void;
+  allViewLabel: string;
 }
 
 function SortableGroupChip({
@@ -79,6 +83,9 @@ export function GroupChips({
   canSelect,
   onStartSelection,
   onReorderGroups,
+  allViewActive,
+  onSelectAllView,
+  allViewLabel,
 }: GroupChipsProps) {
   const { t } = useTranslation();
   const groupsScrollRef = useRef<HTMLDivElement>(null);
@@ -126,6 +133,13 @@ export function GroupChips({
   return (
     <div className="phrase-groups">
       <div className="groups-scroll" ref={groupsScrollRef}>
+        {/* 「全部」chip 固定首位、置于拖拽上下文之外：不参与分组排序。 */}
+        <button
+          className={`group-chip group-chip-all${allViewActive ? " active" : ""}`}
+          onClick={onSelectAllView}
+        >
+          {allViewLabel}
+        </button>
         <DndContext sensors={sensors} collisionDetection={closestCenter} onDragStart={handleGroupDragStart} onDragEnd={(e) => handleGroupDragEnd(e, groups)} onDragCancel={handleGroupDragCancel} modifiers={[restrictToHorizontalAxis]}>
           <SortableContext items={groups.map(g => g.id)} strategy={horizontalListSortingStrategy}>
             {groups.map((g) => (

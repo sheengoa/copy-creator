@@ -221,6 +221,7 @@
     "contentRequired": "内容未填写",
     "empty": "选择一个场景组查看快捷输入",
     "emptyGroupPhrases": "当前分组中无快捷输入",
+    "emptyAll": "暂无快捷输入",
     "manageGroups": "管理分组",
     "rename": "重命名",
     "confirmDelete": "确定要删除此快捷输入吗？",

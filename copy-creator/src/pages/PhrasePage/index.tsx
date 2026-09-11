@@ -2,7 +2,11 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { useTranslation } from "react-i18next";
 import { convertFileSrc } from "@tauri-apps/api/core";
-import { usePhraseStore, isImageFilePath } from "../../stores/phraseStore";
+import {
+  usePhraseStore,
+  isImageFilePath,
+  ALL_PHRASES_GROUP_ID,
+} from "../../stores/phraseStore";
 import type { QuickInputFileSelection } from "../../stores/phraseStore";
 import { fileNameFromPath } from "../../utils/fileName";
 
@@ -109,6 +113,8 @@ export default function PhrasePage() {
     useSensor(PointerSensor, { activationConstraint: { distance: 4 } }),
     useSensor(KeyboardSensor)
   );
+  // 「全部」视图按最近使用排序，拖拽排序仅分组视图可用：以无传感器禁用拖拽。
+  const noDragSensors = useSensors();
 
   const [activePhraseId, setActivePhraseId] = useState<string | null>(null);
   const [previewPhrases, setPreviewPhrases] = useState<typeof phrases | null>(null);
@@ -417,6 +423,10 @@ export default function PhrasePage() {
     });
   };
 
+  // 「全部」= 跨分组聚合视图：按最近使用排序、显示来源分组标签，
+  // 拖拽排序与置顶（使用时间的排序语义）不适用，新建需先落到具体分组。
+  const isAllView = selectedGroupId === ALL_PHRASES_GROUP_ID;
+
   return (
     <div className="phrase-page">
       <div className="page-search">
@@ -432,11 +442,14 @@ export default function PhrasePage() {
         selectedGroupId={selectedGroupId}
         onSelectGroup={handleSelectGroup}
         onManageGroups={openManageGroups}
-        onAddPhrase={openNewPhrase}
+        onAddPhrase={isAllView ? undefined : openNewPhrase}
         selectionMode={isSelecting}
         canSelect={searchedPhrases.length > 0}
         onStartSelection={startSelection}
         onReorderGroups={(ids) => usePhraseStore.getState().reorderGroups(ids)}
+        allViewActive={isAllView}
+        onSelectAllView={() => handleSelectGroup(ALL_PHRASES_GROUP_ID)}
+        allViewLabel={t("clipboard.all")}
       />
 
       {isSelecting && (
@@ -447,11 +460,11 @@ export default function PhrasePage() {
           onToggleAll={toggleAllVisible}
           onDelete={handleDeleteSelected}
           onCancel={exitSelection}
-          onMoveTop={() => void movePhrasesToTop([...selectedIds])}
+          onMoveTop={isAllView ? undefined : () => void movePhrasesToTop([...selectedIds])}
         />
       )}
 
-      <DndContext sensors={sensors} onDragStart={handlePhraseDragStart} onDragOver={handlePhraseDragOver} onDragEnd={handlePhraseDragEnd} onDragCancel={handlePhraseDragCancel} modifiers={[restrictToVerticalAxis]}>
+      <DndContext sensors={isAllView ? noDragSensors : sensors} onDragStart={handlePhraseDragStart} onDragOver={handlePhraseDragOver} onDragEnd={handlePhraseDragEnd} onDragCancel={handlePhraseDragCancel} modifiers={[restrictToVerticalAxis]}>
         <SortableContext items={renderedPhrases.map(p => p.id)} strategy={verticalListSortingStrategy}>
           <PhraseList
             phrases={searchedPhrases}
@@ -463,7 +476,8 @@ export default function PhrasePage() {
             onSecondaryPaste={handleSecondaryPaste}
             onEdit={openEditPhrase}
             onDelete={handleDeletePhrase}
-            onMoveToTop={(id) => void movePhrasesToTop([id])}
+            onMoveToTop={isAllView ? undefined : (id) => void movePhrasesToTop([id])}
+            showGroupTag={isAllView}
             selectionMode={isSelecting}
             isSelected={isSelected}
             onToggleSelected={toggleSelected}

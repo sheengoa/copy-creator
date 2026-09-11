@@ -221,6 +221,7 @@
     "contentRequired": "Content is required",
     "empty": "Select a group to view quick input",
     "emptyGroupPhrases": "No quick input in this group",
+    "emptyAll": "No quick input yet",
     "manageGroups": "Manage Groups",
     "rename": "Rename",
     "confirmDelete": "Delete this quick input?",
