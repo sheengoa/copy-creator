@@ -1023,13 +1023,6 @@
   min-width: 0;
 }
 
-.clipboard-create-bar-caption {
-  flex-shrink: 0;
-  color: var(--text-secondary);
-  font-size: var(--text-sm);
-  font-weight: var(--weight-medium);
-}
-
 .clipboard-create-dest-seg {
   display: flex;
   gap: 2px;
@@ -1239,6 +1232,44 @@
   color: var(--accent);
   font-size: var(--text-sm);
   font-weight: var(--weight-semibold);
+}
+
+/* 目标分组 chip：固定收缩宽度，与已有内容 chip 并列 */
+.clipboard-create-group-picker {
+  width: auto;
+  flex: 0 1 auto;
+  min-width: 96px;
+  max-width: 200px;
+}
+
+.clipboard-create-group-picker .clipboard-create-chip-trigger {
+  gap: 6px;
+  padding: 6px 8px;
+}
+
+/* 弹出菜单不随 chip 收缩，固定宽度便于展示层级与计数 */
+.clipboard-create-group-menu {
+  right: auto;
+  width: 230px;
+}
+
+.clipboard-create-group-count {
+  flex-shrink: 0;
+  margin-left: auto;
+  color: var(--text-secondary);
+  font-size: 11px;
+}
+
+/* 计数已把勾选推至右侧，勾选只需紧跟其后 */
+.clipboard-create-group-menu .clipboard-create-stash-check {
+  margin-left: 6px;
+}
+
+.clipboard-create-group-menu-sep {
+  flex-shrink: 0;
+  height: 1px;
+  margin: 4px 6px;
+  background: var(--card-border);
 }
 
 .clipboard-create-error {

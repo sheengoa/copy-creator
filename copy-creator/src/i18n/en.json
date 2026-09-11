@@ -108,6 +108,7 @@
     "groups": "Groups",
     "allGroups": "All",
     "ungrouped": "Ungrouped",
+    "targetGroup": "Target group",
     "newGroup": "New group",
     "manageGroups": "Manage groups",
     "renameGroup": "Rename group",
