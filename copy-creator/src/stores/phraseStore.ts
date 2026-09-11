@@ -9,6 +9,9 @@ import {
   resolveAbsoluteResourcePath,
 } from "../pages/ResourcePage/resourceUtils";
 
+/** 「全部」跨分组视图的选择哨兵：真实分组 id 由后端生成，不会与之冲突。 */
+export const ALL_PHRASES_GROUP_ID = "__all__";
+
 // 置顶/重排序失败后按当前分组重载短语，恢复与后端一致的真实顺序。
 const reloadPhrasesAfterFailure = async (get: () => PhraseState) => {
   const groupId = get().selectedGroupId;
@@ -21,7 +24,7 @@ const reloadPhrasesAfterFailure = async (get: () => PhraseState) => {
 export const isImageFilePath = (path: string) =>
   DECODABLE_IMAGE_EXTENSIONS.has(getResourceExtension(path));
 
-// 粘贴成功后记录使用时间（fire-and-forget），供径向菜单「最近使用」聚合查询。
+// 粘贴成功后记录使用时间（fire-and-forget），供「全部」视图按最近使用排序。
 function touchPhraseUsage(id: string) {
   void invoke("touch_phrase_usage", { id }).catch((e) => {
     console.error("Failed to record phrase usage:", e);
@@ -97,8 +100,9 @@ export const usePhraseStore = create<PhraseState>()((set, get) => {
     try {
       const groups = await invoke<PhraseGroup[]>("get_phrase_groups");
       set({ groups });
-      if (groups.length > 0 && !get().selectedGroupId) {
-        get().loadPhrases(groups[0].id);
+      // 无已选分组时默认落「全部」视图：跨分组按最近使用排序，省去先选分组。
+      if (!get().selectedGroupId) {
+        get().loadPhrases(ALL_PHRASES_GROUP_ID);
       }
     } catch (e) {
       console.error("Failed to load phrase groups:", e);
@@ -119,7 +123,10 @@ export const usePhraseStore = create<PhraseState>()((set, get) => {
   loadPhrases: async (groupId: string) => {
     set({ loading: true });
     try {
-      const phrases = await invoke<Phrase[]>("get_phrases", { groupId });
+      // 「全部」走跨分组聚合查询：附带分组名与最近使用时间，供来源标签展示。
+      const phrases = groupId === ALL_PHRASES_GROUP_ID
+        ? await invoke<Phrase[]>("get_all_phrases", {})
+        : await invoke<Phrase[]>("get_phrases", { groupId });
       set({ phrases, selectedGroupId: groupId });
     } catch (e) {
       console.error("Failed to load phrases:", e);
@@ -150,14 +157,17 @@ export const usePhraseStore = create<PhraseState>()((set, get) => {
 
   deleteGroup: async (id: string) => {
     try {
+      const wasSelected = get().selectedGroupId === id;
       await invoke("delete_phrase_group", { id });
       set({
         groups: get().groups.filter((g) => g.id !== id),
-        phrases:
-          get().selectedGroupId === id ? [] : get().phrases,
-        selectedGroupId:
-          get().selectedGroupId === id ? null : get().selectedGroupId,
+        phrases: wasSelected ? [] : get().phrases,
+        selectedGroupId: wasSelected ? null : get().selectedGroupId,
       });
+      // 被删分组正处于选中态：回到「全部」视图，保持列表有内容。
+      if (wasSelected) {
+        get().loadPhrases(ALL_PHRASES_GROUP_ID);
+      }
     } catch (e) {
       console.error("Failed to delete group:", e);
     }
@@ -261,6 +271,15 @@ export const usePhraseStore = create<PhraseState>()((set, get) => {
         await invoke("paste_text", { text: phrase.content });
       }
       touchPhraseUsage(phrase.id);
+      // 「全部」视图按最近使用排序：粘贴成功即乐观移到最前，与后端排序一致。
+      set((s) => {
+        if (s.selectedGroupId !== ALL_PHRASES_GROUP_ID) return {};
+        const target = s.phrases.find((p) => p.id === phrase.id);
+        if (!target || s.phrases[0]?.id === phrase.id) return {};
+        return {
+          phrases: [target, ...s.phrases.filter((p) => p.id !== phrase.id)],
+        };
+      });
     } catch (e) {
       console.error("Paste failed:", e);
     }
@@ -279,6 +298,14 @@ export const usePhraseStore = create<PhraseState>()((set, get) => {
         await invoke("paste_text_terminal", { text: phrase.content });
       }
       touchPhraseUsage(phrase.id);
+      set((s) => {
+        if (s.selectedGroupId !== ALL_PHRASES_GROUP_ID) return {};
+        const target = s.phrases.find((p) => p.id === phrase.id);
+        if (!target || s.phrases[0]?.id === phrase.id) return {};
+        return {
+          phrases: [target, ...s.phrases.filter((p) => p.id !== phrase.id)],
+        };
+      });
     } catch (e) {
       console.error("Terminal paste failed:", e);
     }

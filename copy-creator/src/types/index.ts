@@ -68,4 +68,7 @@ export interface Phrase {
   sort_order: number;
   created_at: string;
   updated_at: string;
+  /** 「全部」跨分组视图附带：所属分组名（供来源标签）与最近使用时间。 */
+  group_name?: string | null;
+  last_used_at?: string;
 }

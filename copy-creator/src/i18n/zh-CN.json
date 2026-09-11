@@ -4,7 +4,6 @@
   },
   "sidebar": {},
   "tabs": {
-    "recent": "最近",
     "clipboard": "剪切板",
     "phrases": "快捷输入",
     "resources": "资源"
@@ -226,7 +225,9 @@
     "rename": "重命名",
     "confirmDelete": "确定要删除此快捷输入吗？",
     "confirmDeleteSelected": "确定要删除选中的 {{count}} 条快捷输入吗？此操作不可撤销。",
-    "confirmDeleteGroup": "确定要删除此分组及其中的全部快捷输入吗？此操作不可撤销。"
+    "confirmDeleteGroup": "确定要删除此分组及其中的全部快捷输入吗？此操作不可撤销。",
+    "neverUsed": "未使用过",
+    "unusedDivider": "以下未使用过"
   },
   "common": {
     "search": "搜索",
@@ -252,11 +253,14 @@
     "pinWindow": "固定窗口",
     "unpinWindow": "取消固定",
     "backToTop": "回到顶部",
-    "moveToTop": "移到顶部"
+    "moveToTop": "移到顶部",
+    "justNow": "刚刚",
+    "minutesAgo": "{{count}} 分钟前",
+    "hoursAgo": "{{count}} 小时前",
+    "daysAgo": "{{count}} 天前"
   },
   "radialMenu": {
     "empty": "暂无内容",
-    "recentEmpty": "还没有使用记录，粘贴过的内容会出现在这里",
     "previewTitle": "完整内容",
     "openPreview": "展开预览",
     "closePreview": "收起预览",

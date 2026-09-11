@@ -265,8 +265,10 @@ describe("integration regressions", () => {
       resourcePage.indexOf("{resourceGroupDialog &&"),
     );
     expect(radialMenu).toContain("RADIAL_TAB_KEYS");
-    // 「最近使用」为默认 tab：无记忆（首次使用）时打开菜单落在「最近」。
-    expect(radialMenu).toContain('useState<TabKey>("recent")');
+    // 快捷输入为默认 tab：「最近」tab 已移除，无记忆（首次使用）时
+    // 打开菜单落在快捷输入「全部」（跨分组、按最近使用排序）。
+    expect(radialMenu).toContain('useState<TabKey>("phrases")');
+    expect(radialMenu).toContain("useState<string | null>(ALL_PHRASES_GROUP_ID)");
     // tab 用图标表达，名称经 aria-label / title 提示。
     expect(radialMenu).toContain("NAV_TAB_ICONS[tab]");
     expect(radialMenu).toContain('aria-label={t(`tabs.${tab}`)}');
@@ -275,8 +277,9 @@ describe("integration regressions", () => {
     expect(radialMenu).toContain('key: RADIAL_LAST_TAB_SETTING');
     expect(radialMenu).toContain("restoreLastTab");
     expect(radialMenu).toContain("if (tabTouchedRef.current) return;");
-    expect(radialMenu).toContain('invoke<RecentUsedItem[]>("get_recent_used_items"');
-    expect(radialMenu).toContain("recentItemByIdRef.current.get(itemId)");
+    // 快捷输入 tab 激活即回到「全部」并重载（聚合查询 get_all_phrases）。
+    expect(radialMenu).toContain("buildAllPhraseItems");
+    expect(radialMenu).toContain("loadPhrases(ALL_PHRASES_GROUP_ID)");
     // 资源 tab 依据记忆的分组位置加载（跨重启持久化），不再强制重置为"全部"。
     expect(radialMenu).toContain('useClipboardStore.getState().loadRecords(false, "resources", remembered)');
     expect(radialMenu).not.toContain('loadRecords(false, "resources", null)');
