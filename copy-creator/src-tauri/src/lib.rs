@@ -6,6 +6,7 @@ mod ipc;
 mod media_server;
 mod paste;
 mod radial_drag;
+mod resource_watch;
 mod shortcut;
 mod tray;
 
@@ -131,6 +132,7 @@ pub fn run() {
             db::init_db(app.handle())?;
             db::prune_old_records(app.handle()).ok();
             media_server::spawn(app.handle());
+            resource_watch::spawn(app.handle());
 
             // Restore persisted theme; DB init defaults to light, so
             // the first-ever launch will be light mode.

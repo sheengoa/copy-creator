@@ -2606,6 +2606,11 @@ fn stage_external_resource_files<R: Runtime>(
         let Some(original_path) = resource_file_path_from_id(app, id)? else {
             continue;
         };
+        // 文件已被外部删除（如用户在文件管理器中删掉）时无需暂存，
+        // 跳过后继续走正常流程清理记录，否则 rename 报错会让整个删除失败。
+        if !original_path.exists() {
+            continue;
+        }
         let parent = original_path
             .parent()
             .ok_or_else(|| "资源文件路径无效".to_string())?;

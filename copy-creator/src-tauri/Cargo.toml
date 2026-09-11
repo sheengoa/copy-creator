@@ -36,6 +36,8 @@ tauri-plugin-process = "2.3.1"
 dirs = "5"
 arboard = { version = "3", features = ["image-data"] }
 drag = "2.1.1"
+# 资源库目录监听：外部增删改文件后实时通知前端刷新
+notify = "8"
 
 [dev-dependencies]
 tauri = { version = "2.11.1", features = ["test"] }
