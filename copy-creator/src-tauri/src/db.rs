@@ -307,11 +307,17 @@ fn resolve_storage_path_from_root(root: &Path, path: &str) -> Result<PathBuf, St
         .ok_or_else(|| "存储路径无效".to_string())
 }
 
-pub(crate) fn resolve_storage_path(app: &AppHandle, path: &str) -> Result<PathBuf, String> {
+pub(crate) fn resolve_storage_path<R: Runtime>(
+    app: &AppHandle<R>,
+    path: &str,
+) -> Result<PathBuf, String> {
     resolve_storage_path_from_root(&get_storage_dir(app), path)
 }
 
-pub(crate) fn resolve_managed_storage_path(app: &AppHandle, path: &str) -> Option<PathBuf> {
+pub(crate) fn resolve_managed_storage_path<R: Runtime>(
+    app: &AppHandle<R>,
+    path: &str,
+) -> Option<PathBuf> {
     resolve_relative_storage_path(&get_storage_dir(app), path)
 }
 
@@ -866,8 +872,8 @@ fn remove_resource_record_attachments_from_roots(
     }
 }
 
-pub(crate) fn remove_resource_record_attachments(
-    app: &AppHandle,
+pub(crate) fn remove_resource_record_attachments<R: Runtime>(
+    app: &AppHandle<R>,
     record_id: &str,
     attachment_paths: &[String],
 ) {
@@ -875,8 +881,8 @@ pub(crate) fn remove_resource_record_attachments(
     remove_resource_record_attachments_from_roots(&resource_roots, record_id, attachment_paths);
 }
 
-pub(crate) fn remove_resource_record_files(
-    app: &AppHandle,
+pub(crate) fn remove_resource_record_files<R: Runtime>(
+    app: &AppHandle<R>,
     record_id: &str,
     resource_path: &str,
     attachment_paths: &[String],
@@ -6863,6 +6869,76 @@ mod resource_command_tests {
         assert!(unreadable_markdown.is_file());
         assert!(!root.join("01-resource.txt").exists());
         assert!(root.join("References").is_dir());
+        cleanup(&root);
+    }
+
+    #[test]
+    fn save_stash_record_accepts_nested_group_path() {
+        // 新建窗口分组选择器传完整分组路径；单级名校验会误拒子分组保存。
+        let (app, root) = test_app();
+        let nested = root.join("分镜提词").join("seedance");
+        std::fs::create_dir_all(&nested).unwrap();
+
+        let result = crate::clipboard::save_stash_record_inner(
+            app.handle(),
+            None,
+            "嵌套分组内容".to_string(),
+            Vec::new(),
+            Some("resource".to_string()),
+            Some("分镜提词/seedance".to_string()),
+        )
+        .unwrap();
+
+        assert_eq!(result["resource_group"], "分镜提词/seedance");
+        let resource_path = Path::new(result["resource_path"].as_str().unwrap());
+        assert!(resource_path.starts_with(&nested));
+        assert!(resource_path.is_file());
+
+        let state = app.state::<DbState>();
+        let conn = state.conn.lock().unwrap();
+        let (group_name, storage_mode): (String, String) = conn
+            .query_row(
+                "SELECT group_name, storage_mode FROM clipboard_records WHERE id = ?1",
+                [result["id"].as_str().unwrap()],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )
+            .unwrap();
+        assert_eq!(group_name, "分镜提词/seedance");
+        assert_eq!(storage_mode, "resource");
+        cleanup(&root);
+    }
+
+    #[test]
+    fn save_stash_record_nested_group_image_links_match_depth() {
+        // 附件存放在资源库根目录 .copy-creator 下，二级分组的相对前缀应为 ../../。
+        let (app, root) = test_app();
+        let nested = root.join("a").join("b");
+        std::fs::create_dir_all(&nested).unwrap();
+        let mut png = std::io::Cursor::new(Vec::new());
+        image::RgbaImage::from_pixel(1, 1, image::Rgba([255u8, 0, 0, 255]))
+            .write_to(&mut png, image::ImageFormat::Png)
+            .unwrap();
+        use base64::Engine as _;
+        let data_url = format!(
+            "data:image/png;base64,{}",
+            base64::engine::general_purpose::STANDARD.encode(png.into_inner())
+        );
+
+        let result = crate::clipboard::save_stash_record_inner(
+            app.handle(),
+            None,
+            "\u{FFFC}".to_string(),
+            vec![data_url],
+            Some("resource".to_string()),
+            Some("a/b".to_string()),
+        )
+        .unwrap();
+
+        let markdown = std::fs::read_to_string(result["resource_path"].as_str().unwrap()).unwrap();
+        assert!(
+            markdown.contains("../../.copy-creator/attachments/"),
+            "markdown 应包含两级相对前缀: {markdown}"
+        );
         cleanup(&root);
     }
 }

@@ -3,7 +3,7 @@ use rusqlite::OptionalExtension;
 use std::collections::HashSet;
 use std::io::Write;
 use std::path::PathBuf;
-use tauri::{AppHandle, Emitter, Manager};
+use tauri::{AppHandle, Emitter, Manager, Runtime};
 use tauri_plugin_clipboard_manager::ClipboardExt;
 
 fn is_url(text: &str) -> bool {
@@ -129,8 +129,8 @@ fn parse_file_uri(uri: &str) -> Option<String> {
     Some(decoded)
 }
 
-fn write_stash_images(
-    app: &AppHandle,
+fn write_stash_images<R: Runtime>(
+    app: &AppHandle<R>,
     images: &[String],
     reusable_paths: &HashSet<String>,
 ) -> Result<(Vec<String>, Vec<String>), String> {
@@ -180,7 +180,7 @@ fn write_stash_images(
     Ok((paths, created_paths))
 }
 
-fn remove_stash_images(app: &AppHandle, paths: &[String]) {
+fn remove_stash_images<R: Runtime>(app: &AppHandle<R>, paths: &[String]) {
     crate::paste::remove_cached_images(paths);
     for path in paths {
         if let Some(path) = crate::db::resolve_managed_storage_path(app, path) {
@@ -189,7 +189,7 @@ fn remove_stash_images(app: &AppHandle, paths: &[String]) {
     }
 }
 
-fn read_image_source(app: &AppHandle, value: &str) -> Result<Vec<u8>, String> {
+fn read_image_source<R: Runtime>(app: &AppHandle<R>, value: &str) -> Result<Vec<u8>, String> {
     let value = value.trim();
     if value.is_empty() {
         return Err("图片数据为空".to_string());
@@ -302,8 +302,8 @@ struct ResourceWriteResult {
     attachment_paths: Vec<String>,
 }
 
-fn write_resource_record(
-    app: &AppHandle,
+fn write_resource_record<R: Runtime>(
+    app: &AppHandle<R>,
     record_id: &str,
     content: &str,
     images: &[String],
@@ -354,9 +354,12 @@ fn write_resource_record(
         let file_content = if images.is_empty() {
             format!("{content}\n")
         } else {
+            // 附件统一存放在资源库根目录的 .copy-creator 下，相对路径
+            // 前缀按分组深度补齐（顶层分组一层 ../，嵌套分组逐层递增）。
+            let depth = group_name.split('/').filter(|part| !part.is_empty()).count();
+            let prefix = "../".repeat(depth);
             let relative_paths = (1..=images.len())
                 .map(|index| {
-                    let prefix = if group_name.is_empty() { "" } else { "../" };
                     format!(
                         "{prefix}.copy-creator/attachments/{attachment_dir_name}/image-{index}.png"
                     )
@@ -432,6 +435,24 @@ pub fn save_stash_record(
     storage_mode: Option<String>,
     group_name: Option<String>,
 ) -> Result<serde_json::Value, String> {
+    save_stash_record_inner(
+        &app,
+        id,
+        content,
+        images,
+        storage_mode,
+        group_name,
+    )
+}
+
+pub(crate) fn save_stash_record_inner<R: Runtime>(
+    app: &AppHandle<R>,
+    id: Option<String>,
+    content: String,
+    images: Vec<String>,
+    storage_mode: Option<String>,
+    group_name: Option<String>,
+) -> Result<serde_json::Value, String> {
     let content = content.trim().to_string();
     if content.is_empty() {
         return Err("内容不能为空".to_string());
@@ -487,16 +508,19 @@ pub fn save_stash_record(
         .map(|(_, _, _, path)| path.clone())
         .unwrap_or_default();
     let target_group_name = if target_storage_mode == crate::db::RESOURCE_STORAGE_MODE {
+        // 前端分组选择器传完整分组路径（如「分镜提词/seedance」），
+        // 按多级目录路径校验；编辑已有资源时的默认值同样取完整路径，
+        // 避免把子分组内容挪回顶层分组。
         let default_group = if current_is_resource {
-            crate::db::resource_group_for_path(
-                &crate::db::get_resource_library_dir(&app),
+            crate::db::resource_folder_for_path(
+                &crate::db::get_resource_library_dir(app),
                 &old_resource_path,
             )
             .unwrap_or_default()
         } else {
             String::new()
         };
-        crate::db::normalize_resource_group_name(
+        crate::db::normalize_resource_folder_path(
             group_name.as_deref().or(Some(default_group.as_str())),
         )?
     } else {
@@ -513,7 +537,7 @@ pub fn save_stash_record(
     let (new_paths, created_stash_paths, new_resource_path, new_resource_paths) =
         if target_storage_mode == crate::db::RESOURCE_STORAGE_MODE {
             let result =
-                write_resource_record(&app, &record_id, &content, &images, &target_group_name)?;
+                write_resource_record(app, &record_id, &content, &images, &target_group_name)?;
             (
                 result.attachment_paths.clone(),
                 Vec::new(),
@@ -521,7 +545,7 @@ pub fn save_stash_record(
                 result.attachment_paths,
             )
         } else {
-            let (paths, created_paths) = write_stash_images(&app, &images, &reusable_paths)?;
+            let (paths, created_paths) = write_stash_images(app, &images, &reusable_paths)?;
             (paths, created_paths, String::new(), Vec::new())
         };
     let attachments = serde_json::to_string(&new_paths).map_err(|e| e.to_string())?;
@@ -573,10 +597,10 @@ pub fn save_stash_record(
     })();
 
     if let Err(error) = result {
-        remove_stash_images(&app, &created_stash_paths);
+        remove_stash_images(app, &created_stash_paths);
         if !new_resource_path.is_empty() || !new_resource_paths.is_empty() {
             crate::db::remove_resource_record_files(
-                &app,
+                app,
                 &record_id,
                 &new_resource_path,
                 &new_resource_paths,
@@ -586,13 +610,13 @@ pub fn save_stash_record(
     }
     let retained_paths = new_paths.iter().cloned().collect::<HashSet<_>>();
     if current_is_resource {
-        crate::db::remove_resource_record_files(&app, &record_id, &old_resource_path, &old_paths);
+        crate::db::remove_resource_record_files(app, &record_id, &old_resource_path, &old_paths);
     } else {
         let obsolete_paths = old_paths
             .into_iter()
             .filter(|path| !retained_paths.contains(path))
             .collect::<Vec<_>>();
-        remove_stash_images(&app, &obsolete_paths);
+        remove_stash_images(app, &obsolete_paths);
     }
 
     if updated {

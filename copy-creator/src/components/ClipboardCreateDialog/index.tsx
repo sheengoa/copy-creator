@@ -21,6 +21,8 @@ interface StashRecord {
   storage_mode?: ClipboardStorageMode;
   resource_path?: string;
   resource_group?: string | null;
+  /** 完整分组相对路径（resource_group 只含顶层分组名）。 */
+  resource_folder?: string | null;
 }
 
 export default function ClipboardCreateDialog() {
@@ -232,7 +234,12 @@ export default function ClipboardCreateDialog() {
       })));
       setEditingId(record.id);
       setStorageMode(record.storage_mode === "resource" ? "resource" : "database");
-      setResourceGroupName(record.storage_mode === "resource" ? record.resource_group || "" : "");
+      // 预填完整分组路径，避免编辑子分组资源保存后被挪回顶层分组。
+      setResourceGroupName(
+        record.storage_mode === "resource"
+          ? record.resource_folder || record.resource_group || ""
+          : "",
+      );
       resetDraft(fullContent, imageData);
       setTimeout(() => editorRef.current?.focus(), 0);
     } catch (e) {
