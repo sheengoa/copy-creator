@@ -2168,8 +2168,8 @@ fn all_phrase_rows(
 /// 快捷输入「全部」视图：聚合全部分组的短语，径向菜单与主窗口共用。
 /// limit 仅径向菜单使用（首屏条数）；主窗口不传即全量加载。
 #[tauri::command]
-pub fn get_all_phrases(
-    app: AppHandle,
+pub fn get_all_phrases<R: Runtime>(
+    app: AppHandle<R>,
     limit: Option<u32>,
     sort_by: Option<String>,
 ) -> Result<Vec<serde_json::Value>, String> {
@@ -7055,6 +7055,110 @@ mod resource_command_tests {
             )
             .unwrap();
         assert!(!last_used_at.is_empty());
+        cleanup(&root);
+    }
+
+    #[test]
+    fn content_sort_applies_to_every_all_view() {
+        // 全区「全部」视图的按面验证：剪切板全部、资源全部分组、快捷输入全部
+        // 两种模式都必须按预期排序（分组浏览不在此列，前端不传偏好）。
+        let (app, root) = test_app();
+        {
+            let state = app.state::<DbState>();
+            let conn = state.conn.lock().unwrap();
+            conn.execute_batch(
+                "CREATE TABLE phrase_groups (
+                     id TEXT PRIMARY KEY, name TEXT NOT NULL, sort_order INTEGER DEFAULT 0,
+                     created_at TEXT NOT NULL, updated_at TEXT NOT NULL
+                 );
+                 CREATE TABLE phrases (
+                     id TEXT PRIMARY KEY, group_id TEXT NOT NULL, title TEXT NOT NULL,
+                     content TEXT NOT NULL, input_type TEXT DEFAULT 'text',
+                     source_path TEXT DEFAULT '', file_size INTEGER DEFAULT 0,
+                     sort_order INTEGER DEFAULT 0, created_at TEXT NOT NULL,
+                     updated_at TEXT NOT NULL, last_used_at TEXT DEFAULT '',
+                     use_count INTEGER DEFAULT 0
+                 );",
+            )
+            .unwrap();
+            // 剪切板：fresh-copy 最新复制未使用；just-used 复制最早但刚用过。
+            conn.execute(
+                "INSERT INTO clipboard_records (id, type, content, created_at, sort_order, touched_ms, use_count)
+                 VALUES ('fresh-copy', 'text', '新复制', '2026-09-11T08:00:00Z', 3000.0, 0, 0),
+                        ('just-used', 'text', '刚用过', '2026-09-09T08:00:00Z', 1000.0, 2500, 1)",
+                [],
+            )
+            .unwrap();
+            // 短语：hot 用过 5 次，fresh 短语未使用。
+            conn.execute(
+                "INSERT INTO phrase_groups (id, name, created_at, updated_at)
+                 VALUES ('g1', '分组', '2026-09-01T00:00:00Z', '2026-09-01T00:00:00Z')",
+                [],
+            )
+            .unwrap();
+            conn.execute(
+                "INSERT INTO phrases (id, group_id, title, content, created_at, updated_at, last_used_at, use_count)
+                 VALUES ('phrase-hot', 'g1', 't', '高频短语', '2026-09-01T00:00:00Z', '2026-09-01T00:00:00Z', '2026-09-05T10:00:00Z', 5),
+                        ('phrase-fresh', 'g1', 't', '新短语', '2026-09-06T00:00:00Z', '2026-09-06T00:00:00Z', '', 0)",
+                [],
+            )
+            .unwrap();
+        }
+        // 资源记录：used.png 修改时间早但被用过，fresh.png 修改时间最新。
+        let used = root.join("used.png");
+        let fresh = root.join("fresh.png");
+        std::fs::write(&used, [1, 2, 3]).unwrap();
+        std::fs::write(&fresh, [4, 5, 6]).unwrap();
+        insert_resource(&app, "res-used", 1000.0, "", used.to_str().unwrap());
+        insert_resource(&app, "res-fresh", 3000.0, "", fresh.to_str().unwrap());
+        {
+            let state = app.state::<DbState>();
+            let conn = state.conn.lock().unwrap();
+            conn.execute(
+                "UPDATE clipboard_records SET touched_ms = 2500, use_count = 2 WHERE id = 'res-used'",
+                [],
+            )
+            .unwrap();
+        }
+
+        let ids = |records: &[serde_json::Value]| -> Vec<String> {
+            records
+                .iter()
+                .map(|r| r["id"].as_str().unwrap_or("").to_string())
+                .collect()
+        };
+        let handle = app.handle().clone();
+
+        // 剪切板「全部」：最多使用 → 次数倒序；最近使用 → 新复制置顶、刚用过的上浮。
+        let clipboard_count = get_clipboard_records_inner(
+            &handle, None, Some(50), Some(0), None, None, Some("count".into()),
+        )
+        .unwrap();
+        assert_eq!(ids(&clipboard_count), vec!["just-used", "fresh-copy"]);
+        let clipboard_recent = get_clipboard_records_inner(
+            &handle, None, Some(50), Some(0), None, None, Some("recent".into()),
+        )
+        .unwrap();
+        assert_eq!(ids(&clipboard_recent), vec!["fresh-copy", "just-used"]);
+
+        // 资源「全部分组」：最多使用 → 被用过的在前；最近使用 → 刚改的文件在前。
+        let resources_count = get_clipboard_records_inner(
+            &handle, None, Some(50), Some(0), Some("resources".into()), None, Some("count".into()),
+        )
+        .unwrap();
+        assert_eq!(ids(&resources_count), vec!["res-used", "res-fresh"]);
+        let resources_recent = get_clipboard_records_inner(
+            &handle, None, Some(50), Some(0), Some("resources".into()), None, Some("recent".into()),
+        )
+        .unwrap();
+        assert_eq!(ids(&resources_recent), vec!["res-fresh", "res-used"]);
+
+        // 快捷输入「全部」：最多使用 → 次数倒序、未使用垫底。
+        let phrases_count = super::get_all_phrases(handle.clone(), None, Some("count".into())).unwrap();
+        assert_eq!(ids(&phrases_count), vec!["phrase-hot", "phrase-fresh"]);
+        let phrases_recent = super::get_all_phrases(handle, None, Some("recent".into())).unwrap();
+        assert_eq!(ids(&phrases_recent), vec!["phrase-hot", "phrase-fresh"]);
+
         cleanup(&root);
     }
 
