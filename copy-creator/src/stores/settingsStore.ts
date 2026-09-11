@@ -10,6 +10,12 @@ export const RADIAL_SCALE_MIN = 50;
 export const RADIAL_SCALE_MAX = 200;
 export const RADIAL_SCALE_DEFAULT = 100;
 
+/** 内容列表排序偏好：最近使用（默认）| 最多使用。作用于剪切板、资源、快捷输入主列表。 */
+export type ContentSortMode = "recent" | "count";
+
+export const parseContentSort = (raw: string | undefined): ContentSortMode =>
+  raw === "count" ? "count" : "recent";
+
 export const clampRadialScale = (percent: number): number =>
   Math.min(RADIAL_SCALE_MAX, Math.max(RADIAL_SCALE_MIN, Math.round(percent)));
 
@@ -29,12 +35,14 @@ interface SettingsState {
   radialMenuScale: number;
   autostartEnabled: boolean;
   pasteLeftClick: PasteMode;
+  contentSort: ContentSortMode;
 
   toggleTheme: () => void;
   loadSettings: () => Promise<void>;
   setSetting: (key: string, value: string) => Promise<void>;
   setSettingsBatch: (settings: Record<string, string>) => Promise<void>;
   setPasteLeftClick: (mode: PasteMode) => Promise<void>;
+  setContentSort: (mode: ContentSortMode) => Promise<void>;
   setAutostart: (enabled: boolean) => Promise<boolean>;
 }
 
@@ -49,6 +57,7 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
   radialMenuScale: RADIAL_SCALE_DEFAULT,
   autostartEnabled: false,
   pasteLeftClick: "normal",
+  contentSort: "recent",
 
   toggleTheme: () => {
     const next = get().themeMode === "light" ? "dark" : "light";
@@ -72,6 +81,7 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
         radialMenuEnabled: settings.radial_menu_enabled !== "0",
         radialMenuScale: parseRadialScale(settings.radial_menu_scale),
         pasteLeftClick: (settings.paste_left_click === "terminal" ? "terminal" : "normal") as PasteMode,
+        contentSort: parseContentSort(settings.content_sort),
       });
 
       // Read autostart state from the .desktop file
@@ -131,6 +141,18 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
       await invoke("set_settings_batch", { settings: { paste_left_click: mode } });
     } catch (e) {
       console.error("Failed to save paste setting:", e);
+    }
+  },
+
+  // 排序偏好切换：持久化后广播事件，两个窗口的 clipboardStore / phraseStore
+  // 实例各自监听并按新排序重载当前视图（emit 对本窗口同样可见）。
+  setContentSort: async (mode: ContentSortMode) => {
+    set({ contentSort: mode });
+    try {
+      await invoke("set_settings_batch", { settings: { content_sort: mode } });
+      await emit("content-sort-changed", { sortBy: mode });
+    } catch (e) {
+      console.error("Failed to save content sort setting:", e);
     }
   },
 

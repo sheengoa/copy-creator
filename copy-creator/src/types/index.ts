@@ -32,6 +32,8 @@ export interface ClipboardRecord {
   resource_file_size?: number;
   resource_managed?: boolean;
   resource_note?: string | null;
+  /** 使用次数（粘贴/拖出成功自增），「最多使用」排序与次数徽标展示。 */
+  use_count?: number;
 }
 
 export interface PhraseGroup {
@@ -71,4 +73,6 @@ export interface Phrase {
   /** 「全部」跨分组视图附带：所属分组名（供来源标签）与最近使用时间。 */
   group_name?: string | null;
   last_used_at?: string;
+  /** 使用次数（粘贴/拖出成功自增），「最多使用」排序与次数徽标展示。 */
+  use_count?: number;
 }

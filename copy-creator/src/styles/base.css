@@ -177,3 +177,20 @@ html, body, #root {
   0%, 100% { opacity: 1; }
   50% { opacity: 0.6; }
 }
+
+/* 「最多使用」模式的次数徽标：剪切板 / 资源 / 快捷输入卡片与径向菜单共用。 */
+.usage-count-badge {
+  flex-shrink: 0;
+  font-size: var(--text-xs);
+  font-weight: var(--weight-medium);
+  color: #9a6b1f;
+  background: rgba(234, 179, 8, 0.16);
+  border-radius: 6px;
+  padding: 0 6px;
+  white-space: nowrap;
+}
+
+[data-theme="dark"] .usage-count-badge {
+  color: rgba(253, 224, 132, 0.95);
+  background: rgba(234, 179, 8, 0.14);
+}

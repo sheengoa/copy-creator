@@ -8,6 +8,7 @@ import type { Phrase } from "../../types";
 import { HighlightText } from "../../components/HighlightText";
 import { InlineImagePreview, InlineTextFilePreview } from "../../components/InlinePreview";
 import { isImageFilePath } from "../../stores/phraseStore";
+import { useSettingsStore } from "../../stores/settingsStore";
 import { fileNameFromPath } from "../../utils/fileName";
 import {
   isInlineTextPreviewFilePath,
@@ -90,6 +91,7 @@ function PhraseCard({
   onToggleSelected: (id: string) => void;
 }) {
   const { t } = useTranslation();
+  const isCountSort = useSettingsStore((s) => s.contentSort === "count");
   const {
     attributes, listeners, setNodeRef, setActivatorNodeRef, transform, transition, isDragging,
   } = useSortable({ id: phrase.id, disabled: selectionMode });
@@ -178,6 +180,11 @@ function PhraseCard({
           {showGroupTag && phrase.group_name && (
             <span className="phrase-card-group-tag" title={phrase.group_name}>
               {phrase.group_name}
+            </span>
+          )}
+          {showGroupTag && isCountSort && (
+            <span className="usage-count-badge">
+              {t("common.usageCount", { count: phrase.use_count ?? 0 })}
             </span>
           )}
           <span className="phrase-card-remark"><HighlightText text={phrase.title || ""} search={search} /></span>

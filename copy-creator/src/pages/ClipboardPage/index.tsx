@@ -1,5 +1,4 @@
 import { useEffect, useState, useRef, useCallback, useMemo } from "react";
-import { createPortal } from "react-dom";
 import { useTranslation } from "react-i18next";
 import { invoke } from "@tauri-apps/api/core";
 import { useClipboardStore, type ClipboardFilter } from "../../stores/clipboardStore";
@@ -7,24 +6,8 @@ import { useSettingsStore } from "../../stores/settingsStore";
 import { Icons } from "../../components/Icons";
 import { ConfirmDialog } from "../../components/ConfirmDialog";
 import SearchInput from "../../components/SearchInput";
-import { ClipboardCard, ClipboardCardDragPreview } from "./ClipboardCard";
+import { ClipboardCard } from "./ClipboardCard";
 import { TYPE_META } from "./utils";
-import {
-  DndContext,
-  PointerSensor,
-  KeyboardSensor,
-  useSensors,
-  useSensor,
-  closestCenter,
-  DragOverlay,
-} from "@dnd-kit/core";
-import type { DragOverEvent, DragStartEvent } from "@dnd-kit/core";
-import {
-  SortableContext,
-  verticalListSortingStrategy,
-} from "@dnd-kit/sortable";
-import { restrictToVerticalAxis } from "@dnd-kit/modifiers";
-import { getChangedOrderIds, getDragPreviewOrder } from "../../utils/reorderPreview";
 import BatchSelectionBar from "../../components/BatchSelectionBar";
 import { BackToTopButton } from "../../components/BackToTop";
 import { useBackToTop } from "../../hooks/useBackToTop";
@@ -65,7 +48,6 @@ export default function ClipboardPage() {
   const [deletingSelected, setDeletingSelected] = useState(false);
 
   const categoriesScrollRef = useRef<HTMLDivElement>(null);
-  const clipboardListRef = useRef<HTMLDivElement>(null);
   const searchEffectInitializedRef = useRef(false);
 
   useEffect(() => {
@@ -254,86 +236,7 @@ export default function ClipboardPage() {
     [cancelClipboardSelection, setCategory, loadRecords],
   );
 
-  const sensors = useSensors(
-    useSensor(PointerSensor, { activationConstraint: { distance: 4 } }),
-    useSensor(KeyboardSensor)
-  );
-
-  const isFiltered = category !== "all" || search.trim().length > 0;
-
-  const [activeId, setActiveId] = useState<string | null>(null);
-  const [previewRecords, setPreviewRecords] = useState<typeof records | null>(null);
-  const [activeOverlayWidth, setActiveOverlayWidth] = useState<number | null>(null);
-  const lastPreviewMoveRef = useRef<string | null>(null);
-
-  const handleDragStart = useCallback((event: DragStartEvent) => {
-    if (isSelecting) return;
-    const id = String(event.active.id);
-    setActiveId(id);
-    setActiveOverlayWidth(clipboardListRef.current?.getBoundingClientRect().width ?? null);
-    lastPreviewMoveRef.current = null;
-    setPreviewRecords(isFiltered ? null : filtered);
-  }, [filtered, isFiltered, isSelecting]);
-
-  const handleDragCancel = useCallback(() => {
-    setActiveId(null);
-    setActiveOverlayWidth(null);
-    setPreviewRecords(null);
-    lastPreviewMoveRef.current = null;
-  }, []);
-
-  const handleDragOver = useCallback(
-    (event: DragOverEvent) => {
-      if (isSelecting || isFiltered || !event.over) return;
-
-      const active = String(event.active.id);
-      const over = String(event.over.id);
-      const previewMoveKey = `${active}:${over}`;
-
-      if (lastPreviewMoveRef.current === previewMoveKey) return;
-      lastPreviewMoveRef.current = previewMoveKey;
-
-      setPreviewRecords((current) => {
-        const base = current ?? filtered;
-        const next = getDragPreviewOrder(base, active, over);
-        return next === base ? current : next;
-      });
-    },
-    [filtered, isFiltered, isSelecting],
-  );
-
-  const handleDragEnd = useCallback(
-    () => {
-      const finalPreview = previewRecords;
-      setActiveId(null);
-      setActiveOverlayWidth(null);
-      setPreviewRecords(null);
-      lastPreviewMoveRef.current = null;
-
-      if (isSelecting || isFiltered) return;
-
-      const nextIds = getChangedOrderIds(filtered, finalPreview);
-      if (!nextIds) return;
-
-      useClipboardStore.getState().reorderRecords(nextIds);
-    },
-    [filtered, isFiltered, isSelecting, previewRecords],
-  );
-
-  const renderedRecords = previewRecords ?? filtered;
-  const activeRecord = activeId ? renderedRecords.find(r => r.id === activeId) : null;
-  const dragOverlay = (
-    <DragOverlay dropAnimation={null} style={{ width: activeOverlayWidth ?? undefined }}>
-      {activeRecord ? (
-        <ClipboardCardDragPreview
-          record={activeRecord}
-          getTypeLabel={getTypeLabel}
-          width={activeOverlayWidth}
-          search={search}
-        />
-      ) : null}
-    </DragOverlay>
-  );
+  // 手动拖拽排序已移除：列表顺序由内容排序偏好（最近使用 / 最多使用）决定。
 
   return (
     <>
@@ -431,32 +334,26 @@ export default function ClipboardPage() {
         <div
           className="clipboard-list"
           ref={(el) => {
-            clipboardListRef.current = el;
             backToTop.containerRef(el);
           }}
         >
-          <DndContext sensors={sensors} collisionDetection={closestCenter} onDragStart={handleDragStart} onDragOver={handleDragOver} onDragEnd={handleDragEnd} onDragCancel={handleDragCancel} modifiers={[restrictToVerticalAxis]}>
-            <SortableContext items={renderedRecords.map(r => r.id)} strategy={verticalListSortingStrategy}>
-              {renderedRecords.map((r, i) => (
-                <ClipboardCard
-                  key={r.id}
-                  record={r}
-                  index={i}
-                  getTypeLabel={getTypeLabel}
-                  pasteLeftClick={pasteLeftClick}
-                  search={search}
-                  onPasteNormal={handlePaste}
-                  onPasteTerminal={handlePasteTerminal}
-                  onDelete={handleDelete}
-                  onMoveToTop={(id) => void moveRecordsToTop([id])}
-                  selectionMode={isSelecting}
-                  selected={isSelected(r.id)}
-                  onToggleSelected={toggleSelected}
-                />
-              ))}
-            </SortableContext>
-            {createPortal(dragOverlay, document.body)}
-          </DndContext>
+          {filtered.map((r, i) => (
+            <ClipboardCard
+              key={r.id}
+              record={r}
+              index={i}
+              getTypeLabel={getTypeLabel}
+              pasteLeftClick={pasteLeftClick}
+              search={search}
+              onPasteNormal={handlePaste}
+              onPasteTerminal={handlePasteTerminal}
+              onDelete={handleDelete}
+              onMoveToTop={(id) => void moveRecordsToTop([id])}
+              selectionMode={isSelecting}
+              selected={isSelected(r.id)}
+              onToggleSelected={toggleSelected}
+            />
+          ))}
           {hasMore && filtered.length > 0 && (
             <button
               className="clipboard-load-more"

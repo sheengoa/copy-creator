@@ -25,6 +25,7 @@ export default function SettingsContent({ embedded }: Props) {
   const { setShortcut: setClipboardCreateShortcut } = ccShortcut;
   const [localAutostart, setLocalAutostart] = useState(settings.autostartEnabled);
   const [localPasteLeftClick, setLocalPasteLeftClick] = useState<"normal" | "terminal">(settings.pasteLeftClick);
+  const [localContentSort, setLocalContentSort] = useState(settings.contentSort);
   const [recording, setRecording] = useState(false);
   const recordingRef = useRef(false);
   const keydownHandlerRef = useRef<((e: KeyboardEvent) => void) | null>(null);
@@ -44,6 +45,7 @@ export default function SettingsContent({ embedded }: Props) {
     radialMenuScale: number;
     autostartEnabled: boolean;
     pasteLeftClick: "normal" | "terminal";
+    contentSort: "recent" | "count";
   } | null>(null);
 
   useEffect(() => {
@@ -62,6 +64,7 @@ export default function SettingsContent({ embedded }: Props) {
       radialMenuScale: settings.radialMenuScale,
       autostartEnabled: settings.autostartEnabled,
       pasteLeftClick: settings.pasteLeftClick,
+      contentSort: settings.contentSort,
     };
     const prev = syncedSettingsRef.current;
 
@@ -74,6 +77,7 @@ export default function SettingsContent({ embedded }: Props) {
     if (!prev || prev.radialMenuScale !== next.radialMenuScale) setLocalRadialMenuScale(next.radialMenuScale);
     if (!prev || prev.autostartEnabled !== next.autostartEnabled) setLocalAutostart(next.autostartEnabled);
     if (!prev || prev.pasteLeftClick !== next.pasteLeftClick) setLocalPasteLeftClick(next.pasteLeftClick);
+    if (!prev || prev.contentSort !== next.contentSort) setLocalContentSort(next.contentSort);
 
     syncedSettingsRef.current = next;
   }, [
@@ -86,6 +90,7 @@ export default function SettingsContent({ embedded }: Props) {
     settings.radialMenuScale,
     settings.autostartEnabled,
     settings.pasteLeftClick,
+    settings.contentSort,
     setClipboardCreateShortcut,
   ]);
 
@@ -315,6 +320,11 @@ export default function SettingsContent({ embedded }: Props) {
         setLocalLang={setLocalLang}
         localAutostart={localAutostart}
         setLocalAutostart={setLocalAutostart}
+        localContentSort={localContentSort}
+        setLocalContentSort={(mode) => {
+          setLocalContentSort(mode);
+          settings.setContentSort(mode);
+        }}
       />
 
       <ShortcutSection

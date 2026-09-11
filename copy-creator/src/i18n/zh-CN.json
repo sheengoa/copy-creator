@@ -51,7 +51,11 @@
     "radialSection": "径向菜单",
     "radialMenuSize": "菜单尺寸",
     "radialMenuSizeReset": "默认",
-    "radialMenuSizeHint": "按显示器分辨率调整径向菜单整体大小，始终保持原有比例；默认 100%（420×650），保存后下次唤起生效。"
+    "radialMenuSizeHint": "按显示器分辨率调整径向菜单整体大小，始终保持原有比例；默认 100%（420×650），保存后下次唤起生效。",
+    "contentListSort": "内容列表排序",
+    "sortRecent": "最近使用",
+    "sortCount": "最多使用",
+    "contentSortHint": "作用于剪切板、资源与快捷输入的「全部」列表及径向菜单；进入分组后按分组原有顺序展示。"
   },
   "clipboard": {
     "search": "搜索剪切板...",
@@ -258,7 +262,8 @@
     "justNow": "刚刚",
     "minutesAgo": "{{count}} 分钟前",
     "hoursAgo": "{{count}} 小时前",
-    "daysAgo": "{{count}} 天前"
+    "daysAgo": "{{count}} 天前",
+    "usageCount": "{{count}} 次"
   },
   "radialMenu": {
     "empty": "暂无内容",

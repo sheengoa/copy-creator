@@ -51,7 +51,11 @@
     "radialSection": "Radial Menu",
     "radialMenuSize": "Menu Size",
     "radialMenuSizeReset": "Default",
-    "radialMenuSizeHint": "Scale the whole radial menu to fit your display while keeping its aspect ratio. Default 100% (420×650); applies the next time the menu pops up."
+    "radialMenuSizeHint": "Scale the whole radial menu to fit your display while keeping its aspect ratio. Default 100% (420×650); applies the next time the menu pops up.",
+    "contentListSort": "Content list order",
+    "sortRecent": "Recently used",
+    "sortCount": "Most used",
+    "contentSortHint": "Applies to the \"all\" lists of clipboard, resources and quick input, and the radial menu. Group views keep their own order."
   },
   "clipboard": {
     "search": "Search clipboard...",
@@ -261,7 +265,9 @@
     "hoursAgo_one": "{{count}} h ago",
     "hoursAgo_other": "{{count}} h ago",
     "daysAgo_one": "{{count}} d ago",
-    "daysAgo_other": "{{count}} d ago"
+    "daysAgo_other": "{{count}} d ago",
+    "usageCount_one": "{{count}} use",
+    "usageCount_other": "{{count}} uses"
   },
   "radialMenu": {
     "empty": "No items",

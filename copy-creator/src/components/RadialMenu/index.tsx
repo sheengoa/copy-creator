@@ -142,6 +142,8 @@ interface RadialItem {
   sourceLabel?: string;
   /** 「全部」视图的使用时间标签（相对时间或「未使用过」）；有值时替代 createdAt 展示。 */
   usedAtLabel?: string;
+  /** 使用次数：「最多使用」模式下条目尾部展示「N 次」。 */
+  useCount?: number;
   /** 分隔线伪条目（「全部」视图的未使用分区），不可悬停、不可粘贴。 */
   isDivider?: boolean;
 }
@@ -1484,6 +1486,7 @@ export default function RadialMenu() {
   const phraseGroups = usePhraseStore((s) => s.groups);
   const phrases = usePhraseStore((s) => s.phrases);
   const pasteLeftClick = useSettingsStore((s) => s.pasteLeftClick);
+  const countSortOn = useSettingsStore((s) => s.contentSort === "count");
 
   const filteredRecords = clipboardCategory === "all"
     ? records.filter((r) => !isResourceRecord(r))
@@ -1518,6 +1521,7 @@ export default function RadialMenu() {
         resourcePath,
         resourceTitle,
         resourceSummary,
+        useCount: r.use_count,
       };
     }
     return {
@@ -1541,6 +1545,7 @@ export default function RadialMenu() {
       dragKind: getClipboardRadialDragKind(r.type, r.has_images),
       dragSource: "clipboard",
       dragPath: r.drag_path,
+      useCount: r.use_count,
     };
   };
 
@@ -1559,6 +1564,7 @@ export default function RadialMenu() {
     dragKind: getPhraseRadialDragKind(p.input_type),
     dragSource: "phrase",
     dragPath: p.input_type === "file" ? p.content : undefined,
+    useCount: p.use_count,
   });
 
   // 「全部」视图：跨分组聚合，条目带来源分组标签与相对使用时间，
@@ -1920,8 +1926,8 @@ export default function RadialMenu() {
                     )}
                   </div>
                   {(item.isResource
-                    ? (item.resourceTitle || item.createdAt || item.usedAtLabel || item.previewAvailable)
-                    : (item.createdAt || item.usedAtLabel || item.title || item.previewAvailable)) && (
+                    ? (item.resourceTitle || item.createdAt || item.usedAtLabel || item.useCount != null || item.previewAvailable)
+                    : (item.createdAt || item.usedAtLabel || item.useCount != null || item.title || item.previewAvailable)) && (
                     <div className="radial-menu-item-footer">
                       <div className="radial-menu-item-meta">
                         {item.isResource && item.resourceTitle && (
@@ -1931,6 +1937,11 @@ export default function RadialMenu() {
                           <span className="radial-menu-item-time">
                             {item.usedAtLabel
                               ?? (item.createdAt ? formatTime(item.createdAt) : "")}
+                          </span>
+                        )}
+                        {countSortOn && item.useCount != null && (
+                          <span className="usage-count-badge">
+                            {t("common.usageCount", { count: item.useCount })}
                           </span>
                         )}
                         {!item.isResource && item.title && (

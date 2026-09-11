@@ -1,11 +1,66 @@
 import { create } from "zustand";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
+import { useSettingsStore } from "./settingsStore";
 import { isResourceRecord } from "../utils/clipboardRecord";
 import { sortByIdOrder } from "../utils/reorder";
 import { getResourcePath, isFileBackedTextResource } from "../pages/ResourcePage/resourceUtils";
 
 type UnlistenFn = () => void;
+
+type RecordsSetter = (
+  partial: Partial<{ records: ClipboardRecord[] }>,
+) => void;
+
+/** 粘贴成功的即时反馈：最近使用模式置顶；最多使用模式计数 +1 并按
+ *  次数重排（并列按最近使用）。时间排序已移除，此处不再区分。 */
+function applyPasteFeedback(
+  records: ClipboardRecord[],
+  recordId: string,
+  set: RecordsSetter,
+) {
+  const index = records.findIndex((r) => r.id === recordId);
+  if (index === -1) return;
+  const target: ClipboardRecord = { ...records[index] };
+  const rest = records.filter((_, i) => i !== index);
+  if (useSettingsStore.getState().contentSort === "count") {
+    target.use_count = (target.use_count ?? 0) + 1;
+    const updated = [target, ...rest];
+    updated.sort((a, b) => {
+      const aUsed = (a.use_count ?? 0) > 0 ? 1 : 0;
+      const bUsed = (b.use_count ?? 0) > 0 ? 1 : 0;
+      if (aUsed !== bUsed) return bUsed - aUsed;
+      if ((b.use_count ?? 0) !== (a.use_count ?? 0)) {
+        return (b.use_count ?? 0) - (a.use_count ?? 0);
+      }
+      const aKey = usageFallbackMs(a);
+      const bKey = usageFallbackMs(b);
+      return bKey - aKey;
+    });
+    set({ records: updated });
+    return;
+  }
+  set({ records: [target, ...rest] });
+}
+
+/** 排序偏好请求参数：仅「全部」视图生效——资源进入具体分组（含未分组）
+ *  即回到时间排序，不带 sortBy。 */
+function contentSortArg(
+  activeCategory: ClipType,
+  activeResourceGroup: string | null | undefined,
+): { sortBy: string } | Record<string, never> {
+  if (activeCategory === "resources" && activeResourceGroup !== null) {
+    return {};
+  }
+  return { sortBy: useSettingsStore.getState().contentSort };
+}
+
+/** 最近使用的兜底时间键：创建时间（与后端 MAX(touched_ms, sort_order) 的
+ *  本地近似——触点毫秒仅本会话内粘贴的记录才有，取值即当前时间）。 */
+function usageFallbackMs(record: ClipboardRecord): number {
+  const parsed = new Date(record.created_at).getTime();
+  return Number.isNaN(parsed) ? 0 : parsed;
+}
 
 export const CLIP_TYPES = ["all", "text", "image", "link", "file", "resources"] as const;
 export type ClipType = (typeof CLIP_TYPES)[number];
@@ -44,6 +99,8 @@ interface ClipboardRecord {
   resource_file_size?: number;
   resource_managed?: boolean;
   resource_note?: string | null;
+  /** 使用次数（粘贴/拖出成功自增），「最多使用」排序与次数徽标展示。 */
+  use_count?: number;
 }
 
 const PAGE_SIZE = 120;
@@ -80,7 +137,6 @@ interface ClipboardState {
   deleteRecord: (id: string) => Promise<void>;
   pasteRecord: (record: ClipboardRecord) => Promise<boolean>;
   pasteRecordTerminal: (record: ClipboardRecord) => Promise<boolean>;
-  reorderRecords: (ids: string[]) => Promise<void>;
   moveRecordsToTop: (ids: string[]) => Promise<void>;
   getRecordContent: (record: ClipboardRecord) => Promise<string>;
   getThumbnail: (record: Pick<ClipboardRecord, "id" | "content">) => Promise<string>;
@@ -231,6 +287,13 @@ export const useClipboardStore = create<ClipboardState>((set, get) => ({
       unlisteners.push(fn);
     });
 
+    listen<{ sortBy: string }>("content-sort-changed", () => {
+      // 排序偏好变化：按新排序重载当前视图（主窗口与径向菜单实例各自收到）。
+      void get().loadRecords(false);
+    }).then((fn) => {
+      unlisteners.push(fn);
+    });
+
     listen("clipboard-cleared", () => {
       if (get().category === "resources") return;
       recordsLoadGeneration++;
@@ -283,6 +346,7 @@ export const useClipboardStore = create<ClipboardState>((set, get) => ({
         limit: PAGE_SIZE,
         offset,
         category: cat,
+        ...contentSortArg(activeCategory, activeResourceGroup),
         ...(activeCategory === "resources" && activeResourceGroup !== null
           ? { resourceGroup: activeResourceGroup }
           : {}),
@@ -341,6 +405,7 @@ export const useClipboardStore = create<ClipboardState>((set, get) => ({
           limit: PAGE_SIZE,
           offset,
           category,
+          ...contentSortArg(activeCategory, activeResourceGroup),
           ...(activeCategory === "resources" && activeResourceGroup !== null
             ? { resourceGroup: activeResourceGroup }
             : {}),
@@ -373,6 +438,7 @@ export const useClipboardStore = create<ClipboardState>((set, get) => ({
           limit: PAGE_SIZE,
           offset,
           category,
+          ...contentSortArg(activeCategory, activeResourceGroup),
           ...(activeCategory === "resources" && activeResourceGroup !== null
             ? { resourceGroup: activeResourceGroup }
             : {}),
@@ -461,6 +527,7 @@ export const useClipboardStore = create<ClipboardState>((set, get) => ({
       if (record.has_images) {
         await invoke("paste_stash_record", { id: record.id, terminal: false });
         touchClipboardUsage([record.id]);
+        applyPasteFeedback(get().records, record.id, set);
         return true;
       }
       const content = await getFullContent(record);
@@ -473,6 +540,7 @@ export const useClipboardStore = create<ClipboardState>((set, get) => ({
             // 等）时回退为文件粘贴，保持不劣于旧行为。
             await invoke("paste_text_file", { path: getResourcePath(record), terminal: false });
             touchClipboardUsage([record.id]);
+            applyPasteFeedback(get().records, record.id, set);
             return true;
           } catch (error) {
             console.warn("文本资源按内容粘贴失败，回退为文件粘贴:", error);
@@ -483,6 +551,7 @@ export const useClipboardStore = create<ClipboardState>((set, get) => ({
         await invoke("paste_text", { text: content });
       }
       touchClipboardUsage([record.id]);
+      applyPasteFeedback(get().records, record.id, set);
       return true;
     } catch (e) {
       console.error("Paste failed:", e);
@@ -495,6 +564,7 @@ export const useClipboardStore = create<ClipboardState>((set, get) => ({
       if (record.has_images) {
         await invoke("paste_stash_record", { id: record.id, terminal: true });
         touchClipboardUsage([record.id]);
+        applyPasteFeedback(get().records, record.id, set);
         return true;
       }
       const content = await getFullContent(record);
@@ -505,6 +575,7 @@ export const useClipboardStore = create<ClipboardState>((set, get) => ({
           try {
             await invoke("paste_text_file", { path: getResourcePath(record), terminal: true });
             touchClipboardUsage([record.id]);
+            applyPasteFeedback(get().records, record.id, set);
             return true;
           } catch (error) {
             console.warn("文本资源按内容粘贴失败，回退为文件粘贴:", error);
@@ -515,21 +586,11 @@ export const useClipboardStore = create<ClipboardState>((set, get) => ({
         await invoke("paste_text_terminal", { text: content });
       }
       touchClipboardUsage([record.id]);
+      applyPasteFeedback(get().records, record.id, set);
       return true;
     } catch (e) {
       console.error("Terminal paste failed:", e);
       return false;
-    }
-  },
-
-  reorderRecords: async (ids: string[]) => {
-    set((state) => ({ records: sortByIdOrder(state.records, ids) }));
-    try {
-      await invoke("reorder_clipboard_records", { ids });
-      get().loadRecords();
-    } catch (e) {
-      console.error("Failed to reorder clipboard records:", e);
-      get().loadRecords();
     }
   },
 

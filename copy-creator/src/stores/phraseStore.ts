@@ -1,6 +1,7 @@
 import { create } from "zustand";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
+import { useSettingsStore } from "./settingsStore";
 import type { Phrase, PhraseGroup } from "../types";
 import { sortByIdOrder } from "../utils/reorder";
 import {
@@ -117,6 +118,13 @@ export const usePhraseStore = create<PhraseState>()((set, get) => {
       get().loadGroups();
     });
 
+    listen("content-sort-changed", () => {
+      // 排序偏好变化：「全部」视图按新排序重载（分组视图手动排序不受影响）。
+      if (get().selectedGroupId === ALL_PHRASES_GROUP_ID) {
+        void get().loadPhrases(ALL_PHRASES_GROUP_ID);
+      }
+    });
+
     get().loadGroups();
   },
 
@@ -125,7 +133,9 @@ export const usePhraseStore = create<PhraseState>()((set, get) => {
     try {
       // 「全部」走跨分组聚合查询：附带分组名与最近使用时间，供来源标签展示。
       const phrases = groupId === ALL_PHRASES_GROUP_ID
-        ? await invoke<Phrase[]>("get_all_phrases", {})
+        ? await invoke<Phrase[]>("get_all_phrases", {
+            sortBy: useSettingsStore.getState().contentSort,
+          })
         : await invoke<Phrase[]>("get_phrases", { groupId });
       set({ phrases, selectedGroupId: groupId });
     } catch (e) {
@@ -275,10 +285,29 @@ export const usePhraseStore = create<PhraseState>()((set, get) => {
       set((s) => {
         if (s.selectedGroupId !== ALL_PHRASES_GROUP_ID) return {};
         const target = s.phrases.find((p) => p.id === phrase.id);
-        if (!target || s.phrases[0]?.id === phrase.id) return {};
-        return {
-          phrases: [target, ...s.phrases.filter((p) => p.id !== phrase.id)],
-        };
+        if (!target) return {};
+        const rest = s.phrases.filter((p) => p.id !== phrase.id);
+        if (useSettingsStore.getState().contentSort === "count") {
+          // 最多使用模式：计数 +1 并按次数重排（并列按最近使用）。
+          const bumped: Phrase = {
+            ...target,
+            use_count: (target.use_count ?? 0) + 1,
+            last_used_at: new Date().toISOString(),
+          };
+          const updated = [bumped, ...rest];
+          updated.sort((a, b) => {
+            const aUsed = (a.use_count ?? 0) > 0 ? 1 : 0;
+            const bUsed = (b.use_count ?? 0) > 0 ? 1 : 0;
+            if (aUsed !== bUsed) return bUsed - aUsed;
+            if ((b.use_count ?? 0) !== (a.use_count ?? 0)) {
+              return (b.use_count ?? 0) - (a.use_count ?? 0);
+            }
+            return (b.last_used_at ?? "").localeCompare(a.last_used_at ?? "");
+          });
+          return { phrases: updated };
+        }
+        if (s.phrases[0]?.id === phrase.id) return {};
+        return { phrases: [target, ...rest] };
       });
     } catch (e) {
       console.error("Paste failed:", e);
@@ -301,10 +330,29 @@ export const usePhraseStore = create<PhraseState>()((set, get) => {
       set((s) => {
         if (s.selectedGroupId !== ALL_PHRASES_GROUP_ID) return {};
         const target = s.phrases.find((p) => p.id === phrase.id);
-        if (!target || s.phrases[0]?.id === phrase.id) return {};
-        return {
-          phrases: [target, ...s.phrases.filter((p) => p.id !== phrase.id)],
-        };
+        if (!target) return {};
+        const rest = s.phrases.filter((p) => p.id !== phrase.id);
+        if (useSettingsStore.getState().contentSort === "count") {
+          // 最多使用模式：计数 +1 并按次数重排（并列按最近使用）。
+          const bumped: Phrase = {
+            ...target,
+            use_count: (target.use_count ?? 0) + 1,
+            last_used_at: new Date().toISOString(),
+          };
+          const updated = [bumped, ...rest];
+          updated.sort((a, b) => {
+            const aUsed = (a.use_count ?? 0) > 0 ? 1 : 0;
+            const bUsed = (b.use_count ?? 0) > 0 ? 1 : 0;
+            if (aUsed !== bUsed) return bUsed - aUsed;
+            if ((b.use_count ?? 0) !== (a.use_count ?? 0)) {
+              return (b.use_count ?? 0) - (a.use_count ?? 0);
+            }
+            return (b.last_used_at ?? "").localeCompare(a.last_used_at ?? "");
+          });
+          return { phrases: updated };
+        }
+        if (s.phrases[0]?.id === phrase.id) return {};
+        return { phrases: [target, ...rest] };
       });
     } catch (e) {
       console.error("Terminal paste failed:", e);

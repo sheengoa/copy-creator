@@ -12,11 +12,12 @@ import {
   useSensor,
   useSensors,
 } from "@dnd-kit/core";
-import type { DragEndEvent, DragOverEvent, DragStartEvent } from "@dnd-kit/core";
+import type { DragEndEvent, DragStartEvent } from "@dnd-kit/core";
 import { SortableContext, arrayMove, useSortable, verticalListSortingStrategy } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
 import { restrictToVerticalAxis } from "@dnd-kit/modifiers";
 import { useClipboardStore } from "../stores/clipboardStore";
+import { useSettingsStore } from "../stores/settingsStore";
 import { useMultiSelect } from "../hooks/useMultiSelect";
 import { Icons } from "../components/Icons";
 import IosSelect from "../components/IosSelect";
@@ -27,11 +28,7 @@ import { BackToTopButton } from "../components/BackToTop";
 import { useBackToTop } from "../hooks/useBackToTop";
 import ResourceDetailPage from "./ResourcePage/ResourceDetailPage";
 import ResourceGroupChips from "./ResourcePage/ResourceGroupChips";
-import { ResourceCard, ResourceCardDragPreview } from "./ResourcePage/ResourceCard";
-import {
-  getChangedOrderIds,
-  getDragPreviewOrder,
-} from "../utils/reorderPreview";
+import { ResourceCard } from "./ResourcePage/ResourceCard";
 import {
   computeResourceColumnCount,
   findResourceFolder,
@@ -52,7 +49,6 @@ import {
 import ResourceMoveDialog from "./ResourcePage/ResourceMoveDialog";
 import { isResourceRecord } from "../utils/clipboardRecord";
 
-type ResourceSortOrder = "newest" | "oldest";
 type ResourceGroupDialogState = {
   mode: "create" | "rename";
   parentPath?: string;
@@ -94,11 +90,10 @@ export default function ResourcePage() {
     deleteRecord,
     deleteRecords,
     pasteRecord,
-    reorderRecords,
   } = useClipboardStore();
+  const contentSort = useSettingsStore((s) => s.contentSort);
 
   const [typeFilter, setTypeFilter] = useState<ResourceTypeFilter>("all");
-  const [sortOrder, setSortOrder] = useState<ResourceSortOrder>("newest");
   const [detailRecordId, setDetailRecordId] = useState<string | null>(null);
   const [detailRecord, setDetailRecord] = useState<ClipboardRecord | null>(null);
   const detailHistoryRef = useRef(false);
@@ -139,9 +134,6 @@ export default function ResourcePage() {
     onConfirm: () => void | Promise<void>;
   } | null>(null);
 
-  const [dragRecords, setDragRecords] = useState<ClipboardRecord[] | null>(null);
-  const [activeDragId, setActiveDragId] = useState<string | null>(null);
-  const lastDragMoveRef = useRef<string | null>(null);
   const searchEffectInitializedRef = useRef(false);
   const selectAllRequestRef = useRef(0);
 
@@ -159,6 +151,8 @@ export default function ResourcePage() {
     (kind: ResourceTypeFilter) => kind === "all" ? t("resources.typeAll") : typeLabels[kind],
     [t, typeLabels],
   );
+  // 分组浏览的本地排序（最新/最旧）。「全部」视图按内容排序偏好展示，控件隐藏。
+  const [sortOrderLocal, setSortOrderLocal] = useState<"newest" | "oldest">("newest");
   const sortOptions = useMemo(() => ([
     { value: "newest", label: t("resources.sortNewest") },
     { value: "oldest", label: t("resources.sortOldest") },
@@ -277,13 +271,14 @@ export default function ResourcePage() {
       isResourceRecord(record)
       && matchesResourceType(record, typeFilter)
     ));
-    if (sortOrder === "oldest") {
+    // 分组浏览保留「最新/最旧」本地排序；「全部」视图按内容排序偏好由后端排序。
+    if (resourceGroup !== null && sortOrderLocal === "oldest") {
       return [...next].sort((left, right) => (
         new Date(left.created_at).getTime() - new Date(right.created_at).getTime()
       ));
     }
     return next;
-  }, [records, sortOrder, typeFilter]);
+  }, [records, typeFilter, resourceGroup, sortOrderLocal]);
 
   const visibleIds = useMemo(
     () => filteredRecords.map((record) => record.id),
@@ -319,18 +314,7 @@ export default function ResourcePage() {
     setSelectingAll(false);
   }, [isSelecting, selectingAll]);
 
-  const reorderEnabled = (
-    !isSelecting
-    && !detailRecordId
-    && !search.trim()
-    && resourceGroup === null
-    && typeFilter === "all"
-    && sortOrder === "newest"
-    && filteredRecords.length > 1
-    && filteredRecords.every((record) => record.resource_managed !== false)
-  );
-  const renderedRecords = dragRecords ?? filteredRecords;
-  const columns = splitResourceColumns(renderedRecords, columnCount);
+  const columns = splitResourceColumns(filteredRecords, columnCount);
 
   // 列数随列表宽度动态变化，窗口缩放时实时跟随（最少两列）。
   useEffect(() => {
@@ -345,55 +329,9 @@ export default function ResourcePage() {
   // 统一的「回到顶部」：批量选择模式下隐藏。
   const backToTop = useBackToTop({ enabled: !isSelecting });
 
-  const activeDragRecord = activeDragId
-    ? renderedRecords.find((record) => record.id === activeDragId)
-    : null;
-
-  useEffect(() => {
-    setDragRecords(null);
-    setActiveDragId(null);
-    lastDragMoveRef.current = null;
-  }, [filteredRecords]);
-
-  const sensors = useSensors(
-    useSensor(PointerSensor, { activationConstraint: { distance: 4 } }),
-  );
   const manageRowSensors = useSensors(
     useSensor(PointerSensor, { activationConstraint: { distance: 4 } }),
   );
-
-  const handleDragStart = useCallback((event: DragStartEvent) => {
-    if (!reorderEnabled) return;
-    setActiveDragId(String(event.active.id));
-    setDragRecords(filteredRecords);
-    lastDragMoveRef.current = null;
-  }, [filteredRecords, reorderEnabled]);
-
-  const handleDragOver = useCallback((event: DragOverEvent) => {
-    if (!reorderEnabled || !event.over) return;
-    const active = String(event.active.id);
-    const over = String(event.over.id);
-    const moveKey = `${active}:${over}`;
-    if (lastDragMoveRef.current === moveKey) return;
-    lastDragMoveRef.current = moveKey;
-    setDragRecords((current) => getDragPreviewOrder(current ?? filteredRecords, active, over));
-  }, [filteredRecords, reorderEnabled]);
-
-  const handleDragCancel = useCallback(() => {
-    setActiveDragId(null);
-    setDragRecords(null);
-    lastDragMoveRef.current = null;
-  }, []);
-
-  const handleDragEnd = useCallback((event: DragEndEvent) => {
-    const finalRecords = dragRecords;
-    setActiveDragId(null);
-    setDragRecords(null);
-    lastDragMoveRef.current = null;
-    if (!reorderEnabled || !finalRecords || !event.over) return;
-    const nextIds = getChangedOrderIds(filteredRecords, finalRecords);
-    if (nextIds) void reorderRecords(nextIds);
-  }, [dragRecords, filteredRecords, reorderEnabled, reorderRecords]);
 
   const handleSearchChange = useCallback((value: string) => {
     cancelResourceSelection();
@@ -403,11 +341,6 @@ export default function ResourcePage() {
   const handleSelectType = useCallback((next: ResourceTypeFilter) => {
     cancelResourceSelection();
     setTypeFilter(next);
-  }, [cancelResourceSelection]);
-
-  const handleSortChange = useCallback((value: string) => {
-    cancelResourceSelection();
-    setSortOrder(value as ResourceSortOrder);
   }, [cancelResourceSelection]);
 
   const resourceFolderGroups = useMemo(
@@ -1056,14 +989,17 @@ export default function ResourcePage() {
             </button>
           ))}
         </div>
-        <div className="resource-sort-control">
-          <span>{t("resources.sort")}</span>
-          <IosSelect
-            value={sortOrder}
-            options={sortOptions}
-            onChange={handleSortChange}
-          />
-        </div>
+        {/* 「全部」视图按内容排序偏好展示，最新/最旧仅分组浏览有意义。 */}
+        {resourceGroup !== null && (
+          <div className="resource-sort-control">
+            <span>{t("resources.sort")}</span>
+            <IosSelect
+              value={sortOrderLocal}
+              options={sortOptions}
+              onChange={(value) => setSortOrderLocal(value as "newest" | "oldest")}
+            />
+          </div>
+        )}
       </div>
 
       {isSelecting && (
@@ -1372,53 +1308,33 @@ export default function ResourcePage() {
             }}
             data-resource-scroll
           >
-            <DndContext
-              sensors={sensors}
-              collisionDetection={closestCenter}
-              onDragStart={handleDragStart}
-              onDragOver={handleDragOver}
-              onDragEnd={handleDragEnd}
-              onDragCancel={handleDragCancel}
+            {/* 手动拖拽排序已移除：「全部分组」按排序偏好，分组浏览按时间序。 */}
+            <div
+              className="resource-columns"
+              style={{ gridTemplateColumns: `repeat(${columnCount}, minmax(0, 1fr))` }}
             >
-              <div
-                className="resource-columns"
-                style={{ gridTemplateColumns: `repeat(${columnCount}, minmax(0, 1fr))` }}
-              >
-                {columns.map((column, columnIndex) => (
-                  <div className="resource-column" key={`column-${columnIndex}`}>
-                    <SortableContext items={column.map((record) => record.id)}>
-                      {column.map((record) => (
-                        <div className="resource-item" key={record.id}>
-                          <ResourceCard
-                            record={record}
-                            search={search}
-                            typeLabel={(kind) => typeLabels[kind]}
-                            selectionMode={isSelecting}
-                            selected={isSelected(record.id)}
-                            reorderEnabled={reorderEnabled}
-                            onOpenDetail={openDetail}
-                            onCopy={handleCopy}
-                            onDelete={handleDeleteRecord}
-                            onToggleSelected={toggleSelected}
-                            onMove={(moveRecord) => openResourceMove([moveRecord.id])}
-                          />
-                        </div>
-                      ))}
-                    </SortableContext>
-                  </div>
-                ))}
-              </div>
-              {activeDragRecord && createPortal(
-                <DragOverlay dropAnimation={null}>
-                  <ResourceCardDragPreview
-                    record={activeDragRecord}
-                    search={search}
-                    typeLabel={(kind) => typeLabels[kind]}
-                  />
-                </DragOverlay>,
-                document.body,
-              )}
-            </DndContext>
+              {columns.map((column, columnIndex) => (
+                <div className="resource-column" key={`column-${columnIndex}`}>
+                  {column.map((record) => (
+                    <div className="resource-item" key={record.id}>
+                      <ResourceCard
+                        record={record}
+                        search={search}
+                        typeLabel={(kind) => typeLabels[kind]}
+                        selectionMode={isSelecting}
+                        selected={isSelected(record.id)}
+                        showUsageBadge={contentSort === "count" && resourceGroup === null}
+                        onOpenDetail={openDetail}
+                        onCopy={handleCopy}
+                        onDelete={handleDeleteRecord}
+                        onToggleSelected={toggleSelected}
+                        onMove={(moveRecord) => openResourceMove([moveRecord.id])}
+                      />
+                    </div>
+                  ))}
+                </div>
+              ))}
+            </div>
             {hasMore && (
               <button type="button" className="clipboard-load-more" onClick={() => void loadRecords(true, "resources", resourceGroup)}>
                 {t("resources.loadMore")}

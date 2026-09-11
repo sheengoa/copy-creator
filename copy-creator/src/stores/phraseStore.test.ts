@@ -208,7 +208,7 @@ describe("phraseStore all-phrases view", () => {
 
     await usePhraseStore.getState().loadPhrases(ALL_PHRASES_GROUP_ID);
 
-    expect(invokeMock).toHaveBeenCalledWith("get_all_phrases", {});
+    expect(invokeMock).toHaveBeenCalledWith("get_all_phrases", { sortBy: "recent" });
     expect(usePhraseStore.getState().phrases).toEqual(allPhrases);
     expect(usePhraseStore.getState().selectedGroupId).toBe(ALL_PHRASES_GROUP_ID);
   });
@@ -223,7 +223,7 @@ describe("phraseStore all-phrases view", () => {
 
     await usePhraseStore.getState().loadGroups();
 
-    expect(invokeMock).toHaveBeenCalledWith("get_all_phrases", {});
+    expect(invokeMock).toHaveBeenCalledWith("get_all_phrases", { sortBy: "recent" });
     expect(usePhraseStore.getState().selectedGroupId).toBe(ALL_PHRASES_GROUP_ID);
   });
 
@@ -239,5 +239,28 @@ describe("phraseStore all-phrases view", () => {
     usePhraseStore.setState({ phrases: [first, second], selectedGroupId: "group-1" });
     await usePhraseStore.getState().pastePhrase(second);
     expect(usePhraseStore.getState().phrases.map((p) => p.id)).toEqual(["a", "b"]);
+  });
+
+  it("bumps usage count and reorders by count in the count sort mode", async () => {
+    const { useSettingsStore } = await import("./settingsStore");
+    const low = {
+      ...textPhrase("a"),
+      use_count: 1,
+      last_used_at: "2026-09-11T00:00:00Z",
+    };
+    const high = {
+      ...textPhrase("b"),
+      use_count: 5,
+      last_used_at: "2026-09-10T00:00:00Z",
+    };
+    useSettingsStore.setState({ contentSort: "count" });
+    usePhraseStore.setState({ phrases: [low, high], selectedGroupId: ALL_PHRASES_GROUP_ID });
+
+    await usePhraseStore.getState().pastePhrase(low);
+
+    // a 计数 +1 变 2，仍低于 b 的 5：按次数排序 b 在前。
+    const after = usePhraseStore.getState().phrases;
+    expect(after.map((p) => p.id)).toEqual(["b", "a"]);
+    expect(after.find((p) => p.id === "a")?.use_count).toBe(2);
   });
 });

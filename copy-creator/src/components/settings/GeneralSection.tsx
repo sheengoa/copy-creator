@@ -1,11 +1,13 @@
 import { useTranslation } from "react-i18next";
-import { useSettingsStore } from "../../stores/settingsStore";
+import { useSettingsStore, type ContentSortMode } from "../../stores/settingsStore";
 
 interface GeneralSectionProps {
   localLang: string;
   setLocalLang: (lang: string) => void;
   localAutostart: boolean;
   setLocalAutostart: (enabled: boolean) => void;
+  localContentSort: ContentSortMode;
+  setLocalContentSort: (mode: ContentSortMode) => void;
 }
 
 export function GeneralSection({
@@ -13,6 +15,8 @@ export function GeneralSection({
   setLocalLang,
   localAutostart,
   setLocalAutostart,
+  localContentSort,
+  setLocalContentSort,
 }: GeneralSectionProps) {
   const { t, i18n } = useTranslation();
   const setSetting = useSettingsStore((s) => s.setSetting);
@@ -54,6 +58,24 @@ export function GeneralSection({
             <span className="toggle-thumb" />
           </button>
         </div>
+        <div className="settings-row">
+          <div className="settings-row-label">{t("settings.contentListSort")}</div>
+          <div className="settings-lang-toggle">
+            <button
+              className={`lang-toggle-btn${localContentSort === "recent" ? " active" : ""}`}
+              onClick={() => setLocalContentSort("recent")}
+            >
+              {t("settings.sortRecent")}
+            </button>
+            <button
+              className={`lang-toggle-btn${localContentSort === "count" ? " active" : ""}`}
+              onClick={() => setLocalContentSort("count")}
+            >
+              {t("settings.sortCount")}
+            </button>
+          </div>
+        </div>
+        <div className="settings-row-hint">{t("settings.contentSortHint")}</div>
       </div>
     </div>
   );

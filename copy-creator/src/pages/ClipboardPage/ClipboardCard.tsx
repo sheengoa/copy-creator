@@ -1,5 +1,3 @@
-import { useSortable } from "@dnd-kit/sortable";
-import { CSS } from "@dnd-kit/utilities";
 import { useCallback, useState, useEffect } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { useTranslation } from "react-i18next";
@@ -17,6 +15,7 @@ import { fileMediaKindFromPath } from "../ResourcePage/resourceUtils";
 import { ImageThumb } from "./ImageThumb";
 import { TYPE_META } from "./utils";
 import { formatTime } from "../../utils/formatTime";
+import { useSettingsStore } from "../../stores/settingsStore";
 import { fileNameFromPath } from "../../utils/fileName";
 import ApiKeyLabelPanel from "./ApiKeyLabelPanel";
 import { HighlightText } from "../../components/HighlightText";
@@ -45,72 +44,7 @@ interface ClipboardCardProps {
   onToggleSelected: (id: string) => void;
 }
 
-type ClipboardCardPreviewProps = {
-  record: ClipboardRecord;
-  getTypeLabel: (type: string) => string;
-  width: number | null;
-  search?: string;
-};
-
-function ClipboardCardBodyPreview({
-  record,
-  getTypeLabel,
-  width,
-  search,
-}: ClipboardCardPreviewProps) {
-  const { t } = useTranslation();
-  const meta = TYPE_META[record.type] || TYPE_META.text;
-  const hasLabel = Boolean(record.is_api_key && record.label);
-  const isUnlabeled = Boolean(record.is_api_key && !record.label);
-  const badgeText = record.label?.note || record.guessed_service || (record.is_api_key ? t("clipboard.unlabeled") : "");
-
-  return (
-    <div
-      className={`notification clipboard-card type-${record.type}${record.is_api_key ? " has-api-key" : ""}${isUnlabeled ? " api-key-unlabeled" : ""}${hasLabel ? " api-key-labeled" : ""} drag-overlay-card`}
-      style={{ "--color": meta.color, width: width ?? undefined } as React.CSSProperties}
-    >
-      <div className="notibar" />
-      <div className="noticontent">
-        <div className="notititle clipboard-card-header">
-          <span className="noti-type-label">
-            <span className="noti-type-icon">{record.is_api_key ? Icons.key : meta.icon}</span>
-            <span className="noti-type-text">{record.is_api_key ? "API Key" : getTypeLabel(record.type)}</span>
-          </span>
-          {record.is_api_key && (
-            <span className="api-key-badge">{badgeText || t("clipboard.unlabeled")}</span>
-          )}
-        </div>
-
-        <div className={`notibody clipboard-card-body${record.type === "image" ? "" : " is-content-summary"}`}>
-          {record.type === "image" ? (
-            <ImageThumb
-              record={record}
-              onClick={(e) => e.stopPropagation()}
-            />
-          ) : record.type === "link" ? (
-            <span className="clipboard-link-content"><HighlightText text={record.content} search={search} /></span>
-          ) : record.type === "file" ? (
-            <span className="clipboard-file-content"><HighlightText text={fileNameFromPath(record.content)} search={search} /></span>
-          ) : (
-            <span className="clipboard-text-content"><HighlightText text={record.content} search={search} /></span>
-          )}
-        </div>
-
-        <div className="notititle clipboard-card-footer">
-          <span className="clipboard-card-time">{formatTime(record.created_at)}</span>
-          <div className="clipboard-card-actions">
-            <span className="drag-handle">
-              {Icons.drag}
-            </span>
-            <button className="card-delete-btn" type="button" disabled>
-              {Icons.delete}
-            </button>
-          </div>
-        </div>
-      </div>
-    </div>
-  );
-}
+// 拖拽排序已移除：排序由内容排序偏好决定，拖拽仅保留快捷输入分组视图。
 
 function ClipboardExpandedPreview({
   record,
@@ -185,20 +119,7 @@ function ClipboardCardInner({
   onToggleSelected,
 }: ClipboardCardProps) {
   const { t } = useTranslation();
-  const {
-    attributes,
-    listeners,
-    setNodeRef,
-    setActivatorNodeRef,
-    transform,
-    transition,
-    isDragging,
-  } = useSortable({ id: record.id, disabled: selectionMode });
-
-  const sortableStyle = {
-    transform: CSS.Transform.toString(transform),
-    transition: transition || "transform 200ms ease",
-  };
+  const isCountSort = useSettingsStore((s) => s.contentSort === "count");
 
   const meta = TYPE_META[record.type] || TYPE_META.text;
   // 文件记录的展开预览：视频/音频播放、图片大图、文本内容，判定规则与
@@ -311,9 +232,8 @@ function ClipboardCardInner({
 
   return (
     <div
-      ref={setNodeRef}
-      className={`notification clipboard-card type-${record.type}${record.is_api_key ? " has-api-key" : ""}${isUnlabeled ? " api-key-unlabeled" : ""}${hasLabel ? " api-key-labeled" : ""}${isDragging ? " is-dragging" : ""}${selectionMode ? " is-selection-mode" : ""}${selected ? " is-selected" : ""}`}
-      style={{ ...sortableStyle, "--color": meta.color, "--enter-delay": index } as React.CSSProperties}
+      className={`notification clipboard-card type-${record.type}${record.is_api_key ? " has-api-key" : ""}${isUnlabeled ? " api-key-unlabeled" : ""}${hasLabel ? " api-key-labeled" : ""}${selectionMode ? " is-selection-mode" : ""}${selected ? " is-selected" : ""}`}
+      style={{ "--color": meta.color, "--enter-delay": index } as React.CSSProperties}
       onClick={selectionMode ? () => onToggleSelected(record.id) : handlePaste}
       onContextMenu={selectionMode ? (e) => { e.preventDefault(); e.stopPropagation(); } : handleContextMenu}
     >
@@ -417,6 +337,11 @@ function ClipboardCardInner({
 
         <div className="notititle clipboard-card-footer">
           <span className="clipboard-card-time">{formatTime(record.created_at)}</span>
+          {isCountSort && (
+            <span className="usage-count-badge">
+              {t("common.usageCount", { count: record.use_count ?? 0 })}
+            </span>
+          )}
           <div className="clipboard-card-actions">
             {!selectionMode && (
               <>
@@ -432,9 +357,6 @@ function ClipboardCardInner({
                     {expanded ? Icons.collapse : Icons.expand}
                   </button>
                 )}
-                <span ref={setActivatorNodeRef} className="drag-handle" {...attributes} {...listeners}>
-                  {Icons.drag}
-                </span>
                 {onMoveToTop && (
                   <button
                     className="card-move-top-btn"
@@ -578,8 +500,4 @@ function ClipboardCardInner({
 
 export function ClipboardCard(props: ClipboardCardProps) {
   return <ClipboardCardInner {...props} />;
-}
-
-export function ClipboardCardDragPreview(props: ClipboardCardPreviewProps) {
-  return <ClipboardCardBodyPreview {...props} />;
 }

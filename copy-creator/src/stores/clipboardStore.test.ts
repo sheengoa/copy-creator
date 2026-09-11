@@ -302,12 +302,14 @@ describe("clipboardStore full record loading", () => {
       limit: 120,
       offset: 0,
       category: undefined,
+      sortBy: "recent",
     });
     expect(invokeMock).toHaveBeenNthCalledWith(2, "get_clipboard_records", {
       search: undefined,
       limit: 120,
       offset: 120,
       category: undefined,
+      sortBy: "recent",
     });
   });
 
@@ -363,6 +365,55 @@ describe("clipboardStore full record loading", () => {
       offset: 0,
       category: "resources",
       resourceGroup: "References",
+    });
+  });
+
+  it("applies the content sort preference only to the all-views", async () => {
+    const makeRecord = (id: string) => ({
+      id,
+      type: "text" as const,
+      content: id,
+      source_app: "",
+      created_at: "2026-08-01T00:00:00Z",
+    });
+    invokeMock.mockResolvedValue([makeRecord("clip-1")]);
+
+    // 剪切板「全部」（含类型筛选）：带排序偏好。
+    await useClipboardStore.getState().loadRecords(false, "all");
+    expect(invokeMock).toHaveBeenLastCalledWith("get_clipboard_records", {
+      search: undefined,
+      limit: 120,
+      offset: 0,
+      category: undefined,
+      sortBy: "recent",
+    });
+
+    // 资源「全部分组」：带排序偏好。
+    await useClipboardStore.getState().loadRecords(false, "resources", null);
+    expect(invokeMock).toHaveBeenLastCalledWith("get_clipboard_records", {
+      search: undefined,
+      limit: 120,
+      offset: 0,
+      category: "resources",
+      sortBy: "recent",
+    });
+
+    // 资源分组浏览（含未分组）：回到时间排序，不带偏好。
+    await useClipboardStore.getState().loadRecords(false, "resources", "References");
+    expect(invokeMock).toHaveBeenLastCalledWith("get_clipboard_records", {
+      search: undefined,
+      limit: 120,
+      offset: 0,
+      category: "resources",
+      resourceGroup: "References",
+    });
+    await useClipboardStore.getState().loadRecords(false, "resources", "");
+    expect(invokeMock).toHaveBeenLastCalledWith("get_clipboard_records", {
+      search: undefined,
+      limit: 120,
+      offset: 0,
+      category: "resources",
+      resourceGroup: "",
     });
   });
 

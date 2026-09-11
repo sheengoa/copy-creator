@@ -1,5 +1,3 @@
-import { useSortable } from "@dnd-kit/sortable";
-import { CSS } from "@dnd-kit/utilities";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import type { ClipboardRecord } from "../../types";
@@ -27,7 +25,8 @@ interface ResourceCardProps {
   typeLabel: (kind: ResourceMediaKind) => string;
   selectionMode: boolean;
   selected: boolean;
-  reorderEnabled: boolean;
+  /** 「最多使用」模式且处于「全部分组」时显示次数徽标；分组浏览不应用。 */
+  showUsageBadge?: boolean;
   onOpenDetail: (record: ClipboardRecord) => void;
   onCopy: (record: ClipboardRecord) => void | Promise<void>;
   onDelete: (id: string) => void;
@@ -121,7 +120,7 @@ export function ResourceCard({
   typeLabel,
   selectionMode,
   selected,
-  reorderEnabled,
+  showUsageBadge,
   onOpenDetail,
   onCopy,
   onDelete,
@@ -129,15 +128,6 @@ export function ResourceCard({
   onMove,
 }: ResourceCardProps) {
   const { t } = useTranslation();
-  const {
-    attributes,
-    listeners,
-    setNodeRef,
-    setActivatorNodeRef,
-    transform,
-    transition,
-    isDragging,
-  } = useSortable({ id: record.id, disabled: !reorderEnabled || selectionMode });
   const kind = inferResourceMediaKind(record);
   const title = getResourceTitle(record, kind);
   const [menuOpen, setMenuOpen] = useState(false);
@@ -158,12 +148,7 @@ export function ResourceCard({
 
   return (
     <article
-      ref={setNodeRef}
-      style={{
-        transform: CSS.Transform.toString(transform),
-        transition: transition || "transform 180ms ease",
-      } as React.CSSProperties}
-      className={`resource-card${selected ? " is-selected" : ""}${isDragging ? " is-dragging" : ""}`}
+      className={`resource-card${selected ? " is-selected" : ""}`}
       onClick={activateDetail}
       tabIndex={0}
       aria-label={t("resources.openDetail")}
@@ -260,26 +245,17 @@ export function ResourceCard({
           <span>{typeLabel(kind)}</span>
           <span aria-hidden="true">·</span>
           <time dateTime={record.created_at}>{formatTime(record.created_at)}</time>
+          {showUsageBadge && (
+            <span className="usage-count-badge">
+              {t("common.usageCount", { count: record.use_count ?? 0 })}
+            </span>
+          )}
         </div>
         <div className="resource-card-footer">
           <span className="resource-card-source">
             {record.has_images ? t("resources.withImages") : record.source_app || t("resources.localSource")}
           </span>
           <div className="resource-card-actions">
-            {reorderEnabled && !selectionMode && (
-              <button
-                type="button"
-                ref={setActivatorNodeRef}
-                className="resource-drag-handle"
-                {...attributes}
-                {...listeners}
-                title={t("resources.reorder")}
-                aria-label={t("resources.reorder")}
-                onClick={(event) => event.stopPropagation()}
-              >
-                {Icons.drag}
-              </button>
-            )}
             {!selectionMode && (
               <>
                 <button
@@ -308,30 +284,6 @@ export function ResourceCard({
               </>
             )}
           </div>
-        </div>
-      </div>
-    </article>
-  );
-}
-
-export function ResourceCardDragPreview({
-  record,
-  search,
-  typeLabel,
-}: Pick<ResourceCardProps, "record" | "search" | "typeLabel">) {
-  const kind = inferResourceMediaKind(record);
-  return (
-    <article className="resource-card is-drag-overlay">
-      <div className="resource-card-preview">
-        <ResourceCardVisual record={record} search={search} typeLabel={typeLabel} />
-        <span className="resource-card-kind">{typeLabel(kind)}</span>
-      </div>
-      <div className="resource-card-body">
-        <strong className="resource-card-title">{getResourceTitle(record, kind)}</strong>
-        <div className="resource-card-meta">
-          <span>{typeLabel(kind)}</span>
-          <span aria-hidden="true">·</span>
-          <time dateTime={record.created_at}>{formatTime(record.created_at)}</time>
         </div>
       </div>
     </article>
