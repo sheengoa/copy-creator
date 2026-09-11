@@ -692,6 +692,22 @@ html {
   max-width: 60%;
 }
 
+/* 「最多使用」模式：条目带次数徽标时元信息收进单行（与 has-source 一致）。 */
+.radial-menu-item.has-count .radial-menu-item-meta {
+  flex-direction: row;
+  align-items: center;
+  gap: 8px;
+}
+
+.radial-menu-item.has-count .radial-menu-item-time {
+  margin-top: 0;
+  flex-shrink: 0;
+}
+
+.radial-menu-item.has-count .usage-count-badge {
+  flex-shrink: 0;
+}
+
 /* --- Empty State --- */
 .radial-menu-empty {
   display: flex;

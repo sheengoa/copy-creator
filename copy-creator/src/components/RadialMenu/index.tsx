@@ -1769,7 +1769,7 @@ export default function RadialMenu() {
               items.map((item) => (
                 <div
                   key={item.id}
-                  className={`radial-menu-item${selectedItemId === item.id ? " selected" : ""}${draggingItemId === item.id ? " dragging" : ""}${item.sourceLabel ? " has-source" : ""}`}
+                  className={`radial-menu-item${selectedItemId === item.id ? " selected" : ""}${draggingItemId === item.id ? " dragging" : ""}${item.sourceLabel ? " has-source" : ""}${countSortOn && item.useCount != null ? " has-count" : ""}`}
                   data-radial-item-id={item.id}
                   data-radial-drag-kind={item.dragKind}
                   data-radial-drag-source={item.dragSource}
