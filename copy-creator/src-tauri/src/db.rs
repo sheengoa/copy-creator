@@ -2304,19 +2304,73 @@ pub fn get_recent_used_items(
 }
 
 /// 记录剪贴板/资源记录的使用时间：粘贴成功与拖出成功放下共用。
+/// 自动发现（未入库）的资源记录不在数据库中，直接 UPDATE 会静默丢失；
+/// 对 `resource-file:` 虚拟 id 在持锁前先解析文件路径，未命中时按文件
+/// 路径查找既有记录（避免按 id 补建造成同一文件出现两行），找到则更新
+/// 其使用时间，确实没有记录才补建入库（与备注、移动功能同一机制）。
 pub(crate) fn touch_clipboard_usage_internal<R: Runtime>(
     app: &AppHandle<R>,
     ids: &[String],
 ) -> Result<(), String> {
+    let now = chrono::Utc::now().to_rfc3339();
+    let mut discovered: HashMap<&str, PathBuf> = HashMap::new();
+    for id in ids {
+        if !id.starts_with(RESOURCE_FILE_ID_PREFIX) {
+            continue;
+        }
+        if let Ok(Some(path)) = resource_file_path_from_id(app, id) {
+            discovered.insert(id.as_str(), path);
+        }
+    }
     let state = app.state::<DbState>();
     let conn = state.conn.lock().map_err(|e| e.to_string())?;
-    let now = chrono::Utc::now().to_rfc3339();
     for id in ids {
         conn.execute(
             "UPDATE clipboard_records SET last_used_at = ?1 WHERE id = ?2",
             params![&now, id],
         )
         .map_err(|e| e.to_string())?;
+    }
+    if discovered.is_empty() {
+        return Ok(());
+    }
+    // 库中全部资源记录的路径键 → 记录 id，用于按文件路径去重。
+    let mut by_path: HashMap<PathBuf, String> = HashMap::new();
+    let mut stmt = conn
+        .prepare(
+            "SELECT id, resource_path FROM clipboard_records
+             WHERE COALESCE(storage_mode, 'database') = 'resource'
+               AND COALESCE(resource_path, '') <> ''",
+        )
+        .map_err(|e| e.to_string())?;
+    let rows = stmt
+        .query_map([], |row| {
+            Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
+        })
+        .map_err(|e| e.to_string())?;
+    for row in rows {
+        let (id, resource_path) = row.map_err(|e| e.to_string())?;
+        by_path.insert(resource_path_key(Path::new(&resource_path)), id);
+    }
+    drop(stmt);
+    for (id, path) in &discovered {
+        let key = resource_path_key(path);
+        if let Some(existing_id) = by_path.get(&key) {
+            conn.execute(
+                "UPDATE clipboard_records SET last_used_at = ?1 WHERE id = ?2",
+                params![&now, existing_id],
+            )
+            .map_err(|e| e.to_string())?;
+        } else {
+            let path_text = path.to_string_lossy();
+            conn.execute(
+                "INSERT INTO clipboard_records
+                 (id, type, content, source_app, created_at, storage_mode, resource_path, last_used_at)
+                 VALUES (?1, 'file', ?2, '', ?3, 'resource', ?2, ?3)",
+                params![id, path_text, &now],
+            )
+            .map_err(|e| e.to_string())?;
+        }
     }
     Ok(())
 }
@@ -2338,13 +2392,38 @@ pub(crate) fn touch_phrase_usage_internal<R: Runtime>(
 
 /// 记录资源分组整组使用的使用时间：整组拖出与整组粘贴同口径，
 /// 分组（含子分组）下的全部资源记录一次计入「最近使用」。
-/// 需在持有数据库锁之前读取资源库根目录（内部会再次加锁读取设置）。
+/// 自动发现（未入库）的文件按文件路径去重后补建入库再计入，避免同一
+/// 文件出现两行。需在持有数据库锁之前读取资源库根目录（内部会再次加锁
+/// 读取设置）。
 pub(crate) fn touch_resource_group_usage_internal<R: Runtime>(
     app: &AppHandle<R>,
     group: &str,
 ) -> Result<(), String> {
     let folder = normalize_resource_folder_path(Some(group))?;
     let root = get_resource_library_dir(app);
+    let in_group = |record_folder: Option<String>| -> bool {
+        let Some(record_folder) = record_folder else {
+            return false;
+        };
+        if folder.is_empty() {
+            record_folder.is_empty()
+        } else {
+            record_folder == folder
+                || record_folder
+                    .strip_prefix(folder.as_str())
+                    .is_some_and(|rest| rest.starts_with('/'))
+        }
+    };
+    // 分组内未入库的文件：库中无对应行，稍后补建再写使用时间。
+    let mut discovered: Vec<(String, PathBuf)> = Vec::new();
+    for entry in scan_resource_files(&root) {
+        let record_folder =
+            resource_folder_for_path(&root, &entry.path.to_string_lossy());
+        if !in_group(record_folder) {
+            continue;
+        }
+        discovered.push((resource_file_id(&entry.path), entry.path.clone()));
+    }
     let state = app.state::<DbState>();
     let conn = state.conn.lock().map_err(|e| e.to_string())?;
     let mut stmt = conn
@@ -2360,28 +2439,34 @@ pub(crate) fn touch_resource_group_usage_internal<R: Runtime>(
         })
         .map_err(|e| e.to_string())?;
     let mut ids = Vec::new();
+    let mut known_paths: HashSet<PathBuf> = HashSet::new();
     for row in rows {
         let (id, resource_path) = row.map_err(|e| e.to_string())?;
-        let Some(record_folder) = resource_folder_for_path(&root, &resource_path) else {
-            continue;
-        };
-        let in_group = if folder.is_empty() {
-            record_folder.is_empty()
-        } else {
-            record_folder == folder
-                || record_folder
-                    .strip_prefix(folder.as_str())
-                    .is_some_and(|rest| rest.starts_with('/'))
-        };
-        if in_group {
+        known_paths.insert(resource_path_key(Path::new(&resource_path)));
+        if in_group(resource_folder_for_path(&root, &resource_path)) {
             ids.push(id);
         }
     }
+    drop(stmt);
     let now = chrono::Utc::now().to_rfc3339();
     for id in &ids {
         conn.execute(
             "UPDATE clipboard_records SET last_used_at = ?1 WHERE id = ?2",
             params![&now, id],
+        )
+        .map_err(|e| e.to_string())?;
+    }
+    for (id, path) in &discovered {
+        // 路径已有记录（不同 id）的文件不再补建，其记录已在上面按分组更新。
+        if known_paths.contains(&resource_path_key(path)) {
+            continue;
+        }
+        let path_text = path.to_string_lossy();
+        conn.execute(
+            "INSERT INTO clipboard_records
+             (id, type, content, source_app, created_at, storage_mode, resource_path, last_used_at)
+             VALUES (?1, 'file', ?2, '', ?3, 'resource', ?2, ?3)",
+            params![id, path_text, &now],
         )
         .map_err(|e| e.to_string())?;
     }
@@ -7004,9 +7089,13 @@ mod resource_command_tests {
         for relative in ["a/one.txt", "a/b/two.txt", "c/three.txt"] {
             let path = root.join(relative);
             std::fs::create_dir_all(path.parent().unwrap()).unwrap();
-            std::fs::write(&path, "resource").unwrap();
+            std::fs::write(&path, [1_u8, 2, 3]).unwrap();
             paths.push(path);
         }
+        // discovered.png 只存在于文件系统（未入库），库中无对应行。
+        // 逐级 join 保证与扫描器产物的路径形态一致。
+        let discovered = root.join("a").join("discovered.png");
+        std::fs::write(&discovered, [1_u8, 2, 3]).unwrap();
         insert_resource(&app, "in-a", 1.0, "a", paths[0].to_str().unwrap());
         insert_resource(&app, "in-a-b", 2.0, "a", paths[1].to_str().unwrap());
         insert_resource(&app, "in-c", 3.0, "c", paths[2].to_str().unwrap());
@@ -7022,7 +7111,47 @@ mod resource_command_tests {
             .unwrap()
             .collect::<Result<Vec<_>, _>>()
             .unwrap();
-        assert_eq!(touched, vec!["in-a", "in-a-b"]);
+        // 未入库的 discovered.png 应被补建记录并计入；c 分组不受影响。
+        assert_eq!(
+            touched,
+            vec![
+                "in-a".to_string(),
+                "in-a-b".to_string(),
+                super::resource_file_id(&discovered)
+            ]
+        );
+        cleanup(&root);
+    }
+
+    #[test]
+    fn touch_clipboard_usage_promotes_discovered_resource() {
+        // 单击粘贴未入库资源（resource-file: 虚拟 id）也应计入「最近使用」。
+        let (app, root) = test_app();
+        let file = root.join("gpt-image.png");
+        std::fs::write(&file, [1_u8, 2, 3]).unwrap();
+        let id = resource_file_id(&file);
+
+        super::touch_clipboard_usage_internal(app.handle(), &[id.clone()]).unwrap();
+
+        let state = app.state::<DbState>();
+        let conn = state.conn.lock().unwrap();
+        let (storage_mode, resource_path): (String, String) = conn
+            .query_row(
+                "SELECT storage_mode, resource_path FROM clipboard_records WHERE id = ?1",
+                [&id],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )
+            .unwrap();
+        assert_eq!(storage_mode, "resource");
+        assert_eq!(resource_path, file.to_string_lossy());
+        let last_used_at: String = conn
+            .query_row(
+                "SELECT last_used_at FROM clipboard_records WHERE id = ?1",
+                [&id],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert!(!last_used_at.is_empty());
         cleanup(&root);
     }
 }
