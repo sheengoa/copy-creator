@@ -1859,8 +1859,42 @@ fn get_resource_records_inner<R: Runtime>(
                 ))
             })
             .map_err(|e| e.to_string())?;
-        rows.collect::<Result<Vec<_>, _>>()
-            .map_err(|e| e.to_string())?
+        let mut database_records = rows
+            .collect::<Result<Vec<_>, _>>()
+            .map_err(|e| e.to_string())?;
+        drop(stmt);
+
+        // 外部删除实时同步：文件管理器删掉的文件，其记录在下一次扫描时自动
+        // 清理（「内容即文件」——文件不在，记录不留）。
+        let stale_ids: Vec<String> = database_records
+            .iter()
+            .filter(|(_, _, path, _, _)| {
+                path.as_deref().is_some_and(|p| !p.is_file())
+            })
+            .map(|(value, ..)| value["id"].as_str().unwrap_or_default().to_string())
+            .filter(|id| !id.is_empty())
+            .collect();
+        if !stale_ids.is_empty() {
+            for id in &stale_ids {
+                let _ = conn.execute(
+                    "DELETE FROM api_key_labels WHERE record_id = ?1",
+                    params![id],
+                );
+                let _ = conn.execute(
+                    "DELETE FROM clipboard_records WHERE id = ?1",
+                    params![id],
+                );
+            }
+            log::info!(
+                "已清理 {} 条文件已被外部删除的资源记录",
+                stale_ids.len()
+            );
+        }
+        database_records.retain(|(_, _, path, _, _)| {
+            path.as_deref().map_or(true, |p| p.is_file())
+        });
+
+        database_records
     };
 
     let database_paths = database_records
@@ -2579,11 +2613,17 @@ fn stage_external_resource_files<R: Runtime>(
 ) -> Result<Vec<StagedExternalResourceFile>, String> {
     let mut staged = Vec::new();
     for id in ids {
-        let Some(original_path) = resource_file_path_from_id(app, id)? else {
-            continue;
+        // 解析失败最常见的原因正是文件已被外部删除（canonicalize 对不存在的
+        // 路径必然报错）：视同文件已不在，跳过暂存并继续清理记录，避免整个
+        // 删除命令失败。
+        let original_path = match resource_file_path_from_id(app, id) {
+            Ok(Some(path)) => path,
+            Ok(None) => continue,
+            Err(error) => {
+                log::info!("资源文件解析失败，按已删除处理并继续清理记录: {error}");
+                continue;
+            }
         };
-        // 文件已被外部删除（如用户在文件管理器中删掉）时无需暂存，
-        // 跳过后继续走正常流程清理记录，否则 rename 报错会让整个删除失败。
         if !original_path.exists() {
             continue;
         }
@@ -2627,7 +2667,10 @@ fn finalize_staged_external_resource_files<R: Runtime>(
     first_error.map_or(Ok(()), Err)
 }
 
-fn delete_clipboard_records_internal(app: &AppHandle, ids: &[String]) -> Result<(), String> {
+fn delete_clipboard_records_internal<R: Runtime>(
+    app: &AppHandle<R>,
+    ids: &[String],
+) -> Result<(), String> {
     if ids.is_empty() {
         return Ok(());
     }
@@ -7249,6 +7292,89 @@ mod resource_command_tests {
         let phrases_recent = super::get_all_phrases(handle, None, Some("recent".into())).unwrap();
         assert_eq!(ids(&phrases_recent), vec!["phrase-hot", "phrase-fresh"]);
 
+        cleanup(&root);
+    }
+
+    #[test]
+    fn resource_scan_prunes_rows_for_externally_deleted_files() {
+        // 外部（文件管理器）删除文件后：下一次资源扫描自动清理其记录，
+        // 列表实时同步，不再残留"媒体无法加载"的僵尸条目。
+        let (app, root) = test_app();
+        insert_resource(&app, "res-stay", 1000.0, "", root.join("stay.png").to_str().unwrap());
+        std::fs::write(root.join("stay.png"), [1]).unwrap();
+        insert_resource(&app, "res-gone", 2000.0, "", root.join("gone.png").to_str().unwrap());
+        std::fs::write(root.join("gone.png"), [2]).unwrap();
+        std::fs::remove_file(root.join("gone.png")).unwrap();
+
+        let records = get_clipboard_records_inner(
+            &app.handle().clone(),
+            None,
+            Some(50),
+            Some(0),
+            Some("resources".to_string()),
+            None,
+            None,
+        )
+        .unwrap();
+        assert_eq!(
+            records
+                .iter()
+                .map(|r| r["id"].as_str().unwrap())
+                .collect::<Vec<_>>(),
+            vec!["res-stay"]
+        );
+
+        let state = app.state::<DbState>();
+        let conn = state.conn.lock().unwrap();
+        let gone_count: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM clipboard_records WHERE id = 'res-gone'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(gone_count, 0);
+        cleanup(&root);
+    }
+
+    #[test]
+    fn delete_tolerates_externally_deleted_resource_files() {
+        // 文件已被外部删除时，应用内点击删除应成功清理记录（解析失败
+        // 视同文件已不在，不再让整个删除命令失败）。
+        let (app, root) = test_app();
+        let file = root.join("pinned-then-deleted.md");
+        std::fs::write(&file, b"content").unwrap();
+        {
+            let state = app.state::<DbState>();
+            let conn = state.conn.lock().unwrap();
+            conn.execute_batch(
+                "CREATE TABLE api_key_labels (
+                     record_id TEXT PRIMARY KEY,
+                     service TEXT NOT NULL,
+                     api_base TEXT DEFAULT '',
+                     note TEXT DEFAULT '',
+                     is_expired INTEGER DEFAULT 0,
+                     created_at TEXT NOT NULL
+                 );",
+            )
+            .unwrap();
+        }
+        super::discover_external_resource_files(app.handle(), &[file.clone()]);
+        std::fs::remove_file(&file).unwrap();
+
+        let id = super::resource_file_id(&file);
+        super::delete_clipboard_records_internal(app.handle(), &[id]).unwrap();
+
+        let state = app.state::<DbState>();
+        let conn = state.conn.lock().unwrap();
+        let count: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM clipboard_records WHERE resource_path = ?1",
+                [file.to_string_lossy().as_ref()],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(count, 0);
         cleanup(&root);
     }
 
