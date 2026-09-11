@@ -1234,8 +1234,9 @@
   font-weight: var(--weight-semibold);
 }
 
-/* 目标分组 chip：固定收缩宽度，与已有内容 chip 并列 */
-.clipboard-create-group-picker {
+/* 目标分组 chip：固定收缩宽度，与已有内容 chip 并列；
+   选择器带 .clipboard-create-bar-left 以覆盖「已有内容 chip」的占满剩余宽度规则 */
+.clipboard-create-bar-left .clipboard-create-group-picker {
   width: auto;
   flex: 0 1 auto;
   min-width: 96px;
