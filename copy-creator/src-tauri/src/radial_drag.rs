@@ -212,7 +212,7 @@ fn finish_radial_drag(
         cursor_position.y
     );
     // 拖出成功放下等同一次使用：与粘贴成功同一口径计入「最近使用」。
-    // 整组拖出不逐条记录——整组条目会一次淹没高频列表。
+    // 整组拖出与整组粘贴同口径：分组（含子分组）内全部资源记录一次计入。
     if matches!(result, drag::DragResult::Dropped) {
         if let Some((source, id)) = &usage {
             let touch_result = match source {
@@ -220,7 +220,9 @@ fn finish_radial_drag(
                     crate::db::touch_clipboard_usage_internal(app, std::slice::from_ref(id))
                 }
                 RadialDragSource::Phrase => crate::db::touch_phrase_usage_internal(app, id),
-                RadialDragSource::ResourceGroup => Ok(()),
+                RadialDragSource::ResourceGroup => {
+                    crate::db::touch_resource_group_usage_internal(app, id)
+                }
             };
             if let Err(error) = touch_result {
                 log::warn!("[radial_drag] 记录拖出使用时间失败 source={source:?} id={id}: {error}");

@@ -2284,9 +2284,11 @@ pub fn get_recent_used_items(
         if record["storage_mode"].as_str() != Some(RESOURCE_STORAGE_MODE) {
             continue;
         }
+        // 回传完整分组相对路径：前端来源标签取最末级目录名
+        // （如「分镜提词/seedance」显示为「资源 · seedance」）。
         let group = record["resource_path"]
             .as_str()
-            .and_then(|path| resource_group_for_path(&resource_root, path));
+            .and_then(|path| resource_folder_for_path(&resource_root, path));
         if let Some(object) = record.as_object_mut() {
             object.insert(
                 "resource_group".to_string(),
@@ -2331,6 +2333,58 @@ pub(crate) fn touch_phrase_usage_internal<R: Runtime>(
         params![chrono::Utc::now().to_rfc3339(), id],
     )
     .map_err(|e| e.to_string())?;
+    Ok(())
+}
+
+/// 记录资源分组整组使用的使用时间：整组拖出与整组粘贴同口径，
+/// 分组（含子分组）下的全部资源记录一次计入「最近使用」。
+/// 需在持有数据库锁之前读取资源库根目录（内部会再次加锁读取设置）。
+pub(crate) fn touch_resource_group_usage_internal<R: Runtime>(
+    app: &AppHandle<R>,
+    group: &str,
+) -> Result<(), String> {
+    let folder = normalize_resource_folder_path(Some(group))?;
+    let root = get_resource_library_dir(app);
+    let state = app.state::<DbState>();
+    let conn = state.conn.lock().map_err(|e| e.to_string())?;
+    let mut stmt = conn
+        .prepare(
+            "SELECT id, resource_path FROM clipboard_records
+             WHERE COALESCE(storage_mode, 'database') = 'resource'
+               AND COALESCE(resource_path, '') <> ''",
+        )
+        .map_err(|e| e.to_string())?;
+    let rows = stmt
+        .query_map([], |row| {
+            Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
+        })
+        .map_err(|e| e.to_string())?;
+    let mut ids = Vec::new();
+    for row in rows {
+        let (id, resource_path) = row.map_err(|e| e.to_string())?;
+        let Some(record_folder) = resource_folder_for_path(&root, &resource_path) else {
+            continue;
+        };
+        let in_group = if folder.is_empty() {
+            record_folder.is_empty()
+        } else {
+            record_folder == folder
+                || record_folder
+                    .strip_prefix(folder.as_str())
+                    .is_some_and(|rest| rest.starts_with('/'))
+        };
+        if in_group {
+            ids.push(id);
+        }
+    }
+    let now = chrono::Utc::now().to_rfc3339();
+    for id in &ids {
+        conn.execute(
+            "UPDATE clipboard_records SET last_used_at = ?1 WHERE id = ?2",
+            params![&now, id],
+        )
+        .map_err(|e| e.to_string())?;
+    }
     Ok(())
 }
 
@@ -5589,7 +5643,8 @@ mod resource_command_tests {
                  attachments TEXT DEFAULT '[]',
                  storage_mode TEXT DEFAULT 'database',
                  resource_path TEXT DEFAULT '',
-                 resource_note TEXT DEFAULT ''
+                 resource_note TEXT DEFAULT '',
+                 last_used_at TEXT DEFAULT ''
              );
              INSERT INTO settings (key, value) VALUES ('resource_library_path', '');",
         )
@@ -6939,6 +6994,35 @@ mod resource_command_tests {
             markdown.contains("../../.copy-creator/attachments/"),
             "markdown 应包含两级相对前缀: {markdown}"
         );
+        cleanup(&root);
+    }
+
+    #[test]
+    fn touch_resource_group_usage_covers_nested_subgroups_only() {
+        let (app, root) = test_app();
+        let mut paths = Vec::new();
+        for relative in ["a/one.txt", "a/b/two.txt", "c/three.txt"] {
+            let path = root.join(relative);
+            std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+            std::fs::write(&path, "resource").unwrap();
+            paths.push(path);
+        }
+        insert_resource(&app, "in-a", 1.0, "a", paths[0].to_str().unwrap());
+        insert_resource(&app, "in-a-b", 2.0, "a", paths[1].to_str().unwrap());
+        insert_resource(&app, "in-c", 3.0, "c", paths[2].to_str().unwrap());
+
+        super::touch_resource_group_usage_internal(app.handle(), "a").unwrap();
+
+        let state = app.state::<DbState>();
+        let conn = state.conn.lock().unwrap();
+        let touched: Vec<String> = conn
+            .prepare("SELECT id FROM clipboard_records WHERE COALESCE(last_used_at, '') <> ''")
+            .unwrap()
+            .query_map([], |row| row.get(0))
+            .unwrap()
+            .collect::<Result<Vec<_>, _>>()
+            .unwrap();
+        assert_eq!(touched, vec!["in-a", "in-a-b"]);
         cleanup(&root);
     }
 }
