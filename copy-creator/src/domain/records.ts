@@ -106,6 +106,13 @@ export function isInlineTextPreviewFilePath(path: string): boolean {
   return isQuickInputFilePath(path) && hasInlineTextPreviewExtension(path);
 }
 
+/** file 记录的媒体视觉细分；非 file 记录返回 null（type 判定留在 records，recordView 禁止）。 */
+export function recordFileMediaKind(
+  record: Pick<ClipboardRecord, "type" | "content">,
+): "video" | "audio" | "image" | null {
+  return record.type === "file" ? fileMediaKindFromPath(record.content) : null;
+}
+
 /** 条目显示文本：三窗口统一规则（收口原主窗口/径向菜单两套实现）。
  *  imagePlaceholder 由调用方传入（如 t("clipboard.image")），domain 不依赖 i18n。 */
 export function recordDisplayName(

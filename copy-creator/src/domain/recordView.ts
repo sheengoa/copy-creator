@@ -5,11 +5,7 @@
 // 2. RecordView 字段分两组——事实字段（透传，叶子可做渲染分支）与
 //    判定字段（叶子只读不猜）；新增字段必须在 PR 说明消费方。
 import type { ApiKeyLabel, ClipboardRecord } from "../types";
-import {
-  fileMediaKindFromPath,
-  inferResourceMediaKind,
-  type ResourceMediaKind,
-} from "./mediaKind";
+import { inferResourceMediaKind, type ResourceMediaKind } from "./mediaKind";
 import {
   getResourcePath,
   getResourceTitle,
@@ -17,6 +13,7 @@ import {
   isResourceRecord,
   recordDisplayName,
   recordExpandPreview,
+  recordFileMediaKind,
   recordPasteStrategy,
   type ExpandPreviewKind,
   type PasteStrategy,
@@ -67,7 +64,7 @@ export function buildRecordView(
   options: BuildRecordViewOptions = {},
 ): RecordView {
   const kind = inferResourceMediaKind(record);
-  const fileMediaKind = record.type === "file" ? fileMediaKindFromPath(record.content) : null;
+  const fileMediaKind = recordFileMediaKind(record);
   const expandPreview = recordExpandPreview(record);
   let displayName = recordDisplayName(record, "图片");
   let displayTruncated = false;

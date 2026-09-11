@@ -466,7 +466,7 @@ describe("integration regressions", () => {
     expect(dbSource).toContain("read_quick_input_text_preview");
     expect(dbSource).toContain("read_clipboard_text_preview");
     // 后端文本预览与资源区共用同一份扩展名白名单（md 等常见格式均可预览）。
-    expect(dbSource).toContain("fn is_text_preview_extension(path: &Path) -> bool {\n    is_resource_text_extension(path)\n}");
+    expect(dbSource).toContain("fn is_text_preview_extension(path: &Path) -> bool {\n    crate::media_kind::is_text_extension(path)\n}");
     expect(dbSource).not.toContain("仅支持预览 JSON、TXT 和 TOML 文件");
     expect(libSource).toContain("db::read_quick_input_text_preview");
   });
