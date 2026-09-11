@@ -1301,3 +1301,64 @@
 .clipboard-create-actions .dialog-btn.save {
   min-width: 132px;
 }
+
+/* --- 剪切板文件卡片的媒体视觉：视频封面帧 / 音频 / 图片文件 --- */
+/* 容器定高，内部复用资源区 .resource-video-poster 系列的绝对定位铺层。 */
+.clipboard-file-media {
+  position: relative;
+  width: 100%;
+  height: 110px;
+  margin-bottom: 8px;
+  border-radius: 10px;
+  overflow: hidden;
+  background: color-mix(in srgb, #5e5ce6 10%, var(--input-bg));
+}
+
+.clipboard-file-media.is-audio {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  background: color-mix(in srgb, #ff9500 10%, var(--input-bg));
+  color: var(--text-secondary);
+  font-size: var(--text-sm);
+}
+
+.clipboard-file-media.is-image {
+  background: var(--input-bg);
+}
+
+.clipboard-file-media-image {
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+}
+
+.clipboard-file-media-icon svg {
+  width: 16px;
+  height: 16px;
+}
+
+.clipboard-file-media .clipboard-file-media-play {
+  position: absolute;
+  z-index: 1;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  background: rgba(0, 0, 0, 0.45);
+  color: #fff;
+  box-shadow: 0 2px 10px rgba(0, 0, 0, 0.35);
+  pointer-events: none;
+}
+
+.clipboard-file-media .clipboard-file-media-play svg {
+  width: 14px;
+  height: 14px;
+  margin-left: 1px;
+}

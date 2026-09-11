@@ -846,3 +846,11 @@ html {
 .content-preview-body .resource-media-fallback {
   margin: 10px 0;
 }
+
+/* 剪切板/资源文件条目的媒体视觉（视频封面帧等）：比主窗口卡片矮一些，
+   覆盖 .clipboard-file-media 的默认尺寸。 */
+.clipboard-file-media.radial-menu-file-media {
+  height: 96px;
+  margin: 2px 0 4px;
+  border-radius: 8px;
+}

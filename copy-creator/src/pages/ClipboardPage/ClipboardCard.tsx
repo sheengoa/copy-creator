@@ -11,6 +11,7 @@ import {
   CardActionMenuSeparator,
 } from "../../components/CardActionMenu";
 import { InlineImagePreview, InlineTextFilePreview } from "../../components/InlinePreview";
+import { FileMediaVisual } from "../../components/FileMediaPreview";
 import { ImageThumb } from "./ImageThumb";
 import { TYPE_META } from "./utils";
 import { formatTime } from "../../utils/formatTime";
@@ -370,6 +371,7 @@ function ClipboardCardInner({
             )
           ) : record.type === "file" ? (
             <>
+              <FileMediaVisual path={record.content} />
               <span className="clipboard-file-content"><HighlightText text={fileNameFromPath(record.content)} search={search} /></span>
               {expanded && canPreviewFile && (
                 <InlineTextFilePreview recordId={record.id} search={search} />

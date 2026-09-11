@@ -160,6 +160,12 @@ export function splitResourceFileName(fileName: string): {
   };
 }
 
+/** 文件路径按扩展名推断的媒体视觉类型；普通文件/文本返回 null，维持文件名展示。 */
+export function fileMediaKindFromPath(path: string): "video" | "audio" | "image" | null {
+  const kind = inferResourceMediaKind({ type: "file", content: path });
+  return kind === "video" || kind === "audio" || kind === "image" ? kind : null;
+}
+
 export function inferResourceMediaKind(
   record: Pick<ClipboardRecord, "type" | "content" | "resource_kind">,
 ): ResourceMediaKind {
@@ -170,8 +176,7 @@ export function inferResourceMediaKind(
   const extension = getResourceExtension(record.content);
   if (VIDEO_EXTENSIONS.has(extension)) return "video";
   if (AUDIO_EXTENSIONS.has(extension)) return "audio";
-  if (IMAGE_EXTENSIONS.has(extension)) return "image";
-  if (TEXT_EXTENSIONS.has(extension)) return "text";
+  if (IMAGE_EXTENSIONS.has(extension)) return "image";  if (TEXT_EXTENSIONS.has(extension)) return "text";
   return "file";
 }
 

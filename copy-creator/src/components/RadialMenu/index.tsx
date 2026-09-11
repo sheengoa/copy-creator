@@ -30,6 +30,7 @@ import {
   type RadialDragSource,
 } from "../../utils/radialDrag";
 import { ContentPreviewPanel } from "../ContentPreviewPanel";
+import { FileMediaVisual } from "../FileMediaPreview";
 import { BackToTopButton } from "../BackToTop";
 import { useBackToTop } from "../../hooks/useBackToTop";
 import { InlineTextFilePreview } from "../InlinePreview";
@@ -39,6 +40,7 @@ import { formatTime } from "../../utils/formatTime";
 import { fileNameFromPath } from "../../utils/fileName";
 import type { ClipboardRecord, Phrase, ResourceFolder } from "../../types";
 import {
+  fileMediaKindFromPath,
   findResourceFolder,
   flattenResourceFolders,
   formatResourceFolderPath,
@@ -118,6 +120,8 @@ interface RadialItem {
   type: string;
   /** file 短语指向图像文件时为相对存储路径：条目显示缩略图，悬浮展开大图预览。 */
   imagePath?: string;
+  /** 剪切板 file 记录的完整本地路径：条目据此渲染视频封面帧等媒体视觉。 */
+  filePath?: string;
   createdAt?: string;
   title?: string;
   contentTruncated?: boolean;
@@ -282,6 +286,15 @@ function ResourceItemVisual({ item }: { item: RadialItem }) {
       <div className="radial-menu-resource-text">
         {item.resourceSummary || t("resources.empty")}
       </div>
+    );
+  }
+
+  if (kind === "video" && item.resourcePath && fileMediaKindFromPath(item.resourcePath)) {
+    return (
+      <FileMediaVisual
+        path={item.resourcePath}
+        className="radial-menu-file-media"
+      />
     );
   }
 
@@ -1578,6 +1591,7 @@ export default function RadialMenu() {
             ? r.key_preview || r.content
             : r.content,
       type: r.type,
+      filePath: r.type === "file" ? r.content : undefined,
       createdAt: r.created_at,
       contentTruncated: r.content_truncated,
       previewAvailable: isContentPreviewAvailable({
@@ -1953,6 +1967,11 @@ export default function RadialMenu() {
                       <ImageThumb recordId={item.id} />
                     ) : item.imagePath ? (
                       <FileThumb path={item.imagePath} />
+                    ) : item.filePath && fileMediaKindFromPath(item.filePath) ? (
+                      <FileMediaVisual
+                        path={item.filePath}
+                        className="radial-menu-file-media"
+                      />
                     ) : (
                       <span className="radial-menu-item-text">
                         {item.content.length > 300
