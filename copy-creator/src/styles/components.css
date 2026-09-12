@@ -1148,8 +1148,3 @@ input:focus-visible + .selection-checkbox {
 .image-lightbox-close:hover {
   background: rgba(255, 255, 255, 0.24);
 }
-
-/* 可点击放大的图片：悬停提示可查看大图 */
-.is-zoomable {
-  cursor: zoom-in;
-}

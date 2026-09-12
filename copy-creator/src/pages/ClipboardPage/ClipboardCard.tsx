@@ -88,7 +88,6 @@ function ClipboardExpandedPreview({
             path={segment.path}
             alt={t("radialMenu.previewImage")}
             className="clipboard-card-expanded-image"
-            zoomable
           />
         ) : segment.type === "text" ? (
           <div className="clipboard-card-expanded-text" key={`text-${index}`}>
@@ -259,7 +258,6 @@ function ClipboardCardInner({
                 path={view.content}
                 alt={t("radialMenu.previewImage")}
                 className="clipboard-card-expanded-image"
-                zoomable
               />
             ) : (
               /* 图片列表态统一全宽横幅；点击卡片即粘贴（卡片根 onClick）。 */
@@ -288,7 +286,6 @@ function ClipboardCardInner({
                     path={view.content}
                     alt={t("radialMenu.previewImage")}
                     className="clipboard-card-expanded-image"
-                    zoomable
                   />
                 ) : (
                   <InlineTextFilePreview recordId={view.id} search={search} />

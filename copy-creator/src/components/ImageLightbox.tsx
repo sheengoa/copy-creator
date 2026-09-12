@@ -9,7 +9,8 @@ interface ImageLightboxProps {
 
 /**
  * 全屏图片灯箱：点击遮罩、右上角按钮或按 ESC 关闭。
- * 主窗口内查看大图的统一出口（剪切板/快捷输入展开图、资源详情页大图）。
+ * 仅用于资源详情页大图——列表卡片内不可用：卡片悬停位移的 transform
+ * 会把 position:fixed 困在卡片内，遮罩无法铺满窗口。
  */
 export function ImageLightbox({ src, alt, onClose }: ImageLightboxProps) {
   const { t } = useTranslation();
