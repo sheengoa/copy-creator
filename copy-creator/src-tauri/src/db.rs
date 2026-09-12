@@ -475,6 +475,22 @@ fn path_inside_ignored_dir(path: &Path) -> bool {
         .any(|component| is_ignored_resource_dir(component.as_os_str()))
 }
 
+/// 清退历史误入库的 thumbs 派生缓存记录：旧版本的缩略图命令会把
+/// `thumbs/<同名文件>` 写在原图旁，资源发现又未排除该目录，导致缩略图
+/// 以「原图」身份混进库（模糊重复条目 + thumbs 嵌套分组）。文件本体
+/// 保留在磁盘上，仅移除入库记录。必须在 init_db 每次启动时执行——
+/// 只挂在监听补建路径上时，无新文件移入则永远不会触发（已踩坑）。
+fn prune_legacy_thumb_records(conn: &Connection) {
+    if let Err(error) = conn.execute(
+        "DELETE FROM clipboard_records
+         WHERE COALESCE(storage_mode, 'database') = 'resource'
+           AND (resource_path LIKE '%/thumbs/%' OR resource_path LIKE '%\\thumbs\\%')",
+        [],
+    ) {
+        log::warn!("清理 thumbs 缓存记录失败: {error}");
+    }
+}
+
 fn scan_resource_files(root: &Path) -> Vec<ResourceFileEntry> {
     fn visit(root: &Path, directory: &Path, entries: &mut Vec<ResourceFileEntry>) {
         let Ok(read_dir) = std::fs::read_dir(directory) else {
@@ -1476,6 +1492,9 @@ pub fn init_db(app: &AppHandle) -> Result<(), Box<dyn std::error::Error>> {
     conn.execute("DROP TABLE IF EXISTS resource_groups", [])
         .ok();
 
+    // thumbs 派生缓存清退（每次启动执行，见函数注释）。
+    prune_legacy_thumb_records(&conn);
+
     app.manage(DbState {
         conn: Mutex::new(conn),
     });
@@ -1651,16 +1670,9 @@ pub fn discover_external_resource_files<R: Runtime>(
     // 去重与 touch 补建同口径：按归一化路径键比较（Windows 大小写、
     // 分隔符形态差异不产生重复记录）。
     let mut by_path: HashMap<PathBuf, String> = HashMap::new();
-    // 清退历史遗留：旧版本曾把 thumbs/ 派生缓存当内容入库（产生模糊重复
-    // 条目与 thumbs 嵌套分组）。文件本体保留在磁盘上，仅移除入库记录。
-    if let Err(error) = conn.execute(
-        "DELETE FROM clipboard_records
-         WHERE COALESCE(storage_mode, 'database') = 'resource'
-           AND (resource_path LIKE '%/thumbs/%' OR resource_path LIKE '%\\thumbs\\%')",
-        [],
-    ) {
-        log::warn!("清理 thumbs 缓存记录失败: {error}");
-    }
+    // 双保险：init_db 已按启动清退历史 thumbs 记录，此处兜底运行期
+    // 旧版本数据被外部引入的场景。
+    prune_legacy_thumb_records(&conn);
     let mut stmt = match conn.prepare(
         "SELECT id, resource_path FROM clipboard_records
          WHERE COALESCE(storage_mode, 'database') = 'resource'
