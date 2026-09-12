@@ -1355,16 +1355,6 @@
   object-fit: contain;
 }
 
-/* 资源详情页大图的原图虚影：前景图跟随容器的高度约束，
-   模糊铺底自动填满前景留白区域。 */
-.resource-segment-image > .resource-thumb-blur-fg {
-  max-height: 330px;
-}
-
-.resource-detail-stage-image .resource-segment-image > .resource-thumb-blur-fg {
-  max-height: 62vh;
-}
-
 .resource-media-loading {
   width: 100%;
   min-height: 120px;
@@ -2033,8 +2023,13 @@
   background: var(--input-bg);
 }
 
+/* 详情页原图干净展示：contain 完整呈现、水平居中，不超出可视高度。 */
 .resource-detail-stage-image .resource-segment-image {
+  max-width: 100%;
   max-height: 62vh;
+  margin: 0 auto;
+  border-radius: 8px;
+  object-fit: contain;
 }
 
 .resource-detail-stage-video {

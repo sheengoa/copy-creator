@@ -18,7 +18,7 @@ import { inferResourceMediaKind } from "../../domain/mediaKind";
 import { resolveResourceMediaUrl } from "../../domain/mediaUrl";
 import { getResourcePath, getResourceTitle } from "../../domain/records";
 import {
-  ResourceImageGhost,
+  ResourceImageOriginal,
   ResourceMediaPlayer,
   ResourceSegments,
   type ResourceMediaMetadata,
@@ -474,7 +474,7 @@ export default function ResourceDetailPage({
               />
             ) : kind === "image" ? (
               <>
-                <ResourceImageGhost
+                <ResourceImageOriginal
                   path={resourcePath}
                   alt={title}
                   className="resource-segment-image"

@@ -174,12 +174,12 @@ export function ResourceImage({
 }
 
 /**
- * 原图虚影（详情页大图等大尺寸场景）：同图放大模糊铺底，前景完整展示，
- * 与列表卡片的缩略图虚影同一视觉。className 施加于容器；
- * 前景图的高度约束需在使用方的 CSS 中给定（如详情页的 62vh）。
- * onZoom 提供时前景图可点击，回调携带已解析的图片 URL 供全屏灯箱使用。
+ * 详情页原图干净展示：中性舞台上 contain 完整呈现原图，不做模糊虚影
+ * 铺底——那是列表缩略图卡片的视觉，放进详情页会让整图看起来发糊。
+ * className 施加于图片，高度约束由使用方 CSS 给定（如详情页的 62vh）。
+ * onZoom 提供时图片可点击，回调携带已解析的图片 URL 供全屏灯箱使用。
  */
-export function ResourceImageGhost({
+export function ResourceImageOriginal({
   path,
   alt,
   className = "",
@@ -211,33 +211,29 @@ export function ResourceImageGhost({
   }
   if (!src) return <div className={`resource-media-loading ${className}`} aria-hidden="true" />;
   return (
-    <div className={`resource-thumb-blur resource-image-ghost ${className}`.trim()}>
-      <img className="resource-thumb-blur-bg" src={src} alt="" aria-hidden="true" />
-      <img
-        className={`resource-thumb-blur-fg${onZoom ? " is-zoomable" : ""}`}
-        src={src}
-        alt={alt}
-        draggable={false}
-        loading="lazy"
-        decoding="async"
-        onClick={onZoom
-          ? (event) => {
-              // 阻止冒泡，避免触发外层容器的点击行为。
-              event.stopPropagation();
-              onZoom(src);
-            }
-          : undefined}
-        onLoad={(event) => {
-          const image = event.currentTarget;
-          if (image.naturalWidth <= 0 || image.naturalHeight <= 0) return;
-          const sizeKey = `${image.naturalWidth}x${image.naturalHeight}`;
-          if (reportedSizeRef.current === sizeKey) return;
-          reportedSizeRef.current = sizeKey;
-          onMetadata?.({ width: image.naturalWidth, height: image.naturalHeight });
-        }}
-        onError={() => setImageFailed(true)}
-      />
-    </div>
+    <img
+      className={className}
+      src={src}
+      alt={alt}
+      draggable={false}
+      decoding="async"
+      onClick={onZoom
+        ? (event) => {
+            // 阻止冒泡，避免触发外层容器的点击行为。
+            event.stopPropagation();
+            onZoom(src);
+          }
+        : undefined}
+      onLoad={(event) => {
+        const image = event.currentTarget;
+        if (image.naturalWidth <= 0 || image.naturalHeight <= 0) return;
+        const sizeKey = `${image.naturalWidth}x${image.naturalHeight}`;
+        if (reportedSizeRef.current === sizeKey) return;
+        reportedSizeRef.current = sizeKey;
+        onMetadata?.({ width: image.naturalWidth, height: image.naturalHeight });
+      }}
+      onError={() => setImageFailed(true)}
+    />
   );
 }
 
