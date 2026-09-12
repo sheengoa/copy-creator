@@ -51,9 +51,12 @@ export function useExpandReveal<T extends HTMLElement>(expanded: boolean) {
         if (!scroller) return;
         const rect = element.getBoundingClientRect();
         const bounds = scroller.getBoundingClientRect();
-        const margin = 8;
-        const below = rect.bottom - bounds.bottom + margin; // >0：下方被裁的量
-        const above = bounds.top - rect.top + margin; // >0：上方被裁的量
+        // 上方只需贴回可视区；下方除呼吸间隙外还要容纳卡片尾栏（时间戳约 30px），
+        // 否则尾栏会紧贴甚至超出可视区底边。
+        const marginAbove = 8;
+        const marginBelow = 40;
+        const below = rect.bottom - bounds.bottom + marginBelow; // >0：下方被裁的量
+        const above = bounds.top - rect.top + marginAbove; // >0：上方被裁的量
         let target = scroller.scrollTop;
         if (below > 0) target += below;
         else if (above > 0) target -= above;
