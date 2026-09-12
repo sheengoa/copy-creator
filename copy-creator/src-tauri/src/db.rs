@@ -463,6 +463,18 @@ fn is_ignored_resource_file(path: &Path) -> bool {
         })
 }
 
+/// 应用缩略图目录约定：原图旁的 `thumbs/` 全部是派生缓存（可随时再生成），
+/// 永不作为资源内容收录，否则缩略图会以「原图」身份混进库，还会被再次
+/// 生成缩略图衍生出 thumbs/thumbs 嵌套污染。`.copy-creator` 是应用元数据。
+fn is_ignored_resource_dir(name: &OsStr) -> bool {
+    name == OsStr::new(".copy-creator") || name == OsStr::new("thumbs")
+}
+
+fn path_inside_ignored_dir(path: &Path) -> bool {
+    path.components()
+        .any(|component| is_ignored_resource_dir(component.as_os_str()))
+}
+
 fn scan_resource_files(root: &Path) -> Vec<ResourceFileEntry> {
     fn visit(root: &Path, directory: &Path, entries: &mut Vec<ResourceFileEntry>) {
         let Ok(read_dir) = std::fs::read_dir(directory) else {
@@ -477,7 +489,7 @@ fn scan_resource_files(root: &Path) -> Vec<ResourceFileEntry> {
                 continue;
             };
             if file_type.is_dir() {
-                if entry.file_name() == OsStr::new(".copy-creator") {
+                if is_ignored_resource_dir(&entry.file_name()) {
                     continue;
                 }
                 visit(root, &path, entries);
@@ -1639,6 +1651,16 @@ pub fn discover_external_resource_files<R: Runtime>(
     // 去重与 touch 补建同口径：按归一化路径键比较（Windows 大小写、
     // 分隔符形态差异不产生重复记录）。
     let mut by_path: HashMap<PathBuf, String> = HashMap::new();
+    // 清退历史遗留：旧版本曾把 thumbs/ 派生缓存当内容入库（产生模糊重复
+    // 条目与 thumbs 嵌套分组）。文件本体保留在磁盘上，仅移除入库记录。
+    if let Err(error) = conn.execute(
+        "DELETE FROM clipboard_records
+         WHERE COALESCE(storage_mode, 'database') = 'resource'
+           AND (resource_path LIKE '%/thumbs/%' OR resource_path LIKE '%\\thumbs\\%')",
+        [],
+    ) {
+        log::warn!("清理 thumbs 缓存记录失败: {error}");
+    }
     let mut stmt = match conn.prepare(
         "SELECT id, resource_path FROM clipboard_records
          WHERE COALESCE(storage_mode, 'database') = 'resource'
@@ -1670,11 +1692,10 @@ pub fn discover_external_resource_files<R: Runtime>(
         if !path.is_file() || !path.starts_with(&root) {
             continue;
         }
-        // 与扫描同一套忽略规则：应用自身的附件与临时文件不是内容，
-        // 否则保存图文暂存时会被当作新放入置顶成独立资源条目。
-        if path.components().any(|c| c.as_os_str() == OsStr::new(".copy-creator"))
-            || is_ignored_resource_file(path)
-        {
+        // 与扫描同一套忽略规则：应用自身的附件、临时文件与 thumbs/ 派生
+        // 缓存不是内容，否则保存图文暂存或缩略图生成时会被当作新放入
+        // 置顶成独立资源条目。
+        if path_inside_ignored_dir(path) || is_ignored_resource_file(path) {
             continue;
         }
         let path_text = path.to_string_lossy().to_string();
@@ -3223,10 +3244,35 @@ pub fn get_image_thumbnail(app: AppHandle, path: String, max_size: u32) -> Resul
         .map(Path::to_path_buf)
         .unwrap_or_else(|| get_storage_dir(&app));
 
-    // Try pre-generated thumbnail first (saved during clipboard capture)
-    let thumb_dir = image_path.parent().unwrap_or(&base_dir).join("thumbs");
-    let filename = image_path.file_name().ok_or("invalid path")?;
-    let thumb_path = thumb_dir.join(filename);
+    // 应用存储图沿用剪贴板捕获时写在原图旁 thumbs/ 的预生成缩略图；
+    // 外部绝对路径（资源库等用户目录）不得写入派生文件——thumbs/ 曾被
+    // 资源发现误收录为内容。缓存统一进应用缓存目录，键含路径与修改时间。
+    let thumb_path = if Path::new(&path).is_absolute() {
+        let metadata =
+            std::fs::metadata(&image_path).map_err(|e| format!("stat image: {e}"))?;
+        let modified_secs = metadata
+            .modified()
+            .ok()
+            .and_then(|time| time.duration_since(std::time::UNIX_EPOCH).ok())
+            .map(|duration| duration.as_secs())
+            .unwrap_or(0);
+        let key = format!(
+            "{:016x}-{}-{}",
+            fnv1a64(path.as_bytes()),
+            metadata.len(),
+            modified_secs
+        );
+        app.path()
+            .app_cache_dir()
+            .map_err(|e| e.to_string())?
+            .join("external-image-thumbs")
+            .join(format!("{key}.png"))
+    } else {
+        // Try pre-generated thumbnail first (saved during clipboard capture)
+        let thumb_dir = image_path.parent().unwrap_or(&base_dir).join("thumbs");
+        let filename = image_path.file_name().ok_or("invalid path")?;
+        thumb_dir.join(filename)
+    };
 
     let thumb_bytes = if thumb_path.exists() {
         std::fs::read(&thumb_path).map_err(|e| format!("read thumbnail: {}", e))?
@@ -3253,7 +3299,9 @@ pub fn get_image_thumbnail(app: AppHandle, path: String, max_size: u32) -> Resul
             .map_err(|e| format!("encode thumbnail: {}", e))?;
         let data = buf.into_inner();
         // Save for future use
-        std::fs::create_dir_all(&thumb_dir).ok();
+        if let Some(thumb_dir) = thumb_path.parent() {
+            std::fs::create_dir_all(thumb_dir).ok();
+        }
         let _ = std::fs::write(&thumb_path, &data);
         data
     };
@@ -4866,59 +4914,6 @@ pub fn open_resource_file(app: AppHandle, path: String) -> Result<(), String> { 
 
     #[cfg(not(any(target_os = "windows", target_os = "macos", target_os = "linux")))]
     Err("当前系统不支持打开资源文件".to_string())
-}
-
-#[tauri::command]
-pub fn ensure_thumbnail(app: AppHandle, path: String) -> Result<String, String> {
-    let base = resolve_storage_path(&app, &path)?;
-
-    if !base.exists() {
-        return Err("image file not found".to_string());
-    }
-
-    let filename = base
-        .file_name()
-        .ok_or("invalid path")?
-        .to_string_lossy()
-        .to_string();
-    let mut thumb_dir = base.parent().ok_or("invalid path")?.to_path_buf();
-    thumb_dir.push("thumbs");
-    std::fs::create_dir_all(&thumb_dir).ok();
-    let thumb_path = thumb_dir.join(&filename);
-
-    if thumb_path.exists() {
-        return Ok(thumb_path.to_string_lossy().to_string());
-    }
-
-    let bytes = std::fs::read(&base).map_err(|e| format!("read image: {}", e))?;
-    let img = image::load_from_memory(&bytes).map_err(|e| format!("decode image: {}", e))?;
-
-    let (w, h) = (img.width(), img.height());
-    let max_thumb: u32 = 200;
-    let scale = if w > max_thumb || h > max_thumb {
-        max_thumb as f32 / w.max(h) as f32
-    } else {
-        1.0
-    };
-
-    let thumb = if scale < 1.0 {
-        img.resize(
-            (w as f32 * scale) as u32,
-            (h as f32 * scale) as u32,
-            image::imageops::FilterType::Triangle,
-        )
-    } else {
-        img
-    };
-
-    let mut buf = std::io::Cursor::new(Vec::new());
-    thumb
-        .write_to(&mut buf, image::ImageFormat::Png)
-        .map_err(|e| format!("encode thumbnail: {}", e))?;
-
-    std::fs::write(&thumb_path, buf.into_inner()).map_err(|e| format!("write thumbnail: {}", e))?;
-
-    Ok(thumb_path.to_string_lossy().to_string())
 }
 
 #[tauri::command]
@@ -7541,6 +7536,71 @@ mod resource_command_tests {
             .unwrap();
         assert_eq!(count, 0);
         cleanup(&root);
+    }
+
+    #[test]
+    fn thumbs_directories_are_never_indexed_as_content() {
+        // thumbs/ 是应用派生缓存：扫描不得收录（含嵌套 thumbs/thumbs），
+        // 否则缩略图会以「原图」身份混进资源库。
+        let root = std::env::temp_dir().join(format!(
+            "copy-creator-resource-thumbs-scan-test-{}",
+            uuid::Uuid::new_v4()
+        ));
+        std::fs::create_dir_all(root.join("人物视图/thumbs/thumbs")).unwrap();
+        std::fs::write(root.join("人物视图/original.png"), [1, 2, 3]).unwrap();
+        std::fs::write(root.join("人物视图/thumbs/original.png"), [4]).unwrap();
+        std::fs::write(root.join("人物视图/thumbs/thumbs/original.png"), [5]).unwrap();
+
+        let entries = super::scan_resource_files(&root);
+        let relative_paths = entries
+            .iter()
+            .map(|entry| {
+                entry
+                    .path
+                    .strip_prefix(&root)
+                    .unwrap()
+                    .to_string_lossy()
+                    .to_string()
+                    .replace('\\', "/")
+            })
+            .collect::<Vec<_>>();
+        assert_eq!(relative_paths, vec!["人物视图/original.png"]);
+    }
+
+    #[test]
+    fn discover_external_resource_files_skips_thumbs_and_prunes_legacy_rows() {
+        // 监听补建不得收录 thumbs/ 缓存文件；历史版本误入库的 thumbs 记录
+        // 在发现流程中被清退（文件保留在磁盘，仅移除入库记录）。
+        let (app, root) = test_app();
+        let legacy = root.join("人物视图/thumbs/legacy.png");
+        std::fs::create_dir_all(legacy.parent().unwrap()).unwrap();
+        std::fs::write(&legacy, [1]).unwrap();
+        insert_resource(&app, "res-legacy-thumb", 3000.0, "", legacy.to_str().unwrap());
+
+        let fresh = root.join("fresh.md");
+        std::fs::write(&fresh, b"fresh").unwrap();
+        super::discover_external_resource_files(app.handle(), &[fresh, legacy]);
+
+        let records = get_clipboard_records_inner(
+            &app.handle().clone(),
+            None,
+            Some(50),
+            Some(0),
+            Some("resources".to_string()),
+            None,
+            Some("recent".into()),
+        )
+        .unwrap();
+        assert!(!records.iter().any(|record| {
+            record["resource_path"]
+                .as_str()
+                .is_some_and(|path| path.contains("thumbs"))
+        }));
+        assert_eq!(records.len(), 1);
+        assert_eq!(
+            records[0]["resource_path"].as_str(),
+            Some(root.join("fresh.md").to_str().unwrap())
+        );
     }
 
     #[test]
