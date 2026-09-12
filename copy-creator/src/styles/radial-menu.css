@@ -865,6 +865,12 @@ html {
   margin: 10px 0;
 }
 
+/* 与图片同理：预览面板内视频放宽到面板可视高度，竖版视频不再被 330px 上限压成小条。
+   仅覆盖本面板，主窗口卡片与详情页保持各自尺寸。 */
+.content-preview-body .resource-media-video {
+  max-height: calc(100vh - 96px);
+}
+
 /* 剪切板/资源文件条目的媒体视觉（视频封面帧等）：比主窗口卡片矮一些，
    覆盖 .clipboard-file-media 的默认尺寸。 */
 .clipboard-file-media.radial-menu-file-media {
