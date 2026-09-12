@@ -406,10 +406,11 @@ describe("integration regressions", () => {
     const libSource = readSource("../src-tauri/src/lib.rs");
     const dbSource = readSource("../src-tauri/src/db.rs");
 
-    // 列表卡片必须走缩略图：原图直出会在滚动时全尺寸解码造成卡顿，
-    // 详情页与展开预览仍保留 ResourceImage 原图（见上方 detail 断言）。
+    // 密集网格卡片必须走缩略图：原图直出会在滚动时全尺寸解码造成卡顿。
+    // 全宽横幅（剪切板/径向，经 FileMediaVisual）可视数量少，直接流式
+    // 原图保证清晰度，不生成任何缩略图文件；详情页保持 ResourceImage 原图。
     expect(cardSource).toContain("<ResourceFileImage");
-    expect(radialSource).toContain("<ResourceFileImage");
+    expect(radialSource).toContain("<ResourceImage");
     expect(mediaSource).toContain('getResourceFileThumbnail(path, 256)');
     expect(mediaSource).toContain('loading="lazy"');
     expect(mediaSource).toContain('decoding="async"');

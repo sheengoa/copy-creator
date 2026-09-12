@@ -3,15 +3,15 @@ import { useTranslation } from "react-i18next";
 import { Icons } from "./Icons";
 import { fileMediaKindFromPath } from "../domain/mediaKind";
 import { resolveResourceMediaUrl } from "../domain/mediaUrl";
-import { ResourceFileImage } from "../pages/ResourcePage/ResourceMedia";
+import { ResourceImage } from "../pages/ResourcePage/ResourceMedia";
 
 /**
  * 剪切板/径向菜单文件条目的媒体视觉，也是图片内容的统一列表态：
- * 图片一律出全宽横幅（contain 完整展示，缩略图管线解码），无论它以
- * 图片数据还是图片文件进入；视频出封面帧（元数据寻帧，失败回退图标
- * 占位），音频出类型图标条。普通文件渲染 null，调用方按原样展示文件名。
- * 媒体地址经后端回环媒体服务提供，任意本机绝对路径均可播放，与资源区
- * 视频预览同一条链路。
+ * 图片一律出全宽横幅并直接流式加载原图（asset 协议 + 懒解码，不在任何
+ * 目录生成缩略图文件），横幅可视数量少，全尺寸解码开销可接受；清晰度
+ * 优先，256px 缩略图管线只留给密集小网格卡片。视频出封面帧（元数据
+ * 寻帧，失败回退图标占位），音频出类型图标条。普通文件渲染 null，
+ * 调用方按原样展示文件名。视频地址经后端回环媒体服务提供。
  */
 export function FileMediaVisual({
   path,
@@ -35,7 +35,7 @@ export function FileMediaVisual({
   if (kind === "image") {
     return (
       <div className={`clipboard-file-media is-image${className ? ` ${className}` : ""}`}>
-        <ResourceFileImage
+        <ResourceImage
           path={path}
           alt={t("resources.typeImage")}
           className="clipboard-file-media-image"
