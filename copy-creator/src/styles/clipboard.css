@@ -327,6 +327,16 @@
   background: rgba(255, 255, 255, 0.18);
 }
 
+/* 展开媒体（图片/视频）必须完整展示：容器不限高、不出卡内滚动条，
+   高度由媒体自身上限决定（展开图 480px / 视频 330px），超出部分交给列表滚动。
+   根因教训：媒体上限放宽时容器仍保留 320px 滚动上限，展开图被裁切、
+   必须卡内上下滑动才能看全。文本展开不受本规则影响，保留卡内滚动。 */
+.clipboard-card-body.is-expanded.is-media-expanded {
+  max-height: none;
+  padding-right: 1rem;
+  overflow-y: visible;
+}
+
 .clipboard-card-expanded-content {
   display: flex;
   flex-direction: column;

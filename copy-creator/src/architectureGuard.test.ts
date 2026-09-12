@@ -138,4 +138,23 @@ describe("架构守卫：领域规则必须全局共享", () => {
       "按折叠集合展平分组树必须复用 domain/groups.ts，禁止页面手写 walk（见 domain/README.md）",
     ).toEqual([]);
   });
+
+  it("规则 11：主窗口展开媒体容器必须放开限高（防卡内滚动裁切回归）", () => {
+    // 展开图/视频自身上限（480px/330px）曾高于容器滚动上限（320px），
+    // 媒体被裁切、必须卡内滑动才能看全；剪切板与短语两份样式同规同源，缺一不可。
+    for (const cssFile of ["styles/clipboard.css", "styles/phrases.css"]) {
+      expect(
+        readSource(cssFile),
+        `${cssFile} 缺少 is-media-expanded 放开规则：展开媒体容器不得保留 320px 滚动上限`,
+      ).toMatch(/\.is-expanded\.is-media-expanded\s*\{[^}]*max-height:\s*none[^}]*overflow-y:\s*visible/s);
+    }
+    expect(
+      readSource("pages/ClipboardPage/ClipboardCard.tsx"),
+      "剪切板卡片展开媒体（图片/视频）时必须输出 is-media-expanded（判定读 domain 字段 expandPreview）",
+    ).toContain('view.expandPreview === "image" || view.expandPreview === "video"');
+    expect(
+      readSource("pages/PhrasePage/PhraseList.tsx"),
+      "短语卡片展开图片时必须输出 is-media-expanded",
+    ).toContain('isTextExpanded && imageFile ? " is-media-expanded"');
+  });
 });

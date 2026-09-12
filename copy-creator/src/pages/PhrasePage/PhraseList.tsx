@@ -144,7 +144,7 @@ function PhraseCard({
       )}
       <div className="noticontent">
         <div
-          className={`notibody phrase-card-body${isFile ? " phrase-card-file-body" : ""}${canToggleText ? " is-toggleable" : ""}${canCollapseText && !isTextExpanded ? " is-collapsed" : ""}${isTextExpanded ? " is-expanded" : ""}${isFile && isTextExpanded ? " is-file-expanded" : ""}`}
+          className={`notibody phrase-card-body${isFile ? " phrase-card-file-body" : ""}${canToggleText ? " is-toggleable" : ""}${canCollapseText && !isTextExpanded ? " is-collapsed" : ""}${isTextExpanded ? " is-expanded" : ""}${isFile && isTextExpanded ? " is-file-expanded" : ""}${isTextExpanded && imageFile ? " is-media-expanded" : ""}`}
         >
           {isFile ? (
             <>

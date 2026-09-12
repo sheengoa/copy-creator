@@ -240,6 +240,15 @@
   background: rgba(255, 255, 255, 0.18);
 }
 
+/* 展开图片必须完整展示：容器不限高、不出卡内滚动条，
+   高度由展开图自身上限（480px）决定，超出部分交给列表滚动。
+   与 clipboard.css 的 is-media-expanded 同规同源，改动需两处同步（守卫规则 11）。 */
+.phrase-card-body.is-expanded.is-media-expanded {
+  max-height: none;
+  padding-right: 1rem;
+  overflow-y: visible;
+}
+
 .phrase-card.is-selection-mode .phrase-card-body {
   padding-inline-start: 1rem;
 }

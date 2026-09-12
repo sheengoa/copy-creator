@@ -248,7 +248,7 @@ function ClipboardCardInner({
         </div>
 
         <div
-          className={`notibody clipboard-card-body${canToggle ? " is-toggleable" : ""}${canCollapseText && !expanded ? " is-collapsed" : ""}${canToggle && expanded ? " is-expanded" : ""}${view.recordType === "file" && expanded ? " is-file-expanded" : ""}`}
+          className={`notibody clipboard-card-body${canToggle ? " is-toggleable" : ""}${canCollapseText && !expanded ? " is-collapsed" : ""}${canToggle && expanded ? " is-expanded" : ""}${view.recordType === "file" && expanded ? " is-file-expanded" : ""}${expanded && (view.expandPreview === "image" || view.expandPreview === "video") ? " is-media-expanded" : ""}`}
         >
           {view.recordType === "image" ? (
             expanded ? (
