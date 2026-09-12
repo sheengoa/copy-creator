@@ -34,7 +34,7 @@ import { ResourceCard } from "./ResourcePage/ResourceCard";
 import { buildRecordView, type RecordView } from "../domain/recordView";
 import { type ResourceTypeFilter } from "../domain/mediaKind";
 import { computeResourceColumnCount, splitResourceColumns } from "./ResourcePage/resourceUtils";
-import { findResourceFolder, flattenResourceFolderPaths, flattenResourceFolders, formatResourceFolderPath, getResourceFolderRoot, getResourceFolderSiblings, isResourceFolderPath, reorderResourceFolderSiblings } from "../domain/groups";
+import { buildResourceFolderParentMap, findResourceFolder, flattenResourceFolderPaths, flattenResourceFoldersVisible, formatResourceFolderPath, getResourceFolderRoot, getResourceFolderSiblings, isResourceFolderPath, reorderResourceFolderSiblings } from "../domain/groups";
 import { inferResourceMediaKind, matchesResourceType } from "../domain/mediaKind";
 import { getResourceTitle } from "../domain/records";
 import ResourceMoveDialog from "./ResourcePage/ResourceMoveDialog";
@@ -351,36 +351,24 @@ export default function ResourcePage() {
     [resourceFolderGroups, resourceGroup],
   );
   // 管理对话框的树形行：折叠的分组不展示其后代；计数为含子级的总量（后端提供）。
-  const manageRows = useMemo(() => {
-    const rows: Array<{ folder: ResourceFolder; depth: number }> = [];
-    const collapsed = new Set(collapsedGroupPaths);
-    const walk = (folders: ResourceFolder[], depth: number) => {
-      for (const folder of folders) {
-        rows.push({ folder, depth });
-        if ((folder.children ?? []).length > 0 && !collapsed.has(folder.path)) {
-          walk(folder.children ?? [], depth + 1);
-        }
-      }
-    };
-    walk(resourceGroups, 0);
-    return rows;
-  }, [collapsedGroupPaths, resourceGroups]);
+  const manageRows = useMemo(
+    () => flattenResourceFoldersVisible(resourceGroups, new Set(collapsedGroupPaths)),
+    [collapsedGroupPaths, resourceGroups],
+  );
+  // 「移动分组」目标树与管理对话框共用同一折叠集合：同一棵树在两个
+  // 对话框间来回打开时保持一致的浏览状态。
   const groupMoveRows = useMemo(
-    () => flattenResourceFolders(resourceGroups.filter((group) => group.name !== "")),
-    [resourceGroups],
+    () => flattenResourceFoldersVisible(
+      resourceGroups.filter((group) => group.name !== ""),
+      new Set(collapsedGroupPaths),
+    ),
+    [collapsedGroupPaths, resourceGroups],
   );
   // 管理对话框拖拽用：分组路径 → 父分组路径（顶层为 null）。
-  const groupParentMap = useMemo(() => {
-    const map = new Map<string, string | null>();
-    const walk = (folders: ResourceFolder[], parent: string | null) => {
-      for (const folder of folders) {
-        map.set(folder.path, parent);
-        walk(folder.children ?? [], folder.path);
-      }
-    };
-    walk(resourceGroups, null);
-    return map;
-  }, [resourceGroups]);
+  const groupParentMap = useMemo(
+    () => buildResourceFolderParentMap(resourceGroups),
+    [resourceGroups],
+  );
   const [activeGroupRowId, setActiveGroupRowId] = useState<string | null>(null);
   // 拖动虚影与被拖行等宽：fixed 定位的 DragOverlay 默认按内容收缩，
   // 文字短时会缩成一小条（与剪贴板区 activeOverlayWidth 同一做法）。
@@ -1173,16 +1161,24 @@ export default function ResourcePage() {
               })}
             </h3>
             <div className="resource-move-tree" role="listbox" aria-label={t("resources.moveGroup")}>
-              <button
-                type="button"
-                className={`resource-move-row${resourceGroupMove.target === "" ? " selected" : ""}`}
-                role="option"
-                aria-selected={resourceGroupMove.target === ""}
-                onClick={() => setResourceGroupMove({ ...resourceGroupMove, target: "" })}
-              >
-                <span className="resource-move-icon">{Icons.resources}</span>
-                <span>{t("resources.topLevel")}</span>
-              </button>
+              <div className="resource-move-entry">
+                <button
+                  type="button"
+                  className="resource-group-twist"
+                  disabled
+                  tabIndex={-1}
+                />
+                <button
+                  type="button"
+                  className={`resource-move-row${resourceGroupMove.target === "" ? " selected" : ""}`}
+                  role="option"
+                  aria-selected={resourceGroupMove.target === ""}
+                  onClick={() => setResourceGroupMove({ ...resourceGroupMove, target: "" })}
+                >
+                  <span className="resource-move-icon">{Icons.resources}</span>
+                  <span>{t("resources.topLevel")}</span>
+                </button>
+              </div>
               {groupMoveRows.map(({ folder, depth }) => {
                 const currentParent = resourceGroupMove.path
                   .split("/")
@@ -1191,27 +1187,46 @@ export default function ResourcePage() {
                 const inSubtree = folder.path === resourceGroupMove.path
                   || folder.path.startsWith(`${resourceGroupMove.path}/`);
                 const disabled = inSubtree || folder.path === currentParent;
+                const hasChildren = (folder.children ?? []).length > 0;
+                const collapsed = collapsedGroupPaths.includes(folder.path);
                 return (
-                  <button
+                  <div
                     key={folder.path}
-                    type="button"
-                    className={`resource-move-row${resourceGroupMove.target === folder.path ? " selected" : ""}${disabled ? " current" : ""}`}
-                    style={{ paddingLeft: `${8 + depth * 16}px` }}
-                    role="option"
-                    aria-selected={resourceGroupMove.target === folder.path}
-                    disabled={disabled}
-                    title={folder.path}
-                    onClick={() => !disabled && setResourceGroupMove({ ...resourceGroupMove, target: folder.path })}
+                    className="resource-move-entry"
+                    style={{ paddingLeft: `${depth * 16}px` }}
                   >
-                    <span className="resource-move-icon">{Icons.resources}</span>
-                    <span>{folder.name}</span>
-                    {folder.path === currentParent && (
-                      <span className="resource-move-current-tag">{t("resources.currentParentTag")}</span>
-                    )}
-                    {inSubtree && (
-                      <span className="resource-move-current-tag">{t("resources.selfTag")}</span>
-                    )}
-                  </button>
+                    <button
+                      type="button"
+                      className={`resource-group-twist${collapsed ? " collapsed" : ""}`}
+                      disabled={!hasChildren}
+                      aria-label={
+                        hasChildren
+                          ? (collapsed ? t("resources.expandGroup") : t("resources.collapseGroup"))
+                          : undefined
+                      }
+                      onClick={() => hasChildren && toggleGroupCollapsed(folder.path)}
+                    >
+                      {hasChildren ? Icons.chevronDown : null}
+                    </button>
+                    <button
+                      type="button"
+                      className={`resource-move-row${resourceGroupMove.target === folder.path ? " selected" : ""}${disabled ? " current" : ""}`}
+                      role="option"
+                      aria-selected={resourceGroupMove.target === folder.path}
+                      disabled={disabled}
+                      title={folder.path}
+                      onClick={() => !disabled && setResourceGroupMove({ ...resourceGroupMove, target: folder.path })}
+                    >
+                      <span className="resource-move-icon">{Icons.resources}</span>
+                      <span>{folder.name}</span>
+                      {folder.path === currentParent && (
+                        <span className="resource-move-current-tag">{t("resources.currentParentTag")}</span>
+                      )}
+                      {inSubtree && (
+                        <span className="resource-move-current-tag">{t("resources.selfTag")}</span>
+                      )}
+                    </button>
+                  </div>
                 );
               })}
             </div>

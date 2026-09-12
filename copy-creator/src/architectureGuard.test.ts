@@ -123,4 +123,19 @@ describe("架构守卫：领域规则必须全局共享", () => {
     );
     expect(listeners.length, "新增列表应复用既有刷新监听（见 domain/README.md）").toBe(2);
   });
+
+  it("规则 10：分组树折叠展平仅在 domain/groups.ts 定义", () => {
+    expect(readSource("domain/groups.ts")).toContain(
+      "export function flattenResourceFoldersVisible",
+    );
+    const offenders = allSources
+      .filter((file) => !toPosix(file).includes("domain/groups.ts"))
+      .filter((file) =>
+        /function flattenResourceFoldersVisible|const walk = \(folders/.test(sourceOf(file)))
+      .map((file) => toPosix(file.replace(frontRoot, "")));
+    expect(
+      offenders,
+      "按折叠集合展平分组树必须复用 domain/groups.ts，禁止页面手写 walk（见 domain/README.md）",
+    ).toEqual([]);
+  });
 });

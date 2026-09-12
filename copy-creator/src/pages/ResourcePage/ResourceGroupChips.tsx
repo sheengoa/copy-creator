@@ -20,7 +20,7 @@ import { CSS } from "@dnd-kit/utilities";
 import { restrictToHorizontalAxis } from "@dnd-kit/modifiers";
 import { Icons } from "../../components/Icons";
 import type { ResourceFolder } from "../../types";
-import { findResourceFolder, flattenResourceFolders, formatResourceFolderPath, isResourceFolderPath } from "../../domain/groups";
+import { findResourceFolder, flattenResourceFoldersVisible, formatResourceFolderPath, isResourceFolderPath } from "../../domain/groups";
 
 interface ResourceGroupChipsProps {
   groups: ResourceFolder[];
@@ -119,6 +119,16 @@ export default function ResourceGroupChips({
   const [activeDragId, setActiveDragId] = useState<string | null>(null);
   const [menuPath, setMenuPath] = useState<string | null>(null);
   const [menuPosition, setMenuPosition] = useState<{ left: number; top: number } | null>(null);
+  // 子分组折叠状态：浮层内存活，重开浮层与页面级重扫都保持。
+  const [collapsedPaths, setCollapsedPaths] = useState<string[]>([]);
+
+  const toggleCollapsed = useCallback((path: string) => {
+    setCollapsedPaths((current) => (
+      current.includes(path)
+        ? current.filter((path2) => path2 !== path)
+        : [...current, path]
+    ));
+  }, []);
 
   const sensors = useSensors(
     useSensor(PointerSensor, { activationConstraint: { distance: 4 } }),
@@ -162,6 +172,21 @@ export default function ResourceGroupChips({
     setMenuPosition({ left, top });
   }, []);
 
+  const menuFolder = useMemo(
+    () => (menuPath ? findResourceFolder(groups, menuPath) : null),
+    [groups, menuPath],
+  );
+  // 折叠展平：根行（全部文件）不参与折叠，其下各行可收起后代。
+  const menuItems = useMemo(
+    () => menuFolder
+      ? [
+        { folder: menuFolder, depth: 0 },
+        ...flattenResourceFoldersVisible(menuFolder.children ?? [], new Set(collapsedPaths), 1),
+      ]
+      : [],
+    [menuFolder, collapsedPaths],
+  );
+
   useEffect(() => {
     if (!menuPath) return;
 
@@ -199,7 +224,7 @@ export default function ResourceGroupChips({
       window.removeEventListener("scroll", schedulePositionUpdate, true);
       if (frame !== null) window.cancelAnimationFrame(frame);
     };
-  }, [closeMenu, menuPath, updateMenuPosition]);
+  }, [closeMenu, menuPath, menuItems.length, updateMenuPosition]);
 
   const handleSelect = useCallback((path: string) => {
     closeMenu();
@@ -234,19 +259,6 @@ export default function ResourceGroupChips({
     onReorderGroups(arrayMove(groups, oldIndex, newIndex).map((group) => group.path));
   }, [groups, onReorderGroups]);
 
-  const menuFolder = useMemo(
-    () => (menuPath ? findResourceFolder(groups, menuPath) : null),
-    [groups, menuPath],
-  );
-  const menuItems = useMemo(
-    () => menuFolder
-      ? [
-        { folder: menuFolder, depth: 0 },
-        ...flattenResourceFolders(menuFolder.children ?? [], 1),
-      ]
-      : [],
-    [menuFolder],
-  );
   const activeGroup = activeDragId ? groups.find((group) => group.path === activeDragId) : null;
 
   return (
@@ -332,21 +344,43 @@ export default function ResourceGroupChips({
             visibility: menuPosition ? "visible" : "hidden",
           }}
         >
-          {menuItems.map(({ folder, depth }) => (
-            <button
-              key={folder.path}
-              type="button"
-              className={`resource-group-menu-item${depth > 0 ? " nested" : ""}${selectedGroup === folder.path ? " selected" : ""}`}
-              role="menuitem"
-              aria-current={selectedGroup === folder.path ? "page" : undefined}
-              title={folder.path}
-              style={{ paddingLeft: `${8 + depth * 14}px` }}
-              onClick={() => handleSelect(folder.path)}
-            >
-              {Icons.resources}
-              <span>{depth === 0 ? t("resources.allFiles") : folder.name}</span>
-            </button>
-          ))}
+          {menuItems.map(({ folder, depth }, index) => {
+            const hasChildren = index > 0 && (folder.children ?? []).length > 0;
+            const collapsed = collapsedPaths.includes(folder.path);
+            return (
+              <div
+                key={folder.path}
+                className="resource-group-menu-entry"
+                style={{ paddingLeft: `${8 + depth * 14}px` }}
+              >
+                <button
+                  type="button"
+                  className={`resource-group-twist${collapsed ? " collapsed" : ""}`}
+                  disabled={!hasChildren}
+                  tabIndex={hasChildren ? 0 : -1}
+                  aria-label={
+                    hasChildren
+                      ? (collapsed ? t("resources.expandGroup") : t("resources.collapseGroup"))
+                      : undefined
+                  }
+                  onClick={() => hasChildren && toggleCollapsed(folder.path)}
+                >
+                  {hasChildren ? Icons.chevronDown : null}
+                </button>
+                <button
+                  type="button"
+                  className={`resource-group-menu-item${depth > 0 ? " nested" : ""}${selectedGroup === folder.path ? " selected" : ""}`}
+                  role="menuitem"
+                  aria-current={selectedGroup === folder.path ? "page" : undefined}
+                  title={folder.path}
+                  onClick={() => handleSelect(folder.path)}
+                >
+                  {Icons.resources}
+                  <span>{depth === 0 ? t("resources.allFiles") : folder.name}</span>
+                </button>
+              </div>
+            );
+          })}
         </div>,
         document.body,
       )}

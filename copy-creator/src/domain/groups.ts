@@ -21,6 +21,22 @@ export function flattenResourceFolders(
   ]);
 }
 
+// 按折叠集合展平分组树：集合内的分组自身保留一行，其后代不产生行。
+// 主窗口下拉、径向菜单、移动对话框与新建对话框共用；折叠是纯展示
+// 状态，集合由各界面自行持有。
+export function flattenResourceFoldersVisible(
+  folders: ResourceFolder[],
+  collapsedPaths: ReadonlySet<string>,
+  depth = 0,
+): FlattenedResourceFolder[] {
+  return folders.flatMap((folder) => [
+    { folder, depth },
+    ...((folder.children ?? []).length > 0 && !collapsedPaths.has(folder.path)
+      ? flattenResourceFoldersVisible(folder.children ?? [], collapsedPaths, depth + 1)
+      : []),
+  ]);
+}
+
 // 求分组树扁平化后的全路径顺序（提交手动排序时按此持久化）。
 export function flattenResourceFolderPaths(folders: ResourceFolder[]): string[] {
   return flattenResourceFolders(folders).map(({ folder }) => folder.path);
@@ -68,6 +84,21 @@ export function findResourceFolder(
     if (found) return found;
   }
   return null;
+}
+
+// 求分组路径 → 父分组路径（顶层为 null）的映射；供分组管理拖拽排序使用。
+export function buildResourceFolderParentMap(
+  folders: ResourceFolder[],
+): Map<string, string | null> {
+  const map = new Map<string, string | null>();
+  const walk = (items: ResourceFolder[], parent: string | null) => {
+    for (const folder of items) {
+      map.set(folder.path, parent);
+      walk(folder.children ?? [], folder.path);
+    }
+  };
+  walk(folders, null);
+  return map;
 }
 
 export function isResourceFolderPath(path: string, ancestor: string): boolean {

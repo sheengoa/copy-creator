@@ -1,7 +1,7 @@
 import { FileThumb } from "./FileThumb";
 import { RadialImageThumb, ResourceItemVisual } from "./ResourceItemVisual";
 import { readResourceTextPreview, readTextFileContent } from "../../domain/mediaAssets";
-import { useEffect, useRef, useState, useCallback, type CSSProperties } from "react";
+import { useEffect, useRef, useState, useCallback, useMemo, type CSSProperties } from "react";
 import { createPortal } from "react-dom";
 import { useTranslation } from "react-i18next";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
@@ -47,7 +47,7 @@ import { formatTime, formatRelativeTime } from "../../utils/formatTime";
 import { fileNameFromPath } from "../../domain/fileName";
 import type { ClipboardRecord, Phrase, ResourceFolder } from "../../types";
 import { type ResourceMediaKind } from "../../domain/mediaKind";
-import { findResourceFolder, flattenResourceFolders, formatResourceFolderPath, isResourceFolderPath } from "../../domain/groups";
+import { findResourceFolder, flattenResourceFoldersVisible, formatResourceFolderPath, isResourceFolderPath } from "../../domain/groups";
 import { fileMediaKindFromPath, getResourceExtension, inferResourceMediaKind, TEXT_EXTENSIONS } from "../../domain/mediaKind";
 import {
   getResourcePath,
@@ -204,6 +204,8 @@ export default function RadialMenu() {
     left: number;
     top: number;
   } | null>(null);
+  // 资源分组下拉的子分组折叠状态：菜单存活期内记忆。
+  const [collapsedGroupPaths, setCollapsedGroupPaths] = useState<string[]>([]);
   const [phraseGroupId, setPhraseGroupId] = useState<string | null>(ALL_PHRASES_GROUP_ID);
   const [preview, setPreview] = useState<PreviewState | null>(null);
   const [dragSessionItemId, setDragSessionItemId] = useState<string | null>(null);
@@ -284,12 +286,22 @@ export default function RadialMenu() {
   const resourceGroupMenuFolder = resourceGroupMenuPath
     ? findResourceFolder(resourceFolderGroups, resourceGroupMenuPath)
     : null;
+  // 折叠展平：根行（全部文件）不参与折叠，其下各行可收起后代。
+  const collapsedGroupSet = useMemo(() => new Set(collapsedGroupPaths), [collapsedGroupPaths]);
   const resourceGroupMenuItems = resourceGroupMenuFolder
     ? [
         { folder: resourceGroupMenuFolder, depth: 0 },
-        ...flattenResourceFolders(resourceGroupMenuFolder.children ?? [], 1),
+        ...flattenResourceFoldersVisible(resourceGroupMenuFolder.children ?? [], collapsedGroupSet, 1),
       ]
     : [];
+
+  const toggleResourceGroupCollapsed = useCallback((path: string) => {
+    setCollapsedGroupPaths((current) => (
+      current.includes(path)
+        ? current.filter((path2) => path2 !== path)
+        : [...current, path]
+    ));
+  }, []);
 
   const closeResourceGroupMenu = useCallback(() => {
     setResourceGroupMenuPath(null);
@@ -343,7 +355,7 @@ export default function RadialMenu() {
       window.removeEventListener("scroll", schedulePositionUpdate, true);
       if (frame !== null) window.cancelAnimationFrame(frame);
     };
-  }, [closeResourceGroupMenu, resourceGroupMenuPath, updateResourceGroupMenuPosition]);
+  }, [closeResourceGroupMenu, resourceGroupMenuPath, resourceGroupMenuItems.length, updateResourceGroupMenuPosition]);
 
   const invalidatePreviewRequest = useCallback(() => {
     previewRequestRef.current += 1;
@@ -1582,21 +1594,43 @@ export default function RadialMenu() {
         }}
         onClick={(event) => event.stopPropagation()}
       >
-        {resourceGroupMenuItems.map(({ folder, depth }) => (
-          <button
-            key={folder.path}
-            type="button"
-            className={`radial-menu-resource-group-menu-item${resourceGroup === folder.path ? " selected" : ""}`}
-            role="menuitem"
-            aria-current={resourceGroup === folder.path ? "page" : undefined}
-            title={folder.path}
-            style={{ paddingLeft: `${8 + depth * 14}px` }}
-            onClick={() => applyResourceGroupSwitch(folder.path)}
-          >
-            {Icons.resources}
-            <span>{depth === 0 ? t("resources.allFiles") : folder.name}</span>
-          </button>
-        ))}
+        {resourceGroupMenuItems.map(({ folder, depth }, index) => {
+          const hasChildren = index > 0 && (folder.children ?? []).length > 0;
+          const collapsed = collapsedGroupPaths.includes(folder.path);
+          return (
+            <div
+              key={folder.path}
+              className="resource-group-menu-entry"
+              style={{ paddingLeft: `${8 + depth * 14}px` }}
+            >
+              <button
+                type="button"
+                className={`resource-group-twist${collapsed ? " collapsed" : ""}`}
+                disabled={!hasChildren}
+                tabIndex={hasChildren ? 0 : -1}
+                aria-label={
+                  hasChildren
+                    ? (collapsed ? t("resources.expandGroup") : t("resources.collapseGroup"))
+                    : undefined
+                }
+                onClick={() => hasChildren && toggleResourceGroupCollapsed(folder.path)}
+              >
+                {hasChildren ? Icons.chevronDown : null}
+              </button>
+              <button
+                type="button"
+                className={`radial-menu-resource-group-menu-item${resourceGroup === folder.path ? " selected" : ""}`}
+                role="menuitem"
+                aria-current={resourceGroup === folder.path ? "page" : undefined}
+                title={folder.path}
+                onClick={() => applyResourceGroupSwitch(folder.path)}
+              >
+                {Icons.resources}
+                <span>{depth === 0 ? t("resources.allFiles") : folder.name}</span>
+              </button>
+            </div>
+          );
+        })}
       </div>,
       document.body,
     )

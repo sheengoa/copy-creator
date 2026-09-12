@@ -10,6 +10,8 @@ import { WindowResizeHandles } from "../WindowResizeHandles";
 import { usePersistWindowSize } from "../../hooks/usePersistWindowSize";
 import type { ClipboardStorageMode, ResourceFolder } from "../../types";
 import { isResourceRecord } from "../../domain/records";
+import { flattenResourceFoldersVisible } from "../../domain/groups";
+import { Icons } from "../Icons";
 
 interface StashRecord {
   id: string;
@@ -36,6 +38,8 @@ export default function ClipboardCreateDialog() {
   const [resourceGroupName, setResourceGroupName] = useState("");
   const [resourceGroups, setResourceGroups] = useState<ResourceFolder[]>([]);
   const [groupMenuOpen, setGroupMenuOpen] = useState(false);
+  // 分组下拉的子分组折叠状态：对话框存活期内记忆。
+  const [collapsedGroupPaths, setCollapsedGroupPaths] = useState<string[]>([]);
   const [loadingRecords, setLoadingRecords] = useState(true);
   const [loadingRecordId, setLoadingRecordId] = useState<string | null>(null);
   const [editingId, setEditingId] = useState<string | null>(null);
@@ -89,26 +93,30 @@ export default function ClipboardCreateDialog() {
     }
   }, []);
 
-  // 拍平分组树为缩进行；未分组（path 为空）由后端固定放在首位，加载失败时至少保留该项可选。
+  // 拍平分组树为缩进行（支持子分组折叠，对话框存活期内记忆）；未分组
+  // （path 为空）由后端固定放在首位，加载失败时至少保留该项可选。
+  const collapsedGroupSet = useMemo(() => new Set(collapsedGroupPaths), [collapsedGroupPaths]);
   const groupRows = useMemo(() => {
-    const rows: Array<{ path: string; label: string; count: number; depth: number }> = [];
-    const walk = (folders: ResourceFolder[], depth: number) => {
-      for (const folder of folders) {
-        rows.push({
-          path: folder.path,
-          label: folder.name === "" ? t("resources.ungrouped") : folder.name,
-          count: folder.count,
-          depth,
-        });
-        if ((folder.children ?? []).length > 0) walk(folder.children ?? [], depth + 1);
-      }
-    };
-    walk(resourceGroups, 0);
+    const rows = flattenResourceFoldersVisible(resourceGroups, collapsedGroupSet).map(
+      ({ folder, depth }) => ({
+        folder,
+        label: folder.name === "" ? t("resources.ungrouped") : folder.name,
+        depth,
+      }),
+    );
     if (rows.length === 0) {
-      rows.push({ path: "", label: t("resources.ungrouped"), count: 0, depth: 0 });
+      rows.push({ folder: { name: "", path: "", count: 0, children: [] }, label: t("resources.ungrouped"), depth: 0 });
     }
     return rows;
-  }, [resourceGroups, t]);
+  }, [collapsedGroupSet, resourceGroups, t]);
+
+  const toggleGroupCollapsed = useCallback((path: string) => {
+    setCollapsedGroupPaths((current) => (
+      current.includes(path)
+        ? current.filter((path2) => path2 !== path)
+        : [...current, path]
+    ));
+  }, []);
 
   // 初始化：主题 + 语言 + 事件监听
   useEffect(() => {
@@ -409,25 +417,42 @@ export default function ClipboardCreateDialog() {
               {groupMenuOpen && (
                 <div className="clipboard-create-stash-menu clipboard-create-group-menu" role="listbox" aria-label={t("resources.targetGroup")}>
                   {groupRows.map((row) => (
-                    <Fragment key={row.path || "ungrouped"}>
-                      <button
-                        type="button"
-                        className={`clipboard-create-stash-option${resourceGroupName === row.path ? " selected" : ""}`}
-                        onClick={() => handleGroupSelect(row.path)}
-                        role="option"
-                        aria-selected={resourceGroupName === row.path}
-                        title={row.label}
+                    <Fragment key={row.folder.path || "ungrouped"}>
+                      <div
+                        className="resource-group-menu-entry"
+                        style={row.depth > 0 ? { paddingLeft: row.depth * 14 } : undefined}
                       >
-                        <span
-                          className="clipboard-create-stash-option-content"
-                          style={row.depth > 0 ? { paddingLeft: row.depth * 14 } : undefined}
+                        <button
+                          type="button"
+                          className={`resource-group-twist${collapsedGroupPaths.includes(row.folder.path) ? " collapsed" : ""}`}
+                          disabled={(row.folder.children ?? []).length === 0}
+                          aria-label={(row.folder.children ?? []).length > 0
+                            ? (collapsedGroupPaths.includes(row.folder.path)
+                              ? t("resources.expandGroup")
+                              : t("resources.collapseGroup"))
+                            : undefined}
+                          onClick={() =>
+                            (row.folder.children ?? []).length > 0
+                            && toggleGroupCollapsed(row.folder.path)}
                         >
-                          {row.label}
-                        </span>
-                        <span className="clipboard-create-group-count">{row.count > 0 ? row.count : ""}</span>
-                        {resourceGroupName === row.path && <span className="clipboard-create-stash-check">✓</span>}
-                      </button>
-                      {row.path === "" && <div className="clipboard-create-group-menu-sep" />}
+                          {(row.folder.children ?? []).length > 0 ? Icons.chevronDown : null}
+                        </button>
+                        <button
+                          type="button"
+                          className={`clipboard-create-stash-option${resourceGroupName === row.folder.path ? " selected" : ""}`}
+                          onClick={() => handleGroupSelect(row.folder.path)}
+                          role="option"
+                          aria-selected={resourceGroupName === row.folder.path}
+                          title={row.label}
+                        >
+                          <span className="clipboard-create-stash-option-content">
+                            {row.label}
+                          </span>
+                          <span className="clipboard-create-group-count">{row.folder.count > 0 ? row.folder.count : ""}</span>
+                          {resourceGroupName === row.folder.path && <span className="clipboard-create-stash-check">✓</span>}
+                        </button>
+                      </div>
+                      {row.folder.path === "" && <div className="clipboard-create-group-menu-sep" />}
                     </Fragment>
                   ))}
                 </div>

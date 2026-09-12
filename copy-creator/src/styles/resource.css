@@ -403,6 +403,33 @@
   color: var(--accent);
 }
 
+/* 分组树折叠条目容器（下拉、移动对话框、新建对话框共用）：
+   左侧折叠箭头 + 右侧行主体；无子分组的行渲染禁用空箭头对齐。 */
+.resource-group-menu-entry,
+.resource-move-entry {
+  display: flex;
+  width: 100%;
+  flex: 0 0 auto;
+  align-items: center;
+  gap: 2px;
+}
+
+.resource-group-menu-entry .resource-group-twist,
+.resource-move-entry .resource-group-twist {
+  flex: 0 0 auto;
+  align-self: center;
+  margin-left: 2px;
+}
+
+.resource-group-menu-entry > .resource-group-menu-item,
+.resource-group-menu-entry > .radial-menu-resource-group-menu-item,
+.resource-group-menu-entry > .clipboard-create-stash-option,
+.resource-move-entry > .resource-move-row {
+  flex: 1 1 auto;
+  width: auto;
+  min-width: 0;
+}
+
 .resource-group-menu-item.nested {
   font-size: var(--text-xs);
 }

@@ -1,8 +1,8 @@
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
 import type { ResourceFolder } from "../../types";
 import { Icons } from "../../components/Icons";
-import { flattenResourceFolders } from "../../domain/groups";
+import { flattenResourceFoldersVisible } from "../../domain/groups";
 
 interface ResourceMoveDialogProps {
   open: boolean;
@@ -30,6 +30,16 @@ export default function ResourceMoveDialog({
 }: ResourceMoveDialogProps) {
   const { t } = useTranslation();
   const [target, setTarget] = useState<string | null>(null);
+  // 目标树子分组折叠状态：对话框存活期内记忆。
+  const [collapsedPaths, setCollapsedPaths] = useState<string[]>([]);
+
+  const toggleCollapsed = useCallback((path: string) => {
+    setCollapsedPaths((current) => (
+      current.includes(path)
+        ? current.filter((path2) => path2 !== path)
+        : [...current, path]
+    ));
+  }, []);
 
   useEffect(() => {
     if (open) setTarget(null);
@@ -37,8 +47,11 @@ export default function ResourceMoveDialog({
 
   const rows = useMemo(() => {
     const topLevel = groups.filter((group) => group.name !== "");
-    return [{ folder: null, depth: 0 }, ...flattenResourceFolders(topLevel)];
-  }, [groups]);
+    return [
+      { folder: null, depth: 0 },
+      ...flattenResourceFoldersVisible(topLevel, new Set(collapsedPaths)),
+    ];
+  }, [collapsedPaths, groups]);
 
   if (!open) return null;
 
@@ -56,39 +69,59 @@ export default function ResourceMoveDialog({
           </div>
         </div>
         <div className="resource-move-tree" role="listbox" aria-label={t("resources.moveTitle")}>
-          <button
-            type="button"
-            className={`resource-move-row${target === "" ? " selected" : ""}${isCurrentFolder("") ? " current" : ""}`}
-            role="option"
-            aria-selected={target === ""}
-            disabled={isCurrentFolder("")}
-            onClick={() => setTarget("")}
-          >
-            <span className="resource-move-icon">{Icons.resources}</span>
-            <span>{t("resources.ungrouped")}</span>
-            {isCurrentFolder("") && (
-              <span className="resource-move-current-tag">{t("resources.moveCurrentTag")}</span>
-            )}
-          </button>
+          <div className="resource-move-entry">
+            <button type="button" className="resource-group-twist" disabled tabIndex={-1} />
+            <button
+              type="button"
+              className={`resource-move-row${target === "" ? " selected" : ""}${isCurrentFolder("") ? " current" : ""}`}
+              role="option"
+              aria-selected={target === ""}
+              disabled={isCurrentFolder("")}
+              onClick={() => setTarget("")}
+            >
+              <span className="resource-move-icon">{Icons.resources}</span>
+              <span>{t("resources.ungrouped")}</span>
+              {isCurrentFolder("") && (
+                <span className="resource-move-current-tag">{t("resources.moveCurrentTag")}</span>
+              )}
+            </button>
+          </div>
           {rows.map(({ folder, depth }) =>
             folder ? (
-              <button
+              <div
                 key={folder.path}
-                type="button"
-                className={`resource-move-row${target === folder.path ? " selected" : ""}${isCurrentFolder(folder.path) ? " current" : ""}`}
-                style={{ paddingLeft: `${8 + depth * 16}px` }}
-                role="option"
-                aria-selected={target === folder.path}
-                disabled={isCurrentFolder(folder.path)}
-                title={folder.path}
-                onClick={() => setTarget(folder.path)}
+                className="resource-move-entry"
+                style={{ paddingLeft: `${depth * 16}px` }}
               >
-                <span className="resource-move-icon">{Icons.resources}</span>
-                <span>{folder.name}</span>
-                {isCurrentFolder(folder.path) && (
-                  <span className="resource-move-current-tag">{t("resources.moveCurrentTag")}</span>
-                )}
-              </button>
+                <button
+                  type="button"
+                  className={`resource-group-twist${collapsedPaths.includes(folder.path) ? " collapsed" : ""}`}
+                  disabled={(folder.children ?? []).length === 0}
+                  aria-label={(folder.children ?? []).length > 0
+                    ? (collapsedPaths.includes(folder.path)
+                      ? t("resources.expandGroup")
+                      : t("resources.collapseGroup"))
+                    : undefined}
+                  onClick={() => (folder.children ?? []).length > 0 && toggleCollapsed(folder.path)}
+                >
+                  {(folder.children ?? []).length > 0 ? Icons.chevronDown : null}
+                </button>
+                <button
+                  type="button"
+                  className={`resource-move-row${target === folder.path ? " selected" : ""}${isCurrentFolder(folder.path) ? " current" : ""}`}
+                  role="option"
+                  aria-selected={target === folder.path}
+                  disabled={isCurrentFolder(folder.path)}
+                  title={folder.path}
+                  onClick={() => setTarget(folder.path)}
+                >
+                  <span className="resource-move-icon">{Icons.resources}</span>
+                  <span>{folder.name}</span>
+                  {isCurrentFolder(folder.path) && (
+                    <span className="resource-move-current-tag">{t("resources.moveCurrentTag")}</span>
+                  )}
+                </button>
+              </div>
             ) : null,
           )}
         </div>
