@@ -11,6 +11,7 @@ import { useSettingsStore } from "../../stores/settingsStore";
 import { UsageCountBadge } from "../../components/UsageCountBadge";
 import { fileNameFromPath } from "../../domain/fileName";
 import { isInlineTextPreviewFilePath, shouldShowInlineTextToggle } from "../../domain/records";
+import { useExpandReveal } from "../../hooks/useExpandReveal";
 
 interface PhraseListProps {
   phrases: Phrase[];
@@ -108,6 +109,8 @@ function PhraseCard({
     : shouldShowInlineTextToggle(phrase.content);
   const canCollapseText = !isFile && shouldShowInlineTextToggle(phrase.content);
   const isTextExpanded = canToggleText && textExpanded;
+  // 展开后若超出列表可视区，自动滚入完整展示（含图片异步加载后的高度校正）。
+  const expandedBodyRef = useExpandReveal<HTMLDivElement>(isTextExpanded);
 
   useEffect(() => {
     setTextExpanded(false);
@@ -144,6 +147,7 @@ function PhraseCard({
       )}
       <div className="noticontent">
         <div
+          ref={expandedBodyRef}
           className={`notibody phrase-card-body${isFile ? " phrase-card-file-body" : ""}${canToggleText ? " is-toggleable" : ""}${canCollapseText && !isTextExpanded ? " is-collapsed" : ""}${isTextExpanded ? " is-expanded" : ""}${isFile && isTextExpanded ? " is-file-expanded" : ""}${isTextExpanded && imageFile ? " is-media-expanded" : ""}`}
         >
           {isFile ? (

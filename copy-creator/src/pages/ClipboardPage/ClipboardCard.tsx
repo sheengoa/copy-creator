@@ -18,6 +18,7 @@ import { useSettingsStore } from "../../stores/settingsStore";
 import ApiKeyLabelPanel from "./ApiKeyLabelPanel";
 import { HighlightText } from "../../components/HighlightText";
 import { shouldUseTerminalPasteForMouseTrigger } from "../../utils/pasteMode";
+import { useExpandReveal } from "../../hooks/useExpandReveal";
 import { loadRecordPreviewSegments, type RadialPreviewSegment } from "../../domain/preview";
 import type { RecordView } from "../../domain/recordView";
 
@@ -125,6 +126,8 @@ function ClipboardCardInner({
   const canCollapseText = view.recordType !== "image" && view.recordType !== "file"
     && view.expandPreview === "text";
   const [expanded, setExpanded] = useState(false);
+  // 展开后若超出列表可视区，自动滚入完整展示（含媒体异步加载后的高度校正）。
+  const expandedBodyRef = useExpandReveal<HTMLDivElement>(expanded);
   const [ctxMenu, setCtxMenu] = useState<{ x: number; y: number } | null>(null);
   const [labelOpen, setLabelOpen] = useState(false);
   const apiKey = view.apiKey;
@@ -248,6 +251,7 @@ function ClipboardCardInner({
         </div>
 
         <div
+          ref={expandedBodyRef}
           className={`notibody clipboard-card-body${canToggle ? " is-toggleable" : ""}${canCollapseText && !expanded ? " is-collapsed" : ""}${canToggle && expanded ? " is-expanded" : ""}${view.recordType === "file" && expanded ? " is-file-expanded" : ""}${expanded && (view.expandPreview === "image" || view.expandPreview === "video") ? " is-media-expanded" : ""}`}
         >
           {view.recordType === "image" ? (

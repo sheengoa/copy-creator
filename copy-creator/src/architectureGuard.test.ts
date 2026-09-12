@@ -157,4 +157,22 @@ describe("架构守卫：领域规则必须全局共享", () => {
       "短语卡片展开图片时必须输出 is-media-expanded",
     ).toContain('isTextExpanded && imageFile ? " is-media-expanded"');
   });
+
+  it("规则 12：卡内展开必须经共享 useExpandReveal 完整滚入可视区", () => {
+    // 展开内容超出列表可视区时必须自动滚动展示完全；逻辑集中在共享 hook
+    // （最小滚动 + 媒体异步加载后的高度校正），新增可展开列表同样必须复用。
+    expect(
+      readSource("hooks/useExpandReveal.ts"),
+      "展开揭示必须集中在共享 hook：block: nearest 做最小滚动",
+    ).toContain('scrollIntoView({ block: "nearest"');
+    for (const cardFile of [
+      "pages/ClipboardPage/ClipboardCard.tsx",
+      "pages/PhrasePage/PhraseList.tsx",
+    ]) {
+      expect(
+        readSource(cardFile),
+        `${cardFile} 展开时必须消费 useExpandReveal，禁止手写滚动或遗漏`,
+      ).toContain("useExpandReveal");
+    }
+  });
 });
