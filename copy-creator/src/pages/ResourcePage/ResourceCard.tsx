@@ -10,7 +10,6 @@ import { InlineTextFilePreview } from "../../components/InlinePreview";
 import { formatTime, formatRelativeTime } from "../../utils/formatTime";
 import { recordUsageTime, resourceGroupLeafLabel } from "../../domain/records";
 import { UsageCountBadge } from "../../components/UsageCountBadge";
-import { ImageThumb } from "../ClipboardPage/ImageThumb";
 import { ResourceFileImage, ResourceVideoPoster } from "./ResourceMedia";
 import { type ResourceMediaKind } from "../../domain/mediaKind";
 import { getResourceSummary } from "../../domain/records";
@@ -38,26 +37,10 @@ function ResourceCardVisual({
   view,
   search,
   typeLabel,
-  onActivate,
-}: Pick<ResourceCardProps, "view" | "search" | "typeLabel"> & {
-  onActivate?: () => void;
-}) {
+}: Pick<ResourceCardProps, "view" | "search" | "typeLabel">) {
   const kind = view.kind;
   const summary = getResourceSummary({ type: view.recordType, content: view.content });
   const resourcePath = view.resourcePath ?? view.content;
-
-  if (kind === "image" && view.recordType === "image") {
-    return (
-      <ImageThumb
-        id={view.id}
-        content={view.content}
-        onClick={(event) => {
-          event.stopPropagation();
-          onActivate?.();
-        }}
-      />
-    );
-  }
 
   if (kind === "video") {
     return (
@@ -176,7 +159,6 @@ export function ResourceCard({
           view={view}
           search={search}
           typeLabel={typeLabel}
-          onActivate={activateDetail}
         />
         <span className="resource-card-kind">{typeLabel(kind)}</span>
         {onMove && !selectionMode && (

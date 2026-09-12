@@ -1,5 +1,4 @@
-import { FileThumb } from "./FileThumb";
-import { RadialImageThumb, ResourceItemVisual } from "./ResourceItemVisual";
+import { RadialImageBanner, ResourceItemVisual } from "./ResourceItemVisual";
 import { readResourceTextPreview, readTextFileContent } from "../../domain/mediaAssets";
 import { useEffect, useRef, useState, useCallback, useMemo, type CSSProperties } from "react";
 import { createPortal } from "react-dom";
@@ -1840,9 +1839,9 @@ export default function RadialMenu() {
                     {item.isResource ? (
                       <ResourceItemVisual item={item} />
                     ) : item.type === "image" ? (
-                      <RadialImageThumb recordId={item.id} />
+                      <RadialImageBanner recordId={item.id} />
                     ) : item.imagePath ? (
-                      <FileThumb path={item.imagePath} />
+                      <FileMediaVisual path={item.imagePath} className="radial-menu-file-media" />
                     ) : item.filePath && item.fileMediaKind ? (
                       <FileMediaVisual
                         path={item.filePath}

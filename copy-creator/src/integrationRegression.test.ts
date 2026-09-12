@@ -399,7 +399,8 @@ describe("integration regressions", () => {
     const cardSource = readSource("./pages/ResourcePage/ResourceCard.tsx");
     const radialSource = readSource("./components/RadialMenu/index.tsx")
       + readSource("./components/RadialMenu/ResourceItemVisual.tsx")
-      + readSource("./components/RadialMenu/FileThumb.tsx");
+      // 径向图片条目的横幅经共享 FileMediaVisual 渲染（内含 ResourceFileImage 缩略图管线）。
+      + readSource("./components/FileMediaPreview.tsx");
     const radialStyles = readSource("./styles/radial-menu.css");
     const resourceStyles = readSource("./styles/resource.css");
     const libSource = readSource("../src-tauri/src/lib.rs");

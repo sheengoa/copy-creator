@@ -9,7 +9,6 @@ import {
 import { InlineImagePreview, InlineTextFilePreview } from "../../components/InlinePreview";
 import { FileMediaVisual } from "../../components/FileMediaPreview";
 import { ResourceMediaPlayer } from "../ResourcePage/ResourceMedia";
-import { ImageThumb } from "./ImageThumb";
 import { TYPE_META } from "./utils";
 import { formatRelativeTime } from "../../utils/formatTime";
 import { recordUsageTime } from "../../domain/records";
@@ -263,15 +262,8 @@ function ClipboardCardInner({
                 zoomable
               />
             ) : (
-              <ImageThumb
-                id={view.id}
-                content={view.content}
-                onClick={(e) => {
-                  e.stopPropagation();
-                  if (selectionMode) onToggleSelected(view.id);
-                  else handlePaste();
-                }}
-              />
+              /* 图片列表态统一全宽横幅；点击卡片即粘贴（卡片根 onClick）。 */
+              <FileMediaVisual path={view.content} />
             )
           ) : view.recordType === "link" ? (
             expanded ? (

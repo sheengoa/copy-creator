@@ -3306,10 +3306,9 @@ pub fn get_resource_file_thumbnail(
     path: String,
     max_size: u32,
 ) -> Result<String, String> {
-    let image_path = PathBuf::from(&path);
-    if !image_path.is_absolute() {
-        return Err("图片路径必须为绝对路径".to_string());
-    }
+    // 统一路径解析：绝对路径原样（资源库/外部文件），存储相对路径按存储目录
+    // 展开（剪切板图片记录的 content 即此形态）。
+    let image_path = resolve_storage_path(&app, &path)?;
     let metadata = std::fs::metadata(&image_path).map_err(|e| format!("stat image: {e}"))?;
     let modified_secs = metadata
         .modified()

@@ -175,4 +175,17 @@ describe("架构守卫：领域规则必须全局共享", () => {
       ).toContain("useExpandReveal");
     }
   });
+
+  it("规则 13：图片列表态一律全宽媒体横幅，不得回退小缩略图两副面孔", () => {
+    // 同一张图片曾因进入方式不同（图片数据 vs 图片文件）呈现缩略图/全宽横幅
+    // 两副面孔；统一为横幅形态并固化在共享组件 FileMediaVisual。
+    expect(
+      readSource("components/FileMediaPreview.tsx"),
+      "FileMediaVisual 必须保留图片横幅分支（图片列表态统一全宽横幅，见组件注释）",
+    ).toContain('kind === "image"');
+    expect(
+      readSource("pages/ClipboardPage/ClipboardCard.tsx"),
+      "剪切板图片记录折叠态必须用 FileMediaVisual 横幅，不得回退 48×36 小缩略图",
+    ).toContain("<FileMediaVisual path={view.content} />");
+  });
 });
