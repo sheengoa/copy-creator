@@ -1101,3 +1101,53 @@ input:focus-visible + .selection-checkbox {
   right: calc(var(--window-shadow-margin, 0px) + 18px);
   bottom: calc(var(--window-shadow-margin, 0px) + 18px);
 }
+
+/* --- 全屏图片灯箱：主窗口内查看大图的统一出口 --- */
+.image-lightbox {
+  position: fixed;
+  inset: 0;
+  z-index: 50;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 42px 24px 24px;
+  background: rgba(0, 0, 0, 0.72);
+  outline: none;
+}
+
+.image-lightbox-image {
+  display: block;
+  max-width: 100%;
+  max-height: 100%;
+  object-fit: contain;
+  border-radius: 8px;
+  box-shadow: 0 12px 36px rgba(0, 0, 0, 0.3);
+}
+
+.image-lightbox-close {
+  position: absolute;
+  top: 12px;
+  right: 14px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 30px;
+  height: 30px;
+  padding: 0;
+  border: 0;
+  border-radius: 6px;
+  background: rgba(255, 255, 255, 0.14);
+  color: #fff;
+  font: inherit;
+  font-size: 22px;
+  cursor: pointer;
+}
+
+.image-lightbox-close:hover {
+  background: rgba(255, 255, 255, 0.24);
+}
+
+/* 可点击放大的图片：悬停提示可查看大图 */
+.is-zoomable {
+  cursor: zoom-in;
+}

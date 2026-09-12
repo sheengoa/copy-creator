@@ -164,6 +164,7 @@ function PhraseCard({
                   path={phrase.content}
                   alt={t("resources.imagePreview")}
                   className="phrase-card-expanded-image"
+                  zoomable
                 />
               )}
               {isTextExpanded && textFile && (

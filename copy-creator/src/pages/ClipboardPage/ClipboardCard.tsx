@@ -88,6 +88,7 @@ function ClipboardExpandedPreview({
             path={segment.path}
             alt={t("radialMenu.previewImage")}
             className="clipboard-card-expanded-image"
+            zoomable
           />
         ) : segment.type === "text" ? (
           <div className="clipboard-card-expanded-text" key={`text-${index}`}>
@@ -255,6 +256,7 @@ function ClipboardCardInner({
                 path={view.content}
                 alt={t("radialMenu.previewImage")}
                 className="clipboard-card-expanded-image"
+                zoomable
               />
             ) : (
               <ImageThumb
@@ -290,6 +292,7 @@ function ClipboardCardInner({
                     path={view.content}
                     alt={t("radialMenu.previewImage")}
                     className="clipboard-card-expanded-image"
+                    zoomable
                   />
                 ) : (
                   <InlineTextFilePreview recordId={view.id} search={search} />

@@ -177,17 +177,20 @@ export function ResourceImage({
  * 原图虚影（详情页大图等大尺寸场景）：同图放大模糊铺底，前景完整展示，
  * 与列表卡片的缩略图虚影同一视觉。className 施加于容器；
  * 前景图的高度约束需在使用方的 CSS 中给定（如详情页的 62vh）。
+ * onZoom 提供时前景图可点击，回调携带已解析的图片 URL 供全屏灯箱使用。
  */
 export function ResourceImageGhost({
   path,
   alt,
   className = "",
   onMetadata,
+  onZoom,
 }: {
   path: string;
   alt: string;
   className?: string;
   onMetadata?: (meta: ResourceImageMetadata) => void;
+  onZoom?: (src: string) => void;
 }) {
   const { src, failed } = useResourceAssetUrl(path);
   const [imageFailed, setImageFailed] = useState(false);
@@ -211,12 +214,19 @@ export function ResourceImageGhost({
     <div className={`resource-thumb-blur resource-image-ghost ${className}`.trim()}>
       <img className="resource-thumb-blur-bg" src={src} alt="" aria-hidden="true" />
       <img
-        className="resource-thumb-blur-fg"
+        className={`resource-thumb-blur-fg${onZoom ? " is-zoomable" : ""}`}
         src={src}
         alt={alt}
         draggable={false}
         loading="lazy"
         decoding="async"
+        onClick={onZoom
+          ? (event) => {
+              // 阻止冒泡，避免触发外层容器的点击行为。
+              event.stopPropagation();
+              onZoom(src);
+            }
+          : undefined}
         onLoad={(event) => {
           const image = event.currentTarget;
           if (image.naturalWidth <= 0 || image.naturalHeight <= 0) return;
