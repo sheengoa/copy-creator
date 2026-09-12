@@ -744,8 +744,18 @@ html {
   border-inline-start: 0.5px solid var(--separator);
 }
 
+/* 左向扩展：预览绝对定位在菜单左侧、不参与文档流（插入/移除时不会
+   挤动菜单布局），菜单改为右锚定——窗口向左加宽并移动的过渡帧里，
+   菜单与预览在屏幕上的位置都保持稳定，消除闪烁。 */
+.radial-menu-popup.preview-left .radial-menu-main {
+  margin-left: auto;
+}
+
 .radial-menu-popup.preview-left .radial-menu-preview {
-  order: -1;
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  right: 420px;
   border-inline-start: 0;
   border-inline-end: 0.5px solid var(--separator);
 }
