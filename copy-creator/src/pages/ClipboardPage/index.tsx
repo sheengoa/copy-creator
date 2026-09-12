@@ -12,6 +12,7 @@ import BatchSelectionBar from "../../components/BatchSelectionBar";
 import { BackToTopButton } from "../../components/BackToTop";
 import { useBackToTop } from "../../hooks/useBackToTop";
 import { useMultiSelect } from "../../hooks/useMultiSelect";
+import { useRefreshOnShow } from "../../hooks/useRefreshOnShow";
 import { buildRecordView, type RecordView } from "../../domain/recordView";
 import { isResourceRecord } from "../../domain/records";
 
@@ -196,6 +197,11 @@ export default function ClipboardPage() {
     setSearch("");
     init("all");
   }, [init, setSearch]);
+
+  // 主窗口从隐藏恢复显示时重载当前视图：兜底隐藏期间丢失/被节流的刷新。
+  useRefreshOnShow(useCallback(() => {
+    void loadRecords(false);
+  }, [loadRecords]));
 
   useEffect(() => {
     if (searchEffectInitializedRef.current) {

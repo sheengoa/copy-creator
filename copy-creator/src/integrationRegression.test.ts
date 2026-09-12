@@ -199,6 +199,35 @@ describe("integration regressions", () => {
     expect(componentSource).toContain("stashRecords");
   });
 
+  it("propagates external library changes and usage updates to the frontend", () => {
+    const watchSource = readSource("../src-tauri/src/resource_watch.rs");
+    const dbSource = readSource("../src-tauri/src/db.rs");
+    const clipboardPageSource = readSource("./pages/ClipboardPage/index.tsx");
+    const pageSource = readSource("./pages/ResourcePage.tsx");
+
+    // 目录监听必须把删除/内容修改也转发进防抖汇聚（不只是新建/改名），
+    // 否则文件管理器里删除内容后界面永远不会刷新（修复前的根因）。
+    expect(watchSource).toContain("WatchSignal::Changed");
+    expect(watchSource).toContain("EventKind::Remove(_) | EventKind::Modify(_)");
+    expect(watchSource).toContain("EventKind::Access(_)");
+
+    // 使用（粘贴/整组粘贴/拖出）写入使用时间后必须发事件，主窗口与径向
+    // 菜单才能实时刷新徽标与「最近使用」排序；无实际变更不发。
+    const touchStart = dbSource.indexOf("pub(crate) fn touch_clipboard_usage_internal");
+    const touchBlock = dbSource.slice(touchStart, dbSource.indexOf("pub(crate) fn", touchStart + 10));
+    expect(touchBlock).toContain("emit_usage_updated(app,");
+    const groupTouchStart = dbSource.indexOf("pub(crate) fn touch_resource_group_usage_internal");
+    const groupTouchBlock = dbSource.slice(
+      groupTouchStart,
+      dbSource.indexOf("pub fn touch_clipboard_usage", groupTouchStart),
+    );
+    expect(groupTouchBlock).toContain("emit_usage_updated(app,");
+
+    // 主窗口从隐藏恢复显示时兜底重载当前视图。
+    expect(clipboardPageSource).toContain("useRefreshOnShow");
+    expect(pageSource).toContain("useRefreshOnShow");
+  });
+
   it("passes clipboard search into cards for highlighting", () => {
     const pageSource = readSource("./pages/ClipboardPage/index.tsx");
 

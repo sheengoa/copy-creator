@@ -22,7 +22,6 @@ use notify::{RecommendedWatcher, RecursiveMode, Watcher};
 use tauri::{AppHandle, Emitter, Runtime};
 
 use crate::db;
-
 /// 变更防抖窗口：文件管理器常把一次操作拆成多个事件，窗口内的变更
 /// 合并为一次刷新。
 const DEBOUNCE: Duration = Duration::from_millis(500);
@@ -33,13 +32,20 @@ const RESOLVE_INTERVAL: Duration = Duration::from_secs(2);
 /// 监听建立失败后的重试间隔，避免对失效路径每两秒刷一遍告警日志。
 const RETRY_INTERVAL: Duration = Duration::from_secs(10);
 
+/// 监听事件的两种语义：只有「到达」需要按发现时间补建入库记录，
+/// 其余变更（删除、内容修改）只需触发前端重扫。
+enum WatchSignal {
+    Arrived(Vec<PathBuf>),
+    Changed,
+}
+
 pub fn spawn<R: Runtime>(app: &AppHandle<R>) {
     let app = app.clone();
     std::thread::spawn(move || watch_loop(app));
 }
 
 fn watch_loop<R: Runtime>(app: AppHandle<R>) {
-    let (event_tx, event_rx) = mpsc::channel::<Vec<PathBuf>>();
+    let (event_tx, event_rx) = mpsc::channel::<WatchSignal>();
     // 常驻发送端：重建 watcher 时把克隆交给回调，保证 event_rx 永不断开。
     let keeper = event_tx.clone();
     drop(event_tx);
@@ -91,12 +97,15 @@ fn watch_loop<R: Runtime>(app: AppHandle<R>) {
         }
 
         // 汇聚监听事件，防抖后：新文件先按发现时间补建入库（置顶），
-        // 再通知前端刷新。
+        // 再通知前端刷新。删除与内容修改没有「到达」路径可补建，
+        // 但同样进入防抖并触发重扫，保证外部增删改都实时反映到界面。
         let mut saw_event = false;
-        while let Ok(paths) = event_rx.try_recv() {
+        while let Ok(signal) = event_rx.try_recv() {
             saw_event = true;
-            for path in paths {
-                arrived_paths.insert(path);
+            if let WatchSignal::Arrived(paths) = signal {
+                for path in paths {
+                    arrived_paths.insert(path);
+                }
             }
         }
         if saw_event {
@@ -119,20 +128,27 @@ fn watch_loop<R: Runtime>(app: AppHandle<R>) {
 }
 
 fn build_watcher(
-    event_tx: &mpsc::Sender<Vec<PathBuf>>,
+    event_tx: &mpsc::Sender<WatchSignal>,
 ) -> Result<RecommendedWatcher, notify::Error> {
     notify::recommended_watcher({
         let tx = event_tx.clone();
         move |result: Result<notify::Event, notify::Error>| {
-            // 只收集「新出现的文件路径」（创建 / 改名落入监听目录）；
-            // 内容修改与删除不影响置顶语义，交给常规重扫。
             if let Ok(event) = result {
-                let is_arrival = matches!(
-                    event.kind,
-                    EventKind::Create(_) | EventKind::Modify(ModifyKind::Name(_))
-                );
-                if is_arrival && !event.paths.is_empty() {
-                    let _ = tx.send(event.paths.clone());
+                match event.kind {
+                    // 「新出现的文件路径」（创建 / 改名落入监听目录）：按
+                    // 发现时间补建入库记录，使其在「全部」列表置顶。
+                    EventKind::Create(_) | EventKind::Modify(ModifyKind::Name(_)) => {
+                        if !event.paths.is_empty() {
+                            let _ = tx.send(WatchSignal::Arrived(event.paths.clone()));
+                        }
+                    }
+                    // 删除与内容修改不影响置顶语义，但必须触发重扫刷新，
+                    // 否则文件管理器里删除/改动内容后界面永远不更新。
+                    EventKind::Remove(_) | EventKind::Modify(_) => {
+                        let _ = tx.send(WatchSignal::Changed);
+                    }
+                    // Access 等事件高频且无业务语义，忽略以免无谓刷新。
+                    EventKind::Access(_) | EventKind::Other | EventKind::Any => {}
                 }
             }
         }

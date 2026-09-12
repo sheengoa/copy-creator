@@ -2325,20 +2325,23 @@ pub(crate) fn touch_clipboard_usage_internal<R: Runtime>(
     }
     let state = app.state::<DbState>();
     let conn = state.conn.lock().map_err(|e| e.to_string())?;
+    let mut touched = false;
     for id in ids {
         if discovered.contains_key(id.as_str()) {
             // 未入库资源（resource-file: 虚拟 id）由下方按路径去重处理，
             // 这里跳过以免既有记录被重复计数。
             continue;
         }
-        conn.execute(
+        let changed = conn.execute(
             "UPDATE clipboard_records SET last_used_at = ?1, use_count = COALESCE(use_count, 0) + 1,
                     touched_ms = ?2 WHERE id = ?3",
             params![&now, now_ms, id],
         )
         .map_err(|e| e.to_string())?;
+        touched |= changed > 0;
     }
     if discovered.is_empty() {
+        emit_usage_updated(app, ids, touched);
         return Ok(());
     }
     // 库中全部资源记录的路径键 → 记录 id，用于按文件路径去重。
@@ -2362,13 +2365,13 @@ pub(crate) fn touch_clipboard_usage_internal<R: Runtime>(
     drop(stmt);
     for (id, path) in &discovered {
         let key = resource_path_key(path);
-        if let Some(existing_id) = by_path.get(&key) {
+        let changed = if let Some(existing_id) = by_path.get(&key) {
             conn.execute(
                 "UPDATE clipboard_records SET last_used_at = ?1, use_count = COALESCE(use_count, 0) + 1,
                         touched_ms = ?2 WHERE id = ?3",
                 params![&now, now_ms, existing_id],
             )
-            .map_err(|e| e.to_string())?;
+            .map_err(|e| e.to_string())?
         } else {
             let path_text = path.to_string_lossy();
             conn.execute(
@@ -2378,10 +2381,22 @@ pub(crate) fn touch_clipboard_usage_internal<R: Runtime>(
                  VALUES (?1, 'file', ?2, '', ?3, 'resource', ?2, ?3, 1, ?4)",
                 params![id, path_text, &now, now_ms],
             )
-            .map_err(|e| e.to_string())?;
-        }
+            .map_err(|e| e.to_string())?
+        };
+        touched |= changed > 0;
     }
+    emit_usage_updated(app, ids, touched);
     Ok(())
+}
+
+/// 使用变化（次数 / 最近使用时间）只写库不发前端可见的返回值：统一在此
+/// 发 `clipboard-record-updated`，让主窗口与径向菜单重载列表，徽标与
+/// 「最近使用」排序实时更新。无实际变更（如 id 均未命中记录）不发，
+/// 避免无谓刷新。
+fn emit_usage_updated<R: Runtime>(app: &AppHandle<R>, ids: &[String], touched: bool) {
+    if touched {
+        let _ = app.emit("clipboard-record-updated", ids);
+    }
 }
 
 /// 记录短语的使用时间：粘贴成功与拖出成功放下共用。
@@ -2459,12 +2474,15 @@ pub(crate) fn touch_resource_group_usage_internal<R: Runtime>(
     }
     drop(stmt);
     let now = chrono::Utc::now().to_rfc3339();
+    let mut touched = false;
     for id in &ids {
-        conn.execute(
-            "UPDATE clipboard_records SET last_used_at = ?1 WHERE id = ?2",
-            params![&now, id],
-        )
-        .map_err(|e| e.to_string())?;
+        let changed = conn
+            .execute(
+                "UPDATE clipboard_records SET last_used_at = ?1 WHERE id = ?2",
+                params![&now, id],
+            )
+            .map_err(|e| e.to_string())?;
+        touched |= changed > 0;
     }
     for (id, path) in &discovered {
         // 路径已有记录（不同 id）的文件不再补建，其记录已在上面按分组更新。
@@ -2472,14 +2490,17 @@ pub(crate) fn touch_resource_group_usage_internal<R: Runtime>(
             continue;
         }
         let path_text = path.to_string_lossy();
-        conn.execute(
-            "INSERT INTO clipboard_records
-             (id, type, content, source_app, created_at, storage_mode, resource_path, last_used_at)
-             VALUES (?1, 'file', ?2, '', ?3, 'resource', ?2, ?3)",
-            params![id, path_text, &now],
-        )
-        .map_err(|e| e.to_string())?;
+        let changed = conn
+            .execute(
+                "INSERT INTO clipboard_records
+                 (id, type, content, source_app, created_at, storage_mode, resource_path, last_used_at)
+                 VALUES (?1, 'file', ?2, '', ?3, 'resource', ?2, ?3)",
+                params![id, path_text, &now],
+            )
+            .map_err(|e| e.to_string())?;
+        touched |= changed > 0;
     }
+    emit_usage_updated(app, &ids, touched);
     Ok(())
 }
 

@@ -26,6 +26,7 @@ import BatchSelectionBar from "../components/BatchSelectionBar";
 import type { ClipboardRecord, ResourceFolder } from "../types";
 import { BackToTopButton } from "../components/BackToTop";
 import { useBackToTop } from "../hooks/useBackToTop";
+import { useRefreshOnShow } from "../hooks/useRefreshOnShow";
 import ResourceDetailPage from "./ResourcePage/ResourceDetailPage";
 import ResourceGroupChips from "./ResourcePage/ResourceGroupChips";
 import type { ResourceMediaKind as ResourceMediaKindLabel } from "../domain/mediaKind";
@@ -205,6 +206,12 @@ export default function ResourcePage() {
       if (unlisten) unlisten();
     };
   }, [loadRecords, loadResourceGroups, resourceGroup]);
+
+  // 主窗口从隐藏恢复显示时重载分组与记录：兜底隐藏期间丢失/被节流的刷新。
+  useRefreshOnShow(useCallback(() => {
+    void loadResourceGroups();
+    void loadRecords(false, "resources", resourceGroup);
+  }, [loadRecords, loadResourceGroups, resourceGroup]));
 
   useEffect(() => {
     let cancelled = false;
