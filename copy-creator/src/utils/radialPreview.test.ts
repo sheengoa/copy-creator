@@ -4,6 +4,7 @@ import {
   calculatePreviewExpansion,
   calculateRadialExpansion,
   isContentPreviewAvailable,
+  RADIAL_SHADOW_MARGIN,
   STASH_IMAGE_PLACEHOLDER,
 } from "./radialPreview";
 
@@ -45,6 +46,26 @@ describe("calculateRadialExpansion", () => {
       scaleFactor: 1,
       uiScale: 1.5,
     })).toEqual({ direction: "right", previewWidth: 293, windowX: 200 });
+  });
+
+  it("keeps expansion positions integral under f32 ui-scale artifacts (0.8)", () => {
+    // 径向缩放 80% 的实际存储值是 f32(0.8)：阴影边距带出浮点残渣时，
+    // 回写窗口原点必须保持整数，否则 PhysicalPosition(i32) 被拒绝，
+    // 预览会静默无法展开（贴右缘场景的实测根因）。
+    const uiScale = 0.800000011920929;
+    const scaleFactor = 1;
+    const marginPhysical = Math.round(RADIAL_SHADOW_MARGIN * scaleFactor * uiScale);
+    const expansion = calculateRadialExpansion({
+      windowX: 1369 + marginPhysical,
+      workAreaX: 0,
+      workAreaWidth: 1920,
+      scaleFactor,
+      uiScale,
+    });
+    // 贴右缘（右侧仅剩阴影边距的空间）时必须向左扩展。
+    expect(expansion.direction).toBe("left");
+    expect(expansion.previewWidth).toBe(549);
+    expect(expansion.windowX - marginPhysical).toBe(929);
   });
 });
 

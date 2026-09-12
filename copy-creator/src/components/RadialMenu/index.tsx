@@ -449,9 +449,11 @@ export default function RadialMenu() {
         || nativeDragRef.current
       ) return null;
       // position 是含阴影边距的窗口原点；展开计算按可见内容区域换算。
-      // zoom 缩放后，物理边距与可见宽度都随 uiScale 放大。
+      // zoom 缩放后，物理边距与可见宽度都随 uiScale 放大。边距必须取整：
+      // PhysicalPosition 只接受 i32，f32 缩放残渣（如 0.8 → 16.00000024）
+      // 会让 setPosition 整个失败，预览静默无法展开。
       const uiScale = uiScaleRef.current;
-      const marginPhysical = RADIAL_SHADOW_MARGIN * scaleFactor * uiScale;
+      const marginPhysical = Math.round(RADIAL_SHADOW_MARGIN * scaleFactor * uiScale);
       const expansion = calculateRadialExpansion({
         windowX: position.x + marginPhysical,
         workAreaX: monitor.workArea.position.x,
@@ -491,7 +493,10 @@ export default function RadialMenu() {
         return null;
       }
       return layout;
-    } catch {
+    } catch (error) {
+      // 展开失败必须留下痕迹：此前 setPosition 被拒绝只会静默吞掉，
+      // 用户侧表现为「点展开毫无反应」，极难排查。
+      flog(`[preview] expand failed: ${String(error)}`);
       if (request !== previewRequestRef.current) return null;
       const deferRestore = dragActiveRef.current || nativeDragRef.current;
       const originalPosition = originalWindowPositionRef.current;
