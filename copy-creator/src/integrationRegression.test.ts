@@ -207,8 +207,11 @@ describe("integration regressions", () => {
 
     // 目录监听必须把删除/内容修改也转发进防抖汇聚（不只是新建/改名），
     // 否则文件管理器里删除内容后界面永远不会刷新（修复前的根因）。
+    // 删除进一步经 Vanished 信号按路径移除记录（文件不在，记录不留）。
     expect(watchSource).toContain("WatchSignal::Changed");
-    expect(watchSource).toContain("EventKind::Remove(_) | EventKind::Modify(_)");
+    expect(watchSource).toContain("WatchSignal::Vanished");
+    expect(watchSource).toContain("EventKind::Remove(_)");
+    expect(watchSource).toContain("EventKind::Modify(_)");
     expect(watchSource).toContain("EventKind::Access(_)");
 
     // 使用（粘贴/整组粘贴/拖出）写入使用时间后必须发事件，主窗口与径向
