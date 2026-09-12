@@ -4,6 +4,7 @@ import { listen } from "@tauri-apps/api/event";
 import { useTranslation } from "react-i18next";
 import i18n from "../../i18n";
 import { ContentPreviewPanel } from "../ContentPreviewPanel";
+import { WindowResizeHandles } from "../WindowResizeHandles";
 import type { RadialPreviewSegment } from "../../utils/radialPreview";
 
 interface PreviewPayload {
@@ -84,6 +85,7 @@ export default function PreviewWindow() {
           </button>
         </div>
         <div className="preview-window-error" role="alert">{String(loadError)}</div>
+        <WindowResizeHandles />
       </div>
     );
   }
@@ -110,6 +112,7 @@ export default function PreviewWindow() {
       <div className="preview-window-body">
         <ContentPreviewPanel segments={segments} className="" ariaLabel={title} />
       </div>
+      <WindowResizeHandles />
     </div>
   );
 }

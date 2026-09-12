@@ -1105,6 +1105,7 @@ input:focus-visible + .selection-checkbox {
 /* --- 独立内容预览窗口：与新建窗口同款自绘窗口（透明边距 + 圆角阴影 +
        自绘标题栏）；窗口本体透明，可见卡片由 root 提供 --- */
 .preview-window-root {
+  position: relative;
   display: flex;
   flex-direction: column;
   box-sizing: border-box;
