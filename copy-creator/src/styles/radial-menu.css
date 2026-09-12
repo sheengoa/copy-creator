@@ -407,12 +407,6 @@ html {
   cursor: grabbing;
 }
 
-.radial-menu-popup.drag-session .content-preview-panel {
-  visibility: hidden;
-  pointer-events: none;
-  user-select: none;
-}
-
 .radial-menu-item:hover {
   background: var(--bg-card-hover);
   border-color: rgba(0, 0, 0, 0.18);
@@ -722,7 +716,8 @@ html {
   color: rgba(255, 255, 255, 0.3);
 }
 
-/* --- Full Content Preview --- */
+/* --- Full Content Preview（独立预览窗口复用的内容面板样式，
+       面板内部排版样式保留在此；径向菜单本体不再内嵌预览面板） --- */
 .content-preview-panel {
   display: flex;
   flex-direction: column;
@@ -731,67 +726,8 @@ html {
   background: #fff;
 }
 
-.content-preview-header {
-  display: flex;
-  align-items: center;
-  flex: 0 0 auto;
-  border-bottom: 0.5px solid var(--separator);
-}
-
-.radial-menu-preview {
-  flex: 0 0 var(--radial-preview-width);
-  width: var(--radial-preview-width);
-  border-inline-start: 0.5px solid var(--separator);
-}
-
-.radial-menu-popup.preview-left .radial-menu-preview {
-  order: -1;
-  border-inline-start: 0;
-  border-inline-end: 0.5px solid var(--separator);
-}
-
 [data-theme="dark"] .content-preview-panel {
   background: #1e1e1e;
-}
-
-.content-preview-title {
-  flex: 1;
-  min-width: 0;
-  padding: 13px 16px 11px;
-  color: var(--text-secondary);
-  font-size: var(--text-xs);
-  font-weight: var(--weight-semibold);
-}
-
-.content-preview-close {
-  display: inline-flex !important;
-  align-items: center;
-  justify-content: center;
-  flex: 0 0 28px;
-  width: 28px !important;
-  height: 28px !important;
-  margin: 0 8px 0 0 !important;
-  padding: 0 !important;
-  border: 0 !important;
-  border-radius: 6px !important;
-  background: transparent !important;
-  cursor: pointer;
-  color: var(--text-tertiary) !important;
-}
-
-.content-preview-close:hover {
-  background: var(--chip-hover-bg) !important;
-  color: var(--text-primary) !important;
-}
-
-.content-preview-close:focus-visible {
-  outline: 2px solid var(--accent);
-  outline-offset: 1px;
-}
-
-.content-preview-close svg {
-  width: 15px;
-  height: 15px;
 }
 
 .content-preview-body {

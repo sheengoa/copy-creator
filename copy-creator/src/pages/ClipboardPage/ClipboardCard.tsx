@@ -302,7 +302,7 @@ function ClipboardCardInner({
             </>
           ) : (
             expanded ? (
-              <ClipboardExpandedPreview view={view} search={search} />
+              <ClipboardExpandedPreview view={view} search={search} onOpenPreview={onOpenPreview} />
             ) : (
               <span className="clipboard-text-content">
                 <HighlightText text={view.content} search={search} />

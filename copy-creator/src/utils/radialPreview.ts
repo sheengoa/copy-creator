@@ -4,41 +4,13 @@ export const RADIAL_MENU_HEIGHT = 650;
 // 因此窗口实际尺寸比可见面板大一圈，阴影落在边距内。与 src-tauri 侧
 // WINDOW_SHADOW_MARGIN 保持一致，改动时必须同步。
 export const RADIAL_SHADOW_MARGIN = 20;
-export const RADIAL_PREVIEW_WIDTH = 440;
-export const RADIAL_PREVIEW_MIN_WIDTH = 260;
 export const STASH_IMAGE_PLACEHOLDER = "\uFFFC";
-
-export type RadialPreviewDirection = "left" | "right";
 
 export type RadialPreviewSegment =
   | { type: "text"; content: string }
   | { type: "image"; path: string }
   | { type: "video"; path: string }
   | { type: "audio"; path: string };
-
-interface ExpansionInput {
-  windowX: number;
-  windowWidth: number;
-  workAreaX: number;
-  workAreaWidth: number;
-  scaleFactor: number;
-  /**
-   * 径向菜单 UI 缩放比（设置百分比 / 100，默认 1）。启用后窗口整体按该
-   * 比例放大，CSS 布局仍以设计像素书写：实际渲染物理 px =
-   * 设计 px × scaleFactor × uiScale。预览宽度换算回设计像素时必须把
-   * uiScale 一并除掉，否则展开面板与窗口增量对不上。
-   */
-  uiScale?: number;
-}
-
-export interface PreviewExpansion {
-  direction: RadialPreviewDirection;
-  previewWidth: number;
-  previewPhysicalWidth: number;
-  windowX: number;
-}
-
-export type RadialExpansion = Omit<PreviewExpansion, "previewPhysicalWidth">;
 
 interface ContentPreviewCandidate {
   type: string;
@@ -59,58 +31,6 @@ export function isContentPreviewAvailable(
     || candidate.type === "phrase"
   ) return true;
   return Boolean(candidate.contentTruncated || isClipped);
-}
-
-export function calculatePreviewExpansion({
-  windowX,
-  windowWidth,
-  workAreaX,
-  workAreaWidth,
-  scaleFactor,
-  uiScale,
-}: ExpansionInput): PreviewExpansion {
-  const scale = Math.max(scaleFactor, 0.1);
-  const zoom = Math.max(uiScale ?? 1, 0.1);
-  const rightSpace = workAreaX + workAreaWidth - (windowX + windowWidth);
-  const leftSpace = windowX - workAreaX;
-  const preferredWidth = RADIAL_PREVIEW_WIDTH * scale;
-  const minimumWidth = RADIAL_PREVIEW_MIN_WIDTH * scale;
-  const direction: RadialPreviewDirection =
-    rightSpace >= minimumWidth || rightSpace >= leftSpace ? "right" : "left";
-  const availableSpace = Math.max(0, direction === "right" ? rightSpace : leftSpace);
-  const previewPhysicalWidth = Math.min(preferredWidth, availableSpace);
-  const previewWidth = Math.floor(previewPhysicalWidth / (scale * zoom));
-
-  return {
-    direction,
-    previewWidth,
-    previewPhysicalWidth,
-    windowX: direction === "left" ? Math.round(windowX - previewPhysicalWidth) : windowX,
-  };
-}
-
-export function calculateRadialExpansion({
-  windowX,
-  workAreaX,
-  workAreaWidth,
-  scaleFactor,
-  uiScale,
-}: Omit<ExpansionInput, "windowWidth">): RadialExpansion {
-  const scale = Math.max(scaleFactor, 0.1);
-  const zoom = Math.max(uiScale ?? 1, 0.1);
-  const expansion = calculatePreviewExpansion({
-    windowX,
-    windowWidth: RADIAL_MENU_WIDTH * scale * zoom,
-    workAreaX,
-    workAreaWidth,
-    scaleFactor,
-    uiScale,
-  });
-  return {
-    direction: expansion.direction,
-    previewWidth: expansion.previewWidth,
-    windowX: expansion.windowX,
-  };
 }
 
 function pushText(segments: RadialPreviewSegment[], content: string) {
