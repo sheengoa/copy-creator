@@ -24,14 +24,37 @@ export function readTextFileContent(path: string): Promise<string> {
   return invoke<string>("read_text_file_content", { path });
 }
 
+// 缩略图命令全局并发上限：解码已下放线程池，仍需限流——大库首次滚动时
+// 同时发起几十个解码会挤占 CPU，肉眼可见地拖慢滚动与切换。
+const MAX_THUMBNAIL_CONCURRENCY = 3;
+let runningThumbnailTasks = 0;
+const thumbnailWaiters: (() => void)[] = [];
+
+async function runThumbnailLimited<T>(task: () => Promise<T>): Promise<T> {
+  if (runningThumbnailTasks >= MAX_THUMBNAIL_CONCURRENCY) {
+    await new Promise<void>((resolve) => thumbnailWaiters.push(resolve));
+  }
+  runningThumbnailTasks += 1;
+  try {
+    return await task();
+  } finally {
+    runningThumbnailTasks -= 1;
+    thumbnailWaiters.shift()?.();
+  }
+}
+
 /** 图片记录/图像文件短语的缩略图（base64 PNG）。 */
 export function getImageThumbnail(path: string, maxSize: number): Promise<string> {
-  return invoke<string>("get_image_thumbnail", { path, maxSize });
+  return runThumbnailLimited(() =>
+    invoke<string>("get_image_thumbnail", { path, maxSize }),
+  );
 }
 
 /** 资源库文件（含视频抽帧前的位图）缩略图（base64 PNG）。 */
 export function getResourceFileThumbnail(path: string, maxSize: number): Promise<string> {
-  return invoke<string>("get_resource_file_thumbnail", { path, maxSize });
+  return runThumbnailLimited(() =>
+    invoke<string>("get_resource_file_thumbnail", { path, maxSize }),
+  );
 }
 
 /** 用系统默认播放器打开媒体文件（应用内播放失败时的兜底）。 */

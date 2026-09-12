@@ -416,7 +416,10 @@ describe("integration regressions", () => {
     expect(mediaSource).toContain('decoding="async"');
     expect(mediaSource).toContain("return <ResourceImage path={path} alt={alt} className={className} />;");
     expect(libSource).toContain("db::get_resource_file_thumbnail");
-    expect(dbSource).toContain("pub fn get_resource_file_thumbnail");
+    // 缩略图解码必须在线程池执行（async 命令 + spawn_blocking），
+    // 同步命令在主线程解码大图会冻结 UI。
+    expect(dbSource).toContain("pub async fn get_resource_file_thumbnail");
+    expect(dbSource).toContain("spawn_blocking");
     expect(dbSource).toContain('join("resource-thumbs")');
     // 屏幕外卡片跳过渲染，配合图片懒加载保持长列表滚动流畅。
     expect(radialStyles).toContain("content-visibility: auto");

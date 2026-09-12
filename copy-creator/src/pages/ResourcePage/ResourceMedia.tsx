@@ -1,5 +1,6 @@
 import { getResourceFileThumbnail, openResourceFile } from "../../domain/mediaAssets";
 import { useEffect, useRef, useState } from "react";
+import { useInViewOnce } from "../../hooks/useInViewOnce";
 import { useTranslation } from "react-i18next";
 import type { RadialPreviewSegment } from "../../utils/radialPreview";
 import { Icons } from "../../components/Icons";
@@ -78,6 +79,10 @@ export function ResourceFileImage({
   const cached = fileThumbCache.get(path);
   const [src, setSrc] = useState(cached ?? "");
   const [failed, setFailed] = useState(false);
+  // 真懒加载：进入视口（含 300px 预载边）才请求后端解码缩略图。
+  // 挂载即请求会让大库一次触发成百上千个解码任务，滚动直接卡死；
+  // content-visibility 只省绘制，拦不住 effect，必须在这里拦。
+  const [viewportRef, inView] = useInViewOnce<HTMLDivElement>();
 
   useEffect(() => {
     const cachedUrl = fileThumbCache.get(path);
@@ -86,6 +91,7 @@ export function ResourceFileImage({
       setFailed(false);
       return;
     }
+    if (!inView) return;
     let cancelled = false;
     setSrc("");
     setFailed(false);
@@ -102,12 +108,20 @@ export function ResourceFileImage({
     return () => {
       cancelled = true;
     };
-  }, [path]);
+  }, [path, inView]);
 
   if (failed) {
     return <ResourceImage path={path} alt={alt} className={className} />;
   }
-  if (!src) return <div className={`resource-media-loading ${className}`} aria-hidden="true" />;
+  if (!src) {
+    return (
+      <div
+        ref={viewportRef}
+        className={`resource-media-loading ${className}`}
+        aria-hidden="true"
+      />
+    );
+  }
   return (
     <div className={`resource-thumb-blur ${className}`.trim()}>
       <img className="resource-thumb-blur-bg" src={src} alt="" aria-hidden="true" />
