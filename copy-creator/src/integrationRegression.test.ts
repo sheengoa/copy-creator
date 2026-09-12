@@ -76,10 +76,7 @@ describe("integration regressions", () => {
 
     expect(phraseSource).toContain('className="card-toggle-text-btn"');
     expect(phraseSource).toContain("e.stopPropagation()");
-    // 图片文件短语点展开改弹独立预览窗口，文本保留卡片内展开（双文案并存）。
-    expect(phraseSource).toContain("if (imageFile)");
-    expect(phraseSource).toContain('? "radialMenu.openPreview"');
-    expect(phraseSource).toContain('isTextExpanded ? "phrases.collapseText" : "phrases.expandText"');
+    expect(phraseSource).toContain('t(isTextExpanded ? "phrases.collapseText" : "phrases.expandText")');
     expect(phraseSource).toContain("Icons.expand");
     expect(phraseSource).toContain("Icons.collapse");
     expect(phraseStyles).toContain(".phrase-card-body.is-toggleable");
@@ -477,32 +474,17 @@ describe("integration regressions", () => {
     const clipboardStyles = readSource("./styles/clipboard.css");
     const persistWindowSize = readSource("./hooks/usePersistWindowSize.ts");
     const inlinePreview = readSource("./components/InlinePreview.tsx");
-    const previewWindowRoot = readSource("./components/PreviewWindow/index.tsx");
-    const previewWindowUtil = readSource("./utils/previewWindow.ts");
     const dbSource = readSource("../src-tauri/src/db.rs");
     const libSource = readSource("../src-tauri/src/lib.rs");
 
-    // 径向菜单预览改走独立预览窗口：菜单本体不再内嵌预览面板。
-    expect(radialMenu).not.toContain("<ContentPreviewPanel");
-    expect(radialMenu).toContain("openContentPreviewWindow");
-    expect(radialMenu).toContain("hide_preview_window");
-    expect(previewWindowRoot).toContain('<ContentPreviewPanel');
+    expect(radialMenu).toContain('<ContentPreviewPanel');
     expect(previewLoader).toContain("loadRecordPreviewSegments");
     expect(pageSource).not.toContain("<ContentPreviewPanel");
     expect(pageSource).not.toContain("getCurrentWindow");
     expect(pageSource).not.toContain("calculatePreviewExpansion");
-    // 预览面板供独立预览窗口复用：无内置标题栏（由系统标题栏承担）。
-    expect(previewPanel).toContain("ariaLabel?: string;");
-    expect(previewPanel).not.toContain("content-preview-close");
+    expect(previewPanel).toContain("onClose?: () => void;");
+    expect(previewPanel).toContain("content-preview-close");
     expect(previewPanel).not.toContain("onDelete");
-    // 独立预览窗口：常驻隐藏、事件驱动渲染、以鼠标为中心弹出。
-    expect(previewWindowRoot).toContain('<ContentPreviewPanel');
-    expect(previewWindowRoot).toContain('listen<PreviewPayload>("preview-content"');
-    expect(previewWindowRoot).toContain('invoke("hide_preview_window")');
-    expect(previewWindowUtil).toContain('invoke("open_preview_window"');
-    expect(libSource).toContain("preview_window::open_preview_window");
-    expect(libSource).toContain("preview_window::init_preview_window");
-    expect(cardSource).toContain("onOpenPreview");
     expect(cardSource).toContain("ClipboardExpandedPreview");
     expect(cardSource).toContain("InlineImagePreview");
     expect(cardSource).toContain("InlineTextFilePreview");
@@ -607,7 +589,8 @@ describe("integration regressions", () => {
       pointerMoveBlock.indexOf("if (pending.nativeStarted) return;"),
     );
     expect(radialMenu).toContain("dismissPreviewForDrag");
-    expect(radialMenu).toContain("startRadialFileDrag");    expect(radialMenu).toContain("nativeStarted");
+    expect(radialMenu).toContain("startRadialFileDrag");
+    expect(radialMenu).toContain("nativeStarted");
     expect(pointerMoveBlock).toContain("startRadialFileDrag(crossed)");
     expect(pointerDownBlock).not.toContain("start_radial_file_drag");
     expect(pointerDownBlock).toContain("sessionId:");
@@ -631,9 +614,8 @@ describe("integration regressions", () => {
     expect(listenerBlock.indexOf("visibleRef.current = true;")).toBeLessThan(
       listenerBlock.indexOf("void loadPasteLeftClickSetting();"),
     );
-    // 预览窗口是独立窗口：失焦时菜单直接隐藏，不再有「预览打开则不隐藏」分支。
-    expect(blurBlock).not.toContain("previewRef");
-    expect(blurBlock).toContain("resetState();");
+    expect(blurBlock).toContain("&& previewRef.current");
+    expect(blurBlock).toContain("return;");
     expect(blurBlock).toContain("resetState();");
     expect(radialMenu).not.toContain("syncDragCandidate");
     expect(radialMenu).not.toContain("radial-menu-drag-surface");
@@ -643,23 +625,23 @@ describe("integration regressions", () => {
     expect(radialMenu).toContain("if (dragActiveRef.current || nativeDragRef.current)");
     expect(radialMenu).toContain("data-radial-drag-source={item.dragSource}");
     expect(radialMenu).toContain("data-radial-drag-path={item.dragPath}");
+    expect(radialMenu).toContain('className="radial-menu-preview"');
     expect(radialMenu).toContain("previewAvailable");
     expect(radialMenu).toContain("data-radial-preview-trigger");
     expect(radialMenu).toContain('closest("[data-radial-preview-trigger]")');
-    // 预览面板不再内嵌菜单，⤷ 按钮改为弹出独立预览窗口。
-    expect(radialMenu).not.toContain("{preview && (");
+    expect(radialMenu).toContain("{preview && (");
     expect(radialMenu).toContain("const togglePreview = useCallback");
-    expect(radialMenu).not.toContain("aria-expanded={preview?.itemId === item.id}");
+    expect(radialMenu).toContain("aria-expanded={preview?.itemId === item.id}");
     expect(radialMenu).not.toContain("schedulePreview");
     expect(radialMenu).not.toContain("onMouseEnter={(e) =>");
-    expect(radialMenu).not.toContain("windowRestoreRef");
-    expect(radialMenu).not.toContain("onMouseLeave={handlePreviewLeave}");
+    expect(radialMenu).toContain("windowRestoreRef");
+    expect(radialMenu).toContain("onMouseLeave={handlePreviewLeave}");
     const armDragCatchBlock = radialMenu.slice(
       radialMenu.indexOf("const armRadialFileDrag"),
       radialMenu.indexOf("const finishPendingPointerDrag"),
     );
     expect(armDragCatchBlock).toContain("if (current.thresholdCrossed)");
-    expect(armDragCatchBlock).toContain("hidePreviewWindow();");
+    expect(armDragCatchBlock).toContain("collapsePreview();");
     const radialItemBlock = radialMenu.slice(
       radialMenu.indexOf('data-radial-item-id={item.id}'),
       radialMenu.indexOf("onClick={(e) => {", radialMenu.indexOf('data-radial-item-id={item.id}')),
@@ -688,9 +670,7 @@ describe("integration regressions", () => {
     expect(radialStyles).not.toContain("padding-right: 48px");
     expect(radialStyles).toContain(".radial-menu-item-footer");
     expect(radialStyles).toContain("prefers-reduced-motion: reduce");
-    // 预览面板改由独立窗口承载：菜单本体不再有内嵌面板与 drag-session 隐藏规则。
-    expect(radialStyles).not.toContain(".radial-menu-popup.drag-session .content-preview-panel");
-    expect(radialStyles).toContain(".radial-menu-preview-trigger");
+    expect(radialStyles).toContain(".radial-menu-popup.drag-session .content-preview-panel");
     expect(radialMenu).toContain('listen("radial-menu-hide", resetStateForNativeHide)');
     expect(shortcutSource).toContain('app.emit("radial-menu-hide", ())');
     expect(radialDrag).not.toContain('RadialDragKind = "text"');

@@ -1102,93 +1102,52 @@ input:focus-visible + .selection-checkbox {
   bottom: calc(var(--window-shadow-margin, 0px) + 18px);
 }
 
-/* --- 独立内容预览窗口：与新建窗口同款自绘窗口（透明边距 + 圆角阴影 +
-       自绘标题栏）；窗口本体透明，可见卡片由 root 提供 --- */
-.preview-window-root {
-  position: relative;
-  display: flex;
-  flex-direction: column;
-  box-sizing: border-box;
-  width: calc(100vw - 2 * var(--window-shadow-margin));
-  height: calc(100vh - 2 * var(--window-shadow-margin));
-  margin: var(--window-shadow-margin);
-  overflow: hidden;
-  background: var(--panel-bg);
-  border-radius: var(--window-radius);
-  box-shadow: var(--window-shadow);
-  isolation: isolate;
-}
-
-.preview-window-header {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  flex: 0 0 auto;
-  padding: 10px 12px 8px 16px;
-  -webkit-app-region: drag;
-  app-region: drag;
-}
-
-.preview-window-title {
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  font-size: var(--text-sm);
-  font-weight: var(--weight-semibold);
-  color: var(--text-secondary);
-}
-
-.preview-window-close-btn {
+/* --- 全屏图片灯箱：主窗口内查看大图的统一出口 --- */
+.image-lightbox {
+  position: fixed;
+  inset: 0;
+  z-index: 50;
   display: flex;
   align-items: center;
   justify-content: center;
-  flex: 0 0 24px;
-  width: 24px;
-  height: 24px;
+  padding: 42px 24px 24px;
+  background: rgba(0, 0, 0, 0.72);
+  outline: none;
+}
+
+.image-lightbox-image {
+  display: block;
+  max-width: 100%;
+  max-height: 100%;
+  object-fit: contain;
+  border-radius: 8px;
+  box-shadow: 0 12px 36px rgba(0, 0, 0, 0.3);
+}
+
+.image-lightbox-close {
+  position: absolute;
+  top: 12px;
+  right: 14px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 30px;
+  height: 30px;
   padding: 0;
   border: 0;
   border-radius: 6px;
-  background: transparent;
-  color: var(--text-secondary);
+  background: rgba(255, 255, 255, 0.14);
+  color: #fff;
+  font: inherit;
+  font-size: 22px;
   cursor: pointer;
-  transition: background 0.15s, color 0.15s;
 }
 
-.preview-window-close-btn:hover {
-  background: var(--chip-hover-bg);
-  color: var(--text-primary);
+.image-lightbox-close:hover {
+  background: rgba(255, 255, 255, 0.24);
 }
 
-/* 内容区占满标题栏以下；面板自带滚动。 */
-.preview-window-body {
-  display: flex;
-  flex-direction: column;
-  flex: 1;
-  min-height: 0;
-}
-
-.preview-window-body .content-preview-panel {
-  flex: 1;
-  min-height: 0;
-}
-
-.preview-window-empty {
-  width: calc(100vw - 2 * var(--window-shadow-margin));
-  height: calc(100vh - 2 * var(--window-shadow-margin));
-  margin: var(--window-shadow-margin);
-  border-radius: var(--window-radius);
-  background: var(--panel-bg, #fff);
-  box-shadow: var(--window-shadow);
-}
-
-.preview-window-error {
-  padding: 20px;
-  color: var(--danger);
-  font-size: var(--text-sm);
-}
-
-/* 可点击放大的图片：悬停提示可在独立预览窗口查看大图 */
+/* 可点击放大的图片：悬停提示可查看大图 */
 .is-zoomable {
   cursor: zoom-in;
 }

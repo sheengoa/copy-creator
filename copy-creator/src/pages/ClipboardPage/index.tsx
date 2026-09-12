@@ -15,7 +15,6 @@ import { useMultiSelect } from "../../hooks/useMultiSelect";
 import { useRefreshOnShow } from "../../hooks/useRefreshOnShow";
 import { buildRecordView, type RecordView } from "../../domain/recordView";
 import { isResourceRecord } from "../../domain/records";
-import { openContentPreviewWindow } from "../../utils/previewWindow";
 
 type ClipType = ClipboardFilter;
 
@@ -389,7 +388,6 @@ export default function ClipboardPage() {
               onDelete={handleDelete}
               onMoveToTop={(id) => void moveRecordsToTop([id])}
               getRecordContent={getRecordContent}
-              onOpenPreview={(payload) => void openContentPreviewWindow(payload.title, payload.segments)}
               onToggleUserApiKey={(v) => void handleToggleUserApiKey(v)}
               selectionMode={isSelecting}
               selected={isSelected(view.id)}
