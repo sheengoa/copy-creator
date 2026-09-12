@@ -1,16 +1,19 @@
 // 独立内容预览窗口：主窗口媒体展开与径向菜单展开按钮共用的弹窗。
-// 系统标题栏、可拖拽调整大小；窗口常驻隐藏、复用，内容经事件下发。
+// 与新建窗口同款自绘窗口：无边框透明 + CSS 圆角阴影 + 自绘标题栏，
+// 可拖拽移动、拖边缘调整大小；窗口常驻隐藏、复用，内容经事件下发。
 
 use serde_json::Value;
 use tauri::{AppHandle, Emitter, Manager, PhysicalPosition};
 
+use crate::WINDOW_SHADOW_MARGIN;
+
 pub const PREVIEW_WINDOW_LABEL: &str = "content-preview";
-const PREVIEW_WIDTH: f64 = 760.0;
-const PREVIEW_HEIGHT: f64 = 560.0;
+const PREVIEW_WIDTH: f64 = 720.0;
+const PREVIEW_HEIGHT: f64 = 540.0;
 const PREVIEW_MIN_WIDTH: f64 = 420.0;
 const PREVIEW_MIN_HEIGHT: f64 = 320.0;
 
-/// 启动时创建隐藏的预览窗口（带系统标题栏，可拖拽调整大小）。
+/// 启动时创建隐藏的预览窗口（自绘标题栏，可调整大小）。
 pub fn init_preview_window(app: &AppHandle) -> tauri::Result<()> {
     use tauri::{WebviewUrl, WebviewWindowBuilder};
     let window = WebviewWindowBuilder::new(
@@ -19,9 +22,20 @@ pub fn init_preview_window(app: &AppHandle) -> tauri::Result<()> {
         WebviewUrl::App("index.html?preview=1".into()),
     )
     .title("预览")
-    .inner_size(PREVIEW_WIDTH, PREVIEW_HEIGHT)
-    .min_inner_size(PREVIEW_MIN_WIDTH, PREVIEW_MIN_HEIGHT)
+    .inner_size(
+        PREVIEW_WIDTH + 2.0 * WINDOW_SHADOW_MARGIN,
+        PREVIEW_HEIGHT + 2.0 * WINDOW_SHADOW_MARGIN,
+    )
+    .min_inner_size(
+        PREVIEW_MIN_WIDTH + 2.0 * WINDOW_SHADOW_MARGIN,
+        PREVIEW_MIN_HEIGHT + 2.0 * WINDOW_SHADOW_MARGIN,
+    )
+    .decorations(false)
+    .transparent(true)
+    .always_on_top(true)
     .visible(false)
+    .shadow(false)
+    .skip_taskbar(true)
     .resizable(true)
     .build()?;
     // 系统关闭按钮按「隐藏」处理：窗口常驻复用，避免下次打开重建 WebView。
@@ -36,27 +50,17 @@ pub fn init_preview_window(app: &AppHandle) -> tauri::Result<()> {
     Ok(())
 }
 
-/// 以鼠标指针为中心弹出预览窗口；title 同时写入系统标题栏。
+/// 在鼠标所在显示器居中弹出预览窗口；标题写入自绘标题栏（经事件下发）。
 #[tauri::command]
-pub fn open_preview_window(
-    app: AppHandle,
-    title: String,
-    segments: Value,
-) -> Result<(), String> {
+pub fn open_preview_window(app: AppHandle, title: String, segments: Value) -> Result<(), String> {
     let preview = app
         .get_webview_window(PREVIEW_WINDOW_LABEL)
         .ok_or_else(|| "预览窗口未初始化".to_string())?;
 
     let cursor = app.cursor_position().map_err(|error| error.to_string())?;
-    let outer = preview
-        .outer_size()
-        .map_err(|error| error.to_string())?;
-    let half_width = (outer.width / 2) as i32;
-    let half_height = (outer.height / 2) as i32;
-    let mut x = cursor.x as i32 - half_width;
-    let mut y = cursor.y as i32 - half_height;
+    let outer = preview.outer_size().map_err(|error| error.to_string())?;
 
-    // 钳制到鼠标所在显示器范围内，避免窗口一半留在屏幕外。
+    // 居中于鼠标所在显示器（多显示器时跟随用户当前位置），失败时回退主显示器。
     let monitor = app
         .available_monitors()
         .ok()
@@ -74,25 +78,18 @@ pub fn open_preview_window(
     if let Some(monitor) = monitor {
         let position = monitor.position();
         let size = monitor.size();
-        x = x.clamp(position.x, position.x + size.width as i32 - outer.width as i32);
-        y = y.clamp(position.y, position.y + size.height as i32 - outer.height as i32);
+        let x = position.x + (size.width as i32 - outer.width as i32) / 2;
+        let y = position.y + (size.height as i32 - outer.height as i32) / 2;
+        preview
+            .set_position(PhysicalPosition::new(x, y))
+            .map_err(|error| error.to_string())?;
     }
-    preview
-        .set_position(PhysicalPosition::new(x, y))
-        .map_err(|error| error.to_string())?;
 
-    preview
-        .set_title(&title)
-        .map_err(|error| error.to_string())?;
-    let emit_result = app.emit_to(PREVIEW_WINDOW_LABEL, "preview-content", PreviewPayload {
+    app.emit_to(PREVIEW_WINDOW_LABEL, "preview-content", PreviewPayload {
         title,
         segments,
-    });
-    match &emit_result {
-        Ok(()) => log::info!("[preview_window] preview-content emitted to {PREVIEW_WINDOW_LABEL}"),
-        Err(error) => log::warn!("[preview_window] emit failed: {error}"),
-    }
-    emit_result.map_err(|error| error.to_string())?;
+    })
+    .map_err(|error| error.to_string())?;
     preview.show().map_err(|error| error.to_string())?;
     let _ = preview.set_focus();
     Ok(())

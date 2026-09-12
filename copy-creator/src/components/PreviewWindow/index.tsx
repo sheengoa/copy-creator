@@ -18,7 +18,8 @@ const plog = (message: string) => {
 
 /**
  * 独立内容预览窗口的根组件：常驻隐藏，收到 preview-content 事件后
- * 渲染对应内容；ESC 隐藏窗口，系统关闭按钮由 Rust 侧按隐藏处理。
+ * 渲染对应内容；自绘标题栏支持拖拽移动，ESC 或关闭按钮隐藏窗口
+ * （窗口常驻复用，系统层关闭请求由 Rust 侧按隐藏处理）。
  */
 export default function PreviewWindow() {
   const { t } = useTranslation();
@@ -61,21 +62,54 @@ export default function PreviewWindow() {
     };
   }, []);
 
+  const hideWindow = () => {
+    void invoke("hide_preview_window").catch(() => {});
+  };
+
   if (loadError) {
     return (
-      <div className="preview-window-error" role="alert">{String(loadError)}</div>
+      <div className="preview-window-root">
+        <div className="preview-window-header" data-tauri-drag-region>
+          <span className="preview-window-title">{t("radialMenu.previewTitle")}</span>
+          <button
+            type="button"
+            className="preview-window-close-btn"
+            onClick={hideWindow}
+            aria-label={t("common.close")}
+          >
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" aria-hidden="true">
+              <line x1="18" y1="6" x2="6" y2="18" />
+              <line x1="6" y1="6" x2="18" y2="18" />
+            </svg>
+          </button>
+        </div>
+        <div className="preview-window-error" role="alert">{String(loadError)}</div>
+      </div>
     );
   }
 
-  if (!payload) {
-    return <div className="preview-window-empty" aria-hidden="true" />;
-  }
-
-  const segments = Array.isArray(payload.segments) ? payload.segments : null;
+  const segments = payload && Array.isArray(payload.segments) ? payload.segments : null;
+  const title = payload?.title || t("radialMenu.previewTitle");
 
   return (
     <div className="preview-window-root">
-      <ContentPreviewPanel segments={segments} className="" ariaLabel={payload.title || t("radialMenu.previewTitle")} />
+      <div className="preview-window-header" data-tauri-drag-region>
+        <span className="preview-window-title" title={title}>{title}</span>
+        <button
+          type="button"
+          className="preview-window-close-btn"
+          onClick={hideWindow}
+          aria-label={t("common.close")}
+        >
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" aria-hidden="true">
+            <line x1="18" y1="6" x2="6" y2="18" />
+            <line x1="6" y1="6" x2="18" y2="18" />
+          </svg>
+        </button>
+      </div>
+      <div className="preview-window-body">
+        <ContentPreviewPanel segments={segments} className="" ariaLabel={title} />
+      </div>
     </div>
   );
 }
