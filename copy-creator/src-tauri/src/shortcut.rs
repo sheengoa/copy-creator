@@ -392,6 +392,39 @@ pub fn show_radial_menu(app: &AppHandle) {
     }
 }
 
+/// 原子设置径向菜单窗口边界（物理像素）：尺寸与位置在同一次主线程调度
+/// 里先后落盘，操作系统层面不存在中间矩形。预览向左扩展需要「加宽 +
+/// 左移」两步，若分两次调用，中间帧会把菜单面板挤向屏幕右缘外再拉回
+/// （肉眼可见的闪烁）。
+#[tauri::command]
+pub async fn set_radial_window_bounds(
+    app: AppHandle,
+    x: i32,
+    y: i32,
+    width: i32,
+    height: i32,
+) -> Result<(), String> {
+    let Some(window) = app.get_webview_window("radial-menu") else {
+        return Err("radial-menu window not found".into());
+    };
+    let (tx, rx) = std::sync::mpsc::channel::<Result<(), String>>();
+    let win = window.clone();
+    window
+        .run_on_main_thread(move || {
+            let result = (|| {
+                win.set_size(tauri::PhysicalSize::new(width, height))
+                    .map_err(|e| e.to_string())?;
+                win.set_position(tauri::PhysicalPosition::new(x, y))
+                    .map_err(|e| e.to_string())
+            })();
+            let _ = tx.send(result);
+        })
+        .map_err(|e| e.to_string())?;
+    // 异步命令运行在 tokio 工作线程，阻塞等待主线程完成不会造成死锁。
+    rx.recv_timeout(std::time::Duration::from_secs(1))
+        .map_err(|_| "radial window bounds dispatch timed out".to_string())?
+}
+
 // ---- clipboard create dialog ----
 
 // 窗口尺寸均含透明阴影边距（见文件顶部"窗口层级约定"注释）。
