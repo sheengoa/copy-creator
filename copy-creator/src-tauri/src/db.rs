@@ -3249,7 +3249,23 @@ pub fn get_image_base64(app: AppHandle, path: String) -> Result<String, String> 
 }
 
 #[tauri::command]
-pub fn get_image_thumbnail(app: AppHandle, path: String, max_size: u32) -> Result<String, String> {
+pub async fn get_image_thumbnail(
+    app: AppHandle,
+    path: String,
+    max_size: u32,
+) -> Result<String, String> {
+    // 图片解码是重 CPU 操作，必须离开主线程：同步命令在主线程执行，
+    // 大图串行解码会直接冻结 UI（切换资源区卡顿的主因之一）。
+    tokio::task::spawn_blocking(move || get_image_thumbnail_blocking(app, path, max_size))
+        .await
+        .map_err(|e| format!("thumbnail task join: {e}"))?
+}
+
+fn get_image_thumbnail_blocking(
+    app: AppHandle,
+    path: String,
+    max_size: u32,
+) -> Result<String, String> {
     let image_path = resolve_storage_path(&app, &path)?;
     let base_dir = image_path
         .parent()
@@ -3360,8 +3376,19 @@ fn trim_resource_thumbnail_cache(cache_dir: &Path) {
 /// 不同，本命令面向资源库里用户自选路径的图片文件：缓存集中存放在应用
 /// 缓存目录，key 由"路径哈希 + 文件大小 + 修改时间"组成，文件被覆盖后
 /// 自动失效。解码失败（svg/heic 等格式）交由前端回退原图。
+/// 解码经 spawn_blocking 在线程池执行，不阻塞主线程（大库切换流畅的前提）。
 #[tauri::command]
-pub fn get_resource_file_thumbnail(
+pub async fn get_resource_file_thumbnail(
+    app: AppHandle,
+    path: String,
+    max_size: u32,
+) -> Result<String, String> {
+    tokio::task::spawn_blocking(move || get_resource_file_thumbnail_blocking(app, path, max_size))
+        .await
+        .map_err(|e| format!("thumbnail task join: {e}"))?
+}
+
+fn get_resource_file_thumbnail_blocking(
     app: AppHandle,
     path: String,
     max_size: u32,
