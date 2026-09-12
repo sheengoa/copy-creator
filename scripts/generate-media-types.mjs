@@ -99,7 +99,10 @@ mkdirSync(dirname(tsOutPath), { recursive: true });
 if (CHECK_ONLY) {
   const tsCurrent = readFileSync(tsOutPath, "utf8");
   const rsCurrent = readFileSync(rsOutPath, "utf8");
-  if (tsCurrent !== tsBody || rsCurrent !== rsBody) {
+  // 比对前归一化行尾：Windows 上 autocrlf 检出的文件是 CRLF，
+  // 生成串固定为 LF，内容一致时不应误报不同步。
+  const normalizeEol = (text) => text.replace(/\r\n/g, "\n");
+  if (normalizeEol(tsCurrent) !== tsBody || normalizeEol(rsCurrent) !== rsBody) {
     console.error(
       "生成物与 config/media-types.json 不同步：请运行 node scripts/generate-media-types.mjs 后提交生成物。",
     );

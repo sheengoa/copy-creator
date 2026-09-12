@@ -28,19 +28,21 @@ function collectSources(dir: string, out: string[] = []): string[] {
 
 const allSources = collectSources(join(frontRoot, "."));
 const sourceOf = (absolute: string) => readFileSync(absolute, "utf8");
+// Windows 检出的路径是反斜杠：豁免匹配与期望值比较统一转 POSIX。
+const toPosix = (path: string) => path.replace(/\\/g, "/");
 
 describe("架构守卫：领域规则必须全局共享", () => {
   it("规则 1：扩展名集合定义仅存在于生成物与显式豁免（语言特有清单）", () => {
     const offenders = allSources
-      .filter((file) => !file.includes("domain/mediaTypes.generated.ts"))
-      .filter((file) => !file.includes("domain/mediaKind.ts")) // DECODABLE 豁免
+      .filter((file) => !toPosix(file).includes("domain/mediaTypes.generated.ts"))
+      .filter((file) => !toPosix(file).includes("domain/mediaKind.ts")) // DECODABLE 豁免
             .filter((file) => {
         const source = sourceOf(file);
         // 手写扩展名集合模式：new Set([  后跟引号包裹的扩展名字面量
         return /new Set\(\[\s*"[a-z0-9]{2,5}"/.test(source.replace(/\n/g, " "));
       });
     expect(
-      offenders.map((file) => file.replace(frontRoot, "")),
+      offenders.map((file) => toPosix(file.replace(frontRoot, ""))),
       "发现手写扩展名集合，请改用 domain/mediaKind.ts 的共享集合（见 domain/README.md）",
     ).toEqual([]);
   });
@@ -48,7 +50,7 @@ describe("架构守卫：领域规则必须全局共享", () => {
   it("规则 2：convertFileSrc 仅出现在 domain/mediaUrl.ts 与过渡豁免", () => {
     const offenders = allSources
       .filter((file) => sourceOf(file).includes("convertFileSrc"))
-            .map((file) => file.replace(frontRoot, ""));
+            .map((file) => toPosix(file.replace(frontRoot, "")));
     expect(offenders, "媒体地址解析必须走 domain/mediaUrl（见 domain/README.md）").toEqual([
       "/domain/mediaUrl.ts",
     ]);
@@ -58,7 +60,7 @@ describe("架构守卫：领域规则必须全局共享", () => {
     const offenders = allSources
       .filter((file) => file.endsWith(".tsx"))
       .filter((file) => /<video|<audio/.test(sourceOf(file)))
-      .map((file) => file.replace(frontRoot, ""))
+      .map((file) => toPosix(file.replace(frontRoot, "")))
       .sort();
     expect(offenders, "视频/音频渲染必须复用 ResourceMediaPlayer/FileMediaVisual").toEqual([
       "/components/FileMediaPreview.tsx",
