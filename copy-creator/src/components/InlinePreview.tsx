@@ -3,33 +3,30 @@ import { useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { HighlightText } from "./HighlightText";
 import { Icons } from "./Icons";
-import { ImageLightbox } from "./ImageLightbox";
 import { resolveResourceAssetUrl } from "../domain/mediaUrl";
 
 interface InlineImagePreviewProps {
   path: string;
   alt: string;
   className?: string;
-  /** 点击图片打开全屏灯箱查看；展开态大图场景开启。 */
-  zoomable?: boolean;
+  /** 提供时图片可点击，回调携带原始路径供调用方打开独立预览窗口。 */
+  onZoom?: (path: string) => void;
 }
 
 export function InlineImagePreview({
   path,
   alt,
   className = "",
-  zoomable = false,
+  onZoom,
 }: InlineImagePreviewProps) {
   const { t } = useTranslation();
   const [src, setSrc] = useState("");
   const [failed, setFailed] = useState(false);
-  const [zoomed, setZoomed] = useState(false);
 
   useEffect(() => {
     let cancelled = false;
     setSrc("");
     setFailed(false);
-    setZoomed(false);
     resolveResourceAssetUrl(path)
       .then((url) => {
         if (!cancelled) setSrc(url);
@@ -52,25 +49,20 @@ export function InlineImagePreview({
   }
   if (!src) return <div className={`inline-preview-loading ${className}`} aria-hidden="true" />;
   return (
-    <>
-      <img
-        className={`${className}${zoomable ? " is-zoomable" : ""}`.trim()}
-        src={src}
-        alt={alt}
-        draggable={false}
-        onClick={zoomable
-          ? (event) => {
-              // 阻止冒泡，避免触发列表卡片自身的点击行为。
-              event.stopPropagation();
-              setZoomed(true);
-            }
-          : undefined}
-        onError={() => setFailed(true)}
-      />
-      {zoomed && (
-        <ImageLightbox src={src} alt={alt} onClose={() => setZoomed(false)} />
-      )}
-    </>
+    <img
+      className={`${className}${onZoom ? " is-zoomable" : ""}`.trim()}
+      src={src}
+      alt={alt}
+      draggable={false}
+      onClick={onZoom
+        ? (event) => {
+            // 阻止冒泡，避免触发列表卡片自身的点击行为。
+            event.stopPropagation();
+            onZoom(path);
+          }
+        : undefined}
+      onError={() => setFailed(true)}
+    />
   );
 }
 

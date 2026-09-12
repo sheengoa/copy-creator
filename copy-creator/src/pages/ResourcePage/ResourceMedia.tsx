@@ -177,7 +177,7 @@ export function ResourceImage({
  * 原图虚影（详情页大图等大尺寸场景）：同图放大模糊铺底，前景完整展示，
  * 与列表卡片的缩略图虚影同一视觉。className 施加于容器；
  * 前景图的高度约束需在使用方的 CSS 中给定（如详情页的 62vh）。
- * onZoom 提供时前景图可点击，回调携带已解析的图片 URL 供全屏灯箱使用。
+ * onZoom 提供时前景图可点击，供使用方打开独立预览窗口。
  */
 export function ResourceImageGhost({
   path,
@@ -190,7 +190,7 @@ export function ResourceImageGhost({
   alt: string;
   className?: string;
   onMetadata?: (meta: ResourceImageMetadata) => void;
-  onZoom?: (src: string) => void;
+  onZoom?: () => void;
 }) {
   const { src, failed } = useResourceAssetUrl(path);
   const [imageFailed, setImageFailed] = useState(false);
@@ -224,7 +224,7 @@ export function ResourceImageGhost({
           ? (event) => {
               // 阻止冒泡，避免触发外层容器的点击行为。
               event.stopPropagation();
-              onZoom(src);
+              onZoom();
             }
           : undefined}
         onLoad={(event) => {

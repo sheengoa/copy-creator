@@ -1102,52 +1102,21 @@ input:focus-visible + .selection-checkbox {
   bottom: calc(var(--window-shadow-margin, 0px) + 18px);
 }
 
-/* --- 全屏图片灯箱：主窗口内查看大图的统一出口 --- */
-.image-lightbox {
-  position: fixed;
-  inset: 0;
-  z-index: 50;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  padding: 42px 24px 24px;
-  background: rgba(0, 0, 0, 0.72);
-  outline: none;
+/* --- 独立内容预览窗口：不透明窗口需自带背景；空态仅占位避免白屏闪烁 --- */
+.preview-window-root {
+  height: 100%;
 }
 
-.image-lightbox-image {
-  display: block;
-  max-width: 100%;
-  max-height: 100%;
-  object-fit: contain;
-  border-radius: 8px;
-  box-shadow: 0 12px 36px rgba(0, 0, 0, 0.3);
+.preview-window-empty {
+  height: 100%;
+  background: var(--panel-bg, #fff);
 }
 
-.image-lightbox-close {
-  position: absolute;
-  top: 12px;
-  right: 14px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  width: 30px;
-  height: 30px;
-  padding: 0;
-  border: 0;
-  border-radius: 6px;
-  background: rgba(255, 255, 255, 0.14);
-  color: #fff;
-  font: inherit;
-  font-size: 22px;
-  cursor: pointer;
+[data-theme="dark"] .preview-window-empty {
+  background: #1e1e1e;
 }
 
-.image-lightbox-close:hover {
-  background: rgba(255, 255, 255, 0.24);
-}
-
-/* 可点击放大的图片：悬停提示可查看大图 */
+/* 可点击放大的图片：悬停提示可在独立预览窗口查看大图 */
 .is-zoomable {
   cursor: zoom-in;
 }

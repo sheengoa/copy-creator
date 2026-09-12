@@ -8,7 +8,6 @@ import {
 } from "../../components/CardActionMenu";
 import { InlineImagePreview, InlineTextFilePreview } from "../../components/InlinePreview";
 import { FileMediaVisual } from "../../components/FileMediaPreview";
-import { ResourceMediaPlayer } from "../ResourcePage/ResourceMedia";
 import { ImageThumb } from "./ImageThumb";
 import { TYPE_META } from "./utils";
 import { formatRelativeTime } from "../../utils/formatTime";
@@ -20,6 +19,7 @@ import { HighlightText } from "../../components/HighlightText";
 import { shouldUseTerminalPasteForMouseTrigger } from "../../utils/pasteMode";
 import { loadRecordPreviewSegments, type RadialPreviewSegment } from "../../domain/preview";
 import type { RecordView } from "../../domain/recordView";
+import type { ContentPreviewPayload } from "../../utils/previewWindow";
 
 interface ClipboardCardProps {
   /** 叶子合同：只收视图模型（DOMAIN_ARCHITECTURE_PLAN.md §3.10）。 */
@@ -35,6 +35,8 @@ interface ClipboardCardProps {
   onMoveToTop?: (id: string) => void;
   /** 数据/动作经容器回调进出（叶子禁 import stores/invoke）。 */
   getRecordContent: (view: RecordView) => Promise<string>;
+  /** 媒体记录点展开按钮：打开独立预览窗口（容器负责 invoke）。 */
+  onOpenPreview: (payload: ContentPreviewPayload) => void;
   onToggleUserApiKey: (view: RecordView) => void;
   selectionMode: boolean;
   selected: boolean;
@@ -44,9 +46,11 @@ interface ClipboardCardProps {
 function ClipboardExpandedPreview({
   view,
   search,
+  onOpenPreview,
 }: {
   view: RecordView;
   search?: string;
+  onOpenPreview: (payload: ContentPreviewPayload) => void;
 }) {
   const { t } = useTranslation();
   const [segments, setSegments] = useState<RadialPreviewSegment[] | null>(null);
@@ -88,7 +92,10 @@ function ClipboardExpandedPreview({
             path={segment.path}
             alt={t("radialMenu.previewImage")}
             className="clipboard-card-expanded-image"
-            zoomable
+            onZoom={(path) => onOpenPreview({
+              title: view.displayName || view.content,
+              segments: [{ type: "image", path }],
+            })}
           />
         ) : segment.type === "text" ? (
           <div className="clipboard-card-expanded-text" key={`text-${index}`}>
@@ -111,6 +118,7 @@ function ClipboardCardInner({
   onDelete,
   onMoveToTop,
   getRecordContent,
+  onOpenPreview,
   onToggleUserApiKey,
   selectionMode,
   selected,
@@ -173,8 +181,24 @@ function ClipboardCardInner({
   const handleToggleExpanded = useCallback((e: React.MouseEvent) => {
     e.preventDefault();
     e.stopPropagation();
+    // 媒体记录：展开按钮改为弹出独立预览窗口，卡片内不再展开媒体；
+    // 文本内容保留卡片内展开看全文。
+    if (
+      view.expandPreview === "image"
+      || view.expandPreview === "video"
+      || view.expandPreview === "audio"
+    ) {
+      const title = view.displayName || view.content;
+      loadRecordPreviewSegments(view)
+        .then((segments) => onOpenPreview({ title, segments }))
+        .catch(() => onOpenPreview({
+          title,
+          segments: [{ type: "text", content: view.content }],
+        }));
+      return;
+    }
     setExpanded((value) => !value);
-  }, []);
+  }, [onOpenPreview, view]);
 
   const handleToggleUserApiKey = useCallback(() => {
     setCtxMenu(null);
@@ -251,52 +275,29 @@ function ClipboardCardInner({
           className={`notibody clipboard-card-body${canToggle ? " is-toggleable" : ""}${canCollapseText && !expanded ? " is-collapsed" : ""}${canToggle && expanded ? " is-expanded" : ""}${view.recordType === "file" && expanded ? " is-file-expanded" : ""}`}
         >
           {view.recordType === "image" ? (
-            expanded ? (
-              <InlineImagePreview
-                path={view.content}
-                alt={t("radialMenu.previewImage")}
-                className="clipboard-card-expanded-image"
-                zoomable
-              />
-            ) : (
-              <ImageThumb
-                id={view.id}
-                content={view.content}
-                onClick={(e) => {
-                  e.stopPropagation();
-                  if (selectionMode) onToggleSelected(view.id);
-                  else handlePaste();
-                }}
-              />
-            )
+            <ImageThumb
+              id={view.id}
+              content={view.content}
+              onClick={(e) => {
+                e.stopPropagation();
+                if (selectionMode) onToggleSelected(view.id);
+                else handlePaste();
+              }}
+            />
           ) : view.recordType === "link" ? (
             expanded ? (
-              <ClipboardExpandedPreview view={view} search={search} />
+              <ClipboardExpandedPreview view={view} search={search} onOpenPreview={onOpenPreview} />
             ) : (
               <span className="clipboard-link-content"><HighlightText text={view.content} search={search} /></span>
             )
           ) : view.recordType === "file" ? (
             <>
-              {/* 展开显示媒体/大图时隐藏封面帧：视觉上封面被"拉大"为预览，不再叠两个 */}
-              {(!expanded || view.expandPreview === null || view.expandPreview === "text") && (
-                <FileMediaVisual path={view.content} />
-              )}
+              {/* 文本文件展开在卡片内阅读；媒体文件（视频/音频/图片）由
+                  展开按钮弹出独立预览窗口，卡片内不再渲染媒体播放器。 */}
+              <FileMediaVisual path={view.content} />
               <span className="clipboard-file-content"><HighlightText text={view.displayName} search={search} /></span>
-              {expanded && view.expandPreview !== null && (
-                view.expandPreview === "video" || view.expandPreview === "audio" ? (
-                  <div className={`clipboard-media-slot is-${view.expandPreview}`}>
-                    <ResourceMediaPlayer kind={view.expandPreview} path={view.content} />
-                  </div>
-                ) : view.expandPreview === "image" ? (
-                  <InlineImagePreview
-                    path={view.content}
-                    alt={t("radialMenu.previewImage")}
-                    className="clipboard-card-expanded-image"
-                    zoomable
-                  />
-                ) : (
-                  <InlineTextFilePreview recordId={view.id} search={search} />
-                )
+              {expanded && view.expandPreview === "text" && (
+                <InlineTextFilePreview recordId={view.id} search={search} />
               )}
             </>
           ) : (

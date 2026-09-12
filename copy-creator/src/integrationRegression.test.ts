@@ -76,7 +76,10 @@ describe("integration regressions", () => {
 
     expect(phraseSource).toContain('className="card-toggle-text-btn"');
     expect(phraseSource).toContain("e.stopPropagation()");
-    expect(phraseSource).toContain('t(isTextExpanded ? "phrases.collapseText" : "phrases.expandText")');
+    // 图片文件短语点展开改弹独立预览窗口，文本保留卡片内展开（双文案并存）。
+    expect(phraseSource).toContain("if (imageFile)");
+    expect(phraseSource).toContain('? "radialMenu.openPreview"');
+    expect(phraseSource).toContain('isTextExpanded ? "phrases.collapseText" : "phrases.expandText"');
     expect(phraseSource).toContain("Icons.expand");
     expect(phraseSource).toContain("Icons.collapse");
     expect(phraseStyles).toContain(".phrase-card-body.is-toggleable");
@@ -474,6 +477,8 @@ describe("integration regressions", () => {
     const clipboardStyles = readSource("./styles/clipboard.css");
     const persistWindowSize = readSource("./hooks/usePersistWindowSize.ts");
     const inlinePreview = readSource("./components/InlinePreview.tsx");
+    const previewWindowRoot = readSource("./components/PreviewWindow/index.tsx");
+    const previewWindowUtil = readSource("./utils/previewWindow.ts");
     const dbSource = readSource("../src-tauri/src/db.rs");
     const libSource = readSource("../src-tauri/src/lib.rs");
 
@@ -482,9 +487,18 @@ describe("integration regressions", () => {
     expect(pageSource).not.toContain("<ContentPreviewPanel");
     expect(pageSource).not.toContain("getCurrentWindow");
     expect(pageSource).not.toContain("calculatePreviewExpansion");
-    expect(previewPanel).toContain("onClose?: () => void;");
-    expect(previewPanel).toContain("content-preview-close");
+    // 预览面板供独立预览窗口复用：无内置标题栏（由系统标题栏承担）。
+    expect(previewPanel).toContain("ariaLabel?: string;");
+    expect(previewPanel).not.toContain("content-preview-close");
     expect(previewPanel).not.toContain("onDelete");
+    // 独立预览窗口：常驻隐藏、事件驱动渲染、以鼠标为中心弹出。
+    expect(previewWindowRoot).toContain('<ContentPreviewPanel');
+    expect(previewWindowRoot).toContain('listen<PreviewPayload>("preview-content"');
+    expect(previewWindowRoot).toContain('invoke("hide_preview_window")');
+    expect(previewWindowUtil).toContain('invoke("open_preview_window"');
+    expect(libSource).toContain("preview_window::open_preview_window");
+    expect(libSource).toContain("preview_window::init_preview_window");
+    expect(cardSource).toContain("onOpenPreview");
     expect(cardSource).toContain("ClipboardExpandedPreview");
     expect(cardSource).toContain("InlineImagePreview");
     expect(cardSource).toContain("InlineTextFilePreview");

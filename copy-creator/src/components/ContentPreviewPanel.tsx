@@ -3,14 +3,13 @@ import { useTranslation } from "react-i18next";
 import type { RadialPreviewSegment } from "../utils/radialPreview";
 import { resolveResourceAssetUrl } from "../domain/mediaUrl";
 import { ResourceMediaPlayer } from "../pages/ResourcePage/ResourceMedia";
-import { Icons } from "./Icons";
 
 interface ContentPreviewPanelProps {
   segments: RadialPreviewSegment[] | null;
   className: string;
+  ariaLabel?: string;
   onClick?: (event: React.MouseEvent<HTMLElement>) => void;
   onMouseLeave?: (event: React.MouseEvent<HTMLElement>) => void;
-  onClose?: () => void;
 }
 
 function PreviewImage({ path }: { path: string }) {
@@ -54,38 +53,20 @@ function PreviewImage({ path }: { path: string }) {
 export function ContentPreviewPanel({
   segments,
   className,
+  ariaLabel,
   onClick,
   onMouseLeave,
-  onClose,
 }: ContentPreviewPanelProps) {
   const { t } = useTranslation();
 
   return (
     <section
       className={`content-preview-panel ${className}`}
-      aria-label={t("radialMenu.previewTitle")}
+      aria-label={ariaLabel}
       data-content-preview
       onClick={onClick}
       onMouseLeave={onMouseLeave}
     >
-      <div className="content-preview-header">
-        <div className="content-preview-title">{t("radialMenu.previewTitle")}</div>
-        {onClose && (
-          <button
-            className="content-preview-close"
-            type="button"
-            aria-label={t("radialMenu.closePreview")}
-            title={t("radialMenu.closePreview")}
-            onClick={(event) => {
-              event.preventDefault();
-              event.stopPropagation();
-              onClose();
-            }}
-          >
-            {Icons.close}
-          </button>
-        )}
-      </div>
       <div className="content-preview-body" data-content-preview-scroll>
         {segments === null ? (
           <div className="content-preview-loading">{t("common.loading")}</div>

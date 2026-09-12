@@ -7,6 +7,7 @@ mod media_kind;
 mod media_server;
 mod media_types_generated;
 mod paste;
+mod preview_window;
 mod radial_drag;
 mod resource_watch;
 mod shortcut;
@@ -256,6 +257,11 @@ pub fn run() {
                 log::info!("Clipboard create popup window created");
             }
 
+            // Create hidden standalone content preview window (resizable,
+            // system title bar; shared by the main window and radial menu).
+            preview_window::init_preview_window(app.handle())
+                .map_err(|error| format!("创建内容预览窗口失败: {error}"))?;
+
             if let Ok(key) = db::get_setting(app.handle().clone(), "shortcut_key".to_string()) {
                 let key = key.trim().to_string();
                 if !key.is_empty() {
@@ -388,6 +394,8 @@ pub fn run() {
             shortcut::update_clipboard_create_shortcut,
             shortcut::set_radial_menu_enabled,
             shortcut::open_clipboard_create,
+            preview_window::open_preview_window,
+            preview_window::hide_preview_window,
             tray::update_tray_language,
             db::check_api_key,
             db::save_api_key_label,

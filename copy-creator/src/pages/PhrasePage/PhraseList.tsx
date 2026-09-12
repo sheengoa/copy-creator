@@ -5,12 +5,13 @@ import { CSS } from "@dnd-kit/utilities";
 import { useTranslation } from "react-i18next";
 import type { Phrase } from "../../types";
 import { HighlightText } from "../../components/HighlightText";
-import { InlineImagePreview, InlineTextFilePreview } from "../../components/InlinePreview";
+import { InlineTextFilePreview } from "../../components/InlinePreview";
 import { usePhraseStore, isImageFilePath } from "../../stores/phraseStore";
 import { useSettingsStore } from "../../stores/settingsStore";
 import { UsageCountBadge } from "../../components/UsageCountBadge";
 import { fileNameFromPath } from "../../domain/fileName";
 import { isInlineTextPreviewFilePath, shouldShowInlineTextToggle } from "../../domain/records";
+import { openContentPreviewWindow } from "../../utils/previewWindow";
 
 interface PhraseListProps {
   phrases: Phrase[];
@@ -115,6 +116,13 @@ function PhraseCard({
 
   const handleToggleText = (e: React.MouseEvent) => {
     e.stopPropagation();
+    // 图片文件短语：展开改为弹出独立预览窗口；文本保留卡片内展开。
+    if (imageFile) {
+      void openContentPreviewWindow(fileName || phrase.content, [
+        { type: "image", path: phrase.content },
+      ]);
+      return;
+    }
     setTextExpanded((expanded) => !expanded);
   };
 
@@ -149,9 +157,7 @@ function PhraseCard({
           {isFile ? (
             <>
               <div className="phrase-card-file-summary">
-                {imageFile && isTextExpanded ? (
-                  <span className="phrase-card-file-icon">{Icons.image}</span>
-                ) : imageFile ? (
+                {imageFile ? (
                   <PhraseFileImage content={phrase.content} />
                 ) : (
                   <span className="phrase-card-file-icon">{Icons.file}</span>
@@ -159,14 +165,6 @@ function PhraseCard({
                 <span className="phrase-card-file-name"><HighlightText text={fileName} search={search} /></span>
                 <span className="phrase-card-file-size">{formatBytes(phrase.file_size)}</span>
               </div>
-              {isTextExpanded && imageFile && (
-                <InlineImagePreview
-                  path={phrase.content}
-                  alt={t("resources.imagePreview")}
-                  className="phrase-card-expanded-image"
-                  zoomable
-                />
-              )}
               {isTextExpanded && textFile && (
                 <InlineTextFilePreview path={phrase.content} search={search} />
               )}
@@ -191,12 +189,20 @@ function PhraseCard({
                 <button
                   className="card-toggle-text-btn"
                   type="button"
-                  aria-expanded={isTextExpanded}
-                  aria-label={t(isTextExpanded ? "phrases.collapseText" : "phrases.expandText")}
-                  title={t(isTextExpanded ? "phrases.collapseText" : "phrases.expandText")}
+                  aria-expanded={imageFile ? undefined : isTextExpanded}
+                  aria-label={t(
+                    imageFile
+                      ? "radialMenu.openPreview"
+                      : isTextExpanded ? "phrases.collapseText" : "phrases.expandText",
+                  )}
+                  title={t(
+                    imageFile
+                      ? "radialMenu.openPreview"
+                      : isTextExpanded ? "phrases.collapseText" : "phrases.expandText",
+                  )}
                   onClick={handleToggleText}
                 >
-                  {isTextExpanded ? Icons.collapse : Icons.expand}
+                  {imageFile || !isTextExpanded ? Icons.expand : Icons.collapse}
                 </button>
               )}
               <span ref={setActivatorNodeRef} className="drag-handle" {...attributes} {...listeners}>

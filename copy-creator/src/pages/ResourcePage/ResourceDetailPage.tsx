@@ -8,7 +8,6 @@ import { Icons } from "../../components/Icons";
 import { BackToTopButton } from "../../components/BackToTop";
 import { useBackToTop } from "../../hooks/useBackToTop";
 import { HighlightText } from "../../components/HighlightText";
-import { ImageLightbox } from "../../components/ImageLightbox";
 import { loadRecordPreviewSegments, type RadialPreviewSegment } from "../../domain/preview";
 import { formatResourceBitrate, formatResourceDuration, formatResourceFileSize } from "./resourceUtils";
 import { type ResourceMediaKind } from "../../domain/mediaKind";
@@ -17,6 +16,7 @@ import { formatResourceFolderPath } from "../../domain/groups";
 import { inferResourceMediaKind } from "../../domain/mediaKind";
 import { resolveResourceMediaUrl } from "../../domain/mediaUrl";
 import { getResourcePath, getResourceTitle } from "../../domain/records";
+import { openContentPreviewWindow } from "../../utils/previewWindow";
 import {
   ResourceImageGhost,
   ResourceMediaPlayer,
@@ -50,7 +50,6 @@ export default function ResourceDetailPage({
   const [segments, setSegments] = useState<RadialPreviewSegment[] | null>(null);
   const [textContent, setTextContent] = useState<string | null>(null);
   const [error, setError] = useState(false);
-  const [lightboxSrc, setLightboxSrc] = useState<string | null>(null);
   const [mediaSource, setMediaSource] = useState<string | null>(null);
   const [mediaMeta, setMediaMeta] = useState<ResourceMediaMetadata>({});
   const [noteDraft, setNoteDraft] = useState(record.resource_note ?? "");
@@ -77,7 +76,6 @@ export default function ResourceDetailPage({
 
   useEffect(() => {
     setMediaMeta({});
-    setLightboxSrc(null);
     setNoteDraft(record.resource_note ?? "");
     setSavedNote(record.resource_note ?? "");
     setNoteSaved(false);
@@ -473,22 +471,17 @@ export default function ResourceDetailPage({
                 onMediaMetadata={setMediaMeta}
               />
             ) : kind === "image" ? (
-              <>
-                <ResourceImageGhost
-                  path={resourcePath}
-                  alt={title}
-                  className="resource-segment-image"
-                  onMetadata={({ width, height }) => setMediaMeta({ width, height })}
-                  onZoom={(src) => setLightboxSrc(src)}
-                />
-                {lightboxSrc && (
-                  <ImageLightbox
-                    src={lightboxSrc}
-                    alt={title}
-                    onClose={() => setLightboxSrc(null)}
-                  />
-                )}
-              </>
+              <ResourceImageGhost
+                path={resourcePath}
+                alt={title}
+                className="resource-segment-image"
+                onMetadata={({ width, height }) => setMediaMeta({ width, height })}
+                onZoom={() =>
+                  void openContentPreviewWindow(title, [
+                    { type: "image", path: resourcePath },
+                  ])
+                }
+              />
             ) : kind === "file" ? (
               <div className="resource-detail-file">
                 {Icons.file}
