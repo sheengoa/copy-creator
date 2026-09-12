@@ -388,7 +388,6 @@ pub fn run() {
             shortcut::update_clipboard_create_shortcut,
             shortcut::set_radial_menu_enabled,
             shortcut::open_clipboard_create,
-            shortcut::set_radial_window_bounds,
             tray::update_tray_language,
             db::check_api_key,
             db::save_api_key_label,

@@ -8,6 +8,7 @@ import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import {
   getCurrentWindow,
   currentMonitor,
+  LogicalSize,
   PhysicalPosition,
 } from "@tauri-apps/api/window";
 import { invoke } from "@tauri-apps/api/core";
@@ -388,15 +389,11 @@ export default function RadialMenu() {
       const appWindow = getCurrentWindow();
       const uiScale = uiScaleRef.current;
       try {
-        const scaleFactor = await appWindow.scaleFactor();
-        const current = await appWindow.outerPosition();
-        const target = originalPosition ?? current;
-        await invoke("set_radial_window_bounds", {
-          x: target.x,
-          y: target.y,
-          width: Math.round((RADIAL_MENU_WIDTH + 2 * RADIAL_SHADOW_MARGIN) * uiScale * scaleFactor),
-          height: Math.round((RADIAL_MENU_HEIGHT + 2 * RADIAL_SHADOW_MARGIN) * uiScale * scaleFactor),
-        });
+        await appWindow.setSize(new LogicalSize(
+          (RADIAL_MENU_WIDTH + 2 * RADIAL_SHADOW_MARGIN) * uiScale,
+          (RADIAL_MENU_HEIGHT + 2 * RADIAL_SHADOW_MARGIN) * uiScale,
+        ));
+        if (originalPosition) await appWindow.setPosition(originalPosition);
       } catch {
         // 后端会在菜单下次打开时恢复紧凑尺寸。
       }
@@ -476,16 +473,17 @@ export default function RadialMenu() {
       previewRef.current = loadingState;
       setPreview(loadingState);
       await enqueueWindowOperation(async () => {
-        // 尺寸与位置必须原子下发：向左扩展时若分两步，中间帧会把菜单
-        // 面板挤向屏幕右缘外再拉回（肉眼可见的闪烁）。
-        await invoke("set_radial_window_bounds", {
-          x: expansion.direction === "left"
-            ? expansion.windowX - marginPhysical
-            : position.x,
-          y: position.y,
-          width: Math.round((RADIAL_MENU_WIDTH + 2 * RADIAL_SHADOW_MARGIN + expansion.previewWidth) * uiScale * scaleFactor),
-          height: Math.round((RADIAL_MENU_HEIGHT + 2 * RADIAL_SHADOW_MARGIN) * uiScale * scaleFactor),
-        });
+        await appWindow.setSize(new LogicalSize(
+          (RADIAL_MENU_WIDTH + 2 * RADIAL_SHADOW_MARGIN + expansion.previewWidth) * uiScale,
+          (RADIAL_MENU_HEIGHT + 2 * RADIAL_SHADOW_MARGIN) * uiScale,
+        ));
+        if (expansion.direction === "left") {
+          // 展开计算给出的是内容原点，回写窗口位置时补回阴影边距。
+          await appWindow.setPosition(new PhysicalPosition(
+            expansion.windowX - marginPhysical,
+            position.y,
+          ));
+        }
       });
       if (
         request !== previewRequestRef.current
@@ -510,15 +508,11 @@ export default function RadialMenu() {
       if (!deferRestore) {
         try {
           await enqueueWindowOperation(async () => {
-            const scaleFactor = await appWindow.scaleFactor();
-            const current = await appWindow.outerPosition();
-            const target = originalPosition ?? current;
-            await invoke("set_radial_window_bounds", {
-              x: target.x,
-              y: target.y,
-              width: Math.round((RADIAL_MENU_WIDTH + 2 * RADIAL_SHADOW_MARGIN) * uiScaleRef.current * scaleFactor),
-              height: Math.round((RADIAL_MENU_HEIGHT + 2 * RADIAL_SHADOW_MARGIN) * uiScaleRef.current * scaleFactor),
-            });
+            await appWindow.setSize(new LogicalSize(
+              (RADIAL_MENU_WIDTH + 2 * RADIAL_SHADOW_MARGIN) * uiScaleRef.current,
+              (RADIAL_MENU_HEIGHT + 2 * RADIAL_SHADOW_MARGIN) * uiScaleRef.current,
+            ));
+            if (originalPosition) await appWindow.setPosition(originalPosition);
           });
         } catch {
           // 后端会在菜单下次打开时恢复紧凑尺寸。
