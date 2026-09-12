@@ -32,10 +32,11 @@ const RESOLVE_INTERVAL: Duration = Duration::from_secs(2);
 /// 监听建立失败后的重试间隔，避免对失效路径每两秒刷一遍告警日志。
 const RETRY_INTERVAL: Duration = Duration::from_secs(10);
 
-/// 监听事件的两种语义：只有「到达」需要按发现时间补建入库记录，
-/// 其余变更（删除、内容修改）只需触发前端重扫。
+/// 监听事件的三种语义：「到达」按发现时间补建入库，「消失」按路径移除
+/// 记录（文件不在，记录不留），其余变更（内容修改）只触发前端重扫。
 enum WatchSignal {
     Arrived(Vec<PathBuf>),
+    Vanished(Vec<PathBuf>),
     Changed,
 }
 
@@ -55,9 +56,10 @@ fn watch_loop<R: Runtime>(app: AppHandle<R>) {
     let mut watch_failed = false;
     let mut last_event: Option<Instant> = None;
     let mut next_resolve = Instant::now();
-    // 新出现文件跨 tick 累积：事件与防抖结束往往不在同一个 200ms tick 里，
-    // 集合必须活到防抖触发被消费为止。
+    // 新出现/消失的文件跨 tick 累积：事件与防抖结束往往不在同一个
+    // 200ms tick 里，集合必须活到防抖触发被消费为止。
     let mut arrived_paths: HashSet<PathBuf> = HashSet::new();
+    let mut vanished_paths: HashSet<PathBuf> = HashSet::new();
 
     loop {
         // 跟进资源库目录变化（含首次解析）。
@@ -96,16 +98,25 @@ fn watch_loop<R: Runtime>(app: AppHandle<R>) {
             }
         }
 
-        // 汇聚监听事件，防抖后：新文件先按发现时间补建入库（置顶），
-        // 再通知前端刷新。删除与内容修改没有「到达」路径可补建，
-        // 但同样进入防抖并触发重扫，保证外部增删改都实时反映到界面。
+        // 汇聚监听事件，防抖后：新文件按发现时间补建入库（置顶），被删除
+        // 的文件按路径移除记录，然后通知前端刷新。内容修改只进入防抖触发
+        // 重扫，保证外部增删改都实时反映到界面。
         let mut saw_event = false;
         while let Ok(signal) = event_rx.try_recv() {
             saw_event = true;
-            if let WatchSignal::Arrived(paths) = signal {
-                for path in paths {
-                    arrived_paths.insert(path);
+            match signal {
+                WatchSignal::Arrived(paths) => {
+                    for path in paths {
+                        arrived_paths.insert(path);
+                    }
                 }
+                WatchSignal::Vanished(paths) => {
+                    for path in paths {
+                        arrived_paths.remove(&path);
+                        vanished_paths.insert(path);
+                    }
+                }
+                WatchSignal::Changed => {}
             }
         }
         if saw_event {
@@ -114,6 +125,10 @@ fn watch_loop<R: Runtime>(app: AppHandle<R>) {
         if let Some(at) = last_event {
             if at.elapsed() >= DEBOUNCE {
                 last_event = None;
+                if !vanished_paths.is_empty() {
+                    let paths: Vec<PathBuf> = vanished_paths.drain().collect();
+                    db::forget_resource_records(&app, &paths);
+                }
                 if !arrived_paths.is_empty() {
                     let paths: Vec<PathBuf> = arrived_paths.drain().collect();
                     db::discover_external_resource_files(&app, &paths);
@@ -142,9 +157,17 @@ fn build_watcher(
                             let _ = tx.send(WatchSignal::Arrived(event.paths.clone()));
                         }
                     }
-                    // 删除与内容修改不影响置顶语义，但必须触发重扫刷新，
-                    // 否则文件管理器里删除/改动内容后界面永远不更新。
-                    EventKind::Remove(_) | EventKind::Modify(_) => {
+                    // 删除：按路径移除记录（改名也会先发 Remove 旧路径，
+                    // 新路径由 Arrived 补建），并触发重扫刷新。
+                    EventKind::Remove(_) => {
+                        if !event.paths.is_empty() {
+                            let _ = tx.send(WatchSignal::Vanished(event.paths.clone()));
+                        }
+                        let _ = tx.send(WatchSignal::Changed);
+                    }
+                    // 内容修改不影响置顶语义，但必须触发重扫刷新，
+                    // 否则文件管理器里改动内容后界面永远不更新。
+                    EventKind::Modify(_) => {
                         let _ = tx.send(WatchSignal::Changed);
                     }
                     // Access 等事件高频且无业务语义，忽略以免无谓刷新。

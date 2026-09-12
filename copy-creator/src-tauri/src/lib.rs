@@ -137,6 +137,17 @@ pub fn run() {
             media_server::spawn(app.handle());
             resource_watch::spawn(app.handle());
 
+            // 资源库全量对账放后台线程：数万文件的 stat 扫描不能拖慢启动。
+            // 完成后广播刷新，前端用对账后的完整索引重载一次。
+            {
+                let app_handle = app.handle().clone();
+                std::thread::spawn(move || {
+                    db::sync_resource_library(&app_handle);
+                    use tauri::Emitter;
+                    let _ = app_handle.emit("resource-groups-changed", ());
+                });
+            }
+
             // Restore persisted theme; DB init defaults to light, so
             // the first-ever launch will be light mode.
             let current_theme =

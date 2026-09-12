@@ -1433,6 +1433,13 @@ pub fn init_db(app: &AppHandle) -> Result<(), Box<dyn std::error::Error>> {
         [],
     )
     .ok();
+    // 外部发现的资源文件（对账/监听补建）：区别于应用内保存的记录。
+    // 前端据此决定文本详情保存走记录 id 还是直接写文件路径。
+    conn.execute(
+        "ALTER TABLE clipboard_records ADD COLUMN resource_external INTEGER DEFAULT 0",
+        [],
+    )
+    .ok();
 
     // ── last_used_at：粘贴成功时记录使用时间，供径向菜单「最近使用」聚合查询 ──
     conn.execute(
@@ -1649,6 +1656,127 @@ pub fn prune_old_records(app: &AppHandle) -> Result<(), Box<dyn std::error::Erro
 
 // ---- Tauri Commands ----
 
+/// 资源库全量对账：以磁盘为准一次性同步索引——补录缺失文件、清退幽灵
+/// 记录（文件已被外部删除）。只在应用启动与库路径切换时执行；运行期的
+/// 增删由 resource_watch 增量上报。查询路径不得再做全目录扫描与逐行
+/// stat——那是大库（数万文件）每次切换/搜索都卡顿的根源。返回补录条数。
+pub fn sync_resource_library<R: Runtime>(app: &AppHandle<R>) -> usize {
+    let root = get_resource_library_dir(app);
+    let entries = scan_resource_files(&root);
+    let state = app.state::<DbState>();
+    let Ok(conn) = state.conn.lock() else {
+        return 0;
+    };
+
+    let scanned_keys: HashSet<PathBuf> =
+        entries.iter().map(|entry| resource_path_key(&entry.path)).collect();
+
+    // 幽灵清退：库内文件已不存在（且不在本次扫描结果中）的记录移除，
+    // 与原查询路径的「文件不在，记录不留」语义一致。
+    let mut removable: Vec<(String, String)> = Vec::new();
+    {
+        let Ok(mut stmt) = conn.prepare(
+            "SELECT id, resource_path FROM clipboard_records
+             WHERE COALESCE(storage_mode, 'database') = 'resource'",
+        ) else {
+            return 0;
+        };
+        let Ok(rows) = stmt.query_map([], |row| {
+            Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
+        }) else {
+            return 0;
+        };
+        for row in rows.flatten() {
+            let path = PathBuf::from(&row.1);
+            if path.starts_with(&root) && !scanned_keys.contains(&resource_path_key(&path)) {
+                removable.push(row);
+            }
+        }
+    }
+    for (id, _) in &removable {
+        let _ = conn.execute("DELETE FROM api_key_labels WHERE record_id = ?1", params![id]);
+        let _ = conn.execute("DELETE FROM clipboard_records WHERE id = ?1", params![id]);
+    }
+
+    // 补录：应用未运行期间放入库的文件按扫描语义入库——created_at 取文件
+    // 修改时间、sort_order 取修改毫秒，与原「查询内扫描合并」的排序一致。
+    // （运行期由监听补建的记录仍是发现时刻置顶，语义分工不变。）
+    let mut known: HashSet<PathBuf> = {
+        let Ok(mut stmt) = conn.prepare(
+            "SELECT resource_path FROM clipboard_records
+             WHERE COALESCE(storage_mode, 'database') = 'resource'
+               AND COALESCE(resource_path, '') <> ''",
+        ) else {
+            return removable.len();
+        };
+        let Ok(rows) = stmt.query_map([], |row| row.get::<_, String>(0)) else {
+            return removable.len();
+        };
+        rows.flatten().map(|p| resource_path_key(Path::new(&p))).collect()
+    };
+    let mut added = 0;
+    for entry in &entries {
+        let key = resource_path_key(&entry.path);
+        if known.contains(&key) {
+            continue;
+        }
+        let path_text = entry.path.to_string_lossy().to_string();
+        let inserted = conn.execute(
+            "INSERT OR IGNORE INTO clipboard_records
+             (id, type, content, source_app, created_at, group_name, attachments,
+              storage_mode, resource_path, sort_order, use_count, resource_external)
+             VALUES (?1, 'file', ?2, '', ?3, ?4, '[]', 'resource', ?2, ?5, 0, 1)",
+            params![
+                resource_file_id(&entry.path),
+                path_text,
+                entry.modified_at,
+                entry.group,
+                entry.sort_order
+            ],
+        );
+        if let Ok(count) = inserted {
+            if count > 0 {
+                known.insert(key);
+                added += count;
+            }
+        }
+    }
+    let total_removed = removable.len();
+    drop(conn);
+    if added > 0 || total_removed > 0 {
+        log::info!("资源库对账完成：补录 {added} 条，清退 {total_removed} 条");
+    }
+    added
+}
+
+/// 按路径移除资源记录（监听到外部删除时调用）：文件不在，记录不留。
+pub fn forget_resource_records<R: Runtime>(app: &AppHandle<R>, paths: &[PathBuf]) {
+    if paths.is_empty() {
+        return;
+    }
+    let state = app.state::<DbState>();
+    let Ok(conn) = state.conn.lock() else {
+        return;
+    };
+    let Ok(mut stmt) = conn.prepare(
+        "SELECT id FROM clipboard_records
+         WHERE COALESCE(storage_mode, 'database') = 'resource' AND resource_path = ?1",
+    ) else {
+        return;
+    };
+    for path in paths {
+        let path_text = path.to_string_lossy().to_string();
+        let Ok(rows) = stmt.query_map(params![path_text], |row| row.get::<_, String>(0)) else {
+            continue;
+        };
+        let ids: Vec<String> = rows.flatten().collect();
+        for id in ids {
+            let _ = conn.execute("DELETE FROM api_key_labels WHERE record_id = ?1", params![id]);
+            let _ = conn.execute("DELETE FROM clipboard_records WHERE id = ?1", params![id]);
+        }
+    }
+}
+
 /// 外部移入资源库的新文件按发现时间补建入库：sort_order 取发现时刻，
 /// 使其在「全部」列表置顶（与刚复制的剪切板内容同待遇）。已存在记录的
 /// 路径（管理中 / 此前补建）不重复置顶；应用未运行期间放入的文件不追溯。
@@ -1718,8 +1846,8 @@ pub fn discover_external_resource_files<R: Runtime>(
         match conn.execute(
             "INSERT OR IGNORE INTO clipboard_records
              (id, type, content, source_app, created_at, storage_mode, resource_path,
-              sort_order, use_count)
-             VALUES (?1, 'file', ?2, '', ?3, 'resource', ?2, ?4, 0)",
+              sort_order, use_count, resource_external)
+             VALUES (?1, 'file', ?2, '', ?3, 'resource', ?2, ?4, 0, 1)",
             params![id, path_text, &now, now_ms],
         ) {
             Err(error) => {
@@ -1838,7 +1966,7 @@ fn get_resource_records_inner<R: Runtime>(
                         group_name, attachments, storage_mode, resource_path,
                         COALESCE(sort_order, 0), COALESCE(resource_note, ''),
                         COALESCE(use_count, 0), COALESCE(touched_ms, 0),
-                        COALESCE(last_used_at, '')
+                        COALESCE(last_used_at, ''), COALESCE(resource_external, 0)
                  FROM clipboard_records
                  WHERE COALESCE(storage_mode, 'database') = 'resource'",
             )
@@ -1854,6 +1982,7 @@ fn get_resource_records_inner<R: Runtime>(
                 let use_count = row.get::<_, i64>(12)?;
                 let touched_ms = row.get::<_, i64>(13)?;
                 let last_used_at = row.get::<_, String>(14)?;
+                let resource_external = row.get::<_, i64>(15)?;
                 let path = if resource_path.is_empty() {
                     None
                 } else {
@@ -1883,8 +2012,12 @@ fn get_resource_records_inner<R: Runtime>(
                     last_used_at,
                 );
                 value["resource_note"] = serde_json::Value::String(resource_note);
+                // managed 语义：应用内保存的记录 true；对账/监听发现的外部
+                // 文件 false（文本详情保存直接写路径）。与查询内扫描时代的
+                // 区分一致，只是判定从「是否来自扫描」改为显式列。
+                let managed = resource_external == 0;
                 Ok((
-                    resource_record_value(value, &resource_root, path.as_deref(), media_kind, true),
+                    resource_record_value(value, &resource_root, path.as_deref(), media_kind, managed),
                     sort_order,
                     path,
                     use_count,
@@ -1897,43 +2030,13 @@ fn get_resource_records_inner<R: Runtime>(
             .map_err(|e| e.to_string())?;
         drop(stmt);
 
-        // 外部删除实时同步：文件管理器删掉的文件，其记录在下一次扫描时自动
-        // 清理（「内容即文件」——文件不在，记录不留）。
-        let stale_ids: Vec<String> = database_records
-            .iter()
-            .filter(|(_, _, path, _, _)| {
-                path.as_deref().is_some_and(|p| !p.is_file())
-            })
-            .map(|(value, ..)| value["id"].as_str().unwrap_or_default().to_string())
-            .filter(|id| !id.is_empty())
-            .collect();
-        if !stale_ids.is_empty() {
-            for id in &stale_ids {
-                let _ = conn.execute(
-                    "DELETE FROM api_key_labels WHERE record_id = ?1",
-                    params![id],
-                );
-                let _ = conn.execute(
-                    "DELETE FROM clipboard_records WHERE id = ?1",
-                    params![id],
-                );
-            }
-            log::info!(
-                "已清理 {} 条文件已被外部删除的资源记录",
-                stale_ids.len()
-            );
-        }
-        database_records.retain(|(_, _, path, _, _)| {
-            path.as_deref().map_or(true, |p| p.is_file())
-        });
-
+        // 幽灵清退已移出查询路径：启动对账（sync_resource_library）与监听
+        // 删除事件（forget_resource_records）负责「文件不在，记录不留」。
+        // 原先这里每次查询逐行 stat + 全目录扫描，数万文件的库每切换一次
+        // 就是十万级系统调用，是资源区卡顿的根源。
         database_records
     };
 
-    let database_paths = database_records
-        .iter()
-        .filter_map(|(_, _, path, _, _)| path.as_deref().map(resource_path_key))
-        .collect::<HashSet<_>>();
     let mut records = database_records
         .into_iter()
         .map(|(value, sort_order, _, use_count, touched_ms)| ResourceRecordValue {
@@ -1943,38 +2046,6 @@ fn get_resource_records_inner<R: Runtime>(
             touched_ms,
         })
         .collect::<Vec<_>>();
-
-    for entry in scan_resource_files(&resource_root) {
-        if database_paths.contains(&resource_path_key(&entry.path)) {
-            continue;
-        }
-        let value = clipboard_record_json(
-            resource_file_id(&entry.path),
-            "file".to_string(),
-            entry.path.to_string_lossy().to_string(),
-            String::new(),
-            entry.modified_at.clone(),
-            0,
-            entry.group.clone(),
-            "[]".to_string(),
-            RESOURCE_STORAGE_MODE.to_string(),
-            entry.path.to_string_lossy().to_string(),
-            0,
-            String::new(),
-        );
-        records.push(ResourceRecordValue {
-            value: resource_record_value(
-                value,
-                &resource_root,
-                Some(&entry.path),
-                entry.media_kind,
-                false,
-            ),
-            sort_order: entry.sort_order,
-            use_count: 0,
-            touched_ms: 0,
-        });
-    }
 
     let query = search
         .as_deref()
@@ -3693,6 +3764,9 @@ pub fn set_resource_library_path(app: AppHandle, path: String) -> Result<String,
     .map_err(|error| format!("保存资源库历史失败: {error}"))?;
     set_setting_inner(&app, "resource_library_path", &path_string)?;
     set_setting_inner(&app, RESOURCE_LIBRARY_HISTORY_SETTING, &history_value)?;
+    // 库路径切换后立即对新库全量对账：这是用户主动的低频操作，同步执行
+    // 换取切换完成即是完整索引（查询路径已不做扫描，缺这步新库不显示）。
+    sync_resource_library(&app);
     let _ = app.emit("resource-library-path-changed", &path_string);
     Ok(path_string)
 }
@@ -5808,6 +5882,7 @@ mod resource_command_tests {
                  storage_mode TEXT DEFAULT 'database',
                  resource_path TEXT DEFAULT '',
                  resource_note TEXT DEFAULT '',
+                 resource_external INTEGER DEFAULT 0,
                  last_used_at TEXT DEFAULT '',
                  use_count INTEGER DEFAULT 0,
                  touched_ms INTEGER DEFAULT 0
@@ -6363,6 +6438,9 @@ mod resource_command_tests {
             managed.to_str().unwrap(),
         );
 
+        // 索引维护已移出查询路径：磁盘文件经启动/切换对账入库（生产中由
+        // lib.rs 启动线程与 set_resource_library_path 调用）。
+        super::sync_resource_library(app.handle());
         let records = get_clipboard_records_inner(
             &app.handle().clone(),
             None,
@@ -7342,8 +7420,9 @@ mod resource_command_tests {
         assert!(after_arrival_count.contains(&super::resource_file_id(&copied)));
         assert!(after_arrival_count.contains(&super::resource_file_id(&moved)));
 
-        // ── 步骤 3：文件管理器删除其中一个 → 下一次扫描自愈 ──
+        // ── 步骤 3：文件管理器删除其中一个 → 对账/监听删除自愈 ──
         std::fs::remove_file(&copied).unwrap();
+        super::sync_resource_library(app.handle());
         assert_eq!(
             resource_ids("recent"),
             vec![super::resource_file_id(&moved)]
@@ -7496,14 +7575,15 @@ mod resource_command_tests {
 
     #[test]
     fn resource_scan_prunes_rows_for_externally_deleted_files() {
-        // 外部（文件管理器）删除文件后：下一次资源扫描自动清理其记录，
-        // 列表实时同步，不再残留"媒体无法加载"的僵尸条目。
+        // 外部（文件管理器）删除文件后：启动/切换对账清退其记录（运行期
+        // 由监听 Vanished 事件实时清理），列表不再残留僵尸条目。
         let (app, root) = test_app();
         insert_resource(&app, "res-stay", 1000.0, "", root.join("stay.png").to_str().unwrap());
         std::fs::write(root.join("stay.png"), [1]).unwrap();
         insert_resource(&app, "res-gone", 2000.0, "", root.join("gone.png").to_str().unwrap());
         std::fs::write(root.join("gone.png"), [2]).unwrap();
         std::fs::remove_file(root.join("gone.png")).unwrap();
+        super::sync_resource_library(app.handle());
 
         let records = get_clipboard_records_inner(
             &app.handle().clone(),
@@ -7640,6 +7720,77 @@ mod resource_command_tests {
             records[0]["resource_path"].as_str(),
             Some(root.join("fresh.md").to_str().unwrap())
         );
+    }
+
+    #[test]
+    fn sync_resource_library_inserts_missing_and_prunes_ghosts() {
+        // 对账语义：应用未运行期间放入的文件按扫描语义补录（created_at/
+        // sort_order 取文件修改时间，不置顶）；库内文件已被删除的记录清退；
+        // 既有记录的 sort_order（发现时刻置顶语义）不被覆盖。
+        let (app, root) = test_app();
+        let existing = root.join("kept.png");
+        std::fs::write(&existing, [1, 2, 3]).unwrap();
+        insert_resource(&app, "res-kept", 5000.0, "", existing.to_str().unwrap());
+        insert_resource(&app, "res-ghost", 3000.0, "", root.join("gone.png").to_str().unwrap());
+
+        let newcomer = root.join("人物视图/new.png");
+        std::fs::create_dir_all(newcomer.parent().unwrap()).unwrap();
+        std::fs::write(&newcomer, [9, 9, 9]).unwrap();
+        let file_time = chrono::DateTime::<chrono::Utc>::from(std::fs::metadata(&newcomer).unwrap().modified().unwrap()).to_rfc3339();
+
+        let added = super::sync_resource_library(app.handle());
+        assert!(added >= 1);
+
+        let records = get_clipboard_records_inner(
+            &app.handle().clone(),
+            None,
+            Some(50),
+            Some(0),
+            Some("resources".to_string()),
+            None,
+            Some("recent".into()),
+        )
+        .unwrap();
+        let paths: Vec<&str> = records
+            .iter()
+            .filter_map(|r| r["resource_path"].as_str())
+            .collect();
+        assert!(!paths.iter().any(|p| p.contains("gone.png")), "幽灵记录应被清退");
+        assert!(paths.iter().any(|p| p.ends_with("kept.png")), "既有记录保留");
+        assert!(paths.iter().any(|p| p.ends_with("new.png")), "新文件已补录");
+        let newcomer_record = records
+            .iter()
+            .find(|r| r["resource_path"].as_str().is_some_and(|p| p.ends_with("new.png")))
+            .unwrap();
+        assert_eq!(newcomer_record["created_at"].as_str(), Some(file_time.as_str()));
+        // 既有记录 sort_order 保持（发现时刻置顶语义不被对账覆盖）。
+        assert_eq!(records.iter().find(|r| r["id"].as_str() == Some("res-kept")).is_some(), true);
+    }
+
+    #[test]
+    fn forget_resource_records_removes_rows_for_deleted_paths() {
+        let (app, root) = test_app();
+        let target = root.join("doomed.png");
+        std::fs::write(&target, [1]).unwrap();
+        insert_resource(&app, "res-doomed", 1000.0, "", target.to_str().unwrap());
+        let keeper = root.join("safe.png");
+        std::fs::write(&keeper, [2]).unwrap();
+        insert_resource(&app, "res-safe", 1000.0, "", keeper.to_str().unwrap());
+
+        super::forget_resource_records(app.handle(), &[target]);
+
+        let records = get_clipboard_records_inner(
+            &app.handle().clone(),
+            None,
+            Some(50),
+            Some(0),
+            Some("resources".to_string()),
+            None,
+            Some("recent".into()),
+        )
+        .unwrap();
+        assert_eq!(records.len(), 1);
+        assert_eq!(records[0]["id"].as_str(), Some("res-safe"));
     }
 
     #[test]
