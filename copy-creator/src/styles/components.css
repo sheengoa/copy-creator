@@ -1112,6 +1112,12 @@ input:focus-visible + .selection-checkbox {
   background: var(--panel-bg, #fff);
 }
 
+.preview-window-error {
+  padding: 20px;
+  color: var(--danger);
+  font-size: var(--text-sm);
+}
+
 [data-theme="dark"] .preview-window-empty {
   background: #1e1e1e;
 }

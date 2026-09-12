@@ -84,11 +84,15 @@ pub fn open_preview_window(
     preview
         .set_title(&title)
         .map_err(|error| error.to_string())?;
-    app.emit_to(PREVIEW_WINDOW_LABEL, "preview-content", PreviewPayload {
+    let emit_result = app.emit_to(PREVIEW_WINDOW_LABEL, "preview-content", PreviewPayload {
         title,
         segments,
-    })
-    .map_err(|error| error.to_string())?;
+    });
+    match &emit_result {
+        Ok(()) => log::info!("[preview_window] preview-content emitted to {PREVIEW_WINDOW_LABEL}"),
+        Err(error) => log::warn!("[preview_window] emit failed: {error}"),
+    }
+    emit_result.map_err(|error| error.to_string())?;
     preview.show().map_err(|error| error.to_string())?;
     let _ = preview.set_focus();
     Ok(())
