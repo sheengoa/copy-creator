@@ -25,12 +25,26 @@ const NAV_ITEMS = [
   { panelType: "resources" },
 ] as const;
 
+const PANEL_KEYS = NAV_ITEMS.map((item) => item.panelType);
+
 function App() {
   const { t } = useTranslation();
   const [activePanel, setActivePanel] = useState<string>("clipboard");
   const { themeMode, toggleTheme, loadSettings } = useSettingsStore();
   const [isPinned, setIsPinned] = useState(false);
   usePersistWindowSize("main_window_width", "main_window_height");
+  // 已访问面板保挂载：首次进入才挂载，之后仅显隐切换。卸载重挂会让每次
+  // 切换都重新查询、重建整棵卡片树并重取缩略图，是切换卡顿的另一半原因。
+  // 隐藏面板 display:none，IntersectionObserver 视其为不可见，缩略图
+  // 等视口内请求自动暂停，不会为隐藏页面白白加载。
+  const [mountedPanels, setMountedPanels] = useState<ReadonlySet<string>>(
+    () => new Set([activePanel]),
+  );
+
+  useEffect(() => {
+    if (activePanel === "settings" || mountedPanels.has(activePanel)) return;
+    setMountedPanels((previous) => new Set(previous).add(activePanel));
+  }, [activePanel, mountedPanels]);
 
   useEffect(() => {
     loadSettings().then(async () => {
@@ -234,11 +248,20 @@ function App() {
           </button>
         </div>
         <div className="panel-window-body">
-          {isSettingsPanel ? (
-            <SettingsContent embedded />
-          ) : (
-            panelInfo?.component()
-          )}
+          {PANEL_KEYS.map((panelKey) => {
+            if (!mountedPanels.has(panelKey)) return null;
+            const isActive = activePanel === panelKey && !isSettingsPanel;
+            const panel = PANEL_MAP[panelKey];
+            return (
+              <div
+                key={panelKey}
+                style={{ height: "100%", display: isActive ? "block" : "none" }}
+              >
+                {panel.component()}
+              </div>
+            );
+          })}
+          {isSettingsPanel && <SettingsContent embedded />}
         </div>
       </div>
 
