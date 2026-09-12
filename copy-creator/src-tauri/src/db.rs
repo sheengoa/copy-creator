@@ -3805,7 +3805,17 @@ fn paths_overlap(left: &Path, right: &Path) -> bool {
 }
 
 #[tauri::command]
-pub fn set_resource_library_path(app: AppHandle, path: String) -> Result<String, String> {
+pub async fn set_resource_library_path(
+    app: AppHandle,
+    path: String,
+) -> Result<String, String> {
+    // 切库后的全量对账含整库扫描，必须离开主线程（大库会冻结 UI 数秒）。
+    tokio::task::spawn_blocking(move || set_resource_library_path_blocking(app, path))
+        .await
+        .map_err(|e| format!("library path task join: {e}"))?
+}
+
+fn set_resource_library_path_blocking(app: AppHandle, path: String) -> Result<String, String> {
     let path = validate_resource_library_path(&app, &path)?;
     let path_string = path.to_string_lossy().to_string();
     let previous_path = get_setting_sync(&app, "resource_library_path")

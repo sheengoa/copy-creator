@@ -441,7 +441,8 @@ describe("integration regressions", () => {
 
     expect(dbSource).toContain("resource_library_path");
     expect(dbSource).toContain("pub fn get_resource_library_path");
-    expect(dbSource).toContain("pub fn set_resource_library_path");
+    // 切库后的全量对账含整库扫描，必须 async + spawn_blocking 离开主线程。
+    expect(dbSource).toContain("pub async fn set_resource_library_path");
     expect(dbSource).toContain("pub async fn select_resource_library_folder");
     expect(dbSource).toContain("paths_overlap(&path, &storage_path)");
     expect(pruneBlock).toContain("COALESCE(storage_mode, 'database') = 'resource'");
