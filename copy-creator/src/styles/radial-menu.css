@@ -831,7 +831,9 @@ html {
 .content-preview-image {
   display: block;
   width: 100%;
-  max-height: 300px;
+  /* 竖图/长图按面板可视高度展示（扣除标题栏、内边距与图片纵向外边距），
+     避免固定上限把竖图压成小条、面板大面积留白；混排内容超出时靠滚动。 */
+  max-height: calc(100vh - 96px);
   margin: 10px 0;
   border-radius: 6px;
   object-fit: contain;
