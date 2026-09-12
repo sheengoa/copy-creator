@@ -163,8 +163,8 @@ describe("架构守卫：领域规则必须全局共享", () => {
     // （最小滚动 + 媒体异步加载后的高度校正），新增可展开列表同样必须复用。
     expect(
       readSource("hooks/useExpandReveal.ts"),
-      "展开揭示必须集中在共享 hook：block: nearest 做最小滚动",
-    ).toContain('scrollIntoView({ block: "nearest"');
+      "展开揭示必须集中在共享 hook：手动定位滚动容器并写 scrollTop（不依赖 scrollIntoView smooth，WebKitGTK 上不生效）",
+    ).toContain("findScrollParent");
     for (const cardFile of [
       "pages/ClipboardPage/ClipboardCard.tsx",
       "pages/PhrasePage/PhraseList.tsx",
