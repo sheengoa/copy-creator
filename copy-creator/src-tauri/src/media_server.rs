@@ -148,8 +148,10 @@ fn handle_connection<R: Runtime>(
     let content_type = media_content_type(&local_path);
     let content_length = if length == 0 { 0 } else { end - start + 1 };
     let status_text = if status == 206 { "Partial Content" } else { "OK" };
+    // ACAO 必须存在：前端视频海报经 <video crossOrigin="anonymous"> 取帧
+    // 导出 canvas，跨源且无此头时 canvas 被污染，toDataURL 直接抛错。
     let mut head = format!(
-        "HTTP/1.1 {status} {status_text}\r\nContent-Type: {content_type}\r\nContent-Length: {content_length}\r\nAccept-Ranges: bytes\r\nConnection: close\r\n"
+        "HTTP/1.1 {status} {status_text}\r\nContent-Type: {content_type}\r\nContent-Length: {content_length}\r\nAccept-Ranges: bytes\r\nAccess-Control-Allow-Origin: *\r\nConnection: close\r\n"
     );
     if status == 206 {
         head.push_str(&format!("Content-Range: bytes {start}-{end}/{length}\r\n"));

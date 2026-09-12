@@ -376,6 +376,8 @@ pub fn run() {
             db::get_image_base64,
             db::get_image_thumbnail,
             db::get_resource_file_thumbnail,
+            db::load_resource_video_poster,
+            db::save_resource_video_poster,
             db::get_storage_path,
             db::select_storage_folder,
             db::get_resource_library_path,

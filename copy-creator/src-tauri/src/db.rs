@@ -3418,6 +3418,74 @@ fn fnv1a64(bytes: &[u8]) -> u64 {
     hash
 }
 
+/// 视频海报缓存路径：与图片缩略图同策略（路径哈希 + 大小 + 修改时间），
+/// 集中存放在应用缓存目录，永不写入用户库。
+fn video_poster_cache_path(app: &AppHandle, path: &str) -> Result<PathBuf, String> {
+    let metadata = std::fs::metadata(path).map_err(|e| format!("stat video: {e}"))?;
+    let modified_secs = metadata
+        .modified()
+        .ok()
+        .and_then(|time| time.duration_since(std::time::UNIX_EPOCH).ok())
+        .map(|duration| duration.as_secs())
+        .unwrap_or(0);
+    let key = format!(
+        "{:016x}-{}-{}",
+        fnv1a64(path.as_bytes()),
+        metadata.len(),
+        modified_secs
+    );
+    Ok(app
+        .path()
+        .app_cache_dir()
+        .map_err(|e| e.to_string())?
+        .join("video-posters")
+        .join(format!("{key}.jpg")))
+}
+
+/// 读取已持久化的视频海报（base64 JPEG）。未生成返回空串，调用方回退
+/// 现场抽帧流程。
+#[tauri::command]
+pub async fn load_resource_video_poster(app: AppHandle, path: String) -> Result<String, String> {
+    tokio::task::spawn_blocking(move || {
+        let cache_path = video_poster_cache_path(&app, &path)?;
+        if !cache_path.exists() {
+            return Ok(String::new());
+        }
+        let bytes = std::fs::read(cache_path).map_err(|e| format!("read poster: {e}"))?;
+        use base64::Engine;
+        Ok(base64::engine::general_purpose::STANDARD.encode(&bytes))
+    })
+    .await
+    .map_err(|e| format!("poster task join: {e}"))?
+}
+
+/// 持久化前端抽帧得到的海报（data:image/jpeg;base64,...）。此后列表展示
+/// 该视频只加载这张图，不再挂 <video> 加载元数据与寻帧。
+#[tauri::command]
+pub async fn save_resource_video_poster(
+    app: AppHandle,
+    path: String,
+    data_url: String,
+) -> Result<(), String> {
+    tokio::task::spawn_blocking(move || {
+        let base64_part = data_url
+            .strip_prefix("data:image/jpeg;base64,")
+            .ok_or("poster dataUrl 格式不符")?;
+        use base64::Engine;
+        let bytes = base64::engine::general_purpose::STANDARD
+            .decode(base64_part)
+            .map_err(|e| format!("decode poster: {e}"))?;
+        let cache_path = video_poster_cache_path(&app, &path)?;
+        if let Some(dir) = cache_path.parent() {
+            std::fs::create_dir_all(dir).ok();
+        }
+        std::fs::write(cache_path, &bytes).map_err(|e| format!("write poster: {e}"))?;
+        Ok(())
+    })
+    .await
+    .map_err(|e| format!("poster task join: {e}"))?
+}
+
 // 缓存条目超限后按修改时间裁剪最旧的一批，防止缩略图目录无限增长。
 fn trim_resource_thumbnail_cache(cache_dir: &Path) {
     const MAX_ENTRIES: usize = 1000;

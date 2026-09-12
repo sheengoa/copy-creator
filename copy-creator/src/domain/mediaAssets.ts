@@ -61,3 +61,13 @@ export function getResourceFileThumbnail(path: string, maxSize: number): Promise
 export function openResourceFile(path: string): Promise<void> {
   return invoke("open_resource_file", { path });
 }
+
+/** 已持久化的视频海报（base64 JPEG）；未生成返回空串，调用方回退现场抽帧。 */
+export function loadResourceVideoPoster(path: string): Promise<string> {
+  return invoke<string>("load_resource_video_poster", { path });
+}
+
+/** 持久化前端抽帧得到的视频海报，此后列表展示只加载这张图。 */
+export function saveResourceVideoPoster(path: string, dataUrl: string): Promise<void> {
+  return invoke("save_resource_video_poster", { path, dataUrl });
+}

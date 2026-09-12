@@ -3,6 +3,7 @@ import { useTranslation } from "react-i18next";
 import { Icons } from "./Icons";
 import { fileMediaKindFromPath } from "../domain/mediaKind";
 import { resolveResourceMediaUrl } from "../domain/mediaUrl";
+import { loadResourceVideoPoster, saveResourceVideoPoster } from "../domain/mediaAssets";
 import { ResourceImage } from "../pages/ResourcePage/ResourceMedia";
 
 /**
@@ -74,6 +75,10 @@ function VideoPosterFrame({
   const [src, setSrc] = useState("");
   const [failed, setFailed] = useState(false);
   const [hasFrame, setHasFrame] = useState(false);
+  // 已持久化的海报：命中后横幅只渲染这张图，不再挂 <video> 加载元数据
+  // 与寻帧——几百个视频的库靠它保住列表流畅。
+  const [savedPoster, setSavedPoster] = useState("");
+  const posterSaveAttemptedRef = useRef(false);
 
   useEffect(() => {
     const element = containerRef.current;
@@ -96,6 +101,7 @@ function VideoPosterFrame({
     setSrc("");
     setFailed(false);
     setHasFrame(false);
+    posterSaveAttemptedRef.current = false;
     resolveResourceMediaUrl(path)
       .then((url) => {
         if (!cancelled) setSrc(url);
@@ -103,6 +109,11 @@ function VideoPosterFrame({
       .catch(() => {
         if (!cancelled) setFailed(true);
       });
+    loadResourceVideoPoster(path)
+      .then((base64) => {
+        if (!cancelled && base64) setSavedPoster(`data:image/jpeg;base64,${base64}`);
+      })
+      .catch(() => {});
     return () => {
       cancelled = true;
     };
@@ -117,6 +128,26 @@ function VideoPosterFrame({
       const context = canvas.getContext("2d");
       if (context && media.videoWidth > 0 && media.videoHeight > 0) {
         context.drawImage(media, 0, 0, canvas.width, canvas.height);
+      }
+    }
+    // 高清帧导出持久化（每视频一次；canvas 被污染等场景吞错放弃存盘）。
+    if (!posterSaveAttemptedRef.current && media.videoWidth > 0) {
+      posterSaveAttemptedRef.current = true;
+      try {
+        const exportCanvas = document.createElement("canvas");
+        exportCanvas.width = 640;
+        exportCanvas.height = Math.max(
+          1,
+          Math.round((640 * media.videoHeight) / media.videoWidth),
+        );
+        const exportContext = exportCanvas.getContext("2d");
+        if (exportContext) {
+          exportContext.drawImage(media, 0, 0, exportCanvas.width, exportCanvas.height);
+          const dataUrl = exportCanvas.toDataURL("image/jpeg", 0.72);
+          void saveResourceVideoPoster(path, dataUrl).catch(() => {});
+        }
+      } catch {
+        // 放弃持久化，不影响本次展示。
       }
     }
     setHasFrame(true);
@@ -135,10 +166,17 @@ function VideoPosterFrame({
     }
   };
 
-  const showPlaceholder = !inView || failed || !src || !hasFrame;
+  const showPlaceholder = !inView || failed || (!src && !savedPoster) || (!savedPoster && !hasFrame);
   return (
     <div ref={containerRef} className="resource-video-poster" aria-hidden="true">
-      {inView && !failed && src && (
+      {inView && savedPoster ? (
+        <img
+          className="resource-video-poster-frame is-ready"
+          src={savedPoster}
+          alt=""
+          draggable={false}
+        />
+      ) : inView && !failed && src ? (
         <>
           <canvas ref={canvasRef} className="resource-video-poster-bg" width={48} height={27} />
           <video
@@ -146,12 +184,13 @@ function VideoPosterFrame({
             src={src}
             muted
             preload="metadata"
+            crossOrigin="anonymous"
             onLoadedMetadata={handleLoadedMetadata}
             onSeeked={handleSeeked}
             onError={() => setFailed(true)}
           />
         </>
-      )}
+      ) : null}
       {showPlaceholder && (
         <div className="resource-video-poster-placeholder">
           <span className="clipboard-file-media-icon">{Icons.video}</span>
