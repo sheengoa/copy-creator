@@ -14,43 +14,66 @@ fn is_wayland() -> bool {
         .unwrap_or(false)
 }
 
-/// 径向窗口几何原子下发：X11 用单次 gdk_window_move_resize（一次
-/// XMoveResizeWindow 请求）同时改位置与尺寸。setSize→setPosition 对应
-/// tao 的两次独立 GTK 调用（resize + move_）→ 两次 X11 请求，中间态
-/// （左向扩展先加宽未左移、右缘探出屏幕）会被合成器画出来——左向扩展
-/// 闪烁的实测根源；历史两次修复（b0ce041/ebd8528）的原子化只覆盖
-/// Windows（SetWindowPos），Linux 从未处理。Wayland 无客户端定位语义，
-/// 维持两步。命令带请求/GDK 回读日志，首次运行即为坐标映射实证。
-#[tauri::command]
-pub fn set_radial_window_bounds(
-    window: tauri::WebviewWindow<tauri::Wry>,
-    x: i32,
-    y: i32,
-    width: i32,
-    height: i32,
-) -> Result<(), String> {
+/// 径向窗口预留条带几何（物理像素）：方向、条带宽、窗口总宽/高，在
+/// show_radial_menu 打开窗口时一次性决定。展开/收起只切换输入区域，
+/// 绝不改动窗口几何——X11 上任何 resize/move 都会被合成器画出一帧
+/// "旧内容按左上锚定 + 新区域未绘制"（实机采集帧证据），即扩展闪烁
+/// 的物理根源，只能靠几何不变来根除。
+static RADIAL_STRIP: Mutex<(bool, i32, i32, i32)> = Mutex::new((false, 0, 0, 0));
+
+/// 切换径向窗口的输入区域。收起：仅面板侧（与原紧凑窗口同面积）接收
+/// 输入，预留条带上的点击穿透到下层应用，不引入"点击被吞"；展开：
+/// 全窗接收输入（预览面板铺满条带）。空条带（无空间）时不收窄。
+fn apply_radial_input_shape(window: &tauri::WebviewWindow<tauri::Wry>, expanded: bool) {
     #[cfg(target_os = "linux")]
     {
-        if !is_wayland() {
-            use gtk::prelude::*;
-            let gtk_window = window.gtk_window().map_err(|e| e.to_string())?;
-            let gdk_window = gtk_window
-                .window()
-                .ok_or_else(|| "GDK 窗口尚未就绪".to_string())?;
-            gdk_window.move_resize(x, y, width.max(1), height.max(1));
-            let (gdk_x, gdk_y) = gdk_window.position();
-            log::info!(
-                "radial bounds atomic: requested=({x},{y},{width}x{height}) gdk=({gdk_x},{gdk_y})"
-            );
-            return Ok(());
+        let (strip_left, strip_w, win_w, win_h) = *RADIAL_STRIP
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        if strip_w <= 0 || win_w <= 0 || win_h <= 0 {
+            return;
         }
+        let task_window = window.clone();
+        // 输入区域是 GTK 调用，必须落在主线程；调用方可能在 IPC 线程。
+        let apply = move || {
+            use gtk::prelude::*;
+            let Ok(gtk_window) = task_window.gtk_window() else {
+                return;
+            };
+            let Some(gdk_window) = gtk_window.window() else {
+                return;
+            };
+            let region = if expanded {
+                gtk::cairo::Region::create_rectangle(&gtk::cairo::RectangleInt::new(
+                    0, 0, win_w, win_h,
+                ))
+            } else {
+                let x = if strip_left { strip_w } else { 0 };
+                gtk::cairo::Region::create_rectangle(&gtk::cairo::RectangleInt::new(
+                    x,
+                    0,
+                    win_w - strip_w,
+                    win_h,
+                ))
+            };
+            gdk_window.input_shape_combine_region(&region, 0, 0);
+        };
+        window.run_on_main_thread(apply).ok();
     }
-    window
-        .set_size(tauri::PhysicalSize::new(width.max(1), height.max(1)))
-        .map_err(|e| e.to_string())?;
-    window
-        .set_position(tauri::PhysicalPosition::new(x, y))
-        .map_err(|e| e.to_string())?;
+    #[cfg(not(target_os = "linux"))]
+    {
+        let _ = (window, expanded);
+    }
+}
+
+/// 展开/收起径向菜单预览时切换输入区域；窗口几何自打开起固定不变
+/// （条带已在打开时预留，见 RADIAL_STRIP 注释）。
+#[tauri::command]
+pub fn set_radial_hit_area(
+    window: tauri::WebviewWindow<tauri::Wry>,
+    expanded: bool,
+) -> Result<(), String> {
+    apply_radial_input_shape(&window, expanded);
     Ok(())
 }
 
@@ -374,24 +397,21 @@ pub fn show_radial_menu(app: &AppHandle) {
 
         let (cursor_x, cursor_y) = get_cursor_position();
 
-        // 每次打开时恢复标准尺寸，并将窗口定位在鼠标附近。
-        // 窗口含透明阴影边距（层级与尺寸约定见文件顶部注释），定位偏移按
-        // 可见面板原点换算。用户设置了缩放比时，窗口整体尺寸与光标偏移
-        // 同乘该系数（前端以 CSS zoom 等比缩放，保持 420×650 设计比例）。
         let scale = radial_ui_scale(app);
         let margin = crate::WINDOW_SHADOW_MARGIN as f32;
 
-        // 以光标所在显示器为基准换算：物理尺寸 = 逻辑尺寸 × 该屏 DPI。
-        // 首选锚点为光标上方居中；随后钳制进该屏工作区（排除任务栏），
-        // 否则贴边（尤其中下边缘）唤起时菜单会被推出屏幕外不可见。
-        // 尺寸直接用 PhysicalSize 下发，保证钳制假设与窗口实际尺寸一致。
+        // 每次打开时按面板尺寸钳制进光标所在显示器工作区（排除任务栏），
+        // 再在空间更充裕的一侧一次性预留透明扩展条带（首选右侧，判定口径
+        // 与前端 utils/radialPreview.ts 的 calculatePreviewExpansion 一致，
+        // 改动时必须同步）。此后窗口几何在整场交互中不再变化：展开/收起
+        // 只切换前端面板挂载与输入区域（set_radial_hit_area），从根源上
+        // 消除 X11 resize 引起的闪烁帧。
         let monitor = cursor_monitor_info(app, cursor_x, cursor_y);
         let dpi = monitor.map(|(dpi, ..)| dpi).unwrap_or(1.0);
         let win_w =
             ((420.0 + 2.0 * crate::WINDOW_SHADOW_MARGIN) * scale as f64 * dpi).round() as i32;
         let win_h =
             ((650.0 + 2.0 * crate::WINDOW_SHADOW_MARGIN) * scale as f64 * dpi).round() as i32;
-        let _ = radial.set_size(tauri::PhysicalSize::new(win_w, win_h));
         let px = cursor_x - (((210.0 + margin) * scale * dpi as f32) as i32);
         let py = cursor_y - (((24.0 + margin) * scale * dpi as f32) as i32);
         let (px, py) = match monitor {
@@ -401,7 +421,30 @@ pub fn show_radial_menu(app: &AppHandle) {
             // 找不到所在显示器时保持旧行为：仅防负坐标。
             None => (px.max(0), py.max(0)),
         };
-        let _ = radial.set_position(tauri::PhysicalPosition::new(px, py));
+        let preferred_strip = (440.0 * scale as f64 * dpi).round() as i32;
+        let min_strip = (260.0 * scale as f64 * dpi).round() as i32;
+        let (strip_left, strip_w) = match monitor {
+            Some((_, ax, ay, aw, ah)) => {
+                let right_space = ax + aw - (px + win_w);
+                let left_space = px - ax;
+                if right_space >= min_strip || right_space >= left_space {
+                    (false, preferred_strip.min(right_space.max(0)))
+                } else {
+                    (true, preferred_strip.min(left_space.max(0)))
+                }
+            }
+            None => (false, preferred_strip),
+        };
+        let win_w_total = win_w + strip_w;
+        let px_total = if strip_left { px - strip_w } else { px };
+        let _ = radial.set_size(tauri::PhysicalSize::new(win_w_total, win_h));
+        let _ = radial.set_position(tauri::PhysicalPosition::new(px_total, py));
+
+        if let Ok(mut slot) = RADIAL_STRIP.lock() {
+            *slot = (strip_left, strip_w, win_w_total, win_h);
+        }
+        // 打开即重置为收起形态的输入区域（条带穿透）。
+        apply_radial_input_shape(&radial, false);
 
         // Read theme from DB
         let theme =
@@ -415,18 +458,28 @@ pub fn show_radial_menu(app: &AppHandle) {
         #[cfg(target_os = "windows")]
         win_hook::force_focus_window(&radial);
 
+        let preview_side = if strip_left { "left" } else { "right" };
+        let preview_width = if dpi > 0.0 {
+            (strip_w as f64 / (scale as f64 * dpi)).round() as i32
+        } else {
+            0
+        };
         let _ = app.emit(
             "radial-menu-show",
             serde_json::json!({
                 "theme": theme,
-                "scale": scale
+                "scale": scale,
+                "previewSide": preview_side,
+                "previewWidth": preview_width
             }),
         );
 
         log::info!(
-            "[show_radial_menu] shown at ({}, {}) theme={}",
+            "[show_radial_menu] shown at ({}, {}) strip={}w={} theme={}",
             px,
             py,
+            preview_side,
+            preview_width,
             theme
         );
     }

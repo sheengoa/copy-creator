@@ -19,8 +19,10 @@ function getRule(css: string, selector: string) {
 
 describe("standalone window chrome", () => {
   it("keeps radial menu corners clean on transparent windows", () => {
-    const popupRule = getRule(readStyle("radial-menu.css"), ".radial-menu-popup");
-    const overlayRule = getRule(readStyle("radial-menu.css"), ".radial-menu-overlay");
+    const css = readStyle("radial-menu.css");
+    const popupRule = getRule(css, ".radial-menu-popup");
+    const mainRule = getRule(css, ".radial-menu-main");
+    const overlayRule = getRule(css, ".radial-menu-overlay");
     const libSource = readSource("../../src-tauri/src/lib.rs");
     const radialWindowBlock = libSource.slice(
       libSource.indexOf('"radial-menu"'),
@@ -30,7 +32,11 @@ describe("standalone window chrome", () => {
     expect(popupRule).not.toContain("0 20px 60px");
     expect(radialWindowBlock).toContain(".transparent(true)");
     // 透明窗口的阴影必须落在窗口内预留的透明边距里，不能被边界裁剪。
-    expect(popupRule).toContain("box-shadow: var(--window-shadow)");
+    // popup 是透明容器（可见面板 + 预留扩展条带），背景/阴影/圆角挂在
+    // 可见的 .radial-menu-main 上。
+    expect(popupRule).not.toContain("background: #FFFFFF");
+    expect(mainRule).toContain("box-shadow: var(--window-shadow)");
+    expect(mainRule).toContain("border-radius: var(--window-radius)");
     expect(overlayRule).toContain("padding: var(--window-shadow-margin)");
     expect(radialWindowBlock).toContain("2.0 * WINDOW_SHADOW_MARGIN");
   });

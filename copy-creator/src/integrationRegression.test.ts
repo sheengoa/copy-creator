@@ -474,6 +474,56 @@ describe("integration regressions", () => {
     expect(pageSource).toContain("cancelResourceSelection();");
   });
 
+  // 径向菜单左向扩展的窗口闪烁修复。实机采集帧证据表明：X11 上对窗口
+  // 做 resize/move 时，合成器必然绘出一帧"旧内容按左上锚定 + 新区域未
+  // 绘制"（原子的 gdk move_resize 也无法避免），因此展开/收起必须完全
+  // 不触碰窗口几何——条带在窗口打开时一次性预留，展开只挂载面板并扩放
+  // 输入区域（XShape），收起反向；条带收起时点击穿透，不吞下层点击。
+  it("expands the radial preview without any window geometry change", () => {
+    const radialStyles = readSource("./styles/radial-menu.css");
+    const radialMenu = readSource("./components/RadialMenu/index.tsx");
+    const shortcutSource = readSource("../src-tauri/src/shortcut.rs");
+    const libSource = readSource("../src-tauri/src/lib.rs");
+
+    // 前端展开/收起路径不得再出现任何窗口几何操作。
+    const previewFlow = radialMenu.slice(
+      radialMenu.indexOf("const invalidatePreviewRequest = useCallback"),
+      radialMenu.indexOf("const loadPreviewSegments = useCallback"),
+    );
+    expect(previewFlow).not.toContain("setSize");
+    expect(previewFlow).not.toContain("setPosition");
+    expect(previewFlow).toContain('invoke("set_radial_hit_area", { expanded: true })');
+    expect(previewFlow).toContain('invoke("set_radial_hit_area", { expanded: false })');
+    expect(radialMenu).not.toContain("set_radial_window_bounds");
+    // 条带方向与宽度来自后端事件，不再由前端查询显示器计算。
+    expect(radialMenu).toContain("previewSideRef.current");
+    expect(radialMenu).toContain("previewWidthRef.current");
+    expect(radialMenu).not.toContain("currentMonitor()");
+
+    // 可见面板的背景/阴影在 main 上；popup 自身透明承载预留条带。
+    const popupBlock = radialStyles.slice(
+      radialStyles.indexOf(".radial-menu-popup {"),
+      radialStyles.indexOf("/* --- Nav Tabs"),
+    );
+    expect(popupBlock).toContain(".radial-menu-main {");
+    expect(popupBlock).toContain("margin-left: auto");
+    // 预览面板绝对定位且不参与 flex 排版（挂载/卸载不移动主面板）。
+    const previewBlock = radialStyles.slice(
+      radialStyles.indexOf(".radial-menu-preview {"),
+      radialStyles.indexOf("[data-theme=\"dark\"] .content-preview-panel"),
+    );
+    expect(previewBlock).toContain("position: absolute");
+    expect(previewBlock).not.toContain("order: -1");
+
+    // 后端在打开窗口时一次性预留条带并重置输入区域；命令已注册。
+    expect(shortcutSource).toContain("static RADIAL_STRIP");
+    expect(shortcutSource).toContain("apply_radial_input_shape(&radial, false)");
+    expect(shortcutSource).toContain("pub fn set_radial_hit_area");
+    expect(shortcutSource).toContain("input_shape_combine_region");
+    expect(shortcutSource).toContain('"previewSide": preview_side');
+    expect(libSource).toContain("shortcut::set_radial_hit_area,");
+  });
+
   it("keeps the content panel for radial menu and uses inline previews on the main page", () => {
     const pageSource = readSource("./pages/ClipboardPage/index.tsx");
     const cardSource = readSource("./pages/ClipboardPage/ClipboardCard.tsx");
@@ -643,7 +693,8 @@ describe("integration regressions", () => {
     expect(radialMenu).toContain("aria-expanded={preview?.itemId === item.id}");
     expect(radialMenu).not.toContain("schedulePreview");
     expect(radialMenu).not.toContain("onMouseEnter={(e) =>");
-    expect(radialMenu).toContain("windowRestoreRef");
+    // 预览展开/收起不再触碰窗口几何（几何固定是防闪烁方案的前提）。
+    expect(radialMenu).not.toContain("windowRestoreRef");
     expect(radialMenu).toContain("onMouseLeave={handlePreviewLeave}");
     const armDragCatchBlock = radialMenu.slice(
       radialMenu.indexOf("const armRadialFileDrag"),

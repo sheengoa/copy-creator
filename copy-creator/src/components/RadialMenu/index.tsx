@@ -4,12 +4,7 @@ import { useEffect, useRef, useState, useCallback, useMemo, type CSSProperties }
 import { createPortal } from "react-dom";
 import { useTranslation } from "react-i18next";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
-import {
-  getCurrentWindow,
-  currentMonitor,
-  LogicalSize,
-  PhysicalPosition,
-} from "@tauri-apps/api/window";
+import { getCurrentWindow } from "@tauri-apps/api/window";
 import { invoke } from "@tauri-apps/api/core";
 import { Icons } from "../Icons";
 import { useClipboardStore, type ClipType } from "../../stores/clipboardStore";
@@ -21,11 +16,8 @@ import {
 import { useSettingsStore } from "../../stores/settingsStore";
 import { shouldUseTerminalPasteForMouseTrigger } from "../../utils/pasteMode";
 import {
-  calculateRadialExpansion,
   isContentPreviewAvailable,
-  RADIAL_MENU_HEIGHT,
-  RADIAL_MENU_WIDTH,
-  RADIAL_SHADOW_MARGIN,
+  RADIAL_PREVIEW_WIDTH,
   type RadialPreviewDirection,
   type RadialPreviewSegment,
 } from "../../utils/radialPreview";
@@ -207,6 +199,9 @@ export default function RadialMenu() {
   const [collapsedGroupPaths, setCollapsedGroupPaths] = useState<string[]>([]);
   const [phraseGroupId, setPhraseGroupId] = useState<string | null>(ALL_PHRASES_GROUP_ID);
   const [preview, setPreview] = useState<PreviewState | null>(null);
+  // 条带方向决定主面板贴窗口哪一侧（几何固定，会话内不变）：state 供
+  // 渲染取类名，ref 供异步展开逻辑读取。
+  const [previewSide, setPreviewSide] = useState<RadialPreviewDirection>("right");
   const [dragSessionItemId, setDragSessionItemId] = useState<string | null>(null);
   const [draggingItemId, setDraggingItemId] = useState<string | null>(null);
 
@@ -228,9 +223,10 @@ export default function RadialMenu() {
   const phraseGroupIdRef = useRef<string | null>(ALL_PHRASES_GROUP_ID);
   const previewRequestRef = useRef(0);
   const previewRef = useRef<PreviewState | null>(null);
-  const originalWindowPositionRef = useRef<PhysicalPosition | null>(null);
-  const windowRestoreRef = useRef<Promise<void> | null>(null);
-  const windowOperationQueueRef = useRef<Promise<void>>(Promise.resolve());
+  // 扩展条带的方向与宽度：后端打开窗口时按光标所在显示器一次性决定
+  // （预留好条带，展开期不再改动窗口几何），随 radial-menu-show 事件下发。
+  const previewSideRef = useRef<RadialPreviewDirection>("right");
+  const previewWidthRef = useRef(RADIAL_PREVIEW_WIDTH);
   const previewCacheRef = useRef(new Map<string, RadialPreviewSegment[]>());
   const dragActiveRef = useRef(false);
   const suppressClickRef = useRef(false);
@@ -360,70 +356,20 @@ export default function RadialMenu() {
     previewRequestRef.current += 1;
   }, []);
 
-  const enqueueWindowOperation = useCallback((operation: () => Promise<void>) => {
-    const task = windowOperationQueueRef.current.then(
-      () => operation(),
-      () => operation(),
-    );
-    windowOperationQueueRef.current = task.then(
-      () => undefined,
-      () => undefined,
-    );
-    return task;
-  }, []);
-
+  // 展开/收起只做两件事：挂载/卸载预览面板 + 通知后端扩放输入区域。
+  // 窗口几何自打开时按"面板 + 预留条带"分配后就固定不变——X11 上任何
+  // resize/move 都会被合成器画出一帧"旧内容按左上锚定 + 新区域未绘制"
+  // 的闪烁帧（实测帧证据），这是扩展闪烁的物理根源，必须整体绕开。
   const collapsePreview = useCallback(() => {
-    const shouldRestoreWindow = Boolean(
-      previewRef.current || originalWindowPositionRef.current,
-    );
     invalidatePreviewRequest();
-    setPreview(null);
     previewRef.current = null;
-    const restoreTask = windowRestoreRef.current;
-    if (!shouldRestoreWindow && !restoreTask) return;
-
-    const originalPosition = originalWindowPositionRef.current;
-    originalWindowPositionRef.current = null;
-    const nextRestoreTask = restoreTask ?? enqueueWindowOperation(async () => {
-      const appWindow = getCurrentWindow();
-      const uiScale = uiScaleRef.current;
-      try {
-        // 与扩展同理：位置与尺寸单次原子下发，避免收起时的两步闪烁。
-        const scaleFactor = await appWindow.scaleFactor();
-        if (originalPosition) {
-          await invoke("set_radial_window_bounds", {
-            x: originalPosition.x,
-            y: originalPosition.y,
-            width: Math.round(
-              (RADIAL_MENU_WIDTH + 2 * RADIAL_SHADOW_MARGIN) * uiScale * scaleFactor,
-            ),
-            height: Math.round(
-              (RADIAL_MENU_HEIGHT + 2 * RADIAL_SHADOW_MARGIN) * uiScale * scaleFactor,
-            ),
-          });
-        } else {
-          await appWindow.setSize(new LogicalSize(
-            (RADIAL_MENU_WIDTH + 2 * RADIAL_SHADOW_MARGIN) * uiScale,
-            (RADIAL_MENU_HEIGHT + 2 * RADIAL_SHADOW_MARGIN) * uiScale,
-          ));
-        }
-      } catch {
-        // 后端会在菜单下次打开时恢复紧凑尺寸。
-      }
-    });
-    windowRestoreRef.current = nextRestoreTask;
-    void nextRestoreTask.finally(() => {
-      if (windowRestoreRef.current === nextRestoreTask) {
-        windowRestoreRef.current = null;
-      }
-    });
-  }, [enqueueWindowOperation, invalidatePreviewRequest]);
+    setPreview(null);
+    void invoke("set_radial_hit_area", { expanded: false }).catch(() => {});
+  }, [invalidatePreviewRequest]);
 
   const dismissPreviewForDrag = useCallback(() => {
-    invalidatePreviewRequest();
-    setPreview(null);
-    previewRef.current = null;
-  }, [invalidatePreviewRequest]);
+    collapsePreview();
+  }, [collapsePreview]);
 
   const cancelPendingNativeDrag = useCallback((pending: PendingNativeDrag | null) => {
     if (!pending || !pending.armRequested || pending.nativeStarted) return;
@@ -445,111 +391,34 @@ export default function RadialMenu() {
     item: RadialItem,
   ): Promise<PreviewLayout | null> => {
     if (dragActiveRef.current || nativeDragRef.current) return null;
-    if (windowRestoreRef.current) await windowRestoreRef.current;
     if (request !== previewRequestRef.current) return null;
     if (previewRef.current) return previewRef.current.layout;
-    const appWindow = getCurrentWindow();
+    // 条带方向与宽度由后端在打开窗口时一次性决定并随事件下发，
+    // 前端不再查询显示器/计算窗口几何。
+    const layout = { direction: previewSideRef.current, width: previewWidthRef.current };
+    if (layout.width <= 0) return null;
     try {
-      const [position, monitor, scaleFactor] = await Promise.all([
-        appWindow.outerPosition(),
-        currentMonitor(),
-        appWindow.scaleFactor(),
-      ]);
-      if (
-        !monitor
-        || request !== previewRequestRef.current
-        || dragActiveRef.current
-        || nativeDragRef.current
-      ) return null;
-      // position 是含阴影边距的窗口原点；展开计算按可见内容区域换算。
-      // zoom 缩放后，物理边距与可见宽度都随 uiScale 放大。边距必须取整：
-      // PhysicalPosition 只接受 i32，f32 缩放残渣（如 0.8 → 16.00000024）
-      // 会让 setPosition 整个失败，预览静默无法展开。
-      const uiScale = uiScaleRef.current;
-      const marginPhysical = Math.round(RADIAL_SHADOW_MARGIN * scaleFactor * uiScale);
-      const expansion = calculateRadialExpansion({
-        windowX: position.x + marginPhysical,
-        workAreaX: monitor.workArea.position.x,
-        workAreaWidth: monitor.workArea.size.width,
-        scaleFactor,
-        uiScale,
-      });
-      if (expansion.previewWidth <= 0) return null;
-
-      originalWindowPositionRef.current = position;
-      const layout = { direction: expansion.direction, width: expansion.previewWidth };
-      const loadingState = {
-        itemId: item.id,
-        segments: null,
-        layout,
-      };
-      previewRef.current = loadingState;
-      setPreview(loadingState);
-      await enqueueWindowOperation(async () => {
-        // 位置与尺寸必须单次原子下发：setSize→setPosition 是两次独立 X11
-        // 请求，左向扩展的中间态（加宽未左移、右缘探出屏幕）会被合成器
-        // 画出来，就是扩展闪烁的根源。物理坐标 = 逻辑值 × scaleFactor。
-        await invoke("set_radial_window_bounds", {
-          x: expansion.direction === "left" ? expansion.windowX - marginPhysical : position.x,
-          y: position.y,
-          width: Math.round(
-            (RADIAL_MENU_WIDTH + 2 * RADIAL_SHADOW_MARGIN + expansion.previewWidth)
-              * uiScale * scaleFactor,
-          ),
-          height: Math.round(
-            (RADIAL_MENU_HEIGHT + 2 * RADIAL_SHADOW_MARGIN) * uiScale * scaleFactor,
-          ),
-        });
-      });
-      if (
-        request !== previewRequestRef.current
-        || dragActiveRef.current
-        || nativeDragRef.current
-      ) {
-        return null;
-      }
-      return layout;
+      // 先扩输入区再挂载面板：面板出现的同一帧即可接收指针事件。
+      await invoke("set_radial_hit_area", { expanded: true });
     } catch (error) {
-      // 展开失败必须留下痕迹：此前 setPosition 被拒绝只会静默吞掉，
-      // 用户侧表现为「点展开毫无反应」，极难排查。
-      flog(`[preview] expand failed: ${String(error)}`);
-      if (request !== previewRequestRef.current) return null;
-      const deferRestore = dragActiveRef.current || nativeDragRef.current;
-      const originalPosition = originalWindowPositionRef.current;
-      if (!deferRestore) originalWindowPositionRef.current = null;
-      if (request === previewRequestRef.current) {
-        previewRef.current = null;
-        setPreview(null);
-      }
-      if (!deferRestore) {
-        try {
-          await enqueueWindowOperation(async () => {
-            const scaleFactor = await appWindow.scaleFactor();
-            if (originalPosition) {
-              await invoke("set_radial_window_bounds", {
-                x: originalPosition.x,
-                y: originalPosition.y,
-                width: Math.round(
-                  (RADIAL_MENU_WIDTH + 2 * RADIAL_SHADOW_MARGIN) * uiScaleRef.current * scaleFactor,
-                ),
-                height: Math.round(
-                  (RADIAL_MENU_HEIGHT + 2 * RADIAL_SHADOW_MARGIN) * uiScaleRef.current * scaleFactor,
-                ),
-              });
-            } else {
-              await appWindow.setSize(new LogicalSize(
-                (RADIAL_MENU_WIDTH + 2 * RADIAL_SHADOW_MARGIN) * uiScaleRef.current,
-                (RADIAL_MENU_HEIGHT + 2 * RADIAL_SHADOW_MARGIN) * uiScaleRef.current,
-              ));
-            }
-          });
-        } catch {
-          // 后端会在菜单下次打开时恢复紧凑尺寸。
-        }
-      }
+      flog(`[preview] expand hit-area failed: ${String(error)}`);
+    }
+    if (
+      request !== previewRequestRef.current
+      || dragActiveRef.current
+      || nativeDragRef.current
+    ) {
       return null;
     }
-  }, [enqueueWindowOperation]);
+    const loadingState = {
+      itemId: item.id,
+      segments: null,
+      layout,
+    };
+    previewRef.current = loadingState;
+    setPreview(loadingState);
+    return layout;
+  }, []);
 
   const loadPreviewSegments = useCallback(async (item: RadialItem) => {
     const cached = previewCacheRef.current.get(item.id);
@@ -877,9 +746,7 @@ export default function RadialMenu() {
   }, [cancelPendingNativeDrag, closeResourceGroupMenu, collapsePreview]);
 
   const resetStateForNativeHide = useCallback(() => {
-    // 原生窗口已经被后端隐藏，下一次显示会重新定位到鼠标处，
-    // 不能让上一次预览的恢复任务把窗口移回旧位置。
-    originalWindowPositionRef.current = null;
+    // 原生窗口已被后端隐藏，下次显示会重新定位并重置输入区域。
     resetState();
   }, [resetState]);
 
@@ -1098,9 +965,7 @@ export default function RadialMenu() {
     }
     setDragSessionItemId(null);
     setDraggingItemId(null);
-    if (previewRef.current || originalWindowPositionRef.current) {
-      collapsePreview();
-    }
+    if (previewRef.current) collapsePreview();
   }, [cancelPendingNativeDrag, collapsePreview]);
 
   const handleItemPointerDown = useCallback((
@@ -1275,9 +1140,16 @@ export default function RadialMenu() {
       });
       // Listen for radial-menu-show event from backend (keyboard shortcut triggered)
       const [unShow, unHide, unDragStarted, unDragFinished, unScaleChanged] = await Promise.all([
-        listen<{ theme: string; scale?: number }>("radial-menu-show", (e) => {
+        listen<{ theme: string; scale?: number; previewSide?: RadialPreviewDirection; previewWidth?: number }>("radial-menu-show", (e) => {
           // 后端会先显示窗口再发事件，必须先同步开放前端交互，避免首次按下落在隐藏状态。
           if (typeof e.payload.scale === "number") applyUiScale(e.payload.scale);
+          // 打开时已按该方向/宽度预留好扩展条带（几何不再变化），此处仅同步。
+          const side = e.payload.previewSide === "left" ? "left" : "right";
+          previewSideRef.current = side;
+          setPreviewSide(side);
+          previewWidthRef.current = typeof e.payload.previewWidth === "number"
+            ? Math.max(0, Math.floor(e.payload.previewWidth))
+            : RADIAL_PREVIEW_WIDTH;
           const pending = nativeDragRef.current;
           if (pending && !pending.nativeStarted) {
             cancelPendingNativeDrag(pending);
@@ -1288,7 +1160,6 @@ export default function RadialMenu() {
           visibleRef.current = true;
           setVisible(true);
           if (!dragActiveRef.current && !nativeDragRef.current) {
-            originalWindowPositionRef.current = null;
             collapsePreview();
             previewCacheRef.current.clear();
             suppressClickRef.current = false;
@@ -1673,7 +1544,7 @@ export default function RadialMenu() {
   return (
     <div className={`radial-menu-overlay${visible ? "" : " radial-menu-hidden"}`}>
       <div
-        className={`radial-menu-popup${preview ? ` preview-open preview-${preview.layout.direction}` : ""}${dragSessionItemId ? " drag-session" : ""}`}
+        className={`radial-menu-popup ${previewSide === "left" ? "strip-left" : "strip-right"}${preview ? " preview-open" : ""}${dragSessionItemId ? " drag-session" : ""}`}
         style={preview ? {
           "--radial-preview-width": `${preview.layout.width}px`,
         } as CSSProperties : undefined}
