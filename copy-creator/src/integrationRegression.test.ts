@@ -523,6 +523,18 @@ describe("integration regressions", () => {
     expect(overlayBlock).toContain("rgba(0, 0, 0, 0.004)");
     expect(radialStyles).toContain("background: rgba(255, 255, 255, 0.004)");
 
+    // 收起态四角必须全圆（用户可见回归）：拼接侧直角只允许出现在
+    // 展开态（preview-open），否则收起面板条带侧露出方角。
+    const stripLeftMain = radialStyles.slice(
+      radialStyles.indexOf(".radial-menu-popup.strip-left .radial-menu-main {"),
+      radialStyles.indexOf("}", radialStyles.indexOf(".radial-menu-popup.strip-left .radial-menu-main {")),
+    );
+    expect(stripLeftMain).toContain("margin-left: auto");
+    expect(stripLeftMain).not.toContain("border-radius: 0");
+    expect(radialStyles).toContain(
+      ".radial-menu-popup.preview-open.strip-left .radial-menu-main {\n  border-radius: 0 var(--window-radius) var(--window-radius) 0;\n}",
+    );
+
     // 后端在打开窗口时一次性预留条带并重置输入区域；命令已注册。
     expect(shortcutSource).toContain("static RADIAL_STRIP");
     expect(shortcutSource).toContain("apply_radial_input_shape(&radial, false)");

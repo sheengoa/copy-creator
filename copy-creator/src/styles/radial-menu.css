@@ -63,14 +63,20 @@ html {
   overflow: hidden;
 }
 
-/* 展开时主面板与条带拼成一张连续表面：拼接侧改直角，由条带负责
-   该侧的外圆角，收起（类移除）与展开同一帧提交，无中间形态。 */
+/* 条带在左侧时主面板恒定贴窗口右缘（几何不变的前提），但四角圆角
+   不能无条件改直角：收起态没有预览面板补该侧外圆角，会露出方角。 */
 .radial-menu-popup.strip-left .radial-menu-main {
   margin-left: auto;
+}
+
+/* 仅展开态把拼接侧改直角、由预览面板负责该侧外圆角，拼成一张连续
+   表面（外轮廓四角仍是圆角）；收起类移除与面板卸载同一帧提交，
+   无中间形态。 */
+.radial-menu-popup.preview-open.strip-left .radial-menu-main {
   border-radius: 0 var(--window-radius) var(--window-radius) 0;
 }
 
-.radial-menu-popup.strip-right .radial-menu-main {
+.radial-menu-popup.preview-open.strip-right .radial-menu-main {
   border-radius: var(--window-radius) 0 0 var(--window-radius);
 }
 
