@@ -379,6 +379,35 @@ fn clamp_position_into_work_area(
     (x, y)
 }
 
+/// 径向扩展条带的方向与宽度判定（纯函数，该几何规则的唯一事实源）：
+/// 右侧剩余空间放得下最小条带（260）、或不小于左侧空间时向右扩展，
+/// 否则向左；条带宽度取期望宽度（440 × uiScale × dpi）与该侧可用空间
+/// 的较小值。前端旧副本已随 utils/radialPreview.ts 删除（架构守卫规则
+/// 15 防回潮），行为回归由 radial_strip_tests 锚定。
+fn decide_radial_strip(
+    px: i32,
+    win_w: i32,
+    monitor: Option<(f64, i32, i32, i32, i32)>,
+    ui_scale: f32,
+    dpi: f64,
+) -> (bool, i32) {
+    let preferred_strip = (440.0 * ui_scale as f64 * dpi).round() as i32;
+    let min_strip = (260.0 * ui_scale as f64 * dpi).round() as i32;
+    match monitor {
+        // 条带只在水平方向分配，工作区的纵向分量（y/height）与 dpi 用不到。
+        Some((_, ax, _, aw, _)) => {
+            let right_space = ax + aw - (px + win_w);
+            let left_space = px - ax;
+            if right_space >= min_strip || right_space >= left_space {
+                (false, preferred_strip.min(right_space.max(0)))
+            } else {
+                (true, preferred_strip.min(left_space.max(0)))
+            }
+        }
+        None => (false, preferred_strip),
+    }
+}
+
 pub fn show_radial_menu(app: &AppHandle) {
     if let Some(radial) = app.get_webview_window("radial-menu") {
         if radial.is_visible().unwrap_or(false) {
@@ -404,11 +433,10 @@ pub fn show_radial_menu(app: &AppHandle) {
         let margin = crate::WINDOW_SHADOW_MARGIN as f32;
 
         // 每次打开时按面板尺寸钳制进光标所在显示器工作区（排除任务栏），
-        // 再在空间更充裕的一侧一次性预留透明扩展条带（首选右侧，判定口径
-        // 与前端 utils/radialPreview.ts 的 calculatePreviewExpansion 一致，
-        // 改动时必须同步）。此后窗口几何在整场交互中不再变化：展开/收起
-        // 只切换前端面板挂载与输入区域（set_radial_hit_area），从根源上
-        // 消除 X11 resize 引起的闪烁帧。
+        // 再在空间更充裕的一侧一次性预留透明扩展条带（判定口径见
+        // decide_radial_strip，唯一事实源）。此后窗口几何在整场交互中
+        // 不再变化：展开/收起只切换前端面板挂载与输入区域
+        // （set_radial_hit_area），从根源上消除 X11 resize 引起的闪烁帧。
         let monitor = cursor_monitor_info(app, cursor_x, cursor_y);
         let dpi = monitor.map(|(dpi, ..)| dpi).unwrap_or(1.0);
         let win_w =
@@ -424,21 +452,7 @@ pub fn show_radial_menu(app: &AppHandle) {
             // 找不到所在显示器时保持旧行为：仅防负坐标。
             None => (px.max(0), py.max(0)),
         };
-        let preferred_strip = (440.0 * scale as f64 * dpi).round() as i32;
-        let min_strip = (260.0 * scale as f64 * dpi).round() as i32;
-        let (strip_left, strip_w) = match monitor {
-            // 条带只在水平方向分配，工作区的纵向分量（y/height）用不到。
-            Some((_, ax, _, aw, _)) => {
-                let right_space = ax + aw - (px + win_w);
-                let left_space = px - ax;
-                if right_space >= min_strip || right_space >= left_space {
-                    (false, preferred_strip.min(right_space.max(0)))
-                } else {
-                    (true, preferred_strip.min(left_space.max(0)))
-                }
-            }
-            None => (false, preferred_strip),
-        };
+        let (strip_left, strip_w) = decide_radial_strip(px, win_w, monitor, scale, dpi);
         let win_w_total = win_w + strip_w;
         let px_total = if strip_left { px - strip_w } else { px };
         let _ = radial.set_size(tauri::PhysicalSize::new(win_w_total, win_h));
@@ -1462,5 +1476,70 @@ mod tests {
             clamp_position_into_work_area((-2500, 1200), (460, 690), (-1920, 0, 1920, 1040)),
             (-1920, 350)
         );
+    }
+}
+
+#[cfg(test)]
+mod radial_strip_tests {
+    use super::decide_radial_strip;
+
+    const MONITOR: Option<(f64, i32, i32, i32, i32)> = Some((1.0, 0, 0, 1920, 1040));
+
+    #[test]
+    fn expands_right_when_space_remains() {
+        // 右侧剩余 1260 ≥ 最小条带 260：向右，宽度取期望值 440。
+        assert_eq!(decide_radial_strip(200, 460, MONITOR, 1.0, 1.0), (false, 440));
+    }
+
+    #[test]
+    fn expands_left_near_right_edge() {
+        // 贴右缘（右侧仅剩负空间）时向左，面板自身位置不动。
+        assert_eq!(decide_radial_strip(1500, 460, MONITOR, 1.0, 1.0), (true, 440));
+    }
+
+    #[test]
+    fn uses_remaining_space_on_constrained_work_area() {
+        // 工作区放不下整条：右侧剩 90（不足最小条带但比左侧宽），
+        // 向右并压缩到 90。
+        assert_eq!(
+            decide_radial_strip(50, 460, Some((1.0, 0, 0, 600, 1040)), 1.0, 1.0),
+            (false, 90)
+        );
+    }
+
+    #[test]
+    fn clamps_left_width_to_available_left_space() {
+        // 左向扩展时宽度被左侧空间钳制：右侧 -240，左侧 300。
+        assert_eq!(
+            decide_radial_strip(300, 460, Some((1.0, 0, 0, 520, 1040)), 1.0, 1.0),
+            (true, 300)
+        );
+    }
+
+    #[test]
+    fn scales_strip_with_ui_scale_and_dpi() {
+        // 期望/最小宽度都随 uiScale × dpi 放大：440×1.5×2=1320。
+        assert_eq!(
+            decide_radial_strip(100, 1380, Some((2.0, 0, 0, 5000, 1040)), 1.5, 2.0),
+            (false, 1320)
+        );
+    }
+
+    #[test]
+    fn keeps_integral_strip_under_fractional_ui_scale() {
+        // 设置项 80% 的实际存储值带 f32 残渣（0.800000011920929）：
+        // 440×…=352.000005…、260×…=208.000006…，round 后必须是整洁
+        // 物理值 352/208，否则与窗口几何的整数世界对不上。
+        let ui_scale = 0.800_000_011_920_929_f32;
+        assert_eq!(
+            decide_radial_strip(200, 368, MONITOR, ui_scale, 1.0),
+            (false, 352)
+        );
+    }
+
+    #[test]
+    fn prefers_right_without_monitor_info() {
+        // 找不到所在显示器时保持旧行为：按期望宽度向右。
+        assert_eq!(decide_radial_strip(200, 460, None, 1.0, 1.0), (false, 440));
     }
 }
