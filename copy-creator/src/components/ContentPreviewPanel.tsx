@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
-import type { RadialPreviewSegment } from "../utils/radialPreview";
+import type { RadialPreviewSegment } from "../domain/preview";
 import { resolveResourceAssetUrl } from "../domain/mediaUrl";
 import { ResourceMediaPlayer } from "../pages/ResourcePage/ResourceMedia";
 import { Icons } from "./Icons";

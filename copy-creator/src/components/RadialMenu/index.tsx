@@ -16,12 +16,6 @@ import {
 import { useSettingsStore } from "../../stores/settingsStore";
 import { shouldUseTerminalPasteForMouseTrigger } from "../../utils/pasteMode";
 import {
-  isContentPreviewAvailable,
-  RADIAL_PREVIEW_WIDTH,
-  type RadialPreviewDirection,
-  type RadialPreviewSegment,
-} from "../../utils/radialPreview";
-import {
   getClipboardRadialDragKind,
   getPhraseRadialDragKind,
   type RadialDragKind,
@@ -31,7 +25,13 @@ import { ContentPreviewPanel } from "../ContentPreviewPanel";
 import { FileMediaVisual } from "../FileMediaPreview";
 import { BackToTopButton } from "../BackToTop";
 import { useBackToTop } from "../../hooks/useBackToTop";
-import { loadRecordPreviewSegments } from "../../domain/preview";
+import {
+  isContentPreviewAvailable,
+  loadRecordPreviewSegments,
+  RADIAL_PREVIEW_WIDTH,
+  type RadialPreviewDirection,
+  type RadialPreviewSegment,
+} from "../../domain/preview";
 import { buildRecordView } from "../../domain/recordView";
 import { isResourceRecord } from "../../domain/records";
 import { formatTime, formatRelativeTime } from "../../utils/formatTime";

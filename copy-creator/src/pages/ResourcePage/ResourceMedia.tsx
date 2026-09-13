@@ -7,7 +7,7 @@ import {
 import { useEffect, useRef, useState } from "react";
 import { useInViewOnce } from "../../hooks/useInViewOnce";
 import { useTranslation } from "react-i18next";
-import type { RadialPreviewSegment } from "../../utils/radialPreview";
+import type { RadialPreviewSegment } from "../../domain/preview";
 import { Icons } from "../../components/Icons";
 import { resolveResourceAssetUrl, resolveResourceMediaUrl } from "../../domain/mediaUrl";
 

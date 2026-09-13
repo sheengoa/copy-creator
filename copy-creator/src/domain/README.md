@@ -10,7 +10,7 @@
 |:---|:---|
 | 某内容**是什么类型**（媒体类型、扩展名判定） | `mediaKind.ts` |
 | 某记录**能做什么**（能否展开、粘贴路由、是否资源/文件承载文本） | `records.ts` |
-| 预览 **segments 怎么生成** | `preview.ts` |
+| 预览 **segments 怎么生成**（含预览条带方向/宽度契约 `RadialPreviewDirection`/`RADIAL_PREVIEW_WIDTH`） | `preview.ts` |
 | 本地路径→**可显示/可播放 URL** | `mediaUrl.ts`（`convertFileSrc`/媒体服务 token 全项目仅此处可用） |
 | **文件名**切分、重命名资格 | `fileName.ts` |
 | 分组树的**组织与排序** | `groups.ts` |

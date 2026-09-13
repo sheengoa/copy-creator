@@ -4,6 +4,13 @@ import { invoke } from "@tauri-apps/api/core";
 import type { ClipboardRecord } from "../types";
 import { fileMediaKindFromPath, getResourceExtension, TEXT_EXTENSIONS } from "./mediaKind";
 
+// 预览条带的设计像素宽度：后端开窗时按 440 × scale × dpi 一次性预留条带
+// （见 src-tauri show_radial_menu 的 preferred_strip），前端展开面板以此为
+// 名义宽度，两处必须同步修改。
+export const RADIAL_PREVIEW_WIDTH = 440;
+
+export type RadialPreviewDirection = "left" | "right";
+
 export type RadialPreviewSegment =
   | { type: "text"; content: string }
   | { type: "image"; path: string }

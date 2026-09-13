@@ -218,4 +218,15 @@ describe("架构守卫：领域规则必须全局共享", () => {
       ).toContain('selection.type === "Range"');
     }
   });
+
+  it("规则 15：预览 segments 与方向/宽度契约仅在 domain/preview.ts，utils 旧副本零残留", () => {
+    expect(readSource("domain/preview.ts")).toContain("export function buildRadialPreviewSegments");
+    const offenders = allSources
+      .filter((file) => sourceOf(file).includes("utils/radialPreview"))
+      .map((file) => toPosix(file.replace(frontRoot, "")));
+    expect(
+      offenders,
+      "预览 segments 与展开方向/宽度契约必须从 domain/preview 导入（见 domain/README.md）",
+    ).toEqual([]);
+  });
 });
