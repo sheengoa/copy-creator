@@ -12,12 +12,11 @@ mod resource_watch;
 mod shortcut;
 mod tray;
 
-use tauri::Manager;
+use tauri::{Emitter, Manager};
 
 /// 窗口四周的透明阴影边距（逻辑像素）。透明窗口的 CSS 阴影会被窗口边界
-/// 裁剪，因此所有窗口实际尺寸比可见面板大一圈，阴影落在边距内。与前端
-/// `src/utils/radialPreview.ts` 的 RADIAL_SHADOW_MARGIN 及 CSS 变量
-/// `--window-shadow-margin` 保持一致，改动时必须同步。
+/// 裁剪，因此所有窗口实际尺寸比可见面板大一圈，阴影落在边距内。与 CSS 变量
+/// `--window-shadow-margin`（src/styles/base.css）保持一致，改动时必须同步。
 pub(crate) const WINDOW_SHADOW_MARGIN: f64 = 20.0;
 
 pub(crate) fn show_main_window(app: &tauri::AppHandle, reason: &str, center: bool) {
@@ -48,6 +47,10 @@ pub(crate) fn show_main_window(app: &tauri::AppHandle, reason: &str, center: boo
     if let Err(e) = window.show() {
         log::warn!("[show_main_window] show failed: {e}");
     }
+    // 广播主窗口重新可见：WebKitGTK 在 hide/show 时不触发
+    // document.visibilitychange（探针实测 0 次），前端的「恢复显示重载」
+    // 只能挂本事件。所有显示路径（快捷键/托盘/IPC/启动）都经本函数。
+    let _ = app.emit("main-window-shown", ());
     if !popup_visible {
         if let Err(e) = window.set_focus() {
             log::warn!("[show_main_window] set_focus failed: {e}");

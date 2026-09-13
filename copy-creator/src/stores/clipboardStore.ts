@@ -321,8 +321,13 @@ export const useClipboardStore = create<ClipboardState>((set, get) => ({
     });
 
     // 首次加载前先装载设置：contentSort 参与请求参数，径向菜单窗口
-    // 没有 App 层的设置装载，必须在这里保证已从设置表读取。
-    void useSettingsStore.getState().loadSettings().then(() => {
+    // 没有 App 层的设置装载，必须在这里保证已从设置表读取。设置装载
+    // 若因 IPC 异常迟迟不返回，1.5s 后仍放行首载（排序偏好晚到时会经
+    // content-sort-changed 触发重载纠正），避免列表因一次悬挂永久空白。
+    void Promise.race([
+      useSettingsStore.getState().loadSettings(),
+      new Promise<void>((resolve) => window.setTimeout(resolve, 1500)),
+    ]).then(() => {
       void get().loadRecords(false, categoryOverride);
     });
   },

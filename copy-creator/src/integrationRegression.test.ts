@@ -226,9 +226,15 @@ describe("integration regressions", () => {
     );
     expect(groupTouchBlock).toContain("emit_usage_updated(app,");
 
-    // 主窗口从隐藏恢复显示时兜底重载当前视图。
+    // 主窗口从隐藏恢复显示时兜底重载当前视图：WebKitGTK 上 hide/show
+    // 不触发 visibilitychange（实测），重载必须挂后端 main-window-shown
+    // 广播；后端在 show_main_window（全部显示路径的汇聚点）发射该事件。
     expect(clipboardPageSource).toContain("useRefreshOnShow");
     expect(pageSource).toContain("useRefreshOnShow");
+    const hookSource = readSource("./hooks/useRefreshOnShow.ts");
+    expect(hookSource).toContain('listen("main-window-shown"');
+    const libSource = readSource("../src-tauri/src/lib.rs");
+    expect(libSource).toContain('emit("main-window-shown"');
   });
 
   it("passes clipboard search into cards for highlighting", () => {
