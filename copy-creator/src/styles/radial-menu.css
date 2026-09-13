@@ -14,13 +14,22 @@ html {
   position: fixed;
   inset: 0;
   z-index: 3000;
-  background: transparent;
+  /*
+   * 窗口含预留扩展条带（strip-left/right），收起态条带没有任何元素
+   * 绘制。WebKit 不会把无内容区域主动清成透明，缓冲区会残留展开态
+   * 面板的圆角/阴影乃至上一次打开的旧内容（残影实测见截图）。这里
+   * 用一层 alpha=1/255 的真实填充强制重绘时写入透明像素，视觉上
+   * 不可感知；可见/隐藏两态填充值刻意不同，保证每次开合都触发
+   * 全窗重绘，跨会话也不留残影。
+   */
+  background: rgba(0, 0, 0, 0.004);
   /* 让出透明阴影边距，避免阴影被窗口边界裁剪。 */
   padding: var(--window-shadow-margin);
 }
 
 .radial-menu-overlay.radial-menu-hidden {
   pointer-events: none;
+  background: rgba(255, 255, 255, 0.004);
 }
 
 /*

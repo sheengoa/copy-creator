@@ -514,6 +514,14 @@ describe("integration regressions", () => {
     );
     expect(previewBlock).toContain("position: absolute");
     expect(previewBlock).not.toContain("order: -1");
+    // 收起态条带无元素绘制，必须靠 overlay 的近零 alpha 填充强制清屏，
+    // 否则 WebKit 缓冲区残留展开面板圆角/阴影的旧像素（残影）。
+    const overlayBlock = radialStyles.slice(
+      radialStyles.indexOf(".radial-menu-overlay {"),
+      radialStyles.indexOf(".radial-menu-overlay.radial-menu-hidden"),
+    );
+    expect(overlayBlock).toContain("rgba(0, 0, 0, 0.004)");
+    expect(radialStyles).toContain("background: rgba(255, 255, 255, 0.004)");
 
     // 后端在打开窗口时一次性预留条带并重置输入区域；命令已注册。
     expect(shortcutSource).toContain("static RADIAL_STRIP");
