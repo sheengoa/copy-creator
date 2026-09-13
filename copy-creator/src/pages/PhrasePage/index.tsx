@@ -94,14 +94,15 @@ export default function PhrasePage() {
   const pasteLeftClick = useSettingsStore((s) => s.pasteLeftClick);
 
   useEffect(() => {
+    // zustand action 引用恒定，加入依赖仅为满足 exhaustive-deps。
     init();
-  }, []);
+  }, [init]);
 
   useEffect(() => {
     if (selectedGroupId) {
       loadPhrases(selectedGroupId);
     }
-  }, [selectedGroupId]);
+  }, [selectedGroupId, loadPhrases]);
 
   useEffect(() => {
     getQuickInputFileLimit()

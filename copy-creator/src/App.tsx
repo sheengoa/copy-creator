@@ -77,7 +77,8 @@ function App() {
         // validate_autostart command not available (older backend)
       }
     });
-  }, []);
+    // zustand action 引用恒定，仅满足 exhaustive-deps，不会引发重跑。
+  }, [loadSettings]);
 
   const SIDEBAR_MIN = 60;
   const SIDEBAR_MAX = 130;
