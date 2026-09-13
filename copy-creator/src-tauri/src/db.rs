@@ -423,11 +423,11 @@ const RESOURCE_FILE_ID_PREFIX: &str = "resource-file:";
 struct ResourceFileEntry {
     path: PathBuf,
     group: String,
-    media_kind: &'static str,
     modified_at: String,
     sort_order: f64,
 }
 
+/// 记录列表输出用：按路径把 file 记录归类为 image/video/audio/text/file。
 fn resource_media_kind_for_path(path: &Path) -> &'static str {
     crate::media_kind::media_kind_for_path(path).as_str()
 }
@@ -528,7 +528,6 @@ fn scan_resource_files(root: &Path) -> Vec<ResourceFileEntry> {
                 .unwrap_or_else(chrono::Utc::now);
             let sort_order = modified.timestamp_millis() as f64;
             entries.push(ResourceFileEntry {
-                media_kind: resource_media_kind_for_path(&path),
                 path,
                 group,
                 modified_at: modified.to_rfc3339(),
@@ -2025,7 +2024,7 @@ fn get_resource_records_inner<R: Runtime>(
                 ))
             })
             .map_err(|e| e.to_string())?;
-        let mut database_records = rows
+        let database_records = rows
             .collect::<Result<Vec<_>, _>>()
             .map_err(|e| e.to_string())?;
         drop(stmt);
@@ -3942,7 +3941,7 @@ fn resource_group_count_map<R: Runtime>(
         if database_paths.contains(&resource_path_key(&entry.path)) {
             continue;
         }
-        let folder = resource_folder_for_path(&root, &entry.path.to_string_lossy().as_ref())
+        let folder = resource_folder_for_path(&root, entry.path.to_string_lossy().as_ref())
             .unwrap_or_default();
         *counts.entry(folder).or_insert(0) += 1;
     }
@@ -4911,7 +4910,7 @@ fn move_resource_group_inner<R: Runtime>(
     if new_parent == path || new_parent.starts_with(&format!("{path}/")) {
         return Err("不能把分组移动到它自身或其子分组内".to_string());
     }
-    let base_name = path.split('/').last().unwrap_or_default().to_string();
+    let base_name = path.rsplit('/').next().unwrap_or_default().to_string();
     let current_parent = path
         .rsplit_once('/')
         .map(|(parent, _)| parent.to_string())
@@ -5307,15 +5306,6 @@ pub fn set_user_api_key(app: AppHandle, id: String, value: bool) -> Result<(), S
 // ── Reorder Commands ──────────────────────────────────────────
 
 #[tauri::command]
-pub fn reorder_clipboard_records(app: AppHandle, ids: Vec<String>) -> Result<(), String> {
-    let state = app.state::<DbState>();
-    let conn = state.conn.lock().map_err(|e| e.to_string())?;
-    write_id_order(&conn, "clipboard_records", &ids, |i, n| ((n - i) * 10) as f64)?;
-    log::info!("reorder_clipboard_records: {} items", ids.len());
-    Ok(())
-}
-
-#[tauri::command]
 pub fn reorder_phrase_groups(app: AppHandle, ids: Vec<String>) -> Result<(), String> {
     let state = app.state::<DbState>();
     let conn = state.conn.lock().map_err(|e| e.to_string())?;
@@ -5574,8 +5564,7 @@ mod resource_file_tests {
     use super::{
         managed_resource_attachment_path, managed_resource_file_path,
         normalize_resource_folder_path, normalize_resource_group_name,
-        resource_folder_for_path, resource_group_for_path, resource_media_kind_for_path,
-        scan_resource_files,
+        resource_folder_for_path, resource_group_for_path, scan_resource_files,
     };
     use std::path::PathBuf;
 
@@ -5830,46 +5819,58 @@ mod resource_file_tests {
                         .to_string()
                         .replace('\\', "/"),
                     entry.group.clone(),
-                    entry.media_kind
                 ))
                 .collect::<Vec<_>>(),
             vec![
                 (
                     "References/archive/archive.bin".to_string(),
                     "References".to_string(),
-                    "file",
                 ),
                 (
                     "References/archive/note.md".to_string(),
                     "References".to_string(),
-                    "text",
                 ),
                 (
                     "References/image.PNG".to_string(),
                     "References".to_string(),
-                    "image",
                 ),
                 (
                     "References/movie.mp4".to_string(),
                     "References".to_string(),
-                    "video",
                 ),
                 (
                     "References/notes.tmp".to_string(),
                     "References".to_string(),
-                    "text",
                 ),
                 (
                     "References/sound.ogg".to_string(),
                     "References".to_string(),
-                    "audio",
                 ),
-                ("root.txt".to_string(), "".to_string(), "text"),
+                ("root.txt".to_string(), "".to_string()),
             ]
         );
         assert!(crate::media_kind::is_text_extension(&root.join("README.MD")));
+        // 扫描产物不再携带媒体分类（入库统一 type='file'，渲染期按路径
+        // 判定）；分类器行为属于 media_kind 模块，这里保留代表性扩展名
+        // 与未知扩展名的兜底断言。
         assert_eq!(
-            resource_media_kind_for_path(&root.join("unknown.bin")),
+            crate::media_kind::media_kind_for_path(&root.join("References/image.PNG")).as_str(),
+            "image"
+        );
+        assert_eq!(
+            crate::media_kind::media_kind_for_path(&root.join("References/movie.mp4")).as_str(),
+            "video"
+        );
+        assert_eq!(
+            crate::media_kind::media_kind_for_path(&root.join("References/sound.ogg")).as_str(),
+            "audio"
+        );
+        assert_eq!(
+            crate::media_kind::media_kind_for_path(&root.join("References/notes.tmp")).as_str(),
+            "text"
+        );
+        assert_eq!(
+            crate::media_kind::media_kind_for_path(&root.join("unknown.bin")).as_str(),
             "file"
         );
         let _ = std::fs::remove_dir_all(root);

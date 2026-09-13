@@ -192,7 +192,7 @@ fn release_unused_modifiers(enigo: &mut Enigo, shortcut: PasteShortcut) {
         PasteShortcut::CtrlShiftV => &[Key::Alt, Key::Meta],
     };
     for key in keys {
-        if let Err(e) = enigo.key(key.clone(), Direction::Release) {
+        if let Err(e) = enigo.key(*key, Direction::Release) {
             log::warn!("enigo modifier release failed (continuing): {e}");
         }
     }
@@ -611,6 +611,7 @@ const DEFOCUS_SETTLE_MS: u64 = 200;
 #[cfg(target_os = "windows")]
 const DEFOCUS_POLL_TIMEOUT_MS: u64 = 150;
 /// 等待用户松开残留修饰键（如 Shift+单击后的 Shift）的上限。
+#[cfg(target_os = "windows")]
 const STRAY_MODIFIER_WAIT_MS: u64 = 400;
 
 /// Windows: 轮询 GetForegroundWindow，直到前台进程不再是本进程
@@ -681,6 +682,9 @@ fn defocus_windows(app: &AppHandle) -> Result<bool, String> {
 }
 
 fn paste_with_defocus(app: &AppHandle, shortcut: PasteShortcut) -> Result<(), String> {
+    // 返回值仅 Windows 分支使用（自家窗口跳过焦点轮询）；其余平台只取
+    // defocus 的副作用与错误传播。
+    #[cfg_attr(not(target_os = "windows"), allow(unused_variables))]
     let paste_into_own_window = defocus_windows(app)?;
 
     #[cfg(target_os = "windows")]
@@ -1011,6 +1015,8 @@ pub fn paste_image_file(app: AppHandle, path: String) -> Result<(), String> {
         // Linux 沉降按"defocus 起始"计时；Windows 用焦点轮询，无需起始点。
         #[cfg(not(target_os = "windows"))]
         let defocus_start = std::time::Instant::now();
+        // 返回值仅 Windows 分支使用（自家窗口跳过焦点轮询）。
+        #[cfg_attr(not(target_os = "windows"), allow(unused_variables))]
         let paste_into_own = match defocus_windows(&handle) {
             Ok(own) => own,
             Err(e) => {

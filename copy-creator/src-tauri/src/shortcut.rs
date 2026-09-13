@@ -427,7 +427,8 @@ pub fn show_radial_menu(app: &AppHandle) {
         let preferred_strip = (440.0 * scale as f64 * dpi).round() as i32;
         let min_strip = (260.0 * scale as f64 * dpi).round() as i32;
         let (strip_left, strip_w) = match monitor {
-            Some((_, ax, ay, aw, ah)) => {
+            // 条带只在水平方向分配，工作区的纵向分量（y/height）用不到。
+            Some((_, ax, _, aw, _)) => {
                 let right_space = ax + aw - (px + win_w);
                 let left_space = px - ax;
                 if right_space >= min_strip || right_space >= left_space {
