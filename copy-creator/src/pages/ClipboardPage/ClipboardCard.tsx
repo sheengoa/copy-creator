@@ -258,6 +258,7 @@ function ClipboardCardInner({
                 path={view.content}
                 alt={t("radialMenu.previewImage")}
                 className="clipboard-card-expanded-image"
+                onClick={handleToggleExpanded}
               />
             ) : (
               /* 图片列表态统一全宽横幅；点击卡片即粘贴（卡片根 onClick）。 */
@@ -278,7 +279,10 @@ function ClipboardCardInner({
               <span className="clipboard-file-content"><HighlightText text={view.displayName} search={search} /></span>
               {expanded && view.expandPreview !== null && (
                 view.expandPreview === "video" || view.expandPreview === "audio" ? (
-                  <div className={`clipboard-media-slot is-${view.expandPreview}`}>
+                  <div
+                    className={`clipboard-media-slot is-${view.expandPreview}`}
+                    onClick={handleToggleExpanded}
+                  >
                     <ResourceMediaPlayer kind={view.expandPreview} path={view.content} />
                   </div>
                 ) : view.expandPreview === "image" ? (
@@ -286,6 +290,7 @@ function ClipboardCardInner({
                     path={view.content}
                     alt={t("radialMenu.previewImage")}
                     className="clipboard-card-expanded-image"
+                    onClick={handleToggleExpanded}
                   />
                 ) : (
                   <InlineTextFilePreview recordId={view.id} search={search} />

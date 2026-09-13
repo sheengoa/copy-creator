@@ -168,6 +168,7 @@ function PhraseCard({
                   path={phrase.content}
                   alt={t("resources.imagePreview")}
                   className="phrase-card-expanded-image"
+                  onClick={handleToggleText}
                 />
               )}
               {isTextExpanded && textFile && (

@@ -9,12 +9,15 @@ interface InlineImagePreviewProps {
   path: string;
   alt: string;
   className?: string;
+  /** 点击图片（展开卡片内点击 = 收起卡片，避免冒泡触发卡片根元素的粘贴）。 */
+  onClick?: (event: React.MouseEvent) => void;
 }
 
 export function InlineImagePreview({
   path,
   alt,
   className = "",
+  onClick,
 }: InlineImagePreviewProps) {
   const { t } = useTranslation();
   const [src, setSrc] = useState("");
@@ -51,6 +54,7 @@ export function InlineImagePreview({
       src={src}
       alt={alt}
       draggable={false}
+      onClick={onClick}
       onError={() => setFailed(true)}
     />
   );
