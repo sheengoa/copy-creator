@@ -197,4 +197,25 @@ describe("架构守卫：领域规则必须全局共享", () => {
       "剪切板图片记录折叠态必须用 FileMediaVisual 横幅，不得回退 48×36 小缩略图",
     ).toContain("<FileMediaVisual path={view.content} />");
   });
+
+  it("规则 14：可展开卡片展开态点击必须收起，不得落回粘贴", () => {
+    // 展开内容是大面积点击热区，点击冒泡到根元素的粘贴动作会写入剪贴板、
+    // 失焦隐藏窗口并按「最近使用」重排（用户实测卡片「跑到最上面」）。
+    // 两处可展开卡片（剪切板/快捷输入）都必须在根元素拦截：展开态点击
+    // 一律收起，且放行拖选文本结束的 click（selection 为 Range）。
+    for (const cardFile of [
+      "pages/ClipboardPage/ClipboardCard.tsx",
+      "pages/PhrasePage/PhraseList.tsx",
+    ]) {
+      const source = readSource(cardFile);
+      expect(
+        source,
+        `${cardFile} 根元素必须用 handleCardClick 统一处理点击（展开态收起/收起态粘贴）`,
+      ).toContain("onClick={handleCardClick}");
+      expect(
+        source,
+        `${cardFile} 展开态收起必须放行拖选文本（selection.type === "Range" 不收起）`,
+      ).toContain('selection.type === "Range"');
+    }
+  });
 });
