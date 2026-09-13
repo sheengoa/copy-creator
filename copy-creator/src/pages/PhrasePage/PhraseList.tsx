@@ -121,12 +121,28 @@ function PhraseCard({
     setTextExpanded((expanded) => !expanded);
   };
 
+  // 展开态点击卡片任何位置 = 收起，不落回粘贴（与剪切板卡片同语义）；
+  // 拖选文本结束的 click（selection 为 Range）不收起，避免打断手动复制。
+  const handleCardClick = (e: React.MouseEvent) => {
+    if (selectionMode) {
+      onToggleSelected(phrase.id);
+      return;
+    }
+    if (!isTextExpanded) {
+      onPaste(phrase);
+      return;
+    }
+    const selection = window.getSelection();
+    if (selection && selection.type === "Range") return;
+    handleToggleText(e);
+  };
+
   return (
     <div
       ref={setNodeRef}
       style={style}
       className={`notification phrase-card${isDragging ? " is-dragging" : ""}${selectionMode ? " is-selection-mode" : ""}${selected ? " is-selected" : ""}`}
-      onClick={selectionMode ? () => onToggleSelected(phrase.id) : () => onPaste(phrase)}
+      onClick={handleCardClick}
       onContextMenu={(e) => {
         e.preventDefault();
         e.stopPropagation();

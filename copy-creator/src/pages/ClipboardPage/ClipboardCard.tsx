@@ -177,6 +177,23 @@ function ClipboardCardInner({
     setExpanded((value) => !value);
   }, []);
 
+  // 展开态点击卡片任何位置 = 收起（不能落回根元素的粘贴：那会写入剪贴板
+  // 并按「最近使用」把卡片挪到顶部，表现为点击后卡片「跑到最上面」）。
+  // 拖选文本结束的 click（selection 为 Range）不收起，避免打断手动复制。
+  const handleCardClick = useCallback((e: React.MouseEvent) => {
+    if (selectionMode) {
+      onToggleSelected(view.id);
+      return;
+    }
+    if (!expanded) {
+      handlePaste();
+      return;
+    }
+    const selection = window.getSelection();
+    if (selection && selection.type === "Range") return;
+    handleToggleExpanded(e);
+  }, [selectionMode, onToggleSelected, view.id, expanded, handlePaste, handleToggleExpanded]);
+
   const handleToggleUserApiKey = useCallback(() => {
     setCtxMenu(null);
     onToggleUserApiKey(view);
@@ -213,7 +230,7 @@ function ClipboardCardInner({
     <div
       className={`notification clipboard-card type-${view.recordType}${isApiKey ? " has-api-key" : ""}${isUnlabeled ? " api-key-unlabeled" : ""}${hasLabel ? " api-key-labeled" : ""}${selectionMode ? " is-selection-mode" : ""}${selected ? " is-selected" : ""}`}
       style={{ "--color": meta.color, "--enter-delay": index } as React.CSSProperties}
-      onClick={selectionMode ? () => onToggleSelected(view.id) : handlePaste}
+      onClick={handleCardClick}
       onContextMenu={selectionMode ? (e) => { e.preventDefault(); e.stopPropagation(); } : handleContextMenu}
     >
       <div className="notibar" />
