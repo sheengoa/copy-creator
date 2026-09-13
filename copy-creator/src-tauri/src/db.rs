@@ -4414,7 +4414,7 @@ const RESOURCE_RENAME_MAX_LEN: usize = 120;
 
 /// 校验重命名输入并返回文件名主干（不含扩展名）。
 /// 扩展名始终沿用原文件：用户输入带不带原扩展名都可以，但不允许借改名更换扩展名。
-fn validate_resource_rename_stem(new_name: &str, old_path: &Path) -> Result<String, String> {
+pub(crate) fn validate_resource_rename_stem(new_name: &str, old_path: &Path) -> Result<String, String> {
     let trimmed = new_name.trim();
     if trimmed.is_empty() {
         return Err("文件名不能为空".to_string());
@@ -5965,6 +5965,10 @@ mod resource_command_tests {
                  use_count INTEGER DEFAULT 0,
                  touched_ms INTEGER DEFAULT 0
              );
+             CREATE TABLE api_key_labels (
+                 record_id TEXT PRIMARY KEY,
+                 label TEXT DEFAULT ''
+             );
              INSERT INTO settings (key, value) VALUES ('resource_library_path', '');",
         )
         .unwrap();
@@ -7259,6 +7263,53 @@ mod resource_command_tests {
     }
 
     #[test]
+    fn save_stash_record_custom_resource_name() {
+        // 新建窗口资源命名：填名称按名称落盘；重名报错；编辑保存同名
+        // 覆盖自身旧文件不误报冲突。
+        let (app, root) = test_app();
+        let group = root.join("分镜提词");
+        std::fs::create_dir_all(&group).unwrap();
+
+        let result = crate::clipboard::save_stash_record_inner(
+            app.handle(),
+            None,
+            "命名内容".to_string(),
+            Vec::new(),
+            Some("resource".to_string()),
+            Some("分镜提词".to_string()),
+            Some("我的提示词".to_string()),
+        )
+        .unwrap();
+        let path = Path::new(result["resource_path"].as_str().unwrap());
+        assert_eq!(path.file_name().unwrap().to_str().unwrap(), "我的提示词.txt");
+        assert!(path.is_file());
+
+        let conflict = crate::clipboard::save_stash_record_inner(
+            app.handle(),
+            None,
+            "另一段内容".to_string(),
+            Vec::new(),
+            Some("resource".to_string()),
+            Some("分镜提词".to_string()),
+            Some("我的提示词".to_string()),
+        );
+        assert!(conflict.is_err(), "同组同名资源应报冲突");
+
+        let record_id = result["id"].as_str().unwrap().to_string();
+        let updated = crate::clipboard::save_stash_record_inner(
+            app.handle(),
+            Some(record_id),
+            "改后的内容".to_string(),
+            Vec::new(),
+            Some("resource".to_string()),
+            Some("分镜提词".to_string()),
+            Some("我的提示词".to_string()),
+        )
+        .unwrap();
+        assert!(Path::new(updated["resource_path"].as_str().unwrap()).is_file());
+    }
+
+    #[test]
     fn save_stash_record_accepts_nested_group_path() {
         // 新建窗口分组选择器传完整分组路径；单级名校验会误拒子分组保存。
         let (app, root) = test_app();
@@ -7272,6 +7323,7 @@ mod resource_command_tests {
             Vec::new(),
             Some("resource".to_string()),
             Some("分镜提词/seedance".to_string()),
+            None,
         )
         .unwrap();
 
@@ -7317,6 +7369,7 @@ mod resource_command_tests {
             vec![data_url],
             Some("resource".to_string()),
             Some("a/b".to_string()),
+            None,
         )
         .unwrap();
 
@@ -7411,7 +7464,7 @@ mod resource_command_tests {
             let state = app.state::<DbState>();
             let conn = state.conn.lock().unwrap();
             conn.execute_batch(
-                "CREATE TABLE api_key_labels (
+                "CREATE TABLE IF NOT EXISTS api_key_labels (
                      record_id TEXT PRIMARY KEY, service TEXT NOT NULL,
                      api_base TEXT DEFAULT '', note TEXT DEFAULT '',
                      is_expired INTEGER DEFAULT 0, created_at TEXT NOT NULL
@@ -7705,7 +7758,7 @@ mod resource_command_tests {
             let state = app.state::<DbState>();
             let conn = state.conn.lock().unwrap();
             conn.execute_batch(
-                "CREATE TABLE api_key_labels (
+                "CREATE TABLE IF NOT EXISTS api_key_labels (
                      record_id TEXT PRIMARY KEY,
                      service TEXT NOT NULL,
                      api_base TEXT DEFAULT '',

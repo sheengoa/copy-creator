@@ -890,6 +890,39 @@
   outline: none;
 }
 
+/* 资源页签的名称行：可选自定义命名，留空走后端按内容自动命名 */
+.clipboard-create-resource-name {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 10px;
+  flex: 0 0 auto;
+}
+
+.clipboard-create-resource-name-label {
+  flex-shrink: 0;
+  color: var(--text-secondary);
+  font-size: var(--text-sm);
+}
+
+.clipboard-create-resource-name-input {
+  flex: 1;
+  min-width: 0;
+  height: 34px;
+  padding: 0 10px;
+  border: 1px solid var(--separator);
+  border-radius: 8px;
+  background: var(--input-bg);
+  color: var(--text-primary);
+  font-size: var(--text-sm);
+  outline: none;
+  transition: border-color 0.2s;
+}
+
+.clipboard-create-resource-name-input:focus {
+  border-color: var(--accent);
+}
+
 .clipboard-create-editor-wrap {
   flex: 1 1 auto;
   min-height: 130px;

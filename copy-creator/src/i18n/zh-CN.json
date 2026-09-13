@@ -102,6 +102,8 @@
     "existing": "已有资源",
     "selectExisting": "选择要编辑的资源内容",
     "noExisting": "当前没有可编辑的资源",
+    "nameLabel": "名称",
+    "namePlaceholder": "可选，默认按内容生成",
     "exitEdit": "退出资源编辑",
     "update": "更新资源",
     "confirmDelete": "确定要删除此资源吗？",

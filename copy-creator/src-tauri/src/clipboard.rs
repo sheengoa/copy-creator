@@ -1,8 +1,9 @@
 use base64::Engine;
 use rusqlite::OptionalExtension;
 use std::collections::HashSet;
+use std::ffi::OsStr;
 use std::io::Write;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use tauri::{AppHandle, Emitter, Manager, Runtime};
 use tauri_plugin_clipboard_manager::ClipboardExt;
 
@@ -292,6 +293,8 @@ fn write_resource_record<R: Runtime>(
     content: &str,
     images: &[String],
     group_name: &str,
+    custom_name: Option<&str>,
+    allow_overwrite_path: &str,
 ) -> Result<ResourceWriteResult, String> {
     let resource_root = crate::db::get_resource_library_dir(app);
     let resource_dir = crate::db::resource_group_path(app, group_name)?;
@@ -334,7 +337,7 @@ fn write_resource_record<R: Runtime>(
             "copy-creator-{record_id}-{transaction_id}-{}",
             sanitize_resource_file_stem(content)
         );
-        let resource_path = resource_dir.join(format!("{file_stem}.{extension}"));
+        let mut resource_path = resource_dir.join(format!("{file_stem}.{extension}"));
         let file_content = if images.is_empty() {
             format!("{content}\n")
         } else {
@@ -358,6 +361,31 @@ fn write_resource_record<R: Runtime>(
             return Err(format!("资源文件提交失败: {error}"));
         }
 
+        // 用户在新建窗口指定了名称：写完管理文件后立即按其命名（复用详情页
+        // 重命名的校验链）。编辑保存且目标名与记录旧文件同路径属正常覆盖
+        // （旧文件随后由保存流程的旧路径清理移除）；其余重名直接报错。
+        if let Some(custom_name) = custom_name.map(str::trim).filter(|name| !name.is_empty()) {
+            let stem = crate::db::validate_resource_rename_stem(custom_name, &resource_path)?;
+            let new_file_name = match resource_path.extension().and_then(OsStr::to_str) {
+                Some(extension) => format!("{stem}.{extension}"),
+                None => stem,
+            };
+            let custom_path = resource_dir.join(&new_file_name);
+            if custom_path != resource_path {
+                let overwrites_old = !allow_overwrite_path.is_empty()
+                    && resource_paths_equivalent(&custom_path, allow_overwrite_path);
+                if custom_path.exists() && !overwrites_old {
+                    return Err(format!("已存在同名文件：{new_file_name}"));
+                }
+                if custom_path.exists() {
+                    let _ = std::fs::remove_file(&custom_path);
+                }
+                std::fs::rename(&resource_path, &custom_path)
+                    .map_err(|e| format!("资源命名失败: {e}"))?;
+                resource_path = custom_path;
+            }
+        }
+
         Ok(ResourceWriteResult {
             resource_path: resource_path.to_string_lossy().to_string(),
             attachment_paths: attachment_paths.clone(),
@@ -368,6 +396,22 @@ fn write_resource_record<R: Runtime>(
         crate::db::remove_resource_record_attachments(app, record_id, &attachment_paths);
     }
     result
+}
+
+/// 资源路径等价比较：分隔符归一；Windows 文件系统不区分大小写。
+#[cfg(windows)]
+fn normalize_resource_path_text(value: &str) -> String {
+    value.replace('\\', "/").to_lowercase()
+}
+
+#[cfg(not(windows))]
+fn normalize_resource_path_text(value: &str) -> String {
+    value.replace('\\', "/")
+}
+
+fn resource_paths_equivalent(left: &Path, right: &str) -> bool {
+    normalize_resource_path_text(&left.to_string_lossy())
+        == normalize_resource_path_text(right)
 }
 
 fn validate_stash_content(content: &str, image_count: usize) -> Result<(), String> {
@@ -418,6 +462,7 @@ pub fn save_stash_record(
     images: Vec<String>,
     storage_mode: Option<String>,
     group_name: Option<String>,
+    resource_name: Option<String>,
 ) -> Result<serde_json::Value, String> {
     save_stash_record_inner(
         &app,
@@ -426,6 +471,7 @@ pub fn save_stash_record(
         images,
         storage_mode,
         group_name,
+        resource_name,
     )
 }
 
@@ -436,6 +482,7 @@ pub(crate) fn save_stash_record_inner<R: Runtime>(
     images: Vec<String>,
     storage_mode: Option<String>,
     group_name: Option<String>,
+    resource_name: Option<String>,
 ) -> Result<serde_json::Value, String> {
     let content = content.trim().to_string();
     if content.is_empty() {
@@ -520,8 +567,19 @@ pub(crate) fn save_stash_record_inner<R: Runtime>(
     };
     let (new_paths, created_stash_paths, new_resource_path, new_resource_paths) =
         if target_storage_mode == crate::db::RESOURCE_STORAGE_MODE {
-            let result =
-                write_resource_record(app, &record_id, &content, &images, &target_group_name)?;
+            let custom_name = resource_name
+                .as_deref()
+                .map(str::trim)
+                .filter(|name| !name.is_empty());
+            let result = write_resource_record(
+                app,
+                &record_id,
+                &content,
+                &images,
+                &target_group_name,
+                custom_name,
+                &old_resource_path,
+            )?;
             (
                 result.attachment_paths.clone(),
                 Vec::new(),

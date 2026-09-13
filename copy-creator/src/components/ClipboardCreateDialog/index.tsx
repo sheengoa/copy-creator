@@ -1,6 +1,7 @@
 import { Fragment, useEffect, useState, useCallback, useMemo, useRef } from "react";
 import { useTranslation } from "react-i18next";
 import { invoke } from "@tauri-apps/api/core";
+import { getResourceFileName } from "../../domain/fileName";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { resolveDoubleEnterSave } from "../../utils/doubleEnterShortcut";
@@ -36,6 +37,8 @@ export default function ClipboardCreateDialog() {
   const [stashRecords, setStashRecords] = useState<StashRecord[]>([]);
   const [storageMode, setStorageMode] = useState<ClipboardStorageMode>("database");
   const [resourceGroupName, setResourceGroupName] = useState("");
+  // 资源自定义名称（可选）：留空走后端自动命名，填写则按此命名保存。
+  const [resourceName, setResourceName] = useState("");
   const [resourceGroups, setResourceGroups] = useState<ResourceFolder[]>([]);
   const [groupMenuOpen, setGroupMenuOpen] = useState(false);
   // 分组下拉的子分组折叠状态：对话框存活期内记忆。
@@ -52,6 +55,7 @@ export default function ClipboardCreateDialog() {
   const resetDraft = useCallback((nextContent = "", nextImages: StashImage[] = []) => {
     setContent(nextContent);
     setImages(nextImages);
+    setResourceName("");
     setEditorVersion((version) => version + 1);
     lastEnterAtRef.current = 0;
   }, []);
@@ -209,7 +213,12 @@ export default function ClipboardCreateDialog() {
         content: trimmed,
         images: images.map((image) => image.sourcePath || image.dataUrl),
         storageMode,
-        ...(storageMode === "resource" ? { groupName: resourceGroupName } : {}),
+        ...(storageMode === "resource"
+          ? {
+              groupName: resourceGroupName,
+              resourceName: resourceName.trim() || undefined,
+            }
+          : {}),
       });
       resetDraft();
       setEditingId(null);
@@ -220,7 +229,7 @@ export default function ClipboardCreateDialog() {
     } finally {
       setSaving(false);
     }
-  }, [content, editingId, images, resourceGroupName, saving, storageMode, hideWindow, resetDraft, t]);
+  }, [content, editingId, images, resourceGroupName, resourceName, saving, storageMode, hideWindow, resetDraft, t]);
 
   const handleSelectRecord = useCallback(async (record: StashRecord) => {
     if (loadingRecordId) return;
@@ -246,6 +255,15 @@ export default function ClipboardCreateDialog() {
       setResourceGroupName(
         record.storage_mode === "resource"
           ? record.resource_folder || record.resource_group || ""
+          : "",
+      );
+      // 预填自定义名称（自动命名的文件带 copy-creator-{id} 前缀，不回填
+      // 技术名，留空保存即维持自动命名）。
+      setResourceName(
+        record.storage_mode === "resource"
+          && record.resource_path
+          && !record.resource_path.includes(`copy-creator-${record.id}`)
+          ? getResourceFileName(record.resource_path)
           : "",
       );
       resetDraft(fullContent, imageData);
@@ -353,6 +371,24 @@ export default function ClipboardCreateDialog() {
           </svg>
         </button>
       </div>
+      {isResource && (
+        <div className="clipboard-create-resource-name">
+          <label
+            className="clipboard-create-resource-name-label"
+            htmlFor="clipboard-create-resource-name-input"
+          >
+            {t("resources.nameLabel")}
+          </label>
+          <input
+            id="clipboard-create-resource-name-input"
+            className="clipboard-create-resource-name-input"
+            value={resourceName}
+            maxLength={100}
+            placeholder={t("resources.namePlaceholder")}
+            onChange={(event) => setResourceName(event.target.value)}
+          />
+        </div>
+      )}
       <div onFocus={() => { setDropdownOpen(false); setGroupMenuOpen(false); }} className="clipboard-create-editor-wrap">
         <StashEditor
           key={editorVersion}

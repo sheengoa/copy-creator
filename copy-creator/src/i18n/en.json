@@ -91,6 +91,8 @@
     "existing": "Existing Resources",
     "selectExisting": "Select resource content to edit",
     "noExisting": "No editable content yet",
+    "nameLabel": "Name",
+    "namePlaceholder": "Optional — named from content by default",
     "exitEdit": "Exit resource editing",
     "update": "Update Resource",
     "confirmDelete": "Delete this resource?",
