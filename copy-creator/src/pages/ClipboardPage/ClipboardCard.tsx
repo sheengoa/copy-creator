@@ -305,7 +305,12 @@ function ClipboardCardInner({
               <span className="clipboard-file-content"><HighlightText text={view.displayName} search={search} /></span>
               {expanded && view.expandPreview !== null && (
                 view.expandPreview === "video" || view.expandPreview === "audio" ? (
-                  <div className={`clipboard-media-slot is-${view.expandPreview}`}>
+                  <div
+                    className={`clipboard-media-slot is-${view.expandPreview}`}
+                    // 播放器带原生控件（播放/进度条）：点击不得冒泡到根元素的
+                    // 「展开态收起」，否则视频播到一半点暂停卡片直接合上。
+                    onClick={(e) => e.stopPropagation()}
+                  >
                     <ResourceMediaPlayer kind={view.expandPreview} path={view.content} />
                   </div>
                 ) : view.expandPreview === "image" ? (
