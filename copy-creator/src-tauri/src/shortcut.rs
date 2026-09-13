@@ -14,6 +14,46 @@ fn is_wayland() -> bool {
         .unwrap_or(false)
 }
 
+/// 径向窗口几何原子下发：X11 用单次 gdk_window_move_resize（一次
+/// XMoveResizeWindow 请求）同时改位置与尺寸。setSize→setPosition 对应
+/// tao 的两次独立 GTK 调用（resize + move_）→ 两次 X11 请求，中间态
+/// （左向扩展先加宽未左移、右缘探出屏幕）会被合成器画出来——左向扩展
+/// 闪烁的实测根源；历史两次修复（b0ce041/ebd8528）的原子化只覆盖
+/// Windows（SetWindowPos），Linux 从未处理。Wayland 无客户端定位语义，
+/// 维持两步。命令带请求/GDK 回读日志，首次运行即为坐标映射实证。
+#[tauri::command]
+pub fn set_radial_window_bounds(
+    window: tauri::WebviewWindow<tauri::Wry>,
+    x: i32,
+    y: i32,
+    width: i32,
+    height: i32,
+) -> Result<(), String> {
+    #[cfg(target_os = "linux")]
+    {
+        if !is_wayland() {
+            use gtk::prelude::*;
+            let gtk_window = window.gtk_window().map_err(|e| e.to_string())?;
+            let gdk_window = gtk_window
+                .window()
+                .ok_or_else(|| "GDK 窗口尚未就绪".to_string())?;
+            gdk_window.move_resize(x, y, width.max(1), height.max(1));
+            let (gdk_x, gdk_y) = gdk_window.position();
+            log::info!(
+                "radial bounds atomic: requested=({x},{y},{width}x{height}) gdk=({gdk_x},{gdk_y})"
+            );
+            return Ok(());
+        }
+    }
+    window
+        .set_size(tauri::PhysicalSize::new(width.max(1), height.max(1)))
+        .map_err(|e| e.to_string())?;
+    window
+        .set_position(tauri::PhysicalPosition::new(x, y))
+        .map_err(|e| e.to_string())?;
+    Ok(())
+}
+
 static RADIAL_MENU_ENABLED: AtomicBool = AtomicBool::new(true);
 
 static TOGGLING: AtomicBool = AtomicBool::new(false);

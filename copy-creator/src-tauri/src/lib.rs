@@ -372,6 +372,7 @@ pub fn run() {
             radial_drag::arm_radial_file_drag,
             radial_drag::cancel_radial_file_drag,
             radial_drag::start_radial_file_drag,
+            shortcut::set_radial_window_bounds,
             debug_log,
             db::get_image_base64,
             db::get_image_thumbnail,

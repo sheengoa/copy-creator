@@ -388,11 +388,25 @@ export default function RadialMenu() {
       const appWindow = getCurrentWindow();
       const uiScale = uiScaleRef.current;
       try {
-        await appWindow.setSize(new LogicalSize(
-          (RADIAL_MENU_WIDTH + 2 * RADIAL_SHADOW_MARGIN) * uiScale,
-          (RADIAL_MENU_HEIGHT + 2 * RADIAL_SHADOW_MARGIN) * uiScale,
-        ));
-        if (originalPosition) await appWindow.setPosition(originalPosition);
+        // 与扩展同理：位置与尺寸单次原子下发，避免收起时的两步闪烁。
+        const scaleFactor = await appWindow.scaleFactor();
+        if (originalPosition) {
+          await invoke("set_radial_window_bounds", {
+            x: originalPosition.x,
+            y: originalPosition.y,
+            width: Math.round(
+              (RADIAL_MENU_WIDTH + 2 * RADIAL_SHADOW_MARGIN) * uiScale * scaleFactor,
+            ),
+            height: Math.round(
+              (RADIAL_MENU_HEIGHT + 2 * RADIAL_SHADOW_MARGIN) * uiScale * scaleFactor,
+            ),
+          });
+        } else {
+          await appWindow.setSize(new LogicalSize(
+            (RADIAL_MENU_WIDTH + 2 * RADIAL_SHADOW_MARGIN) * uiScale,
+            (RADIAL_MENU_HEIGHT + 2 * RADIAL_SHADOW_MARGIN) * uiScale,
+          ));
+        }
       } catch {
         // 后端会在菜单下次打开时恢复紧凑尺寸。
       }
@@ -472,17 +486,20 @@ export default function RadialMenu() {
       previewRef.current = loadingState;
       setPreview(loadingState);
       await enqueueWindowOperation(async () => {
-        await appWindow.setSize(new LogicalSize(
-          (RADIAL_MENU_WIDTH + 2 * RADIAL_SHADOW_MARGIN + expansion.previewWidth) * uiScale,
-          (RADIAL_MENU_HEIGHT + 2 * RADIAL_SHADOW_MARGIN) * uiScale,
-        ));
-        if (expansion.direction === "left") {
-          // 展开计算给出的是内容原点，回写窗口位置时补回阴影边距。
-          await appWindow.setPosition(new PhysicalPosition(
-            expansion.windowX - marginPhysical,
-            position.y,
-          ));
-        }
+        // 位置与尺寸必须单次原子下发：setSize→setPosition 是两次独立 X11
+        // 请求，左向扩展的中间态（加宽未左移、右缘探出屏幕）会被合成器
+        // 画出来，就是扩展闪烁的根源。物理坐标 = 逻辑值 × scaleFactor。
+        await invoke("set_radial_window_bounds", {
+          x: expansion.direction === "left" ? expansion.windowX - marginPhysical : position.x,
+          y: position.y,
+          width: Math.round(
+            (RADIAL_MENU_WIDTH + 2 * RADIAL_SHADOW_MARGIN + expansion.previewWidth)
+              * uiScale * scaleFactor,
+          ),
+          height: Math.round(
+            (RADIAL_MENU_HEIGHT + 2 * RADIAL_SHADOW_MARGIN) * uiScale * scaleFactor,
+          ),
+        });
       });
       if (
         request !== previewRequestRef.current
@@ -507,11 +524,24 @@ export default function RadialMenu() {
       if (!deferRestore) {
         try {
           await enqueueWindowOperation(async () => {
-            await appWindow.setSize(new LogicalSize(
-              (RADIAL_MENU_WIDTH + 2 * RADIAL_SHADOW_MARGIN) * uiScaleRef.current,
-              (RADIAL_MENU_HEIGHT + 2 * RADIAL_SHADOW_MARGIN) * uiScaleRef.current,
-            ));
-            if (originalPosition) await appWindow.setPosition(originalPosition);
+            const scaleFactor = await appWindow.scaleFactor();
+            if (originalPosition) {
+              await invoke("set_radial_window_bounds", {
+                x: originalPosition.x,
+                y: originalPosition.y,
+                width: Math.round(
+                  (RADIAL_MENU_WIDTH + 2 * RADIAL_SHADOW_MARGIN) * uiScaleRef.current * scaleFactor,
+                ),
+                height: Math.round(
+                  (RADIAL_MENU_HEIGHT + 2 * RADIAL_SHADOW_MARGIN) * uiScaleRef.current * scaleFactor,
+                ),
+              });
+            } else {
+              await appWindow.setSize(new LogicalSize(
+                (RADIAL_MENU_WIDTH + 2 * RADIAL_SHADOW_MARGIN) * uiScaleRef.current,
+                (RADIAL_MENU_HEIGHT + 2 * RADIAL_SHADOW_MARGIN) * uiScaleRef.current,
+              ));
+            }
           });
         } catch {
           // 后端会在菜单下次打开时恢复紧凑尺寸。
