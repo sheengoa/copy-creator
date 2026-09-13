@@ -121,8 +121,9 @@ function PhraseCard({
     setTextExpanded((expanded) => !expanded);
   };
 
-  // 展开态点击卡片任何位置 = 收起，不落回粘贴（与剪切板卡片同语义）；
-  // 拖选文本结束的 click（selection 为 Range）不收起，避免打断手动复制。
+  // 展开态点击卡片任何位置 = 收起，不落回粘贴（与剪切板卡片同语义）。
+  // 收起豁免仅限「拖选了文本且点在文本上」；WebKit 点击图片不会清除残留
+  // 选区，只看 selection.type === "Range" 会把普通点击误拦。
   const handleCardClick = (e: React.MouseEvent) => {
     if (selectionMode) {
       onToggleSelected(phrase.id);
@@ -133,7 +134,13 @@ function PhraseCard({
       return;
     }
     const selection = window.getSelection();
-    if (selection && selection.type === "Range") return;
+    const hasTextSelection = Boolean(
+      selection && selection.type === "Range" && selection.toString().length > 0,
+    );
+    const clickedText = Boolean(
+      (e.target as HTMLElement | null)?.closest("span, pre"),
+    );
+    if (hasTextSelection && clickedText) return;
     handleToggleText(e);
   };
 
@@ -184,7 +191,6 @@ function PhraseCard({
                   path={phrase.content}
                   alt={t("resources.imagePreview")}
                   className="phrase-card-expanded-image"
-                  onClick={handleToggleText}
                 />
               )}
               {isTextExpanded && textFile && (

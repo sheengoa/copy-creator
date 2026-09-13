@@ -179,7 +179,9 @@ function ClipboardCardInner({
 
   // 展开态点击卡片任何位置 = 收起（不能落回根元素的粘贴：那会写入剪贴板
   // 并按「最近使用」把卡片挪到顶部，表现为点击后卡片「跑到最上面」）。
-  // 拖选文本结束的 click（selection 为 Range）不收起，避免打断手动复制。
+  // 收起豁免仅限「拖选了文本且点在文本上」：手动复制不被打断。
+  // 注意 WebKit 点击图片/空白不会清除残留选区，只看 selection.type === "Range"
+  // 会把普通点击也误拦（实测点击图片无法收起），必须同时要求点在文本上。
   const handleCardClick = useCallback((e: React.MouseEvent) => {
     if (selectionMode) {
       onToggleSelected(view.id);
@@ -190,7 +192,15 @@ function ClipboardCardInner({
       return;
     }
     const selection = window.getSelection();
-    if (selection && selection.type === "Range") return;
+    const hasTextSelection = Boolean(
+      selection && selection.type === "Range" && selection.toString().length > 0,
+    );
+    const clickedText = Boolean(
+      (e.target as HTMLElement | null)?.closest(
+        ".clipboard-card-expanded-text, .inline-text-file-preview, .clipboard-text-content, .clipboard-link-content",
+      ),
+    );
+    if (hasTextSelection && clickedText) return;
     handleToggleExpanded(e);
   }, [selectionMode, onToggleSelected, view.id, expanded, handlePaste, handleToggleExpanded]);
 
@@ -275,7 +285,6 @@ function ClipboardCardInner({
                 path={view.content}
                 alt={t("radialMenu.previewImage")}
                 className="clipboard-card-expanded-image"
-                onClick={handleToggleExpanded}
               />
             ) : (
               /* 图片列表态统一全宽横幅；点击卡片即粘贴（卡片根 onClick）。 */
@@ -296,10 +305,7 @@ function ClipboardCardInner({
               <span className="clipboard-file-content"><HighlightText text={view.displayName} search={search} /></span>
               {expanded && view.expandPreview !== null && (
                 view.expandPreview === "video" || view.expandPreview === "audio" ? (
-                  <div
-                    className={`clipboard-media-slot is-${view.expandPreview}`}
-                    onClick={handleToggleExpanded}
-                  >
+                  <div className={`clipboard-media-slot is-${view.expandPreview}`}>
                     <ResourceMediaPlayer kind={view.expandPreview} path={view.content} />
                   </div>
                 ) : view.expandPreview === "image" ? (
@@ -307,7 +313,6 @@ function ClipboardCardInner({
                     path={view.content}
                     alt={t("radialMenu.previewImage")}
                     className="clipboard-card-expanded-image"
-                    onClick={handleToggleExpanded}
                   />
                 ) : (
                   <InlineTextFilePreview recordId={view.id} search={search} />
