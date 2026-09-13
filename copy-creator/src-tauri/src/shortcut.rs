@@ -62,6 +62,9 @@ fn apply_radial_input_shape(window: &tauri::WebviewWindow<tauri::Wry>, expanded:
     }
     #[cfg(not(target_os = "linux"))]
     {
+        // 非 Linux 暂无输入区域等价实现：收起态条带会接收输入（点击落在
+        // 条带上有窗自身的悬浮窗特性，不穿透下层应用）。展开/收起依然
+        // 不改窗口几何，闪烁修复不受影响。
         let _ = (window, expanded);
     }
 }
