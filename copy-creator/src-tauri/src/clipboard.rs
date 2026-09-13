@@ -364,26 +364,38 @@ fn write_resource_record<R: Runtime>(
         // 用户在新建窗口指定了名称：写完管理文件后立即按其命名（复用详情页
         // 重命名的校验链）。编辑保存且目标名与记录旧文件同路径属正常覆盖
         // （旧文件随后由保存流程的旧路径清理移除）；其余重名直接报错。
+        // 命名失败必须回滚已写入的管理文件——外层清理只删图片附件，
+        // 管理文件残留会被资源发现收录成幽灵条目。
         if let Some(custom_name) = custom_name.map(str::trim).filter(|name| !name.is_empty()) {
-            let stem = crate::db::validate_resource_rename_stem(custom_name, &resource_path)?;
-            let new_file_name = match resource_path.extension().and_then(OsStr::to_str) {
-                Some(extension) => format!("{stem}.{extension}"),
-                None => stem,
+            let naming = (|| -> Result<PathBuf, String> {
+                let stem = crate::db::validate_resource_rename_stem(custom_name, &resource_path)?;
+                let new_file_name = match resource_path.extension().and_then(OsStr::to_str) {
+                    Some(extension) => format!("{stem}.{extension}"),
+                    None => stem,
+                };
+                let custom_path = resource_dir.join(&new_file_name);
+                if custom_path != resource_path {
+                    let overwrites_old = !allow_overwrite_path.is_empty()
+                        && resource_paths_equivalent(&custom_path, allow_overwrite_path);
+                    if custom_path.exists() && !overwrites_old {
+                        return Err(format!("已存在同名文件：{new_file_name}"));
+                    }
+                    if custom_path.exists() {
+                        let _ = std::fs::remove_file(&custom_path);
+                    }
+                    std::fs::rename(&resource_path, &custom_path)
+                        .map_err(|e| format!("资源命名失败: {e}"))?;
+                    return Ok(custom_path);
+                }
+                Ok(resource_path.clone())
+            })();
+            resource_path = match naming {
+                Ok(path) => path,
+                Err(error) => {
+                    let _ = std::fs::remove_file(&resource_path);
+                    return Err(error);
+                }
             };
-            let custom_path = resource_dir.join(&new_file_name);
-            if custom_path != resource_path {
-                let overwrites_old = !allow_overwrite_path.is_empty()
-                    && resource_paths_equivalent(&custom_path, allow_overwrite_path);
-                if custom_path.exists() && !overwrites_old {
-                    return Err(format!("已存在同名文件：{new_file_name}"));
-                }
-                if custom_path.exists() {
-                    let _ = std::fs::remove_file(&custom_path);
-                }
-                std::fs::rename(&resource_path, &custom_path)
-                    .map_err(|e| format!("资源命名失败: {e}"))?;
-                resource_path = custom_path;
-            }
         }
 
         Ok(ResourceWriteResult {

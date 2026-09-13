@@ -7294,6 +7294,19 @@ mod resource_command_tests {
             Some("我的提示词".to_string()),
         );
         assert!(conflict.is_err(), "同组同名资源应报冲突");
+        // 命名失败必须回滚已写入的管理文件：残留会被资源发现收录成幽灵条目。
+        let orphans: Vec<String> = std::fs::read_dir(&group)
+            .unwrap()
+            .flatten()
+            .map(|entry| entry.file_name().to_string_lossy().to_string())
+            .filter(|name| name.starts_with("copy-creator-") || name.starts_with('.'))
+            .collect();
+        assert!(orphans.is_empty(), "命名失败不应残留管理/临时文件: {orphans:?}");
+        assert_eq!(
+            std::fs::read_dir(&group).unwrap().flatten().count(),
+            1,
+            "分组内应只剩首次保存的命名文件"
+        );
 
         let record_id = result["id"].as_str().unwrap().to_string();
         let updated = crate::clipboard::save_stash_record_inner(
