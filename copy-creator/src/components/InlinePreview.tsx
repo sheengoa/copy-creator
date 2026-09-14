@@ -9,12 +9,15 @@ interface InlineImagePreviewProps {
   path: string;
   alt: string;
   className?: string;
+  /** 文件版本（修改毫秒）：URL 随覆盖保存变化，绕开 WebView 旧缓存。 */
+  version?: string;
 }
 
 export function InlineImagePreview({
   path,
   alt,
   className = "",
+  version,
 }: InlineImagePreviewProps) {
   const { t } = useTranslation();
   const [src, setSrc] = useState("");
@@ -24,7 +27,7 @@ export function InlineImagePreview({
     let cancelled = false;
     setSrc("");
     setFailed(false);
-    resolveResourceAssetUrl(path)
+    resolveResourceAssetUrl(path, version)
       .then((url) => {
         if (!cancelled) setSrc(url);
       })
@@ -34,7 +37,7 @@ export function InlineImagePreview({
     return () => {
       cancelled = true;
     };
-  }, [path]);
+  }, [path, version]);
 
   if (failed) {
     return (

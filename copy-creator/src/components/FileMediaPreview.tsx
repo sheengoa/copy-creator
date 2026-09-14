@@ -16,9 +16,12 @@ import { ResourceImage } from "../pages/ResourcePage/ResourceMedia";
  */
 export function FileMediaVisual({
   path,
+  version,
   className = "",
 }: {
   path: string;
+  /** 文件版本（修改毫秒）：文件被覆盖保存后 URL 变化，WebView 不再命中旧缓存。 */
+  version?: string;
   className?: string;
 }) {
   const { t } = useTranslation();
@@ -27,7 +30,7 @@ export function FileMediaVisual({
   if (kind === "video") {
     return (
       <div className={`clipboard-file-media is-video${className ? ` ${className}` : ""}`}>
-        <VideoPosterFrame path={path} fallbackLabel={t("resources.typeVideo")} />
+        <VideoPosterFrame path={path} version={version} fallbackLabel={t("resources.typeVideo")} />
         <span className="clipboard-file-media-play" aria-hidden="true">{Icons.play}</span>
       </div>
     );
@@ -40,6 +43,7 @@ export function FileMediaVisual({
           path={path}
           alt={t("resources.typeImage")}
           className="clipboard-file-media-image"
+          version={version}
         />
       </div>
     );
@@ -64,9 +68,11 @@ export function FileMediaVisual({
  */
 function VideoPosterFrame({
   path,
+  version,
   fallbackLabel,
 }: {
   path: string;
+  version?: string;
   fallbackLabel: string;
 }) {
   const containerRef = useRef<HTMLDivElement | null>(null);
@@ -102,7 +108,7 @@ function VideoPosterFrame({
     setFailed(false);
     setHasFrame(false);
     posterSaveAttemptedRef.current = false;
-    resolveResourceMediaUrl(path)
+    resolveResourceMediaUrl(path, version)
       .then((url) => {
         if (!cancelled) setSrc(url);
       })
@@ -117,7 +123,7 @@ function VideoPosterFrame({
     return () => {
       cancelled = true;
     };
-  }, [path]);
+  }, [path, version]);
 
   // 寻到代表性帧后画到低分辨率画布上：放大 + 模糊作为铺底虚影，
   // 前景视频完整展示，替代纯色留白。仅绘制不读回像素，无跨源限制。

@@ -15,6 +15,7 @@ import {
   recordExpandPreview,
   recordFileMediaKind,
   recordPasteStrategy,
+  resourceMediaVersion,
   type ExpandPreviewKind,
   type PasteStrategy,
 } from "./records";
@@ -44,6 +45,7 @@ export interface RecordView {
   pasteStrategy: PasteStrategy; // 粘贴路由描述（执行仍在 clipboardStore.pasteRecord）
   dragPath: string | null; // 拖出路径
   resourcePath: string | null; // 预览/播放用的本地路径
+  mediaVersion: string | null; // 资源文件版本（修改毫秒）：媒体 URL/缓存键随覆盖保存失效
   displayName: string; // 条目显示文本（三窗口统一规则）
   displayTruncated: boolean; // displayName 是否被渲染参数截断（区别于 contentTruncated）
   title: string; // 标题（资源标题或文件名）
@@ -97,6 +99,7 @@ export function buildRecordView(
     pasteStrategy: recordPasteStrategy(record),
     dragPath: record.drag_path ?? null,
     resourcePath: getResourcePath(record),
+    mediaVersion: resourceMediaVersion(record) ?? null,
     displayName,
     displayTruncated,
     title: getResourceTitle(record),

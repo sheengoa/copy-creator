@@ -16,7 +16,7 @@ import { getResourceFileName, isResourceTitleRenameable, splitResourceFileName }
 import { formatResourceFolderPath } from "../../domain/groups";
 import { inferResourceMediaKind } from "../../domain/mediaKind";
 import { resolveResourceMediaUrl } from "../../domain/mediaUrl";
-import { getResourcePath, getResourceTitle } from "../../domain/records";
+import { getResourcePath, getResourceTitle, resourceMediaVersion } from "../../domain/records";
 import {
   ResourceImageOriginal,
   ResourceMediaPlayer,
@@ -47,6 +47,7 @@ export default function ResourceDetailPage({
   const updateResourceNote = useResourceStore((state) => state.updateResourceNote);
   const kind = inferResourceMediaKind(record);
   const resourcePath = getResourcePath(record);
+  const mediaVersion = resourceMediaVersion(record);
   const [segments, setSegments] = useState<RadialPreviewSegment[] | null>(null);
   const [textContent, setTextContent] = useState<string | null>(null);
   const [error, setError] = useState(false);
@@ -178,7 +179,7 @@ export default function ResourceDetailPage({
     setMediaSource(null);
     if (kind === "video" || kind === "audio" || kind === "file" || kind === "image") {
       if (kind === "video" || kind === "audio") {
-        resolveResourceMediaUrl(resourcePath)
+        resolveResourceMediaUrl(resourcePath, mediaVersion)
           .then((url) => {
             if (!cancelled) setMediaSource(url);
           })
@@ -220,7 +221,7 @@ export default function ResourceDetailPage({
     return () => {
       cancelled = true;
     };
-  }, [externalTextPath, kind, record, resourcePath]);
+  }, [externalTextPath, kind, mediaVersion, record, resourcePath]);
 
   const title = getResourceTitle(record, kind);
 
@@ -471,6 +472,7 @@ export default function ResourceDetailPage({
                 path={resourcePath}
                 resolvedSrc={mediaSource ?? undefined}
                 onMediaMetadata={setMediaMeta}
+                version={mediaVersion}
               />
             ) : kind === "image" ? (
               <>
@@ -480,6 +482,7 @@ export default function ResourceDetailPage({
                   className="resource-segment-image"
                   onMetadata={({ width, height }) => setMediaMeta({ width, height })}
                   onZoom={(src) => setLightboxSrc(src)}
+                  version={mediaVersion}
                 />
                 {lightboxSrc && (
                   <ImageLightbox

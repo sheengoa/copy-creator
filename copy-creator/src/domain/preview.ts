@@ -13,9 +13,9 @@ export type RadialPreviewDirection = "left" | "right";
 
 export type RadialPreviewSegment =
   | { type: "text"; content: string }
-  | { type: "image"; path: string }
-  | { type: "video"; path: string }
-  | { type: "audio"; path: string };
+  | { type: "image"; path: string; version?: string }
+  | { type: "video"; path: string; version?: string }
+  | { type: "audio"; path: string; version?: string };
 
 export const STASH_IMAGE_PLACEHOLDER = "\uFFFC";
 

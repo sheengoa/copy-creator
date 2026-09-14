@@ -36,6 +36,18 @@ export function getResourcePath(
   return record.type === "file" ? record.resource_path || record.content : record.content;
 }
 
+/** 资源文件的媒体版本（文件修改毫秒，后端查询时 stat）：媒体 URL 与
+ *  进程内缓存键的组成部分。文件被覆盖保存后版本变化，WebView 图片缓存、
+ *  进程内缩略图缓存等以新键重新取数，旧图不再残留；无版本的记录
+ *  （应用内剪切板媒体、无 stat 信息）返回 undefined，URL 保持原样。 */
+export function resourceMediaVersion(
+  record: Pick<ClipboardRecord, "resource_modified">,
+): string | undefined {
+  return record.resource_modified && record.resource_modified > 0
+    ? String(record.resource_modified)
+    : undefined;
+}
+
 export function getResourceTitle(
   record: (Pick<ClipboardRecord, "type" | "content" | "resource_kind" | "resource_path"> & { id?: string }),
   kind = inferResourceMediaKind(record),

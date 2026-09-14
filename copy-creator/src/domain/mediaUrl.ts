@@ -64,16 +64,29 @@ export async function resolveAbsoluteResourcePath(path: string): Promise<string>
   return `${storagePath}/${normalized.replace(/^[\\/]+/, "")}`;
 }
 
-export async function resolveResourceAssetUrl(path: string): Promise<string> {
+/** 本地媒体 URL 的缓存版本参数：asset 协议与媒体服务地址只由路径决定，
+ *  文件被覆盖保存后 URL 不变，WebView 会命中旧缓存显示陈旧内容；追加
+ *  v 查询参数（两侧处理器均忽略未知参数）使 URL 随内容版本变化，强制
+ *  重新取数。远程/数据地址内容不受本地覆盖影响，原样返回。 */
+function appendMediaVersion(url: string, version?: string): string {
+  if (!version) return url;
+  if (!/^(?:https?:|asset:)/i.test(url)) return url;
+  return `${url}${url.includes("?") ? "&" : "?"}v=${encodeURIComponent(version)}`;
+}
+
+export async function resolveResourceAssetUrl(path: string, version?: string): Promise<string> {
   const absolute = await resolveAbsoluteResourcePath(path);
-  return convertFileSrc(absolute);
+  return appendMediaVersion(convertFileSrc(absolute), version);
 }
 
 // WebKitGTK 的 <video>/<audio> 无法播放 asset:// 协议地址（媒体协议白名单
 // 与 GStreamer 均不支持自定义协议），媒体预览需改走后端回环 HTTP 服务。
-export async function resolveResourceMediaUrl(path: string): Promise<string> {
+export async function resolveResourceMediaUrl(path: string, version?: string): Promise<string> {
   const absolute = await resolveAbsoluteResourcePath(path);
   if (!isAbsoluteLocalPath(absolute)) return absolute;
   const { origin, token } = await getMediaServer();
-  return `${origin}/media?token=${encodeURIComponent(token)}&path=${encodeURIComponent(absolute)}`;
+  return appendMediaVersion(
+    `${origin}/media?token=${encodeURIComponent(token)}&path=${encodeURIComponent(absolute)}`,
+    version,
+  );
 }

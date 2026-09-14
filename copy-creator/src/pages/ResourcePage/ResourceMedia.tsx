@@ -14,7 +14,8 @@ import { resolveResourceAssetUrl, resolveResourceMediaUrl } from "../../domain/m
 function useResourceAssetUrl(
   path: string,
   resolvedSrc?: string,
-  resolve: (path: string) => Promise<string> = resolveResourceAssetUrl,
+  resolve: (path: string, version?: string) => Promise<string> = resolveResourceAssetUrl,
+  version?: string,
 ) {
   const [src, setSrc] = useState(resolvedSrc ?? "");
   const [failed, setFailed] = useState(false);
@@ -28,7 +29,7 @@ function useResourceAssetUrl(
         cancelled = true;
       };
     }
-    resolve(path)
+    resolve(path, version)
       .then((url) => {
         if (!cancelled) setSrc(url);
       })
@@ -38,7 +39,7 @@ function useResourceAssetUrl(
     return () => {
       cancelled = true;
     };
-  }, [path, resolvedSrc, resolve]);
+  }, [path, resolvedSrc, resolve, version]);
 
   return { src, failed };
 }
@@ -58,13 +59,18 @@ export interface ResourceMediaMetadata {
 const fileThumbCache = new Map<string, string>();
 const MAX_FILE_THUMBS = 240;
 
-function rememberFileThumb(path: string, dataUrl: string) {
-  fileThumbCache.delete(path);
-  fileThumbCache.set(path, dataUrl);
+function rememberFileThumb(key: string, dataUrl: string) {
+  fileThumbCache.delete(key);
+  fileThumbCache.set(key, dataUrl);
   if (fileThumbCache.size > MAX_FILE_THUMBS) {
     const oldest = fileThumbCache.keys().next().value;
     if (oldest !== undefined) fileThumbCache.delete(oldest);
   }
+}
+
+/** 进程内缩略图缓存键：路径 + 文件版本，覆盖保存后自然失效取新。 */
+function fileThumbCacheKey(path: string, version?: string) {
+  return version ? `${path}\u0000${version}` : path;
 }
 
 /**
@@ -76,12 +82,16 @@ export function ResourceFileImage({
   path,
   alt,
   className = "",
+  version,
 }: {
   path: string;
   alt: string;
   className?: string;
+  /** 文件版本（修改毫秒）：失效进程内缓存与后端缩放缓存。 */
+  version?: string;
 }) {
-  const cached = fileThumbCache.get(path);
+  const cacheKey = fileThumbCacheKey(path, version);
+  const cached = fileThumbCache.get(cacheKey);
   const [src, setSrc] = useState(cached ?? "");
   const [failed, setFailed] = useState(false);
   // 真懒加载：进入视口（含 300px 预载边）才请求后端解码缩略图。
@@ -90,7 +100,7 @@ export function ResourceFileImage({
   const [viewportRef, inView] = useInViewOnce<HTMLDivElement>();
 
   useEffect(() => {
-    const cachedUrl = fileThumbCache.get(path);
+    const cachedUrl = fileThumbCache.get(cacheKey);
     if (cachedUrl) {
       setSrc(cachedUrl);
       setFailed(false);
@@ -104,7 +114,7 @@ export function ResourceFileImage({
       .then((base64) => {
         if (cancelled) return;
         const dataUrl = `data:image/png;base64,${base64}`;
-        rememberFileThumb(path, dataUrl);
+        rememberFileThumb(cacheKey, dataUrl);
         setSrc(dataUrl);
       })
       .catch(() => {
@@ -113,10 +123,10 @@ export function ResourceFileImage({
     return () => {
       cancelled = true;
     };
-  }, [path, inView]);
+  }, [cacheKey, inView, path]);
 
   if (failed) {
-    return <ResourceImage path={path} alt={alt} className={className} />;
+    return <ResourceImage path={path} alt={alt} className={className} version={version} />;
   }
   if (!src) {
     return (
@@ -146,14 +156,17 @@ export function ResourceImage({
   alt,
   className = "",
   onMetadata,
+  version,
 }: {
   path: string;
   alt: string;
   className?: string;
   onMetadata?: (meta: ResourceImageMetadata) => void;
+  /** 文件版本（修改毫秒）：URL 随覆盖保存变化，绕开 WebView 旧缓存。 */
+  version?: string;
 }) {
   const { t } = useTranslation();
-  const { src, failed } = useResourceAssetUrl(path);
+  const { src, failed } = useResourceAssetUrl(path, undefined, resolveResourceAssetUrl, version);
   const [imageFailed, setImageFailed] = useState(false);
   const reportedSizeRef = useRef("");
 
@@ -204,14 +217,16 @@ export function ResourceImageOriginal({
   className = "",
   onMetadata,
   onZoom,
+  version,
 }: {
   path: string;
   alt: string;
   className?: string;
   onMetadata?: (meta: ResourceImageMetadata) => void;
   onZoom?: (src: string) => void;
+  version?: string;
 }) {
-  const { src, failed } = useResourceAssetUrl(path);
+  const { src, failed } = useResourceAssetUrl(path, undefined, resolveResourceAssetUrl, version);
   const [imageFailed, setImageFailed] = useState(false);
   const reportedSizeRef = useRef("");
 
@@ -273,10 +288,11 @@ export function ResourceSegments({
           </pre>
         ) : (
           <ResourceImage
-            key={`image-${index}-${segment.path}`}
+            key={`image-${index}-${segment.path}-${segment.version ?? ""}`}
             path={segment.path}
             alt={t("resources.imagePreview")}
             className="resource-segment-image"
+            version={segment.version}
           />
         ),
       )}
@@ -292,14 +308,16 @@ export function ResourceSegments({
 export function ResourceVideoPoster({
   path,
   fallbackLabel,
+  version,
 }: {
   path: string;
   fallbackLabel: string;
+  version?: string;
 }) {
   const containerRef = useRef<HTMLDivElement | null>(null);
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const [inView, setInView] = useState(false);
-  const { src, failed } = useResourceAssetUrl(path, undefined, resolveResourceMediaUrl);
+  const { src, failed } = useResourceAssetUrl(path, undefined, resolveResourceMediaUrl, version);
   const [videoFailed, setVideoFailed] = useState(false);
   const [hasFrame, setHasFrame] = useState(false);
   // 已持久化的海报：命中后列表只渲染这张图，不再挂 <video> 加载元数据
@@ -427,15 +445,17 @@ export function ResourceMediaPlayer({
   compact = false,
   resolvedSrc,
   onMediaMetadata,
+  version,
 }: {
   kind: "video" | "audio";
   path: string;
   compact?: boolean;
   resolvedSrc?: string;
   onMediaMetadata?: (meta: ResourceMediaMetadata) => void;
+  version?: string;
 }) {
   const { t } = useTranslation();
-  const { src, failed } = useResourceAssetUrl(path, resolvedSrc, resolveResourceMediaUrl);
+  const { src, failed } = useResourceAssetUrl(path, resolvedSrc, resolveResourceMediaUrl, version);
   const mediaRef = useRef<HTMLVideoElement | HTMLAudioElement | null>(null);
   const [autoplayBlocked, setAutoplayBlocked] = useState(false);
   const [mediaFailed, setMediaFailed] = useState(false);

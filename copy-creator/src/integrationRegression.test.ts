@@ -432,7 +432,9 @@ describe("integration regressions", () => {
     expect(mediaSource).toContain("onMediaMetadata");
     expect(mediaSource).toContain("onMetadata");
     expect(mediaSource).toContain("resolveResourceMediaUrl");
-    expect(detailPageSource).toContain("resolveResourceMediaUrl(resourcePath)");
+    // 媒体 URL 必须携带文件版本（mediaVersion）：地址只由路径决定时，
+    // 覆盖保存的文件会命中 WebView 旧缓存，预览停留在旧图。
+    expect(detailPageSource).toContain("resolveResourceMediaUrl(resourcePath, mediaVersion)");
     expect(detailPageSource).toContain("set_resource_note");
     expect(detailPageSource).toContain("resource-note-input");
     expect(detailPageSource).toContain("metaResolution");
@@ -484,7 +486,10 @@ describe("integration regressions", () => {
     expect(mediaSource).toContain('getResourceFileThumbnail(path, 256)');
     expect(mediaSource).toContain('loading="lazy"');
     expect(mediaSource).toContain('decoding="async"');
-    expect(mediaSource).toContain("return <ResourceImage path={path} alt={alt} className={className} />;");
+    // 回退原图必须携带版本：URL 随覆盖保存变化，WebView 不再命中旧缓存。
+    expect(mediaSource).toContain(
+      "return <ResourceImage path={path} alt={alt} className={className} version={version} />;",
+    );
     expect(libSource).toContain("db::get_resource_file_thumbnail");
     // 缩略图解码必须在线程池执行（async 命令 + spawn_blocking），
     // 同步命令在主线程解码大图会冻结 UI。

@@ -30,6 +30,9 @@ export interface ClipboardRecord {
   resource_relative_path?: string;
   resource_folder?: string | null;
   resource_file_size?: number;
+  /** 资源文件修改毫秒（查询时 stat）：媒体 URL 与进程内缓存的版本键，
+   *  文件被覆盖保存后变化，使各缓存层失效取新。 */
+  resource_modified?: number;
   resource_managed?: boolean;
   resource_note?: string | null;
   /** 使用次数（粘贴/拖出成功自增），「最多使用」排序与次数徽标展示。 */

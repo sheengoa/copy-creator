@@ -13,7 +13,7 @@ interface ContentPreviewPanelProps {
   onClose?: () => void;
 }
 
-function PreviewImage({ path }: { path: string }) {
+function PreviewImage({ path, version }: { path: string; version?: string }) {
   const { t } = useTranslation();
   const [src, setSrc] = useState("");
   const [failed, setFailed] = useState(false);
@@ -22,7 +22,7 @@ function PreviewImage({ path }: { path: string }) {
     let cancelled = false;
     setSrc("");
     setFailed(false);
-    resolveResourceAssetUrl(path)
+    resolveResourceAssetUrl(path, version)
       .then((url) => {
         if (!cancelled) setSrc(url);
       })
@@ -30,7 +30,7 @@ function PreviewImage({ path }: { path: string }) {
         if (!cancelled) setFailed(true);
       });
     return () => { cancelled = true; };
-  }, [path]);
+  }, [path, version]);
 
   if (failed) {
     return (
@@ -95,12 +95,17 @@ export function ContentPreviewPanel({
               {segment.content}
             </div>
           ) : segment.type === "image" ? (
-            <PreviewImage path={segment.path} key={`image-${index}-${segment.path}`} />
+            <PreviewImage
+              path={segment.path}
+              version={segment.version}
+              key={`image-${index}-${segment.path}-${segment.version ?? ""}`}
+            />
           ) : (
             <ResourceMediaPlayer
               kind={segment.type}
               path={segment.path}
-              key={`media-${index}-${segment.path}`}
+              version={segment.version}
+              key={`media-${index}-${segment.path}-${segment.version ?? ""}`}
             />
           ))
         )}

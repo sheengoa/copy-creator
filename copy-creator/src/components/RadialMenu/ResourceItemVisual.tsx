@@ -13,6 +13,7 @@ export interface ResourceItemVisualProps {
     type: string;
     resourceKind?: ResourceMediaKind;
     resourcePath?: string;
+    resourceVersion?: string;
     resourceTitle?: string;
     resourceSummary?: string;
     createdAt?: string;
@@ -31,7 +32,13 @@ export function ResourceItemVisual({ item }: ResourceItemVisualProps) {
   }
 
   if (kind === "image" && item.resourcePath) {
-    return <FileMediaVisual path={item.resourcePath} className="radial-menu-file-media" />;
+    return (
+      <FileMediaVisual
+        path={item.resourcePath}
+        version={item.resourceVersion}
+        className="radial-menu-file-media"
+      />
+    );
   }
 
   if (kind === "text" && item.type === "file" && item.resourcePath) {
@@ -39,7 +46,7 @@ export function ResourceItemVisual({ item }: ResourceItemVisualProps) {
       <div className="radial-menu-resource-text-file">
         <InlineTextFilePreview
           resourcePath={item.resourcePath}
-          resourceVersion={item.createdAt}
+          resourceVersion={item.resourceVersion ?? item.createdAt}
         />
       </div>
     );
@@ -57,6 +64,7 @@ export function ResourceItemVisual({ item }: ResourceItemVisualProps) {
     return (
       <FileMediaVisual
         path={item.resourcePath}
+        version={item.resourceVersion}
         className="radial-menu-file-media"
       />
     );

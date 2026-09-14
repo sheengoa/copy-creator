@@ -46,6 +46,7 @@ import {
   isFileBackedTextResource,
   recordUsageTime,
   resourceGroupLeafLabel,
+  resourceMediaVersion,
 } from "../../domain/records";
 import { UsageCountBadge } from "../UsageCountBadge";
 import i18n from "../../i18n";
@@ -127,6 +128,8 @@ interface RadialItem {
   isResource?: boolean;
   resourceKind?: ResourceMediaKind;
   resourcePath?: string;
+  /** 资源文件版本（修改毫秒）：预览媒体 URL 携带它，覆盖保存后强制取新。 */
+  resourceVersion?: string;
   resourceTitle?: string;
   resourceSummary?: string;
   /** 「最近使用」条目的来源标签（剪切板 / 快捷输入·分组 / 资源·分组）。 */
@@ -461,9 +464,9 @@ export default function RadialMenu() {
         const kind = inferResourceMediaKind(record);
         const resourcePath = getResourcePath(record);
         if (kind === "image") {
-          segments = [{ type: "image", path: resourcePath }];
+          segments = [{ type: "image", path: resourcePath, version: item.resourceVersion }];
         } else if (kind === "video" || kind === "audio") {
-          segments = [{ type: kind, path: resourcePath }];
+          segments = [{ type: kind, path: resourcePath, version: item.resourceVersion }];
         } else if (
           record.type === "file"
           && TEXT_EXTENSIONS.has(getResourceExtension(resourcePath))
@@ -1397,6 +1400,7 @@ export default function RadialMenu() {
         isResource: true,
         resourceKind,
         resourcePath,
+        resourceVersion: resourceMediaVersion(r),
         resourceTitle,
         resourceSummary,
         useCount: r.use_count,

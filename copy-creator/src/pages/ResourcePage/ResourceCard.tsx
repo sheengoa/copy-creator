@@ -45,7 +45,11 @@ function ResourceCardVisual({
   if (kind === "video") {
     return (
       <div className={`resource-card-visual resource-card-${kind}`}>
-        <ResourceVideoPoster path={resourcePath} fallbackLabel={typeLabel(kind)} />
+        <ResourceVideoPoster
+          path={resourcePath}
+          version={view.mediaVersion ?? undefined}
+          fallbackLabel={typeLabel(kind)}
+        />
         <span className="resource-card-play">{Icons.play}</span>
       </div>
     );
@@ -66,6 +70,7 @@ function ResourceCardVisual({
         path={resourcePath}
         alt={view.title}
         className="resource-card-file-image"
+        version={view.mediaVersion ?? undefined}
       />
     );
   }
@@ -84,7 +89,7 @@ function ResourceCardVisual({
       <div className="resource-card-text-preview">
         <InlineTextFilePreview
           resourcePath={view.resourcePath}
-          resourceVersion={view.createdAt}
+          resourceVersion={view.mediaVersion ?? view.createdAt}
           search={search}
         />
       </div>

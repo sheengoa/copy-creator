@@ -1982,6 +1982,20 @@ fn resource_record_value(
                     "resource_file_size".to_string(),
                     serde_json::Value::Number(metadata.len().into()),
                 );
+                // 媒体版本（修改毫秒）：前端媒体 URL 与进程内缓存键携带它，
+                // 文件被覆盖保存后版本变化，各缓存层随之失效（与缩略图
+                // 缓存「路径+大小+修改时间」键同一口径）。复用本次 stat，
+                // 不增加查询路径的系统调用。
+                if let Ok(modified) = metadata.modified() {
+                    let millis = modified
+                        .duration_since(std::time::UNIX_EPOCH)
+                        .map(|duration| duration.as_millis() as u64)
+                        .unwrap_or(0);
+                    object.insert(
+                        "resource_modified".to_string(),
+                        serde_json::Value::Number(millis.into()),
+                    );
+                }
             }
         }
     }
