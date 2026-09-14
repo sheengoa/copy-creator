@@ -2009,11 +2009,29 @@ fn clipboard_order_clause(sort_by: Option<&str>) -> &'static str {
     }
 }
 
-struct ResourceRecordValue {
-    value: serde_json::Value,
+/// 资源列表查询的中间行：只承载过滤与排序所需的标量字段。完整 JSON 组装
+/// 与文件 stat 延迟到分页之后，仅对返回页（≤limit 行）执行——原先全量
+/// 构建 JSON + 逐行 stat，数万文件的库每次查询都是十万级系统调用。
+struct ResourceRow {
+    id: String,
+    record_type: String,
+    content: String,
+    source_app: String,
+    created_at: String,
+    user_api_key: i64,
+    group_name: String,
+    attachments: String,
+    storage_mode: String,
+    resource_path: String,
+    path: Option<PathBuf>,
+    relative_path: Option<String>,
+    folder: Option<String>,
     sort_order: f64,
+    resource_note: String,
     use_count: i64,
     touched_ms: i64,
+    last_used_at: String,
+    resource_external: i64,
 }
 
 fn resource_record_value(
@@ -2064,7 +2082,7 @@ fn resource_record_value(
                 // 媒体版本（修改毫秒）：前端媒体 URL 与进程内缓存键携带它，
                 // 文件被覆盖保存后版本变化，各缓存层随之失效（与缩略图
                 // 缓存「路径+大小+修改时间」键同一口径）。复用本次 stat，
-                // 不增加查询路径的系统调用。
+                // 不增加查询路径的系统调用。仅对返回页执行，实时性保留。
                 if let Ok(modified) = metadata.modified() {
                     let millis = modified
                         .duration_since(std::time::UNIX_EPOCH)
@@ -2114,6 +2132,12 @@ fn get_resource_records_inner<R: Runtime>(
                 let id = row.get::<_, String>(0)?;
                 let record_type = row.get::<_, String>(1)?;
                 let content = row.get::<_, String>(2)?;
+                let source_app = row.get::<_, String>(3)?;
+                let created_at = row.get::<_, String>(4)?;
+                let user_api_key = row.get::<_, i64>(5)?;
+                let group_name = row.get::<_, String>(6)?;
+                let attachments = row.get::<_, String>(7)?;
+                let storage_mode = row.get::<_, String>(8)?;
                 let resource_path = row.get::<_, String>(9)?;
                 let sort_order = row.get::<_, f64>(10)?;
                 let resource_note = row.get::<_, String>(11)?;
@@ -2121,109 +2145,86 @@ fn get_resource_records_inner<R: Runtime>(
                 let touched_ms = row.get::<_, i64>(13)?;
                 let last_used_at = row.get::<_, String>(14)?;
                 let resource_external = row.get::<_, i64>(15)?;
+
                 let path = if resource_path.is_empty() {
                     None
                 } else {
                     Some(PathBuf::from(&resource_path))
                 };
-                let media_kind = if record_type == "image" {
-                    "image"
-                } else if record_type == "file" {
-                    path.as_deref()
-                        .map(resource_media_kind_for_path)
-                        .unwrap_or("file")
-                } else {
-                    "text"
-                };
-                let mut value = clipboard_record_json(
+                let relative_path = path
+                    .as_ref()
+                    .and_then(|path| path.strip_prefix(&resource_root).ok())
+                    .map(|relative| relative.to_string_lossy().to_string());
+                let folder = path.as_ref().and_then(|path| {
+                    resource_folder_for_path(&resource_root, path.to_string_lossy().as_ref())
+                });
+                Ok(ResourceRow {
                     id,
                     record_type,
                     content,
-                    row.get::<_, String>(3)?,
-                    row.get::<_, String>(4)?,
-                    row.get::<_, i64>(5)?,
-                    row.get::<_, String>(6)?,
-                    row.get::<_, String>(7)?,
-                    row.get::<_, String>(8)?,
+                    source_app,
+                    created_at,
+                    user_api_key,
+                    group_name,
+                    attachments,
+                    storage_mode,
                     resource_path,
-                    use_count,
-                    last_used_at,
-                );
-                value["resource_note"] = serde_json::Value::String(resource_note);
-                // managed 语义：应用内保存的记录 true；对账/监听发现的外部
-                // 文件 false（文本详情保存直接写路径）。与查询内扫描时代的
-                // 区分一致，只是判定从「是否来自扫描」改为显式列。
-                let managed = resource_external == 0;
-                Ok((
-                    resource_record_value(value, &resource_root, path.as_deref(), media_kind, managed),
-                    sort_order,
                     path,
+                    relative_path,
+                    folder,
+                    sort_order,
+                    resource_note,
                     use_count,
                     touched_ms,
-                ))
+                    last_used_at,
+                    resource_external,
+                })
             })
             .map_err(|e| e.to_string())?;
-        let database_records = rows
-            .collect::<Result<Vec<_>, _>>()
-            .map_err(|e| e.to_string())?;
-        drop(stmt);
-
-        // 幽灵清退已移出查询路径：启动对账（sync_resource_library）与监听
-        // 删除事件（forget_resource_records）负责「文件不在，记录不留」。
-        // 原先这里每次查询逐行 stat + 全目录扫描，数万文件的库每切换一次
-        // 就是十万级系统调用，是资源区卡顿的根源。
-        database_records
+        rows.collect::<Result<Vec<_>, _>>()
+            .map_err(|e| e.to_string())?
     };
-
-    let mut records = database_records
-        .into_iter()
-        .map(|(value, sort_order, _, use_count, touched_ms)| ResourceRecordValue {
-            value,
-            sort_order,
-            use_count,
-            touched_ms,
-        })
-        .collect::<Vec<_>>();
 
     let query = search
         .as_deref()
         .map(str::trim)
         .filter(|query| !query.is_empty())
         .map(str::to_lowercase);
-    records.retain(|record| {
-        let matches_folder = normalized_folder.as_deref().map_or(true, |folder| {
-            let record_folder = record.value["resource_folder"].as_str();
-            if folder.is_empty() {
-                record_folder == Some("")
-            } else {
-                record_folder.is_some_and(|current| {
-                    current == folder
-                        || current
-                            .strip_prefix(folder)
-                            .is_some_and(|rest| rest.starts_with('/'))
-                })
+    let mut matches: Vec<ResourceRow> = database_records
+        .into_iter()
+        .filter(|record| {
+            let matches_folder = normalized_folder.as_deref().map_or(true, |folder| {
+                let record_folder = record.folder.as_deref();
+                if folder.is_empty() {
+                    record_folder == Some("")
+                } else {
+                    record_folder.is_some_and(|current| {
+                        current == folder
+                            || current
+                                .strip_prefix(folder)
+                                .is_some_and(|rest| rest.starts_with('/'))
+                    })
+                }
+            });
+            if !matches_folder {
+                return false;
             }
-        });
-        let matches_search = query.as_deref().map_or(true, |query| {
-            [
-                record.value["content"].as_str().unwrap_or_default(),
-                record.value["resource_path"].as_str().unwrap_or_default(),
-                record.value["resource_relative_path"]
-                    .as_str()
-                    .unwrap_or_default(),
-                record.value["resource_note"].as_str().unwrap_or_default(),
-            ]
-            .iter()
-            .any(|value| value.to_lowercase().contains(query))
-        });
-        matches_folder && matches_search
-    });
-    // 排序键与 clipboard_order_clause 同语义（Rust 侧实现：库内记录与
-    // 文件扫描记录合并后统一比较）。
-    let effective_ms = |record: &ResourceRecordValue| {
-        (record.touched_ms as f64).max(record.sort_order)
-    };
-    records.sort_by(|left, right| {
+            query.as_deref().map_or(true, |query| {
+                [
+                    record.content.as_str(),
+                    record.resource_path.as_str(),
+                    record.relative_path.as_deref().unwrap_or_default(),
+                    record.resource_note.as_str(),
+                ]
+                .iter()
+                .any(|value| value.to_lowercase().contains(query))
+            })
+        })
+        .collect();
+
+    // 排序键与 clipboard_order_clause 同语义。
+    let effective_ms = |record: &ResourceRow| (record.touched_ms as f64).max(record.sort_order);
+    matches.sort_by(|left, right| {
         let ordering = match sort_by.as_deref() {
             Some("count") => (left.use_count == 0)
                 .cmp(&(right.use_count == 0))
@@ -2235,20 +2236,57 @@ fn get_resource_records_inner<R: Runtime>(
                 .partial_cmp(&left.sort_order)
                 .unwrap_or(std::cmp::Ordering::Equal),
         };
-        ordering.then_with(|| {
-            let left_id = left.value["id"].as_str().unwrap_or_default();
-            let right_id = right.value["id"].as_str().unwrap_or_default();
-            left_id.cmp(right_id)
-        })
+        ordering.then_with(|| left.id.cmp(&right.id))
     });
 
     let offset = offset.unwrap_or(0) as usize;
     let limit = limit.unwrap_or(200) as usize;
-    Ok(records
+
+    // 幽灵清退已移出查询路径：启动对账（sync_resource_library）与监听
+    // 删除事件（forget_resource_records）负责「文件不在，记录不留」。
+    Ok(matches
         .into_iter()
         .skip(offset)
         .take(limit)
-        .map(|record| record.value)
+        .map(|record| {
+            // managed 语义：应用内保存的记录 true；对账/监听发现的外部
+            // 文件 false（文本详情保存直接写路径）。
+            let managed = record.resource_external == 0;
+            let media_kind = if record.record_type == "image" {
+                "image"
+            } else if record.record_type == "file" {
+                record
+                    .path
+                    .as_deref()
+                    .map(resource_media_kind_for_path)
+                    .unwrap_or("file")
+            } else {
+                "text"
+            };
+            let value = clipboard_record_json(
+                record.id,
+                record.record_type,
+                record.content,
+                record.source_app,
+                record.created_at,
+                record.user_api_key,
+                record.group_name,
+                record.attachments,
+                record.storage_mode,
+                record.resource_path,
+                record.use_count,
+                record.last_used_at,
+            );
+            let mut value = resource_record_value(
+                value,
+                &resource_root,
+                record.path.as_deref(),
+                media_kind,
+                managed,
+            );
+            value["resource_note"] = serde_json::Value::String(record.resource_note);
+            value
+        })
         .collect())
 }
 
