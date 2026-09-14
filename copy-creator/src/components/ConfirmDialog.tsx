@@ -7,15 +7,19 @@ export interface ConfirmDialogState {
 
 interface ConfirmDialogProps extends ConfirmDialogState {
   onCancel: () => void;
+  /** 遮罩点击 / 意外关闭的处理：缺省与取消一致。传入可区分「显式取消」
+   *  与「误触关闭」——如存储迁移：取消=仅改路径，误触=放弃整个操作。 */
+  onDismiss?: () => void;
 }
 
 // 页面级确认对话框的统一实现：剪贴板、快捷输入、资源区原先各有一份
 // 相同结构的内联 dialog-overlay + 取消/确认按钮。确认后先关闭再执行，
 // 避免执行耗时长时确认框滞留。
-export function ConfirmDialog({ message, onConfirm, onCancel }: ConfirmDialogProps) {
+export function ConfirmDialog({ message, onConfirm, onCancel, onDismiss }: ConfirmDialogProps) {
   const { t } = useTranslation();
+  const dismiss = onDismiss ?? onCancel;
   return (
-    <div className="dialog-overlay" onClick={onCancel}>
+    <div className="dialog-overlay" onClick={dismiss}>
       <div className="dialog-content" onClick={(event) => event.stopPropagation()}>
         <h3 className="dialog-title">{t("common.confirm")}</h3>
         <p className="dialog-message">{message}</p>

@@ -89,6 +89,10 @@ export function StorageSection({
           onCancel={() => {
             void applyStoragePath(pendingMigratePath, false);
           }}
+          onDismiss={() => {
+            // 遮罩误触视为放弃整个操作：不迁移也不改路径。
+            setPendingMigratePath(null);
+          }}
         />
       )}
     </div>
