@@ -811,16 +811,19 @@ html {
   }
 }
 
-/* 弹出动效：与新建窗口一致的弹性缩放入场（窗口几何不变，动画只作用
-   于可见面板本身；类随 visible 翻转，每次弹出都会重放）。 */
+/* 弹出动效：对齐新建窗口的窗管浮现动画（逐帧实测基准：快速淡入 +
+   自约 92% 长到 100%，约 150ms，底边锚定、水平居中）。Linux 侧窗口
+   常驻映射、显示时被后端纯移动到目标位置后立即发 radial-menu-show，
+   本动画是唯一可见动效；类随 visible 翻转，每次弹出都会重放。 */
 .radial-menu-popup.radial-menu-appearing .radial-menu-main {
-  animation: radial-main-in 240ms cubic-bezier(0.34, 1.56, 0.64, 1);
+  transform-origin: 50% 100%;
+  animation: radial-main-in 160ms cubic-bezier(0.22, 0.9, 0.35, 1);
 }
 
 @keyframes radial-main-in {
   from {
     opacity: 0;
-    transform: scale(0.94);
+    transform: scale(0.92);
   }
   to {
     opacity: 1;
@@ -828,10 +831,12 @@ html {
   }
 }
 
-/* 收起动效：绕面板自身中心缩小淡出，与弹出互为镜像。后端发出
-   radial-menu-hide 后延迟约 160ms 才隐藏窗口，动画在这段时间播放。 */
+/* 收起动效：对齐新建窗口的窗管退场动画（缩至约 82% + 淡出，约
+   100ms，同样底边锚定）。后端发出 radial-menu-hide 后约 170ms 才把
+   窗口停泊回屏幕外，动画在这段时间完整播放。 */
 .radial-menu-popup.radial-menu-closing .radial-menu-main {
-  animation: radial-main-out 150ms ease-in forwards;
+  transform-origin: 50% 100%;
+  animation: radial-main-out 110ms ease-in forwards;
 }
 
 @keyframes radial-main-out {
@@ -841,8 +846,15 @@ html {
   }
   to {
     opacity: 0;
-    transform: scale(0.95);
+    transform: scale(0.82);
   }
+}
+
+/* 停泊态（窗口移至屏幕外常驻映射，前端 visible=false）：弹出层必须
+   完全透明。否则下一次显示时，窗口先落位、React 再换类，中间一两帧
+   会闪现上一会话的完整菜单。 */
+.radial-menu-overlay.radial-menu-hidden .radial-menu-main {
+  opacity: 0;
 }
 
 @media (prefers-reduced-motion: reduce) {

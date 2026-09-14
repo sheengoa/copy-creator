@@ -239,6 +239,14 @@ pub fn run() {
             if let Some(window) = app.get_webview_window("radial-menu") {
                 radial_drag::install_radial_file_drag_source(app.handle(), &window)
                     .map_err(|error| format!("安装径向菜单文件拖动源失败: {error}"))?;
+                // Linux 常驻模型：启动即映射并停泊到屏幕外。此后显示/隐藏
+                // 只做纯移动（见 shortcut::RADIAL_MENU_SHOWN 注释），窗管的
+                // map/unmap 动画（作用于"面板+条带"偏心大矩形）永不出现。
+                let _ = window.set_position(tauri::PhysicalPosition::new(
+                    shortcut::RADIAL_PARKED_POS.0,
+                    shortcut::RADIAL_PARKED_POS.1,
+                ));
+                let _ = window.show();
             }
 
             // Create hidden standalone clipboard-create popup window.
@@ -376,6 +384,7 @@ pub fn run() {
             radial_drag::cancel_radial_file_drag,
             radial_drag::start_radial_file_drag,
             shortcut::set_radial_hit_area,
+            shortcut::hide_radial_menu,
             debug_log,
             db::get_image_base64,
             db::get_image_thumbnail,

@@ -229,9 +229,8 @@ fn finish_radial_drag(
             }
         }
     }
-    if let Some(radial) = app.get_webview_window("radial-menu") {
-        let _ = radial.hide();
-    }
+    // 拖拽结束后收仓径向窗口（Linux 停泊屏幕外，非 Linux hide）。
+    crate::shortcut::park_radial_window(app);
     let _ = app.emit("radial-drag-finished", RadialDragEvent { session_id });
 }
 
@@ -741,9 +740,7 @@ fn install_linux_drag_source(
         );
         let app_for_hide = begin_app.clone();
         gtk::glib::idle_add_once(move || {
-            if let Some(radial) = app_for_hide.get_webview_window("radial-menu") {
-                let _ = radial.hide();
-            }
+            crate::shortcut::park_radial_window(&app_for_hide);
         });
     });
 
@@ -1066,9 +1063,7 @@ mod windows_drag {
         app.run_on_main_thread(move || {
             // 先隐藏径向窗口：给出"拖动开始"的视觉反馈，同时释放 WebView2
             // 的隐式鼠标捕获。DoDragDrop 随后在主线程上接管输入。
-            if let Some(radial) = main_app.get_webview_window("radial-menu") {
-                let _ = radial.hide();
-            }
+            crate::shortcut::park_radial_window(&main_app);
 
             let Ok(hwnd) = drag_window.hwnd() else {
                 log::warn!("[radial_drag] 获取窗口句柄失败，看门狗降级为不启用");

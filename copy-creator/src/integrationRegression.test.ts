@@ -53,7 +53,9 @@ describe("integration regressions", () => {
     expect(popupRaiseBlock.indexOf("raise_always_on_top(&create)")).toBeLessThan(
       popupRaiseBlock.indexOf("raise_always_on_top(&radial)"),
     );
-    expect(shortcutSource).toContain("if radial.is_visible().unwrap_or(false)");
+    // Linux 常驻模型下径向窗口 is_visible 恒为 true，抬升前必须查显示
+    // 状态标志（否则会把停泊在屏幕外的窗口抬升并抢焦点）。
+    expect(shortcutSource).toContain("let radial_shown = RADIAL_MENU_SHOWN.load(Ordering::SeqCst);");
     expect(createBlock).toContain("raise_visible_popup_windows(app);");
     expect(libSource).toContain("shortcut::has_visible_popup_window(app)");
     expect(libSource).toContain("shortcut::raise_visible_popup_windows(&app_handle)");
@@ -268,14 +270,28 @@ describe("integration regressions", () => {
     expect(radialMenuSource).toContain("blurHideTimerRef");
     expect(radialMenuSource).toContain("cancelPendingBlurHide");
 
-    // 弹出/回收的可见动效必须绕面板自身中心：窗管对"面板+条带"大矩形
-    // 的浮现/退场动画中心落在隐形条带里（偏心），Linux 侧用 GTK 透明度
-    // 将其隐形化（set_opacity 0→1），可见动效只保留 web 层的居中缩放。
+    // 弹出/回收的可见动效全部由 web 层承担：窗管对"面板+条带"大矩形
+    // 的 map/unmap 动画中心落在隐形条带里（逐帧实测：可见内容朝条带
+    // 方向飞入/收回）。Linux 侧窗口常驻映射，显示/隐藏是纯移动（park，
+    // 附带焦点归还），窗管动画永不出现；opacity 遮罩方案已被实测否定
+    // （遮不住 unmap、且引入弹出死延迟），不得回潮。
     expect(radialCssSource).toContain("radial-menu-closing");
     expect(radialCssSource).toContain("radial-main-out");
+    // 停泊态弹出层强制透明，防止下次显示在动画首帧前闪现旧菜单。
+    expect(radialCssSource).toContain(".radial-menu-hidden .radial-menu-main");
     const radialMenuGtk = readSource("../src-tauri/src/shortcut.rs");
-    expect(radialMenuGtk).toContain("set_opacity(0.0)");
-    expect(radialMenuGtk).toContain("set_opacity(1.0)");
+    expect(radialMenuGtk).toContain("fn park_radial_window");
+    expect(radialMenuGtk).toContain("RADIAL_MENU_SHOWN");
+    expect(radialMenuGtk).toContain("RADIAL_PARKED_POS");
+    expect(radialMenuGtk).toContain("x11_activate_window");
+    expect(radialMenuGtk).not.toContain("set_opacity");
+    // 前端不得直接 unmap 径向窗口：一律走后端 hide_radial_menu 停泊。
+    expect(radialMenuSource).toContain('invoke("hide_radial_menu")');
+    expect(radialMenuSource).not.toContain("getCurrentWindow().hide()");
+    // 启动即映射并停泊（常驻模型的前置条件）。
+    const libRsSource = readSource("../src-tauri/src/lib.rs");
+    expect(libRsSource).toContain("RADIAL_PARKED_POS");
+    expect(libRsSource).toContain("shortcut::hide_radial_menu");
   });
 
   it("passes clipboard search into cards for highlighting", () => {

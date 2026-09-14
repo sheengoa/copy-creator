@@ -652,11 +652,10 @@ fn defocus_windows(app: &AppHandle) -> Result<bool, String> {
     // Hide radial popup if visible.  When pasting from the radial menu
     // itself the frontend has already issued a hide, so this is a fast
     // no-op in the common case — but it is a safety net for edge cases
-    // where the popup was left open.
-    let radial = app.get_webview_window("radial-menu");
-    if let Some(radial) = radial {
-        let _ = radial.hide();
-    }
+    // where the popup was left open. Linux 停泊（不 unmap，见
+    // park_radial_window 注释），且焦点仍在径向窗口时会先归还给呼出前
+    // 的窗口——粘贴击键正要发给它。
+    crate::shortcut::park_radial_window(app);
 
     // 粘贴目标判定只用呼出时刻的标志，不依赖径向菜单当下的可见性：
     // 前端现在"先藏菜单再触发粘贴"，可见性检查存在竞态。标志在每次

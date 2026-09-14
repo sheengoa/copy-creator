@@ -201,7 +201,7 @@ export default function RadialMenu() {
   const [preview, setPreview] = useState<PreviewState | null>(null);
   // 收起动画播放中：预览保持挂载滑出，动画结束才真正卸载并恢复穿透。
   const [previewClosing, setPreviewClosing] = useState(false);
-  // 菜单收起动画播放中（后端已发出 radial-menu-hide，窗口尚未隐藏）。
+  // 菜单收起动画播放中（后端已发出 radial-menu-hide，窗口尚未停泊）。
   const [menuClosing, setMenuClosing] = useState(false);
   // 条带方向决定主面板贴窗口哪一侧（几何固定，会话内不变）：state 供
   // 渲染取类名，ref 供异步展开逻辑读取。
@@ -806,7 +806,7 @@ export default function RadialMenu() {
     // 先收起菜单再触发粘贴：后端的焦点沉降等待与窗口隐藏并行，
     // 点击到粘贴落地的延迟显著降低（原来串行等待粘贴命令返回后才隐藏）。
     resetState();
-    void getCurrentWindow().hide();
+    void invoke("hide_radial_menu");
     const { records, pasteRecord, pasteRecordTerminal } = useClipboardStore.getState();
     const record = records.find((r) => r.id === itemId);
     if (record) {
@@ -876,7 +876,7 @@ export default function RadialMenu() {
       }
     }
     resetState();
-    getCurrentWindow().hide();
+    void invoke("hide_radial_menu");
   }, [resetState]);
 
   const markRadialDragStarted = useCallback((pending: PendingNativeDrag) => {
@@ -902,7 +902,7 @@ export default function RadialMenu() {
     nativeDragRef.current = next;
     // 先隐藏窗口再启动拖动：视觉即时反馈，同时释放 WebView2 的隐式
     // 鼠标捕获。此前要等后端解码完虚影才隐藏，期间界面毫无反应。
-    void getCurrentWindow().hide();
+    void invoke("hide_radial_menu");
     flog(`invoking start_radial_file_drag session=${next.sessionId} item=${next.itemId}`);
     void invoke("start_radial_file_drag", {
       source: next.dragSource,
@@ -919,7 +919,7 @@ export default function RadialMenu() {
         || current.sessionId !== next.sessionId
       ) return;
       resetState(true);
-      void getCurrentWindow().hide();
+      void invoke("hide_radial_menu");
       console.error("Failed to start radial file drag:", error);
     });
   }, [resetState]);
@@ -1117,7 +1117,7 @@ export default function RadialMenu() {
     activeDragSessionIdRef.current = null;
     setDraggingItemId(null);
     resetState(true);
-    void getCurrentWindow().hide();
+    void invoke("hide_radial_menu");
   }, [resetState]);
 
   const handleDocumentPointerDown = useCallback((e: PointerEvent) => {
@@ -1231,10 +1231,10 @@ export default function RadialMenu() {
         }),
         listen("radial-menu-hide", () => {
           cancelPendingBlurHide();
-          // 后端延迟约 160ms 才隐藏窗口，期间播放居中缩小退场动画
-          // （窗管的退场动画作用于偏心的大矩形，观感错误，必须绕开）。
+          // 后端约 170ms 后把窗口停泊回屏幕外（不 unmap，窗管的偏心
+          // 退场动画永不出现），期间播放居中缩小退场动画（110ms）。
           setMenuClosing(true);
-          window.setTimeout(() => setMenuClosing(false), 170);
+          window.setTimeout(() => setMenuClosing(false), 150);
           resetStateForNativeHide();
         }),
         listen("radial-drag-started", handleRadialDragStarted),
@@ -1268,7 +1268,9 @@ export default function RadialMenu() {
     const handleKeyDown = (e: KeyboardEvent) => {
       if (e.key === "Escape" && visibleRef.current) {
         resetState();
-        getCurrentWindow().hide();
+        // Linux 窗口常驻映射，前端不得直接 unmap（会触发窗管偏心退场
+        // 动画）；走后端停泊，由后端归还焦点。
+        void invoke("hide_radial_menu");
       }
     };
 
@@ -1282,7 +1284,8 @@ export default function RadialMenu() {
         && !pending.nativeStarted
       ) {
         finishPendingPointerDrag(pending);
-        getCurrentWindow().hide();
+        resetState();
+        void invoke("hide_radial_menu");
         return;
       }
       // 系统截图会暂时抢走焦点；扩展预览仍由整个弹出窗口承载，不能因此关闭。
@@ -1314,7 +1317,7 @@ export default function RadialMenu() {
             && !nativeDragRef.current
           ) {
             resetState();
-            void getCurrentWindow().hide();
+            void invoke("hide_radial_menu");
           }
         }, 150);
       }

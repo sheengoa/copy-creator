@@ -102,6 +102,140 @@ pub fn set_radial_hit_area(
 
 static RADIAL_MENU_ENABLED: AtomicBool = AtomicBool::new(true);
 
+/// Linux 常驻窗口模型的显示状态事实源。径向窗口在启动时即映射并停泊
+/// 到屏幕外（RADIAL_PARKED_POS），此后显示/隐藏只做"移入/移出屏幕"的
+/// 纯移动——窗管的 map/unmap 动画作用于"面板+条带"偏心大矩形（中心落
+/// 在隐形条带里，逐帧采集证据：可见内容朝条带方向飞入/收回），窗口不
+/// unmap 这些动画就永远不会出现，可见动效完全由 web 层承担。窗口本身
+/// 常驻映射后 is_visible() 恒为 true，不能再作切换依据。
+static RADIAL_MENU_SHOWN: AtomicBool = AtomicBool::new(false);
+
+/// 屏幕外停泊坐标：任何显示器、任何缩放（radial_menu_scale 最大 200%
+/// 时窗口约 1900×1400）下都完整落在屏幕外。
+pub static RADIAL_PARKED_POS: (i32, i32) = (-20000, -20000);
+
+/// 呼出前持有焦点的 X 窗口 id（0 = 未知），以及呼出后径向窗口自身的
+/// 焦点 id。收仓时若焦点仍在径向窗口（快捷键二次按压/Escape），把焦点
+/// 还给呼出前的窗口；用户已点击其他窗口（失焦自隐藏）则不抢回。
+static RADIAL_PREV_FOCUS: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
+static RADIAL_FOCUS_XID: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
+
+/// 读取当前持有 X 输入焦点的窗口 id（仅 X11；打不开显示连接返回 0，
+/// Wayland 下即如此，调用方按 0 跳过焦点管理）。
+#[cfg(target_os = "linux")]
+fn x11_current_focus_xid() -> u32 {
+    use std::os::raw::{c_char, c_int, c_ulong, c_void};
+    #[link(name = "X11")]
+    extern "C" {
+        fn XOpenDisplay(name: *const c_char) -> *mut c_void;
+        fn XCloseDisplay(display: *mut c_void);
+        fn XGetInputFocus(
+            display: *mut c_void,
+            focus_return: *mut c_ulong,
+            revert_to_return: *mut c_int,
+        );
+    }
+    unsafe {
+        let display = XOpenDisplay(std::ptr::null());
+        if display.is_null() {
+            return 0;
+        }
+        let mut focus: c_ulong = 0;
+        let mut revert: c_int = 0;
+        XGetInputFocus(display, &mut focus, &mut revert);
+        XCloseDisplay(display);
+        focus as u32
+    }
+}
+
+/// 以 pager 来源向根窗口发送 _NET_ACTIVE_WINDOW，请求激活任意 X 窗口。
+/// 目标窗口已销毁时 mutter 直接忽略该消息，不会产生 X 错误。
+#[cfg(target_os = "linux")]
+fn x11_activate_window(xid: u32) {
+    use std::ffi::CString;
+    use std::os::raw::{c_char, c_int, c_long, c_ulong, c_void};
+    #[link(name = "X11")]
+    extern "C" {
+        fn XOpenDisplay(name: *const c_char) -> *mut c_void;
+        fn XCloseDisplay(display: *mut c_void);
+        fn XInternAtom(display: *mut c_void, name: *const c_char, only_if_exists: c_int) -> c_ulong;
+        fn XSendEvent(
+            display: *mut c_void,
+            w: c_long,
+            propagate: c_int,
+            event_mask: c_long,
+            event: *mut [c_long; 24],
+        ) -> c_int;
+        fn XFlush(display: *mut c_void);
+        fn XDefaultRootWindow(display: *mut c_void) -> c_ulong;
+    }
+    unsafe {
+        let display = XOpenDisplay(std::ptr::null());
+        if display.is_null() {
+            return;
+        }
+        let atom_active = CString::new("_NET_ACTIVE_WINDOW").unwrap();
+        let message_type = XInternAtom(display, atom_active.as_ptr(), 0);
+        // XEvent 按平台长字长度铺开；ClientMessage 字段依次为
+        // type/serial/send_event/display/window/message_type/format/data.l[5]。
+        let mut event: [c_long; 24] = [0; 24];
+        event[0] = 33; // ClientMessage
+        event[4] = xid as c_long;
+        event[5] = message_type as c_long;
+        event[6] = 32; // format
+        event[7] = 1; // source indication: pager
+        event[8] = 0; // timestamp: CurrentTime
+        event[9] = 0; // requestor's active window
+        const SUBSTRUCTURE_REDIRECT: c_long = 1 << 20;
+        const SUBSTRUCTURE_NOTIFY: c_long = 1 << 19;
+        XSendEvent(
+            display,
+            XDefaultRootWindow(display) as c_long,
+            0,
+            SUBSTRUCTURE_REDIRECT | SUBSTRUCTURE_NOTIFY,
+            &mut event,
+        );
+        XFlush(display);
+        XCloseDisplay(display);
+    }
+}
+
+/// 收起径向菜单（所有隐藏路径的唯一出口）：Linux 把窗口停泊回屏幕外
+/// 并归还焦点（绝不 unmap，理由见 RADIAL_MENU_SHOWN 注释）；非 Linux
+/// 直接 hide()（DWM 没有偏心退场动画问题，保持原有行为）。
+pub(crate) fn park_radial_window(app: &AppHandle) {
+    RADIAL_MENU_SHOWN.store(false, Ordering::SeqCst);
+    let Some(radial) = app.get_webview_window("radial-menu") else {
+        return;
+    };
+    #[cfg(target_os = "linux")]
+    {
+        let _ = radial.set_position(tauri::PhysicalPosition::new(
+            RADIAL_PARKED_POS.0,
+            RADIAL_PARKED_POS.1,
+        ));
+        let focus_xid = x11_current_focus_xid();
+        let radial_xid = RADIAL_FOCUS_XID.load(Ordering::SeqCst);
+        let prev = RADIAL_PREV_FOCUS.load(Ordering::SeqCst);
+        if focus_xid != 0 && focus_xid == radial_xid && prev != 0 && prev != radial_xid {
+            x11_activate_window(prev);
+        }
+        RADIAL_FOCUS_XID.store(0, Ordering::SeqCst);
+    }
+    #[cfg(not(target_os = "linux"))]
+    {
+        let _ = radial.hide();
+    }
+}
+
+/// 前端请求隐藏径向菜单（Escape / 失焦自隐藏）。立即停泊、不播退场
+/// 动画——与旧 `getCurrentWindow().hide()` 的即时消失行为一致，但焦点
+/// 归还只有后端能做，且常驻模型下前端不得直接 unmap 窗口。
+#[tauri::command]
+pub fn hide_radial_menu(app: AppHandle) {
+    park_radial_window(&app);
+}
+
 static TOGGLING: AtomicBool = AtomicBool::new(false);
 
 pub static MAIN_SHORTCUT_KEY: Mutex<String> = Mutex::new(String::new());
@@ -336,7 +470,13 @@ pub(crate) fn raise_visible_popup_windows(app: &AppHandle) {
         }
     }
     if let Some(radial) = app.get_webview_window("radial-menu") {
-        if radial.is_visible().unwrap_or(false) {
+        // Linux 常驻模型下 is_visible 恒为 true（停泊屏幕外也算可见），
+        // 必须查显示状态标志，否则会把屏幕外的停泊窗口抬升并抢焦点。
+        #[cfg(target_os = "linux")]
+        let radial_shown = RADIAL_MENU_SHOWN.load(Ordering::SeqCst);
+        #[cfg(not(target_os = "linux"))]
+        let radial_shown = radial.is_visible().unwrap_or(false);
+        if radial_shown {
             raise_always_on_top(&radial);
         }
     }
@@ -430,19 +570,27 @@ fn decide_radial_strip(
 
 pub fn show_radial_menu(app: &AppHandle) {
     if let Some(radial) = app.get_webview_window("radial-menu") {
-        if radial.is_visible().unwrap_or(false) {
+        // Linux：窗口常驻映射，显示状态以标志为准（is_visible 恒 true）。
+        #[cfg(target_os = "linux")]
+        let visible_now = RADIAL_MENU_SHOWN.load(Ordering::SeqCst);
+        #[cfg(not(target_os = "linux"))]
+        let visible_now = radial.is_visible().unwrap_or(false);
+        if visible_now {
             log::info!("[show_radial_menu] already visible, hiding");
-            // Linux：先让前端播居中缩小动画（radial-menu-hide 事件），稍后
-            // 再真正隐藏窗口——窗管的退场动画作用于"面板+条带"大矩形，
-            // 中心落在隐形条带里，可见内容会朝条带方向偏心收回（用户实测
-            // 反馈"从右边某个方向回收"），必须绕开。
+            // Linux：先让前端播居中缩小退场动画（radial-menu-hide 事件），
+            // 动画播完后停泊窗口。绝不 unmap——窗管的退场动画作用于
+            // "面板+条带"大矩形，中心落在隐形条带里，可见内容会朝条带
+            // 方向偏心收回（逐帧采集证据：左缘 97→155 右移、右缘不动）。
             #[cfg(target_os = "linux")]
             {
                 let _ = app.emit("radial-menu-hide", ());
-                let task = radial.clone();
+                let task = app.clone();
                 std::thread::spawn(move || {
-                    std::thread::sleep(std::time::Duration::from_millis(160));
-                    let _ = task.hide();
+                    // 170ms = 退场动画 110ms + 余量：停泊必须在动画播完
+                    // 之后，否则最后一帧停在半途被截断（实测 140ms 时收
+                    // 到 89% 尺寸半透明即消失，观感生硬）。
+                    std::thread::sleep(std::time::Duration::from_millis(170));
+                    park_radial_window(&task);
                 });
             }
             #[cfg(not(target_os = "linux"))]
@@ -517,39 +665,22 @@ pub fn show_radial_menu(app: &AppHandle) {
         let theme =
             crate::db::get_setting_sync(app, "theme").unwrap_or_else(|| "light".to_string());
 
+        // 呼出前记录焦点窗口 xid：收仓时据此把焦点还给呼出前的应用。
+        // 必须在抢焦点（raise + pager 激活）之前读取。
         #[cfg(target_os = "linux")]
-        {
-            // GNOME 的窗口浮现动画作用于"面板+条带"整块矩形，其中心落在
-            // 隐形条带里，可见内容看起来是从条带方向偏心飞入（用户实测
-            // 反馈）。先把窗口整面透明化让该动画不可见，短暂延迟后恢复
-            // 不透明——可见动效只剩 web 层绕面板自身中心的缩放入场
-            // （radial-main-in），与新建窗口观感一致。
-            let task = radial.clone();
-            let _ = radial.run_on_main_thread(move || {
-                use gtk::prelude::*;
-                if let Ok(gtk_window) = task.gtk_window() {
-                    gtk_window.set_opacity(0.0);
-                }
-            });
-        }
+        RADIAL_PREV_FOCUS.store(x11_current_focus_xid(), Ordering::SeqCst);
 
         raise_always_on_top(&radial);
 
         #[cfg(target_os = "linux")]
         {
-            // WebKit 收到 radial-menu-show 后重绘内容约需几十毫秒，此后
-            // 恢复不透明，入场动画的大部分过程可见。GTK 调用须回主线程。
-            let gtk_task = radial.clone();
-            let main_task = radial.clone();
-            std::thread::spawn(move || {
-                std::thread::sleep(std::time::Duration::from_millis(90));
-                let _ = main_task.run_on_main_thread(move || {
-                    use gtk::prelude::*;
-                    if let Ok(gtk_window) = gtk_task.gtk_window() {
-                        gtk_window.set_opacity(1.0);
-                    }
-                });
-            });
+            // 常驻模型：窗口已在屏幕上（纯移动完成），登记显示状态，并
+            // 记录此刻焦点 xid（应为径向窗口自身），收仓时用于判定焦点
+            // 是否仍在径向窗口。若 pager 激活失败（焦点留在原应用），
+            // 这里记录的 xid 与 PREV 相同，收仓时比较后会跳过归还。
+            RADIAL_MENU_SHOWN.store(true, Ordering::SeqCst);
+            let focus_xid = x11_current_focus_xid();
+            RADIAL_FOCUS_XID.store(focus_xid, Ordering::SeqCst);
         }
 
         // Windows: 快捷键触发时进程在后台，tauri 的 set_focus 会被前台锁
