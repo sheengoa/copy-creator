@@ -1583,6 +1583,25 @@ fn ensure_schema(conn: &Connection) -> Result<(), Box<dyn std::error::Error>> {
     )
     .ok();
 
+    // ── created_ms 生成列：created_at 派生的毫秒时间戳 ──
+    // 清理/去重等范围查询用毫秒整数比较，替代 datetime(created_at) 这类
+    // 包列函数（索引失效）与 RFC3339 变精度字符串比较（边界误判）。生成列
+    // 保证任何现有与未来的插入路径都自动带值，不可能漏写。索引建在虚拟列
+    // 上，条目由 SQLite 存于索引内，不占用表存储。
+    conn.execute(
+        "ALTER TABLE clipboard_records ADD COLUMN created_ms INTEGER \
+         GENERATED ALWAYS AS (CAST((julianday(created_at) - 2440587.5) * 86400000 AS INTEGER)) VIRTUAL",
+        [],
+    )
+    .ok();
+    conn.execute_batch(
+        "
+        CREATE INDEX IF NOT EXISTS idx_clipboard_created_ms ON clipboard_records(created_ms);
+        CREATE INDEX IF NOT EXISTS idx_clipboard_content ON clipboard_records(content);
+        CREATE INDEX IF NOT EXISTS idx_clipboard_resource_path ON clipboard_records(resource_path);
+        ",
+    )?;
+
     // ── 内容模式迁移：资源（资源库）与普通剪贴板两种模式，分组与“临时”标记废弃 ──
     // 旧版本以“是否有分组”推断资源，手动暂存记在 group_name（'stash'/'暂存'/'临时'）。
     // 统一为：带真实分组名的旧记录升级为资源后清空分组；手动暂存标记全部清除，并入剪贴板列表。
@@ -1677,13 +1696,17 @@ pub fn prune_old_records(app: &AppHandle) -> Result<(), Box<dyn std::error::Erro
             _ => 30,
         };
 
+        let cutoff_ms = chrono::Utc::now().timestamp_millis() - days as i64 * 86_400_000;
+
+        // 一条语句完成筛选与删除（RETURNING 拿回被删行）；created_ms 走
+        // idx_clipboard_created_ms，替代 datetime(created_at) 的全表扫描。
         let mut stmt = conn.prepare(
-            "SELECT type, content, attachments
-             FROM clipboard_records
-             WHERE datetime(created_at) < datetime('now', ?1)
-               AND NOT (COALESCE(storage_mode, 'database') = 'resource')",
+            "DELETE FROM clipboard_records
+             WHERE created_ms < ?1
+               AND NOT (COALESCE(storage_mode, 'database') = 'resource')
+             RETURNING type, content, attachments",
         )?;
-        let rows = stmt.query_map(params![format!("-{} days", days)], |row| {
+        let rows = stmt.query_map(params![cutoff_ms], |row| {
             Ok((
                 row.get::<_, String>(0)?,
                 row.get::<_, String>(1)?,
@@ -1700,12 +1723,6 @@ pub fn prune_old_records(app: &AppHandle) -> Result<(), Box<dyn std::error::Erro
             image_contents.extend(attachment_paths);
         }
 
-        conn.execute(
-            "DELETE FROM clipboard_records
-             WHERE datetime(created_at) < datetime('now', ?1)
-               AND NOT (COALESCE(storage_mode, 'database') = 'resource')",
-            params![format!("-{} days", days)],
-        )?;
         (days, image_contents)
     };
 
@@ -8735,5 +8752,91 @@ mod migrate_storage_tests {
         assert_eq!(count, 2);
 
         let _ = std::fs::remove_dir_all(base);
+    }
+}
+
+#[cfg(test)]
+mod created_ms_tests {
+    use super::{ensure_schema, Connection, params};
+
+    fn setup() -> Connection {
+        let conn = Connection::open_in_memory().unwrap();
+        ensure_schema(&conn).unwrap();
+        conn
+    }
+
+    /// created_ms 是 created_at 的生成列：插入路径无需显式写值即自动可得。
+    #[test]
+    fn created_ms_is_derived_from_created_at() {
+        let conn = setup();
+        conn.execute(
+            "INSERT INTO clipboard_records (id, type, content, created_at)
+             VALUES ('r1', 'text', 'hello', '2020-01-01T00:00:00Z')",
+            [],
+        )
+        .unwrap();
+        let created_ms: i64 = conn
+            .query_row(
+                "SELECT created_ms FROM clipboard_records WHERE id = 'r1'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(created_ms, 1_577_836_800_000);
+    }
+
+    /// 清理查询语义：created_ms 毫秒比较命中过期行并由 RETURNING 拿回；
+    /// 资源记录豁免、未过期记录保留。
+    #[test]
+    fn prune_deletes_only_expired_rows_and_returns_them() {
+        let conn = setup();
+        conn.execute(
+            "INSERT INTO clipboard_records (id, type, content, created_at)
+             VALUES ('old', 'text', 'old-content', '2020-01-01T00:00:00Z')",
+            [],
+        )
+        .unwrap();
+        conn.execute(
+            "INSERT INTO clipboard_records (id, type, content, created_at, storage_mode)
+             VALUES ('res', 'file', '/lib/x.png', '2020-01-01T00:00:00Z', 'resource')",
+            [],
+        )
+        .unwrap();
+        // fresh 用明确的未来时间：与下方阈值取"当前时刻"之间若跨毫秒，
+        // 恰好等于阈值会比较出脆弱边界（测试自身的竞态，与实现无关）。
+        conn.execute(
+            "INSERT INTO clipboard_records (id, type, content, created_at)
+             VALUES ('fresh', 'text', 'fresh-content', ?1)",
+            params![(chrono::Utc::now() + chrono::Duration::hours(1)).to_rfc3339()],
+        )
+        .unwrap();
+
+        let now_ms = chrono::Utc::now().timestamp_millis();
+        let mut stmt = conn
+            .prepare(
+                "DELETE FROM clipboard_records
+                 WHERE created_ms < ?1
+                   AND NOT (COALESCE(storage_mode, 'database') = 'resource')
+                 RETURNING id",
+            )
+            .unwrap();
+        let mut deleted: Vec<String> = stmt
+            .query_map(params![now_ms], |row| row.get::<_, String>(0))
+            .unwrap()
+            .collect::<Result<_, _>>()
+            .unwrap();
+        drop(stmt);
+        deleted.sort();
+        assert_eq!(deleted, vec!["old"]);
+
+        let mut remaining: Vec<String> = conn
+            .prepare("SELECT id FROM clipboard_records ORDER BY id")
+            .unwrap()
+            .query_map([], |row| row.get::<_, String>(0))
+            .unwrap()
+            .collect::<Result<_, _>>()
+            .unwrap();
+        remaining.sort();
+        assert_eq!(remaining, vec!["fresh", "res"]);
     }
 }

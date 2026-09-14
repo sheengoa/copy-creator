@@ -939,8 +939,9 @@ fn import_image_file(app: &AppHandle, file_path: &str) -> bool {
 /// Skips insertion only if the most recent record has identical type and content
 /// AND was created within the last 2 seconds (debounce window).
 fn insert_and_emit(app: &AppHandle, record_type: &str, content: &str) {
-    let two_seconds_ago = chrono::Utc::now() - chrono::Duration::seconds(2);
-    let cutoff = two_seconds_ago.to_rfc3339();
+    // 去重窗口按毫秒整数比较：RFC3339 秒内小数位数不固定，字符串比较
+    // 在不同精度之间会误判。
+    let cutoff_ms = (chrono::Utc::now() - chrono::Duration::seconds(2)).timestamp_millis();
 
     // Check ANY recent record with same type+content (not just the last one)
     // so that batches of files/images don't circumvent deduplication.
@@ -949,8 +950,8 @@ fn insert_and_emit(app: &AppHandle, record_type: &str, content: &str) {
         let x = match state.conn.lock() {
             Ok(conn) => conn
                 .query_row(
-                    "SELECT COUNT(*) FROM clipboard_records WHERE type = ?1 AND content = ?2 AND created_at >= ?3",
-                    rusqlite::params![record_type, content, cutoff],
+                    "SELECT COUNT(*) FROM clipboard_records WHERE type = ?1 AND content = ?2 AND created_ms >= ?3",
+                    rusqlite::params![record_type, content, cutoff_ms],
                     |row| row.get::<_, i64>(0),
                 )
                 .map(|count| count > 0)
