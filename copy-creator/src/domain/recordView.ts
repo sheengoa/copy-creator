@@ -1,5 +1,5 @@
 // 领域层：记录视图模型——记录进 UI 前的唯一组装点。
-// 组装-only 契约（DOMAIN_ARCHITECTURE_PLAN.md §3.7）：
+// 组装-only 契约（见 src/domain/README.md 决策表）：
 // 1. buildRecordView 只调用 domain 各模块导出的判定函数并做字段映射，
 //    不得新增业务判定（守卫：architectureGuard 规则 6）；
 // 2. RecordView 字段分两组——事实字段（透传，叶子可做渲染分支）与

@@ -20,7 +20,7 @@ export default defineConfig([
     },
     rules: {
       'react-hooks/set-state-in-effect': 'off',
-      // 领域层边界（DOMAIN_ARCHITECTURE_PLAN.md §5.1）：媒体地址解析唯一出口
+      // 领域层边界（见 src/domain/README.md）：媒体地址解析唯一出口
       'no-restricted-imports': ['error', {
         paths: [{
           name: '@tauri-apps/api/core',

@@ -3,7 +3,7 @@
  * 媒体类型清单生成器：从 config/media-types.json（唯一源）生成 TS 与 Rust
  * 两份代码，生成物提交进仓库（不引入构建顺序耦合）。改配置后必须重新运行
  * 本脚本并提交生成物；架构守卫测试会跑一遍生成器与仓库内生成物做 diff，
- * 不同步即红（DOMAIN_ARCHITECTURE_PLAN.md §5.2 规则 7）。
+ * 不同步即红（架构守卫规则 7，清单见 src/architectureGuard.test.ts）。
  *
  * 用法：node scripts/generate-media-types.mjs [仓库根目录]
  */

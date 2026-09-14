@@ -1,5 +1,5 @@
 // 架构守卫测试：把「领域规则必须全局共享」的约束固化为 CI 断言。
-// 规则编号对应 DOMAIN_ARCHITECTURE_PLAN.md §5.2；失败信息指向 domain/README.md。
+// 规则编号以本文件的守卫规则清单为准；约束说明见 src/domain/README.md。
 // 允许清单显式列出——新增例外必须修改本测试（= 强制过评审）。
 import { readFileSync, readdirSync, statSync } from "node:fs";
 import { execSync } from "node:child_process";
