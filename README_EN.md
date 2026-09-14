@@ -12,7 +12,7 @@ English | [中文](./README.md)
 
 **Desktop Productivity Tool for Windows & Linux**
 
-Clipboard Manager · Content Library · Quick Phrases
+Clipboard Manager · Content Library · Quick Input
 
 ![License](https://img.shields.io/badge/license-MIT-blue.svg)
 ![Platform](https://img.shields.io/badge/platform-Windows%2010%2B%20%7C%20Linux%20(Ubuntu%2024.04)-brightgreen.svg)
@@ -25,7 +25,7 @@ Clipboard Manager · Content Library · Quick Phrases
 
 ## Overview
 
-Copy Creator is a lightweight cross-platform (Windows / Linux) desktop productivity tool that appears as a floating window and minimizes to the system tray when closed. It integrates three core features: clipboard history management, a content library, and quick phrases, helping users save, find, and reuse content efficiently in their daily work.
+Copy Creator is a lightweight cross-platform (Windows / Linux) desktop productivity tool that appears as a floating window and minimizes to the system tray when closed. It integrates three core features: clipboard history management, a content library, and quick input, helping users save, find, and reuse content efficiently in their daily work.
 
 > **Acknowledgement**: This project is forked from [hu-qi-jia/copy-creator](https://github.com/hu-qi-jia/copy-creator). The original project was Windows-only. This repository is a complete Linux adaptation (including Wayland/X11 dual protocol support, Ubuntu native shortcut integration, clipboard compatibility fixes, and more) with Windows build support restored, now available on both platforms. Thanks to the original author for the open-source contribution!
 
@@ -45,7 +45,7 @@ Copy Creator is a lightweight cross-platform (Windows / Linux) desktop productiv
 - Double-click the title on the detail page to rename a file (extension preserved automatically)
 - Notes participate in search; images, audio, and video support inline preview and playback, with thumbnails for fast browsing
 
-### ⚡ Quick Phrases
+### ⚡ Quick Input
 - Organize common phrases and code snippets by scenario groups
 - Customizable groups for flexible content organization
 - Click to paste directly without manual copying
@@ -140,12 +140,12 @@ sudo dpkg -i copy-creator_*.deb
    - **Hold and drag a group**: natively drag all files of that group into a file manager, chat window, or other target app — the cursor carries the drag data and dropping completes the action
    - Dragging and clicking are distinguished by a unified movement threshold; empty groups and the "All" view offer no batch operations
 
-### Quick Phrases Feature
+### Quick Input Feature
 
-1. Switch to the "Phrases" tab
+1. Switch to the "Quick Input" tab
 2. Click "New Group" to create scenario groups (e.g., customer service scripts, code snippets)
-3. Add commonly used phrases to the group
-4. When needed, click a phrase to paste it to the current input position
+3. Add commonly used quick inputs to the group
+4. When needed, click a quick input to paste it to the current input position
 
 ### Personalization Settings
 
@@ -218,6 +218,11 @@ copy-creator/
 │   └── Cargo.toml          # Rust dependency config
 ├── public/                 # Static assets
 └── package.json            # Frontend dependency config
+
+> Naming note: the in-app feature is called "Quick Input" (快捷输入); code and
+> IPC commands keep the historical identifiers `quick_input` / `phrases`
+> (e.g. `get_all_phrases`, the `phrases` table) as semantic equivalents.
+> New documentation should use "Quick Input".
 
 The repository root also holds the single source of the extension lists and its generator:
 
