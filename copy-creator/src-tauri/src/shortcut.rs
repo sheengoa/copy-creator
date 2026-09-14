@@ -14,20 +14,28 @@ fn is_wayland() -> bool {
         .unwrap_or(false)
 }
 
-/// 径向窗口预留条带几何（物理像素）：方向、条带宽、窗口总宽/高，在
-/// show_radial_menu 打开窗口时一次性决定。展开/收起只切换输入区域，
-/// 绝不改动窗口几何——X11 上任何 resize/move 都会被合成器画出一帧
-/// "旧内容按左上锚定 + 新区域未绘制"（实机采集帧证据），即扩展闪烁
-/// 的物理根源，只能靠几何不变来根除。
-static RADIAL_STRIP: Mutex<(bool, i32, i32, i32)> = Mutex::new((false, 0, 0, 0));
+/// 径向窗口预留条带几何（物理像素）：方向、条带宽、窗口总宽/高，以及
+/// 面板锚点 (px, py)，在 show_radial_menu 打开窗口时一次性决定。
+///
+/// 展开/收起的几何策略分平台：
+/// - Linux：窗口按"面板 + 条带"全尺寸常驻，展开/收起只切换 X11 输入
+///   区域，绝不 resize/move——X11 上任何 resize/move 都会被合成器画出
+///   一帧"旧内容按左上锚定 + 新区域未绘制"（实机采集帧证据），即扩展
+///   闪烁的物理根源，只能靠几何不变来根除；
+/// - Windows：DWM 合成器没有上述残影问题，收起态窗口即面板大小（隐形
+///   条带不进窗口、不会拦截点击），展开/收起由 set_radial_hit_area 以
+///   (px, py) 为锚做 resize+move，双端用户可见行为一致。
+static RADIAL_STRIP: Mutex<(bool, i32, i32, i32, i32, i32)> =
+    Mutex::new((false, 0, 0, 0, 0, 0));
 
-/// 切换径向窗口的输入区域。收起：仅面板侧（与原紧凑窗口同面积）接收
-/// 输入，预留条带上的点击穿透到下层应用，不引入"点击被吞"；展开：
-/// 全窗接收输入（预览面板铺满条带）。空条带（无空间）时不收窄。
+/// 切换径向窗口预览区的展开/收起（双平台策略见 RADIAL_STRIP 注释）：
+/// Linux 切 X11 输入区域（收起态条带穿透到下层应用）；Windows 直接
+/// resize+move（收起态窗口即面板大小）。用户可见行为双端一致：收起态
+/// 预留条带不拦截任何点击，展开态预览铺满条带。空条带（无空间）时不做。
 fn apply_radial_input_shape(window: &tauri::WebviewWindow<tauri::Wry>, expanded: bool) {
     #[cfg(target_os = "linux")]
     {
-        let (strip_left, strip_w, win_w, win_h) = *RADIAL_STRIP
+        let (strip_left, strip_w, win_w, win_h, _px, _py) = *RADIAL_STRIP
             .lock()
             .unwrap_or_else(|poisoned| poisoned.into_inner());
         if strip_w <= 0 || win_w <= 0 || win_h <= 0 {
@@ -62,10 +70,22 @@ fn apply_radial_input_shape(window: &tauri::WebviewWindow<tauri::Wry>, expanded:
     }
     #[cfg(not(target_os = "linux"))]
     {
-        // 非 Linux 暂无输入区域等价实现：收起态条带会接收输入（点击落在
-        // 条带上有窗自身的悬浮窗特性，不穿透下层应用）。展开/收起依然
-        // 不改窗口几何，闪烁修复不受影响。
-        let _ = (window, expanded);
+        // Windows：窗口收起态即面板大小（条带不在窗口内，点击天然落到
+        // 下层应用），展开/收起以面板锚点为准做 resize+move。DWM 合成
+        // 没有 X11 的残影帧问题，尺寸变化是安全的。
+        let (strip_left, strip_w, win_w_total, win_h, px, py) = *RADIAL_STRIP
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        if strip_w <= 0 {
+            return;
+        }
+        let (width, x) = if expanded {
+            (win_w_total, if strip_left { px - strip_w } else { px })
+        } else {
+            (win_w_total - strip_w, px)
+        };
+        let _ = window.set_size(tauri::PhysicalSize::new(width, win_h));
+        let _ = window.set_position(tauri::PhysicalPosition::new(x, py));
     }
 }
 
@@ -454,12 +474,25 @@ pub fn show_radial_menu(app: &AppHandle) {
         };
         let (strip_left, strip_w) = decide_radial_strip(px, win_w, monitor, scale, dpi);
         let win_w_total = win_w + strip_w;
-        let px_total = if strip_left { px - strip_w } else { px };
-        let _ = radial.set_size(tauri::PhysicalSize::new(win_w_total, win_h));
-        let _ = radial.set_position(tauri::PhysicalPosition::new(px_total, py));
 
         if let Ok(mut slot) = RADIAL_STRIP.lock() {
-            *slot = (strip_left, strip_w, win_w_total, win_h);
+            *slot = (strip_left, strip_w, win_w_total, win_h, px, py);
+        }
+
+        #[cfg(target_os = "linux")]
+        {
+            // Linux：窗口按全尺寸常驻，展开/收起只切输入区域（见
+            // RADIAL_STRIP 注释）。
+            let px_total = if strip_left { px - strip_w } else { px };
+            let _ = radial.set_size(tauri::PhysicalSize::new(win_w_total, win_h));
+            let _ = radial.set_position(tauri::PhysicalPosition::new(px_total, py));
+        }
+        #[cfg(not(target_os = "linux"))]
+        {
+            // Windows：收起态窗口即面板大小，条带不进窗口；展开/收起
+            // 由 set_radial_hit_area 以 (px, py) 为锚 resize+move。
+            let _ = radial.set_size(tauri::PhysicalSize::new(win_w, win_h));
+            let _ = radial.set_position(tauri::PhysicalPosition::new(px, py));
         }
         // 打开即重置为收起形态的输入区域（条带穿透）。
         apply_radial_input_shape(&radial, false);
