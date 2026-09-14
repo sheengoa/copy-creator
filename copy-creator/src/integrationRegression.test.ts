@@ -267,6 +267,15 @@ describe("integration regressions", () => {
     // 自隐藏必须延迟一拍并在收到后端 hide/show 事件或焦点回归时取消。
     expect(radialMenuSource).toContain("blurHideTimerRef");
     expect(radialMenuSource).toContain("cancelPendingBlurHide");
+
+    // 弹出/回收的可见动效必须绕面板自身中心：窗管对"面板+条带"大矩形
+    // 的浮现/退场动画中心落在隐形条带里（偏心），Linux 侧用 GTK 透明度
+    // 将其隐形化（set_opacity 0→1），可见动效只保留 web 层的居中缩放。
+    expect(radialCssSource).toContain("radial-menu-closing");
+    expect(radialCssSource).toContain("radial-main-out");
+    const radialMenuGtk = readSource("../src-tauri/src/shortcut.rs");
+    expect(radialMenuGtk).toContain("set_opacity(0.0)");
+    expect(radialMenuGtk).toContain("set_opacity(1.0)");
   });
 
   it("passes clipboard search into cards for highlighting", () => {

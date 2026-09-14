@@ -201,6 +201,8 @@ export default function RadialMenu() {
   const [preview, setPreview] = useState<PreviewState | null>(null);
   // 收起动画播放中：预览保持挂载滑出，动画结束才真正卸载并恢复穿透。
   const [previewClosing, setPreviewClosing] = useState(false);
+  // 菜单收起动画播放中（后端已发出 radial-menu-hide，窗口尚未隐藏）。
+  const [menuClosing, setMenuClosing] = useState(false);
   // 条带方向决定主面板贴窗口哪一侧（几何固定，会话内不变）：state 供
   // 渲染取类名，ref 供异步展开逻辑读取。
   const [previewSide, setPreviewSide] = useState<RadialPreviewDirection>("right");
@@ -1229,6 +1231,10 @@ export default function RadialMenu() {
         }),
         listen("radial-menu-hide", () => {
           cancelPendingBlurHide();
+          // 后端延迟约 160ms 才隐藏窗口，期间播放居中缩小退场动画
+          // （窗管的退场动画作用于偏心的大矩形，观感错误，必须绕开）。
+          setMenuClosing(true);
+          window.setTimeout(() => setMenuClosing(false), 170);
           resetStateForNativeHide();
         }),
         listen("radial-drag-started", handleRadialDragStarted),
@@ -1607,7 +1613,7 @@ export default function RadialMenu() {
   return (
     <div className={`radial-menu-overlay${visible ? "" : " radial-menu-hidden"}`}>
       <div
-        className={`radial-menu-popup ${previewSide === "left" ? "strip-left" : "strip-right"}${preview ? " preview-open" : ""}${dragSessionItemId ? " drag-session" : ""}${visible ? " radial-menu-appearing" : ""}`}
+        className={`radial-menu-popup ${previewSide === "left" ? "strip-left" : "strip-right"}${preview ? " preview-open" : ""}${dragSessionItemId ? " drag-session" : ""}${visible ? " radial-menu-appearing" : ""}${menuClosing ? " radial-menu-closing" : ""}`}
         style={preview ? {
           "--radial-preview-width": `${preview.layout.width}px`,
         } as CSSProperties : undefined}

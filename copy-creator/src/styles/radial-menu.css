@@ -828,10 +828,28 @@ html {
   }
 }
 
+/* 收起动效：绕面板自身中心缩小淡出，与弹出互为镜像。后端发出
+   radial-menu-hide 后延迟约 160ms 才隐藏窗口，动画在这段时间播放。 */
+.radial-menu-popup.radial-menu-closing .radial-menu-main {
+  animation: radial-main-out 150ms ease-in forwards;
+}
+
+@keyframes radial-main-out {
+  from {
+    opacity: 1;
+    transform: scale(1);
+  }
+  to {
+    opacity: 0;
+    transform: scale(0.95);
+  }
+}
+
 @media (prefers-reduced-motion: reduce) {
   .radial-menu-preview,
   .radial-menu-preview.preview-closing,
-  .radial-menu-popup.radial-menu-appearing .radial-menu-main {
+  .radial-menu-popup.radial-menu-appearing .radial-menu-main,
+  .radial-menu-popup.radial-menu-closing .radial-menu-main {
     animation: none;
   }
 }

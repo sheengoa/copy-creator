@@ -432,8 +432,24 @@ pub fn show_radial_menu(app: &AppHandle) {
     if let Some(radial) = app.get_webview_window("radial-menu") {
         if radial.is_visible().unwrap_or(false) {
             log::info!("[show_radial_menu] already visible, hiding");
-            let _ = radial.hide();
-            let _ = app.emit("radial-menu-hide", ());
+            // Linux：先让前端播居中缩小动画（radial-menu-hide 事件），稍后
+            // 再真正隐藏窗口——窗管的退场动画作用于"面板+条带"大矩形，
+            // 中心落在隐形条带里，可见内容会朝条带方向偏心收回（用户实测
+            // 反馈"从右边某个方向回收"），必须绕开。
+            #[cfg(target_os = "linux")]
+            {
+                let _ = app.emit("radial-menu-hide", ());
+                let task = radial.clone();
+                std::thread::spawn(move || {
+                    std::thread::sleep(std::time::Duration::from_millis(160));
+                    let _ = task.hide();
+                });
+            }
+            #[cfg(not(target_os = "linux"))]
+            {
+                let _ = radial.hide();
+                let _ = app.emit("radial-menu-hide", ());
+            }
             return;
         }
 
@@ -501,7 +517,40 @@ pub fn show_radial_menu(app: &AppHandle) {
         let theme =
             crate::db::get_setting_sync(app, "theme").unwrap_or_else(|| "light".to_string());
 
+        #[cfg(target_os = "linux")]
+        {
+            // GNOME 的窗口浮现动画作用于"面板+条带"整块矩形，其中心落在
+            // 隐形条带里，可见内容看起来是从条带方向偏心飞入（用户实测
+            // 反馈）。先把窗口整面透明化让该动画不可见，短暂延迟后恢复
+            // 不透明——可见动效只剩 web 层绕面板自身中心的缩放入场
+            // （radial-main-in），与新建窗口观感一致。
+            let task = radial.clone();
+            let _ = radial.run_on_main_thread(move || {
+                use gtk::prelude::*;
+                if let Ok(gtk_window) = task.gtk_window() {
+                    gtk_window.set_opacity(0.0);
+                }
+            });
+        }
+
         raise_always_on_top(&radial);
+
+        #[cfg(target_os = "linux")]
+        {
+            // WebKit 收到 radial-menu-show 后重绘内容约需几十毫秒，此后
+            // 恢复不透明，入场动画的大部分过程可见。GTK 调用须回主线程。
+            let gtk_task = radial.clone();
+            let main_task = radial.clone();
+            std::thread::spawn(move || {
+                std::thread::sleep(std::time::Duration::from_millis(90));
+                let _ = main_task.run_on_main_thread(move || {
+                    use gtk::prelude::*;
+                    if let Ok(gtk_window) = gtk_task.gtk_window() {
+                        gtk_window.set_opacity(1.0);
+                    }
+                });
+            });
+        }
 
         // Windows: 快捷键触发时进程在后台，tauri 的 set_focus 会被前台锁
         // 拒绝，菜单拿不到键盘焦点（Escape、失焦自隐藏都会失效），需强制
