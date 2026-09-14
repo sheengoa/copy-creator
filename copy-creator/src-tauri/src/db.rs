@@ -589,6 +589,12 @@ fn prune_temporary_resource_records(conn: &Connection) {
 }
 
 fn scan_resource_files(root: &Path) -> Vec<ResourceFileEntry> {
+    scan_resource_files_under(root, root)
+}
+
+/// 只递归 directory 子树（分组/文件夹相对 root 计算，调用方保证 directory
+/// 位于 root 内）：整组粘贴/拖出只需要目标分组的内容，不必全库扫描。
+fn scan_resource_files_under(root: &Path, directory: &Path) -> Vec<ResourceFileEntry> {
     fn visit(root: &Path, directory: &Path, entries: &mut Vec<ResourceFileEntry>) {
         let Ok(read_dir) = std::fs::read_dir(directory) else {
             return;
@@ -634,8 +640,8 @@ fn scan_resource_files(root: &Path) -> Vec<ResourceFileEntry> {
     }
 
     let mut entries = Vec::new();
-    if root.is_dir() {
-        visit(root, root, &mut entries);
+    if directory.is_dir() {
+        visit(root, directory, &mut entries);
     }
     entries
 }
@@ -2719,15 +2725,27 @@ pub(crate) fn touch_resource_group_usage_internal<R: Runtime>(
                     .is_some_and(|rest| rest.starts_with('/'))
         }
     };
-    // 分组内未入库的文件：库中无对应行，稍后补建再写使用时间。
+    // 分组内未入库的文件：库中无对应行，稍后补建再写使用时间。只扫目标
+    // 分组子目录，不再全库递归——整组粘贴/拖出是高频操作，全库扫描是它
+    // 最大的可避免开销。未分组语义即库根一级文件，非递归列出与旧的全库
+    // 扫描后按空文件夹过滤等价。
     let mut discovered: Vec<(String, PathBuf)> = Vec::new();
-    for entry in scan_resource_files(&root) {
-        let record_folder =
-            resource_folder_for_path(&root, &entry.path.to_string_lossy());
-        if !in_group(record_folder) {
-            continue;
+    if folder.is_empty() {
+        if let Ok(read_dir) = std::fs::read_dir(&root) {
+            for entry in read_dir.flatten() {
+                let path = entry.path();
+                if !entry.file_type().is_ok_and(|file_type| file_type.is_file())
+                    || is_ignored_resource_file(&path)
+                {
+                    continue;
+                }
+                discovered.push((resource_file_id(&path), path));
+            }
         }
-        discovered.push((resource_file_id(&entry.path), entry.path.clone()));
+    } else {
+        for entry in scan_resource_files_under(&root, &root.join(&folder)) {
+            discovered.push((resource_file_id(&entry.path), entry.path.clone()));
+        }
     }
     let state = app.state::<DbState>();
     let conn = state.conn.lock().map_err(|e| e.to_string())?;
@@ -8876,5 +8894,51 @@ mod created_ms_tests {
             .unwrap();
         remaining.sort();
         assert_eq!(remaining, vec!["fresh", "res"]);
+    }
+}
+
+#[cfg(test)]
+mod group_scan_tests {
+    use super::{scan_resource_files, scan_resource_files_under};
+
+    /// 子树扫描：只返回目标分组目录下的文件，分组仍相对库根计算；
+    /// 全库扫描结果包含它（子树限定的语义补集校验）。
+    #[test]
+    fn scan_resource_files_under_limits_to_target_subtree() {
+        let root = std::env::temp_dir().join(format!(
+            "copy-creator-scan-under-{}",
+            uuid::Uuid::new_v4()
+        ));
+        std::fs::create_dir_all(root.join("Group/nested")).unwrap();
+        std::fs::create_dir_all(root.join("Other")).unwrap();
+        std::fs::write(root.join("Group/a.txt"), "a").unwrap();
+        std::fs::write(root.join("Group/nested/b.txt"), "b").unwrap();
+        std::fs::write(root.join("Other/c.txt"), "c").unwrap();
+        std::fs::write(root.join("top.txt"), "t").unwrap();
+
+        let under = scan_resource_files_under(&root, &root.join("Group"));
+        // 断言以 `/` 分隔符书写；Windows 实际路径为 `\`，归一后比较。
+        let mut under_paths = under
+            .iter()
+            .map(|entry| {
+                entry
+                    .path
+                    .strip_prefix(&root)
+                    .unwrap()
+                    .to_string_lossy()
+                    .to_string()
+                    .replace(['\\'], "/")
+            })
+            .collect::<Vec<_>>();
+        under_paths.sort();
+        assert_eq!(under_paths, vec!["Group/a.txt", "Group/nested/b.txt"]);
+        assert!(under
+            .iter()
+            .all(|entry| entry.group == "Group" || entry.group == "Group/nested"));
+
+        let all = scan_resource_files(&root);
+        assert!(all.len() >= under.len());
+
+        let _ = std::fs::remove_dir_all(root);
     }
 }
