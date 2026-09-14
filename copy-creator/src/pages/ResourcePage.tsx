@@ -65,7 +65,7 @@ const RESOURCE_TYPE_FILTERS: ResourceTypeFilter[] = [
   "file",
 ];
 
-export default function ResourcePage() {
+export default function ResourcePage({ active }: { active: boolean }) {
   const { t } = useTranslation();
   const {
     records,
@@ -212,6 +212,17 @@ export default function ResourcePage() {
     void loadResourceGroups();
     void loadRecords(false, "resources", resourceGroup);
   }, [loadRecords, loadResourceGroups, resourceGroup]));
+
+  // 对称兜底：剪切板页重新激活时会把自己的分类写回 store（重申视图），
+  // 本页重新激活时若视图仍被剪切板分类占用，同样重载资源视图。
+  const resourcesActiveRef = useRef(active);
+  useEffect(() => {
+    if (resourcesActiveRef.current === active) return;
+    resourcesActiveRef.current = active;
+    if (!active) return;
+    if (useClipboardStore.getState().category === "resources") return;
+    void loadRecords(false, "resources", resourceGroup);
+  }, [active, loadRecords, resourceGroup]);
 
   useEffect(() => {
     let cancelled = false;

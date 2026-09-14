@@ -23,7 +23,7 @@ TYPE_META.image.icon = Icons.image;
 TYPE_META.link.icon = Icons.link;
 TYPE_META.file.icon = Icons.file;
 
-export default function ClipboardPage() {
+export default function ClipboardPage({ active }: { active: boolean }) {
   const { t } = useTranslation();
   const {
     records,
@@ -198,10 +198,25 @@ export default function ClipboardPage() {
     init("all");
   }, [init, setSearch]);
 
-  // 主窗口从隐藏恢复显示时重载当前视图：兜底隐藏期间丢失/被节流的刷新。
-  useRefreshOnShow(useCallback(() => {
-    void loadRecords(false);
-  }, [loadRecords]));
+  // 本页与资源页共用 clipboardStore 的 records/category：资源页装载会把
+  // category 切到 resources 并覆盖 records，而本页渲染时过滤掉资源记录
+  // （isResourceRecord），不重申视图则列表恒为空（切区往返空白的根因）。
+  // 记住离开时的分类；凡是本页可见的时机（面板切回、窗口恢复显示）都
+  // 检查视图是否仍被资源页占用，被占用则恢复分类并重载。
+  const lastClipboardCategoryRef = useRef<ClipType>("all");
+  useEffect(() => {
+    if (category !== "resources") lastClipboardCategoryRef.current = category;
+  }, [category]);
+
+  const reassertClipboardView = useCallback(() => {
+    if (useClipboardStore.getState().category !== "resources") {
+      void loadRecords(false);
+      return;
+    }
+    const restored = lastClipboardCategoryRef.current;
+    setCategory(restored);
+    void loadRecords(false, restored);
+  }, [loadRecords, setCategory]);
 
   useEffect(() => {
     if (searchEffectInitializedRef.current) {
@@ -210,6 +225,23 @@ export default function ClipboardPage() {
     }
     searchEffectInitializedRef.current = true;
   }, [loadRecords, search]);
+
+  // 主窗口从隐藏恢复显示时重载当前视图：兜底隐藏期间丢失/被节流的刷新。
+  // 注意不能盲重载 loadRecords(false)——那会按 store 当前（可能是资源）
+  // 视图取数，本页依旧空白。
+  useRefreshOnShow(reassertClipboardView);
+
+  // 面板切走再切回：无任何事件信号，只有 active 翻转，同样重申视图。
+  const clipboardActiveRef = useRef(active);
+  useEffect(() => {
+    if (clipboardActiveRef.current === active) return;
+    clipboardActiveRef.current = active;
+    if (!active) return;
+    if (useClipboardStore.getState().category !== "resources") return;
+    const restored = lastClipboardCategoryRef.current;
+    setCategory(restored);
+    void loadRecords(false, restored);
+  }, [active, setCategory, loadRecords]);
 
   const handleDelete = useCallback(
     (id: string) => {

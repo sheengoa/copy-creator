@@ -235,6 +235,15 @@ describe("integration regressions", () => {
     expect(hookSource).toContain('listen("main-window-shown"');
     const libSource = readSource("../src-tauri/src/lib.rs");
     expect(libSource).toContain('emit("main-window-shown"');
+
+    // 切区往返：剪切板页与资源页共用 store 的 records/category，页面
+    // 重新激活时必须重申自己的视图（资源记录会被剪切板页的
+    // isResourceRecord 过滤滤空，不重申则切回恒为空白）。
+    expect(clipboardPageSource).toContain("lastClipboardCategoryRef");
+    expect(clipboardPageSource).toContain("void loadRecords(false, restored)");
+    expect(pageSource).toContain("void loadRecords(false, \"resources\", resourceGroup)");
+    const appSource = readSource("./App.tsx");
+    expect(appSource).toContain("panel.component(isActive)");
   });
 
   it("passes clipboard search into cards for highlighting", () => {
