@@ -1,3 +1,4 @@
+import { useEffect, useRef } from "react";
 import { useTranslation } from "react-i18next";
 
 export interface ConfirmDialogState {
@@ -18,13 +19,29 @@ interface ConfirmDialogProps extends ConfirmDialogState {
 export function ConfirmDialog({ message, onConfirm, onCancel, onDismiss }: ConfirmDialogProps) {
   const { t } = useTranslation();
   const dismiss = onDismiss ?? onCancel;
+  const cancelButtonRef = useRef<HTMLButtonElement | null>(null);
+
+  useEffect(() => {
+    // Esc = 取消；焦点默认落在取消按钮上（回车误触时执行的是非破坏操作）。
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") onCancel();
+    };
+    window.addEventListener("keydown", onKeyDown);
+    cancelButtonRef.current?.focus();
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [onCancel]);
   return (
     <div className="dialog-overlay" onClick={dismiss}>
       <div className="dialog-content" onClick={(event) => event.stopPropagation()}>
         <h3 className="dialog-title">{t("common.confirm")}</h3>
         <p className="dialog-message">{message}</p>
         <div className="dialog-actions">
-          <button type="button" className="dialog-btn secondary" onClick={onCancel}>
+          <button
+            type="button"
+            ref={cancelButtonRef}
+            className="dialog-btn secondary"
+            onClick={onCancel}
+          >
             {t("common.cancel")}
           </button>
           <button

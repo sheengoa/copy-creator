@@ -236,6 +236,22 @@ function ClipboardCardInner({
     }
   }, [apiKey?.label?.note, apiKey?.guessedService, isApiKey, t]);
 
+  // 键盘可达性：卡片根节点可聚焦，Enter/Space 触发与单击一致的主操作
+  // （选择模式切换选中；浏览模式未展开时粘贴，展开后忽略——展开态的
+  // 文本选择逻辑依赖鼠标命位，键盘回车不再二次折叠）。
+  const handleCardKeyDown = useCallback(
+    (e: React.KeyboardEvent) => {
+      if (e.key !== "Enter" && e.key !== " ") return;
+      e.preventDefault();
+      if (selectionMode) {
+        onToggleSelected(view.id);
+        return;
+      }
+      if (!expanded) handlePaste();
+    },
+    [selectionMode, onToggleSelected, view.id, expanded, handlePaste],
+  );
+
   return (
     <div
       className={`notification clipboard-card type-${view.recordType}${isApiKey ? " has-api-key" : ""}${isUnlabeled ? " api-key-unlabeled" : ""}${hasLabel ? " api-key-labeled" : ""}${selectionMode ? " is-selection-mode" : ""}${selected ? " is-selected" : ""}`}
@@ -243,6 +259,9 @@ function ClipboardCardInner({
       // 新卡片延迟数十秒才出现（fill-mode both 停在不可见起始帧）。
       style={{ "--color": meta.color, "--enter-delay": Math.min(index, 20) } as React.CSSProperties}
       onClick={handleCardClick}
+      onKeyDown={handleCardKeyDown}
+      role="button"
+      tabIndex={0}
       onContextMenu={selectionMode ? (e) => { e.preventDefault(); e.stopPropagation(); } : handleContextMenu}
     >
       <div className="notibar" />

@@ -150,6 +150,19 @@ function PhraseCard({
       style={style}
       className={`notification phrase-card${isDragging ? " is-dragging" : ""}${selectionMode ? " is-selection-mode" : ""}${selected ? " is-selected" : ""}`}
       onClick={handleCardClick}
+      onKeyDown={(e) => {
+        // 键盘可达性：Enter/Space 与单击同义（选择模式切换选中；浏览模式
+        // 未展开文本时粘贴）。
+        if (e.key !== "Enter" && e.key !== " ") return;
+        e.preventDefault();
+        if (selectionMode) {
+          onToggleSelected(phrase.id);
+          return;
+        }
+        if (!isTextExpanded) onPaste(phrase);
+      }}
+      role="button"
+      tabIndex={0}
       onContextMenu={(e) => {
         e.preventDefault();
         e.stopPropagation();
