@@ -25,6 +25,7 @@ import { ContentPreviewPanel } from "../ContentPreviewPanel";
 import { FileMediaVisual } from "../FileMediaPreview";
 import { BackToTopButton } from "../BackToTop";
 import { useBackToTop } from "../../hooks/useBackToTop";
+import { useRecordLocale } from "../../hooks/useRecordLocale";
 import {
   isContentPreviewAvailable,
   loadRecordPreviewSegments,
@@ -42,7 +43,6 @@ import { findResourceFolder, flattenResourceFoldersVisible, formatResourceFolder
 import { fileMediaKindFromPath, getResourceExtension, inferResourceMediaKind, TEXT_EXTENSIONS } from "../../domain/mediaKind";
 import {
   getResourcePath,
-  getResourceSummary,
   isFileBackedTextResource,
   recordUsageTime,
   resourceGroupLeafLabel,
@@ -1369,6 +1369,7 @@ export default function RadialMenu() {
   const phrases = usePhraseStore((s) => s.phrases);
   const pasteLeftClick = useSettingsStore((s) => s.pasteLeftClick);
   const countSortOn = useSettingsStore((s) => s.contentSort === "count");
+  const recordLocale = useRecordLocale();
 
   // hover 每次移动都会触发整树重渲：过滤与条目映射（最多 2000 条、含
   // 日期解析）必须 memo，不能落在渲染体裸代码里。
@@ -1385,13 +1386,11 @@ export default function RadialMenu() {
   const items: RadialItem[] = useMemo(() => {
     const recordToRadialItem = (r: ClipboardRecord): RadialItem => {
       if (isResourceRecord(r)) {
-        const item = buildRecordView(r);
+        const item = buildRecordView(r, { locale: recordLocale });
         const resourceKind = item.kind;
         const resourcePath = item.resourcePath ?? r.content;
         const resourceTitle = item.title;
-        const resourceSummary = r.type === "file"
-          ? undefined
-          : getResourceSummary(r);
+        const resourceSummary = r.type === "file" ? undefined : item.summary;
         return {
           id: r.id,
           content: resourceTitle,
@@ -1519,6 +1518,7 @@ export default function RadialMenu() {
     resourceGroup,
     phrases,
     phraseGroupId,
+    recordLocale,
     t,
   ]);
 

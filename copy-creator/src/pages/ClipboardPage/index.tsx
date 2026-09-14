@@ -14,6 +14,7 @@ import { BackToTopButton } from "../../components/BackToTop";
 import { useBackToTop } from "../../hooks/useBackToTop";
 import { useMultiSelect } from "../../hooks/useMultiSelect";
 import { useRefreshOnShow } from "../../hooks/useRefreshOnShow";
+import { useRecordLocale } from "../../hooks/useRecordLocale";
 import { buildRecordView, type RecordView } from "../../domain/recordView";
 import { isResourceRecord } from "../../domain/records";
 
@@ -188,7 +189,11 @@ export default function ClipboardPage() {
     return clipboardRecords.filter((r) => r.type === category);
   }, [records, category]);
   // 容器层组装视图模型（依赖 records 引用纪律，zustand 不可变更新保证稳定）。
-  const views = useMemo(() => filtered.map((record) => buildRecordView(record)), [filtered]);
+  const recordLocale = useRecordLocale();
+  const views = useMemo(
+    () => filtered.map((record) => buildRecordView(record, { locale: recordLocale })),
+    [filtered, recordLocale],
+  );
   const visibleIds = useMemo(() => filtered.map((record) => record.id), [filtered]);
   const {
     isSelecting,

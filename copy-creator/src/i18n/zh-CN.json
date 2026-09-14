@@ -65,6 +65,8 @@
     "image": "图片",
     "link": "链接",
     "file": "文件",
+    "textContent": "文本内容",
+    "linkContent": "链接内容",
     "create": "新建",
     "pasteNormal": "普通粘贴",
     "pasteToTerminal": "粘贴到终端",

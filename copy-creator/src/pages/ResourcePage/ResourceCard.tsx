@@ -12,7 +12,6 @@ import { recordUsageTime, resourceGroupLeafLabel } from "../../domain/records";
 import { UsageCountBadge } from "../../components/UsageCountBadge";
 import { ResourceFileImage, ResourceVideoPoster } from "./ResourceMedia";
 import { type ResourceMediaKind } from "../../domain/mediaKind";
-import { getResourceSummary } from "../../domain/records";
 import type { RecordView } from "../../domain/recordView";
 
 interface ResourceCardProps {
@@ -39,7 +38,7 @@ function ResourceCardVisual({
   typeLabel,
 }: Pick<ResourceCardProps, "view" | "search" | "typeLabel">) {
   const kind = view.kind;
-  const summary = getResourceSummary({ type: view.recordType, content: view.content });
+  const summary = view.summary;
   const resourcePath = view.resourcePath ?? view.content;
 
   if (kind === "video") {

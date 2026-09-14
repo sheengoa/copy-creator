@@ -28,6 +28,7 @@ import type { ClipboardRecord, ResourceFolder } from "../types";
 import { BackToTopButton } from "../components/BackToTop";
 import { useBackToTop } from "../hooks/useBackToTop";
 import { useRefreshOnShow } from "../hooks/useRefreshOnShow";
+import { useRecordLocale } from "../hooks/useRecordLocale";
 import ResourceDetailPage from "./ResourcePage/ResourceDetailPage";
 import ResourceGroupChips from "./ResourcePage/ResourceGroupChips";
 import type { ResourceMediaKind as ResourceMediaKindLabel } from "../domain/mediaKind";
@@ -357,13 +358,14 @@ export default function ResourcePage() {
 
   // 视图模型与分列都 memo 化：避免任意一次无关 state 变化触发全量重建
   // （buildRecordView 每卡一次）导致整页卡片级重渲。
+  const recordLocale = useRecordLocale();
   const resourceViews = useMemo(() => {
     const views = new Map<string, RecordView>();
     for (const record of filteredRecords) {
-      views.set(record.id, buildRecordView(record));
+      views.set(record.id, buildRecordView(record, { locale: recordLocale }));
     }
     return views;
-  }, [filteredRecords]);
+  }, [filteredRecords, recordLocale]);
   const columns = useMemo(
     () => splitResourceColumns(filteredRecords, columnCount),
     [filteredRecords, columnCount],
@@ -695,7 +697,7 @@ export default function ResourcePage() {
     if (selected.length === 0) return;
     const folders = [...new Set(selected.map((record) => record.resource_folder ?? ""))];
     const label = selected.length === 1
-      ? getResourceTitle(selected[0], inferResourceMediaKind(selected[0]))
+      ? getResourceTitle(selected[0], inferResourceMediaKind(selected[0]), recordLocale)
       : t("resources.moveSelectedCount", { count: selected.length });
     const meta = folders.length === 1
       ? t("resources.moveCurrentLocation", {
@@ -704,7 +706,7 @@ export default function ResourcePage() {
       : t("resources.moveMultipleLocations");
     setMoveError(null);
     setMoveDialog({ ids, label, meta, folders });
-  }, [detailRecord, filteredRecords, t]);
+  }, [detailRecord, filteredRecords, recordLocale, t]);
 
   const handleMoveCard = useCallback(
     (moveView: RecordView) => openResourceMove([moveView.id]),

@@ -17,6 +17,7 @@ import { formatResourceFolderPath } from "../../domain/groups";
 import { inferResourceMediaKind } from "../../domain/mediaKind";
 import { resolveResourceMediaUrl } from "../../domain/mediaUrl";
 import { getResourcePath, getResourceTitle, resourceMediaVersion } from "../../domain/records";
+import { useRecordLocale } from "../../hooks/useRecordLocale";
 import {
   ResourceImageOriginal,
   ResourceMediaPlayer,
@@ -44,6 +45,7 @@ export default function ResourceDetailPage({
   onMoveRecord,
 }: ResourceDetailPageProps) {
   const { t } = useTranslation();
+  const recordLocale = useRecordLocale();
   const updateResourceNote = useResourceStore((state) => state.updateResourceNote);
   const kind = inferResourceMediaKind(record);
   const resourcePath = getResourcePath(record);
@@ -223,7 +225,7 @@ export default function ResourceDetailPage({
     };
   }, [externalTextPath, kind, mediaVersion, record, resourcePath]);
 
-  const title = getResourceTitle(record, kind);
+  const title = getResourceTitle(record, kind, recordLocale);
 
   const renameable = isResourceTitleRenameable(record);
   // 标题编辑基于文件名：文件记录的路径在 content/resource_path，文本资源记录的

@@ -16,8 +16,10 @@ import {
   recordFileMediaKind,
   recordPasteStrategy,
   resourceMediaVersion,
+  getResourceSummary,
   type ExpandPreviewKind,
   type PasteStrategy,
+  type RecordLocaleText,
 } from "./records";
 
 export type { ExpandPreviewKind, PasteStrategy };
@@ -49,6 +51,7 @@ export interface RecordView {
   displayName: string; // 条目显示文本（三窗口统一规则）
   displayTruncated: boolean; // displayName 是否被渲染参数截断（区别于 contentTruncated）
   title: string; // 标题（资源标题或文件名）
+  summary: string; // 摘要（正文首段/图片占位；资源卡片与径向条目共用）
   // —— API Key 场景（isApiKey 为 true 时有值）——
   apiKey?: {
     preview: string;
@@ -61,16 +64,21 @@ export interface RecordView {
 export interface BuildRecordViewOptions {
   /** 显示文本的渲染截断长度（如径向菜单 300）；不传则不截断。 */
   displayNameTruncateAt?: number;
+  /** i18n 兜底文案（图片占位 / 文本与链接兜底标题）。英文界面必须传入；
+   *  缺省为中文历史行为（domain 不依赖 i18n，见 records.RecordLocaleText）。 */
+  locale?: RecordLocaleText;
 }
 
 export function buildRecordView(
   record: ClipboardRecord,
   options: BuildRecordViewOptions = {},
 ): RecordView {
+  const locale = options.locale;
+  const imagePlaceholder = locale?.imagePlaceholder ?? "图片";
   const kind = inferResourceMediaKind(record);
   const fileMediaKind = recordFileMediaKind(record);
   const expandPreview = recordExpandPreview(record);
-  let displayName = recordDisplayName(record, "图片");
+  let displayName = recordDisplayName(record, imagePlaceholder);
   let displayTruncated = false;
   if (options.displayNameTruncateAt !== undefined && displayName.length > options.displayNameTruncateAt) {
     displayName = `${displayName.slice(0, options.displayNameTruncateAt)}…`;
@@ -102,7 +110,8 @@ export function buildRecordView(
     mediaVersion: resourceMediaVersion(record) ?? null,
     displayName,
     displayTruncated,
-    title: getResourceTitle(record),
+    title: getResourceTitle(record, kind, locale),
+    summary: getResourceSummary(record, imagePlaceholder),
 
     apiKey: record.is_api_key
       ? {

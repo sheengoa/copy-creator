@@ -48,9 +48,21 @@ export function resourceMediaVersion(
     : undefined;
 }
 
+/** 标题/摘要的 i18n 兜底文案：由调用方注入（domain 不依赖 i18n）。
+ *  缺省值为中文历史行为，英文界面必须显式传入。 */
+export interface RecordLocaleText {
+  /** 图片占位词（"图片" / "Image"）：显示名与摘要占位共用。 */
+  imagePlaceholder?: string;
+  /** 无首行文本记录的兜底标题。 */
+  textFallbackTitle?: string;
+  /** 链接记录的兜底标题。 */
+  linkFallbackTitle?: string;
+}
+
 export function getResourceTitle(
   record: (Pick<ClipboardRecord, "type" | "content" | "resource_kind" | "resource_path"> & { id?: string }),
   kind = inferResourceMediaKind(record),
+  locale?: RecordLocaleText,
 ): string {
   const resourcePath = record.type === "file" ? record.resource_path || record.content : record.content;
   if (record.type === "file" && (record.resource_kind || kind === "text")) {
@@ -73,7 +85,10 @@ export function getResourceTitle(
     .map((line) => line.trim())
     .find(Boolean);
   if (firstLine) return firstLine.slice(0, 80);
-  return record.type === "link" ? "链接内容" : "文本内容";
+  // 兜底标题由调用方注入（domain 不依赖 i18n）；缺省保留中文历史行为。
+  return record.type === "link"
+    ? locale?.linkFallbackTitle ?? "链接内容"
+    : locale?.textFallbackTitle ?? "文本内容";
 }
 
 /** 「全部」视图的使用时间来源：最近使用时间，从未使用过回退创建时间。
@@ -93,9 +108,12 @@ export function resourceGroupLeafLabel(
   return group.split("/").filter(Boolean).pop() ?? null;
 }
 
-export function getResourceSummary(record: Pick<ClipboardRecord, "type" | "content">): string {
+export function getResourceSummary(
+  record: Pick<ClipboardRecord, "type" | "content">,
+  imagePlaceholder = "图片",
+): string {
   const summary = record.content
-    .replaceAll("\uFFFC", "[图片]")
+    .replaceAll("\uFFFC", `[${imagePlaceholder}]`)
     .replace(/\s+/g, " ")
     .trim();
   return summary.length > 180 ? `${summary.slice(0, 180)}…` : summary;

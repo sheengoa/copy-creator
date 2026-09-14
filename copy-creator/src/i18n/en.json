@@ -65,6 +65,8 @@
     "image": "Image",
     "link": "Link",
     "file": "File",
+    "textContent": "Text content",
+    "linkContent": "Link content",
     "create": "Create",
     "pasteNormal": "Normal paste",
     "pasteToTerminal": "Paste to terminal",
