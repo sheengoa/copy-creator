@@ -244,6 +244,11 @@ describe("integration regressions", () => {
     expect(pageSource).toContain("void loadRecords(false, \"resources\", resourceGroup)");
     const appSource = readSource("./App.tsx");
     expect(appSource).toContain("panel.component(isActive)");
+
+    // 三个常挂页面的窗口恢复显示刷新必须齐全：短语页虽独占 phraseStore，
+    // 但隐藏期间的增删改只能靠事件感知，事件丢失时同样需要兜底重载。
+    const phrasePageSource = readSource("./pages/PhrasePage/index.tsx");
+    expect(phrasePageSource).toContain("useRefreshOnShow");
   });
 
   it("passes clipboard search into cards for highlighting", () => {

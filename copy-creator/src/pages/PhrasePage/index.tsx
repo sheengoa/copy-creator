@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { useTranslation } from "react-i18next";
 import { resolveResourceAssetUrl } from "../../domain/mediaUrl";
+import { useRefreshOnShow } from "../../hooks/useRefreshOnShow";
 import {
   usePhraseStore,
   isImageFilePath,
@@ -74,6 +75,7 @@ export default function PhrasePage() {
     setSearch,
     setSelectedGroup,
     init,
+    loadGroups,
     loadPhrases,
     createGroup,
     updateGroup,
@@ -103,6 +105,18 @@ export default function PhrasePage() {
       loadPhrases(selectedGroupId);
     }
   }, [selectedGroupId, loadPhrases]);
+
+  // 窗口从隐藏恢复显示时重载分组与当前分组短语：兜底隐藏期间丢失或被
+  // WebView 节流的刷新事件（短语可能在其他窗口被增删改）。与剪切板/
+  // 资源两页的 useRefreshOnShow 同款兜底。
+  useRefreshOnShow(
+    useCallback(() => {
+      void loadGroups();
+      if (selectedGroupId) {
+        void loadPhrases(selectedGroupId);
+      }
+    }, [loadGroups, loadPhrases, selectedGroupId]),
+  );
 
   useEffect(() => {
     getQuickInputFileLimit()
