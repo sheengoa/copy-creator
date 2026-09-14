@@ -1317,7 +1317,9 @@ pub fn init_db(app: &AppHandle) -> Result<(), Box<dyn std::error::Error>> {
     let conn = Connection::open(&path)?;
 
     conn.execute_batch(
-        "PRAGMA journal_mode=WAL; PRAGMA synchronous=NORMAL; PRAGMA cache_size=-8000;",
+        // foreign_keys 默认关闭：声明式级联（phrases.group_id）此前从未生效，
+        // 级联删除一直靠手写 DELETE。显式开启让引用约真正生效。
+        "PRAGMA journal_mode=WAL; PRAGMA synchronous=NORMAL; PRAGMA cache_size=-8000; PRAGMA foreign_keys=ON;",
     )?;
 
     ensure_schema(&conn)?;
@@ -3926,7 +3928,7 @@ fn migrate_storage_data(
     let new_conn = Connection::open(&new_db).map_err(|e| format!("open new db: {}", e))?;
     new_conn
         .execute_batch(
-            "PRAGMA journal_mode=WAL; PRAGMA synchronous=NORMAL; PRAGMA cache_size=-8000;",
+            "PRAGMA journal_mode=WAL; PRAGMA synchronous=NORMAL; PRAGMA cache_size=-8000; PRAGMA foreign_keys=ON;",
         )
         .map_err(|e| format!("set pragmas: {}", e))?;
     ensure_schema(&new_conn).map_err(|e| format!("create schema: {}", e))?;
