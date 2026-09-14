@@ -140,6 +140,7 @@ interface ClipboardState {
     resourceGroup?: string | null,
     options?: { silent?: boolean },
   ) => Promise<ClipboardRecord[] | null>;
+  reloadLoadedWindow: () => Promise<void>;
   updateRecordLabel: (id: string, label: ApiKeyLabel) => void;
   updateResourceNote: (id: string, note: string) => void;
   deleteRecords: (ids: string[]) => Promise<void>;
@@ -286,7 +287,7 @@ export function createRecordsStore() {
       });
 
       listen<string>("clipboard-record-updated", () => {
-        get().loadRecords();
+        void get().reloadLoadedWindow();
       }).then((fn) => {
         unlisteners.push(fn);
       });
@@ -409,12 +410,46 @@ export function createRecordsStore() {
       }
     },
 
+    // 后台刷新（clipboard-record-updated 等使用/内容变化）：只重拉当前
+    // 已加载窗口等量记录——不再回退到第一页，深翻页的滚动位置与数据量
+    // 得以保留；静默执行，不触发加载态闪烁。排序/字段变化照常反映。
+    reloadLoadedWindow: async () => {
+      const state = get();
+      const loaded = state.records.length;
+      if (loaded === 0) return;
+      const request = ++recordsLoadGeneration;
+      try {
+        const activeCategory = state.category;
+        const cat = activeCategory !== "all" ? activeCategory : undefined;
+        const activeResourceGroup =
+          activeCategory === "resources" ? state.resourceGroup : null;
+        const records = await invoke<ClipboardRecord[]>("get_clipboard_records", {
+          search: state.search || undefined,
+          limit: loaded,
+          offset: 0,
+          category: cat,
+          ...contentSortArg(activeCategory, activeResourceGroup),
+          ...(activeCategory === "resources" && activeResourceGroup !== null
+            ? { resourceGroup: activeResourceGroup }
+            : {}),
+        });
+        if (request !== recordsLoadGeneration) return;
+        set((prev) => ({
+          records,
+          // 返回数少于窗口长度说明总数已不足一窗，无更多可加载。
+          hasMore: records.length >= prev.records.length,
+          loadError: null,
+        }));
+      } catch (e) {
+        console.error("Failed to reload loaded window:", e);
+      }
+    },
+
     loadAllRecords: async (
       categoryOverride?: ClipType,
       resourceGroup?: string | null,
       options?: { silent?: boolean },
-    ) => {
-      // silent 模式：整组粘贴等一次性取数专用。不参与 UI 加载代数竞争、
+    ) => {      // silent 模式：整组粘贴等一次性取数专用。不参与 UI 加载代数竞争、
       // 不触碰共享状态，避免被并发的常规加载（如菜单打开时的 loadRecords
       // 或剪贴板推送触发的刷新）判定为过期而返回 null，导致粘贴静默失效。
       // 也不带主窗口搜索词：整组粘贴取的是分组全量，搜索框是无关状态。
