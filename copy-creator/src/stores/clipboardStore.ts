@@ -203,6 +203,52 @@ async function getFullContent(record: ClipboardRecord): Promise<string> {
   return invoke<string>("get_clipboard_record_content", { id: record.id });
 }
 
+/** 粘贴执行统一路径：普通 / 终端两种模式只差后端命令名与 terminal 参数。
+ *  返回是否成功（失败由调用方给出可见反馈）。 */
+async function runPaste(
+  get: () => ClipboardState,
+  set: RecordsSetter,
+  record: ClipboardRecord,
+  terminal: boolean,
+): Promise<boolean> {
+  try {
+    if (record.has_images) {
+      await invoke("paste_stash_record", { id: record.id, terminal });
+      touchClipboardUsage([record.id]);
+      applyPasteFeedback(get(), record.id, set);
+      return true;
+    }
+    const content = await getFullContent(record);
+    if (record.type === "image") {
+      await invoke("paste_image", { path: content });
+    } else if (record.type === "file") {
+      if (isFileBackedTextResource(record)) {
+        try {
+          // 文件承载的文本资源按内容粘贴；读取失败（超限、非 UTF-8
+          // 等）时回退为文件粘贴，保持不劣于旧行为。
+          await invoke("paste_text_file", { path: getResourcePath(record), terminal });
+          touchClipboardUsage([record.id]);
+          applyPasteFeedback(get(), record.id, set);
+          return true;
+        } catch (error) {
+          console.warn("文本资源按内容粘贴失败，回退为文件粘贴:", error);
+        }
+      }
+      await invoke("paste_file", { path: content });
+    } else if (terminal) {
+      await invoke("paste_text_terminal", { text: content });
+    } else {
+      await invoke("paste_text", { text: content });
+    }
+    touchClipboardUsage([record.id]);
+    applyPasteFeedback(get(), record.id, set);
+    return true;
+  } catch (e) {
+    console.error(terminal ? "Terminal paste failed:" : "Paste failed:", e);
+    return false;
+  }
+}
+
 /** 记录列表 store 工厂：每次调用产出视图状态完全隔离的实例（records/
  *  category/search/加载代数/事件监听互不可见）。主窗口内剪切板页与资源
  *  页必须各持一个实例——两页曾共用同一实例，页面又永久保挂载，任何一方
@@ -551,77 +597,9 @@ export function createRecordsStore() {
 
     deleteRecord: async (id: string) => get().deleteRecords([id]),
 
-    pasteRecord: async (record: ClipboardRecord) => {
-      try {
-        if (record.has_images) {
-          await invoke("paste_stash_record", { id: record.id, terminal: false });
-          touchClipboardUsage([record.id]);
-          applyPasteFeedback(get(), record.id, set);
-          return true;
-        }
-        const content = await getFullContent(record);
-        if (record.type === "image") {
-          await invoke("paste_image", { path: content });
-        } else if (record.type === "file") {
-          if (isFileBackedTextResource(record)) {
-            try {
-              // 文件承载的文本资源按内容粘贴；读取失败（超限、非 UTF-8
-              // 等）时回退为文件粘贴，保持不劣于旧行为。
-              await invoke("paste_text_file", { path: getResourcePath(record), terminal: false });
-              touchClipboardUsage([record.id]);
-              applyPasteFeedback(get(), record.id, set);
-              return true;
-            } catch (error) {
-              console.warn("文本资源按内容粘贴失败，回退为文件粘贴:", error);
-            }
-          }
-          await invoke("paste_file", { path: content });
-        } else {
-          await invoke("paste_text", { text: content });
-        }
-        touchClipboardUsage([record.id]);
-        applyPasteFeedback(get(), record.id, set);
-        return true;
-      } catch (e) {
-        console.error("Paste failed:", e);
-        return false;
-      }
-    },
+    pasteRecord: (record) => runPaste(get, set, record, false),
 
-    pasteRecordTerminal: async (record: ClipboardRecord) => {
-      try {
-        if (record.has_images) {
-          await invoke("paste_stash_record", { id: record.id, terminal: true });
-          touchClipboardUsage([record.id]);
-          applyPasteFeedback(get(), record.id, set);
-          return true;
-        }
-        const content = await getFullContent(record);
-        if (record.type === "image") {
-          await invoke("paste_image", { path: content });
-        } else if (record.type === "file") {
-          if (isFileBackedTextResource(record)) {
-            try {
-              await invoke("paste_text_file", { path: getResourcePath(record), terminal: true });
-              touchClipboardUsage([record.id]);
-              applyPasteFeedback(get(), record.id, set);
-              return true;
-            } catch (error) {
-              console.warn("文本资源按内容粘贴失败，回退为文件粘贴:", error);
-            }
-          }
-          await invoke("paste_file", { path: content });
-        } else {
-          await invoke("paste_text_terminal", { text: content });
-        }
-        touchClipboardUsage([record.id]);
-        applyPasteFeedback(get(), record.id, set);
-        return true;
-      } catch (e) {
-        console.error("Terminal paste failed:", e);
-        return false;
-      }
-    },
+    pasteRecordTerminal: (record) => runPaste(get, set, record, true),
 
     // 移到顶部：sort_order 提到全表最前，径向菜单与主窗口共用该顺序。
     // 搜索状态下执行后按当前搜索词重载，置顶项保持在结果最前。
