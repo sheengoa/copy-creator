@@ -1108,182 +1108,20 @@ pub fn start_monitor(app: &AppHandle) -> Result<(), Box<dyn std::error::Error>> 
     }
 
     std::thread::spawn(move || {
-        let mut poll_count: u32 = 0;
+        // 采集线程是剪切板功能的生命线：单轮 panic（剪贴板平台层、图片
+        // 编解码等）不允许静默终止采集。与 win_hook 分发线程的做法对齐：
+        // 捕获后记录日志并整体重建循环；重建会重走 1.6 秒启动静默窗，
+        // LAST_* 判重缓存为全局状态，不会造成重复入库。
         loop {
-            std::thread::sleep(std::time::Duration::from_millis(800));
-            poll_count += 1;
-
-            // Skip first 2 polls (1.6s) to avoid recording startup clipboard state
-            if poll_count <= 2 {
-                sync_monitor_cache(&handle);
-                continue;
-            }
-
-            if crate::paste::PASTING.load(std::sync::atomic::Ordering::SeqCst) {
-                continue;
-            }
-
-            // Linux: poll-based detection via content comparison every cycle
-            let mut image_recorded = false;
-
-            let mut image_data: Option<(Vec<u8>, u32, u32)> = None;
-
-            // Image detection via arboard — only record when the image actually changes
-            if let Ok(mut clipboard) = arboard::Clipboard::new() {
-                if let Ok(image) = clipboard.get_image() {
-                    let rgba = &image.bytes;
-                    if !rgba.is_empty() && image.width > 0 && image.height > 0 {
-                        let hash = rgba
-                            .iter()
-                            .step_by(64)
-                            .fold(0u64, |acc, &b| acc.wrapping_mul(31).wrapping_add(b as u64));
-                        let mut cached_hash = LAST_CLIPBOARD_IMAGE_HASH.lock().unwrap();
-                        if hash != *cached_hash {
-                            *cached_hash = hash;
-                            image_data =
-                                Some((rgba.to_vec(), image.width as u32, image.height as u32));
-                        }
-                        // If hash matches: image hasn't changed → skip (no re-insertion)
-                    }
-                }
-            }
-
-            if let Some((rgba_vec, img_w, img_h)) = image_data.take() {
-                let content_hash: u64 = rgba_vec
-                    .iter()
-                    .fold(0u64, |acc, &b| acc.wrapping_mul(31).wrapping_add(b as u64));
-                let content_hash_str = format!("{:016x}", content_hash);
-                let filename = format!("{}.png", content_hash_str);
-                let relative = format!("images/{}", filename);
-
-                let mut png_bytes: Vec<u8> = Vec::new();
-                {
-                    let encoder = image::codecs::png::PngEncoder::new(&mut png_bytes);
-                    use image::ImageEncoder;
-                    let _ = encoder.write_image(
-                        &rgba_vec,
-                        img_w,
-                        img_h,
-                        image::ExtendedColorType::Rgba8,
-                    );
-                }
-
-                if !png_bytes.is_empty() {
-                    let mut dir = crate::db::get_storage_dir(&handle);
-                    dir.push("images");
-                    std::fs::create_dir_all(&dir).ok();
-
-                    let filepath = dir.join(&filename);
-
-                    if !filepath.exists() {
-                        if let Ok(mut f) = std::fs::File::create(&filepath) {
-                            let _ = f.write_all(&png_bytes);
-                        }
-                    }
-
-                    log::info!(
-                        "clipboard: recorded image {}x{} hash={}",
-                        img_w,
-                        img_h,
-                        content_hash_str
-                    );
-
-                    crate::paste::cache_image(relative.clone(), rgba_vec, img_w, img_h);
-
-                    // Generate thumbnail if missing
-                    let mut thumb_dir = dir.clone();
-                    thumb_dir.push("thumbs");
-                    std::fs::create_dir_all(&thumb_dir).ok();
-                    let thumb_path = thumb_dir.join(&filename);
-                    if !thumb_path.exists() {
-                        if let Ok(decoded) = image::load_from_memory(&png_bytes) {
-                            let (tw, th) = (decoded.width(), decoded.height());
-                            let max_thumb: u32 = 200;
-                            let scale = if tw > max_thumb || th > max_thumb {
-                                max_thumb as f32 / tw.max(th) as f32
-                            } else {
-                                1.0
-                            };
-                            let thumb = if scale < 1.0 {
-                                decoded.resize(
-                                    (tw as f32 * scale) as u32,
-                                    (th as f32 * scale) as u32,
-                                    image::imageops::FilterType::Triangle,
-                                )
-                            } else {
-                                decoded
-                            };
-                            let mut thumb_buf = std::io::Cursor::new(Vec::new());
-                            if thumb
-                                .write_to(&mut thumb_buf, image::ImageFormat::Png)
-                                .is_ok()
-                            {
-                                if let Ok(mut tf) = std::fs::File::create(&thumb_path) {
-                                    let _ = tf.write_all(&thumb_buf.into_inner());
-                                }
-                            }
-                        }
-                    }
-
-                    insert_and_emit(&handle, "image", &relative);
-                    image_recorded = true;
-                }
-            }
-
-            if image_recorded {
-                if let Ok(text) = handle.clipboard().read_text() {
-                    *LAST_CLIPBOARD_TEXT.lock().unwrap() = text.trim().to_string();
-                }
-            } else {
-                // 优先读剪贴板文件格式：Windows 资源管理器复制文件只放
-                // CF_HDROP 不放文本，仅靠文本启发式会漏掉这类文件记录。
-                let mut files = clipboard_file_list().unwrap_or_default();
-
-                if files.is_empty() {
-                    if let Ok(text) = handle.clipboard().read_text() {
-                        let text = text.trim().to_string();
-                        files = clipboard_text_files(&text);
-
-                        if !files.is_empty() {
-                            *LAST_CLIPBOARD_TEXT.lock().unwrap() = text;
-                        }
-                    }
-                }
-
-                if !files.is_empty() {
-                    let key = files.join("|");
-                    {
-                        let mut cached = LAST_CLIPBOARD_FILES_KEY.lock().unwrap();
-                        if key == *cached {
-                            // File list unchanged — skip to avoid re-inserting
-                            // the same images/files on every poll cycle.
-                            continue;
-                        }
-                        *cached = key.clone();
-                    }
-
-                    for file_path in files {
-                        if file_path.trim().is_empty() {
-                            continue;
-                        }
-                        let is_image =
-                            crate::media_kind::is_previewable_image_file(std::path::Path::new(&file_path))
-                                || crate::media_kind::is_importable_image_file(std::path::Path::new(&file_path));
-                        if is_image && import_image_file(&handle, &file_path) {
-                            continue;
-                        }
-                        // 图片导入失败（如 jpg/png 超过预览导入大小上限、解码失败）
-                        // 时降级为文件记录，保证复制的内容可见、可粘贴，而不是
-                        // 静默丢失。
-                        insert_and_emit(&handle, "file", &file_path);
-                    }
-                } else if let Ok(text) = handle.clipboard().read_text() {
-                    let text = text.trim().to_string();
-                    if !text.is_empty() && text != *LAST_CLIPBOARD_TEXT.lock().unwrap() {
-                        *LAST_CLIPBOARD_TEXT.lock().unwrap() = text.clone();
-                        let record_type = classify_text_record(&text);
-                        insert_and_emit(&handle, record_type, &text);
-                    }
+            let outcome =
+                std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                    poll_clipboard_forever(handle.clone());
+                }));
+            match outcome {
+                Ok(()) => break,
+                Err(_) => {
+                    log::error!("剪切板采集线程发生 panic，2 秒后重建采集循环");
+                    std::thread::sleep(std::time::Duration::from_secs(2));
                 }
             }
         }
@@ -1291,6 +1129,191 @@ pub fn start_monitor(app: &AppHandle) -> Result<(), Box<dyn std::error::Error>> 
 
     Ok(())
 }
+
+/// 剪切板采集主循环：每 800ms 轮询剪贴板并判重入库。由 `start_monitor`
+/// 的兜底循环调用，单次 panic 时整体重建（见其内注释）。
+fn poll_clipboard_forever(handle: AppHandle) {
+    let mut poll_count: u32 = 0;
+    loop {
+        std::thread::sleep(std::time::Duration::from_millis(800));
+        poll_count += 1;
+
+        // Skip first 2 polls (1.6s) to avoid recording startup clipboard state
+        if poll_count <= 2 {
+            sync_monitor_cache(&handle);
+            continue;
+        }
+
+        if crate::paste::PASTING.load(std::sync::atomic::Ordering::SeqCst) {
+            continue;
+        }
+
+        // Linux: poll-based detection via content comparison every cycle
+        let mut image_recorded = false;
+
+        let mut image_data: Option<(Vec<u8>, u32, u32)> = None;
+
+        // Image detection via arboard — only record when the image actually changes
+        if let Ok(mut clipboard) = arboard::Clipboard::new() {
+            if let Ok(image) = clipboard.get_image() {
+                let rgba = &image.bytes;
+                if !rgba.is_empty() && image.width > 0 && image.height > 0 {
+                    let hash = rgba
+                        .iter()
+                        .step_by(64)
+                        .fold(0u64, |acc, &b| acc.wrapping_mul(31).wrapping_add(b as u64));
+                    let mut cached_hash = LAST_CLIPBOARD_IMAGE_HASH.lock().unwrap();
+                    if hash != *cached_hash {
+                        *cached_hash = hash;
+                        image_data =
+                            Some((rgba.to_vec(), image.width as u32, image.height as u32));
+                    }
+                    // If hash matches: image hasn't changed → skip (no re-insertion)
+                }
+            }
+        }
+
+        if let Some((rgba_vec, img_w, img_h)) = image_data.take() {
+            let content_hash: u64 = rgba_vec
+                .iter()
+                .fold(0u64, |acc, &b| acc.wrapping_mul(31).wrapping_add(b as u64));
+            let content_hash_str = format!("{:016x}", content_hash);
+            let filename = format!("{}.png", content_hash_str);
+            let relative = format!("images/{}", filename);
+
+            let mut png_bytes: Vec<u8> = Vec::new();
+            {
+                let encoder = image::codecs::png::PngEncoder::new(&mut png_bytes);
+                use image::ImageEncoder;
+                let _ = encoder.write_image(
+                    &rgba_vec,
+                    img_w,
+                    img_h,
+                    image::ExtendedColorType::Rgba8,
+                );
+            }
+
+            if !png_bytes.is_empty() {
+                let mut dir = crate::db::get_storage_dir(&handle);
+                dir.push("images");
+                std::fs::create_dir_all(&dir).ok();
+
+                let filepath = dir.join(&filename);
+
+                if !filepath.exists() {
+                    if let Ok(mut f) = std::fs::File::create(&filepath) {
+                        let _ = f.write_all(&png_bytes);
+                    }
+                }
+
+                log::info!(
+                    "clipboard: recorded image {}x{} hash={}",
+                    img_w,
+                    img_h,
+                    content_hash_str
+                );
+
+                crate::paste::cache_image(relative.clone(), rgba_vec, img_w, img_h);
+
+                // Generate thumbnail if missing
+                let mut thumb_dir = dir.clone();
+                thumb_dir.push("thumbs");
+                std::fs::create_dir_all(&thumb_dir).ok();
+                let thumb_path = thumb_dir.join(&filename);
+                if !thumb_path.exists() {
+                    if let Ok(decoded) = image::load_from_memory(&png_bytes) {
+                        let (tw, th) = (decoded.width(), decoded.height());
+                        let max_thumb: u32 = 200;
+                        let scale = if tw > max_thumb || th > max_thumb {
+                            max_thumb as f32 / tw.max(th) as f32
+                        } else {
+                            1.0
+                        };
+                        let thumb = if scale < 1.0 {
+                            decoded.resize(
+                                (tw as f32 * scale) as u32,
+                                (th as f32 * scale) as u32,
+                                image::imageops::FilterType::Triangle,
+                            )
+                        } else {
+                            decoded
+                        };
+                        let mut thumb_buf = std::io::Cursor::new(Vec::new());
+                        if thumb
+                            .write_to(&mut thumb_buf, image::ImageFormat::Png)
+                            .is_ok()
+                        {
+                            if let Ok(mut tf) = std::fs::File::create(&thumb_path) {
+                                let _ = tf.write_all(&thumb_buf.into_inner());
+                            }
+                        }
+                    }
+                }
+
+                insert_and_emit(&handle, "image", &relative);
+                image_recorded = true;
+            }
+        }
+
+        if image_recorded {
+            if let Ok(text) = handle.clipboard().read_text() {
+                *LAST_CLIPBOARD_TEXT.lock().unwrap() = text.trim().to_string();
+            }
+        } else {
+            // 优先读剪贴板文件格式：Windows 资源管理器复制文件只放
+            // CF_HDROP 不放文本，仅靠文本启发式会漏掉这类文件记录。
+            let mut files = clipboard_file_list().unwrap_or_default();
+
+            if files.is_empty() {
+                if let Ok(text) = handle.clipboard().read_text() {
+                    let text = text.trim().to_string();
+                    files = clipboard_text_files(&text);
+
+                    if !files.is_empty() {
+                        *LAST_CLIPBOARD_TEXT.lock().unwrap() = text;
+                    }
+                }
+            }
+
+            if !files.is_empty() {
+                let key = files.join("|");
+                {
+                    let mut cached = LAST_CLIPBOARD_FILES_KEY.lock().unwrap();
+                    if key == *cached {
+                        // File list unchanged — skip to avoid re-inserting
+                        // the same images/files on every poll cycle.
+                        continue;
+                    }
+                    *cached = key.clone();
+                }
+
+                for file_path in files {
+                    if file_path.trim().is_empty() {
+                        continue;
+                    }
+                    let is_image =
+                        crate::media_kind::is_previewable_image_file(std::path::Path::new(&file_path))
+                            || crate::media_kind::is_importable_image_file(std::path::Path::new(&file_path));
+                    if is_image && import_image_file(&handle, &file_path) {
+                        continue;
+                    }
+                    // 图片导入失败（如 jpg/png 超过预览导入大小上限、解码失败）
+                    // 时降级为文件记录，保证复制的内容可见、可粘贴，而不是
+                    // 静默丢失。
+                    insert_and_emit(&handle, "file", &file_path);
+                }
+            } else if let Ok(text) = handle.clipboard().read_text() {
+                let text = text.trim().to_string();
+                if !text.is_empty() && text != *LAST_CLIPBOARD_TEXT.lock().unwrap() {
+                    *LAST_CLIPBOARD_TEXT.lock().unwrap() = text.clone();
+                    let record_type = classify_text_record(&text);
+                    insert_and_emit(&handle, record_type, &text);
+                }
+            }
+        }
+    }
+}
+
 
 #[cfg(test)]
 mod tests {

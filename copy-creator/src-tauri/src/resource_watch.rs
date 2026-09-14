@@ -42,7 +42,22 @@ enum WatchSignal {
 
 pub fn spawn<R: Runtime>(app: &AppHandle<R>) {
     let app = app.clone();
-    std::thread::spawn(move || watch_loop(app));
+    std::thread::spawn(move || {
+        // 监听线程承载资源库的自愈语义，任何 panic（notify 平台层、记录
+        // 库锁毒化等）都不允许静默终止监听：捕获后整体重建 watch_loop，
+        // 循环自身的路径解析与 watcher 重建逻辑会恢复到一致状态。
+        loop {
+            let outcome =
+                std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| watch_loop(app.clone())));
+            match outcome {
+                Ok(()) => break,
+                Err(_) => {
+                    log::error!("资源库监听线程发生 panic，3 秒后重建监听循环");
+                    std::thread::sleep(Duration::from_secs(3));
+                }
+            }
+        }
+    });
 }
 
 fn watch_loop<R: Runtime>(app: AppHandle<R>) {
