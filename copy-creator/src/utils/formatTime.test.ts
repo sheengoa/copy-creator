@@ -12,7 +12,13 @@ beforeAll(async () => {
 
 describe("formatTime", () => {
   it("formats to M/D HH:MM and falls back for unparsable input", () => {
-    expect(formatTime("2026-09-11T08:05:00+08:00")).toBe("9/11 08:05");
+    // 实现按用户本地时区渲染，期望值须从同一 Date 的本地字段推导，
+    // 断言才与时区无关（CI 在 UTC、开发机在 UTC+8 均须通过）。
+    const date = new Date("2026-09-11T08:05:00+08:00");
+    const expected = `${date.getMonth() + 1}/${date.getDate()} ${String(
+      date.getHours(),
+    ).padStart(2, "0")}:${String(date.getMinutes()).padStart(2, "0")}`;
+    expect(formatTime("2026-09-11T08:05:00+08:00")).toBe(expected);
     expect(formatTime("not-a-date")).toBe("not-a-date");
   });
 });
