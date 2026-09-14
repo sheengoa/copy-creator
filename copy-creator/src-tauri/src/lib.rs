@@ -239,14 +239,14 @@ pub fn run() {
             if let Some(window) = app.get_webview_window("radial-menu") {
                 radial_drag::install_radial_file_drag_source(app.handle(), &window)
                     .map_err(|error| format!("安装径向菜单文件拖动源失败: {error}"))?;
-                // Linux 常驻模型：启动即映射并停泊到屏幕外。此后显示/隐藏
-                // 只做纯移动（见 shortcut::RADIAL_MENU_SHOWN 注释），窗管的
-                // map/unmap 动画（作用于"面板+条带"偏心大矩形）永不出现。
-                let _ = window.set_position(tauri::PhysicalPosition::new(
-                    shortcut::RADIAL_PARKED_POS.0,
-                    shortcut::RADIAL_PARKED_POS.1,
-                ));
+                // Linux 常驻模型：启动即映射（内容不可见由前端初始
+                // visible=false 保证），随后清空输入区域让所有点击穿透。
+                // 此后显示/隐藏只切换 web 内容可见性 + 输入区域 + 焦点，
+                // 窗口几何从不改变：窗管既无 map/unmap 动画可播（退场
+                // 动画作用于"面板+条带"偏心大矩形，见 RADIAL_MENU_SHOWN），
+                // 也无移屏外请求可钳制（实测会被钳回工作区左上角）。
                 let _ = window.show();
+                shortcut::clear_radial_input(&window);
             }
 
             // Create hidden standalone clipboard-create popup window.

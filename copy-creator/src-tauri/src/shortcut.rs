@@ -102,28 +102,31 @@ pub fn set_radial_hit_area(
 
 static RADIAL_MENU_ENABLED: AtomicBool = AtomicBool::new(true);
 
-/// Linux 常驻窗口模型的显示状态事实源。径向窗口在启动时即映射并停泊
-/// 到屏幕外（RADIAL_PARKED_POS），此后显示/隐藏只做"移入/移出屏幕"的
-/// 纯移动——窗管的 map/unmap 动画作用于"面板+条带"偏心大矩形（中心落
-/// 在隐形条带里，逐帧采集证据：可见内容朝条带方向飞入/收回），窗口不
-/// unmap 这些动画就永远不会出现，可见动效完全由 web 层承担。窗口本身
-/// 常驻映射后 is_visible() 恒为 true，不能再作切换依据。
+/// Linux 常驻窗口模型的显示状态事实源。径向窗口启动即映射，此后显示/
+/// 隐藏只切换"web 内容可见性 + 输入区域 + 焦点"，几何从不改变——
+/// - 窗管对映射窗口的移屏外请求会钳制回工作区（实测请求
+///   (-20000,-20000) 被落成 (0,-32)，肉眼可见"另一个菜单"闪现左上角）；
+/// - unmap 会触发窗管退场动画，它作用于"面板+条带"偏心大矩形、中心
+///   落在隐形条带里（逐帧采集证据：可见内容朝条带方向收回）；
+/// 因此停泊 = 清空输入区域 + 焦点归还，内容不可见由 web 层负责
+/// （前端 visible=false 经 .radial-menu-hidden 规则整面透明，逐帧采集
+/// 证实停泊后屏幕与背景零差异）。窗口常驻映射后 is_visible() 恒为
+/// true，显示判定只能查本标志。
 static RADIAL_MENU_SHOWN: AtomicBool = AtomicBool::new(false);
 
-/// 屏幕外停泊坐标：任何显示器、任何缩放（radial_menu_scale 最大 200%
-/// 时窗口约 1900×1400）下都完整落在屏幕外。
-pub static RADIAL_PARKED_POS: (i32, i32) = (-20000, -20000);
-
-/// 呼出前持有焦点的 X 窗口 id（0 = 未知），以及呼出后径向窗口自身的
-/// 焦点 id。收仓时若焦点仍在径向窗口（快捷键二次按压/Escape），把焦点
-/// 还给呼出前的窗口；用户已点击其他窗口（失焦自隐藏）则不抢回。
+/// 呼出前持有焦点的 X 窗口 id（0 = 未知）。收仓时若焦点仍在径向窗口
+/// （快捷键二次按压/Escape），把焦点还给呼出前的窗口；用户已点击其他
+/// 窗口（失焦自隐藏）则不抢回。径向窗口自身 xid 不做快照——pager 激活
+/// 是异步的，激活后立即采集会误采到上一个窗口（实测导致归还永远跳过、
+/// 粘贴击键落进不可见菜单），改为停泊时直接从 GDK 读取。
 static RADIAL_PREV_FOCUS: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
-static RADIAL_FOCUS_XID: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
 
-/// 读取当前持有 X 输入焦点的窗口 id（仅 X11；打不开显示连接返回 0，
-/// Wayland 下即如此，调用方按 0 跳过焦点管理）。
+/// 当前焦点所在的**窗管托管顶层**窗口 id。键盘焦点常悬在应用内部的
+/// input-only 子窗口上（如 WebKitGTK 的 0xa00004），_NET_ACTIVE_WINDOW
+/// 激活请求对这类非托管窗口会被 mutter 静默忽略，必须上溯到根窗口的
+/// 直接子窗口。焦点在根/无效时返回 0。
 #[cfg(target_os = "linux")]
-fn x11_current_focus_xid() -> u32 {
+fn x11_focus_toplevel_xid() -> u32 {
     use std::os::raw::{c_char, c_int, c_ulong, c_void};
     #[link(name = "X11")]
     extern "C" {
@@ -134,6 +137,16 @@ fn x11_current_focus_xid() -> u32 {
             focus_return: *mut c_ulong,
             revert_to_return: *mut c_int,
         );
+        fn XQueryTree(
+            display: *mut c_void,
+            w: c_ulong,
+            root_return: *mut c_ulong,
+            parent_return: *mut c_ulong,
+            children_return: *mut *mut c_ulong,
+            nchildren_return: *mut c_int,
+        ) -> c_int;
+        fn XFree(data: *mut c_void) -> c_int;
+        fn XDefaultRootWindow(display: *mut c_void) -> c_ulong;
     }
     unsafe {
         let display = XOpenDisplay(std::ptr::null());
@@ -143,8 +156,28 @@ fn x11_current_focus_xid() -> u32 {
         let mut focus: c_ulong = 0;
         let mut revert: c_int = 0;
         XGetInputFocus(display, &mut focus, &mut revert);
+        let root = XDefaultRootWindow(display);
+        let mut cur = focus;
+        let result = loop {
+            if cur == 0 || cur <= 1 || cur == root {
+                break 0;
+            }
+            let (mut tree_root, mut parent): (c_ulong, c_ulong) = (0, 0);
+            let mut children: *mut c_ulong = std::ptr::null_mut();
+            let mut n = 0;
+            if XQueryTree(display, cur, &mut tree_root, &mut parent, &mut children, &mut n) == 0 {
+                break 0;
+            }
+            if !children.is_null() {
+                XFree(children as *mut c_void);
+            }
+            if parent == root {
+                break cur;
+            }
+            cur = parent;
+        };
         XCloseDisplay(display);
-        focus as u32
+        result as u32
     }
 }
 
@@ -200,9 +233,30 @@ fn x11_activate_window(xid: u32) {
     }
 }
 
-/// 收起径向菜单（所有隐藏路径的唯一出口）：Linux 把窗口停泊回屏幕外
-/// 并归还焦点（绝不 unmap，理由见 RADIAL_MENU_SHOWN 注释）；非 Linux
-/// 直接 hide()（DWM 没有偏心退场动画问题，保持原有行为）。
+/// 清空径向窗口输入区域（停泊态所有点击穿透到下层应用）。GTK 调用，
+/// 须回主线程。
+#[cfg(target_os = "linux")]
+pub(crate) fn clear_radial_input(window: &tauri::WebviewWindow<tauri::Wry>) {
+    let task_window = window.clone();
+    let _ = window.run_on_main_thread(move || {
+        use gtk::prelude::*;
+        let Ok(gtk_window) = task_window.gtk_window() else {
+            return;
+        };
+        let Some(gdk_window) = gtk_window.window() else {
+            return;
+        };
+        gdk_window.input_shape_combine_region(
+            &gtk::cairo::Region::create_rectangle(&gtk::cairo::RectangleInt::new(0, 0, 0, 0)),
+            0,
+            0,
+        );
+    });
+}
+
+/// 收起径向菜单（所有隐藏路径的唯一出口）：Linux 原地停泊（清输入 +
+/// 焦点归还，内容不可见由 web 层负责，理由见 RADIAL_MENU_SHOWN 注释），
+/// 非 Linux 直接 hide()（DWM 没有偏心退场动画问题，保持原有行为）。
 pub(crate) fn park_radial_window(app: &AppHandle) {
     RADIAL_MENU_SHOWN.store(false, Ordering::SeqCst);
     let Some(radial) = app.get_webview_window("radial-menu") else {
@@ -210,17 +264,33 @@ pub(crate) fn park_radial_window(app: &AppHandle) {
     };
     #[cfg(target_os = "linux")]
     {
-        let _ = radial.set_position(tauri::PhysicalPosition::new(
-            RADIAL_PARKED_POS.0,
-            RADIAL_PARKED_POS.1,
-        ));
-        let focus_xid = x11_current_focus_xid();
-        let radial_xid = RADIAL_FOCUS_XID.load(Ordering::SeqCst);
         let prev = RADIAL_PREV_FOCUS.load(Ordering::SeqCst);
-        if focus_xid != 0 && focus_xid == radial_xid && prev != 0 && prev != radial_xid {
-            x11_activate_window(prev);
-        }
-        RADIAL_FOCUS_XID.store(0, Ordering::SeqCst);
+        let task = radial.clone();
+        // 顺序收进一个主线程闭包：先穿透输入，再归还焦点。
+        let _ = radial.run_on_main_thread(move || {
+            use gtk::prelude::*;
+            let Ok(gtk_window) = task.gtk_window() else {
+                return;
+            };
+            if let Some(gdk_window) = gtk_window.window() {
+                gdk_window.input_shape_combine_region(
+                    &gtk::cairo::Region::create_rectangle(&gtk::cairo::RectangleInt::new(
+                        0, 0, 0, 0,
+                    )),
+                    0,
+                    0,
+                );
+            }
+            // 焦点判定必须用 GTK 的 is_active：WebKitGTK 持有键盘焦点
+            // 的是其 input-only 子窗口而非顶层（XGetInputFocus 实测返回
+            // 0xa00004 子窗口、顶层是 0xa00003），按顶层 xid 比较永远
+            // 不匹配，归还曾被永久跳过。用户已点击其他应用（失焦自
+            // 隐藏）时 is_active 为 false，自然不抢回焦点。
+            if gtk_window.is_active() && prev != 0 {
+                x11_activate_window(prev);
+                log::info!("[park_radial] focus restored to #{prev:x}");
+            }
+        });
     }
     #[cfg(not(target_os = "linux"))]
     {
@@ -665,23 +735,15 @@ pub fn show_radial_menu(app: &AppHandle) {
         let theme =
             crate::db::get_setting_sync(app, "theme").unwrap_or_else(|| "light".to_string());
 
-        // 呼出前记录焦点窗口 xid：收仓时据此把焦点还给呼出前的应用。
-        // 必须在抢焦点（raise + pager 激活）之前读取。
+        // 呼出前记录焦点所在的托管顶层窗口：收仓时据此把焦点还给呼出
+        // 前的应用。必须在抢焦点（raise + pager 激活）之前读取。
         #[cfg(target_os = "linux")]
-        RADIAL_PREV_FOCUS.store(x11_current_focus_xid(), Ordering::SeqCst);
+        RADIAL_PREV_FOCUS.store(x11_focus_toplevel_xid(), Ordering::SeqCst);
 
         raise_always_on_top(&radial);
 
         #[cfg(target_os = "linux")]
-        {
-            // 常驻模型：窗口已在屏幕上（纯移动完成），登记显示状态，并
-            // 记录此刻焦点 xid（应为径向窗口自身），收仓时用于判定焦点
-            // 是否仍在径向窗口。若 pager 激活失败（焦点留在原应用），
-            // 这里记录的 xid 与 PREV 相同，收仓时比较后会跳过归还。
-            RADIAL_MENU_SHOWN.store(true, Ordering::SeqCst);
-            let focus_xid = x11_current_focus_xid();
-            RADIAL_FOCUS_XID.store(focus_xid, Ordering::SeqCst);
-        }
+        RADIAL_MENU_SHOWN.store(true, Ordering::SeqCst);
 
         // Windows: 快捷键触发时进程在后台，tauri 的 set_focus 会被前台锁
         // 拒绝，菜单拿不到键盘焦点（Escape、失焦自隐藏都会失效），需强制
