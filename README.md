@@ -6,7 +6,7 @@
 
 <div align="center">
 
-<img src="copy-creator/public/logo.png" alt="Copy Creator Logo" width="120">
+<img src="copy-creator/public/logo_top.png" alt="Copy Creator Logo" width="120">
 
 # Copy Creator
 
@@ -114,7 +114,7 @@ sudo dpkg -i copy-creator_*.deb
    | Copy Creator — 窗口 | `path/to/copy-creator-ctl show` | `Ctrl+Shift+V` |
    | Copy Creator — 径向菜单 | `path/to/copy-creator-ctl radial` | `Ctrl+Shift+B` |
 
-   > `copy-creator-ctl` 脚本位于安装目录的 `scripts/` 文件夹中。复制到 `~/.local/bin/` 可直接使用。
+   > `copy-creator-ctl` 脚本随源码仓库提供（`copy-creator/scripts/copy-creator-ctl`），安装包暂未附带；从仓库复制到 `~/.local/bin/` 可直接使用。
 
 ### 剪切板功能
 
@@ -209,6 +209,8 @@ copy-creator/
 │   ├── components/         # React 组件（含径向菜单 RadialMenu）
 │   ├── pages/              # 页面组件（剪切板 / 短语 / 资源）
 │   ├── stores/             # Zustand 状态管理
+│   ├── domain/             # 领域层：类型判定 / 记录语义 / 预览 / 媒体 URL 唯一出口
+│   ├── hooks/              # 共享 Hooks
 │   ├── styles/             # CSS 样式文件
 │   ├── i18n/               # 国际化配置
 │   ├── utils/              # 工具函数
@@ -218,6 +220,12 @@ copy-creator/
 │   └── Cargo.toml          # Rust 依赖配置
 ├── public/                 # 静态资源
 └── package.json            # 前端依赖配置
+
+仓库根目录另有扩展名清单的单一配置与生成器：
+
+├── config/media-types.json           # 扩展名清单唯一源
+└── scripts/generate-media-types.mjs  # 生成 TS / Rust 代码：改配置后必须重跑
+                                     # pnpm gen:media-types 并提交生成物
 ```
 
 ## 许可证

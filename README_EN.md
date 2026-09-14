@@ -6,7 +6,7 @@ English | [中文](./README.md)
 
 <div align="center">
 
-<img src="copy-creator/public/logo.png" alt="Copy Creator Logo" width="120">
+<img src="copy-creator/public/logo_top.png" alt="Copy Creator Logo" width="120">
 
 # Copy Creator
 
@@ -103,8 +103,16 @@ sudo dpkg -i copy-creator_*.deb
 
 1. **Launch the App**: Launch from the application menu after installation, the app will appear as a floating window
 2. **System Tray**: When you close the window, the app automatically minimizes to the system tray and continues running in the background
-3. **Show Window**: Use the global hotkey (configurable in settings) to quickly show/hide the window
-4. **Quick Menu**: Set an independent global hotkey to open a quick menu at the mouse cursor for fast selection and pasting
+3. **Set Global Shortcuts** (Ubuntu native method): due to Wayland security restrictions, global shortcuts are bound via system settings. The app automatically creates a Unix socket at startup so external scripts can control it. Open Ubuntu **Settings → Keyboard → Keyboard Shortcuts → Custom Shortcuts** and add:
+
+   | Name | Command | Suggested Shortcut |
+   |:---|:---|:---|
+   | Copy Creator — Window | `path/to/copy-creator-ctl show` | `Ctrl+Shift+V` |
+   | Copy Creator — Radial Menu | `path/to/copy-creator-ctl radial` | `Ctrl+Shift+B` |
+
+   > The `copy-creator-ctl` script ships with the source repository (`copy-creator/scripts/copy-creator-ctl`) and is not yet bundled in installers; copy it from the repository to `~/.local/bin/` to use it directly.
+
+4. **Quick Menu**: trigger the radial-menu shortcut to open a quick panel at the mouse cursor, with Clipboard / Quick Input / Resources tabs for fast selection and pasting
 
 ### Clipboard Feature
 
@@ -199,6 +207,8 @@ copy-creator/
 │   ├── components/         # React components (incl. RadialMenu)
 │   ├── pages/              # Page components (Clipboard / Phrases / Resources)
 │   ├── stores/             # Zustand state management
+│   ├── domain/             # Domain layer: media kind / record semantics / preview / media URL
+│   ├── hooks/              # Shared hooks
 │   ├── styles/             # CSS style files
 │   ├── i18n/               # Internationalization config
 │   ├── utils/              # Utility functions
@@ -208,6 +218,12 @@ copy-creator/
 │   └── Cargo.toml          # Rust dependency config
 ├── public/                 # Static assets
 └── package.json            # Frontend dependency config
+
+The repository root also holds the single source of the extension lists and its generator:
+
+├── config/media-types.json           # Single source for extension lists
+└── scripts/generate-media-types.mjs  # Generates TS / Rust code: after editing the
+                                     # config, run pnpm gen:media-types and commit
 ```
 
 ## License
