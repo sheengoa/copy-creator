@@ -1314,6 +1314,21 @@ pub fn init_db(app: &AppHandle) -> Result<(), Box<dyn std::error::Error>> {
         "PRAGMA journal_mode=WAL; PRAGMA synchronous=NORMAL; PRAGMA cache_size=-8000;",
     )?;
 
+    ensure_schema(&conn)?;
+
+
+    app.manage(DbState {
+        conn: Mutex::new(conn),
+    });
+    migrate_legacy_quick_input_file_names(app);
+
+    Ok(())
+}
+
+/// 连接 schema 与历史数据迁移的唯一入口：建表、索引、默认设置种子、
+/// 历史结构增量迁移（全部幂等）。主库初始化与存储迁移共用，保证任何
+/// 路径建出的库 schema 完全一致，不再各自维护一份 CREATE TABLE 文本。
+fn ensure_schema(conn: &Connection) -> Result<(), Box<dyn std::error::Error>> {
     conn.execute_batch(
         "
         CREATE TABLE IF NOT EXISTS clipboard_records (
@@ -1596,14 +1611,8 @@ pub fn init_db(app: &AppHandle) -> Result<(), Box<dyn std::error::Error>> {
         .ok();
 
     // thumbs 派生缓存清退（每次启动执行，见函数注释）。
-    prune_legacy_thumb_records(&conn);
-    prune_temporary_resource_records(&conn);
-
-    app.manage(DbState {
-        conn: Mutex::new(conn),
-    });
-    migrate_legacy_quick_input_file_names(app);
-
+    prune_legacy_thumb_records(conn);
+    prune_temporary_resource_records(conn);
     Ok(())
 }
 
@@ -3773,83 +3782,20 @@ fn migrate_storage(app: &AppHandle, new_path: &str) -> Result<(), String> {
     // Create new DB with schema and settings at target location
     let new_conn = Connection::open(&custom_db).map_err(|e| format!("open new db: {}", e))?;
 
+    // 与主库同源的连接初始化：PRAGMA + ensure_schema（schema 单一来源，
+    // 新库从第一天起就具备全部列与索引，不会与 init_db 漂移）。
     new_conn
         .execute_batch(
-            "
-            CREATE TABLE IF NOT EXISTS clipboard_records (
-                id TEXT PRIMARY KEY,
-                type TEXT NOT NULL,
-                content TEXT NOT NULL,
-                source_app TEXT DEFAULT '',
-                created_at TEXT NOT NULL,
-                user_api_key INTEGER DEFAULT 0,
-                sort_order REAL,
-                group_name TEXT DEFAULT '',
-                attachments TEXT DEFAULT '[]',
-                storage_mode TEXT DEFAULT 'database',
-                resource_path TEXT DEFAULT '',
-                last_used_at TEXT DEFAULT ''
-            );
-            CREATE INDEX IF NOT EXISTS idx_clipboard_created_at ON clipboard_records(created_at);
-            CREATE INDEX IF NOT EXISTS idx_clipboard_sort_order ON clipboard_records(sort_order DESC);
-            CREATE TABLE IF NOT EXISTS phrase_groups (
-                id TEXT PRIMARY KEY,
-                name TEXT NOT NULL,
-                sort_order INTEGER DEFAULT 0,
-                created_at TEXT NOT NULL,
-                updated_at TEXT NOT NULL
-            );
-            CREATE TABLE IF NOT EXISTS phrases (
-                id TEXT PRIMARY KEY,
-                group_id TEXT NOT NULL,
-                title TEXT NOT NULL,
-                content TEXT NOT NULL,
-                input_type TEXT DEFAULT 'text',
-                source_path TEXT DEFAULT '',
-                file_size INTEGER DEFAULT 0,
-                sort_order INTEGER DEFAULT 0,
-                created_at TEXT NOT NULL,
-                updated_at TEXT NOT NULL,
-                last_used_at TEXT DEFAULT '',
-                use_count INTEGER DEFAULT 0,
-                FOREIGN KEY (group_id) REFERENCES phrase_groups(id) ON DELETE CASCADE
-            );
-            CREATE TABLE IF NOT EXISTS translation_history (
-                id TEXT PRIMARY KEY,
-                source_text TEXT NOT NULL,
-                target_text TEXT NOT NULL,
-                source_lang TEXT DEFAULT 'auto',
-                target_lang TEXT NOT NULL,
-                engine TEXT NOT NULL,
-                created_at TEXT NOT NULL
-            );
-            CREATE INDEX IF NOT EXISTS idx_translation_created_at ON translation_history(created_at);
-            CREATE TABLE IF NOT EXISTS settings (
-                key TEXT PRIMARY KEY,
-                value TEXT NOT NULL
-            );
-            DROP TABLE IF EXISTS api_key_labels;
-            CREATE TABLE IF NOT EXISTS api_key_labels (
-                record_id   TEXT PRIMARY KEY,
-                key_preview TEXT NOT NULL,
-                service     TEXT NOT NULL,
-                api_base    TEXT DEFAULT '',
-                note        TEXT DEFAULT '',
-                is_expired  INTEGER DEFAULT 0,
-                created_at  TEXT NOT NULL,
-                updated_at  TEXT NOT NULL
-            );
-            CREATE TABLE IF NOT EXISTS toast_shown (
-                key_preview TEXT PRIMARY KEY
-            );
-            ",
+            "PRAGMA journal_mode=WAL; PRAGMA synchronous=NORMAL; PRAGMA cache_size=-8000;",
         )
-        .map_err(|e| format!("create schema: {}", e))?;
+        .map_err(|e| format!("set pragmas: {}", e))?;
+    ensure_schema(&new_conn).map_err(|e| format!("create schema: {}", e))?;
 
-    // Copy settings to new DB
+    // Copy settings to new DB（ensure_schema 已种子化默认设置，旧值
+    // 必须以 REPLACE 覆盖种子，否则与种子键冲突报 UNIQUE 约束错误）
     {
         let mut stmt = new_conn
-            .prepare("INSERT INTO settings (key, value) VALUES (?1, ?2)")
+            .prepare("INSERT OR REPLACE INTO settings (key, value) VALUES (?1, ?2)")
             .map_err(|e| e.to_string())?;
         for (k, v) in &settings {
             if k != "storage_path" && k != "shortcut_key" {
