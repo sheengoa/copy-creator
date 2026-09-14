@@ -765,9 +765,40 @@ html {
   bottom: 0;
   width: var(--radial-preview-width);
   border-inline-start: 0.5px solid var(--separator);
+  /* inset 发丝线与主面板一致；inset 阴影不外溢，直接画在元素上才不会被
+     自身背景盖住，也不会渗到拼接侧的主面板表面。 */
+  box-shadow: inset 0 0 0 0.5px rgba(0, 0, 0, 0.06);
   /* 展开动效：几何恒定（防 X11 闪烁帧）的前提下，滑入动画全部在
      web 层完成——预览从主面板一侧滑出并淡入，方向随条带侧翻转。 */
   animation: radial-preview-in 220ms cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+/*
+ * 扩展条带的窗口边界阴影：与主面板同款 var(--window-shadow)，绘制在
+ * 条带背后一层的伪元素上（z-index:-1 落到主面板之下），阴影向拼接侧
+ * 渗透的部分被不透明的主面板盖住——拼接缝保持干净，外侧三边呈现与
+ * 主面板一致的窗口阴影。伪元素圆角与条带一致（拼接侧直角），外轮廓
+ * 四角与整窗圆角对齐。
+ */
+.radial-menu-preview::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  z-index: -1;
+  pointer-events: none;
+  box-shadow: var(--window-shadow);
+}
+
+.radial-menu-popup.strip-right .radial-menu-preview::before {
+  border-radius: 0 var(--window-radius) var(--window-radius) 0;
+}
+
+.radial-menu-popup.strip-left .radial-menu-preview::before {
+  border-radius: var(--window-radius) 0 0 var(--window-radius);
+}
+
+[data-theme="dark"] .radial-menu-preview {
+  box-shadow: inset 0 0 0 0.5px rgba(255, 255, 255, 0.08);
 }
 
 .radial-menu-popup.strip-right .radial-menu-preview {
