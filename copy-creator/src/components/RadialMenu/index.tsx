@@ -1,5 +1,5 @@
 import { RadialImageBanner, ResourceItemVisual } from "./ResourceItemVisual";
-import { readResourceTextPreview, readTextFileContent } from "../../domain/mediaAssets";
+import { readResourceTextPreview, readTextFileContent, readQuickInputTextPreview } from "../../domain/mediaAssets";
 import { useEffect, useRef, useState, useCallback, useMemo, type CSSProperties } from "react";
 import { createPortal } from "react-dom";
 import { useTranslation } from "react-i18next";
@@ -501,9 +501,7 @@ export default function RadialMenu() {
       } else if (phrase && phrase.input_type === "file") {
         // 文件短语：常见文本格式读取内容预览，与主窗口一致。
         try {
-          const text = await invoke<string>("read_quick_input_text_preview", {
-            path: phrase.content,
-          });
+          const text = await readQuickInputTextPreview(phrase.content);
           segments = [{ type: "text", content: text }];
         } catch {
           segments = [{ type: "text", content: phrase.content }];

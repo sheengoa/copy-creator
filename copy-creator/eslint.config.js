@@ -39,6 +39,10 @@ export default defineConfig([
         message: '预览/媒体/存储类命令必须经 domain 或 stores 调用（见 domain/README.md）。',
       },
       {
+        selector: "CallExpression[callee.name='invoke'][arguments.0.value='read_quick_input_text_preview']",
+        message: '预览/媒体/存储类命令必须经 domain 或 stores 调用（见 domain/README.md）。',
+      },
+      {
         selector: "CallExpression[callee.name='invoke'][arguments.0.value='read_text_file_content']",
         message: '预览/媒体/存储类命令必须经 domain 或 stores 调用（见 domain/README.md）。',
       },
