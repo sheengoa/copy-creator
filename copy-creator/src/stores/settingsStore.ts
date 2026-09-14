@@ -103,8 +103,15 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
         const auto = await invoke<boolean>("is_autostart_enabled");
         set({ autostartEnabled: auto });
       } catch { /* command not available (older backend) */ }
-    } catch {
-      // Settings not yet initialized, use defaults
+    } catch (e) {
+      // 装载失败（后端启动竞态等）不能永久缓存失败结果：清空缓存允许后续
+      // 调用重试，并安排一次延迟自愈重试，否则主题/语言/排序整窗回落默认
+      // 值直到重启。
+      console.error("Failed to load settings, will retry:", e);
+      settingsLoadPromise = null;
+      window.setTimeout(() => {
+        void get().loadSettings();
+      }, 2000);
     }
   },
 
