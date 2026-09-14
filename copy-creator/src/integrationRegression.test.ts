@@ -110,14 +110,22 @@ describe("integration regressions", () => {
 
   it("keeps migrated clipboard schema compatible with current record fields", () => {
     const dbSource = readSource("../src-tauri/src/db.rs");
+    // 迁移路径必须经由 migrate_storage_data → ensure_schema：迁移库与
+    // 主库共用同一 schema 源（含全部列与索引），禁止再出现各自的
+    // CREATE TABLE 副本——曾经的副本缺 4 列，迁移后列表命令直接报错。
     const migrateBlock = dbSource.slice(
       dbSource.indexOf("fn migrate_storage"),
-      dbSource.indexOf("CREATE TABLE IF NOT EXISTS phrase_groups", dbSource.indexOf("fn migrate_storage")),
+      dbSource.indexOf("fn migrate_storage_data"),
     );
+    expect(migrateBlock).toContain("migrate_storage_data(");
 
-    expect(migrateBlock).toContain("sort_order REAL");
-    expect(migrateBlock).toContain("group_name TEXT DEFAULT ''");
-    expect(migrateBlock).toContain("idx_clipboard_sort_order");
+    const ensureBlock = dbSource.slice(
+      dbSource.indexOf("fn ensure_schema"),
+      dbSource.indexOf("fn sanitize_file_record_contents"),
+    );
+    expect(ensureBlock).toContain("sort_order REAL");
+    expect(ensureBlock).toContain("group_name TEXT DEFAULT ''");
+    expect(ensureBlock).toContain("idx_clipboard_sort_order");
   });
 
   it("classifies manually saved content through the shared stash path", () => {
