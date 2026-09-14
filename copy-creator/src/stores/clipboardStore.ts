@@ -5,6 +5,11 @@ import { useSettingsStore, parseContentSort } from "./settingsStore";
 import { isResourceRecord } from "../domain/records";
 import { sortByIdOrder } from "../utils/reorder";
 import { getResourcePath, isFileBackedTextResource } from "../domain/records";
+// 权威类型唯一定义在 types/：store 不再手写副本（历史副本缺
+// resource_modified 等字段，曾让版本字段对类型系统"隐身"）。
+import type { ApiKeyLabel, ClipboardRecord } from "../types";
+
+export type { ApiKeyLabel, ClipboardRecord };
 
 type UnlistenFn = () => void;
 
@@ -73,44 +78,6 @@ export const CLIP_TYPES = ["all", "text", "image", "link", "file", "resources"] 
 export type ClipType = (typeof CLIP_TYPES)[number];
 /** 剪贴板页的筛选范围：除资源外的全部类型。 */
 export type ClipboardFilter = Exclude<ClipType, "resources">;
-
-interface ApiKeyLabel {
-  service: string;
-  api_base: string;
-  note: string;
-  is_expired: boolean;
-}
-
-interface ClipboardRecord {
-  id: string;
-  type: "text" | "image" | "link" | "file";
-  content: string;
-  content_length?: number;
-  content_truncated?: boolean;
-  source_app: string;
-  created_at: string;
-  is_api_key?: boolean;
-  user_api_key?: boolean;
-  key_preview?: string;
-  guessed_service?: string | null;
-  label?: ApiKeyLabel | null;
-  group_name?: string;
-  has_images?: boolean;
-  drag_path?: string;
-  storage_mode?: "database" | "resource";
-  resource_path?: string;
-  resource_group?: string | null;
-  resource_kind?: "text" | "image" | "video" | "audio" | "file";
-  resource_relative_path?: string;
-  resource_folder?: string | null;
-  resource_file_size?: number;
-  resource_managed?: boolean;
-  resource_note?: string | null;
-  /** 使用次数（粘贴/拖出成功自增），「最多使用」排序与次数徽标展示。 */
-  use_count?: number;
-  /** 最近使用时间：使用时间标签展示（未使用过的条目回退创建时间）。 */
-  last_used_at?: string;
-}
 
 const PAGE_SIZE = 120;
 
