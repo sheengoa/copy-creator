@@ -114,11 +114,10 @@ static RADIAL_MENU_ENABLED: AtomicBool = AtomicBool::new(true);
 /// true，显示判定只能查本标志。
 static RADIAL_MENU_SHOWN: AtomicBool = AtomicBool::new(false);
 
-/// 呼出前持有焦点的 X 窗口 id（0 = 未知）。收仓时若焦点仍在径向窗口
-/// （快捷键二次按压/Escape），把焦点还给呼出前的窗口；用户已点击其他
-/// 窗口（失焦自隐藏）则不抢回。径向窗口自身 xid 不做快照——pager 激活
-/// 是异步的，激活后立即采集会误采到上一个窗口（实测导致归还永远跳过、
-/// 粘贴击键落进不可见菜单），改为停泊时直接从 GDK 读取。
+/// 呼出前持有焦点的**托管顶层**窗口 id（0 = 未知）。收仓时若径向窗口
+/// 仍是活动窗口（快捷键二次按压/Escape），把焦点还给呼出前的窗口；
+/// 用户已点击其他窗口（失焦自隐藏）则不抢回。仅 Linux 常驻模型使用。
+#[cfg(target_os = "linux")]
 static RADIAL_PREV_FOCUS: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
 
 /// 当前焦点所在的**窗管托管顶层**窗口 id。键盘焦点常悬在应用内部的
@@ -171,7 +170,8 @@ fn x11_focus_toplevel_xid() -> u32 {
             if !children.is_null() {
                 XFree(children as *mut c_void);
             }
-            if parent == root {
+            // parent == cur（自引用）只可能是异常窗口树，防死循环。
+            if parent == root || parent == cur {
                 break cur;
             }
             cur = parent;
@@ -522,11 +522,24 @@ fn raise_always_on_top(window: &tauri::WebviewWindow) {
 }
 
 pub(crate) fn has_visible_popup_window(app: &AppHandle) -> bool {
-    ["clipboard-create", "radial-menu"].iter().any(|label| {
-        app.get_webview_window(label)
+    if let Some(create) = app.get_webview_window("clipboard-create") {
+        if create.is_visible().unwrap_or(false) {
+            return true;
+        }
+    }
+    // Linux 常驻模型下径向窗口 is_visible 恒为 true（停泊也算可见），
+    // 必须查显示状态标志，否则主窗口显示时永远拿不到键盘焦点（见
+    // show_main_window 对本函数的用法）。
+    #[cfg(target_os = "linux")]
+    {
+        RADIAL_MENU_SHOWN.load(Ordering::SeqCst)
+    }
+    #[cfg(not(target_os = "linux"))]
+    {
+        app.get_webview_window("radial-menu")
             .and_then(|window| window.is_visible().ok())
             .unwrap_or(false)
-    })
+    }
 }
 
 pub(crate) fn raise_visible_popup_windows(app: &AppHandle) {
@@ -653,13 +666,25 @@ pub fn show_radial_menu(app: &AppHandle) {
             // 方向偏心收回（逐帧采集证据：左缘 97→155 右移、右缘不动）。
             #[cfg(target_os = "linux")]
             {
+                // 显示状态即刻翻转：后续的停泊守卫（等待期间若重新呼出
+                // 则放弃停泊）依赖它已为 false，否则守卫自身会把停泊
+                // 整体跳过。
+                RADIAL_MENU_SHOWN.store(false, Ordering::SeqCst);
                 let _ = app.emit("radial-menu-hide", ());
                 let task = app.clone();
                 std::thread::spawn(move || {
                     // 170ms = 退场动画 110ms + 余量：停泊必须在动画播完
                     // 之后，否则最后一帧停在半途被截断（实测 140ms 时收
-                    // 到 89% 尺寸半透明即消失，观感生硬）。
+                    // 到 89% 尺寸半透明即消失，观感生硬）。等待期间用户
+                    // 可能已再次呼出（快速连按切换）：已重新显示则放弃
+                    // 停泊，否则会把刚弹出的菜单原地清掉输入和焦点。
+                    if RADIAL_MENU_SHOWN.load(Ordering::SeqCst) {
+                        return;
+                    }
                     std::thread::sleep(std::time::Duration::from_millis(170));
+                    if RADIAL_MENU_SHOWN.load(Ordering::SeqCst) {
+                        return;
+                    }
                     park_radial_window(&task);
                 });
             }
@@ -736,9 +761,13 @@ pub fn show_radial_menu(app: &AppHandle) {
             crate::db::get_setting_sync(app, "theme").unwrap_or_else(|| "light".to_string());
 
         // 呼出前记录焦点所在的托管顶层窗口：收仓时据此把焦点还给呼出
-        // 前的应用。必须在抢焦点（raise + pager 激活）之前读取。
+        // 前的应用。必须在抢焦点（raise + pager 激活）之前读取。径向
+        // 窗口本就持焦时（快速"隐藏→再呼出"竞态，停泊尚未执行）不覆盖
+        // ——否则 prev 被写成径向自身，收起时会"还给自己"。
         #[cfg(target_os = "linux")]
-        RADIAL_PREV_FOCUS.store(x11_focus_toplevel_xid(), Ordering::SeqCst);
+        if !radial.is_focused().unwrap_or(false) {
+            RADIAL_PREV_FOCUS.store(x11_focus_toplevel_xid(), Ordering::SeqCst);
+        }
 
         raise_always_on_top(&radial);
 

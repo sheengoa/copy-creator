@@ -902,6 +902,10 @@ export default function RadialMenu() {
     nativeDragRef.current = next;
     // 先隐藏窗口再启动拖动：视觉即时反馈，同时释放 WebView2 的隐式
     // 鼠标捕获。此前要等后端解码完虚影才隐藏，期间界面毫无反应。
+    // 停泊模型下后端不再 unmap 窗口（Linux），这里必须自行隐藏内容
+    // （只翻 visible，不清拖拽会话状态——原生拖拽还在进行中）。
+    visibleRef.current = false;
+    setVisible(false);
     void invoke("hide_radial_menu");
     flog(`invoking start_radial_file_drag session=${next.sessionId} item=${next.itemId}`);
     void invoke("start_radial_file_drag", {
