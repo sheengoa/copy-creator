@@ -110,6 +110,10 @@ fn watch_loop<R: Runtime>(app: AppHandle<R>) {
                 if watch_failed {
                     next_resolve = Instant::now() + RETRY_INTERVAL;
                 }
+                // 丢弃旧 watcher 到新 watcher 生效之间的文件系统事件无法补收，
+                // 修订号也不会自增，前端心跳无从察觉：重建后无条件安排一次
+                // 防抖重扫（冲刷是幂等重扫），把间隙内丢失的变更并入冲刷。
+                last_event = Some(Instant::now());
             }
         }
 
