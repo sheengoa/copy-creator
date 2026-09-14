@@ -3761,8 +3761,9 @@ pub fn set_settings_batch(
 
 fn migrate_storage(app: &AppHandle, new_path: &str) -> Result<(), String> {
     let custom_dir = PathBuf::from(new_path);
-    std::fs::create_dir_all(&custom_dir).map_err(|e| format!("create dir: {}", e))?;
-    let custom_db = custom_dir.join("data.db");
+
+    // 旧存储目录在切换前解析（此刻 settings 仍指向旧位置）。
+    let old_storage_dir = get_storage_dir(app);
 
     // Collect all settings from current DB
     let settings: Vec<(String, String)> = {
@@ -3779,17 +3780,13 @@ fn migrate_storage(app: &AppHandle, new_path: &str) -> Result<(), String> {
         rows.filter_map(|r| r.ok()).collect()
     };
 
-    // Create new DB with schema and settings at target location
-    let new_conn = Connection::open(&custom_db).map_err(|e| format!("open new db: {}", e))?;
-
-    // 与主库同源的连接初始化：PRAGMA + ensure_schema（schema 单一来源，
-    // 新库从第一天起就具备全部列与索引，不会与 init_db 漂移）。
-    new_conn
-        .execute_batch(
-            "PRAGMA journal_mode=WAL; PRAGMA synchronous=NORMAL; PRAGMA cache_size=-8000;",
-        )
-        .map_err(|e| format!("set pragmas: {}", e))?;
-    ensure_schema(&new_conn).map_err(|e| format!("create schema: {}", e))?;
+    // 完整迁移：业务数据逐表复制 + 附件目录搬迁 + 行数校验，全部成功后
+    // 才在下方切换连接；中途失败时旧库不受影响，重试会先清掉半成品新库。
+    let new_conn = migrate_storage_data(
+        &old_storage_dir.join("data.db"),
+        &old_storage_dir,
+        &custom_dir,
+    )?;
 
     // Copy settings to new DB（ensure_schema 已种子化默认设置，旧值
     // 必须以 REPLACE 覆盖种子，否则与种子键冲突报 UNIQUE 约束错误）
@@ -3821,6 +3818,146 @@ fn migrate_storage(app: &AppHandle, new_path: &str) -> Result<(), String> {
     }
 
     log::info!("Storage migrated to: {}", new_path);
+    Ok(())
+}
+
+/// 迁移涉及的业务表（settings 由命令层单独复制：storage_path/shortcut_key
+/// 有特殊处理）。表名为内部常量，不来自用户输入。
+const MIGRATED_BUSINESS_TABLES: [&str; 6] = [
+    "clipboard_records",
+    "phrase_groups",
+    "phrases",
+    "translation_history",
+    "api_key_labels",
+    "toast_shown",
+];
+
+/// 存储迁移的数据搬运核心：在 new_dir 建新库（PRAGMA + ensure_schema 与
+/// 主库同源），旧库逐表按"两库共同列"复制并校验行数一致，附件目录跟随
+/// 搬迁；任一步失败即返回 Err，调用方不得切换连接。返回打开的新连接。
+fn migrate_storage_data(
+    old_db: &Path,
+    old_storage_dir: &Path,
+    new_dir: &Path,
+) -> Result<Connection, String> {
+    if !old_db.exists() {
+        return Err(format!("旧数据库不存在: {}", old_db.display()));
+    }
+    let new_db = new_dir.join("data.db");
+    // 上次迁移失败可能残留半成品库：重建前清掉，保证重试幂等。
+    for suffix in ["", "-wal", "-shm"] {
+        let _ = std::fs::remove_file(PathBuf::from(format!("{}{}", new_db.display(), suffix)));
+    }
+    std::fs::create_dir_all(new_dir).map_err(|e| format!("create dir: {}", e))?;
+
+    let new_conn = Connection::open(&new_db).map_err(|e| format!("open new db: {}", e))?;
+    new_conn
+        .execute_batch(
+            "PRAGMA journal_mode=WAL; PRAGMA synchronous=NORMAL; PRAGMA cache_size=-8000;",
+        )
+        .map_err(|e| format!("set pragmas: {}", e))?;
+    ensure_schema(&new_conn).map_err(|e| format!("create schema: {}", e))?;
+
+    // 旧库以别名接入后逐表复制。
+    new_conn
+        .execute(
+            "ATTACH DATABASE ?1 AS migrate_src",
+            params![old_db.to_string_lossy()],
+        )
+        .map_err(|e| format!("attach old db: {}", e))?;
+    for table in MIGRATED_BUSINESS_TABLES {
+        let copied = copy_table_across_databases(&new_conn, table)?;
+        let old_count: i64 = new_conn
+            .query_row(
+                &format!("SELECT COUNT(*) FROM migrate_src.{table}"),
+                [],
+                |row| row.get(0),
+            )
+            .map_err(|e| format!("count {table}: {}", e))?;
+        let new_count: i64 = new_conn
+            .query_row(
+                &format!("SELECT COUNT(*) FROM main.{table}"),
+                [],
+                |row| row.get(0),
+            )
+            .map_err(|e| format!("count {table}: {}", e))?;
+        if old_count != new_count {
+            return Err(format!(
+                "迁移校验失败：{table} 旧库 {old_count} 行，新库 {new_count} 行"
+            ));
+        }
+        log::info!("migrate_storage: {table} 复制 {copied} 行");
+    }
+    new_conn
+        .execute("DETACH DATABASE migrate_src", [])
+        .map_err(|e| format!("detach old db: {}", e))?;
+
+    // 附件（images/thumbs）与快捷输入文件跟随搬迁；数据库文件由 ATTACH
+    // 直接读取、settings 在命令层复制，均不在搬迁范围。旧目录保留作备份。
+    copy_storage_dir_tree(old_storage_dir, new_dir)?;
+
+    Ok(new_conn)
+}
+
+/// 把 migrate_src 里的同名表复制到 main，返回复制的行数。按两库共同列
+/// 交集复制：历史 ALTER 演进可能让两库列序不同，`SELECT *` 不可靠。
+fn copy_table_across_databases(conn: &Connection, table: &str) -> Result<usize, String> {
+    let columns_of = |database: &str| -> Result<Vec<String>, String> {
+        let mut stmt = conn
+            .prepare(&format!("PRAGMA {database}.table_info({table})"))
+            .map_err(|e| e.to_string())?;
+        let rows = stmt
+            .query_map([], |row| row.get::<_, String>(1))
+            .map_err(|e| e.to_string())?;
+        Ok(rows.filter_map(|r| r.ok()).collect())
+    };
+    let new_columns = columns_of("main")?;
+    let old_columns = columns_of("migrate_src")?;
+    let shared: Vec<String> = new_columns
+        .into_iter()
+        .filter(|column| old_columns.contains(column))
+        .collect();
+    if shared.is_empty() {
+        return Err(format!("迁移失败：{table} 两库没有共同列"));
+    }
+    let column_list = shared
+        .iter()
+        .map(|column| format!("\"{column}\""))
+        .collect::<Vec<_>>()
+        .join(", ");
+    conn.execute(
+        &format!(
+            "INSERT INTO main.{table} ({column_list}) SELECT {column_list} FROM migrate_src.{table}"
+        ),
+        [],
+    )
+    .map_err(|e| format!("复制 {table} 失败: {}", e))
+}
+
+/// 递归搬迁目录内容到目标目录（data.db/-wal/-shm 除外，同名文件覆盖）。
+fn copy_storage_dir_tree(src: &Path, dest: &Path) -> Result<(), String> {
+    for entry in
+        std::fs::read_dir(src).map_err(|e| format!("read dir {}: {}", src.display(), e))?
+    {
+        let entry = entry.map_err(|e| e.to_string())?;
+        let name = entry.file_name();
+        if matches!(
+            name.to_str(),
+            Some("data.db") | Some("data.db-wal") | Some("data.db-shm")
+        ) {
+            continue;
+        }
+        let target = dest.join(&name);
+        let file_type = entry.file_type().map_err(|e| e.to_string())?;
+        if file_type.is_dir() {
+            std::fs::create_dir_all(&target)
+                .map_err(|e| format!("create dir {}: {}", target.display(), e))?;
+            copy_storage_dir_tree(&entry.path(), &target)?;
+        } else if file_type.is_file() {
+            std::fs::copy(entry.path(), &target)
+                .map_err(|e| format!("复制 {}: {}", entry.path().display(), e))?;
+        }
+    }
     Ok(())
 }
 
@@ -8488,5 +8625,115 @@ mod content_sort_tests {
             ordered_ids(&conn, Some("count")),
             vec!["warm", "hot", "cold", "fresh", "stale"]
         );
+    }
+}
+
+#[cfg(test)]
+mod migrate_storage_tests {
+    use super::{ensure_schema, migrate_storage_data, Connection};
+
+    fn seed_old_library(old_dir: &std::path::Path) -> std::path::PathBuf {
+        std::fs::create_dir_all(old_dir).unwrap();
+        let old_db = old_dir.join("data.db");
+        let conn = Connection::open(&old_db).unwrap();
+        conn.execute_batch("PRAGMA journal_mode=WAL; PRAGMA synchronous=NORMAL;")
+            .unwrap();
+        ensure_schema(&conn).unwrap();
+        conn.execute(
+            "INSERT INTO clipboard_records (id, type, content, created_at, resource_note, use_count)
+             VALUES ('r1', 'text', 'hello', '2026-01-01T00:00:00Z', '备注', 3)",
+            [],
+        )
+        .unwrap();
+        conn.execute(
+            "INSERT INTO phrase_groups (id, name, sort_order, created_at, updated_at)
+             VALUES ('g1', '分组', 0, '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z')",
+            [],
+        )
+        .unwrap();
+        conn.execute(
+            "INSERT INTO phrases (id, group_id, title, content, created_at, updated_at)
+             VALUES ('p1', 'g1', '标题', '内容', '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z')",
+            [],
+        )
+        .unwrap();
+        drop(conn);
+        std::fs::create_dir_all(old_dir.join("images")).unwrap();
+        std::fs::write(old_dir.join("images").join("a.png"), b"png-bytes").unwrap();
+        old_db
+    }
+
+    /// 完整迁移：业务数据逐表复制（含 ensure_schema 增量列）+ 附件目录
+    /// 搬迁。回归锚点：迁移实现曾只复制 settings，业务数据被静默丢弃。
+    #[test]
+    fn migrates_business_data_and_assets_to_new_location() {
+        let base = std::env::temp_dir().join(format!(
+            "copy-creator-migrate-{}",
+            uuid::Uuid::new_v4()
+        ));
+        let old_dir = base.join("old");
+        let new_dir = base.join("new");
+        std::fs::create_dir_all(&new_dir).unwrap();
+        let old_db = seed_old_library(&old_dir);
+
+        let new_conn = migrate_storage_data(&old_db, &old_dir, &new_dir).unwrap();
+
+        let (note, use_count): (String, i64) = new_conn
+            .query_row(
+                "SELECT resource_note, use_count FROM clipboard_records WHERE id = 'r1'",
+                [],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )
+            .unwrap();
+        assert_eq!(note, "备注");
+        assert_eq!(use_count, 3);
+        let phrase_count: i64 = new_conn
+            .query_row("SELECT COUNT(*) FROM phrases", [], |row| row.get(0))
+            .unwrap();
+        assert_eq!(phrase_count, 1);
+        assert_eq!(
+            std::fs::read(new_dir.join("images").join("a.png")).unwrap(),
+            b"png-bytes".to_vec()
+        );
+        // 旧库保留作备份，不受迁移影响。
+        assert!(old_db.exists());
+
+        let _ = std::fs::remove_dir_all(base);
+    }
+
+    /// 重试幂等：上次迁移残留的半成品新库会被清除，重试迁移到同一目录
+    /// 得到完整的最新数据，而不是叠加或报 UNIQUE 冲突。
+    #[test]
+    fn retried_migration_replaces_stale_partial_target() {
+        let base = std::env::temp_dir().join(format!(
+            "copy-creator-migrate-retry-{}",
+            uuid::Uuid::new_v4()
+        ));
+        let old_dir = base.join("old");
+        let new_dir = base.join("new");
+        std::fs::create_dir_all(&new_dir).unwrap();
+        let old_db = seed_old_library(&old_dir);
+
+        let first = migrate_storage_data(&old_db, &old_dir, &new_dir).unwrap();
+        drop(first);
+
+        // 第一次迁移后旧库又新增一条记录，然后向同一目标目录重试。
+        {
+            let conn = Connection::open(&old_db).unwrap();
+            conn.execute(
+                "INSERT INTO clipboard_records (id, type, content, created_at)
+                 VALUES ('r2', 'text', 'second', '2026-01-02T00:00:00Z')",
+                [],
+            )
+            .unwrap();
+        }
+
+        let second = migrate_storage_data(&old_db, &old_dir, &new_dir).unwrap();
+        let count: i64 = second
+            .query_row("SELECT COUNT(*) FROM clipboard_records", [], |row| row.get(0))
+            .unwrap();
+        assert_eq!(count, 2);
+
+        let _ = std::fs::remove_dir_all(base);
     }
 }
