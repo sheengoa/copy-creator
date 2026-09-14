@@ -5891,9 +5891,10 @@ mod resource_file_tests {
         std::fs::write(root.join("References/movie.mp4"), b"video").unwrap();
         std::fs::write(root.join("References/sound.ogg"), b"audio").unwrap();
         std::fs::write(root.join("References/archive/archive.bin"), [0, 1, 2]).unwrap();
-        std::fs::write(root.join("References/notes.tmp"), b"temporary text").unwrap();
         std::fs::write(root.join("References/.resource.tmp"), b"ignored").unwrap();
         // 半成品下载与锁文件：扫描不得收录（覆盖完成后以真实文件名再入库）。
+        // 纯 .tmp 与 .crdownload/.part 同清单处理（b66122d 起的既定行为）。
+        std::fs::write(root.join("References/notes.tmp"), b"temporary text").unwrap();
         std::fs::write(root.join("References/未确认 409376.crdownload"), [0, 1]).unwrap();
         std::fs::write(root.join("References/notes.part"), b"partial").unwrap();
         std::fs::write(root.join("References/~$report.docx"), b"lock").unwrap();
@@ -5921,7 +5922,6 @@ mod resource_file_tests {
                 "References/archive/note.md",
                 "References/image.PNG",
                 "References/movie.mp4",
-                "References/notes.tmp",
                 "References/sound.ogg",
                 "root.txt",
             ]
