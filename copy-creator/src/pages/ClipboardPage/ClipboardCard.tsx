@@ -239,7 +239,9 @@ function ClipboardCardInner({
   return (
     <div
       className={`notification clipboard-card type-${view.recordType}${isApiKey ? " has-api-key" : ""}${isUnlabeled ? " api-key-unlabeled" : ""}${hasLabel ? " api-key-labeled" : ""}${selectionMode ? " is-selection-mode" : ""}${selected ? " is-selected" : ""}`}
-      style={{ "--color": meta.color, "--enter-delay": index } as React.CSSProperties}
+      // 入场延迟封顶首屏：index 是全列表下标，深翻页时 55ms×index 会让
+      // 新卡片延迟数十秒才出现（fill-mode both 停在不可见起始帧）。
+      style={{ "--color": meta.color, "--enter-delay": Math.min(index, 20) } as React.CSSProperties}
       onClick={handleCardClick}
       onContextMenu={selectionMode ? (e) => { e.preventDefault(); e.stopPropagation(); } : handleContextMenu}
     >
