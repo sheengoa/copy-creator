@@ -21,6 +21,7 @@ export function StorageSection({
   const [pendingMigratePath, setPendingMigratePath] = useState<string | null>(
     null,
   );
+  const [error, setError] = useState<string | null>(null);
 
   const handleChangeFolder = async () => {
     try {
@@ -29,8 +30,10 @@ export function StorageSection({
 
       // 是否迁移现有数据：确认 → set_setting（完整迁移）；取消 → 仅改路径。
       setPendingMigratePath(folder);
-    } catch {
-      // User cancelled folder picker
+    } catch (e) {
+      // 用户取消选择或选择超时：给出可见反馈，不再静默吞掉。
+      console.error("select_storage_folder failed:", e);
+      setError(String(e));
     }
   };
 
@@ -79,6 +82,12 @@ export function StorageSection({
           )}
         </div>
       </div>
+
+      {error && (
+        <div className="settings-restart-hint">
+          <span>诊断: {error}</span>
+        </div>
+      )}
 
       {pendingMigratePath !== null && (
         <ConfirmDialog
