@@ -1235,8 +1235,8 @@ export default function RadialMenu() {
         }),
         listen("radial-menu-hide", () => {
           cancelPendingBlurHide();
-          // 后端约 170ms 后把窗口停泊回屏幕外（不 unmap，窗管的偏心
-          // 退场动画永不出现），期间播放居中缩小退场动画（110ms）。
+          // 后端约 170ms 后原地停泊（清输入区、归还焦点，不 unmap——
+          // 窗管的偏心退场动画永不出现），期间播放居中缩小退场动画。
           setMenuClosing(true);
           window.setTimeout(() => setMenuClosing(false), 150);
           resetStateForNativeHide();

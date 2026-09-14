@@ -233,6 +233,25 @@ fn x11_activate_window(xid: u32) {
     }
 }
 
+/// 主线程内读取给定 GTK 窗口的 X xid（GDK 调用）；无法获取返回 0。
+#[cfg(target_os = "linux")]
+fn gtk_window_xid_on_main(gtk_window: &gtk::ApplicationWindow) -> u32 {
+    use gtk::prelude::*;
+    use std::os::raw::{c_ulong, c_void};
+    #[link(name = "gdk-3")]
+    extern "C" {
+        fn gdk_x11_window_get_xid(window: *mut c_void) -> c_ulong;
+    }
+    let Some(gdk_window) = gtk_window.window() else {
+        return 0;
+    };
+    let stash = <gtk::gdk::Window as gtk::glib::translate::ToGlibPtr<
+        '_,
+        *mut gtk::gdk::ffi::GdkWindow,
+    >>::to_glib_none(&gdk_window);
+    unsafe { gdk_x11_window_get_xid(stash.0 as *mut c_void) as u32 }
+}
+
 /// 清空径向窗口输入区域（停泊态所有点击穿透到下层应用）。GTK 调用，
 /// 须回主线程。
 #[cfg(target_os = "linux")]
@@ -285,8 +304,11 @@ pub(crate) fn park_radial_window(app: &AppHandle) {
             // 的是其 input-only 子窗口而非顶层（XGetInputFocus 实测返回
             // 0xa00004 子窗口、顶层是 0xa00003），按顶层 xid 比较永远
             // 不匹配，归还曾被永久跳过。用户已点击其他应用（失焦自
-            // 隐藏）时 is_active 为 false，自然不抢回焦点。
-            if gtk_window.is_active() && prev != 0 {
+            // 隐藏）时 is_active 为 false，自然不抢回焦点。prev 等于
+            // 径向自身（异步激活间隙被污染）时拒绝归还，否则焦点永远
+            // 锁死在不可见窗口上。
+            let own_xid = gtk_window_xid_on_main(&gtk_window);
+            if gtk_window.is_active() && prev != 0 && prev != own_xid {
                 x11_activate_window(prev);
                 log::info!("[park_radial] focus restored to #{prev:x}");
             }
@@ -553,8 +575,9 @@ pub(crate) fn raise_visible_popup_windows(app: &AppHandle) {
         }
     }
     if let Some(radial) = app.get_webview_window("radial-menu") {
-        // Linux 常驻模型下 is_visible 恒为 true（停泊屏幕外也算可见），
-        // 必须查显示状态标志，否则会把屏幕外的停泊窗口抬升并抢焦点。
+        // Linux 常驻模型下 is_visible 恒为 true（常驻映射的停泊态也算
+        // 可见），必须查显示状态标志，否则会把不可见的停泊窗口抬升并
+        // 抢走焦点。
         #[cfg(target_os = "linux")]
         let radial_shown = RADIAL_MENU_SHOWN.load(Ordering::SeqCst);
         #[cfg(not(target_os = "linux"))]
