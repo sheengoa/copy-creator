@@ -1133,8 +1133,30 @@ pub fn start_monitor(app: &AppHandle) -> Result<(), Box<dyn std::error::Error>> 
 
 /// 剪切板采集主循环：每 800ms 轮询剪贴板并判重入库。由 `start_monitor`
 /// 的兜底循环调用，单次 panic 时整体重建（见其内注释）。
+/// 本轮是否需要重新读取剪贴板图片。Windows 用剪贴板序列号精确判断：
+/// 任何进程修改剪贴板内容都会使其自增，一次无锁调用即可确认「没变过」；
+/// 其他平台退化为每轮都读（行为不变）。
+#[cfg(not(target_os = "windows"))]
+fn should_check_clipboard_image(_last_seen: &mut u32) -> bool {
+    true
+}
+
+#[cfg(target_os = "windows")]
+fn should_check_clipboard_image(last_seen: &mut u32) -> bool {
+    // 序列号 0 表示会话内剪贴板从未被使用，保守起见照常读取。
+    let sequence = unsafe {
+        windows::Win32::System::DataExchange::GetClipboardSequenceNumber()
+    };
+    if sequence != 0 && sequence == *last_seen {
+        return false;
+    }
+    *last_seen = sequence;
+    true
+}
+
 fn poll_clipboard_forever(handle: AppHandle) {
     let mut poll_count: u32 = 0;
+    let mut last_image_seq: u32 = 0;
     loop {
         std::thread::sleep(std::time::Duration::from_millis(800));
         poll_count += 1;
@@ -1154,22 +1176,26 @@ fn poll_clipboard_forever(handle: AppHandle) {
 
         let mut image_data: Option<(Vec<u8>, u32, u32)> = None;
 
-        // Image detection via arboard — only record when the image actually changes
-        if let Ok(mut clipboard) = arboard::Clipboard::new() {
-            if let Ok(image) = clipboard.get_image() {
-                let rgba = &image.bytes;
-                if !rgba.is_empty() && image.width > 0 && image.height > 0 {
-                    let hash = rgba
-                        .iter()
-                        .step_by(64)
-                        .fold(0u64, |acc, &b| acc.wrapping_mul(31).wrapping_add(b as u64));
-                    let mut cached_hash = LAST_CLIPBOARD_IMAGE_HASH.lock().unwrap();
-                    if hash != *cached_hash {
-                        *cached_hash = hash;
-                        image_data =
-                            Some((rgba.to_vec(), image.width as u32, image.height as u32));
+        // Image detection via arboard — only record when the image actually
+        // changes. Windows 先经序列号判断剪贴板是否变过：图片驻留不变期间
+        // 跳过全量 RGBA 拷贝与哈希（4K 截图 ≈33MB/轮），检出延迟不变。
+        if should_check_clipboard_image(&mut last_image_seq) {
+            if let Ok(mut clipboard) = arboard::Clipboard::new() {
+                if let Ok(image) = clipboard.get_image() {
+                    let rgba = &image.bytes;
+                    if !rgba.is_empty() && image.width > 0 && image.height > 0 {
+                        let hash = rgba
+                            .iter()
+                            .step_by(64)
+                            .fold(0u64, |acc, &b| acc.wrapping_mul(31).wrapping_add(b as u64));
+                        let mut cached_hash = LAST_CLIPBOARD_IMAGE_HASH.lock().unwrap();
+                        if hash != *cached_hash {
+                            *cached_hash = hash;
+                            image_data =
+                                Some((rgba.to_vec(), image.width as u32, image.height as u32));
+                        }
+                        // If hash matches: image hasn't changed → skip (no re-insertion)
                     }
-                    // If hash matches: image hasn't changed → skip (no re-insertion)
                 }
             }
         }
