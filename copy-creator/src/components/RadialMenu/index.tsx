@@ -199,6 +199,8 @@ export default function RadialMenu() {
   const [collapsedGroupPaths, setCollapsedGroupPaths] = useState<string[]>([]);
   const [phraseGroupId, setPhraseGroupId] = useState<string | null>(ALL_PHRASES_GROUP_ID);
   const [preview, setPreview] = useState<PreviewState | null>(null);
+  // 收起动画播放中：预览保持挂载滑出，动画结束才真正卸载并恢复穿透。
+  const [previewClosing, setPreviewClosing] = useState(false);
   // 条带方向决定主面板贴窗口哪一侧（几何固定，会话内不变）：state 供
   // 渲染取类名，ref 供异步展开逻辑读取。
   const [previewSide, setPreviewSide] = useState<RadialPreviewDirection>("right");
@@ -223,6 +225,7 @@ export default function RadialMenu() {
   const phraseGroupIdRef = useRef<string | null>(ALL_PHRASES_GROUP_ID);
   const previewRequestRef = useRef(0);
   const previewRef = useRef<PreviewState | null>(null);
+  const previewCloseTimerRef = useRef<number | null>(null);
   // 扩展条带的方向与宽度：后端打开窗口时按光标所在显示器一次性决定
   // （预留好条带，展开期不再改动窗口几何），随 radial-menu-show 事件下发。
   const previewSideRef = useRef<RadialPreviewDirection>("right");
@@ -360,12 +363,34 @@ export default function RadialMenu() {
   // 窗口几何自打开时按"面板 + 预留条带"分配后就固定不变——X11 上任何
   // resize/move 都会被合成器画出一帧"旧内容按左上锚定 + 新区域未绘制"
   // 的闪烁帧（实测帧证据），这是扩展闪烁的物理根源，必须整体绕开。
-  const collapsePreview = useCallback(() => {
+  // 收起因此也在 web 层做：预览滑出动画播放完毕才卸载并恢复条带穿透，
+  // 动画期间输入区域保持展开（用户看到的预览仍可点击）。animated=false
+  // 用于窗口隐藏等无需动效的路径，立即复位。
+  const cancelPreviewClose = useCallback(() => {
+    if (previewCloseTimerRef.current !== null) {
+      window.clearTimeout(previewCloseTimerRef.current);
+      previewCloseTimerRef.current = null;
+    }
+    setPreviewClosing(false);
+  }, []);
+
+  const collapsePreview = useCallback((animated = true) => {
     invalidatePreviewRequest();
     previewRef.current = null;
-    setPreview(null);
-    void invoke("set_radial_hit_area", { expanded: false }).catch(() => {});
-  }, [invalidatePreviewRequest]);
+    cancelPreviewClose();
+    if (!animated) {
+      setPreview(null);
+      void invoke("set_radial_hit_area", { expanded: false }).catch(() => {});
+      return;
+    }
+    setPreviewClosing(true);
+    previewCloseTimerRef.current = window.setTimeout(() => {
+      previewCloseTimerRef.current = null;
+      setPreviewClosing(false);
+      setPreview(null);
+      void invoke("set_radial_hit_area", { expanded: false }).catch(() => {});
+    }, 160);
+  }, [invalidatePreviewRequest, cancelPreviewClose]);
 
   const dismissPreviewForDrag = useCallback(() => {
     collapsePreview();
@@ -393,6 +418,8 @@ export default function RadialMenu() {
     if (dragActiveRef.current || nativeDragRef.current) return null;
     if (request !== previewRequestRef.current) return null;
     if (previewRef.current) return previewRef.current.layout;
+    // 收起动画尚在播放时重新展开：取消待执行的卸载，面板直接续用。
+    cancelPreviewClose();
     // 条带方向与宽度由后端在打开窗口时一次性决定并随事件下发，
     // 前端不再查询显示器/计算窗口几何。
     const layout = { direction: previewSideRef.current, width: previewWidthRef.current };
@@ -731,7 +758,7 @@ export default function RadialMenu() {
 
   const resetState = useCallback((preserveClickSuppression = false) => {
     cancelPendingNativeDrag(nativeDragRef.current);
-    collapsePreview();
+    collapsePreview(false);
     closeResourceGroupMenu();
     dragActiveRef.current = false;
     if (!preserveClickSuppression) suppressClickRef.current = false;
@@ -1544,7 +1571,7 @@ export default function RadialMenu() {
   return (
     <div className={`radial-menu-overlay${visible ? "" : " radial-menu-hidden"}`}>
       <div
-        className={`radial-menu-popup ${previewSide === "left" ? "strip-left" : "strip-right"}${preview ? " preview-open" : ""}${dragSessionItemId ? " drag-session" : ""}`}
+        className={`radial-menu-popup ${previewSide === "left" ? "strip-left" : "strip-right"}${preview ? " preview-open" : ""}${dragSessionItemId ? " drag-session" : ""}${visible ? " radial-menu-appearing" : ""}`}
         style={preview ? {
           "--radial-preview-width": `${preview.layout.width}px`,
         } as CSSProperties : undefined}
@@ -1829,9 +1856,9 @@ export default function RadialMenu() {
 
         {preview && (
           <ContentPreviewPanel
-            className="radial-menu-preview"
+            className={`radial-menu-preview${previewClosing ? " preview-closing" : ""}`}
             segments={preview.segments}
-            onClose={collapsePreview}
+            onClose={() => collapsePreview()}
             onClick={(e) => e.stopPropagation()}
           />
         )}

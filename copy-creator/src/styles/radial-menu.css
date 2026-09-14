@@ -765,11 +765,15 @@ html {
   bottom: 0;
   width: var(--radial-preview-width);
   border-inline-start: 0.5px solid var(--separator);
+  /* 展开动效：几何恒定（防 X11 闪烁帧）的前提下，滑入动画全部在
+     web 层完成——预览从主面板一侧滑出并淡入，方向随条带侧翻转。 */
+  animation: radial-preview-in 220ms cubic-bezier(0.22, 1, 0.36, 1);
 }
 
 .radial-menu-popup.strip-right .radial-menu-preview {
   left: 420px;
   border-radius: 0 var(--window-radius) var(--window-radius) 0;
+  --radial-preview-slide: -28px;
 }
 
 .radial-menu-popup.strip-left .radial-menu-preview {
@@ -777,6 +781,59 @@ html {
   border-inline-start: 0;
   border-inline-end: 0.5px solid var(--separator);
   border-radius: var(--window-radius) 0 0 var(--window-radius);
+  --radial-preview-slide: 28px;
+}
+
+/* 收起动效：与滑入反向，播放完毕由前端卸载面板并恢复条带穿透。 */
+.radial-menu-preview.preview-closing {
+  animation: radial-preview-out 160ms ease-in forwards;
+}
+
+@keyframes radial-preview-in {
+  from {
+    opacity: 0;
+    transform: translateX(var(--radial-preview-slide, -28px));
+  }
+  to {
+    opacity: 1;
+    transform: translateX(0);
+  }
+}
+
+@keyframes radial-preview-out {
+  from {
+    opacity: 1;
+    transform: translateX(0);
+  }
+  to {
+    opacity: 0;
+    transform: translateX(var(--radial-preview-slide, -28px));
+  }
+}
+
+/* 弹出动效：与新建窗口一致的弹性缩放入场（窗口几何不变，动画只作用
+   于可见面板本身；类随 visible 翻转，每次弹出都会重放）。 */
+.radial-menu-popup.radial-menu-appearing .radial-menu-main {
+  animation: radial-main-in 240ms cubic-bezier(0.34, 1.56, 0.64, 1);
+}
+
+@keyframes radial-main-in {
+  from {
+    opacity: 0;
+    transform: scale(0.94);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .radial-menu-preview,
+  .radial-menu-preview.preview-closing,
+  .radial-menu-popup.radial-menu-appearing .radial-menu-main {
+    animation: none;
+  }
 }
 
 [data-theme="dark"] .content-preview-panel {

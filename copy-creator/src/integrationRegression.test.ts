@@ -249,6 +249,18 @@ describe("integration regressions", () => {
     // 但隐藏期间的增删改只能靠事件感知，事件丢失时同样需要兜底重载。
     const phrasePageSource = readSource("./pages/PhrasePage/index.tsx");
     expect(phrasePageSource).toContain("useRefreshOnShow");
+
+    // 径向菜单弹出/展开/收起动效：窗口几何恒定（防 X11 闪烁）的前提
+    // 下，动效全部在 web 层完成——弹出入场、预览滑入、收起滑出三段
+    // 缺一不可，防止动效被静默删除后菜单变回"生硬瞬现"。
+    const radialCssSource = readSource("./styles/radial-menu.css");
+    expect(radialCssSource).toContain("radial-preview-in");
+    expect(radialCssSource).toContain("radial-preview-out");
+    expect(radialCssSource).toContain("preview-closing");
+    expect(radialCssSource).toContain("radial-main-in");
+    const radialMenuSource = readSource("./components/RadialMenu/index.tsx");
+    expect(radialMenuSource).toContain("previewClosing");
+    expect(radialMenuSource).toContain("collapsePreview(false)");
   });
 
   it("passes clipboard search into cards for highlighting", () => {
@@ -724,7 +736,7 @@ describe("integration regressions", () => {
     expect(radialMenu).toContain("if (dragActiveRef.current || nativeDragRef.current)");
     expect(radialMenu).toContain("data-radial-drag-source={item.dragSource}");
     expect(radialMenu).toContain("data-radial-drag-path={item.dragPath}");
-    expect(radialMenu).toContain('className="radial-menu-preview"');
+    expect(radialMenu).toContain('className={`radial-menu-preview${previewClosing ? " preview-closing" : ""}`}');
     expect(radialMenu).toContain("previewAvailable");
     expect(radialMenu).toContain("data-radial-preview-trigger");
     expect(radialMenu).toContain('closest("[data-radial-preview-trigger]")');
