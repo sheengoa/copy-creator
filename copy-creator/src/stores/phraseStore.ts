@@ -29,6 +29,63 @@ function touchPhraseUsage(id: string) {
   });
 }
 
+/** 「全部」视图粘贴成功的乐观重排：最近使用模式置顶；最多使用模式计数
+ *  +1 并按次数重排（并列按最近使用）。返回 null 表示无需变化（目标
+ *  不存在或已在首位）。 */
+function bumpUsedPhrase(phrases: Phrase[], phraseId: string): Phrase[] | null {
+  const target = phrases.find((p) => p.id === phraseId);
+  if (!target) return null;
+  const rest = phrases.filter((p) => p.id !== phraseId);
+  if (useSettingsStore.getState().contentSort === "count") {
+    const bumped: Phrase = {
+      ...target,
+      use_count: (target.use_count ?? 0) + 1,
+      last_used_at: new Date().toISOString(),
+    };
+    const updated = [bumped, ...rest];
+    updated.sort((a, b) => {
+      const aUsed = (a.use_count ?? 0) > 0 ? 1 : 0;
+      const bUsed = (b.use_count ?? 0) > 0 ? 1 : 0;
+      if (aUsed !== bUsed) return bUsed - aUsed;
+      if ((b.use_count ?? 0) !== (a.use_count ?? 0)) {
+        return (b.use_count ?? 0) - (a.use_count ?? 0);
+      }
+      return (b.last_used_at ?? "").localeCompare(a.last_used_at ?? "");
+    });
+    return updated;
+  }
+  if (phrases[0]?.id === phraseId) return null;
+  return [target, ...rest];
+}
+
+/** 短语粘贴统一路径：普通 / 终端只差文本命令名。「全部」视图粘贴成功
+ *  即乐观重排，与后端排序保持一致。 */
+async function runPastePhrase(phrase: Phrase, terminal: boolean) {
+  try {
+    if (phrase.input_type === "file") {
+      const path = await resolveAbsoluteResourcePath(phrase.content);
+      if (isImageFilePath(path)) {
+        // 图像文件以位图粘贴（图像只能 Ctrl+V），终端入口同普通入口。
+        await invoke("paste_image_file", { path });
+      } else {
+        await invoke("paste_file", { path });
+      }
+    } else if (terminal) {
+      await invoke("paste_text_terminal", { text: phrase.content });
+    } else {
+      await invoke("paste_text", { text: phrase.content });
+    }
+    touchPhraseUsage(phrase.id);
+    usePhraseStore.setState((s) => {
+      if (s.selectedGroupId !== ALL_PHRASES_GROUP_ID) return {};
+      const updated = bumpUsedPhrase(s.phrases, phrase.id);
+      return updated ? { phrases: updated } : {};
+    });
+  } catch (e) {
+    console.error(terminal ? "Terminal paste failed:" : "Paste failed:", e);
+  }
+}
+
 export interface QuickInputFileSelection {
   path: string;
   file_size: number;
@@ -274,97 +331,9 @@ export const usePhraseStore = create<PhraseState>()((set, get) => {
 
   deletePhrase: async (id: string) => get().deletePhrases([id]),
 
-  pastePhrase: async (phrase: Phrase) => {
-    try {
-      if (phrase.input_type === "file") {
-        const path = await resolveAbsoluteResourcePath(phrase.content);
-        if (isImageFilePath(path)) {
-          // 图像文件以位图粘贴（图像只能 Ctrl+V），终端入口同普通入口。
-          await invoke("paste_image_file", { path });
-        } else {
-          await invoke("paste_file", { path });
-        }
-      } else {
-        await invoke("paste_text", { text: phrase.content });
-      }
-      touchPhraseUsage(phrase.id);
-      // 「全部」视图按最近使用排序：粘贴成功即乐观移到最前，与后端排序一致。
-      set((s) => {
-        if (s.selectedGroupId !== ALL_PHRASES_GROUP_ID) return {};
-        const target = s.phrases.find((p) => p.id === phrase.id);
-        if (!target) return {};
-        const rest = s.phrases.filter((p) => p.id !== phrase.id);
-        if (useSettingsStore.getState().contentSort === "count") {
-          // 最多使用模式：计数 +1 并按次数重排（并列按最近使用）。
-          const bumped: Phrase = {
-            ...target,
-            use_count: (target.use_count ?? 0) + 1,
-            last_used_at: new Date().toISOString(),
-          };
-          const updated = [bumped, ...rest];
-          updated.sort((a, b) => {
-            const aUsed = (a.use_count ?? 0) > 0 ? 1 : 0;
-            const bUsed = (b.use_count ?? 0) > 0 ? 1 : 0;
-            if (aUsed !== bUsed) return bUsed - aUsed;
-            if ((b.use_count ?? 0) !== (a.use_count ?? 0)) {
-              return (b.use_count ?? 0) - (a.use_count ?? 0);
-            }
-            return (b.last_used_at ?? "").localeCompare(a.last_used_at ?? "");
-          });
-          return { phrases: updated };
-        }
-        if (s.phrases[0]?.id === phrase.id) return {};
-        return { phrases: [target, ...rest] };
-      });
-    } catch (e) {
-      console.error("Paste failed:", e);
-    }
-  },
+  pastePhrase: async (phrase: Phrase) => runPastePhrase(phrase, false),
 
-  pastePhraseTerminal: async (phrase: Phrase) => {
-    try {
-      if (phrase.input_type === "file") {
-        const path = await resolveAbsoluteResourcePath(phrase.content);
-        if (isImageFilePath(path)) {
-          await invoke("paste_image_file", { path });
-        } else {
-          await invoke("paste_file", { path });
-        }
-      } else {
-        await invoke("paste_text_terminal", { text: phrase.content });
-      }
-      touchPhraseUsage(phrase.id);
-      set((s) => {
-        if (s.selectedGroupId !== ALL_PHRASES_GROUP_ID) return {};
-        const target = s.phrases.find((p) => p.id === phrase.id);
-        if (!target) return {};
-        const rest = s.phrases.filter((p) => p.id !== phrase.id);
-        if (useSettingsStore.getState().contentSort === "count") {
-          // 最多使用模式：计数 +1 并按次数重排（并列按最近使用）。
-          const bumped: Phrase = {
-            ...target,
-            use_count: (target.use_count ?? 0) + 1,
-            last_used_at: new Date().toISOString(),
-          };
-          const updated = [bumped, ...rest];
-          updated.sort((a, b) => {
-            const aUsed = (a.use_count ?? 0) > 0 ? 1 : 0;
-            const bUsed = (b.use_count ?? 0) > 0 ? 1 : 0;
-            if (aUsed !== bUsed) return bUsed - aUsed;
-            if ((b.use_count ?? 0) !== (a.use_count ?? 0)) {
-              return (b.use_count ?? 0) - (a.use_count ?? 0);
-            }
-            return (b.last_used_at ?? "").localeCompare(a.last_used_at ?? "");
-          });
-          return { phrases: updated };
-        }
-        if (s.phrases[0]?.id === phrase.id) return {};
-        return { phrases: [target, ...rest] };
-      });
-    } catch (e) {
-      console.error("Terminal paste failed:", e);
-    }
-  },
+  pastePhraseTerminal: async (phrase: Phrase) => runPastePhrase(phrase, true),
 
   reorderPhrases: async (ids: string[]) => {
     set((s) => ({ phrases: sortByIdOrder(s.phrases, ids) }));
