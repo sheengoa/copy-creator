@@ -80,8 +80,11 @@ export function ResourceItemVisual({ item }: ResourceItemVisualProps) {
 
 /** 径向菜单剪切板图片条目的横幅（图片列表态统一全宽，经 FileMediaVisual）。 */
 export function RadialImageBanner({ recordId }: { recordId: string }) {
-  const { records } = useClipboardStore();
-  const record = records.find((entry) => entry.id === recordId);
-  if (!record) return <span className="radial-menu-item-text">…</span>;
-  return <FileMediaVisual path={record.content} className="radial-menu-file-media" />;
+  // 订阅收窄到该条目的内容字符串：store 其余字段变化不再触发每个横幅
+  // 逐条重渲（原先全量解构 + O(n) find，列表态是 O(n²)）。
+  const content = useClipboardStore(
+    (s) => s.records.find((entry) => entry.id === recordId)?.content,
+  );
+  if (!content) return <span className="radial-menu-item-text">…</span>;
+  return <FileMediaVisual path={content} className="radial-menu-file-media" />;
 }

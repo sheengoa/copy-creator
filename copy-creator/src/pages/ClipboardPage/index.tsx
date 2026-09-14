@@ -1,6 +1,7 @@
 import { useEffect, useState, useRef, useCallback, useMemo } from "react";
 import { useTranslation } from "react-i18next";
 import { invoke } from "@tauri-apps/api/core";
+import { useShallow } from "zustand/react/shallow";
 import { useClipboardStore, type ClipboardFilter } from "../../stores/clipboardStore";
 import { useSettingsStore } from "../../stores/settingsStore";
 import { Icons } from "../../components/Icons";
@@ -25,6 +26,7 @@ TYPE_META.file.icon = Icons.file;
 
 export default function ClipboardPage() {
   const { t } = useTranslation();
+  // 选择器订阅：仅这些字段变化才重渲整页（store 里其余无关状态不触发）。
   const {
     records,
     search,
@@ -41,7 +43,25 @@ export default function ClipboardPage() {
     pasteRecord,
     pasteRecordTerminal,
     moveRecordsToTop,
-  } = useClipboardStore();
+  } = useClipboardStore(
+    useShallow((s) => ({
+      records: s.records,
+      search: s.search,
+      loading: s.loading,
+      hasMore: s.hasMore,
+      category: s.category,
+      init: s.init,
+      setSearch: s.setSearch,
+      setCategory: s.setCategory,
+      loadRecords: s.loadRecords,
+      loadAllRecords: s.loadAllRecords,
+      deleteRecords: s.deleteRecords,
+      deleteRecord: s.deleteRecord,
+      pasteRecord: s.pasteRecord,
+      pasteRecordTerminal: s.pasteRecordTerminal,
+      moveRecordsToTop: s.moveRecordsToTop,
+    })),
+  );
   const pasteLeftClick = useSettingsStore((s) => s.pasteLeftClick);
   const [confirmState, setConfirmState] = useState<{
     message: string;
@@ -125,6 +145,13 @@ export default function ClipboardPage() {
       }
     },
     [loadRecords, records],
+  );
+
+  const handleMoveToTop = useCallback(
+    (id: string) => {
+      void moveRecordsToTop([id]);
+    },
+    [moveRecordsToTop],
   );
 
   const openClipboardCreate = useCallback(async () => {
@@ -388,9 +415,9 @@ export default function ClipboardPage() {
               onPasteNormal={handlePaste}
               onPasteTerminal={handlePasteTerminal}
               onDelete={handleDelete}
-              onMoveToTop={(id) => void moveRecordsToTop([id])}
+              onMoveToTop={handleMoveToTop}
               getRecordContent={getRecordContent}
-              onToggleUserApiKey={(v) => void handleToggleUserApiKey(v)}
+              onToggleUserApiKey={handleToggleUserApiKey}
               selectionMode={isSelecting}
               selected={isSelected(view.id)}
               onToggleSelected={toggleSelected}

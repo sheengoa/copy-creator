@@ -17,6 +17,7 @@ import { SortableContext, arrayMove, useSortable, verticalListSortingStrategy } 
 import { CSS } from "@dnd-kit/utilities";
 import { restrictToVerticalAxis } from "@dnd-kit/modifiers";
 import { useResourceStore } from "../stores/clipboardStore";
+import { useShallow } from "zustand/react/shallow";
 import { useSettingsStore } from "../stores/settingsStore";
 import { useMultiSelect } from "../hooks/useMultiSelect";
 import { Icons } from "../components/Icons";
@@ -81,7 +82,23 @@ export default function ResourcePage() {
     deleteRecord,
     deleteRecords,
     pasteRecord,
-  } = useResourceStore();
+  } = useResourceStore(
+    useShallow((s) => ({
+      records: s.records,
+      search: s.search,
+      loading: s.loading,
+      loadError: s.loadError,
+      hasMore: s.hasMore,
+      init: s.init,
+      setSearch: s.setSearch,
+      loadRecords: s.loadRecords,
+      loadAllRecords: s.loadAllRecords,
+      setResourceGroup: s.setResourceGroup,
+      deleteRecord: s.deleteRecord,
+      deleteRecords: s.deleteRecords,
+      pasteRecord: s.pasteRecord,
+    })),
+  );
   const contentSort = useSettingsStore((s) => s.contentSort);
 
   const [typeFilter, setTypeFilter] = useState<ResourceTypeFilter>("all");
@@ -142,6 +159,8 @@ export default function ResourcePage() {
     (kind: ResourceTypeFilter) => kind === "all" ? t("resources.typeAll") : typeLabels[kind],
     [t, typeLabels],
   );
+  // 卡片回调保持引用稳定：ResourceCard 已 memo，内联箭头函数会让 memo 失效。
+  const cardTypeLabel = useCallback((kind: ResourceMediaKindLabel) => typeLabels[kind], [typeLabels]);
   // 分组浏览的本地排序（最新/最旧）。「全部」视图按内容排序偏好展示，控件隐藏。
   const [sortOrderLocal, setSortOrderLocal] = useState<"newest" | "oldest">("newest");
   const sortOptions = useMemo(() => ([
@@ -336,7 +355,19 @@ export default function ResourcePage() {
     setSelectingAll(false);
   }, [isSelecting, selectingAll]);
 
-  const columns = splitResourceColumns(filteredRecords, columnCount);
+  // 视图模型与分列都 memo 化：避免任意一次无关 state 变化触发全量重建
+  // （buildRecordView 每卡一次）导致整页卡片级重渲。
+  const resourceViews = useMemo(() => {
+    const views = new Map<string, RecordView>();
+    for (const record of filteredRecords) {
+      views.set(record.id, buildRecordView(record));
+    }
+    return views;
+  }, [filteredRecords]);
+  const columns = useMemo(
+    () => splitResourceColumns(filteredRecords, columnCount),
+    [filteredRecords, columnCount],
+  );
 
   // 列数随列表宽度动态变化，窗口缩放时实时跟随（最少两列）。
   useEffect(() => {
@@ -674,6 +705,11 @@ export default function ResourcePage() {
     setMoveError(null);
     setMoveDialog({ ids, label, meta, folders });
   }, [detailRecord, filteredRecords, t]);
+
+  const handleMoveCard = useCallback(
+    (moveView: RecordView) => openResourceMove([moveView.id]),
+    [openResourceMove],
+  );
 
   const handleMoveConfirm = useCallback(async (targetFolder: string) => {
     if (!moveDialog || movingResource) return;
@@ -1361,13 +1397,14 @@ export default function ResourcePage() {
               {columns.map((column, columnIndex) => (
                 <div className="resource-column" key={`column-${columnIndex}`}>
                   {column.map((record) => {
-                    const view = buildRecordView(record);
+                    const view = resourceViews.get(record.id);
+                    if (!view) return null;
                     return (
                     <div className="resource-item" key={record.id}>
                       <ResourceCard
                         view={view}
                         search={search}
-                        typeLabel={(kind) => typeLabels[kind]}
+                        typeLabel={cardTypeLabel}
                         selectionMode={isSelecting}
                         selected={isSelected(view.id)}
                         showGroupTag={resourceGroup === null}
@@ -1376,7 +1413,7 @@ export default function ResourcePage() {
                         onCopy={handleCopyCard}
                         onDelete={handleDeleteRecord}
                         onToggleSelected={toggleSelected}
-                        onMove={(moveView) => openResourceMove([moveView.id])}
+                        onMove={handleMoveCard}
                       />
                     </div>
                     );

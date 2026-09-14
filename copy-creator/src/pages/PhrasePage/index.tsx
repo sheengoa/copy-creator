@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { useTranslation } from "react-i18next";
+import { useShallow } from "zustand/react/shallow";
 import { resolveResourceAssetUrl } from "../../domain/mediaUrl";
 import { useRefreshOnShow } from "../../hooks/useRefreshOnShow";
 import {
@@ -66,6 +67,7 @@ export default function PhrasePage() {
   const [renameId, setRenameId] = useState<string | null>(null);
   const [renameName, setRenameName] = useState("");
 
+  // 选择器订阅：仅这些字段变化才重渲整页。
   const {
     groups,
     phrases,
@@ -92,7 +94,35 @@ export default function PhrasePage() {
     getQuickInputFileInfo,
     getQuickInputFileLimit,
     movePhrasesToTop,
-  } = usePhraseStore();
+  } = usePhraseStore(
+    useShallow((s) => ({
+      groups: s.groups,
+      phrases: s.phrases,
+      selectedGroupId: s.selectedGroupId,
+      search: s.search,
+      loading: s.loading,
+      setSearch: s.setSearch,
+      setSelectedGroup: s.setSelectedGroup,
+      init: s.init,
+      loadGroups: s.loadGroups,
+      loadPhrases: s.loadPhrases,
+      createGroup: s.createGroup,
+      updateGroup: s.updateGroup,
+      createPhrase: s.createPhrase,
+      createFilePhrase: s.createFilePhrase,
+      updatePhrase: s.updatePhrase,
+      updateFilePhrase: s.updateFilePhrase,
+      deletePhrases: s.deletePhrases,
+      deletePhrase: s.deletePhrase,
+      deleteGroup: s.deleteGroup,
+      pastePhrase: s.pastePhrase,
+      pastePhraseTerminal: s.pastePhraseTerminal,
+      selectQuickInputFile: s.selectQuickInputFile,
+      getQuickInputFileInfo: s.getQuickInputFileInfo,
+      getQuickInputFileLimit: s.getQuickInputFileLimit,
+      movePhrasesToTop: s.movePhrasesToTop,
+    })),
+  );
   const pasteLeftClick = useSettingsStore((s) => s.pasteLeftClick);
 
   useEffect(() => {

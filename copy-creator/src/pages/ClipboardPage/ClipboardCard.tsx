@@ -1,4 +1,4 @@
-import { useCallback, useState, useEffect } from "react";
+import { memo, useCallback, useState, useEffect } from "react";
 import { useTranslation } from "react-i18next";
 import { Icons } from "../../components/Icons";
 import {
@@ -509,6 +509,4 @@ function ClipboardCardInner({
   );
 }
 
-export function ClipboardCard(props: ClipboardCardProps) {
-  return <ClipboardCardInner {...props} />;
-}
+export const ClipboardCard = memo(ClipboardCardInner);

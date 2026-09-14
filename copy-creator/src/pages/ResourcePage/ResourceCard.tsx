@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { memo, useCallback, useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Icons } from "../../components/Icons";
 import {
@@ -103,7 +103,7 @@ function ResourceCardVisual({
   );
 }
 
-export function ResourceCard({
+function ResourceCardInner({
   view,
   search,
   typeLabel,
@@ -283,3 +283,5 @@ export function ResourceCard({
     </article>
   );
 }
+
+export const ResourceCard = memo(ResourceCardInner);
