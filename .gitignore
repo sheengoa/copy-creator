@@ -23,3 +23,10 @@ output/
 
 # 低保真原型 HTML：仅本地留存，不纳入版本控制
 design/*.html
+
+# 本机开发脚本：dev.cmd 硬编码个人 MSVC/SDK 安装路径，仅本机留存
+copy-creator/dev.cmd
+
+# 代理/工具会话过程产物
+**/.superpowers/
+.workbuddy/
