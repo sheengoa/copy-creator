@@ -456,11 +456,33 @@ fn resource_path_key(path: &Path) -> PathBuf {
 }
 
 fn is_ignored_resource_file(path: &Path) -> bool {
-    path.file_name()
-        .and_then(OsStr::to_str)
-        .is_some_and(|name| {
-            name.starts_with(".copy-creator-") || (name.starts_with('.') && name.ends_with(".tmp"))
-        })
+    let Some(name) = path.file_name().and_then(OsStr::to_str) else {
+        return false;
+    };
+    name.starts_with(".copy-creator-")
+        || (name.starts_with('.') && name.ends_with(".tmp"))
+        || is_temporary_resource_file_name(name)
+}
+
+/// 浏览器/下载器的半成品文件与 Office/LibreOffice 锁文件、系统派生文件：
+/// 入库只会产生无内容可展示的「文件」占位卡片，覆盖完成后才会以真实
+/// 文件名再次出现并被正常收录。扩展名清单由扫描忽略与启动清退共用
+/// （is_temporary_resource_file_name 与 prune_temporary_resource_records）。
+const TEMPORARY_RESOURCE_EXTENSIONS: [&str; 9] = [
+    "tmp", "temp", "crdownload", "part", "download", "partial", "opdownload", "swp", "swo",
+];
+
+fn is_temporary_resource_file_name(name: &str) -> bool {
+    if name.starts_with("~$") || name.starts_with(".~lock.") {
+        return true;
+    }
+    let lower = name.to_lowercase();
+    if matches!(lower.as_str(), "desktop.ini" | "thumbs.db" | ".ds_store") {
+        return true;
+    }
+    lower
+        .rsplit_once('.')
+        .is_some_and(|(_, extension)| TEMPORARY_RESOURCE_EXTENSIONS.contains(&extension))
 }
 
 /// 应用缩略图目录约定：原图旁的 `thumbs/` 全部是派生缓存（可随时再生成），
@@ -488,6 +510,29 @@ fn prune_legacy_thumb_records(conn: &Connection) {
         [],
     ) {
         log::warn!("清理 thumbs 缓存记录失败: {error}");
+    }
+}
+
+/// 清退历史误入库的外部临时文件记录（浏览器半成品下载 .crdownload/.tmp
+/// 等）：文件本体保留在磁盘上，仅移除入库记录；此后扫描与监听补建均按
+/// is_temporary_resource_file_name 忽略，不会重新出现。只清外部发现
+/// （resource_external=1）的记录，应用内显式保存的资源不受影响。必须在
+/// init_db 每次启动时执行（与 prune_legacy_thumb_records 同理）。扩展名
+/// 清单须与 is_temporary_resource_file_name 保持一致（有单测钉住）。
+fn prune_temporary_resource_records(conn: &Connection) {
+    let conditions: Vec<String> = TEMPORARY_RESOURCE_EXTENSIONS
+        .iter()
+        .map(|extension| format!("LOWER(resource_path) LIKE '%.{extension}'"))
+        .collect();
+    let sql = format!(
+        "DELETE FROM clipboard_records
+         WHERE COALESCE(storage_mode, 'database') = 'resource'
+           AND COALESCE(resource_external, 0) = 1
+           AND ({})",
+        conditions.join(" OR ")
+    );
+    if let Err(error) = conn.execute(&sql, []) {
+        log::warn!("清理临时文件记录失败: {error}");
     }
 }
 
@@ -1500,6 +1545,7 @@ pub fn init_db(app: &AppHandle) -> Result<(), Box<dyn std::error::Error>> {
 
     // thumbs 派生缓存清退（每次启动执行，见函数注释）。
     prune_legacy_thumb_records(&conn);
+    prune_temporary_resource_records(&conn);
 
     app.manage(DbState {
         conn: Mutex::new(conn),
@@ -1828,7 +1874,7 @@ pub fn discover_external_resource_files<R: Runtime>(
     }
     drop(stmt);
     for path in paths {
-        if !path.is_file() || !path.starts_with(&root) {
+        if !path.is_file() || !path.starts_with(&root) || is_ignored_resource_file(&path) {
             continue;
         }
         // 与扫描同一套忽略规则：应用自身的附件、临时文件与 thumbs/ 派生
@@ -5562,9 +5608,10 @@ mod quick_input_file_tests {
 #[cfg(test)]
 mod resource_file_tests {
     use super::{
-        managed_resource_attachment_path, managed_resource_file_path,
-        normalize_resource_folder_path, normalize_resource_group_name,
-        resource_folder_for_path, resource_group_for_path, scan_resource_files,
+        is_temporary_resource_file_name, managed_resource_attachment_path,
+        managed_resource_file_path, normalize_resource_folder_path,
+        normalize_resource_group_name, resource_folder_for_path, resource_group_for_path,
+        scan_resource_files, TEMPORARY_RESOURCE_EXTENSIONS,
     };
     use std::path::PathBuf;
 
@@ -5779,6 +5826,11 @@ mod resource_file_tests {
         std::fs::write(root.join("References/archive/archive.bin"), [0, 1, 2]).unwrap();
         std::fs::write(root.join("References/notes.tmp"), b"temporary text").unwrap();
         std::fs::write(root.join("References/.resource.tmp"), b"ignored").unwrap();
+        // 半成品下载与锁文件：扫描不得收录（覆盖完成后以真实文件名再入库）。
+        std::fs::write(root.join("References/未确认 409376.crdownload"), [0, 1]).unwrap();
+        std::fs::write(root.join("References/notes.part"), b"partial").unwrap();
+        std::fs::write(root.join("References/~$report.docx"), b"lock").unwrap();
+        std::fs::write(root.join("References/desktop.ini"), b"system").unwrap();
         std::fs::write(root.join(".copy-creator/hidden.txt"), b"hidden").unwrap();
 
         let entries = scan_resource_files(&root);
@@ -5839,10 +5891,6 @@ mod resource_file_tests {
                     "References".to_string(),
                 ),
                 (
-                    "References/notes.tmp".to_string(),
-                    "References".to_string(),
-                ),
-                (
                     "References/sound.ogg".to_string(),
                     "References".to_string(),
                 ),
@@ -5874,6 +5922,56 @@ mod resource_file_tests {
             "file"
         );
         let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn temporary_resource_rules_cover_scan_and_prune_consistently() {
+        for name in [
+            "未确认 409376.crdownload",
+            "d99cb95b-c1be-4400-95c5-f334a965cf30.tmp",
+            "archive.TEMP",
+            "notes.part",
+            "setup.download",
+            "file.partial",
+            "movie.opdownload",
+            ".notes.swp",
+            "swap.swo",
+            "~$report.docx",
+            ".~lock.notes.txt#",
+            "desktop.ini",
+            "THUMBS.DB",
+        ] {
+            assert!(
+                is_temporary_resource_file_name(name),
+                "{name} 应判为临时/系统文件"
+            );
+        }
+        for name in [
+            "report.docx",
+            "photo.png",
+            "tmp",
+            "tips",
+            "desktop.ini.bak",
+            "parliament.txt",
+        ] {
+            assert!(
+                !is_temporary_resource_file_name(name),
+                "{name} 不应判为临时/系统文件"
+            );
+        }
+        // 清退 SQL 的条件必须与判定函数覆盖同一份扩展名清单。
+        let conditions: Vec<String> = TEMPORARY_RESOURCE_EXTENSIONS
+            .iter()
+            .map(|extension| format!("LOWER(resource_path) LIKE '%.{extension}'"))
+            .collect();
+        for extension in TEMPORARY_RESOURCE_EXTENSIONS {
+            assert!(
+                conditions
+                    .iter()
+                    .any(|condition| condition.contains(&format!(".{extension}'"))),
+                "清退 SQL 缺少扩展名 {extension}"
+            );
+        }
     }
 }
 
