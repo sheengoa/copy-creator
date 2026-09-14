@@ -80,6 +80,7 @@ export default function ResourcePage() {
     setSearch,
     loadRecords,
     loadAllRecords,
+    resourceGroup,
     setResourceGroup: setStoreResourceGroup,
     deleteRecord,
     deleteRecords,
@@ -95,6 +96,7 @@ export default function ResourcePage() {
       setSearch: s.setSearch,
       loadRecords: s.loadRecords,
       loadAllRecords: s.loadAllRecords,
+      resourceGroup: s.resourceGroup,
       setResourceGroup: s.setResourceGroup,
       deleteRecord: s.deleteRecord,
       deleteRecords: s.deleteRecords,
@@ -126,7 +128,8 @@ export default function ResourcePage() {
   const [resourceLibraryPathError, setResourceLibraryPathError] = useState<string | null>(null);
   const [resourceSettingsOpen, setResourceSettingsOpen] = useState(false);
   const [resourceGroups, setResourceGroups] = useState<ResourceFolder[]>([]);
-  const [resourceGroup, setResourceGroup] = useState<string | null>(null);
+  // 分组选中态以 store 为单一来源：store 字段同时驱动 record-updated 事件
+  // 的过滤（recordMatchesCategory），页面只读写 store，不再维护本地副本。
   const [resourceGroupsLoading, setResourceGroupsLoading] = useState(true);
   const [resourceGroupsError, setResourceGroupsError] = useState<string | null>(null);
   const [resourceGroupManageOpen, setResourceGroupManageOpen] = useState(false);
@@ -448,7 +451,6 @@ export default function ResourcePage() {
     ) {
       return;
     }
-    setResourceGroup(null);
     setStoreResourceGroup(null);
     void loadRecords(false, "resources", null);
   }, [
@@ -461,7 +463,6 @@ export default function ResourcePage() {
 
   const handleSelectResourceGroup = useCallback((name: string | null) => {
     cancelResourceSelection();
-    setResourceGroup(name);
     setStoreResourceGroup(name);
   }, [cancelResourceSelection, setStoreResourceGroup]);
 
@@ -512,7 +513,6 @@ export default function ResourcePage() {
           nextGroup = target === "" ? rest : `${target}/${rest}`;
         }
       }
-      setResourceGroup(nextGroup);
       setStoreResourceGroup(nextGroup);
       setResourceGroupMove(null);
       await loadRecords(false, "resources", nextGroup);
@@ -546,14 +546,12 @@ export default function ResourcePage() {
           newName: newPath,
         });
         await loadResourceGroups();
-        setResourceGroup(newPath);
         setStoreResourceGroup(newPath);
       } else {
         const parentPath = resourceGroupDialog?.parentPath;
         const fullPath = parentPath ? `${parentPath}/${name}` : name;
         await invoke("create_resource_group", { name: fullPath });
         await loadResourceGroups();
-        setResourceGroup(fullPath);
         setStoreResourceGroup(fullPath);
       }
       setResourceGroupDialog(null);
@@ -627,7 +625,6 @@ export default function ResourcePage() {
           const nextGroup = resourceGroup !== null && isResourceFolderPath(resourceGroup, name)
             ? null
             : resourceGroup;
-          setResourceGroup(nextGroup);
           setStoreResourceGroup(nextGroup);
           await loadRecords(false, "resources", nextGroup);
           setResourceGroupManageOpen(false);
@@ -863,7 +860,6 @@ export default function ResourcePage() {
         path: selectedPath,
       });
       setResourceLibraryPath(savedPath);
-      setResourceGroup(null);
       setStoreResourceGroup(null);
       await loadResourceGroups();
       await loadRecords(false, "resources", null);
