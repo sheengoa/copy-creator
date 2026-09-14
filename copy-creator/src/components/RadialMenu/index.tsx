@@ -25,6 +25,7 @@ import { ContentPreviewPanel } from "../ContentPreviewPanel";
 import { FileMediaVisual } from "../FileMediaPreview";
 import { BackToTopButton } from "../BackToTop";
 import { useBackToTop } from "../../hooks/useBackToTop";
+import { useHorizontalWheelScroll } from "../../hooks/useHorizontalWheelScroll";
 import { useRecordLocale } from "../../hooks/useRecordLocale";
 import {
   isContentPreviewAvailable,
@@ -273,18 +274,7 @@ export default function RadialMenu() {
   // 快捷输入数据在挂载时由 phraseStore.init() 预取（默认「全部」视图）；
   // 每次切到该 tab / 打开菜单时由 activateTab 重新加载，保证使用记录新鲜。
 
-  useEffect(() => {
-    const el = categoriesScrollRef.current;
-    if (!el) return;
-    const handleCategoriesWheel = (event: WheelEvent) => {
-      if (Math.abs(event.deltaY) > Math.abs(event.deltaX)) {
-        event.preventDefault();
-        el.scrollLeft += event.deltaY;
-      }
-    };
-    el.addEventListener("wheel", handleCategoriesWheel, { passive: false });
-    return () => el.removeEventListener("wheel", handleCategoriesWheel);
-  }, [activeTab]);
+  useHorizontalWheelScroll(categoriesScrollRef, activeTab);
 
   const resourceFolderGroups = resourceGroups.filter((group) => group.name !== "");
   const resourceGroupMenuFolder = resourceGroupMenuPath

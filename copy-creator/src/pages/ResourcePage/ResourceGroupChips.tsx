@@ -1,27 +1,21 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { useTranslation } from "react-i18next";
-import {
-  DndContext,
-  DragOverlay,
-  PointerSensor,
-  closestCenter,
-  useSensor,
-  useSensors,
-} from "@dnd-kit/core";
-import type { DragEndEvent, DragStartEvent } from "@dnd-kit/core";
+import { DndContext, closestCenter } from "@dnd-kit/core";
 import {
   SortableContext,
-  arrayMove,
   horizontalListSortingStrategy,
   useSortable,
 } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
 import { restrictToHorizontalAxis } from "@dnd-kit/modifiers";
 import { Icons } from "../../components/Icons";
+import { ChipDragOverlay } from "../../components/ChipDragOverlay";
 import type { ResourceFolder } from "../../types";
 import { findResourceFolder, flattenResourceFoldersVisible, formatResourceFolderPath, isResourceFolderPath } from "../../domain/groups";
 import { useEscapeKey } from "../../hooks/useEscapeKey";
+import { useChipStripReorder } from "../../hooks/useChipStripReorder";
+import { useHorizontalWheelScroll } from "../../hooks/useHorizontalWheelScroll";
 
 interface ResourceGroupChipsProps {
   groups: ResourceFolder[];
@@ -117,7 +111,6 @@ export default function ResourceGroupChips({
   const scrollRef = useRef<HTMLDivElement>(null);
   const menuRef = useRef<HTMLDivElement>(null);
   const menuAnchorRef = useRef<HTMLButtonElement>(null);
-  const [activeDragId, setActiveDragId] = useState<string | null>(null);
   const [menuPath, setMenuPath] = useState<string | null>(null);
   const [menuPosition, setMenuPosition] = useState<{ left: number; top: number } | null>(null);
   // 子分组折叠状态：浮层内存活，重开浮层与页面级重扫都保持。
@@ -131,23 +124,7 @@ export default function ResourceGroupChips({
     ));
   }, []);
 
-  const sensors = useSensors(
-    useSensor(PointerSensor, { activationConstraint: { distance: 4 } }),
-  );
-
-  // 与剪切板区、快捷输入区一致：指针悬浮在分组栏上滚动滑轮即可横向滚动。
-  useEffect(() => {
-    const element = scrollRef.current;
-    if (!element) return;
-    const onWheel = (event: WheelEvent) => {
-      if (Math.abs(event.deltaY) > Math.abs(event.deltaX)) {
-        event.preventDefault();
-        element.scrollLeft += event.deltaY;
-      }
-    };
-    element.addEventListener("wheel", onWheel, { passive: false });
-    return () => element.removeEventListener("wheel", onWheel);
-  }, []);
+  useHorizontalWheelScroll(scrollRef);
 
   const closeMenu = useCallback(() => {
     setMenuPath(null);
@@ -238,25 +215,13 @@ export default function ResourceGroupChips({
     setMenuPath(path);
   }, [closeMenu, menuPath]);
 
-  const handleDragStart = useCallback((event: DragStartEvent) => {
-    setActiveDragId(String(event.active.id));
-  }, []);
-
-  const handleDragCancel = useCallback(() => {
-    setActiveDragId(null);
-  }, []);
-
-  const handleDragEnd = useCallback((event: DragEndEvent) => {
-    setActiveDragId(null);
-    const { active, over } = event;
-    if (!over || active.id === over.id) return;
-    const oldIndex = groups.findIndex((group) => group.path === active.id);
-    const newIndex = groups.findIndex((group) => group.path === over.id);
-    if (oldIndex === -1 || newIndex === -1) return;
-    onReorderGroups(arrayMove(groups, oldIndex, newIndex).map((group) => group.path));
-  }, [groups, onReorderGroups]);
-
-  const activeGroup = activeDragId ? groups.find((group) => group.path === activeDragId) : null;
+  const {
+    activeItem: activeGroup,
+    sensors,
+    handleDragStart,
+    handleDragCancel,
+    handleDragEnd,
+  } = useChipStripReorder(groups, (group) => group.path, onReorderGroups);
 
   return (
     <section className="resource-group-section" aria-label={t("resources.groups")}>
@@ -306,16 +271,7 @@ export default function ResourceGroupChips({
               );
             })}
           </SortableContext>
-          {/* 主窗口内容容器带 transform/backdrop-filter，fixed 会以其为
-              包含块，虚影须 portal 到 body 才能跟随指针。 */}
-          {activeGroup ? createPortal(
-            <DragOverlay dropAnimation={null}>
-              <div className="resource-group-chip active drag-overlay-chip">
-                {activeGroup.name}
-              </div>
-            </DragOverlay>,
-            document.body,
-          ) : null}
+          {activeGroup ? <ChipDragOverlay label={activeGroup.name} className="resource-group-chip" /> : null}
         </DndContext>
       </div>
       <div className="resource-group-actions">

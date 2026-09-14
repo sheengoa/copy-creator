@@ -12,6 +12,7 @@ import { TYPE_META } from "./utils";
 import BatchSelectionBar from "../../components/BatchSelectionBar";
 import { BackToTopButton } from "../../components/BackToTop";
 import { useBackToTop } from "../../hooks/useBackToTop";
+import { useHorizontalWheelScroll } from "../../hooks/useHorizontalWheelScroll";
 import { useMultiSelect } from "../../hooks/useMultiSelect";
 import { useRefreshOnShow } from "../../hooks/useRefreshOnShow";
 import { useRecordLocale } from "../../hooks/useRecordLocale";
@@ -89,18 +90,7 @@ export default function ClipboardPage() {
   const categoriesScrollRef = useRef<HTMLDivElement>(null);
   const searchEffectInitializedRef = useRef(false);
 
-  useEffect(() => {
-    const el = categoriesScrollRef.current;
-    if (!el) return;
-    const onWheel = (e: WheelEvent) => {
-      if (Math.abs(e.deltaY) > Math.abs(e.deltaX)) {
-        e.preventDefault();
-        el.scrollLeft += e.deltaY;
-      }
-    };
-    el.addEventListener("wheel", onWheel, { passive: false });
-    return () => el.removeEventListener("wheel", onWheel);
-  }, []);
+  useHorizontalWheelScroll(categoriesScrollRef);
 
   const categories: { key: ClipType; label: string }[] = [
     { key: "all", label: t("clipboard.all") },

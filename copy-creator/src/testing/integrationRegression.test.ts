@@ -461,9 +461,13 @@ describe("integration regressions", () => {
     // 「回到顶部」统一走共享模块（剪贴板/快捷输入/资源/径向菜单共用）。
     expect(pageSource).toContain("useBackToTop");
     expect(readSource("../hooks/useBackToTop.ts")).toContain("export function useBackToTop");
-    // 分组栏滚轮横向滚动随组件内聚（原 resourceGroupScrollRef 在 ResourcePage 上）。
+    // 分组栏滚轮横滚收敛到共享 hook（剪切板/快捷输入/资源/径向菜单共用），
+    // 行为由 useHorizontalWheelScroll.test.ts 真实验证。
     const groupChipsSource = readSource("../pages/ResourcePage/ResourceGroupChips.tsx");
-    expect(groupChipsSource).toContain('addEventListener("wheel"');
+    expect(groupChipsSource).toContain("useHorizontalWheelScroll");
+    expect(readSource("../hooks/useHorizontalWheelScroll.ts")).toContain(
+      "export function useHorizontalWheelScroll",
+    );
     const libSource = readSource("../../src-tauri/src/lib.rs");
     const mediaServerSource = readSource("../../src-tauri/src/media_server.rs");
     const dbSource = readSource("../../src-tauri/src/db/mod.rs");

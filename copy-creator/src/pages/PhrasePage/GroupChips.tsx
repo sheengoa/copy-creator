@@ -1,24 +1,20 @@
-import { useState, useRef, useEffect } from "react";
-import { createPortal } from "react-dom";
+import { useRef } from "react";
 import { useTranslation } from "react-i18next";
-import { Icons } from "../../components/Icons";
 import {
   DndContext,
-  PointerSensor,
-  useSensors,
-  useSensor,
   closestCenter,
-  DragOverlay,
 } from "@dnd-kit/core";
-import type { DragEndEvent, DragStartEvent } from "@dnd-kit/core";
 import {
   SortableContext,
   horizontalListSortingStrategy,
-  arrayMove,
   useSortable,
 } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
 import { restrictToHorizontalAxis } from "@dnd-kit/modifiers";
+import { Icons } from "../../components/Icons";
+import { ChipDragOverlay } from "../../components/ChipDragOverlay";
+import { useChipStripReorder } from "../../hooks/useChipStripReorder";
+import { useHorizontalWheelScroll } from "../../hooks/useHorizontalWheelScroll";
 import type { PhraseGroup } from "../../types";
 
 interface GroupChipsProps {
@@ -89,46 +85,15 @@ export function GroupChips({
 }: GroupChipsProps) {
   const { t } = useTranslation();
   const groupsScrollRef = useRef<HTMLDivElement>(null);
+  useHorizontalWheelScroll(groupsScrollRef);
 
-  useEffect(() => {
-    const el = groupsScrollRef.current;
-    if (!el) return;
-    const onWheel = (e: WheelEvent) => {
-      if (Math.abs(e.deltaY) > Math.abs(e.deltaX)) {
-        e.preventDefault();
-        el.scrollLeft += e.deltaY;
-      }
-    };
-    el.addEventListener("wheel", onWheel, { passive: false });
-    return () => el.removeEventListener("wheel", onWheel);
-  }, []);
-
-  const sensors = useSensors(
-    useSensor(PointerSensor, { activationConstraint: { distance: 4 } })
-  );
-
-  const [activeGroupId, setActiveGroupId] = useState<string | null>(null);
-
-  const handleGroupDragStart = (event: DragStartEvent) => {
-    setActiveGroupId(String(event.active.id));
-  };
-
-  const handleGroupDragCancel = () => {
-    setActiveGroupId(null);
-  };
-
-  const handleGroupDragEnd = (event: DragEndEvent, groups: PhraseGroup[]) => {
-    setActiveGroupId(null);
-    const { active, over } = event;
-    if (!over || active.id === over.id) return;
-    const oldIndex = groups.findIndex((g) => g.id === active.id);
-    const newIndex = groups.findIndex((g) => g.id === over.id);
-    if (oldIndex === -1 || newIndex === -1) return;
-    const newOrder = arrayMove(groups, oldIndex, newIndex);
-    onReorderGroups(newOrder.map((g) => g.id));
-  };
-
-  const activeGroup = activeGroupId ? groups.find(g => g.id === activeGroupId) : null;
+  const {
+    activeItem: activeGroup,
+    sensors,
+    handleDragStart,
+    handleDragCancel,
+    handleDragEnd,
+  } = useChipStripReorder(groups, (group) => group.id, onReorderGroups);
 
   return (
     <div className="phrase-groups">
@@ -140,7 +105,7 @@ export function GroupChips({
         >
           {allViewLabel}
         </button>
-        <DndContext sensors={sensors} collisionDetection={closestCenter} onDragStart={handleGroupDragStart} onDragEnd={(e) => handleGroupDragEnd(e, groups)} onDragCancel={handleGroupDragCancel} modifiers={[restrictToHorizontalAxis]}>
+        <DndContext sensors={sensors} collisionDetection={closestCenter} onDragStart={handleDragStart} onDragEnd={handleDragEnd} onDragCancel={handleDragCancel} modifiers={[restrictToHorizontalAxis]}>
           <SortableContext items={groups.map(g => g.id)} strategy={horizontalListSortingStrategy}>
             {groups.map((g) => (
               <SortableGroupChip
@@ -151,16 +116,7 @@ export function GroupChips({
               />
             ))}
           </SortableContext>
-          {/* 主窗口内容容器带 transform/backdrop-filter，fixed 会以其为
-              包含块，虚影须 portal 到 body 才能跟随指针。 */}
-          {activeGroup ? createPortal(
-            <DragOverlay dropAnimation={null}>
-              <div className={`group-chip active drag-overlay-chip`}>
-                {activeGroup.name}
-              </div>
-            </DragOverlay>,
-            document.body,
-          ) : null}
+          {activeGroup ? <ChipDragOverlay label={activeGroup.name} className="group-chip" /> : null}
         </DndContext>
       </div>
       {!selectionMode && (
