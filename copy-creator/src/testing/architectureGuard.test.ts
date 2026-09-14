@@ -7,7 +7,7 @@ import { describe, expect, it } from "vitest";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
-const frontRoot = resolve(dirname(fileURLToPath(import.meta.url)));
+const frontRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const repoRoot = resolve(frontRoot, "..", "..");
 const readSource = (relative: string): string =>
   readFileSync(join(frontRoot, relative), "utf8");

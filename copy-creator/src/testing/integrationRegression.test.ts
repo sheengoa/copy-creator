@@ -10,7 +10,7 @@ function readSource(path: string) {
 
 describe("integration regressions", () => {
   it("does not re-show hidden windows from delayed raise paths", () => {
-    const libSource = readSource("../src-tauri/src/lib.rs");
+    const libSource = readSource("../../src-tauri/src/lib.rs");
     const delayedMainBlock = libSource.slice(
       libSource.indexOf("Duration::from_millis(250)"),
       libSource.indexOf("main window not found (delayed startup)"),
@@ -18,7 +18,7 @@ describe("integration regressions", () => {
     expect(delayedMainBlock).not.toContain(".show()");
     expect(delayedMainBlock).toContain("is_visible()");
 
-    const shortcutSource = readSource("../src-tauri/src/shortcut.rs");
+    const shortcutSource = readSource("../../src-tauri/src/shortcut.rs");
     expect(shortcutSource).not.toContain("refresh_always_on_top_if_visible");
     expect(shortcutSource).not.toContain("Duration::from_millis(60)");
     expect(shortcutSource).toContain("raise_always_on_top(&radial);");
@@ -27,7 +27,7 @@ describe("integration regressions", () => {
   });
 
   it("does not animate the radial popup during native window mapping", () => {
-    const radialStyles = readSource("./styles/radial-menu.css");
+    const radialStyles = readSource("../styles/radial-menu.css");
 
     expect(radialStyles).toContain(".radial-menu-overlay.radial-menu-hidden");
     expect(radialStyles).not.toContain("radial-menu-hidden .radial-menu-popup");
@@ -36,8 +36,8 @@ describe("integration regressions", () => {
   });
 
   it("keeps a visible radial menu above the clipboard create dialog", () => {
-    const shortcutSource = readSource("../src-tauri/src/shortcut.rs");
-    const libSource = readSource("../src-tauri/src/lib.rs");
+    const shortcutSource = readSource("../../src-tauri/src/shortcut.rs");
+    const libSource = readSource("../../src-tauri/src/lib.rs");
     const createBlock = shortcutSource.slice(
       shortcutSource.indexOf("pub fn show_clipboard_create"),
       shortcutSource.indexOf("#[tauri::command]", shortcutSource.indexOf("pub fn show_clipboard_create")),
@@ -62,7 +62,7 @@ describe("integration regressions", () => {
   });
 
   it("uses the shared main-window show path for Linux IPC", () => {
-    const ipcSource = readSource("../src-tauri/src/ipc.rs");
+    const ipcSource = readSource("../../src-tauri/src/ipc.rs");
 
     expect(ipcSource).toContain('crate::show_main_window(app, "ipc", false);');
     expect(ipcSource).not.toContain("static SHOWING");
@@ -70,11 +70,11 @@ describe("integration regressions", () => {
   });
 
   it("uses the same six-line card folding for quick input and clipboard cards", () => {
-    const phraseSource = readSource("./pages/PhrasePage/PhraseList.tsx");
-    const clipboardSource = readSource("./pages/ClipboardPage/ClipboardCard.tsx");
-    const phraseStyles = readSource("./styles/phrases.css");
-    const clipboardStyles = readSource("./styles/clipboard.css");
-    const recordsDomain = readSource("./domain/records.ts");
+    const phraseSource = readSource("../pages/PhrasePage/PhraseList.tsx");
+    const clipboardSource = readSource("../pages/ClipboardPage/ClipboardCard.tsx");
+    const phraseStyles = readSource("../styles/phrases.css");
+    const clipboardStyles = readSource("../styles/clipboard.css");
+    const recordsDomain = readSource("../domain/records.ts");
 
     expect(phraseSource).toContain('className="card-toggle-text-btn"');
     expect(phraseSource).toContain("e.stopPropagation()");
@@ -98,8 +98,8 @@ describe("integration regressions", () => {
   });
 
   it("sizes the quick input editor dialog relative to the main window", () => {
-    const dialogSource = readSource("./pages/PhrasePage/PhraseDialog.tsx");
-    const componentsStyles = readSource("./styles/components.css");
+    const dialogSource = readSource("../pages/PhrasePage/PhraseDialog.tsx");
+    const componentsStyles = readSource("../styles/components.css");
 
     expect(dialogSource).toContain('className="dialog-content large phrase-dialog-content"');
     expect(componentsStyles).toContain(".dialog-content.large.phrase-dialog-content");
@@ -109,7 +109,7 @@ describe("integration regressions", () => {
   });
 
   it("keeps migrated clipboard schema compatible with current record fields", () => {
-    const dbSource = readSource("../src-tauri/src/db/mod.rs");
+    const dbSource = readSource("../../src-tauri/src/db/mod.rs");
     // 迁移路径必须经由 migrate_storage_data → ensure_schema：迁移库与
     // 主库共用同一 schema 源（含全部列与索引），禁止再出现各自的
     // CREATE TABLE 副本——曾经的副本缺 4 列，迁移后列表命令直接报错。
@@ -129,7 +129,7 @@ describe("integration regressions", () => {
   });
 
   it("classifies manually saved content through the shared stash path", () => {
-    const clipboardSource = readSource("../src-tauri/src/clipboard.rs");
+    const clipboardSource = readSource("../../src-tauri/src/clipboard.rs");
     const saveStart = clipboardSource.indexOf("pub fn save_stash_record");
     const saveBlock = clipboardSource.slice(
       saveStart,
@@ -141,12 +141,12 @@ describe("integration regressions", () => {
   });
 
   it("updates stash records and moves them to the top without changing creation time", () => {
-    const dbSource = readSource("../src-tauri/src/db/mod.rs");
+    const dbSource = readSource("../../src-tauri/src/db/mod.rs");
     const updateBlock = dbSource.slice(
       dbSource.indexOf("pub fn update_clipboard_record"),
       dbSource.indexOf("pub fn delete_all_clipboard_records"),
     );
-    const libSource = readSource("../src-tauri/src/lib.rs");
+    const libSource = readSource("../../src-tauri/src/lib.rs");
 
     expect(updateBlock).toContain("SELECT storage_mode FROM clipboard_records");
     expect(updateBlock).toContain("is_resource_record(&storage_mode)");
@@ -159,18 +159,18 @@ describe("integration regressions", () => {
   });
 
   it("keeps standalone clipboard create language in sync", () => {
-    const componentSource = readSource("./components/ClipboardCreateDialog/index.tsx");
+    const componentSource = readSource("../components/ClipboardCreateDialog/index.tsx");
 
     expect(componentSource).toContain('get_setting", { key: "language"');
     expect(componentSource).toContain("i18n.changeLanguage");
   });
 
   it("supports resource groups through library subfolders", () => {
-    const dbSource = readSource("../src-tauri/src/db/mod.rs");
-    const clipboardSource = readSource("../src-tauri/src/clipboard.rs");
-    const pageSource = readSource("./pages/ResourcePage.tsx");
-    const groupChipsSource = readSource("./pages/ResourcePage/ResourceGroupChips.tsx");
-    const componentSource = readSource("./components/ClipboardCreateDialog/index.tsx");
+    const dbSource = readSource("../../src-tauri/src/db/mod.rs");
+    const clipboardSource = readSource("../../src-tauri/src/clipboard.rs");
+    const pageSource = readSource("../pages/ResourcePage.tsx");
+    const groupChipsSource = readSource("../pages/ResourcePage/ResourceGroupChips.tsx");
+    const componentSource = readSource("../components/ClipboardCreateDialog/index.tsx");
 
     expect(dbSource).toContain("DROP TABLE IF EXISTS resource_groups");
     expect(dbSource).toContain("pub fn get_resource_groups");
@@ -210,10 +210,10 @@ describe("integration regressions", () => {
   });
 
   it("propagates external library changes and usage updates to the frontend", () => {
-    const watchSource = readSource("../src-tauri/src/resource_watch.rs");
-    const dbSource = readSource("../src-tauri/src/db/mod.rs");
-    const clipboardPageSource = readSource("./pages/ClipboardPage/index.tsx");
-    const pageSource = readSource("./pages/ResourcePage.tsx");
+    const watchSource = readSource("../../src-tauri/src/resource_watch.rs");
+    const dbSource = readSource("../../src-tauri/src/db/mod.rs");
+    const clipboardPageSource = readSource("../pages/ClipboardPage/index.tsx");
+    const pageSource = readSource("../pages/ResourcePage.tsx");
 
     // 目录监听必须把删除/内容修改也转发进防抖汇聚（不只是新建/改名），
     // 否则文件管理器里删除内容后界面永远不会刷新（修复前的根因）。
@@ -241,9 +241,9 @@ describe("integration regressions", () => {
     // 广播；后端在 show_main_window（全部显示路径的汇聚点）发射该事件。
     expect(clipboardPageSource).toContain("useRefreshOnShow");
     expect(pageSource).toContain("useRefreshOnShow");
-    const hookSource = readSource("./hooks/useRefreshOnShow.ts");
+    const hookSource = readSource("../hooks/useRefreshOnShow.ts");
     expect(hookSource).toContain('listen("main-window-shown"');
-    const libSource = readSource("../src-tauri/src/lib.rs");
+    const libSource = readSource("../../src-tauri/src/lib.rs");
     expect(libSource).toContain('emit("main-window-shown"');
 
     // 兜底自愈：resource-groups-changed 是单次事件，被 WebView 丢弃时
@@ -261,23 +261,23 @@ describe("integration regressions", () => {
     // 不得回退到共享的 clipboardStore。
     expect(pageSource).toContain("useResourceStore");
     expect(pageSource).not.toContain("useClipboardStore");
-    const detailSource = readSource("./pages/ResourcePage/ResourceDetailPage.tsx");
+    const detailSource = readSource("../pages/ResourcePage/ResourceDetailPage.tsx");
     expect(detailSource).toContain("useResourceStore");
 
     // 三个常挂页面的窗口恢复显示刷新必须齐全：短语页虽独占 phraseStore，
     // 但隐藏期间的增删改只能靠事件感知，事件丢失时同样需要兜底重载。
-    const phrasePageSource = readSource("./pages/PhrasePage/index.tsx");
+    const phrasePageSource = readSource("../pages/PhrasePage/index.tsx");
     expect(phrasePageSource).toContain("useRefreshOnShow");
 
     // 径向菜单弹出/展开/收起动效：窗口几何恒定（防 X11 闪烁）的前提
     // 下，动效全部在 web 层完成——弹出入场、预览滑入、收起滑出三段
     // 缺一不可，防止动效被静默删除后菜单变回"生硬瞬现"。
-    const radialCssSource = readSource("./styles/radial-menu.css");
+    const radialCssSource = readSource("../styles/radial-menu.css");
     expect(radialCssSource).toContain("radial-preview-in");
     expect(radialCssSource).toContain("radial-preview-out");
     expect(radialCssSource).toContain("preview-closing");
     expect(radialCssSource).toContain("radial-main-in");
-    const radialMenuSource = readSource("./components/RadialMenu/index.tsx");
+    const radialMenuSource = readSource("../components/RadialMenu/index.tsx");
     expect(radialMenuSource).toContain("previewClosing");
     expect(radialMenuSource).toContain("collapsePreview(false)");
 
@@ -299,7 +299,7 @@ describe("integration regressions", () => {
     expect(radialCssSource).toContain("radial-menu-closing");
     expect(radialCssSource).toContain("radial-main-out");
     expect(radialCssSource).toContain(".radial-menu-hidden .radial-menu-main");
-    const radialMenuGtk = readSource("../src-tauri/src/shortcut.rs");
+    const radialMenuGtk = readSource("../../src-tauri/src/shortcut.rs");
     expect(radialMenuGtk).toContain("fn park_radial_window");
     expect(radialMenuGtk).toContain("RADIAL_MENU_SHOWN");
     expect(radialMenuGtk).toContain("x11_focus_toplevel_xid");
@@ -309,19 +309,19 @@ describe("integration regressions", () => {
     expect(radialMenuSource).toContain('invoke("hide_radial_menu")');
     expect(radialMenuSource).not.toContain("getCurrentWindow().hide()");
     // 启动即映射并清空输入区域（常驻模型的前置条件）。
-    const libRsSource = readSource("../src-tauri/src/lib.rs");
+    const libRsSource = readSource("../../src-tauri/src/lib.rs");
     expect(libRsSource).toContain("clear_radial_input");
     expect(libRsSource).toContain("shortcut::hide_radial_menu");
   });
 
   it("passes clipboard search into cards for highlighting", () => {
-    const pageSource = readSource("./pages/ClipboardPage/index.tsx");
+    const pageSource = readSource("../pages/ClipboardPage/index.tsx");
 
     expect(pageSource).toContain("search={search}");
   });
 
   it("keeps clipboard deletion on the shared cleanup path", () => {
-    const dbSource = readSource("../src-tauri/src/db/mod.rs");
+    const dbSource = readSource("../../src-tauri/src/db/mod.rs");
     const deleteBlock = dbSource.slice(
       dbSource.indexOf("fn delete_clipboard_records_internal"),
       dbSource.indexOf("pub fn get_phrase_groups"),
@@ -333,10 +333,10 @@ describe("integration regressions", () => {
   });
 
   it("uses shared batch selection controls on both list pages", () => {
-    const clipboardPage = readSource("./pages/ClipboardPage/index.tsx");
-    const phrasePage = readSource("./pages/PhrasePage/index.tsx");
-    const batchBar = readSource("./components/BatchSelectionBar.tsx");
-    const libSource = readSource("../src-tauri/src/lib.rs");
+    const clipboardPage = readSource("../pages/ClipboardPage/index.tsx");
+    const phrasePage = readSource("../pages/PhrasePage/index.tsx");
+    const batchBar = readSource("../components/BatchSelectionBar.tsx");
+    const libSource = readSource("../../src-tauri/src/lib.rs");
 
     expect(clipboardPage).toContain("<BatchSelectionBar");
     expect(phrasePage).toContain("<BatchSelectionBar");
@@ -357,10 +357,10 @@ describe("integration regressions", () => {
   });
 
   it("keeps the resource library independent from clipboard history", () => {
-    const appSource = readSource("./App.tsx");
-    const clipboardPage = readSource("./pages/ClipboardPage/index.tsx");
-    const radialMenu = readSource("./components/RadialMenu/index.tsx");
-    const resourcePage = readSource("./pages/ResourcePage.tsx");
+    const appSource = readSource("../App.tsx");
+    const clipboardPage = readSource("../pages/ClipboardPage/index.tsx");
+    const radialMenu = readSource("../components/RadialMenu/index.tsx");
+    const resourcePage = readSource("../pages/ResourcePage.tsx");
 
     expect(appSource).toContain('titleKey: "tabs.resources"');
     expect(appSource).toContain('{ panelType: "resources" }');
@@ -413,10 +413,10 @@ describe("integration regressions", () => {
   });
 
   it("keeps resource detail flow and batch selection aligned with current records", () => {
-    const pageSource = readSource("./pages/ResourcePage.tsx");
-    const cardSource = readSource("./pages/ResourcePage/ResourceCard.tsx");
-    const detailPageSource = readSource("./pages/ResourcePage/ResourceDetailPage.tsx");
-    const config = JSON.parse(readSource("../src-tauri/tauri.conf.json")) as {
+    const pageSource = readSource("../pages/ResourcePage.tsx");
+    const cardSource = readSource("../pages/ResourcePage/ResourceCard.tsx");
+    const detailPageSource = readSource("../pages/ResourcePage/ResourceDetailPage.tsx");
+    const config = JSON.parse(readSource("../../src-tauri/tauri.conf.json")) as {
       app: { security: { csp: string } };
     };
     const detailLoaderBlock = detailPageSource.slice(
@@ -435,8 +435,8 @@ describe("integration regressions", () => {
     expect(detailLoaderBlock).toContain('|| kind === "image"');
     expect(detailPageSource).toContain("<ResourceImage");
     expect(detailPageSource).toContain("getResourcePath");
-    const mediaSource = readSource("./pages/ResourcePage/ResourceMedia.tsx");
-    const resourceStyles = readSource("./styles/resource.css");
+    const mediaSource = readSource("../pages/ResourcePage/ResourceMedia.tsx");
+    const resourceStyles = readSource("../styles/resource.css");
     expect(mediaSource).toContain('openResourceFile(path)');
     expect(mediaSource).toContain('errorName !== "AbortError"');
     expect(mediaSource).toContain("if (failed || mediaFailed)");
@@ -460,13 +460,13 @@ describe("integration regressions", () => {
     expect(pageSource).toContain("activeGroupRow && createPortal(");
     // 「回到顶部」统一走共享模块（剪贴板/快捷输入/资源/径向菜单共用）。
     expect(pageSource).toContain("useBackToTop");
-    expect(readSource("./hooks/useBackToTop.ts")).toContain("export function useBackToTop");
+    expect(readSource("../hooks/useBackToTop.ts")).toContain("export function useBackToTop");
     // 分组栏滚轮横向滚动随组件内聚（原 resourceGroupScrollRef 在 ResourcePage 上）。
-    const groupChipsSource = readSource("./pages/ResourcePage/ResourceGroupChips.tsx");
+    const groupChipsSource = readSource("../pages/ResourcePage/ResourceGroupChips.tsx");
     expect(groupChipsSource).toContain('addEventListener("wheel"');
-    const libSource = readSource("../src-tauri/src/lib.rs");
-    const mediaServerSource = readSource("../src-tauri/src/media_server.rs");
-    const dbSource = readSource("../src-tauri/src/db/mod.rs");
+    const libSource = readSource("../../src-tauri/src/lib.rs");
+    const mediaServerSource = readSource("../../src-tauri/src/media_server.rs");
+    const dbSource = readSource("../../src-tauri/src/db/mod.rs");
     expect(libSource).toContain("media_server::spawn");
     expect(mediaServerSource).toContain("Accept-Ranges: bytes");
     expect(mediaServerSource).toContain("get_media_server_origin");
@@ -483,16 +483,16 @@ describe("integration regressions", () => {
   });
 
   it("renders resource list card images from backend thumbnails", () => {
-    const mediaSource = readSource("./pages/ResourcePage/ResourceMedia.tsx");
-    const cardSource = readSource("./pages/ResourcePage/ResourceCard.tsx");
-    const radialSource = readSource("./components/RadialMenu/index.tsx")
-      + readSource("./components/RadialMenu/ResourceItemVisual.tsx")
+    const mediaSource = readSource("../pages/ResourcePage/ResourceMedia.tsx");
+    const cardSource = readSource("../pages/ResourcePage/ResourceCard.tsx");
+    const radialSource = readSource("../components/RadialMenu/index.tsx")
+      + readSource("../components/RadialMenu/ResourceItemVisual.tsx")
       // 径向图片条目的横幅经共享 FileMediaVisual 渲染（内含 ResourceFileImage 缩略图管线）。
-      + readSource("./components/FileMediaPreview.tsx");
-    const radialStyles = readSource("./styles/radial-menu.css");
-    const resourceStyles = readSource("./styles/resource.css");
-    const libSource = readSource("../src-tauri/src/lib.rs");
-    const dbSource = readSource("../src-tauri/src/db/mod.rs");
+      + readSource("../components/FileMediaPreview.tsx");
+    const radialStyles = readSource("../styles/radial-menu.css");
+    const resourceStyles = readSource("../styles/resource.css");
+    const libSource = readSource("../../src-tauri/src/lib.rs");
+    const dbSource = readSource("../../src-tauri/src/db/mod.rs");
 
     // 密集网格卡片必须走缩略图：原图直出会在滚动时全尺寸解码造成卡顿。
     // 全宽横幅（剪切板/径向，经 FileMediaVisual）可视数量少，直接流式
@@ -518,10 +518,10 @@ describe("integration regressions", () => {
   });
 
   it("keeps resource-library storage separate from the app database", () => {
-    const dbSource = readSource("../src-tauri/src/db/mod.rs");
-    const clipboardSource = readSource("../src-tauri/src/clipboard.rs");
-    const resourcePage = readSource("./pages/ResourcePage.tsx");
-    const createDialog = readSource("./components/ClipboardCreateDialog/index.tsx");
+    const dbSource = readSource("../../src-tauri/src/db/mod.rs");
+    const clipboardSource = readSource("../../src-tauri/src/clipboard.rs");
+    const resourcePage = readSource("../pages/ResourcePage.tsx");
+    const createDialog = readSource("../components/ClipboardCreateDialog/index.tsx");
     const pruneBlock = dbSource.slice(
       dbSource.indexOf("pub fn prune_old_records"),
       dbSource.indexOf("// ---- Tauri Commands ----"),
@@ -554,7 +554,7 @@ describe("integration regressions", () => {
   });
 
   it("keeps the resource area single-mode without a mode switch", () => {
-    const pageSource = readSource("./pages/ResourcePage.tsx");
+    const pageSource = readSource("../pages/ResourcePage.tsx");
 
     expect(pageSource).not.toContain("handleSwitchMode");
     expect(pageSource).not.toContain("ResourceMode");
@@ -568,10 +568,10 @@ describe("integration regressions", () => {
   // 不触碰窗口几何——条带在窗口打开时一次性预留，展开只挂载面板并扩放
   // 输入区域（XShape），收起反向；条带收起时点击穿透，不吞下层点击。
   it("expands the radial preview without any window geometry change", () => {
-    const radialStyles = readSource("./styles/radial-menu.css");
-    const radialMenu = readSource("./components/RadialMenu/index.tsx");
-    const shortcutSource = readSource("../src-tauri/src/shortcut.rs");
-    const libSource = readSource("../src-tauri/src/lib.rs");
+    const radialStyles = readSource("../styles/radial-menu.css");
+    const radialMenu = readSource("../components/RadialMenu/index.tsx");
+    const shortcutSource = readSource("../../src-tauri/src/shortcut.rs");
+    const libSource = readSource("../../src-tauri/src/lib.rs");
 
     // 前端展开/收起路径不得再出现任何窗口几何操作。
     const previewFlow = radialMenu.slice(
@@ -633,16 +633,16 @@ describe("integration regressions", () => {
   });
 
   it("keeps the content panel for radial menu and uses inline previews on the main page", () => {
-    const pageSource = readSource("./pages/ClipboardPage/index.tsx");
-    const cardSource = readSource("./pages/ClipboardPage/ClipboardCard.tsx");
-    const radialMenu = readSource("./components/RadialMenu/index.tsx");
-    const previewPanel = readSource("./components/ContentPreviewPanel.tsx");
-    const previewLoader = readSource("./domain/preview.ts");
-    const clipboardStyles = readSource("./styles/clipboard.css");
-    const persistWindowSize = readSource("./hooks/usePersistWindowSize.ts");
-    const inlinePreview = readSource("./components/InlinePreview.tsx");
-    const dbSource = readSource("../src-tauri/src/db/mod.rs");
-    const libSource = readSource("../src-tauri/src/lib.rs");
+    const pageSource = readSource("../pages/ClipboardPage/index.tsx");
+    const cardSource = readSource("../pages/ClipboardPage/ClipboardCard.tsx");
+    const radialMenu = readSource("../components/RadialMenu/index.tsx");
+    const previewPanel = readSource("../components/ContentPreviewPanel.tsx");
+    const previewLoader = readSource("../domain/preview.ts");
+    const clipboardStyles = readSource("../styles/clipboard.css");
+    const persistWindowSize = readSource("../hooks/usePersistWindowSize.ts");
+    const inlinePreview = readSource("../components/InlinePreview.tsx");
+    const dbSource = readSource("../../src-tauri/src/db/mod.rs");
+    const libSource = readSource("../../src-tauri/src/lib.rs");
 
     expect(radialMenu).toContain('<ContentPreviewPanel');
     expect(previewLoader).toContain("loadRecordPreviewSegments");
@@ -658,7 +658,7 @@ describe("integration regressions", () => {
     expect(cardSource).toContain("view.expandPreview");
     expect(clipboardStyles).not.toContain(".main-window-content-preview");
     expect(persistWindowSize).not.toContain("data-main-content-preview");
-    expect(readSource('./domain/mediaAssets.ts')).toContain('read_quick_input_text_preview');
+    expect(readSource('../domain/mediaAssets.ts')).toContain('read_quick_input_text_preview');
     expect(inlinePreview).toContain('readClipboardTextPreviewById');
     expect(inlinePreview).toContain("resolveResourceAssetUrl");
     expect(dbSource).toContain("read_quick_input_text_preview");
@@ -670,15 +670,15 @@ describe("integration regressions", () => {
   });
 
   it("starts Linux file drags from the top-level GTK window", () => {
-    const dragSource = readSource("../src-tauri/src/radial_drag.rs");
-    const libSource = readSource("../src-tauri/src/lib.rs");
-    const shortcutSource = readSource("../src-tauri/src/shortcut.rs");
-    const radialMenu = readSource("./components/RadialMenu/index.tsx");
-    const pageSource = readSource("./pages/ClipboardPage/index.tsx");
-    const cardSource = readSource("./pages/ClipboardPage/ClipboardCard.tsx");
-    const previewPanel = readSource("./components/ContentPreviewPanel.tsx");
-    const radialStyles = readSource("./styles/radial-menu.css");
-    const radialDrag = readSource("./utils/radialDrag.ts");
+    const dragSource = readSource("../../src-tauri/src/radial_drag.rs");
+    const libSource = readSource("../../src-tauri/src/lib.rs");
+    const shortcutSource = readSource("../../src-tauri/src/shortcut.rs");
+    const radialMenu = readSource("../components/RadialMenu/index.tsx");
+    const pageSource = readSource("../pages/ClipboardPage/index.tsx");
+    const cardSource = readSource("../pages/ClipboardPage/ClipboardCard.tsx");
+    const previewPanel = readSource("../components/ContentPreviewPanel.tsx");
+    const radialStyles = readSource("../styles/radial-menu.css");
+    const radialDrag = readSource("../utils/radialDrag.ts");
     const pointerDownBlock = radialMenu.slice(
       radialMenu.indexOf("const handleItemPointerDown"),
       radialMenu.indexOf("const handleItemPointerMove"),

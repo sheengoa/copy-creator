@@ -4,7 +4,7 @@ import { describe, expect, it } from "vitest";
 import { readFileSync } from "node:fs";
 
 function readStyle(name: string) {
-  return readFileSync(new URL(`./${name}`, import.meta.url), "utf8");
+  return readFileSync(new URL(`../styles/${name}`, import.meta.url), "utf8");
 }
 
 function readSource(path: string) {
