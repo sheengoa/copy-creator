@@ -25,8 +25,8 @@ tauri-plugin-clipboard-manager = "2"
 tauri-plugin-global-shortcut = "2"
 tauri-plugin-dialog = "2"
 rusqlite = { version = "0.31", features = ["bundled"] }
-reqwest = { version = "0.12", features = ["json"] }
-tokio = { version = "1", features = ["full"] }
+# 仅用 spawn_blocking（rt）与 oneshot（sync），运行时由 tauri 自带。
+tokio = { version = "1", features = ["rt", "sync"] }
 uuid = { version = "1", features = ["v4"] }
 chrono = { version = "0.4", features = ["serde"] }
 enigo = "0.3"
