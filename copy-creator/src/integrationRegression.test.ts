@@ -261,6 +261,12 @@ describe("integration regressions", () => {
     const radialMenuSource = readSource("./components/RadialMenu/index.tsx");
     expect(radialMenuSource).toContain("previewClosing");
     expect(radialMenuSource).toContain("collapsePreview(false)");
+
+    // 快捷键二次按键收起：X11 grab 抢焦点触发 blur 自隐藏会与后端
+    // 快捷键处理竞态（自隐藏抢先 → 后端误判未显示 → 重新弹出），
+    // 自隐藏必须延迟一拍并在收到后端 hide/show 事件或焦点回归时取消。
+    expect(radialMenuSource).toContain("blurHideTimerRef");
+    expect(radialMenuSource).toContain("cancelPendingBlurHide");
   });
 
   it("passes clipboard search into cards for highlighting", () => {
@@ -783,7 +789,7 @@ describe("integration regressions", () => {
     expect(radialStyles).toContain(".radial-menu-item-footer");
     expect(radialStyles).toContain("prefers-reduced-motion: reduce");
     expect(radialStyles).toContain(".radial-menu-popup.drag-session .content-preview-panel");
-    expect(radialMenu).toContain('listen("radial-menu-hide", resetStateForNativeHide)');
+    expect(radialMenu).toContain('listen("radial-menu-hide", () => {');
     expect(shortcutSource).toContain('app.emit("radial-menu-hide", ())');
     expect(radialDrag).not.toContain('RadialDragKind = "text"');
     expect(libSource).toContain("start_radial_file_drag");

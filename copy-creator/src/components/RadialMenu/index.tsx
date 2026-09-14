@@ -226,6 +226,7 @@ export default function RadialMenu() {
   const previewRequestRef = useRef(0);
   const previewRef = useRef<PreviewState | null>(null);
   const previewCloseTimerRef = useRef<number | null>(null);
+  const blurHideTimerRef = useRef<number | null>(null);
   // 扩展条带的方向与宽度：后端打开窗口时按光标所在显示器一次性决定
   // （预留好条带，展开期不再改动窗口几何），随 radial-menu-show 事件下发。
   const previewSideRef = useRef<RadialPreviewDirection>("right");
@@ -1161,13 +1162,26 @@ export default function RadialMenu() {
     let disposed = false;
 
     const setup = async () => {
+      // 快捷键的 X11 全局 grab 会先抢走焦点（DOM blur），后端的快捷键
+      // 处理器随后才运行——若 blur 立即自隐藏，处理器会误判"窗口未显示"
+      // 而重新弹出，二次按键永远无法收起。因此自隐藏延迟一拍，期间收到
+      // 后端 hide/show 事件或焦点回归（用户点了回来）即取消。
+      const cancelPendingBlurHide = () => {
+        if (blurHideTimerRef.current !== null) {
+          window.clearTimeout(blurHideTimerRef.current);
+          blurHideTimerRef.current = null;
+        }
+      };
       // 诊断：径向窗口焦点丢失往往先于用户感知的"菜单消失"。
       void getCurrentWindow().onFocusChanged(({ payload: focused }) => {
         flog(`radial window focus changed: focused=${focused}`);
+        if (focused) cancelPendingBlurHide();
       });
+
       // Listen for radial-menu-show event from backend (keyboard shortcut triggered)
       const [unShow, unHide, unDragStarted, unDragFinished, unScaleChanged] = await Promise.all([
         listen<{ theme: string; scale?: number; previewSide?: RadialPreviewDirection; previewWidth?: number }>("radial-menu-show", (e) => {
+          cancelPendingBlurHide();
           // 后端会先显示窗口再发事件，必须先同步开放前端交互，避免首次按下落在隐藏状态。
           if (typeof e.payload.scale === "number") applyUiScale(e.payload.scale);
           // 打开时已按该方向/宽度预留好扩展条带（几何不再变化），此处仅同步。
@@ -1213,7 +1227,10 @@ export default function RadialMenu() {
           useClipboardStore.getState().loadRecords(false, "all");
           usePhraseStore.getState().loadGroups();
         }),
-        listen("radial-menu-hide", resetStateForNativeHide),
+        listen("radial-menu-hide", () => {
+          cancelPendingBlurHide();
+          resetStateForNativeHide();
+        }),
         listen("radial-drag-started", handleRadialDragStarted),
         listen("radial-drag-finished", handleRadialDragFinished),
         listen<{ scale: number }>("radial-scale-changed", (e) => {
@@ -1277,8 +1294,23 @@ export default function RadialMenu() {
         && !dragActiveRef.current
         && !nativeDragRef.current
       ) {
-        resetState();
-        getCurrentWindow().hide();
+        // 延迟自隐藏：给后端快捷键处理器留出竞态窗口（见
+        // cancelPendingBlurHide 注释）。真实失焦（点击其他应用）时没有
+        // 事件来取消，150ms 后照常隐藏。
+        if (blurHideTimerRef.current !== null) {
+          window.clearTimeout(blurHideTimerRef.current);
+        }
+        blurHideTimerRef.current = window.setTimeout(() => {
+          blurHideTimerRef.current = null;
+          if (
+            visibleRef.current
+            && !dragActiveRef.current
+            && !nativeDragRef.current
+          ) {
+            resetState();
+            void getCurrentWindow().hide();
+          }
+        }, 150);
       }
     };
 
@@ -1289,6 +1321,10 @@ export default function RadialMenu() {
     return () => {
       disposed = true;
       cancelPendingNativeDrag(nativeDragRef.current);
+      if (blurHideTimerRef.current !== null) {
+        window.clearTimeout(blurHideTimerRef.current);
+        blurHideTimerRef.current = null;
+      }
       unlisteners.forEach((fn) => fn());
       document.removeEventListener("mousemove", handleMouseMove);
       document.removeEventListener("keydown", handleKeyDown);
