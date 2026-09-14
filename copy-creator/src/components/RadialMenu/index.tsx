@@ -448,7 +448,7 @@ export default function RadialMenu() {
     previewRef.current = loadingState;
     setPreview(loadingState);
     return layout;
-  }, []);
+  }, [cancelPreviewClose]);
 
   const loadPreviewSegments = useCallback(async (item: RadialItem) => {
     const cached = previewCacheRef.current.get(item.id);
