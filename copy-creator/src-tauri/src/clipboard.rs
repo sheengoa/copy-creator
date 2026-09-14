@@ -1240,46 +1240,54 @@ fn poll_clipboard_forever(handle: AppHandle) {
                     content_hash_str
                 );
 
-                crate::paste::cache_image(relative.clone(), rgba_vec, img_w, img_h);
-
-                // Generate thumbnail if missing
+                // Generate thumbnail if missing —— 直接从内存中的 RGBA 缓冲
+                // 缩放生成，不再把刚编码的 PNG 整图解码一遍（4K 图一次解码
+                // 数百毫秒，发生在采集关键路径上）。
                 let mut thumb_dir = dir.clone();
                 thumb_dir.push("thumbs");
                 std::fs::create_dir_all(&thumb_dir).ok();
                 let thumb_path = thumb_dir.join(&filename);
                 if !thumb_path.exists() {
-                    if let Ok(decoded) = image::load_from_memory(&png_bytes) {
-                        let (tw, th) = (decoded.width(), decoded.height());
-                        let max_thumb: u32 = 200;
-                        let scale = if tw > max_thumb || th > max_thumb {
-                            max_thumb as f32 / tw.max(th) as f32
-                        } else {
-                            1.0
-                        };
-                        let thumb = if scale < 1.0 {
-                            decoded.resize(
-                                (tw as f32 * scale) as u32,
-                                (th as f32 * scale) as u32,
-                                image::imageops::FilterType::Triangle,
-                            )
-                        } else {
-                            decoded
-                        };
-                        let mut thumb_buf = std::io::Cursor::new(Vec::new());
-                        if thumb
-                            .write_to(&mut thumb_buf, image::ImageFormat::Png)
-                            .is_ok()
+                    let max_thumb: u32 = 200;
+                    let scale = if img_w > max_thumb || img_h > max_thumb {
+                        max_thumb as f32 / img_w.max(img_h) as f32
+                    } else {
+                        1.0
+                    };
+                    if scale < 1.0 {
+                        let (tw, th) = (
+                            (img_w as f32 * scale) as u32,
+                            (img_h as f32 * scale) as u32,
+                        );
+                        if let Some(rgba_img) =
+                            image::RgbaImage::from_raw(img_w, img_h, rgba_vec.clone())
                         {
-                            if let Ok(mut tf) = std::fs::File::create(&thumb_path) {
-                                let _ = tf.write_all(&thumb_buf.into_inner());
+                            let thumb = image::DynamicImage::ImageRgba8(rgba_img).resize(
+                                tw,
+                                th,
+                                image::imageops::FilterType::Triangle,
+                            );
+                            let mut thumb_buf = std::io::Cursor::new(Vec::new());
+                            if thumb
+                                .write_to(&mut thumb_buf, image::ImageFormat::Png)
+                                .is_ok()
+                            {
+                                if let Ok(mut tf) = std::fs::File::create(&thumb_path) {
+                                    let _ = tf.write_all(&thumb_buf.into_inner());
+                                }
                             }
                         }
+                    } else {
+                        // 原图不超阈值：缩略图与原图同尺寸，直接复制原图。
+                        let _ = std::fs::copy(&filepath, &thumb_path);
                     }
                 }
 
-                insert_and_emit(&handle, "image", &relative);
-                image_recorded = true;
+                crate::paste::cache_image(relative.clone(), rgba_vec, img_w, img_h);
             }
+
+            insert_and_emit(&handle, "image", &relative);
+            image_recorded = true;
         }
 
         if image_recorded {
