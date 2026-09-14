@@ -813,7 +813,9 @@ export default function RadialMenu() {
     const { records, pasteRecord, pasteRecordTerminal } = useClipboardStore.getState();
     const record = records.find((r) => r.id === itemId);
     if (record) {
-      await (terminal ? pasteRecordTerminal(record) : pasteRecord(record));
+      const copied = await (terminal ? pasteRecordTerminal(record) : pasteRecord(record));
+      // 菜单已按设计隐藏，无法就地反馈；失败必须留痕（否则用户拿旧内容误贴）。
+      if (!copied) flog(`paste-failed record=${itemId} terminal=${terminal}`);
     } else {
       const { phrases, pastePhrase, pastePhraseTerminal } = usePhraseStore.getState();
       const phrase = phrases.find((p) => p.id === itemId);

@@ -69,6 +69,22 @@ export default function ClipboardPage() {
   } | null>(null);
   const [deletingSelected, setDeletingSelected] = useState(false);
 
+  // 粘贴结果反馈：粘贴失败此前被静默吞掉，用户会去目标应用贴出旧内容。
+  // 与资源页同款 showFeedback 模式与样式（resource-feedback）。
+  const [pasteFeedback, setPasteFeedback] = useState<"copied" | "copyFailed" | null>(null);
+  const feedbackTimerRef = useRef<number | null>(null);
+  const showPasteFeedback = useCallback((next: "copied" | "copyFailed") => {
+    if (feedbackTimerRef.current !== null) window.clearTimeout(feedbackTimerRef.current);
+    setPasteFeedback(next);
+    feedbackTimerRef.current = window.setTimeout(() => {
+      setPasteFeedback(null);
+      feedbackTimerRef.current = null;
+    }, 2200);
+  }, []);
+  useEffect(() => () => {
+    if (feedbackTimerRef.current !== null) window.clearTimeout(feedbackTimerRef.current);
+  }, []);
+
   const categoriesScrollRef = useRef<HTMLDivElement>(null);
   const searchEffectInitializedRef = useRef(false);
 
@@ -109,19 +125,23 @@ export default function ClipboardPage() {
   );
 
   const handlePaste = useCallback(
-    (view: RecordView) => {
+    async (view: RecordView) => {
       const record = records.find((r) => r.id === view.id);
-      if (record) void pasteRecord(record);
+      if (!record) return;
+      const copied = await pasteRecord(record);
+      showPasteFeedback(copied ? "copied" : "copyFailed");
     },
-    [pasteRecord, records],
+    [pasteRecord, records, showPasteFeedback],
   );
 
   const handlePasteTerminal = useCallback(
-    (view: RecordView) => {
+    async (view: RecordView) => {
       const record = records.find((r) => r.id === view.id);
-      if (record) void pasteRecordTerminal(record);
+      if (!record) return;
+      const copied = await pasteRecordTerminal(record);
+      showPasteFeedback(copied ? "copied" : "copyFailed");
     },
-    [pasteRecordTerminal, records],
+    [pasteRecordTerminal, records, showPasteFeedback],
   );
 
   const getRecordContent = useCallback(
@@ -432,6 +452,16 @@ export default function ClipboardPage() {
               {t("clipboard.loadMore")}
             </button>
           )}
+        </div>
+      )}
+
+      {pasteFeedback && (
+        <div
+          className={`resource-feedback ${pasteFeedback === "copied" ? "success" : "error"}`}
+          role="status"
+          aria-live="polite"
+        >
+          {pasteFeedback === "copied" ? t("resources.copied") : t("resources.copyFailed")}
         </div>
       )}
 
