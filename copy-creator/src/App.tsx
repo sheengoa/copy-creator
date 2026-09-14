@@ -13,10 +13,10 @@ import { useSettingsStore } from "./stores/settingsStore";
 import { Icons } from "./components/Icons";
 import i18n from "./i18n";
 
-const PANEL_MAP: Record<string, { titleKey: string; component: (active: boolean) => React.ReactNode }> = {
-  clipboard: { titleKey: "tabs.clipboard", component: (active) => <ClipboardPage active={active} /> },
+const PANEL_MAP: Record<string, { titleKey: string; component: () => React.ReactNode }> = {
+  clipboard: { titleKey: "tabs.clipboard", component: () => <ClipboardPage /> },
   phrases: { titleKey: "tabs.phrases", component: () => <PhrasePage /> },
-  resources: { titleKey: "tabs.resources", component: (active) => <ResourcePage active={active} /> },
+  resources: { titleKey: "tabs.resources", component: () => <ResourcePage /> },
 };
 
 const NAV_ITEMS = [
@@ -258,7 +258,7 @@ function App() {
                 key={panelKey}
                 style={{ height: "100%", display: isActive ? "block" : "none" }}
               >
-                {panel.component(isActive)}
+                {panel.component()}
               </div>
             );
           })}

@@ -10,7 +10,7 @@ vi.mock("@tauri-apps/api/event", () => ({
   listen: vi.fn(),
 }));
 
-const { matchesResourceGroup, useClipboardStore } = await import("./clipboardStore");
+const { matchesResourceGroup, useClipboardStore, useResourceStore } = await import("./clipboardStore");
 
 const records = [
   {
@@ -516,5 +516,24 @@ describe("clipboardStore full record loading", () => {
 
     expect(useClipboardStore.getState().records).toEqual([records[1]]);
     expect(useClipboardStore.getState().loading).toBe(false);
+  });
+});
+
+describe("records store instances", () => {
+  it("keeps the clipboard and resource page view states independent", () => {
+    // 两页各持工厂产出的独立实例：一方写入视图（records/category/search）
+    // 不得影响另一方。曾因共用实例导致隐藏页的后台加载覆盖可见页列表。
+    const clipboardBefore = useClipboardStore.getState();
+
+    useResourceStore.setState({
+      records,
+      category: "resources",
+      search: "资源搜索词",
+    });
+
+    const clipboardAfter = useClipboardStore.getState();
+    expect(clipboardAfter.records).toBe(clipboardBefore.records);
+    expect(clipboardAfter.category).toBe(clipboardBefore.category);
+    expect(clipboardAfter.search).toBe(clipboardBefore.search);
   });
 });

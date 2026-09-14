@@ -152,9 +152,6 @@ interface ClipboardState {
   getImageData: (record: Pick<ClipboardRecord, "id" | "content">) => Promise<string>;
 }
 
-let unlisteners: UnlistenFn[] = [];
-let recordsLoadGeneration = 0;
-
 const MAX_CONCURRENT = 3;
 const MAX_THUMBNAILS = 80;
 const MAX_FULL_IMAGES = 8;
@@ -238,441 +235,460 @@ async function getFullContent(record: ClipboardRecord): Promise<string> {
   return invoke<string>("get_clipboard_record_content", { id: record.id });
 }
 
-export const useClipboardStore = create<ClipboardState>((set, get) => ({
-  records: [],
-  search: "",
-  loading: false,
-  loadError: null,
-  hasMore: true,
-  thumbnailCache: {},
-  imageCache: {},
-  category: "all",
-  initialized: false,
-  resourceGroup: null,
+/** 记录列表 store 工厂：每次调用产出视图状态完全隔离的实例（records/
+ *  category/search/加载代数/事件监听互不可见）。主窗口内剪切板页与资源
+ *  页必须各持一个实例——两页曾共用同一实例，页面又永久保挂载，任何一方
+ *  在后台（页面隐藏时）发起的视图加载都会经「加载代数最后者赢」覆盖对
+ *  方正在显示的列表，是切区/恢复显示后列表恒空白的根因。径向菜单窗口
+ *  是独立 WebView 实例，继续使用 useClipboardStore。 */
+export function createRecordsStore() {
+  let unlisteners: UnlistenFn[] = [];
+  let recordsLoadGeneration = 0;
 
-  init: (categoryOverride?: ClipType) => {
-    const initialized = get().initialized;
-    const previousCategory = get().category;
-    if (categoryOverride && previousCategory !== categoryOverride) {
-      recordsLoadGeneration++;
-      set({ category: categoryOverride, resourceGroup: null });
-    }
-    if (initialized) {
-      if (categoryOverride) {
-        void get().loadRecords(false, categoryOverride);
+  const useRecordsStore = create<ClipboardState>((set, get) => ({
+    records: [],
+    search: "",
+    loading: false,
+    loadError: null,
+    hasMore: true,
+    thumbnailCache: {},
+    imageCache: {},
+    category: "all",
+    initialized: false,
+    resourceGroup: null,
+
+    init: (categoryOverride?: ClipType) => {
+      const initialized = get().initialized;
+      const previousCategory = get().category;
+      if (categoryOverride && previousCategory !== categoryOverride) {
+        recordsLoadGeneration++;
+        set({ category: categoryOverride, resourceGroup: null });
       }
-      return;
-    }
-    set({ initialized: true });
+      if (initialized) {
+        if (categoryOverride) {
+          void get().loadRecords(false, categoryOverride);
+        }
+        return;
+      }
+      set({ initialized: true });
 
-    listen<ClipboardRecord>("clipboard-update", (event) => {
-      const newRecord = event.payload;
-      set((state) => {
-        // Skip if record with same ID already exists (prevents loadRecords race)
-        if (state.records.some((r) => r.id === newRecord.id)) return state;
-        if (!recordMatchesCategory(newRecord, state.category, state.resourceGroup)) return state;
-        if (!recordMatchesSearch(newRecord, state.search)) return state;
-        return { records: [newRecord, ...state.records].slice(0, 2000) };
+      listen<ClipboardRecord>("clipboard-update", (event) => {
+        const newRecord = event.payload;
+        set((state) => {
+          // Skip if record with same ID already exists (prevents loadRecords race)
+          if (state.records.some((r) => r.id === newRecord.id)) return state;
+          if (!recordMatchesCategory(newRecord, state.category, state.resourceGroup)) return state;
+          if (!recordMatchesSearch(newRecord, state.search)) return state;
+          return { records: [newRecord, ...state.records].slice(0, 2000) };
+        });
+      }).then((fn) => {
+        unlisteners.push(fn);
       });
-    }).then((fn) => {
-      unlisteners.push(fn);
-    });
 
-    listen<string>("clipboard-record-updated", () => {
-      get().loadRecords();
-    }).then((fn) => {
-      unlisteners.push(fn);
-    });
-
-    listen<string>("clipboard-deleted", (event) => {
-      const deletedId = event.payload;
-      recordsLoadGeneration++;
-      set((state) => ({
-        records: state.records.filter((r) => r.id !== deletedId),
-        loading: false,
-        loadError: null,
-      }));
-    }).then((fn) => {
-      unlisteners.push(fn);
-    });
-
-    listen<{ sortBy: string }>("content-sort-changed", (event) => {
-      // 排序偏好变化：径向菜单窗口的设置实例不经主窗口装载，
-      // 必须先用事件负载更新本窗口设置值，再按新排序重载当前视图。
-      useSettingsStore.setState({ contentSort: parseContentSort(event.payload.sortBy) });
-      void get().loadRecords(false);
-    }).then((fn) => {
-      unlisteners.push(fn);
-    });
-
-    listen("clipboard-cleared", () => {
-      if (get().category === "resources") return;
-      recordsLoadGeneration++;
-      set({
-        records: [],
-        hasMore: false,
-        loading: false,
-        loadError: null,
-        thumbnailCache: {},
-        imageCache: {},
+      listen<string>("clipboard-record-updated", () => {
+        get().loadRecords();
+      }).then((fn) => {
+        unlisteners.push(fn);
       });
-    }).then((fn) => {
-      unlisteners.push(fn);
-    });
 
-    // 首次加载前先装载设置：contentSort 参与请求参数，径向菜单窗口
-    // 没有 App 层的设置装载，必须在这里保证已从设置表读取。设置装载
-    // 若因 IPC 异常迟迟不返回，1.5s 后仍放行首载（排序偏好晚到时会经
-    // content-sort-changed 触发重载纠正），避免列表因一次悬挂永久空白。
-    void Promise.race([
-      useSettingsStore.getState().loadSettings(),
-      new Promise<void>((resolve) => window.setTimeout(resolve, 1500)),
-    ]).then(() => {
-      void get().loadRecords(false, categoryOverride);
-    });
-  },
-
-  setSearch: (s) => {
-    recordsLoadGeneration++;
-    set({ search: s });
-  },
-  setCategory: (c) => {
-    recordsLoadGeneration++;
-    set({ category: c, resourceGroup: null });
-  },
-  setResourceGroup: (group) => {
-    recordsLoadGeneration++;
-    set({ resourceGroup: group });
-  },
-
-  loadRecords: async (
-    append = false,
-    categoryOverride?: ClipType,
-    resourceGroup?: string | null,
-  ) => {
-    const request = ++recordsLoadGeneration;
-    set({ loading: true, loadError: null });
-    try {
-      const state = get();
-      const s = state.search || undefined;
-      const activeCategory = categoryOverride ?? state.category;
-      const cat = activeCategory !== "all" ? activeCategory : undefined;
-      const activeResourceGroup = activeCategory === "resources"
-        ? resourceGroup !== undefined ? resourceGroup : state.resourceGroup
-        : null;
-      const offset = append ? state.records.length : 0;
-      const requestArgs = {
-        search: s,
-        limit: PAGE_SIZE,
-        offset,
-        category: cat,
-        ...contentSortArg(activeCategory, activeResourceGroup),
-        ...(activeCategory === "resources" && activeResourceGroup !== null
-          ? { resourceGroup: activeResourceGroup }
-          : {}),
-      };
-      const records = await invoke<ClipboardRecord[]>("get_clipboard_records", requestArgs);
-      if (request !== recordsLoadGeneration) return;
-      if (append) {
-        set((prev) => ({
-          records: [...prev.records, ...records],
-          hasMore: records.length >= PAGE_SIZE,
-          category: activeCategory,
-          resourceGroup: activeResourceGroup,
+      listen<string>("clipboard-deleted", (event) => {
+        const deletedId = event.payload;
+        recordsLoadGeneration++;
+        set((state) => ({
+          records: state.records.filter((r) => r.id !== deletedId),
+          loading: false,
           loadError: null,
         }));
-      } else {
+      }).then((fn) => {
+        unlisteners.push(fn);
+      });
+
+      listen<{ sortBy: string }>("content-sort-changed", (event) => {
+        // 排序偏好变化：径向菜单窗口的设置实例不经主窗口装载，
+        // 必须先用事件负载更新本窗口设置值，再按新排序重载当前视图。
+        useSettingsStore.setState({ contentSort: parseContentSort(event.payload.sortBy) });
+        void get().loadRecords(false);
+      }).then((fn) => {
+        unlisteners.push(fn);
+      });
+
+      listen("clipboard-cleared", () => {
+        if (get().category === "resources") return;
+        recordsLoadGeneration++;
         set({
-          records,
-          hasMore: records.length >= PAGE_SIZE,
+          records: [],
+          hasMore: false,
+          loading: false,
+          loadError: null,
+          thumbnailCache: {},
+          imageCache: {},
+        });
+      }).then((fn) => {
+        unlisteners.push(fn);
+      });
+
+      // 首次加载前先装载设置：contentSort 参与请求参数，径向菜单窗口
+      // 没有 App 层的设置装载，必须在这里保证已从设置表读取。设置装载
+      // 若因 IPC 异常迟迟不返回，1.5s 后仍放行首载（排序偏好晚到时会经
+      // content-sort-changed 触发重载纠正），避免列表因一次悬挂永久空白。
+      void Promise.race([
+        useSettingsStore.getState().loadSettings(),
+        new Promise<void>((resolve) => window.setTimeout(resolve, 1500)),
+      ]).then(() => {
+        void get().loadRecords(false, categoryOverride);
+      });
+    },
+
+    setSearch: (s) => {
+      recordsLoadGeneration++;
+      set({ search: s });
+    },
+    setCategory: (c) => {
+      recordsLoadGeneration++;
+      set({ category: c, resourceGroup: null });
+    },
+    setResourceGroup: (group) => {
+      recordsLoadGeneration++;
+      set({ resourceGroup: group });
+    },
+
+    loadRecords: async (
+      append = false,
+      categoryOverride?: ClipType,
+      resourceGroup?: string | null,
+    ) => {
+      const request = ++recordsLoadGeneration;
+      set({ loading: true, loadError: null });
+      try {
+        const state = get();
+        const s = state.search || undefined;
+        const activeCategory = categoryOverride ?? state.category;
+        const cat = activeCategory !== "all" ? activeCategory : undefined;
+        const activeResourceGroup = activeCategory === "resources"
+          ? resourceGroup !== undefined ? resourceGroup : state.resourceGroup
+          : null;
+        const offset = append ? state.records.length : 0;
+        const requestArgs = {
+          search: s,
+          limit: PAGE_SIZE,
+          offset,
+          category: cat,
+          ...contentSortArg(activeCategory, activeResourceGroup),
+          ...(activeCategory === "resources" && activeResourceGroup !== null
+            ? { resourceGroup: activeResourceGroup }
+            : {}),
+        };
+        const records = await invoke<ClipboardRecord[]>("get_clipboard_records", requestArgs);
+        if (request !== recordsLoadGeneration) return;
+        if (append) {
+          set((prev) => ({
+            records: [...prev.records, ...records],
+            hasMore: records.length >= PAGE_SIZE,
+            category: activeCategory,
+            resourceGroup: activeResourceGroup,
+            loadError: null,
+          }));
+        } else {
+          set({
+            records,
+            hasMore: records.length >= PAGE_SIZE,
+            category: activeCategory,
+            resourceGroup: activeResourceGroup,
+            loadError: null,
+          });
+        }
+      } catch (e) {
+        console.error("Failed to load clipboard records:", e);
+        if (request === recordsLoadGeneration) {
+          set({
+            loadError: e instanceof Error && e.message ? e.message : String(e),
+          });
+        }
+      } finally {
+        if (request === recordsLoadGeneration) set({ loading: false });
+      }
+    },
+
+    loadAllRecords: async (
+      categoryOverride?: ClipType,
+      resourceGroup?: string | null,
+      options?: { silent?: boolean },
+    ) => {
+      // silent 模式：整组粘贴等一次性取数专用。不参与 UI 加载代数竞争、
+      // 不触碰共享状态，避免被并发的常规加载（如菜单打开时的 loadRecords
+      // 或剪贴板推送触发的刷新）判定为过期而返回 null，导致粘贴静默失效。
+      // 也不带主窗口搜索词：整组粘贴取的是分组全量，搜索框是无关状态。
+      if (options?.silent === true) {
+        const state = get();
+        const activeCategory = categoryOverride ?? state.category;
+        const category = activeCategory !== "all" ? activeCategory : undefined;
+        const activeResourceGroup = activeCategory === "resources"
+          ? resourceGroup !== undefined ? resourceGroup : state.resourceGroup
+          : null;
+        const allRecords: ClipboardRecord[] = [];
+        let offset = 0;
+        while (true) {
+          const requestArgs = {
+            limit: PAGE_SIZE,
+            offset,
+            category,
+            ...contentSortArg(activeCategory, activeResourceGroup),
+            ...(activeCategory === "resources" && activeResourceGroup !== null
+              ? { resourceGroup: activeResourceGroup }
+              : {}),
+          };
+          const page = await invoke<ClipboardRecord[]>("get_clipboard_records", requestArgs);
+          allRecords.push(...page);
+          if (page.length < PAGE_SIZE) break;
+          offset += page.length;
+        }
+        return allRecords;
+      }
+
+      const request = ++recordsLoadGeneration;
+      set({ loading: true, loadError: null });
+      try {
+        const state = get();
+        const search = state.search || undefined;
+        const activeCategory = categoryOverride ?? state.category;
+        const category = activeCategory !== "all" ? activeCategory : undefined;
+        const activeResourceGroup = activeCategory === "resources"
+          ? resourceGroup !== undefined ? resourceGroup : state.resourceGroup
+          : null;
+        const allRecords: ClipboardRecord[] = [];
+        let offset = 0;
+
+        while (true) {
+          if (request !== recordsLoadGeneration) return null;
+          const requestArgs = {
+            search,
+            limit: PAGE_SIZE,
+            offset,
+            category,
+            ...contentSortArg(activeCategory, activeResourceGroup),
+            ...(activeCategory === "resources" && activeResourceGroup !== null
+              ? { resourceGroup: activeResourceGroup }
+              : {}),
+          };
+          const page = await invoke<ClipboardRecord[]>("get_clipboard_records", requestArgs);
+          if (request !== recordsLoadGeneration) return null;
+          allRecords.push(...page);
+          if (page.length < PAGE_SIZE) break;
+          offset += page.length;
+        }
+
+        if (
+          request !== recordsLoadGeneration
+          || get().search !== state.search
+          || get().category !== activeCategory
+        ) {
+          return null;
+        }
+        set({
+          records: allRecords,
+          hasMore: false,
           category: activeCategory,
           resourceGroup: activeResourceGroup,
           loadError: null,
         });
-      }
-    } catch (e) {
-      console.error("Failed to load clipboard records:", e);
-      if (request === recordsLoadGeneration) {
-        set({
-          loadError: e instanceof Error && e.message ? e.message : String(e),
-        });
-      }
-    } finally {
-      if (request === recordsLoadGeneration) set({ loading: false });
-    }
-  },
-
-  loadAllRecords: async (
-    categoryOverride?: ClipType,
-    resourceGroup?: string | null,
-    options?: { silent?: boolean },
-  ) => {
-    // silent 模式：整组粘贴等一次性取数专用。不参与 UI 加载代数竞争、
-    // 不触碰共享状态，避免被并发的常规加载（如菜单打开时的 loadRecords
-    // 或剪贴板推送触发的刷新）判定为过期而返回 null，导致粘贴静默失效。
-    // 也不带主窗口搜索词：整组粘贴取的是分组全量，搜索框是无关状态。
-    if (options?.silent === true) {
-      const state = get();
-      const activeCategory = categoryOverride ?? state.category;
-      const category = activeCategory !== "all" ? activeCategory : undefined;
-      const activeResourceGroup = activeCategory === "resources"
-        ? resourceGroup !== undefined ? resourceGroup : state.resourceGroup
-        : null;
-      const allRecords: ClipboardRecord[] = [];
-      let offset = 0;
-      while (true) {
-        const requestArgs = {
-          limit: PAGE_SIZE,
-          offset,
-          category,
-          ...contentSortArg(activeCategory, activeResourceGroup),
-          ...(activeCategory === "resources" && activeResourceGroup !== null
-            ? { resourceGroup: activeResourceGroup }
-            : {}),
-        };
-        const page = await invoke<ClipboardRecord[]>("get_clipboard_records", requestArgs);
-        allRecords.push(...page);
-        if (page.length < PAGE_SIZE) break;
-        offset += page.length;
-      }
-      return allRecords;
-    }
-
-    const request = ++recordsLoadGeneration;
-    set({ loading: true, loadError: null });
-    try {
-      const state = get();
-      const search = state.search || undefined;
-      const activeCategory = categoryOverride ?? state.category;
-      const category = activeCategory !== "all" ? activeCategory : undefined;
-      const activeResourceGroup = activeCategory === "resources"
-        ? resourceGroup !== undefined ? resourceGroup : state.resourceGroup
-        : null;
-      const allRecords: ClipboardRecord[] = [];
-      let offset = 0;
-
-      while (true) {
-        if (request !== recordsLoadGeneration) return null;
-        const requestArgs = {
-          search,
-          limit: PAGE_SIZE,
-          offset,
-          category,
-          ...contentSortArg(activeCategory, activeResourceGroup),
-          ...(activeCategory === "resources" && activeResourceGroup !== null
-            ? { resourceGroup: activeResourceGroup }
-            : {}),
-        };
-        const page = await invoke<ClipboardRecord[]>("get_clipboard_records", requestArgs);
-        if (request !== recordsLoadGeneration) return null;
-        allRecords.push(...page);
-        if (page.length < PAGE_SIZE) break;
-        offset += page.length;
-      }
-
-      if (
-        request !== recordsLoadGeneration
-        || get().search !== state.search
-        || get().category !== activeCategory
-      ) {
+        return allRecords;
+      } catch (e) {
+        console.error("Failed to load all clipboard records:", e);
+        if (request === recordsLoadGeneration) {
+          set({
+            loadError: e instanceof Error && e.message ? e.message : String(e),
+          });
+        }
         return null;
+      } finally {
+        if (request === recordsLoadGeneration) set({ loading: false });
       }
-      set({
-        records: allRecords,
-        hasMore: false,
-        category: activeCategory,
-        resourceGroup: activeResourceGroup,
-        loadError: null,
-      });
-      return allRecords;
-    } catch (e) {
-      console.error("Failed to load all clipboard records:", e);
-      if (request === recordsLoadGeneration) {
+    },
+
+    updateRecordLabel: (id: string, label: ApiKeyLabel) =>
+      set((state) => {
+        const idx = state.records.findIndex((r) => r.id === id);
+        if (idx === -1) return state;
+        const updated = [...state.records];
+        updated[idx] = { ...updated[idx], label };
+        return { records: updated };
+      }),
+
+    updateResourceNote: (id: string, note: string) =>
+      set((state) => {
+        const idx = state.records.findIndex((r) => r.id === id);
+        if (idx === -1) return state;
+        const updated = [...state.records];
+        updated[idx] = { ...updated[idx], resource_note: note };
+        return { records: updated };
+      }),
+
+    deleteRecords: async (ids: string[]) => {
+      if (ids.length === 0) return;
+      recordsLoadGeneration++;
+      set({ loading: false, loadError: null });
+      try {
+        await invoke("delete_clipboard_records", { ids });
+        const deletedIds = new Set(ids);
+        const thumbCache = { ...get().thumbnailCache };
+        const cache = { ...get().imageCache };
+        for (const id of deletedIds) {
+          delete thumbCache[id];
+          delete cache[id];
+        }
         set({
-          loadError: e instanceof Error && e.message ? e.message : String(e),
+          records: get().records.filter((r) => !deletedIds.has(r.id)),
+          thumbnailCache: thumbCache,
+          imageCache: cache,
         });
+      } catch (e) {
+        console.error("Failed to delete clipboard records:", e);
+        throw e;
       }
-      return null;
-    } finally {
-      if (request === recordsLoadGeneration) set({ loading: false });
-    }
-  },
+    },
 
-  updateRecordLabel: (id: string, label: ApiKeyLabel) =>
-    set((state) => {
-      const idx = state.records.findIndex((r) => r.id === id);
-      if (idx === -1) return state;
-      const updated = [...state.records];
-      updated[idx] = { ...updated[idx], label };
-      return { records: updated };
-    }),
+    deleteRecord: async (id: string) => get().deleteRecords([id]),
 
-  updateResourceNote: (id: string, note: string) =>
-    set((state) => {
-      const idx = state.records.findIndex((r) => r.id === id);
-      if (idx === -1) return state;
-      const updated = [...state.records];
-      updated[idx] = { ...updated[idx], resource_note: note };
-      return { records: updated };
-    }),
-
-  deleteRecords: async (ids: string[]) => {
-    if (ids.length === 0) return;
-    recordsLoadGeneration++;
-    set({ loading: false, loadError: null });
-    try {
-      await invoke("delete_clipboard_records", { ids });
-      const deletedIds = new Set(ids);
-      const thumbCache = { ...get().thumbnailCache };
-      const cache = { ...get().imageCache };
-      for (const id of deletedIds) {
-        delete thumbCache[id];
-        delete cache[id];
+    pasteRecord: async (record: ClipboardRecord) => {
+      try {
+        if (record.has_images) {
+          await invoke("paste_stash_record", { id: record.id, terminal: false });
+          touchClipboardUsage([record.id]);
+          applyPasteFeedback(get(), record.id, set);
+          return true;
+        }
+        const content = await getFullContent(record);
+        if (record.type === "image") {
+          await invoke("paste_image", { path: content });
+        } else if (record.type === "file") {
+          if (isFileBackedTextResource(record)) {
+            try {
+              // 文件承载的文本资源按内容粘贴；读取失败（超限、非 UTF-8
+              // 等）时回退为文件粘贴，保持不劣于旧行为。
+              await invoke("paste_text_file", { path: getResourcePath(record), terminal: false });
+              touchClipboardUsage([record.id]);
+              applyPasteFeedback(get(), record.id, set);
+              return true;
+            } catch (error) {
+              console.warn("文本资源按内容粘贴失败，回退为文件粘贴:", error);
+            }
+          }
+          await invoke("paste_file", { path: content });
+        } else {
+          await invoke("paste_text", { text: content });
+        }
+        touchClipboardUsage([record.id]);
+        applyPasteFeedback(get(), record.id, set);
+        return true;
+      } catch (e) {
+        console.error("Paste failed:", e);
+        return false;
       }
-      set({
-        records: get().records.filter((r) => !deletedIds.has(r.id)),
-        thumbnailCache: thumbCache,
-        imageCache: cache,
+    },
+
+    pasteRecordTerminal: async (record: ClipboardRecord) => {
+      try {
+        if (record.has_images) {
+          await invoke("paste_stash_record", { id: record.id, terminal: true });
+          touchClipboardUsage([record.id]);
+          applyPasteFeedback(get(), record.id, set);
+          return true;
+        }
+        const content = await getFullContent(record);
+        if (record.type === "image") {
+          await invoke("paste_image", { path: content });
+        } else if (record.type === "file") {
+          if (isFileBackedTextResource(record)) {
+            try {
+              await invoke("paste_text_file", { path: getResourcePath(record), terminal: true });
+              touchClipboardUsage([record.id]);
+              applyPasteFeedback(get(), record.id, set);
+              return true;
+            } catch (error) {
+              console.warn("文本资源按内容粘贴失败，回退为文件粘贴:", error);
+            }
+          }
+          await invoke("paste_file", { path: content });
+        } else {
+          await invoke("paste_text_terminal", { text: content });
+        }
+        touchClipboardUsage([record.id]);
+        applyPasteFeedback(get(), record.id, set);
+        return true;
+      } catch (e) {
+        console.error("Terminal paste failed:", e);
+        return false;
+      }
+    },
+
+    // 移到顶部：sort_order 提到全表最前，径向菜单与主窗口共用该顺序。
+    // 搜索状态下执行后按当前搜索词重载，置顶项保持在结果最前。
+    moveRecordsToTop: async (ids: string[]) => {
+      set((state) => ({ records: sortByIdOrder(state.records, ids) }));
+      try {
+        await invoke("move_clipboard_records_to_top", { ids });
+      } catch (e) {
+        console.error("Failed to move clipboard records to top:", e);
+      }
+      get().loadRecords();
+    },
+
+    getRecordContent: getFullContent,
+
+    getThumbnail: async (record: Pick<ClipboardRecord, "id" | "content">): Promise<string> => {
+      const cached = get().thumbnailCache[record.id];
+      if (cached) return cached;
+
+      return enqueue(async () => {
+        const cached2 = get().thumbnailCache[record.id];
+        if (cached2) return cached2;
+
+        try {
+          // Use base64 data URI for reliable cross-platform display
+          const base64 = await invoke<string>("get_image_thumbnail", {
+            path: record.content,
+            maxSize: 200,
+          });
+          const url = `data:image/png;base64,${base64}`;
+          set({ thumbnailCache: trimCache({ ...get().thumbnailCache, [record.id]: url }, MAX_THUMBNAILS) });
+          return url;
+        } catch (e) {
+          console.error("Failed to load thumbnail:", e);
+          return "";
+        }
       });
-    } catch (e) {
-      console.error("Failed to delete clipboard records:", e);
-      throw e;
-    }
-  },
+    },
 
-  deleteRecord: async (id: string) => get().deleteRecords([id]),
-
-  pasteRecord: async (record: ClipboardRecord) => {
-    try {
-      if (record.has_images) {
-        await invoke("paste_stash_record", { id: record.id, terminal: false });
-        touchClipboardUsage([record.id]);
-        applyPasteFeedback(get(), record.id, set);
-        return true;
-      }
-      const content = await getFullContent(record);
-      if (record.type === "image") {
-        await invoke("paste_image", { path: content });
-      } else if (record.type === "file") {
-        if (isFileBackedTextResource(record)) {
-          try {
-            // 文件承载的文本资源按内容粘贴；读取失败（超限、非 UTF-8
-            // 等）时回退为文件粘贴，保持不劣于旧行为。
-            await invoke("paste_text_file", { path: getResourcePath(record), terminal: false });
-            touchClipboardUsage([record.id]);
-            applyPasteFeedback(get(), record.id, set);
-            return true;
-          } catch (error) {
-            console.warn("文本资源按内容粘贴失败，回退为文件粘贴:", error);
-          }
-        }
-        await invoke("paste_file", { path: content });
-      } else {
-        await invoke("paste_text", { text: content });
-      }
-      touchClipboardUsage([record.id]);
-      applyPasteFeedback(get(), record.id, set);
-      return true;
-    } catch (e) {
-      console.error("Paste failed:", e);
-      return false;
-    }
-  },
-
-  pasteRecordTerminal: async (record: ClipboardRecord) => {
-    try {
-      if (record.has_images) {
-        await invoke("paste_stash_record", { id: record.id, terminal: true });
-        touchClipboardUsage([record.id]);
-        applyPasteFeedback(get(), record.id, set);
-        return true;
-      }
-      const content = await getFullContent(record);
-      if (record.type === "image") {
-        await invoke("paste_image", { path: content });
-      } else if (record.type === "file") {
-        if (isFileBackedTextResource(record)) {
-          try {
-            await invoke("paste_text_file", { path: getResourcePath(record), terminal: true });
-            touchClipboardUsage([record.id]);
-            applyPasteFeedback(get(), record.id, set);
-            return true;
-          } catch (error) {
-            console.warn("文本资源按内容粘贴失败，回退为文件粘贴:", error);
-          }
-        }
-        await invoke("paste_file", { path: content });
-      } else {
-        await invoke("paste_text_terminal", { text: content });
-      }
-      touchClipboardUsage([record.id]);
-      applyPasteFeedback(get(), record.id, set);
-      return true;
-    } catch (e) {
-      console.error("Terminal paste failed:", e);
-      return false;
-    }
-  },
-
-  // 移到顶部：sort_order 提到全表最前，径向菜单与主窗口共用该顺序。
-  // 搜索状态下执行后按当前搜索词重载，置顶项保持在结果最前。
-  moveRecordsToTop: async (ids: string[]) => {
-    set((state) => ({ records: sortByIdOrder(state.records, ids) }));
-    try {
-      await invoke("move_clipboard_records_to_top", { ids });
-    } catch (e) {
-      console.error("Failed to move clipboard records to top:", e);
-    }
-    get().loadRecords();
-  },
-
-  getRecordContent: getFullContent,
-
-  getThumbnail: async (record: Pick<ClipboardRecord, "id" | "content">): Promise<string> => {
-    const cached = get().thumbnailCache[record.id];
-    if (cached) return cached;
-
-    return enqueue(async () => {
-      const cached2 = get().thumbnailCache[record.id];
-      if (cached2) return cached2;
+    getImageData: async (record: Pick<ClipboardRecord, "id" | "content">): Promise<string> => {
+      const cached = get().imageCache[record.id];
+      if (cached) return cached;
 
       try {
-        // Use base64 data URI for reliable cross-platform display
-        const base64 = await invoke<string>("get_image_thumbnail", {
+        const base64 = await invoke<string>("get_image_base64", {
           path: record.content,
-          maxSize: 200,
         });
         const url = `data:image/png;base64,${base64}`;
-        set({ thumbnailCache: trimCache({ ...get().thumbnailCache, [record.id]: url }, MAX_THUMBNAILS) });
+        set({ imageCache: trimCache({ ...get().imageCache, [record.id]: url }, MAX_FULL_IMAGES) });
         return url;
       } catch (e) {
-        console.error("Failed to load thumbnail:", e);
+        console.error("Failed to load image:", e);
         return "";
       }
+    },
+  }));
+
+  if (typeof window !== "undefined") {
+    window.addEventListener("beforeunload", () => {
+      unlisteners.forEach((fn) => fn());
+      unlisteners = [];
     });
-  },
+  }
 
-  getImageData: async (record: Pick<ClipboardRecord, "id" | "content">): Promise<string> => {
-    const cached = get().imageCache[record.id];
-    if (cached) return cached;
-
-    try {
-      const base64 = await invoke<string>("get_image_base64", {
-        path: record.content,
-      });
-      const url = `data:image/png;base64,${base64}`;
-      set({ imageCache: trimCache({ ...get().imageCache, [record.id]: url }, MAX_FULL_IMAGES) });
-      return url;
-    } catch (e) {
-      console.error("Failed to load image:", e);
-      return "";
-    }
-  },
-}));
-
-if (typeof window !== "undefined") {
-  window.addEventListener("beforeunload", () => {
-    unlisteners.forEach((fn) => fn());
-    unlisteners = [];
-  });
+  return useRecordsStore;
 }
+
+export const useClipboardStore = createRecordsStore();
+
+/** 资源页专用实例：与剪切板页的视图状态完全隔离，双方的刷新/搜索/
+ *  分组切换互不覆盖。 */
+export const useResourceStore = createRecordsStore();

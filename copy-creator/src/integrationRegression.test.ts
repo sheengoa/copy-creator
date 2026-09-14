@@ -238,14 +238,15 @@ describe("integration regressions", () => {
     const libSource = readSource("../src-tauri/src/lib.rs");
     expect(libSource).toContain('emit("main-window-shown"');
 
-    // 切区往返：剪切板页与资源页共用 store 的 records/category，页面
-    // 重新激活时必须重申自己的视图（资源记录会被剪切板页的
-    // isResourceRecord 过滤滤空，不重申则切回恒为空白）。
-    expect(clipboardPageSource).toContain("lastClipboardCategoryRef");
-    expect(clipboardPageSource).toContain("void loadRecords(false, restored)");
-    expect(pageSource).toContain("void loadRecords(false, \"resources\", resourceGroup)");
-    const appSource = readSource("./App.tsx");
-    expect(appSource).toContain("panel.component(isActive)");
+    // 两页视图状态必须按页隔离：剪切板页与资源页曾共用 clipboardStore
+    // 的 records/category，而两页永久保挂载，任何一方后台发起的加载都会
+    // 经「加载代数最后者赢」覆盖对方正在显示的列表（切区/恢复显示后恒
+    // 空白的根因）。资源页及其详情页必须使用独立 useResourceStore，
+    // 不得回退到共享的 clipboardStore。
+    expect(pageSource).toContain("useResourceStore");
+    expect(pageSource).not.toContain("useClipboardStore");
+    const detailSource = readSource("./pages/ResourcePage/ResourceDetailPage.tsx");
+    expect(detailSource).toContain("useResourceStore");
 
     // 三个常挂页面的窗口恢复显示刷新必须齐全：短语页虽独占 phraseStore，
     // 但隐藏期间的增删改只能靠事件感知，事件丢失时同样需要兜底重载。

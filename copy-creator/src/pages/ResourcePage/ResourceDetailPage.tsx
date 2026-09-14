@@ -3,7 +3,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { useTranslation } from "react-i18next";
 import type { ClipboardRecord } from "../../types";
-import { useClipboardStore } from "../../stores/clipboardStore";
+import { useResourceStore } from "../../stores/clipboardStore";
 import { Icons } from "../../components/Icons";
 import { BackToTopButton } from "../../components/BackToTop";
 import { useBackToTop } from "../../hooks/useBackToTop";
@@ -44,7 +44,7 @@ export default function ResourceDetailPage({
   onMoveRecord,
 }: ResourceDetailPageProps) {
   const { t } = useTranslation();
-  const updateResourceNote = useClipboardStore((state) => state.updateResourceNote);
+  const updateResourceNote = useResourceStore((state) => state.updateResourceNote);
   const kind = inferResourceMediaKind(record);
   const resourcePath = getResourcePath(record);
   const [segments, setSegments] = useState<RadialPreviewSegment[] | null>(null);
