@@ -8,6 +8,21 @@ function readSource(path: string) {
   return readFileSync(new URL(path, import.meta.url), "utf8").replace(/\r\n/g, "\n");
 }
 
+// db 模块已按业务域拆分为多个文件；守卫断言统一读拼接源。
+// 切片断言的起止标记位于同一域文件内，拼接序保持「共享 → 各业务域」。
+const DB_SOURCE_FILES = [
+  "mod.rs",
+  "apikeys.rs",
+  "clipboard.rs",
+  "media.rs",
+  "migrate.rs",
+  "phrase.rs",
+  "resource.rs",
+  "settings.rs",
+] as const;
+const readDbSource = () =>
+  DB_SOURCE_FILES.map((file) => readSource(`../../src-tauri/src/db/${file}`)).join("\n");
+
 describe("integration regressions", () => {
   it("does not re-show hidden windows from delayed raise paths", () => {
     const libSource = readSource("../../src-tauri/src/lib.rs");
@@ -109,7 +124,7 @@ describe("integration regressions", () => {
   });
 
   it("keeps migrated clipboard schema compatible with current record fields", () => {
-    const dbSource = readSource("../../src-tauri/src/db/mod.rs");
+    const dbSource = readDbSource();
     // 迁移路径必须经由 migrate_storage_data → ensure_schema：迁移库与
     // 主库共用同一 schema 源（含全部列与索引），禁止再出现各自的
     // CREATE TABLE 副本——曾经的副本缺 4 列，迁移后列表命令直接报错。
@@ -141,7 +156,7 @@ describe("integration regressions", () => {
   });
 
   it("updates stash records and moves them to the top without changing creation time", () => {
-    const dbSource = readSource("../../src-tauri/src/db/mod.rs");
+    const dbSource = readDbSource();
     const updateBlock = dbSource.slice(
       dbSource.indexOf("pub fn update_clipboard_record"),
       dbSource.indexOf("pub fn delete_all_clipboard_records"),
@@ -166,7 +181,7 @@ describe("integration regressions", () => {
   });
 
   it("supports resource groups through library subfolders", () => {
-    const dbSource = readSource("../../src-tauri/src/db/mod.rs");
+    const dbSource = readDbSource();
     const clipboardSource = readSource("../../src-tauri/src/clipboard.rs");
     const pageSource = readSource("../pages/ResourcePage.tsx");
     const groupChipsSource = readSource("../pages/ResourcePage/ResourceGroupChips.tsx");
@@ -211,7 +226,7 @@ describe("integration regressions", () => {
 
   it("propagates external library changes and usage updates to the frontend", () => {
     const watchSource = readSource("../../src-tauri/src/resource_watch.rs");
-    const dbSource = readSource("../../src-tauri/src/db/mod.rs");
+    const dbSource = readDbSource();
     const clipboardPageSource = readSource("../pages/ClipboardPage/index.tsx");
     const pageSource = readSource("../pages/ResourcePage.tsx");
 
@@ -321,7 +336,7 @@ describe("integration regressions", () => {
   });
 
   it("keeps clipboard deletion on the shared cleanup path", () => {
-    const dbSource = readSource("../../src-tauri/src/db/mod.rs");
+    const dbSource = readDbSource();
     const deleteBlock = dbSource.slice(
       dbSource.indexOf("fn delete_clipboard_records_internal"),
       dbSource.indexOf("pub fn get_phrase_groups"),
@@ -470,7 +485,7 @@ describe("integration regressions", () => {
     );
     const libSource = readSource("../../src-tauri/src/lib.rs");
     const mediaServerSource = readSource("../../src-tauri/src/media_server.rs");
-    const dbSource = readSource("../../src-tauri/src/db/mod.rs");
+    const dbSource = readDbSource();
     expect(libSource).toContain("media_server::spawn");
     expect(mediaServerSource).toContain("Accept-Ranges: bytes");
     expect(mediaServerSource).toContain("get_media_server_origin");
@@ -496,7 +511,7 @@ describe("integration regressions", () => {
     const radialStyles = readSource("../styles/radial-menu.css");
     const resourceStyles = readSource("../styles/resource.css");
     const libSource = readSource("../../src-tauri/src/lib.rs");
-    const dbSource = readSource("../../src-tauri/src/db/mod.rs");
+    const dbSource = readDbSource();
 
     // 密集网格卡片必须走缩略图：原图直出会在滚动时全尺寸解码造成卡顿。
     // 全宽横幅（剪切板/径向，经 FileMediaVisual）可视数量少，直接流式
@@ -522,13 +537,13 @@ describe("integration regressions", () => {
   });
 
   it("keeps resource-library storage separate from the app database", () => {
-    const dbSource = readSource("../../src-tauri/src/db/mod.rs");
+    const dbSource = readDbSource();
     const clipboardSource = readSource("../../src-tauri/src/clipboard.rs");
     const resourcePage = readSource("../pages/ResourcePage.tsx");
     const createDialog = readSource("../components/ClipboardCreateDialog/index.tsx");
     const pruneBlock = dbSource.slice(
       dbSource.indexOf("pub fn prune_old_records"),
-      dbSource.indexOf("// ---- Tauri Commands ----"),
+      dbSource.indexOf("pub fn get_clipboard_records"),
     );
 
     expect(dbSource).toContain("resource_library_path");
@@ -645,7 +660,7 @@ describe("integration regressions", () => {
     const clipboardStyles = readSource("../styles/clipboard.css");
     const persistWindowSize = readSource("../hooks/usePersistWindowSize.ts");
     const inlinePreview = readSource("../components/InlinePreview.tsx");
-    const dbSource = readSource("../../src-tauri/src/db/mod.rs");
+    const dbSource = readDbSource();
     const libSource = readSource("../../src-tauri/src/lib.rs");
 
     expect(radialMenu).toContain('<ContentPreviewPanel');
