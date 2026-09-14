@@ -239,6 +239,9 @@ export default function ResourcePage() {
   const libraryRevisionRef = useRef(-1);
   useEffect(() => {
     const timer = window.setInterval(() => {
+      // 面板隐藏（display:none）时对账无意义：offsetParent 为 null 的
+      // display:none 子树直接跳过，恢复显示由 useRefreshOnShow 全量重载兜底。
+      if (resourceListRef.current?.offsetParent === null) return;
       void invoke<number>("get_resource_library_revision")
         .then((revision) => {
           const seen = libraryRevisionRef.current;

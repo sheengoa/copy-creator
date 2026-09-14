@@ -12,6 +12,12 @@ import { usePersistWindowSize } from "./hooks/usePersistWindowSize";
 import { useSettingsStore } from "./stores/settingsStore";
 import { Icons } from "./components/Icons";
 import i18n from "./i18n";
+// 主窗口专属样式：径向菜单与粘贴创建对话框窗口不加载这些文件
+// （共享的 base/layout/components 由 main.tsx 的 index.css 分发）。
+import "./styles/clipboard.css";
+import "./styles/resource.css";
+import "./styles/phrases.css";
+import "./styles/settings.css";
 
 const PANEL_MAP: Record<string, { titleKey: string; component: () => React.ReactNode }> = {
   clipboard: { titleKey: "tabs.clipboard", component: () => <ClipboardPage /> },

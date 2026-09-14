@@ -1,5 +1,7 @@
 import { Fragment, useEffect, useState, useCallback, useMemo, useRef } from "react";
 import { useTranslation } from "react-i18next";
+// 粘贴创建对话框窗口专属样式：随动态 import 的 root 分包。
+import "../../styles/clipboard.css";
 import { invoke } from "@tauri-apps/api/core";
 import { getResourceFileName } from "../../domain/fileName";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";

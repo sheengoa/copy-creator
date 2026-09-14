@@ -1,4 +1,6 @@
 import { RadialImageBanner, ResourceItemVisual } from "./ResourceItemVisual";
+// 径向菜单窗口专属样式：随动态 import 的 root 分包，主窗口不加载。
+import "../../styles/radial-menu.css";
 import { readResourceTextPreview, readTextFileContent, readQuickInputTextPreview } from "../../domain/mediaAssets";
 import { useEffect, useRef, useState, useCallback, useMemo, type CSSProperties } from "react";
 import { createPortal } from "react-dom";

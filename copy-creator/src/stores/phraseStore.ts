@@ -10,6 +10,12 @@ import { resolveAbsoluteResourcePath } from "../domain/mediaUrl";
 /** 「全部」跨分组视图的选择哨兵：真实分组 id 由后端生成，不会与之冲突。 */
 export const ALL_PHRASES_GROUP_ID = "__all__";
 
+// 短语图片缩略图的进程内 LRU（与资源区同容量）：文件短语的 content 是
+// 入库时拷入应用存储的受管副本（路径不变内容不变），路径作缓存键安全。
+// 无缓存时切分组/重挂列表会逐卡片重新 invoke 解码。
+const phraseThumbCache = new Map<string, string>();
+const MAX_PHRASE_THUMBS = 240;
+
 // 置顶/重排序失败后按当前分组重载短语，恢复与后端一致的真实顺序。
 const reloadPhrasesAfterFailure = async (get: () => PhraseState) => {
   const groupId = get().selectedGroupId;
@@ -189,7 +195,20 @@ export const usePhraseStore = create<PhraseState>()((set, get) => {
   },
 
   getImageThumbnail: async (path: string) => {
-    return invoke<string>("get_image_thumbnail", { path, maxSize: 96 });
+    const cached = phraseThumbCache.get(path);
+    if (cached !== undefined) {
+      // 重插实现 LRU：最近访问的条目沉底，淘汰总从最旧一端发生。
+      phraseThumbCache.delete(path);
+      phraseThumbCache.set(path, cached);
+      return cached;
+    }
+    const base64 = await invoke<string>("get_image_thumbnail", { path, maxSize: 96 });
+    phraseThumbCache.set(path, base64);
+    if (phraseThumbCache.size > MAX_PHRASE_THUMBS) {
+      const oldest = phraseThumbCache.keys().next().value;
+      if (oldest !== undefined) phraseThumbCache.delete(oldest);
+    }
+    return base64;
   },
 
   loadPhrases: async (groupId: string) => {
