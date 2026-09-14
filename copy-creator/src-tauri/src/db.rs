@@ -56,10 +56,46 @@ pub fn guess_service(content: &str) -> Option<&'static str> {
 
 pub fn make_key_preview(content: &str) -> String {
     let c = content.trim();
-    if c.len() >= 12 {
-        format!("{}...{}", &c[..8], &c[c.len() - 4..])
+    let total = c.chars().count();
+    if total >= 12 {
+        let head: String = c.chars().take(8).collect();
+        let tail: String = c.chars().skip(total - 4).collect();
+        format!("{}...{}", head, tail)
     } else {
         c.to_string()
+    }
+}
+
+#[cfg(test)]
+mod key_preview_tests {
+    use super::make_key_preview;
+
+    // 原实现对非 ASCII 内容按字节切片会 panic（字节 8 落入多字节字符内部），
+    // 且 panic 点位于采集线程与持锁的列表查询路径，这里钉住字符安全语义。
+    #[test]
+    fn preview_is_safe_for_multibyte_content() {
+        assert_eq!(
+            make_key_preview("sk-中文密钥测试内容示例"),
+            "sk-中文密钥测...内容示例"
+        );
+    }
+
+    #[test]
+    fn preview_elides_long_ascii_keys() {
+        assert_eq!(make_key_preview("sk-abcdefghijklmnop"), "sk-abcde...mnop");
+    }
+
+    #[test]
+    fn preview_threshold_follows_char_count() {
+        // 12 个字符：进入省略分支
+        assert_eq!(make_key_preview("sk-1234567890"), "sk-12345...7890");
+        // 11 个字符：原样返回
+        assert_eq!(make_key_preview("sk-12345678"), "sk-12345678");
+    }
+
+    #[test]
+    fn preview_of_short_content_is_verbatim_after_trim() {
+        assert_eq!(make_key_preview("  short  "), "short");
     }
 }
 
