@@ -1,15 +1,11 @@
-import {
-  getResourceFileThumbnail,
-  loadResourceVideoPoster,
-  openResourceFile,
-  saveResourceVideoPoster,
-} from "../../domain/mediaAssets";
+import { getResourceFileThumbnail, openResourceFile } from "../../domain/mediaAssets";
 import { useEffect, useRef, useState } from "react";
 import { useInViewOnce } from "../../hooks/useInViewOnce";
 import { useTranslation } from "react-i18next";
 import type { RadialPreviewSegment } from "../../domain/preview";
 import { Icons } from "../../components/Icons";
 import { resolveResourceAssetUrl, resolveResourceMediaUrl } from "../../domain/mediaUrl";
+import { VideoPoster, type VideoPosterProps } from "../../components/VideoPoster";
 
 function useResourceAssetUrl(
   path: string,
@@ -301,143 +297,15 @@ export function ResourceSegments({
 }
 
 /**
- * 列表卡片专用的视频封面帧：进入视口后才解析媒体地址并加载元数据，
- * 加载到后跳到代表性时间点（约 10% 处）渲染画面。元数据/寻帧失败时
- * 保持占位图标，不影响卡片其余交互。
+ * 列表卡片专用的视频封面帧：统一实现见 components/VideoPoster.tsx，
+ * 这里保留原函数名作为资源卡片的转发出口（占位图标用资源卡视觉）。
  */
-export function ResourceVideoPoster({
-  path,
-  fallbackLabel,
-  version,
-}: {
-  path: string;
-  fallbackLabel: string;
-  version?: string;
-}) {
-  const containerRef = useRef<HTMLDivElement | null>(null);
-  const canvasRef = useRef<HTMLCanvasElement | null>(null);
-  const [inView, setInView] = useState(false);
-  const { src, failed } = useResourceAssetUrl(path, undefined, resolveResourceMediaUrl, version);
-  const [videoFailed, setVideoFailed] = useState(false);
-  const [hasFrame, setHasFrame] = useState(false);
-  // 已持久化的海报：命中后列表只渲染这张图，不再挂 <video> 加载元数据
-  // 与寻帧——几百个视频的库靠它保住列表流畅。
-  const [savedPoster, setSavedPoster] = useState("");
-  const posterSaveAttemptedRef = useRef(false);
-
-  useEffect(() => {
-    const element = containerRef.current;
-    if (!element) return;
-    const observer = new IntersectionObserver(
-      ([entry]) => {
-        if (entry.isIntersecting) {
-          setInView(true);
-          observer.disconnect();
-        }
-      },
-      { rootMargin: "200px" },
-    );
-    observer.observe(element);
-    return () => observer.disconnect();
-  }, []);
-
-  useEffect(() => {
-    setVideoFailed(false);
-    setHasFrame(false);
-    posterSaveAttemptedRef.current = false;
-  }, [src]);
-
-  useEffect(() => {
-    if (!inView) return;
-    let cancelled = false;
-    loadResourceVideoPoster(path)
-      .then((base64) => {
-        if (!cancelled && base64) setSavedPoster(`data:image/jpeg;base64,${base64}`);
-      })
-      .catch(() => {});
-    return () => {
-      cancelled = true;
-    };
-  }, [inView, path]);
-
-  // 寻到代表性帧后画到低分辨率画布上：放大 + 模糊作为铺底虚影，
-  // 前景视频完整展示，替代纯色留白。仅绘制不读回像素，无跨源限制。
-  const handleSeeked = (event: React.SyntheticEvent<HTMLVideoElement>) => {
-    const media = event.currentTarget;
-    const canvas = canvasRef.current;
-    if (canvas) {
-      const context = canvas.getContext("2d");
-      if (context && media.videoWidth > 0 && media.videoHeight > 0) {
-        context.drawImage(media, 0, 0, canvas.width, canvas.height);
-      }
-    }
-    // 高清帧导出持久化（每个视频只做一次；旧版本缓存的响应无 CORS 头时
-    // canvas 被污染，toDataURL 抛错——吞掉即可，下次仍走现场抽帧）。
-    if (!posterSaveAttemptedRef.current && media.videoWidth > 0) {
-      posterSaveAttemptedRef.current = true;
-      try {
-        const exportCanvas = document.createElement("canvas");
-        exportCanvas.width = 640;
-        exportCanvas.height = Math.max(
-          1,
-          Math.round((640 * media.videoHeight) / media.videoWidth),
-        );
-        const exportContext = exportCanvas.getContext("2d");
-        if (exportContext) {
-          exportContext.drawImage(media, 0, 0, exportCanvas.width, exportCanvas.height);
-          const dataUrl = exportCanvas.toDataURL("image/jpeg", 0.72);
-          void saveResourceVideoPoster(path, dataUrl).catch(() => {});
-        }
-      } catch {
-        // 跨源污染等场景放弃持久化，不影响本次展示。
-      }
-    }
-    setHasFrame(true);
-  };
-
-  const handleLoadedMetadata = (event: React.SyntheticEvent<HTMLVideoElement>) => {
-    const media = event.currentTarget;
-    // 首帧常为黑场，跳到约 10% 处取代表性画面；seek 失败则退回首帧。
-    const target = Number.isFinite(media.duration) && media.duration > 0
-      ? Math.min(media.duration * 0.1, 3)
-      : 0.04;
-    try {
-      media.currentTime = target;
-    } catch {
-      handleSeeked(event);
-    }
-  };
-
-  const showPlaceholder = !inView || failed || videoFailed || (!src && !savedPoster) || (!savedPoster && !hasFrame);
-  const useSavedPoster = Boolean(inView && savedPoster);
-  return (
-    <div ref={containerRef} className="resource-video-poster" aria-hidden="true">
-      {useSavedPoster ? (
-        <img className="resource-video-poster-frame is-ready" src={savedPoster} alt="" draggable={false} />
-      ) : inView && !failed && !videoFailed && src ? (
-        <>
-          <canvas ref={canvasRef} className="resource-video-poster-bg" width={48} height={27} />
-          <video
-            className={`resource-video-poster-frame${hasFrame ? " is-ready" : ""}`}
-            src={src}
-            muted
-            preload="metadata"
-            crossOrigin="anonymous"
-            onLoadedMetadata={handleLoadedMetadata}
-            onSeeked={handleSeeked}
-            onError={() => setVideoFailed(true)}
-          />
-        </>
-      ) : null}
-      {showPlaceholder && (
-        <div className="resource-video-poster-placeholder">
-          <span className="resource-card-visual-icon">{Icons.video}</span>
-          <span>{fallbackLabel}</span>
-        </div>
-      )}
-    </div>
-  );
+export function ResourceVideoPoster(
+  props: Omit<VideoPosterProps, "iconClassName">,
+) {
+  return <VideoPoster iconClassName="resource-card-visual-icon" {...props} />;
 }
+
 
 export function ResourceMediaPlayer({
   kind,
