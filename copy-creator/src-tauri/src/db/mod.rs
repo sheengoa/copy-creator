@@ -3945,7 +3945,12 @@ fn migrate_storage_data(
         .map_err(|e| format!("set pragmas: {}", e))?;
     ensure_schema(&new_conn).map_err(|e| format!("create schema: {}", e))?;
 
-    // 旧库以别名接入后逐表复制。
+    // 旧库以别名接入后逐表复制。复制期间临时关闭新连接的外键：旧库若存
+    // 在历史孤儿行（外键约束启用前的遗留），严格校验会让整个迁移失败；
+    // 数据保真优先，孤儿行原样保留进新库。
+    new_conn
+        .execute("PRAGMA foreign_keys=OFF", [])
+        .map_err(|e| format!("toggle foreign_keys: {}", e))?;
     new_conn
         .execute(
             "ATTACH DATABASE ?1 AS migrate_src",
@@ -3978,6 +3983,10 @@ fn migrate_storage_data(
     new_conn
         .execute("DETACH DATABASE migrate_src", [])
         .map_err(|e| format!("detach old db: {}", e))?;
+    // 复制完成，恢复外键约束（与主库同配置）。
+    new_conn
+        .execute("PRAGMA foreign_keys=ON", [])
+        .map_err(|e| format!("restore foreign_keys: {}", e))?;
 
     // 附件（images/thumbs）与快捷输入文件跟随搬迁；数据库文件由 ATTACH
     // 直接读取、settings 在命令层复制，均不在搬迁范围。旧目录保留作备份。
