@@ -2186,6 +2186,7 @@ mod resource_command_tests {
                      source_path TEXT DEFAULT '', file_size INTEGER DEFAULT 0,
                      sort_order INTEGER DEFAULT 0, created_at TEXT NOT NULL,
                      updated_at TEXT NOT NULL, last_used_at TEXT DEFAULT '',
+                     last_used_ms INTEGER GENERATED ALWAYS AS (CAST((julianday(last_used_at) - 2440587.5) * 86400000 AS INTEGER)) VIRTUAL,
                      use_count INTEGER DEFAULT 0
                  );
                  INSERT INTO clipboard_records (id, type, content, created_at, sort_order)
@@ -2326,6 +2327,7 @@ mod resource_command_tests {
                      source_path TEXT DEFAULT '', file_size INTEGER DEFAULT 0,
                      sort_order INTEGER DEFAULT 0, created_at TEXT NOT NULL,
                      updated_at TEXT NOT NULL, last_used_at TEXT DEFAULT '',
+                     last_used_ms INTEGER GENERATED ALWAYS AS (CAST((julianday(last_used_at) - 2440587.5) * 86400000 AS INTEGER)) VIRTUAL,
                      use_count INTEGER DEFAULT 0
                  );",
             )
@@ -2773,6 +2775,7 @@ mod resource_command_tests {
                      created_at TEXT NOT NULL,
                      updated_at TEXT NOT NULL,
                      last_used_at TEXT DEFAULT '',
+                     last_used_ms INTEGER GENERATED ALWAYS AS (CAST((julianday(last_used_at) - 2440587.5) * 86400000 AS INTEGER)) VIRTUAL,
                      use_count INTEGER DEFAULT 0
                  );",
             )
@@ -2879,6 +2882,7 @@ mod all_phrases_tests {
                 created_at TEXT NOT NULL,
                 updated_at TEXT NOT NULL,
                 last_used_at TEXT DEFAULT '',
+                last_used_ms INTEGER GENERATED ALWAYS AS (CAST((julianday(last_used_at) - 2440587.5) * 86400000 AS INTEGER)) VIRTUAL,
                 use_count INTEGER DEFAULT 0,
                 FOREIGN KEY (group_id) REFERENCES phrase_groups(id) ON DELETE CASCADE
             );
@@ -2993,6 +2997,21 @@ mod all_phrases_tests {
         assert_eq!(rows[0]["group_name"], "group-g1");
         assert_eq!(rows[0]["last_used_at"], "2026-09-05T10:00:00+00:00");
         assert_eq!(rows[0]["use_count"], 0);
+    }
+
+    #[test]
+    fn all_phrase_rows_sorts_by_real_time_not_string_order() {
+        // 排序语义锁定为「按真实时间（毫秒）」而非文本字典序：当前写入的
+        // RFC3339 带 '+00:00' 后缀时两者恰好一致，但格式一旦漂移（如换 'Z'
+        // 后缀，'Z' > '.' 会使整秒误判为更新）字符串比较即出错，毫秒生成
+        // 列对格式免疫。
+        let conn = setup_conn();
+        insert_group(&conn, "g1", 1);
+        insert_phrase(&conn, "whole", "g1", 2, "2026-09-05T10:00:00+00:00");
+        insert_phrase(&conn, "later", "g1", 1, "2026-09-05T10:00:00.100+00:00");
+        insert_phrase(&conn, "newest", "g1", 3, "2026-09-05T10:00:00.999+00:00");
+
+        assert_eq!(query_ids(&conn, i64::MAX, None), vec!["newest", "later", "whole"]);
     }
 }
 

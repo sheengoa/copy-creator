@@ -1614,6 +1614,17 @@ fn ensure_schema(conn: &Connection) -> Result<(), Box<dyn std::error::Error>> {
         ",
     )?;
 
+    // ── last_used_ms 生成列：phrases.last_used_at 派生的毫秒时间戳 ──
+    // last_used_at 为 RFC3339 且亚秒位数可变（0/3/6/9 位），字符串比较在同秒
+    // 内会误判（'…00Z' 字典序大于 '…00.100Z'）；「全部」视图排序改走毫秒整数。
+    // 空串（从未使用）经 julianday 得 NULL，排序子句按 0 垫底。
+    conn.execute(
+        "ALTER TABLE phrases ADD COLUMN last_used_ms INTEGER \
+         GENERATED ALWAYS AS (CAST((julianday(last_used_at) - 2440587.5) * 86400000 AS INTEGER)) VIRTUAL",
+        [],
+    )
+    .ok();
+
     // ── 内容模式迁移：资源（资源库）与普通剪贴板两种模式，分组与“临时”标记废弃 ──
     // 旧版本以“是否有分组”推断资源，手动暂存记在 group_name（'stash'/'暂存'/'临时'）。
     // 统一为：带真实分组名的旧记录升级为资源后清空分组；手动暂存标记全部清除，并入剪贴板列表。
@@ -2541,20 +2552,22 @@ fn phrase_row_with_group(row: &rusqlite::Row) -> rusqlite::Result<serde_json::Va
 
 /// 「全部」视图排序子句：recent=最近使用（未使用按分组 + 手动顺序垫底）；
 /// count=最多使用（次数倒序、并列按最近使用，未使用垫底规则相同）。
+/// 时间比较统一走 last_used_ms 生成列（毫秒整数），不受 RFC3339 变精度
+/// 字符串比较的同秒误判影响。
 fn phrases_all_order_clause(sort_by: Option<&str>) -> &'static str {
     match sort_by {
-        Some("count") => "(COALESCE(p.use_count, 0) = 0) ASC, p.use_count DESC, p.last_used_at DESC,
+        Some("count") => "(COALESCE(p.use_count, 0) = 0) ASC, p.use_count DESC, p.last_used_ms DESC,
                 COALESCE(g.sort_order, 0) DESC, p.sort_order DESC",
-        _ => "(COALESCE(p.last_used_at, '') = '') ASC,
-                      p.last_used_at DESC,
+        _ => "(COALESCE(p.last_used_ms, 0) = 0) ASC,
+                      p.last_used_ms DESC,
                       COALESCE(g.sort_order, 0) DESC,
                       p.sort_order DESC",
     }
 }
 
-/// 查询全部短语：有使用记录的按 last_used_at 倒序在前，未使用的按
+/// 查询全部短语：有使用记录的按最近使用（last_used_ms）倒序在前，未使用的按
 /// 「分组顺序 + 组内手动顺序」垫底（分组、手动均为 sort_order 越大越靠前）。
-/// 时间戳均为 chrono RFC3339 UTC，字典序即时间序；limit 传 i64::MAX 表示全量。
+/// limit 传 i64::MAX 表示全量。
 fn all_phrase_rows(
     conn: &Connection,
     limit: i64,
