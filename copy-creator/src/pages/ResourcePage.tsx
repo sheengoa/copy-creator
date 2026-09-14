@@ -207,6 +207,31 @@ export default function ResourcePage() {
     };
   }, [loadRecords, loadResourceGroups, resourceGroup]);
 
+  // 兜底自愈：resource-groups-changed 是单次事件，被 WebView 丢弃或延迟
+  // 时列表会停留旧数据且没有任何重试（实测出现过一次覆盖保存后列表长时
+  // 间不刷新）。挂载期间每 10s 拉取库修订号比对，发现落后即重载分组与
+  // 记录——事件为主路径，轮询只做对账补漏；窗口隐藏到托盘时定时器被
+  // WebView 节流，恢复显示另有 useRefreshOnShow 全量重载。
+  const libraryRevisionRef = useRef(-1);
+  useEffect(() => {
+    const timer = window.setInterval(() => {
+      void invoke<number>("get_resource_library_revision")
+        .then((revision) => {
+          const seen = libraryRevisionRef.current;
+          if (seen === -1) {
+            libraryRevisionRef.current = revision;
+            return;
+          }
+          if (revision === seen) return;
+          libraryRevisionRef.current = revision;
+          void loadResourceGroups();
+          void loadRecords(false, "resources", resourceGroup);
+        })
+        .catch(() => {});
+    }, 10_000);
+    return () => window.clearInterval(timer);
+  }, [loadRecords, loadResourceGroups, resourceGroup]);
+
   // 主窗口从隐藏恢复显示时重载分组与记录：兜底隐藏期间丢失/被节流的刷新。
   useRefreshOnShow(useCallback(() => {
     void loadResourceGroups();

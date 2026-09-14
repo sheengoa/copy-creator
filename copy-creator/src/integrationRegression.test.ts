@@ -238,6 +238,14 @@ describe("integration regressions", () => {
     const libSource = readSource("../src-tauri/src/lib.rs");
     expect(libSource).toContain('emit("main-window-shown"');
 
+    // 兜底自愈：resource-groups-changed 是单次事件，被 WebView 丢弃时
+    // 列表停留旧数据且无重试。资源页挂载期间必须定时拉取库修订号对账
+    // （事件为主路径，轮询只补漏）；后端在监听冲刷与启动对账时自增。
+    expect(pageSource).toContain("get_resource_library_revision");
+    expect(dbSource).toContain("fn get_resource_library_revision");
+    expect(dbSource).toContain("bump_resource_library_revision");
+    expect(watchSource).toContain("bump_resource_library_revision");
+
     // 两页视图状态必须按页隔离：剪切板页与资源页曾共用 clipboardStore
     // 的 records/category，而两页永久保挂载，任何一方后台发起的加载都会
     // 经「加载代数最后者赢」覆盖对方正在显示的列表（切区/恢复显示后恒

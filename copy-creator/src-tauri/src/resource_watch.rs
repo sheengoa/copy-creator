@@ -133,6 +133,9 @@ fn watch_loop<R: Runtime>(app: AppHandle<R>) {
                     let paths: Vec<PathBuf> = arrived_paths.drain().collect();
                     db::discover_external_resource_files(&app, &paths);
                 }
+                // 修订号随冲刷自增：即使 resource-groups-changed 事件被
+                // WebView 丢弃，前端心跳比对也能发现落后并自愈。
+                db::bump_resource_library_revision();
                 log::info!("资源库外部变更，通知前端刷新");
                 let _ = app.emit("resource-groups-changed", ());
             }

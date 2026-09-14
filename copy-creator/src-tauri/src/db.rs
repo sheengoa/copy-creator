@@ -2,8 +2,24 @@ use rusqlite::{params, Connection, OptionalExtension};
 use std::collections::{HashMap, HashSet};
 use std::ffi::OsStr;
 use std::path::{Component, Path, PathBuf};
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Mutex;
 use tauri::{AppHandle, Emitter, Manager, Runtime};
+
+/// 资源库修订号：外部变更（监听防抖冲刷/启动对账）时自增。前端定时拉取
+/// 比对，作为 resource-groups-changed 单次事件被 WebView 丢弃或延迟时的
+/// 兜底自愈信号——事件是主路径，轮询对账只补漏。
+static RESOURCE_LIBRARY_REVISION: AtomicU64 = AtomicU64::new(0);
+
+pub(crate) fn bump_resource_library_revision() {
+    RESOURCE_LIBRARY_REVISION.fetch_add(1, Ordering::Relaxed);
+}
+
+/// 前端心跳拉取当前修订号（纯内存读取，零 IO）。
+#[tauri::command]
+pub fn get_resource_library_revision() -> u64 {
+    RESOURCE_LIBRARY_REVISION.load(Ordering::Relaxed)
+}
 
 // === API Key Detection ===
 
@@ -1789,6 +1805,7 @@ pub fn sync_resource_library<R: Runtime>(app: &AppHandle<R>) -> usize {
     let total_removed = removable.len();
     drop(conn);
     if added > 0 || total_removed > 0 {
+        bump_resource_library_revision();
         log::info!("资源库对账完成：补录 {added} 条，清退 {total_removed} 条");
     }
     added

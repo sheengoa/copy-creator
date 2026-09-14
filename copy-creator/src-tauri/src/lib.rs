@@ -394,6 +394,7 @@ pub fn run() {
             db::get_storage_path,
             db::select_storage_folder,
             db::get_resource_library_path,
+            db::get_resource_library_revision,
             db::set_resource_library_path,
             db::select_resource_library_folder,
             db::get_resource_groups,
