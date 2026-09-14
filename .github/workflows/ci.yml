@@ -47,6 +47,10 @@ jobs:
         run: pnpm lint
         working-directory: copy-creator
 
+      - name: 类型检查
+        run: pnpm typecheck
+        working-directory: copy-creator
+
       - name: 前端测试（含架构守卫）
         run: pnpm test
         working-directory: copy-creator

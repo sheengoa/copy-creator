@@ -11,6 +11,7 @@
     "lint": "eslint .",
     "preview": "vite preview",
     "test": "vitest run",
+    "typecheck": "tsc -b",
     "tauri": "tauri",
     "gen:media-types": "node ../scripts/generate-media-types.mjs",
     "gen:check": "node ../scripts/generate-media-types.mjs --check"
