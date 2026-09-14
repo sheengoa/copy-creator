@@ -29,6 +29,7 @@ import { BackToTopButton } from "../components/BackToTop";
 import { useBackToTop } from "../hooks/useBackToTop";
 import { useRefreshOnShow } from "../hooks/useRefreshOnShow";
 import { useRecordLocale } from "../hooks/useRecordLocale";
+import { useEscapeKey } from "../hooks/useEscapeKey";
 import ResourceDetailPage from "./ResourcePage/ResourceDetailPage";
 import ResourceGroupChips from "./ResourcePage/ResourceGroupChips";
 import type { ResourceMediaKind as ResourceMediaKindLabel } from "../domain/mediaKind";
@@ -286,16 +287,12 @@ export default function ResourcePage() {
       if (resourceSettingsButtonRef.current?.contains(target)) return;
       setResourceSettingsOpen(false);
     };
-    const handleKeyDown = (event: KeyboardEvent) => {
-      if (event.key === "Escape") setResourceSettingsOpen(false);
-    };
     document.addEventListener("mousedown", handlePointerDown);
-    document.addEventListener("keydown", handleKeyDown);
     return () => {
       document.removeEventListener("mousedown", handlePointerDown);
-      document.removeEventListener("keydown", handleKeyDown);
     };
   }, [resourceSettingsOpen]);
+  useEscapeKey(() => setResourceSettingsOpen(false), resourceSettingsOpen);
 
   useEffect(() => {
     if (!searchEffectInitializedRef.current) {
@@ -787,17 +784,12 @@ export default function ResourcePage() {
     return () => cancelAnimationFrame(frame);
   }, [detailRecordId]);
 
-  useEffect(() => {
-    const handleKeyDown = (event: KeyboardEvent) => {
-      if (event.key !== "Escape" || !detailRecordId) return;
-      const target = event.target as HTMLElement | null;
-      if (target && (target.tagName === "TEXTAREA" || target.tagName === "INPUT")) return;
-      event.preventDefault();
-      closeDetail();
-    };
-    document.addEventListener("keydown", handleKeyDown);
-    return () => document.removeEventListener("keydown", handleKeyDown);
-  }, [closeDetail, detailRecordId]);
+  useEscapeKey((event) => {
+    const target = event.target as HTMLElement | null;
+    if (target && (target.tagName === "TEXTAREA" || target.tagName === "INPUT")) return;
+    event.preventDefault();
+    closeDetail();
+  }, Boolean(detailRecordId));
 
   const handleToggleAll = useCallback(async () => {
     if (selectingAll) return;

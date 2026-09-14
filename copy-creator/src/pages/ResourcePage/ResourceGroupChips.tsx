@@ -21,6 +21,7 @@ import { restrictToHorizontalAxis } from "@dnd-kit/modifiers";
 import { Icons } from "../../components/Icons";
 import type { ResourceFolder } from "../../types";
 import { findResourceFolder, flattenResourceFoldersVisible, formatResourceFolderPath, isResourceFolderPath } from "../../domain/groups";
+import { useEscapeKey } from "../../hooks/useEscapeKey";
 
 interface ResourceGroupChipsProps {
   groups: ResourceFolder[];
@@ -204,27 +205,23 @@ export default function ResourceGroupChips({
       if (menuAnchorRef.current?.contains(target)) return;
       closeMenu();
     };
-    const handleKeyDown = (event: KeyboardEvent) => {
-      if (event.key === "Escape") {
-        event.preventDefault();
-        closeMenu();
-      }
-    };
 
     document.addEventListener("mousedown", handlePointerDown);
-    document.addEventListener("keydown", handleKeyDown);
     window.addEventListener("resize", schedulePositionUpdate);
     window.addEventListener("scroll", schedulePositionUpdate, true);
     schedulePositionUpdate();
 
     return () => {
       document.removeEventListener("mousedown", handlePointerDown);
-      document.removeEventListener("keydown", handleKeyDown);
       window.removeEventListener("resize", schedulePositionUpdate);
       window.removeEventListener("scroll", schedulePositionUpdate, true);
       if (frame !== null) window.cancelAnimationFrame(frame);
     };
   }, [closeMenu, menuPath, menuItems.length, updateMenuPosition]);
+  useEscapeKey((event) => {
+    event.preventDefault();
+    closeMenu();
+  }, menuPath !== null);
 
   const handleSelect = useCallback((path: string) => {
     closeMenu();
