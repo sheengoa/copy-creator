@@ -256,17 +256,24 @@ fn percent_decode(value: &str) -> String {
 }
 
 /// 与前端 resolveResourceAssetUrl 相同的语义：绝对路径直接使用，
-/// 相对路径拼接到应用存储目录之下。
+/// 相对路径拼接到应用存储目录之下。解析结果必须落在应用管理目录内
+/// （存储目录 / 资源库）：token 一旦泄漏（渲染进程被注入），无边界
+/// 即可借本服务读取磁盘任意文件。
 fn resolve_media_file<R: Runtime>(app: &AppHandle<R>, raw: &str) -> Option<PathBuf> {
     let value = raw.trim();
     if value.is_empty() {
         return None;
     }
     let path = Path::new(value);
-    if path.is_absolute() {
-        return Some(path.to_path_buf());
+    let resolved = if path.is_absolute() {
+        path.to_path_buf()
+    } else {
+        db::get_storage_dir(app).join(value.trim_start_matches(['/', '\\']))
+    };
+    if !db::is_app_managed_path(app, &resolved) {
+        return None;
     }
-    Some(db::get_storage_dir(app).join(value.trim_start_matches(['/', '\\'])))
+    Some(resolved)
 }
 
 fn media_content_type(path: &Path) -> &'static str {
@@ -455,18 +462,36 @@ mod media_server_http_tests {
 
     #[test]
     fn serves_local_media_with_token_and_byte_ranges() {
+        let dir: PathBuf = std::env::temp_dir().join(format!(
+            "copy-creator-media-server-test-{}",
+            uuid::Uuid::new_v4()
+        ));
+        std::fs::create_dir_all(&dir).unwrap();
+
         let app = tauri::test::mock_app();
+        // 媒体解析的白名单需要 DbState（存储/资源库目录）：内存库 +
+        // storage_path 指向测试目录，使被请求文件落在放行边界内。
+        {
+            let conn = rusqlite::Connection::open_in_memory().unwrap();
+            conn.execute_batch(
+                "CREATE TABLE settings (key TEXT PRIMARY KEY, value TEXT NOT NULL);",
+            )
+            .unwrap();
+            conn.execute(
+                "INSERT INTO settings (key, value) VALUES ('storage_path', ?1)",
+                rusqlite::params![dir.to_string_lossy()],
+            )
+            .unwrap();
+            app.manage(crate::db::DbState {
+                conn: std::sync::Mutex::new(conn),
+            });
+        }
         spawn(app.handle());
         let (origin, token) = {
             let state = app.state::<MediaServerState>();
             (state.origin.clone(), state.token.clone())
         };
 
-        let dir: PathBuf = std::env::temp_dir().join(format!(
-            "copy-creator-media-server-test-{}",
-            uuid::Uuid::new_v4()
-        ));
-        std::fs::create_dir_all(&dir).unwrap();
         let file = dir.join("clip.mp4");
         let data: Vec<u8> = (0..1000_u32).map(|value| (value % 251) as u8).collect();
         std::fs::write(&file, &data).unwrap();

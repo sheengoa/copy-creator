@@ -369,6 +369,42 @@ pub(crate) fn resolve_storage_path<R: Runtime>(
     resolve_storage_path_from_root(&get_storage_dir(app), path)
 }
 
+/// 安全边界：判断路径是否位于应用自身管理的目录（存储目录、默认/当前/
+/// 历史资源库）之内。媒体服务与图片读取命令共用——这些通道的 token /
+/// 调用方一旦被注入，无边界即可读取磁盘任意文件；同时拒绝携带 `..`/
+/// `.` 组件的路径防穿越。组件比较统一小写（Windows 大小写不敏感）。
+pub(crate) fn is_app_managed_path<R: Runtime>(app: &AppHandle<R>, path: &Path) -> bool {
+    if path
+        .components()
+        .any(|c| matches!(c, Component::ParentDir | Component::CurDir))
+    {
+        return false;
+    }
+    let mut roots = resource_library_roots(app);
+    roots.push(get_storage_dir(app));
+    path_within_any(path, &roots)
+}
+
+/// 纯函数部分（便于单测）：path 是否落在任一 root 之内。
+fn path_within_any(path: &Path, roots: &[PathBuf]) -> bool {
+    let component_key = |p: &Path| -> Vec<String> {
+        p.components()
+            .filter_map(|c| match c {
+                Component::Normal(part) => Some(part.to_string_lossy().to_lowercase()),
+                _ => None,
+            })
+            .collect()
+    };
+    let target = component_key(path);
+    if target.is_empty() {
+        return false;
+    }
+    roots.iter().any(|root| {
+        let root_key = component_key(root);
+        target.len() >= root_key.len() && target[..root_key.len()] == root_key[..]
+    })
+}
+
 pub(crate) fn resolve_managed_storage_path<R: Runtime>(
     app: &AppHandle<R>,
     path: &str,
@@ -3509,6 +3545,10 @@ pub fn get_all_settings(
 #[tauri::command]
 pub fn get_image_base64(app: AppHandle, path: String) -> Result<String, String> {
     let image_path = resolve_storage_path(&app, &path)?;
+    // 安全边界：只读应用管理目录内的图片，拒绝越界绝对路径。
+    if !is_app_managed_path(&app, &image_path) {
+        return Err("图片路径越界".to_string());
+    }
     let bytes = std::fs::read(&image_path).map_err(|e| format!("read image file: {}", e))?;
 
     use base64::Engine;
@@ -3534,6 +3574,10 @@ fn get_image_thumbnail_blocking(
     max_size: u32,
 ) -> Result<String, String> {
     let image_path = resolve_storage_path(&app, &path)?;
+    // 安全边界：同 get_image_base64，拒绝应用管理目录之外的绝对路径。
+    if !is_app_managed_path(&app, &image_path) {
+        return Err("图片路径越界".to_string());
+    }
     let base_dir = image_path
         .parent()
         .map(Path::to_path_buf)
@@ -8942,5 +8986,41 @@ mod group_scan_tests {
         assert!(all.len() >= under.len());
 
         let _ = std::fs::remove_dir_all(root);
+    }
+}
+
+#[cfg(test)]
+mod managed_path_tests {
+    use super::path_within_any;
+    use std::path::{Path, PathBuf};
+
+    fn roots() -> Vec<PathBuf> {
+        vec![
+            PathBuf::from(r"C:\Users\u\AppData\Roaming\com.copycreator.app"),
+            PathBuf::from(r"D:\lib"),
+        ]
+    }
+
+    /// 存储目录内（含子目录）放行；目录外绝对路径与目录外前缀一律拒绝。
+    #[test]
+    fn allows_only_paths_under_managed_roots() {
+        assert!(path_within_any(
+            Path::new(r"C:\Users\u\AppData\Roaming\com.copycreator.app\images\a.png"),
+            &roots()
+        ));
+        assert!(path_within_any(Path::new(r"D:\lib\Group\b.txt"), &roots()));
+        assert!(!path_within_any(Path::new(r"C:\Windows\system32\cmd.exe"), &roots()));
+        // 前缀相似但目录名不同（"library" vs "lib"）不得放行。
+        assert!(!path_within_any(Path::new(r"D:\library\x.png"), &roots()));
+    }
+
+    /// 大小写不敏感（Windows 语义）；空路径拒绝。
+    #[test]
+    fn comparison_is_case_insensitive_and_rejects_empty() {
+        assert!(path_within_any(
+            Path::new(r"c:\users\U\appdata\roaming\COM.COPYCREATOR.APP\images\a.png"),
+            &roots()
+        ));
+        assert!(!path_within_any(Path::new(""), &roots()));
     }
 }
