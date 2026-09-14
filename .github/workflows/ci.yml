@@ -58,3 +58,31 @@ jobs:
       - name: Rust 测试
         run: cargo test
         working-directory: copy-creator/src-tauri
+
+  windows:
+    # Windows 专属代码（OLE 拖出、低级键盘钩子、注册表自启动）过去只在
+    # 发版构建时才编译，编译错误会潜伏到打 tag 当天才暴露。日常门禁补上
+    # Windows 侧的编译检查与 lib 测试（debug 构建不需要前端 dist 产物）。
+    runs-on: windows-latest
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: 安装 Rust 工具链
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: 缓存 Rust 编译产物
+        uses: swatinem/rust-cache@v2
+        with:
+          workspaces: copy-creator/src-tauri
+
+      - name: Rust 编译检查
+        run: cargo check
+        working-directory: copy-creator/src-tauri
+
+      # lib 测试进程需要嵌入 Common-Controls v6 manifest 才能启动，
+      # test.cmd 经 RUSTFLAGS 注入（本仓库 Windows 跑测试的既定方式）。
+      - name: Rust lib 测试
+        shell: cmd
+        run: test.cmd
+        working-directory: copy-creator/src-tauri
