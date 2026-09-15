@@ -504,8 +504,10 @@ describe("integration regressions", () => {
     expect(mediaServerSource).toContain("get_media_server_origin");
     expect(dbSource).toContain("ADD COLUMN resource_note TEXT DEFAULT ''");
     expect(dbSource).toContain("fn set_resource_note");
-    expect(resourceStyles).toContain(".resource-detail-stage-audio .resource-media-player");
-    expect(resourceStyles).toContain("height: 40px");
+    // resource-media-* 预览样式已随跨窗口共享迁移到 components.css。
+    const sharedStyles = readSource("../styles/components.css");
+    expect(sharedStyles).toContain(".resource-detail-stage-audio .resource-media-player");
+    expect(sharedStyles).toContain("height: 40px");
     // CSP 收紧（E7）：不再放行任意 https 外联；asset 协议已停用，
     // 媒体一律经本机 media server（127.0.0.1）或 data/blob URL 加载。
     expect(config.app.security.csp).not.toContain("https:");

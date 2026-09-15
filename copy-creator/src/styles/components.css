@@ -1309,3 +1309,334 @@ input:focus-visible + .selection-checkbox {
   color: var(--text-secondary);
   font-size: var(--text-sm);
 }
+
+/* ── 跨窗口共享：资源/文件媒体预览（径向菜单经共享组件复用） ── */
+
+.clipboard-file-media {
+  position: relative;
+  width: 100%;
+  height: 110px;
+  margin-bottom: 8px;
+  border-radius: 10px;
+  overflow: hidden;
+  background: color-mix(in srgb, #5e5ce6 10%, var(--input-bg));
+}
+
+.clipboard-file-media.is-audio {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  background: color-mix(in srgb, #ff9500 10%, var(--input-bg));
+  color: var(--text-secondary);
+  font-size: var(--text-sm);
+}
+
+.clipboard-file-media.is-image {
+  background: var(--input-bg);
+}
+
+.clipboard-file-media-image {
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+}
+
+.clipboard-file-media-icon svg {
+  width: 16px;
+  height: 16px;
+}
+
+.clipboard-file-media .clipboard-file-media-play {
+  position: absolute;
+  z-index: 1;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  background: rgba(0, 0, 0, 0.45);
+  color: #fff;
+  box-shadow: 0 2px 10px rgba(0, 0, 0, 0.35);
+  pointer-events: none;
+}
+
+.clipboard-file-media .clipboard-file-media-play svg {
+  width: 14px;
+  height: 14px;
+  margin-left: 1px;
+}
+
+.clipboard-media-slot {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  animation: clipboard-media-fade-in 0.25s ease;
+}
+
+.clipboard-media-slot.is-video {
+  min-height: 240px;
+}
+
+.resource-new-button,
+.resource-secondary-button {
+  min-height: 30px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 5px;
+  padding: 0 10px;
+  border: 1px solid var(--separator);
+  border-radius: 7px;
+  font-family: var(--font);
+  font-size: var(--text-sm);
+  font-weight: var(--weight-medium);
+  white-space: nowrap;
+  cursor: pointer;
+  transition: background 0.15s ease, border-color 0.15s ease, color 0.15s ease, transform 0.15s ease;
+}
+
+.resource-settings-popover .resource-secondary-button {
+  align-self: flex-start;
+}
+
+.resource-settings-popover .resource-secondary-button:disabled {
+  cursor: wait;
+  opacity: 0.65;
+}
+
+.resource-new-button:active,
+.resource-secondary-button:active {
+  transform: scale(0.97);
+}
+
+.resource-new-button svg,
+.resource-secondary-button svg {
+  width: 14px;
+  height: 14px;
+}
+
+.resource-card-preview > .resource-thumb-blur,
+.resource-card-preview > img.resource-card-file-image,
+.resource-card-preview .clipboard-card-thumb img {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  border-radius: 0;
+  /* 完整展示图片内容，不做封面式裁切（虚影前景同样 contain）。 */
+  object-fit: contain;
+  transition: transform 0.2s ease;
+}
+
+.resource-card:hover .resource-card-preview .clipboard-card-thumb img,
+.resource-card:hover .resource-card-preview > .resource-thumb-blur .resource-thumb-blur-fg {
+  transform: scale(1.03);
+}
+
+.resource-thumb-blur {
+  position: relative;
+  overflow: hidden;
+}
+
+.resource-thumb-blur-bg {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  filter: blur(14px) saturate(1.15);
+  transform: scale(1.15);
+}
+
+.resource-thumb-blur-fg {
+  position: relative;
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+  /* 卡片 hover 的前景缩放过渡：容器化后原 img 上的 transition 需在此补回。 */
+  transition: transform 0.2s ease;
+}
+
+.resource-card-file-image.resource-media-loading {
+  min-height: 0;
+}
+
+.resource-card-file-image.resource-media-fallback {
+  min-height: 0;
+  flex-direction: column;
+}
+
+.resource-secondary-button {
+  border-color: var(--separator);
+  background: var(--card-inner-bg);
+  color: var(--text-primary);
+}
+
+.resource-secondary-button:hover {
+  border-color: color-mix(in srgb, var(--text-primary) 24%, var(--separator));
+  background: var(--chip-hover-bg);
+}
+
+.resource-segments {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.resource-segments.compact {
+  max-height: 360px;
+  overflow: auto;
+}
+
+.resource-segment-text {
+  margin: 0;
+  padding: 11px;
+  border: 1px solid var(--separator);
+  border-radius: 7px;
+  background: var(--input-bg);
+  color: var(--text-primary);
+  font-family: var(--font-mono);
+  font-size: var(--text-sm);
+  line-height: 1.65;
+  overflow-wrap: anywhere;
+  user-select: text;
+  white-space: pre-wrap;
+}
+
+.resource-segment-image {
+  display: block;
+  width: 100%;
+  max-height: 330px;
+  border: 1px solid var(--separator);
+  border-radius: 7px;
+  background: var(--input-bg);
+  object-fit: contain;
+}
+
+.resource-media-loading {
+  width: 100%;
+  min-height: 120px;
+  border-radius: 7px;
+  background: linear-gradient(90deg, var(--separator) 25%, var(--chip-hover-bg) 50%, var(--separator) 75%);
+  background-size: 200% 100%;
+  animation: shimmer 1.5s ease-in-out infinite;
+}
+
+.resource-media-fallback,
+.resource-preview-error,
+.resource-preview-loading {
+  display: flex;
+  min-height: 110px;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  padding: 18px;
+  border: 1px dashed var(--separator);
+  border-radius: 7px;
+  color: var(--text-secondary);
+  font-size: var(--text-sm);
+  text-align: center;
+}
+
+.resource-media-fallback svg {
+  width: 24px;
+  height: 24px;
+  flex-shrink: 0;
+}
+
+.resource-media-player-fallback {
+  flex-direction: column;
+}
+
+.resource-media-open-button {
+  min-height: 29px;
+}
+
+.resource-media-open-button svg {
+  width: 14px;
+  height: 14px;
+}
+
+.resource-media-player {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: 7px;
+}
+
+.resource-media-player.compact {
+  max-width: 100%;
+}
+
+.resource-media-video {
+  display: block;
+  width: 100%;
+  max-height: 330px;
+  border-radius: 7px;
+  background: #090909;
+  object-fit: contain;
+}
+
+.resource-media-audio {
+  display: block;
+  width: 100%;
+  height: 40px;
+}
+
+.resource-media-note {
+  color: var(--text-secondary);
+  font-size: var(--text-xs);
+  line-height: 1.45;
+  text-align: center;
+}
+
+.resource-empty-state .resource-secondary-button {
+  margin-top: 4px;
+}
+
+.resource-detail-stage-text .resource-segments,
+.resource-detail-stage-image .resource-segments {
+  width: 100%;
+}
+
+.resource-detail-stage-text .resource-segment-text,
+.resource-detail-text-file.resource-segment-text {
+  padding: 22px;
+  font-family: var(--font);
+  font-size: var(--text-md);
+  line-height: 1.9;
+  letter-spacing: 0.01em;
+}
+
+.resource-detail-stage-image .resource-segment-image {
+  max-width: 100%;
+  max-height: 62vh;
+  margin: 0 auto;
+  border-radius: 8px;
+  object-fit: contain;
+}
+
+.resource-detail-stage-video .resource-media-player {
+  width: 100%;
+}
+
+.resource-detail-stage-video .resource-media-video {
+  max-height: 62vh;
+}
+
+.resource-detail-stage-audio .resource-media-player {
+  width: 100%;
+}
+
+.resource-detail-stage .resource-media-fallback,
+.resource-detail-stage .resource-preview-loading {
+  width: 100%;
+}
+
