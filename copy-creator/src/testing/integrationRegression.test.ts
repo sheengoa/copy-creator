@@ -444,7 +444,8 @@ describe("integration regressions", () => {
     const cardSource = readSource("../pages/ResourcePage/ResourceCard.tsx");
     const detailPageSource = readSource("../pages/ResourcePage/ResourceDetailPage.tsx");
     const config = JSON.parse(readSource("../../src-tauri/tauri.conf.json")) as {
-      app: { security: { csp: string } };
+      app: { security: { csp: string; assetProtocol: { enable: boolean } } };
+      bundle: { targets: string[]; resources: Record<string, string> };
     };
     const detailLoaderBlock = detailPageSource.slice(
       detailPageSource.indexOf("useEffect(() =>"),
