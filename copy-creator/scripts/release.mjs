@@ -17,6 +17,8 @@ import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
 
 const root = join(dirname(fileURLToPath(import.meta.url)), "..");
+// CHANGELOG.md 在仓库根（copy-creator/ 的上一级）。
+const repoRoot = join(root, "..");
 const run = (cmd, cwd = root) => execSync(cmd, { cwd, encoding: "utf8" }).trim();
 
 const version = process.argv[2];
@@ -84,15 +86,15 @@ const sectionLines = [
       "",
     ]),
 ];
-const changelogPath = join(root, "CHANGELOG.md");
+const changelogPath = join(repoRoot, "CHANGELOG.md");
 const changelog = readFileSync(changelogPath, "utf8");
 const headerEnd = changelog.indexOf("<!-- 新版本插入位置 -->");
 if (headerEnd === -1) {
   console.error("CHANGELOG.md 缺少插入位置标记，请检查文件结构。");
   process.exit(1);
 }
-write(
-  "CHANGELOG.md",
+writeFileSync(
+  changelogPath,
   changelog.slice(0, headerEnd) +
     "<!-- 新版本插入位置 -->\n\n" +
     sectionLines.join("\n") +
@@ -100,7 +102,7 @@ write(
 );
 
 // 3. 提交 + 打 tag。
-run(`git add package.json src-tauri/tauri.conf.json src-tauri/Cargo.toml src-tauri/Cargo.lock CHANGELOG.md`);
+run(`git add package.json src-tauri/tauri.conf.json src-tauri/Cargo.toml src-tauri/Cargo.lock ../CHANGELOG.md`);
 run(`git commit -m "工程：发布 ${version}，统一四处版本号"`);
 run(`git tag v${version}`);
 
