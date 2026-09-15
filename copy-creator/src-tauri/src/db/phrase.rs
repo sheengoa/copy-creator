@@ -4,7 +4,7 @@ use super::*;
 use rusqlite::params;
 use tauri::{AppHandle, Emitter, Manager, Runtime};
 
-pub(crate) fn quick_input_files_dir(app: &AppHandle) -> PathBuf {
+pub(crate) fn quick_input_files_dir<R: Runtime>(app: &AppHandle<R>) -> PathBuf {
     let dir = get_storage_dir(app).join("quick-input-files");
     let _ = std::fs::create_dir_all(&dir);
     dir
@@ -34,17 +34,24 @@ pub(crate) fn quick_input_relative_component_count(relative_path: &str) -> Optio
     Some(rest.len())
 }
 
-pub(crate) fn quick_input_absolute_path(app: &AppHandle, relative_path: &str) -> Option<PathBuf> {
+pub(crate) fn quick_input_absolute_path<R: Runtime>(
+    app: &AppHandle<R>,
+    relative_path: &str,
+) -> Option<PathBuf> {
     quick_input_relative_component_count(relative_path)?;
     resolve_relative_storage_path(&get_storage_dir(app), relative_path)
 }
 
-pub(crate) fn remove_quick_input_file(app: &AppHandle, relative_path: &str) {
+pub(crate) fn remove_quick_input_file<R: Runtime>(app: &AppHandle<R>, relative_path: &str) {
     if let Some(path) = quick_input_absolute_path(app, relative_path) {
         let _ = std::fs::remove_file(&path);
         if let Some(parent) = path.parent() {
-            if parent != quick_input_files_dir(app) {
-                let _ = std::fs::remove_dir(parent);
+            let root = quick_input_files_dir(app);
+            // <uuid>/ 目录为单条短语独占，列表渲染过缩略图后其下会有
+            // thumbs/ 缓存子目录，remove_dir 删不掉非空目录会整体残留；
+            // 仅当目录确为 quick-input-files 的直接子目录时才整目录删除。
+            if parent != root && parent.parent() == Some(root.as_path()) {
+                let _ = std::fs::remove_dir_all(parent);
             }
         }
     }

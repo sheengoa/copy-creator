@@ -3535,3 +3535,76 @@ mod recorded_file_path_tests {
     }
 }
 
+#[cfg(test)]
+mod remove_quick_input_file_tests {
+    use crate::db::{remove_quick_input_file, DbState};
+    use std::path::Path;
+    use std::sync::Mutex;
+    use tauri::Manager;
+
+    /// 内存库 + mock app：storage_path 指向测试目录。
+    fn app_with_storage_dir(dir: &Path) -> tauri::App<tauri::test::MockRuntime> {
+        let app = tauri::test::mock_app();
+        let conn = rusqlite::Connection::open_in_memory().unwrap();
+        conn.execute_batch(
+            "CREATE TABLE settings (key TEXT PRIMARY KEY, value TEXT NOT NULL);",
+        )
+        .unwrap();
+        conn.execute(
+            "INSERT INTO settings (key, value) VALUES ('storage_path', ?1)",
+            rusqlite::params![dir.to_string_lossy()],
+        )
+        .unwrap();
+        app.manage(DbState {
+            conn: Mutex::new(conn),
+        });
+        app
+    }
+
+    /// 删除列表渲染过缩略图的短语时必须连同 <uuid>/thumbs/ 一起移除
+    /// （回归：remove_dir 删不掉非空目录，缓存会把整个短语目录残留）。
+    #[test]
+    fn removes_phrase_dir_including_thumbs_cache() {
+        let dir = std::env::temp_dir().join(format!(
+            "copy-creator-remove-qi-{}",
+            uuid::Uuid::new_v4()
+        ));
+        let app = app_with_storage_dir(&dir);
+        let phrase_dir = dir.join("quick-input-files").join("uuid-1");
+        std::fs::create_dir_all(phrase_dir.join("thumbs")).unwrap();
+        std::fs::write(phrase_dir.join("img.png"), b"png").unwrap();
+        std::fs::write(phrase_dir.join("thumbs").join("img.png"), b"thumb").unwrap();
+
+        remove_quick_input_file(app.handle(), "quick-input-files/uuid-1/img.png");
+
+        assert!(!phrase_dir.exists(), "短语目录应连同 thumbs/ 缓存一起删除");
+        assert!(
+            dir.join("quick-input-files").exists(),
+            "quick-input-files 根目录必须保留"
+        );
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    /// 根一级的旧式单文件路径只删文件本身，不动根目录。
+    #[test]
+    fn legacy_root_level_file_only_removes_the_file() {
+        let dir = std::env::temp_dir().join(format!(
+            "copy-creator-remove-qi-{}",
+            uuid::Uuid::new_v4()
+        ));
+        let app = app_with_storage_dir(&dir);
+        let legacy = dir.join("quick-input-files").join("legacy.md");
+        std::fs::create_dir_all(&legacy.parent().unwrap()).unwrap();
+        std::fs::write(&legacy, b"md").unwrap();
+
+        remove_quick_input_file(app.handle(), "quick-input-files/legacy.md");
+
+        assert!(!legacy.exists(), "旧式文件应被删除");
+        assert!(
+            dir.join("quick-input-files").exists(),
+            "根目录必须保留"
+        );
+        std::fs::remove_dir_all(&dir).ok();
+    }
+}
+
