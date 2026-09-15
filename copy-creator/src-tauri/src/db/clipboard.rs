@@ -525,6 +525,51 @@ pub fn get_clipboard_record_content(app: AppHandle, id: String) -> Result<String
     .map_err(|e| e.to_string())
 }
 
+/// 判断路径是否已被某条剪切板记录在案（content / resource_path / attachments
+/// 元素精确匹配，英文字母不区分大小写）。媒体服务白名单的补充例外：剪切板
+/// 采集的文件记录可以指向管理目录之外的任意位置（用户复制文件的原始位置），
+/// 应用既有能力就是展示与粘贴这些文件（paste 路径同样无目录限制）；媒体
+/// 服务据此前提放行"记录在案"的路径。必须是全等比较——子串匹配会让注入者
+/// 用短路径轻松命中记录，白名单形同虚设。
+pub(crate) fn is_recorded_file_path<R: Runtime>(app: &AppHandle<R>, path: &str) -> bool {
+    if path.is_empty() {
+        return false;
+    }
+    let path_eq = |candidate: &str| {
+        candidate.eq_ignore_ascii_case(path)
+    };
+    let state = app.state::<DbState>();
+    let Ok(conn) = state.conn.lock() else {
+        return false;
+    };
+    let content_hit = conn
+        .query_row(
+            "SELECT EXISTS(SELECT 1 FROM clipboard_records
+                 WHERE content = ?1 COLLATE NOCASE OR resource_path = ?1 COLLATE NOCASE)",
+            params![path],
+            |row| row.get::<_, i64>(0),
+        )
+        .unwrap_or(0);
+    if content_hit == 1 {
+        return true;
+    }
+    let attachments_in_db = || -> Result<Vec<String>, rusqlite::Error> {
+        let mut stmt = conn.prepare(
+            "SELECT attachments FROM clipboard_records WHERE attachments IS NOT NULL AND attachments != '[]'",
+        )?;
+        let rows = stmt.query_map([], |row| row.get::<_, String>(0))?;
+        rows.collect()
+    };
+    let Ok(attachments_rows) = attachments_in_db() else {
+        return false;
+    };
+    attachments_rows.iter().any(|attachments| {
+        serde_json::from_str::<Vec<String>>(attachments)
+            .map(|paths| paths.iter().any(|item| path_eq(item)))
+            .unwrap_or(false)
+    })
+}
+
 #[tauri::command]
 pub fn update_clipboard_record(app: AppHandle, id: String, content: String) -> Result<(), String> {
     let content = content.trim().to_string();

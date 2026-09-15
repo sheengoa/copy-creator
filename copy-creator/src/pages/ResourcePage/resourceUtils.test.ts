@@ -1,18 +1,16 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { ClipboardRecord } from "../../types";
 
-const { convertFileSrcMock, invokeMock } = vi.hoisted(() => ({
-  convertFileSrcMock: vi.fn((path: string) => `asset://${path}`),
+const { invokeMock } = vi.hoisted(() => ({
   invokeMock: vi.fn(),
 }));
 
 vi.mock("@tauri-apps/api/core", () => ({
-  convertFileSrc: convertFileSrcMock,
   invoke: invokeMock,
 }));
 
 import { computeResourceColumnCount, formatResourceBitrate, formatResourceDuration, formatResourceFileSize, splitResourceColumns } from "./resourceUtils";
-import { resolveResourceAssetUrl, resolveResourceMediaUrl } from "../../domain/mediaUrl";
+import { resolveResourceMediaUrl } from "../../domain/mediaUrl";
 import { findResourceFolder, flattenResourceFolders } from "../../domain/groups";
 import { getResourceFileName, hasCustomResourceFileName, isResourceTitleRenameable, splitResourceFileName } from "../../domain/fileName";
 import { getResourcePath, getResourceTitle, isFileBackedTextResource } from "../../domain/records";
@@ -26,8 +24,13 @@ function record(type: ClipboardRecord["type"], content: string): Pick<ClipboardR
 
 describe("resourceUtils", () => {
   beforeEach(() => {
-    convertFileSrcMock.mockClear();
     invokeMock.mockReset();
+    invokeMock.mockImplementation((command: string) => {
+      if (command === "get_media_server_origin") {
+        return Promise.resolve({ origin: "http://127.0.0.1:18765", token: "secret" });
+      }
+      return Promise.resolve("/tmp/resources");
+    });
   });
 
   it("infers media kinds from record types and file extensions", () => {
@@ -149,33 +152,35 @@ describe("resourceUtils", () => {
     expect(formatResourceBitrate(60_000, 16)).toBe("30 kbps");
   });
 
-  it("normalizes Windows file URLs before converting them to asset URLs", async () => {
-    await resolveResourceAssetUrl("file:///C:/Media/report%20final.png");
-
-    expect(convertFileSrcMock).toHaveBeenCalledWith("C:/Media/report final.png");
-    expect(invokeMock).not.toHaveBeenCalled();
+  it("normalizes Windows file URLs before routing them through the media server", async () => {
+    await expect(resolveResourceMediaUrl("file:///C:/Media/report%20final.png")).resolves.toBe(
+      "http://127.0.0.1:18765/media?token=secret&path=C%3A%2FMedia%2Freport%20final.png",
+    );
   });
 
   it("allows storage path resolution to retry after a failed request", async () => {
-    invokeMock
-      .mockRejectedValueOnce(new Error("temporary failure"))
-      .mockResolvedValueOnce("/tmp/resources");
-
-    await expect(resolveResourceAssetUrl("notes.txt")).rejects.toThrow("temporary failure");
-    await expect(resolveResourceAssetUrl("notes.txt")).resolves.toBe(
-      "asset:///tmp/resources/notes.txt",
-    );
-    expect(invokeMock).toHaveBeenCalledTimes(2);
-  });
-
-  it("routes local media previews through the loopback media server", async () => {
+    let storagePathCalls = 0;
     invokeMock.mockImplementation((command: string) => {
+      if (command === "get_storage_path") {
+        storagePathCalls += 1;
+        if (storagePathCalls === 1) {
+          return Promise.reject(new Error("temporary failure"));
+        }
+        return Promise.resolve("/tmp/resources");
+      }
       if (command === "get_media_server_origin") {
         return Promise.resolve({ origin: "http://127.0.0.1:18765", token: "secret" });
       }
       return Promise.resolve("/tmp/resources");
     });
 
+    await expect(resolveResourceMediaUrl("notes.txt")).rejects.toThrow("temporary failure");
+    await expect(resolveResourceMediaUrl("notes.txt")).resolves.toBe(
+      "http://127.0.0.1:18765/media?token=secret&path=%2Ftmp%2Fresources%2Fnotes.txt",
+    );
+  });
+
+  it("routes local media previews through the loopback media server", async () => {
     await expect(resolveResourceMediaUrl("/tmp/视频/a b.mp4")).resolves.toBe(
       "http://127.0.0.1:18765/media?token=secret&path=%2Ftmp%2F%E8%A7%86%E9%A2%91%2Fa%20b.mp4",
     );

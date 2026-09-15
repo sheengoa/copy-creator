@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
 import type { RadialPreviewSegment } from "../domain/preview";
-import { resolveResourceAssetUrl } from "../domain/mediaUrl";
+import { resolveResourceMediaUrl } from "../domain/mediaUrl";
 import { ResourceMediaPlayer } from "../pages/ResourcePage/ResourceMedia";
 import { Icons } from "./Icons";
 
@@ -22,7 +22,7 @@ function PreviewImage({ path, version }: { path: string; version?: string }) {
     let cancelled = false;
     setSrc("");
     setFailed(false);
-    resolveResourceAssetUrl(path, version)
+    resolveResourceMediaUrl(path, version)
       .then((url) => {
         if (!cancelled) setSrc(url);
       })

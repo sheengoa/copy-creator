@@ -3,7 +3,7 @@ import { useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { HighlightText } from "./HighlightText";
 import { Icons } from "./Icons";
-import { resolveResourceAssetUrl } from "../domain/mediaUrl";
+import { resolveResourceMediaUrl } from "../domain/mediaUrl";
 
 interface InlineImagePreviewProps {
   path: string;
@@ -27,7 +27,7 @@ export function InlineImagePreview({
     let cancelled = false;
     setSrc("");
     setFailed(false);
-    resolveResourceAssetUrl(path, version)
+    resolveResourceMediaUrl(path, version)
       .then((url) => {
         if (!cancelled) setSrc(url);
       })

@@ -255,10 +255,12 @@ fn percent_decode(value: &str) -> String {
     String::from_utf8_lossy(&output).into_owned()
 }
 
-/// 与前端 resolveResourceAssetUrl 相同的语义：绝对路径直接使用，
+/// 与前端 resolveResourceMediaUrl 相同的语义：绝对路径直接使用，
 /// 相对路径拼接到应用存储目录之下。解析结果必须落在应用管理目录内
-/// （存储目录 / 资源库）：token 一旦泄漏（渲染进程被注入），无边界
-/// 即可借本服务读取磁盘任意文件。
+/// （存储目录 / 资源库），或已被剪切板记录在案——剪切板文件记录可以
+/// 指向用户复制的任意位置文件，展示与粘贴它们本就是应用既有能力；
+/// 前者防 token 泄漏后读任意文件，后者为已复制文件的精确全等匹配，
+/// 注入者仍需猜中确切路径。两个条件都必须过，缺一不可。
 fn resolve_media_file<R: Runtime>(app: &AppHandle<R>, raw: &str) -> Option<PathBuf> {
     let value = raw.trim();
     if value.is_empty() {
@@ -270,7 +272,7 @@ fn resolve_media_file<R: Runtime>(app: &AppHandle<R>, raw: &str) -> Option<PathB
     } else {
         db::get_storage_dir(app).join(value.trim_start_matches(['/', '\\']))
     };
-    if !db::is_app_managed_path(app, &resolved) {
+    if !db::is_app_managed_path(app, &resolved) && !db::is_recorded_file_path(app, value) {
         return None;
     }
     Some(resolved)
@@ -471,10 +473,30 @@ mod media_server_http_tests {
         let app = tauri::test::mock_app();
         // 媒体解析的白名单需要 DbState（存储/资源库目录）：内存库 +
         // storage_path 指向测试目录，使被请求文件落在放行边界内。
+        // clipboard_records 供"记录在案"例外使用（剪切板文件记录可以
+        // 指向管理目录之外，如下载目录里的原始文件）。
         {
             let conn = rusqlite::Connection::open_in_memory().unwrap();
             conn.execute_batch(
-                "CREATE TABLE settings (key TEXT PRIMARY KEY, value TEXT NOT NULL);",
+                "CREATE TABLE settings (key TEXT PRIMARY KEY, value TEXT NOT NULL);
+                 CREATE TABLE clipboard_records (
+                     id TEXT PRIMARY KEY,
+                     type TEXT NOT NULL,
+                     content TEXT NOT NULL,
+                     source_app TEXT DEFAULT '',
+                     created_at TEXT NOT NULL,
+                     user_api_key INTEGER DEFAULT 0,
+                     sort_order REAL,
+                     group_name TEXT DEFAULT '',
+                     attachments TEXT DEFAULT '[]',
+                     storage_mode TEXT DEFAULT 'database',
+                     resource_path TEXT DEFAULT '',
+                     resource_note TEXT DEFAULT '',
+                     resource_external INTEGER DEFAULT 0,
+                     last_used_at TEXT DEFAULT '',
+                     use_count INTEGER DEFAULT 0,
+                     touched_ms INTEGER DEFAULT 0
+                 );",
             )
             .unwrap();
             conn.execute(
@@ -544,6 +566,62 @@ mod media_server_http_tests {
         );
         assert_eq!(status, 404);
 
+        // 图片与音视频共用本服务（asset 协议停用后这是唯一本地媒体通道）：
+        // 必须以正确的 image content-type 全量返回。
+        let image = dir.join("clip.png");
+        std::fs::write(&image, [0x89_u8, b'P', b'N', b'G', 0x0A]).unwrap();
+        let image_param = percent_encode(image.to_str().unwrap());
+        let (status, headers, body) = request(
+            &origin,
+            "GET",
+            &format!("/media?token={token}&path={image_param}"),
+            None,
+        );
+        assert_eq!(status, 200);
+        assert_eq!(header(&headers, "content-type"), Some("image/png"));
+        assert_eq!(body, vec![0x89_u8, b'P', b'N', b'G', 0x0A]);
+
+        // 记录在案的管理目录外文件（剪切板文件记录指向下载目录等原始位置）
+        // 必须放行——这是 0.3.2 图片无法预览的另一半根因；未记录的越界
+        // 路径仍拒绝。相似路径（目录前缀、子串）同样拒绝。
+        let outside_dir = std::env::temp_dir().join(format!(
+            "copy-creator-media-server-outside-{}",
+            uuid::Uuid::new_v4()
+        ));
+        std::fs::create_dir_all(&outside_dir).unwrap();
+        let outside_file = outside_dir.join("from-explorer.png");
+        std::fs::write(&outside_file, [0x89_u8, b'P', b'N', b'G']).unwrap();
+        {
+            let state = app.state::<crate::db::DbState>();
+            let conn = state.conn.lock().unwrap();
+            conn.execute(
+                "INSERT INTO clipboard_records (id, type, content, created_at) VALUES ('r1', 'file', ?1, '2026-09-15T00:00:00Z')",
+                rusqlite::params![outside_file.to_string_lossy()],
+            )
+            .unwrap();
+        }
+        let outside_param = percent_encode(outside_file.to_str().unwrap());
+        let (status, headers, _) = request(
+            &origin,
+            "GET",
+            &format!("/media?token={token}&path={outside_param}"),
+            None,
+        );
+        assert_eq!(status, 200);
+        assert_eq!(header(&headers, "content-type"), Some("image/png"));
+
+        let sibling = outside_dir.join("unrecorded.png");
+        std::fs::write(&sibling, b"x").unwrap();
+        let sibling_param = percent_encode(sibling.to_str().unwrap());
+        let (status, _, _) = request(
+            &origin,
+            "GET",
+            &format!("/media?token={token}&path={sibling_param}"),
+            None,
+        );
+        assert_eq!(status, 404);
+
         std::fs::remove_dir_all(&dir).ok();
+        std::fs::remove_dir_all(&outside_dir).ok();
     }
 }

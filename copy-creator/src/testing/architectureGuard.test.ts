@@ -47,13 +47,11 @@ describe("架构守卫：领域规则必须全局共享", () => {
     ).toEqual([]);
   });
 
-  it("规则 2：convertFileSrc 仅出现在 domain/mediaUrl.ts 与过渡豁免", () => {
+  it("规则 2：convertFileSrc 全仓禁止（asset 协议已停用，媒体走回环服务）", () => {
     const offenders = allSources
       .filter((file) => sourceOf(file).includes("convertFileSrc"))
             .map((file) => toPosix(file.replace(frontRoot, "")));
-    expect(offenders, "媒体地址解析必须走 domain/mediaUrl（见 domain/README.md）").toEqual([
-      "/domain/mediaUrl.ts",
-    ]);
+    expect(offenders, "asset 协议已在 tauri.conf.json 停用，媒体地址必须走 domain/mediaUrl 的回环媒体服务（见 domain/README.md）").toEqual([]);
   });
 
   it("规则 3：<video>/<audio> JSX 仅出现在共享媒体组件", () => {

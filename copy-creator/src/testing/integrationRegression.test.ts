@@ -519,6 +519,11 @@ describe("integration regressions", () => {
     // asset 协议已停用（E7），img-src 只放行自身、内联数据与本机 media server。
     expect(config.app.security.csp).toContain("img-src 'self' data: blob: http://127.0.0.1:*");
     expect(config.app.security.csp).not.toContain("media-src *");
+    // 消费侧必须与配置侧一致（防"停用协议但前端仍生成 asset URL"回归）：
+    // 图片曾因此全窗口无法预览（0.3.2）。媒体地址一律经回环媒体服务。
+    const mediaUrlSource = readSource("../domain/mediaUrl.ts");
+    expect(mediaUrlSource).not.toContain("convertFileSrc");
+    expect(mediaUrlSource).toContain("get_media_server_origin");
   });
 
   it("renders resource list card images from backend thumbnails", () => {
@@ -699,7 +704,7 @@ describe("integration regressions", () => {
     expect(persistWindowSize).not.toContain("data-main-content-preview");
     expect(readSource('../domain/mediaAssets.ts')).toContain('read_quick_input_text_preview');
     expect(inlinePreview).toContain('readClipboardTextPreviewById');
-    expect(inlinePreview).toContain("resolveResourceAssetUrl");
+    expect(inlinePreview).toContain("resolveResourceMediaUrl");
     expect(dbSource).toContain("read_quick_input_text_preview");
     expect(dbSource).toContain("read_clipboard_text_preview");
     // 后端文本预览与资源区共用同一份扩展名白名单（md 等常见格式均可预览）。

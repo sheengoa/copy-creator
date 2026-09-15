@@ -3371,3 +3371,124 @@ mod managed_path_tests {
     }
 }
 
+#[cfg(test)]
+mod recorded_file_path_tests {
+    use crate::db::{is_recorded_file_path, DbState};
+    use std::sync::Mutex;
+    use tauri::Manager;
+
+    /// 内存库 + mock app：clipboard_records 与生产 schema 同列
+    /// （is_recorded_file_path 只依赖 content / resource_path / attachments）。
+    fn app_with_records(rows: &[(&str, &str, &str)]) -> tauri::App<tauri::test::MockRuntime> {
+        let app = tauri::test::mock_app();
+        let conn = rusqlite::Connection::open_in_memory().unwrap();
+        conn.execute_batch(
+            "CREATE TABLE clipboard_records (
+                 id TEXT PRIMARY KEY,
+                 type TEXT NOT NULL,
+                 content TEXT NOT NULL,
+                 source_app TEXT DEFAULT '',
+                 created_at TEXT NOT NULL,
+                 user_api_key INTEGER DEFAULT 0,
+                 sort_order REAL,
+                 group_name TEXT DEFAULT '',
+                 attachments TEXT DEFAULT '[]',
+                 storage_mode TEXT DEFAULT 'database',
+                 resource_path TEXT DEFAULT '',
+                 resource_note TEXT DEFAULT '',
+                 resource_external INTEGER DEFAULT 0,
+                 last_used_at TEXT DEFAULT '',
+                 use_count INTEGER DEFAULT 0,
+                 touched_ms INTEGER DEFAULT 0
+             );",
+        )
+        .unwrap();
+        for (id, content, resource_path) in rows {
+            conn.execute(
+                "INSERT INTO clipboard_records (id, type, content, created_at, resource_path)
+                 VALUES (?1, 'file', ?2, '2026-09-15T00:00:00Z', ?3)",
+                rusqlite::params![id, content, resource_path],
+            )
+            .unwrap();
+        }
+        app.manage(DbState {
+            conn: Mutex::new(conn),
+        });
+        app
+    }
+
+    /// 记录在案的三种形态：content、resource_path、attachments 元素。
+    #[test]
+    fn allows_paths_recorded_in_content_resource_path_or_attachments() {
+        let app = app_with_records(&[(
+            "rec-1",
+            r"D:\downloads\奥克斯设计图.png",
+            r"D:\lib\产品道具\四肢冒着蓝光.png",
+        )]);
+        {
+            let state = app.state::<DbState>();
+            let conn = state.conn.lock().unwrap();
+            conn.execute(
+                "UPDATE clipboard_records SET attachments = ?1 WHERE id = 'rec-1'",
+                [r#"["E:\\photos\\附件图.jpg"]"#],
+            )
+            .unwrap();
+        }
+
+        assert!(is_recorded_file_path(
+            app.handle(),
+            r"D:\downloads\奥克斯设计图.png"
+        ));
+        assert!(is_recorded_file_path(
+            app.handle(),
+            r"D:\lib\产品道具\四肢冒着蓝光.png"
+        ));
+        assert!(is_recorded_file_path(app.handle(), r"E:\photos\附件图.jpg"));
+    }
+
+    /// 安全面钉死：只有全等命中才放行。子串、目录前缀、相似路径都不算
+    /// "记录在案"——若实现退化为子串匹配，注入者可用极短路径命中记录。
+    #[test]
+    fn rejects_substring_directory_and_unrelated_paths() {
+        let app = app_with_records(&[(
+            "rec-1",
+            r"D:\downloads\奥克斯设计图.png",
+            r"D:\lib\产品道具\四肢冒着蓝光.png",
+        )]);
+
+        assert!(!is_recorded_file_path(app.handle(), r"D:\downloads"));
+        assert!(!is_recorded_file_path(app.handle(), r"D:\downloads\"));
+        assert!(!is_recorded_file_path(
+            app.handle(),
+            r"D:\lib\产品道具\四肢冒着蓝光.png.bak"
+        ));
+        assert!(!is_recorded_file_path(
+            app.handle(),
+            r"C:\Windows\system32\cmd.exe"
+        ));
+        assert!(!is_recorded_file_path(app.handle(), ""));
+    }
+
+    /// 英文字母大小写不敏感（Windows 路径语义）；非 ASCII 部分仍须逐字相等。
+    #[test]
+    fn matches_case_insensitively_for_ascii_letters() {
+        let app = app_with_records(&[("rec-1", r"D:\Downloads\Design.PNG", "")]);
+
+        assert!(is_recorded_file_path(app.handle(), r"d:\downloads\design.png"));
+        assert!(!is_recorded_file_path(
+            app.handle(),
+            r"d:\downloads\design.pngx"
+        ));
+    }
+
+    /// 库不可用或记录为空时一律拒绝（fail closed）。
+    #[test]
+    fn fails_closed_without_records() {
+        let app = app_with_records(&[]);
+        assert!(!is_recorded_file_path(
+            app.handle(),
+            r"D:\downloads\anything.png"
+        ));
+    }
+}
+

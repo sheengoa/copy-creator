@@ -4,13 +4,12 @@ import { useInViewOnce } from "../../hooks/useInViewOnce";
 import { useTranslation } from "react-i18next";
 import type { RadialPreviewSegment } from "../../domain/preview";
 import { Icons } from "../../components/Icons";
-import { resolveResourceAssetUrl, resolveResourceMediaUrl } from "../../domain/mediaUrl";
+import { resolveResourceMediaUrl } from "../../domain/mediaUrl";
 import { VideoPoster, type VideoPosterProps } from "../../components/VideoPoster";
 
-function useResourceAssetUrl(
+function useResourceMediaUrl(
   path: string,
   resolvedSrc?: string,
-  resolve: (path: string, version?: string) => Promise<string> = resolveResourceAssetUrl,
   version?: string,
 ) {
   const [src, setSrc] = useState(resolvedSrc ?? "");
@@ -25,7 +24,7 @@ function useResourceAssetUrl(
         cancelled = true;
       };
     }
-    resolve(path, version)
+    resolveResourceMediaUrl(path, version)
       .then((url) => {
         if (!cancelled) setSrc(url);
       })
@@ -35,7 +34,7 @@ function useResourceAssetUrl(
     return () => {
       cancelled = true;
     };
-  }, [path, resolvedSrc, resolve, version]);
+  }, [path, resolvedSrc, version]);
 
   return { src, failed };
 }
@@ -162,7 +161,7 @@ export function ResourceImage({
   version?: string;
 }) {
   const { t } = useTranslation();
-  const { src, failed } = useResourceAssetUrl(path, undefined, resolveResourceAssetUrl, version);
+  const { src, failed } = useResourceMediaUrl(path, undefined, version);
   const [imageFailed, setImageFailed] = useState(false);
   const reportedSizeRef = useRef("");
 
@@ -222,7 +221,7 @@ export function ResourceImageOriginal({
   onZoom?: (src: string) => void;
   version?: string;
 }) {
-  const { src, failed } = useResourceAssetUrl(path, undefined, resolveResourceAssetUrl, version);
+  const { src, failed } = useResourceMediaUrl(path, undefined, version);
   const [imageFailed, setImageFailed] = useState(false);
   const reportedSizeRef = useRef("");
 
@@ -323,7 +322,7 @@ export function ResourceMediaPlayer({
   version?: string;
 }) {
   const { t } = useTranslation();
-  const { src, failed } = useResourceAssetUrl(path, resolvedSrc, resolveResourceMediaUrl, version);
+  const { src, failed } = useResourceMediaUrl(path, resolvedSrc, version);
   const mediaRef = useRef<HTMLVideoElement | HTMLAudioElement | null>(null);
   const [autoplayBlocked, setAutoplayBlocked] = useState(false);
   const [mediaFailed, setMediaFailed] = useState(false);

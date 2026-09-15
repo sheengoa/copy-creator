@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { useTranslation } from "react-i18next";
 import { useShallow } from "zustand/react/shallow";
-import { resolveResourceAssetUrl } from "../../domain/mediaUrl";
+import { resolveResourceMediaUrl } from "../../domain/mediaUrl";
 import { useRefreshOnShow } from "../../hooks/useRefreshOnShow";
 import {
   usePhraseStore,
@@ -319,7 +319,7 @@ export default function PhrasePage() {
     // 避免保存时被误当作"更换文件"。
     const sourcePath = p.source_path || p.content;
     if (p.input_type === "file" && isImageFilePath(sourcePath)) {
-      void resolveResourceAssetUrl(sourcePath).then(setPhraseFilePreviewSrc);
+      void resolveResourceMediaUrl(sourcePath).then(setPhraseFilePreviewSrc);
     } else {
       setPhraseFilePreviewSrc(null);
     }
@@ -334,7 +334,7 @@ export default function PhrasePage() {
     setPhraseFileName(fileName);
     setPhraseFileSize(file.file_size);
     if (isImageFilePath(file.path)) {
-      void resolveResourceAssetUrl(file.path).then(setPhraseFilePreviewSrc);
+      void resolveResourceMediaUrl(file.path).then(setPhraseFilePreviewSrc);
     } else {
       setPhraseFilePreviewSrc(null);
     }
