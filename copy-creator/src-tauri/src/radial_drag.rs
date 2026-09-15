@@ -930,7 +930,7 @@ mod windows_drag {
     use std::sync::atomic::{AtomicBool, Ordering};
     use std::sync::Arc;
     use std::time::{Duration, Instant};
-    use tauri::{AppHandle, Manager, WebviewWindow};
+    use tauri::{AppHandle, WebviewWindow};
 
     type Handle = *mut core::ffi::c_void;
 

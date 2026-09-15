@@ -40,6 +40,64 @@ enum WatchSignal {
     Changed,
 }
 
+/// notify 事件到业务信号的纯映射（可单测）：创建/改名落入 = 到达；
+/// 删除 = 消失 + 触发重扫（改名会先发 Remove 旧路径，新路径由到达补建）；
+/// 内容修改只触发重扫；Access 等高频无语义事件忽略以免无谓刷新。
+fn classify_event(event: &notify::Event) -> Vec<WatchSignal> {
+    match event.kind {
+        EventKind::Create(_) | EventKind::Modify(ModifyKind::Name(_)) => {
+            if event.paths.is_empty() {
+                Vec::new()
+            } else {
+                vec![WatchSignal::Arrived(event.paths.clone())]
+            }
+        }
+        EventKind::Remove(_) => {
+            let mut signals = Vec::new();
+            if !event.paths.is_empty() {
+                signals.push(WatchSignal::Vanished(event.paths.clone()));
+            }
+            signals.push(WatchSignal::Changed);
+            signals
+        }
+        EventKind::Modify(_) => vec![WatchSignal::Changed],
+        EventKind::Access(_) | EventKind::Other | EventKind::Any => Vec::new(),
+    }
+}
+
+/// 跨 tick 的信号聚合（可单测）：防抖窗口内到达按路径合并；消失与先前的
+/// 到达相互抵消（同一文件窗口内到了又走，不应补建入库记录），消失路径
+/// 单独收集。冲刷一次取空两组路径。
+#[derive(Default)]
+struct SignalAccumulator {
+    arrived: HashSet<PathBuf>,
+    vanished: HashSet<PathBuf>,
+}
+
+impl SignalAccumulator {
+    fn absorb(&mut self, signal: WatchSignal) {
+        match signal {
+            WatchSignal::Arrived(paths) => {
+                for path in paths {
+                    self.arrived.insert(path);
+                }
+            }
+            WatchSignal::Vanished(paths) => {
+                for path in paths {
+                    self.arrived.remove(&path);
+                    self.vanished.insert(path);
+                }
+            }
+            WatchSignal::Changed => {}
+        }
+    }
+
+    /// 冲刷：返回（消失, 到达）两组路径并清空。
+    fn take_flush(&mut self) -> (Vec<PathBuf>, Vec<PathBuf>) {
+        (self.vanished.drain().collect(), self.arrived.drain().collect())
+    }
+}
+
 pub fn spawn<R: Runtime>(app: &AppHandle<R>) {
     let app = app.clone();
     std::thread::spawn(move || {
@@ -73,8 +131,7 @@ fn watch_loop<R: Runtime>(app: AppHandle<R>) {
     let mut next_resolve = Instant::now();
     // 新出现/消失的文件跨 tick 累积：事件与防抖结束往往不在同一个
     // 200ms tick 里，集合必须活到防抖触发被消费为止。
-    let mut arrived_paths: HashSet<PathBuf> = HashSet::new();
-    let mut vanished_paths: HashSet<PathBuf> = HashSet::new();
+    let mut accumulator = SignalAccumulator::default();
 
     loop {
         // 跟进资源库目录变化（含首次解析）。
@@ -123,20 +180,7 @@ fn watch_loop<R: Runtime>(app: AppHandle<R>) {
         let mut saw_event = false;
         while let Ok(signal) = event_rx.try_recv() {
             saw_event = true;
-            match signal {
-                WatchSignal::Arrived(paths) => {
-                    for path in paths {
-                        arrived_paths.insert(path);
-                    }
-                }
-                WatchSignal::Vanished(paths) => {
-                    for path in paths {
-                        arrived_paths.remove(&path);
-                        vanished_paths.insert(path);
-                    }
-                }
-                WatchSignal::Changed => {}
-            }
+            accumulator.absorb(signal);
         }
         if saw_event {
             last_event = Some(Instant::now());
@@ -144,13 +188,12 @@ fn watch_loop<R: Runtime>(app: AppHandle<R>) {
         if let Some(at) = last_event {
             if at.elapsed() >= DEBOUNCE {
                 last_event = None;
+                let (vanished_paths, arrived_paths) = accumulator.take_flush();
                 if !vanished_paths.is_empty() {
-                    let paths: Vec<PathBuf> = vanished_paths.drain().collect();
-                    db::forget_resource_records(&app, &paths);
+                    db::forget_resource_records(&app, &vanished_paths);
                 }
                 if !arrived_paths.is_empty() {
-                    let paths: Vec<PathBuf> = arrived_paths.drain().collect();
-                    db::discover_external_resource_files(&app, &paths);
+                    db::discover_external_resource_files(&app, &arrived_paths);
                 }
                 // 修订号随冲刷自增：即使 resource-groups-changed 事件被
                 // WebView 丢弃，前端心跳比对也能发现落后并自愈。
@@ -171,31 +214,105 @@ fn build_watcher(
         let tx = event_tx.clone();
         move |result: Result<notify::Event, notify::Error>| {
             if let Ok(event) = result {
-                match event.kind {
-                    // 「新出现的文件路径」（创建 / 改名落入监听目录）：按
-                    // 发现时间补建入库记录，使其在「全部」列表置顶。
-                    EventKind::Create(_) | EventKind::Modify(ModifyKind::Name(_)) => {
-                        if !event.paths.is_empty() {
-                            let _ = tx.send(WatchSignal::Arrived(event.paths.clone()));
-                        }
-                    }
-                    // 删除：按路径移除记录（改名也会先发 Remove 旧路径，
-                    // 新路径由 Arrived 补建），并触发重扫刷新。
-                    EventKind::Remove(_) => {
-                        if !event.paths.is_empty() {
-                            let _ = tx.send(WatchSignal::Vanished(event.paths.clone()));
-                        }
-                        let _ = tx.send(WatchSignal::Changed);
-                    }
-                    // 内容修改不影响置顶语义，但必须触发重扫刷新，
-                    // 否则文件管理器里改动内容后界面永远不更新。
-                    EventKind::Modify(_) => {
-                        let _ = tx.send(WatchSignal::Changed);
-                    }
-                    // Access 等事件高频且无业务语义，忽略以免无谓刷新。
-                    EventKind::Access(_) | EventKind::Other | EventKind::Any => {}
+                for signal in classify_event(&event) {
+                    let _ = tx.send(signal);
                 }
             }
         }
     })
+}
+
+#[cfg(test)]
+mod resource_watch_tests {
+    use super::*;
+    use std::path::Path;
+
+    fn event(kind: EventKind, paths: &[&str]) -> notify::Event {
+        let mut event = notify::Event::new(kind);
+        event.paths = paths.iter().map(Path::new).map(PathBuf::from).collect();
+        event
+    }
+
+    fn single(signal: Option<WatchSignal>) -> WatchSignal {
+        signal.expect("expected one signal")
+    }
+
+    #[test]
+    fn create_and_rename_arrivals_map_to_arrived() {
+        let created = classify_event(&event(
+            EventKind::Create(notify::event::CreateKind::File),
+            &["/lib/new.png"],
+        ));
+        assert!(matches!(single(created.into_iter().next()), WatchSignal::Arrived(_)));
+
+        let renamed = classify_event(&event(
+            EventKind::Modify(ModifyKind::Name(notify::event::RenameMode::To)),
+            &["/lib/renamed.txt"],
+        ));
+        assert!(matches!(single(renamed.into_iter().next()), WatchSignal::Arrived(_)));
+    }
+
+    #[test]
+    fn removal_emits_vanished_then_rescan() {
+        let signals = classify_event(&event(
+            EventKind::Remove(notify::event::RemoveKind::File),
+            &["/lib/gone.png"],
+        ));
+        assert_eq!(signals.len(), 2);
+        assert!(matches!(&signals[0], WatchSignal::Vanished(p) if p == &vec![PathBuf::from("/lib/gone.png")]));
+        assert!(matches!(signals[1], WatchSignal::Changed));
+    }
+
+    #[test]
+    fn content_modify_only_triggers_rescan() {
+        let signals = classify_event(&event(
+            EventKind::Modify(ModifyKind::Data(notify::event::DataChange::Any)),
+            &["/lib/a.md"],
+        ));
+        assert_eq!(signals.len(), 1);
+        assert!(matches!(signals[0], WatchSignal::Changed));
+    }
+
+    #[test]
+    fn access_and_other_events_are_ignored() {
+        assert!(classify_event(&event(
+            EventKind::Access(notify::event::AccessKind::Read),
+            &["/lib/a.md"],
+        ))
+        .is_empty());
+        assert!(classify_event(&event(EventKind::Other, &[])).is_empty());
+    }
+
+    #[test]
+    fn vanished_cancels_arrival_within_debounce_window() {
+        // 同一文件窗口内到了又走：不应补建入库（arrived 为空），
+        // 只按消失处理。
+        let mut acc = SignalAccumulator::default();
+        acc.absorb(WatchSignal::Arrived(vec![PathBuf::from("/lib/new.png")]));
+        acc.absorb(WatchSignal::Vanished(vec![PathBuf::from("/lib/new.png")]));
+
+        let (vanished, arrived) = acc.take_flush();
+        assert!(arrived.is_empty());
+        assert_eq!(vanished, vec![PathBuf::from("/lib/new.png")]);
+    }
+
+    #[test]
+    fn flush_drains_paths_exactly_once_and_merges_duplicates() {
+        let mut acc = SignalAccumulator::default();
+        acc.absorb(WatchSignal::Arrived(vec![PathBuf::from("/lib/a.png")]));
+        acc.absorb(WatchSignal::Arrived(vec![
+            PathBuf::from("/lib/a.png"),
+            PathBuf::from("/lib/b.png"),
+        ]));
+
+        let (vanished, arrived) = acc.take_flush();
+        assert!(vanished.is_empty());
+        let mut names: Vec<_> = arrived.iter().map(|p| p.file_name().unwrap().to_string_lossy().to_string()).collect();
+        names.sort();
+        assert_eq!(names, vec!["a.png", "b.png"]);
+
+        // 冲刷后清空：再次冲刷不重复上报。
+        let (vanished, arrived) = acc.take_flush();
+        assert!(vanished.is_empty() && arrived.is_empty());
+    }
 }
