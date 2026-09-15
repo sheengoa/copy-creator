@@ -3334,6 +3334,8 @@ mod group_scan_tests {
 }
 
 #[cfg(test)]
+// 用例断言 Windows 路径语义（盘符、反斜杠、大小写不敏感），仅 Windows 有意义。
+#[cfg(windows)]
 mod managed_path_tests {
     use crate::db::path_within_any;
     use std::path::{Path, PathBuf};
