@@ -1,5 +1,13 @@
-// Windows 低级键盘钩子（A2 拆分，cfg(windows)）：抢在系统热键前识别
-// 含 Win 修饰键的自定义快捷键并分发。从 shortcut.rs 机械搬迁。
+// ---- Windows low-level keyboard hook ----
+//
+// Windows 系统组件通过 RegisterHotKey 永久占用 Win+V(剪贴板历史面板)与
+// Win+B(托盘"显示隐藏图标")等组合,普通应用的 RegisterHotKey 调用必然
+// 失败。低级键盘钩子在系统热键处理之前运行,且后安装的钩子先被调用,因此
+// 这里抢先识别含 Win 修饰键的快捷键、吞掉按键并分发给对应窗口,其余按键
+// 全部原样放行。Win 键本身按下/抬起均放行;拦截组合键后由分发线程注入
+// 一次 Ctrl 点按,避免之后的 Win 抬起被系统当成"裸 Win 按键"弹出开始菜单
+// (见 inject_ctrl_tap)。
+// （A2 拆分：本模块自 shortcut.rs 机械搬迁，cfg(windows)。）
 
 use crate::shortcut::{show_clipboard_create, show_radial_menu, toggle_window};
 use std::sync::atomic::{AtomicI32, Ordering};

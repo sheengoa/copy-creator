@@ -313,6 +313,19 @@ describe("clipboardStore full record loading", () => {
     });
   });
 
+  it("keeps the resource group when the clipboard category filter changes", () => {
+    // A9 回归锚点：剪切板类别筛选（setCategory）不得重置资源面板的
+    // 分组浏览位置——分组选中态以 store 为单一来源后跨面板必须存活。
+    useClipboardStore.setState({ category: "resources", resourceGroup: "References" });
+
+    useClipboardStore.getState().setCategory("image");
+    expect(useClipboardStore.getState().resourceGroup).toBe("References");
+
+    // 切回资源类别后原分组仍在，页面据此恢复浏览位置。
+    useClipboardStore.getState().setCategory("resources");
+    expect(useClipboardStore.getState().resourceGroup).toBe("References");
+  });
+
   it("keeps the selected resource group for refresh and pagination", async () => {
     const resourceRecord = {
       id: "resource-1",

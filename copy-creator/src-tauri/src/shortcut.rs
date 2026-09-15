@@ -92,6 +92,9 @@ mod shortcut_matching_tests {
     }
 }
 
+/// Restore the radial-menu enabled flag from the database and log the
+/// platform capabilities.  Linux does not have global mouse hooks, so
+/// the radial menu is driven exclusively by the keyboard shortcut.
 pub fn init_radial_menu_state(app: &AppHandle) {
     if let Ok(val) = crate::db::get_setting(app.clone(), "radial_menu_enabled".to_string()) {
         set_radial_menu_enabled_flag(val == "1");
@@ -315,16 +318,6 @@ pub fn refresh_win_hook_combos(app: &AppHandle) {
     #[cfg(not(target_os = "windows"))]
     let _ = app;
 }
-
-// ---- Windows low-level keyboard hook ----
-//
-// Windows 系统组件通过 RegisterHotKey 永久占用 Win+V(剪贴板历史面板)与
-// Win+B(托盘"显示隐藏图标")等组合,普通应用的 RegisterHotKey 调用必然
-// 失败。低级键盘钩子在系统热键处理之前运行,且后安装的钩子先被调用,因此
-// 这里抢先识别含 Win 修饰键的快捷键、吞掉按键并分发给对应窗口,其余按键
-// 全部原样放行。Win 键本身按下/抬起均放行;拦截组合键后由分发线程注入
-// 一次 Ctrl 点按,避免之后的 Win 抬起被系统当成"裸 Win 按键"弹出开始菜单
-// (见 inject_ctrl_tap)。
 
 // ── A2 拆分：窗口域各归其位 ────────────────────────────────
 // 径向窗口 / 粘贴创建窗口 / Windows 键盘钩子分别独立成文件；

@@ -783,10 +783,6 @@ pub fn show_radial_menu(app: &AppHandle) {
     }
 }
 
-// ---- clipboard create dialog ----
-
-// 窗口尺寸均含透明阴影边距（见文件顶部"窗口层级约定"注释）。
-
 #[cfg(test)]
 mod tests {
     use super::clamp_position_into_work_area;

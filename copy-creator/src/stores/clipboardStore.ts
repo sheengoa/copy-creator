@@ -359,7 +359,9 @@ export function createRecordsStore() {
     },
     setCategory: (c) => {
       recordsLoadGeneration++;
-      set({ category: c, resourceGroup: null });
+      // 不清 resourceGroup：剪切板类别筛选不应重置资源面板的分组浏览
+      // 位置（跨面板保活），非 resources 类别的各消费方本就不读该字段。
+      set({ category: c });
     },
     setResourceGroup: (group) => {
       recordsLoadGeneration++;

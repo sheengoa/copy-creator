@@ -464,7 +464,6 @@ describe("integration regressions", () => {
     expect(detailPageSource).toContain("<ResourceImage");
     expect(detailPageSource).toContain("getResourcePath");
     const mediaSource = readSource("../pages/ResourcePage/ResourceMedia.tsx");
-    const resourceStyles = readSource("../styles/resource.css");
     expect(mediaSource).toContain('openResourceFile(path)');
     expect(mediaSource).toContain('errorName !== "AbortError"');
     expect(mediaSource).toContain("if (failed || mediaFailed)");
