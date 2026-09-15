@@ -1,5 +1,6 @@
 mod autostart;
 mod clipboard;
+mod clipboard_create_window;
 mod db;
 #[cfg(target_os = "linux")]
 mod ipc;
@@ -8,9 +9,12 @@ mod media_server;
 mod media_types_generated;
 mod paste;
 mod radial_drag;
+mod radial_window;
 mod resource_watch;
 mod shortcut;
 mod tray;
+#[cfg(target_os = "windows")]
+mod win_hook;
 
 use tauri::{Emitter, Manager};
 

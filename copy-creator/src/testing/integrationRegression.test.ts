@@ -23,6 +23,17 @@ const DB_SOURCE_FILES = [
 const readDbSource = () =>
   DB_SOURCE_FILES.map((file) => readSource(`../../src-tauri/src/db/${file}`)).join("\n");
 
+// shortcut 模块已按窗口域拆分（shortcut / radial_window /
+// clipboard_create_window / win_hook）；守卫断言统一读拼接源。
+const SHORTCUT_SOURCE_FILES = [
+  "shortcut.rs",
+  "radial_window.rs",
+  "clipboard_create_window.rs",
+  "win_hook.rs",
+] as const;
+const readShortcutSource = () =>
+  SHORTCUT_SOURCE_FILES.map((file) => readSource(`../../src-tauri/src/${file}`)).join("\n");
+
 describe("integration regressions", () => {
   it("does not re-show hidden windows from delayed raise paths", () => {
     const libSource = readSource("../../src-tauri/src/lib.rs");
@@ -33,7 +44,7 @@ describe("integration regressions", () => {
     expect(delayedMainBlock).not.toContain(".show()");
     expect(delayedMainBlock).toContain("is_visible()");
 
-    const shortcutSource = readSource("../../src-tauri/src/shortcut.rs");
+    const shortcutSource = readShortcutSource();
     expect(shortcutSource).not.toContain("refresh_always_on_top_if_visible");
     expect(shortcutSource).not.toContain("Duration::from_millis(60)");
     expect(shortcutSource).toContain("raise_always_on_top(&radial);");
@@ -51,7 +62,7 @@ describe("integration regressions", () => {
   });
 
   it("keeps a visible radial menu above the clipboard create dialog", () => {
-    const shortcutSource = readSource("../../src-tauri/src/shortcut.rs");
+    const shortcutSource = readShortcutSource();
     const libSource = readSource("../../src-tauri/src/lib.rs");
     const createBlock = shortcutSource.slice(
       shortcutSource.indexOf("pub fn show_clipboard_create"),
@@ -69,8 +80,9 @@ describe("integration regressions", () => {
       popupRaiseBlock.indexOf("raise_always_on_top(&radial)"),
     );
     // Linux 常驻模型下径向窗口 is_visible 恒为 true，抬升前必须查显示
-    // 状态标志（否则会把停泊在屏幕外的窗口抬升并抢焦点）。
-    expect(shortcutSource).toContain("let radial_shown = RADIAL_MENU_SHOWN.load(Ordering::SeqCst);");
+    // 状态标志（否则会把停泊在屏幕外的窗口抬升并抢焦点）；标志读写统一
+    // 走 radial_window 的收敛入口（A3）。
+    expect(shortcutSource).toContain("let radial_shown = radial_menu_shown();");
     expect(createBlock).toContain("raise_visible_popup_windows(app);");
     expect(libSource).toContain("shortcut::has_visible_popup_window(app)");
     expect(libSource).toContain("shortcut::raise_visible_popup_windows(&app_handle)");
@@ -314,7 +326,7 @@ describe("integration regressions", () => {
     expect(radialCssSource).toContain("radial-menu-closing");
     expect(radialCssSource).toContain("radial-main-out");
     expect(radialCssSource).toContain(".radial-menu-hidden .radial-menu-main");
-    const radialMenuGtk = readSource("../../src-tauri/src/shortcut.rs");
+    const radialMenuGtk = readShortcutSource();
     expect(radialMenuGtk).toContain("fn park_radial_window");
     expect(radialMenuGtk).toContain("RADIAL_MENU_SHOWN");
     expect(radialMenuGtk).toContain("x11_focus_toplevel_xid");
@@ -589,7 +601,7 @@ describe("integration regressions", () => {
   it("expands the radial preview without any window geometry change", () => {
     const radialStyles = readSource("../styles/radial-menu.css");
     const radialMenu = readSource("../components/RadialMenu/index.tsx");
-    const shortcutSource = readSource("../../src-tauri/src/shortcut.rs");
+    const shortcutSource = readShortcutSource();
     const libSource = readSource("../../src-tauri/src/lib.rs");
 
     // 前端展开/收起路径不得再出现任何窗口几何操作。
@@ -691,7 +703,7 @@ describe("integration regressions", () => {
   it("starts Linux file drags from the top-level GTK window", () => {
     const dragSource = readSource("../../src-tauri/src/radial_drag.rs");
     const libSource = readSource("../../src-tauri/src/lib.rs");
-    const shortcutSource = readSource("../../src-tauri/src/shortcut.rs");
+    const shortcutSource = readShortcutSource();
     const radialMenu = readSource("../components/RadialMenu/index.tsx");
     const pageSource = readSource("../pages/ClipboardPage/index.tsx");
     const cardSource = readSource("../pages/ClipboardPage/ClipboardCard.tsx");
