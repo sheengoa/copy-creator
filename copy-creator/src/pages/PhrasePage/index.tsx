@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { useTranslation } from "react-i18next";
 import { useShallow } from "zustand/react/shallow";
-import { resolveResourceMediaUrl } from "../../domain/mediaUrl";
+import { getResourceFileThumbnail } from "../../domain/mediaAssets";
 import { useRefreshOnShow } from "../../hooks/useRefreshOnShow";
 import {
   usePhraseStore,
@@ -316,10 +316,13 @@ export default function PhrasePage() {
     setPhraseFileName(p.input_type === "file" ? fileNameFromPath(p.source_path || p.content) : "");
     setPhraseFileSize(p.input_type === "file" ? p.file_size : 0);
     // 编辑时仅预览原文件（source_path 为原始绝对路径）；不写入 phraseFilePath，
-    // 避免保存时被误当作"更换文件"。
+    // 避免保存时被误当作"更换文件"。48px 小预览直接走缩略图命令（用户自选
+    // 路径属该命令的设计范围），无需为小图加载原图。
     const sourcePath = p.source_path || p.content;
     if (p.input_type === "file" && isImageFilePath(sourcePath)) {
-      void resolveResourceMediaUrl(sourcePath).then(setPhraseFilePreviewSrc);
+      void getResourceFileThumbnail(sourcePath, 256)
+        .then((base64) => setPhraseFilePreviewSrc(`data:image/png;base64,${base64}`))
+        .catch(() => setPhraseFilePreviewSrc(null));
     } else {
       setPhraseFilePreviewSrc(null);
     }
@@ -334,7 +337,10 @@ export default function PhrasePage() {
     setPhraseFileName(fileName);
     setPhraseFileSize(file.file_size);
     if (isImageFilePath(file.path)) {
-      void resolveResourceMediaUrl(file.path).then(setPhraseFilePreviewSrc);
+      // 刚挑选、尚未保存的文件不在任何记录里，同样走缩略图命令。
+      void getResourceFileThumbnail(file.path, 256)
+        .then((base64) => setPhraseFilePreviewSrc(`data:image/png;base64,${base64}`))
+        .catch(() => setPhraseFilePreviewSrc(null));
     } else {
       setPhraseFilePreviewSrc(null);
     }

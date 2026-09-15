@@ -496,6 +496,21 @@ mod media_server_http_tests {
                      last_used_at TEXT DEFAULT '',
                      use_count INTEGER DEFAULT 0,
                      touched_ms INTEGER DEFAULT 0
+                 );
+                 CREATE TABLE phrases (
+                     id TEXT PRIMARY KEY,
+                     group_id TEXT NOT NULL DEFAULT '',
+                     title TEXT NOT NULL DEFAULT '',
+                     content TEXT NOT NULL DEFAULT '',
+                     input_type TEXT DEFAULT 'text',
+                     source_path TEXT DEFAULT '',
+                     file_size INTEGER DEFAULT 0,
+                     sort_order REAL,
+                     created_at TEXT NOT NULL,
+                     updated_at TEXT NOT NULL,
+                     last_used_at TEXT DEFAULT '',
+                     use_count INTEGER DEFAULT 0,
+                     touched_ms INTEGER DEFAULT 0
                  );",
             )
             .unwrap();

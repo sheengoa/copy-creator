@@ -3377,8 +3377,9 @@ mod recorded_file_path_tests {
     use std::sync::Mutex;
     use tauri::Manager;
 
-    /// 内存库 + mock app：clipboard_records 与生产 schema 同列
-    /// （is_recorded_file_path 只依赖 content / resource_path / attachments）。
+    /// 内存库 + mock app：clipboard_records / phrases 与生产 schema 同列
+    /// （is_recorded_file_path 只依赖 content / resource_path / attachments
+    /// 与 phrases.source_path）。
     fn app_with_records(rows: &[(&str, &str, &str)]) -> tauri::App<tauri::test::MockRuntime> {
         let app = tauri::test::mock_app();
         let conn = rusqlite::Connection::open_in_memory().unwrap();
@@ -3397,6 +3398,21 @@ mod recorded_file_path_tests {
                  resource_path TEXT DEFAULT '',
                  resource_note TEXT DEFAULT '',
                  resource_external INTEGER DEFAULT 0,
+                 last_used_at TEXT DEFAULT '',
+                 use_count INTEGER DEFAULT 0,
+                 touched_ms INTEGER DEFAULT 0
+             );
+             CREATE TABLE phrases (
+                 id TEXT PRIMARY KEY,
+                 group_id TEXT NOT NULL DEFAULT '',
+                 title TEXT NOT NULL DEFAULT '',
+                 content TEXT NOT NULL DEFAULT '',
+                 input_type TEXT DEFAULT 'text',
+                 source_path TEXT DEFAULT '',
+                 file_size INTEGER DEFAULT 0,
+                 sort_order REAL,
+                 created_at TEXT NOT NULL,
+                 updated_at TEXT NOT NULL,
                  last_used_at TEXT DEFAULT '',
                  use_count INTEGER DEFAULT 0,
                  touched_ms INTEGER DEFAULT 0
@@ -3478,6 +3494,33 @@ mod recorded_file_path_tests {
         assert!(!is_recorded_file_path(
             app.handle(),
             r"d:\downloads\design.pngx"
+        ));
+    }
+
+    /// 文件快捷输入的源路径（phrases.source_path，用户挑选文件时的原始
+    /// 位置）也算记录在案：编辑对话框预览的就是这个路径。
+    #[test]
+    fn allows_phrase_source_paths() {
+        let app = app_with_records(&[]);
+        {
+            let state = app.state::<DbState>();
+            let conn = state.conn.lock().unwrap();
+            conn.execute(
+                "INSERT INTO phrases (id, group_id, title, content, input_type, source_path, created_at, updated_at)
+                 VALUES ('p1', 'g', '短语', 'quick-input-files/p1.png', 'file', ?1, '2026-09-15T00:00:00Z', '2026-09-15T00:00:00Z')",
+                [r"D:\downloads\即梦生成图.png"],
+            )
+            .unwrap();
+        }
+
+        assert!(is_recorded_file_path(
+            app.handle(),
+            r"D:\downloads\即梦生成图.png"
+        ));
+        // phrases 表存在时未记录路径仍须拒绝（不因表存在而误放行）。
+        assert!(!is_recorded_file_path(
+            app.handle(),
+            r"D:\downloads\未挑选的文件.png"
         ));
     }
 

@@ -525,12 +525,13 @@ pub fn get_clipboard_record_content(app: AppHandle, id: String) -> Result<String
     .map_err(|e| e.to_string())
 }
 
-/// 判断路径是否已被某条剪切板记录在案（content / resource_path / attachments
-/// 元素精确匹配，英文字母不区分大小写）。媒体服务白名单的补充例外：剪切板
-/// 采集的文件记录可以指向管理目录之外的任意位置（用户复制文件的原始位置），
-/// 应用既有能力就是展示与粘贴这些文件（paste 路径同样无目录限制）；媒体
-/// 服务据此前提放行"记录在案"的路径。必须是全等比较——子串匹配会让注入者
-/// 用短路径轻松命中记录，白名单形同虚设。
+/// 判断路径是否已被应用记录在案：剪切板记录（content / resource_path /
+/// attachments 元素）或文件快捷输入的源路径（phrases.source_path，用户
+/// 挑选文件时的原始位置），精确匹配、英文字母不区分大小写。媒体服务
+/// 白名单的补充例外：这些记录可以指向管理目录之外的任意位置，展示与
+/// 粘贴它们本就是应用既有能力（paste 路径同样无目录限制）；媒体服务据
+/// 此前提放行"记录在案"的路径。必须是全等比较——子串匹配会让注入者用
+/// 短路径轻松命中记录，白名单形同虚设。
 pub(crate) fn is_recorded_file_path<R: Runtime>(app: &AppHandle<R>, path: &str) -> bool {
     if path.is_empty() {
         return false;
@@ -545,12 +546,14 @@ pub(crate) fn is_recorded_file_path<R: Runtime>(app: &AppHandle<R>, path: &str) 
     let content_hit = conn
         .query_row(
             "SELECT EXISTS(SELECT 1 FROM clipboard_records
-                 WHERE content = ?1 COLLATE NOCASE OR resource_path = ?1 COLLATE NOCASE)",
+                 WHERE content = ?1 COLLATE NOCASE OR resource_path = ?1 COLLATE NOCASE)
+              + EXISTS(SELECT 1 FROM phrases
+                 WHERE input_type = 'file' AND source_path = ?1 COLLATE NOCASE)",
             params![path],
             |row| row.get::<_, i64>(0),
         )
         .unwrap_or(0);
-    if content_hit == 1 {
+    if content_hit > 0 {
         return true;
     }
     let attachments_in_db = || -> Result<Vec<String>, rusqlite::Error> {
