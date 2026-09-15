@@ -14,7 +14,8 @@
     "typecheck": "tsc -b",
     "tauri": "tauri",
     "gen:media-types": "node ../scripts/generate-media-types.mjs",
-    "gen:check": "node ../scripts/generate-media-types.mjs --check"
+    "gen:check": "node ../scripts/generate-media-types.mjs --check",
+    "release": "node scripts/release.mjs"
   },
   "dependencies": {
     "@dnd-kit/core": "^6.3.1",

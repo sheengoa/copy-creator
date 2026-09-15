@@ -505,11 +505,17 @@ describe("integration regressions", () => {
     expect(dbSource).toContain("fn set_resource_note");
     expect(resourceStyles).toContain(".resource-detail-stage-audio .resource-media-player");
     expect(resourceStyles).toContain("height: 40px");
-    expect(config.app.security.csp).toContain(
-      "media-src 'self' asset: http://asset.localhost https://asset.localhost http://127.0.0.1:* data: blob:",
-    );
-    // Windows 的 asset 协议走 http scheme，img-src 必须放行 http://asset.localhost
-    expect(config.app.security.csp).toContain("img-src 'self' asset: http://asset.localhost");
+    // CSP 收紧（E7）：不再放行任意 https 外联；asset 协议已停用，
+    // 媒体一律经本机 media server（127.0.0.1）或 data/blob URL 加载。
+    expect(config.app.security.csp).not.toContain("https:");
+    expect(config.app.security.csp).toContain("media-src 'self' data: blob: http://127.0.0.1:*");
+    expect(config.app.security.assetProtocol.enable).toBe(false);
+    // ctl 脚本随安装包分发（F1 收尾）。
+    expect(config.bundle.resources).toEqual({ "../scripts/copy-creator-ctl": "copy-creator-ctl" });
+    // 发布产物与 GitHub Releases 四件套一致（E8）。
+    expect(config.bundle.targets).toEqual(["appimage", "deb", "nsis", "msi"]);
+    // asset 协议已停用（E7），img-src 只放行自身、内联数据与本机 media server。
+    expect(config.app.security.csp).toContain("img-src 'self' data: blob: http://127.0.0.1:*");
     expect(config.app.security.csp).not.toContain("media-src *");
   });
 

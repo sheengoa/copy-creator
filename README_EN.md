@@ -110,7 +110,7 @@ sudo dpkg -i copy-creator_*.deb
    | Copy Creator — Window | `path/to/copy-creator-ctl show` | `Ctrl+Shift+V` |
    | Copy Creator — Radial Menu | `path/to/copy-creator-ctl radial` | `Ctrl+Shift+B` |
 
-   > The `copy-creator-ctl` script ships with the source repository (`copy-creator/scripts/copy-creator-ctl`) and is not yet bundled in installers; copy it from the repository to `~/.local/bin/` to use it directly.
+   > The `copy-creator-ctl` script ships with the installers (under the install prefix at `resources/copy-creator-ctl`); you can also copy it from the repository (`copy-creator/scripts/copy-creator-ctl`) to `~/.local/bin/` to use it directly.
 
 4. **Quick Menu**: trigger the radial-menu shortcut to open a quick panel at the mouse cursor, with Clipboard / Quick Input / Resources tabs for fast selection and pasting
 
