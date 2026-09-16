@@ -1749,6 +1749,9 @@ pub fn sync_resource_library<R: Runtime>(app: &AppHandle<R>) -> usize {
 }
 
 /// 按路径移除资源记录（监听到外部删除时调用）：文件不在，记录不留。
+/// 目录型路径连带整棵子树——外部删除/移出目录时事件只报目录本身，
+/// 旧实现精确匹配会让目录下全部记录变成孤儿（分组 0 条、详情 404）。
+/// 路径比较经组件级前缀匹配，分隔符与尾部形态差异不影响命中。
 pub fn forget_resource_records<R: Runtime>(app: &AppHandle<R>, paths: &[PathBuf]) {
     if paths.is_empty() {
         return;
@@ -1758,18 +1761,29 @@ pub fn forget_resource_records<R: Runtime>(app: &AppHandle<R>, paths: &[PathBuf]
         return;
     };
     let Ok(mut stmt) = conn.prepare(
-        "SELECT id FROM clipboard_records
-         WHERE COALESCE(storage_mode, 'database') = 'resource' AND resource_path = ?1",
+        "SELECT id, resource_path FROM clipboard_records
+         WHERE COALESCE(storage_mode, 'database') = 'resource'
+           AND COALESCE(resource_path, '') <> ''",
     ) else {
         return;
     };
-    for path in paths {
-        let path_text = path.to_string_lossy().to_string();
-        let Ok(rows) = stmt.query_map(params![path_text], |row| row.get::<_, String>(0)) else {
-            continue;
-        };
-        let ids: Vec<String> = rows.flatten().collect();
-        for id in ids {
+    let rows: Vec<(String, PathBuf)> = match stmt.query_map([], |row| {
+        Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
+    }) {
+        Ok(rows) => rows
+            .flatten()
+            .map(|(id, path)| (id, PathBuf::from(&path)))
+            .collect(),
+        Err(_) => return,
+    };
+    drop(stmt);
+    let missing_keys: Vec<PathBuf> = paths.iter().map(|path| watch_path_key(path)).collect();
+    for (id, resource_path) in rows {
+        let key = watch_path_key(&resource_path);
+        if missing_keys
+            .iter()
+            .any(|missing| key == *missing || key.starts_with(missing))
+        {
             let _ = conn.execute("DELETE FROM api_key_labels WHERE record_id = ?1", params![id]);
             let _ = conn.execute("DELETE FROM clipboard_records WHERE id = ?1", params![id]);
         }
@@ -1828,36 +1842,245 @@ pub fn discover_external_resource_files<R: Runtime>(
     }
     drop(stmt);
     for path in paths {
-        if !path.is_file() || !path.starts_with(&root) {
+        if !path.starts_with(&root) {
             continue;
         }
-        // 与扫描同一套忽略规则：应用自身的附件、临时文件与 thumbs/ 派生
-        // 缓存不是内容，否则保存图文暂存或缩略图生成时会被当作新放入
-        // 置顶成独立资源条目。
-        if path_inside_ignored_dir(path) || is_ignored_resource_file(path) {
-            continue;
-        }
-        let path_text = path.to_string_lossy().to_string();
-        if by_path.contains_key(&resource_path_key(path)) {
-            continue;
-        }
-        let id = resource_file_id(path);
-        match conn.execute(
-            "INSERT OR IGNORE INTO clipboard_records
-             (id, type, content, source_app, created_at, storage_mode, resource_path,
-              sort_order, use_count, resource_external)
-             VALUES (?1, 'file', ?2, '', ?3, 'resource', ?2, ?4, 0, 1)",
-            params![id, path_text, &now, now_ms],
-        ) {
-            Err(error) => {
-                log::warn!("外部移入文件补建入库失败 {}: {error}", path.display());
+        // 目录到达（外部整目录移入/复制进来，rename 目标）时递归补建
+        // 全部内容——事件只报目录本身，子文件不会再有独立事件，不递归
+        // 就要等下次启动对账才能被发现。
+        if path.is_dir() {
+            if path_inside_ignored_dir(path) {
+                continue;
             }
-            Ok(_) => {
-                by_path.insert(resource_path_key(path), id);
-                log::info!("外部移入文件已按发现时间入库置顶: {}", path.display());
+            for file in collect_resource_files_under(path) {
+                insert_external_resource_file(&conn, &mut by_path, &root, &file, &now, now_ms);
+            }
+            continue;
+        }
+        insert_external_resource_file(&conn, &mut by_path, &root, path, &now, now_ms);
+    }
+}
+
+/// 单个外部文件按发现时间补建入库；已存在记录、库外路径与忽略文件跳过。
+fn insert_external_resource_file(
+    conn: &Connection,
+    by_path: &mut HashMap<PathBuf, String>,
+    root: &Path,
+    path: &Path,
+    now: &str,
+    now_ms: i64,
+) {
+    if !path.is_file() || !path.starts_with(root) {
+        return;
+    }
+    // 与扫描同一套忽略规则：应用自身的附件、临时文件与 thumbs/ 派生
+    // 缓存不是内容，否则保存图文暂存或缩略图生成时会被当作新放入
+    // 置顶成独立资源条目。
+    if path_inside_ignored_dir(path) || is_ignored_resource_file(path) {
+        return;
+    }
+    let path_text = path.to_string_lossy().to_string();
+    if by_path.contains_key(&resource_path_key(path)) {
+        return;
+    }
+    let id = resource_file_id(path);
+    match conn.execute(
+        "INSERT OR IGNORE INTO clipboard_records
+         (id, type, content, source_app, created_at, storage_mode, resource_path,
+          sort_order, use_count, resource_external)
+         VALUES (?1, 'file', ?2, '', ?3, 'resource', ?2, ?4, 0, 1)",
+        params![id, path_text, now, now_ms],
+    ) {
+        Err(error) => {
+            log::warn!("外部移入文件补建入库失败 {}: {error}", path.display());
+        }
+        Ok(_) => {
+            by_path.insert(resource_path_key(path), id);
+            log::info!("外部移入文件已按发现时间入库置顶: {}", path.display());
+        }
+    }
+}
+
+/// 递归收集目录下的资源文件路径（对齐扫描语义：跳过 `.copy-creator`、
+/// `thumbs` 派生目录与临时/隐藏文件）。只回路径不取元数据——补建走
+/// 发现时间，排序结果做稳定处理便于测试断言。
+fn collect_resource_files_under(directory: &Path) -> Vec<PathBuf> {
+    let mut files: Vec<PathBuf> = Vec::new();
+    let mut stack = vec![directory.to_path_buf()];
+    while let Some(dir) = stack.pop() {
+        let Ok(read_dir) = std::fs::read_dir(&dir) else {
+            continue;
+        };
+        for entry in read_dir.flatten() {
+            let path = entry.path();
+            let Ok(file_type) = entry.file_type() else {
+                continue;
+            };
+            if file_type.is_dir() {
+                if is_ignored_resource_dir(&entry.file_name()) {
+                    continue;
+                }
+                stack.push(path);
+            } else if file_type.is_file() && !is_ignored_resource_file(&path) {
+                files.push(path);
             }
         }
     }
+    files.sort();
+    files
+}
+
+/// 监听结算专用的路径比较键：只做组件规范化与 `\\?\` 前缀还原，不走
+/// canonicalize——消失路径已无法 canonicalize，混用两种形态会让前缀
+/// 匹配失效。事件路径与记录路径同源于 `get_resource_library_dir`，
+/// 形态一致，直接组件比较即可。
+fn watch_path_key(path: &Path) -> PathBuf {
+    simplify_windows_path(&path.components().collect::<PathBuf>())
+}
+
+/// 两个路径是否为同父目录下的兄弟节点（组件级比较，忽略分隔符形态）。
+fn same_parent(a: &Path, b: &Path) -> bool {
+    match (a.parent(), b.parent()) {
+        (Some(parent_a), Some(parent_b)) => watch_path_key(parent_a) == watch_path_key(parent_b),
+        _ => false,
+    }
+}
+
+/// 外部目录改名/移动的重定向：旧目录路径消失、同批有同父目录的新目录
+/// 到达、且新目录的实际文件完全覆盖旧子树的记录时，把记录的
+/// resource_path 与 id 级联改写到新路径（备注、使用次数、创建时间等
+/// 元数据全部保留；分组归属查询时从 resource_path 现场推导，无需额外
+/// 改写）。找不到替身（真删除/移出库外）时不动，交给
+/// forget_resource_records 按子树清退。仅目录型消失参与重定向；单文件
+/// 改名维持「删旧建新」语义，避免同窗口内无关的删+建被误配对。
+fn relocate_resource_records<R: Runtime>(
+    app: &AppHandle<R>,
+    missing: &[PathBuf],
+    arrived: &[PathBuf],
+) {
+    if missing.is_empty() || arrived.is_empty() {
+        return;
+    }
+    let state = app.state::<DbState>();
+    let Ok(conn) = state.conn.lock() else {
+        return;
+    };
+    let Ok(mut stmt) = conn.prepare(
+        "SELECT id, resource_path FROM clipboard_records
+         WHERE COALESCE(storage_mode, 'database') = 'resource'
+           AND COALESCE(resource_path, '') <> ''",
+    ) else {
+        return;
+    };
+    let records: Vec<(String, PathBuf)> = match stmt.query_map([], |row| {
+        Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
+    }) {
+        Ok(rows) => rows
+            .flatten()
+            .map(|(id, path)| (id, PathBuf::from(&path)))
+            .collect(),
+        Err(_) => return,
+    };
+    drop(stmt);
+    // 现有路径占用表：重定向目标已被其他记录占用时放弃，防同路径重复。
+    let mut occupied: HashSet<PathBuf> = records.iter().map(|(_, path)| watch_path_key(path)).collect();
+
+    for gone in missing {
+        let gone_key = watch_path_key(gone);
+        // 子树受害者：位于消失目录之下的全部记录。
+        let victims: Vec<&(String, PathBuf)> = records
+            .iter()
+            .filter(|(_, path)| {
+                let key = watch_path_key(path);
+                key.starts_with(&gone_key) && key != gone_key
+            })
+            .collect();
+        if victims.is_empty() {
+            continue;
+        }
+        // 替身：同父目录、本批到达、真实存在的目录（且不是消失路径本身）。
+        let Some(replacement) = arrived.iter().find(|candidate| {
+            candidate.is_dir()
+                && watch_path_key(candidate) != gone_key
+                && same_parent(candidate, gone)
+        }) else {
+            continue;
+        };
+        // 覆盖验证：替身下的实际文件必须包含全部受害记录的相对路径。
+        let replacement_files: HashSet<PathBuf> = collect_resource_files_under(replacement)
+            .iter()
+            .map(|path| watch_path_key(path))
+            .collect();
+        let mut moves: Vec<(String, PathBuf)> = Vec::new();
+        let mut fully_covered = true;
+        for (id, path) in &victims {
+            let victim_key = watch_path_key(path);
+            let Ok(relative) = victim_key.strip_prefix(&gone_key) else {
+                fully_covered = false;
+                break;
+            };
+            let target = replacement.join(relative);
+            let target_key = watch_path_key(&target);
+            if !replacement_files.contains(&target_key) || occupied.contains(&target_key) {
+                fully_covered = false;
+                break;
+            }
+            moves.push(((id.clone()), target));
+        }
+        if !fully_covered {
+            continue;
+        }
+        for (id, target) in moves {
+            let new_id = resource_file_id(&target);
+            let updated = conn.execute(
+                "UPDATE clipboard_records SET id = ?1, resource_path = ?2 WHERE id = ?3",
+                params![new_id, target.to_string_lossy(), id],
+            );
+            if updated == Ok(1) {
+                occupied.insert(watch_path_key(&target));
+                let _ = conn.execute(
+                    "UPDATE api_key_labels SET record_id = ?1 WHERE record_id = ?2",
+                    params![new_id, id],
+                );
+                log::info!(
+                    "外部目录改名已重定向资源记录: {} -> {}",
+                    id,
+                    target.display()
+                );
+            }
+        }
+    }
+}
+
+/// 监听防抖结束后的统一结算入口：对触碰路径按磁盘现状裁决方向——
+/// 已消失的先尝试目录改名/移动重定向（保元数据），再按「文件不在，
+/// 记录不留」子树清退；仍存在的按到达补建（文件单条，目录递归）。
+/// rename 在 Windows（ReadDirectoryChangesW）与 Linux（inotify）上都报
+/// `Modify(Name(From/To))` 而非 Remove/Create，删除到回收站正是一次
+/// rename 移出，按事件类型分流会永远漏删，必须以 stat 结果为准。
+pub fn settle_external_resource_changes<R: Runtime>(app: &AppHandle<R>, paths: &[PathBuf]) {
+    if paths.is_empty() {
+        return;
+    }
+    let root = get_resource_library_dir(app);
+    let mut missing: Vec<PathBuf> = Vec::new();
+    let mut existing: Vec<PathBuf> = Vec::new();
+    for path in paths {
+        if !path.starts_with(&root) {
+            continue;
+        }
+        if path.exists() {
+            existing.push(path.to_path_buf());
+        } else {
+            missing.push(path.to_path_buf());
+        }
+    }
+    if missing.is_empty() && existing.is_empty() {
+        return;
+    }
+    relocate_resource_records(app, &missing, &existing);
+    forget_resource_records(app, &missing);
+    discover_external_resource_files(app, &existing);
 }
 
 #[tauri::command]
@@ -7936,6 +8159,232 @@ mod resource_command_tests {
         .unwrap();
         assert_eq!(records.len(), 1);
         assert_eq!(records[0]["id"].as_str(), Some("res-safe"));
+    }
+
+    #[test]
+    fn forget_resource_records_removes_subtree_for_deleted_directory() {
+        // 外部删除/移出目录时事件只报目录本身：目录下的全部记录（含嵌套
+        // 子目录）都要清退，兄弟路径不受影响。
+        let (app, root) = test_app();
+        let dir = root.join("doomed");
+        std::fs::create_dir_all(dir.join("sub")).unwrap();
+        let file_a = dir.join("a.mp4");
+        let file_b = dir.join("sub").join("b.png");
+        let keeper = root.join("kept.png");
+        std::fs::write(&file_a, [1]).unwrap();
+        std::fs::write(&file_b, [2]).unwrap();
+        std::fs::write(&keeper, [3]).unwrap();
+        insert_resource(&app, "res-a", 1000.0, "", file_a.to_str().unwrap());
+        insert_resource(&app, "res-b", 1000.0, "", file_b.to_str().unwrap());
+        insert_resource(&app, "res-kept", 1000.0, "", keeper.to_str().unwrap());
+
+        super::forget_resource_records(app.handle(), &[dir]);
+
+        let records = get_clipboard_records_inner(
+            &app.handle().clone(),
+            None,
+            Some(50),
+            Some(0),
+            Some("resources".to_string()),
+            None,
+            Some("recent".into()),
+        )
+        .unwrap();
+        assert_eq!(records.len(), 1, "目录子树记录应全部清退");
+        assert_eq!(records[0]["id"].as_str(), Some("res-kept"));
+    }
+
+    #[test]
+    fn settle_redirects_renamed_directory_and_keeps_metadata() {
+        // 外部把目录改名（事件 = rename 旧路径 + 新路径）：子树记录应整体
+        // 重定向到新路径——id/resource_path 改写、api_key_labels 级联、
+        // sort_order 等元数据保留，不删了重建。
+        let (app, root) = test_app();
+        let old_dir = root.join("旧分组");
+        std::fs::create_dir_all(old_dir.join("sub")).unwrap();
+        let file_x = old_dir.join("x.mp4");
+        let file_y = old_dir.join("sub").join("y.mp3");
+        std::fs::write(&file_x, [1, 1]).unwrap();
+        std::fs::write(&file_y, [2, 2]).unwrap();
+        insert_resource(&app, "res-x", 1234.0, "", file_x.to_str().unwrap());
+        insert_resource(&app, "res-y", 5678.0, "", file_y.to_str().unwrap());
+        {
+            let state = app.state::<super::DbState>();
+            let conn = state.conn.lock().unwrap();
+            conn.execute(
+                "INSERT INTO api_key_labels (record_id, label) VALUES ('res-x', '标签A')",
+                [],
+            )
+            .unwrap();
+        }
+        let new_dir = root.join("0916");
+        std::fs::rename(&old_dir, &new_dir).unwrap();
+
+        super::settle_external_resource_changes(app.handle(), &[old_dir.clone(), new_dir.clone()]);
+
+        let records = get_clipboard_records_inner(
+            &app.handle().clone(),
+            None,
+            Some(50),
+            Some(0),
+            Some("resources".to_string()),
+            None,
+            Some("recent".into()),
+        )
+        .unwrap();
+        assert_eq!(records.len(), 2, "重定向不应丢记录");
+        let by_content = |marker: &str| {
+            records
+                .iter()
+                .find(|r| r["content"].as_str() == Some(marker))
+                .unwrap_or_else(|| panic!("content={marker} 的记录应保留: {records:?}"))
+        };
+        let redirected_x = by_content("res-x");
+        let redirected_y = by_content("res-y");
+        let new_x = new_dir.join("x.mp4");
+        let new_y = new_dir.join("sub").join("y.mp3");
+        assert_eq!(
+            redirected_x["resource_path"].as_str(),
+            Some(new_x.to_str().unwrap()),
+            "记录应重定向到新路径"
+        );
+        assert_eq!(
+            redirected_y["resource_path"].as_str(),
+            Some(new_y.to_str().unwrap())
+        );
+        // created_at 未被覆盖 = 元数据保留（删了重建会换成发现时刻）。
+        assert_eq!(
+            redirected_x["created_at"].as_str(),
+            Some("2026-08-01T00:00:00Z"),
+            "重定向应保留原 created_at"
+        );
+        assert_eq!(
+            redirected_x["id"].as_str(),
+            Some(super::resource_file_id(&new_x).as_str()),
+            "id 应随路径级联改写"
+        );
+        assert!(
+            !records.iter().any(|r| r["id"].as_str() == Some("res-x")),
+            "旧 id 不应残留"
+        );
+        assert_eq!(
+            redirected_x["resource_group"].as_str(),
+            Some("0916"),
+            "分组归属应随新路径推导"
+        );
+        {
+            let state = app.state::<super::DbState>();
+            let conn = state.conn.lock().unwrap();
+            let label: String = conn
+                .query_row(
+                    "SELECT label FROM api_key_labels WHERE record_id = ?1",
+                    [super::resource_file_id(&new_x)],
+                    |row| row.get(0),
+                )
+                .unwrap();
+            assert_eq!(label, "标签A", "api_key_labels 应级联迁移");
+        }
+    }
+
+    #[test]
+    fn settle_removes_records_when_directory_moved_out_of_library() {
+        // 删除到回收站/剪切移出库外 = rename 出监听目录：旧路径事件按
+        // stat 裁决为消失，子树记录清退——旧实现按「Modify=到达」处理
+        // 会永远漏删（径向菜单/资源页残留已删文件）。
+        let (app, root) = test_app();
+        let dir = root.join("移出分组");
+        std::fs::create_dir_all(&dir).unwrap();
+        let file = dir.join("a.mp4");
+        std::fs::write(&file, [1]).unwrap();
+        insert_resource(&app, "res-out", 1000.0, "", file.to_str().unwrap());
+        let outside = std::env::temp_dir().join(format!("out-{}", uuid::Uuid::new_v4()));
+        std::fs::create_dir_all(&outside).unwrap();
+
+        std::fs::rename(&dir, outside.join("移出分组")).unwrap();
+        super::settle_external_resource_changes(app.handle(), &[dir]);
+
+        let records = get_clipboard_records_inner(
+            &app.handle().clone(),
+            None,
+            Some(50),
+            Some(0),
+            Some("resources".to_string()),
+            None,
+            Some("recent".into()),
+        )
+        .unwrap();
+        assert_eq!(records.len(), 0, "移出库外的目录记录应被清退");
+        std::fs::remove_dir_all(&outside).ok();
+    }
+
+    #[test]
+    fn settle_discovers_records_when_whole_directory_moved_in() {
+        // 外部把整个目录移入库：事件只报目录本身，子文件应递归补建入库
+        // 并按路径归组（旧实现只认文件路径，要等重启对账才能发现）。
+        let (app, root) = test_app();
+        let outside = std::env::temp_dir().join(format!("in-{}", uuid::Uuid::new_v4()));
+        let source = outside.join("素材包");
+        std::fs::create_dir_all(source.join("nested")).unwrap();
+        std::fs::write(source.join("a.mp4"), [1]).unwrap();
+        std::fs::write(source.join("nested").join("b.mp3"), [2]).unwrap();
+
+        let target = root.join("素材包");
+        std::fs::rename(&source, &target).unwrap();
+        super::settle_external_resource_changes(app.handle(), &[target.clone()]);
+
+        let records = get_clipboard_records_inner(
+            &app.handle().clone(),
+            None,
+            Some(50),
+            Some(0),
+            Some("resources".to_string()),
+            None,
+            Some("recent".into()),
+        )
+        .unwrap();
+        assert_eq!(records.len(), 2, "目录内文件应递归补建");
+        let groups: Vec<String> = records
+            .iter()
+            .map(|r| r["resource_group"].as_str().unwrap_or("").to_string())
+            .collect();
+        assert!(
+            groups.iter().all(|group| group == "素材包"),
+            "补建记录应归入新分组: {groups:?}"
+        );
+        assert!(records.iter().any(|r| r["id"].as_str()
+            == Some(super::resource_file_id(&target.join("a.mp4")).as_str())));
+        std::fs::remove_dir_all(&outside).ok();
+    }
+
+    #[test]
+    fn settle_single_file_trash_rename_swaps_record() {
+        // 库内单文件改名：旧路径记录按「文件不在」清退，新路径按发现
+        // 时间补建——不产生幽灵重复条目（外部改名等价于删旧建新）。
+        let (app, root) = test_app();
+        let old_file = root.join("old.mp4");
+        std::fs::write(&old_file, [1, 2, 3]).unwrap();
+        insert_resource(&app, "res-old-vid", 1000.0, "", old_file.to_str().unwrap());
+        let new_file = root.join("new.mp4");
+        std::fs::rename(&old_file, &new_file).unwrap();
+
+        super::settle_external_resource_changes(app.handle(), &[old_file, new_file.clone()]);
+
+        let records = get_clipboard_records_inner(
+            &app.handle().clone(),
+            None,
+            Some(50),
+            Some(0),
+            Some("resources".to_string()),
+            None,
+            Some("recent".into()),
+        )
+        .unwrap();
+        assert_eq!(records.len(), 1, "应恰好一条记录（无幽灵无重复）");
+        assert_eq!(records[0]["resource_path"].as_str(), Some(new_file.to_str().unwrap()));
+        assert_eq!(
+            records[0]["id"].as_str(),
+            Some(super::resource_file_id(&new_file).as_str())
+        );
     }
 
     #[test]

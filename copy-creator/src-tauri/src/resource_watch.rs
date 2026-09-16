@@ -2,10 +2,18 @@
 //! `resource-groups-changed`，资源页与径向菜单已有的监听会自动重新扫描，
 //! 让「内容即文件」的外部变更实时反映到界面。
 //!
-//! 运行期间新出现的文件（从外部移入/复制进来）会按发现时间补建入库记录，
-//! 使其在「全部」列表置顶——与刚复制的剪切板内容同待遇；文件管理器的
-//! 「移动」保留原修改时间，若只靠扫描合成会按旧时间沉底，因此必须在
-//! 监听侧显式补建。应用未运行期间放入的文件不追溯。
+//! 运行期间新出现的文件（从外部移入/复制进来，含整个目录）会按发现时间
+//! 补建入库记录，使其在「全部」列表置顶——与刚复制的剪切板内容同待遇；
+//! 文件管理器的「移动」保留原修改时间，若只靠扫描合成会按旧时间沉底，
+//! 因此必须在监听侧显式补建。应用未运行期间放入的文件不追溯。
+//!
+//! 事件只提供「哪些路径被触碰」，方向（到达还是消失）由防抖结束时按
+//! 磁盘现状 stat 裁决：不存在视为消失（含删除、删除到回收站、剪切移出、
+//! rename 来源），存在视为到达（含新建、rename 目标、整目录移入）。
+//! 不能信任事件类型分类——Windows（ReadDirectoryChangesW）与 Linux
+//! （inotify）都把 rename 报成 `Modify(Name(From/To))` 而非 Remove/Create，
+//! 删除到回收站正是这样一次 rename，若按「Modify=到达」处理将永远漏删。
+//! 方向裁决后的入库/重定向/清退统一收敛在 `db::settle_external_resource_changes`。
 //!
 //! 监听目录通过周期性调用 `db::get_resource_library_dir` 解析，用户切换
 //! 资源库路径、迁移存储位置等所有变更途径都会被跟进；监听失败按退避
@@ -32,11 +40,11 @@ const RESOLVE_INTERVAL: Duration = Duration::from_secs(2);
 /// 监听建立失败后的重试间隔，避免对失效路径每两秒刷一遍告警日志。
 const RETRY_INTERVAL: Duration = Duration::from_secs(10);
 
-/// 监听事件的三种语义：「到达」按发现时间补建入库，「消失」按路径移除
-/// 记录（文件不在，记录不留），其余变更（内容修改）只触发前端重扫。
+/// 监听事件的两种语义：「触碰」收集路径，防抖结束后按磁盘现状统一
+/// 结算（到达补建 / 消失重定向或清退）；「变化」只触发前端重扫
+/// （内容修改，无路径语义）。
 enum WatchSignal {
-    Arrived(Vec<PathBuf>),
-    Vanished(Vec<PathBuf>),
+    Touched(Vec<PathBuf>),
     Changed,
 }
 
@@ -56,10 +64,10 @@ fn watch_loop<R: Runtime>(app: AppHandle<R>) {
     let mut watch_failed = false;
     let mut last_event: Option<Instant> = None;
     let mut next_resolve = Instant::now();
-    // 新出现/消失的文件跨 tick 累积：事件与防抖结束往往不在同一个
-    // 200ms tick 里，集合必须活到防抖触发被消费为止。
-    let mut arrived_paths: HashSet<PathBuf> = HashSet::new();
-    let mut vanished_paths: HashSet<PathBuf> = HashSet::new();
+    // 触碰的路径跨 tick 累积：事件与防抖结束往往不在同一个 200ms tick
+    // 里，集合必须活到防抖触发被消费为止。到达与消失不在此分流——同一
+    // 路径窗口内先消失后到达等竞态由结算时的 stat 结果一锤定音。
+    let mut touched_paths: HashSet<PathBuf> = HashSet::new();
 
     loop {
         // 跟进资源库目录变化（含首次解析）。
@@ -98,22 +106,16 @@ fn watch_loop<R: Runtime>(app: AppHandle<R>) {
             }
         }
 
-        // 汇聚监听事件，防抖后：新文件按发现时间补建入库（置顶），被删除
-        // 的文件按路径移除记录，然后通知前端刷新。内容修改只进入防抖触发
-        // 重扫，保证外部增删改都实时反映到界面。
+        // 汇聚监听事件，防抖结束后统一结算：按 stat 结果重定向/补建/清退，
+        // 然后通知前端刷新。内容修改只进入防抖触发重扫，保证外部增删改
+        // 都实时反映到界面。
         let mut saw_event = false;
         while let Ok(signal) = event_rx.try_recv() {
             saw_event = true;
             match signal {
-                WatchSignal::Arrived(paths) => {
+                WatchSignal::Touched(paths) => {
                     for path in paths {
-                        arrived_paths.insert(path);
-                    }
-                }
-                WatchSignal::Vanished(paths) => {
-                    for path in paths {
-                        arrived_paths.remove(&path);
-                        vanished_paths.insert(path);
+                        touched_paths.insert(path);
                     }
                 }
                 WatchSignal::Changed => {}
@@ -125,13 +127,9 @@ fn watch_loop<R: Runtime>(app: AppHandle<R>) {
         if let Some(at) = last_event {
             if at.elapsed() >= DEBOUNCE {
                 last_event = None;
-                if !vanished_paths.is_empty() {
-                    let paths: Vec<PathBuf> = vanished_paths.drain().collect();
-                    db::forget_resource_records(&app, &paths);
-                }
-                if !arrived_paths.is_empty() {
-                    let paths: Vec<PathBuf> = arrived_paths.drain().collect();
-                    db::discover_external_resource_files(&app, &paths);
+                if !touched_paths.is_empty() {
+                    let paths: Vec<PathBuf> = touched_paths.drain().collect();
+                    db::settle_external_resource_changes(&app, &paths);
                 }
                 log::info!("资源库外部变更，通知前端刷新");
                 let _ = app.emit("resource-groups-changed", ());
@@ -150,20 +148,14 @@ fn build_watcher(
         move |result: Result<notify::Event, notify::Error>| {
             if let Ok(event) = result {
                 match event.kind {
-                    // 「新出现的文件路径」（创建 / 改名落入监听目录）：按
-                    // 发现时间补建入库记录，使其在「全部」列表置顶。
-                    EventKind::Create(_) | EventKind::Modify(ModifyKind::Name(_)) => {
+                    // 路径出现/消失/改名（含删除到回收站这类 rename 移出）：
+                    // 只收集路径，方向由防抖结束时的 stat 裁决。
+                    EventKind::Create(_)
+                    | EventKind::Remove(_)
+                    | EventKind::Modify(ModifyKind::Name(_)) => {
                         if !event.paths.is_empty() {
-                            let _ = tx.send(WatchSignal::Arrived(event.paths.clone()));
+                            let _ = tx.send(WatchSignal::Touched(event.paths.clone()));
                         }
-                    }
-                    // 删除：按路径移除记录（改名也会先发 Remove 旧路径，
-                    // 新路径由 Arrived 补建），并触发重扫刷新。
-                    EventKind::Remove(_) => {
-                        if !event.paths.is_empty() {
-                            let _ = tx.send(WatchSignal::Vanished(event.paths.clone()));
-                        }
-                        let _ = tx.send(WatchSignal::Changed);
                     }
                     // 内容修改不影响置顶语义，但必须触发重扫刷新，
                     // 否则文件管理器里改动内容后界面永远不更新。
