@@ -140,6 +140,24 @@ fn watch_loop<R: Runtime>(app: AppHandle<R>) {
     }
 }
 
+/// 事件分类（纯函数，可测）：路径出现/消失/改名（含删除到回收站这类
+/// rename 移出）收集为「触碰」，方向由防抖结束时的 stat 裁决；内容修改
+/// 只触发重扫刷新，否则文件管理器里改动内容后界面永远不更新；Access
+/// 等事件高频且无业务语义，忽略以免无谓刷新。
+fn classify_watch_event(kind: &EventKind, paths: &[PathBuf]) -> Option<WatchSignal> {
+    match kind {
+        EventKind::Create(_) | EventKind::Remove(_) | EventKind::Modify(ModifyKind::Name(_)) => {
+            if paths.is_empty() {
+                None
+            } else {
+                Some(WatchSignal::Touched(paths.to_vec()))
+            }
+        }
+        EventKind::Modify(_) => Some(WatchSignal::Changed),
+        EventKind::Access(_) | EventKind::Other | EventKind::Any => None,
+    }
+}
+
 fn build_watcher(
     event_tx: &mpsc::Sender<WatchSignal>,
 ) -> Result<RecommendedWatcher, notify::Error> {
@@ -147,25 +165,66 @@ fn build_watcher(
         let tx = event_tx.clone();
         move |result: Result<notify::Event, notify::Error>| {
             if let Ok(event) = result {
-                match event.kind {
-                    // 路径出现/消失/改名（含删除到回收站这类 rename 移出）：
-                    // 只收集路径，方向由防抖结束时的 stat 裁决。
-                    EventKind::Create(_)
-                    | EventKind::Remove(_)
-                    | EventKind::Modify(ModifyKind::Name(_)) => {
-                        if !event.paths.is_empty() {
-                            let _ = tx.send(WatchSignal::Touched(event.paths.clone()));
-                        }
-                    }
-                    // 内容修改不影响置顶语义，但必须触发重扫刷新，
-                    // 否则文件管理器里改动内容后界面永远不更新。
-                    EventKind::Modify(_) => {
-                        let _ = tx.send(WatchSignal::Changed);
-                    }
-                    // Access 等事件高频且无业务语义，忽略以免无谓刷新。
-                    EventKind::Access(_) | EventKind::Other | EventKind::Any => {}
+                if let Some(signal) = classify_watch_event(&event.kind, &event.paths) {
+                    let _ = tx.send(signal);
                 }
             }
         }
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use notify::event::{
+        AccessKind, AccessMode, CreateKind, DataChange, ModifyKind, RemoveKind, RenameMode,
+    };
+
+    fn paths() -> Vec<PathBuf> {
+        vec![PathBuf::from("/tmp/sample.mp4")]
+    }
+
+    #[test]
+    fn create_remove_and_rename_are_touched_not_directional() {
+        // Windows/inotify 都把 rename 报成 Modify(Name(From/To)) 而非
+        // Remove/Create：三类事件必须统一收集为「触碰」，方向交给 stat
+        // 裁决——删除到回收站正是一次 rename 移出，按事件类型分流会漏删。
+        for kind in [
+            EventKind::Create(CreateKind::Any),
+            EventKind::Remove(RemoveKind::Any),
+            EventKind::Modify(ModifyKind::Name(RenameMode::From)),
+            EventKind::Modify(ModifyKind::Name(RenameMode::To)),
+            EventKind::Modify(ModifyKind::Name(RenameMode::Any)),
+        ] {
+            let signal = classify_watch_event(&kind, &paths())
+                .unwrap_or_else(|| panic!("{kind:?} 应被收集"));
+            assert!(
+                matches!(signal, WatchSignal::Touched(_)),
+                "{kind:?} 应分类为 Touched"
+            );
+        }
+    }
+
+    #[test]
+    fn touched_without_paths_is_dropped() {
+        let kind = EventKind::Create(CreateKind::Any);
+        assert!(classify_watch_event(&kind, &[]).is_none());
+    }
+
+    #[test]
+    fn content_modify_is_changed() {
+        let kind = EventKind::Modify(ModifyKind::Data(DataChange::Any));
+        assert!(matches!(
+            classify_watch_event(&kind, &paths()),
+            Some(WatchSignal::Changed)
+        ));
+    }
+
+    #[test]
+    fn access_and_unknown_are_ignored() {
+        let access = EventKind::Access(AccessKind::Close(AccessMode::Any));
+        assert!(classify_watch_event(&access, &paths()).is_none());
+        assert!(classify_watch_event(&EventKind::Other, &paths()).is_none());
+        assert!(classify_watch_event(&EventKind::Any, &paths()).is_none());
+    }
 }
