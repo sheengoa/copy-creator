@@ -33,6 +33,7 @@ import ResourceGroupMoveDialog from "./ResourcePage/ResourceGroupMoveDialog";
 import ResourceGroupManageDialog from "./ResourcePage/ResourceGroupManageDialog";
 import ResourceLibrarySettings from "./ResourcePage/ResourceLibrarySettings";
 import { isResourceRecord } from "../domain/records";
+import { mayReloadSharedRecordsView } from "../domain/viewOwnership";
 
 import type {
   ResourceGroupDialogState,
@@ -177,6 +178,18 @@ export default function ResourcePage({ active }: { active: boolean }) {
     let unlisten: UnlistenFn | undefined;
     listen("resource-groups-changed", () => {
       void loadResourceGroups();
+      // 归属判定（domain/viewOwnership）：外部资源库变更事件不分面板广播，
+      // 本页不可见时不得强制加载资源视图——否则用户在剪切板页的每次外部
+      // 文件操作都会把共享视图抢成资源，列表随即「有内容却显示为空」。
+      if (
+        !mayReloadSharedRecordsView({
+          pageVisible: active,
+          pageView: "resources",
+          storeCategory: useClipboardStore.getState().category,
+        })
+      ) {
+        return;
+      }
       void loadRecords(false, "resources", resourceGroup);
     }).then((nextUnlisten) => {
       if (cancelled) {
@@ -189,22 +202,34 @@ export default function ResourcePage({ active }: { active: boolean }) {
       cancelled = true;
       if (unlisten) unlisten();
     };
-  }, [loadRecords, loadResourceGroups, resourceGroup]);
+  }, [active, loadRecords, loadResourceGroups, resourceGroup]);
 
   // 主窗口从隐藏恢复显示时重载分组与记录：兜底隐藏期间丢失/被节流的刷新。
+  // 归属判定：本页不可见时（恢复显示的是剪切板等其他面板）不得写共享视图，
+  // 否则每次窗口显示都会覆盖剪切板回调先落地的加载，列表恒空（空列表根因）。
   useRefreshOnShow(useCallback(() => {
     void loadResourceGroups();
+    if (
+      !mayReloadSharedRecordsView({
+        pageVisible: active,
+        pageView: "resources",
+        storeCategory: useClipboardStore.getState().category,
+      })
+    ) {
+      return;
+    }
     void loadRecords(false, "resources", resourceGroup);
-  }, [loadRecords, loadResourceGroups, resourceGroup]));
+  }, [active, loadRecords, loadResourceGroups, resourceGroup]));
 
-  // 对称兜底：剪切板页重新激活时会把自己的分类写回 store（重申视图），
-  // 本页重新激活时若视图仍被剪切板分类占用，同样重载资源视图。
+  // 对称兜底：本页激活即重载。归属判定使 resource-groups-changed /
+  // 恢复显示兜底不再刷新不可见页，停留在其他面板期间的外部变更由激活
+  // 重载补偿（不可见时不触发，无抢占风险）；视图仍被剪切板分类占用时
+  // 借此写回资源视图，与剪切板页的重申对称。
   const resourcesActiveRef = useRef(active);
   useEffect(() => {
     if (resourcesActiveRef.current === active) return;
     resourcesActiveRef.current = active;
     if (!active) return;
-    if (useClipboardStore.getState().category === "resources") return;
     void loadRecords(false, "resources", resourceGroup);
   }, [active, loadRecords, resourceGroup]);
 
@@ -253,10 +278,21 @@ export default function ResourcePage({ active }: { active: boolean }) {
       return;
     }
     const timer = window.setTimeout(() => {
+      // search 是两页共享的 store 字段：剪切板页输入也会走到这里，
+      // 本页不可见时不得借防抖重载抢占共享视图（空列表根因之一）。
+      if (
+        !mayReloadSharedRecordsView({
+          pageVisible: active,
+          pageView: "resources",
+          storeCategory: useClipboardStore.getState().category,
+        })
+      ) {
+        return;
+      }
       void loadRecords(false, "resources", resourceGroup);
     }, 300);
     return () => window.clearTimeout(timer);
-  }, [loadRecords, resourceGroup, search]);
+  }, [active, loadRecords, resourceGroup, search]);
 
   const filteredRecords = useMemo(() => {
     const next = records.filter((record) => (

@@ -229,4 +229,39 @@ describe("架构守卫：领域规则必须全局共享", () => {
       "预览 segments 与展开方向/宽度契约必须从 domain/preview 导入（见 domain/README.md）",
     ).toEqual([]);
   });
+
+  it("规则 16：共享记录视图的全局重载必须经 domain/viewOwnership 归属判定", () => {
+    // 剪切板页与资源页常挂载且共用 clipboardStore，全局事件（窗口恢复显示、
+    // resource-groups-changed、共享搜索词防抖）会同时唤醒两页回调；不设防的
+    // 一方经加载代数「后写者赢」抢占视图，剪切板页把资源记录过滤后显示
+    // 「暂无剪切板记录」（2026-09 空列表根因，此前五次修复均未建立归属
+    // 规则而反复复发）。两页的全部全局重载路径必须逐点接入归属判定。
+    expect(readSource("domain/viewOwnership.ts")).toContain(
+      "export function mayReloadSharedRecordsView",
+    );
+    const redefiners = allSources
+      .filter((file) => !toPosix(file).includes("domain/viewOwnership.ts"))
+      .filter((file) => /function mayReloadSharedRecordsView/.test(sourceOf(file)))
+      .map((file) => toPosix(file.replace(frontRoot, "")));
+    expect(
+      redefiners,
+      "共享视图归属判定只能在 domain/viewOwnership 定义（见 domain/README.md）",
+    ).toEqual([]);
+    // 剪切板页两处：窗口恢复显示重申视图 + 共享搜索词防抖。
+    const clipboardGuards = (
+      readSource("pages/ClipboardPage/index.tsx").match(/mayReloadSharedRecordsView\(/g) ?? []
+    ).length;
+    expect(
+      clipboardGuards,
+      "ClipboardPage 的重申视图与搜索防抖重载必须经 mayReloadSharedRecordsView 归属判定",
+    ).toBeGreaterThanOrEqual(2);
+    // 资源页三处：resource-groups-changed 监听 + 窗口恢复显示兜底 + 共享搜索词防抖。
+    const resourceGuards = (
+      readSource("pages/ResourcePage.tsx").match(/mayReloadSharedRecordsView\(/g) ?? []
+    ).length;
+    expect(
+      resourceGuards,
+      "ResourcePage 的变更监听、恢复显示兜底与搜索防抖重载必须经 mayReloadSharedRecordsView 归属判定",
+    ).toBeGreaterThanOrEqual(3);
+  });
 });

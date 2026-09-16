@@ -15,12 +15,14 @@
 | **文件名**切分、重命名资格 | `fileName.ts` |
 | 分组树的**组织与排序** | `groups.ts` |
 | 组装视图模型 `RecordView` | `recordView.ts`（**组装-only**：只调用上述模块，不得新增判定） |
+| 常挂载页面**谁能重载共享记录视图**（窗口恢复显示/资源变更事件/共享搜索词等全局回调的写权限） | `viewOwnership.ts`（`mayReloadSharedRecordsView`——只有可见页面可写，防加载代数互抢致列表恒空） |
 | 上述都不是的展示辅助（格式化、列宽计算） | 不进 domain，留在各页面的工具文件 |
 
 硬性约束：
 - **禁止**在 `components/`、`pages/` 中新写扩展名判断、媒体类型分支、能力判定——一律 import domain；
 - `recordView.ts` 内禁止扩展名字面量、`record.type === "…"` 判定、`endsWith/startsWith` 推断（架构守卫规则 6）；
 - `domain/**` 禁止 import `stores/*` 与组件（规则 12）；叶子组件禁止 import `stores/*`（规则 10）；
+- ClipboardPage/ResourcePage 在全局事件回调中重载共享记录视图前，必须经 `viewOwnership.ts` 归属判定（规则 16）；
 - 拆分触发条件：单一文件出现第二个不相关主题，或超过约 400 行。
 
 ## 缺陷 → 守卫闭环

@@ -15,6 +15,7 @@ import { useMultiSelect } from "../../hooks/useMultiSelect";
 import { useRefreshOnShow } from "../../hooks/useRefreshOnShow";
 import { buildRecordView, type RecordView } from "../../domain/recordView";
 import { isResourceRecord } from "../../domain/records";
+import { mayReloadSharedRecordsView } from "../../domain/viewOwnership";
 
 type ClipType = ClipboardFilter;
 
@@ -209,6 +210,18 @@ export default function ClipboardPage({ active }: { active: boolean }) {
   }, [category]);
 
   const reassertClipboardView = useCallback(() => {
+    // 归属判定（domain/viewOwnership）：窗口恢复显示时资源页的兜底回调
+    // 也会执行，本页不可见时不得改写共享视图——否则会把资源面板正在
+    // 展示的视图抢回剪切板，与资源页的兜底形成互抢竞速。
+    if (
+      !mayReloadSharedRecordsView({
+        pageVisible: active,
+        pageView: "clipboard",
+        storeCategory: useClipboardStore.getState().category,
+      })
+    ) {
+      return;
+    }
     if (useClipboardStore.getState().category !== "resources") {
       void loadRecords(false);
       return;
@@ -216,28 +229,46 @@ export default function ClipboardPage({ active }: { active: boolean }) {
     const restored = lastClipboardCategoryRef.current;
     setCategory(restored);
     void loadRecords(false, restored);
-  }, [loadRecords, setCategory]);
+  }, [active, loadRecords, setCategory]);
 
   useEffect(() => {
     if (searchEffectInitializedRef.current) {
-      const timer = setTimeout(() => void loadRecords(false), 300);
+      const timer = setTimeout(() => {
+        // search 是两页共享的 store 字段：本页不可见时（搜索词来自资源页）
+        // 不得重载共享视图，防抖重载同样受归属判定约束。
+        if (
+          !mayReloadSharedRecordsView({
+            pageVisible: active,
+            pageView: "clipboard",
+            storeCategory: useClipboardStore.getState().category,
+          })
+        ) {
+          return;
+        }
+        void loadRecords(false);
+      }, 300);
       return () => clearTimeout(timer);
     }
     searchEffectInitializedRef.current = true;
-  }, [loadRecords, search]);
+  }, [active, loadRecords, search]);
 
   // 主窗口从隐藏恢复显示时重载当前视图：兜底隐藏期间丢失/被节流的刷新。
   // 注意不能盲重载 loadRecords(false)——那会按 store 当前（可能是资源）
   // 视图取数，本页依旧空白。
   useRefreshOnShow(reassertClipboardView);
 
-  // 面板切走再切回：无任何事件信号，只有 active 翻转，同样重申视图。
+  // 面板切走再切回：无任何事件信号，只有 active 翻转。激活即重载：
+  // 恢复显示兜底经归属判定只刷新可见页，门控期间（停留在其他面板/窗口
+  // 隐藏）可能漏掉的变更由激活重载补偿；资源视图占用时先夺回分类再重载。
   const clipboardActiveRef = useRef(active);
   useEffect(() => {
     if (clipboardActiveRef.current === active) return;
     clipboardActiveRef.current = active;
     if (!active) return;
-    if (useClipboardStore.getState().category !== "resources") return;
+    if (useClipboardStore.getState().category !== "resources") {
+      void loadRecords(false);
+      return;
+    }
     const restored = lastClipboardCategoryRef.current;
     setCategory(restored);
     void loadRecords(false, restored);
