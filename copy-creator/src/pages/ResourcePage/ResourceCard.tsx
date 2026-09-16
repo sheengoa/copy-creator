@@ -16,7 +16,7 @@ import { getResourceSummary } from "../../domain/records";
 import type { RecordView } from "../../domain/recordView";
 
 interface ResourceCardProps {
-  /** 叶子合同：只收视图模型（DOMAIN_ARCHITECTURE_PLAN.md §3.10）。 */
+  /** 叶子合同：只收视图模型。 */
   view: RecordView;
   search: string;
   typeLabel: (kind: ResourceMediaKind) => string;

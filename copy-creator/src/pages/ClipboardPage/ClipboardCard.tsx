@@ -22,7 +22,7 @@ import { loadRecordPreviewSegments, type RadialPreviewSegment } from "../../doma
 import type { RecordView } from "../../domain/recordView";
 
 interface ClipboardCardProps {
-  /** 叶子合同：只收视图模型（DOMAIN_ARCHITECTURE_PLAN.md §3.10）。 */
+  /** 叶子合同：只收视图模型。 */
   view: RecordView;
   index: number;
   getTypeLabel: (type: string) => string;

@@ -1,6 +1,6 @@
 # 持续集成：push/PR 即运行 lint、前端测试（含架构守卫）与 Rust 测试。
 # 发布构建（build.yml）保留测试步骤作为最后防线；本工作流保证日常开发
-# 中架构守卫真实生效（DOMAIN_ARCHITECTURE_PLAN.md §5.4）。
+# 中架构守卫真实生效。
 name: CI
 
 on:
