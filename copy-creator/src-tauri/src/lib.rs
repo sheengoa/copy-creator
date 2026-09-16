@@ -130,6 +130,23 @@ pub fn run() {
                         .level(log::LevelFilter::Info)
                         .build(),
                 )?;
+            } else {
+                // Release 同样必须落日志：常驻后台应用（文件监听/媒体服务/
+                // 粘贴模拟）出问题时，无日志等于不可诊断。只写日志文件
+                // （AppImage 双击启动时 stdout 无人消费）；轮转 512KB × 3 份
+                // 控制磁盘占用；本地时区便于用户对时间线。现有日志语句均为
+                // 路径/计数/状态，不含剪贴板内容。
+                app.handle().plugin(
+                    tauri_plugin_log::Builder::default()
+                        .level(log::LevelFilter::Info)
+                        .rotation_strategy(tauri_plugin_log::RotationStrategy::KeepSome(3))
+                        .max_file_size(512_000)
+                        .timezone_strategy(tauri_plugin_log::TimezoneStrategy::UseLocal)
+                        .targets([tauri_plugin_log::Target::new(
+                            tauri_plugin_log::TargetKind::LogDir { file_name: None },
+                        )])
+                        .build(),
+                )?;
             }
 
             let is_autostart = std::env::args().any(|a| a == "--hidden");
