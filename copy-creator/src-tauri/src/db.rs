@@ -47,7 +47,19 @@ pub fn make_key_preview(content: &str) -> String {
     }
 }
 
-const RESOURCE_RECORD_CONDITION: &str = "COALESCE(storage_mode, 'database') = 'resource'";
+// storage_mode 列在 schema 层有 DEFAULT 'database' 且历史数据已回填，
+// 永不为 NULL：直接等值比较可命中 idx_clipboard_storage_mode 索引。
+// 不要改回 COALESCE(storage_mode, 'database') 包裹——那会让索引失效。
+const RESOURCE_RECORD_CONDITION: &str = "storage_mode = 'resource'";
+
+/// storage_mode 历史数据回填 + 资源查询组合索引。init_db 与测试共用同一
+/// 份 SQL，保证两者建的库结构一致。
+const RESOURCE_INDEX_MIGRATION_SQL: &str = "
+UPDATE clipboard_records SET storage_mode = 'database' WHERE storage_mode IS NULL;
+
+CREATE INDEX IF NOT EXISTS idx_clipboard_storage_mode
+    ON clipboard_records(storage_mode, resource_path);
+";
 
 fn category_sql(category: &Option<String>) -> (String, String) {
     match category.as_deref() {
@@ -483,7 +495,7 @@ fn path_inside_ignored_dir(path: &Path) -> bool {
 fn prune_legacy_thumb_records(conn: &Connection) {
     if let Err(error) = conn.execute(
         "DELETE FROM clipboard_records
-         WHERE COALESCE(storage_mode, 'database') = 'resource'
+         WHERE storage_mode = 'resource'
            AND (resource_path LIKE '%/thumbs/%' OR resource_path LIKE '%\\thumbs\\%')",
         [],
     ) {
@@ -1440,6 +1452,13 @@ pub fn init_db(app: &AppHandle) -> Result<(), Box<dyn std::error::Error>> {
     )
     .ok();
 
+    // ── storage_mode 回填 + 资源索引 ─────────────────────────────
+    // 列经 ALTER/CREATE TABLE 均带 DEFAULT 'database'，NULL 只可能来自
+    // 异常路径；回填幂等，保证「storage_mode = 'resource'」等值查询与
+    // COALESCE 语义一致。索引必须建在列存在之后（老库 ALTER 补列在前）。
+    // SQL 抽成常量供测试复用（EXPLAIN 验证索引命中）。
+    conn.execute_batch(RESOURCE_INDEX_MIGRATION_SQL).ok();
+
     // ── last_used_at：粘贴成功时记录使用时间，供径向菜单「最近使用」聚合查询 ──
     conn.execute(
         "ALTER TABLE clipboard_records ADD COLUMN last_used_at TEXT DEFAULT ''",
@@ -1478,13 +1497,13 @@ pub fn init_db(app: &AppHandle) -> Result<(), Box<dyn std::error::Error>> {
         "UPDATE clipboard_records SET storage_mode = ?1
          WHERE TRIM(COALESCE(group_name, '')) <> ''
            AND group_name NOT IN ('stash', '暂存', '默认', '临时')
-           AND COALESCE(storage_mode, 'database') <> ?1",
+           AND storage_mode <> ?1",
         params![RESOURCE_STORAGE_MODE],
     )
     .ok();
     conn.execute(
         "UPDATE clipboard_records SET group_name = ''
-         WHERE COALESCE(storage_mode, 'database') = ?1",
+         WHERE storage_mode = ?1",
         params![RESOURCE_STORAGE_MODE],
     )
     .ok();
@@ -1574,7 +1593,7 @@ pub fn prune_old_records(app: &AppHandle) -> Result<(), Box<dyn std::error::Erro
             "SELECT type, content, attachments
              FROM clipboard_records
              WHERE datetime(created_at) < datetime('now', ?1)
-               AND NOT (COALESCE(storage_mode, 'database') = 'resource')",
+               AND NOT (storage_mode = 'resource')",
         )?;
         let rows = stmt.query_map(params![format!("-{} days", days)], |row| {
             Ok((
@@ -1596,7 +1615,7 @@ pub fn prune_old_records(app: &AppHandle) -> Result<(), Box<dyn std::error::Erro
         conn.execute(
             "DELETE FROM clipboard_records
              WHERE datetime(created_at) < datetime('now', ?1)
-               AND NOT (COALESCE(storage_mode, 'database') = 'resource')",
+               AND NOT (storage_mode = 'resource')",
             params![format!("-{} days", days)],
         )?;
         (days, image_contents)
@@ -1676,7 +1695,7 @@ pub fn sync_resource_library<R: Runtime>(app: &AppHandle<R>) -> usize {
     {
         let Ok(mut stmt) = conn.prepare(
             "SELECT id, resource_path FROM clipboard_records
-             WHERE COALESCE(storage_mode, 'database') = 'resource'",
+             WHERE storage_mode = 'resource'",
         ) else {
             return 0;
         };
@@ -1703,7 +1722,7 @@ pub fn sync_resource_library<R: Runtime>(app: &AppHandle<R>) -> usize {
     let mut known: HashSet<PathBuf> = {
         let Ok(mut stmt) = conn.prepare(
             "SELECT resource_path FROM clipboard_records
-             WHERE COALESCE(storage_mode, 'database') = 'resource'
+             WHERE storage_mode = 'resource'
                AND COALESCE(resource_path, '') <> ''",
         ) else {
             return removable.len();
@@ -1762,7 +1781,7 @@ pub fn forget_resource_records<R: Runtime>(app: &AppHandle<R>, paths: &[PathBuf]
     };
     let Ok(mut stmt) = conn.prepare(
         "SELECT id, resource_path FROM clipboard_records
-         WHERE COALESCE(storage_mode, 'database') = 'resource'
+         WHERE storage_mode = 'resource'
            AND COALESCE(resource_path, '') <> ''",
     ) else {
         return;
@@ -1816,7 +1835,7 @@ pub fn discover_external_resource_files<R: Runtime>(
     prune_legacy_thumb_records(&conn);
     let mut stmt = match conn.prepare(
         "SELECT id, resource_path FROM clipboard_records
-         WHERE COALESCE(storage_mode, 'database') = 'resource'
+         WHERE storage_mode = 'resource'
            AND COALESCE(resource_path, '') <> ''",
     ) {
         Ok(stmt) => stmt,
@@ -1967,7 +1986,7 @@ fn relocate_resource_records<R: Runtime>(
     };
     let Ok(mut stmt) = conn.prepare(
         "SELECT id, resource_path FROM clipboard_records
-         WHERE COALESCE(storage_mode, 'database') = 'resource'
+         WHERE storage_mode = 'resource'
            AND COALESCE(resource_path, '') <> ''",
     ) else {
         return;
@@ -2190,7 +2209,7 @@ fn get_resource_records_inner<R: Runtime>(
                         COALESCE(use_count, 0), COALESCE(touched_ms, 0),
                         COALESCE(last_used_at, ''), COALESCE(resource_external, 0)
                  FROM clipboard_records
-                 WHERE COALESCE(storage_mode, 'database') = 'resource'",
+                 WHERE storage_mode = 'resource'",
             )
             .map_err(|e| e.to_string())?;
         let rows = stmt
@@ -2675,7 +2694,7 @@ pub(crate) fn touch_clipboard_usage_internal<R: Runtime>(
     let mut stmt = conn
         .prepare(
             "SELECT id, resource_path FROM clipboard_records
-             WHERE COALESCE(storage_mode, 'database') = 'resource'
+             WHERE storage_mode = 'resource'
                AND COALESCE(resource_path, '') <> ''",
         )
         .map_err(|e| e.to_string())?;
@@ -2780,7 +2799,7 @@ pub(crate) fn touch_resource_group_usage_internal<R: Runtime>(
     let mut stmt = conn
         .prepare(
             "SELECT id, resource_path FROM clipboard_records
-             WHERE COALESCE(storage_mode, 'database') = 'resource'
+             WHERE storage_mode = 'resource'
                AND COALESCE(resource_path, '') <> ''",
         )
         .map_err(|e| e.to_string())?;
@@ -4082,7 +4101,7 @@ fn resource_record_paths_in_folder<R: Runtime>(
         .prepare(
             "SELECT id, resource_path
              FROM clipboard_records
-             WHERE COALESCE(storage_mode, 'database') = 'resource'",
+             WHERE storage_mode = 'resource'",
         )
         .map_err(|e| e.to_string())?;
     let rows = stmt
@@ -4122,7 +4141,7 @@ fn update_resource_record_paths<R: Runtime>(
         tx.execute(
             "UPDATE clipboard_records
              SET resource_path = ?1, group_name = ?2
-             WHERE id = ?3 AND COALESCE(storage_mode, 'database') = 'resource'",
+             WHERE id = ?3 AND storage_mode = 'resource'",
             params![path, group_name, id],
         )
         .map_err(|e| e.to_string())?;
@@ -4142,7 +4161,7 @@ fn resource_group_count_map<R: Runtime>(
             .prepare(
                 "SELECT resource_path
                  FROM clipboard_records
-                 WHERE COALESCE(storage_mode, 'database') = 'resource'",
+                 WHERE storage_mode = 'resource'",
             )
             .map_err(|e| e.to_string())?;
         let rows = stmt
@@ -6114,9 +6133,9 @@ mod record_classification_tests {
     fn resource_category_sql_filters_by_storage_mode() {
         let (filter, search_filter) = category_sql(&Some("resources".to_string()));
 
-        assert!(filter.contains("COALESCE(storage_mode, 'database') = 'resource'"));
+        assert!(filter.contains("storage_mode = 'resource'"));
         assert!(!filter.contains("group_name"));
-        assert!(search_filter.contains("COALESCE(storage_mode, 'database') = 'resource'"));
+        assert!(search_filter.contains("storage_mode = 'resource'"));
         assert!(!search_filter.contains("group_name"));
     }
 
@@ -6124,9 +6143,9 @@ mod record_classification_tests {
     fn temp_category_falls_back_to_plain_clipboard_filter() {
         let (filter, search_filter) = category_sql(&Some("temp".to_string()));
 
-        assert!(filter.contains("NOT (COALESCE(storage_mode, 'database') = 'resource')"));
+        assert!(filter.contains("NOT (storage_mode = 'resource')"));
         assert!(!filter.contains("group_name"));
-        assert!(search_filter.contains("NOT (COALESCE(storage_mode, 'database') = 'resource')"));
+        assert!(search_filter.contains("NOT (storage_mode = 'resource')"));
         assert!(!search_filter.contains("group_name"));
     }
 }
@@ -8159,6 +8178,52 @@ mod resource_command_tests {
         .unwrap();
         assert_eq!(records.len(), 1);
         assert_eq!(records[0]["id"].as_str(), Some("res-safe"));
+    }
+
+    #[test]
+    fn storage_mode_backfill_and_resource_index_are_effective() {
+        // 回填：异常路径产生的 NULL storage_mode 迁移后归位 'database'，
+        // 保证等值查询与旧 COALESCE 语义一致；索引：资源等值查询命中
+        // idx_clipboard_storage_mode 而非全表扫描（SCAN）。
+        let (app, root) = test_app();
+        insert_resource(&app, "res-a", 1000.0, "", root.join("a.mp4").to_str().unwrap());
+        {
+            let state = app.state::<super::DbState>();
+            let conn = state.conn.lock().unwrap();
+            conn.execute(
+                "INSERT INTO clipboard_records (id, type, content, created_at, storage_mode)
+                 VALUES ('null-mode', 'text', 'x', '2026-08-01T00:00:00Z', NULL)",
+                [],
+            )
+            .unwrap();
+        }
+
+        {
+            let state = app.state::<super::DbState>();
+            let conn = state.conn.lock().unwrap();
+            conn.execute_batch(super::RESOURCE_INDEX_MIGRATION_SQL).unwrap();
+            let mode: String = conn
+                .query_row(
+                    "SELECT storage_mode FROM clipboard_records WHERE id = 'null-mode'",
+                    [],
+                    |row| row.get(0),
+                )
+                .unwrap();
+            assert_eq!(mode, "database", "NULL storage_mode 应回填为 'database'");
+
+            let plan: String = conn
+                .query_row(
+                    "EXPLAIN QUERY PLAN SELECT id, resource_path FROM clipboard_records
+                     WHERE storage_mode = 'resource'",
+                    [],
+                    |row| row.get(3),
+                )
+                .unwrap();
+            assert!(
+                plan.contains("idx_clipboard_storage_mode") && !plan.contains("SCAN"),
+                "资源等值查询应命中索引而非全表扫描: {plan}"
+            );
+        }
     }
 
     #[test]
