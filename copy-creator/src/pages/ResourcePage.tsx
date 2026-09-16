@@ -1,21 +1,11 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { ConfirmDialog } from "../components/ConfirmDialog";
-import { createPortal } from "react-dom";
 import { invoke } from "@tauri-apps/api/core";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import { useTranslation } from "react-i18next";
-import {
-  DndContext,
-  DragOverlay,
-  PointerSensor,
-  closestCenter,
-  useSensor,
-  useSensors,
-} from "@dnd-kit/core";
+import { PointerSensor, useSensor, useSensors } from "@dnd-kit/core";
 import type { DragEndEvent, DragStartEvent } from "@dnd-kit/core";
-import { SortableContext, arrayMove, useSortable, verticalListSortingStrategy } from "@dnd-kit/sortable";
-import { CSS } from "@dnd-kit/utilities";
-import { restrictToVerticalAxis } from "@dnd-kit/modifiers";
+import { arrayMove } from "@dnd-kit/sortable";
 import { useClipboardStore } from "../stores/clipboardStore";
 import { useSettingsStore } from "../stores/settingsStore";
 import { useMultiSelect } from "../hooks/useMultiSelect";
@@ -38,23 +28,17 @@ import { buildResourceFolderParentMap, findResourceFolder, flattenResourceFolder
 import { inferResourceMediaKind, matchesResourceType } from "../domain/mediaKind";
 import { getResourceTitle } from "../domain/records";
 import ResourceMoveDialog from "./ResourcePage/ResourceMoveDialog";
+import ResourceGroupNameDialog from "./ResourcePage/ResourceGroupNameDialog";
+import ResourceGroupMoveDialog from "./ResourcePage/ResourceGroupMoveDialog";
+import ResourceGroupManageDialog from "./ResourcePage/ResourceGroupManageDialog";
+import ResourceLibrarySettings from "./ResourcePage/ResourceLibrarySettings";
 import { isResourceRecord } from "../domain/records";
 
-type ResourceGroupDialogState = {
-  mode: "create" | "rename";
-  parentPath?: string;
-  oldName?: string;
-} | null;
-type ResourceMoveDialogState = {
-  ids: string[];
-  label: string;
-  meta: string;
-  folders: string[];
-} | null;
-type ResourceGroupMoveState = {
-  path: string;
-  target: string | null;
-} | null;
+import type {
+  ResourceGroupDialogState,
+  ResourceGroupMoveState,
+  ResourceMoveDialogState,
+} from "./ResourcePage/dialogTypes";
 
 const RESOURCE_TYPE_FILTERS: ResourceTypeFilter[] = [
   "all",
@@ -388,9 +372,6 @@ export default function ResourcePage({ active }: { active: boolean }) {
     setActiveGroupRowId(String(event.active.id));
     setActiveGroupRowWidth(event.active.rect.current.initial?.width ?? null);
   }, []);
-  const activeGroupRow = activeGroupRowId
-    ? manageRows.find(({ folder }) => folder.path === activeGroupRowId)?.folder ?? null
-    : null;
   const getResourceGroupLabel = useCallback((name: string) => (
     name === "" ? t("resources.ungrouped") : name
   ), [t]);
@@ -923,49 +904,15 @@ export default function ResourcePage({ active }: { active: boolean }) {
       </div>
 
       {resourceSettingsOpen && (
-        <section
-          ref={resourceSettingsPopoverRef}
-          className="resource-settings-popover"
-          role="dialog"
-          aria-label={t("resources.librarySettings")}
-        >
-          <div className="resource-settings-header">
-            <strong>{t("resources.librarySettings")}</strong>
-            <button
-              type="button"
-              className="resource-icon-button"
-              onClick={() => setResourceSettingsOpen(false)}
-              aria-label={t("common.close")}
-              title={t("common.close")}
-            >
-              {Icons.close}
-            </button>
-          </div>
-          <code className="resource-settings-path" title={resourceLibraryPath}>
-            {resourceLibraryPathLoading
-              ? t("common.loading")
-              : resourceLibraryPath || t("resources.libraryPathError")}
-          </code>
-          <p className="resource-settings-hint">{t("resources.libraryPathHint")}</p>
-          {resourceLibraryPathError && (
-            <span className="resource-settings-error" role="alert">
-              {resourceLibraryPathError}
-            </span>
-          )}
-          <button
-            type="button"
-            className="resource-secondary-button"
-            onClick={() => void handleChangeResourceLibraryPath()}
-            disabled={resourceLibraryPathLoading || resourceLibraryPathChanging}
-          >
-            {Icons.edit}
-            <span>
-              {resourceLibraryPathChanging
-                ? t("common.saving")
-                : t("resources.changeLibraryPath")}
-            </span>
-          </button>
-        </section>
+        <ResourceLibrarySettings
+          path={resourceLibraryPath}
+          loading={resourceLibraryPathLoading}
+          changing={resourceLibraryPathChanging}
+          error={resourceLibraryPathError}
+          popoverRef={resourceSettingsPopoverRef}
+          onClose={() => setResourceSettingsOpen(false)}
+          onChangePath={() => void handleChangeResourceLibraryPath()}
+        />
       )}
 
       <ResourceGroupChips
@@ -1021,250 +968,54 @@ export default function ResourcePage({ active }: { active: boolean }) {
       )}
 
       {resourceGroupManageOpen && (
-        <div className="dialog-overlay" onClick={() => setResourceGroupManageOpen(false)}>
-          <div
-            className="dialog-content large resource-group-manage-dialog"
-            onClick={(event) => event.stopPropagation()}
-          >
-            <div className="dialog-title-row">
-              <h3 className="dialog-title">{t("resources.manageGroups")}</h3>
-              <button
-                type="button"
-                className="group-add-btn group-manage-add-btn"
-                onClick={() => openNewResourceGroup()}
-                aria-label={t("resources.newGroup")}
-                title={t("resources.newGroup")}
-              >
-                {Icons.add}
-              </button>
-            </div>
-            {resourceGroupsError && (
-              <span className="dialog-error-text" role="alert">{resourceGroupsError}</span>
-            )}
-            <div className="resource-group-manage-list">
-              <DndContext
-                sensors={manageRowSensors}
-                collisionDetection={closestCenter}
-                modifiers={[restrictToVerticalAxis]}
-                onDragStart={handleManageRowDragStart}
-                onDragEnd={handleReorderManageRows}
-                onDragCancel={() => {
-                  setActiveGroupRowId(null);
-                  setActiveGroupRowWidth(null);
-                }}
-              >
-                <SortableContext
-                  items={manageRows.map(({ folder }) => folder.path)}
-                  strategy={verticalListSortingStrategy}
-                >
-                  {manageRows.map(({ folder, depth }) => {
-                    const isRoot = folder.name === "";
-                    const hasChildren = (folder.children ?? []).length > 0;
-                    const collapsed = collapsedGroupPaths.includes(folder.path);
-                    return (
-                      <SortableManageRow
-                        key={folder.path || "ungrouped"}
-                        folder={folder}
-                        depth={depth}
-                        label={getResourceGroupLabel(folder.name)}
-                        collapsed={collapsed}
-                        hasChildren={hasChildren}
-                        onToggleCollapsed={() => hasChildren && toggleGroupCollapsed(folder.path)}
-                        onOpen={() => void handleOpenResourceGroup(folder.path)}
-                        onNewSubgroup={() => openNewResourceGroup(folder.path)}
-                        onRename={() => openRenameResourceGroup(folder.path)}
-                        onMove={() => openGroupMove(folder.path)}
-                        onDelete={() => handleDeleteResourceGroup(folder.path)}
-                        hideRootControls={isRoot}
-                      />
-                    );
-                  })}
-                </SortableContext>
-                {/* 对话框带 backdrop-filter/transform 会让 fixed 以它为包含块，
-                    虚影飘出对话框；portal 到 body 才能跟随指针。 */}
-                {activeGroupRow && createPortal(
-                  <DragOverlay
-                    dropAnimation={null}
-                    style={activeGroupRowWidth ? { width: activeGroupRowWidth } : undefined}
-                  >
-                    <div className="resource-group-manage-row is-drag-overlay">
-                      <span className="resource-group-drag-handle is-static">{Icons.drag}</span>
-                      <span className="resource-group-manage-name">
-                        {getResourceGroupLabel(activeGroupRow.name)}
-                      </span>
-                    </div>
-                  </DragOverlay>,
-                  document.body,
-                )}
-              </DndContext>
-            </div>
-          </div>
-        </div>
+        <ResourceGroupManageDialog
+          rows={manageRows}
+          sensors={manageRowSensors}
+          collapsedPaths={collapsedGroupPaths}
+          activeRowId={activeGroupRowId}
+          activeRowWidth={activeGroupRowWidth}
+          error={resourceGroupsError}
+          onClose={() => setResourceGroupManageOpen(false)}
+          onNewSubgroup={openNewResourceGroup}
+          onRename={openRenameResourceGroup}
+          onMove={openGroupMove}
+          onDelete={handleDeleteResourceGroup}
+          onOpen={(path) => void handleOpenResourceGroup(path)}
+          onToggleCollapsed={toggleGroupCollapsed}
+          getGroupLabel={getResourceGroupLabel}
+          onDragStart={handleManageRowDragStart}
+          onDragEnd={handleReorderManageRows}
+          onDragCancel={() => {
+            setActiveGroupRowId(null);
+            setActiveGroupRowWidth(null);
+          }}
+        />
       )}
 
       {resourceGroupDialog && (
-        <div className="dialog-overlay" onClick={() => setResourceGroupDialog(null)}>
-          <div className="dialog-content" onClick={(event) => event.stopPropagation()}>
-            <h3 className="dialog-title">
-              {resourceGroupDialog.mode === "rename"
-                ? t("resources.renameGroup")
-                : t("resources.newGroup")}
-            </h3>
-            {resourceGroupDialog.mode === "create" && resourceGroupDialog.parentPath && (
-              <p className="resource-group-path-hint">
-                {t("resources.groupCreateAt", {
-                  path: formatResourceFolderPath(resourceGroupDialog.parentPath),
-                })}
-              </p>
-            )}
-            {resourceGroupDialog.mode === "rename" && resourceGroupDialog.oldName && (
-              <p className="resource-group-path-hint">
-                {t("resources.groupLocationAt", {
-                  path: formatResourceFolderPath(
-                    resourceGroupDialog.oldName.split("/").slice(0, -1).join("/"),
-                  ),
-                })}
-              </p>
-            )}
-            <input
-              className="dialog-input"
-              autoFocus
-              value={resourceGroupName}
-              placeholder={t("resources.groupName")}
-              onChange={(event) => setResourceGroupName(event.target.value)}
-              onKeyDown={(event) => {
-                if (event.key === "Enter") void handleSaveResourceGroup();
-              }}
-            />
-            {resourceGroupsError && (
-              <span className="dialog-error-text" role="alert">{resourceGroupsError}</span>
-            )}
-            <div className="dialog-actions">
-              <button
-                type="button"
-                className="dialog-btn secondary"
-                onClick={() => setResourceGroupDialog(null)}
-              >
-                {t("common.cancel")}
-              </button>
-              <button
-                type="button"
-                className="dialog-btn save"
-                onClick={() => void handleSaveResourceGroup()}
-                disabled={!resourceGroupName.trim() || resourceGroupSaving}
-              >
-                {resourceGroupSaving ? t("common.saving") : t("common.save")}
-              </button>
-            </div>
-          </div>
-        </div>
+        <ResourceGroupNameDialog
+          dialog={resourceGroupDialog}
+          name={resourceGroupName}
+          saving={resourceGroupSaving}
+          error={resourceGroupsError}
+          onNameChange={setResourceGroupName}
+          onClose={() => setResourceGroupDialog(null)}
+          onSave={() => void handleSaveResourceGroup()}
+        />
       )}
 
       {resourceGroupMove && (
-        <div className="dialog-overlay" onClick={() => !movingGroup && setResourceGroupMove(null)}>
-          <div
-            className="dialog-content resource-move-dialog"
-            onClick={(event) => event.stopPropagation()}
-          >
-            <h3 className="dialog-title">
-              {t("resources.moveGroupTitle", {
-                name: resourceGroupMove.path.split("/").pop() ?? resourceGroupMove.path,
-              })}
-            </h3>
-            <div className="resource-move-tree" role="listbox" aria-label={t("resources.moveGroup")}>
-              <div className="resource-move-entry">
-                <button
-                  type="button"
-                  className="resource-group-twist"
-                  disabled
-                  tabIndex={-1}
-                />
-                <button
-                  type="button"
-                  className={`resource-move-row${resourceGroupMove.target === "" ? " selected" : ""}`}
-                  role="option"
-                  aria-selected={resourceGroupMove.target === ""}
-                  onClick={() => setResourceGroupMove({ ...resourceGroupMove, target: "" })}
-                >
-                  <span className="resource-move-icon">{Icons.resources}</span>
-                  <span>{t("resources.topLevel")}</span>
-                </button>
-              </div>
-              {groupMoveRows.map(({ folder, depth }) => {
-                const currentParent = resourceGroupMove.path
-                  .split("/")
-                  .slice(0, -1)
-                  .join("/");
-                const inSubtree = folder.path === resourceGroupMove.path
-                  || folder.path.startsWith(`${resourceGroupMove.path}/`);
-                const disabled = inSubtree || folder.path === currentParent;
-                const hasChildren = (folder.children ?? []).length > 0;
-                const collapsed = collapsedGroupPaths.includes(folder.path);
-                return (
-                  <div
-                    key={folder.path}
-                    className="resource-move-entry"
-                    style={{ paddingLeft: `${depth * 16}px` }}
-                  >
-                    <button
-                      type="button"
-                      className={`resource-group-twist${collapsed ? " collapsed" : ""}`}
-                      disabled={!hasChildren}
-                      aria-label={
-                        hasChildren
-                          ? (collapsed ? t("resources.expandGroup") : t("resources.collapseGroup"))
-                          : undefined
-                      }
-                      onClick={() => hasChildren && toggleGroupCollapsed(folder.path)}
-                    >
-                      {hasChildren ? Icons.chevronDown : null}
-                    </button>
-                    <button
-                      type="button"
-                      className={`resource-move-row${resourceGroupMove.target === folder.path ? " selected" : ""}${disabled ? " current" : ""}`}
-                      role="option"
-                      aria-selected={resourceGroupMove.target === folder.path}
-                      disabled={disabled}
-                      title={folder.path}
-                      onClick={() => !disabled && setResourceGroupMove({ ...resourceGroupMove, target: folder.path })}
-                    >
-                      <span className="resource-move-icon">{Icons.resources}</span>
-                      <span>{folder.name}</span>
-                      {folder.path === currentParent && (
-                        <span className="resource-move-current-tag">{t("resources.currentParentTag")}</span>
-                      )}
-                      {inSubtree && (
-                        <span className="resource-move-current-tag">{t("resources.selfTag")}</span>
-                      )}
-                    </button>
-                  </div>
-                );
-              })}
-            </div>
-            <p className="resource-move-hint">{t("resources.moveGroupHint")}</p>
-            {movingGroupError && (
-              <span className="dialog-error-text" role="alert">{movingGroupError}</span>
-            )}
-            <div className="dialog-actions">
-              <button
-                type="button"
-                className="dialog-btn secondary"
-                onClick={() => setResourceGroupMove(null)}
-                disabled={movingGroup}
-              >
-                {t("common.cancel")}
-              </button>
-              <button
-                type="button"
-                className="dialog-btn save"
-                disabled={resourceGroupMove.target === null || movingGroup}
-                onClick={() => void handleMoveGroupConfirm()}
-              >
-                {movingGroup ? t("common.saving") : t("resources.move")}
-              </button>
-            </div>
-          </div>
-        </div>
+        <ResourceGroupMoveDialog
+          moveState={resourceGroupMove}
+          rows={groupMoveRows}
+          collapsedPaths={collapsedGroupPaths}
+          moving={movingGroup}
+          error={movingGroupError}
+          onSelectTarget={(target) => setResourceGroupMove({ ...resourceGroupMove, target })}
+          onClose={() => setResourceGroupMove(null)}
+          onConfirm={() => void handleMoveGroupConfirm()}
+          onToggleCollapsed={toggleGroupCollapsed}
+        />
       )}
 
       {confirmDialog}
@@ -1398,142 +1149,6 @@ export default function ResourcePage({ active }: { active: boolean }) {
       )}
       {moveDialogElement}
       {moveFeedbackElement}
-    </div>
-  );
-}
-
-function SortableManageRow({
-  folder,
-  depth,
-  label,
-  collapsed,
-  hasChildren,
-  onToggleCollapsed,
-  onOpen,
-  onNewSubgroup,
-  onRename,
-  onMove,
-  onDelete,
-  hideRootControls,
-}: {
-  folder: ResourceFolder;
-  depth: number;
-  label: string;
-  collapsed: boolean;
-  hasChildren: boolean;
-  onToggleCollapsed: () => void;
-  onOpen: () => void;
-  onNewSubgroup: () => void;
-  onRename: () => void;
-  onMove: () => void;
-  onDelete: () => void;
-  hideRootControls: boolean;
-}) {
-  const { t } = useTranslation();
-  const {
-    attributes,
-    listeners,
-    setNodeRef,
-    setActivatorNodeRef,
-    transform,
-    transition,
-    isDragging,
-  } = useSortable({ id: folder.path, disabled: hideRootControls });
-
-  return (
-    <div
-      ref={setNodeRef}
-      className={`resource-group-manage-row${isDragging ? " is-dragging" : ""}`}
-      style={{
-        paddingLeft: `${depth * 16}px`,
-        transform: CSS.Transform.toString(transform),
-        transition: transition || "transform 180ms ease",
-      } as React.CSSProperties}
-    >
-      {!hideRootControls && (
-        <button
-          type="button"
-          ref={setActivatorNodeRef}
-          className="resource-group-drag-handle"
-          {...attributes}
-          {...listeners}
-          aria-label={t("resources.reorder")}
-          title={t("resources.reorder")}
-          onClick={(event) => event.stopPropagation()}
-        >
-          {Icons.drag}
-        </button>
-      )}
-      <button
-        type="button"
-        className={`resource-group-twist${collapsed ? " collapsed" : ""}`}
-        disabled={!hasChildren}
-        aria-label={
-          hasChildren
-            ? (collapsed ? t("resources.expandGroup") : t("resources.collapseGroup"))
-            : undefined
-        }
-        onClick={() => hasChildren && onToggleCollapsed()}
-      >
-        {hasChildren && Icons.chevronDown}
-      </button>
-      <div className="resource-group-manage-name" title={folder.path}>
-        <span>{label}</span>
-      </div>
-      <span className="resource-group-manage-count">
-        {t("resources.itemCount", { count: folder.count })}
-      </span>
-      <div className="resource-group-manage-actions">
-        <button
-          type="button"
-          className="resource-icon-button"
-          onClick={onOpen}
-          aria-label={t("resources.openGroup")}
-          title={t("resources.openGroup")}
-        >
-          {Icons.resources}
-        </button>
-        {!hideRootControls && (
-          <>
-            <button
-              type="button"
-              className="resource-icon-button"
-              onClick={onNewSubgroup}
-              aria-label={t("resources.newSubgroup")}
-              title={t("resources.newSubgroup")}
-            >
-              {Icons.add}
-            </button>
-            <button
-              type="button"
-              className="resource-icon-button"
-              onClick={onRename}
-              aria-label={t("resources.renameGroup")}
-              title={t("resources.renameGroup")}
-            >
-              {Icons.edit}
-            </button>
-            <button
-              type="button"
-              className="resource-icon-button"
-              onClick={onMove}
-              aria-label={t("resources.moveGroup")}
-              title={t("resources.moveGroup")}
-            >
-              {Icons.arrowRight}
-            </button>
-            <button
-              type="button"
-              className="resource-delete-button"
-              onClick={onDelete}
-              aria-label={t("common.delete")}
-              title={t("common.delete")}
-            >
-              {Icons.delete}
-            </button>
-          </>
-        )}
-      </div>
     </div>
   );
 }

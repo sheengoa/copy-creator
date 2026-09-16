@@ -349,6 +349,7 @@ describe("integration regressions", () => {
     const appSource = readSource("./App.tsx");
     const clipboardPage = readSource("./pages/ClipboardPage/index.tsx");
     const radialMenu = readSource("./components/RadialMenu/index.tsx");
+    const radialItems = readSource("./components/RadialMenu/radialItems.ts");
     const resourcePage = readSource("./pages/ResourcePage.tsx");
 
     expect(appSource).toContain('titleKey: "tabs.resources"');
@@ -397,12 +398,13 @@ describe("integration regressions", () => {
     expect(radialMenu).toContain('useClipboardStore.getState().setCategory("resources")');
     expect(radialMenu).toContain('clipboardCategory === "resources"');
     expect(radialMenu).toContain(".filter((r) => isResourceRecord(r))");
-    expect(radialMenu).toContain("isContentPreviewAvailable");
+    expect(radialItems).toContain("isContentPreviewAvailable");
     expect(radialMenu).not.toContain("previewAvailable: true");
   });
 
   it("keeps resource detail flow and batch selection aligned with current records", () => {
     const pageSource = readSource("./pages/ResourcePage.tsx");
+    const manageDialogSource = readSource("./pages/ResourcePage/ResourceGroupManageDialog.tsx");
     const cardSource = readSource("./pages/ResourcePage/ResourceCard.tsx");
     const detailPageSource = readSource("./pages/ResourcePage/ResourceDetailPage.tsx");
     const config = JSON.parse(readSource("../src-tauri/tauri.conf.json")) as {
@@ -444,7 +446,7 @@ describe("integration regressions", () => {
     expect(pageSource).toContain("computeResourceColumnCount");
     // 管理分组对话框的拖拽虚影必须 portal 到 body：对话框的
     // backdrop-filter/transform 会把 fixed 虚影的包含块劫持到对话框上。
-    expect(pageSource).toContain("activeGroupRow && createPortal(");
+    expect(manageDialogSource).toContain("activeRow && createPortal(");
     // 「回到顶部」统一走共享模块（剪贴板/快捷输入/资源/径向菜单共用）。
     expect(pageSource).toContain("useBackToTop");
     expect(readSource("./hooks/useBackToTop.ts")).toContain("export function useBackToTop");
@@ -517,7 +519,7 @@ describe("integration regressions", () => {
     expect(dbSource).toContain("pub async fn set_resource_library_path");
     expect(dbSource).toContain("pub async fn select_resource_library_folder");
     expect(dbSource).toContain("paths_overlap(&path, &storage_path)");
-    expect(pruneBlock).toContain("COALESCE(storage_mode, 'database') = 'resource'");
+    expect(pruneBlock).toContain("NOT (storage_mode = 'resource')");
     expect(pruneBlock).not.toContain("TRIM(COALESCE(group_name, '')) <> ''");
     expect(pruneBlock).not.toContain("resource_files");
     expect(dbSource).toContain("WHERE NOT ({RESOURCE_RECORD_CONDITION})");

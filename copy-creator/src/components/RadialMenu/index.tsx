@@ -1,185 +1,54 @@
 import { RadialImageBanner, ResourceItemVisual } from "./ResourceItemVisual";
-import { readResourceTextPreview, readTextFileContent } from "../../domain/mediaAssets";
 import { useEffect, useRef, useState, useCallback, useMemo, type CSSProperties } from "react";
-import { createPortal } from "react-dom";
 import { useTranslation } from "react-i18next";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { invoke } from "@tauri-apps/api/core";
 import { Icons } from "../Icons";
 import { useClipboardStore, type ClipType } from "../../stores/clipboardStore";
-import {
-  usePhraseStore,
-  isImageFilePath,
-  ALL_PHRASES_GROUP_ID,
-} from "../../stores/phraseStore";
+import { usePhraseStore, ALL_PHRASES_GROUP_ID } from "../../stores/phraseStore";
 import { useSettingsStore } from "../../stores/settingsStore";
 import { shouldUseTerminalPasteForMouseTrigger } from "../../utils/pasteMode";
-import {
-  getClipboardRadialDragKind,
-  getPhraseRadialDragKind,
-  type RadialDragKind,
-  type RadialDragSource,
-} from "../../utils/radialDrag";
+import { type RadialDragSource } from "../../utils/radialDrag";
 import { ContentPreviewPanel } from "../ContentPreviewPanel";
 import { FileMediaVisual } from "../FileMediaPreview";
 import { BackToTopButton } from "../BackToTop";
 import { useBackToTop } from "../../hooks/useBackToTop";
-import {
-  isContentPreviewAvailable,
-  loadRecordPreviewSegments,
-  RADIAL_PREVIEW_WIDTH,
-  type RadialPreviewDirection,
-  type RadialPreviewSegment,
-} from "../../domain/preview";
-import { buildRecordView } from "../../domain/recordView";
+import { RADIAL_PREVIEW_WIDTH, type RadialPreviewDirection, type RadialPreviewSegment } from "../../domain/preview";
 import { isResourceRecord } from "../../domain/records";
-import { formatTime, formatRelativeTime } from "../../utils/formatTime";
-import { fileNameFromPath } from "../../domain/fileName";
-import type { ClipboardRecord, Phrase, ResourceFolder } from "../../types";
-import { type ResourceMediaKind } from "../../domain/mediaKind";
+import { formatTime } from "../../utils/formatTime";
+import type { ResourceFolder } from "../../types";
 import { findResourceFolder, flattenResourceFoldersVisible, formatResourceFolderPath, isResourceFolderPath } from "../../domain/groups";
-import { fileMediaKindFromPath, getResourceExtension, inferResourceMediaKind, TEXT_EXTENSIONS } from "../../domain/mediaKind";
-import {
-  getResourcePath,
-  getResourceSummary,
-  isFileBackedTextResource,
-  recordUsageTime,
-  resourceGroupLeafLabel,
-} from "../../domain/records";
+import { resourceGroupLeafLabel } from "../../domain/records";
 import { UsageCountBadge } from "../UsageCountBadge";
+import { ResourceGroupMenu } from "./ResourceGroupMenu";
+import {
+  buildAllPhraseItems,
+  loadRadialPreviewSegments,
+  pasteResourceGroup,
+  phraseToRadialItem,
+  recordToRadialItem,
+  usageTimeLabel,
+} from "./radialItems";
+import {
+  IS_LINUX,
+  MAX_ITEMS,
+  NAV_TAB_ICONS,
+  PHRASES_ALL_LIMIT,
+  RADIAL_DRAG_THRESHOLD_PX,
+  RADIAL_LAST_TAB_SETTING,
+  RADIAL_TAB_KEYS,
+  captureDragThumbnail,
+  flog,
+  loadPasteLeftClickSetting,
+  type PendingNativeDrag,
+  type PreviewLayout,
+  type PreviewState,
+  type RadialDragEvent,
+  type RadialItem,
+  type TabKey,
+} from "./types";
 import i18n from "../../i18n";
-
-type TabKey = "clipboard" | "phrases" | "resources";
-
-// 径向菜单 tab 用图标表达（与主窗口侧栏同一套图标），悬停由 title 提示名称。
-const NAV_TAB_ICONS: Record<TabKey, typeof Icons.clipboard> = {
-  clipboard: Icons.clipboard,
-  phrases: Icons.phrases,
-  resources: Icons.resources,
-};
-
-// 「记住上次模式」的设置键与合法取值。
-const RADIAL_LAST_TAB_SETTING = "radial_last_tab";
-const RADIAL_TAB_KEYS: TabKey[] = ["clipboard", "phrases", "resources"];
-
-const MAX_ITEMS = 2000;
-// 快捷输入「全部」视图展示条数：覆盖高频短语，按最近使用倒序，
-// 更多内容通过搜索或切到具体分组查看。
-const PHRASES_ALL_LIMIT = 15;
-const RADIAL_DRAG_THRESHOLD_PX = 6;
-const IS_LINUX = typeof navigator !== "undefined"
-  && /Linux/i.test(navigator.userAgent)
-  && !/Android/i.test(navigator.userAgent);
-
-// 诊断日志：转发到后端日志文件，排查仅真实交互可复现的拖动时序问题。
-const flog = (message: string) => {
-  void invoke("debug_log", { message }).catch(() => {});
-};
-
-// 拖动虚影上限：与后端 make_drag_image 的 MAX_DIM 保持一致。
-const RADIAL_DRAG_GHOST_PX = 128;
-
-// 抓取条目已渲染的缩略图交给后端当拖动虚影，避免后端解码原图
-// （大图会拖慢拖动启动 ~1s）。无图或未加载完成返回 null，由后端
-// 回退磁盘解码。
-const captureDragThumbnail = (itemId: string): string | null => {
-  try {
-    const img = document
-      .querySelector(`[data-radial-item-id="${CSS.escape(itemId)}"]`)
-      ?.querySelector("img");
-    if (!img || !img.complete || !img.naturalWidth) return null;
-    const scale = Math.min(
-      1,
-      RADIAL_DRAG_GHOST_PX / Math.max(img.naturalWidth, img.naturalHeight),
-    );
-    const width = Math.max(1, Math.round(img.naturalWidth * scale));
-    const height = Math.max(1, Math.round(img.naturalHeight * scale));
-    const canvas = document.createElement("canvas");
-    canvas.width = width;
-    canvas.height = height;
-    const ctx = canvas.getContext("2d");
-    if (!ctx) return null;
-    ctx.drawImage(img, 0, 0, width, height);
-    return canvas.toDataURL("image/png");
-  } catch {
-    return null;
-  }
-};
-
-interface RadialItem {
-  id: string;
-  content: string;
-  type: string;
-  /** file 短语指向图像文件时为相对存储路径：条目显示缩略图，悬浮展开大图预览。 */
-  imagePath?: string;
-  /** 剪切板 file 记录的完整本地路径：条目据此渲染视频封面帧等媒体视觉。 */
-  filePath?: string;
-  /** filePath 的媒体视觉判定（映射时经 domain 计算，渲染层只读不判）。 */
-  fileMediaKind?: "video" | "audio" | "image" | null;
-  createdAt?: string;
-  title?: string;
-  contentTruncated?: boolean;
-  previewAvailable: boolean;
-  dragPath?: string;
-  dragKind: RadialDragKind;
-  dragSource: RadialDragSource;
-  isResource?: boolean;
-  resourceKind?: ResourceMediaKind;
-  resourcePath?: string;
-  resourceTitle?: string;
-  resourceSummary?: string;
-  /** 「最近使用」条目的来源标签（剪切板 / 快捷输入·分组 / 资源·分组）。 */
-  sourceLabel?: string;
-  /** 「全部」视图的使用时间标签（相对时间或「未使用过」）；有值时替代 createdAt 展示。 */
-  usedAtLabel?: string;
-  /** 使用次数：「最多使用」模式下条目尾部展示「N 次」。 */
-  useCount?: number;
-}
-
-interface PreviewLayout {
-  direction: RadialPreviewDirection;
-  width: number;
-}
-
-interface PreviewState {
-  itemId: string;
-  segments: RadialPreviewSegment[] | null;
-  layout: PreviewLayout;
-}
-
-interface PendingNativeDrag {
-  itemId: string;
-  dragSource: RadialDragSource;
-  dragPath?: string;
-  sessionId: number;
-  pointerId: number;
-  startX: number;
-  startY: number;
-  startScreenX: number;
-  startScreenY: number;
-  devicePixelRatio: number;
-  thresholdCrossed: boolean;
-  armRequested: boolean;
-  armCompleted: boolean;
-  startRequested: boolean;
-  nativeStarted: boolean;
-}
-
-interface RadialDragEvent {
-  session_id: number;
-}
-
-async function loadPasteLeftClickSetting() {
-  try {
-    const mode = await invoke<string>("get_setting", { key: "paste_left_click" });
-    useSettingsStore.setState({
-      pasteLeftClick: mode === "terminal" ? "terminal" : "normal",
-    });
-  } catch {
-    // Keep the default normal paste mode if the setting is unavailable.
-  }
-}
 
 export default function RadialMenu() {
   const { t } = useTranslation();
@@ -450,68 +319,10 @@ export default function RadialMenu() {
     return layout;
   }, [cancelPreviewClose]);
 
-  const loadPreviewSegments = useCallback(async (item: RadialItem) => {
-    const cached = previewCacheRef.current.get(item.id);
-    if (cached) return cached;
-
-    const record = useClipboardStore.getState().records.find((entry) => entry.id === item.id);
-    let segments: RadialPreviewSegment[];
-    if (record) {
-      if (isResourceRecord(record)) {
-        const kind = inferResourceMediaKind(record);
-        const resourcePath = getResourcePath(record);
-        if (kind === "image") {
-          segments = [{ type: "image", path: resourcePath }];
-        } else if (kind === "video" || kind === "audio") {
-          segments = [{ type: kind, path: resourcePath }];
-        } else if (
-          record.type === "file"
-          && TEXT_EXTENSIONS.has(getResourceExtension(resourcePath))
-        ) {
-          // 文本文件按扩展名判定读取实际内容，不依赖 resource_kind；
-          // 读取失败时回退为路径展示。
-          try {
-            const text = await readResourceTextPreview(resourcePath);
-            segments = [{ type: "text", content: text }];
-          } catch {
-            segments = [{ type: "text", content: resourcePath }];
-          }
-        } else {
-          const content = kind === "text"
-            ? await useClipboardStore.getState().getRecordContent(record)
-            : item.resourceTitle || item.content;
-          segments = [{ type: "text", content }];
-        }
-      } else {
-        segments = await loadRecordPreviewSegments({
-          id: record.id,
-          recordType: record.type,
-          content: record.content,
-          contentTruncated: Boolean(record.content_truncated),
-          hasImages: Boolean(record.has_images),
-        });
-      }
-    } else {
-      const phrase = usePhraseStore.getState().phrases.find((entry) => entry.id === item.id);
-      if (phrase && phrase.input_type === "file" && isImageFilePath(phrase.content)) {
-        segments = [{ type: "image", path: phrase.content }];
-      } else if (phrase && phrase.input_type === "file") {
-        // 文件短语：常见文本格式读取内容预览，与主窗口一致。
-        try {
-          const text = await invoke<string>("read_quick_input_text_preview", {
-            path: phrase.content,
-          });
-          segments = [{ type: "text", content: text }];
-        } catch {
-          segments = [{ type: "text", content: phrase.content }];
-        }
-      } else {
-        segments = [{ type: "text", content: phrase?.content ?? item.content }];
-      }
-    }
-    previewCacheRef.current.set(item.id, segments);
-    return segments;
-  }, []);
+  const loadPreviewSegments = useCallback(
+    (item: RadialItem) => loadRadialPreviewSegments(item, previewCacheRef.current),
+    [],
+  );
 
   const showPreview = useCallback(async (item: RadialItem) => {
     if (dragActiveRef.current || nativeDragRef.current) return;
@@ -820,63 +631,10 @@ export default function RadialMenu() {
     }
   }, [resetState]);
 
-  // 整组粘贴（方案 A）：分组内全部为文本时合并为一段文本粘贴，
-  // 否则把分组内全部文件按文件列表一次写入剪切板再模拟 Ctrl+V。
-  // groupPath 为 null 时作用于当前选中的分组。
-  const handlePasteGroup = useCallback(async (groupPath: string | null) => {
-    const store = useClipboardStore.getState();
-    const allRecords = await store.loadAllRecords(
-      "resources",
-      groupPath ?? resourceGroupRef.current,
-      { silent: true },
-    );
-    const records = (allRecords ?? []).filter((record) => isResourceRecord(record));
-    flog(`paste-group path=${groupPath ?? resourceGroupRef.current} records=${records.length}`);
-    if (records.length > 0) {
-      const allText = records.every((record) => inferResourceMediaKind(record) === "text");
-      try {
-        // 文件承载的文本资源（如自动发现的 .txt）的 content 是文件路径，
-        // 合并前需读取文件真实内容；任一读取失败则整组回退为文件列表粘贴。
-        const parts: string[] = [];
-        let allTextContentReady = allText;
-        if (allText) {
-          for (const record of records) {
-            if (isFileBackedTextResource(record)) {
-              try {
-                parts.push(
-                  await readTextFileContent(getResourcePath(record)),
-                );
-              } catch (error) {
-                console.error("Failed to read text resource for group paste:", error);
-                allTextContentReady = false;
-                break;
-              }
-            } else {
-              parts.push(await store.getRecordContent(record));
-            }
-          }
-        }
-        if (allTextContentReady) {
-          await invoke("paste_text", { text: parts.join("\n") });
-        } else {
-          const paths = records
-            .map((record) => record.resource_path)
-            .filter((path): path is string => Boolean(path));
-          if (paths.length === 0) throw new Error("分组内没有可粘贴的文件");
-          await invoke("paste_files", { paths });
-        }
-        // 整组粘贴成功后全组计入「最近使用」，与单条粘贴的记录口径一致。
-        void invoke("touch_clipboard_usage", {
-          ids: records.map((record) => record.id),
-        }).catch((error) => {
-          console.error("Failed to record group usage:", error);
-        });
-      } catch (error) {
-        console.error("Failed to paste resource group:", error);
-      }
-    }
-    resetState();
-    void invoke("hide_radial_menu");
+  // 整组粘贴（方案 A）：文本组合并为一段，文件组按文件列表粘贴；
+  // 逻辑本体在 radialItems.pasteResourceGroup，这里只接当前分组兜底值。
+  const handlePasteGroup = useCallback((groupPath: string | null) => {
+    void pasteResourceGroup(groupPath, resourceGroupRef.current, resetState);
   }, [resetState]);
 
   const markRadialDragStarted = useCallback((pending: PendingNativeDrag) => {
@@ -1371,109 +1129,12 @@ export default function RadialMenu() {
       ? records.filter((r) => isResourceRecord(r))
     : records.filter((r) => !isResourceRecord(r) && r.type === clipboardCategory);
 
-  // 三类来源统一映射为 RadialItem，「最近使用」复用同一套渲染、预览与拖出机制。
-  const recordToRadialItem = (r: ClipboardRecord): RadialItem => {
-    if (isResourceRecord(r)) {
-      const item = buildRecordView(r);
-      const resourceKind = item.kind;
-      const resourcePath = item.resourcePath ?? r.content;
-      const resourceTitle = item.title;
-      const resourceSummary = r.type === "file"
-        ? undefined
-        : getResourceSummary(r);
-      return {
-        id: r.id,
-        content: resourceTitle,
-        type: r.type,
-        createdAt: r.created_at,
-        contentTruncated: r.content_truncated,
-        previewAvailable: resourceKind === "image"
-          || resourceKind === "text"
-          || resourceKind === "video"
-          || resourceKind === "audio",
-        dragKind: getClipboardRadialDragKind(r.type, r.has_images),
-        dragSource: "clipboard",
-        dragPath: r.drag_path || (r.type === "file" ? resourcePath : undefined),
-        isResource: true,
-        resourceKind,
-        resourcePath,
-        resourceTitle,
-        resourceSummary,
-        useCount: r.use_count,
-      };
-    }
-    return {
-      id: r.id,
-      content: r.type === "image"
-        ? `[${t("clipboard.image")}]`
-        : r.type === "file"
-          ? fileNameFromPath(r.content)
-          : r.is_api_key
-            ? r.key_preview || r.content
-            : r.content,
-      type: r.type,
-      filePath: r.type === "file" ? r.content : undefined,
-      fileMediaKind: r.type === "file" ? fileMediaKindFromPath(r.content) : undefined,
-      createdAt: r.created_at,
-      contentTruncated: r.content_truncated,
-      previewAvailable: isContentPreviewAvailable({
-        type: r.type,
-        contentTruncated: r.content_truncated,
-        hasImages: r.has_images,
-      }, r.content.length > 300),
-      dragKind: getClipboardRadialDragKind(r.type, r.has_images),
-      dragSource: "clipboard",
-      dragPath: r.drag_path,
-      useCount: r.use_count,
-    };
-  };
-
-  const phraseToRadialItem = (p: Phrase): RadialItem => ({
-    id: p.id,
-    content: p.input_type === "file"
-      ? fileNameFromPath(p.source_path || p.content)
-      : p.content,
-    type: p.input_type === "file" ? "file" : "phrase",
-    imagePath:
-      p.input_type === "file" && isImageFilePath(p.content) ? p.content : undefined,
-    title: p.title,
-    previewAvailable: isContentPreviewAvailable({
-      type: p.input_type,
-    }, p.content.length > 300),
-    dragKind: getPhraseRadialDragKind(p.input_type),
-    dragSource: "phrase",
-    dragPath: p.input_type === "file" ? p.content : undefined,
-    useCount: p.use_count,
-  });
-
-  // 「全部」视图：跨分组聚合，条目带来源分组标签与相对使用时间，
-  // 未使用过的短语以分隔线垫底（后端已按此顺序返回，这里只做展示映射）。
-  const allViewUsedAtLabel = (p: Phrase): string =>
-    p.last_used_at ? formatRelativeTime(p.last_used_at) : t("phrases.neverUsed");
-  const phraseSourceLabel = (p: Phrase): string =>
-    p.group_name ? `${t("tabs.phrases")} · ${p.group_name}` : t("tabs.phrases");
-
-  const buildAllPhraseItems = (list: Phrase[]): RadialItem[] => {
-    const toItem = (p: Phrase): RadialItem => ({
-      ...phraseToRadialItem(p),
-      usedAtLabel: allViewUsedAtLabel(p),
-      sourceLabel: phraseSourceLabel(p),
-    });
-    // 未使用过的短语按「分组顺序 + 组内手动顺序」垫底（不加分隔线，
-    // 与剪切板 / 资源「全部」视图形态统一）。
-    const used = list.filter((p) => (p.last_used_at ?? "") !== "");
-    const unused = list.filter((p) => (p.last_used_at ?? "") === "");
-    return [...used.map(toItem), ...unused.map(toItem)];
-  };
-
-  // 「全部」视图条目形态全区一致：相对使用时间 + 来源标签
-  // （快捷输入 · 分组 / 资源 · 分组；剪切板无分组概念不显示标签）。
-  const usageTimeLabel = (r: ClipboardRecord): string =>
-    formatRelativeTime(recordUsageTime(r.last_used_at, r.created_at));
+  // 三类来源统一映射为 RadialItem；映射本体在 radialItems 模块，
+  // 此处只注入翻译函数。
 
   const items: RadialItem[] = activeTab === "clipboard"
     ? filteredRecords.slice(0, MAX_ITEMS).map((r) => ({
-        ...recordToRadialItem(r),
+        ...recordToRadialItem(r, t),
         usedAtLabel: usageTimeLabel(r),
       }))
     : activeTab === "resources"
@@ -1481,7 +1142,7 @@ export default function RadialMenu() {
           .filter((r) => isResourceRecord(r))
           .slice(0, MAX_ITEMS)
           .map((r) => {
-            const item = recordToRadialItem(r);
+            const item = recordToRadialItem(r, t);
             if (resourceGroup !== null) {
               // 分组浏览保持原样：不带使用时间标签、来源标签与次数徽标。
               return { ...item, useCount: undefined };
@@ -1497,8 +1158,8 @@ export default function RadialMenu() {
           })
       : activeTab === "phrases"
         ? phraseGroupId === ALL_PHRASES_GROUP_ID
-          ? buildAllPhraseItems(phrases).slice(0, PHRASES_ALL_LIMIT)
-          : phrases.map(phraseToRadialItem)
+          ? buildAllPhraseItems(phrases, t).slice(0, PHRASES_ALL_LIMIT)
+          : phrases.map((phrase) => phraseToRadialItem(phrase))
         : [];
 
   // 统一的「回到顶部」：tab / 分类 / 分组 / 内容变化后重新评估按钮可见性。
@@ -1561,61 +1222,17 @@ export default function RadialMenu() {
     applyResourceGroupSwitch(groupPath);
   };
 
-  const resourceGroupMenu = resourceGroupMenuPath && resourceGroupMenuFolder
-    ? createPortal(
-      <div
-        ref={resourceGroupMenuRef}
-        className="radial-menu-resource-group-dropdown"
-        role="menu"
-        aria-label={t("resources.openSubfolders")}
-        style={{
-          left: resourceGroupMenuPosition?.left ?? 0,
-          top: resourceGroupMenuPosition?.top ?? 0,
-          visibility: resourceGroupMenuPosition ? "visible" : "hidden",
-        }}
-        onClick={(event) => event.stopPropagation()}
-      >
-        {resourceGroupMenuItems.map(({ folder, depth }, index) => {
-          const hasChildren = index > 0 && (folder.children ?? []).length > 0;
-          const collapsed = collapsedGroupPaths.includes(folder.path);
-          return (
-            <div
-              key={folder.path}
-              className="resource-group-menu-entry"
-              style={{ paddingLeft: `${8 + depth * 14}px` }}
-            >
-              <button
-                type="button"
-                className={`resource-group-twist${collapsed ? " collapsed" : ""}`}
-                disabled={!hasChildren}
-                tabIndex={hasChildren ? 0 : -1}
-                aria-label={
-                  hasChildren
-                    ? (collapsed ? t("resources.expandGroup") : t("resources.collapseGroup"))
-                    : undefined
-                }
-                onClick={() => hasChildren && toggleResourceGroupCollapsed(folder.path)}
-              >
-                {hasChildren ? Icons.chevronDown : null}
-              </button>
-              <button
-                type="button"
-                className={`radial-menu-resource-group-menu-item${resourceGroup === folder.path ? " selected" : ""}`}
-                role="menuitem"
-                aria-current={resourceGroup === folder.path ? "page" : undefined}
-                title={folder.path}
-                onClick={() => applyResourceGroupSwitch(folder.path)}
-              >
-                {Icons.resources}
-                <span>{depth === 0 ? t("resources.allFiles") : folder.name}</span>
-              </button>
-            </div>
-          );
-        })}
-      </div>,
-      document.body,
-    )
-    : null;
+  const resourceGroupMenu = resourceGroupMenuPath && resourceGroupMenuFolder ? (
+    <ResourceGroupMenu
+      items={resourceGroupMenuItems}
+      position={resourceGroupMenuPosition}
+      collapsedPaths={collapsedGroupPaths}
+      selectedGroup={resourceGroup}
+      menuRef={resourceGroupMenuRef}
+      onToggleCollapsed={toggleResourceGroupCollapsed}
+      onSwitch={applyResourceGroupSwitch}
+    />
+  ) : null;
 
   return (
     <div className={`radial-menu-overlay${visible ? "" : " radial-menu-hidden"}`}>
