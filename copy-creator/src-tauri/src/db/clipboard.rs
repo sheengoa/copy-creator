@@ -96,7 +96,7 @@ pub fn prune_old_records(app: &AppHandle) -> Result<(), Box<dyn std::error::Erro
         let mut stmt = conn.prepare(
             "DELETE FROM clipboard_records
              WHERE created_ms < ?1
-               AND NOT (COALESCE(storage_mode, 'database') = 'resource')
+               AND NOT (storage_mode = 'resource')
              RETURNING type, content, attachments",
         )?;
         let rows = stmt.query_map(params![cutoff_ms], |row| {
@@ -451,7 +451,7 @@ pub(crate) fn touch_clipboard_usage_internal<R: Runtime>(
     let mut stmt = conn
         .prepare(
             "SELECT id, resource_path FROM clipboard_records
-             WHERE COALESCE(storage_mode, 'database') = 'resource'
+             WHERE storage_mode = 'resource'
                AND COALESCE(resource_path, '') <> ''",
         )
         .map_err(|e| e.to_string())?;

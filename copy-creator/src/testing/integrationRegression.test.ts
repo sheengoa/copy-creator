@@ -244,12 +244,18 @@ describe("integration regressions", () => {
 
     // 目录监听必须把删除/内容修改也转发进防抖汇聚（不只是新建/改名），
     // 否则文件管理器里删除内容后界面永远不会刷新（修复前的根因）。
-    // 删除进一步经 Vanished 信号按路径移除记录（文件不在，记录不留）。
+    // 删除到回收站在 Windows/inotify 上都是 rename 移出（Modify(Name)），
+    // 不能按事件类型分流方向：路径只做触碰收集，到达/消失由
+    // settle_external_resource_changes 按磁盘现状 stat 裁决后统一结算
+    // （重定向/清退/补建）。
+    expect(watchSource).toContain("WatchSignal::Touched");
     expect(watchSource).toContain("WatchSignal::Changed");
-    expect(watchSource).toContain("WatchSignal::Vanished");
     expect(watchSource).toContain("EventKind::Remove(_)");
+    expect(watchSource).toContain("EventKind::Modify(ModifyKind::Name(_))");
     expect(watchSource).toContain("EventKind::Modify(_)");
     expect(watchSource).toContain("EventKind::Access(_)");
+    expect(watchSource).toContain("db::settle_external_resource_changes");
+    expect(dbSource).toContain("pub fn settle_external_resource_changes");
 
     // 使用（粘贴/整组粘贴/拖出）写入使用时间后必须发事件，主窗口与径向
     // 菜单才能实时刷新徽标与「最近使用」排序；无实际变更不发。
@@ -577,7 +583,10 @@ describe("integration regressions", () => {
     expect(dbSource).toContain("pub async fn set_resource_library_path");
     expect(dbSource).toContain("pub async fn select_resource_library_folder");
     expect(dbSource).toContain("paths_overlap(&path, &storage_path)");
-    expect(pruneBlock).toContain("COALESCE(storage_mode, 'database') = 'resource'");
+    // 保留期清理必须排除资源记录（storage_mode 等值比较命中
+    // idx_clipboard_storage_mode 索引；NULL 已由启动回填排除，勿改回
+    // COALESCE 包裹——那会让索引失效）。
+    expect(pruneBlock).toContain("storage_mode = 'resource'");
     expect(pruneBlock).not.toContain("TRIM(COALESCE(group_name, '')) <> ''");
     expect(pruneBlock).not.toContain("resource_files");
     expect(dbSource).toContain("WHERE NOT ({RESOURCE_RECORD_CONDITION})");

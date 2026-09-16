@@ -67,7 +67,19 @@ pub fn make_key_preview(content: &str) -> String {
 }
 
 
-const RESOURCE_RECORD_CONDITION: &str = "COALESCE(storage_mode, 'database') = 'resource'";
+// storage_mode 列在 schema 层有 DEFAULT 'database' 且历史数据已回填，
+// 永不为 NULL：直接等值比较可命中 idx_clipboard_storage_mode 索引。
+// 不要改回 COALESCE(storage_mode, 'database') 包裹——那会让索引失效。
+const RESOURCE_RECORD_CONDITION: &str = "storage_mode = 'resource'";
+
+/// storage_mode 历史数据回填 + 资源查询组合索引。ensure_schema 与测试共用
+/// 同一份 SQL，保证两者建的库结构一致。
+const RESOURCE_INDEX_MIGRATION_SQL: &str = "
+UPDATE clipboard_records SET storage_mode = 'database' WHERE storage_mode IS NULL;
+
+CREATE INDEX IF NOT EXISTS idx_clipboard_storage_mode
+    ON clipboard_records(storage_mode, resource_path);
+";
 
 fn category_sql(category: &Option<String>) -> (String, String) {
     match category.as_deref() {
@@ -552,7 +564,7 @@ fn path_inside_ignored_dir(path: &Path) -> bool {
 fn prune_legacy_thumb_records(conn: &Connection) {
     if let Err(error) = conn.execute(
         "DELETE FROM clipboard_records
-         WHERE COALESCE(storage_mode, 'database') = 'resource'
+         WHERE storage_mode = 'resource'
            AND (resource_path LIKE '%/thumbs/%' OR resource_path LIKE '%\\thumbs\\%')",
         [],
     ) {
@@ -573,7 +585,7 @@ fn prune_temporary_resource_records(conn: &Connection) {
         .collect();
     let sql = format!(
         "DELETE FROM clipboard_records
-         WHERE COALESCE(storage_mode, 'database') = 'resource'
+         WHERE storage_mode = 'resource'
            AND COALESCE(resource_external, 0) = 1
            AND ({})",
         conditions.join(" OR ")
@@ -1222,17 +1234,21 @@ fn ensure_schema(conn: &Connection) -> Result<(), Box<dyn std::error::Error>> {
     // ── 内容模式迁移：资源（资源库）与普通剪贴板两种模式，分组与“临时”标记废弃 ──
     // 旧版本以“是否有分组”推断资源，手动暂存记在 group_name（'stash'/'暂存'/'临时'）。
     // 统一为：带真实分组名的旧记录升级为资源后清空分组；手动暂存标记全部清除，并入剪贴板列表。
+    // 前置回填：storage_mode 列经 DEFAULT/ALTER 均带 'database'，NULL 只可能来自
+    // 异常路径；先回填再等值比较，保证「storage_mode = 'resource'」与旧
+    // COALESCE 语义一致，资源等值查询命中组合索引。
+    conn.execute_batch(RESOURCE_INDEX_MIGRATION_SQL).ok();
     conn.execute(
         "UPDATE clipboard_records SET storage_mode = ?1
          WHERE TRIM(COALESCE(group_name, '')) <> ''
            AND group_name NOT IN ('stash', '暂存', '默认', '临时')
-           AND COALESCE(storage_mode, 'database') <> ?1",
+           AND storage_mode <> ?1",
         params![RESOURCE_STORAGE_MODE],
     )
     .ok();
     conn.execute(
         "UPDATE clipboard_records SET group_name = ''
-         WHERE COALESCE(storage_mode, 'database') = ?1",
+         WHERE storage_mode = ?1",
         params![RESOURCE_STORAGE_MODE],
     )
     .ok();

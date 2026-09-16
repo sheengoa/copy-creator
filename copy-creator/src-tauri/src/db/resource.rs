@@ -96,7 +96,7 @@ pub fn sync_resource_library<R: Runtime>(app: &AppHandle<R>) -> usize {
     {
         let Ok(mut stmt) = conn.prepare(
             "SELECT id, resource_path FROM clipboard_records
-             WHERE COALESCE(storage_mode, 'database') = 'resource'",
+             WHERE storage_mode = 'resource'",
         ) else {
             return 0;
         };
@@ -123,7 +123,7 @@ pub fn sync_resource_library<R: Runtime>(app: &AppHandle<R>) -> usize {
     let mut known: HashSet<PathBuf> = {
         let Ok(mut stmt) = conn.prepare(
             "SELECT resource_path FROM clipboard_records
-             WHERE COALESCE(storage_mode, 'database') = 'resource'
+             WHERE storage_mode = 'resource'
                AND COALESCE(resource_path, '') <> ''",
         ) else {
             return removable.len();
@@ -170,6 +170,9 @@ pub fn sync_resource_library<R: Runtime>(app: &AppHandle<R>) -> usize {
 }
 
 /// 按路径移除资源记录（监听到外部删除时调用）：文件不在，记录不留。
+/// 目录型路径连带整棵子树——外部删除/移出目录时事件只报目录本身，
+/// 旧实现精确匹配会让目录下全部记录变成孤儿（分组 0 条、详情 404）。
+/// 路径比较经组件级前缀匹配，分隔符与尾部形态差异不影响命中。
 pub fn forget_resource_records<R: Runtime>(app: &AppHandle<R>, paths: &[PathBuf]) {
     if paths.is_empty() {
         return;
@@ -179,18 +182,29 @@ pub fn forget_resource_records<R: Runtime>(app: &AppHandle<R>, paths: &[PathBuf]
         return;
     };
     let Ok(mut stmt) = conn.prepare(
-        "SELECT id FROM clipboard_records
-         WHERE COALESCE(storage_mode, 'database') = 'resource' AND resource_path = ?1",
+        "SELECT id, resource_path FROM clipboard_records
+         WHERE storage_mode = 'resource'
+           AND COALESCE(resource_path, '') <> ''",
     ) else {
         return;
     };
-    for path in paths {
-        let path_text = path.to_string_lossy().to_string();
-        let Ok(rows) = stmt.query_map(params![path_text], |row| row.get::<_, String>(0)) else {
-            continue;
-        };
-        let ids: Vec<String> = rows.flatten().collect();
-        for id in ids {
+    let rows: Vec<(String, PathBuf)> = match stmt.query_map([], |row| {
+        Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
+    }) {
+        Ok(rows) => rows
+            .flatten()
+            .map(|(id, path)| (id, PathBuf::from(&path)))
+            .collect(),
+        Err(_) => return,
+    };
+    drop(stmt);
+    let missing_keys: Vec<PathBuf> = paths.iter().map(|path| watch_path_key(path)).collect();
+    for (id, resource_path) in rows {
+        let key = watch_path_key(&resource_path);
+        if missing_keys
+            .iter()
+            .any(|missing| key == *missing || key.starts_with(missing))
+        {
             let _ = conn.execute("DELETE FROM api_key_labels WHERE record_id = ?1", params![id]);
             let _ = conn.execute("DELETE FROM clipboard_records WHERE id = ?1", params![id]);
         }
@@ -223,7 +237,7 @@ pub fn discover_external_resource_files<R: Runtime>(
     prune_legacy_thumb_records(&conn);
     let mut stmt = match conn.prepare(
         "SELECT id, resource_path FROM clipboard_records
-         WHERE COALESCE(storage_mode, 'database') = 'resource'
+         WHERE storage_mode = 'resource'
            AND COALESCE(resource_path, '') <> ''",
     ) {
         Ok(stmt) => stmt,
@@ -249,36 +263,245 @@ pub fn discover_external_resource_files<R: Runtime>(
     }
     drop(stmt);
     for path in paths {
-        if !path.is_file() || !path.starts_with(&root) || is_ignored_resource_file(&path) {
+        if !path.starts_with(&root) {
             continue;
         }
-        // 与扫描同一套忽略规则：应用自身的附件、临时文件与 thumbs/ 派生
-        // 缓存不是内容，否则保存图文暂存或缩略图生成时会被当作新放入
-        // 置顶成独立资源条目。
-        if path_inside_ignored_dir(path) || is_ignored_resource_file(path) {
-            continue;
-        }
-        let path_text = path.to_string_lossy().to_string();
-        if by_path.contains_key(&resource_path_key(path)) {
-            continue;
-        }
-        let id = resource_file_id(path);
-        match conn.execute(
-            "INSERT OR IGNORE INTO clipboard_records
-             (id, type, content, source_app, created_at, storage_mode, resource_path,
-              sort_order, use_count, resource_external)
-             VALUES (?1, 'file', ?2, '', ?3, 'resource', ?2, ?4, 0, 1)",
-            params![id, path_text, &now, now_ms],
-        ) {
-            Err(error) => {
-                log::warn!("外部移入文件补建入库失败 {}: {error}", path.display());
+        // 目录到达（外部整目录移入/复制进来，rename 目标）时递归补建
+        // 全部内容——事件只报目录本身，子文件不会再有独立事件，不递归
+        // 就要等下次启动对账才能被发现。
+        if path.is_dir() {
+            if path_inside_ignored_dir(path) {
+                continue;
             }
-            Ok(_) => {
-                by_path.insert(resource_path_key(path), id);
-                log::info!("外部移入文件已按发现时间入库置顶: {}", path.display());
+            for file in collect_resource_files_under(path) {
+                insert_external_resource_file(&conn, &mut by_path, &root, &file, &now, now_ms);
+            }
+            continue;
+        }
+        insert_external_resource_file(&conn, &mut by_path, &root, path, &now, now_ms);
+    }
+}
+
+/// 单个外部文件按发现时间补建入库；已存在记录、库外路径与忽略文件跳过。
+fn insert_external_resource_file(
+    conn: &Connection,
+    by_path: &mut HashMap<PathBuf, String>,
+    root: &Path,
+    path: &Path,
+    now: &str,
+    now_ms: i64,
+) {
+    if !path.is_file() || !path.starts_with(root) {
+        return;
+    }
+    // 与扫描同一套忽略规则：应用自身的附件、临时文件与 thumbs/ 派生
+    // 缓存不是内容，否则保存图文暂存或缩略图生成时会被当作新放入
+    // 置顶成独立资源条目。
+    if path_inside_ignored_dir(path) || is_ignored_resource_file(path) {
+        return;
+    }
+    let path_text = path.to_string_lossy().to_string();
+    if by_path.contains_key(&resource_path_key(path)) {
+        return;
+    }
+    let id = resource_file_id(path);
+    match conn.execute(
+        "INSERT OR IGNORE INTO clipboard_records
+         (id, type, content, source_app, created_at, storage_mode, resource_path,
+          sort_order, use_count, resource_external)
+         VALUES (?1, 'file', ?2, '', ?3, 'resource', ?2, ?4, 0, 1)",
+        params![id, path_text, now, now_ms],
+    ) {
+        Err(error) => {
+            log::warn!("外部移入文件补建入库失败 {}: {error}", path.display());
+        }
+        Ok(_) => {
+            by_path.insert(resource_path_key(path), id);
+            log::info!("外部移入文件已按发现时间入库置顶: {}", path.display());
+        }
+    }
+}
+
+/// 递归收集目录下的资源文件路径（对齐扫描语义：跳过 `.copy-creator`、
+/// `thumbs` 派生目录与临时/隐藏文件）。只回路径不取元数据——补建走
+/// 发现时间，排序结果做稳定处理便于测试断言。
+fn collect_resource_files_under(directory: &Path) -> Vec<PathBuf> {
+    let mut files: Vec<PathBuf> = Vec::new();
+    let mut stack = vec![directory.to_path_buf()];
+    while let Some(dir) = stack.pop() {
+        let Ok(read_dir) = std::fs::read_dir(&dir) else {
+            continue;
+        };
+        for entry in read_dir.flatten() {
+            let path = entry.path();
+            let Ok(file_type) = entry.file_type() else {
+                continue;
+            };
+            if file_type.is_dir() {
+                if is_ignored_resource_dir(&entry.file_name()) {
+                    continue;
+                }
+                stack.push(path);
+            } else if file_type.is_file() && !is_ignored_resource_file(&path) {
+                files.push(path);
             }
         }
     }
+    files.sort();
+    files
+}
+
+/// 监听结算专用的路径比较键：只做组件规范化与 `\\?\` 前缀还原，不走
+/// canonicalize——消失路径已无法 canonicalize，混用两种形态会让前缀
+/// 匹配失效。事件路径与记录路径同源于 `get_resource_library_dir`，
+/// 形态一致，直接组件比较即可。
+fn watch_path_key(path: &Path) -> PathBuf {
+    simplify_windows_path(&path.components().collect::<PathBuf>())
+}
+
+/// 两个路径是否为同父目录下的兄弟节点（组件级比较，忽略分隔符形态）。
+fn same_parent(a: &Path, b: &Path) -> bool {
+    match (a.parent(), b.parent()) {
+        (Some(parent_a), Some(parent_b)) => watch_path_key(parent_a) == watch_path_key(parent_b),
+        _ => false,
+    }
+}
+
+/// 外部目录改名/移动的重定向：旧目录路径消失、同批有同父目录的新目录
+/// 到达、且新目录的实际文件完全覆盖旧子树的记录时，把记录的
+/// resource_path 与 id 级联改写到新路径（备注、使用次数、创建时间等
+/// 元数据全部保留；分组归属查询时从 resource_path 现场推导，无需额外
+/// 改写）。找不到替身（真删除/移出库外）时不动，交给
+/// forget_resource_records 按子树清退。仅目录型消失参与重定向；单文件
+/// 改名维持「删旧建新」语义，避免同窗口内无关的删+建被误配对。
+fn relocate_resource_records<R: Runtime>(
+    app: &AppHandle<R>,
+    missing: &[PathBuf],
+    arrived: &[PathBuf],
+) {
+    if missing.is_empty() || arrived.is_empty() {
+        return;
+    }
+    let state = app.state::<DbState>();
+    let Ok(conn) = state.conn.lock() else {
+        return;
+    };
+    let Ok(mut stmt) = conn.prepare(
+        "SELECT id, resource_path FROM clipboard_records
+         WHERE storage_mode = 'resource'
+           AND COALESCE(resource_path, '') <> ''",
+    ) else {
+        return;
+    };
+    let records: Vec<(String, PathBuf)> = match stmt.query_map([], |row| {
+        Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
+    }) {
+        Ok(rows) => rows
+            .flatten()
+            .map(|(id, path)| (id, PathBuf::from(&path)))
+            .collect(),
+        Err(_) => return,
+    };
+    drop(stmt);
+    // 现有路径占用表：重定向目标已被其他记录占用时放弃，防同路径重复。
+    let mut occupied: HashSet<PathBuf> = records.iter().map(|(_, path)| watch_path_key(path)).collect();
+
+    for gone in missing {
+        let gone_key = watch_path_key(gone);
+        // 子树受害者：位于消失目录之下的全部记录。
+        let victims: Vec<&(String, PathBuf)> = records
+            .iter()
+            .filter(|(_, path)| {
+                let key = watch_path_key(path);
+                key.starts_with(&gone_key) && key != gone_key
+            })
+            .collect();
+        if victims.is_empty() {
+            continue;
+        }
+        // 替身：同父目录、本批到达、真实存在的目录（且不是消失路径本身）。
+        let Some(replacement) = arrived.iter().find(|candidate| {
+            candidate.is_dir()
+                && watch_path_key(candidate) != gone_key
+                && same_parent(candidate, gone)
+        }) else {
+            continue;
+        };
+        // 覆盖验证：替身下的实际文件必须包含全部受害记录的相对路径。
+        let replacement_files: HashSet<PathBuf> = collect_resource_files_under(replacement)
+            .iter()
+            .map(|path| watch_path_key(path))
+            .collect();
+        let mut moves: Vec<(String, PathBuf)> = Vec::new();
+        let mut fully_covered = true;
+        for (id, path) in &victims {
+            let victim_key = watch_path_key(path);
+            let Ok(relative) = victim_key.strip_prefix(&gone_key) else {
+                fully_covered = false;
+                break;
+            };
+            let target = replacement.join(relative);
+            let target_key = watch_path_key(&target);
+            if !replacement_files.contains(&target_key) || occupied.contains(&target_key) {
+                fully_covered = false;
+                break;
+            }
+            moves.push(((id.clone()), target));
+        }
+        if !fully_covered {
+            continue;
+        }
+        for (id, target) in moves {
+            let new_id = resource_file_id(&target);
+            let updated = conn.execute(
+                "UPDATE clipboard_records SET id = ?1, resource_path = ?2 WHERE id = ?3",
+                params![new_id, target.to_string_lossy(), id],
+            );
+            if updated == Ok(1) {
+                occupied.insert(watch_path_key(&target));
+                let _ = conn.execute(
+                    "UPDATE api_key_labels SET record_id = ?1 WHERE record_id = ?2",
+                    params![new_id, id],
+                );
+                log::info!(
+                    "外部目录改名已重定向资源记录: {} -> {}",
+                    id,
+                    target.display()
+                );
+            }
+        }
+    }
+}
+
+/// 监听防抖结束后的统一结算入口：对触碰路径按磁盘现状裁决方向——
+/// 已消失的先尝试目录改名/移动重定向（保元数据），再按「文件不在，
+/// 记录不留」子树清退；仍存在的按到达补建（文件单条，目录递归）。
+/// rename 在 Windows（ReadDirectoryChangesW）与 Linux（inotify）上都报
+/// `Modify(Name(From/To))` 而非 Remove/Create，删除到回收站正是一次
+/// rename 移出，按事件类型分流会永远漏删，必须以 stat 结果为准。
+pub fn settle_external_resource_changes<R: Runtime>(app: &AppHandle<R>, paths: &[PathBuf]) {
+    if paths.is_empty() {
+        return;
+    }
+    let root = get_resource_library_dir(app);
+    let mut missing: Vec<PathBuf> = Vec::new();
+    let mut existing: Vec<PathBuf> = Vec::new();
+    for path in paths {
+        if !path.starts_with(&root) {
+            continue;
+        }
+        if path.exists() {
+            existing.push(path.to_path_buf());
+        } else {
+            missing.push(path.to_path_buf());
+        }
+    }
+    if missing.is_empty() && existing.is_empty() {
+        return;
+    }
+    relocate_resource_records(app, &missing, &existing);
+    forget_resource_records(app, &missing);
+    discover_external_resource_files(app, &existing);
 }
 
 /// 资源列表查询的中间行：只承载过滤与排序所需的标量字段。完整 JSON 组装
@@ -396,7 +619,7 @@ pub(crate) fn get_resource_records_inner<R: Runtime>(
                         COALESCE(use_count, 0), COALESCE(touched_ms, 0),
                         COALESCE(last_used_at, ''), COALESCE(resource_external, 0)
                  FROM clipboard_records
-                 WHERE COALESCE(storage_mode, 'database') = 'resource'",
+                 WHERE storage_mode = 'resource'",
             )
             .map_err(|e| e.to_string())?;
         let rows = stmt
@@ -613,7 +836,7 @@ pub(crate) fn touch_resource_group_usage_internal<R: Runtime>(
     let mut stmt = conn
         .prepare(
             "SELECT id, resource_path FROM clipboard_records
-             WHERE COALESCE(storage_mode, 'database') = 'resource'
+             WHERE storage_mode = 'resource'
                AND COALESCE(resource_path, '') <> ''",
         )
         .map_err(|e| e.to_string())?;
@@ -752,7 +975,7 @@ pub(crate) fn resource_record_paths_in_folder<R: Runtime>(
         .prepare(
             "SELECT id, resource_path
              FROM clipboard_records
-             WHERE COALESCE(storage_mode, 'database') = 'resource'",
+             WHERE storage_mode = 'resource'",
         )
         .map_err(|e| e.to_string())?;
     let rows = stmt
@@ -792,7 +1015,7 @@ pub(crate) fn update_resource_record_paths<R: Runtime>(
         tx.execute(
             "UPDATE clipboard_records
              SET resource_path = ?1, group_name = ?2
-             WHERE id = ?3 AND COALESCE(storage_mode, 'database') = 'resource'",
+             WHERE id = ?3 AND storage_mode = 'resource'",
             params![path, group_name, id],
         )
         .map_err(|e| e.to_string())?;
@@ -812,7 +1035,7 @@ pub(crate) fn resource_group_count_map<R: Runtime>(
             .prepare(
                 "SELECT resource_path
                  FROM clipboard_records
-                 WHERE COALESCE(storage_mode, 'database') = 'resource'",
+                 WHERE storage_mode = 'resource'",
             )
             .map_err(|e| e.to_string())?;
         let rows = stmt
