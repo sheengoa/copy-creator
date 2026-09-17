@@ -121,19 +121,19 @@
 }
 
 /* --- Sidebar Nav --- */
-/* 分段控件容器：浅灰圆角底，激活项为其中浮起的白色卡片（设计稿样式） */
+/* 分段控件容器：浅灰圆角底，激活项为其中浮起的白色卡片（设计稿样式）。
+   居中用左右对称 margin，不依赖百分比宽度 + align-self 的取整。 */
 .sidebar-nav {
   flex: 0 0 auto;
   display: flex;
   flex-direction: column;
   align-items: stretch;
-  align-self: center;
-  width: calc(100% - 16px);
+  align-self: stretch;
+  margin: 16px 8px 0;
   padding: 5px;
   border-radius: 16px;
   background: #F2F2F2;
   gap: 4px;
-  margin-top: 16px;
 }
 
 .sidebar-nav-item {
@@ -186,8 +186,6 @@
 
 /* 展开态（拖宽 >80px）：容器与白卡整行延展 + 文字标签 */
 .sidebar:not(.collapsed) .sidebar-nav {
-  align-self: stretch;
-  width: auto;
   margin: 16px 12px 0;
 }
 
@@ -223,18 +221,22 @@
 }
 
 /* --- Sidebar Footer --- */
+/* 与导航同款分段容器：浅灰圆角底 + 激活白卡，固定吸附底部 */
 .sidebar-footer {
+  flex: 0 0 auto;
   display: flex;
   flex-direction: column;
-  align-items: center;
-  gap: 12px;
-  padding: 8px 0 16px;
+  align-items: stretch;
+  align-self: stretch;
+  margin: 12px 8px 14px;
+  padding: 5px;
+  border-radius: 16px;
+  background: #F2F2F2;
+  gap: 4px;
   margin-top: auto;
 }
 
-/* 设计稿：白底上的裸图标，无底色；激活/悬停以浅灰圆角填充示意 */
 .sidebar-footer-item {
-  width: 44px;
   height: 44px;
   flex-shrink: 0;
   display: flex;
@@ -248,14 +250,13 @@
   background: transparent;
   color: var(--text-secondary);
   cursor: pointer;
-  transition: background 0.15s ease, color 0.15s ease;
+  transition: background 0.15s ease, color 0.15s ease, box-shadow 0.15s ease;
   white-space: nowrap;
   -webkit-app-region: no-drag;
   app-region: no-drag;
 }
 
 .sidebar-footer-item:hover {
-  background: rgba(0, 0, 0, 0.04);
   color: var(--text-primary);
 }
 
@@ -264,8 +265,9 @@
 }
 
 .sidebar-footer-item.active {
-  background: #F2F2F2;
+  background: #FFFFFF;
   color: var(--text-primary);
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.10), 0 0 0 0.5px rgba(0, 0, 0, 0.02);
 }
 
 .sidebar-footer-icon {
@@ -281,34 +283,9 @@
   stroke-width: 1.8;
 }
 
-/* 展开态：整行 + 文字标签，与导航一致 */
+/* 展开态：容器与白卡整行延展 + 文字标签，与导航一致 */
 .sidebar:not(.collapsed) .sidebar-footer {
-  align-items: stretch;
-  padding: 8px 12px 16px;
-}
-
-.sidebar:not(.collapsed) .sidebar-footer-item {
-  width: 100%;
-  justify-content: flex-start;
-  padding: 0 10px;
-}
-
-[data-theme="dark"] .sidebar-footer-item {
-  color: rgba(255, 255, 255, 0.45);
-}
-
-[data-theme="dark"] .sidebar-footer-item:hover {
-  background: rgba(255, 255, 255, 0.07);
-  color: rgba(255, 255, 255, 0.8);
-}
-
-[data-theme="dark"] .sidebar-footer-item:hover {
-  background: rgba(255, 255, 255, 0.06);
-}
-
-[data-theme="dark"] .sidebar-footer-item.active {
-  background: rgba(255, 255, 255, 0.10);
-  color: rgba(255, 255, 255, 0.9);
+  margin: 12px 12px 14px;
 }
 
 .sidebar-footer-label {
@@ -322,6 +299,24 @@
   opacity: 0;
   max-width: 0;
   overflow: hidden;
+}
+
+[data-theme="dark"] .sidebar-footer {
+  background: rgba(255, 255, 255, 0.07);
+}
+
+[data-theme="dark"] .sidebar-footer-item {
+  color: rgba(255, 255, 255, 0.45);
+}
+
+[data-theme="dark"] .sidebar-footer-item:hover {
+  color: rgba(255, 255, 255, 0.8);
+}
+
+[data-theme="dark"] .sidebar-footer-item.active {
+  background: rgba(255, 255, 255, 0.14);
+  color: rgba(255, 255, 255, 0.9);
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.30);
 }
 
 /* --- Panel Area --- */
