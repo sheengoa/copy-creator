@@ -161,6 +161,8 @@ function App() {
       const next = await invoke<boolean>("toggle_always_on_top");
       setIsPinned(next);
     } catch (e) {
+      // 失败写入后端日志文件：置顶只在真实交互中暴露问题（预览页无后端）。
+      invoke("debug_log", { message: `pin: toggle 失败 ${String(e).slice(0, 200)}` }).catch(() => {});
       console.error("Failed to toggle pin:", e);
     }
   };
