@@ -202,6 +202,12 @@
   overflow: hidden;
 }
 
+/* 折叠态：零宽标签 + gap 会把图标推离按钮中心半个 gap，置 0 校正 */
+.sidebar.collapsed .sidebar-nav-item,
+.sidebar.collapsed .sidebar-footer-item {
+  gap: 0;
+}
+
 [data-theme="dark"] .sidebar-nav {
   background: rgba(255, 255, 255, 0.07);
 }
@@ -228,7 +234,7 @@
   flex-direction: column;
   align-items: stretch;
   align-self: stretch;
-  margin: 12px 8px 14px;
+  margin: 12px 8px 20px;
   padding: 5px;
   border-radius: 16px;
   background: #F2F2F2;
@@ -285,7 +291,7 @@
 
 /* 展开态：容器与白卡整行延展 + 文字标签，与导航一致 */
 .sidebar:not(.collapsed) .sidebar-footer {
-  margin: 12px 12px 14px;
+  margin: 12px 12px 20px;
 }
 
 .sidebar-footer-label {
