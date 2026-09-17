@@ -86,9 +86,9 @@ function App() {
     // zustand action 引用恒定，仅满足 exhaustive-deps，不会引发重跑。
   }, [loadSettings]);
 
-  const SIDEBAR_MIN = 60;
+  const SIDEBAR_MIN = 72;
   const SIDEBAR_MAX = 130;
-  const SIDEBAR_DEFAULT = 60;
+  const SIDEBAR_DEFAULT = 72;
   const COLLAPSE_THRESHOLD = 80;
   const [sidebarWidth, setSidebarWidth] = useState(SIDEBAR_DEFAULT);
   const [isCollapsed, setIsCollapsed] = useState(true);
