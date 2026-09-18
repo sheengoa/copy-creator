@@ -1672,6 +1672,7 @@
 }
 
 .resource-detail-stage {
+  position: relative;
   display: flex;
   min-height: 300px;
   align-items: center;
@@ -1682,6 +1683,20 @@
   border: 1px solid var(--separator);
   border-radius: 10px;
   background: var(--card-inner-bg);
+}
+
+/* 编辑文本态：列向拉伸承载查找条（sticky 常驻顶部）与自动增高编辑器 */
+.resource-detail-stage.resource-detail-stage-editing {
+  flex-direction: column;
+  align-items: stretch;
+  justify-content: flex-start;
+}
+
+.resource-detail-stage .find-replace-bar {
+  position: sticky;
+  top: 4px;
+  right: auto;
+  align-self: flex-end;
 }
 
 .resource-detail-stage-text,

@@ -303,7 +303,17 @@
     "daysAgo_one": "{{count}} d ago",
     "daysAgo_other": "{{count}} d ago",
     "usageCount_one": "{{count}} use",
-    "usageCount_other": "{{count}} uses"
+    "usageCount_other": "{{count}} uses",
+    "findPlaceholder": "Find",
+    "replacePlaceholder": "Replace with",
+    "replaceCurrent": "Replace",
+    "replaceAll": "Replace all",
+    "findPrev": "Previous match",
+    "findNext": "Next match",
+    "findNoResults": "No results",
+    "matchCase": "Match case",
+    "closeFindReplace": "Close find and replace",
+    "findReplace": "Find and replace"
   },
   "radialMenu": {
     "empty": "No items",

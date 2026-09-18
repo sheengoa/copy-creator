@@ -9,6 +9,8 @@ import { BackToTopButton } from "../../components/BackToTop";
 import { useBackToTop } from "../../hooks/useBackToTop";
 import { HighlightText } from "../../components/HighlightText";
 import { ImageLightbox } from "../../components/ImageLightbox";
+import FindReplaceBar from "../../components/FindReplaceBar";
+import { findMatchPositions } from "../../utils/findReplace";
 import { loadRecordPreviewSegments, type RadialPreviewSegment } from "../../domain/preview";
 import { formatResourceBitrate, formatResourceDuration, formatResourceFileSize } from "./resourceUtils";
 import { type ResourceMediaKind } from "../../domain/mediaKind";
@@ -309,6 +311,78 @@ export default function ResourceDetailPage({
   }, [fullTextContent]);
   const contentDirty = contentDraft.trim() !== savedContent.trim();
 
+  // ── 查找替换（编辑模式，Ctrl+F）──
+  const [findOpen, setFindOpen] = useState(false);
+  const [findQuery, setFindQuery] = useState("");
+  const [findReplaceText, setFindReplaceText] = useState("");
+  const [findCaseSensitive, setFindCaseSensitive] = useState(false);
+  const [findIndex, setFindIndex] = useState(0);
+  const findMatches = useMemo(
+    () => (contentEditing ? findMatchPositions(contentDraft, findQuery, findCaseSensitive) : []),
+    [contentEditing, contentDraft, findQuery, findCaseSensitive],
+  );
+
+  // 选中指定匹配：textarea 自动增高、无内部滚动，选区交给浏览器随
+  // focus 沿祖先滚动容器（页面层级）呈现到可视区。
+  const focusFindMatch = useCallback((start: number, end: number) => {
+    const textarea = contentEditorRef.current;
+    if (!textarea) return;
+    textarea.focus();
+    textarea.setSelectionRange(start, end);
+  }, []);
+
+  const goToFindMatch = useCallback((index: number) => {
+    if (findMatches.length === 0) return;
+    const wrapped = ((index % findMatches.length) + findMatches.length) % findMatches.length;
+    setFindIndex(wrapped);
+    const start = findMatches[wrapped];
+    focusFindMatch(start, start + findQuery.length);
+  }, [findMatches, findQuery, focusFindMatch]);
+
+  const handleFindQueryChange = useCallback((query: string) => {
+    setFindQuery(query);
+    const positions = findMatchPositions(contentDraft, query, findCaseSensitive);
+    setFindIndex(0);
+    if (positions.length > 0) focusFindMatch(positions[0], positions[0] + query.length);
+  }, [contentDraft, findCaseSensitive, focusFindMatch]);
+
+  const handleFindCaseSensitiveChange = useCallback((nextCaseSensitive: boolean) => {
+    setFindCaseSensitive(nextCaseSensitive);
+    const positions = findMatchPositions(contentDraft, findQuery, nextCaseSensitive);
+    setFindIndex(0);
+    if (positions.length > 0) focusFindMatch(positions[0], positions[0] + findQuery.length);
+  }, [contentDraft, findQuery, focusFindMatch]);
+
+  const handleFindReplaceCurrent = useCallback(() => {
+    if (findMatches.length === 0 || findQuery === "") return;
+    const index = Math.min(findIndex, findMatches.length - 1);
+    const start = findMatches[index];
+    const nextDraft =
+      contentDraft.slice(0, start) + findReplaceText + contentDraft.slice(start + findQuery.length);
+    setContentDraft(nextDraft);
+    setContentSaveError(false);
+    const positions = findMatchPositions(nextDraft, findQuery, findCaseSensitive);
+    const shifted = positions.findIndex((position) => position >= start + findReplaceText.length);
+    const target = shifted === -1 ? 0 : shifted;
+    setFindIndex(target);
+    if (positions.length > 0) focusFindMatch(positions[target], positions[target] + findQuery.length);
+  }, [contentDraft, findMatches, findIndex, findQuery, findReplaceText, findCaseSensitive, focusFindMatch]);
+
+  const handleFindReplaceAll = useCallback(() => {
+    if (findMatches.length === 0 || findQuery === "") return;
+    let result = "";
+    let cursor = 0;
+    for (const position of findMatches) {
+      result += contentDraft.slice(cursor, position) + findReplaceText;
+      cursor = position + findQuery.length;
+    }
+    result += contentDraft.slice(cursor);
+    setContentDraft(result);
+    setContentSaveError(false);
+    setFindIndex(0);
+    contentEditorRef.current?.focus();
+  }, [contentDraft, findMatches, findQuery, findReplaceText]);
+
   const startContentEdit = () => {
     setContentDraft(fullTextContent ?? "");
     setContentSaved(false);
@@ -458,7 +532,39 @@ export default function ResourceDetailPage({
           <p className="resource-detail-subtitle">
             {typeLabel(kind)} · {record.source_app || t("resources.localSource")}
           </p>
-          <div className={`resource-detail-stage resource-detail-stage-${kind}`}>
+          <div
+            className={`resource-detail-stage resource-detail-stage-${kind}${contentEditing && contentEditable ? " resource-detail-stage-editing" : ""}`}
+            onDoubleClick={(event) => {
+              // 视图态双击内容 → 进入编辑；编辑态双击文本区外 → 保存。
+              // 编辑态双击文本区内保留原生「选词」。
+              if (!contentEditable) return;
+              const target = event.target instanceof HTMLElement ? event.target : null;
+              if (target?.closest("button, a, img, video, audio")) return;
+              if (!contentEditing) {
+                startContentEdit();
+                return;
+              }
+              if (target?.closest("textarea, .find-replace-bar")) return;
+              if (contentDirty && !contentSaving) void handleSaveContent();
+            }}
+          >
+            {contentEditing && findOpen && (
+              <FindReplaceBar
+                query={findQuery}
+                replacement={findReplaceText}
+                caseSensitive={findCaseSensitive}
+                matchCount={findMatches.length}
+                matchIndex={findIndex}
+                onQueryChange={handleFindQueryChange}
+                onReplacementChange={setFindReplaceText}
+                onCaseSensitiveChange={handleFindCaseSensitiveChange}
+                onNext={() => goToFindMatch(findIndex + 1)}
+                onPrev={() => goToFindMatch(findIndex - 1)}
+                onReplaceCurrent={handleFindReplaceCurrent}
+                onReplaceAll={handleFindReplaceAll}
+                onClose={() => setFindOpen(false)}
+              />
+            )}
             {error ? (
               <div className="resource-detail-error" role="alert">
                 <strong>{t("resources.detailError")}</strong>
@@ -523,6 +629,19 @@ export default function ResourceDetailPage({
                     event.preventDefault();
                     event.stopPropagation();
                     cancelContentEdit();
+                    return;
+                  }
+                  // Ctrl+Enter 保存（双击选词与 Enter 换行语义保持原生）。
+                  if ((event.ctrlKey || event.metaKey) && event.key === "Enter") {
+                    event.preventDefault();
+                    if (contentDirty && !contentSaving) void handleSaveContent();
+                    return;
+                  }
+                  // Ctrl+F 打开查找替换条。
+                  if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "f") {
+                    event.preventDefault();
+                    event.stopPropagation();
+                    setFindOpen(true);
                   }
                 }}
               />
