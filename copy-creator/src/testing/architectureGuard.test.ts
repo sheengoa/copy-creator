@@ -291,6 +291,21 @@ describe("架构守卫：领域规则必须全局共享", () => {
       css,
       "焦点环不得再挂在单个按钮的修饰类上",
     ).not.toMatch(/\.radial-menu-(preview-trigger|item-pin):focus-visible/);
+    // hover 底色同属共享机制：曾漏掉导致星标 hover 无底色反馈而预览
+    // 按钮有（主窗口剪切板卡片动作组同理，星标必须与删除/展开同组）。
+    expect(
+      css,
+      "径向动作按钮的 hover 底色必须定义在共享基类上",
+    ).toMatch(/\.radial-menu-item \.radial-menu-item-action:hover\s*\{[^}]*background:\s*var\(--chip-hover-bg\)/);
+    const clipboardStyles = readSource("styles/clipboard.css");
+    expect(
+      clipboardStyles.includes(".clipboard-card-actions > .card-pin-btn"),
+      "主窗口剪切板卡片动作组必须包含收藏星标（与删除/展开/拖拽柄同组共享 hover 底色）",
+    ).toBe(true);
+    expect(
+      clipboardStyles.match(/\.clipboard-card-actions > \.card-pin-btn/g)?.length,
+      "星标必须加入动作组的基础/hover 显现/底色/svg 尺寸全部分组",
+    ).toBeGreaterThanOrEqual(4);
     const radialMenu = readSource("components/RadialMenu/index.tsx");
     expect(
       radialMenu,

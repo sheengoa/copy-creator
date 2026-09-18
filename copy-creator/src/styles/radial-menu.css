@@ -607,6 +607,7 @@ html {
 
 .radial-menu-item .radial-menu-item-action:hover {
   opacity: 1;
+  background: var(--chip-hover-bg) !important;
   color: var(--text-primary) !important;
 }
 
@@ -627,19 +628,11 @@ html {
   }
 }
 
-/* 预览按钮专有：hover 底色与暗色适配 */
-.radial-menu-item .radial-menu-item-action.radial-menu-preview-trigger:hover {
-  background: var(--chip-hover-bg) !important;
-}
-
+/* 预览按钮专有：暗色下的默认色微调（hover 底色已随基类走
+ * --chip-hover-bg，主题自适应，无需再手写暗色覆盖） */
 [data-theme="dark"] .radial-menu-preview-trigger {
   background: transparent !important;
   color: rgba(255, 255, 255, 0.72) !important;
-}
-
-[data-theme="dark"] .radial-menu-preview-trigger:hover {
-  background: rgba(255, 255, 255, 0.16) !important;
-  color: #fff !important;
 }
 
 /* 收藏星标专有：已收藏常显实心星（主题前景色）；星形在 24 视图框内
