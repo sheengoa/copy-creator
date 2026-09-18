@@ -366,8 +366,9 @@ export default function ClipboardCreateDialog() {
     }
   }, [content, dropdownOpen, groupMenuOpen, hideWindow, handleSave]);
 
-  // 匹配计数随内容/查询实时刷新，并把当前命中重新选中（替换后索引
-  // 偏移在此自动收敛）。
+  // 匹配计数随内容/查询实时刷新。注意：这里绝不能调用 selectMatch——
+  // 内容变化（用户正在编辑器里打字）时把选区强制设回匹配处，会不断
+  // 拽走输入光标（曾实测打字时指针突然跳走）。选区只由显式导航触发。
   useEffect(() => {
     if (!findOpen) return;
     const editor = editorRef.current;
@@ -376,7 +377,6 @@ export default function ClipboardCreateDialog() {
     setFindMatchCount(count);
     const clamped = count === 0 ? 0 : Math.min(findIndex, count - 1);
     setFindIndex(clamped);
-    if (count > 0) editor.selectMatch(findQuery, clamped, findCaseSensitive);
   }, [findOpen, findQuery, findCaseSensitive, content, findIndex]);
 
   const handleFindNext = useCallback(() => {

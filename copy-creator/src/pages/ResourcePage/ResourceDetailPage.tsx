@@ -380,19 +380,18 @@ export default function ResourceDetailPage({
     focusFindMatch(start, start + findQuery.length);
   }, [findMatches, findQuery, focusFindMatch]);
 
+  // 查询/大小写变化只更新计数与索引：textarea 无法在不移动光标的
+  // 前提下高亮匹配，若此处抢焦点选区，会把用户正在查找输入框打的字
+  // 截进正文（曾实测「打着字光标突然跳走」）。定位只发生在显式导航。
   const handleFindQueryChange = useCallback((query: string) => {
     setFindQuery(query);
-    const positions = findMatchPositions(contentDraft, query, findCaseSensitive);
     setFindIndex(0);
-    if (positions.length > 0) focusFindMatch(positions[0], positions[0] + query.length);
-  }, [contentDraft, findCaseSensitive, focusFindMatch]);
+  }, []);
 
   const handleFindCaseSensitiveChange = useCallback((nextCaseSensitive: boolean) => {
     setFindCaseSensitive(nextCaseSensitive);
-    const positions = findMatchPositions(contentDraft, findQuery, nextCaseSensitive);
     setFindIndex(0);
-    if (positions.length > 0) focusFindMatch(positions[0], positions[0] + findQuery.length);
-  }, [contentDraft, findQuery, focusFindMatch]);
+  }, []);
 
   const handleFindReplaceCurrent = useCallback(() => {
     if (findMatches.length === 0 || findQuery === "") return;
