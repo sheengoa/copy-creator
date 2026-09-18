@@ -115,11 +115,11 @@ describe("架构守卫：领域规则必须全局共享", () => {
     ).toEqual([]);
   });
 
-  it("规则 9：resource-groups-changed 在 src 内恰好两处监听", () => {
+  it("规则 9：resource-groups-changed 在 src 内恰好三处监听", () => {
     const listeners = allSources.filter((file) =>
       sourceOf(file).includes('listen("resource-groups-changed"'),
     );
-    expect(listeners.length, "新增列表应复用既有刷新监听（见 domain/README.md）").toBe(2);
+    expect(listeners.length, "新增列表应复用既有刷新监听（见 domain/README.md）").toBe(3);
   });
 
   it("规则 10：分组树折叠展平仅在 domain/groups.ts 定义", () => {

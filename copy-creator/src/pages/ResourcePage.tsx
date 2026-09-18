@@ -32,6 +32,7 @@ import { useRecordLocale } from "../hooks/useRecordLocale";
 import { useEscapeKey } from "../hooks/useEscapeKey";
 import ResourceDetailPage from "./ResourcePage/ResourceDetailPage";
 import ResourceGroupChips from "./ResourcePage/ResourceGroupChips";
+import { TrashPanel } from "./ResourcePage/TrashPanel";
 import type { ResourceMediaKind as ResourceMediaKindLabel } from "../domain/mediaKind";
 import { ResourceCard } from "./ResourcePage/ResourceCard";
 import { buildRecordView, type RecordView } from "../domain/recordView";
@@ -146,6 +147,19 @@ export default function ResourcePage() {
     message: string;
     onConfirm: () => void | Promise<void>;
   } | null>(null);
+  // 回收站：入口角标随 resource-groups-changed 刷新（删除入站即触发）。
+  const [trashOpen, setTrashOpen] = useState(false);
+  const [trashCount, setTrashCount] = useState(0);
+
+  const refreshTrashCount = useCallback(() => {
+    invoke<number>("trash_items_count")
+      .then((count) => setTrashCount(count))
+      .catch((e) => console.error("Failed to count trash items:", e));
+  }, []);
+
+  useEffect(() => {
+    refreshTrashCount();
+  }, [refreshTrashCount]);
 
   const searchEffectInitializedRef = useRef(false);
   const selectAllRequestRef = useRef(0);
@@ -218,6 +232,7 @@ export default function ResourcePage() {
     listen("resource-groups-changed", () => {
       void loadResourceGroups();
       void loadRecords(false, "resources", resourceGroup);
+      refreshTrashCount();
     }).then((nextUnlisten) => {
       if (cancelled) {
         nextUnlisten();
@@ -229,7 +244,7 @@ export default function ResourcePage() {
       cancelled = true;
       if (unlisten) unlisten();
     };
-  }, [loadRecords, loadResourceGroups, resourceGroup]);
+  }, [loadRecords, loadResourceGroups, resourceGroup, refreshTrashCount]);
 
   // 兜底自愈：resource-groups-changed 是单次事件，被 WebView 丢弃或延迟
   // 时列表会停留旧数据且没有任何重试（实测出现过一次覆盖保存后列表长时
@@ -950,6 +965,16 @@ export default function ResourcePage() {
         </div>
         <button
           type="button"
+          className={`resource-secondary-button resource-trash-button${trashOpen ? " active" : ""}`}
+          onClick={() => setTrashOpen((open) => !open)}
+          aria-pressed={trashOpen}
+        >
+          {Icons.delete}
+          <span>{t("resources.trashTitle")}</span>
+          {trashCount > 0 && <span className="resource-trash-badge">{trashCount}</span>}
+        </button>
+        <button
+          type="button"
           ref={resourceSettingsButtonRef}
           className="resource-secondary-button resource-settings-button"
           onClick={() => setResourceSettingsOpen((open) => !open)}
@@ -1011,6 +1036,10 @@ export default function ResourcePage() {
         </section>
       )}
 
+      {trashOpen && <TrashPanel onBack={() => setTrashOpen(false)} />}
+
+      {!trashOpen && (
+        <>
       <ResourceGroupChips
         groups={resourceFolderGroups}
         selectedGroup={resourceGroup}
@@ -1061,6 +1090,8 @@ export default function ResourcePage() {
           busyLabel={deletingSelected ? t("common.deleting") : t("common.loading")}
           onMove={() => openResourceMove([...selectedIds])}
         />
+      )}
+        </>
       )}
 
       {resourceGroupManageOpen && (
@@ -1312,6 +1343,7 @@ export default function ResourcePage() {
 
       {confirmDialog}
 
+      {!trashOpen && (
       <section className="resource-list-area">
         <div className="resource-list-heading">
           <div className="resource-list-heading-main">
@@ -1428,6 +1460,7 @@ export default function ResourcePage() {
           label={t("common.backToTop")}
         />
       </section>
+      )}
 
       {feedback && (
         <div className={`resource-feedback ${feedback === "copied" ? "success" : "error"}`} role="status" aria-live="polite">
