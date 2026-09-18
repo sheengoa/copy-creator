@@ -557,10 +557,18 @@ pub(crate) fn trash_retention_days<R: Runtime>(app: &AppHandle<R>) -> i64 {
     .unwrap_or(DEFAULT_TRASH_RETENTION_DAYS)
 }
 
+/// 清理截止时间：天数用饱和乘法换算毫秒——trash_retention 虽尚未在设置
+/// 页暴露，但设置键已存在，极端值在普通乘法下会溢出（debug 构建 panic，
+/// release 回绕成小值导致回收站被全量清空）。饱和后截止时间远早于任何
+/// trashed_ms，保守方向等于不清理。
+fn trash_cutoff_ms(now_ms: i64, days: i64) -> i64 {
+    now_ms.saturating_sub(days.saturating_mul(86_400_000))
+}
+
 /// 过期清理：随保留期清理任务（启动 + 每小时）执行。
 pub(crate) fn purge_expired_trash<R: Runtime>(app: &AppHandle<R>) {
     let days = trash_retention_days(app);
-    let cutoff_ms = chrono::Utc::now().timestamp_millis() - days * 86_400_000;
+    let cutoff_ms = trash_cutoff_ms(chrono::Utc::now().timestamp_millis(), days);
     if let Err(error) = purge_trash_expired_before(app, cutoff_ms) {
         log::warn!("回收站过期清理失败: {error}");
     }
@@ -598,5 +606,14 @@ mod tests {
     #[test]
     fn trash_retention_falls_back_to_thirty_days() {
         assert_eq!(DEFAULT_TRASH_RETENTION_DAYS, 30);
+    }
+
+    #[test]
+    fn trash_cutoff_saturates_extreme_retention_days() {
+        let now = 1_789_000_000_000_i64;
+        assert_eq!(trash_cutoff_ms(now, 30), now - 30 * 86_400_000);
+        // 极端大值不溢出：截止时间远早于任何真实 trashed_ms（等于不清理）。
+        assert!(trash_cutoff_ms(now, i64::MAX) < now - 365 * 86_400_000);
+        assert!(trash_cutoff_ms(now, i64::MAX) < 1_000_000_000_000);
     }
 }
