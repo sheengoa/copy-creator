@@ -335,8 +335,8 @@ export default function ResourceDetailPage({
       const rect = stage.getBoundingClientRect();
       setFindBarPos((prev) => {
         const next = {
-          top: Math.max(rect.top + 8, 64),
-          right: Math.max(window.innerWidth - rect.right + 14, 14),
+          top: Math.max(rect.top + 20, 76),
+          right: Math.max(window.innerWidth - rect.right + 28, 14),
         };
         return prev.top === next.top && prev.right === next.right ? prev : next;
       });
