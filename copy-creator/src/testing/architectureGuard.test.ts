@@ -307,14 +307,29 @@ describe("架构守卫：领域规则必须全局共享", () => {
       "星标必须加入动作组的基础/hover 显现/底色/svg 尺寸全部分组",
     ).toBeGreaterThanOrEqual(4);
     const radialMenu = readSource("components/RadialMenu/index.tsx");
+    // 动作区唯一出口是 RadialItemAction 组件（基类挂载 + 冒泡拦截不可
+    // 遗漏）：动作区块内禁止裸 <button>，两个既有按钮必须经组件渲染。
+    const actionsStart = radialMenu.indexOf('className="radial-menu-item-actions"');
+    const actionsBlock = radialMenu.slice(
+      actionsStart,
+      radialMenu.indexOf("</div>", actionsStart),
+    );
     expect(
-      radialMenu,
-      "预览按钮必须挂共享基类",
-    ).toContain('className="radial-menu-item-action radial-menu-preview-trigger"');
+      actionsBlock,
+      "径向动作区必须存在",
+    ).not.toBe("");
     expect(
-      radialMenu,
-      "收藏星标必须挂共享基类",
-    ).toContain("radial-menu-item-action radial-menu-item-pin");
+      actionsBlock.includes("<button"),
+      "径向动作区禁止裸写 <button>——一律经 RadialItemAction 渲染（基类挂载与冒泡拦截不可遗漏）",
+    ).toBe(false);
+    expect(
+      (actionsBlock.match(/<RadialItemAction/g) ?? []).length,
+      "动作区按钮必须经 RadialItemAction 渲染",
+    ).toBeGreaterThanOrEqual(2);
+    expect(
+      radialMenu.includes("radial-menu-item-action radial-menu-item-pin"),
+      "星标基类必须由组件出口统一挂载，调用点只传修饰类",
+    ).toBe(false);
   });
 
   it("规则 18：剪切板卡片动作区按钮必须被 clipboard.css 动作组覆盖", () => {

@@ -37,6 +37,7 @@ import {
   type RadialPreviewSegment,
 } from "../../domain/preview";
 import { buildRecordView } from "../../domain/recordView";
+import RadialItemAction from "./RadialItemAction";
 import { isResourceRecord } from "../../domain/records";
 import { formatTime, formatRelativeTime } from "../../utils/formatTime";
 import { fileNameFromPath } from "../../domain/fileName";
@@ -1880,30 +1881,19 @@ export default function RadialMenu() {
                       {(item.previewAvailable || (!item.isResource && item.pinned !== undefined)) && (
                         <div className="radial-menu-item-actions">
                           {!item.isResource && item.pinned !== undefined && (
-                            <button
-                              className={`radial-menu-item-action radial-menu-item-pin${item.pinned ? " pinned" : ""}`}
-                              type="button"
+                            <RadialItemAction
+                              className={`radial-menu-item-pin${item.pinned ? " pinned" : ""}`}
                               aria-pressed={item.pinned}
                               aria-label={t(item.pinned ? "common.unfavorite" : "common.favorite")}
                               title={t(item.pinned ? "common.unfavorite" : "common.favorite")}
-                              onPointerDown={(e) => e.stopPropagation()}
-                              onContextMenu={(e) => {
-                                e.preventDefault();
-                                e.stopPropagation();
-                              }}
-                              onClick={(e) => {
-                                e.preventDefault();
-                                e.stopPropagation();
-                                toggleRecordPinned(item.id, Boolean(item.pinned));
-                              }}
+                              onClick={() => toggleRecordPinned(item.id, Boolean(item.pinned))}
                             >
                               {Icons.star}
-                            </button>
+                            </RadialItemAction>
                           )}
-                          <button
-                            className="radial-menu-item-action radial-menu-preview-trigger"
+                          <RadialItemAction
+                            className="radial-menu-preview-trigger"
                             data-radial-preview-trigger
-                            type="button"
                             aria-expanded={preview?.itemId === item.id}
                             aria-label={t(
                               preview?.itemId === item.id
@@ -1915,15 +1905,13 @@ export default function RadialMenu() {
                                 ? "radialMenu.closePreview"
                                 : "radialMenu.openPreview",
                             )}
-                            onClick={(e) => {
-                              e.preventDefault();
-                              e.stopPropagation();
+                            onClick={() => {
                               suppressClickRef.current = false;
                               togglePreview(item);
                             }}
                           >
                             {preview?.itemId === item.id ? Icons.collapse : Icons.expand}
-                          </button>
+                          </RadialItemAction>
                         </div>
                       )}
                     </div>
