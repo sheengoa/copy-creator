@@ -212,10 +212,6 @@ export function BackupSection() {
                     {t("settings.changeFolder")}
                   </button>
                 </div>
-                {selection.libraryTarget !== null &&
-                  selection.libraryTarget !== selection.manifest.library_path && (
-                    <div className="settings-storage-hint" />
-                  )}
               </>
             )}
             <div className="settings-storage-hint">{t("settings.backupImportCoverHint")}</div>
