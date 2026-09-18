@@ -51,6 +51,9 @@ export default function FindReplaceBar({
 
   const hasMatch = matchCount > 0;
   const displayIndex = hasMatch ? Math.min(matchIndex + 1, matchCount) : 0;
+  // 查询为空时计数区留空——「无结果」只用于确实搜过但没搜到的场景。
+  const countText =
+    query === "" ? "" : hasMatch ? `${displayIndex}/${matchCount}` : t("common.findNoResults");
 
   return (
     <div
@@ -93,7 +96,7 @@ export default function FindReplaceBar({
           }}
         />
         <span className={`find-replace-count${hasMatch ? "" : " empty"}`} role="status">
-          {hasMatch ? `${displayIndex}/${matchCount}` : t("common.findNoResults")}
+          {countText}
         </span>
         <button
           type="button"
