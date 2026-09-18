@@ -3874,6 +3874,53 @@ mod migrate_storage_tests {
 
         let _ = std::fs::remove_dir_all(base);
     }
+
+    /// 回收站条目随迁移保留（0.4.0 起 trash_items 入迁移清单）；源库是
+    /// 0.3.x 旧库（无该表）时跳过该表，迁移整体仍成功。回归锚点：曾因
+    /// 清单缺 trash_items 导致迁移后回收站被静默清空；补表后又因缺表
+    /// 跳过缺失，旧库迁移直接报"没有共同列"失败。
+    #[test]
+    fn migrates_trash_items_and_tolerates_missing_source_table() {
+        let base = std::env::temp_dir().join(format!(
+            "copy-creator-migrate-trash-{}",
+            uuid::Uuid::new_v4()
+        ));
+        let old_dir = base.join("old");
+        let new_dir = base.join("new");
+        std::fs::create_dir_all(&new_dir).unwrap();
+        let old_db = seed_old_library(&old_dir);
+        {
+            let conn = Connection::open(&old_db).unwrap();
+            conn.execute(
+                "INSERT INTO trash_items (id, record_json, trash_dir, trashed_at, trashed_ms)
+                 VALUES ('t1', '{}', '.trash/1-x', '2026-09-18T00:00:00Z', 1)",
+                [],
+            )
+            .unwrap();
+        }
+
+        let new_conn = migrate_storage_data(&old_db, &old_dir, &new_dir).unwrap();
+        let trash_count: i64 = new_conn
+            .query_row("SELECT COUNT(*) FROM trash_items", [], |row| row.get(0))
+            .unwrap();
+        assert_eq!(trash_count, 1, "回收站条目应随迁移保留");
+        drop(new_conn);
+
+        let old_dir2 = base.join("old2");
+        std::fs::create_dir_all(&old_dir2).unwrap();
+        let old_db2 = seed_old_library(&old_dir2);
+        {
+            let conn = Connection::open(&old_db2).unwrap();
+            conn.execute("DROP TABLE trash_items", []).unwrap();
+        }
+        let new_conn2 = migrate_storage_data(&old_db2, &old_dir2, &base.join("new2")).unwrap();
+        let record_count: i64 = new_conn2
+            .query_row("SELECT COUNT(*) FROM clipboard_records", [], |row| row.get(0))
+            .unwrap();
+        assert_eq!(record_count, 1, "缺表跳过后其余业务数据照常迁移");
+
+        let _ = std::fs::remove_dir_all(base);
+    }
 }
 
 #[cfg(test)]
