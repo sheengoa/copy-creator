@@ -375,7 +375,8 @@ describe("integration regressions", () => {
     expect(phrasePage).toContain("<BatchSelectionBar");
     expect(clipboardPage).toContain("loadAllRecords");
     expect(clipboardPage).toContain("selectIds(allVisibleRecordIds)");
-    expect(clipboardPage).toContain("const clipboardRecords = records.filter((r) => !isResourceRecord(r))");
+    // 类别过滤收进 domain（recordMatchesCategory），内联 clipboardRecords 副本不再存在。
+    expect(clipboardPage).toContain("records.filter((r) => recordMatchesCategory(r, category))");
     expect(clipboardPage).toContain(".filter((record) => !isResourceRecord(record))");
     expect(clipboardPage).not.toContain('if (category === "temp") return []');
     expect(clipboardPage).toContain('"clipboard.confirmDeleteSelected"');
@@ -439,7 +440,10 @@ describe("integration regressions", () => {
     expect(radialMenu).toContain("resourceGroupTouchedRef.current = false");
     expect(radialMenu).toContain("if (resourceGroupTouchedRef.current) return;");
     expect(radialMenu).toContain('useClipboardStore.getState().setCategory("resources")');
-    expect(radialMenu).toContain('clipboardCategory === "resources"');
+    // 类别过滤已收进 domain/records（recordMatchesCategory 含收藏语义，
+    // 与主窗口共用；内联的 resources 分支不再存在——架构守卫规则 16）。
+    expect(radialMenu).toContain("recordMatchesCategory(r, clipboardCategory)");
+    expect(radialMenu).toContain("RECORD_CATEGORY_KEYS.map");
     expect(radialMenu).toContain(".filter((r) => isResourceRecord(r))");
     expect(radialMenu).toContain("isContentPreviewAvailable");
     expect(radialMenu).not.toContain("previewAvailable: true");

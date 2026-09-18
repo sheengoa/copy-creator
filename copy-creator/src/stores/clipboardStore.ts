@@ -2,8 +2,13 @@ import { create } from "zustand";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { useSettingsStore, parseContentSort } from "./settingsStore";
-import { isResourceRecord } from "../domain/records";
-import { getResourcePath, isFileBackedTextResource } from "../domain/records";
+import {
+  getResourcePath,
+  isFileBackedTextResource,
+  recordMatchesCategory,
+  RECORD_CATEGORY_KEYS,
+  type RecordCategory,
+} from "../domain/records";
 // 权威类型唯一定义在 types/：store 不再手写副本（历史副本缺
 // resource_modified 等字段，曾让版本字段对类型系统"隐身"）。
 import type { ApiKeyLabel, ClipboardRecord } from "../types";
@@ -73,8 +78,10 @@ function usageFallbackMs(record: ClipboardRecord): number {
   return Number.isNaN(parsed) ? 0 : parsed;
 }
 
-export const CLIP_TYPES = ["all", "favorites", "text", "image", "link", "file", "resources"] as const;
-export type ClipType = (typeof CLIP_TYPES)[number];
+// 类别键序唯一来源在 domain（RECORD_CATEGORY_KEYS）：展示列表与过滤
+// 判定共用同一份枚举，"resources" 是资源视图的专用类别。
+export const CLIP_TYPES = [...RECORD_CATEGORY_KEYS, "resources"] as const;
+export type ClipType = RecordCategory;
 /** 剪贴板页的筛选范围：除资源外的全部类型。 */
 export type ClipboardFilter = Exclude<ClipType, "resources">;
 
@@ -163,34 +170,9 @@ function trimCache(cache: Record<string, string>, maxEntries: number) {
   return Object.fromEntries(entries.slice(entries.length - maxEntries));
 }
 
-export function matchesResourceGroup(
-  record: Pick<ClipboardRecord, "resource_folder" | "resource_group">,
-  resourceGroup: string | null,
-) {
-  if (resourceGroup === null) return true;
-
-  const recordFolder = record.resource_folder ?? record.resource_group;
-  if (recordFolder === undefined || recordFolder === null) return false;
-
-  const normalizedFolder = recordFolder.replace(/\\/g, "/");
-  const normalizedGroup = resourceGroup.replace(/\\/g, "/");
-  if (normalizedGroup === "") return normalizedFolder === "";
-  return normalizedFolder === normalizedGroup
-    || normalizedFolder.startsWith(`${normalizedGroup}/`);
-}
-
-function recordMatchesCategory(
-  record: ClipboardRecord,
-  category: ClipType,
-  resourceGroup: string | null = null,
-) {
-  if (category === "all") return !isResourceRecord(record);
-  if ((category as string) === "resources") {
-    return isResourceRecord(record)
-      && matchesResourceGroup(record, resourceGroup);
-  }
-  return !isResourceRecord(record) && record.type === category;
-}
+// 类别判定与分组匹配的唯一实现收进 domain/records.ts（含收藏语义）：
+// store、主窗口、径向菜单三处消费同一份，新增类别不再有「改一漏二」。
+// matchesResourceGroup 曾在本文件导出（现无外部使用点），改为 domain 导出。
 
 function recordMatchesSearch(record: ClipboardRecord, search: string) {
   const q = search.trim().toLowerCase();

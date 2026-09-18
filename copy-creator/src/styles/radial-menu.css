@@ -570,6 +570,53 @@ html {
   gap: 2px;
 }
 
+/* 收藏星标：与预览按钮同款 hover 显现；已收藏条目常显实心星 */
+.radial-menu-item-pin {
+  position: relative !important;
+  flex: 0 0 28px;
+  z-index: 2;
+  width: 28px !important;
+  height: 28px !important;
+  margin: 0 !important;
+  padding: 0 !important;
+  border: 0 !important;
+  border-radius: 6px !important;
+  background: transparent !important;
+  cursor: pointer;
+  color: var(--text-tertiary) !important;
+  opacity: 0;
+  transform: scale(0.78);
+  pointer-events: none;
+  transition:
+    opacity 140ms ease-out,
+    transform 140ms cubic-bezier(0.16, 1, 0.3, 1),
+    background 120ms ease-out,
+    color 120ms ease-out;
+}
+
+.radial-menu-item:hover .radial-menu-item-pin,
+.radial-menu-item:focus-within .radial-menu-item-pin {
+  opacity: 0.5;
+  transform: scale(1);
+  pointer-events: auto;
+}
+
+.radial-menu-item .radial-menu-item-pin:hover {
+  opacity: 1;
+  color: var(--accent, #3b82f6) !important;
+}
+
+.radial-menu-item .radial-menu-item-pin.pinned {
+  opacity: 1;
+  transform: scale(1);
+  pointer-events: auto;
+  color: var(--accent, #3b82f6) !important;
+}
+
+.radial-menu-item .radial-menu-item-pin.pinned svg {
+  fill: currentColor;
+}
+
 .radial-menu-preview-trigger {
   position: relative !important;
   flex: 0 0 28px;

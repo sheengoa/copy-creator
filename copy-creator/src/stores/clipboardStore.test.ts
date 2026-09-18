@@ -10,7 +10,9 @@ vi.mock("@tauri-apps/api/event", () => ({
   listen: vi.fn(),
 }));
 
-const { matchesResourceGroup, useClipboardStore, useResourceStore } = await import("./clipboardStore");
+const { useClipboardStore, useResourceStore } = await import("./clipboardStore");
+// matchesResourceGroup 已收进 domain/records.ts（唯一实现）。
+const { matchesResourceGroup } = await import("../domain/records");
 
 const records = [
   {

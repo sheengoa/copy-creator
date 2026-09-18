@@ -227,4 +227,44 @@ describe("架构守卫：领域规则必须全局共享", () => {
       "预览 segments 与展开方向/宽度契约必须从 domain/preview 导入（见 domain/README.md）",
     ).toEqual([]);
   });
+
+  it("规则 16：记录类别过滤判定唯一来源——recordMatchesCategory 仅在 domain/records.ts", () => {
+    // 回归锚点：收藏（favorites）上线时主窗口内联过滤改了，store 与
+    // 径向菜单的两份内联副本漏改，径向菜单既无收藏入口也无收藏视图。
+    // 判定收进 domain 后，任何新增类别只允许改 domain 一处。
+    expect(
+      readSource("domain/records.ts"),
+      "recordMatchesCategory 必须定义在 domain/records.ts",
+    ).toContain("export function recordMatchesCategory");
+    const definitionFiles = allSources
+      .filter((file) => !toPosix(file).includes("domain/records.ts"))
+      .filter((file) => /function recordMatchesCategory|function matchesResourceGroup/.test(sourceOf(file)))
+      .map((file) => toPosix(file.replace(frontRoot, "")));
+    expect(
+      definitionFiles,
+      "类别/分组匹配判定不得在 domain 之外重写（见 domain/README.md）",
+    ).toEqual([]);
+    // 消费方必须经 domain 判定，不得内联「type === 类别」过滤副本。
+    for (const consumer of [
+      "pages/ClipboardPage/index.tsx",
+      "components/RadialMenu/index.tsx",
+      "stores/clipboardStore.ts",
+    ]) {
+      expect(
+        readSource(consumer),
+        `${consumer} 必须消费 domain 的 recordMatchesCategory`,
+      ).toContain("recordMatchesCategory");
+    }
+    const inlineFilters = allSources
+      .filter((file) => !toPosix(file).includes("domain/"))
+      .filter((file) => /\.(type|category)\s*===\s*(category|clipboardCategory)\b/.test(sourceOf(file)))
+      .map((file) => toPosix(file.replace(frontRoot, "")));
+    expect(
+      inlineFilters,
+      "禁止内联「type === 类别」过滤副本——一律走 domain/records 的 recordMatchesCategory",
+    ).toEqual([]);
+    // 类别 chips 键序唯一来源：两处类别行都从 RECORD_CATEGORY_KEYS 映射。
+    expect(readSource("pages/ClipboardPage/index.tsx"), "主窗口类别行应从 RECORD_CATEGORY_KEYS 映射").toContain("RECORD_CATEGORY_KEYS.map");
+    expect(readSource("components/RadialMenu/index.tsx"), "径向菜单类别行应从 RECORD_CATEGORY_KEYS 映射").toContain("RECORD_CATEGORY_KEYS.map");
+  });
 });

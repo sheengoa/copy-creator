@@ -205,3 +205,55 @@ export function recordPasteStrategy(
   }
   return "text";
 }
+
+// ── 类别过滤（全项目唯一实现：主窗口 / 径向菜单 / store 共用）──
+// 「A 界面有、B 界面没有」类缺陷的根因是各窗口各自内联一份类别过滤：
+// 收藏（favorites）上线时只改了主窗口副本，径向菜单与 store 副本漏改。
+// 类别键序也在此定义，两处类别 chips 从同一来源映射标签。
+
+/** 剪切板记录的展示类别键序（不含资源面板专用的 "resources"）。 */
+export const RECORD_CATEGORY_KEYS = [
+  "all",
+  "favorites",
+  "text",
+  "image",
+  "link",
+  "file",
+] as const;
+
+/** 记录类别："resources" 是资源视图的专用类别，不在展示键序内。 */
+export type RecordCategory = (typeof RECORD_CATEGORY_KEYS)[number] | "resources";
+
+/** 资源记录 × 分组路径匹配（null = 不限分组）。 */
+export function matchesResourceGroup(
+  record: Pick<ClipboardRecord, "resource_folder" | "resource_group">,
+  resourceGroup: string | null,
+): boolean {
+  if (resourceGroup === null) return true;
+
+  const recordFolder = record.resource_folder ?? record.resource_group;
+  if (recordFolder === undefined || recordFolder === null) return false;
+
+  const normalizedFolder = recordFolder.replace(/\\/g, "/");
+  const normalizedGroup = resourceGroup.replace(/\\/g, "/");
+  if (normalizedGroup === "") return normalizedFolder === "";
+  return normalizedFolder === normalizedGroup
+    || normalizedFolder.startsWith(`${normalizedGroup}/`);
+}
+
+/** 记录 × 类别匹配判定（含收藏浮顶与资源分组语义）。 */
+export function recordMatchesCategory(
+  record: ClipboardRecord,
+  category: RecordCategory,
+  resourceGroup: string | null = null,
+): boolean {
+  if (category === "all") return !isResourceRecord(record);
+  if (category === "favorites") {
+    return !isResourceRecord(record) && Boolean(record.pinned);
+  }
+  if (category === "resources") {
+    return isResourceRecord(record)
+      && matchesResourceGroup(record, resourceGroup);
+  }
+  return !isResourceRecord(record) && record.type === category;
+}

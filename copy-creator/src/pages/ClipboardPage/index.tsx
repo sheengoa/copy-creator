@@ -17,7 +17,7 @@ import { useMultiSelect } from "../../hooks/useMultiSelect";
 import { useRefreshOnShow } from "../../hooks/useRefreshOnShow";
 import { useRecordLocale } from "../../hooks/useRecordLocale";
 import { buildRecordView, type RecordView } from "../../domain/recordView";
-import { isResourceRecord } from "../../domain/records";
+import { isResourceRecord, recordMatchesCategory, RECORD_CATEGORY_KEYS } from "../../domain/records";
 
 type ClipType = ClipboardFilter;
 
@@ -92,14 +92,10 @@ export default function ClipboardPage() {
 
   useHorizontalWheelScroll(categoriesScrollRef);
 
-  const categories: { key: ClipType; label: string }[] = [
-    { key: "all", label: t("clipboard.all") },
-    { key: "favorites", label: t("clipboard.favorites") },
-    { key: "text", label: t("clipboard.text") },
-    { key: "image", label: t("clipboard.image") },
-    { key: "link", label: t("clipboard.link") },
-    { key: "file", label: t("clipboard.file") },
-  ];
+  // 类别键序唯一来源在 domain（RECORD_CATEGORY_KEYS），与径向菜单同源。
+  const categories: { key: ClipType; label: string }[] = RECORD_CATEGORY_KEYS.map(
+    (key) => ({ key, label: t(`clipboard.${key}`) }),
+  );
 
   const labels: Record<string, string> = useMemo(
     () => ({
@@ -174,14 +170,11 @@ export default function ClipboardPage() {
     }
   }, []);
 
-  const filtered = useMemo(() => {
-    const clipboardRecords = records.filter((r) => !isResourceRecord(r));
-    if (category === "all") return clipboardRecords;
-    // 「收藏」视图：跨类别，只看收藏记录（后端已过滤，这里是对本地
-    // 窗口的同口径兜底）。
-    if (category === "favorites") return clipboardRecords.filter((r) => r.pinned);
-    return clipboardRecords.filter((r) => r.type === category);
-  }, [records, category]);
+  // 类别过滤走 domain 唯一判定（含收藏语义），不再内联副本。
+  const filtered = useMemo(
+    () => records.filter((r) => recordMatchesCategory(r, category)),
+    [records, category],
+  );
   // 容器层组装视图模型（依赖 records 引用纪律，zustand 不可变更新保证稳定）。
   const recordLocale = useRecordLocale();
   const views = useMemo(
