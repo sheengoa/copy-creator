@@ -121,7 +121,6 @@
     "confirmDelete": "Move this resource to the trash? Kept for 30 days and restorable anytime.",
     "confirmDeleteSelected": "Move the selected {{count}} resources to the trash? Kept for 30 days and restorable anytime.",
     "trashTitle": "Trash",
-    "trashBack": "Back",
     "trashEmpty": "Trash is empty",
     "trashRestore": "Restore",
     "trashPurge": "Delete forever",

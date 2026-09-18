@@ -66,14 +66,10 @@ export function TrashPanel({ onBack }: { onBack: () => void }) {
   return (
     <div className="trash-panel">
       <div className="trash-head">
-        <button
-          type="button"
-          className="resource-icon-button"
-          onClick={onBack}
-          aria-label={t("resources.trashBack")}
-          title={t("resources.trashBack")}
-        >
-          {Icons.chevronDown}
+        {/* 与详情页返回键同款（resource-back-button）：纯图标曾是折叠控件观感 */}
+        <button type="button" className="resource-back-button" onClick={onBack}>
+          {Icons.arrowLeft}
+          <span>{t("resources.backToLibrary")}</span>
         </button>
         <strong className="trash-title">{t("resources.trashTitle")}</strong>
         <span className="trash-count">{items?.length ?? ""}</span>

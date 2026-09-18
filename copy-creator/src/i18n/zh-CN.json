@@ -132,7 +132,6 @@
     "confirmDelete": "确定将此资源移入回收站吗？保留 30 天，可随时恢复。",
     "confirmDeleteSelected": "确定将选中的 {{count}} 条资源移入回收站吗？保留 30 天，可随时恢复。",
     "trashTitle": "回收站",
-    "trashBack": "返回",
     "trashEmpty": "回收站为空",
     "trashRestore": "恢复",
     "trashPurge": "彻底删除",
