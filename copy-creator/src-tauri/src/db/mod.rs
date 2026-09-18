@@ -953,7 +953,7 @@ pub fn init_db(app: &AppHandle) -> Result<(), Box<dyn std::error::Error>> {
 /// 连接 schema 与历史数据迁移的唯一入口：建表、索引、默认设置种子、
 /// 历史结构增量迁移（全部幂等）。主库初始化与存储迁移共用，保证任何
 /// 路径建出的库 schema 完全一致，不再各自维护一份 CREATE TABLE 文本。
-fn ensure_schema(conn: &Connection) -> Result<(), Box<dyn std::error::Error>> {
+pub(crate) fn ensure_schema(conn: &Connection) -> Result<(), Box<dyn std::error::Error>> {
     conn.execute_batch(
         "
         CREATE TABLE IF NOT EXISTS clipboard_records (

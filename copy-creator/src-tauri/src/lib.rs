@@ -1,4 +1,5 @@
 mod autostart;
+mod backup;
 mod clipboard;
 mod clipboard_create_window;
 mod db;
@@ -176,6 +177,7 @@ pub fn run() {
             db::init_db(app.handle())?;
             db::sanitize_file_record_contents(app.handle());
             db::prune_old_records(app.handle()).ok();
+            app.handle().manage(backup::BackupState::default());
             media_server::spawn(app.handle());
             resource_watch::spawn(app.handle());
 
@@ -467,6 +469,12 @@ pub fn run() {
             db::reorder_phrase_groups,
             db::reorder_phrases,
             db::set_clipboard_record_pinned,
+            backup::export_backup,
+            backup::cancel_backup_export,
+            backup::preview_backup,
+            backup::import_backup,
+            backup::select_backup_save_path,
+            backup::select_backup_zip_path,
             db::move_phrases_to_top,
             toggle_always_on_top,
             autostart::set_autostart,
