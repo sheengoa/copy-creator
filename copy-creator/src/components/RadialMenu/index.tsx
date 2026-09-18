@@ -1881,7 +1881,7 @@ export default function RadialMenu() {
                         <div className="radial-menu-item-actions">
                           {!item.isResource && item.pinned !== undefined && (
                             <button
-                              className={`radial-menu-item-pin${item.pinned ? " pinned" : ""}`}
+                              className={`radial-menu-item-action radial-menu-item-pin${item.pinned ? " pinned" : ""}`}
                               type="button"
                               aria-pressed={item.pinned}
                               aria-label={t(item.pinned ? "common.unfavorite" : "common.favorite")}
@@ -1901,7 +1901,7 @@ export default function RadialMenu() {
                             </button>
                           )}
                           <button
-                            className="radial-menu-preview-trigger"
+                            className="radial-menu-item-action radial-menu-preview-trigger"
                             data-radial-preview-trigger
                             type="button"
                             aria-expanded={preview?.itemId === item.id}

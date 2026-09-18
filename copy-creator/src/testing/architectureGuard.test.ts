@@ -267,4 +267,28 @@ describe("架构守卫：领域规则必须全局共享", () => {
     expect(readSource("pages/ClipboardPage/index.tsx"), "主窗口类别行应从 RECORD_CATEGORY_KEYS 映射").toContain("RECORD_CATEGORY_KEYS.map");
     expect(readSource("components/RadialMenu/index.tsx"), "径向菜单类别行应从 RECORD_CATEGORY_KEYS 映射").toContain("RECORD_CATEGORY_KEYS.map");
   });
+
+  it("规则 17：径向条目动作按钮共享基类——按钮机制样式禁止复制", () => {
+    // 回归锚点：收藏星标复制了预览按钮的 45 行机制样式却漏掉 svg 尺寸
+    // 规则，首次渲染即巨型图标；随后又与预览按钮尺寸不一致。动作区
+    // 按钮的盒子/显现/图标尺寸只允许在 .radial-menu-item-action 定义一次。
+    const css = readSource("styles/radial-menu.css");
+    expect(css, "共享基类 .radial-menu-item-action 必须存在").toContain(
+      ".radial-menu-item-action",
+    );
+    const mechanismCopies = css.match(/transform: scale\(0\.78\)/g) ?? [];
+    expect(
+      mechanismCopies.length,
+      "按钮显现机制（scale(0.78) 起点）只允许在共享基类定义一次",
+    ).toBe(1);
+    const radialMenu = readSource("components/RadialMenu/index.tsx");
+    expect(
+      radialMenu,
+      "预览按钮必须挂共享基类",
+    ).toContain('className="radial-menu-item-action radial-menu-preview-trigger"');
+    expect(
+      radialMenu,
+      "收藏星标必须挂共享基类",
+    ).toContain("radial-menu-item-action radial-menu-item-pin");
+  });
 });
