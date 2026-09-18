@@ -1,5 +1,6 @@
 import { readResourceTextPreview } from "../../domain/mediaAssets";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import { invoke } from "@tauri-apps/api/core";
 import { useTranslation } from "react-i18next";
 import type { ClipboardRecord } from "../../types";
@@ -332,9 +333,12 @@ export default function ResourceDetailPage({
     if (!stage) return;
     const update = () => {
       const rect = stage.getBoundingClientRect();
-      setFindBarPos({
-        top: Math.max(rect.top + 8, 64),
-        right: Math.max(window.innerWidth - rect.right + 14, 14),
+      setFindBarPos((prev) => {
+        const next = {
+          top: Math.max(rect.top + 8, 64),
+          right: Math.max(window.innerWidth - rect.right + 14, 14),
+        };
+        return prev.top === next.top && prev.right === next.right ? prev : next;
       });
     };
     update();
@@ -586,7 +590,7 @@ export default function ResourceDetailPage({
               if (contentDirty && !contentSaving) void handleSaveContent();
             }}
           >
-            {contentEditing && findOpen && (
+            {contentEditing && findOpen && createPortal(
               <FindReplaceBar
                 style={{
                   position: "fixed",
@@ -606,7 +610,8 @@ export default function ResourceDetailPage({
                 onReplaceCurrent={handleFindReplaceCurrent}
                 onReplaceAll={handleFindReplaceAll}
                 onClose={() => setFindOpen(false)}
-              />
+              />,
+              document.body,
             )}
             {error ? (
               <div className="resource-detail-error" role="alert">
