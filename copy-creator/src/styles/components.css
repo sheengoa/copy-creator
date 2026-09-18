@@ -564,8 +564,10 @@ input:focus-visible + .selection-checkbox {
   padding: 8px;
   border: 1px solid var(--separator);
   border-radius: 10px;
-  background: var(--card-bg, #fff);
-  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.14);
+  /* 高不透明度磨砂：正文不得透过卡片可读（用户反馈透字） */
+  background: rgba(255, 255, 255, 0.96);
+  backdrop-filter: blur(10px);
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.18);
 }
 
 .find-replace-row {
@@ -647,7 +649,7 @@ input:focus-visible + .selection-checkbox {
 }
 
 [data-theme="dark"] .find-replace-bar {
-  background: var(--card-bg, #1c1c1e);
+  background: rgba(32, 32, 36, 0.97);
   box-shadow: 0 8px 24px rgba(0, 0, 0, 0.5);
 }
 

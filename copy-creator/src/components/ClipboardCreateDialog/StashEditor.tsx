@@ -205,7 +205,12 @@ const findEditorMatches = (
   return matches;
 };
 
-const selectRunRange = (run: EditorTextRun, start: number, end: number): boolean => {
+const selectRunRange = (
+  editor: HTMLDivElement,
+  run: EditorTextRun,
+  start: number,
+  end: number,
+): boolean => {
   const selection = window.getSelection();
   if (!selection) return false;
   const range = document.createRange();
@@ -220,7 +225,16 @@ const selectRunRange = (run: EditorTextRun, start: number, end: number): boolean
       range.setEnd(part.node, end - part.start);
       selection.removeAllRanges();
       selection.addRange(range);
-      part.node.parentElement?.scrollIntoView({ block: "nearest" });
+      // 编辑器自身是滚动容器：匹配在视口外时按实时位置推进 scrollTop
+      //（scrollIntoView 只会滚动编辑器的祖先，滚不到编辑器内部）。
+      const rangeRect = range.getBoundingClientRect();
+      const editorRect = editor.getBoundingClientRect();
+      const margin = 40;
+      if (rangeRect.top < editorRect.top + margin) {
+        editor.scrollTop += rangeRect.top - editorRect.top - margin;
+      } else if (rangeRect.bottom > editorRect.bottom - margin) {
+        editor.scrollTop += rangeRect.bottom - editorRect.bottom + margin;
+      }
       return true;
     }
   }
@@ -553,10 +567,12 @@ const StashEditor = forwardRef<StashEditorHandle, Props>(function StashEditor({
     countMatches: (query: string, caseSensitive: boolean) =>
       buildEditorMatches(query, caseSensitive).length,
     selectMatch: (query: string, index: number, caseSensitive: boolean) => {
-      const matches = buildEditorMatches(query, caseSensitive);
+      const editor = editorRef.current;
+      if (!editor) return false;
+      const matches = findEditorMatches(editor, query, caseSensitive);
       const match = matches[index];
       if (!match) return false;
-      selectRunRange(match.run, match.start, match.end);
+      selectRunRange(editor, match.run, match.start, match.end);
       return true;
     },
     replaceMatch: (

@@ -1685,18 +1685,12 @@
   background: var(--card-inner-bg);
 }
 
-/* 编辑文本态：列向拉伸承载查找条（sticky 常驻顶部）与自动增高编辑器 */
-.resource-detail-stage.resource-detail-stage-editing {
-  flex-direction: column;
-  align-items: stretch;
-  justify-content: flex-start;
-}
-
+/* 查找条 fixed 钉在窗口右上：脱离内容流（不把正文往下挤），页面滚动
+   时保持常驻（sticky 曾因 stage 自身是滚动容器而失效） */
 .resource-detail-stage .find-replace-bar {
-  position: sticky;
-  top: 4px;
-  right: auto;
-  align-self: flex-end;
+  position: fixed;
+  top: 60px;
+  right: 18px;
 }
 
 .resource-detail-stage-text,

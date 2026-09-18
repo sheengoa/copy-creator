@@ -55,6 +55,13 @@ export default function FindReplaceBar({
       role="search"
       aria-label={t("common.findReplace")}
       onKeyDown={(event) => {
+        // 焦点在查找条内时 Ctrl+F 同样是开/关切换（关=当前必然开着）。
+        if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "f") {
+          event.preventDefault();
+          event.stopPropagation();
+          onClose();
+          return;
+        }
         if (event.key === "Escape") {
           event.preventDefault();
           event.stopPropagation();

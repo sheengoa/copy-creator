@@ -312,11 +312,11 @@ export default function ClipboardCreateDialog() {
   }, [loadStashRecords, resourceGroupName, storageMode]);
 
   const handleKeyDown = useCallback((e: React.KeyboardEvent) => {
-    // Ctrl+F 查找替换（编辑窗口即编辑态，始终可用）。
+    // Ctrl+F 开/关查找替换（编辑窗口即编辑态，始终可用）。
     if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "f") {
       e.preventDefault();
       e.stopPropagation();
-      setFindOpen(true);
+      setFindOpen((open) => !open);
       return;
     }
     if (e.key === "Escape") {

@@ -322,14 +322,26 @@ export default function ResourceDetailPage({
     [contentEditing, contentDraft, findQuery, findCaseSensitive],
   );
 
-  // 选中指定匹配：textarea 自动增高、无内部滚动，选区交给浏览器随
-  // focus 沿祖先滚动容器（页面层级）呈现到可视区。
+  // 选中指定匹配并滚到可视区：textarea 自动增高、无内部滚动，页面级
+  // 滚动容器按匹配所在行手工定位——浏览器对 focus 的默认呈现不保证
+  // 滚到选区（用户实测「下一个匹配」不跳转）。
   const focusFindMatch = useCallback((start: number, end: number) => {
     const textarea = contentEditorRef.current;
     if (!textarea) return;
-    textarea.focus();
     textarea.setSelectionRange(start, end);
-  }, []);
+    textarea.focus();
+    const scroller = findPageScroller();
+    if (!scroller) return;
+    const style = window.getComputedStyle(textarea);
+    const lineHeight =
+      Number.parseFloat(style.lineHeight) || Number.parseFloat(style.fontSize) * 1.5 || 20;
+    const line = (contentDraft.slice(0, start).match(/\n/g) ?? []).length;
+    const textareaRect = textarea.getBoundingClientRect();
+    const scrollerRect = scroller.getBoundingClientRect();
+    const target =
+      textareaRect.top - scrollerRect.top + scroller.scrollTop + line * lineHeight + 8;
+    scroller.scrollTop = Math.max(0, target - scroller.clientHeight / 3);
+  }, [contentDraft, findPageScroller]);
 
   const goToFindMatch = useCallback((index: number) => {
     if (findMatches.length === 0) return;
@@ -533,7 +545,7 @@ export default function ResourceDetailPage({
             {typeLabel(kind)} · {record.source_app || t("resources.localSource")}
           </p>
           <div
-            className={`resource-detail-stage resource-detail-stage-${kind}${contentEditing && contentEditable ? " resource-detail-stage-editing" : ""}`}
+            className={`resource-detail-stage resource-detail-stage-${kind}`}
             onDoubleClick={(event) => {
               // 视图态双击内容 → 进入编辑；编辑态双击文本区外 → 保存。
               // 编辑态双击文本区内保留原生「选词」。
@@ -637,11 +649,11 @@ export default function ResourceDetailPage({
                     if (contentDirty && !contentSaving) void handleSaveContent();
                     return;
                   }
-                  // Ctrl+F 打开查找替换条。
+                  // Ctrl+F 开/关查找替换条。
                   if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "f") {
                     event.preventDefault();
                     event.stopPropagation();
-                    setFindOpen(true);
+                    setFindOpen((open) => !open);
                   }
                 }}
               />
