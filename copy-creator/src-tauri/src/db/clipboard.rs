@@ -68,7 +68,9 @@ pub fn sanitize_file_record_contents<R: Runtime>(app: &AppHandle<R>) {
     }
 }
 
-pub fn prune_old_records(app: &AppHandle) -> Result<(), Box<dyn std::error::Error>> {
+pub fn prune_old_records<R: Runtime>(
+    app: &AppHandle<R>,
+) -> Result<(), Box<dyn std::error::Error>> {
     let (days, image_contents) = {
         let mut image_contents = Vec::new();
 
@@ -93,10 +95,12 @@ pub fn prune_old_records(app: &AppHandle) -> Result<(), Box<dyn std::error::Erro
 
         // 一条语句完成筛选与删除（RETURNING 拿回被删行）；created_ms 走
         // idx_clipboard_created_ms，替代 datetime(created_at) 的全表扫描。
+        // 收藏（pinned）记录是用户明确要留的内容，清理永不触碰。
         let mut stmt = conn.prepare(
             "DELETE FROM clipboard_records
              WHERE created_ms < ?1
                AND NOT (storage_mode = 'resource')
+               AND pinned = 0
              RETURNING type, content, attachments",
         )?;
         let rows = stmt.query_map(params![cutoff_ms], |row| {
@@ -183,14 +187,15 @@ pub fn get_clipboard_records(
     get_clipboard_records_inner(&app, search, limit, offset, category, resource_group, sort_by)
 }
 
-/// 内容列表排序子句：created=现状时间序；recent=最近使用（touch 毫秒，
-/// 未使用回退 sort_order 即复制/文件时间，新复制置顶不沉底）；count=最多使用。
+/// 内容列表排序子句：pinned 收藏恒定浮顶；created=现状时间序；recent=最近
+/// 使用（touch 毫秒，未使用回退 sort_order 即复制/文件时间，新复制置顶不
+/// 沉底）；count=最多使用。
 pub(crate) fn clipboard_order_clause(sort_by: Option<&str>) -> &'static str {
     match sort_by {
-        Some("count") => "(COALESCE(use_count, 0) = 0) ASC, use_count DESC,
+        Some("count") => "pinned DESC, (COALESCE(use_count, 0) = 0) ASC, use_count DESC,
                 MAX(COALESCE(touched_ms, 0), sort_order) DESC",
-        Some("recent") => "MAX(COALESCE(touched_ms, 0), sort_order) DESC",
-        _ => "sort_order DESC",
+        Some("recent") => "pinned DESC, MAX(COALESCE(touched_ms, 0), sort_order) DESC",
+        _ => "pinned DESC, sort_order DESC",
     }
 }
 
@@ -238,7 +243,7 @@ pub(crate) fn get_clipboard_records_inner<R: Runtime>(
             .replace('%', "\\%")
             .replace('_', "\\_");
         let sql = format!(
-            "SELECT id, type, content, source_app, created_at, user_api_key, group_name, attachments, storage_mode, resource_path, COALESCE(use_count, 0), COALESCE(last_used_at, '') FROM clipboard_records
+            "SELECT id, type, content, source_app, created_at, user_api_key, group_name, attachments, storage_mode, resource_path, COALESCE(use_count, 0), COALESCE(last_used_at, ''), COALESCE(pinned, 0) FROM clipboard_records
              WHERE content LIKE '%' || ?1 || '%' ESCAPE '\\' {} ORDER BY {} LIMIT ?2 OFFSET ?3",
             cat_filter.1,
             clipboard_order_clause(sort_by.as_deref())
@@ -259,6 +264,7 @@ pub(crate) fn get_clipboard_records_inner<R: Runtime>(
                     row.get::<_, String>(9)?,
                     row.get::<_, i64>(10)?,
                     row.get::<_, String>(11)?,
+                    row.get::<_, i64>(12)?,
                 ))
             })
             .map_err(|e| e.to_string())?;
@@ -267,7 +273,7 @@ pub(crate) fn get_clipboard_records_inner<R: Runtime>(
         }
     } else {
         let sql = format!(
-            "SELECT id, type, content, source_app, created_at, user_api_key, group_name, attachments, storage_mode, resource_path, COALESCE(use_count, 0), COALESCE(last_used_at, '') FROM clipboard_records
+            "SELECT id, type, content, source_app, created_at, user_api_key, group_name, attachments, storage_mode, resource_path, COALESCE(use_count, 0), COALESCE(last_used_at, ''), COALESCE(pinned, 0) FROM clipboard_records
              {} ORDER BY {} LIMIT ?1 OFFSET ?2",
             cat_filter.0,
             clipboard_order_clause(sort_by.as_deref())
@@ -288,6 +294,7 @@ pub(crate) fn get_clipboard_records_inner<R: Runtime>(
                     row.get::<_, String>(9)?,
                     row.get::<_, i64>(10)?,
                     row.get::<_, String>(11)?,
+                    row.get::<_, i64>(12)?,
                 ))
             })
             .map_err(|e| e.to_string())?;
@@ -875,4 +882,37 @@ pub fn move_clipboard_records_to_top(app: AppHandle, ids: Vec<String>) -> Result
     move_rows_to_top(&conn, "clipboard_records", &ids)?;
     log::info!("move_clipboard_records_to_top: {} items", ids.len());
     Ok(())
+}
+
+/// 收藏/取消收藏剪切板记录（单条与批量共用，ids 传一个也走这里）。
+/// 收藏记录不受保留期清理，列表查询恒定浮顶；用户主动删除不受影响。
+pub(crate) fn set_clipboard_record_pinned_internal<R: Runtime>(
+    app: &AppHandle<R>,
+    ids: &[String],
+    pinned: bool,
+) -> Result<(), String> {
+    if ids.is_empty() {
+        return Ok(());
+    }
+    let state = app.state::<DbState>();
+    let conn = state.conn.lock().map_err(|e| e.to_string())?;
+    let flag = if pinned { 1 } else { 0 };
+    for id in ids {
+        conn.execute(
+            "UPDATE clipboard_records SET pinned = ?1 WHERE id = ?2",
+            params![flag, id],
+        )
+        .map_err(|e| e.to_string())?;
+    }
+    log::info!("set_clipboard_record_pinned: {} items -> {}", ids.len(), flag);
+    Ok(())
+}
+
+#[tauri::command]
+pub fn set_clipboard_record_pinned(
+    app: AppHandle,
+    ids: Vec<String>,
+    pinned: bool,
+) -> Result<(), String> {
+    set_clipboard_record_pinned_internal(&app, &ids, pinned)
 }

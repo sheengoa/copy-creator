@@ -527,6 +527,7 @@ pub(crate) struct ResourceRow {
     touched_ms: i64,
     last_used_at: String,
     resource_external: i64,
+    pinned: i64,
 }
 
 pub(crate) fn resource_record_value(
@@ -617,7 +618,8 @@ pub(crate) fn get_resource_records_inner<R: Runtime>(
                         group_name, attachments, storage_mode, resource_path,
                         COALESCE(sort_order, 0), COALESCE(resource_note, ''),
                         COALESCE(use_count, 0), COALESCE(touched_ms, 0),
-                        COALESCE(last_used_at, ''), COALESCE(resource_external, 0)
+                        COALESCE(last_used_at, ''), COALESCE(resource_external, 0),
+                        COALESCE(pinned, 0)
                  FROM clipboard_records
                  WHERE storage_mode = 'resource'",
             )
@@ -640,6 +642,7 @@ pub(crate) fn get_resource_records_inner<R: Runtime>(
                 let touched_ms = row.get::<_, i64>(13)?;
                 let last_used_at = row.get::<_, String>(14)?;
                 let resource_external = row.get::<_, i64>(15)?;
+                let pinned = row.get::<_, i64>(16)?;
 
                 let path = if resource_path.is_empty() {
                     None
@@ -673,6 +676,7 @@ pub(crate) fn get_resource_records_inner<R: Runtime>(
                     touched_ms,
                     last_used_at,
                     resource_external,
+                    pinned,
                 })
             })
             .map_err(|e| e.to_string())?;
@@ -771,6 +775,7 @@ pub(crate) fn get_resource_records_inner<R: Runtime>(
                 record.resource_path,
                 record.use_count,
                 record.last_used_at,
+                record.pinned,
             );
             let mut value = resource_record_value(
                 value,

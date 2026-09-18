@@ -183,6 +183,7 @@ fn clipboard_record_json(
     resource_path: String,
     use_count: i64,
     last_used_at: String,
+    pinned: i64,
 ) -> serde_json::Value {
     let attachment_paths = serde_json::from_str::<Vec<String>>(&attachments).unwrap_or_default();
     let has_images = !attachment_paths.is_empty();
@@ -228,6 +229,7 @@ fn clipboard_record_json(
         "resource_path": resource_path,
         "use_count": use_count,
         "last_used_at": last_used_at,
+        "pinned": pinned != 0,
     })
 }
 
@@ -961,7 +963,8 @@ fn ensure_schema(conn: &Connection) -> Result<(), Box<dyn std::error::Error>> {
             resource_path TEXT DEFAULT '',
             last_used_at TEXT DEFAULT '',
             use_count INTEGER DEFAULT 0,
-            touched_ms INTEGER DEFAULT 0
+            touched_ms INTEGER DEFAULT 0,
+            pinned INTEGER NOT NULL DEFAULT 0
         );
 
         CREATE INDEX IF NOT EXISTS idx_clipboard_created_at
@@ -1192,6 +1195,15 @@ fn ensure_schema(conn: &Connection) -> Result<(), Box<dyn std::error::Error>> {
     .ok();
     conn.execute(
         "ALTER TABLE clipboard_records ADD COLUMN touched_ms INTEGER DEFAULT 0",
+        [],
+    )
+    .ok();
+
+    // ── pinned：收藏标记 ──
+    // 收藏记录不受保留期清理（prune_old_records 排除），列表查询恒定浮顶
+    // （clipboard_order_clause 前置 pinned DESC）。用户主动删除仍可移除。
+    conn.execute(
+        "ALTER TABLE clipboard_records ADD COLUMN pinned INTEGER NOT NULL DEFAULT 0",
         [],
     )
     .ok();

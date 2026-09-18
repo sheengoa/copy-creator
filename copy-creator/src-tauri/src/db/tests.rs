@@ -658,7 +658,8 @@ mod resource_command_tests {
                  resource_external INTEGER DEFAULT 0,
                  last_used_at TEXT DEFAULT '',
                  use_count INTEGER DEFAULT 0,
-                 touched_ms INTEGER DEFAULT 0
+                 touched_ms INTEGER DEFAULT 0,
+                 pinned INTEGER NOT NULL DEFAULT 0
              );
              CREATE TABLE api_key_labels (
                  record_id TEXT PRIMARY KEY,
@@ -3295,7 +3296,8 @@ mod content_sort_tests {
                 id TEXT PRIMARY KEY,
                 sort_order REAL,
                 touched_ms INTEGER DEFAULT 0,
-                use_count INTEGER DEFAULT 0
+                use_count INTEGER DEFAULT 0,
+                pinned INTEGER NOT NULL DEFAULT 0
             );",
         )
         .unwrap();
@@ -3303,10 +3305,21 @@ mod content_sort_tests {
     }
 
     fn insert(conn: &Connection, id: &str, sort_order: f64, touched_ms: i64, use_count: i64) {
+        insert_pinned(conn, id, sort_order, touched_ms, use_count, 0);
+    }
+
+    fn insert_pinned(
+        conn: &Connection,
+        id: &str,
+        sort_order: f64,
+        touched_ms: i64,
+        use_count: i64,
+        pinned: i64,
+    ) {
         conn.execute(
-            "INSERT INTO clipboard_records (id, sort_order, touched_ms, use_count)
-             VALUES (?1, ?2, ?3, ?4)",
-            params![id, sort_order, touched_ms, use_count],
+            "INSERT INTO clipboard_records (id, sort_order, touched_ms, use_count, pinned)
+             VALUES (?1, ?2, ?3, ?4, ?5)",
+            params![id, sort_order, touched_ms, use_count, pinned],
         )
         .unwrap();
     }
@@ -3356,6 +3369,147 @@ mod content_sort_tests {
             ordered_ids(&conn, Some("count")),
             vec!["warm", "hot", "cold", "fresh", "stale"]
         );
+    }
+
+    // 收藏恒定浮顶：pinned DESC 前置于三类排序键，任何排序模式下收藏记录
+    // 都在非收藏之前；收藏之间保持该模式原有次序。
+    #[test]
+    fn pinned_rows_float_above_others_in_every_sort_mode() {
+        let conn = setup_conn();
+        // pinned 记录复制时间与使用次数都更旧，仍须排最前。
+        insert_pinned(&conn, "fav-old", 100.0, 0, 0, 1);
+        insert(&conn, "new", 9000.0, 0, 0);
+        insert(&conn, "hot", 200.0, 0, 30);
+        assert_eq!(ordered_ids(&conn, None), vec!["fav-old", "new", "hot"]);
+        assert_eq!(ordered_ids(&conn, Some("recent")), vec!["fav-old", "new", "hot"]);
+        assert_eq!(ordered_ids(&conn, Some("count")), vec!["fav-old", "hot", "new"]);
+    }
+}
+
+#[cfg(test)]
+mod pinned_record_tests {
+    use crate::db::{
+        get_clipboard_records_inner, prune_old_records, set_clipboard_record_pinned_internal,
+        DbState,
+    };
+    use rusqlite::{params, Connection};
+    use std::sync::Mutex;
+    use tauri::Manager;
+
+    /// 内存库 + mock app：schema 含 created_ms 生成列（prune 的清理键）与
+    /// pinned（收藏标记），与生产 ensure_schema 语义一致。
+    fn pinned_test_app() -> tauri::App<tauri::test::MockRuntime> {
+        let app = tauri::test::mock_app();
+        let conn = Connection::open_in_memory().unwrap();
+        conn.execute_batch(
+            "CREATE TABLE settings (key TEXT PRIMARY KEY, value TEXT NOT NULL);
+             CREATE TABLE clipboard_records (
+                 id TEXT PRIMARY KEY,
+                 type TEXT NOT NULL,
+                 content TEXT NOT NULL,
+                 source_app TEXT DEFAULT '',
+                 created_at TEXT NOT NULL,
+                 user_api_key INTEGER DEFAULT 0,
+                 sort_order REAL,
+                 group_name TEXT DEFAULT '',
+                 attachments TEXT DEFAULT '[]',
+                 storage_mode TEXT DEFAULT 'database',
+                 resource_path TEXT DEFAULT '',
+                 resource_note TEXT DEFAULT '',
+                 resource_external INTEGER DEFAULT 0,
+                 last_used_at TEXT DEFAULT '',
+                 use_count INTEGER DEFAULT 0,
+                 touched_ms INTEGER DEFAULT 0,
+                 pinned INTEGER NOT NULL DEFAULT 0,
+                 created_ms INTEGER GENERATED ALWAYS AS (CAST((julianday(created_at) - 2440587.5) * 86400000 AS INTEGER)) VIRTUAL
+             );
+             CREATE TABLE api_key_labels (
+                 record_id TEXT PRIMARY KEY,
+                 label TEXT DEFAULT ''
+             );",
+        )
+        .unwrap();
+        app.manage(DbState {
+            conn: Mutex::new(conn),
+        });
+        app
+    }
+
+    fn insert_record(app: &tauri::App<tauri::test::MockRuntime>, id: &str, created_at: &str) {
+        let state = app.state::<DbState>();
+        let conn = state.conn.lock().unwrap();
+        conn.execute(
+            "INSERT INTO clipboard_records (id, type, content, created_at, sort_order)
+             VALUES (?1, 'text', ?2, ?3, 1000.0)",
+            params![id, id, created_at],
+        )
+        .unwrap();
+    }
+
+    fn remaining_ids(app: &tauri::App<tauri::test::MockRuntime>) -> Vec<String> {
+        let state = app.state::<DbState>();
+        let conn = state.conn.lock().unwrap();
+        let mut stmt = conn
+            .prepare("SELECT id FROM clipboard_records ORDER BY id")
+            .unwrap();
+        stmt.query_map([], |row| row.get::<_, String>(0))
+            .unwrap()
+            .collect::<Result<Vec<_>, _>>()
+            .unwrap()
+    }
+
+    // 收藏记录是用户明确要留的内容：超期后清理只淘汰未收藏记录，
+    // 收藏记录与其引用的图片文件不随保留期消失。
+    #[test]
+    fn prune_keeps_pinned_records_but_expires_others() {
+        let app = pinned_test_app();
+        let handle = app.handle().clone();
+        // 两条超期（1 年前）：一条收藏、一条普通；一条新鲜普通记录作对照。
+        insert_record(&app, "old-pinned", "2025-09-01T00:00:00Z");
+        insert_record(&app, "old-plain", "2025-09-01T00:00:00Z");
+        insert_record(&app, "fresh-plain", "2026-09-18T00:00:00Z");
+        set_clipboard_record_pinned_internal(&handle, &["old-pinned".to_string()], true).unwrap();
+
+        prune_old_records(&handle).unwrap();
+
+        assert_eq!(remaining_ids(&app), vec!["fresh-plain", "old-pinned"]);
+    }
+
+    // 取消收藏后恢复受清理管辖：收藏是可逆的保护，不是删除。
+    #[test]
+    fn unpinning_restores_retention_semantics() {
+        let app = pinned_test_app();
+        let handle = app.handle().clone();
+        insert_record(&app, "maybe", "2025-09-01T00:00:00Z");
+        set_clipboard_record_pinned_internal(&handle, &["maybe".to_string()], true).unwrap();
+        set_clipboard_record_pinned_internal(&handle, &["maybe".to_string()], false).unwrap();
+
+        prune_old_records(&handle).unwrap();
+
+        assert!(remaining_ids(&app).is_empty());
+    }
+
+    // 列表查询带回 pinned 事实字段且收藏浮顶（与排序子句测试互补，钉住
+    // SELECT 列与 JSON 组装的端到端一致性）。
+    #[test]
+    fn list_carries_pinned_flag_and_floats_favorites_first() {
+        let app = pinned_test_app();
+        let handle = app.handle().clone();
+        insert_record(&app, "fav", "2025-09-01T00:00:00Z");
+        insert_record(&app, "plain", "2026-09-18T00:00:00Z");
+        set_clipboard_record_pinned_internal(&handle, &["fav".to_string()], true).unwrap();
+
+        let records =
+            get_clipboard_records_inner(&handle, None, Some(50), Some(0), None, None, None)
+                .unwrap();
+
+        let ids: Vec<&str> = records
+            .iter()
+            .map(|r| r["id"].as_str().unwrap())
+            .collect();
+        assert_eq!(ids, vec!["fav", "plain"]);
+        assert_eq!(records[0]["pinned"], serde_json::Value::Bool(true));
+        assert_eq!(records[1]["pinned"], serde_json::Value::Bool(false));
     }
 }
 
