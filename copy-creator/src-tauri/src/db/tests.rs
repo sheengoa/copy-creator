@@ -3764,6 +3764,60 @@ mod trash_tests {
         assert!(list_trash_items_internal(&handle).unwrap().is_empty());
         assert!(!file.exists());
     }
+
+    // 换库后恢复：删除后用户切换了资源库，.trash 留在旧库根——恢复按
+    // 多根查找定位回收目录（与 purge 同一口径），文件仍能移回原位。
+    // 回归锚点：恢复曾只在当前库根找 .trash，换库后文件滞留旧库无法取回。
+    #[test]
+    fn restore_locates_trash_dir_in_previous_library_root() {
+        let (app, library_a) = trash_test_app();
+        let handle = app.handle().clone();
+        let group_dir = library_a.join("组");
+        std::fs::create_dir_all(&group_dir).unwrap();
+        let file = group_dir.join("跨库.txt");
+        std::fs::write(&file, b"cross").unwrap();
+        insert_external_record(&app, "r1", &file, &[]);
+
+        delete_clipboard_records_internal(&handle, &["r1".to_string()]).unwrap();
+        assert!(!file.exists());
+
+        // 模拟 set_resource_library_path 的切换链路：当前根改写为新库，
+        // 旧库进历史（resource_library_history）。
+        let library_b = std::env::temp_dir().join(format!(
+            "copy-creator-trash-switch-{}",
+            uuid::Uuid::new_v4()
+        ));
+        std::fs::create_dir_all(&library_b).unwrap();
+        {
+            let state = app.state::<DbState>();
+            let conn = state.conn.lock().unwrap();
+            conn.execute(
+                "INSERT INTO settings (key, value) VALUES ('resource_library_path', ?1)
+                 ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+                params![library_b.to_string_lossy().as_ref()],
+            )
+            .unwrap();
+            conn.execute(
+                "INSERT INTO settings (key, value) VALUES ('resource_library_history', ?1)
+                 ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+                params![serde_json::to_string(&vec![library_a.to_string_lossy().to_string()])
+                    .unwrap()],
+            )
+            .unwrap();
+        }
+
+        let trash_id = list_trash_items_internal(&handle).unwrap()[0]["id"]
+            .as_str()
+            .unwrap()
+            .to_string();
+        restore_trash_item_internal(&handle, &trash_id).unwrap();
+
+        assert!(file.exists(), "恢复应从历史库根找到回收目录并移回文件");
+        assert_eq!(std::fs::read(&file).unwrap(), b"cross");
+        assert_eq!(record_count(&app, "r1"), 1);
+        assert!(list_trash_items_internal(&handle).unwrap().is_empty());
+        std::fs::remove_dir_all(&library_b).ok();
+    }
 }
 
 #[cfg(test)]

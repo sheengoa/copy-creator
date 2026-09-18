@@ -313,7 +313,10 @@ pub(crate) fn restore_trash_item_internal<R: Runtime>(
     app: &AppHandle<R>,
     id: &str,
 ) -> Result<(), String> {
+    // 多根查找要在拿数据库锁之前完成：roots 解析要读 settings，而
+    // conn 是不可重入 Mutex，锁内再取会死锁（purge 同样先 drop(conn)）。
     let library_root = get_resource_library_dir(app);
+    let roots = resource_library_roots(app);
     let state = app.state::<DbState>();
     let conn = state.conn.lock().map_err(|e| e.to_string())?;
 
@@ -334,10 +337,18 @@ pub(crate) fn restore_trash_item_internal<R: Runtime>(
         .map_err(|e| e.to_string())?;
     }
 
+    // 回收目录按多根查找：删除后用户可能切换过资源库，.trash 留在历史
+    // 库根（purge 已按多根清理，恢复保持同一口径）。都找不到时按当前根
+    // 拼接，维持「无文件可移」的原语义。
+    let trash_abs = roots
+        .iter()
+        .map(|root| trash_dir_absolute(root, &trash_dir))
+        .find(|path| path.is_dir())
+        .unwrap_or_else(|| trash_dir_absolute(&library_root, &trash_dir));
+
     // 文件移回：主文件按原 resource_path 落位，被占用则加序号并更新记录。
     let mut updated_json = record_json.clone();
     if !original_path.is_empty() {
-        let trash_abs = trash_dir_absolute(&library_root, &trash_dir);
         let restored = move_trash_files_back(&library_root, &trash_abs, &original_path)?;
         if let Some(final_path) = restored {
             if final_path != PathBuf::from(&original_path) {
@@ -349,7 +360,7 @@ pub(crate) fn restore_trash_item_internal<R: Runtime>(
     reinsert_record_from_json(&conn, &updated_json)?;
     conn.execute("DELETE FROM trash_items WHERE id = ?1", params![id])
         .map_err(|e| e.to_string())?;
-    let _ = std::fs::remove_dir_all(trash_dir_absolute(&library_root, &trash_dir));
+    let _ = std::fs::remove_dir_all(&trash_abs);
     drop(conn);
     let _ = app.emit("resource-groups-changed", ());
     Ok(())
