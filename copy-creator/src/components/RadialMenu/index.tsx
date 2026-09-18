@@ -1132,9 +1132,12 @@ export default function RadialMenu() {
 
   const handleDocumentPointerDown = useCallback((e: PointerEvent) => {
     if (e.button !== 0 || !e.isPrimary) return;
+    // 动作按钮是点击热区（28px），按下不应武装 6px 阈值的条目拖拽——
+    // 预览触发器与收藏星标都豁免。
     if (
       e.target instanceof Element
-      && e.target.closest("[data-radial-preview-trigger]")
+      && (e.target.closest("[data-radial-preview-trigger]")
+        || e.target.closest("[data-radial-item-pin]"))
     ) return;
     // 清掉上一次原生拖动为防止幽灵 click 留下的抑制标记。
     suppressClickRef.current = false;
@@ -1883,6 +1886,7 @@ export default function RadialMenu() {
                           {!item.isResource && item.pinned !== undefined && (
                             <RadialItemAction
                               className={`radial-menu-item-pin${item.pinned ? " pinned" : ""}`}
+                              data-radial-item-pin
                               aria-pressed={item.pinned}
                               aria-label={t(item.pinned ? "common.unfavorite" : "common.favorite")}
                               title={t(item.pinned ? "common.unfavorite" : "common.favorite")}
