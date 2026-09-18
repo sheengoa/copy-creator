@@ -2,7 +2,9 @@
 // 导入解压到暂存目录并逐表校验，通过后写 storage_path 由重启链式切换。
 // 校验强度对齐 db/migrate.rs（逐表行数一致才切换）；缩略图与视频海报等
 // 再生缓存按"整树 − 缓存黑名单"排除（缺失时自动再生，见 db/media.rs）。
-use crate::db::{get_resource_library_dir, get_storage_dir, DbState, MIGRATED_BUSINESS_TABLES};
+use crate::db::{
+    get_resource_library_dir, get_storage_dir, paths_overlap, DbState, MIGRATED_BUSINESS_TABLES,
+};
 use serde::{Deserialize, Serialize};
 use std::fs::File;
 use std::io::{BufReader, Read, Write};
@@ -282,6 +284,13 @@ pub fn import_backup_internal<R: Runtime>(
         .app_data_dir()
         .map_err(|e| format!("定位应用数据目录失败: {e}"))?;
     let restore_dir = data_dir.join(format!("restore-{}", chrono::Utc::now().timestamp_millis()));
+    // 库恢复位置在落盘前校验：与当前存储目录或本轮流暂存目录（重启后
+    // 即新存储目录）互相嵌套会让后续导出双份打包、watcher 与全量对账
+    // 互相纠缠——与 set_resource_library_path 的重叠约束同一口径。
+    if let Some(dir) = &library_dir {
+        let storage_dir = get_storage_dir(app);
+        reject_overlapping_library_target(&storage_dir, &restore_dir, dir)?;
+    }
     std::fs::create_dir_all(&restore_dir).map_err(|e| format!("创建暂存目录失败: {e}"))?;
     if let Some(dir) = &library_dir {
         std::fs::create_dir_all(dir).map_err(|e| format!("创建资源库恢复目录失败: {e}"))?;
@@ -353,6 +362,18 @@ pub fn import_backup_internal<R: Runtime>(
 
 fn target_restore_path(restore_dir: &Path, name: &str) -> PathBuf {
     restore_dir.join(name)
+}
+
+/// 库恢复位置不得与存储目录（当前的或导入切换后的暂存目录）互相嵌套。
+fn reject_overlapping_library_target(
+    storage_dir: &Path,
+    restore_dir: &Path,
+    library_dir: &Path,
+) -> Result<(), String> {
+    if paths_overlap(storage_dir, library_dir) || paths_overlap(restore_dir, library_dir) {
+        return Err("资源库恢复位置不能与存储目录重叠，请另选目录".to_string());
+    }
+    Ok(())
 }
 
 /// 校验暂存库（行数 + 外键），通过后写两处 storage_path。
@@ -545,6 +566,21 @@ mod tests {
         assert!(!is_unsafe_entry_name("library/组/文件.txt"));
     }
 
+    /// 库恢复位置与当前存储目录或导入暂存目录（重启后即新存储目录）
+    /// 互相嵌套都应拒绝，普通独立目录放行。
+    #[test]
+    fn library_restore_target_may_not_overlap_storage() {
+        let storage = Path::new("E:/data/storage");
+        let restore = Path::new("E:/appdata/restore-1");
+        let inside_storage = Path::new("E:/data/storage/lib");
+        let inside_restore = restore.join("lib");
+        let independent = Path::new("E:/libraries/main");
+        assert!(reject_overlapping_library_target(storage, restore, inside_storage).is_err());
+        assert!(reject_overlapping_library_target(storage, restore, &inside_restore).is_err());
+        assert!(reject_overlapping_library_target(storage, restore, storage).is_err());
+        assert!(reject_overlapping_library_target(storage, restore, independent).is_ok());
+    }
+
     /// 真实 round-trip：导出 → 当前库被改乱 → 导入 → 暂存库数据与导出前
     /// 一致，storage_path 双写指向暂存目录（对齐计划验收场景）。
     #[test]
@@ -599,10 +635,23 @@ mod tests {
             conn.execute("DELETE FROM clipboard_records", []).unwrap();
         }
 
+        // 库恢复位置与存储目录互相嵌套应在解压前被拒绝（此时 storage_path
+        // 尚未被成功导入改写，指向 work/storage）。
+        let nested = work.join("storage").join("nested-library");
+        assert!(
+            import_backup_internal(
+                &handle,
+                &zip_path,
+                Some(nested.to_string_lossy().as_ref()),
+                &AtomicBool::new(false),
+            )
+            .is_err(),
+            "库恢复位置选在存储目录内应被拒绝"
+        );
+
         let summary =
             import_backup_internal(&handle, &zip_path, None, &AtomicBool::new(false)).unwrap();
         let restore_dir = summary["restore_dir"].as_str().unwrap().to_string();
-
         // 当前库 storage_path 已指向暂存目录，重启后 db_path 链式跟随。
         {
             let state = handle.state::<DbState>();
