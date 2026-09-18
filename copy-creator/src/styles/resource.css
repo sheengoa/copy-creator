@@ -2040,6 +2040,17 @@
   flex-shrink: 0;
 }
 
+/* 入口按钮激活态：回收站面板打开时给出与徽标同色调的按下反馈 */
+.resource-trash-button.active {
+  border-color: color-mix(in srgb, var(--accent, #3b82f6) 45%, transparent);
+  background: rgba(59, 130, 246, 0.12);
+  color: var(--accent, #3b82f6);
+}
+
+[data-theme="dark"] .resource-trash-button.active {
+  background: rgba(59, 130, 246, 0.2);
+}
+
 .trash-panel {
   margin-top: 12px;
   border: 1px solid var(--separator);
