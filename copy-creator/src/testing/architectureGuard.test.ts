@@ -316,4 +316,31 @@ describe("架构守卫：领域规则必须全局共享", () => {
       "收藏星标必须挂共享基类",
     ).toContain("radial-menu-item-action radial-menu-item-pin");
   });
+
+  it("规则 18：剪切板卡片动作区按钮必须被 clipboard.css 动作组覆盖", () => {
+    // 回归锚点：收藏星标上线时只写了 components.css 的基础样式（token
+    // 存在），未加入 clipboard.css 的卡片动作组——hover 无底色反馈而
+    // 相邻按钮有。「类名存在于某处」是 token 级核对；动作区按钮的交互
+    // 反馈必须整组覆盖，新增按钮时本守卫的清单自动跟随。
+    const cardSource = readSource("pages/ClipboardPage/ClipboardCard.tsx");
+    const actionButtons = [
+      ...new Set(
+        (cardSource.match(/className="card-[a-z-]+-btn"/g) ?? []).map((match) =>
+          match.slice('className="'.length, -1),
+        ),
+      ),
+    ].sort();
+    expect(
+      actionButtons,
+      "ClipboardCard 动作按钮清单（正则失效即守卫空转）",
+    ).toEqual(["card-delete-btn", "card-pin-btn", "card-toggle-text-btn"]);
+    const clipboardStyles = readSource("styles/clipboard.css");
+    const uncovered = actionButtons.filter(
+      (name) => !clipboardStyles.includes(`.clipboard-card-actions > .${name}`),
+    );
+    expect(
+      uncovered,
+      "动作区按钮必须加入 clipboard.css 动作组（基础/hover 显现/底色/svg 尺寸），不得只有孤立的 token 样式",
+    ).toEqual([]);
+  });
 });
