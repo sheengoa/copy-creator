@@ -13,6 +13,7 @@ vi.mock("@tauri-apps/api/event", () => ({
 const { useClipboardStore, useResourceStore } = await import("./clipboardStore");
 // matchesResourceGroup 已收进 domain/records.ts（唯一实现）。
 const { matchesResourceGroup } = await import("../domain/records");
+type ClipboardRecord = import("../types").ClipboardRecord;
 
 const records = [
   {
@@ -137,6 +138,29 @@ describe("clipboardStore pinning", () => {
     await useClipboardStore.getState().setRecordsPinned([], true);
 
     expect(invokeMock).not.toHaveBeenCalled();
+  });
+
+  it("does not leave loading stuck when the event reload outraces the optimistic load", async () => {
+    // 收藏会同时触发乐观 loadRecords 与 clipboard-record-updated 引发的
+    // reloadLoadedWindow；若后者先完成，旧加载被代数丢弃时会跳过 finally
+    // 的清理——最终完成者必须把 loading 收敛回 false。
+    useClipboardStore.setState({ records: [records[0]], loading: false });
+    const optimisticLoad = deferred<ClipboardRecord[]>();
+    const reloaded = [{ ...records[0], pinned: true }];
+    invokeMock
+      .mockResolvedValueOnce(undefined) // set_clipboard_record_pinned
+      .mockImplementationOnce(() => optimisticLoad.promise) // 乐观 loadRecords
+      .mockResolvedValueOnce(reloaded); // reloadLoadedWindow
+
+    const optimistic = useClipboardStore.getState().setRecordsPinned(["clip-1"], true);
+    // 等乐观 loadRecords 发起（第 2 次 invoke）后，再模拟事件触发的 reload。
+    await vi.waitFor(() => expect(invokeMock).toHaveBeenCalledTimes(2));
+    await useClipboardStore.getState().reloadLoadedWindow();
+    optimisticLoad.resolve([{ ...records[0], pinned: true }]);
+    await optimistic;
+
+    expect(useClipboardStore.getState().loading).toBe(false);
+    expect(useClipboardStore.getState().records[0]?.pinned).toBe(true);
   });
 });
 

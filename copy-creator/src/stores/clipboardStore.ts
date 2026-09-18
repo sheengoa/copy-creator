@@ -436,6 +436,11 @@ export function createRecordsStore() {
           // 返回数少于窗口长度说明总数已不足一窗，无更多可加载。
           hasMore: records.length >= prev.records.length,
           loadError: null,
+          // 本刷新若已是最新加载代数，则一并收敛并发首载遗留的 loading：
+          // 收藏等操作会同时触发乐观 loadRecords 与本刷新（经
+          // clipboard-record-updated），若本刷新先完成，旧加载被代数
+          // 丢弃时会跳过 finally 的清理，loading 将卡在 true。
+          loading: false,
         }));
       } catch (e) {
         console.error("Failed to reload loaded window:", e);
