@@ -3511,6 +3511,59 @@ mod pinned_record_tests {
         assert_eq!(records[0]["pinned"], serde_json::Value::Bool(true));
         assert_eq!(records[1]["pinned"], serde_json::Value::Bool(false));
     }
+
+    // 「收藏」视图（category=favorites）：数据库层过滤，跨类别只返回收藏
+    // 记录；搜索分支同样生效。
+    #[test]
+    fn favorites_category_filters_at_database_layer() {
+        let app = pinned_test_app();
+        let handle = app.handle().clone();
+        insert_record(&app, "fav-text", "2025-09-01T00:00:00Z");
+        insert_record(&app, "plain", "2026-09-18T00:00:00Z");
+        set_clipboard_record_pinned_internal(&handle, &["fav-text".to_string()], true).unwrap();
+
+        let ids_of = |records: &[serde_json::Value]| -> Vec<String> {
+            records
+                .iter()
+                .map(|r| r["id"].as_str().unwrap().to_string())
+                .collect()
+        };
+        let favorites = get_clipboard_records_inner(
+            &handle,
+            None,
+            Some(50),
+            Some(0),
+            Some("favorites".to_string()),
+            None,
+            None,
+        )
+        .unwrap();
+        assert_eq!(ids_of(&favorites), vec!["fav-text"]);
+
+        let searched = get_clipboard_records_inner(
+            &handle,
+            Some("fav-text".to_string()),
+            Some(50),
+            Some(0),
+            Some("favorites".to_string()),
+            None,
+            None,
+        )
+        .unwrap();
+        assert_eq!(ids_of(&searched), vec!["fav-text"]);
+
+        let searched_out = get_clipboard_records_inner(
+            &handle,
+            Some("plain".to_string()),
+            Some(50),
+            Some(0),
+            Some("favorites".to_string()),
+            None,
+            None,
+        )
+        .unwrap();
+        assert!(ids_of(&searched_out).is_empty());
+    }
 }
 
 #[cfg(test)]

@@ -3,7 +3,6 @@ import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { useSettingsStore, parseContentSort } from "./settingsStore";
 import { isResourceRecord } from "../domain/records";
-import { sortByIdOrder } from "../utils/reorder";
 import { getResourcePath, isFileBackedTextResource } from "../domain/records";
 // 权威类型唯一定义在 types/：store 不再手写副本（历史副本缺
 // resource_modified 等字段，曾让版本字段对类型系统"隐身"）。
@@ -74,7 +73,7 @@ function usageFallbackMs(record: ClipboardRecord): number {
   return Number.isNaN(parsed) ? 0 : parsed;
 }
 
-export const CLIP_TYPES = ["all", "text", "image", "link", "file", "resources"] as const;
+export const CLIP_TYPES = ["all", "favorites", "text", "image", "link", "file", "resources"] as const;
 export type ClipType = (typeof CLIP_TYPES)[number];
 /** 剪贴板页的筛选范围：除资源外的全部类型。 */
 export type ClipboardFilter = Exclude<ClipType, "resources">;
@@ -114,7 +113,8 @@ interface ClipboardState {
   deleteRecord: (id: string) => Promise<void>;
   pasteRecord: (record: ClipboardRecord) => Promise<boolean>;
   pasteRecordTerminal: (record: ClipboardRecord) => Promise<boolean>;
-  moveRecordsToTop: (ids: string[]) => Promise<void>;
+  /** 收藏/取消收藏：本地即时打标，随后重载拿收藏浮顶的新顺序。 */
+  setRecordsPinned: (ids: string[], pinned: boolean) => Promise<void>;
   getRecordContent: (record: ClipboardRecord) => Promise<string>;
   getThumbnail: (record: Pick<ClipboardRecord, "id" | "content">) => Promise<string>;
   getImageData: (record: Pick<ClipboardRecord, "id" | "content">) => Promise<string>;
@@ -603,14 +603,18 @@ export function createRecordsStore() {
 
     pasteRecordTerminal: (record) => runPaste(get, set, record, true),
 
-    // 移到顶部：sort_order 提到全表最前，径向菜单与主窗口共用该顺序。
-    // 搜索状态下执行后按当前搜索词重载，置顶项保持在结果最前。
-    moveRecordsToTop: async (ids: string[]) => {
-      set((state) => ({ records: sortByIdOrder(state.records, ids) }));
+    // 收藏：本地先打标（星标即时反馈），后端落库后重载——排序由后端
+    // pinned DESC 决定；「收藏」视图下取消收藏的记录随重载从列表消失。
+    setRecordsPinned: async (ids, pinned) => {
+      if (ids.length === 0) return;
+      const idSet = new Set(ids);
+      set((state) => ({
+        records: state.records.map((r) => (idSet.has(r.id) ? { ...r, pinned } : r)),
+      }));
       try {
-        await invoke("move_clipboard_records_to_top", { ids });
+        await invoke("set_clipboard_record_pinned", { ids, pinned });
       } catch (e) {
-        console.error("Failed to move clipboard records to top:", e);
+        console.error("Failed to set clipboard record pinned:", e);
       }
       get().loadRecords();
     },

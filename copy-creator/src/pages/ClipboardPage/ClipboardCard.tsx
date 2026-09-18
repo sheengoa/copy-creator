@@ -31,8 +31,8 @@ interface ClipboardCardProps {
   onPasteNormal: (view: RecordView) => void;
   onPasteTerminal: (view: RecordView) => void;
   onDelete: (id: string) => void;
-  /** 右键菜单「移到顶部」：搜索定位后一键置顶，径向菜单同步可见。 */
-  onMoveToTop?: (id: string) => void;
+  /** 收藏/取消收藏（hover 星标与右键菜单共用）：防保留期清理，恒定浮顶。 */
+  onSetPinned?: (id: string, pinned: boolean) => void;
   /** 数据/动作经容器回调进出（叶子禁 import stores/invoke）。 */
   getRecordContent: (view: RecordView) => Promise<string>;
   onToggleUserApiKey: (view: RecordView) => void;
@@ -108,7 +108,7 @@ function ClipboardCardInner({
   onPasteNormal,
   onPasteTerminal,
   onDelete,
-  onMoveToTop,
+  onSetPinned,
   getRecordContent,
   onToggleUserApiKey,
   selectionMode,
@@ -279,6 +279,11 @@ function ClipboardCardInner({
       <div className="noticontent">
         <div className="notititle clipboard-card-header">
           <span className="noti-type-label">
+            {view.pinned && (
+              <span className="card-pinned-badge" title={t("common.favorite")} aria-label={t("common.favorite")}>
+                {Icons.star}
+              </span>
+            )}
             <span className="noti-type-icon">{isApiKey ? Icons.key : meta.icon}</span>
             <span className="noti-type-text">{isApiKey ? "API Key" : getTypeLabel(view.recordType)}</span>
           </span>
@@ -387,18 +392,18 @@ function ClipboardCardInner({
                     {expanded ? Icons.collapse : Icons.expand}
                   </button>
                 )}
-                {onMoveToTop && (
+                {onSetPinned && (
                   <button
-                    className="card-move-top-btn"
+                    className="card-pin-btn"
                     type="button"
-                    aria-label={t("common.moveToTop")}
-                    title={t("common.moveToTop")}
+                    aria-label={t(view.pinned ? "common.unfavorite" : "common.favorite")}
+                    title={t(view.pinned ? "common.unfavorite" : "common.favorite")}
                     onClick={(e) => {
                       e.stopPropagation();
-                      onMoveToTop(view.id);
+                      onSetPinned(view.id, !view.pinned);
                     }}
                   >
-                    {Icons.arrowUp}
+                    {Icons.star}
                   </button>
                 )}
                 <button className="card-delete-btn" onClick={handleDelete}>
@@ -495,19 +500,18 @@ function ClipboardCardInner({
           label={pasteLeftClick === "terminal" ? t("clipboard.pasteToTerminal") : t("clipboard.pasteNormal")}
           onClick={handlePaste}
         />
-        {onMoveToTop && (
+        {onSetPinned && (
           <>
             <CardActionMenuSeparator />
             <CardActionMenuItem
               className="ctx-menu-item"
               icon={
                 <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                  <line x1="12" y1="19" x2="12" y2="5" />
-                  <polyline points="5 12 12 5 19 12" />
+                  <polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2" />
                 </svg>
               }
-              label={t("common.moveToTop")}
-              onClick={() => onMoveToTop(view.id)}
+              label={t(view.pinned ? "common.unfavorite" : "common.favorite")}
+              onClick={() => onSetPinned(view.id, !view.pinned)}
             />
           </>
         )}

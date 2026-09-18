@@ -103,6 +103,11 @@ fn category_sql(category: &Option<String>) -> (String, String) {
             format!("WHERE ({RESOURCE_RECORD_CONDITION})"),
             format!("AND ({RESOURCE_RECORD_CONDITION})"),
         ),
+        // 「收藏」视图：跨类别只看收藏记录（与其它类别一样走数据库层过滤）。
+        Some("favorites") => (
+            format!("WHERE pinned = 1 AND NOT ({RESOURCE_RECORD_CONDITION})"),
+            format!("AND pinned = 1 AND NOT ({RESOURCE_RECORD_CONDITION})"),
+        ),
         Some("apikey") => (
             format!(
                 "WHERE NOT ({RESOURCE_RECORD_CONDITION}) AND (user_api_key = 1 OR (type IN ('text', 'link') AND (content LIKE 'sk-%' OR content LIKE 'AIza%' OR content LIKE 'glpat-%' OR content LIKE 'ghp_%' OR content LIKE 'xai-%')))"

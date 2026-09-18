@@ -105,6 +105,39 @@ describe("clipboardStore deletion", () => {
   });
 });
 
+describe("clipboardStore pinning", () => {
+  beforeEach(() => {
+    invokeMock.mockReset();
+    invokeMock.mockResolvedValue(undefined);
+    useClipboardStore.setState({ records });
+  });
+
+  it("flags records locally, persists via the pin command, then reloads", async () => {
+    const reloaded = [{ ...records[0], pinned: true }, records[1]];
+    invokeMock
+      .mockResolvedValueOnce(undefined) // set_clipboard_record_pinned
+      .mockResolvedValueOnce(reloaded); // loadRecords reload
+
+    await useClipboardStore.getState().setRecordsPinned(["clip-1"], true);
+
+    expect(invokeMock).toHaveBeenCalledWith("set_clipboard_record_pinned", {
+      ids: ["clip-1"],
+      pinned: true,
+    });
+    expect(invokeMock).toHaveBeenCalledWith("get_clipboard_records", expect.anything());
+    expect(useClipboardStore.getState().records.map((record) => record.pinned)).toEqual([
+      true,
+      undefined,
+    ]);
+  });
+
+  it("does not touch the backend for an empty selection", async () => {
+    await useClipboardStore.getState().setRecordsPinned([], true);
+
+    expect(invokeMock).not.toHaveBeenCalled();
+  });
+});
+
 describe("clipboardStore stash image paste routing", () => {
   beforeEach(() => {
     invokeMock.mockReset();

@@ -12,8 +12,11 @@ interface BatchSelectionBarProps {
   busy?: boolean;
   busyLabel?: string;
   onMove?: () => void;
-  /** 可选：把选中内容移到列表顶部（径向菜单同步可见）。 */
+  /** 可选：把选中内容移到列表顶部（快捷输入短语批量置顶仍在用）。 */
   onMoveTop?: () => void;
+  /** 可选：批量收藏 / 取消收藏选中内容（防保留期清理，恒定浮顶）。 */
+  onPin?: () => void;
+  onUnpin?: () => void;
 }
 
 export default function BatchSelectionBar({
@@ -27,6 +30,8 @@ export default function BatchSelectionBar({
   busyLabel,
   onMove,
   onMoveTop,
+  onPin,
+  onUnpin,
 }: BatchSelectionBarProps) {
   const { t } = useTranslation();
   const checkboxRef = useRef<HTMLInputElement>(null);
@@ -65,6 +70,26 @@ export default function BatchSelectionBar({
           >
             {Icons.arrowUp}
             <span>{t("common.moveToTop")}</span>
+          </button>
+        )}
+        {onPin && (
+          <button
+            className="batch-move-btn"
+            type="button"
+            disabled={selectedCount === 0 || busy}
+            onClick={onPin}
+          >
+            <span>{t("common.favorite")}</span>
+          </button>
+        )}
+        {onUnpin && (
+          <button
+            className="batch-move-btn"
+            type="button"
+            disabled={selectedCount === 0 || busy}
+            onClick={onUnpin}
+          >
+            <span>{t("common.unfavorite")}</span>
           </button>
         )}
         {onMove && (

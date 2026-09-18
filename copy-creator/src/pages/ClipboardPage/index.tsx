@@ -44,7 +44,7 @@ export default function ClipboardPage() {
     deleteRecord,
     pasteRecord,
     pasteRecordTerminal,
-    moveRecordsToTop,
+    setRecordsPinned,
   } = useClipboardStore(
     useShallow((s) => ({
       records: s.records,
@@ -61,7 +61,7 @@ export default function ClipboardPage() {
       deleteRecord: s.deleteRecord,
       pasteRecord: s.pasteRecord,
       pasteRecordTerminal: s.pasteRecordTerminal,
-      moveRecordsToTop: s.moveRecordsToTop,
+      setRecordsPinned: s.setRecordsPinned,
     })),
   );
   const pasteLeftClick = useSettingsStore((s) => s.pasteLeftClick);
@@ -94,6 +94,7 @@ export default function ClipboardPage() {
 
   const categories: { key: ClipType; label: string }[] = [
     { key: "all", label: t("clipboard.all") },
+    { key: "favorites", label: t("clipboard.favorites") },
     { key: "text", label: t("clipboard.text") },
     { key: "image", label: t("clipboard.image") },
     { key: "link", label: t("clipboard.link") },
@@ -158,11 +159,11 @@ export default function ClipboardPage() {
     [loadRecords, records],
   );
 
-  const handleMoveToTop = useCallback(
-    (id: string) => {
-      void moveRecordsToTop([id]);
+  const handleSetPinned = useCallback(
+    (id: string, pinned: boolean) => {
+      void setRecordsPinned([id], pinned);
     },
-    [moveRecordsToTop],
+    [setRecordsPinned],
   );
 
   const openClipboardCreate = useCallback(async () => {
@@ -176,6 +177,9 @@ export default function ClipboardPage() {
   const filtered = useMemo(() => {
     const clipboardRecords = records.filter((r) => !isResourceRecord(r));
     if (category === "all") return clipboardRecords;
+    // 「收藏」视图：跨类别，只看收藏记录（后端已过滤，这里是对本地
+    // 窗口的同口径兜底）。
+    if (category === "favorites") return clipboardRecords.filter((r) => r.pinned);
     return clipboardRecords.filter((r) => r.type === category);
   }, [records, category]);
   // 容器层组装视图模型（依赖 records 引用纪律，zustand 不可变更新保证稳定）。
@@ -374,7 +378,8 @@ export default function ClipboardPage() {
           onCancel={cancelClipboardSelection}
           busy={selectingAll || deletingSelected}
           busyLabel={deletingSelected ? t("common.deleting") : t("common.loading")}
-          onMoveTop={() => void moveRecordsToTop([...selectedIds])}
+          onPin={() => void setRecordsPinned([...selectedIds], true)}
+          onUnpin={() => void setRecordsPinned([...selectedIds], false)}
         />
       )}
 
@@ -430,7 +435,7 @@ export default function ClipboardPage() {
               onPasteNormal={handlePaste}
               onPasteTerminal={handlePasteTerminal}
               onDelete={handleDelete}
-              onMoveToTop={handleMoveToTop}
+              onSetPinned={handleSetPinned}
               getRecordContent={getRecordContent}
               onToggleUserApiKey={handleToggleUserApiKey}
               selectionMode={isSelecting}

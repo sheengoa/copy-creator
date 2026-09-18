@@ -481,9 +481,11 @@ input:focus-visible + .selection-checkbox {
 }
 
 /* Card Action Buttons */
+/* card-move-top-btn：快捷输入短语置顶仍在用；card-pin-btn：剪切板收藏星标 */
 .card-delete-btn,
 .card-edit-btn,
-.card-move-top-btn {
+.card-move-top-btn,
+.card-pin-btn {
   background: transparent;
   position: relative;
   border: none;
@@ -501,19 +503,22 @@ input:focus-visible + .selection-checkbox {
 
 .notification:hover .card-delete-btn,
 .notification:hover .card-edit-btn,
-.notification:hover .card-move-top-btn {
+.notification:hover .card-move-top-btn,
+.notification:hover .card-pin-btn {
   opacity: 0.5;
 }
 
 .card-delete-btn:hover,
 .card-edit-btn:hover,
-.card-move-top-btn:hover {
+.card-move-top-btn:hover,
+.card-pin-btn:hover {
   opacity: 1 !important;
 }
 
 .card-delete-btn svg,
 .card-edit-btn svg,
-.card-move-top-btn svg {
+.card-move-top-btn svg,
+.card-pin-btn svg {
   width: 15px;
   height: 15px;
   transition: transform 0.2s linear;
@@ -522,6 +527,20 @@ input:focus-visible + .selection-checkbox {
 .card-delete-btn:hover svg {
   transform: scale(1.3);
   color: rgb(220, 38, 38);
+}
+
+/* 收藏常驻角标：类型标签前的实心星，亮暗主题共用金色系 */
+.card-pinned-badge {
+  display: inline-flex;
+  align-items: center;
+  flex-shrink: 0;
+  color: #d99a00;
+}
+
+.card-pinned-badge svg {
+  width: 11px;
+  height: 11px;
+  fill: currentColor;
 }
 
 .card-edit-btn:hover svg {

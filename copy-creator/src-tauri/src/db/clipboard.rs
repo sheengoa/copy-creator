@@ -875,15 +875,6 @@ pub fn delete_clipboard_record(app: AppHandle, id: String) -> Result<(), String>
     delete_clipboard_records_internal(&app, &[id])
 }
 
-#[tauri::command]
-pub fn move_clipboard_records_to_top(app: AppHandle, ids: Vec<String>) -> Result<(), String> {
-    let state = app.state::<DbState>();
-    let conn = state.conn.lock().map_err(|e| e.to_string())?;
-    move_rows_to_top(&conn, "clipboard_records", &ids)?;
-    log::info!("move_clipboard_records_to_top: {} items", ids.len());
-    Ok(())
-}
-
 /// 收藏/取消收藏剪切板记录（单条与批量共用，ids 传一个也走这里）。
 /// 收藏记录不受保留期清理，列表查询恒定浮顶；用户主动删除不受影响。
 pub(crate) fn set_clipboard_record_pinned_internal<R: Runtime>(
