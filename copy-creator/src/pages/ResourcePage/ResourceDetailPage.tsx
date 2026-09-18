@@ -523,7 +523,29 @@ export default function ResourceDetailPage({
         </div>
       </header>
 
-      <main className="resource-detail-body">
+      <main
+        className="resource-detail-body"
+        onDoubleClick={(event) => {
+          // 视图态：双击内容区进入编辑。编辑态：双击文本区/控件外的
+          // 任意空白（含内容框外的页面空白）保存修改；文本区内双击
+          // 保留原生选词。标题双击是重命名，信息面板是备注编辑，均排除。
+          if (!contentEditable) return;
+          const target = event.target instanceof HTMLElement ? event.target : null;
+          if (!target) return;
+          if (
+            target.closest(
+              "button, a, input, textarea, select, img, video, audio, .find-replace-bar, .resource-detail-aside, .resource-detail-header, .resource-detail-title",
+            )
+          ) {
+            return;
+          }
+          if (!contentEditing) {
+            if (target.closest(".resource-detail-stage")) startContentEdit();
+            return;
+          }
+          if (contentDirty && !contentSaving) void handleSaveContent();
+        }}
+      >
         <section className="resource-detail-main" aria-busy={!(externalTextPath ? textDetailReady : detailReady) && !error}>
           <span className="resource-detail-kind">{typeLabel(kind)}</span>
           {renameDraft === null ? (
@@ -575,19 +597,6 @@ export default function ResourceDetailPage({
           <div
             ref={stageRef}
             className={`resource-detail-stage resource-detail-stage-${kind}`}
-            onDoubleClick={(event) => {
-              // 视图态双击内容 → 进入编辑；编辑态双击文本区外 → 保存。
-              // 编辑态双击文本区内保留原生「选词」。
-              if (!contentEditable) return;
-              const target = event.target instanceof HTMLElement ? event.target : null;
-              if (target?.closest("button, a, img, video, audio")) return;
-              if (!contentEditing) {
-                startContentEdit();
-                return;
-              }
-              if (target?.closest("textarea, .find-replace-bar")) return;
-              if (contentDirty && !contentSaving) void handleSaveContent();
-            }}
           >
             {contentEditing && findOpen && createPortal(
               <FindReplaceBar
@@ -679,7 +688,11 @@ export default function ResourceDetailPage({
                     return;
                   }
                   // Ctrl+Enter 保存（双击选词与 Enter 换行语义保持原生）。
-                  if ((event.ctrlKey || event.metaKey) && event.key === "Enter") {
+                  // 中文输入法激活时 key 可能报 "Process"，补 code 物理键判断。
+                  if (
+                    (event.ctrlKey || event.metaKey)
+                    && (event.key === "Enter" || event.code === "Enter")
+                  ) {
                     event.preventDefault();
                     if (contentDirty && !contentSaving) void handleSaveContent();
                     return;

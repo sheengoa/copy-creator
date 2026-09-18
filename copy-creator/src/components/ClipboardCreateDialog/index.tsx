@@ -333,7 +333,7 @@ export default function ClipboardCreateDialog() {
       hideWindow();
       return;
     }
-    if ((e.ctrlKey || e.metaKey) && e.key === "Enter") {
+    if ((e.ctrlKey || e.metaKey) && (e.key === "Enter" || e.code === "Enter")) {
       e.preventDefault();
       lastEnterAtRef.current = 0;
       handleSave();
