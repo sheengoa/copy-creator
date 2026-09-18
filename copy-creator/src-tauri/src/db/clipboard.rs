@@ -157,6 +157,9 @@ pub fn prune_old_records<R: Runtime>(
             let _ = std::fs::remove_file(&thumb_path);
         }
     }
+    // 回收站过期清理与保留期清理同任务（启动 + 每小时）：默认 30 天。
+    purge_expired_trash(app);
+
     // Clean up temp paste image files older than retention period
     let paste_dir = std::env::temp_dir().join("copy_creator_paste");
     if let Ok(entries) = std::fs::read_dir(&paste_dir) {
@@ -751,7 +754,11 @@ pub(crate) fn delete_clipboard_records_internal<R: Runtime>(
     let staged_external_files = stage_external_resource_files(app, ids)?;
     let mut deleted_ids = Vec::new();
     let mut image_contents = HashSet::new();
-    let mut resource_files: Vec<(String, String, Vec<String>)> = Vec::new();
+    let mut trashed_resources: Vec<(crate::db::TrashedResourceFile, Vec<String>)> = Vec::new();
+
+    // 资源入回收站按当前库根落 .trash；目录切换场景由恢复/清空时的
+    // 多根查找兜底。
+    let trash_library_root = get_resource_library_dir(app);
 
     let transaction_result = (|| -> Result<(), String> {
         let state = app.state::<DbState>();
@@ -781,6 +788,14 @@ pub(crate) fn delete_clipboard_records_internal<R: Runtime>(
                 continue;
             };
 
+            // 资源记录先在删除前序列化整行（含 API Key 标签），trash_items
+            // 与删除同事务落库。
+            let record_json = if is_resource_record(&storage_mode) {
+                Some(serialize_resource_record(&tx, id)?)
+            } else {
+                None
+            };
+
             tx.execute(
                 "DELETE FROM api_key_labels WHERE record_id = ?1",
                 params![id],
@@ -791,8 +806,18 @@ pub(crate) fn delete_clipboard_records_internal<R: Runtime>(
 
             let attachment_paths =
                 serde_json::from_str::<Vec<String>>(&attachments).unwrap_or_default();
-            if is_resource_record(&storage_mode) {
-                resource_files.push((id.clone(), resource_path, attachment_paths));
+            if let Some(record_json) = record_json {
+                // 资源记录：trash_items 行与删除同事务；文件在提交后移入
+                // 库根 .trash——watcher 裁决只看现存记录行，settle 运行时
+                // 行已不在，不会被误清退。
+                let trashed = insert_trash_item_in_tx(
+                    &tx,
+                    id,
+                    &record_json,
+                    &resource_path,
+                    &trash_library_root,
+                )?;
+                trashed_resources.push((trashed, attachment_paths));
             } else {
                 if record_type == "image" {
                     image_contents.insert(content);
@@ -844,14 +869,37 @@ pub(crate) fn delete_clipboard_records_internal<R: Runtime>(
         }
     }
 
-    let had_resources = !resource_files.is_empty();
-    for (id, resource_path, attachment_paths) in resource_files {
-        remove_resource_record_files(app, &id, &resource_path, &attachment_paths);
+    // 资源文件移入库根 .trash（外部暂存文件从暂存位直接移入）。
+    // 移动失败已在内部整体补偿（文件移回 + 记录行回插），此处把失败
+    // 向上抛出：对外表现为删除失败，不丢数据。
+    let had_resources = !trashed_resources.is_empty();
+    if had_resources {
+        let mut trash_moves = Vec::new();
+        for (trashed, _attachments) in &trashed_resources {
+            let staged_source = staged_external_files
+                .iter()
+                .find(|file| file.id == trashed.record_id)
+                .map(|file| file.staged_path.clone());
+            trash_moves.push((trashed.clone(), staged_source));
+        }
+        if let Err(error) = move_trashed_resource_files(app, &trash_library_root, &trash_moves) {
+            restore_staged_external_resource_files(&staged_external_files);
+            return Err(error);
+        }
     }
-    if let Err(error) = finalize_staged_external_resource_files(app, &staged_external_files) {
+    // 未入回收站的暂存文件（记录行本就不存在等边缘）维持彻底删除。
+    let trashed_record_ids: std::collections::HashSet<&str> = trashed_resources
+        .iter()
+        .map(|(trashed, _)| trashed.record_id.as_str())
+        .collect();
+    let leftover_staged: Vec<StagedExternalResourceFile> = staged_external_files
+        .into_iter()
+        .filter(|file| !trashed_record_ids.contains(file.id.as_str()))
+        .collect();
+    if let Err(error) = finalize_staged_external_resource_files(app, &leftover_staged) {
         log::warn!("资源文件临时清理失败，已保留隐藏临时文件: {error}");
     }
-    for file in staged_external_files {
+    for file in leftover_staged {
         deleted_ids.push(file.id);
     }
 

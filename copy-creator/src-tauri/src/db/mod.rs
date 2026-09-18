@@ -133,6 +133,7 @@ mod migrate;
 mod phrase;
 mod resource;
 mod settings;
+mod trash;
 pub(crate) use apikeys::*;
 pub(crate) use clipboard::*;
 pub(crate) use media::*;
@@ -140,6 +141,7 @@ pub(crate) use migrate::*;
 pub(crate) use phrase::*;
 pub(crate) use resource::*;
 pub(crate) use settings::*;
+pub(crate) use trash::*;
 
 pub struct DbState {
     pub conn: Mutex<Connection>,
@@ -1045,6 +1047,20 @@ pub(crate) fn ensure_schema(conn: &Connection) -> Result<(), Box<dyn std::error:
         CREATE TABLE IF NOT EXISTS toast_shown (
             key_preview TEXT PRIMARY KEY
         );
+
+        CREATE TABLE IF NOT EXISTS trash_items (
+            id TEXT PRIMARY KEY,
+            record_id TEXT DEFAULT '',
+            record_json TEXT NOT NULL,
+            file_name TEXT DEFAULT '',
+            original_group TEXT DEFAULT '',
+            original_path TEXT DEFAULT '',
+            trash_dir TEXT NOT NULL,
+            trashed_at TEXT NOT NULL,
+            trashed_ms INTEGER NOT NULL DEFAULT 0
+        );
+
+        CREATE INDEX IF NOT EXISTS idx_trash_trashed_ms ON trash_items(trashed_ms);
         ",
     )?;
 

@@ -661,6 +661,17 @@ mod resource_command_tests {
                  touched_ms INTEGER DEFAULT 0,
                  pinned INTEGER NOT NULL DEFAULT 0
              );
+             CREATE TABLE IF NOT EXISTS trash_items (
+                 id TEXT PRIMARY KEY,
+                 record_id TEXT DEFAULT '',
+                 record_json TEXT NOT NULL,
+                 file_name TEXT DEFAULT '',
+                 original_group TEXT DEFAULT '',
+                 original_path TEXT DEFAULT '',
+                 trash_dir TEXT NOT NULL,
+                 trashed_at TEXT NOT NULL,
+                 trashed_ms INTEGER NOT NULL DEFAULT 0
+             );
              CREATE TABLE api_key_labels (
                  record_id TEXT PRIMARY KEY,
                  label TEXT DEFAULT ''
@@ -3563,6 +3574,195 @@ mod pinned_record_tests {
         )
         .unwrap();
         assert!(ids_of(&searched_out).is_empty());
+    }
+}
+
+#[cfg(test)]
+mod trash_tests {
+    use crate::db::{
+        delete_clipboard_records_internal, ensure_schema, list_trash_items_internal,
+        prune_old_records, purge_trash_internal, restore_trash_item_internal, DbState,
+    };
+    use rusqlite::params;
+    use std::path::{Path, PathBuf};
+    use std::sync::Mutex;
+    use tauri::Manager;
+
+    fn trash_test_app() -> (tauri::App<tauri::test::MockRuntime>, PathBuf) {
+        let app = tauri::test::mock_app();
+        let library = std::env::temp_dir().join(format!(
+            "copy-creator-trash-test-{}",
+            uuid::Uuid::new_v4()
+        ));
+        std::fs::create_dir_all(&library).unwrap();
+        let conn = rusqlite::Connection::open_in_memory().unwrap();
+        ensure_schema(&conn).unwrap();
+        conn.execute(
+            "INSERT INTO settings (key, value) VALUES ('resource_library_path', ?1)
+             ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+            params![library.to_string_lossy().as_ref()],
+        )
+        .unwrap();
+        app.manage(DbState {
+            conn: Mutex::new(conn),
+        });
+        (app, library)
+    }
+
+    fn insert_external_record(
+        app: &tauri::App<tauri::test::MockRuntime>,
+        id: &str,
+        path: &Path,
+        attachments: &[String],
+    ) {
+        let state = app.state::<DbState>();
+        let conn = state.conn.lock().unwrap();
+        conn.execute(
+            "INSERT INTO clipboard_records
+             (id, type, content, created_at, group_name, storage_mode, resource_path, resource_external, attachments)
+             VALUES (?1, 'file', ?2, '2026-09-18T00:00:00Z', '', 'resource', ?2, 1, ?3)",
+            params![
+                id,
+                path.to_string_lossy().as_ref(),
+                serde_json::to_string(attachments).unwrap()
+            ],
+        )
+        .unwrap();
+    }
+
+    fn record_count(app: &tauri::App<tauri::test::MockRuntime>, id: &str) -> i64 {
+        let state = app.state::<DbState>();
+        let conn = state.conn.lock().unwrap();
+        conn.query_row(
+            "SELECT COUNT(*) FROM clipboard_records WHERE id = ?1",
+            params![id],
+            |row| row.get(0),
+        )
+        .unwrap()
+    }
+
+    // 应用内删除资源记录：文件移入库根 .trash（原位消失）、trash_items
+    // 落一行、clipboard_records 无行；恢复后文件回原位、记录整行回插
+    // （分组/备注经 resource_path 与元数据保留）。
+    #[test]
+    fn deleting_resource_record_trashes_file_and_restore_brings_it_back() {
+        let (app, library) = trash_test_app();
+        let handle = app.handle().clone();
+        let group_dir = library.join("项目资料");
+        std::fs::create_dir_all(&group_dir).unwrap();
+        let file = group_dir.join("报价.pdf");
+        std::fs::write(&file, b"pdf").unwrap();
+        insert_external_record(&app, "r1", &file, &[]);
+
+        delete_clipboard_records_internal(&handle, &["r1".to_string()]).unwrap();
+
+        assert_eq!(record_count(&app, "r1"), 0);
+        assert!(!file.exists());
+        let items = list_trash_items_internal(&handle).unwrap();
+        assert_eq!(items.len(), 1);
+        assert_eq!(items[0]["file_name"], serde_json::json!("报价.pdf"));
+        assert_eq!(items[0]["original_group"], serde_json::json!("项目资料"));
+        let trash_id = items[0]["id"].as_str().unwrap().to_string();
+
+        restore_trash_item_internal(&handle, &trash_id).unwrap();
+
+        assert!(file.exists());
+        assert_eq!(std::fs::read(&file).unwrap(), b"pdf");
+        assert_eq!(record_count(&app, "r1"), 1);
+        assert!(list_trash_items_internal(&handle).unwrap().is_empty());
+    }
+
+    // 恢复同名冲突：原位已被同名文件占用时恢复为 "name (1).ext"，并同步
+    // 记录的 content / resource_path 指向新落位文件。
+    #[test]
+    fn restore_resolves_name_conflicts_with_numbered_suffix() {
+        let (app, library) = trash_test_app();
+        let handle = app.handle().clone();
+        let group_dir = library.join("组");
+        std::fs::create_dir_all(&group_dir).unwrap();
+        let file = group_dir.join("doc.txt");
+        std::fs::write(&file, b"old").unwrap();
+        insert_external_record(&app, "r1", &file, &[]);
+
+        delete_clipboard_records_internal(&handle, &["r1".to_string()]).unwrap();
+        std::fs::write(&file, b"occupied").unwrap();
+
+        let trash_id = list_trash_items_internal(&handle).unwrap()[0]["id"]
+            .as_str()
+            .unwrap()
+            .to_string();
+        restore_trash_item_internal(&handle, &trash_id).unwrap();
+
+        let restored = group_dir.join("doc (1).txt");
+        assert!(restored.exists());
+        assert_eq!(std::fs::read(&restored).unwrap(), b"old");
+        let state = app.state::<DbState>();
+        let conn = state.conn.lock().unwrap();
+        let stored_path: String = conn
+            .query_row(
+                "SELECT resource_path FROM clipboard_records WHERE id = 'r1'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(Path::new(&stored_path), restored.as_path());
+    }
+
+    // 彻底删除：回收目录与记录行清除，record_json 里的附件一并清理。
+    #[test]
+    fn purging_removes_trash_dir_and_orphan_attachments() {
+        let (app, library) = trash_test_app();
+        let handle = app.handle().clone();
+        let group_dir = library.join("组");
+        std::fs::create_dir_all(&group_dir).unwrap();
+        // 附件固定在库根 .copy-creator/attachments（与写入侧一致）。
+        let attachment_dir = library.join(".copy-creator").join("attachments").join("r1-abc");
+        std::fs::create_dir_all(&attachment_dir).unwrap();
+        let attachment = attachment_dir.join("image-1.png");
+        std::fs::write(&attachment, b"png").unwrap();
+        let file = group_dir.join("笔记.md");
+        std::fs::write(&file, b"md").unwrap();
+        insert_external_record(&app, "r1", &file, &[attachment.to_string_lossy().to_string()]);
+
+        delete_clipboard_records_internal(&handle, &["r1".to_string()]).unwrap();
+        let trash_id = list_trash_items_internal(&handle).unwrap()[0]["id"]
+            .as_str()
+            .unwrap()
+            .to_string();
+
+        purge_trash_internal(&handle, Some(&[trash_id])).unwrap();
+
+        assert!(!file.exists());
+        assert!(!attachment.exists());
+        assert!(list_trash_items_internal(&handle).unwrap().is_empty());
+        assert_eq!(record_count(&app, "r1"), 0);
+    }
+
+    // 过期清理：trashed_ms 超过保留期（默认 30 天）的条目随保留期任务
+    // 清除（prune_old_records 即回收站的清理执行点）。
+    #[test]
+    fn prune_purges_expired_trash_items() {
+        let (app, library) = trash_test_app();
+        let handle = app.handle().clone();
+        let group_dir = library.join("组");
+        std::fs::create_dir_all(&group_dir).unwrap();
+        let file = group_dir.join("旧文件.txt");
+        std::fs::write(&file, b"old").unwrap();
+        insert_external_record(&app, "r1", &file, &[]);
+        delete_clipboard_records_internal(&handle, &["r1".to_string()]).unwrap();
+        assert_eq!(list_trash_items_internal(&handle).unwrap().len(), 1);
+
+        {
+            let state = app.state::<DbState>();
+            let conn = state.conn.lock().unwrap();
+            conn.execute("UPDATE trash_items SET trashed_ms = 1000", [])
+                .unwrap();
+        }
+
+        prune_old_records(&handle).unwrap();
+
+        assert!(list_trash_items_internal(&handle).unwrap().is_empty());
+        assert!(!file.exists());
     }
 }
 
