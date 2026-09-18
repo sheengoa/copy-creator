@@ -925,26 +925,29 @@ pub fn delete_clipboard_record(app: AppHandle, id: String) -> Result<(), String>
 
 /// 收藏/取消收藏剪切板记录（单条与批量共用，ids 传一个也走这里）。
 /// 收藏记录不受保留期清理，列表查询恒定浮顶；用户主动删除不受影响。
+/// 返回实际命中的行数（id 未命中不计）。
 pub(crate) fn set_clipboard_record_pinned_internal<R: Runtime>(
     app: &AppHandle<R>,
     ids: &[String],
     pinned: bool,
-) -> Result<(), String> {
+) -> Result<usize, String> {
+    let mut changed = 0usize;
     if ids.is_empty() {
-        return Ok(());
+        return Ok(changed);
     }
     let state = app.state::<DbState>();
     let conn = state.conn.lock().map_err(|e| e.to_string())?;
     let flag = if pinned { 1 } else { 0 };
     for id in ids {
-        conn.execute(
-            "UPDATE clipboard_records SET pinned = ?1 WHERE id = ?2",
-            params![flag, id],
-        )
-        .map_err(|e| e.to_string())?;
+        changed += conn
+            .execute(
+                "UPDATE clipboard_records SET pinned = ?1 WHERE id = ?2",
+                params![flag, id],
+            )
+            .map_err(|e| e.to_string())?;
     }
     log::info!("set_clipboard_record_pinned: {} items -> {}", ids.len(), flag);
-    Ok(())
+    Ok(changed)
 }
 
 #[tauri::command]
@@ -953,5 +956,12 @@ pub fn set_clipboard_record_pinned(
     ids: Vec<String>,
     pinned: bool,
 ) -> Result<(), String> {
-    set_clipboard_record_pinned_internal(&app, &ids, pinned)
+    let changed = set_clipboard_record_pinned_internal(&app, &ids, pinned)?;
+    if changed > 0 {
+        // 复用使用变化的既有同步事件：收藏/取消收藏在其他窗口（主窗口
+        // ↔ 径向菜单）实时重载，收藏视图与浮顶顺序跨窗口一致。本窗口
+        // 已乐观更新 + 重载，再多收一次幂等重载无碍。无命中不发。
+        let _ = app.emit("clipboard-record-updated", ids);
+    }
+    Ok(())
 }
