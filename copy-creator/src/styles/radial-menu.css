@@ -596,21 +596,21 @@ html {
 
 .radial-menu-item:hover .radial-menu-item-pin,
 .radial-menu-item:focus-within .radial-menu-item-pin {
-  opacity: 0.5;
+  opacity: 0.55;
   transform: scale(1);
   pointer-events: auto;
 }
 
 .radial-menu-item .radial-menu-item-pin:hover {
   opacity: 1;
-  color: var(--accent, #3b82f6) !important;
+  color: var(--text-primary) !important;
 }
 
 .radial-menu-item .radial-menu-item-pin.pinned {
   opacity: 1;
   transform: scale(1);
   pointer-events: auto;
-  color: var(--accent, #3b82f6) !important;
+  color: var(--text-primary) !important;
 }
 
 .radial-menu-item .radial-menu-item-pin.pinned svg {
@@ -618,8 +618,10 @@ html {
 }
 
 .radial-menu-item-pin svg {
-  width: 15px;
-  height: 15px;
+  width: 17px;
+  height: 17px;
+  /* 星形在 24 视图框内自带留白且细描边显小：放大一档并加粗 */
+  stroke-width: 2.4;
 }
 
 .radial-menu-preview-trigger {
