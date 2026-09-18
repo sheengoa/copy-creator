@@ -553,11 +553,17 @@ fn is_temporary_resource_file_name(name: &str) -> bool {
         .is_some_and(|(_, extension)| TEMPORARY_RESOURCE_EXTENSIONS.contains(&extension))
 }
 
-/// 应用缩略图目录约定：原图旁的 `thumbs/` 全部是派生缓存（可随时再生成），
+/// 应用自身目录约定：原图旁的 `thumbs/` 全部是派生缓存（可随时再生成），
 /// 永不作为资源内容收录，否则缩略图会以「原图」身份混进库，还会被再次
-/// 生成缩略图衍生出 thumbs/thumbs 嵌套污染。`.copy-creator` 是应用元数据。
+/// 生成缩略图衍生出 thumbs/thumbs 嵌套污染。`.copy-creator` 是应用元数据；
+/// `.trash` 是资源回收站目录，删除资源会把文件移进去——若不排除，监听
+/// 结算会把回收站内文件当「新到达」重新入库，列表顶部立刻出现指向回收
+/// 站的幽灵重复卡片。分组树扫描（is_ignored_resource_directory）与文件
+/// 发现（本函数 + path_inside_ignored_dir）必须覆盖同一组应用目录。
 fn is_ignored_resource_dir(name: &OsStr) -> bool {
-    name == OsStr::new(".copy-creator") || name == OsStr::new("thumbs")
+    name == OsStr::new(".copy-creator")
+        || name == OsStr::new("thumbs")
+        || name == OsStr::new(TRASH_DIR_NAME)
 }
 
 fn path_inside_ignored_dir(path: &Path) -> bool {

@@ -3818,6 +3818,45 @@ mod trash_tests {
         assert!(list_trash_items_internal(&handle).unwrap().is_empty());
         std::fs::remove_dir_all(&library_b).ok();
     }
+    // 删除入回收站后监听结算不得把 .trash 内文件当「到达」重新入库。
+    // 回归锚点：is_ignored_resource_dir 曾只排除 .copy-creator/thumbs，
+    // 删除资源的瞬间 watcher 结算会把回收站内文件重新入库，「全部」列表
+    // 顶部出现指向回收站的幽灵重复卡片，持续到恢复、彻底删除或重启对账。
+    #[test]
+    fn settle_after_trash_does_not_rediscover_trashed_files() {
+        assert!(
+            crate::db::is_ignored_resource_dir(std::ffi::OsStr::new(".trash")),
+            ".trash 必须在应用自身目录忽略规则内"
+        );
+
+        let (app, library) = trash_test_app();
+        let handle = app.handle().clone();
+        let group_dir = library.join("组");
+        std::fs::create_dir_all(&group_dir).unwrap();
+        let file = group_dir.join("报告.pdf");
+        std::fs::write(&file, b"pdf").unwrap();
+        insert_external_record(&app, "r1", &file, &[]);
+
+        delete_clipboard_records_internal(&handle, &["r1".to_string()]).unwrap();
+
+        // 模拟 watcher 防抖结束后的结算：源路径已消失，.trash 内目标已到达。
+        let trash_root = library.join(".trash");
+        let mut inner = None;
+        for entry in std::fs::read_dir(&trash_root).unwrap().flatten() {
+            for sub in std::fs::read_dir(entry.path()).unwrap().flatten() {
+                inner = Some(sub.path());
+            }
+        }
+        let inner = inner.expect("trash 目录应有移入文件");
+        crate::db::settle_external_resource_changes(&handle, &[file.clone(), inner]);
+
+        let state = app.state::<DbState>();
+        let conn = state.conn.lock().unwrap();
+        let count: i64 = conn
+            .query_row("SELECT COUNT(*) FROM clipboard_records", [], |row| row.get(0))
+            .unwrap();
+        assert_eq!(count, 0, ".trash 内文件被监听结算重新入库为幽灵记录");
+    }
 }
 
 #[cfg(test)]
