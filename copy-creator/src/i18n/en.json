@@ -64,6 +64,7 @@
     "backupStartImport": "Start import",
     "backupImporting": "Importing...",
     "backupProcessed": "{{count}} items processed",
+    "backupImportCoverHint": "Starting the import overwrites all current data; it takes effect after validation and a restart.",
     "pasteLeftClick": "Left-click paste mode",
     "pasteNormal": "Normal",
     "pasteTerminal": "Terminal",

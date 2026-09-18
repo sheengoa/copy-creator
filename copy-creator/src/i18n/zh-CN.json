@@ -64,6 +64,7 @@
     "backupStartImport": "开始导入",
     "backupImporting": "导入中...",
     "backupProcessed": "已处理 {{count}} 项",
+    "backupImportCoverHint": "开始导入后将覆盖当前全部数据，校验通过并重启后生效。",
     "pasteLeftClick": "左键粘贴模式",
     "pasteNormal": "普通粘贴",
     "pasteTerminal": "终端粘贴",
