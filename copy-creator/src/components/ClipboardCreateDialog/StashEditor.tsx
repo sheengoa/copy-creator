@@ -1,5 +1,6 @@
 import { forwardRef, useCallback, useEffect, useImperativeHandle, useRef, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
+import { findMatchPositions } from "../../utils/findReplace";
 
 export interface StashImage {
   id: string;
@@ -10,6 +11,19 @@ export interface StashImage {
 
 export interface StashEditorHandle {
   focus: () => void;
+  /** 可见文本中 query 的匹配总数（图片标记截断文本，匹配不跨标记）。 */
+  countMatches: (query: string, caseSensitive: boolean) => number;
+  /** 选中第 index（0 基）个匹配并滚入可视区；返回是否命中。 */
+  selectMatch: (query: string, index: number, caseSensitive: boolean) => boolean;
+  /** 替换第 index 个匹配并同步内容/历史；返回是否命中。 */
+  replaceMatch: (
+    query: string,
+    replacement: string,
+    index: number,
+    caseSensitive: boolean,
+  ) => boolean;
+  /** 替换全部匹配；返回替换数量。 */
+  replaceAllMatches: (query: string, replacement: string, caseSensitive: boolean) => number;
 }
 
 interface Props {
@@ -137,12 +151,124 @@ const readImage = (file: File): Promise<string> => new Promise((resolve, reject)
   reader.readAsDataURL(file);
 });
 
+// 编辑器可见文本运行段：相邻文本节点合并为一段，图片标记按钮截断文本
+// （标记内的说明文本经 FILTER_REJECT 整棵跳过，不属于可搜索正文）。
+// 查找匹配不跨运行段——与渲染语义一致：图片天然打断连续文本。
+interface EditorTextRun {
+  text: string;
+  parts: Array<{ node: Text; start: number }>;
+}
+
+const collectEditorTextRuns = (editor: HTMLDivElement): EditorTextRun[] => {
+  const walker = document.createTreeWalker(editor, NodeFilter.SHOW_TEXT, {
+    acceptNode(node) {
+      let parent: Node | null = node.parentNode;
+      while (parent && parent !== editor) {
+        if (parent instanceof HTMLElement && parent.matches("[data-image-id]")) {
+          return NodeFilter.FILTER_REJECT;
+        }
+        parent = parent.parentNode;
+      }
+      return NodeFilter.FILTER_ACCEPT;
+    },
+  });
+  const runs: EditorTextRun[] = [];
+  let current = walker.nextNode();
+  while (current) {
+    const textNode = current as Text;
+    current = walker.nextNode();
+    if (textNode.length === 0) continue;
+    const lastRun = runs[runs.length - 1];
+    const lastPart = lastRun?.parts[lastRun.parts.length - 1];
+    if (lastPart && lastPart.node.nextSibling === textNode) {
+      lastRun.parts.push({ node: textNode, start: lastRun.text.length });
+      lastRun.text += textNode.data;
+    } else {
+      runs.push({ text: textNode.data, parts: [{ node: textNode, start: 0 }] });
+    }
+  }
+  return runs;
+};
+
+const findEditorMatches = (
+  editor: HTMLDivElement,
+  query: string,
+  caseSensitive: boolean,
+): Array<{ run: EditorTextRun; start: number; end: number }> => {
+  const matches: Array<{ run: EditorTextRun; start: number; end: number }> = [];
+  if (query === "") return matches;
+  for (const run of collectEditorTextRuns(editor)) {
+    for (const position of findMatchPositions(run.text, query, caseSensitive)) {
+      matches.push({ run, start: position, end: position + query.length });
+    }
+  }
+  return matches;
+};
+
+const selectRunRange = (
+  editor: HTMLDivElement,
+  run: EditorTextRun,
+  start: number,
+  end: number,
+): boolean => {
+  const selection = window.getSelection();
+  if (!selection) return false;
+  const range = document.createRange();
+  let startPlaced = false;
+  for (const part of run.parts) {
+    const partEnd = part.start + part.node.length;
+    if (!startPlaced && start < partEnd) {
+      range.setStart(part.node, start - part.start);
+      startPlaced = true;
+    }
+    if (startPlaced && end <= partEnd) {
+      range.setEnd(part.node, end - part.start);
+      selection.removeAllRanges();
+      selection.addRange(range);
+      // 编辑器自身是滚动容器：匹配在视口外时按实时位置推进 scrollTop
+      //（scrollIntoView 只会滚动编辑器的祖先，滚不到编辑器内部）。
+      const rangeRect = range.getBoundingClientRect();
+      const editorRect = editor.getBoundingClientRect();
+      const margin = 40;
+      if (rangeRect.top < editorRect.top + margin) {
+        editor.scrollTop += rangeRect.top - editorRect.top - margin;
+      } else if (rangeRect.bottom > editorRect.bottom - margin) {
+        editor.scrollTop += rangeRect.bottom - editorRect.bottom + margin;
+      }
+      return true;
+    }
+  }
+  return false;
+};
+
+// 倒序拼接替换：后段先删、首段写入替换文本，避免前段插入位移影响后段。
+const applyRunSplice = (
+  run: EditorTextRun,
+  start: number,
+  end: number,
+  replacement: string,
+): void => {
+  let replaced = false;
+  for (let index = run.parts.length - 1; index >= 0; index -= 1) {
+    const part = run.parts[index];
+    const partEnd = part.start + part.node.length;
+    if (partEnd <= start || part.start >= end) continue;
+    const localStart = Math.max(0, start - part.start);
+    const localEnd = Math.min(part.node.length, end - part.start);
+    if (replaced) {
+      part.node.deleteData(localStart, localEnd - localStart);
+    } else {
+      part.node.replaceData(localStart, localEnd - localStart, replacement);
+      replaced = true;
+    }
+  }
+};
+
 const placeCaretAtEnd = (editor: HTMLDivElement) => {
   const applySelection = () => {
     const selection = window.getSelection();
     if (!selection) return;
-    const range = document.createRange();
-    const walker = document.createTreeWalker(editor, NodeFilter.SHOW_TEXT);
+    const range = document.createRange();    const walker = document.createTreeWalker(editor, NodeFilter.SHOW_TEXT);
     let lastTextNode: Text | null = null;
     let current = walker.nextNode();
     while (current) {
@@ -428,11 +554,50 @@ const StashEditor = forwardRef<StashEditorHandle, Props>(function StashEditor({
     onChangeRef.current(content, cloneImages(imagesRef.current));
   }, [renderPersistedContent]);
 
+  const buildEditorMatches = useCallback((query: string, caseSensitive: boolean) => {
+    const editor = editorRef.current;
+    if (!editor) return [];
+    return findEditorMatches(editor, query, caseSensitive);
+  }, []);
+
   useImperativeHandle(ref, () => ({
     focus: () => {
       if (editorRef.current) placeCaretAtEnd(editorRef.current);
     },
-  }), []);
+    countMatches: (query: string, caseSensitive: boolean) =>
+      buildEditorMatches(query, caseSensitive).length,
+    selectMatch: (query: string, index: number, caseSensitive: boolean) => {
+      const editor = editorRef.current;
+      if (!editor) return false;
+      const matches = findEditorMatches(editor, query, caseSensitive);
+      const match = matches[index];
+      if (!match) return false;
+      selectRunRange(editor, match.run, match.start, match.end);
+      return true;
+    },
+    replaceMatch: (
+      query: string,
+      replacement: string,
+      index: number,
+      caseSensitive: boolean,
+    ) => {
+      const matches = buildEditorMatches(query, caseSensitive);
+      const match = matches[index];
+      if (!match) return false;
+      applyRunSplice(match.run, match.start, match.end, replacement);
+      syncEditor();
+      return true;
+    },
+    replaceAllMatches: (query: string, replacement: string, caseSensitive: boolean) => {
+      const matches = buildEditorMatches(query, caseSensitive);
+      for (let index = matches.length - 1; index >= 0; index -= 1) {
+        const match = matches[index];
+        applyRunSplice(match.run, match.start, match.end, replacement);
+      }
+      if (matches.length > 0) syncEditor();
+      return matches.length;
+    },
+  }), [buildEditorMatches, syncEditor]);
 
   useEffect(() => {
     if (previewImage) previewRef.current?.focus();

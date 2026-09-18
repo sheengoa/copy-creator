@@ -1,5 +1,6 @@
 import { readResourceTextPreview } from "../../domain/mediaAssets";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import { invoke } from "@tauri-apps/api/core";
 import { useTranslation } from "react-i18next";
 import type { ClipboardRecord } from "../../types";
@@ -9,6 +10,8 @@ import { BackToTopButton } from "../../components/BackToTop";
 import { useBackToTop } from "../../hooks/useBackToTop";
 import { HighlightText } from "../../components/HighlightText";
 import { ImageLightbox } from "../../components/ImageLightbox";
+import FindReplaceBar from "../../components/FindReplaceBar";
+import { findMatchPositions } from "../../utils/findReplace";
 import { loadRecordPreviewSegments, type RadialPreviewSegment } from "../../domain/preview";
 import { formatResourceBitrate, formatResourceDuration, formatResourceFileSize } from "./resourceUtils";
 import { type ResourceMediaKind } from "../../domain/mediaKind";
@@ -73,6 +76,7 @@ export default function ResourceDetailPage({
   const [contentSaveError, setContentSaveError] = useState(false);
   const contentSavedTimerRef = useRef<number | null>(null);
   const contentEditorRef = useRef<HTMLTextAreaElement | null>(null);
+  const stageRef = useRef<HTMLDivElement | null>(null);
   const externalTextPath = kind === "text" && record.type === "file"
     ? resourcePath
     : null;
@@ -309,6 +313,116 @@ export default function ResourceDetailPage({
   }, [fullTextContent]);
   const contentDirty = contentDraft.trim() !== savedContent.trim();
 
+  // ── 查找替换（编辑模式，Ctrl+F）──
+  const [findOpen, setFindOpen] = useState(false);
+  const [findQuery, setFindQuery] = useState("");
+  const [findReplaceText, setFindReplaceText] = useState("");
+  const [findCaseSensitive, setFindCaseSensitive] = useState(false);
+  const [findIndex, setFindIndex] = useState(0);
+  // 查找条 fixed 定位：按内容区（stage）的实时视口位置钉在其右上角，
+  // 随页面滚动/窗口缩放持续跟随（信息面板与窗口头不被遮挡）。
+  const [findBarPos, setFindBarPos] = useState({ top: 120, right: 24 });
+  const findMatches = useMemo(
+    () => (contentEditing ? findMatchPositions(contentDraft, findQuery, findCaseSensitive) : []),
+    [contentEditing, contentDraft, findQuery, findCaseSensitive],
+  );
+
+  useEffect(() => {
+    if (!findOpen || !contentEditing) return;
+    const stage = stageRef.current;
+    if (!stage) return;
+    const update = () => {
+      const rect = stage.getBoundingClientRect();
+      setFindBarPos((prev) => {
+        const next = {
+          top: Math.max(rect.top + 20, 76),
+          right: Math.max(window.innerWidth - rect.right + 28, 14),
+        };
+        return prev.top === next.top && prev.right === next.right ? prev : next;
+      });
+    };
+    update();
+    const scroller = findPageScroller();
+    scroller?.addEventListener("scroll", update);
+    window.addEventListener("resize", update);
+    return () => {
+      scroller?.removeEventListener("scroll", update);
+      window.removeEventListener("resize", update);
+    };
+  }, [findOpen, contentEditing, findPageScroller]);
+
+  // 选中指定匹配并滚到可视区：textarea 自动增高、无内部滚动，页面级
+  // 滚动容器按匹配所在行手工定位——浏览器对 focus 的默认呈现不保证
+  // 滚到选区（用户实测「下一个匹配」不跳转）。
+  const focusFindMatch = useCallback((start: number, end: number) => {
+    const textarea = contentEditorRef.current;
+    if (!textarea) return;
+    textarea.setSelectionRange(start, end);
+    textarea.focus();
+    const scroller = findPageScroller();
+    if (!scroller) return;
+    const style = window.getComputedStyle(textarea);
+    const lineHeight =
+      Number.parseFloat(style.lineHeight) || Number.parseFloat(style.fontSize) * 1.5 || 20;
+    const line = (contentDraft.slice(0, start).match(/\n/g) ?? []).length;
+    const textareaRect = textarea.getBoundingClientRect();
+    const scrollerRect = scroller.getBoundingClientRect();
+    const target =
+      textareaRect.top - scrollerRect.top + scroller.scrollTop + line * lineHeight + 8;
+    scroller.scrollTop = Math.max(0, target - scroller.clientHeight / 3);
+  }, [contentDraft, findPageScroller]);
+
+  const goToFindMatch = useCallback((index: number) => {
+    if (findMatches.length === 0) return;
+    const wrapped = ((index % findMatches.length) + findMatches.length) % findMatches.length;
+    setFindIndex(wrapped);
+    const start = findMatches[wrapped];
+    focusFindMatch(start, start + findQuery.length);
+  }, [findMatches, findQuery, focusFindMatch]);
+
+  // 查询/大小写变化只更新计数与索引：textarea 无法在不移动光标的
+  // 前提下高亮匹配，若此处抢焦点选区，会把用户正在查找输入框打的字
+  // 截进正文（曾实测「打着字光标突然跳走」）。定位只发生在显式导航。
+  const handleFindQueryChange = useCallback((query: string) => {
+    setFindQuery(query);
+    setFindIndex(0);
+  }, []);
+
+  const handleFindCaseSensitiveChange = useCallback((nextCaseSensitive: boolean) => {
+    setFindCaseSensitive(nextCaseSensitive);
+    setFindIndex(0);
+  }, []);
+
+  const handleFindReplaceCurrent = useCallback(() => {
+    if (findMatches.length === 0 || findQuery === "") return;
+    const index = Math.min(findIndex, findMatches.length - 1);
+    const start = findMatches[index];
+    const nextDraft =
+      contentDraft.slice(0, start) + findReplaceText + contentDraft.slice(start + findQuery.length);
+    setContentDraft(nextDraft);
+    setContentSaveError(false);
+    const positions = findMatchPositions(nextDraft, findQuery, findCaseSensitive);
+    const shifted = positions.findIndex((position) => position >= start + findReplaceText.length);
+    const target = shifted === -1 ? 0 : shifted;
+    setFindIndex(target);
+    if (positions.length > 0) focusFindMatch(positions[target], positions[target] + findQuery.length);
+  }, [contentDraft, findMatches, findIndex, findQuery, findReplaceText, findCaseSensitive, focusFindMatch]);
+
+  const handleFindReplaceAll = useCallback(() => {
+    if (findMatches.length === 0 || findQuery === "") return;
+    let result = "";
+    let cursor = 0;
+    for (const position of findMatches) {
+      result += contentDraft.slice(cursor, position) + findReplaceText;
+      cursor = position + findQuery.length;
+    }
+    result += contentDraft.slice(cursor);
+    setContentDraft(result);
+    setContentSaveError(false);
+    setFindIndex(0);
+    contentEditorRef.current?.focus();
+  }, [contentDraft, findMatches, findQuery, findReplaceText]);
+
   const startContentEdit = () => {
     setContentDraft(fullTextContent ?? "");
     setContentSaved(false);
@@ -409,7 +523,29 @@ export default function ResourceDetailPage({
         </div>
       </header>
 
-      <main className="resource-detail-body">
+      <main
+        className="resource-detail-body"
+        onDoubleClick={(event) => {
+          // 视图态：双击内容区进入编辑。编辑态：双击文本区/控件外的
+          // 任意空白（含内容框外的页面空白）保存修改；文本区内双击
+          // 保留原生选词。标题双击是重命名，信息面板是备注编辑，均排除。
+          if (!contentEditable) return;
+          const target = event.target instanceof HTMLElement ? event.target : null;
+          if (!target) return;
+          if (
+            target.closest(
+              "button, a, input, textarea, select, img, video, audio, .find-replace-bar, .resource-detail-aside, .resource-detail-header, .resource-detail-title",
+            )
+          ) {
+            return;
+          }
+          if (!contentEditing) {
+            if (target.closest(".resource-detail-stage")) startContentEdit();
+            return;
+          }
+          if (contentDirty && !contentSaving) void handleSaveContent();
+        }}
+      >
         <section className="resource-detail-main" aria-busy={!(externalTextPath ? textDetailReady : detailReady) && !error}>
           <span className="resource-detail-kind">{typeLabel(kind)}</span>
           {renameDraft === null ? (
@@ -458,7 +594,33 @@ export default function ResourceDetailPage({
           <p className="resource-detail-subtitle">
             {typeLabel(kind)} · {record.source_app || t("resources.localSource")}
           </p>
-          <div className={`resource-detail-stage resource-detail-stage-${kind}`}>
+          <div
+            ref={stageRef}
+            className={`resource-detail-stage resource-detail-stage-${kind}`}
+          >
+            {contentEditing && findOpen && createPortal(
+              <FindReplaceBar
+                style={{
+                  position: "fixed",
+                  top: findBarPos.top,
+                  right: findBarPos.right,
+                }}
+                query={findQuery}
+                replacement={findReplaceText}
+                caseSensitive={findCaseSensitive}
+                matchCount={findMatches.length}
+                matchIndex={findIndex}
+                onQueryChange={handleFindQueryChange}
+                onReplacementChange={setFindReplaceText}
+                onCaseSensitiveChange={handleFindCaseSensitiveChange}
+                onNext={() => goToFindMatch(findIndex + 1)}
+                onPrev={() => goToFindMatch(findIndex - 1)}
+                onReplaceCurrent={handleFindReplaceCurrent}
+                onReplaceAll={handleFindReplaceAll}
+                onClose={() => setFindOpen(false)}
+              />,
+              document.body,
+            )}
             {error ? (
               <div className="resource-detail-error" role="alert">
                 <strong>{t("resources.detailError")}</strong>
@@ -523,6 +685,23 @@ export default function ResourceDetailPage({
                     event.preventDefault();
                     event.stopPropagation();
                     cancelContentEdit();
+                    return;
+                  }
+                  // Ctrl+Enter 保存（双击选词与 Enter 换行语义保持原生）。
+                  // 中文输入法激活时 key 可能报 "Process"，补 code 物理键判断。
+                  if (
+                    (event.ctrlKey || event.metaKey)
+                    && (event.key === "Enter" || event.code === "Enter")
+                  ) {
+                    event.preventDefault();
+                    if (contentDirty && !contentSaving) void handleSaveContent();
+                    return;
+                  }
+                  // Ctrl+F 开/关查找替换条。
+                  if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "f") {
+                    event.preventDefault();
+                    event.stopPropagation();
+                    setFindOpen((open) => !open);
                   }
                 }}
               />

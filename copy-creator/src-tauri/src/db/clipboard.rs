@@ -68,7 +68,9 @@ pub fn sanitize_file_record_contents<R: Runtime>(app: &AppHandle<R>) {
     }
 }
 
-pub fn prune_old_records(app: &AppHandle) -> Result<(), Box<dyn std::error::Error>> {
+pub fn prune_old_records<R: Runtime>(
+    app: &AppHandle<R>,
+) -> Result<(), Box<dyn std::error::Error>> {
     let (days, image_contents) = {
         let mut image_contents = Vec::new();
 
@@ -93,10 +95,12 @@ pub fn prune_old_records(app: &AppHandle) -> Result<(), Box<dyn std::error::Erro
 
         // 一条语句完成筛选与删除（RETURNING 拿回被删行）；created_ms 走
         // idx_clipboard_created_ms，替代 datetime(created_at) 的全表扫描。
+        // 收藏（pinned）记录是用户明确要留的内容，清理永不触碰。
         let mut stmt = conn.prepare(
             "DELETE FROM clipboard_records
              WHERE created_ms < ?1
-               AND NOT (COALESCE(storage_mode, 'database') = 'resource')
+               AND NOT (storage_mode = 'resource')
+               AND pinned = 0
              RETURNING type, content, attachments",
         )?;
         let rows = stmt.query_map(params![cutoff_ms], |row| {
@@ -153,6 +157,9 @@ pub fn prune_old_records(app: &AppHandle) -> Result<(), Box<dyn std::error::Erro
             let _ = std::fs::remove_file(&thumb_path);
         }
     }
+    // 回收站过期清理与保留期清理同任务（启动 + 每小时）：默认 30 天。
+    purge_expired_trash(app);
+
     // Clean up temp paste image files older than retention period
     let paste_dir = std::env::temp_dir().join("copy_creator_paste");
     if let Ok(entries) = std::fs::read_dir(&paste_dir) {
@@ -183,14 +190,15 @@ pub fn get_clipboard_records(
     get_clipboard_records_inner(&app, search, limit, offset, category, resource_group, sort_by)
 }
 
-/// 内容列表排序子句：created=现状时间序；recent=最近使用（touch 毫秒，
-/// 未使用回退 sort_order 即复制/文件时间，新复制置顶不沉底）；count=最多使用。
+/// 内容列表排序子句：pinned 收藏恒定浮顶；created=现状时间序；recent=最近
+/// 使用（touch 毫秒，未使用回退 sort_order 即复制/文件时间，新复制置顶不
+/// 沉底）；count=最多使用。
 pub(crate) fn clipboard_order_clause(sort_by: Option<&str>) -> &'static str {
     match sort_by {
-        Some("count") => "(COALESCE(use_count, 0) = 0) ASC, use_count DESC,
+        Some("count") => "pinned DESC, (COALESCE(use_count, 0) = 0) ASC, use_count DESC,
                 MAX(COALESCE(touched_ms, 0), sort_order) DESC",
-        Some("recent") => "MAX(COALESCE(touched_ms, 0), sort_order) DESC",
-        _ => "sort_order DESC",
+        Some("recent") => "pinned DESC, MAX(COALESCE(touched_ms, 0), sort_order) DESC",
+        _ => "pinned DESC, sort_order DESC",
     }
 }
 
@@ -238,7 +246,7 @@ pub(crate) fn get_clipboard_records_inner<R: Runtime>(
             .replace('%', "\\%")
             .replace('_', "\\_");
         let sql = format!(
-            "SELECT id, type, content, source_app, created_at, user_api_key, group_name, attachments, storage_mode, resource_path, COALESCE(use_count, 0), COALESCE(last_used_at, '') FROM clipboard_records
+            "SELECT id, type, content, source_app, created_at, user_api_key, group_name, attachments, storage_mode, resource_path, COALESCE(use_count, 0), COALESCE(last_used_at, ''), COALESCE(pinned, 0) FROM clipboard_records
              WHERE content LIKE '%' || ?1 || '%' ESCAPE '\\' {} ORDER BY {} LIMIT ?2 OFFSET ?3",
             cat_filter.1,
             clipboard_order_clause(sort_by.as_deref())
@@ -259,6 +267,7 @@ pub(crate) fn get_clipboard_records_inner<R: Runtime>(
                     row.get::<_, String>(9)?,
                     row.get::<_, i64>(10)?,
                     row.get::<_, String>(11)?,
+                    row.get::<_, i64>(12)?,
                 ))
             })
             .map_err(|e| e.to_string())?;
@@ -267,7 +276,7 @@ pub(crate) fn get_clipboard_records_inner<R: Runtime>(
         }
     } else {
         let sql = format!(
-            "SELECT id, type, content, source_app, created_at, user_api_key, group_name, attachments, storage_mode, resource_path, COALESCE(use_count, 0), COALESCE(last_used_at, '') FROM clipboard_records
+            "SELECT id, type, content, source_app, created_at, user_api_key, group_name, attachments, storage_mode, resource_path, COALESCE(use_count, 0), COALESCE(last_used_at, ''), COALESCE(pinned, 0) FROM clipboard_records
              {} ORDER BY {} LIMIT ?1 OFFSET ?2",
             cat_filter.0,
             clipboard_order_clause(sort_by.as_deref())
@@ -288,6 +297,7 @@ pub(crate) fn get_clipboard_records_inner<R: Runtime>(
                     row.get::<_, String>(9)?,
                     row.get::<_, i64>(10)?,
                     row.get::<_, String>(11)?,
+                    row.get::<_, i64>(12)?,
                 ))
             })
             .map_err(|e| e.to_string())?;
@@ -451,7 +461,7 @@ pub(crate) fn touch_clipboard_usage_internal<R: Runtime>(
     let mut stmt = conn
         .prepare(
             "SELECT id, resource_path FROM clipboard_records
-             WHERE COALESCE(storage_mode, 'database') = 'resource'
+             WHERE storage_mode = 'resource'
                AND COALESCE(resource_path, '') <> ''",
         )
         .map_err(|e| e.to_string())?;
@@ -744,7 +754,11 @@ pub(crate) fn delete_clipboard_records_internal<R: Runtime>(
     let staged_external_files = stage_external_resource_files(app, ids)?;
     let mut deleted_ids = Vec::new();
     let mut image_contents = HashSet::new();
-    let mut resource_files: Vec<(String, String, Vec<String>)> = Vec::new();
+    let mut trashed_resources: Vec<(crate::db::TrashedResourceFile, Vec<String>)> = Vec::new();
+
+    // 资源入回收站按当前库根落 .trash；目录切换场景由恢复/清空时的
+    // 多根查找兜底。
+    let trash_library_root = get_resource_library_dir(app);
 
     let transaction_result = (|| -> Result<(), String> {
         let state = app.state::<DbState>();
@@ -774,6 +788,14 @@ pub(crate) fn delete_clipboard_records_internal<R: Runtime>(
                 continue;
             };
 
+            // 资源记录先在删除前序列化整行（含 API Key 标签），trash_items
+            // 与删除同事务落库。
+            let record_json = if is_resource_record(&storage_mode) {
+                Some(serialize_resource_record(&tx, id)?)
+            } else {
+                None
+            };
+
             tx.execute(
                 "DELETE FROM api_key_labels WHERE record_id = ?1",
                 params![id],
@@ -784,8 +806,18 @@ pub(crate) fn delete_clipboard_records_internal<R: Runtime>(
 
             let attachment_paths =
                 serde_json::from_str::<Vec<String>>(&attachments).unwrap_or_default();
-            if is_resource_record(&storage_mode) {
-                resource_files.push((id.clone(), resource_path, attachment_paths));
+            if let Some(record_json) = record_json {
+                // 资源记录：trash_items 行与删除同事务；文件在提交后移入
+                // 库根 .trash——watcher 裁决只看现存记录行，settle 运行时
+                // 行已不在，不会被误清退。
+                let trashed = insert_trash_item_in_tx(
+                    &tx,
+                    id,
+                    &record_json,
+                    &resource_path,
+                    &trash_library_root,
+                )?;
+                trashed_resources.push((trashed, attachment_paths));
             } else {
                 if record_type == "image" {
                     image_contents.insert(content);
@@ -837,14 +869,37 @@ pub(crate) fn delete_clipboard_records_internal<R: Runtime>(
         }
     }
 
-    let had_resources = !resource_files.is_empty();
-    for (id, resource_path, attachment_paths) in resource_files {
-        remove_resource_record_files(app, &id, &resource_path, &attachment_paths);
+    // 资源文件移入库根 .trash（外部暂存文件从暂存位直接移入）。
+    // 移动失败已在内部整体补偿（文件移回 + 记录行回插），此处把失败
+    // 向上抛出：对外表现为删除失败，不丢数据。
+    let had_resources = !trashed_resources.is_empty();
+    if had_resources {
+        let mut trash_moves = Vec::new();
+        for (trashed, _attachments) in &trashed_resources {
+            let staged_source = staged_external_files
+                .iter()
+                .find(|file| file.id == trashed.record_id)
+                .map(|file| file.staged_path.clone());
+            trash_moves.push((trashed.clone(), staged_source));
+        }
+        if let Err(error) = move_trashed_resource_files(app, &trash_library_root, &trash_moves) {
+            restore_staged_external_resource_files(&staged_external_files);
+            return Err(error);
+        }
     }
-    if let Err(error) = finalize_staged_external_resource_files(app, &staged_external_files) {
+    // 未入回收站的暂存文件（记录行本就不存在等边缘）维持彻底删除。
+    let trashed_record_ids: std::collections::HashSet<&str> = trashed_resources
+        .iter()
+        .map(|(trashed, _)| trashed.record_id.as_str())
+        .collect();
+    let leftover_staged: Vec<StagedExternalResourceFile> = staged_external_files
+        .into_iter()
+        .filter(|file| !trashed_record_ids.contains(file.id.as_str()))
+        .collect();
+    if let Err(error) = finalize_staged_external_resource_files(app, &leftover_staged) {
         log::warn!("资源文件临时清理失败，已保留隐藏临时文件: {error}");
     }
-    for file in staged_external_files {
+    for file in leftover_staged {
         deleted_ids.push(file.id);
     }
 
@@ -868,11 +923,45 @@ pub fn delete_clipboard_record(app: AppHandle, id: String) -> Result<(), String>
     delete_clipboard_records_internal(&app, &[id])
 }
 
-#[tauri::command]
-pub fn move_clipboard_records_to_top(app: AppHandle, ids: Vec<String>) -> Result<(), String> {
+/// 收藏/取消收藏剪切板记录（单条与批量共用，ids 传一个也走这里）。
+/// 收藏记录不受保留期清理，列表查询恒定浮顶；用户主动删除不受影响。
+/// 返回实际命中的行数（id 未命中不计）。
+pub(crate) fn set_clipboard_record_pinned_internal<R: Runtime>(
+    app: &AppHandle<R>,
+    ids: &[String],
+    pinned: bool,
+) -> Result<usize, String> {
+    let mut changed = 0usize;
+    if ids.is_empty() {
+        return Ok(changed);
+    }
     let state = app.state::<DbState>();
     let conn = state.conn.lock().map_err(|e| e.to_string())?;
-    move_rows_to_top(&conn, "clipboard_records", &ids)?;
-    log::info!("move_clipboard_records_to_top: {} items", ids.len());
+    let flag = if pinned { 1 } else { 0 };
+    for id in ids {
+        changed += conn
+            .execute(
+                "UPDATE clipboard_records SET pinned = ?1 WHERE id = ?2",
+                params![flag, id],
+            )
+            .map_err(|e| e.to_string())?;
+    }
+    log::info!("set_clipboard_record_pinned: {} items -> {}", ids.len(), flag);
+    Ok(changed)
+}
+
+#[tauri::command]
+pub fn set_clipboard_record_pinned(
+    app: AppHandle,
+    ids: Vec<String>,
+    pinned: bool,
+) -> Result<(), String> {
+    let changed = set_clipboard_record_pinned_internal(&app, &ids, pinned)?;
+    if changed > 0 {
+        // 复用使用变化的既有同步事件：收藏/取消收藏在其他窗口（主窗口
+        // ↔ 径向菜单）实时重载，收藏视图与浮顶顺序跨窗口一致。本窗口
+        // 已乐观更新 + 重载，再多收一次幂等重载无碍。无命中不发。
+        let _ = app.emit("clipboard-record-updated", ids);
+    }
     Ok(())
 }

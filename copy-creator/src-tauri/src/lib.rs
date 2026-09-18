@@ -1,4 +1,5 @@
 mod autostart;
+mod backup;
 mod clipboard;
 mod clipboard_create_window;
 mod db;
@@ -16,7 +17,23 @@ mod tray;
 #[cfg(target_os = "windows")]
 mod win_hook;
 
+use std::sync::atomic::{AtomicBool, Ordering};
 use tauri::{Emitter, Manager};
+
+/// 用户置顶的唯一事实源。不能用 tao 的 `is_always_on_top()`：它读的是
+/// GTK `window-state-event` 上报的「请求态」——而 `show_main_window` 每次
+/// 显示窗口都会临时置顶再回落，部分 WM 下该请求态会钉在 true，与 X11
+/// 真实状态脱节，导致置顶按钮的点击永远在「取消一个不存在的置顶」
+/// （实测表现为毫无反应）。
+static USER_PINNED: AtomicBool = AtomicBool::new(false);
+
+fn user_pinned() -> bool {
+  USER_PINNED.load(Ordering::Acquire)
+}
+
+fn set_user_pinned(pinned: bool) {
+  USER_PINNED.store(pinned, Ordering::Release);
+}
 
 /// 窗口四周的透明阴影边距（逻辑像素）。透明窗口的 CSS 阴影会被窗口边界
 /// 裁剪，因此所有窗口实际尺寸比可见面板大一圈，阴影落在边距内。与 CSS 变量
@@ -36,7 +53,7 @@ pub(crate) fn show_main_window(app: &tauri::AppHandle, reason: &str, center: boo
     // shortcut::raise_visible_popup_windows 把弹窗顶回最上层。详见 shortcut.rs
     // 顶部的"窗口层级约定"注释。
     let popup_visible = shortcut::has_visible_popup_window(app);
-    let was_pinned = window.is_always_on_top().unwrap_or(false);
+    let was_pinned = user_pinned();
     if let Err(e) = window.set_always_on_top(true) {
         log::warn!("[show_main_window] set_always_on_top(true) failed: {e}");
     }
@@ -86,9 +103,11 @@ fn toggle_always_on_top(app: tauri::AppHandle) -> Result<bool, String> {
     let window = app
         .get_webview_window("main")
         .ok_or_else(|| "window not found".to_string())?;
-    let current = window.is_always_on_top().map_err(|e| e.to_string())?;
-    let next = !current;
+    // 置顶判定走应用层事实源（USER_PINNED），不读 tao 的 is_always_on_top
+    //（GTK 请求态，与 X11 实际状态可能脱节，见 USER_PINNED 注释）。
+    let next = !user_pinned();
     window.set_always_on_top(next).map_err(|e| e.to_string())?;
+    set_user_pinned(next);
     Ok(next)
 }
 
@@ -134,6 +153,23 @@ pub fn run() {
                         .level(log::LevelFilter::Info)
                         .build(),
                 )?;
+            } else {
+                // Release 同样必须落日志：常驻后台应用（文件监听/媒体服务/
+                // 粘贴模拟）出问题时，无日志等于不可诊断。只写日志文件
+                // （AppImage 双击启动时 stdout 无人消费）；轮转 512KB × 3 份
+                // 控制磁盘占用；本地时区便于用户对时间线。现有日志语句均为
+                // 路径/计数/状态，不含剪贴板内容。
+                app.handle().plugin(
+                    tauri_plugin_log::Builder::default()
+                        .level(log::LevelFilter::Info)
+                        .rotation_strategy(tauri_plugin_log::RotationStrategy::KeepSome(3))
+                        .max_file_size(512_000)
+                        .timezone_strategy(tauri_plugin_log::TimezoneStrategy::UseLocal)
+                        .targets([tauri_plugin_log::Target::new(
+                            tauri_plugin_log::TargetKind::LogDir { file_name: None },
+                        )])
+                        .build(),
+                )?;
             }
 
             let is_autostart = std::env::args().any(|a| a == "--hidden");
@@ -141,6 +177,7 @@ pub fn run() {
             db::init_db(app.handle())?;
             db::sanitize_file_record_contents(app.handle());
             db::prune_old_records(app.handle()).ok();
+            app.handle().manage(backup::BackupState::default());
             media_server::spawn(app.handle());
             resource_watch::spawn(app.handle());
 
@@ -431,7 +468,17 @@ pub fn run() {
             db::set_user_api_key,
             db::reorder_phrase_groups,
             db::reorder_phrases,
-            db::move_clipboard_records_to_top,
+            db::set_clipboard_record_pinned,
+            db::list_trash_items,
+            db::trash_items_count,
+            db::restore_trash_item,
+            db::purge_trash_items,
+            backup::export_backup,
+            backup::cancel_backup_export,
+            backup::preview_backup,
+            backup::import_backup,
+            backup::select_backup_save_path,
+            backup::select_backup_zip_path,
             db::move_phrases_to_top,
             toggle_always_on_top,
             autostart::set_autostart,

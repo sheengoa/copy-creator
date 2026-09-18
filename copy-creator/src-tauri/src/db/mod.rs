@@ -67,7 +67,19 @@ pub fn make_key_preview(content: &str) -> String {
 }
 
 
-const RESOURCE_RECORD_CONDITION: &str = "COALESCE(storage_mode, 'database') = 'resource'";
+// storage_mode 列在 schema 层有 DEFAULT 'database' 且历史数据已回填，
+// 永不为 NULL：直接等值比较可命中 idx_clipboard_storage_mode 索引。
+// 不要改回 COALESCE(storage_mode, 'database') 包裹——那会让索引失效。
+const RESOURCE_RECORD_CONDITION: &str = "storage_mode = 'resource'";
+
+/// storage_mode 历史数据回填 + 资源查询组合索引。ensure_schema 与测试共用
+/// 同一份 SQL，保证两者建的库结构一致。
+const RESOURCE_INDEX_MIGRATION_SQL: &str = "
+UPDATE clipboard_records SET storage_mode = 'database' WHERE storage_mode IS NULL;
+
+CREATE INDEX IF NOT EXISTS idx_clipboard_storage_mode
+    ON clipboard_records(storage_mode, resource_path);
+";
 
 fn category_sql(category: &Option<String>) -> (String, String) {
     match category.as_deref() {
@@ -90,6 +102,11 @@ fn category_sql(category: &Option<String>) -> (String, String) {
         Some("resources") => (
             format!("WHERE ({RESOURCE_RECORD_CONDITION})"),
             format!("AND ({RESOURCE_RECORD_CONDITION})"),
+        ),
+        // 「收藏」视图：跨类别只看收藏记录（与其它类别一样走数据库层过滤）。
+        Some("favorites") => (
+            format!("WHERE pinned = 1 AND NOT ({RESOURCE_RECORD_CONDITION})"),
+            format!("AND pinned = 1 AND NOT ({RESOURCE_RECORD_CONDITION})"),
         ),
         Some("apikey") => (
             format!(
@@ -116,6 +133,7 @@ mod migrate;
 mod phrase;
 mod resource;
 mod settings;
+mod trash;
 pub(crate) use apikeys::*;
 pub(crate) use clipboard::*;
 pub(crate) use media::*;
@@ -123,6 +141,7 @@ pub(crate) use migrate::*;
 pub(crate) use phrase::*;
 pub(crate) use resource::*;
 pub(crate) use settings::*;
+pub(crate) use trash::*;
 
 pub struct DbState {
     pub conn: Mutex<Connection>,
@@ -171,6 +190,7 @@ fn clipboard_record_json(
     resource_path: String,
     use_count: i64,
     last_used_at: String,
+    pinned: i64,
 ) -> serde_json::Value {
     let attachment_paths = serde_json::from_str::<Vec<String>>(&attachments).unwrap_or_default();
     let has_images = !attachment_paths.is_empty();
@@ -216,6 +236,7 @@ fn clipboard_record_json(
         "resource_path": resource_path,
         "use_count": use_count,
         "last_used_at": last_used_at,
+        "pinned": pinned != 0,
     })
 }
 
@@ -532,11 +553,17 @@ fn is_temporary_resource_file_name(name: &str) -> bool {
         .is_some_and(|(_, extension)| TEMPORARY_RESOURCE_EXTENSIONS.contains(&extension))
 }
 
-/// 应用缩略图目录约定：原图旁的 `thumbs/` 全部是派生缓存（可随时再生成），
+/// 应用自身目录约定：原图旁的 `thumbs/` 全部是派生缓存（可随时再生成），
 /// 永不作为资源内容收录，否则缩略图会以「原图」身份混进库，还会被再次
-/// 生成缩略图衍生出 thumbs/thumbs 嵌套污染。`.copy-creator` 是应用元数据。
+/// 生成缩略图衍生出 thumbs/thumbs 嵌套污染。`.copy-creator` 是应用元数据；
+/// `.trash` 是资源回收站目录，删除资源会把文件移进去——若不排除，监听
+/// 结算会把回收站内文件当「新到达」重新入库，列表顶部立刻出现指向回收
+/// 站的幽灵重复卡片。分组树扫描（is_ignored_resource_directory）与文件
+/// 发现（本函数 + path_inside_ignored_dir）必须覆盖同一组应用目录。
 fn is_ignored_resource_dir(name: &OsStr) -> bool {
-    name == OsStr::new(".copy-creator") || name == OsStr::new("thumbs")
+    name == OsStr::new(".copy-creator")
+        || name == OsStr::new("thumbs")
+        || name == OsStr::new(TRASH_DIR_NAME)
 }
 
 fn path_inside_ignored_dir(path: &Path) -> bool {
@@ -552,7 +579,7 @@ fn path_inside_ignored_dir(path: &Path) -> bool {
 fn prune_legacy_thumb_records(conn: &Connection) {
     if let Err(error) = conn.execute(
         "DELETE FROM clipboard_records
-         WHERE COALESCE(storage_mode, 'database') = 'resource'
+         WHERE storage_mode = 'resource'
            AND (resource_path LIKE '%/thumbs/%' OR resource_path LIKE '%\\thumbs\\%')",
         [],
     ) {
@@ -573,7 +600,7 @@ fn prune_temporary_resource_records(conn: &Connection) {
         .collect();
     let sql = format!(
         "DELETE FROM clipboard_records
-         WHERE COALESCE(storage_mode, 'database') = 'resource'
+         WHERE storage_mode = 'resource'
            AND COALESCE(resource_external, 0) = 1
            AND ({})",
         conditions.join(" OR ")
@@ -934,7 +961,7 @@ pub fn init_db(app: &AppHandle) -> Result<(), Box<dyn std::error::Error>> {
 /// 连接 schema 与历史数据迁移的唯一入口：建表、索引、默认设置种子、
 /// 历史结构增量迁移（全部幂等）。主库初始化与存储迁移共用，保证任何
 /// 路径建出的库 schema 完全一致，不再各自维护一份 CREATE TABLE 文本。
-fn ensure_schema(conn: &Connection) -> Result<(), Box<dyn std::error::Error>> {
+pub(crate) fn ensure_schema(conn: &Connection) -> Result<(), Box<dyn std::error::Error>> {
     conn.execute_batch(
         "
         CREATE TABLE IF NOT EXISTS clipboard_records (
@@ -949,7 +976,8 @@ fn ensure_schema(conn: &Connection) -> Result<(), Box<dyn std::error::Error>> {
             resource_path TEXT DEFAULT '',
             last_used_at TEXT DEFAULT '',
             use_count INTEGER DEFAULT 0,
-            touched_ms INTEGER DEFAULT 0
+            touched_ms INTEGER DEFAULT 0,
+            pinned INTEGER NOT NULL DEFAULT 0
         );
 
         CREATE INDEX IF NOT EXISTS idx_clipboard_created_at
@@ -1025,6 +1053,20 @@ fn ensure_schema(conn: &Connection) -> Result<(), Box<dyn std::error::Error>> {
         CREATE TABLE IF NOT EXISTS toast_shown (
             key_preview TEXT PRIMARY KEY
         );
+
+        CREATE TABLE IF NOT EXISTS trash_items (
+            id TEXT PRIMARY KEY,
+            record_id TEXT DEFAULT '',
+            record_json TEXT NOT NULL,
+            file_name TEXT DEFAULT '',
+            original_group TEXT DEFAULT '',
+            original_path TEXT DEFAULT '',
+            trash_dir TEXT NOT NULL,
+            trashed_at TEXT NOT NULL,
+            trashed_ms INTEGER NOT NULL DEFAULT 0
+        );
+
+        CREATE INDEX IF NOT EXISTS idx_trash_trashed_ms ON trash_items(trashed_ms);
         ",
     )?;
 
@@ -1183,6 +1225,15 @@ fn ensure_schema(conn: &Connection) -> Result<(), Box<dyn std::error::Error>> {
         [],
     )
     .ok();
+
+    // ── pinned：收藏标记 ──
+    // 收藏记录不受保留期清理（prune_old_records 排除），列表查询恒定浮顶
+    // （clipboard_order_clause 前置 pinned DESC）。用户主动删除仍可移除。
+    conn.execute(
+        "ALTER TABLE clipboard_records ADD COLUMN pinned INTEGER NOT NULL DEFAULT 0",
+        [],
+    )
+    .ok();
     conn.execute(
         "ALTER TABLE phrases ADD COLUMN use_count INTEGER DEFAULT 0",
         [],
@@ -1222,17 +1273,21 @@ fn ensure_schema(conn: &Connection) -> Result<(), Box<dyn std::error::Error>> {
     // ── 内容模式迁移：资源（资源库）与普通剪贴板两种模式，分组与“临时”标记废弃 ──
     // 旧版本以“是否有分组”推断资源，手动暂存记在 group_name（'stash'/'暂存'/'临时'）。
     // 统一为：带真实分组名的旧记录升级为资源后清空分组；手动暂存标记全部清除，并入剪贴板列表。
+    // 前置回填：storage_mode 列经 DEFAULT/ALTER 均带 'database'，NULL 只可能来自
+    // 异常路径；先回填再等值比较，保证「storage_mode = 'resource'」与旧
+    // COALESCE 语义一致，资源等值查询命中组合索引。
+    conn.execute_batch(RESOURCE_INDEX_MIGRATION_SQL).ok();
     conn.execute(
         "UPDATE clipboard_records SET storage_mode = ?1
          WHERE TRIM(COALESCE(group_name, '')) <> ''
            AND group_name NOT IN ('stash', '暂存', '默认', '临时')
-           AND COALESCE(storage_mode, 'database') <> ?1",
+           AND storage_mode <> ?1",
         params![RESOURCE_STORAGE_MODE],
     )
     .ok();
     conn.execute(
         "UPDATE clipboard_records SET group_name = ''
-         WHERE COALESCE(storage_mode, 'database') = ?1",
+         WHERE storage_mode = ?1",
         params![RESOURCE_STORAGE_MODE],
     )
     .ok();

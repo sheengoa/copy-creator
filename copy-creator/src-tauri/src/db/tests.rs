@@ -584,9 +584,9 @@ mod record_classification_tests {
     fn resource_category_sql_filters_by_storage_mode() {
         let (filter, search_filter) = category_sql(&Some("resources".to_string()));
 
-        assert!(filter.contains("COALESCE(storage_mode, 'database') = 'resource'"));
+        assert!(filter.contains("storage_mode = 'resource'"));
         assert!(!filter.contains("group_name"));
-        assert!(search_filter.contains("COALESCE(storage_mode, 'database') = 'resource'"));
+        assert!(search_filter.contains("storage_mode = 'resource'"));
         assert!(!search_filter.contains("group_name"));
     }
 
@@ -594,9 +594,9 @@ mod record_classification_tests {
     fn temp_category_falls_back_to_plain_clipboard_filter() {
         let (filter, search_filter) = category_sql(&Some("temp".to_string()));
 
-        assert!(filter.contains("NOT (COALESCE(storage_mode, 'database') = 'resource')"));
+        assert!(filter.contains("NOT (storage_mode = 'resource')"));
         assert!(!filter.contains("group_name"));
-        assert!(search_filter.contains("NOT (COALESCE(storage_mode, 'database') = 'resource')"));
+        assert!(search_filter.contains("NOT (storage_mode = 'resource')"));
         assert!(!search_filter.contains("group_name"));
     }
 }
@@ -605,14 +605,15 @@ mod record_classification_tests {
 mod resource_command_tests {
     use crate::db::{
         create_resource_group_inner, delete_external_resource_file, delete_resource_group_inner,
-        get_clipboard_records_inner, get_resource_groups_inner, move_resource_group_inner,
-        move_resource_records_inner, read_resource_text_preview_file, read_text_file_content_inner,
-        rename_resource_file_inner,
+        forget_resource_records, get_clipboard_records_inner, get_resource_groups_inner,
+        move_resource_group_inner, move_resource_records_inner, read_resource_text_preview_file,
+        read_text_file_content_inner, rename_resource_file_inner,
         reorder_resource_groups_inner, resolve_resource_file_path, resource_file_id,
         resource_folder_tree, resource_group_count_map, set_resource_note_inner,
-        simplify_windows_path, restore_staged_external_resource_files,
-        stage_external_resource_files, validate_resource_rename_stem, update_resource_group_inner,
-        DbState, RESOURCE_TEXT_PASTE_LIMIT_BYTES,
+        settle_external_resource_changes, simplify_windows_path,
+        restore_staged_external_resource_files, stage_external_resource_files,
+        validate_resource_rename_stem, update_resource_group_inner,
+        DbState, RESOURCE_INDEX_MIGRATION_SQL, RESOURCE_TEXT_PASTE_LIMIT_BYTES,
     };
     use rusqlite::Connection;
     use std::path::{Path, PathBuf};
@@ -657,7 +658,19 @@ mod resource_command_tests {
                  resource_external INTEGER DEFAULT 0,
                  last_used_at TEXT DEFAULT '',
                  use_count INTEGER DEFAULT 0,
-                 touched_ms INTEGER DEFAULT 0
+                 touched_ms INTEGER DEFAULT 0,
+                 pinned INTEGER NOT NULL DEFAULT 0
+             );
+             CREATE TABLE IF NOT EXISTS trash_items (
+                 id TEXT PRIMARY KEY,
+                 record_id TEXT DEFAULT '',
+                 record_json TEXT NOT NULL,
+                 file_name TEXT DEFAULT '',
+                 original_group TEXT DEFAULT '',
+                 original_path TEXT DEFAULT '',
+                 trash_dir TEXT NOT NULL,
+                 trashed_at TEXT NOT NULL,
+                 trashed_ms INTEGER NOT NULL DEFAULT 0
              );
              CREATE TABLE api_key_labels (
                  record_id TEXT PRIMARY KEY,
@@ -2852,6 +2865,273 @@ mod resource_command_tests {
         assert_eq!(file_content, "/home/ao/图片/微信图片.jpg");
         assert_eq!(text_content, "第一行\r\n第二行");
     }
+
+    #[test]
+    fn forget_resource_records_removes_subtree_for_deleted_directory() {
+        // 外部删除/移出目录时事件只报目录本身：目录下的全部记录（含嵌套
+        // 子目录）都要清退，兄弟路径不受影响。
+        let (app, root) = test_app();
+        let dir = root.join("doomed");
+        std::fs::create_dir_all(dir.join("sub")).unwrap();
+        let file_a = dir.join("a.mp4");
+        let file_b = dir.join("sub").join("b.png");
+        let keeper = root.join("kept.png");
+        std::fs::write(&file_a, [1]).unwrap();
+        std::fs::write(&file_b, [2]).unwrap();
+        std::fs::write(&keeper, [3]).unwrap();
+        insert_resource(&app, "res-a", 1000.0, "", file_a.to_str().unwrap());
+        insert_resource(&app, "res-b", 1000.0, "", file_b.to_str().unwrap());
+        insert_resource(&app, "res-kept", 1000.0, "", keeper.to_str().unwrap());
+
+        forget_resource_records(app.handle(), &[dir]);
+
+        let records = get_clipboard_records_inner(
+            &app.handle().clone(),
+            None,
+            Some(50),
+            Some(0),
+            Some("resources".to_string()),
+            None,
+            Some("recent".into()),
+        )
+        .unwrap();
+        assert_eq!(records.len(), 1, "目录子树记录应全部清退");
+        assert_eq!(records[0]["id"].as_str(), Some("res-kept"));
+    }
+
+    #[test]
+    fn settle_redirects_renamed_directory_and_keeps_metadata() {
+        // 外部把目录改名（事件 = rename 旧路径 + 新路径）：子树记录应整体
+        // 重定向到新路径——id/resource_path 改写、api_key_labels 级联、
+        // sort_order 等元数据保留，不删了重建。
+        let (app, root) = test_app();
+        let old_dir = root.join("旧分组");
+        std::fs::create_dir_all(old_dir.join("sub")).unwrap();
+        let file_x = old_dir.join("x.mp4");
+        let file_y = old_dir.join("sub").join("y.mp3");
+        std::fs::write(&file_x, [1, 1]).unwrap();
+        std::fs::write(&file_y, [2, 2]).unwrap();
+        insert_resource(&app, "res-x", 1234.0, "", file_x.to_str().unwrap());
+        insert_resource(&app, "res-y", 5678.0, "", file_y.to_str().unwrap());
+        {
+            let state = app.state::<DbState>();
+            let conn = state.conn.lock().unwrap();
+            conn.execute(
+                "INSERT INTO api_key_labels (record_id, label) VALUES ('res-x', '标签A')",
+                [],
+            )
+            .unwrap();
+        }
+        let new_dir = root.join("0916");
+        std::fs::rename(&old_dir, &new_dir).unwrap();
+
+        settle_external_resource_changes(app.handle(), &[old_dir.clone(), new_dir.clone()]);
+
+        let records = get_clipboard_records_inner(
+            &app.handle().clone(),
+            None,
+            Some(50),
+            Some(0),
+            Some("resources".to_string()),
+            None,
+            Some("recent".into()),
+        )
+        .unwrap();
+        assert_eq!(records.len(), 2, "重定向不应丢记录");
+        let by_content = |marker: &str| {
+            records
+                .iter()
+                .find(|r| r["content"].as_str() == Some(marker))
+                .unwrap_or_else(|| panic!("content={marker} 的记录应保留: {records:?}"))
+        };
+        let redirected_x = by_content("res-x");
+        let redirected_y = by_content("res-y");
+        let new_x = new_dir.join("x.mp4");
+        let new_y = new_dir.join("sub").join("y.mp3");
+        assert_eq!(
+            redirected_x["resource_path"].as_str(),
+            Some(new_x.to_str().unwrap()),
+            "记录应重定向到新路径"
+        );
+        assert_eq!(
+            redirected_y["resource_path"].as_str(),
+            Some(new_y.to_str().unwrap())
+        );
+        // created_at 未被覆盖 = 元数据保留（删了重建会换成发现时刻）。
+        assert_eq!(
+            redirected_x["created_at"].as_str(),
+            Some("2026-08-01T00:00:00Z"),
+            "重定向应保留原 created_at"
+        );
+        assert_eq!(
+            redirected_x["id"].as_str(),
+            Some(resource_file_id(&new_x).as_str()),
+            "id 应随路径级联改写"
+        );
+        assert!(
+            !records.iter().any(|r| r["id"].as_str() == Some("res-x")),
+            "旧 id 不应残留"
+        );
+        assert_eq!(
+            redirected_x["resource_group"].as_str(),
+            Some("0916"),
+            "分组归属应随新路径推导"
+        );
+        {
+            let state = app.state::<DbState>();
+            let conn = state.conn.lock().unwrap();
+            let label: String = conn
+                .query_row(
+                    "SELECT label FROM api_key_labels WHERE record_id = ?1",
+                    [resource_file_id(&new_x)],
+                    |row| row.get(0),
+                )
+                .unwrap();
+            assert_eq!(label, "标签A", "api_key_labels 应级联迁移");
+        }
+    }
+
+    #[test]
+    fn settle_removes_records_when_directory_moved_out_of_library() {
+        // 删除到回收站/剪切移出库外 = rename 出监听目录：旧路径事件按
+        // stat 裁决为消失，子树记录清退——旧实现按「Modify=到达」处理
+        // 会永远漏删（径向菜单/资源页残留已删文件）。
+        let (app, root) = test_app();
+        let dir = root.join("移出分组");
+        std::fs::create_dir_all(&dir).unwrap();
+        let file = dir.join("a.mp4");
+        std::fs::write(&file, [1]).unwrap();
+        insert_resource(&app, "res-out", 1000.0, "", file.to_str().unwrap());
+        let outside = std::env::temp_dir().join(format!("out-{}", uuid::Uuid::new_v4()));
+        std::fs::create_dir_all(&outside).unwrap();
+
+        std::fs::rename(&dir, outside.join("移出分组")).unwrap();
+        settle_external_resource_changes(app.handle(), &[dir]);
+
+        let records = get_clipboard_records_inner(
+            &app.handle().clone(),
+            None,
+            Some(50),
+            Some(0),
+            Some("resources".to_string()),
+            None,
+            Some("recent".into()),
+        )
+        .unwrap();
+        assert_eq!(records.len(), 0, "移出库外的目录记录应被清退");
+        std::fs::remove_dir_all(&outside).ok();
+    }
+
+    #[test]
+    fn settle_discovers_records_when_whole_directory_moved_in() {
+        // 外部把整个目录移入库：事件只报目录本身，子文件应递归补建入库
+        // 并按路径归组（旧实现只认文件路径，要等重启对账才能发现）。
+        let (app, root) = test_app();
+        let outside = std::env::temp_dir().join(format!("in-{}", uuid::Uuid::new_v4()));
+        let source = outside.join("素材包");
+        std::fs::create_dir_all(source.join("nested")).unwrap();
+        std::fs::write(source.join("a.mp4"), [1]).unwrap();
+        std::fs::write(source.join("nested").join("b.mp3"), [2]).unwrap();
+
+        let target = root.join("素材包");
+        std::fs::rename(&source, &target).unwrap();
+        settle_external_resource_changes(app.handle(), std::slice::from_ref(&target));
+
+        let records = get_clipboard_records_inner(
+            &app.handle().clone(),
+            None,
+            Some(50),
+            Some(0),
+            Some("resources".to_string()),
+            None,
+            Some("recent".into()),
+        )
+        .unwrap();
+        assert_eq!(records.len(), 2, "目录内文件应递归补建");
+        let groups: Vec<String> = records
+            .iter()
+            .map(|r| r["resource_group"].as_str().unwrap_or("").to_string())
+            .collect();
+        assert!(
+            groups.iter().all(|group| group == "素材包"),
+            "补建记录应归入新分组: {groups:?}"
+        );
+        assert!(records.iter().any(|r| r["id"].as_str()
+            == Some(resource_file_id(&target.join("a.mp4")).as_str())));
+        std::fs::remove_dir_all(&outside).ok();
+    }
+
+    #[test]
+    fn settle_single_file_trash_rename_swaps_record() {
+        // 库内单文件改名：旧路径记录按「文件不在」清退，新路径按发现
+        // 时间补建——不产生幽灵重复条目（外部改名等价于删旧建新）。
+        let (app, root) = test_app();
+        let old_file = root.join("old.mp4");
+        std::fs::write(&old_file, [1, 2, 3]).unwrap();
+        insert_resource(&app, "res-old-vid", 1000.0, "", old_file.to_str().unwrap());
+        let new_file = root.join("new.mp4");
+        std::fs::rename(&old_file, &new_file).unwrap();
+
+        settle_external_resource_changes(app.handle(), &[old_file, new_file.clone()]);
+
+        let records = get_clipboard_records_inner(
+            &app.handle().clone(),
+            None,
+            Some(50),
+            Some(0),
+            Some("resources".to_string()),
+            None,
+            Some("recent".into()),
+        )
+        .unwrap();
+        assert_eq!(records.len(), 1, "应恰好一条记录（无幽灵无重复）");
+        assert_eq!(records[0]["resource_path"].as_str(), Some(new_file.to_str().unwrap()));
+        assert_eq!(
+            records[0]["id"].as_str(),
+            Some(resource_file_id(&new_file).as_str())
+        );
+    }
+
+    #[test]
+    fn storage_mode_backfill_and_resource_index_are_effective() {
+        // 回填：异常路径产生的 NULL storage_mode 迁移后归位 'database'，
+        // 保证等值查询与旧 COALESCE 语义一致；索引：资源等值查询命中
+        // idx_clipboard_storage_mode 而非全表扫描（SCAN）。
+        let (app, root) = test_app();
+        insert_resource(&app, "res-a", 1000.0, "", root.join("a.mp4").to_str().unwrap());
+        {
+            let state = app.state::<DbState>();
+            let conn = state.conn.lock().unwrap();
+            conn.execute(
+                "INSERT INTO clipboard_records (id, type, content, created_at, storage_mode)
+                 VALUES ('null-mode', 'text', 'x', '2026-08-01T00:00:00Z', NULL)",
+                [],
+            )
+            .unwrap();
+            conn.execute_batch(RESOURCE_INDEX_MIGRATION_SQL).unwrap();
+            let mode: String = conn
+                .query_row(
+                    "SELECT storage_mode FROM clipboard_records WHERE id = 'null-mode'",
+                    [],
+                    |row| row.get(0),
+                )
+                .unwrap();
+            assert_eq!(mode, "database", "NULL storage_mode 应回填为 'database'");
+
+            let plan: String = conn
+                .query_row(
+                    "EXPLAIN QUERY PLAN SELECT id, resource_path FROM clipboard_records
+                     WHERE storage_mode = 'resource'",
+                    [],
+                    |row| row.get(3),
+                )
+                .unwrap();
+            assert!(
+                plan.contains("idx_clipboard_storage_mode") && !plan.contains("SCAN"),
+                "资源等值查询应命中索引而非全表扫描: {plan}"
+            );
+        }
+    }
 }
 
 #[cfg(test)]
@@ -3027,7 +3307,8 @@ mod content_sort_tests {
                 id TEXT PRIMARY KEY,
                 sort_order REAL,
                 touched_ms INTEGER DEFAULT 0,
-                use_count INTEGER DEFAULT 0
+                use_count INTEGER DEFAULT 0,
+                pinned INTEGER NOT NULL DEFAULT 0
             );",
         )
         .unwrap();
@@ -3035,10 +3316,21 @@ mod content_sort_tests {
     }
 
     fn insert(conn: &Connection, id: &str, sort_order: f64, touched_ms: i64, use_count: i64) {
+        insert_pinned(conn, id, sort_order, touched_ms, use_count, 0);
+    }
+
+    fn insert_pinned(
+        conn: &Connection,
+        id: &str,
+        sort_order: f64,
+        touched_ms: i64,
+        use_count: i64,
+        pinned: i64,
+    ) {
         conn.execute(
-            "INSERT INTO clipboard_records (id, sort_order, touched_ms, use_count)
-             VALUES (?1, ?2, ?3, ?4)",
-            params![id, sort_order, touched_ms, use_count],
+            "INSERT INTO clipboard_records (id, sort_order, touched_ms, use_count, pinned)
+             VALUES (?1, ?2, ?3, ?4, ?5)",
+            params![id, sort_order, touched_ms, use_count, pinned],
         )
         .unwrap();
     }
@@ -3088,6 +3380,482 @@ mod content_sort_tests {
             ordered_ids(&conn, Some("count")),
             vec!["warm", "hot", "cold", "fresh", "stale"]
         );
+    }
+
+    // 收藏恒定浮顶：pinned DESC 前置于三类排序键，任何排序模式下收藏记录
+    // 都在非收藏之前；收藏之间保持该模式原有次序。
+    #[test]
+    fn pinned_rows_float_above_others_in_every_sort_mode() {
+        let conn = setup_conn();
+        // pinned 记录复制时间与使用次数都更旧，仍须排最前。
+        insert_pinned(&conn, "fav-old", 100.0, 0, 0, 1);
+        insert(&conn, "new", 9000.0, 0, 0);
+        insert(&conn, "hot", 200.0, 0, 30);
+        assert_eq!(ordered_ids(&conn, None), vec!["fav-old", "new", "hot"]);
+        assert_eq!(ordered_ids(&conn, Some("recent")), vec!["fav-old", "new", "hot"]);
+        assert_eq!(ordered_ids(&conn, Some("count")), vec!["fav-old", "hot", "new"]);
+    }
+}
+
+#[cfg(test)]
+mod pinned_record_tests {
+    use crate::db::{
+        get_clipboard_records_inner, prune_old_records, set_clipboard_record_pinned_internal,
+        DbState,
+    };
+    use rusqlite::{params, Connection};
+    use std::sync::Mutex;
+    use tauri::Manager;
+
+    /// 内存库 + mock app：schema 含 created_ms 生成列（prune 的清理键）与
+    /// pinned（收藏标记），与生产 ensure_schema 语义一致。
+    fn pinned_test_app() -> tauri::App<tauri::test::MockRuntime> {
+        let app = tauri::test::mock_app();
+        let conn = Connection::open_in_memory().unwrap();
+        conn.execute_batch(
+            "CREATE TABLE settings (key TEXT PRIMARY KEY, value TEXT NOT NULL);
+             CREATE TABLE clipboard_records (
+                 id TEXT PRIMARY KEY,
+                 type TEXT NOT NULL,
+                 content TEXT NOT NULL,
+                 source_app TEXT DEFAULT '',
+                 created_at TEXT NOT NULL,
+                 user_api_key INTEGER DEFAULT 0,
+                 sort_order REAL,
+                 group_name TEXT DEFAULT '',
+                 attachments TEXT DEFAULT '[]',
+                 storage_mode TEXT DEFAULT 'database',
+                 resource_path TEXT DEFAULT '',
+                 resource_note TEXT DEFAULT '',
+                 resource_external INTEGER DEFAULT 0,
+                 last_used_at TEXT DEFAULT '',
+                 use_count INTEGER DEFAULT 0,
+                 touched_ms INTEGER DEFAULT 0,
+                 pinned INTEGER NOT NULL DEFAULT 0,
+                 created_ms INTEGER GENERATED ALWAYS AS (CAST((julianday(created_at) - 2440587.5) * 86400000 AS INTEGER)) VIRTUAL
+             );
+             CREATE TABLE api_key_labels (
+                 record_id TEXT PRIMARY KEY,
+                 label TEXT DEFAULT ''
+             );",
+        )
+        .unwrap();
+        app.manage(DbState {
+            conn: Mutex::new(conn),
+        });
+        app
+    }
+
+    fn insert_record(app: &tauri::App<tauri::test::MockRuntime>, id: &str, created_at: &str) {
+        let state = app.state::<DbState>();
+        let conn = state.conn.lock().unwrap();
+        conn.execute(
+            "INSERT INTO clipboard_records (id, type, content, created_at, sort_order)
+             VALUES (?1, 'text', ?2, ?3, 1000.0)",
+            params![id, id, created_at],
+        )
+        .unwrap();
+    }
+
+    fn remaining_ids(app: &tauri::App<tauri::test::MockRuntime>) -> Vec<String> {
+        let state = app.state::<DbState>();
+        let conn = state.conn.lock().unwrap();
+        let mut stmt = conn
+            .prepare("SELECT id FROM clipboard_records ORDER BY id")
+            .unwrap();
+        stmt.query_map([], |row| row.get::<_, String>(0))
+            .unwrap()
+            .collect::<Result<Vec<_>, _>>()
+            .unwrap()
+    }
+
+    // 收藏记录是用户明确要留的内容：超期后清理只淘汰未收藏记录，
+    // 收藏记录与其引用的图片文件不随保留期消失。
+    #[test]
+    fn prune_keeps_pinned_records_but_expires_others() {
+        let app = pinned_test_app();
+        let handle = app.handle().clone();
+        // 两条超期（1 年前）：一条收藏、一条普通；一条新鲜普通记录作对照。
+        insert_record(&app, "old-pinned", "2025-09-01T00:00:00Z");
+        insert_record(&app, "old-plain", "2025-09-01T00:00:00Z");
+        insert_record(&app, "fresh-plain", "2026-09-18T00:00:00Z");
+        set_clipboard_record_pinned_internal(&handle, &["old-pinned".to_string()], true).unwrap();
+
+        prune_old_records(&handle).unwrap();
+
+        assert_eq!(remaining_ids(&app), vec!["fresh-plain", "old-pinned"]);
+    }
+
+    // 取消收藏后恢复受清理管辖：收藏是可逆的保护，不是删除。
+    #[test]
+    fn unpinning_restores_retention_semantics() {
+        let app = pinned_test_app();
+        let handle = app.handle().clone();
+        insert_record(&app, "maybe", "2025-09-01T00:00:00Z");
+        set_clipboard_record_pinned_internal(&handle, &["maybe".to_string()], true).unwrap();
+        set_clipboard_record_pinned_internal(&handle, &["maybe".to_string()], false).unwrap();
+
+        prune_old_records(&handle).unwrap();
+
+        assert!(remaining_ids(&app).is_empty());
+    }
+
+    // 列表查询带回 pinned 事实字段且收藏浮顶（与排序子句测试互补，钉住
+    // SELECT 列与 JSON 组装的端到端一致性）。
+    #[test]
+    fn list_carries_pinned_flag_and_floats_favorites_first() {
+        let app = pinned_test_app();
+        let handle = app.handle().clone();
+        insert_record(&app, "fav", "2025-09-01T00:00:00Z");
+        insert_record(&app, "plain", "2026-09-18T00:00:00Z");
+        set_clipboard_record_pinned_internal(&handle, &["fav".to_string()], true).unwrap();
+
+        let records =
+            get_clipboard_records_inner(&handle, None, Some(50), Some(0), None, None, None)
+                .unwrap();
+
+        let ids: Vec<&str> = records
+            .iter()
+            .map(|r| r["id"].as_str().unwrap())
+            .collect();
+        assert_eq!(ids, vec!["fav", "plain"]);
+        assert_eq!(records[0]["pinned"], serde_json::Value::Bool(true));
+        assert_eq!(records[1]["pinned"], serde_json::Value::Bool(false));
+    }
+
+    // 「收藏」视图（category=favorites）：数据库层过滤，跨类别只返回收藏
+    // 记录；搜索分支同样生效。
+    #[test]
+    fn favorites_category_filters_at_database_layer() {
+        let app = pinned_test_app();
+        let handle = app.handle().clone();
+        insert_record(&app, "fav-text", "2025-09-01T00:00:00Z");
+        insert_record(&app, "plain", "2026-09-18T00:00:00Z");
+        set_clipboard_record_pinned_internal(&handle, &["fav-text".to_string()], true).unwrap();
+
+        let ids_of = |records: &[serde_json::Value]| -> Vec<String> {
+            records
+                .iter()
+                .map(|r| r["id"].as_str().unwrap().to_string())
+                .collect()
+        };
+        let favorites = get_clipboard_records_inner(
+            &handle,
+            None,
+            Some(50),
+            Some(0),
+            Some("favorites".to_string()),
+            None,
+            None,
+        )
+        .unwrap();
+        assert_eq!(ids_of(&favorites), vec!["fav-text"]);
+
+        let searched = get_clipboard_records_inner(
+            &handle,
+            Some("fav-text".to_string()),
+            Some(50),
+            Some(0),
+            Some("favorites".to_string()),
+            None,
+            None,
+        )
+        .unwrap();
+        assert_eq!(ids_of(&searched), vec!["fav-text"]);
+
+        let searched_out = get_clipboard_records_inner(
+            &handle,
+            Some("plain".to_string()),
+            Some(50),
+            Some(0),
+            Some("favorites".to_string()),
+            None,
+            None,
+        )
+        .unwrap();
+        assert!(ids_of(&searched_out).is_empty());
+    }
+}
+
+#[cfg(test)]
+mod trash_tests {
+    use crate::db::{
+        delete_clipboard_records_internal, ensure_schema, list_trash_items_internal,
+        prune_old_records, purge_trash_internal, restore_trash_item_internal, DbState,
+    };
+    use rusqlite::params;
+    use std::path::{Path, PathBuf};
+    use std::sync::Mutex;
+    use tauri::Manager;
+
+    fn trash_test_app() -> (tauri::App<tauri::test::MockRuntime>, PathBuf) {
+        let app = tauri::test::mock_app();
+        let library = std::env::temp_dir().join(format!(
+            "copy-creator-trash-test-{}",
+            uuid::Uuid::new_v4()
+        ));
+        std::fs::create_dir_all(&library).unwrap();
+        let conn = rusqlite::Connection::open_in_memory().unwrap();
+        ensure_schema(&conn).unwrap();
+        conn.execute(
+            "INSERT INTO settings (key, value) VALUES ('resource_library_path', ?1)
+             ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+            params![library.to_string_lossy().as_ref()],
+        )
+        .unwrap();
+        app.manage(DbState {
+            conn: Mutex::new(conn),
+        });
+        (app, library)
+    }
+
+    fn insert_external_record(
+        app: &tauri::App<tauri::test::MockRuntime>,
+        id: &str,
+        path: &Path,
+        attachments: &[String],
+    ) {
+        let state = app.state::<DbState>();
+        let conn = state.conn.lock().unwrap();
+        conn.execute(
+            "INSERT INTO clipboard_records
+             (id, type, content, created_at, group_name, storage_mode, resource_path, resource_external, attachments)
+             VALUES (?1, 'file', ?2, '2026-09-18T00:00:00Z', '', 'resource', ?2, 1, ?3)",
+            params![
+                id,
+                path.to_string_lossy().as_ref(),
+                serde_json::to_string(attachments).unwrap()
+            ],
+        )
+        .unwrap();
+    }
+
+    fn record_count(app: &tauri::App<tauri::test::MockRuntime>, id: &str) -> i64 {
+        let state = app.state::<DbState>();
+        let conn = state.conn.lock().unwrap();
+        conn.query_row(
+            "SELECT COUNT(*) FROM clipboard_records WHERE id = ?1",
+            params![id],
+            |row| row.get(0),
+        )
+        .unwrap()
+    }
+
+    // 应用内删除资源记录：文件移入库根 .trash（原位消失）、trash_items
+    // 落一行、clipboard_records 无行；恢复后文件回原位、记录整行回插
+    // （分组/备注经 resource_path 与元数据保留）。
+    #[test]
+    fn deleting_resource_record_trashes_file_and_restore_brings_it_back() {
+        let (app, library) = trash_test_app();
+        let handle = app.handle().clone();
+        let group_dir = library.join("项目资料");
+        std::fs::create_dir_all(&group_dir).unwrap();
+        let file = group_dir.join("报价.pdf");
+        std::fs::write(&file, b"pdf").unwrap();
+        insert_external_record(&app, "r1", &file, &[]);
+
+        delete_clipboard_records_internal(&handle, &["r1".to_string()]).unwrap();
+
+        assert_eq!(record_count(&app, "r1"), 0);
+        assert!(!file.exists());
+        let items = list_trash_items_internal(&handle).unwrap();
+        assert_eq!(items.len(), 1);
+        assert_eq!(items[0]["file_name"], serde_json::json!("报价.pdf"));
+        assert_eq!(items[0]["original_group"], serde_json::json!("项目资料"));
+        let trash_id = items[0]["id"].as_str().unwrap().to_string();
+
+        restore_trash_item_internal(&handle, &trash_id).unwrap();
+
+        assert!(file.exists());
+        assert_eq!(std::fs::read(&file).unwrap(), b"pdf");
+        assert_eq!(record_count(&app, "r1"), 1);
+        assert!(list_trash_items_internal(&handle).unwrap().is_empty());
+    }
+
+    // 恢复同名冲突：原位已被同名文件占用时恢复为 "name (1).ext"，并同步
+    // 记录的 content / resource_path 指向新落位文件。
+    #[test]
+    fn restore_resolves_name_conflicts_with_numbered_suffix() {
+        let (app, library) = trash_test_app();
+        let handle = app.handle().clone();
+        let group_dir = library.join("组");
+        std::fs::create_dir_all(&group_dir).unwrap();
+        let file = group_dir.join("doc.txt");
+        std::fs::write(&file, b"old").unwrap();
+        insert_external_record(&app, "r1", &file, &[]);
+
+        delete_clipboard_records_internal(&handle, &["r1".to_string()]).unwrap();
+        std::fs::write(&file, b"occupied").unwrap();
+
+        let trash_id = list_trash_items_internal(&handle).unwrap()[0]["id"]
+            .as_str()
+            .unwrap()
+            .to_string();
+        restore_trash_item_internal(&handle, &trash_id).unwrap();
+
+        let restored = group_dir.join("doc (1).txt");
+        assert!(restored.exists());
+        assert_eq!(std::fs::read(&restored).unwrap(), b"old");
+        let state = app.state::<DbState>();
+        let conn = state.conn.lock().unwrap();
+        let stored_path: String = conn
+            .query_row(
+                "SELECT resource_path FROM clipboard_records WHERE id = 'r1'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(Path::new(&stored_path), restored.as_path());
+    }
+
+    // 彻底删除：回收目录与记录行清除，record_json 里的附件一并清理。
+    #[test]
+    fn purging_removes_trash_dir_and_orphan_attachments() {
+        let (app, library) = trash_test_app();
+        let handle = app.handle().clone();
+        let group_dir = library.join("组");
+        std::fs::create_dir_all(&group_dir).unwrap();
+        // 附件固定在库根 .copy-creator/attachments（与写入侧一致）。
+        let attachment_dir = library.join(".copy-creator").join("attachments").join("r1-abc");
+        std::fs::create_dir_all(&attachment_dir).unwrap();
+        let attachment = attachment_dir.join("image-1.png");
+        std::fs::write(&attachment, b"png").unwrap();
+        let file = group_dir.join("笔记.md");
+        std::fs::write(&file, b"md").unwrap();
+        insert_external_record(&app, "r1", &file, &[attachment.to_string_lossy().to_string()]);
+
+        delete_clipboard_records_internal(&handle, &["r1".to_string()]).unwrap();
+        let trash_id = list_trash_items_internal(&handle).unwrap()[0]["id"]
+            .as_str()
+            .unwrap()
+            .to_string();
+
+        purge_trash_internal(&handle, Some(&[trash_id])).unwrap();
+
+        assert!(!file.exists());
+        assert!(!attachment.exists());
+        assert!(list_trash_items_internal(&handle).unwrap().is_empty());
+        assert_eq!(record_count(&app, "r1"), 0);
+    }
+
+    // 过期清理：trashed_ms 超过保留期（默认 30 天）的条目随保留期任务
+    // 清除（prune_old_records 即回收站的清理执行点）。
+    #[test]
+    fn prune_purges_expired_trash_items() {
+        let (app, library) = trash_test_app();
+        let handle = app.handle().clone();
+        let group_dir = library.join("组");
+        std::fs::create_dir_all(&group_dir).unwrap();
+        let file = group_dir.join("旧文件.txt");
+        std::fs::write(&file, b"old").unwrap();
+        insert_external_record(&app, "r1", &file, &[]);
+        delete_clipboard_records_internal(&handle, &["r1".to_string()]).unwrap();
+        assert_eq!(list_trash_items_internal(&handle).unwrap().len(), 1);
+
+        {
+            let state = app.state::<DbState>();
+            let conn = state.conn.lock().unwrap();
+            conn.execute("UPDATE trash_items SET trashed_ms = 1000", [])
+                .unwrap();
+        }
+
+        prune_old_records(&handle).unwrap();
+
+        assert!(list_trash_items_internal(&handle).unwrap().is_empty());
+        assert!(!file.exists());
+    }
+
+    // 换库后恢复：删除后用户切换了资源库，.trash 留在旧库根——恢复按
+    // 多根查找定位回收目录（与 purge 同一口径），文件仍能移回原位。
+    // 回归锚点：恢复曾只在当前库根找 .trash，换库后文件滞留旧库无法取回。
+    #[test]
+    fn restore_locates_trash_dir_in_previous_library_root() {
+        let (app, library_a) = trash_test_app();
+        let handle = app.handle().clone();
+        let group_dir = library_a.join("组");
+        std::fs::create_dir_all(&group_dir).unwrap();
+        let file = group_dir.join("跨库.txt");
+        std::fs::write(&file, b"cross").unwrap();
+        insert_external_record(&app, "r1", &file, &[]);
+
+        delete_clipboard_records_internal(&handle, &["r1".to_string()]).unwrap();
+        assert!(!file.exists());
+
+        // 模拟 set_resource_library_path 的切换链路：当前根改写为新库，
+        // 旧库进历史（resource_library_history）。
+        let library_b = std::env::temp_dir().join(format!(
+            "copy-creator-trash-switch-{}",
+            uuid::Uuid::new_v4()
+        ));
+        std::fs::create_dir_all(&library_b).unwrap();
+        {
+            let state = app.state::<DbState>();
+            let conn = state.conn.lock().unwrap();
+            conn.execute(
+                "INSERT INTO settings (key, value) VALUES ('resource_library_path', ?1)
+                 ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+                params![library_b.to_string_lossy().as_ref()],
+            )
+            .unwrap();
+            conn.execute(
+                "INSERT INTO settings (key, value) VALUES ('resource_library_history', ?1)
+                 ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+                params![serde_json::to_string(&vec![library_a.to_string_lossy().to_string()])
+                    .unwrap()],
+            )
+            .unwrap();
+        }
+
+        let trash_id = list_trash_items_internal(&handle).unwrap()[0]["id"]
+            .as_str()
+            .unwrap()
+            .to_string();
+        restore_trash_item_internal(&handle, &trash_id).unwrap();
+
+        assert!(file.exists(), "恢复应从历史库根找到回收目录并移回文件");
+        assert_eq!(std::fs::read(&file).unwrap(), b"cross");
+        assert_eq!(record_count(&app, "r1"), 1);
+        assert!(list_trash_items_internal(&handle).unwrap().is_empty());
+        std::fs::remove_dir_all(&library_b).ok();
+    }
+    // 删除入回收站后监听结算不得把 .trash 内文件当「到达」重新入库。
+    // 回归锚点：is_ignored_resource_dir 曾只排除 .copy-creator/thumbs，
+    // 删除资源的瞬间 watcher 结算会把回收站内文件重新入库，「全部」列表
+    // 顶部出现指向回收站的幽灵重复卡片，持续到恢复、彻底删除或重启对账。
+    #[test]
+    fn settle_after_trash_does_not_rediscover_trashed_files() {
+        assert!(
+            crate::db::is_ignored_resource_dir(std::ffi::OsStr::new(".trash")),
+            ".trash 必须在应用自身目录忽略规则内"
+        );
+
+        let (app, library) = trash_test_app();
+        let handle = app.handle().clone();
+        let group_dir = library.join("组");
+        std::fs::create_dir_all(&group_dir).unwrap();
+        let file = group_dir.join("报告.pdf");
+        std::fs::write(&file, b"pdf").unwrap();
+        insert_external_record(&app, "r1", &file, &[]);
+
+        delete_clipboard_records_internal(&handle, &["r1".to_string()]).unwrap();
+
+        // 模拟 watcher 防抖结束后的结算：源路径已消失，.trash 内目标已到达。
+        let trash_root = library.join(".trash");
+        let mut inner = None;
+        for entry in std::fs::read_dir(&trash_root).unwrap().flatten() {
+            for sub in std::fs::read_dir(entry.path()).unwrap().flatten() {
+                inner = Some(sub.path());
+            }
+        }
+        let inner = inner.expect("trash 目录应有移入文件");
+        crate::db::settle_external_resource_changes(&handle, &[file.clone(), inner]);
+
+        let state = app.state::<DbState>();
+        let conn = state.conn.lock().unwrap();
+        let count: i64 = conn
+            .query_row("SELECT COUNT(*) FROM clipboard_records", [], |row| row.get(0))
+            .unwrap();
+        assert_eq!(count, 0, ".trash 内文件被监听结算重新入库为幽灵记录");
     }
 }
 
@@ -3199,6 +3967,53 @@ mod migrate_storage_tests {
 
         let _ = std::fs::remove_dir_all(base);
     }
+
+    /// 回收站条目随迁移保留（0.4.0 起 trash_items 入迁移清单）；源库是
+    /// 0.3.x 旧库（无该表）时跳过该表，迁移整体仍成功。回归锚点：曾因
+    /// 清单缺 trash_items 导致迁移后回收站被静默清空；补表后又因缺表
+    /// 跳过缺失，旧库迁移直接报"没有共同列"失败。
+    #[test]
+    fn migrates_trash_items_and_tolerates_missing_source_table() {
+        let base = std::env::temp_dir().join(format!(
+            "copy-creator-migrate-trash-{}",
+            uuid::Uuid::new_v4()
+        ));
+        let old_dir = base.join("old");
+        let new_dir = base.join("new");
+        std::fs::create_dir_all(&new_dir).unwrap();
+        let old_db = seed_old_library(&old_dir);
+        {
+            let conn = Connection::open(&old_db).unwrap();
+            conn.execute(
+                "INSERT INTO trash_items (id, record_json, trash_dir, trashed_at, trashed_ms)
+                 VALUES ('t1', '{}', '.trash/1-x', '2026-09-18T00:00:00Z', 1)",
+                [],
+            )
+            .unwrap();
+        }
+
+        let new_conn = migrate_storage_data(&old_db, &old_dir, &new_dir).unwrap();
+        let trash_count: i64 = new_conn
+            .query_row("SELECT COUNT(*) FROM trash_items", [], |row| row.get(0))
+            .unwrap();
+        assert_eq!(trash_count, 1, "回收站条目应随迁移保留");
+        drop(new_conn);
+
+        let old_dir2 = base.join("old2");
+        std::fs::create_dir_all(&old_dir2).unwrap();
+        let old_db2 = seed_old_library(&old_dir2);
+        {
+            let conn = Connection::open(&old_db2).unwrap();
+            conn.execute("DROP TABLE trash_items", []).unwrap();
+        }
+        let new_conn2 = migrate_storage_data(&old_db2, &old_dir2, &base.join("new2")).unwrap();
+        let record_count: i64 = new_conn2
+            .query_row("SELECT COUNT(*) FROM clipboard_records", [], |row| row.get(0))
+            .unwrap();
+        assert_eq!(record_count, 1, "缺表跳过后其余业务数据照常迁移");
+
+        let _ = std::fs::remove_dir_all(base);
+    }
 }
 
 #[cfg(test)]
@@ -3262,7 +4077,7 @@ mod created_ms_tests {
             .prepare(
                 "DELETE FROM clipboard_records
                  WHERE created_ms < ?1
-                   AND NOT (COALESCE(storage_mode, 'database') = 'resource')
+                   AND NOT (storage_mode = 'resource')
                  RETURNING id",
             )
             .unwrap();

@@ -115,11 +115,11 @@ describe("架构守卫：领域规则必须全局共享", () => {
     ).toEqual([]);
   });
 
-  it("规则 9：resource-groups-changed 在 src 内恰好两处监听", () => {
+  it("规则 9：resource-groups-changed 在 src 内恰好三处监听", () => {
     const listeners = allSources.filter((file) =>
       sourceOf(file).includes('listen("resource-groups-changed"'),
     );
-    expect(listeners.length, "新增列表应复用既有刷新监听（见 domain/README.md）").toBe(2);
+    expect(listeners.length, "新增列表应复用既有刷新监听（见 domain/README.md）").toBe(3);
   });
 
   it("规则 10：分组树折叠展平仅在 domain/groups.ts 定义", () => {
@@ -225,6 +225,137 @@ describe("架构守卫：领域规则必须全局共享", () => {
     expect(
       offenders,
       "预览 segments 与展开方向/宽度契约必须从 domain/preview 导入（见 domain/README.md）",
+    ).toEqual([]);
+  });
+
+  it("规则 16：记录类别过滤判定唯一来源——recordMatchesCategory 仅在 domain/records.ts", () => {
+    // 回归锚点：收藏（favorites）上线时主窗口内联过滤改了，store 与
+    // 径向菜单的两份内联副本漏改，径向菜单既无收藏入口也无收藏视图。
+    // 判定收进 domain 后，任何新增类别只允许改 domain 一处。
+    expect(
+      readSource("domain/records.ts"),
+      "recordMatchesCategory 必须定义在 domain/records.ts",
+    ).toContain("export function recordMatchesCategory");
+    const definitionFiles = allSources
+      .filter((file) => !toPosix(file).includes("domain/records.ts"))
+      .filter((file) => /function recordMatchesCategory|function matchesResourceGroup/.test(sourceOf(file)))
+      .map((file) => toPosix(file.replace(frontRoot, "")));
+    expect(
+      definitionFiles,
+      "类别/分组匹配判定不得在 domain 之外重写（见 domain/README.md）",
+    ).toEqual([]);
+    // 消费方必须经 domain 判定，不得内联「type === 类别」过滤副本。
+    for (const consumer of [
+      "pages/ClipboardPage/index.tsx",
+      "components/RadialMenu/index.tsx",
+      "stores/clipboardStore.ts",
+    ]) {
+      expect(
+        readSource(consumer),
+        `${consumer} 必须消费 domain 的 recordMatchesCategory`,
+      ).toContain("recordMatchesCategory");
+    }
+    const inlineFilters = allSources
+      .filter((file) => !toPosix(file).includes("domain/"))
+      .filter((file) => /\.(type|category)\s*===\s*(category|clipboardCategory)\b/.test(sourceOf(file)))
+      .map((file) => toPosix(file.replace(frontRoot, "")));
+    expect(
+      inlineFilters,
+      "禁止内联「type === 类别」过滤副本——一律走 domain/records 的 recordMatchesCategory",
+    ).toEqual([]);
+    // 类别 chips 键序唯一来源：两处类别行都从 RECORD_CATEGORY_KEYS 映射。
+    expect(readSource("pages/ClipboardPage/index.tsx"), "主窗口类别行应从 RECORD_CATEGORY_KEYS 映射").toContain("RECORD_CATEGORY_KEYS.map");
+    expect(readSource("components/RadialMenu/index.tsx"), "径向菜单类别行应从 RECORD_CATEGORY_KEYS 映射").toContain("RECORD_CATEGORY_KEYS.map");
+  });
+
+  it("规则 17：径向条目动作按钮共享基类——按钮机制样式禁止复制", () => {
+    // 回归锚点：收藏星标复制了预览按钮的 45 行机制样式却漏掉 svg 尺寸
+    // 规则，首次渲染即巨型图标；随后又与预览按钮尺寸不一致。动作区
+    // 按钮的盒子/显现/图标尺寸只允许在 .radial-menu-item-action 定义一次。
+    const css = readSource("styles/radial-menu.css");
+    expect(css, "共享基类 .radial-menu-item-action 必须存在").toContain(
+      ".radial-menu-item-action",
+    );
+    const mechanismCopies = css.match(/transform: scale\(0\.78\)/g) ?? [];
+    expect(
+      mechanismCopies.length,
+      "按钮显现机制（scale(0.78) 起点）只允许在共享基类定义一次",
+    ).toBe(1);
+    // 焦点环同属共享机制：随基类生效，不许某个按钮私有（曾漏掉导致
+    // 星标没有 focus-visible 描边框而预览按钮有）。
+    expect(
+      css,
+      "焦点环必须定义在共享基类上",
+    ).toMatch(/\.radial-menu-item-action:focus-visible\s*\{/);
+    expect(
+      css,
+      "焦点环不得再挂在单个按钮的修饰类上",
+    ).not.toMatch(/\.radial-menu-(preview-trigger|item-pin):focus-visible/);
+    // hover 底色同属共享机制：曾漏掉导致星标 hover 无底色反馈而预览
+    // 按钮有（主窗口剪切板卡片动作组同理，星标必须与删除/展开同组）。
+    expect(
+      css,
+      "径向动作按钮的 hover 底色必须定义在共享基类上",
+    ).toMatch(/\.radial-menu-item \.radial-menu-item-action:hover\s*\{[^}]*background:\s*var\(--chip-hover-bg\)/);
+    const clipboardStyles = readSource("styles/clipboard.css");
+    expect(
+      clipboardStyles.includes(".clipboard-card-actions > .card-pin-btn"),
+      "主窗口剪切板卡片动作组必须包含收藏星标（与删除/展开/拖拽柄同组共享 hover 底色）",
+    ).toBe(true);
+    expect(
+      clipboardStyles.match(/\.clipboard-card-actions > \.card-pin-btn/g)?.length,
+      "星标必须加入动作组的基础/hover 显现/底色/svg 尺寸全部分组",
+    ).toBeGreaterThanOrEqual(4);
+    const radialMenu = readSource("components/RadialMenu/index.tsx");
+    // 动作区唯一出口是 RadialItemAction 组件（基类挂载 + 冒泡拦截不可
+    // 遗漏）：动作区块内禁止裸 <button>，两个既有按钮必须经组件渲染。
+    const actionsStart = radialMenu.indexOf('className="radial-menu-item-actions"');
+    const actionsBlock = radialMenu.slice(
+      actionsStart,
+      radialMenu.indexOf("</div>", actionsStart),
+    );
+    expect(
+      actionsBlock,
+      "径向动作区必须存在",
+    ).not.toBe("");
+    expect(
+      actionsBlock.includes("<button"),
+      "径向动作区禁止裸写 <button>——一律经 RadialItemAction 渲染（基类挂载与冒泡拦截不可遗漏）",
+    ).toBe(false);
+    expect(
+      (actionsBlock.match(/<RadialItemAction/g) ?? []).length,
+      "动作区按钮必须经 RadialItemAction 渲染",
+    ).toBeGreaterThanOrEqual(2);
+    expect(
+      radialMenu.includes("radial-menu-item-action radial-menu-item-pin"),
+      "星标基类必须由组件出口统一挂载，调用点只传修饰类",
+    ).toBe(false);
+  });
+
+  it("规则 18：剪切板卡片动作区按钮必须被 clipboard.css 动作组覆盖", () => {
+    // 回归锚点：收藏星标上线时只写了 components.css 的基础样式（token
+    // 存在），未加入 clipboard.css 的卡片动作组——hover 无底色反馈而
+    // 相邻按钮有。「类名存在于某处」是 token 级核对；动作区按钮的交互
+    // 反馈必须整组覆盖，新增按钮时本守卫的清单自动跟随。
+    const cardSource = readSource("pages/ClipboardPage/ClipboardCard.tsx");
+    const actionButtons = [
+      ...new Set(
+        (cardSource.match(/className="card-[a-z-]+-btn"/g) ?? []).map((match) =>
+          match.slice('className="'.length, -1),
+        ),
+      ),
+    ].sort();
+    expect(
+      actionButtons,
+      "ClipboardCard 动作按钮清单（正则失效即守卫空转）",
+    ).toEqual(["card-delete-btn", "card-pin-btn", "card-toggle-text-btn"]);
+    const clipboardStyles = readSource("styles/clipboard.css");
+    const uncovered = actionButtons.filter(
+      (name) => !clipboardStyles.includes(`.clipboard-card-actions > .${name}`),
+    );
+    expect(
+      uncovered,
+      "动作区按钮必须加入 clipboard.css 动作组（基础/hover 显现/底色/svg 尺寸），不得只有孤立的 token 样式",
     ).toEqual([]);
   });
 });

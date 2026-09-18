@@ -17,7 +17,7 @@ import { useMultiSelect } from "../../hooks/useMultiSelect";
 import { useRefreshOnShow } from "../../hooks/useRefreshOnShow";
 import { useRecordLocale } from "../../hooks/useRecordLocale";
 import { buildRecordView, type RecordView } from "../../domain/recordView";
-import { isResourceRecord } from "../../domain/records";
+import { isResourceRecord, recordMatchesCategory, RECORD_CATEGORY_KEYS } from "../../domain/records";
 
 type ClipType = ClipboardFilter;
 
@@ -44,7 +44,7 @@ export default function ClipboardPage() {
     deleteRecord,
     pasteRecord,
     pasteRecordTerminal,
-    moveRecordsToTop,
+    setRecordsPinned,
   } = useClipboardStore(
     useShallow((s) => ({
       records: s.records,
@@ -61,7 +61,7 @@ export default function ClipboardPage() {
       deleteRecord: s.deleteRecord,
       pasteRecord: s.pasteRecord,
       pasteRecordTerminal: s.pasteRecordTerminal,
-      moveRecordsToTop: s.moveRecordsToTop,
+      setRecordsPinned: s.setRecordsPinned,
     })),
   );
   const pasteLeftClick = useSettingsStore((s) => s.pasteLeftClick);
@@ -92,13 +92,10 @@ export default function ClipboardPage() {
 
   useHorizontalWheelScroll(categoriesScrollRef);
 
-  const categories: { key: ClipType; label: string }[] = [
-    { key: "all", label: t("clipboard.all") },
-    { key: "text", label: t("clipboard.text") },
-    { key: "image", label: t("clipboard.image") },
-    { key: "link", label: t("clipboard.link") },
-    { key: "file", label: t("clipboard.file") },
-  ];
+  // 类别键序唯一来源在 domain（RECORD_CATEGORY_KEYS），与径向菜单同源。
+  const categories: { key: ClipType; label: string }[] = RECORD_CATEGORY_KEYS.map(
+    (key) => ({ key, label: t(`clipboard.${key}`) }),
+  );
 
   const labels: Record<string, string> = useMemo(
     () => ({
@@ -158,11 +155,11 @@ export default function ClipboardPage() {
     [loadRecords, records],
   );
 
-  const handleMoveToTop = useCallback(
-    (id: string) => {
-      void moveRecordsToTop([id]);
+  const handleSetPinned = useCallback(
+    (id: string, pinned: boolean) => {
+      void setRecordsPinned([id], pinned);
     },
-    [moveRecordsToTop],
+    [setRecordsPinned],
   );
 
   const openClipboardCreate = useCallback(async () => {
@@ -173,11 +170,11 @@ export default function ClipboardPage() {
     }
   }, []);
 
-  const filtered = useMemo(() => {
-    const clipboardRecords = records.filter((r) => !isResourceRecord(r));
-    if (category === "all") return clipboardRecords;
-    return clipboardRecords.filter((r) => r.type === category);
-  }, [records, category]);
+  // 类别过滤走 domain 唯一判定（含收藏语义），不再内联副本。
+  const filtered = useMemo(
+    () => records.filter((r) => recordMatchesCategory(r, category)),
+    [records, category],
+  );
   // 容器层组装视图模型（依赖 records 引用纪律，zustand 不可变更新保证稳定）。
   const recordLocale = useRecordLocale();
   const views = useMemo(
@@ -374,7 +371,8 @@ export default function ClipboardPage() {
           onCancel={cancelClipboardSelection}
           busy={selectingAll || deletingSelected}
           busyLabel={deletingSelected ? t("common.deleting") : t("common.loading")}
-          onMoveTop={() => void moveRecordsToTop([...selectedIds])}
+          onPin={() => void setRecordsPinned([...selectedIds], true)}
+          onUnpin={() => void setRecordsPinned([...selectedIds], false)}
         />
       )}
 
@@ -430,7 +428,7 @@ export default function ClipboardPage() {
               onPasteNormal={handlePaste}
               onPasteTerminal={handlePasteTerminal}
               onDelete={handleDelete}
-              onMoveToTop={handleMoveToTop}
+              onSetPinned={handleSetPinned}
               getRecordContent={getRecordContent}
               onToggleUserApiKey={handleToggleUserApiKey}
               selectionMode={isSelecting}

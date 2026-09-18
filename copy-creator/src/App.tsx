@@ -86,9 +86,9 @@ function App() {
     // zustand action 引用恒定，仅满足 exhaustive-deps，不会引发重跑。
   }, [loadSettings]);
 
-  const SIDEBAR_MIN = 60;
+  const SIDEBAR_MIN = 72;
   const SIDEBAR_MAX = 130;
-  const SIDEBAR_DEFAULT = 60;
+  const SIDEBAR_DEFAULT = 72;
   const COLLAPSE_THRESHOLD = 80;
   const [sidebarWidth, setSidebarWidth] = useState(SIDEBAR_DEFAULT);
   const [isCollapsed, setIsCollapsed] = useState(true);
@@ -161,6 +161,8 @@ function App() {
       const next = await invoke<boolean>("toggle_always_on_top");
       setIsPinned(next);
     } catch (e) {
+      // 失败写入后端日志文件：置顶只在真实交互中暴露问题（预览页无后端）。
+      invoke("debug_log", { message: `pin: toggle 失败 ${String(e).slice(0, 200)}` }).catch(() => {});
       console.error("Failed to toggle pin:", e);
     }
   };

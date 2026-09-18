@@ -7,6 +7,7 @@ import { getResourceFileName } from "../../domain/fileName";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { resolveDoubleEnterSave } from "../../utils/doubleEnterShortcut";
+import FindReplaceBar from "../../components/FindReplaceBar";
 import i18n from "../../i18n";
 import StashEditor, { type StashEditorHandle, type StashImage } from "./StashEditor";
 import { WindowResizeHandles } from "../WindowResizeHandles";
@@ -52,6 +53,13 @@ export default function ClipboardCreateDialog() {
   const [error, setError] = useState<string | null>(null);
   const editorRef = useRef<StashEditorHandle>(null);
   const lastEnterAtRef = useRef(0);
+  // ── 查找替换（Ctrl+F）──
+  const [findOpen, setFindOpen] = useState(false);
+  const [findQuery, setFindQuery] = useState("");
+  const [findReplacement, setFindReplacement] = useState("");
+  const [findCaseSensitive, setFindCaseSensitive] = useState(false);
+  const [findMatchCount, setFindMatchCount] = useState(0);
+  const [findIndex, setFindIndex] = useState(0);
   const cancelResizeSave = usePersistWindowSize("clipboard_create_width", "clipboard_create_height");
 
   const resetDraft = useCallback((nextContent = "", nextImages: StashImage[] = []) => {
@@ -304,6 +312,13 @@ export default function ClipboardCreateDialog() {
   }, [loadStashRecords, resourceGroupName, storageMode]);
 
   const handleKeyDown = useCallback((e: React.KeyboardEvent) => {
+    // Ctrl+F 开/关查找替换（编辑窗口即编辑态，始终可用）。
+    if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "f") {
+      e.preventDefault();
+      e.stopPropagation();
+      setFindOpen((open) => !open);
+      return;
+    }
     if (e.key === "Escape") {
       e.preventDefault();
       lastEnterAtRef.current = 0;
@@ -318,7 +333,7 @@ export default function ClipboardCreateDialog() {
       hideWindow();
       return;
     }
-    if ((e.ctrlKey || e.metaKey) && e.key === "Enter") {
+    if ((e.ctrlKey || e.metaKey) && (e.key === "Enter" || e.code === "Enter")) {
       e.preventDefault();
       lastEnterAtRef.current = 0;
       handleSave();
@@ -350,6 +365,44 @@ export default function ClipboardCreateDialog() {
       handleSave();
     }
   }, [content, dropdownOpen, groupMenuOpen, hideWindow, handleSave]);
+
+  // 匹配计数随内容/查询实时刷新。注意：这里绝不能调用 selectMatch——
+  // 内容变化（用户正在编辑器里打字）时把选区强制设回匹配处，会不断
+  // 拽走输入光标（曾实测打字时指针突然跳走）。选区只由显式导航触发。
+  useEffect(() => {
+    if (!findOpen) return;
+    const editor = editorRef.current;
+    if (!editor) return;
+    const count = editor.countMatches(findQuery, findCaseSensitive);
+    setFindMatchCount(count);
+    const clamped = count === 0 ? 0 : Math.min(findIndex, count - 1);
+    setFindIndex(clamped);
+  }, [findOpen, findQuery, findCaseSensitive, content, findIndex]);
+
+  const handleFindNext = useCallback(() => {
+    if (findMatchCount === 0) return;
+    const next = (findIndex + 1) % findMatchCount;
+    setFindIndex(next);
+    editorRef.current?.selectMatch(findQuery, next, findCaseSensitive);
+  }, [findIndex, findMatchCount, findQuery, findCaseSensitive]);
+
+  const handleFindPrev = useCallback(() => {
+    if (findMatchCount === 0) return;
+    const prev = (findIndex - 1 + findMatchCount) % findMatchCount;
+    setFindIndex(prev);
+    editorRef.current?.selectMatch(findQuery, prev, findCaseSensitive);
+  }, [findIndex, findMatchCount, findQuery, findCaseSensitive]);
+
+  const handleFindReplaceCurrent = useCallback(() => {
+    if (findMatchCount === 0) return;
+    editorRef.current?.replaceMatch(findQuery, findReplacement, findIndex, findCaseSensitive);
+    // 内容经 onChange 回流，计数与选中由上方 effect 自动收敛。
+  }, [findIndex, findMatchCount, findQuery, findReplacement, findCaseSensitive]);
+
+  const handleFindReplaceAll = useCallback(() => {
+    if (findMatchCount === 0) return;
+    editorRef.current?.replaceAllMatches(findQuery, findReplacement, findCaseSensitive);
+  }, [findMatchCount, findQuery, findReplacement, findCaseSensitive]);
 
   const selectedStashRecord = stashRecords.find((record) => record.id === editingId);
   const isResource = storageMode === "resource";
@@ -392,6 +445,23 @@ export default function ClipboardCreateDialog() {
         </div>
       )}
       <div onFocus={() => { setDropdownOpen(false); setGroupMenuOpen(false); }} className="clipboard-create-editor-wrap">
+        {findOpen && (
+          <FindReplaceBar
+            query={findQuery}
+            replacement={findReplacement}
+            caseSensitive={findCaseSensitive}
+            matchCount={findMatchCount}
+            matchIndex={findIndex}
+            onQueryChange={setFindQuery}
+            onReplacementChange={setFindReplacement}
+            onCaseSensitiveChange={setFindCaseSensitive}
+            onNext={handleFindNext}
+            onPrev={handleFindPrev}
+            onReplaceCurrent={handleFindReplaceCurrent}
+            onReplaceAll={handleFindReplaceAll}
+            onClose={() => setFindOpen(false)}
+          />
+        )}
         <StashEditor
           key={editorVersion}
           ref={editorRef}

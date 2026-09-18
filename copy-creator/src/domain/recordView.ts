@@ -37,6 +37,7 @@ export interface RecordView {
   lastUsedAt: string | null; // 最近使用时间（相对使用时间标签）
   resourceGroup: string | null; // 资源所属分组（「全部」视图来源标签）
   groupName: string; // 分组名（API Key 标签等场景）
+  pinned: boolean; // 收藏标记（卡片星标角标与「收藏」筛选；防保留期清理）
   // —— 判定字段（domain 规则结果，叶子只读不猜）——
   kind: ResourceMediaKind; // 统一内容类型（text/image/video/audio/file；link 折叠为 text）
   fileMediaKind: "video" | "audio" | "image" | null; // file 记录的媒体细分
@@ -97,6 +98,7 @@ export function buildRecordView(
     lastUsedAt: record.last_used_at ?? null,
     resourceGroup: record.resource_group ?? null,
     groupName: record.group_name ?? "",
+    pinned: Boolean(record.pinned),
 
     kind,
     fileMediaKind,

@@ -570,7 +570,12 @@ html {
   gap: 2px;
 }
 
-.radial-menu-preview-trigger {
+/* ── 条目动作按钮共享基类 ─────────────────────────────
+ * 同一动作区内的按钮（预览展开、收藏星标……）共用一套盒子尺寸、
+ * hover 显现机制与图标尺寸；专有差异（底色/焦点环/实心态）只允许
+ * 写成修饰类。禁止再复制一份按钮机制样式——曾因复制预览按钮块
+ * 漏掉 svg 尺寸规则，收藏星标首次渲染即巨型图标（守卫规则 17）。 */
+.radial-menu-item-action {
   position: relative !important;
   flex: 0 0 28px;
   z-index: 2;
@@ -593,43 +598,58 @@ html {
     color 120ms ease-out;
 }
 
-.radial-menu-item:hover .radial-menu-preview-trigger,
-.radial-menu-item:focus-within .radial-menu-preview-trigger {
-  opacity: 0.5;
+.radial-menu-item:hover .radial-menu-item-action,
+.radial-menu-item:focus-within .radial-menu-item-action {
+  opacity: 0.55;
   transform: scale(1);
   pointer-events: auto;
 }
 
-.radial-menu-item .radial-menu-preview-trigger:hover {
+.radial-menu-item .radial-menu-item-action:hover {
   opacity: 1;
   background: var(--chip-hover-bg) !important;
   color: var(--text-primary) !important;
 }
 
-.radial-menu-preview-trigger:focus-visible {
+.radial-menu-item-action svg {
+  width: 16px;
+  height: 16px;
+}
+
+/* 焦点环是所有动作按钮共有的交互反馈，随基类生效 */
+.radial-menu-item-action:focus-visible {
   outline: 2px solid var(--accent);
   outline-offset: 1px;
 }
 
-.radial-menu-preview-trigger svg {
-  width: 15px;
-  height: 15px;
+@media (prefers-reduced-motion: reduce) {
+  .radial-menu-item-action {
+    transition: none;
+  }
 }
 
+/* 预览按钮专有：暗色下的默认色微调（hover 底色已随基类走
+ * --chip-hover-bg，主题自适应，无需再手写暗色覆盖） */
 [data-theme="dark"] .radial-menu-preview-trigger {
   background: transparent !important;
   color: rgba(255, 255, 255, 0.72) !important;
 }
 
-[data-theme="dark"] .radial-menu-preview-trigger:hover {
-  background: rgba(255, 255, 255, 0.16) !important;
-  color: #fff !important;
+/* 收藏星标专有：已收藏常显实心星（主题前景色）；星形在 24 视图框内
+ * 自带留白且细描边显小，单独加粗描边。 */
+.radial-menu-item .radial-menu-item-action.radial-menu-item-pin.pinned {
+  opacity: 1;
+  transform: scale(1);
+  pointer-events: auto;
+  color: var(--text-primary) !important;
 }
 
-@media (prefers-reduced-motion: reduce) {
-  .radial-menu-preview-trigger {
-    transition: none;
-  }
+.radial-menu-item .radial-menu-item-action.radial-menu-item-pin.pinned svg {
+  fill: currentColor;
+}
+
+.radial-menu-item-action.radial-menu-item-pin svg {
+  stroke-width: 2.4;
 }
 
 /* --- Item Time & Remark --- */

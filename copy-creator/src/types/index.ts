@@ -39,6 +39,8 @@ export interface ClipboardRecord {
   use_count?: number;
   /** 最近使用时间：使用时间标签与排序展示（资源/剪切板共用）。 */
   last_used_at?: string;
+  /** 收藏标记：不受保留期清理，列表恒定浮顶（仅剪切板页暴露入口）。 */
+  pinned?: boolean;
 }
 
 export interface PhraseGroup {

@@ -37,6 +37,7 @@ import {
   type RadialPreviewSegment,
 } from "../../domain/preview";
 import { buildRecordView } from "../../domain/recordView";
+import RadialItemAction from "./RadialItemAction";
 import { isResourceRecord } from "../../domain/records";
 import { formatTime, formatRelativeTime } from "../../utils/formatTime";
 import { fileNameFromPath } from "../../domain/fileName";
@@ -47,7 +48,9 @@ import { fileMediaKindFromPath, getResourceExtension, inferResourceMediaKind, TE
 import {
   getResourcePath,
   isFileBackedTextResource,
+  recordMatchesCategory,
   recordUsageTime,
+  RECORD_CATEGORY_KEYS,
   resourceGroupLeafLabel,
   resourceMediaVersion,
 } from "../../domain/records";
@@ -141,6 +144,8 @@ interface RadialItem {
   usedAtLabel?: string;
   /** 使用次数：「最多使用」模式下条目尾部展示「N 次」。 */
   useCount?: number;
+  /** 收藏标记（仅剪切板记录）：常显实心星，hover 出现的星标可切换。 */
+  pinned?: boolean;
 }
 
 interface PreviewLayout {
@@ -874,6 +879,12 @@ export default function RadialMenu() {
     void invoke("hide_radial_menu");
   }, [resetState]);
 
+  // 收藏/取消收藏（与主窗口共用 store action）：本地即时打标 + 落库后重载，
+  // pinned DESC 浮顶由共享查询自然生效。
+  const toggleRecordPinned = useCallback((id: string, pinned: boolean) => {
+    void useClipboardStore.getState().setRecordsPinned([id], !pinned);
+  }, []);
+
   const markRadialDragStarted = useCallback((pending: PendingNativeDrag) => {
     if (pending.nativeStarted) return;
     dragActiveRef.current = true;
@@ -1121,9 +1132,12 @@ export default function RadialMenu() {
 
   const handleDocumentPointerDown = useCallback((e: PointerEvent) => {
     if (e.button !== 0 || !e.isPrimary) return;
+    // 动作按钮是点击热区（28px），按下不应武装 6px 阈值的条目拖拽——
+    // 预览触发器与收藏星标都豁免。
     if (
       e.target instanceof Element
-      && e.target.closest("[data-radial-preview-trigger]")
+      && (e.target.closest("[data-radial-preview-trigger]")
+        || e.target.closest("[data-radial-item-pin]"))
     ) return;
     // 清掉上一次原生拖动为防止幽灵 click 留下的抑制标记。
     suppressClickRef.current = false;
@@ -1362,13 +1376,13 @@ export default function RadialMenu() {
   const recordLocale = useRecordLocale();
 
   // hover 每次移动都会触发整树重渲：过滤与条目映射（最多 2000 条、含
-  // 日期解析）必须 memo，不能落在渲染体裸代码里。
-  const filteredRecords = useMemo(() => clipboardCategory === "all"
-    ? records.filter((r) => !isResourceRecord(r))
-    : clipboardCategory === "resources"
-      ? records.filter((r) => isResourceRecord(r))
-    : records.filter((r) => !isResourceRecord(r) && r.type === clipboardCategory),
-  [records, clipboardCategory]);
+  // 日期解析）必须 memo，不能落在渲染体裸代码里。类别过滤走 domain 唯一
+  // 判定（含收藏语义）——曾因本处内联副本漏掉 favorites，收藏上线时
+  // 径向菜单成了「A 界面有、B 界面没有」的盲区。
+  const filteredRecords = useMemo(
+    () => records.filter((r) => recordMatchesCategory(r, clipboardCategory)),
+    [records, clipboardCategory],
+  );
 
   // 三类来源统一映射为 RadialItem，「最近使用」复用同一套渲染、预览与拖出机制。
   // 辅助映射函数只服务于 items，整体收进 useMemo 体内：hover 驱动的重渲
@@ -1426,6 +1440,7 @@ export default function RadialMenu() {
         dragSource: "clipboard",
         dragPath: r.drag_path,
         useCount: r.use_count,
+        pinned: Boolean(r.pinned),
       };
     };
 
@@ -1518,13 +1533,7 @@ export default function RadialMenu() {
   });
 
   const categories = activeTab === "clipboard"
-    ? [
-        { key: "all", label: t("clipboard.all") },
-        { key: "text", label: t("clipboard.text") },
-        { key: "image", label: t("clipboard.image") },
-        { key: "link", label: t("clipboard.link") },
-        { key: "file", label: t("clipboard.file") },
-      ]
+    ? RECORD_CATEGORY_KEYS.map((key) => ({ key, label: t(`clipboard.${key}`) }))
     : activeTab === "phrases"
       ? [
           { key: ALL_PHRASES_GROUP_ID, label: t("clipboard.all") },
@@ -1845,7 +1854,7 @@ export default function RadialMenu() {
                   </div>
                   {(item.isResource
                     ? (item.resourceTitle || item.createdAt || item.usedAtLabel || item.useCount != null || item.previewAvailable)
-                    : (item.createdAt || item.usedAtLabel || item.useCount != null || item.title || item.previewAvailable)) && (
+                    : (item.createdAt || item.usedAtLabel || item.useCount != null || item.title || item.previewAvailable || item.pinned !== undefined)) && (
                     <div className="radial-menu-item-footer">
                       <div className="radial-menu-item-meta">
                         {item.isResource && item.resourceTitle && (
@@ -1872,12 +1881,23 @@ export default function RadialMenu() {
                           </span>
                         )}
                       </div>
-                      {item.previewAvailable && (
+                      {(item.previewAvailable || (!item.isResource && item.pinned !== undefined)) && (
                         <div className="radial-menu-item-actions">
-                          <button
+                          {!item.isResource && item.pinned !== undefined && (
+                            <RadialItemAction
+                              className={`radial-menu-item-pin${item.pinned ? " pinned" : ""}`}
+                              data-radial-item-pin
+                              aria-pressed={item.pinned}
+                              aria-label={t(item.pinned ? "common.unfavorite" : "common.favorite")}
+                              title={t(item.pinned ? "common.unfavorite" : "common.favorite")}
+                              onClick={() => toggleRecordPinned(item.id, Boolean(item.pinned))}
+                            >
+                              {Icons.star}
+                            </RadialItemAction>
+                          )}
+                          <RadialItemAction
                             className="radial-menu-preview-trigger"
                             data-radial-preview-trigger
-                            type="button"
                             aria-expanded={preview?.itemId === item.id}
                             aria-label={t(
                               preview?.itemId === item.id
@@ -1889,15 +1909,13 @@ export default function RadialMenu() {
                                 ? "radialMenu.closePreview"
                                 : "radialMenu.openPreview",
                             )}
-                            onClick={(e) => {
-                              e.preventDefault();
-                              e.stopPropagation();
+                            onClick={() => {
                               suppressClickRef.current = false;
                               togglePreview(item);
                             }}
                           >
                             {preview?.itemId === item.id ? Icons.collapse : Icons.expand}
-                          </button>
+                          </RadialItemAction>
                         </div>
                       )}
                     </div>

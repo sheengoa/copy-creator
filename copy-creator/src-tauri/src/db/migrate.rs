@@ -68,13 +68,16 @@ pub(crate) fn migrate_storage(app: &AppHandle, new_path: &str) -> Result<(), Str
 
 /// 迁移涉及的业务表（settings 由命令层单独复制：storage_path/shortcut_key
 /// 有特殊处理）。表名为内部常量，不来自用户输入。
-pub(crate) const MIGRATED_BUSINESS_TABLES: [&str; 6] = [
+pub(crate) const MIGRATED_BUSINESS_TABLES: [&str; 7] = [
     "clipboard_records",
     "phrase_groups",
     "phrases",
     "translation_history",
     "api_key_labels",
     "toast_shown",
+    // 回收站条目（0.4.0 起）：trash_dir 是相对库根的路径，存储迁移不改
+    // 库根，搬表即可保持可恢复。
+    "trash_items",
 ];
 
 /// 存储迁移的数据搬运核心：在 new_dir 建新库（PRAGMA + ensure_schema 与
@@ -116,6 +119,22 @@ pub(crate) fn migrate_storage_data(
         )
         .map_err(|e| format!("attach old db: {}", e))?;
     for table in MIGRATED_BUSINESS_TABLES {
+        // 0.4.0 起新增的表在旧库可能不存在：PRAGMA table_info 对缺表返回
+        // 空列集，会被共同列交集判成"没有共同列"而报错，整个迁移失败。
+        // 源库缺表时跳过复制与校验，新库保留 ensure_schema 建出的空表。
+        let source_has_table: bool = new_conn
+            .query_row(
+                "SELECT COUNT(*) FROM migrate_src.sqlite_master
+                 WHERE type = 'table' AND name = ?1",
+                params![table],
+                |row| row.get::<_, i64>(0),
+            )
+            .map(|count| count > 0)
+            .unwrap_or(false);
+        if !source_has_table {
+            log::info!("migrate_storage: 源库无 {table} 表，跳过");
+            continue;
+        }
         let copied = copy_table_across_databases(&new_conn, table)?;
         let old_count: i64 = new_conn
             .query_row(

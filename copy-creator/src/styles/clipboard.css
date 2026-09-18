@@ -388,7 +388,8 @@
 
 .clipboard-card-actions > .card-toggle-text-btn,
 .clipboard-card-actions > .drag-handle,
-.clipboard-card-actions > .card-delete-btn {
+.clipboard-card-actions > .card-delete-btn,
+.clipboard-card-actions > .card-pin-btn {
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -414,15 +415,18 @@
 .clipboard-card:hover .clipboard-card-actions > .card-toggle-text-btn,
 .clipboard-card:hover .clipboard-card-actions > .drag-handle,
 .clipboard-card:hover .clipboard-card-actions > .card-delete-btn,
+.clipboard-card:hover .clipboard-card-actions > .card-pin-btn,
 .clipboard-card:focus-within .clipboard-card-actions > .card-toggle-text-btn,
 .clipboard-card:focus-within .clipboard-card-actions > .drag-handle,
-.clipboard-card:focus-within .clipboard-card-actions > .card-delete-btn {
+.clipboard-card:focus-within .clipboard-card-actions > .card-delete-btn,
+.clipboard-card:focus-within .clipboard-card-actions > .card-pin-btn {
   opacity: 0.5;
 }
 
 .clipboard-card-actions > .card-toggle-text-btn:hover,
 .clipboard-card-actions > .drag-handle:hover,
-.clipboard-card-actions > .card-delete-btn:hover {
+.clipboard-card-actions > .card-delete-btn:hover,
+.clipboard-card-actions > .card-pin-btn:hover {
   opacity: 1;
   background: var(--chip-hover-bg) !important;
   color: var(--text-primary);
@@ -434,7 +438,8 @@
 
 .clipboard-card-actions > .card-toggle-text-btn svg,
 .clipboard-card-actions > .drag-handle svg,
-.clipboard-card-actions > .card-delete-btn svg {
+.clipboard-card-actions > .card-delete-btn svg,
+.clipboard-card-actions > .card-pin-btn svg {
   width: 15px;
   height: 15px;
 }
