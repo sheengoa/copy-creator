@@ -617,6 +617,11 @@ html {
   fill: currentColor;
 }
 
+.radial-menu-item-pin svg {
+  width: 15px;
+  height: 15px;
+}
+
 .radial-menu-preview-trigger {
   position: relative !important;
   flex: 0 0 28px;
