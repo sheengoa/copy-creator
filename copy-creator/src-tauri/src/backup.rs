@@ -1,7 +1,9 @@
-// 数据备份：整库导出为 zip（data.db 快照 + 存储附件 + 可选资源库），
-// 导入解压到暂存目录并逐表校验，通过后写 storage_path 由重启链式切换。
-// 校验强度对齐 db/migrate.rs（逐表行数一致才切换）；缩略图与视频海报等
-// 再生缓存按"整树 − 缓存黑名单"排除（缺失时自动再生，见 db/media.rs）。
+// 数据备份：整库导出为 zip（data.db 快照 + 存储附件 + 可选资源库）。
+// 导入分两步解压：data.db 与存储附件先落暂存目录并完成逐表行数、外键
+// 校验，全部通过后资源库条目才就地落位（临时文件 + 原子改名）——校验
+// 失败不触碰现有库；通过后写 storage_path 由重启链式切换。校验强度对齐
+// db/migrate.rs（逐表行数一致才切换）；缩略图与视频海报等再生缓存按
+// "整树 − 缓存黑名单"排除（缺失时自动再生，见 db/media.rs）。
 use crate::db::{
     get_resource_library_dir, get_storage_dir, paths_overlap, DbState, MIGRATED_BUSINESS_TABLES,
 };
@@ -256,9 +258,12 @@ fn open_connection(path: &Path) -> Result<rusqlite::Connection, String> {
     Ok(conn)
 }
 
-/// 解压到应用数据目录下的暂存目录：附件与库文件落位、逐表行数校验、
-/// 外键检查，全部通过后才改写 storage_path（新库与当前库双写，重启后
-/// db_path 链式跟随）。任一步失败不碰现有数据，暂存目录即刻清理。
+/// 导入备份：data.db 与存储附件先解压到应用数据目录下的暂存目录并完成
+/// 逐表行数、外键校验，全部通过后资源库条目才就地落位到恢复位置（先
+/// 临时文件再原子改名），最后写 storage_path（新库与当前库双写，重启后
+/// db_path 链式跟随）。任一步失败不碰现有数据——暂存目录即刻清理，库
+/// 落位发生在全部校验之后，只有落位中途的 I/O 故障才可能留下部分已
+/// 恢复的库文件。
 pub fn import_backup_internal<R: Runtime>(
     app: &AppHandle<R>,
     zip_path: &Path,
@@ -283,7 +288,13 @@ pub fn import_backup_internal<R: Runtime>(
         .path()
         .app_data_dir()
         .map_err(|e| format!("定位应用数据目录失败: {e}"))?;
-    let restore_dir = data_dir.join(format!("restore-{}", chrono::Utc::now().timestamp_millis()));
+    // 暂存目录名带 uuid：毫秒时间戳在并行测试（共享 mock app_data_dir）
+    // 与程序化连续导入下可能撞名，互相覆盖/清理对方的暂存库。
+    let restore_dir = data_dir.join(format!(
+        "restore-{}-{}",
+        chrono::Utc::now().timestamp_millis(),
+        uuid::Uuid::new_v4().simple()
+    ));
     // 库恢复位置在落盘前校验：与当前存储目录或本轮流暂存目录（重启后
     // 即新存储目录）互相嵌套会让后续导出双份打包、watcher 与全量对账
     // 互相纠缠——与 set_resource_library_path 的重叠约束同一口径。
@@ -300,52 +311,25 @@ pub fn import_backup_internal<R: Runtime>(
         let file = File::open(zip_path).map_err(|e| format!("打开备份文件失败: {e}"))?;
         let mut archive = ZipArchive::new(BufReader::new(file))
             .map_err(|e| format!("读取压缩包失败: {e}"))?;
-        let mut processed = 0usize;
-        for index in 0..archive.len() {
-            if cancel.load(Ordering::Relaxed) {
-                return Err("cancelled".to_string());
-            }
-            let mut entry =
-                archive.by_index(index).map_err(|e| format!("读取条目失败: {e}"))?;
-            if entry.is_dir() {
-                continue;
-            }
-            let name = entry.name().to_string();
-            if name.ends_with('/') {
-                continue;
-            }
-            if is_unsafe_entry_name(&name) {
-                return Err(format!("备份内包含非法路径条目：{name}"));
-            }
-            if name == MANIFEST_NAME {
-                continue;
-            }
-            let dest = if name == DB_NAME {
-                target_restore_path(&restore_dir, DB_NAME)
-            } else if let Some(rest) = name.strip_prefix(LIBRARY_PREFIX) {
-                let Some(library_dir) = &library_dir else {
-                    continue;
-                };
-                library_dir.join(rest)
-            } else {
-                target_restore_path(&restore_dir, &name)
-            };
-            if let Some(parent) = dest.parent() {
-                std::fs::create_dir_all(parent).map_err(|e| format!("创建目录失败: {e}"))?;
-            }
-            let mut out = File::create(&dest).map_err(|e| format!("写入 {name} 失败: {e}"))?;
-            std::io::copy(&mut entry, &mut out).map_err(|e| format!("写入 {name} 失败: {e}"))?;
-            processed += 1;
-            if processed % 500 == 0 {
-                push_progress(app, "import", processed);
-            }
+        // 第一步：data.db 与存储附件落暂存目录，随后立即校验。库文件是
+        // 就地覆盖式恢复，绝不能在校验之前落位——否则行数/外键校验失败
+        // 时，用户的现有库已被部分覆盖且无法回滚。
+        extract_main_entries(app, &mut archive, &restore_dir, cancel)?;
+        validate_staged_db(&restore_dir.join(DB_NAME), &manifest)?;
+        // 第二步：全部校验通过后，库条目才解压到恢复位置。
+        if let Some(dir) = &library_dir {
+            extract_library_entries(app, &mut archive, dir, cancel)?;
         }
         Ok(())
     })();
 
-    let staged_db = restore_dir.join(DB_NAME);
     let apply_result = extract_result.and_then(|()| {
-        apply_staged_import(app, &staged_db, &restore_dir, library_dir.as_deref(), &manifest)
+        finalize_staged_import(
+            app,
+            &restore_dir.join(DB_NAME),
+            &restore_dir,
+            library_dir.as_deref(),
+        )
     });
 
     if let Err(error) = apply_result {
@@ -360,8 +344,98 @@ pub fn import_backup_internal<R: Runtime>(
     }))
 }
 
-fn target_restore_path(restore_dir: &Path, name: &str) -> PathBuf {
-    restore_dir.join(name)
+/// 写单个 zip 条目到目标路径（父目录自动创建）。
+fn write_zip_entry(
+    entry: &mut impl std::io::Read,
+    dest: &Path,
+    name: &str,
+) -> Result<(), String> {
+    if let Some(parent) = dest.parent() {
+        std::fs::create_dir_all(parent).map_err(|e| format!("创建目录失败: {e}"))?;
+    }
+    let mut out = File::create(dest).map_err(|e| format!("写入 {name} 失败: {e}"))?;
+    std::io::copy(entry, &mut out).map_err(|e| format!("写入 {name} 失败: {e}"))?;
+    Ok(())
+}
+
+/// 第一步解压：data.db 与存储附件落暂存目录；资源库条目留给
+/// extract_library_entries 在校验通过后处理。
+fn extract_main_entries<R: Runtime>(
+    app: &AppHandle<R>,
+    archive: &mut ZipArchive<BufReader<File>>,
+    restore_dir: &Path,
+    cancel: &AtomicBool,
+) -> Result<(), String> {
+    let mut processed = 0usize;
+    for index in 0..archive.len() {
+        if cancel.load(Ordering::Relaxed) {
+            return Err("cancelled".to_string());
+        }
+        let mut entry =
+            archive.by_index(index).map_err(|e| format!("读取条目失败: {e}"))?;
+        if entry.is_dir() || entry.name().ends_with('/') {
+            continue;
+        }
+        let name = entry.name().to_string();
+        if is_unsafe_entry_name(&name) {
+            return Err(format!("备份内包含非法路径条目：{name}"));
+        }
+        if name == MANIFEST_NAME || name.starts_with(LIBRARY_PREFIX) {
+            continue;
+        }
+        write_zip_entry(&mut entry, &restore_dir.join(&name), &name)?;
+        processed += 1;
+        if processed % 500 == 0 {
+            push_progress(app, "import", processed);
+        }
+    }
+    Ok(())
+}
+
+/// 第二步解压：资源库条目就地落位。逐文件先写 `.copy-creator-importing-`
+/// 隐藏临时文件再原子改名——临时文件命中扫描忽略规则，写一半的文件不会
+/// 短暂出现在资源列表；临时文件与目标同目录，rename 不跨文件系统。
+fn extract_library_entries<R: Runtime>(
+    app: &AppHandle<R>,
+    archive: &mut ZipArchive<BufReader<File>>,
+    library_dir: &Path,
+    cancel: &AtomicBool,
+) -> Result<(), String> {
+    let mut processed = 0usize;
+    for index in 0..archive.len() {
+        if cancel.load(Ordering::Relaxed) {
+            return Err("cancelled".to_string());
+        }
+        let mut entry =
+            archive.by_index(index).map_err(|e| format!("读取条目失败: {e}"))?;
+        if entry.is_dir() || entry.name().ends_with('/') {
+            continue;
+        }
+        let name = entry.name().to_string();
+        let Some(rest) = name.strip_prefix(LIBRARY_PREFIX) else {
+            continue;
+        };
+        if is_unsafe_entry_name(&name) || rest.is_empty() {
+            return Err(format!("备份内包含非法路径条目：{name}"));
+        }
+        let dest = library_dir.join(rest);
+        let Some(file_name) = dest.file_name().and_then(|n| n.to_str()) else {
+            return Err(format!("备份内包含非法路径条目：{name}"));
+        };
+        let tmp = dest.with_file_name(format!(".copy-creator-importing-{file_name}"));
+        let placed = write_zip_entry(&mut entry, &tmp, &name).and_then(|()| {
+            std::fs::rename(&tmp, &dest).map_err(|e| format!("落位 {name} 失败: {e}"))
+        });
+        if let Err(error) = placed {
+            let _ = std::fs::remove_file(&tmp);
+            return Err(error);
+        }
+        processed += 1;
+        if processed % 500 == 0 {
+            push_progress(app, "import", processed);
+        }
+    }
+    Ok(())
 }
 
 /// 库恢复位置不得与存储目录（当前的或导入切换后的暂存目录）互相嵌套。
@@ -376,14 +450,10 @@ fn reject_overlapping_library_target(
     Ok(())
 }
 
-/// 校验暂存库（行数 + 外键），通过后写两处 storage_path。
-fn apply_staged_import<R: Runtime>(
-    app: &AppHandle<R>,
-    staged_db: &Path,
-    restore_dir: &Path,
-    library_dir: Option<&Path>,
-    manifest: &BackupManifest,
-) -> Result<(), String> {
+/// 校验暂存库：外键检查 + 逐表行数对照 manifest。备份若带有当前版本
+/// 不认识的表，说明出自更新的应用版本（format_version 相同也可能加表），
+/// 明确报版本过新，不落入误导性的「行数不符」。
+fn validate_staged_db(staged_db: &Path, manifest: &BackupManifest) -> Result<(), String> {
     if !staged_db.exists() {
         return Err("备份内没有 data.db，不是有效的 Copy Creator 备份".to_string());
     }
@@ -395,6 +465,13 @@ fn apply_staged_import<R: Runtime>(
     if has_violation {
         return Err("备份库外键校验未通过".to_string());
     }
+    for table in manifest.table_counts.keys() {
+        if !MIGRATED_BUSINESS_TABLES.contains(&table.as_str()) {
+            return Err(format!(
+                "备份包含当前版本不支持的表（{table}），可能来自更新版本的应用，请先升级应用"
+            ));
+        }
+    }
     let actual = count_tables(&staged)?;
     for (table, expected) in &manifest.table_counts {
         let found = actual.get(table).copied().unwrap_or(0);
@@ -404,12 +481,28 @@ fn apply_staged_import<R: Runtime>(
             ));
         }
     }
-    // 新库的 storage_path 指回暂存目录自身（导出机器上的旧路径已失效）；
-    // 资源库恢复位置一并写入。快捷键设置原样保留，重启自动重新注册。
+    Ok(())
+}
+
+/// 校验通过后的收尾：写暂存库与本机当前库的 storage_path（重启后
+/// db_path 链式跟随）与资源库位置。快捷键设置原样保留，重启自动重新注册。
+fn finalize_staged_import<R: Runtime>(
+    app: &AppHandle<R>,
+    staged_db: &Path,
+    restore_dir: &Path,
+    library_dir: Option<&Path>,
+) -> Result<(), String> {
+    let staged = open_connection(staged_db)?;
+    // 恢复了库就用恢复位置；没恢复库则保留导入方当前的库位置（未自定义
+    // 时写空值回落默认目录）——绝不沿用备份创建机器上的路径，否则重启
+    // 后会对陌生路径自动建空目录，本机资源库看起来「凭空清空」。
+    let resource_library_path = match library_dir {
+        Some(dir) => dir.to_string_lossy().to_string(),
+        None => crate::db::get_setting_sync(app, "resource_library_path").unwrap_or_default(),
+    };
+    // 新库的 storage_path 指回暂存目录自身（导出机器上的旧路径已失效）。
     upsert_setting(&staged, "storage_path", &restore_dir.to_string_lossy())?;
-    if let Some(dir) = library_dir {
-        upsert_setting(&staged, "resource_library_path", &dir.to_string_lossy())?;
-    }
+    upsert_setting(&staged, "resource_library_path", &resource_library_path)?;
     drop(staged);
 
     let state = app.state::<DbState>();
@@ -521,6 +614,11 @@ pub async fn import_backup(
 mod tests {
     use super::*;
 
+    // 这批测试的 mock 应用共享同一个真实 app_data_dir（tauri mock 不隔离
+    // 路径，恢复暂存目录都落在 ~/.local/share）：导入/导出类用例必须串行，
+    // 否则会互相读到对方正在写的数据。
+    static BACKUP_IO_TEST_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
     #[test]
     fn manifest_json_roundtrip_preserves_counts() {
         let mut counts = std::collections::BTreeMap::new();
@@ -590,6 +688,7 @@ mod tests {
         use std::sync::Mutex;
         use tauri::Manager;
 
+        let _io = BACKUP_IO_TEST_LOCK.lock().unwrap_or_else(|e| e.into_inner());
         let app = tauri::test::mock_app();
         let work = std::env::temp_dir().join(format!(
             "copy-creator-backup-roundtrip-{}",
@@ -686,6 +785,273 @@ mod tests {
             )
             .unwrap();
         assert_eq!(Path::new(&staged_storage), Path::new(&restore_dir));
+
+        let _ = std::fs::remove_dir_all(&work);
+    }
+
+    // ── 守护测试辅助：手工构造 zip 备份（可控制清单行数与库条目）──
+
+    fn seeded_db_file(path: &Path) {
+        use crate::db::ensure_schema;
+        let conn = rusqlite::Connection::open(path).unwrap();
+        ensure_schema(&conn).unwrap();
+        conn.execute(
+            "INSERT INTO clipboard_records (id, type, content, created_at)
+             VALUES ('r1', 'text', 'hello', '2026-09-01T00:00:00Z')",
+            [],
+        )
+        .unwrap();
+    }
+
+    fn write_manual_backup_zip(
+        zip_path: &Path,
+        db_path: &Path,
+        table_counts: serde_json::Value,
+        library_entry: Option<(&str, &[u8])>,
+    ) {
+        let file = File::create(zip_path).unwrap();
+        let mut writer = ZipWriter::new(file);
+        let manifest = serde_json::json!({
+            "format_version": FORMAT_VERSION,
+            "app_version": env!("CARGO_PKG_VERSION"),
+            "exported_at": "2026-09-18T00:00:00Z",
+            "includes_library": library_entry.is_some(),
+            "library_path": "",
+            "table_counts": table_counts,
+        });
+        writer
+            .start_file(MANIFEST_NAME, zip_file_options())
+            .unwrap();
+        writer
+            .write_all(&serde_json::to_vec(&manifest).unwrap())
+            .unwrap();
+        writer.start_file(DB_NAME, zip_file_options()).unwrap();
+        std::io::copy(&mut File::open(db_path).unwrap(), &mut writer).unwrap();
+        if let Some((name, content)) = library_entry {
+            writer.start_file(name, zip_file_options()).unwrap();
+            writer.write_all(content).unwrap();
+        }
+        writer.finish().unwrap();
+    }
+
+    /// 校验失败的导入不得触碰库恢复位置：行数不符必须在库条目落位之前
+    /// 暴露——恢复位置里的现有文件原样保留、备份内的库条目不出现、
+    /// 暂存目录清理干净。（回归锚点：库条目曾与 data.db 同批解压，校验
+    /// 失败时现有库已被部分覆盖且无法回滚。）
+    #[test]
+    fn failed_validation_leaves_library_target_untouched() {
+        use crate::db::{ensure_schema, DbState};
+        use std::sync::Mutex;
+        use tauri::Manager;
+
+        let _io = BACKUP_IO_TEST_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        let app = tauri::test::mock_app();
+        let work = std::env::temp_dir().join(format!(
+            "copy-creator-backup-guard-{}",
+            uuid::Uuid::new_v4()
+        ));
+        std::fs::create_dir_all(&work).unwrap();
+
+        let db_path = work.join("src.db");
+        seeded_db_file(&db_path);
+        let zip_path = work.join("bad.zip");
+        write_manual_backup_zip(
+            &zip_path,
+            &db_path,
+            serde_json::json!({ "clipboard_records": 99 }),
+            Some(("library/sentinel.txt", b"evil".as_slice())),
+        );
+
+        // 恢复位置已有同名文件（哨兵）：若库条目在校验前落位，它会被覆盖。
+        let target = work.join("lib");
+        std::fs::create_dir_all(&target).unwrap();
+        let sentinel = target.join("sentinel.txt");
+        std::fs::write(&sentinel, b"keep").unwrap();
+
+        let conn = rusqlite::Connection::open_in_memory().unwrap();
+        ensure_schema(&conn).unwrap();
+        app.manage(DbState {
+            conn: Mutex::new(conn),
+        });
+        let handle = app.handle().clone();
+
+        let data_dir = handle.path().app_data_dir().unwrap();
+        let count_restore_dirs = |dir: &Path| {
+            std::fs::read_dir(dir)
+                .map(|entries| {
+                    entries
+                        .flatten()
+                        .filter(|entry| entry.file_name().to_string_lossy().starts_with("restore-"))
+                        .count()
+                })
+                .unwrap_or(0)
+        };
+        let restores_before = count_restore_dirs(&data_dir);
+
+        let error = import_backup_internal(
+            &handle,
+            &zip_path,
+            Some(target.to_string_lossy().as_ref()),
+            &AtomicBool::new(false),
+        )
+        .unwrap_err();
+        assert!(error.contains("行数不符"), "实际错误: {error}");
+        assert_eq!(
+            std::fs::read(&sentinel).unwrap(),
+            b"keep",
+            "校验失败时库恢复位置被提前覆盖"
+        );
+        assert_eq!(
+            count_restore_dirs(&data_dir),
+            restores_before,
+            "失败导入留下暂存目录"
+        );
+
+        let _ = std::fs::remove_dir_all(&work);
+    }
+
+    /// 备份清单带有当前版本不认识的表（format_version 相同但出自更新
+    /// 版本的应用）时，明确报版本过新，而非误导性的「行数不符」。
+    #[test]
+    fn unknown_table_in_manifest_reports_newer_version() {
+        use crate::db::{ensure_schema, DbState};
+        use std::sync::Mutex;
+        use tauri::Manager;
+
+        let _io = BACKUP_IO_TEST_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        let app = tauri::test::mock_app();
+        let work = std::env::temp_dir().join(format!(
+            "copy-creator-backup-future-{}",
+            uuid::Uuid::new_v4()
+        ));
+        std::fs::create_dir_all(&work).unwrap();
+
+        let db_path = work.join("src.db");
+        seeded_db_file(&db_path);
+        let zip_path = work.join("future.zip");
+        write_manual_backup_zip(
+            &zip_path,
+            &db_path,
+            serde_json::json!({ "clipboard_records": 1, "future_table": 7 }),
+            None,
+        );
+
+        let conn = rusqlite::Connection::open_in_memory().unwrap();
+        ensure_schema(&conn).unwrap();
+        app.manage(DbState {
+            conn: Mutex::new(conn),
+        });
+
+        let error = import_backup_internal(
+            app.handle(),
+            &zip_path,
+            None,
+            &AtomicBool::new(false),
+        )
+        .unwrap_err();
+        assert!(error.contains("请先升级应用"), "实际错误: {error}");
+
+        let _ = std::fs::remove_dir_all(&work);
+    }
+
+    /// 备份不含资源库时，导入后的库位置沿用导入方当前设置，绝不沿用
+    /// 备份创建机器上的路径（否则重启后会对陌生路径自动建空目录，本机
+    /// 资源库看起来「凭空清空」）；本机未自定义时写空值回落默认目录。
+    #[test]
+    fn import_without_library_keeps_local_library_path() {
+        use crate::db::{ensure_schema, DbState};
+        use rusqlite::params;
+        use std::sync::Mutex;
+        use tauri::Manager;
+
+        let _io = BACKUP_IO_TEST_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        let app = tauri::test::mock_app();
+        let work = std::env::temp_dir().join(format!(
+            "copy-creator-backup-libpath-{}",
+            uuid::Uuid::new_v4()
+        ));
+        std::fs::create_dir_all(&work).unwrap();
+
+        let conn = rusqlite::Connection::open_in_memory().unwrap();
+        ensure_schema(&conn).unwrap();
+        // storage_path 必须种子到小型工作目录：缺省时 get_storage_dir
+        // 回退整个 app_data_dir，mock 应用的 app_data_dir 是真实的
+        // ~/.local/share，导出会去压缩 GB 级无关数据。
+        conn.execute(
+            "INSERT INTO settings (key, value) VALUES ('storage_path', ?1)",
+            params![work.join("storage").to_string_lossy().as_ref()],
+        )
+        .unwrap();
+        conn.execute(
+            "INSERT INTO settings (key, value) VALUES ('resource_library_path', ?1)
+             ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+            params![work.join("backup-machine-lib").to_string_lossy().as_ref()],
+        )
+        .unwrap();
+        app.manage(DbState {
+            conn: Mutex::new(conn),
+        });
+        let handle = app.handle().clone();
+
+        let zip_path = work.join("nolib.zip");
+        export_backup_internal(&handle, &zip_path, false, &AtomicBool::new(false)).unwrap();
+
+        // 模拟导入方的本机设置与备份创建机器不同。
+        {
+            let state = handle.state::<DbState>();
+            let conn = state.conn.lock().unwrap();
+            conn.execute(
+                "UPDATE settings SET value = ?1 WHERE key = 'resource_library_path'",
+                params![work.join("local-lib").to_string_lossy().as_ref()],
+            )
+            .unwrap();
+        }
+        let summary =
+            import_backup_internal(&handle, &zip_path, None, &AtomicBool::new(false)).unwrap();
+        let restore_dir = summary["restore_dir"].as_str().unwrap().to_string();
+        let staged = open_connection(Path::new(&restore_dir).join(DB_NAME).as_path()).unwrap();
+        let lib: String = staged
+            .query_row(
+                "SELECT value FROM settings WHERE key = 'resource_library_path'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(
+            Path::new(&lib),
+            work.join("local-lib").as_path(),
+            "库位置沿用本机设置而非备份里的路径"
+        );
+        drop(staged);
+
+        // 本机未自定义（键删除）时回落空值（默认目录语义）。
+        let zip_path2 = work.join("nolib2.zip");
+        export_backup_internal(&handle, &zip_path2, false, &AtomicBool::new(false)).unwrap();
+        {
+            let state = handle.state::<DbState>();
+            let conn = state.conn.lock().unwrap();
+            conn.execute("DELETE FROM settings WHERE key = 'resource_library_path'", [])
+                .unwrap();
+        }
+        let summary2 =
+            import_backup_internal(&handle, &zip_path2, None, &AtomicBool::new(false)).unwrap();
+        let staged2 = open_connection(
+            Path::new(summary2["restore_dir"].as_str().unwrap())
+                .join(DB_NAME)
+                .as_path(),
+        )
+        .unwrap();
+        let lib2: String = staged2
+            .query_row(
+                "SELECT value FROM settings WHERE key = 'resource_library_path'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(lib2, "", "未自定义时应写空值回落默认目录");
+        // 导入成功会保留暂存目录（重启切换语义），测试自行清理。
+        let _ = std::fs::remove_dir_all(&restore_dir);
+        let _ = std::fs::remove_dir_all(summary2["restore_dir"].as_str().unwrap_or(""));
 
         let _ = std::fs::remove_dir_all(&work);
     }
