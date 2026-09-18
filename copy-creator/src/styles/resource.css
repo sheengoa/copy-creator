@@ -1685,14 +1685,6 @@
   background: var(--card-inner-bg);
 }
 
-/* 查找条 fixed 钉在窗口右上：脱离内容流（不把正文往下挤），页面滚动
-   时保持常驻（sticky 曾因 stage 自身是滚动容器而失效） */
-.resource-detail-stage .find-replace-bar {
-  position: fixed;
-  top: 60px;
-  right: 18px;
-}
-
 .resource-detail-stage-text,
 .resource-detail-stage-image {
   align-items: flex-start;

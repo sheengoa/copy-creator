@@ -75,6 +75,7 @@ export default function ResourceDetailPage({
   const [contentSaveError, setContentSaveError] = useState(false);
   const contentSavedTimerRef = useRef<number | null>(null);
   const contentEditorRef = useRef<HTMLTextAreaElement | null>(null);
+  const stageRef = useRef<HTMLDivElement | null>(null);
   const externalTextPath = kind === "text" && record.type === "file"
     ? resourcePath
     : null;
@@ -317,10 +318,34 @@ export default function ResourceDetailPage({
   const [findReplaceText, setFindReplaceText] = useState("");
   const [findCaseSensitive, setFindCaseSensitive] = useState(false);
   const [findIndex, setFindIndex] = useState(0);
+  // 查找条 fixed 定位：按内容区（stage）的实时视口位置钉在其右上角，
+  // 随页面滚动/窗口缩放持续跟随（信息面板与窗口头不被遮挡）。
+  const [findBarPos, setFindBarPos] = useState({ top: 120, right: 24 });
   const findMatches = useMemo(
     () => (contentEditing ? findMatchPositions(contentDraft, findQuery, findCaseSensitive) : []),
     [contentEditing, contentDraft, findQuery, findCaseSensitive],
   );
+
+  useEffect(() => {
+    if (!findOpen || !contentEditing) return;
+    const stage = stageRef.current;
+    if (!stage) return;
+    const update = () => {
+      const rect = stage.getBoundingClientRect();
+      setFindBarPos({
+        top: Math.max(rect.top + 8, 64),
+        right: Math.max(window.innerWidth - rect.right + 14, 14),
+      });
+    };
+    update();
+    const scroller = findPageScroller();
+    scroller?.addEventListener("scroll", update);
+    window.addEventListener("resize", update);
+    return () => {
+      scroller?.removeEventListener("scroll", update);
+      window.removeEventListener("resize", update);
+    };
+  }, [findOpen, contentEditing, findPageScroller]);
 
   // 选中指定匹配并滚到可视区：textarea 自动增高、无内部滚动，页面级
   // 滚动容器按匹配所在行手工定位——浏览器对 focus 的默认呈现不保证
@@ -545,6 +570,7 @@ export default function ResourceDetailPage({
             {typeLabel(kind)} · {record.source_app || t("resources.localSource")}
           </p>
           <div
+            ref={stageRef}
             className={`resource-detail-stage resource-detail-stage-${kind}`}
             onDoubleClick={(event) => {
               // 视图态双击内容 → 进入编辑；编辑态双击文本区外 → 保存。
@@ -562,6 +588,11 @@ export default function ResourceDetailPage({
           >
             {contentEditing && findOpen && (
               <FindReplaceBar
+                style={{
+                  position: "fixed",
+                  top: findBarPos.top,
+                  right: findBarPos.right,
+                }}
                 query={findQuery}
                 replacement={findReplaceText}
                 caseSensitive={findCaseSensitive}

@@ -3,10 +3,13 @@
 // 键盘约定：Enter 下一个、Shift+Enter 上一个、Esc 关闭（拦截冒泡，避免
 // 误触宿主的「退出编辑/关闭窗口」）。
 import { useEffect, useRef } from "react";
+import type { CSSProperties } from "react";
 import { useTranslation } from "react-i18next";
 import { Icons } from "./Icons";
 
 interface FindReplaceBarProps {
+  /** 覆盖定位样式（如详情页的 fixed 跟随定位）；不传则用默认 absolute。 */
+  style?: CSSProperties;
   query: string;
   replacement: string;
   caseSensitive: boolean;
@@ -24,6 +27,7 @@ interface FindReplaceBarProps {
 }
 
 export default function FindReplaceBar({
+  style,
   query,
   replacement,
   caseSensitive,
@@ -40,7 +44,6 @@ export default function FindReplaceBar({
 }: FindReplaceBarProps) {
   const { t } = useTranslation();
   const queryInputRef = useRef<HTMLInputElement>(null);
-
   useEffect(() => {
     queryInputRef.current?.focus();
     queryInputRef.current?.select();
@@ -54,6 +57,7 @@ export default function FindReplaceBar({
       className="find-replace-bar"
       role="search"
       aria-label={t("common.findReplace")}
+      style={style}
       onKeyDown={(event) => {
         // 焦点在查找条内时 Ctrl+F 同样是开/关切换（关=当前必然开着）。
         if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "f") {
