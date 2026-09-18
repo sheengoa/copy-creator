@@ -176,8 +176,18 @@ pub fn export_backup_internal<R: Runtime>(
         .map_err(|e| format!("生成数据库快照失败: {e}"))?;
     drop(conn);
 
+    // 先写同目录隐藏临时文件、成功后落位：导出中途失败（取消/磁盘满）
+    // 只清临时件，不再摧毁目标路径上已有的旧备份。临时件与目标同目录，
+    // rename 不跨文件系统。
+    let staging_zip = target_zip.with_file_name(format!(
+        ".copy-creator-exporting-{}",
+        target_zip
+            .file_name()
+            .and_then(|name| name.to_str())
+            .unwrap_or("backup.zip")
+    ));
     let export_result = (|| -> Result<u64, String> {
-        let file = File::create(target_zip).map_err(|e| format!("创建导出文件失败: {e}"))?;
+        let file = File::create(&staging_zip).map_err(|e| format!("创建导出文件失败: {e}"))?;
         let mut writer = ZipWriter::new(file);
 
         {
@@ -224,13 +234,19 @@ pub fn export_backup_internal<R: Runtime>(
             .map_err(|e| format!("写入 {MANIFEST_NAME} 失败: {e}"))?;
 
         writer.finish().map_err(|e| format!("完成压缩包失败: {e}"))?;
+        // 落位：Windows 不允许 rename 覆盖已存在文件，先移除旧目标；
+        // 此前全部写入都发生在临时件上，旧备份在失败路径下完好。
+        if target_zip.exists() {
+            std::fs::remove_file(target_zip).map_err(|e| format!("替换旧备份失败: {e}"))?;
+        }
+        std::fs::rename(&staging_zip, target_zip).map_err(|e| format!("落位备份文件失败: {e}"))?;
         Ok(processed as u64)
     })();
 
     let _ = std::fs::remove_file(&snapshot);
     if export_result.is_err() {
-        // 失败/取消不残留半截压缩包。
-        let _ = std::fs::remove_file(target_zip);
+        // 失败/取消只清临时件，目标路径上已有的旧备份保持原样。
+        let _ = std::fs::remove_file(&staging_zip);
     }
     export_result
 }
@@ -1052,6 +1068,67 @@ mod tests {
         // 导入成功会保留暂存目录（重启切换语义），测试自行清理。
         let _ = std::fs::remove_dir_all(&restore_dir);
         let _ = std::fs::remove_dir_all(summary2["restore_dir"].as_str().unwrap_or(""));
+
+        let _ = std::fs::remove_dir_all(&work);
+    }
+
+    /// 导出失败（取消/磁盘满）不得摧毁目标路径上已有的旧备份：写入走
+    /// 同目录临时文件，成功后才落位。（回归锚点：曾直接截断目标文件，
+    /// 同一路径二次导出失败时旧备份一并丢失。）
+    #[test]
+    fn failed_export_preserves_existing_backup() {
+        use crate::db::{ensure_schema, DbState};
+        use std::sync::Mutex;
+        use tauri::Manager;
+
+        let app = tauri::test::mock_app();
+        let work = std::env::temp_dir().join(format!(
+            "copy-creator-backup-export-{}",
+            uuid::Uuid::new_v4()
+        ));
+        std::fs::create_dir_all(&work).unwrap();
+
+        let conn = rusqlite::Connection::open_in_memory().unwrap();
+        ensure_schema(&conn).unwrap();
+        conn.execute(
+            "INSERT INTO settings (key, value) VALUES ('storage_path', ?1)",
+            rusqlite::params![work.join("storage").to_string_lossy().as_ref()],
+        )
+        .unwrap();
+        app.manage(DbState {
+            conn: Mutex::new(conn),
+        });
+        let handle = app.handle().clone();
+
+        // 存储目录放一个文件：取消标志进入遍历即生效。
+        std::fs::create_dir_all(work.join("storage")).unwrap();
+        std::fs::write(work.join("storage").join("a.png"), b"png").unwrap();
+
+        let zip_path = work.join("backup.zip");
+        export_backup_internal(&handle, &zip_path, false, &AtomicBool::new(false)).unwrap();
+        let original = std::fs::read(&zip_path).unwrap();
+
+        let cancel = AtomicBool::new(true);
+        assert!(
+            export_backup_internal(&handle, &zip_path, false, &cancel).is_err(),
+            "预置取消标志的导出应当失败"
+        );
+        assert_eq!(
+            std::fs::read(&zip_path).unwrap(),
+            original,
+            "导出失败摧毁了目标路径上已有的旧备份"
+        );
+        let leftovers: Vec<_> = std::fs::read_dir(&work)
+            .unwrap()
+            .flatten()
+            .filter(|entry| {
+                entry
+                    .file_name()
+                    .to_string_lossy()
+                    .starts_with(".copy-creator-exporting-")
+            })
+            .collect();
+        assert!(leftovers.is_empty(), "失败的导出残留了临时文件");
 
         let _ = std::fs::remove_dir_all(&work);
     }
