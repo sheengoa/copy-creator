@@ -615,20 +615,21 @@ html {
   height: 16px;
 }
 
+/* 焦点环是所有动作按钮共有的交互反馈，随基类生效 */
+.radial-menu-item-action:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+
 @media (prefers-reduced-motion: reduce) {
   .radial-menu-item-action {
     transition: none;
   }
 }
 
-/* 预览按钮专有：hover 底色、焦点环与暗色适配 */
+/* 预览按钮专有：hover 底色与暗色适配 */
 .radial-menu-item .radial-menu-item-action.radial-menu-preview-trigger:hover {
   background: var(--chip-hover-bg) !important;
-}
-
-.radial-menu-preview-trigger:focus-visible {
-  outline: 2px solid var(--accent);
-  outline-offset: 1px;
 }
 
 [data-theme="dark"] .radial-menu-preview-trigger {

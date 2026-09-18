@@ -281,6 +281,16 @@ describe("架构守卫：领域规则必须全局共享", () => {
       mechanismCopies.length,
       "按钮显现机制（scale(0.78) 起点）只允许在共享基类定义一次",
     ).toBe(1);
+    // 焦点环同属共享机制：随基类生效，不许某个按钮私有（曾漏掉导致
+    // 星标没有 focus-visible 描边框而预览按钮有）。
+    expect(
+      css,
+      "焦点环必须定义在共享基类上",
+    ).toMatch(/\.radial-menu-item-action:focus-visible\s*\{/);
+    expect(
+      css,
+      "焦点环不得再挂在单个按钮的修饰类上",
+    ).not.toMatch(/\.radial-menu-(preview-trigger|item-pin):focus-visible/);
     const radialMenu = readSource("components/RadialMenu/index.tsx");
     expect(
       radialMenu,
