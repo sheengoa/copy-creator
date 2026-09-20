@@ -279,11 +279,6 @@ function ClipboardCardInner({
       <div className="noticontent">
         <div className="notititle clipboard-card-header">
           <span className="noti-type-label">
-            {view.pinned && (
-              <span className="card-pinned-badge" title={t("common.favorite")} aria-label={t("common.favorite")}>
-                {Icons.star}
-              </span>
-            )}
             <span className="noti-type-icon">{isApiKey ? Icons.key : meta.icon}</span>
             <span className="noti-type-text">{isApiKey ? "API Key" : getTypeLabel(view.recordType)}</span>
           </span>
@@ -396,6 +391,7 @@ function ClipboardCardInner({
                   <button
                     className="card-pin-btn"
                     type="button"
+                    aria-pressed={view.pinned}
                     aria-label={t(view.pinned ? "common.unfavorite" : "common.favorite")}
                     title={t(view.pinned ? "common.unfavorite" : "common.favorite")}
                     onClick={(e) => {

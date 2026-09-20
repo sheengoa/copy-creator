@@ -529,20 +529,6 @@ input:focus-visible + .selection-checkbox {
   color: rgb(220, 38, 38);
 }
 
-/* 收藏常驻角标：类型标签前的实心星，亮暗主题共用金色系 */
-.card-pinned-badge {
-  display: inline-flex;
-  align-items: center;
-  flex-shrink: 0;
-  color: #d99a00;
-}
-
-.card-pinned-badge svg {
-  width: 11px;
-  height: 11px;
-  fill: currentColor;
-}
-
 .card-edit-btn:hover svg {
   transform: scale(1.3);
   color: var(--accent);

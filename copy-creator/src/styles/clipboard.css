@@ -425,11 +425,28 @@
 
 .clipboard-card-actions > .card-toggle-text-btn:hover,
 .clipboard-card-actions > .drag-handle:hover,
-.clipboard-card-actions > .card-delete-btn:hover,
-.clipboard-card-actions > .card-pin-btn:hover {
+.clipboard-card-actions > .card-delete-btn:hover {
   opacity: 1;
   background: var(--chip-hover-bg) !important;
   color: var(--text-primary);
+}
+
+/* 收藏星 hover 不跟随变近黑：反馈交给底色与不透明度 */
+.clipboard-card-actions > .card-pin-btn:hover {
+  opacity: 1;
+  background: var(--chip-hover-bg) !important;
+}
+
+/* 已收藏（aria-pressed）：星标本体常显为实心中灰（不随卡片悬停消失、
+ * 不跳黑），与径向菜单的收藏态语义一致；选择器带上 .clipboard-card
+ * 与上方卡片 hover/focus-within 同权重，才能压住基础规则的 opacity: 0 */
+.clipboard-card .clipboard-card-actions > .card-pin-btn[aria-pressed="true"] {
+  opacity: 1;
+  color: var(--text-secondary);
+}
+
+.clipboard-card .clipboard-card-actions > .card-pin-btn[aria-pressed="true"] svg {
+  fill: currentColor;
 }
 
 .clipboard-card-actions > .card-delete-btn:hover {

@@ -635,13 +635,14 @@ html {
   color: rgba(255, 255, 255, 0.72) !important;
 }
 
-/* 收藏星标专有：已收藏常显实心星（主题前景色）；星形在 24 视图框内
- * 自带留白且细描边显小，单独加粗描边。 */
+/* 收藏星标专有：已收藏常显实心星（中灰，与主窗口收藏态一致，不跳
+ * 主题前景色黑）；星形在 24 视图框内自带留白且细描边显小，单独加粗
+ * 描边。 */
 .radial-menu-item .radial-menu-item-action.radial-menu-item-pin.pinned {
   opacity: 1;
   transform: scale(1);
   pointer-events: auto;
-  color: var(--text-primary) !important;
+  color: var(--text-secondary) !important;
 }
 
 .radial-menu-item .radial-menu-item-action.radial-menu-item-pin.pinned svg {
