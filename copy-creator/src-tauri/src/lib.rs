@@ -381,7 +381,6 @@ pub fn run() {
             clipboard::get_stash_record_images,
             clipboard::read_clipboard_image_base64,
             db::get_clipboard_record_content,
-            db::update_clipboard_record,
             db::delete_clipboard_records,
             db::delete_all_clipboard_records,
             db::delete_records_by_type,
