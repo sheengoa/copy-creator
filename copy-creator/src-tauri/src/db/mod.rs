@@ -1304,6 +1304,8 @@ pub(crate) fn ensure_schema(conn: &Connection) -> Result<(), Box<dyn std::error:
     // thumbs 派生缓存清退（每次启动执行，见函数注释）。
     prune_legacy_thumb_records(conn);
     prune_temporary_resource_records(conn);
+    // 编辑降级的文件承载文本记录归一（幂等，见函数注释）。
+    normalize_file_backed_text_records(conn);
     Ok(())
 }
 // ── Reorder Commands ──────────────────────────────────────────

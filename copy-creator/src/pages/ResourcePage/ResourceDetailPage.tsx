@@ -19,7 +19,7 @@ import { getResourceFileName, isResourceTitleRenameable, splitResourceFileName }
 import { formatResourceFolderPath } from "../../domain/groups";
 import { inferResourceMediaKind } from "../../domain/mediaKind";
 import { resolveResourceMediaUrl } from "../../domain/mediaUrl";
-import { getResourcePath, getResourceTitle, resourceMediaVersion } from "../../domain/records";
+import { getResourcePath, getResourceTitle, resourceMediaVersion, resourceTextPreviewPath } from "../../domain/records";
 import { useRecordLocale } from "../../hooks/useRecordLocale";
 import {
   ResourceImageOriginal,
@@ -77,9 +77,9 @@ export default function ResourceDetailPage({
   const contentSavedTimerRef = useRef<number | null>(null);
   const contentEditorRef = useRef<HTMLTextAreaElement | null>(null);
   const stageRef = useRef<HTMLDivElement | null>(null);
-  const externalTextPath = kind === "text" && record.type === "file"
-    ? resourcePath
-    : null;
+  // 文本取材唯一入口（domain 判定）：有文件承载一律读文件全文——含详情页
+  // 编辑后 type 已转为 text 的记录；无文件承载的纯文本资源走 segments。
+  const externalTextPath = kind === "text" ? resourceTextPreviewPath(record) : null;
   const noteDirty = noteDraft.trim() !== savedNote;
 
   useEffect(() => {
@@ -291,11 +291,10 @@ export default function ResourceDetailPage({
   const textDetailReady = externalTextPath ? textContent !== null : Boolean(segments);
   const contentReady = externalTextPath ? textDetailReady : detailReady;
 
-  // 正文编辑仅面向纯文本资源（不含内嵌图片）：文件承载文本是事实来源，
-  // 数据库记录的 content 在保存时与文件同步。
-  const textEditPath = kind === "text"
-    ? (record.type === "file" ? externalTextPath : record.resource_path || null)
-    : null;
+  // 正文编辑面向有文件承载的文本资源（不含内嵌图片）：取材与保存目标
+  // 都是文件本身，文件是全文的唯一事实来源。
+  // 编辑目标与取材同源：一律指向 backing 文件（domain 判定已校验文本扩展名）。
+  const textEditPath = kind === "text" ? externalTextPath : null;
   const fullTextContent = useMemo(() => {
     if (externalTextPath) return textContent;
     if (!segments) return null;
@@ -460,10 +459,10 @@ export default function ResourceDetailPage({
       }, 2200);
       onRecordUpdated({
         ...record,
+        // 保存后记录归一为文件承载形态（与 write_resource_text_content 的
+        // 归一更新一致）：type=file、content=文件路径，全文以文件为唯一事实来源。
+        type: "file",
         content: saved.content,
-        ...(saved.record_type === "text" || saved.record_type === "link"
-          ? { type: saved.record_type }
-          : null),
       });
     } catch {
       setContentSaveError(true);

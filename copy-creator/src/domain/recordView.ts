@@ -16,6 +16,7 @@ import {
   recordFileMediaKind,
   recordPasteStrategy,
   resourceMediaVersion,
+  resourceTextPreviewPath,
   getResourceSummary,
   type ExpandPreviewKind,
   type PasteStrategy,
@@ -43,6 +44,9 @@ export interface RecordView {
   fileMediaKind: "video" | "audio" | "image" | null; // file 记录的媒体细分
   isResource: boolean;
   isFileBackedText: boolean;
+  /** 文本预览取材路径：有文本文件承载时为文件路径（读全文），纯文本资源
+   * 为 null（展示用 summary）。资源卡与径向条目的文本预览分支统一消费。 */
+  textPreviewPath: string | null;
   expandable: boolean; // 能否展开/预览
   expandPreview: ExpandPreviewKind; // 展开后渲染什么
   pasteStrategy: PasteStrategy; // 粘贴路由描述（执行仍在 clipboardStore.pasteRecord）
@@ -104,6 +108,7 @@ export function buildRecordView(
     fileMediaKind,
     isResource: isResourceRecord(record),
     isFileBackedText: isFileBackedTextResource(record),
+    textPreviewPath: resourceTextPreviewPath(record),
     expandable: expandPreview !== null,
     expandPreview,
     pasteStrategy: recordPasteStrategy(record),

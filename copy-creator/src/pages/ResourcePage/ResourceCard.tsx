@@ -83,11 +83,11 @@ function ResourceCardVisual({
     );
   }
 
-  if (view.recordType === "file" && view.resourcePath) {
+  if (view.textPreviewPath) {
     return (
       <div className="resource-card-text-preview">
         <InlineTextFilePreview
-          resourcePath={view.resourcePath}
+          resourcePath={view.textPreviewPath}
           resourceVersion={view.mediaVersion ?? view.createdAt}
           search={search}
         />

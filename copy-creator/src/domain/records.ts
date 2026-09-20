@@ -30,6 +30,22 @@ export function isFileBackedTextResource(
   return record.type === "file" && isResourceRecord(record) && inferResourceMediaKind(record) === "text";
 }
 
+/** 资源文本预览的取材路径：有文本文件承载（resource_path 指向文本扩展名）
+ * 时返回该路径，卡片/径向条目读文件全文；无文件承载的纯文本资源返回
+ * null（展示改用摘要）。
+ * 与 isFileBackedTextResource（粘贴/展开判定）刻意解耦：详情页编辑保存
+ * （write_resource_text_content）会把记录 type 从 file 转为 text、content
+ * 存全文，此时本判定仍应命中 backing 文件——文件是全文的唯一事实来源。 */
+export function resourceTextPreviewPath(
+  record: Pick<ClipboardRecord, "type" | "content" | "resource_path" | "storage_mode">,
+): string | null {
+  if (!isResourceRecord(record)) return null;
+  const path = record.type === "file"
+    ? record.resource_path || record.content
+    : record.resource_path ?? "";
+  return path && isTextPreviewableFile(path) ? path : null;
+}
+
 export function getResourcePath(
   record: Pick<ClipboardRecord, "type" | "content" | "resource_path">,
 ): string {

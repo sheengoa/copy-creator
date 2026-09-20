@@ -44,7 +44,7 @@ import { fileNameFromPath } from "../../domain/fileName";
 import type { ClipboardRecord, Phrase, ResourceFolder } from "../../types";
 import { type ResourceMediaKind } from "../../domain/mediaKind";
 import { findResourceFolder, flattenResourceFoldersVisible, formatResourceFolderPath, isResourceFolderPath } from "../../domain/groups";
-import { fileMediaKindFromPath, getResourceExtension, inferResourceMediaKind, TEXT_EXTENSIONS } from "../../domain/mediaKind";
+import { fileMediaKindFromPath, inferResourceMediaKind } from "../../domain/mediaKind";
 import {
   getResourcePath,
   isFileBackedTextResource,
@@ -134,6 +134,8 @@ interface RadialItem {
   isResource?: boolean;
   resourceKind?: ResourceMediaKind;
   resourcePath?: string;
+  /** 文本预览取材路径（domain 判定字段）：有文本文件承载时预览读文件全文。 */
+  textPreviewPath?: string;
   /** 资源文件版本（修改毫秒）：预览媒体 URL 携带它，覆盖保存后强制取新。 */
   resourceVersion?: string;
   resourceTitle?: string;
@@ -464,17 +466,14 @@ export default function RadialMenu() {
           segments = [{ type: "image", path: resourcePath, version: item.resourceVersion }];
         } else if (kind === "video" || kind === "audio") {
           segments = [{ type: kind, path: resourcePath, version: item.resourceVersion }];
-        } else if (
-          record.type === "file"
-          && TEXT_EXTENSIONS.has(getResourceExtension(resourcePath))
-        ) {
-          // 文本文件按扩展名判定读取实际内容，不依赖 resource_kind；
-          // 读取失败时回退为路径展示。
+        } else if (item.textPreviewPath) {
+          // 文本取材经 domain 判定读文件全文（含编辑后 type 为 text 的记录），
+          // 不依赖 resource_kind 与 type；读取失败时回退为路径展示。
           try {
-            const text = await readResourceTextPreview(resourcePath);
+            const text = await readResourceTextPreview(item.textPreviewPath);
             segments = [{ type: "text", content: text }];
           } catch {
-            segments = [{ type: "text", content: resourcePath }];
+            segments = [{ type: "text", content: item.textPreviewPath }];
           }
         } else {
           const content = kind === "text"
@@ -1394,7 +1393,9 @@ export default function RadialMenu() {
         const resourceKind = item.kind;
         const resourcePath = item.resourcePath ?? r.content;
         const resourceTitle = item.title;
-        const resourceSummary = r.type === "file" ? undefined : item.summary;
+        // 有文件承载的文本资源预览读文件全文（含编辑后 type 转为 text 的记录），
+        // 摘要只用于无文件承载的纯文本资源。
+        const resourceSummary = item.textPreviewPath ? undefined : item.summary;
         return {
           id: r.id,
           content: resourceTitle,
@@ -1407,10 +1408,12 @@ export default function RadialMenu() {
             || resourceKind === "audio",
           dragKind: getClipboardRadialDragKind(r.type, r.has_images),
           dragSource: "clipboard",
-          dragPath: r.drag_path || (r.type === "file" ? resourcePath : undefined),
+          // 文件承载的文本资源（含编辑后 type 为 text 的记录）拖出其 backing 文件。
+          dragPath: r.drag_path || item.textPreviewPath || (r.type === "file" ? resourcePath : undefined),
           isResource: true,
           resourceKind,
           resourcePath,
+          textPreviewPath: item.textPreviewPath ?? undefined,
           resourceVersion: resourceMediaVersion(r),
           resourceTitle,
           resourceSummary,

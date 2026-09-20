@@ -13,6 +13,8 @@ export interface ResourceItemVisualProps {
     type: string;
     resourceKind?: ResourceMediaKind;
     resourcePath?: string;
+    /** domain 判定字段：有值表示有文本文件承载，预览读文件全文。 */
+    textPreviewPath?: string;
     resourceVersion?: string;
     resourceTitle?: string;
     resourceSummary?: string;
@@ -41,11 +43,11 @@ export function ResourceItemVisual({ item }: ResourceItemVisualProps) {
     );
   }
 
-  if (kind === "text" && item.type === "file" && item.resourcePath) {
+  if (kind === "text" && item.textPreviewPath) {
     return (
       <div className="radial-menu-resource-text-file">
         <InlineTextFilePreview
-          resourcePath={item.resourcePath}
+          resourcePath={item.textPreviewPath}
           resourceVersion={item.resourceVersion ?? item.createdAt}
         />
       </div>

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { isResourceRecord } from "./records";
+import { isResourceRecord, resourceTextPreviewPath } from "./records";
 
 describe("isResourceRecord", () => {
   it("recognizes records stored in the resource library", () => {
@@ -11,6 +11,61 @@ describe("isResourceRecord", () => {
     expect(isResourceRecord({ group_name: "旧资源", storage_mode: "database" })).toBe(false);
     expect(isResourceRecord({ group_name: "", storage_mode: "database" })).toBe(false);
     expect(isResourceRecord({ group_name: "  ", storage_mode: undefined })).toBe(false);
+  });
+});
+
+// resourceTextPreviewPath：资源文本预览取材的唯一判定（资源卡 / 径向条目
+// 共用）。回归锚点：详情页编辑保存会把记录 type 从 file 转为 text（content
+// 存全文、resource_path 不变），消费方若以 type === "file" 自行判定，编辑过
+// 的 .txt 卡片就只剩 180 字摘要——预览必须认 backing 文件而非 type。
+describe("resourceTextPreviewPath", () => {
+  const fileRecord = (overrides: Partial<Record<string, unknown>>) =>
+    ({
+      type: "file",
+      content: "C:/库/分镜提词/厂里传疯了.txt",
+      resource_path: "C:/库/分镜提词/厂里传疯了.txt",
+      storage_mode: "resource",
+      ...overrides,
+    }) as never as Parameters<typeof resourceTextPreviewPath>[0];
+
+  it("returns the backing path for file-backed text resources", () => {
+    expect(resourceTextPreviewPath(fileRecord({}))).toBe("C:/库/分镜提词/厂里传疯了.txt");
+    expect(resourceTextPreviewPath(fileRecord({ resource_path: "" }))).toBe(
+      "C:/库/分镜提词/厂里传疯了.txt",
+    );
+  });
+
+  it("still resolves edited records whose type was demoted to text", () => {
+    const edited = fileRecord({
+      type: "text",
+      content: "参考图片1中的女工形象……".repeat(20),
+      resource_path: "C:/库/分镜提词/工厂都传疯了.txt",
+    });
+    expect(resourceTextPreviewPath(edited)).toBe("C:/库/分镜提词/工厂都传疯了.txt");
+  });
+
+  it("returns null for plain text resources without a backing file", () => {
+    expect(
+      resourceTextPreviewPath(fileRecord({ type: "text", content: "正文", resource_path: "" })),
+    ).toBeNull();
+    expect(
+      resourceTextPreviewPath(fileRecord({ type: "text", content: "正文", resource_path: undefined })),
+    ).toBeNull();
+  });
+
+  it("returns null for non-text media files", () => {
+    expect(
+      resourceTextPreviewPath(fileRecord({ content: "C:/库/01.png", resource_path: "C:/库/01.png" })),
+    ).toBeNull();
+    expect(
+      resourceTextPreviewPath(
+        fileRecord({ content: "C:/库/01.mp4", resource_path: "C:/库/01.mp4" }),
+      ),
+    ).toBeNull();
+  });
+
+  it("returns null for non-resource records", () => {
+    expect(resourceTextPreviewPath(fileRecord({ storage_mode: "database" }))).toBeNull();
   });
 });
 

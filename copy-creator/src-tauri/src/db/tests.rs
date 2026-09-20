@@ -606,7 +606,8 @@ mod resource_command_tests {
     use crate::db::{
         create_resource_group_inner, delete_external_resource_file, delete_resource_group_inner,
         forget_resource_records, get_clipboard_records_inner, get_resource_groups_inner,
-        move_resource_group_inner, move_resource_records_inner, read_resource_text_preview_file,
+        move_resource_group_inner, move_resource_records_inner, normalize_file_backed_text_records,
+        read_resource_text_preview_file,
         read_text_file_content_inner, rename_resource_file_inner,
         reorder_resource_groups_inner, resolve_resource_file_path, resource_file_id,
         resource_folder_tree, resource_group_count_map, set_resource_note_inner,
@@ -3090,6 +3091,69 @@ mod resource_command_tests {
             records[0]["id"].as_str(),
             Some(resource_file_id(&new_file).as_str())
         );
+    }
+
+    #[test]
+    fn normalize_file_backed_text_records_repairs_edited_demotions() {
+        // 回归锚点：详情页编辑保存曾把文件承载文本资源降级为 text/link 并把
+        // 全文写进 content，粘贴/拖出/预览从此绕过文件，外部编辑文件后取到
+        // 过期内容。启动归一须把「resource_path 指向存在的文本扩展名文件」
+        // 的降级行恢复为 file 形态（content 归位为路径）；文件缺失或非文本
+        // 扩展名的行保持原样，交由展示层摘要兜底。
+        let (app, root) = test_app();
+        let live = root.join("edited.txt");
+        std::fs::write(&live, "最新正文\n").unwrap();
+        insert_typed_resource(
+            &app,
+            "demoted-txt",
+            "text",
+            "过期的正文副本",
+            live.to_str().unwrap(),
+        );
+        insert_typed_resource(
+            &app,
+            "demoted-link",
+            "link",
+            "https://example.com/旧文案",
+            live.to_str().unwrap(),
+        );
+        let missing = root.join("gone.txt");
+        insert_typed_resource(&app, "demoted-missing", "text", "正文", missing.to_str().unwrap());
+        let binary = root.join("raw.dat");
+        std::fs::write(&binary, b"\x00\x01").unwrap();
+        insert_typed_resource(&app, "demoted-dat", "text", "正文", binary.to_str().unwrap());
+
+        {
+            let state = app.state::<DbState>();
+            let conn = state.conn.lock().unwrap();
+            let normalized = normalize_file_backed_text_records(&conn);
+            assert_eq!(normalized, 2, "仅存在的文本扩展名行参与归一");
+            for id in ["demoted-txt", "demoted-link"] {
+                let (record_type, content): (String, String) = conn
+                    .query_row(
+                        "SELECT type, content FROM clipboard_records WHERE id = ?1",
+                        [&id],
+                        |row| Ok((row.get(0)?, row.get(1)?)),
+                    )
+                    .unwrap();
+                assert_eq!(record_type, "file", "{id} 应回归 file 形态");
+                assert_eq!(
+                    slash_normalized(&content),
+                    slash_normalized(live.to_str().unwrap()),
+                    "{id} 的 content 应归位为文件路径",
+                );
+            }
+            let remaining_demoted: i64 = conn
+                .query_row(
+                    "SELECT COUNT(*) FROM clipboard_records
+                     WHERE id IN ('demoted-missing', 'demoted-dat') AND type <> 'file'",
+                    [],
+                    |row| row.get(0),
+                )
+                .unwrap();
+            assert_eq!(remaining_demoted, 2, "文件缺失/非文本扩展名的行保持原样");
+        }
+        cleanup(&root);
     }
 
     #[test]

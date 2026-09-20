@@ -358,4 +358,47 @@ describe("架构守卫：领域规则必须全局共享", () => {
       "动作区按钮必须加入 clipboard.css 动作组（基础/hover 显现/底色/svg 尺寸），不得只有孤立的 token 样式",
     ).toEqual([]);
   });
+
+  it("规则 19：资源文本预览必须消费 textPreviewPath 判定字段，禁止按 type 自行判定", () => {
+    // 回归锚点：详情页编辑保存会把记录 type 从 file 转为 text（content 存
+    // 全文、resource_path 不变）。资源卡与径向条目曾各自以 type === "file"
+    // 判定是否读文件预览，编辑过的 .txt 由此退化为 180 字摘要。取材判定
+    // 唯一来源是 domain/records 的 resourceTextPreviewPath（经 RecordView
+    // 的 textPreviewPath 暴露），消费方只允许读该字段。
+    const card = readSource("pages/ResourcePage/ResourceCard.tsx");
+    expect(
+      card.includes("view.textPreviewPath"),
+      "资源卡文本预览分支必须消费 view.textPreviewPath 判定字段",
+    ).toBe(true);
+    expect(
+      card.includes('view.recordType === "file" && view.resourcePath'),
+      "资源卡禁止以 recordType === \"file\" 自行判定文本预览取材（编辑后 type 已是 text）",
+    ).toBe(false);
+    const radialItem = readSource("components/RadialMenu/ResourceItemVisual.tsx");
+    expect(
+      radialItem.includes("item.textPreviewPath"),
+      "径向条目文本预览分支必须消费 item.textPreviewPath 判定字段",
+    ).toBe(true);
+    expect(
+      radialItem.includes('item.type === "file" && item.resourcePath'),
+      "径向条目禁止以 type === \"file\" 自行判定文本预览取材",
+    ).toBe(false);
+    // 取材同源约束：详情页的正文展示、编辑底稿与编辑目标，径向菜单的预览
+    // 面板与文件拖出，都不得按 record type 分叉——编辑过的记录 type 已是
+    // text，按 type 判定必然取到过期副本或丢失文件语义。
+    const detail = readSource("pages/ResourcePage/ResourceDetailPage.tsx");
+    expect(
+      detail.includes("resourceTextPreviewPath"),
+      "详情页文本展示与编辑目标必须经 domain resourceTextPreviewPath 取材",
+    ).toBe(true);
+    const radialContainer = readSource("components/RadialMenu/index.tsx");
+    expect(
+      radialContainer.includes("item.textPreviewPath"),
+      "径向菜单预览面板与文件拖出必须消费 textPreviewPath 判定字段",
+    ).toBe(true);
+    expect(
+      radialContainer.includes("TEXT_EXTENSIONS.has"),
+      "径向菜单禁止在容器内按扩展名自行判定文本取材（判定收口在 domain）",
+    ).toBe(false);
+  });
 });

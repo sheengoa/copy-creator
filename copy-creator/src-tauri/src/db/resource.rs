@@ -32,8 +32,8 @@ pub fn read_text_file_content(app: AppHandle, path: String) -> Result<String, St
 }
 
 /// 保存资源详情页编辑后的文本正文。文件承载的文本是唯一事实来源；
-/// 数据库记录（id 非空时）的 content 与文件同步。编辑不改动 sort_order，
-/// 避免卡片在列表里跳位。
+/// 数据库记录（id 非空时）保存后归一为文件承载形态（type=file、
+/// content=文件路径）。编辑不改动 sort_order，避免卡片在列表里跳位。
 #[tauri::command]
 pub fn write_resource_text_content(
     app: AppHandle,
@@ -54,14 +54,19 @@ pub fn write_resource_text_content(
     std::fs::write(&target, format!("{trimmed}\n"))
         .map_err(|e| format!("写入资源文件失败: {e}"))?;
 
-    let record_type = crate::clipboard::classify_text_record(&trimmed);
+    // 保存后记录归一为文件承载形态：粘贴/拖出/预览统一经文件读取，永远
+    // 拿到最新内容。此前曾把 type 重分类为 text/link 并把全文写进 content，
+    // 记录从此以 DB 副本取材——外部编辑文件后粘贴与详情页都是过期内容，
+    // 径向菜单的文件拖出也随之失效；存量降级行由启动迁移
+    // normalize_file_backed_text_records 归一。
+    let path_text = target.to_string_lossy().to_string();
     if let Some(id) = id.as_deref() {
         let update_result = {
             let state = app.state::<DbState>();
             let conn = state.conn.lock().map_err(|e| e.to_string())?;
             conn.execute(
-                "UPDATE clipboard_records SET content = ?1, type = ?2 WHERE id = ?3",
-                params![&trimmed, record_type, id],
+                "UPDATE clipboard_records SET type = 'file', content = ?1 WHERE id = ?2",
+                params![&path_text, id],
             )
             .map_err(|e| e.to_string())
         };
@@ -70,7 +75,57 @@ pub fn write_resource_text_content(
         }
     }
     let _ = app.emit("resource-groups-changed", ());
-    Ok(serde_json::json!({ "content": trimmed, "record_type": record_type }))
+    Ok(serde_json::json!({
+        "content": path_text,
+        "record_type": "file",
+    }))
+}
+
+/// 启动归一：修复历史「详情页编辑降级」的资源记录。write_resource_text_content
+/// 曾把文件承载文本资源的 type 重分类为 text/link、content 换成全文副本，
+/// 导致粘贴/拖出/预览绕过文件，外部编辑文件后各处取到过期内容。凡
+/// resource_path 指向存在的文本扩展名文件的记录，统一归一为文件承载形态
+/// （type='file'、content=文件路径）。幂等，随 ensure_schema 每次启动执行；
+/// 返回归一条数（供测试断言）。
+pub(crate) fn normalize_file_backed_text_records(conn: &Connection) -> usize {
+    let rows: Vec<(String, String)> = match conn
+        .prepare(
+            "SELECT id, resource_path FROM clipboard_records
+             WHERE storage_mode = 'resource'
+               AND type IN ('text', 'link')
+               AND COALESCE(resource_path, '') <> ''",
+        )
+        .and_then(|mut stmt| {
+            stmt.query_map([], |row| {
+                Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
+            })
+            .map(|rows| rows.filter_map(|row| row.ok()).collect())
+        }) {
+        Ok(rows) => rows,
+        Err(error) => {
+            log::warn!("扫描待归一的文件承载文本记录失败: {error}");
+            return 0;
+        }
+    };
+    let mut normalized = 0;
+    for (id, path_text) in rows {
+        let path = PathBuf::from(&path_text);
+        if !crate::media_kind::is_text_extension(&path) || !path.is_file() {
+            continue;
+        }
+        match conn.execute(
+            "UPDATE clipboard_records SET type = 'file', content = ?1 WHERE id = ?2",
+            params![&path_text, &id],
+        ) {
+            Ok(updated) if updated > 0 => normalized += 1,
+            Ok(_) => {}
+            Err(error) => log::warn!("归一文件承载文本记录 {id} 失败: {error}"),
+        }
+    }
+    if normalized > 0 {
+        log::info!("已归一 {normalized} 条编辑降级的文件承载文本记录");
+    }
+    normalized
 }
 
 // ---- Tauri Commands ----
