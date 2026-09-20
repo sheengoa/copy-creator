@@ -55,8 +55,9 @@ write(
 );
 
 const cargoLock = readFileSync(join(root, "src-tauri/Cargo.lock"), "utf8");
+// 行尾兼容：Windows 检出为 CRLF 时 \n 单独匹配不到条目，用 \r?\n 兼容两种检出。
 const lockUpdated = cargoLock.replace(
-  /(\[\[package\]\]\nname = "copy-creator"\nversion = ")[^"]+(")/,
+  /(\[\[package\]\]\r?\nname = "copy-creator"\r?\nversion = ")[^"]+(")/,
   `$1${version}$2`,
 );
 if (lockUpdated === cargoLock) {
