@@ -2,7 +2,7 @@ import { RadialImageBanner, ResourceItemVisual } from "./ResourceItemVisual";
 // 径向菜单窗口专属样式：随动态 import 的 root 分包，主窗口不加载。
 import "../../styles/radial-menu.css";
 import { readResourceTextPreview, readTextFileContent, readQuickInputTextPreview } from "../../domain/mediaAssets";
-import { useEffect, useRef, useState, useCallback, useMemo, type CSSProperties } from "react";
+import { useEffect, useLayoutEffect, useRef, useState, useCallback, useMemo, type CSSProperties } from "react";
 import { createPortal } from "react-dom";
 import { useTranslation } from "react-i18next";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
@@ -17,6 +17,7 @@ import {
 } from "../../stores/phraseStore";
 import { useSettingsStore } from "../../stores/settingsStore";
 import { shouldUseTerminalPasteForMouseTrigger } from "../../utils/pasteMode";
+import { applyListScrollAnchor, captureListScrollAnchor, type ListScrollAnchor } from "../../utils/scrollAnchor";
 import {
   getClipboardRadialDragKind,
   getPhraseRadialDragKind,
@@ -237,6 +238,10 @@ export default function RadialMenu() {
   const resourceGroupMenuAnchorRef = useRef<HTMLButtonElement>(null);
   const categoriesScrollRef = useRef<HTMLDivElement>(null);
   const listRef = useRef<HTMLDivElement>(null);
+  // 列表滚动锚点：后台整窗替换 records 时（粘贴使用重排/资源增删/打开
+  // 菜单刷新），WebKitGTK 无 scroll anchoring，停留位置会被顶走。随
+  // 滚动持续记住「视口顶条目 + 偏移」，同视图内容更新后重新对位。
+  const scrollAnchorRef = useRef<ListScrollAnchor | null>(null);
   const phraseGroupIdRef = useRef<string | null>(ALL_PHRASES_GROUP_ID);
   const previewRequestRef = useRef(0);
   const previewRef = useRef<PreviewState | null>(null);
@@ -1534,6 +1539,42 @@ export default function RadialMenu() {
   const backToTop = useBackToTop({
     resetKey: `${activeTab}|${clipboardCategory}|${phraseGroupId}|${resourceGroup ?? ""}|${items.length}`,
   });
+
+  // ── 滚动停留位置保持（滚动锚点）──
+  // 视图标识不含 items.length：内容多寡变化恰恰是需要恢复对位的场景，
+  // 只有 tab/类别/分组本身切换（视图换内容）才放弃旧锚点。
+  const listViewKey = `${activeTab}|${clipboardCategory}|${phraseGroupId}|${resourceGroup ?? ""}`;
+
+  // items 每次变化（后台重载/重排）后重对位，再按新位置刷新锚点。
+  // useLayoutEffect 在绘制前完成，用户看不到跳动帧。
+  useLayoutEffect(() => {
+    const list = listRef.current;
+    if (!list) return;
+    const previous = scrollAnchorRef.current;
+    if (previous && previous.viewKey === listViewKey) {
+      applyListScrollAnchor(list, previous, listViewKey);
+    }
+    const captured = captureListScrollAnchor(list, listViewKey);
+    // 空态（无条目）不覆盖旧锚点：列表短暂清空又填充（如打开菜单的
+    // 重载序列）时，旧锚点仍能把位置找回来。
+    if (captured && (captured.itemId !== null || previous?.viewKey !== listViewKey)) {
+      scrollAnchorRef.current = captured;
+    }
+  }, [items, listViewKey]);
+
+  // 用户滚动期间持续刷新锚点，保证下一次内容替换用的是最新停留位置。
+  useEffect(() => {
+    const list = listRef.current;
+    if (!list) return;
+    const onScroll = () => {
+      const captured = captureListScrollAnchor(list, listViewKey);
+      if (captured && captured.itemId !== null) {
+        scrollAnchorRef.current = captured;
+      }
+    };
+    list.addEventListener("scroll", onScroll, { passive: true });
+    return () => list.removeEventListener("scroll", onScroll);
+  }, [listViewKey]);
 
   const categories = activeTab === "clipboard"
     ? RECORD_CATEGORY_KEYS.map((key) => ({ key, label: t(`clipboard.${key}`) }))

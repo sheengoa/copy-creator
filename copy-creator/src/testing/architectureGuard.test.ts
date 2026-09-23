@@ -425,4 +425,30 @@ describe("架构守卫：领域规则必须全局共享", () => {
       "新建窗口保存失败必须经共享解析器区分可行动错误，禁止一律回退泛化「请重试」",
     ).toBe(true);
   });
+
+  it("规则 21：列表滚动停留位置必须抗后台整窗替换（滚动锚点）", () => {
+    // 回归锚点：径向窗口常驻，「记住浏览位置」依赖列表 DOM 不重建；但
+    // records 会被后台事件整窗替换——资源「全部」视图按最近使用排序，
+    // 任意窗口粘贴/收藏都会把条目搬到列表顶部，资源目录增删会在视口
+    // 上方插拔行，WebKitGTK 无 scroll anchoring，停留内容随之位移，曾
+    // 表现为资源区滚动位置偶发重置。捕获/恢复逻辑唯一来源
+    // utils/scrollAnchor.ts，径向列表必须消费；主窗口资源页同类保护
+    // （pendingScrollTopRef 像素兜底）不得移除。
+    const anchorUtil = readSource("utils/scrollAnchor.ts");
+    expect(
+      anchorUtil.includes("captureListScrollAnchor")
+        && anchorUtil.includes("applyListScrollAnchor"),
+      "滚动锚点捕获/恢复逻辑必须集中在 utils/scrollAnchor.ts",
+    ).toBe(true);
+    const radial = readSource("components/RadialMenu/index.tsx");
+    expect(
+      radial.includes("applyListScrollAnchor") && radial.includes("captureListScrollAnchor"),
+      "径向列表必须在 items 更新后恢复同视图滚动停留位置（后台重排不得顶走视口）",
+    ).toBe(true);
+    const resourcePage = readSource("pages/ResourcePage.tsx");
+    expect(
+      resourcePage.includes("pendingScrollTopRef"),
+      "主窗口资源页的滚动位置保持机制不得移除",
+    ).toBe(true);
+  });
 });
