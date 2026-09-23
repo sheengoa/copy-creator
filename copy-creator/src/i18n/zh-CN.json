@@ -144,6 +144,8 @@
     "loadError": "资源列表加载失败",
     "loadContentError": "资源内容读取失败",
     "saveError": "资源保存失败，请重试",
+    "nameExistsInGroup": "该分组已存在同名文件：{{name}}，请换一个名称",
+    "groupMissing": "目标分组不存在，可能已被删除，请重新选择分组",
     "createPlaceholder": "输入要保存的资源内容...",
     "imagePreview": "资源图片预览",
     "closeImagePreview": "关闭图片预览",

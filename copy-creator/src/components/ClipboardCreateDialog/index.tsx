@@ -15,6 +15,7 @@ import { usePersistWindowSize } from "../../hooks/usePersistWindowSize";
 import type { ClipboardStorageMode, ResourceFolder } from "../../types";
 import { isResourceRecord } from "../../domain/records";
 import { flattenResourceFoldersVisible } from "../../domain/groups";
+import { parseResourceSaveError } from "../../utils/resourceSaveError";
 import { Icons } from "../Icons";
 
 interface StashRecord {
@@ -52,6 +53,7 @@ export default function ClipboardCreateDialog() {
   const [dropdownOpen, setDropdownOpen] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const editorRef = useRef<StashEditorHandle>(null);
+  const resourceNameInputRef = useRef<HTMLInputElement>(null);
   const lastEnterAtRef = useRef(0);
   // ── 查找替换（Ctrl+F）──
   const [findOpen, setFindOpen] = useState(false);
@@ -212,6 +214,13 @@ export default function ClipboardCreateDialog() {
     getCurrentWindow().hide();
   }, []);
 
+  // 名称相关的保存失败（重名/命名非法）把焦点送回名称输入框，用户改个
+  // 名字就能直接重存；其余失败重试才有意义，不动焦点。
+  const focusResourceNameInput = useCallback(() => {
+    resourceNameInputRef.current?.focus();
+    resourceNameInputRef.current?.select();
+  }, []);
+
   const handleSave = useCallback(async () => {
     const trimmed = content.trim();
     if (!trimmed || saving || images.some((image) => image.pending)) return;
@@ -235,11 +244,26 @@ export default function ClipboardCreateDialog() {
       hideWindow();
     } catch (e) {
       console.error("Failed to save clipboard record:", e);
-      setError(t("resources.saveError"));
+      // 后端给出的具体原因里，重名/分组失效/命名非法都是用户可行动的，
+      // 必须原样或转译后呈现；只有无法识别的失败才回退「请重试」。
+      const parsed = parseResourceSaveError(e);
+      if (parsed?.kind === "nameExists") {
+        setError(t("resources.nameExistsInGroup", { name: parsed.fileName }));
+        focusResourceNameInput();
+      } else if (parsed?.kind === "groupMissing") {
+        setError(t("resources.groupMissing"));
+        // 对话框存活期间分组可能被别的窗口删除，刷新候选列表。
+        void loadResourceGroups();
+      } else if (parsed?.kind === "nameInvalid") {
+        setError(parsed.message);
+        focusResourceNameInput();
+      } else {
+        setError(t("resources.saveError"));
+      }
     } finally {
       setSaving(false);
     }
-  }, [content, editingId, images, resourceGroupName, resourceName, saving, storageMode, hideWindow, resetDraft, t]);
+  }, [content, editingId, images, resourceGroupName, resourceName, saving, storageMode, hideWindow, focusResourceNameInput, loadResourceGroups, resetDraft, t]);
 
   const handleSelectRecord = useCallback(async (record: StashRecord) => {
     if (loadingRecordId) return;
@@ -436,6 +460,7 @@ export default function ClipboardCreateDialog() {
           </label>
           <input
             id="clipboard-create-resource-name-input"
+            ref={resourceNameInputRef}
             className="clipboard-create-resource-name-input"
             value={resourceName}
             maxLength={100}

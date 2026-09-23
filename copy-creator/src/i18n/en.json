@@ -133,6 +133,8 @@
     "loadError": "Failed to load resources",
     "loadContentError": "Failed to load resource content",
     "saveError": "Failed to save resource, please retry",
+    "nameExistsInGroup": "\"{{name}}\" already exists in this group. Choose a different name.",
+    "groupMissing": "The target group no longer exists. Please choose another group.",
     "createPlaceholder": "Enter content to save as a resource...",
     "imagePreview": "Resource image preview",
     "closeImagePreview": "Close image preview",

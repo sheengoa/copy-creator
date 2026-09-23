@@ -401,4 +401,28 @@ describe("架构守卫：领域规则必须全局共享", () => {
       "径向菜单禁止在容器内按扩展名自行判定文本取材（判定收口在 domain）",
     ).toBe(false);
   });
+
+  it("规则 20：后端保存错误结构知识唯一源——界面禁止散落匹配错误文案", () => {
+    // 回归锚点：保存资源重名时后端返回「已存在同名文件：xxx」，新建窗口
+    // 曾把它吞成「保存失败，请重试」，用户重试永远失败。可行动错误（重名/
+    // 分组失效/命名非法）必须经共享解析器转译后提示；错误文案的结构知识
+    // 只允许存在于 utils/resourceSaveError.ts，防止各界面复制粘贴 startsWith。
+    const parser = readSource("utils/resourceSaveError.ts");
+    expect(
+      parser.includes("已存在同名文件") && parser.includes("资源分组不存在"),
+      "保存错误解析器必须维护后端错误文案契约（与 src-tauri 测试锁定文案一致）",
+    ).toBe(true);
+    const offenders = allSources
+      .filter((file) => !toPosix(file).endsWith("/utils/resourceSaveError.ts"))
+      .filter((file) => /已存在同名文件|资源分组不存在/.test(sourceOf(file)));
+    expect(
+      offenders.map(toPosix),
+      "保存错误文案匹配只允许出现在 utils/resourceSaveError.ts，界面一律 import parseResourceSaveError",
+    ).toEqual([]);
+    const createDialog = readSource("components/ClipboardCreateDialog/index.tsx");
+    expect(
+      createDialog.includes("parseResourceSaveError"),
+      "新建窗口保存失败必须经共享解析器区分可行动错误，禁止一律回退泛化「请重试」",
+    ).toBe(true);
+  });
 });
