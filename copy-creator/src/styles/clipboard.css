@@ -546,6 +546,13 @@
   margin-top: 2px;
 }
 
+.label-panel-error {
+  color: var(--danger);
+  font-size: var(--text-sm);
+  line-height: 1.35;
+  word-break: break-all;
+}
+
 .label-panel-actions .dialog-btn {
   padding: 5px 14px;
   font-size: 12px;

@@ -48,9 +48,11 @@ export default function ApiKeyLabelPanel({
 
   const [note, setNote] = useState(existingLabel?.note || "");
   const [saving, setSaving] = useState(false);
+  const [error, setError] = useState<string | null>(null);
 
   const handleSave = async () => {
     setSaving(true);
+    setError(null);
     const trimmed = note.trim();
     const label = {
       service: defaultService,
@@ -59,11 +61,9 @@ export default function ApiKeyLabelPanel({
       is_expired: false,
     };
 
-    // Close panel and update store immediately
-    updateRecordLabel(recordId, label);
-    onSave();
-
     try {
+      // 先落库再关面板：曾先乐观更新并关闭、失败只写日志，用户以为保存
+      // 成功，重启后标签丢失且无任何提示。
       await invoke("save_api_key_label", {
         recordId,
         keyPreview,
@@ -71,8 +71,13 @@ export default function ApiKeyLabelPanel({
         apiBase: label.api_base,
         note: label.note,
       });
+      updateRecordLabel(recordId, label);
+      onSave();
     } catch (e) {
       console.error("Failed to save label:", e);
+      setError(String(e));
+    } finally {
+      setSaving(false);
     }
   };
 
@@ -88,6 +93,7 @@ export default function ApiKeyLabelPanel({
           maxLength={10}
         />
       </div>
+      {error && <div className="label-panel-error" role="alert">{error}</div>}
       <div className="label-panel-actions">
         <button className="label-panel-chip-btn secondary" onClick={onCancel} type="button">
           {t("common.cancel")}
