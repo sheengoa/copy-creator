@@ -73,7 +73,9 @@ export default function ResourceDetailPage({
   const [savedContent, setSavedContent] = useState("");
   const [contentSaving, setContentSaving] = useState(false);
   const [contentSaved, setContentSaved] = useState(false);
-  const [contentSaveError, setContentSaveError] = useState(false);
+  // 正文保存失败的后端原因（超 1 MB、文件被外部替换等），null=无错误；
+  // 空串表示拿不到具体原因，展示时回退泛化文案。
+  const [contentSaveError, setContentSaveError] = useState<string | null>(null);
   const contentSavedTimerRef = useRef<number | null>(null);
   const contentEditorRef = useRef<HTMLTextAreaElement | null>(null);
   const stageRef = useRef<HTMLDivElement | null>(null);
@@ -93,7 +95,7 @@ export default function ResourceDetailPage({
     setRenameError(null);
     setContentEditing(false);
     setContentSaved(false);
-    setContentSaveError(false);
+    setContentSaveError(null);
   }, [record.id, record.resource_note]);
 
   useEffect(() => () => {
@@ -399,7 +401,7 @@ export default function ResourceDetailPage({
     const nextDraft =
       contentDraft.slice(0, start) + findReplaceText + contentDraft.slice(start + findQuery.length);
     setContentDraft(nextDraft);
-    setContentSaveError(false);
+    setContentSaveError(null);
     const positions = findMatchPositions(nextDraft, findQuery, findCaseSensitive);
     const shifted = positions.findIndex((position) => position >= start + findReplaceText.length);
     const target = shifted === -1 ? 0 : shifted;
@@ -417,7 +419,7 @@ export default function ResourceDetailPage({
     }
     result += contentDraft.slice(cursor);
     setContentDraft(result);
-    setContentSaveError(false);
+    setContentSaveError(null);
     setFindIndex(0);
     contentEditorRef.current?.focus();
   }, [contentDraft, findMatches, findQuery, findReplaceText]);
@@ -425,20 +427,20 @@ export default function ResourceDetailPage({
   const startContentEdit = () => {
     setContentDraft(fullTextContent ?? "");
     setContentSaved(false);
-    setContentSaveError(false);
+    setContentSaveError(null);
     setContentEditing(true);
   };
 
   const cancelContentEdit = () => {
     setContentEditing(false);
     setContentDraft("");
-    setContentSaveError(false);
+    setContentSaveError(null);
   };
 
   const handleSaveContent = async () => {
     if (!textEditPath || contentSaving || !contentDirty) return;
     setContentSaving(true);
-    setContentSaveError(false);
+    setContentSaveError(null);
     try {
       const saved = await invoke<{ content: string; record_type?: string }>(
         "write_resource_text_content",
@@ -464,8 +466,10 @@ export default function ResourceDetailPage({
         type: "file",
         content: saved.content,
       });
-    } catch {
-      setContentSaveError(true);
+    } catch (error) {
+      // 超长、文件被外部替换等失败重试无效，后端原因必须可见；拿不到
+      // 原因时展示层回退泛化文案。
+      setContentSaveError(typeof error === "string" ? error : "");
     } finally {
       setContentSaving(false);
     }
@@ -510,7 +514,11 @@ export default function ResourceDetailPage({
             </>
           )}
           {contentSaved && <span className="resource-content-saved" role="status">{t("resources.contentSaved")}</span>}
-          {contentSaveError && <span className="resource-content-error" role="alert">{t("resources.contentSaveFailed")}</span>}
+          {contentSaveError !== null && (
+            <span className="resource-content-error" role="alert">
+              {contentSaveError || t("resources.contentSaveFailed")}
+            </span>
+          )}
           <button type="button" className="resource-secondary-button" onClick={() => void onCopy(record)}>
             {Icons.copy}
             <span>{t("resources.copy")}</span>
@@ -676,7 +684,7 @@ export default function ResourceDetailPage({
                 aria-label={t("resources.editContent")}
                 onChange={(event) => {
                   setContentDraft(event.target.value);
-                  setContentSaveError(false);
+                  setContentSaveError(null);
                 }}
                 onKeyDown={(event) => {
                   // Escape 只退出编辑（放弃改动），不触发页面级返回。
