@@ -328,7 +328,9 @@ pub fn run() {
                     match shortcut::register_keyboard_shortcut(app.handle(), &key) {
                         Ok(()) => *shortcut::MAIN_SHORTCUT_KEY.lock().unwrap() = key,
                         Err(e) => {
-                            log::warn!("Failed to register keyboard shortcut '{}': {}", key, e)
+                            log::warn!("Failed to register keyboard shortcut '{}': {}", key, e);
+                            // 注册失败用户在界面上毫无感知（以为应用坏了），主窗口补一条提示
+                            shortcut::record_shortcut_failure("main", &key, &e.to_string());
                         }
                     }
                 }
@@ -340,7 +342,10 @@ pub fn run() {
                 if !key.is_empty() {
                     match shortcut::register_keyboard_shortcut(app.handle(), &key) {
                         Ok(()) => *shortcut::RADIAL_SHORTCUT_KEY.lock().unwrap() = key,
-                        Err(e) => log::warn!("Failed to register radial shortcut '{}': {}", key, e),
+                        Err(e) => {
+                            log::warn!("Failed to register radial shortcut '{}': {}", key, e);
+                            shortcut::record_shortcut_failure("radial", &key, &e.to_string());
+                        }
                     }
                 }
             }
@@ -354,11 +359,14 @@ pub fn run() {
                 if !key.is_empty() {
                     match shortcut::register_keyboard_shortcut(app.handle(), &key) {
                         Ok(()) => *shortcut::CLIPBOARD_CREATE_SHORTCUT_KEY.lock().unwrap() = key,
-                        Err(e) => log::warn!(
-                            "Failed to register clipboard create shortcut '{}': {}",
-                            key,
-                            e
-                        ),
+                        Err(e) => {
+                            log::warn!(
+                                "Failed to register clipboard create shortcut '{}': {}",
+                                key,
+                                e
+                            );
+                            shortcut::record_shortcut_failure("clipboard_create", &key, &e.to_string());
+                        }
                     }
                 }
             }
@@ -482,6 +490,7 @@ pub fn run() {
             backup::select_backup_save_path,
             backup::select_backup_zip_path,
             db::move_phrases_to_top,
+            shortcut::take_startup_shortcut_failures,
             toggle_always_on_top,
             autostart::set_autostart,
             autostart::is_autostart_enabled,

@@ -685,6 +685,11 @@
   pointer-events: none;
 }
 
+/* 快捷键注册失败提示与 API Key 提示同用一套 toast 样式，向上错开避免同现时叠放 */
+.shortcut-toast-container {
+  bottom: 78px;
+}
+
 .api-toast {
   display: flex;
   align-items: flex-start;

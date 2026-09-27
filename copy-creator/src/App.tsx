@@ -9,6 +9,7 @@ import ResourcePage from "./pages/ResourcePage";
 import PhrasePage from "./pages/PhrasePage";
 import SettingsContent from "./components/SettingsContent";
 import ApiKeyToast from "./components/ApiKeyToast";
+import ShortcutToast from "./components/ShortcutToast";
 import { WindowResizeHandles } from "./components/WindowResizeHandles";
 import { usePersistWindowSize } from "./hooks/usePersistWindowSize";
 import { useSettingsStore } from "./stores/settingsStore";
@@ -283,6 +284,7 @@ function App() {
       <WindowResizeHandles />
     </div>
     <ApiKeyToast />
+    <ShortcutToast />
     </>
   );
 }

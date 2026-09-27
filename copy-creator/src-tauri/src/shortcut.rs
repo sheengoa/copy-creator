@@ -11,6 +11,38 @@ pub static MAIN_SHORTCUT_KEY: Mutex<String> = Mutex::new(String::new());
 pub static RADIAL_SHORTCUT_KEY: Mutex<String> = Mutex::new(String::new());
 pub static CLIPBOARD_CREATE_SHORTCUT_KEY: Mutex<String> = Mutex::new(String::new());
 
+// 启动期快捷键注册失败记录。setup 阶段的记录时机与主窗口 webview 挂载
+// 互有先后（窗口创建耗时 1-2 秒不定），事件推送存在竞态窗口，因此不发
+// 事件——前端挂载后带短重试调用 take_startup_shortcut_failures 拉取
+// （拉取即清空），由前端保证最终可见。
+#[derive(Clone, serde::Serialize)]
+pub struct ShortcutFailure {
+    pub action: String,
+    pub key: String,
+    pub error: String,
+}
+
+static STARTUP_SHORTCUT_FAILURES: Mutex<Vec<ShortcutFailure>> = Mutex::new(Vec::new());
+
+pub fn record_shortcut_failure(action: &str, key: &str, error: &str) {
+    if let Ok(mut guard) = STARTUP_SHORTCUT_FAILURES.lock() {
+        guard.push(ShortcutFailure {
+            action: action.to_string(),
+            key: key.to_string(),
+            error: error.to_string(),
+        });
+    }
+}
+
+#[tauri::command]
+pub fn take_startup_shortcut_failures() -> Vec<ShortcutFailure> {
+    std::mem::take(
+        &mut *STARTUP_SHORTCUT_FAILURES
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner()),
+    )
+}
+
 /// RAII guard that ensures TOGGLING is always reset, even on panic.
 struct ToggleGuard;
 

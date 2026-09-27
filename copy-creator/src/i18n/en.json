@@ -27,6 +27,7 @@
     "clipboardCreateShortcut": "New clipboard input",
     "shortcutPlaceholder": "Click record button to set keyboard shortcut",
     "shortcutRegistrationFailed": "Shortcut registration failed, possibly due to a system or application conflict. Try another combination.",
+    "shortcutToastTitle": "Failed to register {{name}} ({{key}})",
     "recordShortcut": "Record",
     "stopRecord": "Stop",
     "recording": "Press shortcut combination...",

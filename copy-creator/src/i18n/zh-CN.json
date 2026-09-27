@@ -27,6 +27,7 @@
     "radialShortcut": "快捷菜单呼出快捷键",
     "shortcutPlaceholder": "点击录制按钮设置键盘快捷键",
     "shortcutRegistrationFailed": "快捷键注册失败，可能与系统或其他应用冲突，请更换组合后重试",
+    "shortcutToastTitle": "{{name}}（{{key}}）注册失败",
     "recordShortcut": "录制",
     "stopRecord": "停止",
     "recording": "按下快捷键组合...",
