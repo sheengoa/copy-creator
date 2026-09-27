@@ -1370,8 +1370,11 @@
     padding: 8px 14px;
   }
 
-  /* 保存是主操作，用更宽内边距保持层级 */
+  /* 保存是主操作，用更宽内边距保持层级。min-width 须在本档显式压掉：
+     基础 .save 规则（132px）特异性高于上方 .dialog-btn 的 min-width:0，
+     缺本行时最小宽度下动作区超宽，左侧 chips 被「取消」盖住 */
   .clipboard-create-actions .dialog-btn.save {
+    min-width: 0;
     padding: 8px 22px;
   }
 }

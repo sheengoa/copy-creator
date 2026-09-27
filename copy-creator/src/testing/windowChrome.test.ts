@@ -72,7 +72,9 @@ describe("standalone window chrome", () => {
     // 溢出 chip 边界与相邻元素互压，也不得切出半个字的残影。
     expect(getRule(css, ".clipboard-create-bar-left .clipboard-create-stash-picker")).toContain("min-width: 68px");
     expect(getRule(css, ".clipboard-create-bar-left .clipboard-create-group-picker")).toContain("min-width: 60px");
-    expect(css).toMatch(/\.dialog-btn\.save\s*\{[^}]*padding: 8px 22px;/);
+    // 基础 .save 规则（min-width:132px）特异性高于本档 .dialog-btn 的 min-width:0，
+    // 紧凑档必须对 .save 显式压掉，否则最小宽度下动作区超宽、左侧 chips 被「取消」盖住。
+    expect(css).toMatch(/\.dialog-btn\.save\s*\{[^}]*min-width: 0;[^}]*padding: 8px 22px;/);
   });
 
   it("loads existing records for the injected destination mode", () => {
