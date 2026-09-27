@@ -132,11 +132,12 @@ pub fn init_radial_menu_state(app: &AppHandle) {
         set_radial_menu_enabled_flag(val == "1");
     }
     // 按平台输出能力说明，避免 Linux 专属文案误导其他平台的日志排查。
-    // Linux 无全局鼠标钩子，径向菜单只能由快捷键呼出；Windows 同样仅
+    // Linux 无低级键盘钩子，径向菜单只能由快捷键呼出；Windows 同样仅
     // 支持快捷键（含 Win 组合键时经低级键盘钩子拦截）。
     #[cfg(target_os = "linux")]
     log::info!(
-        "Mouse hook not available on Linux; radial menu accessible via keyboard shortcuts only"
+        "Low-level keyboard hook (Win-combos) is Windows-only; on Linux use in-app global \
+         shortcuts (X11) or system shortcuts + copy-creator-ctl (Wayland)"
     );
     #[cfg(not(target_os = "linux"))]
     log::info!("Radial menu enabled; triggered via global keyboard shortcut");
