@@ -438,19 +438,21 @@ export default function ClipboardCreateDialog() {
         <span className="clipboard-create-title">
           {editingId ? t("resources.edit") : t("clipboard.create")}
         </span>
-        <WindowControlButtons />
-        <button
-          type="button"
-          className="clipboard-create-close-btn"
-          onClick={hideWindow}
-          title={t("common.cancel")}
-          aria-label={t("common.cancel")}
-        >
-          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" aria-hidden="true">
-            <line x1="18" y1="6" x2="6" y2="18" />
-            <line x1="6" y1="6" x2="18" y2="18" />
-          </svg>
-        </button>
+        <div className="window-header-actions">
+          <WindowControlButtons />
+          <button
+            type="button"
+            className="clipboard-create-close-btn"
+            onClick={hideWindow}
+            title={t("common.cancel")}
+            aria-label={t("common.cancel")}
+          >
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" aria-hidden="true">
+              <line x1="18" y1="6" x2="6" y2="18" />
+              <line x1="6" y1="6" x2="18" y2="18" />
+            </svg>
+          </button>
+        </div>
       </div>
       {isResource && (
         <div className="clipboard-create-resource-name">

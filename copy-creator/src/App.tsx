@@ -250,13 +250,15 @@ function App() {
           <h3 className="panel-window-title" data-tauri-drag-region>
             {isSettingsPanel ? t("settings.title") : panelInfo ? t(panelInfo.titleKey) : ""}
           </h3>
-          <WindowControlButtons />
-          <button className="window-close-btn" onClick={handleHide} title={t("common.hide")}>
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-              <line x1="18" y1="6" x2="6" y2="18" />
-              <line x1="6" y1="6" x2="18" y2="18" />
-            </svg>
-          </button>
+          <div className="window-header-actions">
+            <WindowControlButtons />
+            <button className="window-close-btn" onClick={handleHide} title={t("common.hide")}>
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <line x1="18" y1="6" x2="6" y2="18" />
+                <line x1="6" y1="6" x2="18" y2="18" />
+              </svg>
+            </button>
+          </div>
         </div>
         <div className="panel-window-body">
           {PANEL_KEYS.map((panelKey) => {

@@ -210,6 +210,13 @@ describe("standalone window chrome", () => {
 
     expect(appSource).toContain("<WindowControlButtons />");
     expect(dialogSource).toContain("<WindowControlButtons />");
+    // 头部为 space-between，控制按钮必须与关闭键同容器，否则被分散排布。
+    expect(appSource).toContain('className="window-header-actions"');
+    expect(dialogSource).toContain('className="window-header-actions"');
+    expect(appSource.indexOf("window-header-actions")).toBeLessThan(
+      appSource.indexOf("window-close-btn"),
+    );
+    expect(getRule(componentsCss, ".window-header-actions")).toContain("display: flex;");
     expect(controlSource).toContain("minimize()");
     expect(controlSource).toContain("toggleMaximize()");
     // 共享规则以分组选择器书写，取组内行首的第二选择器提取规则体。

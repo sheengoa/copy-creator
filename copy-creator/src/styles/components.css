@@ -1080,6 +1080,14 @@ input:focus-visible + .selection-checkbox {
   box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.1);
 }
 
+/* 无边框窗口头部右侧的动作组：让控制按钮聚在关闭键旁，
+   不被头部 space-between 分散排布 */
+.window-header-actions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
 /* 无边框窗口共用的最小化/最大化按钮；各窗口经 --window-btn-* 变量适配外观 */
 .window-min-btn,
 .window-max-btn {
