@@ -264,3 +264,30 @@ describe("phraseStore all-phrases view", () => {
     expect(after.find((p) => p.id === "a")?.use_count).toBe(2);
   });
 });
+
+describe("phraseStore 加载态", () => {
+  beforeEach(() => {
+    invokeMock.mockReset();
+    invokeMock.mockResolvedValue([]);
+    usePhraseStore.setState({ phrases: [], loading: false, loadedOnce: false });
+  });
+
+  it("首次 loadPhrases 完成后置 loadedOnce，供骨架屏只亮首屏", async () => {
+    invokeMock.mockResolvedValue([
+      {
+        ...basePhrase,
+        content: "hello",
+        input_type: "text",
+        source_path: "",
+        file_size: 0,
+      },
+    ]);
+    expect(usePhraseStore.getState().loadedOnce).toBe(false);
+
+    await usePhraseStore.getState().loadPhrases("group-1");
+
+    const state = usePhraseStore.getState();
+    expect(state.loadedOnce).toBe(true);
+    expect(state.loading).toBe(false);
+  });
+});

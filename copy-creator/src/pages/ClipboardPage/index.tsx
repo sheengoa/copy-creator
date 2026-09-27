@@ -33,6 +33,7 @@ export default function ClipboardPage() {
     records,
     search,
     loading,
+    loadedOnce,
     hasMore,
     category,
     init,
@@ -50,6 +51,7 @@ export default function ClipboardPage() {
       records: s.records,
       search: s.search,
       loading: s.loading,
+      loadedOnce: s.loadedOnce,
       hasMore: s.hasMore,
       category: s.category,
       init: s.init,
@@ -384,7 +386,7 @@ export default function ClipboardPage() {
         />
       )}
 
-      {loading && records.length === 0 ? (
+      {loading && records.length === 0 && !loadedOnce ? (
         <div className="clipboard-list">
           {[1, 2, 3, 4].map((i) => (
             <div key={i} className="notification skeleton">

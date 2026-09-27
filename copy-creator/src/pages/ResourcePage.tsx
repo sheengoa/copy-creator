@@ -75,6 +75,7 @@ export default function ResourcePage() {
     records,
     search,
     loading,
+    loadedOnce,
     loadError,
     hasMore,
     init,
@@ -91,6 +92,7 @@ export default function ResourcePage() {
       records: s.records,
       search: s.search,
       loading: s.loading,
+      loadedOnce: s.loadedOnce,
       loadError: s.loadError,
       hasMore: s.hasMore,
       init: s.init,
@@ -1377,7 +1379,7 @@ export default function ResourcePage() {
           </div>
         )}
 
-        {loading && records.length === 0 ? (
+        {loading && records.length === 0 && !loadedOnce ? (
           <div className="resource-list resource-list-skeleton" aria-busy="true">
             {[1, 2, 3, 4].map((item) => (
               <div className="resource-card-skeleton" key={item}>

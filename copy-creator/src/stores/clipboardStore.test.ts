@@ -609,3 +609,24 @@ describe("records store instances", () => {
     expect(clipboardAfter.search).toBe(clipboardBefore.search);
   });
 });
+
+describe("clipboardStore 加载态", () => {
+  beforeEach(() => {
+    invokeMock.mockReset();
+    invokeMock.mockResolvedValue([]);
+    useClipboardStore.setState({ records: [], loading: false, loadedOnce: false });
+    useResourceStore.setState({ records: [], loading: false, loadedOnce: false });
+  });
+
+  it("loadRecords 完成后置各自实例的 loadedOnce（clipboard 与 resource 互不影响）", async () => {
+    expect(useClipboardStore.getState().loadedOnce).toBe(false);
+    expect(useResourceStore.getState().loadedOnce).toBe(false);
+
+    await useClipboardStore.getState().loadRecords();
+    expect(useClipboardStore.getState().loadedOnce).toBe(true);
+    expect(useResourceStore.getState().loadedOnce).toBe(false);
+
+    await useResourceStore.getState().loadRecords();
+    expect(useResourceStore.getState().loadedOnce).toBe(true);
+  });
+});

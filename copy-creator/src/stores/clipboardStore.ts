@@ -92,6 +92,8 @@ interface ClipboardState {
   search: string;
   loading: boolean;
   loadError: string | null;
+  /** 首次数据加载已完成：其后类别/分组切换不再亮骨架屏（与 phraseStore.loadedOnce 同语义）。 */
+  loadedOnce: boolean;
   hasMore: boolean;
   thumbnailCache: Record<string, string>;
   imageCache: Record<string, string>;
@@ -246,6 +248,7 @@ export function createRecordsStore() {
     search: "",
     loading: false,
     loadError: null,
+    loadedOnce: false,
     hasMore: true,
     thumbnailCache: {},
     imageCache: {},
@@ -403,7 +406,7 @@ export function createRecordsStore() {
           });
         }
       } finally {
-        if (request === recordsLoadGeneration) set({ loading: false });
+        if (request === recordsLoadGeneration) set({ loading: false, loadedOnce: true });
       }
     },
 
@@ -538,7 +541,7 @@ export function createRecordsStore() {
         }
         return null;
       } finally {
-        if (request === recordsLoadGeneration) set({ loading: false });
+        if (request === recordsLoadGeneration) set({ loading: false, loadedOnce: true });
       }
     },
 

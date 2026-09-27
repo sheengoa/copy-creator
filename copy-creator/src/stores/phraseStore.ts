@@ -103,8 +103,8 @@ interface PhraseState {
   selectedGroupId: string | null;
   search: string;
   loading: boolean;
-  /** 首次加载已完成：其后分组切换不再亮骨架屏（本地查询毫秒级，骨架屏反而造成闪烁）。 */
-  initialized: boolean;
+  /** 首次数据加载已完成：其后分组切换不再亮骨架屏（本地查询毫秒级，骨架屏反而造成闪烁）。 */
+  loadedOnce: boolean;
 
   setSearch: (s: string) => void;
   setSelectedGroup: (id: string | null) => void;
@@ -157,7 +157,7 @@ export const usePhraseStore = create<PhraseState>()((set, get) => {
   selectedGroupId: null,
   search: "",
   loading: false,
-  initialized: false,
+  loadedOnce: false,
 
   setSearch: (s: string) => set({ search: s }),
   setSelectedGroup: (id: string | null) => set({ selectedGroupId: id }),
@@ -227,7 +227,7 @@ export const usePhraseStore = create<PhraseState>()((set, get) => {
     } catch (e) {
       console.error("Failed to load phrases:", e);
     } finally {
-      set({ loading: false, initialized: true });
+      set({ loading: false, loadedOnce: true });
     }
   },
 
