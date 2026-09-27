@@ -97,6 +97,7 @@ export function ShortcutSection({
             <li>{t("settings.shortcutGuideStep3")}</li>
             <li>{t("settings.shortcutGuideStep4")}</li>
             <li>{t("settings.shortcutGuideStep5")}</li>
+            <li>{t("settings.shortcutGuideStep6")}</li>
           </ol>
           <p className="settings-shortcut-guide-hint">
             {t("settings.shortcutGuideHint")}

@@ -109,6 +109,7 @@ sudo dpkg -i copy-creator_*.deb
    |:---|:---|:---|
    | Copy Creator — Window | `path/to/copy-creator-ctl show` | `Ctrl+Shift+V` |
    | Copy Creator — Radial Menu | `path/to/copy-creator-ctl radial` | `Ctrl+Shift+B` |
+   | Copy Creator — New Clipboard | `path/to/copy-creator-ctl new-clipboard` | `Ctrl+Shift+N` |
 
    > The `copy-creator-ctl` script ships with the installers (under the install prefix at `resources/copy-creator-ctl`); you can also copy it from the repository (`copy-creator/scripts/copy-creator-ctl`) to `~/.local/bin/` to use it directly.
 

@@ -113,6 +113,7 @@ sudo dpkg -i copy-creator_*.deb
    |:---|:---|:---|
    | Copy Creator — 窗口 | `path/to/copy-creator-ctl show` | `Ctrl+Shift+V` |
    | Copy Creator — 径向菜单 | `path/to/copy-creator-ctl radial` | `Ctrl+Shift+B` |
+   | Copy Creator — 新建内容 | `path/to/copy-creator-ctl new-clipboard` | `Ctrl+Shift+N` |
 
    > `copy-creator-ctl` 随安装包附带（安装目录 `resources/copy-creator-ctl`），也可从仓库（`copy-creator/scripts/copy-creator-ctl`）复制到 `~/.local/bin/` 直接使用。
 
