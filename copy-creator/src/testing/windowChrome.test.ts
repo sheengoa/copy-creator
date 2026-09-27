@@ -113,6 +113,10 @@ describe("standalone window chrome", () => {
     expect(resourceCss).toContain(".resource-list-heading-main > span");
     expect(resourceCss).not.toContain(".resource-list-heading span");
     expect(resourceCss).not.toContain(".resource-reorder-hint");
+    // 工具栏次级按钮与新建按钮同为 36px，与搜索框等高对齐；
+    // getRule 只能提取组内末位选择器，settings 键成员关系用选择器行断言。
+    expect(resourceCss).toMatch(/\.resource-settings-button,\s*\.resource-trash-button\s*\{/);
+    expect(getRule(resourceCss, ".resource-trash-button")).toContain("min-height: 36px");
   });
 
   it("keeps the clipboard create action bar standalone", () => {
