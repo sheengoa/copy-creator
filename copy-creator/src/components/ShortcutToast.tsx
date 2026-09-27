@@ -1,4 +1,4 @@
-import { useEffect, useState, useCallback } from "react";
+import { useEffect, useState, useCallback, useRef } from "react";
 import { listen } from "@tauri-apps/api/event";
 import { invoke } from "@tauri-apps/api/core";
 import { useTranslation } from "react-i18next";
@@ -32,17 +32,29 @@ const actionLabelKey: Record<ShortcutAction, string> = {
 export default function ShortcutToast() {
   const { t } = useTranslation();
   const [toasts, setToasts] = useState<ToastItem[]>([]);
+  // 镜像 ref：主窗口不可见期间后端不消费记录，重复拉取会返回同一批
+  // 失败，按 (action, key) 去重避免堆叠重复提示
+  const toastsRef = useRef<ToastItem[]>([]);
 
   const addItem = useCallback((payload: FailurePayload) => {
+    if (
+      toastsRef.current.some(
+        (x) => x.action === payload.action && x.key === payload.key,
+      )
+    ) {
+      return;
+    }
     const item: ToastItem = {
       id: ++toastCounter,
       action: payload.action,
       key: payload.key,
     };
-    setToasts((prev) => [...prev, item]);
+    toastsRef.current = [...toastsRef.current, item];
+    setToasts(toastsRef.current);
     // 警示信息比普通 toast 停留更久
     setTimeout(() => {
-      setToasts((prev) => prev.filter((x) => x.id !== item.id));
+      toastsRef.current = toastsRef.current.filter((x) => x.id !== item.id);
+      setToasts(toastsRef.current);
     }, 8000);
   }, []);
 
@@ -94,7 +106,8 @@ export default function ShortcutToast() {
   }, [pull]);
 
   const dismiss = useCallback((id: number) => {
-    setToasts((prev) => prev.filter((x) => x.id !== id));
+    toastsRef.current = toastsRef.current.filter((x) => x.id !== id);
+    setToasts(toastsRef.current);
   }, []);
 
   if (toasts.length === 0) return null;

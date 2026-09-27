@@ -35,12 +35,22 @@ pub fn record_shortcut_failure(action: &str, key: &str, error: &str) {
 }
 
 #[tauri::command]
-pub fn take_startup_shortcut_failures() -> Vec<ShortcutFailure> {
-    std::mem::take(
-        &mut *STARTUP_SHORTCUT_FAILURES
-            .lock()
-            .unwrap_or_else(|poisoned| poisoned.into_inner()),
-    )
+pub fn take_startup_shortcut_failures(app: tauri::AppHandle) -> Vec<ShortcutFailure> {
+    // 主窗口不可见（开机自启 --hidden、托盘驻留）时拉取不消费：提示会
+    // 渲染在不可见窗口里随 8 秒过期丢失。窗口显示时必发 main-window-shown
+    // 触发前端补拉，彼时窗口可见才真正清空。
+    let visible = app
+        .get_webview_window("main")
+        .map(|window| window.is_visible().unwrap_or(true))
+        .unwrap_or(true);
+    let mut guard = STARTUP_SHORTCUT_FAILURES
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
+    if visible {
+        std::mem::take(&mut *guard)
+    } else {
+        guard.clone()
+    }
 }
 
 /// RAII guard that ensures TOGGLING is always reset, even on panic.
