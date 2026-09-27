@@ -496,6 +496,13 @@ pub fn run() {
             autostart::is_autostart_enabled,
             autostart::validate_autostart,
         ])
-        .run(tauri::generate_context!())
-        .expect("error while running tauri application");
+        .build(tauri::generate_context!())
+        .expect("error while building tauri application")
+        .run(|_app, event| {
+            // 应用曾出现无日志的静默退出（表现为整个应用消失），在退出链路
+            // 留下痕迹以区分「正常请求退出」与「崩溃」。
+            if let tauri::RunEvent::ExitRequested { code, .. } = event {
+                log::info!("[exit] ExitRequested code={code:?}");
+            }
+        });
 }
