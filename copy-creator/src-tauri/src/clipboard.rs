@@ -1160,16 +1160,17 @@ fn should_check_clipboard_image(last_seen: &mut u32) -> bool {
 }
 
 fn poll_clipboard_forever(handle: AppHandle) {
-    let mut poll_count: u32 = 0;
     let mut last_image_seq: u32 = 0;
+    // 启动静默窗按真实时间计（1.6 秒）：事件唤醒会让迭代瞬间走完，
+    // 旧的「前 2 次迭代」计数制静默窗在事件驱动下会失去保护
+    let started = std::time::Instant::now();
     loop {
         // Windows：WM_CLIPBOARDUPDATE 事件即时唤醒（复制后立即入库），
         // 800ms 兜底轮询防监听异常时失聪；其他平台纯定时轮询。
         crate::clipboard_wake::wait_for_wake_or_timeout(800);
-        poll_count += 1;
 
-        // Skip first 2 polls (1.6s) to avoid recording startup clipboard state
-        if poll_count <= 2 {
+        // Skip first 1.6s to avoid recording startup clipboard state
+        if started.elapsed() < std::time::Duration::from_millis(1600) {
             sync_monitor_cache(&handle);
             continue;
         }
