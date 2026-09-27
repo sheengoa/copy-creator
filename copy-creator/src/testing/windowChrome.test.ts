@@ -75,6 +75,16 @@ describe("standalone window chrome", () => {
     // 基础 .save 规则（min-width:132px）特异性高于本档 .dialog-btn 的 min-width:0，
     // 紧凑档必须对 .save 显式压掉，否则最小宽度下动作区超宽、左侧 chips 被「取消」盖住。
     expect(css).toMatch(/\.dialog-btn\.save\s*\{[^}]*min-width: 0;[^}]*padding: 8px 22px;/);
+    // 英文分段控件更宽，极窄时允许 chip 在左侧组内换行兜底；换行判定用假想尺寸
+    // （flex-basis 受 max-width 钳制），须把 chips 钳到保底宽度，否则按 max-content
+    // 判定会让中文也过早换行。
+    expect(css).toMatch(/\.clipboard-create-bar-left\s*\{[^}]*flex-wrap: wrap;/);
+    expect(css).toMatch(
+      /\.clipboard-create-bar-left \.clipboard-create-stash-picker\s*\{[^}]*flex-basis: 68px;/,
+    );
+    expect(css).toMatch(
+      /\.clipboard-create-bar-left \.clipboard-create-group-picker\s*\{[^}]*flex-basis: 60px;/,
+    );
   });
 
   it("loads existing records for the injected destination mode", () => {

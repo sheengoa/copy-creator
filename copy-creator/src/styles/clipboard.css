@@ -1365,6 +1365,23 @@
     gap: 8px;
   }
 
+  /* 英文分段控件（Clipboard/Resource）比中文宽约 53px，最小宽度下
+     左侧最小宽和会超出单行：允许 chip 在 bar-left 内换到分段控件下一行。
+     换行判定用假想尺寸（flex-basis 受 max-width 钳制），默认 auto 取
+     max-content，chip 长文本会让中文也过早换行——钳到保底宽度后判定值
+     与真实最小宽度一致。分组 picker 须排在其后（同类名覆盖） */
+  .clipboard-create-bar-left {
+    flex-wrap: wrap;
+  }
+
+  .clipboard-create-bar-left .clipboard-create-stash-picker {
+    flex-basis: 68px;
+  }
+
+  .clipboard-create-bar-left .clipboard-create-group-picker {
+    flex-basis: 60px;
+  }
+
   .clipboard-create-actions .dialog-btn {
     min-width: 0;
     padding: 8px 14px;
