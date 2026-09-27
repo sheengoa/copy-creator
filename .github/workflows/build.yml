@@ -116,12 +116,29 @@ jobs:
         working-directory: copy-creator
         run: pnpm install --frozen-lockfile
 
+      # 配置了 TAURI_SIGNING_PRIVATE_KEY 才启用更新产物生成（.sig + latest.json）；
+      # 未配置时保持普通构建，本地 pnpm tauri build 也不受影响（开关只在 CI 传入）。
+      - name: 检测更新签名密钥
+        shell: bash
+        env:
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+        run: |
+          if [ -n "$TAURI_SIGNING_PRIVATE_KEY" ]; then
+            echo "TAURI_UPDATER_ARGS=--config src-tauri/tauri.updater.conf.json" >> "$GITHUB_ENV"
+          else
+            echo "::notice::未配置 TAURI_SIGNING_PRIVATE_KEY，本次构建不生成更新产物"
+          fi
+
       - name: 构建并发布
         uses: tauri-apps/tauri-action@v0
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # 密钥未配置时为空串：此时更新产物未启用，签名路径不会执行
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
         with:
           projectPath: copy-creator
+          args: ${{ env.TAURI_UPDATER_ARGS }}
           tagName: ${{ startsWith(github.ref, 'refs/tags/v') && github.ref_name || '' }}
           releaseName: Copy Creator ${{ github.ref_name }}
           releaseBody: "双平台构建：Linux（deb / AppImage）与 Windows（exe / msi）。"

@@ -146,6 +146,9 @@ pub fn run() {
                 .build(),
         )
         .plugin(tauri_plugin_dialog::init())
+        // 更新器休眠注册：前端尚未接入更新检查，注册后零行为；pubkey 与
+        // endpoint 配置在 tauri.conf.json 的 plugins.updater，密钥接入后生效。
+        .plugin(tauri_plugin_updater::Builder::new().build())
         .setup(|app| {
             if cfg!(debug_assertions) {
                 app.handle().plugin(

@@ -33,6 +33,9 @@ enigo = "0.3"
 base64 = "0.22"
 image = { version = "0.25", default-features = false, features = ["png", "jpeg", "webp", "gif", "bmp"] }
 tauri-plugin-process = "2.3.1"
+# 自动更新器：休眠注册（前端未接入更新检查即零行为），签名密钥接入后
+# 由 build.yml 启用更新产物生成；配置见 tauri.conf.json plugins.updater
+tauri-plugin-updater = "2"
 dirs = "5"
 arboard = { version = "3", features = ["image-data"] }
 drag = "2.1.1"

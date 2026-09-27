@@ -10,7 +10,9 @@
 //   4. 提交「工程：发布 X.Y.Z，统一四处版本号」并打 vX.Y.Z 标签。
 //
 // 后续动作（脚本不做，需人工）：git push --follow-tags，由 build.yml 产出
-// 安装包；updater 签名需要 TAURI_SIGNING_PRIVATE_KEY，接入后另行补充。
+// 安装包；在 GitHub Secrets 配置 TAURI_SIGNING_PRIVATE_KEY（及可选
+// TAURI_SIGNING_PRIVATE_KEY_PASSWORD）并把公钥填入 tauri.conf.json 的
+// plugins.updater.pubkey 后，构建会自动附带更新产物（latest.json）。
 import { readFileSync, writeFileSync } from "node:fs";
 import { execSync } from "node:child_process";
 import { fileURLToPath } from "node:url";

@@ -68,6 +68,12 @@
   "plugins": {
     "clipboard-manager": null,
     "global-shortcut": null,
-    "autostart": null
+    "autostart": null,
+    "updater": {
+      "pubkey": "",
+      "endpoints": [
+        "https://github.com/sheengoa/copy-creator/releases/latest/download/latest.json"
+      ]
+    }
   }
 }
