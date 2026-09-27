@@ -7,6 +7,7 @@ import { getResourceFileName } from "../../domain/fileName";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { WindowControlButtons } from "../WindowControlButtons";
+import { useWindowMaximized } from "../../hooks/useWindowMaximized";
 import { resolveDoubleEnterSave } from "../../utils/doubleEnterShortcut";
 import FindReplaceBar from "../../components/FindReplaceBar";
 import i18n from "../../i18n";
@@ -211,6 +212,7 @@ export default function ClipboardCreateDialog() {
     };
   }, []);
 
+  const maximized = useWindowMaximized();
   const hideWindow = useCallback(() => {
     getCurrentWindow().hide();
   }, []);
@@ -433,7 +435,7 @@ export default function ClipboardCreateDialog() {
   const isResource = storageMode === "resource";
 
   return (
-    <div className="clipboard-create-dialog" onKeyDown={handleKeyDown}>
+    <div className={`clipboard-create-dialog${maximized ? " maximized" : ""}`} onKeyDown={handleKeyDown}>
       <div className="clipboard-create-header" data-tauri-drag-region>
         <span className="clipboard-create-title">
           {editingId ? t("resources.edit") : t("clipboard.create")}

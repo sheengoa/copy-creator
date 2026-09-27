@@ -228,4 +228,26 @@ describe("standalone window chrome", () => {
     expect(capabilities.permissions).toContain("core:window:allow-toggle-maximize");
     expect(capabilities.permissions).toContain("core:window:allow-is-maximized");
   });
+
+  it("collapses shadow-margin chrome while the window is maximized", () => {
+    const hookSource = readSource("../hooks/useWindowMaximized.ts");
+    const appSource = readSource("../App.tsx");
+    const dialogSource = readSource("../components/ClipboardCreateDialog/index.tsx");
+    const componentsCss = readStyle("components.css");
+
+    expect(hookSource).toContain("onResized");
+    expect(hookSource).toContain("isMaximized");
+    expect(appSource).toContain("useWindowMaximized");
+    expect(dialogSource).toContain("useWindowMaximized");
+    // 边距/圆角/阴影全部派生自三个窗口变量，最大化收零即铺满屏幕。
+    expect(appSource).toContain("app-container${maximized");
+    expect(dialogSource).toContain("clipboard-create-dialog${maximized");
+    const maximizedRule = getRule(componentsCss, ".maximized");
+    expect(maximizedRule).toContain("--window-shadow-margin: 0px");
+    expect(maximizedRule).toContain("--window-radius: 0px");
+    expect(maximizedRule).toContain("--window-shadow: none");
+    expect(getRule(componentsCss, ".maximized .window-resize-handle")).toContain(
+      "display: none",
+    );
+  });
 });

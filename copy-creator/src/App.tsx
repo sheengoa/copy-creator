@@ -2,6 +2,7 @@ import React, { useCallback, useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { WindowControlButtons } from "./components/WindowControlButtons";
+import { useWindowMaximized } from "./hooks/useWindowMaximized";
 import { invoke } from "@tauri-apps/api/core";
 import ClipboardPage from "./pages/ClipboardPage";
 import ResourcePage from "./pages/ResourcePage";
@@ -151,6 +152,7 @@ function App() {
     };
   }, []);
 
+  const maximized = useWindowMaximized();
   const handleSettingsClick = () => setActivePanel("settings");
 
   const handleHide = async () => {
@@ -173,7 +175,7 @@ function App() {
 
   return (
     <>
-    <div className="app-container">
+    <div className={`app-container${maximized ? " maximized" : ""}`}>
       <div
         ref={sidebarRef}
         className={`sidebar ${isCollapsed ? "collapsed" : ""}`}
