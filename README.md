@@ -201,6 +201,8 @@ pnpm tauri dev
 pnpm tauri build
 ```
 
+> **Windows 提示**：若 Visual Studio 被安装在非默认位置（SDK 注册表信息缺失），或在 Git Bash 中构建时报 `link.exe` 冲突（误用了 `/usr/bin/link.exe`），需要一个本地启动脚本设置 MSVC/SDK 环境变量：把真实 MSVC 的 `bin\Hostx64\x64` 置于 `PATH` 最前，并设置 `INCLUDE`/`LIB` 指向 MSVC 与 Windows SDK 的 include/lib 目录（本仓库开发者使用未纳入版本控制的 `copy-creator\dev.cmd`，其内含个人路径故不入库）。
+
 ## 项目结构
 
 ```

@@ -199,6 +199,8 @@ pnpm tauri dev
 pnpm tauri build
 ```
 
+> **Windows note**: if Visual Studio lives outside the default location (missing SDK registry entries), or building from Git Bash fails with a `link.exe` conflict (the wrong `/usr/bin/link.exe` gets picked up), use a local launcher script that sets up the MSVC/SDK environment: put the real MSVC `bin\Hostx64\x64` first on `PATH` and point `INCLUDE`/`LIB` at the MSVC and Windows SDK include/lib directories (this repository's maintainer uses an unversioned `copy-creator\dev.cmd` containing personal paths).
+
 ## Project Structure
 
 ```
