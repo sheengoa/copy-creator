@@ -534,8 +534,10 @@ export default function ResourceDetailPage({
         className="resource-detail-body"
         onDoubleClick={(event) => {
           // 视图态：双击内容区进入编辑。编辑态：双击文本区/控件外的
-          // 任意空白（含内容框外的页面空白）保存修改；文本区内双击
-          // 保留原生选词。标题双击是重命名，信息面板是备注编辑，均排除。
+          // 任意空白（含内容框外的页面空白）退出——有修改保存退出，
+          // 无修改直接退出（否则未改动的编辑态无法用双击离开）；
+          // 文本区内双击保留原生选词。标题双击是重命名，信息面板是
+          // 备注编辑，均排除。
           if (!contentEditable) return;
           const target = event.target instanceof HTMLElement ? event.target : null;
           if (!target) return;
@@ -550,7 +552,12 @@ export default function ResourceDetailPage({
             if (target.closest(".resource-detail-stage")) startContentEdit();
             return;
           }
-          if (contentDirty && !contentSaving) void handleSaveContent();
+          if (contentSaving) return;
+          if (!contentDirty) {
+            cancelContentEdit();
+            return;
+          }
+          void handleSaveContent();
         }}
       >
         <section className="resource-detail-main" aria-busy={!(externalTextPath ? textDetailReady : detailReady) && !error}>
