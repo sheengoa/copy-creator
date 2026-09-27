@@ -122,8 +122,10 @@ fn debug_log(message: String) {
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     // 单实例守卫须最先注册（官方建议）：二实例在最早的初始化阶段即退出。
-    // 仅 release 构建启用——debug（tauri dev）不启用，保证开发时可与
-    // 已安装版并行对照测试。
+    // 仅 Windows 启用（插件依赖声明在 Windows target 段，Linux 上无单实例，
+    // 多实例行为与历史版本一致）；仅 release 构建——debug（tauri dev）不
+    // 启用，保证开发时可与已安装版并行对照测试。
+    #[cfg(target_os = "windows")]
     let builder = if cfg!(debug_assertions) {
         tauri::Builder::default()
     } else {
@@ -133,6 +135,8 @@ pub fn run() {
             },
         ))
     };
+    #[cfg(not(target_os = "windows"))]
+    let builder = tauri::Builder::default();
 
     let builder = builder
         .plugin(tauri_plugin_clipboard_manager::init())

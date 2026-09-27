@@ -1,21 +1,25 @@
-//! 剪贴板唤醒源（Windows）：通过消息-only 窗口监听 WM_CLIPBOARDUPDATE，
-//! 把采集循环的「纯 800ms 定时轮询」升级为「事件即时唤醒 + 定时兜底」，
-//! 复制后立即入库，显著降低录入延迟。事件监听异常时兜底轮询保证功能
-//! 不中断（只是退化为原延迟）。
+//! 剪贴板采集唤醒源。`wait_for_wake_or_timeout` 是全平台接口：Windows
+//! 上经消息-only 窗口监听 WM_CLIPBOARDUPDATE，把采集循环的「纯 800ms
+//! 定时轮询」升级为「事件即时唤醒 + 定时兜底」，复制后立即入库；其他
+//! 平台保持纯定时轮询。事件监听异常时兜底轮询保证功能不中断（只是
+//! 退化为原延迟）。
 
-#![cfg(target_os = "windows")]
-
+#[cfg(target_os = "windows")]
 use std::sync::{Condvar, Mutex};
 
+#[cfg(target_os = "windows")]
 #[derive(Default)]
 struct WakeState {
     version: u64,
 }
 
+#[cfg(target_os = "windows")]
 static WAKE_LOCK: Mutex<WakeState> = Mutex::new(WakeState { version: 0 });
+#[cfg(target_os = "windows")]
 static WAKE_CV: Condvar = Condvar::new();
 
 /// 事件线程唤醒采集循环（WM_CLIPBOARDUPDATE 到达时调用）
+#[cfg(target_os = "windows")]
 fn notify() {
     if let Ok(mut state) = WAKE_LOCK.lock() {
         state.version += 1;
