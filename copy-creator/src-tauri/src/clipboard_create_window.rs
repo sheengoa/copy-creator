@@ -80,8 +80,11 @@ pub fn show_clipboard_create(
         }
     };
 
-    // 已显示则隐藏（toggle 行为）
-    if window.is_visible().unwrap_or(false) {
+    // 已显示则隐藏（toggle 行为）。Win32 语义下最小化窗口仍算 visible：
+    // 必须排除最小化，否则经最小化按钮/系统手势收起后（skip_taskbar
+    // 窗口没有任务栏图标可供手动还原），快捷键永远只会走 hide 分支。
+    let minimized = window.is_minimized().unwrap_or(false);
+    if window.is_visible().unwrap_or(false) && !minimized {
         log::info!("[show_clipboard_create] already visible, hiding");
         let _ = window.hide();
         return;
@@ -158,6 +161,15 @@ pub fn show_clipboard_create(
 
     // 读取主题
     let theme = crate::db::get_setting_sync(app, "theme").unwrap_or_else(|| "light".to_string());
+
+    // 从最小化/隐藏态恢复：最小化窗口对 SW_SHOW 类显示不响应，必须先
+    // unminimize 还原再 show，否则窗口处于"可见但仍最小化"的不可见态。
+    if let Err(error) = window.show() {
+        log::warn!("[show_clipboard_create] show failed: {error}");
+    }
+    if let Err(error) = window.unminimize() {
+        log::warn!("[show_clipboard_create] unminimize failed: {error}");
+    }
 
     // 抬升并激活（含 X11 pager 激活），确保新建窗口位于主窗口之上；
     // 主窗口持有焦点时普通抬升会被 mutter 焦点约束压制。
