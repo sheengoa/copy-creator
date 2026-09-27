@@ -74,6 +74,7 @@ export default function PhrasePage() {
     selectedGroupId,
     search,
     loading,
+    initialized,
     setSearch,
     setSelectedGroup,
     init,
@@ -101,6 +102,7 @@ export default function PhrasePage() {
       selectedGroupId: s.selectedGroupId,
       search: s.search,
       loading: s.loading,
+      initialized: s.initialized,
       setSearch: s.setSearch,
       setSelectedGroup: s.setSelectedGroup,
       init: s.init,
@@ -526,6 +528,7 @@ export default function PhrasePage() {
           <PhraseList
             phrases={searchedPhrases}
             loading={loading}
+            initialized={initialized}
             selectedGroupId={selectedGroupId}
             search={search}
             scrollRef={backToTop.containerRef}

@@ -16,6 +16,8 @@ import { useExpandReveal } from "../../hooks/useExpandReveal";
 interface PhraseListProps {
   phrases: Phrase[];
   loading: boolean;
+  /** 首次加载已完成：为 true 后分组切换不再亮骨架屏。 */
+  initialized: boolean;
   selectedGroupId: string | null;
   search?: string;
   /** 列表滚动容器回调 ref，供页面级「回到顶部」监视滚动。 */
@@ -272,6 +274,7 @@ function PhraseCard({
 export function PhraseList({
   phrases,
   loading,
+  initialized,
   selectedGroupId,
   search,
   scrollRef,
@@ -287,7 +290,9 @@ export function PhraseList({
 }: PhraseListProps) {
   const { t } = useTranslation();
 
-  if (loading && phrases.length === 0) {
+  // 骨架屏只用于首屏：分组切换是本地毫秒级查询，从空分组切走时若再亮
+  // 骨架屏，会出现"骨架屏闪一下再变空态"的闪烁（用户可感知）。
+  if (loading && phrases.length === 0 && !initialized) {
     return (
       <div className="phrase-list">
         {[1, 2, 3, 4].map((i) => (
@@ -316,7 +321,9 @@ export function PhraseList({
     );
   }
 
-  if (phrases.length === 0 && !loading) {
+  // 空态乐观显示：已初始化后的分组切换期间（phrases 仍为上一空分组的结果）
+  // 直接显示空态文案，等新结果到达自然替换，避免任何中间态闪烁。
+  if (phrases.length === 0) {
     return (
       <div className="page-empty-compact">
         <span>
