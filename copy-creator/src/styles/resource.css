@@ -111,6 +111,62 @@
   line-height: 1.4;
 }
 
+/* —— 设置弹层「卡片大小」滑块分区 —— */
+.resource-card-size-section {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-top: 3px;
+  padding-top: 11px;
+  border-top: 1px solid var(--separator);
+}
+
+.resource-card-size-label {
+  color: var(--text-primary);
+  font-size: var(--text-xs);
+  font-weight: var(--weight-semibold);
+}
+
+.resource-card-size-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.resource-card-size-end {
+  flex-shrink: 0;
+  color: var(--text-tertiary);
+  font-size: var(--text-xs);
+}
+
+.resource-card-size-slider {
+  flex: 1;
+  min-width: 0;
+  height: 20px;
+  margin: 0;
+  accent-color: var(--accent);
+  cursor: pointer;
+}
+
+.resource-card-size-value {
+  flex-shrink: 0;
+  min-width: 46px;
+  text-align: center;
+  color: var(--text-secondary);
+  font-size: var(--text-xs);
+  font-variant-numeric: tabular-nums;
+  background: var(--chip-bg);
+  border-radius: 6px;
+  padding: 2px 5px;
+}
+
+.resource-card-size-hint {
+  margin: 0;
+  color: var(--text-tertiary);
+  font-size: var(--text-xs);
+  line-height: 1.45;
+}
+
 
 
 
@@ -655,6 +711,8 @@
   grid-template-columns: repeat(2, minmax(0, 1fr));
   align-items: start;
   gap: 10px;
+  /* 卡片整体缩放因子：由资源页按卡片大小设置注入（标准 460px = 1）。 */
+  --card-scale: 1;
 }
 
 .resource-column {
@@ -862,11 +920,11 @@
   height: 100%;
   min-height: 102px;
   align-items: flex-start;
-  padding: 12px;
+  padding: calc(12px * var(--card-scale, 1));
   background: color-mix(in srgb, var(--accent) 5%, var(--input-bg));
   color: var(--text-primary);
   font-family: var(--font-mono);
-  font-size: var(--text-sm);
+  font-size: calc(var(--text-sm) * var(--card-scale, 1));
   line-height: 1.55;
   overflow: hidden;
   text-align: left;
@@ -900,7 +958,7 @@
   border-radius: 4px;
   background: rgba(255, 255, 255, 0.84);
   color: #555;
-  font-size: var(--text-xs);
+  font-size: calc(var(--text-xs) * var(--card-scale, 1));
 }
 
 [data-theme="dark"] .resource-card-kind {
@@ -913,8 +971,8 @@
   display: flex;
   min-width: 0;
   flex-direction: column;
-  gap: 7px;
-  padding: 10px;
+  gap: calc(7px * var(--card-scale, 1));
+  padding: calc(10px * var(--card-scale, 1));
 }
 
 .resource-card-title-row,
@@ -930,7 +988,7 @@
   min-width: 0;
   overflow: hidden;
   color: var(--text-primary);
-  font-size: var(--text-sm);
+  font-size: calc(var(--text-sm) * var(--card-scale, 1));
   font-weight: var(--weight-semibold);
   line-height: 1.4;
   text-overflow: ellipsis;
@@ -951,7 +1009,7 @@
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  font-size: var(--text-xs);
+  font-size: calc(var(--text-xs) * var(--card-scale, 1));
   color: var(--text-secondary);
   background: var(--chip-hover-bg);
   border-radius: 6px;
@@ -961,7 +1019,7 @@
 .resource-card-meta {
   justify-content: flex-start;
   color: var(--text-secondary);
-  font-size: var(--text-xs);
+  font-size: calc(var(--text-xs) * var(--card-scale, 1));
 }
 
 .resource-icon-button,

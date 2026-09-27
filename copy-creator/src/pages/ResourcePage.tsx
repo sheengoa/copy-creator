@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties } from "react";
 import { ConfirmDialog } from "../components/ConfirmDialog";
 import { createPortal } from "react-dom";
 import { invoke } from "@tauri-apps/api/core";
@@ -18,7 +18,7 @@ import { CSS } from "@dnd-kit/utilities";
 import { restrictToVerticalAxis } from "@dnd-kit/modifiers";
 import { useResourceStore } from "../stores/clipboardStore";
 import { useShallow } from "zustand/react/shallow";
-import { useSettingsStore } from "../stores/settingsStore";
+import { useSettingsStore, RESOURCE_CARD_SIZE_MAX, RESOURCE_CARD_SIZE_MIN } from "../stores/settingsStore";
 import { useMultiSelect } from "../hooks/useMultiSelect";
 import { Icons } from "../components/Icons";
 import IosSelect from "../components/IosSelect";
@@ -37,7 +37,7 @@ import type { ResourceMediaKind as ResourceMediaKindLabel } from "../domain/medi
 import { ResourceCard } from "./ResourcePage/ResourceCard";
 import { buildRecordView, type RecordView } from "../domain/recordView";
 import { type ResourceTypeFilter } from "../domain/mediaKind";
-import { computeResourceColumnCount, splitResourceColumns } from "./ResourcePage/resourceUtils";
+import { computeResourceColumnCount, resourceCardScale, splitResourceColumns } from "./ResourcePage/resourceUtils";
 import { buildResourceFolderParentMap, findResourceFolder, flattenResourceFolderPaths, flattenResourceFoldersVisible, formatResourceFolderPath, getResourceFolderRoot, getResourceFolderSiblings, isResourceFolderPath, reorderResourceFolderSiblings } from "../domain/groups";
 import { inferResourceMediaKind, matchesResourceType } from "../domain/mediaKind";
 import { getResourceTitle } from "../domain/records";
@@ -107,6 +107,29 @@ export default function ResourcePage() {
     })),
   );
   const contentSort = useSettingsStore((s) => s.contentSort);
+  const resourceCardSize = useSettingsStore((s) => s.resourceCardSize);
+  const setResourceCardSize = useSettingsStore((s) => s.setResourceCardSize);
+  // 卡片大小滑块的本地即时值：拖动实时重排列表，防抖后持久化到设置表。
+  const [cardSizeDraft, setCardSizeDraft] = useState<number | null>(null);
+  const cardSize = cardSizeDraft ?? resourceCardSize;
+  const cardSizeSaveTimerRef = useRef<number | null>(null);
+  const handleCardSizeChange = useCallback(
+    (size: number) => {
+      setCardSizeDraft(size);
+      if (cardSizeSaveTimerRef.current !== null) window.clearTimeout(cardSizeSaveTimerRef.current);
+      cardSizeSaveTimerRef.current = window.setTimeout(() => {
+        cardSizeSaveTimerRef.current = null;
+        void setResourceCardSize(size);
+      }, 400);
+    },
+    [setResourceCardSize],
+  );
+  useEffect(
+    () => () => {
+      if (cardSizeSaveTimerRef.current !== null) window.clearTimeout(cardSizeSaveTimerRef.current);
+    },
+    [],
+  );
 
   const [typeFilter, setTypeFilter] = useState<ResourceTypeFilter>("all");
   const [detailRecordId, setDetailRecordId] = useState<string | null>(null);
@@ -391,15 +414,17 @@ export default function ResourcePage() {
     [filteredRecords, columnCount],
   );
 
-  // 列数随列表宽度动态变化，窗口缩放时实时跟随（最少两列）。
+  // 列数随列表宽度动态变化，窗口缩放时实时跟随（最少两列）；卡片大小
+  // 设置改变最小列宽槽位，紧凑档同宽容纳更多列。
   useEffect(() => {
     if (!listElement) return;
-    const update = () => setColumnCount(computeResourceColumnCount(listElement.clientWidth));
+    const update = () =>
+      setColumnCount(computeResourceColumnCount(listElement.clientWidth, cardSize));
     update();
     const observer = new ResizeObserver(update);
     observer.observe(listElement);
     return () => observer.disconnect();
-  }, [listElement]);
+  }, [listElement, cardSize]);
 
   // 统一的「回到顶部」：批量选择模式下隐藏。
   const backToTop = useBackToTop({ enabled: !isSelecting });
@@ -1035,6 +1060,25 @@ export default function ResourcePage() {
                 : t("resources.changeLibraryPath")}
             </span>
           </button>
+          <div className="resource-card-size-section">
+            <div className="resource-card-size-label">{t("resources.cardSize")}</div>
+            <div className="resource-card-size-row">
+              <span className="resource-card-size-end">{t("resources.cardSizeCompact")}</span>
+              <input
+                type="range"
+                className="resource-card-size-slider"
+                min={RESOURCE_CARD_SIZE_MIN}
+                max={RESOURCE_CARD_SIZE_MAX}
+                step={10}
+                value={cardSize}
+                onChange={(event) => handleCardSizeChange(Number(event.target.value))}
+                aria-label={t("resources.cardSize")}
+              />
+              <span className="resource-card-size-end">{t("resources.cardSizeSpacious")}</span>
+              <span className="resource-card-size-value">{cardSize}px</span>
+            </div>
+            <p className="resource-card-size-hint">{t("resources.cardSizeHint")}</p>
+          </div>
         </section>
       )}
 
@@ -1419,7 +1463,11 @@ export default function ResourcePage() {
             {/* 手动拖拽排序已移除：「全部分组」按排序偏好，分组浏览按时间序。 */}
             <div
               className="resource-columns"
-              style={{ gridTemplateColumns: `repeat(${columnCount}, minmax(0, 1fr))` }}
+              style={{
+                gridTemplateColumns: `repeat(${columnCount}, minmax(0, 1fr))`,
+                // 卡片整体缩放：字号/内边距随滑块等比（预览区经 aspect-ratio 天然随列宽缩放）。
+                "--card-scale": resourceCardScale(cardSize),
+              } as CSSProperties}
             >
               {columns.map((column, columnIndex) => (
                 <div className="resource-column" key={`column-${columnIndex}`}>

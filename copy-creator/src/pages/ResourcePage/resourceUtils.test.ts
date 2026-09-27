@@ -9,7 +9,7 @@ vi.mock("@tauri-apps/api/core", () => ({
   invoke: invokeMock,
 }));
 
-import { computeResourceColumnCount, formatResourceBitrate, formatResourceDuration, formatResourceFileSize, splitResourceColumns } from "./resourceUtils";
+import { computeResourceColumnCount, formatResourceBitrate, formatResourceDuration, formatResourceFileSize, resourceCardScale, splitResourceColumns } from "./resourceUtils";
 import { resolveResourceMediaUrl } from "../../domain/mediaUrl";
 import { findResourceFolder, flattenResourceFolders } from "../../domain/groups";
 import { getResourceFileName, hasCustomResourceFileName, isResourceTitleRenameable, splitResourceFileName } from "../../domain/fileName";
@@ -139,6 +139,28 @@ describe("resourceUtils", () => {
     expect(computeResourceColumnCount(1420)).toBe(3);
     expect(computeResourceColumnCount(2400)).toBe(5);
     expect(computeResourceColumnCount(4000)).toBe(5);
+  });
+
+  it("lets the card-size setting narrow the column slot for more columns", () => {
+    // 200px 档：同宽下容纳更多列（受 5 列上限钳制）；460 档与默认行为一致。
+    expect(computeResourceColumnCount(1326, 200)).toBe(5);
+    expect(computeResourceColumnCount(1326, 200)).toBeGreaterThan(
+      computeResourceColumnCount(1326, 460),
+    );
+    expect(computeResourceColumnCount(1326, 460)).toBe(
+      computeResourceColumnCount(1326),
+    );
+  });
+
+  it("scales card inner sizes with the slider value and clamps extremes", () => {
+    expect(resourceCardScale(460)).toBe(1);
+    expect(resourceCardScale(0)).toBe(1);
+    expect(resourceCardScale(-1)).toBe(1);
+    expect(resourceCardScale(NaN)).toBe(1);
+    expect(resourceCardScale(200)).toBe(0.8);
+    expect(resourceCardScale(230)).toBe(0.8);
+    expect(resourceCardScale(690)).toBe(1.35);
+    expect(resourceCardScale(800)).toBe(1.35);
   });
 
   it("formats media duration and average bitrate for the detail sidebar", () => {

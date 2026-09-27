@@ -18,15 +18,28 @@ export function formatResourceFileSize(size?: number): string {
   return `${value.toFixed(precision)} ${units[unitIndex]}`;
 }
 
-// 列宽低于该值时保持最少两列（用户要求最低两排），随窗口变宽逐步增加列数。
-const RESOURCE_COLUMN_MIN_WIDTH = 460;
+// 「标准」档位的最小列宽（历史默认），卡片大小滑块的缩放基准值。
+export const RESOURCE_COLUMN_MIN_WIDTH = 460;
 const RESOURCE_COLUMN_GAP = 10;
 const RESOURCE_COLUMN_MAX = 5;
 
-export function computeResourceColumnCount(width: number): number {
+// 卡片内部尺寸的缩放系数钳制：极端滑块值下保持文字可读、版面不失真。
+const CARD_SCALE_MIN = 0.8;
+const CARD_SCALE_MAX = 1.35;
+
+/** 卡片内部尺寸（字号/内边距等）相对基准的等比缩放系数。 */
+export function resourceCardScale(cardSize: number): number {
+  if (!Number.isFinite(cardSize) || cardSize <= 0) return 1;
+  return Math.min(CARD_SCALE_MAX, Math.max(CARD_SCALE_MIN, cardSize / RESOURCE_COLUMN_MIN_WIDTH));
+}
+
+export function computeResourceColumnCount(
+  width: number,
+  minColumnWidth: number = RESOURCE_COLUMN_MIN_WIDTH,
+): number {
   if (!Number.isFinite(width) || width <= 0) return 2;
   const usable = width + RESOURCE_COLUMN_GAP;
-  const columnSlot = RESOURCE_COLUMN_MIN_WIDTH + RESOURCE_COLUMN_GAP;
+  const columnSlot = minColumnWidth + RESOURCE_COLUMN_GAP;
   const count = Math.floor(usable / columnSlot);
   return Math.min(RESOURCE_COLUMN_MAX, Math.max(2, count));
 }

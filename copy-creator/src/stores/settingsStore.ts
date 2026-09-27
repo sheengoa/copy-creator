@@ -10,6 +10,22 @@ export const RADIAL_SCALE_MIN = 50;
 export const RADIAL_SCALE_MAX = 200;
 export const RADIAL_SCALE_DEFAULT = 100;
 
+/** 资源卡片基准宽度（px）：滑块值，列数随窗口自适应的最小列宽。460 为历史默认。 */
+export const RESOURCE_CARD_SIZE_MIN = 200;
+export const RESOURCE_CARD_SIZE_MAX = 800;
+export const RESOURCE_CARD_SIZE_DEFAULT = 460;
+
+export const clampResourceCardSize = (size: number): number =>
+  Math.min(
+    RESOURCE_CARD_SIZE_MAX,
+    Math.max(RESOURCE_CARD_SIZE_MIN, Math.round(size)),
+  );
+
+export const parseResourceCardSize = (raw: string | undefined): number => {
+  const size = Number.parseInt((raw ?? "").trim(), 10);
+  return Number.isFinite(size) ? clampResourceCardSize(size) : RESOURCE_CARD_SIZE_DEFAULT;
+};
+
 /** 内容列表排序偏好：最近使用（默认）| 最多使用。作用于剪切板、资源、快捷输入主列表。 */
 export type ContentSortMode = "recent" | "count";
 
@@ -36,6 +52,7 @@ interface SettingsState {
   autostartEnabled: boolean;
   pasteLeftClick: PasteMode;
   contentSort: ContentSortMode;
+  resourceCardSize: number;
 
   toggleTheme: () => void;
   loadSettings: () => Promise<void>;
@@ -44,6 +61,7 @@ interface SettingsState {
   setSettingsBatch: (settings: Record<string, string>) => Promise<void>;
   setPasteLeftClick: (mode: PasteMode) => Promise<void>;
   setContentSort: (mode: ContentSortMode) => Promise<void>;
+  setResourceCardSize: (size: number) => Promise<void>;
   setAutostart: (enabled: boolean) => Promise<boolean>;
 }
 
@@ -63,6 +81,7 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
   autostartEnabled: false,
   pasteLeftClick: "normal",
   contentSort: "recent",
+  resourceCardSize: RESOURCE_CARD_SIZE_DEFAULT,
 
   toggleTheme: () => {
     const next = get().themeMode === "light" ? "dark" : "light";
@@ -96,6 +115,7 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
         radialMenuScale: parseRadialScale(settings.radial_menu_scale),
         pasteLeftClick: (settings.paste_left_click === "terminal" ? "terminal" : "normal") as PasteMode,
         contentSort: parseContentSort(settings.content_sort),
+        resourceCardSize: parseResourceCardSize(settings.resource_card_size),
       });
 
       // Read autostart state from the .desktop file
@@ -174,6 +194,19 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
       await emit("content-sort-changed", { sortBy: mode });
     } catch (e) {
       console.error("Failed to save content sort setting:", e);
+    }
+  },
+
+  // 卡片大小：即时生效由组件侧先改本地状态重排，防抖后调本方法持久化。
+  setResourceCardSize: async (size: number) => {
+    const next = clampResourceCardSize(size);
+    set({ resourceCardSize: next });
+    try {
+      await invoke("set_settings_batch", {
+        settings: { resource_card_size: String(next) },
+      });
+    } catch (e) {
+      console.error("Failed to save resource card size:", e);
     }
   },
 
