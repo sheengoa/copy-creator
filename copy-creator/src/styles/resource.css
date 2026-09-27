@@ -1407,7 +1407,7 @@
 
 .resource-detail-title-input:focus {
   outline: none;
-  border-color: rgba(0, 122, 255, 0.55);
+  border-color: var(--accent-border-strong);
 }
 
 .resource-detail-title-input:disabled {
@@ -1885,7 +1885,7 @@
 
 .resource-note-input:focus {
   outline: none;
-  border-color: rgba(0, 122, 255, 0.55);
+  border-color: var(--accent-border-strong);
 }
 
 .resource-note-actions {

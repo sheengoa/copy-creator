@@ -1116,10 +1116,12 @@
   box-shadow: 0 1px 3px rgba(0, 0, 0, 0.14);
 }
 
-/* 已有内容 chip：占据分段控件与动作按钮之间的剩余宽度；
-   保底宽度取「图标+展开符」的精确值（68px）——再窄字形会溢出边界、
-   与相邻元素挤在一起，再宽则余量流给文本区切出半个字的残影 */
-.clipboard-create-bar-left .clipboard-create-stash-picker {
+/* 已有内容 chip：占据分段控件与动作按钮之间的剩余宽度。
+   :not 排除目标分组 chip（其同时带本类名），选择器互斥后不再依赖
+   两条规则的源码顺序覆盖。保底宽度取「图标+展开符」的精确值（68px）——
+   再窄字形会溢出边界、与相邻元素挤在一起，再宽则余量流给文本区切出
+   半个字的残影 */
+.clipboard-create-bar-left .clipboard-create-stash-picker:not(.clipboard-create-group-picker) {
   width: auto;
   flex: 1 1 auto;
   min-width: 68px;
@@ -1152,7 +1154,7 @@
 .clipboard-create-chip-trigger:hover:not(:disabled),
 .clipboard-create-stash-picker.open .clipboard-create-chip-trigger {
   background: var(--input-focus-bg);
-  border-color: rgba(0, 122, 255, 0.38);
+  border-color: var(--accent-border-soft);
 }
 
 .clipboard-create-chip-trigger:disabled {
@@ -1295,8 +1297,7 @@
 }
 
 /* 目标分组 chip：与已有内容 chip 并列；保底 60px 同为图标+展开符的精确值。
-   本规则须排在 stash-picker 规则之后——分组 picker 同时带 stash-picker 类，
-   同权重下后者胜出 */
+   已有内容 chip 的规则已用 :not 排除本元素，两条规则互斥，与源码顺序无关 */
 .clipboard-create-bar-left .clipboard-create-group-picker {
   width: auto;
   flex: 0 1 auto;
@@ -1359,11 +1360,15 @@
   justify-content: center;
 }
 
+/* 保存主操作保底更宽；窄窗口紧凑档经 --create-save-min-width 变量压掉
+   （见容器查询），避免此处写死值后与紧凑档形成特异性竞争 */
 .clipboard-create-actions .dialog-btn.save {
-  min-width: 132px;
+  min-width: var(--create-save-min-width, 132px);
 }
 
-/* 窄窗口（接近最小宽度）紧凑排布：收窄动作按钮与间距，给 chip 留空间 */
+/* 窄窗口（接近最小宽度）紧凑排布：收窄动作按钮与间距，给 chip 留空间。
+   注意 @container 度量的是 .clipboard-create-dialog 的 content-box
+   （总宽减 36px 内边距），阈值 599 对应对话框总宽 635 */
 @container (max-width: 599px) {
   .clipboard-create-action-bar,
   .clipboard-create-bar-left {
@@ -1374,12 +1379,12 @@
      左侧最小宽和会超出单行：允许 chip 在 bar-left 内换到分段控件下一行。
      换行判定用假想尺寸（flex-basis 受 max-width 钳制），默认 auto 取
      max-content，chip 长文本会让中文也过早换行——钳到保底宽度后判定值
-     与真实最小宽度一致。分组 picker 须排在其后（同类名覆盖） */
+     与真实最小宽度一致 */
   .clipboard-create-bar-left {
     flex-wrap: wrap;
   }
 
-  .clipboard-create-bar-left .clipboard-create-stash-picker {
+  .clipboard-create-bar-left .clipboard-create-stash-picker:not(.clipboard-create-group-picker) {
     flex-basis: 68px;
   }
 
@@ -1387,16 +1392,18 @@
     flex-basis: 60px;
   }
 
+  .clipboard-create-actions {
+    --create-save-min-width: 0;
+  }
+
   .clipboard-create-actions .dialog-btn {
     min-width: 0;
     padding: 8px 14px;
   }
 
-  /* 保存是主操作，用更宽内边距保持层级。min-width 须在本档显式压掉：
-     基础 .save 规则（132px）特异性高于上方 .dialog-btn 的 min-width:0，
-     缺本行时最小宽度下动作区超宽，左侧 chips 被「取消」盖住 */
+  /* 保存是主操作，用更宽内边距保持层级。保底宽经基础规则读取的
+     --create-save-min-width 变量压掉，无特异性竞争 */
   .clipboard-create-actions .dialog-btn.save {
-    min-width: 0;
     padding: 8px 22px;
   }
 }

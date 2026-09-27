@@ -457,13 +457,13 @@ html {
 
 .radial-menu-item.selected {
   background: var(--accent-bg);
-  border-color: rgba(0, 122, 255, 0.45);
+  border-color: var(--accent-border);
   transform: scale(1.01);
 }
 
 [data-theme="dark"] .radial-menu-item.selected {
-  background: rgba(0, 122, 255, 0.2);
-  border-color: rgba(0, 122, 255, 0.55);
+  background: var(--accent-bg-strong);
+  border-color: var(--accent-border-strong);
 }
 
 .radial-menu-item-text {

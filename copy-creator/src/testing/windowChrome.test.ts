@@ -59,7 +59,8 @@ describe("standalone window chrome", () => {
 
     expect(barRule).toContain("border-top: 1px solid var(--card-border)");
     expect(buttonRule).toContain("min-width: 112px");
-    expect(saveButtonRule).toContain("min-width: 132px");
+    // 保底宽经变量读取：紧凑档只需覆盖变量，与基础规则无特异性竞争
+    expect(saveButtonRule).toContain("min-width: var(--create-save-min-width, 132px)");
   });
 
   it("keeps the create action bar overlap-free at minimum width", () => {
@@ -69,18 +70,25 @@ describe("standalone window chrome", () => {
     expect(getRule(css, ".clipboard-create-dialog")).toContain("container-type: inline-size");
     expect(css).toContain("@container (max-width: 599px)");
     // chip 保底宽度=「图标+展开符」的精确值（68/60）：任何宽度下字形都不得
-    // 溢出 chip 边界与相邻元素互压，也不得切出半个字的残影。
-    expect(getRule(css, ".clipboard-create-bar-left .clipboard-create-stash-picker")).toContain("min-width: 68px");
+    // 溢出 chip 边界与相邻元素互压，也不得切出半个字的残影。已有内容 chip
+    // 的选择器以 :not 排除目标分组 chip（二者类名重叠），互斥后不依赖源码顺序。
+    expect(
+      getRule(
+        css,
+        ".clipboard-create-bar-left .clipboard-create-stash-picker:not(.clipboard-create-group-picker)",
+      ),
+    ).toContain("min-width: 68px");
     expect(getRule(css, ".clipboard-create-bar-left .clipboard-create-group-picker")).toContain("min-width: 60px");
-    // 基础 .save 规则（min-width:132px）特异性高于本档 .dialog-btn 的 min-width:0，
-    // 紧凑档必须对 .save 显式压掉，否则最小宽度下动作区超宽、左侧 chips 被「取消」盖住。
-    expect(css).toMatch(/\.dialog-btn\.save\s*\{[^}]*min-width: 0;[^}]*padding: 8px 22px;/);
+    // 紧凑档经 --create-save-min-width 变量压掉基础 132px 保底宽：若漏掉，
+    // 最小宽度下动作区超宽、左侧 chips 被「取消」盖住。
+    expect(css).toMatch(/\.clipboard-create-actions\s*\{[^}]*--create-save-min-width: 0;/);
+    expect(css).toMatch(/\.dialog-btn\.save\s*\{[^}]*padding: 8px 22px;/);
     // 英文分段控件更宽，极窄时允许 chip 在左侧组内换行兜底；换行判定用假想尺寸
     // （flex-basis 受 max-width 钳制），须把 chips 钳到保底宽度，否则按 max-content
     // 判定会让中文也过早换行。
     expect(css).toMatch(/\.clipboard-create-bar-left\s*\{[^}]*flex-wrap: wrap;/);
     expect(css).toMatch(
-      /\.clipboard-create-bar-left \.clipboard-create-stash-picker\s*\{[^}]*flex-basis: 68px;/,
+      /\.clipboard-create-bar-left \.clipboard-create-stash-picker:not\(\.clipboard-create-group-picker\)\s*\{[^}]*flex-basis: 68px;/,
     );
     expect(css).toMatch(
       /\.clipboard-create-bar-left \.clipboard-create-group-picker\s*\{[^}]*flex-basis: 60px;/,

@@ -16,6 +16,13 @@
   --separator: rgba(0, 0, 0, 0.08);
   --accent: #007AFF;
   --accent-bg: rgba(0, 122, 255, 0.1);
+  /* accent 衍生透明度梯度（与 --accent 同色，亮暗主题通用），集中定义
+     避免各文件散落硬编码 */
+  --accent-bg-strong: rgba(0, 122, 255, 0.2);
+  --accent-glow: rgba(0, 122, 255, 0.3);
+  --accent-border-soft: rgba(0, 122, 255, 0.38);
+  --accent-border: rgba(0, 122, 255, 0.45);
+  --accent-border-strong: rgba(0, 122, 255, 0.55);
   --danger: #FF3B30;
   --shadow: 0 1px 3px rgba(0,0,0,0.08);
   --glass-bg: rgba(242, 242, 247, 0.85);
