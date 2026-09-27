@@ -402,6 +402,13 @@ fn raise_gdk_window(window: &tauri::WebviewWindow) {
 }
 
 fn raise_always_on_top_without_focus(window: &tauri::WebviewWindow) {
+    // Win32 语义下最小化窗口仍算 visible，且对 SW_SHOW 不响应（还原前
+    // 仍是最小化态）：必须先 unminimize 再 show，skip_taskbar 弹窗被
+    // 最小化后（无任务栏图标可手动还原）才有机会再唤回。仅对确在
+    // 最小化态的窗口调用——SW_RESTORE 会把最大化窗口打回常规尺寸。
+    if window.is_minimized().unwrap_or(false) {
+        let _ = window.unminimize();
+    }
     if !window.is_visible().unwrap_or(false) {
         let _ = window.show();
     }
@@ -494,6 +501,13 @@ pub(crate) fn raise_always_on_top(window: &tauri::WebviewWindow) {
     // 改以 pager 激活消息确保焦点与置顶同时生效。
     #[cfg(target_os = "linux")]
     activate_window_via_x11(window);
+}
+
+/// Win32 语义下最小化窗口仍算 visible：skip_taskbar 弹窗的 toggle 判定
+/// 必须排除最小化，否则被最小化后一次快捷键只会先隐藏，观感即"无法
+/// 弹出"。配合 raise_always_on_top_without_focus 的还原逻辑使用。
+pub(crate) fn is_popup_visible_for_toggle(window: &tauri::WebviewWindow) -> bool {
+    !window.is_minimized().unwrap_or(false) && window.is_visible().unwrap_or(false)
 }
 
 pub(crate) fn has_visible_popup_window(app: &AppHandle) -> bool {
@@ -633,7 +647,7 @@ pub fn show_radial_menu(app: &AppHandle) {
         #[cfg(target_os = "linux")]
         let visible_now = radial_menu_shown();
         #[cfg(not(target_os = "linux"))]
-        let visible_now = radial.is_visible().unwrap_or(false);
+        let visible_now = is_popup_visible_for_toggle(&radial);
         if visible_now {
             log::info!("[show_radial_menu] already visible, hiding");
             // Linux：先让前端播居中缩小退场动画（radial-menu-hide 事件），

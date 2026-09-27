@@ -48,7 +48,13 @@ describe("integration regressions", () => {
     expect(shortcutSource).not.toContain("refresh_always_on_top_if_visible");
     expect(shortcutSource).not.toContain("Duration::from_millis(60)");
     expect(shortcutSource).toContain("raise_always_on_top(&radial);");
-    expect(shortcutSource).toContain("if window.is_visible().unwrap_or(false)");
+    // toggle 的可见性检查收口在共享助手：必须排除最小化（Win32 语义下
+    // 最小化窗口仍算 visible），否则 skip_taskbar 弹窗最小化后无法再唤回。
+    expect(shortcutSource).toContain("is_popup_visible_for_toggle(&window)");
+    expect(shortcutSource).toContain("is_popup_visible_for_toggle(&radial)");
+    expect(shortcutSource).toContain(
+      "!window.is_minimized().unwrap_or(false) && window.is_visible().unwrap_or(false)",
+    );
     expect(shortcutSource).toContain("window.set_always_on_top(true)");
   });
 
@@ -888,5 +894,29 @@ describe("integration regressions", () => {
     expect(libSource).not.toContain("reset_radial_drag_candidate");
     expect(libSource).not.toContain("initialize_linux_drag");
     expect(libSource).toContain("cancel_radial_file_drag");
+  });
+
+  it("空列表间切换不再闪骨架屏，弹窗 toggle 排除最小化", () => {
+    const phraseList = readSource("../pages/PhrasePage/PhraseList.tsx");
+    const clipboardPage = readSource("../pages/ClipboardPage/index.tsx");
+    const resourcePage = readSource("../pages/ResourcePage.tsx");
+    const radialWindow = readSource("../../src-tauri/src/radial_window.rs");
+    const createWindow = readSource("../../src-tauri/src/clipboard_create_window.rs");
+
+    // 骨架态只保留首屏：三个列表的骨架条件都必须带 loadedOnce 门闸。
+    expect(phraseList).toContain("loading && phrases.length === 0 && !loadedOnce");
+    expect(clipboardPage).toContain("loading && records.length === 0 && !loadedOnce");
+    expect(resourcePage).toContain("loading && records.length === 0 && !loadedOnce");
+
+    // skip_taskbar 弹窗的 toggle 必须用共享助手排除最小化（最小化窗口在
+    // Win32 语义下仍算 visible），否则最小化后无法再唤回。
+    expect(radialWindow).toContain("is_popup_visible_for_toggle(&radial)");
+    expect(createWindow).toContain("is_popup_visible_for_toggle(&window)");
+    // 还原统一收口在共享抬升助手里（先 unminimize 再 show），弹窗各自
+    // 不再内联还原代码。
+    expect(radialWindow).toContain(
+      "if window.is_minimized().unwrap_or(false) {\n        let _ = window.unminimize();\n    }",
+    );
+    expect(createWindow).not.toContain("window.unminimize()");
   });
 });
