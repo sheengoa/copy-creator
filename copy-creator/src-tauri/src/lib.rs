@@ -2,6 +2,7 @@ mod autostart;
 mod backup;
 mod clipboard;
 mod clipboard_create_window;
+mod clipboard_wake;
 mod db;
 #[cfg(target_os = "linux")]
 mod ipc;
@@ -120,9 +121,22 @@ fn debug_log(message: String) {
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
-    tauri::Builder::default()
+    let builder = tauri::Builder::default()
         .plugin(tauri_plugin_clipboard_manager::init())
-        .plugin(tauri_plugin_process::init())
+        .plugin(tauri_plugin_process::init());
+
+    // 单实例守卫：仅 release 构建启用——常驻托盘应用二次启动应聚焦已有
+    // 实例而非并立。debug（tauri dev）不启用，保证开发时可与已安装版
+    // 并行对照测试。
+    let builder = if cfg!(debug_assertions) {
+        builder
+    } else {
+        builder.plugin(tauri_plugin_single_instance::init(|app, _args, _cwd| {
+            crate::show_main_window(app, "single-instance", true);
+        }))
+    };
+
+    builder
         .plugin(
             tauri_plugin_global_shortcut::Builder::new()
                 .with_handler(|app, shortcut, event| {

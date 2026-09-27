@@ -1108,6 +1108,11 @@ pub fn start_monitor(app: &AppHandle) -> Result<(), Box<dyn std::error::Error>> 
         *LAST_CLIPBOARD_IMAGE_HASH.lock().unwrap() = hash;
     }
 
+    // Windows：启动剪贴板更新事件监听，采集循环由定时轮询升级为事件
+    // 即时唤醒 + 定时兜底（监听失败时自动退化为纯轮询，功能不中断）。
+    #[cfg(target_os = "windows")]
+    crate::clipboard_wake::start_windows_listener();
+
     std::thread::spawn(move || {
         // 采集线程是剪切板功能的生命线：单轮 panic（剪贴板平台层、图片
         // 编解码等）不允许静默终止采集。与 win_hook 分发线程的做法对齐：
@@ -1158,7 +1163,9 @@ fn poll_clipboard_forever(handle: AppHandle) {
     let mut poll_count: u32 = 0;
     let mut last_image_seq: u32 = 0;
     loop {
-        std::thread::sleep(std::time::Duration::from_millis(800));
+        // Windows：WM_CLIPBOARDUPDATE 事件即时唤醒（复制后立即入库），
+        // 800ms 兜底轮询防监听异常时失聪；其他平台纯定时轮询。
+        crate::clipboard_wake::wait_for_wake_or_timeout(800);
         poll_count += 1;
 
         // Skip first 2 polls (1.6s) to avoid recording startup clipboard state
