@@ -1027,38 +1027,38 @@ fn capture_current_image_hash() -> u64 {
 }
 
 pub fn sync_monitor_text(text: &str) {
-    *LAST_CLIPBOARD_TEXT.lock().unwrap() = text.trim().to_string();
+    *LAST_CLIPBOARD_TEXT.lock().expect("剪贴板判重缓存锁中毒") = text.trim().to_string();
 }
 
 pub fn sync_monitor_image(rgba: &[u8]) {
     let hash = rgba.iter().step_by(64).fold(0u64, |acc, &byte| {
         acc.wrapping_mul(31).wrapping_add(byte as u64)
     });
-    *LAST_CLIPBOARD_IMAGE_HASH.lock().unwrap() = hash;
+    *LAST_CLIPBOARD_IMAGE_HASH.lock().expect("剪贴板判重缓存锁中毒") = hash;
 }
 
 pub fn sync_monitor_cache(handle: &AppHandle) {
     // Text
     if let Ok(text) = handle.clipboard().read_text() {
-        *LAST_CLIPBOARD_TEXT.lock().unwrap() = text.trim().to_string();
+        *LAST_CLIPBOARD_TEXT.lock().expect("剪贴板判重缓存锁中毒") = text.trim().to_string();
     }
     // Image
     let hash = capture_current_image_hash();
     if hash != 0 {
-        *LAST_CLIPBOARD_IMAGE_HASH.lock().unwrap() = hash;
+        *LAST_CLIPBOARD_IMAGE_HASH.lock().expect("剪贴板判重缓存锁中毒") = hash;
     }
     // File lists — prevent re-recording our own file paste.
     // paste_file 与 Windows 资源管理器复制文件都写文件格式（CF_HDROP /
     // uri-list），Windows 上读不到对应文本，因此优先从文件格式生成 key。
     match clipboard_file_list() {
         Some(files) => {
-            *LAST_CLIPBOARD_FILES_KEY.lock().unwrap() = files.join("|");
+            *LAST_CLIPBOARD_FILES_KEY.lock().expect("剪贴板判重缓存锁中毒") = files.join("|");
         }
         None => {
             if let Ok(text) = handle.clipboard().read_text() {
                 let text = text.trim().to_string();
                 if text.contains("file://") {
-                    *LAST_CLIPBOARD_FILES_KEY.lock().unwrap() = text
+                    *LAST_CLIPBOARD_FILES_KEY.lock().expect("剪贴板判重缓存锁中毒") = text
                         .lines()
                         .filter_map(|l| parse_file_uri(l.trim()))
                         .collect::<Vec<_>>()
@@ -1078,7 +1078,7 @@ pub fn start_monitor(app: &AppHandle) -> Result<(), Box<dyn std::error::Error>> 
             .read_text()
             .map(|s| s.trim().to_string())
             .unwrap_or_default();
-        *LAST_CLIPBOARD_TEXT.lock().unwrap() = initial_text;
+        *LAST_CLIPBOARD_TEXT.lock().expect("剪贴板判重缓存锁中毒") = initial_text;
     }
 
     {
@@ -1098,14 +1098,14 @@ pub fn start_monitor(app: &AppHandle) -> Result<(), Box<dyn std::error::Error>> 
                     })
                     .unwrap_or_default()
             });
-        *LAST_CLIPBOARD_FILES_KEY.lock().unwrap() = key;
+        *LAST_CLIPBOARD_FILES_KEY.lock().expect("剪贴板判重缓存锁中毒") = key;
     }
 
     // Seed image hash so a hot restart doesn't re-record the
     // image that was already in the clipboard.
     {
         let hash = capture_current_image_hash();
-        *LAST_CLIPBOARD_IMAGE_HASH.lock().unwrap() = hash;
+        *LAST_CLIPBOARD_IMAGE_HASH.lock().expect("剪贴板判重缓存锁中毒") = hash;
     }
 
     // Windows：启动剪贴板更新事件监听，采集循环由定时轮询升级为事件
@@ -1195,7 +1195,7 @@ fn poll_clipboard_forever(handle: AppHandle) {
                             .iter()
                             .step_by(64)
                             .fold(0u64, |acc, &b| acc.wrapping_mul(31).wrapping_add(b as u64));
-                        let mut cached_hash = LAST_CLIPBOARD_IMAGE_HASH.lock().unwrap();
+                        let mut cached_hash = LAST_CLIPBOARD_IMAGE_HASH.lock().expect("剪贴板判重缓存锁中毒");
                         if hash != *cached_hash {
                             *cached_hash = hash;
                             image_data =
@@ -1299,7 +1299,7 @@ fn poll_clipboard_forever(handle: AppHandle) {
 
         if image_recorded {
             if let Ok(text) = handle.clipboard().read_text() {
-                *LAST_CLIPBOARD_TEXT.lock().unwrap() = text.trim().to_string();
+                *LAST_CLIPBOARD_TEXT.lock().expect("剪贴板判重缓存锁中毒") = text.trim().to_string();
             }
         } else {
             // 优先读剪贴板文件格式：Windows 资源管理器复制文件只放
@@ -1312,7 +1312,7 @@ fn poll_clipboard_forever(handle: AppHandle) {
                     files = clipboard_text_files(&text);
 
                     if !files.is_empty() {
-                        *LAST_CLIPBOARD_TEXT.lock().unwrap() = text;
+                        *LAST_CLIPBOARD_TEXT.lock().expect("剪贴板判重缓存锁中毒") = text;
                     }
                 }
             }
@@ -1320,7 +1320,7 @@ fn poll_clipboard_forever(handle: AppHandle) {
             if !files.is_empty() {
                 let key = files.join("|");
                 {
-                    let mut cached = LAST_CLIPBOARD_FILES_KEY.lock().unwrap();
+                    let mut cached = LAST_CLIPBOARD_FILES_KEY.lock().expect("剪贴板判重缓存锁中毒");
                     if key == *cached {
                         // File list unchanged — skip to avoid re-inserting
                         // the same images/files on every poll cycle.
@@ -1346,8 +1346,8 @@ fn poll_clipboard_forever(handle: AppHandle) {
                 }
             } else if let Ok(text) = handle.clipboard().read_text() {
                 let text = text.trim().to_string();
-                if !text.is_empty() && text != *LAST_CLIPBOARD_TEXT.lock().unwrap() {
-                    *LAST_CLIPBOARD_TEXT.lock().unwrap() = text.clone();
+                if !text.is_empty() && text != *LAST_CLIPBOARD_TEXT.lock().expect("剪贴板判重缓存锁中毒") {
+                    *LAST_CLIPBOARD_TEXT.lock().expect("剪贴板判重缓存锁中毒") = text.clone();
                     let record_type = classify_text_record(&text);
                     insert_and_emit(&handle, record_type, &text);
                 }

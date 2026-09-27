@@ -196,17 +196,17 @@ fn matches_configured_shortcut(configured: &str, shortcut: &GsShortcut) -> bool 
 }
 
 pub fn is_main_shortcut(shortcut: &GsShortcut) -> bool {
-    let configured = MAIN_SHORTCUT_KEY.lock().unwrap();
+    let configured = MAIN_SHORTCUT_KEY.lock().expect("快捷键槽位锁中毒");
     matches_configured_shortcut(&configured, shortcut)
 }
 
 pub fn is_radial_shortcut(shortcut: &GsShortcut) -> bool {
-    let configured = RADIAL_SHORTCUT_KEY.lock().unwrap();
+    let configured = RADIAL_SHORTCUT_KEY.lock().expect("快捷键槽位锁中毒");
     matches_configured_shortcut(&configured, shortcut)
 }
 
 pub fn is_clipboard_create_shortcut(shortcut: &GsShortcut) -> bool {
-    let configured = CLIPBOARD_CREATE_SHORTCUT_KEY.lock().unwrap();
+    let configured = CLIPBOARD_CREATE_SHORTCUT_KEY.lock().expect("快捷键槽位锁中毒");
     matches_configured_shortcut(&configured, shortcut)
 }
 
@@ -221,7 +221,7 @@ fn replace_shortcut(
     let new_shortcut = new_shortcut.trim();
 
     if old_shortcut == new_shortcut {
-        *slot.lock().unwrap() = new_shortcut.to_string();
+        *slot.lock().expect("快捷键槽位锁中毒") = new_shortcut.to_string();
         return Ok(());
     }
 
@@ -230,7 +230,7 @@ fn replace_shortcut(
             unregister_keyboard_shortcut(app, old_shortcut)
                 .map_err(|e| format!("Failed to unregister {name} shortcut: {e}"))?;
         }
-        *slot.lock().unwrap() = String::new();
+        *slot.lock().expect("快捷键槽位锁中毒") = String::new();
         refresh_win_hook_combos(app);
         return Ok(());
     }
@@ -243,7 +243,7 @@ fn replace_shortcut(
         .map(|parsed_old| parsed_old == parsed_new)
         .unwrap_or(false)
     {
-        *slot.lock().unwrap() = new_shortcut.to_string();
+        *slot.lock().expect("快捷键槽位锁中毒") = new_shortcut.to_string();
         return Ok(());
     }
 
@@ -268,7 +268,7 @@ fn replace_shortcut(
         }
     }
 
-    *slot.lock().unwrap() = new_shortcut.to_string();
+    *slot.lock().expect("快捷键槽位锁中毒") = new_shortcut.to_string();
     refresh_win_hook_combos(app);
     Ok(())
 }
@@ -338,9 +338,9 @@ pub fn refresh_win_hook_combos(app: &AppHandle) {
     #[cfg(target_os = "windows")]
     {
         win_hook::refresh_combos(
-            &MAIN_SHORTCUT_KEY.lock().unwrap().clone(),
-            &RADIAL_SHORTCUT_KEY.lock().unwrap().clone(),
-            &CLIPBOARD_CREATE_SHORTCUT_KEY.lock().unwrap().clone(),
+            &MAIN_SHORTCUT_KEY.lock().expect("快捷键槽位锁中毒").clone(),
+            &RADIAL_SHORTCUT_KEY.lock().expect("快捷键槽位锁中毒").clone(),
+            &CLIPBOARD_CREATE_SHORTCUT_KEY.lock().expect("快捷键槽位锁中毒").clone(),
             app,
         );
         if win_hook::has_combos() {
