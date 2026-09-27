@@ -4250,6 +4250,34 @@ mod managed_path_tests {
     }
 }
 
+/// 跨平台语义用例：用 `PathBuf::join` 构造各平台原生分隔符路径，避免
+/// 上面 Windows 形态字面量在 Linux 下退化为整段组件导致断言失真。
+/// （managed_path_tests 仅 Windows 编译，安全边界的 Linux 语义此前无覆盖。）
+#[cfg(test)]
+mod managed_path_cross_platform_tests {
+    use crate::db::path_within_any;
+    use std::path::{Path, PathBuf};
+
+    fn roots() -> Vec<PathBuf> {
+        vec![PathBuf::from("data").join("lib")]
+    }
+
+    #[test]
+    fn native_separated_paths_respect_managed_roots() {
+        let root = roots();
+        let inside = PathBuf::from("data").join("lib").join("images").join("a.png");
+        // 前缀相似但目录名不同（"library"/"libx"）不得放行。
+        let lookalike = PathBuf::from("data").join("library").join("x.png");
+        let prefix_trick = PathBuf::from("data").join("libx").join("y.png");
+        assert!(path_within_any(&inside, &root));
+        assert!(!path_within_any(&lookalike, &root));
+        assert!(!path_within_any(&prefix_trick, &root));
+        assert!(!path_within_any(Path::new(""), &root));
+        // 注意：`..` 组件的防穿越在 is_app_managed_path 入口层拒绝，
+        // 不属于本纯函数的合同（其组件比较会忽略非 Normal 组件）。
+    }
+}
+
 #[cfg(test)]
 mod recorded_file_path_tests {
     use crate::db::{is_recorded_file_path, DbState};
