@@ -515,13 +515,6 @@
   flex-shrink: 0;
   -webkit-app-region: drag;
   app-region: drag;
-  /* 窗口控制按钮与右侧关闭按钮同款圆形实底 */
-  --window-btn-size: 28px;
-  --window-btn-radius: 50%;
-  --window-btn-bg: var(--close-btn-bg);
-  --window-btn-color: var(--close-btn-color);
-  --window-btn-hover-bg: var(--close-btn-hover-bg);
-  --window-btn-hover-color: var(--close-btn-hover-color);
 }
 
 [data-theme="dark"] .panel-window-header {
@@ -534,35 +527,6 @@
   color: var(--text-primary);
   margin: 0;
   letter-spacing: -0.3px;
-}
-
-.window-close-btn {
-  width: 28px;
-  height: 28px;
-  border-radius: 50%;
-  border: none;
-  background: var(--close-btn-bg);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  cursor: pointer;
-  transition: all 0.2s cubic-bezier(0.83, 0, 0.17, 1);
-  color: var(--close-btn-color);
-  -webkit-app-region: no-drag;
-  app-region: no-drag;
-  flex-shrink: 0;
-  outline: none;
-}
-
-.window-close-btn:hover {
-  background: var(--close-btn-hover-bg);
-  color: var(--close-btn-hover-color);
-  transform: scale(1.1);
-}
-
-.window-close-btn svg {
-  width: 14px;
-  height: 14px;
 }
 
 .panel-window-body {

@@ -62,6 +62,19 @@ describe("standalone window chrome", () => {
     expect(saveButtonRule).toContain("min-width: 132px");
   });
 
+  it("keeps the create action bar overlap-free at minimum width", () => {
+    const css = readStyle("clipboard.css");
+
+    // 底部动作条以对话框为尺寸容器，窄窗口下切换紧凑排布。
+    expect(getRule(css, ".clipboard-create-dialog")).toContain("container-type: inline-size");
+    expect(css).toContain("@container (max-width: 599px)");
+    // chip 保底宽度=「图标+展开符」的精确值（68/60）：任何宽度下字形都不得
+    // 溢出 chip 边界与相邻元素互压，也不得切出半个字的残影。
+    expect(getRule(css, ".clipboard-create-bar-left .clipboard-create-stash-picker")).toContain("min-width: 68px");
+    expect(getRule(css, ".clipboard-create-bar-left .clipboard-create-group-picker")).toContain("min-width: 60px");
+    expect(css).toMatch(/\.dialog-btn\.save\s*\{[^}]*padding: 8px 22px;/);
+  });
+
   it("loads existing records for the injected destination mode", () => {
     const css = readStyle("clipboard.css");
     const componentSource = readSource("../components/ClipboardCreateDialog/index.tsx");
@@ -150,9 +163,11 @@ describe("standalone window chrome", () => {
     expect(createWindowBlock).toContain("480.0 + 2.0 * WINDOW_SHADOW_MARGIN");
     expect(createWindowBlock).toContain("380.0 + 2.0 * WINDOW_SHADOW_MARGIN");
     expect(componentSource).toContain('className="clipboard-create-header" data-tauri-drag-region');
-    expect(componentSource).toContain('className="clipboard-create-close-btn"');
+    // 关闭键复用无边框窗口共享的 .window-close-btn 幽灵钮，不再自备样式。
+    expect(componentSource).toContain('className="window-close-btn"');
+    expect(componentSource).not.toContain("clipboard-create-close-btn");
+    expect(css).not.toContain("clipboard-create-close-btn");
     expect(getRule(css, ".clipboard-create-header")).toContain("-webkit-app-region: drag");
-    expect(getRule(css, ".clipboard-create-close-btn")).toContain("-webkit-app-region: no-drag");
     expect(componentSource).toContain("<WindowResizeHandles />");
     expect(componentSource).toContain('usePersistWindowSize("clipboard_create_width", "clipboard_create_height")');
     expect(componentSource).toContain("onCloseRequested");
@@ -219,9 +234,18 @@ describe("standalone window chrome", () => {
     expect(getRule(componentsCss, ".window-header-actions")).toContain("display: flex;");
     expect(controlSource).toContain("minimize()");
     expect(controlSource).toContain("toggleMaximize()");
-    // 共享规则以分组选择器书写，取组内行首的第二选择器提取规则体。
-    expect(getRule(componentsCss, ".window-max-btn")).toContain(
+    // 共享规则以分组选择器书写，getRule 只能提取组内末位选择器
+    // （.window-min-btn → .window-max-btn → .window-close-btn 的末位）。
+    expect(getRule(componentsCss, ".window-close-btn")).toContain(
       "-webkit-app-region: no-drag",
+    );
+    // 最小化/最大化/关闭三键共用同一组幽灵钮规则；主窗口头部不得再
+    // 覆盖成关闭键圆形实底（否则与新建窗口三键外观不一致）。
+    expect(componentsCss).toMatch(
+      /\.window-min-btn,\s*\.window-max-btn,\s*\.window-close-btn\s*\{/,
+    );
+    expect(getRule(readStyle("layout.css"), ".panel-window-header")).not.toContain(
+      "--window-btn-",
     );
     // 最大化尺寸是临时态，不能被持久化成下次启动的常规尺寸。
     expect(persistHookSource).toContain("isMaximized");

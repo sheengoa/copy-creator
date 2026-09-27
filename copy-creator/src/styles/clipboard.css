@@ -875,6 +875,8 @@
   border-radius: var(--window-radius);
   overflow: hidden;
   isolation: isolate;
+  /* 作为尺寸容器，供底部动作条在窄窗口下切换紧凑排布 */
+  container-type: inline-size;
   box-shadow: var(--window-shadow);
   position: relative;
 }
@@ -895,29 +897,7 @@
   color: var(--text-primary);
 }
 
-.clipboard-create-close-btn {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  width: 24px;
-  height: 24px;
-  padding: 0;
-  border: 0;
-  border-radius: 6px;
-  background: transparent;
-  color: var(--text-secondary);
-  cursor: pointer;
-  transition: background 0.15s, color 0.15s;
-  -webkit-app-region: no-drag;
-  app-region: no-drag;
-}
-
-.clipboard-create-close-btn:hover,
-.clipboard-create-close-btn:focus-visible {
-  background: var(--chip-hover-bg);
-  color: var(--text-primary);
-  outline: none;
-}
+/* 关闭键共用 components.css 的 .window-close-btn 幽灵钮规则 */
 
 /* 资源页签的名称行：可选自定义命名，留空走后端按内容自动命名 */
 .clipboard-create-resource-name {
@@ -1131,11 +1111,13 @@
   box-shadow: 0 1px 3px rgba(0, 0, 0, 0.14);
 }
 
-/* 已有内容 chip：占据分段控件与动作按钮之间的剩余宽度 */
+/* 已有内容 chip：占据分段控件与动作按钮之间的剩余宽度；
+   保底宽度取「图标+展开符」的精确值（68px）——再窄字形会溢出边界、
+   与相邻元素挤在一起，再宽则余量流给文本区切出半个字的残影 */
 .clipboard-create-bar-left .clipboard-create-stash-picker {
   width: auto;
   flex: 1 1 auto;
-  min-width: 140px;
+  min-width: 68px;
   max-width: 520px;
 }
 
@@ -1307,12 +1289,13 @@
   font-weight: var(--weight-semibold);
 }
 
-/* 目标分组 chip：固定收缩宽度，与已有内容 chip 并列；
-   选择器带 .clipboard-create-bar-left 以覆盖「已有内容 chip」的占满剩余宽度规则 */
+/* 目标分组 chip：与已有内容 chip 并列；保底 60px 同为图标+展开符的精确值。
+   本规则须排在 stash-picker 规则之后——分组 picker 同时带 stash-picker 类，
+   同权重下后者胜出 */
 .clipboard-create-bar-left .clipboard-create-group-picker {
   width: auto;
   flex: 0 1 auto;
-  min-width: 96px;
+  min-width: 60px;
   max-width: 200px;
 }
 
@@ -1373,6 +1356,24 @@
 
 .clipboard-create-actions .dialog-btn.save {
   min-width: 132px;
+}
+
+/* 窄窗口（接近最小宽度）紧凑排布：收窄动作按钮与间距，给 chip 留空间 */
+@container (max-width: 599px) {
+  .clipboard-create-action-bar,
+  .clipboard-create-bar-left {
+    gap: 8px;
+  }
+
+  .clipboard-create-actions .dialog-btn {
+    min-width: 0;
+    padding: 8px 14px;
+  }
+
+  /* 保存是主操作，用更宽内边距保持层级 */
+  .clipboard-create-actions .dialog-btn.save {
+    padding: 8px 22px;
+  }
 }
 
 /* --- 剪切板文件卡片的媒体视觉：视频封面帧 / 音频 / 图片文件 --- */

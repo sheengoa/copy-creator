@@ -2,9 +2,8 @@ import { getCurrentWindow } from "@tauri-apps/api/window";
 import { useTranslation } from "react-i18next";
 
 /**
- * 无边框窗口共用的最小化/最大化（还原）按钮，置于各窗口关闭键左侧。
- * 外观经 --window-btn-* 变量由所在窗口的样式适配（主窗口圆形实底、
- * 新建窗口方形幽灵钮，默认值即后者）；径向菜单为光标处透明弹层，不适用。
+ * 无边框窗口共用的最小化/最大化（还原）按钮，与关闭键 .window-close-btn
+ * 同组幽灵钮外观（components.css）；径向菜单为光标处透明弹层，不适用。
  */
 export function WindowControlButtons() {
   const { t } = useTranslation();

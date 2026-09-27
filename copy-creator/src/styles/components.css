@@ -1100,9 +1100,11 @@ input:focus-visible + .selection-checkbox {
   gap: 6px;
 }
 
-/* 无边框窗口共用的最小化/最大化按钮；各窗口经 --window-btn-* 变量适配外观 */
+/* 无边框窗口共用的最小化/最大化/关闭按钮，三键同款幽灵钮外观；
+   保留 --window-btn-* 变量作为个别窗口将来适配外观的钩子 */
 .window-min-btn,
-.window-max-btn {
+.window-max-btn,
+.window-close-btn {
   display: flex;
   align-items: center;
   justify-content: center;
@@ -1123,14 +1125,17 @@ input:focus-visible + .selection-checkbox {
 .window-min-btn:hover,
 .window-min-btn:focus-visible,
 .window-max-btn:hover,
-.window-max-btn:focus-visible {
+.window-max-btn:focus-visible,
+.window-close-btn:hover,
+.window-close-btn:focus-visible {
   background: var(--window-btn-hover-bg, var(--chip-hover-bg));
   color: var(--window-btn-hover-color, var(--text-primary));
   outline: none;
 }
 
 .window-min-btn svg,
-.window-max-btn svg {
+.window-max-btn svg,
+.window-close-btn svg {
   width: 14px;
   height: 14px;
 }

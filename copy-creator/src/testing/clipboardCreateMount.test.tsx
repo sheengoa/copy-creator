@@ -46,6 +46,6 @@ describe("ClipboardCreateDialog 挂载诊断", () => {
     expect(container.querySelector(".window-header-actions")).toBeTruthy();
     expect(container.querySelector(".window-min-btn")).toBeTruthy();
     expect(container.querySelector(".window-max-btn")).toBeTruthy();
-    expect(container.querySelector(".clipboard-create-close-btn")).toBeTruthy();
+    expect(container.querySelector(".window-close-btn")).toBeTruthy();
   });
 });

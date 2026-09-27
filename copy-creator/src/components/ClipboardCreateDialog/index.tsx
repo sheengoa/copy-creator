@@ -444,7 +444,7 @@ export default function ClipboardCreateDialog() {
           <WindowControlButtons />
           <button
             type="button"
-            className="clipboard-create-close-btn"
+            className="window-close-btn"
             onClick={hideWindow}
             title={t("common.cancel")}
             aria-label={t("common.cancel")}
