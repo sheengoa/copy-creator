@@ -286,6 +286,8 @@
     "deleting": "删除中...",
     "close": "关闭",
     "hide": "隐藏",
+    "minimize": "最小化",
+    "maximize": "最大化",
     "loading": "加载中...",
     "retry": "重试",
     "saved": "已保存",

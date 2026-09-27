@@ -1,6 +1,7 @@
 import React, { useCallback, useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { getCurrentWindow } from "@tauri-apps/api/window";
+import { WindowControlButtons } from "./components/WindowControlButtons";
 import { invoke } from "@tauri-apps/api/core";
 import ClipboardPage from "./pages/ClipboardPage";
 import ResourcePage from "./pages/ResourcePage";
@@ -249,6 +250,7 @@ function App() {
           <h3 className="panel-window-title" data-tauri-drag-region>
             {isSettingsPanel ? t("settings.title") : panelInfo ? t(panelInfo.titleKey) : ""}
           </h3>
+          <WindowControlButtons />
           <button className="window-close-btn" onClick={handleHide} title={t("common.hide")}>
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
               <line x1="18" y1="6" x2="6" y2="18" />

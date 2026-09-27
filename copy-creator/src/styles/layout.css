@@ -515,6 +515,13 @@
   flex-shrink: 0;
   -webkit-app-region: drag;
   app-region: drag;
+  /* 窗口控制按钮与右侧关闭按钮同款圆形实底 */
+  --window-btn-size: 28px;
+  --window-btn-radius: 50%;
+  --window-btn-bg: var(--close-btn-bg);
+  --window-btn-color: var(--close-btn-color);
+  --window-btn-hover-bg: var(--close-btn-hover-bg);
+  --window-btn-hover-color: var(--close-btn-hover-color);
 }
 
 [data-theme="dark"] .panel-window-header {

@@ -28,6 +28,8 @@ export function usePersistWindowSize(widthKey: string, heightKey: string) {
       saveTimerRef.current = window.setTimeout(async () => {
         saveTimerRef.current = null;
         try {
+          // 最大化尺寸是临时态：跳过持久化，避免下次启动恢复成最大化大小。
+          if (await appWindow.isMaximized()) return;
           const scaleFactor = await appWindow.scaleFactor();
           await invoke("set_settings_batch", {
             settings: {

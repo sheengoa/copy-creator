@@ -286,6 +286,8 @@
     "deleting": "Deleting...",
     "close": "Close",
     "hide": "Hide",
+    "minimize": "Minimize",
+    "maximize": "Maximize",
     "loading": "Loading...",
     "retry": "Retry",
     "saved": "Saved",

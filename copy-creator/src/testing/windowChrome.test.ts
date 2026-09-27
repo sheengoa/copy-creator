@@ -197,4 +197,28 @@ describe("standalone window chrome", () => {
     expect(componentSource).not.toContain('addEventListener("blur"');
     expect(componentSource).not.toContain('removeEventListener("blur"');
   });
+
+  it("gives resizable borderless windows minimize and maximize controls", () => {
+    const controlSource = readSource("../components/WindowControlButtons.tsx");
+    const appSource = readSource("../App.tsx");
+    const dialogSource = readSource("../components/ClipboardCreateDialog/index.tsx");
+    const componentsCss = readStyle("components.css");
+    const persistHookSource = readSource("../hooks/usePersistWindowSize.ts");
+    const capabilities = JSON.parse(
+      readFileSync(new URL("../../src-tauri/capabilities/default.json", import.meta.url), "utf8"),
+    ) as { permissions: string[] };
+
+    expect(appSource).toContain("<WindowControlButtons />");
+    expect(dialogSource).toContain("<WindowControlButtons />");
+    expect(controlSource).toContain("minimize()");
+    expect(controlSource).toContain("toggleMaximize()");
+    // 共享规则以分组选择器书写，取组内行首的第二选择器提取规则体。
+    expect(getRule(componentsCss, ".window-max-btn")).toContain(
+      "-webkit-app-region: no-drag",
+    );
+    // 最大化尺寸是临时态，不能被持久化成下次启动的常规尺寸。
+    expect(persistHookSource).toContain("isMaximized");
+    expect(capabilities.permissions).toContain("core:window:allow-toggle-maximize");
+    expect(capabilities.permissions).toContain("core:window:allow-is-maximized");
+  });
 });

@@ -1080,6 +1080,41 @@ input:focus-visible + .selection-checkbox {
   box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.1);
 }
 
+/* 无边框窗口共用的最小化/最大化按钮；各窗口经 --window-btn-* 变量适配外观 */
+.window-min-btn,
+.window-max-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: var(--window-btn-size, 24px);
+  height: var(--window-btn-size, 24px);
+  padding: 0;
+  border: 0;
+  border-radius: var(--window-btn-radius, 6px);
+  background: var(--window-btn-bg, transparent);
+  color: var(--window-btn-color, var(--text-secondary));
+  cursor: pointer;
+  transition: background 0.15s, color 0.15s;
+  -webkit-app-region: no-drag;
+  app-region: no-drag;
+  flex-shrink: 0;
+}
+
+.window-min-btn:hover,
+.window-min-btn:focus-visible,
+.window-max-btn:hover,
+.window-max-btn:focus-visible {
+  background: var(--window-btn-hover-bg, var(--chip-hover-bg));
+  color: var(--window-btn-hover-color, var(--text-primary));
+  outline: none;
+}
+
+.window-min-btn svg,
+.window-max-btn svg {
+  width: 14px;
+  height: 14px;
+}
+
 /* 无边框窗口的八方向缩放手柄（主窗口、暂存窗口共用） */
 .window-resize-handle {
   position: absolute;
