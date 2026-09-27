@@ -244,40 +244,6 @@ function ResourceCardInner({
           </time>
           {showUsageBadge && <UsageCountBadge count={view.useCount} />}
         </div>
-        <div className="resource-card-footer">
-          <span className="resource-card-source">
-            {view.hasImages ? t("resources.withImages") : view.sourceApp || t("resources.localSource")}
-          </span>
-          <div className="resource-card-actions">
-            {!selectionMode && (
-              <>
-                <button
-                  type="button"
-                  className="resource-copy-button"
-                  onClick={(event) => {
-                    event.stopPropagation();
-                    void onCopy(view);
-                  }}
-                >
-                  {Icons.copy}
-                  <span>{t("resources.copy")}</span>
-                </button>
-                <button
-                  type="button"
-                  className="resource-delete-button"
-                  aria-label={t("common.delete")}
-                  title={t("common.delete")}
-                  onClick={(event) => {
-                    event.stopPropagation();
-                    onDelete(view.id);
-                  }}
-                >
-                  {Icons.delete}
-                </button>
-              </>
-            )}
-          </div>
-        </div>
       </div>
     </article>
   );

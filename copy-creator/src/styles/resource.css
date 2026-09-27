@@ -918,8 +918,7 @@
 }
 
 .resource-card-title-row,
-.resource-card-meta,
-.resource-card-footer {
+.resource-card-meta {
   display: flex;
   min-width: 0;
   align-items: center;
@@ -965,27 +964,6 @@
   font-size: var(--text-xs);
 }
 
-.resource-card-footer {
-  padding-top: 7px;
-  border-top: 1px solid var(--separator);
-}
-
-.resource-card-source {
-  min-width: 0;
-  overflow: hidden;
-  color: var(--text-secondary);
-  font-size: var(--text-xs);
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.resource-card-actions {
-  display: flex;
-  align-items: center;
-  gap: 3px;
-  flex-shrink: 0;
-}
-
 .resource-icon-button,
 .resource-delete-button,
 .resource-drag-handle {
@@ -1014,7 +992,6 @@
 
 .resource-icon-button:focus-visible,
 .resource-delete-button:focus-visible,
-.resource-copy-button:focus-visible,
 .resource-drag-handle:focus-visible {
   outline: 2px solid var(--accent);
   outline-offset: 1px;
@@ -1039,31 +1016,6 @@
 
 .resource-drag-handle:active {
   cursor: grabbing;
-}
-
-.resource-copy-button {
-  min-height: 27px;
-  display: inline-flex;
-  align-items: center;
-  gap: 4px;
-  padding: 0 7px;
-  border: 1px solid var(--accent);
-  border-radius: 6px;
-  background: transparent;
-  color: var(--text-primary);
-  font-family: var(--font);
-  font-size: var(--text-xs);
-  cursor: pointer;
-}
-
-.resource-copy-button:hover {
-  background: var(--accent);
-  color: #fff;
-}
-
-.resource-copy-button svg {
-  width: 13px;
-  height: 13px;
 }
 
 .resource-card-selection {
