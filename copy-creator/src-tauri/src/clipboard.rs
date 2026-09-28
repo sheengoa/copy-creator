@@ -1208,7 +1208,9 @@ fn foreground_source() -> Option<(String, String)> {
 
     unsafe {
         let hwnd = GetForegroundWindow();
-        if hwnd.is_invalid() {
+        // HWND 是纯新类型（pub isize，无任何方法），判空直接比内值；
+        // HANDLE 才有 is_invalid()——两者不可混用（Windows CI 实测）。
+        if hwnd.0 == 0 {
             return None;
         }
 
