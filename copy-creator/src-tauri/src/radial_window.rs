@@ -144,7 +144,7 @@ static RADIAL_PREV_FOCUS: std::sync::atomic::AtomicU32 = std::sync::atomic::Atom
 /// 激活请求对这类非托管窗口会被 mutter 静默忽略，必须上溯到根窗口的
 /// 直接子窗口。焦点在根/无效时返回 0。
 #[cfg(target_os = "linux")]
-fn x11_focus_toplevel_xid() -> u32 {
+pub(crate) fn x11_focus_toplevel_xid() -> u32 {
     use std::os::raw::{c_char, c_int, c_ulong, c_void};
     #[link(name = "X11")]
     extern "C" {

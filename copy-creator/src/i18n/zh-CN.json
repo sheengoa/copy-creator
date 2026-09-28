@@ -38,7 +38,7 @@
     "pauseCaptureHint": "开启后不再记录新的复制内容，已有历史保留；可从托盘菜单随时恢复。",
     "exclusionRules": "排除规则",
     "exclusionsPlaceholder": "例如：\n1Password\nKeePass",
-    "exclusionRulesHint": "每行一条关键字，复制来源的窗口标题或进程名包含关键字时不记录（来源识别仅 Windows 支持）。",
+    "exclusionRulesHint": "每行一条关键字，复制来源的窗口标题或进程名包含关键字时不记录（来源识别支持 Windows 与 Linux X11；Wayland 系统安全设计不提供）。",
     "language": "语言",
     "startup": "开机启动",
     "shortcut": "快捷键",
@@ -97,7 +97,8 @@
     "contentListSort": "内容列表排序",
     "sortRecent": "最近使用",
     "sortCount": "最多使用",
-    "contentSortHint": "作用于剪切板、资源与快捷输入的「全部」列表及径向菜单；进入分组后按分组原有顺序展示。"
+    "contentSortHint": "作用于剪切板、资源与快捷输入的「全部」列表及径向菜单；进入分组后按分组原有顺序展示。",
+    "pasteWindowsReady": "系统原生注入，无需外部工具"
   },
   "clipboard": {
     "search": "搜索剪切板...",

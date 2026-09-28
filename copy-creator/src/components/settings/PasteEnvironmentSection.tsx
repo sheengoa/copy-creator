@@ -3,7 +3,7 @@ import { useTranslation } from "react-i18next";
 import { invoke } from "@tauri-apps/api/core";
 
 interface PasteBackendStatus {
-  session: "wayland" | "x11" | "none";
+  session: "windows" | "wayland" | "x11" | "none";
   ydotoolInstalled: boolean;
   ydotooldInstalled: boolean;
   ydotooldRunning: boolean;
@@ -11,10 +11,11 @@ interface PasteBackendStatus {
   xdotoolInstalled: boolean;
 }
 
-// 判定口径与 Rust paste 路径一致（Wayland: ydotool → wtype → enigo；
-// X11: enigo → xdotool）。session 为 "none"（非 Linux 或无显示会话）时
-// 整卡隐藏。
+// 判定口径与 Rust paste 路径一致（Windows: 系统原生；Wayland: ydotool
+// → wtype → enigo；X11: enigo → xdotool）。session 为 "none"（无显示
+// 会话）时整卡隐藏。
 function pasteStatusKey(status: PasteBackendStatus): string {
+  if (status.session === "windows") return "settings.pasteWindowsReady";
   if (status.session === "wayland") {
     if (status.ydotoolInstalled && status.ydotooldRunning) return "settings.pasteWaylandReady";
     if (status.ydotoolInstalled) return "settings.pasteYdotooldNotRunning";
@@ -46,6 +47,8 @@ export function PasteEnvironmentSection() {
     };
   }, []);
 
+  // Windows 卡片：会话与后端两行即全部信息，无安装指引分支。
+
   if (!status) return null;
 
   return (
@@ -54,7 +57,9 @@ export function PasteEnvironmentSection() {
       <div className="settings-card">
         <div className="settings-row">
           <div className="settings-row-label">{t("settings.pasteSessionLabel")}</div>
-          <span className="paste-env-session">{status.session === "wayland" ? "Wayland" : "X11"}</span>
+          <span className="paste-env-session">
+            {status.session === "wayland" ? "Wayland" : status.session === "windows" ? "Windows" : "X11"}
+          </span>
         </div>
         <div className="settings-row">
           <div className="settings-row-label">{t("settings.pasteBackendLabel")}</div>

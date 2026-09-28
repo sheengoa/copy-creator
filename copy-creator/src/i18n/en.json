@@ -38,7 +38,7 @@
     "pauseCaptureHint": "While paused, new copies are not recorded; existing history is kept. Toggle back anytime from the tray menu.",
     "exclusionRules": "Exclusion Rules",
     "exclusionsPlaceholder": "e.g.\n1Password\nKeePass",
-    "exclusionRulesHint": "One keyword per line. Copies whose source window title or process name contains a keyword are not recorded (source detection is Windows-only).",
+    "exclusionRulesHint": "One keyword per line. Copies whose source window title or process name contains a keyword are not recorded (source detection on Windows and Linux X11; not available on Wayland by design).",
     "language": "Language",
     "startup": "Launch at Startup",
     "shortcut": "Shortcuts",
@@ -97,7 +97,8 @@
     "contentListSort": "Content list order",
     "sortRecent": "Recently used",
     "sortCount": "Most used",
-    "contentSortHint": "Applies to the \"all\" lists of clipboard, resources and quick input, and the radial menu. Group views keep their own order."
+    "contentSortHint": "Applies to the \"all\" lists of clipboard, resources and quick input, and the radial menu. Group views keep their own order.",
+    "pasteWindowsReady": "Native system injection; no extra tools needed"
   },
   "clipboard": {
     "search": "Search clipboard...",

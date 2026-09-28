@@ -411,9 +411,9 @@ fn inject_paste_with_shortcut(shortcut: PasteShortcut) {
 // ── 粘贴环境诊断（设置页呈现）─────────────────────────────────
 
 /// 粘贴环境状态：会话类型与可用注入后端。判定口径与 paste 路径一致
-/// （Wayland: ydotool → wtype(wlroots) → enigo(XWayland)；X11: enigo →
-/// xdotool）。前端设置页据此显示状态与安装指引，非 Linux 场景
-/// session 为 "none"，前端隐藏该区域。
+/// （Windows: 系统原生注入；Wayland: ydotool → wtype(wlroots) →
+/// enigo(XWayland)；X11: enigo → xdotool）。前端设置页据此显示状态与
+/// 安装指引；Linux 且无显示会话时 session 为 "none"，前端隐藏该区域。
 #[derive(serde::Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct PasteBackendStatus {
@@ -444,7 +444,10 @@ fn ydotoold_process_running() -> bool {
 #[tauri::command]
 pub fn get_paste_backend_status() -> PasteBackendStatus {
     PasteBackendStatus {
-        session: if is_wayland() {
+        // Windows 原生注入无需外部工具，设置页同样给出明确状态而非隐藏。
+        session: if cfg!(target_os = "windows") {
+            "windows"
+        } else if is_wayland() {
             "wayland"
         } else if is_x11() {
             "x11"

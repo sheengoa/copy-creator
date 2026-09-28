@@ -1166,8 +1166,8 @@ fn is_capture_paused<R: Runtime>(app: &AppHandle<R>) -> bool {
 }
 
 /// 排除规则（设置 `clipboard_exclusions`，每行一条，大小写不敏感子串）：
-/// 命中当前前台来源（窗口标题或进程名）的复制不入库。仅 Windows 能拿到
-/// 来源；其他平台无来源信息，规则不生效。
+/// 命中当前前台来源（窗口标题或进程名）的复制不入库。Windows 与 Linux
+/// X11 能拿到来源；Wayland 系统安全设计不暴露他窗信息，规则不生效。
 fn is_capture_excluded<R: Runtime>(app: &AppHandle<R>) -> bool {
     let Some(raw) = crate::db::get_setting_sync(app, "clipboard_exclusions") else {
         return false;
@@ -1247,10 +1247,139 @@ fn foreground_source() -> Option<(String, String)> {
     }
 }
 
-#[cfg(not(target_os = "windows"))]
+/// Linux/X11 来源识别：焦点顶层窗口的（_NET_WM_NAME/WM_NAME 标题,
+/// _NET_WM_PID 对应的进程名）。Wayland 会话出于安全设计拿不到其他
+/// 应用的前台信息，直接视为无来源；X11 下与 Windows 同语义参与排除
+/// 规则匹配。
+#[cfg(target_os = "linux")]
 fn foreground_source() -> Option<(String, String)> {
-    // Wayland 出于安全设计不暴露其他应用的前台窗口信息；X11 侧如后续
-    // 需要可经 active-window 查询扩展，当前统一视为无来源。
+    use std::ffi::CString;
+    use std::os::raw::{c_char, c_int, c_long, c_ulong, c_void};
+
+    // Wayland 会话：不借助 XWayland 的残缺视野做来源判断。
+    if std::env::var_os("WAYLAND_DISPLAY").is_some() {
+        return None;
+    }
+
+    #[link(name = "X11")]
+    extern "C" {
+        fn XOpenDisplay(name: *const c_char) -> *mut c_void;
+        fn XCloseDisplay(display: *mut c_void);
+        fn XInternAtom(display: *mut c_void, name: *const c_char, only_if_exists: c_int) -> c_ulong;
+        fn XGetWindowProperty(
+            display: *mut c_void,
+            w: c_ulong,
+            prop: c_ulong,
+            long_offset: c_long,
+            long_length: c_long,
+            delete: c_int,
+            req_type: c_ulong,
+            actual_type_return: *mut c_ulong,
+            actual_format_return: *mut c_int,
+            nitems_return: *mut c_ulong,
+            bytes_after_return: *mut c_ulong,
+            prop_return: *mut *mut c_char,
+        ) -> c_int;
+        fn XFetchName(display: *mut c_void, w: c_ulong, name_return: *mut *mut c_char) -> c_int;
+        fn XFree(data: *mut c_void) -> c_int;
+    }
+
+    unsafe {
+        let display = XOpenDisplay(std::ptr::null());
+        if display.is_null() {
+            return None;
+        }
+        // 焦点顶层窗口复用径向窗口的同款上溯查询（XGetInputFocus → 根窗口直接子级）。
+        let window = crate::radial_window::x11_focus_toplevel_xid();
+        if window == 0 {
+            XCloseDisplay(display);
+            return None;
+        }
+        let window = window as c_ulong;
+
+        // 标题：_NET_WM_NAME（UTF-8）优先，缺失回退 WM_NAME（XFetchName）。
+        let intern = |name: &str| CString::new(name).map(|c| XInternAtom(display, c.as_ptr(), 0)).unwrap_or(0);
+        // 返回原始字节：文本属性（UTF-8）与整数属性（CARDINAL32）由调用方
+        // 各自转换——曾把 _NET_WM_PID 按文本读导致进程名恒为空。
+        let read_property = |atom: c_ulong| -> Option<Vec<u8>> {
+            if atom == 0 {
+                return None;
+            }
+            let mut actual_type: c_ulong = 0;
+            let mut actual_format: c_int = 0;
+            let mut nitems: c_ulong = 0;
+            let mut bytes_after: c_ulong = 0;
+            let mut data: *mut c_char = std::ptr::null_mut();
+            let ok = XGetWindowProperty(
+                display,
+                window,
+                atom,
+                0,
+                8192,
+                0,
+                0, // AnyPropertyType
+                &mut actual_type,
+                &mut actual_format,
+                &mut nitems,
+                &mut bytes_after,
+                &mut data,
+            );
+            if ok != 0 || data.is_null() || nitems == 0 {
+                if !data.is_null() {
+                    XFree(data as *mut c_void);
+                }
+                return None;
+            }
+            let bytes = std::slice::from_raw_parts(data as *const u8, nitems as usize).to_vec();
+            XFree(data as *mut c_void);
+            Some(bytes)
+        };
+        let property_text = |bytes: Option<Vec<u8>>| -> Option<String> {
+            bytes.map(|bytes| String::from_utf8_lossy(&bytes).trim_end_matches('\0').to_string())
+        };
+
+        let net_wm_name = intern("_NET_WM_NAME");
+        let title = property_text(read_property(net_wm_name)).or_else(|| {
+            let mut name: *mut c_char = std::ptr::null_mut();
+            if XFetchName(display, window, &mut name) != 0 && !name.is_null() {
+                let value = std::ffi::CStr::from_ptr(name).to_string_lossy().into_owned();
+                XFree(name as *mut c_void);
+                Some(value)
+            } else {
+                None
+            }
+        }).unwrap_or_default();
+
+        // 进程名：_NET_WM_PID（CARDINAL32 整数属性，按 4 字节本机序解析，
+        // 不能按文本读）→ /proc/<pid>/comm；缺失时回退 WM_CLASS 实例名
+        // （NUL 分隔的双字符串取首段，惯例上与可执行名一致）。
+        let net_wm_pid = intern("_NET_WM_PID");
+        let net_wm_class = intern("WM_CLASS");
+        let process = read_property(net_wm_pid)
+            .filter(|bytes| bytes.len() >= 4)
+            .map(|bytes| u32::from_ne_bytes([bytes[0], bytes[1], bytes[2], bytes[3]]))
+            .and_then(|pid| std::fs::read_to_string(format!("/proc/{pid}/comm")).ok())
+            .map(|comm| comm.trim().to_string())
+            .filter(|comm| !comm.is_empty())
+            .or_else(|| {
+                read_property(net_wm_class).map(|class| {
+                    String::from_utf8_lossy(&class)
+                        .split('\0')
+                        .next()
+                        .unwrap_or_default()
+                        .to_string()
+                })
+            })
+            .unwrap_or_default();
+
+        XCloseDisplay(display);
+        Some((title, process))
+    }
+}
+
+/// 其余平台（项目当前仅发 Windows/Linux）：无来源识别。
+#[cfg(not(any(target_os = "windows", target_os = "linux")))]
+fn foreground_source() -> Option<(String, String)> {
     None
 }
 
@@ -1520,6 +1649,79 @@ mod tests {
                     .to_string()
             ]
         );
+    }
+
+    #[test]
+    fn linux_foreground_source_prints_detection() {
+        use super::foreground_source;
+        use std::os::raw::{c_char, c_int, c_long, c_ulong, c_void};
+        std::env::remove_var("WAYLAND_DISPLAY");
+        let result = foreground_source();
+        println!("DBG foreground_source = {result:?}");
+        println!("DBG x11_focus_toplevel = {}", crate::radial_window::x11_focus_toplevel_xid());
+
+        // 对照组：根窗口的 _NET_ACTIVE_WINDOW（用户当前活动窗口）属性读取。
+        unsafe {
+            #[link(name = "X11")]
+            extern "C" {
+                fn XOpenDisplay(name: *const c_char) -> *mut c_void;
+                fn XCloseDisplay(display: *mut c_void);
+                fn XDefaultRootWindow(display: *mut c_void) -> c_ulong;
+                fn XInternAtom(d: *mut c_void, n: *const c_char, e: c_int) -> c_ulong;
+                fn XGetWindowProperty(
+                    d: *mut c_void, w: c_ulong, p: c_ulong, o: c_long, l: c_long, del: c_int,
+                    t: c_ulong, at: *mut c_ulong, af: *mut c_int, ni: *mut c_ulong,
+                    ba: *mut c_ulong, pr: *mut *mut c_char,
+                ) -> c_int;
+                fn XFree(data: *mut c_void) -> c_int;
+            }
+            let display = XOpenDisplay(std::ptr::null());
+            if display.is_null() { return; }
+            let intern = |n: &str| std::ffi::CString::new(n).map(|c| XInternAtom(display, c.as_ptr(), 0)).unwrap_or(0);
+            let active_atom = intern("_NET_ACTIVE_WINDOW");
+            let mut at: c_ulong = 0; let mut af: c_int = 0; let mut ni: c_ulong = 0; let mut ba: c_ulong = 0; let mut pr: *mut c_char = std::ptr::null_mut();
+            let ok = XGetWindowProperty(display, XDefaultRootWindow(display), active_atom, 0, 64, 0, 0, &mut at, &mut af, &mut ni, &mut ba, &mut pr);
+            let active = if ok == 0 && !pr.is_null() && ni > 0 {
+                let bytes = std::slice::from_raw_parts(pr as *const u8, (ni as usize) * (af as usize / 8));
+                let mut arr = [0u8; 8];
+                let n = bytes.len().min(8);
+                arr[..n].copy_from_slice(&bytes[..n]);
+                XFree(pr as *mut c_void);
+                c_ulong::from_ne_bytes(arr)
+            } else { 0 };
+            println!("DBG active_window_xid = {active}");
+            for prop in ["_NET_WM_NAME", "_NET_WM_PID", "WM_CLASS"] {
+                let atom = intern(prop);
+                let mut at: c_ulong = 0; let mut af: c_int = 0; let mut ni: c_ulong = 0; let mut ba: c_ulong = 0; let mut pr: *mut c_char = std::ptr::null_mut();
+                let ok = XGetWindowProperty(display, active, atom, 0, 8192, 0, 0, &mut at, &mut af, &mut ni, &mut ba, &mut pr);
+                let value = if ok == 0 && !pr.is_null() && ni > 0 {
+                    let bytes = std::slice::from_raw_parts(pr as *const u8, ni as usize);
+                    let s = String::from_utf8_lossy(bytes).trim_end_matches('\0').to_string();
+                    XFree(pr as *mut c_void);
+                    s
+                } else { format!("<读取失败 ok={ok}>") };
+                println!("DBG active.{prop} = {value:?}");
+            }
+            XCloseDisplay(display);
+        }
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn linux_foreground_source_degrades_gracefully() {
+        use super::foreground_source;
+
+        // Wayland 会话变量强制 None（安全模型不暴露他窗信息），且必须
+        // 在移除变量后恢复原判定路径。X11 可用时返回 Some（标题/进程
+        // 允许为空串），无显示会话时返回 None——两条路径都不允许 panic。
+        let wayland_display = std::env::var_os("WAYLAND_DISPLAY");
+        std::env::set_var("WAYLAND_DISPLAY", "smoke-test");
+        assert!(foreground_source().is_none());
+        match wayland_display {
+            Some(value) => std::env::set_var("WAYLAND_DISPLAY", value),
+            None => std::env::remove_var("WAYLAND_DISPLAY"),
+        }
+        let _ = foreground_source();
     }
 
     #[test]
