@@ -1,4 +1,4 @@
-import { useEffect, useState, useRef, useCallback, useMemo } from "react";
+import { forwardRef, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { invoke } from "@tauri-apps/api/core";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
@@ -221,6 +221,27 @@ export default function ClipboardPage() {
   // 虚拟滚动以既有滚动容器为滚动源（customScrollParent）：容器 CSS/滚动条
   // 与键盘导航、回到顶部全部保持原状；DOM 就绪后再挂 Virtuoso。
   const [listElement, setListElement] = useState<HTMLDivElement | null>(null);
+  // 「显示更多」作为虚拟列表 Footer 渲染：恒在最后一条内容之后，杜绝
+  // 初次测量窗口期与卡片重叠（曾以兄弟节点挂在 Virtuoso 之后，高度
+  // 未测量时占位偏短，按钮压在卡片上）。
+  const LoadMoreFooter = useMemo(
+    () =>
+      forwardRef<HTMLDivElement, { context?: unknown }>(function LoadMoreFooter(_props, ref) {
+        if (!hasMore || filtered.length === 0) return null;
+        return (
+          <div ref={ref} style={{ display: "flex", justifyContent: "center", padding: "2px 0 8px" }}>
+            <button
+              className="clipboard-load-more"
+              type="button"
+              onClick={() => loadRecords(true)}
+            >
+              {t("clipboard.loadMore")}
+            </button>
+          </div>
+        );
+      }),
+    [hasMore, filtered.length, loadRecords, t],
+  );
   // 前插序号：新复制/使用置顶会让 records 头部插入或位移，Virtuoso 依据
   // 递减的 firstItemIndex 保持视口锚定（官方前插模式），否则滚动位置跳变。
   // 用「渲染期派生调整」记录上一次首条目 id（同组件渲染期 setState 是
@@ -497,6 +518,7 @@ export default function ClipboardPage() {
               // 大预载边：条目在远离视口处挂载/卸载，入场动画只离屏重放；
               // 视口内条目稳定挂载不闪烁。
               increaseViewportBy={{ top: 600, bottom: 1200 }}
+              components={{ Footer: LoadMoreFooter }}
               itemContent={(index, view) => (
                 <div className="clipboard-virtual-item">
                   <ClipboardCard
@@ -519,15 +541,6 @@ export default function ClipboardPage() {
                 </div>
               )}
             />
-          )}
-          {hasMore && filtered.length > 0 && (
-            <button
-              className="clipboard-load-more"
-              type="button"
-              onClick={() => loadRecords(true)}
-            >
-              {t("clipboard.loadMore")}
-            </button>
           )}
         </div>
       )}
