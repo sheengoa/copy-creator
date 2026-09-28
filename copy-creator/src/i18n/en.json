@@ -347,7 +347,8 @@
     "findNoResults": "No results",
     "matchCase": "Match case",
     "closeFindReplace": "Close find and replace",
-    "findReplace": "Find and replace"
+    "findReplace": "Find and replace",
+    "moreInfo": "More info"
   },
   "radialMenu": {
     "empty": "No items",

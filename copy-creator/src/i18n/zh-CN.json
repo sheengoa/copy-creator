@@ -343,7 +343,8 @@
     "findNoResults": "无结果",
     "matchCase": "区分大小写",
     "closeFindReplace": "关闭查找替换",
-    "findReplace": "查找替换"
+    "findReplace": "查找替换",
+    "moreInfo": "详情"
   },
   "radialMenu": {
     "empty": "暂无内容",

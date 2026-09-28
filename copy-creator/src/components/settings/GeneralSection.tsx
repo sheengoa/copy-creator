@@ -1,6 +1,7 @@
 import { useTranslation } from "react-i18next";
 import { useSettingsStore, type ContentSortMode } from "../../stores/settingsStore";
 import type { ThemePreference } from "../../utils/theme";
+import { InfoTip } from "./InfoTip";
 
 interface GeneralSectionProps {
   localLang: string;
@@ -84,7 +85,10 @@ export function GeneralSection({
           </button>
         </div>
         <div className="settings-row">
-          <div className="settings-row-label">{t("settings.autoHideOnBlur")}</div>
+          <div className="settings-row-label">
+            {t("settings.autoHideOnBlur")}
+            <InfoTip text={t("settings.autoHideOnBlurHint")} />
+          </div>
           <button
             className={`toggle-switch ${autoHideOnBlur ? "on" : "off"}`}
             onClick={() => void setAutoHideOnBlur(!autoHideOnBlur)}
@@ -93,9 +97,11 @@ export function GeneralSection({
             <span className="toggle-thumb" />
           </button>
         </div>
-        <div className="settings-row-hint">{t("settings.autoHideOnBlurHint")}</div>
         <div className="settings-row">
-          <div className="settings-row-label">{t("settings.contentListSort")}</div>
+          <div className="settings-row-label">
+            {t("settings.contentListSort")}
+            <InfoTip text={t("settings.contentSortHint")} />
+          </div>
           <div className="settings-lang-toggle">
             <button
               className={`lang-toggle-btn${localContentSort === "recent" ? " active" : ""}`}
@@ -111,7 +117,6 @@ export function GeneralSection({
             </button>
           </div>
         </div>
-        <div className="settings-row-hint">{t("settings.contentSortHint")}</div>
       </div>
     </div>
   );

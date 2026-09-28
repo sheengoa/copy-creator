@@ -609,3 +609,36 @@
   font-size: 11px;
   user-select: text;
 }
+
+/* 行尾 ⓘ 信息图标：完整说明经 title 悬停/聚焦展示，页面不留长注释。 */
+.settings-info-tip {
+  display: inline-flex;
+  align-items: center;
+  margin-left: 6px;
+  color: var(--text-tertiary);
+  cursor: help;
+  transition: color 120ms ease-out;
+}
+
+.settings-info-tip:hover,
+.settings-info-tip:focus {
+  color: var(--text-secondary);
+  outline: none;
+}
+
+.settings-info-tip svg {
+  width: 13px;
+  height: 13px;
+}
+
+/* 同区多卡：剪切板区主设置卡之后的附属卡（粘贴环境）。 */
+.settings-card + .settings-card {
+  margin-top: 10px;
+}
+
+.settings-card-subtitle {
+  padding: 10px 12px 2px;
+  font-size: var(--text-xs);
+  font-weight: var(--weight-medium);
+  color: var(--text-secondary);
+}

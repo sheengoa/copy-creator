@@ -2,6 +2,8 @@ import { useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
 import IosSelect from "../IosSelect";
 import { useSettingsStore } from "../../stores/settingsStore";
+import { InfoTip } from "./InfoTip";
+import { PasteEnvironmentCard } from "./PasteEnvironmentSection";
 
 type PasteMode = "normal" | "terminal";
 
@@ -65,7 +67,10 @@ export function ClipboardSection({
           />
         </div>
         <div className="settings-row">
-          <div className="settings-row-label">{t("settings.pauseCapture")}</div>
+          <div className="settings-row-label">
+            {t("settings.pauseCapture")}
+            <InfoTip text={t("settings.pauseCaptureHint")} />
+          </div>
           <button
             className={`toggle-switch ${clipboardPaused ? "on" : "off"}`}
             onClick={() => void setClipboardPaused(!clipboardPaused)}
@@ -74,9 +79,11 @@ export function ClipboardSection({
             <span className="toggle-thumb" />
           </button>
         </div>
-        <div className="settings-row-hint">{t("settings.pauseCaptureHint")}</div>
         <div className="settings-row vertical">
-          <div className="settings-row-label">{t("settings.exclusionRules")}</div>
+          <div className="settings-row-label">
+            {t("settings.exclusionRules")}
+            <InfoTip text={t("settings.exclusionRulesHint")} />
+          </div>
           <textarea
             className="settings-textarea"
             value={exclusionsDraft}
@@ -87,7 +94,6 @@ export function ClipboardSection({
             spellCheck={false}
           />
         </div>
-        <div className="settings-row-hint">{t("settings.exclusionRulesHint")}</div>
         <div className="settings-row">
           <div className="settings-row-label">{t("settings.pasteLeftClick")}</div>
           <div className="settings-lang-toggle">
@@ -106,6 +112,7 @@ export function ClipboardSection({
           </div>
         </div>
       </div>
+      <PasteEnvironmentCard />
     </div>
   );
 }
