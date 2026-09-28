@@ -31,7 +31,6 @@
     "pasteNeedYdotool": "No injection tool on Wayland; paste unavailable — install ydotool",
     "pasteX11Ready": "Built-in enigo injection ready, xdotool fallback available",
     "pasteX11SuggestXdotool": "Built-in enigo injection ready; install xdotool as a fallback",
-    "pasteInstallHint": "Install and enable the daemon (requires root, starts on boot):",
     "maxRecords": "History Limit",
     "maxRecordsUnlimited": "Unlimited",
     "pauseCapture": "Pause Capture",
@@ -86,7 +85,6 @@
     "backupStartImport": "Start import",
     "backupImporting": "Importing...",
     "backupProcessed": "{{count}} items processed",
-    "backupImportCoverHint": "Starting the import overwrites all current data; it takes effect after validation and a restart.",
     "pasteLeftClick": "Left-click paste mode",
     "pasteNormal": "Normal",
     "pasteTerminal": "Terminal",
@@ -98,7 +96,9 @@
     "sortRecent": "Recently used",
     "sortCount": "Most used",
     "contentSortHint": "Applies to the \"all\" lists of clipboard, resources and quick input, and the radial menu. Group views keep their own order.",
-    "pasteWindowsReady": "Native system injection; no extra tools needed"
+    "pasteWindowsReady": "Native system injection; no extra tools needed",
+    "pasteInstallLabel": "Install and enable the daemon (requires root, starts on boot):",
+    "backupImportCoverWarn": "Starting the import overwrites all current data; it takes effect after validation and a restart."
   },
   "clipboard": {
     "search": "Search clipboard...",

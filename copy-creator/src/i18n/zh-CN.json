@@ -31,7 +31,6 @@
     "pasteNeedYdotool": "Wayland 下缺少注入工具，粘贴不可用，建议安装 ydotool",
     "pasteX11Ready": "enigo 内置注入可用，xdotool 备用就绪",
     "pasteX11SuggestXdotool": "enigo 内置注入可用，建议安装 xdotool 作为备用",
-    "pasteInstallHint": "安装并启用守护进程（需 root，开机自启）:",
     "maxRecords": "历史上限",
     "maxRecordsUnlimited": "不限",
     "pauseCapture": "暂停采集",
@@ -86,7 +85,6 @@
     "backupStartImport": "开始导入",
     "backupImporting": "导入中...",
     "backupProcessed": "已处理 {{count}} 项",
-    "backupImportCoverHint": "开始导入后将覆盖当前全部数据，校验通过并重启后生效。",
     "pasteLeftClick": "左键粘贴模式",
     "pasteNormal": "普通粘贴",
     "pasteTerminal": "终端粘贴",
@@ -98,7 +96,9 @@
     "sortRecent": "最近使用",
     "sortCount": "最多使用",
     "contentSortHint": "作用于剪切板、资源与快捷输入的「全部」列表及径向菜单；进入分组后按分组原有顺序展示。",
-    "pasteWindowsReady": "系统原生注入，无需外部工具"
+    "pasteWindowsReady": "系统原生注入，无需外部工具",
+    "pasteInstallLabel": "安装并启用守护进程（需 root，开机自启）:",
+    "backupImportCoverWarn": "开始导入后将覆盖当前全部数据，校验通过并重启后生效。"
   },
   "clipboard": {
     "search": "搜索剪切板...",

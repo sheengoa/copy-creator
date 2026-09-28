@@ -451,4 +451,27 @@ describe("架构守卫：领域规则必须全局共享", () => {
       "主窗口资源页的滚动位置保持机制不得移除",
     ).toBe(true);
   });
+
+  it("规则 22：设置页静态说明必须用行尾 InfoTip，禁止可见 hint 元素回归", () => {
+    // 回归锚点：设置页随功能增长不断堆积可见长注释（settings-row-hint /
+    // settings-storage-hint），纵向噪声膨胀后统一收进行尾 InfoTip 悬停
+    // 气泡（components/settings/InfoTip.tsx）。此后设置组件里「整段内容
+    // 恰为一条 *Hint 文案」的静态 hint 元素一律禁止；操作反馈（进度、
+    // 重启提示）、动作流内警告与安装命令等可操作/动态信息不受限。
+    const settingsDir = join(frontRoot, "components/settings");
+    const offenders: string[] = [];
+    for (const entry of readdirSync(settingsDir)) {
+      if (!entry.endsWith(".tsx")) continue;
+      const source = readFileSync(join(settingsDir, entry), "utf8");
+      const matches =
+        source.match(
+          /settings-(?:row|storage)-hint"[^>]*>\{t\("settings\.[A-Za-z]+Hint"\)\}/g,
+        ) ?? [];
+      offenders.push(...matches.map(() => `${entry}: ${matches.length} 处`));
+    }
+    expect(
+      offenders,
+      '设置页静态说明必须改为行尾 <InfoTip text={t("…Hint")} />（悬停展示），不得新增可见 hint 元素',
+    ).toEqual([]);
+  });
 });

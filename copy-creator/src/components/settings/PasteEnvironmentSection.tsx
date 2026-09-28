@@ -63,7 +63,7 @@ export function PasteEnvironmentCard() {
       </div>
       {status.session === "wayland" && !status.ydotooldRunning && (
         <>
-          <div className="settings-row-hint">{t("settings.pasteInstallHint")}</div>
+          <div className="settings-row-hint">{t("settings.pasteInstallLabel")}</div>
           <div className="settings-row-hint paste-env-command">
             <code>sudo apt install ydotool</code>
             <code>sudo systemctl enable --now ydotoold</code>

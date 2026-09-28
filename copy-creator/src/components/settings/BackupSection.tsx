@@ -220,7 +220,7 @@ export function BackupSection() {
                 </div>
               </>
             )}
-            <div className="settings-storage-hint">{t("settings.backupImportCoverHint")}</div>
+            <div className="settings-storage-hint">{t("settings.backupImportCoverWarn")}</div>
             <div className="settings-storage-row">
               <button
                 className="settings-storage-btn"
