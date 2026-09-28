@@ -1070,6 +1070,36 @@ pub(crate) fn ensure_schema(conn: &Connection) -> Result<(), Box<dyn std::error:
         ",
     )?;
 
+    // ── 运行时迁移：只在库版本落后时执行一次（见 run_schema_migrations）──
+    if schema_version(conn) < SCHEMA_VERSION {
+        run_schema_migrations(conn)?;
+        set_schema_version(conn, SCHEMA_VERSION);
+    }
+
+    // 剪切板全文索引（存在性与漂移自愈，见函数注释）；自持幂等守卫，
+    // 不随版本门控。
+    ensure_clipboard_fts(conn);
+    Ok(())
+}
+
+/// 当前 schema 版本。新增结构迁移（增列、历史数据回填/清退）时把版本 +1
+/// 并把步骤加进 run_schema_migrations；已升级的库启动时整段跳过——此前
+/// 全部步骤每次启动幂等重跑，启动成本随迁移数量线性增长。
+const SCHEMA_VERSION: i32 = 1;
+
+fn schema_version(conn: &Connection) -> i32 {
+    conn.query_row("PRAGMA user_version", [], |row| row.get(0))
+        .unwrap_or(0)
+}
+
+fn set_schema_version(conn: &Connection, version: i32) {
+    conn.pragma_update(None, "user_version", version).ok();
+}
+
+/// 历史结构迁移与数据回填/清退（从任意旧版本一次性升级到 SCHEMA_VERSION）。
+/// 全部步骤保持幂等：老库中段升级（如 0.2.x 直接升到当前）时按序执行
+/// 也能落到一致状态。仅由 ensure_schema 在版本落后时调用。
+fn run_schema_migrations(conn: &Connection) -> Result<(), Box<dyn std::error::Error>> {
     // Migrate api_key_labels from old schema (no record_id PK) to new schema
     {
         let has_record_id_pk: bool = conn
@@ -1301,13 +1331,12 @@ pub(crate) fn ensure_schema(conn: &Connection) -> Result<(), Box<dyn std::error:
     conn.execute("DROP TABLE IF EXISTS resource_groups", [])
         .ok();
 
-    // thumbs 派生缓存清退（每次启动执行，见函数注释）。
+    // thumbs 派生缓存清退（历史数据一次性清理，随版本门控执行）。
     prune_legacy_thumb_records(conn);
     prune_temporary_resource_records(conn);
-    // 编辑降级的文件承载文本记录归一（幂等，见函数注释）。
+    // 编辑降级的文件承载文本记录归一（幂等，随版本门控执行）。
     normalize_file_backed_text_records(conn);
-    // 剪切板全文索引（存在性与漂移自愈，见函数注释）。
-    ensure_clipboard_fts(conn);
+
     Ok(())
 }
 

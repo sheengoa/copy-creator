@@ -4782,3 +4782,58 @@ mod clipboard_fts_search_tests {
         assert_eq!(search(&app, "\"hello\""), vec!["r1"]);
     }
 }
+
+#[cfg(test)]
+mod schema_version_migration_tests {
+    use rusqlite::Connection;
+
+    use super::super::{ensure_schema, SCHEMA_VERSION};
+
+    #[test]
+    fn fresh_and_legacy_databases_reach_current_schema_version() {
+        // 全新库：基线建表 + 迁移一次执行后版本落当前。
+        let fresh = Connection::open_in_memory().unwrap();
+        ensure_schema(&fresh).unwrap();
+        let version: i32 = fresh
+            .query_row("PRAGMA user_version", [], |row| row.get(0))
+            .unwrap();
+        assert_eq!(version, SCHEMA_VERSION);
+        assert!(version > 0);
+
+        // 幂等：当前版本的库再次执行不报错、版本不变。
+        ensure_schema(&fresh).unwrap();
+        let version_again: i32 = fresh
+            .query_row("PRAGMA user_version", [], |row| row.get(0))
+            .unwrap();
+        assert_eq!(version_again, SCHEMA_VERSION);
+
+        // 旧形状库（有表但缺生成列、user_version=0）：升级后补齐并落版本。
+        let legacy = Connection::open_in_memory().unwrap();
+        legacy
+            .execute_batch(
+                "CREATE TABLE clipboard_records (
+                     id TEXT PRIMARY KEY,
+                     type TEXT NOT NULL,
+                     content TEXT NOT NULL,
+                     created_at TEXT NOT NULL
+                 );
+                 INSERT INTO clipboard_records (id, type, content, created_at)
+                     VALUES ('r1', 'text', '旧数据', '2025-06-01T00:00:00+00:00');",
+            )
+            .unwrap();
+        ensure_schema(&legacy).unwrap();
+        // 生成列不出现在 table_info，须用 table_xinfo。
+        let has_created_ms: bool = legacy
+            .prepare("SELECT COUNT(*) FROM pragma_table_xinfo('clipboard_records') WHERE name = 'created_ms'")
+            .unwrap()
+            .query_row([], |row| row.get::<_, i64>(0))
+            .map(|count| count > 0)
+            .unwrap();
+        assert!(has_created_ms);
+        let legacy_version: i32 = legacy
+            .query_row("PRAGMA user_version", [], |row| row.get(0))
+            .unwrap();
+        assert_eq!(legacy_version, SCHEMA_VERSION);
+    }
+
+}
