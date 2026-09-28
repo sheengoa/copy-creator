@@ -290,35 +290,70 @@ pub(crate) fn get_clipboard_records_inner<R: Runtime>(
             .replace('\\', "\\\\")
             .replace('%', "\\%")
             .replace('_', "\\_");
-        let sql = format!(
-            "SELECT id, type, content, source_app, created_at, user_api_key, group_name, attachments, storage_mode, resource_path, COALESCE(use_count, 0), COALESCE(last_used_at, ''), COALESCE(pinned, 0) FROM clipboard_records
-             WHERE content LIKE '%' || ?1 || '%' ESCAPE '\\' {} ORDER BY {} LIMIT ?2 OFFSET ?3",
-            cat_filter.1,
-            clipboard_order_clause(sort_by.as_deref())
-        );
-        let mut stmt = conn.prepare(&sql).map_err(|e| e.to_string())?;
-        let rows = stmt
-            .query_map(params![escaped, query_lim, query_off], |row| {
-                Ok(clipboard_record_json(
-                    row.get::<_, String>(0)?,
-                    row.get::<_, String>(1)?,
-                    row.get::<_, String>(2)?,
-                    row.get::<_, String>(3)?,
-                    row.get::<_, String>(4)?,
-                    row.get::<_, i64>(5)?,
-                    row.get::<_, String>(6)?,
-                    row.get::<_, String>(7)?,
-                    row.get::<_, String>(8)?,
-                    row.get::<_, String>(9)?,
-                    row.get::<_, i64>(10)?,
-                    row.get::<_, String>(11)?,
-                    row.get::<_, i64>(12)?,
-                ))
-            })
-            .map_err(|e| e.to_string())?;
-        for row in rows {
-            records.push(row.map_err(|e| e.to_string())?);
-        }
+        // ≥3 字符（trigram 最小词元长度）且索引存在时走 FTS 子串匹配，
+        // 避免库大后每次输入全表扫描；更短关键词与 MATCH 异常（如转义
+        // 边界）一律回退 LIKE——语义一致，只慢不缺。
+        let fts_ready = q.chars().count() >= 3
+            && conn
+                .query_row(
+                    "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'clipboard_fts'",
+                    [],
+                    |row| row.get::<_, i64>(0),
+                )
+                .is_ok();
+        let like_filter = "content LIKE '%' || ?1 || '%' ESCAPE '\\'";
+        let fts_filter = "rowid IN (SELECT rowid FROM clipboard_fts WHERE clipboard_fts MATCH ?1)";
+        // 短语查询包裹双引号，内部引号加倍转义，关键字按整串子串解释。
+        let fts_query = format!("\"{}\"", q.replace('"', "\"\""));
+
+        let run_search = |search_filter: &str,
+                          keyword: &str|
+         -> Result<Vec<serde_json::Value>, String> {
+            let sql = format!(
+                "SELECT id, type, content, source_app, created_at, user_api_key, group_name, attachments, storage_mode, resource_path, COALESCE(use_count, 0), COALESCE(last_used_at, ''), COALESCE(pinned, 0) FROM clipboard_records
+                 WHERE {} {} ORDER BY {} LIMIT ?2 OFFSET ?3",
+                search_filter,
+                cat_filter.1,
+                clipboard_order_clause(sort_by.as_deref())
+            );
+            let mut stmt = conn.prepare(&sql).map_err(|e| e.to_string())?;
+            let rows = stmt
+                .query_map(params![keyword, query_lim, query_off], |row| {
+                    Ok(clipboard_record_json(
+                        row.get::<_, String>(0)?,
+                        row.get::<_, String>(1)?,
+                        row.get::<_, String>(2)?,
+                        row.get::<_, String>(3)?,
+                        row.get::<_, String>(4)?,
+                        row.get::<_, i64>(5)?,
+                        row.get::<_, String>(6)?,
+                        row.get::<_, String>(7)?,
+                        row.get::<_, String>(8)?,
+                        row.get::<_, String>(9)?,
+                        row.get::<_, i64>(10)?,
+                        row.get::<_, String>(11)?,
+                        row.get::<_, i64>(12)?,
+                    ))
+                })
+                .map_err(|e| e.to_string())?;
+            let mut matched = Vec::new();
+            for row in rows {
+                matched.push(row.map_err(|e| e.to_string())?);
+            }
+            Ok(matched)
+        };
+
+        records = if fts_ready {
+            match run_search(fts_filter, &fts_query) {
+                Ok(matched) => matched,
+                Err(error) => {
+                    log::warn!("clipboard FTS search failed, falling back to LIKE: {error}");
+                    run_search(like_filter, &escaped)?
+                }
+            }
+        } else {
+            run_search(like_filter, &escaped)?
+        };
     } else {
         let sql = format!(
             "SELECT id, type, content, source_app, created_at, user_api_key, group_name, attachments, storage_mode, resource_path, COALESCE(use_count, 0), COALESCE(last_used_at, ''), COALESCE(pinned, 0) FROM clipboard_records

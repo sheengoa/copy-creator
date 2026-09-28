@@ -4640,3 +4640,145 @@ mod clipboard_prune_count_cap_tests {
         assert_eq!(remaining_ids(&app).len(), 4);
     }
 }
+
+#[cfg(test)]
+mod clipboard_fts_search_tests {
+    use crate::db::{get_clipboard_records_inner, DbState};
+    use rusqlite::Connection;
+    use std::sync::Mutex;
+    use tauri::Manager;
+
+    // FTS 夹具：ensure_schema 的最小表集 + ensure_clipboard_fts 建索引，
+    // 走与生产一致的触发器同步路径。
+    fn fts_app() -> tauri::App<tauri::test::MockRuntime> {
+        let app = tauri::test::mock_app();
+        let conn = Connection::open_in_memory().unwrap();
+        conn.execute_batch(
+            "CREATE TABLE settings (key TEXT PRIMARY KEY, value TEXT NOT NULL);
+             CREATE TABLE clipboard_records (
+                 id TEXT PRIMARY KEY,
+                 type TEXT NOT NULL,
+                 content TEXT NOT NULL,
+                 source_app TEXT DEFAULT '',
+                 created_at TEXT NOT NULL,
+                 user_api_key INTEGER DEFAULT 0,
+                 sort_order REAL,
+                 group_name TEXT DEFAULT '',
+                 attachments TEXT DEFAULT '[]',
+                 storage_mode TEXT DEFAULT 'database',
+                 resource_path TEXT DEFAULT '',
+                 resource_note TEXT DEFAULT '',
+                 resource_external INTEGER DEFAULT 0,
+                 last_used_at TEXT DEFAULT '',
+                 use_count INTEGER DEFAULT 0,
+                 touched_ms INTEGER DEFAULT 0,
+                 pinned INTEGER NOT NULL DEFAULT 0,
+                 created_ms INTEGER GENERATED ALWAYS AS (
+                     CAST((julianday(created_at) - 2440587.5) * 86400000 AS INTEGER)
+                 ) VIRTUAL
+             );
+             CREATE TABLE trash_items (
+                 id TEXT PRIMARY KEY,
+                 record_id TEXT DEFAULT '',
+                 record_json TEXT NOT NULL,
+                 file_name TEXT DEFAULT '',
+                 original_group TEXT DEFAULT '',
+                 original_path TEXT DEFAULT '',
+                 trash_dir TEXT NOT NULL,
+                 trashed_at TEXT NOT NULL,
+                 trashed_ms INTEGER NOT NULL DEFAULT 0
+             );
+             CREATE TABLE api_key_labels (
+                 record_id TEXT PRIMARY KEY,
+                 label TEXT DEFAULT ''
+             );",
+        )
+        .unwrap();
+        super::super::ensure_clipboard_fts(&conn);
+        app.manage(DbState {
+            conn: Mutex::new(conn),
+        });
+        app
+    }
+
+    fn insert_record(app: &tauri::App<tauri::test::MockRuntime>, id: &str, content: &str) {
+        let state = app.state::<DbState>();
+        let conn = state.conn.lock().unwrap();
+        conn.execute(
+            "INSERT INTO clipboard_records (id, type, content, created_at) VALUES (?1, 'text', ?2, '2026-01-01T00:00:00+00:00')",
+            rusqlite::params![id, content],
+        )
+        .unwrap();
+    }
+
+    fn search(app: &tauri::App<tauri::test::MockRuntime>, keyword: &str) -> Vec<String> {
+        get_clipboard_records_inner(
+            app.handle(),
+            Some(keyword.to_string()),
+            Some(200),
+            Some(0),
+            None,
+            None,
+            None,
+        )
+        .unwrap()
+        .into_iter()
+        .map(|record| record["id"].as_str().unwrap_or_default().to_string())
+        .collect()
+    }
+
+    #[test]
+    fn trigram_substring_search_matches_case_and_cjk() {
+        let app = fts_app();
+        insert_record(&app, "r1", "The Quick Brown Fox");
+        insert_record(&app, "r2", "读取配置段之前先初始化");
+        insert_record(&app, "r3", "unrelated content");
+
+        // ASCII 大小写不敏感的子串（trigram 短语查询）。
+        assert_eq!(search(&app, "quick brown"), vec!["r1"]);
+        // 中文 ≥3 字子串命中。
+        assert_eq!(search(&app, "配置段之前"), vec!["r2"]);
+
+        // 短于 trigram 最小词元（2 字符）回退 LIKE，语义不变。
+        assert_eq!(search(&app, "ick"), vec!["r1"]);
+        assert_eq!(search(&app, "置段"), vec!["r2"]);
+    }
+
+    #[test]
+    fn fts_stays_in_sync_with_update_and_delete() {
+        let app = fts_app();
+        insert_record(&app, "r1", "original searchable text");
+
+        assert_eq!(search(&app, "searchable"), vec!["r1"]);
+
+        // 更新正文：新值命中、旧值不再命中（UPDATE 触发器同步）。
+        {
+            let state = app.state::<DbState>();
+            let conn = state.conn.lock().unwrap();
+            conn.execute(
+                "UPDATE clipboard_records SET content = 'replaced entirely' WHERE id = 'r1'",
+                [],
+            )
+            .unwrap();
+        }
+        assert!(search(&app, "searchable").is_empty());
+        assert_eq!(search(&app, "replaced entirely"), vec!["r1"]);
+
+        // 删除记录：索引同步清空，不再命中。
+        {
+            let state = app.state::<DbState>();
+            let conn = state.conn.lock().unwrap();
+            conn.execute("DELETE FROM clipboard_records WHERE id = 'r1'", []).unwrap();
+        }
+        assert!(search(&app, "replaced entirely").is_empty());
+    }
+
+    #[test]
+    fn double_quote_in_keyword_falls_back_without_error() {
+        let app = fts_app();
+        insert_record(&app, "r1", "say \"hello\" loudly");
+
+        // 含双引号的关键词经转义后走 FTS 仍能命中。
+        assert_eq!(search(&app, "\"hello\""), vec!["r1"]);
+    }
+}

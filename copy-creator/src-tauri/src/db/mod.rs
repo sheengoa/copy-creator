@@ -1306,7 +1306,60 @@ pub(crate) fn ensure_schema(conn: &Connection) -> Result<(), Box<dyn std::error:
     prune_temporary_resource_records(conn);
     // 编辑降级的文件承载文本记录归一（幂等，见函数注释）。
     normalize_file_backed_text_records(conn);
+    // 剪切板全文索引（存在性与漂移自愈，见函数注释）。
+    ensure_clipboard_fts(conn);
     Ok(())
+}
+
+// ── 剪切板全文索引（FTS5 trigram）──
+// 搜索是 %kw% LIKE，无法走普通索引，历史库一大就每次输入全表扫描。
+// trigram 分词的 FTS5 外部内容索引提供真子串匹配（中文按字符三元组，
+// 天然支持子串检索），由触发器随记录增删改自动同步。索引建立失败
+// （bundled SQLite 理论上恒支持；仅防异常裁剪）时跳过，搜索回退 LIKE。
+fn ensure_clipboard_fts(conn: &Connection) {
+    let table_ok = conn
+        .execute_batch(
+            "CREATE VIRTUAL TABLE IF NOT EXISTS clipboard_fts USING fts5(
+                 content,
+                 content='clipboard_records',
+                 content_rowid='rowid',
+                 tokenize='trigram'
+             );",
+        )
+        .is_ok();
+    if !table_ok {
+        log::warn!("clipboard FTS5 (trigram) unavailable; search stays on LIKE");
+        return;
+    }
+
+    // 首次接入：记录表非空而索引为空时全量重建一次；此后由触发器维护，
+    // 理论漂移可用 INSERT INTO clipboard_fts(clipboard_fts) VALUES('rebuild')
+    // 手动修复。重建先于触发器创建，避免对未索引行执行 'delete' 同步。
+    let records: i64 = conn
+        .query_row("SELECT COUNT(*) FROM clipboard_records", [], |row| row.get(0))
+        .unwrap_or(0);
+    let indexed: i64 = conn
+        .query_row("SELECT COUNT(*) FROM clipboard_fts", [], |row| row.get(0))
+        .unwrap_or(0);
+    if records > 0 && indexed == 0 {
+        conn.execute_batch("INSERT INTO clipboard_fts(clipboard_fts) VALUES ('rebuild');")
+            .ok();
+        log::info!("clipboard FTS index rebuilt for {records} records");
+    }
+
+    conn.execute_batch(
+        "CREATE TRIGGER IF NOT EXISTS clipboard_fts_insert AFTER INSERT ON clipboard_records BEGIN
+             INSERT INTO clipboard_fts(rowid, content) VALUES (new.rowid, new.content);
+         END;
+         CREATE TRIGGER IF NOT EXISTS clipboard_fts_delete AFTER DELETE ON clipboard_records BEGIN
+             INSERT INTO clipboard_fts(clipboard_fts, rowid, content) VALUES ('delete', old.rowid, old.content);
+         END;
+         CREATE TRIGGER IF NOT EXISTS clipboard_fts_update AFTER UPDATE OF content ON clipboard_records BEGIN
+             INSERT INTO clipboard_fts(clipboard_fts, rowid, content) VALUES ('delete', old.rowid, old.content);
+             INSERT INTO clipboard_fts(rowid, content) VALUES (new.rowid, new.content);
+         END;",
+    )
+    .ok();
 }
 // ── Reorder Commands ──────────────────────────────────────────
 /// 按传入顺序为 ids 写 sort_order：第 i 个 id 的 sort_order 由
