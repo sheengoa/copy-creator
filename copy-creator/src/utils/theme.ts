@@ -12,6 +12,7 @@ export const parseThemePreference = (raw: string | undefined | null): ThemePrefe
   raw === "dark" ? "dark" : raw === "system" ? "system" : "light";
 
 export const systemPrefersDark = (): boolean =>
+  typeof window !== "undefined" &&
   typeof window.matchMedia === "function" &&
   window.matchMedia("(prefers-color-scheme: dark)").matches;
 
@@ -28,7 +29,7 @@ export const applyThemeAttribute = (theme: ResolvedTheme): void => {
  * 调用方按最后一次 resolveTheme 结果保持静态。
  */
 export const onSystemThemeChange = (cb: (dark: boolean) => void): (() => void) => {
-  if (typeof window.matchMedia !== "function") return () => {};
+  if (typeof window === "undefined" || typeof window.matchMedia !== "function") return () => {};
   const mq = window.matchMedia("(prefers-color-scheme: dark)");
   const handler = (e: MediaQueryListEvent) => cb(e.matches);
   mq.addEventListener("change", handler);

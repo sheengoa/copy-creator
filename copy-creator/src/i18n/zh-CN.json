@@ -206,7 +206,6 @@
     "copyFailed": "粘贴失败，请重试",
     "deleteFailed": "删除失败，请重试",
     "openFailed": "打开新建窗口失败，请重试",
-    "withImages": "含图片",
     "localSource": "本地内容",
     "librarySettings": "资源库设置",
     "cardSize": "卡片大小",
@@ -287,7 +286,6 @@
     "remark": "备注",
     "expandText": "展开",
     "collapseText": "收起",
-    "content": "内容",
     "contentRequired": "内容未填写",
     "empty": "选择一个场景组查看快捷输入",
     "emptyGroupPhrases": "当前分组中无快捷输入",
@@ -301,7 +299,6 @@
     "placeholderHint": "可用占位符（粘贴时展开，剪贴板为空则展开为空），点击插入："
   },
   "common": {
-    "search": "搜索",
     "save": "保存",
     "cancel": "取消",
     "select": "选择",

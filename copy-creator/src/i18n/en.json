@@ -195,7 +195,6 @@
     "copyFailed": "Paste failed. Try again.",
     "deleteFailed": "Delete failed. Try again.",
     "openFailed": "Failed to open the new resource window. Try again.",
-    "withImages": "With images",
     "localSource": "Local content",
     "librarySettings": "Library Settings",
     "cardSize": "Card Size",
@@ -287,7 +286,6 @@
     "remark": "Remark",
     "expandText": "Expand",
     "collapseText": "Collapse",
-    "content": "Content",
     "contentRequired": "Content is required",
     "empty": "Select a group to view quick input",
     "emptyGroupPhrases": "No quick input in this group",
@@ -301,7 +299,6 @@
     "placeholderHint": "Placeholders (expanded on paste; empty clipboard expands to empty). Click to insert:"
   },
   "common": {
-    "search": "Search",
     "save": "Save",
     "cancel": "Cancel",
     "select": "Select",
