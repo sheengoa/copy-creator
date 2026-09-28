@@ -1,5 +1,6 @@
-import { useEffect, useState } from "react";
+import { useEffect, useState, useRef } from "react";
 import { Icons } from "../../components/Icons";
+import { useArrowKeyNav } from "../../hooks/useArrowKeyNav";
 import { useSortable } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
 import { useTranslation } from "react-i18next";
@@ -289,6 +290,9 @@ export function PhraseList({
   onToggleSelected,
 }: PhraseListProps) {
   const { t } = useTranslation();
+  // 方向键导航：容器节点同时供「回到顶部」回调用，这里用本地 ref 桥接。
+  const listRef = useRef<HTMLDivElement>(null);
+  const arrowNav = useArrowKeyNav({ containerRef: listRef, itemSelector: ".phrase-card" });
 
   // 骨架屏只用于首屏：分组切换是本地毫秒级查询，从空分组切走时若再亮
   // 骨架屏，会出现"骨架屏闪一下再变空态"的闪烁（用户可感知）。
@@ -334,7 +338,14 @@ export function PhraseList({
   }
 
   return (
-    <div className="phrase-list" ref={scrollRef}>
+    <div
+      className="phrase-list"
+      ref={(el) => {
+        listRef.current = el;
+        scrollRef?.(el);
+      }}
+      onKeyDown={arrowNav}
+    >
       {phrases.map((p) => (
         <PhraseCard
           key={p.id}

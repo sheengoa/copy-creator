@@ -16,6 +16,7 @@ import { useHorizontalWheelScroll } from "../../hooks/useHorizontalWheelScroll";
 import { useMultiSelect } from "../../hooks/useMultiSelect";
 import { useRefreshOnShow } from "../../hooks/useRefreshOnShow";
 import { useRecordLocale } from "../../hooks/useRecordLocale";
+import { useArrowKeyNav } from "../../hooks/useArrowKeyNav";
 import { buildRecordView, type RecordView } from "../../domain/recordView";
 import { isResourceRecord, recordMatchesCategory, RECORD_CATEGORY_KEYS } from "../../domain/records";
 
@@ -200,6 +201,8 @@ export default function ClipboardPage() {
 
   // 统一的「回到顶部」：监视剪贴板列表滚动容器，批量选择模式下隐藏。
   const backToTop = useBackToTop({ enabled: !isSelecting });
+  const listRef = useRef<HTMLDivElement>(null);
+  const arrowNav = useArrowKeyNav({ containerRef: listRef, itemSelector: ".clipboard-card" });
   const selectAllRequestRef = useRef(0);
 
   const startClipboardSelection = useCallback(() => {
@@ -416,8 +419,10 @@ export default function ClipboardPage() {
         <div
           className="clipboard-list"
           ref={(el) => {
+            listRef.current = el;
             backToTop.containerRef(el);
           }}
+          onKeyDown={arrowNav}
         >
           {views.map((view, i) => (
             <ClipboardCard

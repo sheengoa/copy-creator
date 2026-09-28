@@ -21,6 +21,7 @@ import { useResourceStore } from "../stores/clipboardStore";
 import { useShallow } from "zustand/react/shallow";
 import { useSettingsStore, RESOURCE_CARD_SIZE_MAX, RESOURCE_CARD_SIZE_MIN } from "../stores/settingsStore";
 import { useMultiSelect } from "../hooks/useMultiSelect";
+import { useArrowKeyNav } from "../hooks/useArrowKeyNav";
 import { Icons } from "../components/Icons";
 import IosSelect from "../components/IosSelect";
 import SearchInput from "../components/SearchInput";
@@ -429,6 +430,15 @@ export default function ResourcePage() {
 
   // 统一的「回到顶部」：批量选择模式下隐藏。
   const backToTop = useBackToTop({ enabled: !isSelecting });
+
+  // 方向键导航：瀑布流按列分组（上下列内移动、左右跨列同位）。
+  const columnsRef = useRef<HTMLDivElement>(null);
+  const arrowNav = useArrowKeyNav({
+    containerRef: columnsRef,
+    itemSelector: ".resource-card",
+    columnar: true,
+    columnSelector: ".resource-column",
+  });
 
   const manageRowSensors = useSensors(
     useSensor(PointerSensor, { activationConstraint: { distance: 4 } }),
@@ -1464,6 +1474,8 @@ export default function ResourcePage() {
             {/* 手动拖拽排序已移除：「全部分组」按排序偏好，分组浏览按时间序。 */}
             <div
               className="resource-columns"
+              ref={columnsRef}
+              onKeyDown={arrowNav}
               style={{
                 gridTemplateColumns: `repeat(${columnCount}, minmax(0, 1fr))`,
                 // 卡片整体缩放：字号/内边距随滑块等比（预览区经 aspect-ratio 天然随列宽缩放）。
