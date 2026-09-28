@@ -77,9 +77,12 @@ async function runPastePhrase(phrase: Phrase, terminal: boolean) {
         await invoke("paste_file", { path });
       }
     } else if (terminal) {
-      await invoke("paste_text_terminal", { text: phrase.content });
+      // 短语专用命令：粘贴前在后端展开占位符（{{date}}/{{time}}/
+      // {{datetime}}/{{clipboard}}）；clipboard 历史内容必须原样粘贴，
+      // 不能共用 paste_text。
+      await invoke("paste_phrase_text", { text: phrase.content, terminal: true });
     } else {
-      await invoke("paste_text", { text: phrase.content });
+      await invoke("paste_phrase_text", { text: phrase.content, terminal: false });
     }
     touchPhraseUsage(phrase.id);
     usePhraseStore.setState((s) => {

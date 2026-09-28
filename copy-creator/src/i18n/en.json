@@ -286,7 +286,8 @@
     "confirmDelete": "Delete this quick input?",
     "confirmDeleteSelected": "Delete the selected {{count}} quick inputs? This action cannot be undone.",
     "confirmDeleteGroup": "Delete this group and all its quick inputs? This action cannot be undone.",
-    "neverUsed": "Never used"
+    "neverUsed": "Never used",
+    "placeholderHint": "Placeholders (expanded on paste; empty clipboard expands to empty). Click to insert:"
   },
   "common": {
     "search": "Search",

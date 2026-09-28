@@ -37,7 +37,7 @@ describe("phraseStore paste routing", () => {
       file_size: 0,
     });
 
-    expect(invokeMock).toHaveBeenCalledWith("paste_text", { text: "hello" });
+    expect(invokeMock).toHaveBeenCalledWith("paste_phrase_text", { text: "hello", terminal: false });
     expect(invokeMock).toHaveBeenCalledWith("touch_phrase_usage", {
       id: "phrase-1",
     });
@@ -57,7 +57,7 @@ describe("phraseStore paste routing", () => {
 
     invokeMock.mockReset();
     invokeMock.mockImplementation((command: string) => {
-      if (command === "paste_text") return Promise.reject(new Error("boom"));
+      if (command === "paste_phrase_text") return Promise.reject(new Error("boom"));
       return Promise.resolve(undefined);
     });
     await usePhraseStore.getState().pastePhrase({
@@ -100,7 +100,7 @@ describe("phraseStore paste routing", () => {
       file_size: 0,
     });
 
-    expect(invokeMock).toHaveBeenCalledWith("paste_text_terminal", { text: "pwd" });
+    expect(invokeMock).toHaveBeenCalledWith("paste_phrase_text", { text: "pwd", terminal: true });
   });
 
   it("uses file paste for terminal override on file phrases", async () => {

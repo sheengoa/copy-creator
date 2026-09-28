@@ -107,6 +107,29 @@ export function PhraseDialog({
             setPhraseContent(e.target.value);
           }}
         />
+        {!hasFile && (
+          // 占位符名以字面量渲染而非写进译文：i18next 会把 {{x}} 当插值变量。
+          // 点击 token 追加到内容末尾（textarea 光标位置在受控组件外不可得，
+          // 追加语义对快捷短语足够）。
+          <div className="phrase-placeholder-hint">
+            {t("phrases.placeholderHint")}
+            {["{{date}}", "{{time}}", "{{datetime}}", "{{clipboard}}"].map((token) => (
+              <code
+                key={token}
+                role="button"
+                tabIndex={0}
+                onClick={() => setPhraseContent(`${phraseContent}${token}`)}
+                onKeyDown={(e) => {
+                  if (e.key !== "Enter" && e.key !== " ") return;
+                  e.preventDefault();
+                  setPhraseContent(`${phraseContent}${token}`);
+                }}
+              >
+                {token}
+              </code>
+            ))}
+          </div>
+        )}
         <div className="quick-input-file-row">
           {hasFile ? (
             <>

@@ -597,3 +597,29 @@
 [data-theme="dark"] .group-chip.is-dragging {
   box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
 }
+
+/* 短语占位符提示行：token 以代码片样式呈现，点击可插入。 */
+.phrase-placeholder-hint {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px;
+  padding: 6px 2px 2px;
+  font-size: var(--text-xs);
+  color: var(--text-secondary);
+}
+
+.phrase-placeholder-hint code {
+  padding: 1px 6px;
+  border-radius: 5px;
+  background: var(--chip-bg);
+  color: var(--text-primary);
+  font-family: var(--font-mono, monospace);
+  font-size: 11px;
+  cursor: pointer;
+  transition: background 120ms ease-out;
+}
+
+.phrase-placeholder-hint code:hover {
+  background: var(--chip-hover-bg);
+}

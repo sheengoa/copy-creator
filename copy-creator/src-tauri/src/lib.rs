@@ -446,6 +446,7 @@ pub fn run() {
             db::set_settings_batch,
             paste::paste_text,
             paste::paste_text_terminal,
+            paste::paste_phrase_text,
             paste::paste_text_file,
             paste::paste_image,
             paste::paste_image_file,

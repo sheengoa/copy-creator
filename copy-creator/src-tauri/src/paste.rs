@@ -902,6 +902,54 @@ pub fn paste_text_terminal(app: AppHandle, text: String) -> Result<(), String> {
     Ok(())
 }
 
+// ── 快捷输入占位符 ─────────────────────────────────────────────
+// 短语粘贴专属展开（clipboard 历史内容必须原样粘贴，不能共用 paste_text）。
+// {{clipboard}} 需要在写剪切板之前读原值，收在 Rust 侧恰好一次完成；
+// 未知 {{…}} 原样保留，不吞用户文本。
+fn expand_phrase_placeholders_with(
+    now: chrono::DateTime<chrono::Local>,
+    clipboard_text: Option<&str>,
+    text: &str,
+) -> String {
+    if !text.contains("{{") {
+        return text.to_string();
+    }
+    let mut out = text
+        .replace("{{datetime}}", &now.format("%Y-%m-%d %H:%M").to_string())
+        .replace("{{date}}", &now.format("%Y-%m-%d").to_string())
+        .replace("{{time}}", &now.format("%H:%M").to_string());
+    if out.contains("{{clipboard}}") {
+        // 读取失败按空串展开：粘贴主流程不应因剪贴板不可读而失败。
+        let current = clipboard_text.unwrap_or("");
+        out = out.replace("{{clipboard}}", current);
+    }
+    out
+}
+
+/// 短语粘贴命令：先展开占位符再走普通/终端粘贴。
+#[tauri::command]
+pub fn paste_phrase_text(app: AppHandle, text: String, terminal: Option<bool>) -> Result<(), String> {
+    let terminal = terminal.unwrap_or(false);
+    let clipboard_text = if text.contains("{{clipboard}}") {
+        arboard::Clipboard::new()
+            .and_then(|mut clipboard| clipboard.get_text())
+            .ok()
+    } else {
+        None
+    };
+    let expanded =
+        expand_phrase_placeholders_with(chrono::Local::now(), clipboard_text.as_deref(), &text);
+    log::info!(
+        "[paste] paste_phrase_text called (terminal={terminal}, expanded {} chars)",
+        expanded.chars().count()
+    );
+    if terminal {
+        paste_text_terminal(app, expanded)
+    } else {
+        paste_text(app, expanded)
+    }
+}
+/// 使「以文件方式存储的内容」再次使用时粘贴出来的仍是内容本身而非文件。
 /// 文件承载的文本资源粘贴：读取资源库内文本文件的内容后按文本写入剪切板，
 /// 使「以文件方式存储的内容」再次使用时粘贴出来的仍是内容本身而非文件。
 /// 读取失败（路径无效、超过 10 MB、非 UTF-8）返回错误，由前端回退为文件粘贴。
@@ -1168,7 +1216,50 @@ pub fn paste_files(app: AppHandle, paths: Vec<String>) -> Result<(), String> {
 
 #[cfg(test)]
 mod tests {
-    use super::{parse_stash_segments, StashSegment, STASH_IMAGE_PLACEHOLDER};
+    use super::{
+        expand_phrase_placeholders_with, parse_stash_segments, StashSegment,
+        STASH_IMAGE_PLACEHOLDER,
+    };
+    use chrono::TimeZone;
+
+    fn fixed_now() -> chrono::DateTime<chrono::Local> {
+        chrono::Local
+            .with_ymd_and_hms(2026, 9, 28, 14, 5, 9)
+            .single()
+            .unwrap()
+    }
+
+    #[test]
+    fn phrase_placeholders_expand_datetime_and_clipboard() {
+        let out = expand_phrase_placeholders_with(
+            fixed_now(),
+            Some("当前剪贴板内容"),
+            "今日 {{date}} {{time}} / {{datetime}}：{{clipboard}}",
+        );
+        assert_eq!(
+            out,
+            "今日 2026-09-28 14:05 / 2026-09-28 14:05：当前剪贴板内容"
+        );
+    }
+
+    #[test]
+    fn phrase_placeholders_empty_clipboard_and_unknown_tokens() {
+        // 剪贴板读取失败按空串展开；未知占位符原样保留不吞文本。
+        let out = expand_phrase_placeholders_with(
+            fixed_now(),
+            None,
+            "{{clipboard}}与{{model}}保持{{  date  }}",
+        );
+        assert_eq!(out, "与{{model}}保持{{  date  }}");
+    }
+
+    #[test]
+    fn phrase_placeholders_without_tokens_is_verbatim() {
+        assert_eq!(
+            expand_phrase_placeholders_with(fixed_now(), Some("x"), "纯文本内容"),
+            "纯文本内容"
+        );
+    }
 
     #[test]
     fn parses_text_and_images_in_document_order() {
