@@ -4,7 +4,7 @@ import { useTranslation } from "react-i18next";
 import { invoke } from "@tauri-apps/api/core";
 import { emit } from "@tauri-apps/api/event";
 import { useSettingsStore } from "../stores/settingsStore";
-import { ClipboardSection, GeneralSection, ShortcutSection, RadialSection, StorageSection, BackupSection } from "./settings";
+import { ClipboardSection, GeneralSection, ShortcutSection, RadialSection, StorageSection, BackupSection, PasteEnvironmentSection } from "./settings";
 import { useShortcutRecording } from "./settings/useShortcutRecording";
 
 interface Props {
@@ -327,6 +327,8 @@ export default function SettingsContent({ embedded }: Props) {
           settings.setContentSort(mode);
         }}
       />
+
+      <PasteEnvironmentSection />
 
       <ShortcutSection
         localShortcutKey={localShortcutKey}

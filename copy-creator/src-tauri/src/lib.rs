@@ -447,6 +447,7 @@ pub fn run() {
             paste::paste_text,
             paste::paste_text_terminal,
             paste::paste_phrase_text,
+            paste::get_paste_backend_status,
             paste::paste_text_file,
             paste::paste_image,
             paste::paste_image_file,

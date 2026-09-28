@@ -408,6 +408,57 @@ fn inject_paste_with_shortcut(shortcut: PasteShortcut) {
     };
 }
 
+// ── 粘贴环境诊断（设置页呈现）─────────────────────────────────
+
+/// 粘贴环境状态：会话类型与可用注入后端。判定口径与 paste 路径一致
+/// （Wayland: ydotool → wtype(wlroots) → enigo(XWayland)；X11: enigo →
+/// xdotool）。前端设置页据此显示状态与安装指引，非 Linux 场景
+/// session 为 "none"，前端隐藏该区域。
+#[derive(serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PasteBackendStatus {
+    session: &'static str,
+    ydotool_installed: bool,
+    ydotoold_installed: bool,
+    /// ydotoold 守护进程是否正在运行（粘贴注入的实际前提）。
+    ydotoold_running: bool,
+    wtype_installed: bool,
+    xdotool_installed: bool,
+}
+
+#[cfg(target_os = "linux")]
+fn ydotoold_process_running() -> bool {
+    Command::new("pgrep")
+        .arg("-x")
+        .arg("ydotoold")
+        .status()
+        .map(|status| status.success())
+        .unwrap_or(false)
+}
+
+#[cfg(not(target_os = "linux"))]
+fn ydotoold_process_running() -> bool {
+    false
+}
+
+#[tauri::command]
+pub fn get_paste_backend_status() -> PasteBackendStatus {
+    PasteBackendStatus {
+        session: if is_wayland() {
+            "wayland"
+        } else if is_x11() {
+            "x11"
+        } else {
+            "none"
+        },
+        ydotool_installed: which("ydotool").is_some(),
+        ydotoold_installed: which("ydotoold").is_some(),
+        ydotoold_running: ydotoold_process_running(),
+        wtype_installed: which("wtype").is_some(),
+        xdotool_installed: which("xdotool").is_some(),
+    }
+}
+
 // ── Diagnostics (called once at startup) ────────────────────────
 
 /// Emit a desktop notification if `notify-send` is available.
