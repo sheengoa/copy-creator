@@ -30,6 +30,18 @@ export function isFileBackedTextResource(
   return record.type === "file" && isResourceRecord(record) && inferResourceMediaKind(record) === "text";
 }
 
+/** 记录正文能否在本体上直接编辑（列表卡「编辑内容」入口的判定）：
+ * 仅数据库承载的纯文本/链接；资源承载文本在资源详情页编辑（内容在
+ * 文件里），文件承载文本同由资源域管理。 */
+export function recordTextEditable(
+  record: Pick<ClipboardRecord, "type" | "group_name" | "storage_mode">,
+): boolean {
+  return (
+    (record.type === "text" || record.type === "link") &&
+    !isResourceRecord(record)
+  );
+}
+
 /** 资源文本预览的取材路径：有文本文件承载（resource_path 指向文本扩展名）
  * 时返回该路径，卡片/径向条目读文件全文；无文件承载的纯文本资源返回
  * null（展示改用摘要）。

@@ -33,6 +33,8 @@ interface ClipboardCardProps {
   onDelete: (id: string) => void;
   /** 收藏/取消收藏（hover 星标与右键菜单共用）：防保留期清理，恒定浮顶。 */
   onSetPinned?: (id: string, pinned: boolean) => void;
+  /** 编辑正文（view.editableText 时出按钮与菜单项）。 */
+  onEditRecord?: (view: RecordView) => void;
   /** 数据/动作经容器回调进出（叶子禁 import stores/invoke）。 */
   getRecordContent: (view: RecordView) => Promise<string>;
   onToggleUserApiKey: (view: RecordView) => void;
@@ -109,6 +111,7 @@ function ClipboardCardInner({
   onPasteTerminal,
   onDelete,
   onSetPinned,
+  onEditRecord,
   getRecordContent,
   onToggleUserApiKey,
   selectionMode,
@@ -402,6 +405,20 @@ function ClipboardCardInner({
                     {Icons.star}
                   </button>
                 )}
+                {onEditRecord && view.editableText && (
+                  <button
+                    className="card-edit-btn"
+                    type="button"
+                    aria-label={t("clipboard.editContent")}
+                    title={t("clipboard.editContent")}
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      onEditRecord(view);
+                    }}
+                  >
+                    {Icons.edit}
+                  </button>
+                )}
                 <button className="card-delete-btn" onClick={handleDelete}>
                   {Icons.delete}
                 </button>
@@ -496,6 +513,18 @@ function ClipboardCardInner({
           label={pasteLeftClick === "terminal" ? t("clipboard.pasteToTerminal") : t("clipboard.pasteNormal")}
           onClick={handlePaste}
         />
+        {onEditRecord && view.editableText && (
+          <CardActionMenuItem
+            className="ctx-menu-item"
+            icon={
+              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <path d="M17 3a2.83 2.83 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5L17 3z" />
+              </svg>
+            }
+            label={t("clipboard.editContent")}
+            onClick={() => onEditRecord(view)}
+          />
+        )}
         {onSetPinned && (
           <>
             <CardActionMenuSeparator />

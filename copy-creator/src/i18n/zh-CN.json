@@ -117,7 +117,8 @@
     "toastHintLabeled": "可能是 {{guess}} · 可右键标注来源",
     "toastHint": "可右键标注来源",
     "loadMore": "显示更多",
-    "pausedNotice": "采集已暂停：新的复制内容不会被记录"
+    "pausedNotice": "采集已暂停：新的复制内容不会被记录",
+    "editContent": "编辑内容"
   },
   "resources": {
     "search": "搜索资源...",
@@ -222,7 +223,6 @@
     "metaBitrate": "码率",
     "backToLibrary": "返回内容库",
     "renameTitleHint": "双击重命名",
-    "editContent": "编辑内容",
     "discardChanges": "放弃修改",
     "saveChanges": "保存修改",
     "contentSaved": "内容已保存",
@@ -257,7 +257,8 @@
     "createdAt": "创建时间",
     "fileSize": "文件大小",
     "sourceApp": "来源应用",
-    "detailHint": "这里显示内容的完整信息，可直接使用或播放。"
+    "detailHint": "这里显示内容的完整信息，可直接使用或播放。",
+    "editContent": "编辑内容"
   },
   "phrases": {
     "search": "搜索快捷输入...",

@@ -615,6 +615,42 @@ pub fn get_clipboard_record_content(app: AppHandle, id: String) -> Result<String
     .map_err(|e| e.to_string())
 }
 
+/// 编辑剪切板文本/链接记录的正文。仅数据库承载的纯文本可编辑：资源承载
+/// 文本的正文在文件里（走资源详情页），文件承载文本同由资源域管理。
+/// UPDATE 触发 clipboard_fts 的 update 同步，全文索引即时跟进。
+#[tauri::command]
+pub fn update_clipboard_record_content(
+    app: AppHandle,
+    id: String,
+    content: String,
+) -> Result<(), String> {
+    let content = content.trim().to_string();
+    if content.is_empty() {
+        return Err("内容不能为空".to_string());
+    }
+    let state = app.state::<DbState>();
+    let conn = state.conn.lock().map_err(|e| e.to_string())?;
+    let (record_type, storage_mode): (String, String) = conn
+        .query_row(
+            "SELECT type, storage_mode FROM clipboard_records WHERE id = ?1",
+            params![id],
+            |row| Ok((row.get(0)?, row.get(1)?)),
+        )
+        .map_err(|_| "记录不存在".to_string())?;
+    if record_type != "text" && record_type != "link" {
+        return Err("仅文本与链接记录支持编辑".to_string());
+    }
+    if storage_mode == RESOURCE_STORAGE_MODE {
+        return Err("资源承载文本请在资源详情中编辑".to_string());
+    }
+    conn.execute(
+        "UPDATE clipboard_records SET content = ?2 WHERE id = ?1",
+        params![id, content],
+    )
+    .map_err(|e| e.to_string())?;
+    Ok(())
+}
+
 /// 判断路径是否已被应用记录在案：剪切板记录（content / resource_path /
 /// attachments 元素）或文件快捷输入的源路径（phrases.source_path，用户
 /// 挑选文件时的原始位置），精确匹配、英文字母不区分大小写。媒体服务

@@ -117,7 +117,8 @@
     "toastHintLabeled": "Looks like {{guess}} · right-click to label its source",
     "toastHint": "Right-click to label its source",
     "loadMore": "Load more",
-    "pausedNotice": "Capture paused: new copies are not being recorded"
+    "pausedNotice": "Capture paused: new copies are not being recorded",
+    "editContent": "Edit Content"
   },
   "resources": {
     "search": "Search resources...",
@@ -211,7 +212,6 @@
     "metaBitrate": "Bitrate",
     "backToLibrary": "Back to library",
     "renameTitleHint": "Double-click to rename",
-    "editContent": "Edit content",
     "discardChanges": "Discard changes",
     "saveChanges": "Save changes",
     "contentSaved": "Content saved",
@@ -257,7 +257,8 @@
     "exitEditClipboard": "Exit edit",
     "editingTag": "Editing",
     "destinationClipboard": "Clipboard",
-    "destinationResource": "Resources"
+    "destinationResource": "Resources",
+    "editContent": "Edit content"
   },
   "phrases": {
     "search": "Search quick input...",

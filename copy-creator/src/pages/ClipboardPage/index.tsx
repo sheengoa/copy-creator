@@ -9,6 +9,7 @@ import { Icons } from "../../components/Icons";
 import { ConfirmDialog } from "../../components/ConfirmDialog";
 import SearchInput from "../../components/SearchInput";
 import { ClipboardCard } from "./ClipboardCard";
+import { EditRecordDialog } from "./EditRecordDialog";
 import { TYPE_META } from "./utils";
 import BatchSelectionBar from "../../components/BatchSelectionBar";
 import { BackToTopButton } from "../../components/BackToTop";
@@ -74,6 +75,8 @@ export default function ClipboardPage() {
     onConfirm: () => void | Promise<void>;
   } | null>(null);
   const [deletingSelected, setDeletingSelected] = useState(false);
+  // 记录正文编辑：打开时先取全文（列表载荷是截断预览）。
+  const [editingRecord, setEditingRecord] = useState<{ id: string; content: string } | null>(null);
 
   // 粘贴结果反馈：粘贴失败此前被静默吞掉，用户会去目标应用贴出旧内容。
   // 与资源页同款 showFeedback 模式与样式（resource-feedback）。
@@ -157,6 +160,16 @@ export default function ClipboardPage() {
       }
     },
     [loadRecords, records],
+  );
+
+  // 编辑正文：读全文打开对话框，保存成功后重载当前视图拿新预览。
+  const handleEditRecord = useCallback(
+    (view: RecordView) => {
+      void getRecordContent(view)
+        .then((content) => setEditingRecord({ id: view.id, content }))
+        .catch((error) => console.error("Failed to load record content:", error));
+    },
+    [getRecordContent],
   );
 
   const handleSetPinned = useCallback(
@@ -401,6 +414,15 @@ export default function ClipboardPage() {
         />
       )}
 
+      {editingRecord && (
+        <EditRecordDialog
+          recordId={editingRecord.id}
+          initialContent={editingRecord.content}
+          onClose={() => setEditingRecord(null)}
+          onSaved={() => void loadRecords(false)}
+        />
+      )}
+
       {clipboardPaused && (
         <div className="clipboard-paused-notice" role="status">
           {Icons.pause}
@@ -455,6 +477,7 @@ export default function ClipboardPage() {
               onPasteTerminal={handlePasteTerminal}
               onDelete={handleDelete}
               onSetPinned={handleSetPinned}
+              onEditRecord={handleEditRecord}
               getRecordContent={getRecordContent}
               onToggleUserApiKey={handleToggleUserApiKey}
               selectionMode={isSelecting}

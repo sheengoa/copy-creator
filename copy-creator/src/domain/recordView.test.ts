@@ -51,3 +51,43 @@ describe("buildRecordView textPreviewPath", () => {
     ).toBeNull();
   });
 });
+
+describe("buildRecordView editableText", () => {
+  it("数据库承载的文本记录可编辑", () => {
+    const view = buildRecordView({
+      ...baseRecord,
+      type: "text",
+      content: "普通复制的文本",
+    });
+    expect(view.editableText).toBe(true);
+  });
+
+  it("链接记录可编辑", () => {
+    const view = buildRecordView({
+      ...baseRecord,
+      type: "link",
+      content: "https://example.com",
+    });
+    expect(view.editableText).toBe(true);
+  });
+
+  it("资源承载文本不可编辑（正文在文件里，走资源详情页）", () => {
+    const view = buildRecordView({
+      ...baseRecord,
+      type: "text",
+      content: "编辑后的全文内容",
+      storage_mode: "resource",
+      resource_path: "C:/库/分组/厂里传疯了.txt",
+    });
+    expect(view.editableText).toBe(false);
+  });
+
+  it("图片与文件记录不可编辑", () => {
+    expect(
+      buildRecordView({ ...baseRecord, type: "image", content: "images/x.png" }).editableText,
+    ).toBe(false);
+    expect(
+      buildRecordView({ ...baseRecord, type: "file", content: "/tmp/a.pdf" }).editableText,
+    ).toBe(false);
+  });
+});

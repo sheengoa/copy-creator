@@ -348,7 +348,7 @@ describe("架构守卫：领域规则必须全局共享", () => {
     expect(
       actionButtons,
       "ClipboardCard 动作按钮清单（正则失效即守卫空转）",
-    ).toEqual(["card-delete-btn", "card-pin-btn", "card-toggle-text-btn"]);
+    ).toEqual(["card-delete-btn", "card-edit-btn", "card-pin-btn", "card-toggle-text-btn"]);
     const clipboardStyles = readSource("styles/clipboard.css");
     const uncovered = actionButtons.filter(
       (name) => !clipboardStyles.includes(`.clipboard-card-actions > .${name}`),

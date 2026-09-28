@@ -15,6 +15,7 @@ import {
   recordExpandPreview,
   recordFileMediaKind,
   recordPasteStrategy,
+  recordTextEditable,
   resourceMediaVersion,
   resourceTextPreviewPath,
   getResourceSummary,
@@ -50,6 +51,8 @@ export interface RecordView {
   expandable: boolean; // 能否展开/预览
   expandPreview: ExpandPreviewKind; // 展开后渲染什么
   pasteStrategy: PasteStrategy; // 粘贴路由描述（执行仍在 clipboardStore.pasteRecord）
+  /** 能否直接编辑正文（记录编辑对话框入口）：仅数据库承载的文本/链接。 */
+  editableText: boolean;
   dragPath: string | null; // 拖出路径
   resourcePath: string | null; // 预览/播放用的本地路径
   mediaVersion: string | null; // 资源文件版本（修改毫秒）：媒体 URL/缓存键随覆盖保存失效
@@ -112,6 +115,7 @@ export function buildRecordView(
     expandable: expandPreview !== null,
     expandPreview,
     pasteStrategy: recordPasteStrategy(record),
+    editableText: recordTextEditable(record),
     dragPath: record.drag_path ?? null,
     resourcePath: getResourcePath(record),
     mediaVersion: resourceMediaVersion(record) ?? null,

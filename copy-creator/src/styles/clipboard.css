@@ -389,7 +389,8 @@
 .clipboard-card-actions > .card-toggle-text-btn,
 .clipboard-card-actions > .drag-handle,
 .clipboard-card-actions > .card-delete-btn,
-.clipboard-card-actions > .card-pin-btn {
+.clipboard-card-actions > .card-pin-btn,
+.clipboard-card-actions > .card-edit-btn {
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -416,16 +417,19 @@
 .clipboard-card:hover .clipboard-card-actions > .drag-handle,
 .clipboard-card:hover .clipboard-card-actions > .card-delete-btn,
 .clipboard-card:hover .clipboard-card-actions > .card-pin-btn,
+.clipboard-card:hover .clipboard-card-actions > .card-edit-btn,
 .clipboard-card:focus-within .clipboard-card-actions > .card-toggle-text-btn,
 .clipboard-card:focus-within .clipboard-card-actions > .drag-handle,
 .clipboard-card:focus-within .clipboard-card-actions > .card-delete-btn,
-.clipboard-card:focus-within .clipboard-card-actions > .card-pin-btn {
+.clipboard-card:focus-within .clipboard-card-actions > .card-pin-btn,
+.clipboard-card:focus-within .clipboard-card-actions > .card-edit-btn {
   opacity: 0.5;
 }
 
 .clipboard-card-actions > .card-toggle-text-btn:hover,
 .clipboard-card-actions > .drag-handle:hover,
-.clipboard-card-actions > .card-delete-btn:hover {
+.clipboard-card-actions > .card-delete-btn:hover,
+.clipboard-card-actions > .card-edit-btn:hover {
   opacity: 1;
   background: var(--chip-hover-bg) !important;
   color: var(--text-primary);
@@ -456,7 +460,8 @@
 .clipboard-card-actions > .card-toggle-text-btn svg,
 .clipboard-card-actions > .drag-handle svg,
 .clipboard-card-actions > .card-delete-btn svg,
-.clipboard-card-actions > .card-pin-btn svg {
+.clipboard-card-actions > .card-pin-btn svg,
+.clipboard-card-actions > .card-edit-btn svg {
   width: 15px;
   height: 15px;
 }
@@ -1459,4 +1464,35 @@
 
 [data-theme="dark"] .clipboard-paused-notice svg {
   color: #fbbf24;
+}
+
+/* 记录编辑对话框：复用 dialog 弹层视觉，textarea 纵向可拉伸。 */
+.dialog-edit-content {
+  width: min(560px, calc(100vw - 48px));
+}
+
+.dialog-textarea {
+  width: 100%;
+  min-height: 200px;
+  margin-top: 8px;
+  border-radius: 8px;
+  border: 1px solid var(--card-border);
+  background: var(--input-bg);
+  color: var(--text-primary);
+  font-family: var(--font);
+  font-size: var(--text-sm);
+  line-height: 1.5;
+  padding: 8px 10px;
+  outline: none;
+  resize: vertical;
+  transition: all 0.2s;
+}
+
+.dialog-textarea:focus {
+  border-color: rgba(0, 0, 0, 0.25);
+  background: var(--input-focus-bg);
+}
+
+[data-theme="dark"] .dialog-textarea:focus {
+  border-color: rgba(255, 255, 255, 0.4);
 }
