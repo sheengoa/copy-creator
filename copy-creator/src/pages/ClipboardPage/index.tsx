@@ -242,23 +242,9 @@ export default function ClipboardPage() {
       }),
     [hasMore, filtered.length, loadRecords, t],
   );
-  // 前插序号：新复制/使用置顶会让 records 头部插入或位移，Virtuoso 依据
-  // 递减的 firstItemIndex 保持视口锚定（官方前插模式），否则滚动位置跳变。
-  // 用「渲染期派生调整」记录上一次首条目 id（同组件渲染期 setState 是
-  // React 官方模式；refs 禁止渲染期读写）。
-  const [listAnchor, setListAnchor] = useState<{ firstId: string | null; firstItemIndex: number }>({
-    firstId: null,
-    firstItemIndex: 1_000_000,
-  });
-  if (views.length > 0 && views[0].id !== listAnchor.firstId) {
-    const prevId = listAnchor.firstId;
-    let { firstItemIndex } = listAnchor;
-    if (prevId !== null) {
-      const shift = views.findIndex((view) => view.id === prevId);
-      if (shift > 0) firstItemIndex -= shift;
-    }
-    setListAnchor({ firstId: views[0].id, firstItemIndex });
-  }
+  // 不用 firstItemIndex 前插锚定：该协议在 customScrollParent 模式下
+  // 位移补偿不准，偏移累积会在首屏留下大段空白（实测回归）。新复制
+  // 前插的表现退回虚拟化前语义——内容下移一卡，与历史版本一致。
   const selectAllRequestRef = useRef(0);
 
   const startClipboardSelection = useCallback(() => {
@@ -512,8 +498,6 @@ export default function ClipboardPage() {
             <Virtuoso
               customScrollParent={listElement}
               data={views}
-              firstItemIndex={listAnchor.firstItemIndex}
-              initialTopMostItemIndex={0}
               computeItemKey={(_, view) => view.id}
               // 大预载边：条目在远离视口处挂载/卸载，入场动画只离屏重放；
               // 视口内条目稳定挂载不闪烁。
