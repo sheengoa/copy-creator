@@ -1651,61 +1651,6 @@ mod tests {
         );
     }
 
-    #[test]
-    fn linux_foreground_source_prints_detection() {
-        use super::foreground_source;
-        use std::os::raw::{c_char, c_int, c_long, c_ulong, c_void};
-        std::env::remove_var("WAYLAND_DISPLAY");
-        let result = foreground_source();
-        println!("DBG foreground_source = {result:?}");
-        println!("DBG x11_focus_toplevel = {}", crate::radial_window::x11_focus_toplevel_xid());
-
-        // 对照组：根窗口的 _NET_ACTIVE_WINDOW（用户当前活动窗口）属性读取。
-        unsafe {
-            #[link(name = "X11")]
-            extern "C" {
-                fn XOpenDisplay(name: *const c_char) -> *mut c_void;
-                fn XCloseDisplay(display: *mut c_void);
-                fn XDefaultRootWindow(display: *mut c_void) -> c_ulong;
-                fn XInternAtom(d: *mut c_void, n: *const c_char, e: c_int) -> c_ulong;
-                fn XGetWindowProperty(
-                    d: *mut c_void, w: c_ulong, p: c_ulong, o: c_long, l: c_long, del: c_int,
-                    t: c_ulong, at: *mut c_ulong, af: *mut c_int, ni: *mut c_ulong,
-                    ba: *mut c_ulong, pr: *mut *mut c_char,
-                ) -> c_int;
-                fn XFree(data: *mut c_void) -> c_int;
-            }
-            let display = XOpenDisplay(std::ptr::null());
-            if display.is_null() { return; }
-            let intern = |n: &str| std::ffi::CString::new(n).map(|c| XInternAtom(display, c.as_ptr(), 0)).unwrap_or(0);
-            let active_atom = intern("_NET_ACTIVE_WINDOW");
-            let mut at: c_ulong = 0; let mut af: c_int = 0; let mut ni: c_ulong = 0; let mut ba: c_ulong = 0; let mut pr: *mut c_char = std::ptr::null_mut();
-            let ok = XGetWindowProperty(display, XDefaultRootWindow(display), active_atom, 0, 64, 0, 0, &mut at, &mut af, &mut ni, &mut ba, &mut pr);
-            let active = if ok == 0 && !pr.is_null() && ni > 0 {
-                let bytes = std::slice::from_raw_parts(pr as *const u8, (ni as usize) * (af as usize / 8));
-                let mut arr = [0u8; 8];
-                let n = bytes.len().min(8);
-                arr[..n].copy_from_slice(&bytes[..n]);
-                XFree(pr as *mut c_void);
-                c_ulong::from_ne_bytes(arr)
-            } else { 0 };
-            println!("DBG active_window_xid = {active}");
-            for prop in ["_NET_WM_NAME", "_NET_WM_PID", "WM_CLASS"] {
-                let atom = intern(prop);
-                let mut at: c_ulong = 0; let mut af: c_int = 0; let mut ni: c_ulong = 0; let mut ba: c_ulong = 0; let mut pr: *mut c_char = std::ptr::null_mut();
-                let ok = XGetWindowProperty(display, active, atom, 0, 8192, 0, 0, &mut at, &mut af, &mut ni, &mut ba, &mut pr);
-                let value = if ok == 0 && !pr.is_null() && ni > 0 {
-                    let bytes = std::slice::from_raw_parts(pr as *const u8, ni as usize);
-                    let s = String::from_utf8_lossy(bytes).trim_end_matches('\0').to_string();
-                    XFree(pr as *mut c_void);
-                    s
-                } else { format!("<读取失败 ok={ok}>") };
-                println!("DBG active.{prop} = {value:?}");
-            }
-            XCloseDisplay(display);
-        }
-    }
-
     #[cfg(target_os = "linux")]
     #[test]
     fn linux_foreground_source_degrades_gracefully() {
