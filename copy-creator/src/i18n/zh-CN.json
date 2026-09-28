@@ -20,6 +20,8 @@
     "light": "亮色",
     "dark": "暗色",
     "themeSystem": "跟随系统",
+    "autoHideOnBlur": "失焦自动隐藏",
+    "autoHideOnBlurHint": "主窗口失去焦点时自动隐藏，快捷键再次呼出（启动器式行为）。",
     "language": "语言",
     "startup": "开机启动",
     "shortcut": "快捷键",

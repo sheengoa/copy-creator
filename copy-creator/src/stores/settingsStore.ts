@@ -62,6 +62,8 @@ interface SettingsState {
   pasteLeftClick: PasteMode;
   contentSort: ContentSortMode;
   resourceCardSize: number;
+  /** 主窗口失焦自动隐藏（启动器式行为，默认关）。 */
+  autoHideOnBlur: boolean;
 
   toggleTheme: () => void;
   setThemeMode: (mode: ThemeMode) => Promise<void>;
@@ -72,6 +74,7 @@ interface SettingsState {
   setPasteLeftClick: (mode: PasteMode) => Promise<void>;
   setContentSort: (mode: ContentSortMode) => Promise<void>;
   setResourceCardSize: (size: number) => Promise<void>;
+  setAutoHideOnBlur: (enabled: boolean) => Promise<void>;
   setAutostart: (enabled: boolean) => Promise<boolean>;
 }
 
@@ -97,6 +100,7 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
   pasteLeftClick: "normal",
   contentSort: "recent",
   resourceCardSize: RESOURCE_CARD_SIZE_DEFAULT,
+  autoHideOnBlur: false,
 
   // 头部快捷切换：跟随系统模式下取当前解析值的反色落为显式偏好，
   // 其余模式在明暗间往返。
@@ -144,6 +148,7 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
         pasteLeftClick: (settings.paste_left_click === "terminal" ? "terminal" : "normal") as PasteMode,
         contentSort: parseContentSort(settings.content_sort),
         resourceCardSize: parseResourceCardSize(settings.resource_card_size),
+        autoHideOnBlur: settings.auto_hide_on_blur === "1",
       });
 
       // Read autostart state from the .desktop file
@@ -248,6 +253,16 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
       });
     } catch (e) {
       console.error("Failed to save resource card size:", e);
+    }
+  },
+
+  // 失焦自动隐藏：即时持久化，App 的焦点监听按最新值生效。
+  setAutoHideOnBlur: async (enabled) => {
+    set({ autoHideOnBlur: enabled });
+    try {
+      await invoke("set_setting", { key: "auto_hide_on_blur", value: enabled ? "1" : "0" });
+    } catch (e) {
+      console.error("Failed to save auto-hide setting:", e);
     }
   },
 

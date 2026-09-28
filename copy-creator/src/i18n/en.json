@@ -20,6 +20,8 @@
     "light": "Light",
     "dark": "Dark",
     "themeSystem": "System",
+    "autoHideOnBlur": "Hide on Blur",
+    "autoHideOnBlurHint": "Hide the main window automatically when it loses focus; bring it back with the shortcut (launcher-style).",
     "language": "Language",
     "startup": "Launch at Startup",
     "shortcut": "Shortcuts",

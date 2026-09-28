@@ -4,6 +4,7 @@
 import { useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { invoke } from "@tauri-apps/api/core";
+import { invokeNativeDialog } from "../../utils/nativeDialogGuard";
 import { listen } from "@tauri-apps/api/event";
 import { relaunch } from "@tauri-apps/plugin-process";
 
@@ -58,7 +59,7 @@ export function BackupSection() {
   const handleExport = async () => {
     setError(null);
     try {
-      const target = await invoke<string>("select_backup_save_path");
+      const target = await invokeNativeDialog<string>("select_backup_save_path");
       if (!target) return;
       setExporting(true);
       setExportProcessed(0);
@@ -81,7 +82,7 @@ export function BackupSection() {
   const handlePickBackup = async () => {
     setError(null);
     try {
-      const zipPath = await invoke<string>("select_backup_zip_path");
+      const zipPath = await invokeNativeDialog<string>("select_backup_zip_path");
       if (!zipPath) return;
       const manifest = await invoke<BackupManifestView>("preview_backup", { zipPath });
       setSelection({
@@ -96,7 +97,7 @@ export function BackupSection() {
 
   const handlePickLibraryTarget = async () => {
     try {
-      const folder = await invoke<string>("select_resource_library_folder");
+      const folder = await invokeNativeDialog<string>("select_resource_library_folder");
       if (!folder) return;
       setSelection((current) => (current === null ? current : { ...current, libraryTarget: folder }));
     } catch (e) {

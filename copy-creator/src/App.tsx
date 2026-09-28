@@ -13,6 +13,7 @@ import ShortcutToast from "./components/ShortcutToast";
 import { WindowResizeHandles } from "./components/WindowResizeHandles";
 import { usePersistWindowSize } from "./hooks/usePersistWindowSize";
 import { useSettingsStore } from "./stores/settingsStore";
+import { isNativeDialogActive } from "./utils/nativeDialogGuard";
 import { Icons } from "./components/Icons";
 import i18n from "./i18n";
 // 主窗口专属样式：径向菜单与粘贴创建对话框窗口不加载这些文件
@@ -103,6 +104,31 @@ function App() {
   useEffect(() => {
     document.documentElement.setAttribute("data-theme", resolvedTheme);
   }, [resolvedTheme]);
+
+  // 失焦自动隐藏（启动器式行为，设置默认关）：失焦后延迟 120ms 落定，
+  // 重新聚焦即取消——避免窗口拖拽/托盘切换等瞬时失焦竞态误隐藏；
+  // 原生文件对话框在途时豁免（对话框会拿走焦点但流程仍在进行）。
+  useEffect(() => {
+    const appWindow = getCurrentWindow();
+    let hideTimer: number | undefined;
+    let unlisten: (() => void) | undefined;
+    void appWindow.onFocusChanged(({ payload: focused }) => {
+      window.clearTimeout(hideTimer);
+      if (
+        !focused &&
+        useSettingsStore.getState().autoHideOnBlur &&
+        !isNativeDialogActive()
+      ) {
+        hideTimer = window.setTimeout(() => {
+          void appWindow.hide();
+        }, 120);
+      }
+    }).then((fn) => { unlisten = fn; });
+    return () => {
+      window.clearTimeout(hideTimer);
+      unlisten?.();
+    };
+  }, []);
 
   const handleResizeMouseDown = useCallback((e: React.MouseEvent) => {
     e.preventDefault();

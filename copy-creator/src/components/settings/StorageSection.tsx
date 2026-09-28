@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { useTranslation } from "react-i18next";
 import { invoke } from "@tauri-apps/api/core";
+import { invokeNativeDialog } from "../../utils/nativeDialogGuard";
 import { relaunch } from "@tauri-apps/plugin-process";
 import { ConfirmDialog } from "../ConfirmDialog";
 
@@ -25,7 +26,7 @@ export function StorageSection({
 
   const handleChangeFolder = async () => {
     try {
-      const folder = await invoke<string>("select_storage_folder");
+      const folder = await invokeNativeDialog<string>("select_storage_folder");
       if (!folder) return;
 
       // 是否迁移现有数据：确认 → set_setting（完整迁移）；取消 → 仅改路径。

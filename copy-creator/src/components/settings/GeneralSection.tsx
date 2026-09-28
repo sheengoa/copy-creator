@@ -23,6 +23,8 @@ export function GeneralSection({
   const setSetting = useSettingsStore((s) => s.setSetting);
   const themeMode = useSettingsStore((s) => s.themeMode);
   const setThemeMode = useSettingsStore((s) => s.setThemeMode);
+  const autoHideOnBlur = useSettingsStore((s) => s.autoHideOnBlur);
+  const setAutoHideOnBlur = useSettingsStore((s) => s.setAutoHideOnBlur);
 
   const handleChangeLang = (lang: string) => {
     setLocalLang(lang);
@@ -81,6 +83,17 @@ export function GeneralSection({
             <span className="toggle-thumb" />
           </button>
         </div>
+        <div className="settings-row">
+          <div className="settings-row-label">{t("settings.autoHideOnBlur")}</div>
+          <button
+            className={`toggle-switch ${autoHideOnBlur ? "on" : "off"}`}
+            onClick={() => void setAutoHideOnBlur(!autoHideOnBlur)}
+            title={autoHideOnBlur ? t("common.on") : t("common.off")}
+          >
+            <span className="toggle-thumb" />
+          </button>
+        </div>
+        <div className="settings-row-hint">{t("settings.autoHideOnBlurHint")}</div>
         <div className="settings-row">
           <div className="settings-row-label">{t("settings.contentListSort")}</div>
           <div className="settings-lang-toggle">

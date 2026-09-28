@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties }
 import { ConfirmDialog } from "../components/ConfirmDialog";
 import { createPortal } from "react-dom";
 import { invoke } from "@tauri-apps/api/core";
+import { invokeNativeDialog } from "../utils/nativeDialogGuard";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import { useTranslation } from "react-i18next";
 import {
@@ -899,7 +900,7 @@ export default function ResourcePage() {
     setResourceLibraryPathChanging(true);
     setResourceLibraryPathError(null);
     try {
-      const selectedPath = await invoke<string>("select_resource_library_folder");
+      const selectedPath = await invokeNativeDialog<string>("select_resource_library_folder");
       if (!selectedPath) return;
       const savedPath = await invoke<string>("set_resource_library_path", {
         path: selectedPath,
