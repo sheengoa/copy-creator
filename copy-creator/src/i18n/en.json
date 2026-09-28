@@ -22,6 +22,13 @@
     "themeSystem": "System",
     "autoHideOnBlur": "Hide on Blur",
     "autoHideOnBlurHint": "Hide the main window automatically when it loses focus; bring it back with the shortcut (launcher-style).",
+    "maxRecords": "History Limit",
+    "maxRecordsUnlimited": "Unlimited",
+    "pauseCapture": "Pause Capture",
+    "pauseCaptureHint": "While paused, new copies are not recorded; existing history is kept. Toggle back anytime from the tray menu.",
+    "exclusionRules": "Exclusion Rules",
+    "exclusionsPlaceholder": "e.g.\n1Password\nKeePass",
+    "exclusionRulesHint": "One keyword per line. Copies whose source window title or process name contains a keyword are not recorded (source detection is Windows-only).",
     "language": "Language",
     "startup": "Launch at Startup",
     "shortcut": "Shortcuts",
@@ -109,7 +116,8 @@
     "toastTitle": "API Key detected",
     "toastHintLabeled": "Looks like {{guess}} · right-click to label its source",
     "toastHint": "Right-click to label its source",
-    "loadMore": "Load more"
+    "loadMore": "Load more",
+    "pausedNotice": "Capture paused: new copies are not being recorded"
   },
   "resources": {
     "search": "Search resources...",

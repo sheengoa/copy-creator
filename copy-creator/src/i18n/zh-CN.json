@@ -22,6 +22,13 @@
     "themeSystem": "跟随系统",
     "autoHideOnBlur": "失焦自动隐藏",
     "autoHideOnBlurHint": "主窗口失去焦点时自动隐藏，快捷键再次呼出（启动器式行为）。",
+    "maxRecords": "历史上限",
+    "maxRecordsUnlimited": "不限",
+    "pauseCapture": "暂停采集",
+    "pauseCaptureHint": "开启后不再记录新的复制内容，已有历史保留；可从托盘菜单随时恢复。",
+    "exclusionRules": "排除规则",
+    "exclusionsPlaceholder": "例如：\n1Password\nKeePass",
+    "exclusionRulesHint": "每行一条关键字，复制来源的窗口标题或进程名包含关键字时不记录（来源识别仅 Windows 支持）。",
     "language": "语言",
     "startup": "开机启动",
     "shortcut": "快捷键",
@@ -109,7 +116,8 @@
     "toastTitle": "检测到 API Key",
     "toastHintLabeled": "可能是 {{guess}} · 可右键标注来源",
     "toastHint": "可右键标注来源",
-    "loadMore": "显示更多"
+    "loadMore": "显示更多",
+    "pausedNotice": "采集已暂停：新的复制内容不会被记录"
   },
   "resources": {
     "search": "搜索资源...",

@@ -4515,3 +4515,128 @@ mod remove_quick_input_file_tests {
     }
 }
 
+
+#[cfg(test)]
+mod clipboard_prune_count_cap_tests {
+    use crate::db::{prune_old_records, DbState};
+    use rusqlite::Connection;
+    use std::sync::Mutex;
+    use tauri::Manager;
+
+    // 精简夹具：仅 prune_old_records 触及的表；created_ms 与生产 schema
+    // 同式的 VIRTUAL 生成列（由 created_at 派生）。
+    fn prune_app() -> tauri::App<tauri::test::MockRuntime> {
+        let app = tauri::test::mock_app();
+        let conn = Connection::open_in_memory().unwrap();
+        conn.execute_batch(
+            "CREATE TABLE settings (key TEXT PRIMARY KEY, value TEXT NOT NULL);
+             CREATE TABLE clipboard_records (
+                 id TEXT PRIMARY KEY,
+                 type TEXT NOT NULL,
+                 content TEXT NOT NULL,
+                 created_at TEXT NOT NULL,
+                 attachments TEXT DEFAULT '[]',
+                 storage_mode TEXT DEFAULT 'database',
+                 pinned INTEGER NOT NULL DEFAULT 0,
+                 created_ms INTEGER GENERATED ALWAYS AS (
+                     CAST((julianday(created_at) - 2440587.5) * 86400000 AS INTEGER)
+                 ) VIRTUAL
+             );
+             CREATE TABLE trash_items (
+                 id TEXT PRIMARY KEY,
+                 record_id TEXT DEFAULT '',
+                 record_json TEXT NOT NULL,
+                 file_name TEXT DEFAULT '',
+                 original_group TEXT DEFAULT '',
+                 original_path TEXT DEFAULT '',
+                 trash_dir TEXT NOT NULL,
+                 trashed_at TEXT NOT NULL,
+                 trashed_ms INTEGER NOT NULL DEFAULT 0
+             );",
+        )
+        .unwrap();
+        app.manage(DbState {
+            conn: Mutex::new(conn),
+        });
+        app
+    }
+
+    fn insert_record(app: &tauri::App<tauri::test::MockRuntime>, id: &str, created_at: &str, pinned: bool) {
+        let state = app.state::<DbState>();
+        let conn = state.conn.lock().unwrap();
+        conn.execute(
+            "INSERT INTO clipboard_records (id, type, content, created_at, pinned) VALUES (?1, 'text', ?2, ?3, ?4)",
+            rusqlite::params![id, id, created_at, pinned as i64],
+        )
+        .unwrap();
+    }
+
+    fn remaining_ids(app: &tauri::App<tauri::test::MockRuntime>) -> Vec<String> {
+        let state = app.state::<DbState>();
+        let conn = state.conn.lock().unwrap();
+        let mut stmt = conn
+            .prepare("SELECT id FROM clipboard_records ORDER BY created_ms ASC")
+            .unwrap();
+        let rows = stmt
+            .query_map([], |row| row.get::<_, String>(0))
+            .unwrap();
+        rows.map(|r| r.unwrap()).collect()
+    }
+
+    fn set_max_records(app: &tauri::App<tauri::test::MockRuntime>, value: &str) {
+        let state = app.state::<DbState>();
+        let conn = state.conn.lock().unwrap();
+        conn.execute(
+            "INSERT INTO settings (key, value) VALUES ('clipboard_max_records', ?1)
+             ON CONFLICT(key) DO UPDATE SET value = ?1",
+            rusqlite::params![value],
+        )
+        .unwrap();
+    }
+
+    // 相对当前时间的 RFC3339 时间戳：必须落在保留期（默认 1 个月）内，
+    // 否则时间清理会先于条数上限把夹具删掉。
+    fn minutes_ago_rfc3339(minutes: i64) -> String {
+        (chrono::Utc::now() - chrono::Duration::minutes(minutes)).to_rfc3339()
+    }
+
+    #[test]
+    fn count_cap_keeps_newest_and_never_touches_pinned() {
+        let app = prune_app();
+        // 五条文本记录，r1 最旧 r5 最新；r1 置顶。
+        insert_record(&app, "r1", &minutes_ago_rfc3339(50), true);
+        insert_record(&app, "r2", &minutes_ago_rfc3339(40), false);
+        insert_record(&app, "r3", &minutes_ago_rfc3339(30), false);
+        insert_record(&app, "r4", &minutes_ago_rfc3339(20), false);
+        insert_record(&app, "r5", &minutes_ago_rfc3339(10), false);
+        set_max_records(&app, "3");
+
+        prune_old_records(app.handle()).unwrap();
+
+        // 上限 3：可删额度 = 5 - 3 = 2，删最旧的两条非置顶（r2/r3）；
+        // r1 虽最旧但置顶，永不清理。
+        assert_eq!(remaining_ids(&app), vec!["r1", "r4", "r5"]);
+    }
+
+    #[test]
+    fn count_cap_zero_or_missing_means_unlimited() {
+        let app = prune_app();
+        for (i, minutes) in [50, 40, 30, 20].iter().enumerate() {
+            insert_record(&app, &format!("r{}", i + 1), &minutes_ago_rfc3339(*minutes), false);
+        }
+
+        set_max_records(&app, "0");
+        prune_old_records(app.handle()).unwrap();
+        assert_eq!(remaining_ids(&app).len(), 4);
+
+        // 缺省（无该设置行）同样不限。
+        {
+            let state = app.state::<DbState>();
+            let conn = state.conn.lock().unwrap();
+            conn.execute("DELETE FROM settings WHERE key = 'clipboard_max_records'", [])
+                .unwrap();
+        }
+        prune_old_records(app.handle()).unwrap();
+        assert_eq!(remaining_ids(&app).len(), 4);
+    }
+}

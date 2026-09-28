@@ -1159,6 +1159,101 @@ fn should_check_clipboard_image(last_seen: &mut u32) -> bool {
     true
 }
 
+/// 采集暂停开关（设置 `clipboard_paused`）：开启后采集循环只等待不读取，
+/// 用户复制的内容完全不进应用。托盘与设置页均可切换。
+fn is_capture_paused<R: Runtime>(app: &AppHandle<R>) -> bool {
+    crate::db::get_setting_sync(app, "clipboard_paused").as_deref() == Some("1")
+}
+
+/// 排除规则（设置 `clipboard_exclusions`，每行一条，大小写不敏感子串）：
+/// 命中当前前台来源（窗口标题或进程名）的复制不入库。仅 Windows 能拿到
+/// 来源；其他平台无来源信息，规则不生效。
+fn is_capture_excluded<R: Runtime>(app: &AppHandle<R>) -> bool {
+    let Some(raw) = crate::db::get_setting_sync(app, "clipboard_exclusions") else {
+        return false;
+    };
+    let patterns: Vec<String> = raw
+        .lines()
+        .map(|line| line.trim().to_lowercase())
+        .filter(|line| !line.is_empty())
+        .collect();
+    if patterns.is_empty() {
+        return false;
+    }
+    let Some((title, process)) = foreground_source() else {
+        return false;
+    };
+    let title = title.to_lowercase();
+    let process = process.to_lowercase();
+    patterns
+        .iter()
+        .any(|p| title.contains(p.as_str()) || process.contains(p.as_str()))
+}
+
+/// 当前前台窗口的（标题, 进程名）。采集在复制发生的瞬间被事件唤醒，
+/// 前台窗口通常就是执行复制的应用；800ms 兜底轮询期间用户切换应用时
+/// 可能误归属，属可接受的启发式。
+#[cfg(target_os = "windows")]
+fn foreground_source() -> Option<(String, String)> {
+    use std::os::windows::ffi::OsStringExt;
+    use windows::core::PWSTR;
+    use windows::Win32::Foundation::CloseHandle;
+    use windows::Win32::System::Threading::{
+        OpenProcess, QueryFullProcessImageNameW, PROCESS_NAME_WIN32,
+        PROCESS_QUERY_LIMITED_INFORMATION,
+    };
+    use windows::Win32::UI::WindowsAndMessaging::{
+        GetForegroundWindow, GetWindowTextLengthW, GetWindowTextW, GetWindowThreadProcessId,
+    };
+
+    unsafe {
+        let hwnd = GetForegroundWindow();
+        if hwnd.is_invalid() {
+            return None;
+        }
+
+        // 标题：先取长度再读缓冲（0 长度合法，视为空标题）。
+        let title_len = GetWindowTextLengthW(hwnd);
+        let mut title_buf = vec![0u16; title_len.max(0) as usize + 1];
+        let copied = GetWindowTextW(hwnd, &mut title_buf);
+        let title = String::from_utf16_lossy(&title_buf[..copied.max(0) as usize]);
+
+        // 进程名：pid -> OpenProcess -> QueryFullProcessImageNameW。
+        let mut pid = 0u32;
+        GetWindowThreadProcessId(hwnd, Some(&mut pid));
+        if pid == 0 {
+            return Some((title, String::new()));
+        }
+        let process = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, false, pid).ok().and_then(
+            |handle| unsafe {
+                let mut size: u32 = 1024;
+                let mut buf = vec![0u16; size as usize];
+                let ok =
+                    QueryFullProcessImageNameW(handle, PROCESS_NAME_WIN32, PWSTR(buf.as_mut_ptr()), &mut size)
+                        .is_ok();
+                let _ = CloseHandle(handle);
+                if ok {
+                    buf.truncate(size as usize);
+                    std::path::PathBuf::from(std::ffi::OsString::from_wide(&buf))
+                        .file_name()
+                        .map(|name| name.to_string_lossy().into_owned())
+                } else {
+                    None
+                }
+            },
+        );
+
+        Some((title, process.unwrap_or_default()))
+    }
+}
+
+#[cfg(not(target_os = "windows"))]
+fn foreground_source() -> Option<(String, String)> {
+    // Wayland 出于安全设计不暴露其他应用的前台窗口信息；X11 侧如后续
+    // 需要可经 active-window 查询扩展，当前统一视为无来源。
+    None
+}
+
 fn poll_clipboard_forever(handle: AppHandle) {
     let mut last_image_seq: u32 = 0;
     // 启动静默窗按真实时间计（1.6 秒）：事件唤醒会让迭代瞬间走完，
@@ -1178,6 +1273,16 @@ fn poll_clipboard_forever(handle: AppHandle) {
         if crate::paste::PASTING.load(std::sync::atomic::Ordering::SeqCst) {
             continue;
         }
+
+        // 暂停采集：只等待不读取，缓存保持暂停前的状态，恢复后首条变化
+        // 内容照常入库（暂停期间复制的历史不补录）。
+        if is_capture_paused(&handle) {
+            continue;
+        }
+
+        // 排除规则：本迭代如有新内容待入库，命中前台来源则不入库（判重
+        // 缓存照常更新——被排除的内容视为已见，规则解除后不回溯补录）。
+        let capture_excluded = is_capture_excluded(&handle);
 
         // Linux: poll-based detection via content comparison every cycle
         let mut image_recorded = false;
@@ -1209,6 +1314,10 @@ fn poll_clipboard_forever(handle: AppHandle) {
         }
 
         if let Some((rgba_vec, img_w, img_h)) = image_data.take() {
+            if capture_excluded {
+                // 来源被排除：不落盘不入库，视为已见（哈希缓存已更新）。
+                continue;
+            }
             let content_hash: u64 = rgba_vec
                 .iter()
                 .fold(0u64, |acc, &b| acc.wrapping_mul(31).wrapping_add(b as u64));
@@ -1337,6 +1446,10 @@ fn poll_clipboard_forever(handle: AppHandle) {
                     let is_image =
                         crate::media_kind::is_previewable_image_file(std::path::Path::new(&file_path))
                             || crate::media_kind::is_importable_image_file(std::path::Path::new(&file_path));
+                    if capture_excluded {
+                        // 来源被排除：文件列表视为已见（键缓存已更新），不入库。
+                        break;
+                    }
                     if is_image && import_image_file(&handle, &file_path) {
                         continue;
                     }
@@ -1349,6 +1462,10 @@ fn poll_clipboard_forever(handle: AppHandle) {
                 let text = text.trim().to_string();
                 if !text.is_empty() && text != *LAST_CLIPBOARD_TEXT.lock().expect("剪贴板判重缓存锁中毒") {
                     *LAST_CLIPBOARD_TEXT.lock().expect("剪贴板判重缓存锁中毒") = text.clone();
+                    if capture_excluded {
+                        // 来源被排除：文本视为已见（缓存已更新），不入库。
+                        continue;
+                    }
                     let record_type = classify_text_record(&text);
                     insert_and_emit(&handle, record_type, &text);
                 }

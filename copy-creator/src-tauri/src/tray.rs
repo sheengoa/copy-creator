@@ -1,7 +1,7 @@
 use std::sync::Mutex;
 use tauri::menu::{MenuBuilder, MenuItemBuilder};
 use tauri::tray::TrayIconBuilder;
-use tauri::{AppHandle, Manager};
+use tauri::{AppHandle, Emitter, Manager};
 
 pub struct TrayState {
     pub tray: Mutex<Option<tauri::tray::TrayIcon>>,
@@ -16,14 +16,37 @@ fn build_tray_menu(
     } else {
         ("显示窗口", "退出")
     };
+    let paused = crate::db::get_setting_sync(app, "clipboard_paused").as_deref() == Some("1");
+    let pause_text = match (lang == "en", paused) {
+        (true, true) => "Resume Capture",
+        (true, false) => "Pause Capture",
+        (false, true) => "恢复采集",
+        (false, false) => "暂停采集",
+    };
 
     let show = MenuItemBuilder::with_id("show", show_text).build(app)?;
+    let toggle_pause = MenuItemBuilder::with_id("toggle_pause", pause_text).build(app)?;
     let quit = MenuItemBuilder::with_id("quit", quit_text).build(app)?;
     MenuBuilder::new(app)
         .item(&show)
+        .item(&toggle_pause)
+        .separator()
         .item(&quit)
         .build()
         .map_err(Into::into)
+}
+
+/// 重建托盘菜单（语言或采集暂停态变化后调用）；托盘未就绪时静默跳过。
+fn refresh_tray_menu(app: &AppHandle) -> Result<(), String> {
+    let lang = crate::db::get_setting_sync(app, "language").unwrap_or_else(|| "zh-CN".to_string());
+    let menu = build_tray_menu(app, &lang).map_err(|e| e.to_string())?;
+
+    let state = app.state::<TrayState>();
+    let tray_guard = state.tray.lock().map_err(|e| e.to_string())?;
+    if let Some(tray) = tray_guard.as_ref() {
+        tray.set_menu(Some(menu)).map_err(|e| e.to_string())?;
+    }
+    Ok(())
 }
 
 pub fn create_tray(app: &AppHandle) -> Result<(), Box<dyn std::error::Error>> {
@@ -45,6 +68,17 @@ pub fn create_tray(app: &AppHandle) -> Result<(), Box<dyn std::error::Error>> {
         .on_menu_event(|app, event| match event.id().as_ref() {
             "show" => {
                 crate::show_main_window(app, "tray-menu", false);
+            }
+            "toggle_pause" => {
+                let current = crate::db::get_setting_sync(app, "clipboard_paused")
+                    .as_deref()
+                    == Some("1");
+                let next = !current;
+                let _ = crate::db::set_setting_inner(app, "clipboard_paused", if next { "1" } else { "0" });
+                log::info!("tray: capture paused={next}");
+                let _ = refresh_tray_menu(app);
+                // 主窗口提示条与设置页开关跟随（径向/新建窗口无此消费方）。
+                let _ = app.emit("clipboard-pause-changed", serde_json::json!({ "paused": next }));
             }
             "quit" => {
                 app.exit(0);
@@ -83,14 +117,5 @@ pub fn create_tray(app: &AppHandle) -> Result<(), Box<dyn std::error::Error>> {
 
 #[tauri::command]
 pub fn update_tray_language(app: AppHandle) -> Result<(), String> {
-    let lang = crate::db::get_setting_sync(&app, "language").unwrap_or_else(|| "zh-CN".to_string());
-    let menu = build_tray_menu(&app, &lang).map_err(|e| e.to_string())?;
-
-    let state = app.state::<TrayState>();
-    let tray_guard = state.tray.lock().map_err(|e| e.to_string())?;
-    if let Some(tray) = tray_guard.as_ref() {
-        tray.set_menu(Some(menu)).map_err(|e| e.to_string())?;
-    }
-
-    Ok(())
+    refresh_tray_menu(&app)
 }

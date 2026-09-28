@@ -46,6 +46,13 @@ const parseRadialScale = (raw: string | undefined): number => {
   return Number.isFinite(percent) ? clampRadialScale(percent) : RADIAL_SCALE_DEFAULT;
 };
 
+/** 历史条数上限解析：非法/缺失按不限（0）处理，负值钳到不限。 */
+export const parseMaxRecords = (raw: string | undefined): number => {
+  const value = Number.parseInt((raw ?? "").trim(), 10);
+  if (!Number.isFinite(value) || value <= 0) return 0;
+  return value;
+};
+
 interface SettingsState {
   /** 持久化的主题偏好：显式明暗或跟随系统。 */
   themeMode: ThemeMode;
@@ -64,6 +71,12 @@ interface SettingsState {
   resourceCardSize: number;
   /** 主窗口失焦自动隐藏（启动器式行为，默认关）。 */
   autoHideOnBlur: boolean;
+  /** 采集暂停（托盘/设置页可切）：暂停期间复制内容完全不记录。 */
+  clipboardPaused: boolean;
+  /** 历史条数上限（0=不限），随保留期清理一同生效。 */
+  clipboardMaxRecords: number;
+  /** 排除规则原文（每行一条关键字，匹配来源标题/进程名）。 */
+  clipboardExclusions: string;
 
   toggleTheme: () => void;
   setThemeMode: (mode: ThemeMode) => Promise<void>;
@@ -75,6 +88,9 @@ interface SettingsState {
   setContentSort: (mode: ContentSortMode) => Promise<void>;
   setResourceCardSize: (size: number) => Promise<void>;
   setAutoHideOnBlur: (enabled: boolean) => Promise<void>;
+  setClipboardPaused: (enabled: boolean) => Promise<void>;
+  setClipboardMaxRecords: (max: number) => Promise<void>;
+  setClipboardExclusions: (raw: string) => Promise<void>;
   setAutostart: (enabled: boolean) => Promise<boolean>;
 }
 
@@ -101,6 +117,9 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
   contentSort: "recent",
   resourceCardSize: RESOURCE_CARD_SIZE_DEFAULT,
   autoHideOnBlur: false,
+  clipboardPaused: false,
+  clipboardMaxRecords: 0,
+  clipboardExclusions: "",
 
   // 头部快捷切换：跟随系统模式下取当前解析值的反色落为显式偏好，
   // 其余模式在明暗间往返。
@@ -149,6 +168,9 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
         contentSort: parseContentSort(settings.content_sort),
         resourceCardSize: parseResourceCardSize(settings.resource_card_size),
         autoHideOnBlur: settings.auto_hide_on_blur === "1",
+        clipboardPaused: settings.clipboard_paused === "1",
+        clipboardMaxRecords: parseMaxRecords(settings.clipboard_max_records),
+        clipboardExclusions: settings.clipboard_exclusions || "",
       });
 
       // Read autostart state from the .desktop file
@@ -263,6 +285,38 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
       await invoke("set_setting", { key: "auto_hide_on_blur", value: enabled ? "1" : "0" });
     } catch (e) {
       console.error("Failed to save auto-hide setting:", e);
+    }
+  },
+
+  // 采集暂停：持久化并广播（托盘菜单文案、剪切板页提示条都会跟随）。
+  // 事件 payload 与 Rust 侧 tray toggle 的语义一致。
+  setClipboardPaused: async (enabled) => {
+    set({ clipboardPaused: enabled });
+    try {
+      await invoke("set_setting", { key: "clipboard_paused", value: enabled ? "1" : "0" });
+      await emit("clipboard-pause-changed", { paused: enabled });
+    } catch (e) {
+      console.error("Failed to save capture pause:", e);
+    }
+  },
+
+  setClipboardMaxRecords: async (max) => {
+    const value = Math.max(0, Math.round(max));
+    set({ clipboardMaxRecords: value });
+    try {
+      await invoke("set_setting", { key: "clipboard_max_records", value: String(value) });
+    } catch (e) {
+      console.error("Failed to save max records:", e);
+    }
+  },
+
+  // 排除规则：文本域失焦时整体保存，后端采集循环按行解析。
+  setClipboardExclusions: async (raw) => {
+    set({ clipboardExclusions: raw });
+    try {
+      await invoke("set_setting", { key: "clipboard_exclusions", value: raw });
+    } catch (e) {
+      console.error("Failed to save exclusion rules:", e);
     }
   },
 

@@ -554,3 +554,30 @@
   opacity: 0.4;
   cursor: default;
 }
+
+/* 排除规则多行文本域：与 settings-input 同视觉语言，纵向可拉伸。 */
+.settings-textarea {
+  width: 100%;
+  min-height: 72px;
+  margin-top: 2px;
+  border-radius: 8px;
+  border: 1px solid var(--card-border);
+  background: var(--input-bg);
+  color: var(--text-primary);
+  font-family: var(--font);
+  font-size: var(--text-sm);
+  line-height: 1.5;
+  padding: 8px 10px;
+  outline: none;
+  resize: vertical;
+  transition: all 0.2s;
+}
+
+.settings-textarea:focus {
+  border-color: rgba(0, 0, 0, 0.25);
+  background: var(--input-focus-bg);
+}
+
+[data-theme="dark"] .settings-textarea:focus {
+  border-color: rgba(255, 255, 255, 0.4);
+}

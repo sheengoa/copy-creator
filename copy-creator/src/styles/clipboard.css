@@ -1434,3 +1434,29 @@
   from { opacity: 0; }
   to { opacity: 1; }
 }
+
+/* 采集暂停提示条：设置页/托盘切换后即时可见，琥珀警示色两主题通用。 */
+.clipboard-paused-notice {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0 0 8px;
+  padding: 8px 12px;
+  border-radius: 10px;
+  background: rgba(245, 158, 11, 0.12);
+  border: 1px solid rgba(245, 158, 11, 0.35);
+  color: var(--text-primary);
+  font-size: var(--text-sm);
+  line-height: 1.4;
+}
+
+.clipboard-paused-notice svg {
+  width: 16px;
+  height: 16px;
+  flex-shrink: 0;
+  color: #d97706;
+}
+
+[data-theme="dark"] .clipboard-paused-notice svg {
+  color: #fbbf24;
+}

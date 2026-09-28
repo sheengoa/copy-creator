@@ -1,6 +1,7 @@
 import { useEffect, useState, useRef, useCallback, useMemo } from "react";
 import { useTranslation } from "react-i18next";
 import { invoke } from "@tauri-apps/api/core";
+import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import { useShallow } from "zustand/react/shallow";
 import { useClipboardStore, type ClipboardFilter } from "../../stores/clipboardStore";
 import { useSettingsStore } from "../../stores/settingsStore";
@@ -242,6 +243,17 @@ export default function ClipboardPage() {
     init("all");
   }, [init, setSearch]);
 
+  // 采集暂停提示条：托盘菜单切换由 Rust 侧广播，设置页开关由前端广播，
+  // 这里统一监听并同步 store（本页提示条与设置页开关共用同一状态源）。
+  const clipboardPaused = useSettingsStore((s) => s.clipboardPaused);
+  useEffect(() => {
+    let unlisten: UnlistenFn | undefined;
+    listen<{ paused: boolean }>("clipboard-pause-changed", (e) => {
+      useSettingsStore.setState({ clipboardPaused: e.payload.paused });
+    }).then((fn) => { unlisten = fn; });
+    return () => unlisten?.();
+  }, []);
+
   // 主窗口从隐藏恢复显示时重载当前视图：兜底隐藏期间丢失/被节流的刷新。
   // 本页与资源页各持独立的 store 实例（见 clipboardStore 的工厂说明），
   // 这里的加载只写本页视图，不会被另一页的后台加载覆盖。
@@ -387,6 +399,13 @@ export default function ClipboardPage() {
           onConfirm={confirmState.onConfirm}
           onCancel={() => setConfirmState(null)}
         />
+      )}
+
+      {clipboardPaused && (
+        <div className="clipboard-paused-notice" role="status">
+          {Icons.pause}
+          <span>{t("clipboard.pausedNotice")}</span>
+        </div>
       )}
 
       {loading && records.length === 0 && !loadedOnce ? (

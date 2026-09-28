@@ -120,6 +120,51 @@ pub fn prune_old_records<R: Runtime>(
             image_contents.extend(attachment_paths);
         }
 
+        // 条数上限（设置 clipboard_max_records，0=不限）：保留期只按时间
+        // 清理，重度和式用户仍会无限累积，这里按 created_ms 从旧到新删到
+        // 上限为止。与时间清理同一批被删行进入下方文件回收流程。
+        let max_records: i64 = conn
+            .query_row(
+                "SELECT value FROM settings WHERE key = 'clipboard_max_records'",
+                [],
+                |row| row.get::<_, String>(0),
+            )
+            .unwrap_or_else(|_| "0".to_string())
+            .trim()
+            .parse()
+            .unwrap_or(0);
+        if max_records > 0 {
+            // LIMIT = 总数 - 上限：pinned 与资源承载记录不参与删除也不计入
+            // 可删额度，二者超过上限时 MAX(0, …) 自然删无可删。
+            let mut stmt = conn.prepare(
+                "DELETE FROM clipboard_records
+                 WHERE id IN (
+                     SELECT id FROM clipboard_records
+                     WHERE pinned = 0
+                       AND NOT (storage_mode = 'resource')
+                     ORDER BY created_ms ASC
+                     LIMIT MAX(0, (SELECT COUNT(*) FROM clipboard_records) - ?1)
+                 )
+                 RETURNING type, content, attachments",
+            )?;
+            let rows = stmt.query_map(params![max_records], |row| {
+                Ok((
+                    row.get::<_, String>(0)?,
+                    row.get::<_, String>(1)?,
+                    row.get::<_, String>(2)?,
+                ))
+            })?;
+            for row in rows {
+                let (record_type, content, attachments) = row?;
+                let attachment_paths =
+                    serde_json::from_str::<Vec<String>>(&attachments).unwrap_or_default();
+                if record_type == "image" {
+                    image_contents.push(content);
+                }
+                image_contents.extend(attachment_paths);
+            }
+        }
+
         (days, image_contents)
     };
 
