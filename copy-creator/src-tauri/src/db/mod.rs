@@ -1076,6 +1076,14 @@ pub(crate) fn ensure_schema(conn: &Connection) -> Result<(), Box<dyn std::error:
         set_schema_version(conn, SCHEMA_VERSION);
     }
 
+    // 历史数据修复（每次启动执行，不随版本门控）：三个函数都修正数据
+    // 形态而非结构，注释中明确要求每次启动执行（曾因只挂监听路径踩坑）；
+    // 且 normalize 依赖文件可见性——资源盘在升级首启未挂载时需后续启动
+    // 补修。开销为有界全表扫描，远低于此前全量重跑 ALTER/回填。
+    prune_legacy_thumb_records(conn);
+    prune_temporary_resource_records(conn);
+    normalize_file_backed_text_records(conn);
+
     // 剪切板全文索引（存在性与漂移自愈，见函数注释）；自持幂等守卫，
     // 不随版本门控。
     ensure_clipboard_fts(conn);
@@ -1331,12 +1339,6 @@ fn run_schema_migrations(conn: &Connection) -> Result<(), Box<dyn std::error::Er
     conn.execute("DROP TABLE IF EXISTS resource_groups", [])
         .ok();
 
-    // thumbs 派生缓存清退（历史数据一次性清理，随版本门控执行）。
-    prune_legacy_thumb_records(conn);
-    prune_temporary_resource_records(conn);
-    // 编辑降级的文件承载文本记录归一（幂等，随版本门控执行）。
-    normalize_file_backed_text_records(conn);
-
     Ok(())
 }
 
@@ -1361,19 +1363,22 @@ fn ensure_clipboard_fts(conn: &Connection) {
         return;
     }
 
-    // 首次接入：记录表非空而索引为空时全量重建一次；此后由触发器维护，
-    // 理论漂移可用 INSERT INTO clipboard_fts(clipboard_fts) VALUES('rebuild')
-    // 手动修复。重建先于触发器创建，避免对未索引行执行 'delete' 同步。
-    let records: i64 = conn
-        .query_row("SELECT COUNT(*) FROM clipboard_records", [], |row| row.get(0))
-        .unwrap_or(0);
-    let indexed: i64 = conn
-        .query_row("SELECT COUNT(*) FROM clipboard_fts", [], |row| row.get(0))
-        .unwrap_or(0);
-    if records > 0 && indexed == 0 {
+    // 漂移自愈：integrity-check 逐行校验外部内容索引与内容表一致（含
+    // rowid），失败（首次接入索引为空、历史 rebuild 被吞错、外部工具改库
+    // 等）即全量重建。触发器随任何写入方（含旧版本二进制）触发，常规
+    // 运行期不会漂移；每启动一次全索引校验的开销换永久一致性。
+    // 重建先于触发器创建，避免对未索引行执行 'delete' 同步。
+    // 带 rank=1 的变体才比对外部内容表（SQLite 3.43+，bundled 3.45 满足）；
+    // 不带参数的 integrity-check 只查索引内部一致性。
+    let integrity = conn
+        .execute_batch("INSERT INTO clipboard_fts(clipboard_fts, rank) VALUES ('integrity-check', 1);");
+    if integrity.is_err() {
+        let records: i64 = conn
+            .query_row("SELECT COUNT(*) FROM clipboard_records", [], |row| row.get(0))
+            .unwrap_or(0);
         conn.execute_batch("INSERT INTO clipboard_fts(clipboard_fts) VALUES ('rebuild');")
             .ok();
-        log::info!("clipboard FTS index rebuilt for {records} records");
+        log::info!("clipboard FTS integrity check failed; index rebuilt for {records} records");
     }
 
     conn.execute_batch(

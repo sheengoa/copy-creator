@@ -4774,6 +4774,44 @@ mod clipboard_fts_search_tests {
     }
 
     #[test]
+    fn ensure_clipboard_fts_rebuilds_drifted_index() {
+        let app = fts_app();
+        insert_record(&app, "r1", "first searchable text");
+        insert_record(&app, "r2", "second searchable text");
+        assert_eq!(search(&app, "searchable").len(), 2);
+
+        // 模拟漂移：撤掉触发器后绕过同步直接删除索引行（内容表不动），
+        // 索引与内容表失配。
+        {
+            let state = app.state::<DbState>();
+            let conn = state.conn.lock().unwrap();
+            conn.execute_batch(
+                "DROP TRIGGER clipboard_fts_insert;
+                 DROP TRIGGER clipboard_fts_delete;
+                 DROP TRIGGER clipboard_fts_update;
+                 DELETE FROM clipboard_fts
+                  WHERE rowid = (SELECT rowid FROM clipboard_records WHERE id = 'r2');",
+            )
+            .unwrap();
+            // 直接执行完整性校验应失败（索引少了一行）。
+            assert!(conn
+                .execute_batch(
+                    "INSERT INTO clipboard_fts(clipboard_fts, rank) VALUES ('integrity-check', 1);"
+                )
+                .is_err());
+        }
+
+        // 重跑 ensure_clipboard_fts：integrity-check 失败触发全量重建，
+        // 重建触发器后索引恢复一致。
+        {
+            let state = app.state::<DbState>();
+            let conn = state.conn.lock().unwrap();
+            super::super::ensure_clipboard_fts(&conn);
+        }
+        assert_eq!(search(&app, "searchable").len(), 2);
+    }
+
+    #[test]
     fn double_quote_in_keyword_falls_back_without_error() {
         let app = fts_app();
         insert_record(&app, "r1", "say \"hello\" loudly");
