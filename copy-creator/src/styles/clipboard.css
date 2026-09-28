@@ -1496,3 +1496,9 @@
 [data-theme="dark"] .dialog-textarea:focus {
   border-color: rgba(255, 255, 255, 0.4);
 }
+
+/* 虚拟滚动条目包装：以 padding 复刻原 flex gap（Virtuoso 根节点是单一
+ * 子元素，容器上的 gap 不再作用于卡片之间）。 */
+.clipboard-virtual-item {
+  padding-bottom: 10px;
+}

@@ -10,6 +10,7 @@ import { ConfirmDialog } from "../../components/ConfirmDialog";
 import SearchInput from "../../components/SearchInput";
 import { ClipboardCard } from "./ClipboardCard";
 import { EditRecordDialog } from "./EditRecordDialog";
+import { Virtuoso } from "react-virtuoso";
 import { TYPE_META } from "./utils";
 import BatchSelectionBar from "../../components/BatchSelectionBar";
 import { BackToTopButton } from "../../components/BackToTop";
@@ -217,6 +218,26 @@ export default function ClipboardPage() {
   const backToTop = useBackToTop({ enabled: !isSelecting });
   const listRef = useRef<HTMLDivElement>(null);
   const arrowNav = useArrowKeyNav({ containerRef: listRef, itemSelector: ".clipboard-card" });
+  // 虚拟滚动以既有滚动容器为滚动源（customScrollParent）：容器 CSS/滚动条
+  // 与键盘导航、回到顶部全部保持原状；DOM 就绪后再挂 Virtuoso。
+  const [listElement, setListElement] = useState<HTMLDivElement | null>(null);
+  // 前插序号：新复制/使用置顶会让 records 头部插入或位移，Virtuoso 依据
+  // 递减的 firstItemIndex 保持视口锚定（官方前插模式），否则滚动位置跳变。
+  // 用「渲染期派生调整」记录上一次首条目 id（同组件渲染期 setState 是
+  // React 官方模式；refs 禁止渲染期读写）。
+  const [listAnchor, setListAnchor] = useState<{ firstId: string | null; firstItemIndex: number }>({
+    firstId: null,
+    firstItemIndex: 1_000_000,
+  });
+  if (views.length > 0 && views[0].id !== listAnchor.firstId) {
+    const prevId = listAnchor.firstId;
+    let { firstItemIndex } = listAnchor;
+    if (prevId !== null) {
+      const shift = views.findIndex((view) => view.id === prevId);
+      if (shift > 0) firstItemIndex -= shift;
+    }
+    setListAnchor({ firstId: views[0].id, firstItemIndex });
+  }
   const selectAllRequestRef = useRef(0);
 
   const startClipboardSelection = useCallback(() => {
@@ -461,30 +482,44 @@ export default function ClipboardPage() {
           className="clipboard-list"
           ref={(el) => {
             listRef.current = el;
+            setListElement(el);
             backToTop.containerRef(el);
           }}
           onKeyDown={arrowNav}
         >
-          {views.map((view, i) => (
-            <ClipboardCard
-              key={view.id}
-              view={view}
-              index={i}
-              getTypeLabel={getTypeLabel}
-              pasteLeftClick={pasteLeftClick}
-              search={search}
-              onPasteNormal={handlePaste}
-              onPasteTerminal={handlePasteTerminal}
-              onDelete={handleDelete}
-              onSetPinned={handleSetPinned}
-              onEditRecord={handleEditRecord}
-              getRecordContent={getRecordContent}
-              onToggleUserApiKey={handleToggleUserApiKey}
-              selectionMode={isSelecting}
-              selected={isSelected(view.id)}
-              onToggleSelected={toggleSelected}
+          {listElement && (
+            <Virtuoso
+              customScrollParent={listElement}
+              data={views}
+              firstItemIndex={listAnchor.firstItemIndex}
+              initialTopMostItemIndex={0}
+              computeItemKey={(_, view) => view.id}
+              // 大预载边：条目在远离视口处挂载/卸载，入场动画只离屏重放；
+              // 视口内条目稳定挂载不闪烁。
+              increaseViewportBy={{ top: 600, bottom: 1200 }}
+              itemContent={(index, view) => (
+                <div className="clipboard-virtual-item">
+                  <ClipboardCard
+                    view={view}
+                    index={index}
+                    getTypeLabel={getTypeLabel}
+                    pasteLeftClick={pasteLeftClick}
+                    search={search}
+                    onPasteNormal={handlePaste}
+                    onPasteTerminal={handlePasteTerminal}
+                    onDelete={handleDelete}
+                    onSetPinned={handleSetPinned}
+                    onEditRecord={handleEditRecord}
+                    getRecordContent={getRecordContent}
+                    onToggleUserApiKey={handleToggleUserApiKey}
+                    selectionMode={isSelecting}
+                    selected={isSelected(view.id)}
+                    onToggleSelected={toggleSelected}
+                  />
+                </div>
+              )}
             />
-          ))}
+          )}
           {hasMore && filtered.length > 0 && (
             <button
               className="clipboard-load-more"

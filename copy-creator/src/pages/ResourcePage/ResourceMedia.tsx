@@ -63,6 +63,15 @@ function rememberFileThumb(key: string, dataUrl: string) {
   }
 }
 
+/** 命中即刷新新近度：删了再写把键沉底，淘汰的才是真正最久未用的。 */
+function touchFileThumb(key: string) {
+  const cached = fileThumbCache.get(key);
+  if (cached === undefined) return undefined;
+  fileThumbCache.delete(key);
+  fileThumbCache.set(key, cached);
+  return cached;
+}
+
 /** 进程内缩略图缓存键：路径 + 文件版本，覆盖保存后自然失效取新。 */
 function fileThumbCacheKey(path: string, version?: string) {
   return version ? `${path}\u0000${version}` : path;
@@ -86,8 +95,7 @@ export function ResourceFileImage({
   version?: string;
 }) {
   const cacheKey = fileThumbCacheKey(path, version);
-  const cached = fileThumbCache.get(cacheKey);
-  const [src, setSrc] = useState(cached ?? "");
+  const [src, setSrc] = useState(() => touchFileThumb(cacheKey) ?? "");
   const [failed, setFailed] = useState(false);
   // 真懒加载：进入视口（含 300px 预载边）才请求后端解码缩略图。
   // 挂载即请求会让大库一次触发成百上千个解码任务，滚动直接卡死；
@@ -95,7 +103,7 @@ export function ResourceFileImage({
   const [viewportRef, inView] = useInViewOnce<HTMLDivElement>();
 
   useEffect(() => {
-    const cachedUrl = fileThumbCache.get(cacheKey);
+    const cachedUrl = touchFileThumb(cacheKey);
     if (cachedUrl) {
       setSrc(cachedUrl);
       setFailed(false);

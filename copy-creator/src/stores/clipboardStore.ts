@@ -166,10 +166,23 @@ function enqueue<T>(fn: () => Promise<T>): Promise<T> {
   });
 }
 
-function trimCache(cache: Record<string, string>, maxEntries: number) {
+export function trimCache(cache: Record<string, string>, maxEntries: number) {
   const entries = Object.entries(cache);
   if (entries.length <= maxEntries) return cache;
   return Object.fromEntries(entries.slice(entries.length - maxEntries));
+}
+
+/** 缓存命中即刷新新近度：删了再写把键移到插入序末尾，trim 淘汰的才是
+ * 真正最久未用的（此前命中不刷新，长会话里滚动淘汰的是最早插入的热点
+ * 条目）。已是最新条目时原对象返回，避免无谓的 store 级联更新。 */
+export function touchCache(cache: Record<string, string>, key: string): Record<string, string> {
+  const keys = Object.keys(cache);
+  if (keys.length === 0 || keys[keys.length - 1] === key) return cache;
+  if (!(key in cache)) return cache;
+  const next = { ...cache };
+  delete next[key];
+  next[key] = cache[key];
+  return next;
 }
 
 // 类别判定与分组匹配的唯一实现收进 domain/records.ts（含收藏语义）：
@@ -613,7 +626,10 @@ export function createRecordsStore() {
 
     getThumbnail: async (record: Pick<ClipboardRecord, "id" | "content">): Promise<string> => {
       const cached = get().thumbnailCache[record.id];
-      if (cached) return cached;
+      if (cached) {
+        set({ thumbnailCache: touchCache(get().thumbnailCache, record.id) });
+        return cached;
+      }
 
       return enqueue(async () => {
         const cached2 = get().thumbnailCache[record.id];
@@ -637,7 +653,10 @@ export function createRecordsStore() {
 
     getImageData: async (record: Pick<ClipboardRecord, "id" | "content">): Promise<string> => {
       const cached = get().imageCache[record.id];
-      if (cached) return cached;
+      if (cached) {
+        set({ imageCache: touchCache(get().imageCache, record.id) });
+        return cached;
+      }
 
       try {
         const base64 = await invoke<string>("get_image_base64", {
