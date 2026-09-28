@@ -67,20 +67,16 @@ describe("clipboardStore deletion", () => {
     invokeMock.mockResolvedValue(undefined);
     useClipboardStore.setState({
       records,
-      thumbnailCache: { "clip-2": "thumbnail" },
-      imageCache: { "clip-2": "image" },
     });
   });
 
-  it("deletes selected records in one backend call and clears their caches", async () => {
+  it("deletes selected records in one backend call", async () => {
     await useClipboardStore.getState().deleteRecords(["clip-2"]);
 
     expect(invokeMock).toHaveBeenCalledWith("delete_clipboard_records", {
       ids: ["clip-2"],
     });
     expect(useClipboardStore.getState().records.map((record) => record.id)).toEqual(["clip-1"]);
-    expect(useClipboardStore.getState().thumbnailCache).toEqual({});
-    expect(useClipboardStore.getState().imageCache).toEqual({});
   });
 
   it("routes single deletion through the batch command", async () => {

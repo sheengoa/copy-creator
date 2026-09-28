@@ -95,8 +95,6 @@ interface ClipboardState {
   /** 首次数据加载已完成：其后类别/分组切换不再亮骨架屏（与 phraseStore.loadedOnce 同语义）。 */
   loadedOnce: boolean;
   hasMore: boolean;
-  thumbnailCache: Record<string, string>;
-  imageCache: Record<string, string>;
   category: ClipType;
   initialized: boolean;
   resourceGroup: string | null;
@@ -125,15 +123,7 @@ interface ClipboardState {
   /** 收藏/取消收藏：本地即时打标，随后重载拿收藏浮顶的新顺序。 */
   setRecordsPinned: (ids: string[], pinned: boolean) => Promise<void>;
   getRecordContent: (record: ClipboardRecord) => Promise<string>;
-  getThumbnail: (record: Pick<ClipboardRecord, "id" | "content">) => Promise<string>;
-  getImageData: (record: Pick<ClipboardRecord, "id" | "content">) => Promise<string>;
 }
-
-const MAX_CONCURRENT = 3;
-const MAX_THUMBNAILS = 80;
-const MAX_FULL_IMAGES = 8;
-let running = 0;
-const queue: (() => void)[] = [];
 
 // 粘贴成功后记录使用时间（fire-and-forget），供径向菜单「最近使用」聚合查询。
 function touchClipboardUsage(ids: string[]) {
@@ -142,48 +132,6 @@ function touchClipboardUsage(ids: string[]) {
   });
 }
 
-function enqueue<T>(fn: () => Promise<T>): Promise<T> {
-  return new Promise((resolve, reject) => {
-    const run = async () => {
-      running++;
-      try {
-        resolve(await fn());
-      } catch (e) {
-        reject(e);
-      } finally {
-        running--;
-        if (queue.length > 0 && running < MAX_CONCURRENT) {
-          const next = queue.shift()!;
-          next();
-        }
-      }
-    };
-    if (running < MAX_CONCURRENT) {
-      run();
-    } else {
-      queue.push(run);
-    }
-  });
-}
-
-export function trimCache(cache: Record<string, string>, maxEntries: number) {
-  const entries = Object.entries(cache);
-  if (entries.length <= maxEntries) return cache;
-  return Object.fromEntries(entries.slice(entries.length - maxEntries));
-}
-
-/** 缓存命中即刷新新近度：删了再写把键移到插入序末尾，trim 淘汰的才是
- * 真正最久未用的（此前命中不刷新，长会话里滚动淘汰的是最早插入的热点
- * 条目）。已是最新条目时原对象返回，避免无谓的 store 级联更新。 */
-export function touchCache(cache: Record<string, string>, key: string): Record<string, string> {
-  const keys = Object.keys(cache);
-  if (keys.length === 0 || keys[keys.length - 1] === key) return cache;
-  if (!(key in cache)) return cache;
-  const next = { ...cache };
-  delete next[key];
-  next[key] = cache[key];
-  return next;
-}
 
 // 类别判定与分组匹配的唯一实现收进 domain/records.ts（含收藏语义）：
 // store、主窗口、径向菜单三处消费同一份，新增类别不再有「改一漏二」。
@@ -263,8 +211,6 @@ export function createRecordsStore() {
     loadError: null,
     loadedOnce: false,
     hasMore: true,
-    thumbnailCache: {},
-    imageCache: {},
     category: "all",
     initialized: false,
     resourceGroup: null,
@@ -332,8 +278,6 @@ export function createRecordsStore() {
           hasMore: false,
           loading: false,
           loadError: null,
-          thumbnailCache: {},
-          imageCache: {},
         });
       }).then((fn) => {
         unlisteners.push(fn);
@@ -583,16 +527,8 @@ export function createRecordsStore() {
       try {
         await invoke("delete_clipboard_records", { ids });
         const deletedIds = new Set(ids);
-        const thumbCache = { ...get().thumbnailCache };
-        const cache = { ...get().imageCache };
-        for (const id of deletedIds) {
-          delete thumbCache[id];
-          delete cache[id];
-        }
         set({
           records: get().records.filter((r) => !deletedIds.has(r.id)),
-          thumbnailCache: thumbCache,
-          imageCache: cache,
         });
       } catch (e) {
         console.error("Failed to delete clipboard records:", e);
@@ -623,53 +559,6 @@ export function createRecordsStore() {
     },
 
     getRecordContent: getFullContent,
-
-    getThumbnail: async (record: Pick<ClipboardRecord, "id" | "content">): Promise<string> => {
-      const cached = get().thumbnailCache[record.id];
-      if (cached) {
-        set({ thumbnailCache: touchCache(get().thumbnailCache, record.id) });
-        return cached;
-      }
-
-      return enqueue(async () => {
-        const cached2 = get().thumbnailCache[record.id];
-        if (cached2) return cached2;
-
-        try {
-          // Use base64 data URI for reliable cross-platform display
-          const base64 = await invoke<string>("get_image_thumbnail", {
-            path: record.content,
-            maxSize: 200,
-          });
-          const url = `data:image/png;base64,${base64}`;
-          set({ thumbnailCache: trimCache({ ...get().thumbnailCache, [record.id]: url }, MAX_THUMBNAILS) });
-          return url;
-        } catch (e) {
-          console.error("Failed to load thumbnail:", e);
-          return "";
-        }
-      });
-    },
-
-    getImageData: async (record: Pick<ClipboardRecord, "id" | "content">): Promise<string> => {
-      const cached = get().imageCache[record.id];
-      if (cached) {
-        set({ imageCache: touchCache(get().imageCache, record.id) });
-        return cached;
-      }
-
-      try {
-        const base64 = await invoke<string>("get_image_base64", {
-          path: record.content,
-        });
-        const url = `data:image/png;base64,${base64}`;
-        set({ imageCache: trimCache({ ...get().imageCache, [record.id]: url }, MAX_FULL_IMAGES) });
-        return url;
-      } catch (e) {
-        console.error("Failed to load image:", e);
-        return "";
-      }
-    },
   }));
 
   if (typeof window !== "undefined") {

@@ -33,9 +33,10 @@ Copy Creator is a lightweight cross-platform (Windows / Linux) desktop productiv
 
 ### 📋 Clipboard Manager
 - Automatically records text and image copy history
-- Keyword search for quick access to historical content
-- One-click paste to the current cursor position
-- Configurable retention period with automatic cleanup
+- Full-text keyword search backed by an FTS index — long texts hit instantly
+- One-click paste to the current cursor position; text/link records are directly editable
+- Configurable retention period and history cap with automatic cleanup
+- Privacy protection: pause capture with one click, and exclude sensitive copies by source window/process
 
 ### 🗂 Content Library (Resources)
 - A dedicated library folder (customizable location) where content is stored as plain files — open it with any file manager at any time
@@ -48,6 +49,7 @@ Copy Creator is a lightweight cross-platform (Windows / Linux) desktop productiv
 ### ⚡ Quick Input
 - Organize common phrases and code snippets by scenario groups
 - Customizable groups for flexible content organization
+- Supports `{{date}}` `{{time}}` `{{datetime}}` `{{clipboard}}` placeholders, expanded on paste
 - Click to paste directly without manual copying
 
 ### 🧭 Radial Menu
@@ -65,9 +67,11 @@ Copy Creator is a lightweight cross-platform (Windows / Linux) desktop productiv
 
 ### ⚙️ System Features
 - Global hotkey to show/hide window
-- Window always-on-top display
-- Light/Dark theme switching
-- Launch at system startup
+- Window always-on-top display, with optional hide-on-blur (launcher-style behavior)
+- Light/Dark/Follow-system theme
+- Launch at system startup; single-instance guard on both platforms
+- Lists support arrow-key navigation and paged "load more"
+- Built-in paste-environment diagnostics in Settings (Linux injection tooling and install hints)
 
 ## Download
 
