@@ -648,6 +648,9 @@ pub fn update_clipboard_record_content(
         params![id, content],
     )
     .map_err(|e| e.to_string())?;
+    // 与使用/暂存编辑同一事件契约：主窗口与径向菜单重载列表，避免
+    // 其他窗口展示编辑前的旧内容。
+    let _ = app.emit("clipboard-record-updated", &id);
     Ok(())
 }
 

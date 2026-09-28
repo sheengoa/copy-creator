@@ -63,7 +63,7 @@ export function EditRecordDialog({
         <h3 className="dialog-title">{t("clipboard.editContent")}</h3>
         <textarea
           ref={textareaRef}
-          className="dialog-textarea"
+          className="record-edit-textarea"
           value={content}
           onChange={(e) => setContent(e.target.value)}
           onKeyDown={(e) => {

@@ -1466,12 +1466,14 @@
   color: #fbbf24;
 }
 
-/* 记录编辑对话框：复用 dialog 弹层视觉，textarea 纵向可拉伸。 */
+/* 记录编辑对话框：复用 dialog 弹层视觉，textarea 纵向可拉伸。
+ * 类名刻意不叫 dialog-textarea——那是 components.css 的共享类
+ * （短语编辑器等在用），主窗口内同特异性规则会后加载者胜。 */
 .dialog-edit-content {
   width: min(560px, calc(100vw - 48px));
 }
 
-.dialog-textarea {
+.record-edit-textarea {
   width: 100%;
   min-height: 200px;
   margin-top: 8px;
@@ -1488,12 +1490,12 @@
   transition: all 0.2s;
 }
 
-.dialog-textarea:focus {
+.record-edit-textarea:focus {
   border-color: rgba(0, 0, 0, 0.25);
   background: var(--input-focus-bg);
 }
 
-[data-theme="dark"] .dialog-textarea:focus {
+[data-theme="dark"] .record-edit-textarea:focus {
   border-color: rgba(255, 255, 255, 0.4);
 }
 
