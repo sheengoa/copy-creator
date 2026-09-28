@@ -34,6 +34,8 @@ interface PhraseListProps {
   selectionMode: boolean;
   isSelected: (id: string) => boolean;
   onToggleSelected: (id: string) => void;
+  /** dnd 键盘拖拽进行中禁用方向键导航（方向键此时是拖拽移动语义）。 */
+  navDisabled?: boolean;
 }
 
 
@@ -288,11 +290,16 @@ export function PhraseList({
   selectionMode,
   isSelected,
   onToggleSelected,
+  navDisabled,
 }: PhraseListProps) {
   const { t } = useTranslation();
   // 方向键导航：容器节点同时供「回到顶部」回调用，这里用本地 ref 桥接。
   const listRef = useRef<HTMLDivElement>(null);
-  const arrowNav = useArrowKeyNav({ containerRef: listRef, itemSelector: ".phrase-card" });
+  const arrowNav = useArrowKeyNav({
+    containerRef: listRef,
+    itemSelector: ".phrase-card",
+    disabled: navDisabled,
+  });
 
   // 骨架屏只用于首屏：分组切换是本地毫秒级查询，从空分组切走时若再亮
   // 骨架屏，会出现"骨架屏闪一下再变空态"的闪烁（用户可感知）。

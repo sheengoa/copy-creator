@@ -32,12 +32,15 @@ export function isFileBackedTextResource(
 
 /** 记录正文能否在本体上直接编辑（列表卡「编辑内容」入口的判定）：
  * 仅数据库承载的纯文本/链接；资源承载文本在资源详情页编辑（内容在
- * 文件里），文件承载文本同由资源域管理。 */
+ * 文件里），文件承载文本同由资源域管理；图文暂存记录的正文含
+ * [Image #N] 占位符，须由新建窗口的图文编辑器维护，简单文本框会破坏
+ * 占位符与附件的映射。 */
 export function recordTextEditable(
-  record: Pick<ClipboardRecord, "type" | "group_name" | "storage_mode">,
+  record: Pick<ClipboardRecord, "type" | "group_name" | "storage_mode" | "has_images">,
 ): boolean {
   return (
     (record.type === "text" || record.type === "link") &&
+    !record.has_images &&
     !isResourceRecord(record)
   );
 }

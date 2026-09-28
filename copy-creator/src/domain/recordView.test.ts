@@ -82,6 +82,16 @@ describe("buildRecordView editableText", () => {
     expect(view.editableText).toBe(false);
   });
 
+  it("图文暂存记录不可编辑（正文占位符须由图文编辑器维护）", () => {
+    const view = buildRecordView({
+      ...baseRecord,
+      type: "text",
+      content: "说明文字 [Image #1]",
+      has_images: true,
+    });
+    expect(view.editableText).toBe(false);
+  });
+
   it("图片与文件记录不可编辑", () => {
     expect(
       buildRecordView({ ...baseRecord, type: "image", content: "images/x.png" }).editableText,

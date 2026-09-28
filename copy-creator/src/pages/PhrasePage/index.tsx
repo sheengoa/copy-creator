@@ -532,6 +532,7 @@ export default function PhrasePage() {
             selectedGroupId={selectedGroupId}
             search={search}
             scrollRef={backToTop.containerRef}
+            navDisabled={activePhraseId !== null}
             onPaste={handlePaste}
             onSecondaryPaste={handleSecondaryPaste}
             onEdit={openEditPhrase}

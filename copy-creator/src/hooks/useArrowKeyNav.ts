@@ -14,6 +14,8 @@ interface ArrowKeyNavOptions {
   columnar?: boolean;
   /** 列容器选择器，columnar 时必填。 */
   columnSelector?: string;
+  /** 临时禁用（如 dnd-kit 键盘拖拽进行中：方向键属于拖拽移动语义）。 */
+  disabled?: boolean;
 }
 
 const focusItem = (item: HTMLElement) => {
@@ -26,9 +28,11 @@ export function useArrowKeyNav({
   itemSelector,
   columnar = false,
   columnSelector,
+  disabled = false,
 }: ArrowKeyNavOptions) {
   return useCallback(
     (event: KeyboardEvent<HTMLElement>) => {
+      if (disabled) return;
       const key = event.key;
       if (
         (key !== "ArrowDown" && key !== "ArrowUp" && !(columnar && (key === "ArrowLeft" || key === "ArrowRight"))) ||
@@ -83,6 +87,6 @@ export function useArrowKeyNav({
         focusItem(target);
       }
     },
-    [containerRef, itemSelector, columnar, columnSelector],
+    [containerRef, itemSelector, columnar, columnSelector, disabled],
   );
 }
