@@ -1,4 +1,5 @@
 import { useTranslation } from "react-i18next";
+import { InfoTip } from "./InfoTip";
 import {
   RADIAL_SCALE_DEFAULT,
   RADIAL_SCALE_MAX,
@@ -21,7 +22,10 @@ export function RadialSection({
       <div className="settings-section-title">{t("settings.radialSection")}</div>
       <div className="settings-card">
         <div className="settings-row">
-          <div className="settings-row-label">{t("settings.radialMenuSize")}</div>
+          <div className="settings-row-label">
+            {t("settings.radialMenuSize")}
+            <InfoTip text={t("settings.radialMenuSizeHint")} />
+          </div>
           <div className="radial-scale-control">
             <input
               type="range"
@@ -43,9 +47,6 @@ export function RadialSection({
               {t("settings.radialMenuSizeReset")}
             </button>
           </div>
-        </div>
-        <div className="settings-storage-hint">
-          {t("settings.radialMenuSizeHint")}
         </div>
       </div>
     </div>

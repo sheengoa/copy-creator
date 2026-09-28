@@ -5,6 +5,7 @@ import { useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { invoke } from "@tauri-apps/api/core";
 import { invokeNativeDialog } from "../../utils/nativeDialogGuard";
+import { InfoTip } from "./InfoTip";
 import { listen } from "@tauri-apps/api/event";
 import { relaunch } from "@tauri-apps/plugin-process";
 
@@ -138,7 +139,10 @@ export function BackupSection() {
       <div className="settings-section-title">{t("settings.backupTitle")}</div>
       <div className="settings-card">
         <div className="settings-row vertical">
-          <div className="settings-row-label">{t("settings.backupExportLabel")}</div>
+          <div className="settings-row-label">
+            {t("settings.backupExportLabel")}
+            <InfoTip text={t("settings.backupExportHint")} />
+          </div>
           <div className="settings-storage-row">
             <button
               className="settings-storage-btn"
@@ -163,11 +167,13 @@ export function BackupSection() {
             />
             <span>{t("settings.backupIncludeLibrary")}</span>
           </label>
-          <div className="settings-storage-hint">{t("settings.backupExportHint")}</div>
         </div>
 
         <div className="settings-row vertical">
-          <div className="settings-row-label">{t("settings.backupImportLabel")}</div>
+          <div className="settings-row-label">
+            {t("settings.backupImportLabel")}
+            <InfoTip text={t("settings.backupImportHint")} />
+          </div>
           <div className="settings-storage-row">
             <button
               className="settings-storage-btn"
@@ -180,7 +186,6 @@ export function BackupSection() {
               <span className="settings-storage-hint">{t("settings.backupProcessed", { count: importProcessed })}</span>
             )}
           </div>
-          <div className="settings-storage-hint">{t("settings.backupImportHint")}</div>
         </div>
 
         {needRestart && (

@@ -4,6 +4,7 @@ import { invoke } from "@tauri-apps/api/core";
 import { invokeNativeDialog } from "../../utils/nativeDialogGuard";
 import { relaunch } from "@tauri-apps/plugin-process";
 import { ConfirmDialog } from "../ConfirmDialog";
+import { InfoTip } from "./InfoTip";
 
 interface StorageSectionProps {
   storagePath: string;
@@ -57,7 +58,10 @@ export function StorageSection({
       <div className="settings-section-title">{t("settings.storage")}</div>
       <div className="settings-card">
         <div className="settings-row vertical">
-          <div className="settings-row-label">{t("settings.storagePath")}</div>
+          <div className="settings-row-label">
+            {t("settings.storagePath")}
+            <InfoTip text={t("settings.storagePathHint")} />
+          </div>
           <div className="settings-storage-row">
             <span className="settings-storage-path">{storagePath}</span>
             <button
@@ -66,9 +70,6 @@ export function StorageSection({
             >
               {t("settings.changeFolder")}
             </button>
-          </div>
-          <div className="settings-storage-hint">
-            {t("settings.storagePathHint")}
           </div>
           {needRestart && (
             <div className="settings-restart-hint">
