@@ -18,6 +18,13 @@ import type { ClipboardStorageMode, ResourceFolder } from "../../types";
 import { isResourceRecord } from "../../domain/records";
 import { flattenResourceFoldersVisible } from "../../domain/groups";
 import { parseResourceSaveError } from "../../utils/resourceSaveError";
+import {
+  applyThemeAttribute,
+  onSystemThemeChange,
+  parseThemePreference,
+  resolveTheme,
+  type ThemePreference,
+} from "../../utils/theme";
 import { Icons } from "../Icons";
 
 interface StashRecord {
@@ -138,11 +145,19 @@ export default function ClipboardCreateDialog() {
 
   // 初始化：主题 + 语言 + 事件监听
   useEffect(() => {
+    // 偏好可为 "system"：本地解析后应用，系统深浅色切换时按当前偏好重解析。
+    let themePref: ThemePreference = "light";
+    const syncTheme = (pref: ThemePreference) => {
+      themePref = pref;
+      applyThemeAttribute(resolveTheme(pref));
+    };
     invoke<string>("get_setting", { key: "theme" }).then((theme) => {
-      if (theme === "dark" || theme === "light") {
-        document.documentElement.setAttribute("data-theme", theme);
-      }
+      syncTheme(parseThemePreference(theme));
     });
+    const offSystemTheme = onSystemThemeChange(() => {
+      applyThemeAttribute(resolveTheme(themePref));
+    });
+
     invoke<string>("get_setting", { key: "language" })
       .then((language) => {
         if (language) i18n.changeLanguage(language);
@@ -151,7 +166,7 @@ export default function ClipboardCreateDialog() {
 
     let unlistenTheme: UnlistenFn | undefined;
     listen<{ theme: string }>("theme-changed", (e) => {
-      document.documentElement.setAttribute("data-theme", e.payload.theme);
+      syncTheme(parseThemePreference(e.payload.theme));
     }).then((fn) => { unlistenTheme = fn; });
 
     let unlistenLang: UnlistenFn | undefined;
@@ -167,7 +182,7 @@ export default function ClipboardCreateDialog() {
       group_name?: string | null;
     }>("clipboard-create-show", (e) => {
       cancelResizeSave();
-      document.documentElement.setAttribute("data-theme", e.payload.theme);
+      syncTheme(parseThemePreference(e.payload.theme));
       resetDraft();
       setEditingId(null);
       const mode: ClipboardStorageMode = e.payload.storage_mode === "resource" ? "resource" : "database";
@@ -185,6 +200,7 @@ export default function ClipboardCreateDialog() {
     void loadResourceGroups();
 
     return () => {
+      offSystemTheme();
       if (unlistenTheme) unlistenTheme();
       if (unlistenLang) unlistenLang();
       if (unlistenShow) unlistenShow();

@@ -19,6 +19,7 @@
     "theme": "主题",
     "light": "亮色",
     "dark": "暗色",
+    "themeSystem": "跟随系统",
     "language": "语言",
     "startup": "开机启动",
     "shortcut": "快捷键",

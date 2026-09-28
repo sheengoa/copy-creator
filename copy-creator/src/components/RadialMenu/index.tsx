@@ -17,6 +17,13 @@ import {
 } from "../../stores/phraseStore";
 import { useSettingsStore } from "../../stores/settingsStore";
 import { shouldUseTerminalPasteForMouseTrigger } from "../../utils/pasteMode";
+import {
+  applyThemeAttribute,
+  onSystemThemeChange,
+  parseThemePreference,
+  resolveTheme,
+  type ThemePreference,
+} from "../../utils/theme";
 import { applyListScrollAnchor, captureListScrollAnchor, type ListScrollAnchor } from "../../utils/scrollAnchor";
 import {
   getClipboardRadialDragKind,
@@ -224,6 +231,8 @@ export default function RadialMenu() {
   const [draggingItemId, setDraggingItemId] = useState<string | null>(null);
 
   const visibleRef = useRef(false);
+  // 最近一次已知的主题偏好（含 "system"）：系统深浅色变化时按它重解析。
+  const themePrefRef = useRef<ThemePreference>("light");
   const selectedItemIdRef = useRef<string | null>(null);
   const activeTabRef = useRef<TabKey>("phrases");
   const clipboardCategoryRef = useRef<ClipType>("all");
@@ -576,12 +585,16 @@ export default function RadialMenu() {
   }, [collapsePreview]);
 
   useEffect(() => {
-    // Initial theme load
+    // Initial theme load（偏好可为 "system"，本地解析后再应用）
     invoke<string>("get_setting", { key: "theme" }).then((theme) => {
-      if (theme === "dark" || theme === "light") {
-        document.documentElement.setAttribute("data-theme", theme);
-      }
+      themePrefRef.current = parseThemePreference(theme);
+      applyThemeAttribute(resolveTheme(themePrefRef.current));
     }).catch(() => {});
+
+    // 系统深浅色切换时按当前偏好重解析（跟随系统模式即时生效）
+    const offSystemTheme = onSystemThemeChange(() => {
+      applyThemeAttribute(resolveTheme(themePrefRef.current));
+    });
 
     // Initial language load
     invoke<string>("get_setting", { key: "language" }).then((lang) => {
@@ -605,7 +618,8 @@ export default function RadialMenu() {
     // Listen for theme changes from the main window
     let unlistenTheme: UnlistenFn | undefined;
     listen<{ theme: string }>("theme-changed", (e) => {
-      document.documentElement.setAttribute("data-theme", e.payload.theme);
+      themePrefRef.current = parseThemePreference(e.payload.theme);
+      applyThemeAttribute(resolveTheme(themePrefRef.current));
     }).then((fn) => { unlistenTheme = fn; });
 
     // Listen for language changes from the main window
@@ -629,6 +643,7 @@ export default function RadialMenu() {
     }).then((fn) => { unlistenResourceGroups = fn; });
 
     return () => {
+      offSystemTheme();
       if (unlistenTheme) unlistenTheme();
       if (unlistenLang) unlistenLang();
       if (unlistenResourceGroups) unlistenResourceGroups();
@@ -1226,7 +1241,8 @@ export default function RadialMenu() {
             setDragSessionItemId(null);
             setDraggingItemId(null);
           }
-          document.documentElement.setAttribute("data-theme", e.payload.theme);
+          themePrefRef.current = parseThemePreference(e.payload.theme);
+          applyThemeAttribute(resolveTheme(themePrefRef.current));
           void loadPasteLeftClickSetting();
           setSelectedItemId(null);
           selectedItemIdRef.current = null;

@@ -2,8 +2,14 @@ import { create } from "zustand";
 import { invoke } from "@tauri-apps/api/core";
 import { emit } from "@tauri-apps/api/event";
 import type { PasteMode } from "../utils/pasteMode";
+import {
+  type ThemePreference,
+  onSystemThemeChange,
+  parseThemePreference,
+  resolveTheme,
+} from "../utils/theme";
 
-type ThemeMode = "light" | "dark";
+type ThemeMode = ThemePreference;
 
 /** 径向菜单缩放比（百分比），与 Rust 侧 radial_ui_scale 的取值范围保持一致。 */
 export const RADIAL_SCALE_MIN = 50;
@@ -41,7 +47,10 @@ const parseRadialScale = (raw: string | undefined): number => {
 };
 
 interface SettingsState {
+  /** 持久化的主题偏好：显式明暗或跟随系统。 */
   themeMode: ThemeMode;
+  /** 由偏好与系统深浅色解析出的实际主题，UI 只读这个。 */
+  resolvedTheme: "light" | "dark";
   clipboardRetention: string;
   language: string;
   shortcutKey: string;
@@ -55,6 +64,7 @@ interface SettingsState {
   resourceCardSize: number;
 
   toggleTheme: () => void;
+  setThemeMode: (mode: ThemeMode) => Promise<void>;
   loadSettings: () => Promise<void>;
   doLoadSettings: () => Promise<void>;
   setSetting: (key: string, value: string) => Promise<void>;
@@ -69,8 +79,13 @@ interface SettingsState {
 // 首次加载前都要能拿到已装载的偏好；幂等复用避免重复读表。
 let settingsLoadPromise: Promise<void> | null = null;
 
+// 系统深浅色订阅的窗口级单例：订阅一次，跟随系统模式下系统切换时
+// 重算 resolvedTheme（App 的 effect 据此重设 data-theme）。
+let themeWatcherReady = false;
+
 export const useSettingsStore = create<SettingsState>((set, get) => ({
   themeMode: "light",
+  resolvedTheme: "light",
   clipboardRetention: "1month",
   language: "zh-CN",
   shortcutKey: "",
@@ -83,12 +98,23 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
   contentSort: "recent",
   resourceCardSize: RESOURCE_CARD_SIZE_DEFAULT,
 
+  // 头部快捷切换：跟随系统模式下取当前解析值的反色落为显式偏好，
+  // 其余模式在明暗间往返。
   toggleTheme: () => {
-    const next = get().themeMode === "light" ? "dark" : "light";
-    set({ themeMode: next });
-    // Persist to DB so radial menu reads the correct theme on re-open
-    get().setSetting("theme", next);
-    emit("theme-changed", { theme: next });
+    const next = get().resolvedTheme === "light" ? "dark" : "light";
+    void get().setThemeMode(next);
+  },
+
+  // 设置主题偏好：持久化并广播事件。事件 payload 携带原始偏好字符串
+  // （可能为 "system"），径向/新建窗口各自 resolve 后再应用。
+  setThemeMode: async (mode) => {
+    set({ themeMode: mode, resolvedTheme: resolveTheme(mode) });
+    try {
+      await invoke("set_setting", { key: "theme", value: mode });
+      await emit("theme-changed", { theme: mode });
+    } catch (e) {
+      console.error("Failed to save theme:", e);
+    }
   },
 
   // 窗口级幂等装载：首次真正读表，之后复用同一 Promise。
@@ -103,9 +129,11 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
   doLoadSettings: async () => {
     try {
       const settings = await invoke<Record<string, string>>("get_all_settings");
+      const themePref = parseThemePreference(settings.theme);
 
       set({
-        themeMode: (settings.theme === "dark" ? "dark" : "light") as ThemeMode,
+        themeMode: themePref,
+        resolvedTheme: resolveTheme(themePref),
         clipboardRetention: settings.clipboard_retention || "1month",
         language: settings.language || "zh-CN",
         shortcutKey: settings.shortcut_key || "",
@@ -123,6 +151,17 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
         const auto = await invoke<boolean>("is_autostart_enabled");
         set({ autostartEnabled: auto });
       } catch { /* command not available (older backend) */ }
+
+      // 跟随系统：订阅本窗口的系统深浅色变化（每窗口各自订阅，
+      // 不依赖跨窗口事件；径向/新建窗口在各自组件里同样处理）。
+      if (!themeWatcherReady) {
+        themeWatcherReady = true;
+        onSystemThemeChange(() => {
+          if (get().themeMode === "system") {
+            set({ resolvedTheme: resolveTheme("system") });
+          }
+        });
+      }
     } catch (e) {
       // 装载失败（后端启动竞态等）不能永久缓存失败结果：清空缓存允许后续
       // 调用重试，并安排一次延迟自愈重试，否则主题/语言/排序整窗回落默认
@@ -155,7 +194,9 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
       // 同步更新本地 state，避免 UI 组件读到旧值
       const patch: Partial<SettingsState> = {};
       if ("theme" in settings) {
-        patch.themeMode = (settings.theme === "dark" ? "dark" : "light") as ThemeMode;
+        const themePref = parseThemePreference(settings.theme);
+        patch.themeMode = themePref;
+        patch.resolvedTheme = resolveTheme(themePref);
       }
       if ("clipboard_retention" in settings) {
         patch.clipboardRetention = settings.clipboard_retention || "1month";

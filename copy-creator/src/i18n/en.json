@@ -19,6 +19,7 @@
     "theme": "Theme",
     "light": "Light",
     "dark": "Dark",
+    "themeSystem": "System",
     "language": "Language",
     "startup": "Launch at Startup",
     "shortcut": "Shortcuts",

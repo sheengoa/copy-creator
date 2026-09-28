@@ -39,7 +39,7 @@ const PANEL_KEYS = NAV_ITEMS.map((item) => item.panelType);
 function App() {
   const { t } = useTranslation();
   const [activePanel, setActivePanel] = useState<string>("clipboard");
-  const { themeMode, toggleTheme, loadSettings } = useSettingsStore();
+  const { themeMode, resolvedTheme, toggleTheme, loadSettings } = useSettingsStore();
   const [isPinned, setIsPinned] = useState(false);
   usePersistWindowSize("main_window_width", "main_window_height");
   // 已访问面板保挂载：首次进入才挂载，之后仅显隐切换。卸载重挂会让每次
@@ -101,8 +101,8 @@ function App() {
   const dragStartWidth = useRef(0);
 
   useEffect(() => {
-    document.documentElement.setAttribute("data-theme", themeMode);
-  }, [themeMode]);
+    document.documentElement.setAttribute("data-theme", resolvedTheme);
+  }, [resolvedTheme]);
 
   const handleResizeMouseDown = useCallback((e: React.MouseEvent) => {
     e.preventDefault();
@@ -219,13 +219,19 @@ function App() {
           <button
             className="sidebar-footer-item"
             onClick={toggleTheme}
-            title={themeMode === "light" ? t("settings.dark") : t("settings.light")}
+            title={themeMode === "system"
+              ? t("settings.themeSystem")
+              : resolvedTheme === "light" ? t("settings.dark") : t("settings.light")}
           >
             <span className="sidebar-footer-icon">
-              {themeMode === "light" ? Icons.moon : Icons.sun}
+              {themeMode === "system"
+                ? Icons.themeSystem
+                : resolvedTheme === "light" ? Icons.moon : Icons.sun}
             </span>
             <span className="sidebar-footer-label">
-              {themeMode === "light" ? t("settings.dark") : t("settings.light")}
+              {themeMode === "system"
+                ? t("settings.themeSystem")
+                : resolvedTheme === "light" ? t("settings.dark") : t("settings.light")}
             </span>
           </button>
           <button

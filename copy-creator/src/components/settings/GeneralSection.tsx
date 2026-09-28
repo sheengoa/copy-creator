@@ -1,5 +1,6 @@
 import { useTranslation } from "react-i18next";
 import { useSettingsStore, type ContentSortMode } from "../../stores/settingsStore";
+import type { ThemePreference } from "../../utils/theme";
 
 interface GeneralSectionProps {
   localLang: string;
@@ -20,12 +21,20 @@ export function GeneralSection({
 }: GeneralSectionProps) {
   const { t, i18n } = useTranslation();
   const setSetting = useSettingsStore((s) => s.setSetting);
+  const themeMode = useSettingsStore((s) => s.themeMode);
+  const setThemeMode = useSettingsStore((s) => s.setThemeMode);
 
   const handleChangeLang = (lang: string) => {
     setLocalLang(lang);
     i18n.changeLanguage(lang);
     setSetting("language", lang);
   };
+
+  const themeOptions: { value: ThemePreference; label: string }[] = [
+    { value: "light", label: t("settings.light") },
+    { value: "dark", label: t("settings.dark") },
+    { value: "system", label: t("settings.themeSystem") },
+  ];
 
   return (
     <div className="settings-section">
@@ -46,6 +55,20 @@ export function GeneralSection({
             >
               EN
             </button>
+          </div>
+        </div>
+        <div className="settings-row">
+          <div className="settings-row-label">{t("settings.theme")}</div>
+          <div className="settings-lang-toggle">
+            {themeOptions.map((option) => (
+              <button
+                key={option.value}
+                className={`lang-toggle-btn${themeMode === option.value ? " active" : ""}`}
+                onClick={() => void setThemeMode(option.value)}
+              >
+                {option.label}
+              </button>
+            ))}
           </div>
         </div>
         <div className="settings-row">
