@@ -10,9 +10,9 @@
 // （A2 拆分：本模块自 shortcut.rs 机械搬迁，cfg(windows)。）
 
 use crate::shortcut::{show_clipboard_create, show_radial_menu, toggle_window};
-use std::sync::atomic::{AtomicI32, Ordering};
+use std::sync::atomic::{AtomicI32, AtomicU32, Ordering};
 use std::sync::mpsc;
-use std::sync::{Mutex, OnceLock};
+use std::sync::{Mutex, MutexGuard, OnceLock, PoisonError};
 
 type Handle = *mut core::ffi::c_void;
 
@@ -97,11 +97,13 @@ enum Action {
 static COMBOS: Mutex<Vec<(u32, Action)>> = Mutex::new(Vec::new());
 
 pub fn has_combos() -> bool {
-    !COMBOS.lock().unwrap().is_empty()
+    !lock_combos().is_empty()
 }
 // 当前被吞掉键的虚拟键码:键按下时吞掉,对应的抬起事件也要吞掉,
 // 避免裸键抬起泄漏给前台应用。
-static SWALLOWING_VK: Mutex<u32> = Mutex::new(0);
+// 原子量而非锁:钩子回调在 FFI 边界内执行,锁中毒时 panic 穿越
+// extern "system" 属 abort 级故障,单键值判定用不到锁的互斥语义。
+static SWALLOWING_VK: AtomicU32 = AtomicU32::new(0);
 // 钩子自行统计的按下中 Win 键数量(LWIN/RWIN 各计一):用于清理
 // 抬起事件的计数偏差,不依赖 GetAsyncKeyState 的更新时序。
 // 注意:Win 抬起事件必须放行。Win 按下已透传给系统,若吞掉抬起,
@@ -114,6 +116,12 @@ static APP: OnceLock<tauri::AppHandle> = OnceLock::new();
 // 会拖慢回调,超过 LowLevelHooksTimeout 后该次按键会被系统跳过,
 // 直接漏给系统热键(表现为原生 Win+V 面板弹出)。
 static ACTION_TX: OnceLock<mpsc::SyncSender<Action>> = OnceLock::new();
+
+/// 中毒恢复地拿拦截表锁。表内容是整体替换的 Vec,无跨字段不变量,
+/// 即使写入方 panic 过,继续使用原数据也比让钩子回调 panic 安全。
+fn lock_combos() -> MutexGuard<'static, Vec<(u32, Action)>> {
+    COMBOS.lock().unwrap_or_else(PoisonError::into_inner)
+}
 
 /// 解析快捷键字符串;仅当组合含 Win 修饰键且不含其他修饰键时返回主键虚拟键码。
 pub fn parse_win_combo_vk(shortcut: &str) -> Option<u32> {
@@ -184,7 +192,7 @@ pub fn refresh_combos(
     app: &tauri::AppHandle,
 ) {
     use tauri_plugin_global_shortcut::GlobalShortcutExt;
-    let mut combos = COMBOS.lock().unwrap();
+    let mut combos = lock_combos();
     combos.clear();
     for (shortcut, action) in [
         (main, Action::ToggleMain),
@@ -306,9 +314,7 @@ pub fn install(app: tauri::AppHandle) {
 }
 
 fn lookup(vk: u32) -> Option<Action> {
-    COMBOS
-        .lock()
-        .unwrap()
+    lock_combos()
         .iter()
         .find(|(v, _)| *v == vk)
         .map(|(_, a)| *a)
@@ -364,53 +370,78 @@ unsafe fn install_hook(hmod: Handle) -> Handle {
 
 unsafe extern "system" fn hook_proc(n_code: i32, w_param: usize, l_param: isize) -> isize {
     if n_code == HC_ACTION {
-        let kb = &*(l_param as *const KbdLlHookStruct);
-        // 注入事件(本应用自己的粘贴/焦点注入、AHK 等)一律放行:
-        // 钩子只拦物理键盘,否则应用内部的合成按键会被自己吞掉,
-        // 按住 Win 期间触发粘贴注入时还会误触发快捷键。
-        if kb.flags & LLKHF_INJECTED != 0 {
-            return CallNextHookEx(core::ptr::null_mut(), n_code, w_param, l_param);
-        }
-        let is_down = w_param == WM_KEYDOWN || w_param == WM_SYSKEYDOWN;
-        let is_up = w_param == WM_KEYUP || w_param == WM_SYSKEYUP;
-        let is_win_key = kb.vk_code == VK_LWIN as u32 || kb.vk_code == VK_RWIN as u32;
-        let mut swallowing = SWALLOWING_VK.lock().unwrap();
-
-        if is_win_key {
-            if is_down {
-                WIN_KEYS_DOWN.fetch_add(1, Ordering::SeqCst);
-            } else if is_up {
-                // Win 抬起必须放行(见 WIN_KEYS_DOWN 处的说明):
-                // 系统侧的 Win 状态靠这条抬起事件复位。
-                let prev = WIN_KEYS_DOWN.fetch_sub(1, Ordering::SeqCst);
-                if prev <= 1 {
-                    WIN_KEYS_DOWN.store(0, Ordering::SeqCst);
-                }
-                log::info!("[win_hook][dbg] pass win-up prev={prev}");
-            }
-        } else if is_down && win_held() && no_other_mods() {
-            if let Some(action) = lookup(kb.vk_code) {
-                if *swallowing == kb.vk_code {
-                    // 按住不放产生的自动重复:吞掉但不重复触发动作。
-                    log::info!("[win_hook][dbg] autorepeat swallowed");
-                    return 1;
-                }
-                *swallowing = kb.vk_code;
-                drop(swallowing);
-                if let Some(tx) = ACTION_TX.get() {
-                    match tx.try_send(action) {
-                        Ok(()) => log::info!("[win_hook][dbg] queued {action:?}"),
-                        Err(e) => log::error!("[win_hook][dbg] queue FAILED: {e}"),
-                    }
-                } else {
-                    log::error!("[win_hook][dbg] ACTION_TX missing");
-                }
-                return 1; // 吞掉按键,系统组件收不到
-            }
-        } else if is_up && *swallowing == kb.vk_code {
-            *swallowing = 0;
-            return 1;
+        // 任何 panic 都不允许穿越 extern "system" 边界(会整进程 abort,
+        // 表现为全局键盘输入级故障)。正常路径 catch_unwind 零开销;
+        // panic 时放行该次按键,宁可漏一个快捷键也不卡全局输入。
+        let swallow = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            handle_key_event(w_param, l_param)
+        }))
+        .unwrap_or_else(|panic| {
+            let msg = panic
+                .downcast_ref::<&str>()
+                .map(|s| s.to_string())
+                .or_else(|| panic.downcast_ref::<String>().cloned())
+                .unwrap_or_else(|| "unknown panic".to_string());
+            log::error!("[win_hook] hook_proc panicked, passing through: {msg}");
+            false
+        });
+        if swallow {
+            return 1; // 吞掉按键,系统组件收不到
         }
     }
     CallNextHookEx(core::ptr::null_mut(), n_code, w_param, l_param)
+}
+
+/// 处理单次按键事件,返回 true 表示吞掉该事件。
+///
+/// # Safety
+/// `l_param` 必须指向系统提供的合法 `KBDLLHOOKSTRUCT`。
+unsafe fn handle_key_event(w_param: usize, l_param: isize) -> bool {
+    let kb = &*(l_param as *const KbdLlHookStruct);
+    // 注入事件(本应用自己的粘贴/焦点注入、AHK 等)一律放行:
+    // 钩子只拦物理键盘,否则应用内部的合成按键会被自己吞掉,
+    // 按住 Win 期间触发粘贴注入时还会误触发快捷键。
+    if kb.flags & LLKHF_INJECTED != 0 {
+        return false;
+    }
+    let is_down = w_param == WM_KEYDOWN || w_param == WM_SYSKEYDOWN;
+    let is_up = w_param == WM_KEYUP || w_param == WM_SYSKEYUP;
+    let is_win_key = kb.vk_code == VK_LWIN as u32 || kb.vk_code == VK_RWIN as u32;
+    let swallowing = SWALLOWING_VK.load(Ordering::SeqCst);
+
+    if is_win_key {
+        if is_down {
+            WIN_KEYS_DOWN.fetch_add(1, Ordering::SeqCst);
+        } else if is_up {
+            // Win 抬起必须放行(见 WIN_KEYS_DOWN 处的说明):
+            // 系统侧的 Win 状态靠这条抬起事件复位。
+            let prev = WIN_KEYS_DOWN.fetch_sub(1, Ordering::SeqCst);
+            if prev <= 1 {
+                WIN_KEYS_DOWN.store(0, Ordering::SeqCst);
+            }
+            log::info!("[win_hook][dbg] pass win-up prev={prev}");
+        }
+    } else if is_down && win_held() && no_other_mods() {
+        if let Some(action) = lookup(kb.vk_code) {
+            if swallowing == kb.vk_code {
+                // 按住不放产生的自动重复:吞掉但不重复触发动作。
+                log::info!("[win_hook][dbg] autorepeat swallowed");
+                return true;
+            }
+            SWALLOWING_VK.store(kb.vk_code, Ordering::SeqCst);
+            if let Some(tx) = ACTION_TX.get() {
+                match tx.try_send(action) {
+                    Ok(()) => log::info!("[win_hook][dbg] queued {action:?}"),
+                    Err(e) => log::error!("[win_hook][dbg] queue FAILED: {e}"),
+                }
+            } else {
+                log::error!("[win_hook][dbg] ACTION_TX missing");
+            }
+            return true;
+        }
+    } else if is_up && swallowing == kb.vk_code {
+        SWALLOWING_VK.store(0, Ordering::SeqCst);
+        return true;
+    }
+    false
 }
