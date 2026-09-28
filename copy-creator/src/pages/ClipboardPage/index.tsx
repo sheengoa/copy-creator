@@ -1,4 +1,4 @@
-import { forwardRef, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { invoke } from "@tauri-apps/api/core";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
@@ -10,7 +10,6 @@ import { ConfirmDialog } from "../../components/ConfirmDialog";
 import SearchInput from "../../components/SearchInput";
 import { ClipboardCard } from "./ClipboardCard";
 import { EditRecordDialog } from "./EditRecordDialog";
-import { Virtuoso } from "react-virtuoso";
 import { TYPE_META } from "./utils";
 import BatchSelectionBar from "../../components/BatchSelectionBar";
 import { BackToTopButton } from "../../components/BackToTop";
@@ -218,33 +217,6 @@ export default function ClipboardPage() {
   const backToTop = useBackToTop({ enabled: !isSelecting });
   const listRef = useRef<HTMLDivElement>(null);
   const arrowNav = useArrowKeyNav({ containerRef: listRef, itemSelector: ".clipboard-card" });
-  // 虚拟滚动以既有滚动容器为滚动源（customScrollParent）：容器 CSS/滚动条
-  // 与键盘导航、回到顶部全部保持原状；DOM 就绪后再挂 Virtuoso。
-  const [listElement, setListElement] = useState<HTMLDivElement | null>(null);
-  // 「显示更多」作为虚拟列表 Footer 渲染：恒在最后一条内容之后，杜绝
-  // 初次测量窗口期与卡片重叠（曾以兄弟节点挂在 Virtuoso 之后，高度
-  // 未测量时占位偏短，按钮压在卡片上）。
-  const LoadMoreFooter = useMemo(
-    () =>
-      forwardRef<HTMLDivElement, { context?: unknown }>(function LoadMoreFooter(_props, ref) {
-        if (!hasMore || filtered.length === 0) return null;
-        return (
-          <div ref={ref} style={{ display: "flex", justifyContent: "center", padding: "2px 0 8px" }}>
-            <button
-              className="clipboard-load-more"
-              type="button"
-              onClick={() => loadRecords(true)}
-            >
-              {t("clipboard.loadMore")}
-            </button>
-          </div>
-        );
-      }),
-    [hasMore, filtered.length, loadRecords, t],
-  );
-  // 不用 firstItemIndex 前插锚定：该协议在 customScrollParent 模式下
-  // 位移补偿不准，偏移累积会在首屏留下大段空白（实测回归）。新复制
-  // 前插的表现退回虚拟化前语义——内容下移一卡，与历史版本一致。
   const selectAllRequestRef = useRef(0);
 
   const startClipboardSelection = useCallback(() => {
@@ -489,42 +461,38 @@ export default function ClipboardPage() {
           className="clipboard-list"
           ref={(el) => {
             listRef.current = el;
-            setListElement(el);
             backToTop.containerRef(el);
           }}
           onKeyDown={arrowNav}
         >
-          {listElement && (
-            <Virtuoso
-              customScrollParent={listElement}
-              data={views}
-              computeItemKey={(_, view) => view.id}
-              // 大预载边：条目在远离视口处挂载/卸载，入场动画只离屏重放；
-              // 视口内条目稳定挂载不闪烁。
-              increaseViewportBy={{ top: 600, bottom: 1200 }}
-              components={{ Footer: LoadMoreFooter }}
-              itemContent={(index, view) => (
-                <div className="clipboard-virtual-item">
-                  <ClipboardCard
-                    view={view}
-                    index={index}
-                    getTypeLabel={getTypeLabel}
-                    pasteLeftClick={pasteLeftClick}
-                    search={search}
-                    onPasteNormal={handlePaste}
-                    onPasteTerminal={handlePasteTerminal}
-                    onDelete={handleDelete}
-                    onSetPinned={handleSetPinned}
-                    onEditRecord={handleEditRecord}
-                    getRecordContent={getRecordContent}
-                    onToggleUserApiKey={handleToggleUserApiKey}
-                    selectionMode={isSelecting}
-                    selected={isSelected(view.id)}
-                    onToggleSelected={toggleSelected}
-                  />
-                </div>
-              )}
+          {views.map((view, i) => (
+            <ClipboardCard
+              key={view.id}
+              view={view}
+              index={i}
+              getTypeLabel={getTypeLabel}
+              pasteLeftClick={pasteLeftClick}
+              search={search}
+              onPasteNormal={handlePaste}
+              onPasteTerminal={handlePasteTerminal}
+              onDelete={handleDelete}
+              onSetPinned={handleSetPinned}
+              onEditRecord={handleEditRecord}
+              getRecordContent={getRecordContent}
+              onToggleUserApiKey={handleToggleUserApiKey}
+              selectionMode={isSelecting}
+              selected={isSelected(view.id)}
+              onToggleSelected={toggleSelected}
             />
+          ))}
+          {hasMore && filtered.length > 0 && (
+            <button
+              className="clipboard-load-more"
+              type="button"
+              onClick={() => loadRecords(true)}
+            >
+              {t("clipboard.loadMore")}
+            </button>
           )}
         </div>
       )}
