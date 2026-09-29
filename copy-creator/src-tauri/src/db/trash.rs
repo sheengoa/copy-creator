@@ -379,7 +379,7 @@ pub fn trash_items_count(app: AppHandle) -> Result<u64, String> {
 ///   （记录跟随文件，不移动用户整理好的目录结构）；
 /// - MetadataOnly：库内也找不到文件（或同名候选多于一个），仅恢复记录
 ///   元数据——文件在入回收站之前就已丢失，恢复无法凭空还原。
-#[derive(Clone, Copy, serde::Serialize)]
+#[derive(Clone, Copy, Debug, serde::Serialize)]
 #[serde(rename_all = "snake_case")]
 pub(crate) enum RestoreOutcome {
     Restored,
@@ -432,7 +432,19 @@ pub(crate) fn restore_trash_item_internal<R: Runtime>(
     let roots = resource_library_roots(app);
     let state = app.state::<DbState>();
     let conn = state.conn.lock().map_err(|e| e.to_string())?;
+    let outcome = restore_trash_item_on_conn(&conn, &library_root, &roots, id)?;
+    drop(conn);
+    let _ = app.emit("resource-groups-changed", ());
+    Ok(outcome)
+}
 
+/// 恢复核心：调用方须已持有数据库锁（不可重入），本函数自身不再加锁。
+pub(crate) fn restore_trash_item_on_conn(
+    conn: &rusqlite::Connection,
+    library_root: &Path,
+    roots: &[PathBuf],
+    id: &str,
+) -> Result<RestoreOutcome, String> {
     let (record_id, record_json, original_path, trash_dir): (String, String, String, String) = conn
         .query_row(
             "SELECT record_id, record_json, original_path, trash_dir FROM trash_items WHERE id = ?1",
@@ -495,12 +507,10 @@ pub(crate) fn restore_trash_item_internal<R: Runtime>(
         }
     }
 
-    reinsert_record_from_json(&conn, &updated_json)?;
+    reinsert_record_from_json(conn, &updated_json)?;
     conn.execute("DELETE FROM trash_items WHERE id = ?1", params![id])
         .map_err(|e| e.to_string())?;
     let _ = std::fs::remove_dir_all(&trash_abs);
-    drop(conn);
-    let _ = app.emit("resource-groups-changed", ());
     Ok(outcome)
 }
 

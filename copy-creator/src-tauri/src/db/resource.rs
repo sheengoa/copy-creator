@@ -136,6 +136,7 @@ pub(crate) fn normalize_file_backed_text_records(conn: &Connection) -> usize {
 /// stat——那是大库（数万文件）每次切换/搜索都卡顿的根源。返回补录条数。
 pub fn sync_resource_library<R: Runtime>(app: &AppHandle<R>) -> usize {
     let root = get_resource_library_dir(app);
+    let roots = resource_library_roots(app);
     let entries = scan_resource_files(&root);
     // 扫描结果为空 = 库目录缺失/不可读，或整库确已被外部清空。前者是
     // 故障状态：此时清退会把全部记录一次性删光（历史事故反复发生），
@@ -223,6 +224,12 @@ pub fn sync_resource_library<R: Runtime>(app: &AppHandle<R>) -> usize {
         if known.contains(&key) {
             continue;
         }
+        // 同名文件重新出现：复活回收站原记录（清退转存兜底的另一半），
+        // 避免把重新收集的内容建成指向新位置的孤儿重复行。
+        if restore_trash_record_matching_name(&conn, &root, &roots, &entry.path) {
+            known.insert(key);
+            continue;
+        }
         let path_text = entry.path.to_string_lossy().to_string();
         let inserted = conn.execute(
             "INSERT OR IGNORE INTO clipboard_records
@@ -257,11 +264,42 @@ pub fn sync_resource_library<R: Runtime>(app: &AppHandle<R>) -> usize {
 /// 目录型路径连带整棵子树——外部删除/移出目录时事件只报目录本身，
 /// 旧实现精确匹配会让目录下全部记录变成孤儿（分组 0 条、详情 404）。
 /// 路径比较经组件级前缀匹配，分隔符与尾部形态差异不影响命中。
+/// 文件重新入库时优先"复活"回收站里文件已丢失的同名记录：按
+/// original_path 的文件名匹配，把该记录从回收站恢复并改指到新文件
+/// ——重新收集的内容自动回到原记录（分组/备注保留），不产生孤儿
+/// 重复行。返回 true 表示已复活一条，调用方跳过新建。
+fn restore_trash_record_matching_name(
+    conn: &rusqlite::Connection,
+    library_root: &Path,
+    roots: &[PathBuf],
+    new_path: &Path,
+) -> bool {
+    let Some(name) = new_path.file_name().and_then(OsStr::to_str) else {
+        return false;
+    };
+    if name.is_empty() {
+        return false;
+    }
+    let Ok(mut stmt) = conn.prepare(
+        "SELECT id FROM trash_items
+         WHERE substr(original_path, -length(?1)) = ?1
+         LIMIT 1",
+    ) else {
+        return false;
+    };
+    let Ok(trash_id) = stmt.query_row(params![name], |row| row.get::<_, String>(0)) else {
+        return false;
+    };
+    drop(stmt);
+    restore_trash_item_on_conn(conn, library_root, roots, &trash_id).is_ok()
+}
+
 pub fn forget_resource_records<R: Runtime>(app: &AppHandle<R>, paths: &[PathBuf]) {
     if paths.is_empty() {
         return;
     }
     let root = get_resource_library_dir(app);
+    let roots = resource_library_roots(app);
     let state = app.state::<DbState>();
     let Ok(conn) = state.conn.lock() else {
         return;
@@ -312,6 +350,7 @@ pub fn discover_external_resource_files<R: Runtime>(
         return;
     }
     let root = get_resource_library_dir(app);
+    let roots = resource_library_roots(app);
     let now = chrono::Utc::now().to_rfc3339();
     let now_ms = chrono::Utc::now().timestamp_millis();
     let state = app.state::<DbState>();
@@ -363,11 +402,11 @@ pub fn discover_external_resource_files<R: Runtime>(
                 continue;
             }
             for file in collect_resource_files_under(path) {
-                insert_external_resource_file(&conn, &mut by_path, &root, &file, &now, now_ms);
+                insert_external_resource_file(&conn, &mut by_path, &root, &roots, &file, &now, now_ms);
             }
             continue;
         }
-        insert_external_resource_file(&conn, &mut by_path, &root, path, &now, now_ms);
+        insert_external_resource_file(&conn, &mut by_path, &root, &roots, path, &now, now_ms);
     }
 }
 
@@ -376,6 +415,7 @@ fn insert_external_resource_file(
     conn: &Connection,
     by_path: &mut HashMap<PathBuf, String>,
     root: &Path,
+    roots: &[PathBuf],
     path: &Path,
     now: &str,
     now_ms: i64,
@@ -391,6 +431,10 @@ fn insert_external_resource_file(
     }
     let path_text = path.to_string_lossy().to_string();
     if by_path.contains_key(&resource_path_key(path)) {
+        return;
+    }
+    if restore_trash_record_matching_name(conn, root, roots, path) {
+        by_path.insert(resource_path_key(path), resource_file_id(path));
         return;
     }
     let id = resource_file_id(path);

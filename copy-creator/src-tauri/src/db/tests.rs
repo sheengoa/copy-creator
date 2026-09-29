@@ -3646,8 +3646,9 @@ mod pinned_record_tests {
 mod trash_tests {
     use crate::db::{
         delete_clipboard_records_internal, ensure_schema, list_trash_items_internal,
-        get_clipboard_records_inner, prune_old_records, purge_trash_internal,
-        restore_trash_item_internal, sync_resource_library, DbState, RestoreOutcome,
+        discover_external_resource_files, get_clipboard_records_inner, prune_old_records,
+        purge_trash_internal, restore_trash_item_internal, sync_resource_library, DbState,
+        RestoreOutcome,
     };
     use rusqlite::params;
     use std::path::{Path, PathBuf};
@@ -3998,6 +3999,59 @@ mod trash_tests {
         )
         .unwrap();
         assert_eq!(records.len(), 3);
+    }
+
+    // 兜底闭环 3：同名文件重新入库自动"复活"回收站里的原记录——重新
+    // 收集的内容回到原记录（分组/备注保留），不产生孤儿重复行。
+    #[test]
+    fn discovery_revives_trash_record_for_readded_same_named_file() {
+        let (app, library) = trash_test_app();
+        let handle = app.handle().clone();
+        let group_dir = library.join("组");
+        std::fs::create_dir_all(&group_dir).unwrap();
+        let alive = group_dir.join("存活.png");
+        std::fs::write(&alive, b"1").unwrap();
+        insert_external_record(&app, "r1", &alive, &[]);
+        let file = group_dir.join("丢失.png");
+        std::fs::write(&file, b"png").unwrap();
+        insert_external_record(&app, "r2", &file, &[]);
+        std::fs::remove_file(&file).unwrap();
+        // 库内仍有存活文件（扫描非空），对账才会执行清退。
+        sync_resource_library(&handle);
+        assert_eq!(record_count(&app, "r2"), 0);
+        assert_eq!(record_count(&app, "r1"), 1);
+
+        // 同名文件在别的分组重新入库 → 原记录自动复活并指向新位置。
+        let readded = library.join("新位置").join("丢失.png");
+        std::fs::create_dir_all(readded.parent().unwrap()).unwrap();
+        std::fs::write(&readded, b"png2").unwrap();
+        discover_external_resource_files(&handle, &[readded.clone()]);
+
+        assert_eq!(record_count(&app, "r2"), 1);
+        // 锁不可重入：每次查询独立持锁，避免与 list_trash_items_internal 互等。
+        let stored: String = {
+            let state = app.state::<DbState>();
+            let conn = state.conn.lock().unwrap();
+            conn.query_row(
+                "SELECT resource_path FROM clipboard_records WHERE id = 'r2'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap()
+        };
+        assert_eq!(Path::new(&stored), readded.as_path());
+        assert!(list_trash_items_internal(&handle).unwrap().is_empty());
+        let dupes: i64 = {
+            let state = app.state::<DbState>();
+            let conn = state.conn.lock().unwrap();
+            conn.query_row(
+                "SELECT COUNT(*) FROM clipboard_records WHERE resource_path = ?1",
+                params![readded.to_string_lossy().to_string()],
+                |row| row.get(0),
+            )
+            .unwrap()
+        };
+        assert_eq!(dupes, 1);
     }
 
     // 彻底删除：回收目录与记录行清除，record_json 里的附件一并清理。
