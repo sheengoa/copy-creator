@@ -542,6 +542,8 @@
   margin: 0 0 8px;
   color: var(--text-secondary);
   font-size: var(--text-xs);
+  /* 分组路径是无空格长串，必须在固定宽弹窗内强制折行，否则横向溢出。 */
+  overflow-wrap: anywhere;
 }
 
 
@@ -1571,6 +1573,8 @@
 .resource-move-source-names span {
   color: var(--text-secondary);
   font-size: var(--text-xs);
+  /* 路径无空格长串，防横向溢出。 */
+  overflow-wrap: anywhere;
 }
 
 .resource-move-tree {
@@ -2124,7 +2128,7 @@
   overflow: hidden;
   text-overflow: ellipsis;
 }
-.trash-row-meta { color: var(--text-secondary); font-size: var(--text-xs); }
+.trash-row-meta { color: var(--text-secondary); font-size: var(--text-xs); /* 原分组路径无空格长串，防横向溢出。 */ overflow-wrap: anywhere; }
 
 .trash-row-btn {
   flex-shrink: 0;
