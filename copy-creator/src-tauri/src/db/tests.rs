@@ -3645,8 +3645,8 @@ mod pinned_record_tests {
 mod trash_tests {
     use crate::db::{
         delete_clipboard_records_internal, ensure_schema, list_trash_items_internal,
-        prune_old_records, purge_trash_internal, restore_trash_item_internal, DbState,
-        RestoreOutcome,
+        prune_old_records, purge_trash_internal, restore_trash_item_internal,
+        sync_resource_library, DbState, RestoreOutcome,
     };
     use rusqlite::params;
     use std::path::{Path, PathBuf};
@@ -3876,6 +3876,57 @@ mod trash_tests {
         assert!(matches!(outcome, RestoreOutcome::Restored));
         assert_eq!(std::fs::read(&file).unwrap(), b"new");
         assert_eq!(record_count(&app, "r1"), 1);
+    }
+
+
+    // 对账安全边界 1：扫描结果为空（库目录缺失/不可读）时禁止清退——
+    // 否则挂载异常/目录被外部整移会把整个库的记录一次性清光（真实事故）。
+    #[test]
+    fn sync_skips_purge_when_library_scan_is_empty() {
+        let (app, library) = trash_test_app();
+        let handle = app.handle().clone();
+        let group_dir = library.join("组");
+        std::fs::create_dir_all(&group_dir).unwrap();
+        let file = group_dir.join("a.png");
+        std::fs::write(&file, b"png").unwrap();
+        insert_external_record(&app, "r1", &file, &[]);
+
+        // 整个库目录消失（挂载/误删场景）：对账必须原样保留记录。
+        std::fs::remove_dir_all(&library).unwrap();
+        sync_resource_library(&handle);
+
+        assert_eq!(record_count(&app, "r1"), 1);
+    }
+
+    // 对账安全边界 2：单次拟清退过半且达阈值时触发安全阀中止，防止
+    // 扫描口径异常导致整库清退。
+    #[test]
+    fn sync_aborts_mass_purge_via_safety_valve() {
+        let (app, library) = trash_test_app();
+        let handle = app.handle().clone();
+        let group_dir = library.join("组");
+        std::fs::create_dir_all(&group_dir).unwrap();
+        for index in 0..12 {
+            let file = group_dir.join(format!("f{index}.png"));
+            std::fs::write(&file, b"png").unwrap();
+            insert_external_record(&app, &format!("r{index}"), &file, &[]);
+        }
+        // 12 个文件删掉 11 个：拟清退 11/12，触发安全阀，全部保留。
+        for index in 0..11 {
+            std::fs::remove_file(group_dir.join(format!("f{index}.png"))).unwrap();
+        }
+        sync_resource_library(&handle);
+
+        let state = app.state::<DbState>();
+        let conn = state.conn.lock().unwrap();
+        let total: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM clipboard_records WHERE storage_mode = 'resource'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(total, 12);
     }
 
     // 彻底删除：回收目录与记录行清除，record_json 里的附件一并清理。

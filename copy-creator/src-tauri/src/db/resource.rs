@@ -137,6 +137,13 @@ pub(crate) fn normalize_file_backed_text_records(conn: &Connection) -> usize {
 pub fn sync_resource_library<R: Runtime>(app: &AppHandle<R>) -> usize {
     let root = get_resource_library_dir(app);
     let entries = scan_resource_files(&root);
+    // 扫描结果为空 = 库目录缺失/不可读，或整库确已被外部清空。前者是
+    // 故障状态：此时清退会把全部记录一次性删光（历史事故反复发生），
+    // 宁可把死记录留到下次正常扫描再处理，也绝不对空扫描做清退。
+    if entries.is_empty() {
+        log::warn!("资源库扫描结果为空，跳过本次对账清退与补录");
+        return 0;
+    }
     let state = app.state::<DbState>();
     let Ok(conn) = state.conn.lock() else {
         return 0;
@@ -166,6 +173,25 @@ pub fn sync_resource_library<R: Runtime>(app: &AppHandle<R>) -> usize {
                 removable.push(row);
             }
         }
+    }
+    // 批量清退安全阀：单次拟清退达到 10 条且占资源记录总数一半以上时，
+    // 按异常处理（外接目录卸载、扫描口径变化、目录被外部整移等），中止
+    // 本次清退并告警。正常使用不可能一轮删掉半个库；真要批量清理走应用
+    // 内删除/彻底删除，那里有确认弹窗与回收站兜底。
+    let total_resource_records: i64 = conn
+        .query_row(
+            "SELECT COUNT(*) FROM clipboard_records WHERE storage_mode = 'resource'",
+            [],
+            |row| row.get(0),
+        )
+        .unwrap_or(0);
+    if removable.len() >= 10 && (removable.len() as i64) * 2 >= total_resource_records {
+        log::error!(
+            "资源库对账触发批量清退安全阀：本次拟清退 {}/{} 条已中止，请检查库目录与挂载状态",
+            removable.len(),
+            total_resource_records
+        );
+        return removable.len();
     }
     for (id, _) in &removable {
         let _ = conn.execute("DELETE FROM api_key_labels WHERE record_id = ?1", params![id]);
