@@ -2111,11 +2111,13 @@
 .trash-danger-btn:hover:not(:disabled) { background: rgba(220, 38, 38, 0.1); }
 .trash-danger-btn:disabled { opacity: 0.4; cursor: default; }
 
+/* 头部底色即 --card-inner-bg，悬浮态必须换用 chip-hover-bg + 描边才有
+   "浮起卡片"反馈（同头部返回键的既有处理），亮暗主题各自取值。 */
 .trash-select-btn {
   display: inline-flex;
   align-items: center;
   gap: 4px;
-  border: none;
+  border: 1px solid transparent;
   background: transparent;
   color: var(--text-primary);
   font-size: var(--text-xs);
@@ -2123,7 +2125,17 @@
   padding: 4px 8px;
   border-radius: 6px;
 }
-.trash-select-btn:hover { background: var(--card-inner-bg); }
+.trash-select-btn:hover {
+  border-color: var(--separator);
+  background: var(--chip-hover-bg);
+}
+.trash-select-btn:focus-visible {
+  outline: 2px solid color-mix(in srgb, var(--text-primary) 30%, transparent);
+  outline-offset: 2px;
+}
+.trash-select-btn:active {
+  background: color-mix(in srgb, var(--text-primary) 12%, transparent);
+}
 .trash-select-btn svg { width: 12px; height: 12px; }
 
 /* 批量选择模式：整行可点切换选中，勾选框复用全局 selection-checkbox 视觉。 */
@@ -2196,10 +2208,4 @@
   color: var(--text-secondary);
   font-size: var(--text-xs);
   background: var(--card-inner-bg);
-}
-
-/* 回收站视图下工具栏仅剩切换按钮：靠右保持原位置（常规视图有 flex:1
-   搜索占位，该 auto 边距不生效，两种视图几何一致）。 */
-.resource-library-toolbar .resource-trash-button {
-  margin-left: auto;
 }
