@@ -3642,11 +3642,12 @@ mod pinned_record_tests {
 }
 
 #[cfg(test)]
+
 mod trash_tests {
     use crate::db::{
         delete_clipboard_records_internal, ensure_schema, list_trash_items_internal,
-        prune_old_records, purge_trash_internal, restore_trash_item_internal,
-        sync_resource_library, DbState, RestoreOutcome,
+        get_clipboard_records_inner, prune_old_records, purge_trash_internal,
+        restore_trash_item_internal, sync_resource_library, DbState, RestoreOutcome,
     };
     use rusqlite::params;
     use std::path::{Path, PathBuf};
@@ -3961,6 +3962,42 @@ mod trash_tests {
         assert!(matches!(outcome, RestoreOutcome::MetadataOnly));
         assert_eq!(record_count(&app, "r2"), 1);
         assert_eq!(record_count(&app, "r1"), 1);
+    }
+
+    // 回归（真实事故 2026-09-29）：删除 → 恢复后列表整体加载失败。
+    // 根因：回插把 NULL 数值列写成空文本，列表按数值读取整批报错。
+    // 回归契约：删除 → 全部恢复 → 资源列表必须成功返回全部记录。
+    #[test]
+    fn restore_then_resource_list_succeeds() {
+        let (app, library) = trash_test_app();
+        let handle = app.handle().clone();
+        let group_dir = library.join("组");
+        std::fs::create_dir_all(&group_dir).unwrap();
+        for index in 0..3 {
+            let file = group_dir.join(format!("f{index}.png"));
+            std::fs::write(&file, b"png").unwrap();
+            insert_external_record(&app, &format!("r{index}"), &file, &[]);
+        }
+        let ids: Vec<String> = (0..3).map(|index| format!("r{index}")).collect();
+        delete_clipboard_records_internal(&handle, &ids).unwrap();
+
+        let items = list_trash_items_internal(&handle).unwrap();
+        assert_eq!(items.len(), 3);
+        for item in &items {
+            restore_trash_item_internal(&handle, item["id"].as_str().unwrap()).unwrap();
+        }
+
+        let records = get_clipboard_records_inner(
+            &handle,
+            None,
+            Some(200),
+            Some(0),
+            Some("resources".to_string()),
+            None,
+            None,
+        )
+        .unwrap();
+        assert_eq!(records.len(), 3);
     }
 
     // 彻底删除：回收目录与记录行清除，record_json 里的附件一并清理。
@@ -4834,7 +4871,7 @@ mod clipboard_prune_count_cap_tests {
 
 #[cfg(test)]
 mod clipboard_fts_search_tests {
-    use crate::db::{get_clipboard_records_inner, DbState};
+    use crate::db::{get_clipboard_records_inner, get_resource_groups_inner, DbState};
     use rusqlite::Connection;
     use std::sync::Mutex;
     use tauri::Manager;

@@ -703,12 +703,20 @@ pub(crate) fn get_resource_records_inner<R: Runtime>(
         let conn = state.conn.lock().map_err(|e| e.to_string())?;
         let mut stmt = conn
             .prepare(
-                "SELECT id, type, content, source_app, created_at, user_api_key,
-                        group_name, attachments, storage_mode, resource_path,
-                        COALESCE(sort_order, 0), COALESCE(resource_note, ''),
-                        COALESCE(use_count, 0), COALESCE(touched_ms, 0),
-                        COALESCE(last_used_at, ''), COALESCE(resource_external, 0),
-                        COALESCE(pinned, 0)
+                // 所有列一律 COALESCE：个别脏行（历史数据/旧版回插）不得
+                // 让整个列表命令失败。
+                "SELECT id, COALESCE(type, 'file'), COALESCE(content, ''),
+                        COALESCE(source_app, ''), COALESCE(created_at, ''),
+                        CAST(COALESCE(user_api_key, 0) AS INTEGER), COALESCE(group_name, ''),
+                        COALESCE(attachments, '[]'), COALESCE(storage_mode, 'resource'),
+                        COALESCE(resource_path, ''),
+                        CAST(COALESCE(sort_order, 0) AS REAL),
+                        COALESCE(resource_note, ''),
+                        CAST(COALESCE(use_count, 0) AS INTEGER),
+                        CAST(COALESCE(touched_ms, 0) AS INTEGER),
+                        COALESCE(last_used_at, ''),
+                        CAST(COALESCE(resource_external, 0) AS INTEGER),
+                        CAST(COALESCE(pinned, 0) AS INTEGER)
                  FROM clipboard_records
                  WHERE storage_mode = 'resource'",
             )

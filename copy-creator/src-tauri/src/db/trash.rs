@@ -266,19 +266,34 @@ pub(crate) fn reinsert_record_from_json(
     let object = parsed.as_object().ok_or("记录数据不是对象")?;
     let label = object.get("__api_key_label").cloned();
     let mut columns: Vec<String> = Vec::new();
-    let mut values: Vec<String> = Vec::new();
+    let mut values: Vec<rusqlite::types::Value> = Vec::new();
     for (key, value) in object {
         if key == "__api_key_label" {
             continue;
         }
+        // NULL 列整列跳过：回插来自同表序列化，缺列即回落建表默认值。
+        // 若按文本写入空串，INTEGER/REAL 列会存成 TEXT，列表查询按数值
+        // 读取时直接类型报错，一条恢复过的脏行就能炸掉整个列表（真实
+        // 事故：「资源列表加载失败」重试无效）。
+        if value.is_null() {
+            continue;
+        }
         columns.push(key.clone());
-        // 统一以文本参数写入：SQLite 按列亲和性转换（INTEGER/REAL 列接受
-        // 数字文本），避免为每列区分绑定类型。
-        values.push(match value {
-            serde_json::Value::String(s) => s.clone(),
-            serde_json::Value::Null => String::new(),
-            other => other.to_string(),
-        });
+        let sql_value = match value {
+            serde_json::Value::String(s) => rusqlite::types::Value::Text(s.clone()),
+            serde_json::Value::Number(n) => {
+                if let Some(int) = n.as_i64() {
+                    rusqlite::types::Value::Integer(int)
+                } else {
+                    rusqlite::types::Value::Real(n.as_f64().unwrap_or_default())
+                }
+            }
+            serde_json::Value::Bool(flag) => {
+                rusqlite::types::Value::Integer(i64::from(*flag))
+            }
+            other => rusqlite::types::Value::Text(other.to_string()),
+        };
+        values.push(sql_value);
     }
     if columns.is_empty() {
         return Err("记录数据为空".to_string());
