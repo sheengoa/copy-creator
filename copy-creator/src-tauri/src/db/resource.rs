@@ -299,7 +299,6 @@ pub fn forget_resource_records<R: Runtime>(app: &AppHandle<R>, paths: &[PathBuf]
         return;
     }
     let root = get_resource_library_dir(app);
-    let roots = resource_library_roots(app);
     let state = app.state::<DbState>();
     let Ok(conn) = state.conn.lock() else {
         return;

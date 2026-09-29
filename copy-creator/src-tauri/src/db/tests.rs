@@ -5157,3 +5157,159 @@ mod schema_version_migration_tests {
     }
 
 }
+
+#[cfg(test)]
+mod restore_usability_tests {
+    use crate::db::{
+        delete_clipboard_records_internal, ensure_schema, get_clipboard_records_inner,
+        list_trash_items_internal, restore_trash_item_internal, DbState, RestoreOutcome,
+    };
+    use rusqlite::params;
+    use std::io::{Read, Write};
+    use std::path::PathBuf;
+    use std::sync::Mutex;
+    use tauri::Manager;
+
+    const PNG_BYTES: [u8; 84] = [
+        0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A, 0x00, 0x00, 0x00, 0x0D, 0x49, 0x48,
+        0x44, 0x52, 0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0x01, 0x08, 0x06, 0x00, 0x00,
+        0x00, 0x1F, 0x15, 0xC4, 0x89, 0x00, 0x00, 0x00, 0x0A, 0x49, 0x44, 0x41, 0x54, 0x78,
+        0x9C, 0x63, 0x00, 0x01, 0x00, 0x00, 0x05, 0x00, 0x01, 0x0D, 0x0A, 0x2D, 0xB4, 0x00,
+        0x00, 0x00, 0x00, 0x49, 0x45, 0x4E, 0x44, 0xAE, 0x42, 0x60, 0x82, 0x00, 0x00, 0x00,
+        0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+    ];
+
+    // 用户操作全流程（文件级 + 可用性级）：
+    // 资源库删除 → 文件进回收站；回收站恢复 → 文件原样回原位；
+    // 恢复后媒体 URL 返回 200 且字节与原文件一致（能展示、能使用）。
+    #[test]
+    fn restore_returns_file_to_usable_state() {
+        let app = tauri::test::mock_app();
+        let library = std::env::temp_dir().join(format!(
+            "copy-creator-restore-usable-{}",
+            uuid::Uuid::new_v4()
+        ));
+        let group_dir = library.join("组");
+        std::fs::create_dir_all(&group_dir).unwrap();
+        {
+            let conn = rusqlite::Connection::open_in_memory().unwrap();
+            ensure_schema(&conn).unwrap();
+            app.manage(DbState { conn: Mutex::new(conn) });
+        }
+        {
+            let state = app.state::<DbState>();
+            let conn = state.conn.lock().unwrap();
+            conn.execute(
+                "INSERT OR REPLACE INTO settings (key, value) VALUES ('resource_library_path', ?1)",
+                params![library.to_string_lossy().as_ref()],
+            )
+            .unwrap();
+        }
+        let handle = app.handle().clone();
+
+        let original = group_dir.join("证件照.png");
+        std::fs::write(&original, PNG_BYTES).unwrap();
+        {
+            let state = app.state::<DbState>();
+            let conn = state.conn.lock().unwrap();
+            conn.execute(
+                "INSERT INTO clipboard_records
+                 (id, type, content, created_at, group_name, storage_mode, resource_path, resource_external, attachments)
+                 VALUES ('r1', 'file', ?1, '2026-09-19T00:00:00Z', '组', 'resource', ?1, 1, '[]')",
+                params![original.to_string_lossy().as_ref()],
+            )
+            .unwrap();
+        }
+
+        // ① 资源库删除：文件离开原位、进入回收站目录。
+        delete_clipboard_records_internal(&handle, &["r1".to_string()]).unwrap();
+        assert!(!original.exists(), "删除后文件应离开原位");
+        let trash_file = {
+            let mut found: Option<PathBuf> = None;
+            let trash_root = library.join(".trash");
+            let mut stack = vec![trash_root];
+            while let Some(dir) = stack.pop() {
+                let Ok(entries) = std::fs::read_dir(&dir) else { continue };
+                for entry in entries.flatten() {
+                    let path = entry.path();
+                    if path.is_dir() {
+                        stack.push(path);
+                    } else if path.file_name().and_then(|n| n.to_str()) == Some("证件照.png") {
+                        found = Some(path);
+                    }
+                }
+            }
+            found.expect("删除后文件必须在回收站目录内")
+        };
+        assert_eq!(std::fs::read(&trash_file).unwrap(), PNG_BYTES);
+
+        // ② 回收站恢复：文件原样回原位。
+        let items = list_trash_items_internal(&handle).unwrap();
+        assert_eq!(items.len(), 1);
+        let outcome =
+            restore_trash_item_internal(&handle, items[0]["id"].as_str().unwrap()).unwrap();
+        assert!(matches!(outcome, RestoreOutcome::Restored));
+        assert!(original.exists(), "恢复后文件必须回到原位");
+        assert_eq!(std::fs::read(&original).unwrap(), PNG_BYTES, "恢复后字节必须与原文件一致");
+        assert!(!trash_file.exists(), "回收站副本应清位");
+
+        // ③ 恢复后列表正常返回该记录。
+        let records = get_clipboard_records_inner(
+            &handle,
+            None,
+            Some(200),
+            Some(0),
+            Some("resources".to_string()),
+            None,
+            None,
+        )
+        .unwrap();
+        assert_eq!(records.len(), 1);
+
+        // ④ 恢复后媒体 URL 可用：真实 HTTP 请求返回 200 + 原始字节
+        //    （与前端 <img> 加载同一链路：令牌/白名单/路径解析/流式响应）。
+        crate::media_server::spawn(&handle);
+        let state = handle.state::<crate::media_server::MediaServerState>();
+        let origin = state.origin.clone();
+        let token = state.token.clone();
+        drop(state);
+        let encode = |value: &str| -> String {
+            let mut out = String::new();
+            for byte in value.as_bytes() {
+                match byte {
+                    b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'_' | b'.' | b'~' | b'/' => {
+                        out.push(*byte as char)
+                    }
+                    other => out.push_str(&format!("%{other:02X}")),
+                }
+            }
+            out
+        };
+        let target = format!(
+            "/media?token={}&path={}",
+            encode(&token),
+            encode(original.to_string_lossy().as_ref())
+        );
+        let address = origin.trim_start_matches("http://");
+        let mut stream = std::net::TcpStream::connect(address).unwrap();
+        let request = format!(
+            "GET {target} HTTP/1.1\r\nHost: 127.0.0.1\r\nConnection: close\r\n\r\n"
+        );
+        stream.write_all(request.as_bytes()).unwrap();
+        let mut raw = Vec::new();
+        stream.read_to_end(&mut raw).unwrap();
+        let split = raw
+            .windows(4)
+            .position(|w| w == b"\r\n\r\n")
+            .expect("响应缺少头部结束标记");
+        let head = String::from_utf8_lossy(&raw[..split]).to_string();
+        let body = raw[split + 4..].to_vec();
+        assert!(
+            head.starts_with("HTTP/1.1 200"),
+            "恢复后媒体必须可访问，实际响应: {head}"
+        );
+        assert!(head.to_lowercase().contains("content-type: image/png"));
+        assert_eq!(body, PNG_BYTES, "恢复后媒体字节必须与原文件一致");
+        let _ = group_dir;
+    }
+}

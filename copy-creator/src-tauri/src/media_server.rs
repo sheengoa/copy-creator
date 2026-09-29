@@ -651,7 +651,7 @@ mod media_serving_tests {
     use std::sync::Mutex;
     use tauri::Manager;
 
-    fn encode_query_value(value: &str) -> String {
+    pub(crate) fn encode_query_value(value: &str) -> String {
         let mut out = String::new();
         for byte in value.as_bytes() {
             match byte {
