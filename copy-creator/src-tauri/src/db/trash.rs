@@ -187,6 +187,54 @@ fn resolve_trash_source(
     None
 }
 
+/// 对账/监听清退的兜底转存：把"文件已不在库内"的记录整行转入应用内
+/// 回收站，而不是直接删除——记录永不对账即消失，用户可在回收站查看、
+/// 恢复（三态如实提示文件缺失）或彻底删除。
+/// 注意：原文件已不在磁盘，trash_dir 仅作占位、不落盘；恢复与彻底删除
+/// 对缺失目录均按尽力而为处理，恢复时还会走同名文件自动关联兜底。
+pub(crate) fn archive_resource_record_to_trash(
+    conn: &rusqlite::Connection,
+    root: &Path,
+    record_id: &str,
+    resource_path: &str,
+) -> Result<(), String> {
+    let record_json = serialize_resource_record(conn, record_id)?;
+    let now_ms = chrono::Utc::now().timestamp_millis();
+    let trash_id = uuid::Uuid::new_v4().to_string();
+    let trash_dir = format!(
+        "{}/{}-{}",
+        TRASH_DIR_NAME,
+        now_ms,
+        uuid::Uuid::new_v4().simple()
+    );
+    let original_group = resource_group_for_path(root, resource_path).unwrap_or_default();
+    let file_name = Path::new(resource_path)
+        .file_name()
+        .map(|name| name.to_string_lossy().to_string())
+        .unwrap_or_default();
+    conn.execute(
+        "INSERT INTO trash_items (id, record_id, record_json, file_name, original_group, original_path, trash_dir, trashed_at, trashed_ms)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
+        params![
+            trash_id,
+            record_id,
+            record_json,
+            file_name,
+            original_group,
+            resource_path,
+            trash_dir,
+            chrono::Utc::now().to_rfc3339(),
+            now_ms,
+        ],
+    )
+    .map_err(|e| e.to_string())?;
+    conn.execute("DELETE FROM api_key_labels WHERE record_id = ?1", params![record_id])
+        .map_err(|e| e.to_string())?;
+    conn.execute("DELETE FROM clipboard_records WHERE id = ?1", params![record_id])
+        .map_err(|e| e.to_string())?;
+    Ok(())
+}
+
 /// 补偿：删 trash_items 行 + 从 record_json 回插记录行（文件移回由调用方完成）。
 fn compensate_trash_item<R: Runtime>(app: &AppHandle<R>, trash_id: &str) {
     let state = app.state::<DbState>();

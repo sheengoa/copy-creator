@@ -193,9 +193,12 @@ pub fn sync_resource_library<R: Runtime>(app: &AppHandle<R>) -> usize {
         );
         return removable.len();
     }
-    for (id, _) in &removable {
-        let _ = conn.execute("DELETE FROM api_key_labels WHERE record_id = ?1", params![id]);
-        let _ = conn.execute("DELETE FROM clipboard_records WHERE id = ?1", params![id]);
+    // 清退即入桶：被清退记录整行转入应用内回收站（而非直接删除），
+    // 用户可在回收站查看/恢复/彻底删除；配合三态恢复如实提示文件缺失。
+    for (id, path) in &removable {
+        if let Err(error) = archive_resource_record_to_trash(&conn, &root, id, path) {
+            log::error!("对账清退转存回收站失败（{id}）: {error}");
+        }
     }
 
     // 补录：应用未运行期间放入库的文件按扫描语义入库——created_at 取文件
@@ -258,6 +261,7 @@ pub fn forget_resource_records<R: Runtime>(app: &AppHandle<R>, paths: &[PathBuf]
     if paths.is_empty() {
         return;
     }
+    let root = get_resource_library_dir(app);
     let state = app.state::<DbState>();
     let Ok(conn) = state.conn.lock() else {
         return;
@@ -286,8 +290,12 @@ pub fn forget_resource_records<R: Runtime>(app: &AppHandle<R>, paths: &[PathBuf]
             .iter()
             .any(|missing| key == *missing || key.starts_with(missing))
         {
-            let _ = conn.execute("DELETE FROM api_key_labels WHERE record_id = ?1", params![id]);
-            let _ = conn.execute("DELETE FROM clipboard_records WHERE id = ?1", params![id]);
+            // 监听清退同样转存回收站兜底（文件管理器删除等外部操作）。
+            if let Err(error) =
+                archive_resource_record_to_trash(&conn, &root, &id, &resource_path.to_string_lossy())
+            {
+                log::error!("监听清退转存回收站失败（{id}）: {error}");
+            }
         }
     }
 }

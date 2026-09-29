@@ -3929,6 +3929,40 @@ mod trash_tests {
         assert_eq!(total, 12);
     }
 
+    // 对账兜底链路：文件丢失的记录经对账转入应用内回收站（而非硬删除），
+    // 恢复时按 metadata_only 如实回插并提示缺失。
+    #[test]
+    fn sync_moves_dead_records_to_trash_and_restore_reports_missing() {
+        let (app, library) = trash_test_app();
+        let handle = app.handle().clone();
+        let group_dir = library.join("组");
+        std::fs::create_dir_all(&group_dir).unwrap();
+        let alive = group_dir.join("存活.png");
+        std::fs::write(&alive, b"1").unwrap();
+        insert_external_record(&app, "r1", &alive, &[]);
+        let dead = group_dir.join("丢失.png");
+        std::fs::write(&dead, b"2").unwrap();
+        insert_external_record(&app, "r2", &dead, &[]);
+        std::fs::remove_file(&dead).unwrap();
+
+        sync_resource_library(&handle);
+
+        // r2 被清退但进入回收站（非硬删除）；r1 不受影响。
+        assert_eq!(record_count(&app, "r2"), 0);
+        let items = list_trash_items_internal(&handle).unwrap();
+        assert_eq!(items.len(), 1);
+        assert_eq!(
+            items[0]["original_path"],
+            serde_json::json!(dead.to_string_lossy().to_string())
+        );
+        let trash_id = items[0]["id"].as_str().unwrap().to_string();
+
+        let outcome = restore_trash_item_internal(&handle, &trash_id).unwrap();
+        assert!(matches!(outcome, RestoreOutcome::MetadataOnly));
+        assert_eq!(record_count(&app, "r2"), 1);
+        assert_eq!(record_count(&app, "r1"), 1);
+    }
+
     // 彻底删除：回收目录与记录行清除，record_json 里的附件一并清理。
     #[test]
     fn purging_removes_trash_dir_and_orphan_attachments() {
