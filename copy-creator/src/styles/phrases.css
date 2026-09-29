@@ -529,7 +529,8 @@
   display: flex;
   flex-direction: column;
   gap: 6px;
-  max-height: 260px;
+  /* 高度随视口伸缩，与资源侧管理分组列表保持同一公式。 */
+  max-height: min(clamp(280px, 58vh, 560px), calc(100vh - 220px));
   overflow-y: auto;
   margin-bottom: 4px;
 }

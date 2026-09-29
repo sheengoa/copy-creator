@@ -427,7 +427,9 @@
   box-shadow: 0 8px 26px rgba(0, 0, 0, 0.5), 0 0 0 0.5px rgba(255, 255, 255, 0.05);
 }
 
-.resource-group-manage-dialog {
+/* 自适应宽度必须用三类选择器压过共享规则 .dialog-content.large 的 360px，
+   两类及以下会被其覆盖，弹窗退化为写死宽度（历史缺陷：宽度规则从未生效）。 */
+.dialog-content.large.resource-group-manage-dialog {
   /* 随主窗口尺寸自适应：小窗口不低于 440px，大窗口最多 780px，且不溢出视口。 */
   width: min(clamp(440px, 60vw, 780px), calc(100vw - 48px));
 }
@@ -446,7 +448,7 @@
   min-width: 0;
   align-items: center;
   gap: 8px;
-  padding: 8px 10px;
+  padding: 9px 12px;
   border: 1px solid var(--separator);
   border-radius: 9px;
   background: var(--input-bg);
@@ -497,7 +499,7 @@
 
 .resource-group-manage-row.is-drag-overlay {
   /* 宽度由 DragOverlay 按被拖行初始宽度动态传入，不再硬编码。 */
-  padding: 8px 10px;
+  padding: 9px 12px;
   border: 1px solid color-mix(in srgb, var(--text-primary) 20%, var(--separator));
   background: var(--bg-card);
   box-shadow: 0 10px 26px rgba(0, 0, 0, 0.18);
@@ -526,7 +528,7 @@
   display: flex;
   flex-shrink: 0;
   align-items: center;
-  gap: 1px;
+  gap: 4px;
 }
 
 
@@ -1526,7 +1528,8 @@
 
 /* ---------- 移动到分组对话框 ---------- */
 .resource-move-dialog {
-  width: 330px;
+  /* 卡片移动与分组移动共用：宽度随窗口伸缩，长分组路径不再截断。 */
+  width: clamp(330px, 40vw, 520px);
   max-width: calc(100vw - 40px);
 }
 
@@ -1571,7 +1574,8 @@
 }
 
 .resource-move-tree {
-  max-height: 216px;
+  /* 分组树随视口高度伸缩，层级多时无需在固定小盒内滚动。 */
+  max-height: clamp(216px, 40vh, 420px);
   overflow-y: auto;
   border: 1px solid var(--separator);
   border-radius: 9px;
@@ -2064,7 +2068,12 @@
   background: rgba(59, 130, 246, 0.2);
 }
 
+/* 面板撑满工具栏以下的全部剩余空间，列表内部滚动，避免高窗口下面板下方留白。 */
 .trash-panel {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-height: 0;
   margin-top: 12px;
   border: 1px solid var(--separator);
   border-radius: 12px;
@@ -2074,6 +2083,7 @@
 
 .trash-head {
   display: flex;
+  flex-shrink: 0;
   align-items: center;
   gap: 8px;
   padding: 10px 12px;
@@ -2097,7 +2107,7 @@
 .trash-danger-btn:hover:not(:disabled) { background: rgba(220, 38, 38, 0.1); }
 .trash-danger-btn:disabled { opacity: 0.4; cursor: default; }
 
-.trash-list { max-height: 60vh; overflow: auto; }
+.trash-list { flex: 1; min-height: 0; overflow: auto; }
 
 .trash-row {
   display: flex;
@@ -2132,6 +2142,10 @@
 .trash-row-danger:hover:not(:disabled) { background: rgba(220, 38, 38, 0.1); }
 
 .trash-empty {
+  display: flex;
+  flex: 1;
+  align-items: center;
+  justify-content: center;
   padding: 28px 12px;
   text-align: center;
   color: var(--text-secondary);
@@ -2139,6 +2153,7 @@
 }
 
 .trash-foot {
+  flex-shrink: 0;
   padding: 8px 12px;
   color: var(--text-secondary);
   font-size: var(--text-xs);
