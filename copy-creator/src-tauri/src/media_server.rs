@@ -640,3 +640,141 @@ mod media_server_http_tests {
         std::fs::remove_dir_all(&outside_dir).ok();
     }
 }
+
+#[cfg(test)]
+mod media_serving_tests {
+    use super::{spawn, MediaServerState};
+    use crate::db::{ensure_schema, DbState};
+    use rusqlite::params;
+    use std::io::{Read, Write};
+    use std::path::PathBuf;
+    use std::sync::Mutex;
+    use tauri::Manager;
+
+    fn encode_query_value(value: &str) -> String {
+        let mut out = String::new();
+        for byte in value.as_bytes() {
+            match byte {
+                b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'_' | b'.' | b'~' | b'/' => {
+                    out.push(*byte as char)
+                }
+                other => out.push_str(&format!("%{other:02X}")),
+            }
+        }
+        out
+    }
+
+    fn http_get(origin: &str, target: &str) -> (u16, String, Vec<u8>) {
+        let address = origin.trim_start_matches("http://");
+        let mut stream = std::net::TcpStream::connect(address).unwrap();
+        let request = format!("GET {target} HTTP/1.1\r\nHost: 127.0.0.1\r\nConnection: close\r\n\r\n");
+        stream.write_all(request.as_bytes()).unwrap();
+        let mut raw = Vec::new();
+        stream.read_to_end(&mut raw).unwrap();
+        let split = raw
+            .windows(4)
+            .position(|w| w == b"\r\n\r\n")
+            .expect("响应缺少头部结束标记");
+        let head = String::from_utf8_lossy(&raw[..split]).to_string();
+        let status: u16 = head
+            .lines()
+            .next()
+            .unwrap()
+            .split_whitespace()
+            .nth(1)
+            .unwrap()
+            .parse()
+            .unwrap();
+        let body = raw[split + 4..].to_vec();
+        (status, head, body)
+    }
+
+    // 端到端：真实启动媒体服务线程，带 token 请求库内已收录文件——
+    // 回收站「恢复后可正常展示」的协议级证据（令牌/白名单/路径解析/
+    // 内容类型/字节流全链路）。
+    #[test]
+    fn serving_recorded_library_file_returns_full_bytes() {
+        let app = tauri::test::mock_app();
+        let conn = rusqlite::Connection::open_in_memory().unwrap();
+        ensure_schema(&conn).unwrap();
+        app.manage(DbState { conn: Mutex::new(conn) });
+        let library = std::env::temp_dir().join(format!(
+            "copy-creator-media-test-{}",
+            uuid::Uuid::new_v4()
+        ));
+        std::fs::create_dir_all(&library).unwrap();
+        let handle = app.handle().clone();
+
+        {
+            let state = handle.state::<DbState>();
+            let conn = state.conn.lock().unwrap();
+            ensure_schema(&conn).unwrap();
+            conn.execute(
+                "INSERT OR REPLACE INTO settings (key, value) VALUES ('resource_library_path', ?1)",
+                params![library.to_string_lossy().as_ref()],
+            )
+            .unwrap();
+        }
+
+        // 真实 PNG（1x1 像素）作为库内文件。
+        let png_bytes: [u8; 84] = [
+            0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A, 0x00, 0x00, 0x00, 0x0D, 0x49, 0x48,
+            0x44, 0x52, 0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0x01, 0x08, 0x06, 0x00, 0x00,
+            0x00, 0x1F, 0x15, 0xC4, 0x89, 0x00, 0x00, 0x00, 0x0A, 0x49, 0x44, 0x41, 0x54, 0x78,
+            0x9C, 0x63, 0x00, 0x01, 0x00, 0x00, 0x05, 0x00, 0x01, 0x0D, 0x0A, 0x2D, 0xB4, 0x00,
+            0x00, 0x00, 0x00, 0x49, 0x45, 0x4E, 0x44, 0xAE, 0x42, 0x60, 0x82, 0x00, 0x00, 0x00,
+            0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+        ];
+        let picture = library.join("pic.png");
+        std::fs::write(&picture, png_bytes).unwrap();
+        {
+            let state = handle.state::<DbState>();
+            let conn = state.conn.lock().unwrap();
+            conn.execute(
+                "INSERT INTO clipboard_records
+                 (id, type, content, created_at, group_name, storage_mode, resource_path, resource_external, attachments)
+                 VALUES ('r1', 'file', ?1, '2026-09-19T00:00:00Z', '', 'resource', ?1, 1, '[]')",
+                params![picture.to_string_lossy().as_ref()],
+            )
+            .unwrap();
+        }
+
+        spawn(&handle);
+        let state = handle.state::<MediaServerState>();
+        let origin = state.origin.clone();
+        let token = state.token.clone();
+        drop(state);
+
+        let target = format!(
+            "/media?token={}&path={}",
+            encode_query_value(&token),
+            encode_query_value(picture.to_string_lossy().as_ref())
+        );
+        let (status, head, body) = http_get(&origin, &target);
+        assert_eq!(status, 200, "head: {head}");
+        assert!(head.to_lowercase().contains("content-type: image/png"));
+        assert_eq!(body, png_bytes, "媒体字节流必须与文件完全一致");
+
+        // 缺失文件 → 404；令牌错误 → 403（白名单外的路径同样 404）。
+        let missing = library.join("nope.png");
+        let (status, _, _) = http_get(
+            &origin,
+            &format!(
+                "/media?token={}&path={}",
+                encode_query_value(&token),
+                encode_query_value(missing.to_string_lossy().as_ref())
+            ),
+        );
+        assert_eq!(status, 404);
+        let (status, _, _) = http_get(
+            &origin,
+            &format!(
+                "/media?token=wrong&path={}",
+                encode_query_value(picture.to_string_lossy().as_ref())
+            ),
+        );
+        assert_eq!(status, 403);
+
+        std::fs::remove_dir_all(&library).ok();
+    }
+}
