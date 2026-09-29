@@ -2197,3 +2197,9 @@
   font-size: var(--text-xs);
   background: var(--card-inner-bg);
 }
+
+/* 回收站视图下工具栏仅剩切换按钮：靠右保持原位置（常规视图有 flex:1
+   搜索占位，该 auto 边距不生效，两种视图几何一致）。 */
+.resource-library-toolbar .resource-trash-button {
+  margin-left: auto;
+}

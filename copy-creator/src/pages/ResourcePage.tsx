@@ -994,13 +994,17 @@ export default function ResourcePage() {
   return (
     <div className="resource-library-page">
       <div className="resource-library-toolbar">
-        <div className="page-search">
-          <SearchInput
-            placeholder={t("resources.search")}
-            value={search}
-            onChange={handleSearchChange}
-          />
-        </div>
+        {/* 回收站视图下搜索只作用于内容库，与场景无关的按钮一并隐藏，
+            仅保留右侧回收站切换（兼作退出入口）。 */}
+        {!trashOpen && (
+          <div className="page-search">
+            <SearchInput
+              placeholder={t("resources.search")}
+              value={search}
+              onChange={handleSearchChange}
+            />
+          </div>
+        )}
         <button
           type="button"
           className={`resource-secondary-button resource-trash-button${trashOpen ? " active" : ""}`}
@@ -1011,24 +1015,28 @@ export default function ResourcePage() {
           <span>{t("resources.trashTitle")}</span>
           {trashCount > 0 && <span className="resource-trash-badge">{trashCount}</span>}
         </button>
-        <button
-          type="button"
-          ref={resourceSettingsButtonRef}
-          className="resource-secondary-button resource-settings-button"
-          onClick={() => setResourceSettingsOpen((open) => !open)}
-          aria-expanded={resourceSettingsOpen}
-          aria-haspopup="dialog"
-        >
-          {Icons.settings}
-          <span>{t("resources.librarySettings")}</span>
-        </button>
-        <button type="button" className="resource-new-button" onClick={() => void openResourceCreate()}>
-          {Icons.add}
-          <span>{t("resources.new")}</span>
-        </button>
+        {!trashOpen && (
+          <>
+            <button
+              type="button"
+              ref={resourceSettingsButtonRef}
+              className="resource-secondary-button resource-settings-button"
+              onClick={() => setResourceSettingsOpen((open) => !open)}
+              aria-expanded={resourceSettingsOpen}
+              aria-haspopup="dialog"
+            >
+              {Icons.settings}
+              <span>{t("resources.librarySettings")}</span>
+            </button>
+            <button type="button" className="resource-new-button" onClick={() => void openResourceCreate()}>
+              {Icons.add}
+              <span>{t("resources.new")}</span>
+            </button>
+          </>
+        )}
       </div>
 
-      {resourceSettingsOpen && (
+      {resourceSettingsOpen && !trashOpen && (
         <section
           ref={resourceSettingsPopoverRef}
           className="resource-settings-popover"
