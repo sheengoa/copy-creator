@@ -18,6 +18,16 @@ interface TrashItem {
   has_attachments: boolean;
 }
 
+// 与后端 RestoreOutcome / RestoreBatchSummary 对应（snake_case 直传）。
+type RestoreOutcome = "restored" | "relinked" | "metadata_only";
+
+interface RestoreBatchSummary {
+  restored: number;
+  relinked: number;
+  metadata_only: number;
+  failed: string[];
+}
+
 export function TrashPanel({ onBack }: { onBack: () => void }) {
   const { t } = useTranslation();
   const [items, setItems] = useState<TrashItem[] | null>(null);
@@ -27,6 +37,7 @@ export function TrashPanel({ onBack }: { onBack: () => void }) {
   const [confirmPurgeSelected, setConfirmPurgeSelected] = useState(false);
   const [selectionMode, setSelectionMode] = useState(false);
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
+  const [notice, setNotice] = useState<string | null>(null);
   const busy = busyOp !== null;
 
   const loadItems = useCallback(async (): Promise<TrashItem[]> => {
@@ -58,15 +69,28 @@ export function TrashPanel({ onBack }: { onBack: () => void }) {
     };
   }, [loadItems, pruneSelection]);
 
-  const act = async (op: "restore" | "purge", action: () => Promise<unknown>) => {
+  // 恢复结果如实汇报：仅在有"自动关联 / 文件已丢失 / 失败"时出提示，
+  // 全部正常恢复保持既有静默。
+  const noticeFromCounts = (relinked: number, metadataOnly: number, failed: number) => {
+    const parts: string[] = [];
+    if (relinked > 0) parts.push(t("resources.trashRelinkedCount", { count: relinked }));
+    if (metadataOnly > 0)
+      parts.push(t("resources.trashMetadataOnlyCount", { count: metadataOnly }));
+    if (failed > 0) parts.push(t("resources.trashRestoreFailedCount", { count: failed }));
+    return parts.length > 0 ? parts.join("；") : null;
+  };
+
+  const act = async <T,>(op: "restore" | "purge", action: () => Promise<T>): Promise<T | undefined> => {
     setBusyOp(op);
     setError(null);
     try {
-      await action();
+      const result = await action();
       await loadItems();
+      return result;
     } catch (e) {
       console.error("Trash action failed:", e);
       setError(String(e));
+      return undefined;
     } finally {
       setBusyOp(null);
     }
@@ -78,8 +102,11 @@ export function TrashPanel({ onBack }: { onBack: () => void }) {
     setBusyOp("restore");
     setError(null);
     try {
-      await invoke("restore_trash_items", { ids });
+      const summary = await invoke<RestoreBatchSummary>("restore_trash_items", { ids });
       pruneSelection(await loadItems());
+      setNotice(
+        noticeFromCounts(summary.relinked, summary.metadata_only, summary.failed.length),
+      );
     } catch (e) {
       console.error("Trash batch restore failed:", e);
       setError(String(e));
@@ -169,6 +196,20 @@ export function TrashPanel({ onBack }: { onBack: () => void }) {
         </div>
       )}
 
+      {notice && (
+        <div className="trash-notice" role="status">
+          <span className="trash-notice-text">{notice}</span>
+          <button
+            type="button"
+            className="trash-notice-close"
+            aria-label={t("common.close")}
+            onClick={() => setNotice(null)}
+          >
+            ×
+          </button>
+        </div>
+      )}
+
       {selectionMode && items !== null && (
         <BatchSelectionBar
           selectedCount={selectedIds.length}
@@ -228,7 +269,19 @@ export function TrashPanel({ onBack }: { onBack: () => void }) {
                       className="trash-row-btn"
                       disabled={busy}
                       onClick={() =>
-                        void act("restore", () => invoke("restore_trash_item", { id: item.id }))
+                        void act("restore", () =>
+                          invoke<RestoreOutcome>("restore_trash_item", { id: item.id }),
+                        ).then((outcome) => {
+                          if (outcome && outcome !== "restored") {
+                            setNotice(
+                              noticeFromCounts(
+                                outcome === "relinked" ? 1 : 0,
+                                outcome === "metadata_only" ? 1 : 0,
+                                0,
+                              ),
+                            );
+                          }
+                        })
                       }
                     >
                       {t("resources.trashRestore")}

@@ -309,10 +309,60 @@ pub fn trash_items_count(app: AppHandle) -> Result<u64, String> {
 /// 恢复出的文件会触发 watcher 到达事件，自动发现按路径去重（resource.rs
 /// discover 的 by_path 表）——插行在前即不会重复建记录；仍按 resource_path
 /// 兜底清理极端时序下可能已建的幽灵记录。
+/// 单条恢复结果三态。
+/// - Restored：文件从 .trash 移回原位（被占用自动加序号；原位已有同名
+///   文件时视同恢复，无需移动）；
+/// - Relinked：.trash 无文件，但库内存在唯一同名文件，记录改指过去
+///   （记录跟随文件，不移动用户整理好的目录结构）；
+/// - MetadataOnly：库内也找不到文件（或同名候选多于一个），仅恢复记录
+///   元数据——文件在入回收站之前就已丢失，恢复无法凭空还原。
+#[derive(Clone, Copy, serde::Serialize)]
+#[serde(rename_all = "snake_case")]
+pub(crate) enum RestoreOutcome {
+    Restored,
+    Relinked,
+    MetadataOnly,
+}
+
+/// 在库根们之下按文件名查找唯一同名文件。跳过点开头的元数据目录
+/// （.trash / .copy-creator 等，与资源扫描同一口径）；零个或多个同名
+/// 候选都返回 None——多个候选无法替用户做选择，宁可不关联。
+fn find_same_named_file(roots: &[PathBuf], file_name: &str) -> Option<PathBuf> {
+    let mut found: Option<PathBuf> = None;
+    for root in roots {
+        let mut stack = vec![root.clone()];
+        while let Some(dir) = stack.pop() {
+            let entries = match std::fs::read_dir(&dir) {
+                Ok(entries) => entries,
+                Err(_) => continue,
+            };
+            for entry in entries.flatten() {
+                let path = entry.path();
+                if path.is_dir() {
+                    let hidden = path
+                        .file_name()
+                        .and_then(|name| name.to_str())
+                        .map(|name| name.starts_with('.'))
+                        .unwrap_or(true);
+                    if !hidden {
+                        stack.push(path);
+                    }
+                } else if path.file_name().and_then(|name| name.to_str()) == Some(file_name) {
+                    if found.is_some() {
+                        return None;
+                    }
+                    found = Some(path);
+                }
+            }
+        }
+    }
+    found
+}
+
 pub(crate) fn restore_trash_item_internal<R: Runtime>(
     app: &AppHandle<R>,
     id: &str,
-) -> Result<(), String> {
+) -> Result<RestoreOutcome, String> {
     // 多根查找要在拿数据库锁之前完成：roots 解析要读 settings，而
     // conn 是不可重入 Mutex，锁内再取会死锁（purge 同样先 drop(conn)）。
     let library_root = get_resource_library_dir(app);
@@ -328,15 +378,6 @@ pub(crate) fn restore_trash_item_internal<R: Runtime>(
         )
         .map_err(|e| format!("回收站条目不存在: {e}"))?;
 
-    // 幽灵清理：同路径的自动发现记录（不同 id）让位给完整元数据的恢复行。
-    if !original_path.is_empty() {
-        conn.execute(
-            "DELETE FROM clipboard_records WHERE resource_path = ?1 AND id != ?2",
-            params![original_path, record_id],
-        )
-        .map_err(|e| e.to_string())?;
-    }
-
     // 回收目录按多根查找：删除后用户可能切换过资源库，.trash 留在历史
     // 库根（purge 已按多根清理，恢复保持同一口径）。都找不到时按当前根
     // 拼接，维持「无文件可移」的原语义。
@@ -346,14 +387,48 @@ pub(crate) fn restore_trash_item_internal<R: Runtime>(
         .find(|path| path.is_dir())
         .unwrap_or_else(|| trash_dir_absolute(&library_root, &trash_dir));
 
-    // 文件移回：主文件按原 resource_path 落位，被占用则加序号并更新记录。
+    let original = PathBuf::from(&original_path);
+    let moved = if !original_path.is_empty() {
+        move_trash_files_back(&library_root, &trash_abs, &original_path)?
+    } else {
+        None
+    };
+
     let mut updated_json = record_json.clone();
-    if !original_path.is_empty() {
-        let restored = move_trash_files_back(&library_root, &trash_abs, &original_path)?;
-        if let Some(final_path) = restored {
-            if final_path != PathBuf::from(&original_path) {
+    let (outcome, effective_path) = match moved {
+        Some(final_path) => {
+            if final_path != original {
                 updated_json = rewrite_json_path(&record_json, &final_path)?;
             }
+            (RestoreOutcome::Restored, final_path)
+        }
+        None if original.is_file() => (RestoreOutcome::Restored, original.clone()),
+        None => {
+            let file_name = original
+                .file_name()
+                .map(|name| name.to_string_lossy().to_string())
+                .unwrap_or_default();
+            match find_same_named_file(&roots, &file_name) {
+                Some(found) => {
+                    updated_json = rewrite_json_path(&record_json, &found)?;
+                    (RestoreOutcome::Relinked, found)
+                }
+                None => (RestoreOutcome::MetadataOnly, original.clone()),
+            }
+        }
+    };
+
+    // 幽灵清理：同路径的自动发现记录（不同 id）让位给完整元数据的恢复行。
+    // 原路径与最终落位路径都清一遍——改指（relink）后新路径下可能存在
+    // 自动发现行，不清理会与恢复行并存成双记录。
+    let effective_str = effective_path.to_string_lossy().to_string();
+    for ghost_path in [original_path.as_str(), effective_str.as_str()] {
+        if !ghost_path.is_empty() {
+            conn.execute(
+                "DELETE FROM clipboard_records WHERE resource_path = ?1 AND id != ?2",
+                params![ghost_path, record_id],
+            )
+            .map_err(|e| e.to_string())?;
         }
     }
 
@@ -363,30 +438,46 @@ pub(crate) fn restore_trash_item_internal<R: Runtime>(
     let _ = std::fs::remove_dir_all(&trash_abs);
     drop(conn);
     let _ = app.emit("resource-groups-changed", ());
-    Ok(())
+    Ok(outcome)
 }
 
 #[tauri::command]
-pub fn restore_trash_item(app: AppHandle, id: String) -> Result<(), String> {
+pub fn restore_trash_item(app: AppHandle, id: String) -> Result<RestoreOutcome, String> {
     restore_trash_item_internal(&app, &id)
 }
 
-/// 批量恢复：逐条复用单条恢复（各自加锁、文件移动互相独立），尽力而为；
-/// 失败条目带 id 汇总返回，成功的照常生效。resource-groups-changed 由单条
-/// 内部各自发出，前端监听方按最终一次刷新即可。
+/// 批量恢复汇总：按三态计数，失败条目带 id 汇总返回（尽力而为，
+/// 单条失败不中断整批）。
+#[derive(serde::Serialize)]
+pub struct RestoreBatchSummary {
+    pub restored: u32,
+    pub relinked: u32,
+    pub metadata_only: u32,
+    pub failed: Vec<String>,
+}
+
+/// 批量恢复：逐条复用单条恢复（各自加锁、文件移动互相独立）。
+/// resource-groups-changed 由单条内部各自发出，前端监听方按最终一次刷新即可。
 #[tauri::command]
-pub fn restore_trash_items(app: AppHandle, ids: Vec<String>) -> Result<(), String> {
-    let mut errors: Vec<String> = Vec::new();
+pub fn restore_trash_items(
+    app: AppHandle,
+    ids: Vec<String>,
+) -> Result<RestoreBatchSummary, String> {
+    let mut summary = RestoreBatchSummary {
+        restored: 0,
+        relinked: 0,
+        metadata_only: 0,
+        failed: Vec::new(),
+    };
     for id in &ids {
-        if let Err(error) = restore_trash_item_internal(&app, id) {
-            errors.push(format!("{id}: {error}"));
+        match restore_trash_item_internal(&app, id) {
+            Ok(RestoreOutcome::Restored) => summary.restored += 1,
+            Ok(RestoreOutcome::Relinked) => summary.relinked += 1,
+            Ok(RestoreOutcome::MetadataOnly) => summary.metadata_only += 1,
+            Err(error) => summary.failed.push(format!("{id}: {error}")),
         }
     }
-    if errors.is_empty() {
-        Ok(())
-    } else {
-        Err(errors.join("；"))
-    }
+    Ok(summary)
 }
 
 /// 移回主文件；原位被占用时依次尝试 "name (1).ext"，返回最终落位路径

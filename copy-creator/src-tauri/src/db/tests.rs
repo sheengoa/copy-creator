@@ -3646,6 +3646,7 @@ mod trash_tests {
     use crate::db::{
         delete_clipboard_records_internal, ensure_schema, list_trash_items_internal,
         prune_old_records, purge_trash_internal, restore_trash_item_internal, DbState,
+        RestoreOutcome,
     };
     use rusqlite::params;
     use std::path::{Path, PathBuf};
@@ -3770,6 +3771,111 @@ mod trash_tests {
             )
             .unwrap();
         assert_eq!(Path::new(&stored_path), restored.as_path());
+    }
+
+    // 恢复三态之 Relinked：入回收站前文件已丢失（仅记录行入桶），库内
+    // 别处存在唯一同名文件时，记录改指现存文件（记录跟随文件，不移动
+    // 用户整理好的目录结构）。
+    #[test]
+    fn restore_relinks_to_only_same_named_file_in_library() {
+        let (app, library) = trash_test_app();
+        let handle = app.handle().clone();
+        let group_dir = library.join("项目资料");
+        std::fs::create_dir_all(&group_dir).unwrap();
+        let file = group_dir.join("报价.pdf");
+        std::fs::write(&file, b"pdf").unwrap();
+        insert_external_record(&app, "r1", &file, &[]);
+
+        // 先删文件制造"文件已不在磁盘"，再入回收站 → 仅记录行入桶。
+        std::fs::remove_file(&file).unwrap();
+        delete_clipboard_records_internal(&handle, &["r1".to_string()]).unwrap();
+        let items = list_trash_items_internal(&handle).unwrap();
+        assert_eq!(items.len(), 1);
+        let trash_id = items[0]["id"].as_str().unwrap().to_string();
+
+        // 库内别处出现唯一同名文件（thumbs 分组）。
+        let elsewhere = library.join("thumbs").join("报价.pdf");
+        std::fs::create_dir_all(elsewhere.parent().unwrap()).unwrap();
+        std::fs::write(&elsewhere, b"pdf2").unwrap();
+
+        let outcome = restore_trash_item_internal(&handle, &trash_id).unwrap();
+        assert!(matches!(outcome, RestoreOutcome::Relinked));
+        // 文件不被移动，记录改指现存文件。
+        assert!(elsewhere.exists());
+        assert!(!file.exists());
+        let state = app.state::<DbState>();
+        let conn = state.conn.lock().unwrap();
+        let (content, resource_path): (String, String) = conn
+            .query_row(
+                "SELECT content, resource_path FROM clipboard_records WHERE id = 'r1'",
+                [],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )
+            .unwrap();
+        assert_eq!(Path::new(&content), elsewhere.as_path());
+        assert_eq!(Path::new(&resource_path), elsewhere.as_path());
+    }
+
+    // 恢复三态之 MetadataOnly：文件已丢失且库内无同名候选，仅恢复记录
+    // 元数据（保持原路径），outcome 如实标记。
+    #[test]
+    fn restore_reports_metadata_only_when_file_is_gone() {
+        let (app, library) = trash_test_app();
+        let handle = app.handle().clone();
+        let group_dir = library.join("组");
+        std::fs::create_dir_all(&group_dir).unwrap();
+        let file = group_dir.join("丢失.png");
+        std::fs::write(&file, b"png").unwrap();
+        insert_external_record(&app, "r1", &file, &[]);
+
+        std::fs::remove_file(&file).unwrap();
+        delete_clipboard_records_internal(&handle, &["r1".to_string()]).unwrap();
+        let trash_id = list_trash_items_internal(&handle).unwrap()[0]["id"]
+            .as_str()
+            .unwrap()
+            .to_string();
+
+        let outcome = restore_trash_item_internal(&handle, &trash_id).unwrap();
+        assert!(matches!(outcome, RestoreOutcome::MetadataOnly));
+        assert_eq!(record_count(&app, "r1"), 1);
+        let state = app.state::<DbState>();
+        let conn = state.conn.lock().unwrap();
+        let stored_path: String = conn
+            .query_row(
+                "SELECT resource_path FROM clipboard_records WHERE id = 'r1'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(Path::new(&stored_path), file.as_path());
+        assert!(!file.exists());
+    }
+
+    // 三态边界：.trash 无文件但原位已有同名文件（用户后来放了回去），
+    // 视同 Restored，不做移动也不改指别处。
+    #[test]
+    fn restore_counts_existing_original_file_as_restored() {
+        let (app, library) = trash_test_app();
+        let handle = app.handle().clone();
+        let group_dir = library.join("组");
+        std::fs::create_dir_all(&group_dir).unwrap();
+        let file = group_dir.join("说明.txt");
+        std::fs::write(&file, b"old").unwrap();
+        insert_external_record(&app, "r1", &file, &[]);
+
+        std::fs::remove_file(&file).unwrap();
+        delete_clipboard_records_internal(&handle, &["r1".to_string()]).unwrap();
+        let trash_id = list_trash_items_internal(&handle).unwrap()[0]["id"]
+            .as_str()
+            .unwrap()
+            .to_string();
+        // 原位被放回同名文件（内容不同）。
+        std::fs::write(&file, b"new").unwrap();
+
+        let outcome = restore_trash_item_internal(&handle, &trash_id).unwrap();
+        assert!(matches!(outcome, RestoreOutcome::Restored));
+        assert_eq!(std::fs::read(&file).unwrap(), b"new");
+        assert_eq!(record_count(&app, "r1"), 1);
     }
 
     // 彻底删除：回收目录与记录行清除，record_json 里的附件一并清理。

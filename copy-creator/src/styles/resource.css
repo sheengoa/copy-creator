@@ -2191,6 +2191,46 @@
 .trash-row-danger { color: var(--danger, #dc2626); }
 .trash-row-danger:hover:not(:disabled) { background: rgba(220, 38, 38, 0.1); }
 
+/* 恢复结果提示条：仅在自动关联/文件丢失/失败时出现，可手动关闭。 */
+.trash-notice {
+  display: flex;
+  flex-shrink: 0;
+  align-items: center;
+  gap: 8px;
+  padding: 7px 12px;
+  border-bottom: 1px solid var(--separator);
+  background: rgba(59, 130, 246, 0.1);
+  color: var(--text-primary);
+  font-size: var(--text-xs);
+}
+
+[data-theme="dark"] .trash-notice { background: rgba(59, 130, 246, 0.18); }
+
+.trash-notice-text { min-width: 0; overflow-wrap: anywhere; }
+
+.trash-notice-close {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  width: 18px;
+  height: 18px;
+  margin-left: auto;
+  border: none;
+  border-radius: 5px;
+  background: transparent;
+  color: var(--text-secondary);
+  font-size: 13px;
+  line-height: 1;
+  cursor: pointer;
+}
+.trash-notice-close:hover { background: rgba(0, 0, 0, 0.06); color: var(--text-primary); }
+[data-theme="dark"] .trash-notice-close:hover { background: rgba(255, 255, 255, 0.12); }
+.trash-notice-close:focus-visible {
+  outline: 2px solid color-mix(in srgb, var(--text-primary) 30%, transparent);
+  outline-offset: 1px;
+}
+
 .trash-empty {
   display: flex;
   flex: 1;
