@@ -12,6 +12,8 @@ interface BatchSelectionBarProps {
   busy?: boolean;
   busyLabel?: string;
   onMove?: () => void;
+  /** 可选：批量恢复（回收站多选在用，文案取 resources.trashRestore）。 */
+  onRestore?: () => void;
   /** 可选：把选中内容移到列表顶部（快捷输入短语批量置顶仍在用）。 */
   onMoveTop?: () => void;
   /** 可选：批量收藏 / 取消收藏选中内容（防保留期清理，恒定浮顶）。 */
@@ -29,6 +31,7 @@ export default function BatchSelectionBar({
   busy = false,
   busyLabel,
   onMove,
+  onRestore,
   onMoveTop,
   onPin,
   onUnpin,
@@ -101,6 +104,17 @@ export default function BatchSelectionBar({
           >
             {Icons.arrowRight}
             <span>{t("resources.move")}</span>
+          </button>
+        )}
+        {onRestore && (
+          <button
+            className="batch-move-btn"
+            type="button"
+            disabled={selectedCount === 0 || busy}
+            onClick={onRestore}
+          >
+            {Icons.arrowLeft}
+            <span>{t("resources.trashRestore")}</span>
           </button>
         )}
         <button

@@ -371,6 +371,24 @@ pub fn restore_trash_item(app: AppHandle, id: String) -> Result<(), String> {
     restore_trash_item_internal(&app, &id)
 }
 
+/// 批量恢复：逐条复用单条恢复（各自加锁、文件移动互相独立），尽力而为；
+/// 失败条目带 id 汇总返回，成功的照常生效。resource-groups-changed 由单条
+/// 内部各自发出，前端监听方按最终一次刷新即可。
+#[tauri::command]
+pub fn restore_trash_items(app: AppHandle, ids: Vec<String>) -> Result<(), String> {
+    let mut errors: Vec<String> = Vec::new();
+    for id in &ids {
+        if let Err(error) = restore_trash_item_internal(&app, id) {
+            errors.push(format!("{id}: {error}"));
+        }
+    }
+    if errors.is_empty() {
+        Ok(())
+    } else {
+        Err(errors.join("；"))
+    }
+}
+
 /// 移回主文件；原位被占用时依次尝试 "name (1).ext"，返回最终落位路径
 /// （None = 回收站内没有该文件，无需移动）。
 fn move_trash_files_back(

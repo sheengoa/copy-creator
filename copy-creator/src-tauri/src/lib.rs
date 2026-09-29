@@ -503,6 +503,7 @@ pub fn run() {
             db::list_trash_items,
             db::trash_items_count,
             db::restore_trash_item,
+            db::restore_trash_items,
             db::purge_trash_items,
             backup::export_backup,
             backup::cancel_backup_export,

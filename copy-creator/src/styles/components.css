@@ -298,7 +298,8 @@
 }
 
 .batch-select-all input,
-.card-selection-control input {
+.card-selection-control input,
+.trash-row-check input {
   position: absolute;
   width: 1px;
   height: 1px;
@@ -364,7 +365,8 @@ input:focus-visible + .selection-checkbox {
 }
 
 .batch-select-all:hover .selection-checkbox,
-.card-selection-control:hover .selection-checkbox {
+.card-selection-control:hover .selection-checkbox,
+.trash-row-check:hover .selection-checkbox {
   border-color: color-mix(in srgb, var(--text-primary) 42%, transparent);
 }
 

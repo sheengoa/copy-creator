@@ -2111,6 +2111,40 @@
 .trash-danger-btn:hover:not(:disabled) { background: rgba(220, 38, 38, 0.1); }
 .trash-danger-btn:disabled { opacity: 0.4; cursor: default; }
 
+.trash-select-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  border: none;
+  background: transparent;
+  color: var(--text-primary);
+  font-size: var(--text-xs);
+  cursor: pointer;
+  padding: 4px 8px;
+  border-radius: 6px;
+}
+.trash-select-btn:hover { background: var(--card-inner-bg); }
+.trash-select-btn svg { width: 12px; height: 12px; }
+
+/* 批量选择模式：整行可点切换选中，勾选框复用全局 selection-checkbox 视觉。 */
+.trash-row.is-selecting { cursor: pointer; }
+.trash-row.is-selecting:hover:not(.selected) { background: var(--card-inner-bg); }
+.trash-row.selected { background: var(--chip-bg); }
+.trash-row-check {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  flex-shrink: 0;
+  cursor: pointer;
+}
+
+/* 批量选择条嵌入面板：与面板同宽留边，列表之上固定高度不参与伸缩。 */
+.trash-panel .batch-selection-bar {
+  flex-shrink: 0;
+  padding: 3px 12px 6px;
+  border-bottom-color: var(--separator);
+}
+
 .trash-list { flex: 1; min-height: 0; overflow: auto; }
 
 .trash-row {
