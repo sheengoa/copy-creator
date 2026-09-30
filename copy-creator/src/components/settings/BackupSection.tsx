@@ -111,6 +111,7 @@ export function BackupSection() {
   const handleImport = async () => {
     if (selection === null) return;
     setError(null);
+    setMissingFilesCount(null);
     setImporting(true);
     setImportProcessed(0);
     try {
