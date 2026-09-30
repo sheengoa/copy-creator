@@ -1431,6 +1431,41 @@ mod resource_command_tests {
         cleanup(&root);
     }
 
+    // 删除补偿回位的同名占用保护：删除窗口期用户放入原位的同名新文件
+    // 不得被补偿覆盖（Unix rename 会静默替换目标）——暂存文件保留待
+    // 人工处理，Windows 上 rename 本就失败，两平台同语义。
+    #[test]
+    fn restoring_staged_files_never_overwrites_occupied_original() {
+        let (app, root) = test_app();
+        let file = root.join("占用.png");
+        std::fs::write(&file, b"old-content").unwrap();
+        let ids = vec![resource_file_id(&file)];
+
+        let staged = stage_external_resource_files(app.handle(), &ids).unwrap();
+        assert!(!file.exists());
+        std::fs::write(&file, b"user-new-file").unwrap();
+
+        restore_staged_external_resource_files(&staged.files);
+
+        assert_eq!(
+            std::fs::read(&file).unwrap(),
+            b"user-new-file",
+            "窗口期用户文件不得被补偿覆盖"
+        );
+        let leftover = std::fs::read_dir(&root)
+            .unwrap()
+            .flatten()
+            .find(|entry| {
+                entry
+                    .file_name()
+                    .to_string_lossy()
+                    .starts_with(".copy-creator-delete-")
+            })
+            .expect("暂存文件必须保留");
+        assert_eq!(std::fs::read(leftover.path()).unwrap(), b"old-content");
+        cleanup(&root);
+    }
+
     #[test]
     fn renaming_resource_group_updates_files_and_record_metadata() {
         let (app, root) = test_app();

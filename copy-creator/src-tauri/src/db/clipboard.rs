@@ -819,6 +819,18 @@ pub(crate) fn stage_external_resource_files<R: Runtime>(
 pub(crate) fn restore_staged_external_resource_files(staged: &[StagedExternalResourceFile]) {
     for file in staged.iter().rev() {
         if file.staged_path.exists() {
+            // 原位已被同名文件占用（删除窗口期用户放入）时不得覆盖：Unix 的
+            // rename 会静默替换目标（用户新文件被覆盖丢失），Windows 上则
+            // 直接报错。此检查让两平台同语义——保留暂存文件（宁留隐藏
+            // 垃圾，不覆盖用户数据）。
+            if file.original_path.exists() {
+                log::warn!(
+                    "删除补偿回位遇同名占用，暂存文件保留未动: {} → {}",
+                    file.staged_path.display(),
+                    file.original_path.display()
+                );
+                continue;
+            }
             let _ = std::fs::rename(&file.staged_path, &file.original_path);
         }
     }
