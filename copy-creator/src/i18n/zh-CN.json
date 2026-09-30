@@ -63,6 +63,7 @@
     "storagePath": "数据存储位置",
     "storagePathHint": "修改文件位置，重启后生效",
     "restartHint": "存储路径已更改，需要重启应用生效",
+    "backupMissingFilesHint": "恢复完成；有 {{count}} 条资源记录指向的文件不在磁盘上，已在资源列表中以「文件缺失」标记",
     "restartNow": "立即重启",
     "changeFolder": "更改",
     "migratePrompt": "是否将现有剪切板记录、快捷输入和设置迁移到新位置？\n\n选择「迁移」：数据将复制到新位置\n选择「取消」：仅更改存储路径，现有数据保留在原位置",

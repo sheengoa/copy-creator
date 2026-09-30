@@ -33,6 +33,8 @@ export function BackupSection() {
   const [importProcessed, setImportProcessed] = useState(0);
   const [selection, setSelection] = useState<ImportSelection | null>(null);
   const [needRestart, setNeedRestart] = useState(false);
+  // 导入后巡检出的「记录在、文件无」条数（后端只读核对返回）。
+  const [missingFilesCount, setMissingFilesCount] = useState<number | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
@@ -112,10 +114,11 @@ export function BackupSection() {
     setImporting(true);
     setImportProcessed(0);
     try {
-      await invoke("import_backup", {
+      const result = await invoke<{ missing_files: string[] }>("import_backup", {
         zipPath: selection.zipPath,
         restoreLibraryTo: selection.libraryTarget,
       });
+      setMissingFilesCount(result.missing_files?.length ?? 0);
       setSelection(null);
       setNeedRestart(true);
     } catch (e) {
@@ -194,6 +197,14 @@ export function BackupSection() {
             <button className="settings-restart-btn" onClick={() => relaunch()}>
               {t("settings.restartNow")}
             </button>
+          </div>
+        )}
+
+        {/* 导入后一致性巡检（后端只读核对）：缺失记录的清单在源头如实
+            告知——脱节不再静默留给日后删除/恢复时才暴露。 */}
+        {missingFilesCount !== null && missingFilesCount > 0 && (
+          <div className="settings-restart-hint" role="alert">
+            <span>{t("settings.backupMissingFilesHint", { count: missingFilesCount })}</span>
           </div>
         )}
       </div>

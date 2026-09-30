@@ -63,6 +63,7 @@
     "storagePath": "Data Storage Location",
     "storagePathHint": "Changing file location takes effect after restart",
     "restartHint": "Storage path changed, restart required to take effect",
+    "backupMissingFilesHint": "Restore finished; {{count}} resource records point to files missing from disk, now marked \"Missing\" in the resource list",
     "restartNow": "Restart Now",
     "changeFolder": "Change",
     "migratePrompt": "Move existing clipboard records, quick input items, and settings to the new location?\n\nChoose \"Migrate\": data will be copied to the new location\nChoose \"Cancel\": only update the path, existing data stays",
