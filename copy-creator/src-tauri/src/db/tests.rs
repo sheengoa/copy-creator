@@ -4336,6 +4336,36 @@ mod trash_tests {
         assert_eq!(count, 0, ".trash 内文件被监听结算重新入库为幽灵记录");
     }
 
+    // 带病库自愈：版本号已前滚但列缺失（真实事故——迁移被启动瞬间锁
+    // 冲突打断且静默失败，user_version=2 而 resource_missing 缺列，资源
+    // 列表整体加载失败）。ensure_schema 必须以磁盘现状为准补齐列。
+    #[test]
+    fn ensure_schema_heals_missing_column_with_advanced_version() {
+        let conn = rusqlite::Connection::open_in_memory().unwrap();
+        // 手工建 v1 形态的表（无 resource_missing）并把版本号直接写成 2：
+        // 模拟迁移版本前滚但 ALTER 实际失败的带病库。
+        conn.execute_batch(
+            "CREATE TABLE clipboard_records (
+                 id TEXT PRIMARY KEY,
+                 type TEXT NOT NULL,
+                 content TEXT NOT NULL,
+                 created_at TEXT NOT NULL,
+                 pinned INTEGER NOT NULL DEFAULT 0
+             );
+             PRAGMA user_version = 2;",
+        )
+        .unwrap();
+        ensure_schema(&conn).unwrap();
+        let has_column = conn
+            .prepare("PRAGMA table_info(clipboard_records)")
+            .unwrap()
+            .query_map([], |row| row.get::<_, String>(1))
+            .unwrap()
+            .flatten()
+            .any(|name| name == "resource_missing");
+        assert!(has_column, "带病库必须被自愈补齐 resource_missing 列");
+    }
+
     // 对账持久化缺失标志：文件不在扫描集的记录 resource_missing=1——
     // 安全阀中止清退时记录留在列表，但「文件缺失」必须当天可见，不得
     // 静默；文件在的保持 0。

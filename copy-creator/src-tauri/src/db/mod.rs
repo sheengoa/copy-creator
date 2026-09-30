@@ -1088,7 +1088,38 @@ pub(crate) fn ensure_schema(conn: &Connection) -> Result<(), Box<dyn std::error:
     // 剪切板全文索引（存在性与漂移自愈，见函数注释）；自持幂等守卫，
     // 不随版本门控。
     ensure_clipboard_fts(conn);
+    // 关键列存在性补齐：版本门控迁移若被启动瞬间的锁冲突等环境原因打断，
+    // 版本号已前滚、迁移永不重试，库会带病运行（真实事故：resource_missing
+    // 缺列导致资源列表整体加载失败）。以磁盘现状为准每次启动幂等补齐。
+    ensure_column(
+        conn,
+        "clipboard_records",
+        "resource_missing",
+        "INTEGER NOT NULL DEFAULT 0",
+    );
     Ok(())
+}
+
+/// 列存在性补齐（幂等，每次启动执行）：缺列才 ALTER；成功与失败都记日志，
+/// 绝不静默吞错——静默失败正是本次事故的放大器。
+fn ensure_column(conn: &Connection, table: &str, column: &str, definition: &str) {
+    let exists = conn
+        .prepare(&format!("PRAGMA table_info({table})"))
+        .and_then(|mut stmt| {
+            stmt.query_map([], |row| row.get::<_, String>(1))
+                .map(|rows| rows.flatten().any(|name| name == column))
+        });
+    match exists {
+        Ok(true) => {}
+        Ok(false) => match conn.execute(
+            &format!("ALTER TABLE {table} ADD COLUMN {column} {definition}"),
+            [],
+        ) {
+            Ok(_) => log::info!("已补齐列 {table}.{column}"),
+            Err(error) => log::error!("补齐列 {table}.{column} 失败: {error}"),
+        },
+        Err(error) => log::error!("读取表结构 {table} 失败: {error}"),
+    }
 }
 
 /// 当前 schema 版本。新增结构迁移（增列、历史数据回填/清退）时把版本 +1
