@@ -158,7 +158,7 @@
     "trashFromGroup": "From group: {{group}}",
     "trashFromUngrouped": "From group: Ungrouped",
     "trashWithAttachments": "with image attachments",
-    "trashRetentionHint": "Trash items are kept for 30 days and then emptied automatically. You can also find them under the .trash folder in the library root with any file manager.",
+    "trashRetentionHint": "Trash items are kept for 30 days and then emptied automatically. The trash lives in a hidden folder outside the resource library, so cleaning the library never affects it.",
     "loadError": "Failed to load resources",
     "loadContentError": "Failed to load resource content",
     "saveError": "Failed to save resource, please retry",

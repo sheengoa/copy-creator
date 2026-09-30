@@ -3646,14 +3646,24 @@ mod pinned_record_tests {
 mod trash_tests {
     use crate::db::{
         delete_clipboard_records_internal, ensure_schema, list_trash_items_internal,
-        discover_external_resource_files, get_clipboard_records_inner, prune_old_records,
-        purge_trash_internal, restore_trash_item_internal, sync_resource_library, DbState,
-        RestoreOutcome,
+        discover_external_resource_files, get_clipboard_records_inner, migrate_trash_out_of_library,
+        prune_old_records, purge_trash_internal, restore_trash_item_internal,
+        sync_resource_library, DbState, RestoreOutcome,
     };
     use rusqlite::params;
+    use std::io::{Read, Write};
     use std::path::{Path, PathBuf};
     use std::sync::Mutex;
     use tauri::Manager;
+
+    const PNG_BYTES: [u8; 84] = [
+        0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A, 0x00, 0x00, 0x00, 0x0D, 0x49, 0x48,
+        0x44, 0x52, 0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0x01, 0x08, 0x06, 0x00, 0x00,
+        0x00, 0x1F, 0x15, 0xC4, 0x89, 0x00, 0x00, 0x00, 0x0A, 0x49, 0x44, 0x41, 0x54, 0x78,
+        0x9C, 0x63, 0x00, 0x01, 0x00, 0x00, 0x05, 0x00, 0x01, 0x0D, 0x0A, 0x2D, 0xB4, 0x00,
+        0x00, 0x00, 0x00, 0x49, 0x45, 0x4E, 0x44, 0xAE, 0x42, 0x60, 0x82, 0x00, 0x00, 0x00,
+        0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+    ];
 
     fn trash_test_app() -> (tauri::App<tauri::test::MockRuntime>, PathBuf) {
         let app = tauri::test::mock_app();
@@ -4054,6 +4064,119 @@ mod trash_tests {
         assert_eq!(dupes, 1);
     }
 
+    // 兜底根基：回收站在库外——删除后即使整个资源库文件夹被外部清空，
+    // 恢复仍能把文件原样放回资源库（历史事故：回收站在库内被连带删除）。
+    #[test]
+    fn restore_works_even_after_library_folder_wiped_externally() {
+        let (app, library) = trash_test_app();
+        let handle = app.handle().clone();
+        let group_dir = library.join("组");
+        std::fs::create_dir_all(&group_dir).unwrap();
+        let file = group_dir.join("证件照.png");
+        std::fs::write(&file, PNG_BYTES).unwrap();
+        insert_external_record(&app, "r1", &file, &[]);
+
+        delete_clipboard_records_internal(&handle, &["r1".to_string()]).unwrap();
+        assert!(!file.exists());
+
+        // 模拟用户在文件管理器中清空整个资源库文件夹。
+        for entry in std::fs::read_dir(&library).unwrap().flatten() {
+            let path = entry.path();
+            if path.is_dir() {
+                std::fs::remove_dir_all(&path).unwrap();
+            } else {
+                std::fs::remove_file(&path).unwrap();
+            }
+        }
+
+        let items = list_trash_items_internal(&handle).unwrap();
+        assert_eq!(items.len(), 1);
+        let outcome =
+            restore_trash_item_internal(&handle, items[0]["id"].as_str().unwrap()).unwrap();
+        assert!(matches!(outcome, RestoreOutcome::Restored));
+        assert!(file.exists());
+        assert_eq!(std::fs::read(&file).unwrap(), PNG_BYTES);
+        // 组目录一并恢复，记录回到原分组。
+        assert!(group_dir.exists());
+    }
+
+    // 启动迁移：历史版本放在库内的 .trash 整体迁到库外隐藏目录，
+    // 旧回收记录无需任何处理即可继续恢复。
+    #[test]
+    fn legacy_library_trash_migrates_out_of_library() {
+        let (app, library) = trash_test_app();
+        let handle = app.handle().clone();
+        let group_dir = library.join("组");
+        std::fs::create_dir_all(&group_dir).unwrap();
+        let file = group_dir.join("迁移.png");
+        std::fs::write(&file, PNG_BYTES).unwrap();
+
+        // 历史形态：记录在回收站，文件位于库内 .trash/<子目录>/。
+        let sub = format!(
+            "{}-{}",
+            chrono::Utc::now().timestamp_millis(),
+            uuid::Uuid::new_v4().simple()
+        );
+        let legacy_file = library.join(".trash").join(&sub).join("迁移.png");
+        std::fs::create_dir_all(legacy_file.parent().unwrap()).unwrap();
+        std::fs::write(&legacy_file, PNG_BYTES).unwrap();
+        {
+            let record_json = serde_json::json!({
+                "id": "r1",
+                "type": "file",
+                "content": file.to_string_lossy(),
+                "created_at": "2026-09-19T00:00:00Z",
+                "group_name": "组",
+                "storage_mode": "resource",
+                "resource_path": file.to_string_lossy(),
+                "resource_external": 1,
+                "attachments": "[]",
+            });
+            let state = app.state::<DbState>();
+            let conn = state.conn.lock().unwrap();
+            conn.execute(
+                "INSERT INTO trash_items
+                 (id, record_id, record_json, file_name, original_group, original_path, trash_dir, trashed_at, trashed_ms)
+                 VALUES ('t1', 'r1', ?1, '迁移.png', '组', ?2, ?3, '2026-09-29T00:00:00Z', 0)",
+                params![
+                    record_json.to_string(),
+                    file.to_string_lossy().as_ref(),
+                    format!(".trash/{sub}"),
+                ],
+            )
+            .unwrap();
+        }
+
+        crate::db::migrate_trash_out_of_library(&handle);
+
+        // 库内 .trash 已清空；内容在库外隐藏目录。
+        assert!(
+            !library.join(".trash").exists()
+                || std::fs::read_dir(library.join(".trash"))
+                    .unwrap()
+                    .next()
+                    .is_none()
+        );
+        let sibling_now = library
+            .parent()
+            .unwrap()
+            .join(format!(
+                ".{}.trash/.trash/{sub}",
+                library.file_name().and_then(|n| n.to_str()).unwrap()
+            ))
+            .join("迁移.png");
+        assert!(sibling_now.exists(), "迁移后文件应在库外回收站内");
+
+        // 旧回收记录无需处理即可恢复：文件原样回原位。
+        let items = list_trash_items_internal(&handle).unwrap();
+        assert_eq!(items.len(), 1);
+        let outcome =
+            restore_trash_item_internal(&handle, items[0]["id"].as_str().unwrap()).unwrap();
+        assert!(matches!(outcome, RestoreOutcome::Restored));
+        assert!(file.exists());
+        assert_eq!(std::fs::read(&file).unwrap(), PNG_BYTES);
+    }
+
     // 彻底删除：回收目录与记录行清除，record_json 里的附件一并清理。
     #[test]
     fn purging_removes_trash_dir_and_orphan_attachments() {
@@ -4186,7 +4309,13 @@ mod trash_tests {
         delete_clipboard_records_internal(&handle, &["r1".to_string()]).unwrap();
 
         // 模拟 watcher 防抖结束后的结算：源路径已消失，.trash 内目标已到达。
-        let trash_root = library.join(".trash");
+        let trash_root = library
+            .parent()
+            .unwrap()
+            .join(format!(
+                ".{}.trash/.trash",
+                library.file_name().and_then(|n| n.to_str()).unwrap()
+            ));
         let mut inner = None;
         for entry in std::fs::read_dir(&trash_root).unwrap().flatten() {
             for sub in std::fs::read_dir(entry.path()).unwrap().flatten() {
@@ -5226,7 +5355,13 @@ mod restore_usability_tests {
         assert!(!original.exists(), "删除后文件应离开原位");
         let trash_file = {
             let mut found: Option<PathBuf> = None;
-            let trash_root = library.join(".trash");
+            let trash_root = library
+                .parent()
+                .unwrap()
+                .join(format!(
+                    ".{}.trash/.trash",
+                    library.file_name().and_then(|n| n.to_str()).unwrap()
+                ));
             let mut stack = vec![trash_root];
             while let Some(dir) = stack.pop() {
                 let Ok(entries) = std::fs::read_dir(&dir) else { continue };

@@ -1,5 +1,7 @@
-// 回收站域：应用内删除资源改为移入库根 .trash 目录，记录整行序列化进
-// trash_items（恢复时原样回插，保住分组/备注/类型等全部元数据）。
+// 回收站域：应用内删除资源改为移入库根**外**的隐藏回收站目录
+// （<库根>/../.<库名>.trash，与库同盘——移动是原子重命名，且资源库
+// 目录被清理/误删时回收站不受影响），记录整行序列化进 trash_items
+// （恢复时原样回插，保住分组/备注/类型等全部元数据）。
 // 时序硬约束：trash_items 行必须与 clipboard_records 行在同一事务内落库，
 // 文件移动放在事务提交后——watcher 裁决（forget/relocate）只作用于
 // clipboard_records 现存行，settle 运行时行已不在，不会被误清退或跟随
@@ -12,7 +14,7 @@ pub(crate) const TRASH_DIR_NAME: &str = ".trash";
 /// v1 常量；settings 键 trash_retention 预留，设置页暴露放后续版本。
 pub(crate) const DEFAULT_TRASH_RETENTION_DAYS: i64 = 30;
 
-/// 待移动文件的暂存描述：主事务提交后逐项移入库根 .trash。
+/// 待移动文件的暂存描述：主事务提交后逐项移入库外回收站目录。
 /// 附件不随文件移入 .trash——它们留在库根 .copy-creator/attachments
 /// （组只是 md 内的相对链接前缀），恢复后内链仍然有效；彻底删除时
 /// 按 record_json 清理附件。
@@ -118,7 +120,75 @@ fn trash_dir_absolute(library_root: &Path, trash_dir: &str) -> PathBuf {
     library_root.join(trash_dir)
 }
 
-/// 主事务提交后：把资源文件移入库根 .trash。任一项失败即整体补偿——
+/// 回收站实际存放根：库根的同级隐藏目录。与库同盘——删除/恢复是同盘
+/// 原子重命名（大体积也是瞬间完成，不占用系统盘）；在库外——用户清理、
+/// 误删资源库文件夹时不会连带删掉回收站。
+fn sibling_trash_base(library_root: &Path) -> PathBuf {
+    let base = library_root
+        .file_name()
+        .and_then(OsStr::to_str)
+        .unwrap_or("library");
+    library_root
+        .parent()
+        .unwrap_or(library_root)
+        .join(format!(".{base}.trash"))
+}
+
+fn sibling_trash_dir(library_root: &Path, trash_dir: &str) -> PathBuf {
+    sibling_trash_base(library_root).join(trash_dir)
+}
+
+/// 一次性迁移：把历史版本放在库内的回收站（库根/.trash）整体移到库外
+/// 隐藏目录，用户清理资源库文件夹不会再连带删掉回收站内容。启动时调用。
+pub(crate) fn migrate_trash_out_of_library<R: Runtime>(app: &AppHandle<R>) {
+    let mut roots = resource_library_roots(app);
+    let current = get_resource_library_dir(app);
+    if !roots.iter().any(|root| root == &current) {
+        roots.push(current.clone());
+    }
+    for root in &roots {
+        let legacy = root.join(TRASH_DIR_NAME);
+        if !legacy.is_dir() {
+            continue;
+        }
+        let target = sibling_trash_base(root).join(TRASH_DIR_NAME);
+        if std::fs::create_dir_all(&target).is_err() {
+            continue;
+        }
+        let Ok(entries) = std::fs::read_dir(&legacy) else {
+            continue;
+        };
+        let mut moved = 0usize;
+        for entry in entries.flatten() {
+            let from = entry.path();
+            let Ok(name) = entry.file_name().into_string() else {
+                continue;
+            };
+            let mut dest = target.join(&name);
+            if dest.exists() {
+                dest = target.join(format!("{name}-{}", uuid::Uuid::new_v4().simple()));
+            }
+            if std::fs::rename(&from, &dest).is_ok() {
+                moved += 1;
+            }
+        }
+        if legacy
+            .read_dir()
+            .map(|mut remaining| remaining.next().is_none())
+            .unwrap_or(true)
+        {
+            let _ = std::fs::remove_dir(&legacy);
+        }
+        if moved > 0 {
+            log::info!(
+                "库内回收站已迁移至 {}（迁移 {moved} 项）",
+                target.display()
+            );
+        }
+    }
+}
+
+/// 主事务提交后：把资源文件移入库外的回收站目录。任一项失败即整体补偿——
 /// 已移动文件移回原位、trash_items 行删除、记录行从 record_json 回插，
 /// 对外表现为删除失败（不丢数据）。
 pub(crate) fn move_trashed_resource_files<R: Runtime>(
@@ -131,7 +201,7 @@ pub(crate) fn move_trashed_resource_files<R: Runtime>(
     let mut completed: Vec<&TrashedResourceFile> = Vec::new();
     let result = (|| -> Result<(), String> {
         for (item, staged_source) in items {
-            let trash_abs = trash_dir_absolute(library_root, &item.trash_dir);
+            let trash_abs = sibling_trash_dir(library_root, &item.trash_dir);
             std::fs::create_dir_all(&trash_abs)
                 .map_err(|e| format!("创建回收目录失败: {e}"))?;
 
@@ -453,14 +523,30 @@ pub(crate) fn restore_trash_item_on_conn(
         )
         .map_err(|e| format!("回收站条目不存在: {e}"))?;
 
-    // 回收目录按多根查找：删除后用户可能切换过资源库，.trash 留在历史
-    // 库根（purge 已按多根清理，恢复保持同一口径）。都找不到时按当前根
-    // 拼接，维持「无文件可移」的原语义。
-    let trash_abs = roots
+    // 回收目录解析（按优先级）：
+    // 1. 各库根（当前 + 历史）的同级隐藏目录（新位置）；
+    // 2. 各库根内的旧 .trash 与当前库内旧位置（迁移前的历史遗留）；
+    // 都找不到时按当前库的新位置拼接，维持「无文件可移」的原语义。
+    let sibling_abs = sibling_trash_dir(&library_root, &trash_dir);
+    let mut candidates = roots
         .iter()
-        .map(|root| trash_dir_absolute(root, &trash_dir))
-        .find(|path| path.is_dir())
-        .unwrap_or_else(|| trash_dir_absolute(&library_root, &trash_dir));
+        .flat_map(|root| {
+            [
+                sibling_trash_dir(root, &trash_dir),
+                trash_dir_absolute(root, &trash_dir),
+            ]
+        })
+        .chain(std::iter::once(trash_dir_absolute(
+            &library_root,
+            &trash_dir,
+        )));
+    let trash_abs = if sibling_abs.is_dir() {
+        sibling_abs.clone()
+    } else if let Some(legacy) = candidates.find(|path| path.is_dir()) {
+        legacy
+    } else {
+        sibling_abs
+    };
 
     let original = PathBuf::from(&original_path);
     let moved = if !original_path.is_empty() {
@@ -697,9 +783,18 @@ pub(crate) fn purge_trash_internal<R: Runtime>(
     };
     drop(conn);
     let roots = resource_library_roots(app);
+    let purge_bases: Vec<PathBuf> = roots
+        .iter()
+        .flat_map(|root| {
+            [
+                root.as_path().to_path_buf(),
+                sibling_trash_base(root),
+            ]
+        })
+        .collect();
     for (id, trash_dir, record_json, record_id) in rows {
-        for root in &roots {
-            let _ = std::fs::remove_dir_all(root.join(&trash_dir));
+        for base in &purge_bases {
+            let _ = std::fs::remove_dir_all(base.join(&trash_dir));
         }
         // 附件清理：附件未随文件入回收站（留在库根 .copy-creator/attachments），
         // 彻底删除时按 record_json 清掉，避免孤儿附件无限累积。

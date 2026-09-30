@@ -196,6 +196,7 @@ pub fn run() {
             let is_autostart = std::env::args().any(|a| a == "--hidden");
 
             db::init_db(app.handle())?;
+            db::migrate_trash_out_of_library(app.handle());
             db::sanitize_file_record_contents(app.handle());
             db::prune_old_records(app.handle()).ok();
             app.handle().manage(backup::BackupState::default());
