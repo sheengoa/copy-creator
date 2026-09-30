@@ -4336,6 +4336,64 @@ mod trash_tests {
         assert_eq!(count, 0, ".trash 内文件被监听结算重新入库为幽灵记录");
     }
 
+    // 同名改指（Relinked）时，resource-file 形态 id 必须随路径级联改写
+    // ——否则 id 与 resource_path 脱节（真实事故：记录 id 指旧目录、文件
+    // 在新位置，以 id 提取路径的删除暂存永远错位）。
+    #[test]
+    fn relink_rewrites_resource_file_id_to_match_new_path() {
+        let (app, library) = trash_test_app();
+        let handle = app.handle().clone();
+        let file = library.join("改指.png");
+        std::fs::write(&file, b"x").unwrap();
+        let record_id = resource_file_id(&file);
+        insert_external_record(&app, &record_id, &file, &[]);
+
+        // 对账转存空壳（无桶）后同名文件出现在别处：恢复必然走 Relinked。
+        {
+            let state = app.state::<DbState>();
+            let conn = state.conn.lock().unwrap();
+            archive_resource_record_to_trash(&conn, &library, &record_id, &file.to_string_lossy())
+                .unwrap();
+        }
+        std::fs::remove_file(&file).unwrap();
+        let moved_dir = library.join("别处");
+        std::fs::create_dir_all(&moved_dir).unwrap();
+        let moved = moved_dir.join("改指.png");
+        std::fs::write(&moved, b"x").unwrap();
+
+        let trash_id = list_trash_items_internal(&handle).unwrap()[0]["id"]
+            .as_str()
+            .unwrap()
+            .to_string();
+        let outcome = restore_trash_item_internal(&handle, &trash_id).unwrap();
+        assert!(matches!(outcome, RestoreOutcome::Relinked));
+
+        let state = app.state::<DbState>();
+        // 断言全部走同一把锁内完成：conn 是不可重入 Mutex，持锁期间不得
+        // 再调用会重新加锁的辅助函数（如 record_count）。
+        let (row_id, row_path, old_rows_left) = {
+            let conn = state.conn.lock().unwrap();
+            let row: (String, String) = conn
+                .query_row(
+                    "SELECT id, resource_path FROM clipboard_records WHERE storage_mode = 'resource'",
+                    [],
+                    |row| Ok((row.get(0)?, row.get(1)?)),
+                )
+                .unwrap();
+            let old_rows: i64 = conn
+                .query_row(
+                    "SELECT COUNT(*) FROM clipboard_records WHERE id = ?1",
+                    params![record_id],
+                    |row| row.get(0),
+                )
+                .unwrap();
+            (row.0, row.1, old_rows)
+        };
+        assert_eq!(row_id, resource_file_id(&moved), "id 必须随改指路径级联改写");
+        assert_eq!(row_path, moved.to_string_lossy().to_string());
+        assert_eq!(old_rows_left, 0, "旧 id 不得残留任何行");
+    }
+
     // 带病库自愈：版本号已前滚但列缺失（真实事故——迁移被启动瞬间锁
     // 冲突打断且静默失败，user_version=2 而 resource_missing 缺列，资源
     // 列表整体加载失败）。ensure_schema 必须以磁盘现状为准补齐列。
@@ -4364,6 +4422,43 @@ mod trash_tests {
             .flatten()
             .any(|name| name == "resource_missing");
         assert!(has_column, "带病库必须被自愈补齐 resource_missing 列");
+    }
+
+    // 启动纠偏：历史错位行（id 与 resource_path 不一致的 resource-file
+    // 形态）在 ensure_schema 时以 resource_path 为准对齐 id，外键标签表
+    // 随同改指。
+    #[test]
+    fn ensure_schema_realigns_misaligned_resource_file_ids() {
+        let conn = rusqlite::Connection::open_in_memory().unwrap();
+        // 模拟历史错位库：id 指旧目录、resource_path 指新位置。
+        conn.execute_batch(
+            "CREATE TABLE clipboard_records (
+                 id TEXT PRIMARY KEY, type TEXT NOT NULL, content TEXT NOT NULL,
+                 created_at TEXT NOT NULL, storage_mode TEXT DEFAULT 'database',
+                 resource_path TEXT DEFAULT '', pinned INTEGER NOT NULL DEFAULT 0
+             );
+             CREATE TABLE api_key_labels (
+                 record_id TEXT PRIMARY KEY, key_preview TEXT NOT NULL,
+                 service TEXT NOT NULL, created_at TEXT NOT NULL
+             );
+             INSERT INTO clipboard_records (id, type, content, created_at, storage_mode, resource_path)
+             VALUES ('resource-file:/old/错位.png', 'file', '/new/错位.png',
+                     '2026-01-01T00:00:00Z', 'resource', '/new/错位.png');
+             INSERT INTO api_key_labels (record_id, key_preview, service, created_at)
+             VALUES ('resource-file:/old/错位.png', 'sk-x', 'OpenAI', '2026-01-01T00:00:00Z');",
+        )
+        .unwrap();
+
+        ensure_schema(&conn).unwrap();
+
+        let id: String = conn
+            .query_row("SELECT id FROM clipboard_records", [], |row| row.get(0))
+            .unwrap();
+        assert_eq!(id, "resource-file:/new/错位.png", "主表 id 必须对齐 resource_path");
+        let label_id: String = conn
+            .query_row("SELECT record_id FROM api_key_labels", [], |row| row.get(0))
+            .unwrap();
+        assert_eq!(label_id, "resource-file:/new/错位.png", "标签表必须随同改指");
     }
 
     // 对账持久化缺失标志：文件不在扫描集的记录 resource_missing=1——

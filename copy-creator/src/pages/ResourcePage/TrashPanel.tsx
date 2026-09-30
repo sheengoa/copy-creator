@@ -273,11 +273,13 @@ export function TrashPanel({ onBack }: { onBack: () => void }) {
                 <span className="trash-row-main">
                   <span className="trash-row-name" title={item.original_path}>
                     {item.file_name}
+                  </span>
+                  <span className="trash-row-meta">
+                    {/* 缺失标记放 meta 行而非文件名内：文件名过长触发
+                        ellipsis 截断时会连角标一起裁掉，标记必须恒可见。 */}
                     {!item.has_file && (
                       <span className="trash-row-missing">{t("resources.trashFileMissing")}</span>
                     )}
-                  </span>
-                  <span className="trash-row-meta">
                     {item.original_group
                       ? t("resources.trashFromGroup", { group: item.original_group })
                       : t("resources.trashFromUngrouped")}

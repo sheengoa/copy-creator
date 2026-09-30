@@ -656,15 +656,31 @@ pub(crate) fn restore_trash_item_on_conn(
         }
     };
 
+    // id 级联改写：resource-file 形态的 id 内嵌路径，落位路径与原路径
+    // 不一致时（同名改指/带序号落位）必须连 id 一起改写——与外部目录
+    // 重定向同一语义，否则 id 与 resource_path 脱节，以 id 提取路径的
+    // 操作（删除暂存、按 id 解析）会永远指向旧位置（真实事故：记录 id
+    // 指旧目录、文件在新位置）。非该形态 id（uuid 等用户侧标识）不改写。
+    let effective_record_id = if record_id.starts_with(RESOURCE_FILE_ID_PREFIX)
+        && effective_path != original
+    {
+        let derived_id = resource_file_id(&effective_path);
+        updated_json = rewrite_json_id(&updated_json, &derived_id)?;
+        derived_id
+    } else {
+        record_id.clone()
+    };
+
     // 幽灵清理：同路径的自动发现记录（不同 id）让位给完整元数据的恢复行。
     // 原路径与最终落位路径都清一遍——改指（relink）后新路径下可能存在
-    // 自动发现行，不清理会与恢复行并存成双记录。
+    // 自动发现行，不清理会与恢复行并存成双记录；同 id 的幽灵行由
+    // reinsert 的 INSERT OR REPLACE 直接替换。
     let effective_str = effective_path.to_string_lossy().to_string();
     for ghost_path in [original_path.as_str(), effective_str.as_str()] {
         if !ghost_path.is_empty() {
             conn.execute(
                 "DELETE FROM clipboard_records WHERE resource_path = ?1 AND id != ?2",
-                params![ghost_path, record_id],
+                params![ghost_path, effective_record_id],
             )
             .map_err(|e| e.to_string())?;
         }
@@ -673,10 +689,11 @@ pub(crate) fn restore_trash_item_on_conn(
     reinsert_record_from_json(conn, &updated_json)?;
     // 文件已实际回位/改指到存在的文件：缺失标志清零（record_json 带回的
     // 是入桶前的旧值，对 MetadataOnly 保留——文件仍缺失，如实维持）。
+    // 用生效 id：id 已级联改写时旧 id 不再对应任何行。
     if !matches!(outcome, RestoreOutcome::MetadataOnly) {
         conn.execute(
             "UPDATE clipboard_records SET resource_missing = 0 WHERE id = ?1",
-            params![record_id],
+            params![effective_record_id],
         )
         .map_err(|e| e.to_string())?;
     }
@@ -802,6 +819,18 @@ fn rewrite_json_path(record_json: &str, final_path: &Path) -> Result<String, Str
         let path_value = serde_json::Value::from(final_path.to_string_lossy().to_string());
         object.insert("content".to_string(), path_value.clone());
         object.insert("resource_path".to_string(), path_value);
+    }
+    serde_json::to_string(&value).map_err(|e| format!("序列化记录失败: {e}"))
+}
+
+/// id 级联改写：落位路径变化时同步 record_json 里的 id（reinsert 的
+/// INSERT OR REPLACE 以 id 定位行），api_key_labels 由 reinsert 依据
+/// JSON 内的 id 自动落新键。
+fn rewrite_json_id(record_json: &str, new_id: &str) -> Result<String, String> {
+    let mut value: serde_json::Value =
+        serde_json::from_str(record_json).map_err(|e| format!("解析记录失败: {e}"))?;
+    if let Some(object) = value.as_object_mut() {
+        object.insert("id".to_string(), serde_json::Value::from(new_id));
     }
     serde_json::to_string(&value).map_err(|e| format!("序列化记录失败: {e}"))
 }

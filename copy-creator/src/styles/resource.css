@@ -2191,9 +2191,12 @@
   text-overflow: ellipsis;
 }
 .trash-row-meta { color: var(--text-secondary); font-size: var(--text-xs); /* 原分组路径无空格长串，防横向溢出。 */ overflow-wrap: anywhere; }
-/* 文件已丢失标记：随文件名内联展示，警示色但弱于按钮级强调。 */
+/* 文件已丢失标记：置于 meta 行首（不放文件名内——ellipsis 截断会连
+   角标一起裁掉），警示色弱于按钮级强调，右侧留字距；inline-block 使
+   padding 在行内文本流中正确撑起。 */
 .trash-row-missing {
-  margin-left: 8px;
+  display: inline-block;
+  margin-right: 8px;
   padding: 1px 6px;
   border-radius: 4px;
   font-size: var(--text-xs);
