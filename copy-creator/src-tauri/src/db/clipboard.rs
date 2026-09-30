@@ -748,7 +748,7 @@ pub fn delete_records_by_type(app: AppHandle, record_type: String) -> Result<(),
             .map_err(|e| e.to_string())?
     };
 
-    delete_clipboard_records_internal(&app, &ids)
+    delete_clipboard_records_internal(&app, &ids).map(|_| ())
 }
 
 pub(crate) struct StagedExternalResourceFile {
@@ -824,12 +824,22 @@ pub(crate) fn restore_staged_external_resource_files(staged: &[StagedExternalRes
     }
 }
 
+/// 删除结果统计：deleted 为实际删除的记录行数；files_already_missing 为
+/// 「文件在删除之前就已不在磁盘、仅记录行入回收站」的资源条目数——如实
+/// 告知用户这批条目恢复时无文件可还原，而非等到恢复时才报丢失。
+#[derive(Debug, Default, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct DeleteRecordsSummary {
+    pub deleted: u32,
+    pub files_already_missing: u32,
+}
+
 pub(crate) fn delete_clipboard_records_internal<R: Runtime>(
     app: &AppHandle<R>,
     ids: &[String],
-) -> Result<(), String> {
+) -> Result<DeleteRecordsSummary, String> {
     if ids.is_empty() {
-        return Ok(());
+        return Ok(DeleteRecordsSummary::default());
     }
 
     let staged_resources = stage_external_resource_files(app, ids)?;
@@ -958,6 +968,7 @@ pub(crate) fn delete_clipboard_records_internal<R: Runtime>(
     // 移动失败已在内部整体补偿（文件移回 + 记录行回插），此处把失败
     // 向上抛出：对外表现为删除失败，不丢数据。
     let had_resources = !trashed_resources.is_empty();
+    let mut files_already_missing = 0u32;
     if had_resources {
         let mut trash_moves = Vec::new();
         for (trashed, _attachments) in &trashed_resources {
@@ -967,9 +978,12 @@ pub(crate) fn delete_clipboard_records_internal<R: Runtime>(
                 .map(|file| file.staged_path.clone());
             trash_moves.push((trashed.clone(), staged_source));
         }
-        if let Err(error) = move_trashed_resource_files(app, &trash_library_root, &trash_moves) {
-            restore_staged_external_resource_files(&staged_external_files);
-            return Err(error);
+        match move_trashed_resource_files(app, &trash_library_root, &trash_moves) {
+            Ok(missing) => files_already_missing = missing,
+            Err(error) => {
+                restore_staged_external_resource_files(&staged_external_files);
+                return Err(error);
+            }
         }
     }
     // 未入回收站的暂存文件：绝大多数是监听清退与删除事务的竞态残留——
@@ -1009,6 +1023,7 @@ pub(crate) fn delete_clipboard_records_internal<R: Runtime>(
         deleted_ids.push(file.id);
     }
 
+    let deleted_count = deleted_ids.len() as u32;
     for id in deleted_ids {
         let _ = app.emit("clipboard-deleted", &id);
     }
@@ -1016,16 +1031,19 @@ pub(crate) fn delete_clipboard_records_internal<R: Runtime>(
         let _ = app.emit("resource-groups-changed", ());
     }
 
-    Ok(())
+    Ok(DeleteRecordsSummary {
+        deleted: deleted_count,
+        files_already_missing,
+    })
 }
 
 #[tauri::command]
-pub fn delete_clipboard_records(app: AppHandle, ids: Vec<String>) -> Result<(), String> {
+pub fn delete_clipboard_records(app: AppHandle, ids: Vec<String>) -> Result<DeleteRecordsSummary, String> {
     delete_clipboard_records_internal(&app, &ids)
 }
 
 #[tauri::command]
-pub fn delete_clipboard_record(app: AppHandle, id: String) -> Result<(), String> {
+pub fn delete_clipboard_record(app: AppHandle, id: String) -> Result<DeleteRecordsSummary, String> {
     delete_clipboard_records_internal(&app, &[id])
 }
 

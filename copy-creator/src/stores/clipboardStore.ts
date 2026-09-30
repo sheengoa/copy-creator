@@ -87,6 +87,14 @@ export type ClipboardFilter = Exclude<ClipType, "resources">;
 
 const PAGE_SIZE = 120;
 
+// 删除结果统计（与后端 DeleteRecordsSummary 同形）：filesAlreadyMissing
+// 为「文件在删除之前就已不在磁盘、仅删除了记录」的条目数，资源页据此
+// 即时告知用户，而非等恢复时才报丢失。
+export interface DeleteRecordsSummary {
+  deleted: number;
+  filesAlreadyMissing: number;
+}
+
 interface ClipboardState {
   records: ClipboardRecord[];
   search: string;
@@ -116,8 +124,8 @@ interface ClipboardState {
   reloadLoadedWindow: () => Promise<void>;
   updateRecordLabel: (id: string, label: ApiKeyLabel) => void;
   updateResourceNote: (id: string, note: string) => void;
-  deleteRecords: (ids: string[]) => Promise<void>;
-  deleteRecord: (id: string) => Promise<void>;
+  deleteRecords: (ids: string[]) => Promise<DeleteRecordsSummary>;
+  deleteRecord: (id: string) => Promise<DeleteRecordsSummary>;
   pasteRecord: (record: ClipboardRecord) => Promise<boolean>;
   pasteRecordTerminal: (record: ClipboardRecord) => Promise<boolean>;
   /** 收藏/取消收藏：本地即时打标，随后重载拿收藏浮顶的新顺序。 */
@@ -520,16 +528,17 @@ export function createRecordsStore() {
         return { records: updated };
       }),
 
-    deleteRecords: async (ids: string[]) => {
-      if (ids.length === 0) return;
+    deleteRecords: async (ids: string[]): Promise<DeleteRecordsSummary> => {
+      if (ids.length === 0) return { deleted: 0, filesAlreadyMissing: 0 };
       recordsLoadGeneration++;
       set({ loading: false, loadError: null });
       try {
-        await invoke("delete_clipboard_records", { ids });
+        const summary = await invoke<DeleteRecordsSummary>("delete_clipboard_records", { ids });
         const deletedIds = new Set(ids);
         set({
           records: get().records.filter((r) => !deletedIds.has(r.id)),
         });
+        return summary;
       } catch (e) {
         console.error("Failed to delete clipboard records:", e);
         throw e;

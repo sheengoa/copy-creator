@@ -209,6 +209,7 @@
     "copied": "已粘贴到当前应用",
     "copyFailed": "粘贴失败，请重试",
     "deleteFailed": "删除失败，请重试",
+    "deletedWithMissing": "已移入回收站；其中 {{count}} 条的文件在删除前已不在磁盘，仅删除了记录",
     "openFailed": "打开新建窗口失败，请重试",
     "localSource": "本地内容",
     "librarySettings": "资源库设置",

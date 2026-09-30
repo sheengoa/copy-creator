@@ -198,6 +198,7 @@
     "copied": "Pasted to the current app",
     "copyFailed": "Paste failed. Try again.",
     "deleteFailed": "Delete failed. Try again.",
+    "deletedWithMissing": "Moved to trash; {{count}} of them had no file on disk before deletion — records only",
     "openFailed": "Failed to open the new resource window. Try again.",
     "localSource": "Local content",
     "librarySettings": "Library Settings",

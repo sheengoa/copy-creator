@@ -190,15 +190,17 @@ pub(crate) fn migrate_trash_out_of_library<R: Runtime>(app: &AppHandle<R>) {
 
 /// 主事务提交后：把资源文件移入库外的回收站目录。任一项失败即整体补偿——
 /// 已移动文件移回原位、trash_items 行删除、记录行从 record_json 回插，
-/// 对外表现为删除失败（不丢数据）。
+/// 对外表现为删除失败（不丢数据）。返回「文件在删除之前就已不在磁盘、
+/// 仅记录行入桶」的条目数，供删除结果如实告知用户。
 pub(crate) fn move_trashed_resource_files<R: Runtime>(
     app: &AppHandle<R>,
     library_root: &Path,
     items: &[(TrashedResourceFile, Option<std::path::PathBuf>)],
-) -> Result<(), String> {
+) -> Result<u32, String> {
     let roots = resource_library_roots(app);
     let mut moved_backups: Vec<(PathBuf, PathBuf)> = Vec::new();
     let mut completed: Vec<&TrashedResourceFile> = Vec::new();
+    let mut files_already_missing = 0u32;
     let result = (|| -> Result<(), String> {
         for (item, staged_source) in items {
             let trash_abs = sibling_trash_dir(library_root, &item.trash_dir);
@@ -220,6 +222,8 @@ pub(crate) fn move_trashed_resource_files<R: Runtime>(
                 std::fs::rename(&source, &target)
                     .map_err(|e| format!("移入回收站失败: {e}"))?;
                 moved_backups.push((target, source));
+            } else {
+                files_already_missing += 1;
             }
             completed.push(item);
         }
@@ -235,7 +239,7 @@ pub(crate) fn move_trashed_resource_files<R: Runtime>(
         }
         return Err(error);
     }
-    Ok(())
+    Ok(files_already_missing)
 }
 
 /// 定位资源主文件：托管命名走受控解析；外部文件（库内绝对路径）直接用。

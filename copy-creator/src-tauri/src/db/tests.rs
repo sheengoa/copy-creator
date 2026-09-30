@@ -4334,6 +4334,28 @@ mod trash_tests {
         assert_eq!(count, 0, ".trash 内文件被监听结算重新入库为幽灵记录");
     }
 
+    // 删除结果如实统计：文件在删除之前就已不在磁盘的条目计入
+    // files_already_missing，前端得以即时告知「仅删除了记录」，而非等
+    // 恢复时才报丢失。
+    #[test]
+    fn delete_summary_counts_files_already_missing() {
+        let (app, library) = trash_test_app();
+        let handle = app.handle().clone();
+        let present = library.join("存在.png");
+        std::fs::write(&present, b"here").unwrap();
+        insert_external_record(&app, "r1", &present, &[]);
+        let missing_path = library.join("已丢.png");
+        insert_external_record(&app, "r2", &missing_path, &[]);
+
+        let summary = delete_clipboard_records_internal(
+            &handle,
+            &["r1".to_string(), "r2".to_string()],
+        )
+        .unwrap();
+        assert_eq!(summary.deleted, 2);
+        assert_eq!(summary.files_already_missing, 1);
+    }
+
     // 竞态自愈：监听清退抢在删除事务之前把记录转存成空壳回收条目后，
     // 删除事务查不到记录而跳过，暂存文件必须按原文件名补进空壳条目的
     // 桶目录——空壳变实体，恢复照常还原。绝不允许暂存文件被当作

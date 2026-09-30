@@ -141,7 +141,10 @@ export default function ResourcePage() {
   const resourceListRef = useRef<HTMLDivElement>(null);
   const [listElement, setListElement] = useState<HTMLDivElement | null>(null);
   const [columnCount, setColumnCount] = useState(2);
-  const [feedback, setFeedback] = useState<"copied" | "copyFailed" | "deleteFailed" | "openFailed" | null>(null);
+  const [feedback, setFeedback] = useState<"copied" | "copyFailed" | "deleteFailed" | "deletedWithMissing" | "openFailed" | null>(null);
+  // deletedWithMissing 消息的动态计数：文件在删除前就已不在磁盘、仅删除
+  // 了记录的条目数（后端删除统计如实带回）。
+  const [missingCount, setMissingCount] = useState(0);
   const feedbackTimerRef = useRef<number | null>(null);
 
   const [deletingSelected, setDeletingSelected] = useState(false);
@@ -214,7 +217,7 @@ export default function ResourcePage() {
     { value: "oldest", label: t("resources.sortOldest") },
   ]), [t]);
 
-  const showFeedback = useCallback((next: "copied" | "copyFailed" | "deleteFailed" | "openFailed") => {
+  const showFeedback = useCallback((next: "copied" | "copyFailed" | "deleteFailed" | "deletedWithMissing" | "openFailed") => {
     if (feedbackTimerRef.current !== null) window.clearTimeout(feedbackTimerRef.current);
     setFeedback(next);
     feedbackTimerRef.current = window.setTimeout(() => {
@@ -712,8 +715,12 @@ export default function ResourcePage() {
       message: t("resources.confirmDelete"),
       onConfirm: async () => {
         try {
-          await deleteRecord(id);
+          const summary = await deleteRecord(id);
           if (detailRecordId === id) closeDetail();
+          if (summary && summary.filesAlreadyMissing > 0) {
+            setMissingCount(summary.filesAlreadyMissing);
+            showFeedback("deletedWithMissing");
+          }
         } catch {
           showFeedback("deleteFailed");
         }
@@ -885,8 +892,12 @@ export default function ResourcePage() {
       onConfirm: async () => {
         setDeletingSelected(true);
         try {
-          await deleteRecords(ids);
+          const summary = await deleteRecords(ids);
           cancelResourceSelection();
+          if (summary && summary.filesAlreadyMissing > 0) {
+            setMissingCount(summary.filesAlreadyMissing);
+            showFeedback("deletedWithMissing");
+          }
         } catch {
           showFeedback("deleteFailed");
         } finally {
@@ -1530,14 +1541,16 @@ export default function ResourcePage() {
       )}
 
       {feedback && (
-        <div className={`resource-feedback ${feedback === "copied" ? "success" : "error"}`} role="status" aria-live="polite">
+        <div className={`resource-feedback ${feedback === "copied" ? "success" : feedback === "deletedWithMissing" ? "warn" : "error"}`} role="status" aria-live="polite">
           {feedback === "copied"
             ? t("resources.copied")
             : feedback === "copyFailed"
               ? t("resources.copyFailed")
               : feedback === "deleteFailed"
                 ? t("resources.deleteFailed")
-                : t("resources.openFailed")}
+                : feedback === "deletedWithMissing"
+                  ? t("resources.deletedWithMissing", { count: missingCount })
+                  : t("resources.openFailed")}
         </div>
       )}
       {moveDialogElement}

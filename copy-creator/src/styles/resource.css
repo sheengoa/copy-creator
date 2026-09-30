@@ -1250,6 +1250,12 @@
   border-color: color-mix(in srgb, #34c759 38%, var(--separator));
 }
 
+/* 警示反馈（如「已删除，其中 N 条文件本已缺失」）：操作成功但需如实告知。 */
+.resource-feedback.warn {
+  border-color: color-mix(in srgb, var(--warning, #ff9f0a) 45%, var(--separator));
+  color: var(--warning, #ff9f0a);
+}
+
 .resource-feedback.error {
   border-color: color-mix(in srgb, var(--danger) 38%, var(--separator));
   color: var(--danger);
