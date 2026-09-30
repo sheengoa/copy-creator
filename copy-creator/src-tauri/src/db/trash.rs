@@ -492,7 +492,7 @@ pub(crate) fn list_trash_items_internal<R: Runtime>(
                 // 的占位条目（无桶）两者皆无，如实标为文件已丢失。
                 let has_file = PathBuf::from(&original_path).is_file()
                     || match Path::new(&original_path).file_name() {
-                        Some(name) => resolve_trash_bucket(&roots, &library_root, &trash_dir)
+                        Some(name) => resolve_trash_bucket(&roots, &library_root, trash_dir.as_str())
                             .and_then(|bucket| find_file_in_bucket(&bucket, name))
                             .is_some(),
                         None => false,
@@ -623,11 +623,11 @@ pub(crate) fn restore_trash_item_on_conn(
     // 回收目录解析（按优先级）：当前库根 sibling → 各根 sibling 与库内
     // 旧位置（迁移前的历史遗留）。None = 桶不存在（占位条目或被外部
     // 清理），维持「无文件可移」的原语义。
-    let trash_abs = resolve_trash_bucket(&roots, &library_root, &trash_dir);
+    let trash_abs = resolve_trash_bucket(roots, library_root, trash_dir.as_str());
 
     let original = PathBuf::from(&original_path);
     let moved = if !original_path.is_empty() {
-        move_trash_files_back(trash_abs.as_deref(), &original_path)?
+        move_trash_files_back(trash_abs.as_deref(), original_path.as_str())?
     } else {
         None
     };
@@ -646,7 +646,7 @@ pub(crate) fn restore_trash_item_on_conn(
                 .file_name()
                 .map(|name| name.to_string_lossy().to_string())
                 .unwrap_or_default();
-            match find_same_named_file(&roots, &file_name) {
+            match find_same_named_file(roots, &file_name) {
                 Some(found) => {
                     updated_json = rewrite_json_path(&record_json, &found)?;
                     (RestoreOutcome::Relinked, found)

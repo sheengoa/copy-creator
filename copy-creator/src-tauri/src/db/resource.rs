@@ -712,8 +712,8 @@ pub fn settle_external_resource_changes<R: Runtime>(app: &AppHandle<R>, paths: &
         } else {
             // 应用内删除进行中的路径跳过重定向与清退裁决：磁盘暂时缺文件
             // 是删除流程的正常中间态，不是外部删除（见注册表注释）。
-            let key = watch_path_key(&path);
-            if delete_in_flight_contains(&key) {
+            let key = watch_path_key(path);
+            if delete_in_flight_contains(key.as_path()) {
                 continue;
             }
             missing.push(path.to_path_buf());
