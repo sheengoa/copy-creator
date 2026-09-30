@@ -4424,6 +4424,36 @@ mod trash_tests {
         assert!(has_column, "带病库必须被自愈补齐 resource_missing 列");
     }
 
+    // 删除中注册表的 Windows 路径形态匹配：注册与查询两侧经 watch_path_key
+    // 键化后，反斜杠形态与 `\\?\` verbatim 前缀形态必须命中同一键——否则
+    // Windows 上删除互斥失效，监听清退竞态防线只在 Linux 生效。
+    #[test]
+    fn delete_in_flight_keys_match_for_windows_style_paths() {
+        use crate::db::resource::{delete_in_flight_contains, register_delete_in_flight, watch_path_key};
+        use std::path::Path;
+        let path = Path::new(r"C:\Users\w\图片\资源库\a.png");
+        let _guard = register_delete_in_flight(vec![path.to_path_buf()]);
+
+        assert!(
+            delete_in_flight_contains(&watch_path_key(std::path::Path::new(
+                r"C:\Users\w\图片\资源库\a.png"
+            ))),
+            "同形态路径必须命中"
+        );
+        assert!(
+            delete_in_flight_contains(&watch_path_key(std::path::Path::new(
+                r"\\?\C:\Users\w\图片\资源库\a.png"
+            ))),
+            "verbatim 前缀形态必须被还原后命中"
+        );
+        assert!(
+            !delete_in_flight_contains(&watch_path_key(std::path::Path::new(
+                r"C:\Users\w\图片\资源库\b.png"
+            ))),
+            "不同文件不得误命中"
+        );
+    }
+
     // 启动纠偏：历史错位行（id 与 resource_path 不一致的 resource-file
     // 形态）在 ensure_schema 时以 resource_path 为准对齐 id，外键标签表
     // 随同改指。

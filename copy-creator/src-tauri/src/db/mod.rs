@@ -1100,37 +1100,54 @@ pub(crate) fn ensure_schema(conn: &Connection) -> Result<(), Box<dyn std::error:
     // 纠偏 resource-file 形态 id 与 resource_path 的错位（历史版本的同名
     // 复活/带序号落位保留旧 id 所致：id 指旧目录、文件在新位置，以 id
     // 提取路径的删除暂存永远错位）。以 resource_path 为准对齐 id；先同
-    // 步外键标签表（此刻错位行仍是旧 id，可作映射），再改主表 id。无错
-    // 位行时零写入。
-    const REALIGN_CONDITION: &str = "storage_mode = 'resource'
-         AND COALESCE(resource_path, '') <> ''
-         AND id LIKE 'resource-file:%'
-         AND id <> 'resource-file:' || resource_path";
-    let realign_labels = conn.execute(
-        &format!(
-            "UPDATE api_key_labels SET record_id = 'resource-file:' || (
-                 SELECT resource_path FROM clipboard_records
-                 WHERE id = api_key_labels.record_id
-             )
-             WHERE record_id IN (SELECT id FROM clipboard_records WHERE {REALIGN_CONDITION})"
-        ),
-        [],
-    );
-    let realign = conn.execute(
-        &format!(
-            "UPDATE clipboard_records SET id = 'resource-file:' || resource_path WHERE {REALIGN_CONDITION}"
-        ),
-        [],
-    );
-    match (realign_labels, realign) {
-        (labels, Ok(count)) if count > 0 => {
-            if let Err(error) = labels {
-                log::error!("同步错位资源记录的 API Key 标签失败: {error}");
+    // 步外键标签表（此刻错位行仍是旧 id，可作映射），再改主表 id。逐行
+    // 处理：Windows 历史数据可能存在仅大小写变体的双行，批量 UPDATE 撞
+    // 主键会让全部行一起失败；单行失败只跳过该行并告警，不阻断其余。
+    let misaligned: Vec<(String, String)> = {
+        let Ok(mut stmt) = conn.prepare(
+            "SELECT id, 'resource-file:' || resource_path FROM clipboard_records
+             WHERE storage_mode = 'resource'
+               AND COALESCE(resource_path, '') <> ''
+               AND id LIKE 'resource-file:%'
+               AND id <> 'resource-file:' || resource_path",
+        ) else {
+            log::error!("读取待纠偏资源记录失败");
+            return Ok(());
+        };
+        let rows = stmt.query_map([], |row| Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?)));
+        match rows {
+            Ok(rows) => rows.flatten().collect(),
+            Err(error) => {
+                log::error!("读取待纠偏资源记录失败: {error}");
+                return Ok(());
             }
-            log::info!("已纠偏 {count} 条 id 与 resource_path 错位的资源记录");
         }
-        (_, Ok(_)) => {}
-        (_, Err(error)) => log::error!("纠偏资源记录 id 错位失败: {error}"),
+    };
+    let mut realigned = 0usize;
+    for (old_id, new_id) in &misaligned {
+        // 主表先行：改写失败（如 Windows 大小写变体双行撞主键）则本行
+        // 整体跳过，标签不动，数据无损。
+        match conn.execute(
+            "UPDATE clipboard_records SET id = ?1 WHERE id = ?2",
+            params![new_id, old_id],
+        ) {
+            Ok(_) => realigned += 1,
+            Err(error) => {
+                log::error!("纠偏资源记录 id 失败（{old_id}）: {error}");
+                continue;
+            }
+        }
+        // 标签随迁；新 id 已有标签行（主键冲突）时清理旧标签行，防孤儿。
+        if let Err(error) = conn.execute(
+            "UPDATE api_key_labels SET record_id = ?1 WHERE record_id = ?2",
+            params![new_id, old_id],
+        ) {
+            let _ = conn.execute("DELETE FROM api_key_labels WHERE record_id = ?1", params![old_id]);
+            log::error!("同步错位资源记录的 API Key 标签失败，已清理旧标签（{old_id}）: {error}");
+        }
+    }
+    if realigned > 0 {
+        log::info!("已纠偏 {realigned} 条 id 与 resource_path 错位的资源记录");
     }
     Ok(())
 }

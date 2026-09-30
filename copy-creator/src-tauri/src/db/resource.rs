@@ -516,7 +516,7 @@ fn collect_resource_files_under(directory: &Path) -> Vec<PathBuf> {
 /// canonicalize——消失路径已无法 canonicalize，混用两种形态会让前缀
 /// 匹配失效。事件路径与记录路径同源于 `get_resource_library_dir`，
 /// 形态一致，直接组件比较即可。
-fn watch_path_key(path: &Path) -> PathBuf {
+pub(crate) fn watch_path_key(path: &Path) -> PathBuf {
     simplify_windows_path(&path.components().collect::<PathBuf>())
 }
 
@@ -543,7 +543,7 @@ fn delete_in_flight() -> &'static Mutex<HashSet<PathBuf>> {
     DELETE_IN_FLIGHT.get_or_init(|| Mutex::new(HashSet::new()))
 }
 
-fn delete_in_flight_contains(key: &Path) -> bool {
+pub(crate) fn delete_in_flight_contains(key: &Path) -> bool {
     delete_in_flight()
         .lock()
         .map(|set| set.contains(key))
