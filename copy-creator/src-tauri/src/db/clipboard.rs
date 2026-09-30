@@ -751,24 +751,25 @@ pub fn delete_records_by_type(app: AppHandle, record_type: String) -> Result<(),
     delete_clipboard_records_internal(&app, &ids)
 }
 
-pub(crate) fn delete_external_resource_file<R: Runtime>(
-    _app: &AppHandle<R>,
-    path: &Path,
-) -> Result<(), String> {
-    std::fs::remove_file(path).map_err(|error| format!("删除资源文件失败: {error}"))
-}
-
 pub(crate) struct StagedExternalResourceFile {
     id: String,
     original_path: PathBuf,
     staged_path: PathBuf,
 }
 
+/// 暂存结果连同删除进行中注册一起返回：守卫必须活到整个删除流程终结
+/// （文件移入回收站 / 补偿完成），期间监听结算对这些路径的「消失」裁决
+/// 全部跳过。
+pub(crate) struct StagedExternalResources {
+    pub files: Vec<StagedExternalResourceFile>,
+    pub in_flight: crate::db::DeleteInFlightGuard,
+}
+
 pub(crate) fn stage_external_resource_files<R: Runtime>(
     app: &AppHandle<R>,
     ids: &[String],
-) -> Result<Vec<StagedExternalResourceFile>, String> {
-    let mut staged = Vec::new();
+) -> Result<StagedExternalResources, String> {
+    let mut planned: Vec<StagedExternalResourceFile> = Vec::new();
     for id in ids {
         // 解析失败最常见的原因正是文件已被外部删除（canonicalize 对不存在的
         // 路径必然报错）：视同文件已不在，跳过暂存并继续清理记录，避免整个
@@ -788,17 +789,31 @@ pub(crate) fn stage_external_resource_files<R: Runtime>(
             .parent()
             .ok_or_else(|| "资源文件路径无效".to_string())?;
         let staged_path = parent.join(format!(".copy-creator-delete-{}.tmp", uuid::Uuid::new_v4()));
-        if let Err(error) = std::fs::rename(&original_path, &staged_path) {
-            restore_staged_external_resource_files(&staged);
-            return Err(format!("准备删除资源文件失败: {error}"));
-        }
-        staged.push(StagedExternalResourceFile {
+        planned.push(StagedExternalResourceFile {
             id: id.clone(),
             original_path,
             staged_path,
         });
     }
-    Ok(staged)
+    // 注册必须先于任何 rename：监听事件可能在 rename 后毫秒内到达，晚注册
+    // 会留下「记录还在、文件已消失」的误裁决窗口。暂存路径一并注册。
+    let in_flight = crate::db::register_delete_in_flight(
+        planned
+            .iter()
+            .flat_map(|file| [file.original_path.clone(), file.staged_path.clone()]),
+    );
+    let mut staged = Vec::new();
+    for file in planned {
+        if let Err(error) = std::fs::rename(&file.original_path, &file.staged_path) {
+            restore_staged_external_resource_files(&staged);
+            return Err(format!("准备删除资源文件失败: {error}"));
+        }
+        staged.push(file);
+    }
+    Ok(StagedExternalResources {
+        files: staged,
+        in_flight,
+    })
 }
 
 pub(crate) fn restore_staged_external_resource_files(staged: &[StagedExternalResourceFile]) {
@@ -809,21 +824,6 @@ pub(crate) fn restore_staged_external_resource_files(staged: &[StagedExternalRes
     }
 }
 
-pub(crate) fn finalize_staged_external_resource_files<R: Runtime>(
-    app: &AppHandle<R>,
-    staged: &[StagedExternalResourceFile],
-) -> Result<(), String> {
-    let mut first_error = None;
-    for file in staged {
-        if let Err(error) = delete_external_resource_file(app, &file.staged_path) {
-            if first_error.is_none() {
-                first_error = Some(error);
-            }
-        }
-    }
-    first_error.map_or(Ok(()), Err)
-}
-
 pub(crate) fn delete_clipboard_records_internal<R: Runtime>(
     app: &AppHandle<R>,
     ids: &[String],
@@ -832,7 +832,11 @@ pub(crate) fn delete_clipboard_records_internal<R: Runtime>(
         return Ok(());
     }
 
-    let staged_external_files = stage_external_resource_files(app, ids)?;
+    let staged_resources = stage_external_resource_files(app, ids)?;
+    let staged_external_files = staged_resources.files;
+    // 守卫活到函数结束：注册期覆盖 stage → 事务 → 移桶 → leftover 处理
+    // 全程，监听结算在此期间对这些路径的「消失」裁决一律跳过。
+    let _delete_in_flight = staged_resources.in_flight;
     let mut deleted_ids = Vec::new();
     let mut image_contents = HashSet::new();
     let mut trashed_resources: Vec<(crate::db::TrashedResourceFile, Vec<String>)> = Vec::new();
@@ -968,7 +972,11 @@ pub(crate) fn delete_clipboard_records_internal<R: Runtime>(
             return Err(error);
         }
     }
-    // 未入回收站的暂存文件（记录行本就不存在等边缘）维持彻底删除。
+    // 未入回收站的暂存文件：绝大多数是监听清退与删除事务的竞态残留——
+    // 记录行已被抢先转存成空壳回收条目，把暂存文件按原文件名补进该条目
+    // 的桶目录即恢复「删除 = 文件入桶」语义；既无回收条目也无记录行的
+    // 极端情况保留暂存文件并告警，绝不静默删除（宁可留隐藏临时文件，
+    // 不可丢数据）。
     let trashed_record_ids: std::collections::HashSet<&str> = trashed_resources
         .iter()
         .map(|(trashed, _)| trashed.record_id.as_str())
@@ -977,10 +985,27 @@ pub(crate) fn delete_clipboard_records_internal<R: Runtime>(
         .into_iter()
         .filter(|file| !trashed_record_ids.contains(file.id.as_str()))
         .collect();
-    if let Err(error) = finalize_staged_external_resource_files(app, &leftover_staged) {
-        log::warn!("资源文件临时清理失败，已保留隐藏临时文件: {error}");
-    }
     for file in leftover_staged {
+        let original_name = file
+            .original_path
+            .file_name()
+            .map(|name| name.to_os_string())
+            .unwrap_or_default();
+        match heal_staged_file_into_trash(app, &file.id, &file.staged_path, &original_name) {
+            Ok(target) => {
+                log::info!(
+                    "删除与监听结算竞态已自愈: {} → {}",
+                    file.staged_path.display(),
+                    target.display()
+                );
+            }
+            Err(error) => {
+                log::error!(
+                    "暂存文件无法归位，已保留待人工处理: {} ({error})",
+                    file.staged_path.display()
+                );
+            }
+        }
         deleted_ids.push(file.id);
     }
 

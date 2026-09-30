@@ -604,7 +604,7 @@ mod record_classification_tests {
 #[cfg(test)]
 mod resource_command_tests {
     use crate::db::{
-        create_resource_group_inner, delete_external_resource_file, delete_resource_group_inner,
+        create_resource_group_inner, delete_resource_group_inner,
         forget_resource_records, get_clipboard_records_inner, get_resource_groups_inner,
         move_resource_group_inner, move_resource_records_inner, normalize_file_backed_text_records,
         read_resource_text_preview_file,
@@ -1380,7 +1380,7 @@ mod resource_command_tests {
             resolve_resource_file_path(app.handle(), selected.to_string_lossy().as_ref()).unwrap();
         // 解析结果保持常规形态（无 `\\?\` 扩展前缀），与扫描出的记录路径一致。
         assert_eq!(resolved, simplify_windows_path(&selected.canonicalize().unwrap()));
-        delete_external_resource_file(app.handle(), &resolved).unwrap();
+        std::fs::remove_file(&resolved).unwrap();
         assert!(!selected.exists());
         assert!(retained.exists());
         cleanup(&root);
@@ -1423,7 +1423,7 @@ mod resource_command_tests {
         let staged = stage_external_resource_files(app.handle(), &ids).unwrap();
         assert!(!first.exists());
         assert!(!second.exists());
-        restore_staged_external_resource_files(&staged);
+        restore_staged_external_resource_files(&staged.files);
 
         assert!(first.is_file());
         assert!(second.is_file());
@@ -3645,10 +3645,11 @@ mod pinned_record_tests {
 
 mod trash_tests {
     use crate::db::{
-        delete_clipboard_records_internal, ensure_schema, list_trash_items_internal,
-        discover_external_resource_files, get_clipboard_records_inner, migrate_trash_out_of_library,
-        prune_old_records, purge_trash_internal, restore_trash_item_internal,
-        sync_resource_library, DbState, RestoreOutcome,
+        archive_resource_record_to_trash, delete_clipboard_records_internal, ensure_schema,
+        list_trash_items_internal, discover_external_resource_files, get_clipboard_records_inner,
+        migrate_trash_out_of_library, prune_old_records, purge_trash_internal,
+        register_delete_in_flight, restore_trash_item_internal, resource_file_id,
+        settle_external_resource_changes, sync_resource_library, DbState, RestoreOutcome,
     };
     use rusqlite::params;
     use std::io::{Read, Write};
@@ -4331,6 +4332,100 @@ mod trash_tests {
             .query_row("SELECT COUNT(*) FROM clipboard_records", [], |row| row.get(0))
             .unwrap();
         assert_eq!(count, 0, ".trash 内文件被监听结算重新入库为幽灵记录");
+    }
+
+    // 竞态自愈：监听清退抢在删除事务之前把记录转存成空壳回收条目后，
+    // 删除事务查不到记录而跳过，暂存文件必须按原文件名补进空壳条目的
+    // 桶目录——空壳变实体，恢复照常还原。绝不允许暂存文件被当作
+    // leftover 彻底删除（历史真丢路径）。
+    #[test]
+    fn delete_race_with_early_settle_heals_staged_file_into_trash() {
+        let (app, library) = trash_test_app();
+        let handle = app.handle().clone();
+        let group_dir = library.join("组");
+        std::fs::create_dir_all(&group_dir).unwrap();
+        let file = group_dir.join("竞态.png");
+        std::fs::write(&file, b"race").unwrap();
+        let record_id = resource_file_id(&file);
+        insert_external_record(&app, &record_id, &file, &[]);
+
+        // 模拟监听清退抢在删除事务之前运行：记录整行转存（空壳，无文件）。
+        {
+            let state = app.state::<DbState>();
+            let conn = state.conn.lock().unwrap();
+            archive_resource_record_to_trash(&conn, &library, &record_id, &file.to_string_lossy())
+                .unwrap();
+        }
+
+        delete_clipboard_records_internal(&handle, &[record_id.clone()]).unwrap();
+
+        // 只有一条回收条目（不产生重复空壳），暂存文件已补入其桶目录。
+        let items = list_trash_items_internal(&handle).unwrap();
+        assert_eq!(items.len(), 1, "竞态下不得产生重复回收条目");
+
+        // 恢复：文件原样回位、记录整行回插——删除→恢复闭环不因竞态丢数据。
+        let trash_id = items[0]["id"].as_str().unwrap().to_string();
+        restore_trash_item_internal(&handle, &trash_id).unwrap();
+        assert!(file.exists(), "恢复后文件必须回原位");
+        assert_eq!(std::fs::read(&file).unwrap(), b"race");
+        assert_eq!(record_count(&app, &record_id), 1);
+        assert!(list_trash_items_internal(&handle).unwrap().is_empty());
+    }
+
+    // 既无回收条目也无记录行时，暂存文件保留不删——宁可留隐藏临时文件
+    // 待人工处理，也不静默删除用户数据。
+    #[test]
+    fn orphan_staged_file_survives_without_trash_entry() {
+        let (app, library) = trash_test_app();
+        let handle = app.handle().clone();
+        let file = library.join("孤儿.png");
+        std::fs::write(&file, b"orphan").unwrap();
+        // 不插任何记录：删除请求带着指向存在文件的 id，但记录行不存在。
+
+        let record_id = resource_file_id(&file);
+        delete_clipboard_records_internal(&handle, &[record_id]).unwrap();
+
+        assert!(
+            list_trash_items_internal(&handle).unwrap().is_empty(),
+            "无记录行不得凭空建回收条目"
+        );
+        let leftover = std::fs::read_dir(&library)
+            .unwrap()
+            .flatten()
+            .find(|entry| {
+                entry
+                    .file_name()
+                    .to_string_lossy()
+                    .starts_with(".copy-creator-delete-")
+            })
+            .expect("无主暂存文件必须保留");
+        assert_eq!(std::fs::read(leftover.path()).unwrap(), b"orphan");
+    }
+
+    // 删除进行中的路径（stage 已 rename、事务未提交的窗口形态），监听
+    // 结算必须跳过清退——记录行留在删除事务手里，不产生空壳回收条目。
+    #[test]
+    fn settle_skips_paths_registered_as_deleting() {
+        let (app, library) = trash_test_app();
+        let handle = app.handle().clone();
+        let group_dir = library.join("组");
+        std::fs::create_dir_all(&group_dir).unwrap();
+        let file = group_dir.join("进行中.png");
+        std::fs::write(&file, b"busy").unwrap();
+        let record_id = resource_file_id(&file);
+        insert_external_record(&app, &record_id, &file, &[]);
+
+        std::fs::rename(&file, group_dir.join(".copy-creator-delete-x.tmp")).unwrap();
+        let guard = register_delete_in_flight(vec![file.clone()]);
+        settle_external_resource_changes(&handle, &[file.clone()]);
+        drop(guard);
+
+        assert_eq!(
+            record_count(&app, &record_id),
+            1,
+            "在册路径的记录不得被监听清退"
+        );
+        assert!(list_trash_items_internal(&handle).unwrap().is_empty());
     }
 }
 

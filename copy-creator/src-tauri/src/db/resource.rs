@@ -323,16 +323,22 @@ pub fn forget_resource_records<R: Runtime>(app: &AppHandle<R>, paths: &[PathBuf]
     let missing_keys: Vec<PathBuf> = paths.iter().map(|path| watch_path_key(path)).collect();
     for (id, resource_path) in rows {
         let key = watch_path_key(&resource_path);
-        if missing_keys
+        let hit = missing_keys
             .iter()
-            .any(|missing| key == *missing || key.starts_with(missing))
+            .find(|missing| key == missing.as_path() || key.starts_with(missing.as_path()));
+        let Some(missing_key) = hit else {
+            continue;
+        };
+        // 双保险：命中消失路径且该路径正在应用内删除中，跳过清退——记录
+        // 行由删除事务自己处理，抢先转存会制造空壳条目并诱发暂存文件误删。
+        if delete_in_flight_contains(missing_key) {
+            continue;
+        }
+        // 监听清退同样转存回收站兜底（文件管理器删除等外部操作）。
+        if let Err(error) =
+            archive_resource_record_to_trash(&conn, &root, &id, &resource_path.to_string_lossy())
         {
-            // 监听清退同样转存回收站兜底（文件管理器删除等外部操作）。
-            if let Err(error) =
-                archive_resource_record_to_trash(&conn, &root, &id, &resource_path.to_string_lossy())
-            {
-                log::error!("监听清退转存回收站失败（{id}）: {error}");
-            }
+            log::error!("监听清退转存回收站失败（{id}）: {error}");
         }
     }
 }
@@ -499,6 +505,61 @@ fn same_parent(a: &Path, b: &Path) -> bool {
     }
 }
 
+// === 删除进行中注册表：堵死「监听清退与应用内删除竞态」的真丢文件路径 ===
+
+/// 应用内删除资源分三步：把库内文件改名成同目录隐藏 `.tmp` 暂存 → 数据库
+/// 事务（插 trash_items、删记录行）→ 暂存文件移入库外回收站。在暂存与
+/// 事务提交之间，磁盘现状（文件不在）与数据库（记录还在）暂时矛盾；监听
+/// 防抖若恰好在这窗口内结算，会把它误判成外部删除：记录行被抢先转存成
+/// 空壳回收条目，删除事务随后查不到记录而跳过，暂存文件被当作 leftover
+/// 彻底删除——文件永久丢失。注册表让监听结算对删除中路径直接跳过；窗口
+/// 结束（无论成败、panic）由守卫统一注销。
+static DELETE_IN_FLIGHT: OnceLock<Mutex<HashSet<PathBuf>>> = OnceLock::new();
+
+fn delete_in_flight() -> &'static Mutex<HashSet<PathBuf>> {
+    DELETE_IN_FLIGHT.get_or_init(|| Mutex::new(HashSet::new()))
+}
+
+fn delete_in_flight_contains(key: &Path) -> bool {
+    delete_in_flight()
+        .lock()
+        .map(|set| set.contains(key))
+        .unwrap_or(false)
+}
+
+/// 删除进行中注册的 RAII 守卫：持有期间相关路径对监听结算不可见。
+pub(crate) struct DeleteInFlightGuard {
+    keys: Vec<PathBuf>,
+}
+
+impl Drop for DeleteInFlightGuard {
+    fn drop(&mut self) {
+        if let Ok(mut set) = delete_in_flight().lock() {
+            for key in &self.keys {
+                set.remove(key);
+            }
+        }
+    }
+}
+
+/// 登记一次删除涉及的全部路径（原路径与暂存路径；键与 watch_path_key
+/// 同口径，事件路径与记录路径形态一致，直接组件比较）。
+pub(crate) fn register_delete_in_flight<I>(paths: I) -> DeleteInFlightGuard
+where
+    I: IntoIterator<Item = PathBuf>,
+{
+    let mut keys = Vec::new();
+    if let Ok(mut set) = delete_in_flight().lock() {
+        for path in paths {
+            let key = watch_path_key(&path);
+            if set.insert(key.clone()) {
+                keys.push(key);
+            }
+        }
+    }
+    DeleteInFlightGuard { keys }
+}
+
 /// 外部目录改名/移动的重定向：旧目录路径消失、同批有同父目录的新目录
 /// 到达、且新目录的实际文件完全覆盖旧子树的记录时，把记录的
 /// resource_path 与 id 级联改写到新路径（备注、使用次数、创建时间等
@@ -625,6 +686,12 @@ pub fn settle_external_resource_changes<R: Runtime>(app: &AppHandle<R>, paths: &
         if path.exists() {
             existing.push(path.to_path_buf());
         } else {
+            // 应用内删除进行中的路径跳过重定向与清退裁决：磁盘暂时缺文件
+            // 是删除流程的正常中间态，不是外部删除（见注册表注释）。
+            let key = watch_path_key(&path);
+            if delete_in_flight_contains(&key) {
+                continue;
+            }
             missing.push(path.to_path_buf());
         }
     }

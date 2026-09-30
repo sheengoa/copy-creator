@@ -257,6 +257,38 @@ fn resolve_trash_source(
     None
 }
 
+/// 竞态自愈：监听清退抢在删除事务之前把记录转存成空壳回收条目后，删除
+/// 事务查不到记录而跳过，暂存文件留在 leftover。把暂存文件按原文件名补
+/// 进该记录对应回收条目的桶目录——空壳条目变回实体条目，恢复照常还原。
+/// 找不到回收条目时报错，由调用方保留暂存文件（宁可留隐藏临时文件，
+/// 也不静默删除）。
+pub(crate) fn heal_staged_file_into_trash<R: Runtime>(
+    app: &AppHandle<R>,
+    record_id: &str,
+    staged_path: &Path,
+    original_name: &OsStr,
+) -> Result<PathBuf, String> {
+    let library_root = get_resource_library_dir(app);
+    let state = app.state::<DbState>();
+    let conn = state.conn.lock().map_err(|e| e.to_string())?;
+    let trash_dir: String = conn
+        .query_row(
+            "SELECT trash_dir FROM trash_items WHERE record_id = ?1
+             ORDER BY trashed_ms DESC LIMIT 1",
+            params![record_id],
+            |row| row.get(0),
+        )
+        .optional()
+        .map_err(|e| e.to_string())?
+        .ok_or_else(|| "记录既无现存行也无回收条目".to_string())?;
+    drop(conn);
+    let bucket = sibling_trash_dir(&library_root, &trash_dir);
+    std::fs::create_dir_all(&bucket).map_err(|e| format!("创建回收目录失败: {e}"))?;
+    let target = bucket.join(original_name);
+    std::fs::rename(staged_path, &target).map_err(|e| format!("暂存文件补入回收站失败: {e}"))?;
+    Ok(target)
+}
+
 /// 对账/监听清退的兜底转存：把"文件已不在库内"的记录整行转入应用内
 /// 回收站，而不是直接删除——记录永不对账即消失，用户可在回收站查看、
 /// 恢复（三态如实提示文件缺失）或彻底删除。
