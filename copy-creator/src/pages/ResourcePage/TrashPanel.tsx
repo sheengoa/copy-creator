@@ -16,6 +16,8 @@ interface TrashItem {
   original_path: string;
   trashed_at: string;
   has_attachments: boolean;
+  /** 条目实体状态（运行时判定）：false = 文件在删除前已不在磁盘、仅记录入桶，恢复无文件可还原。 */
+  has_file: boolean;
 }
 
 // 与后端 RestoreOutcome / RestoreBatchSummary 对应（snake_case 直传）。
@@ -38,6 +40,9 @@ export function TrashPanel({ onBack }: { onBack: () => void }) {
   const [selectionMode, setSelectionMode] = useState(false);
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
   const [notice, setNotice] = useState<string | null>(null);
+  // 文件已丢失条目的恢复确认：恢复仅还原记录元数据（库内有唯一同名文件
+  // 时自动关联），提前如实告知，而非恢复后才报 metadata_only。
+  const [confirmRestoreMissing, setConfirmRestoreMissing] = useState<TrashItem | null>(null);
   const busy = busyOp !== null;
 
   const loadItems = useCallback(async (): Promise<TrashItem[]> => {
@@ -94,6 +99,22 @@ export function TrashPanel({ onBack }: { onBack: () => void }) {
     } finally {
       setBusyOp(null);
     }
+  };
+
+  const restoreItem = (item: TrashItem) => {
+    void act("restore", () =>
+      invoke<RestoreOutcome>("restore_trash_item", { id: item.id }),
+    ).then((outcome) => {
+      if (outcome && outcome !== "restored") {
+        setNotice(
+          noticeFromCounts(
+            outcome === "relinked" ? 1 : 0,
+            outcome === "metadata_only" ? 1 : 0,
+            0,
+          ),
+        );
+      }
+    });
   };
 
   const runBatchRestore = async () => {
@@ -252,6 +273,9 @@ export function TrashPanel({ onBack }: { onBack: () => void }) {
                 <span className="trash-row-main">
                   <span className="trash-row-name" title={item.original_path}>
                     {item.file_name}
+                    {!item.has_file && (
+                      <span className="trash-row-missing">{t("resources.trashFileMissing")}</span>
+                    )}
                   </span>
                   <span className="trash-row-meta">
                     {item.original_group
@@ -268,21 +292,13 @@ export function TrashPanel({ onBack }: { onBack: () => void }) {
                       type="button"
                       className="trash-row-btn"
                       disabled={busy}
-                      onClick={() =>
-                        void act("restore", () =>
-                          invoke<RestoreOutcome>("restore_trash_item", { id: item.id }),
-                        ).then((outcome) => {
-                          if (outcome && outcome !== "restored") {
-                            setNotice(
-                              noticeFromCounts(
-                                outcome === "relinked" ? 1 : 0,
-                                outcome === "metadata_only" ? 1 : 0,
-                                0,
-                              ),
-                            );
-                          }
-                        })
-                      }
+                      onClick={() => {
+                        if (item.has_file) {
+                          void restoreItem(item);
+                        } else {
+                          setConfirmRestoreMissing(item);
+                        }
+                      }}
                     >
                       {t("resources.trashRestore")}
                     </button>
@@ -305,6 +321,20 @@ export function TrashPanel({ onBack }: { onBack: () => void }) {
       )}
 
       <div className="trash-foot">{t("resources.trashRetentionHint")}</div>
+
+      {confirmRestoreMissing && (
+        <ConfirmDialog
+          message={t("resources.trashRestoreMissingConfirm", {
+            name: confirmRestoreMissing.file_name,
+          })}
+          onConfirm={() => {
+            const item = confirmRestoreMissing;
+            setConfirmRestoreMissing(null);
+            if (item) restoreItem(item);
+          }}
+          onCancel={() => setConfirmRestoreMissing(null)}
+        />
+      )}
 
       {confirmPurgeAll && (
         <ConfirmDialog

@@ -2181,6 +2181,15 @@
   text-overflow: ellipsis;
 }
 .trash-row-meta { color: var(--text-secondary); font-size: var(--text-xs); /* 原分组路径无空格长串，防横向溢出。 */ overflow-wrap: anywhere; }
+/* 文件已丢失标记：随文件名内联展示，警示色但弱于按钮级强调。 */
+.trash-row-missing {
+  margin-left: 8px;
+  padding: 1px 6px;
+  border-radius: 4px;
+  font-size: var(--text-xs);
+  background: color-mix(in srgb, var(--danger, #dc2626) 12%, transparent);
+  color: var(--danger, #dc2626);
+}
 
 .trash-row-btn {
   flex-shrink: 0;

@@ -138,6 +138,34 @@ fn sibling_trash_dir(library_root: &Path, trash_dir: &str) -> PathBuf {
     sibling_trash_base(library_root).join(trash_dir)
 }
 
+/// 回收目录解析（按优先级）：当前库根的同级隐藏目录（新位置）→ 各根的
+/// sibling 与库内旧位置（迁移前的历史遗留）。返回 None 表示桶目录不存在
+/// （对账转存的占位条目，或文件已被外部清理）——恢复与条目实体判定
+/// （has_file）共用同一口径。
+fn resolve_trash_bucket(
+    roots: &[PathBuf],
+    library_root: &Path,
+    trash_dir: &str,
+) -> Option<PathBuf> {
+    let sibling_abs = sibling_trash_dir(library_root, trash_dir);
+    if sibling_abs.is_dir() {
+        return Some(sibling_abs);
+    }
+    roots
+        .iter()
+        .flat_map(|root| {
+            [
+                sibling_trash_dir(root, trash_dir),
+                trash_dir_absolute(root, trash_dir),
+            ]
+        })
+        .chain(std::iter::once(trash_dir_absolute(
+            library_root,
+            trash_dir,
+        )))
+        .find(|path| path.is_dir())
+}
+
 /// 一次性迁移：把历史版本放在库内的回收站（库根/.trash）整体移到库外
 /// 隐藏目录，用户清理资源库文件夹不会再连带删掉回收站内容。启动时调用。
 pub(crate) fn migrate_trash_out_of_library<R: Runtime>(app: &AppHandle<R>) {
@@ -427,27 +455,60 @@ pub(crate) fn reinsert_record_from_json(
 pub(crate) fn list_trash_items_internal<R: Runtime>(
     app: &AppHandle<R>,
 ) -> Result<Vec<serde_json::Value>, String> {
+    // 多根与库根解析要在拿数据库锁之前完成（同 restore 的锁序约束）。
+    let library_root = get_resource_library_dir(app);
+    let roots = resource_library_roots(app);
     let state = app.state::<DbState>();
     let conn = state.conn.lock().map_err(|e| e.to_string())?;
     let mut stmt = conn
         .prepare(
-            "SELECT id, file_name, original_group, original_path, trashed_at, record_json
+            "SELECT id, file_name, original_group, original_path, trashed_at, record_json, trash_dir
              FROM trash_items ORDER BY trashed_ms DESC",
         )
         .map_err(|e| e.to_string())?;
-    let rows = stmt
+    let rows: Vec<(String, String, String, String, String, String, String)> = stmt
         .query_map([], |row| {
-            Ok(serde_json::json!({
-                "id": row.get::<_, String>(0)?,
-                "file_name": row.get::<_, String>(1)?,
-                "original_group": row.get::<_, String>(2)?,
-                "original_path": row.get::<_, String>(3)?,
-                "trashed_at": row.get::<_, String>(4)?,
-                "has_attachments": record_json_has_attachments(row.get::<_, String>(5)?.as_str()),
-            }))
+            Ok((
+                row.get::<_, String>(0)?,
+                row.get::<_, String>(1)?,
+                row.get::<_, String>(2)?,
+                row.get::<_, String>(3)?,
+                row.get::<_, String>(4)?,
+                row.get::<_, String>(5)?,
+                row.get::<_, String>(6)?,
+            ))
         })
+        .map_err(|e| e.to_string())?
+        .collect::<Result<Vec<_>, _>>()
         .map_err(|e| e.to_string())?;
-    rows.collect::<Result<Vec<_>, _>>().map_err(|e| e.to_string())
+    drop(stmt);
+    drop(conn);
+    Ok(rows
+        .into_iter()
+        .map(
+            |(id, file_name, original_group, original_path, trashed_at, record_json, trash_dir)| {
+                // 条目实体判定（运行时 stat，不持久化——外部动过桶后仍真实）：
+                // 原位文件还在，或回收桶内能找到该文件名的主文件。对账转存
+                // 的占位条目（无桶）两者皆无，如实标为文件已丢失。
+                let has_file = PathBuf::from(&original_path).is_file()
+                    || match Path::new(&original_path).file_name() {
+                        Some(name) => resolve_trash_bucket(&roots, &library_root, &trash_dir)
+                            .and_then(|bucket| find_file_in_bucket(&bucket, name))
+                            .is_some(),
+                        None => false,
+                    };
+                serde_json::json!({
+                    "id": id,
+                    "file_name": file_name,
+                    "original_group": original_group,
+                    "original_path": original_path,
+                    "trashed_at": trashed_at,
+                    "has_attachments": record_json_has_attachments(&record_json),
+                    "has_file": has_file,
+                })
+            },
+        )
+        .collect())
 }
 
 #[tauri::command]
@@ -559,34 +620,14 @@ pub(crate) fn restore_trash_item_on_conn(
         )
         .map_err(|e| format!("回收站条目不存在: {e}"))?;
 
-    // 回收目录解析（按优先级）：
-    // 1. 各库根（当前 + 历史）的同级隐藏目录（新位置）；
-    // 2. 各库根内的旧 .trash 与当前库内旧位置（迁移前的历史遗留）；
-    // 都找不到时按当前库的新位置拼接，维持「无文件可移」的原语义。
-    let sibling_abs = sibling_trash_dir(&library_root, &trash_dir);
-    let mut candidates = roots
-        .iter()
-        .flat_map(|root| {
-            [
-                sibling_trash_dir(root, &trash_dir),
-                trash_dir_absolute(root, &trash_dir),
-            ]
-        })
-        .chain(std::iter::once(trash_dir_absolute(
-            &library_root,
-            &trash_dir,
-        )));
-    let trash_abs = if sibling_abs.is_dir() {
-        sibling_abs.clone()
-    } else if let Some(legacy) = candidates.find(|path| path.is_dir()) {
-        legacy
-    } else {
-        sibling_abs
-    };
+    // 回收目录解析（按优先级）：当前库根 sibling → 各根 sibling 与库内
+    // 旧位置（迁移前的历史遗留）。None = 桶不存在（占位条目或被外部
+    // 清理），维持「无文件可移」的原语义。
+    let trash_abs = resolve_trash_bucket(&roots, &library_root, &trash_dir);
 
     let original = PathBuf::from(&original_path);
     let moved = if !original_path.is_empty() {
-        move_trash_files_back(&library_root, &trash_abs, &original_path)?
+        move_trash_files_back(trash_abs.as_deref(), &original_path)?
     } else {
         None
     };
@@ -632,7 +673,9 @@ pub(crate) fn restore_trash_item_on_conn(
     reinsert_record_from_json(conn, &updated_json)?;
     conn.execute("DELETE FROM trash_items WHERE id = ?1", params![id])
         .map_err(|e| e.to_string())?;
-    let _ = std::fs::remove_dir_all(&trash_abs);
+    if let Some(bucket) = &trash_abs {
+        let _ = std::fs::remove_dir_all(bucket);
+    }
     Ok(outcome)
 }
 
@@ -675,55 +718,45 @@ pub fn restore_trash_items(
     Ok(summary)
 }
 
+/// 在桶目录内定位主文件：主文件直接位于桶根；防御式向下找一层
+/// （attachments 目录除外）。恢复与条目实体判定共用同一口径。
+fn find_file_in_bucket(bucket: &Path, file_name: &OsStr) -> Option<PathBuf> {
+    let mut dir: PathBuf = bucket.to_path_buf();
+    loop {
+        let candidate = dir.join(file_name);
+        if candidate.is_file() {
+            return Some(candidate);
+        }
+        let entries = dir.read_dir().ok()?;
+        let mut next = None;
+        for entry in entries.flatten() {
+            let path = entry.path();
+            if path.is_dir() && path.file_name().map(|n| n != "attachments").unwrap_or(false) {
+                next = Some(path);
+                break;
+            }
+        }
+        dir = next?;
+    }
+}
+
 /// 移回主文件；原位被占用时依次尝试 "name (1).ext"，返回最终落位路径
 /// （None = 回收站内没有该文件，无需移动）。
 fn move_trash_files_back(
-    library_root: &Path,
-    trash_abs: &Path,
+    trash_abs: Option<&Path>,
     original_path: &str,
 ) -> Result<Option<PathBuf>, String> {
     let original = PathBuf::from(original_path);
     let Some(file_name) = original.file_name() else {
         return Ok(None);
     };
-    let candidates: Vec<PathBuf> = {
-        let mut found = Vec::new();
-        let mut dir: PathBuf = trash_abs.to_path_buf();
-        // 主文件直接位于回收目录根部；防御式向下找一层（附件目录除外）。
-        loop {
-            let candidate = dir.join(file_name);
-            if candidate.is_file() {
-                found.push(candidate);
-                break;
-            }
-            match dir.read_dir() {
-                Ok(entries) => {
-                    let mut next = None;
-                    for entry in entries.flatten() {
-                        let path = entry.path();
-                        if path.is_dir()
-                            && path.file_name().map(|n| n != "attachments").unwrap_or(false)
-                        {
-                            next = Some(path);
-                            break;
-                        }
-                    }
-                    match next {
-                        Some(path) => dir = path,
-                        None => break,
-                    }
-                }
-                Err(_) => break,
-            }
-        }
-        found
-    };
-    let Some(source) = candidates.into_iter().next() else {
+    let Some(source) = trash_abs.and_then(|bucket| find_file_in_bucket(bucket, file_name)) else {
         return Ok(None);
     };
 
-    std::fs::create_dir_all(original.parent().unwrap_or(library_root))
-        .map_err(|e| format!("创建原分组目录失败: {e}"))?;
+    if let Some(parent) = original.parent() {
+        std::fs::create_dir_all(parent).map_err(|e| format!("创建原分组目录失败: {e}"))?;
+    }
     if !original.exists() {
         std::fs::rename(&source, &original).map_err(|e| format!("恢复文件失败: {e}"))?;
         return Ok(Some(original));

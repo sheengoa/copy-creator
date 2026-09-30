@@ -4334,6 +4334,44 @@ mod trash_tests {
         assert_eq!(count, 0, ".trash 内文件被监听结算重新入库为幽灵记录");
     }
 
+    // 回收站条目实体状态如实反映：文件在桶 → has_file=true；对账转存的
+    // 占位条目（无桶）→ has_file=false。前端据此标注「文件已丢失」。
+    #[test]
+    fn trash_item_reports_file_presence() {
+        let (app, library) = trash_test_app();
+        let handle = app.handle().clone();
+
+        // 实体条目：文件正常入桶。
+        let file = library.join("实体.png");
+        std::fs::write(&file, b"data").unwrap();
+        insert_external_record(&app, "r1", &file, &[]);
+        delete_clipboard_records_internal(&handle, &["r1".to_string()]).unwrap();
+
+        // 占位条目：对账转存，文件本已不在。
+        let ghost = library.join("幽灵.png");
+        insert_external_record(&app, "r2", &ghost, &[]);
+        {
+            let state = app.state::<DbState>();
+            let conn = state.conn.lock().unwrap();
+            archive_resource_record_to_trash(&conn, &library, "r2", &ghost.to_string_lossy())
+                .unwrap();
+        }
+
+        let items = list_trash_items_internal(&handle).unwrap();
+        assert_eq!(items.len(), 2);
+        let by_name = |name: &str| {
+            items
+                .iter()
+                .find(|item| item["file_name"] == serde_json::json!(name))
+                .unwrap()
+        };
+        assert_eq!(by_name("实体.png")["has_file"], serde_json::Value::Bool(true));
+        assert_eq!(
+            by_name("幽灵.png")["has_file"],
+            serde_json::Value::Bool(false)
+        );
+    }
+
     // 删除结果如实统计：文件在删除之前就已不在磁盘的条目计入
     // files_already_missing，前端得以即时告知「仅删除了记录」，而非等
     // 恢复时才报丢失。
