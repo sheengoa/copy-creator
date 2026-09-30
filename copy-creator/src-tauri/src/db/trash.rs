@@ -671,6 +671,15 @@ pub(crate) fn restore_trash_item_on_conn(
     }
 
     reinsert_record_from_json(conn, &updated_json)?;
+    // 文件已实际回位/改指到存在的文件：缺失标志清零（record_json 带回的
+    // 是入桶前的旧值，对 MetadataOnly 保留——文件仍缺失，如实维持）。
+    if !matches!(outcome, RestoreOutcome::MetadataOnly) {
+        conn.execute(
+            "UPDATE clipboard_records SET resource_missing = 0 WHERE id = ?1",
+            params![record_id],
+        )
+        .map_err(|e| e.to_string())?;
+    }
     conn.execute("DELETE FROM trash_items WHERE id = ?1", params![id])
         .map_err(|e| e.to_string())?;
     if let Some(bucket) = &trash_abs {

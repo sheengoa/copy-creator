@@ -660,7 +660,8 @@ mod resource_command_tests {
                  last_used_at TEXT DEFAULT '',
                  use_count INTEGER DEFAULT 0,
                  touched_ms INTEGER DEFAULT 0,
-                 pinned INTEGER NOT NULL DEFAULT 0
+                 pinned INTEGER NOT NULL DEFAULT 0,
+                 resource_missing INTEGER NOT NULL DEFAULT 0
              );
              CREATE TABLE IF NOT EXISTS trash_items (
                  id TEXT PRIMARY KEY,
@@ -3372,7 +3373,8 @@ mod content_sort_tests {
                 sort_order REAL,
                 touched_ms INTEGER DEFAULT 0,
                 use_count INTEGER DEFAULT 0,
-                pinned INTEGER NOT NULL DEFAULT 0
+                pinned INTEGER NOT NULL DEFAULT 0,
+                resource_missing INTEGER NOT NULL DEFAULT 0
             );",
         )
         .unwrap();
@@ -4332,6 +4334,95 @@ mod trash_tests {
             .query_row("SELECT COUNT(*) FROM clipboard_records", [], |row| row.get(0))
             .unwrap();
         assert_eq!(count, 0, ".trash 内文件被监听结算重新入库为幽灵记录");
+    }
+
+    // 对账持久化缺失标志：文件不在扫描集的记录 resource_missing=1——
+    // 安全阀中止清退时记录留在列表，但「文件缺失」必须当天可见，不得
+    // 静默；文件在的保持 0。
+    #[test]
+    fn sync_persists_missing_flags_even_when_safety_valve_aborts() {
+        let (app, library) = trash_test_app();
+        let group_dir = library.join("组");
+        std::fs::create_dir_all(&group_dir).unwrap();
+        let alive = group_dir.join("在.png");
+        std::fs::write(&alive, b"a").unwrap();
+        insert_external_record(&app, "r1", &alive, &[]);
+        for index in 0..12 {
+            let gone = group_dir.join(format!("丢{index}.png"));
+            insert_external_record(&app, &format!("m{index}"), &gone, &[]);
+        }
+
+        sync_resource_library(app.handle());
+
+        // 安全阀触发（拟清退 12/13 ≥10 且过半）：记录全部保留、不转存，
+        // 缺失标志已持久化。
+        let state = app.state::<DbState>();
+        let flag = {
+            let conn = state.conn.lock().unwrap();
+            let count: i64 = conn
+                .query_row("SELECT COUNT(*) FROM clipboard_records", [], |row| row.get(0))
+                .unwrap();
+            assert_eq!(count, 13, "安全阀应中止清退，记录全部保留");
+            let query_flag = |conn: &rusqlite::Connection, id: &str| -> i64 {
+                conn.query_row(
+                    "SELECT COALESCE(resource_missing, 0) FROM clipboard_records WHERE id = ?1",
+                    params![id],
+                    |row| row.get(0),
+                )
+                .unwrap()
+            };
+            (
+                query_flag(&conn, "r1"),
+                query_flag(&conn, "m0"),
+                // 锁内不得再调会加锁的内部函数（conn 是不可重入 Mutex）。
+                {
+                    drop(conn);
+                    list_trash_items_internal(&app.handle()).unwrap()
+                },
+            )
+        };
+        let (r1_flag, m0_flag, items) = flag;
+        assert_eq!(r1_flag, 0, "文件在的记录不得标缺失");
+        assert_eq!(m0_flag, 1, "文件缺失的记录必须标缺失");
+        assert!(items.is_empty(), "安全阀中止时不得转存回收站");
+    }
+
+    // 恢复 Restored 后缺失标志清零：record_json 带回的是入桶前的旧值，
+    // 文件实际回位后不得继续显示「文件缺失」。
+    #[test]
+    fn restore_clears_missing_flag_when_file_back() {
+        let (app, library) = trash_test_app();
+        let handle = app.handle().clone();
+        let file = library.join("回位.png");
+        std::fs::write(&file, b"back").unwrap();
+        insert_external_record(&app, "r1", &file, &[]);
+        {
+            let state = app.state::<DbState>();
+            let conn = state.conn.lock().unwrap();
+            conn.execute(
+                "UPDATE clipboard_records SET resource_missing = 1 WHERE id = 'r1'",
+                [],
+            )
+            .unwrap();
+        }
+
+        delete_clipboard_records_internal(&handle, &["r1".to_string()]).unwrap();
+        let trash_id = list_trash_items_internal(&handle).unwrap()[0]["id"]
+            .as_str()
+            .unwrap()
+            .to_string();
+        restore_trash_item_internal(&handle, &trash_id).unwrap();
+
+        let state = app.state::<DbState>();
+        let conn = state.conn.lock().unwrap();
+        let flag: i64 = conn
+            .query_row(
+                "SELECT COALESCE(resource_missing, 0) FROM clipboard_records WHERE id = 'r1'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(flag, 0, "文件已回位，缺失标志必须清零");
     }
 
     // 回收站条目实体状态如实反映：文件在桶 → has_file=true；对账转存的

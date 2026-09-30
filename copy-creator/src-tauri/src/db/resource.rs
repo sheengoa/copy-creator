@@ -156,24 +156,47 @@ pub fn sync_resource_library<R: Runtime>(app: &AppHandle<R>) -> usize {
     // 幽灵清退：库内文件已不存在（且不在本次扫描结果中）的记录移除，
     // 与原查询路径的「文件不在，记录不留」语义一致。
     let mut removable: Vec<(String, String)> = Vec::new();
+    // 缺失标志持久化：拟清退（含安全阀中止保留在列表的）置 1，文件回归
+    // 的清 0——安全阀保命不清退，但「文件缺失」必须当天可见，不得静默。
+    let mut missing_flag_updates: Vec<(String, i64)> = Vec::new();
     {
         let Ok(mut stmt) = conn.prepare(
-            "SELECT id, resource_path FROM clipboard_records
+            "SELECT id, resource_path, COALESCE(resource_missing, 0) FROM clipboard_records
              WHERE storage_mode = 'resource'",
         ) else {
             return 0;
         };
         let Ok(rows) = stmt.query_map([], |row| {
-            Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
+            Ok((
+                row.get::<_, String>(0)?,
+                row.get::<_, String>(1)?,
+                row.get::<_, i64>(2)?,
+            ))
         }) else {
             return 0;
         };
         for row in rows.flatten() {
-            let path = PathBuf::from(&row.1);
-            if path.starts_with(&root) && !scanned_keys.contains(&resource_path_key(&path)) {
-                removable.push(row);
+            let (id, path_text, current_missing) = row;
+            let path = PathBuf::from(&path_text);
+            if !path.starts_with(&root) {
+                continue;
+            }
+            let missing_now = !scanned_keys.contains(&resource_path_key(&path));
+            if missing_now {
+                if current_missing == 0 {
+                    missing_flag_updates.push((id.clone(), 1));
+                }
+                removable.push((id, path_text));
+            } else if current_missing != 0 {
+                missing_flag_updates.push((id, 0));
             }
         }
+    }
+    for (id, missing) in &missing_flag_updates {
+        let _ = conn.execute(
+            "UPDATE clipboard_records SET resource_missing = ?1 WHERE id = ?2",
+            params![*missing, id],
+        );
     }
     // 批量清退安全阀：单次拟清退达到 10 条且占资源记录总数一半以上时，
     // 按异常处理（外接目录卸载、扫描口径变化、目录被外部整移等），中止
@@ -646,8 +669,9 @@ fn relocate_resource_records<R: Runtime>(
         }
         for (id, target) in moves {
             let new_id = resource_file_id(&target);
+            // 重定向目标经覆盖验证真实存在，缺失标志随之清零。
             let updated = conn.execute(
-                "UPDATE clipboard_records SET id = ?1, resource_path = ?2 WHERE id = ?3",
+                "UPDATE clipboard_records SET id = ?1, resource_path = ?2, resource_missing = 0 WHERE id = ?3",
                 params![new_id, target.to_string_lossy(), id],
             );
             if updated == Ok(1) {
@@ -727,6 +751,7 @@ pub(crate) struct ResourceRow {
     last_used_at: String,
     resource_external: i64,
     pinned: i64,
+    resource_missing: i64,
 }
 
 pub(crate) fn resource_record_value(
@@ -826,7 +851,8 @@ pub(crate) fn get_resource_records_inner<R: Runtime>(
                         CAST(COALESCE(touched_ms, 0) AS INTEGER),
                         COALESCE(last_used_at, ''),
                         CAST(COALESCE(resource_external, 0) AS INTEGER),
-                        CAST(COALESCE(pinned, 0) AS INTEGER)
+                        CAST(COALESCE(pinned, 0) AS INTEGER),
+                        CAST(COALESCE(resource_missing, 0) AS INTEGER)
                  FROM clipboard_records
                  WHERE storage_mode = 'resource'",
             )
@@ -850,6 +876,7 @@ pub(crate) fn get_resource_records_inner<R: Runtime>(
                 let last_used_at = row.get::<_, String>(14)?;
                 let resource_external = row.get::<_, i64>(15)?;
                 let pinned = row.get::<_, i64>(16)?;
+                let resource_missing = row.get::<_, i64>(17)?;
 
                 let path = if resource_path.is_empty() {
                     None
@@ -884,6 +911,7 @@ pub(crate) fn get_resource_records_inner<R: Runtime>(
                     last_used_at,
                     resource_external,
                     pinned,
+                    resource_missing,
                 })
             })
             .map_err(|e| e.to_string())?;
@@ -992,6 +1020,8 @@ pub(crate) fn get_resource_records_inner<R: Runtime>(
                 managed,
             );
             value["resource_note"] = serde_json::Value::String(record.resource_note);
+            // 缺失事实字段：对账/监听结算时持久化，卡片只做渲染分支。
+            value["resource_missing"] = serde_json::Value::Bool(record.resource_missing != 0);
             value
         })
         .collect())

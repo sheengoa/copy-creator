@@ -35,6 +35,9 @@ export interface ClipboardRecord {
   resource_modified?: number;
   resource_managed?: boolean;
   resource_note?: string | null;
+  /** 资源文件缺失事实：对账/监听结算时按磁盘现状持久化的标志（查询零
+   *  stat）。true = 最近一次对账时该记录指向的文件已不在磁盘。 */
+  resource_missing?: boolean;
   /** 使用次数（粘贴/拖出成功自增），「最多使用」排序与次数徽标展示。 */
   use_count?: number;
   /** 最近使用时间：使用时间标签与排序展示（资源/剪切板共用）。 */

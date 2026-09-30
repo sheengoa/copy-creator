@@ -977,7 +977,8 @@ pub(crate) fn ensure_schema(conn: &Connection) -> Result<(), Box<dyn std::error:
             last_used_at TEXT DEFAULT '',
             use_count INTEGER DEFAULT 0,
             touched_ms INTEGER DEFAULT 0,
-            pinned INTEGER NOT NULL DEFAULT 0
+            pinned INTEGER NOT NULL DEFAULT 0,
+            resource_missing INTEGER NOT NULL DEFAULT 0
         );
 
         CREATE INDEX IF NOT EXISTS idx_clipboard_created_at
@@ -1093,7 +1094,7 @@ pub(crate) fn ensure_schema(conn: &Connection) -> Result<(), Box<dyn std::error:
 /// 当前 schema 版本。新增结构迁移（增列、历史数据回填/清退）时把版本 +1
 /// 并把步骤加进 run_schema_migrations；已升级的库启动时整段跳过——此前
 /// 全部步骤每次启动幂等重跑，启动成本随迁移数量线性增长。
-const SCHEMA_VERSION: i32 = 1;
+const SCHEMA_VERSION: i32 = 2;
 
 fn schema_version(conn: &Connection) -> i32 {
     conn.query_row("PRAGMA user_version", [], |row| row.get(0))
@@ -1148,6 +1149,13 @@ fn run_schema_migrations(conn: &Connection) -> Result<(), Box<dyn std::error::Er
     // Runtime migrations for existing databases
     conn.execute(
         "ALTER TABLE clipboard_records ADD COLUMN user_api_key INTEGER DEFAULT 0",
+        [],
+    )
+    .ok();
+    // 资源缺失标志：对账/监听结算时按磁盘现状持久化（文件不在 = 1），
+    // 资源列表与卡片只读该列渲染「文件缺失」角标，查询路径零 stat。
+    conn.execute(
+        "ALTER TABLE clipboard_records ADD COLUMN resource_missing INTEGER NOT NULL DEFAULT 0",
         [],
     )
     .ok();

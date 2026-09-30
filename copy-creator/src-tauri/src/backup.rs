@@ -354,10 +354,45 @@ pub fn import_backup_internal<R: Runtime>(
         return Err(error);
     }
 
+    let missing_files = audit_restored_library(
+        &restore_dir.join(DB_NAME),
+        library_dir.as_deref(),
+    );
+
     Ok(serde_json::json!({
         "restore_dir": restore_dir.to_string_lossy(),
         "library_restored_to": library_dir.map(|d| d.to_string_lossy().to_string()),
+        "missing_files": missing_files,
     }))
+}
+
+/// 导入后一致性巡检（只读）：逐条核对恢复库中的资源记录与资源库文件，
+/// 汇总「记录在、文件无」清单附在导入结果里。备份恢复是 DB 与磁盘脱节
+/// 的最大源头（数据库记录复活而文件未随之恢复），脱节必须在源头暴露，
+/// 而不是等用户日后删除/恢复时才报丢失。只读不修改数据：缺失记录保留
+/// 原状，后续启动对账会为它们持久化缺失标志（resource_missing）。
+fn audit_restored_library(staged_db: &Path, library_dir: Option<&Path>) -> Vec<String> {
+    let _ = library_dir; // 记录路径本身是绝对路径，直接 stat 判定即可。
+    let Ok(conn) = open_connection(staged_db) else {
+        return Vec::new();
+    };
+    let Ok(mut stmt) = conn.prepare(
+        "SELECT resource_path FROM clipboard_records
+         WHERE storage_mode = 'resource' AND COALESCE(resource_path, '') <> ''",
+    ) else {
+        return Vec::new();
+    };
+    let paths: Vec<String> = stmt
+        .query_map([], |row| row.get(0))
+        .map(|rows| rows.flatten().collect())
+        .unwrap_or_default();
+    drop(stmt);
+    drop(conn);
+    paths
+        .into_iter()
+        .filter(|path| !Path::new(path).is_file())
+        .take(200) // 清单上限：巡检是提示不是审计日志，极端大批量截断。
+        .collect()
 }
 
 /// 写单个 zip 条目到目标路径（父目录自动创建）。

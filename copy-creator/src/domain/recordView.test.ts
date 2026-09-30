@@ -21,6 +21,19 @@ describe("buildRecordView pinned", () => {
   });
 });
 
+describe("buildRecordView resourceMissing", () => {
+  it("passes the backend missing flag through as a fact field", () => {
+    expect(buildRecordView({ ...baseRecord, resource_missing: true }).resourceMissing).toBe(true);
+  });
+
+  it("defaults to false when the record carries no missing flag", () => {
+    expect(buildRecordView(baseRecord).resourceMissing).toBe(false);
+    expect(buildRecordView({ ...baseRecord, resource_missing: false }).resourceMissing).toBe(
+      false,
+    );
+  });
+});
+
 describe("buildRecordView textPreviewPath", () => {
   const fileResource = {
     ...baseRecord,

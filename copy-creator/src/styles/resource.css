@@ -999,6 +999,16 @@
   white-space: nowrap;
 }
 
+/* 文件缺失角标：随标题行展示，警示色但弱于操作按钮强调；字号随卡片缩放。 */
+.resource-card-missing {
+  flex-shrink: 0;
+  padding: 1px 6px;
+  border-radius: 4px;
+  font-size: calc(var(--text-xs) * var(--card-scale, 1));
+  background: color-mix(in srgb, var(--danger, #dc2626) 12%, transparent);
+  color: var(--danger, #dc2626);
+}
+
 .resource-card-title mark {
   padding: 0 1px;
   border-radius: 2px;

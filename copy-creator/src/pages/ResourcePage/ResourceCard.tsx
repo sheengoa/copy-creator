@@ -228,6 +228,11 @@ function ResourceCardInner({
           <strong className="resource-card-title">
             <HighlightText text={title} search={search} />
           </strong>
+          {/* 缺失事实角标：recordView.resourceMissing（对账持久化标志），
+              脱节当天在列表可见，不再等删除/恢复才暴露。 */}
+          {view.resourceMissing && (
+            <span className="resource-card-missing">{t("resources.fileMissing")}</span>
+          )}
         </div>
         <div className="resource-card-meta">
           {showGroupTag && view.resourceGroup && (

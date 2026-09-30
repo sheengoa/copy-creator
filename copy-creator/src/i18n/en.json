@@ -200,6 +200,7 @@
     "deleteFailed": "Delete failed. Try again.",
     "deletedWithMissing": "Moved to trash; {{count}} of them had no file on disk before deletion — records only",
     "trashFileMissing": "File missing",
+    "fileMissing": "Missing",
     "trashRestoreMissingConfirm": "The file of \"{{name}}\" was already missing from disk before deletion. Restoring will only bring back the record metadata; a unique same-named file in the library will be linked automatically. Restore anyway?",
     "openFailed": "Failed to open the new resource window. Try again.",
     "localSource": "Local content",

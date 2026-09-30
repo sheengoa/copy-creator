@@ -40,6 +40,10 @@ export interface RecordView {
   resourceGroup: string | null; // 资源所属分组（「全部」视图来源标签）
   groupName: string; // 分组名（API Key 标签等场景）
   pinned: boolean; // 收藏标记（卡片星标角标与「收藏」筛选；防保留期清理）
+  /** 资源文件缺失事实（对账/监听结算时持久化的标志，非前端实时 stat）：
+   * true = 该记录指向的文件在最近一次对账时已不在磁盘。叶子据此渲染
+   * 「文件缺失」角标——脱节当天可见，不再等删除/恢复才暴露。 */
+  resourceMissing: boolean;
   // —— 判定字段（domain 规则结果，叶子只读不猜）——
   kind: ResourceMediaKind; // 统一内容类型（text/image/video/audio/file；link 折叠为 text）
   fileMediaKind: "video" | "audio" | "image" | null; // file 记录的媒体细分
@@ -106,6 +110,7 @@ export function buildRecordView(
     resourceGroup: record.resource_group ?? null,
     groupName: record.group_name ?? "",
     pinned: Boolean(record.pinned),
+    resourceMissing: Boolean(record.resource_missing),
 
     kind,
     fileMediaKind,
