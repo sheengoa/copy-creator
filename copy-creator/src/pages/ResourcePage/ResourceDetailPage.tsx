@@ -463,7 +463,9 @@ export default function ResourceDetailPage({
         return;
       }
       const range = selection.getRangeAt(0);
-      const locate = (node: Node | null): number | null => {
+      // 全文偏移 = 所在块起点 + 块内文本节点累计长度 + Range 在节点内的偏移。
+      // offsetInNode 缺失会让同节点内的划选算出 start === end，工具条永不出现。
+      const locate = (node: Node | null, offsetInNode: number): number | null => {
         let current: Node | null = node;
         while (current && current !== stageRef.current) {
           if (current instanceof HTMLElement && current.dataset.chunkStart !== undefined) {
@@ -471,7 +473,7 @@ export default function ResourceDetailPage({
             const walker = document.createTreeWalker(current, NodeFilter.SHOW_TEXT);
             let total = 0;
             while (walker.nextNode()) {
-              if (walker.currentNode === node) return chunkStart + total;
+              if (walker.currentNode === node) return chunkStart + total + offsetInNode;
               total += walker.currentNode.textContent?.length ?? 0;
             }
             return null;
@@ -480,8 +482,8 @@ export default function ResourceDetailPage({
         }
         return null;
       };
-      const start = locate(range.startContainer);
-      const end = locate(range.endContainer);
+      const start = locate(range.startContainer, range.startOffset);
+      const end = locate(range.endContainer, range.endOffset);
       if (start === null || end === null || start === end) {
         setAnnSelection(null);
         return;
@@ -562,12 +564,16 @@ export default function ResourceDetailPage({
     if (!annSelection || !stageRef.current || !toolbarRef.current) return;
     const selection = window.getSelection();
     if (!selection || selection.rangeCount === 0) return;
-    const live = selection.getRangeAt(0).getBoundingClientRect();
+    const live = selection.getRangeAt(0);
+    // 定位依赖几何信息；环境不提供（如测试的 jsdom）时跳过，工具条
+    // 仍渲染在 stage 内容位置，功能不受影响。
+    if (typeof live.getBoundingClientRect !== "function") return;
+    const liveRect = live.getBoundingClientRect();
     const stage = stageRef.current;
     const stageRect = stage.getBoundingClientRect();
     const toolbar = toolbarRef.current;
-    const top = live.top - stageRect.top + stage.scrollTop - 46;
-    const centerX = live.left - stageRect.left + live.width / 2;
+    const top = liveRect.top - stageRect.top + stage.scrollTop - 46;
+    const centerX = liveRect.left - stageRect.left + liveRect.width / 2;
     const left = Math.min(
       Math.max(8, centerX - toolbar.offsetWidth / 2),
       stage.clientWidth - toolbar.offsetWidth - 8,
