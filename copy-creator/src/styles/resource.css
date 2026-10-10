@@ -1885,6 +1885,13 @@
   contain-intrinsic-size: auto 30000px;
 }
 
+/* 划选选区：WebKitGTK 与暗色偏好下默认选区呈灰色，显式定义为
+   accent 蓝底白字，与原型（Chromium 默认亮色选区）观感一致。 */
+.resource-detail-stage ::selection {
+  background: rgba(0, 122, 255, 0.8);
+  color: #fff;
+}
+
 /* ═══ 文本标注（阅读态划选标记）═══
    色板挂在 stage 作用域：荧光下半铺色 + 亮暗主题两档。 */
 .resource-detail-stage {
