@@ -13,6 +13,17 @@ pub fn read_resource_text_preview(
     read_resource_text_preview_file(path)
 }
 
+/// 详情页全文（与列表预览不同口径）：上限内整读，超上限报错由前端
+/// 回退 1 MB 截断预览。
+#[tauri::command]
+pub fn read_resource_text_detail(
+    app: AppHandle,
+    path: String,
+) -> Result<ResourceTextPreview, String> {
+    let path = resolve_resource_file_path(&app, &path)?;
+    read_resource_text_detail_file(path)
+}
+
 /// 粘贴场景的文本文件大小上限；预览是给人看的用 1 MB，粘贴是完整使用
 /// 内容，放宽到 10 MB，超出仍按文件粘贴。
 pub(crate) const RESOURCE_TEXT_PASTE_LIMIT_BYTES: u64 = 10 * 1024 * 1024;

@@ -436,6 +436,7 @@ pub fn run() {
             db::read_quick_input_text_preview,
             db::read_clipboard_text_preview,
             db::read_resource_text_preview,
+            db::read_resource_text_detail,
             db::read_text_file_content,
             db::write_resource_text_content,
             db::get_setting,

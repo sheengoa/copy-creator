@@ -1819,7 +1819,10 @@
 }
 
 .resource-detail-truncated-hint {
+  display: flex;
   flex-shrink: 0;
+  align-items: center;
+  gap: 10px;
   margin-bottom: 10px;
   padding: 8px 12px;
   border: 1px solid color-mix(in srgb, var(--warning, #ff9f0a) 35%, var(--separator));
@@ -1830,10 +1833,54 @@
   line-height: 1.5;
 }
 
-.resource-detail-text-file {
+.resource-detail-truncated-hint > span:first-of-type {
+  flex: 1;
+}
+
+.resource-detail-truncated-hint .resource-text-external-open {
+  flex-shrink: 0;
+  padding: 4px 10px;
+  font-size: var(--text-xs);
+}
+
+.resource-text-external-failed {
+  flex-shrink: 0;
+  color: var(--danger);
+  font-size: var(--text-xs);
+}
+
+/* 大文本全文分块渲染：容器统一承载「阅读版式」表面（边框/底色/字体/
+   行高，与旧单块正文同款），块级 content-visibility: auto 让浏览器只
+   排版视口内的块——数据全在内存、DOM 只画可视区，超长文本完整展示且
+   滚动不卡。块间必须无任何视觉接缝，故块级清空 <pre> 默认样式并继承
+   容器字体；contain-intrinsic-size 给初始高度估算保滚动条大致准确，
+   auto 前缀让浏览器记住块的真实渲染高度，滚动越深估算越准。 */
+.resource-detail-text-chunks {
   width: 100%;
+  padding: 22px;
+  border: 1px solid var(--separator);
+  border-radius: 7px;
+  background: var(--input-bg);
+  color: var(--text-primary);
+  font-family: var(--font);
+  font-size: var(--text-md);
+  line-height: 1.9;
+  letter-spacing: 0.01em;
+}
+
+.resource-detail-text-chunk {
   margin: 0;
-  overflow: auto;
+  border: none;
+  background: none;
+  color: inherit;
+  font: inherit;
+  line-height: inherit;
+  letter-spacing: inherit;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  user-select: text;
+  content-visibility: auto;
+  contain-intrinsic-size: auto 30000px;
 }
 
 /* 正文编辑态：与阅读版式同源（字体、行高、通栏宽度），

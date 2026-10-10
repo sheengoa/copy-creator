@@ -290,38 +290,73 @@ pub(crate) struct ResourceTextPreview {
     pub truncated: bool,
 }
 
-/// 资源库文本预览（详情页、列表卡片与径向菜单共用）：超过截断阈值时只读
-/// 文件前缀并在 UTF-8 字符边界安全收尾，绝不因「文件大」而失败——预览是
-/// 给人看的第一屏；完整使用内容各有各的口径（编辑/写入 ≤ 1 MB、按内容
-/// 粘贴 ≤ 10 MB、其余按文件粘贴）。
-pub(crate) fn read_resource_text_preview_file(path: PathBuf) -> Result<ResourceTextPreview, String> {
-    if !crate::media_kind::is_text_extension(&path) && !crate::media_kind::is_probably_text_file(&path) {
-        return Err("当前文件不是可预览的文本文件".to_string());
-    }
-    let metadata = std::fs::metadata(&path).map_err(|e| format!("读取文件失败: {e}"))?;
-    let mut file = std::fs::File::open(&path).map_err(|e| format!("读取文件失败: {e}"))?;
-    let mut bytes = Vec::new();
-    (&mut file)
-        .take(RESOURCE_TEXT_PREVIEW_TRUNCATE_BYTES)
-        .read_to_end(&mut bytes)
-        .map_err(|e| format!("读取文件失败: {e}"))?;
-    let content = match std::str::from_utf8(&bytes) {
-        Ok(text) => text.to_string(),
-        // 截断点落在多字节字符中间（末尾是不完整序列）：丢弃末尾不完整
-        // 的字符，最多回退 3 字节。
+fn is_previewable_text_path(path: &Path) -> bool {
+    crate::media_kind::is_text_extension(path) || crate::media_kind::is_probably_text_file(path)
+}
+
+/// UTF-8 解码：截断点落在多字节字符中间（末尾不完整序列）丢弃不完整
+/// 尾字符；中段即存在非法字节（GBK 等非 UTF-8 文本）时裁剪无法修复，
+/// 与旧 read_to_string 行为一致报错，由前端按失败降级并展示原因。
+/// 禁止无界逐字节回退——整段非法时那是对缓冲区长度的平方级重复校验。
+fn decode_utf8_bounded(bytes: Vec<u8>) -> Result<String, String> {
+    match std::str::from_utf8(&bytes) {
+        Ok(text) => Ok(text.to_string()),
         Err(error) if error.error_len().is_none() => {
             String::from_utf8(bytes[..error.valid_up_to()].to_vec())
-                .map_err(|e| format!("读取文件失败: {e}"))?
+                .map_err(|e| format!("读取文件失败: {e}"))
         }
-        // 中段即存在非法字节（GBK 等非 UTF-8 文本）：裁剪无法修复，与旧
-        // read_to_string 行为一致报错，由前端按失败降级并展示原因。禁止
-        // 无界逐字节回退——整段非法时那是对缓冲区长度的平方级校验。
-        Err(_) => return Err("文件内容不是有效的 UTF-8 编码".to_string()),
-    };
+        Err(_) => Err("文件内容不是有效的 UTF-8 编码".to_string()),
+    }
+}
+
+/// 读取不超过 limit 字节并解码；truncated = 文件是否超出读取范围。
+fn read_text_file_bounded(path: &Path, limit: u64) -> Result<ResourceTextPreview, String> {
+    let metadata = std::fs::metadata(path).map_err(|e| format!("读取文件失败: {e}"))?;
+    let mut file = std::fs::File::open(path).map_err(|e| format!("读取文件失败: {e}"))?;
+    let mut bytes = Vec::new();
+    (&mut file)
+        .take(limit)
+        .read_to_end(&mut bytes)
+        .map_err(|e| format!("读取文件失败: {e}"))?;
+    let content = decode_utf8_bounded(bytes)?;
     Ok(ResourceTextPreview {
         truncated: metadata.len() > content.len() as u64,
         content,
     })
+}
+
+/// 资源库文本预览（列表卡片与径向菜单共用）：超过截断阈值时只读文件
+/// 前缀，绝不因「文件大」而失败——预览是给人看的第一屏。详情页全文
+/// 走 read_resource_text_detail_file，两者口径不同。
+pub(crate) fn read_resource_text_preview_file(path: PathBuf) -> Result<ResourceTextPreview, String> {
+    if !is_previewable_text_path(&path) {
+        return Err("当前文件不是可预览的文本文件".to_string());
+    }
+    read_text_file_bounded(&path, RESOURCE_TEXT_PREVIEW_TRUNCATE_BYTES)
+}
+
+/// 资源详情页全文：上限内整读不截断（前端分块虚拟渲染）；超上限报错，
+/// 由前端回退 1 MB 截断预览并引导用系统应用打开。limit 参数化便于小
+/// 值测试，命令层固定传 RESOURCE_TEXT_DETAIL_LIMIT_BYTES。
+pub(crate) fn read_resource_text_detail_bounded(
+    path: &Path,
+    limit: u64,
+) -> Result<ResourceTextPreview, String> {
+    if !is_previewable_text_path(path) {
+        return Err("当前文件不是可预览的文本文件".to_string());
+    }
+    let metadata = std::fs::metadata(path).map_err(|e| format!("读取文件失败: {e}"))?;
+    if metadata.len() > limit {
+        return Err(format!(
+            "文件超过 {} MB，仅显示开头部分内容，可用系统应用打开查阅全文",
+            limit / (1024 * 1024)
+        ));
+    }
+    read_text_file_bounded(path, limit)
+}
+
+pub(crate) fn read_resource_text_detail_file(path: PathBuf) -> Result<ResourceTextPreview, String> {
+    read_resource_text_detail_bounded(&path, RESOURCE_TEXT_DETAIL_LIMIT_BYTES)
 }
 
 pub(crate) fn resolve_quick_input_text_preview_path(app: &AppHandle, path: &str) -> Result<PathBuf, String> {

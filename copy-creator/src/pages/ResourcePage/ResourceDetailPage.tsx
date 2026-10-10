@@ -1,4 +1,9 @@
-import { readResourceTextPreview, type ResourceTextPreview } from "../../domain/mediaAssets";
+import {
+  openResourceFile,
+  readResourceTextDetail,
+  readResourceTextPreview,
+  type ResourceTextPreview,
+} from "../../domain/mediaAssets";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { invoke } from "@tauri-apps/api/core";
@@ -8,11 +13,10 @@ import { useResourceStore } from "../../stores/clipboardStore";
 import { Icons } from "../../components/Icons";
 import { BackToTopButton } from "../../components/BackToTop";
 import { useBackToTop } from "../../hooks/useBackToTop";
-import { HighlightText } from "../../components/HighlightText";
 import { ImageLightbox } from "../../components/ImageLightbox";
 import FindReplaceBar from "../../components/FindReplaceBar";
 import { findMatchPositions } from "../../utils/findReplace";
-import { loadRecordPreviewSegments, type RadialPreviewSegment } from "../../domain/preview";
+import { loadRecordPreviewSegments, splitTextChunks, type RadialPreviewSegment } from "../../domain/preview";
 import { formatResourceBitrate, formatResourceDuration, formatResourceFileSize } from "./resourceUtils";
 import { type ResourceMediaKind } from "../../domain/mediaKind";
 import { getResourceFileName, isResourceTitleRenameable, splitResourceFileName } from "../../domain/fileName";
@@ -58,6 +62,8 @@ export default function ResourceDetailPage({
   // 加载失败的后端原因（文件丢失/非文本等），null=无错误；空串表示拿不到
   // 具体原因，展示时回退泛化文案。超限不属于失败——后端截断返回。
   const [errorReason, setErrorReason] = useState<string | null>(null);
+  // 「用系统应用打开」失败反馈（超长文本回退态的兜底动作）。
+  const [openExternalFailed, setOpenExternalFailed] = useState(false);
   const [lightboxSrc, setLightboxSrc] = useState<string | null>(null);
   const [mediaSource, setMediaSource] = useState<string | null>(null);
   const [mediaMeta, setMediaMeta] = useState<ResourceMediaMetadata>({});
@@ -98,6 +104,7 @@ export default function ResourceDetailPage({
     setContentEditing(false);
     setContentSaved(false);
     setContentSaveError(null);
+    setOpenExternalFailed(false);
   }, [record.id, record.resource_note]);
 
   useEffect(() => () => {
@@ -160,6 +167,13 @@ export default function ResourceDetailPage({
     }
   };
 
+  // 超长文本回退态的兜底动作：用系统默认程序打开文件（阅读/编辑皆宜）。
+  const handleOpenExternal = () => {
+    if (!externalTextPath) return;
+    setOpenExternalFailed(false);
+    openResourceFile(externalTextPath).catch(() => setOpenExternalFailed(true));
+  };
+
   const mediaMetaRows = useMemo(() => {
     const rows: { label: string; value: string }[] = [];
     if (mediaMeta.width && mediaMeta.height) {
@@ -204,11 +218,20 @@ export default function ResourceDetailPage({
     }
 
     if (externalTextPath) {
-      readResourceTextPreview(externalTextPath)
+      // 详情页优先全文（64 MB 上限内整读，前端分块虚拟渲染）；超上限
+      // 或读取失败回退 1 MB 截断预览，预览也失败才是真错误（文件缺失、
+      // 非文本、非 UTF-8），由 fail 透传原因。
+      readResourceTextDetail(externalTextPath)
         .then((preview) => {
           if (!cancelled) setTextContent(preview);
         })
-        .catch(fail);
+        .catch(() => {
+          readResourceTextPreview(externalTextPath)
+            .then((preview) => {
+              if (!cancelled) setTextContent(preview);
+            })
+            .catch(fail);
+        });
       return () => {
         cancelled = true;
       };
@@ -290,10 +313,15 @@ export default function ResourceDetailPage({
     ? Boolean(mediaSource)
     : kind === "file" || kind === "image" || Boolean(segments);
   const textDetailReady = externalTextPath ? textContent !== null : Boolean(segments);
-  // 截断展示时禁止进入正文编辑：编辑器持有的是前缀副本，保存会以副本
-  // 覆盖整个文件、丢掉未展示的部分（写入侧 1 MB 上限是最后防线）。
+  // 截断展示（>64MB 回退 1MB 预览）时禁止进入正文编辑：编辑器持有的
+  // 是前缀副本，保存会以副本覆盖整个文件、丢掉未展示的部分。
   const textDetailTruncated = textContent?.truncated === true;
   const contentReady = externalTextPath ? textDetailReady : detailReady;
+  // 正文分块（domain 切分，配合 CSS content-visibility 只排版可视块）。
+  const textChunks = useMemo(
+    () => (textContent ? splitTextChunks(textContent.content) : []),
+    [textContent],
+  );
 
   // 正文编辑面向有文件承载的文本资源（不含内嵌图片）：取材与保存目标
   // 都是文件本身，文件是全文的唯一事实来源。
@@ -308,8 +336,12 @@ export default function ResourceDetailPage({
       .map((segment) => segment.content)
       .join("\n");
   }, [externalTextPath, segments, textContent]);
+  // 全文加载后截断不再是唯一编辑门槛：超过 100 万字符的正文同样不适合
+  // 应用内编辑（textarea 全量承载卡顿、写入侧 1 MB 上限必拒），用系统
+  // 应用修改文件，改动经监听与媒体版本机制同步回来。
   const contentEditable = Boolean(textEditPath) && !record.has_images && fullTextContent !== null
-    && !textDetailTruncated;
+    && !textDetailTruncated
+    && fullTextContent.length <= 1_000_000;
   // 正文加载完成后把当前内容作为「已保存」基准，进入编辑态时以此为草稿初值。
   useEffect(() => {
     if (fullTextContent === null) return;
@@ -727,12 +759,26 @@ export default function ResourceDetailPage({
               <div className="resource-detail-text-body">
                 {textDetailTruncated && (
                   <div className="resource-detail-truncated-hint" role="note">
-                    {t("resources.textTruncatedHint")}
+                    <span>{t("resources.textTruncatedHint")}</span>
+                    {openExternalFailed && (
+                      <span className="resource-text-external-failed" role="alert">
+                        {t("resources.openInSystemAppFailed")}
+                      </span>
+                    )}
+                    <button
+                      type="button"
+                      className="resource-secondary-button resource-text-external-open"
+                      onClick={handleOpenExternal}
+                    >
+                      {t("resources.openInSystemApp")}
+                    </button>
                   </div>
                 )}
-                <pre className="resource-segment-text resource-detail-text-file">
-                  <HighlightText text={textContent?.content || ""} />
-                </pre>
+                <div className="resource-detail-text-chunks">
+                  {textChunks.map((chunk, index) => (
+                    <pre key={index} className="resource-detail-text-chunk">{chunk}</pre>
+                  ))}
+                </div>
               </div>
             ) : (
               <ResourceSegments segments={segments || []} />

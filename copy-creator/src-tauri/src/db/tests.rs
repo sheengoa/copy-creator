@@ -608,7 +608,8 @@ mod resource_command_tests {
         forget_resource_records, get_clipboard_records_inner, get_resource_groups_inner,
         move_resource_group_inner, move_resource_records_inner, normalize_file_backed_text_records,
         read_resource_text_preview_file, ResourceTextPreview,
-        RESOURCE_TEXT_PREVIEW_TRUNCATE_BYTES,
+        RESOURCE_TEXT_DETAIL_LIMIT_BYTES, RESOURCE_TEXT_PREVIEW_TRUNCATE_BYTES,
+        read_resource_text_detail_bounded,
         read_text_file_content_inner, rename_resource_file_inner,
         reorder_resource_groups_inner, resolve_resource_file_path, resource_file_id,
         resource_folder_tree, resource_group_count_map, set_resource_note_inner,
@@ -1382,6 +1383,37 @@ mod resource_command_tests {
         assert!(preview.truncated);
         assert!(preview.content.ends_with("汉"));
         assert_eq!(preview.content.len() % 3, 0);
+        cleanup(&root);
+    }
+
+    #[test]
+    fn resource_text_detail_reads_full_content_and_rejects_over_limit() {
+        let (app, root) = test_app();
+        // 上限内整读：全文返回、不截断（预览命令对同文件只给前 1 MB）。
+        let text = root.join("novel.txt");
+        let body = "汉".repeat(400_000); // 1.2 MB
+        std::fs::write(&text, &body).unwrap();
+        let path = resolve_resource_file_path(app.handle(), text.to_string_lossy().as_ref())
+            .unwrap();
+        let detail =
+            read_resource_text_detail_bounded(&path, RESOURCE_TEXT_DETAIL_LIMIT_BYTES).unwrap();
+        assert!(!detail.truncated);
+        assert_eq!(detail.content, body);
+
+        // 超上限报错（前端据此回退 1 MB 截断预览并引导系统应用打开）；
+        // 用小 limit 验证，不必真实写入 64 MB。
+        let error = read_resource_text_detail_bounded(&path, 1024).unwrap_err();
+        assert!(error.contains("系统应用"));
+
+        // 非 UTF-8 内容与预览同口径拒绝。
+        let gbk = root.join("gbk.txt");
+        let mut bytes = b"plaintext".as_slice().to_vec();
+        bytes.extend([0xB4, 0xF3]);
+        std::fs::write(&gbk, bytes).unwrap();
+        let gbk_path = resolve_resource_file_path(app.handle(), gbk.to_string_lossy().as_ref())
+            .unwrap();
+        assert!(read_resource_text_detail_bounded(&gbk_path, RESOURCE_TEXT_DETAIL_LIMIT_BYTES)
+            .is_err());
         cleanup(&root);
     }
 

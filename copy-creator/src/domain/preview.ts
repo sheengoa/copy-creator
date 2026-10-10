@@ -19,6 +19,34 @@ export type RadialPreviewSegment =
 
 export const STASH_IMAGE_PLACEHOLDER = "\uFFFC";
 
+// 详情页大文本的分块渲染粒度：正文切成固定字符数的块，块级挂 CSS
+// content-visibility: auto，浏览器只排版视口内的块——全文完整展示而
+// 不拖垮排版的唯一途径（数据全在内存，DOM 只画可视区）。
+export const TEXT_DETAIL_CHUNK_CHARS = 100_000;
+
+/**
+ * 把全文按固定字符数切块（详情页分块虚拟渲染用）。边界向后避开
+ * UTF-16 代理对，任何字符都不会被切进两个块；块顺序拼接与原文严格
+ * 相等。短文本原样返回单块。
+ */
+export function splitTextChunks(content: string): string[] {
+  if (content.length <= TEXT_DETAIL_CHUNK_CHARS) return [content];
+  const chunks: string[] = [];
+  for (let start = 0; start < content.length;) {
+    let end = start + TEXT_DETAIL_CHUNK_CHARS;
+    if (end < content.length) {
+      const code = content.charCodeAt(end);
+      // 边界落在低代理位：上一字符的代理对被切开，回退一位。
+      if (code >= 0xdc00 && code <= 0xdfff) end -= 1;
+    } else {
+      end = content.length;
+    }
+    chunks.push(content.slice(start, end));
+    start = end;
+  }
+  return chunks;
+}
+
 interface ContentPreviewCandidate {
   type: string;
   contentTruncated?: boolean;

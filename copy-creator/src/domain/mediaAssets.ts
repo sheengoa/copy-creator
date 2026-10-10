@@ -13,9 +13,15 @@ export interface ResourceTextPreview {
 }
 
 /** 资源库文本文件的预览内容（按扩展名与文件头判定）。大文件截断返回，
- * 不因超限而失败。 */
+ * 不因超限而失败。列表卡片与径向菜单用这个口径。 */
 export function readResourceTextPreview(path: string): Promise<ResourceTextPreview> {
   return invoke<ResourceTextPreview>("read_resource_text_preview", { path });
+}
+
+/** 资源详情页全文（64 MB 上限内整读不截断；超上限报错，调用方回退
+ * 截断预览并引导用系统应用打开）。 */
+export function readResourceTextDetail(path: string): Promise<ResourceTextPreview> {
+  return invoke<ResourceTextPreview>("read_resource_text_detail", { path });
 }
 
 /** 快捷输入文件（quick-input-files/）的文本预览内容。 */
