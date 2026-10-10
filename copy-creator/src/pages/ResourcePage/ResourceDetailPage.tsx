@@ -172,6 +172,9 @@ export default function ResourceDetailPage({
     setContentSaved(false);
     setContentSaveError(null);
     setOpenExternalFailed(false);
+    // 记录切换必须清掉上一条记录的划选态：否则工具条残留，此时点标注
+    // 会把旧记录的偏移区间写进新记录（脏标注）。
+    setAnnSelection(null);
   }, [record.id, record.resource_note]);
 
   useEffect(() => () => {
