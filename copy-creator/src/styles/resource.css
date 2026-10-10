@@ -1992,6 +1992,10 @@
   place-items: center;
   width: 30px;
   height: 30px;
+  /* 裸 button 的 UA 默认样式是 buttonface 灰底 + outset 边框，必须显式
+     清除——否则工具条上每个图标都会带一块灰色按钮底（原型为透明）。 */
+  background: transparent;
+  border: none;
   border-radius: 8px;
   color: var(--text-primary);
   transition: background 0.14s ease, transform 0.14s ease;
