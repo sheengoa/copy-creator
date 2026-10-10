@@ -68,7 +68,7 @@ pub(crate) fn migrate_storage(app: &AppHandle, new_path: &str) -> Result<(), Str
 
 /// 迁移涉及的业务表（settings 由命令层单独复制：storage_path/shortcut_key
 /// 有特殊处理）。表名为内部常量，不来自用户输入。
-pub(crate) const MIGRATED_BUSINESS_TABLES: [&str; 7] = [
+pub(crate) const MIGRATED_BUSINESS_TABLES: [&str; 8] = [
     "clipboard_records",
     "phrase_groups",
     "phrases",
@@ -78,6 +78,8 @@ pub(crate) const MIGRATED_BUSINESS_TABLES: [&str; 7] = [
     // 回收站条目（0.4.0 起）：trash_dir 是相对库根的路径，存储迁移不改
     // 库根，搬表即可保持可恢复。
     "trash_items",
+    // 资源文本标注：record_id 外键引用 clipboard_records，随主表一起搬迁。
+    "resource_annotations",
 ];
 
 /// 存储迁移的数据搬运核心：在 new_dir 建新库（PRAGMA + ensure_schema 与

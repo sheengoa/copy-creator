@@ -610,6 +610,8 @@ mod resource_command_tests {
         read_resource_text_preview_file, ResourceTextPreview,
         RESOURCE_TEXT_DETAIL_LIMIT_BYTES, RESOURCE_TEXT_PREVIEW_TRUNCATE_BYTES,
         read_resource_text_detail_bounded,
+        add_resource_annotation_inner, annotation_count, get_resource_annotations_inner,
+        remove_resource_annotations_in_range_inner,
         read_text_file_content_inner, rename_resource_file_inner,
         reorder_resource_groups_inner, resolve_resource_file_path, resource_file_id,
         resource_folder_tree, resource_group_count_map, set_resource_note_inner,
@@ -1414,6 +1416,81 @@ mod resource_command_tests {
             .unwrap();
         assert!(read_resource_text_detail_bounded(&gbk_path, RESOURCE_TEXT_DETAIL_LIMIT_BYTES)
             .is_err());
+        cleanup(&root);
+    }
+
+    #[test]
+    fn resource_annotations_crud_validation_and_foreign_key_cascades() {
+        let (app, root) = test_app();
+        // 夹具表结构不含标注表：按 ensure_schema 同构补建并开启外键，
+        // 级联行为（删记录随删、id 改写随迁）与运行时一致。
+        {
+            let state = app.state::<DbState>();
+            let conn = state.conn.lock().unwrap();
+            conn.execute_batch(
+                "PRAGMA foreign_keys=ON;
+                 CREATE TABLE resource_annotations (
+                     id TEXT PRIMARY KEY,
+                     record_id TEXT NOT NULL,
+                     start_offset INTEGER NOT NULL,
+                     length INTEGER NOT NULL,
+                     kind TEXT NOT NULL,
+                     anchor_text TEXT NOT NULL,
+                     created_at TEXT NOT NULL,
+                     FOREIGN KEY (record_id) REFERENCES clipboard_records(id)
+                         ON DELETE CASCADE ON UPDATE CASCADE
+                 );",
+            )
+            .unwrap();
+            conn.execute(
+                "INSERT INTO clipboard_records (id, type, content, created_at, storage_mode, resource_path)
+                 VALUES ('rec-1', 'file', 'p.txt', '2026-01-01', 'resource', 'p.txt')",
+                [],
+            )
+            .unwrap();
+        }
+
+        // 新增 + 按位置排序读取。
+        add_resource_annotation_inner(app.handle(), "rec-1", 10, 4, "hl-y", "铃响七次").unwrap();
+        add_resource_annotation_inner(app.handle(), "rec-1", 20, 6, "bold", "记得回头").unwrap();
+        let list = get_resource_annotations_inner(app.handle(), "rec-1").unwrap();
+        assert_eq!(list.len(), 2);
+        assert_eq!(list[0].start_offset, 10);
+        assert_eq!(list[0].record_id, "rec-1");
+
+        // 输入校验：未知类型 / 非正长度 / 记录不存在（含非资源记录）。
+        assert!(
+            add_resource_annotation_inner(app.handle(), "rec-1", 0, 4, "strike", "x").is_err()
+        );
+        assert!(add_resource_annotation_inner(app.handle(), "rec-1", 0, 0, "bold", "x").is_err());
+        assert!(
+            add_resource_annotation_inner(app.handle(), "missing", 0, 4, "bold", "x").is_err()
+        );
+
+        // 范围清除：与选区部分重叠的标注整条移除，未触及的保留。
+        let removed =
+            remove_resource_annotations_in_range_inner(app.handle(), "rec-1", 12, 4).unwrap();
+        assert_eq!(removed, 1);
+        assert_eq!(get_resource_annotations_inner(app.handle(), "rec-1").unwrap().len(), 1);
+
+        // id 改写（重命名/目录重定向/启动纠偏的共用路径）：外键
+        // ON UPDATE CASCADE 让标注自动随迁，无需各处手写级联。
+        {
+            let state = app.state::<DbState>();
+            let conn = state.conn.lock().unwrap();
+            conn.execute("UPDATE clipboard_records SET id = 'rec-2' WHERE id = 'rec-1'", [])
+                .unwrap();
+        }
+        assert!(get_resource_annotations_inner(app.handle(), "rec-1").unwrap().is_empty());
+        assert_eq!(get_resource_annotations_inner(app.handle(), "rec-2").unwrap().len(), 1);
+
+        // 删除记录：外键 ON DELETE CASCADE 标注清零。
+        {
+            let state = app.state::<DbState>();
+            let conn = state.conn.lock().unwrap();
+            conn.execute("DELETE FROM clipboard_records WHERE id = 'rec-2'", []).unwrap();
+            assert_eq!(annotation_count(&conn, "rec-2"), 0);
+        }
         cleanup(&root);
     }
 

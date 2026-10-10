@@ -126,6 +126,7 @@ fn category_sql(category: &Option<String>) -> (String, String) {
 // ── 业务域子模块（#19 拆分）────────────────────────────────
 // 命令经 pub use 保持在 `db::` 路径下，lib.rs 注册路径不变；
 // 域内助手为 pub(crate)，跨域调用与测试经 crate::db:: 可达。
+mod annotation;
 mod apikeys;
 mod clipboard;
 mod media;
@@ -134,6 +135,7 @@ mod phrase;
 mod resource;
 mod settings;
 mod trash;
+pub(crate) use annotation::*;
 pub(crate) use apikeys::*;
 pub(crate) use clipboard::*;
 pub(crate) use media::*;
@@ -1074,6 +1076,24 @@ pub(crate) fn ensure_schema(conn: &Connection) -> Result<(), Box<dyn std::error:
             trashed_at TEXT NOT NULL,
             trashed_ms INTEGER NOT NULL DEFAULT 0
         );
+
+        /* 资源文本标注：字符偏移锚定 + 锚文本校验。外键双向级联——
+           记录删除时标注随之清理，记录 id 改写（重命名/外部目录重定向/
+           启动纠偏）时标注自动随迁，无需手写级联。 */
+        CREATE TABLE IF NOT EXISTS resource_annotations (
+            id TEXT PRIMARY KEY,
+            record_id TEXT NOT NULL,
+            start_offset INTEGER NOT NULL,
+            length INTEGER NOT NULL,
+            kind TEXT NOT NULL,
+            anchor_text TEXT NOT NULL,
+            created_at TEXT NOT NULL,
+            FOREIGN KEY (record_id) REFERENCES clipboard_records(id)
+                ON DELETE CASCADE ON UPDATE CASCADE
+        );
+
+        CREATE INDEX IF NOT EXISTS idx_annotations_record
+            ON resource_annotations(record_id);
 
         CREATE INDEX IF NOT EXISTS idx_trash_trashed_ms ON trash_items(trashed_ms);
         ",
