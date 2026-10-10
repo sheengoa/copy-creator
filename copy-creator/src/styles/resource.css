@@ -1893,9 +1893,9 @@
   --ann-b: rgba(0, 122, 255, 0.22);
   --ann-o: rgba(255, 149, 0, 0.3);
   --ann-p: rgba(255, 45, 85, 0.24);
-  --ann-float-bg: rgba(250, 250, 252, 0.86);
-  --ann-float-border: rgba(0, 0, 0, 0.1);
-  --ann-float-shadow: 0 10px 34px rgba(0, 0, 0, 0.16), 0 2px 8px rgba(0, 0, 0, 0.08);
+  --ann-float-bg: rgba(252, 252, 254, 0.97);
+  --ann-float-border: rgba(0, 0, 0, 0.12);
+  --ann-float-shadow: 0 12px 32px rgba(0, 0, 0, 0.18), 0 2px 8px rgba(0, 0, 0, 0.1);
   --ann-float-hover: rgba(0, 0, 0, 0.06);
 }
 
@@ -1905,8 +1905,8 @@
   --ann-b: rgba(100, 210, 255, 0.3);
   --ann-o: rgba(255, 159, 10, 0.34);
   --ann-p: rgba(255, 55, 95, 0.32);
-  --ann-float-bg: rgba(44, 44, 46, 0.88);
-  --ann-float-border: rgba(255, 255, 255, 0.12);
+  --ann-float-bg: rgba(44, 44, 46, 0.97);
+  --ann-float-border: rgba(255, 255, 255, 0.14);
   --ann-float-shadow: 0 12px 38px rgba(0, 0, 0, 0.55), 0 2px 8px rgba(0, 0, 0, 0.4);
   --ann-float-hover: rgba(255, 255, 255, 0.1);
 }
@@ -1942,20 +1942,21 @@
   border-radius: 6px;
 }
 
-/* 划选浮动工具条：磨砂玻璃 + 悬停说明气泡。 */
+/* 划选浮动工具条：玻璃质感。WebKitGTK 的 backdrop-filter 支持不完整，
+   底色用高不透明度兜底——不依赖模糊也保持精致层次。 */
 .annotation-toolbar {
   position: absolute;
   z-index: 30;
   display: flex;
   align-items: center;
-  gap: 1px;
-  padding: 4px;
+  gap: 2px;
+  padding: 5px;
   border: 1px solid var(--ann-float-border);
-  border-radius: 11px;
+  border-radius: 12px;
   background: var(--ann-float-bg);
   backdrop-filter: blur(24px) saturate(1.6);
   -webkit-backdrop-filter: blur(24px) saturate(1.6);
-  box-shadow: var(--ann-float-shadow), inset 0 1px 0 rgba(255, 255, 255, 0.25);
+  box-shadow: var(--ann-float-shadow), inset 0 1px 0 rgba(255, 255, 255, 0.35);
   animation: ann-toolbar-in 0.2s cubic-bezier(0.2, 0.9, 0.3, 1.2);
 }
 
@@ -1982,9 +1983,9 @@
   position: relative;
   display: grid;
   place-items: center;
-  width: 30px;
-  height: 30px;
-  border-radius: 8px;
+  width: 32px;
+  height: 32px;
+  border-radius: 9px;
   color: var(--text-primary);
   transition: background 0.14s ease, transform 0.14s ease;
 }
@@ -2026,11 +2027,13 @@
 }
 
 .annotation-toolbar .tb-swatch {
-  width: 15px;
-  height: 15px;
+  width: 16px;
+  height: 16px;
   border-radius: 50%;
-  border: 1px solid rgba(0, 0, 0, 0.12);
-  box-shadow: inset 0 0 0 1.5px rgba(255, 255, 255, 0.45);
+  box-shadow:
+    inset 0 0 0 1px rgba(0, 0, 0, 0.1),
+    inset 0 1px 1px rgba(255, 255, 255, 0.55),
+    0 1px 2px rgba(0, 0, 0, 0.2);
   transition: transform 0.14s ease;
 }
 
@@ -2043,8 +2046,8 @@
 
 .annotation-toolbar .tb-divider {
   width: 1px;
-  height: 16px;
-  margin: 0 3px;
+  height: 18px;
+  margin: 0 4px;
   background: var(--separator);
 }
 
@@ -2068,8 +2071,12 @@
   animation: ann-toolbar-in 0.2s ease;
 }
 
-/* ── 标记面板（详情页信息侧栏内）── */
-.marker-panel { margin-top: 12px; }
+/* ── 标记面板（详情页信息侧栏内）：与上方内容信息以分隔线成区块 ── */
+.marker-panel {
+  margin-top: 12px;
+  padding-top: 12px;
+  border-top: 1px solid var(--separator);
+}
 
 .marker-head {
   display: flex;
