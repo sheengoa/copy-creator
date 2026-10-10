@@ -1808,6 +1808,7 @@
   font-size: var(--text-xs);
   line-height: 1.45;
   user-select: text;
+  -webkit-user-select: text;
 }
 
 /* 大文本截断展示：提示条钉在正文上方，正文区照常滚动浏览。 */
@@ -1879,6 +1880,7 @@
   white-space: pre-wrap;
   overflow-wrap: anywhere;
   user-select: text;
+  -webkit-user-select: text;
   content-visibility: auto;
   contain-intrinsic-size: auto 30000px;
 }
@@ -2231,6 +2233,7 @@
   /* 内部永不滚动：高度由组件按内容计算，滚动统一交给主窗口页面层级。 */
   overflow-y: hidden;
   user-select: text;
+  -webkit-user-select: text;
   white-space: pre-wrap;
   overflow-wrap: anywhere;
 }
