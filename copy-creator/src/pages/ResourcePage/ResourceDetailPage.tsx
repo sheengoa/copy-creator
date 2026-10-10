@@ -338,12 +338,13 @@ export default function ResourceDetailPage({
   }, [externalTextPath, segments, textContent]);
   // 全文加载后截断不再是唯一编辑门槛：正文过大同样不适合应用内编辑，
   // 用系统应用修改文件，改动经监听与媒体版本机制同步回来。闸门与写入
-  // 侧同口径（文件字节数 ≤ 1 MB）——字符数口径对中文会放宽约 3 倍，
+  // 侧（write_resource_text_content 的 ensure_capped_file，1 MiB =
+  // 1024 × 1024 字节）同值同口径——字符数口径对中文会放宽约 3 倍，
   // 1～3 MB 的中文文件会「进得去编辑、存不回去」。文件大小缺失时退回
   // 字符数估算。
   const contentEditable = Boolean(textEditPath) && !record.has_images && fullTextContent !== null
     && !textDetailTruncated
-    && (record.resource_file_size ?? fullTextContent.length) <= 1_000_000;
+    && (record.resource_file_size ?? fullTextContent.length) <= 1024 * 1024;
   // 正文加载完成后把当前内容作为「已保存」基准，进入编辑态时以此为草稿初值。
   useEffect(() => {
     if (fullTextContent === null) return;
