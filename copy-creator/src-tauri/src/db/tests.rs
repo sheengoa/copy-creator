@@ -1354,6 +1354,38 @@ mod resource_command_tests {
     }
 
     #[test]
+    fn resource_text_preview_rejects_non_utf8_and_ignores_invalid_bytes_beyond_the_cut() {
+        let (app, root) = test_app();
+        // GBK 等非 UTF-8 文本：前 1 MB 内存在非法字节 → 与旧 read_to_string
+        // 行为一致报错。截断回退必须以「末尾不完整字符」为界——曾用无界
+        // 逐字节回退实现，整段非法内容会触发平方级重复校验冻结 UI。
+        let gbk = root.join("gbk.txt");
+        let mut bytes = "中文标题".as_bytes().to_vec();
+        bytes.extend([0xB4, 0xF3]); // GBK「大」：单独看是非法 UTF-8 序列
+        bytes.extend("正文内容".as_bytes());
+        std::fs::write(&gbk, bytes).unwrap();
+        assert!(read_resource_text_preview_file(
+            resolve_resource_file_path(app.handle(), gbk.to_string_lossy().as_ref()).unwrap()
+        )
+        .is_err());
+
+        // 非法字节位于截断点之后（读取范围只有前 1 MB）：前置合法部分
+        // 照常截断展示，不受后续内容影响。
+        let mixed = root.join("mixed.txt");
+        let mut bytes = "汉".repeat(400_000).into_bytes(); // 1.2 MB 全合法
+        bytes.push(0xFF);
+        std::fs::write(&mixed, bytes).unwrap();
+        let preview = read_resource_text_preview_file(
+            resolve_resource_file_path(app.handle(), mixed.to_string_lossy().as_ref()).unwrap(),
+        )
+        .unwrap();
+        assert!(preview.truncated);
+        assert!(preview.content.ends_with("汉"));
+        assert_eq!(preview.content.len() % 3, 0);
+        cleanup(&root);
+    }
+
+    #[test]
     fn text_file_content_read_is_limited_to_library_text_files() {
         let (app, root) = test_app();
         let text = root.join("分镜提词/镜头.txt");

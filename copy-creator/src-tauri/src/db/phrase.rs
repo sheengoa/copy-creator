@@ -305,11 +305,19 @@ pub(crate) fn read_resource_text_preview_file(path: PathBuf) -> Result<ResourceT
         .take(RESOURCE_TEXT_PREVIEW_TRUNCATE_BYTES)
         .read_to_end(&mut bytes)
         .map_err(|e| format!("读取文件失败: {e}"))?;
-    // 截断点可能落在多字节字符中间：向前回退到字符边界（最多 3 字节）。
-    while std::str::from_utf8(&bytes).is_err() {
-        bytes.pop();
-    }
-    let content = String::from_utf8(bytes).map_err(|e| format!("读取文件失败: {e}"))?;
+    let content = match std::str::from_utf8(&bytes) {
+        Ok(text) => text.to_string(),
+        // 截断点落在多字节字符中间（末尾是不完整序列）：丢弃末尾不完整
+        // 的字符，最多回退 3 字节。
+        Err(error) if error.error_len().is_none() => {
+            String::from_utf8(bytes[..error.valid_up_to()].to_vec())
+                .map_err(|e| format!("读取文件失败: {e}"))?
+        }
+        // 中段即存在非法字节（GBK 等非 UTF-8 文本）：裁剪无法修复，与旧
+        // read_to_string 行为一致报错，由前端按失败降级并展示原因。禁止
+        // 无界逐字节回退——整段非法时那是对缓冲区长度的平方级校验。
+        Err(_) => return Err("文件内容不是有效的 UTF-8 编码".to_string()),
+    };
     Ok(ResourceTextPreview {
         truncated: metadata.len() > content.len() as u64,
         content,
