@@ -4,7 +4,7 @@ import {
   readResourceTextPreview,
   type ResourceTextPreview,
 } from "../../domain/mediaAssets";
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { invoke } from "@tauri-apps/api/core";
 import { useTranslation } from "react-i18next";
@@ -17,6 +17,18 @@ import { ImageLightbox } from "../../components/ImageLightbox";
 import FindReplaceBar from "../../components/FindReplaceBar";
 import { findMatchPositions } from "../../utils/findReplace";
 import { loadRecordPreviewSegments, splitTextChunks, type RadialPreviewSegment } from "../../domain/preview";
+import {
+  addResourceAnnotation,
+  annotationsForChunk,
+  buildAnnotatedSegments,
+  clearResourceAnnotations,
+  fetchResourceAnnotations,
+  removeResourceAnnotation,
+  removeResourceAnnotationsInRange,
+  validateAnnotations,
+  type AnnotationKind,
+  type ResourceAnnotation,
+} from "../../domain/annotations";
 import { formatResourceBitrate, formatResourceDuration, formatResourceFileSize } from "./resourceUtils";
 import { type ResourceMediaKind } from "../../domain/mediaKind";
 import { getResourceFileName, isResourceTitleRenameable, splitResourceFileName } from "../../domain/fileName";
@@ -42,6 +54,53 @@ interface ResourceDetailPageProps {
   onMoveRecord?: (record: ClipboardRecord) => void;
 }
 
+/* ── 文本标注工具条：高亮色板与图标（纯图标 + data-tip 悬停说明） ── */
+const ANN_HL_KINDS: { kind: AnnotationKind; tipKey: string; swatchClass: string }[] = [
+  { kind: "hl-y", tipKey: "resources.annHlY", swatchClass: "tb-swatch-y" },
+  { kind: "hl-g", tipKey: "resources.annHlG", swatchClass: "tb-swatch-g" },
+  { kind: "hl-b", tipKey: "resources.annHlB", swatchClass: "tb-swatch-b" },
+  { kind: "hl-o", tipKey: "resources.annHlO", swatchClass: "tb-swatch-o" },
+  { kind: "hl-p", tipKey: "resources.annHlP", swatchClass: "tb-swatch-p" },
+];
+
+const ANN_ICONS = {
+  bold: (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
+      <path d="M7 4h6.5a3.5 3.5 0 0 1 0 7H7z" />
+      <path d="M7 11h7.5a3.5 3.5 0 0 1 0 7H7z" />
+    </svg>
+  ),
+  underline: (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round">
+      <path d="M7 4v6.5a5 5 0 0 0 10 0V4" />
+      <path d="M5 20h14" />
+    </svg>
+  ),
+  copy: (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.9" strokeLinecap="round" strokeLinejoin="round">
+      <rect x="9" y="9" width="11" height="11" rx="2.5" />
+      <path d="M5 15V6a2 2 0 0 1 2-2h9" />
+    </svg>
+  ),
+  eraser: (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.9" strokeLinecap="round" strokeLinejoin="round">
+      <path d="m5 16 8.5-8.5a2 2 0 0 1 2.8 0l3.2 3.2a2 2 0 0 1 0 2.8L13 20H8z" />
+      <path d="M6 20h13" />
+    </svg>
+  ),
+  pen: (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round">
+      <path d="M12 19l7-7a4.95 4.95 0 1 0-7-7l-7 7v7h7z" />
+      <path d="M16 5l3 3" />
+    </svg>
+  ),
+  close: (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round">
+      <path d="M6 6l12 12M18 6 6 18" />
+    </svg>
+  ),
+};
+
 export default function ResourceDetailPage({
   record,
   typeLabel,
@@ -64,6 +123,14 @@ export default function ResourceDetailPage({
   const [errorReason, setErrorReason] = useState<string | null>(null);
   // 「用系统应用打开」失败反馈（超长文本回退态的兜底动作）。
   const [openExternalFailed, setOpenExternalFailed] = useState(false);
+  // ── 文本标注（阅读态划选标记）──
+  const [annotations, setAnnotations] = useState<ResourceAnnotation[]>([]);
+  const [annSelection, setAnnSelection] = useState<
+    { start: number; end: number; text: string } | null
+  >(null);
+  const [annFeedback, setAnnFeedback] = useState<string | null>(null);
+  const annFeedbackTimer = useRef<number | null>(null);
+  const toolbarRef = useRef<HTMLDivElement | null>(null);
   const [lightboxSrc, setLightboxSrc] = useState<string | null>(null);
   const [mediaSource, setMediaSource] = useState<string | null>(null);
   const [mediaMeta, setMediaMeta] = useState<ResourceMediaMetadata>({});
@@ -322,6 +389,193 @@ export default function ResourceDetailPage({
     () => (textContent ? splitTextChunks(textContent.content) : []),
     [textContent],
   );
+
+  // ── 文本标注：加载与锚文本校验 ──
+  // 仅完整全文态启用（截断回退态内容不完整，标注定位无意义）；编辑态
+  // 暂离（textarea 内不显示标注），退出后随文本重载重新校验。
+  const annotationsActive = Boolean(externalTextPath) && !textDetailTruncated && !contentEditing;
+  useEffect(() => {
+    if (!annotationsActive || textContent === null) {
+      setAnnotations([]);
+      return;
+    }
+    let cancelled = false;
+    fetchResourceAnnotations(record.id)
+      .then((list) => {
+        if (!cancelled) setAnnotations(validateAnnotations(textContent.content, list));
+      })
+      .catch(() => {
+        if (!cancelled) setAnnotations([]);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [annotationsActive, record.id, textContent]);
+
+  useEffect(() => () => {
+    if (annFeedbackTimer.current !== null) window.clearTimeout(annFeedbackTimer.current);
+  }, []);
+
+  const showAnnFeedback = useCallback((message: string | null) => {
+    setAnnFeedback(message);
+    if (annFeedbackTimer.current !== null) window.clearTimeout(annFeedbackTimer.current);
+    if (message !== null) {
+      annFeedbackTimer.current = window.setTimeout(() => {
+        setAnnFeedback(null);
+        annFeedbackTimer.current = null;
+      }, 1800);
+    }
+  }, []);
+
+  // 每块的全局起点 + 块内标注分段（标注偏移先经 domain 裁剪平移到块内）。
+  const annotatedChunks = useMemo(() => {
+    const result: { start: number; segments: ReturnType<typeof buildAnnotatedSegments> }[] = [];
+    let offset = 0;
+    for (const chunk of textChunks) {
+      result.push({
+        start: offset,
+        segments: buildAnnotatedSegments(
+          chunk,
+          annotationsForChunk(annotations, offset, chunk.length),
+        ),
+      });
+      offset += chunk.length;
+    }
+    return result;
+  }, [textChunks, annotations]);
+
+  const hideAnnToolbar = useCallback(() => {
+    setAnnSelection(null);
+    window.getSelection()?.removeAllRanges();
+  }, []);
+
+  // 阅读态划选：把 Selection 换算为全文偏移区间（跨块自动换算）。
+  const handleStageMouseUp = useCallback(() => {
+    if (toolbarRef.current?.contains(document.activeElement)) return;
+    window.setTimeout(() => {
+      if (contentEditing || !annotationsActive) {
+        setAnnSelection(null);
+        return;
+      }
+      const selection = window.getSelection();
+      if (!selection || selection.isCollapsed || selection.rangeCount === 0) {
+        setAnnSelection(null);
+        return;
+      }
+      const range = selection.getRangeAt(0);
+      const locate = (node: Node | null): number | null => {
+        let current: Node | null = node;
+        while (current && current !== stageRef.current) {
+          if (current instanceof HTMLElement && current.dataset.chunkStart !== undefined) {
+            const chunkStart = Number(current.dataset.chunkStart);
+            const walker = document.createTreeWalker(current, NodeFilter.SHOW_TEXT);
+            let total = 0;
+            while (walker.nextNode()) {
+              if (walker.currentNode === node) return chunkStart + total;
+              total += walker.currentNode.textContent?.length ?? 0;
+            }
+            return null;
+          }
+          current = current.parentNode;
+        }
+        return null;
+      };
+      const start = locate(range.startContainer);
+      const end = locate(range.endContainer);
+      if (start === null || end === null || start === end) {
+        setAnnSelection(null);
+        return;
+      }
+      const [lo, hi] = start < end ? [start, end] : [end, start];
+      const text = textContent?.content.slice(lo, hi) ?? "";
+      if (!text.trim()) {
+        setAnnSelection(null);
+        return;
+      }
+      setAnnSelection({ start: lo, end: hi, text });
+    }, 10);
+  }, [contentEditing, annotationsActive, textContent]);
+
+  const applyAnnotation = useCallback((kind: AnnotationKind) => {
+    if (!annSelection) return;
+    addResourceAnnotation(record.id, annSelection.start, annSelection.end - annSelection.start, kind, annSelection.text)
+      .then((annotation) => {
+        setAnnotations((prev) => [...prev, annotation]);
+        hideAnnToolbar();
+      })
+      .catch(() => showAnnFeedback(t("resources.annSaveFailed")));
+  }, [annSelection, record.id, hideAnnToolbar, showAnnFeedback, t]);
+
+  const clearAnnotationsInRange = useCallback(() => {
+    if (!annSelection) return;
+    const { start, end } = annSelection;
+    removeResourceAnnotationsInRange(record.id, start, end - start)
+      .then(() => {
+        setAnnotations((prev) => prev.filter(
+          (a) => !(a.start < end && a.start + a.length > start),
+        ));
+        hideAnnToolbar();
+        showAnnFeedback(t("resources.annCleared"));
+      })
+      .catch(() => showAnnFeedback(t("resources.annSaveFailed")));
+  }, [annSelection, record.id, hideAnnToolbar, showAnnFeedback, t]);
+
+  const copySelectedText = useCallback(() => {
+    if (!annSelection) return;
+    (navigator.clipboard?.writeText(annSelection.text) ?? Promise.reject())
+      .then(() => showAnnFeedback(t("resources.annCopied")))
+      .catch(() => showAnnFeedback(t("resources.annCopyFailed")));
+    hideAnnToolbar();
+  }, [annSelection, hideAnnToolbar, showAnnFeedback, t]);
+
+  const removeOneAnnotation = useCallback((id: string) => {
+    removeResourceAnnotation(id)
+      .then((removed) => {
+        if (removed) setAnnotations((prev) => prev.filter((a) => a.id !== id));
+      })
+      .catch(() => showAnnFeedback(t("resources.annSaveFailed")));
+  }, [showAnnFeedback, t]);
+
+  const clearAllAnnotations = useCallback(() => {
+    clearResourceAnnotations(record.id)
+      .then(() => {
+        setAnnotations([]);
+        showAnnFeedback(t("resources.annAllCleared"));
+      })
+      .catch(() => showAnnFeedback(t("resources.annSaveFailed")));
+  }, [record.id, showAnnFeedback, t]);
+
+  const jumpToAnnotation = useCallback((id: string) => {
+    const target = stageRef.current?.querySelector(`[data-ann="${id}"]`);
+    if (!(target instanceof HTMLElement)) {
+      showAnnFeedback(t("resources.annJumpMiss"));
+      return;
+    }
+    target.scrollIntoView({ block: "center", behavior: "smooth" });
+    target.classList.remove("ann-jump"); void target.offsetWidth;
+    target.classList.add("ann-jump");
+    window.setTimeout(() => target.classList.remove("ann-jump"), 2100);
+  }, [showAnnFeedback, t]);
+
+  // 工具条定位：钉在选区上方，箭头跟随选区中心；超出 stage 视口时收拢。
+  useLayoutEffect(() => {
+    if (!annSelection || !stageRef.current || !toolbarRef.current) return;
+    const selection = window.getSelection();
+    if (!selection || selection.rangeCount === 0) return;
+    const live = selection.getRangeAt(0).getBoundingClientRect();
+    const stage = stageRef.current;
+    const stageRect = stage.getBoundingClientRect();
+    const toolbar = toolbarRef.current;
+    const top = live.top - stageRect.top + stage.scrollTop - 46;
+    const centerX = live.left - stageRect.left + live.width / 2;
+    const left = Math.min(
+      Math.max(8, centerX - toolbar.offsetWidth / 2),
+      stage.clientWidth - toolbar.offsetWidth - 8,
+    );
+    toolbar.style.top = `${Math.max(6, top)}px`;
+    toolbar.style.left = `${Math.max(8, left)}px`;
+    toolbar.style.setProperty("--arrow-x", `${centerX - left}px`);
+  }, [annSelection]);
 
   // 正文编辑面向有文件承载的文本资源（不含内嵌图片）：取材与保存目标
   // 都是文件本身，文件是全文的唯一事实来源。
@@ -649,6 +903,7 @@ export default function ResourceDetailPage({
           <div
             ref={stageRef}
             className={`resource-detail-stage resource-detail-stage-${kind}`}
+            onMouseUp={handleStageMouseUp}
           >
             {contentEditing && findOpen && createPortal(
               <FindReplaceBar
@@ -778,10 +1033,94 @@ export default function ResourceDetailPage({
                   </div>
                 )}
                 <div className="resource-detail-text-chunks">
-                  {textChunks.map((chunk, index) => (
-                    <pre key={index} className="resource-detail-text-chunk">{chunk}</pre>
+                  {annotatedChunks.map((chunk, index) => (
+                    <pre
+                      key={index}
+                      className="resource-detail-text-chunk"
+                      data-chunk-start={chunk.start}
+                    >
+                      {chunk.segments.map((segment, segIndex) =>
+                        segment.kinds.length ? (
+                          <span
+                            key={segIndex}
+                            className={`ann ${segment.kinds.join(" ")}`}
+                            data-ann={segment.annId}
+                          >
+                            {segment.text}
+                          </span>
+                        ) : (
+                          segment.text
+                        ),
+                      )}
+                    </pre>
                   ))}
                 </div>
+                {annSelection && !contentEditing && (
+                  <div
+                    ref={toolbarRef}
+                    className="annotation-toolbar"
+                    role="toolbar"
+                    aria-label={t("resources.annToolbarLabel")}
+                  >
+                    {ANN_HL_KINDS.map((entry) => (
+                      <button
+                        key={entry.kind}
+                        type="button"
+                        className="tb-btn"
+                        data-tip={t(entry.tipKey)}
+                        onMouseDown={(event) => event.preventDefault()}
+                        onClick={() => applyAnnotation(entry.kind)}
+                      >
+                        <span className={`tb-swatch ${entry.swatchClass}`} />
+                      </button>
+                    ))}
+                    <span className="tb-divider" />
+                    <button
+                      type="button"
+                      className="tb-btn"
+                      data-tip={t("resources.annBold")}
+                      onMouseDown={(event) => event.preventDefault()}
+                      onClick={() => applyAnnotation("bold")}
+                    >
+                      {ANN_ICONS.bold}
+                    </button>
+                    <button
+                      type="button"
+                      className="tb-btn"
+                      data-tip={t("resources.annUnderline")}
+                      onMouseDown={(event) => event.preventDefault()}
+                      onClick={() => applyAnnotation("underline")}
+                    >
+                      {ANN_ICONS.underline}
+                    </button>
+                    <span className="tb-divider" />
+                    <button
+                      type="button"
+                      className="tb-btn"
+                      data-tip={t("resources.annCopy")}
+                      onMouseDown={(event) => event.preventDefault()}
+                      onClick={copySelectedText}
+                    >
+                      {ANN_ICONS.copy}
+                    </button>
+                    {annotations.some(
+                      (a) => a.start < annSelection.end && a.start + a.length > annSelection.start,
+                    ) && (
+                      <button
+                        type="button"
+                        className="tb-btn danger"
+                        data-tip={t("resources.annClear")}
+                        onMouseDown={(event) => event.preventDefault()}
+                        onClick={clearAnnotationsInRange}
+                      >
+                        {ANN_ICONS.eraser}
+                      </button>
+                    )}
+                  </div>
+                )}
+                {annFeedback && (
+                  <div className="annotation-toast" role="status">{annFeedback}</div>
+                )}
               </div>
             ) : (
               <ResourceSegments segments={segments || []} />
@@ -819,6 +1158,87 @@ export default function ResourceDetailPage({
               </div>
             )}
           </dl>
+          {annotationsActive && (
+            <section className="marker-panel" aria-label={t("resources.markerPanelTitle")}>
+              <div className="marker-head">
+                <h2 className="marker-title">
+                  {t("resources.markerPanelTitle")}
+                  <span className="marker-count">{annotations.length}</span>
+                </h2>
+                {annotations.length > 0 && (
+                  <button
+                    type="button"
+                    className="marker-clear-all"
+                    onClick={clearAllAnnotations}
+                  >
+                    {t("resources.markerClearAll")}
+                  </button>
+                )}
+              </div>
+              {annotations.length === 0 ? (
+                <div className="marker-empty">
+                  {ANN_ICONS.pen}
+                  <p>{t("resources.markerEmpty")}</p>
+                </div>
+              ) : (
+                <ul className="marker-list">
+                  {[...annotations]
+                    .sort((a, b) => a.start - b.start)
+                    .map((annotation) => {
+                      const percent = fullTextContent === null || fullTextContent.length === 0
+                        ? 0
+                        : Math.min(100, Math.round((annotation.start / fullTextContent.length) * 100));
+                      const excerpt = annotation.anchorText
+                        .slice(0, 48)
+                        .replace(/\n/g, " ");
+                      const kindLabel = annotation.kind.startsWith("hl-")
+                        ? t("resources.markerKindHighlight", {
+                            color: t(`resources.annHl${annotation.kind.slice(3).toUpperCase()}`),
+                          })
+                        : annotation.kind === "bold"
+                          ? t("resources.markerKindBold")
+                          : t("resources.markerKindUnderline");
+                      return (
+                        <li
+                          key={annotation.id}
+                          className={annotation.stale
+                            ? `marker-item kind-${annotation.kind} stale`
+                            : `marker-item kind-${annotation.kind}`}
+                          title={annotation.stale
+                            ? t("resources.annStaleHint")
+                            : t("resources.markerJumpHint")}
+                          onClick={() => {
+                            if (!annotation.stale) jumpToAnnotation(annotation.id);
+                          }}
+                        >
+                          <span className="marker-body">
+                            <span className="marker-excerpt">{excerpt}</span>
+                            <span className="marker-meta">
+                              {kindLabel}
+                              {" · "}
+                              {annotation.stale
+                                ? t("resources.annStale")
+                                : t("resources.markerPosition", { percent })}
+                            </span>
+                          </span>
+                          <button
+                            type="button"
+                            className="marker-del"
+                            title={t("resources.markerDelete")}
+                            onClick={(event) => {
+                              event.stopPropagation();
+                              removeOneAnnotation(annotation.id);
+                            }}
+                          >
+                            {ANN_ICONS.close}
+                          </button>
+                        </li>
+                      );
+                    })}
+                </ul>
+              )}
+            </section>
+          )}
           {onMoveRecord && (
             <div className="resource-group-line">
               <span className="resource-group-line-label">{t("resources.currentGroup")}</span>
