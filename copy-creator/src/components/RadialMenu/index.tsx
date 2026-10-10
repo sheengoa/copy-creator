@@ -481,11 +481,12 @@ export default function RadialMenu() {
         } else if (kind === "video" || kind === "audio") {
           segments = [{ type: kind, path: resourcePath, version: item.resourceVersion }];
         } else if (item.textPreviewPath) {
-          // 文本取材经 domain 判定读文件全文（含编辑后 type 为 text 的记录），
-          // 不依赖 resource_kind 与 type；读取失败时回退为路径展示。
+          // 文本取材经 domain 判定读文件内容（含编辑后 type 为 text 的记录），
+          // 不依赖 resource_kind 与 type；大文件由后端截断返回，读取失败时
+          // 回退为路径展示。
           try {
-            const text = await readResourceTextPreview(item.textPreviewPath);
-            segments = [{ type: "text", content: text }];
+            const preview = await readResourceTextPreview(item.textPreviewPath);
+            segments = [{ type: "text", content: preview.content }];
           } catch {
             segments = [{ type: "text", content: item.textPreviewPath }];
           }

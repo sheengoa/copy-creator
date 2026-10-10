@@ -1,4 +1,4 @@
-import { readClipboardTextPreviewById, readQuickInputTextPreview, readResourceTextPreview } from "../domain/mediaAssets";
+import { readClipboardTextPreviewById, readQuickInputTextPreview, readResourceTextPreview, type ResourceTextPreview } from "../domain/mediaAssets";
 import { useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { HighlightText } from "./HighlightText";
@@ -67,10 +67,10 @@ interface InlineTextFilePreviewProps {
   search?: string;
 }
 
-const resourceTextPreviewCache = new Map<string, string>();
-const resourceTextPreviewRequests = new Map<string, Promise<string>>();
+const resourceTextPreviewCache = new Map<string, ResourceTextPreview>();
+const resourceTextPreviewRequests = new Map<string, Promise<ResourceTextPreview>>();
 
-function loadResourceTextPreview(path: string, version?: string): Promise<string> {
+function loadResourceTextPreview(path: string, version?: string): Promise<ResourceTextPreview> {
   const cacheKey = `${path}\u0000${version ?? ""}`;
   const cached = resourceTextPreviewCache.get(cacheKey);
   if (cached !== undefined) return Promise.resolve(cached);
@@ -79,9 +79,9 @@ function loadResourceTextPreview(path: string, version?: string): Promise<string
   if (pending) return pending;
 
   const request = readResourceTextPreview(path)
-    .then((text) => {
-      resourceTextPreviewCache.set(cacheKey, text);
-      return text;
+    .then((preview) => {
+      resourceTextPreviewCache.set(cacheKey, preview);
+      return preview;
     })
     .finally(() => {
       resourceTextPreviewRequests.delete(cacheKey);
@@ -111,7 +111,10 @@ export function InlineTextFilePreview({
         ? readClipboardTextPreviewById(recordId)
         : readQuickInputTextPreview(path ?? "");
     request
-      .then((text) => {
+      .then((preview) => {
+        // 资源库路径返回 {content, truncated}，其余两条命令返回纯文本；
+        // 卡片预览是局部视图，截断无需提示。
+        const text = typeof preview === "string" ? preview : preview.content;
         if (!cancelled) setContent(text);
       })
       .catch(() => {

@@ -270,6 +270,7 @@
     "collapseGroup": "折叠子分组",
     "expandGroup": "展开子分组",
     "detailError": "内容详情加载失败",
+    "textTruncatedHint": "文件较大，仅显示前 1 MB 内容；完整内容以文件为准。",
     "fileDetailNote": "当前格式以文件信息展示，可点击「使用」粘贴到当前应用",
     "info": "内容信息",
     "type": "类型",

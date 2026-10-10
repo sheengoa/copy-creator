@@ -607,7 +607,8 @@ mod resource_command_tests {
         create_resource_group_inner, delete_resource_group_inner,
         forget_resource_records, get_clipboard_records_inner, get_resource_groups_inner,
         move_resource_group_inner, move_resource_records_inner, normalize_file_backed_text_records,
-        read_resource_text_preview_file,
+        read_resource_text_preview_file, ResourceTextPreview,
+        RESOURCE_TEXT_PREVIEW_TRUNCATE_BYTES,
         read_text_file_content_inner, rename_resource_file_inner,
         reorder_resource_groups_inner, resolve_resource_file_path, resource_file_id,
         resource_folder_tree, resource_group_count_map, set_resource_note_inner,
@@ -1308,7 +1309,7 @@ mod resource_command_tests {
                 resolve_resource_file_path(app.handle(), text.to_string_lossy().as_ref()).unwrap()
             )
             .unwrap(),
-            "预览内容"
+            ResourceTextPreview { content: "预览内容".to_string(), truncated: false }
         );
 
         let outside = root.parent().unwrap().join(format!(
@@ -1327,6 +1328,28 @@ mod resource_command_tests {
         )
         .is_err());
         let _ = std::fs::remove_file(outside);
+        cleanup(&root);
+    }
+
+    #[test]
+    fn resource_text_preview_truncates_large_files_at_char_boundaries() {
+        let (app, root) = test_app();
+        // 「汉」占 3 字节：截断阈值（1 MB）不整除 3，截断点必然落在字符
+        // 中间——读取必须回退到字符边界安全收尾，而不是像旧实现那样整单
+        // 报错（大文件详情页曾因此显示「内容详情加载失败」）。
+        let large = root.join("large.txt");
+        std::fs::write(&large, "汉".repeat(700_000)).unwrap(); // 约 2 MB
+        let preview = read_resource_text_preview_file(
+            resolve_resource_file_path(app.handle(), large.to_string_lossy().as_ref()).unwrap(),
+        )
+        .unwrap();
+        assert!(preview.truncated);
+        assert!(
+            preview.content.len() <= RESOURCE_TEXT_PREVIEW_TRUNCATE_BYTES as usize,
+            "截断内容不得超过阈值"
+        );
+        assert_eq!(preview.content.len() % 3, 0, "截断点必须落在字符边界");
+        assert!(preview.content.ends_with("汉"));
         cleanup(&root);
     }
 

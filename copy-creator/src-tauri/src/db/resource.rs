@@ -5,7 +5,10 @@ use rusqlite::params;
 use tauri::{AppHandle, Emitter, Manager, Runtime};
 
 #[tauri::command]
-pub fn read_resource_text_preview(app: AppHandle, path: String) -> Result<String, String> {
+pub fn read_resource_text_preview(
+    app: AppHandle,
+    path: String,
+) -> Result<ResourceTextPreview, String> {
     let path = resolve_resource_file_path(&app, &path)?;
     read_resource_text_preview_file(path)
 }

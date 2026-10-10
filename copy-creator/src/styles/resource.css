@@ -1810,6 +1810,26 @@
   user-select: text;
 }
 
+/* 大文本截断展示：提示条钉在正文上方，正文区照常滚动浏览。 */
+.resource-detail-text-body {
+  display: flex;
+  flex-direction: column;
+  width: 100%;
+  min-width: 0;
+}
+
+.resource-detail-truncated-hint {
+  flex-shrink: 0;
+  margin-bottom: 10px;
+  padding: 8px 12px;
+  border: 1px solid color-mix(in srgb, var(--warning, #ff9f0a) 35%, var(--separator));
+  border-radius: 7px;
+  background: color-mix(in srgb, var(--warning, #ff9f0a) 10%, transparent);
+  color: var(--text-secondary);
+  font-size: var(--text-xs);
+  line-height: 1.5;
+}
+
 .resource-detail-text-file {
   width: 100%;
   margin: 0;

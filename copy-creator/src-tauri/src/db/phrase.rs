@@ -2,6 +2,7 @@
 // 从 db/mod.rs 机械搬迁；实现与行为不变，共享助手经 super::* 引用。
 use super::*;
 use rusqlite::params;
+use std::io::Read;
 use tauri::{AppHandle, Emitter, Manager, Runtime};
 
 pub(crate) fn quick_input_files_dir<R: Runtime>(app: &AppHandle<R>) -> PathBuf {
@@ -281,11 +282,38 @@ pub(crate) fn read_text_preview_file(path: PathBuf) -> Result<String, String> {
     read_capped_text_file(&path)
 }
 
-pub(crate) fn read_resource_text_preview_file(path: PathBuf) -> Result<String, String> {
+/// 资源文本预览的读取结果：truncated=true 表示 content 只是文件前缀
+/// （完整内容以文件本身为事实源，详情页据此展示截断提示并禁用编辑）。
+#[derive(Debug, PartialEq, serde::Serialize)]
+pub(crate) struct ResourceTextPreview {
+    pub content: String,
+    pub truncated: bool,
+}
+
+/// 资源库文本预览（详情页、列表卡片与径向菜单共用）：超过截断阈值时只读
+/// 文件前缀并在 UTF-8 字符边界安全收尾，绝不因「文件大」而失败——预览是
+/// 给人看的第一屏；完整使用内容各有各的口径（编辑/写入 ≤ 1 MB、按内容
+/// 粘贴 ≤ 10 MB、其余按文件粘贴）。
+pub(crate) fn read_resource_text_preview_file(path: PathBuf) -> Result<ResourceTextPreview, String> {
     if !crate::media_kind::is_text_extension(&path) && !crate::media_kind::is_probably_text_file(&path) {
         return Err("当前文件不是可预览的文本文件".to_string());
     }
-    read_capped_text_file(&path)
+    let metadata = std::fs::metadata(&path).map_err(|e| format!("读取文件失败: {e}"))?;
+    let mut file = std::fs::File::open(&path).map_err(|e| format!("读取文件失败: {e}"))?;
+    let mut bytes = Vec::new();
+    (&mut file)
+        .take(RESOURCE_TEXT_PREVIEW_TRUNCATE_BYTES)
+        .read_to_end(&mut bytes)
+        .map_err(|e| format!("读取文件失败: {e}"))?;
+    // 截断点可能落在多字节字符中间：向前回退到字符边界（最多 3 字节）。
+    while std::str::from_utf8(&bytes).is_err() {
+        bytes.pop();
+    }
+    let content = String::from_utf8(bytes).map_err(|e| format!("读取文件失败: {e}"))?;
+    Ok(ResourceTextPreview {
+        truncated: metadata.len() > content.len() as u64,
+        content,
+    })
 }
 
 pub(crate) fn resolve_quick_input_text_preview_path(app: &AppHandle, path: &str) -> Result<PathBuf, String> {

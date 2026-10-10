@@ -4,9 +4,18 @@ import { invoke } from "@tauri-apps/api/core";
 
 export { getStoragePath } from "./mediaUrl";
 
-/** 资源库文本文件的预览内容（按扩展名与文件头判定）。 */
-export function readResourceTextPreview(path: string): Promise<string> {
-  return invoke<string>("read_resource_text_preview", { path });
+/** 资源库文本文件的预览读取结果：truncated=true 表示 content 只是文件
+ * 前缀（后端按 1 MB 截断并在 UTF-8 字符边界收尾），完整内容以文件为
+ * 事实源，调用方据此展示截断提示并禁用正文编辑。 */
+export interface ResourceTextPreview {
+  content: string;
+  truncated: boolean;
+}
+
+/** 资源库文本文件的预览内容（按扩展名与文件头判定）。大文件截断返回，
+ * 不因超限而失败。 */
+export function readResourceTextPreview(path: string): Promise<ResourceTextPreview> {
+  return invoke<ResourceTextPreview>("read_resource_text_preview", { path });
 }
 
 /** 快捷输入文件（quick-input-files/）的文本预览内容。 */

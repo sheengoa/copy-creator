@@ -1,4 +1,4 @@
-import { readResourceTextPreview } from "../../domain/mediaAssets";
+import { readResourceTextPreview, type ResourceTextPreview } from "../../domain/mediaAssets";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { invoke } from "@tauri-apps/api/core";
@@ -54,8 +54,10 @@ export default function ResourceDetailPage({
   const resourcePath = getResourcePath(record);
   const mediaVersion = resourceMediaVersion(record);
   const [segments, setSegments] = useState<RadialPreviewSegment[] | null>(null);
-  const [textContent, setTextContent] = useState<string | null>(null);
-  const [error, setError] = useState(false);
+  const [textContent, setTextContent] = useState<ResourceTextPreview | null>(null);
+  // 加载失败的后端原因（文件丢失/非文本等），null=无错误；空串表示拿不到
+  // 具体原因，展示时回退泛化文案。超限不属于失败——后端截断返回。
+  const [errorReason, setErrorReason] = useState<string | null>(null);
   const [lightboxSrc, setLightboxSrc] = useState<string | null>(null);
   const [mediaSource, setMediaSource] = useState<string | null>(null);
   const [mediaMeta, setMediaMeta] = useState<ResourceMediaMetadata>({});
@@ -181,9 +183,12 @@ export default function ResourceDetailPage({
 
   useEffect(() => {
     let cancelled = false;
+    const fail = (reason: unknown) => {
+      if (!cancelled) setErrorReason(typeof reason === "string" ? reason : "");
+    };
     setSegments(null);
     setTextContent(null);
-    setError(false);
+    setErrorReason(null);
     setMediaSource(null);
     if (kind === "video" || kind === "audio" || kind === "file" || kind === "image") {
       if (kind === "video" || kind === "audio") {
@@ -191,9 +196,7 @@ export default function ResourceDetailPage({
           .then((url) => {
             if (!cancelled) setMediaSource(url);
           })
-          .catch(() => {
-            if (!cancelled) setError(true);
-          });
+          .catch(fail);
       }
       return () => {
         cancelled = true;
@@ -202,12 +205,10 @@ export default function ResourceDetailPage({
 
     if (externalTextPath) {
       readResourceTextPreview(externalTextPath)
-        .then((content) => {
-          if (!cancelled) setTextContent(content);
+        .then((preview) => {
+          if (!cancelled) setTextContent(preview);
         })
-        .catch(() => {
-          if (!cancelled) setError(true);
-        });
+        .catch(fail);
       return () => {
         cancelled = true;
       };
@@ -223,9 +224,7 @@ export default function ResourceDetailPage({
       .then((next: RadialPreviewSegment[]) => {
         if (!cancelled) setSegments(next);
       })
-      .catch(() => {
-        if (!cancelled) setError(true);
-      });
+      .catch(fail);
     return () => {
       cancelled = true;
     };
@@ -291,6 +290,9 @@ export default function ResourceDetailPage({
     ? Boolean(mediaSource)
     : kind === "file" || kind === "image" || Boolean(segments);
   const textDetailReady = externalTextPath ? textContent !== null : Boolean(segments);
+  // 截断展示时禁止进入正文编辑：编辑器持有的是前缀副本，保存会以副本
+  // 覆盖整个文件、丢掉未展示的部分（写入侧 1 MB 上限是最后防线）。
+  const textDetailTruncated = textContent?.truncated === true;
   const contentReady = externalTextPath ? textDetailReady : detailReady;
 
   // 正文编辑面向有文件承载的文本资源（不含内嵌图片）：取材与保存目标
@@ -298,7 +300,7 @@ export default function ResourceDetailPage({
   // 编辑目标与取材同源：一律指向 backing 文件（domain 判定已校验文本扩展名）。
   const textEditPath = kind === "text" ? externalTextPath : null;
   const fullTextContent = useMemo(() => {
-    if (externalTextPath) return textContent;
+    if (externalTextPath) return textContent?.content ?? null;
     if (!segments) return null;
     return segments
       .filter((segment): segment is Extract<RadialPreviewSegment, { type: "text" }> =>
@@ -306,7 +308,8 @@ export default function ResourceDetailPage({
       .map((segment) => segment.content)
       .join("\n");
   }, [externalTextPath, segments, textContent]);
-  const contentEditable = Boolean(textEditPath) && !record.has_images && fullTextContent !== null;
+  const contentEditable = Boolean(textEditPath) && !record.has_images && fullTextContent !== null
+    && !textDetailTruncated;
   // 正文加载完成后把当前内容作为「已保存」基准，进入编辑态时以此为草稿初值。
   useEffect(() => {
     if (fullTextContent === null) return;
@@ -560,7 +563,7 @@ export default function ResourceDetailPage({
           void handleSaveContent();
         }}
       >
-        <section className="resource-detail-main" aria-busy={!(externalTextPath ? textDetailReady : detailReady) && !error}>
+        <section className="resource-detail-main" aria-busy={!(externalTextPath ? textDetailReady : detailReady) && !errorReason}>
           <span className="resource-detail-kind">{typeLabel(kind)}</span>
           {renameDraft === null ? (
             <h1
@@ -635,9 +638,10 @@ export default function ResourceDetailPage({
               />,
               document.body,
             )}
-            {error ? (
+            {errorReason !== null ? (
               <div className="resource-detail-error" role="alert">
                 <strong>{t("resources.detailError")}</strong>
+                {errorReason && <span>{errorReason}</span>}
                 <button type="button" className="resource-secondary-button" onClick={onBack}>
                   {t("resources.backToLibrary")}
                 </button>
@@ -720,9 +724,16 @@ export default function ResourceDetailPage({
                 }}
               />
             ) : externalTextPath ? (
-              <pre className="resource-segment-text resource-detail-text-file">
-                <HighlightText text={textContent || ""} />
-              </pre>
+              <div className="resource-detail-text-body">
+                {textDetailTruncated && (
+                  <div className="resource-detail-truncated-hint" role="note">
+                    {t("resources.textTruncatedHint")}
+                  </div>
+                )}
+                <pre className="resource-segment-text resource-detail-text-file">
+                  <HighlightText text={textContent?.content || ""} />
+                </pre>
+              </div>
             ) : (
               <ResourceSegments segments={segments || []} />
             )}

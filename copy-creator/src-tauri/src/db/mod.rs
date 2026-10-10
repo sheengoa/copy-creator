@@ -150,6 +150,11 @@ pub struct DbState {
 const CLIPBOARD_CONTENT_PREVIEW_CHARS: usize = 600;
 const QUICK_INPUT_FILE_LIMIT_BYTES: u64 = 50 * 1024 * 1024;
 const QUICK_INPUT_TEXT_PREVIEW_LIMIT_BYTES: u64 = 1024 * 1024;
+/// 资源文本预览的截断阈值：预览只读文件前 1 MB，超出部分不读入——大文件
+/// 详情页照常可用（截断展示），又避免超长文本拖垮 WebView 渲染。与快捷
+/// 输入预览上限同值：编辑/写入沿用「内容不超过 1 MB」的既有约束，预览
+/// 所见即可编辑所得。
+pub(crate) const RESOURCE_TEXT_PREVIEW_TRUNCATE_BYTES: u64 = 1024 * 1024;
 pub(crate) const DATABASE_STORAGE_MODE: &str = "database";
 pub(crate) const RESOURCE_STORAGE_MODE: &str = "resource";
 const RESOURCE_LIBRARY_DIR_NAME: &str = "resource-library";
