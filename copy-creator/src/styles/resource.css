@@ -2117,6 +2117,8 @@
 
 .marker-clear-all {
   padding: 2px 7px;
+  border: none;
+  background: transparent;
   border-radius: 5px;
   color: var(--text-secondary);
   font-size: var(--text-xs);
@@ -2194,6 +2196,8 @@
   align-self: center;
   width: 22px;
   height: 22px;
+  border: none;
+  background: transparent;
   border-radius: 6px;
   color: var(--text-secondary);
   opacity: 0;
