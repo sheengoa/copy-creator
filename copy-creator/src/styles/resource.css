@@ -1662,8 +1662,10 @@
 .resource-group-line {
   display: flex;
   flex-direction: column;
-  gap: 5px;
-  margin-bottom: 10px;
+  gap: 6px;
+  margin-top: 12px;
+  padding-top: 12px;
+  border-top: 1px solid var(--separator);
 }
 
 .resource-group-line-label {
@@ -1672,11 +1674,11 @@
 }
 
 .resource-group-pill {
-  display: inline-flex;
+  display: flex;
   align-items: center;
   gap: 6px;
-  align-self: flex-start;
-  max-width: 100%;
+  width: 100%;
+  min-width: 0;
   padding: 4px 9px;
   border: 1px solid var(--separator);
   border-radius: 999px;
@@ -1691,6 +1693,8 @@
 }
 
 .resource-group-pill button {
+  flex-shrink: 0;
+  white-space: nowrap;
   border: none;
   background: none;
   padding: 0;
