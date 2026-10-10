@@ -298,22 +298,31 @@ fn is_previewable_text_path(path: &Path) -> bool {
 /// 尾字符；中段即存在非法字节（GBK 等非 UTF-8 文本）时裁剪无法修复，
 /// 与旧 read_to_string 行为一致报错，由前端按失败降级并展示原因。
 /// 禁止无界逐字节回退——整段非法时那是对缓冲区长度的平方级重复校验。
+/// 合法路径直接消费缓冲区（String::from_utf8 零拷贝），详情页全文
+/// （≤64 MB）在主线程解码时不产生翻倍峰值内存。
 fn decode_utf8_bounded(bytes: Vec<u8>) -> Result<String, String> {
-    match std::str::from_utf8(&bytes) {
-        Ok(text) => Ok(text.to_string()),
-        Err(error) if error.error_len().is_none() => {
-            String::from_utf8(bytes[..error.valid_up_to()].to_vec())
-                .map_err(|e| format!("读取文件失败: {e}"))
+    match String::from_utf8(bytes) {
+        Ok(text) => Ok(text),
+        Err(error) => {
+            let utf8_error = error.utf8_error();
+            if utf8_error.error_len().is_none() {
+                let mut bytes = error.into_bytes();
+                bytes.truncate(utf8_error.valid_up_to());
+                // valid_up_to 之前已验证合法，重建必然成功。
+                String::from_utf8(bytes).map_err(|e| format!("读取文件失败: {e}"))
+            } else {
+                Err("文件内容不是有效的 UTF-8 编码".to_string())
+            }
         }
-        Err(_) => Err("文件内容不是有效的 UTF-8 编码".to_string()),
     }
 }
 
 /// 读取不超过 limit 字节并解码；truncated = 文件是否超出读取范围。
+/// 按文件实际大小预分配缓冲，避免 read_to_end 增长路径的反复搬运。
 fn read_text_file_bounded(path: &Path, limit: u64) -> Result<ResourceTextPreview, String> {
     let metadata = std::fs::metadata(path).map_err(|e| format!("读取文件失败: {e}"))?;
     let mut file = std::fs::File::open(path).map_err(|e| format!("读取文件失败: {e}"))?;
-    let mut bytes = Vec::new();
+    let mut bytes = Vec::with_capacity(metadata.len().min(limit) as usize);
     (&mut file)
         .take(limit)
         .read_to_end(&mut bytes)

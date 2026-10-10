@@ -1774,8 +1774,7 @@ input:focus-visible + .selection-checkbox {
   width: 100%;
 }
 
-.resource-detail-stage-text .resource-segment-text,
-.resource-detail-text-file.resource-segment-text {
+.resource-detail-stage-text .resource-segment-text {
   padding: 22px;
   font-family: var(--font);
   font-size: var(--text-md);
