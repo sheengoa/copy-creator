@@ -2272,16 +2272,15 @@
   position: sticky;
   top: 12px;
   /* 粘性定位生效的前提：侧栏高度由自身内容决定（不随 flex 拉伸到与
-     正文等高），且不超过滚动视口——超出部分侧栏内部滚动。 */
+     正文等高）。注意侧栏自身不能设 overflow（auto/scroll 会使元素
+     成为滚动容器、粘性随即失效）；标记列表的独立滚动由
+     .marker-list 的 max-height 承担。 */
   align-self: flex-start;
-  max-height: calc(100vh - 110px);
   min-width: 0;
   padding: 12px;
   border: 1px solid var(--separator);
   border-radius: 9px;
   background: var(--card-inner-bg);
-  overflow-y: auto;
-  scrollbar-width: thin;
 }
 
 .resource-detail-aside h2 {
