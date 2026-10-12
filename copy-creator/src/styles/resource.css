@@ -1274,10 +1274,11 @@
 /* === Resource Detail === */
 .resource-detail-page {
   display: flex;
-  min-height: 100%;
-  /* 长正文不允许把页面撑高（否则窗口内容层出现外层滚动条）：
-     滚动收敛到下方 resource-detail-body 的正文列。 */
-  max-height: 100%;
+  /* 负外边距让页面铺满 panel-window-body（padding: 14px 16px）的可见边缘；
+     高度同步加 28px 抵消其上下内边距——只留 body 自己的底部内边距，
+     长正文不再在页面底部残留一条空白带（也不会引发外层滚动）。 */
+  min-height: calc(100% + 28px);
+  max-height: calc(100% + 28px);
   flex-direction: column;
   margin: -14px -16px;
   background: var(--panel-bg);
@@ -1387,7 +1388,8 @@
   grid-template-columns: minmax(0, 1fr) 190px;
   align-items: start;
   gap: 16px;
-  padding: 18px;
+  /* 底部内边距是正文列与窗口底缘之间唯一的留白，保持紧凑 */
+  padding: 18px 18px 10px;
   /* 容器自身不滚动：滚动收敛到正文列（.resource-detail-main），
      滚动条因此出现在正文与信息侧栏之间，而非窗口最外缘；
      侧栏列不参与滚动，天然固定。 */
