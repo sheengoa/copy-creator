@@ -6,7 +6,7 @@ import { cleanup, render, waitFor } from "@testing-library/react";
 
 afterEach(cleanup);
 
-const TEXT = Array.from({ length: 10 }, (_, i) => [
+const TEXT = Array.from({ length: 10 }, () => [
   "第一行的示例文本，用来模拟小说正文。",
   "第二行的示例文本，拖选这一段应当弹出工具条。",
   "第三行收尾。",
