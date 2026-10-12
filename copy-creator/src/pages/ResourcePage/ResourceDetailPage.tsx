@@ -57,6 +57,11 @@ interface ResourceDetailPageProps {
 /* 自绘滚动进度条 thumb 在滚动视口上下的留白（px） */
 const SCROLLBAR_INSET = 14;
 
+/* content-visibility 跳渲染时的高度估算：每行约 72 个全半角混合字符，
+   行高由 CSS 1.9em 承担。硬编码大估算值会在小文本上严重失真
+   （曾用 30000px，5KB 文本滚动行程被撑成 13 倍），必须按块字符数算。 */
+const CHUNK_CHARS_PER_LINE = 72;
+
 /* ── 文本标注工具条：高亮色板与图标（纯图标 + data-tip 悬停说明） ── */
 const ANN_HL_KINDS: { kind: AnnotationKind; tipKey: string; swatchClass: string }[] = [
   { kind: "hl-y", tipKey: "resources.annHlY", swatchClass: "tb-swatch-y" },
@@ -142,6 +147,9 @@ export default function ResourceDetailPage({
   const [mainElReady, setMainElReady] = useState(false);
   const scrollThumbRef = useRef<HTMLDivElement | null>(null);
   const scrollTrackRef = useRef<HTMLDivElement | null>(null);
+  // 拖动进行中挂在 window 上的监听清理函数；组件卸载（HMR、记录删除）
+  // 或重复按下时调用，避免监听器悬挂到下一次 pointerup。
+  const thumbDragCleanupRef = useRef<(() => void) | null>(null);
   const [lightboxSrc, setLightboxSrc] = useState<string | null>(null);
   const [mediaSource, setMediaSource] = useState<string | null>(null);
   const [mediaMeta, setMediaMeta] = useState<ResourceMediaMetadata>({});
@@ -441,13 +449,15 @@ export default function ResourceDetailPage({
     }
   }, []);
 
-  // 每块的全局起点 + 块内标注分段（标注偏移先经 domain 裁剪平移到块内）。
+  // 每块的全局起点 + 字符数（供高度估算）+ 块内标注分段（标注偏移先经
+  // domain 裁剪平移到块内）。
   const annotatedChunks = useMemo(() => {
-    const result: { start: number; segments: ReturnType<typeof buildAnnotatedSegments> }[] = [];
+    const result: { start: number; chars: number; segments: ReturnType<typeof buildAnnotatedSegments> }[] = [];
     let offset = 0;
     for (const chunk of textChunks) {
       result.push({
         start: offset,
+        chars: chunk.length,
         segments: buildAnnotatedSegments(
           chunk,
           annotationsForChunk(annotations, offset, chunk.length),
@@ -629,14 +639,19 @@ export default function ResourceDetailPage({
       thumbYToScroll(ev.clientY - trackTop() - grabOffset);
     };
     const onUp = () => {
+      thumbDragCleanupRef.current = null;
       window.removeEventListener("pointermove", onMove);
       window.removeEventListener("pointerup", onUp);
       window.removeEventListener("pointercancel", onUp);
     };
+    thumbDragCleanupRef.current?.();
+    thumbDragCleanupRef.current = onUp;
     window.addEventListener("pointermove", onMove);
     window.addEventListener("pointerup", onUp);
     window.addEventListener("pointercancel", onUp);
   }, [thumbYToScroll]);
+
+  useEffect(() => () => thumbDragCleanupRef.current?.(), []);
 
   const handleTrackPointerDown = useCallback((event: React.PointerEvent<HTMLDivElement>) => {
     if (event.button !== 0) return;
@@ -664,9 +679,19 @@ export default function ResourceDetailPage({
     main.addEventListener("scroll", update, { passive: true });
     window.addEventListener("resize", update);
     update();
+    // 内容高度变化（content-visibility 块进入视口按真实高度重排、字体
+    // 加载完成等）不触发 scroll 事件，main 自身是恒定高的滚动视口也测
+    // 不到——观察内容容器 stage，高度跳变时同步 thumb 比例。
+    let observer: ResizeObserver | null = null;
+    const content = stageRef.current;
+    if (typeof ResizeObserver !== "undefined" && content) {
+      observer = new ResizeObserver(update);
+      observer.observe(content);
+    }
     return () => {
       main.removeEventListener("scroll", update);
       window.removeEventListener("resize", update);
+      observer?.disconnect();
     };
   }, [mainElReady, updateScrollThumb]);
 
@@ -1170,6 +1195,9 @@ export default function ResourceDetailPage({
                       key={index}
                       className="resource-detail-text-chunk"
                       data-chunk-start={chunk.start}
+                      style={{
+                        containIntrinsicSize: `auto calc(${Math.ceil(chunk.chars / CHUNK_CHARS_PER_LINE)} * 1.9em)`,
+                      }}
                     >
                       {chunk.segments.map((segment, segIndex) =>
                         segment.kinds.length ? (

@@ -1451,14 +1451,15 @@
   cursor: grabbing;
 }
 
-/* 扩大命中区：视觉 4px 太窄难以点中，伪元素外扩一圈不改变外观 */
+/* 扩大命中区：视觉 4px 太窄难以点中，伪元素外扩一圈不改变外观。
+   左侧外扩收到 6px：再宽会压到正文行尾字符的划选边界。 */
 .resource-main-scrollbar-thumb::before {
   content: "";
   position: absolute;
   top: -8px;
   right: -7px;
   bottom: -8px;
-  left: -7px;
+  left: -6px;
 }
 
 [data-theme="dark"] .resource-main-scrollbar-thumb {
@@ -1961,7 +1962,10 @@
   user-select: text;
   -webkit-user-select: text;
   content-visibility: auto;
-  contain-intrinsic-size: auto 30000px;
+  /* 回退估算：组件渲染时按块字符数以内联 style 覆盖（动态行数估算）。
+     此值只兜底首帧，保持单屏量级即可——硬编码大值会在小文本/无有效
+     视口（窗口隐藏）时把滚动行程撑到严重失真。 */
+  contain-intrinsic-size: auto 2000px;
 }
 
 /* 划选选区：WebKitGTK 与暗色偏好下默认选区呈灰色，显式定义为
