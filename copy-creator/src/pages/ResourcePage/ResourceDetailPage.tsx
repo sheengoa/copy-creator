@@ -54,6 +54,9 @@ interface ResourceDetailPageProps {
   onMoveRecord?: (record: ClipboardRecord) => void;
 }
 
+/* 自绘滚动进度条 thumb 在滚动视口上下的留白（px） */
+const SCROLLBAR_INSET = 14;
+
 /* ── 文本标注工具条：高亮色板与图标（纯图标 + data-tip 悬停说明） ── */
 const ANN_HL_KINDS: { kind: AnnotationKind; tipKey: string; swatchClass: string }[] = [
   { kind: "hl-y", tipKey: "resources.annHlY", swatchClass: "tb-swatch-y" },
@@ -139,7 +142,6 @@ export default function ResourceDetailPage({
   const [mainElReady, setMainElReady] = useState(false);
   const scrollThumbRef = useRef<HTMLDivElement | null>(null);
   const scrollTrackRef = useRef<HTMLDivElement | null>(null);
-  const thumbDragRef = useRef<{ active: boolean; grabOffset: number }>({ active: false, grabOffset: 0 });
   const [lightboxSrc, setLightboxSrc] = useState<string | null>(null);
   const [mediaSource, setMediaSource] = useState<string | null>(null);
   const [mediaMeta, setMediaMeta] = useState<ResourceMediaMetadata>({});
@@ -572,21 +574,29 @@ export default function ResourceDetailPage({
   }, [showAnnFeedback, t]);
 
   // ── 正文列滚动进度条（自绘）：WebKitGTK 的原生滚动条不可见，
-  // 用 sticky 轨道 + thumb 反映阅读进度；thumb 位置直接写 style，
-  // rAF 节流避免高频 setState。 ──
-  const updateScrollThumb = useCallback(() => {
+  // 用 sticky 轨道 + thumb 反映阅读进度；thumb 位置直接写 style。
+  // 轨道元素高度为 0（sticky 钉住不占布局），行程几何一律从滚动
+  // 视口（main）推导，轨道自身 clientHeight 恒为 0 不可用作分母。 ──
+  const trackMetrics = useCallback(() => {
     const main = mainElRef.current;
-    const thumb = scrollThumbRef.current;
-    if (!main || !thumb) return;
+    if (!main) return null;
+    const trackH = Math.max(0, main.clientHeight - SCROLLBAR_INSET * 2);
     const max = main.scrollHeight - main.clientHeight;
-    const trackH = Math.max(0, main.clientHeight - 28);
     const thumbH = Math.max(48, main.clientHeight > 0
       ? trackH * (main.clientHeight / main.scrollHeight)
       : trackH);
-    const y = 14 + (trackH - thumbH) * (max > 0 ? main.scrollTop / max : 0);
+    return { main, trackH, max, thumbH };
+  }, []);
+
+  const updateScrollThumb = useCallback(() => {
+    const metrics = trackMetrics();
+    const thumb = scrollThumbRef.current;
+    if (!metrics || !thumb) return;
+    const { main, trackH, max, thumbH } = metrics;
+    const y = SCROLLBAR_INSET + (trackH - thumbH) * (max > 0 ? main.scrollTop / max : 0);
     thumb.style.height = `${Math.round(thumbH)}px`;
     thumb.style.transform = `translateY(${Math.round(y)}px)`;
-  }, []);
+  }, [trackMetrics]);
 
   // callback ref：元素挂载/卸载时记录并发出就绪信号（滚动监听随之绑定）
   const setMainElRef = useCallback((el: HTMLElement | null) => {
@@ -594,46 +604,56 @@ export default function ResourceDetailPage({
     setMainElReady(el !== null);
   }, []);
 
-  // 轨道点击跳转 / thumb 拖动：点击处作为 thumb 中心换算滚动位置，
-  // 拖动期间保持按下时的抓取偏移，pointer capture 保证移出轨道不丢。
-  const thumbYToScroll = useCallback((thumbY: number) => {
-    const track = scrollTrackRef.current;
-    const main = mainElRef.current;
-    if (!track || !main) return;
-    const trackH = track.clientHeight;
-    const thumbH = Math.max(48, parseFloat(scrollThumbRef.current?.style.height ?? "48") || 48);
-    const max = main.scrollHeight - main.clientHeight;
-    const clamped = Math.max(0, Math.min(thumbY, trackH - thumbH));
+  // thumb 当前顶部（translateY 值，与 updateScrollThumb 的写入口径一致）
+  const currentThumbTop = useCallback(
+    () => parseFloat(scrollThumbRef.current?.style.transform.replace(/[^\d.-]/g, "") || "0") || 0,
+    [],
+  );
+
+  // thumb 目标顶部位置换算滚动位置（超出轨道行程时夹取）
+  const thumbYToScroll = useCallback((thumbTopY: number) => {
+    const metrics = trackMetrics();
+    if (!metrics) return;
+    const { main, trackH, max, thumbH } = metrics;
+    const clamped = Math.max(0, Math.min(thumbTopY - SCROLLBAR_INSET, trackH - thumbH));
     main.scrollTop = max * (clamped / (trackH - thumbH || 1));
-  }, []);
+  }, [trackMetrics]);
+
+  // 拖动用 window 级原生监听：不依赖 setPointerCapture（各引擎行为
+  // 差异大，WebKitGTK 上曾失效），指针快速移动或移出窗口也不丢。
+  const beginThumbDrag = useCallback((grabOffset: number) => {
+    const track = scrollTrackRef.current;
+    if (!track) return;
+    const trackTop = () => track.getBoundingClientRect().top;
+    const onMove = (ev: PointerEvent) => {
+      thumbYToScroll(ev.clientY - trackTop() - grabOffset);
+    };
+    const onUp = () => {
+      window.removeEventListener("pointermove", onMove);
+      window.removeEventListener("pointerup", onUp);
+      window.removeEventListener("pointercancel", onUp);
+    };
+    window.addEventListener("pointermove", onMove);
+    window.addEventListener("pointerup", onUp);
+    window.addEventListener("pointercancel", onUp);
+  }, [thumbYToScroll]);
 
   const handleTrackPointerDown = useCallback((event: React.PointerEvent<HTMLDivElement>) => {
     if (event.button !== 0) return;
+    const metrics = trackMetrics();
     const track = scrollTrackRef.current;
-    const main = mainElRef.current;
-    if (!track || !main) return;
+    if (!metrics || !track) return;
     event.preventDefault();
-    const rect = track.getBoundingClientRect();
-    const y = event.clientY - rect.top;
-    const thumbH = Math.max(48, parseFloat(scrollThumbRef.current?.style.height ?? "48") || 48);
-    thumbYToScroll(y - thumbH / 2);
-    // thumb 当前的 translateY 即按下时 thumb 顶部的位置，抓取偏移由此计算
-    const thumbTopNow = parseFloat(scrollThumbRef.current?.style.transform.replace(/[^\d.-]/g, "") || "0");
-    thumbDragRef.current = { active: true, grabOffset: y - thumbTopNow };
-    track.setPointerCapture(event.pointerId);
-  }, [thumbYToScroll]);
-
-  const handleTrackPointerMove = useCallback((event: React.PointerEvent<HTMLDivElement>) => {
-    if (!thumbDragRef.current.active) return;
-    const track = scrollTrackRef.current;
-    if (!track) return;
     const y = event.clientY - track.getBoundingClientRect().top;
-    thumbYToScroll(y - thumbDragRef.current.grabOffset);
-  }, [thumbYToScroll]);
-
-  const handleTrackPointerUp = useCallback(() => {
-    thumbDragRef.current = { active: false, grabOffset: 0 };
-  }, []);
+    if (event.target === scrollThumbRef.current) {
+      // 抓住 thumb：保持按下点相对 thumb 顶部的偏移，原地进入拖动不跳变
+      beginThumbDrag(y - currentThumbTop());
+    } else {
+      // 点击轨道空白：thumb 中心对齐点击处跳转并进入拖动
+      thumbYToScroll(y - metrics.thumbH / 2);
+      beginThumbDrag(metrics.thumbH / 2);
+    }
+  }, [beginThumbDrag, currentThumbTop, thumbYToScroll, trackMetrics]);
 
   useEffect(() => {
     const main = mainElRef.current;
@@ -962,9 +982,6 @@ export default function ResourceDetailPage({
             aria-orientation="vertical"
             aria-valuenow={undefined}
             onPointerDown={handleTrackPointerDown}
-            onPointerMove={handleTrackPointerMove}
-            onPointerUp={handleTrackPointerUp}
-            onPointerCancel={handleTrackPointerUp}
           >
             <div className="resource-main-scrollbar-thumb" ref={scrollThumbRef} />
           </div>

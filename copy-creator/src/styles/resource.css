@@ -1439,6 +1439,24 @@
   width: 4px;
   border-radius: 2px;
   background: rgba(0, 0, 0, 0.22);
+  /* 轨道整体不接收指针（不挡正文选择），只有 thumb 可交互；
+     拖动由页面挂在 window 上的原生监听接管（见 ResourceDetailPage）。 */
+  pointer-events: auto;
+  cursor: grab;
+}
+
+.resource-main-scrollbar-thumb:active {
+  cursor: grabbing;
+}
+
+/* 扩大命中区：视觉 4px 太窄难以点中，伪元素外扩一圈不改变外观 */
+.resource-main-scrollbar-thumb::before {
+  content: "";
+  position: absolute;
+  top: -8px;
+  right: -7px;
+  bottom: -8px;
+  left: -7px;
 }
 
 [data-theme="dark"] .resource-main-scrollbar-thumb {
