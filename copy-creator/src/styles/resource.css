@@ -2270,12 +2270,18 @@
 
 .resource-detail-aside {
   position: sticky;
-  top: 0;
+  top: 12px;
+  /* 粘性定位生效的前提：侧栏高度由自身内容决定（不随 flex 拉伸到与
+     正文等高），且不超过滚动视口——超出部分侧栏内部滚动。 */
+  align-self: flex-start;
+  max-height: calc(100vh - 110px);
   min-width: 0;
   padding: 12px;
   border: 1px solid var(--separator);
   border-radius: 9px;
   background: var(--card-inner-bg);
+  overflow-y: auto;
+  scrollbar-width: thin;
 }
 
 .resource-detail-aside h2 {
