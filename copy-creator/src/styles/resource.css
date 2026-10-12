@@ -1383,7 +1383,9 @@
   align-items: start;
   gap: 16px;
   padding: 18px;
-  overflow-y: auto;
+  /* 不设 overflow：本容器无高度约束，声明 auto 只会产生一个不滚动的
+     『假滚动容器』，截获侧栏粘性定位的参照使其失效。滚动统一由
+     panel-window-body（窗口内容层）承担，侧栏 sticky 相对它钉住。 */
 }
 
 .resource-detail-main {
