@@ -220,14 +220,12 @@ export default function ResourceDetailPage({
   // 用统一 hook 解析该滚动容器，下滑后显示「回到顶部」按钮。
   const pageRef = useRef<HTMLDivElement | null>(null);
   const findPageScroller = useCallback(() => {
-    let node: HTMLElement | null = pageRef.current?.parentElement ?? null;
-    while (node && node !== document.body) {
-      const overflowY = window.getComputedStyle(node).overflowY;
-      if (overflowY === "auto" || overflowY === "scroll") break;
-      node = node.parentElement;
-    }
-    return node;
-  }, []);
+    // 滚动收敛后，详情页真正的滚动容器是正文列（mainElRef）。旧实现沿
+    // 祖先链找 overflow:auto 的元素，收敛后只会命中零溢出、恒不滚动的
+    // 外层面板——scrollTop 恒 0，返回顶部按钮因此永不出现。正文列晚于
+    // 组件就绪时（全文异步加载）由 mainElReady 触发本回调重建、hook 重新解析。
+    return mainElRef.current;
+  }, [mainElReady]);
   const backToTop = useBackToTop({ resolveContainer: findPageScroller });
 
   const handleSaveNote = async () => {
