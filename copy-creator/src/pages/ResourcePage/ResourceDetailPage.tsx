@@ -135,8 +135,11 @@ export default function ResourceDetailPage({
   // mainEl 用 callback ref + state：hash 直开详情页时记录异步加载、
   // MAIN 晚于组件挂载渲染——普通 ref 的 effect 会因拿到 null 而早退，
   // 滚动监听与初始进度将永不绑定。
-  const [mainEl, setMainEl] = useState<HTMLElement | null>(null);
+  const mainElRef = useRef<HTMLElement | null>(null);
+  const [mainElReady, setMainElReady] = useState(false);
   const scrollThumbRef = useRef<HTMLDivElement | null>(null);
+  const scrollTrackRef = useRef<HTMLDivElement | null>(null);
+  const thumbDragRef = useRef<{ active: boolean; grabOffset: number }>({ active: false, grabOffset: 0 });
   const [lightboxSrc, setLightboxSrc] = useState<string | null>(null);
   const [mediaSource, setMediaSource] = useState<string | null>(null);
   const [mediaMeta, setMediaMeta] = useState<ResourceMediaMetadata>({});
@@ -572,7 +575,7 @@ export default function ResourceDetailPage({
   // 用 sticky 轨道 + thumb 反映阅读进度；thumb 位置直接写 style，
   // rAF 节流避免高频 setState。 ──
   const updateScrollThumb = useCallback(() => {
-    const main = mainEl;
+    const main = mainElRef.current;
     const thumb = scrollThumbRef.current;
     if (!main || !thumb) return;
     const max = main.scrollHeight - main.clientHeight;
@@ -583,21 +586,69 @@ export default function ResourceDetailPage({
     const y = 14 + (trackH - thumbH) * (max > 0 ? main.scrollTop / max : 0);
     thumb.style.height = `${Math.round(thumbH)}px`;
     thumb.style.transform = `translateY(${Math.round(y)}px)`;
-  }, [mainEl]);
+  }, []);
+
+  // callback ref：元素挂载/卸载时记录并发出就绪信号（滚动监听随之绑定）
+  const setMainElRef = useCallback((el: HTMLElement | null) => {
+    mainElRef.current = el;
+    setMainElReady(el !== null);
+  }, []);
+
+  // 轨道点击跳转 / thumb 拖动：点击处作为 thumb 中心换算滚动位置，
+  // 拖动期间保持按下时的抓取偏移，pointer capture 保证移出轨道不丢。
+  const thumbYToScroll = useCallback((thumbY: number) => {
+    const track = scrollTrackRef.current;
+    const main = mainElRef.current;
+    if (!track || !main) return;
+    const trackH = track.clientHeight;
+    const thumbH = Math.max(48, parseFloat(scrollThumbRef.current?.style.height ?? "48") || 48);
+    const max = main.scrollHeight - main.clientHeight;
+    const clamped = Math.max(0, Math.min(thumbY, trackH - thumbH));
+    main.scrollTop = max * (clamped / (trackH - thumbH || 1));
+  }, []);
+
+  const handleTrackPointerDown = useCallback((event: React.PointerEvent<HTMLDivElement>) => {
+    if (event.button !== 0) return;
+    const track = scrollTrackRef.current;
+    const main = mainElRef.current;
+    if (!track || !main) return;
+    event.preventDefault();
+    const rect = track.getBoundingClientRect();
+    const y = event.clientY - rect.top;
+    const thumbH = Math.max(48, parseFloat(scrollThumbRef.current?.style.height ?? "48") || 48);
+    thumbYToScroll(y - thumbH / 2);
+    // thumb 当前的 translateY 即按下时 thumb 顶部的位置，抓取偏移由此计算
+    const thumbTopNow = parseFloat(scrollThumbRef.current?.style.transform.replace(/[^\d.-]/g, "") || "0");
+    thumbDragRef.current = { active: true, grabOffset: y - thumbTopNow };
+    track.setPointerCapture(event.pointerId);
+  }, [thumbYToScroll]);
+
+  const handleTrackPointerMove = useCallback((event: React.PointerEvent<HTMLDivElement>) => {
+    if (!thumbDragRef.current.active) return;
+    const track = scrollTrackRef.current;
+    if (!track) return;
+    const y = event.clientY - track.getBoundingClientRect().top;
+    thumbYToScroll(y - thumbDragRef.current.grabOffset);
+  }, [thumbYToScroll]);
+
+  const handleTrackPointerUp = useCallback(() => {
+    thumbDragRef.current = { active: false, grabOffset: 0 };
+  }, []);
 
   useEffect(() => {
-    if (!mainEl) return;
+    const main = mainElRef.current;
+    if (!mainElReady || !main) return;
     // 滚动/窗口尺寸变化时同步更新 thumb（轻量 style 写入，无需 rAF
     // 节流——后台页面 rAF 被冻结会导致更新完全停摆）。
     const update = () => updateScrollThumb();
-    mainEl.addEventListener("scroll", update, { passive: true });
+    main.addEventListener("scroll", update, { passive: true });
     window.addEventListener("resize", update);
     update();
     return () => {
-      mainEl.removeEventListener("scroll", update);
+      main.removeEventListener("scroll", update);
       window.removeEventListener("resize", update);
     };
-  }, [mainEl, updateScrollThumb]);
+  }, [mainElReady, updateScrollThumb]);
 
   // 工具条定位：钉在选区上方，箭头跟随选区中心；超出 stage 视口时收拢。
   useLayoutEffect(() => {
@@ -900,10 +951,21 @@ export default function ResourceDetailPage({
       >
         <section
           className="resource-detail-main"
-          ref={setMainEl}
+          ref={setMainElRef}
           aria-busy={!(externalTextPath ? textDetailReady : detailReady) && !errorReason}
         >
-          <div className="resource-main-scrollbar-track" aria-hidden="true">
+          <div
+            className="resource-main-scrollbar-track"
+            ref={scrollTrackRef}
+            role="scrollbar"
+            aria-controls="resource-detail-main-scroll"
+            aria-orientation="vertical"
+            aria-valuenow={undefined}
+            onPointerDown={handleTrackPointerDown}
+            onPointerMove={handleTrackPointerMove}
+            onPointerUp={handleTrackPointerUp}
+            onPointerCancel={handleTrackPointerUp}
+          >
             <div className="resource-main-scrollbar-thumb" ref={scrollThumbRef} />
           </div>
           <span className="resource-detail-kind">{typeLabel(kind)}</span>
