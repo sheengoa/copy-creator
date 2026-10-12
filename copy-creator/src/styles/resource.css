@@ -1388,14 +1388,61 @@
   align-items: start;
   gap: 16px;
   padding: 18px;
-  overflow-y: auto;
-  scrollbar-width: thin;
-  /* 有 flex:1 + min-height:0 带来的真实高度约束：本列是滚动容器
-     （滚动条显示在正文右侧而非窗口外缘），侧栏 sticky 相对本列钉住。 */
+  /* 容器自身不滚动：滚动收敛到正文列（.resource-detail-main），
+     滚动条因此出现在正文与信息侧栏之间，而非窗口最外缘；
+     侧栏列不参与滚动，天然固定。 */
+}
+
+.resource-detail-body::-webkit-scrollbar {
+  width: 8px;
+}
+
+.resource-detail-body::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.resource-detail-body::-webkit-scrollbar-thumb {
+  background: rgba(0, 0, 0, 0.22);
+  border-radius: 4px;
+}
+
+[data-theme="dark"] .resource-detail-body::-webkit-scrollbar-thumb {
+  background: rgba(255, 255, 255, 0.26);
 }
 
 .resource-detail-main {
   min-width: 0;
+  max-height: 100%;
+  overflow-y: auto;
+  scrollbar-width: none;
+  /* 正文列是滚动容器：滚动条出现在正文与信息侧栏之间。
+     原生滚动条在 WebKitGTK 不可见（overlay 且忽略 ::-webkit-scrollbar
+     自定义样式），改用自绘进度条（见 .resource-main-scrollbar-*），
+     跨引擎观感一致。 */
+}
+
+/* 正文列滚动进度条：sticky 轨道钉在滚动视口内不随内容滚动，
+   thumb 由页面按滚动进度定位（height/translateY 内联样式）。 */
+.resource-main-scrollbar-track {
+  position: sticky;
+  top: 0;
+  height: 0;
+  width: 100%;
+  z-index: 15;
+  pointer-events: none;
+}
+
+.resource-main-scrollbar-thumb {
+  position: absolute;
+  top: 14px;
+  right: 3px;
+  width: 4px;
+  border-radius: 2px;
+  background: rgba(0, 0, 0, 0.22);
+}
+
+[data-theme="dark"] .resource-main-scrollbar-thumb {
+  background: rgba(255, 255, 255, 0.26);
 }
 
 .resource-detail-kind {

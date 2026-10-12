@@ -131,6 +131,12 @@ export default function ResourceDetailPage({
   const [annFeedback, setAnnFeedback] = useState<string | null>(null);
   const annFeedbackTimer = useRef<number | null>(null);
   const toolbarRef = useRef<HTMLDivElement | null>(null);
+  // 正文列自绘滚动进度条（WebKitGTK 原生滚动条不可见）。
+  // mainEl 用 callback ref + state：hash 直开详情页时记录异步加载、
+  // MAIN 晚于组件挂载渲染——普通 ref 的 effect 会因拿到 null 而早退，
+  // 滚动监听与初始进度将永不绑定。
+  const [mainEl, setMainEl] = useState<HTMLElement | null>(null);
+  const scrollThumbRef = useRef<HTMLDivElement | null>(null);
   const [lightboxSrc, setLightboxSrc] = useState<string | null>(null);
   const [mediaSource, setMediaSource] = useState<string | null>(null);
   const [mediaMeta, setMediaMeta] = useState<ResourceMediaMetadata>({});
@@ -562,6 +568,37 @@ export default function ResourceDetailPage({
     window.setTimeout(() => target.classList.remove("ann-jump"), 2100);
   }, [showAnnFeedback, t]);
 
+  // ── 正文列滚动进度条（自绘）：WebKitGTK 的原生滚动条不可见，
+  // 用 sticky 轨道 + thumb 反映阅读进度；thumb 位置直接写 style，
+  // rAF 节流避免高频 setState。 ──
+  const updateScrollThumb = useCallback(() => {
+    const main = mainEl;
+    const thumb = scrollThumbRef.current;
+    if (!main || !thumb) return;
+    const max = main.scrollHeight - main.clientHeight;
+    const trackH = Math.max(0, main.clientHeight - 28);
+    const thumbH = Math.max(48, main.clientHeight > 0
+      ? trackH * (main.clientHeight / main.scrollHeight)
+      : trackH);
+    const y = 14 + (trackH - thumbH) * (max > 0 ? main.scrollTop / max : 0);
+    thumb.style.height = `${Math.round(thumbH)}px`;
+    thumb.style.transform = `translateY(${Math.round(y)}px)`;
+  }, [mainEl]);
+
+  useEffect(() => {
+    if (!mainEl) return;
+    // 滚动/窗口尺寸变化时同步更新 thumb（轻量 style 写入，无需 rAF
+    // 节流——后台页面 rAF 被冻结会导致更新完全停摆）。
+    const update = () => updateScrollThumb();
+    mainEl.addEventListener("scroll", update, { passive: true });
+    window.addEventListener("resize", update);
+    update();
+    return () => {
+      mainEl.removeEventListener("scroll", update);
+      window.removeEventListener("resize", update);
+    };
+  }, [mainEl, updateScrollThumb]);
+
   // 工具条定位：钉在选区上方，箭头跟随选区中心；超出 stage 视口时收拢。
   useLayoutEffect(() => {
     if (!annSelection || !stageRef.current || !toolbarRef.current) return;
@@ -861,7 +898,14 @@ export default function ResourceDetailPage({
           void handleSaveContent();
         }}
       >
-        <section className="resource-detail-main" aria-busy={!(externalTextPath ? textDetailReady : detailReady) && !errorReason}>
+        <section
+          className="resource-detail-main"
+          ref={setMainEl}
+          aria-busy={!(externalTextPath ? textDetailReady : detailReady) && !errorReason}
+        >
+          <div className="resource-main-scrollbar-track" aria-hidden="true">
+            <div className="resource-main-scrollbar-thumb" ref={scrollThumbRef} />
+          </div>
           <span className="resource-detail-kind">{typeLabel(kind)}</span>
           {renameDraft === null ? (
             <h1
