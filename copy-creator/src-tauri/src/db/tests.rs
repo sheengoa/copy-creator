@@ -313,6 +313,18 @@ mod resource_file_tests {
         assert!(normalize_resource_group_name(Some("nested/group")).is_err());
         assert!(normalize_resource_group_name(Some("nested\\group")).is_err());
         assert!(normalize_resource_group_name(Some(&"x".repeat(81))).is_err());
+        // 回归：80 字符上限按字符计，80 个 4 字节字符（emoji）达 320 字节，
+        // 超过 NAME_MAX 255，创建目录报 os error 36——需按字节兜底。
+        assert!(normalize_resource_group_name(Some(&"🎨".repeat(80))).is_err());
+        // 80 个汉字 240 字节，仍在字节上限内，保持可用。
+        assert_eq!(
+            normalize_resource_group_name(Some(&"段".repeat(80))).unwrap(),
+            "段".repeat(80)
+        );
+        // Windows 非法字符与保留名：Linux 上合法但跨平台同步会失败。
+        assert!(normalize_resource_group_name(Some("a:b")).is_err());
+        assert!(normalize_resource_group_name(Some("CON")).is_err());
+        assert!(normalize_resource_group_name(Some("CON.txt")).is_err());
     }
 
     #[test]
@@ -324,6 +336,16 @@ mod resource_file_tests {
         assert_eq!(normalize_resource_folder_path(Some("")).unwrap(), "");
         assert!(normalize_resource_folder_path(Some("人物三视图//细节")).is_err());
         assert!(normalize_resource_folder_path(Some("人物三视图/../细节")).is_err());
+        // 层数与整条路径字节上限：防止深层多级分组把完整路径撑过 PATH_MAX。
+        let deep_ok = vec!["组"; 15].join("/");
+        assert_eq!(
+            normalize_resource_folder_path(Some(&deep_ok)).unwrap(),
+            deep_ok
+        );
+        let too_deep = vec!["组"; 17].join("/");
+        assert!(normalize_resource_folder_path(Some(&too_deep)).is_err());
+        let too_long = vec!["段".repeat(80); 16].join("/");
+        assert!(normalize_resource_folder_path(Some(&too_long)).is_err());
     }
 
     #[test]

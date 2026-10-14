@@ -1783,10 +1783,6 @@ pub(crate) fn delete_resource_group_inner<R: Runtime>(app: &AppHandle<R>, name: 
 
 pub(crate) const RESOURCE_RENAME_MAX_LEN: usize = 120;
 
-/// 文件系统单文件名字节上限（Linux NAME_MAX / NTFS 同值）。
-/// 长度控制必须按 UTF-8 字节数而非字符数：中文每字 3 字节，120 字已达 360 字节。
-pub(crate) const RESOURCE_FILE_NAME_MAX_BYTES: usize = 255;
-
 /// 校验重命名输入并返回文件名主干（不含扩展名）。
 /// 扩展名始终沿用原文件：用户输入带不带原扩展名都可以，但不允许借改名更换扩展名。
 pub(crate) fn validate_resource_rename_stem(new_name: &str, old_path: &Path) -> Result<String, String> {
@@ -1838,14 +1834,7 @@ pub(crate) fn validate_resource_rename_stem(new_name: &str, old_path: &Path) -> 
     if stem.contains(['/', '\\', '<', '>', ':', '"', '|', '?', '*']) {
         return Err("文件名包含非法字符".to_string());
     }
-    const WINDOWS_RESERVED_STEMS: [&str; 22] = [
-        "CON", "PRN", "AUX", "NUL", "COM1", "COM2", "COM3", "COM4", "COM5", "COM6", "COM7",
-        "COM8", "COM9", "LPT1", "LPT2", "LPT3", "LPT4", "LPT5", "LPT6", "LPT7", "LPT8", "LPT9",
-    ];
-    if WINDOWS_RESERVED_STEMS
-        .iter()
-        .any(|reserved| stem.eq_ignore_ascii_case(reserved))
-    {
+    if super::is_windows_reserved_stem(stem) {
         return Err("该文件名是系统保留名称".to_string());
     }
     Ok(stem.to_string())

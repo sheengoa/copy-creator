@@ -442,6 +442,25 @@ pub(crate) fn simplify_windows_path(path: &Path) -> PathBuf {
     path.to_path_buf()
 }
 
+/// 文件系统单文件名字节上限（Linux NAME_MAX / NTFS 同值）。
+/// 长度控制必须按 UTF-8 字节数而非字符数：中文每字 3 字节，120 字已达 360 字节。
+pub(crate) const RESOURCE_FILE_NAME_MAX_BYTES: usize = 255;
+
+/// Windows 保留设备名（按首个点号前的主干比对）。分组目录与资源文件名
+/// 共用同一约束，避免资源库目录在双平台间同步或备份恢复时出错。
+pub(crate) const WINDOWS_RESERVED_STEMS: [&str; 22] = [
+    "CON", "PRN", "AUX", "NUL", "COM1", "COM2", "COM3", "COM4", "COM5", "COM6", "COM7", "COM8",
+    "COM9", "LPT1", "LPT2", "LPT3", "LPT4", "LPT5", "LPT6", "LPT7", "LPT8", "LPT9",
+];
+
+/// 名字主干（首个点号前的部分）是否为 Windows 保留设备名。
+pub(crate) fn is_windows_reserved_stem(name: &str) -> bool {
+    let stem = name.split('.').next().unwrap_or("");
+    WINDOWS_RESERVED_STEMS
+        .iter()
+        .any(|reserved| stem.eq_ignore_ascii_case(reserved))
+}
+
 pub(crate) fn normalize_resource_group_name(value: Option<&str>) -> Result<String, String> {
     let name = value.unwrap_or("").trim();
     if name.is_empty() {
@@ -450,11 +469,23 @@ pub(crate) fn normalize_resource_group_name(value: Option<&str>) -> Result<Strin
     if name.chars().count() > 80 {
         return Err("分组名称不能超过 80 个字符".to_string());
     }
+    // NAME_MAX 按 UTF-8 字节计：80 个 4 字节字符（emoji 等）已达 320 字节，
+    // 字符数校验拦不住，创建目录会报 os error 36（文件名过长）。
+    if name.len() > RESOURCE_FILE_NAME_MAX_BYTES {
+        return Err("分组名称过长（文件系统按字节限制，请减少多字节字符）".to_string());
+    }
     if name == "." || name == ".." || name.starts_with('.') {
         return Err("分组名称不能以点号开头".to_string());
     }
     if name.contains('/') || name.contains('\\') {
         return Err("分组名称不能包含路径分隔符".to_string());
+    }
+    // 同步沿用 Windows 的非法字符与保留名约束（Linux 上合法，但跨平台同步/恢复会失败）。
+    if name.contains(['<', '>', ':', '"', '|', '?', '*']) {
+        return Err("分组名称包含非法字符".to_string());
+    }
+    if is_windows_reserved_stem(name) {
+        return Err("该分组名称是系统保留名称".to_string());
     }
     let mut components = Path::new(name).components();
     if !matches!(components.next(), Some(Component::Normal(_))) || components.next().is_some() {
@@ -474,6 +505,14 @@ pub(crate) fn normalize_resource_folder_path(value: Option<&str>) -> Result<Stri
             return Err("资源目录路径无效".to_string());
         }
         parts.push(normalize_resource_group_name(Some(part))?);
+    }
+    // 创建/重命名分组可一次携带多级路径；约束整条路径的层数与字节数，
+    // 防止「库根 + 分组路径 + 管理文件名」的完整路径超过 PATH_MAX（4096）。
+    if parts.len() > 16 {
+        return Err("分组路径层级不能超过 16 层".to_string());
+    }
+    if parts.join("/").len() > 2000 {
+        return Err("分组路径过长".to_string());
     }
     Ok(parts.join("/"))
 }
