@@ -508,13 +508,14 @@ pub(crate) fn normalize_resource_folder_path(value: Option<&str>) -> Result<Stri
     }
     // 创建/重命名分组可一次携带多级路径；约束整条路径的层数与字节数，
     // 防止「库根 + 分组路径 + 管理文件名」的完整路径超过 PATH_MAX（4096）。
+    let joined = parts.join("/");
     if parts.len() > 16 {
         return Err("分组路径层级不能超过 16 层".to_string());
     }
-    if parts.join("/").len() > 2000 {
+    if joined.len() > 2000 {
         return Err("分组路径过长".to_string());
     }
-    Ok(parts.join("/"))
+    Ok(joined)
 }
 
 pub(crate) fn resource_group_path<R: Runtime>(
