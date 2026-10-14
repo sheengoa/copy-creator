@@ -283,9 +283,37 @@ pub fn run() {
                     WebviewUrl::App("index.html?radial=1".into()),
                 )
                 .title("")
+                // Linux：窗口一次性按"面板 + 满额扩展条带"创建（缩放系数
+                // 与 show_radial_menu 的运行期期望一致），此后常规路径零
+                // resize——GTK 对 resizable(false) 窗口的运行期 resize 不
+                // 会联动 WebKit 视口（页面仍按旧宽度布局，扩展预览被视口
+                // 右缘裁剪，实机复现），只能靠创建即定终尺寸根除。满额
+                // 条带中超出实际预留的部分保持透明 + 点击穿透，无可见
+                // 副作用。Windows：收起态窗口即面板大小（条带不进窗口，
+                // 见 RADIAL_STRIP 注释），维持原尺寸。
                 .inner_size(
-                    420.0 + 2.0 * WINDOW_SHADOW_MARGIN,
-                    650.0 + 2.0 * WINDOW_SHADOW_MARGIN,
+                    {
+                        #[cfg(target_os = "linux")]
+                        {
+                            (420.0 + 440.0 + 2.0 * WINDOW_SHADOW_MARGIN)
+                                * radial_window::radial_ui_scale(app.handle()) as f64
+                        }
+                        #[cfg(not(target_os = "linux"))]
+                        {
+                            420.0 + 2.0 * WINDOW_SHADOW_MARGIN
+                        }
+                    },
+                    {
+                        #[cfg(target_os = "linux")]
+                        {
+                            (650.0 + 2.0 * WINDOW_SHADOW_MARGIN)
+                                * radial_window::radial_ui_scale(app.handle()) as f64
+                        }
+                        #[cfg(not(target_os = "linux"))]
+                        {
+                            650.0 + 2.0 * WINDOW_SHADOW_MARGIN
+                        }
+                    },
                 )
                 .decorations(false)
                 .transparent(true)

@@ -15,19 +15,24 @@ fn is_wayland() -> bool {
         .unwrap_or(false)
 }
 
-/// 径向窗口预留条带几何（物理像素）：方向、条带宽、窗口总宽/高，以及
-/// 面板锚点 (px, py)，在 show_radial_menu 打开窗口时一次性决定。
+/// 径向窗口预留条带几何（物理像素）：方向、预览面板宽（钳制后）、满额
+/// 条带宽、面板宽、窗口高，以及面板锚点 (px, py)，在 show_radial_menu
+/// 打开窗口时一次性决定。满额条带是窗口恒定宽度（面板 + 440 设计像素）
+/// 的组成部分；钳制只作用于预览面板宽，满额条带中超出预览宽的部分保持
+/// 透明 + 点击穿透，无用户可见副作用。
 ///
 /// 展开/收起的几何策略分平台：
-/// - Linux：窗口按"面板 + 条带"全尺寸常驻，展开/收起只切换 X11 输入
-///   区域，绝不 resize/move——X11 上任何 resize/move 都会被合成器画出
-///   一帧"旧内容按左上锚定 + 新区域未绘制"（实机采集帧证据），即扩展
-///   闪烁的物理根源，只能靠几何不变来根除；
+/// - Linux：窗口创建时即"面板 + 满额条带"全尺寸（见 lib.rs 创建处），
+///   常规路径零 resize；展开/收起只切换 X11 输入区域。绝不 resize/move
+///   ——GTK 对 resizable(false) 窗口的运行期 resize 不会联动 WebKit
+///   视口（页面仍按旧宽度布局，扩展预览被视口右缘裁剪），且 X11 上任何
+///   resize/move 都会被合成器画出一帧"旧内容按左上锚定 + 新区域未
+///   绘制"（实机采集帧证据），只能靠几何不变来根除；
 /// - Windows：DWM 合成器没有上述残影问题，收起态窗口即面板大小（隐形
 ///   条带不进窗口、不会拦截点击），展开/收起由 set_radial_hit_area 以
-///   (px, py) 为锚做 resize+move，双端用户可见行为一致。
-static RADIAL_STRIP: Mutex<(bool, i32, i32, i32, i32, i32)> =
-    Mutex::new((false, 0, 0, 0, 0, 0));
+///   (px, py) 为锚做 resize+move，窗口宽按"面板 + 钳制后预览宽"。
+static RADIAL_STRIP: Mutex<(bool, i32, i32, i32, i32, i32, i32)> =
+    Mutex::new((false, 0, 0, 0, 0, 0, 0));
 
 /// 切换径向窗口预览区的展开/收起（双平台策略见 RADIAL_STRIP 注释）：
 /// Linux 切 X11 输入区域（收起态条带穿透到下层应用）；Windows 直接
@@ -36,10 +41,10 @@ static RADIAL_STRIP: Mutex<(bool, i32, i32, i32, i32, i32)> =
 fn apply_radial_input_shape(window: &tauri::WebviewWindow<tauri::Wry>, expanded: bool) {
     #[cfg(target_os = "linux")]
     {
-        let (strip_left, strip_w, win_w, win_h, _px, _py) = *RADIAL_STRIP
+        let (strip_left, preview_w, full_strip, panel_w, win_h, _px, _py) = *RADIAL_STRIP
             .lock()
             .unwrap_or_else(|poisoned| poisoned.into_inner());
-        if strip_w <= 0 || win_w <= 0 || win_h <= 0 {
+        if preview_w <= 0 || panel_w <= 0 || win_h <= 0 {
             return;
         }
         let task_window = window.clone();
@@ -52,16 +57,22 @@ fn apply_radial_input_shape(window: &tauri::WebviewWindow<tauri::Wry>, expanded:
             let Some(gdk_window) = gtk_window.window() else {
                 return;
             };
+            // 条带在面板左侧时，可交互区域从"满额条带 - 预览宽"处开始；
+            // 满额条带中超出预览宽的部分始终穿透（含收起态整条条带）。
             let region = if expanded {
-                gtk::cairo::Region::create_rectangle(&gtk::cairo::RectangleInt::new(
-                    0, 0, win_w, win_h,
-                ))
-            } else {
-                let x = if strip_left { strip_w } else { 0 };
+                let x = if strip_left { full_strip - preview_w } else { 0 };
                 gtk::cairo::Region::create_rectangle(&gtk::cairo::RectangleInt::new(
                     x,
                     0,
-                    win_w - strip_w,
+                    panel_w + preview_w,
+                    win_h,
+                ))
+            } else {
+                let x = if strip_left { full_strip } else { 0 };
+                gtk::cairo::Region::create_rectangle(&gtk::cairo::RectangleInt::new(
+                    x,
+                    0,
+                    panel_w,
                     win_h,
                 ))
             };
@@ -72,18 +83,20 @@ fn apply_radial_input_shape(window: &tauri::WebviewWindow<tauri::Wry>, expanded:
     #[cfg(not(target_os = "linux"))]
     {
         // Windows：窗口收起态即面板大小（条带不在窗口内，点击天然落到
-        // 下层应用），展开/收起以面板锚点为准做 resize+move。DWM 合成
-        // 没有 X11 的残影帧问题，尺寸变化是安全的。
-        let (strip_left, strip_w, win_w_total, win_h, px, py) = *RADIAL_STRIP
+        // 下层应用），展开/收起以面板锚点为准做 resize+move，窗口宽按
+        // "面板 + 钳制后预览宽"。DWM 合成没有 X11 的残影帧问题，尺寸
+        // 变化是安全的。
+        let (strip_left, preview_w, _full_strip, panel_w, win_h, px, py) = *RADIAL_STRIP
             .lock()
             .unwrap_or_else(|poisoned| poisoned.into_inner());
-        if strip_w <= 0 {
+        if preview_w <= 0 {
             return;
         }
+        let win_w_total = panel_w + preview_w;
         let (width, x) = if expanded {
-            (win_w_total, if strip_left { px - strip_w } else { px })
+            (win_w_total, if strip_left { px - preview_w } else { px })
         } else {
-            (win_w_total - strip_w, px)
+            (panel_w, px)
         };
         let _ = window.set_size(tauri::PhysicalSize::new(width, win_h));
         let _ = window.set_position(tauri::PhysicalPosition::new(x, py));
@@ -612,9 +625,16 @@ fn clamp_position_into_work_area(
     (x, y)
 }
 
+/// 满额条带物理宽（440 设计像素 × uiScale × dpi）。Linux 窗口宽度恒按
+/// 满额预留；decide_radial_strip 的钳制只决定预览面板宽（preview_w），
+/// 满额条带中超出预览宽的部分保持透明 + 点击穿透。
+fn full_strip_w(ui_scale: f32, dpi: f64) -> i32 {
+    (440.0 * ui_scale as f64 * dpi).round() as i32
+}
+
 /// 径向扩展条带的方向与宽度判定（纯函数，该几何规则的唯一事实源）：
 /// 右侧剩余空间放得下最小条带（260）、或不小于左侧空间时向右扩展，
-/// 否则向左；条带宽度取期望宽度（440 × uiScale × dpi）与该侧可用空间
+/// 否则向左；预览面板宽度取期望宽度（full_strip_w）与该侧可用空间
 /// 的较小值。前端旧副本已随 utils/radialPreview.ts 删除（架构守卫规则
 /// 15 防回潮），行为回归由 radial_strip_tests 锚定。
 fn decide_radial_strip(
@@ -624,7 +644,7 @@ fn decide_radial_strip(
     ui_scale: f32,
     dpi: f64,
 ) -> (bool, i32) {
-    let preferred_strip = (440.0 * ui_scale as f64 * dpi).round() as i32;
+    let preferred_strip = full_strip_w(ui_scale, dpi);
     let min_strip = (260.0 * ui_scale as f64 * dpi).round() as i32;
     match monitor {
         // 条带只在水平方向分配，工作区的纵向分量（y/height）与 dpi 用不到。
@@ -702,10 +722,11 @@ pub fn show_radial_menu(app: &AppHandle) {
         let margin = crate::WINDOW_SHADOW_MARGIN as f32;
 
         // 每次打开时按面板尺寸钳制进光标所在显示器工作区（排除任务栏），
-        // 再在空间更充裕的一侧一次性预留透明扩展条带（判定口径见
-        // decide_radial_strip，唯一事实源）。此后窗口几何在整场交互中
-        // 不再变化：展开/收起只切换前端面板挂载与输入区域
-        // （set_radial_hit_area），从根源上消除 X11 resize 引起的闪烁帧。
+        // 再在空间更充裕的一侧预留透明扩展条带（方向与预览面板宽的判定
+        // 口径见 decide_radial_strip，唯一事实源）。Linux 窗口创建时即
+        // "面板 + 满额条带"全尺寸，此后常规路径零 resize：展开/收起只切
+        // 换前端面板挂载与输入区域（set_radial_hit_area），从根源上消除
+        // X11 resize 引起的闪烁帧与 WebKit 视口脱节。
         let monitor = cursor_monitor_info(app, cursor_x, cursor_y);
         let dpi = monitor.map(|(dpi, ..)| dpi).unwrap_or(1.0);
         let win_w =
@@ -721,19 +742,33 @@ pub fn show_radial_menu(app: &AppHandle) {
             // 找不到所在显示器时保持旧行为：仅防负坐标。
             None => (px.max(0), py.max(0)),
         };
-        let (strip_left, strip_w) = decide_radial_strip(px, win_w, monitor, scale, dpi);
-        let win_w_total = win_w + strip_w;
+        let (strip_left, preview_w) = decide_radial_strip(px, win_w, monitor, scale, dpi);
+        let full_strip = full_strip_w(scale, dpi);
+        // Linux 窗口恒为"面板 + 满额条带"（创建时已定，见 lib.rs）；
+        // Windows 窗口不含条带，展开时才 resize 到"面板 + 预览宽"。
+        let win_w_total = win_w + full_strip;
 
         if let Ok(mut slot) = RADIAL_STRIP.lock() {
-            *slot = (strip_left, strip_w, win_w_total, win_h, px, py);
+            *slot = (strip_left, preview_w, full_strip, win_w, win_h, px, py);
         }
 
         #[cfg(target_os = "linux")]
         {
-            // Linux：窗口按全尺寸常驻，展开/收起只切输入区域（见
-            // RADIAL_STRIP 注释）。
-            let px_total = if strip_left { px - strip_w } else { px };
-            let _ = radial.set_size(tauri::PhysicalSize::new(win_w_total, win_h));
+            // Linux：窗口创建即全尺寸，常规路径零 resize；仅当缩放设置/
+            // 显示器缩放变化导致期望尺寸与当前不同时才 set_size 兜底
+            // （GTK 对 resizable(false) 窗口的运行期 resize 不会联动
+            // WebKit 视口，该慢路径行为与旧版一致，极端时序下扩展预览
+            // 可能停留在旧视口宽度，重启应用恢复）。定位按满额条带宽
+            // 反推窗口左缘，保证面板锚点 (px, py) 落位准确；窗口越出
+            // 工作区的条带部分透明且点击穿透。
+            let px_total = if strip_left { px - full_strip } else { px };
+            let actual_size = radial
+                .inner_size()
+                .ok()
+                .map(|s| (s.width as i64, s.height as i64));
+            if actual_size != Some((win_w_total as i64, win_h as i64)) {
+                let _ = radial.set_size(tauri::PhysicalSize::new(win_w_total, win_h));
+            }
             let _ = radial.set_position(tauri::PhysicalPosition::new(px_total, py));
         }
         #[cfg(not(target_os = "linux"))]
@@ -772,7 +807,7 @@ pub fn show_radial_menu(app: &AppHandle) {
 
         let preview_side = if strip_left { "left" } else { "right" };
         let preview_width = if dpi > 0.0 {
-            (strip_w as f64 / (scale as f64 * dpi)).round() as i32
+            (preview_w as f64 / (scale as f64 * dpi)).round() as i32
         } else {
             0
         };
