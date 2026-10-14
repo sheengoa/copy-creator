@@ -1,7 +1,7 @@
 {
   "name": "copy-creator",
   "private": true,
-  "version": "0.3.14",
+  "version": "0.3.15",
   "type": "module",
   "packageManager": "pnpm@11.24.0",
   "scripts": {
