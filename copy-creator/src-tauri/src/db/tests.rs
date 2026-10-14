@@ -2263,6 +2263,36 @@ mod resource_command_tests {
     }
 
     #[test]
+    fn save_stash_record_long_multibyte_content_fits_name_max() {
+        // 回归（端到端）：内容派生名按 60 字符截断，长中文组装出的文件名
+        // 267 字节超 NAME_MAX，真实写入报 os error 36——修复后必须成功落盘。
+        let (app, root) = test_app();
+        let content =
+            "【全局设定】基础环境与质感：深夜大排档后厨的灶台区，不锈钢灶台与排烟罩，真实物理质感，灶火橙色光恒定；全片只有这一口炒锅在灶上。"
+                .repeat(5);
+        let result = crate::clipboard::save_stash_record_inner(
+            app.handle(),
+            None,
+            content,
+            Vec::new(),
+            Some("resource".to_string()),
+            None,
+            None,
+        )
+        .unwrap();
+
+        let resource_path = Path::new(result["resource_path"].as_str().unwrap());
+        assert!(resource_path.is_file());
+        // 每个路径组件（含自动派生名的管理文件与写入用临时名形态）不超单文件名上限
+        for component in resource_path.components() {
+            if let Some(name) = component.as_os_str().to_str() {
+                assert!(name.len() <= 255, "路径组件超限: {name}");
+            }
+        }
+        cleanup(&root);
+    }
+
+    #[test]
     fn save_stash_record_accepts_nested_group_path() {
         // 新建窗口分组选择器传完整分组路径；单级名校验会误拒子分组保存。
         let (app, root) = test_app();
