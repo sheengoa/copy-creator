@@ -211,7 +211,10 @@ fn read_image_source<R: Runtime>(app: &AppHandle<R>, value: &str) -> Result<Vec<
         .map_err(|e| format!("图片数据无效: {e}"))
 }
 
-fn sanitize_resource_file_stem(content: &str) -> String {
+/// 按内容派生资源管理文件主干：取首个非空行，替换文件系统非法字符，
+/// 保留原 60 字符上限，同时受 `max_bytes`（UTF-8 字节数）约束——
+/// NAME_MAX 按字节计，中文每字 3 字节，60 个汉字已超 Linux 255 字节上限。
+fn sanitize_resource_file_stem(content: &str, max_bytes: usize) -> String {
     let cleaned_content = content
         .replace(crate::paste::STASH_IMAGE_PLACEHOLDER, "")
         .replace("[Image #1]", "");
@@ -240,6 +243,9 @@ fn sanitize_resource_file_stem(content: &str) -> String {
             previous_separator = true;
         } else {
             previous_separator = false;
+        }
+        if result.len() + next.len_utf8() > max_bytes {
+            break;
         }
         result.push(next);
         if result.chars().count() >= 60 {
@@ -333,9 +339,14 @@ fn write_resource_record<R: Runtime>(
         }
 
         let extension = if images.is_empty() { "txt" } else { "md" };
+        // 临时名 .{stem}.tmp 比最终名 {stem}.{ext} 更长，按临时名扣减固定开销
+        // 得出内容部分字节预算，保证两种文件名都不超过单文件名 255 字节上限。
+        let stem_prefix = format!("copy-creator-{record_id}-{transaction_id}-");
+        let stem_byte_budget = crate::db::RESOURCE_FILE_NAME_MAX_BYTES
+            .saturating_sub(stem_prefix.len() + ".tmp".len() + 1);
         let file_stem = format!(
-            "copy-creator-{record_id}-{transaction_id}-{}",
-            sanitize_resource_file_stem(content)
+            "{stem_prefix}{}",
+            sanitize_resource_file_stem(content, stem_byte_budget)
         );
         let mut resource_path = resource_dir.join(format!("{file_stem}.{extension}"));
         let file_content = if images.is_empty() {
@@ -1729,8 +1740,33 @@ mod tests {
     #[test]
     fn generates_a_safe_resource_file_stem_from_visible_content() {
         assert_eq!(
-            sanitize_resource_file_stem("  一个/文件:标题\u{FFFC}"),
+            sanitize_resource_file_stem("  一个/文件:标题\u{FFFC}", 163),
             "一个_文件_标题"
         );
+    }
+
+    #[test]
+    fn caps_resource_file_stem_by_utf8_bytes_for_multibyte_content() {
+        // 回归：60 字符上限按字符计，60 个汉字 180 字节，加上 UUID 前缀后
+        // 完整文件名 267 字节超过 NAME_MAX 255 字节，写入报 os error 36。
+        let content = "深夜大排档后厨的灶台区，不锈钢灶台与排烟罩。".repeat(10);
+        let stem = sanitize_resource_file_stem(&content, 163);
+        assert!(stem.len() <= 163);
+        // 组装完整临时文件名（copy-creator-{uuid36}-{uuid36}-{stem} 前后缀）不超 255 字节
+        let temp_name = format!(
+            ".copy-creator-{}-{}-{stem}.tmp",
+            "a".repeat(36),
+            "b".repeat(36)
+        );
+        assert!(temp_name.len() <= 255);
+        // 截断落在字符边界上：每字 3 字节，163 字节恰好容纳 54 个字（162≤163，55×3=165>163）
+        let expected: String = content.chars().take(54).collect();
+        assert_eq!(stem, expected);
+    }
+
+    #[test]
+    fn keeps_char_cap_for_ascii_content_within_byte_budget() {
+        // 字节预算不影响纯 ASCII 内容的既有 60 字符上限行为
+        assert_eq!(sanitize_resource_file_stem(&"a".repeat(100), 163), "a".repeat(60));
     }
 }

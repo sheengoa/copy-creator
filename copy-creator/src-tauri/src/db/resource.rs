@@ -1783,6 +1783,10 @@ pub(crate) fn delete_resource_group_inner<R: Runtime>(app: &AppHandle<R>, name: 
 
 pub(crate) const RESOURCE_RENAME_MAX_LEN: usize = 120;
 
+/// 文件系统单文件名字节上限（Linux NAME_MAX / NTFS 同值）。
+/// 长度控制必须按 UTF-8 字节数而非字符数：中文每字 3 字节，120 字已达 360 字节。
+pub(crate) const RESOURCE_FILE_NAME_MAX_BYTES: usize = 255;
+
 /// 校验重命名输入并返回文件名主干（不含扩展名）。
 /// 扩展名始终沿用原文件：用户输入带不带原扩展名都可以，但不允许借改名更换扩展名。
 pub(crate) fn validate_resource_rename_stem(new_name: &str, old_path: &Path) -> Result<String, String> {
@@ -1816,6 +1820,16 @@ pub(crate) fn validate_resource_rename_stem(new_name: &str, old_path: &Path) -> 
     }
     if stem.chars().count() > RESOURCE_RENAME_MAX_LEN {
         return Err(format!("文件名不能超过 {RESOURCE_RENAME_MAX_LEN} 字"));
+    }
+    // 字符数校验拦不住多字节字符的超限（120 个汉字 360 字节 > 255 字节），
+    // 按最终文件名 {stem}.{extension} 的实际字节数兜底，给出可读错误而非 os error 36。
+    let extension_bytes = old_path
+        .extension()
+        .and_then(OsStr::to_str)
+        .map(|extension| extension.len() + 1)
+        .unwrap_or(0);
+    if stem.len() + extension_bytes > RESOURCE_FILE_NAME_MAX_BYTES {
+        return Err("文件名过长（文件系统按字节限制，请减少多字节字符）".to_string());
     }
     if stem.starts_with('.') {
         return Err("文件名不能以点号开头".to_string());

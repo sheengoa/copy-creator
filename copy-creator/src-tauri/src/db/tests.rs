@@ -1876,6 +1876,14 @@ mod resource_command_tests {
             validate_resource_rename_stem("名字", Path::new("/tmp/a.png")).unwrap(),
             "名字"
         );
+        // 字符数在 120 字内但 UTF-8 字节数超 NAME_MAX 的名称：给可读错误而非 os error 36
+        let long_multibyte = "段".repeat(120);
+        assert!(validate_resource_rename_stem(&long_multibyte, Path::new("/tmp/a.png")).is_err());
+        let near_limit = "段".repeat(83);
+        assert_eq!(
+            validate_resource_rename_stem(&near_limit, Path::new("/tmp/a.png")).unwrap(),
+            near_limit
+        );
         cleanup(&root);
     }
 
