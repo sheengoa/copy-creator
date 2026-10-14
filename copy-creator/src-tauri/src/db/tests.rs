@@ -1906,6 +1906,8 @@ mod resource_command_tests {
             validate_resource_rename_stem(&near_limit, Path::new("/tmp/a.png")).unwrap(),
             near_limit
         );
+        // 保留名按首个点号前的主干判定：带扩展名的 CON.backup 旧整名比对会漏放
+        assert!(validate_resource_rename_stem("CON.backup", Path::new("/tmp/a.txt")).is_err());
         cleanup(&root);
     }
 
