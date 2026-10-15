@@ -52,12 +52,17 @@ export default function ResourceCleanupDialog({
   const { t } = useTranslation();
   if (!open) return null;
 
+  // 字段归一化前置：清单与总数先取默认值再参与计算，序列化命名的任何
+  // 偏差都降级为「空清单」而非渲染抛错整页卸载（曾有字段命名错位导致
+  // undefined.length 崩掉整页的事故）。
   const entries = check?.stillMissing ?? [];
+  const totalResources = check?.totalResources ?? 0;
   const count = entries.length;
   const mass = check !== null
-    && isMassMissing(check.stillMissing.length, check.totalResources);
-  const percent = check && check.totalResources > 0
-    ? Math.round((count / check.totalResources) * 100)
+    && check.libraryAccessible === true
+    && isMassMissing(count, totalResources);
+  const percent = totalResources > 0
+    ? Math.round((count / totalResources) * 100)
     : 0;
   const visibleEntries = entries.slice(0, MAX_LIST_ROWS);
   const overflow = count - visibleEntries.length;
@@ -76,7 +81,7 @@ export default function ResourceCleanupDialog({
           </div>
         )}
 
-        {!checking && check && !check.libraryAccessible && (
+        {!checking && check && check.libraryAccessible !== true && (
           <>
             <div className="dialog-callout error" role="alert">
               <span className="resource-trace-warn-mark" aria-hidden="true">!</span>
@@ -121,7 +126,7 @@ export default function ResourceCleanupDialog({
               <div className="dialog-callout error" role="alert">
                 <span className="resource-trace-warn-mark" aria-hidden="true">!</span>
                 <span>
-                  {t("resources.cleanupMassWarn", { count, total: check.totalResources, percent })}
+                  {t("resources.cleanupMassWarn", { count, total: totalResources, percent })}
                 </span>
               </div>
             ) : (

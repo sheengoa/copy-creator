@@ -2270,6 +2270,7 @@ pub(crate) fn rewrite_folder_markdown_links(
 
 /// 缺失记录的轻量快照：id + 文件名（清理确认列表展示用）。
 #[derive(serde::Serialize)]
+#[serde(rename_all = "camelCase")]
 pub(crate) struct MissingResourceEntry {
     pub id: String,
     pub name: String,
@@ -2279,6 +2280,7 @@ pub(crate) struct MissingResourceEntry {
 /// 清理确认对话框直接消费）。total_resources 为资源记录总数，供前端
 /// 计算「缺失占比」护栏。
 #[derive(serde::Serialize)]
+#[serde(rename_all = "camelCase")]
 pub(crate) struct RecheckMissingSummary {
     pub library_accessible: bool,
     pub recovered: u32,
