@@ -537,7 +537,7 @@ describe("架构守卫：领域规则必须全局共享", () => {
       for (const source of allSources) {
         const text = sourceOf(source);
         const pattern = new RegExp(
-          `className="[^"]*\b${cls}\b[^"]*"[^>]*>\s*${literal.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}`,
+          `className="[^"]*\\b${cls}\\b[^"]*"[^>]*>\\s*${literal.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}`,
         );
         if (pattern.test(text)) {
           offenders.push(`${toPosix(source)}: 类 .${cls} 的 "${literal}" 已由 ${cssFile} ::before/::after 生成`);
