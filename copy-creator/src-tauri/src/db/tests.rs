@@ -3594,6 +3594,35 @@ mod resource_command_tests {
         let ghost_id = crate::db::resource_file_id(&target);
         insert_missing_resource(&app, ghost_id.as_str(), &target, 0);
 
+        // 旧 id 上挂一条划选标注：id 级联改写必须经外键随迁标注
+        // （resource_annotations ON UPDATE CASCADE + 连接外键开关）。
+        {
+            let state = app.state::<DbState>();
+            let conn = state.conn.lock().unwrap();
+            conn.execute_batch(
+                "PRAGMA foreign_keys=ON;
+                 CREATE TABLE resource_annotations (
+                     id TEXT PRIMARY KEY,
+                     record_id TEXT NOT NULL,
+                     start_offset INTEGER NOT NULL,
+                     length INTEGER NOT NULL,
+                     kind TEXT NOT NULL,
+                     anchor_text TEXT NOT NULL,
+                     created_at TEXT NOT NULL,
+                     FOREIGN KEY (record_id) REFERENCES clipboard_records(id)
+                         ON DELETE CASCADE ON UPDATE CASCADE
+                 );",
+            )
+            .unwrap();
+            conn.execute(
+                "INSERT INTO resource_annotations
+                 (id, record_id, start_offset, length, kind, anchor_text, created_at)
+                 VALUES ('ann-1', ?1, 0, 3, 'bold', 'B组', '2026-08-01T00:00:00Z')",
+                [old_id.as_str()],
+            )
+            .unwrap();
+        }
+
         let result = crate::db::trace_relink_resource_internal(
             app.handle(),
             old_id.as_str(),
@@ -3621,6 +3650,26 @@ mod resource_command_tests {
             Some(0),
             "重链后缺失标志必须清零"
         );
+        // 标注随 id 迁移：旧 id 下不再有标注，新 id 恰好一条。
+        {
+            let state = app.state::<DbState>();
+            let conn = state.conn.lock().unwrap();
+            let old_count: i64 = conn
+                .query_row(
+                    "SELECT COUNT(*) FROM resource_annotations WHERE record_id = ?1",
+                    [old_id.as_str()],
+                    |row| row.get(0),
+                )
+                .unwrap();
+            let new_count: i64 = conn
+                .query_row(
+                    "SELECT COUNT(*) FROM resource_annotations WHERE record_id = ?1",
+                    [ghost_id.as_str()],
+                    |row| row.get(0),
+                )
+                .unwrap();
+            assert_eq!((old_count, new_count), (0, 1), "标注必须随 id 级联迁移");
+        }
         let _ = std::fs::remove_dir_all(&root);
     }
 

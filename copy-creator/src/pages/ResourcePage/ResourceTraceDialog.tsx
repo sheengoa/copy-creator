@@ -101,8 +101,13 @@ export default function ResourceTraceDialog({
       const result = await invoke<{ path: string }>("select_resource_trace_file");
       setPickedPath(result.path);
       setStep("picked");
-    } catch {
-      // 用户取消选择：留在手动步骤。
+    } catch (error) {
+      // 用户取消选择：留在手动步骤；其余错误（选择器故障/超时）可见反馈，
+      // 不静默吞掉让用户对着无反应的按钮困惑。
+      if (!/cancel/i.test(String(error))) {
+        setErrorMessage(String(error));
+        setStep("error");
+      }
     } finally {
       setBusy(false);
     }
