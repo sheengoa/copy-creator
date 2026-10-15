@@ -35,6 +35,11 @@ import { useEscapeKey } from "../hooks/useEscapeKey";
 import ResourceDetailPage from "./ResourcePage/ResourceDetailPage";
 import ResourceGroupChips from "./ResourcePage/ResourceGroupChips";
 import { TrashPanel } from "./ResourcePage/TrashPanel";
+import ResourceTraceDialog, { type TraceRelinkResult } from "./ResourcePage/ResourceTraceDialog";
+import ResourceCleanupDialog, {
+  type CleanupCheckSummary,
+  type CleanupMissingEntry,
+} from "./ResourcePage/ResourceCleanupDialog";
 import type { ResourceMediaKind as ResourceMediaKindLabel } from "../domain/mediaKind";
 import { ResourceCard } from "./ResourcePage/ResourceCard";
 import { buildRecordView, type RecordView } from "../domain/recordView";
@@ -70,6 +75,9 @@ const RESOURCE_TYPE_FILTERS: ResourceTypeFilter[] = [
   "audio",
   "file",
 ];
+
+/** 页面级类型筛选：标准媒体类型 + 「缺失」伪筛选（按 resource_missing 事实字段）。 */
+type ResourcePageTypeFilter = ResourceTypeFilter | "missing";
 
 export default function ResourcePage() {
   const { t } = useTranslation();
@@ -133,7 +141,7 @@ export default function ResourcePage() {
     [],
   );
 
-  const [typeFilter, setTypeFilter] = useState<ResourceTypeFilter>("all");
+  const [typeFilter, setTypeFilter] = useState<ResourcePageTypeFilter>("all");
   const [detailRecordId, setDetailRecordId] = useState<string | null>(null);
   const [detailRecord, setDetailRecord] = useState<ClipboardRecord | null>(null);
   const detailHistoryRef = useRef(false);
@@ -180,6 +188,102 @@ export default function ResourcePage() {
   // 回收站：入口角标随 resource-groups-changed 刷新（删除入站即触发）。
   const [trashOpen, setTrashOpen] = useState(false);
   const [trashCount, setTrashCount] = useState(0);
+
+  // —— 缺失追溯与清理 ——
+  // 缺失计数来自已加载记录（分页视野内，与列表展示一致）；清理前的
+  // 实时复查走后端全量口径，不受分页影响。
+  const missingAllCount = useMemo(
+    () => records.reduce(
+      (count, record) => count + (isResourceRecord(record) && record.resource_missing ? 1 : 0),
+      0,
+    ),
+    [records],
+  );
+  const [traceRecord, setTraceRecord] = useState<ClipboardRecord | null>(null);
+  const [cleanupOpen, setCleanupOpen] = useState(false);
+  const [cleanupChecking, setCleanupChecking] = useState(false);
+  const [cleanupCheck, setCleanupCheck] = useState<CleanupCheckSummary | null>(null);
+  const [cleaningMissing, setCleaningMissing] = useState(false);
+  const [missingRecheckRunning, setMissingRecheckRunning] = useState(false);
+  const [missingNotice, setMissingNotice] = useState<{ text: string; tone: "ok" | "warn" } | null>(null);
+  const missingNoticeTimerRef = useRef<number | null>(null);
+
+  const showMissingNotice = useCallback((text: string, tone: "ok" | "warn") => {
+    if (missingNoticeTimerRef.current !== null) window.clearTimeout(missingNoticeTimerRef.current);
+    setMissingNotice({ text, tone });
+    missingNoticeTimerRef.current = window.setTimeout(() => {
+      setMissingNotice(null);
+      missingNoticeTimerRef.current = null;
+    }, 2600);
+  }, []);
+
+  useEffect(() => () => {
+    if (missingNoticeTimerRef.current !== null) window.clearTimeout(missingNoticeTimerRef.current);
+  }, []);
+
+  /** 重新检查：逐条实时 stat，文件回来的清缺失标志（后端发事件刷新列表）。 */
+  const runMissingRecheck = useCallback(async () => {
+    if (missingRecheckRunning) return;
+    setMissingRecheckRunning(true);
+    try {
+      const summary = await invoke<{ recovered: number }>("recheck_missing_resources");
+      if (summary.recovered > 0) {
+        showMissingNotice(t("resources.recheckRecovered", { count: summary.recovered }), "ok");
+      } else {
+        showMissingNotice(t("resources.recheckNoChange"), "warn");
+      }
+    } catch (error) {
+      console.error("Failed to recheck missing resources:", error);
+      showMissingNotice(String(error), "warn");
+    } finally {
+      setMissingRecheckRunning(false);
+    }
+  }, [missingRecheckRunning, showMissingNotice, t]);
+
+  /** 清理入口：先实时复查拿权威缺失清单（不受分页视野限制），再进确认。 */
+  const openMissingCleanup = useCallback(async () => {
+    if (cleanupChecking) return;
+    setCleanupOpen(true);
+    setCleanupChecking(true);
+    setCleanupCheck(null);
+    try {
+      const summary = await invoke<CleanupCheckSummary>("recheck_missing_resources");
+      setCleanupCheck(summary);
+    } catch (error) {
+      console.error("Failed to check missing resources:", error);
+      setCleanupOpen(false);
+      showMissingNotice(String(error), "warn");
+    } finally {
+      setCleanupChecking(false);
+    }
+  }, [cleanupChecking, showMissingNotice]);
+
+
+  const handleTraceCard = useCallback((view: RecordView) => {
+    const record = records.find((item) => item.id === view.id);
+    if (record) setTraceRecord(record);
+  }, [records]);
+
+  const handleTraceDetail = useCallback((record: ClipboardRecord) => {
+    setTraceRecord(record);
+  }, []);
+
+  const handleRelinked = useCallback((result: TraceRelinkResult) => {
+    // 详情页的记录对象按旧 id 对齐后整条修补（id 随路径级联改写）。
+    setDetailRecord((current) => {
+      if (!current || !traceRecord || current.id !== traceRecord.id) return current;
+      return {
+        ...current,
+        id: result.id,
+        resource_path: result.resource_path,
+        resource_relative_path: result.resource_relative_path ?? undefined,
+        content: result.content,
+        resource_group: result.group_name || null,
+        resource_folder: result.resource_folder,
+        resource_missing: false,
+      };
+    });
+  }, [traceRecord]);
 
   const refreshTrashCount = useCallback(() => {
     invoke<number>("trash_items_count")
@@ -359,7 +463,9 @@ export default function ResourcePage() {
   const filteredRecords = useMemo(() => {
     const next = records.filter((record) => (
       isResourceRecord(record)
-      && matchesResourceType(record, typeFilter)
+      && (typeFilter === "missing"
+        ? Boolean(record.resource_missing)
+        : matchesResourceType(record, typeFilter))
     ));
     // 分组浏览保留「最新/最旧」本地排序；「全部」视图按内容排序偏好由后端排序。
     if (resourceGroup !== null && sortOrderLocal === "oldest") {
@@ -452,10 +558,18 @@ export default function ResourcePage() {
     setSearch(value);
   }, [cancelResourceSelection, setSearch]);
 
-  const handleSelectType = useCallback((next: ResourceTypeFilter) => {
+  const handleSelectType = useCallback((next: ResourcePageTypeFilter) => {
     cancelResourceSelection();
     setTypeFilter(next);
   }, [cancelResourceSelection]);
+
+  // 「缺失」筛选下的记录被追溯/清理/自动恢复清零后，chip 会消失，
+  // 筛选状态跟着退回「全部」，避免停留在无提示的空视图。
+  useEffect(() => {
+    if (typeFilter === "missing" && !loading && missingAllCount === 0) {
+      setTypeFilter("all");
+    }
+  }, [typeFilter, loading, missingAllCount]);
 
   const resourceFolderGroups = useMemo(
     () => resourceGroups.filter((group) => group.name !== ""),
@@ -866,7 +980,9 @@ export default function ResourcePage() {
         allRecords
           .filter((record) => (
             isResourceRecord(record)
-            && matchesResourceType(record, typeFilter)
+            && (typeFilter === "missing"
+              ? Boolean(record.resource_missing)
+              : matchesResourceType(record, typeFilter))
           ))
           .map((record) => record.id),
       );
@@ -915,6 +1031,23 @@ export default function ResourcePage() {
     showFeedback,
     t,
   ]);
+
+  const handleCleanupConfirm = useCallback(async (entries: CleanupMissingEntry[]) => {
+    if (cleaningMissing || entries.length === 0) return;
+    setCleaningMissing(true);
+    try {
+      // 走既有删除通道：进回收站，可恢复记录信息（文件本已不在磁盘）。
+      const summary = await deleteRecords(entries.map((entry) => entry.id));
+      setCleanupOpen(false);
+      cancelResourceSelection();
+      setMissingCount(summary?.filesAlreadyMissing ?? entries.length);
+      showFeedback("deletedWithMissing");
+    } catch {
+      showFeedback("deleteFailed");
+    } finally {
+      setCleaningMissing(false);
+    }
+  }, [cancelResourceSelection, cleaningMissing, deleteRecords, showFeedback]);
 
   const handleChangeResourceLibraryPath = useCallback(async () => {
     if (resourceLibraryPathChanging) return;
@@ -983,6 +1116,36 @@ export default function ResourcePage() {
     </div>
   ) : null;
 
+  const traceDialogElement = (
+    <ResourceTraceDialog
+      open={traceRecord !== null}
+      record={traceRecord}
+      libraryPath={resourceLibraryPath}
+      onClose={() => setTraceRecord(null)}
+      onRelinked={handleRelinked}
+    />
+  );
+
+  const cleanupDialogElement = (
+    <ResourceCleanupDialog
+      open={cleanupOpen}
+      checking={cleanupChecking}
+      check={cleanupCheck}
+      cleaning={cleaningMissing}
+      libraryPath={resourceLibraryPath}
+      onClose={() => setCleanupOpen(false)}
+      onConfirm={(entries) => void handleCleanupConfirm(entries)}
+      onRecheck={() => {
+        setCleanupOpen(false);
+        void runMissingRecheck();
+      }}
+      onOpenLibrarySettings={() => {
+        setCleanupOpen(false);
+        setResourceSettingsOpen(true);
+      }}
+    />
+  );
+
   if (detailRecord) {
     return (
       <>
@@ -994,10 +1157,13 @@ export default function ResourcePage() {
           onDelete={handleDeleteRecord}
           onRecordUpdated={setDetailRecord}
           onMoveRecord={(record) => openResourceMove([record.id])}
+          onTrace={handleTraceDetail}
         />
         {confirmDialog}
         {moveDialogElement}
         {moveFeedbackElement}
+        {traceDialogElement}
+        {cleanupDialogElement}
       </>
     );
   }
@@ -1136,6 +1302,17 @@ export default function ResourcePage() {
               {typeFilterLabel(filter)}
             </button>
           ))}
+          {missingAllCount > 0 && (
+            <button
+              type="button"
+              className={`resource-filter-chip is-missing${typeFilter === "missing" ? " active" : ""}`}
+              onClick={() => handleSelectType("missing")}
+              aria-pressed={typeFilter === "missing"}
+            >
+              <span aria-hidden="true">⚠</span>
+              {t("resources.missingFilterChip", { count: missingAllCount })}
+            </button>
+          )}
         </div>
         {/* 「全部」视图按内容排序偏好展示，最新/最旧仅分组浏览有意义。 */}
         {resourceGroup !== null && (
@@ -1162,6 +1339,33 @@ export default function ResourcePage() {
           busyLabel={deletingSelected ? t("common.deleting") : t("common.loading")}
           onMove={() => openResourceMove([...selectedIds])}
         />
+      )}
+
+      {/* 缺失筛选视图的操作条：重新检查（实时对账救回）与批量清理入口。 */}
+      {typeFilter === "missing" && !isSelecting && (
+        <div className="resource-missing-bar" role="status">
+          <span className="resource-missing-bar-mark" aria-hidden="true">!</span>
+          <span>{t("resources.missingBarText", { count: missingAllCount })}</span>
+          <span className="resource-missing-bar-grow" />
+          <button
+            type="button"
+            className="resource-missing-bar-btn"
+            disabled={missingRecheckRunning}
+            onClick={() => void runMissingRecheck()}
+          >
+            {Icons.recent}
+            <span>{missingRecheckRunning ? t("resources.rechecking") : t("resources.recheck")}</span>
+          </button>
+          <button
+            type="button"
+            className="resource-missing-bar-btn is-danger"
+            disabled={missingAllCount === 0}
+            onClick={() => void openMissingCleanup()}
+          >
+            {Icons.delete}
+            <span>{t("resources.cleanAllMissing")}</span>
+          </button>
+        </div>
       )}
         </>
       )}
@@ -1517,6 +1721,7 @@ export default function ResourcePage() {
                         onDelete={handleDeleteRecord}
                         onToggleSelected={toggleSelected}
                         onMove={handleMoveCard}
+                        onTrace={handleTraceCard}
                       />
                     </div>
                     );
@@ -1555,6 +1760,13 @@ export default function ResourcePage() {
       )}
       {moveDialogElement}
       {moveFeedbackElement}
+      {missingNotice && (
+        <div className={`resource-feedback ${missingNotice.tone === "ok" ? "success" : "warn"}`} role="status" aria-live="polite">
+          {missingNotice.text}
+        </div>
+      )}
+      {traceDialogElement}
+      {cleanupDialogElement}
     </div>
   );
 }

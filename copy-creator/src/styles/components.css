@@ -875,6 +875,157 @@ input:focus-visible + .selection-checkbox {
   box-shadow: 0 0 0 3px rgba(255, 59, 48, 0.12);
 }
 
+/* === 对话框共享构件：结论条 / 区块标签 / 文件清单 / 脚注 ===
+   资源缺失的追溯与清理对话框共用同一套信息层次（结论→清单→脚注→动作），
+   机制只在此定义一次，专有差异写各对话框的修饰类。 */
+.dialog-callout {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  padding: 9px 12px;
+  border-radius: 10px;
+  font-size: var(--text-sm);
+  line-height: 1.6;
+  margin-bottom: 12px;
+}
+
+.dialog-callout svg {
+  width: 15px;
+  height: 15px;
+  flex-shrink: 0;
+  margin-top: 2px;
+}
+
+.dialog-callout b {
+  font-weight: var(--weight-semibold);
+}
+
+.dialog-callout.ok {
+  background: rgba(52, 199, 89, 0.12);
+  color: #248a3d;
+}
+
+.dialog-callout.warn {
+  background: rgba(255, 149, 0, 0.12);
+  color: #8a5300;
+}
+
+.dialog-callout.error {
+  background: rgba(255, 59, 48, 0.1);
+  color: #c0271d;
+}
+
+[data-theme="dark"] .dialog-callout.ok {
+  background: rgba(52, 199, 89, 0.16);
+  color: #4cd964;
+}
+
+[data-theme="dark"] .dialog-callout.warn {
+  background: rgba(255, 149, 0, 0.16);
+  color: #ffb340;
+}
+
+[data-theme="dark"] .dialog-callout.error {
+  background: rgba(255, 59, 48, 0.16);
+  color: #ff6961;
+}
+
+.dialog-section-label {
+  margin: 0 0 8px;
+  font-size: var(--text-xs);
+  font-weight: var(--weight-semibold);
+  color: var(--text-secondary);
+}
+
+.dialog-section-label b {
+  color: var(--text-primary);
+}
+
+.dialog-file-list {
+  max-height: 148px;
+  overflow-y: auto;
+  border: 1px solid var(--separator);
+  border-radius: 10px;
+  background: var(--bg-card);
+}
+
+.dialog-file-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 12px;
+  font-size: var(--text-sm);
+  color: var(--text-primary);
+}
+
+.dialog-file-row + .dialog-file-row {
+  border-top: 1px solid var(--separator);
+}
+
+.dialog-file-row svg {
+  width: 14px;
+  height: 14px;
+  flex-shrink: 0;
+  color: var(--text-secondary);
+}
+
+.dialog-file-row .name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.dialog-file-row .group {
+  margin-left: auto;
+  flex-shrink: 0;
+  color: var(--text-secondary);
+  font-size: var(--text-xs);
+}
+
+.dialog-file-row.is-more {
+  justify-content: center;
+  color: var(--text-tertiary);
+  font-size: var(--text-xs);
+}
+
+.dialog-footnote {
+  display: flex;
+  align-items: flex-start;
+  gap: 7px;
+  margin-top: 12px;
+  font-size: var(--text-xs);
+  line-height: 1.65;
+  color: var(--text-secondary);
+}
+
+.dialog-footnote svg {
+  width: 13px;
+  height: 13px;
+  flex-shrink: 0;
+  margin-top: 2px;
+}
+
+.dialog-footnote b {
+  color: var(--text-primary);
+  font-weight: var(--weight-medium);
+}
+
+/* 破坏性升级按钮：强确认场景（如疑似存储离线的大规模清理）。 */
+.dialog-btn.destructive {
+  background: var(--danger);
+  color: white;
+  font-weight: var(--weight-semibold);
+}
+
+.dialog-btn.destructive:hover {
+  transform: translateY(-1px);
+  box-shadow: 0 4px 12px rgba(255, 59, 48, 0.3);
+}
+
+.dialog-btn.destructive:active {
+  transform: scale(0.96);
+}
+
 [data-theme="dark"] .dialog-textarea.error {
   box-shadow: 0 0 0 3px rgba(255, 59, 48, 0.2);
 }

@@ -30,6 +30,8 @@ interface ResourceCardProps {
   onDelete: (id: string) => void;
   onToggleSelected: (id: string) => void;
   onMove?: (view: RecordView) => void;
+  /** 追溯文件（缺失记录的菜单项）；与详情页共用同一入口语义（守卫规则 23）。 */
+  onTrace?: (view: RecordView) => void;
 }
 
 function ResourceCardVisual({
@@ -115,6 +117,7 @@ function ResourceCardInner({
   onDelete,
   onToggleSelected,
   onMove,
+  onTrace,
 }: ResourceCardProps) {
   const { t } = useTranslation();
   const kind = view.kind;
@@ -202,8 +205,17 @@ function ResourceCardInner({
           <CardActionMenuItem
             icon={Icons.copy}
             label={t("resources.copy")}
+            disabled={view.resourceMissing}
+            disabledTitle={t("resources.copyMissingDisabled")}
             onClick={() => void onCopy(view)}
           />
+          {view.resourceMissing && onTrace && (
+            <CardActionMenuItem
+              icon={Icons.search}
+              label={t("resources.traceFile")}
+              onClick={() => onTrace(view)}
+            />
+          )}
           <CardActionMenuItem
             icon={Icons.expand}
             label={t("resources.openDetail")}

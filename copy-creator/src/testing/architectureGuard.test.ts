@@ -474,4 +474,37 @@ describe("架构守卫：领域规则必须全局共享", () => {
       '设置页静态说明必须改为行尾 <InfoTip text={t("…Hint")} />（悬停展示），不得新增可见 hint 元素',
     ).toEqual([]);
   });
+
+  it("规则 23：缺失文件的追溯入口必须同时存在于列表卡片与详情页，判定一律读 resourceMissing", () => {
+    // 「A 界面有、B 界面没有」防回退：缺失记录的手动追溯出口曾只在列表
+    // 规划，详情页断头（点开详情后无路可走）。两个入口必须共存，且都以
+    // RecordView/记录的 resourceMissing 事实字段为显隐与复制置灰依据，
+    // 禁止在叶子内自行 stat 或另立判定。
+    const card = readSource("pages/ResourcePage/ResourceCard.tsx");
+    expect(
+      card.includes("onTrace"),
+      "资源卡片必须提供 onTrace 追溯入口（缺失记录的菜单项）",
+    ).toBe(true);
+    expect(
+      card.includes("view.resourceMissing && onTrace"),
+      "卡片追溯入口必须以 view.resourceMissing 为显隐条件",
+    ).toBe(true);
+    expect(
+      card.includes("disabled={view.resourceMissing}"),
+      "卡片「复制」必须随缺失置灰（文件不在，复制必然失败）",
+    ).toBe(true);
+    const detail = readSource("pages/ResourcePage/ResourceDetailPage.tsx");
+    expect(
+      detail.includes("onTrace"),
+      "详情页必须提供 onTrace 追溯入口（缺失记录断头回退防线）",
+    ).toBe(true);
+    expect(
+      detail.includes("record.resource_missing && onTrace"),
+      "详情页追溯入口必须以 resource_missing 为显隐条件",
+    ).toBe(true);
+    expect(
+      detail.includes("disabled={Boolean(record.resource_missing)}"),
+      "详情页「复制」必须随缺失置灰",
+    ).toBe(true);
+  });
 });

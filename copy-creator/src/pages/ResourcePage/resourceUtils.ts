@@ -83,3 +83,16 @@ export function splitResourceColumns(records: ClipboardRecord[], columnCount: nu
   });
   return columns;
 }
+
+/** 强确认护栏阈值：缺失 ≥10 条且占资源记录总数一半以上——与启动对账
+ *  清退安全阀同一口径，视为疑似存储离线的异常规模。 */
+export function isMassMissing(
+  stillMissingCount: number,
+  totalResources: number,
+): boolean {
+  return (
+    stillMissingCount >= 10
+    && totalResources > 0
+    && stillMissingCount * 2 >= totalResources
+  );
+}

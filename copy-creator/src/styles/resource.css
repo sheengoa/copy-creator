@@ -999,6 +999,240 @@
   white-space: nowrap;
 }
 
+/* === 资源缺失：筛选 chip / 操作条 === */
+.resource-filter-chip.is-missing {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  border-color: rgba(255, 59, 48, 0.3);
+  background: color-mix(in srgb, var(--danger) 6%, transparent);
+  color: var(--danger);
+}
+
+.resource-filter-chip.is-missing:hover {
+  border-color: rgba(255, 59, 48, 0.45);
+  background: color-mix(in srgb, var(--danger) 10%, transparent);
+  color: var(--danger);
+}
+
+.resource-filter-chip.is-missing.active {
+  border-color: var(--danger);
+  background: var(--danger);
+  color: #fff;
+  box-shadow: 0 2px 8px rgba(255, 59, 48, 0.24);
+}
+
+[data-theme="dark"] .resource-filter-chip.is-missing.active {
+  background: var(--danger);
+  border-color: var(--danger);
+}
+
+.resource-missing-bar {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 9px 13px;
+  border-radius: 10px;
+  background: rgba(255, 149, 0, 0.09);
+  border: 1px solid rgba(255, 149, 0, 0.28);
+  font-size: var(--text-sm);
+  color: #8a5300;
+  animation: resource-missing-bar-in 0.22s ease-out;
+}
+
+.resource-missing-bar-mark {
+  display: inline-grid;
+  place-items: center;
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  flex-shrink: 0;
+  background: rgba(255, 149, 0, 0.18);
+  color: #c46a00;
+  font-size: 11px;
+  font-weight: 700;
+}
+
+.resource-missing-bar-mark::before {
+  content: "!";
+}
+
+.resource-missing-bar-grow {
+  flex: 1;
+}
+
+.resource-missing-bar-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  min-height: 28px;
+  padding: 0 11px;
+  border-radius: 8px;
+  font-size: var(--text-sm);
+  background: var(--bg-card);
+  border: 1px solid rgba(0, 0, 0, 0.12);
+  color: var(--text-primary);
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.05);
+}
+
+.resource-missing-bar-btn svg {
+  width: 12px;
+  height: 12px;
+}
+
+.resource-missing-bar-btn:active {
+  transform: scale(0.96);
+}
+
+.resource-missing-bar-btn.is-danger {
+  background: var(--danger);
+  border-color: var(--danger);
+  color: #fff;
+}
+
+.resource-missing-bar-btn.is-danger:hover {
+  background: #e6362b;
+}
+
+[data-theme="dark"] .resource-missing-bar {
+  background: rgba(255, 149, 0, 0.12);
+  color: #ffb340;
+}
+
+[data-theme="dark"] .resource-missing-bar-btn {
+  background: rgba(255, 255, 255, 0.08);
+  border-color: rgba(255, 255, 255, 0.14);
+}
+
+[data-theme="dark"] .resource-missing-bar-btn.is-danger {
+  background: var(--danger);
+  border-color: var(--danger);
+  color: #fff;
+}
+
+@keyframes resource-missing-bar-in {
+  from { opacity: 0; transform: translateY(-4px); }
+  to { opacity: 1; transform: none; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .resource-missing-bar {
+    animation: none;
+  }
+
+  .resource-missing-bar-btn:active {
+    transform: none;
+  }
+}
+
+/* === 缺失追溯 / 清理对话框（信息层次构件见 components.css 的 dialog-callout 等） === */
+.resource-trace-dialog,
+.resource-cleanup-dialog {
+  width: 360px;
+}
+
+.resource-trace-record-sub {
+  margin: -6px 0 12px;
+  text-align: center;
+  color: var(--text-secondary);
+  font-size: var(--text-xs);
+}
+
+.resource-trace-searching {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 14px 4px;
+  color: var(--text-secondary);
+  font-size: var(--text-sm);
+}
+
+.resource-trace-spinner {
+  width: 17px;
+  height: 17px;
+  border-radius: 50%;
+  flex-shrink: 0;
+  border: 2px solid var(--separator);
+  border-top-color: var(--accent);
+  animation: resource-trace-spin 0.8s linear infinite;
+}
+
+@keyframes resource-trace-spin {
+  to { transform: rotate(360deg); }
+}
+
+.resource-trace-warn-mark {
+  display: inline-grid;
+  place-items: center;
+  width: 15px;
+  height: 15px;
+  border-radius: 50%;
+  flex-shrink: 0;
+  margin-top: 2px;
+  background: currentColor;
+}
+
+.resource-trace-warn-mark::before {
+  content: "!";
+  color: #fff;
+  font-size: 10px;
+  font-weight: 700;
+}
+
+.resource-trace-field {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 9px 12px;
+  border-radius: 10px;
+  background: var(--input-bg);
+  font-size: var(--text-sm);
+  line-height: 1.6;
+  color: var(--text-primary);
+}
+
+.resource-trace-field code {
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
+  word-break: break-all;
+  color: var(--text-primary);
+}
+
+.resource-trace-candidates {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.resource-trace-candidate {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  padding: 9px 12px;
+  border: 1px solid var(--separator);
+  border-radius: 10px;
+  background: var(--bg-card);
+  font-size: var(--text-xs);
+  cursor: pointer;
+}
+
+.resource-trace-candidate:has(input:checked) {
+  border-color: var(--accent);
+  background: var(--accent-bg);
+}
+
+.resource-trace-candidate-path {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  word-break: break-all;
+  color: var(--text-secondary);
+}
+
+.resource-cleanup-offline-path {
+  font-family: var(--font-mono);
+  word-break: break-all;
+}
+
 /* 文件缺失角标：随标题行展示，警示色但弱于操作按钮强调；字号随卡片缩放。 */
 .resource-card-missing {
   flex-shrink: 0;

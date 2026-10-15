@@ -660,6 +660,22 @@
   background: var(--chip-bg);
 }
 
+/* 禁用项（如缺失文件的「复制」）：无悬停反馈，悬停原因看 title。 */
+.ctx-menu-item:disabled {
+  cursor: not-allowed;
+  opacity: 0.4;
+}
+
+.ctx-menu-item:disabled:hover {
+  background: transparent;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .ctx-menu-item {
+    transition: none;
+  }
+}
+
 .ctx-menu-item.danger {
   color: #ff3b30;
 }

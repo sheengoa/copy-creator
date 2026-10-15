@@ -52,6 +52,8 @@ interface ResourceDetailPageProps {
   onDelete: (id: string) => void;
   onRecordUpdated: (record: ClipboardRecord) => void;
   onMoveRecord?: (record: ClipboardRecord) => void;
+  /** 追溯文件（缺失记录的操作入口）；与列表卡片共用同一语义（守卫规则 23）。 */
+  onTrace?: (record: ClipboardRecord) => void;
 }
 
 /* 自绘滚动进度条 thumb 在滚动视口上下的留白（px） */
@@ -117,6 +119,7 @@ export default function ResourceDetailPage({
   onDelete,
   onRecordUpdated,
   onMoveRecord,
+  onTrace,
 }: ResourceDetailPageProps) {
   const { t } = useTranslation();
   const recordLocale = useRecordLocale();
@@ -951,7 +954,23 @@ export default function ResourceDetailPage({
               {contentSaveError || t("resources.contentSaveFailed")}
             </span>
           )}
-          <button type="button" className="resource-secondary-button" onClick={() => void onCopy(record)}>
+          {record.resource_missing && onTrace && (
+            <button
+              type="button"
+              className="resource-primary-button"
+              onClick={() => onTrace(record)}
+            >
+              {Icons.search}
+              <span>{t("resources.traceFile")}</span>
+            </button>
+          )}
+          <button
+            type="button"
+            className="resource-secondary-button"
+            onClick={() => void onCopy(record)}
+            disabled={Boolean(record.resource_missing)}
+            title={record.resource_missing ? t("resources.copyMissingDisabled") : undefined}
+          >
             {Icons.copy}
             <span>{t("resources.copy")}</span>
           </button>

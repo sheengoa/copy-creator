@@ -139,19 +139,33 @@ interface CardActionMenuItemProps {
   label: ReactNode;
   /** 菜单项样式类，跟随所在页面菜单的样式族（如 ctx-menu-item、is-danger）。 */
   className?: string;
+  /** 置灰禁用（如缺失文件的「复制」）；悬停原因由 disabledTitle 说明。 */
+  disabled?: boolean;
+  disabledTitle?: string;
   onClick: () => void;
 }
 
-export function CardActionMenuItem({ icon, label, className, onClick }: CardActionMenuItemProps) {
+export function CardActionMenuItem({
+  icon,
+  label,
+  className,
+  disabled,
+  disabledTitle,
+  onClick,
+}: CardActionMenuItemProps) {
   const ctx = useContext(closeContext);
   return (
     <button
       type="button"
       role="menuitem"
+      aria-disabled={disabled || undefined}
       className={className}
+      disabled={disabled}
+      title={disabled ? disabledTitle : undefined}
       onClick={(event) => {
         // portal 菜单的点击仍沿 React 树冒泡到卡片，需阻断卡片自身的点击行为。
         event.stopPropagation();
+        if (disabled) return;
         ctx?.close();
         onClick();
       }}
