@@ -507,4 +507,46 @@ describe("架构守卫：领域规则必须全局共享", () => {
       "详情页「复制」必须随缺失置灰",
     ).toBe(true);
   });
+
+  it("规则 24：CSS 生成内容（字面量 content）不得与 JSX 文本重复渲染", () => {
+    // 事故锚点：警示圆点的「!」由 ::before 绘制，JSX 又写了文本节点，
+    // 两个符号叠渲染、第二个被挤出 16px 圆框换行悬挂（用户实测）。
+    // 本规则静态扫描全部样式表的字面量 content（"" 装饰与 attr() 机制
+    // 不在此列），禁止对应类名的 JSX 开标签后紧跟同字面量文本。
+    const offenders: string[] = [];
+    const stylesDir = join(frontRoot, "styles");
+    const cssLiteralContents: Array<{ cls: string; literal: string; cssFile: string }> = [];
+    for (const file of readdirSync(stylesDir)) {
+      if (!file.endsWith(".css")) continue;
+      const css = readFileSync(join(stylesDir, file), "utf8");
+      const rule = /\.([a-zA-Z0-9_-]+)(?:::before|::after)[^{]*\{[^}]*content:\s*"([^"]+)"/g;
+      for (const match of css.matchAll(rule)) {
+        cssLiteralContents.push({
+          cls: match[1],
+          literal: match[2],
+          cssFile: file,
+        });
+      }
+    }
+    expect(
+      cssLiteralContents.length,
+      "下方断言依赖字面量 content 清单；删除生成内容时请同步清理本规则",
+    ).toBeGreaterThan(0);
+
+    for (const { cls, literal, cssFile } of cssLiteralContents) {
+      for (const source of allSources) {
+        const text = sourceOf(source);
+        const pattern = new RegExp(
+          `className="[^"]*\b${cls}\b[^"]*"[^>]*>\s*${literal.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}`,
+        );
+        if (pattern.test(text)) {
+          offenders.push(`${toPosix(source)}: 类 .${cls} 的 "${literal}" 已由 ${cssFile} ::before/::after 生成`);
+        }
+      }
+    }
+    expect(
+      offenders,
+      "CSS ::before/::after 已生成该符号，JSX 不得再写同字面量文本（重复渲染且溢出容器）",
+    ).toEqual([]);
+  });
 });
