@@ -2303,53 +2303,70 @@ pub(crate) fn recheck_missing_resources_internal<R: Runtime>(
     let root = get_resource_library_dir(app);
     let library_accessible = root.is_dir();
     let state = app.state::<DbState>();
-    let conn = state.conn.lock().map_err(|e| e.to_string())?;
-    let mut stmt = conn
-        .prepare(
-            "SELECT id, resource_path, COALESCE(resource_missing, 0) FROM clipboard_records
-             WHERE storage_mode = 'resource'",
-        )
-        .map_err(|e| e.to_string())?;
-    let rows: Vec<(String, String, i64)> = stmt
-        .query_map([], |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)))
-        .map_err(|e| e.to_string())?
-        .flatten()
-        .collect();
-    drop(stmt);
+    // 阶段一（锁内只读库）：取缺失清单与总数。文件 stat 可能落在失联
+    // 存储上（网络挂载超时动辄数秒），绝不能握着全局连接锁做——本功能
+    // 恰恰服务于存储离线场景，锁内 stat 会冻结整个应用。
+    let (missing_rows, total_resources): (Vec<(String, String)>, u32) = {
+        let conn = state.conn.lock().map_err(|e| e.to_string())?;
+        let mut stmt = conn
+            .prepare(
+                "SELECT id, resource_path FROM clipboard_records
+                 WHERE storage_mode = 'resource' AND COALESCE(resource_missing, 0) = 1",
+            )
+            .map_err(|e| e.to_string())?;
+        let missing: Vec<(String, String)> = stmt
+            .query_map([], |row| Ok((row.get(0)?, row.get(1)?)))
+            .map_err(|e| e.to_string())?
+            .flatten()
+            .collect();
+        drop(stmt);
+        let total: u32 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM clipboard_records WHERE storage_mode = 'resource'",
+                [],
+                |row| row.get(0),
+            )
+            .map_err(|e| e.to_string())?;
+        (missing, total)
+    };
 
-    let total_resources = rows.len() as u32;
-    let mut recovered = 0u32;
+    // 阶段二（锁外）：逐条实时 stat（不信任对账时刻的持久化标志）。
+    let mut recovered_ids: Vec<String> = Vec::new();
     let mut still_missing: Vec<MissingResourceEntry> = Vec::new();
-    for (id, path_text, missing) in rows {
-        if missing == 0 {
-            continue;
+    for (id, path_text) in &missing_rows {
+        let exists = !path_text.is_empty() && PathBuf::from(path_text).exists();
+        if exists {
+            recovered_ids.push(id.clone());
+        } else {
+            still_missing.push(MissingResourceEntry {
+                name: Path::new(path_text)
+                    .file_name()
+                    .map(|name| name.to_string_lossy().to_string())
+                    .unwrap_or_else(|| path_text.clone()),
+                id: id.clone(),
+            });
         }
-        let path = PathBuf::from(&path_text);
-        if !path_text.is_empty() && path.exists() {
+    }
+
+    // 阶段三（锁内落库）：文件已回到磁盘的清零缺失标志。仍缺失的原样
+    // 保留——刻意不做启动对账的清退语义：重查是用户主动校准事实，清退
+    // 与否（追溯/清理）交给用户在重查后的清单上决定。
+    if !recovered_ids.is_empty() {
+        let conn = state.conn.lock().map_err(|e| e.to_string())?;
+        for id in &recovered_ids {
             conn.execute(
                 "UPDATE clipboard_records SET resource_missing = 0 WHERE id = ?1",
                 params![id],
             )
             .map_err(|e| e.to_string())?;
-            recovered += 1;
-        } else {
-            still_missing.push(MissingResourceEntry {
-                name: path
-                    .file_name()
-                    .map(|name| name.to_string_lossy().to_string())
-                    .unwrap_or_else(|| path_text.clone()),
-                id,
-            });
         }
-    }
-    drop(conn);
-    if recovered > 0 {
+        drop(conn);
         bump_resource_library_revision();
         let _ = app.emit("resource-groups-changed", ());
     }
     Ok(RecheckMissingSummary {
         library_accessible,
-        recovered,
+        recovered: recovered_ids.len() as u32,
         total_resources,
         still_missing,
     })
@@ -2452,28 +2469,30 @@ pub(crate) fn trace_relink_resource_internal<R: Runtime>(
     if !root.is_dir() {
         return Err("资源库目录无法访问".to_string());
     }
-    let target = PathBuf::from(&target_path);
+    let target = PathBuf::from(target_path);
     if !target.is_file() {
         return Err("目标文件不存在".to_string());
     }
 
-    let state = app.state::<DbState>();
-    let conn = state.conn.lock().map_err(|e| e.to_string())?;
-    let (old_path_text, content, missing): (String, String, i64) = conn
-        .query_row(
-            "SELECT resource_path, content, COALESCE(resource_missing, 0) FROM clipboard_records
-             WHERE id = ?1 AND storage_mode = 'resource'",
+    // 阶段一（锁内只读库）：取记录现状。
+    let (old_path_text, content): (String, String) = {
+        let state = app.state::<DbState>();
+        let conn = state.conn.lock().map_err(|e| e.to_string())?;
+        conn.query_row(
+            "SELECT resource_path, content FROM clipboard_records
+             WHERE id = ?1 AND storage_mode = 'resource' AND COALESCE(resource_missing, 0) = 1",
             params![id],
-            |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+            |row| Ok((row.get(0)?, row.get(1)?)),
         )
         .optional()
         .map_err(|e| e.to_string())?
-        .ok_or_else(|| "记录不存在".to_string())?;
-    if missing == 0 {
-        return Err("记录不在缺失状态".to_string());
-    }
+        .ok_or_else(|| "记录不在缺失状态".to_string())?
+    };
 
-    // 库外文件：复制入记录原分组；同名冲突加序号（回收站恢复同约定）。
+    // 阶段二（锁外文件 IO）：库外文件复制入记录原分组；同名冲突加序号
+    // （回收站恢复同约定）。大文件复制可能耗时以分钟计，绝不能握着全局
+    // 连接锁做。复制到一半失败/状态变化：库内最多残留一个待自动发现的
+    // 孤儿文件，内容仍是用户要找回的东西，无破坏性。
     let effective = if target.starts_with(&root) {
         target.clone()
     } else {
@@ -2520,8 +2539,12 @@ pub(crate) fn trace_relink_resource_internal<R: Runtime>(
         dest
     };
 
+    // 阶段三（锁内落库）：复制/校验期间记录可能已被追溯、清退或恢复改写，
+    // 用 resource_missing=1 条件更新防双写；幽灵清理（目标路径上的其他
+    // 记录行让位，字符串同径比较，与恢复一致）与 id 级联改写同事务语义。
     let effective_str = effective.to_string_lossy().to_string();
-    // 幽灵清理：目标路径上的其他记录行让位（字符串同径比较，与恢复一致）。
+    let state = app.state::<DbState>();
+    let conn = state.conn.lock().map_err(|e| e.to_string())?;
     conn.execute(
         "DELETE FROM clipboard_records
          WHERE storage_mode = 'resource' AND resource_path = ?1 AND id != ?2",
@@ -2548,13 +2571,17 @@ pub(crate) fn trace_relink_resource_internal<R: Runtime>(
         .and_then(|full| full.split('/').next())
         .unwrap_or("")
         .to_string();
-    conn.execute(
-        "UPDATE clipboard_records
-         SET id = ?1, resource_path = ?2, resource_missing = 0, content = ?3, group_name = ?4
-         WHERE id = ?5",
-        params![final_id, effective_str, new_content, group, id],
-    )
-    .map_err(|e| e.to_string())?;
+    let updated = conn
+        .execute(
+            "UPDATE clipboard_records
+             SET id = ?1, resource_path = ?2, resource_missing = 0, content = ?3, group_name = ?4
+             WHERE id = ?5 AND COALESCE(resource_missing, 0) = 1",
+            params![final_id, effective_str, new_content, group, id],
+        )
+        .map_err(|e| e.to_string())?;
+    if updated == 0 {
+        return Err("记录状态已变化，请刷新后重试".to_string());
+    }
     if final_id != id {
         let _ = conn.execute(
             "UPDATE api_key_labels SET record_id = ?1 WHERE record_id = ?2",

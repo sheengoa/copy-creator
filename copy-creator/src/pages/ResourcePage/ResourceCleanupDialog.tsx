@@ -92,7 +92,7 @@ export default function ResourceCleanupDialog({
               </span>
             </div>
             <div className="dialog-footnote">
-              {Icons.expand}
+              {Icons.info}
               <span>{t("resources.cleanupOfflineAdvice")}</span>
             </div>
             <div className="dialog-actions">
@@ -155,7 +155,7 @@ export default function ResourceCleanupDialog({
               )}
             </div>
             <div className="dialog-footnote">
-              {Icons.expand}
+              {Icons.info}
               <span>
                 {mass ? t("resources.cleanupMassNote") : t("resources.cleanupFootnote")}
               </span>
