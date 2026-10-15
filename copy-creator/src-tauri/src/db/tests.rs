@@ -3458,6 +3458,237 @@ mod resource_command_tests {
             );
         }
     }
+
+    // ==================== 缺失追溯与清理 ====================
+
+    fn insert_missing_resource(
+        app: &tauri::App<tauri::test::MockRuntime>,
+        id: &str,
+        resource_path: &Path,
+        missing: i64,
+    ) {
+        let state = app.state::<DbState>();
+        let conn = state.conn.lock().unwrap();
+        conn.execute(
+            "INSERT INTO clipboard_records
+             (id, type, content, created_at, group_name, storage_mode, resource_path, resource_missing)
+             VALUES (?1, 'file', ?2, '2026-08-01T00:00:00Z', '', 'resource', ?3, ?4)",
+            (
+                id,
+                resource_path.to_string_lossy().as_ref(),
+                resource_path.to_string_lossy().as_ref(),
+                missing,
+            ),
+        )
+        .unwrap();
+    }
+
+    fn resource_missing_flag(app: &tauri::App<tauri::test::MockRuntime>, id: &str) -> Option<i64> {
+        let state = app.state::<DbState>();
+        let conn = state.conn.lock().unwrap();
+        conn.query_row(
+            "SELECT COALESCE(resource_missing, 0) FROM clipboard_records WHERE id = ?1",
+            [id],
+            |row| row.get(0),
+        )
+        .ok()
+    }
+
+    #[test]
+    fn recheck_missing_resources_recovers_returned_files_and_reports_rest() {
+        let (app, root) = test_app();
+        let back = root.join("back.txt");
+        std::fs::write(&back, b"back").unwrap();
+        let gone = root.join("gone.txt");
+        insert_missing_resource(&app, crate::db::resource_file_id(&back).as_str(), &back, 1);
+        insert_missing_resource(&app, "uuid-gone", &gone, 1);
+
+        let summary = crate::db::recheck_missing_resources_internal(app.handle()).unwrap();
+        assert!(summary.library_accessible);
+        assert_eq!(summary.recovered, 1);
+        assert_eq!(summary.total_resources, 2);
+        assert_eq!(summary.still_missing.len(), 1);
+        assert_eq!(summary.still_missing[0].id, "uuid-gone");
+        assert_eq!(summary.still_missing[0].name, "gone.txt");
+        assert_eq!(
+            resource_missing_flag(&app, crate::db::resource_file_id(&back).as_str()),
+            Some(0)
+        );
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn recheck_missing_resources_reports_offline_library() {
+        let (app, root) = test_app();
+        // 库目录会被 get_resource_library_dir 尝试自动重建，存储离线要用
+        // 「无法创建」的路径模拟（/proc 之下 mkdir 必然失败）。
+        let offline_root = PathBuf::from("/proc/copy-creator-offline-test/library");
+        {
+            let state = app.state::<DbState>();
+            let conn = state.conn.lock().unwrap();
+            conn.execute(
+                "UPDATE settings SET value = ?1 WHERE key = 'resource_library_path'",
+                [offline_root.to_string_lossy().as_ref()],
+            )
+            .unwrap();
+        }
+        let gone = root.join("gone.txt");
+        insert_missing_resource(&app, "uuid-gone", &gone, 1);
+
+        let summary = crate::db::recheck_missing_resources_internal(app.handle()).unwrap();
+        assert!(!summary.library_accessible);
+        assert_eq!(summary.recovered, 0);
+        assert_eq!(summary.still_missing.len(), 1);
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn trace_candidates_list_all_same_named_library_files() {
+        let (app, root) = test_app();
+        let lost = root.join("lost");
+        std::fs::create_dir_all(&lost).unwrap();
+        let backup_a = root.join("备用");
+        std::fs::create_dir_all(&backup_a).unwrap();
+        let backup_b = root.join("归档");
+        std::fs::create_dir_all(&backup_b).unwrap();
+        let same_a = backup_a.join("A组.mp4");
+        let same_b = backup_b.join("A组.mp4");
+        std::fs::write(&same_a, [1]).unwrap();
+        std::fs::write(&same_b, [2]).unwrap();
+        let missing_path = lost.join("A组.mp4");
+        insert_missing_resource(
+            &app,
+            crate::db::resource_file_id(&missing_path).as_str(),
+            &missing_path,
+            1,
+        );
+
+        let record_id = crate::db::resource_file_id(&missing_path);
+        let mut candidates =
+            crate::db::find_resource_trace_candidates_internal(app.handle(), record_id.as_str())
+                .unwrap();
+        candidates.sort();
+        let mut expected = vec![
+            same_a.to_string_lossy().to_string(),
+            same_b.to_string_lossy().to_string(),
+        ];
+        expected.sort();
+        assert_eq!(candidates, expected);
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn trace_relink_rewrites_id_path_and_clears_missing_flag() {
+        let (app, root) = test_app();
+        let old_dir = root.join("A组");
+        std::fs::create_dir_all(&old_dir).unwrap();
+        let old_path = old_dir.join("B组02.mp4");
+        let old_id = crate::db::resource_file_id(&old_path);
+        insert_missing_resource(&app, old_id.as_str(), &old_path, 1);
+
+        let backup_dir = root.join("备用");
+        std::fs::create_dir_all(&backup_dir).unwrap();
+        let target = backup_dir.join("B组02.mp4");
+        std::fs::write(&target, [9]).unwrap();
+        // 目标路径上先有一条自动发现的幽灵行（同一文件被建了新记录）。
+        let ghost_id = crate::db::resource_file_id(&target);
+        insert_missing_resource(&app, ghost_id.as_str(), &target, 0);
+
+        let result = crate::db::trace_relink_resource_internal(
+            app.handle(),
+            old_id.as_str(),
+            target.to_string_lossy().as_ref(),
+        )
+        .unwrap();
+        assert_eq!(result["id"], ghost_id);
+        assert_eq!(result["resource_path"], target.to_string_lossy().as_ref());
+        assert_eq!(result["resource_relative_path"], "备用/B组02.mp4");
+
+        let state = app.state::<DbState>();
+        let conn = state.conn.lock().unwrap();
+        // 幽灵行让位：同路径只剩重链后的一行，携带旧记录的身份重写。
+        let count: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM clipboard_records WHERE resource_path = ?1",
+                [target.to_string_lossy().as_ref()],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(count, 1);
+        drop(conn);
+        assert_eq!(
+            resource_missing_flag(&app, ghost_id.as_str()),
+            Some(0),
+            "重链后缺失标志必须清零"
+        );
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn trace_relink_copies_external_file_into_record_group_with_suffix() {
+        let (app, root) = test_app();
+        let group_dir = root.join("分组1");
+        std::fs::create_dir_all(&group_dir).unwrap();
+        let old_path = group_dir.join("video.mp4");
+        let old_id = crate::db::resource_file_id(&old_path);
+        insert_missing_resource(&app, old_id.as_str(), &old_path, 1);
+
+        let external_dir = root.parent().unwrap().join("trace-external-src");
+        std::fs::create_dir_all(&external_dir).unwrap();
+        let external = external_dir.join("video.mp4");
+        std::fs::write(&external, [7]).unwrap();
+
+        // 无冲突：复制入原分组原文件名。
+        let result = crate::db::trace_relink_resource_internal(
+            app.handle(),
+            old_id.as_str(),
+            external.to_string_lossy().as_ref(),
+        )
+        .unwrap();
+        assert!(old_path.is_file(), "库外文件必须复制入库");
+        assert!(external.is_file(), "用户选中的原文件必须保留");
+        assert_eq!(result["resource_relative_path"], "分组1/video.mp4");
+        assert_eq!(resource_missing_flag(&app, old_id.as_str()), Some(0));
+
+        // 同名冲突：自动加序号，记录跟随最终落位路径。
+        let old_path2 = group_dir.join("clip.mp4");
+        let old_id2 = crate::db::resource_file_id(&old_path2);
+        insert_missing_resource(&app, old_id2.as_str(), &old_path2, 1);
+        std::fs::write(&old_path2, b"occupied").unwrap();
+        let external2 = external_dir.join("clip.mp4");
+        std::fs::write(&external2, [3]).unwrap();
+        let result2 = crate::db::trace_relink_resource_internal(
+            app.handle(),
+            old_id2.as_str(),
+            external2.to_string_lossy().as_ref(),
+        )
+        .unwrap();
+        let final_relative = result2["resource_relative_path"].as_str().unwrap();
+        assert_eq!(final_relative, "分组1/clip (1).mp4");
+        assert!(group_dir.join("clip (1).mp4").is_file());
+        assert_eq!(
+            resource_missing_flag(&app, result2["id"].as_str().unwrap()),
+            Some(0)
+        );
+
+        // 非缺失记录拒绝重链。
+        let alive = group_dir.join("alive.txt");
+        std::fs::write(&alive, b"x").unwrap();
+        let alive_id = crate::db::resource_file_id(&alive);
+        insert_missing_resource(&app, alive_id.as_str(), &alive, 0);
+        assert!(
+            crate::db::trace_relink_resource_internal(
+                app.handle(),
+                alive_id.as_str(),
+                external.to_string_lossy().as_ref()
+            )
+            .is_err()
+        );
+
+        let _ = std::fs::remove_dir_all(&root);
+        let _ = std::fs::remove_dir_all(&external_dir);
+    }
+
 }
 
 #[cfg(test)]
@@ -5712,6 +5943,7 @@ mod clipboard_prune_count_cap_tests {
         prune_old_records(app.handle()).unwrap();
         assert_eq!(remaining_ids(&app).len(), 4);
     }
+
 }
 
 #[cfg(test)]

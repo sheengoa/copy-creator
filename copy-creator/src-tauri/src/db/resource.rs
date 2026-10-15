@@ -2262,6 +2262,349 @@ pub(crate) fn rewrite_folder_markdown_links(
     Ok(undo)
 }
 
+// ==================== 缺失追溯与清理 ====================
+// 「文件缺失」记录的手动出口：自动兜底（启动对账清退、监听清退、目录
+// 重定向、恢复同名改指）覆盖不到的场景——网络挂载等无事件环境、批量
+// 安全阀中止后的残余、备份恢复与回收站 MetadataOnly 恢复的缺失行——
+// 由用户主动 ①重查校准 ②同名/手动追溯重链 ③确认后清理三个动作收尾。
+
+/// 缺失记录的轻量快照：id + 文件名（清理确认列表展示用）。
+#[derive(serde::Serialize)]
+pub(crate) struct MissingResourceEntry {
+    pub id: String,
+    pub name: String,
+}
+
+/// 重查结果：库可访问性 + 全量权威缺失清单（不受前端分页视野限制，
+/// 清理确认对话框直接消费）。total_resources 为资源记录总数，供前端
+/// 计算「缺失占比」护栏。
+#[derive(serde::Serialize)]
+pub(crate) struct RecheckMissingSummary {
+    pub library_accessible: bool,
+    pub recovered: u32,
+    pub total_resources: u32,
+    pub still_missing: Vec<MissingResourceEntry>,
+}
+
+/// 重新检查缺失记录：逐条实时 stat（不信任对账时刻的持久化标志），
+/// 文件已回到磁盘的清零缺失标志；仍缺失的原样保留——这里刻意不做
+/// 启动对账的清退语义：重查是用户主动校准事实，清退与否（追溯/清理）
+/// 交给用户在重查后的清单上决定。
+#[tauri::command]
+pub fn recheck_missing_resources(app: AppHandle) -> Result<RecheckMissingSummary, String> {
+    recheck_missing_resources_internal(&app)
+}
+
+pub(crate) fn recheck_missing_resources_internal<R: Runtime>(
+    app: &AppHandle<R>,
+) -> Result<RecheckMissingSummary, String> {
+    let root = get_resource_library_dir(app);
+    let library_accessible = root.is_dir();
+    let state = app.state::<DbState>();
+    let conn = state.conn.lock().map_err(|e| e.to_string())?;
+    let mut stmt = conn
+        .prepare(
+            "SELECT id, resource_path, COALESCE(resource_missing, 0) FROM clipboard_records
+             WHERE storage_mode = 'resource'",
+        )
+        .map_err(|e| e.to_string())?;
+    let rows: Vec<(String, String, i64)> = stmt
+        .query_map([], |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)))
+        .map_err(|e| e.to_string())?
+        .flatten()
+        .collect();
+    drop(stmt);
+
+    let total_resources = rows.len() as u32;
+    let mut recovered = 0u32;
+    let mut still_missing: Vec<MissingResourceEntry> = Vec::new();
+    for (id, path_text, missing) in rows {
+        if missing == 0 {
+            continue;
+        }
+        let path = PathBuf::from(&path_text);
+        if !path_text.is_empty() && path.exists() {
+            conn.execute(
+                "UPDATE clipboard_records SET resource_missing = 0 WHERE id = ?1",
+                params![id],
+            )
+            .map_err(|e| e.to_string())?;
+            recovered += 1;
+        } else {
+            still_missing.push(MissingResourceEntry {
+                name: path
+                    .file_name()
+                    .map(|name| name.to_string_lossy().to_string())
+                    .unwrap_or_else(|| path_text.clone()),
+                id,
+            });
+        }
+    }
+    drop(conn);
+    if recovered > 0 {
+        bump_resource_library_revision();
+        let _ = app.emit("resource-groups-changed", ());
+    }
+    Ok(RecheckMissingSummary {
+        library_accessible,
+        recovered,
+        total_resources,
+        still_missing,
+    })
+}
+
+/// 追溯候选：全部库根之下与记录同名的现存文件。与回收站恢复的
+/// find_same_named_file 同一口径（跳过点开头的元数据目录），但返回
+/// 全部命中——唯一命中界面直接给出关联结果，多个命中列出候选让用户
+/// 挑选，零命中才走手动选文件。记录自身旧路径不在候选之列（文件回到
+/// 原位属于「重新检查」的职责）。
+#[tauri::command]
+pub fn find_resource_trace_candidates(
+    app: AppHandle,
+    id: String,
+) -> Result<Vec<String>, String> {
+    find_resource_trace_candidates_internal(&app, &id)
+}
+
+pub(crate) fn find_resource_trace_candidates_internal<R: Runtime>(
+    app: &AppHandle<R>,
+    id: &str,
+) -> Result<Vec<String>, String> {
+    let roots = resource_library_roots(app);
+    let state = app.state::<DbState>();
+    let conn = state.conn.lock().map_err(|e| e.to_string())?;
+    let path_text: String = conn
+        .query_row(
+            "SELECT resource_path FROM clipboard_records
+             WHERE id = ?1 AND storage_mode = 'resource'",
+            params![id],
+            |row| row.get(0),
+        )
+        .optional()
+        .map_err(|e| e.to_string())?
+        .ok_or_else(|| "记录不存在".to_string())?;
+    drop(conn);
+    let primary_root = get_resource_library_dir(app);
+    if !primary_root.is_dir() {
+        return Err("资源库目录无法访问".to_string());
+    }
+    let file_name = Path::new(&path_text)
+        .file_name()
+        .and_then(OsStr::to_str)
+        .ok_or_else(|| "资源文件路径无效".to_string())?
+        .to_string();
+    let own_key = resource_path_key(Path::new(&path_text));
+    let mut candidates: Vec<String> = Vec::new();
+    for root in &roots {
+        let mut stack = vec![root.clone()];
+        while let Some(dir) = stack.pop() {
+            let entries = match std::fs::read_dir(&dir) {
+                Ok(entries) => entries,
+                Err(_) => continue,
+            };
+            for entry in entries.flatten() {
+                let path = entry.path();
+                if path.is_dir() {
+                    let hidden = path
+                        .file_name()
+                        .and_then(|name| name.to_str())
+                        .map(|name| name.starts_with('.'))
+                        .unwrap_or(true);
+                    if !hidden {
+                        stack.push(path);
+                    }
+                } else if path.file_name().and_then(|name| name.to_str()) == Some(file_name.as_str())
+                    && resource_path_key(&path) != own_key
+                {
+                    candidates.push(path.to_string_lossy().to_string());
+                }
+            }
+        }
+    }
+    Ok(candidates)
+}
+
+/// 追溯重链：把缺失记录改指到 target_path 指向的真实文件。/// - 库内路径：直接改指（id/content 级联改写，与外部目录重定向、回收
+///   站同名改指同一语义）；
+/// - 库外路径：复制入记录原分组后改指（同名自动加序号，沿用回收站
+///   恢复约定）——资源库保持「内容即文件」的自包含假设，记录不指向
+///   库外路径；用户选中的原文件保留不动。
+/// 仅接受缺失状态的记录（界面入口只在缺失时出现，这里兜底防误调）。
+/// 目标路径若已被另一条记录占用（同一文件被自动发现建了新行），幽灵行
+/// 让位删除——重链行携带完整元数据，不清理会成双记录（与恢复同一语义）。
+#[tauri::command]
+pub fn trace_relink_resource(
+    app: AppHandle,
+    id: String,
+    target_path: String,
+) -> Result<serde_json::Value, String> {
+    trace_relink_resource_internal(&app, &id, &target_path)
+}
+
+pub(crate) fn trace_relink_resource_internal<R: Runtime>(
+    app: &AppHandle<R>,
+    id: &str,
+    target_path: &str,
+) -> Result<serde_json::Value, String> {
+    let root = get_resource_library_dir(app);
+    if !root.is_dir() {
+        return Err("资源库目录无法访问".to_string());
+    }
+    let target = PathBuf::from(&target_path);
+    if !target.is_file() {
+        return Err("目标文件不存在".to_string());
+    }
+
+    let state = app.state::<DbState>();
+    let conn = state.conn.lock().map_err(|e| e.to_string())?;
+    let (old_path_text, content, missing): (String, String, i64) = conn
+        .query_row(
+            "SELECT resource_path, content, COALESCE(resource_missing, 0) FROM clipboard_records
+             WHERE id = ?1 AND storage_mode = 'resource'",
+            params![id],
+            |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+        )
+        .optional()
+        .map_err(|e| e.to_string())?
+        .ok_or_else(|| "记录不存在".to_string())?;
+    if missing == 0 {
+        return Err("记录不在缺失状态".to_string());
+    }
+
+    // 库外文件：复制入记录原分组；同名冲突加序号（回收站恢复同约定）。
+    let effective = if target.starts_with(&root) {
+        target.clone()
+    } else {
+        let folder = resource_folder_for_path(&root, &old_path_text).unwrap_or_default();
+        let mut dest_dir = root.clone();
+        if !folder.is_empty() {
+            for segment in folder.split('/') {
+                dest_dir.push(segment);
+            }
+        }
+        std::fs::create_dir_all(&dest_dir).map_err(|e| format!("创建资源目录失败: {e}"))?;
+        let file_name = target
+            .file_name()
+            .ok_or_else(|| "目标文件路径无效".to_string())?;
+        let mut dest = dest_dir.join(file_name);
+        if dest.exists() {
+            let stem = target
+                .file_stem()
+                .map(|stem| stem.to_string_lossy().to_string())
+                .unwrap_or_default();
+            let extension = target
+                .extension()
+                .map(|ext| ext.to_string_lossy().to_string())
+                .unwrap_or_default();
+            let mut placed = false;
+            for index in 1..=999u32 {
+                let candidate_name = if extension.is_empty() {
+                    format!("{stem} ({index})")
+                } else {
+                    format!("{stem} ({index}).{extension}")
+                };
+                let candidate = dest_dir.join(candidate_name);
+                if !candidate.exists() {
+                    dest = candidate;
+                    placed = true;
+                    break;
+                }
+            }
+            if !placed {
+                return Err("分组内存在大量同名文件，无法自动命名".to_string());
+            }
+        }
+        std::fs::copy(&target, &dest).map_err(|e| format!("复制文件入库失败: {e}"))?;
+        dest
+    };
+
+    let effective_str = effective.to_string_lossy().to_string();
+    // 幽灵清理：目标路径上的其他记录行让位（字符串同径比较，与恢复一致）。
+    conn.execute(
+        "DELETE FROM clipboard_records
+         WHERE storage_mode = 'resource' AND resource_path = ?1 AND id != ?2",
+        params![effective_str, id],
+    )
+    .map_err(|e| e.to_string())?;
+
+    // id 级联改写：resource-file 形态的 id 内嵌路径，路径变化必须连 id
+    // 一起改写，否则以 id 提取路径的操作永远指向旧位置（历史事故）。
+    let new_id = resource_file_id(&effective);
+    let final_id = if id.starts_with(RESOURCE_FILE_ID_PREFIX) {
+        new_id
+    } else {
+        id.to_string()
+    };
+    let new_content = if content == old_path_text {
+        effective_str.clone()
+    } else {
+        content
+    };
+    let folder = resource_folder_for_path(&root, &effective_str);
+    let group = folder
+        .as_deref()
+        .and_then(|full| full.split('/').next())
+        .unwrap_or("")
+        .to_string();
+    conn.execute(
+        "UPDATE clipboard_records
+         SET id = ?1, resource_path = ?2, resource_missing = 0, content = ?3, group_name = ?4
+         WHERE id = ?5",
+        params![final_id, effective_str, new_content, group, id],
+    )
+    .map_err(|e| e.to_string())?;
+    if final_id != id {
+        let _ = conn.execute(
+            "UPDATE api_key_labels SET record_id = ?1 WHERE record_id = ?2",
+            params![final_id, id],
+        );
+    }
+    drop(conn);
+    bump_resource_library_revision();
+    let _ = app.emit("resource-groups-changed", ());
+    let relative_path = effective
+        .strip_prefix(&root)
+        .ok()
+        .map(|relative| relative.to_string_lossy().to_string());
+    Ok(serde_json::json!({
+        "id": final_id,
+        "resource_path": effective_str,
+        "resource_relative_path": relative_path,
+        "content": new_content,
+        "group_name": group,
+        "resource_folder": folder,
+    }))
+}
+
+/// 追溯手动选文件的系统对话框：与快捷输入选文件同一实现通道
+/// （tauri-plugin-dialog + 通道转发），但无体积上限——资源文件不受
+/// 快捷输入的大小约束。
+#[tauri::command]
+pub async fn select_resource_trace_file(app: AppHandle) -> Result<serde_json::Value, String> {
+    use tauri_plugin_dialog::DialogExt;
+    let (tx, rx) = std::sync::mpsc::channel();
+    app.dialog().file().pick_file(move |path| {
+        let _ = tx.send(path);
+    });
+    let result =
+        tokio::task::spawn_blocking(move || rx.recv_timeout(std::time::Duration::from_secs(60)))
+            .await
+            .map_err(|e| format!("task error: {}", e))?;
+    match result {
+        Ok(Some(path)) => {
+            let path_string = path.to_string();
+            let meta = std::fs::metadata(PathBuf::from(&path_string))
+                .map_err(|e| format!("读取文件失败: {}", e))?;
+            if !meta.is_file() {
+                return Err("请选择一个文件".to_string());
+            }
+            Ok(serde_json::json!({ "path": path_string }))
+        }
+        Ok(None) => Err("cancelled".to_string()),
+        Err(error) => Err(format!("选择文件失败: {error}")),
+    }
+}
+
 #[tauri::command]
 pub fn move_resource_group(
     app: AppHandle,
