@@ -84,7 +84,7 @@ export default function ResourceCleanupDialog({
         {!checking && check && check.libraryAccessible !== true && (
           <>
             <div className="dialog-callout error" role="alert">
-              <span className="resource-trace-warn-mark" aria-hidden="true">!</span>
+              <span className="resource-trace-warn-mark" aria-hidden="true" />
               <span>
                 {t("resources.cleanupOfflineReason")}
                 <br />
@@ -124,7 +124,7 @@ export default function ResourceCleanupDialog({
           <>
             {mass ? (
               <div className="dialog-callout error" role="alert">
-                <span className="resource-trace-warn-mark" aria-hidden="true">!</span>
+                <span className="resource-trace-warn-mark" aria-hidden="true" />
                 <span>
                   {t("resources.cleanupMassWarn", { count, total: totalResources, percent })}
                 </span>

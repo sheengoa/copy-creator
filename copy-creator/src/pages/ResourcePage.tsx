@@ -1344,7 +1344,7 @@ export default function ResourcePage() {
       {/* 缺失筛选视图的操作条：重新检查（实时对账救回）与批量清理入口。 */}
       {typeFilter === "missing" && !isSelecting && (
         <div className="resource-missing-bar" role="status">
-          <span className="resource-missing-bar-mark" aria-hidden="true">!</span>
+          <span className="resource-missing-bar-mark" aria-hidden="true" />
           <span>{t("resources.missingBarText", { count: missingAllCount })}</span>
           <span className="resource-missing-bar-grow" />
           <button

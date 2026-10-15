@@ -181,7 +181,7 @@ export default function ResourceTraceDialog({
         {step === "multi" && (
           <>
             <div className="dialog-callout warn">
-              <span className="resource-trace-warn-mark" aria-hidden="true">!</span>
+              <span className="resource-trace-warn-mark" aria-hidden="true" />
               <span>{t("resources.traceMultiFound")}</span>
             </div>
             <div className="resource-trace-candidates" role="radiogroup" aria-label={t("resources.traceTitle")}>
@@ -216,7 +216,7 @@ export default function ResourceTraceDialog({
         {step === "manual" && (
           <>
             <div className="dialog-callout warn">
-              <span className="resource-trace-warn-mark" aria-hidden="true">!</span>
+              <span className="resource-trace-warn-mark" aria-hidden="true" />
               <span>{t("resources.traceNoneFound")}</span>
             </div>
             <div className="dialog-actions">
@@ -243,7 +243,7 @@ export default function ResourceTraceDialog({
             </div>
             {outsideLibrary && (
               <div className="dialog-callout warn">
-                <span className="resource-trace-warn-mark" aria-hidden="true">!</span>
+                <span className="resource-trace-warn-mark" aria-hidden="true" />
                 <span>
                   {t("resources.traceCopyIntoLibrary", {
                     group: recordFolder || t("resources.ungrouped"),
@@ -253,7 +253,7 @@ export default function ResourceTraceDialog({
             )}
             {!outsideLibrary && renamed && (
               <div className="dialog-callout warn">
-                <span className="resource-trace-warn-mark" aria-hidden="true">!</span>
+                <span className="resource-trace-warn-mark" aria-hidden="true" />
                 <span>{t("resources.traceRenameNote", { name: targetName })}</span>
               </div>
             )}
@@ -295,7 +295,7 @@ export default function ResourceTraceDialog({
         {step === "error" && (
           <>
             <div className="dialog-callout error" role="alert">
-              <span className="resource-trace-warn-mark" aria-hidden="true">!</span>
+              <span className="resource-trace-warn-mark" aria-hidden="true" />
               <span>{errorMessage ?? t("resources.traceFailed")}</span>
             </div>
             <div className="dialog-actions">
