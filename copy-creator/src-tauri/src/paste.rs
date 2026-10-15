@@ -417,13 +417,13 @@ fn inject_paste_with_shortcut(shortcut: PasteShortcut) {
 #[derive(serde::Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct PasteBackendStatus {
-    session: &'static str,
-    ydotool_installed: bool,
-    ydotoold_installed: bool,
+    pub(crate) session: &'static str,
+    pub(crate) ydotool_installed: bool,
+    pub(crate) ydotoold_installed: bool,
     /// ydotoold 守护进程是否正在运行（粘贴注入的实际前提）。
-    ydotoold_running: bool,
-    wtype_installed: bool,
-    xdotool_installed: bool,
+    pub(crate) ydotoold_running: bool,
+    pub(crate) wtype_installed: bool,
+    pub(crate) xdotool_installed: bool,
 }
 
 #[cfg(target_os = "linux")]

@@ -6341,4 +6341,124 @@ mod restore_usability_tests {
         assert_eq!(body, PNG_BYTES, "恢复后媒体字节必须与原文件一致");
         let _ = group_dir;
     }
+
+}
+
+// ==================== IPC 载荷命名契约 ====================
+// Tauri 只自动转换命令入参（camelCase→snake_case），返回值命名完全由
+// serde 属性决定——漏声明 rename_all 会把蛇形键直达前端，前端按驼峰
+// 读取得到 undefined，渲染中一抛错就是整页卸载（真实事故：清理缺失
+// 对话框）。本测试把每个跨 IPC 的结构体载荷键集显式钉住：
+// - 标注 [camel] 的必须带 #[serde(rename_all = "camelCase")]，前端按驼峰读；
+// - 标注 [snake] 的历史载荷两端均为蛇形；
+// 新增/修改任一端命名的唯一通路是同步更新本测试（= 强制过评审）。
+// json! 字面量键不受 rename_all 影响，键即契约，新增时请在此登记同类断言。
+#[cfg(test)]
+mod ipc_naming_contract_tests {
+    use crate::autostart::AutostartStatus;
+    use crate::backup::BackupManifest;
+    use crate::db::annotation::ResourceAnnotation;
+    use crate::db::clipboard::DeleteRecordsSummary;
+    use crate::db::phrase::ResourceTextPreview;
+    use crate::db::resource::{MissingResourceEntry, RecheckMissingSummary};
+    use crate::db::trash::{RestoreBatchSummary, RestoreOutcome};
+    use crate::paste::PasteBackendStatus;
+
+    fn keys_of<T: serde::Serialize>(value: &T) -> Vec<String> {
+        let mut keys: Vec<String> = serde_json::to_value(value)
+            .unwrap()
+            .as_object()
+            .expect("IPC 载荷必须是对象")
+            .keys()
+            .cloned()
+            .collect();
+        keys.sort();
+        keys
+    }
+
+    fn assert_keys<T: serde::Serialize>(value: &T, expected: &[&str]) {
+        let mut expected: Vec<String> = expected.iter().map(|k| k.to_string()).collect();
+        expected.sort();
+        assert_eq!(keys_of(value), expected);
+    }
+
+    #[test]
+    fn camel_case_payloads_serialize_with_camel_keys() {
+        // [camel] 删除统计（消费方：ResourcePage 删除反馈）
+        assert_keys(
+            &DeleteRecordsSummary { deleted: 1, files_already_missing: 2 },
+            &["deleted", "filesAlreadyMissing"],
+        );
+        // [camel] 缺失重查（消费方：清理确认对话框；字段错位曾致整页消失）
+        assert_keys(
+            &RecheckMissingSummary {
+                library_accessible: true,
+                recovered: 1,
+                total_resources: 2,
+                still_missing: vec![MissingResourceEntry { id: "m".into(), name: "a.mp4".into() }],
+            },
+            &["libraryAccessible", "recovered", "stillMissing", "totalResources"],
+        );
+        // [camel] 粘贴环境诊断（消费方：PasteEnvironmentSection）
+        assert_keys(
+            &PasteBackendStatus {
+                session: "x11",
+                ydotool_installed: true,
+                ydotoold_installed: true,
+                ydotoold_running: true,
+                wtype_installed: false,
+                xdotool_installed: true,
+            },
+            &["session", "ydotoolInstalled", "ydotooldInstalled", "ydotooldRunning", "wtypeInstalled", "xdotoolInstalled"],
+        );
+    }
+
+    #[test]
+    fn snake_case_payloads_keep_snake_keys() {
+        // [snake] 回收站批量恢复统计（消费方：TrashPanel）
+        assert_keys(
+            &RestoreBatchSummary { restored: 1, relinked: 2, metadata_only: 3, failed: vec![] },
+            &["restored", "relinked", "metadata_only", "failed"],
+        );
+        // [snake] 恢复结果枚举值本身也是契约（TrashPanel 按字符串比较）
+        assert_eq!(
+            serde_json::to_value(RestoreOutcome::MetadataOnly).unwrap(),
+            serde_json::json!("metadata_only")
+        );
+        // [snake] 资源标注（消费方：domain/annotations.ts 按 raw.start_offset 取）
+        assert_keys(
+            &ResourceAnnotation {
+                id: "a".into(),
+                record_id: "r".into(),
+                start_offset: 0,
+                length: 1,
+                kind: "bold".into(),
+                anchor_text: "x".into(),
+                created_at: "now".into(),
+            },
+            &["id", "record_id", "start_offset", "length", "kind", "anchor_text", "created_at"],
+        );
+        // [snake] 开机自启状态（消费方：App.tsx）
+        assert_keys(
+            &AutostartStatus { enabled: false, file_exists: false, path_correct: false, message: String::new() },
+            &["enabled", "file_exists", "path_correct", "message"],
+        );
+        // [snake] 备份清单（文件格式 + 设置页展示，双契约）
+        assert_keys(
+            &BackupManifest {
+                format_version: 1,
+                app_version: "0.0.0".into(),
+                exported_at: "now".into(),
+                includes_library: true,
+                library_path: String::new(),
+                table_counts: Default::default(),
+            },
+            &["format_version", "app_version", "exported_at", "includes_library", "library_path", "table_counts"],
+        );
+        // [snake] 资源文本预览（消费方：ResourceDetailPage）
+        assert_keys(
+            &ResourceTextPreview { content: String::new(), truncated: false },
+            &["content", "truncated"],
+        );
+    }
 }
