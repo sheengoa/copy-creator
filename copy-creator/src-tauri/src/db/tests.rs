@@ -3521,8 +3521,11 @@ mod resource_command_tests {
     fn recheck_missing_resources_reports_offline_library() {
         let (app, root) = test_app();
         // 库目录会被 get_resource_library_dir 尝试自动重建，存储离线要用
-        // 「无法创建」的路径模拟（/proc 之下 mkdir 必然失败）。
-        let offline_root = PathBuf::from("/proc/copy-creator-offline-test/library");
+        // 「无法创建」的路径模拟：让父级是一个文件——mkdir 在两个平台都
+        // 必然失败（原 /proc 方案是 Linux 专属，Windows 会建到当前盘符下）。
+        let blocker = root.join("not-a-dir");
+        std::fs::write(&blocker, b"x").unwrap();
+        let offline_root = blocker.join("library");
         {
             let state = app.state::<DbState>();
             let conn = state.conn.lock().unwrap();
@@ -3631,7 +3634,7 @@ mod resource_command_tests {
         .unwrap();
         assert_eq!(result["id"], ghost_id);
         assert_eq!(result["resource_path"], target.to_string_lossy().as_ref());
-        assert_eq!(result["resource_relative_path"], "备用/B组02.mp4");
+        assert_eq!(slash_normalized(result["resource_relative_path"].as_str().unwrap()), "备用/B组02.mp4");
 
         let state = app.state::<DbState>();
         let conn = state.conn.lock().unwrap();
@@ -3696,7 +3699,7 @@ mod resource_command_tests {
         .unwrap();
         assert!(old_path.is_file(), "库外文件必须复制入库");
         assert!(external.is_file(), "用户选中的原文件必须保留");
-        assert_eq!(result["resource_relative_path"], "分组1/video.mp4");
+        assert_eq!(slash_normalized(result["resource_relative_path"].as_str().unwrap()), "分组1/video.mp4");
         assert_eq!(resource_missing_flag(&app, old_id.as_str()), Some(0));
 
         // 同名冲突：自动加序号，记录跟随最终落位路径。
@@ -3713,7 +3716,7 @@ mod resource_command_tests {
         )
         .unwrap();
         let final_relative = result2["resource_relative_path"].as_str().unwrap();
-        assert_eq!(final_relative, "分组1/clip (1).mp4");
+        assert_eq!(slash_normalized(final_relative), "分组1/clip (1).mp4");
         assert!(group_dir.join("clip (1).mp4").is_file());
         assert_eq!(
             resource_missing_flag(&app, result2["id"].as_str().unwrap()),
