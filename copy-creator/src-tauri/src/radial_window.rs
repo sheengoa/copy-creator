@@ -82,9 +82,21 @@ fn radial_input_transition(current: u8, requested: u8) -> Option<u8> {
 fn replay_radial_input_now(gtk_window: &gtk::ApplicationWindow) {
     use gtk::prelude::*;
     let Some(gdk_window) = gtk_window.window() else {
-        // 未重放意味着输入区域维持旧值；停泊场景下这就是"隐形拦截区"
-        // 的先兆，必须留痕而不是静默吞掉。
-        log::warn!("[radial-input] replay skipped: gdk window not ready");
+        // 启动期 show() 返回后 GdkWindow 可能尚未完成 realize（实测：dev
+        // 启动即触发一次跳过）。跳过意味着输入区域维持 X 默认整窗拦截，
+        // 直到下一次呼出径向菜单才恢复——这正是"启动后部分区域无法点击、
+        // 呼出一次菜单又好了"的根因，必须延时重试而不是放弃。窗口常驻
+        // 映射，realize 一旦完成便不再消失，重试必然收敛。
+        log::warn!("[radial-input] gdk window not ready, retrying every 50ms");
+        let retry_window = gtk_window.clone();
+        gtk::glib::timeout_add_local(std::time::Duration::from_millis(50), move || {
+            if retry_window.window().is_some() {
+                log::info!("[radial-input] replay applied after gdk-ready retry");
+                replay_radial_input_now(&retry_window);
+                return gtk::glib::ControlFlow::Break;
+            }
+            gtk::glib::ControlFlow::Continue
+        });
         return;
     };
     let state = RADIAL_INPUT_STATE.load(Ordering::SeqCst);
