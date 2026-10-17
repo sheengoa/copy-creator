@@ -4,7 +4,9 @@ use enigo::{Enigo, Mouse, Settings};
 use std::process::Command;
 #[cfg(target_os = "windows")]
 use crate::win_hook;
-use std::sync::atomic::{AtomicBool, AtomicU8, Ordering};
+use std::sync::atomic::{AtomicBool, Ordering};
+#[cfg(target_os = "linux")]
+use std::sync::atomic::AtomicU8;
 use std::sync::Mutex;
 use tauri::{AppHandle, Emitter, Manager};
 
@@ -46,19 +48,24 @@ static RADIAL_STRIP: Mutex<(bool, i32, i32, i32, i32, i32, i32)> =
 /// 无结构性保证。
 ///
 /// 规则：输入区域永远由本状态唯一决定；写入方只做状态转移请求，主线程
-/// 闭包按当前状态**整体重放** input shape（幂等）。状态为 Parked 时，
-/// expand/collapse 请求一律拒绝（停泊优先：穿透已覆盖"收起"的语义，
+/// 闭包按**执行时**读到的状态整体重放 input shape（幂等）。状态为 Parked
+/// 时，expand/collapse 请求一律拒绝（停泊优先：穿透已覆盖"收起"的语义，
 /// 只有 show 的 Collapsed 唤醒合法）。如此无论命令以何种顺序到达，
 /// 最终输入区域恒等于最后一条被接受命令的意图。
-pub(crate) const RADIAL_INPUT_PARKED: u8 = 0;
-pub(crate) const RADIAL_INPUT_COLLAPSED: u8 = 1;
-pub(crate) const RADIAL_INPUT_EXPANDED: u8 = 2;
+#[cfg(target_os = "linux")]
+const RADIAL_INPUT_PARKED: u8 = 0;
+#[cfg(target_os = "linux")]
+const RADIAL_INPUT_COLLAPSED: u8 = 1;
+#[cfg(target_os = "linux")]
+const RADIAL_INPUT_EXPANDED: u8 = 2;
+#[cfg(target_os = "linux")]
 static RADIAL_INPUT_STATE: AtomicU8 = AtomicU8::new(RADIAL_INPUT_PARKED);
 
 /// 状态转移判定（纯函数，便于单测钉住"停泊优先"规则）：
 /// Parked 态拒绝 hit_area 命令的一切写入（穿透已覆盖"收起"的语义）；
 /// 唤醒停泊的唯一路径是 show_radial_menu，它不经本判定、直接写入
 /// Collapsed。其余状态接受任何请求。
+#[cfg(target_os = "linux")]
 fn radial_input_transition(current: u8, requested: u8) -> Option<u8> {
     if current == RADIAL_INPUT_PARKED {
         return None;
@@ -66,43 +73,54 @@ fn radial_input_transition(current: u8, requested: u8) -> Option<u8> {
     Some(requested)
 }
 
-/// 主线程内按 RADIAL_INPUT_STATE 整体重放输入区域。GTK 调用，必须落在
-/// 主线程；调用方可能在 IPC 线程。Parked 清空无条件执行（不依赖
+/// 主线程内按 RADIAL_INPUT_STATE **执行时**状态整体重放输入区域（必须在
+/// 主线程调用）。延迟读取状态是收敛性的关键：状态 store 与重放闭包入队
+/// 的交错顺序不影响结果——最后执行的闭包重放出最后被接受命令的意图，
+/// 状态标志与 X11 input shape 恒一致。Parked 清空无条件执行（不依赖
 /// RADIAL_STRIP 就绪，与历史 park 行为一致）。
+#[cfg(target_os = "linux")]
+fn replay_radial_input_now(gtk_window: &gtk::ApplicationWindow) {
+    use gtk::prelude::*;
+    let Some(gdk_window) = gtk_window.window() else {
+        // 未重放意味着输入区域维持旧值；停泊场景下这就是"隐形拦截区"
+        // 的先兆，必须留痕而不是静默吞掉。
+        log::warn!("[radial-input] replay skipped: gdk window not ready");
+        return;
+    };
+    let state = RADIAL_INPUT_STATE.load(Ordering::SeqCst);
+    let region = if state == RADIAL_INPUT_PARKED {
+        gtk::cairo::Region::create_rectangle(&gtk::cairo::RectangleInt::new(0, 0, 0, 0))
+    } else {
+        let (strip_left, preview_w, full_strip, panel_w, win_h, _px, _py) = *RADIAL_STRIP
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        if preview_w <= 0 || panel_w <= 0 || win_h <= 0 {
+            return;
+        }
+        // 条带在面板左侧时，可交互区域从"满额条带 - 预览宽"处开始；
+        // 满额条带中超出预览宽的部分始终穿透（含收起态整条条带）。
+        let (x, width) = if state == RADIAL_INPUT_EXPANDED {
+            (
+                if strip_left { full_strip - preview_w } else { 0 },
+                panel_w + preview_w,
+            )
+        } else {
+            (if strip_left { full_strip } else { 0 }, panel_w)
+        };
+        gtk::cairo::Region::create_rectangle(&gtk::cairo::RectangleInt::new(x, 0, width, win_h))
+    };
+    gdk_window.input_shape_combine_region(&region, 0, 0);
+}
+
+/// 把输入区域重放排队到主线程。GTK 调用，必须落在主线程；调用方可能在
+/// IPC 线程。
 #[cfg(target_os = "linux")]
 fn enqueue_radial_input_replay(window: &tauri::WebviewWindow<tauri::Wry>) {
     let task_window = window.clone();
     let _ = window.run_on_main_thread(move || {
-        use gtk::prelude::*;
-        let Ok(gtk_window) = task_window.gtk_window() else {
-            return;
-        };
-        let Some(gdk_window) = gtk_window.window() else {
-            return;
-        };
-        let state = RADIAL_INPUT_STATE.load(Ordering::SeqCst);
-        let region = if state == RADIAL_INPUT_PARKED {
-            gtk::cairo::Region::create_rectangle(&gtk::cairo::RectangleInt::new(0, 0, 0, 0))
-        } else {
-            let (strip_left, preview_w, full_strip, panel_w, win_h, _px, _py) = *RADIAL_STRIP
-                .lock()
-                .unwrap_or_else(|poisoned| poisoned.into_inner());
-            if preview_w <= 0 || panel_w <= 0 || win_h <= 0 {
-                return;
-            }
-            // 条带在面板左侧时，可交互区域从"满额条带 - 预览宽"处开始；
-            // 满额条带中超出预览宽的部分始终穿透（含收起态整条条带）。
-            let (x, width) = if state == RADIAL_INPUT_EXPANDED {
-                (
-                    if strip_left { full_strip - preview_w } else { 0 },
-                    panel_w + preview_w,
-                )
-            } else {
-                (if strip_left { full_strip } else { 0 }, panel_w)
-            };
-            gtk::cairo::Region::create_rectangle(&gtk::cairo::RectangleInt::new(x, 0, width, win_h))
-        };
-        gdk_window.input_shape_combine_region(&region, 0, 0);
+        if let Ok(gtk_window) = task_window.gtk_window() {
+            replay_radial_input_now(&gtk_window);
+        }
     });
 }
 
@@ -367,21 +385,17 @@ pub(crate) fn park_radial_window(app: &AppHandle) {
         RADIAL_INPUT_STATE.store(RADIAL_INPUT_PARKED, Ordering::SeqCst);
         let prev = RADIAL_PREV_FOCUS.load(Ordering::SeqCst);
         let task = radial.clone();
-        // 顺序收进一个主线程闭包：先重放（清空输入），再归还焦点。
+        // 顺序收进一个主线程闭包：先重放（按执行时状态清空输入），再归还
+        // 焦点。重放读的是执行时状态：若与 show 并发交错（show 的状态
+        // 写入先落地），此处按 Collapsed 重放面板区恰是正确结果——最终
+        // 输入区域始终收敛于最后被接受命令的意图（见
+        // replay_radial_input_now 注释）。
         let _ = radial.run_on_main_thread(move || {
             use gtk::prelude::*;
             let Ok(gtk_window) = task.gtk_window() else {
                 return;
             };
-            if let Some(gdk_window) = gtk_window.window() {
-                gdk_window.input_shape_combine_region(
-                    &gtk::cairo::Region::create_rectangle(&gtk::cairo::RectangleInt::new(
-                        0, 0, 0, 0,
-                    )),
-                    0,
-                    0,
-                );
-            }
+            replay_radial_input_now(&gtk_window);
             // 焦点判定必须用 GTK 的 is_active：WebKitGTK 持有键盘焦点
             // 的是其 input-only 子窗口而非顶层（XGetInputFocus 实测返回
             // 0xa00004 子窗口、顶层是 0xa00003），按顶层 xid 比较永远
@@ -1002,7 +1016,9 @@ mod radial_strip_tests {
     }
 }
 
-#[cfg(test)]
+// 状态机是 Linux 常驻模型专属（Windows 停泊即真 hide，无输入区域概念），
+// 测试连同被测项一起限定 Linux 目标。
+#[cfg(all(test, target_os = "linux"))]
 mod radial_input_state_tests {
     use super::{
         radial_input_transition, RADIAL_INPUT_COLLAPSED, RADIAL_INPUT_EXPANDED,
