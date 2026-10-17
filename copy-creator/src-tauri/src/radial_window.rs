@@ -4,7 +4,7 @@ use enigo::{Enigo, Mouse, Settings};
 use std::process::Command;
 #[cfg(target_os = "windows")]
 use crate::win_hook;
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU8, Ordering};
 use std::sync::Mutex;
 use tauri::{AppHandle, Emitter, Manager};
 
@@ -34,73 +34,102 @@ fn is_wayland() -> bool {
 static RADIAL_STRIP: Mutex<(bool, i32, i32, i32, i32, i32, i32)> =
     Mutex::new((false, 0, 0, 0, 0, 0, 0));
 
-/// 切换径向窗口预览区的展开/收起（双平台策略见 RADIAL_STRIP 注释）：
-/// Linux 切 X11 输入区域（收起态条带穿透到下层应用）；Windows 直接
-/// resize+move（收起态窗口即面板大小）。用户可见行为双端一致：收起态
-/// 预留条带不拦截任何点击，展开态预览铺满条带。空条带（无空间）时不做。
-fn apply_radial_input_shape(window: &tauri::WebviewWindow<tauri::Wry>, expanded: bool) {
-    #[cfg(target_os = "linux")]
-    {
-        let (strip_left, preview_w, full_strip, panel_w, win_h, _px, _py) = *RADIAL_STRIP
-            .lock()
-            .unwrap_or_else(|poisoned| poisoned.into_inner());
-        if preview_w <= 0 || panel_w <= 0 || win_h <= 0 {
+/// 径向窗口输入区域状态机（唯一事实源）。
+///
+/// 背景缺陷：Linux 常驻模型下停泊态的点击穿透完全依赖"清空 X11 input
+/// shape"，而写输入区域的命令分属不同入口——set_radial_hit_area（前端
+/// hover 展开/收起）、show_radial_menu（呼出）、park_radial_window（Escape /
+/// 失焦 / 粘贴兜底 / toggle 的 170ms 延迟线程）。任何"停泊之后仍有展开/
+/// 收起写入晚到"的乱序都会把输入区域重新留在非空状态：窗口 web 层已
+/// 透明，结果就是屏幕上出现一块看不见但拦截点击的区域（用户实测
+/// "桌面某些区域无法点击"）。此前安全性只靠 IPC→主线程的 FIFO 顺序，
+/// 无结构性保证。
+///
+/// 规则：输入区域永远由本状态唯一决定；写入方只做状态转移请求，主线程
+/// 闭包按当前状态**整体重放** input shape（幂等）。状态为 Parked 时，
+/// expand/collapse 请求一律拒绝（停泊优先：穿透已覆盖"收起"的语义，
+/// 只有 show 的 Collapsed 唤醒合法）。如此无论命令以何种顺序到达，
+/// 最终输入区域恒等于最后一条被接受命令的意图。
+pub(crate) const RADIAL_INPUT_PARKED: u8 = 0;
+pub(crate) const RADIAL_INPUT_COLLAPSED: u8 = 1;
+pub(crate) const RADIAL_INPUT_EXPANDED: u8 = 2;
+static RADIAL_INPUT_STATE: AtomicU8 = AtomicU8::new(RADIAL_INPUT_PARKED);
+
+/// 状态转移判定（纯函数，便于单测钉住"停泊优先"规则）：
+/// Parked 态拒绝 hit_area 命令的一切写入（穿透已覆盖"收起"的语义）；
+/// 唤醒停泊的唯一路径是 show_radial_menu，它不经本判定、直接写入
+/// Collapsed。其余状态接受任何请求。
+fn radial_input_transition(current: u8, requested: u8) -> Option<u8> {
+    if current == RADIAL_INPUT_PARKED {
+        return None;
+    }
+    Some(requested)
+}
+
+/// 主线程内按 RADIAL_INPUT_STATE 整体重放输入区域。GTK 调用，必须落在
+/// 主线程；调用方可能在 IPC 线程。Parked 清空无条件执行（不依赖
+/// RADIAL_STRIP 就绪，与历史 park 行为一致）。
+#[cfg(target_os = "linux")]
+fn enqueue_radial_input_replay(window: &tauri::WebviewWindow<tauri::Wry>) {
+    let task_window = window.clone();
+    let _ = window.run_on_main_thread(move || {
+        use gtk::prelude::*;
+        let Ok(gtk_window) = task_window.gtk_window() else {
             return;
-        }
-        let task_window = window.clone();
-        // 输入区域是 GTK 调用，必须落在主线程；调用方可能在 IPC 线程。
-        let apply = move || {
-            use gtk::prelude::*;
-            let Ok(gtk_window) = task_window.gtk_window() else {
+        };
+        let Some(gdk_window) = gtk_window.window() else {
+            return;
+        };
+        let state = RADIAL_INPUT_STATE.load(Ordering::SeqCst);
+        let region = if state == RADIAL_INPUT_PARKED {
+            gtk::cairo::Region::create_rectangle(&gtk::cairo::RectangleInt::new(0, 0, 0, 0))
+        } else {
+            let (strip_left, preview_w, full_strip, panel_w, win_h, _px, _py) = *RADIAL_STRIP
+                .lock()
+                .unwrap_or_else(|poisoned| poisoned.into_inner());
+            if preview_w <= 0 || panel_w <= 0 || win_h <= 0 {
                 return;
-            };
-            let Some(gdk_window) = gtk_window.window() else {
-                return;
-            };
+            }
             // 条带在面板左侧时，可交互区域从"满额条带 - 预览宽"处开始；
             // 满额条带中超出预览宽的部分始终穿透（含收起态整条条带）。
-            let region = if expanded {
-                let x = if strip_left { full_strip - preview_w } else { 0 };
-                gtk::cairo::Region::create_rectangle(&gtk::cairo::RectangleInt::new(
-                    x,
-                    0,
+            let (x, width) = if state == RADIAL_INPUT_EXPANDED {
+                (
+                    if strip_left { full_strip - preview_w } else { 0 },
                     panel_w + preview_w,
-                    win_h,
-                ))
+                )
             } else {
-                let x = if strip_left { full_strip } else { 0 };
-                gtk::cairo::Region::create_rectangle(&gtk::cairo::RectangleInt::new(
-                    x,
-                    0,
-                    panel_w,
-                    win_h,
-                ))
+                (if strip_left { full_strip } else { 0 }, panel_w)
             };
-            gdk_window.input_shape_combine_region(&region, 0, 0);
+            gtk::cairo::Region::create_rectangle(&gtk::cairo::RectangleInt::new(x, 0, width, win_h))
         };
-        window.run_on_main_thread(apply).ok();
+        gdk_window.input_shape_combine_region(&region, 0, 0);
+    });
+}
+
+/// 切换径向窗口预览区的展开/收起（双平台策略见 RADIAL_STRIP 注释）。
+/// Linux：走状态机（见 RADIAL_INPUT_STATE 注释）；Windows：直接
+/// resize+move（收起态窗口即面板大小，条带不在窗口内，点击天然落到
+/// 下层应用，不存在隐形拦截面，无需状态机）。
+#[cfg(not(target_os = "linux"))]
+fn apply_radial_input_shape(window: &tauri::WebviewWindow<tauri::Wry>, expanded: bool) {
+    // Windows：窗口收起态即面板大小（条带不在窗口内，点击天然落到
+    // 下层应用），展开/收起以面板锚点为准做 resize+move，窗口宽按
+    // "面板 + 钳制后预览宽"。DWM 合成没有 X11 的残影帧问题，尺寸
+    // 变化是安全的。
+    let (strip_left, preview_w, _full_strip, panel_w, win_h, px, py) = *RADIAL_STRIP
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
+    if preview_w <= 0 {
+        return;
     }
-    #[cfg(not(target_os = "linux"))]
-    {
-        // Windows：窗口收起态即面板大小（条带不在窗口内，点击天然落到
-        // 下层应用），展开/收起以面板锚点为准做 resize+move，窗口宽按
-        // "面板 + 钳制后预览宽"。DWM 合成没有 X11 的残影帧问题，尺寸
-        // 变化是安全的。
-        let (strip_left, preview_w, _full_strip, panel_w, win_h, px, py) = *RADIAL_STRIP
-            .lock()
-            .unwrap_or_else(|poisoned| poisoned.into_inner());
-        if preview_w <= 0 {
-            return;
-        }
-        let win_w_total = panel_w + preview_w;
-        let (width, x) = if expanded {
-            (win_w_total, if strip_left { px - preview_w } else { px })
-        } else {
-            (panel_w, px)
-        };
-        let _ = window.set_size(tauri::PhysicalSize::new(width, win_h));
-        let _ = window.set_position(tauri::PhysicalPosition::new(x, py));
-    }
+    let win_w_total = panel_w + preview_w;
+    let (width, x) = if expanded {
+        (win_w_total, if strip_left { px - preview_w } else { px })
+    } else {
+        (panel_w, px)
+    };
+    let _ = window.set_size(tauri::PhysicalSize::new(width, win_h));
+    let _ = window.set_position(tauri::PhysicalPosition::new(x, py));
 }
 
 /// 展开/收起径向菜单预览时切换输入区域；窗口几何自打开起固定不变
@@ -110,8 +139,37 @@ pub fn set_radial_hit_area(
     window: tauri::WebviewWindow<tauri::Wry>,
     expanded: bool,
 ) -> Result<(), String> {
-    apply_radial_input_shape(&window, expanded);
-    Ok(())
+    #[cfg(target_os = "linux")]
+    {
+        let requested = if expanded {
+            RADIAL_INPUT_EXPANDED
+        } else {
+            RADIAL_INPUT_COLLAPSED
+        };
+        match radial_input_transition(
+            RADIAL_INPUT_STATE.load(Ordering::SeqCst),
+            requested,
+        ) {
+            Some(next) => {
+                RADIAL_INPUT_STATE.store(next, Ordering::SeqCst);
+                enqueue_radial_input_replay(&window);
+            }
+            None => {
+                // 停泊后迟到的展开/收起写入：拒绝并留痕，这是"隐形拦截
+                // 区"缺陷的直接防波堤。
+                log::info!(
+                    "[radial-input] rejected {:?} while parked",
+                    if expanded { "expand" } else { "collapse" }
+                );
+            }
+        }
+        return Ok(());
+    }
+    #[cfg(not(target_os = "linux"))]
+    {
+        apply_radial_input_shape(&window, expanded);
+        Ok(())
+    }
 }
 
 static RADIAL_MENU_ENABLED: AtomicBool = AtomicBool::new(true);
@@ -285,24 +343,12 @@ fn gtk_window_xid_on_main(gtk_window: &gtk::ApplicationWindow) -> u32 {
 }
 
 /// 清空径向窗口输入区域（停泊态所有点击穿透到下层应用）。GTK 调用，
-/// 须回主线程。
+/// 须回主线程。走状态机重放（置 Parked），与运行期停泊路径共用同一套
+/// 写入规则，避免启动期与运行期的输入区域来源不一致。
 #[cfg(target_os = "linux")]
 pub(crate) fn clear_radial_input(window: &tauri::WebviewWindow<tauri::Wry>) {
-    let task_window = window.clone();
-    let _ = window.run_on_main_thread(move || {
-        use gtk::prelude::*;
-        let Ok(gtk_window) = task_window.gtk_window() else {
-            return;
-        };
-        let Some(gdk_window) = gtk_window.window() else {
-            return;
-        };
-        gdk_window.input_shape_combine_region(
-            &gtk::cairo::Region::create_rectangle(&gtk::cairo::RectangleInt::new(0, 0, 0, 0)),
-            0,
-            0,
-        );
-    });
+    RADIAL_INPUT_STATE.store(RADIAL_INPUT_PARKED, Ordering::SeqCst);
+    enqueue_radial_input_replay(window);
 }
 
 /// 收起径向菜单（所有隐藏路径的唯一出口）：Linux 原地停泊（清输入 +
@@ -315,9 +361,13 @@ pub(crate) fn park_radial_window(app: &AppHandle) {
     };
     #[cfg(target_os = "linux")]
     {
+        // 停泊必须先于主线程闭包置入状态机（Parked），此后任何迟到的
+        // expand/collapse 写入都会被 set_radial_hit_area 拒绝——这是
+        // "停泊后输入区域残留非空 = 隐形拦截区"缺陷的结构性防线。
+        RADIAL_INPUT_STATE.store(RADIAL_INPUT_PARKED, Ordering::SeqCst);
         let prev = RADIAL_PREV_FOCUS.load(Ordering::SeqCst);
         let task = radial.clone();
-        // 顺序收进一个主线程闭包：先穿透输入，再归还焦点。
+        // 顺序收进一个主线程闭包：先重放（清空输入），再归还焦点。
         let _ = radial.run_on_main_thread(move || {
             use gtk::prelude::*;
             let Ok(gtk_window) = task.gtk_window() else {
@@ -778,7 +828,17 @@ pub fn show_radial_menu(app: &AppHandle) {
             let _ = radial.set_size(tauri::PhysicalSize::new(win_w, win_h));
             let _ = radial.set_position(tauri::PhysicalPosition::new(px, py));
         }
-        // 打开即重置为收起形态的输入区域（条带穿透）。
+        // 打开即重置为收起形态的输入区域（条带穿透）。Linux 走状态机；
+        // 显示标志必须先于输入写入置位：toggle 隐藏路径的 170ms 停泊
+        // 线程以该标志为守卫，若在"输入已写、标志未置"的间隙醒来，会把
+        // 刚呼出的菜单错误停泊（输入被清空而 web 层可见，点击全部穿透）。
+        #[cfg(target_os = "linux")]
+        {
+            set_radial_menu_shown(true);
+            RADIAL_INPUT_STATE.store(RADIAL_INPUT_COLLAPSED, Ordering::SeqCst);
+            enqueue_radial_input_replay(&radial);
+        }
+        #[cfg(not(target_os = "linux"))]
         apply_radial_input_shape(&radial, false);
 
         // Read theme from DB
@@ -795,9 +855,6 @@ pub fn show_radial_menu(app: &AppHandle) {
         }
 
         raise_always_on_top(&radial);
-
-        #[cfg(target_os = "linux")]
-        set_radial_menu_shown(true);
 
         // Windows: 快捷键触发时进程在后台，tauri 的 set_focus 会被前台锁
         // 拒绝，菜单拿不到键盘焦点（Escape、失焦自隐藏都会失效），需强制
@@ -942,5 +999,47 @@ mod radial_strip_tests {
     fn prefers_right_without_monitor_info() {
         // 找不到所在显示器时保持旧行为：按期望宽度向右。
         assert_eq!(decide_radial_strip(200, 460, None, 1.0, 1.0), (false, 440));
+    }
+}
+
+#[cfg(test)]
+mod radial_input_state_tests {
+    use super::{
+        radial_input_transition, RADIAL_INPUT_COLLAPSED, RADIAL_INPUT_EXPANDED,
+        RADIAL_INPUT_PARKED,
+    };
+
+    #[test]
+    fn parked_rejects_hit_area_writes() {
+        // 停泊后迟到的展开/收起写入必须被拒绝:它们一旦执行,就会把输入
+        // 区域重新留在非空状态,在 web 层已透明的停泊窗口上留下"看不见
+        // 但拦截点击"的区域(线上缺陷:桌面某些区域无法点击)。唤醒停泊
+        // 的 show 路径不经本判定(show_radial_menu 直接写入 Collapsed),
+        // 因此本函数对 Parked 态拒绝一切请求即告正确。
+        assert_eq!(
+            radial_input_transition(RADIAL_INPUT_PARKED, RADIAL_INPUT_EXPANDED),
+            None
+        );
+        assert_eq!(
+            radial_input_transition(RADIAL_INPUT_PARKED, RADIAL_INPUT_COLLAPSED),
+            None
+        );
+    }
+
+    #[test]
+    fn shown_states_accept_any_request() {
+        // 显示中(Collapsed/Expanded)的展开/收起照常流转。
+        assert_eq!(
+            radial_input_transition(RADIAL_INPUT_COLLAPSED, RADIAL_INPUT_EXPANDED),
+            Some(RADIAL_INPUT_EXPANDED)
+        );
+        assert_eq!(
+            radial_input_transition(RADIAL_INPUT_EXPANDED, RADIAL_INPUT_COLLAPSED),
+            Some(RADIAL_INPUT_COLLAPSED)
+        );
+        assert_eq!(
+            radial_input_transition(RADIAL_INPUT_COLLAPSED, RADIAL_INPUT_COLLAPSED),
+            Some(RADIAL_INPUT_COLLAPSED)
+        );
     }
 }
