@@ -30,3 +30,6 @@ copy-creator/dev.cmd
 # 代理/工具会话过程产物
 **/.superpowers/
 .workbuddy/
+
+# Python 诊断脚本的字节码缓存(运行 scripts/radial-input-doctor.py 等产生)
+**/__pycache__/
