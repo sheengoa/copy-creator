@@ -4017,6 +4017,13 @@ mod pinned_record_tests {
     use std::sync::Mutex;
     use tauri::Manager;
 
+    /// 相对当前时间生成"新鲜"夹具：硬编码日期会随真实时间流逝跌出保留期
+    /// （默认 1 个月），夹具自己变成超期记录（2026-09-18 在 10-18 起爆炸，
+    /// v0.3.18 CI 首次暴露）。超期夹具硬编码过去日期则是安全的。
+    fn hours_ago_rfc3339(hours: i64) -> String {
+        (chrono::Utc::now() - chrono::Duration::hours(hours)).to_rfc3339()
+    }
+
     /// 内存库 + mock app：schema 含 created_ms 生成列（prune 的清理键）与
     /// pinned（收藏标记），与生产 ensure_schema 语义一致。
     fn pinned_test_app() -> tauri::App<tauri::test::MockRuntime> {
@@ -4085,10 +4092,11 @@ mod pinned_record_tests {
     fn prune_keeps_pinned_records_but_expires_others() {
         let app = pinned_test_app();
         let handle = app.handle().clone();
-        // 两条超期（1 年前）：一条收藏、一条普通；一条新鲜普通记录作对照。
+        // 两条超期（1 年前）：一条收藏、一条普通；一条新鲜普通记录作对照
+        //（相对当前时间生成，避免夹具随真实时间过期，见 hours_ago_rfc3339）。
         insert_record(&app, "old-pinned", "2025-09-01T00:00:00Z");
         insert_record(&app, "old-plain", "2025-09-01T00:00:00Z");
-        insert_record(&app, "fresh-plain", "2026-09-18T00:00:00Z");
+        insert_record(&app, "fresh-plain", &hours_ago_rfc3339(1));
         set_clipboard_record_pinned_internal(&handle, &["old-pinned".to_string()], true).unwrap();
 
         prune_old_records(&handle).unwrap();
