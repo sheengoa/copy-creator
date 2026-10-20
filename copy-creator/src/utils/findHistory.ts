@@ -47,8 +47,21 @@ export function serializeFindHistory(entries: FindHistoryEntry[]): string {
   return JSON.stringify(entries.slice(0, FIND_HISTORY_LIMIT));
 }
 
-/** 按查找词置顶插入，同词旧条目移除，容量超限淘汰末尾。 */
+/**
+ * 按查找词置顶插入，同词旧条目移除，容量超限淘汰末尾。
+ * 目标条目已在顶部且字段完全一致时原样返回同一引用——调用方据引用
+ * 相等跳过无效持久化与跨窗口广播（连按 Enter 导航不重复写库）。
+ */
 function upsert(entries: FindHistoryEntry[], entry: FindHistoryEntry): FindHistoryEntry[] {
+  const top = entries[0];
+  if (
+    top !== undefined &&
+    top.query === entry.query &&
+    top.replacement === entry.replacement &&
+    top.replaced === entry.replaced
+  ) {
+    return entries;
+  }
   const rest = entries.filter((item) => item.query !== entry.query);
   return [entry, ...rest].slice(0, FIND_HISTORY_LIMIT);
 }
@@ -77,5 +90,6 @@ export function removeFindHistoryEntry(
   entries: FindHistoryEntry[],
   query: string,
 ): FindHistoryEntry[] {
+  if (!entries.some((item) => item.query === query)) return entries;
   return entries.filter((item) => item.query !== query);
 }

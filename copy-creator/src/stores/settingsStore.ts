@@ -332,11 +332,14 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
     }
   },
 
-  // 查找替换历史：函数式更新（执行时读最新 state，快速连续操作不丢条目），
+  // 查找替换历史：函数式更新（执行时读最新 state，快速连续操作不丢条目）。
+  // 更新器返回同引用视为无变化，跳过写库与广播（连按 Enter 导航不抖动）。
   // 持久化后广播事件；其余窗口由 useFindReplaceHistory 的监听同步，
   // 本窗口监听也会收到但 setState 同值幂等，无副作用。
   setFindReplaceHistory: async (update) => {
-    const next = update(get().findReplaceHistory);
+    const prev = get().findReplaceHistory;
+    const next = update(prev);
+    if (next === prev) return;
     set({ findReplaceHistory: next });
     try {
       await invoke("set_setting", { key: FIND_HISTORY_SETTING_KEY, value: serializeFindHistory(next) });

@@ -51,7 +51,7 @@ export default function FindReplaceBar({
   const [historyOpen, setHistoryOpen] = useState(false);
   // 交换按钮每次点击翻转一次旋转方向，形成交替动效反馈。
   const [swapFlipped, setSwapFlipped] = useState(false);
-  const { history, recordFind, recordReplace, removeEntry, clearHistory } =
+  const { history, recordFind, recordReplace, removeEntry, clearHistory, refresh } =
     useFindReplaceHistory();
 
   useEffect(() => {
@@ -104,6 +104,12 @@ export default function FindReplaceBar({
       event.preventDefault();
       handleHistorySelect(entry);
     }
+  };
+  // 展开时先拉取最新历史：本窗口的跨窗口监听要等查找条首次挂载才有，
+  // 期间其他窗口的替换不会反映在启动期快照里。
+  const toggleHistory = () => {
+    if (!historyOpen) refresh();
+    setHistoryOpen(!historyOpen);
   };
 
   return (
@@ -158,7 +164,7 @@ export default function FindReplaceBar({
           title={t("common.findHistory")}
           aria-label={t("common.findHistory")}
           aria-expanded={historyOpen}
-          onClick={() => setHistoryOpen((open) => !open)}
+          onClick={toggleHistory}
         >
           {Icons.recent}
         </button>

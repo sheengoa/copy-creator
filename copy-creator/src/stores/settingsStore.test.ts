@@ -100,6 +100,17 @@ describe("settingsStore 主题与隐私设置 wiring", () => {
     expect(emitMock).toHaveBeenCalledWith("find-replace-history-changed", { entries });
   });
 
+  it("setFindReplaceHistory 同引用视为无变化，跳过写库与广播", async () => {
+    const entries = [{ query: "a", replacement: "", replaced: false }];
+    useSettingsStore.setState({ findReplaceHistory: entries });
+
+    await useSettingsStore.getState().setFindReplaceHistory((prev) => prev);
+
+    expect(invokeMock).not.toHaveBeenCalled();
+    expect(emitMock).not.toHaveBeenCalled();
+    expect(useSettingsStore.getState().findReplaceHistory).toBe(entries);
+  });
+
   it("doLoadSettings 解析 find_replace_history 存储串", async () => {
     const entries = [{ query: "x", replacement: "y", replaced: true }];
     invokeMock.mockImplementation((cmd: string) => {

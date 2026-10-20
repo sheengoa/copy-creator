@@ -52,6 +52,12 @@ function renderBar(overrides: Partial<BarProps> = {}) {
 
 const seedHistory = (entries: FindHistoryEntry[]) => {
   useSettingsStore.setState({ findReplaceHistory: entries });
+  // 面板展开会经 get_setting 重读最新历史（跨窗口陈旧防护），把存储侧
+  // 打成与 store 一致，避免刷新覆盖测试种子。
+  invokeMock.mockImplementation((cmd: string) => {
+    if (cmd === "get_setting") return Promise.resolve(serializeFindHistory(entries));
+    return Promise.resolve(undefined);
+  });
 };
 
 describe("FindReplaceBar 历史面板", () => {
@@ -61,6 +67,49 @@ describe("FindReplaceBar 历史面板", () => {
     invokeMock.mockResolvedValue(undefined);
     emitMock.mockResolvedValue(undefined);
     seedHistory([]);
+  });
+
+  it("时钟按钮展开面板时经 get_setting 拉取最新历史（陈旧快照防护）", async () => {
+    // store 只有启动期快照，存储侧已有其他窗口写入的更新条目。
+    seedHistory([]);
+    const stored: FindHistoryEntry[] = [{ query: "别的窗口刚替换的词", replacement: "新值", replaced: true }];
+    invokeMock.mockImplementation((cmd: string) => {
+      if (cmd === "get_setting") return Promise.resolve(JSON.stringify(stored));
+      return Promise.resolve(undefined);
+    });
+
+    renderBar();
+    fireEvent.click(screen.getByRole("button", { name: "查找替换历史" }));
+
+    await waitFor(() => {
+      expect(screen.getByText("别的窗口刚替换的词")).not.toBeNull();
+    });
+    expect(screen.getByText("新值")).not.toBeNull();
+  });
+
+  it("refresh 在途期间发生本地变更时丢弃过期快照，不回写覆盖", async () => {
+    seedHistory([{ query: "a", replacement: "", replaced: false }]);
+    let resolveGetSetting: (value: string) => void = () => {};
+    invokeMock.mockImplementation((cmd: string) => {
+      if (cmd === "get_setting") {
+        return new Promise<string>((resolve) => {
+          resolveGetSetting = resolve;
+        });
+      }
+      return Promise.resolve(undefined);
+    });
+
+    renderBar({ query: "", matchCount: 0, matchIndex: -1 });
+    fireEvent.click(screen.getByRole("button", { name: "查找替换历史" }));
+    // refresh 尚在途，用户先做了一次本地记录
+    fireEvent.keyDown(screen.getByPlaceholderText("查找"), { key: "Enter" });
+    resolveGetSetting(JSON.stringify([{ query: "存储侧的旧词", replacement: "", replaced: false }]));
+
+    await waitFor(() => {
+      expect(useSettingsStore.getState().findReplaceHistory[0]?.query).toBe("a");
+    });
+    // 存储侧旧词不得回写覆盖本地新记录
+    expect(useSettingsStore.getState().findReplaceHistory.map((e) => e.query)).toEqual(["a"]);
   });
 
   it("时钟按钮展开面板，条目按「查找过/替换过」形态渲染", () => {
@@ -151,7 +200,6 @@ describe("FindReplaceBar 历史记录时机", () => {
     emitMock.mockResolvedValue(undefined);
     seedHistory([]);
   });
-
   it("查找框内 Enter 触达下一个并记录查找词", async () => {
     const next = vi.fn();
     renderBar({ query: "abc", matchCount: 2, matchIndex: 0, onNext: next });
@@ -208,6 +256,28 @@ describe("FindReplaceBar 历史记录时机", () => {
         { query: "a", replacement: "A", replaced: true },
       ]);
     });
+  });
+
+  it("连按 Enter 导航只落一次历史（重复条目不再写库）", async () => {
+    const next = vi.fn();
+    renderBar({ query: "abc", matchCount: 2, matchIndex: 0, onNext: next });
+
+    const queryInput = screen.getByPlaceholderText("查找");
+    fireEvent.keyDown(queryInput, { key: "Enter" });
+    await waitFor(() => {
+      expect(useSettingsStore.getState().findReplaceHistory).toHaveLength(1);
+    });
+    fireEvent.keyDown(queryInput, { key: "Enter" });
+    fireEvent.keyDown(queryInput, { key: "Enter" });
+
+    expect(next).toHaveBeenCalledTimes(3);
+    await waitFor(() => {
+      expect(invokeMock).toHaveBeenCalledWith("set_setting", expect.objectContaining({ key: "find_replace_history" }));
+    });
+    const persistCalls = invokeMock.mock.calls.filter(
+      ([cmd]) => cmd === "set_setting" && (cmd && true),
+    );
+    expect(persistCalls).toHaveLength(1);
   });
 });
 

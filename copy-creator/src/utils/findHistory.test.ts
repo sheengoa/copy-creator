@@ -79,6 +79,12 @@ describe("recordFindQuery", () => {
       entry("b"),
     ]);
   });
+
+  it("目标条目已在顶部且一致时返回同引用（供调用方跳过无效写库）", () => {
+    const entries = [entry("a", "A", true), entry("b")];
+    expect(recordFindQuery(entries, "a")).toBe(entries);
+    expect(recordReplacement(entries, "a", "A")).toBe(entries);
+  });
 });
 
 describe("recordReplacement", () => {
@@ -107,9 +113,9 @@ describe("removeFindHistoryEntry", () => {
     expect(removeFindHistoryEntry(entries, "b")).toEqual([entry("a"), entry("c")]);
   });
 
-  it("移除不存在的词返回等价内容", () => {
+  it("移除不存在的词返回同引用", () => {
     const entries = [entry("a")];
-    expect(removeFindHistoryEntry(entries, "zzz")).toEqual([entry("a")]);
+    expect(removeFindHistoryEntry(entries, "zzz")).toBe(entries);
   });
 });
 
