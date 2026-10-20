@@ -423,6 +423,14 @@
     "matchCase": "区分大小写",
     "closeFindReplace": "关闭查找替换",
     "findReplace": "查找替换",
+    "findHistory": "查找替换历史",
+    "clearFindHistory": "清空历史",
+    "findHistoryEmpty": "暂无历史",
+    "findHistoryEmptyValue": "（空）",
+    "findHistorySearched": "查找过",
+    "findHistoryReplaced": "替换过",
+    "deleteFindHistoryEntry": "删除该条",
+    "swapFindReplace": "交换查找与替换内容",
     "moreInfo": "详情"
   },
   "radialMenu": {

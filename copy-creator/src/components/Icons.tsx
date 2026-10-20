@@ -221,6 +221,14 @@ export const Icons = {
       <polyline points="6 15 12 9 18 15" />
     </svg>
   ),
+  swap: (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round">
+      <line x1="4" y1="8" x2="18" y2="8" />
+      <polyline points="14 4 18 8 14 12" />
+      <line x1="20" y1="16" x2="6" y2="16" />
+      <polyline points="10 12 6 16 10 20" />
+    </svg>
+  ),
   arrowUp: (
     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
       <line x1="12" y1="19" x2="12" y2="5" />

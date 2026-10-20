@@ -427,6 +427,14 @@
     "matchCase": "Match case",
     "closeFindReplace": "Close find and replace",
     "findReplace": "Find and replace",
+    "findHistory": "Find & Replace History",
+    "clearFindHistory": "Clear History",
+    "findHistoryEmpty": "No history yet",
+    "findHistoryEmptyValue": "(empty)",
+    "findHistorySearched": "Searched",
+    "findHistoryReplaced": "Replaced",
+    "deleteFindHistoryEntry": "Delete entry",
+    "swapFindReplace": "Swap Find and Replace",
     "moreInfo": "More info"
   },
   "radialMenu": {
