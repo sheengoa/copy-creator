@@ -19,6 +19,7 @@ vi.mock("@tauri-apps/api/event", () => ({
 }));
 
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { listen } from "@tauri-apps/api/event";
 import "../i18n";
 import FindReplaceBar from "../components/FindReplaceBar";
 import { useSettingsStore } from "../stores/settingsStore";
@@ -110,6 +111,37 @@ describe("FindReplaceBar 历史面板", () => {
     });
     // 存储侧旧词不得回写覆盖本地新记录
     expect(useSettingsStore.getState().findReplaceHistory.map((e) => e.query)).toEqual(["a"]);
+  });
+
+  it("跨窗口事件先落地时使在途 refresh 失效，过期快照不回写", async () => {
+    seedHistory([{ query: "本地已有", replacement: "", replaced: false }]);
+    let resolveGetSetting: (value: string) => void = () => {};
+    invokeMock.mockImplementation((cmd: string) => {
+      if (cmd === "get_setting") {
+        return new Promise<string>((resolve) => {
+          resolveGetSetting = resolve;
+        });
+      }
+      return Promise.resolve(undefined);
+    });
+
+    renderBar();
+    fireEvent.click(screen.getByRole("button", { name: "查找替换历史" }));
+    // 另一窗口的新历史先经事件同步落地（事件按变更处理，使在途 refresh 失效）
+    type HistorySyncListener = (event: {
+      payload: { entries: FindHistoryEntry[] };
+    }) => void;
+    const listener = vi.mocked(listen).mock.calls[0]?.[1] as HistorySyncListener | undefined;
+    if (!listener) throw new Error("跨窗口同步监听未注册");
+    listener({ payload: { entries: [{ query: "事件新词", replacement: "", replaced: true }] } });
+    expect(useSettingsStore.getState().findReplaceHistory[0]?.query).toBe("事件新词");
+
+    // 随后才返回的存储快照已过期，不得覆盖事件带来的新列表
+    resolveGetSetting(JSON.stringify([{ query: "过期快照", replacement: "", replaced: false }]));
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(useSettingsStore.getState().findReplaceHistory.map((entry) => entry.query)).toEqual([
+      "事件新词",
+    ]);
   });
 
   it("时钟按钮展开面板，条目按「查找过/替换过」形态渲染", () => {
@@ -231,6 +263,27 @@ describe("FindReplaceBar 历史记录时机", () => {
     });
   });
 
+  it("无匹配时替换行 Enter 只触发宿主回调，不落历史", async () => {
+    const replaceCurrent = vi.fn();
+    renderBar({
+      query: "abc",
+      replacement: "X",
+      matchCount: 0,
+      matchIndex: -1,
+      onReplaceCurrent: replaceCurrent,
+    });
+
+    fireEvent.keyDown(screen.getByPlaceholderText("替换为"), { key: "Enter" });
+
+    expect(replaceCurrent).toHaveBeenCalledTimes(1);
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(useSettingsStore.getState().findReplaceHistory).toEqual([]);
+    expect(invokeMock).not.toHaveBeenCalledWith(
+      "set_setting",
+      expect.objectContaining({ key: "find_replace_history" }),
+    );
+  });
+
   it("点「全部替换」记录替换对", async () => {
     const replaceAll = vi.fn();
     renderBar({ query: "a", replacement: "", matchCount: 2, matchIndex: 0, onReplaceAll: replaceAll });
@@ -274,9 +327,7 @@ describe("FindReplaceBar 历史记录时机", () => {
     await waitFor(() => {
       expect(invokeMock).toHaveBeenCalledWith("set_setting", expect.objectContaining({ key: "find_replace_history" }));
     });
-    const persistCalls = invokeMock.mock.calls.filter(
-      ([cmd]) => cmd === "set_setting" && (cmd && true),
-    );
+    const persistCalls = invokeMock.mock.calls.filter(([cmd]) => cmd === "set_setting");
     expect(persistCalls).toHaveLength(1);
   });
 });

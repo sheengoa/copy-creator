@@ -32,6 +32,9 @@ export function useFindReplaceHistory() {
     if (historySyncReady) return;
     historySyncReady = true;
     void listen<{ entries: FindHistoryEntry[] }>("find-replace-history-changed", (event) => {
+      // 事件携带的是其他窗口持久化时刻的完整列表，比在途 refresh 的存储
+      // 快照更新；按变更处理使在途 refresh 失效，避免旧快照回写覆盖。
+      mutationSeq += 1;
       useSettingsStore.setState({ findReplaceHistory: normalizeFindHistory(event.payload.entries) });
     });
   }, []);

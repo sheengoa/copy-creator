@@ -218,7 +218,9 @@ export default function FindReplaceBar({
           onKeyDown={(event) => {
             if (event.key === "Enter") {
               event.preventDefault();
-              replaceWithRecord(onReplaceCurrent);
+              // 无匹配时宿主替换为安全空操作，不落历史（并未发生替换）。
+              if (hasMatch) replaceWithRecord(onReplaceCurrent);
+              else onReplaceCurrent();
             }
           }}
         />
