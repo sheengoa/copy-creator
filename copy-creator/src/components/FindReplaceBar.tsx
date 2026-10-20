@@ -163,6 +163,7 @@ export default function FindReplaceBar({
           className={`find-replace-btn${historyOpen ? " active" : ""}`}
           title={t("common.findHistory")}
           aria-label={t("common.findHistory")}
+          aria-haspopup="listbox"
           aria-expanded={historyOpen}
           onClick={toggleHistory}
         >

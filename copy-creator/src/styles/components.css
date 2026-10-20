@@ -567,7 +567,7 @@ input:focus-visible + .selection-checkbox {
 .find-replace-input {
   width: 170px;
   /* 左内边距为交换圆钮（悬浮在两行左缘）让出文字空间 */
-  padding: 4px 8px 4px 14px;
+  padding: 4px 8px 4px 16px;
   border: 1px solid var(--separator);
   border-radius: 6px;
   background: transparent;
@@ -640,7 +640,7 @@ input:focus-visible + .selection-checkbox {
 /* 交换按钮：两行左侧交界悬浮圆钮，点击对调查找/替换输入框内容 */
 .find-replace-swap {
   position: absolute;
-  left: 8px;
+  left: 12px;
   top: 50%;
   transform: translate(-50%, -50%);
   z-index: 2;
