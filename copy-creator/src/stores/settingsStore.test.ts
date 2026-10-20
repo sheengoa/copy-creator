@@ -29,6 +29,7 @@ describe("settingsStore 主题与隐私设置 wiring", () => {
       clipboardMaxRecords: 0,
       clipboardExclusions: "",
       autoHideOnBlur: false,
+      findReplaceHistory: [],
     });
   });
 
@@ -77,6 +78,55 @@ describe("settingsStore 主题与隐私设置 wiring", () => {
       key: "auto_hide_on_blur",
       value: "1",
     });
+  });
+
+  it("setFindReplaceHistory 函数式更新并持久化广播", async () => {
+    useSettingsStore.setState({
+      findReplaceHistory: [{ query: "a", replacement: "", replaced: false }],
+    });
+
+    await useSettingsStore.getState().setFindReplaceHistory((prev) =>
+      prev.map((item) =>
+        item.query === "a" ? { query: "a", replacement: "A", replaced: true } : item,
+      ),
+    );
+
+    const entries = [{ query: "a", replacement: "A", replaced: true }];
+    expect(useSettingsStore.getState().findReplaceHistory).toEqual(entries);
+    expect(invokeMock).toHaveBeenCalledWith("set_setting", {
+      key: "find_replace_history",
+      value: JSON.stringify(entries),
+    });
+    expect(emitMock).toHaveBeenCalledWith("find-replace-history-changed", { entries });
+  });
+
+  it("doLoadSettings 解析 find_replace_history 存储串", async () => {
+    const entries = [{ query: "x", replacement: "y", replaced: true }];
+    invokeMock.mockImplementation((cmd: string) => {
+      if (cmd === "get_all_settings") {
+        return Promise.resolve({ find_replace_history: JSON.stringify(entries) });
+      }
+      if (cmd === "is_autostart_enabled") return Promise.resolve(false);
+      return Promise.resolve(undefined);
+    });
+
+    await useSettingsStore.getState().doLoadSettings();
+
+    expect(useSettingsStore.getState().findReplaceHistory).toEqual(entries);
+  });
+
+  it("doLoadSettings 对畸形的 find_replace_history 存储串回退空历史", async () => {
+    invokeMock.mockImplementation((cmd: string) => {
+      if (cmd === "get_all_settings") {
+        return Promise.resolve({ find_replace_history: "{oops" });
+      }
+      if (cmd === "is_autostart_enabled") return Promise.resolve(false);
+      return Promise.resolve(undefined);
+    });
+
+    await useSettingsStore.getState().doLoadSettings();
+
+    expect(useSettingsStore.getState().findReplaceHistory).toEqual([]);
   });
 });
 

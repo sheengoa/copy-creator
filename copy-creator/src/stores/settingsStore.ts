@@ -8,6 +8,12 @@ import {
   parseThemePreference,
   resolveTheme,
 } from "../utils/theme";
+import {
+  FIND_HISTORY_SETTING_KEY,
+  parseFindHistory,
+  serializeFindHistory,
+  type FindHistoryEntry,
+} from "../utils/findHistory";
 
 type ThemeMode = ThemePreference;
 
@@ -77,6 +83,8 @@ interface SettingsState {
   clipboardMaxRecords: number;
   /** 排除规则原文（每行一条关键字，匹配来源标题/进程名）。 */
   clipboardExclusions: string;
+  /** 查找替换历史（全局共享，资源详情页与新建内容窗口共用）。 */
+  findReplaceHistory: FindHistoryEntry[];
 
   toggleTheme: () => void;
   setThemeMode: (mode: ThemeMode) => Promise<void>;
@@ -91,6 +99,8 @@ interface SettingsState {
   setClipboardPaused: (enabled: boolean) => Promise<void>;
   setClipboardMaxRecords: (max: number) => Promise<void>;
   setClipboardExclusions: (raw: string) => Promise<void>;
+  /** 函数式更新查找替换历史：持久化并广播跨窗口同步事件。 */
+  setFindReplaceHistory: (update: (prev: FindHistoryEntry[]) => FindHistoryEntry[]) => Promise<void>;
   setAutostart: (enabled: boolean) => Promise<boolean>;
 }
 
@@ -120,6 +130,7 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
   clipboardPaused: false,
   clipboardMaxRecords: 0,
   clipboardExclusions: "",
+  findReplaceHistory: [],
 
   // 头部快捷切换：跟随系统模式下取当前解析值的反色落为显式偏好，
   // 其余模式在明暗间往返。
@@ -171,6 +182,7 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
         clipboardPaused: settings.clipboard_paused === "1",
         clipboardMaxRecords: parseMaxRecords(settings.clipboard_max_records),
         clipboardExclusions: settings.clipboard_exclusions || "",
+        findReplaceHistory: parseFindHistory(settings.find_replace_history),
       });
 
       // Read autostart state from the .desktop file
@@ -317,6 +329,20 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
       await invoke("set_setting", { key: "clipboard_exclusions", value: raw });
     } catch (e) {
       console.error("Failed to save exclusion rules:", e);
+    }
+  },
+
+  // 查找替换历史：函数式更新（执行时读最新 state，快速连续操作不丢条目），
+  // 持久化后广播事件；其余窗口由 useFindReplaceHistory 的监听同步，
+  // 本窗口监听也会收到但 setState 同值幂等，无副作用。
+  setFindReplaceHistory: async (update) => {
+    const next = update(get().findReplaceHistory);
+    set({ findReplaceHistory: next });
+    try {
+      await invoke("set_setting", { key: FIND_HISTORY_SETTING_KEY, value: serializeFindHistory(next) });
+      await emit("find-replace-history-changed", { entries: next });
+    } catch (e) {
+      console.error("Failed to save find/replace history:", e);
     }
   },
 
