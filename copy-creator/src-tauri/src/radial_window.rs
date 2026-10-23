@@ -1,6 +1,7 @@
 // 径向菜单窗口域（A2 拆分）：几何 / 层级 / 停泊 / X11 激活与条带决策。
 // 从 shortcut.rs 机械搬迁；实现与行为不变。
 use enigo::{Enigo, Mouse, Settings};
+#[cfg(target_os = "linux")]
 use std::process::Command;
 #[cfg(target_os = "windows")]
 use crate::win_hook;
@@ -11,6 +12,7 @@ use std::sync::Mutex;
 use tauri::{AppHandle, Emitter, Manager};
 
 /// Detect whether we are running under Wayland.
+#[cfg(target_os = "linux")]
 fn is_wayland() -> bool {
     std::env::var("WAYLAND_DISPLAY")
         .map(|v| !v.is_empty())
@@ -446,7 +448,9 @@ pub fn get_cursor_position() -> (i32, i32) {
         Err(e) => log::warn!("enigo init failed: {:?}", e),
     }
 
-    // CLI fallback for X11 (xdotool)
+    // CLI fallback for X11 (xdotool) — Linux 专属：Windows 上该分支必然
+    // 派生失败，但 GUI 子系统进程尝试启动 xdotool 仍会闪一次控制台窗。
+    #[cfg(target_os = "linux")]
     if !is_wayland() {
         if let Ok(out) = Command::new("xdotool")
             .args(["getmouselocation", "--shell"])

@@ -125,6 +125,7 @@ fn is_x11() -> bool {
 }
 
 /// Try to locate an executable in PATH.
+#[cfg(target_os = "linux")]
 fn which(cmd: &str) -> Option<String> {
     Command::new("which")
         .arg(cmd)
@@ -132,6 +133,16 @@ fn which(cmd: &str) -> Option<String> {
         .ok()
         .filter(|o| o.status.success())
         .map(|o| String::from_utf8_lossy(&o.stdout).trim().to_string())
+}
+
+/// 非 Linux 平台没有可探测的 Unix 注入工具链，直接返回 None。
+/// 必须拦在这里：本函数会被 get_paste_backend_status（设置页每次打开）
+/// 与 diagnose_paste_environment（每次启动）无条件调用，若在 Windows 上
+/// 真实派生 `which`，GUI 子系统进程会为控制台子系统的 which.exe（Git
+/// 的 usr\bin 常在 PATH 上）分配新控制台——用户可见的终端窗口闪烁。
+#[cfg(not(target_os = "linux"))]
+fn which(_cmd: &str) -> Option<String> {
+    None
 }
 
 /// Check whether ydotool daemon is reachable (ydotool needs ydotoold running).
