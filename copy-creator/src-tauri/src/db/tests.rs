@@ -2854,8 +2854,9 @@ mod resource_command_tests {
         std::fs::write(&newcomer, [9, 9, 9]).unwrap();
         let file_time = chrono::DateTime::<chrono::Utc>::from(std::fs::metadata(&newcomer).unwrap().modified().unwrap()).to_rfc3339();
 
-        let added = crate::db::sync_resource_library(app.handle());
+        let (added, removed) = crate::db::sync_resource_library(app.handle());
         assert!(added >= 1);
+        assert!(removed >= 1, "幽灵记录应计入清退数");
 
         let records = get_clipboard_records_inner(
             &app.handle().clone(),

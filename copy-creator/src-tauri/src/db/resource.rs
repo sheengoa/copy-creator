@@ -145,23 +145,44 @@ pub(crate) fn normalize_file_backed_text_records(conn: &Connection) -> usize {
 // ---- Tauri Commands ----
 
 /// 资源库全量对账：以磁盘为准一次性同步索引——补录缺失文件、清退幽灵
-/// 记录（文件已被外部删除）。只在应用启动与库路径切换时执行；运行期的
-/// 增删由 resource_watch 增量上报。查询路径不得再做全目录扫描与逐行
-/// stat——那是大库（数万文件）每次切换/搜索都卡顿的根源。返回补录条数。
-pub fn sync_resource_library<R: Runtime>(app: &AppHandle<R>) -> usize {
+/// 记录（文件已被外部删除）。在应用启动、库路径切换与 resource_watch
+/// 周期兜底对账时执行；运行期的常规增删由 resource_watch 增量上报。
+/// 查询路径不得再做全目录扫描与逐行
+/// stat——那是大库（数万文件）每次切换/搜索都卡顿的根源。
+/// 返回 `(补录条数, 清退条数)`——周期对账方（resource_watch）据此决定
+/// 是否广播前端刷新；安全阀中止与中途失败按 `(0, 已标记条数)` 返回，
+/// 缺失标记的变化同样值得刷新。
+pub fn sync_resource_library<R: Runtime>(app: &AppHandle<R>) -> (usize, usize) {
     let root = get_resource_library_dir(app);
     let roots = resource_library_roots(app);
     let entries = scan_resource_files(&root);
     // 扫描结果为空 = 库目录缺失/不可读，或整库确已被外部清空。前者是
     // 故障状态：此时清退会把全部记录一次性删光（历史事故反复发生），
     // 宁可把死记录留到下次正常扫描再处理，也绝不对空扫描做清退。
+    // 库里本就无资源记录（全新安装/已清空）则无事可保护，静默返回——
+    // 周期对账下此状态常态存在，告警只该出现在「有记录却无法核对」时。
     if entries.is_empty() {
-        log::warn!("资源库扫描结果为空，跳过本次对账清退与补录");
-        return 0;
+        let has_records = {
+            let state = app.state::<DbState>();
+            let Ok(conn) = state.conn.lock() else {
+                return (0, 0);
+            };
+            conn.query_row(
+                "SELECT EXISTS(SELECT 1 FROM clipboard_records WHERE storage_mode = 'resource')",
+                [],
+                |row| row.get::<_, i64>(0),
+            )
+            .map(|exists| exists != 0)
+            .unwrap_or(true)
+        };
+        if has_records {
+            log::warn!("资源库扫描结果为空，跳过本次对账清退与补录");
+        }
+        return (0, 0);
     }
     let state = app.state::<DbState>();
     let Ok(conn) = state.conn.lock() else {
-        return 0;
+        return (0, 0);
     };
 
     let scanned_keys: HashSet<PathBuf> =
@@ -178,7 +199,7 @@ pub fn sync_resource_library<R: Runtime>(app: &AppHandle<R>) -> usize {
             "SELECT id, resource_path, COALESCE(resource_missing, 0) FROM clipboard_records
              WHERE storage_mode = 'resource'",
         ) else {
-            return 0;
+            return (0, 0);
         };
         let Ok(rows) = stmt.query_map([], |row| {
             Ok((
@@ -187,7 +208,7 @@ pub fn sync_resource_library<R: Runtime>(app: &AppHandle<R>) -> usize {
                 row.get::<_, i64>(2)?,
             ))
         }) else {
-            return 0;
+            return (0, 0);
         };
         for row in rows.flatten() {
             let (id, path_text, current_missing) = row;
@@ -229,7 +250,7 @@ pub fn sync_resource_library<R: Runtime>(app: &AppHandle<R>) -> usize {
             removable.len(),
             total_resource_records
         );
-        return removable.len();
+        return (0, removable.len());
     }
     // 清退即入桶：被清退记录整行转入应用内回收站（而非直接删除），
     // 用户可在回收站查看/恢复/彻底删除；配合三态恢复如实提示文件缺失。
@@ -248,10 +269,10 @@ pub fn sync_resource_library<R: Runtime>(app: &AppHandle<R>) -> usize {
              WHERE storage_mode = 'resource'
                AND COALESCE(resource_path, '') <> ''",
         ) else {
-            return removable.len();
+            return (0, removable.len());
         };
         let Ok(rows) = stmt.query_map([], |row| row.get::<_, String>(0)) else {
-            return removable.len();
+            return (0, removable.len());
         };
         rows.flatten().map(|p| resource_path_key(Path::new(&p))).collect()
     };
@@ -294,7 +315,7 @@ pub fn sync_resource_library<R: Runtime>(app: &AppHandle<R>) -> usize {
         bump_resource_library_revision();
         log::info!("资源库对账完成：补录 {added} 条，清退 {total_removed} 条");
     }
-    added
+    (added, total_removed)
 }
 
 /// 按路径移除资源记录（监听到外部删除时调用）：文件不在，记录不留。

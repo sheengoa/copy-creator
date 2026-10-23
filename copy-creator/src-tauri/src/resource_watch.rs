@@ -39,6 +39,16 @@ const TICK: Duration = Duration::from_millis(200);
 const RESOLVE_INTERVAL: Duration = Duration::from_secs(2);
 /// 监听建立失败后的重试间隔，避免对失效路径每两秒刷一遍告警日志。
 const RETRY_INTERVAL: Duration = Duration::from_secs(10);
+/// 周期性全量对账间隔。Windows 的 ReadDirectoryChangesW 在事件层会偶发
+/// 丢事件——生产日志实证：同一批复制的兄弟文件有事件、个别文件根本没有
+/// 事件到达，其入库记录直到数日后该文件被再次触碰或应用重启（启动对账）
+/// 才补上；notify 后端在 ReadDirectoryChangesW 返回未识别错误码时还会
+/// 静默 unwatch 整个目录，watch_loop 对此无从感知。防抖冲刷只处理「已
+/// 到达的路径」，对根本没到达的事件无能为力，因此周期对账是最后一道
+/// 兜底：按启动同款语义把磁盘与记录库全量对齐，把漏网文件的最坏不可见
+/// 窗口从「直到重启」收敛到一个间隔内。对账自带空扫描安全阀，库目录
+/// 不可达时不会误清记录。
+const RECONCILE_INTERVAL: Duration = Duration::from_secs(60);
 
 /// 监听事件的两种语义：「触碰」收集路径，防抖结束后按磁盘现状统一
 /// 结算（到达补建 / 消失重定向或清退）；「变化」只触发前端重扫
@@ -97,6 +107,7 @@ fn watch_loop<R: Runtime>(app: AppHandle<R>) {
     let mut watch_failed = false;
     let mut last_event: Option<Instant> = None;
     let mut next_resolve = Instant::now();
+    let mut next_reconcile = Instant::now() + RECONCILE_INTERVAL;
     // 触碰的路径跨 tick 累积：事件与防抖结束往往不在同一个 200ms tick
     // 里，集合必须活到防抖触发被消费为止。到达与消失不在此分流——同一
     // 路径窗口内先消失后到达等竞态由结算时的 stat 结果一锤定音。
@@ -108,6 +119,8 @@ fn watch_loop<R: Runtime>(app: AppHandle<R>) {
             next_resolve = Instant::now() + RESOLVE_INTERVAL;
             let current = db::get_resource_library_dir(&app);
             if watch_failed || watched_path.as_deref() != Some(current.as_path()) {
+                // 首次解析不算重建：启动对账（lib.rs）马上会做，无需重复。
+                let rebuild = watch_failed || watcher.is_some();
                 watch_failed = false;
                 watched_path = Some(current.clone());
                 drop(watcher.take());
@@ -139,7 +152,12 @@ fn watch_loop<R: Runtime>(app: AppHandle<R>) {
                 // 丢弃旧 watcher 到新 watcher 生效之间的文件系统事件无法补收，
                 // 修订号也不会自增，前端心跳无从察觉：重建后无条件安排一次
                 // 防抖重扫（冲刷是幂等重扫），把间隙内丢失的变更并入冲刷。
+                // 冲刷只能处理已知路径，重建间隙里「新出现的文件」没有事件
+                // 可依，真实重建（非首次解析）再安排一次立即对账兜底补录。
                 last_event = Some(Instant::now());
+                if rebuild {
+                    next_reconcile = Instant::now();
+                }
             }
         }
 
@@ -172,6 +190,18 @@ fn watch_loop<R: Runtime>(app: AppHandle<R>) {
                 // WebView 丢弃，前端心跳比对也能发现落后并自愈。
                 db::bump_resource_library_revision();
                 log::info!("资源库外部变更，通知前端刷新");
+                let _ = app.emit("resource-groups-changed", ());
+            }
+        }
+
+        // 周期兜底对账（见 RECONCILE_INTERVAL 注释）：事件层漏网与监听
+        // 静默失效的文件在这里被找回。对账内部变更时已自增修订号，此处
+        // 只需广播刷新；监听失败重试期间它也是唯一的发现机制。
+        if next_reconcile <= Instant::now() {
+            next_reconcile = Instant::now() + RECONCILE_INTERVAL;
+            let (added, removed) = db::sync_resource_library(&app);
+            if added > 0 || removed > 0 {
+                log::info!("资源库周期对账：补录 {added} 条，清退 {removed} 条");
                 let _ = app.emit("resource-groups-changed", ());
             }
         }
