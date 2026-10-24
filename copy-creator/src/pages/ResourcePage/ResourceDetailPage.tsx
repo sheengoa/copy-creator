@@ -2,6 +2,7 @@ import {
   openResourceFile,
   readResourceTextDetail,
   readResourceTextPreview,
+  revealResourceFile,
   type ResourceTextPreview,
 } from "../../domain/mediaAssets";
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
@@ -56,7 +57,6 @@ interface ResourceDetailPageProps {
   record: ClipboardRecord;
   typeLabel: (kind: ResourceMediaKind) => string;
   onBack: () => void;
-  onCopy: (record: ClipboardRecord) => void | Promise<void>;
   onDelete: (id: string) => void;
   onRecordUpdated: (record: ClipboardRecord) => void;
   onMoveRecord?: (record: ClipboardRecord) => void;
@@ -123,7 +123,6 @@ export default function ResourceDetailPage({
   record,
   typeLabel,
   onBack,
-  onCopy,
   onDelete,
   onRecordUpdated,
   onMoveRecord,
@@ -134,6 +133,8 @@ export default function ResourceDetailPage({
   const updateResourceNote = useResourceStore((state) => state.updateResourceNote);
   const kind = inferResourceMediaKind(record);
   const resourcePath = getResourcePath(record);
+  // 打开所在位置：仅文件承载记录可用（数据库承载的文本无文件可定位）。
+  const revealPath = record.resource_path || (record.type === "file" ? record.content : null);
   const mediaVersion = resourceMediaVersion(record);
   const [segments, setSegments] = useState<RadialPreviewSegment[] | null>(null);
   const [textContent, setTextContent] = useState<ResourceTextPreview | null>(null);
@@ -339,12 +340,22 @@ export default function ResourceDetailPage({
 
   const handlePreviewVersion = useCallback(
     (version: ResourceTextVersion) => {
+      // 选中即收起面板：预览横幅（还原此版本/退出预览）就挂在面板正下方，
+      // 面板开着会正好盖住这两个按钮，逼用户先「点面板外」收起才能点。
+      setHistoryOpen(false);
       fetchTextVersionContent(version.id)
         .then((content) => setPreviewEntry({ version, content }))
         .catch(() => showHistoryToast(t("resources.textHistoryLoadFailed")));
     },
     [showHistoryToast, t],
   );
+
+  // 「当前」项点击：退出预览回到最新内容（与横幅「退出预览」同效）。
+  // 版本预览中从列表点「当前」即可回最新状态，不必先收面板再找横幅按钮。
+  const handleBackToCurrent = useCallback(() => {
+    setPreviewEntry(null);
+    setHistoryOpen(false);
+  }, []);
 
   const handleRestoreVersion = useCallback(async () => {
     if (!previewEntry || historyBusy) return;
@@ -1013,7 +1024,10 @@ export default function ResourceDetailPage({
         {
           path: textEditPath,
           content: contentDraft,
-          ...(record.resource_managed !== false ? { id: record.id } : {}),
+          // 外部发现的记录（resource_managed=false）也传 id：改动记录按
+          // record_id 记版，外部资源编辑后历史面板才有版本可看；后端归一
+          // UPDATE 对已是文件承载形态的外部记录是幂等空操作。
+          id: record.id,
         },
       );
       setContentEditing(false);
@@ -1099,15 +1113,16 @@ export default function ResourceDetailPage({
                             key={version.id}
                             role="button"
                             tabIndex={0}
-                            aria-disabled={current}
                             className={`text-history-item${previewing ? " previewing" : ""}${current ? " current" : ""}`}
                             onClick={() => {
-                              if (!current) handlePreviewVersion(version);
+                              if (current) handleBackToCurrent();
+                              else handlePreviewVersion(version);
                             }}
                             onKeyDown={(event) => {
                               if (event.key === "Enter" || event.key === " ") {
                                 event.preventDefault();
-                                if (!current) handlePreviewVersion(version);
+                                if (current) handleBackToCurrent();
+                                else handlePreviewVersion(version);
                               }
                             }}
                           >
@@ -1185,16 +1200,18 @@ export default function ResourceDetailPage({
               <span>{t("resources.traceFile")}</span>
             </button>
           )}
-          <button
-            type="button"
-            className="resource-secondary-button"
-            onClick={() => void onCopy(record)}
-            disabled={Boolean(record.resource_missing)}
-            title={record.resource_missing ? t("resources.copyMissingDisabled") : undefined}
-          >
-            {Icons.copy}
-            <span>{t("resources.copy")}</span>
-          </button>
+          {revealPath && (
+            <button
+              type="button"
+              className="resource-secondary-button"
+              onClick={() => void revealResourceFile(revealPath).catch(() => {})}
+              disabled={Boolean(record.resource_missing)}
+              title={record.resource_missing ? t("resources.openLocationMissingDisabled") : undefined}
+            >
+              {Icons.folderOpen}
+              <span>{t("resources.openLocation")}</span>
+            </button>
+          )}
           <button type="button" className="resource-delete-button resource-detail-delete" onClick={() => onDelete(record.id)}>
             {Icons.delete}
             <span>{t("common.delete")}</span>

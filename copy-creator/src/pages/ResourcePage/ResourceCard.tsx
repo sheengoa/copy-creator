@@ -9,6 +9,7 @@ import { HighlightText } from "../../components/HighlightText";
 import { InlineTextFilePreview } from "../../components/InlinePreview";
 import { formatTime, formatRelativeTime } from "../../utils/formatTime";
 import { recordUsageTime, resourceGroupLeafLabel } from "../../domain/records";
+import { revealResourceFile } from "../../domain/mediaAssets";
 import { UsageCountBadge } from "../../components/UsageCountBadge";
 import { ResourceFileImage, ResourceVideoPoster } from "./ResourceMedia";
 import { type ResourceMediaKind } from "../../domain/mediaKind";
@@ -26,7 +27,6 @@ interface ResourceCardProps {
   /** 「最多使用」模式且处于「全部分组」时显示次数徽标；分组浏览不应用。 */
   showUsageBadge?: boolean;
   onOpenDetail: (view: RecordView) => void;
-  onCopy: (view: RecordView) => void | Promise<void>;
   onDelete: (id: string) => void;
   onToggleSelected: (id: string) => void;
   onMove?: (view: RecordView) => void;
@@ -113,7 +113,6 @@ function ResourceCardInner({
   showGroupTag,
   showUsageBadge,
   onOpenDetail,
-  onCopy,
   onDelete,
   onToggleSelected,
   onMove,
@@ -122,6 +121,8 @@ function ResourceCardInner({
   const { t } = useTranslation();
   const kind = view.kind;
   const title = view.title;
+  // 打开所在位置：仅文件承载记录可用（数据库承载的文本无文件可定位）。
+  const revealPath = view.resourcePath ?? (view.recordType === "file" ? view.content : null);
   const [menuOpen, setMenuOpen] = useState(false);
   const moreButtonRef = useRef<HTMLButtonElement | null>(null);
 
@@ -202,13 +203,15 @@ function ResourceCardInner({
           }}
           onClose={() => setMenuOpen(false)}
         >
-          <CardActionMenuItem
-            icon={Icons.copy}
-            label={t("resources.copy")}
-            disabled={view.resourceMissing}
-            disabledTitle={t("resources.copyMissingDisabled")}
-            onClick={() => void onCopy(view)}
-          />
+          {revealPath && (
+            <CardActionMenuItem
+              icon={Icons.folderOpen}
+              label={t("resources.openLocation")}
+              disabled={view.resourceMissing}
+              disabledTitle={t("resources.openLocationMissingDisabled")}
+              onClick={() => void revealResourceFile(revealPath).catch(() => {})}
+            />
+          )}
           {view.resourceMissing && onTrace && (
             <CardActionMenuItem
               icon={Icons.search}

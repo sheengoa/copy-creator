@@ -2917,6 +2917,45 @@ pub fn open_resource_file(app: AppHandle, path: String) -> Result<(), String> { 
     Err("当前系统不支持打开资源文件".to_string())
 }
 
+/// 在系统文件管理器中显示资源文件：打开所在目录并选中该文件。
+#[tauri::command]
+pub fn reveal_resource_file(app: AppHandle, path: String) -> Result<(), String> {
+    let path = resolve_resource_file_path(&app, &path)?;
+
+    #[cfg(target_os = "windows")]
+    {
+        use std::os::windows::process::CommandExt;
+        // /select 的引号必须只包住路径本身（含空格路径），把整段参数引起来
+        // explorer 会解析失败，故用 raw_arg 精确控制引号。explorer 成功时
+        // 也可能返回非零退出码，spawn 成功即视为已唤起。
+        return std::process::Command::new("explorer")
+            .raw_arg(format!("/select,\"{}\"", path.display()))
+            .spawn()
+            .map(|_| ())
+            .map_err(|e| format!("打开文件所在位置失败: {e}"));
+    }
+
+    #[cfg(target_os = "macos")]
+    return std::process::Command::new("open")
+        .args(["-R", &path.to_string_lossy()])
+        .spawn()
+        .map(|_| ())
+        .map_err(|e| format!("打开文件所在位置失败: {e}"));
+
+    #[cfg(target_os = "linux")]
+    {
+        let parent = path.parent().map(|p| p.to_path_buf()).unwrap_or(path);
+        return std::process::Command::new("xdg-open")
+            .arg(&parent)
+            .spawn()
+            .map(|_| ())
+            .map_err(|e| format!("打开文件所在位置失败: {e}"));
+    }
+
+    #[cfg(not(any(target_os = "windows", target_os = "macos", target_os = "linux")))]
+    Err("当前系统不支持打开文件所在位置".to_string())
+}
+
 #[tauri::command]
 pub async fn select_storage_folder(app: AppHandle) -> Result<String, String> {
     use tauri_plugin_dialog::DialogExt;

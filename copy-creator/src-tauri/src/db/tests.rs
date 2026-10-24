@@ -6755,4 +6755,61 @@ mod text_version_tests {
             assert_eq!(top_text_version_content(&conn, "rec-1").unwrap(), None);
         }
     }
+
+    // 外部发现的记录（resource_external=1，资源库扫描入库而非应用内新建）
+    // 在应用内保存同样记版：记版按 record_id 走、与记录来源无关；归一
+    // UPDATE 对已是文件承载形态的外部记录是幂等空操作（type/content 原样）。
+    #[test]
+    fn external_record_save_records_versions_and_keeps_row() {
+        let (app, root) = history_test_app();
+        let handle = app.handle().clone();
+        let file: PathBuf = root.join("外部资源.txt");
+        std::fs::write(&file, "v1").unwrap();
+        {
+            let state = app.state::<DbState>();
+            let conn = state.conn.lock().unwrap();
+            conn.execute_batch(
+                "ALTER TABLE clipboard_records ADD COLUMN resource_external INTEGER DEFAULT 0;
+                 CREATE TABLE resource_text_versions (
+                     id TEXT PRIMARY KEY,
+                     record_id TEXT NOT NULL,
+                     content TEXT NOT NULL,
+                     byte_size INTEGER NOT NULL,
+                     source TEXT NOT NULL,
+                     created_at TEXT NOT NULL,
+                     FOREIGN KEY (record_id) REFERENCES clipboard_records(id)
+                         ON DELETE CASCADE ON UPDATE CASCADE
+                 );",
+            )
+            .unwrap();
+            conn.execute(
+                "INSERT INTO clipboard_records
+                     (id, type, content, created_at, storage_mode, resource_path, resource_external)
+                 VALUES ('rec-ext', 'file', ?1, '2026-01-01', 'resource', ?1, 1)",
+                params![file.to_string_lossy().as_ref()],
+            )
+            .unwrap();
+        }
+        let path = file.to_string_lossy().to_string();
+
+        write_text_content_inner(&handle, &path, " v2 ", Some("rec-ext".into()), VERSION_SOURCE_EDIT)
+            .unwrap();
+        let versions = list_resource_text_versions_inner(&handle, "rec-ext", &path).unwrap();
+        assert_eq!(versions.len(), 2);
+        assert_eq!(versions[0].source, VERSION_SOURCE_EDIT);
+        assert_eq!(versions[1].source, VERSION_SOURCE_INIT);
+        {
+            let state = app.state::<DbState>();
+            let conn = state.conn.lock().unwrap();
+            let (rtype, content): (String, String) = conn
+                .query_row(
+                    "SELECT type, content FROM clipboard_records WHERE id = 'rec-ext'",
+                    [],
+                    |row| Ok((row.get(0)?, row.get(1)?)),
+                )
+                .unwrap();
+            assert_eq!(rtype, "file");
+            assert_eq!(content, path);
+        }
+    }
 }

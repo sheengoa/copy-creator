@@ -96,7 +96,6 @@ export default function ResourcePage() {
     setResourceGroup: setStoreResourceGroup,
     deleteRecord,
     deleteRecords,
-    pasteRecord,
   } = useResourceStore(
     useShallow((s) => ({
       records: s.records,
@@ -113,7 +112,6 @@ export default function ResourcePage() {
       setResourceGroup: s.setResourceGroup,
       deleteRecord: s.deleteRecord,
       deleteRecords: s.deleteRecords,
-      pasteRecord: s.pasteRecord,
     })),
   );
   const contentSort = useSettingsStore((s) => s.contentSort);
@@ -149,7 +147,7 @@ export default function ResourcePage() {
   const resourceListRef = useRef<HTMLDivElement>(null);
   const [listElement, setListElement] = useState<HTMLDivElement | null>(null);
   const [columnCount, setColumnCount] = useState(2);
-  const [feedback, setFeedback] = useState<"copied" | "copyFailed" | "deleteFailed" | "deletedWithMissing" | "openFailed" | null>(null);
+  const [feedback, setFeedback] = useState<"deleteFailed" | "deletedWithMissing" | "openFailed" | null>(null);
   // deletedWithMissing 消息的动态计数：文件在删除前就已不在磁盘、仅删除
   // 了记录的条目数（后端删除统计如实带回）。
   const [missingCount, setMissingCount] = useState(0);
@@ -321,7 +319,7 @@ export default function ResourcePage() {
     { value: "oldest", label: t("resources.sortOldest") },
   ]), [t]);
 
-  const showFeedback = useCallback((next: "copied" | "copyFailed" | "deleteFailed" | "deletedWithMissing" | "openFailed") => {
+  const showFeedback = useCallback((next: "deleteFailed" | "deletedWithMissing" | "openFailed") => {
     if (feedbackTimerRef.current !== null) window.clearTimeout(feedbackTimerRef.current);
     setFeedback(next);
     feedbackTimerRef.current = window.setTimeout(() => {
@@ -809,11 +807,6 @@ export default function ResourcePage() {
     });
   }, [loadRecords, loadResourceGroups, resourceGroup, setStoreResourceGroup, t]);
 
-  const handleCopy = useCallback(async (record: ClipboardRecord) => {
-    const copied = await pasteRecord(record);
-    showFeedback(copied ? "copied" : "copyFailed");
-  }, [pasteRecord, showFeedback]);
-
   const closeDetail = useCallback(() => {
     if (!detailRecordId) return;
     if (detailHistoryRef.current) {
@@ -841,12 +834,6 @@ export default function ResourcePage() {
       },
     });
   }, [closeDetail, deleteRecord, detailRecordId, showFeedback, t]);
-
-  // 卡片叶子回合适配：view → 按 id 查原始记录
-  const handleCopyCard = useCallback((view: RecordView) => {
-    const record = records.find((r) => r.id === view.id);
-    if (record) void handleCopy(record);
-  }, [handleCopy, records]);
 
   const openDetail = useCallback((view: RecordView) => {
     const record = records.find((r) => r.id === view.id);
@@ -1153,7 +1140,6 @@ export default function ResourcePage() {
           record={detailRecord}
           typeLabel={(kind) => typeLabels[kind]}
           onBack={closeDetail}
-          onCopy={handleCopy}
           onDelete={handleDeleteRecord}
           onRecordUpdated={setDetailRecord}
           onMoveRecord={(record) => openResourceMove([record.id])}
@@ -1717,7 +1703,6 @@ export default function ResourcePage() {
                         showGroupTag={resourceGroup === null}
                         showUsageBadge={contentSort === "count" && resourceGroup === null}
                         onOpenDetail={openDetail}
-                        onCopy={handleCopyCard}
                         onDelete={handleDeleteRecord}
                         onToggleSelected={toggleSelected}
                         onMove={handleMoveCard}
@@ -1746,16 +1731,12 @@ export default function ResourcePage() {
       )}
 
       {feedback && (
-        <div className={`resource-feedback ${feedback === "copied" ? "success" : feedback === "deletedWithMissing" ? "warn" : "error"}`} role="status" aria-live="polite">
-          {feedback === "copied"
-            ? t("resources.copied")
-            : feedback === "copyFailed"
-              ? t("resources.copyFailed")
-              : feedback === "deleteFailed"
-                ? t("resources.deleteFailed")
-                : feedback === "deletedWithMissing"
-                  ? t("resources.deletedWithMissing", { count: missingCount })
-                  : t("resources.openFailed")}
+        <div className={`resource-feedback ${feedback === "deletedWithMissing" ? "warn" : "error"}`} role="status" aria-live="polite">
+          {feedback === "deleteFailed"
+            ? t("resources.deleteFailed")
+            : feedback === "deletedWithMissing"
+              ? t("resources.deletedWithMissing", { count: missingCount })
+              : t("resources.openFailed")}
         </div>
       )}
       {moveDialogElement}

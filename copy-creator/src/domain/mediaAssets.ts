@@ -77,6 +77,11 @@ export function openResourceFile(path: string): Promise<void> {
   return invoke("open_resource_file", { path });
 }
 
+/** 在系统文件管理器中显示文件（打开所在目录并选中）。 */
+export function revealResourceFile(path: string): Promise<void> {
+  return invoke("reveal_resource_file", { path });
+}
+
 /** 已持久化的视频海报（base64 JPEG）；未生成返回空串，调用方回退现场抽帧。 */
 export function loadResourceVideoPoster(path: string): Promise<string> {
   return invoke<string>("load_resource_video_poster", { path });

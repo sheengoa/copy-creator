@@ -48,7 +48,6 @@ function renderDetail() {
       record={record}
       typeLabel={() => "文本"}
       onBack={() => {}}
-      onCopy={() => {}}
       onDelete={() => {}}
       onRecordUpdated={() => {}}
     />,

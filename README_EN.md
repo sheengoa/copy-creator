@@ -40,6 +40,7 @@ Copy Creator is a lightweight cross-platform (Windows / Linux) desktop productiv
 
 ### 🗂 Content Library (Resources)
 - A dedicated library folder (customizable location) where content is stored as plain files — open it with any file manager at any time
+- "Open file location" in the card "⋯" menu (and on the detail page) reveals and selects the file in your file manager
 - Save text, images, links, and files; files placed into the folder are discovered and managed automatically
 - Multi-level grouping (subfolders): create, rename, move, and delete groups, with group counts including all descendants
 - Move content between groups from three entry points: the card "⋯" menu, batch selection, and the detail page "Group" row — missing target folders are created automatically and name conflicts cancel the whole move
@@ -133,7 +134,7 @@ sudo dpkg -i copy-creator_*.deb
 3. Use the "Manage Groups" dialog next to the group bar to create groups and subfolders, rename, move, or delete groups; deleting a group keeps its content and moves it to Ungrouped
 4. Move content to another group via the card "⋯" menu, batch selection, or the "Group" row on the detail page
 5. Double-click the title on the detail page to rename the file (extension preserved); notes are searchable
-6. Open a card's detail page to review images or play audio/video before using it
+6. Open a card's detail page to review images or audio/video; use "Open file location" from the card "⋯" menu to reveal the file in your file manager
 
 ### Radial Menu Feature
 

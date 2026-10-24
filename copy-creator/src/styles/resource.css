@@ -3106,14 +3106,6 @@
   outline: none;
 }
 
-.text-history-item.current {
-  cursor: default;
-}
-
-.text-history-item.current:hover {
-  background: transparent;
-}
-
 .text-history-item.previewing {
   background: var(--accent-bg);
 }

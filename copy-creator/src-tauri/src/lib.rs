@@ -515,6 +515,7 @@ pub fn run() {
             db::delete_resource_group,
             db::open_resource_group,
             db::open_resource_file,
+            db::reveal_resource_file,
             db::move_resource_records,
             db::move_resource_group,
             db::rename_resource_file,
