@@ -313,14 +313,14 @@ export default function ResourceDetailPage({
   }, [externalTextPath, record.id, showHistoryToast, t]);
 
   const toggleHistory = useCallback(() => {
-    setHistoryOpen((open) => {
-      if (!open) {
-        setVersions(null);
-        refreshVersions();
-      }
-      return !open;
-    });
-  }, [refreshVersions]);
+    // 副作用（拉列表）放在 updater 之外：StrictMode 下 updater 会被
+    // 双调用，内联触发会重复请求。
+    if (!historyOpen) {
+      setVersions(null);
+      refreshVersions();
+    }
+    setHistoryOpen(!historyOpen);
+  }, [historyOpen, refreshVersions]);
 
   // 面板打开时点击面板外任意处关闭（pointerdown 捕获按下瞬间）。
   useEffect(() => {
@@ -1046,7 +1046,18 @@ export default function ResourceDetailPage({
         </button>
         <div className="resource-detail-actions">
           {contentEditable && !contentEditing && (
-            <span className="text-history-anchor" ref={historyAnchorRef}>
+            <span
+              className="text-history-anchor"
+              ref={historyAnchorRef}
+              onKeyDown={(event) => {
+                // Esc 分层：面板开着先关面板，且不触发页面级返回。
+                if (event.key === "Escape" && historyOpen) {
+                  event.preventDefault();
+                  event.stopPropagation();
+                  setHistoryOpen(false);
+                }
+              }}
+            >
               <button
                 type="button"
                 className={`resource-secondary-button${historyOpen ? " active" : ""}`}

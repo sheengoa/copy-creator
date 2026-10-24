@@ -178,4 +178,18 @@ describe("资源文本改动记录", () => {
       expect(container.querySelector(".text-history-empty")?.textContent).toContain("尚无改动记录");
     });
   });
+
+  it("按 Esc 关闭面板", async () => {
+    const { container } = renderDetail();
+    await waitFor(() => {
+      expect(container.querySelector("[data-chunk-start]")?.textContent).toContain("第二行");
+    });
+    await openHistory(container);
+    const anchor = container.querySelector(".text-history-anchor");
+    expect(anchor).not.toBeNull();
+    anchor!.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true }));
+    await waitFor(() => {
+      expect(container.querySelector(".text-history-pop")).toBeNull();
+    });
+  });
 });
