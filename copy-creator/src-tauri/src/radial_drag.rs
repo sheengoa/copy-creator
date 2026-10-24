@@ -826,17 +826,11 @@ pub(crate) struct DragImage {
     bgra: Vec<u8>,
 }
 
-/// 生成拖动虚影位图：原图等比缩放到 128×128 以内。直接把原图当拖动
-/// 图像时，虚影按原始像素渲染，截图类内容会大到夸张（实测踩坑）。
-/// 非图片文件（zip 等）解码失败返回 None，拖动时表现为无虚影。
-#[cfg(target_os = "windows")]
-fn make_drag_image(source: &std::path::Path) -> Option<DragImage> {
-    let bytes = std::fs::read(source).ok()?;
-    make_drag_image_bytes(&bytes)
-}
-
-/// 从内存图片字节生成虚影位图。优先消费前端已渲染的缩略图：省掉
-/// 原图磁盘读取 + 全尺寸解码，拖动启动从 ~1s 降到毫秒级。
+/// 从内存图片字节生成虚影位图：等比缩放到 128×128 以内。直接把原图
+/// 当拖动图像时，虚影按原始像素渲染，截图类内容会大到夸张（实测踩坑）。
+/// 唯一数据源是前端已渲染的缩略图——磁盘全尺寸解码回退已删除：大图
+/// 解码秒级，挂在"按住拖动无反应"上（实测踩坑）；解码失败返回 None，
+/// 拖动表现为无虚影。
 #[cfg(target_os = "windows")]
 fn make_drag_image_bytes(bytes: &[u8]) -> Option<DragImage> {
     const MAX_DIM: u32 = 128;
@@ -1157,6 +1151,12 @@ mod windows_drag {
         use windows::Win32::UI::Shell::Common::ITEMIDLIST;
         use windows::Win32::UI::WindowsAndMessaging::GetCursorPos;
 
+        // 异步按键状态用于启动窗口期守卫；Win32_UI_Input_KeyboardAndMouse
+        // feature 未启用（见 Cargo.toml），与父模块一致走裸声明。
+        unsafe extern "system" {
+            fn GetAsyncKeyState(v_key: i32) -> i16;
+        }
+
         #[implement(IDropSource)]
         struct OleDropSource;
 
@@ -1292,10 +1292,31 @@ mod windows_drag {
 
                 let drop_source: IDropSource = OleDropSource.into();
                 let mut effect = DROPEFFECT::default();
+                // 启动窗口期守卫：从前端越过阈值到此处，IPC 往返、虚影
+                // 准备、PIDL 构建（大分组拖出逐个创建可达秒级）都可能
+                // 耗时可观，期间按键状态无人观察。若左键已松开，紧随其
+                // 后的 DoDragDrop 会在首个 QueryContinueDrag 即判定"左键
+                // 已松开→落放"——文件被当场丢在光标当前位置，落在文件
+                // 夹上就是一次意外复制。检测到已松开就按取消收场，宁可
+                // 让用户重来。触摸/笔不会更新异步按键状态，本就走不到
+                // 可用的拖动（松开永不被观察到，僵死看门狗 5 秒后注入
+                // ESC），这里只是把同样的失败提前成即时取消。
+                let mut pos = POINT::default();
+                if GetCursorPos(&mut pos).is_err() {
+                    (pos.x, pos.y) = (0, 0);
+                }
+                if unsafe { (GetAsyncKeyState(super::VK_LBUTTON) as u16 & 0x8000) == 0 } {
+                    log::info!(
+                        "[radial_drag] 拖动启动时左键已释放，取消本次拖动 (cursor=({}, {}))",
+                        pos.x,
+                        pos.y
+                    );
+                    free_pidls(&pidls);
+                    return Ok((false, pos.x, pos.y));
+                }
                 let hr = DoDragDrop(&data_object, &drop_source, DROPEFFECT_COPY, &mut effect);
                 free_pidls(&pidls);
                 let dropped = hr == DRAGDROP_S_DROP;
-                let mut pos = POINT::default();
                 if GetCursorPos(&mut pos).is_err() {
                     (pos.x, pos.y) = (0, 0);
                 }
@@ -1446,34 +1467,22 @@ pub async fn start_radial_file_drag(
             "[radial_drag] start_radial_file_drag invoked session={session_id} source={source:?} id={id} path={path:?}"
         );
         let paths = requested_drag_paths(&app, &source, &id, path)?;
-        let icon_path = paths
-            .first()
-            .cloned()
-            .ok_or_else(|| "没有可拖拽的文件".to_string())?;
-        // 优先用前端已渲染的缩略图生成虚影（省掉大图磁盘读取 + 全尺寸
-        // 解码，这段耗时此前直接挂在"按住拖动无反应"上）；缺省或解码
-        // 失败再回退磁盘解码，非图片文件回退后仍返回 None（无虚影）。
-        let drag_image = match drag_image_base64.as_deref().map(str::trim) {
-            Some(encoded) => {
-                let encoded =
-                    encoded.trim_start_matches("data:image/png;base64,");
+        // 虚影只消费前端已渲染的缩略图（128px PNG，毫秒级解码）。不做
+        // 磁盘全尺寸解码回退——2MB 级 PNG 实测要 1 秒上下，而此时径向
+        // 窗口已隐藏、按键状态无人观察：拖动迟钝，快速松键还会在
+        // DoDragDrop 起手时被判定"已落放"（见 start_drag 的按键守卫）。
+        // 缩略图缺失就无虚影立即启动，与视频/文本的行为对齐。
+        let drag_image = drag_image_base64
+            .as_deref()
+            .map(str::trim)
+            .and_then(|encoded| {
+                let encoded = encoded.trim_start_matches("data:image/png;base64,");
                 use base64::Engine as _;
-                match base64::engine::general_purpose::STANDARD
+                base64::engine::general_purpose::STANDARD
                     .decode(encoded)
                     .ok()
                     .and_then(|bytes| make_drag_image_bytes(&bytes))
-                {
-                    Some(image) => Some(image),
-                    None => {
-                        log::warn!(
-                            "[radial_drag] 前端虚影解码失败，回退磁盘解码 session={session_id}"
-                        );
-                        make_drag_image(&icon_path)
-                    }
-                }
-            }
-            None => make_drag_image(&icon_path),
-        };
+            });
         start_platform_drag(
             &window,
             paths,
