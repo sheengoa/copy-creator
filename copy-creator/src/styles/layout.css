@@ -84,11 +84,13 @@
   app-region: drag;
 }
 
+/* logo 尺度与导航图标体系协调：40px 深色圆块在 72px 折叠侧栏里占比过半、
+   压过下方 20px 级的线性导航图标，缩到 28px 让品牌区退为轻量锚点。 */
 .sidebar-logo {
-  width: 40px;
-  height: 40px;
+  width: 28px;
+  height: 28px;
   flex-shrink: 0;
-  border-radius: 12px;
+  border-radius: 8px;
   object-fit: contain;
 }
 
