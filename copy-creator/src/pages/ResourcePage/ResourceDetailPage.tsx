@@ -309,7 +309,11 @@ export default function ResourceDetailPage({
     if (!externalTextPath) return;
     fetchResourceTextVersions(record.id, externalTextPath)
       .then((list) => setVersions(list))
-      .catch(() => showHistoryToast(t("resources.textHistoryLoadFailed")));
+      .catch(() => {
+        // 失败也要脱离加载态，否则面板停在「加载中」直到重开。
+        setVersions([]);
+        showHistoryToast(t("resources.textHistoryLoadFailed"));
+      });
   }, [externalTextPath, record.id, showHistoryToast, t]);
 
   const toggleHistory = useCallback(() => {
@@ -1095,6 +1099,7 @@ export default function ResourceDetailPage({
                             key={version.id}
                             role="button"
                             tabIndex={0}
+                            aria-disabled={current}
                             className={`text-history-item${previewing ? " previewing" : ""}${current ? " current" : ""}`}
                             onClick={() => {
                               if (!current) handlePreviewVersion(version);
