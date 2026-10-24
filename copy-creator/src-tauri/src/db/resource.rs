@@ -55,17 +55,46 @@ pub fn write_resource_text_content(
     content: String,
     id: Option<String>,
 ) -> Result<serde_json::Value, String> {
-    let trimmed = content.trim().to_string();
-    if trimmed.is_empty() {
+    write_text_content_inner(&app, &path, &content, id, super::text_version::VERSION_SOURCE_EDIT)
+}
+
+/// 正文写入通道（应用内保存与版本还原共用）：写文件 + 记录归一 + 改动
+/// 记录。edit 做正文规范化（trim + 补尾换行，与新建窗口写入路径一致）；
+/// restore 原样写入版本快照——规范化会让还原后的文件内容偏离快照，
+/// 下次列表懒对齐会误记一版「外部修改」。
+pub(crate) fn write_text_content_inner<R: Runtime>(
+    app: &AppHandle<R>,
+    path: &str,
+    content: &str,
+    id: Option<String>,
+    source: &str,
+) -> Result<serde_json::Value, String> {
+    let normalized = if source == super::text_version::VERSION_SOURCE_RESTORE {
+        content.to_string()
+    } else {
+        let trimmed = content.trim().to_string();
+        if trimmed.is_empty() {
+            return Err("内容不能为空".to_string());
+        }
+        format!("{trimmed}\n")
+    };
+    if normalized.trim().is_empty() {
         return Err("内容不能为空".to_string());
     }
-    let target = resolve_resource_file_path(&app, &path)?;
+    let target = resolve_resource_file_path(app, path)?;
     if !crate::media_kind::is_text_extension(&target) && !crate::media_kind::is_probably_text_file(&target) {
         return Err("当前文件不是可编辑的文本文件".to_string());
     }
     ensure_capped_file(&target, QUICK_INPUT_TEXT_PREVIEW_LIMIT_BYTES, "文本内容不能超过 1 MB")?;
+    // 写入前读旧内容：仅用于版本链为空时补记「首次入库」版（改动记录
+    // 是附属能力，读取失败不阻断保存）。
+    let prior_content = if id.is_some() {
+        std::fs::read_to_string(&target).ok()
+    } else {
+        None
+    };
     // 与新建窗口写入路径保持一致：正文末尾补一个换行。
-    std::fs::write(&target, format!("{trimmed}\n"))
+    std::fs::write(&target, &normalized)
         .map_err(|e| format!("写入资源文件失败: {e}"))?;
 
     // 保存后记录归一为文件承载形态：粘贴/拖出/预览统一经文件读取，永远
@@ -86,6 +115,20 @@ pub fn write_resource_text_content(
         };
         if let Err(error) = update_result {
             return Err(format!("更新资源记录失败: {error}"));
+        }
+        // 落盘成功后记版；记版失败只留痕不阻断保存。
+        {
+            let state = app.state::<DbState>();
+            let conn = state.conn.lock().map_err(|e| e.to_string())?;
+            if let Err(error) = super::text_version::record_versions_after_write(
+                &conn,
+                id,
+                prior_content.as_deref(),
+                &normalized,
+                source,
+            ) {
+                log::warn!("记录文本改动版本失败: {error}");
+            }
         }
     }
     let _ = app.emit("resource-groups-changed", ());

@@ -30,6 +30,14 @@ import {
   type ResourceAnnotation,
 } from "../../domain/annotations";
 import { formatResourceBitrate, formatResourceDuration, formatResourceFileSize } from "./resourceUtils";
+import {
+  clearResourceTextVersions,
+  fetchResourceTextVersions,
+  fetchTextVersionContent,
+  restoreResourceTextVersion,
+  textVersionSourceKey,
+  type ResourceTextVersion,
+} from "../../domain/textVersions";
 import { type ResourceMediaKind } from "../../domain/mediaKind";
 import { getResourceFileName, isResourceTitleRenameable, splitResourceFileName } from "../../domain/fileName";
 import { formatResourceFolderPath } from "../../domain/groups";
@@ -176,6 +184,19 @@ export default function ResourceDetailPage({
   const contentSavedTimerRef = useRef<number | null>(null);
   const contentEditorRef = useRef<HTMLTextAreaElement | null>(null);
   const stageRef = useRef<HTMLDivElement | null>(null);
+  // ── 改动记录（顶栏按钮 + 弹出面板；预览与还原在正文区完成）──
+  // versions=null 表示列表未加载（面板刚打开的加载态）；previewEntry 是
+  // 正在只读预览的版本。还原走正文写入通道并自动记「还原」版，永远可逆。
+  const [historyOpen, setHistoryOpen] = useState(false);
+  const [versions, setVersions] = useState<ResourceTextVersion[] | null>(null);
+  const [previewEntry, setPreviewEntry] = useState<{
+    version: ResourceTextVersion;
+    content: string;
+  } | null>(null);
+  const [historyBusy, setHistoryBusy] = useState(false);
+  const [historyToast, setHistoryToast] = useState<string | null>(null);
+  const historyAnchorRef = useRef<HTMLSpanElement | null>(null);
+  const historyToastTimerRef = useRef<number | null>(null);
   // 文本取材唯一入口（domain 判定）：有文件承载一律读文件全文——含详情页
   // 编辑后 type 已转为 text 的记录；无文件承载的纯文本资源走 segments。
   const externalTextPath = kind === "text" ? resourceTextPreviewPath(record) : null;
@@ -197,11 +218,16 @@ export default function ResourceDetailPage({
     // 记录切换必须清掉上一条记录的划选态：否则工具条残留，此时点标注
     // 会把旧记录的偏移区间写进新记录（脏标注）。
     setAnnSelection(null);
+    // 改动记录与版本预览同样绑定单条记录：切换时整体重置。
+    setHistoryOpen(false);
+    setPreviewEntry(null);
+    setVersions(null);
   }, [record.id, record.resource_note]);
 
   useEffect(() => () => {
     if (noteSavedTimerRef.current !== null) window.clearTimeout(noteSavedTimerRef.current);
     if (contentSavedTimerRef.current !== null) window.clearTimeout(contentSavedTimerRef.current);
+    if (historyToastTimerRef.current !== null) window.clearTimeout(historyToastTimerRef.current);
   }, []);
 
   // 编辑器高度跟随内容伸缩，避免固定高度出现内部滚动条截断正文。
@@ -263,6 +289,104 @@ export default function ResourceDetailPage({
     setOpenExternalFailed(false);
     openResourceFile(externalTextPath).catch(() => setOpenExternalFailed(true));
   };
+
+  // ── 改动记录：列表拉取 / 预览 / 还原 / 清空 ──
+  const showHistoryToast = useCallback((message: string) => {
+    setHistoryToast(message);
+    if (historyToastTimerRef.current !== null) window.clearTimeout(historyToastTimerRef.current);
+    historyToastTimerRef.current = window.setTimeout(() => {
+      setHistoryToast(null);
+      historyToastTimerRef.current = null;
+    }, 2600);
+  }, []);
+
+  const formatVersionTime = useCallback((iso: string) => {
+    const date = new Date(iso);
+    return Number.isNaN(date.getTime()) ? iso : date.toLocaleString();
+  }, []);
+
+  const refreshVersions = useCallback(() => {
+    if (!externalTextPath) return;
+    fetchResourceTextVersions(record.id, externalTextPath)
+      .then((list) => setVersions(list))
+      .catch(() => showHistoryToast(t("resources.textHistoryLoadFailed")));
+  }, [externalTextPath, record.id, showHistoryToast, t]);
+
+  const toggleHistory = useCallback(() => {
+    setHistoryOpen((open) => {
+      if (!open) {
+        setVersions(null);
+        refreshVersions();
+      }
+      return !open;
+    });
+  }, [refreshVersions]);
+
+  // 面板打开时点击面板外任意处关闭（pointerdown 捕获按下瞬间）。
+  useEffect(() => {
+    if (!historyOpen) return;
+    const onPointerDown = (event: PointerEvent) => {
+      if (historyAnchorRef.current?.contains(event.target as Node)) return;
+      setHistoryOpen(false);
+    };
+    document.addEventListener("pointerdown", onPointerDown);
+    return () => document.removeEventListener("pointerdown", onPointerDown);
+  }, [historyOpen]);
+
+  const handlePreviewVersion = useCallback(
+    (version: ResourceTextVersion) => {
+      fetchTextVersionContent(version.id)
+        .then((content) => setPreviewEntry({ version, content }))
+        .catch(() => showHistoryToast(t("resources.textHistoryLoadFailed")));
+    },
+    [showHistoryToast, t],
+  );
+
+  const handleRestoreVersion = useCallback(async () => {
+    if (!previewEntry || historyBusy) return;
+    const { version, content } = previewEntry;
+    setHistoryBusy(true);
+    try {
+      const saved = await restoreResourceTextVersion(version.id);
+      setPreviewEntry(null);
+      // 还原内容成为新的「已保存」基准；记录归一为文件承载形态后触发
+      // 全文重读，与正文保存路径同款。
+      setSavedContent(content);
+      setContentSaveError(null);
+      onRecordUpdated({
+        ...record,
+        type: "file",
+        content: saved.content,
+      });
+      refreshVersions();
+      showHistoryToast(
+        t("resources.versionRestored", { time: formatVersionTime(version.createdAt) }),
+      );
+    } catch (error) {
+      showHistoryToast(
+        typeof error === "string" && error ? error : t("resources.versionRestoreFailed"),
+      );
+    } finally {
+      setHistoryBusy(false);
+    }
+  }, [previewEntry, historyBusy, record, onRecordUpdated, refreshVersions, showHistoryToast, t, formatVersionTime]);
+
+  const handleClearVersions = useCallback(async () => {
+    if (historyBusy) return;
+    setHistoryBusy(true);
+    try {
+      await clearResourceTextVersions(record.id);
+      setPreviewEntry(null);
+      // 本地直接置空：清空后立即重拉会经懒对齐再次出现条目，视觉上
+      // 与「已清空」矛盾；下次打开面板时按需重新对齐。
+      setVersions([]);
+      showHistoryToast(t("resources.versionClearDone"));
+    } catch {
+      showHistoryToast(t("resources.textHistoryLoadFailed"));
+    } finally {
+      setHistoryBusy(false);
+    }
+  }, [historyBusy, record.id, showHistoryToast, t]);
 
   const mediaMetaRows = useMemo(() => {
     const rows: { label: string; value: string }[] = [];
@@ -415,8 +539,10 @@ export default function ResourceDetailPage({
 
   // ── 文本标注：加载与锚文本校验 ──
   // 仅完整全文态启用（截断回退态内容不完整，标注定位无意义）；编辑态
-  // 暂离（textarea 内不显示标注），退出后随文本重载重新校验。
-  const annotationsActive = Boolean(externalTextPath) && !textDetailTruncated && !contentEditing;
+  // 与版本预览态暂离（预览的是历史快照，偏移对当前文件无意义），退出后
+  // 随文本重载重新校验。
+  const annotationsActive =
+    Boolean(externalTextPath) && !textDetailTruncated && !contentEditing && !previewEntry;
   useEffect(() => {
     if (!annotationsActive || textContent === null) {
       setAnnotations([]);
@@ -863,6 +989,7 @@ export default function ResourceDetailPage({
     setContentDraft(fullTextContent ?? "");
     setContentSaved(false);
     setContentSaveError(null);
+    setPreviewEntry(null);
     setContentEditing(true);
   };
 
@@ -918,6 +1045,84 @@ export default function ResourceDetailPage({
           <span>{t("resources.backToLibrary")}</span>
         </button>
         <div className="resource-detail-actions">
+          {contentEditable && !contentEditing && (
+            <span className="text-history-anchor" ref={historyAnchorRef}>
+              <button
+                type="button"
+                className={`resource-secondary-button${historyOpen ? " active" : ""}`}
+                onClick={toggleHistory}
+                aria-haspopup="dialog"
+                aria-expanded={historyOpen}
+              >
+                {Icons.recent}
+                <span>{t("resources.textHistory")}</span>
+              </button>
+              {historyOpen && (
+                <div className="text-history-pop" role="dialog" aria-label={t("resources.textHistory")}>
+                  <div className="text-history-head">
+                    <span>{t("resources.textHistory")}</span>
+                    <button
+                      type="button"
+                      className="text-history-clear"
+                      disabled={historyBusy || versions === null || versions.length === 0}
+                      onClick={() => void handleClearVersions()}
+                    >
+                      {t("resources.textHistoryClear")}
+                    </button>
+                  </div>
+                  <div className="text-history-list">
+                    {versions === null ? (
+                      <div className="text-history-empty">{t("common.loading")}</div>
+                    ) : versions.length === 0 ? (
+                      <div className="text-history-empty">{t("resources.textHistoryEmpty")}</div>
+                    ) : (
+                      versions.map((version) => {
+                        const previewing = previewEntry?.version.id === version.id;
+                        const current = version.id === versions[0].id;
+                        return (
+                          <div
+                            key={version.id}
+                            role="button"
+                            tabIndex={0}
+                            className={`text-history-item${previewing ? " previewing" : ""}${current ? " current" : ""}`}
+                            onClick={() => {
+                              if (!current) handlePreviewVersion(version);
+                            }}
+                            onKeyDown={(event) => {
+                              if (event.key === "Enter" || event.key === " ") {
+                                event.preventDefault();
+                                if (!current) handlePreviewVersion(version);
+                              }
+                            }}
+                          >
+                            <span className="text-history-dot" />
+                            <span className="text-history-body">
+                              <span className="text-history-time">
+                                {formatVersionTime(version.createdAt)}
+                              </span>
+                              <span className="text-history-meta">
+                                {formatResourceFileSize(version.byteSize)}
+                                {" · "}
+                                {t(textVersionSourceKey(version.source))}
+                              </span>
+                            </span>
+                            {(previewing || current) && (
+                              <span className={`text-history-badge${previewing ? " previewing" : ""}`}>
+                                {previewing
+                                  ? t("resources.versionPreviewBadge")
+                                  : t("resources.versionCurrent")}
+                              </span>
+                            )}
+                          </div>
+                        );
+                      })
+                    )}
+                  </div>
+                  <div className="text-history-foot">{t("resources.textHistoryHint")}</div>
+                </div>
+              )}
+            </span>
+          )}
           {contentEditable && !contentEditing && (
             <button
               type="button"
@@ -992,6 +1197,8 @@ export default function ResourceDetailPage({
           if (!contentEditable) return;
           const target = event.target instanceof HTMLElement ? event.target : null;
           if (!target) return;
+          // 版本预览态双击不进入编辑（预览的是历史快照，不是当前正文）。
+          if (previewEntry) return;
           if (
             target.closest(
               "button, a, input, textarea, select, img, video, audio, .find-replace-bar, .resource-detail-aside, .resource-detail-header, .resource-detail-title",
@@ -1147,6 +1354,47 @@ export default function ResourceDetailPage({
                   {record.resource_file_size !== undefined && ` · ${formatResourceFileSize(record.resource_file_size)}`}
                 </span>
                 <code>{record.resource_relative_path || record.resource_path || record.content}</code>
+              </div>
+            ) : previewEntry ? (
+              // 改动记录的版本只读预览：展示历史快照并给出还原入口。
+              // 还原走正文写入通道且当前内容自动先存一版，无需确认框。
+              <div className="resource-detail-text-body">
+                <div className="resource-version-banner" role="note">
+                  <span className="resource-version-banner-text">
+                    {t("resources.versionPreview", {
+                      time: formatVersionTime(previewEntry.version.createdAt),
+                    })}
+                  </span>
+                  <button
+                    type="button"
+                    className="resource-secondary-button resource-version-restore"
+                    disabled={historyBusy}
+                    onClick={() => void handleRestoreVersion()}
+                  >
+                    {t("resources.versionRestore")}
+                  </button>
+                  <button
+                    type="button"
+                    className="resource-secondary-button"
+                    disabled={historyBusy}
+                    onClick={() => setPreviewEntry(null)}
+                  >
+                    {t("resources.versionExitPreview")}
+                  </button>
+                </div>
+                <div className="resource-detail-text-chunks">
+                  {splitTextChunks(previewEntry.content).map((chunk, index) => (
+                    <pre
+                      key={index}
+                      className="resource-detail-text-chunk"
+                      style={{
+                        containIntrinsicSize: `auto calc(${Math.ceil(chunk.length / CHUNK_CHARS_PER_LINE)} * 1.9em)`,
+                      }}
+                    >
+                      {chunk}
+                    </pre>
+                  ))}
+                </div>
               </div>
             ) : contentEditing && contentEditable ? (
               <textarea
@@ -1465,6 +1713,11 @@ export default function ResourceDetailPage({
           <p>{t("resources.detailHint")}</p>
         </aside>
       </main>
+      {historyToast && (
+        <div className="resource-history-toast" role="status">
+          {historyToast}
+        </div>
+      )}
       <BackToTopButton
         visible={backToTop.visible}
         onTop={backToTop.scrollToTop}

@@ -44,7 +44,8 @@ fn validate_annotation_input(start: i64, len: i64, kind: &str) -> Result<(), Str
     Ok(())
 }
 
-fn record_exists_as_resource(conn: &Connection, record_id: &str) -> Result<bool, String> {
+// 资源文本改动记录域（text_version）复用同一「记录存在且为资源」校验。
+pub(crate) fn record_exists_as_resource(conn: &Connection, record_id: &str) -> Result<bool, String> {
     conn.query_row(
         "SELECT 1 FROM clipboard_records WHERE id = ?1 AND storage_mode = 'resource'",
         params![record_id],

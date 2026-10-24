@@ -6523,3 +6523,236 @@ mod ipc_naming_contract_tests {
         );
     }
 }
+
+#[cfg(test)]
+mod text_version_tests {
+    use crate::db::{
+        add_text_version, clear_resource_text_versions_inner, list_resource_text_versions_inner,
+        record_versions_after_write, restore_resource_text_version_inner,
+        top_text_version_content, write_text_content_inner,
+        DbState, simplify_windows_path, VERSION_SOURCE_EDIT, VERSION_SOURCE_EXTERNAL,
+        VERSION_SOURCE_INIT, VERSION_SOURCE_RESTORE,
+    };
+    use rusqlite::{params, Connection};
+    use std::path::PathBuf;
+    use std::sync::Mutex;
+    use tauri::Manager;
+
+    /// 本地完整夹具:临时库目录 + settings 指向 + 内存业务库
+    /// (trash/resource_command 测试同款;业务表为最小 schema,版本表由
+    /// 测试体按 ensure_schema 同构补建)。
+    fn history_test_app() -> (tauri::App<tauri::test::MockRuntime>, PathBuf) {
+        let app = tauri::test::mock_app();
+        let root = std::env::temp_dir().join(format!(
+            "copy-creator-text-version-test-{}",
+            uuid::Uuid::new_v4()
+        ));
+        std::fs::create_dir_all(&root).unwrap();
+        let root = crate::db::simplify_windows_path(&root.canonicalize().unwrap());
+        let conn = Connection::open_in_memory().unwrap();
+        conn.execute_batch(
+            "CREATE TABLE settings (key TEXT PRIMARY KEY, value TEXT NOT NULL);
+             CREATE TABLE clipboard_records (
+                 id TEXT PRIMARY KEY,
+                 type TEXT NOT NULL,
+                 content TEXT NOT NULL,
+                 created_at TEXT NOT NULL,
+                 storage_mode TEXT DEFAULT 'database',
+                 resource_path TEXT DEFAULT ''
+             );",
+        )
+        .unwrap();
+        conn.execute(
+            "INSERT INTO settings (key, value) VALUES ('resource_library_path', ?1)",
+            params![root.to_string_lossy().as_ref()],
+        )
+        .unwrap();
+        app.manage(DbState {
+            conn: Mutex::new(conn),
+        });
+        (app, root)
+    }
+
+    /// 内存库 + 与 ensure_schema 同构的版本表（外键级联开启）。
+    fn version_db() -> Connection {
+        let conn = Connection::open_in_memory().unwrap();
+        conn.execute_batch(
+            "PRAGMA foreign_keys=ON;
+             CREATE TABLE clipboard_records (
+                 id TEXT PRIMARY KEY,
+                 type TEXT NOT NULL,
+                 content TEXT NOT NULL,
+                 created_at TEXT NOT NULL,
+                 storage_mode TEXT DEFAULT 'database',
+                 resource_path TEXT DEFAULT ''
+             );
+             CREATE TABLE resource_text_versions (
+                 id TEXT PRIMARY KEY,
+                 record_id TEXT NOT NULL,
+                 content TEXT NOT NULL,
+                 byte_size INTEGER NOT NULL,
+                 source TEXT NOT NULL,
+                 created_at TEXT NOT NULL,
+                 FOREIGN KEY (record_id) REFERENCES clipboard_records(id)
+                     ON DELETE CASCADE ON UPDATE CASCADE
+             );",
+        )
+        .unwrap();
+        conn.execute(
+            "INSERT INTO clipboard_records (id, type, content, created_at, storage_mode)
+             VALUES ('rec-1', 'file', 'p.txt', '2026-01-01', 'resource')",
+            [],
+        )
+        .unwrap();
+        conn
+    }
+
+    fn version_sources(conn: &Connection, record_id: &str) -> Vec<(String, String)> {
+        let mut stmt = conn
+            .prepare(
+                "SELECT source, content FROM resource_text_versions
+                 WHERE record_id = ?1 ORDER BY rowid DESC",
+            )
+            .unwrap();
+        stmt.query_map(params![record_id], |row| {
+            Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
+        })
+        .unwrap()
+        .collect::<Result<Vec<_>, _>>()
+        .unwrap()
+    }
+
+    // 保存落盘记版：版本链为空时先把入库原文补为首版「首次入库」，再记
+    // 本次写入「应用内编辑」；新内容与顶端相同（空转保存）不重复记。
+    #[test]
+    fn write_seeds_init_then_edit_and_skips_same_content() {
+        let conn = version_db();
+        record_versions_after_write(&conn, "rec-1", Some("v1"), "v2\n", VERSION_SOURCE_EDIT)
+            .unwrap();
+        assert_eq!(
+            version_sources(&conn, "rec-1"),
+            vec![
+                (VERSION_SOURCE_EDIT.to_string(), "v2\n".to_string()),
+                (VERSION_SOURCE_INIT.to_string(), "v1".to_string()),
+            ]
+        );
+        // 空转保存：与顶端内容相同不记。
+        record_versions_after_write(&conn, "rec-1", Some("v2\n"), "v2\n", VERSION_SOURCE_EDIT)
+            .unwrap();
+        assert_eq!(version_sources(&conn, "rec-1").len(), 2);
+        // 文件原本缺失（prior None）：只记本次内容，不补 init。
+        let conn2 = version_db();
+        record_versions_after_write(&conn2, "rec-1", None, "fresh\n", VERSION_SOURCE_EDIT)
+            .unwrap();
+        assert_eq!(version_sources(&conn2, "rec-1").len(), 1);
+    }
+
+    // 限量淘汰：每条资源最多 20 版，超出按写入顺序淘汰最旧。
+    #[test]
+    fn version_limit_prunes_oldest() {
+        let conn = version_db();
+        for i in 0..22 {
+            add_text_version(&conn, "rec-1", &format!("v{i}\n"), VERSION_SOURCE_EDIT).unwrap();
+        }
+        let sources = version_sources(&conn, "rec-1");
+        assert_eq!(sources.len(), 20);
+        assert_eq!(sources[0].1, "v21\n"); // 最新保留
+        assert_eq!(sources[19].1, "v2\n"); // v0、v1 已淘汰
+    }
+
+    // 外键双向级联：删记录版本随删、id 改写版本随迁（与标注同模型）。
+    #[test]
+    fn foreign_key_cascades_delete_and_id_rewrite() {
+        let conn = version_db();
+        add_text_version(&conn, "rec-1", "v1\n", VERSION_SOURCE_INIT).unwrap();
+        conn.execute("UPDATE clipboard_records SET id = 'rec-2' WHERE id = 'rec-1'", [])
+            .unwrap();
+        assert_eq!(version_sources(&conn, "rec-2").len(), 1);
+        conn.execute("DELETE FROM clipboard_records WHERE id = 'rec-2'", []).unwrap();
+        assert_eq!(version_sources(&conn, "rec-2").len(), 0);
+    }
+
+    // 保存 → 还原 → 外部修改懒对齐的完整回路（走真实文件与命令层）。
+    #[test]
+    fn save_restore_and_external_lazy_align_round_trip() {
+        let (app, root) = history_test_app();
+        let handle = app.handle().clone();
+        let file: PathBuf = root.join("改动记录.txt");
+        std::fs::write(&file, "v1").unwrap();
+        {
+            let state = app.state::<DbState>();
+            let conn = state.conn.lock().unwrap();
+            conn.execute_batch(
+                "CREATE TABLE resource_text_versions (
+                     id TEXT PRIMARY KEY,
+                     record_id TEXT NOT NULL,
+                     content TEXT NOT NULL,
+                     byte_size INTEGER NOT NULL,
+                     source TEXT NOT NULL,
+                     created_at TEXT NOT NULL,
+                     FOREIGN KEY (record_id) REFERENCES clipboard_records(id)
+                         ON DELETE CASCADE ON UPDATE CASCADE
+                 );",
+            )
+            .unwrap();
+            conn.execute(
+                "INSERT INTO clipboard_records (id, type, content, created_at, storage_mode, resource_path)
+                 VALUES ('rec-1', 'file', ?1, '2026-01-01', 'resource', ?1)",
+                params![file.to_string_lossy().as_ref()],
+            )
+            .unwrap();
+        }
+        let path = file.to_string_lossy().to_string();
+
+        // 应用内保存：文件更新为规范化内容，版本链 = [edit, init]。
+        let saved = write_text_content_inner(&handle, &path, " v2 ", Some("rec-1".into()), VERSION_SOURCE_EDIT)
+            .unwrap();
+        assert_eq!(std::fs::read_to_string(&file).unwrap(), "v2\n");
+        assert_eq!(saved["record_type"], "file");
+        let versions = list_resource_text_versions_inner(&handle, "rec-1", &path).unwrap();
+        assert_eq!(versions.len(), 2);
+        assert_eq!(versions[0].source, VERSION_SOURCE_EDIT);
+        assert_eq!(versions[1].source, VERSION_SOURCE_INIT);
+        let init_id = versions[1].id.clone();
+
+        // 还原到入库版：文件原样写回「v1」（无规范化补换行），并记一版
+        // 「还原」；紧接的懒对齐发现文件与顶端一致，不再误记外部修改。
+        restore_resource_text_version_inner(&handle, &init_id).unwrap();
+        assert_eq!(std::fs::read_to_string(&file).unwrap(), "v1");
+        let versions = list_resource_text_versions_inner(&handle, "rec-1", &path).unwrap();
+        assert_eq!(versions.len(), 3);
+        assert_eq!(versions[0].source, VERSION_SOURCE_RESTORE);
+        let again = list_resource_text_versions_inner(&handle, "rec-1", &path).unwrap();
+        assert_eq!(again.len(), 3);
+
+        // 外部程序改文件：下次列表读取懒对齐补记「外部修改」。
+        std::fs::write(&file, "hacked").unwrap();
+        let versions = list_resource_text_versions_inner(&handle, "rec-1", &path).unwrap();
+        assert_eq!(versions.len(), 4);
+        assert_eq!(versions[0].source, VERSION_SOURCE_EXTERNAL);
+
+        // 还原到「外部修改」版后文件内容随之更新；顶端内容查询与链一致。
+        let external_id = versions[0].id.clone();
+        restore_resource_text_version_inner(&handle, &external_id).unwrap();
+        assert_eq!(std::fs::read_to_string(&file).unwrap(), "hacked");
+        {
+            let state = app.state::<DbState>();
+            let conn = state.conn.lock().unwrap();
+            assert_eq!(
+                top_text_version_content(&conn, "rec-1").unwrap().unwrap(),
+                "hacked"
+            );
+        }
+        // 还原到「外部修改」版后文件内容随之更新；内容与顶端相同，
+        // 记版被同内容去重跳过（重复还原同一目标不产生噪音版本），
+        // 链仍是 4 版。clear inner 内部会获取 DB 锁，不得在持有 guard
+        // 的块内调用（否则自锁死——实测挂死定位的教训）。
+        let removed = clear_resource_text_versions_inner(&handle, "rec-1").unwrap();
+        assert_eq!(removed, 4);
+        {
+            let state = app.state::<DbState>();
+            let conn = state.conn.lock().unwrap();
+            assert_eq!(top_text_version_content(&conn, "rec-1").unwrap(), None);
+        }
+    }
+}

@@ -134,6 +134,7 @@ mod migrate;
 mod phrase;
 mod resource;
 mod settings;
+mod text_version;
 mod trash;
 pub(crate) use annotation::*;
 pub(crate) use apikeys::*;
@@ -143,6 +144,7 @@ pub(crate) use migrate::*;
 pub(crate) use phrase::*;
 pub(crate) use resource::*;
 pub(crate) use settings::*;
+pub(crate) use text_version::*;
 pub(crate) use trash::*;
 
 pub struct DbState {
@@ -1134,6 +1136,23 @@ pub(crate) fn ensure_schema(conn: &Connection) -> Result<(), Box<dyn std::error:
 
         CREATE INDEX IF NOT EXISTS idx_annotations_record
             ON resource_annotations(record_id);
+
+        /* 资源文本改动记录：正文每次落盘自动记一版（内容快照），改错可
+           还原。外键双向级联——记录删除时版本随之清理，记录 id 改写
+           （重命名/外部目录重定向/启动纠偏）时版本自动随迁。 */
+        CREATE TABLE IF NOT EXISTS resource_text_versions (
+            id TEXT PRIMARY KEY,
+            record_id TEXT NOT NULL,
+            content TEXT NOT NULL,
+            byte_size INTEGER NOT NULL,
+            source TEXT NOT NULL,
+            created_at TEXT NOT NULL,
+            FOREIGN KEY (record_id) REFERENCES clipboard_records(id)
+                ON DELETE CASCADE ON UPDATE CASCADE
+        );
+
+        CREATE INDEX IF NOT EXISTS idx_text_versions_record
+            ON resource_text_versions(record_id);
 
         CREATE INDEX IF NOT EXISTS idx_trash_trashed_ms ON trash_items(trashed_ms);
         ",
