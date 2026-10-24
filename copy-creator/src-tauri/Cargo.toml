@@ -46,6 +46,7 @@ notify = "8"
 # 数据备份导出/导入：整库打包为 zip（deflate 压缩即可，无需加密等特性）
 zip = { version = "2.2", default-features = false, features = ["deflate"] }
 walkdir = "2"
+trash = "5.2"
 
 [dev-dependencies]
 tauri = { version = "2.11.1", features = ["test"] }

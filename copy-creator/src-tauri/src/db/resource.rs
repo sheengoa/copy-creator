@@ -392,7 +392,14 @@ fn restore_trash_record_matching_name(
         return false;
     };
     drop(stmt);
-    restore_trash_item_on_conn(conn, library_root, roots, &trash_id).is_ok()
+    restore_trash_item_on_conn(
+        conn,
+        library_root,
+        roots,
+        &*super::trash_backend::trash_backend(),
+        &trash_id,
+    )
+    .is_ok()
 }
 
 pub fn forget_resource_records<R: Runtime>(app: &AppHandle<R>, paths: &[PathBuf]) {
@@ -786,6 +793,12 @@ pub fn settle_external_resource_changes<R: Runtime>(app: &AppHandle<R>, paths: &
             continue;
         }
         if path.exists() {
+            // 应用内删除进行中的路径跳过补录：事务已提交、文件尚未移入
+            // 系统回收站的窗口内，磁盘存在是删除流程的正常中间态，此时
+            // 补录会把记录当外部新文件重建（丢元数据）。
+            if delete_in_flight_contains(watch_path_key(path).as_path()) {
+                continue;
+            }
             existing.push(path.to_path_buf());
         } else {
             // 应用内删除进行中的路径跳过重定向与清退裁决：磁盘暂时缺文件

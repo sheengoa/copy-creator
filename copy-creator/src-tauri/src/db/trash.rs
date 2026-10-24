@@ -1,29 +1,37 @@
-// 回收站域：应用内删除资源改为移入库根**外**的隐藏回收站目录
-// （<库根>/../.<库名>.trash，与库同盘——移动是原子重命名，且资源库
-// 目录被清理/误删时回收站不受影响），记录整行序列化进 trash_items
-// （恢复时原样回插，保住分组/备注/类型等全部元数据）。
+// 回收站域：应用内删除资源改为移入**系统回收站**（Windows Shell COM /
+// Linux freedesktop 规范，经 trash_backend 抽象；测试注入临时目录 fake，
+// 绝不触碰真实系统回收站），记录整行序列化进 trash_items（恢复时原样
+// 回插，保住分组/备注/类型等全部元数据）。恢复优先按原始路径从系统回收
+// 站找回最新一版——资源管理器里删除的文件同样在系统回收站，对账/监听
+// 产生的占位条目因此也能真实恢复。
 // 时序硬约束：trash_items 行必须与 clipboard_records 行在同一事务内落库，
-// 文件移动放在事务提交后——watcher 裁决（forget/relocate）只作用于
-// clipboard_records 现存行，settle 运行时行已不在，不会被误清退或跟随
-// 重定向。文件移动失败则整体补偿回滚（文件移回 + 记录行回插）。
+// 文件移入系统回收站放在事务提交后——watcher 裁决（forget/relocate）只
+// 作用于 clipboard_records 现存行，settle 运行时行已不在，不会被误清退
+// 或跟随重定向；删除进行中守卫（delete_in_flight）覆盖事务到移入全程，
+// 防 settle 的补录把窗口内的现存文件当外部新文件重建记录。文件移入失败
+// 则整体补偿回滚（文件从系统回收站恢复回原位 + 记录行回插）。
+// 历史兼容：旧版本把回收站文件放在库外隐藏目录（.<库名>.trash）或库内
+// .trash，启动迁移会把它们改送系统回收站；迁移前的行仍按旧桶位置恢复
+// （resolve_trash_bucket / find_file_in_bucket / move_trash_files_back）。
 use super::*;
 use rusqlite::{params, params_from_iter};
 use tauri::{AppHandle, Emitter, Manager, Runtime};
+
+use super::trash_backend::{bin_path_eq, trash_backend, TrashBackend};
 
 pub(crate) const TRASH_DIR_NAME: &str = ".trash";
 /// v1 常量；settings 键 trash_retention 预留，设置页暴露放后续版本。
 pub(crate) const DEFAULT_TRASH_RETENTION_DAYS: i64 = 30;
 
-/// 待移动文件的暂存描述：主事务提交后逐项移入库外回收站目录。
-/// 附件不随文件移入 .trash——它们留在库根 .copy-creator/attachments
-/// （组只是 md 内的相对链接前缀），恢复后内链仍然有效；彻底删除时
-/// 按 record_json 清理附件。
+/// 待移入系统回收站的文件描述：主事务提交后逐项送入。附件不随文件进
+/// 系统回收站——它们留在库根 .copy-creator/attachments（组只是 md 内的
+/// 相对链接前缀），恢复后内链仍然有效；彻底删除时按 record_json 清理
+/// 附件。
 #[derive(Clone)]
 pub(crate) struct TrashedResourceFile {
     pub trash_id: String,
     pub record_id: String,
     pub resource_path: String,
-    pub trash_dir: String,
 }
 
 /// SELECT * 序列化整行（排除生成列 created_ms——插入生成列会报错；
@@ -112,7 +120,6 @@ pub(crate) fn insert_trash_item_in_tx(
         trash_id,
         record_id: record_id.to_string(),
         resource_path: resource_path.to_string(),
-        trash_dir,
     })
 }
 
@@ -166,103 +173,168 @@ fn resolve_trash_bucket(
         .find(|path| path.is_dir())
 }
 
-/// 一次性迁移：把历史版本放在库内的回收站（库根/.trash）整体移到库外
-/// 隐藏目录，用户清理资源库文件夹不会再连带删掉回收站内容。启动时调用。
+/// 一次性迁移：历史版本把回收站文件放在库外隐藏目录（.<库名>.trash）
+/// 或库内 .trash——启动时逐文件改送系统回收站。能对上 trash_items 行且
+/// 原始路径未被占用的文件先移回原位再送入（系统回收站记录的原始路径
+/// 与条目一致，恢复匹配才成立）；对不上行或被占用的直接从桶位置送入
+/// （用户在系统回收站可见、可手动还原，绝不静默删除）。迁移后删除已
+/// 清空的遗留目录；送入失败的文件保留原状，下次启动重试。
 pub(crate) fn migrate_trash_out_of_library<R: Runtime>(app: &AppHandle<R>) {
     let mut roots = resource_library_roots(app);
     let current = get_resource_library_dir(app);
     if !roots.iter().any(|root| root == &current) {
         roots.push(current.clone());
     }
-    for root in &roots {
-        let legacy = root.join(TRASH_DIR_NAME);
-        if !legacy.is_dir() {
-            continue;
-        }
-        let target = sibling_trash_base(root).join(TRASH_DIR_NAME);
-        if std::fs::create_dir_all(&target).is_err() {
-            continue;
-        }
-        let Ok(entries) = std::fs::read_dir(&legacy) else {
-            continue;
+    let rows: Vec<(String, String, String)> = {
+        let state = app.state::<DbState>();
+        let Ok(conn) = state.conn.lock() else {
+            return;
         };
-        let mut moved = 0usize;
-        for entry in entries.flatten() {
-            let from = entry.path();
-            let Ok(name) = entry.file_name().into_string() else {
+        conn.prepare("SELECT id, original_path, trash_dir FROM trash_items")
+            .and_then(|mut stmt| {
+                stmt.query_map([], |row| {
+                    Ok((
+                        row.get::<_, String>(0)?,
+                        row.get::<_, String>(1)?,
+                        row.get::<_, String>(2)?,
+                    ))
+                })?
+                .collect::<Result<Vec<_>, _>>()
+            })
+            .unwrap_or_default()
+    };
+    // 行索引：桶目录名（trash_dir 尾段）→ 原始路径。
+    let mut original_by_bucket: std::collections::HashMap<String, String> =
+        std::collections::HashMap::new();
+    for (_, original_path, trash_dir) in &rows {
+        if let Some(tail) = trash_dir.rsplit('/').next() {
+            original_by_bucket.insert(tail.to_string(), original_path.clone());
+        }
+    }
+    let ops = trash_backend();
+    let mut migrated = 0usize;
+    for root in &roots {
+        for legacy_base in [sibling_trash_base(root), root.join(TRASH_DIR_NAME)] {
+            if !legacy_base.is_dir() {
                 continue;
-            };
-            let mut dest = target.join(&name);
-            if dest.exists() {
-                dest = target.join(format!("{name}-{}", uuid::Uuid::new_v4().simple()));
             }
-            if std::fs::rename(&from, &dest).is_ok() {
-                moved += 1;
+            for file in walk_files(&legacy_base) {
+                let Some(bucket_name) = file
+                    .parent()
+                    .and_then(|parent| parent.file_name())
+                    .and_then(|name| name.to_str())
+                else {
+                    continue;
+                };
+                let sent = match original_by_bucket
+                    .get(bucket_name)
+                    .filter(|path| !path.is_empty())
+                    .map(PathBuf::from)
+                {
+                    // 原位未被占用：先回位再送入。
+                    Some(path) if !path.exists() => {
+                        if let Some(parent) = path.parent() {
+                            let _ = std::fs::create_dir_all(parent);
+                        }
+                        std::fs::rename(&file, &path).is_ok() && ops.send_to_trash(&path).is_ok()
+                    }
+                    // 原位被占用或行已消费：直接从桶位置送入。
+                    _ => ops.send_to_trash(&file).is_ok(),
+                };
+                if sent {
+                    migrated += 1;
+                }
             }
+            // 全部送出（rename 是移动）后自底向上清理空目录树（只删空
+            // 目录；有失败残留文件的层级保留，下次启动重试）。
+            remove_empty_dir_tree(&legacy_base);
         }
-        if legacy
-            .read_dir()
-            .map(|mut remaining| remaining.next().is_none())
-            .unwrap_or(true)
-        {
-            let _ = std::fs::remove_dir(&legacy);
-        }
-        if moved > 0 {
-            log::info!(
-                "库内回收站已迁移至 {}（迁移 {moved} 项）",
-                target.display()
-            );
-        }
+    }
+    if migrated > 0 {
+        log::info!("历史回收桶已改送系统回收站（迁移 {migrated} 项）");
     }
 }
 
-/// 主事务提交后：把资源文件移入库外的回收站目录。任一项失败即整体补偿——
-/// 已移动文件移回原位、trash_items 行删除、记录行从 record_json 回插，
-/// 对外表现为删除失败（不丢数据）。返回「文件在删除之前就已不在磁盘、
-/// 仅记录行入桶」的条目数，供删除结果如实告知用户。
+/// 递归收集目录下的全部文件（回收桶条目目录结构简单，深度有限）。
+fn walk_files(dir: &Path) -> Vec<PathBuf> {
+    let mut out = Vec::new();
+    let mut stack = vec![dir.to_path_buf()];
+    while let Some(current) = stack.pop() {
+        let Ok(entries) = std::fs::read_dir(&current) else {
+            continue;
+        };
+        for entry in entries.flatten() {
+            let path = entry.path();
+            if path.is_dir() {
+                stack.push(path);
+            } else {
+                out.push(path);
+            }
+        }
+    }
+    out
+}
+
+/// 自底向上删除空目录树：只删目录、不删任何文件；非空层级 remove_dir
+/// 自然失败并保留（供下次启动重试迁移）。
+fn remove_empty_dir_tree(dir: &Path) {
+    if let Ok(entries) = std::fs::read_dir(dir) {
+        for entry in entries.flatten() {
+            let path = entry.path();
+            if path.is_dir() {
+                remove_empty_dir_tree(&path);
+            }
+        }
+    }
+    let _ = std::fs::remove_dir(dir);
+}
+
+/// 主事务提交后：把资源文件移入系统回收站。任一项失败即整体补偿——
+/// 已移入的文件从系统回收站恢复回原位（send 刚成功，匹配项必为本次
+/// 删除的那条）、trash_items 行删除、记录行从 record_json 回插，对外
+/// 表现为删除失败（不丢数据）。返回「文件在删除之前就已不在磁盘、仅
+/// 记录行入桶」的条目数，供删除结果如实告知用户。
 pub(crate) fn move_trashed_resource_files<R: Runtime>(
     app: &AppHandle<R>,
-    library_root: &Path,
-    items: &[(TrashedResourceFile, Option<std::path::PathBuf>)],
+    roots: &[PathBuf],
+    items: &[TrashedResourceFile],
 ) -> Result<u32, String> {
-    let roots = resource_library_roots(app);
-    let mut moved_backups: Vec<(PathBuf, PathBuf)> = Vec::new();
-    let mut completed: Vec<&TrashedResourceFile> = Vec::new();
+    let ops = trash_backend();
     let mut files_already_missing = 0u32;
+    // completed 记录已移入系统回收站条目的原位路径——补偿恢复按它从
+    // 系统回收站找回（send_to_trash 之后原位必然已空，匹配项唯一且
+    // 是本次删除的那条）。
+    let mut completed: Vec<(&TrashedResourceFile, Option<PathBuf>)> = Vec::new();
     let result = (|| -> Result<(), String> {
-        for (item, staged_source) in items {
-            let trash_abs = sibling_trash_dir(library_root, &item.trash_dir);
-            std::fs::create_dir_all(&trash_abs)
-                .map_err(|e| format!("创建回收目录失败: {e}"))?;
-
-            // 主文件：外部暂存文件已 rename 到临时路径，从暂存位移动；
-            // 其余按 resource_path 定位；文件已不在磁盘则只留记录行。
-            let source: Option<PathBuf> = match staged_source {
-                Some(staged_path) => Some(staged_path.clone()),
-                None => resolve_trash_source(&roots, &item.record_id, &item.resource_path),
-            };
-            if let Some(source) = source {
-                let target_name = source
-                    .file_name()
-                    .map(|name| name.to_string_lossy().to_string())
-                    .unwrap_or_else(|| "file".to_string());
-                let target = trash_abs.join(&target_name);
-                std::fs::rename(&source, &target)
-                    .map_err(|e| format!("移入回收站失败: {e}"))?;
-                moved_backups.push((target, source));
-            } else {
+        for item in items {
+            // 定位主文件；文件已不在磁盘则只留记录行（占位条目——恢复时
+            // 优先按原始路径从系统回收站找回，其次同名关联）。
+            let Some(source) = resolve_trash_source(roots, &item.record_id, &item.resource_path)
+            else {
                 files_already_missing += 1;
+                completed.push((item, None));
+                continue;
+            };
+            if let Err(error) = ops.send_to_trash(&source) {
+                return Err(format!("移入系统回收站失败: {error}"));
             }
-            completed.push(item);
+            completed.push((item, Some(source)));
         }
         Ok(())
     })();
 
     if let Err(error) = result {
-        for (target, source) in moved_backups.iter().rev() {
-            let _ = std::fs::rename(target, source);
-        }
-        for item in completed {
+        for (item, source) in completed.iter().rev() {
+            if let Some(source) = source {
+                if let Err(restore_error) = ops.restore_newest(source) {
+                    // 补偿恢复失败不中断其余项的补偿：文件仍在系统回收站
+                    // （用户可手动还原），记录行照常回插保证列表一致。
+                    log::error!(
+                        "删除补偿从系统回收站恢复文件失败（trash={}，文件可手动还原）: {restore_error}",
+                        item.trash_id
+                    );
+                }
+            }
             compensate_trash_item(app, item.trash_id.as_str());
         }
         return Err(error);
@@ -289,43 +361,12 @@ fn resolve_trash_source(
     None
 }
 
-/// 竞态自愈：监听清退抢在删除事务之前把记录转存成空壳回收条目后，删除
-/// 事务查不到记录而跳过，暂存文件留在 leftover。把暂存文件按原文件名补
-/// 进该记录对应回收条目的桶目录——空壳条目变回实体条目，恢复照常还原。
-/// 找不到回收条目时报错，由调用方保留暂存文件（宁可留隐藏临时文件，
-/// 也不静默删除）。
-pub(crate) fn heal_staged_file_into_trash<R: Runtime>(
-    app: &AppHandle<R>,
-    record_id: &str,
-    staged_path: &Path,
-    original_name: &OsStr,
-) -> Result<PathBuf, String> {
-    let library_root = get_resource_library_dir(app);
-    let state = app.state::<DbState>();
-    let conn = state.conn.lock().map_err(|e| e.to_string())?;
-    let trash_dir: String = conn
-        .query_row(
-            "SELECT trash_dir FROM trash_items WHERE record_id = ?1
-             ORDER BY trashed_ms DESC LIMIT 1",
-            params![record_id],
-            |row| row.get(0),
-        )
-        .optional()
-        .map_err(|e| e.to_string())?
-        .ok_or_else(|| "记录既无现存行也无回收条目".to_string())?;
-    drop(conn);
-    let bucket = sibling_trash_dir(&library_root, &trash_dir);
-    std::fs::create_dir_all(&bucket).map_err(|e| format!("创建回收目录失败: {e}"))?;
-    let target = bucket.join(original_name);
-    std::fs::rename(staged_path, &target).map_err(|e| format!("暂存文件补入回收站失败: {e}"))?;
-    Ok(target)
-}
-
 /// 对账/监听清退的兜底转存：把"文件已不在库内"的记录整行转入应用内
 /// 回收站，而不是直接删除——记录永不对账即消失，用户可在回收站查看、
-/// 恢复（三态如实提示文件缺失）或彻底删除。
-/// 注意：原文件已不在磁盘，trash_dir 仅作占位、不落盘；恢复与彻底删除
-/// 对缺失目录均按尽力而为处理，恢复时还会走同名文件自动关联兜底。
+/// 恢复（优先按原始路径从系统回收站找回——资源管理器删除的文件就在
+/// 那里；其次同名文件自动关联）或彻底删除。
+/// 注意：原文件已不在磁盘、也不再另存副本，has_file 由系统回收站匹配
+/// 与同名关联兜底判定；恢复时还会走同名文件自动关联兜底。
 pub(crate) fn archive_resource_record_to_trash(
     conn: &rusqlite::Connection,
     root: &Path,
@@ -455,9 +496,10 @@ pub(crate) fn reinsert_record_from_json(
 pub(crate) fn list_trash_items_internal<R: Runtime>(
     app: &AppHandle<R>,
 ) -> Result<Vec<serde_json::Value>, String> {
-    // 多根与库根解析要在拿数据库锁之前完成（同 restore 的锁序约束）。
+    // 多根/库根解析与系统回收站快照都要在拿数据库锁之前完成（锁序约束）。
     let library_root = get_resource_library_dir(app);
     let roots = resource_library_roots(app);
+    let bin_paths = trash_backend().list_original_paths()?;
     let state = app.state::<DbState>();
     let conn = state.conn.lock().map_err(|e| e.to_string())?;
     let mut stmt = conn
@@ -487,11 +529,16 @@ pub(crate) fn list_trash_items_internal<R: Runtime>(
         .into_iter()
         .map(
             |(id, file_name, original_group, original_path, trashed_at, record_json, trash_dir)| {
-                // 条目实体判定（运行时 stat，不持久化——外部动过桶后仍真实）：
-                // 原位文件还在，或回收桶内能找到该文件名的主文件。对账转存
-                // 的占位条目（无桶）两者皆无，如实标为文件已丢失。
-                let has_file = PathBuf::from(&original_path).is_file()
-                    || match Path::new(&original_path).file_name() {
+                // 条目实体判定（运行时判定，不持久化——磁盘与系统回收站
+                // 随时在变）：原位文件还在，或系统回收站有该原始路径的
+                // 条目（含资源管理器删除的文件），或历史桶目录内能找到
+                // （迁移前的遗留条目）。三者皆无才如实标为文件已丢失。
+                let original = Path::new(&original_path);
+                let has_file = original.is_file()
+                    || bin_paths
+                        .iter()
+                        .any(|entry| bin_path_eq(&entry.original_path, original))
+                    || match original.file_name() {
                         Some(name) => resolve_trash_bucket(&roots, &library_root, trash_dir.as_str())
                             .and_then(|bucket| find_file_in_bucket(&bucket, name))
                             .is_some(),
@@ -535,17 +582,17 @@ pub fn trash_items_count(app: AppHandle) -> Result<u64, String> {
         .map_err(|e| e.to_string())
 }
 
-/// 恢复：文件移回原位（同名自动加序号并同步记录路径），记录行整行回插。
-/// 恢复出的文件会触发 watcher 到达事件，自动发现按路径去重（resource.rs
-/// discover 的 by_path 表）——插行在前即不会重复建记录；仍按 resource_path
-/// 兜底清理极端时序下可能已建的幽灵记录。
-/// 单条恢复结果三态。
-/// - Restored：文件从 .trash 移回原位（被占用自动加序号；原位已有同名
-///   文件时视同恢复，无需移动）；
-/// - Relinked：.trash 无文件，但库内存在唯一同名文件，记录改指过去
-///   （记录跟随文件，不移动用户整理好的目录结构）；
-/// - MetadataOnly：库内也找不到文件（或同名候选多于一个），仅恢复记录
-///   元数据——文件在入回收站之前就已丢失，恢复无法凭空还原。
+/// 恢复：优先从系统回收站按原始路径找回最新一版（应用内删除与资源
+/// 管理器删除都覆盖），记录行整行回插。恢复出的文件会触发 watcher 到达
+/// 事件，自动发现按路径去重（resource.rs discover 的 by_path 表）——
+/// 插行在前即不会重复建记录；仍按 resource_path 兜底清理极端时序下
+/// 可能已建的幽灵记录。单条恢复结果三态。
+/// - Restored：原位文件还在（视同恢复），或从系统回收站恢复回原位，
+///   或从历史回收桶移回原位；
+/// - Relinked：回收站与历史桶都无文件，但库内存在唯一同名文件，记录
+///   改指过去（记录跟随文件，不移动用户整理好的目录结构）；
+/// - MetadataOnly：都找不到文件（或同名候选多于一个），仅恢复记录
+///   元数据——文件已被彻底清除，恢复无法凭空还原。
 #[derive(Clone, Copy, Debug, serde::Serialize)]
 #[serde(rename_all = "snake_case")]
 pub(crate) enum RestoreOutcome {
@@ -593,23 +640,26 @@ pub(crate) fn restore_trash_item_internal<R: Runtime>(
     app: &AppHandle<R>,
     id: &str,
 ) -> Result<RestoreOutcome, String> {
-    // 多根查找要在拿数据库锁之前完成：roots 解析要读 settings，而
-    // conn 是不可重入 Mutex，锁内再取会死锁（purge 同样先 drop(conn)）。
+    // 多根/库根解析与回收站后端获取都要在拿数据库锁之前完成（锁序约束：
+    // roots 解析要读 settings，conn 是不可重入 Mutex，锁内再取会死锁）。
     let library_root = get_resource_library_dir(app);
     let roots = resource_library_roots(app);
+    let ops = trash_backend();
     let state = app.state::<DbState>();
     let conn = state.conn.lock().map_err(|e| e.to_string())?;
-    let outcome = restore_trash_item_on_conn(&conn, &library_root, &roots, id)?;
+    let outcome = restore_trash_item_on_conn(&conn, &library_root, &roots, ops.as_ref(), id)?;
     drop(conn);
     let _ = app.emit("resource-groups-changed", ());
     Ok(outcome)
 }
 
 /// 恢复核心：调用方须已持有数据库锁（不可重入），本函数自身不再加锁。
+/// ops 由调用方传入（单条与批量恢复、同名复活共用）。
 pub(crate) fn restore_trash_item_on_conn(
     conn: &rusqlite::Connection,
     library_root: &Path,
     roots: &[PathBuf],
+    ops: &dyn TrashBackend,
     id: &str,
 ) -> Result<RestoreOutcome, String> {
     let (record_id, record_json, original_path, trash_dir): (String, String, String, String) = conn
@@ -620,38 +670,52 @@ pub(crate) fn restore_trash_item_on_conn(
         )
         .map_err(|e| format!("回收站条目不存在: {e}"))?;
 
-    // 回收目录解析（按优先级）：当前库根 sibling → 各根 sibling 与库内
-    // 旧位置（迁移前的历史遗留）。None = 桶不存在（占位条目或被外部
-    // 清理），维持「无文件可移」的原语义。
-    let trash_abs = resolve_trash_bucket(roots, library_root, trash_dir.as_str());
-
     let original = PathBuf::from(&original_path);
-    let moved = if !original_path.is_empty() {
-        move_trash_files_back(trash_abs.as_deref(), original_path.as_str())?
-    } else {
-        None
-    };
 
+    // 文件找回判定（按优先级）：
+    // 1) 原位文件还在（恢复前被外部放回）→ 视同恢复，无需移动；
+    // 2) 系统回收站有该原始路径的条目 → 恢复最新一版回原路径（应用内
+    //    删除与资源管理器删除都走这里；父目录可能已被整组清理，先建）；
+    // 3) 历史回收桶（迁移前的遗留条目）内有该文件 → 移回原位，被占用
+    //    自动加序号并同步记录路径；
+    // 4) 库内唯一同名文件 → 改指过去；
+    // 5) 都没有 → 仅恢复元数据。
     let mut updated_json = record_json.clone();
-    let (outcome, effective_path) = match moved {
-        Some(final_path) => {
-            if final_path != original {
-                updated_json = rewrite_json_path(&record_json, &final_path)?;
-            }
-            (RestoreOutcome::Restored, final_path)
+    let (outcome, effective_path) = if original.is_file() {
+        (RestoreOutcome::Restored, original.clone())
+    } else if !original_path.is_empty()
+        && ops
+            .list_original_paths()?
+            .iter()
+            .any(|entry| bin_path_eq(&entry.original_path, &original))
+    {
+        if let Some(parent) = original.parent() {
+            std::fs::create_dir_all(parent).map_err(|e| format!("创建原分组目录失败: {e}"))?;
         }
-        None if original.is_file() => (RestoreOutcome::Restored, original.clone()),
-        None => {
-            let file_name = original
-                .file_name()
-                .map(|name| name.to_string_lossy().to_string())
-                .unwrap_or_default();
-            match find_same_named_file(roots, &file_name) {
-                Some(found) => {
-                    updated_json = rewrite_json_path(&record_json, &found)?;
-                    (RestoreOutcome::Relinked, found)
+        ops.restore_newest(&original)?;
+        (RestoreOutcome::Restored, original.clone())
+    } else {
+        // 历史回收桶遗留（启动迁移完成前的旧条目）：原桶恢复语义整段保留。
+        let trash_abs = resolve_trash_bucket(roots, library_root, trash_dir.as_str());
+        match move_trash_files_back(trash_abs.as_deref(), original_path.as_str())? {
+            Some(final_path) => {
+                if final_path != original {
+                    updated_json = rewrite_json_path(&record_json, &final_path)?;
                 }
-                None => (RestoreOutcome::MetadataOnly, original.clone()),
+                (RestoreOutcome::Restored, final_path)
+            }
+            None => {
+                let file_name = original
+                    .file_name()
+                    .map(|name| name.to_string_lossy().to_string())
+                    .unwrap_or_default();
+                match find_same_named_file(roots, &file_name) {
+                    Some(found) => {
+                        updated_json = rewrite_json_path(&record_json, &found)?;
+                        (RestoreOutcome::Relinked, found)
+                    }
+                    None => (RestoreOutcome::MetadataOnly, original.clone()),
+                }
             }
         }
     };
@@ -699,7 +763,9 @@ pub(crate) fn restore_trash_item_on_conn(
     }
     conn.execute("DELETE FROM trash_items WHERE id = ?1", params![id])
         .map_err(|e| e.to_string())?;
-    if let Some(bucket) = &trash_abs {
+    // 历史回收桶遗留：恢复完成后清理该条目的桶目录（迁移后的新条目
+    // 从不落桶，解析返回 None 自然跳过）。
+    if let Some(bucket) = resolve_trash_bucket(roots, library_root, trash_dir.as_str()) {
         let _ = std::fs::remove_dir_all(bucket);
     }
     Ok(outcome)
@@ -766,8 +832,9 @@ fn find_file_in_bucket(bucket: &Path, file_name: &OsStr) -> Option<PathBuf> {
     }
 }
 
-/// 移回主文件；原位被占用时依次尝试 "name (1).ext"，返回最终落位路径
-/// （None = 回收站内没有该文件，无需移动）。
+/// 移回主文件到原位（调用方已判定原位不存在）。返回是否实际移动
+/// （None = 历史桶内没有该文件，无需移动）。仅供迁移完成前的历史
+/// 桶遗留条目恢复使用。
 fn move_trash_files_back(
     trash_abs: Option<&Path>,
     original_path: &str,
@@ -787,28 +854,9 @@ fn move_trash_files_back(
         std::fs::rename(&source, &original).map_err(|e| format!("恢复文件失败: {e}"))?;
         return Ok(Some(original));
     }
-    // 同名冲突：加序号后缀，并让调用方同步记录里的路径。
-    let stem = original
-        .file_stem()
-        .map(|s| s.to_string_lossy().to_string())
-        .unwrap_or_default();
-    let extension = original
-        .extension()
-        .map(|s| s.to_string_lossy().to_string())
-        .unwrap_or_default();
-    for index in 1..=999u32 {
-        let candidate_name = if extension.is_empty() {
-            format!("{stem} ({index})")
-        } else {
-            format!("{stem} ({index}).{extension}")
-        };
-        let candidate = original.with_file_name(candidate_name);
-        if !candidate.exists() {
-            std::fs::rename(&source, &candidate).map_err(|e| format!("恢复文件失败: {e}"))?;
-            return Ok(Some(candidate));
-        }
-    }
-    Err("恢复位置存在大量同名文件，无法自动命名".to_string())
+    // 原位被占用时视同恢复（调用方判定树第 1 步已先行处理，此处仅防御）：
+    // 不覆盖占用文件，桶内副本保留待用户在系统侧处理。
+    Ok(None)
 }
 
 /// 恢复落位路径与原路径不同时，同步 record_json 里的 content / resource_path。
@@ -835,8 +883,9 @@ fn rewrite_json_id(record_json: &str, new_id: &str) -> Result<String, String> {
     serde_json::to_string(&value).map_err(|e| format!("序列化记录失败: {e}"))
 }
 
-/// 彻底删除：ids 为空表示清空全部。文件删除尽力而为（跨库历史根也找），
-/// trash_items 行必删。
+/// 彻底删除：ids 为空表示清空全部。文件删除尽力而为——系统回收站内
+/// 按原始路径清除全部匹配条目（可能已被用户在系统侧清空），历史回收
+/// 桶遗留一并清理；trash_items 行必删。
 #[tauri::command]
 pub fn purge_trash_items(app: AppHandle, ids: Vec<String>) -> Result<(), String> {
     purge_trash_internal(&app, if ids.is_empty() { None } else { Some(&ids) })?;
@@ -850,12 +899,12 @@ pub(crate) fn purge_trash_internal<R: Runtime>(
 ) -> Result<(), String> {
     let state = app.state::<DbState>();
     let conn = state.conn.lock().map_err(|e| e.to_string())?;
-    let rows: Vec<(String, String, String, String)> = match ids {
+    let rows: Vec<(String, String, String, String, String)> = match ids {
         Some(ids) => {
             let mut out = Vec::new();
             for id in ids {
                 if let Ok(row) = conn.query_row(
-                    "SELECT id, trash_dir, record_json, record_id FROM trash_items WHERE id = ?1",
+                    "SELECT id, original_path, record_json, record_id, trash_dir FROM trash_items WHERE id = ?1",
                     params![id],
                     |row| {
                         Ok((
@@ -863,6 +912,7 @@ pub(crate) fn purge_trash_internal<R: Runtime>(
                             row.get::<_, String>(1)?,
                             row.get::<_, String>(2)?,
                             row.get::<_, String>(3)?,
+                            row.get::<_, String>(4)?,
                         ))
                     },
                 ) {
@@ -873,7 +923,7 @@ pub(crate) fn purge_trash_internal<R: Runtime>(
         }
         None => {
             let mut stmt = conn
-                .prepare("SELECT id, trash_dir, record_json, record_id FROM trash_items")
+                .prepare("SELECT id, original_path, record_json, record_id, trash_dir FROM trash_items")
                 .map_err(|e| e.to_string())?;
             let rows = stmt
                 .query_map([], |row| {
@@ -882,6 +932,7 @@ pub(crate) fn purge_trash_internal<R: Runtime>(
                         row.get::<_, String>(1)?,
                         row.get::<_, String>(2)?,
                         row.get::<_, String>(3)?,
+                        row.get::<_, String>(4)?,
                     ))
                 })
                 .map_err(|e| e.to_string())?;
@@ -890,6 +941,8 @@ pub(crate) fn purge_trash_internal<R: Runtime>(
     };
     drop(conn);
     let roots = resource_library_roots(app);
+    // 历史回收桶遗留（迁移完成前的旧条目）随彻底删除一并清理；迁移后
+    // 的新条目从不落桶，remove_dir_all 对不存在目录是静默 no-op。
     let purge_bases: Vec<PathBuf> = roots
         .iter()
         .flat_map(|root| {
@@ -899,7 +952,23 @@ pub(crate) fn purge_trash_internal<R: Runtime>(
             ]
         })
         .collect();
-    for (id, trash_dir, record_json, record_id) in rows {
+    let ops = trash_backend();
+    // 系统回收站批量清除：一次枚举覆盖全部原始路径（best-effort——条目
+    // 可能已被用户在系统侧清空，失败仅留痕不阻断记录行清理）。
+    let mut bin_targets: Vec<PathBuf> = rows
+        .iter()
+        .map(|(_, original_path, ..)| original_path)
+        .filter(|path| !path.is_empty())
+        .map(PathBuf::from)
+        .collect();
+    bin_targets.sort();
+    bin_targets.dedup();
+    if !bin_targets.is_empty() {
+        if let Err(error) = ops.purge_batch(&bin_targets) {
+            log::warn!("从系统回收站彻底清除失败: {error}");
+        }
+    }
+    for (id, _original_path, record_json, record_id, trash_dir) in rows {
         for base in &purge_bases {
             let _ = std::fs::remove_dir_all(base.join(&trash_dir));
         }

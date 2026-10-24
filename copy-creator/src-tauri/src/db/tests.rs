@@ -638,7 +638,6 @@ mod resource_command_tests {
         reorder_resource_groups_inner, resolve_resource_file_path, resource_file_id,
         resource_folder_tree, resource_group_count_map, set_resource_note_inner,
         settle_external_resource_changes, simplify_windows_path,
-        restore_staged_external_resource_files, stage_external_resource_files,
         validate_resource_rename_stem, update_resource_group_inner,
         DbState, RESOURCE_INDEX_MIGRATION_SQL, RESOURCE_TEXT_PASTE_LIMIT_BYTES,
     };
@@ -1595,61 +1594,6 @@ mod resource_command_tests {
         );
         // 非 Windows 风格路径不受影响。
         assert_eq!(simplify_windows_path(Path::new("/home/a/b.png")), Path::new("/home/a/b.png"));
-    }
-
-    #[test]
-    fn external_resource_files_can_be_restored_before_database_commit() {
-        let (app, root) = test_app();
-        let first = root.join("first.bin");
-        let second = root.join("nested/second.bin");
-        std::fs::create_dir_all(second.parent().unwrap()).unwrap();
-        std::fs::write(&first, [1_u8, 2, 3]).unwrap();
-        std::fs::write(&second, [4_u8, 5, 6]).unwrap();
-        let ids = vec![resource_file_id(&first), resource_file_id(&second)];
-
-        let staged = stage_external_resource_files(app.handle(), &ids).unwrap();
-        assert!(!first.exists());
-        assert!(!second.exists());
-        restore_staged_external_resource_files(&staged.files);
-
-        assert!(first.is_file());
-        assert!(second.is_file());
-        cleanup(&root);
-    }
-
-    // 删除补偿回位的同名占用保护：删除窗口期用户放入原位的同名新文件
-    // 不得被补偿覆盖（Unix rename 会静默替换目标）——暂存文件保留待
-    // 人工处理，Windows 上 rename 本就失败，两平台同语义。
-    #[test]
-    fn restoring_staged_files_never_overwrites_occupied_original() {
-        let (app, root) = test_app();
-        let file = root.join("占用.png");
-        std::fs::write(&file, b"old-content").unwrap();
-        let ids = vec![resource_file_id(&file)];
-
-        let staged = stage_external_resource_files(app.handle(), &ids).unwrap();
-        assert!(!file.exists());
-        std::fs::write(&file, b"user-new-file").unwrap();
-
-        restore_staged_external_resource_files(&staged.files);
-
-        assert_eq!(
-            std::fs::read(&file).unwrap(),
-            b"user-new-file",
-            "窗口期用户文件不得被补偿覆盖"
-        );
-        let leftover = std::fs::read_dir(&root)
-            .unwrap()
-            .flatten()
-            .find(|entry| {
-                entry
-                    .file_name()
-                    .to_string_lossy()
-                    .starts_with(".copy-creator-delete-")
-            })
-            .expect("暂存文件必须保留");
-        assert_eq!(std::fs::read(leftover.path()).unwrap(), b"old-content");
-        cleanup(&root);
     }
 
     #[test]
@@ -4202,12 +4146,12 @@ mod trash_tests {
     use crate::db::{
         archive_resource_record_to_trash, delete_clipboard_records_internal, ensure_schema,
         list_trash_items_internal, discover_external_resource_files, get_clipboard_records_inner,
-        migrate_trash_out_of_library, prune_old_records, purge_trash_internal,
+        prune_old_records, purge_trash_internal,
         register_delete_in_flight, restore_trash_item_internal, resource_file_id,
         settle_external_resource_changes, sync_resource_library, DbState, RestoreOutcome,
     };
+    use crate::db::trash_backend::{fake_count, fake_send};
     use rusqlite::params;
-    use std::io::{Read, Write};
     use std::path::{Path, PathBuf};
     use std::sync::Mutex;
     use tauri::Manager;
@@ -4274,9 +4218,9 @@ mod trash_tests {
         .unwrap()
     }
 
-    // 应用内删除资源记录：文件移入库根 .trash（原位消失）、trash_items
-    // 落一行、clipboard_records 无行；恢复后文件回原位、记录整行回插
-    // （分组/备注经 resource_path 与元数据保留）。
+    // 应用内删除资源记录：文件移入系统回收站（fake 中有条目、原位消失）、
+    // trash_items 落一行、clipboard_records 无行；恢复后文件回原位、记录
+    // 整行回插（分组/备注经 resource_path 与元数据保留）。
     #[test]
     fn deleting_resource_record_trashes_file_and_restore_brings_it_back() {
         let (app, library) = trash_test_app();
@@ -4291,34 +4235,72 @@ mod trash_tests {
 
         assert_eq!(record_count(&app, "r1"), 0);
         assert!(!file.exists());
+        assert_eq!(fake_count(&file), 1, "文件应移入系统回收站（fake）");
         let items = list_trash_items_internal(&handle).unwrap();
         assert_eq!(items.len(), 1);
         assert_eq!(items[0]["file_name"], serde_json::json!("报价.pdf"));
         assert_eq!(items[0]["original_group"], serde_json::json!("项目资料"));
+        assert_eq!(items[0]["has_file"], serde_json::Value::Bool(true));
         let trash_id = items[0]["id"].as_str().unwrap().to_string();
 
         restore_trash_item_internal(&handle, &trash_id).unwrap();
 
         assert!(file.exists());
         assert_eq!(std::fs::read(&file).unwrap(), b"pdf");
+        assert_eq!(fake_count(&file), 0, "恢复后系统回收站条目应随之消失");
         assert_eq!(record_count(&app, "r1"), 1);
         assert!(list_trash_items_internal(&handle).unwrap().is_empty());
     }
 
-    // 恢复同名冲突：原位已被同名文件占用时恢复为 "name (1).ext"，并同步
-    // 记录的 content / resource_path 指向新落位文件。
+    // 历史回收桶遗留（迁移前的旧条目）：恢复走旧桶路径，文件移回原位、
+    // 桶目录清理。
     #[test]
-    fn restore_resolves_name_conflicts_with_numbered_suffix() {
+    fn legacy_bucket_restore_moves_file_back_to_original() {
         let (app, library) = trash_test_app();
         let handle = app.handle().clone();
         let group_dir = library.join("组");
         std::fs::create_dir_all(&group_dir).unwrap();
         let file = group_dir.join("doc.txt");
         std::fs::write(&file, b"old").unwrap();
-        insert_external_record(&app, "r1", &file, &[]);
 
-        delete_clipboard_records_internal(&handle, &["r1".to_string()]).unwrap();
-        std::fs::write(&file, b"occupied").unwrap();
+        // 历史形态：trash_items 行 + 库外 sibling 桶内的文件（迁移前状态）。
+        let sub = format!(
+            "{}-{}",
+            chrono::Utc::now().timestamp_millis(),
+            uuid::Uuid::new_v4().simple()
+        );
+        let bucket_file = library
+            .parent()
+            .unwrap()
+            .join(format!(
+                ".{}.trash/.trash/{sub}",
+                library.file_name().and_then(|n| n.to_str()).unwrap()
+            ))
+            .join("doc.txt");
+        std::fs::create_dir_all(bucket_file.parent().unwrap()).unwrap();
+        std::fs::write(&bucket_file, b"old").unwrap();
+        {
+            let record_json = serde_json::json!({
+                "id": "r1", "type": "file", "content": file.to_string_lossy(),
+                "created_at": "2026-09-19T00:00:00Z", "group_name": "组",
+                "storage_mode": "resource", "resource_path": file.to_string_lossy(),
+                "resource_external": 1, "attachments": "[]",
+            });
+            let state = app.state::<DbState>();
+            let conn = state.conn.lock().unwrap();
+            conn.execute(
+                "INSERT INTO trash_items
+                 (id, record_id, record_json, file_name, original_group, original_path, trash_dir, trashed_at, trashed_ms)
+                 VALUES ('t1', 'r1', ?1, 'doc.txt', '组', ?2, ?3, '2026-09-29T00:00:00Z', 0)",
+                params![
+                    record_json.to_string(),
+                    file.to_string_lossy().as_ref(),
+                    format!(".trash/{sub}"),
+                ],
+            )
+            .unwrap();
+        }
+        std::fs::remove_file(&file).unwrap();
 
         let trash_id = list_trash_items_internal(&handle).unwrap()[0]["id"]
             .as_str()
@@ -4326,9 +4308,9 @@ mod trash_tests {
             .to_string();
         restore_trash_item_internal(&handle, &trash_id).unwrap();
 
-        let restored = group_dir.join("doc (1).txt");
-        assert!(restored.exists());
-        assert_eq!(std::fs::read(&restored).unwrap(), b"old");
+        assert!(file.exists(), "历史桶文件应移回原位");
+        assert_eq!(std::fs::read(&file).unwrap(), b"old");
+        assert!(!bucket_file.exists(), "桶内副本应清位");
         let state = app.state::<DbState>();
         let conn = state.conn.lock().unwrap();
         let stored_path: String = conn
@@ -4338,7 +4320,7 @@ mod trash_tests {
                 |row| row.get(0),
             )
             .unwrap();
-        assert_eq!(Path::new(&stored_path), restored.as_path());
+        assert_eq!(Path::new(&stored_path), file.as_path());
     }
 
     // 恢复三态之 Relinked：入回收站前文件已丢失（仅记录行入桶），库内
@@ -4656,7 +4638,7 @@ mod trash_tests {
         assert!(group_dir.exists());
     }
 
-    // 启动迁移：历史版本放在库内的 .trash 整体迁到库外隐藏目录，
+    // 启动迁移：历史版本放在库内 .trash 的文件改送系统回收站（fake），
     // 旧回收记录无需任何处理即可继续恢复。
     #[test]
     fn legacy_library_trash_migrates_out_of_library() {
@@ -4665,7 +4647,8 @@ mod trash_tests {
         let group_dir = library.join("组");
         std::fs::create_dir_all(&group_dir).unwrap();
         let file = group_dir.join("迁移.png");
-        std::fs::write(&file, PNG_BYTES).unwrap();
+        // 真实历史场景：原位文件已删除（所以副本躺在桶里），原位必须为空，
+        // 迁移才能「先回位再送入」并让系统回收站记录到正确的原始路径。
 
         // 历史形态：记录在回收站，文件位于库内 .trash/<子目录>/。
         let sub = format!(
@@ -4705,7 +4688,8 @@ mod trash_tests {
 
         crate::db::migrate_trash_out_of_library(&handle);
 
-        // 库内 .trash 已清空；内容在库外隐藏目录。
+        // 库内 .trash 已清空；文件改送系统回收站（fake），且迁移是先回位
+        // 再送入——系统回收站记录的原始路径与条目一致，恢复匹配才成立。
         assert!(
             !library.join(".trash").exists()
                 || std::fs::read_dir(library.join(".trash"))
@@ -4713,19 +4697,16 @@ mod trash_tests {
                     .next()
                     .is_none()
         );
-        let sibling_now = library
-            .parent()
-            .unwrap()
-            .join(format!(
-                ".{}.trash/.trash/{sub}",
-                library.file_name().and_then(|n| n.to_str()).unwrap()
-            ))
-            .join("迁移.png");
-        assert!(sibling_now.exists(), "迁移后文件应在库外回收站内");
+        assert_eq!(
+            fake_count(&file),
+            1,
+            "迁移后文件应在系统回收站（fake）且原始路径为库内原位"
+        );
 
         // 旧回收记录无需处理即可恢复：文件原样回原位。
         let items = list_trash_items_internal(&handle).unwrap();
         assert_eq!(items.len(), 1);
+        assert_eq!(items[0]["has_file"], serde_json::Value::Bool(true));
         let outcome =
             restore_trash_item_internal(&handle, items[0]["id"].as_str().unwrap()).unwrap();
         assert!(matches!(outcome, RestoreOutcome::Restored));
@@ -4758,6 +4739,7 @@ mod trash_tests {
         purge_trash_internal(&handle, Some(&[trash_id])).unwrap();
 
         assert!(!file.exists());
+        assert_eq!(fake_count(&file), 0, "彻底删除应连系统回收站内条目一并清除");
         assert!(!attachment.exists());
         assert!(list_trash_items_internal(&handle).unwrap().is_empty());
         assert_eq!(record_count(&app, "r1"), 0);
@@ -4843,15 +4825,15 @@ mod trash_tests {
         assert!(list_trash_items_internal(&handle).unwrap().is_empty());
         std::fs::remove_dir_all(&library_b).ok();
     }
-    // 删除入回收站后监听结算不得把 .trash 内文件当「到达」重新入库。
-    // 回归锚点：is_ignored_resource_dir 曾只排除 .copy-creator/thumbs，
-    // 删除资源的瞬间 watcher 结算会把回收站内文件重新入库，「全部」列表
-    // 顶部出现指向回收站的幽灵重复卡片，持续到恢复、彻底删除或重启对账。
+    // 删除入回收站后监听结算不得把已删除路径当外部变更重新裁决。回归
+    // 锚点：is_ignored_resource_dir 曾只排除 .copy-creator/thumbs，删除
+    // 资源的瞬间 watcher 结算会误处理；文件现已移入系统回收站（fake，
+    // 库外），结算看到的是原路径消失——必须按删除进行中守卫跳过。
     #[test]
     fn settle_after_trash_does_not_rediscover_trashed_files() {
         assert!(
             crate::db::is_ignored_resource_dir(std::ffi::OsStr::new(".trash")),
-            ".trash 必须在应用自身目录忽略规则内"
+            ".trash 必须在应用自身目录忽略规则内（历史桶遗留兼容）"
         );
 
         let (app, library) = trash_test_app();
@@ -4863,30 +4845,24 @@ mod trash_tests {
         insert_external_record(&app, "r1", &file, &[]);
 
         delete_clipboard_records_internal(&handle, &["r1".to_string()]).unwrap();
+        assert_eq!(fake_count(&file), 1);
 
-        // 模拟 watcher 防抖结束后的结算：源路径已消失，.trash 内目标已到达。
-        let trash_root = library
-            .parent()
-            .unwrap()
-            .join(format!(
-                ".{}.trash/.trash",
-                library.file_name().and_then(|n| n.to_str()).unwrap()
-            ));
-        let mut inner = None;
-        for entry in std::fs::read_dir(&trash_root).unwrap().flatten() {
-            for sub in std::fs::read_dir(entry.path()).unwrap().flatten() {
-                inner = Some(sub.path());
-            }
-        }
-        let inner = inner.expect("trash 目录应有移入文件");
-        crate::db::settle_external_resource_changes(&handle, &[file.clone(), inner]);
+        // 模拟 watcher 防抖结束后的结算：源路径已消失（守卫应跳过）。
+        crate::db::settle_external_resource_changes(&handle, &[file.clone()]);
 
-        let state = app.state::<DbState>();
-        let conn = state.conn.lock().unwrap();
-        let count: i64 = conn
-            .query_row("SELECT COUNT(*) FROM clipboard_records", [], |row| row.get(0))
-            .unwrap();
-        assert_eq!(count, 0, ".trash 内文件被监听结算重新入库为幽灵记录");
+        // 锁不可重入：计数与列表查询各自独立持锁（同 record_count 纪律）。
+        let count: i64 = {
+            let state = app.state::<DbState>();
+            let conn = state.conn.lock().unwrap();
+            conn.query_row("SELECT COUNT(*) FROM clipboard_records", [], |row| row.get(0))
+                .unwrap()
+        };
+        assert_eq!(count, 0, "删除后结算不得重建任何记录");
+        assert_eq!(
+            list_trash_items_internal(&handle).unwrap().len(),
+            1,
+            "结算不得对删除进行中的路径重复归档"
+        );
     }
 
     // 同名改指（Relinked）时，resource-file 形态 id 必须随路径级联改写
@@ -5193,76 +5169,48 @@ mod trash_tests {
         assert_eq!(summary.files_already_missing, 1);
     }
 
-    // 竞态自愈：监听清退抢在删除事务之前把记录转存成空壳回收条目后，
-    // 删除事务查不到记录而跳过，暂存文件必须按原文件名补进空壳条目的
-    // 桶目录——空壳变实体，恢复照常还原。绝不允许暂存文件被当作
-    // leftover 彻底删除（历史真丢路径）。
+    // 本方案最大收益的钉子：用户在资源管理器里删除文件（进系统回收站）
+    // → 对账清退转存占位条目 → 占位条目按原始路径从系统回收站找回文件
+    // 真实恢复。此前的占位条目只能 metadata_only，恢复按钮直接禁用。
     #[test]
-    fn delete_race_with_early_settle_heals_staged_file_into_trash() {
+    fn external_delete_placeholder_restorable_via_system_bin() {
         let (app, library) = trash_test_app();
         let handle = app.handle().clone();
         let group_dir = library.join("组");
         std::fs::create_dir_all(&group_dir).unwrap();
-        let file = group_dir.join("竞态.png");
-        std::fs::write(&file, b"race").unwrap();
-        let record_id = resource_file_id(&file);
-        insert_external_record(&app, &record_id, &file, &[]);
+        let alive = group_dir.join("存活.png");
+        std::fs::write(&alive, b"1").unwrap();
+        insert_external_record(&app, "r1", &alive, &[]);
+        let file = group_dir.join("外部删除.png");
+        std::fs::write(&file, b"explorer-deleted").unwrap();
+        insert_external_record(&app, "r2", &file, &[]);
 
-        // 模拟监听清退抢在删除事务之前运行：记录整行转存（空壳，无文件）。
-        {
-            let state = app.state::<DbState>();
-            let conn = state.conn.lock().unwrap();
-            archive_resource_record_to_trash(&conn, &library, &record_id, &file.to_string_lossy())
-                .unwrap();
-        }
+        // 资源管理器删除：文件进系统回收站（fake），应用侧只剩记录。
+        fake_send(&file);
+        assert!(!file.exists());
 
-        delete_clipboard_records_internal(&handle, &[record_id.clone()]).unwrap();
-
-        // 只有一条回收条目（不产生重复空壳），暂存文件已补入其桶目录。
+        // 对账：文件消失 → 记录转存占位条目；系统回收站内有文件 →
+        // has_file 如实为 true（前端恢复按钮可点）。
+        sync_resource_library(&handle);
+        assert_eq!(record_count(&app, "r2"), 0);
+        assert_eq!(record_count(&app, "r1"), 1);
         let items = list_trash_items_internal(&handle).unwrap();
-        assert_eq!(items.len(), 1, "竞态下不得产生重复回收条目");
-
-        // 恢复：文件原样回位、记录整行回插——删除→恢复闭环不因竞态丢数据。
+        assert_eq!(items.len(), 1);
+        assert_eq!(items[0]["has_file"], serde_json::Value::Bool(true));
         let trash_id = items[0]["id"].as_str().unwrap().to_string();
-        restore_trash_item_internal(&handle, &trash_id).unwrap();
-        assert!(file.exists(), "恢复后文件必须回原位");
-        assert_eq!(std::fs::read(&file).unwrap(), b"race");
-        assert_eq!(record_count(&app, &record_id), 1);
+
+        let outcome = restore_trash_item_internal(&handle, &trash_id).unwrap();
+        assert!(matches!(outcome, RestoreOutcome::Restored));
+        assert!(file.exists(), "文件应从系统回收站恢复回原位");
+        assert_eq!(std::fs::read(&file).unwrap(), b"explorer-deleted");
+        assert_eq!(record_count(&app, "r2"), 1);
         assert!(list_trash_items_internal(&handle).unwrap().is_empty());
     }
 
-    // 既无回收条目也无记录行时，暂存文件保留不删——宁可留隐藏临时文件
-    // 待人工处理，也不静默删除用户数据。
-    #[test]
-    fn orphan_staged_file_survives_without_trash_entry() {
-        let (app, library) = trash_test_app();
-        let handle = app.handle().clone();
-        let file = library.join("孤儿.png");
-        std::fs::write(&file, b"orphan").unwrap();
-        // 不插任何记录：删除请求带着指向存在文件的 id，但记录行不存在。
-
-        let record_id = resource_file_id(&file);
-        delete_clipboard_records_internal(&handle, &[record_id]).unwrap();
-
-        assert!(
-            list_trash_items_internal(&handle).unwrap().is_empty(),
-            "无记录行不得凭空建回收条目"
-        );
-        let leftover = std::fs::read_dir(&library)
-            .unwrap()
-            .flatten()
-            .find(|entry| {
-                entry
-                    .file_name()
-                    .to_string_lossy()
-                    .starts_with(".copy-creator-delete-")
-            })
-            .expect("无主暂存文件必须保留");
-        assert_eq!(std::fs::read(leftover.path()).unwrap(), b"orphan");
-    }
-
-    // 删除进行中的路径（stage 已 rename、事务未提交的窗口形态），监听
-    // 结算必须跳过清退——记录行留在删除事务手里，不产生空壳回收条目。
+    // 删除进行中的路径（事务已提交、文件尚未移入系统回收站的窗口形态），
+    // 监听结算必须双向跳过：不清退（守卫原语义）、也不补录（文件仍存在
+    // 会被当外部新文件重建记录，丢元数据——暂存机制移除后由 existing
+    // 分支的守卫兜住）。
     #[test]
     fn settle_skips_paths_registered_as_deleting() {
         let (app, library) = trash_test_app();
@@ -5274,7 +5222,7 @@ mod trash_tests {
         let record_id = resource_file_id(&file);
         insert_external_record(&app, &record_id, &file, &[]);
 
-        std::fs::rename(&file, group_dir.join(".copy-creator-delete-x.tmp")).unwrap();
+        // 窗口形态：文件仍在原位（未 send），守卫已注册。
         let guard = register_delete_in_flight(vec![file.clone()]);
         settle_external_resource_changes(&handle, &[file.clone()]);
         drop(guard);
@@ -5284,6 +5232,18 @@ mod trash_tests {
             1,
             "在册路径的记录不得被监听清退"
         );
+        // 关键断言：existing 分支被守卫跳过，文件不得被补录成重复记录。
+        let dupes: i64 = {
+            let state = app.state::<DbState>();
+            let conn = state.conn.lock().unwrap();
+            conn.query_row(
+                "SELECT COUNT(*) FROM clipboard_records WHERE resource_path = ?1",
+                params![file.to_string_lossy().as_ref()],
+                |row| row.get(0),
+            )
+            .unwrap()
+        };
+        assert_eq!(dupes, 1, "在册路径的文件不得被补录成重复记录");
         assert!(list_trash_items_internal(&handle).unwrap().is_empty());
     }
 }
@@ -6248,6 +6208,7 @@ mod restore_usability_tests {
         delete_clipboard_records_internal, ensure_schema, get_clipboard_records_inner,
         list_trash_items_internal, restore_trash_item_internal, DbState, RestoreOutcome,
     };
+    use crate::db::trash_backend::fake_count;
     use rusqlite::params;
     use std::io::{Read, Write};
     use std::path::PathBuf;
@@ -6305,33 +6266,10 @@ mod restore_usability_tests {
             .unwrap();
         }
 
-        // ① 资源库删除：文件离开原位、进入回收站目录。
+        // ① 资源库删除：文件离开原位、进入系统回收站（fake）。
         delete_clipboard_records_internal(&handle, &["r1".to_string()]).unwrap();
         assert!(!original.exists(), "删除后文件应离开原位");
-        let trash_file = {
-            let mut found: Option<PathBuf> = None;
-            let trash_root = library
-                .parent()
-                .unwrap()
-                .join(format!(
-                    ".{}.trash/.trash",
-                    library.file_name().and_then(|n| n.to_str()).unwrap()
-                ));
-            let mut stack = vec![trash_root];
-            while let Some(dir) = stack.pop() {
-                let Ok(entries) = std::fs::read_dir(&dir) else { continue };
-                for entry in entries.flatten() {
-                    let path = entry.path();
-                    if path.is_dir() {
-                        stack.push(path);
-                    } else if path.file_name().and_then(|n| n.to_str()) == Some("证件照.png") {
-                        found = Some(path);
-                    }
-                }
-            }
-            found.expect("删除后文件必须在回收站目录内")
-        };
-        assert_eq!(std::fs::read(&trash_file).unwrap(), PNG_BYTES);
+        assert_eq!(fake_count(&original), 1, "删除后文件必须在系统回收站内");
 
         // ② 回收站恢复：文件原样回原位。
         let items = list_trash_items_internal(&handle).unwrap();
@@ -6341,7 +6279,7 @@ mod restore_usability_tests {
         assert!(matches!(outcome, RestoreOutcome::Restored));
         assert!(original.exists(), "恢复后文件必须回到原位");
         assert_eq!(std::fs::read(&original).unwrap(), PNG_BYTES, "恢复后字节必须与原文件一致");
-        assert!(!trash_file.exists(), "回收站副本应清位");
+        assert_eq!(fake_count(&original), 0, "系统回收站副本应清位");
 
         // ③ 恢复后列表正常返回该记录。
         let records = get_clipboard_records_inner(

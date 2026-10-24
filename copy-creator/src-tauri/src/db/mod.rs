@@ -136,6 +136,7 @@ mod resource;
 mod settings;
 mod text_version;
 mod trash;
+mod trash_backend;
 pub(crate) use annotation::*;
 pub(crate) use apikeys::*;
 pub(crate) use clipboard::*;
