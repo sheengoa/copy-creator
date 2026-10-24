@@ -33,3 +33,6 @@ copy-creator/dev.cmd
 
 # Python 诊断脚本的字节码缓存(运行 scripts/radial-input-doctor.py 等产生)
 **/__pycache__/
+
+# ZCode 会话工具产物（计划文件等）
+.zcode/
