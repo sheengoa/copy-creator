@@ -1391,50 +1391,6 @@ input:focus-visible + .selection-checkbox {
   margin-left: 8px;
 }
 
-/* === Chip Styles (shared) */
-.chip-base {
-  flex-shrink: 0;
-  padding: 5px 14px;
-  border-radius: 7px;
-  border: 0.5px solid var(--separator);
-  background: #fafaffaf;
-  color: var(--text-secondary);
-  font-size: 12px;
-  font-weight: var(--weight-medium);
-  cursor: pointer;
-  transition: all 0.2s cubic-bezier(0.22, 1, 0.36, 1);
-  white-space: nowrap;
-}
-
-.chip-base:hover {
-  background: var(--chip-hover-bg);
-  border-color: rgba(0, 0, 0, 0.1);
-}
-
-.chip-base.active {
-  background: #333;
-  color: white;
-  border-color: #333;
-  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.12);
-}
-
-.chip-base:active {
-  transform: scale(0.95);
-}
-
-[data-theme="dark"] .chip-base {
-  color: rgba(255, 255, 255, 0.6);
-  background: var(--card-inner-bg);
-  border-color: var(--card-border);
-}
-
-[data-theme="dark"] .chip-base.active {
-  background: rgba(255, 255, 255, 0.18);
-  color: #fff;
-  border-color: rgba(255, 255, 255, 0.25);
-  box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.1);
-}
-
 /* 最大化时收起阴影边距技法：可见面板的边距/圆角/阴影全部派生自这三个
    窗口变量，收零即铺满屏幕，两个窗口（主/新建）共用；缩放手柄一并禁用 */
 .maximized {

@@ -44,17 +44,23 @@
   background: rgba(255, 255, 255, 0.2);
 }
 
+/* 分组 chip 与径向菜单同规格（radial-menu.css 的 radial-menu-category-chip）：
+   灰底灰字、黑底白字选中，颜色全部走主题变量。 */
 .group-chip {
+  display: inline-flex;
   flex-shrink: 0;
-  padding: 5px 14px;
-  border-radius: 7px;
+  min-height: 30px;
+  align-items: center;
+  box-sizing: border-box;
+  padding: 0 14px;
+  border-radius: 6px;
   border: 0.5px solid var(--separator);
-  background: #fafaffaf;
+  background: var(--chip-bg);
   color: var(--text-secondary);
-  font-size: 12px;
+  font-size: var(--text-sm);
   font-weight: var(--weight-medium);
   cursor: pointer;
-  transition: all 0.2s cubic-bezier(0.22, 1, 0.36, 1);
+  transition: all 0.15s cubic-bezier(0.22, 1, 0.36, 1);
   white-space: nowrap;
 }
 
@@ -67,51 +73,45 @@
   background: #333;
   color: white;
   border-color: #333;
-  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.12);
 }
 
 .group-chip:active {
   transform: scale(0.95);
 }
 
-[data-theme="dark"] .group-chip {
-  color: rgba(255, 255, 255, 0.6);
-  background: var(--card-inner-bg);
-  border-color: var(--card-border);
+/* 默认态颜色已全部变量化（--chip-bg/--separator/--text-secondary 均带
+   暗色值），无需暗色覆盖；选中态白玻璃与径向菜单一致。 */
+[data-theme="dark"] .group-chip.active {
+  background: rgba(255, 255, 255, 0.18);
+  color: #fff;
+  border-color: rgba(255, 255, 255, 0.25);
 }
 
-/* 「全部」跨分组视图 chip：固定首位，虚线边框区别于普通分组 chip。 */
+/* 「全部」chip：固定首位，虚线边框区别于普通分组 chip。 */
 .group-chip-all {
   border-style: dashed;
   margin-right: 2px;
 }
 
-[data-theme="dark"] .group-chip.active {
-  background: rgba(255, 255, 255, 0.18);
-  color: #fff;
-  border-color: rgba(255, 255, 255, 0.25);
-  box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.1);
-}
-
 .group-add-btn {
-  width: 28px;
-  height: 28px;
-  border-radius: 8px;
+  width: 30px;
+  height: 30px;
+  border-radius: 6px;
   border: 0.5px solid var(--separator);
-  background: #fafaffaf;
-  color: #000;
+  background: var(--chip-bg);
+  color: var(--text-secondary);
   display: flex;
   align-items: center;
   justify-content: center;
   cursor: pointer;
-  transition: all 0.2s cubic-bezier(0.22, 1, 0.36, 1);
+  transition: all 0.15s cubic-bezier(0.22, 1, 0.36, 1);
   flex-shrink: 0;
 }
 
 .group-add-btn:hover {
-  background: #333;
-  color: #fff;
-  transform: scale(1.05);
+  background: var(--chip-hover-bg);
+  border-color: rgba(0, 0, 0, 0.1);
+  color: var(--text-primary);
 }
 
 .group-add-btn:active {

@@ -207,35 +207,43 @@
   background: rgba(255, 255, 255, 0.18);
 }
 
+/* 分组 chip 与径向菜单同规格（radial-menu.css 的 radial-menu-category-chip）：
+   灰底灰字、黑底白字选中，颜色全部走主题变量。 */
 .resource-group-chip {
   display: inline-flex;
-  min-height: 28px;
+  min-height: 30px;
   flex: 0 0 auto;
   align-items: center;
   gap: 6px;
-  padding: 0 10px;
-  border: 1px solid var(--separator);
-  border-radius: 7px;
-  background: var(--card-inner-bg);
+  box-sizing: border-box;
+  padding: 0 12px;
+  border: 0.5px solid var(--separator);
+  border-radius: 6px;
+  background: var(--chip-bg);
   color: var(--text-secondary);
   font-family: var(--font);
-  font-size: var(--text-xs);
+  font-size: var(--text-sm);
   font-weight: var(--weight-medium);
   white-space: nowrap;
   cursor: pointer;
-  transition: background 0.15s ease, border-color 0.15s ease, color 0.15s ease;
+  transition: all 0.15s cubic-bezier(0.22, 1, 0.36, 1);
 }
 
 .resource-group-chip:hover {
-  border-color: color-mix(in srgb, var(--text-primary) 16%, var(--separator));
   background: var(--chip-hover-bg);
-  color: var(--text-primary);
+  border-color: rgba(0, 0, 0, 0.1);
 }
 
 .resource-group-chip.active {
   border-color: #333;
   background: #333;
   color: #fff;
+}
+
+[data-theme="dark"] .resource-group-chip.active {
+  background: rgba(255, 255, 255, 0.18);
+  color: #fff;
+  border-color: rgba(255, 255, 255, 0.25);
 }
 
 .resource-group-chip:active {
@@ -250,12 +258,12 @@
 }
 
 .resource-group-chip.drag-overlay-chip {
-  min-height: 28px;
+  min-height: 30px;
   padding: 0 12px;
   border-color: #333;
   background: #333;
   color: #fff;
-  font-size: var(--text-xs);
+  font-size: var(--text-sm);
   font-weight: var(--weight-medium);
   box-shadow: 0 6px 18px rgba(0, 0, 0, 0.22);
   cursor: grabbing;
@@ -268,21 +276,20 @@
 
 .resource-group-control {
   display: inline-flex;
-  min-height: 28px;
+  min-height: 30px;
   flex: 0 0 auto;
   align-items: stretch;
   overflow: hidden;
-  border: 1px solid var(--separator);
-  border-radius: 7px;
-  background: var(--card-inner-bg);
+  border: 0.5px solid var(--separator);
+  border-radius: 6px;
+  background: var(--chip-bg);
   color: var(--text-secondary);
-  transition: background 0.15s ease, border-color 0.15s ease, color 0.15s ease;
+  transition: all 0.15s cubic-bezier(0.22, 1, 0.36, 1);
 }
 
 .resource-group-control:hover {
-  border-color: color-mix(in srgb, var(--text-primary) 16%, var(--separator));
   background: var(--chip-hover-bg);
-  color: var(--text-primary);
+  border-color: rgba(0, 0, 0, 0.1);
 }
 
 .resource-group-control.active {
@@ -291,14 +298,20 @@
   color: #fff;
 }
 
+[data-theme="dark"] .resource-group-control.active {
+  background: rgba(255, 255, 255, 0.18);
+  color: #fff;
+  border-color: rgba(255, 255, 255, 0.25);
+}
+
 .resource-group-chip-main {
   display: inline-flex;
   min-width: 0;
   max-width: 210px;
-  min-height: 28px;
+  min-height: 30px;
   flex: 1 1 auto;
   align-items: center;
-  padding: 0 10px;
+  padding: 0 12px;
   border: 0;
   background: transparent;
   color: inherit;
@@ -319,7 +332,7 @@
 .resource-group-chevron {
   display: inline-flex;
   width: 26px;
-  min-height: 28px;
+  min-height: 30px;
   flex: 0 0 26px;
   align-items: center;
   justify-content: center;
@@ -332,7 +345,7 @@
 }
 
 .resource-group-chevron:hover {
-  background: rgba(0, 0, 0, 0.05);
+  background: var(--chip-bg);
 }
 
 .resource-group-chevron svg {
@@ -369,22 +382,22 @@
 
 .resource-group-action {
   display: inline-flex;
-  width: 28px;
-  height: 28px;
+  width: 30px;
+  height: 30px;
   align-items: center;
   justify-content: center;
   padding: 0;
-  border: 1px solid var(--separator);
-  border-radius: 7px;
-  background: var(--card-inner-bg);
+  border: 0.5px solid var(--separator);
+  border-radius: 6px;
+  background: var(--chip-bg);
   color: var(--text-secondary);
   cursor: pointer;
-  transition: background 0.15s ease, border-color 0.15s ease, color 0.15s ease;
+  transition: all 0.15s cubic-bezier(0.22, 1, 0.36, 1);
 }
 
 .resource-group-action:hover {
-  border-color: color-mix(in srgb, var(--text-primary) 16%, var(--separator));
   background: var(--chip-hover-bg);
+  border-color: rgba(0, 0, 0, 0.1);
   color: var(--text-primary);
 }
 
@@ -399,15 +412,8 @@
 }
 
 
-[data-theme="dark"] .resource-group-control {
-  background: var(--card-inner-bg);
-}
-
-[data-theme="dark"] .resource-group-control.active {
-  border-color: rgba(255, 255, 255, 0.22);
-  background: rgba(255, 255, 255, 0.16);
-}
-
+/* 默认态颜色已变量化（--chip-bg/--separator 均带暗色值），无需暗色覆盖；
+   选中态白玻璃规则见上方 [data-theme="dark"] .resource-group-control.active。 */
 [data-theme="dark"] .resource-group-chevron {
   border-left-color: rgba(255, 255, 255, 0.12);
 }
@@ -577,31 +583,33 @@
   height: 3px;
 }
 
+/* 类型筛选 chip 与分组 chip 同规格（径向菜单样式语言）。 */
 .resource-filter-chip {
-  min-height: 27px;
+  display: inline-flex;
+  min-height: 30px;
+  align-items: center;
+  box-sizing: border-box;
   flex: 0 0 auto;
   padding: 0 12px;
-  border: 1px solid var(--separator);
-  border-radius: 7px;
-  background: var(--card-inner-bg);
+  border: 0.5px solid var(--separator);
+  border-radius: 6px;
+  background: var(--chip-bg);
   color: var(--text-secondary);
   font-family: var(--font);
-  font-size: var(--text-xs);
+  font-size: var(--text-sm);
   cursor: pointer;
-  transition: background 0.15s ease, border-color 0.15s ease, color 0.15s ease;
+  transition: all 0.15s cubic-bezier(0.22, 1, 0.36, 1);
 }
 
 .resource-filter-chip:hover {
   border-color: rgba(0, 0, 0, 0.1);
   background: var(--chip-hover-bg);
-  color: var(--text-primary);
 }
 
 .resource-filter-chip.active {
   border-color: #333;
   background: #333;
   color: white;
-  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.12);
 }
 
 .resource-filter-chip:active {
@@ -612,7 +620,6 @@
   background: rgba(255, 255, 255, 0.18);
   color: #fff;
   border-color: rgba(255, 255, 255, 0.25);
-  box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.1);
 }
 
 .resource-sort-control {
@@ -1019,7 +1026,6 @@
   border-color: var(--danger);
   background: var(--danger);
   color: #fff;
-  box-shadow: 0 2px 8px rgba(255, 59, 48, 0.24);
 }
 
 [data-theme="dark"] .resource-filter-chip.is-missing.active {

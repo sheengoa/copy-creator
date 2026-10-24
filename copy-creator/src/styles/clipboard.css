@@ -150,17 +150,23 @@
   background: rgba(255, 255, 255, 0.2);
 }
 
+/* 类型筛选 chip 与径向菜单同规格（radial-menu.css 的 radial-menu-category-chip）：
+   灰底灰字、黑底白字选中，颜色全部走主题变量。危险操作红系变体见上。 */
 .category-chip {
+  display: inline-flex;
   flex-shrink: 0;
-  padding: 5px 14px;
-  border-radius: 7px;
+  min-height: 30px;
+  align-items: center;
+  box-sizing: border-box;
+  padding: 0 14px;
+  border-radius: 6px;
   border: 0.5px solid var(--separator);
-  background: #fafaffaf;
+  background: var(--chip-bg);
   color: var(--text-secondary);
-  font-size: 12px;
+  font-size: var(--text-sm);
   font-weight: var(--weight-medium);
   cursor: pointer;
-  transition: all 0.2s cubic-bezier(0.22, 1, 0.36, 1);
+  transition: all 0.15s cubic-bezier(0.22, 1, 0.36, 1);
   white-space: nowrap;
 }
 
@@ -173,24 +179,16 @@
   background: #333;
   color: white;
   border-color: #333;
-  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.12);
 }
 
 .category-chip:active {
   transform: scale(0.95);
 }
 
-[data-theme="dark"] .category-chip {
-  color: rgba(255, 255, 255, 0.6);
-  background: var(--card-inner-bg);
-  border-color: var(--card-border);
-}
-
 [data-theme="dark"] .category-chip.active {
   background: rgba(255, 255, 255, 0.18);
   color: #fff;
   border-color: rgba(255, 255, 255, 0.25);
-  box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.1);
 }
 
 .noti-type-label {
@@ -563,21 +561,27 @@
   font-size: 12px;
 }
 
+/* chip 形按钮与径向菜单 chip 同规格；secondary=默认态灰底灰字、
+   primary=选中态黑底白字。 */
 .label-panel-chip-btn {
+  display: inline-flex;
   flex-shrink: 0;
-  padding: 5px 14px;
-  border-radius: 7px;
+  min-height: 30px;
+  align-items: center;
+  box-sizing: border-box;
+  padding: 0 14px;
+  border-radius: 6px;
   border: 0.5px solid var(--separator);
   font-family: var(--font);
-  font-size: 12px;
+  font-size: var(--text-sm);
   font-weight: var(--weight-medium);
   cursor: pointer;
-  transition: all 0.2s cubic-bezier(0.22, 1, 0.36, 1);
+  transition: all 0.15s cubic-bezier(0.22, 1, 0.36, 1);
   white-space: nowrap;
 }
 
 .label-panel-chip-btn.secondary {
-  background: #fafaffaf;
+  background: var(--chip-bg);
   color: var(--text-secondary);
 }
 
@@ -590,7 +594,6 @@
   background: #333;
   color: white;
   border-color: #333;
-  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.12);
 }
 
 .label-panel-chip-btn.primary:hover {
@@ -607,17 +610,10 @@
   transform: scale(0.95);
 }
 
-[data-theme="dark"] .label-panel-chip-btn.secondary {
-  color: rgba(255, 255, 255, 0.6);
-  background: var(--card-inner-bg);
-  border-color: var(--card-border);
-}
-
 [data-theme="dark"] .label-panel-chip-btn.primary {
   background: rgba(255, 255, 255, 0.18);
   color: #fff;
   border-color: rgba(255, 255, 255, 0.25);
-  box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.1);
 }
 
 /* === Context Menu === */
