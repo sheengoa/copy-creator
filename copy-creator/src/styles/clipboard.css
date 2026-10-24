@@ -34,23 +34,25 @@
   background: rgba(255, 255, 255, 0.15);
 }
 
+/* 列表底部「显示更多」次级按钮：与工具栏控件同一灰色源。 */
 .clipboard-load-more {
   align-self: center;
-  padding: 7px 16px;
-  border: 1px solid var(--separator);
-  border-radius: 8px;
-  background: var(--card-inner-bg);
+  min-height: 30px;
+  box-sizing: border-box;
+  padding: 0 16px;
+  border: 0.5px solid var(--separator);
+  border-radius: 6px;
+  background: var(--chip-bg);
   color: var(--text-secondary);
   font-family: var(--font);
   font-size: var(--text-sm);
   font-weight: var(--weight-medium);
   cursor: pointer;
-  box-shadow: 0 0.5px 0 0 rgba(255,255,255,0.25) inset;
   transition: background 0.15s, color 0.15s, transform 0.15s;
 }
 
 .clipboard-load-more:hover {
-  background: var(--chip-bg);
+  background: var(--chip-hover-bg);
   color: var(--text-primary);
 }
 
