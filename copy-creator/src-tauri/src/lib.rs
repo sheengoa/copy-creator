@@ -558,6 +558,7 @@ pub fn run() {
             db::project_set_shot_props,
             db::project_link_asset,
             db::project_import_asset,
+            db::import_resource_file,
             db::project_update_asset,
             db::project_unlink_asset,
             db::project_list_prompts,

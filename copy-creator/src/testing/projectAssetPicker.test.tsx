@@ -30,15 +30,16 @@ const invokeMock = vi.fn(async (cmd: string, args?: Record<string, unknown>) => 
     case "project_list_shows":
       return [];
     // 导入流：pickResultPath 为 "" 时按钮点了也不该走到这；"cancelled"
-    // 模拟文件框取消；"ERROR" 模拟导入失败。
+    // 模拟文件框取消；"ERROR" 模拟导入失败。通用浮层只入库
+    // （import_resource_file），挂靠由壳在 onPick 里接手（project_link_asset）。
     case "select_resource_trace_file": {
       if (pickResultPath === "cancelled") throw new Error("cancelled");
       return { path: pickResultPath };
     }
-    case "project_import_asset":
+    case "import_resource_file":
       if (pickResultPath === "ERROR") throw new Error("磁盘已满");
       importCalls.push(args ?? {});
-      return { id: "a8", file_path: "新素材.png", missing: false };
+      return { file_path: "新素材.png", kind: "image", name: "新素材.png" };
     default:
       return null;
   }
@@ -148,7 +149,7 @@ describe("ProjectAssetPicker", () => {
     });
   });
 
-  it("从电脑导入并挂靠：选文件后走 importAsset 并触发 onLinked", async () => {
+  it("从电脑导入并挂靠：入库后挂靠壳接手并触发 onLinked", async () => {
     allRecords = makeRecords(1);
     pickResultPath = "C:/out/新素材.png";
     importCalls = [];
@@ -164,11 +165,13 @@ describe("ProjectAssetPicker", () => {
       expect(onLinked).toHaveBeenCalledTimes(1);
     });
     expect(onClose).toHaveBeenCalledTimes(1);
-    expect(importCalls[0]).toMatchObject({
-      sourcePath: "C:/out/新素材.png",
-      episodeId: "ep1",
-      shotId: "sh1",
-    });
+    // 通用浮层只入库；挂靠（含导入文件）由壳接手。mock 调用跨用例
+    // 累积，按导入文件名过滤本用例的挂靠调用。
+    expect(importCalls[0]).toMatchObject({ sourcePath: "C:/out/新素材.png" });
+    const importLink = invokeMock.mock.calls.find(
+      ([cmd, args]) => cmd === "project_link_asset" && args?.filePath === "新素材.png",
+    );
+    expect(importLink?.[1]).toMatchObject({ episodeId: "ep1", shotId: "sh1" });
   });
 
   it("导入取消静默：不关浮层不报错", async () => {

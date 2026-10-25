@@ -1044,6 +1044,41 @@
   word-break: break-all;
 }
 
+/* 三库表单的路径输入 + 选择按钮：点按钮开带预览的选择浮层，手填保留 */
+.project-field-pick {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.project-field-pick input {
+  flex: 1;
+  min-width: 0;
+}
+
+.project-field-pick-btn {
+  flex-shrink: 0;
+  width: 34px;
+  height: 34px;
+  border: 0.5px solid var(--card-border);
+  border-radius: 8px;
+  display: grid;
+  place-items: center;
+  background: var(--chip-bg);
+  color: var(--text-secondary);
+  cursor: pointer;
+}
+
+.project-field-pick-btn:hover {
+  background: var(--chip-hover-bg);
+  color: var(--text-primary);
+}
+
+.project-field-pick-btn svg {
+  width: 14px;
+  height: 14px;
+}
+
 .project-library-main {
   flex: 1;
   min-width: 0;

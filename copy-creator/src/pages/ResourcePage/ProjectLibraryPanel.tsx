@@ -11,6 +11,7 @@ import {
 import { ConfirmDialog } from "../../components/ConfirmDialog";
 import { ResourceImage } from "./ResourceMedia";
 import { Icons } from "../../components/Icons";
+import ProjectFilePickerDialog from "./ProjectFilePickerDialog";
 import {
   parseCharacterReferences,
   serializeCharacterReferences,
@@ -113,6 +114,9 @@ export default function ProjectLibraryPanel({
   const [propDraft, setPropDraft] = useState<PropDraft | null>(null);
   const [deleteConfirm, setDeleteConfirm] = useState<{ id: string; name: string } | null>(null);
   const [characterRefInput, setCharacterRefInput] = useState("");
+  /** 打开中的文件选择浮层：media = 形象图/参考图（单选），references =
+   *  参考图集（多选，选完不关可连续加）。 */
+  const [pickTarget, setPickTarget] = useState<"media" | "references" | null>(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -451,15 +455,26 @@ export default function ProjectLibraryPanel({
                           : "project.library.field.refPath",
                       )}
                     </span>
-                    <input
-                      placeholder={t("project.library.field.pathPlaceholder")}
-                      value={mediaPath}
-                      onChange={(event) =>
-                        updateDraft(kind, setCharacterDraft, setLocationDraft, setPropDraft, kind === "characters"
-                          ? { avatar_path: event.target.value }
-                          : { ref_path: event.target.value })
-                      }
-                    />
+                    <span className="project-field-pick">
+                      <input
+                        placeholder={t("project.library.field.pathPlaceholder")}
+                        value={mediaPath}
+                        onChange={(event) =>
+                          updateDraft(kind, setCharacterDraft, setLocationDraft, setPropDraft, kind === "characters"
+                            ? { avatar_path: event.target.value }
+                            : { ref_path: event.target.value })
+                        }
+                      />
+                      <button
+                        type="button"
+                        className="project-field-pick-btn"
+                        title={t("project.library.pickFromLibrary")}
+                        aria-label={t("project.library.pickFromLibrary")}
+                        onClick={() => setPickTarget("media")}
+                      >
+                        {Icons.folderOpen}
+                      </button>
+                    </span>
                   </label>
                   {mediaPath.trim() && (
                     <div className="project-library-preview">
@@ -475,23 +490,34 @@ export default function ProjectLibraryPanel({
                   <div className="project-form-row">
                     <label>
                       <span>{t("project.library.field.references")}</span>
-                      <input
-                        placeholder={t("project.library.field.refAddPlaceholder")}
-                        value={characterRefInput}
-                        onChange={(event) => setCharacterRefInput(event.target.value)}
-                        onKeyDown={(event) => {
-                          if (event.key === "Enter") {
-                            event.preventDefault();
-                            const path = characterRefInput.trim();
-                            if (!path) return;
-                            setCharacterDraft({
-                              ...characterDraft,
-                              references: [...characterDraft.references, path],
-                            });
-                            setCharacterRefInput("");
-                          }
-                        }}
-                      />
+                      <span className="project-field-pick">
+                        <input
+                          placeholder={t("project.library.field.refAddPlaceholder")}
+                          value={characterRefInput}
+                          onChange={(event) => setCharacterRefInput(event.target.value)}
+                          onKeyDown={(event) => {
+                            if (event.key === "Enter") {
+                              event.preventDefault();
+                              const path = characterRefInput.trim();
+                              if (!path) return;
+                              setCharacterDraft({
+                                ...characterDraft,
+                                references: [...characterDraft.references, path],
+                              });
+                              setCharacterRefInput("");
+                            }
+                          }}
+                        />
+                        <button
+                          type="button"
+                          className="project-field-pick-btn"
+                          title={t("project.library.pickFromLibrary")}
+                          aria-label={t("project.library.field.pickReference")}
+                          onClick={() => setPickTarget("references")}
+                        >
+                          {Icons.folderOpen}
+                        </button>
+                      </span>
                     </label>
                     {characterDraft.references.length > 0 && (
                       <div className="project-ref-list">
@@ -572,6 +598,36 @@ export default function ProjectLibraryPanel({
             void handleDelete(target.id);
           }}
           onCancel={() => setDeleteConfirm(null)}
+        />
+      )}
+
+      {pickTarget && draft && (
+        <ProjectFilePickerDialog
+          title={t(
+            pickTarget === "references"
+              ? "project.library.pickReferences"
+              : "project.library.pickImage",
+          )}
+          pickLabel={t("project.library.pickAction")}
+          importLabel={t("project.library.importAction")}
+          onClose={() => setPickTarget(null)}
+          onPick={(file) => {
+            if (pickTarget === "references") {
+              // 多选：选一张加一张，浮层保持打开供连续挑选。
+              setCharacterDraft((prev) =>
+                prev ? { ...prev, references: [...prev.references, file.filePath] } : prev,
+              );
+            } else {
+              updateDraft(
+                kind,
+                setCharacterDraft,
+                setLocationDraft,
+                setPropDraft,
+                kind === "characters" ? { avatar_path: file.filePath } : { ref_path: file.filePath },
+              );
+              setPickTarget(null);
+            }
+          }}
         />
       )}
     </div>

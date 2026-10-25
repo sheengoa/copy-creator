@@ -1385,22 +1385,20 @@ pub(crate) fn copy_into_library_root(
     Ok(dest)
 }
 
-/// 从电脑导入文件并挂靠：库外文件复制进库根「未分组」→ watcher 同款
-/// 登记资源记录 → 按当前集/镜头落工程档案，一次调用完成。已在库内的
-/// 路径不复制直接挂靠（容错；正常路径由挂靠列表完成）。挂靠仍是
-/// file_path UNIQUE upsert，重复导入/挂靠改归属不新建行。
-#[tauri::command]
-pub fn project_import_asset(
-    app: AppHandle,
-    source_path: String,
-    episode_id: String,
-    shot_id: String,
-) -> Result<serde_json::Value, String> {
+/// 库外文件入库：复制进库根「未分组」（重名加「 (n)」序号）→ watcher
+/// 同款登记资源记录并 bump 修订号；已在库内的路径原样返回不复制。
+/// 工程导入（project_import_asset）与通用选择器（import_resource_file）
+/// 共用；本函数不落工程档案——挂靠归属是调用方的事。
+/// 返回 (相对路径, 媒体类型, 文件名)。
+pub(crate) fn import_file_into_library<R: Runtime>(
+    app: &AppHandle<R>,
+    source_path: &str,
+) -> Result<(String, String, String), String> {
     let source = std::path::PathBuf::from(source_path.trim());
     if !source.is_file() {
         return Err("请选择一个文件".to_string());
     }
-    let root = get_resource_library_dir(&app);
+    let root = get_resource_library_dir(app);
     // 库内判断用小写前缀（Windows 大小写不敏感口径，与前端
     // relativeLibraryPath 一致）；dest 由 root.join 构造，strip_prefix 必成。
     let in_library = source
@@ -1414,7 +1412,7 @@ pub fn project_import_asset(
     };
     // watcher 同款登记：为新文件补建资源记录（幂等，已有记录跳过）；
     // 再 bump 修订号让文件视图的心跳立刻感知，不必等监听器。
-    settle_external_resource_changes(&app, &[dest.clone()]);
+    settle_external_resource_changes(app, &[dest.clone()]);
     bump_resource_library_revision();
 
     let relative = normalize_project_path(
@@ -1431,6 +1429,32 @@ pub fn project_import_asset(
         .file_name()
         .map(|file_name| file_name.to_string_lossy().to_string())
         .unwrap_or_default();
+    Ok((relative, kind, name))
+}
+
+/// 通用选择器的「从电脑导入」：只入库不挂靠，返回库内相对路径/媒体
+/// 类型/文件名，调用方（三库回填、挂靠薄壳）自行决定后续。
+#[tauri::command]
+pub fn import_resource_file(
+    app: AppHandle,
+    source_path: String,
+) -> Result<serde_json::Value, String> {
+    let (relative, kind, name) = import_file_into_library(&app, &source_path)?;
+    Ok(serde_json::json!({ "file_path": relative, "kind": kind, "name": name }))
+}
+
+/// 从电脑导入文件并挂靠：库外文件复制进库根「未分组」→ watcher 同款
+/// 登记资源记录 → 按当前集/镜头落工程档案，一次调用完成。已在库内的
+/// 路径不复制直接挂靠（容错；正常路径由挂靠列表完成）。挂靠仍是
+/// file_path UNIQUE upsert，重复导入/挂靠改归属不新建行。
+#[tauri::command]
+pub fn project_import_asset(
+    app: AppHandle,
+    source_path: String,
+    episode_id: String,
+    shot_id: String,
+) -> Result<serde_json::Value, String> {
+    let (relative, kind, name) = import_file_into_library(&app, &source_path)?;
     let id = uuid::Uuid::new_v4().to_string();
     let now = project_now();
     {
@@ -1449,6 +1473,9 @@ pub fn project_import_asset(
         .map_err(|e| e.to_string())?;
     }
     emit_project_changed(&app);
+    // 与 project_link_asset 同口径：即时返回也带 missing 标。root 在本
+    // 函数开头已解析，无重入锁问题。
+    let root = get_resource_library_dir(&app);
     let state = app.state::<DbState>();
     let conn = state.conn.lock().map_err(|e| e.to_string())?;
     let mut asset = query_row_with_param(
@@ -1457,8 +1484,6 @@ pub fn project_import_asset(
         &[&relative],
         asset_row,
     )?;
-    // 与 project_link_asset 同口径：即时返回也带 missing 标。root 在本
-    // 函数开头已解析，无重入锁问题。
     asset["missing"] = serde_json::json!(!root.join(&relative).exists());
     Ok(asset)
 }
