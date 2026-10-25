@@ -413,14 +413,14 @@
       "nameLabel": "剧名",
       "namePlaceholder": "例如：山海食肆",
       "delete": "删除剧「{{name}}」",
-      "deleteConfirm": "删除剧「{{name}}」及其全部集、场景、镜头结构？素材文件会保留在资源库中。"
+      "deleteConfirm": "该操作不可撤销。删除剧「{{name}}」及其全部集、场景、镜头结构？素材文件会保留在资源库中。"
     },
     "episode": {
       "untitled": "未命名集",
       "new": "新建集",
       "crumb": "第 {{number}} 集",
       "delete": "删除本集",
-      "deleteConfirm": "删除「{{title}}」的场景与镜头结构？素材文件会保留在资源库中。",
+      "deleteConfirm": "该操作不可撤销。删除「{{title}}」的场景与镜头结构？素材文件会保留在资源库中。",
       "renameHint": "双击重命名",
       "numberHint": "（双击集号可改）",
       "moveUp": "上移",
@@ -482,7 +482,7 @@
       "editCharacter": "编辑角色",
       "editLocation": "编辑场景",
       "editProp": "编辑道具",
-      "deleteConfirm": "删除「{{name}}」？已关联的集会自动解除关联。",
+      "deleteConfirm": "该操作不可撤销。删除「{{name}}」？已关联的集会自动解除关联。",
       "episodeRefs": "出场 {{count}} 集",
       "unlinked": "未关联",
       "noDescription": "暂无描述",
@@ -527,7 +527,7 @@
       },
       "moveUp": "上移",
       "moveDown": "下移",
-      "deleteConfirm": "删除「{{heading}}」及其镜头？素材档案会保留为集级散件。"
+      "deleteConfirm": "该操作不可撤销。删除「{{heading}}」及其镜头？素材档案会保留为集级散件。"
     },
     "shot": {
       "new": "镜头",
@@ -546,7 +546,7 @@
       "field.duration": "时长",
       "moveUp": "上移",
       "moveDown": "下移",
-      "deleteConfirm": "删除这个镜头？挂靠的素材档案会保留为集级散件。"
+      "deleteConfirm": "该操作不可撤销。删除这个镜头？挂靠的素材档案会保留为集级散件。"
     },
     "prompt": {
       "title": "提示词库",
@@ -554,9 +554,12 @@
       "noContent": "（无内容）",
       "copy": "复制全文",
       "copied": "已复制",
+      "saveToQuick": "存为快捷输入",
+      "savedToQuick": "已存入快捷输入",
+      "quickGroupName": "工程提示词",
       "new": "新建提示词",
       "edit": "编辑提示词",
-      "deleteConfirm": "删除提示词「{{title}}」？素材上的溯源标记会保留（显示为空标题）。",
+      "deleteConfirm": "该操作不可撤销。删除提示词「{{title}}」？素材上的溯源标记会保留（显示为空标题）。",
       "copyHint": "保存后列表内一键复制全文",
       "field": {
         "title": "标题",
@@ -578,6 +581,7 @@
       "fromPrompt": "由哪条提示词生成",
       "fromAsset": "由哪个源素材生成",
       "none": "无",
+      "staleRef": "已失效（原记录已删除）",
       "open": "打开文件",
       "reveal": "在文件管理器显示",
       "locate": "在资源库中显示",

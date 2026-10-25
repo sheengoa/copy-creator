@@ -72,6 +72,13 @@ export default function ProjectAssetSheet({ asset, onClose }: ProjectAssetSheetP
   const absolutePath = joinLibraryPath(root, asset.file_path);
   const groupLabel = asset.file_path.split("/")[0] || "";
 
+  // 溯源标记是软引用：指向的提示词/素材被删除后值仍保留，下拉列表里
+  // 已无对应选项，此时显示「已失效」占位而不是静默丢值。
+  const staleFromPrompt =
+    genFromPrompt !== "" && !prompts.some((prompt) => prompt.id === genFromPrompt);
+  const staleFromAsset =
+    genFromAsset !== "" && !siblingAssets.some((candidate) => candidate.id === genFromAsset);
+
   const dirty =
     genFromPrompt !== asset.gen_from_prompt ||
     genFromAsset !== asset.gen_from_asset ||
@@ -132,6 +139,11 @@ export default function ProjectAssetSheet({ asset, onClose }: ProjectAssetSheetP
                   onChange={(event) => setGenFromPrompt(event.target.value)}
                 >
                   <option value="">{t("project.sheet.none")}</option>
+                  {staleFromPrompt && (
+                    <option value={genFromPrompt} disabled>
+                      {t("project.sheet.staleRef")}
+                    </option>
+                  )}
                   {prompts.map((prompt) => (
                     <option key={prompt.id} value={prompt.id}>
                       {prompt.title}
@@ -173,6 +185,11 @@ export default function ProjectAssetSheet({ asset, onClose }: ProjectAssetSheetP
                   onChange={(event) => setGenFromAsset(event.target.value)}
                 >
                   <option value="">{t("project.sheet.none")}</option>
+                  {staleFromAsset && (
+                    <option value={genFromAsset} disabled>
+                      {t("project.sheet.staleRef")}
+                    </option>
+                  )}
                   {siblingAssets
                     .filter((candidate) => candidate.id !== asset.id)
                     .map((candidate) => (

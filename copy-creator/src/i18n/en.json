@@ -413,14 +413,14 @@
       "nameLabel": "Show name",
       "namePlaceholder": "e.g. Mountain-Sea Diner",
       "delete": "Delete \"{{name}}\"",
-      "deleteConfirm": "Delete show \"{{name}}\" with all episodes, scenes and shots? Asset files stay in the library."
+      "deleteConfirm": "This cannot be undone. Delete show \"{{name}}\" with all episodes, scenes and shots? Asset files stay in the library."
     },
     "episode": {
       "untitled": "Untitled episode",
       "new": "New Episode",
       "crumb": "Episode {{number}}",
       "delete": "Delete this episode",
-      "deleteConfirm": "Delete scenes and shots of \"{{title}}\"? Asset files stay in the library.",
+      "deleteConfirm": "This cannot be undone. Delete scenes and shots of \"{{title}}\"? Asset files stay in the library.",
       "renameHint": "Double-click to rename",
       "numberHint": " (double-click the number to change)",
       "moveUp": "Move up",
@@ -482,7 +482,7 @@
       "editCharacter": "Edit Character",
       "editLocation": "Edit Location",
       "editProp": "Edit Prop",
-      "deleteConfirm": "Delete \"{{name}}\"? Linked episodes will be unlinked automatically.",
+      "deleteConfirm": "This cannot be undone. Delete \"{{name}}\"? Linked episodes will be unlinked automatically.",
       "episodeRefs": "In {{count}} episodes",
       "unlinked": "Not linked",
       "noDescription": "No description",
@@ -527,7 +527,7 @@
       },
       "moveUp": "Move up",
       "moveDown": "Move down",
-      "deleteConfirm": "Delete \"{{heading}}\" and its shots? Linked assets stay as episode loose files."
+      "deleteConfirm": "This cannot be undone. Delete \"{{heading}}\" and its shots? Linked assets stay as episode loose files."
     },
     "shot": {
       "new": "Shot",
@@ -546,7 +546,7 @@
       "field.duration": "Duration",
       "moveUp": "Move up",
       "moveDown": "Move down",
-      "deleteConfirm": "Delete this shot? Linked assets stay as episode loose files."
+      "deleteConfirm": "This cannot be undone. Delete this shot? Linked assets stay as episode loose files."
     },
     "prompt": {
       "title": "Prompt Library",
@@ -554,9 +554,12 @@
       "noContent": "(no content)",
       "copy": "Copy all",
       "copied": "Copied",
+      "saveToQuick": "Save to quick input",
+      "savedToQuick": "Saved to quick input",
+      "quickGroupName": "Project prompts",
       "new": "New Prompt",
       "edit": "Edit Prompt",
-      "deleteConfirm": "Delete prompt \"{{title}}\"? Trace marks on assets are kept (shown without title).",
+      "deleteConfirm": "This cannot be undone. Delete prompt \"{{title}}\"? Trace marks on assets are kept (shown without title).",
       "copyHint": "Copy the full text from the list after saving",
       "field": {
         "title": "Title",
@@ -578,6 +581,7 @@
       "fromPrompt": "Generated from prompt",
       "fromAsset": "Generated from asset",
       "none": "None",
+      "staleRef": "Stale (source deleted)",
       "open": "Open file",
       "reveal": "Reveal in file manager",
       "locate": "Show in library",

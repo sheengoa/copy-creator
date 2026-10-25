@@ -563,25 +563,62 @@ pub fn project_list_episodes(
         ),
         episode_row,
     )?;
-    // 每集出场角色 id：剧集树与工作台角色行一次拿全，省去逐集往返。
+    // 镜头统计与出场角色各一次全剧批量查回（按集分组），避免逐集
+    // 3 次往返的 N+1；查询量与集数无关，只随全剧镜头/关联总数增长。
+    let mut shot_stats: std::collections::HashMap<String, (i64, i64)> =
+        std::collections::HashMap::new();
+    {
+        let mut stmt = conn
+            .prepare(
+                "SELECT episode_id, COUNT(*), \
+                 SUM(CASE WHEN status = 'done' THEN 1 ELSE 0 END) \
+                 FROM project_shots \
+                 WHERE episode_id IN (SELECT id FROM project_episodes WHERE show_id = ?1) \
+                 GROUP BY episode_id",
+            )
+            .map_err(|e| e.to_string())?;
+        let rows = stmt
+            .query_map(params![show_id], |row| {
+                Ok((
+                    row.get::<_, String>(0)?,
+                    row.get::<_, i64>(1)?,
+                    row.get::<_, i64>(2)?,
+                ))
+            })
+            .map_err(|e| e.to_string())?;
+        for row in rows {
+            let (episode_id, total, done) = row.map_err(|e| e.to_string())?;
+            shot_stats.insert(episode_id, (total, done));
+        }
+    }
+    let mut cast: std::collections::HashMap<String, Vec<String>> =
+        std::collections::HashMap::new();
+    {
+        let mut stmt = conn
+            .prepare(
+                "SELECT episode_id, character_id FROM project_episode_characters \
+                 WHERE episode_id IN (SELECT id FROM project_episodes WHERE show_id = ?1) \
+                 ORDER BY rowid ASC",
+            )
+            .map_err(|e| e.to_string())?;
+        let rows = stmt
+            .query_map(params![show_id], |row| {
+                Ok((
+                    row.get::<_, String>(0)?,
+                    row.get::<_, String>(1)?,
+                ))
+            })
+            .map_err(|e| e.to_string())?;
+        for row in rows {
+            let (episode_id, character_id) = row.map_err(|e| e.to_string())?;
+            cast.entry(episode_id).or_default().push(character_id);
+        }
+    }
     for episode in episodes.iter_mut() {
-        let character_ids =
-            episode_character_ids(&conn, episode["id"].as_str().unwrap_or_default())?;
-        let shot_count: i64 = conn
-            .query_row(
-                "SELECT COUNT(*) FROM project_shots WHERE episode_id = ?1",
-                params![episode["id"].as_str().unwrap_or_default()],
-                |row| row.get(0),
-            )
-            .map_err(|e| e.to_string())?;
-        let done_shot_count: i64 = conn
-            .query_row(
-                "SELECT COUNT(*) FROM project_shots WHERE episode_id = ?1 AND status = 'done'",
-                params![episode["id"].as_str().unwrap_or_default()],
-                |row| row.get(0),
-            )
-            .map_err(|e| e.to_string())?;
-        episode["character_ids"] = serde_json::json!(character_ids);
+        let episode_id = episode["id"].as_str().unwrap_or_default();
+        let (shot_count, done_shot_count) = shot_stats.get(episode_id).copied().unwrap_or((0, 0));
+        episode["character_ids"] =
+            serde_json::json!(cast.get(episode_id).cloned().unwrap_or_default());
         episode["shot_count"] = serde_json::json!(shot_count);
         episode["done_shot_count"] = serde_json::json!(done_shot_count);
     }
@@ -1608,6 +1645,9 @@ pub fn project_get_episode_overview(
         ),
         scene_row,
     )?;
+    // 镜头出镜/道具关系与素材各一次全集批量查回（按镜头分组），避免
+    // 每镜头 3 次往返的 N+1；素材一次按集拿全，集级散件同批过滤。
+    let mut per_scene_shots: Vec<Vec<serde_json::Value>> = Vec::new();
     for scene in scenes.iter_mut() {
         let scene_id = scene["id"].as_str().unwrap_or_default().to_string();
         if let Some(location_id) = scene["location_id"].as_str() {
@@ -1621,37 +1661,96 @@ pub fn project_get_episode_overview(
                 scene["location"] = location.unwrap_or(serde_json::Value::Null);
             }
         }
-        let mut shots = query_all(
+        per_scene_shots.push(query_all(
             &conn,
             &format!(
                 "SELECT {SHOT_COLS} FROM project_shots \
                  WHERE scene_id = ?1 ORDER BY sort_order ASC, created_at ASC",
             ),
             shot_row,
-        )?;
+        )?);
+        scene["shots"] = serde_json::json!([]);
+    }
+
+    let mut shot_characters: std::collections::HashMap<String, Vec<String>> =
+        std::collections::HashMap::new();
+    {
+        let mut stmt = conn
+            .prepare(
+                "SELECT shot_id, character_id FROM project_shot_characters \
+                 WHERE shot_id IN (SELECT id FROM project_shots WHERE scene_id IN \
+                 (SELECT id FROM project_scenes WHERE episode_id = ?1)) ORDER BY rowid ASC",
+            )
+            .map_err(|e| e.to_string())?;
+        let rows = stmt
+            .query_map(params![&episode_id], |row| {
+                Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
+            })
+            .map_err(|e| e.to_string())?;
+        for row in rows {
+            let (shot_id, character_id) = row.map_err(|e| e.to_string())?;
+            shot_characters.entry(shot_id).or_default().push(character_id);
+        }
+    }
+    let mut shot_props: std::collections::HashMap<String, Vec<String>> =
+        std::collections::HashMap::new();
+    {
+        let mut stmt = conn
+            .prepare(
+                "SELECT shot_id, prop_id FROM project_shot_props \
+                 WHERE shot_id IN (SELECT id FROM project_shots WHERE scene_id IN \
+                 (SELECT id FROM project_scenes WHERE episode_id = ?1)) ORDER BY rowid ASC",
+            )
+            .map_err(|e| e.to_string())?;
+        let rows = stmt
+            .query_map(params![&episode_id], |row| {
+                Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
+            })
+            .map_err(|e| e.to_string())?;
+        for row in rows {
+            let (shot_id, prop_id) = row.map_err(|e| e.to_string())?;
+            shot_props.entry(shot_id).or_default().push(prop_id);
+        }
+    }
+    let mut assets_by_shot: std::collections::HashMap<String, Vec<serde_json::Value>> =
+        std::collections::HashMap::new();
+    let mut loose_assets: Vec<serde_json::Value> = Vec::new();
+    {
+        let mut stmt = conn
+            .prepare(&format!(
+                "SELECT {ASSET_COLS} FROM project_assets \
+                 WHERE episode_id = ?1 ORDER BY created_at ASC"
+            ))
+            .map_err(|e| e.to_string())?;
+        let rows = stmt
+            .query_map(params![&episode_id], asset_row)
+            .map_err(|e| e.to_string())?;
+        for row in rows {
+            let asset = row.map_err(|e| e.to_string())?;
+            let shot_id = asset["shot_id"].as_str().unwrap_or_default().to_string();
+            if shot_id.is_empty() {
+                loose_assets.push(asset);
+            } else {
+                assets_by_shot.entry(shot_id).or_default().push(asset);
+            }
+        }
+    }
+
+    for (scene, mut shots) in scenes.iter_mut().zip(per_scene_shots) {
         for shot in shots.iter_mut() {
-            attach_shot_relations(&conn, shot)?;
             let shot_id = shot["id"].as_str().unwrap_or_default().to_string();
-            shot["assets"] = serde_json::json!(query_all(
-                &conn,
-                &format!(
-                    "SELECT {ASSET_COLS} FROM project_assets \
-                     WHERE shot_id = ?1 ORDER BY created_at ASC",
-                ),
-                asset_row,
-            )?);
+            shot["character_ids"] = serde_json::json!(
+                shot_characters.get(&shot_id).cloned().unwrap_or_default()
+            );
+            shot["prop_ids"] = serde_json::json!(
+                shot_props.get(&shot_id).cloned().unwrap_or_default()
+            );
+            shot["assets"] = serde_json::json!(
+                assets_by_shot.get(&shot_id).cloned().unwrap_or_default()
+            );
         }
         scene["shots"] = serde_json::json!(shots);
     }
-
-    let loose_assets = query_all(
-        &conn,
-        &format!(
-            "SELECT {ASSET_COLS} FROM project_assets \
-             WHERE episode_id = ?1 AND shot_id = '' ORDER BY created_at ASC",
-        ),
-        asset_row,
-    )?;
 
     Ok(serde_json::json!({
         "episode": episode,
@@ -1669,35 +1768,57 @@ pub fn project_get_episode_overview(
 /// 影响）；提示词额外搜内容正文。
 #[tauri::command]
 pub fn project_search(app: AppHandle, query: String) -> Result<Vec<serde_json::Value>, String> {
+    let state = app.state::<DbState>();
+    let conn = state.conn.lock().map_err(|e| e.to_string())?;
+    project_search_inner(&conn, &query)
+}
+
+pub(crate) fn project_search_inner(
+    conn: &Connection,
+    query: &str,
+) -> Result<Vec<serde_json::Value>, String> {
     let keyword = query.trim().to_lowercase();
     if keyword.is_empty() {
         return Ok(Vec::new());
     }
     let pattern = format!("%{keyword}%");
-    let state = app.state::<DbState>();
-    let conn = state.conn.lock().map_err(|e| e.to_string())?;
     let mut results: Vec<serde_json::Value> = Vec::new();
 
-    // (kind, 表, 匹配列, 取列)：统一产出 kind/title/id 及跳转所需外键。
-    let tables: [(&str, &str, &str, &str); 6] = [
-        ("show", "project_shows", "name", "id, name AS title"),
-        ("episode", "project_episodes", "title", "id, title, show_id"),
-        ("character", "project_characters", "name", "id, name AS title"),
-        ("location", "project_locations", "name", "id, name AS title"),
-        ("prop", "project_props", "name", "id, name AS title"),
+    // (kind, 表, 匹配列, 附加描述列, 取列)：统一产出 kind/title/id 及跳转
+    // 所需外键。附加列是名称之外的描述性正文（角色的 bio、提示词的
+    // content），SQL 片段为内部常量拼接，不来自用户输入。
+    let tables: [(&str, &str, &str, &str, &str); 6] = [
+        ("show", "project_shows", "name", "note", "id, name AS title"),
+        ("episode", "project_episodes", "title", "", "id, title, show_id"),
+        (
+            "character",
+            "project_characters",
+            "name",
+            "bio",
+            "id, name AS title",
+        ),
+        (
+            "location",
+            "project_locations",
+            "name",
+            "bio",
+            "id, name AS title",
+        ),
+        ("prop", "project_props", "name", "bio", "id, name AS title"),
         (
             "prompt",
             "project_prompts",
             "title",
+            "content",
             "id, title, content",
         ),
     ];
-    for (kind, table, column, select) in tables {
-        // 提示词额外搜内容正文；其余表只搜名称/标题列。
-        let content_clause = if kind == "prompt" {
-            " OR lower(content) LIKE ?1"
+    for (kind, table, column, extra_column, select) in tables {
+        // 描述列额外参与匹配（剧的备注/角色地点道具的简介/提示词正文）。
+        let content_clause = if extra_column.is_empty() {
+            String::new()
         } else {
-            ""
+            format!(" OR lower({extra_column}) LIKE ?1")
         };
         let sql = format!(
             "SELECT '{kind}' AS kind, {select} FROM {table} \

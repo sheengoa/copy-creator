@@ -395,6 +395,7 @@ export default function ProjectView() {
                             path={avatarPath}
                             alt={character.name}
                             className="project-avatar-img"
+                            version={character.updated_at}
                           />
                         ) : (
                           characterAvatarInitial(character.name)

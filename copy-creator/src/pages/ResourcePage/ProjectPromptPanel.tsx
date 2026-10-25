@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { useShallow } from "zustand/react/shallow";
 import { useProjectStore, type ProjectPrompt } from "../../stores/projectStore";
+import { usePhraseStore } from "../../stores/phraseStore";
 import { ConfirmDialog } from "../../components/ConfirmDialog";
 import { Icons } from "../../components/Icons";
 import { PROMPT_CATEGORIES, promptCategoryKey } from "../../domain/projectView";
@@ -31,6 +32,7 @@ export default function ProjectPromptPanel({ onClose }: { onClose: () => void })
 
   const [draft, setDraft] = useState<PromptDraft | null>(null);
   const [copiedId, setCopiedId] = useState<string | null>(null);
+  const [quickSavedId, setQuickSavedId] = useState<string | null>(null);
   const [deleteTarget, setDeleteTarget] = useState<ProjectPrompt | null>(null);
 
   useEffect(() => {
@@ -45,6 +47,30 @@ export default function ProjectPromptPanel({ onClose }: { onClose: () => void })
     } catch {
       // WebView 剪切板不可用时静默失败：复制按钮仅是快捷方式。
     }
+  };
+
+  // 存为快捷输入：统一收进「工程提示词」分组（无则自动建），跨库
+  // 复用 phraseStore 既有命令，工程侧不直接 invoke 快捷输入命令。
+  const handleSaveToQuickInput = async (prompt: ProjectPrompt) => {
+    const phraseStore = usePhraseStore.getState();
+    let groups = phraseStore.groups;
+    if (groups.length === 0) {
+      await phraseStore.loadGroups();
+      groups = usePhraseStore.getState().groups;
+    }
+    const groupName = t("project.prompt.quickGroupName");
+    let group = groups.find((candidate) => candidate.name === groupName);
+    if (!group) {
+      await phraseStore.createGroup(groupName);
+      group = usePhraseStore.getState().groups.find((candidate) => candidate.name === groupName);
+    }
+    if (!group) return;
+    await phraseStore.createPhrase(group.id, prompt.title, prompt.content);
+    setQuickSavedId(prompt.id);
+    window.setTimeout(
+      () => setQuickSavedId((current) => (current === prompt.id ? null : current)),
+      1600,
+    );
   };
 
   const handleSave = async () => {
@@ -103,6 +129,19 @@ export default function ProjectPromptPanel({ onClose }: { onClose: () => void })
                   onClick={() => void handleCopy(prompt)}
                 >
                   {copiedId === prompt.id ? Icons.check : Icons.copy}
+                </button>
+                <button
+                  type="button"
+                  className={`project-mini-btn${quickSavedId === prompt.id ? " copied" : ""}`}
+                  title={
+                    quickSavedId === prompt.id
+                      ? t("project.prompt.savedToQuick")
+                      : t("project.prompt.saveToQuick")
+                  }
+                  disabled={!prompt.content}
+                  onClick={() => void handleSaveToQuickInput(prompt)}
+                >
+                  {quickSavedId === prompt.id ? Icons.check : Icons.star}
                 </button>
                 <button
                   type="button"

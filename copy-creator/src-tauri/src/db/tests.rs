@@ -6756,6 +6756,7 @@ mod text_version_tests {
 #[cfg(test)]
 mod project_tests {
     use crate::db::{ensure_schema, Connection, MIGRATED_BUSINESS_TABLES, PROJECT_SCHEMA_SQL};
+    use tauri::Manager;
 
     fn project_conn() -> Connection {
         let conn = Connection::open_in_memory().unwrap();
@@ -7134,5 +7135,35 @@ mod project_tests {
                 "{table} 未登记进 MIGRATED_BUSINESS_TABLES"
             );
         }
+    }
+
+    #[test]
+    fn search_matches_description_fields() {
+        // 工程搜索除名称/标题外还应命中描述性正文：角色/道具的 bio
+        // （剧的 note 同列机制，提示词正文原本已覆盖）。
+        let conn = project_conn();
+        conn.execute(
+            "INSERT INTO project_characters (id, name, role_tag, bio, prompt, avatar_path, created_at, updated_at) \
+             VALUES ('c1', '陆离', '掌柜', '沉默寡言的老江湖', '', '', '2026-01-01', '2026-01-01')",
+            [],
+        )
+        .unwrap();
+        conn.execute(
+            "INSERT INTO project_props (id, name, bio, prompt, ref_path, created_at, updated_at) \
+             VALUES ('p1', '铜锣', '祖传的老铜锣，声音清亮', '', '', '2026-01-01', '2026-01-01')",
+            [],
+        )
+        .unwrap();
+        let hits = crate::db::project::project_search_inner(&conn, "老江湖").unwrap();
+        assert!(
+            hits.iter()
+                .any(|r| r["kind"] == "character" && r["id"] == "c1"),
+            "角色 bio 未命中搜索：{hits:?}"
+        );
+        let hits = crate::db::project::project_search_inner(&conn, "清亮").unwrap();
+        assert!(
+            hits.iter().any(|r| r["kind"] == "prop" && r["id"] == "p1"),
+            "道具 bio 未命中搜索：{hits:?}"
+        );
     }
 }

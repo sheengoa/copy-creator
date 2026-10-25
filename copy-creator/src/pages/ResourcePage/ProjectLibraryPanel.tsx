@@ -246,6 +246,11 @@ export default function ProjectLibraryPanel({
                         ? (entity as ProjectLocation).ref_path
                         : (entity as ProjectProp).ref_path
                     }
+                    version={
+                      kind === "locations"
+                        ? (entity as ProjectLocation).updated_at
+                        : (entity as ProjectProp).updated_at
+                    }
                     libraryRoot={libraryRoot}
                     icon={kind === "locations" ? Icons.resources : Icons.star}
                   />
@@ -626,7 +631,12 @@ function CharacterVisual({
       aria-label={t("project.cast.title")}
     >
       {avatarPath ? (
-        <ResourceImage path={avatarPath} alt={character.name} className="project-avatar-img" />
+        <ResourceImage
+          path={avatarPath}
+          alt={character.name}
+          className="project-avatar-img"
+          version={character.updated_at}
+        />
       ) : (
         characterAvatarInitial(character.name)
       )}
@@ -638,16 +648,23 @@ function RefVisual({
   refPath,
   libraryRoot,
   icon,
+  version,
 }: {
   refPath: string;
   libraryRoot: string;
   icon: React.ReactNode;
+  version: string;
 }) {
   const absolute = refPath ? joinLibraryPath(libraryRoot, refPath) : "";
   return (
     <span className="project-library-thumb">
       {absolute ? (
-        <ResourceImage path={absolute} alt="" className="project-library-thumb-img" />
+        <ResourceImage
+          path={absolute}
+          alt=""
+          className="project-library-thumb-img"
+          version={version}
+        />
       ) : (
         icon
       )}
