@@ -101,6 +101,16 @@ describe("projectStore", () => {
     expect(created?.id).toBe("show-a");
   });
 
+  it("renameShow 以 camelCase 参数路由到 project_rename_show", async () => {
+    invokeMock.mockResolvedValue(undefined);
+    await useProjectStore.getState().renameShow("show-a", "山海食肆");
+
+    expect(invokeMock).toHaveBeenCalledWith("project_rename_show", {
+      id: "show-a",
+      name: "山海食肆",
+    });
+  });
+
   it("updateEpisode 以 camelCase 参数路由 script_path", async () => {
     invokeMock.mockResolvedValue(undefined);
     await useProjectStore.getState().updateEpisode("ep-2", {

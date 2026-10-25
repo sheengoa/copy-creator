@@ -457,20 +457,8 @@ pub fn project_rename_show(app: AppHandle, id: String, name: String) -> Result<(
     Ok(())
 }
 
-#[tauri::command]
-pub fn project_update_show(app: AppHandle, id: String, note: String) -> Result<(), String> {
-    {
-        let state = app.state::<DbState>();
-        let conn = state.conn.lock().map_err(|e| e.to_string())?;
-        conn.execute(
-            "UPDATE project_shows SET note = ?1, updated_at = ?2 WHERE id = ?3",
-            params![note, project_now(), id],
-        )
-        .map_err(|e| e.to_string())?;
-    }
-    emit_project_changed(&app);
-    Ok(())
-}
+// project_shows 的备注（note）列 UI 无编辑入口，不再暴露只写 note 的
+// 旧命令；改名走 project_rename_show。
 
 /// 资源库文件改名/移动成功后同步工程素材档案：单文件相对库根路径
 /// 精确替换。同步失败只记日志不阻断资源操作（档案路径过期会被
@@ -1103,48 +1091,6 @@ pub fn project_delete_prop(app: AppHandle, id: String) -> Result<(), String> {
 // ── 集内场景 ────────────────────────────────────────────────
 
 #[tauri::command]
-pub fn project_list_scenes(
-    app: AppHandle,
-    episode_id: String,
-) -> Result<Vec<serde_json::Value>, String> {
-    let state = app.state::<DbState>();
-    let conn = state.conn.lock().map_err(|e| e.to_string())?;
-    let mut scenes = query_all_params(
-        &conn,
-        &format!(
-            "SELECT {SCENE_COLS} FROM project_scenes \
-             WHERE episode_id = ?1 ORDER BY sort_order ASC, created_at ASC",
-        ),
-        params![&episode_id],
-        scene_row,
-    )?;
-    for scene in scenes.iter_mut() {
-        let count: i64 = conn
-            .query_row(
-                "SELECT COUNT(*) FROM project_shots WHERE scene_id = ?1",
-                params![scene["id"].as_str().unwrap_or_default()],
-                |row| row.get(0),
-            )
-            .map_err(|e| e.to_string())?;
-        scene["shot_count"] = serde_json::json!(count);
-        // 场景库条目（软引用）：还在则带出名称供列表直显，被删则仅剩
-        // heading 自身，场景实例不受影响。
-        if let Some(location_id) = scene["location_id"].as_str() {
-            if !location_id.is_empty() {
-                let location = query_row_with_param(
-                    &conn,
-                    &format!("SELECT {LOCATION_COLS} FROM project_locations WHERE id = ?1"),
-                    &[&location_id],
-                    location_row,
-                );
-                scene["location"] = location.unwrap_or(serde_json::Value::Null);
-            }
-        }
-    }
-    Ok(scenes)
-}
-
-#[tauri::command]
 pub fn project_create_scene(
     app: AppHandle,
     episode_id: String,
@@ -1232,28 +1178,6 @@ pub fn project_delete_scene(app: AppHandle, id: String) -> Result<(), String> {
 }
 
 // ── 镜头 ────────────────────────────────────────────────────
-
-#[tauri::command]
-pub fn project_list_shots(
-    app: AppHandle,
-    episode_id: String,
-) -> Result<Vec<serde_json::Value>, String> {
-    let state = app.state::<DbState>();
-    let conn = state.conn.lock().map_err(|e| e.to_string())?;
-    let mut shots = query_all_params(
-        &conn,
-        &format!(
-            "SELECT {SHOT_COLS} FROM project_shots \
-             WHERE episode_id = ?1 ORDER BY sort_order ASC, created_at ASC",
-        ),
-        params![&episode_id],
-        shot_row,
-    )?;
-    for shot in shots.iter_mut() {
-        attach_shot_relations(&conn, shot)?;
-    }
-    Ok(shots)
-}
 
 pub(crate) fn attach_shot_relations(
     conn: &Connection,
@@ -1414,43 +1338,6 @@ pub fn project_set_shot_props(
 }
 
 // ── 素材档案 ────────────────────────────────────────────────
-
-#[tauri::command]
-pub fn project_list_assets(
-    app: AppHandle,
-    episode_id: String,
-    shot_id: String,
-) -> Result<Vec<serde_json::Value>, String> {
-    let state = app.state::<DbState>();
-    let conn = state.conn.lock().map_err(|e| e.to_string())?;
-    if !shot_id.is_empty() {
-        return query_all_params(
-            &conn,
-            &format!(
-                "SELECT {ASSET_COLS} FROM project_assets \
-                 WHERE shot_id = ?1 ORDER BY created_at ASC",
-            ),
-            params![&shot_id],
-            asset_row,
-        );
-    }
-    if !episode_id.is_empty() {
-        return query_all_params(
-            &conn,
-            &format!(
-                "SELECT {ASSET_COLS} FROM project_assets \
-                 WHERE episode_id = ?1 ORDER BY created_at ASC",
-            ),
-            params![&episode_id],
-            asset_row,
-        );
-    }
-    query_all(
-        &conn,
-        &format!("SELECT {ASSET_COLS} FROM project_assets ORDER BY created_at ASC"),
-        asset_row,
-    )
-}
 
 /// 把资源库文件挂进工程：同一文件只有一份档案，重复挂靠时改写归属
 /// （换集/换镜头）而不是新建行——file_path UNIQUE + DO UPDATE。

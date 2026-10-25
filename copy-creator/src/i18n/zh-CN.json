@@ -410,6 +410,7 @@
       "emptyStage": "从右上角「新建剧」开始你的第一部 AI 视频",
       "pickPlaceholder": "选择剧",
       "new": "新建剧",
+      "rename": "重命名剧",
       "nameLabel": "剧名",
       "namePlaceholder": "例如：山海食肆",
       "delete": "删除剧「{{name}}」",

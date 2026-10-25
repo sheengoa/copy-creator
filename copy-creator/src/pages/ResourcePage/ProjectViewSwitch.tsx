@@ -11,7 +11,7 @@ import { Icons } from "../../components/Icons";
  *  纵向空间；为空/false（工程视图）时回落 spacer，布局与此前一致。 */
 export default function ProjectViewSwitch({ children }: { children?: ReactNode }) {
   const { t } = useTranslation();
-  const { view, setView, shows, currentShowId, selectShow, createShow, deleteShow, loadShows } =
+  const { view, setView, shows, currentShowId, selectShow, createShow, renameShow, deleteShow, loadShows } =
     useProjectStore(
       useShallow((state) => ({
         view: state.view,
@@ -20,6 +20,7 @@ export default function ProjectViewSwitch({ children }: { children?: ReactNode }
         currentShowId: state.currentShowId,
         selectShow: state.selectShow,
         createShow: state.createShow,
+        renameShow: state.renameShow,
         deleteShow: state.deleteShow,
         loadShows: state.loadShows,
       })),
@@ -28,6 +29,8 @@ export default function ProjectViewSwitch({ children }: { children?: ReactNode }
   const [menuOpen, setMenuOpen] = useState(false);
   const [newShowOpen, setNewShowOpen] = useState(false);
   const [newShowName, setNewShowName] = useState("");
+  const [renameOpen, setRenameOpen] = useState(false);
+  const [renameName, setRenameName] = useState("");
   const [deleteShowConfirm, setDeleteShowConfirm] = useState(false);
   const menuRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
@@ -61,6 +64,13 @@ export default function ProjectViewSwitch({ children }: { children?: ReactNode }
 
   const currentShow = shows.find((show) => show.id === currentShowId) ?? null;
 
+  useEffect(() => {
+    if (renameOpen && currentShow) {
+      setRenameName(currentShow.name);
+      window.setTimeout(() => inputRef.current?.focus(), 0);
+    }
+  }, [renameOpen, currentShow]);
+
   const handleCreateShow = async () => {
     const name = newShowName.trim();
     if (!name) return;
@@ -69,6 +79,16 @@ export default function ProjectViewSwitch({ children }: { children?: ReactNode }
       setNewShowOpen(false);
       await selectShow(created.id);
     }
+  };
+
+  const handleRenameShow = async () => {
+    const name = renameName.trim();
+    if (!name || !currentShow || name === currentShow.name) {
+      setRenameOpen(false);
+      return;
+    }
+    await renameShow(currentShow.id, name);
+    setRenameOpen(false);
   };
 
   return (
@@ -146,6 +166,20 @@ export default function ProjectViewSwitch({ children }: { children?: ReactNode }
                 <button
                   type="button"
                   role="menuitem"
+                  className="project-menu-item"
+                  onClick={() => {
+                    setMenuOpen(false);
+                    setRenameOpen(true);
+                  }}
+                >
+                  <span className="project-menu-item-icon">{Icons.edit}</span>
+                  {t("project.show.rename")}
+                </button>
+              )}
+              {currentShow && (
+                <button
+                  type="button"
+                  role="menuitem"
                   className="project-menu-item project-menu-danger"
                   onClick={() => {
                     setMenuOpen(false);
@@ -210,6 +244,63 @@ export default function ProjectViewSwitch({ children }: { children?: ReactNode }
                 className="project-dialog-btn primary"
                 disabled={!newShowName.trim()}
                 onClick={() => void handleCreateShow()}
+              >
+                {t("common.confirm")}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {renameOpen && (
+        <div
+          className="project-dialog-overlay"
+          onMouseDown={(event) => {
+            if (event.target === event.currentTarget) setRenameOpen(false);
+          }}
+        >
+          <div className="project-dialog">
+            <div className="project-dialog-head">
+              <h4>{t("project.show.rename")}</h4>
+              <button
+                type="button"
+                className="project-dialog-close"
+                onClick={() => setRenameOpen(false)}
+                aria-label={t("common.cancel")}
+              >
+                {Icons.close}
+              </button>
+            </div>
+            <div className="project-dialog-body">
+              <label className="project-dialog-label" htmlFor="project-rename-show-name">
+                {t("project.show.nameLabel")}
+              </label>
+              <input
+                id="project-rename-show-name"
+                ref={inputRef}
+                className="project-dialog-input"
+                value={renameName}
+                placeholder={t("project.show.namePlaceholder")}
+                onChange={(event) => setRenameName(event.target.value)}
+                onKeyDown={(event) => {
+                  if (event.key === "Enter") void handleRenameShow();
+                  if (event.key === "Escape") setRenameOpen(false);
+                }}
+              />
+            </div>
+            <div className="project-dialog-foot">
+              <button
+                type="button"
+                className="project-dialog-btn"
+                onClick={() => setRenameOpen(false)}
+              >
+                {t("common.cancel")}
+              </button>
+              <button
+                type="button"
+                className="project-dialog-btn primary"
+                disabled={!renameName.trim()}
+                onClick={() => void handleRenameShow()}
               >
                 {t("common.confirm")}
               </button>

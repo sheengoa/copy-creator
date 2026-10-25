@@ -410,6 +410,7 @@
       "emptyStage": "Create your first AI video show from the top right",
       "pickPlaceholder": "Select a show",
       "new": "New Show",
+      "rename": "Rename Show",
       "nameLabel": "Show name",
       "namePlaceholder": "e.g. Mountain-Sea Diner",
       "delete": "Delete \"{{name}}\"",
