@@ -464,6 +464,7 @@
       "scope": "Global",
       "empty": "{{kind}} is empty — create one to start",
       "linked": "Linked",
+      "selected": "Selected",
       "pick": "Link",
       "newCharacter": "New Character",
       "newLocation": "New Location",
@@ -500,6 +501,31 @@
         "night": "Night",
         "dusk": "Dusk"
       }
+    },
+    "scene": {
+      "empty": "No scenes yet — start from each scene of the script",
+      "new": "New Scene",
+      "untitled": "Untitled scene",
+      "field": {
+        "heading": "Scene heading",
+        "headingPlaceholder": "Scene 1 · INT · Diner · Night",
+        "location": "Link location",
+        "freeLocation": "None (free scene)"
+      },
+      "deleteConfirm": "Delete \"{{heading}}\" and its shots? Linked assets stay as episode loose files."
+    },
+    "shot": {
+      "new": "Shot",
+      "untitled": "No description yet",
+      "field": {
+        "description": "Description",
+        "dialogue": "Dialogue / VO",
+        "cast": "Cast",
+        "props": "Props"
+      },
+      "pickCastTitle": "Select cast",
+      "pickPropsTitle": "Select props",
+      "deleteConfirm": "Delete this shot? Linked assets stay as episode loose files."
     }
   },
   "common": {

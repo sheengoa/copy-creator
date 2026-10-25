@@ -60,6 +60,12 @@ export interface ProjectLibraryPanelProps {
   linkedIds?: string[];
   /** pick 模式：选中未关联实体后的回调。 */
   onPick?: (id: string) => void;
+  /** 多选挑选模式：点选切换并集而不关闭面板（镜头出镜/道具用）。 */
+  multi?: boolean;
+  /** 多选模式：当前已选集合（显示「已选」标记，可点选取消）。 */
+  selectedIds?: string[];
+  /** 多选模式：点选切换回调。 */
+  onTogglePick?: (id: string) => void;
 }
 
 const EMPTY_CHARACTER: CharacterDraft = { name: "", role_tag: "", bio: "", prompt: "", avatar_path: "" };
@@ -67,8 +73,8 @@ const EMPTY_LOCATION: LocationDraft = { name: "", int_ext: "", time_hint: "", bi
 const EMPTY_PROP: PropDraft = { name: "", bio: "", prompt: "", ref_path: "" };
 
 /** 全局三库面板（角色/场景/道具）：browse 模式浏览与维护；pick 模式
- *  供集工作台挑选关联。场景与道具的参考图、角色的形象图在列表内
- *  图文同屏（有图显图、无图占位），路径为相对库根。 */
+ *  供集工作台挑选关联（单选即选即关，multi 多选点选切换）。场景与
+ *  道具的参考图、角色的形象图在列表内图文同屏。 */
 export default function ProjectLibraryPanel({
   kind,
   mode,
@@ -76,6 +82,9 @@ export default function ProjectLibraryPanel({
   pickTitle,
   linkedIds,
   onPick,
+  multi,
+  selectedIds,
+  onTogglePick,
 }: ProjectLibraryPanelProps) {
   const { t } = useTranslation();
   const store = useProjectStore(
@@ -129,7 +138,10 @@ export default function ProjectLibraryPanel({
     setPropDraft(null);
   };
 
-  const linked = useMemo(() => new Set(linkedIds ?? []), [linkedIds]);
+  const marked = useMemo(
+    () => new Set((multi ? selectedIds : linkedIds) ?? []),
+    [multi, selectedIds, linkedIds],
+  );
 
   const handleSave = async () => {
     if (kind === "characters" && characterDraft) {
@@ -199,18 +211,20 @@ export default function ProjectLibraryPanel({
             </div>
           )}
           {items.map(({ id, name, entity }) => {
-            const isLinked = mode === "pick" && linked.has(id);
+            const isMarked = mode === "pick" && marked.has(id);
+            const handleClick =
+              mode === "pick"
+                ? multi
+                  ? () => onTogglePick?.(id)
+                  : isMarked
+                    ? undefined
+                    : () => onPick?.(id)
+                : undefined;
             return (
               <div
                 key={id}
-                className={`project-library-card${mode === "pick" && !isLinked ? " pick" : ""}`}
-                onClick={
-                  mode === "pick" && !isLinked
-                    ? () => {
-                        onPick?.(id);
-                      }
-                    : undefined
-                }
+                className={`project-library-card${handleClick ? " pick" : ""}`}
+                onClick={handleClick}
               >
                 {kind === "characters" ? (
                   <CharacterVisual
@@ -245,8 +259,10 @@ export default function ProjectLibraryPanel({
                   </i>
                 </div>
                 {mode === "pick" ? (
-                  <span className={`project-library-tag${isLinked ? " linked" : ""}`}>
-                    {isLinked ? t("project.library.linked") : t("project.library.pick")}
+                  <span className={`project-library-tag${isMarked ? " linked" : ""}`}>
+                    {isMarked
+                      ? t(multi ? "project.library.selected" : "project.library.linked")
+                      : t("project.library.pick")}
                   </span>
                 ) : (
                   <span className="project-library-actions">

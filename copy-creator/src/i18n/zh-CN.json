@@ -464,6 +464,7 @@
       "scope": "全局",
       "empty": "{{kind}}还是空的，先新建一条",
       "linked": "已关联",
+      "selected": "已选",
       "pick": "关联",
       "newCharacter": "新建角色",
       "newLocation": "新建场景",
@@ -500,6 +501,31 @@
         "night": "夜",
         "dusk": "黄昏"
       }
+    },
+    "scene": {
+      "empty": "本集还没有场景，从剧本的每一场开始建",
+      "new": "新建场景",
+      "untitled": "未命名场景",
+      "field": {
+        "heading": "场景标题",
+        "headingPlaceholder": "场 1 · 内景 · 食肆大堂 · 夜",
+        "location": "引用场景库",
+        "freeLocation": "不引用（自由场景）"
+      },
+      "deleteConfirm": "删除「{{heading}}」及其镜头？素材档案会保留为集级散件。"
+    },
+    "shot": {
+      "new": "镜头",
+      "untitled": "未写镜头描述",
+      "field": {
+        "description": "镜头描述",
+        "dialogue": "对白 / 旁白",
+        "cast": "出镜",
+        "props": "道具"
+      },
+      "pickCastTitle": "选择出镜角色",
+      "pickPropsTitle": "选择出场道具",
+      "deleteConfirm": "删除这个镜头？挂靠的素材档案会保留为集级散件。"
     }
   },
   "common": {

@@ -8,6 +8,7 @@ import { ConfirmDialog } from "../../components/ConfirmDialog";
 import IosSelect from "../../components/IosSelect";
 import { ResourceImage } from "./ResourceMedia";
 import ProjectLibraryPanel from "./ProjectLibraryPanel";
+import ProjectSceneBoard from "./ProjectSceneBoard";
 import { Icons } from "../../components/Icons";
 import { openResourceFile, readResourceTextPreview } from "../../domain/mediaAssets";
 import {
@@ -376,36 +377,40 @@ export default function ProjectView() {
                 )}
               </div>
 
-              <div className="project-assets">
-                <div className="project-assets-head">
-                  <h4>{t("project.asset.title")}</h4>
-                  <span>{looseAssets.length}</span>
+              <div className="project-stage-right">
+                <ProjectSceneBoard />
+
+                <div className="project-assets">
+                  <div className="project-assets-head">
+                    <h4>{t("project.asset.title")}</h4>
+                    <span>{looseAssets.length}</span>
+                  </div>
+                  {overviewLoading ? (
+                    <div className="project-assets-empty">{t("project.loading")}</div>
+                  ) : looseAssets.length === 0 ? (
+                    <div className="project-assets-empty">
+                      {Icons.empty}
+                      <p>{t("project.asset.empty")}</p>
+                    </div>
+                  ) : (
+                    <div className="project-asset-list">
+                      {looseAssets.map((asset) => (
+                        <div
+                          key={asset.id}
+                          className="project-asset-row"
+                          title={asset.file_path}
+                        >
+                          <span className="project-asset-kind">
+                            {t(assetKindLabelKey(asset.kind))}
+                          </span>
+                          <span className="project-asset-name">
+                            {asset.name || asset.file_path}
+                          </span>
+                        </div>
+                      ))}
+                    </div>
+                  )}
                 </div>
-                {overviewLoading ? (
-                  <div className="project-assets-empty">{t("project.loading")}</div>
-                ) : looseAssets.length === 0 ? (
-                  <div className="project-assets-empty">
-                    {Icons.empty}
-                    <p>{t("project.asset.empty")}</p>
-                  </div>
-                ) : (
-                  <div className="project-asset-list">
-                    {looseAssets.map((asset) => (
-                      <div
-                        key={asset.id}
-                        className="project-asset-row"
-                        title={asset.file_path}
-                      >
-                        <span className="project-asset-kind">
-                          {t(assetKindLabelKey(asset.kind))}
-                        </span>
-                        <span className="project-asset-name">
-                          {asset.name || asset.file_path}
-                        </span>
-                      </div>
-                    ))}
-                  </div>
-                )}
               </div>
             </div>
           </>

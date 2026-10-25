@@ -77,10 +77,38 @@ export interface ProjectAsset {
   updated_at: string;
 }
 
+export interface ProjectShot {
+  id: string;
+  scene_id: string;
+  episode_id: string;
+  description: string;
+  dialogue: string;
+  character_ids: string[];
+  prop_ids: string[];
+  assets: ProjectAsset[];
+  sort_order: number;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface ProjectScene {
+  id: string;
+  episode_id: string;
+  location_id: string;
+  heading: string;
+  note: string;
+  shot_count: number;
+  location: ProjectLocation | null;
+  shots: ProjectShot[];
+  sort_order: number;
+  created_at: string;
+  updated_at: string;
+}
+
 export interface EpisodeOverview {
   episode: ProjectEpisode;
   characters: ProjectCharacter[];
-  scenes: Array<Record<string, unknown>>;
+  scenes: ProjectScene[];
   loose_assets: ProjectAsset[];
 }
 
@@ -133,6 +161,25 @@ interface ProjectStoreState {
 
   /** 集关联角色：整组替换（后端 delete + 批量插入），随后刷新概览。 */
   setEpisodeCharacters: (episodeId: string, characterIds: string[]) => Promise<void>;
+
+  saveScene: (payload: {
+    id?: string;
+    episodeId: string;
+    heading: string;
+    locationId: string;
+    note: string;
+  }) => Promise<boolean>;
+  deleteScene: (id: string) => Promise<void>;
+  saveShot: (payload: {
+    id?: string;
+    sceneId: string;
+    description: string;
+    dialogue: string;
+  }) => Promise<boolean>;
+  deleteShot: (id: string) => Promise<void>;
+  /** 镜头出镜角色 / 道具：整组替换。 */
+  setShotCharacters: (shotId: string, characterIds: string[]) => Promise<void>;
+  setShotProps: (shotId: string, propIds: string[]) => Promise<void>;
 }
 
 const VIEW_STORAGE_KEY = "resource_view_mode";
@@ -482,6 +529,90 @@ export const useProjectStore = create<ProjectStoreState>((set, get) => ({
       await get().loadCharacters();
     } catch (error) {
       console.error("project_set_episode_characters failed:", error);
+    }
+  },
+
+  // ── 场景与镜头 ───────────────────────────────────────────
+  // 概览（scenes 含 shots）是唯一数据源，CRUD 后重取当前集保持一致。
+
+  saveScene: async (payload) => {
+    const args = { heading: payload.heading, locationId: payload.locationId, note: payload.note };
+    try {
+      if (payload.id) {
+        await invoke("project_update_scene", { id: payload.id, ...args });
+      } else {
+        await invoke("project_create_scene", { episodeId: payload.episodeId, ...args });
+      }
+      const { currentEpisodeId } = get();
+      if (currentEpisodeId) await get().selectEpisode(currentEpisodeId);
+      return true;
+    } catch (error) {
+      console.error("save scene failed:", error);
+      return false;
+    }
+  },
+
+  deleteScene: async (id) => {
+    try {
+      await invoke("project_delete_scene", { id });
+      const { currentEpisodeId } = get();
+      if (currentEpisodeId) await get().selectEpisode(currentEpisodeId);
+    } catch (error) {
+      console.error("project_delete_scene failed:", error);
+    }
+  },
+
+  saveShot: async (payload) => {
+    try {
+      if (payload.id) {
+        await invoke("project_update_shot", {
+          id: payload.id,
+          description: payload.description,
+          dialogue: payload.dialogue,
+        });
+      } else {
+        await invoke("project_create_shot", {
+          sceneId: payload.sceneId,
+          description: payload.description,
+          dialogue: payload.dialogue,
+        });
+      }
+      const { currentEpisodeId } = get();
+      if (currentEpisodeId) await get().selectEpisode(currentEpisodeId);
+      return true;
+    } catch (error) {
+      console.error("save shot failed:", error);
+      return false;
+    }
+  },
+
+  deleteShot: async (id) => {
+    try {
+      await invoke("project_delete_shot", { id });
+      const { currentEpisodeId } = get();
+      if (currentEpisodeId) await get().selectEpisode(currentEpisodeId);
+    } catch (error) {
+      console.error("project_delete_shot failed:", error);
+    }
+  },
+
+  setShotCharacters: async (shotId, characterIds) => {
+    try {
+      await invoke("project_set_shot_characters", { shotId, characterIds });
+      const { currentEpisodeId } = get();
+      if (currentEpisodeId) await get().selectEpisode(currentEpisodeId);
+    } catch (error) {
+      console.error("project_set_shot_characters failed:", error);
+    }
+  },
+
+  setShotProps: async (shotId, propIds) => {
+    try {
+      await invoke("project_set_shot_props", { shotId, propIds });
+      const { currentEpisodeId } = get();
+      if (currentEpisodeId) await get().selectEpisode(currentEpisodeId);
+    } catch (error) {
+      console.error("project_set_shot_props failed:", error);
     }
   },
 }));
