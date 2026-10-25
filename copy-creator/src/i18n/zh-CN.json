@@ -458,6 +458,7 @@
       "pickerEmpty": "资源库中还没有可挂靠的文件",
       "alreadyLinked": "已挂靠",
       "linkAction": "挂靠",
+      "fileMissing": "文件缺失",
       "empty": "暂无挂靠素材；放入资源库分组的文件可挂到本集（下一阶段开放）",
       "kind": {
         "image": "图片",
@@ -583,6 +584,8 @@
       "fromAsset": "由哪个源素材生成",
       "none": "无",
       "staleRef": "已失效（原记录已删除）",
+      "missingBanner": "文件已不在资源库中，可能已被删除或移出库外。",
+      "relink": "重新挂靠",
       "open": "打开文件",
       "reveal": "在文件管理器显示",
       "locate": "在资源库中显示",

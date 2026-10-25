@@ -11,7 +11,7 @@ import { Icons } from "../../components/Icons";
  *  纵向空间；为空/false（工程视图）时回落 spacer，布局与此前一致。 */
 export default function ProjectViewSwitch({ children }: { children?: ReactNode }) {
   const { t } = useTranslation();
-  const { view, setView, shows, currentShowId, selectShow, createShow, renameShow, deleteShow, loadShows } =
+  const { view, setView, shows, currentShowId, selectShow, createShow, renameShow, deleteShow, refresh } =
     useProjectStore(
       useShallow((state) => ({
         view: state.view,
@@ -22,7 +22,7 @@ export default function ProjectViewSwitch({ children }: { children?: ReactNode }
         createShow: state.createShow,
         renameShow: state.renameShow,
         deleteShow: state.deleteShow,
-        loadShows: state.loadShows,
+        refresh: state.refresh,
       })),
     );
 
@@ -34,8 +34,6 @@ export default function ProjectViewSwitch({ children }: { children?: ReactNode }
   const [deleteShowConfirm, setDeleteShowConfirm] = useState(false);
   const menuRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
-  // 首次进入工程视图才拉剧列表；后续切回不重复全量加载（事件驱动刷新）。
-  const showsLoadingChecked = useRef(false);
 
   useEffect(() => {
     if (!menuOpen) return;
@@ -56,11 +54,13 @@ export default function ProjectViewSwitch({ children }: { children?: ReactNode }
   }, [newShowOpen]);
 
   useEffect(() => {
-    if (view === "project" && !showsLoadingChecked.current) {
-      showsLoadingChecked.current = true;
-      void loadShows();
+    // 每次切入工程视图都全量刷新（refresh 保住当前选中）：文件视图期间
+    // 库内文件可能被增删/改名/恢复，素材档案的缺失标记与路径同步依赖
+    // 新鲜的 overview，不能只靠 project-changed 事件（库文件操作不发它）。
+    if (view === "project") {
+      void refresh();
     }
-  }, [view, loadShows]);
+  }, [view, refresh]);
 
   const currentShow = shows.find((show) => show.id === currentShowId) ?? null;
 

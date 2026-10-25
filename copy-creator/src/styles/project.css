@@ -928,6 +928,27 @@
   box-shadow: 0 4px 14px rgba(0, 0, 0, 0.06);
 }
 
+/* 挂靠选择器「显示更多」：与次级按钮家族同规格（灰底 6px 圆角 30px 高） */
+.project-library-more {
+  flex-shrink: 0;
+  height: 30px;
+  border: none;
+  border-radius: 6px;
+  background: var(--chip-bg);
+  color: var(--text-secondary);
+  font-size: var(--text-sm);
+  cursor: pointer;
+}
+
+.project-library-more:hover:not(:disabled) {
+  background: var(--chip-hover-bg);
+}
+
+.project-library-more:disabled {
+  opacity: 0.6;
+  cursor: default;
+}
+
 .project-library-main {
   flex: 1;
   min-width: 0;
@@ -1765,12 +1786,55 @@
   margin-left: 6px;
 }
 
+/* 素材档案文件缺失标记：与资源库卡片同口径（danger 12% 底 + danger 字） */
+.project-asset-missing {
+  flex-shrink: 0;
+  padding: 1px 6px;
+  border-radius: 4px;
+  font-size: var(--text-xs);
+  background: color-mix(in srgb, var(--danger) 12%, transparent);
+  color: var(--danger);
+}
+
 .project-shot-asset {
   cursor: pointer;
 }
 
+.project-shot-asset.is-missing {
+  background: color-mix(in srgb, var(--danger) 12%, transparent);
+  color: var(--danger);
+}
+
+.project-shot-asset-flag {
+  font-style: normal;
+  flex-shrink: 0;
+}
+
 .project-dialog-btn.danger {
   color: var(--danger);
+}
+
+/* 素材详情浮层的缺失横幅：口径同列表标记，附「重新挂靠」入口 */
+.project-sheet-missing {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 10px;
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--danger) 10%, transparent);
+  color: var(--danger);
+  font-size: var(--text-sm);
+}
+
+.project-sheet-missing span {
+  flex: 1;
+  min-width: 0;
+}
+
+.project-sheet-missing .project-dialog-btn {
+  flex-shrink: 0;
+  height: 28px;
+  padding: 0 12px;
 }
 
 [data-theme="dark"] .project-mini-btn.copied {

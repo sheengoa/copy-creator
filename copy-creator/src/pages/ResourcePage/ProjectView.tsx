@@ -88,6 +88,9 @@ export default function ProjectView() {
   const [numberDraft, setNumberDraft] = useState("");
   const [assetPickerShotId, setAssetPickerShotId] = useState<string | null>(null);
   const [sheetAsset, setSheetAsset] = useState<ProjectAsset | null>(null);
+  // 「重新挂靠」替换流：详情浮层对缺失档案发起时记录旧档案，选择器
+  // 挂上新文件成功后把旧档案取消挂靠（两步都走既有命令）。
+  const [replaceAsset, setReplaceAsset] = useState<ProjectAsset | null>(null);
   const renameInputRef = useRef<HTMLInputElement>(null);
 
   const currentShow = shows.find((show) => show.id === currentShowId) ?? null;
@@ -501,7 +504,7 @@ export default function ProjectView() {
                       {looseAssets.map((asset) => (
                         <div
                           key={asset.id}
-                          className="project-asset-row is-clickable"
+                          className={`project-asset-row is-clickable${asset.missing ? " is-missing" : ""}`}
                           title={asset.file_path}
                           onClick={() => setSheetAsset(asset)}
                         >
@@ -520,6 +523,11 @@ export default function ProjectView() {
                               </i>
                             )}
                           </span>
+                          {asset.missing && (
+                            <span className="project-asset-missing">
+                              {t("project.asset.fileMissing")}
+                            </span>
+                          )}
                           <button
                             type="button"
                             className="project-asset-unlink"
@@ -543,10 +551,38 @@ export default function ProjectView() {
       </section>
 
       {assetPickerShotId !== null && (
-        <ProjectAssetPicker shotId={assetPickerShotId} onClose={() => setAssetPickerShotId(null)} />
+        <ProjectAssetPicker
+          shotId={assetPickerShotId}
+          onClose={() => {
+            setAssetPickerShotId(null);
+            setReplaceAsset(null);
+          }}
+          onLinked={
+            replaceAsset
+              ? () => {
+                  void unlinkAsset(replaceAsset.id);
+                  setReplaceAsset(null);
+                }
+              : undefined
+          }
+        />
       )}
 
-      {sheetAsset && <ProjectAssetSheet asset={sheetAsset} onClose={() => setSheetAsset(null)} />}
+      {sheetAsset && (
+        <ProjectAssetSheet
+          asset={sheetAsset}
+          onClose={() => setSheetAsset(null)}
+          onRelink={
+            sheetAsset.missing
+              ? () => {
+                  setReplaceAsset(sheetAsset);
+                  setSheetAsset(null);
+                  setAssetPickerShotId(sheetAsset.shot_id);
+                }
+              : undefined
+          }
+        />
+      )}
 
       {/* 全局面板（树底入口/搜索跳转）：三库浏览或提示词库 */}
       {libraryPanel?.kind === "prompts" && (

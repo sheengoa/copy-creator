@@ -77,6 +77,8 @@ export interface ProjectAsset {
   gen_from_prompt: string;
   gen_params: string;
   audio_role: string;
+  /** 文件是否已不在当前资源库根下（overview 命令逐档案检测）。 */
+  missing: boolean;
   created_at: string;
   updated_at: string;
 }

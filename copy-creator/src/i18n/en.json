@@ -458,6 +458,7 @@
       "pickerEmpty": "No linkable files in the library yet",
       "alreadyLinked": "Linked",
       "linkAction": "Link",
+      "fileMissing": "Missing file",
       "empty": "No linked assets yet; files in library groups can be linked here (next stage)",
       "kind": {
         "image": "Image",
@@ -583,6 +584,8 @@
       "fromAsset": "Generated from asset",
       "none": "None",
       "staleRef": "Stale (source deleted)",
+      "missingBanner": "This file is no longer in the resource library. It may have been deleted or moved out.",
+      "relink": "Re-link",
       "open": "Open file",
       "reveal": "Reveal in file manager",
       "locate": "Show in library",

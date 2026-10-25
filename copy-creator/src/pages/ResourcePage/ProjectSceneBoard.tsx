@@ -91,6 +91,8 @@ export default function ProjectSceneBoard() {
   const [pick, setPick] = useState<PickState>(null);
   const [assetPickerShotId, setAssetPickerShotId] = useState<string | null>(null);
   const [sheetAsset, setSheetAsset] = useState<ProjectAsset | null>(null);
+  // 「重新挂靠」替换流：缺失档案从详情浮层发起，选择器挂上新文件后撤销旧档案。
+  const [replaceAsset, setReplaceAsset] = useState<ProjectAsset | null>(null);
   const [deleteSceneTarget, setDeleteSceneTarget] = useState<ProjectScene | null>(null);
   const [deleteShotTarget, setDeleteShotTarget] = useState<ProjectShot | null>(null);
 
@@ -418,11 +420,20 @@ export default function ProjectSceneBoard() {
                       {shot.assets.map((asset) => (
                         <span
                           key={asset.id}
-                          className="project-shot-asset"
-                          title={asset.file_path}
+                          className={`project-shot-asset${asset.missing ? " is-missing" : ""}`}
+                          title={
+                            asset.missing
+                              ? `${t("project.asset.fileMissing")} · ${asset.file_path}`
+                              : asset.file_path
+                          }
                           onClick={() => setSheetAsset(asset)}
                         >
                           {asset.name || asset.file_path}
+                          {asset.missing && (
+                            <i className="project-shot-asset-flag">
+                              {t("project.asset.fileMissing")}
+                            </i>
+                          )}
                           <button
                             type="button"
                             className="project-shot-asset-x"
@@ -607,10 +618,38 @@ export default function ProjectSceneBoard() {
         </button>
       )}
 
-      {sheetAsset && <ProjectAssetSheet asset={sheetAsset} onClose={() => setSheetAsset(null)} />}
+      {sheetAsset && (
+        <ProjectAssetSheet
+          asset={sheetAsset}
+          onClose={() => setSheetAsset(null)}
+          onRelink={
+            sheetAsset.missing
+              ? () => {
+                  setReplaceAsset(sheetAsset);
+                  setSheetAsset(null);
+                  setAssetPickerShotId(sheetAsset.shot_id);
+                }
+              : undefined
+          }
+        />
+      )}
 
       {assetPickerShotId !== null && (
-        <ProjectAssetPicker shotId={assetPickerShotId} onClose={() => setAssetPickerShotId(null)} />
+        <ProjectAssetPicker
+          shotId={assetPickerShotId}
+          onClose={() => {
+            setAssetPickerShotId(null);
+            setReplaceAsset(null);
+          }}
+          onLinked={
+            replaceAsset
+              ? () => {
+                  void unlinkAsset(replaceAsset.id);
+                  setReplaceAsset(null);
+                }
+              : undefined
+          }
+        />
       )}
 
       {pick && pickShot && (

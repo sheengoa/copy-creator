@@ -7272,7 +7272,9 @@ mod project_tests {
         )
         .unwrap();
 
-        let overview = crate::db::project::episode_overview_inner(&conn, "e1").unwrap();
+        let overview =
+            crate::db::project::episode_overview_inner(&conn, "e1", std::path::Path::new(""))
+                .unwrap();
         assert_eq!(overview["characters"].as_array().unwrap().len(), 1);
         let scenes = overview["scenes"].as_array().unwrap();
         assert_eq!(scenes.len(), 2);
@@ -7291,6 +7293,54 @@ mod project_tests {
         let loose = overview["loose_assets"].as_array().unwrap();
         assert_eq!(loose.len(), 1);
         assert_eq!(loose[0]["id"], "a3");
+    }
+
+    #[test]
+    fn episode_overview_flags_missing_asset_files() {
+        // 缺失口径锚点：overview 给每个素材档案带 missing 标记——文件在
+        // 库根下存在为 false，不在为 true。库里删文件后工程悬空档案靠它
+        // 显形（与资源库「文件缺失」同口径）。
+        let conn = project_conn();
+        conn.execute(
+            "INSERT INTO project_shows (id, name, note, created_at, updated_at) \
+             VALUES ('s1', '剧', '', '2026-01-01', '2026-01-01')",
+            [],
+        )
+        .unwrap();
+        conn.execute(
+            "INSERT INTO project_episodes (id, show_id, number, title, status, script_path, sort_order, created_at, updated_at) \
+             VALUES ('e1', 's1', 1, '', 'none', '', 0, '2026-01-01', '2026-01-01')",
+            [],
+        )
+        .unwrap();
+        let root = std::env::temp_dir().join(format!(
+            "copy-creator-project-overview-missing-{}",
+            uuid::Uuid::new_v4()
+        ));
+        std::fs::create_dir_all(&root).unwrap();
+        std::fs::write(root.join("ok.png"), b"png").unwrap();
+        for (id, path) in [("a1", "ok.png"), ("a2", "分镜/gone.png")] {
+            conn.execute(
+                "INSERT INTO project_assets (id, file_path, kind, name, shot_id, episode_id, created_at, updated_at) \
+                 VALUES (?1, ?2, 'image', ?2, '', 'e1', '2026-01-01', '2026-01-01')",
+                params![id, path],
+            )
+            .unwrap();
+        }
+        let overview = crate::db::project::episode_overview_inner(&conn, "e1", &root).unwrap();
+        let loose = overview["loose_assets"].as_array().unwrap();
+        assert_eq!(loose.len(), 2);
+        let missing_of = |id: &str| {
+            loose
+                .iter()
+                .find(|asset| asset["id"] == id)
+                .unwrap()["missing"]
+                .as_bool()
+                .unwrap()
+        };
+        assert!(!missing_of("a1"), "库内存在的文件不应标缺失");
+        assert!(missing_of("a2"), "库内不存在的文件应标缺失");
+        std::fs::remove_dir_all(&root).ok();
     }
 
     #[test]

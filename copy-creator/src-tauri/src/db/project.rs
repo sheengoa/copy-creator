@@ -1531,20 +1531,25 @@ pub fn project_delete_prompt(app: AppHandle, id: String) -> Result<(), String> {
 // ── 集工作台聚合 ────────────────────────────────────────────
 
 /// 一次拿全集工作台数据：集、出场角色、场景树（含镜头与其出镜/道具/
-/// 素材）、集级散件素材。前端打开一集只需这一次往返。
+/// 素材）、集级散件素材。前端打开一集只需这一次往返。素材档案带
+/// missing 标记（文件是否还在当前资源库根下）：库里删了文件时工程侧
+/// 悬空档案可见，而不是等点开详情图挂了才发现。
 #[tauri::command]
 pub fn project_get_episode_overview(
     app: AppHandle,
     episode_id: String,
 ) -> Result<serde_json::Value, String> {
+    // 先解析库根（内部也要锁 conn 读设置），再锁库连接做聚合。
+    let library_root = get_resource_library_dir(&app);
     let state = app.state::<DbState>();
     let conn = state.conn.lock().map_err(|e| e.to_string())?;
-    episode_overview_inner(&conn, &episode_id)
+    episode_overview_inner(&conn, &episode_id, &library_root)
 }
 
 pub(crate) fn episode_overview_inner(
     conn: &Connection,
     episode_id: &str,
+    library_root: &std::path::Path,
 ) -> Result<serde_json::Value, String> {
     let episode = query_row_with_param(
         conn,
@@ -1658,7 +1663,11 @@ pub(crate) fn episode_overview_inner(
             .query_map(params![episode_id], asset_row)
             .map_err(|e| e.to_string())?;
         for row in rows {
-            let asset = row.map_err(|e| e.to_string())?;
+            let mut asset = row.map_err(|e| e.to_string())?;
+            // 缺失检测按当前库根解析相对路径；库根迁移后按新根判，
+            // 与「文件引用相对库根」的存储惯例一致。
+            let file_path = asset["file_path"].as_str().unwrap_or_default();
+            asset["missing"] = serde_json::json!(!library_root.join(file_path).exists());
             let shot_id = asset["shot_id"].as_str().unwrap_or_default().to_string();
             if shot_id.is_empty() {
                 loose_assets.push(asset);

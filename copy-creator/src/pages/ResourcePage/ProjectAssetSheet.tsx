@@ -17,11 +17,13 @@ import {
 export interface ProjectAssetSheetProps {
   asset: ProjectAsset;
   onClose: () => void;
+  /** 档案文件缺失时提供：发起「重新挂靠」替换（打开选择器，挂新撤旧）。 */
+  onRelink?: () => void;
 }
 
 /** 素材详情浮层：预览 + 溯源链编辑（由哪条提示词/哪个源素材生成）+
  *  打开/在文件管理器显示/跳转文件视图分组。 */
-export default function ProjectAssetSheet({ asset, onClose }: ProjectAssetSheetProps) {
+export default function ProjectAssetSheet({ asset, onClose, onRelink }: ProjectAssetSheetProps) {
   const { t } = useTranslation();
   const {
     prompts,
@@ -106,6 +108,16 @@ export default function ProjectAssetSheet({ asset, onClose }: ProjectAssetSheetP
         </div>
 
         <div className="project-library-body">
+          {asset.missing && (
+            <div className="project-sheet-missing">
+              <span>{t("project.sheet.missingBanner")}</span>
+              {onRelink && (
+                <button type="button" className="project-dialog-btn" onClick={onRelink}>
+                  {t("project.sheet.relink")}
+                </button>
+              )}
+            </div>
+          )}
           {asset.kind === "image" && (
             <div className="project-sheet-preview">
               <ResourceImage
@@ -212,6 +224,8 @@ export default function ProjectAssetSheet({ asset, onClose }: ProjectAssetSheetP
           <button
             type="button"
             className="project-dialog-btn"
+            disabled={asset.missing}
+            title={asset.missing ? t("resources.openLocationMissingDisabled") : undefined}
             onClick={() => void openResourceFile(absolutePath)}
           >
             {t("project.sheet.open")}
@@ -219,6 +233,8 @@ export default function ProjectAssetSheet({ asset, onClose }: ProjectAssetSheetP
           <button
             type="button"
             className="project-dialog-btn"
+            disabled={asset.missing}
+            title={asset.missing ? t("resources.openLocationMissingDisabled") : undefined}
             onClick={() => void revealResourceFile(absolutePath)}
           >
             {t("project.sheet.reveal")}
