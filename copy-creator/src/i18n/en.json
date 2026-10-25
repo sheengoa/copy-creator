@@ -437,20 +437,13 @@
     },
     "cast": {
       "title": "Cast",
-      "empty": "No characters linked",
-      "global": "Global",
       "link": "Link character",
       "pickTitle": "Link characters · Ep {{number}} {{title}}"
     },
     "script": {
-      "open": "Open script file",
-      "loading": "Reading script…",
-      "footer": "{{count}} scenes · open the file to edit",
-      "empty": "No script linked to this episode",
-      "emptyHint": "Drop a script file into the library to link it here (next stage)"
+      "open": "Open script file"
     },
     "asset": {
-      "title": "Episode assets",
       "link": "Link library file",
       "unlink": "Unlink",
       "pickerTitle": "Link a library file",
@@ -462,7 +455,6 @@
       "importAction": "Import from computer and link…",
       "importing": "Importing {{file}} …",
       "importFailed": "Import failed",
-      "empty": "No linked assets yet; files in library groups can be linked here (next stage)",
       "kind": {
         "image": "Image",
         "video": "Video",

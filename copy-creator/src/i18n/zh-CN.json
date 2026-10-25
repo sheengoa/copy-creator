@@ -437,20 +437,13 @@
     },
     "cast": {
       "title": "出场角色",
-      "empty": "暂未关联角色",
-      "global": "全局角色",
       "link": "关联角色",
       "pickTitle": "关联角色 · 第 {{number}} 集 {{title}}"
     },
     "script": {
-      "open": "打开剧本文件",
-      "loading": "读取剧本…",
-      "footer": "剧本 {{count}} 场 · 打开文件编辑全文",
-      "empty": "本集还没有挂接剧本",
-      "emptyHint": "剧本文件放入资源库后即可挂接到本集（下一阶段开放）"
+      "open": "打开剧本文件"
     },
     "asset": {
-      "title": "集级素材",
       "link": "挂靠资源库文件",
       "unlink": "解除挂靠",
       "pickerTitle": "挂靠资源库文件",
@@ -462,7 +455,6 @@
       "importAction": "从电脑导入并挂靠…",
       "importing": "正在导入：{{file}} …",
       "importFailed": "导入失败",
-      "empty": "暂无挂靠素材；放入资源库分组的文件可挂到本集（下一阶段开放）",
       "kind": {
         "image": "图片",
         "video": "视频",

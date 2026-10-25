@@ -476,42 +476,6 @@
   opacity: 0.5;
 }
 
-.project-crumb {
-  font-size: var(--text-xs);
-  color: var(--text-secondary);
-}
-
-.project-stage-title-row {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-}
-
-.project-stage-title {
-  margin: 0;
-  font-size: var(--text-lg);
-  font-weight: var(--weight-semibold);
-  letter-spacing: -0.3px;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  cursor: default;
-}
-
-.project-title-input {
-  height: 32px;
-  min-width: 0;
-  flex: 0 1 220px;
-  padding: 0 10px;
-  border: 1px solid var(--accent-border);
-  border-radius: 8px;
-  background: var(--input-focus-bg);
-  color: var(--text-primary);
-  font-family: var(--font);
-  font-size: var(--text-md);
-  outline: none;
-}
-
 .project-title-spacer {
   flex: 1 1 auto;
   min-width: 0;
@@ -538,63 +502,6 @@
 .project-mini-btn svg {
   width: 14px;
   height: 14px;
-}
-
-/* --- 出场角色行 --- */
-.project-cast {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  min-width: 0;
-  flex-shrink: 0;
-  overflow-x: auto;
-}
-
-.project-cast-label {
-  font-size: var(--text-xs);
-  color: var(--text-secondary);
-  flex-shrink: 0;
-}
-
-.project-cast-empty {
-  font-size: var(--text-xs);
-  color: var(--text-tertiary);
-}
-
-.project-cast-card {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  height: 46px;
-  padding: 0 12px 0 7px;
-  border-radius: 10px;
-  background: var(--card-inner-bg);
-  border: 0.5px solid var(--card-border);
-  flex-shrink: 0;
-}
-
-.project-cast-info {
-  display: flex;
-  flex-direction: column;
-  line-height: 1.3;
-  min-width: 0;
-}
-
-.project-cast-info b {
-  font-size: var(--text-sm);
-  font-weight: var(--weight-medium);
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.project-cast-info i {
-  font-style: normal;
-  font-size: var(--text-xs);
-  color: var(--text-secondary);
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
 }
 
 /* 角色头像：有图显示图（圆裁切），无图显示名字首字 + 稳定配色 */
@@ -628,197 +535,6 @@
   object-fit: cover;
 }
 
-/* --- 剧本面板 + 素材区 --- */
-.project-stage-main {
-  flex: 1;
-  min-height: 0;
-  display: grid;
-  grid-template-columns: 264px minmax(0, 1fr);
-  gap: 12px;
-}
-
-.project-script {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-  padding: 12px;
-  border-radius: var(--radius);
-  background: var(--card-inner-bg);
-  border: 1px solid var(--card-border);
-  overflow: hidden;
-}
-
-.project-script-head {
-  display: flex;
-  align-items: center;
-  gap: 7px;
-  flex-shrink: 0;
-}
-
-.project-script-icon {
-  display: grid;
-  place-items: center;
-  color: var(--text-secondary);
-  flex-shrink: 0;
-}
-
-.project-script-icon svg {
-  width: 15px;
-  height: 15px;
-}
-
-.project-script-file {
-  flex: 1;
-  min-width: 0;
-  font-size: var(--text-sm);
-  font-weight: var(--weight-semibold);
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.project-script-body {
-  flex: 1;
-  min-height: 0;
-  overflow: hidden;
-}
-
-.project-script-line {
-  margin: 0;
-  font-size: var(--text-xs);
-  line-height: 1.75;
-  color: var(--text-secondary);
-}
-
-.project-script-loading {
-  font-size: var(--text-xs);
-  color: var(--text-tertiary);
-}
-
-.project-script-foot {
-  flex-shrink: 0;
-  padding-top: 8px;
-  border-top: 0.5px solid var(--separator);
-  font-size: var(--text-xs);
-  color: var(--text-tertiary);
-}
-
-.project-script-empty {
-  flex: 1;
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  gap: 8px;
-  color: var(--text-secondary);
-  font-size: var(--text-sm);
-  min-height: 0;
-}
-
-.project-script-empty svg {
-  width: 22px;
-  height: 22px;
-  opacity: 0.5;
-}
-
-.project-script-empty p {
-  margin: 0;
-}
-
-.project-script-empty-hint {
-  font-size: var(--text-xs);
-  color: var(--text-tertiary);
-}
-
-.project-assets {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-  min-width: 0;
-  min-height: 0;
-}
-
-.project-assets-head {
-  display: flex;
-  align-items: center;
-  gap: 7px;
-  flex-shrink: 0;
-}
-
-.project-assets-head h4 {
-  margin: 0;
-  font-size: var(--text-sm);
-  font-weight: var(--weight-semibold);
-}
-
-.project-assets-head span {
-  font-size: var(--text-xs);
-  color: var(--text-secondary);
-}
-
-.project-assets-empty {
-  flex: 1;
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  gap: 8px;
-  color: var(--text-secondary);
-  font-size: var(--text-sm);
-  border-radius: var(--radius);
-  border: 1.5px dashed var(--separator);
-  min-height: 0;
-}
-
-.project-assets-empty svg {
-  width: 22px;
-  height: 22px;
-  opacity: 0.5;
-}
-
-.project-assets-empty p {
-  margin: 0;
-}
-
-.project-asset-list {
-  flex: 1;
-  min-height: 0;
-  overflow-y: auto;
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-  padding-right: 2px;
-}
-
-.project-asset-row {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  height: 34px;
-  padding: 0 10px;
-  border-radius: 8px;
-  background: var(--card-inner-bg);
-  border: 0.5px solid var(--card-border);
-  min-width: 0;
-}
-
-.project-asset-kind {
-  flex-shrink: 0;
-  font-size: var(--text-xs);
-  color: var(--text-secondary);
-  padding: 2px 6px;
-  border-radius: 5px;
-  background: var(--chip-bg);
-}
-
-.project-asset-name {
-  min-width: 0;
-  font-size: var(--text-sm);
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
 /* --- 暗色适配（分段控件底、菜单、头像同色系不区分主题） --- */
 [data-theme="dark"] .project-switch {
   background: rgba(255, 255, 255, 0.07);
@@ -850,13 +566,6 @@
 
 /* --- 窄视口 --- */
 @media (max-width: 760px) {
-  .project-stage-main {
-    grid-template-columns: minmax(0, 1fr);
-  }
-
-  .project-script {
-    display: none;
-  }
 
   .project-tree {
     width: 160px;
@@ -1347,46 +1056,8 @@
   flex-shrink: 0;
 }
 
-/* --- 工作台关联角色按钮 --- */
-.project-cast-add {
-  height: 30px;
-  padding: 0 12px;
-  border: 0.5px solid var(--separator);
-  border-radius: 6px;
-  display: inline-flex;
-  align-items: center;
-  gap: 4px;
-  background: var(--chip-bg);
-  color: var(--text-secondary);
-  font-family: var(--font);
-  font-size: var(--text-sm);
-  cursor: pointer;
-  flex-shrink: 0;
-}
-
-.project-cast-add:hover {
-  background: var(--chip-hover-bg);
-  color: var(--text-primary);
-}
-
-.project-cast-add svg {
-  width: 13px;
-  height: 13px;
-}
-
 [data-theme="dark"] .project-library-tag.linked {
   color: #42d06a;
-}
-
-/* --- 场景与镜头板（集工作台右列）--- */
-.project-stage-right {
-  display: flex;
-  flex-direction: column;
-  gap: 10px;
-  min-width: 0;
-  min-height: 0;
-  overflow-y: auto;
-  padding-right: 2px;
 }
 
 .project-scene-board {
@@ -1729,30 +1400,6 @@
   height: 13px;
 }
 
-/* --- 素材挂接与解除 --- */
-.project-asset-unlink {
-  width: 22px;
-  height: 22px;
-  border: none;
-  border-radius: 6px;
-  display: grid;
-  place-items: center;
-  background: transparent;
-  color: var(--text-tertiary);
-  cursor: pointer;
-  flex-shrink: 0;
-}
-
-.project-asset-unlink:hover {
-  background: var(--chip-hover-bg);
-  color: var(--text-primary);
-}
-
-.project-asset-unlink svg {
-  width: 11px;
-  height: 11px;
-}
-
 .project-shot-asset {
   display: inline-flex;
   align-items: center;
@@ -1900,30 +1547,6 @@
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-}
-
-.project-asset-row.is-clickable {
-  cursor: pointer;
-}
-
-.project-asset-row.is-clickable:hover {
-  border-color: color-mix(in srgb, var(--text-primary) 22%, var(--card-border));
-}
-
-.project-asset-trace {
-  font-style: normal;
-  color: var(--text-tertiary);
-  margin-left: 6px;
-}
-
-/* 素材档案文件缺失标记：与资源库卡片同口径（danger 12% 底 + danger 字） */
-.project-asset-missing {
-  flex-shrink: 0;
-  padding: 1px 6px;
-  border-radius: 4px;
-  font-size: var(--text-xs);
-  background: color-mix(in srgb, var(--danger) 12%, transparent);
-  color: var(--danger);
 }
 
 .project-shot-asset {
