@@ -22,3 +22,6 @@ dist-ssr
 *.njsproj
 *.sln
 *.sw?
+
+# 本机 MSVC 工具链配置（VS 在非标准路径 + Git Bash link.exe 抢占，见文件内注释）
+src-tauri/.cargo/config.toml
