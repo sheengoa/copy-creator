@@ -46,6 +46,8 @@ export default function ProjectView() {
     updateEpisode,
     refresh,
     setEpisodeCharacters,
+    moveEpisode,
+    updateEpisodeNumber,
     unlinkAsset,
     prompts,
     loadPrompts,
@@ -66,6 +68,8 @@ export default function ProjectView() {
       updateEpisode: state.updateEpisode,
       refresh: state.refresh,
       setEpisodeCharacters: state.setEpisodeCharacters,
+      moveEpisode: state.moveEpisode,
+      updateEpisodeNumber: state.updateEpisodeNumber,
       unlinkAsset: state.unlinkAsset,
       prompts: state.prompts,
       loadPrompts: state.loadPrompts,
@@ -80,6 +84,8 @@ export default function ProjectView() {
   const [deleteTarget, setDeleteTarget] = useState<ProjectEpisode | null>(null);
   const [renamingEpisode, setRenamingEpisode] = useState(false);
   const [castPickOpen, setCastPickOpen] = useState(false);
+  const [numberEditingId, setNumberEditingId] = useState<string | null>(null);
+  const [numberDraft, setNumberDraft] = useState("");
   const [assetPickerShotId, setAssetPickerShotId] = useState<string | null>(null);
   const [sheetAsset, setSheetAsset] = useState<ProjectAsset | null>(null);
   const renameInputRef = useRef<HTMLInputElement>(null);
@@ -158,6 +164,15 @@ export default function ProjectView() {
     });
   };
 
+  const submitNumber = (episodeId: string) => {
+    setNumberEditingId(null);
+    const episode = episodes.find((item) => item.id === episodeId);
+    if (!episode) return;
+    const next = Number.parseInt(numberDraft, 10);
+    if (!Number.isInteger(next) || next === episode.number) return;
+    void updateEpisodeNumber(episodeId, next);
+  };
+
   return (
     <div className="project-workspace">
       <aside className="project-tree">
@@ -179,32 +194,81 @@ export default function ProjectView() {
           </div>
         )}
         <div className="project-ep-list">
-          {episodes.map((episode) => {
+          {episodes.map((episode, index) => {
             const active = episode.id === currentEpisodeId;
+            const numberEditing = numberEditingId === episode.id;
             return (
-              <button
-                key={episode.id}
-                type="button"
-                className={`project-ep${active ? " active" : ""}`}
-                onClick={() => void selectEpisode(episode.id)}
-                title={episode.title || t("project.episode.untitled")}
-              >
-                <span className="project-ep-no">{episodeNumberLabel(episode.number)}</span>
-                <span className="project-ep-name">
-                  {episode.title || t("project.episode.untitled")}
-                </span>
-                {episodeHasDoneMark(episode.status) ? (
-                  <span className="project-ep-done" aria-label={t("project.status.done")}>
-                    {Icons.check}
+              <div key={episode.id} className={`project-ep${active ? " active" : ""}`}>
+                <button
+                  type="button"
+                  className="project-ep-main"
+                  onClick={() => void selectEpisode(episode.id)}
+                  onDoubleClick={() => {
+                    setNumberEditingId(episode.id);
+                    setNumberDraft(String(episode.number));
+                  }}
+                  title={
+                    (episode.title || t("project.episode.untitled")) +
+                    t("project.episode.numberHint")
+                  }
+                >
+                  {numberEditing ? (
+                    <input
+                      className="project-ep-no-input"
+                      value={numberDraft}
+                      autoFocus
+                      onFocus={(event) => event.currentTarget.select()}
+                      onChange={(event) => setNumberDraft(event.target.value.replace(/\D/g, ""))}
+                      onClick={(event) => event.stopPropagation()}
+                      onKeyDown={(event) => {
+                        if (event.key === "Enter") submitNumber(episode.id);
+                        if (event.key === "Escape") setNumberEditingId(null);
+                      }}
+                      onBlur={() => submitNumber(episode.id)}
+                    />
+                  ) : (
+                    <span className="project-ep-no">{episodeNumberLabel(episode.number)}</span>
+                  )}
+                  <span className="project-ep-name">
+                    {episode.title || t("project.episode.untitled")}
                   </span>
-                ) : (
+                  {episodeHasDoneMark(episode.status) ? (
+                    <span className="project-ep-done" aria-label={t("project.status.done")}>
+                      {Icons.check}
+                    </span>
+                  ) : (
+                    <span
+                      className={`project-ep-chip${episode.status === "storyboard" ? " on" : ""}`}
+                    >
+                      {t(episodeStatusKey(episode.status))}
+                    </span>
+                  )}
+                </button>
+                <span className="project-ep-movers">
                   <span
-                    className={`project-ep-chip${episode.status === "storyboard" ? " on" : ""}`}
+                    role="button"
+                    className={`project-ep-mover${index === 0 ? " disabled" : ""}`}
+                    title={t("project.episode.moveUp")}
+                    onClick={(event) => {
+                      event.stopPropagation();
+                      if (index > 0) void moveEpisode(episode.id, -1);
+                    }}
                   >
-                    {t(episodeStatusKey(episode.status))}
+                    {Icons.chevronUp}
                   </span>
-                )}
-              </button>
+                  <span
+                    role="button"
+                    className={`project-ep-mover${index === episodes.length - 1 ? " disabled" : ""}`}
+                    title={t("project.episode.moveDown")}
+                    onClick={(event) => {
+                      event.stopPropagation();
+                      if (index < episodes.length - 1) void moveEpisode(episode.id, 1);
+                    }}
+                  >
+                    {Icons.chevronDown}
+                  </span>
+                </span>
+              </div>
             );
           })}
           {currentShowId && (
@@ -489,28 +553,27 @@ export default function ProjectView() {
         />
       )}
 
-      {/* 集工作台的单选关联角色（pick）：本地交互不入全局面板状态 */}
+      {/* 集工作台的多选关联角色（pick）：点选切换（可加可减），与镜头
+          出镜行为一致；改动即存（整组替换）。 */}
       {castPickOpen && currentEpisode && (
         <ProjectLibraryPanel
           kind="characters"
           mode="pick"
+          multi
+          selectedIds={overview?.episode.character_ids ?? []}
           onClose={() => setCastPickOpen(false)}
           pickTitle={t("project.cast.pickTitle", {
             number: episodeNumberLabel(currentEpisode.number),
             title: currentEpisode.title || t("project.episode.untitled"),
           })}
-          linkedIds={overview?.episode.character_ids ?? []}
-          onPick={
-            currentEpisodeId
-              ? (id) => {
-                  const existing = overview?.episode.character_ids ?? [];
-                  if (!existing.includes(id)) {
-                    void setEpisodeCharacters(currentEpisodeId, [...existing, id]);
-                  }
-                  setCastPickOpen(false);
-                }
-              : undefined
-          }
+          onTogglePick={(id) => {
+            if (!currentEpisodeId) return;
+            const existing = overview?.episode.character_ids ?? [];
+            const next = existing.includes(id)
+              ? existing.filter((item) => item !== id)
+              : [...existing, id];
+            void setEpisodeCharacters(currentEpisodeId, next);
+          }}
         />
       )}
 

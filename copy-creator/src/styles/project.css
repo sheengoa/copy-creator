@@ -1844,3 +1844,89 @@
   text-overflow: ellipsis;
   white-space: nowrap;
 }
+
+/* --- 排序与集号编辑（P0 接线）--- */
+/* 树集行改为 wrapper div + 内层 main 按钮：movers hover 浮现替换状态标签 */
+.project-ep {
+  position: relative;
+}
+
+.project-ep-main {
+  flex: 1;
+  min-width: 0;
+  height: 100%;
+  border: none;
+  border-radius: 8px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 0 8px;
+  background: transparent;
+  color: inherit;
+  font-family: inherit;
+  font-size: inherit;
+  cursor: pointer;
+  text-align: left;
+}
+
+.project-ep-movers {
+  display: none;
+  align-items: center;
+  gap: 1px;
+  flex-shrink: 0;
+  padding-right: 4px;
+}
+
+.project-ep:hover .project-ep-movers,
+.project-ep.active .project-ep-movers {
+  display: inline-flex;
+}
+
+.project-ep:hover .project-ep-chip,
+.project-ep:hover .project-ep-done {
+  display: none;
+}
+
+.project-ep-mover {
+  width: 16px;
+  height: 15px;
+  border-radius: 4px;
+  display: grid;
+  place-items: center;
+  color: var(--text-secondary);
+  cursor: pointer;
+}
+
+.project-ep-mover:hover {
+  background: var(--chip-hover-bg);
+  color: var(--text-primary);
+}
+
+.project-ep-mover.disabled {
+  opacity: 0.3;
+  cursor: default;
+}
+
+.project-ep-mover svg {
+  width: 11px;
+  height: 11px;
+}
+
+.project-ep-no-input {
+  width: 34px;
+  height: 22px;
+  border: 1px solid var(--accent-border);
+  border-radius: 5px;
+  background: var(--input-focus-bg);
+  color: var(--text-primary);
+  font-family: var(--font);
+  font-size: var(--text-xs);
+  text-align: center;
+  outline: none;
+  flex-shrink: 0;
+}
+
+.project-mini-btn:disabled {
+  opacity: 0.3;
+  cursor: default;
+}

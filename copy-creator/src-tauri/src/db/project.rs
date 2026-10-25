@@ -637,6 +637,7 @@ fn query_row_with_param(
 pub fn project_update_episode(
     app: AppHandle,
     id: String,
+    number: Option<i64>,
     title: String,
     status: String,
     script_path: String,
@@ -644,6 +645,36 @@ pub fn project_update_episode(
     {
         let state = app.state::<DbState>();
         let conn = state.conn.lock().map_err(|e| e.to_string())?;
+        // 集号可改（行业惯例删除后编号保留，跳号由用户手动填补）：1-999
+        // 且同剧内唯一，冲突报错由前端提示。
+        if let Some(number) = number {
+            if !(1..=999).contains(&number) {
+                return Err("集号需在 1-999 之间".to_string());
+            }
+            let show_id: String = conn
+                .query_row(
+                    "SELECT show_id FROM project_episodes WHERE id = ?1",
+                    params![&id],
+                    |row| row.get(0),
+                )
+                .map_err(|e| e.to_string())?;
+            let conflict: i64 = conn
+                .query_row(
+                    "SELECT COUNT(*) FROM project_episodes \
+                     WHERE show_id = ?1 AND number = ?2 AND id != ?3",
+                    params![&show_id, number, &id],
+                    |row| row.get(0),
+                )
+                .map_err(|e| e.to_string())?;
+            if conflict > 0 {
+                return Err(format!("第 {number} 集已存在"));
+            }
+            conn.execute(
+                "UPDATE project_episodes SET number = ?1 WHERE id = ?2",
+                params![number, &id],
+            )
+            .map_err(|e| e.to_string())?;
+        }
         conn.execute(
             "UPDATE project_episodes SET title = ?1, status = ?2, script_path = ?3, updated_at = ?4 WHERE id = ?5",
             params![title, status, normalize_project_path(&script_path), project_now(), id],
@@ -1318,22 +1349,6 @@ pub fn project_list_assets(
     query_all(
         &conn,
         &format!("SELECT {ASSET_COLS} FROM project_assets ORDER BY created_at ASC"),
-        asset_row,
-    )
-}
-
-#[tauri::command]
-pub fn project_get_asset_by_path(
-    app: AppHandle,
-    file_path: String,
-) -> Result<serde_json::Value, String> {
-    let state = app.state::<DbState>();
-    let conn = state.conn.lock().map_err(|e| e.to_string())?;
-    let path = normalize_project_path(&file_path);
-    query_row_with_param(
-        &conn,
-        &format!("SELECT {ASSET_COLS} FROM project_assets WHERE file_path = ?1"),
-        &[&path],
         asset_row,
     )
 }

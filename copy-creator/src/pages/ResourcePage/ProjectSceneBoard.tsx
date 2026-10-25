@@ -54,6 +54,8 @@ export default function ProjectSceneBoard() {
     deleteShot,
     setShotCharacters,
     setShotProps,
+    moveScene,
+    moveShot,
     unlinkAsset,
   } = useProjectStore(
     useShallow((state) => ({
@@ -70,6 +72,8 @@ export default function ProjectSceneBoard() {
       deleteShot: state.deleteShot,
       setShotCharacters: state.setShotCharacters,
       setShotProps: state.setShotProps,
+      moveScene: state.moveScene,
+      moveShot: state.moveShot,
       unlinkAsset: state.unlinkAsset,
     })),
   );
@@ -117,7 +121,7 @@ export default function ProjectSceneBoard() {
           <p>{t("project.scene.empty")}</p>
         </div>
       )}
-      {scenes.map((scene, index) => (
+      {scenes.map((scene, sceneIndex) => (
         <section key={scene.id} className="project-scene-card">
           {sceneDraft?.id === scene.id ? (
             <div className="project-scene-form">
@@ -178,7 +182,7 @@ export default function ProjectSceneBoard() {
             </div>
           ) : (
             <header className="project-scene-head">
-              <span className="project-scene-no">{index + 1}</span>
+              <span className="project-scene-no">{sceneIndex + 1}</span>
               <span className="project-scene-heading" title={scene.heading}>
                 {scene.heading || t("project.scene.untitled")}
               </span>
@@ -202,6 +206,24 @@ export default function ProjectSceneBoard() {
                 </span>
               )}
               <span className="project-title-spacer" />
+              <button
+                type="button"
+                className="project-mini-btn"
+                title={t("project.scene.moveUp")}
+                disabled={sceneIndex === 0}
+                onClick={() => void moveScene(scene.id, -1)}
+              >
+                {Icons.chevronUp}
+              </button>
+              <button
+                type="button"
+                className="project-mini-btn"
+                title={t("project.scene.moveDown")}
+                disabled={sceneIndex === scenes.length - 1}
+                onClick={() => void moveScene(scene.id, 1)}
+              >
+                {Icons.chevronDown}
+              </button>
               <button
                 type="button"
                 className="project-mini-btn"
@@ -375,6 +397,24 @@ export default function ProjectSceneBoard() {
                       </span>
                     )}
                   </div>
+                  <button
+                    type="button"
+                    className="project-mini-btn"
+                    title={t("project.shot.moveUp")}
+                    disabled={shotIndex === 0}
+                    onClick={() => void moveShot(shot.id, -1)}
+                  >
+                    {Icons.chevronUp}
+                  </button>
+                  <button
+                    type="button"
+                    className="project-mini-btn"
+                    title={t("project.shot.moveDown")}
+                    disabled={shotIndex === scene.shots.length - 1}
+                    onClick={() => void moveShot(shot.id, 1)}
+                  >
+                    {Icons.chevronDown}
+                  </button>
                   <button
                     type="button"
                     className="project-mini-btn"

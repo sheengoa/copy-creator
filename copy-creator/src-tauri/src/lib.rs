@@ -560,7 +560,6 @@ pub fn run() {
             db::project_set_shot_characters,
             db::project_set_shot_props,
             db::project_list_assets,
-            db::project_get_asset_by_path,
             db::project_link_asset,
             db::project_update_asset,
             db::project_unlink_asset,

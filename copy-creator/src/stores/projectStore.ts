@@ -168,6 +168,10 @@ interface ProjectStoreState {
     patch: { title: string; status: ProjectEpisodeStatus; script_path: string },
   ) => Promise<void>;
   deleteEpisode: (id: string) => Promise<void>;
+  /** 树内上下移动集：本地换位 + 后端全量顺序回写。 */
+  moveEpisode: (episodeId: string, direction: -1 | 1) => Promise<void>;
+  /** 修改集号（1-999，同剧内唯一；冲突报错返回 false）。 */
+  updateEpisodeNumber: (id: string, number: number) => Promise<boolean>;
   selectEpisode: (episodeId: string) => Promise<void>;
   /** 后端 project-changed 事件后的整体重取：保持当前选中位置不变。 */
   refresh: () => Promise<void>;
@@ -201,6 +205,7 @@ interface ProjectStoreState {
     note: string;
   }) => Promise<boolean>;
   deleteScene: (id: string) => Promise<void>;
+  moveScene: (sceneId: string, direction: -1 | 1) => Promise<void>;
   saveShot: (payload: {
     id?: string;
     sceneId: string;
@@ -208,6 +213,7 @@ interface ProjectStoreState {
     dialogue: string;
   }) => Promise<boolean>;
   deleteShot: (id: string) => Promise<void>;
+  moveShot: (shotId: string, direction: -1 | 1) => Promise<void>;
   /** 镜头出镜角色 / 道具：整组替换。 */
   setShotCharacters: (shotId: string, characterIds: string[]) => Promise<void>;
   setShotProps: (shotId: string, propIds: string[]) => Promise<void>;
@@ -415,6 +421,43 @@ export const useProjectStore = create<ProjectStoreState>((set, get) => ({
       await get().refresh();
     } catch (error) {
       console.error("project_delete_episode failed:", error);
+    }
+  },
+
+  moveEpisode: async (episodeId, direction) => {
+    const episodes = get().episodes;
+    const index = episodes.findIndex((episode) => episode.id === episodeId);
+    const target = index + direction;
+    if (index < 0 || target < 0 || target >= episodes.length) return;
+    const reordered = reorderList(episodes, index, target);
+    const ids = reordered.map((episode) => episode.id);
+    // 本地先行换位（树的即时反馈），后端按新顺序重写 sort_order，失败回滚。
+    set({ episodes: reordered });
+    try {
+      await invoke("project_reorder_episodes", { showId: get().currentShowId ?? "", ids });
+    } catch (error) {
+      console.error("project_reorder_episodes failed:", error);
+      set({ episodes });
+    }
+  },
+
+  updateEpisodeNumber: async (id, number) => {
+    if (!Number.isInteger(number) || number < 1 || number > 999) return false;
+    const episode = get().episodes.find((item) => item.id === id);
+    if (!episode) return false;
+    try {
+      await invoke("project_update_episode", {
+        id,
+        number,
+        title: episode.title,
+        status: episode.status,
+        scriptPath: episode.script_path,
+      });
+      await get().refresh();
+      return true;
+    } catch (error) {
+      console.error("project_update_episode number failed:", error);
+      return false;
     }
   },
 
@@ -639,6 +682,25 @@ export const useProjectStore = create<ProjectStoreState>((set, get) => ({
     }
   },
 
+  moveScene: async (sceneId, direction) => {
+    const overview = get().overview;
+    const scenes = overview?.scenes ?? [];
+    const index = scenes.findIndex((scene) => scene.id === sceneId);
+    const target = index + direction;
+    if (!overview || index < 0 || target < 0 || target >= scenes.length) return;
+    const reordered = reorderList(scenes, index, target);
+    const ids = reordered.map((scene) => scene.id);
+    // 概览是场景列表唯一数据源：先本地换位给即时反馈，失败靠重取回滚。
+    set({ overview: { ...overview, scenes: reordered } });
+    try {
+      await invoke("project_reorder_scenes", { episodeId: get().currentEpisodeId ?? "", ids });
+    } catch (error) {
+      console.error("project_reorder_scenes failed:", error);
+      const { currentEpisodeId } = get();
+      if (currentEpisodeId) await get().selectEpisode(currentEpisodeId);
+    }
+  },
+
   saveShot: async (payload) => {
     try {
       if (payload.id) {
@@ -670,6 +732,33 @@ export const useProjectStore = create<ProjectStoreState>((set, get) => ({
       if (currentEpisodeId) await get().selectEpisode(currentEpisodeId);
     } catch (error) {
       console.error("project_delete_shot failed:", error);
+    }
+  },
+
+  moveShot: async (shotId, direction) => {
+    const overview = get().overview;
+    if (!overview) return;
+    const scene = overview.scenes.find((item) => item.shots.some((shot) => shot.id === shotId));
+    if (!scene) return;
+    const index = scene.shots.findIndex((shot) => shot.id === shotId);
+    const target = index + direction;
+    if (target < 0 || target >= scene.shots.length) return;
+    const reordered = reorderList(scene.shots, index, target);
+    const ids = reordered.map((shot) => shot.id);
+    set({
+      overview: {
+        ...overview,
+        scenes: overview.scenes.map((item) =>
+          item.id === scene.id ? { ...item, shots: reordered } : item,
+        ),
+      },
+    });
+    try {
+      await invoke("project_reorder_shots", { sceneId: scene.id, ids });
+    } catch (error) {
+      console.error("project_reorder_shots failed:", error);
+      const { currentEpisodeId } = get();
+      if (currentEpisodeId) await get().selectEpisode(currentEpisodeId);
     }
   },
 
@@ -813,3 +902,11 @@ export const useProjectStore = create<ProjectStoreState>((set, get) => ({
     }
   },
 }));
+
+/** 列表元素换位（纯函数，move* 动作共用）。 */
+function reorderList<T>(list: T[], from: number, to: number): T[] {
+  const next = [...list];
+  const [moved] = next.splice(from, 1);
+  next.splice(to, 0, moved);
+  return next;
+}

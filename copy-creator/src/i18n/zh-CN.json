@@ -422,6 +422,9 @@
       "delete": "删除本集",
       "deleteConfirm": "删除「{{title}}」的场景与镜头结构？素材文件会保留在资源库中。",
       "renameHint": "双击重命名",
+      "numberHint": "（双击集号可改）",
+      "moveUp": "上移",
+      "moveDown": "下移",
       "emptyStage": "这部剧还没有集，从左侧「新建集」开始"
     },
     "status": {
@@ -519,6 +522,8 @@
         "location": "引用场景库",
         "freeLocation": "不引用（自由场景）"
       },
+      "moveUp": "上移",
+      "moveDown": "下移",
       "deleteConfirm": "删除「{{heading}}」及其镜头？素材档案会保留为集级散件。"
     },
     "shot": {
@@ -532,6 +537,8 @@
       },
       "pickCastTitle": "选择出镜角色",
       "pickPropsTitle": "选择出场道具",
+      "moveUp": "上移",
+      "moveDown": "下移",
       "deleteConfirm": "删除这个镜头？挂靠的素材档案会保留为集级散件。"
     },
     "prompt": {

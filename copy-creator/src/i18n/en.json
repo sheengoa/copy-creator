@@ -422,6 +422,9 @@
       "delete": "Delete this episode",
       "deleteConfirm": "Delete scenes and shots of \"{{title}}\"? Asset files stay in the library.",
       "renameHint": "Double-click to rename",
+      "numberHint": " (double-click the number to change)",
+      "moveUp": "Move up",
+      "moveDown": "Move down",
       "emptyStage": "No episodes yet — start with \"New Episode\" in the left panel"
     },
     "status": {
@@ -519,6 +522,8 @@
         "location": "Link location",
         "freeLocation": "None (free scene)"
       },
+      "moveUp": "Move up",
+      "moveDown": "Move down",
       "deleteConfirm": "Delete \"{{heading}}\" and its shots? Linked assets stay as episode loose files."
     },
     "shot": {
@@ -532,6 +537,8 @@
       },
       "pickCastTitle": "Select cast",
       "pickPropsTitle": "Select props",
+      "moveUp": "Move up",
+      "moveDown": "Move down",
       "deleteConfirm": "Delete this shot? Linked assets stay as episode loose files."
     },
     "prompt": {
