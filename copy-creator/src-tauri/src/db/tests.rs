@@ -7502,6 +7502,75 @@ mod project_tests {
     }
 
     #[test]
+    fn episode_output_roundtrip() {
+        // 成片输出（每集工作流的总输出）：来源可以是素材或镜头
+        // （"shot:<id>"），可清除；来源不存在与空集被拒绝；overview 的
+        // episode 节点带出 output_asset_id 供画布渲染成片连线。
+        let conn = project_conn();
+        conn.execute(
+            "INSERT INTO project_shows (id, name, note, created_at, updated_at) \
+             VALUES ('s1', '剧', '', '2026-01-01', '2026-01-01')",
+            [],
+        )
+        .unwrap();
+        conn.execute(
+            "INSERT INTO project_episodes (id, show_id, number, title, status, script_path, sort_order, created_at, updated_at) \
+             VALUES ('e1', 's1', 1, '', 'none', '', 0, '2026-01-01', '2026-01-01')",
+            [],
+        )
+        .unwrap();
+        conn.execute(
+            "INSERT INTO project_assets (id, file_path, kind, name, shot_id, episode_id, created_at, updated_at) \
+             VALUES ('a1', 'a1.mp4', 'video', 'a1', '', 'e1', '2026-01-01', '2026-01-01')",
+            [],
+        )
+        .unwrap();
+        conn.execute(
+            "INSERT INTO project_scenes (id, episode_id, location_id, heading, sort_order, note, created_at, updated_at) \
+             VALUES ('sc1', 'e1', '', '场', 0, '', '2026-01-01', '2026-01-01')",
+            [],
+        )
+        .unwrap();
+        conn.execute(
+            "INSERT INTO project_shots (id, scene_id, episode_id, description, sort_order, created_at, updated_at) \
+             VALUES ('sh1', 'sc1', 'e1', '', 0, '2026-01-01', '2026-01-01')",
+            [],
+        )
+        .unwrap();
+
+        assert!(
+            crate::db::project::set_episode_output_inner(&conn, "ghost", Some("a1")).is_err(),
+            "集不存在应被拒绝"
+        );
+        assert!(
+            crate::db::project::set_episode_output_inner(&conn, "e1", Some("nope")).is_err(),
+            "不存在的素材应被拒绝"
+        );
+        assert!(
+            crate::db::project::set_episode_output_inner(&conn, "e1", Some("shot:ghost")).is_err(),
+            "不存在的镜头应被拒绝"
+        );
+
+        crate::db::project::set_episode_output_inner(&conn, "e1", Some("a1")).unwrap();
+        let overview =
+            crate::db::project::episode_overview_inner(&conn, "e1", &std::env::temp_dir()).unwrap();
+        assert_eq!(overview["episode"]["output_asset_id"], "a1");
+
+        crate::db::project::set_episode_output_inner(&conn, "e1", Some("shot:sh1")).unwrap();
+        let overview =
+            crate::db::project::episode_overview_inner(&conn, "e1", &std::env::temp_dir()).unwrap();
+        assert_eq!(overview["episode"]["output_asset_id"], "shot:sh1");
+
+        crate::db::project::set_episode_output_inner(&conn, "e1", Some("")).unwrap();
+        let overview =
+            crate::db::project::episode_overview_inner(&conn, "e1", &std::env::temp_dir()).unwrap();
+        assert!(
+            overview["episode"]["output_asset_id"].is_null(),
+            "空串应清除为 NULL"
+        );
+    }
+
+    #[test]
     fn episodes_list_returns_sorted_with_stats() {
         // 剧集树主查询（带参 SQL 的防回归锚点）：按 sort_order 排序
         // （reorder 写的就是它，集号 number 仅作次序兜底），附镜头总数/

@@ -505,7 +505,13 @@
       "typeScript": "Script",
       "portRef": "Ref",
       "portFootage": "Footage",
-      "portRefImg": "Ref Image"
+      "portRefImg": "Ref Image",
+      "portFinal": "Final Cut",
+      "outputNode": "Final Output",
+      "outputEmpty": "No source linked",
+      "checkTitle": "Workflow issues",
+      "checkScript": "Script missing (link it in the materials frame)",
+      "checkOutput": "Final output not linked · click to locate"
     },
     "library": {
       "characters": "Characters",

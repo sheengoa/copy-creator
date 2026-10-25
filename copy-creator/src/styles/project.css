@@ -2235,6 +2235,66 @@
 .pc-wire-temp { fill: none; stroke: var(--text-secondary); stroke-width: 2.2; stroke-dasharray: 5, 5; }
 .pc-wire-temp.invalid { stroke: var(--danger); }
 
+/* ── 成片输出节点（每集工作流的总输出口） ── */
+.pc-outnode { cursor: grab; }
+.pc-outnode:active { cursor: grabbing; }
+.pc-outnode-body {
+  height: 100%;
+  border-radius: 14px;
+  background: rgba(24, 24, 30, 0.92);
+  color: #fff;
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  box-shadow: 0 10px 26px rgba(0, 0, 0, 0.35);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 3px;
+  text-align: center;
+  padding: 0 14px;
+}
+.pc-outnode-body b { font-size: 13px; }
+.pc-outnode-body small {
+  font-size: 10.5px;
+  color: rgba(255, 255, 255, 0.6);
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.pc-outnode-icon svg { width: 16px; height: 16px; opacity: 0.85; }
+.pc-outnode .pc-port-in { border-color: var(--video-wire, #a78bfa); }
+
+/* ── 工作流缺项提醒条 ── */
+.pc-checkbar {
+  position: absolute;
+  top: 10px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 28;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  max-width: calc(100% - 320px);
+  padding: 5px 10px;
+  border-radius: 10px;
+  background: rgba(140, 40, 40, 0.92);
+  color: #fff;
+  box-shadow: 0 8px 22px rgba(0, 0, 0, 0.3);
+  font-size: 11.5px;
+  white-space: nowrap;
+}
+.pc-checkbar-title { font-weight: 600; opacity: 0.9; }
+.pc-checkbar-chip {
+  border: 1px solid rgba(255, 255, 255, 0.35);
+  border-radius: 7px;
+  padding: 2px 9px;
+  color: #fff;
+  font-size: 11px;
+  cursor: pointer;
+}
+.pc-checkbar-chip:hover { background: rgba(255, 255, 255, 0.18); }
+
 /* ── 玻璃 overlay 控件 ── */
 .pc-glass {
   position: absolute;

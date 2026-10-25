@@ -29,6 +29,8 @@ export interface ProjectEpisode {
   done_shot_count: number;
   created_at: string;
   updated_at: string;
+  /** 本集成片输出来源：素材 id 或 "shot:<id>"；null = 尚未连接。 */
+  output_asset_id: string | null;
 }
 
 export interface ProjectCharacter {
@@ -291,6 +293,8 @@ interface ProjectStoreState {
   linkAssets: (fromAsset: string, toAsset: string, label?: string) => Promise<ProjectAssetLink | null>;
   /** 摘除一条手动连线（按两端素材，方向不限）。 */
   unlinkAssets: (fromAsset: string, toAsset: string) => Promise<void>;
+  /** 设置本集成片输出来源（素材 id 或 "shot:<id>"；null 清除）。 */
+  setEpisodeOutput: (episodeId: string, outputAssetId: string | null) => Promise<void>;
 
   loadPrompts: (category?: string) => Promise<void>;
   savePrompt: (payload: {
@@ -980,6 +984,28 @@ export const useProjectStore = create<ProjectStoreState>((set, get) => ({
       }
     } catch (error) {
       console.error("project_unlink_assets failed:", error);
+    }
+  },
+
+  setEpisodeOutput: async (episodeId, outputAssetId) => {
+    // 本地即时回写 + 静默落库（与 saveCanvasLayout 同策略：画布是事实
+    // 来源，成片连线由 output_asset_id 推导渲染）。
+    const overview = get().overview;
+    if (overview && overview.episode.id === episodeId) {
+      set({
+        overview: {
+          ...overview,
+          episode: { ...overview.episode, output_asset_id: outputAssetId },
+        },
+      });
+    }
+    try {
+      await invoke("project_set_episode_output", {
+        id: episodeId,
+        outputAssetId: outputAssetId ?? "",
+      });
+    } catch (error) {
+      console.error("project_set_episode_output failed:", error);
     }
   },
 

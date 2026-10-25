@@ -564,6 +564,7 @@ pub fn run() {
             db::project_save_canvas_layout,
             db::project_link_assets,
             db::project_unlink_assets,
+            db::project_set_episode_output,
             db::project_list_prompts,
             db::project_create_prompt,
             db::project_update_prompt,

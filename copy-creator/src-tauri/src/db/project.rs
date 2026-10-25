@@ -33,6 +33,7 @@ CREATE TABLE IF NOT EXISTS project_episodes (
     sort_order REAL NOT NULL DEFAULT 0,
     created_at TEXT NOT NULL,
     updated_at TEXT NOT NULL,
+    output_asset_id TEXT,
     FOREIGN KEY (show_id) REFERENCES project_shows(id) ON DELETE CASCADE
 );
 CREATE INDEX IF NOT EXISTS idx_project_episodes_show ON project_episodes(show_id);
@@ -214,6 +215,7 @@ fn episode_row(row: &rusqlite::Row) -> rusqlite::Result<serde_json::Value> {
         "sort_order": row.get::<_, f64>(6)?,
         "created_at": row.get::<_, String>(7)?,
         "updated_at": row.get::<_, String>(8)?,
+        "output_asset_id": row.get::<_, Option<String>>(9)?,
     }))
 }
 
@@ -331,7 +333,7 @@ fn prompt_row(row: &rusqlite::Row) -> rusqlite::Result<serde_json::Value> {
 
 const SHOW_COLS: &str = "id, name, note, created_at, updated_at";
 const EPISODE_COLS: &str =
-    "id, show_id, number, title, status, script_path, sort_order, created_at, updated_at";
+    "id, show_id, number, title, status, script_path, sort_order, created_at, updated_at, output_asset_id";
 const CHARACTER_COLS: &str =
     "id, name, role_tag, bio, prompt, avatar_path, reference_paths, created_at, updated_at";
 const LOCATION_COLS: &str =
@@ -1716,6 +1718,72 @@ pub fn project_link_assets(
     let state = app.state::<DbState>();
     let conn = state.conn.lock().map_err(|e| e.to_string())?;
     link_assets_inner(&conn, &from_asset, &to_asset, &label)
+}
+
+/// 设置本集成片输出的来源：裸素材 id 或 "shot:<id>"；None/空串为清除。
+#[tauri::command]
+pub fn project_set_episode_output(
+    app: AppHandle,
+    id: String,
+    output_asset_id: Option<String>,
+) -> Result<(), String> {
+    {
+        let state = app.state::<DbState>();
+        let conn = state.conn.lock().map_err(|e| e.to_string())?;
+        set_episode_output_inner(&conn, &id, output_asset_id.as_deref())?;
+    }
+    emit_project_changed(&app);
+    Ok(())
+}
+
+pub(crate) fn set_episode_output_inner(
+    conn: &Connection,
+    id: &str,
+    output_asset_id: Option<&str>,
+) -> Result<(), String> {
+    let value = output_asset_id.unwrap_or("").trim();
+    if !value.is_empty() {
+        let episode_exists: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM project_episodes WHERE id = ?1",
+                params![id],
+                |row| row.get(0),
+            )
+            .map_err(|e| e.to_string())?;
+        if episode_exists == 0 {
+            return Err("集不存在".to_string());
+        }
+        // 来源可以是某素材，也可以是某镜头（"shot:<id>"，取其视频产出）。
+        if let Some(shot_id) = value.strip_prefix("shot:") {
+            let shot_exists: i64 = conn
+                .query_row(
+                    "SELECT COUNT(*) FROM project_shots WHERE id = ?1",
+                    params![shot_id],
+                    |row| row.get(0),
+                )
+                .map_err(|e| e.to_string())?;
+            if shot_exists == 0 {
+                return Err("镜头不存在".to_string());
+            }
+        } else {
+            let asset_exists: i64 = conn
+                .query_row(
+                    "SELECT COUNT(*) FROM project_assets WHERE id = ?1",
+                    params![value],
+                    |row| row.get(0),
+                )
+                .map_err(|e| e.to_string())?;
+            if asset_exists == 0 {
+                return Err("素材档案不存在".to_string());
+            }
+        }
+    }
+    conn.execute(
+        "UPDATE project_episodes SET output_asset_id = ?1, updated_at = ?2 WHERE id = ?3",
+        params![if value.is_empty() { None } else { Some(value) }, project_now(), id],
+    )
+    .map_err(|e| e.to_string())?;
+    Ok(())
 }
 
 pub(crate) fn link_assets_inner(

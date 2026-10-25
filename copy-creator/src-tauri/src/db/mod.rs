@@ -1182,6 +1182,7 @@ pub(crate) fn ensure_schema(conn: &Connection) -> Result<(), Box<dyn std::error:
     ensure_column(conn, "project_assets", "canvas_x", "REAL");
     ensure_column(conn, "project_assets", "canvas_y", "REAL");
     ensure_column(conn, "project_assets", "canvas_w", "REAL");
+    ensure_column(conn, "project_episodes", "output_asset_id", "TEXT");
 
     // ── 运行时迁移：只在库版本落后时执行一次（见 run_schema_migrations）──
     if schema_version(conn) < SCHEMA_VERSION {

@@ -505,7 +505,13 @@
       "typeScript": "剧本",
       "portRef": "参考",
       "portFootage": "画面",
-      "portRefImg": "参考图"
+      "portRefImg": "参考图",
+      "portFinal": "成片",
+      "outputNode": "成片输出",
+      "outputEmpty": "未连接来源",
+      "checkTitle": "工作流缺项",
+      "checkScript": "缺少剧本（资料框挂接后消除）",
+      "checkOutput": "未连接成片输出 · 点击定位"
     },
     "library": {
       "characters": "角色库",

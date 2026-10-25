@@ -44,6 +44,8 @@ const WORLD_MARGIN = 60;
 const SCENE_PITCH = 380;
 const MINI_W = 150;
 const MINI_H = 96;
+const OUTPUT_W = 176; // 成片输出节点（每集工作流的总输出口）
+const OUTPUT_H = 72;
 
 type Pos = { x: number; y: number };
 type PosMap = { cards: Record<string, Pos>; loose: Record<string, Pos>; info?: Pos };
@@ -372,6 +374,7 @@ export default function ProjectCanvas({
     deleteScene,
     saveShot,
     deleteShot,
+    setEpisodeOutput,
   } = useProjectStore(
     useShallow((state) => ({
       overview: state.overview,
@@ -387,6 +390,7 @@ export default function ProjectCanvas({
       deleteScene: state.deleteScene,
       saveShot: state.saveShot,
       deleteShot: state.deleteShot,
+      setEpisodeOutput: state.setEpisodeOutput,
     })),
   );
   const episodeId = overview?.episode.id ?? "";
@@ -425,6 +429,28 @@ export default function ProjectCanvas({
       setInfoFramePos(next);
       try {
         window.localStorage.setItem(`project_canvas_info_${episodeId}`, JSON.stringify(next));
+      } catch {
+        // 存储不可用：仅不记忆。
+      }
+    },
+    [episodeId],
+  );
+
+  // ── 成片输出节点位置（localStorage 按集；默认挂世界右侧居中） ──
+  const [outputPos, setOutputPos] = useState<Pos | null>(null);
+  useEffect(() => {
+    try {
+      const raw = window.localStorage.getItem(`project_canvas_output_${episodeId}`);
+      setOutputPos(raw ? (JSON.parse(raw) as Pos) : null);
+    } catch {
+      setOutputPos(null);
+    }
+  }, [episodeId]);
+  const saveOutputPos = useCallback(
+    (next: Pos) => {
+      setOutputPos(next);
+      try {
+        window.localStorage.setItem(`project_canvas_output_${episodeId}`, JSON.stringify(next));
       } catch {
         // 存储不可用：仅不记忆。
       }
@@ -479,6 +505,32 @@ export default function ProjectCanvas({
     setPos({ cards: layout.cardPos, loose: layout.loosePos });
   }, [layout]);
 
+  // 成片输出节点盒：默认挂世界右侧居中，位置按集记忆。
+  const outputBox: WireBox | null = useMemo(() => {
+    if (!overview) return null;
+    const p = outputPos ?? {
+      x: layout.worldW + 80,
+      y: Math.max(WORLD_MARGIN, layout.worldH / 2 - OUTPUT_H / 2),
+    };
+    return { x: p.x, y: p.y, w: OUTPUT_W, h: OUTPUT_H };
+  }, [overview, outputPos, layout]);
+
+  const outputKey = overview?.episode.output_asset_id ?? null;
+
+  // 成片来源显示名：镜头描述或素材名。
+  const outputSourceLabel: string | null = useMemo(() => {
+    if (!outputKey) return null;
+    if (outputKey.startsWith("shot:")) {
+      const shot = scenes.flatMap((s) => s.shots).find((item) => item.id === outputKey.slice(5));
+      return shot?.description || null;
+    }
+    return (
+      looseAssets.find((a) => a.id === outputKey)?.name ||
+      allAssetsOf(scenes, looseAssets).find((a) => a.id === outputKey)?.name ||
+      null
+    );
+  }, [outputKey, scenes, looseAssets]);
+
   const cardSizeOf = useCallback(
     (shotId: string) => {
       const card = layout.cards.find((c) => c.shot.id === shotId);
@@ -501,6 +553,31 @@ export default function ProjectCanvas({
     },
     [episodeId],
   );
+
+  // 工作流缺项检查（ComfyUI 缺节点的对应提醒）；「未连成片」可点击
+  // 定位到成片节点。
+  const issues = useMemo(() => {
+    const list: { key: string; label: string }[] = [];
+    if (overview && !overview.episode.script_path) {
+      list.push({ key: "script", label: t("project.canvas.checkScript") });
+    }
+    if (overview && !outputKey) {
+      list.push({ key: "output", label: t("project.canvas.checkOutput") });
+    }
+    return list;
+  }, [overview, outputKey, t]);
+
+  const locateOutput = useCallback(() => {
+    const el = vpRef.current;
+    if (!el || !outputBox) return;
+    const next = {
+      x: el.clientWidth / 2 - (outputBox.x + outputBox.w / 2) * view.scale,
+      y: el.clientHeight / 2 - (outputBox.y + outputBox.h / 2) * view.scale,
+      scale: view.scale,
+    };
+    setView(next);
+    saveView(next);
+  }, [outputBox, view.scale, setView, saveView]);
 
   useEffect(() => {
     const el = vpRef.current;
@@ -611,9 +688,10 @@ export default function ProjectCanvas({
         const p = pos.loose[assetId];
         return loose && p ? { x: p.x, y: p.y, w: loose.w, h: loose.h } : null;
       }
+      if (key === "output") return outputBox;
       return null;
     },
-    [layout, pos, cardSizeOf],
+    [layout, pos, cardSizeOf, outputBox],
   );
 
   // 节点接口（ComfyUI 式）：输入口在左缘、输出口在右缘，口带名称与
@@ -646,6 +724,9 @@ export default function ProjectCanvas({
       if (key === "script") return { outLabel: t("project.canvas.typeScript"), outType: "text" };
       if (key.startsWith("char:") || key.startsWith("prop:")) {
         return { outLabel: t("project.canvas.portRefImg"), outType: "image" };
+      }
+      if (key === "output") {
+        return { inLabel: t("project.canvas.portFinal"), inAccepts: ["video"] };
       }
       return {};
     },
@@ -702,7 +783,7 @@ export default function ProjectCanvas({
   );
 
   interface DragState {
-    kind: "pan" | "marquee" | "card" | "loose" | "group" | "infoframe" | "wire";
+    kind: "pan" | "marquee" | "card" | "loose" | "group" | "infoframe" | "wire" | "outnode";
     sx: number;
     sy: number;
     moved?: boolean;
@@ -764,6 +845,15 @@ export default function ProjectCanvas({
       const nodeEl = target?.closest(".pc-node");
       if (nodeEl) {
         const key = nodeEl.getAttribute("data-key") ?? "";
+        if (key === "output" && outputBox) {
+          // 成片输出节点：卡体拖动只挪位置（localStorage 按集记忆）。
+          dragRef.current = {
+            kind: "outnode", sx: e.clientX, sy: e.clientY, moved: false,
+            ox: outputBox.x, oy: outputBox.y,
+          };
+          e.preventDefault();
+          return;
+        }
         const nextSel = selRef.current.includes(key) ? selRef.current : [key];
         setSelection(nextSel);
         const kind = key.startsWith("shot:") ? "card" : "loose";
@@ -817,7 +907,7 @@ export default function ProjectCanvas({
       dragRef.current = { kind: "marquee", sx: e.clientX, sy: e.clientY, mq, moved: false };
       e.preventDefault();
     },
-    [layout, pos, setSelection, view, infoPos, scenePos, portsOf],
+    [layout, pos, setSelection, view, infoPos, scenePos, portsOf, outputBox],
   );
 
 
@@ -866,6 +956,12 @@ export default function ProjectCanvas({
         setInfoFramePos({
           x: (drag.fox ?? 0) + dx / view.scale,
           y: (drag.foy ?? 0) + dy / view.scale,
+        });
+      } else if (drag.kind === "outnode") {
+        if (!drag.moved) return;
+        setOutputPos({
+          x: (drag.ox ?? 0) + dx / view.scale,
+          y: (drag.oy ?? 0) + dy / view.scale,
         });
       } else if (drag.kind === "wire") {
         const el = vpRef.current;
@@ -921,13 +1017,28 @@ export default function ProjectCanvas({
       } else if (drag.kind === "wire") {
         setWireDraft(null);
         if (drag.targetKey && drag.fromKey) {
-          // 反拖（从输入口出发）时落点才是数据的来源方。
+          // 反拖（从输入口出发）时落点才是数据的来源方；落到成片节点
+          // （key "output"）即设置本集总输出，不进素材参考线。
           const [outKey, inKey] = drag.fromDir === "in" ? [drag.targetKey, drag.fromKey] : [drag.fromKey, drag.targetKey];
-          void linkAssets(
-            outKey.replace(/^(shot|asset):/, ""),
-            inKey.replace(/^(shot|asset):/, ""),
-            "",
-          );
+          if (inKey === "output") {
+            void setEpisodeOutput(
+              episodeId,
+              outKey.startsWith("shot:") ? outKey : outKey.replace(/^asset:/, ""),
+            );
+          } else {
+            void linkAssets(
+              outKey.replace(/^(shot|asset):/, ""),
+              inKey.replace(/^(shot|asset):/, ""),
+              "",
+            );
+          }
+        }
+      } else if (drag.kind === "outnode") {
+        if (drag.moved) {
+          saveOutputPos({
+            x: (drag.ox ?? 0) + (e.clientX - drag.sx) / view.scale,
+            y: (drag.oy ?? 0) + (e.clientY - drag.sy) / view.scale,
+          });
         }
       } else if (drag.kind === "marquee") {
         const list: string[] = [];
@@ -988,7 +1099,7 @@ export default function ProjectCanvas({
       document.removeEventListener("mousemove", onMove);
       document.removeEventListener("mouseup", onUp);
     };
-  }, [layout, pos, view, scenePos, infoPos, boxOf, portsOf, linkAssets, persistCards, persistLoose, saveCanvasLayout, saveInfoFramePos, saveView, setSelection]);
+  }, [layout, pos, view, scenePos, infoPos, boxOf, portsOf, linkAssets, persistCards, persistLoose, saveCanvasLayout, saveInfoFramePos, saveView, setSelection, saveOutputPos, setEpisodeOutput, episodeId]);
 
   // ── 节点操作 ──
   // 节点左右缘的接口圆点（ComfyUI 式）：左输入空心、右输出实心类型色，
@@ -1229,6 +1340,37 @@ export default function ProjectCanvas({
             {wireDraft && (
               <path className={`pc-wire-temp${wireDraft.invalid ? " invalid" : ""}`} d={wireDraft.d} />
             )}
+            {/* 成片连线：总输出来源 → 成片节点（由 output_asset_id 推导） */}
+            {(() => {
+              const outputKey = overview?.episode.output_asset_id;
+              if (!outputKey || !outputBox) return null;
+              const fromBox = boxOf(outputKey.startsWith("shot:") ? outputKey : `asset:${outputKey}`);
+              if (!fromBox) return null;
+              const d = wirePathD(fromBox, outputBox);
+              const midX = (fromBox.x + fromBox.w + outputBox.x) / 2;
+              const midY = (fromBox.y + fromBox.h / 2 + outputBox.y + outputBox.h / 2) / 2 - 7;
+              return (
+                <g className="pc-wire">
+                  <path className="pc-wire-hit" d={d} />
+                  <path
+                    className="pc-wire-line"
+                    d={d}
+                    style={{ stroke: WIRE_TYPE_COLORS.video }}
+                  />
+                  <text className="pc-wire-label" x={midX} y={midY} style={{ fill: WIRE_TYPE_COLORS.video }}>
+                    {t("project.canvas.portFinal")}
+                  </text>
+                  <g
+                    className="pc-wire-del"
+                    data-tooltip={t("project.canvas.wireRemove")}
+                    onClick={() => void setEpisodeOutput(episodeId, null)}
+                  >
+                    <circle cx={midX + 36} cy={midY - 4} r="9" />
+                    <path d={`M${midX + 32} ${midY - 8} l8 8 M${midX + 40} ${midY - 8} l-8 8`} />
+                  </g>
+                </g>
+              );
+            })()}
           </svg>
 
           {/* 镜头卡 */}
@@ -1480,7 +1622,40 @@ export default function ProjectCanvas({
               </div>
             );
           })}
+
+          {/* 成片输出节点：本集工作流的总输出口（拖卡体挪位，按集记忆） */}
+          {outputBox && (
+            <div
+              data-key="output"
+              className="pc-node pc-outnode"
+              style={{ left: outputBox.x, top: outputBox.y, width: outputBox.w, height: outputBox.h }}
+            >
+              <div className="pc-outnode-body">
+                <span className="pc-outnode-icon">{Icons.clapperboard}</span>
+                <b>{t("project.canvas.outputNode")}</b>
+                <small>{outputSourceLabel ?? t("project.canvas.outputEmpty")}</small>
+              </div>
+              {portEls("output")}
+            </div>
+          )}
         </div>
+
+        {/* 缺失提醒条（ComfyUI 缺节点警示的对应物）：缺项可点击定位 */}
+        {issues.length > 0 && (
+          <div className="pc-checkbar">
+            <span className="pc-checkbar-title">{t("project.canvas.checkTitle")}</span>
+            {issues.map((issue) => (
+              <button
+                key={issue.key}
+                type="button"
+                className="pc-checkbar-chip"
+                onClick={issue.key === "output" ? locateOutput : undefined}
+              >
+                {issue.label}
+              </button>
+            ))}
+          </div>
+        )}
 
         {/* 集信息玻璃卡 + 统计 */}
         <div className="pc-glass pc-ep-card">
