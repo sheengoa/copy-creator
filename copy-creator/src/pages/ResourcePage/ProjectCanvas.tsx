@@ -855,7 +855,7 @@ export default function ProjectCanvas({
   );
 
   interface DragState {
-    kind: "pan" | "marquee" | "card" | "loose" | "group" | "infoframe" | "wire" | "outnode" | "note";
+    kind: "pan" | "marquee" | "card" | "loose" | "group" | "infoframe" | "wire" | "outnode" | "note" | "addnode";
     sx: number;
     sy: number;
     moved?: boolean;
@@ -1150,6 +1150,21 @@ export default function ProjectCanvas({
             ),
           );
         }
+      } else if (drag.kind === "addnode") {
+        // 点击（未拖动）落双击点；按住拖到画布松手落松手点。
+        const rect = vpRef.current?.getBoundingClientRect();
+        const dropPos = drag.moved && rect
+          ? {
+              x: (e.clientX - rect.left - view.x) / view.scale,
+              y: (e.clientY - rect.top - view.y) / view.scale,
+            }
+          : { x: drag.fox ?? 0, y: drag.foy ?? 0 };
+        if (drag.frameKey === "note") {
+          addNote(dropPos.x, dropPos.y);
+        } else {
+          setPendingAddPos(dropPos);
+          onAddLooseAsset();
+        }
       } else if (drag.kind === "marquee") {
         const list: string[] = [];
         if (drag.moved) {
@@ -1209,7 +1224,7 @@ export default function ProjectCanvas({
       document.removeEventListener("mousemove", onMove);
       document.removeEventListener("mouseup", onUp);
     };
-  }, [layout, pos, view, scenePos, infoPos, boxOf, portsOf, linkAssets, persistCards, persistLoose, saveCanvasLayout, saveInfoFramePos, saveView, setSelection, saveOutputPos, setEpisodeOutput, episodeId, notes, persistNotes]);
+  }, [layout, pos, view, scenePos, infoPos, boxOf, portsOf, linkAssets, persistCards, persistLoose, saveCanvasLayout, saveInfoFramePos, saveView, setSelection, saveOutputPos, setEpisodeOutput, episodeId, notes, persistNotes, addNote, onAddLooseAsset]);
 
   // ── 节点操作 ──
   // 节点左右缘的接口圆点（ComfyUI 式）：左输入空心、右输出实心类型色，
@@ -1862,8 +1877,18 @@ export default function ProjectCanvas({
               autoFocus
             />
             {[
-              { key: "note", label: t("project.canvas.typeNote"), hint: t("project.canvas.typeNoteHint"), icon: Icons.edit },
-              { key: "asset", label: t("project.canvas.typeAsset"), hint: t("project.canvas.typeAssetHint"), icon: Icons.image },
+              {
+                key: "note",
+                label: t("project.canvas.typeNote"),
+                hint: t("project.canvas.typeNoteHint"),
+                icon: Icons.edit,
+              },
+              {
+                key: "asset",
+                label: t("project.canvas.typeAsset"),
+                hint: t("project.canvas.typeAssetHint"),
+                icon: Icons.image,
+              },
             ]
               .filter((item) => item.label.toLowerCase().includes(addMenuQuery.trim().toLowerCase()))
               .map((item) => (
@@ -1871,15 +1896,18 @@ export default function ProjectCanvas({
                   key={item.key}
                   type="button"
                   className="pc-addmenu-item"
-                  onClick={() => {
+                  // 点击与按住拖到画布松手都创建（ComfyUI 搜索框惯例）：
+                  // 拖动落点为松手处的世界坐标，原地点击落双击点。
+                  onMouseDown={(event) => {
+                    if (event.button !== 0) return;
+                    event.stopPropagation();
+                    event.preventDefault();
+                    dragRef.current = {
+                      kind: "addnode", sx: event.clientX, sy: event.clientY, moved: false,
+                      fox: addMenu.wx, foy: addMenu.wy, frameKey: item.key,
+                    };
                     setAddMenu(null);
                     setAddMenuQuery("");
-                    if (item.key === "note") {
-                      addNote(addMenu.wx, addMenu.wy);
-                    } else {
-                      setPendingAddPos({ x: addMenu.wx, y: addMenu.wy });
-                      onAddLooseAsset();
-                    }
                   }}
                 >
                   {item.icon}
