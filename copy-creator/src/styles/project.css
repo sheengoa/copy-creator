@@ -2237,8 +2237,7 @@
 
 /* ── 成片输出节点（每集工作流的总输出口） ── */
 .pc-outnode { cursor: grab; }
-.pc-outnode:active { cursor: grabbing; }
-.pc-outnode-body {
+.pc-outnode:active { cursor: grabbing; }.pc-outnode-body {
   height: 100%;
   border-radius: 14px;
   background: rgba(24, 24, 30, 0.92);
@@ -2264,6 +2263,52 @@
 }
 .pc-outnode-icon svg { width: 16px; height: 16px; opacity: 0.85; }
 .pc-outnode .pc-port-in { border-color: var(--video-wire, #a78bfa); }
+
+/* ── 片段节点（AI 分段生成的视频分段，按序拼接成片） ── */
+.pc-segment { cursor: grab; }
+.pc-segment:active { cursor: grabbing; }
+.pc-seg-card { display: flex; flex-direction: column; cursor: grab; }
+.pc-seg-card:active { cursor: grabbing; }
+.pc-seg-head {
+  position: relative;
+  padding: 8px 11px 7px;
+  border-bottom: 1px solid var(--separator);
+  display: flex;
+  align-items: center;
+  gap: 7px;
+}
+.pc-seg-head .pc-shot-desc { flex: 1; font-size: 12px; -webkit-line-clamp: 1; }
+.pc-seg-thumb {
+  position: relative;
+  display: block;
+  margin: 8px;
+  height: 56px;
+  border: 1px solid var(--separator);
+  border-radius: 8px;
+  overflow: hidden;
+  padding: 0;
+  cursor: pointer;
+  background: var(--chip-bg);
+}
+.pc-seg-thumb.is-missing { border-style: dashed; border-color: var(--danger); }
+.pc-seg-thumb .resource-video-poster { width: 100%; height: 100%; }
+.pc-seg-thumb .resource-video-poster img { width: 100%; height: 100%; object-fit: cover; }
+.pc-seg-empty {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  margin: 8px;
+  height: 56px;
+  border: 1.5px dashed var(--separator);
+  border-radius: 8px;
+  color: var(--text-tertiary);
+  font-size: 11px;
+  background: none;
+  cursor: pointer;
+}
+.pc-seg-empty:hover { border-color: var(--text-tertiary); color: var(--text-secondary); }
+.pc-seg-empty svg { width: 13px; height: 13px; }
 
 /* ── 工作流缺项提醒条 ── */
 .pc-checkbar {

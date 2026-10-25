@@ -5,10 +5,13 @@ import {
   useProjectStore,
   type ProjectAsset,
   type ProjectAssetLink,
+  type ProjectNodeLink,
   type ProjectScene,
   type ProjectShot,
 } from "../../stores/projectStore";
 import { ConfirmDialog } from "../../components/ConfirmDialog";
+import ProjectFilePickerDialog from "./ProjectFilePickerDialog";
+import ProjectLibraryPanel from "./ProjectLibraryPanel";
 import { ResourceFileImage, ResourceVideoPoster, ResourceImage } from "./ResourceMedia";
 import { Icons } from "../../components/Icons";
 import { openResourceFile, readResourceTextPreview } from "../../domain/mediaAssets";
@@ -46,6 +49,8 @@ const MINI_W = 150;
 const MINI_H = 96;
 const OUTPUT_W = 176; // 成片输出节点（每集工作流的总输出口）
 const OUTPUT_H = 72;
+const SEG_W = 208; // 片段节点（AI 分段生成的视频分段）
+const SEG_H = 108;
 
 type Pos = { x: number; y: number };
 type PosMap = { cards: Record<string, Pos>; loose: Record<string, Pos>; info?: Pos };
@@ -72,10 +77,10 @@ interface CanvasLoose {
   h: number;
 }
 interface CanvasInfo {
-  key: string; // `char:<id>` | `prop:<id>` | `script`
-  kind: "character" | "prop" | "script";
+  key: string; // `char:<id>` | `loc:<id>` | `prop:<id>` | `script`
+  kind: "character" | "location" | "prop" | "script";
   name: string;
-  avatarPath: string; // 角色头像（相对库根）
+  avatarPath: string; // 角色/场景参考图（相对库根）
   textPath: string; // 剧本正文（相对库根）
   w: number;
   h: number;
@@ -113,16 +118,18 @@ interface WireBox extends Pos {
   h: number;
 }
 
-/** ComfyUI 风格连线：从 from 节点右缘中点（输出口）出发，到 to 节点
- *  左缘中点（输入口）。控制点沿水平方向延伸两点距离的 1/4，任意角度
- *  都得到平滑弯出的贝塞尔，不存在直线或拐角形态。 */
-function wirePathD(from: WireBox, to: WireBox): string {
-  const ax = from.x + from.w;
-  const ay = from.y + from.h / 2;
-  const bx = to.x;
-  const by = to.y + to.h / 2;
-  const offset = Math.hypot(bx - ax, by - ay) * 0.25;
-  return `M ${ax} ${ay} C ${ax + offset} ${ay}, ${bx - offset} ${by}, ${bx} ${by}`;
+/** ComfyUI 风格连线：直接接收两端端口点（输出在节点右缘、输入在左缘），
+ *  控制点沿水平方向延伸两点距离的 1/4，任意角度都是平滑弯出的贝塞尔，
+ *  不存在直线或拐角形态。 */
+function wirePathD(a: { x: number; y: number }, b: { x: number; y: number }): string {
+  const offset = Math.hypot(b.x - a.x, b.y - a.y) * 0.25;
+  return `M ${a.x} ${a.y} C ${a.x + offset} ${a.y}, ${b.x - offset} ${b.y}, ${b.x} ${b.y}`;
+}
+
+/** 输入端口列的垂直比例：第 i 口（0 起）位于节点高度的 (i+1)/(n+1) 处
+ *  （ComfyUI 槽位分布），单口即中点。 */
+function portRatio(index: number, count: number): number {
+  return (index + 1) / (count + 1);
 }
 
 /** 镜头卡尺寸：卡头 + 素材两列网格（空镜头为挂靠占位高度）。 */
@@ -386,6 +393,14 @@ export default function ProjectCanvas({
     saveShot,
     deleteShot,
     setEpisodeOutput,
+    setEpisodeLocations,
+    addSegment,
+    removeSegment,
+    moveSegment,
+    setSegmentAsset,
+    linkNode,
+    unlinkNode,
+    linkAsset,
   } = useProjectStore(
     useShallow((state) => ({
       overview: state.overview,
@@ -402,12 +417,23 @@ export default function ProjectCanvas({
       saveShot: state.saveShot,
       deleteShot: state.deleteShot,
       setEpisodeOutput: state.setEpisodeOutput,
+      setEpisodeLocations: state.setEpisodeLocations,
+      addSegment: state.addSegment,
+      removeSegment: state.removeSegment,
+      moveSegment: state.moveSegment,
+      setSegmentAsset: state.setSegmentAsset,
+      linkNode: state.linkNode,
+      unlinkNode: state.unlinkNode,
+      linkAsset: state.linkAsset,
     })),
   );
   const episodeId = overview?.episode.id ?? "";
   const scenes = useMemo(() => overview?.scenes ?? [], [overview]);
   const looseAssets = useMemo(() => overview?.loose_assets ?? [], [overview]);
   const links = useMemo(() => overview?.links ?? [], [overview]);
+  const episodeLocations = useMemo(() => overview?.locations ?? [], [overview]);
+  const segments = useMemo(() => overview?.segments ?? [], [overview]);
+  const nodeLinks = useMemo(() => overview?.node_links ?? [], [overview]);
 
   // 出镜道具名（全集并集）与出场角色：资料框数据源。
   const castCharacters = useMemo(() => overview?.characters ?? [], [overview]);
@@ -511,6 +537,9 @@ export default function ProjectCanvas({
   // ── 双击空白添加节点（ComfyUI 搜索框的对应物） ──
   const [addMenu, setAddMenu] = useState<{ sx: number; sy: number; wx: number; wy: number } | null>(null);
   const [addMenuQuery, setAddMenuQuery] = useState("");
+  // 挂产出：正在为哪个片段选择视频文件；场景关联面板开关。
+  const [segmentAssetPickFor, setSegmentAssetPickFor] = useState<string | null>(null);
+  const [locationPickOpen, setLocationPickOpen] = useState(false);
   // 从库选完素材后落到双击点的世界坐标：loose_assets 出现新 id 即落位。
   const [pendingAddPos, setPendingAddPos] = useState<Pos | null>(null);
   const lastLooseIdsRef = useRef<string[]>([]);
@@ -536,13 +565,19 @@ export default function ProjectCanvas({
     return base;
   }, [scenes, looseAssets]);
 
-  // 资料节点（出场角色/出镜道具/剧本）：资料框内网格自动排。
+  // 资料节点（出场角色/出场场景/出镜道具/剧本）：资料框内网格自动排。
   const infoNodes = useMemo(() => {
     const list: CanvasInfo[] = [];
     castCharacters.forEach((character) => {
       list.push({
         key: `char:${character.id}`, kind: "character", name: character.name,
         avatarPath: character.avatar_path, textPath: "", w: INFO_W, h: INFO_H,
+      });
+    });
+    episodeLocations.forEach((location) => {
+      list.push({
+        key: `loc:${location.id}`, kind: "location", name: location.name,
+        avatarPath: location.ref_path, textPath: "", w: INFO_W, h: INFO_H,
       });
     });
     propIds.forEach((pid) => {
@@ -558,7 +593,7 @@ export default function ProjectCanvas({
       });
     }
     return list;
-  }, [castCharacters, propIds, props, overview]);
+  }, [castCharacters, episodeLocations, propIds, props, overview]);
 
   const infoPos = useMemo(() => {
     const frame = infoFramePos ?? { x: WORLD_MARGIN, y: layout.worldH + 48 };
@@ -586,6 +621,34 @@ export default function ProjectCanvas({
     };
     return { x: p.x, y: p.y, w: OUTPUT_W, h: OUTPUT_H };
   }, [overview, outputPos, layout]);
+
+  // 片段位置：canvas 存储之外叠本地实时层；默认在成片节点左侧按拼接序
+  // 排成一列（工作流读向：剧本 → 片段列 → 成片）。
+  const [segPos, setSegPos] = useState<Record<string, Pos>>({});
+  useEffect(() => {
+    setSegPos((prev) => {
+      const next: Record<string, Pos> = {};
+      const baseX = (outputBox?.x ?? layout.worldW + 260) - SEG_W - 140;
+      segments.forEach((segment, index) => {
+        next[segment.id] = prev[segment.id] ?? {
+          x: segment.canvas_x ?? baseX,
+          y: segment.canvas_y ?? Math.max(WORLD_MARGIN, 110 + index * (SEG_H + 28)),
+        };
+      });
+      return next;
+    });
+  }, [segments, outputBox, layout.worldW]);
+  const persistSegments = useCallback(
+    (next: Record<string, Pos>) => {
+      void saveCanvasLayout({
+        assets: [],
+        shots: [],
+        scenes: [],
+        segments: Object.entries(next).map(([id, p]) => ({ id, x: p.x, y: p.y })),
+      });
+    },
+    [saveCanvasLayout],
+  );
 
   const outputKey = overview?.episode.output_asset_id ?? null;
 
@@ -627,17 +690,21 @@ export default function ProjectCanvas({
   );
 
   // 工作流缺项检查（ComfyUI 缺节点的对应提醒）；「未连成片」可点击
-  // 定位到成片节点。
+  // 定位到成片节点。有片段时成片由片段按序聚合，不再要求单素材连线。
   const issues = useMemo(() => {
     const list: { key: string; label: string }[] = [];
     if (overview && !overview.episode.script_path) {
       list.push({ key: "script", label: t("project.canvas.checkScript") });
     }
-    if (overview && !outputKey) {
+    const emptySegments = segments.filter((item) => !item.asset).length;
+    if (emptySegments > 0) {
+      list.push({ key: "segAssets", label: t("project.canvas.checkSegAssets", { count: emptySegments }) });
+    }
+    if (overview && !outputKey && segments.length === 0) {
       list.push({ key: "output", label: t("project.canvas.checkOutput") });
     }
     return list;
-  }, [overview, outputKey, t]);
+  }, [overview, outputKey, segments, t]);
 
   const locateOutput = useCallback(() => {
     const el = vpRef.current;
@@ -760,49 +827,104 @@ export default function ProjectCanvas({
         const p = pos.loose[assetId];
         return loose && p ? { x: p.x, y: p.y, w: loose.w, h: loose.h } : null;
       }
+      if (key.startsWith("segment:")) {
+        const p = segPos[key.slice(8)];
+        return p ? { x: p.x, y: p.y, w: SEG_W, h: SEG_H } : null;
+      }
       if (key === "output") return outputBox;
-      return null;
+      // 资料节点（角色/场景/道具/剧本）按资料框网格位置。
+      const infoNode = infoNodes.find((item) => item.key === key);
+      const infoP = infoNode ? infoPos.map[key] : undefined;
+      return infoNode && infoP ? { x: infoP.x, y: infoP.y, w: infoNode.w, h: infoNode.h } : null;
     },
-    [layout, pos, cardSizeOf, outputBox],
+    [layout, pos, cardSizeOf, outputBox, segPos, infoNodes, infoPos],
   );
 
-  // 节点接口（ComfyUI 式）：输入口在左缘、输出口在右缘，口带名称与
+  // 端口点：输出口在右缘中点；输入口按片段端口列分布取左缘位置。
+  const outPointOf = useCallback(
+    (key: string): { x: number; y: number } | null => {
+      const box = boxOf(key);
+      return box ? { x: box.x + box.w, y: box.y + box.h / 2 } : null;
+    },
+    [boxOf],
+  );
+
+  // 节点接口（ComfyUI 式）：输入口列在左缘、输出口在右缘，口带名称与
   // 数据类型；类型不兼容的连线在拖拽与落下时都会被拒绝。
+  // 片段节点是核心生成单元：五输入口（角色/场景/道具/脚本/其他）+
+  // 片段视频输出口；剧本与脚本同为 text，都连进片段的「脚本」口。
   const portsOf = useCallback(
-    (key: string): { inLabel?: string; inAccepts?: string[]; outLabel?: string; outType?: string } => {
+    (key: string): { ins: { id: string; label: string; accepts: string[] }[]; out?: { label: string; type: string } } => {
+      if (key.startsWith("segment:")) {
+        return {
+          ins: [
+            { id: "character", label: t("project.canvas.typeCharacter"), accepts: ["image"] },
+            { id: "location", label: t("project.canvas.typeLocation"), accepts: ["image"] },
+            { id: "prop", label: t("project.canvas.typeProp"), accepts: ["image"] },
+            { id: "script", label: t("project.canvas.typeScript"), accepts: ["text"] },
+            { id: "other", label: t("project.canvas.typeOther"), accepts: ["video", "audio", "file", "image"] },
+          ],
+          out: { label: t("project.canvas.portSegment"), type: "video" },
+        };
+      }
+      if (key === "output") {
+        return { ins: [{ id: "in", label: t("project.canvas.portFinal"), accepts: ["video"] }] };
+      }
       if (key.startsWith("shot:")) {
         const shot = scenes.flatMap((s) => s.shots).find((item) => item.id === key.slice(5));
-        if (!shot) return {};
+        if (!shot) return { ins: [] };
         const hasVideo = shot.assets.some((a) => a.kind === "video");
         return {
-          inLabel: t("project.canvas.portRef"),
-          inAccepts: REF_ACCEPTS,
-          outLabel: t(hasVideo ? "project.canvas.portFootage" : "project.canvas.typeImage"),
-          outType: hasVideo ? "video" : "image",
+          ins: [{ id: "in", label: t("project.canvas.portRef"), accepts: REF_ACCEPTS }],
+          out: { label: t(hasVideo ? "project.canvas.portFootage" : "project.canvas.typeImage"), type: hasVideo ? "video" : "image" },
         };
       }
       if (key.startsWith("asset:")) {
         const assetId = key.slice(6);
         const loose = looseAssets.find((a) => a.id === assetId);
-        if (!loose) return {};
-        const kind = loose.kind;
+        const kind =
+          loose?.kind ??
+          allAssetsOf(scenes, looseAssets).find((a) => a.id === assetId)?.kind;
+        if (!kind) return { ins: [] };
         return {
-          inLabel: REF_ACCEPTS.includes(kind) ? t("project.canvas.portRef") : undefined,
-          inAccepts: REF_ACCEPTS.includes(kind) ? REF_ACCEPTS : undefined,
-          outLabel: t(assetKindBadgeKey(kind)),
-          outType: kind,
+          ins: REF_ACCEPTS.includes(kind)
+            ? [{ id: "in", label: t("project.canvas.portRef"), accepts: REF_ACCEPTS }]
+            : [],
+          out: { label: t(assetKindBadgeKey(kind)), type: kind },
         };
       }
-      if (key === "script") return { outLabel: t("project.canvas.typeScript"), outType: "text" };
-      if (key.startsWith("char:") || key.startsWith("prop:")) {
-        return { outLabel: t("project.canvas.portRefImg"), outType: "image" };
+      if (key === "script") return { ins: [], out: { label: t("project.canvas.typeScript"), type: "text" } };
+      if (key.startsWith("char:") || key.startsWith("loc:") || key.startsWith("prop:")) {
+        return { ins: [], out: { label: t("project.canvas.portRefImg"), type: "image" } };
       }
-      if (key === "output") {
-        return { inLabel: t("project.canvas.portFinal"), inAccepts: ["video"] };
-      }
-      return {};
+      return { ins: [] };
     },
     [scenes, looseAssets, t],
+  );
+
+  const inPointOf = useCallback(
+    (key: string, portId?: string): { x: number; y: number } | null => {
+      const box = boxOf(key);
+      if (!box) return null;
+      const ins = portsOf(key).ins;
+      const index = portId ? ins.findIndex((p) => p.id === portId) : 0;
+      return { x: box.x, y: box.y + box.h * portRatio(index < 0 ? 0 : index, Math.max(ins.length, 1)) };
+    },
+    [boxOf, portsOf],
+  );
+
+  // 画布节点 key → node_link 来源（片段输入口连线的落库形态）。
+  const nodeKeyParts = useCallback(
+    (key: string): { kind: ProjectNodeLink["from_kind"]; id: string } | null => {
+      if (key.startsWith("asset:")) return { kind: "asset", id: key.slice(6) };
+      if (key.startsWith("char:")) return { kind: "character", id: key.slice(5) };
+      if (key.startsWith("loc:")) return { kind: "location", id: key.slice(4) };
+      if (key.startsWith("prop:")) return { kind: "prop", id: key.slice(5) };
+      if (key.startsWith("segment:")) return { kind: "segment", id: key.slice(8) };
+      if (key === "script") return { kind: "script", id: episodeId };
+      return null; // 镜头卡不在片段工作流的节点类型中
+    },
+    [episodeId],
   );
 
   // ── 选中与拖拽 ──
@@ -855,7 +977,7 @@ export default function ProjectCanvas({
   );
 
   interface DragState {
-    kind: "pan" | "marquee" | "card" | "loose" | "group" | "infoframe" | "wire" | "outnode" | "note" | "addnode";
+    kind: "pan" | "marquee" | "card" | "loose" | "group" | "infoframe" | "wire" | "outnode" | "note" | "addnode" | "segment";
     sx: number;
     sy: number;
     moved?: boolean;
@@ -872,6 +994,8 @@ export default function ProjectCanvas({
     fromDir?: "out" | "in"; // 从输出口正拖 / 从输入口反拖
     fromType?: string; // 正拖：出发输出口的数据类型
     fromAccepts?: string[]; // 反拖：出发输入口可接的类型
+    fromPortId?: string; // 反拖：出发的输入口
+    targetPort?: string | null; // 正拖：悬停片段上匹配的输入口
     invalid?: boolean; // 悬停目标类型不兼容
   }
   const dragRef = useRef<DragState | null>(null);
@@ -919,11 +1043,15 @@ export default function ProjectCanvas({
         const nodeEl = port.closest(".pc-node");
         const key = nodeEl?.getAttribute("data-key") ?? "";
         const dir = port.dataset.port === "in" ? "in" : "out";
+        const portId = port.dataset.portId ?? "";
         const ports = portsOf(key);
-        if (key && (dir === "out" ? ports.outType : ports.inAccepts)) {
+        const inPort = ports.ins.find((item) => item.id === portId);
+        if (key && (dir === "out" ? ports.out : inPort)) {
           dragRef.current = {
             kind: "wire", sx: e.clientX, sy: e.clientY, fromKey: key, targetKey: null,
-            fromDir: dir, fromType: ports.outType, fromAccepts: ports.inAccepts,
+            targetPort: null, fromDir: dir,
+            fromType: ports.out?.type, fromAccepts: inPort?.accepts,
+            fromPortId: portId || undefined,
           };
           e.preventDefault();
           return;
@@ -940,6 +1068,19 @@ export default function ProjectCanvas({
           };
           e.preventDefault();
           return;
+        }
+        if (key.startsWith("segment:")) {
+          // 片段卡：按下即拖动，松手持久化坐标。
+          const segId = key.slice(8);
+          const p = segPos[segId];
+          if (p) {
+            dragRef.current = {
+              kind: "segment", sx: e.clientX, sy: e.clientY, moved: false,
+              ox: p.x, oy: p.y, frameKey: segId,
+            };
+            e.preventDefault();
+            return;
+          }
         }
         const nextSel = selRef.current.includes(key) ? selRef.current : [key];
         setSelection(nextSel);
@@ -994,7 +1135,7 @@ export default function ProjectCanvas({
       dragRef.current = { kind: "marquee", sx: e.clientX, sy: e.clientY, mq, moved: false };
       e.preventDefault();
     },
-    [layout, pos, setSelection, view, infoPos, scenePos, portsOf, outputBox, notes],
+    [layout, pos, setSelection, view, infoPos, scenePos, portsOf, outputBox, notes, segPos],
   );
 
 
@@ -1050,6 +1191,13 @@ export default function ProjectCanvas({
           x: (drag.ox ?? 0) + dx / view.scale,
           y: (drag.oy ?? 0) + dy / view.scale,
         });
+      } else if (drag.kind === "segment") {
+        if (!drag.moved) return;
+        const segId = drag.frameKey ?? "";
+        setSegPos((prev) => ({
+          ...prev,
+          [segId]: { x: (drag.ox ?? 0) + dx / view.scale, y: (drag.oy ?? 0) + dy / view.scale },
+        }));
       } else if (drag.kind === "note") {
         if (!drag.moved) return;
         setNotes((prev) =>
@@ -1065,26 +1213,40 @@ export default function ProjectCanvas({
         const rect = el.getBoundingClientRect();
         const wx = (e.clientX - rect.left - view.x) / view.scale;
         const wy = (e.clientY - rect.top - view.y) / view.scale;
-        const fromBox = boxOf(drag.fromKey);
-        if (!fromBox) return;
-        const cursor = { x: wx - 1, y: wy - 1, w: 2, h: 2 };
+        const startPoint =
+          drag.fromDir === "in"
+            ? inPointOf(drag.fromKey, drag.fromPortId)
+            : outPointOf(drag.fromKey);
+        if (!startPoint) return;
+        const cursor = { x: wx, y: wy };
         const hit = document.elementFromPoint(e.clientX, e.clientY);
         const tEl = hit instanceof Element ? hit.closest(".pc-node") : null;
         const tKey = tEl?.getAttribute("data-key") ?? null;
-        // 类型校验（ComfyUI 式）：正拖找可接该类型的输入口，反拖找
-        // 在可接范围内的输出口；不兼容的落点整条线标红。
+        // 类型校验（ComfyUI 式）：正拖在落点节点的输入口列里找可接该
+        // 类型的口；反拖找在出发口可接范围内的输出口。镜头卡不在片段
+        // 工作流节点类型中，不与片段互连。
         let compatible = false;
-        if (tKey && tKey !== drag.fromKey) {
+        let targetPort: string | null = null;
+        if (tKey && tKey !== drag.fromKey && !(tKey.startsWith("segment:") && drag.fromKey.startsWith("shot:"))) {
           const ports = portsOf(tKey);
-          compatible =
-            drag.fromDir === "in"
-              ? !!ports.outType && !!drag.fromAccepts?.includes(ports.outType)
-              : !!ports.inAccepts && !!drag.fromType && ports.inAccepts.includes(drag.fromType);
+          if (drag.fromDir === "in") {
+            compatible = !!ports.out && !!drag.fromAccepts?.includes(ports.out.type);
+          } else if (drag.fromType) {
+            const hitPort = ports.ins.find((item) => item.accepts.includes(drag.fromType!));
+            compatible = !!hitPort;
+            targetPort = hitPort?.id ?? null;
+          }
         }
         drag.invalid = !!tKey && tKey !== drag.fromKey && !compatible;
         drag.targetKey = compatible ? tKey : null;
+        drag.targetPort = targetPort;
+        // 草稿终点：正拖命中片段时吸附到匹配输入口的位置。
+        const endPoint =
+          compatible && drag.fromDir === "out" && tKey
+            ? inPointOf(tKey, targetPort ?? undefined) ?? cursor
+            : cursor;
         setWireDraft({
-          d: drag.fromDir === "in" ? wirePathD(cursor, fromBox) : wirePathD(fromBox, cursor),
+          d: drag.fromDir === "in" ? wirePathD(cursor, startPoint) : wirePathD(startPoint, endPoint),
           invalid: drag.invalid,
         });
       } else if (drag.kind === "card") {
@@ -1114,13 +1276,26 @@ export default function ProjectCanvas({
         setWireDraft(null);
         if (drag.targetKey && drag.fromKey) {
           // 反拖（从输入口出发）时落点才是数据的来源方；落到成片节点
-          // （key "output"）即设置本集总输出，不进素材参考线。
+          // （key "output"）即设置本集总输出；落到片段的某个输入口则写
+          // 一条 node_link（角色/场景/道具/剧本/素材/片段 → 片段）。
           const [outKey, inKey] = drag.fromDir === "in" ? [drag.targetKey, drag.fromKey] : [drag.fromKey, drag.targetKey];
           if (inKey === "output") {
             void setEpisodeOutput(
               episodeId,
               outKey.startsWith("shot:") ? outKey : outKey.replace(/^asset:/, ""),
             );
+          } else if (inKey.startsWith("segment:")) {
+            const source = nodeKeyParts(outKey);
+            const port = drag.fromDir === "in" ? drag.fromPortId : drag.targetPort;
+            if (source && port) {
+              void linkNode(
+                episodeId,
+                source.kind,
+                source.id,
+                inKey.slice(8),
+                port as ProjectNodeLink["to_port"],
+              );
+            }
           } else {
             void linkAssets(
               outKey.replace(/^(shot|asset):/, ""),
@@ -1134,6 +1309,21 @@ export default function ProjectCanvas({
           saveOutputPos({
             x: (drag.ox ?? 0) + (e.clientX - drag.sx) / view.scale,
             y: (drag.oy ?? 0) + (e.clientY - drag.sy) / view.scale,
+          });
+        }
+      } else if (drag.kind === "segment") {
+        if (drag.moved) {
+          const segId = drag.frameKey ?? "";
+          setSegPos((prev) => {
+            const next = {
+              ...prev,
+              [segId]: {
+                x: (drag.ox ?? 0) + (e.clientX - drag.sx) / view.scale,
+                y: (drag.oy ?? 0) + (e.clientY - drag.sy) / view.scale,
+              },
+            };
+            persistSegments(next);
+            return next;
           });
         }
       } else if (drag.kind === "note") {
@@ -1161,6 +1351,15 @@ export default function ProjectCanvas({
           : { x: drag.fox ?? 0, y: drag.foy ?? 0 };
         if (drag.frameKey === "note") {
           addNote(dropPos.x, dropPos.y);
+        } else if (drag.frameKey === "segment") {
+          void addSegment(episodeId).then((segment) => {
+            if (segment) {
+              void saveCanvasLayout({
+                assets: [], shots: [], scenes: [],
+                segments: [{ id: segment.id, x: dropPos.x, y: dropPos.y }],
+              });
+            }
+          });
         } else {
           setPendingAddPos(dropPos);
           onAddLooseAsset();
@@ -1224,24 +1423,32 @@ export default function ProjectCanvas({
       document.removeEventListener("mousemove", onMove);
       document.removeEventListener("mouseup", onUp);
     };
-  }, [layout, pos, view, scenePos, infoPos, boxOf, portsOf, linkAssets, persistCards, persistLoose, saveCanvasLayout, saveInfoFramePos, saveView, setSelection, saveOutputPos, setEpisodeOutput, episodeId, notes, persistNotes, addNote, onAddLooseAsset]);
+  }, [layout, pos, view, scenePos, infoPos, boxOf, portsOf, outPointOf, inPointOf, linkAssets, persistCards, persistLoose, saveCanvasLayout, saveInfoFramePos, saveView, setSelection, saveOutputPos, setEpisodeOutput, episodeId, notes, persistNotes, addNote, onAddLooseAsset, persistSegments, linkNode, nodeKeyParts, addSegment]);
 
   // ── 节点操作 ──
-  // 节点左右缘的接口圆点（ComfyUI 式）：左输入空心、右输出实心类型色，
-  // hover 浮现接口名称；按下即拖出连线，从输入口反向拖也允许。
+  // 节点接口圆点（ComfyUI 式）：输入口列在左缘（片段五口按列分布）、
+  // 输出口在右缘实心类型色，hover 浮现接口名称；按下即拖出连线，从
+  // 输入口反向拖也允许。
   const portEls = (key: string) => {
-    const ports = portsOf(key);
+    const { ins, out } = portsOf(key);
     return (
       <>
-        {ports.inAccepts && (
-          <span className="pc-port pc-port-in" data-port="in" data-label={ports.inLabel} />
-        )}
-        {ports.outType && (
+        {ins.map((port, index) => (
+          <span
+            key={port.id}
+            className="pc-port pc-port-in"
+            data-port="in"
+            data-port-id={port.id}
+            data-label={port.label}
+            style={{ top: `${portRatio(index, ins.length) * 100}%` }}
+          />
+        ))}
+        {out && (
           <span
             className="pc-port pc-port-out"
             data-port="out"
-            data-label={ports.outLabel}
-            style={{ background: WIRE_TYPE_COLORS[ports.outType] ?? "#94a3b8" }}
+            data-label={out.label}
+            style={{ background: WIRE_TYPE_COLORS[out.type] ?? "#94a3b8" }}
           />
         )}
       </>
@@ -1441,16 +1648,12 @@ export default function ProjectCanvas({
           {/* 连线层（卡片之下） */}
           <svg className="pc-wires" aria-hidden="true">
             {wires.map((wire) => {
-              const fromBox = boxOf(wire.fromKey);
-              const toBox = boxOf(wire.toKey);
-              if (!fromBox || !toBox) return null;
-              const d = wirePathD(fromBox, toBox);
-              const ax = fromBox.x + fromBox.w;
-              const ay = fromBox.y + fromBox.h / 2;
-              const bx = toBox.x;
-              const by = toBox.y + toBox.h / 2;
-              const midX = (ax + bx) / 2;
-              const midY = (ay + by) / 2 - 7;
+              const a = outPointOf(wire.fromKey);
+              const b = inPointOf(wire.toKey);
+              if (!a || !b) return null;
+              const d = wirePathD(a, b);
+              const midX = (a.x + b.x) / 2;
+              const midY = (a.y + b.y) / 2 - 7;
               const color = WIRE_TYPE_COLORS[wire.type] ?? "#94a3b8";
               return (
                 <g key={`${wire.fromKey}->${wire.toKey}`} className="pc-wire">
@@ -1476,6 +1679,46 @@ export default function ProjectCanvas({
                 </g>
               );
             })}
+            {/* 片段输入口连线（角色/场景/道具/剧本/素材/片段 → 片段口） */}
+            {nodeLinks.map((link) => {
+              const fromKey =
+                link.from_kind === "script"
+                  ? "script"
+                  : link.from_kind === "character"
+                    ? `char:${link.from_id}`
+                    : link.from_kind === "location"
+                      ? `loc:${link.from_id}`
+                      : link.from_kind === "prop"
+                        ? `prop:${link.from_id}`
+                        : link.from_kind === "segment"
+                          ? `segment:${link.from_id}`
+                          : `asset:${link.from_id}`;
+              const a = outPointOf(fromKey);
+              const b = inPointOf(`segment:${link.to_segment}`, link.to_port);
+              if (!a || !b) return null;
+              const d = wirePathD(a, b);
+              const midX = (a.x + b.x) / 2;
+              const midY = (a.y + b.y) / 2 - 7;
+              return (
+                <g key={link.id} className="pc-wire">
+                  <path className="pc-wire-hit" d={d} />
+                  <path className="pc-wire-line" d={d} style={{ stroke: WIRE_TYPE_COLORS.video, strokeOpacity: 0.55 }} />
+                  <text className="pc-wire-label" x={midX} y={midY}>
+                    {t(`project.canvas.port_${link.to_port}`)}
+                  </text>
+                  <g
+                    className="pc-wire-del"
+                    data-tooltip={t("project.canvas.wireRemove")}
+                    onClick={() =>
+                      void unlinkNode(link.from_kind, link.from_id, link.to_segment, link.to_port)
+                    }
+                  >
+                    <circle cx={midX + 36} cy={midY - 4} r="9" />
+                    <path d={`M${midX + 32} ${midY - 8} l8 8 M${midX + 40} ${midY - 8} l-8 8`} />
+                  </g>
+                </g>
+              );
+            })}
             {wireDraft && (
               <path className={`pc-wire-temp${wireDraft.invalid ? " invalid" : ""}`} d={wireDraft.d} />
             )}
@@ -1483,11 +1726,12 @@ export default function ProjectCanvas({
             {(() => {
               const outputKey = overview?.episode.output_asset_id;
               if (!outputKey || !outputBox) return null;
-              const fromBox = boxOf(outputKey.startsWith("shot:") ? outputKey : `asset:${outputKey}`);
-              if (!fromBox) return null;
-              const d = wirePathD(fromBox, outputBox);
-              const midX = (fromBox.x + fromBox.w + outputBox.x) / 2;
-              const midY = (fromBox.y + fromBox.h / 2 + outputBox.y + outputBox.h / 2) / 2 - 7;
+              const a = outPointOf(outputKey.startsWith("shot:") ? outputKey : `asset:${outputKey}`);
+              if (!a) return null;
+              const b = { x: outputBox.x, y: outputBox.y + outputBox.h / 2 };
+              const d = wirePathD(a, b);
+              const midX = (a.x + b.x) / 2;
+              const midY = (a.y + b.y) / 2 - 7;
               return (
                 <g className="pc-wire">
                   <path className="pc-wire-hit" d={d} />
@@ -1708,6 +1952,13 @@ export default function ProjectCanvas({
                 <span className="pc-frame-name">{t("project.canvas.infoFrame")}</span>
                 <small>{infoNodes.length}</small>
                 <span className="pc-frame-ops">
+                  <button
+                    type="button"
+                    data-tooltip={t("project.canvas.linkScene")}
+                    onClick={() => setLocationPickOpen(true)}
+                  >
+                    {Icons.add}
+                  </button>
                   {infoNodes.length === 0 && (
                     <small style={{ padding: "0 4px" }}>{t("project.canvas.infoEmpty")}</small>
                   )}
@@ -1736,6 +1987,22 @@ export default function ProjectCanvas({
                       <b className="pc-info-name">{node.name}</b>
                       <small className="pc-info-role">{t("project.cast.title")}</small>
                     </>
+                  ) : node.kind === "location" ? (
+                    <>
+                      <span className="pc-info-ava">
+                        {node.avatarPath ? (
+                          <ResourceImage
+                            path={joinLibraryPath(libraryRoot, node.avatarPath)}
+                            alt={node.name}
+                            className="pc-info-ava-img"
+                          />
+                        ) : (
+                          Icons.resources
+                        )}
+                      </span>
+                      <b className="pc-info-name">{node.name}</b>
+                      <small className="pc-info-role">{t("project.library.locations")}</small>
+                    </>
                   ) : node.kind === "prop" ? (
                     <>
                       <span className="pc-info-ava">{Icons.star}</span>
@@ -1752,12 +2019,87 @@ export default function ProjectCanvas({
                   {t(
                     node.kind === "character"
                       ? "project.canvas.typeCharacter"
-                      : node.kind === "prop"
-                        ? "project.canvas.typeProp"
-                        : "project.canvas.typeScript",
+                      : node.kind === "location"
+                        ? "project.canvas.typeLocation"
+                        : node.kind === "prop"
+                          ? "project.canvas.typeProp"
+                          : "project.canvas.typeScript",
                   )}
                 </span>
                 {portEls(node.key)}
+              </div>
+            );
+          })}
+
+          {/* 片段节点：AI 分段生成的视频分段，按拼接序汇入本集成片 */}
+          {segments.map((segment, index) => {
+            const p = segPos[segment.id];
+            if (!p) return null;
+            const key = `segment:${segment.id}`;
+            return (
+              <div key={segment.id} data-key={key} className="pc-node pc-segment" style={{ left: p.x, top: p.y, width: SEG_W }}>
+                <div className="pc-media-wrap pc-seg-card">
+                  <div className="pc-seg-head">
+                    <span className="pc-shot-no">{index + 1}</span>
+                    <b className="pc-shot-desc">{segment.note || t("project.canvas.segName")}</b>
+                    <span className="pc-node-tools">
+                      <button
+                        type="button"
+                        data-tooltip={t("project.canvas.segMoveUp")}
+                        onClick={() => void moveSegment(segment.id, -1)}
+                      >
+                        {Icons.chevronUp}
+                      </button>
+                      <button
+                        type="button"
+                        data-tooltip={t("project.canvas.segMoveDown")}
+                        onClick={() => void moveSegment(segment.id, 1)}
+                      >
+                        {Icons.chevronDown}
+                      </button>
+                      <button
+                        type="button"
+                        data-tooltip={t("project.canvas.segAttach")}
+                        onClick={() => setSegmentAssetPickFor(segment.id)}
+                      >
+                        {Icons.file}
+                      </button>
+                      <button
+                        type="button"
+                        data-tooltip={t("common.delete")}
+                        className="danger"
+                        onClick={() => void removeSegment(segment.id)}
+                      >
+                        {Icons.delete}
+                      </button>
+                    </span>
+                  </div>
+                  {segment.asset ? (
+                    <button
+                      type="button"
+                      className={`pc-seg-thumb${segment.asset.missing ? " is-missing" : ""}`}
+                      title={segment.asset.missing ? t("project.asset.fileMissing") : segment.asset.name}
+                      onClick={() => onOpenAsset(segment.asset as ProjectAsset)}
+                    >
+                      <ResourceVideoPoster
+                        path={joinLibraryPath(libraryRoot, segment.asset.file_path)}
+                        version={segment.asset.updated_at}
+                        fallbackLabel={segment.asset.name || segment.asset.file_path}
+                      />
+                      <span className="pc-thumb-play">{Icons.play}</span>
+                    </button>
+                  ) : (
+                    <button
+                      type="button"
+                      className="pc-seg-empty"
+                      onClick={() => setSegmentAssetPickFor(segment.id)}
+                    >
+                      {Icons.link}
+                      {t("project.canvas.segEmpty")}
+                    </button>
+                  )}
+                </div>
+                {portEls(key)}
               </div>
             );
           })}
@@ -1772,7 +2114,11 @@ export default function ProjectCanvas({
               <div className="pc-outnode-body">
                 <span className="pc-outnode-icon">{Icons.clapperboard}</span>
                 <b>{t("project.canvas.outputNode")}</b>
-                <small>{outputSourceLabel ?? t("project.canvas.outputEmpty")}</small>
+                <small>
+                  {segments.length > 0
+                    ? t("project.canvas.outputSummary", { count: segments.length })
+                    : (outputSourceLabel ?? t("project.canvas.outputEmpty"))}
+                </small>
               </div>
               {portEls("output")}
             </div>
@@ -1878,10 +2224,22 @@ export default function ProjectCanvas({
             />
             {[
               {
+                key: "segment",
+                label: t("project.canvas.segName"),
+                hint: t("project.canvas.typeSegmentHint"),
+                icon: Icons.clapperboard,
+              },
+              {
                 key: "note",
                 label: t("project.canvas.typeNote"),
                 hint: t("project.canvas.typeNoteHint"),
                 icon: Icons.edit,
+              },
+              {
+                key: "script",
+                label: t("project.canvas.typeScript"),
+                hint: t("project.canvas.typeScriptHint"),
+                icon: Icons.file,
               },
               {
                 key: "asset",
@@ -2137,6 +2495,47 @@ export default function ProjectCanvas({
             void deleteShot(target.id);
           }}
           onCancel={() => setDeleteShotTarget(null)}
+        />
+      )}
+      {/* 片段挂产出：从资源库选视频文件，导入为集级素材并设为片段产出 */}
+      {segmentAssetPickFor && (
+        <ProjectFilePickerDialog
+          title={t("project.canvas.segAttach")}
+          takenPaths={new Set()}
+          takenLabel=""
+          onClose={() => setSegmentAssetPickFor(null)}
+          onPick={(file) => {
+            const segmentId = segmentAssetPickFor;
+            setSegmentAssetPickFor(null);
+            void linkAsset({
+              filePath: file.filePath,
+              kind: file.kind,
+              name: file.name,
+              episodeId,
+              shotId: "",
+            }).then((asset) => {
+              if (asset) void setSegmentAsset(segmentId, asset.id);
+            });
+          }}
+        />
+      )}
+      {/* 资料框「关联场景」：多选切换，与出场角色同一交互模式 */}
+      {locationPickOpen && (
+        <ProjectLibraryPanel
+          kind="locations"
+          mode="pick"
+          multi
+          selectedIds={overview?.episode.location_ids ?? []}
+          onClose={() => setLocationPickOpen(false)}
+          pickTitle={t("project.canvas.linkScene")}
+          onTogglePick={(id) => {
+            if (!episodeId) return;
+            const existing = overview?.episode.location_ids ?? [];
+            const next = existing.includes(id)
+              ? existing.filter((item) => item !== id)
+              : [...existing, id];
+            void setEpisodeLocations(episodeId, next);
+          }}
         />
       )}
     </div>

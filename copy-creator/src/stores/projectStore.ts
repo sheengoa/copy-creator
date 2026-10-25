@@ -25,6 +25,7 @@ export interface ProjectEpisode {
   status: ProjectEpisodeStatus;
   script_path: string;
   character_ids: string[];
+  location_ids: string[];
   shot_count: number;
   done_shot_count: number;
   created_at: string;
@@ -160,12 +161,39 @@ export interface ProjectAssetLink {
   label: string;
 }
 
+/** 片段（AI 分段生成的视频分段），按 sort_order 拼接成本集成片。 */
+export interface ProjectSegment {
+  id: string;
+  episode_id: string;
+  asset_id: string | null;
+  sort_order: number;
+  note: string;
+  canvas_x: number | null;
+  canvas_y: number | null;
+  created_at: string;
+  updated_at: string;
+  /** 产出视频素材整对象（后端带出，未挂产出时缺省）。 */
+  asset?: ProjectAsset & { missing?: boolean };
+}
+
+/** 片段输入口连线：来源跨库资料/剧本/素材/另一片段。 */
+export interface ProjectNodeLink {
+  id: string;
+  from_kind: "asset" | "character" | "location" | "prop" | "script" | "segment";
+  from_id: string;
+  to_segment: string;
+  to_port: "character" | "location" | "prop" | "script" | "other";
+}
+
 export interface EpisodeOverview {
   episode: ProjectEpisode;
   characters: ProjectCharacter[];
+  locations: ProjectLocation[];
   scenes: ProjectScene[];
   loose_assets: ProjectAsset[];
   links: ProjectAssetLink[];
+  segments: ProjectSegment[];
+  node_links: ProjectNodeLink[];
 }
 
 interface ProjectStoreState {
@@ -288,6 +316,7 @@ interface ProjectStoreState {
     assets: { id: string; x: number | null; y: number | null; w: number | null }[];
     shots: { id: string; x: number | null; y: number | null }[];
     scenes: { id: string; x: number | null; y: number | null }[];
+    segments?: { id: string; x: number | null; y: number | null }[];
   }) => Promise<void>;
   /** 手动连出工作流参考线（重复幂等）；成功后本地追加并返回连线。 */
   linkAssets: (fromAsset: string, toAsset: string, label?: string) => Promise<ProjectAssetLink | null>;
@@ -295,6 +324,29 @@ interface ProjectStoreState {
   unlinkAssets: (fromAsset: string, toAsset: string) => Promise<void>;
   /** 设置本集成片输出来源（素材 id 或 "shot:<id>"；null 清除）。 */
   setEpisodeOutput: (episodeId: string, outputAssetId: string | null) => Promise<void>;
+  /** 本集出场场景关联（整组替换）。 */
+  setEpisodeLocations: (episodeId: string, locationIds: string[]) => Promise<void>;
+  /** 新建空片段（排到拼接序末尾），失败返回 null。 */
+  addSegment: (episodeId: string) => Promise<ProjectSegment | null>;
+  removeSegment: (id: string) => Promise<void>;
+  moveSegment: (id: string, direction: -1 | 1) => Promise<void>;
+  /** 挂靠/清除片段产出视频。 */
+  setSegmentAsset: (id: string, assetId: string | null) => Promise<void>;
+  /** 片段输入口连线（幂等）：本地即时追加 + 落库。 */
+  linkNode: (
+    episodeId: string,
+    fromKind: ProjectNodeLink["from_kind"],
+    fromId: string,
+    toSegment: string,
+    toPort: ProjectNodeLink["to_port"],
+  ) => Promise<void>;
+  /** 摘除片段输入口连线：本地即时过滤 + 落库。 */
+  unlinkNode: (
+    fromKind: ProjectNodeLink["from_kind"],
+    fromId: string,
+    toSegment: string,
+    toPort: ProjectNodeLink["to_port"],
+  ) => Promise<void>;
 
   loadPrompts: (category?: string) => Promise<void>;
   savePrompt: (payload: {
@@ -909,6 +961,7 @@ export const useProjectStore = create<ProjectStoreState>((set, get) => ({
       const assetMap = new Map(payload.assets.map((item) => [item.id, item]));
       const shotMap = new Map(payload.shots.map((item) => [item.id, item]));
       const sceneMap = new Map(payload.scenes.map((item) => [item.id, item]));
+      const segmentMap = new Map((payload.segments ?? []).map((item) => [item.id, item]));
       const patchAsset = (asset: ProjectAsset): ProjectAsset => {
         const patch = assetMap.get(asset.id);
         return patch
@@ -919,6 +972,12 @@ export const useProjectStore = create<ProjectStoreState>((set, get) => ({
         overview: {
           ...overview,
           loose_assets: overview.loose_assets.map(patchAsset),
+          segments: overview.segments.map((segment) => {
+            const patch = segmentMap.get(segment.id);
+            return patch
+              ? { ...segment, canvas_x: patch.x, canvas_y: patch.y }
+              : segment;
+          }),
           scenes: overview.scenes.map((scene) => {
             const scenePatch = sceneMap.get(scene.id);
             return {
@@ -1006,6 +1065,107 @@ export const useProjectStore = create<ProjectStoreState>((set, get) => ({
       });
     } catch (error) {
       console.error("project_set_episode_output failed:", error);
+    }
+  },
+
+  setEpisodeLocations: async (episodeId, locationIds) => {
+    try {
+      await invoke("project_set_episode_locations", { episodeId, locationIds });
+    } catch (error) {
+      console.error("project_set_episode_locations failed:", error);
+    }
+  },
+
+  addSegment: async (episodeId) => {
+    try {
+      const segment = await invoke<ProjectSegment>("project_add_segment", { episodeId });
+      const overview = get().overview;
+      if (overview && overview.episode.id === episodeId) {
+        set({ overview: { ...overview, segments: [...overview.segments, segment] } });
+      }
+      return segment;
+    } catch (error) {
+      console.error("project_add_segment failed:", error);
+      return null;
+    }
+  },
+
+  removeSegment: async (id) => {
+    try {
+      await invoke("project_remove_segment", { id });
+    } catch (error) {
+      console.error("project_remove_segment failed:", error);
+    }
+  },
+
+  moveSegment: async (id, direction) => {
+    try {
+      await invoke("project_move_segment", { id, direction });
+    } catch (error) {
+      console.error("project_move_segment failed:", error);
+    }
+  },
+
+  setSegmentAsset: async (id, assetId) => {
+    try {
+      await invoke("project_set_segment_asset", { id, assetId: assetId ?? "" });
+    } catch (error) {
+      console.error("project_set_segment_asset failed:", error);
+    }
+  },
+
+  linkNode: async (episodeId, fromKind, fromId, toSegment, toPort) => {
+    // 本地即时追加（与 linkAssets 同策略），落库由后端幂等兜底。
+    const overview = get().overview;
+    if (overview) {
+      const exists = overview.node_links.some(
+        (item) =>
+          item.from_kind === fromKind &&
+          item.from_id === fromId &&
+          item.to_segment === toSegment &&
+          item.to_port === toPort,
+      );
+      if (!exists) {
+        set({
+          overview: {
+            ...overview,
+            node_links: [
+              ...overview.node_links,
+              { id: `local-${Date.now()}`, from_kind: fromKind, from_id: fromId, to_segment: toSegment, to_port: toPort },
+            ],
+          },
+        });
+      }
+    }
+    try {
+      await invoke("project_link_node", { episodeId, fromKind, fromId, toSegment, toPort });
+    } catch (error) {
+      console.error("project_link_node failed:", error);
+    }
+  },
+
+  unlinkNode: async (fromKind, fromId, toSegment, toPort) => {
+    const overview = get().overview;
+    if (overview) {
+      set({
+        overview: {
+          ...overview,
+          node_links: overview.node_links.filter(
+            (item) =>
+              !(
+                item.from_kind === fromKind &&
+                item.from_id === fromId &&
+                item.to_segment === toSegment &&
+                item.to_port === toPort
+              ),
+          ),
+        },
+      });
+    }
+    try {
+      await invoke("project_unlink_node", { fromKind, fromId, toSegment, toPort });
+    } catch (error) {
+      console.error("project_unlink_node failed:", error);
     }
   },
 
