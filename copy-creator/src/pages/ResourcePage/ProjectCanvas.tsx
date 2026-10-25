@@ -1146,28 +1146,6 @@ export default function ProjectCanvas({
                     <span className="pc-shot-no">{shotNoOf(card.sceneId, card.shot.id)}</span>
                     <b className="pc-shot-desc">{shot.description || t("project.shot.untitled")}</b>
                     {shot.dialogue && <i className="pc-shot-dialogue">{shot.dialogue}</i>}
-                    <span className="pc-node-tools">
-                      <button type="button" data-tooltip={t("project.asset.link")} onClick={() => onPickForShot(shot.id)}>
-                        {Icons.file}
-                      </button>
-                      <button
-                        type="button"
-                        data-tooltip={t("common.edit")}
-                        onClick={() =>
-                          setShotForm({ id: shot.id, sceneId: shot.scene_id, description: shot.description, dialogue: shot.dialogue })
-                        }
-                      >
-                        {Icons.edit}
-                      </button>
-                      <button
-                        type="button"
-                        data-tooltip={t("common.delete")}
-                        className="danger"
-                        onClick={() => setDeleteShotTarget(shot)}
-                      >
-                        {Icons.delete}
-                      </button>
-                    </span>
                   </div>
                   {shot.assets.length > 0 ? (
                     <div className="pc-shot-grid">
@@ -1229,6 +1207,28 @@ export default function ProjectCanvas({
                     </button>
                   )}
                 </div>
+                <span className="pc-node-tools">
+                  <button type="button" data-tooltip={t("project.asset.link")} onClick={() => onPickForShot(shot.id)}>
+                    {Icons.file}
+                  </button>
+                  <button
+                    type="button"
+                    data-tooltip={t("common.edit")}
+                    onClick={() =>
+                      setShotForm({ id: shot.id, sceneId: shot.scene_id, description: shot.description, dialogue: shot.dialogue })
+                    }
+                  >
+                    {Icons.edit}
+                  </button>
+                  <button
+                    type="button"
+                    data-tooltip={t("common.delete")}
+                    className="danger"
+                    onClick={() => setDeleteShotTarget(shot)}
+                  >
+                    {Icons.delete}
+                  </button>
+                </span>
                 <span className="pc-anchor" data-tooltip={t("project.canvas.wireHint")} />
               </div>
             );
