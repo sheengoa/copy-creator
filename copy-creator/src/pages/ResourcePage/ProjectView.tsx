@@ -10,6 +10,9 @@ import { ResourceImage } from "./ResourceMedia";
 import ProjectLibraryPanel from "./ProjectLibraryPanel";
 import ProjectSceneBoard from "./ProjectSceneBoard";
 import ProjectAssetPicker from "./ProjectAssetPicker";
+import ProjectPromptPanel from "./ProjectPromptPanel";
+import ProjectAssetSheet from "./ProjectAssetSheet";
+import type { ProjectAsset } from "../../stores/projectStore";
 import { Icons } from "../../components/Icons";
 import { openResourceFile, readResourceTextPreview } from "../../domain/mediaAssets";
 import {
@@ -50,6 +53,8 @@ export default function ProjectView() {
     refresh,
     setEpisodeCharacters,
     unlinkAsset,
+    prompts,
+    loadPrompts,
   } = useProjectStore(
     useShallow((state) => ({
       shows: state.shows,
@@ -65,6 +70,8 @@ export default function ProjectView() {
       refresh: state.refresh,
       setEpisodeCharacters: state.setEpisodeCharacters,
       unlinkAsset: state.unlinkAsset,
+      prompts: state.prompts,
+      loadPrompts: state.loadPrompts,
     })),
   );
 
@@ -74,6 +81,8 @@ export default function ProjectView() {
   const [renamingEpisode, setRenamingEpisode] = useState(false);
   const [libraryPanel, setLibraryPanel] = useState<LibraryPanelState | null>(null);
   const [assetPickerShotId, setAssetPickerShotId] = useState<string | null>(null);
+  const [promptPanelOpen, setPromptPanelOpen] = useState(false);
+  const [sheetAsset, setSheetAsset] = useState<ProjectAsset | null>(null);
   const renameInputRef = useRef<HTMLInputElement>(null);
 
   const currentShow = shows.find((show) => show.id === currentShowId) ?? null;
@@ -92,6 +101,10 @@ export default function ProjectView() {
       cancelled = true;
     };
   }, []);
+
+  useEffect(() => {
+    if (prompts.length === 0) void loadPrompts();
+  }, [prompts.length, loadPrompts]);
 
   useEffect(() => {
     const unlisten = listen("project-changed", () => {
@@ -221,6 +234,15 @@ export default function ProjectView() {
             <span className="project-lib-scope">{t("project.library.scope")}</span>
           </button>
         ))}
+        <button
+          type="button"
+          className="project-lib-row"
+          onClick={() => setPromptPanelOpen(true)}
+        >
+          <span className="project-lib-icon">{Icons.copy}</span>
+          <span className="project-lib-name">{t("project.prompt.title")}</span>
+          <span className="project-lib-scope">{t("project.library.scope")}</span>
+        </button>
       </aside>
 
       <section className="project-stage">
@@ -410,20 +432,32 @@ export default function ProjectView() {
                       {looseAssets.map((asset) => (
                         <div
                           key={asset.id}
-                          className="project-asset-row"
+                          className="project-asset-row is-clickable"
                           title={asset.file_path}
+                          onClick={() => setSheetAsset(asset)}
                         >
                           <span className="project-asset-kind">
                             {t(assetKindLabelKey(asset.kind))}
                           </span>
                           <span className="project-asset-name">
                             {asset.name || asset.file_path}
+                            {asset.gen_from_prompt && prompts.length > 0 && (
+                              <i className="project-asset-trace">
+                                {t("project.sheet.traceBadge", {
+                                  title:
+                                    prompts.find((prompt) => prompt.id === asset.gen_from_prompt)?.title ?? "",
+                                })}
+                              </i>
+                            )}
                           </span>
                           <button
                             type="button"
                             className="project-asset-unlink"
                             title={t("project.asset.unlink")}
-                            onClick={() => void unlinkAsset(asset.id)}
+                            onClick={(event) => {
+                              event.stopPropagation();
+                              void unlinkAsset(asset.id);
+                            }}
                           >
                             {Icons.close}
                           </button>
@@ -441,6 +475,10 @@ export default function ProjectView() {
       {assetPickerShotId !== null && (
         <ProjectAssetPicker shotId={assetPickerShotId} onClose={() => setAssetPickerShotId(null)} />
       )}
+
+      {promptPanelOpen && <ProjectPromptPanel onClose={() => setPromptPanelOpen(false)} />}
+
+      {sheetAsset && <ProjectAssetSheet asset={sheetAsset} onClose={() => setSheetAsset(null)} />}
 
       {libraryPanel && (
         <ProjectLibraryPanel

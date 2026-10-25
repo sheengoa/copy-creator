@@ -114,6 +114,15 @@ export function locationSubtitleParts(intExt: string, timeHint: string): string[
   return parts;
 }
 
+/** 提示词用途分类（场景/角色/镜头/其他）与 i18n 键映射。 */
+export const PROMPT_CATEGORIES = ["scene", "character", "shot", "other"] as const;
+
+export function promptCategoryKey(category: string): string {
+  return `project.prompt.category.${
+    (PROMPT_CATEGORIES as readonly string[]).includes(category) ? category : "other"
+  }`;
+}
+
 /** 三库面板的实体种类键（标题/新建文案复用 project.library.* 前缀）。 */
 export const LIBRARY_KINDS = ["characters", "locations", "props"] as const;
 export type LibraryKind = (typeof LIBRARY_KINDS)[number];

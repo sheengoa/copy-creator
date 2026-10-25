@@ -642,6 +642,15 @@ export default function ResourcePage() {
     setStoreResourceGroup(name);
   }, [cancelResourceSelection, setStoreResourceGroup]);
 
+  // 工程侧「在资源库中显示」：切回文件视图并定位到素材所在分组
+  // （path 首段；库根文件为未分组）。分组级定位，卡片级高亮后续打磨。
+  const locateRequest = useProjectStore((state) => state.locateRequest);
+  useEffect(() => {
+    if (!locateRequest) return;
+    const group = locateRequest.path.split("/")[0] ?? "";
+    handleSelectResourceGroup(group || null);
+  }, [locateRequest, handleSelectResourceGroup]);
+
   const openNewResourceGroup = useCallback((parentPath?: string) => {
     setResourceGroupName("");
     setResourceGroupsError(null);

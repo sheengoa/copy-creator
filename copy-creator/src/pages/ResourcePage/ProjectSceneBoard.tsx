@@ -9,6 +9,8 @@ import {
 import { ConfirmDialog } from "../../components/ConfirmDialog";
 import ProjectLibraryPanel from "./ProjectLibraryPanel";
 import ProjectAssetPicker from "./ProjectAssetPicker";
+import ProjectAssetSheet from "./ProjectAssetSheet";
+import type { ProjectAsset } from "../../stores/projectStore";
 import { Icons } from "../../components/Icons";
 import {
   characterAvatarInitial,
@@ -79,6 +81,7 @@ export default function ProjectSceneBoard() {
   const [shotDraft, setShotDraft] = useState<ShotDraft | null>(null);
   const [pick, setPick] = useState<PickState>(null);
   const [assetPickerShotId, setAssetPickerShotId] = useState<string | null>(null);
+  const [sheetAsset, setSheetAsset] = useState<ProjectAsset | null>(null);
   const [deleteSceneTarget, setDeleteSceneTarget] = useState<ProjectScene | null>(null);
   const [deleteShotTarget, setDeleteShotTarget] = useState<ProjectShot | null>(null);
 
@@ -324,13 +327,21 @@ export default function ProjectSceneBoard() {
                     {shot.assets.length > 0 && (
                     <span className="project-shot-cast">
                       {shot.assets.map((asset) => (
-                        <span key={asset.id} className="project-shot-asset" title={asset.file_path}>
+                        <span
+                          key={asset.id}
+                          className="project-shot-asset"
+                          title={asset.file_path}
+                          onClick={() => setSheetAsset(asset)}
+                        >
                           {asset.name || asset.file_path}
                           <button
                             type="button"
                             className="project-shot-asset-x"
                             title={t("project.asset.unlink")}
-                            onClick={() => void unlinkAsset(asset.id)}
+                            onClick={(event) => {
+                              event.stopPropagation();
+                              void unlinkAsset(asset.id);
+                            }}
                           >
                             {Icons.close}
                           </button>
@@ -479,6 +490,8 @@ export default function ProjectSceneBoard() {
           {t("project.scene.new")}
         </button>
       )}
+
+      {sheetAsset && <ProjectAssetSheet asset={sheetAsset} onClose={() => setSheetAsset(null)} />}
 
       {assetPickerShotId !== null && (
         <ProjectAssetPicker shotId={assetPickerShotId} onClose={() => setAssetPickerShotId(null)} />

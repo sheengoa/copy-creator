@@ -533,6 +533,41 @@
       "pickCastTitle": "Select cast",
       "pickPropsTitle": "Select props",
       "deleteConfirm": "Delete this shot? Linked assets stay as episode loose files."
+    },
+    "prompt": {
+      "title": "Prompt Library",
+      "empty": "Prompt library is empty — save your generation prompts for one-click copy",
+      "noContent": "(no content)",
+      "copy": "Copy all",
+      "copied": "Copied",
+      "new": "New Prompt",
+      "edit": "Edit Prompt",
+      "deleteConfirm": "Delete prompt \"{{title}}\"? Trace marks on assets are kept (shown without title).",
+      "copyHint": "Copy the full text from the list after saving",
+      "field": {
+        "title": "Title",
+        "category": "Category",
+        "content": "Content"
+      },
+      "category": {
+        "scene": "Scene",
+        "character": "Character",
+        "shot": "Shot",
+        "other": "Other"
+      }
+    },
+    "sheet": {
+      "kind": "Kind",
+      "path": "Path",
+      "group": "Group",
+      "traceTitle": "Generation trace",
+      "fromPrompt": "Generated from prompt",
+      "fromAsset": "Generated from asset",
+      "none": "None",
+      "open": "Open file",
+      "reveal": "Reveal in file manager",
+      "locate": "Show in library",
+      "traceBadge": "↳ {{title}}"
     }
   },
   "common": {

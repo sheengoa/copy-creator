@@ -105,6 +105,16 @@ export interface ProjectScene {
   updated_at: string;
 }
 
+export interface ProjectPrompt {
+  id: string;
+  title: string;
+  content: string;
+  category: string;
+  file_path: string;
+  created_at: string;
+  updated_at: string;
+}
+
 export interface EpisodeOverview {
   episode: ProjectEpisode;
   characters: ProjectCharacter[];
@@ -124,6 +134,8 @@ interface ProjectStoreState {
   characters: ProjectCharacter[];
   locations: ProjectLocation[];
   props: ProjectProp[];
+  prompts: ProjectPrompt[];
+  locateRequest: { path: string; token: number } | null;
 
   setView: (view: ResourceViewMode) => void;
   loadShows: () => Promise<void>;
@@ -192,6 +204,30 @@ interface ProjectStoreState {
   }) => Promise<ProjectAsset | null>;
   /** 摘除工程档案（仅删记录，文件不动）。 */
   unlinkAsset: (id: string) => Promise<void>;
+  /** 更新素材档案（溯源链与归属调整）。 */
+  updateAsset: (payload: {
+    id: string;
+    kind: string;
+    name: string;
+    episodeId: string;
+    shotId: string;
+    genFromAsset: string;
+    genFromPrompt: string;
+  }) => Promise<void>;
+
+  loadPrompts: (category?: string) => Promise<void>;
+  savePrompt: (payload: {
+    id?: string;
+    title: string;
+    content: string;
+    category: string;
+  }) => Promise<boolean>;
+  deletePrompt: (id: string) => Promise<void>;
+
+  /** 跨视图定位请求：工程侧要求切到文件视图并选中 path 首段分组。 */
+  locateInFileView: (relativePath: string) => void;
+  /** 文件视图消费定位请求后清除（token 递增保证同路径重复定位也生效）。 */
+  consumeLocateRequest: () => { path: string; token: number } | null;
 }
 
 const VIEW_STORAGE_KEY = "resource_view_mode";
@@ -231,6 +267,8 @@ export const useProjectStore = create<ProjectStoreState>((set, get) => ({
   characters: [],
   locations: [],
   props: [],
+  prompts: [],
+  locateRequest: null,
 
   setView: (view) => {
     writeStored(VIEW_STORAGE_KEY, view);
@@ -654,5 +692,73 @@ export const useProjectStore = create<ProjectStoreState>((set, get) => ({
     } catch (error) {
       console.error("project_unlink_asset failed:", error);
     }
+  },
+
+  updateAsset: async (payload) => {
+    try {
+      await invoke("project_update_asset", {
+        id: payload.id,
+        kind: payload.kind,
+        name: payload.name,
+        episodeId: payload.episodeId,
+        shotId: payload.shotId,
+        genFromAsset: payload.genFromAsset,
+        genFromPrompt: payload.genFromPrompt,
+      });
+      const { currentEpisodeId } = get();
+      if (currentEpisodeId) await get().selectEpisode(currentEpisodeId);
+    } catch (error) {
+      console.error("project_update_asset failed:", error);
+    }
+  },
+
+  loadPrompts: async (category) => {
+    try {
+      const args = category && category.trim() ? { category: category.trim() } : undefined;
+      set({ prompts: await invoke<ProjectPrompt[]>("project_list_prompts", args) });
+    } catch (error) {
+      console.error("project_list_prompts failed:", error);
+    }
+  },
+
+  savePrompt: async (payload) => {
+    const args = { title: payload.title, content: payload.content, category: payload.category };
+    try {
+      if (payload.id) {
+        await invoke("project_update_prompt", { id: payload.id, ...args });
+      } else {
+        await invoke("project_create_prompt", args);
+      }
+      await get().loadPrompts();
+      return true;
+    } catch (error) {
+      console.error("save prompt failed:", error);
+      return false;
+    }
+  },
+
+  deletePrompt: async (id) => {
+    try {
+      await invoke("project_delete_prompt", { id });
+      await get().loadPrompts();
+    } catch (error) {
+      console.error("project_delete_prompt failed:", error);
+    }
+  },
+
+  locateInFileView: (relativePath) => {
+    const { locateRequest } = get();
+    set({
+      view: "file",
+      locateRequest: { path: relativePath, token: (locateRequest?.token ?? 0) + 1 },
+    });
+    writeStored(VIEW_STORAGE_KEY, "file");
+  },
+
+  consumeLocateRequest: () => {
+    const { locateRequest } = get();
+    if (!locateRequest) return null;
+    set({ locateRequest: null });
+    return locateRequest;
   },
 }));

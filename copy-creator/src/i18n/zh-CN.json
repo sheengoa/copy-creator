@@ -533,6 +533,41 @@
       "pickCastTitle": "选择出镜角色",
       "pickPropsTitle": "选择出场道具",
       "deleteConfirm": "删除这个镜头？挂靠的素材档案会保留为集级散件。"
+    },
+    "prompt": {
+      "title": "提示词库",
+      "empty": "提示词库还是空的，把常用生成提示词存进来即点即复制",
+      "noContent": "（无内容）",
+      "copy": "复制全文",
+      "copied": "已复制",
+      "new": "新建提示词",
+      "edit": "编辑提示词",
+      "deleteConfirm": "删除提示词「{{title}}」？素材上的溯源标记会保留（显示为空标题）。",
+      "copyHint": "保存后列表内一键复制全文",
+      "field": {
+        "title": "标题",
+        "category": "分类",
+        "content": "内容"
+      },
+      "category": {
+        "scene": "场景",
+        "character": "角色",
+        "shot": "镜头",
+        "other": "其他"
+      }
+    },
+    "sheet": {
+      "kind": "类型",
+      "path": "路径",
+      "group": "分组",
+      "traceTitle": "生成溯源",
+      "fromPrompt": "由哪条提示词生成",
+      "fromAsset": "由哪个源素材生成",
+      "none": "无",
+      "open": "打开文件",
+      "reveal": "在文件管理器显示",
+      "locate": "在资源库中显示",
+      "traceBadge": "↳ {{title}}"
     }
   },
   "common": {
