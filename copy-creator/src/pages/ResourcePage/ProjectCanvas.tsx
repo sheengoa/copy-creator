@@ -134,6 +134,18 @@ function shotCardSize(shot: ProjectShot): { w: number; h: number } {
   return { w: CARD_W, h: CARD_HEAD_H + gridH };
 }
 
+/** 素材类型 → hover 标注的 i18n 键。 */
+function assetKindBadgeKey(kind: string): string {
+  switch (kind) {
+    case "image": return "project.canvas.typeImage";
+    case "video": return "project.canvas.typeVideo";
+    case "text": return "project.canvas.typeText";
+    case "audio": return "project.canvas.typeAudio";
+    case "prompt": return "project.canvas.typePrompt";
+    default: return "project.canvas.typeFile";
+  }
+}
+
 /** 确定性自动布局：已摆放的镜头卡/散件用存储坐标；未摆放的按场景
  *  横排 + 框内网格补位（跳过已占用格位，避免新卡叠在旧卡下）。 */
 function buildLayout(
@@ -1229,6 +1241,7 @@ export default function ProjectCanvas({
                     {Icons.delete}
                   </button>
                 </span>
+                <span className="pc-type-badge">{t("project.canvas.typeShot")}</span>
                 <span className="pc-anchor" data-tooltip={t("project.canvas.wireHint")} />
               </div>
             );
@@ -1280,6 +1293,7 @@ export default function ProjectCanvas({
                     </div>
                   )}
                 </div>
+                <span className="pc-type-badge">{t(assetKindBadgeKey(asset.kind))}</span>
                 <span className="pc-node-tools">
                   <button type="button" data-tooltip={t("project.canvas.view")} onClick={() => onOpenAsset(asset)}>
                     {Icons.expand}
@@ -1362,6 +1376,15 @@ export default function ProjectCanvas({
                     </div>
                   )}
                 </div>
+                <span className="pc-type-badge">
+                  {t(
+                    node.kind === "character"
+                      ? "project.canvas.typeCharacter"
+                      : node.kind === "prop"
+                        ? "project.canvas.typeProp"
+                        : "project.canvas.typeScript",
+                  )}
+                </span>
               </div>
             );
           })}

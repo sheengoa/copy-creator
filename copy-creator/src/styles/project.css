@@ -2556,6 +2556,25 @@
 .pc-node-tools button:hover { background: rgba(255, 255, 255, 0.15); color: #fff; }
 .pc-node-tools button.danger:hover { background: var(--danger); }
 .pc-node-tools svg { width: 14px; height: 14px; }
+/* 节点类型标注：hover 时浮现在节点左上角（镜头/图片/视频/角色…） */
+.pc-type-badge {
+  position: absolute;
+  top: -9px;
+  left: -7px;
+  z-index: 7;
+  padding: 2px 8px;
+  border-radius: 6px;
+  background: rgba(28, 28, 34, 0.92);
+  color: #fff;
+  font-size: 10.5px;
+  line-height: 1.5;
+  white-space: nowrap;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.25);
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.12s ease;
+}
+.pc-node:hover .pc-type-badge { opacity: 1; }
 /* 手动连线锚点 */
 .pc-anchor {
   position: absolute;

@@ -504,7 +504,17 @@
       "statWires": "Wires {{count}}",
       "infoFrame": "Episode materials",
       "infoEmpty": "No cast / props / script for this episode",
-      "shotEmpty": "Link assets"
+      "shotEmpty": "Link assets",
+      "typeShot": "Shot",
+      "typeImage": "Image",
+      "typeVideo": "Video",
+      "typeText": "Text",
+      "typeAudio": "Audio",
+      "typePrompt": "Prompt",
+      "typeFile": "File",
+      "typeCharacter": "Character",
+      "typeProp": "Prop",
+      "typeScript": "Script"
     },
     "library": {
       "characters": "Characters",
