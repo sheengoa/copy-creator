@@ -535,7 +535,12 @@
       "port_prop": "Prop",
       "port_script": "Script",
       "port_other": "Other",
-      "typePromptHint": "Pick a prompt asset from the library"
+      "typePromptHint": "Pick a prompt asset from the library",
+      "typeCharacterHint": "Pick cast members from the character library",
+      "typeLocationHint": "Pick locations from the location library",
+      "typePropHint": "Pick props from the prop library",
+      "linkCast": "Cast",
+      "linkProps": "Props"
     },
     "library": {
       "characters": "Characters",

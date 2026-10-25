@@ -381,9 +381,7 @@ export default function ProjectCanvas({
   const {
     overview,
     locations,
-    props,
     loadLocations,
-    loadProps,
     saveCanvasLayout,
     linkAssets,
     unlinkAssets,
@@ -394,6 +392,8 @@ export default function ProjectCanvas({
     deleteShot,
     setEpisodeOutput,
     setEpisodeLocations,
+    setEpisodeProps,
+    setEpisodeCharacters,
     addSegment,
     removeSegment,
     moveSegment,
@@ -405,9 +405,7 @@ export default function ProjectCanvas({
     useShallow((state) => ({
       overview: state.overview,
       locations: state.locations,
-      props: state.props,
       loadLocations: state.loadLocations,
-      loadProps: state.loadProps,
       saveCanvasLayout: state.saveCanvasLayout,
       linkAssets: state.linkAssets,
       unlinkAssets: state.unlinkAssets,
@@ -418,6 +416,8 @@ export default function ProjectCanvas({
       deleteShot: state.deleteShot,
       setEpisodeOutput: state.setEpisodeOutput,
       setEpisodeLocations: state.setEpisodeLocations,
+      setEpisodeProps: state.setEpisodeProps,
+      setEpisodeCharacters: state.setEpisodeCharacters,
       addSegment: state.addSegment,
       removeSegment: state.removeSegment,
       moveSegment: state.moveSegment,
@@ -432,24 +432,12 @@ export default function ProjectCanvas({
   const looseAssets = useMemo(() => overview?.loose_assets ?? [], [overview]);
   const links = useMemo(() => overview?.links ?? [], [overview]);
   const episodeLocations = useMemo(() => overview?.locations ?? [], [overview]);
+  const episodeProps = useMemo(() => overview?.props ?? [], [overview]);
   const segments = useMemo(() => overview?.segments ?? [], [overview]);
   const nodeLinks = useMemo(() => overview?.node_links ?? [], [overview]);
 
-  // 出镜道具名（全集并集）与出场角色：资料框数据源。
+  // 出场角色/出场场景/出场道具/剧本：资料框数据源（均为 overview 带出）。
   const castCharacters = useMemo(() => overview?.characters ?? [], [overview]);
-  const propIds = useMemo(() => {
-    const ids: string[] = [];
-    scenes.forEach((scene) =>
-      scene.shots.forEach((shot) => shot.prop_ids.forEach((pid) => {
-        if (!ids.includes(pid)) ids.push(pid);
-      })),
-    );
-    return ids;
-  }, [scenes]);
-
-  useEffect(() => {
-    if (propIds.length > 0 && props.length === 0) void loadProps();
-  }, [propIds.length, props.length, loadProps]);
 
   // ── 资料框位置（localStorage 按集） ──
   const [infoFramePos, setInfoFramePos] = useState<Pos | null>(null);
@@ -534,30 +522,38 @@ export default function ProjectCanvas({
     [notes, persistNotes],
   );
 
-  // ── 双击空白添加节点（ComfyUI 搜索框的对应物） ──
-  const [addMenu, setAddMenu] = useState<{ sx: number; sy: number; wx: number; wy: number } | null>(null);
+  // ── 双击空白添加节点（ComfyUI 搜索框的对应物）；拖线到空白松手也
+  // 弹出本菜单，创建的节点自动接上那条线（wire 字段） ──
+  const [addMenu, setAddMenu] = useState<{
+    sx: number;
+    sy: number;
+    wx: number;
+    wy: number;
+    wire?: {
+      fromKey: string;
+      fromDir: "out" | "in";
+      fromType?: string;
+      fromAccepts?: string[];
+      fromPortId?: string;
+    };
+  } | null>(null);
   const [addMenuQuery, setAddMenuQuery] = useState("");
-  // 挂产出：正在为哪个片段选择视频文件；场景关联面板开关。
+  // 挂产出：正在为哪个片段选择视频文件；资料关联面板开关。
   const [segmentAssetPickFor, setSegmentAssetPickFor] = useState<string | null>(null);
   const [locationPickOpen, setLocationPickOpen] = useState(false);
-  // 从库选完素材后落到双击点的世界坐标：loose_assets 出现新 id 即落位。
+  const [castPickOpen, setCastPickOpen] = useState(false);
+  const [propPickOpen, setPropPickOpen] = useState(false);
+  // 从库选完素材后落到指定点的世界坐标：loose_assets 出现新 id 即落位，
+  // 若携带待接线（pendingLinkWire）则连上。
   const [pendingAddPos, setPendingAddPos] = useState<Pos | null>(null);
+  const [pendingLinkWire, setPendingLinkWire] = useState<{
+    fromKey: string;
+    fromDir: "out" | "in";
+    fromType?: string;
+    fromAccepts?: string[];
+    fromPortId?: string;
+  } | null>(null);
   const lastLooseIdsRef = useRef<string[]>([]);
-  useEffect(() => {
-    const ids = looseAssets.map((a) => a.id);
-    const prev = lastLooseIdsRef.current;
-    lastLooseIdsRef.current = ids;
-    if (!pendingAddPos) return;
-    const added = ids.find((id) => !prev.includes(id));
-    if (added) {
-      void saveCanvasLayout({
-        assets: [{ id: added, x: pendingAddPos.x, y: pendingAddPos.y, w: LOOSE_W }],
-        shots: [],
-        scenes: [],
-      });
-      setPendingAddPos(null);
-    }
-  }, [looseAssets, pendingAddPos, saveCanvasLayout]);
 
   // ── 布局与位置（state 驱动渲染） ──
   const layout = useMemo(() => {
@@ -580,11 +576,8 @@ export default function ProjectCanvas({
         avatarPath: location.ref_path, textPath: "", w: INFO_W, h: INFO_H,
       });
     });
-    propIds.forEach((pid) => {
-      const prop = props.find((item) => item.id === pid);
-      if (prop) {
-        list.push({ key: `prop:${pid}`, kind: "prop", name: prop.name, avatarPath: "", textPath: "", w: INFO_W, h: INFO_H });
-      }
+    episodeProps.forEach((prop) => {
+      list.push({ key: `prop:${prop.id}`, kind: "prop", name: prop.name, avatarPath: "", textPath: "", w: INFO_W, h: INFO_H });
     });
     if (overview?.episode.script_path) {
       list.push({
@@ -593,7 +586,7 @@ export default function ProjectCanvas({
       });
     }
     return list;
-  }, [castCharacters, episodeLocations, propIds, props, overview]);
+  }, [castCharacters, episodeLocations, episodeProps, overview]);
 
   const infoPos = useMemo(() => {
     const frame = infoFramePos ?? { x: WORLD_MARGIN, y: layout.worldH + 48 };
@@ -921,11 +914,81 @@ export default function ProjectCanvas({
       if (key.startsWith("loc:")) return { kind: "location", id: key.slice(4) };
       if (key.startsWith("prop:")) return { kind: "prop", id: key.slice(5) };
       if (key.startsWith("segment:")) return { kind: "segment", id: key.slice(8) };
+      if (key.startsWith("shot:")) return { kind: "shot", id: key.slice(5) };
       if (key === "script") return { kind: "script", id: episodeId };
-      return null; // 镜头卡不在片段工作流的节点类型中
+      return null;
     },
     [episodeId],
   );
+
+  // 「拖线到空白 → 创建节点」后自动把新节点接上那条线（ComfyUI 行为）。
+  const autoConnectNewNode = useCallback(
+    (
+      newKey: string,
+      wire:
+        | {
+            fromKey: string;
+            fromDir: "out" | "in";
+            fromType?: string;
+            fromAccepts?: string[];
+            fromPortId?: string;
+          }
+        | null
+        | undefined,
+    ) => {
+      if (!wire) return;
+      const [outKey, inKey] = wire.fromDir === "in" ? [newKey, wire.fromKey] : [wire.fromKey, newKey];
+      if (inKey === "output") {
+        if (outKey.startsWith("asset:")) void setEpisodeOutput(episodeId, outKey.slice(6));
+        else if (outKey.startsWith("shot:")) void setEpisodeOutput(episodeId, outKey);
+        return;
+      }
+      if (inKey.startsWith("segment:")) {
+        const source = nodeKeyParts(outKey);
+        if (!source) return;
+        const fromType = wire.fromType ?? portsOf(outKey).out?.type;
+        const port = portsOf(inKey).ins.find((item) =>
+          fromType ? item.accepts.includes(fromType) : false,
+        );
+        if (port) {
+          void linkNode(
+            episodeId,
+            source.kind,
+            source.id,
+            inKey.slice(8),
+            port.id as ProjectNodeLink["to_port"],
+          );
+        }
+        return;
+      }
+      if (outKey.startsWith("asset:") && inKey.startsWith("asset:")) {
+        void linkAssets(outKey.slice(6), inKey.slice(6), "");
+      }
+    },
+    [episodeId, nodeKeyParts, portsOf, linkNode, linkAssets, setEpisodeOutput],
+  );
+
+  // 库选择落位：loose_assets 出现新 id 即落到指定点；若从「拖线到空白」
+  // 菜单进入（pendingLinkWire），新素材自动接上那条线。
+  useEffect(() => {
+    const ids = looseAssets.map((a) => a.id);
+    const prev = lastLooseIdsRef.current;
+    lastLooseIdsRef.current = ids;
+    if (!pendingAddPos) return;
+    const added = ids.find((id) => !prev.includes(id));
+    if (added) {
+      void saveCanvasLayout({
+        assets: [{ id: added, x: pendingAddPos.x, y: pendingAddPos.y, w: LOOSE_W }],
+        shots: [],
+        scenes: [],
+      });
+      setPendingAddPos(null);
+      if (pendingLinkWire) {
+        autoConnectNewNode(`asset:${added}`, pendingLinkWire);
+        setPendingLinkWire(null);
+      }
+    }
+  }, [looseAssets, pendingAddPos, pendingLinkWire, saveCanvasLayout, autoConnectNewNode]);
 
   // ── 选中与拖拽 ──
   const [selKeys, setSelKeys] = useState<string[]>([]);
@@ -997,6 +1060,13 @@ export default function ProjectCanvas({
     fromPortId?: string; // 反拖：出发的输入口
     targetPort?: string | null; // 正拖：悬停片段上匹配的输入口
     invalid?: boolean; // 悬停目标类型不兼容
+    wire?: { // addnode：从「拖线到空白」菜单创建节点后要自动接的线
+      fromKey: string;
+      fromDir: "out" | "in";
+      fromType?: string;
+      fromAccepts?: string[];
+      fromPortId?: string;
+    };
   }
   const dragRef = useRef<DragState | null>(null);
   // 拖动后 mouseup 落在卡内按钮（挂靠/缩略图）上会派发 click，需吞掉这次误触。
@@ -1223,11 +1293,17 @@ export default function ProjectCanvas({
         const tEl = hit instanceof Element ? hit.closest(".pc-node") : null;
         const tKey = tEl?.getAttribute("data-key") ?? null;
         // 类型校验（ComfyUI 式）：正拖在落点节点的输入口列里找可接该
-        // 类型的口；反拖找在出发口可接范围内的输出口。镜头卡不在片段
-        // 工作流节点类型中，不与片段互连。
+        // 类型的口；反拖找在出发口可接范围内的输出口。镜头卡的产出只
+        // 进片段/成片（素材参考线是素材间语义），不与散件互连。
         let compatible = false;
         let targetPort: string | null = null;
-        if (tKey && tKey !== drag.fromKey && !(tKey.startsWith("segment:") && drag.fromKey.startsWith("shot:"))) {
+        const shotSource = drag.fromKey.startsWith("shot:");
+        if (
+          tKey &&
+          tKey !== drag.fromKey &&
+          !(tKey.startsWith("segment:") && shotSource) &&
+          !(shotSource && tKey.startsWith("asset:"))
+        ) {
           const ports = portsOf(tKey);
           if (drag.fromDir === "in") {
             compatible = !!ports.out && !!drag.fromAccepts?.includes(ports.out.type);
@@ -1303,6 +1379,27 @@ export default function ProjectCanvas({
               "",
             );
           }
+        } else if (!drag.targetKey && drag.moved && drag.fromKey) {
+          // ComfyUI 惯例：拖到空白松手 → 弹节点选择框，创建的节点自动
+          // 接上这条线（pendingWire 随菜单带入创建流程）。
+          const el = vpRef.current;
+          if (el) {
+            const rect = el.getBoundingClientRect();
+            setAddMenu({
+              sx: e.clientX - rect.left,
+              sy: e.clientY - rect.top,
+              wx: (e.clientX - rect.left - view.x) / view.scale,
+              wy: (e.clientY - rect.top - view.y) / view.scale,
+              wire: {
+                fromKey: drag.fromKey,
+                fromDir: drag.fromDir ?? "out",
+                fromType: drag.fromType,
+                fromAccepts: drag.fromAccepts,
+                fromPortId: drag.fromPortId,
+              },
+            });
+            setAddMenuQuery("");
+          }
         }
       } else if (drag.kind === "outnode") {
         if (drag.moved) {
@@ -1341,7 +1438,8 @@ export default function ProjectCanvas({
           );
         }
       } else if (drag.kind === "addnode") {
-        // 点击（未拖动）落双击点；按住拖到画布松手落松手点。
+        // 点击（未拖动）落双击点；按住拖到画布松手落松手点；从「拖线
+        // 到空白」菜单进入时（drag.wire），创建的节点自动接上那条线。
         const rect = vpRef.current?.getBoundingClientRect();
         const dropPos = drag.moved && rect
           ? {
@@ -1358,10 +1456,12 @@ export default function ProjectCanvas({
                 assets: [], shots: [], scenes: [],
                 segments: [{ id: segment.id, x: dropPos.x, y: dropPos.y }],
               });
+              autoConnectNewNode(`segment:${segment.id}`, drag.wire);
             }
           });
         } else {
           setPendingAddPos(dropPos);
+          setPendingLinkWire(drag.wire ?? null);
           onAddLooseAsset();
         }
       } else if (drag.kind === "marquee") {
@@ -1423,7 +1523,7 @@ export default function ProjectCanvas({
       document.removeEventListener("mousemove", onMove);
       document.removeEventListener("mouseup", onUp);
     };
-  }, [layout, pos, view, scenePos, infoPos, boxOf, portsOf, outPointOf, inPointOf, linkAssets, persistCards, persistLoose, saveCanvasLayout, saveInfoFramePos, saveView, setSelection, saveOutputPos, setEpisodeOutput, episodeId, notes, persistNotes, addNote, onAddLooseAsset, persistSegments, linkNode, nodeKeyParts, addSegment]);
+  }, [layout, pos, view, scenePos, infoPos, boxOf, portsOf, outPointOf, inPointOf, linkAssets, persistCards, persistLoose, saveCanvasLayout, saveInfoFramePos, saveView, setSelection, saveOutputPos, setEpisodeOutput, episodeId, notes, persistNotes, addNote, onAddLooseAsset, persistSegments, linkNode, nodeKeyParts, addSegment, autoConnectNewNode]);
 
   // ── 节点操作 ──
   // 节点接口圆点（ComfyUI 式）：输入口列在左缘（片段五口按列分布）、
@@ -1692,7 +1792,9 @@ export default function ProjectCanvas({
                         ? `prop:${link.from_id}`
                         : link.from_kind === "segment"
                           ? `segment:${link.from_id}`
-                          : `asset:${link.from_id}`;
+                          : link.from_kind === "shot"
+                            ? `shot:${link.from_id}`
+                            : `asset:${link.from_id}`;
               const a = outPointOf(fromKey);
               const b = inPointOf(`segment:${link.to_segment}`, link.to_port);
               if (!a || !b) return null;
@@ -2228,24 +2330,49 @@ export default function ProjectCanvas({
                 label: t("project.canvas.segName"),
                 hint: t("project.canvas.typeSegmentHint"),
                 icon: Icons.clapperboard,
+                panel: "",
+              },
+              {
+                key: "character",
+                label: t("project.canvas.typeCharacter"),
+                hint: t("project.canvas.typeCharacterHint"),
+                icon: Icons.clipboard,
+                panel: "characters",
+              },
+              {
+                key: "location",
+                label: t("project.canvas.typeLocation"),
+                hint: t("project.canvas.typeLocationHint"),
+                icon: Icons.resources,
+                panel: "locations",
+              },
+              {
+                key: "prop",
+                label: t("project.canvas.typeProp"),
+                hint: t("project.canvas.typePropHint"),
+                icon: Icons.star,
+                panel: "props",
               },
               {
                 key: "note",
                 label: t("project.canvas.typeNote"),
                 hint: t("project.canvas.typeNoteHint"),
                 icon: Icons.edit,
+                panel: "",
               },
               {
                 key: "script",
                 label: t("project.canvas.typePrompt"),
                 hint: t("project.canvas.typePromptHint"),
                 icon: Icons.file,
+                panel: "",
               },
               {
                 key: "asset",
                 label: t("project.canvas.typeAsset"),
                 hint: t("project.canvas.typeAssetHint"),
                 icon: Icons.image,
+                panel: "",
               },
             ]
               .filter((item) => item.label.toLowerCase().includes(addMenuQuery.trim().toLowerCase()))
@@ -2254,19 +2381,34 @@ export default function ProjectCanvas({
                   key={item.key}
                   type="button"
                   className="pc-addmenu-item"
-                  // 点击与按住拖到画布松手都创建（ComfyUI 搜索框惯例）：
-                  // 拖动落点为松手处的世界坐标，原地点击落双击点。
-                  onMouseDown={(event) => {
-                    if (event.button !== 0) return;
-                    event.stopPropagation();
-                    event.preventDefault();
-                    dragRef.current = {
-                      kind: "addnode", sx: event.clientX, sy: event.clientY, moved: false,
-                      fox: addMenu.wx, foy: addMenu.wy, frameKey: item.key,
-                    };
-                    setAddMenu(null);
-                    setAddMenuQuery("");
-                  }}
+                  // 资料类节点点击打开库挑选面板（挑选即关联进资料框）；
+                  // 创建类节点支持点击与按住拖到画布松手两种落位（ComfyUI
+                  // 搜索框惯例）；从「拖线到空白」进入时创建的节点自动接上
+                  // 那条线。
+                  {...(item.panel
+                    ? {
+                        onClick: () => {
+                          setAddMenu(null);
+                          setAddMenuQuery("");
+                          if (item.panel === "characters") setCastPickOpen(true);
+                          if (item.panel === "locations") setLocationPickOpen(true);
+                          if (item.panel === "props") setPropPickOpen(true);
+                        },
+                      }
+                    : {
+                        onMouseDown: (event: React.MouseEvent) => {
+                          if (event.button !== 0) return;
+                          event.stopPropagation();
+                          event.preventDefault();
+                          dragRef.current = {
+                            kind: "addnode", sx: event.clientX, sy: event.clientY, moved: false,
+                            fox: addMenu.wx, foy: addMenu.wy, frameKey: item.key,
+                            wire: addMenu.wire,
+                          };
+                          setAddMenu(null);
+                          setAddMenuQuery("");
+                        },
+                      })}
                 >
                   {item.icon}
                   <span>{item.label}</span>
@@ -2535,6 +2677,44 @@ export default function ProjectCanvas({
               ? existing.filter((item) => item !== id)
               : [...existing, id];
             void setEpisodeLocations(episodeId, next);
+          }}
+        />
+      )}
+      {/* 双击菜单「角色」：出场角色挑选面板 */}
+      {castPickOpen && (
+        <ProjectLibraryPanel
+          kind="characters"
+          mode="pick"
+          multi
+          selectedIds={overview?.episode.character_ids ?? []}
+          onClose={() => setCastPickOpen(false)}
+          pickTitle={t("project.canvas.linkCast")}
+          onTogglePick={(id) => {
+            if (!episodeId) return;
+            const existing = overview?.episode.character_ids ?? [];
+            const next = existing.includes(id)
+              ? existing.filter((item) => item !== id)
+              : [...existing, id];
+            void setEpisodeCharacters(episodeId, next);
+          }}
+        />
+      )}
+      {/* 双击菜单「道具」：出场道具挑选面板（与镜头挂靠按并集并存） */}
+      {propPickOpen && (
+        <ProjectLibraryPanel
+          kind="props"
+          mode="pick"
+          multi
+          selectedIds={overview?.episode.prop_ids ?? []}
+          onClose={() => setPropPickOpen(false)}
+          pickTitle={t("project.canvas.linkProps")}
+          onTogglePick={(id) => {
+            if (!episodeId) return;
+            const existing = overview?.episode.prop_ids ?? [];
+            const next = existing.includes(id)
+              ? existing.filter((item) => item !== id)
+              : [...existing, id];
+            void setEpisodeProps(episodeId, next);
           }}
         />
       )}

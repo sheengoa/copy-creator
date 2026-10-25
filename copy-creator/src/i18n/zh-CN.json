@@ -535,7 +535,12 @@
       "port_prop": "道具",
       "port_script": "脚本",
       "port_other": "其他",
-      "typePromptHint": "从库选择提示词素材"
+      "typePromptHint": "从库选择提示词素材",
+      "typeCharacterHint": "从角色库勾选出场角色",
+      "typeLocationHint": "从场景库勾选出场场景",
+      "typePropHint": "从道具库勾选出场道具",
+      "linkCast": "出场角色",
+      "linkProps": "出场道具"
     },
     "library": {
       "characters": "角色库",

@@ -201,6 +201,14 @@ CREATE TABLE IF NOT EXISTS project_episode_locations (
     FOREIGN KEY (location_id) REFERENCES project_locations(id) ON DELETE CASCADE
 );
 
+CREATE TABLE IF NOT EXISTS project_episode_props (
+    episode_id TEXT NOT NULL,
+    prop_id TEXT NOT NULL,
+    PRIMARY KEY (episode_id, prop_id),
+    FOREIGN KEY (episode_id) REFERENCES project_episodes(id) ON DELETE CASCADE,
+    FOREIGN KEY (prop_id) REFERENCES project_props(id) ON DELETE CASCADE
+);
+
 CREATE TABLE IF NOT EXISTS project_shot_characters (
     shot_id TEXT NOT NULL,
     character_id TEXT NOT NULL,
@@ -960,6 +968,29 @@ pub fn project_set_episode_locations(
             "location_id",
             &episode_id,
             &location_ids,
+        )?;
+    }
+    emit_project_changed(&app);
+    Ok(())
+}
+
+/// 本集出场道具关联（画布道具节点的数据源；镜头挂靠的道具按并集并存）。
+#[tauri::command]
+pub fn project_set_episode_props(
+    app: AppHandle,
+    episode_id: String,
+    prop_ids: Vec<String>,
+) -> Result<(), String> {
+    {
+        let state = app.state::<DbState>();
+        let conn = state.conn.lock().map_err(|e| e.to_string())?;
+        replace_links(
+            &conn,
+            "project_episode_props",
+            "episode_id",
+            "prop_id",
+            &episode_id,
+            &prop_ids,
         )?;
     }
     emit_project_changed(&app);
@@ -2137,7 +2168,7 @@ pub(crate) fn link_node_inner(
     to_segment: &str,
     to_port: &str,
 ) -> Result<serde_json::Value, String> {
-    const FROM_KINDS: [&str; 6] = ["asset", "character", "location", "prop", "script", "segment"];
+    const FROM_KINDS: [&str; 7] = ["asset", "character", "location", "prop", "script", "segment", "shot"];
     const TO_PORTS: [&str; 5] = ["character", "location", "prop", "script", "other"];
     if !FROM_KINDS.contains(&from_kind) {
         return Err(format!("未知连线来源类型：{from_kind}"));
@@ -2173,6 +2204,7 @@ pub(crate) fn link_node_inner(
         "location" => exists_in("project_locations")?,
         "prop" => exists_in("project_props")?,
         "segment" => exists_in("project_segments")?,
+        "shot" => exists_in("project_shots")?,
         "script" => {
             if from_id != episode_id {
                 return Err("剧本来源的 from_id 必须为集 id".to_string());
@@ -2458,6 +2490,51 @@ pub(crate) fn episode_overview_inner(
     let mut episode = episode;
     episode["location_ids"] = serde_json::json!(location_ids);
 
+    // 本集出场道具 = 集级关联 ∪ 镜头挂靠并集（画布道具节点数据源）。
+    let mut prop_ids: Vec<String> = {
+        let mut stmt = conn
+            .prepare(
+                "SELECT prop_id FROM project_episode_props \
+                 WHERE episode_id = ?1 ORDER BY rowid ASC",
+            )
+            .map_err(|e| e.to_string())?;
+        let rows = stmt
+            .query_map(params![episode_id], |row| row.get::<_, String>(0))
+            .map_err(|e| e.to_string())?;
+        rows.collect::<Result<Vec<_>, _>>().map_err(|e| e.to_string())?
+    };
+    {
+        let mut stmt = conn
+            .prepare(
+                "SELECT DISTINCT sp.prop_id FROM project_shot_props sp \
+                 JOIN project_shots s ON s.id = sp.shot_id \
+                 WHERE s.episode_id = ?1 ORDER BY sp.rowid ASC",
+            )
+            .map_err(|e| e.to_string())?;
+        let rows = stmt
+            .query_map(params![episode_id], |row| row.get::<_, String>(0))
+            .map_err(|e| e.to_string())?;
+        for row in rows {
+            let prop_id = row.map_err(|e| e.to_string())?;
+            if !prop_ids.contains(&prop_id) {
+                prop_ids.push(prop_id);
+            }
+        }
+    }
+    let mut props = Vec::with_capacity(prop_ids.len());
+    for prop_id in &prop_ids {
+        let prop = query_row_with_param(
+            conn,
+            &format!("SELECT {PROP_COLS} FROM project_props WHERE id = ?1"),
+            &[prop_id],
+            prop_row,
+        );
+        if let Ok(prop) = prop {
+            props.push(prop);
+        }
+    }
+    episode["prop_ids"] = serde_json::json!(prop_ids);
+
     let mut scenes = query_all_params(
         conn,
         &format!(
@@ -2648,6 +2725,7 @@ pub(crate) fn episode_overview_inner(
         "episode": episode,
         "characters": characters,
         "locations": locations,
+        "props": props,
         "scenes": scenes,
         "loose_assets": loose_assets,
         "links": links,

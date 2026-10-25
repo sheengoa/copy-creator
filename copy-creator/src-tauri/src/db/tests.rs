@@ -7660,13 +7660,27 @@ mod project_tests {
             crate::db::project::link_node_inner(&conn, "e1", "asset", "v1", s2["id"].as_str().unwrap(), "nonsense").is_err(),
             "未知输入口应被拒绝"
         );
-        // 片段→片段续生成线（视频进其他口）。
+        // 片段→片段续生成线（视频进其他口）；镜头产出也可作为片段来源。
         crate::db::project::link_node_inner(&conn, "e1", "segment", s1["id"].as_str().unwrap(), s2["id"].as_str().unwrap(), "other")
+            .unwrap();
+        conn.execute(
+            "INSERT INTO project_scenes (id, episode_id, location_id, heading, sort_order, note, created_at, updated_at) \
+             VALUES ('sc1', 'e1', '', '场', 0, '', '2026-01-01', '2026-01-01')",
+            [],
+        )
+        .unwrap();
+        conn.execute(
+            "INSERT INTO project_shots (id, scene_id, episode_id, description, sort_order, created_at, updated_at) \
+             VALUES ('sh1', 'sc1', 'e1', '', 0, '2026-01-01', '2026-01-01')",
+            [],
+        )
+        .unwrap();
+        crate::db::project::link_node_inner(&conn, "e1", "shot", "sh1", s2["id"].as_str().unwrap(), "other")
             .unwrap();
 
         let overview =
             crate::db::project::episode_overview_inner(&conn, "e1", &std::env::temp_dir()).unwrap();
-        assert_eq!(overview["node_links"].as_array().unwrap().len(), 2, "重复连线应幂等忽略");
+        assert_eq!(overview["node_links"].as_array().unwrap().len(), 3, "重复连线应幂等忽略");
 
         // 删片段后其输入口连线级联消失。
         crate::db::project::remove_segment_inner(&conn, s2["id"].as_str().unwrap()).unwrap();

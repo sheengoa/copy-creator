@@ -26,6 +26,7 @@ export interface ProjectEpisode {
   script_path: string;
   character_ids: string[];
   location_ids: string[];
+  prop_ids: string[];
   shot_count: number;
   done_shot_count: number;
   created_at: string;
@@ -176,10 +177,10 @@ export interface ProjectSegment {
   asset?: ProjectAsset & { missing?: boolean };
 }
 
-/** 片段输入口连线：来源跨库资料/剧本/素材/另一片段。 */
+/** 片段输入口连线：来源跨库资料/剧本/素材/另一片段/镜头。 */
 export interface ProjectNodeLink {
   id: string;
-  from_kind: "asset" | "character" | "location" | "prop" | "script" | "segment";
+  from_kind: "asset" | "character" | "location" | "prop" | "script" | "segment" | "shot";
   from_id: string;
   to_segment: string;
   to_port: "character" | "location" | "prop" | "script" | "other";
@@ -189,6 +190,7 @@ export interface EpisodeOverview {
   episode: ProjectEpisode;
   characters: ProjectCharacter[];
   locations: ProjectLocation[];
+  props: ProjectProp[];
   scenes: ProjectScene[];
   loose_assets: ProjectAsset[];
   links: ProjectAssetLink[];
@@ -326,6 +328,8 @@ interface ProjectStoreState {
   setEpisodeOutput: (episodeId: string, outputAssetId: string | null) => Promise<void>;
   /** 本集出场场景关联（整组替换）。 */
   setEpisodeLocations: (episodeId: string, locationIds: string[]) => Promise<void>;
+  /** 本集出场道具关联（整组替换；与镜头挂靠按并集并存）。 */
+  setEpisodeProps: (episodeId: string, propIds: string[]) => Promise<void>;
   /** 新建空片段（排到拼接序末尾），失败返回 null。 */
   addSegment: (episodeId: string) => Promise<ProjectSegment | null>;
   removeSegment: (id: string) => Promise<void>;
@@ -1073,6 +1077,14 @@ export const useProjectStore = create<ProjectStoreState>((set, get) => ({
       await invoke("project_set_episode_locations", { episodeId, locationIds });
     } catch (error) {
       console.error("project_set_episode_locations failed:", error);
+    }
+  },
+
+  setEpisodeProps: async (episodeId, propIds) => {
+    try {
+      await invoke("project_set_episode_props", { episodeId, propIds });
+    } catch (error) {
+      console.error("project_set_episode_props failed:", error);
     }
   },
 
