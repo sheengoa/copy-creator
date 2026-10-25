@@ -20,6 +20,7 @@ import i18n from "./i18n";
 // （共享的 base/layout/components 由 main.tsx 的 index.css 分发）。
 import "./styles/clipboard.css";
 import "./styles/resource.css";
+import "./styles/project.css";
 import "./styles/phrases.css";
 import "./styles/settings.css";
 

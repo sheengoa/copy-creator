@@ -396,6 +396,66 @@
     "neverUsed": "未使用过",
     "placeholderHint": "可用占位符（粘贴时展开，剪贴板为空则展开为空），点击插入："
   },
+  "project": {
+    "loading": "加载中…",
+    "view": {
+      "switchLabel": "资源页视图",
+      "file": "文件视图",
+      "project": "工程视图"
+    },
+    "show": {
+      "episodeCount": "共 {{count}} 集",
+      "empty": "还没有剧",
+      "emptyHint": "右上角新建一部剧",
+      "emptyStage": "从右上角「新建剧」开始你的第一部 AI 视频",
+      "pickPlaceholder": "选择剧",
+      "new": "新建剧",
+      "nameLabel": "剧名",
+      "namePlaceholder": "例如：山海食肆",
+      "delete": "删除剧「{{name}}」",
+      "deleteConfirm": "删除剧「{{name}}」及其全部集、场景、镜头结构？素材文件会保留在资源库中。"
+    },
+    "episode": {
+      "untitled": "未命名集",
+      "new": "新建集",
+      "crumb": "第 {{number}} 集",
+      "delete": "删除本集",
+      "deleteConfirm": "删除「{{title}}」的场景与镜头结构？素材文件会保留在资源库中。",
+      "renameHint": "双击重命名",
+      "emptyStage": "这部剧还没有集，从左侧「新建集」开始"
+    },
+    "status": {
+      "none": "新建",
+      "script": "剧本",
+      "storyboard": "分镜中",
+      "generating": "生成中",
+      "done": "已完成"
+    },
+    "cast": {
+      "title": "出场角色",
+      "empty": "暂未关联角色",
+      "global": "全局角色"
+    },
+    "script": {
+      "open": "打开剧本文件",
+      "loading": "读取剧本…",
+      "footer": "剧本 {{count}} 场 · 打开文件编辑全文",
+      "empty": "本集还没有挂接剧本",
+      "emptyHint": "剧本文件放入资源库后即可挂接到本集（下一阶段开放）"
+    },
+    "asset": {
+      "title": "集级素材",
+      "empty": "暂无挂靠素材；放入资源库分组的文件可挂到本集（下一阶段开放）",
+      "kind": {
+        "image": "图片",
+        "video": "视频",
+        "audio": "音频",
+        "text": "文本",
+        "prompt": "提示词",
+        "file": "文件"
+      }
+    }
+  },
   "common": {
     "save": "保存",
     "cancel": "取消",

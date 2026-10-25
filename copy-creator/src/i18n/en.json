@@ -396,6 +396,66 @@
     "neverUsed": "Never used",
     "placeholderHint": "Placeholders (expanded on paste; empty clipboard expands to empty). Click to insert:"
   },
+  "project": {
+    "loading": "Loading…",
+    "view": {
+      "switchLabel": "Library view",
+      "file": "Files",
+      "project": "Project"
+    },
+    "show": {
+      "episodeCount": "{{count}} episodes",
+      "empty": "No shows yet",
+      "emptyHint": "Create one from the top right",
+      "emptyStage": "Create your first AI video show from the top right",
+      "pickPlaceholder": "Select a show",
+      "new": "New Show",
+      "nameLabel": "Show name",
+      "namePlaceholder": "e.g. Mountain-Sea Diner",
+      "delete": "Delete \"{{name}}\"",
+      "deleteConfirm": "Delete show \"{{name}}\" with all episodes, scenes and shots? Asset files stay in the library."
+    },
+    "episode": {
+      "untitled": "Untitled episode",
+      "new": "New Episode",
+      "crumb": "Episode {{number}}",
+      "delete": "Delete this episode",
+      "deleteConfirm": "Delete scenes and shots of \"{{title}}\"? Asset files stay in the library.",
+      "renameHint": "Double-click to rename",
+      "emptyStage": "No episodes yet — start with \"New Episode\" in the left panel"
+    },
+    "status": {
+      "none": "New",
+      "script": "Script",
+      "storyboard": "Storyboarding",
+      "generating": "Generating",
+      "done": "Done"
+    },
+    "cast": {
+      "title": "Cast",
+      "empty": "No characters linked",
+      "global": "Global"
+    },
+    "script": {
+      "open": "Open script file",
+      "loading": "Reading script…",
+      "footer": "{{count}} scenes · open the file to edit",
+      "empty": "No script linked to this episode",
+      "emptyHint": "Drop a script file into the library to link it here (next stage)"
+    },
+    "asset": {
+      "title": "Episode assets",
+      "empty": "No linked assets yet; files in library groups can be linked here (next stage)",
+      "kind": {
+        "image": "Image",
+        "video": "Video",
+        "audio": "Audio",
+        "text": "Text",
+        "prompt": "Prompt",
+        "file": "File"
+      }
+    }
+  },
   "common": {
     "save": "Save",
     "cancel": "Cancel",

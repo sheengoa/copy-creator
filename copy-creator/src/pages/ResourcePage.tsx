@@ -18,6 +18,7 @@ import { SortableContext, arrayMove, useSortable, verticalListSortingStrategy } 
 import { CSS } from "@dnd-kit/utilities";
 import { restrictToVerticalAxis } from "@dnd-kit/modifiers";
 import { useResourceStore } from "../stores/clipboardStore";
+import { useProjectStore } from "../stores/projectStore";
 import { useShallow } from "zustand/react/shallow";
 import { useSettingsStore, RESOURCE_CARD_SIZE_MAX, RESOURCE_CARD_SIZE_MIN } from "../stores/settingsStore";
 import { useMultiSelect } from "../hooks/useMultiSelect";
@@ -49,6 +50,8 @@ import { buildResourceFolderParentMap, findResourceFolder, flattenResourceFolder
 import { inferResourceMediaKind, matchesResourceType } from "../domain/mediaKind";
 import { getResourceTitle } from "../domain/records";
 import ResourceMoveDialog from "./ResourcePage/ResourceMoveDialog";
+import ProjectView from "./ResourcePage/ProjectView";
+import ProjectViewSwitch from "./ResourcePage/ProjectViewSwitch";
 import { isResourceRecord } from "../domain/records";
 
 type ResourceGroupDialogState = {
@@ -185,6 +188,8 @@ export default function ResourcePage() {
   } | null>(null);
   // 回收站：入口角标随 resource-groups-changed 刷新（删除入站即触发）。
   const [trashOpen, setTrashOpen] = useState(false);
+  // 工程视图与文件视图共用本页工具行与对话框，仅内容区切换。
+  const projectView = useProjectStore((state) => state.view);
   const [trashCount, setTrashCount] = useState(0);
 
   // —— 缺失追溯与清理 ——
@@ -1195,6 +1200,9 @@ export default function ResourcePage() {
         </div>
       )}
 
+      {/* 文件视图 / 工程视图切换：与工具行共用，回收站全屏时隐藏 */}
+      {!trashOpen && <ProjectViewSwitch />}
+
       {resourceSettingsOpen && !trashOpen && (
         <section
           ref={resourceSettingsPopoverRef}
@@ -1262,7 +1270,7 @@ export default function ResourcePage() {
 
       {trashOpen && <TrashPanel onBack={() => setTrashOpen(false)} />}
 
-      {!trashOpen && (
+      {!trashOpen && projectView === "file" && (
         <>
       <ResourceGroupChips
         groups={resourceFolderGroups}
@@ -1605,7 +1613,9 @@ export default function ResourcePage() {
 
       {confirmDialog}
 
-      {!trashOpen && (
+      {projectView === "project" && !trashOpen && <ProjectView />}
+
+      {!trashOpen && projectView === "file" && (
       <section className="resource-list-area">
         <div className="resource-list-heading">
           <div className="resource-list-heading-main">
