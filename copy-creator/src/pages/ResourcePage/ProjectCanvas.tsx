@@ -103,26 +103,16 @@ interface WireBox extends Pos {
   h: number;
 }
 
-function wirePathD(a: WireBox, b: WireBox): string {
-  const aMX = a.x + a.w / 2;
-  const aMY = a.y + a.h / 2;
-  const bMX = b.x + b.w / 2;
-  const bMY = b.y + b.h / 2;
-  const hOverlap = b.x < a.x + a.w && b.x + b.w > a.x;
-  if (hOverlap && b.y >= a.y + a.h) {
-    const c = Math.max(40, (b.y - a.y - a.h) * 0.5);
-    return `M ${aMX} ${a.y + a.h} C ${aMX} ${a.y + a.h + c}, ${bMX} ${b.y - c}, ${bMX} ${b.y}`;
-  }
-  if (hOverlap && a.y >= b.y + b.h) {
-    const c = Math.max(40, (a.y - b.y - b.h) * 0.5);
-    return `M ${aMX} ${a.y} C ${aMX} ${a.y - c}, ${bMX} ${b.y + b.h + c}, ${bMX} ${b.y + b.h}`;
-  }
-  if (b.x - (a.x + a.w) > -40) {
-    const c = Math.max(46, (b.x - a.x - a.w) * 0.5);
-    return `M ${a.x + a.w} ${aMY} C ${a.x + a.w + c} ${aMY}, ${b.x - c} ${bMY}, ${b.x} ${bMY}`;
-  }
-  const c = Math.max(46, (a.x - b.x - b.w) * 0.5);
-  return `M ${a.x} ${aMY} C ${a.x - c} ${aMY}, ${b.x + b.w + c} ${bMY}, ${b.x + b.w} ${bMY}`;
+/** ComfyUI 风格连线：从 from 节点右缘中点（输出口）出发，到 to 节点
+ *  左缘中点（输入口）。控制点沿水平方向延伸两点距离的 1/4，任意角度
+ *  都得到平滑弯出的贝塞尔，不存在直线或拐角形态。 */
+function wirePathD(from: WireBox, to: WireBox): string {
+  const ax = from.x + from.w;
+  const ay = from.y + from.h / 2;
+  const bx = to.x;
+  const by = to.y + to.h / 2;
+  const offset = Math.hypot(bx - ax, by - ay) * 0.25;
+  return `M ${ax} ${ay} C ${ax + offset} ${ay}, ${bx - offset} ${by}, ${bx} ${by}`;
 }
 
 /** 镜头卡尺寸：卡头 + 素材两列网格（空镜头为挂靠占位高度）。 */
@@ -319,15 +309,33 @@ function TextPaperBody({ path, name, lines }: { path: string; name: string; line
   );
 }
 
-function wirePath(a: WireBox, b: WireBox): string {
-  return wirePathD(a, b);
-}
-
 interface WireItem {
   fromKey: string; // 容器 key：shot:<id> | asset:<id>
   toKey: string;
   label: string;
   kind: "gen" | "manual";
+  type: string; // 线上流动的数据类型 = 来源素材的 kind
+}
+
+/** 连线数据类型色（ComfyUI 每类型一色的惯例）。 */
+const WIRE_TYPE_COLORS: Record<string, string> = {
+  image: "#4ade80",
+  video: "#a78bfa",
+  text: "#fb923c",
+  prompt: "#22d3ee",
+  audio: "#facc15",
+  file: "#94a3b8",
+};
+
+/** 参考类输入口可接的数据类型（图/视频/文本/提示词）。 */
+const REF_ACCEPTS = ["image", "video", "text", "prompt"];
+
+/** 全集素材（镜头挂靠 + 集级散件）。 */
+function allAssetsOf(scenes: ProjectScene[], looseAssets: ProjectAsset[]): ProjectAsset[] {
+  const list: ProjectAsset[] = [];
+  scenes.forEach((scene) => scene.shots.forEach((shot) => list.push(...shot.assets)));
+  list.push(...looseAssets);
+  return list;
 }
 
 /** 工程画布：集素材的无限画布（看/摆/连）。镜头卡与散件坐标持久化进
@@ -570,18 +578,16 @@ export default function ProjectCanvas({
 
   const wires = useMemo(() => {
     const list: WireItem[] = [];
+    const kindOf = new Map(allAssetsOf(scenes, looseAssets).map((a) => [a.id, a.kind]));
     const pushWire = (fromAsset: string, toAsset: string, label: string, kind: "gen" | "manual") => {
       const from = containerOf(fromAsset);
       const to = containerOf(toAsset);
       if (!from || !to || from === to) return;
       if (list.some((w) => w.fromKey === from && w.toKey === to && w.kind === kind)) return;
-      list.push({ fromKey: from, toKey: to, label, kind });
+      list.push({ fromKey: from, toKey: to, label, kind, type: kindOf.get(fromAsset) ?? "file" });
     };
-    const allAssets: ProjectAsset[] = [];
-    scenes.forEach((scene) => scene.shots.forEach((shot) => allAssets.push(...shot.assets)));
-    allAssets.push(...looseAssets);
-    allAssets.forEach((asset) => {
-      if (asset.gen_from_asset && allAssets.some((a) => a.id === asset.gen_from_asset)) {
+    allAssetsOf(scenes, looseAssets).forEach((asset) => {
+      if (asset.gen_from_asset && kindOf.has(asset.gen_from_asset)) {
         pushWire(asset.gen_from_asset, asset.id, t("project.canvas.wireGen"), "gen");
       }
     });
@@ -608,6 +614,42 @@ export default function ProjectCanvas({
       return null;
     },
     [layout, pos, cardSizeOf],
+  );
+
+  // 节点接口（ComfyUI 式）：输入口在左缘、输出口在右缘，口带名称与
+  // 数据类型；类型不兼容的连线在拖拽与落下时都会被拒绝。
+  const portsOf = useCallback(
+    (key: string): { inLabel?: string; inAccepts?: string[]; outLabel?: string; outType?: string } => {
+      if (key.startsWith("shot:")) {
+        const shot = scenes.flatMap((s) => s.shots).find((item) => item.id === key.slice(5));
+        if (!shot) return {};
+        const hasVideo = shot.assets.some((a) => a.kind === "video");
+        return {
+          inLabel: t("project.canvas.portRef"),
+          inAccepts: REF_ACCEPTS,
+          outLabel: t(hasVideo ? "project.canvas.portFootage" : "project.canvas.typeImage"),
+          outType: hasVideo ? "video" : "image",
+        };
+      }
+      if (key.startsWith("asset:")) {
+        const assetId = key.slice(6);
+        const loose = looseAssets.find((a) => a.id === assetId);
+        if (!loose) return {};
+        const kind = loose.kind;
+        return {
+          inLabel: REF_ACCEPTS.includes(kind) ? t("project.canvas.portRef") : undefined,
+          inAccepts: REF_ACCEPTS.includes(kind) ? REF_ACCEPTS : undefined,
+          outLabel: t(assetKindBadgeKey(kind)),
+          outType: kind,
+        };
+      }
+      if (key === "script") return { outLabel: t("project.canvas.typeScript"), outType: "text" };
+      if (key.startsWith("char:") || key.startsWith("prop:")) {
+        return { outLabel: t("project.canvas.portRefImg"), outType: "image" };
+      }
+      return {};
+    },
+    [scenes, looseAssets, t],
   );
 
   // ── 选中与拖拽 ──
@@ -674,11 +716,15 @@ export default function ProjectCanvas({
     starts?: { key: string; x: number; y: number }[];
     fromKey?: string;
     targetKey?: string | null;
+    fromDir?: "out" | "in"; // 从输出口正拖 / 从输入口反拖
+    fromType?: string; // 正拖：出发输出口的数据类型
+    fromAccepts?: string[]; // 反拖：出发输入口可接的类型
+    invalid?: boolean; // 悬停目标类型不兼容
   }
   const dragRef = useRef<DragState | null>(null);
   // 拖动后 mouseup 落在卡内按钮（挂靠/缩略图）上会派发 click，需吞掉这次误触。
   const suppressClickRef = useRef(false);
-  const [wireDraft, setWireDraft] = useState<string | null>(null);
+  const [wireDraft, setWireDraft] = useState<{ d: string; invalid: boolean } | null>(null);
 
   const onViewportMouseDown = useCallback(
     (e: React.MouseEvent) => {
@@ -700,12 +746,17 @@ export default function ProjectCanvas({
         return;
       }
       if (e.button !== 0) return;
-      const anchor = target?.closest(".pc-anchor");
-      if (anchor) {
-        const nodeEl = anchor.closest(".pc-node");
+      const port = target?.closest(".pc-port") as HTMLElement | null;
+      if (port) {
+        const nodeEl = port.closest(".pc-node");
         const key = nodeEl?.getAttribute("data-key") ?? "";
-        if (key) {
-          dragRef.current = { kind: "wire", sx: e.clientX, sy: e.clientY, fromKey: key, targetKey: null };
+        const dir = port.dataset.port === "in" ? "in" : "out";
+        const ports = portsOf(key);
+        if (key && (dir === "out" ? ports.outType : ports.inAccepts)) {
+          dragRef.current = {
+            kind: "wire", sx: e.clientX, sy: e.clientY, fromKey: key, targetKey: null,
+            fromDir: dir, fromType: ports.outType, fromAccepts: ports.inAccepts,
+          };
           e.preventDefault();
           return;
         }
@@ -766,7 +817,7 @@ export default function ProjectCanvas({
       dragRef.current = { kind: "marquee", sx: e.clientX, sy: e.clientY, mq, moved: false };
       e.preventDefault();
     },
-    [layout, pos, setSelection, view, infoPos, scenePos],
+    [layout, pos, setSelection, view, infoPos, scenePos, portsOf],
   );
 
 
@@ -824,11 +875,26 @@ export default function ProjectCanvas({
         const wy = (e.clientY - rect.top - view.y) / view.scale;
         const fromBox = boxOf(drag.fromKey);
         if (!fromBox) return;
-        setWireDraft(wirePath(fromBox, { x: wx - 1, y: wy - 1, w: 2, h: 2 }));
+        const cursor = { x: wx - 1, y: wy - 1, w: 2, h: 2 };
         const hit = document.elementFromPoint(e.clientX, e.clientY);
         const tEl = hit instanceof Element ? hit.closest(".pc-node") : null;
         const tKey = tEl?.getAttribute("data-key") ?? null;
-        drag.targetKey = tKey && tKey !== drag.fromKey ? tKey : null;
+        // 类型校验（ComfyUI 式）：正拖找可接该类型的输入口，反拖找
+        // 在可接范围内的输出口；不兼容的落点整条线标红。
+        let compatible = false;
+        if (tKey && tKey !== drag.fromKey) {
+          const ports = portsOf(tKey);
+          compatible =
+            drag.fromDir === "in"
+              ? !!ports.outType && !!drag.fromAccepts?.includes(ports.outType)
+              : !!ports.inAccepts && !!drag.fromType && ports.inAccepts.includes(drag.fromType);
+        }
+        drag.invalid = !!tKey && tKey !== drag.fromKey && !compatible;
+        drag.targetKey = compatible ? tKey : null;
+        setWireDraft({
+          d: drag.fromDir === "in" ? wirePathD(cursor, fromBox) : wirePathD(fromBox, cursor),
+          invalid: drag.invalid,
+        });
       } else if (drag.kind === "card") {
         setPos((prev) => {
           const cards = { ...prev.cards };
@@ -855,9 +921,11 @@ export default function ProjectCanvas({
       } else if (drag.kind === "wire") {
         setWireDraft(null);
         if (drag.targetKey && drag.fromKey) {
+          // 反拖（从输入口出发）时落点才是数据的来源方。
+          const [outKey, inKey] = drag.fromDir === "in" ? [drag.targetKey, drag.fromKey] : [drag.fromKey, drag.targetKey];
           void linkAssets(
-            drag.fromKey.replace(/^(shot|asset):/, ""),
-            drag.targetKey.replace(/^(shot|asset):/, ""),
+            outKey.replace(/^(shot|asset):/, ""),
+            inKey.replace(/^(shot|asset):/, ""),
             "",
           );
         }
@@ -920,9 +988,30 @@ export default function ProjectCanvas({
       document.removeEventListener("mousemove", onMove);
       document.removeEventListener("mouseup", onUp);
     };
-  }, [layout, pos, view, scenePos, infoPos, boxOf, linkAssets, persistCards, persistLoose, saveCanvasLayout, saveInfoFramePos, saveView, setSelection]);
+  }, [layout, pos, view, scenePos, infoPos, boxOf, portsOf, linkAssets, persistCards, persistLoose, saveCanvasLayout, saveInfoFramePos, saveView, setSelection]);
 
   // ── 节点操作 ──
+  // 节点左右缘的接口圆点（ComfyUI 式）：左输入空心、右输出实心类型色，
+  // hover 浮现接口名称；按下即拖出连线，从输入口反向拖也允许。
+  const portEls = (key: string) => {
+    const ports = portsOf(key);
+    return (
+      <>
+        {ports.inAccepts && (
+          <span className="pc-port pc-port-in" data-port="in" data-label={ports.inLabel} />
+        )}
+        {ports.outType && (
+          <span
+            className="pc-port pc-port-out"
+            data-port="out"
+            data-label={ports.outLabel}
+            style={{ background: WIRE_TYPE_COLORS[ports.outType] ?? "#94a3b8" }}
+          />
+        )}
+      </>
+    );
+  };
+
   const shotNoOf = useCallback(
     (sceneId: string, shotId: string): number => {
       const scene = scenes.find((item) => item.id === sceneId);
@@ -1101,27 +1190,27 @@ export default function ProjectCanvas({
 
           {/* 连线层（卡片之下） */}
           <svg className="pc-wires" aria-hidden="true">
-            <defs>
-              <marker id="pc-arrow" viewBox="0 0 10 10" refX="8.5" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
-                <path d="M0 0 L10 5 L0 10 z" fill="#4a4a54" />
-              </marker>
-            </defs>
             {wires.map((wire) => {
               const fromBox = boxOf(wire.fromKey);
               const toBox = boxOf(wire.toKey);
               if (!fromBox || !toBox) return null;
               const d = wirePathD(fromBox, toBox);
-              const midX = (fromBox.x + fromBox.w / 2 + toBox.x + toBox.w / 2) / 2;
-              const midY = (fromBox.y + fromBox.h / 2 + toBox.y + toBox.h / 2) / 2 - 7;
+              const ax = fromBox.x + fromBox.w;
+              const ay = fromBox.y + fromBox.h / 2;
+              const bx = toBox.x;
+              const by = toBox.y + toBox.h / 2;
+              const midX = (ax + bx) / 2;
+              const midY = (ay + by) / 2 - 7;
+              const color = WIRE_TYPE_COLORS[wire.type] ?? "#94a3b8";
               return (
                 <g key={`${wire.fromKey}->${wire.toKey}`} className="pc-wire">
                   <path className="pc-wire-hit" d={d} />
                   <path
-                    className={`pc-wire-line ${wire.kind}`}
+                    className={`pc-wire-line${wire.kind === "manual" ? " manual" : ""}`}
                     d={d}
-                    markerEnd={wire.kind === "gen" ? "url(#pc-arrow)" : undefined}
+                    style={{ stroke: color }}
                   />
-                  <text className="pc-wire-label" x={midX} y={midY}>
+                  <text className="pc-wire-label" x={midX} y={midY} style={{ fill: color }}>
                     {wire.label}
                   </text>
                   {wire.kind === "manual" && (
@@ -1137,7 +1226,9 @@ export default function ProjectCanvas({
                 </g>
               );
             })}
-            {wireDraft && <path className="pc-wire-temp" d={wireDraft} />}
+            {wireDraft && (
+              <path className={`pc-wire-temp${wireDraft.invalid ? " invalid" : ""}`} d={wireDraft.d} />
+            )}
           </svg>
 
           {/* 镜头卡 */}
@@ -1242,7 +1333,7 @@ export default function ProjectCanvas({
                   </button>
                 </span>
                 <span className="pc-type-badge">{t("project.canvas.typeShot")}</span>
-                <span className="pc-anchor" data-tooltip={t("project.canvas.wireHint")} />
+                {portEls(card.key)}
               </div>
             );
           })}
@@ -1315,7 +1406,7 @@ export default function ProjectCanvas({
                     {Icons.close}
                   </button>
                 </span>
-                <span className="pc-anchor" data-tooltip={t("project.canvas.wireHint")} />
+                {portEls(loose.key)}
               </div>
             );
           })}
@@ -1346,7 +1437,7 @@ export default function ProjectCanvas({
           {infoNodes.map((node) => {
             const p = infoPos.map[node.key];
             return (
-              <div key={node.key} className={`pc-node pc-info${""}`} style={{ left: p.x, top: p.y, width: node.w }}>
+              <div key={node.key} data-key={node.key} className={`pc-node pc-info${""}`} style={{ left: p.x, top: p.y, width: node.w }}>
                 <div className="pc-media-wrap pc-info-card">
                   {node.kind === "character" ? (
                     <>
@@ -1385,6 +1476,7 @@ export default function ProjectCanvas({
                         : "project.canvas.typeScript",
                   )}
                 </span>
+                {portEls(node.key)}
               </div>
             );
           })}

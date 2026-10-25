@@ -465,7 +465,7 @@
       }
     },
     "canvas": {
-      "tip": "中键拖动平移 · 滚轮缩放 · 左键框选 · 拖素材摆放 · 拖场景标签牌整组移动 · 从节点右下角圆点拖出连线 · 单击选中 / 双击放大",
+      "tip": "中键拖动平移 · 滚轮缩放 · 左键框选 · 拖素材摆放 · 双击空白添加节点 · 从节点右侧输出口拖到左侧输入口连线（类型须匹配）· 双击集名改名",
       "wireGen": "生成",
       "wireRef": "参考",
       "wireRemove": "删除连线",
@@ -502,7 +502,10 @@
       "typeFile": "文件",
       "typeCharacter": "角色",
       "typeProp": "道具",
-      "typeScript": "剧本"
+      "typeScript": "剧本",
+      "portRef": "参考",
+      "portFootage": "画面",
+      "portRefImg": "参考图"
     },
     "library": {
       "characters": "角色库",

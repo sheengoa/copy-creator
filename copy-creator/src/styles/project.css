@@ -2165,24 +2165,43 @@
   transition: opacity 0.12s ease;
 }
 .pc-node:hover .pc-type-badge { opacity: 1; }
-/* 手动连线锚点 */
-.pc-anchor {
+/* 节点接口（ComfyUI 式）：输入左缘空心、输出右缘实心类型色，hover
+   浮现接口名称；按下即拖线。 */
+.pc-port {
   position: absolute;
-  right: -8px;
-  bottom: -8px;
-  width: 16px;
-  height: 16px;
+  top: 50%;
+  width: 13px;
+  height: 13px;
   border-radius: 50%;
-  background: var(--bg-primary);
-  border: 2px solid var(--text-primary);
-  box-shadow: 0 1px 5px rgba(0, 0, 0, 0.35);
-  opacity: 0;
-  transition: opacity 0.12s ease, transform 0.12s ease;
+  transform: translateY(-50%);
+  z-index: 6;
   cursor: crosshair;
-  z-index: 5;
+  box-shadow: 0 0 0 2px var(--bg-primary), 0 1px 4px rgba(0, 0, 0, 0.3);
+  transition: transform 0.12s ease;
 }
-.pc-node:hover .pc-anchor { opacity: 1; }
-.pc-node .pc-anchor:hover { transform: scale(1.25); }
+.pc-port:hover { transform: translateY(-50%) scale(1.3); }
+.pc-port-in { left: -7px; background: var(--bg-primary); border: 2.5px solid var(--text-secondary); }
+.pc-port-out { right: -7px; }
+.pc-port::after {
+  content: attr(data-label);
+  position: absolute;
+  top: 50%;
+  transform: translateY(-50%);
+  padding: 2px 8px;
+  border-radius: 6px;
+  background: rgba(28, 28, 34, 0.92);
+  color: #fff;
+  font-size: 10.5px;
+  line-height: 1.5;
+  white-space: nowrap;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.25);
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.12s ease;
+}
+.pc-port-in::after { right: 16px; }
+.pc-port-out::after { left: 16px; }
+.pc-port:hover::after { opacity: 1; }
 
 /* ── 工作流连线 ── */
 .pc-wires {
@@ -2195,10 +2214,9 @@
   pointer-events: none;
 }
 .pc-wire-hit { fill: none; stroke: transparent; stroke-width: 16; pointer-events: stroke; cursor: pointer; }
-.pc-wire-line { fill: none; stroke: var(--text-tertiary); stroke-width: 2; stroke-opacity: 0.9; }
-.pc-wire-line.gen { stroke: var(--text-secondary); stroke-width: 2.2px; }
-.pc-wire-line.manual { stroke-dasharray: 5, 5; }
-.pc-wire:hover .pc-wire-line { stroke: var(--text-primary); stroke-width: 3; stroke-opacity: 1; }
+.pc-wire-line { fill: none; stroke-width: 2.2; stroke-opacity: 0.95; }
+.pc-wire-line.manual { stroke-dasharray: 5, 5; stroke-opacity: 0.8; }
+.pc-wire:hover .pc-wire-line { stroke-width: 3.2; stroke-opacity: 1; }
 .pc-wire-label {
   font-size: 11px;
   fill: var(--text-secondary);
@@ -2214,7 +2232,8 @@
 .pc-wire:hover .pc-wire-del { opacity: 1; }
 .pc-wire-del circle { fill: var(--danger); }
 .pc-wire-del path { stroke: #fff; stroke-width: 2; fill: none; }
-.pc-wire-temp { fill: none; stroke: var(--text-secondary); stroke-width: 2; stroke-dasharray: 5, 5; }
+.pc-wire-temp { fill: none; stroke: var(--text-secondary); stroke-width: 2.2; stroke-dasharray: 5, 5; }
+.pc-wire-temp.invalid { stroke: var(--danger); }
 
 /* ── 玻璃 overlay 控件 ── */
 .pc-glass {

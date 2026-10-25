@@ -465,7 +465,7 @@
       }
     },
     "canvas": {
-      "tip": "Middle-drag to pan · Wheel to zoom · Left-drag to marquee · Drag nodes to arrange · Drag a scene tag to move the group · Drag from a node's corner dot to wire · Click to select / double-click to inspect",
+      "tip": "Middle-drag to pan · Wheel to zoom · Left-drag to marquee · Drag nodes to arrange · Double-click empty space to add nodes · Drag from an output port (right edge) to an input port (left edge); types must match · Double-click episode title to rename",
       "wireGen": "Generated",
       "wireRef": "Reference",
       "wireRemove": "Remove wire",
@@ -502,7 +502,10 @@
       "typeFile": "File",
       "typeCharacter": "Character",
       "typeProp": "Prop",
-      "typeScript": "Script"
+      "typeScript": "Script",
+      "portRef": "Ref",
+      "portFootage": "Footage",
+      "portRefImg": "Ref Image"
     },
     "library": {
       "characters": "Characters",
