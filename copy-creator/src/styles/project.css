@@ -2260,6 +2260,17 @@
 
 /* ══ 工程画布（无限画布视图）：pc- 前缀 ═══════════════════════ */
 
+/* 画布内按钮统一去 UA 默认边框/底色（:where 零优先级，不影响下方具体规则） */
+.pc-root :where(button), .project-stage-switch :where(button) {
+  border: none;
+  background: none;
+  padding: 0;
+  font: inherit;
+  color: inherit;
+  cursor: pointer;
+}
+
+
 .project-stage-shell {
   flex: 1;
   min-height: 0;
@@ -2600,11 +2611,11 @@
   position: absolute;
   z-index: 10;
   border-radius: 13px;
-  background: var(--glass-bg, rgba(255, 255, 255, 0.8));
+  background: var(--card-inner-bg, rgba(255, 255, 255, 0.9));
   backdrop-filter: blur(14px);
   -webkit-backdrop-filter: blur(14px);
   border: 1px solid var(--separator);
-  box-shadow: var(--shadow);
+  box-shadow: 0 8px 28px rgba(0, 0, 0, 0.14), 0 1px 3px rgba(0, 0, 0, 0.08);
 }
 .pc-ep-card { top: 16px; left: 16px; padding: 13px 15px; max-width: 300px; display: flex; flex-direction: column; gap: 9px; }
 .pc-ep-crumb { font-size: 10.5px; color: var(--text-secondary); display: flex; align-items: center; gap: 5px; }
