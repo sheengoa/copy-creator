@@ -472,10 +472,6 @@
         "file": "File"
       }
     },
-    "stage": {
-      "canvas": "Canvas view",
-      "list": "List view"
-    },
     "canvas": {
       "tip": "Middle-drag to pan · Wheel to zoom · Left-drag to marquee · Drag nodes to arrange · Drag a scene tag to move the group · Drag from a node's corner dot to wire · Click to select / double-click to inspect",
       "wireGen": "Generated",

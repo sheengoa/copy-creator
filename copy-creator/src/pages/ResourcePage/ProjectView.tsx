@@ -8,21 +8,18 @@ import { ConfirmDialog } from "../../components/ConfirmDialog";
 import IosSelect from "../../components/IosSelect";
 import { ResourceImage } from "./ResourceMedia";
 import ProjectLibraryPanel from "./ProjectLibraryPanel";
-import ProjectSceneBoard from "./ProjectSceneBoard";
 import ProjectCanvas from "./ProjectCanvas";
 import ProjectAssetPicker from "./ProjectAssetPicker";
 import ProjectPromptPanel from "./ProjectPromptPanel";
 import ProjectAssetSheet from "./ProjectAssetSheet";
 import type { ProjectAsset } from "../../stores/projectStore";
 import { Icons } from "../../components/Icons";
-import { openResourceFile, readResourceTextPreview } from "../../domain/mediaAssets";
+import { openResourceFile } from "../../domain/mediaAssets";
 import {
   EPISODE_STATUSES,
   LIBRARY_KINDS,
-  assetKindLabelKey,
   characterAvatarInitial,
   characterAvatarPaletteIndex,
-  characterSubtitle,
   episodeHasDoneMark,
   episodeNumberLabel,
   episodeStatusKey,
@@ -40,7 +37,6 @@ export default function ProjectView() {
     episodes,
     currentEpisodeId,
     overview,
-    overviewLoading,
     createEpisode,
     deleteEpisode,
     selectEpisode,
@@ -50,8 +46,6 @@ export default function ProjectView() {
     moveEpisode,
     updateEpisodeNumber,
     unlinkAsset,
-    prompts,
-    loadPrompts,
     libraryPanel,
     openLibraryPanel,
     closeLibraryPanel,
@@ -62,7 +56,6 @@ export default function ProjectView() {
       episodes: state.episodes,
       currentEpisodeId: state.currentEpisodeId,
       overview: state.overview,
-      overviewLoading: state.overviewLoading,
       createEpisode: state.createEpisode,
       deleteEpisode: state.deleteEpisode,
       selectEpisode: state.selectEpisode,
@@ -72,8 +65,6 @@ export default function ProjectView() {
       moveEpisode: state.moveEpisode,
       updateEpisodeNumber: state.updateEpisodeNumber,
       unlinkAsset: state.unlinkAsset,
-      prompts: state.prompts,
-      loadPrompts: state.loadPrompts,
       libraryPanel: state.libraryPanel,
       openLibraryPanel: state.openLibraryPanel,
       closeLibraryPanel: state.closeLibraryPanel,
@@ -81,7 +72,6 @@ export default function ProjectView() {
   );
 
   const [libraryRoot, setLibraryRoot] = useState("");
-  const [scriptPreview, setScriptPreview] = useState<string | null>(null);
   const [deleteTarget, setDeleteTarget] = useState<ProjectEpisode | null>(null);
   const [renamingEpisode, setRenamingEpisode] = useState(false);
   const [castPickOpen, setCastPickOpen] = useState(false);
@@ -92,10 +82,6 @@ export default function ProjectView() {
   // 「重新挂靠」替换流：详情浮层对缺失档案发起时记录旧档案，选择器
   // 挂上新文件成功后把旧档案取消挂靠（两步都走既有命令）。
   const [replaceAsset, setReplaceAsset] = useState<ProjectAsset | null>(null);
-  // 舞台模式：画布（默认，看/摆/连）与列表（字段级精修）共享同一数据层。
-  const [stageMode, setStageMode] = useState<"canvas" | "list">(() =>
-    localStorage.getItem("project_stage_mode") === "list" ? "list" : "canvas",
-  );
   const renameInputRef = useRef<HTMLInputElement>(null);
 
   const currentShow = shows.find((show) => show.id === currentShowId) ?? null;
@@ -116,10 +102,6 @@ export default function ProjectView() {
   }, []);
 
   useEffect(() => {
-    if (prompts.length === 0) void loadPrompts();
-  }, [prompts.length, loadPrompts]);
-
-  useEffect(() => {
     const unlisten = listen("project-changed", () => {
       void refresh();
     });
@@ -127,25 +109,6 @@ export default function ProjectView() {
       void unlisten.then((fn) => fn());
     };
   }, [refresh]);
-
-  // 剧本预览：挂接的剧本文件变化时重取（截断预览口径，正文编辑走
-  // 资源详情页，工程面板只读）。
-  const scriptPath = overview?.episode.script_path ?? "";
-  useEffect(() => {
-    setScriptPreview(null);
-    if (!scriptPath) return;
-    let cancelled = false;
-    readResourceTextPreview(scriptPath)
-      .then((preview) => {
-        if (!cancelled) setScriptPreview(preview.content);
-      })
-      .catch(() => {
-        // 文件缺失或不可读：面板显示文件名与打开入口即可。
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [scriptPath]);
 
   useEffect(() => {
     if (renamingEpisode) renameInputRef.current?.select();
@@ -157,11 +120,10 @@ export default function ProjectView() {
   }));
 
   const castCharacters = overview?.characters ?? [];
-  const looseAssets = overview?.loose_assets ?? [];
+  const scriptPath = overview?.episode.script_path ?? "";
   const scriptName = scriptFileLabel(scriptPath);
 
-  // 画布左上角玻璃卡内容：集身份/状态/出场角色/剧本入口（编辑逻辑与
-  // 列表模式共用同一组状态）。
+  // 画布左上角玻璃卡内容：集身份/状态/出场角色/剧本入口。
 
   const handleRenameSubmit = () => {
     if (!currentEpisode) return;
@@ -428,265 +390,17 @@ export default function ProjectView() {
           </div>
         ) : (
           <div className="project-stage-shell">
-            <div className="project-stage-switch">
-              <button
-                type="button"
-                className={stageMode === "canvas" ? "active" : ""}
-                title={t("project.stage.canvas")}
-                onClick={() => {
-                  setStageMode("canvas");
-                  localStorage.setItem("project_stage_mode", "canvas");
-                }}
-              >
-                {Icons.clapperboard}
-              </button>
-              <button
-                type="button"
-                className={stageMode === "list" ? "active" : ""}
-                title={t("project.stage.list")}
-                onClick={() => {
-                  setStageMode("list");
-                  localStorage.setItem("project_stage_mode", "list");
-                }}
-              >
-                {Icons.copy}
-              </button>
-            </div>
-            {stageMode === "canvas" ? (
-              <ProjectCanvas
-                libraryRoot={libraryRoot}
-                overlay={epOverlay}
-                onOpenAsset={setSheetAsset}
-                onPickForShot={setAssetPickerShotId}
-                onRelinkAsset={(asset) => {
-                  setReplaceAsset(asset);
-                  setSheetAsset(null);
-                  setAssetPickerShotId(asset.shot_id);
-                }}
-              />
-            ) : (
-              <div className="project-stage-scroll">
-              <>
-            <div className="project-crumb">
-              {currentShow?.name} / {t("project.episode.crumb", {
-                number: episodeNumberLabel(currentEpisode.number),
-              })}
-            </div>
-            <div className="project-stage-title-row">
-              {renamingEpisode ? (
-                <input
-                  ref={renameInputRef}
-                  className="project-title-input"
-                  defaultValue={currentEpisode.title}
-                  placeholder={t("project.episode.untitled")}
-                  onKeyDown={(event) => {
-                    if (event.key === "Enter") handleRenameSubmit();
-                    if (event.key === "Escape") setRenamingEpisode(false);
-                  }}
-                  onBlur={handleRenameSubmit}
-                  autoFocus
-                />
-              ) : (
-                <h2
-                  className="project-stage-title"
-                  title={t("project.episode.renameHint")}
-                  onDoubleClick={() => setRenamingEpisode(true)}
-                >
-                  {currentEpisode.title || t("project.episode.untitled")}
-                </h2>
-              )}
-              <IosSelect
-                value={currentEpisode.status}
-                options={statusOptions}
-                onChange={(next) =>
-                  void updateEpisode(currentEpisode.id, {
-                    title: currentEpisode.title,
-                    status: next as ProjectEpisode["status"],
-                    script_path: currentEpisode.script_path,
-                  })
-                }
-              />
-              <span className="project-title-spacer" />
-              <button
-                type="button"
-                className="project-mini-btn"
-                title={t("project.episode.delete")}
-                onClick={() => setDeleteTarget(currentEpisode)}
-              >
-                {Icons.delete}
-              </button>
-            </div>
-
-            <div className="project-cast">
-              <span className="project-cast-label">{t("project.cast.title")}</span>
-              {castCharacters.length === 0 ? (
-                <span className="project-cast-empty">{t("project.cast.empty")}</span>
-              ) : (
-                castCharacters.map((character) => {
-                  const avatarPath = character.avatar_path
-                    ? joinLibraryPath(libraryRoot, character.avatar_path)
-                    : "";
-                  return (
-                    <div key={character.id} className="project-cast-card" title={character.bio}>
-                      <span
-                        className={`project-avatar project-avatar-p${characterAvatarPaletteIndex(character.name)}`}
-                      >
-                        {avatarPath ? (
-                          <ResourceImage
-                            path={avatarPath}
-                            alt={character.name}
-                            className="project-avatar-img"
-                            version={character.updated_at}
-                          />
-                        ) : (
-                          characterAvatarInitial(character.name)
-                        )}
-                      </span>
-                      <span className="project-cast-info">
-                        <b>{character.name}</b>
-                        <i>{characterSubtitle(character.role_tag, t("project.cast.global"))}</i>
-                      </span>
-                    </div>
-                  );
-                })
-              )}
-              {currentEpisode && (
-                <button
-                  type="button"
-                  className="project-cast-add"
-                  onClick={() => setCastPickOpen(true)}
-                >
-                  {Icons.add}
-                  {t("project.cast.link")}
-                </button>
-              )}
-            </div>
-
-            <div className="project-stage-main">
-              <div className="project-script">
-                {scriptName ? (
-                  <>
-                    <div className="project-script-head">
-                      <span className="project-script-icon">{Icons.file}</span>
-                      <span className="project-script-file" title={scriptName}>
-                        {scriptName}
-                      </span>
-                      <button
-                        type="button"
-                        className="project-mini-btn"
-                        title={t("project.script.open")}
-                        onClick={() => void openResourceFile(joinLibraryPath(libraryRoot, scriptPath))}
-                      >
-                        {Icons.externalLink}
-                      </button>
-                    </div>
-                    <div className="project-script-body">
-                      {scriptPreview === null ? (
-                        <span className="project-script-loading">
-                          {t("project.script.loading")}
-                        </span>
-                      ) : (
-                        scriptPreview
-                          .split("\n")
-                          .slice(0, 12)
-                          .map((line, index) => (
-                            <p key={index} className="project-script-line">
-                              {line || "\u00a0"}
-                            </p>
-                          ))
-                      )}
-                    </div>
-                    <div className="project-script-foot">
-                      {t("project.script.footer", {
-                        count: (scriptPreview ?? "").split(/场\s*\d/).length - 1,
-                      })}
-                    </div>
-                  </>
-                ) : (
-                  <div className="project-script-empty">
-                    {Icons.file}
-                    <p>{t("project.script.empty")}</p>
-                    <p className="project-script-empty-hint">
-                      {t("project.script.emptyHint")}
-                    </p>
-                  </div>
-                )}
-              </div>
-
-              <div className="project-stage-right">
-                <ProjectSceneBoard />
-
-                <div className="project-assets">
-                  <div className="project-assets-head">
-                    <h4>{t("project.asset.title")}</h4>
-                    <span>{looseAssets.length}</span>
-                    <span className="project-title-spacer" />
-                    <button
-                      type="button"
-                      className="project-mini-btn"
-                      title={t("project.asset.link")}
-                      onClick={() => setAssetPickerShotId("")}
-                    >
-                      {Icons.add}
-                    </button>
-                  </div>
-                  {overviewLoading ? (
-                    <div className="project-assets-empty">{t("project.loading")}</div>
-                  ) : looseAssets.length === 0 ? (
-                    <div className="project-assets-empty">
-                      {Icons.empty}
-                      <p>{t("project.asset.empty")}</p>
-                    </div>
-                  ) : (
-                    <div className="project-asset-list">
-                      {looseAssets.map((asset) => (
-                        <div
-                          key={asset.id}
-                          className={`project-asset-row is-clickable${asset.missing ? " is-missing" : ""}`}
-                          title={asset.file_path}
-                          onClick={() => setSheetAsset(asset)}
-                        >
-                          <span className="project-asset-kind">
-                            {t(assetKindLabelKey(asset.kind))}
-                          </span>
-                          <span className="project-asset-name">
-                            {asset.name || asset.file_path}
-                            {asset.gen_from_prompt && prompts.length > 0 && (
-                              <i className="project-asset-trace">
-                                {t("project.sheet.traceBadge", {
-                                  title:
-                                    prompts.find((prompt) => prompt.id === asset.gen_from_prompt)
-                                      ?.title ?? t("project.sheet.staleRef"),
-                                })}
-                              </i>
-                            )}
-                          </span>
-                          {asset.missing && (
-                            <span className="project-asset-missing">
-                              {t("project.asset.fileMissing")}
-                            </span>
-                          )}
-                          <button
-                            type="button"
-                            className="project-asset-unlink"
-                            title={t("project.asset.unlink")}
-                            onClick={(event) => {
-                              event.stopPropagation();
-                              void unlinkAsset(asset.id);
-                            }}
-                          >
-                            {Icons.close}
-                          </button>
-                        </div>
-                      ))}
-                    </div>
-                  )}
-                </div>
-              </div>
-            </div>
-              </>
-              </div>
-            )}
+            <ProjectCanvas
+              libraryRoot={libraryRoot}
+              overlay={epOverlay}
+              onOpenAsset={setSheetAsset}
+              onPickForShot={setAssetPickerShotId}
+              onRelinkAsset={(asset) => {
+                setReplaceAsset(asset);
+                setSheetAsset(null);
+                setAssetPickerShotId(asset.shot_id);
+              }}
+            />
           </div>
         )}
       </section>

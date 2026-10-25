@@ -2261,7 +2261,7 @@
 /* ══ 工程画布（无限画布视图）：pc- 前缀 ═══════════════════════ */
 
 /* 画布内按钮统一去 UA 默认边框/底色（:where 零优先级，不影响下方具体规则） */
-.pc-root :where(button), .project-stage-switch :where(button) {
+.pc-root :where(button) {
   border: none;
   background: none;
   padding: 0;
@@ -2279,39 +2279,6 @@
   flex-direction: column;
 }
 .project-stage-shell > .pc-root { flex: 1; min-height: 0; }
-.project-stage-scroll {
-  flex: 1;
-  min-height: 0;
-  overflow-y: auto;
-  display: flex;
-  flex-direction: column;
-  gap: 10px;
-}
-.project-stage-switch {
-  position: absolute;
-  top: 10px;
-  right: 14px;
-  z-index: 30;
-  display: flex;
-  gap: 2px;
-  padding: 3px;
-  border-radius: 8px;
-  background: var(--chip-bg);
-}
-.project-stage-switch button {
-  width: 28px;
-  height: 26px;
-  border-radius: 6px;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  color: var(--text-secondary);
-}
-.project-stage-switch button.active {
-  background: var(--text-primary);
-  color: var(--bg-primary);
-}
-.project-stage-switch button svg { width: 15px; height: 15px; }
 
 .pc-root { position: relative; display: flex; flex-direction: column; }
 .pc-viewport {
