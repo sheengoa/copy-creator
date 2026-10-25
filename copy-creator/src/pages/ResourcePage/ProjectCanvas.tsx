@@ -861,7 +861,7 @@ export default function ProjectCanvas({
             { id: "character", label: t("project.canvas.typeCharacter"), accepts: ["image"] },
             { id: "location", label: t("project.canvas.typeLocation"), accepts: ["image"] },
             { id: "prop", label: t("project.canvas.typeProp"), accepts: ["image"] },
-            { id: "script", label: t("project.canvas.typeScript"), accepts: ["text"] },
+            { id: "script", label: t("project.canvas.typePrompt"), accepts: ["prompt", "text"] },
             { id: "other", label: t("project.canvas.typeOther"), accepts: ["video", "audio", "file", "image"] },
           ],
           out: { label: t("project.canvas.portSegment"), type: "video" },
@@ -2237,8 +2237,8 @@ export default function ProjectCanvas({
               },
               {
                 key: "script",
-                label: t("project.canvas.typeScript"),
-                hint: t("project.canvas.typeScriptHint"),
+                label: t("project.canvas.typePrompt"),
+                hint: t("project.canvas.typePromptHint"),
                 icon: Icons.file,
               },
               {

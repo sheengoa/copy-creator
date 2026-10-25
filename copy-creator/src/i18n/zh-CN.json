@@ -529,13 +529,13 @@
       "outputSummary": "已含 {{count}} 个片段按序拼接",
       "checkSegAssets": "{{count}} 个片段未挂产出",
       "typeSegmentHint": "AI 分段生成的视频单元",
-      "typeScriptHint": "从库选择文本素材作为脚本",
       "linkScene": "关联场景",
       "port_character": "角色",
       "port_location": "场景",
       "port_prop": "道具",
       "port_script": "脚本",
-      "port_other": "其他"
+      "port_other": "其他",
+      "typePromptHint": "从库选择提示词素材"
     },
     "library": {
       "characters": "角色库",

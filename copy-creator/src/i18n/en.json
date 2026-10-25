@@ -502,7 +502,7 @@
       "typeFile": "File",
       "typeCharacter": "Character",
       "typeProp": "Prop",
-      "typeScript": "Script",
+      "typeScript": "Episode script",
       "portRef": "Ref",
       "portFootage": "Footage",
       "portRefImg": "Ref Image",
@@ -529,13 +529,13 @@
       "outputSummary": "{{count}} segments joined in order",
       "checkSegAssets": "{{count}} segment(s) without output",
       "typeSegmentHint": "AI-generated video segment unit",
-      "typeScriptHint": "Pick a text asset from the library as script",
       "linkScene": "Link locations",
       "port_character": "Character",
       "port_location": "Location",
       "port_prop": "Prop",
       "port_script": "Script",
-      "port_other": "Other"
+      "port_other": "Other",
+      "typePromptHint": "Pick a prompt asset from the library"
     },
     "library": {
       "characters": "Characters",
