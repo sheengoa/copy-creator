@@ -141,6 +141,40 @@ CREATE TABLE IF NOT EXISTS project_asset_links (
 CREATE INDEX IF NOT EXISTS idx_project_asset_links_from ON project_asset_links(from_asset);
 CREATE INDEX IF NOT EXISTS idx_project_asset_links_to ON project_asset_links(to_asset);
 
+-- 片段（AI 分段生成的视频分段）：一集拆成多个片段分别生成，按
+-- sort_order 拼接成本集成片；产出视频为可空外键（未生成为 NULL）。
+CREATE TABLE IF NOT EXISTS project_segments (
+    id TEXT PRIMARY KEY,
+    episode_id TEXT NOT NULL,
+    asset_id TEXT,
+    sort_order REAL NOT NULL DEFAULT 0,
+    note TEXT NOT NULL DEFAULT '',
+    canvas_x REAL,
+    canvas_y REAL,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    FOREIGN KEY (episode_id) REFERENCES project_episodes(id) ON DELETE CASCADE,
+    FOREIGN KEY (asset_id) REFERENCES project_assets(id) ON DELETE SET NULL
+);
+CREATE INDEX IF NOT EXISTS idx_project_segments_episode ON project_segments(episode_id);
+
+-- 片段输入口的连线（角色/场景/道具/脚本/其他 → 片段）：来源可以是库
+-- 资料、剧本或素材（脚本/其他口），片段→片段的续生成线也走本表
+-- （from_kind='segment'）；素材间参考线仍走 project_asset_links。
+CREATE TABLE IF NOT EXISTS project_node_links (
+    id TEXT PRIMARY KEY,
+    episode_id TEXT NOT NULL,
+    from_kind TEXT NOT NULL,
+    from_id TEXT NOT NULL,
+    to_segment TEXT NOT NULL,
+    to_port TEXT NOT NULL,
+    created_at TEXT NOT NULL,
+    UNIQUE (from_kind, from_id, to_segment, to_port),
+    FOREIGN KEY (episode_id) REFERENCES project_episodes(id) ON DELETE CASCADE,
+    FOREIGN KEY (to_segment) REFERENCES project_segments(id) ON DELETE CASCADE
+);
+CREATE INDEX IF NOT EXISTS idx_project_node_links_to ON project_node_links(to_segment);
+
 CREATE TABLE IF NOT EXISTS project_prompts (
     id TEXT PRIMARY KEY,
     title TEXT NOT NULL,
@@ -157,6 +191,14 @@ CREATE TABLE IF NOT EXISTS project_episode_characters (
     PRIMARY KEY (episode_id, character_id),
     FOREIGN KEY (episode_id) REFERENCES project_episodes(id) ON DELETE CASCADE,
     FOREIGN KEY (character_id) REFERENCES project_characters(id) ON DELETE CASCADE
+);
+
+CREATE TABLE IF NOT EXISTS project_episode_locations (
+    episode_id TEXT NOT NULL,
+    location_id TEXT NOT NULL,
+    PRIMARY KEY (episode_id, location_id),
+    FOREIGN KEY (episode_id) REFERENCES project_episodes(id) ON DELETE CASCADE,
+    FOREIGN KEY (location_id) REFERENCES project_locations(id) ON DELETE CASCADE
 );
 
 CREATE TABLE IF NOT EXISTS project_shot_characters (
@@ -332,6 +374,23 @@ fn prompt_row(row: &rusqlite::Row) -> rusqlite::Result<serde_json::Value> {
 }
 
 const SHOW_COLS: &str = "id, name, note, created_at, updated_at";
+const SEGMENT_COLS: &str =
+    "id, episode_id, asset_id, sort_order, note, canvas_x, canvas_y, created_at, updated_at";
+
+fn segment_row(row: &rusqlite::Row) -> rusqlite::Result<serde_json::Value> {
+    Ok(serde_json::json!({
+        "id": row.get::<_, String>(0)?,
+        "episode_id": row.get::<_, String>(1)?,
+        "asset_id": row.get::<_, Option<String>>(2)?,
+        "sort_order": row.get::<_, f64>(3)?,
+        "note": row.get::<_, String>(4)?,
+        "canvas_x": row.get::<_, Option<f64>>(5)?,
+        "canvas_y": row.get::<_, Option<f64>>(6)?,
+        "created_at": row.get::<_, String>(7)?,
+        "updated_at": row.get::<_, String>(8)?,
+    }))
+}
+
 const EPISODE_COLS: &str =
     "id, show_id, number, title, status, script_path, sort_order, created_at, updated_at, output_asset_id";
 const CHARACTER_COLS: &str =
@@ -671,11 +730,39 @@ pub(crate) fn episodes_list_inner(
             cast.entry(episode_id).or_default().push(character_id);
         }
     }
+    let mut episode_locations: std::collections::HashMap<String, Vec<String>> =
+        std::collections::HashMap::new();
+    {
+        let mut stmt = conn
+            .prepare(
+                "SELECT episode_id, location_id FROM project_episode_locations \
+                 WHERE episode_id IN (SELECT id FROM project_episodes WHERE show_id = ?1) \
+                 ORDER BY rowid ASC",
+            )
+            .map_err(|e| e.to_string())?;
+        let rows = stmt
+            .query_map(params![&show_id], |row| {
+                Ok((
+                    row.get::<_, String>(0)?,
+                    row.get::<_, String>(1)?,
+                ))
+            })
+            .map_err(|e| e.to_string())?;
+        for row in rows {
+            let (episode_id, location_id) = row.map_err(|e| e.to_string())?;
+            episode_locations
+                .entry(episode_id)
+                .or_default()
+                .push(location_id);
+        }
+    }
     for episode in episodes.iter_mut() {
-        let episode_id = episode["id"].as_str().unwrap_or_default();
-        let (shot_count, done_shot_count) = shot_stats.get(episode_id).copied().unwrap_or((0, 0));
+        let episode_id = episode["id"].as_str().unwrap_or_default().to_string();
+        let (shot_count, done_shot_count) = shot_stats.get(&episode_id).copied().unwrap_or((0, 0));
         episode["character_ids"] =
-            serde_json::json!(cast.get(episode_id).cloned().unwrap_or_default());
+            serde_json::json!(cast.get(&episode_id).cloned().unwrap_or_default());
+        episode["location_ids"] =
+            serde_json::json!(episode_locations.get(&episode_id).cloned().unwrap_or_default());
         episode["shot_count"] = serde_json::json!(shot_count);
         episode["done_shot_count"] = serde_json::json!(done_shot_count);
     }
@@ -850,6 +937,29 @@ pub fn project_set_episode_characters(
             "character_id",
             &episode_id,
             &character_ids,
+        )?;
+    }
+    emit_project_changed(&app);
+    Ok(())
+}
+
+/// 本集出场场景关联（画布场景节点的数据源，对齐出场角色模式）。
+#[tauri::command]
+pub fn project_set_episode_locations(
+    app: AppHandle,
+    episode_id: String,
+    location_ids: Vec<String>,
+) -> Result<(), String> {
+    {
+        let state = app.state::<DbState>();
+        let conn = state.conn.lock().map_err(|e| e.to_string())?;
+        replace_links(
+            &conn,
+            "project_episode_locations",
+            "episode_id",
+            "location_id",
+            &episode_id,
+            &location_ids,
         )?;
     }
     emit_project_changed(&app);
@@ -1703,6 +1813,21 @@ pub(crate) fn canvas_layout_inner(
             .map_err(|e| e.to_string())?;
         }
     }
+    if let Some(segments) = payload.get("segments").and_then(|v| v.as_array()) {
+        for item in segments {
+            let id = item.get("id").and_then(|v| v.as_str()).unwrap_or_default();
+            if id.is_empty() {
+                continue;
+            }
+            let x = item.get("x").and_then(|v| v.as_f64());
+            let y = item.get("y").and_then(|v| v.as_f64());
+            tx.execute(
+                "UPDATE project_segments SET canvas_x = ?2, canvas_y = ?3, updated_at = ?4 WHERE id = ?1",
+                params![id, x, y, &now],
+            )
+            .map_err(|e| e.to_string())?;
+        }
+    }
     tx.commit().map_err(|e| e.to_string())?;
     Ok(())
 }
@@ -1783,6 +1908,324 @@ pub(crate) fn set_episode_output_inner(
         params![if value.is_empty() { None } else { Some(value) }, project_now(), id],
     )
     .map_err(|e| e.to_string())?;
+    Ok(())
+}
+
+// ── 片段工作流（AI 分段生成 → 按序拼接成片） ────────────────
+
+/// 新建一个空片段，排到本集拼接序列末尾。
+#[tauri::command]
+pub fn project_add_segment(
+    app: AppHandle,
+    episode_id: String,
+) -> Result<serde_json::Value, String> {
+    let state = app.state::<DbState>();
+    let conn = state.conn.lock().map_err(|e| e.to_string())?;
+    let segment = add_segment_inner(&conn, &episode_id)?;
+    emit_project_changed(&app);
+    Ok(segment)
+}
+
+pub(crate) fn add_segment_inner(
+    conn: &Connection,
+    episode_id: &str,
+) -> Result<serde_json::Value, String> {
+    let episode_exists: i64 = conn
+        .query_row(
+            "SELECT COUNT(*) FROM project_episodes WHERE id = ?1",
+            params![episode_id],
+            |row| row.get(0),
+        )
+        .map_err(|e| e.to_string())?;
+    if episode_exists == 0 {
+        return Err("集不存在".to_string());
+    }
+    let max_order: f64 = conn
+        .query_row(
+            "SELECT COALESCE(MAX(sort_order), 0) FROM project_segments WHERE episode_id = ?1",
+            params![episode_id],
+            |row| row.get(0),
+        )
+        .map_err(|e| e.to_string())?;
+    let id = uuid::Uuid::new_v4().to_string();
+    let now = project_now();
+    conn.execute(
+        "INSERT INTO project_segments (id, episode_id, asset_id, sort_order, note, canvas_x, canvas_y, created_at, updated_at) \
+         VALUES (?1, ?2, NULL, ?3, '', NULL, NULL, ?4, ?4)",
+        params![id, episode_id, max_order + 1.0, &now],
+    )
+    .map_err(|e| e.to_string())?;
+    query_row_with_param(
+        conn,
+        &format!("SELECT {SEGMENT_COLS} FROM project_segments WHERE id = ?1"),
+        &[&id],
+        segment_row,
+    )
+}
+
+/// 删除片段（输入口连线随外键级联消失）。
+#[tauri::command]
+pub fn project_remove_segment(app: AppHandle, id: String) -> Result<(), String> {
+    let state = app.state::<DbState>();
+    let conn = state.conn.lock().map_err(|e| e.to_string())?;
+    remove_segment_inner(&conn, &id)?;
+    emit_project_changed(&app);
+    Ok(())
+}
+
+pub(crate) fn remove_segment_inner(conn: &Connection, id: &str) -> Result<(), String> {
+    conn.execute("DELETE FROM project_segments WHERE id = ?1", params![id])
+        .map_err(|e| e.to_string())?;
+    Ok(())
+}
+
+/// 片段在拼接序列中前移/后移一位（与相邻片段交换 sort_order）。
+#[tauri::command]
+pub fn project_move_segment(app: AppHandle, id: String, direction: i64) -> Result<(), String> {
+    let state = app.state::<DbState>();
+    let conn = state.conn.lock().map_err(|e| e.to_string())?;
+    move_segment_inner(&conn, &id, direction)?;
+    emit_project_changed(&app);
+    Ok(())
+}
+
+pub(crate) fn move_segment_inner(
+    conn: &Connection,
+    id: &str,
+    direction: i64,
+) -> Result<(), String> {
+    if direction != -1 && direction != 1 {
+        return Err("方向只能是 -1（前移）或 1（后移）".to_string());
+    }
+    let (episode_id, sort_order): (String, f64) = conn
+        .query_row(
+            "SELECT episode_id, sort_order FROM project_segments WHERE id = ?1",
+            params![id],
+            |row| Ok((row.get(0)?, row.get(1)?)),
+        )
+        .map_err(|_| "片段不存在".to_string())?;
+    // 相邻片段按拼接序取（排序口径与 overview 一致）：前移找排序更小
+    // 的前一个，后移找排序更大的后一个。
+    let neighbor: Option<String> = if direction == -1 {
+        conn.query_row(
+            "SELECT id FROM project_segments \
+             WHERE episode_id = ?1 AND sort_order < ?2 \
+             ORDER BY sort_order DESC, created_at DESC, id DESC LIMIT 1",
+            params![episode_id, sort_order],
+            |row| row.get(0),
+        )
+        .ok()
+    } else {
+        conn.query_row(
+            "SELECT id FROM project_segments \
+             WHERE episode_id = ?1 AND sort_order > ?2 \
+             ORDER BY sort_order ASC, created_at ASC, id ASC LIMIT 1",
+            params![episode_id, sort_order],
+            |row| row.get(0),
+        )
+        .ok()
+    };
+    let neighbor_id = neighbor.ok_or_else(|| "已经在序列边缘".to_string())?;
+    let neighbor_order: f64 = conn
+        .query_row(
+            "SELECT sort_order FROM project_segments WHERE id = ?1",
+            params![&neighbor_id],
+            |row| row.get(0),
+        )
+        .map_err(|e| e.to_string())?;
+    conn.execute(
+        "UPDATE project_segments SET sort_order = ?1, updated_at = ?2 WHERE id = ?3",
+        params![neighbor_order, project_now(), id],
+    )
+    .map_err(|e| e.to_string())?;
+    conn.execute(
+        "UPDATE project_segments SET sort_order = ?1, updated_at = ?2 WHERE id = ?3",
+        params![sort_order, project_now(), &neighbor_id],
+    )
+    .map_err(|e| e.to_string())?;
+    Ok(())
+}
+
+/// 挂靠片段产出视频（可清除；素材不存在拒绝）。
+#[tauri::command]
+pub fn project_set_segment_asset(
+    app: AppHandle,
+    id: String,
+    asset_id: Option<String>,
+) -> Result<(), String> {
+    let state = app.state::<DbState>();
+    let conn = state.conn.lock().map_err(|e| e.to_string())?;
+    set_segment_asset_inner(&conn, &id, asset_id.as_deref())?;
+    emit_project_changed(&app);
+    Ok(())
+}
+
+pub(crate) fn set_segment_asset_inner(
+    conn: &Connection,
+    id: &str,
+    asset_id: Option<&str>,
+) -> Result<(), String> {
+    let value = asset_id.unwrap_or("").trim();
+    if !value.is_empty() {
+        let exists: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM project_assets WHERE id = ?1",
+                params![value],
+                |row| row.get(0),
+            )
+            .map_err(|e| e.to_string())?;
+        if exists == 0 {
+            return Err("素材档案不存在".to_string());
+        }
+    }
+    conn.execute(
+        "UPDATE project_segments SET asset_id = ?1, updated_at = ?2 WHERE id = ?3",
+        params![if value.is_empty() { None } else { Some(value) }, project_now(), id],
+    )
+    .map_err(|e| e.to_string())?;
+    Ok(())
+}
+
+/// 片段备注（卡头名称；空串回落为默认名）。
+#[tauri::command]
+pub fn project_set_segment_note(
+    app: AppHandle,
+    id: String,
+    note: String,
+) -> Result<(), String> {
+    let state = app.state::<DbState>();
+    let conn = state.conn.lock().map_err(|e| e.to_string())?;
+    conn.execute(
+        "UPDATE project_segments SET note = ?1, updated_at = ?2 WHERE id = ?3",
+        params![note.trim(), project_now(), &id],
+    )
+    .map_err(|e| e.to_string())?;
+    emit_project_changed(&app);
+    Ok(())
+}
+
+/// 片段输入口连线：来源 = 库资料 / 剧本 / 素材 / 另一片段（续生成），
+/// 幂等；from_kind 与来源 id 必须真实存在。
+#[tauri::command]
+pub fn project_link_node(
+    app: AppHandle,
+    episode_id: String,
+    from_kind: String,
+    from_id: String,
+    to_segment: String,
+    to_port: String,
+) -> Result<serde_json::Value, String> {
+    let state = app.state::<DbState>();
+    let conn = state.conn.lock().map_err(|e| e.to_string())?;
+    let link = link_node_inner(
+        &conn,
+        &episode_id,
+        &from_kind,
+        &from_id,
+        &to_segment,
+        &to_port,
+    )?;
+    emit_project_changed(&app);
+    Ok(link)
+}
+
+pub(crate) fn link_node_inner(
+    conn: &Connection,
+    episode_id: &str,
+    from_kind: &str,
+    from_id: &str,
+    to_segment: &str,
+    to_port: &str,
+) -> Result<serde_json::Value, String> {
+    const FROM_KINDS: [&str; 6] = ["asset", "character", "location", "prop", "script", "segment"];
+    const TO_PORTS: [&str; 5] = ["character", "location", "prop", "script", "other"];
+    if !FROM_KINDS.contains(&from_kind) {
+        return Err(format!("未知连线来源类型：{from_kind}"));
+    }
+    if !TO_PORTS.contains(&to_port) {
+        return Err(format!("未知片段输入口：{to_port}"));
+    }
+    let segment_exists: i64 = conn
+        .query_row(
+            "SELECT COUNT(*) FROM project_segments WHERE id = ?1 AND episode_id = ?2",
+            params![to_segment, episode_id],
+            |row| row.get(0),
+        )
+        .map_err(|e| e.to_string())?;
+    if segment_exists == 0 {
+        return Err("片段不存在".to_string());
+    }
+    // 剧本来源以集为锚（from_id = episode_id），要求该集已挂接剧本；
+    // 其余来源逐一查表确认存在。
+    let exists_in = |table: &str| -> Result<bool, String> {
+        Ok(conn
+            .query_row(
+                &format!("SELECT COUNT(*) FROM {table} WHERE id = ?1"),
+                params![from_id],
+                |row| row.get::<_, i64>(0),
+            )
+            .map_err(|e| e.to_string())?
+            > 0)
+    };
+    let source_exists = match from_kind {
+        "asset" => exists_in("project_assets")?,
+        "character" => exists_in("project_characters")?,
+        "location" => exists_in("project_locations")?,
+        "prop" => exists_in("project_props")?,
+        "segment" => exists_in("project_segments")?,
+        "script" => {
+            if from_id != episode_id {
+                return Err("剧本来源的 from_id 必须为集 id".to_string());
+            }
+            let script_path: String = conn
+                .query_row(
+                    "SELECT script_path FROM project_episodes WHERE id = ?1",
+                    params![episode_id],
+                    |row| row.get(0),
+                )
+                .map_err(|e| e.to_string())?;
+            !script_path.trim().is_empty()
+        }
+        _ => false,
+    };
+    if !source_exists {
+        return Err("连线来源不存在".to_string());
+    }
+    let id = uuid::Uuid::new_v4().to_string();
+    conn.execute(
+        "INSERT OR IGNORE INTO project_node_links \
+         (id, episode_id, from_kind, from_id, to_segment, to_port, created_at) \
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
+        params![id, episode_id, from_kind, from_id, to_segment, to_port, project_now()],
+    )
+    .map_err(|e| e.to_string())?;
+    Ok(serde_json::json!({
+        "id": id,
+        "from_kind": from_kind,
+        "from_id": from_id,
+        "to_segment": to_segment,
+        "to_port": to_port,
+    }))
+}
+
+/// 摘除一条片段输入口连线。
+#[tauri::command]
+pub fn project_unlink_node(
+    app: AppHandle,
+    from_kind: String,
+    from_id: String,
+    to_segment: String,
+    to_port: String,
+) -> Result<(), String> {
+    let state = app.state::<DbState>();
+    let conn = state.conn.lock().map_err(|e| e.to_string())?;
+    conn.execute(
+        "DELETE FROM project_node_links \
+         WHERE from_kind = ?1 AND from_id = ?2 AND to_segment = ?3 AND to_port = ?4",
+        params![from_kind, from_id, to_segment, to_port],
+    )
+    .map_err(|e| e.to_string())?;
+    emit_project_changed(&app);
     Ok(())
 }
 
@@ -1987,6 +2430,34 @@ pub(crate) fn episode_overview_inner(
         }
     }
 
+    // 本集出场场景（画布场景节点的数据源，与出场角色同模式）。
+    let location_ids: Vec<String> = {
+        let mut stmt = conn
+            .prepare(
+                "SELECT location_id FROM project_episode_locations \
+                 WHERE episode_id = ?1 ORDER BY rowid ASC",
+            )
+            .map_err(|e| e.to_string())?;
+        let rows = stmt
+            .query_map(params![episode_id], |row| row.get::<_, String>(0))
+            .map_err(|e| e.to_string())?;
+        rows.collect::<Result<Vec<_>, _>>().map_err(|e| e.to_string())?
+    };
+    let mut locations = Vec::with_capacity(location_ids.len());
+    for location_id in &location_ids {
+        let location = query_row_with_param(
+            conn,
+            &format!("SELECT {LOCATION_COLS} FROM project_locations WHERE id = ?1"),
+            &[location_id],
+            location_row,
+        );
+        if let Ok(location) = location {
+            locations.push(location);
+        }
+    }
+    let mut episode = episode;
+    episode["location_ids"] = serde_json::json!(location_ids);
+
     let mut scenes = query_all_params(
         conn,
         &format!(
@@ -2129,12 +2600,59 @@ pub(crate) fn episode_overview_inner(
         },
     )?;
 
+    // 片段（按拼接序）与片段输入口连线：片段产出的视频素材整对象带出
+    // （缺失检测与素材口径一致），画布直接渲染缩略与连线。
+    let mut segments = query_all_params(
+        conn,
+        &format!(
+            "SELECT {SEGMENT_COLS} FROM project_segments \
+             WHERE episode_id = ?1 ORDER BY sort_order ASC, created_at ASC, id ASC"
+        ),
+        params![episode_id],
+        segment_row,
+    )?;
+    for segment in segments.iter_mut() {
+        if let Some(asset_id) = segment["asset_id"].as_str() {
+            let asset = query_row_with_param(
+                conn,
+                &format!("SELECT {ASSET_COLS} FROM project_assets WHERE id = ?1"),
+                &[&asset_id.to_string()],
+                asset_row,
+            );
+            if let Ok(mut asset) = asset {
+                let file_path = asset["file_path"].as_str().unwrap_or_default().to_string();
+                asset["missing"] =
+                    serde_json::json!(!library_root.join(&file_path).exists());
+                segment["asset"] = asset;
+            }
+        }
+    }
+    let node_links = query_all_params(
+        conn,
+        "SELECT id, from_kind, from_id, to_segment, to_port \
+         FROM project_node_links WHERE episode_id = ?1 \
+         ORDER BY created_at ASC, id ASC",
+        params![episode_id],
+        |row| {
+            Ok(serde_json::json!({
+                "id": row.get::<_, String>(0)?,
+                "from_kind": row.get::<_, String>(1)?,
+                "from_id": row.get::<_, String>(2)?,
+                "to_segment": row.get::<_, String>(3)?,
+                "to_port": row.get::<_, String>(4)?,
+            }))
+        },
+    )?;
+
     Ok(serde_json::json!({
         "episode": episode,
         "characters": characters,
+        "locations": locations,
         "scenes": scenes,
         "loose_assets": loose_assets,
         "links": links,
+        "segments": segments,
+        "node_links": node_links,
     }))
 }
 

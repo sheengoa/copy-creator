@@ -7571,6 +7571,160 @@ mod project_tests {
     }
 
     #[test]
+    fn segments_and_node_links_lifecycle() {
+        // 片段工作流：新建排到序列尾、相邻交换排序、挂产出视频（缺失拒
+        // 绝、删素材置空）、输入口连线（未知来源/端口拒绝、剧本要求已挂
+        // 接、幂等）；删片段后连线级联消失；overview 带出 segments 与
+        // node_links。
+        let conn = project_conn();
+        conn.execute(
+            "INSERT INTO project_shows (id, name, note, created_at, updated_at) \
+             VALUES ('s1', '剧', '', '2026-01-01', '2026-01-01')",
+            [],
+        )
+        .unwrap();
+        conn.execute(
+            "INSERT INTO project_episodes (id, show_id, number, title, status, script_path, sort_order, created_at, updated_at) \
+             VALUES ('e1', 's1', 1, '', 'none', '', 0, '2026-01-01', '2026-01-01')",
+            [],
+        )
+        .unwrap();
+
+        let s1 = crate::db::project::add_segment_inner(&conn, "e1").unwrap();
+        let s2 = crate::db::project::add_segment_inner(&conn, "e1").unwrap();
+        let s3 = crate::db::project::add_segment_inner(&conn, "e1").unwrap();
+        assert!(
+            s1["sort_order"].as_f64().unwrap() < s2["sort_order"].as_f64().unwrap()
+                && s2["sort_order"].as_f64().unwrap() < s3["sort_order"].as_f64().unwrap(),
+            "新建片段应按创建顺序递增拼接序"
+        );
+
+        crate::db::project::move_segment_inner(&conn, s3["id"].as_str().unwrap(), -1).unwrap();
+        let order_of = |id: &str| {
+            conn.query_row(
+                "SELECT sort_order FROM project_segments WHERE id = ?1",
+                params![id],
+                |row| row.get::<_, f64>(0),
+            )
+            .unwrap()
+        };
+        assert!(
+            order_of(s3["id"].as_str().unwrap()) < order_of(s2["id"].as_str().unwrap()),
+            "前移后 s3 应排到 s2 之前"
+        );
+        assert!(
+            crate::db::project::move_segment_inner(&conn, "ghost", -1).is_err(),
+            "片段不存在应被拒绝"
+        );
+
+        // 产出视频：不存在拒绝；挂上后 overview 带出 asset；删素材置空。
+        conn.execute(
+            "INSERT INTO project_assets (id, file_path, kind, name, shot_id, episode_id, created_at, updated_at) \
+             VALUES ('v1', 'v1.mp4', 'video', 'v1', '', 'e1', '2026-01-01', '2026-01-01')",
+            [],
+        )
+        .unwrap();
+        assert!(
+            crate::db::project::set_segment_asset_inner(&conn, s1["id"].as_str().unwrap(), Some("nope")).is_err(),
+            "不存在的素材应被拒绝"
+        );
+        crate::db::project::set_segment_asset_inner(&conn, s1["id"].as_str().unwrap(), Some("v1"))
+            .unwrap();
+        let overview =
+            crate::db::project::episode_overview_inner(&conn, "e1", &std::env::temp_dir()).unwrap();
+        assert_eq!(overview["segments"].as_array().unwrap().len(), 3);
+        assert_eq!(
+            overview["segments"][0]["asset"]["id"], "v1",
+            "overview 应按拼接序带出片段与其产出素材"
+        );
+
+        // 输入口连线：剧本口要求集已挂接剧本；未知端口/来源拒绝；幂等。
+        assert!(
+            crate::db::project::link_node_inner(&conn, "e1", "script", "e1", s2["id"].as_str().unwrap(), "script").is_err(),
+            "未挂接剧本时应被拒绝"
+        );
+        conn.execute(
+            "UPDATE project_episodes SET script_path = 'e1.md', updated_at = '2026-01-01' WHERE id = 'e1'",
+            [],
+        )
+        .unwrap();
+        crate::db::project::link_node_inner(&conn, "e1", "script", "e1", s2["id"].as_str().unwrap(), "script")
+            .unwrap();
+        crate::db::project::link_node_inner(&conn, "e1", "script", "e1", s2["id"].as_str().unwrap(), "script")
+            .unwrap();
+        assert!(
+            crate::db::project::link_node_inner(&conn, "e1", "ghost", "x", s2["id"].as_str().unwrap(), "other").is_err(),
+            "未知来源类型应被拒绝"
+        );
+        assert!(
+            crate::db::project::link_node_inner(&conn, "e1", "asset", "v1", s2["id"].as_str().unwrap(), "nonsense").is_err(),
+            "未知输入口应被拒绝"
+        );
+        // 片段→片段续生成线（视频进其他口）。
+        crate::db::project::link_node_inner(&conn, "e1", "segment", s1["id"].as_str().unwrap(), s2["id"].as_str().unwrap(), "other")
+            .unwrap();
+
+        let overview =
+            crate::db::project::episode_overview_inner(&conn, "e1", &std::env::temp_dir()).unwrap();
+        assert_eq!(overview["node_links"].as_array().unwrap().len(), 2, "重复连线应幂等忽略");
+
+        // 删片段后其输入口连线级联消失。
+        crate::db::project::remove_segment_inner(&conn, s2["id"].as_str().unwrap()).unwrap();
+        let overview =
+            crate::db::project::episode_overview_inner(&conn, "e1", &std::env::temp_dir()).unwrap();
+        assert_eq!(overview["segments"].as_array().unwrap().len(), 2);
+        assert_eq!(overview["node_links"].as_array().unwrap().len(), 0, "片段删除应级联清掉输入口连线");
+
+        // 删产出素材后片段保留、产出置空（ON DELETE SET NULL）。
+        conn.execute("DELETE FROM project_assets WHERE id = 'v1'", []).unwrap();
+        let overview =
+            crate::db::project::episode_overview_inner(&conn, "e1", &std::env::temp_dir()).unwrap();
+        assert!(overview["segments"][0]["asset_id"].is_null());
+    }
+
+    #[test]
+    fn episode_locations_roundtrip() {
+        // 本集场景关联（画布场景节点数据源）：整组替换 + overview 带出
+        // 完整场景对象与 location_ids。
+        let conn = project_conn();
+        conn.execute(
+            "INSERT INTO project_shows (id, name, note, created_at, updated_at) \
+             VALUES ('s1', '剧', '', '2026-01-01', '2026-01-01')",
+            [],
+        )
+        .unwrap();
+        conn.execute(
+            "INSERT INTO project_episodes (id, show_id, number, title, status, script_path, sort_order, created_at, updated_at) \
+             VALUES ('e1', 's1', 1, '', 'none', '', 0, '2026-01-01', '2026-01-01')",
+            [],
+        )
+        .unwrap();
+        for id in ["l1", "l2"] {
+            conn.execute(
+                "INSERT INTO project_locations (id, name, int_ext, time_hint, bio, prompt, ref_path, created_at, updated_at) \
+                 VALUES (?1, ?1, 'INT', 'DAY', '', '', '', '2026-01-01', '2026-01-01')",
+                params![id],
+            )
+            .unwrap();
+        }
+        conn.execute(
+            "INSERT INTO project_episode_locations (episode_id, location_id) VALUES ('e1', 'l1')",
+            [],
+        )
+        .unwrap();
+        conn.execute(
+            "INSERT INTO project_episode_locations (episode_id, location_id) VALUES ('e1', 'l2')",
+            [],
+        )
+        .unwrap();
+        let overview =
+            crate::db::project::episode_overview_inner(&conn, "e1", &std::env::temp_dir()).unwrap();
+        assert_eq!(overview["locations"].as_array().unwrap().len(), 2);
+        assert_eq!(overview["locations"][0]["id"], "l1");
+        assert_eq!(overview["episode"]["location_ids"].as_array().unwrap().len(), 2);
+    }
+
+    #[test]
     fn episodes_list_returns_sorted_with_stats() {
         // 剧集树主查询（带参 SQL 的防回归锚点）：按 sort_order 排序
         // （reorder 写的就是它，集号 number 仅作次序兜底），附镜头总数/
