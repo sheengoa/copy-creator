@@ -115,6 +115,22 @@ export interface ProjectPrompt {
   updated_at: string;
 }
 
+/** 工程侧可打开的全局面板（三库 + 提示词库）。 */
+export type ProjectPanelKind = "characters" | "locations" | "props" | "prompts";
+
+export interface ProjectLibraryPanelState {
+  kind: ProjectPanelKind;
+  mode: "browse" | "pick";
+}
+
+export interface ProjectSearchItem {
+  kind: "show" | "episode" | "character" | "location" | "prop" | "prompt";
+  id: string;
+  title: string | null;
+  show_id?: string | null;
+  content?: string | null;
+}
+
 export interface EpisodeOverview {
   episode: ProjectEpisode;
   characters: ProjectCharacter[];
@@ -136,6 +152,9 @@ interface ProjectStoreState {
   props: ProjectProp[];
   prompts: ProjectPrompt[];
   locateRequest: { path: string; token: number } | null;
+  libraryPanel: ProjectLibraryPanelState | null;
+  searchResults: ProjectSearchItem[];
+  searchLoading: boolean;
 
   setView: (view: ResourceViewMode) => void;
   loadShows: () => Promise<void>;
@@ -228,6 +247,11 @@ interface ProjectStoreState {
   locateInFileView: (relativePath: string) => void;
   /** 文件视图消费定位请求后清除（token 递增保证同路径重复定位也生效）。 */
   consumeLocateRequest: () => { path: string; token: number } | null;
+
+  openLibraryPanel: (kind: ProjectPanelKind) => void;
+  closeLibraryPanel: () => void;
+  /** 工程跨表搜索（防抖由调用方负责）。 */
+  runProjectSearch: (query: string) => Promise<void>;
 }
 
 const VIEW_STORAGE_KEY = "resource_view_mode";
@@ -269,6 +293,9 @@ export const useProjectStore = create<ProjectStoreState>((set, get) => ({
   props: [],
   prompts: [],
   locateRequest: null,
+  libraryPanel: null,
+  searchResults: [],
+  searchLoading: false,
 
   setView: (view) => {
     writeStored(VIEW_STORAGE_KEY, view);
@@ -760,5 +787,29 @@ export const useProjectStore = create<ProjectStoreState>((set, get) => ({
     if (!locateRequest) return null;
     set({ locateRequest: null });
     return locateRequest;
+  },
+
+  openLibraryPanel: (kind) => {
+    set({ libraryPanel: { kind, mode: "browse" } });
+  },
+
+  closeLibraryPanel: () => {
+    set({ libraryPanel: null });
+  },
+
+  runProjectSearch: async (query) => {
+    const keyword = query.trim();
+    if (!keyword) {
+      set({ searchResults: [], searchLoading: false });
+      return;
+    }
+    set({ searchLoading: true });
+    try {
+      const results = await invoke<ProjectSearchItem[]>("project_search", { query: keyword });
+      set({ searchResults: results, searchLoading: false });
+    } catch (error) {
+      console.error("project_search failed:", error);
+      set({ searchResults: [], searchLoading: false });
+    }
   },
 }));

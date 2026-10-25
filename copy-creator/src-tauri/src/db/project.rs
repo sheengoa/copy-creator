@@ -1614,3 +1614,75 @@ pub fn project_get_episode_overview(
         "loose_assets": loose_assets,
     }))
 }
+
+// ── 工程搜索 ────────────────────────────────────────────────
+
+/// 跨表搜索工程实体（剧/集/角色/场景/道具/提示词）：LIKE 逐表扫描。
+/// 工程数据为个人创作库量级（百级），LIKE 足够且免维护 FTS 影子表；
+/// 关键词经 to_lowercase 后与 lower(列) 比较（大小写不敏感，中文不受
+/// 影响）；提示词额外搜内容正文。
+#[tauri::command]
+pub fn project_search(app: AppHandle, query: String) -> Result<Vec<serde_json::Value>, String> {
+    let keyword = query.trim().to_lowercase();
+    if keyword.is_empty() {
+        return Ok(Vec::new());
+    }
+    let pattern = format!("%{keyword}%");
+    let state = app.state::<DbState>();
+    let conn = state.conn.lock().map_err(|e| e.to_string())?;
+    let mut results: Vec<serde_json::Value> = Vec::new();
+
+    // (kind, 表, 匹配列, 取列)：统一产出 kind/title/id 及跳转所需外键。
+    let tables: [(&str, &str, &str, &str); 6] = [
+        ("show", "project_shows", "name", "id, name AS title"),
+        ("episode", "project_episodes", "title", "id, title, show_id"),
+        ("character", "project_characters", "name", "id, name AS title"),
+        ("location", "project_locations", "name", "id, name AS title"),
+        ("prop", "project_props", "name", "id, name AS title"),
+        (
+            "prompt",
+            "project_prompts",
+            "title",
+            "id, title, content",
+        ),
+    ];
+    for (kind, table, column, select) in tables {
+        // 提示词额外搜内容正文；其余表只搜名称/标题列。
+        let content_clause = if kind == "prompt" {
+            " OR lower(content) LIKE ?1"
+        } else {
+            ""
+        };
+        let sql = format!(
+            "SELECT '{kind}' AS kind, {select} FROM {table} \
+             WHERE lower({column}) LIKE ?1{content_clause} LIMIT 20"
+        );
+        let mut stmt = conn.prepare(&sql).map_err(|e| e.to_string())?;
+        // 列名先收集成自有 Vec：闭包内借用 stmt 查列名会与 query_map 的
+        // 可变借用冲突。
+        let column_names: Vec<String> = (0..stmt.column_count())
+            .filter_map(|index| stmt.column_name(index).ok().map(|name| name.to_string()))
+            .collect();
+        let rows = stmt
+            .query_map(params![&pattern], |row| {
+                let mut value = serde_json::Map::new();
+                for (index, name) in column_names.iter().enumerate() {
+                    if name == "kind" {
+                        value.insert("kind".into(), serde_json::json!(kind));
+                    } else if let Ok(text) = row.get::<_, Option<String>>(index) {
+                        value.insert(name.clone(), serde_json::json!(text));
+                    }
+                }
+                Ok(serde_json::Value::Object(value))
+            })
+            .map_err(|e| e.to_string())?
+            .filter_map(|r| r.ok())
+            .collect::<Vec<_>>();
+        results.extend(rows);
+        if results.len() >= 50 {
+            results.truncate(50);
+            break;
+        }
+    }
+    Ok(results)
+}

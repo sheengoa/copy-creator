@@ -568,6 +568,16 @@
       "reveal": "在文件管理器显示",
       "locate": "在资源库中显示",
       "traceBadge": "↳ {{title}}"
+    },
+    "search": {
+      "kind": {
+        "show": "剧",
+        "episode": "集",
+        "character": "角色",
+        "location": "场景",
+        "prop": "道具",
+        "prompt": "提示词"
+      }
     }
   },
   "common": {

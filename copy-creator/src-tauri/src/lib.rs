@@ -569,6 +569,7 @@ pub fn run() {
             db::project_update_prompt,
             db::project_delete_prompt,
             db::project_get_episode_overview,
+            db::project_search,
             media_server::get_media_server_origin,
             shortcut::update_shortcut,
             shortcut::update_radial_shortcut,

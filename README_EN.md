@@ -53,6 +53,15 @@ Copy Creator is a lightweight cross-platform (Windows / Linux) desktop productiv
 - Supports `{{date}}` `{{time}}` `{{datetime}}` `{{clipboard}}` placeholders, expanded on paste
 - Click to paste directly without manual copying
 
+### 🎬 Project (AI Video Production)
+- One-click "Files / Project" view switch inside the Resources page; the Files view stays unchanged
+- Four-layer structure: Show → Episode → Scene → Shot, with an episode status machine (new/script/storyboard/generating/done), scenes linked to the global location library (INT/EXT + time-of-day), and shots carrying description/dialogue/cast/props
+- Global libraries reused across shows: characters (bio prompt + portrait shown side by side), locations, and props; link a character to an episode in one click
+- Asset linking: link library files to an episode or a shot (one file, one record); project records follow file renames, moves and whole-group migrations automatically
+- Generation tracing: one-click copy prompt library (categorized by scene/character/shot); assets record "generated from which prompt / which source asset", forming an explicit prompt → image → video chain
+- Cross-view locating: "Show in library" jumps back to the Files view at the asset's group
+- Deleting project structures (shows/episodes/scenes/shots) only removes metadata — asset files always stay in the library
+
 ### 🧭 Radial Menu
 - A quick panel pops up at the mouse cursor, with Clipboard / Phrases / Resources tabs
 - The Resources tab supports batch operations on a whole group:

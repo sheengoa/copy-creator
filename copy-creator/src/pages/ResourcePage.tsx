@@ -52,6 +52,7 @@ import { getResourceTitle } from "../domain/records";
 import ResourceMoveDialog from "./ResourcePage/ResourceMoveDialog";
 import ProjectView from "./ResourcePage/ProjectView";
 import ProjectViewSwitch from "./ResourcePage/ProjectViewSwitch";
+import ProjectSearchResults from "./ResourcePage/ProjectSearchResults";
 import { isResourceRecord } from "../domain/records";
 
 type ResourceGroupDialogState = {
@@ -190,6 +191,9 @@ export default function ResourcePage() {
   const [trashOpen, setTrashOpen] = useState(false);
   // 工程视图与文件视图共用本页工具行与对话框，仅内容区切换。
   const projectView = useProjectStore((state) => state.view);
+  const runProjectSearch = useProjectStore((state) => state.runProjectSearch);
+  const searchResults = useProjectStore((state) => state.searchResults);
+  const clearProjectSearch = useProjectStore((state) => state.runProjectSearch);
   const [trashCount, setTrashCount] = useState(0);
 
   // —— 缺失追溯与清理 ——
@@ -642,6 +646,19 @@ export default function ResourcePage() {
     setStoreResourceGroup(name);
   }, [cancelResourceSelection, setStoreResourceGroup]);
 
+  // 工程视图下工具行搜索框联动跨实体搜索（300ms 防抖）；文件视图仍走
+  // 原记录搜索，工程结果清空。
+  useEffect(() => {
+    if (projectView !== "project") {
+      if (searchResults.length > 0) void clearProjectSearch("");
+      return;
+    }
+    const timer = window.setTimeout(() => {
+      void runProjectSearch(search);
+    }, 300);
+    return () => window.clearTimeout(timer);
+  }, [projectView, search, runProjectSearch, clearProjectSearch, searchResults.length]);
+
   // 工程侧「在资源库中显示」：切回文件视图并定位到素材所在分组
   // （path 首段；库根文件为未分组）。分组级定位，卡片级高亮后续打磨。
   const locateRequest = useProjectStore((state) => state.locateRequest);
@@ -649,7 +666,11 @@ export default function ResourcePage() {
     if (!locateRequest) return;
     const group = locateRequest.path.split("/")[0] ?? "";
     handleSelectResourceGroup(group || null);
-  }, [locateRequest, handleSelectResourceGroup]);
+    // 按文件名（去扩展名）过滤列表，目标文件立即可见；清空搜索即回全组。
+    const fileName = locateRequest.path.split("/").pop() ?? "";
+    const stem = fileName.replace(/\.[^.]+$/, "");
+    if (stem) setSearch(stem);
+  }, [locateRequest, handleSelectResourceGroup, setSearch]);
 
   const openNewResourceGroup = useCallback((parentPath?: string) => {
     setResourceGroupName("");
@@ -1211,6 +1232,14 @@ export default function ResourcePage() {
 
       {/* 文件视图 / 工程视图切换：与工具行共用，回收站全屏时隐藏 */}
       {!trashOpen && <ProjectViewSwitch />}
+
+      {!trashOpen && projectView === "project" && search.trim() !== "" && (
+        <ProjectSearchResults
+          onJumped={() => {
+            setSearch("");
+          }}
+        />
+      )}
 
       {resourceSettingsOpen && !trashOpen && (
         <section

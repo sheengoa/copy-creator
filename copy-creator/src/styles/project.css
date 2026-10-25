@@ -1764,3 +1764,83 @@
 [data-theme="dark"] .project-mini-btn.copied {
   color: #42d06a;
 }
+
+/* --- 工程搜索结果浮层 --- */
+.project-search-results {
+  position: relative;
+  z-index: 25;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 5px;
+  border: 1px solid var(--card-border);
+  border-radius: 10px;
+  background: var(--bg-card);
+  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.12), 0 0 0 0.5px rgba(0, 0, 0, 0.04);
+  flex-shrink: 0;
+  max-height: 260px;
+  overflow-y: auto;
+}
+
+.project-search-empty {
+  padding: 12px;
+  text-align: center;
+  color: var(--text-secondary);
+  font-size: var(--text-sm);
+}
+
+.project-search-item {
+  height: 34px;
+  border: none;
+  border-radius: 7px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 0 10px;
+  background: transparent;
+  color: var(--text-primary);
+  font-family: var(--font);
+  font-size: var(--text-sm);
+  cursor: pointer;
+  min-width: 0;
+}
+
+.project-search-item:hover {
+  background: var(--chip-hover-bg);
+}
+
+.project-search-item svg {
+  width: 13px;
+  height: 13px;
+  color: var(--text-secondary);
+  flex-shrink: 0;
+}
+
+.project-search-kind {
+  flex-shrink: 0;
+  height: 18px;
+  padding: 0 6px;
+  border-radius: 5px;
+  display: inline-flex;
+  align-items: center;
+  background: var(--chip-bg);
+  color: var(--text-secondary);
+  font-size: var(--text-xs);
+}
+
+.project-search-title {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.project-search-sub {
+  min-width: 0;
+  flex: 0 1 40%;
+  font-size: var(--text-xs);
+  color: var(--text-secondary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}

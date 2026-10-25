@@ -27,13 +27,7 @@ import {
   episodeStatusKey,
   joinLibraryPath,
   scriptFileLabel,
-  type LibraryKind,
 } from "../../domain/projectView";
-
-interface LibraryPanelState {
-  kind: LibraryKind;
-  mode: "browse" | "pick";
-}
 
 /** 工程视图：资源页内与文件视图并列的剧集工作台。数据全部来自
  *  projectStore；后端 project-changed 事件统一驱动重取。 */
@@ -55,6 +49,9 @@ export default function ProjectView() {
     unlinkAsset,
     prompts,
     loadPrompts,
+    libraryPanel,
+    openLibraryPanel,
+    closeLibraryPanel,
   } = useProjectStore(
     useShallow((state) => ({
       shows: state.shows,
@@ -72,6 +69,9 @@ export default function ProjectView() {
       unlinkAsset: state.unlinkAsset,
       prompts: state.prompts,
       loadPrompts: state.loadPrompts,
+      libraryPanel: state.libraryPanel,
+      openLibraryPanel: state.openLibraryPanel,
+      closeLibraryPanel: state.closeLibraryPanel,
     })),
   );
 
@@ -79,9 +79,8 @@ export default function ProjectView() {
   const [scriptPreview, setScriptPreview] = useState<string | null>(null);
   const [deleteTarget, setDeleteTarget] = useState<ProjectEpisode | null>(null);
   const [renamingEpisode, setRenamingEpisode] = useState(false);
-  const [libraryPanel, setLibraryPanel] = useState<LibraryPanelState | null>(null);
+  const [castPickOpen, setCastPickOpen] = useState(false);
   const [assetPickerShotId, setAssetPickerShotId] = useState<string | null>(null);
-  const [promptPanelOpen, setPromptPanelOpen] = useState(false);
   const [sheetAsset, setSheetAsset] = useState<ProjectAsset | null>(null);
   const renameInputRef = useRef<HTMLInputElement>(null);
 
@@ -225,7 +224,7 @@ export default function ProjectView() {
             key={kind}
             type="button"
             className="project-lib-row"
-            onClick={() => setLibraryPanel({ kind, mode: "browse" })}
+            onClick={() => openLibraryPanel(kind)}
           >
             <span className="project-lib-icon">
               {kind === "characters" ? Icons.clipboard : kind === "locations" ? Icons.resources : Icons.star}
@@ -237,7 +236,7 @@ export default function ProjectView() {
         <button
           type="button"
           className="project-lib-row"
-          onClick={() => setPromptPanelOpen(true)}
+          onClick={() => openLibraryPanel("prompts")}
         >
           <span className="project-lib-icon">{Icons.copy}</span>
           <span className="project-lib-name">{t("project.prompt.title")}</span>
@@ -344,7 +343,7 @@ export default function ProjectView() {
                 <button
                   type="button"
                   className="project-cast-add"
-                  onClick={() => setLibraryPanel({ kind: "characters", mode: "pick" })}
+                  onClick={() => setCastPickOpen(true)}
                 >
                   {Icons.add}
                   {t("project.cast.link")}
@@ -476,34 +475,39 @@ export default function ProjectView() {
         <ProjectAssetPicker shotId={assetPickerShotId} onClose={() => setAssetPickerShotId(null)} />
       )}
 
-      {promptPanelOpen && <ProjectPromptPanel onClose={() => setPromptPanelOpen(false)} />}
-
       {sheetAsset && <ProjectAssetSheet asset={sheetAsset} onClose={() => setSheetAsset(null)} />}
 
-      {libraryPanel && (
+      {/* 全局面板（树底入口/搜索跳转）：三库浏览或提示词库 */}
+      {libraryPanel?.kind === "prompts" && (
+        <ProjectPromptPanel onClose={() => closeLibraryPanel()} />
+      )}
+      {libraryPanel && libraryPanel.kind !== "prompts" && (
         <ProjectLibraryPanel
           kind={libraryPanel.kind}
-          mode={libraryPanel.mode}
-          onClose={() => setLibraryPanel(null)}
-          pickTitle={
-            libraryPanel.mode === "pick" && currentEpisode
-              ? t("project.cast.pickTitle", {
-                  number: episodeNumberLabel(currentEpisode.number),
-                  title: currentEpisode.title || t("project.episode.untitled"),
-                })
-              : undefined
-          }
-          linkedIds={
-            libraryPanel.mode === "pick" ? (overview?.episode.character_ids ?? []) : undefined
-          }
+          mode="browse"
+          onClose={() => closeLibraryPanel()}
+        />
+      )}
+
+      {/* 集工作台的单选关联角色（pick）：本地交互不入全局面板状态 */}
+      {castPickOpen && currentEpisode && (
+        <ProjectLibraryPanel
+          kind="characters"
+          mode="pick"
+          onClose={() => setCastPickOpen(false)}
+          pickTitle={t("project.cast.pickTitle", {
+            number: episodeNumberLabel(currentEpisode.number),
+            title: currentEpisode.title || t("project.episode.untitled"),
+          })}
+          linkedIds={overview?.episode.character_ids ?? []}
           onPick={
-            libraryPanel.mode === "pick" && currentEpisodeId
+            currentEpisodeId
               ? (id) => {
                   const existing = overview?.episode.character_ids ?? [];
                   if (!existing.includes(id)) {
                     void setEpisodeCharacters(currentEpisodeId, [...existing, id]);
                   }
-                  setLibraryPanel(null);
+                  setCastPickOpen(false);
                 }
               : undefined
           }

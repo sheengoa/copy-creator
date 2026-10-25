@@ -568,6 +568,16 @@
       "reveal": "Reveal in file manager",
       "locate": "Show in library",
       "traceBadge": "↳ {{title}}"
+    },
+    "search": {
+      "kind": {
+        "show": "Show",
+        "episode": "Episode",
+        "character": "Character",
+        "location": "Location",
+        "prop": "Prop",
+        "prompt": "Prompt"
+      }
     }
   },
   "common": {
