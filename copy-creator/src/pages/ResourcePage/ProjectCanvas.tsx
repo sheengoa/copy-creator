@@ -9,10 +9,12 @@ import {
   type ProjectShot,
 } from "../../stores/projectStore";
 import { ConfirmDialog } from "../../components/ConfirmDialog";
-import { ResourceFileImage, ResourceVideoPoster } from "./ResourceMedia";
+import { ResourceFileImage, ResourceVideoPoster, ResourceImage } from "./ResourceMedia";
 import { Icons } from "../../components/Icons";
 import { openResourceFile, readResourceTextPreview } from "../../domain/mediaAssets";
 import {
+  characterAvatarInitial,
+  characterAvatarPaletteIndex,
   intExtLabelKey,
   joinLibraryPath,
   locationSubtitleParts,
@@ -20,64 +22,85 @@ import {
 } from "../../domain/projectView";
 
 // ── 布局常量（世界像素） ──────────────────────────────────────
-const FRAME_MIN_W = 440;
-const FRAME_MIN_H = 300;
-const FRAME_PAD_X = 36;
-const FRAME_PAD_TOP = 64;
-const GRID_GAP = 22;
-const TAG_ZONE = 26; // 节点上方便镜归属签的呼吸空间
-const MEDIA_RATIO = 0.62; // 画布统一节点比例（盒稳定，连线/框尺寸可算）
-const TEXT_RATIO = 0.72;
+const FRAME_MIN_W = 340;
+const FRAME_MIN_H = 260;
+const FRAME_PAD_X = 32;
+const FRAME_PAD_TOP = 60;
+const FRAME_PAD_BOTTOM = 32;
+const CARD_GAP = 24;
+const CARD_W = 268; // 镜头卡宽
+const CARD_HEAD_H = 44; // 卡头（镜头号 + 描述）
+const THUMB_W = 116; // 卡内素材缩略宽（两列）
+const THUMB_RATIO = 0.68;
+const THUMB_GAP = 8;
+const LOOSE_W = 200;
+const LOOSE_RATIO = 0.62;
 const MISSING_W = 170;
-const MISSING_H = 120;
-const SHOTCARD_W = 210;
-const SHOTCARD_H = 96;
-const DEFAULT_NODE_W = 220;
+const MISSING_H = 96;
+const INFO_W = 132; // 资料卡宽（角色/道具/剧本）
+const INFO_H = 156;
+const SCRIPT_W = 210;
 const WORLD_MARGIN = 60;
-const SCENE_PITCH = 480; // 未摆放场景的横向间距
+const SCENE_PITCH = 380;
 const MINI_W = 150;
 const MINI_H = 96;
 
-type Pos = { x: number; y: number; w?: number };
-type PosMap = { nodes: Record<string, Pos>; frames: Record<string, Pos> };
+type Pos = { x: number; y: number };
+type PosMap = { cards: Record<string, Pos>; loose: Record<string, Pos>; info?: Pos };
 
-interface CanvasNode {
-  key: string; // `asset:<id>` | `shot:<id>`
-  kind: "asset" | "shotcard";
-  group: string; // sceneId 或 "loose"
-  asset?: ProjectAsset;
-  shot?: ProjectShot;
+interface CardAsset {
+  asset: ProjectAsset;
   w: number;
   h: number;
 }
 
+/** 镜头卡（含素材网格）/ 散件 / 资料节点的统一渲染模型。 */
+interface CanvasCard {
+  key: string; // `shot:<id>`
+  shot: ProjectShot;
+  sceneId: string;
+  w: number;
+  h: number;
+  assets: CardAsset[];
+}
+interface CanvasLoose {
+  key: string; // `asset:<id>`
+  asset: ProjectAsset;
+  w: number;
+  h: number;
+}
+interface CanvasInfo {
+  key: string; // `char:<id>` | `prop:<id>` | `script`
+  kind: "character" | "prop" | "script";
+  name: string;
+  avatarPath: string; // 角色头像（相对库根）
+  textPath: string; // 剧本正文（相对库根）
+  w: number;
+  h: number;
+}
 interface CanvasFrame {
-  id: string; // sceneId 或 "loose"
+  id: string; // sceneId | "loose" | "info"
   scene: ProjectScene | null;
+  label: string;
   w: number;
   h: number;
 }
 
 interface CanvasLayout {
-  nodes: CanvasNode[];
+  cards: CanvasCard[];
+  looses: CanvasLoose[];
+  infos: CanvasInfo[];
   frames: CanvasFrame[];
-  nodePos: Record<string, Pos>;
-  framePos: Record<string, Pos>;
+  cardPos: Record<string, Pos>;
+  loosePos: Record<string, Pos>;
+  infoFramePos: Pos;
   worldW: number;
   worldH: number;
 }
 
-interface WireBox {
-  x: number;
-  y: number;
+interface WireBox extends Pos {
   w: number;
   h: number;
-}
-
-function nodeSize(asset: ProjectAsset, w: number): { w: number; h: number } {
-  if (asset.missing) return { w: MISSING_W, h: MISSING_H };
-  if (asset.kind === "text") return { w, h: Math.round(w * TEXT_RATIO) };
-  return { w, h: Math.round(w * MEDIA_RATIO) };
 }
 
 function wirePathD(a: WireBox, b: WireBox): string {
@@ -102,15 +125,25 @@ function wirePathD(a: WireBox, b: WireBox): string {
   return `M ${a.x} ${aMY} C ${a.x - c} ${aMY}, ${b.x + b.w + c} ${bMY}, ${b.x + b.w} ${bMY}`;
 }
 
-/** 确定性自动布局：已摆放的实体用存储坐标，未摆放的按场景横排 +
- *  组内网格 + 散件集级网格铺开。纯函数（overview 变化即重建）。 */
+/** 镜头卡尺寸：卡头 + 素材两列网格（空镜头为挂靠占位高度）。 */
+function shotCardSize(shot: ProjectShot): { w: number; h: number } {
+  const rows = Math.ceil(shot.assets.length / 2);
+  const gridH = shot.assets.length
+    ? rows * (THUMB_W * THUMB_RATIO + THUMB_GAP) + 10
+    : 64;
+  return { w: CARD_W, h: CARD_HEAD_H + gridH };
+}
+
+/** 确定性自动布局：已摆放的镜头卡/散件用存储坐标；未摆放的按场景
+ *  横排 + 框内网格补位（跳过已占用格位，避免新卡叠在旧卡下）。 */
 function buildLayout(
   scenes: ProjectScene[],
   looseAssets: ProjectAsset[],
-): CanvasLayout {
-  const nodePos: Record<string, Pos> = {};
-  const framePos: Record<string, Pos> = {};
-  const nodes: CanvasNode[] = [];
+): Omit<CanvasLayout, "infoFramePos"> {
+  const cardPos: Record<string, Pos> = {};
+  const loosePos: Record<string, Pos> = {};
+  const cards: CanvasCard[] = [];
+  const looses: CanvasLoose[] = [];
   const frames: CanvasFrame[] = [];
   let worldW = 1200;
   let worldH = 900;
@@ -118,123 +151,137 @@ function buildLayout(
   scenes.forEach((scene, index) => {
     const fx = scene.canvas_x ?? WORLD_MARGIN + index * SCENE_PITCH;
     const fy = scene.canvas_y ?? 110;
-    framePos[scene.id] = { x: fx, y: fy };
-    const placed: { key: string; w: number; h: number }[] = [];
-    const pending: { key: string; w: number; h: number; asset: ProjectAsset | null }[] = [];
+    const sceneCards: CanvasCard[] = [];
+    const occupied = new Set<string>(); // 已摆放卡占用的网格格位
+    const CELL_W = CARD_W + CARD_GAP;
+    const cellKey = (col: number, row: number) => `${col}:${row}`;
+
     scene.shots.forEach((shot) => {
-      if (shot.assets.length === 0) {
-        nodePos[`shot:${shot.id}`] =
-          shot.canvas_x != null && shot.canvas_y != null
-            ? { x: shot.canvas_x, y: shot.canvas_y }
-            : { x: 0, y: 0 };
-        pending.push({ key: `shot:${shot.id}`, w: SHOTCARD_W, h: SHOTCARD_H, asset: null });
-      }
-      shot.assets.forEach((asset) => {
-        const size = nodeSize(asset, asset.canvas_w ?? DEFAULT_NODE_W);
-        const fixed = asset.canvas_x != null && asset.canvas_y != null;
-        nodePos[`asset:${asset.id}`] = fixed
-          ? { x: asset.canvas_x as number, y: asset.canvas_y as number, w: size.w }
-          : { x: 0, y: 0, w: size.w };
-        if (fixed) {
-          placed.push({ key: `asset:${asset.id}`, w: size.w, h: size.h });
-        } else {
-          pending.push({ key: `asset:${asset.id}`, w: size.w, h: size.h, asset });
+      const size = shotCardSize(shot);
+      const fixed =
+        shot.canvas_x != null && shot.canvas_y != null
+          ? { x: shot.canvas_x, y: shot.canvas_y }
+          : null;
+      if (fixed) {
+        cardPos[shot.id] = fixed;
+        // 反推占用格位（以框原点为网格原点）。
+        const col = Math.round((fixed.x - fx - FRAME_PAD_X) / CELL_W);
+        const row = Math.round((fixed.y - fy - FRAME_PAD_TOP) / CELL_W);
+        for (let dc = -1; dc <= 1; dc++) {
+          for (let dr = -1; dr <= 1; dr++) occupied.add(cellKey(col + dc, row + dr));
         }
-      });
-    });
-    // 未摆放成员按组内网格补位（避开已摆放成员的包围区）。
-    let col = 0;
-    let rowH = 0;
-    let cursorX = fx + FRAME_PAD_X;
-    let cursorY = fy + FRAME_PAD_TOP;
-    pending.forEach((member) => {
-      if (col === 3) {
-        col = 0;
-        cursorX = fx + FRAME_PAD_X;
-        cursorY += rowH + GRID_GAP + TAG_ZONE;
-        rowH = 0;
       }
-      nodePos[member.key] = { x: cursorX, y: cursorY, w: member.w };
-      cursorX += member.w + GRID_GAP;
-      rowH = Math.max(rowH, member.h);
-      col += 1;
+      const assets: CardAsset[] = shot.assets.map((asset) => {
+        const w = THUMB_W;
+        return { asset, w, h: Math.round(w * THUMB_RATIO) };
+      });
+      sceneCards.push({ key: `shot:${shot.id}`, shot, sceneId: scene.id, w: size.w, h: size.h, assets });
     });
-    void rowH;
-    const all = [...placed, ...pending.map((m) => ({ key: m.key, w: m.w, h: m.h }))];
-    const maxX = Math.max(fx + FRAME_MIN_W, ...all.map((m) => nodePos[m.key].x + m.w));
-    const maxY = Math.max(fy + FRAME_MIN_H, ...all.map((m) => nodePos[m.key].y + m.h));
-    frames.push({ id: scene.id, scene, w: maxX - fx, h: maxY - fy });
+
+    // 未摆放卡按网格找空位（3 列，跳过占用）。
+    let col = 0;
+    let row = 0;
+    sceneCards.forEach((card) => {
+      if (cardPos[card.shot.id]) return;
+      while (occupied.has(cellKey(col, row))) {
+        col += 1;
+        if (col === 3) {
+          col = 0;
+          row += 1;
+        }
+      }
+      cardPos[card.shot.id] = { x: fx + FRAME_PAD_X + col * CELL_W, y: fy + FRAME_PAD_TOP + row * CELL_W };
+      occupied.add(cellKey(col, row));
+      const colNext = col + 1;
+      if (colNext === 3) {
+        col = 0;
+        row += 1;
+      } else {
+        col = colNext;
+      }
+    });
+
+    sceneCards.forEach((card) => {
+      const pos = cardPos[card.shot.id];
+      card.w = CARD_W;
+      card.h = shotCardSize(card.shot).h;
+      void pos;
+    });
+    cards.push(...sceneCards);
+
+    const maxX = Math.max(
+      fx + FRAME_MIN_W,
+      ...sceneCards.map((c) => cardPos[c.shot.id].x + c.w),
+    );
+    const maxY = Math.max(
+      fy + FRAME_MIN_H,
+      ...sceneCards.map((c) => cardPos[c.shot.id].y + c.h),
+    );
+    frames.push({
+      id: scene.id, scene, label: scene.heading || "",
+      w: maxX - fx, h: maxY - fy,
+    });
     worldW = Math.max(worldW, maxX + 60);
     worldH = Math.max(worldH, maxY + 60);
   });
 
-  // 集级散件：铺在所有场景框下方。
+  // 集级散件：铺在所有场景框下方，4 列网格（已摆放的用存储坐标）。
   const scenesBottom = frames.reduce((acc, frame) => {
-    const fp = framePos[frame.id];
-    return frame.id === "loose" ? acc : Math.max(acc, fp.y + frame.h);
+    const isScene = frame.id !== "loose" && frame.id !== "info";
+    if (!isScene) return acc;
+    // 场景框位置在调用方 pos state 里（布局纯函数只产尺寸），这里用
+    // frame 的默认 y 推导：所有场景框 y 已定（fx/fy 在上方算好）。
+    return acc;
   }, 0);
-  const looseY = Math.max(620, scenesBottom + 48);
-  framePos["loose"] = { x: WORLD_MARGIN, y: looseY };
-  looseAssets.forEach((asset, index) => {
-    const size = nodeSize(asset, asset.canvas_w ?? DEFAULT_NODE_W);
-    nodePos[`asset:${asset.id}`] =
-      asset.canvas_x != null && asset.canvas_y != null
-        ? { x: asset.canvas_x, y: asset.canvas_y, w: size.w }
-        : {
-            x: WORLD_MARGIN + FRAME_PAD_X + (index % 4) * (DEFAULT_NODE_W + GRID_GAP),
-            y: looseY + FRAME_PAD_TOP + Math.floor(index / 4) * (size.h + GRID_GAP + TAG_ZONE),
-            w: size.w,
-          };
-    nodes.push({
-      key: `asset:${asset.id}`, kind: "asset", group: "loose", asset,
-      w: size.w, h: size.h,
-    });
-  });
-  const looseMaxX = Math.max(
-    WORLD_MARGIN + FRAME_MIN_W,
-    ...looseAssets.map((a) => {
-      const p = nodePos[`asset:${a.id}`];
-      return (p?.x ?? 0) + (p?.w ?? 0);
-    }),
-  );
-  const looseMaxY = Math.max(
-    looseY + FRAME_MIN_H,
-    ...looseAssets.map((a) => {
-      const p = nodePos[`asset:${a.id}`];
-      return (p?.y ?? looseY) + nodeSize(a, a.canvas_w ?? DEFAULT_NODE_W).h;
-    }),
-  );
-  frames.push({
-    id: "loose", scene: null,
-    w: looseMaxX - WORLD_MARGIN, h: looseMaxY - looseY,
-  });
-  worldW = Math.max(worldW, looseMaxX + 60);
-  worldH = Math.max(worldH, looseMaxY + 60);
-
-  // 场景成员进渲染列表。
+  void scenesBottom;
+  // 场景框底部：直接由 frames 尺寸 + 已知 fy 推（fy 存在 frame.label 之外，
+  // 这里用 scenes 的 canvas 或默认值重推一次，与上方一致）。
+  let scenesMaxY = 0;
   scenes.forEach((scene) => {
-    scene.shots.forEach((shot) => {
-      if (shot.assets.length === 0) {
-        nodes.push({
-          key: `shot:${shot.id}`, kind: "shotcard", group: scene.id, shot,
-          w: SHOTCARD_W, h: SHOTCARD_H,
-        });
-      }
-      shot.assets.forEach((asset) => {
-        const size = nodeSize(asset, asset.canvas_w ?? DEFAULT_NODE_W);
-        nodes.push({
-          key: `asset:${asset.id}`, kind: "asset", group: scene.id, asset,
-          w: size.w, h: size.h,
-        });
-      });
+    const fy = scene.canvas_y ?? 110;
+    const frame = frames.find((f) => f.id === scene.id);
+    scenesMaxY = Math.max(scenesMaxY, fy + (frame?.h ?? 0));
+  });
+  const looseY = Math.max(620, scenesMaxY + 48);
+  frames.push({ id: "loose", scene: null, label: "", w: FRAME_MIN_W, h: FRAME_MIN_H });
+  looseAssets.forEach((asset, index) => {
+    loosePos[asset.id] =
+      asset.canvas_x != null && asset.canvas_y != null
+        ? { x: asset.canvas_x, y: asset.canvas_y }
+        : {
+            x: WORLD_MARGIN + FRAME_PAD_X + (index % 4) * (LOOSE_W + CARD_GAP),
+            y: looseY + FRAME_PAD_TOP + Math.floor(index / 4) * (LOOSE_W * LOOSE_RATIO + CARD_GAP + 8),
+          };
+    looses.push({
+      key: `asset:${asset.id}`, asset,
+      w: asset.missing ? MISSING_W : LOOSE_W,
+      h: asset.missing ? MISSING_H : Math.round(LOOSE_W * LOOSE_RATIO),
     });
   });
+  const looseFrame = frames.find((f) => f.id === "loose");
+  if (looseFrame) {
+    const maxX = Math.max(
+      WORLD_MARGIN + FRAME_MIN_W,
+      ...looseAssets.map((a) => loosePos[a.id].x + (looses.find((l) => l.key === `asset:${a.id}`)?.w ?? LOOSE_W)),
+    );
+    const maxY = Math.max(
+      looseY + FRAME_MIN_H,
+      ...looseAssets.map((a) => {
+        const node = looses.find((l) => l.key === `asset:${a.id}`);
+        return loosePos[a.id].y + (node?.h ?? LOOSE_W * LOOSE_RATIO);
+      }),
+    );
+    looseFrame.w = maxX - WORLD_MARGIN;
+    looseFrame.h = maxY - looseY;
+  }
+  worldW = Math.max(worldW, (looseFrame?.w ?? 0) + WORLD_MARGIN + 60);
+  worldH = Math.max(worldH, looseY + (looseFrame?.h ?? 0) + 60);
 
-  return { nodes, frames, nodePos, framePos, worldW, worldH };
+  return { cards, looses, infos: [], frames, cardPos, loosePos, worldW, worldH };
 }
 
 /** 文本纸片内容（读资源文本头部，组件内自持请求）。 */
-function TextPaperBody({ path, name }: { path: string; name: string }) {
+function TextPaperBody({ path, name, lines }: { path: string; name: string; lines?: number }) {
   const [preview, setPreview] = useState<string | null>(null);
   useEffect(() => {
     let cancelled = false;
@@ -255,22 +302,27 @@ function TextPaperBody({ path, name }: { path: string; name: string }) {
         {Icons.file}
         <span>{name}</span>
       </h5>
-      <p>{preview === null ? "…" : preview}</p>
+      <p style={lines ? { WebkitLineClamp: lines } : undefined}>{preview === null ? "…" : preview}</p>
     </div>
   );
 }
 
+function wirePath(a: WireBox, b: WireBox): string {
+  return wirePathD(a, b);
+}
+
 interface WireItem {
-  from: string; // asset id
-  to: string;
+  fromKey: string; // 容器 key：shot:<id> | asset:<id>
+  toKey: string;
   label: string;
   kind: "gen" | "manual";
 }
 
-/** 工程画布：集素材的无限画布（看/摆/连）。节点与分组框坐标持久化进
- *  工程库；视口按集记 localStorage。交互：中键平移、滚轮缩放、左键
- *  框选、多选拖动、拖场景标签牌整组移动、节点右下锚点拖出手动连线、
- *  双击素材开详情。生成链（gen_from_asset）自动画实线箭头。 */
+/** 工程画布：集素材的无限画布（看/摆/连）。镜头卡与散件坐标持久化进
+ *  工程库；资料框（出场角色/出镜道具/剧本）与视口按集记 localStorage。
+ *  交互：中键平移、滚轮缩放、左键框选、多选拖动、拖场景标签牌整组
+ *  移动、卡头锚点拖出手动连线、点击卡内素材开详情。生成链
+ *  （gen_from_asset）自动在容器（镜头卡/散件）之间画实线箭头。 */
 export default function ProjectCanvas({
   libraryRoot,
   overlay,
@@ -289,7 +341,9 @@ export default function ProjectCanvas({
   const {
     overview,
     locations,
+    props,
     loadLocations,
+    loadProps,
     saveCanvasLayout,
     linkAssets,
     unlinkAssets,
@@ -302,7 +356,9 @@ export default function ProjectCanvas({
     useShallow((state) => ({
       overview: state.overview,
       locations: state.locations,
+      props: state.props,
       loadLocations: state.loadLocations,
+      loadProps: state.loadProps,
       saveCanvasLayout: state.saveCanvasLayout,
       linkAssets: state.linkAssets,
       unlinkAssets: state.unlinkAssets,
@@ -318,12 +374,98 @@ export default function ProjectCanvas({
   const looseAssets = useMemo(() => overview?.loose_assets ?? [], [overview]);
   const links = useMemo(() => overview?.links ?? [], [overview]);
 
-  // ── 布局与位置（state 驱动渲染；拖动经 setPos 更新） ──
-  const layout = useMemo(() => buildLayout(scenes, looseAssets), [scenes, looseAssets]);
-  const [pos, setPos] = useState<PosMap>({ nodes: layout.nodePos, frames: layout.framePos });
+  // 出镜道具名（全集并集）与出场角色：资料框数据源。
+  const castCharacters = useMemo(() => overview?.characters ?? [], [overview]);
+  const propIds = useMemo(() => {
+    const ids: string[] = [];
+    scenes.forEach((scene) =>
+      scene.shots.forEach((shot) => shot.prop_ids.forEach((pid) => {
+        if (!ids.includes(pid)) ids.push(pid);
+      })),
+    );
+    return ids;
+  }, [scenes]);
+
   useEffect(() => {
-    setPos({ nodes: layout.nodePos, frames: layout.framePos });
+    if (propIds.length > 0 && props.length === 0) void loadProps();
+  }, [propIds.length, props.length, loadProps]);
+
+  // ── 资料框位置（localStorage 按集） ──
+  const [infoFramePos, setInfoFramePos] = useState<Pos | null>(null);
+  useEffect(() => {
+    try {
+      const raw = window.localStorage.getItem(`project_canvas_info_${episodeId}`);
+      setInfoFramePos(raw ? (JSON.parse(raw) as Pos) : null);
+    } catch {
+      setInfoFramePos(null);
+    }
+  }, [episodeId]);
+  const saveInfoFramePos = useCallback(
+    (next: Pos) => {
+      setInfoFramePos(next);
+      try {
+        window.localStorage.setItem(`project_canvas_info_${episodeId}`, JSON.stringify(next));
+      } catch {
+        // 存储不可用：仅不记忆。
+      }
+    },
+    [episodeId],
+  );
+
+  // ── 布局与位置（state 驱动渲染） ──
+  const layout = useMemo(() => {
+    const base = buildLayout(scenes, looseAssets);
+    return base;
+  }, [scenes, looseAssets]);
+
+  // 资料节点（出场角色/出镜道具/剧本）：资料框内网格自动排。
+  const infoNodes = useMemo(() => {
+    const list: CanvasInfo[] = [];
+    castCharacters.forEach((character) => {
+      list.push({
+        key: `char:${character.id}`, kind: "character", name: character.name,
+        avatarPath: character.avatar_path, textPath: "", w: INFO_W, h: INFO_H,
+      });
+    });
+    propIds.forEach((pid) => {
+      const prop = props.find((item) => item.id === pid);
+      if (prop) {
+        list.push({ key: `prop:${pid}`, kind: "prop", name: prop.name, avatarPath: "", textPath: "", w: INFO_W, h: INFO_H });
+      }
+    });
+    if (overview?.episode.script_path) {
+      list.push({
+        key: "script", kind: "script", name: scriptFileLabelOf(overview.episode.script_path),
+        avatarPath: "", textPath: overview.episode.script_path, w: SCRIPT_W, h: INFO_H + 40,
+      });
+    }
+    return list;
+  }, [castCharacters, propIds, props, overview]);
+
+  const infoPos = useMemo(() => {
+    const frame = infoFramePos ?? { x: WORLD_MARGIN, y: layout.worldH + 48 };
+    const map: Record<string, Pos> = {};
+    infoNodes.forEach((node, index) => {
+      map[node.key] = {
+        x: frame.x + FRAME_PAD_X + (index % 3) * (INFO_W + CARD_GAP),
+        y: frame.y + FRAME_PAD_TOP + Math.floor(index / 3) * (INFO_H + CARD_GAP),
+      };
+    });
+    return { frame, map };
+  }, [infoNodes, infoFramePos, layout.worldH]);
+
+  const [pos, setPos] = useState<PosMap>({ cards: layout.cardPos, loose: layout.loosePos });
+  useEffect(() => {
+    setPos({ cards: layout.cardPos, loose: layout.loosePos });
   }, [layout]);
+
+  const cardSizeOf = useCallback(
+    (shotId: string) => {
+      const card = layout.cards.find((c) => c.shot.id === shotId);
+      return { w: card?.w ?? CARD_W, h: card?.h ?? 120 };
+    },
+    [layout],
+  );
 
   // ── 视口：按集记 localStorage ──
   const vpRef = useRef<HTMLDivElement | null>(null);
@@ -340,7 +482,6 @@ export default function ProjectCanvas({
     [episodeId],
   );
 
-  // 视口尺寸（小地图视口框需要）。
   useEffect(() => {
     const el = vpRef.current;
     if (!el) return;
@@ -354,17 +495,19 @@ export default function ProjectCanvas({
   const fitAll = useCallback(() => {
     const el = vpRef.current;
     if (!el) return;
-    const scale = Math.min(el.clientWidth / layout.worldW, el.clientHeight / layout.worldH, 1);
+    const infoBottom = infoPos.frame.y + FRAME_PAD_TOP + Math.ceil(infoNodes.length / 3) * (INFO_H + CARD_GAP);
+    const worldW = Math.max(layout.worldW, infoPos.frame.x + FRAME_MIN_W + 60);
+    const worldH = Math.max(layout.worldH, infoBottom + 60);
+    const scale = Math.min(el.clientWidth / worldW, el.clientHeight / worldH, 1);
     const next = {
-      x: Math.max(12, (el.clientWidth - layout.worldW * scale) / 2),
-      y: Math.max(8, (el.clientHeight - layout.worldH * scale) / 2),
+      x: Math.max(12, (el.clientWidth - worldW * scale) / 2),
+      y: Math.max(8, (el.clientHeight - worldH * scale) / 2),
       scale,
     };
     setView(next);
     saveView(next);
-  }, [layout, saveView]);
+  }, [layout, infoPos, infoNodes, saveView]);
 
-  // 切集时恢复/初始化视口。
   const initializedRef = useRef("");
   useEffect(() => {
     if (!episodeId || initializedRef.current === episodeId) return;
@@ -382,7 +525,7 @@ export default function ProjectCanvas({
       fitAll();
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [episodeId]);
+  }, [episodeId, infoPos]);
 
   const zoomAt = useCallback(
     (mx: number, my: number, factor: number) => {
@@ -400,45 +543,59 @@ export default function ProjectCanvas({
     [saveView],
   );
 
-  // ── 连线数据：生成链 + 手动 ──
-  const wires = useMemo(() => {
-    const ids = new Set(
-      layout.nodes.filter((n) => n.kind === "asset").map((n) => n.key.slice(6)),
-    );
-    const list: WireItem[] = [];
-    const pushGen = (asset: ProjectAsset) => {
-      if (asset.gen_from_asset && ids.has(asset.gen_from_asset)) {
-        list.push({
-          from: asset.gen_from_asset,
-          to: asset.id,
-          label: t("project.canvas.wireGen"),
-          kind: "gen",
-        });
+  // ── 连线：容器（镜头卡/散件）之间的生成链 + 手动线 ──
+  const containerOf = useCallback(
+    (assetId: string): string | null => {
+      for (const scene of scenes) {
+        for (const shot of scene.shots) {
+          if (shot.assets.some((a) => a.id === assetId)) return `shot:${shot.id}`;
+        }
       }
+      return looseAssets.some((a) => a.id === assetId) ? `asset:${assetId}` : null;
+    },
+    [scenes, looseAssets],
+  );
+
+  const wires = useMemo(() => {
+    const list: WireItem[] = [];
+    const pushWire = (fromAsset: string, toAsset: string, label: string, kind: "gen" | "manual") => {
+      const from = containerOf(fromAsset);
+      const to = containerOf(toAsset);
+      if (!from || !to || from === to) return;
+      if (list.some((w) => w.fromKey === from && w.toKey === to && w.kind === kind)) return;
+      list.push({ fromKey: from, toKey: to, label, kind });
     };
-    scenes.forEach((scene) => scene.shots.forEach((shot) => shot.assets.forEach(pushGen)));
-    looseAssets.forEach(pushGen);
-    links.forEach((link: ProjectAssetLink) => {
-      if (ids.has(link.from_asset) && ids.has(link.to_asset)) {
-        list.push({
-          from: link.from_asset,
-          to: link.to_asset,
-          label: link.label || t("project.canvas.wireRef"),
-          kind: "manual",
-        });
+    const allAssets: ProjectAsset[] = [];
+    scenes.forEach((scene) => scene.shots.forEach((shot) => allAssets.push(...shot.assets)));
+    allAssets.push(...looseAssets);
+    allAssets.forEach((asset) => {
+      if (asset.gen_from_asset && allAssets.some((a) => a.id === asset.gen_from_asset)) {
+        pushWire(asset.gen_from_asset, asset.id, t("project.canvas.wireGen"), "gen");
       }
     });
+    links.forEach((link: ProjectAssetLink) => {
+      pushWire(link.from_asset, link.to_asset, link.label || t("project.canvas.wireRef"), "manual");
+    });
     return list;
-  }, [layout, scenes, looseAssets, links, t]);
+  }, [scenes, looseAssets, links, containerOf, t]);
 
   const boxOf = useCallback(
-    (assetId: string): WireBox | null => {
-      const node = layout.nodes.find((n) => n.key === `asset:${assetId}`);
-      const p = pos.nodes[node?.key ?? ""];
-      if (!node || !p) return null;
-      return { x: p.x, y: p.y, w: node.w, h: node.h };
+    (key: string): WireBox | null => {
+      if (key.startsWith("shot:")) {
+        const shotId = key.slice(5);
+        const size = cardSizeOf(shotId);
+        const p = pos.cards[shotId];
+        return p ? { x: p.x, y: p.y, w: size.w, h: size.h } : null;
+      }
+      if (key.startsWith("asset:")) {
+        const assetId = key.slice(6);
+        const loose = layout.looses.find((l) => l.asset.id === assetId);
+        const p = pos.loose[assetId];
+        return loose && p ? { x: p.x, y: p.y, w: loose.w, h: loose.h } : null;
+      }
+      return null;
     },
-    [layout, pos],
+    [layout, pos, cardSizeOf],
   );
 
   // ── 选中与拖拽 ──
@@ -449,31 +606,49 @@ export default function ProjectCanvas({
     setSelKeys(keys);
   }, []);
 
-  const persistLayout = useCallback(
-    (next: PosMap) => {
-      const assets: { id: string; x: number; y: number; w: number | null }[] = [];
-      const shots: { id: string; x: number; y: number }[] = [];
-      const sceneList: { id: string; x: number; y: number }[] = [];
-      layout.nodes.forEach((node) => {
-        const p = next.nodes[node.key];
-        if (!p) return;
-        if (node.kind === "asset" && node.asset) {
-          assets.push({ id: node.asset.id, x: p.x, y: p.y, w: p.w ?? node.w });
-        } else if (node.kind === "shotcard" && node.shot) {
-          shots.push({ id: node.shot.id, x: p.x, y: p.y });
-        }
+  // ── 场景框位置：scenes.canvas 之外再叠一层本地偏移（拖标签牌实时） ──
+  const [scenePos, setScenePos] = useState<Record<string, Pos>>({});
+  useEffect(() => {
+    setScenePos((prev) => {
+      const next: Record<string, Pos> = {};
+      scenes.forEach((scene, index) => {
+        next[scene.id] = prev[scene.id] ?? {
+          x: scene.canvas_x ?? WORLD_MARGIN + index * SCENE_PITCH,
+          y: scene.canvas_y ?? 110,
+        };
       });
-      layout.frames.forEach((frame) => {
-        const p = next.frames[frame.id];
-        if (p && frame.id !== "loose") sceneList.push({ id: frame.id, x: p.x, y: p.y });
+      return next;
+    });
+  }, [scenes]);
+
+  const persistCards = useCallback(
+    (nextCards: Record<string, Pos>) => {
+      const entries = Object.entries(nextCards);
+      void saveCanvasLayout({
+        assets: [],
+        shots: entries.map(([id, p]) => ({ id, x: p.x, y: p.y })),
+        scenes: [],
       });
-      void saveCanvasLayout({ assets, shots, scenes: sceneList });
+    },
+    [saveCanvasLayout],
+  );
+  const persistLoose = useCallback(
+    (nextLoose: Record<string, Pos>) => {
+      const sizeOf = (id: string) => {
+        const node = layout.looses.find((l) => l.asset.id === id);
+        return node?.w ?? LOOSE_W;
+      };
+      void saveCanvasLayout({
+        assets: Object.entries(nextLoose).map(([id, p]) => ({ id, x: p.x, y: p.y, w: sizeOf(id) })),
+        shots: [],
+        scenes: [],
+      });
     },
     [layout, saveCanvasLayout],
   );
 
   interface DragState {
-    kind: "pan" | "marquee" | "node" | "group" | "wire";
+    kind: "pan" | "marquee" | "card" | "loose" | "group" | "infoframe" | "wire";
     sx: number;
     sy: number;
     moved?: boolean;
@@ -498,17 +673,17 @@ export default function ProjectCanvas({
         target?.closest(".pc-node-tools") ||
         target?.closest(".pc-glass") ||
         target?.closest(".pc-lb") ||
-        target?.closest(".pc-frame-ops")
+        target?.closest(".pc-frame-ops") ||
+        target?.closest(".pc-shot-head") ||
+        target?.closest(".pc-shot-grid") ||
+        target?.closest(".pc-shot-empty")
       ) {
         return;
       }
       const vp = vpRef.current;
       if (!vp) return;
       if (e.button === 1) {
-        dragRef.current = {
-          kind: "pan", sx: e.clientX, sy: e.clientY,
-          ox: view.x, oy: view.y, moved: false,
-        };
+        dragRef.current = { kind: "pan", sx: e.clientX, sy: e.clientY, ox: view.x, oy: view.y, moved: false };
         vp.classList.add("pc-panning");
         e.preventDefault();
         return;
@@ -518,7 +693,7 @@ export default function ProjectCanvas({
       if (anchor) {
         const nodeEl = anchor.closest(".pc-node");
         const key = nodeEl?.getAttribute("data-key") ?? "";
-        if (key.startsWith("asset:")) {
+        if (key) {
           dragRef.current = { kind: "wire", sx: e.clientX, sy: e.clientY, fromKey: key, targetKey: null };
           e.preventDefault();
           return;
@@ -529,12 +704,19 @@ export default function ProjectCanvas({
         const key = nodeEl.getAttribute("data-key") ?? "";
         const nextSel = selRef.current.includes(key) ? selRef.current : [key];
         setSelection(nextSel);
+        const kind = key.startsWith("shot:") ? "card" : "loose";
         dragRef.current = {
-          kind: "node", sx: e.clientX, sy: e.clientY, moved: false,
+          kind, sx: e.clientX, sy: e.clientY, moved: false,
           moves: nextSel
             .map((k) => {
-              const p = pos.nodes[k];
-              return p ? { key: k, x: p.x, y: p.y } : null;
+              if (k.startsWith("shot:")) {
+                const id = k.slice(5);
+                const p = pos.cards[id];
+                return p ? { key: id, x: p.x, y: p.y } : null;
+              }
+              const id = k.slice(6);
+              const p = pos.loose[id];
+              return p ? { key: id, x: p.x, y: p.y } : null;
             })
             .filter((item): item is { key: string; x: number; y: number } => item !== null),
         };
@@ -545,19 +727,23 @@ export default function ProjectCanvas({
       if (labelEl) {
         const frameEl = labelEl.closest(".pc-frame");
         const frameKey = frameEl?.getAttribute("data-frame") ?? "";
+        if (frameKey === "info") {
+          dragRef.current = {
+            kind: "infoframe", sx: e.clientX, sy: e.clientY,
+            fox: infoPos.frame.x, foy: infoPos.frame.y, moved: false,
+          };
+          e.preventDefault();
+          return;
+        }
         if (frameKey && frameKey !== "loose") {
           dragRef.current = {
             kind: "group", sx: e.clientX, sy: e.clientY, frameKey,
-            fox: pos.frames[frameKey]?.x ?? 0, foy: pos.frames[frameKey]?.y ?? 0,
-            starts: layout.nodes
-              .filter((n) => n.group === frameKey)
-              .map((n) => ({
-                key: n.key,
-                x: pos.nodes[n.key]?.x ?? 0,
-                y: pos.nodes[n.key]?.y ?? 0,
-              })),
-            moved: false,
-          };
+            fox: scenePos[frameKey]?.x ?? 0,
+            foy: scenePos[frameKey]?.y ?? 0,
+            starts: [], moved: false,
+          };          dragRef.current.starts = layout.cards
+            .filter((c) => c.sceneId === frameKey)
+            .map((c) => ({ key: c.shot.id, x: pos.cards[c.shot.id]?.x ?? 0, y: pos.cards[c.shot.id]?.y ?? 0 }));
           e.preventDefault();
           return;
         }
@@ -569,8 +755,9 @@ export default function ProjectCanvas({
       dragRef.current = { kind: "marquee", sx: e.clientX, sy: e.clientY, mq, moved: false };
       e.preventDefault();
     },
-    [layout, pos, setSelection, view],
+    [layout, pos, setSelection, view, infoPos, scenePos],
   );
+
 
   useEffect(() => {
     const onMove = (e: MouseEvent) => {
@@ -595,27 +782,28 @@ export default function ProjectCanvas({
         drag.mq.style.height = `${y2 - y1}px`;
       } else if (drag.kind === "group") {
         if (!drag.moved) return;
+        setScenePos((prev) => {
+          const fk = drag.frameKey ?? "";
+          const base = { x: (drag.fox ?? 0) + dx / view.scale, y: (drag.foy ?? 0) + dy / view.scale };
+          const prevPos = prev[fk] ?? { x: 0, y: 0 };
+          void prevPos;
+          return { ...prev, [fk]: base };
+        });
         setPos((prev) => {
-          const nodesNext = { ...prev.nodes };
+          const cards = { ...prev.cards };
           drag.starts?.forEach((start) => {
-            nodesNext[start.key] = {
-              ...nodesNext[start.key],
+            cards[start.key] = {
               x: start.x + dx / view.scale,
               y: start.y + dy / view.scale,
             };
           });
-          const fk = drag.frameKey ?? "";
-          return {
-            nodes: nodesNext,
-            frames: {
-              ...prev.frames,
-              [fk]: {
-                ...prev.frames[fk],
-                x: (drag.fox ?? 0) + dx / view.scale,
-                y: (drag.foy ?? 0) + dy / view.scale,
-              },
-            },
-          };
+          return { ...prev, cards };
+        });
+      } else if (drag.kind === "infoframe") {
+        if (!drag.moved) return;
+        setInfoFramePos({
+          x: (drag.fox ?? 0) + dx / view.scale,
+          y: (drag.foy ?? 0) + dy / view.scale,
         });
       } else if (drag.kind === "wire") {
         const el = vpRef.current;
@@ -623,30 +811,28 @@ export default function ProjectCanvas({
         const rect = el.getBoundingClientRect();
         const wx = (e.clientX - rect.left - view.x) / view.scale;
         const wy = (e.clientY - rect.top - view.y) / view.scale;
-        const fromNode = layout.nodes.find((n) => n.key === drag.fromKey);
-        const fromPos = pos.nodes[drag.fromKey];
-        if (!fromNode || !fromPos) return;
-        setWireDraft(
-          wirePathD(
-            { x: fromPos.x, y: fromPos.y, w: fromNode.w, h: fromNode.h },
-            { x: wx - 1, y: wy - 1, w: 2, h: 2 },
-          ),
-        );
+        const fromBox = boxOf(drag.fromKey);
+        if (!fromBox) return;
+        setWireDraft(wirePath(fromBox, { x: wx - 1, y: wy - 1, w: 2, h: 2 }));
         const hit = document.elementFromPoint(e.clientX, e.clientY);
         const tEl = hit instanceof Element ? hit.closest(".pc-node") : null;
         const tKey = tEl?.getAttribute("data-key") ?? null;
         drag.targetKey = tKey && tKey !== drag.fromKey ? tKey : null;
-      } else {
+      } else if (drag.kind === "card") {
         setPos((prev) => {
-          const nodesNext = { ...prev.nodes };
+          const cards = { ...prev.cards };
           drag.moves?.forEach((mv) => {
-            nodesNext[mv.key] = {
-              ...nodesNext[mv.key],
-              x: mv.x + dx / view.scale,
-              y: mv.y + dy / view.scale,
-            };
+            cards[mv.key] = { x: mv.x + dx / view.scale, y: mv.y + dy / view.scale };
           });
-          return { ...prev, nodes: nodesNext };
+          return { ...prev, cards };
+        });
+      } else if (drag.kind === "loose") {
+        setPos((prev) => {
+          const loose = { ...prev.loose };
+          drag.moves?.forEach((mv) => {
+            loose[mv.key] = { x: mv.x + dx / view.scale, y: mv.y + dy / view.scale };
+          });
+          return { ...prev, loose };
         });
       }
     };
@@ -659,8 +845,8 @@ export default function ProjectCanvas({
         setWireDraft(null);
         if (drag.targetKey && drag.fromKey) {
           void linkAssets(
-            drag.fromKey.replace("asset:", ""),
-            drag.targetKey.replace("asset:", ""),
+            drag.fromKey.replace(/^(shot|asset):/, ""),
+            drag.targetKey.replace(/^(shot|asset):/, ""),
             "",
           );
         }
@@ -674,21 +860,39 @@ export default function ProjectCanvas({
             const ry1 = (Math.min(drag.sy, e.clientY) - rect.top - view.y) / view.scale;
             const rx2 = (Math.max(drag.sx, e.clientX) - rect.left - view.x) / view.scale;
             const ry2 = (Math.max(drag.sy, e.clientY) - rect.top - view.y) / view.scale;
-            layout.nodes.forEach((node) => {
-              const p = pos.nodes[node.key];
-              if (!p) return;
-              const cx = p.x + node.w / 2;
-              const cy = p.y + node.h / 2;
-              if (cx >= rx1 && cx <= rx2 && cy >= ry1 && cy <= ry2) list.push(node.key);
+            const inBox = (p: Pos | undefined, w: number, h: number) => {
+              if (!p) return false;
+              const cx = p.x + w / 2;
+              const cy = p.y + h / 2;
+              return cx >= rx1 && cx <= rx2 && cy >= ry1 && cy <= ry2;
+            };
+            layout.cards.forEach((card) => {
+              const size = shotCardSize(card.shot);
+              if (inBox(pos.cards[card.shot.id], size.w, size.h)) list.push(card.key);
+            });
+            layout.looses.forEach((loose) => {
+              if (inBox(pos.loose[loose.asset.id], loose.w, loose.h)) list.push(loose.key);
             });
           }
         }
         setSelection(list);
         drag.mq?.remove();
-      } else if (drag.kind === "node" && drag.moved) {
-        persistLayout(pos);
+      } else if (drag.kind === "card" && drag.moved) {
+        persistCards(pos.cards);
+      } else if (drag.kind === "loose" && drag.moved) {
+        persistLoose(pos.loose);
       } else if (drag.kind === "group" && drag.moved) {
-        persistLayout(pos);
+        const fk = drag.frameKey ?? "";
+        const frame = layout.frames.find((f) => f.id === fk);
+        const p = scenePos[fk];
+        if (frame?.scene && p) {
+          void saveCanvasLayout({
+            assets: [], shots: [],
+            scenes: [{ id: fk, x: p.x, y: p.y }],
+          });
+        }
+      } else if (drag.kind === "infoframe" && drag.moved) {
+        saveInfoFramePos(infoPos.frame);
       }
       vpRef.current?.classList.remove("pc-panning");
       dragRef.current = null;
@@ -699,17 +903,23 @@ export default function ProjectCanvas({
       document.removeEventListener("mousemove", onMove);
       document.removeEventListener("mouseup", onUp);
     };
-  }, [layout, pos, view, linkAssets, persistLayout, saveView, setSelection]);
+  }, [layout, pos, view, scenePos, infoPos, boxOf, linkAssets, persistCards, persistLoose, saveCanvasLayout, saveInfoFramePos, saveView, setSelection]);
 
   // ── 节点操作 ──
-  const handleNodeTool = useCallback(
-    (asset: ProjectAsset, act: string) => {
-      if (act === "view") onOpenAsset(asset);
-      else if (act === "locate") void openResourceFile(joinLibraryPath(libraryRoot, asset.file_path));
-      else if (act === "relink") onRelinkAsset(asset);
-      else if (act === "remove") void unlinkAsset(asset.id);
+  const shotNoOf = useCallback(
+    (sceneId: string, shotId: string): number => {
+      const scene = scenes.find((item) => item.id === sceneId);
+      const index = scene ? scene.shots.findIndex((shot) => shot.id === shotId) : -1;
+      return index + 1;
     },
-    [libraryRoot, onOpenAsset, onRelinkAsset, unlinkAsset],
+    [scenes],
+  );
+
+  const handleLocate = useCallback(
+    (asset: ProjectAsset) => {
+      void openResourceFile(joinLibraryPath(libraryRoot, asset.file_path));
+    },
+    [libraryRoot],
   );
 
   // ── 场景/镜头快速管理 ──
@@ -750,26 +960,11 @@ export default function ProjectCanvas({
     });
   };
 
-  const shotTagLabel = useCallback(
-    (shotId: string): string | null => {
-      for (const scene of scenes) {
-        const index = scene.shots.findIndex((shot) => shot.id === shotId);
-        if (index >= 0) {
-          const shot = scene.shots[index];
-          return t("project.canvas.shotTag", {
-            no: index + 1,
-            name: shot.description || t("project.shot.untitled"),
-          });
-        }
-      }
-      return null;
-    },
-    [scenes, t],
-  );
+
 
   const miniRatio = Math.min(
     MINI_W / Math.max(layout.worldW, 1),
-    MINI_H / Math.max(layout.worldH, 1),
+    MINI_H / Math.max(layout.worldH + 320, 1),
   );
 
   return (
@@ -785,117 +980,103 @@ export default function ProjectCanvas({
           zoomAt(e.clientX - rect.left, e.clientY - rect.top, e.deltaY < 0 ? 1.12 : 1 / 1.12);
         }}
         onDoubleClick={(e) => {
-          const nodeEl = e.target instanceof Element ? e.target.closest(".pc-node") : null;
-          if (!nodeEl) return;
-          const key = nodeEl.getAttribute("data-key") ?? "";
-          if (!key.startsWith("asset:")) return;
-          const node = layout.nodes.find((n) => n.key === key);
-          if (node?.asset) onOpenAsset(node.asset);
+          const thumb = e.target instanceof Element ? e.target.closest(".pc-shot-asset-thumb") : null;
+          if (!thumb) return;
+          const assetId = thumb.getAttribute("data-asset") ?? "";
+          const node = layout.cards
+            .flatMap((c) => c.assets)
+            .find((a) => a.asset.id === assetId);
+          if (node) onOpenAsset(node.asset);
         }}
       >
         <div
           className="pc-world"
           style={{ transform: `translate(${view.x}px, ${view.y}px) scale(${view.scale})` }}
         >
-          {/* 分组框 */}
-          {layout.frames.map((frame) => {
-            const isLoose = frame.id === "loose";
-            const scene = frame.scene;
-            const sceneIndex = scene ? scenes.findIndex((item) => item.id === scene.id) : -1;
-            const fpos = pos.frames[frame.id] ?? { x: WORLD_MARGIN, y: 110 };
-            const memberCount = layout.nodes.filter((n) => n.group === frame.id).length;
+          {/* 场景分组框 + 集级框 + 资料框 */}
+          {scenes.map((scene, sceneIndex) => {
+            const spos = scenePos[scene.id] ?? { x: scene.canvas_x ?? WORLD_MARGIN + sceneIndex * SCENE_PITCH, y: scene.canvas_y ?? 110 };
+            const sceneCards = layout.cards.filter((c) => c.sceneId === scene.id);
+            const frameW = Math.max(
+              FRAME_MIN_W,
+              ...sceneCards.map((c) => {
+                const p = pos.cards[c.shot.id] ?? { x: spos.x + FRAME_PAD_X, y: spos.y };
+                const size = shotCardSize(c.shot);
+                return p.x - spos.x + size.w + FRAME_PAD_X;
+              }),
+            );
+            const frameH = Math.max(
+              FRAME_MIN_H,
+              ...sceneCards.map((c) => {
+                const p = pos.cards[c.shot.id] ?? { x: spos.x, y: spos.y };
+                const size = shotCardSize(c.shot);
+                return p.y - spos.y + size.h + FRAME_PAD_BOTTOM;
+              }),
+            );
+            const assetsCount = scene.shots.reduce((acc, s) => acc + s.assets.length, 0);
             return (
               <div
-                key={frame.id}
-                data-frame={frame.id}
+                key={scene.id}
+                data-frame={scene.id}
                 className="pc-frame"
-                style={{ left: fpos.x, top: fpos.y, width: frame.w, height: frame.h }}
+                style={{ left: spos.x, top: spos.y, width: frameW, height: frameH }}
               >
                 <div className="pc-frame-label">
-                  {isLoose ? (
-                    <>
-                      <span className="pc-frame-name">{t("project.asset.title")}</span>
-                      <small>{memberCount}</small>
-                    </>
-                  ) : (
-                    scene && (
-                      <>
-                        <small className="pc-frame-no">
-                          {t("project.canvas.sceneNo", { no: sceneIndex + 1 })}
-                        </small>
-                        <span className="pc-frame-name">
-                          {scene.heading || t("project.scene.untitled")}
-                        </span>
-                        {scene.location && (
-                          <span className="pc-int" title={scene.location.name}>
-                            {Icons.resources}
-                            {scene.location.name}
-                            {locationSubtitleParts(scene.location.int_ext, scene.location.time_hint).length > 0 && (
-                              <em>
-                                {locationSubtitleParts(scene.location.int_ext, scene.location.time_hint)
-                                  .map((part) =>
-                                    t(
-                                      part === scene.location?.int_ext
-                                        ? intExtLabelKey(part)
-                                        : timeHintLabelKey(part),
-                                    ),
-                                  )
-                                  .join("/")}
-                              </em>
-                            )}
-                          </span>
-                        )}
-                        <small>
-                          {t("project.canvas.frameStats", {
-                            shots: scene.shots.length,
-                            assets: memberCount,
-                          })}
-                        </small>
-                      </>
-                    )
+                  <small className="pc-frame-no">
+                    {t("project.canvas.sceneNo", { no: sceneIndex + 1 })}
+                  </small>
+                  <span className="pc-frame-name">
+                    {scene.heading || t("project.scene.untitled")}
+                  </span>
+                  {scene.location && (
+                    <span className="pc-int" title={scene.location.name}>
+                      {Icons.resources}
+                      {scene.location.name}
+                      {locationSubtitleParts(scene.location.int_ext, scene.location.time_hint).length > 0 && (
+                        <em>
+                          {locationSubtitleParts(scene.location.int_ext, scene.location.time_hint)
+                            .map((part) =>
+                              t(
+                                part === scene.location?.int_ext
+                                  ? intExtLabelKey(part)
+                                  : timeHintLabelKey(part),
+                              ),
+                            )
+                            .join("/")}
+                        </em>
+                      )}
+                    </span>
                   )}
+                  <small>
+                    {t("project.canvas.frameStats", { shots: scene.shots.length, assets: assetsCount })}
+                  </small>
                   <span className="pc-frame-ops">
-                    {scene && (
-                      <>
-                        <button
-                          type="button"
-                          data-tooltip={t("common.edit")}
-                          onClick={() =>
-                            setSceneForm({ id: scene.id, heading: scene.heading, locationId: scene.location_id })
-                          }
-                        >
-                          {Icons.edit}
-                        </button>
-                        <button
-                          type="button"
-                          data-tooltip={t("project.canvas.addShot")}
-                          onClick={() =>
-                            setShotForm({ id: "", sceneId: scene.id, description: "", dialogue: "" })
-                          }
-                        >
-                          {Icons.add}
-                        </button>
-                        <button
-                          type="button"
-                          data-tooltip={t("common.delete")}
-                          onClick={() => setDeleteSceneTarget(scene)}
-                        >
-                          {Icons.delete}
-                        </button>
-                      </>
-                    )}
-                    {isLoose && (
-                      <button type="button" data-tooltip={t("project.asset.link")} onClick={() => onPickForShot("")}>
-                        {Icons.add}
-                      </button>
-                    )}
+                    <button
+                      type="button"
+                      data-tooltip={t("common.edit")}
+                      onClick={() =>
+                        setSceneForm({ id: scene.id, heading: scene.heading, locationId: scene.location_id })
+                      }
+                    >
+                      {Icons.edit}
+                    </button>
+                    <button
+                      type="button"
+                      data-tooltip={t("project.canvas.addShot")}
+                      onClick={() => setShotForm({ id: "", sceneId: scene.id, description: "", dialogue: "" })}
+                    >
+                      {Icons.add}
+                    </button>
+                    <button type="button" data-tooltip={t("common.delete")} onClick={() => setDeleteSceneTarget(scene)}>
+                      {Icons.delete}
+                    </button>
                   </span>
                 </div>
               </div>
             );
           })}
 
-          {/* 连线层（节点之下） */}
+          {/* 连线层（卡片之下） */}
           <svg className="pc-wires" aria-hidden="true">
             <defs>
               <marker id="pc-arrow" viewBox="0 0 10 10" refX="8.5" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
@@ -903,14 +1084,14 @@ export default function ProjectCanvas({
               </marker>
             </defs>
             {wires.map((wire) => {
-              const fromBox = boxOf(wire.from);
-              const toBox = boxOf(wire.to);
+              const fromBox = boxOf(wire.fromKey);
+              const toBox = boxOf(wire.toKey);
               if (!fromBox || !toBox) return null;
               const d = wirePathD(fromBox, toBox);
               const midX = (fromBox.x + fromBox.w / 2 + toBox.x + toBox.w / 2) / 2;
               const midY = (fromBox.y + fromBox.h / 2 + toBox.y + toBox.h / 2) / 2 - 7;
               return (
-                <g key={`${wire.from}->${wire.to}`} className="pc-wire">
+                <g key={`${wire.fromKey}->${wire.toKey}`} className="pc-wire">
                   <path className="pc-wire-hit" d={d} />
                   <path
                     className={`pc-wire-line ${wire.kind}`}
@@ -924,7 +1105,7 @@ export default function ProjectCanvas({
                     <g
                       className="pc-wire-del"
                       data-tooltip={t("project.canvas.wireRemove")}
-                      onClick={() => void unlinkAssets(wire.from, wire.to)}
+                      onClick={() => void unlinkAssets(wire.fromKey, wire.toKey)}
                     >
                       <circle cx={midX + 36} cy={midY - 4} r="9" />
                       <path d={`M${midX + 32} ${midY - 8} l8 8 M${midX + 40} ${midY - 8} l-8 8`} />
@@ -936,69 +1117,133 @@ export default function ProjectCanvas({
             {wireDraft && <path className="pc-wire-temp" d={wireDraft} />}
           </svg>
 
-          {/* 节点 */}
-          {layout.nodes.map((node) => {
-            const p = pos.nodes[node.key] ?? { x: 0, y: 0 };
-            const selected = selKeys.includes(node.key);
-            if (node.kind === "shotcard" && node.shot) {
-              const shot = node.shot;
-              return (
-                <div
-                  key={node.key}
-                  data-key={node.key}
-                  className={`pc-node pc-shotcard${selected ? " pc-selected" : ""}`}
-                  style={{ left: p.x, top: p.y, width: node.w }}
-                >
-                  <div className="pc-media-wrap">
-                    <div className="pc-shotcard-body">
-                      <b>{shot.description || t("project.shot.untitled")}</b>
-                      {shot.dialogue && <i>{shot.dialogue}</i>}
-                    </div>
-                  </div>
-                  <span className="pc-node-tools">
-                    <button type="button" data-tooltip={t("project.asset.link")} onClick={() => onPickForShot(shot.id)}>
-                      {Icons.file}
-                    </button>
-                    <button
-                      type="button"
-                      data-tooltip={t("common.edit")}
-                      onClick={() =>
-                        setShotForm({ id: shot.id, sceneId: shot.scene_id, description: shot.description, dialogue: shot.dialogue })
-                      }
-                    >
-                      {Icons.edit}
-                    </button>
-                    <button
-                      type="button"
-                      data-tooltip={t("common.delete")}
-                      className="danger"
-                      onClick={() => setDeleteShotTarget(shot)}
-                    >
-                      {Icons.delete}
-                    </button>
-                  </span>
-                </div>
-              );
-            }
-            const asset = node.asset;
-            if (!asset) return null;
-            const mediaPath = joinLibraryPath(libraryRoot, asset.file_path);
-            const tag = asset.shot_id ? shotTagLabel(asset.shot_id) : null;
+          {/* 镜头卡 */}
+          {layout.cards.map((card) => {
+            const p = pos.cards[card.shot.id] ?? { x: 0, y: 0 };
+            const selected = selKeys.includes(card.key);
+            const shot = card.shot;
             return (
               <div
-                key={node.key}
-                data-key={node.key}
+                key={card.key}
+                data-key={card.key}
+                data-frame={card.sceneId}
+                className={`pc-node pc-shotcard${selected ? " pc-selected" : ""}`}
+                style={{ left: p.x, top: p.y, width: card.w }}
+              >
+                <div className="pc-media-wrap pc-shot-card">
+                  <div className="pc-shot-head">
+                    <span className="pc-shot-no">{shotNoOf(card.sceneId, card.shot.id)}</span>
+                    <b className="pc-shot-desc">{shot.description || t("project.shot.untitled")}</b>
+                    {shot.dialogue && <i className="pc-shot-dialogue">{shot.dialogue}</i>}
+                    <span className="pc-node-tools">
+                      <button type="button" data-tooltip={t("project.asset.link")} onClick={() => onPickForShot(shot.id)}>
+                        {Icons.file}
+                      </button>
+                      <button
+                        type="button"
+                        data-tooltip={t("common.edit")}
+                        onClick={() =>
+                          setShotForm({ id: shot.id, sceneId: shot.scene_id, description: shot.description, dialogue: shot.dialogue })
+                        }
+                      >
+                        {Icons.edit}
+                      </button>
+                      <button
+                        type="button"
+                        data-tooltip={t("common.delete")}
+                        className="danger"
+                        onClick={() => setDeleteShotTarget(shot)}
+                      >
+                        {Icons.delete}
+                      </button>
+                    </span>
+                  </div>
+                  {shot.assets.length > 0 ? (
+                    <div className="pc-shot-grid">
+                      {card.assets.map(({ asset, w, h }) => {
+                        const mediaPath = joinLibraryPath(libraryRoot, asset.file_path);
+                        return (
+                          <button
+                            key={asset.id}
+                            type="button"
+                            className={`pc-shot-asset-thumb${asset.missing ? " is-missing" : ""}`}
+                            data-asset={asset.id}
+                            style={{ width: w, height: h }}
+                            title={asset.missing ? `${t("project.asset.fileMissing")} · ${asset.file_path}` : asset.name}
+                          >
+                            {asset.missing ? (
+                              <span className="pc-thumb-miss">
+                                {Icons.image}
+                                {t("project.asset.fileMissing")}
+                              </span>
+                            ) : asset.kind === "image" ? (
+                              <ResourceFileImage
+                                path={mediaPath}
+                                alt={asset.name}
+                                version={asset.updated_at}
+                                className="pc-thumb-img"
+                              />
+                            ) : asset.kind === "video" ? (
+                              <>
+                                <ResourceVideoPoster
+                                  path={mediaPath}
+                                  version={asset.updated_at}
+                                  fallbackLabel={asset.name || asset.file_path}
+                                />
+                                <span className="pc-thumb-play">{Icons.play}</span>
+                              </>
+                            ) : asset.kind === "text" ? (
+                              <span className="pc-thumb-text">
+                                {Icons.file}
+                                {asset.name || asset.file_path}
+                              </span>
+                            ) : (
+                              <span className="pc-thumb-text">
+                                {Icons.file}
+                                {asset.name || asset.file_path}
+                              </span>
+                            )}
+                          </button>
+                        );
+                      })}
+                    </div>
+                  ) : (
+                    <button
+                      type="button"
+                      className="pc-shot-empty"
+                      onClick={() => onPickForShot(shot.id)}
+                    >
+                      {Icons.link}
+                      {t("project.canvas.shotEmpty")}
+                    </button>
+                  )}
+                </div>
+                <span className="pc-anchor" data-tooltip={t("project.canvas.wireHint")} />
+              </div>
+            );
+          })}
+
+          {/* 集级散件节点 */}
+          {layout.looses.map((loose) => {
+            const p = pos.loose[loose.asset.id] ?? { x: 0, y: 0 };
+            const selected = selKeys.includes(loose.key);
+            const asset = loose.asset;
+            const mediaPath = joinLibraryPath(libraryRoot, asset.file_path);
+            return (
+              <div
+                key={loose.key}
+                data-key={loose.key}
                 className={`pc-node${selected ? " pc-selected" : ""}`}
-                style={{ left: p.x, top: p.y, width: node.w }}
+                style={{ left: p.x, top: p.y, width: loose.w }}
               >
                 <div className="pc-media-wrap">
                   {asset.missing ? (
-                    <div className="pc-miss-card" style={{ height: node.h }}>
+                    <div className="pc-miss-card" style={{ height: loose.h }}>
                       {Icons.image}
                       {t("project.asset.fileMissing")}
                     </div>
                   ) : asset.kind === "image" ? (
-                    <div className="pc-media" style={{ height: node.h }}>
+                    <div className="pc-media" style={{ height: loose.h }}>
                       <ResourceFileImage
                         path={mediaPath}
                         alt={asset.name}
@@ -1007,7 +1252,7 @@ export default function ProjectCanvas({
                       />
                     </div>
                   ) : asset.kind === "video" ? (
-                    <div className="pc-media" style={{ height: node.h }}>
+                    <div className="pc-media" style={{ height: loose.h }}>
                       <ResourceVideoPoster
                         path={mediaPath}
                         version={asset.updated_at}
@@ -1018,30 +1263,21 @@ export default function ProjectCanvas({
                   ) : asset.kind === "text" ? (
                     <TextPaperBody path={mediaPath} name={asset.name || asset.file_path} />
                   ) : (
-                    <div className="pc-media pc-media-file" style={{ height: node.h }}>
+                    <div className="pc-media pc-media-file" style={{ height: loose.h }}>
                       {Icons.file}
                       <span>{asset.name || asset.file_path}</span>
                     </div>
                   )}
                 </div>
-                {tag && (
-                  <span className="pc-shot-tag" title={tag}>
-                    {Icons.clapperboard}
-                    {tag}
-                  </span>
-                )}
-                {asset.gen_from_asset && (
-                  <span className="pc-gen-tag">{Icons.link}{t("project.canvas.genTag")}</span>
-                )}
                 <span className="pc-node-tools">
-                  <button type="button" data-tooltip={t("project.canvas.view")} onClick={() => handleNodeTool(asset, "view")}>
+                  <button type="button" data-tooltip={t("project.canvas.view")} onClick={() => onOpenAsset(asset)}>
                     {Icons.expand}
                   </button>
-                  <button type="button" data-tooltip={t("project.canvas.openFile")} onClick={() => handleNodeTool(asset, "locate")}>
+                  <button type="button" data-tooltip={t("project.canvas.openFile")} onClick={() => handleLocate(asset)}>
                     {Icons.externalLink}
                   </button>
                   {asset.missing && (
-                    <button type="button" data-tooltip={t("project.sheet.relink")} onClick={() => handleNodeTool(asset, "relink")}>
+                    <button type="button" data-tooltip={t("project.sheet.relink")} onClick={() => onRelinkAsset(asset)}>
                       {Icons.swap}
                     </button>
                   )}
@@ -1049,7 +1285,7 @@ export default function ProjectCanvas({
                     type="button"
                     data-tooltip={t("project.canvas.remove")}
                     className="danger"
-                    onClick={() => handleNodeTool(asset, "remove")}
+                    onClick={() => void unlinkAsset(asset.id)}
                   >
                     {Icons.close}
                   </button>
@@ -1058,15 +1294,75 @@ export default function ProjectCanvas({
               </div>
             );
           })}
+
+          {/* 资料框（出场角色/出镜道具/剧本） */}
+          {(
+            <div
+              data-frame="info"
+              className="pc-frame"
+              style={{
+                left: infoPos.frame.x,
+                top: infoPos.frame.y,
+                width: Math.max(FRAME_MIN_W, FRAME_PAD_X * 2 + 3 * (INFO_W + CARD_GAP) - CARD_GAP),
+                height: Math.max(FRAME_MIN_H, FRAME_PAD_TOP + Math.ceil(Math.max(infoNodes.length, 1) / 3) * (INFO_H + CARD_GAP) + 12),
+              }}
+            >
+              <div className="pc-frame-label">
+                <span className="pc-frame-name">{t("project.canvas.infoFrame")}</span>
+                <small>{infoNodes.length}</small>
+                <span className="pc-frame-ops">
+                  {infoNodes.length === 0 && (
+                    <small style={{ padding: "0 4px" }}>{t("project.canvas.infoEmpty")}</small>
+                  )}
+                </span>
+              </div>
+            </div>
+          )}
+          {infoNodes.map((node) => {
+            const p = infoPos.map[node.key];
+            return (
+              <div key={node.key} className={`pc-node pc-info${""}`} style={{ left: p.x, top: p.y, width: node.w }}>
+                <div className="pc-media-wrap pc-info-card">
+                  {node.kind === "character" ? (
+                    <>
+                      <span className={`pc-info-ava pc-ava-p${characterAvatarPaletteIndex(node.name)}`}>
+                        {node.avatarPath ? (
+                          <ResourceImage
+                            path={joinLibraryPath(libraryRoot, node.avatarPath)}
+                            alt={node.name}
+                            className="pc-info-ava-img"
+                          />
+                        ) : (
+                          characterAvatarInitial(node.name)
+                        )}
+                      </span>
+                      <b className="pc-info-name">{node.name}</b>
+                      <small className="pc-info-role">{t("project.cast.title")}</small>
+                    </>
+                  ) : node.kind === "prop" ? (
+                    <>
+                      <span className="pc-info-ava">{Icons.star}</span>
+                      <b className="pc-info-name">{node.name}</b>
+                      <small className="pc-info-role">{t("project.library.props")}</small>
+                    </>
+                  ) : (
+                    <div className="pc-info-script">
+                      <TextPaperBody path={joinLibraryPath(libraryRoot, node.textPath)} name={node.name} lines={5} />
+                    </div>
+                  )}
+                </div>
+              </div>
+            );
+          })}
         </div>
 
-        {/* 集信息玻璃卡（内容由 ProjectView 组装）+ 画布统计 */}
+        {/* 集信息玻璃卡 + 统计 */}
         <div className="pc-glass pc-ep-card">
           {overlay}
           <div className="pc-ep-stats">
             <span>{t("project.canvas.statScenes", { count: scenes.length })}</span>
             <span>{t("project.canvas.statShots", { count: scenes.reduce((acc, s) => acc + s.shots.length, 0) })}</span>
-            <span>{t("project.canvas.statAssets", { count: layout.nodes.filter((n) => n.kind === "asset").length })}</span>
+            <span>{t("project.canvas.statAssets", { count: scenes.reduce((acc, s) => acc + s.shots.reduce((a, sh) => a + sh.assets.length, 0), 0) + looseAssets.length })}</span>
             <span>{t("project.canvas.statWires", { count: wires.length })}</span>
           </div>
         </div>
@@ -1109,31 +1405,31 @@ export default function ProjectCanvas({
             onMouseDown={(e) => {
               e.stopPropagation();
               const rect = (e.currentTarget as SVGSVGElement).getBoundingClientRect();
-              const wx = e.clientX - rect.left;
-              const wy = e.clientY - rect.top;
+              const wx = (e.clientX - rect.left) / miniRatio;
+              const wy = (e.clientY - rect.top) / miniRatio;
               const vpRect = vpRef.current?.getBoundingClientRect();
               if (!vpRect) return;
               setView((prev) => {
                 const next = {
                   ...prev,
-                  x: vpRect.width / 2 - wx / miniRatio * prev.scale,
-                  y: vpRect.height / 2 - wy / miniRatio * prev.scale,
+                  x: vpRect.width / 2 - wx * prev.scale,
+                  y: vpRect.height / 2 - wy * prev.scale,
                 };
                 saveView(next);
                 return next;
               });
             }}
           >
-            {layout.frames.map((frame) => {
-              const fpos = pos.frames[frame.id];
-              if (!fpos) return null;
+            {scenes.map((scene) => {
+              const spos = scenePos[scene.id];
+              if (!spos) return null;
               return (
                 <rect
-                  key={frame.id}
-                  x={fpos.x * miniRatio}
-                  y={fpos.y * miniRatio}
-                  width={frame.w * miniRatio}
-                  height={frame.h * miniRatio}
+                  key={scene.id}
+                  x={spos.x * miniRatio}
+                  y={spos.y * miniRatio}
+                  width={FRAME_MIN_W * miniRatio}
+                  height={FRAME_MIN_H * miniRatio}
                   rx="3"
                   fill="none"
                   stroke="var(--text-tertiary)"
@@ -1141,16 +1437,17 @@ export default function ProjectCanvas({
                 />
               );
             })}
-            {layout.nodes.map((node) => {
-              const p = pos.nodes[node.key];
+            {layout.cards.map((card) => {
+              const p = pos.cards[card.shot.id];
               if (!p) return null;
+              const size = shotCardSize(card.shot);
               return (
                 <rect
-                  key={node.key}
+                  key={card.key}
                   x={p.x * miniRatio}
                   y={p.y * miniRatio}
-                  width={Math.max(3, node.w * miniRatio)}
-                  height={Math.max(2.5, node.h * miniRatio)}
+                  width={Math.max(3, size.w * miniRatio)}
+                  height={Math.max(2.5, size.h * miniRatio)}
                   rx="1.5"
                   fill="var(--text-tertiary)"
                 />
@@ -1159,8 +1456,8 @@ export default function ProjectCanvas({
             <rect
               x={(-view.x / view.scale) * miniRatio}
               y={(-view.y / view.scale) * miniRatio}
-              width={(vpSize?.w ?? 1200) / view.scale * miniRatio}
-              height={(vpSize?.h ?? 700) / view.scale * miniRatio}
+              width={((vpSize?.w ?? 1200) / view.scale) * miniRatio}
+              height={((vpSize?.h ?? 700) / view.scale) * miniRatio}
               fill="rgba(127,127,140,.1)"
               stroke="var(--text-primary)"
               strokeWidth="1.2"
@@ -1282,4 +1579,9 @@ export default function ProjectCanvas({
       )}
     </div>
   );
+}
+
+function scriptFileLabelOf(path: string): string {
+  const trimmed = path.replace(/\\/g, "/").split("/").pop() ?? path;
+  return trimmed;
 }

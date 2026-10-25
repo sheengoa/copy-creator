@@ -501,7 +501,10 @@
       "statScenes": "场景 {{count}}",
       "statShots": "镜头 {{count}}",
       "statAssets": "素材 {{count}}",
-      "statWires": "连线 {{count}}"
+      "statWires": "连线 {{count}}",
+      "infoFrame": "本集资料",
+      "infoEmpty": "本集暂无出场角色 / 出镜道具 / 剧本",
+      "shotEmpty": "挂靠素材"
     },
     "library": {
       "characters": "角色库",

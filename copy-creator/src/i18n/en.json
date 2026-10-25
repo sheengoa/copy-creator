@@ -501,7 +501,10 @@
       "statScenes": "Scenes {{count}}",
       "statShots": "Shots {{count}}",
       "statAssets": "Assets {{count}}",
-      "statWires": "Wires {{count}}"
+      "statWires": "Wires {{count}}",
+      "infoFrame": "Episode materials",
+      "infoEmpty": "No cast / props / script for this episode",
+      "shotEmpty": "Link assets"
     },
     "library": {
       "characters": "Characters",
