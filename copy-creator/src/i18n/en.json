@@ -487,6 +487,9 @@
       "unlinked": "Not linked",
       "noDescription": "No description",
       "pathHint": "Image path is relative to the library root; saved paths preview here",
+      "refCount": "Refs ×{{count}}",
+      "field.references": "Reference sheets (turnaround/expressions, multiple)",
+      "field.refAddPlaceholder": "Library-relative path, Enter to add",
       "field": {
         "name": "Name",
         "roleTag": "Role",
@@ -537,6 +540,10 @@
       },
       "pickCastTitle": "Select cast",
       "pickPropsTitle": "Select props",
+      "field.status": "Status",
+      "field.camera": "Framing/Movement",
+      "field.cameraPlaceholder": "e.g. CU · slow push",
+      "field.duration": "Duration",
       "moveUp": "Move up",
       "moveDown": "Move down",
       "deleteConfirm": "Delete this shot? Linked assets stay as episode loose files."
@@ -574,7 +581,23 @@
       "open": "Open file",
       "reveal": "Reveal in file manager",
       "locate": "Show in library",
-      "traceBadge": "↳ {{title}}"
+      "traceBadge": "↳ {{title}}",
+      "genParams": "Generation params",
+      "genParamsPlaceholder": "Model / seed / resolution, for reproduction",
+      "audioRole": "Audio role",
+      "audioRoleNone": "Unset"
+    },
+    "shotStatus": {
+      "none": "Todo",
+      "pending": "To generate",
+      "generating": "Generating",
+      "done": "Final",
+      "rejected": "Dropped"
+    },
+    "audioRole": {
+      "voice": "Voice",
+      "bgm": "BGM",
+      "sfx": "SFX"
     },
     "search": {
       "kind": {

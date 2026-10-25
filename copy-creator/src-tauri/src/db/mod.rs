@@ -1165,6 +1165,16 @@ pub(crate) fn ensure_schema(conn: &Connection) -> Result<(), Box<dyn std::error:
     // 对新库/旧库升级/存储迁移三条路径一致生效。
     conn.execute_batch(PROJECT_SCHEMA_SQL)?;
 
+    // 一致性工作流扩展列：新库随建表语句带全列，这里只为旧库幂等补齐
+    // （ensure_column 存在即跳过）。与「关键列存在性补齐」同模式——
+    // 版本号前滚后迁移不重试，列补齐必须每次启动执行。
+    ensure_column(conn, "project_characters", "reference_paths", "TEXT NOT NULL DEFAULT '[]'");
+    ensure_column(conn, "project_shots", "status", "TEXT NOT NULL DEFAULT 'none'");
+    ensure_column(conn, "project_shots", "camera", "TEXT NOT NULL DEFAULT ''");
+    ensure_column(conn, "project_shots", "duration", "TEXT NOT NULL DEFAULT ''");
+    ensure_column(conn, "project_assets", "gen_params", "TEXT NOT NULL DEFAULT ''");
+    ensure_column(conn, "project_assets", "audio_role", "TEXT NOT NULL DEFAULT ''");
+
     // ── 运行时迁移：只在库版本落后时执行一次（见 run_schema_migrations）──
     if schema_version(conn) < SCHEMA_VERSION {
         run_schema_migrations(conn)?;

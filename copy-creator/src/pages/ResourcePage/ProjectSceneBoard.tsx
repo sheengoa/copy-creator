@@ -13,10 +13,12 @@ import ProjectAssetSheet from "./ProjectAssetSheet";
 import type { ProjectAsset } from "../../stores/projectStore";
 import { Icons } from "../../components/Icons";
 import {
+  SHOT_STATUSES,
   characterAvatarInitial,
   characterAvatarPaletteIndex,
   locationSubtitleParts,
   intExtLabelKey,
+  shotStatusKey,
   timeHintLabelKey,
 } from "../../domain/projectView";
 
@@ -32,6 +34,9 @@ interface ShotDraft {
   sceneId: string;
   description: string;
   dialogue: string;
+  status: string;
+  camera: string;
+  duration: string;
 }
 
 type PickState = { shotId: string; kind: "characters" | "props" } | null;
@@ -274,6 +279,46 @@ export default function ProjectSceneBoard() {
                     />
                   </label>
                   <div className="project-shot-form-row">
+                    <span>{t("project.shot.field.status")}</span>
+                    <select
+                      className="project-shot-form-select"
+                      value={shotDraft.status}
+                      onChange={(event) =>
+                        setShotDraft((prev) =>
+                          prev ? { ...prev, status: event.target.value } : prev,
+                        )
+                      }
+                    >
+                      {SHOT_STATUSES.map((status) => (
+                        <option key={status} value={status}>
+                          {t(shotStatusKey(status))}
+                        </option>
+                      ))}
+                    </select>
+                    <span>{t("project.shot.field.camera")}</span>
+                    <input
+                      className="project-shot-form-input"
+                      value={shotDraft.camera}
+                      placeholder={t("project.shot.field.cameraPlaceholder")}
+                      onChange={(event) =>
+                        setShotDraft((prev) =>
+                          prev ? { ...prev, camera: event.target.value } : prev,
+                        )
+                      }
+                    />
+                    <span>{t("project.shot.field.duration")}</span>
+                    <input
+                      className="project-shot-form-input project-shot-form-duration"
+                      value={shotDraft.duration}
+                      placeholder="8s"
+                      onChange={(event) =>
+                        setShotDraft((prev) =>
+                          prev ? { ...prev, duration: event.target.value } : prev,
+                        )
+                      }
+                    />
+                  </div>
+                  <div className="project-shot-form-row">
                     <span>{t("project.shot.field.cast")}</span>
                     <span className="project-shot-form-chips">
                       {shot.character_ids.map((cid) => {
@@ -332,6 +377,9 @@ export default function ProjectSceneBoard() {
                             sceneId: draft.sceneId,
                             description: draft.description,
                             dialogue: draft.dialogue,
+                            status: draft.status,
+                            camera: draft.camera,
+                            duration: draft.duration,
                           });
                         }
                       }}
@@ -344,8 +392,18 @@ export default function ProjectSceneBoard() {
                 <div key={shot.id} className="project-shot-row">
                   <span className="project-shot-no">{shotIndex + 1}</span>
                   <div className="project-shot-main">
-                    <b>{shot.description || t("project.shot.untitled")}</b>
-                    {shot.dialogue && <i>{shot.dialogue}</i>}
+                    <b>
+                      {shot.description || t("project.shot.untitled")}
+                      {shot.status !== "none" && (
+                        <span className={`project-shot-status s-${shotStatusKey(shot.status).split(".").pop()}`}>
+                          {t(shotStatusKey(shot.status))}
+                        </span>
+                      )}
+                    </b>
+                    <i>
+                      {[shot.camera, shot.duration].filter(Boolean).join(" · ")}
+                      {shot.dialogue && (shot.camera || shot.duration ? " — " : "") + shot.dialogue}
+                    </i>
                     {shot.assets.length > 0 && (
                     <span className="project-shot-cast">
                       {shot.assets.map((asset) => (
@@ -434,6 +492,9 @@ export default function ProjectSceneBoard() {
                         sceneId: shot.scene_id,
                         description: shot.description,
                         dialogue: shot.dialogue,
+                        status: shot.status,
+                        camera: shot.camera,
+                        duration: shot.duration,
                       })
                     }
                   >
@@ -454,7 +515,7 @@ export default function ProjectSceneBoard() {
               type="button"
               className="project-shot-new"
               onClick={() =>
-                setShotDraft({ id: `new-${scene.id}`, isNew: true, sceneId: scene.id, description: "", dialogue: "" })
+                setShotDraft({ id: `new-${scene.id}`, isNew: true, sceneId: scene.id, description: "", dialogue: "", status: "none", camera: "", duration: "" })
               }
             >
               {Icons.add}

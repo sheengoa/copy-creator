@@ -7,8 +7,12 @@ import {
   episodeHasDoneMark,
   episodeNumberLabel,
   episodeStatusKey,
+  audioRoleKey,
   joinLibraryPath,
+  parseCharacterReferences,
   projectFileDisplayName,
+  serializeCharacterReferences,
+  shotStatusKey,
   relativeLibraryPath,
   scriptFileLabel,
 } from "./projectView";
@@ -76,6 +80,21 @@ describe("projectView 领域规则", () => {
     expect(relativeLibraryPath("F:/lib", joinLibraryPath("F:/lib", "剧/02.md"))).toBe("剧/02.md");
   });
 
+  it("镜头状态与音频用途键未知回退默认", () => {
+    expect(shotStatusKey("done")).toBe("project.shotStatus.done");
+    expect(shotStatusKey("weird")).toBe("project.shotStatus.none");
+    expect(audioRoleKey("bgm")).toBe("project.audioRole.bgm");
+    expect(audioRoleKey("x")).toBe("project.audioRole.voice");
+  });
+
+  it("角色参考图集 JSON 解析容错并往返一致", () => {
+    expect(parseCharacterReferences('["a.png","b.png"]')).toEqual(["a.png", "b.png"]);
+    expect(parseCharacterReferences("")).toEqual([]);
+    expect(parseCharacterReferences("not json")).toEqual([]);
+    expect(parseCharacterReferences('{"x":1}')).toEqual([]);
+    expect(serializeCharacterReferences(["a", "b"])).toBe('["a","b"]');
+    expect(parseCharacterReferences(serializeCharacterReferences(["第2集/a.png"]))).toEqual(["第2集/a.png"]);
+  });
   it("素材类型键未知回退 file", () => {
     expect(assetKindLabelKey("image")).toBe("project.asset.kind.image");
     expect(assetKindLabelKey("prompt")).toBe("project.asset.kind.prompt");

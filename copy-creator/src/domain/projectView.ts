@@ -114,6 +114,38 @@ export function locationSubtitleParts(intExt: string, timeHint: string): string[
   return parts;
 }
 
+/** 镜头生产状态（none 待处理 / pending 待生成 / generating 生成中 / done 已定稿 / rejected 弃用）。 */
+export const SHOT_STATUSES = ["none", "pending", "generating", "done", "rejected"] as const;
+export type ShotStatus = (typeof SHOT_STATUSES)[number];
+
+export function shotStatusKey(status: string): string {
+  return `project.shotStatus.${(SHOT_STATUSES as readonly string[]).includes(status) ? status : "none"}`;
+}
+
+/** 音频挂靠用途（voice 配音 / bgm 配乐 / sfx 音效）。 */
+export const AUDIO_ROLES = ["voice", "bgm", "sfx"] as const;
+
+export function audioRoleKey(role: string): string {
+  return `project.audioRole.${(AUDIO_ROLES as readonly string[]).includes(role) ? role : "voice"}`;
+}
+
+/** 角色参考图集（JSON 数组文本）的解析：容错非数组/空串/坏 JSON。 */
+export function parseCharacterReferences(referencePaths: string): string[] {
+  try {
+    const parsed: unknown = JSON.parse(referencePaths || "[]");
+    return Array.isArray(parsed)
+      ? parsed.filter((item): item is string => typeof item === "string")
+      : [];
+  } catch {
+    return [];
+  }
+}
+
+/** 角色参考图集序列化。 */
+export function serializeCharacterReferences(paths: string[]): string {
+  return JSON.stringify(paths);
+}
+
 /** 提示词用途分类（场景/角色/镜头/其他）与 i18n 键映射。 */
 export const PROMPT_CATEGORIES = ["scene", "character", "shot", "other"] as const;
 

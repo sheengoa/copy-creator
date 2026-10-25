@@ -26,6 +26,7 @@ export interface ProjectEpisode {
   script_path: string;
   character_ids: string[];
   shot_count: number;
+  done_shot_count: number;
   created_at: string;
   updated_at: string;
 }
@@ -37,6 +38,7 @@ export interface ProjectCharacter {
   bio: string;
   prompt: string;
   avatar_path: string;
+  reference_paths: string;
   episode_ref_count?: number;
   created_at: string;
   updated_at: string;
@@ -73,6 +75,8 @@ export interface ProjectAsset {
   episode_id: string;
   gen_from_asset: string;
   gen_from_prompt: string;
+  gen_params: string;
+  audio_role: string;
   created_at: string;
   updated_at: string;
 }
@@ -83,6 +87,9 @@ export interface ProjectShot {
   episode_id: string;
   description: string;
   dialogue: string;
+  status: string;
+  camera: string;
+  duration: string;
   character_ids: string[];
   prop_ids: string[];
   assets: ProjectAsset[];
@@ -178,7 +185,7 @@ interface ProjectStoreState {
 
   loadCharacters: () => Promise<void>;
   saveCharacter: (
-    payload: { id?: string; name: string; role_tag: string; bio: string; prompt: string; avatar_path: string },
+    payload: { id?: string; name: string; role_tag: string; bio: string; prompt: string; avatar_path: string; reference_paths: string },
   ) => Promise<boolean>;
   deleteCharacter: (id: string) => Promise<void>;
 
@@ -211,6 +218,9 @@ interface ProjectStoreState {
     sceneId: string;
     description: string;
     dialogue: string;
+    status: string;
+    camera: string;
+    duration: string;
   }) => Promise<boolean>;
   deleteShot: (id: string) => Promise<void>;
   moveShot: (shotId: string, direction: -1 | 1) => Promise<void>;
@@ -238,6 +248,8 @@ interface ProjectStoreState {
     shotId: string;
     genFromAsset: string;
     genFromPrompt: string;
+    genParams: string;
+    audioRole: string;
   }) => Promise<void>;
 
   loadPrompts: (category?: string) => Promise<void>;
@@ -534,6 +546,7 @@ export const useProjectStore = create<ProjectStoreState>((set, get) => ({
       bio: payload.bio,
       prompt: payload.prompt,
       avatarPath: payload.avatar_path,
+      referencePaths: payload.reference_paths,
     };
     try {
       if (payload.id) {
@@ -708,6 +721,9 @@ export const useProjectStore = create<ProjectStoreState>((set, get) => ({
           id: payload.id,
           description: payload.description,
           dialogue: payload.dialogue,
+          status: payload.status,
+          camera: payload.camera,
+          duration: payload.duration,
         });
       } else {
         await invoke("project_create_shot", {
@@ -820,6 +836,8 @@ export const useProjectStore = create<ProjectStoreState>((set, get) => ({
         shotId: payload.shotId,
         genFromAsset: payload.genFromAsset,
         genFromPrompt: payload.genFromPrompt,
+        genParams: payload.genParams,
+        audioRole: payload.audioRole,
       });
       const { currentEpisodeId } = get();
       if (currentEpisodeId) await get().selectEpisode(currentEpisodeId);

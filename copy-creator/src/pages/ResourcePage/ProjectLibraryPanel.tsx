@@ -12,6 +12,8 @@ import { ConfirmDialog } from "../../components/ConfirmDialog";
 import { ResourceImage } from "./ResourceMedia";
 import { Icons } from "../../components/Icons";
 import {
+  parseCharacterReferences,
+  serializeCharacterReferences,
   LIBRARY_INT_EXTS,
   LIBRARY_TIME_HINTS,
   characterAvatarInitial,
@@ -30,6 +32,7 @@ interface CharacterDraft {
   bio: string;
   prompt: string;
   avatar_path: string;
+  references: string[];
 }
 
 interface LocationDraft {
@@ -68,7 +71,7 @@ export interface ProjectLibraryPanelProps {
   onTogglePick?: (id: string) => void;
 }
 
-const EMPTY_CHARACTER: CharacterDraft = { name: "", role_tag: "", bio: "", prompt: "", avatar_path: "" };
+const EMPTY_CHARACTER: CharacterDraft = { name: "", role_tag: "", bio: "", prompt: "", avatar_path: "", references: [] };
 const EMPTY_LOCATION: LocationDraft = { name: "", int_ext: "", time_hint: "", bio: "", prompt: "", ref_path: "" };
 const EMPTY_PROP: PropDraft = { name: "", bio: "", prompt: "", ref_path: "" };
 
@@ -109,6 +112,7 @@ export default function ProjectLibraryPanel({
   const [locationDraft, setLocationDraft] = useState<LocationDraft | null>(null);
   const [propDraft, setPropDraft] = useState<PropDraft | null>(null);
   const [deleteConfirm, setDeleteConfirm] = useState<{ id: string; name: string } | null>(null);
+  const [characterRefInput, setCharacterRefInput] = useState("");
 
   useEffect(() => {
     let cancelled = false;
@@ -146,7 +150,10 @@ export default function ProjectLibraryPanel({
   const handleSave = async () => {
     if (kind === "characters" && characterDraft) {
       if (!characterDraft.name.trim()) return;
-      const ok = await store.saveCharacter(characterDraft);
+      const ok = await store.saveCharacter({
+        ...characterDraft,
+        reference_paths: serializeCharacterReferences(characterDraft.references),
+      });
       if (ok) setCharacterDraft(null);
     } else if (kind === "locations" && locationDraft) {
       if (!locationDraft.name.trim()) return;
@@ -249,6 +256,14 @@ export default function ProjectLibraryPanel({
                     {kind === "characters" && (entity as ProjectCharacter).role_tag
                       ? ` · ${(entity as ProjectCharacter).role_tag}`
                       : ""}
+                    {kind === "characters" &&
+                      parseCharacterReferences((entity as ProjectCharacter).reference_paths).length > 0 && (
+                        <span className="project-prompt-cat">
+                          {t("project.library.refCount", {
+                            count: parseCharacterReferences((entity as ProjectCharacter).reference_paths).length,
+                          })}
+                        </span>
+                      )}
                   </b>
                   <i>
                     {kind === "characters"
@@ -280,6 +295,7 @@ export default function ProjectLibraryPanel({
                             bio: c.bio,
                             prompt: c.prompt,
                             avatar_path: c.avatar_path,
+                            references: parseCharacterReferences(c.reference_paths),
                           });
                         } else if (kind === "locations") {
                           const l = entity as ProjectLocation;
@@ -450,6 +466,63 @@ export default function ProjectLibraryPanel({
                     </div>
                   )}
                 </div>
+                {kind === "characters" && characterDraft && (
+                  <div className="project-form-row">
+                    <label>
+                      <span>{t("project.library.field.references")}</span>
+                      <input
+                        placeholder={t("project.library.field.refAddPlaceholder")}
+                        value={characterRefInput}
+                        onChange={(event) => setCharacterRefInput(event.target.value)}
+                        onKeyDown={(event) => {
+                          if (event.key === "Enter") {
+                            event.preventDefault();
+                            const path = characterRefInput.trim();
+                            if (!path) return;
+                            setCharacterDraft({
+                              ...characterDraft,
+                              references: [...characterDraft.references, path],
+                            });
+                            setCharacterRefInput("");
+                          }
+                        }}
+                      />
+                    </label>
+                    {characterDraft.references.length > 0 && (
+                      <div className="project-ref-list">
+                        {characterDraft.references.map((refPath, index) => (
+                          <div key={`${refPath}-${index}`} className="project-ref-item">
+                            <span className="project-ref-thumb">
+                              <ResourceImage
+                                path={joinLibraryPath(libraryRoot, refPath)}
+                                alt=""
+                                className="project-ref-thumb-img"
+                              />
+                            </span>
+                            <span className="project-ref-path" title={refPath}>
+                              {refPath}
+                            </span>
+                            <button
+                              type="button"
+                              className="project-mini-btn"
+                              title={t("common.delete")}
+                              onClick={() =>
+                                setCharacterDraft({
+                                  ...characterDraft,
+                                  references: characterDraft.references.filter(
+                                    (_, itemIndex) => itemIndex !== index,
+                                  ),
+                                })
+                              }
+                            >
+                              {Icons.close}
+                            </button>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                )}
                 <div className="project-library-form-foot">
                   <span className="project-library-form-hint">
                     {t("project.library.pathHint")}

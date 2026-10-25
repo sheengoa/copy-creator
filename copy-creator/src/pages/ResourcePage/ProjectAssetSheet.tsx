@@ -7,7 +7,9 @@ import { ResourceImage } from "./ResourceMedia";
 import { Icons } from "../../components/Icons";
 import { openResourceFile, revealResourceFile } from "../../domain/mediaAssets";
 import {
+  AUDIO_ROLES,
   assetKindLabelKey,
+  audioRoleKey,
   joinLibraryPath,
   projectFileDisplayName,
 } from "../../domain/projectView";
@@ -42,6 +44,8 @@ export default function ProjectAssetSheet({ asset, onClose }: ProjectAssetSheetP
   const [root, setRoot] = useState("");
   const [genFromPrompt, setGenFromPrompt] = useState(asset.gen_from_prompt);
   const [genFromAsset, setGenFromAsset] = useState(asset.gen_from_asset);
+  const [genParams, setGenParams] = useState(asset.gen_params);
+  const [audioRole, setAudioRole] = useState(asset.audio_role);
 
   useEffect(() => {
     let cancelled = false;
@@ -68,7 +72,11 @@ export default function ProjectAssetSheet({ asset, onClose }: ProjectAssetSheetP
   const absolutePath = joinLibraryPath(root, asset.file_path);
   const groupLabel = asset.file_path.split("/")[0] || "";
 
-  const dirty = genFromPrompt !== asset.gen_from_prompt || genFromAsset !== asset.gen_from_asset;
+  const dirty =
+    genFromPrompt !== asset.gen_from_prompt ||
+    genFromAsset !== asset.gen_from_asset ||
+    genParams !== asset.gen_params ||
+    audioRole !== asset.audio_role;
 
   return (
     <div
@@ -132,6 +140,31 @@ export default function ProjectAssetSheet({ asset, onClose }: ProjectAssetSheetP
                 </select>
               </label>
             </div>
+            <div className="project-form-row">
+              <label>
+                <span>{t("project.sheet.genParams")}</span>
+                <input
+                  value={genParams}
+                  placeholder={t("project.sheet.genParamsPlaceholder")}
+                  onChange={(event) => setGenParams(event.target.value)}
+                />
+              </label>
+            </div>
+            {asset.kind === "audio" && (
+              <div className="project-form-row">
+                <label>
+                  <span>{t("project.sheet.audioRole")}</span>
+                  <select value={audioRole} onChange={(event) => setAudioRole(event.target.value)}>
+                    <option value="">{t("project.sheet.audioRoleNone")}</option>
+                    {AUDIO_ROLES.map((role) => (
+                      <option key={role} value={role}>
+                        {t(audioRoleKey(role))}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+              </div>
+            )}
             <div className="project-form-row">
               <label>
                 <span>{t("project.sheet.fromAsset")}</span>
@@ -202,6 +235,8 @@ export default function ProjectAssetSheet({ asset, onClose }: ProjectAssetSheetP
                 shotId: asset.shot_id,
                 genFromAsset,
                 genFromPrompt,
+                genParams,
+                audioRole,
               });
               onClose();
             }}

@@ -231,6 +231,11 @@ export default function ProjectView() {
                   )}
                   <span className="project-ep-name">
                     {episode.title || t("project.episode.untitled")}
+                    {episode.shot_count > 0 && (
+                      <span className="project-ep-progress">
+                        {episode.done_shot_count}/{episode.shot_count}
+                      </span>
+                    )}
                   </span>
                   {episodeHasDoneMark(episode.status) ? (
                     <span className="project-ep-done" aria-label={t("project.status.done")}>

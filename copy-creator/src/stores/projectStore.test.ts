@@ -159,6 +159,7 @@ describe("projectStore", () => {
       bio: "沉稳寡言",
       prompt: "中年掌柜…",
       avatar_path: "角色库/陆离/设定图.png",
+      reference_paths: "[]",
     });
     expect(okNew).toBe(true);
     expect(invokeMock).toHaveBeenCalledWith("project_create_character", {
@@ -167,6 +168,7 @@ describe("projectStore", () => {
       bio: "沉稳寡言",
       prompt: "中年掌柜…",
       avatarPath: "角色库/陆离/设定图.png",
+      referencePaths: "[]",
     });
 
     const okEdit = await useProjectStore.getState().saveCharacter({
@@ -176,6 +178,7 @@ describe("projectStore", () => {
       bio: "",
       prompt: "",
       avatar_path: "",
+      reference_paths: "[]",
     });
     expect(okEdit).toBe(true);
     expect(invokeMock).toHaveBeenCalledWith("project_update_character", {
@@ -185,6 +188,7 @@ describe("projectStore", () => {
       bio: "",
       prompt: "",
       avatarPath: "",
+      referencePaths: "[]",
     });
   });
 

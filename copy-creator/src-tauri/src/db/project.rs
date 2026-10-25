@@ -44,6 +44,7 @@ CREATE TABLE IF NOT EXISTS project_characters (
     bio TEXT NOT NULL DEFAULT '',
     prompt TEXT NOT NULL DEFAULT '',
     avatar_path TEXT NOT NULL DEFAULT '',
+    reference_paths TEXT NOT NULL DEFAULT '[]',
     created_at TEXT NOT NULL,
     updated_at TEXT NOT NULL
 );
@@ -89,6 +90,9 @@ CREATE TABLE IF NOT EXISTS project_shots (
     episode_id TEXT NOT NULL,
     description TEXT NOT NULL DEFAULT '',
     dialogue TEXT NOT NULL DEFAULT '',
+    status TEXT NOT NULL DEFAULT 'none',
+    camera TEXT NOT NULL DEFAULT '',
+    duration TEXT NOT NULL DEFAULT '',
     sort_order REAL NOT NULL DEFAULT 0,
     created_at TEXT NOT NULL,
     updated_at TEXT NOT NULL,
@@ -107,6 +111,8 @@ CREATE TABLE IF NOT EXISTS project_assets (
     episode_id TEXT NOT NULL DEFAULT '',
     gen_from_asset TEXT NOT NULL DEFAULT '',
     gen_from_prompt TEXT NOT NULL DEFAULT '',
+    gen_params TEXT NOT NULL DEFAULT '',
+    audio_role TEXT NOT NULL DEFAULT '',
     created_at TEXT NOT NULL,
     updated_at TEXT NOT NULL
 );
@@ -198,8 +204,9 @@ fn character_row(row: &rusqlite::Row) -> rusqlite::Result<serde_json::Value> {
         "bio": row.get::<_, String>(3)?,
         "prompt": row.get::<_, String>(4)?,
         "avatar_path": row.get::<_, String>(5)?,
-        "created_at": row.get::<_, String>(6)?,
-        "updated_at": row.get::<_, String>(7)?,
+        "reference_paths": row.get::<_, String>(6)?,
+        "created_at": row.get::<_, String>(7)?,
+        "updated_at": row.get::<_, String>(8)?,
     }))
 }
 
@@ -249,9 +256,12 @@ fn shot_row(row: &rusqlite::Row) -> rusqlite::Result<serde_json::Value> {
         "episode_id": row.get::<_, String>(2)?,
         "description": row.get::<_, String>(3)?,
         "dialogue": row.get::<_, String>(4)?,
-        "sort_order": row.get::<_, f64>(5)?,
-        "created_at": row.get::<_, String>(6)?,
-        "updated_at": row.get::<_, String>(7)?,
+        "status": row.get::<_, String>(5)?,
+        "camera": row.get::<_, String>(6)?,
+        "duration": row.get::<_, String>(7)?,
+        "sort_order": row.get::<_, f64>(8)?,
+        "created_at": row.get::<_, String>(9)?,
+        "updated_at": row.get::<_, String>(10)?,
     }))
 }
 
@@ -265,8 +275,10 @@ fn asset_row(row: &rusqlite::Row) -> rusqlite::Result<serde_json::Value> {
         "episode_id": row.get::<_, String>(5)?,
         "gen_from_asset": row.get::<_, String>(6)?,
         "gen_from_prompt": row.get::<_, String>(7)?,
-        "created_at": row.get::<_, String>(8)?,
-        "updated_at": row.get::<_, String>(9)?,
+        "gen_params": row.get::<_, String>(8)?,
+        "audio_role": row.get::<_, String>(9)?,
+        "created_at": row.get::<_, String>(10)?,
+        "updated_at": row.get::<_, String>(11)?,
     }))
 }
 
@@ -285,16 +297,17 @@ fn prompt_row(row: &rusqlite::Row) -> rusqlite::Result<serde_json::Value> {
 const SHOW_COLS: &str = "id, name, note, created_at, updated_at";
 const EPISODE_COLS: &str =
     "id, show_id, number, title, status, script_path, sort_order, created_at, updated_at";
-const CHARACTER_COLS: &str = "id, name, role_tag, bio, prompt, avatar_path, created_at, updated_at";
+const CHARACTER_COLS: &str =
+    "id, name, role_tag, bio, prompt, avatar_path, reference_paths, created_at, updated_at";
 const LOCATION_COLS: &str =
     "id, name, int_ext, time_hint, bio, prompt, ref_path, created_at, updated_at";
 const PROP_COLS: &str = "id, name, bio, prompt, ref_path, created_at, updated_at";
 const SCENE_COLS: &str =
     "id, episode_id, location_id, heading, sort_order, note, created_at, updated_at";
 const SHOT_COLS: &str =
-    "id, scene_id, episode_id, description, dialogue, sort_order, created_at, updated_at";
+    "id, scene_id, episode_id, description, dialogue, status, camera, duration, sort_order, created_at, updated_at";
 const ASSET_COLS: &str =
-    "id, file_path, kind, name, shot_id, episode_id, gen_from_asset, gen_from_prompt, created_at, updated_at";
+    "id, file_path, kind, name, shot_id, episode_id, gen_from_asset, gen_from_prompt, gen_params, audio_role, created_at, updated_at";
 const PROMPT_COLS: &str = "id, title, content, category, file_path, created_at, updated_at";
 
 fn query_all(
@@ -561,8 +574,16 @@ pub fn project_list_episodes(
                 |row| row.get(0),
             )
             .map_err(|e| e.to_string())?;
+        let done_shot_count: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM project_shots WHERE episode_id = ?1 AND status = 'done'",
+                params![episode["id"].as_str().unwrap_or_default()],
+                |row| row.get(0),
+            )
+            .map_err(|e| e.to_string())?;
         episode["character_ids"] = serde_json::json!(character_ids);
         episode["shot_count"] = serde_json::json!(shot_count);
+        episode["done_shot_count"] = serde_json::json!(done_shot_count);
     }
     Ok(episodes)
 }
@@ -773,6 +794,7 @@ pub fn project_create_character(
     bio: String,
     prompt: String,
     avatar_path: String,
+    reference_paths: String,
 ) -> Result<serde_json::Value, String> {
     let name = name.trim().to_string();
     if name.is_empty() {
@@ -786,9 +808,9 @@ pub fn project_create_character(
         let conn = state.conn.lock().map_err(|e| e.to_string())?;
         conn.execute(
             "INSERT INTO project_characters \
-             (id, name, role_tag, bio, prompt, avatar_path, created_at, updated_at) \
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
-            params![id, name, role_tag, bio, prompt, avatar_path, &now, &now],
+             (id, name, role_tag, bio, prompt, avatar_path, reference_paths, created_at, updated_at) \
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
+            params![id, name, role_tag, bio, prompt, avatar_path, reference_paths, &now, &now],
         )
         .map_err(|e| e.to_string())?;
     }
@@ -796,6 +818,7 @@ pub fn project_create_character(
     Ok(serde_json::json!({
         "id": id, "name": name, "role_tag": role_tag, "bio": bio,
         "prompt": prompt, "avatar_path": avatar_path,
+        "reference_paths": reference_paths,
         "created_at": now, "updated_at": now, "episode_ref_count": 0,
     }))
 }
@@ -809,6 +832,7 @@ pub fn project_update_character(
     bio: String,
     prompt: String,
     avatar_path: String,
+    reference_paths: String,
 ) -> Result<(), String> {
     let name = name.trim().to_string();
     if name.is_empty() {
@@ -818,8 +842,8 @@ pub fn project_update_character(
         let state = app.state::<DbState>();
         let conn = state.conn.lock().map_err(|e| e.to_string())?;
         conn.execute(
-            "UPDATE project_characters SET name = ?1, role_tag = ?2, bio = ?3, prompt = ?4, avatar_path = ?5, updated_at = ?6 WHERE id = ?7",
-            params![name, role_tag, bio, prompt, normalize_project_path(&avatar_path), project_now(), id],
+            "UPDATE project_characters SET name = ?1, role_tag = ?2, bio = ?3, prompt = ?4, avatar_path = ?5, reference_paths = ?6, updated_at = ?7 WHERE id = ?8",
+            params![name, role_tag, bio, prompt, normalize_project_path(&avatar_path), reference_paths, project_now(), id],
         )
         .map_err(|e| e.to_string())?;
     }
@@ -1226,13 +1250,16 @@ pub fn project_update_shot(
     id: String,
     description: String,
     dialogue: String,
+    status: String,
+    camera: String,
+    duration: String,
 ) -> Result<(), String> {
     {
         let state = app.state::<DbState>();
         let conn = state.conn.lock().map_err(|e| e.to_string())?;
         conn.execute(
-            "UPDATE project_shots SET description = ?1, dialogue = ?2, updated_at = ?3 WHERE id = ?4",
-            params![description, dialogue, project_now(), id],
+            "UPDATE project_shots SET description = ?1, dialogue = ?2, status = ?3, camera = ?4, duration = ?5, updated_at = ?6 WHERE id = ?7",
+            params![description, dialogue, status, camera, duration, project_now(), id],
         )
         .map_err(|e| e.to_string())?;
     }
@@ -1406,13 +1433,15 @@ pub fn project_update_asset(
     shot_id: String,
     gen_from_asset: String,
     gen_from_prompt: String,
+    gen_params: String,
+    audio_role: String,
 ) -> Result<(), String> {
     {
         let state = app.state::<DbState>();
         let conn = state.conn.lock().map_err(|e| e.to_string())?;
         conn.execute(
             "UPDATE project_assets SET kind = ?1, name = ?2, episode_id = ?3, shot_id = ?4, \
-                gen_from_asset = ?5, gen_from_prompt = ?6, updated_at = ?7 WHERE id = ?8",
+                gen_from_asset = ?5, gen_from_prompt = ?6, gen_params = ?7, audio_role = ?8, updated_at = ?9 WHERE id = ?10",
             params![
                 kind,
                 name,
@@ -1420,6 +1449,8 @@ pub fn project_update_asset(
                 shot_id,
                 gen_from_asset,
                 gen_from_prompt,
+                gen_params,
+                audio_role,
                 project_now(),
                 id
             ],

@@ -487,6 +487,9 @@
       "unlinked": "未关联",
       "noDescription": "暂无描述",
       "pathHint": "图片路径填相对资源库根的路径，保存后即在此预览",
+      "refCount": "参考图 ×{{count}}",
+      "field.references": "参考图集（设定图/表情包等，可多张）",
+      "field.refAddPlaceholder": "输入相对库根路径，回车添加",
       "field": {
         "name": "名称",
         "roleTag": "身份",
@@ -537,6 +540,10 @@
       },
       "pickCastTitle": "选择出镜角色",
       "pickPropsTitle": "选择出场道具",
+      "field.status": "状态",
+      "field.camera": "景别/运镜",
+      "field.cameraPlaceholder": "如：特写 · 缓推",
+      "field.duration": "时长",
       "moveUp": "上移",
       "moveDown": "下移",
       "deleteConfirm": "删除这个镜头？挂靠的素材档案会保留为集级散件。"
@@ -574,7 +581,23 @@
       "open": "打开文件",
       "reveal": "在文件管理器显示",
       "locate": "在资源库中显示",
-      "traceBadge": "↳ {{title}}"
+      "traceBadge": "↳ {{title}}",
+      "genParams": "生成参数",
+      "genParamsPlaceholder": "模型 / seed / 分辨率等，便于复现",
+      "audioRole": "音频用途",
+      "audioRoleNone": "未指定"
+    },
+    "shotStatus": {
+      "none": "待处理",
+      "pending": "待生成",
+      "generating": "生成中",
+      "done": "已定稿",
+      "rejected": "弃用"
+    },
+    "audioRole": {
+      "voice": "配音",
+      "bgm": "配乐",
+      "sfx": "音效"
     },
     "search": {
       "kind": {

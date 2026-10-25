@@ -7048,6 +7048,70 @@ mod project_tests {
     }
 
     #[test]
+    fn consistency_columns_added_idempotently() {
+        // 旧库升级：建表语句无新列时 ensure_column 补齐；再跑一遍不报错。
+        let conn = Connection::open_in_memory().unwrap();
+        conn.execute_batch("PRAGMA foreign_keys=ON;").unwrap();
+        conn.execute_batch(
+            "CREATE TABLE project_characters (
+                id TEXT PRIMARY KEY, name TEXT NOT NULL, role_tag TEXT NOT NULL DEFAULT '',
+                bio TEXT NOT NULL DEFAULT '', prompt TEXT NOT NULL DEFAULT '',
+                avatar_path TEXT NOT NULL DEFAULT '', created_at TEXT NOT NULL, updated_at TEXT NOT NULL
+            );
+            CREATE TABLE project_shots (
+                id TEXT PRIMARY KEY, scene_id TEXT NOT NULL, episode_id TEXT NOT NULL,
+                description TEXT NOT NULL DEFAULT '', dialogue TEXT NOT NULL DEFAULT '',
+                sort_order REAL NOT NULL DEFAULT 0, created_at TEXT NOT NULL, updated_at TEXT NOT NULL
+            );
+            CREATE TABLE project_assets (
+                id TEXT PRIMARY KEY, file_path TEXT NOT NULL UNIQUE, kind TEXT NOT NULL DEFAULT 'file',
+                name TEXT NOT NULL DEFAULT '', shot_id TEXT NOT NULL DEFAULT '',
+                episode_id TEXT NOT NULL DEFAULT '', gen_from_asset TEXT NOT NULL DEFAULT '',
+                gen_from_prompt TEXT NOT NULL DEFAULT '', created_at TEXT NOT NULL, updated_at TEXT NOT NULL
+            );",
+        )
+        .unwrap();
+        crate::db::ensure_schema(&conn).unwrap();
+        for (table, column) in [
+            ("project_characters", "reference_paths"),
+            ("project_shots", "status"),
+            ("project_shots", "camera"),
+            ("project_shots", "duration"),
+            ("project_assets", "gen_params"),
+            ("project_assets", "audio_role"),
+        ] {
+            let exists: i64 = conn
+                .query_row(
+                    &format!(
+                        "SELECT COUNT(*) FROM pragma_table_info('{table}') WHERE name = '{column}'"
+                    ),
+                    [],
+                    |row| row.get(0),
+                )
+                .unwrap();
+            assert_eq!(exists, 1, "{table}.{column} 应已补齐");
+        }
+        // 新列可写可读（默认值语义）。
+        conn.execute(
+            "INSERT INTO project_shots (id, scene_id, episode_id, status, camera, duration, created_at, updated_at) \
+             VALUES ('sh1', 'sc', 'e1', 'done', '特写', '8s', '2026-01-01', '2026-01-01')",
+            [],
+        )
+        .unwrap();
+        let (status, camera, duration): (String, String, String) = conn
+            .query_row(
+                "SELECT status, camera, duration FROM project_shots WHERE id = 'sh1'",
+                [],
+                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+            )
+            .unwrap();
+        assert_eq!(
+            (status.as_str(), camera.as_str(), duration.as_str()),
+            ("done", "特写", "8s")
+        );
+    }
+
+    #[test]
     fn migrated_tables_include_project_schema() {
         // 新表漏登记 MIGRATED_BUSINESS_TABLES 会导致换存储目录丢工程数据；
         // 钉住 11 张表全部在册。
