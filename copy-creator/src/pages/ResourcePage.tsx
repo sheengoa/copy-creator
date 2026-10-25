@@ -1230,8 +1230,24 @@ export default function ResourcePage() {
         </div>
       )}
 
-      {/* 文件视图 / 工程视图切换：与工具行共用，回收站全屏时隐藏 */}
-      {!trashOpen && <ProjectViewSwitch />}
+      {/* 文件视图 / 工程视图切换：与工具行共用，回收站全屏时隐藏。
+          文件视图的分组条上移到切换按钮同一行（children），省一行纵向空间。 */}
+      {!trashOpen && (
+        <ProjectViewSwitch>
+          {projectView === "file" && (
+            <ResourceGroupChips
+              groups={resourceFolderGroups}
+              selectedGroup={resourceGroup}
+              onSelectGroup={handleSelectResourceGroup}
+              onReorderGroups={handleReorderTopGroups}
+              onManageGroups={() => {
+                setResourceGroupsError(null);
+                setResourceGroupManageOpen(true);
+              }}
+            />
+          )}
+        </ProjectViewSwitch>
+      )}
 
       {!trashOpen && projectView === "project" && search.trim() !== "" && (
         <ProjectSearchResults
@@ -1310,17 +1326,6 @@ export default function ResourcePage() {
 
       {!trashOpen && projectView === "file" && (
         <>
-      <ResourceGroupChips
-        groups={resourceFolderGroups}
-        selectedGroup={resourceGroup}
-        onSelectGroup={handleSelectResourceGroup}
-        onReorderGroups={handleReorderTopGroups}
-        onManageGroups={() => {
-          setResourceGroupsError(null);
-          setResourceGroupManageOpen(true);
-        }}
-      />
-
       <div className="resource-filter-row">
         <span className="resource-filter-label">{t("resources.filterByType")}</span>
         <div className="resource-filter-options">

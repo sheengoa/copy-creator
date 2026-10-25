@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
 import { useTranslation } from "react-i18next";
 import { useShallow } from "zustand/react/shallow";
 import { useProjectStore } from "../../stores/projectStore";
@@ -6,8 +6,10 @@ import { ConfirmDialog } from "../../components/ConfirmDialog";
 import { Icons } from "../../components/Icons";
 
 /** 资源页顶部的视图切换栏：文件视图 / 工程视图分段控件 + 剧选择器。
- *  文件视图是原有形态；工程视图进入剧集工作台。 */
-export default function ProjectViewSwitch() {
+ *  文件视图是原有形态；工程视图进入剧集工作台。
+ *  children（文件视图的分组条）渲染在切换按钮右侧同一行，节省一行
+ *  纵向空间；工程视图不传 children，布局与此前一致。 */
+export default function ProjectViewSwitch({ children }: { children?: ReactNode }) {
   const { t } = useTranslation();
   const { view, setView, shows, currentShowId, selectShow, createShow, deleteShow, loadShows } =
     useProjectStore(
@@ -91,7 +93,7 @@ export default function ProjectViewSwitch() {
           {t("project.view.project")}
         </button>
       </div>
-      <span className="project-viewbar-spacer" />
+      {children ?? <span className="project-viewbar-spacer" />}
       {view === "project" && (
         <div className="project-show-pick-wrap" ref={menuRef}>
           <button

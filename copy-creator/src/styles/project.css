@@ -17,6 +17,18 @@
   min-width: 0;
 }
 
+/* 文件视图：分组条上移到切换按钮同一行（children），占满右侧剩余空间，
+   分组多时行内横向滚动（resource-group-scroll 自带 overflow-x）。
+   工程视图不传 children，此规则无目标不生效。 */
+.project-viewbar .resource-group-section {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.project-viewbar .project-switch {
+  flex-shrink: 0;
+}
+
 /* 分段控件：与侧栏导航同语言（浅灰圆角底 + 激活白卡） */
 .project-switch {
   display: inline-flex;
