@@ -2026,6 +2026,21 @@ pub(crate) fn rename_resource_file_inner<R: Runtime>(
     }
 
     let root = resource_path_key(&get_resource_library_dir(app));
+    // 工程素材档案跟随文件改名（相对库根精确替换；失败仅记日志）。
+    if let (Some(old_rel), Some(new_rel)) = (
+        old_path
+            .strip_prefix(&root)
+            .ok()
+            .map(|p| p.to_string_lossy().to_string()),
+        new_path
+            .strip_prefix(&root)
+            .ok()
+            .map(|p| p.to_string_lossy().to_string()),
+    ) {
+        if let Err(error) = sync_project_asset_renamed(app, &old_rel, &new_rel) {
+            log::warn!("工程素材路径同步失败（改名）：{error}");
+        }
+    }
     let relative_path = new_path
         .strip_prefix(&root)
         .ok()
@@ -2268,6 +2283,25 @@ pub(crate) fn move_resource_records_inner<R: Runtime>(
             "group_name": target_group.clone(),
             "resource_folder": target_folder.clone(),
         }));
+    }
+
+    // 工程素材档案跟随文件移动（含自动发现记录：文件动了档案就要跟；
+    // 失败仅记日志，不阻断资源操作）。
+    for (old_moved, new_moved, _) in &moved {
+        if let (Some(old_rel), Some(new_rel)) = (
+            old_moved
+                .strip_prefix(&root)
+                .ok()
+                .map(|p| p.to_string_lossy().to_string()),
+            new_moved
+                .strip_prefix(&root)
+                .ok()
+                .map(|p| p.to_string_lossy().to_string()),
+        ) {
+            if let Err(error) = sync_project_asset_renamed(app, &old_rel, &new_rel) {
+                log::warn!("工程素材路径同步失败（移动）：{error}");
+            }
+        }
     }
 
     if !moved.is_empty() {
@@ -2781,6 +2815,26 @@ pub(crate) fn move_resource_group_inner<R: Runtime>(
     if let Err(error) = update_resource_record_paths(app, &new_records, &new_group) {
         let _ = std::fs::rename(&new_dir, &old_dir);
         return Err(format!("更新资源路径失败: {error}"));
+    }
+
+    // 工程素材档案跟随分组目录整体迁移（相对库根前缀替换；失败仅记
+    // 日志，档案路径过期由缺失口径暴露、可重新挂靠修复）。
+    {
+        let root = resource_path_key(&get_resource_library_dir(app));
+        if let (Some(old_rel), Some(new_rel)) = (
+            old_dir
+                .strip_prefix(&root)
+                .ok()
+                .map(|p| p.to_string_lossy().to_string()),
+            new_dir
+                .strip_prefix(&root)
+                .ok()
+                .map(|p| p.to_string_lossy().to_string()),
+        ) {
+            if let Err(error) = sync_project_assets_prefix_moved(app, &old_rel, &new_rel) {
+                log::warn!("工程素材路径同步失败（分组移动）：{error}");
+            }
+        }
     }
 
     if depth_delta != 0 {

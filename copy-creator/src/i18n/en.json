@@ -447,6 +447,13 @@
     },
     "asset": {
       "title": "Episode assets",
+      "link": "Link library file",
+      "unlink": "Unlink",
+      "pickerTitle": "Link a library file",
+      "pickerSearch": "Search file name…",
+      "pickerEmpty": "No linkable files in the library yet",
+      "alreadyLinked": "Linked",
+      "linkAction": "Link",
       "empty": "No linked assets yet; files in library groups can be linked here (next stage)",
       "kind": {
         "image": "Image",

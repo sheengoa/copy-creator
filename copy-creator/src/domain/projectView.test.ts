@@ -9,6 +9,7 @@ import {
   episodeStatusKey,
   joinLibraryPath,
   projectFileDisplayName,
+  relativeLibraryPath,
   scriptFileLabel,
 } from "./projectView";
 
@@ -63,6 +64,16 @@ describe("projectView 领域规则", () => {
     expect(joinLibraryPath("F:\\lib\\", "\\剧/02.md")).toBe("F:\\lib/剧/02.md");
     expect(joinLibraryPath("", "剧/02.md")).toBe("剧/02.md");
     expect(joinLibraryPath("F:/lib", "")).toBe("F:/lib");
+  });
+
+  it("绝对路径换算相对库根：库内归一、库外拒绝", () => {
+    expect(relativeLibraryPath("F:/lib", "F:/lib/剧/02.md")).toBe("剧/02.md");
+    // Windows 反斜杠与尾部斜杠的库根都要归一后比较。
+    expect(relativeLibraryPath("F:/lib/", String.raw`F:\lib\剧\02.md`)).toBe("剧/02.md");
+    expect(relativeLibraryPath("F:/lib", "F:/other/x.png")).toBe("");
+    expect(relativeLibraryPath("", "F:/lib/x.png")).toBe("");
+    // 与 joinLibraryPath 往返一致。
+    expect(relativeLibraryPath("F:/lib", joinLibraryPath("F:/lib", "剧/02.md"))).toBe("剧/02.md");
   });
 
   it("素材类型键未知回退 file", () => {

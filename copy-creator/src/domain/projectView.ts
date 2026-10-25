@@ -71,6 +71,19 @@ export function joinLibraryPath(libraryRoot: string, relativePath: string): stri
   return `${root}/${rel}`;
 }
 
+/** 反向换算：资源记录里的绝对路径 → 相对库根（挂接工程档案用）。
+ *  归一双侧斜杠后按前缀剥离；不在库内（外部文件）返回空串由调用方
+ *  拒绝挂靠——工程档案的路径约定必须相对库根才能随库迁移。 */
+export function relativeLibraryPath(libraryRoot: string, absolutePath: string): string {
+  const root = libraryRoot.trim().replace(/[\\/]+$/, "").replace(/\\/g, "/");
+  const abs = absolutePath.trim().replace(/\\/g, "/");
+  if (!root || !abs) return "";
+  if (abs.toLowerCase() !== root.toLowerCase() && !abs.toLowerCase().startsWith(root.toLowerCase() + "/")) {
+    return "";
+  }
+  return abs.slice(root.length).replace(/^\/+/, "");
+}
+
 /** 素材类型 → i18n 键（图片/视频/音频/文本/提示词/文件）。 */
 export function assetKindLabelKey(kind: string): string {
   const known = ["image", "video", "audio", "text", "prompt", "file"];

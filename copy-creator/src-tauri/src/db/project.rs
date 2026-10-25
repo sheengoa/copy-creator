@@ -436,11 +436,77 @@ pub fn project_update_show(app: AppHandle, id: String, note: String) -> Result<(
     Ok(())
 }
 
+/// 资源库文件改名/移动成功后同步工程素材档案：单文件相对库根路径
+/// 精确替换。同步失败只记日志不阻断资源操作（档案路径过期会被
+/// 「文件缺失」口径暴露，可重新挂靠修复）。
+pub(crate) fn sync_project_asset_renamed<R: Runtime>(
+    app: &AppHandle<R>,
+    old_relative: &str,
+    new_relative: &str,
+) -> Result<usize, String> {
+    let old = normalize_project_path(old_relative);
+    let new = normalize_project_path(new_relative);
+    if old.is_empty() || new.is_empty() || old == new {
+        return Ok(0);
+    }
+    let state = app.state::<DbState>();
+    let conn = state.conn.lock().map_err(|e| e.to_string())?;
+    conn.execute(
+        "UPDATE project_assets SET file_path = ?1, updated_at = ?2 WHERE file_path = ?3",
+        params![&new, project_now(), &old],
+    )
+    .map_err(|e| e.to_string())
+}
+
+/// 资源分组（目录）整体移动后同步：把该目录前缀下全部工程素材的
+/// 路径换到新前缀。工程素材量级小，全表读出后在 Rust 端做前缀匹配，
+/// 规避 SQL LIKE 对用户输入分组名的转义问题。
+pub(crate) fn sync_project_assets_prefix_moved<R: Runtime>(
+    app: &AppHandle<R>,
+    old_prefix_relative: &str,
+    new_prefix_relative: &str,
+) -> Result<usize, String> {
+    let old_prefix = normalize_project_path(old_prefix_relative)
+        .trim_end_matches('/')
+        .to_string();
+    let new_prefix = normalize_project_path(new_prefix_relative)
+        .trim_end_matches('/')
+        .to_string();
+    if old_prefix.is_empty() || new_prefix.is_empty() || old_prefix == new_prefix {
+        return Ok(0);
+    }
+    let state = app.state::<DbState>();
+    let conn = state.conn.lock().map_err(|e| e.to_string())?;
+    let paths: Vec<String> = {
+        let mut stmt = conn
+            .prepare("SELECT file_path FROM project_assets")
+            .map_err(|e| e.to_string())?;
+        let rows = stmt
+            .query_map([], |row| row.get::<_, String>(0))
+            .map_err(|e| e.to_string())?
+            .filter_map(|r| r.ok())
+            .collect();
+        rows
+    };
+    let now = project_now();
+    let mut changed = 0;
+    let mut stmt = conn
+        .prepare("UPDATE project_assets SET file_path = ?1, updated_at = ?2 WHERE file_path = ?3")
+        .map_err(|e| e.to_string())?;
+    for path in paths {
+        if let Some(rest) = path.strip_prefix(&old_prefix).filter(|rest| rest.starts_with('/')) {
+            changed += stmt
+                .execute(params![format!("{new_prefix}{rest}"), &now, &path])
+                .map_err(|e| e.to_string())?;
+        }
+    }
+    Ok(changed)
+}
+
 /// 删除镜头/场景/集/剧之前调用：把受影响的素材档案的工程归属清空
 /// （shot_id/episode_id 软引用，档案与文件本身保留，降级为待重挂的
 /// 散件）。SQL 片段为内部常量拼接，不来自用户输入。
-pub(crate) fn detach_assets_before_delete(
-    conn: &Connection,
+pub(crate) fn detach_assets_before_delete(    conn: &Connection,
     sql: &str,
     id: &str,
 ) -> Result<(), String> {

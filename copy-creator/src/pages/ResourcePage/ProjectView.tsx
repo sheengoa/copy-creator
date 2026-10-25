@@ -9,6 +9,7 @@ import IosSelect from "../../components/IosSelect";
 import { ResourceImage } from "./ResourceMedia";
 import ProjectLibraryPanel from "./ProjectLibraryPanel";
 import ProjectSceneBoard from "./ProjectSceneBoard";
+import ProjectAssetPicker from "./ProjectAssetPicker";
 import { Icons } from "../../components/Icons";
 import { openResourceFile, readResourceTextPreview } from "../../domain/mediaAssets";
 import {
@@ -48,6 +49,7 @@ export default function ProjectView() {
     updateEpisode,
     refresh,
     setEpisodeCharacters,
+    unlinkAsset,
   } = useProjectStore(
     useShallow((state) => ({
       shows: state.shows,
@@ -62,6 +64,7 @@ export default function ProjectView() {
       updateEpisode: state.updateEpisode,
       refresh: state.refresh,
       setEpisodeCharacters: state.setEpisodeCharacters,
+      unlinkAsset: state.unlinkAsset,
     })),
   );
 
@@ -70,6 +73,7 @@ export default function ProjectView() {
   const [deleteTarget, setDeleteTarget] = useState<ProjectEpisode | null>(null);
   const [renamingEpisode, setRenamingEpisode] = useState(false);
   const [libraryPanel, setLibraryPanel] = useState<LibraryPanelState | null>(null);
+  const [assetPickerShotId, setAssetPickerShotId] = useState<string | null>(null);
   const renameInputRef = useRef<HTMLInputElement>(null);
 
   const currentShow = shows.find((show) => show.id === currentShowId) ?? null;
@@ -384,6 +388,15 @@ export default function ProjectView() {
                   <div className="project-assets-head">
                     <h4>{t("project.asset.title")}</h4>
                     <span>{looseAssets.length}</span>
+                    <span className="project-title-spacer" />
+                    <button
+                      type="button"
+                      className="project-mini-btn"
+                      title={t("project.asset.link")}
+                      onClick={() => setAssetPickerShotId("")}
+                    >
+                      {Icons.add}
+                    </button>
                   </div>
                   {overviewLoading ? (
                     <div className="project-assets-empty">{t("project.loading")}</div>
@@ -406,6 +419,14 @@ export default function ProjectView() {
                           <span className="project-asset-name">
                             {asset.name || asset.file_path}
                           </span>
+                          <button
+                            type="button"
+                            className="project-asset-unlink"
+                            title={t("project.asset.unlink")}
+                            onClick={() => void unlinkAsset(asset.id)}
+                          >
+                            {Icons.close}
+                          </button>
                         </div>
                       ))}
                     </div>
@@ -416,6 +437,10 @@ export default function ProjectView() {
           </>
         )}
       </section>
+
+      {assetPickerShotId !== null && (
+        <ProjectAssetPicker shotId={assetPickerShotId} onClose={() => setAssetPickerShotId(null)} />
+      )}
 
       {libraryPanel && (
         <ProjectLibraryPanel

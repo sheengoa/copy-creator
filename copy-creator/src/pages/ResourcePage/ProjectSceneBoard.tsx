@@ -8,6 +8,7 @@ import {
 } from "../../stores/projectStore";
 import { ConfirmDialog } from "../../components/ConfirmDialog";
 import ProjectLibraryPanel from "./ProjectLibraryPanel";
+import ProjectAssetPicker from "./ProjectAssetPicker";
 import { Icons } from "../../components/Icons";
 import {
   characterAvatarInitial,
@@ -51,6 +52,7 @@ export default function ProjectSceneBoard() {
     deleteShot,
     setShotCharacters,
     setShotProps,
+    unlinkAsset,
   } = useProjectStore(
     useShallow((state) => ({
       overview: state.overview,
@@ -66,6 +68,7 @@ export default function ProjectSceneBoard() {
       deleteShot: state.deleteShot,
       setShotCharacters: state.setShotCharacters,
       setShotProps: state.setShotProps,
+      unlinkAsset: state.unlinkAsset,
     })),
   );
 
@@ -75,6 +78,7 @@ export default function ProjectSceneBoard() {
   const [sceneDraft, setSceneDraft] = useState<SceneDraft | null>(null);
   const [shotDraft, setShotDraft] = useState<ShotDraft | null>(null);
   const [pick, setPick] = useState<PickState>(null);
+  const [assetPickerShotId, setAssetPickerShotId] = useState<string | null>(null);
   const [deleteSceneTarget, setDeleteSceneTarget] = useState<ProjectScene | null>(null);
   const [deleteShotTarget, setDeleteShotTarget] = useState<ProjectShot | null>(null);
 
@@ -317,7 +321,24 @@ export default function ProjectSceneBoard() {
                   <div className="project-shot-main">
                     <b>{shot.description || t("project.shot.untitled")}</b>
                     {shot.dialogue && <i>{shot.dialogue}</i>}
-                    {(shot.character_ids.length > 0 || shot.prop_ids.length > 0) && (
+                    {shot.assets.length > 0 && (
+                    <span className="project-shot-cast">
+                      {shot.assets.map((asset) => (
+                        <span key={asset.id} className="project-shot-asset" title={asset.file_path}>
+                          {asset.name || asset.file_path}
+                          <button
+                            type="button"
+                            className="project-shot-asset-x"
+                            title={t("project.asset.unlink")}
+                            onClick={() => void unlinkAsset(asset.id)}
+                          >
+                            {Icons.close}
+                          </button>
+                        </span>
+                      ))}
+                    </span>
+                  )}
+                  {(shot.character_ids.length > 0 || shot.prop_ids.length > 0) && (
                       <span className="project-shot-cast">
                         {shot.character_ids.map((cid) => {
                           const character = characters.find((c) => c.id === cid);
@@ -343,6 +364,14 @@ export default function ProjectSceneBoard() {
                       </span>
                     )}
                   </div>
+                  <button
+                    type="button"
+                    className="project-mini-btn"
+                    title={t("project.asset.link")}
+                    onClick={() => setAssetPickerShotId(shot.id)}
+                  >
+                    {Icons.file}
+                  </button>
                   <button
                     type="button"
                     className="project-mini-btn"
@@ -449,6 +478,10 @@ export default function ProjectSceneBoard() {
           {Icons.add}
           {t("project.scene.new")}
         </button>
+      )}
+
+      {assetPickerShotId !== null && (
+        <ProjectAssetPicker shotId={assetPickerShotId} onClose={() => setAssetPickerShotId(null)} />
       )}
 
       {pick && pickShot && (

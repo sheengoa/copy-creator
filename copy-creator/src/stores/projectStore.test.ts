@@ -188,6 +188,27 @@ describe("projectStore", () => {
     });
   });
 
+  it("linkAsset 以 camelCase 参数挂靠并刷新概览", async () => {
+    invokeMock.mockResolvedValue({ id: "a1", file_path: "第 2 集/分镜/S1.png" });
+    useProjectStore.setState({ currentEpisodeId: "ep-2" });
+    const asset = await useProjectStore.getState().linkAsset({
+      filePath: "第 2 集/分镜/S1.png",
+      kind: "image",
+      name: "S1.png",
+      episodeId: "ep-2",
+      shotId: "sh1",
+    });
+    expect(invokeMock).toHaveBeenCalledWith("project_link_asset", {
+      filePath: "第 2 集/分镜/S1.png",
+      kind: "image",
+      name: "S1.png",
+      episodeId: "ep-2",
+      shotId: "sh1",
+    });
+    expect(asset?.id).toBe("a1");
+    expect(invokeMock).toHaveBeenCalledWith("project_get_episode_overview", { episodeId: "ep-2" });
+  });
+
   it("setEpisodeCharacters 整组替换后重取概览与角色统计", async () => {
     invokeMock.mockResolvedValue(undefined);
     useProjectStore.setState({ currentEpisodeId: "ep-2" });

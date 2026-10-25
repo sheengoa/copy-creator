@@ -180,6 +180,18 @@ interface ProjectStoreState {
   /** 镜头出镜角色 / 道具：整组替换。 */
   setShotCharacters: (shotId: string, characterIds: string[]) => Promise<void>;
   setShotProps: (shotId: string, propIds: string[]) => Promise<void>;
+
+  /** 把资源库文件挂进工程（集级散件或指定镜头）；同文件重复挂靠改写
+   *  归属。filePath 为相对库根路径。 */
+  linkAsset: (payload: {
+    filePath: string;
+    kind: string;
+    name: string;
+    episodeId: string;
+    shotId: string;
+  }) => Promise<ProjectAsset | null>;
+  /** 摘除工程档案（仅删记录，文件不动）。 */
+  unlinkAsset: (id: string) => Promise<void>;
 }
 
 const VIEW_STORAGE_KEY = "resource_view_mode";
@@ -613,6 +625,34 @@ export const useProjectStore = create<ProjectStoreState>((set, get) => ({
       if (currentEpisodeId) await get().selectEpisode(currentEpisodeId);
     } catch (error) {
       console.error("project_set_shot_props failed:", error);
+    }
+  },
+
+  linkAsset: async (payload) => {
+    try {
+      const asset = await invoke<ProjectAsset>("project_link_asset", {
+        filePath: payload.filePath,
+        kind: payload.kind,
+        name: payload.name,
+        episodeId: payload.episodeId,
+        shotId: payload.shotId,
+      });
+      const { currentEpisodeId } = get();
+      if (currentEpisodeId) await get().selectEpisode(currentEpisodeId);
+      return asset;
+    } catch (error) {
+      console.error("project_link_asset failed:", error);
+      return null;
+    }
+  },
+
+  unlinkAsset: async (id) => {
+    try {
+      await invoke("project_unlink_asset", { id });
+      const { currentEpisodeId } = get();
+      if (currentEpisodeId) await get().selectEpisode(currentEpisodeId);
+    } catch (error) {
+      console.error("project_unlink_asset failed:", error);
     }
   },
 }));

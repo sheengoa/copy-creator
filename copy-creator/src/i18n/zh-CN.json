@@ -447,6 +447,13 @@
     },
     "asset": {
       "title": "集级素材",
+      "link": "挂靠资源库文件",
+      "unlink": "解除挂靠",
+      "pickerTitle": "挂靠资源库文件",
+      "pickerSearch": "搜索文件名…",
+      "pickerEmpty": "资源库中还没有可挂靠的文件",
+      "alreadyLinked": "已挂靠",
+      "linkAction": "挂靠",
       "empty": "暂无挂靠素材；放入资源库分组的文件可挂到本集（下一阶段开放）",
       "kind": {
         "image": "图片",
