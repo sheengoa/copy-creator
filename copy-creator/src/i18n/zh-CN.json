@@ -488,9 +488,9 @@
       "noDescription": "暂无描述",
       "pathHint": "图片路径填相对资源库根的路径，保存后即在此预览",
       "refCount": "参考图 ×{{count}}",
-      "field.references": "参考图集（设定图/表情包等，可多张）",
-      "field.refAddPlaceholder": "输入相对库根路径，回车添加",
       "field": {
+        "references": "参考图集（设定图/表情包等，可多张）",
+        "refAddPlaceholder": "输入相对库根路径，回车添加",
         "name": "名称",
         "roleTag": "身份",
         "intExt": "内外景",
@@ -532,18 +532,18 @@
     "shot": {
       "new": "镜头",
       "untitled": "未写镜头描述",
+      "pickCastTitle": "选择出镜角色",
+      "pickPropsTitle": "选择出场道具",
       "field": {
         "description": "镜头描述",
         "dialogue": "对白 / 旁白",
+        "status": "状态",
+        "camera": "景别/运镜",
+        "cameraPlaceholder": "如：特写 · 缓推",
+        "duration": "时长",
         "cast": "出镜",
         "props": "道具"
       },
-      "pickCastTitle": "选择出镜角色",
-      "pickPropsTitle": "选择出场道具",
-      "field.status": "状态",
-      "field.camera": "景别/运镜",
-      "field.cameraPlaceholder": "如：特写 · 缓推",
-      "field.duration": "时长",
       "moveUp": "上移",
       "moveDown": "下移",
       "deleteConfirm": "该操作不可撤销。删除这个镜头？挂靠的素材档案会保留为集级散件。"

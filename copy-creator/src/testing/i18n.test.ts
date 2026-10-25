@@ -67,4 +67,19 @@ describe("i18n 键完整性守卫", () => {
     expect(onlyZh).toEqual([]);
     expect(onlyEn).toEqual([]);
   });
+
+  it("JSON 键名不得含点号（扁平键与 t() 嵌套解析不一致，界面会裸显键名）", () => {
+    // 带点的键如 "field.status" 经 flatten 拼串后与嵌套路径不可区分，
+    // 上面的存在性检查拦不住；i18next 按点号逐层解析，扁平键永远命中
+    // 不了（P1 曾因此让镜头表单/参考图集的标签裸显键名）。
+    const dotted = (value: unknown, prefix = ""): string[] =>
+      value && typeof value === "object"
+        ? Object.entries(value as Record<string, unknown>).flatMap(([key, child]) => [
+            ...(key.includes(".") ? [`${prefix}${key}`] : []),
+            ...dotted(child, prefix ? `${prefix}.${key}` : `${key}.`),
+          ])
+        : [];
+    expect(dotted(zhCN)).toEqual([]);
+    expect(dotted(en)).toEqual([]);
+  });
 });

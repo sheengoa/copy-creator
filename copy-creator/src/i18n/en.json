@@ -488,9 +488,9 @@
       "noDescription": "No description",
       "pathHint": "Image path is relative to the library root; saved paths preview here",
       "refCount": "Refs ×{{count}}",
-      "field.references": "Reference sheets (turnaround/expressions, multiple)",
-      "field.refAddPlaceholder": "Library-relative path, Enter to add",
       "field": {
+        "references": "Reference sheets (turnaround/expressions, multiple)",
+        "refAddPlaceholder": "Library-relative path, Enter to add",
         "name": "Name",
         "roleTag": "Role",
         "intExt": "Int/Ext",
@@ -532,18 +532,18 @@
     "shot": {
       "new": "Shot",
       "untitled": "No description yet",
+      "pickCastTitle": "Select cast",
+      "pickPropsTitle": "Select props",
       "field": {
         "description": "Description",
         "dialogue": "Dialogue / VO",
+        "status": "Status",
+        "camera": "Framing/Movement",
+        "cameraPlaceholder": "e.g. CU · slow push",
+        "duration": "Duration",
         "cast": "Cast",
         "props": "Props"
       },
-      "pickCastTitle": "Select cast",
-      "pickPropsTitle": "Select props",
-      "field.status": "Status",
-      "field.camera": "Framing/Movement",
-      "field.cameraPlaceholder": "e.g. CU · slow push",
-      "field.duration": "Duration",
       "moveUp": "Move up",
       "moveDown": "Move down",
       "deleteConfirm": "This cannot be undone. Delete this shot? Linked assets stay as episode loose files."

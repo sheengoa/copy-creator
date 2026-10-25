@@ -103,6 +103,104 @@ export default function ProjectSceneBoard() {
 
   const pickShot = pick ? (scenes.flatMap((s) => s.shots).find((sh) => sh.id === pick.shotId) ?? null) : null;
 
+  // 新建与编辑镜头共用四组字段（描述/台词/状态/景别/时长）；出镜与
+  // 道具 chips 依赖已存在的镜头 id，仅编辑表单渲染。
+  const shotFieldRows = (draft: ShotDraft) => (
+    <>
+      <label>
+        <span>{t("project.shot.field.description")}</span>
+        <textarea
+          rows={2}
+          value={draft.description}
+          onChange={(event) =>
+            setShotDraft((prev) =>
+              prev ? { ...prev, description: event.target.value } : prev,
+            )
+          }
+        />
+      </label>
+      <label>
+        <span>{t("project.shot.field.dialogue")}</span>
+        <textarea
+          rows={2}
+          value={draft.dialogue}
+          onChange={(event) =>
+            setShotDraft((prev) =>
+              prev ? { ...prev, dialogue: event.target.value } : prev,
+            )
+          }
+        />
+      </label>
+      <div className="project-shot-form-row">
+        <span>{t("project.shot.field.status")}</span>
+        <select
+          className="project-shot-form-select"
+          value={draft.status}
+          onChange={(event) =>
+            setShotDraft((prev) =>
+              prev ? { ...prev, status: event.target.value } : prev,
+            )
+          }
+        >
+          {SHOT_STATUSES.map((status) => (
+            <option key={status} value={status}>
+              {t(shotStatusKey(status))}
+            </option>
+          ))}
+        </select>
+        <span>{t("project.shot.field.camera")}</span>
+        <input
+          className="project-shot-form-input"
+          value={draft.camera}
+          placeholder={t("project.shot.field.cameraPlaceholder")}
+          onChange={(event) =>
+            setShotDraft((prev) =>
+              prev ? { ...prev, camera: event.target.value } : prev,
+            )
+          }
+        />
+        <span>{t("project.shot.field.duration")}</span>
+        <input
+          className="project-shot-form-input project-shot-form-duration"
+          value={draft.duration}
+          placeholder="8s"
+          onChange={(event) =>
+            setShotDraft((prev) =>
+              prev ? { ...prev, duration: event.target.value } : prev,
+            )
+          }
+        />
+      </div>
+    </>
+  );
+
+  const shotFormFoot = (draft: ShotDraft) => (
+    <div className="project-scene-form-foot">
+      <span className="project-title-spacer" />
+      <button type="button" className="project-dialog-btn" onClick={() => setShotDraft(null)}>
+        {t("common.cancel")}
+      </button>
+      <button
+        type="button"
+        className="project-dialog-btn primary"
+        onClick={() => {
+          setShotDraft(null);
+          void saveShot({
+            id: draft.isNew ? undefined : draft.id,
+            sceneId: draft.sceneId,
+            description: draft.description,
+            dialogue: draft.dialogue,
+            status: draft.status,
+            camera: draft.camera,
+            duration: draft.duration,
+          });
+        }}
+      >
+        {t("common.save")}
+      </button>
+    </div>
+  );
+
   const handleTogglePick = (id: string) => {
     if (!pickShot || !pick) return;
     if (pick.kind === "characters") {
@@ -254,70 +352,7 @@ export default function ProjectSceneBoard() {
             {scene.shots.map((shot, shotIndex) =>
               shotDraft?.id === shot.id ? (
                 <div key={shot.id} className="project-shot-form">
-                  <label>
-                    <span>{t("project.shot.field.description")}</span>
-                    <textarea
-                      rows={2}
-                      value={shotDraft.description}
-                      onChange={(event) =>
-                        setShotDraft((prev) =>
-                          prev ? { ...prev, description: event.target.value } : prev,
-                        )
-                      }
-                    />
-                  </label>
-                  <label>
-                    <span>{t("project.shot.field.dialogue")}</span>
-                    <textarea
-                      rows={2}
-                      value={shotDraft.dialogue}
-                      onChange={(event) =>
-                        setShotDraft((prev) =>
-                          prev ? { ...prev, dialogue: event.target.value } : prev,
-                        )
-                      }
-                    />
-                  </label>
-                  <div className="project-shot-form-row">
-                    <span>{t("project.shot.field.status")}</span>
-                    <select
-                      className="project-shot-form-select"
-                      value={shotDraft.status}
-                      onChange={(event) =>
-                        setShotDraft((prev) =>
-                          prev ? { ...prev, status: event.target.value } : prev,
-                        )
-                      }
-                    >
-                      {SHOT_STATUSES.map((status) => (
-                        <option key={status} value={status}>
-                          {t(shotStatusKey(status))}
-                        </option>
-                      ))}
-                    </select>
-                    <span>{t("project.shot.field.camera")}</span>
-                    <input
-                      className="project-shot-form-input"
-                      value={shotDraft.camera}
-                      placeholder={t("project.shot.field.cameraPlaceholder")}
-                      onChange={(event) =>
-                        setShotDraft((prev) =>
-                          prev ? { ...prev, camera: event.target.value } : prev,
-                        )
-                      }
-                    />
-                    <span>{t("project.shot.field.duration")}</span>
-                    <input
-                      className="project-shot-form-input project-shot-form-duration"
-                      value={shotDraft.duration}
-                      placeholder="8s"
-                      onChange={(event) =>
-                        setShotDraft((prev) =>
-                          prev ? { ...prev, duration: event.target.value } : prev,
-                        )
-                      }
-                    />
-                  </div>
+                  {shotFieldRows(shotDraft)}
                   <div className="project-shot-form-row">
                     <span>{t("project.shot.field.cast")}</span>
                     <span className="project-shot-form-chips">
@@ -360,33 +395,7 @@ export default function ProjectSceneBoard() {
                       </button>
                     </span>
                   </div>
-                  <div className="project-scene-form-foot">
-                    <span className="project-title-spacer" />
-                    <button type="button" className="project-dialog-btn" onClick={() => setShotDraft(null)}>
-                      {t("common.cancel")}
-                    </button>
-                    <button
-                      type="button"
-                      className="project-dialog-btn primary"
-                      onClick={() => {
-                        const draft = shotDraft;
-                        setShotDraft(null);
-                        if (draft) {
-                          void saveShot({
-                            id: draft.isNew ? undefined : draft.id,
-                            sceneId: draft.sceneId,
-                            description: draft.description,
-                            dialogue: draft.dialogue,
-                            status: draft.status,
-                            camera: draft.camera,
-                            duration: draft.duration,
-                          });
-                        }
-                      }}
-                    >
-                      {t("common.save")}
-                    </button>
-                  </div>
+                  {shotFormFoot(shotDraft)}
                 </div>
               ) : (
                 <div key={shot.id} className="project-shot-row">
@@ -510,6 +519,12 @@ export default function ProjectSceneBoard() {
                   </button>
                 </div>
               ),
+            )}
+            {shotDraft?.isNew && shotDraft.sceneId === scene.id && (
+              <div className="project-shot-form">
+                {shotFieldRows(shotDraft)}
+                {shotFormFoot(shotDraft)}
+              </div>
             )}
             <button
               type="button"

@@ -7154,6 +7154,12 @@ mod project_tests {
             [],
         )
         .unwrap();
+        conn.execute(
+            "INSERT INTO project_characters (id, name, role_tag, bio, prompt, avatar_path, created_at, updated_at) \
+             VALUES ('c2', '阿_强', '', '带下划线的名字', '', '', '2026-01-01', '2026-01-01')",
+            [],
+        )
+        .unwrap();
         let hits = crate::db::project::project_search_inner(&conn, "老江湖").unwrap();
         assert!(
             hits.iter()
@@ -7164,6 +7170,13 @@ mod project_tests {
         assert!(
             hits.iter().any(|r| r["kind"] == "prop" && r["id"] == "p1"),
             "道具 bio 未命中搜索：{hits:?}"
+        );
+        // LIKE 通配符按字面匹配：搜「阿_」只命中名字含下划线的角色，
+        // 下划线不得当成「任意单字符」把「阿强」之类也带进来。
+        let hits = crate::db::project::project_search_inner(&conn, "阿_").unwrap();
+        assert!(
+            hits.iter().any(|r| r["kind"] == "character" && r["id"] == "c2"),
+            "通配符转义后应命中字面下划线：{hits:?}"
         );
     }
 

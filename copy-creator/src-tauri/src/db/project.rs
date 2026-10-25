@@ -1825,7 +1825,12 @@ pub(crate) fn project_search_inner(
     if keyword.is_empty() {
         return Ok(Vec::new());
     }
-    let pattern = format!("%{keyword}%");
+    // LIKE 通配符按字面匹配：用户搜「100%」「a_b」不被当模式。
+    let escaped = keyword
+        .replace('\\', "\\\\")
+        .replace('%', "\\%")
+        .replace('_', "\\_");
+    let pattern = format!("%{escaped}%");
     let mut results: Vec<serde_json::Value> = Vec::new();
 
     // (kind, 表, 匹配列, 附加描述列, 取列)：统一产出 kind/title/id 及跳转
@@ -1862,11 +1867,11 @@ pub(crate) fn project_search_inner(
         let content_clause = if extra_column.is_empty() {
             String::new()
         } else {
-            format!(" OR lower({extra_column}) LIKE ?1")
+            format!(" OR lower({extra_column}) LIKE ?1 ESCAPE '\\'")
         };
         let sql = format!(
             "SELECT '{kind}' AS kind, {select} FROM {table} \
-             WHERE lower({column}) LIKE ?1{content_clause} LIMIT 20"
+             WHERE lower({column}) LIKE ?1 ESCAPE '\\'{content_clause} LIMIT 20"
         );
         let mut stmt = conn.prepare(&sql).map_err(|e| e.to_string())?;
         // 列名先收集成自有 Vec：闭包内借用 stmt 查列名会与 query_map 的
