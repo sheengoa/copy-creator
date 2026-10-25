@@ -395,6 +395,7 @@ export default function ProjectView() {
               overlay={epOverlay}
               onOpenAsset={setSheetAsset}
               onPickForShot={setAssetPickerShotId}
+              onAddLooseAsset={() => setAssetPickerShotId("")}
               onRelinkAsset={(asset) => {
                 setReplaceAsset(asset);
                 setSheetAsset(null);

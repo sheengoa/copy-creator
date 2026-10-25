@@ -2295,6 +2295,121 @@
 }
 .pc-checkbar-chip:hover { background: rgba(255, 255, 255, 0.18); }
 
+/* ── 便签节点（ComfyUI Note 的对应物） ── */
+.pc-note {
+  position: absolute;
+  width: 172px;
+  border-radius: 10px;
+  background: #f6e6a8;
+  color: #4a3f14;
+  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.18);
+  cursor: grab;
+  z-index: 4;
+}
+.pc-note:active { cursor: grabbing; }
+.pc-note-body {
+  padding: 10px 12px;
+  font-size: 11.5px;
+  line-height: 1.55;
+  word-break: break-word;
+  white-space: pre-wrap;
+  min-height: 40px;
+}
+.pc-note-body i { opacity: 0.55; }
+.pc-note-input {
+  display: block;
+  width: 100%;
+  min-height: 72px;
+  border: none;
+  background: transparent;
+  padding: 10px 12px;
+  font: inherit;
+  font-size: 11.5px;
+  line-height: 1.55;
+  color: inherit;
+  resize: none;
+  outline: 2px solid rgba(74, 63, 20, 0.4);
+  border-radius: 10px;
+}
+.pc-note-tools {
+  position: absolute;
+  top: -14px;
+  right: 0;
+  display: inline-flex;
+  gap: 1px;
+  padding: 2px;
+  border-radius: 7px;
+  background: rgba(28, 28, 34, 0.94);
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.12s ease;
+  z-index: 6;
+}
+.pc-note:hover .pc-note-tools { opacity: 1; pointer-events: auto; }
+.pc-note-tools button {
+  width: 22px;
+  height: 22px;
+  border-radius: 5px;
+  color: rgba(255, 255, 255, 0.85);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+}
+.pc-note-tools button:hover { background: rgba(255, 255, 255, 0.15); color: #fff; }
+.pc-note-tools button.danger:hover { background: var(--danger); }
+.pc-note-tools svg { width: 12px; height: 12px; }
+
+/* ── 双击空白的节点选择框 ── */
+.pc-addmenu {
+  position: absolute;
+  z-index: 40;
+  min-width: 240px;
+  padding: 6px;
+  border-radius: 12px;
+  background: rgba(28, 28, 34, 0.96);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  box-shadow: 0 14px 38px rgba(0, 0, 0, 0.4);
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.pc-addmenu-search {
+  border: none;
+  background: rgba(255, 255, 255, 0.08);
+  border-radius: 8px;
+  padding: 7px 10px;
+  margin-bottom: 3px;
+  color: #fff;
+  font-size: 12px;
+  outline: none;
+}
+.pc-addmenu-search::placeholder { color: rgba(255, 255, 255, 0.4); }
+.pc-addmenu-item {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  border: none;
+  background: none;
+  border-radius: 8px;
+  padding: 8px 10px;
+  color: rgba(255, 255, 255, 0.88);
+  font-size: 12.5px;
+  text-align: left;
+  cursor: pointer;
+}
+.pc-addmenu-item:hover { background: rgba(255, 255, 255, 0.12); }
+.pc-addmenu-item svg { width: 15px; height: 15px; flex: none; opacity: 0.8; }
+.pc-addmenu-item span { flex: none; }
+.pc-addmenu-item small {
+  flex: 1;
+  font-size: 10.5px;
+  color: rgba(255, 255, 255, 0.45);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 /* ── 玻璃 overlay 控件 ── */
 .pc-glass {
   position: absolute;

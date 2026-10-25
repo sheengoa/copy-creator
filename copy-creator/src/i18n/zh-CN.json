@@ -511,7 +511,13 @@
       "outputEmpty": "未连接来源",
       "checkTitle": "工作流缺项",
       "checkScript": "缺少剧本（资料框挂接后消除）",
-      "checkOutput": "未连接成片输出 · 点击定位"
+      "checkOutput": "未连接成片输出 · 点击定位",
+      "typeNote": "便签",
+      "typeAsset": "素材",
+      "addNodeSearch": "搜索节点…",
+      "typeNoteHint": "双击编辑的画布备注",
+      "typeAssetHint": "从资源库选择后落到此处",
+      "noteEmpty": "空便签 · 双击编辑"
     },
     "library": {
       "characters": "角色库",

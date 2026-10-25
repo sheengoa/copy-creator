@@ -511,7 +511,13 @@
       "outputEmpty": "No source linked",
       "checkTitle": "Workflow issues",
       "checkScript": "Script missing (link it in the materials frame)",
-      "checkOutput": "Final output not linked · click to locate"
+      "checkOutput": "Final output not linked · click to locate",
+      "typeNote": "Note",
+      "typeAsset": "Asset",
+      "addNodeSearch": "Search nodes…",
+      "typeNoteHint": "Canvas note, double-click to edit",
+      "typeAssetHint": "Pick from library, dropped right here",
+      "noteEmpty": "Empty note · double-click to edit"
     },
     "library": {
       "characters": "Characters",

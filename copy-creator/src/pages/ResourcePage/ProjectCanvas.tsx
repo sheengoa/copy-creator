@@ -80,6 +80,14 @@ interface CanvasInfo {
   w: number;
   h: number;
 }
+
+/** 画布便签节点（ComfyUI Note 的对应物），按集存 localStorage。 */
+interface CanvasNote {
+  id: string;
+  text: string;
+  x: number;
+  y: number;
+}
 interface CanvasFrame {
   id: string; // sceneId | "loose" | "info"
   scene: ProjectScene | null;
@@ -351,6 +359,7 @@ export default function ProjectCanvas({
   onOpenAsset,
   onPickForShot,
   onRelinkAsset,
+  onAddLooseAsset,
 }: {
   libraryRoot: string;
   /** 集信息玻璃卡内容（标题/状态/角色/剧本入口），由 ProjectView 组装。 */
@@ -358,6 +367,8 @@ export default function ProjectCanvas({
   onOpenAsset: (asset: ProjectAsset) => void;
   onPickForShot: (shotId: string) => void;
   onRelinkAsset: (asset: ProjectAsset) => void;
+  /** 双击菜单选「素材」时打开库选择器（添加为集级散件）。 */
+  onAddLooseAsset: () => void;
 }) {
   const { t } = useTranslation();
   const {
@@ -457,6 +468,67 @@ export default function ProjectCanvas({
     },
     [episodeId],
   );
+
+  // ── 便签节点（ComfyUI Note 的对应物）：文本与位置按集记 localStorage ──
+  const [notes, setNotes] = useState<CanvasNote[]>([]);
+  const [editingNoteId, setEditingNoteId] = useState<string | null>(null);
+  const [noteDraft, setNoteDraft] = useState("");
+  useEffect(() => {
+    try {
+      const raw = window.localStorage.getItem(`project_canvas_notes_${episodeId}`);
+      setNotes(raw ? (JSON.parse(raw) as CanvasNote[]) : []);
+    } catch {
+      setNotes([]);
+    }
+    setEditingNoteId(null);
+  }, [episodeId]);
+  const persistNotes = useCallback(
+    (next: CanvasNote[]) => {
+      setNotes(next);
+      try {
+        window.localStorage.setItem(`project_canvas_notes_${episodeId}`, JSON.stringify(next));
+      } catch {
+        // 存储不可用：仅不记忆。
+      }
+    },
+    [episodeId],
+  );
+  const addNote = useCallback(
+    (x: number, y: number) => {
+      const note: CanvasNote = {
+        id: `n${Date.now()}${Math.floor(Math.random() * 1e4)}`,
+        text: "",
+        x,
+        y,
+      };
+      persistNotes([...notes, note]);
+      setEditingNoteId(note.id);
+      setNoteDraft("");
+    },
+    [notes, persistNotes],
+  );
+
+  // ── 双击空白添加节点（ComfyUI 搜索框的对应物） ──
+  const [addMenu, setAddMenu] = useState<{ sx: number; sy: number; wx: number; wy: number } | null>(null);
+  const [addMenuQuery, setAddMenuQuery] = useState("");
+  // 从库选完素材后落到双击点的世界坐标：loose_assets 出现新 id 即落位。
+  const [pendingAddPos, setPendingAddPos] = useState<Pos | null>(null);
+  const lastLooseIdsRef = useRef<string[]>([]);
+  useEffect(() => {
+    const ids = looseAssets.map((a) => a.id);
+    const prev = lastLooseIdsRef.current;
+    lastLooseIdsRef.current = ids;
+    if (!pendingAddPos) return;
+    const added = ids.find((id) => !prev.includes(id));
+    if (added) {
+      void saveCanvasLayout({
+        assets: [{ id: added, x: pendingAddPos.x, y: pendingAddPos.y, w: LOOSE_W }],
+        shots: [],
+        scenes: [],
+      });
+      setPendingAddPos(null);
+    }
+  }, [looseAssets, pendingAddPos, saveCanvasLayout]);
 
   // ── 布局与位置（state 驱动渲染） ──
   const layout = useMemo(() => {
@@ -783,7 +855,7 @@ export default function ProjectCanvas({
   );
 
   interface DragState {
-    kind: "pan" | "marquee" | "card" | "loose" | "group" | "infoframe" | "wire" | "outnode";
+    kind: "pan" | "marquee" | "card" | "loose" | "group" | "infoframe" | "wire" | "outnode" | "note";
     sx: number;
     sy: number;
     moved?: boolean;
@@ -810,6 +882,21 @@ export default function ProjectCanvas({
   const onViewportMouseDown = useCallback(
     (e: React.MouseEvent) => {
       const target = e.target instanceof Element ? e.target : null;
+      setAddMenu(null);
+      // 便签卡：按下即拖动（编辑态除外）。
+      const noteEl = target?.closest(".pc-note");
+      if (noteEl && !target?.closest("textarea, button")) {
+        const noteId = noteEl.getAttribute("data-note") ?? "";
+        const note = notes.find((item) => item.id === noteId);
+        if (note) {
+          dragRef.current = {
+            kind: "note", sx: e.clientX, sy: e.clientY, moved: false,
+            ox: note.x, oy: note.y, frameKey: noteId,
+          };
+          e.preventDefault();
+          return;
+        }
+      }
       // 只豁免悬停工具条与浮层玻璃卡；镜头卡头/缩略网格属于卡面，按下即拖卡。
       if (
         target?.closest(".pc-node-tools") ||
@@ -907,7 +994,7 @@ export default function ProjectCanvas({
       dragRef.current = { kind: "marquee", sx: e.clientX, sy: e.clientY, mq, moved: false };
       e.preventDefault();
     },
-    [layout, pos, setSelection, view, infoPos, scenePos, portsOf, outputBox],
+    [layout, pos, setSelection, view, infoPos, scenePos, portsOf, outputBox, notes],
   );
 
 
@@ -963,6 +1050,15 @@ export default function ProjectCanvas({
           x: (drag.ox ?? 0) + dx / view.scale,
           y: (drag.oy ?? 0) + dy / view.scale,
         });
+      } else if (drag.kind === "note") {
+        if (!drag.moved) return;
+        setNotes((prev) =>
+          prev.map((item) =>
+            item.id === drag.frameKey
+              ? { ...item, x: (drag.ox ?? 0) + dx / view.scale, y: (drag.oy ?? 0) + dy / view.scale }
+              : item,
+          ),
+        );
       } else if (drag.kind === "wire") {
         const el = vpRef.current;
         if (!el || !drag.fromKey) return;
@@ -1040,6 +1136,20 @@ export default function ProjectCanvas({
             y: (drag.oy ?? 0) + (e.clientY - drag.sy) / view.scale,
           });
         }
+      } else if (drag.kind === "note") {
+        if (drag.moved) {
+          persistNotes(
+            notes.map((item) =>
+              item.id === drag.frameKey
+                ? {
+                    ...item,
+                    x: (drag.ox ?? 0) + (e.clientX - drag.sx) / view.scale,
+                    y: (drag.oy ?? 0) + (e.clientY - drag.sy) / view.scale,
+                  }
+                : item,
+            ),
+          );
+        }
       } else if (drag.kind === "marquee") {
         const list: string[] = [];
         if (drag.moved) {
@@ -1099,7 +1209,7 @@ export default function ProjectCanvas({
       document.removeEventListener("mousemove", onMove);
       document.removeEventListener("mouseup", onUp);
     };
-  }, [layout, pos, view, scenePos, infoPos, boxOf, portsOf, linkAssets, persistCards, persistLoose, saveCanvasLayout, saveInfoFramePos, saveView, setSelection, saveOutputPos, setEpisodeOutput, episodeId]);
+  }, [layout, pos, view, scenePos, infoPos, boxOf, portsOf, linkAssets, persistCards, persistLoose, saveCanvasLayout, saveInfoFramePos, saveView, setSelection, saveOutputPos, setEpisodeOutput, episodeId, notes, persistNotes]);
 
   // ── 节点操作 ──
   // 节点左右缘的接口圆点（ComfyUI 式）：左输入空心、右输出实心类型色，
@@ -1204,12 +1314,26 @@ export default function ProjectCanvas({
         }}
         onDoubleClick={(e) => {
           const thumb = e.target instanceof Element ? e.target.closest(".pc-shot-asset-thumb") : null;
-          if (!thumb) return;
-          const assetId = thumb.getAttribute("data-asset") ?? "";
-          const node = layout.cards
-            .flatMap((c) => c.assets)
-            .find((a) => a.asset.id === assetId);
-          if (node) onOpenAsset(node.asset);
+          if (thumb) {
+            const assetId = thumb.getAttribute("data-asset") ?? "";
+            const node = layout.cards
+              .flatMap((c) => c.assets)
+              .find((a) => a.asset.id === assetId);
+            if (node) onOpenAsset(node.asset);
+            return;
+          }
+          // 双击空白（非节点/标签牌/浮层）：弹出节点选择框（ComfyUI 式）。
+          const target = e.target instanceof Element ? e.target : null;
+          if (target?.closest(".pc-node, .pc-frame-label, .pc-glass, .pc-checkbar, .pc-note, textarea, input, button")) return;
+          const rect = vpRef.current?.getBoundingClientRect();
+          if (!rect) return;
+          setAddMenu({
+            sx: e.clientX - rect.left,
+            sy: e.clientY - rect.top,
+            wx: (e.clientX - rect.left - view.x) / view.scale,
+            wy: (e.clientY - rect.top - view.y) / view.scale,
+          });
+          setAddMenuQuery("");
         }}
       >
         <div
@@ -1638,6 +1762,68 @@ export default function ProjectCanvas({
               {portEls("output")}
             </div>
           )}
+
+          {/* 便签节点：双击编辑、拖动挪位、按集记 localStorage */}
+          {notes.map((note) => (
+            <div key={note.id} data-note={note.id} className="pc-note" style={{ left: note.x, top: note.y }}>
+              {editingNoteId === note.id ? (
+                <textarea
+                  className="pc-note-input"
+                  autoFocus
+                  value={noteDraft}
+                  onChange={(event) => setNoteDraft(event.target.value)}
+                  onBlur={() => {
+                    persistNotes(
+                      notes.map((item) =>
+                        item.id === note.id ? { ...item, text: noteDraft.trim() } : item,
+                      ),
+                    );
+                    setEditingNoteId(null);
+                  }}
+                  onKeyDown={(event) => {
+                    if (event.key === "Escape") setEditingNoteId(null);
+                    if (event.key === "Enter" && !event.shiftKey) {
+                      event.preventDefault();
+                      event.currentTarget.blur();
+                    }
+                  }}
+                  onMouseDown={(event) => event.stopPropagation()}
+                  onDoubleClick={(event) => event.stopPropagation()}
+                />
+              ) : (
+                <div
+                  className="pc-note-body"
+                  onDoubleClick={(event) => {
+                    event.stopPropagation();
+                    setEditingNoteId(note.id);
+                    setNoteDraft(note.text);
+                  }}
+                >
+                  {note.text || <i>{t("project.canvas.noteEmpty")}</i>}
+                </div>
+              )}
+              <span className="pc-note-tools">
+                <button
+                  type="button"
+                  data-tooltip={t("common.edit")}
+                  onClick={() => {
+                    setEditingNoteId(note.id);
+                    setNoteDraft(note.text);
+                  }}
+                >
+                  {Icons.edit}
+                </button>
+                <button
+                  type="button"
+                  data-tooltip={t("common.delete")}
+                  className="danger"
+                  onClick={() => persistNotes(notes.filter((item) => item.id !== note.id))}
+                >
+                  {Icons.close}
+                </button>
+              </span>
+            </div>
+          ))}
         </div>
 
         {/* 缺失提醒条（ComfyUI 缺节点警示的对应物）：缺项可点击定位 */}
@@ -1654,6 +1840,53 @@ export default function ProjectCanvas({
                 {issue.label}
               </button>
             ))}
+          </div>
+        )}
+
+        {/* 双击空白的节点选择框（ComfyUI 搜索框的对应物） */}
+        {addMenu && (
+          <div
+            className="pc-addmenu"
+            style={{ left: addMenu.sx, top: addMenu.sy }}
+            onMouseDown={(event) => event.stopPropagation()}
+            onDoubleClick={(event) => event.stopPropagation()}
+          >
+            <input
+              className="pc-addmenu-search"
+              placeholder={t("project.canvas.addNodeSearch")}
+              value={addMenuQuery}
+              onChange={(event) => setAddMenuQuery(event.target.value)}
+              onKeyDown={(event) => {
+                if (event.key === "Escape") setAddMenu(null);
+              }}
+              autoFocus
+            />
+            {[
+              { key: "note", label: t("project.canvas.typeNote"), hint: t("project.canvas.typeNoteHint"), icon: Icons.edit },
+              { key: "asset", label: t("project.canvas.typeAsset"), hint: t("project.canvas.typeAssetHint"), icon: Icons.image },
+            ]
+              .filter((item) => item.label.toLowerCase().includes(addMenuQuery.trim().toLowerCase()))
+              .map((item) => (
+                <button
+                  key={item.key}
+                  type="button"
+                  className="pc-addmenu-item"
+                  onClick={() => {
+                    setAddMenu(null);
+                    setAddMenuQuery("");
+                    if (item.key === "note") {
+                      addNote(addMenu.wx, addMenu.wy);
+                    } else {
+                      setPendingAddPos({ x: addMenu.wx, y: addMenu.wy });
+                      onAddLooseAsset();
+                    }
+                  }}
+                >
+                  {item.icon}
+                  <span>{item.label}</span>
+                  <small>{item.hint}</small>
+                </button>
+              ))}
           </div>
         )}
 
