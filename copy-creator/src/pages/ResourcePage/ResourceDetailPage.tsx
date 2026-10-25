@@ -254,7 +254,9 @@ export default function ResourceDetailPage({
     // 祖先链找 overflow:auto 的元素，收敛后只会命中零溢出、恒不滚动的
     // 外层面板——scrollTop 恒 0，返回顶部按钮因此永不出现。正文列晚于
     // 组件就绪时（全文异步加载）由 mainElReady 触发本回调重建、hook 重新解析。
+    // mainElReady 不在函数体内出现是刻意的：靠依赖数组驱动重建，禁用该规则。
     return mainElRef.current;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [mainElReady]);
   const backToTop = useBackToTop({ resolveContainer: findPageScroller });
 

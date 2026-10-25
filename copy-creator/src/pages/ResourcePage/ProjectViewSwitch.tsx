@@ -8,7 +8,7 @@ import { Icons } from "../../components/Icons";
 /** 资源页顶部的视图切换栏：文件视图 / 工程视图分段控件 + 剧选择器。
  *  文件视图是原有形态；工程视图进入剧集工作台。
  *  children（文件视图的分组条）渲染在切换按钮右侧同一行，节省一行
- *  纵向空间；工程视图不传 children，布局与此前一致。 */
+ *  纵向空间；为空/false（工程视图）时回落 spacer，布局与此前一致。 */
 export default function ProjectViewSwitch({ children }: { children?: ReactNode }) {
   const { t } = useTranslation();
   const { view, setView, shows, currentShowId, selectShow, createShow, deleteShow, loadShows } =
@@ -93,7 +93,9 @@ export default function ProjectViewSwitch({ children }: { children?: ReactNode }
           {t("project.view.project")}
         </button>
       </div>
-      {children ?? <span className="project-viewbar-spacer" />}
+      {/* children 为 false（工程视图）时也要有 spacer 把剧选择器推到行尾；
+          ?? 不会回落 false，这里必须用 ||。 */}
+      {children || <span className="project-viewbar-spacer" />}
       {view === "project" && (
         <div className="project-show-pick-wrap" ref={menuRef}>
           <button
