@@ -68,7 +68,7 @@ pub(crate) fn migrate_storage(app: &AppHandle, new_path: &str) -> Result<(), Str
 
 /// 迁移涉及的业务表（settings 由命令层单独复制：storage_path/shortcut_key
 /// 有特殊处理）。表名为内部常量，不来自用户输入。
-pub(crate) const MIGRATED_BUSINESS_TABLES: [&str; 21] = [
+pub(crate) const MIGRATED_BUSINESS_TABLES: [&str; 22] = [
     "clipboard_records",
     "phrase_groups",
     "phrases",
@@ -97,6 +97,8 @@ pub(crate) const MIGRATED_BUSINESS_TABLES: [&str; 21] = [
     "project_episode_characters",
     "project_shot_characters",
     "project_shot_props",
+    // 工程画布的手动工作流连线：两端外键引用 project_assets，随素材表搬迁。
+    "project_asset_links",
 ];
 
 /// 存储迁移的数据搬运核心：在 new_dir 建新库（PRAGMA + ensure_schema 与

@@ -7378,6 +7378,130 @@ mod project_tests {
     }
 
     #[test]
+    fn canvas_layout_roundtrip() {
+        // 画布布局持久化锚点：素材/镜头/场景坐标批量保存后 overview 原样
+        // 回读；未摆放的实体坐标为 null（前端据此自动布局，不落默认值）。
+        let conn = project_conn();
+        conn.execute(
+            "INSERT INTO project_shows (id, name, note, created_at, updated_at) \
+             VALUES ('s1', '剧', '', '2026-01-01', '2026-01-01')",
+            [],
+        )
+        .unwrap();
+        conn.execute(
+            "INSERT INTO project_episodes (id, show_id, number, title, status, script_path, sort_order, created_at, updated_at) \
+             VALUES ('e1', 's1', 1, '', 'none', '', 0, '2026-01-01', '2026-01-01')",
+            [],
+        )
+        .unwrap();
+        conn.execute(
+            "INSERT INTO project_scenes (id, episode_id, heading, sort_order, created_at, updated_at) \
+             VALUES ('sc1', 'e1', '场景', 0, '2026-01-01', '2026-01-01')",
+            [],
+        )
+        .unwrap();
+        conn.execute(
+            "INSERT INTO project_shots (id, scene_id, episode_id, description, sort_order, created_at, updated_at) \
+             VALUES ('sh1', 'sc1', 'e1', '', 0, '2026-01-01', '2026-01-01')",
+            [],
+        )
+        .unwrap();
+        conn.execute(
+            "INSERT INTO project_assets (id, file_path, kind, name, shot_id, episode_id, created_at, updated_at) \
+             VALUES ('a1', 'x.png', 'image', 'x.png', '', 'e1', '2026-01-01', '2026-01-01')",
+            [],
+        )
+        .unwrap();
+        let root = std::env::temp_dir().join(format!(
+            "copy-creator-canvas-layout-{}",
+            uuid::Uuid::new_v4()
+        ));
+        let overview_of = || crate::db::project::episode_overview_inner(&conn, "e1", &root).unwrap();
+
+        let overview = overview_of();
+        assert!(overview["scenes"][0]["canvas_x"].is_null(), "未摆放的场景坐标应为 null");
+        assert!(overview["scenes"][0]["shots"][0]["canvas_y"].is_null());
+        assert!(overview["loose_assets"][0]["canvas_w"].is_null());
+
+        crate::db::project::canvas_layout_inner(
+            &conn,
+            &serde_json::json!({
+                "assets": [{ "id": "a1", "x": 120.0, "y": 80.0, "w": 220.0 }],
+                "shots": [{ "id": "sh1", "x": 100.0, "y": 60.0 }],
+                "scenes": [{ "id": "sc1", "x": 60.0, "y": 40.0 }]
+            }),
+        )
+        .unwrap();
+        let overview = overview_of();
+        assert_eq!(overview["scenes"][0]["canvas_x"], 60.0);
+        assert_eq!(overview["scenes"][0]["canvas_y"], 40.0);
+        assert_eq!(overview["scenes"][0]["shots"][0]["canvas_x"], 100.0);
+        assert_eq!(overview["loose_assets"][0]["canvas_x"], 120.0);
+        assert_eq!(overview["loose_assets"][0]["canvas_w"], 220.0);
+    }
+
+    #[test]
+    fn asset_links_lifecycle() {
+        // 手动工作流连线锚点：创建（重复幂等）→ overview 返回 → 反方向
+        // 摘除；自连与不存在素材被拒绝；删素材后连线随外键级联消失。
+        let conn = project_conn();
+        conn.execute(
+            "INSERT INTO project_shows (id, name, note, created_at, updated_at) \
+             VALUES ('s1', '剧', '', '2026-01-01', '2026-01-01')",
+            [],
+        )
+        .unwrap();
+        conn.execute(
+            "INSERT INTO project_episodes (id, show_id, number, title, status, script_path, sort_order, created_at, updated_at) \
+             VALUES ('e1', 's1', 1, '', 'none', '', 0, '2026-01-01', '2026-01-01')",
+            [],
+        )
+        .unwrap();
+        for id in ["a1", "a2"] {
+            conn.execute(
+                "INSERT INTO project_assets (id, file_path, kind, name, shot_id, episode_id, created_at, updated_at) \
+                 VALUES (?1, ?1 || '.png', 'image', ?1, '', 'e1', '2026-01-01', '2026-01-01')",
+                params![id],
+            )
+            .unwrap();
+        }
+        let root = std::env::temp_dir().join(format!(
+            "copy-creator-canvas-links-{}",
+            uuid::Uuid::new_v4()
+        ));
+        let links_of = || {
+            crate::db::project::episode_overview_inner(&conn, "e1", &root)
+                .unwrap()["links"]
+                .as_array()
+                .unwrap()
+                .len()
+        };
+
+        assert!(crate::db::project::link_assets_inner(&conn, "a1", "a1", "参考").is_err(), "自连应被拒绝");
+        assert!(
+            crate::db::project::link_assets_inner(&conn, "a1", "ghost", "参考").is_err(),
+            "不存在的素材应被拒绝"
+        );
+        crate::db::project::link_assets_inner(&conn, "a1", "a2", "参考").unwrap();
+        crate::db::project::link_assets_inner(&conn, "a1", "a2", "参考").unwrap();
+        assert_eq!(links_of(), 1, "重复连线应幂等忽略");
+
+        let overview = crate::db::project::episode_overview_inner(&conn, "e1", &root).unwrap();
+        assert_eq!(overview["links"][0]["from_asset"], "a1");
+        assert_eq!(overview["links"][0]["to_asset"], "a2");
+        assert_eq!(overview["links"][0]["label"], "参考");
+
+        // 反方向也能摘除（画布上连线不区分朝向删除）。
+        crate::db::project::unlink_assets_inner(&conn, "a2", "a1").unwrap();
+        assert_eq!(links_of(), 0);
+
+        crate::db::project::link_assets_inner(&conn, "a1", "a2", "参考").unwrap();
+        conn.execute("DELETE FROM project_assets WHERE id = 'a1'", [])
+            .unwrap();
+        assert_eq!(links_of(), 0, "删素材后连线应随外键级联消失");
+    }
+
+    #[test]
     fn episodes_list_returns_sorted_with_stats() {
         // 剧集树主查询（带参 SQL 的防回归锚点）：按 sort_order 排序
         // （reorder 写的就是它，集号 number 仅作次序兜底），附镜头总数/

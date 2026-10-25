@@ -1174,6 +1174,14 @@ pub(crate) fn ensure_schema(conn: &Connection) -> Result<(), Box<dyn std::error:
     ensure_column(conn, "project_shots", "duration", "TEXT NOT NULL DEFAULT ''");
     ensure_column(conn, "project_assets", "gen_params", "TEXT NOT NULL DEFAULT ''");
     ensure_column(conn, "project_assets", "audio_role", "TEXT NOT NULL DEFAULT ''");
+    // 工程画布：节点/分组框摆放坐标（NULL = 未摆放过，前端自动布局）。
+    ensure_column(conn, "project_scenes", "canvas_x", "REAL");
+    ensure_column(conn, "project_scenes", "canvas_y", "REAL");
+    ensure_column(conn, "project_shots", "canvas_x", "REAL");
+    ensure_column(conn, "project_shots", "canvas_y", "REAL");
+    ensure_column(conn, "project_assets", "canvas_x", "REAL");
+    ensure_column(conn, "project_assets", "canvas_y", "REAL");
+    ensure_column(conn, "project_assets", "canvas_w", "REAL");
 
     // ── 运行时迁移：只在库版本落后时执行一次（见 run_schema_migrations）──
     if schema_version(conn) < SCHEMA_VERSION {

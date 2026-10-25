@@ -80,6 +80,8 @@ CREATE TABLE IF NOT EXISTS project_scenes (
     note TEXT NOT NULL DEFAULT '',
     created_at TEXT NOT NULL,
     updated_at TEXT NOT NULL,
+    canvas_x REAL,
+    canvas_y REAL,
     FOREIGN KEY (episode_id) REFERENCES project_episodes(id) ON DELETE CASCADE
 );
 CREATE INDEX IF NOT EXISTS idx_project_scenes_episode ON project_scenes(episode_id);
@@ -96,6 +98,8 @@ CREATE TABLE IF NOT EXISTS project_shots (
     sort_order REAL NOT NULL DEFAULT 0,
     created_at TEXT NOT NULL,
     updated_at TEXT NOT NULL,
+    canvas_x REAL,
+    canvas_y REAL,
     FOREIGN KEY (scene_id) REFERENCES project_scenes(id) ON DELETE CASCADE,
     FOREIGN KEY (episode_id) REFERENCES project_episodes(id) ON DELETE CASCADE
 );
@@ -114,10 +118,27 @@ CREATE TABLE IF NOT EXISTS project_assets (
     gen_params TEXT NOT NULL DEFAULT '',
     audio_role TEXT NOT NULL DEFAULT '',
     created_at TEXT NOT NULL,
-    updated_at TEXT NOT NULL
+    updated_at TEXT NOT NULL,
+    canvas_x REAL,
+    canvas_y REAL,
+    canvas_w REAL
 );
 CREATE INDEX IF NOT EXISTS idx_project_assets_episode ON project_assets(episode_id);
 CREATE INDEX IF NOT EXISTS idx_project_assets_shot ON project_assets(shot_id);
+
+-- 工程画布的手动工作流连线（生成链走 gen_from_asset，不入本表）。
+CREATE TABLE IF NOT EXISTS project_asset_links (
+    id TEXT PRIMARY KEY,
+    from_asset TEXT NOT NULL,
+    to_asset TEXT NOT NULL,
+    label TEXT NOT NULL DEFAULT '',
+    created_at TEXT NOT NULL,
+    UNIQUE (from_asset, to_asset),
+    FOREIGN KEY (from_asset) REFERENCES project_assets(id) ON DELETE CASCADE,
+    FOREIGN KEY (to_asset) REFERENCES project_assets(id) ON DELETE CASCADE
+);
+CREATE INDEX IF NOT EXISTS idx_project_asset_links_from ON project_asset_links(from_asset);
+CREATE INDEX IF NOT EXISTS idx_project_asset_links_to ON project_asset_links(to_asset);
 
 CREATE TABLE IF NOT EXISTS project_prompts (
     id TEXT PRIMARY KEY,
@@ -237,6 +258,8 @@ fn prop_row(row: &rusqlite::Row) -> rusqlite::Result<serde_json::Value> {
 }
 
 fn scene_row(row: &rusqlite::Row) -> rusqlite::Result<serde_json::Value> {
+    let canvas_x: Option<f64> = row.get(8)?;
+    let canvas_y: Option<f64> = row.get(9)?;
     Ok(serde_json::json!({
         "id": row.get::<_, String>(0)?,
         "episode_id": row.get::<_, String>(1)?,
@@ -246,10 +269,14 @@ fn scene_row(row: &rusqlite::Row) -> rusqlite::Result<serde_json::Value> {
         "note": row.get::<_, String>(5)?,
         "created_at": row.get::<_, String>(6)?,
         "updated_at": row.get::<_, String>(7)?,
+        "canvas_x": canvas_x,
+        "canvas_y": canvas_y,
     }))
 }
 
 fn shot_row(row: &rusqlite::Row) -> rusqlite::Result<serde_json::Value> {
+    let canvas_x: Option<f64> = row.get(11)?;
+    let canvas_y: Option<f64> = row.get(12)?;
     Ok(serde_json::json!({
         "id": row.get::<_, String>(0)?,
         "scene_id": row.get::<_, String>(1)?,
@@ -262,10 +289,15 @@ fn shot_row(row: &rusqlite::Row) -> rusqlite::Result<serde_json::Value> {
         "sort_order": row.get::<_, f64>(8)?,
         "created_at": row.get::<_, String>(9)?,
         "updated_at": row.get::<_, String>(10)?,
+        "canvas_x": canvas_x,
+        "canvas_y": canvas_y,
     }))
 }
 
 fn asset_row(row: &rusqlite::Row) -> rusqlite::Result<serde_json::Value> {
+    let canvas_x: Option<f64> = row.get(12)?;
+    let canvas_y: Option<f64> = row.get(13)?;
+    let canvas_w: Option<f64> = row.get(14)?;
     Ok(serde_json::json!({
         "id": row.get::<_, String>(0)?,
         "file_path": row.get::<_, String>(1)?,
@@ -279,6 +311,9 @@ fn asset_row(row: &rusqlite::Row) -> rusqlite::Result<serde_json::Value> {
         "audio_role": row.get::<_, String>(9)?,
         "created_at": row.get::<_, String>(10)?,
         "updated_at": row.get::<_, String>(11)?,
+        "canvas_x": canvas_x,
+        "canvas_y": canvas_y,
+        "canvas_w": canvas_w,
     }))
 }
 
@@ -303,11 +338,11 @@ const LOCATION_COLS: &str =
     "id, name, int_ext, time_hint, bio, prompt, ref_path, created_at, updated_at";
 const PROP_COLS: &str = "id, name, bio, prompt, ref_path, created_at, updated_at";
 const SCENE_COLS: &str =
-    "id, episode_id, location_id, heading, sort_order, note, created_at, updated_at";
+    "id, episode_id, location_id, heading, sort_order, note, created_at, updated_at, canvas_x, canvas_y";
 const SHOT_COLS: &str =
-    "id, scene_id, episode_id, description, dialogue, status, camera, duration, sort_order, created_at, updated_at";
+    "id, scene_id, episode_id, description, dialogue, status, camera, duration, sort_order, created_at, updated_at, canvas_x, canvas_y";
 const ASSET_COLS: &str =
-    "id, file_path, kind, name, shot_id, episode_id, gen_from_asset, gen_from_prompt, gen_params, audio_role, created_at, updated_at";
+    "id, file_path, kind, name, shot_id, episode_id, gen_from_asset, gen_from_prompt, gen_params, audio_role, created_at, updated_at, canvas_x, canvas_y, canvas_w";
 const PROMPT_COLS: &str = "id, title, content, category, file_path, created_at, updated_at";
 
 fn query_all(
@@ -1576,16 +1611,173 @@ pub fn project_update_asset(
     Ok(())
 }
 
-/// 摘除工程档案（只删记录，资源库文件不动）。
+/// 摘除工程档案（只删记录，资源库文件不动）。工作流连线随档案两端
+/// 一并清理（外键 CASCADE 已覆盖，显式删除兜底历史库未启外键的场景）。
 #[tauri::command]
 pub fn project_unlink_asset(app: AppHandle, id: String) -> Result<(), String> {
     {
         let state = app.state::<DbState>();
         let conn = state.conn.lock().map_err(|e| e.to_string())?;
+        conn.execute(
+            "DELETE FROM project_asset_links WHERE from_asset = ?1 OR to_asset = ?1",
+            params![id],
+        )
+        .map_err(|e| e.to_string())?;
         conn.execute("DELETE FROM project_assets WHERE id = ?1", params![id])
             .map_err(|e| e.to_string())?;
     }
     emit_project_changed(&app);
+    Ok(())
+}
+
+// ── 工程画布 ────────────────────────────────────────────────
+// 节点/分组框坐标与手动连线是「看」的持久化形态：保存走批量静默命令
+// （不 emit project-changed，画布自身已是事实来源，避免拖一下整树重取）。
+
+/// 批量保存画布布局：素材节点（x/y/宽）、空镜头卡（x/y）、场景分组
+/// 框（x/y）。坐标为世界像素；未提供的条目不动。NULL 坐标（未摆放）
+/// 由前端自动布局，无需在此清除。
+#[tauri::command]
+pub fn project_save_canvas_layout(
+    app: AppHandle,
+    payload: serde_json::Value,
+) -> Result<(), String> {
+    let state = app.state::<DbState>();
+    let conn = state.conn.lock().map_err(|e| e.to_string())?;
+    canvas_layout_inner(&conn, &payload)
+}
+
+pub(crate) fn canvas_layout_inner(
+    conn: &Connection,
+    payload: &serde_json::Value,
+) -> Result<(), String> {
+    let now = project_now();
+    let tx = conn.unchecked_transaction().map_err(|e| e.to_string())?;
+    if let Some(assets) = payload.get("assets").and_then(|v| v.as_array()) {
+        for item in assets {
+            let id = item.get("id").and_then(|v| v.as_str()).unwrap_or_default();
+            if id.is_empty() {
+                continue;
+            }
+            let x = item.get("x").and_then(|v| v.as_f64());
+            let y = item.get("y").and_then(|v| v.as_f64());
+            let w = item.get("w").and_then(|v| v.as_f64());
+            tx.execute(
+                "UPDATE project_assets \
+                 SET canvas_x = ?2, canvas_y = ?3, canvas_w = ?4, updated_at = ?5 \
+                 WHERE id = ?1",
+                params![id, x, y, w, &now],
+            )
+            .map_err(|e| e.to_string())?;
+        }
+    }
+    if let Some(shots) = payload.get("shots").and_then(|v| v.as_array()) {
+        for item in shots {
+            let id = item.get("id").and_then(|v| v.as_str()).unwrap_or_default();
+            if id.is_empty() {
+                continue;
+            }
+            let x = item.get("x").and_then(|v| v.as_f64());
+            let y = item.get("y").and_then(|v| v.as_f64());
+            tx.execute(
+                "UPDATE project_shots SET canvas_x = ?2, canvas_y = ?3, updated_at = ?4 WHERE id = ?1",
+                params![id, x, y, &now],
+            )
+            .map_err(|e| e.to_string())?;
+        }
+    }
+    if let Some(scenes) = payload.get("scenes").and_then(|v| v.as_array()) {
+        for item in scenes {
+            let id = item.get("id").and_then(|v| v.as_str()).unwrap_or_default();
+            if id.is_empty() {
+                continue;
+            }
+            let x = item.get("x").and_then(|v| v.as_f64());
+            let y = item.get("y").and_then(|v| v.as_f64());
+            tx.execute(
+                "UPDATE project_scenes SET canvas_x = ?2, canvas_y = ?3, updated_at = ?4 WHERE id = ?1",
+                params![id, x, y, &now],
+            )
+            .map_err(|e| e.to_string())?;
+        }
+    }
+    tx.commit().map_err(|e| e.to_string())?;
+    Ok(())
+}
+
+/// 手动连出一条工作流参考线（重复连线幂等忽略）。
+#[tauri::command]
+pub fn project_link_assets(
+    app: AppHandle,
+    from_asset: String,
+    to_asset: String,
+    label: String,
+) -> Result<serde_json::Value, String> {
+    let state = app.state::<DbState>();
+    let conn = state.conn.lock().map_err(|e| e.to_string())?;
+    link_assets_inner(&conn, &from_asset, &to_asset, &label)
+}
+
+pub(crate) fn link_assets_inner(
+    conn: &Connection,
+    from_asset: &str,
+    to_asset: &str,
+    label: &str,
+) -> Result<serde_json::Value, String> {
+    if from_asset == to_asset {
+        return Err("不能连接素材自身".to_string());
+    }
+    // 两端必须都是当前库内的工程档案（防跨集脏边由 overview 过滤兜底）。
+    let exists = |id: &str| -> Result<bool, String> {
+        Ok(conn
+            .query_row("SELECT COUNT(*) FROM project_assets WHERE id = ?1", params![id], |row| {
+                row.get::<_, i64>(0)
+            })
+            .map_err(|e| e.to_string())?
+            > 0)
+    };
+    if !exists(from_asset)? || !exists(to_asset)? {
+        return Err("素材档案不存在".to_string());
+    }
+    let id = uuid::Uuid::new_v4().to_string();
+    let now = project_now();
+    conn.execute(
+        "INSERT OR IGNORE INTO project_asset_links (id, from_asset, to_asset, label, created_at) \
+         VALUES (?1, ?2, ?3, ?4, ?5)",
+        params![id, from_asset, to_asset, label.trim(), &now],
+    )
+    .map_err(|e| e.to_string())?;
+    Ok(serde_json::json!({
+        "id": id,
+        "from_asset": from_asset,
+        "to_asset": to_asset,
+        "label": label.trim(),
+    }))
+}
+
+/// 摘除一条手动连线（按两端素材定位，忽略方向与创建顺序）。
+#[tauri::command]
+pub fn project_unlink_assets(
+    app: AppHandle,
+    from_asset: String,
+    to_asset: String,
+) -> Result<(), String> {
+    let state = app.state::<DbState>();
+    let conn = state.conn.lock().map_err(|e| e.to_string())?;
+    unlink_assets_inner(&conn, &from_asset, &to_asset)
+}
+
+pub(crate) fn unlink_assets_inner(
+    conn: &Connection,
+    from_asset: &str,
+    to_asset: &str,
+) -> Result<(), String> {
+    conn.execute(
+        "DELETE FROM project_asset_links \
+         WHERE (from_asset = ?1 AND to_asset = ?2) OR (from_asset = ?2 AND to_asset = ?1)",
+        params![from_asset, to_asset],
+    )
+    .map_err(|e| e.to_string())?;
     Ok(())
 }
 
@@ -1848,11 +2040,33 @@ pub(crate) fn episode_overview_inner(
         scene["shots"] = serde_json::json!(shots);
     }
 
+    // 手动工作流连线：只取本集素材之间的边（两端都属当前集），供画布
+    // 一次渲染；生成链（gen_from_asset）由前端从素材数据直接推导。
+    let links = query_all_params(
+        conn,
+        "SELECT l.id, l.from_asset, l.to_asset, l.label \
+         FROM project_asset_links l \
+         JOIN project_assets a1 ON a1.id = l.from_asset \
+         JOIN project_assets a2 ON a2.id = l.to_asset \
+         WHERE a1.episode_id = ?1 AND a2.episode_id = ?1 \
+         ORDER BY l.created_at ASC, l.id ASC",
+        params![episode_id],
+        |row| {
+            Ok(serde_json::json!({
+                "id": row.get::<_, String>(0)?,
+                "from_asset": row.get::<_, String>(1)?,
+                "to_asset": row.get::<_, String>(2)?,
+                "label": row.get::<_, String>(3)?,
+            }))
+        },
+    )?;
+
     Ok(serde_json::json!({
         "episode": episode,
         "characters": characters,
         "scenes": scenes,
         "loose_assets": loose_assets,
+        "links": links,
     }))
 }
 
