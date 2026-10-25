@@ -1340,6 +1340,129 @@ pub fn project_set_shot_props(
 
 // ── 素材档案 ────────────────────────────────────────────────
 
+/// 把库外文件复制进资源库根（「未分组」）：重名自动加「 (1)」序号，与
+/// 追溯重链/回收站恢复同一约定。纯文件操作不持锁，大文件复制不阻塞
+/// 其他命令；复制非移动，原文件保留。返回库内目标路径。
+pub(crate) fn copy_into_library_root(
+    root: &std::path::Path,
+    source: &std::path::Path,
+) -> std::io::Result<std::path::PathBuf> {
+    let file_name = source
+        .file_name()
+        .ok_or_else(|| std::io::Error::new(std::io::ErrorKind::InvalidInput, "源路径没有文件名"))?;
+    let mut dest = root.join(file_name);
+    if dest.exists() {
+        let stem = source
+            .file_stem()
+            .map(|stem| stem.to_string_lossy().to_string())
+            .unwrap_or_default();
+        let extension = source
+            .extension()
+            .map(|ext| ext.to_string_lossy().to_string())
+            .unwrap_or_default();
+        let mut placed = false;
+        for index in 1..=999u32 {
+            let candidate_name = if extension.is_empty() {
+                format!("{stem} ({index})")
+            } else {
+                format!("{stem} ({index}).{extension}")
+            };
+            let candidate = root.join(candidate_name);
+            if !candidate.exists() {
+                dest = candidate;
+                placed = true;
+                break;
+            }
+        }
+        if !placed {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::AlreadyExists,
+                "库内存在大量同名文件，无法自动命名",
+            ));
+        }
+    }
+    std::fs::copy(source, &dest)?;
+    Ok(dest)
+}
+
+/// 从电脑导入文件并挂靠：库外文件复制进库根「未分组」→ watcher 同款
+/// 登记资源记录 → 按当前集/镜头落工程档案，一次调用完成。已在库内的
+/// 路径不复制直接挂靠（容错；正常路径由挂靠列表完成）。挂靠仍是
+/// file_path UNIQUE upsert，重复导入/挂靠改归属不新建行。
+#[tauri::command]
+pub fn project_import_asset(
+    app: AppHandle,
+    source_path: String,
+    episode_id: String,
+    shot_id: String,
+) -> Result<serde_json::Value, String> {
+    let source = std::path::PathBuf::from(source_path.trim());
+    if !source.is_file() {
+        return Err("请选择一个文件".to_string());
+    }
+    let root = get_resource_library_dir(&app);
+    // 库内判断用小写前缀（Windows 大小写不敏感口径，与前端
+    // relativeLibraryPath 一致）；dest 由 root.join 构造，strip_prefix 必成。
+    let in_library = source
+        .to_string_lossy()
+        .to_lowercase()
+        .starts_with(&(root.to_string_lossy().to_lowercase() + "/"));
+    let dest = if in_library {
+        source.clone()
+    } else {
+        copy_into_library_root(&root, &source).map_err(|error| format!("导入文件失败: {error}"))?
+    };
+    // watcher 同款登记：为新文件补建资源记录（幂等，已有记录跳过）；
+    // 再 bump 修订号让文件视图的心跳立刻感知，不必等监听器。
+    settle_external_resource_changes(&app, &[dest.clone()]);
+    bump_resource_library_revision();
+
+    let relative = normalize_project_path(
+        dest.strip_prefix(&root)
+            .map_err(|_| "目标路径不在资源库内".to_string())?
+            .to_string_lossy()
+            .as_ref(),
+    );
+    if relative.is_empty() {
+        return Err("目标路径无效".to_string());
+    }
+    let kind = crate::media_kind::media_kind_for_path(&dest).as_str().to_string();
+    let name = dest
+        .file_name()
+        .map(|file_name| file_name.to_string_lossy().to_string())
+        .unwrap_or_default();
+    let id = uuid::Uuid::new_v4().to_string();
+    let now = project_now();
+    {
+        let state = app.state::<DbState>();
+        let conn = state.conn.lock().map_err(|e| e.to_string())?;
+        conn.execute(
+            "INSERT INTO project_assets \
+             (id, file_path, kind, name, shot_id, episode_id, gen_from_asset, gen_from_prompt, created_at, updated_at) \
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, '', '', ?7, ?8) \
+             ON CONFLICT(file_path) DO UPDATE SET \
+                kind = excluded.kind, name = excluded.name, \
+                shot_id = excluded.shot_id, episode_id = excluded.episode_id, \
+                updated_at = excluded.updated_at",
+            params![id, relative, kind, name, shot_id, episode_id, &now, &now],
+        )
+        .map_err(|e| e.to_string())?;
+    }
+    emit_project_changed(&app);
+    let state = app.state::<DbState>();
+    let conn = state.conn.lock().map_err(|e| e.to_string())?;
+    let mut asset = query_row_with_param(
+        &conn,
+        &format!("SELECT {ASSET_COLS} FROM project_assets WHERE file_path = ?1"),
+        &[&relative],
+        asset_row,
+    )?;
+    // 与 project_link_asset 同口径：即时返回也带 missing 标。root 在本
+    // 函数开头已解析，无重入锁问题。
+    asset["missing"] = serde_json::json!(!root.join(&relative).exists());
+    Ok(asset)
+}
+
 /// 把资源库文件挂进工程：同一文件只有一份档案，重复挂靠时改写归属
 /// （换集/换镜头）而不是新建行——file_path UNIQUE + DO UPDATE。
 #[tauri::command]
@@ -1373,14 +1496,21 @@ pub fn project_link_asset(
         .map_err(|e| e.to_string())?;
     }
     emit_project_changed(&app);
+    emit_project_changed(&app);
+    // 返回值补 missing 标：ProjectAsset 类型要求该字段（overview 逐档案
+    // 检测的同口径），挂靠/导入的即时返回也要带，免得类型谎报。先解析
+    // 库根（内部要锁 conn 读设置），再锁连接取行。
+    let library_root = get_resource_library_dir(&app);
     let state = app.state::<DbState>();
     let conn = state.conn.lock().map_err(|e| e.to_string())?;
-    query_row_with_param(
+    let mut asset = query_row_with_param(
         &conn,
         &format!("SELECT {ASSET_COLS} FROM project_assets WHERE file_path = ?1"),
         &[&path],
         asset_row,
-    )
+    )?;
+    asset["missing"] = serde_json::json!(!library_root.join(&path).exists());
+    Ok(asset)
 }
 
 #[tauri::command]

@@ -7344,6 +7344,40 @@ mod project_tests {
     }
 
     #[test]
+    fn copy_into_library_root_dedupes_names() {
+        // 导入重名约定锚点：无冲突用原名；冲突加「 (1)」序号且不覆盖
+        // 已有文件；无扩展名文件同样处理；源文件保留（复制非移动）。
+        let root = std::env::temp_dir().join(format!(
+            "copy-creator-import-copy-{}",
+            uuid::Uuid::new_v4()
+        ));
+        std::fs::create_dir_all(&root).unwrap();
+        let outside = std::env::temp_dir().join(format!(
+            "copy-creator-import-src-{}.png",
+            uuid::Uuid::new_v4()
+        ));
+        std::fs::write(&outside, b"png-bytes").unwrap();
+
+        // 无冲突：原名落库
+        let first = crate::db::project::copy_into_library_root(&root, &outside).unwrap();
+        assert_eq!(first.file_name().unwrap().to_string_lossy(), outside.file_name().unwrap().to_string_lossy());
+        // 同名再导：加 (1) 序号，两份内容独立
+        let second = crate::db::project::copy_into_library_root(&root, &outside).unwrap();
+        assert!(second.file_name().unwrap().to_string_lossy().ends_with(" (1).png"));
+        assert!(first.exists() && second.exists() && outside.exists(), "复制不得覆盖或移动源文件");
+
+        // 无扩展名文件：序号加在主干后
+        let no_ext = std::env::temp_dir().join(format!("noext-{}", uuid::Uuid::new_v4()));
+        std::fs::write(&no_ext, b"x").unwrap();
+        let placed = crate::db::project::copy_into_library_root(&root, &no_ext).unwrap();
+        assert!(!placed.to_string_lossy().contains('.'), "无扩展名文件不应凭空加扩展名");
+
+        std::fs::remove_dir_all(&root).ok();
+        std::fs::remove_file(&outside).ok();
+        std::fs::remove_file(&no_ext).ok();
+    }
+
+    #[test]
     fn episodes_list_returns_sorted_with_stats() {
         // 剧集树主查询（带参 SQL 的防回归锚点）：按 sort_order 排序
         // （reorder 写的就是它，集号 number 仅作次序兜底），附镜头总数/

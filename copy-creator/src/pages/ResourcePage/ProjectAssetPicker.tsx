@@ -35,10 +35,11 @@ export default function ProjectAssetPicker({
   // 跑，new Set 的引用永远不等 → 无限重渲染 → React 卸载整树（白屏）。
   // 改为订阅 overview 引用 + useMemo 派生。
   const overview = useProjectStore((state) => state.overview);
-  const { episodeId, linkAsset } = useProjectStore(
+  const { episodeId, linkAsset, importAsset } = useProjectStore(
     useShallow((state) => ({
       episodeId: state.overview?.episode.id ?? "",
       linkAsset: state.linkAsset,
+      importAsset: state.importAsset,
     })),
   );
   const linkedPaths = useMemo(
@@ -61,6 +62,30 @@ export default function ProjectAssetPicker({
   // 搜索词防抖后驱动后端查询；offset 只随「显示更多」推进。
   const [search, setSearch] = useState("");
   const [offset, setOffset] = useState(0);
+  // 库外导入：选完文件后的复制+挂靠进行中态与失败提示（取消静默）。
+  const [importing, setImporting] = useState(false);
+  const [importFile, setImportFile] = useState("");
+  const [importError, setImportError] = useState("");
+
+  const importAndLink = async () => {
+    if (importing) return;
+    setImportError("");
+    setImporting(true);
+    try {
+      const { path } = await invoke<{ path: string }>("select_resource_trace_file");
+      setImportFile(path.split(/[\\/]/).pop() ?? path);
+      await importAsset({ sourcePath: path, episodeId, shotId });
+      onLinked?.();
+      onClose();
+    } catch (error) {
+      const text = error instanceof Error ? error.message : String(error);
+      if (text.includes("cancelled")) return;
+      setImportError(text);
+    } finally {
+      setImporting(false);
+      setImportFile("");
+    }
+  };
 
   useEffect(() => {
     const timer = window.setTimeout(() => setSearch(query.trim()), 250);
@@ -217,6 +242,26 @@ export default function ProjectAssetPicker({
             >
               {loadingMore ? t("project.loading") : t("resources.loadMore")}
             </button>
+          )}
+        </div>
+        <div className="project-import-bar">
+          <button
+            type="button"
+            className="project-library-import"
+            onClick={() => void importAndLink()}
+            disabled={importing}
+          >
+            {Icons.add}
+            <span>
+              {importing
+                ? t("project.asset.importing", { file: importFile })
+                : t("project.asset.importAction")}
+            </span>
+          </button>
+          {importError && (
+            <div className="project-import-error" role="alert">
+              {t("project.asset.importFailed")}：{importError}
+            </div>
           )}
         </div>
       </div>

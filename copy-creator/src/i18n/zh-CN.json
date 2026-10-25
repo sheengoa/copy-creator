@@ -459,6 +459,9 @@
       "alreadyLinked": "已挂靠",
       "linkAction": "挂靠",
       "fileMissing": "文件缺失",
+      "importAction": "从电脑导入并挂靠…",
+      "importing": "正在导入：{{file}} …",
+      "importFailed": "导入失败",
       "empty": "暂无挂靠素材；放入资源库分组的文件可挂到本集（下一阶段开放）",
       "kind": {
         "image": "图片",

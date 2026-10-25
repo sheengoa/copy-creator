@@ -459,6 +459,9 @@
       "alreadyLinked": "Linked",
       "linkAction": "Link",
       "fileMissing": "Missing file",
+      "importAction": "Import from computer and link…",
+      "importing": "Importing {{file}} …",
+      "importFailed": "Import failed",
       "empty": "No linked assets yet; files in library groups can be linked here (next stage)",
       "kind": {
         "image": "Image",

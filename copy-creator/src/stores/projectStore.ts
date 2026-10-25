@@ -239,6 +239,13 @@ interface ProjectStoreState {
     episodeId: string;
     shotId: string;
   }) => Promise<ProjectAsset | null>;
+  /** 库外文件导入并挂靠：后端复制进库根「未分组」→ 登记资源记录 →
+   *  落工程档案。错误不吞（选择器负责展示），用户取消以外都应可见。 */
+  importAsset: (payload: {
+    sourcePath: string;
+    episodeId: string;
+    shotId: string;
+  }) => Promise<ProjectAsset>;
   /** 摘除工程档案（仅删记录，文件不动）。 */
   unlinkAsset: (id: string) => Promise<void>;
   /** 更新素材档案（溯源链与归属调整）。 */
@@ -816,6 +823,17 @@ export const useProjectStore = create<ProjectStoreState>((set, get) => ({
       console.error("project_link_asset failed:", error);
       return null;
     }
+  },
+
+  importAsset: async (payload) => {
+    const asset = await invoke<ProjectAsset>("project_import_asset", {
+      sourcePath: payload.sourcePath,
+      episodeId: payload.episodeId,
+      shotId: payload.shotId,
+    });
+    const { currentEpisodeId } = get();
+    if (currentEpisodeId) await get().selectEpisode(currentEpisodeId);
+    return asset;
   },
 
   unlinkAsset: async (id) => {

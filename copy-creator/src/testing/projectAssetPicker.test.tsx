@@ -9,6 +9,8 @@ afterEach(cleanup);
 
 const PAGE = 500;
 let allRecords: Array<Record<string, unknown>>;
+let pickResultPath = "";
+let importCalls: Array<Record<string, unknown>> = [];
 
 const invokeMock = vi.fn(async (cmd: string, args?: Record<string, unknown>) => {
   switch (cmd) {
@@ -27,6 +29,16 @@ const invokeMock = vi.fn(async (cmd: string, args?: Record<string, unknown>) => 
       return { id: "a9", file_path: args?.filePath, missing: false };
     case "project_list_shows":
       return [];
+    // 导入流：pickResultPath 为 "" 时按钮点了也不该走到这；"cancelled"
+    // 模拟文件框取消；"ERROR" 模拟导入失败。
+    case "select_resource_trace_file": {
+      if (pickResultPath === "cancelled") throw new Error("cancelled");
+      return { path: pickResultPath };
+    }
+    case "project_import_asset":
+      if (pickResultPath === "ERROR") throw new Error("磁盘已满");
+      importCalls.push(args ?? {});
+      return { id: "a8", file_path: "新素材.png", missing: false };
     default:
       return null;
   }
@@ -134,5 +146,65 @@ describe("ProjectAssetPicker", () => {
       episodeId: "ep1",
       shotId: "sh1",
     });
+  });
+
+  it("从电脑导入并挂靠：选文件后走 importAsset 并触发 onLinked", async () => {
+    allRecords = makeRecords(1);
+    pickResultPath = "C:/out/新素材.png";
+    importCalls = [];
+    seedStore();
+    const onLinked = vi.fn();
+    const onClose = vi.fn();
+    render(<ProjectAssetPicker shotId="sh1" onClose={onClose} onLinked={onLinked} />);
+    await waitFor(() => {
+      expect(screen.getByText("文件0.png")).toBeTruthy();
+    });
+    fireEvent.click(screen.getByText("从电脑导入并挂靠…"));
+    await waitFor(() => {
+      expect(onLinked).toHaveBeenCalledTimes(1);
+    });
+    expect(onClose).toHaveBeenCalledTimes(1);
+    expect(importCalls[0]).toMatchObject({
+      sourcePath: "C:/out/新素材.png",
+      episodeId: "ep1",
+      shotId: "sh1",
+    });
+  });
+
+  it("导入取消静默：不关浮层不报错", async () => {
+    allRecords = makeRecords(1);
+    pickResultPath = "cancelled";
+    seedStore();
+    const onLinked = vi.fn();
+    const onClose = vi.fn();
+    render(<ProjectAssetPicker shotId="" onClose={onClose} onLinked={onLinked} />);
+    await waitFor(() => {
+      expect(screen.getByText("文件0.png")).toBeTruthy();
+    });
+    fireEvent.click(screen.getByText("从电脑导入并挂靠…"));
+    await waitFor(() => {
+      expect(screen.getByText("从电脑导入并挂靠…")).toBeTruthy();
+    });
+    expect(onLinked).not.toHaveBeenCalled();
+    expect(onClose).not.toHaveBeenCalled();
+    expect(screen.queryByText(/导入失败/)).toBeNull();
+  });
+
+  it("导入失败展示错误且浮层不关", async () => {
+    allRecords = makeRecords(1);
+    pickResultPath = "ERROR";
+    seedStore();
+    const onLinked = vi.fn();
+    const onClose = vi.fn();
+    render(<ProjectAssetPicker shotId="" onClose={onClose} onLinked={onLinked} />);
+    await waitFor(() => {
+      expect(screen.getByText("文件0.png")).toBeTruthy();
+    });
+    fireEvent.click(screen.getByText("从电脑导入并挂靠…"));
+    await waitFor(() => {
+      expect(screen.getByText(/导入失败/).textContent).toContain("磁盘已满");
+    });
+    expect(onLinked).not.toHaveBeenCalled();
+    expect(onClose).not.toHaveBeenCalled();
   });
 });
