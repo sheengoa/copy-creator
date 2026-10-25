@@ -132,6 +132,7 @@ mod clipboard;
 mod media;
 mod migrate;
 mod phrase;
+mod project;
 mod resource;
 mod settings;
 mod text_version;
@@ -143,6 +144,7 @@ pub(crate) use clipboard::*;
 pub(crate) use media::*;
 pub(crate) use migrate::*;
 pub(crate) use phrase::*;
+pub(crate) use project::*;
 pub(crate) use resource::*;
 pub(crate) use settings::*;
 pub(crate) use text_version::*;
@@ -1158,6 +1160,10 @@ pub(crate) fn ensure_schema(conn: &Connection) -> Result<(), Box<dyn std::error:
         CREATE INDEX IF NOT EXISTS idx_trash_trashed_ms ON trash_items(trashed_ms);
         ",
     )?;
+
+    // 工程域（AI 视频制作）schema：与主批次分离保持域内聚，幂等建表
+    // 对新库/旧库升级/存储迁移三条路径一致生效。
+    conn.execute_batch(PROJECT_SCHEMA_SQL)?;
 
     // ── 运行时迁移：只在库版本落后时执行一次（见 run_schema_migrations）──
     if schema_version(conn) < SCHEMA_VERSION {

@@ -6751,3 +6751,324 @@ mod text_version_tests {
         }
     }
 }
+
+// ── 工程域（AI 视频制作）：schema、级联、档案 upsert 与迁移登记 ──
+#[cfg(test)]
+mod project_tests {
+    use crate::db::{ensure_schema, Connection, MIGRATED_BUSINESS_TABLES, PROJECT_SCHEMA_SQL};
+
+    fn project_conn() -> Connection {
+        let conn = Connection::open_in_memory().unwrap();
+        conn.execute_batch("PRAGMA foreign_keys=ON;").unwrap();
+        conn.execute_batch(PROJECT_SCHEMA_SQL).unwrap();
+        conn
+    }
+
+    fn count(conn: &Connection, sql: &str) -> i64 {
+        conn.query_row(sql, [], |row| row.get(0)).unwrap()
+    }
+
+    #[test]
+    fn schema_creates_all_project_tables() {
+        let conn = project_conn();
+        for table in [
+            "project_shows",
+            "project_episodes",
+            "project_characters",
+            "project_locations",
+            "project_props",
+            "project_scenes",
+            "project_shots",
+            "project_assets",
+            "project_prompts",
+            "project_episode_characters",
+            "project_shot_characters",
+            "project_shot_props",
+        ] {
+            let exists: i64 = conn
+                .query_row(
+                    "SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name = ?1",
+                    [table],
+                    |row| row.get(0),
+                )
+                .unwrap();
+            assert_eq!(exists, 1, "缺表：{table}");
+        }
+    }
+
+    #[test]
+    fn ensure_schema_main_path_also_creates_project_tables() {
+        // 工程表经 ensure_schema 主路径建库（init_db / 存储迁移共用），
+        // 防止 PROJECT_SCHEMA_SQL 忘挂在主入口。
+        let conn = Connection::open_in_memory().unwrap();
+        ensure_schema(&conn).unwrap();
+        let exists: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name = 'project_shots'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(exists, 1);
+    }
+
+    #[test]
+    fn hierarchy_cascades_on_show_delete() {
+        let conn = project_conn();
+        conn.execute(
+            "INSERT INTO project_shows (id, name, note, created_at, updated_at) VALUES ('s1', '山海食肆', '', '2026-01-01', '2026-01-01')",
+            [],
+        )
+        .unwrap();
+        conn.execute(
+            "INSERT INTO project_episodes (id, show_id, number, title, status, script_path, sort_order, created_at, updated_at) \
+             VALUES ('e1', 's1', 1, '开业大吉', 'done', '', 0, '2026-01-01', '2026-01-01')",
+            [],
+        )
+        .unwrap();
+        conn.execute(
+            "INSERT INTO project_characters (id, name, role_tag, bio, prompt, avatar_path, created_at, updated_at) \
+             VALUES ('c1', '陆离', '掌柜', '', '', '', '2026-01-01', '2026-01-01')",
+            [],
+        )
+        .unwrap();
+        conn.execute(
+            "INSERT INTO project_episode_characters (episode_id, character_id) VALUES ('e1', 'c1')",
+            [],
+        )
+        .unwrap();
+        conn.execute(
+            "INSERT INTO project_scenes (id, episode_id, location_id, heading, sort_order, note, created_at, updated_at) \
+             VALUES ('sc1', 'e1', '', '场 1', 0, '', '2026-01-01', '2026-01-01')",
+            [],
+        )
+        .unwrap();
+        conn.execute(
+            "INSERT INTO project_shots (id, scene_id, episode_id, description, dialogue, sort_order, created_at, updated_at) \
+             VALUES ('sh1', 'sc1', 'e1', '特写', '', 0, '2026-01-01', '2026-01-01')",
+            [],
+        )
+        .unwrap();
+        conn.execute(
+            "INSERT INTO project_shot_characters (shot_id, character_id) VALUES ('sh1', 'c1')",
+            [],
+        )
+        .unwrap();
+
+        conn.execute("DELETE FROM project_shows WHERE id = 's1'", [])
+            .unwrap();
+        for (label, sql) in [
+            ("集", "SELECT COUNT(*) FROM project_episodes"),
+            ("场景", "SELECT COUNT(*) FROM project_scenes"),
+            ("镜头", "SELECT COUNT(*) FROM project_shots"),
+            (
+                "集-角色关联",
+                "SELECT COUNT(*) FROM project_episode_characters",
+            ),
+            (
+                "镜头-角色关联",
+                "SELECT COUNT(*) FROM project_shot_characters",
+            ),
+        ] {
+            assert_eq!(count(&conn, sql), 0, "删剧后{label}应级联清空");
+        }
+        // 角色是全局实体：删剧不影响角色库。
+        assert_eq!(count(&conn, "SELECT COUNT(*) FROM project_characters"), 1);
+    }
+
+    #[test]
+    fn shot_delete_keeps_asset_as_loose() {
+        let conn = project_conn();
+        conn.execute(
+            "INSERT INTO project_shows (id, name, note, created_at, updated_at) VALUES ('s1', 'x', '', '2026-01-01', '2026-01-01')",
+            [],
+        )
+        .unwrap();
+        conn.execute(
+            "INSERT INTO project_episodes (id, show_id, number, title, status, script_path, sort_order, created_at, updated_at) \
+             VALUES ('e1', 's1', 1, '', 'none', '', 0, '2026-01-01', '2026-01-01')",
+            [],
+        )
+        .unwrap();
+        conn.execute(
+            "INSERT INTO project_scenes (id, episode_id, location_id, heading, sort_order, note, created_at, updated_at) \
+             VALUES ('sc1', 'e1', '', '', 0, '', '2026-01-01', '2026-01-01')",
+            [],
+        )
+        .unwrap();
+        conn.execute(
+            "INSERT INTO project_shots (id, scene_id, episode_id, description, dialogue, sort_order, created_at, updated_at) \
+             VALUES ('sh1', 'sc1', 'e1', '', '', 0, '2026-01-01', '2026-01-01')",
+            [],
+        )
+        .unwrap();
+        conn.execute(
+            "INSERT INTO project_assets (id, file_path, kind, name, shot_id, episode_id, gen_from_asset, gen_from_prompt, created_at, updated_at) \
+             VALUES ('a1', '第 2 集/分镜/S1-01.png', 'image', 'S1-01', 'sh1', 'e1', '', '', '2026-01-01', '2026-01-01')",
+            [],
+        )
+        .unwrap();
+
+        // 删镜头：素材档案保留、降级为集级散件（shot_id 置空），文件不动。
+        // shot_id/episode_id 是软引用，降级由命令层显式 UPDATE（见
+        // detach_assets_before_delete），这里按命令的完整顺序验证。
+        crate::db::detach_assets_before_delete(
+            &conn,
+            "UPDATE project_assets SET shot_id = '', updated_at = ?1 WHERE shot_id = ?2",
+            "sh1",
+        )
+        .unwrap();
+        conn.execute("DELETE FROM project_shots WHERE id = 'sh1'", [])
+            .unwrap();
+        let (shot_id, episode_id): (String, String) = conn
+            .query_row(
+                "SELECT shot_id, episode_id FROM project_assets WHERE id = 'a1'",
+                [],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )
+            .unwrap();
+        assert_eq!(shot_id, "");
+        assert_eq!(episode_id, "e1");
+    }
+
+    #[test]
+    fn link_asset_upsert_moves_ownership() {
+        let conn = project_conn();
+        // 模拟 project_link_asset 的 upsert：同一文件二次挂靠改写归属。
+        for (shot_id, episode_id) in [("sh1", "e1"), ("", "e2")] {
+            conn.execute(
+                "INSERT INTO project_assets (id, file_path, kind, name, shot_id, episode_id, gen_from_asset, gen_from_prompt, created_at, updated_at) \
+                 VALUES ('a-x', '组/S1-01.png', 'image', 'S1-01', ?1, ?2, '', '', '2026-01-01', '2026-01-01') \
+                 ON CONFLICT(file_path) DO UPDATE SET shot_id = excluded.shot_id, episode_id = excluded.episode_id, updated_at = excluded.updated_at",
+                [shot_id, episode_id],
+            )
+            .unwrap();
+        }
+        assert_eq!(count(&conn, "SELECT COUNT(*) FROM project_assets"), 1);
+        let (shot_id, episode_id): (String, String) = conn
+            .query_row(
+                "SELECT shot_id, episode_id FROM project_assets WHERE file_path = '组/S1-01.png'",
+                [],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )
+            .unwrap();
+        assert_eq!((shot_id.as_str(), episode_id.as_str()), ("", "e2"));
+    }
+
+    #[test]
+    fn replace_links_full_swap() {
+        let conn = project_conn();
+        conn.execute(
+            "INSERT INTO project_shows (id, name, note, created_at, updated_at) VALUES ('s1', 'x', '', '2026-01-01', '2026-01-01')",
+            [],
+        )
+        .unwrap();
+        conn.execute(
+            "INSERT INTO project_episodes (id, show_id, number, title, status, script_path, sort_order, created_at, updated_at)
+             VALUES ('e1', 's1', 1, '', 'none', '', 0, '2026-01-01', '2026-01-01')",
+            [],
+        )
+        .unwrap();
+        conn.execute(
+            "INSERT INTO project_characters (id, name, role_tag, bio, prompt, avatar_path, created_at, updated_at) \
+             VALUES ('c1', '甲', '', '', '', '', '2026-01-01', '2026-01-01')",
+            [],
+        )
+        .unwrap();
+        conn.execute(
+            "INSERT INTO project_characters (id, name, role_tag, bio, prompt, avatar_path, created_at, updated_at) \
+             VALUES ('c2', '乙', '', '', '', '', '2026-01-01', '2026-01-01')",
+            [],
+        )
+        .unwrap();
+        for (episode_id, character_id) in [("e1", "c1"), ("e1", "c2")] {
+            conn.execute(
+                "INSERT OR IGNORE INTO project_episode_characters (episode_id, character_id) VALUES (?1, ?2)",
+                [episode_id, character_id],
+            )
+            .unwrap();
+        }
+        // 整组替换为只剩 c2：DELETE + 重插（模拟 replace_links）。
+        conn.execute(
+            "DELETE FROM project_episode_characters WHERE episode_id = 'e1'",
+            [],
+        )
+        .unwrap();
+        conn.execute(
+            "INSERT OR IGNORE INTO project_episode_characters (episode_id, character_id) VALUES ('e1', 'c2')",
+            [],
+        )
+        .unwrap();
+        let ids: Vec<String> = conn
+            .prepare("SELECT character_id FROM project_episode_characters WHERE episode_id = 'e1'")
+            .unwrap()
+            .query_map([], |row| row.get(0))
+            .unwrap()
+            .collect::<Result<_, _>>()
+            .unwrap();
+        assert_eq!(ids, vec!["c2".to_string()]);
+    }
+
+    #[test]
+    fn character_delete_clears_links_but_keeps_episodes() {
+        let conn = project_conn();
+        conn.execute(
+            "INSERT INTO project_characters (id, name, role_tag, bio, prompt, avatar_path, created_at, updated_at) \
+             VALUES ('c1', '甲', '', '', '', '', '2026-01-01', '2026-01-01')",
+            [],
+        )
+        .unwrap();
+        conn.execute(
+            "INSERT INTO project_shows (id, name, note, created_at, updated_at) VALUES ('s1', 'x', '', '2026-01-01', '2026-01-01')",
+            [],
+        )
+        .unwrap();
+        conn.execute(
+            "INSERT INTO project_episodes (id, show_id, number, title, status, script_path, sort_order, created_at, updated_at) \
+             VALUES ('e1', 's1', 1, '', 'none', '', 0, '2026-01-01', '2026-01-01')",
+            [],
+        )
+        .unwrap();
+        conn.execute(
+            "INSERT INTO project_episode_characters (episode_id, character_id) VALUES ('e1', 'c1')",
+            [],
+        )
+        .unwrap();
+        conn.execute("DELETE FROM project_characters WHERE id = 'c1'", [])
+            .unwrap();
+        assert_eq!(
+            count(&conn, "SELECT COUNT(*) FROM project_episode_characters"),
+            0
+        );
+        assert_eq!(
+            count(&conn, "SELECT COUNT(*) FROM project_episodes"),
+            1,
+            "删全局角色不应影响集本身"
+        );
+    }
+
+    #[test]
+    fn migrated_tables_include_project_schema() {
+        // 新表漏登记 MIGRATED_BUSINESS_TABLES 会导致换存储目录丢工程数据；
+        // 钉住 11 张表全部在册。
+        for table in [
+            "project_shows",
+            "project_episodes",
+            "project_characters",
+            "project_locations",
+            "project_props",
+            "project_scenes",
+            "project_shots",
+            "project_assets",
+            "project_prompts",
+            "project_episode_characters",
+            "project_shot_characters",
+            "project_shot_props",
+        ] {
+            assert!(
+                MIGRATED_BUSINESS_TABLES.contains(&table),
+                "{table} 未登记进 MIGRATED_BUSINESS_TABLES"
+            );
+        }
+    }
+}
