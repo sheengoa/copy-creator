@@ -315,9 +315,32 @@ fn query_all(
     sql: &str,
     map: fn(&rusqlite::Row) -> rusqlite::Result<serde_json::Value>,
 ) -> Result<Vec<serde_json::Value>, String> {
+    // 空参数字面量走 rusqlite 的 ensure_parameter_count(0)：SQL 里一旦
+    // 出现 ?N 占位符即报 InvalidParameterCount。带参查询必须用
+    // query_all_params；此断言让误用在测试期就爆出来。
+    debug_assert!(
+        !sql.contains('?'),
+        "query_all 仅限无参数 SQL，带参请用 query_all_params：{sql}"
+    );
     let mut stmt = conn.prepare(sql).map_err(|e| e.to_string())?;
     let rows = stmt
         .query_map([], map)
+        .map_err(|e| e.to_string())?
+        .filter_map(|r| r.ok())
+        .collect();
+    Ok(rows)
+}
+
+/// query_all 的带参版本：参数按位置绑定（SQL 用 ?1 ?2 … 编号占位符）。
+fn query_all_params(
+    conn: &Connection,
+    sql: &str,
+    params: &[&dyn rusqlite::ToSql],
+    map: fn(&rusqlite::Row) -> rusqlite::Result<serde_json::Value>,
+) -> Result<Vec<serde_json::Value>, String> {
+    let mut stmt = conn.prepare(sql).map_err(|e| e.to_string())?;
+    let rows = stmt
+        .query_map(params, map)
         .map_err(|e| e.to_string())?
         .filter_map(|r| r.ok())
         .collect();
@@ -555,12 +578,20 @@ pub fn project_list_episodes(
 ) -> Result<Vec<serde_json::Value>, String> {
     let state = app.state::<DbState>();
     let conn = state.conn.lock().map_err(|e| e.to_string())?;
-    let mut episodes = query_all(
-        &conn,
+    episodes_list_inner(&conn, &show_id)
+}
+
+pub(crate) fn episodes_list_inner(
+    conn: &Connection,
+    show_id: &str,
+) -> Result<Vec<serde_json::Value>, String> {
+    let mut episodes = query_all_params(
+        conn,
         &format!(
             "SELECT {EPISODE_COLS} FROM project_episodes \
              WHERE show_id = ?1 ORDER BY number ASC, created_at ASC",
         ),
+        params![&show_id],
         episode_row,
     )?;
     // 镜头统计与出场角色各一次全剧批量查回（按集分组），避免逐集
@@ -578,7 +609,7 @@ pub fn project_list_episodes(
             )
             .map_err(|e| e.to_string())?;
         let rows = stmt
-            .query_map(params![show_id], |row| {
+            .query_map(params![&show_id], |row| {
                 Ok((
                     row.get::<_, String>(0)?,
                     row.get::<_, i64>(1)?,
@@ -602,7 +633,7 @@ pub fn project_list_episodes(
             )
             .map_err(|e| e.to_string())?;
         let rows = stmt
-            .query_map(params![show_id], |row| {
+            .query_map(params![&show_id], |row| {
                 Ok((
                     row.get::<_, String>(0)?,
                     row.get::<_, String>(1)?,
@@ -1078,12 +1109,13 @@ pub fn project_list_scenes(
 ) -> Result<Vec<serde_json::Value>, String> {
     let state = app.state::<DbState>();
     let conn = state.conn.lock().map_err(|e| e.to_string())?;
-    let mut scenes = query_all(
+    let mut scenes = query_all_params(
         &conn,
         &format!(
             "SELECT {SCENE_COLS} FROM project_scenes \
              WHERE episode_id = ?1 ORDER BY sort_order ASC, created_at ASC",
         ),
+        params![&episode_id],
         scene_row,
     )?;
     for scene in scenes.iter_mut() {
@@ -1208,12 +1240,13 @@ pub fn project_list_shots(
 ) -> Result<Vec<serde_json::Value>, String> {
     let state = app.state::<DbState>();
     let conn = state.conn.lock().map_err(|e| e.to_string())?;
-    let mut shots = query_all(
+    let mut shots = query_all_params(
         &conn,
         &format!(
             "SELECT {SHOT_COLS} FROM project_shots \
              WHERE episode_id = ?1 ORDER BY sort_order ASC, created_at ASC",
         ),
+        params![&episode_id],
         shot_row,
     )?;
     for shot in shots.iter_mut() {
@@ -1391,22 +1424,24 @@ pub fn project_list_assets(
     let state = app.state::<DbState>();
     let conn = state.conn.lock().map_err(|e| e.to_string())?;
     if !shot_id.is_empty() {
-        return query_all(
+        return query_all_params(
             &conn,
             &format!(
                 "SELECT {ASSET_COLS} FROM project_assets \
                  WHERE shot_id = ?1 ORDER BY created_at ASC",
             ),
+            params![&shot_id],
             asset_row,
         );
     }
     if !episode_id.is_empty() {
-        return query_all(
+        return query_all_params(
             &conn,
             &format!(
                 "SELECT {ASSET_COLS} FROM project_assets \
                  WHERE episode_id = ?1 ORDER BY created_at ASC",
             ),
+            params![&episode_id],
             asset_row,
         );
     }
@@ -1521,12 +1556,13 @@ pub fn project_list_prompts(
     let state = app.state::<DbState>();
     let conn = state.conn.lock().map_err(|e| e.to_string())?;
     match category.as_deref().map(str::trim).filter(|c| !c.is_empty()) {
-        Some(category) => query_all(
+        Some(category) => query_all_params(
             &conn,
             &format!(
                 "SELECT {PROMPT_COLS} FROM project_prompts \
                  WHERE category = ?1 ORDER BY created_at DESC, id ASC",
             ),
+            params![category],
             prompt_row,
         ),
         None => query_all(
@@ -1615,19 +1651,25 @@ pub fn project_get_episode_overview(
 ) -> Result<serde_json::Value, String> {
     let state = app.state::<DbState>();
     let conn = state.conn.lock().map_err(|e| e.to_string())?;
+    episode_overview_inner(&conn, &episode_id)
+}
 
+pub(crate) fn episode_overview_inner(
+    conn: &Connection,
+    episode_id: &str,
+) -> Result<serde_json::Value, String> {
     let episode = query_row_with_param(
-        &conn,
+        conn,
         &format!("SELECT {EPISODE_COLS} FROM project_episodes WHERE id = ?1"),
         &[&episode_id],
         episode_row,
     )?;
 
-    let character_ids = episode_character_ids(&conn, &episode_id)?;
+    let character_ids = episode_character_ids(conn, episode_id)?;
     let mut characters = Vec::with_capacity(character_ids.len());
     for character_id in &character_ids {
         let character = query_row_with_param(
-            &conn,
+            conn,
             &format!("SELECT {CHARACTER_COLS} FROM project_characters WHERE id = ?1"),
             &[character_id],
             character_row,
@@ -1637,12 +1679,13 @@ pub fn project_get_episode_overview(
         }
     }
 
-    let mut scenes = query_all(
-        &conn,
+    let mut scenes = query_all_params(
+        conn,
         &format!(
             "SELECT {SCENE_COLS} FROM project_scenes \
              WHERE episode_id = ?1 ORDER BY sort_order ASC, created_at ASC",
         ),
+        params![&episode_id],
         scene_row,
     )?;
     // 镜头出镜/道具关系与素材各一次全集批量查回（按镜头分组），避免
@@ -1653,7 +1696,7 @@ pub fn project_get_episode_overview(
         if let Some(location_id) = scene["location_id"].as_str() {
             if !location_id.is_empty() {
                 let location = query_row_with_param(
-                    &conn,
+                    conn,
                     &format!("SELECT {LOCATION_COLS} FROM project_locations WHERE id = ?1"),
                     &[&location_id],
                     location_row,
@@ -1661,12 +1704,13 @@ pub fn project_get_episode_overview(
                 scene["location"] = location.unwrap_or(serde_json::Value::Null);
             }
         }
-        per_scene_shots.push(query_all(
-            &conn,
+        per_scene_shots.push(query_all_params(
+            conn,
             &format!(
                 "SELECT {SHOT_COLS} FROM project_shots \
                  WHERE scene_id = ?1 ORDER BY sort_order ASC, created_at ASC",
             ),
+            params![&scene_id],
             shot_row,
         )?);
         scene["shots"] = serde_json::json!([]);
@@ -1723,7 +1767,7 @@ pub fn project_get_episode_overview(
             ))
             .map_err(|e| e.to_string())?;
         let rows = stmt
-            .query_map(params![&episode_id], asset_row)
+            .query_map(params![episode_id], asset_row)
             .map_err(|e| e.to_string())?;
         for row in rows {
             let asset = row.map_err(|e| e.to_string())?;

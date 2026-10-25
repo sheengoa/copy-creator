@@ -108,7 +108,12 @@ export default function ProjectAssetSheet({ asset, onClose }: ProjectAssetSheetP
         <div className="project-library-body">
           {asset.kind === "image" && (
             <div className="project-sheet-preview">
-              <ResourceImage path={absolutePath} alt={displayName} className="project-sheet-img" />
+              <ResourceImage
+                path={absolutePath}
+                alt={displayName}
+                className="project-sheet-img"
+                version={asset.updated_at}
+              />
             </div>
           )}
 

@@ -514,7 +514,8 @@ export default function ProjectView() {
                               <i className="project-asset-trace">
                                 {t("project.sheet.traceBadge", {
                                   title:
-                                    prompts.find((prompt) => prompt.id === asset.gen_from_prompt)?.title ?? "",
+                                    prompts.find((prompt) => prompt.id === asset.gen_from_prompt)
+                                      ?.title ?? t("project.sheet.staleRef"),
                                 })}
                               </i>
                             )}

@@ -6756,7 +6756,7 @@ mod text_version_tests {
 #[cfg(test)]
 mod project_tests {
     use crate::db::{ensure_schema, Connection, MIGRATED_BUSINESS_TABLES, PROJECT_SCHEMA_SQL};
-    use tauri::Manager;
+    use rusqlite::params;
 
     fn project_conn() -> Connection {
         let conn = Connection::open_in_memory().unwrap();
@@ -7165,5 +7165,194 @@ mod project_tests {
             hits.iter().any(|r| r["kind"] == "prop" && r["id"] == "p1"),
             "道具 bio 未命中搜索：{hits:?}"
         );
+    }
+
+    #[test]
+    fn episode_overview_aggregates_scenes_shots_and_assets() {
+        // 集工作台聚合（批量重构后的行为锚点）：多场景多镜头下，
+        // 出镜/道具/素材按镜头分组归位，散件单独返回，他集素材不串场。
+        let conn = project_conn();
+        conn.execute(
+            "INSERT INTO project_characters (id, name, role_tag, bio, prompt, avatar_path, created_at, updated_at) \
+             VALUES ('c1', '陆离', '掌柜', '', '', '', '2026-01-01', '2026-01-01')",
+            [],
+        )
+        .unwrap();
+        conn.execute(
+            "INSERT INTO project_props (id, name, bio, prompt, ref_path, created_at, updated_at) \
+             VALUES ('p1', '铜锣', '', '', '', '2026-01-01', '2026-01-01')",
+            [],
+        )
+        .unwrap();
+        conn.execute(
+            "INSERT INTO project_locations (id, name, int_ext, time_hint, bio, prompt, ref_path, created_at, updated_at) \
+             VALUES ('l1', '客栈大堂', '内景', '夜', '', '', '', '2026-01-01', '2026-01-01')",
+            [],
+        )
+        .unwrap();
+        conn.execute(
+            "INSERT INTO project_shows (id, name, note, created_at, updated_at) VALUES ('s1', '剧', '', '2026-01-01', '2026-01-01')",
+            [],
+        )
+        .unwrap();
+        conn.execute(
+            "INSERT INTO project_episodes (id, show_id, number, title, status, script_path, sort_order, created_at, updated_at) \
+             VALUES ('e1', 's1', 1, '第一集', 'none', '', 0, '2026-01-01', '2026-01-01')",
+            [],
+        )
+        .unwrap();
+        conn.execute(
+            "INSERT INTO project_episodes (id, show_id, number, title, status, script_path, sort_order, created_at, updated_at) \
+             VALUES ('e2', 's1', 2, '第二集', 'none', '', 1, '2026-01-01', '2026-01-01')",
+            [],
+        )
+        .unwrap();
+        conn.execute(
+            "INSERT INTO project_episode_characters (episode_id, character_id) VALUES ('e1', 'c1')",
+            [],
+        )
+        .unwrap();
+        conn.execute(
+            "INSERT INTO project_scenes (id, episode_id, location_id, heading, sort_order, note, created_at, updated_at) \
+             VALUES ('sc1', 'e1', 'l1', '内 客栈 夜', 0, '', '2026-01-01', '2026-01-01')",
+            [],
+        )
+        .unwrap();
+        conn.execute(
+            "INSERT INTO project_scenes (id, episode_id, location_id, heading, sort_order, note, created_at, updated_at) \
+             VALUES ('sc2', 'e1', '', '外 山道 晨', 1, '', '2026-01-01', '2026-01-01')",
+            [],
+        )
+        .unwrap();
+        for (id, scene_id, order) in [("sh1", "sc1", 0), ("sh2", "sc1", 1), ("sh3", "sc2", 0)] {
+            conn.execute(
+                "INSERT INTO project_shots (id, scene_id, episode_id, description, dialogue, sort_order, created_at, updated_at) \
+                 VALUES (?1, ?2, 'e1', '描述', '', ?3, '2026-01-01', '2026-01-01')",
+                params![id, scene_id, order],
+            )
+            .unwrap();
+        }
+        conn.execute(
+            "INSERT INTO project_shot_characters (shot_id, character_id) VALUES ('sh1', 'c1')",
+            [],
+        )
+        .unwrap();
+        conn.execute("INSERT INTO project_shot_props (shot_id, prop_id) VALUES ('sh2', 'p1')", [])
+            .unwrap();
+        for (id, path, shot_id) in [
+            ("a1", "第 1 集/分镜/S1.png", "sh1"),
+            ("a2", "第 1 集/分镜/S2.png", "sh2"),
+            ("a3", "第 1 集/参考.png", ""),
+        ] {
+            conn.execute(
+                "INSERT INTO project_assets (id, file_path, kind, name, shot_id, episode_id, created_at, updated_at) \
+                 VALUES (?1, ?2, 'image', ?2, ?3, 'e1', '2026-01-01', '2026-01-01')",
+                params![id, path, shot_id],
+            )
+            .unwrap();
+        }
+        // 他集素材：不得出现在 e1 的任何分组里
+        conn.execute(
+            "INSERT INTO project_assets (id, file_path, kind, name, shot_id, episode_id, created_at, updated_at) \
+             VALUES ('a9', '第 2 集/x.png', 'image', 'x.png', '', 'e2', '2026-01-01', '2026-01-01')",
+            [],
+        )
+        .unwrap();
+
+        let overview = crate::db::project::episode_overview_inner(&conn, "e1").unwrap();
+        assert_eq!(overview["characters"].as_array().unwrap().len(), 1);
+        let scenes = overview["scenes"].as_array().unwrap();
+        assert_eq!(scenes.len(), 2);
+        assert_eq!(scenes[0]["location"]["name"], "客栈大堂");
+        assert!(scenes[1]["location"].is_null());
+        let shots1 = scenes[0]["shots"].as_array().unwrap();
+        assert_eq!(shots1.len(), 2);
+        assert_eq!(shots1[0]["character_ids"], serde_json::json!(["c1"]));
+        assert_eq!(shots1[0]["assets"].as_array().unwrap().len(), 1);
+        assert_eq!(shots1[0]["assets"][0]["id"], "a1");
+        assert_eq!(shots1[1]["prop_ids"], serde_json::json!(["p1"]));
+        let shots2 = scenes[1]["shots"].as_array().unwrap();
+        assert_eq!(shots2.len(), 1);
+        assert_eq!(shots2[0]["character_ids"], serde_json::json!([]));
+        assert_eq!(shots2[0]["assets"].as_array().unwrap().len(), 0);
+        let loose = overview["loose_assets"].as_array().unwrap();
+        assert_eq!(loose.len(), 1);
+        assert_eq!(loose[0]["id"], "a3");
+    }
+
+    #[test]
+    fn episodes_list_returns_sorted_with_stats() {
+        // 剧集树主查询（带参 SQL 的防回归锚点）：按集号排序返回，
+        // 附镜头总数/完成数与出场角色，无数据的集回落为 0/空。
+        let conn = project_conn();
+        conn.execute(
+            "INSERT INTO project_shows (id, name, note, created_at, updated_at) VALUES ('s1', '剧', '', '2026-01-01', '2026-01-01')",
+            [],
+        )
+        .unwrap();
+        conn.execute(
+            "INSERT INTO project_episodes (id, show_id, number, title, status, script_path, sort_order, created_at, updated_at) \
+             VALUES ('e2', 's1', 2, '第二集', 'none', '', 1, '2026-01-01', '2026-01-01')",
+            [],
+        )
+        .unwrap();
+        conn.execute(
+            "INSERT INTO project_episodes (id, show_id, number, title, status, script_path, sort_order, created_at, updated_at) \
+             VALUES ('e1', 's1', 1, '第一集', 'none', '', 0, '2026-01-01', '2026-01-01')",
+            [],
+        )
+        .unwrap();
+        conn.execute(
+            "INSERT INTO project_characters (id, name, role_tag, bio, prompt, avatar_path, created_at, updated_at) \
+             VALUES ('c1', '陆离', '', '', '', '', '2026-01-01', '2026-01-01')",
+            [],
+        )
+        .unwrap();
+        conn.execute(
+            "INSERT INTO project_episode_characters (episode_id, character_id) VALUES ('e1', 'c1')",
+            [],
+        )
+        .unwrap();
+        conn.execute(
+            "INSERT INTO project_scenes (id, episode_id, location_id, heading, sort_order, note, created_at, updated_at) \
+             VALUES ('sc1', 'e1', '', '内 客栈 夜', 0, '', '2026-01-01', '2026-01-01')",
+            [],
+        )
+        .unwrap();
+        for (id, episode_id, status) in [
+            ("sh1", "e1", "done"),
+            ("sh2", "e1", "pending"),
+            ("sh3", "e2", "done"),
+        ] {
+            conn.execute(
+                "INSERT INTO project_shots (id, scene_id, episode_id, description, dialogue, status, sort_order, created_at, updated_at) \
+                 VALUES (?1, 'sc1', ?2, '', '', ?3, 0, '2026-01-01', '2026-01-01')",
+                params![id, episode_id, status],
+            )
+            .unwrap();
+        }
+        // 他剧数据不得串场
+        conn.execute(
+            "INSERT INTO project_shows (id, name, note, created_at, updated_at) VALUES ('s2', '别的剧', '', '2026-01-01', '2026-01-01')",
+            [],
+        )
+        .unwrap();
+        conn.execute(
+            "INSERT INTO project_episodes (id, show_id, number, title, status, script_path, sort_order, created_at, updated_at) \
+             VALUES ('e9', 's2', 1, '他剧集', 'none', '', 0, '2026-01-01', '2026-01-01')",
+            [],
+        )
+        .unwrap();
+
+        let episodes = crate::db::project::episodes_list_inner(&conn, "s1").unwrap();
+        assert_eq!(episodes.len(), 2);
+        assert_eq!(episodes[0]["id"], "e1");
+        assert_eq!(episodes[1]["id"], "e2");
+        assert_eq!(episodes[0]["shot_count"], 2);
+        assert_eq!(episodes[0]["done_shot_count"], 1);
+        assert_eq!(episodes[0]["character_ids"], serde_json::json!(["c1"]));
+        assert_eq!(episodes[1]["shot_count"], 1);
+        assert_eq!(episodes[1]["done_shot_count"], 1);
+        assert_eq!(episodes[1]["character_ids"], serde_json::json!([]));
     }
 }
