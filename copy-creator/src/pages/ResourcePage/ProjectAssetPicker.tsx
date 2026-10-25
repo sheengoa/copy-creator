@@ -22,17 +22,25 @@ export interface ProjectAssetPickerProps {
  *  搜索过滤，点选即挂靠（project_link_asset，同文件重复挂靠改归属）。 */
 export default function ProjectAssetPicker({ shotId, onClose }: ProjectAssetPickerProps) {
   const { t } = useTranslation();
-  const { episodeId, linkedPaths, linkAsset } = useProjectStore(
+  // linkedPaths 不能放进 useShallow 的 selector：selector 每次渲染都会
+  // 跑，new Set 的引用永远不等 → 无限重渲染 → React 卸载整树（白屏）。
+  // 改为订阅 overview 引用 + useMemo 派生。
+  const overview = useProjectStore((state) => state.overview);
+  const { episodeId, linkAsset } = useProjectStore(
     useShallow((state) => ({
       episodeId: state.overview?.episode.id ?? "",
-      linkedPaths: new Set([
-        ...(state.overview?.loose_assets ?? []).map((asset) => asset.file_path),
-        ...(state.overview?.scenes ?? []).flatMap((scene) =>
+      linkAsset: state.linkAsset,
+    })),
+  );
+  const linkedPaths = useMemo(
+    () =>
+      new Set([
+        ...(overview?.loose_assets ?? []).map((asset) => asset.file_path),
+        ...(overview?.scenes ?? []).flatMap((scene) =>
           scene.shots.flatMap((shot) => shot.assets.map((asset) => asset.file_path)),
         ),
       ]),
-      linkAsset: state.linkAsset,
-    })),
+    [overview],
   );
 
   const [libraryRoot, setLibraryRoot] = useState("");

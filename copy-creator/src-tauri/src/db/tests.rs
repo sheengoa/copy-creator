@@ -7295,8 +7295,9 @@ mod project_tests {
 
     #[test]
     fn episodes_list_returns_sorted_with_stats() {
-        // 剧集树主查询（带参 SQL 的防回归锚点）：按集号排序返回，
-        // 附镜头总数/完成数与出场角色，无数据的集回落为 0/空。
+        // 剧集树主查询（带参 SQL 的防回归锚点）：按 sort_order 排序
+        // （reorder 写的就是它，集号 number 仅作次序兜底），附镜头总数/
+        // 完成数与出场角色，无数据的集回落为 0/空。
         let conn = project_conn();
         conn.execute(
             "INSERT INTO project_shows (id, name, note, created_at, updated_at) VALUES ('s1', '剧', '', '2026-01-01', '2026-01-01')",
@@ -7305,13 +7306,13 @@ mod project_tests {
         .unwrap();
         conn.execute(
             "INSERT INTO project_episodes (id, show_id, number, title, status, script_path, sort_order, created_at, updated_at) \
-             VALUES ('e2', 's1', 2, '第二集', 'none', '', 1, '2026-01-01', '2026-01-01')",
+             VALUES ('e2', 's1', 2, '第二集', 'none', '', 3, '2026-01-01', '2026-01-01')",
             [],
         )
         .unwrap();
         conn.execute(
             "INSERT INTO project_episodes (id, show_id, number, title, status, script_path, sort_order, created_at, updated_at) \
-             VALUES ('e1', 's1', 1, '第一集', 'none', '', 0, '2026-01-01', '2026-01-01')",
+             VALUES ('e1', 's1', 1, '第一集', 'none', '', 5, '2026-01-01', '2026-01-01')",
             [],
         )
         .unwrap();
@@ -7358,14 +7359,16 @@ mod project_tests {
         .unwrap();
 
         let episodes = crate::db::project::episodes_list_inner(&conn, "s1").unwrap();
+        // sort_order 与集号刻意相反（e2 sort 3 / e1 sort 5）：排序键是
+        // sort_order（reorder 所写），集号 number 不参与主序。
         assert_eq!(episodes.len(), 2);
-        assert_eq!(episodes[0]["id"], "e1");
-        assert_eq!(episodes[1]["id"], "e2");
-        assert_eq!(episodes[0]["shot_count"], 2);
+        assert_eq!(episodes[0]["id"], "e2");
+        assert_eq!(episodes[1]["id"], "e1");
+        assert_eq!(episodes[0]["shot_count"], 1);
         assert_eq!(episodes[0]["done_shot_count"], 1);
-        assert_eq!(episodes[0]["character_ids"], serde_json::json!(["c1"]));
-        assert_eq!(episodes[1]["shot_count"], 1);
+        assert_eq!(episodes[0]["character_ids"], serde_json::json!([]));
+        assert_eq!(episodes[1]["shot_count"], 2);
         assert_eq!(episodes[1]["done_shot_count"], 1);
-        assert_eq!(episodes[1]["character_ids"], serde_json::json!([]));
+        assert_eq!(episodes[1]["character_ids"], serde_json::json!(["c1"]));
     }
 }

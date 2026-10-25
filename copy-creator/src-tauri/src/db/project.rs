@@ -577,7 +577,8 @@ pub(crate) fn episodes_list_inner(
         conn,
         &format!(
             "SELECT {EPISODE_COLS} FROM project_episodes \
-             WHERE show_id = ?1 ORDER BY number ASC, created_at ASC",
+             WHERE show_id = ?1 \
+             ORDER BY sort_order ASC, number ASC, created_at ASC",
         ),
         params![&show_id],
         episode_row,
