@@ -6,8 +6,10 @@ import { useProjectStore } from "../../stores/projectStore";
 import type { ClipboardRecord } from "../../types";
 import { Icons } from "../../components/Icons";
 import { inferResourceMediaKind } from "../../domain/mediaKind";
+import { ResourceFileImage, ResourceVideoPoster } from "./ResourceMedia";
 import {
   assetKindLabelKey,
+  joinLibraryPath,
   projectFileDisplayName,
   relativeLibraryPath,
 } from "../../domain/projectView";
@@ -22,6 +24,41 @@ export interface ProjectAssetPickerProps {
 
 /** 单页条数：后端按关键词搜索 + 偏移分页，大库不再只有最新 200 条可选。 */
 const PAGE_SIZE = 500;
+
+/** 选择器卡片缩略图：图片/视频出真预览（真懒加载，滚动到才解码，大库
+ *  不卡），音频/文本/文件出类型占位——预览让「挂靠哪个」选得有把握。 */
+function PickerCardThumb({
+  item,
+  libraryRoot,
+}: {
+  item: { filePath: string; kind: string };
+  libraryRoot: string;
+}) {
+  const { t } = useTranslation();
+  const kindKey = t(assetKindLabelKey(item.kind));
+  const absolutePath = joinLibraryPath(libraryRoot, item.filePath);
+  if (item.kind === "image") {
+    return (
+      <span className="project-library-thumb">
+        <ResourceFileImage path={absolutePath} alt={item.filePath} className="project-library-thumb-img" />
+      </span>
+    );
+  }
+  if (item.kind === "video") {
+    return (
+      <span className="project-library-thumb">
+        <ResourceVideoPoster path={absolutePath} fallbackLabel={kindKey} />
+        <span className="project-library-thumb-play">{Icons.play}</span>
+      </span>
+    );
+  }
+  return (
+    <span className="project-library-thumb is-placeholder">
+      {item.kind === "audio" ? Icons.audio : Icons.file}
+      <span>{kindKey}</span>
+    </span>
+  );
+}
 
 /** 从资源库挑选文件挂进工程的浮层：后端搜索资源记录、仅保留库内文件
  *  条目，点选即挂靠（project_link_asset，同文件重复挂靠改归属）。 */
@@ -219,7 +256,7 @@ export default function ProjectAssetPicker({
                         }
                   }
                 >
-                  <span className="project-asset-kind">{t(assetKindLabelKey(item.kind))}</span>
+                  <PickerCardThumb item={item} libraryRoot={libraryRoot} />
                   <div className="project-library-main">
                     <b>{item.name}</b>
                     <i>{item.filePath}</i>
