@@ -664,19 +664,18 @@ export default function ProjectCanvas({
     targetKey?: string | null;
   }
   const dragRef = useRef<DragState | null>(null);
+  // 拖动后 mouseup 落在卡内按钮（挂靠/缩略图）上会派发 click，需吞掉这次误触。
+  const suppressClickRef = useRef(false);
   const [wireDraft, setWireDraft] = useState<string | null>(null);
 
   const onViewportMouseDown = useCallback(
     (e: React.MouseEvent) => {
       const target = e.target instanceof Element ? e.target : null;
+      // 只豁免悬停工具条与浮层玻璃卡；镜头卡头/缩略网格属于卡面，按下即拖卡。
       if (
         target?.closest(".pc-node-tools") ||
         target?.closest(".pc-glass") ||
-        target?.closest(".pc-lb") ||
-        target?.closest(".pc-frame-ops") ||
-        target?.closest(".pc-shot-head") ||
-        target?.closest(".pc-shot-grid") ||
-        target?.closest(".pc-shot-empty")
+        target?.closest(".pc-frame-ops")
       ) {
         return;
       }
@@ -895,6 +894,12 @@ export default function ProjectCanvas({
         saveInfoFramePos(infoPos.frame);
       }
       vpRef.current?.classList.remove("pc-panning");
+      if (drag.moved) {
+        suppressClickRef.current = true;
+        window.setTimeout(() => {
+          suppressClickRef.current = false;
+        }, 0);
+      }
       dragRef.current = null;
     };
     document.addEventListener("mousemove", onMove);
@@ -973,6 +978,12 @@ export default function ProjectCanvas({
         ref={vpRef}
         className="pc-viewport"
         onMouseDown={onViewportMouseDown}
+        onClickCapture={(e) => {
+          if (!suppressClickRef.current) return;
+          e.stopPropagation();
+          e.preventDefault();
+          suppressClickRef.current = false;
+        }}
         onWheel={(e) => {
           e.preventDefault();
           const rect = vpRef.current?.getBoundingClientRect();
