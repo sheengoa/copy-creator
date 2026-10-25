@@ -472,6 +472,37 @@
         "file": "File"
       }
     },
+    "stage": {
+      "canvas": "Canvas view",
+      "list": "List view"
+    },
+    "canvas": {
+      "tip": "Middle-drag to pan · Wheel to zoom · Left-drag to marquee · Drag nodes to arrange · Drag a scene tag to move the group · Drag from a node's corner dot to wire · Click to select / double-click to inspect",
+      "wireGen": "Generated",
+      "wireRef": "Reference",
+      "wireRemove": "Remove wire",
+      "wireHint": "Drag onto another asset to wire a workflow",
+      "genTag": "AI generated",
+      "view": "Inspect",
+      "openFile": "Reveal in file manager",
+      "remove": "Remove",
+      "zoomOut": "Zoom out",
+      "zoomIn": "Zoom in",
+      "fit": "Fit all",
+      "minimap": "Minimap · click to jump",
+      "pickFromLibrary": "Pick from library",
+      "newScene": "New scene",
+      "editScene": "Edit scene",
+      "addShot": "Add shot",
+      "editShot": "Edit shot",
+      "sceneNo": "Scene {{no}}",
+      "frameStats": "{{shots}} shots · {{assets}} assets",
+      "shotTag": "Shot {{no}} · {{name}}",
+      "statScenes": "Scenes {{count}}",
+      "statShots": "Shots {{count}}",
+      "statAssets": "Assets {{count}}",
+      "statWires": "Wires {{count}}"
+    },
     "library": {
       "characters": "Characters",
       "locations": "Locations",

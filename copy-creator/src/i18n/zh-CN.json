@@ -472,6 +472,37 @@
         "file": "文件"
       }
     },
+    "stage": {
+      "canvas": "画布视图",
+      "list": "列表视图"
+    },
+    "canvas": {
+      "tip": "中键拖动平移 · 滚轮缩放 · 左键框选 · 拖素材摆放 · 拖场景标签牌整组移动 · 从节点右下角圆点拖出连线 · 单击选中 / 双击放大",
+      "wireGen": "生成",
+      "wireRef": "参考",
+      "wireRemove": "删除连线",
+      "wireHint": "按住拖到另一素材连出工作流",
+      "genTag": "AI 生成",
+      "view": "放大查看",
+      "openFile": "在文件管理器显示",
+      "remove": "移除",
+      "zoomOut": "缩小",
+      "zoomIn": "放大",
+      "fit": "适应全部",
+      "minimap": "小地图 · 点击跳转",
+      "pickFromLibrary": "从资源库选择",
+      "newScene": "新建场景",
+      "editScene": "编辑场景",
+      "addShot": "加镜头",
+      "editShot": "编辑镜头",
+      "sceneNo": "场景 {{no}}",
+      "frameStats": "{{shots}} 镜头 · {{assets}} 素材",
+      "shotTag": "镜头 {{no}} · {{name}}",
+      "statScenes": "场景 {{count}}",
+      "statShots": "镜头 {{count}}",
+      "statAssets": "素材 {{count}}",
+      "statWires": "连线 {{count}}"
+    },
     "library": {
       "characters": "角色库",
       "locations": "场景库",

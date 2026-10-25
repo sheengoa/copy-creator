@@ -9,6 +9,7 @@ import IosSelect from "../../components/IosSelect";
 import { ResourceImage } from "./ResourceMedia";
 import ProjectLibraryPanel from "./ProjectLibraryPanel";
 import ProjectSceneBoard from "./ProjectSceneBoard";
+import ProjectCanvas from "./ProjectCanvas";
 import ProjectAssetPicker from "./ProjectAssetPicker";
 import ProjectPromptPanel from "./ProjectPromptPanel";
 import ProjectAssetSheet from "./ProjectAssetSheet";
@@ -91,6 +92,10 @@ export default function ProjectView() {
   // 「重新挂靠」替换流：详情浮层对缺失档案发起时记录旧档案，选择器
   // 挂上新文件成功后把旧档案取消挂靠（两步都走既有命令）。
   const [replaceAsset, setReplaceAsset] = useState<ProjectAsset | null>(null);
+  // 舞台模式：画布（默认，看/摆/连）与列表（字段级精修）共享同一数据层。
+  const [stageMode, setStageMode] = useState<"canvas" | "list">(() =>
+    localStorage.getItem("project_stage_mode") === "list" ? "list" : "canvas",
+  );
   const renameInputRef = useRef<HTMLInputElement>(null);
 
   const currentShow = shows.find((show) => show.id === currentShowId) ?? null;
@@ -155,6 +160,9 @@ export default function ProjectView() {
   const looseAssets = overview?.loose_assets ?? [];
   const scriptName = scriptFileLabel(scriptPath);
 
+  // 画布左上角玻璃卡内容：集身份/状态/出场角色/剧本入口（编辑逻辑与
+  // 列表模式共用同一组状态）。
+
   const handleRenameSubmit = () => {
     if (!currentEpisode) return;
     const nextTitle = (renameInputRef.current?.value ?? "").trim();
@@ -175,6 +183,97 @@ export default function ProjectView() {
     if (!Number.isInteger(next) || next === episode.number) return;
     void updateEpisodeNumber(episodeId, next);
   };
+
+  const epOverlay = currentEpisode ? (
+    <>
+      <div className="pc-ep-crumb">
+        {currentShow?.name} /{" "}
+        {t("project.episode.crumb", { number: episodeNumberLabel(currentEpisode.number) })}
+      </div>
+      <div className="pc-ep-row">
+        {renamingEpisode ? (
+          <input
+            ref={renameInputRef}
+            className="pc-ep-title-input"
+            defaultValue={currentEpisode.title}
+            placeholder={t("project.episode.untitled")}
+            onKeyDown={(event) => {
+              if (event.key === "Enter") handleRenameSubmit();
+              if (event.key === "Escape") setRenamingEpisode(false);
+            }}
+            onBlur={handleRenameSubmit}
+            autoFocus
+          />
+        ) : (
+          <h2
+            className="pc-ep-title"
+            title={t("project.episode.renameHint")}
+            onDoubleClick={() => setRenamingEpisode(true)}
+          >
+            {currentEpisode.title || t("project.episode.untitled")}
+          </h2>
+        )}
+        <IosSelect
+          value={currentEpisode.status}
+          options={statusOptions}
+          onChange={(next) =>
+            void updateEpisode(currentEpisode.id, {
+              title: currentEpisode.title,
+              status: next as ProjectEpisode["status"],
+              script_path: currentEpisode.script_path,
+            })
+          }
+        />
+        <button
+          type="button"
+          className="pc-ep-del"
+          title={t("project.episode.delete")}
+          onClick={() => setDeleteTarget(currentEpisode)}
+        >
+          {Icons.delete}
+        </button>
+      </div>
+      <div className="pc-cast">
+        {castCharacters.map((character) => {
+          const avatarPath = character.avatar_path
+            ? joinLibraryPath(libraryRoot, character.avatar_path)
+            : "";
+          return (
+            <span key={character.id} className="pc-cast-chip" title={character.bio}>
+              <span className={`pc-cast-ava pc-ava-p${characterAvatarPaletteIndex(character.name)}`}>
+                {avatarPath ? (
+                  <ResourceImage
+                    path={avatarPath}
+                    alt={character.name}
+                    className="pc-cast-ava-img"
+                    version={character.updated_at}
+                  />
+                ) : (
+                  characterAvatarInitial(character.name)
+                )}
+              </span>
+              {character.name}
+            </span>
+          );
+        })}
+        <button type="button" className="pc-cast-add" title={t("project.cast.link")} onClick={() => setCastPickOpen(true)}>
+          {Icons.add}
+        </button>
+      </div>
+      {scriptName && (
+        <button
+          type="button"
+          className="pc-script-row"
+          title={t("project.script.open")}
+          onClick={() => void openResourceFile(joinLibraryPath(libraryRoot, scriptPath))}
+        >
+          {Icons.file}
+          <span>{scriptName}</span>
+          {Icons.externalLink}
+        </button>
+      )}
+    </>
+  ) : null;
 
   return (
     <div className="project-workspace">
@@ -328,7 +427,46 @@ export default function ProjectView() {
             <p>{t("project.episode.emptyStage")}</p>
           </div>
         ) : (
-          <>
+          <div className="project-stage-shell">
+            <div className="project-stage-switch">
+              <button
+                type="button"
+                className={stageMode === "canvas" ? "active" : ""}
+                title={t("project.stage.canvas")}
+                onClick={() => {
+                  setStageMode("canvas");
+                  localStorage.setItem("project_stage_mode", "canvas");
+                }}
+              >
+                {Icons.clapperboard}
+              </button>
+              <button
+                type="button"
+                className={stageMode === "list" ? "active" : ""}
+                title={t("project.stage.list")}
+                onClick={() => {
+                  setStageMode("list");
+                  localStorage.setItem("project_stage_mode", "list");
+                }}
+              >
+                {Icons.copy}
+              </button>
+            </div>
+            {stageMode === "canvas" ? (
+              <ProjectCanvas
+                libraryRoot={libraryRoot}
+                overlay={epOverlay}
+                onOpenAsset={setSheetAsset}
+                onPickForShot={setAssetPickerShotId}
+                onRelinkAsset={(asset) => {
+                  setReplaceAsset(asset);
+                  setSheetAsset(null);
+                  setAssetPickerShotId(asset.shot_id);
+                }}
+              />
+            ) : (
+              <div className="project-stage-scroll">
+              <>
             <div className="project-crumb">
               {currentShow?.name} / {t("project.episode.crumb", {
                 number: episodeNumberLabel(currentEpisode.number),
@@ -546,7 +684,10 @@ export default function ProjectView() {
                 </div>
               </div>
             </div>
-          </>
+              </>
+              </div>
+            )}
+          </div>
         )}
       </section>
 

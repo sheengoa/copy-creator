@@ -2257,3 +2257,559 @@
   color: rgba(253, 224, 132, 0.95);
   background: rgba(234, 179, 8, 0.14);
 }
+
+/* ══ 工程画布（无限画布视图）：pc- 前缀 ═══════════════════════ */
+
+.project-stage-shell {
+  flex: 1;
+  min-height: 0;
+  position: relative;
+  display: flex;
+  flex-direction: column;
+}
+.project-stage-shell > .pc-root { flex: 1; min-height: 0; }
+.project-stage-scroll {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.project-stage-switch {
+  position: absolute;
+  top: 10px;
+  right: 14px;
+  z-index: 30;
+  display: flex;
+  gap: 2px;
+  padding: 3px;
+  border-radius: 8px;
+  background: var(--chip-bg);
+}
+.project-stage-switch button {
+  width: 28px;
+  height: 26px;
+  border-radius: 6px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--text-secondary);
+}
+.project-stage-switch button.active {
+  background: var(--text-primary);
+  color: var(--bg-primary);
+}
+.project-stage-switch button svg { width: 15px; height: 15px; }
+
+.pc-root { position: relative; display: flex; flex-direction: column; }
+.pc-viewport {
+  position: relative;
+  flex: 1;
+  min-height: 0;
+  overflow: hidden;
+  touch-action: none;
+  user-select: none;
+  -webkit-user-select: none;
+  cursor: default;
+  background-color: var(--bg-primary);
+  background-image: radial-gradient(circle, var(--separator) 1px, transparent 1px);
+  background-size: 22px 22px;
+}
+.pc-viewport.panning { cursor: grabbing; }
+.pc-world { position: absolute; left: 0; top: 0; transform-origin: 0 0; }
+.pc-marquee {
+  position: absolute;
+  z-index: 15;
+  border: 1.5px dashed var(--text-primary);
+  background: rgba(127, 127, 140, 0.08);
+  border-radius: 4px;
+  pointer-events: none;
+}
+
+/* ── 场景分组框 ── */
+.pc-frame {
+  position: absolute;
+  border: 1.5px dashed var(--separator);
+  border-radius: 18px;
+  background: var(--card-bg);
+  pointer-events: none;
+}
+.pc-frame-label {
+  position: absolute;
+  top: -14px;
+  left: 18px;
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  background: var(--panel-bg, var(--bg-primary));
+  border: 1px solid var(--separator);
+  border-radius: 9px;
+  padding: 5px 11px;
+  box-shadow: var(--shadow);
+  font-size: 12.5px;
+  font-weight: 500;
+  white-space: nowrap;
+  cursor: grab;
+  pointer-events: auto;
+}
+.pc-frame-label:active { cursor: grabbing; }
+.pc-frame-no { color: var(--text-tertiary); font-size: 10.5px; }
+.pc-frame-name { max-width: 180px; overflow: hidden; text-overflow: ellipsis; }
+.pc-frame-label small { color: var(--text-tertiary); font-size: 10.5px; font-weight: 400; }
+.pc-int {
+  height: 18px;
+  padding: 0 6px;
+  border-radius: 5px;
+  background: var(--chip-bg);
+  font-size: 10px;
+  color: var(--text-secondary);
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+}
+.pc-int svg { width: 10px; height: 10px; }
+.pc-int em { font-style: normal; opacity: 0.75; }
+.pc-frame-ops { display: inline-flex; gap: 1px; color: var(--text-tertiary); }
+.pc-frame-ops button {
+  width: 20px;
+  height: 20px;
+  border-radius: 5px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+.pc-frame-ops button:hover { background: var(--chip-bg); color: var(--text-primary); }
+.pc-frame-ops svg { width: 12px; height: 12px; }
+
+/* ── 素材节点 ── */
+.pc-node { position: absolute; border-radius: 14px; cursor: grab; }
+.pc-node:active { cursor: grabbing; }
+.pc-node.pc-dragging { z-index: 20; }
+.pc-node > .pc-media-wrap {
+  border-radius: 14px;
+  overflow: hidden;
+  background: var(--bg-card);
+  border: 1px solid var(--separator);
+  box-shadow: 0 2px 12px rgba(0, 0, 0, 0.1), 0 1px 3px rgba(0, 0, 0, 0.06);
+  transition: box-shadow 0.16s ease, transform 0.16s ease;
+}
+.pc-node:hover > .pc-media-wrap {
+  box-shadow: 0 14px 34px rgba(0, 0, 0, 0.2), 0 3px 8px rgba(0, 0, 0, 0.1);
+  transform: translateY(-2px);
+}
+.pc-node.pc-selected > .pc-media-wrap { outline: 2px solid var(--text-primary); outline-offset: 3px; }
+.pc-node.pc-wire-target > .pc-media-wrap { outline: 2px solid var(--card-glow); outline-offset: 3px; }
+.pc-media { overflow: hidden; }
+.pc-media-img { width: 100%; height: 100%; object-fit: cover; display: block; }
+.pc-media-img img { width: 100%; height: 100%; object-fit: cover; }
+.pc-media .resource-thumb-blur { width: 100%; height: 100%; }
+.pc-media .resource-thumb-blur img { width: 100%; height: 100%; object-fit: cover; }
+.pc-media-loading, .pc-media .resource-media-loading { width: 100%; height: 100%; }
+.pc-play {
+  position: absolute;
+  inset: 0;
+  margin: auto;
+  width: 40px;
+  height: 40px;
+  border-radius: 50%;
+  background: rgba(20, 20, 26, 0.5);
+  color: #fff;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  pointer-events: none;
+}
+.pc-play svg { width: 16px; height: 16px; }
+.pc-miss-card {
+  border: 1.5px dashed var(--danger);
+  color: var(--danger);
+  font-size: 11.5px;
+  background: repeating-linear-gradient(45deg, transparent, transparent 9px, rgba(194, 65, 65, 0.05) 9px, rgba(194, 65, 65, 0.05) 18px);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+}
+.pc-miss-card svg { width: 18px; height: 18px; }
+.pc-media-file {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  color: var(--text-secondary);
+  font-size: 11px;
+  padding: 0 10px;
+  text-align: center;
+}
+.pc-media-file span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 100%; }
+/* 文本纸片 */
+.pc-paper {
+  border-radius: 13px;
+  background: var(--card-inner-bg);
+  border: 1px solid var(--separator);
+  padding: 12px 14px;
+}
+.pc-paper h5 {
+  font-size: 12px;
+  font-weight: 500;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-bottom: 7px;
+  color: var(--text-primary);
+}
+.pc-paper h5 svg { width: 12px; height: 12px; flex: none; }
+.pc-paper h5 span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.pc-paper p {
+  font-size: 10.5px;
+  line-height: 1.7;
+  color: var(--text-secondary);
+  white-space: pre-wrap;
+  display: -webkit-box;
+  -webkit-line-clamp: 6;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+  margin: 0;
+}
+/* 空镜头卡 */
+.pc-shotcard-body { padding: 11px 13px; display: flex; flex-direction: column; gap: 5px; height: 100%; }
+.pc-shotcard-body b {
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--text-primary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+}
+.pc-shotcard-body i {
+  font-style: normal;
+  font-size: 10.5px;
+  color: var(--text-secondary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+/* 镜头归属签 / 生成徽标 */
+.pc-shot-tag, .pc-gen-tag {
+  position: absolute;
+  height: 21px;
+  max-width: calc(100% - 18px);
+  padding: 0 8px;
+  border-radius: 7px;
+  color: #fff;
+  font-size: 10px;
+  letter-spacing: 0.3px;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  pointer-events: none;
+  overflow: hidden;
+  white-space: nowrap;
+}
+.pc-shot-tag { left: 9px; top: 9px; background: rgba(28, 28, 34, 0.7); }
+.pc-gen-tag { right: 9px; top: 9px; background: rgba(84, 68, 160, 0.85); }
+.pc-shot-tag svg, .pc-gen-tag svg { width: 10px; height: 10px; flex: none; }
+/* 节点 hover 工具条 */
+.pc-node-tools {
+  position: absolute;
+  top: -36px;
+  left: 50%;
+  transform: translateX(-50%);
+  display: flex;
+  gap: 2px;
+  padding: 3px;
+  border-radius: 9px;
+  background: rgba(28, 28, 34, 0.94);
+  box-shadow: 0 6px 18px rgba(0, 0, 0, 0.3);
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.12s ease;
+  z-index: 6;
+}
+.pc-node:hover .pc-node-tools { opacity: 1; pointer-events: auto; }
+.pc-node-tools button {
+  width: 27px;
+  height: 27px;
+  border-radius: 7px;
+  color: rgba(255, 255, 255, 0.85);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+.pc-node-tools button:hover { background: rgba(255, 255, 255, 0.15); color: #fff; }
+.pc-node-tools button.danger:hover { background: var(--danger); }
+.pc-node-tools svg { width: 14px; height: 14px; }
+/* 手动连线锚点 */
+.pc-anchor {
+  position: absolute;
+  right: -8px;
+  bottom: -8px;
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  background: var(--bg-primary);
+  border: 2px solid var(--text-primary);
+  box-shadow: 0 1px 5px rgba(0, 0, 0, 0.35);
+  opacity: 0;
+  transition: opacity 0.12s ease, transform 0.12s ease;
+  cursor: crosshair;
+  z-index: 5;
+}
+.pc-node:hover .pc-anchor { opacity: 1; }
+.pc-node .pc-anchor:hover { transform: scale(1.25); }
+
+/* ── 工作流连线 ── */
+.pc-wires {
+  position: absolute;
+  left: 0;
+  top: 0;
+  width: 100%;
+  height: 100%;
+  overflow: visible;
+  pointer-events: none;
+}
+.pc-wire-hit { fill: none; stroke: transparent; stroke-width: 16; pointer-events: stroke; cursor: pointer; }
+.pc-wire-line { fill: none; stroke: var(--text-tertiary); stroke-width: 2; stroke-opacity: 0.9; }
+.pc-wire-line.gen { stroke: var(--text-secondary); stroke-width: 2.2px; }
+.pc-wire-line.manual { stroke-dasharray: 5, 5; }
+.pc-wire:hover .pc-wire-line { stroke: var(--text-primary); stroke-width: 3; stroke-opacity: 1; }
+.pc-wire-label {
+  font-size: 11px;
+  fill: var(--text-secondary);
+  text-anchor: middle;
+  pointer-events: none;
+  paint-order: stroke;
+  stroke: var(--bg-primary);
+  stroke-width: 4px;
+  font-weight: 400;
+}
+.pc-wire:hover .pc-wire-label { fill: var(--text-primary); }
+.pc-wire-del { opacity: 0; transition: opacity 0.12s ease; pointer-events: none; }
+.pc-wire:hover .pc-wire-del { opacity: 1; }
+.pc-wire-del circle { fill: var(--danger); }
+.pc-wire-del path { stroke: #fff; stroke-width: 2; fill: none; }
+.pc-wire-temp { fill: none; stroke: var(--text-secondary); stroke-width: 2; stroke-dasharray: 5, 5; }
+
+/* ── 玻璃 overlay 控件 ── */
+.pc-glass {
+  position: absolute;
+  z-index: 10;
+  border-radius: 13px;
+  background: var(--glass-bg, rgba(255, 255, 255, 0.8));
+  backdrop-filter: blur(14px);
+  -webkit-backdrop-filter: blur(14px);
+  border: 1px solid var(--separator);
+  box-shadow: var(--shadow);
+}
+.pc-ep-card { top: 16px; left: 16px; padding: 13px 15px; max-width: 300px; display: flex; flex-direction: column; gap: 9px; }
+.pc-ep-crumb { font-size: 10.5px; color: var(--text-secondary); display: flex; align-items: center; gap: 5px; }
+.pc-ep-row { display: flex; align-items: center; gap: 9px; }
+.pc-ep-title {
+  font-size: 18px;
+  font-weight: 500;
+  color: var(--text-primary);
+  max-width: 160px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  margin: 0;
+}
+.pc-ep-title-input {
+  font-size: 15px;
+  font-weight: 500;
+  width: 150px;
+  border: 1px solid var(--separator);
+  border-radius: 6px;
+  background: var(--input-bg);
+  color: var(--text-primary);
+  padding: 3px 8px;
+  outline: none;
+}
+.pc-ep-del {
+  width: 26px;
+  height: 26px;
+  border-radius: 6px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--text-secondary);
+}
+.pc-ep-del:hover { background: rgba(194, 65, 65, 0.12); color: var(--danger); }
+.pc-ep-del svg { width: 14px; height: 14px; }
+.pc-cast { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+.pc-cast-chip {
+  height: 28px;
+  padding: 0 9px 0 4px;
+  border-radius: 14px;
+  background: var(--chip-bg);
+  border: 1px solid var(--separator);
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 11px;
+  color: var(--text-primary);
+}
+.pc-cast-ava {
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  overflow: hidden;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: #fff;
+  font-size: 10px;
+  background: var(--chip-hover-bg);
+  flex: none;
+}
+.pc-cast-ava-img { width: 100%; height: 100%; object-fit: cover; }
+.pc-cast-add {
+  width: 28px;
+  height: 28px;
+  border-radius: 14px;
+  border: 1px dashed var(--text-tertiary);
+  color: var(--text-secondary);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+.pc-cast-add svg { width: 13px; height: 13px; }
+.pc-script-row {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  height: 28px;
+  padding: 0 10px;
+  border-radius: 7px;
+  background: var(--chip-bg);
+  color: var(--text-secondary);
+  font-size: 11px;
+  max-width: 100%;
+  align-self: flex-start;
+}
+.pc-script-row span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.pc-script-row svg { width: 12px; height: 12px; flex: none; }
+.pc-script-row:hover { background: var(--chip-hover-bg); color: var(--text-primary); }
+.pc-ep-stats {
+  padding-top: 9px;
+  border-top: 1px solid var(--separator);
+  display: flex;
+  gap: 12px;
+  font-size: 10.5px;
+  color: var(--text-secondary);
+}
+
+.pc-tip {
+  position: absolute;
+  top: 12px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 9;
+  font-size: 10.5px;
+  color: var(--text-tertiary);
+  background: var(--glass-bg, rgba(255, 255, 255, 0.7));
+  backdrop-filter: blur(6px);
+  padding: 5px 11px;
+  border-radius: 7px;
+  white-space: nowrap;
+  pointer-events: none;
+}
+.pc-zoombar { bottom: 16px; left: 16px; display: flex; align-items: center; gap: 2px; padding: 4px; }
+.pc-zoombar button {
+  min-width: 28px;
+  height: 28px;
+  border-radius: 7px;
+  color: var(--text-secondary);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 15px;
+}
+.pc-zoombar button:hover { background: var(--chip-bg); color: var(--text-primary); }
+.pc-zoombar button svg { width: 14px; height: 14px; }
+.pc-zpct {
+  font-size: 11.5px;
+  color: var(--text-secondary);
+  min-width: 44px;
+  text-align: center;
+  font-variant-numeric: tabular-nums;
+}
+.pc-zoombar .pc-sep { width: 1px; height: 16px; background: var(--separator); margin: 0 3px; }
+.pc-minimap { bottom: 58px; right: 16px; padding: 5px; cursor: crosshair; }
+.pc-minimap svg { display: block; }
+.pc-addbtn { bottom: 16px; right: 16px; display: flex; gap: 8px; padding: 6px; }
+.pc-addbtn button {
+  height: 30px;
+  padding: 0 12px;
+  border-radius: 7px;
+  font-size: 12px;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--text-secondary);
+}
+.pc-addbtn button:hover { background: var(--chip-bg); }
+.pc-addbtn button.primary { background: var(--text-primary); color: var(--bg-primary); }
+.pc-addbtn button.primary:hover { opacity: 0.88; }
+.pc-addbtn svg { width: 13px; height: 13px; }
+
+/* ── 快速编辑对话框 ── */
+.pc-dialog-mask {
+  position: absolute;
+  inset: 0;
+  z-index: 50;
+  background: rgba(18, 18, 24, 0.4);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.pc-dialog {
+  width: min(400px, calc(100% - 48px));
+  border-radius: 14px;
+  background: var(--panel-bg, var(--bg-primary));
+  border: 1px solid var(--separator);
+  box-shadow: 0 24px 70px rgba(0, 0, 0, 0.4);
+  padding: 18px 20px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+.pc-dialog h4 { font-size: 14px; font-weight: 500; margin: 0; color: var(--text-primary); }
+.pc-dialog label { display: flex; flex-direction: column; gap: 6px; font-size: 12px; color: var(--text-secondary); }
+.pc-dialog input,
+.pc-dialog textarea,
+.pc-dialog select {
+  border: 1px solid var(--separator);
+  border-radius: 8px;
+  background: var(--input-bg);
+  color: var(--text-primary);
+  padding: 7px 10px;
+  font-size: 12.5px;
+  font-family: inherit;
+  outline: none;
+  resize: vertical;
+}
+.pc-dialog input:focus,
+.pc-dialog textarea:focus,
+.pc-dialog select:focus { border-color: var(--card-glow); }
+.pc-dialog-foot { display: flex; justify-content: flex-end; gap: 8px; margin-top: 2px; }
+.pc-dialog-foot button {
+  height: 30px;
+  padding: 0 14px;
+  border-radius: 7px;
+  background: var(--chip-bg);
+  color: var(--text-primary);
+  font-size: 12px;
+}
+.pc-dialog-foot button:hover { background: var(--chip-hover-bg); }
+.pc-dialog-foot button.primary { background: var(--text-primary); color: var(--bg-primary); }
+.pc-dialog-foot button.primary:hover { opacity: 0.88; }
+
+/* 画布内的视频封面：撑满节点盒 */
+.pc-media .resource-video-poster { width: 100%; height: 100%; }
+.pc-media .resource-video-poster img { width: 100%; height: 100%; object-fit: cover; }

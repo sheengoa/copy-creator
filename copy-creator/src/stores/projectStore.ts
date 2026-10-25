@@ -79,6 +79,10 @@ export interface ProjectAsset {
   audio_role: string;
   /** 文件是否已不在当前资源库根下（overview 命令逐档案检测）。 */
   missing: boolean;
+  /** 工程画布摆放坐标（世界像素；null = 未摆放过，画布自动布局）。 */
+  canvas_x: number | null;
+  canvas_y: number | null;
+  canvas_w: number | null;
   created_at: string;
   updated_at: string;
 }
@@ -95,6 +99,9 @@ export interface ProjectShot {
   character_ids: string[];
   prop_ids: string[];
   assets: ProjectAsset[];
+  /** 画布上空镜头卡坐标（有素材的镜头以素材节点上的标签表达归属）。 */
+  canvas_x: number | null;
+  canvas_y: number | null;
   sort_order: number;
   created_at: string;
   updated_at: string;
@@ -109,6 +116,9 @@ export interface ProjectScene {
   shot_count: number;
   location: ProjectLocation | null;
   shots: ProjectShot[];
+  /** 画布分组框位置（世界像素；尺寸由成员包围盒动态推导）。 */
+  canvas_x: number | null;
+  canvas_y: number | null;
   sort_order: number;
   created_at: string;
   updated_at: string;
@@ -140,11 +150,20 @@ export interface ProjectSearchItem {
   content?: string | null;
 }
 
+/** 工程画布的手动工作流连线（生成链由 gen_from_asset 推导，不入库）。 */
+export interface ProjectAssetLink {
+  id: string;
+  from_asset: string;
+  to_asset: string;
+  label: string;
+}
+
 export interface EpisodeOverview {
   episode: ProjectEpisode;
   characters: ProjectCharacter[];
   scenes: ProjectScene[];
   loose_assets: ProjectAsset[];
+  links: ProjectAssetLink[];
 }
 
 interface ProjectStoreState {
@@ -260,6 +279,18 @@ interface ProjectStoreState {
     genParams: string;
     audioRole: string;
   }) => Promise<void>;
+
+  /** 批量保存画布布局（素材/镜头/场景坐标）：本地即时更新 + 静默落库，
+   *  不触发 overview 重取（拖拽结束才调用，画布自身是事实来源）。 */
+  saveCanvasLayout: (payload: {
+    assets: { id: string; x: number | null; y: number | null; w: number | null }[];
+    shots: { id: string; x: number | null; y: number | null }[];
+    scenes: { id: string; x: number | null; y: number | null }[];
+  }) => Promise<void>;
+  /** 手动连出工作流参考线（重复幂等）；成功后本地追加并返回连线。 */
+  linkAssets: (fromAsset: string, toAsset: string, label?: string) => Promise<ProjectAssetLink | null>;
+  /** 摘除一条手动连线（按两端素材，方向不限）。 */
+  unlinkAssets: (fromAsset: string, toAsset: string) => Promise<void>;
 
   loadPrompts: (category?: string) => Promise<void>;
   savePrompt: (payload: {
@@ -863,6 +894,92 @@ export const useProjectStore = create<ProjectStoreState>((set, get) => ({
       if (currentEpisodeId) await get().selectEpisode(currentEpisodeId);
     } catch (error) {
       console.error("project_update_asset failed:", error);
+    }
+  },
+
+  saveCanvasLayout: async (payload) => {
+    // 本地即时回写（overview 内嵌结构的对应字段），静默落库；失败仅
+    // 记日志，画布保留用户摆位、下次改动会再保存。
+    const overview = get().overview;
+    if (overview) {
+      const assetMap = new Map(payload.assets.map((item) => [item.id, item]));
+      const shotMap = new Map(payload.shots.map((item) => [item.id, item]));
+      const sceneMap = new Map(payload.scenes.map((item) => [item.id, item]));
+      const patchAsset = (asset: ProjectAsset): ProjectAsset => {
+        const patch = assetMap.get(asset.id);
+        return patch
+          ? { ...asset, canvas_x: patch.x, canvas_y: patch.y, canvas_w: patch.w }
+          : asset;
+      };
+      set({
+        overview: {
+          ...overview,
+          loose_assets: overview.loose_assets.map(patchAsset),
+          scenes: overview.scenes.map((scene) => {
+            const scenePatch = sceneMap.get(scene.id);
+            return {
+              ...scene,
+              canvas_x: scenePatch ? scenePatch.x : scene.canvas_x,
+              canvas_y: scenePatch ? scenePatch.y : scene.canvas_y,
+              shots: scene.shots.map((shot) => {
+                const shotPatch = shotMap.get(shot.id);
+                return shotPatch
+                  ? { ...shot, canvas_x: shotPatch.x, canvas_y: shotPatch.y }
+                  : {
+                      ...shot,
+                      assets: shot.assets.map(patchAsset),
+                    };
+              }),
+            };
+          }),
+        },
+      });
+    }
+    try {
+      await invoke("project_save_canvas_layout", { payload });
+    } catch (error) {
+      console.error("project_save_canvas_layout failed:", error);
+    }
+  },
+
+  linkAssets: async (fromAsset, toAsset, label) => {
+    try {
+      const link = await invoke<ProjectAssetLink>("project_link_assets", {
+        fromAsset,
+        toAsset,
+        label: label ?? "",
+      });
+      const overview = get().overview;
+      if (overview && !overview.links.some((item) => item.id === link.id)) {
+        set({ overview: { ...overview, links: [...overview.links, link] } });
+      }
+      return link;
+    } catch (error) {
+      console.error("project_link_assets failed:", error);
+      return null;
+    }
+  },
+
+  unlinkAssets: async (fromAsset, toAsset) => {
+    try {
+      await invoke("project_unlink_assets", { fromAsset, toAsset });
+      const overview = get().overview;
+      if (overview) {
+        set({
+          overview: {
+            ...overview,
+            links: overview.links.filter(
+              (item) =>
+                !(
+                  (item.from_asset === fromAsset && item.to_asset === toAsset) ||
+                  (item.from_asset === toAsset && item.to_asset === fromAsset)
+                ),
+            ),
+          },
+        });
+      }
+    } catch (error) {
+      console.error("project_unlink_assets failed:", error);
     }
   },
 
