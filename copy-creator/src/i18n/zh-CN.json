@@ -434,7 +434,9 @@
     "cast": {
       "title": "出场角色",
       "empty": "暂未关联角色",
-      "global": "全局角色"
+      "global": "全局角色",
+      "link": "关联角色",
+      "pickTitle": "关联角色 · 第 {{number}} 集 {{title}}"
     },
     "script": {
       "open": "打开剧本文件",
@@ -453,6 +455,50 @@
         "text": "文本",
         "prompt": "提示词",
         "file": "文件"
+      }
+    },
+    "library": {
+      "characters": "角色库",
+      "locations": "场景库",
+      "props": "道具库",
+      "scope": "全局",
+      "empty": "{{kind}}还是空的，先新建一条",
+      "linked": "已关联",
+      "pick": "关联",
+      "newCharacter": "新建角色",
+      "newLocation": "新建场景",
+      "newProp": "新建道具",
+      "editCharacter": "编辑角色",
+      "editLocation": "编辑场景",
+      "editProp": "编辑道具",
+      "deleteConfirm": "删除「{{name}}」？已关联的集会自动解除关联。",
+      "episodeRefs": "出场 {{count}} 集",
+      "unlinked": "未关联",
+      "noDescription": "暂无描述",
+      "pathHint": "图片路径填相对资源库根的路径，保存后即在此预览",
+      "field": {
+        "name": "名称",
+        "roleTag": "身份",
+        "intExt": "内外景",
+        "timeHint": "时间",
+        "bio": "人设",
+        "bioScene": "描述",
+        "prompt": "提示词",
+        "avatarPath": "形象图路径",
+        "refPath": "参考图路径",
+        "pathPlaceholder": "如：角色库/陆离/设定图.png"
+      },
+      "intExt": {
+        "unset": "未设置",
+        "int": "内景",
+        "ext": "外景",
+        "both": "内外"
+      },
+      "timeHint": {
+        "unset": "未设置",
+        "day": "日",
+        "night": "夜",
+        "dusk": "黄昏"
       }
     }
   },

@@ -77,4 +77,36 @@ export function assetKindLabelKey(kind: string): string {
   return `project.asset.kind.${known.includes(kind) ? kind : "file"}`;
 }
 
+/** 场景内外景惯例值（Fountain 行业标准 INT/EXT 的本地化表达）。 */
+export const LIBRARY_INT_EXTS = ["int", "ext", "both"] as const;
+export type LibraryIntExt = (typeof LIBRARY_INT_EXTS)[number];
+
+export function intExtLabelKey(value: string): string {
+  return `project.library.intExt.${(LIBRARY_INT_EXTS as readonly string[]).includes(value) ? value : "unset"}`;
+}
+
+/** 场景默认时间氛围。 */
+export const LIBRARY_TIME_HINTS = ["day", "night", "dusk"] as const;
+export type LibraryTimeHint = (typeof LIBRARY_TIME_HINTS)[number];
+
+export function timeHintLabelKey(value: string): string {
+  return `project.library.timeHint.${(LIBRARY_TIME_HINTS as readonly string[]).includes(value) ? value : "unset"}`;
+}
+
+/** 场景卡副文案：内外景 + 时间，缺失部分省略，全缺失显示占位键。 */
+export function locationSubtitleParts(intExt: string, timeHint: string): string[] {
+  const parts: string[] = [];
+  if ((LIBRARY_INT_EXTS as readonly string[]).includes(intExt)) parts.push(intExt);
+  if ((LIBRARY_TIME_HINTS as readonly string[]).includes(timeHint)) parts.push(timeHint);
+  return parts;
+}
+
+/** 三库面板的实体种类键（标题/新建文案复用 project.library.* 前缀）。 */
+export const LIBRARY_KINDS = ["characters", "locations", "props"] as const;
+export type LibraryKind = (typeof LIBRARY_KINDS)[number];
+
+export function isLibraryKind(value: string): value is LibraryKind {
+  return (LIBRARY_KINDS as readonly string[]).includes(value);
+}
+
 export type { ProjectEpisodeStatus };

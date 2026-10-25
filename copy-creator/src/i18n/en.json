@@ -434,7 +434,9 @@
     "cast": {
       "title": "Cast",
       "empty": "No characters linked",
-      "global": "Global"
+      "global": "Global",
+      "link": "Link character",
+      "pickTitle": "Link characters · Ep {{number}} {{title}}"
     },
     "script": {
       "open": "Open script file",
@@ -453,6 +455,50 @@
         "text": "Text",
         "prompt": "Prompt",
         "file": "File"
+      }
+    },
+    "library": {
+      "characters": "Characters",
+      "locations": "Locations",
+      "props": "Props",
+      "scope": "Global",
+      "empty": "{{kind}} is empty — create one to start",
+      "linked": "Linked",
+      "pick": "Link",
+      "newCharacter": "New Character",
+      "newLocation": "New Location",
+      "newProp": "New Prop",
+      "editCharacter": "Edit Character",
+      "editLocation": "Edit Location",
+      "editProp": "Edit Prop",
+      "deleteConfirm": "Delete \"{{name}}\"? Linked episodes will be unlinked automatically.",
+      "episodeRefs": "In {{count}} episodes",
+      "unlinked": "Not linked",
+      "noDescription": "No description",
+      "pathHint": "Image path is relative to the library root; saved paths preview here",
+      "field": {
+        "name": "Name",
+        "roleTag": "Role",
+        "intExt": "Int/Ext",
+        "timeHint": "Time",
+        "bio": "Bio",
+        "bioScene": "Description",
+        "prompt": "Prompt",
+        "avatarPath": "Portrait path",
+        "refPath": "Reference path",
+        "pathPlaceholder": "e.g. characters/ada/sheet.png"
+      },
+      "intExt": {
+        "unset": "Unset",
+        "int": "INT",
+        "ext": "EXT",
+        "both": "I/E"
+      },
+      "timeHint": {
+        "unset": "Unset",
+        "day": "Day",
+        "night": "Night",
+        "dusk": "Dusk"
       }
     }
   },

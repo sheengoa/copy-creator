@@ -7,10 +7,12 @@ import { useProjectStore, type ProjectEpisode } from "../../stores/projectStore"
 import { ConfirmDialog } from "../../components/ConfirmDialog";
 import IosSelect from "../../components/IosSelect";
 import { ResourceImage } from "./ResourceMedia";
+import ProjectLibraryPanel from "./ProjectLibraryPanel";
 import { Icons } from "../../components/Icons";
 import { openResourceFile, readResourceTextPreview } from "../../domain/mediaAssets";
 import {
   EPISODE_STATUSES,
+  LIBRARY_KINDS,
   assetKindLabelKey,
   characterAvatarInitial,
   characterAvatarPaletteIndex,
@@ -20,7 +22,13 @@ import {
   episodeStatusKey,
   joinLibraryPath,
   scriptFileLabel,
+  type LibraryKind,
 } from "../../domain/projectView";
+
+interface LibraryPanelState {
+  kind: LibraryKind;
+  mode: "browse" | "pick";
+}
 
 /** 工程视图：资源页内与文件视图并列的剧集工作台。数据全部来自
  *  projectStore；后端 project-changed 事件统一驱动重取。 */
@@ -38,6 +46,7 @@ export default function ProjectView() {
     selectEpisode,
     updateEpisode,
     refresh,
+    setEpisodeCharacters,
   } = useProjectStore(
     useShallow((state) => ({
       shows: state.shows,
@@ -51,6 +60,7 @@ export default function ProjectView() {
       selectEpisode: state.selectEpisode,
       updateEpisode: state.updateEpisode,
       refresh: state.refresh,
+      setEpisodeCharacters: state.setEpisodeCharacters,
     })),
   );
 
@@ -58,6 +68,7 @@ export default function ProjectView() {
   const [scriptPreview, setScriptPreview] = useState<string | null>(null);
   const [deleteTarget, setDeleteTarget] = useState<ProjectEpisode | null>(null);
   const [renamingEpisode, setRenamingEpisode] = useState(false);
+  const [libraryPanel, setLibraryPanel] = useState<LibraryPanelState | null>(null);
   const renameInputRef = useRef<HTMLInputElement>(null);
 
   const currentShow = shows.find((show) => show.id === currentShowId) ?? null;
@@ -190,6 +201,21 @@ export default function ProjectView() {
             </button>
           )}
         </div>
+        <div className="project-tree-split" />
+        {LIBRARY_KINDS.map((kind) => (
+          <button
+            key={kind}
+            type="button"
+            className="project-lib-row"
+            onClick={() => setLibraryPanel({ kind, mode: "browse" })}
+          >
+            <span className="project-lib-icon">
+              {kind === "characters" ? Icons.clipboard : kind === "locations" ? Icons.resources : Icons.star}
+            </span>
+            <span className="project-lib-name">{t(`project.library.${kind}`)}</span>
+            <span className="project-lib-scope">{t("project.library.scope")}</span>
+          </button>
+        ))}
       </aside>
 
       <section className="project-stage">
@@ -287,6 +313,16 @@ export default function ProjectView() {
                   );
                 })
               )}
+              {currentEpisode && (
+                <button
+                  type="button"
+                  className="project-cast-add"
+                  onClick={() => setLibraryPanel({ kind: "characters", mode: "pick" })}
+                >
+                  {Icons.add}
+                  {t("project.cast.link")}
+                </button>
+              )}
             </div>
 
             <div className="project-stage-main">
@@ -375,6 +411,36 @@ export default function ProjectView() {
           </>
         )}
       </section>
+
+      {libraryPanel && (
+        <ProjectLibraryPanel
+          kind={libraryPanel.kind}
+          mode={libraryPanel.mode}
+          onClose={() => setLibraryPanel(null)}
+          pickTitle={
+            libraryPanel.mode === "pick" && currentEpisode
+              ? t("project.cast.pickTitle", {
+                  number: episodeNumberLabel(currentEpisode.number),
+                  title: currentEpisode.title || t("project.episode.untitled"),
+                })
+              : undefined
+          }
+          linkedIds={
+            libraryPanel.mode === "pick" ? (overview?.episode.character_ids ?? []) : undefined
+          }
+          onPick={
+            libraryPanel.mode === "pick" && currentEpisodeId
+              ? (id) => {
+                  const existing = overview?.episode.character_ids ?? [];
+                  if (!existing.includes(id)) {
+                    void setEpisodeCharacters(currentEpisodeId, [...existing, id]);
+                  }
+                  setLibraryPanel(null);
+                }
+              : undefined
+          }
+        />
+      )}
 
       {deleteTarget && (
         <ConfirmDialog

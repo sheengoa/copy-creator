@@ -42,6 +42,28 @@ export interface ProjectCharacter {
   updated_at: string;
 }
 
+export interface ProjectLocation {
+  id: string;
+  name: string;
+  int_ext: string;
+  time_hint: string;
+  bio: string;
+  prompt: string;
+  ref_path: string;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface ProjectProp {
+  id: string;
+  name: string;
+  bio: string;
+  prompt: string;
+  ref_path: string;
+  created_at: string;
+  updated_at: string;
+}
+
 export interface ProjectAsset {
   id: string;
   file_path: string;
@@ -71,6 +93,9 @@ interface ProjectStoreState {
   currentEpisodeId: string | null;
   overview: EpisodeOverview | null;
   overviewLoading: boolean;
+  characters: ProjectCharacter[];
+  locations: ProjectLocation[];
+  props: ProjectProp[];
 
   setView: (view: ResourceViewMode) => void;
   loadShows: () => Promise<void>;
@@ -87,6 +112,27 @@ interface ProjectStoreState {
   selectEpisode: (episodeId: string) => Promise<void>;
   /** 后端 project-changed 事件后的整体重取：保持当前选中位置不变。 */
   refresh: () => Promise<void>;
+
+  loadCharacters: () => Promise<void>;
+  saveCharacter: (
+    payload: { id?: string; name: string; role_tag: string; bio: string; prompt: string; avatar_path: string },
+  ) => Promise<boolean>;
+  deleteCharacter: (id: string) => Promise<void>;
+
+  loadLocations: () => Promise<void>;
+  saveLocation: (
+    payload: { id?: string; name: string; int_ext: string; time_hint: string; bio: string; prompt: string; ref_path: string },
+  ) => Promise<boolean>;
+  deleteLocation: (id: string) => Promise<void>;
+
+  loadProps: () => Promise<void>;
+  saveProp: (
+    payload: { id?: string; name: string; bio: string; prompt: string; ref_path: string },
+  ) => Promise<boolean>;
+  deleteProp: (id: string) => Promise<void>;
+
+  /** 集关联角色：整组替换（后端 delete + 批量插入），随后刷新概览。 */
+  setEpisodeCharacters: (episodeId: string, characterIds: string[]) => Promise<void>;
 }
 
 const VIEW_STORAGE_KEY = "resource_view_mode";
@@ -123,6 +169,9 @@ export const useProjectStore = create<ProjectStoreState>((set, get) => ({
   currentEpisodeId: null,
   overview: null,
   overviewLoading: false,
+  characters: [],
+  locations: [],
+  props: [],
 
   setView: (view) => {
     writeStored(VIEW_STORAGE_KEY, view);
@@ -295,6 +344,144 @@ export const useProjectStore = create<ProjectStoreState>((set, get) => ({
       else set({ overview: null });
     } catch (error) {
       console.error("project refresh failed:", error);
+    }
+  },
+
+  // ── 全局三库 ─────────────────────────────────────────────
+  // 列表按需拉取（面板打开/关联时），project-changed 事件经 refresh 只
+  // 刷新剧集侧；三库列表的即时一致性由保存/删除后本域重拉保证。
+
+  loadCharacters: async () => {
+    try {
+      set({ characters: await invoke<ProjectCharacter[]>("project_list_characters") });
+    } catch (error) {
+      console.error("project_list_characters failed:", error);
+    }
+  },
+
+  saveCharacter: async (payload) => {
+    // Tauri 参数自动 camelCase 化：role_tag/... → roleTag/...。
+    const args = {
+      name: payload.name,
+      roleTag: payload.role_tag,
+      bio: payload.bio,
+      prompt: payload.prompt,
+      avatarPath: payload.avatar_path,
+    };
+    try {
+      if (payload.id) {
+        await invoke("project_update_character", { id: payload.id, ...args });
+      } else {
+        await invoke("project_create_character", args);
+      }
+      await get().loadCharacters();
+      // 人设与形象图的改动会体现在集概览的出场角色行里。
+      const { currentEpisodeId } = get();
+      if (currentEpisodeId) await get().selectEpisode(currentEpisodeId);
+      return true;
+    } catch (error) {
+      console.error("save character failed:", error);
+      return false;
+    }
+  },
+
+  deleteCharacter: async (id) => {
+    try {
+      await invoke("project_delete_character", { id });
+      await get().loadCharacters();
+      const { currentEpisodeId } = get();
+      if (currentEpisodeId) await get().selectEpisode(currentEpisodeId);
+    } catch (error) {
+      console.error("project_delete_character failed:", error);
+    }
+  },
+
+  loadLocations: async () => {
+    try {
+      set({ locations: await invoke<ProjectLocation[]>("project_list_locations") });
+    } catch (error) {
+      console.error("project_list_locations failed:", error);
+    }
+  },
+
+  saveLocation: async (payload) => {
+    const args = {
+      name: payload.name,
+      intExt: payload.int_ext,
+      timeHint: payload.time_hint,
+      bio: payload.bio,
+      prompt: payload.prompt,
+      refPath: payload.ref_path,
+    };
+    try {
+      if (payload.id) {
+        await invoke("project_update_location", { id: payload.id, ...args });
+      } else {
+        await invoke("project_create_location", args);
+      }
+      await get().loadLocations();
+      return true;
+    } catch (error) {
+      console.error("save location failed:", error);
+      return false;
+    }
+  },
+
+  deleteLocation: async (id) => {
+    try {
+      await invoke("project_delete_location", { id });
+      await get().loadLocations();
+    } catch (error) {
+      console.error("project_delete_location failed:", error);
+    }
+  },
+
+  loadProps: async () => {
+    try {
+      set({ props: await invoke<ProjectProp[]>("project_list_props") });
+    } catch (error) {
+      console.error("project_list_props failed:", error);
+    }
+  },
+
+  saveProp: async (payload) => {
+    const args = {
+      name: payload.name,
+      bio: payload.bio,
+      prompt: payload.prompt,
+      refPath: payload.ref_path,
+    };
+    try {
+      if (payload.id) {
+        await invoke("project_update_prop", { id: payload.id, ...args });
+      } else {
+        await invoke("project_create_prop", args);
+      }
+      await get().loadProps();
+      return true;
+    } catch (error) {
+      console.error("save prop failed:", error);
+      return false;
+    }
+  },
+
+  deleteProp: async (id) => {
+    try {
+      await invoke("project_delete_prop", { id });
+      await get().loadProps();
+    } catch (error) {
+      console.error("project_delete_prop failed:", error);
+    }
+  },
+
+  setEpisodeCharacters: async (episodeId, characterIds) => {
+    try {
+      await invoke("project_set_episode_characters", { episodeId, characterIds });
+      // 保存后概览重取即拿到最新出场角色与统计。
+      await get().selectEpisode(episodeId);
+      await get().loadCharacters();
+    } catch (error) {
+      console.error("project_set_episode_characters failed:", error);
     }
   },
 }));

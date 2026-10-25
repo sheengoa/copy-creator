@@ -150,4 +150,56 @@ describe("projectStore", () => {
     await useProjectStore.getState().refresh();
     expect(invokeMock).not.toHaveBeenCalled();
   });
+
+  it("saveCharacter 新建/更新均以 camelCase 参数路由", async () => {
+    invokeMock.mockResolvedValue(undefined);
+    const okNew = await useProjectStore.getState().saveCharacter({
+      name: "陆离",
+      role_tag: "掌柜",
+      bio: "沉稳寡言",
+      prompt: "中年掌柜…",
+      avatar_path: "角色库/陆离/设定图.png",
+    });
+    expect(okNew).toBe(true);
+    expect(invokeMock).toHaveBeenCalledWith("project_create_character", {
+      name: "陆离",
+      roleTag: "掌柜",
+      bio: "沉稳寡言",
+      prompt: "中年掌柜…",
+      avatarPath: "角色库/陆离/设定图.png",
+    });
+
+    const okEdit = await useProjectStore.getState().saveCharacter({
+      id: "c1",
+      name: "陆离",
+      role_tag: "掌柜",
+      bio: "",
+      prompt: "",
+      avatar_path: "",
+    });
+    expect(okEdit).toBe(true);
+    expect(invokeMock).toHaveBeenCalledWith("project_update_character", {
+      id: "c1",
+      name: "陆离",
+      roleTag: "掌柜",
+      bio: "",
+      prompt: "",
+      avatarPath: "",
+    });
+  });
+
+  it("setEpisodeCharacters 整组替换后重取概览与角色统计", async () => {
+    invokeMock.mockResolvedValue(undefined);
+    useProjectStore.setState({ currentEpisodeId: "ep-2" });
+    await useProjectStore.getState().setEpisodeCharacters("ep-2", ["c1", "c2"]);
+
+    expect(invokeMock).toHaveBeenCalledWith("project_set_episode_characters", {
+      episodeId: "ep-2",
+      characterIds: ["c1", "c2"],
+    });
+    expect(invokeMock).toHaveBeenCalledWith("project_get_episode_overview", {
+      episodeId: "ep-2",
+    });
+    expect(invokeMock).toHaveBeenCalledWith("project_list_characters");
+  });
 });
