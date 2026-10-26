@@ -44,6 +44,8 @@ const INFO_W = 132; // 资料卡宽（角色/道具/剧本）
 const INFO_H = 156;
 const SCRIPT_W = 210;
 const WORLD_MARGIN = 60;
+/** 连线 SVG 相对世界原点的负向余量（节点可被拖到世界原点左侧/上方）。 */
+const WIRE_PAD = 1200;
 const MINI_W = 150;
 const MINI_H = 96;
 const OUTPUT_W = 176; // 成片输出节点（每集工作流的总输出口）
@@ -89,6 +91,13 @@ interface CanvasInfo {
 interface CanvasNote {
   id: string;
   text: string;
+  x: number;
+  y: number;
+}
+/** 画布占位素材节点（「素材」菜单创建的空节点，双击填充后才入库为
+ *  集级散件），按集存 localStorage。 */
+interface CanvasPlaceholder {
+  id: string;
   x: number;
   y: number;
 }
@@ -389,8 +398,6 @@ export default function ProjectCanvas({
   onOpenAsset,
   onPickForShot,
   onRelinkAsset,
-  onAddLooseAsset,
-  pickerEpoch,
 }: {
   libraryRoot: string;
   /** 集信息玻璃卡内容（标题/状态/角色/剧本入口），由 ProjectView 组装。 */
@@ -398,10 +405,6 @@ export default function ProjectCanvas({
   onOpenAsset: (asset: ProjectAsset) => void;
   onPickForShot: (shotId: string) => void;
   onRelinkAsset: (asset: ProjectAsset) => void;
-  /** 双击菜单选「素材」时打开库选择器（添加为集级散件）。 */
-  onAddLooseAsset: () => void;
-  /** 资源选择器取消计数：父组件在选择器被取消关闭（未挑选文件）时递增。 */
-  pickerEpoch?: number;
 }) {
   const { t } = useTranslation();
   const {
@@ -574,27 +577,39 @@ export default function ProjectCanvas({
   // 挂剧本：选择库内文件设为本集 script_path；已有剧本时「剧本」菜单项
   // 与缺项提醒改为定位。
   const [scriptPickOpen, setScriptPickOpen] = useState(false);
-  // 从库选完素材后落到指定点的世界坐标：loose_assets 出现新 id 即落位，
-  // 若携带待接线（pendingLinkWire）则连上。
-  const [pendingAddPos, setPendingAddPos] = useState<Pos | null>(null);
-  const [pendingLinkWire, setPendingLinkWire] = useState<{
-    fromKey: string;
-    fromDir: "out" | "in";
-    fromType?: string;
-    fromAccepts?: string[];
-    fromPortId?: string;
-  } | null>(null);
-  const lastLooseIdsRef = useRef<string[]>([]);
 
-  // 资源选择器被取消（未挑选文件，父组件递增 pickerEpoch）：丢弃待落位
-  // 与待接线状态，避免之后无关的新散件被吸附到过期落点或误接旧线。
-  // 成功挂靠不递增，异步落位仍会正常消费挂起状态。
+  // ── 占位素材节点（双击填充后才入库为集级散件）：按集存 localStorage ──
+  const [placeholders, setPlaceholders] = useState<CanvasPlaceholder[]>([]);
+  const [placeholderFillFor, setPlaceholderFillFor] = useState<string | null>(null);
   useEffect(() => {
-    if (pickerEpoch) {
-      setPendingAddPos(null);
-      setPendingLinkWire(null);
+    try {
+      const raw = window.localStorage.getItem(`project_canvas_placeholders_${episodeId}`);
+      setPlaceholders(raw ? (JSON.parse(raw) as CanvasPlaceholder[]) : []);
+    } catch {
+      setPlaceholders([]);
     }
-  }, [pickerEpoch]);
+    setPlaceholderFillFor(null);
+  }, [episodeId]);
+  const persistPlaceholders = useCallback(
+    (next: CanvasPlaceholder[]) => {
+      setPlaceholders(next);
+      try {
+        window.localStorage.setItem(`project_canvas_placeholders_${episodeId}`, JSON.stringify(next));
+      } catch {
+        // 存储不可用：仅不记忆。
+      }
+    },
+    [episodeId],
+  );
+  const addPlaceholder = useCallback(
+    (x: number, y: number) => {
+      persistPlaceholders([
+        ...placeholders,
+        { id: `p${Date.now()}${Math.floor(Math.random() * 1e4)}`, x, y },
+      ]);
+    },
+    [placeholders, persistPlaceholders],
+  );
 
   // ── 布局与位置（state 驱动渲染） ──
   const layout = useMemo(() => {
@@ -766,6 +781,41 @@ export default function ProjectCanvas({
     setView(next);
     saveView(next);
   }, [segments, segPos, view.scale, setView, saveView]);
+
+  // ── 默认工作流模板：首次进入某集画布且集内尚无任何工作流数据时，
+  // 自动铺一套已连接骨架——两个空片段（片段→成片是隐式聚合线），已
+  // 关联的角色/场景/道具接入片段一的对应口；剧本挂接后自动连提示词
+  // 口。用户在其上双击填充、自由增删连线。标记落 localStorage，此后
+  // 即使删光片段也不再重建。
+  const templateFlagKey = `project_canvas_templated_${episodeId}`;
+  useEffect(() => {
+    if (!episodeId || !overview) return;
+    let templated: boolean;
+    try {
+      templated = window.localStorage.getItem(templateFlagKey) === "1";
+    } catch {
+      templated = false;
+    }
+    if (templated) return;
+    try {
+      window.localStorage.setItem(templateFlagKey, "1");
+    } catch {
+      // 存储不可用：仅不记忆（下次进入可能重铺一次，无碍）。
+    }
+    if (overview.segments.length > 0 || overview.node_links.length > 0 || overview.episode.output_asset_id) {
+      return; // 已有工作流数据的老集：保持原样。
+    }
+    void (async () => {
+      const first = await addSegment(episodeId);
+      if (!first) return;
+      const jobs: Promise<unknown>[] = [];
+      overview.characters.slice(0, 2).forEach((c) => jobs.push(linkNode(episodeId, "character", c.id, first.id, "character")));
+      overview.locations.slice(0, 2).forEach((l) => jobs.push(linkNode(episodeId, "location", l.id, first.id, "location")));
+      overview.props.slice(0, 2).forEach((p) => jobs.push(linkNode(episodeId, "prop", p.id, first.id, "prop")));
+      await Promise.all(jobs);
+      await addSegment(episodeId);
+    })();
+  }, [episodeId, overview, addSegment, linkNode, templateFlagKey]);
 
   // 剧本节点定位（视口居中到资料框剧本纸片）。
   const locateScript = useCallback(() => {
@@ -1148,33 +1198,6 @@ export default function ProjectCanvas({
     [episodeId, nodeKeyParts, portsOf, linkNode, linkAssets, setEpisodeOutput],
   );
 
-  // 库选择落位：loose_assets 出现新 id 即落到指定点；若从「拖线到空白」
-  // 菜单进入（pendingLinkWire），新素材自动接上那条线。
-  // 库选择落位：loose_assets 出现新 id 即落到指定点；若从「拖线到空白」
-  // 菜单进入（pendingLinkWire），新素材自动接上那条线。概览重取存在
-  // 空窗（selectEpisode 先置 null）：空窗期不更新 id 基线，否则新概览
-  // 会把全部旧散件误判为"新增"，把挂起落位错写到第一个旧散件上。
-  useEffect(() => {
-    if (!overview) return;
-    const ids = looseAssets.map((a) => a.id);
-    const prev = lastLooseIdsRef.current;
-    lastLooseIdsRef.current = ids;
-    if (!pendingAddPos) return;
-    const added = ids.find((id) => !prev.includes(id));
-    if (added) {
-      void saveCanvasLayout({
-        assets: [{ id: added, x: pendingAddPos.x, y: pendingAddPos.y, w: LOOSE_W }],
-        shots: [],
-        scenes: [],
-      });
-      setPendingAddPos(null);
-      if (pendingLinkWire) {
-        autoConnectNewNode(`asset:${added}`, pendingLinkWire);
-        setPendingLinkWire(null);
-      }
-    }
-  }, [overview, looseAssets, pendingAddPos, pendingLinkWire, saveCanvasLayout, autoConnectNewNode]);
-
   // ── 选中与拖拽 ──
   const [selKeys, setSelKeys] = useState<string[]>([]);
   const selRef = useRef<string[]>([]);
@@ -1226,7 +1249,7 @@ export default function ProjectCanvas({
   );
 
   interface DragState {
-    kind: "pan" | "marquee" | "card" | "loose" | "group" | "infoframe" | "wire" | "outnode" | "note" | "addnode" | "segment";
+    kind: "pan" | "marquee" | "card" | "loose" | "group" | "infoframe" | "wire" | "outnode" | "note" | "addnode" | "segment" | "placeholder";
     sx: number;
     sy: number;
     moved?: boolean;
@@ -1306,6 +1329,7 @@ export default function ProjectCanvas({
         const ports = portsOf(key);
         const inPort = ports.ins.find((item) => item.id === portId);
         if (key && (dir === "out" ? ports.out : inPort)) {
+          vp.classList.add("pc-wiring");
           dragRef.current = {
             kind: "wire", sx: e.clientX, sy: e.clientY, fromKey: key, targetKey: null,
             targetPort: null, fromDir: dir,
@@ -1338,6 +1362,20 @@ export default function ProjectCanvas({
             dragRef.current = {
               kind: "segment", sx: e.clientX, sy: e.clientY, moved: false,
               ox: p.x, oy: p.y, frameKey: segId,
+            };
+            e.preventDefault();
+            return;
+          }
+        }
+        if (key.startsWith("placeholder:")) {
+          // 占位素材节点：按下即拖动，松手持久化到 localStorage。
+          const phId = key.slice(12);
+          const ph = placeholders.find((item) => item.id === phId);
+          if (ph) {
+            nodeEl.classList.add("pc-dragging");
+            dragRef.current = {
+              kind: "placeholder", sx: e.clientX, sy: e.clientY, moved: false,
+              ox: ph.x, oy: ph.y, frameKey: phId,
             };
             e.preventDefault();
             return;
@@ -1397,7 +1435,7 @@ export default function ProjectCanvas({
       dragRef.current = { kind: "marquee", sx: e.clientX, sy: e.clientY, mq, moved: false };
       e.preventDefault();
     },
-    [layout, pos, setSelection, view, infoPos, scenePos, portsOf, outputBox, notes, segPos],
+    [layout, pos, setSelection, view, infoPos, scenePos, portsOf, outputBox, notes, segPos, placeholders],
   );
 
 
@@ -1463,6 +1501,15 @@ export default function ProjectCanvas({
       } else if (drag.kind === "note") {
         if (!drag.moved) return;
         setNotes((prev) =>
+          prev.map((item) =>
+            item.id === drag.frameKey
+              ? { ...item, x: (drag.ox ?? 0) + dx / view.scale, y: (drag.oy ?? 0) + dy / view.scale }
+              : item,
+          ),
+        );
+      } else if (drag.kind === "placeholder") {
+        if (!drag.moved) return;
+        setPlaceholders((prev) =>
           prev.map((item) =>
             item.id === drag.frameKey
               ? { ...item, x: (drag.ox ?? 0) + dx / view.scale, y: (drag.oy ?? 0) + dy / view.scale }
@@ -1668,6 +1715,22 @@ export default function ProjectCanvas({
             ),
           );
         }
+      } else if (drag.kind === "placeholder") {
+        if (drag.moved) {
+          setPlaceholders((prev) => {
+            const next = prev.map((item) =>
+              item.id === drag.frameKey
+                ? {
+                    ...item,
+                    x: (drag.ox ?? 0) + (e.clientX - drag.sx) / view.scale,
+                    y: (drag.oy ?? 0) + (e.clientY - drag.sy) / view.scale,
+                  }
+                : item,
+            );
+            persistPlaceholders(next);
+            return next;
+          });
+        }
       } else if (drag.kind === "addnode") {
         // 点击（未拖动）落双击点；按住拖到画布松手落松手点；从「拖线
         // 到空白」菜单进入时（drag.wire），创建的节点自动接上那条线。
@@ -1691,9 +1754,9 @@ export default function ProjectCanvas({
             }
           });
         } else {
-          setPendingAddPos(dropPos);
-          setPendingLinkWire(drag.wire ?? null);
-          onAddLooseAsset();
+          // 「素材」：创建空占位节点（不入库），双击占位节点才从库挑
+          // 文件填充；填充后落位在占位节点处。
+          addPlaceholder(dropPos.x, dropPos.y);
         }
       } else if (drag.kind === "marquee") {
         const list: string[] = [];
@@ -1740,6 +1803,7 @@ export default function ProjectCanvas({
         saveInfoFramePos(infoPos.frame);
       }
       vpRef.current?.classList.remove("pc-panning");
+      vpRef.current?.classList.remove("pc-wiring");
       vpRef.current?.querySelectorAll<HTMLElement>(".pc-dragging").forEach((el) => el.classList.remove("pc-dragging"));
       if (drag.moved) {
         suppressClickRef.current = true;
@@ -1755,7 +1819,7 @@ export default function ProjectCanvas({
       document.removeEventListener("mousemove", onMove);
       document.removeEventListener("mouseup", onUp);
     };
-  }, [layout, pos, view, scenePos, infoPos, boxOf, portsOf, outPointOf, inPointOf, linkAssets, persistCards, persistLoose, saveCanvasLayout, saveInfoFramePos, saveView, setSelection, saveOutputPos, setEpisodeOutput, episodeId, notes, persistNotes, addNote, onAddLooseAsset, persistSegments, linkNode, nodeKeyParts, addSegment, autoConnectNewNode]);
+  }, [layout, pos, view, scenePos, infoPos, boxOf, portsOf, outPointOf, inPointOf, linkAssets, persistCards, persistLoose, saveCanvasLayout, saveInfoFramePos, saveView, setSelection, saveOutputPos, setEpisodeOutput, episodeId, notes, persistNotes, addNote, addPlaceholder, persistPlaceholders, persistSegments, linkNode, nodeKeyParts, addSegment, autoConnectNewNode]);
 
   // ── 节点操作 ──
   // 节点接口圆点（ComfyUI 式）：输入口列在左缘（片段五口按列分布）、
@@ -2004,8 +2068,19 @@ export default function ProjectCanvas({
             );
           })}
 
-          {/* 连线层（卡片之下） */}
-          <svg className="pc-wires" aria-hidden="true">
+          {/* 连线层（卡片之下）。显式尺寸覆盖世界范围（含负向余量）：
+              依赖 0×0 + overflow:visible 在部分 WebView2 上会被整体裁剪，
+              用户端表现为所有连线与拖线草稿都不可见。 */}
+          <svg
+            className="pc-wires"
+            aria-hidden="true"
+            style={{
+              left: -WIRE_PAD,
+              top: -WIRE_PAD,
+              width: layout.worldW + WIRE_PAD * 2 + 2400,
+              height: layout.worldH + WIRE_PAD * 2 + 1200,
+            }}
+          >
             {wires.map((wire) => {
               const a = outPointOf(wire.fromKey);
               const b = inPointOf(wire.toKey);
@@ -2428,6 +2503,13 @@ export default function ProjectCanvas({
                 data-key={key}
                 className="pc-node pc-segment"
                 style={{ left: p.x, top: p.y, width: SEG_W, ["--node-accent" as string]: NODE_ACCENTS.segment } as React.CSSProperties}
+                onDoubleClick={(event) => {
+                  // 空片段双击卡体即打开填充窗口（有产出时双击无操作，
+                  // 单击缩略图开素材详情）。
+                  if (segment.asset) return;
+                  event.stopPropagation();
+                  setSegmentAssetPickFor(segment.id);
+                }}
               >
                 <div className="pc-node-head">
                   <span className="pc-node-kind">{t("project.canvas.segName")}</span>
@@ -2577,6 +2659,39 @@ export default function ProjectCanvas({
               </span>
             </div>
           ))}
+
+          {/* 占位素材节点：「素材」菜单创建的空节点，双击打开填充窗口 */}
+          {placeholders.map((ph) => (
+            <div
+              key={ph.id}
+              data-key={`placeholder:${ph.id}`}
+              className="pc-node pc-placeholder"
+              style={{ left: ph.x, top: ph.y, width: LOOSE_W, ["--node-accent" as string]: "#94a3b8" } as React.CSSProperties}
+              onDoubleClick={(event) => {
+                event.stopPropagation();
+                setPlaceholderFillFor(ph.id);
+              }}
+            >
+              <div className="pc-node-head">
+                <span className="pc-node-kind">{t("project.canvas.typeAsset")}</span>
+                <b className="pc-node-title">{t("project.canvas.placeholderTitle")}</b>
+              </div>
+              <div className="pc-ph-empty">
+                {Icons.image}
+                {t("project.canvas.placeholderEmpty")}
+              </div>
+              <span className="pc-node-tools">
+                <button
+                  type="button"
+                  data-tooltip={t("common.delete")}
+                  className="danger"
+                  onClick={() => persistPlaceholders(placeholders.filter((item) => item.id !== ph.id))}
+                >
+                  {Icons.close}
+                </button>
+              </span>
+            </div>
+          ))}
         </div>
 
         {/* 缺失提醒条（ComfyUI 缺节点警示的对应物）：缺项可点击定位 */}
@@ -2591,7 +2706,12 @@ export default function ProjectCanvas({
                 onClick={() => {
                   if (issue.key === "output") locateOutput();
                   if (issue.key === "script") setScriptPickOpen(true);
-                  if (issue.key === "segAssets") locateEmptySegment();
+                  if (issue.key === "segAssets") {
+                    locateEmptySegment();
+                    // 定位之余直接打开填充窗口，形成"提醒→填充"闭环。
+                    const firstEmpty = segments.find((item) => !item.asset);
+                    if (firstEmpty) setSegmentAssetPickFor(firstEmpty.id);
+                  }
                 }}
               >
                 {issue.label}
@@ -2985,6 +3105,35 @@ export default function ProjectCanvas({
           takenLabel=""
           onClose={() => setScriptPickOpen(false)}
           onPick={(file) => handleScriptPick(file.filePath)}
+        />
+      )}
+      {/* 占位素材填充窗口：从库挑文件，新散件落在占位节点位置并移除占位 */}
+      {placeholderFillFor && (
+        <ProjectFilePickerDialog
+          title={t("project.canvas.fillAsset")}
+          takenPaths={new Set()}
+          takenLabel=""
+          onClose={() => setPlaceholderFillFor(null)}
+          onPick={(file) => {
+            const ph = placeholders.find((item) => item.id === placeholderFillFor);
+            setPlaceholderFillFor(null);
+            if (!ph) return;
+            void linkAsset({
+              filePath: file.filePath,
+              kind: file.kind,
+              name: file.name,
+              episodeId,
+              shotId: "",
+            }).then((asset) => {
+              if (!asset) return;
+              void saveCanvasLayout({
+                assets: [{ id: asset.id, x: ph.x, y: ph.y, w: LOOSE_W }],
+                shots: [],
+                scenes: [],
+              });
+              persistPlaceholders(placeholders.filter((item) => item.id !== ph.id));
+            });
+          }}
         />
       )}
       {/* 资料框「关联场景」：多选切换，与出场角色同一交互模式 */}

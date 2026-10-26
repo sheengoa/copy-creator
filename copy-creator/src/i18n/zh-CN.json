@@ -514,7 +514,7 @@
       "typeAsset": "素材",
       "addNodeSearch": "搜索节点…",
       "typeNoteHint": "双击编辑的画布备注",
-      "typeAssetHint": "从资源库选择后落到此处",
+      "typeAssetHint": "创建空素材节点，双击填充",
       "noteEmpty": "空便签 · 双击编辑",
       "typeLocation": "场景",
       "typeOther": "其他",
@@ -537,7 +537,10 @@
       "typeEpisode": "剧本",
       "typeEpisodeHint": "从库选择剧本文件挂接到本集",
       "typeEpisodeLocatedHint": "已挂接 · 点击定位",
-      "linkScript": "挂接剧本"
+      "linkScript": "挂接剧本",
+      "fillAsset": "填充素材",
+      "placeholderTitle": "待填充",
+      "placeholderEmpty": "双击选择素材文件"
     },
     "library": {
       "characters": "角色库",

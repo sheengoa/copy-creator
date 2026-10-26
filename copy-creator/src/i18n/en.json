@@ -514,7 +514,7 @@
       "typeAsset": "Asset",
       "addNodeSearch": "Search nodes…",
       "typeNoteHint": "Canvas note, double-click to edit",
-      "typeAssetHint": "Pick from library, dropped right here",
+      "typeAssetHint": "Adds an empty asset node; double-click to fill",
       "noteEmpty": "Empty note · double-click to edit",
       "typeLocation": "Location",
       "typeOther": "Other",
@@ -537,7 +537,10 @@
       "typeEpisode": "Episode script",
       "typeEpisodeHint": "Pick a script file from the library for this episode",
       "typeEpisodeLocatedHint": "Linked · click to locate",
-      "linkScript": "Link script"
+      "linkScript": "Link script",
+      "fillAsset": "Fill asset",
+      "placeholderTitle": "Empty",
+      "placeholderEmpty": "Double-click to pick a file"
     },
     "library": {
       "characters": "Characters",

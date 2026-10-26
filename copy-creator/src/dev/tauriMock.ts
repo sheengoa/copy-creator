@@ -101,6 +101,23 @@ const db = {
       created_at: ts(),
       updated_at: ts(),
     },
+    {
+      // 空集：验证默认工作流模板（首次进入自动铺骨架）。
+      id: "ep-2",
+      show_id: "show-1",
+      number: 2,
+      title: "第 2 集 · 回声",
+      status: "none" as "none" | "script" | "storyboard" | "generating" | "done",
+      script_path: "",
+      character_ids: ["char-1"],
+      location_ids: ["loc-2"],
+      prop_ids: [],
+      shot_count: 0,
+      done_shot_count: 0,
+      output_asset_id: null as string | null,
+      created_at: ts(),
+      updated_at: ts(),
+    },
   ],
   characters: [
     { id: "char-1", name: "小雨", role_tag: "主角", bio: "", prompt: "", avatar_path: "", reference_paths: "", created_at: ts(), updated_at: ts() },
@@ -174,12 +191,22 @@ function overviewOf(episodeId: string) {
     props: clone(props),
     scenes,
     loose_assets: clone(db.assets.filter((a) => a.episode_id === episodeId && a.shot_id === "")),
-    links: clone(db.links),
+    links: clone(
+      db.links.filter((l) => {
+        const from = assetById(l.from_asset);
+        const to = assetById(l.to_asset);
+        return from?.episode_id === episodeId && to?.episode_id === episodeId;
+      }),
+    ),
     segments: db.segments
       .filter((s) => s.episode_id === episodeId)
       .sort((a, b) => a.sort_order - b.sort_order)
       .map((s) => ({ ...s, asset: s.asset_id ? assetById(s.asset_id) ?? null : null })),
-    node_links: clone(db.node_links),
+    node_links: clone(
+      db.node_links.filter((l) =>
+        db.segments.some((s) => s.id === l.to_segment && s.episode_id === episodeId),
+      ),
+    ),
   };
 }
 

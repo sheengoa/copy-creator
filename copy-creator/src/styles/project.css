@@ -1918,6 +1918,8 @@
   background-size: 22px 22px;
 }
 .pc-viewport.pc-panning { cursor: grabbing; }
+/* 拖线中：全程十字光标（即使草稿线被环境吞掉也有状态反馈） */
+.pc-viewport.pc-wiring, .pc-viewport.pc-wiring .pc-node, .pc-viewport.pc-wiring .pc-note { cursor: crosshair; }
 .pc-world { position: absolute; left: 0; top: 0; transform-origin: 0 0; }
 .pc-marquee {
   position: absolute;
@@ -2193,12 +2195,10 @@
 .pc-port-name { pointer-events: none; }
 
 /* ── 工作流连线 ── */
+/* 尺寸由 JSX 按世界范围显式给出（0×0 + overflow:visible 在部分
+   WebView2 上会被整体裁剪，表现为所有连线不可见）。 */
 .pc-wires {
   position: absolute;
-  left: 0;
-  top: 0;
-  width: 100%;
-  height: 100%;
   overflow: visible;
   pointer-events: none;
 }
@@ -2309,8 +2309,26 @@
 }
 .pc-checkbar-chip:hover { background: rgba(255, 255, 255, 0.18); }
 
-/* ── 便签节点（ComfyUI Note 的对应物） ── */
-.pc-note {
+/* ── 占位素材节点（空节点，双击填充） ── */
+.pc-ph-empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  margin: 0 8px 8px;
+  min-height: 64px;
+  border: 1.5px dashed var(--separator);
+  border-radius: 8px;
+  color: var(--text-tertiary);
+  font-size: 10.5px;
+  text-align: center;
+  padding: 6px 8px;
+  word-break: break-word;
+}
+.pc-ph-empty svg { width: 15px; height: 15px; opacity: 0.7; }
+
+/* ── 便签节点（ComfyUI Note 的对应物） ── */.pc-note {
   position: absolute;
   width: 172px;
   border-radius: 10px;
