@@ -2177,26 +2177,6 @@
     0 0 0 5px var(--node-accent, var(--text-secondary)),
     0 1px 4px rgba(0, 0, 0, 0.3);
 }
-.pc-port::after {
-  content: attr(data-label);
-  position: absolute;
-  top: 50%;
-  transform: translateY(-50%);
-  padding: 2px 8px;
-  border-radius: 6px;
-  background: rgba(28, 28, 34, 0.92);
-  color: #fff;
-  font-size: 10.5px;
-  line-height: 1.5;
-  white-space: nowrap;
-  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.25);
-  opacity: 0;
-  pointer-events: none;
-  transition: opacity 0.12s ease;
-}
-.pc-port-in::after { right: 16px; }
-.pc-port-out::after { left: 16px; }
-.pc-port:hover::after { opacity: 1; }
 /* 工作流节点端口行（片段/成片）：口点嵌行首/行尾，接口名称常显 */
 .pc-port-row {
   position: relative;
@@ -2212,6 +2192,16 @@
 .pc-port-row .pc-port { top: 50%; }
 .pc-port-row-out { justify-content: flex-end; padding: 0 17px 0 12px; }
 .pc-port-name { pointer-events: none; }
+/* 卡内接口行位（全部节点统一，与片段/成片的端口行同款）：
+   输入列靠左、输出列靠右，口点嵌在卡片两缘、名称常显。 */
+.pc-port-bar {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 12px;
+  padding: 2px 0 0;
+}
+.pc-port-col { display: flex; flex-direction: column; min-width: 0; }
 
 /* ── 工作流连线 ── */
 /* 尺寸由 JSX 按视口给出（世界单位），超出部分即视口外，默认裁剪即可；
@@ -2647,6 +2637,13 @@
   z-index: 4;
 }
 .pc-note:active { cursor: grabbing; }
+/* 便签选中点亮：与节点同语言（描边 + 泛光，便签黄混文字主色） */
+.pc-note.pc-selected {
+  box-shadow:
+    0 0 0 2px color-mix(in srgb, #f6e6a8 45%, var(--text-primary)),
+    0 0 16px color-mix(in srgb, #f6e6a8 40%, transparent),
+    0 4px 14px rgba(0, 0, 0, 0.18);
+}
 .pc-note-body {
   padding: 10px 12px;
   font-size: 11.5px;

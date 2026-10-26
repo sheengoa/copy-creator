@@ -1109,6 +1109,10 @@ export const useProjectStore = create<ProjectStoreState>((set, get) => ({
   removeSegment: async (id) => {
     try {
       await invoke("project_remove_segment", { id });
+      // 后端删除后重取当前集：不刷新的话画布上的片段节点不会消失
+      //（Delete 键删除看起来「无效」的根因）。
+      const currentEpisodeId = get().currentEpisodeId;
+      if (currentEpisodeId) await get().selectEpisode(currentEpisodeId);
     } catch (error) {
       console.error("project_remove_segment failed:", error);
     }

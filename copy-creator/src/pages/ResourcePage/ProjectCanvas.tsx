@@ -43,7 +43,7 @@ const LOOSE_RATIO = 0.62;
 const MISSING_W = 170;
 const MISSING_H = 96;
 const INFO_W = 132; // 资料卡宽（角色/道具/剧本）
-const INFO_H = 156;
+const INFO_H = 180; // 含标题条 + 接口行 + 预览卡（接口行内移后增高的估算值）
 const SCRIPT_W = 210;
 const WORLD_MARGIN = 60;
 /** 连线层视口外沿的世界余量（把可见区外一点的线也画进来，避免边缘裁切）。 */
@@ -1723,6 +1723,8 @@ export default function ProjectCanvas({
         const noteId = noteEl.getAttribute("data-note") ?? "";
         const note = notes.find((item) => item.id === noteId);
         if (note) {
+          // 按下即选中（配合选中点亮样式），Delete 键可删除便签。
+          setSelection(selRef.current.includes(`note:${noteId}`) ? selRef.current : [`note:${noteId}`]);
           noteEl.classList.add("pc-dragging");
           dragRef.current = {
             kind: "note", sx: e.clientX, sy: e.clientY, moved: false,
@@ -2451,29 +2453,42 @@ export default function ProjectCanvas({
   // 节点接口圆点（ComfyUI 式）：输入口列在左缘（片段五口按列分布）、
   // 输出口在右缘实心类型色，hover 浮现接口名称；按下即拖出连线，从
   // 输入口反向拖也允许。
+  // 节点接口（ComfyUI 行位，与片段/成片的端口行同款）：卡片顶部一行，
+  // 输入口靠左（口点+名称）、输出口靠右（名称+口点），口点嵌在卡片两缘；
+  // 端口坐标由实测驱动连线锚点。
   const portEls = (key: string) => {
     const { ins, out } = portsOf(key);
+    if (ins.length === 0 && !out) return null;
     return (
-      <>
-        {ins.map((port, index) => (
-          <span
-            key={port.id}
-            className="pc-port pc-port-in"
-            data-port="in"
-            data-port-id={port.id}
-            data-label={port.label}
-            style={{ top: `${portRatio(index, ins.length) * 100}%` }}
-          />
-        ))}
-        {out && (
-          <span
-            className="pc-port pc-port-out"
-            data-port="out"
-            data-label={out.label}
-            style={{ background: WIRE_TYPE_COLORS[out.type] ?? "#94a3b8" }}
-          />
+      <div className="pc-port-bar">
+        {ins.length > 0 && (
+          <div className="pc-port-col">
+            {ins.map((port) => (
+              <div key={port.id} className="pc-port-row">
+                <span
+                  className="pc-port pc-port-in"
+                  data-port="in"
+                  data-port-id={port.id}
+                  style={{ borderColor: WIRE_TYPE_COLORS[port.accepts[0] ?? ""] ?? undefined }}
+                />
+                <span className="pc-port-name">{port.label}</span>
+              </div>
+            ))}
+          </div>
         )}
-      </>
+        {out && (
+          <div className="pc-port-col">
+            <div className="pc-port-row pc-port-row-out">
+              <span className="pc-port-name">{out.label}</span>
+              <span
+                className="pc-port pc-port-out"
+                data-port="out"
+                style={{ background: WIRE_TYPE_COLORS[out.type] ?? "#94a3b8" }}
+              />
+            </div>
+          </div>
+        )}
+      </div>
     );
   };
 
@@ -2530,7 +2545,6 @@ export default function ProjectCanvas({
   const [sceneForm, setSceneForm] = useState<{ id?: string; heading: string; locationId: string } | null>(null);
   const [shotForm, setShotForm] = useState<{ id: string; sceneId: string; description: string; dialogue: string } | null>(null);
   const [deleteSceneTarget, setDeleteSceneTarget] = useState<ProjectScene | null>(null);
-  const [deleteShotTarget, setDeleteShotTarget] = useState<ProjectShot | null>(null);
 
   useEffect(() => {
     if ((sceneForm || shotForm) && locations.length === 0) void loadLocations();
@@ -2792,16 +2806,22 @@ export default function ProjectCanvas({
       if (
         detailFor || pickerFor || memberPick || addMenu || wireDraft ||
         scriptPickOpen || locationPickOpen || sceneForm || shotForm ||
-        deleteSceneTarget || deleteShotTarget
+        deleteSceneTarget
       ) {
         return;
       }
       e.preventDefault();
-      const shotKeys = selKeys.filter((k) => k.startsWith("shot:"));
       for (const key of selKeys) {
-        if (key.startsWith("shot:")) continue;
         if (key === "output") {
           if (episodeId) void setEpisodeOutput(episodeId, null);
+        } else if (key.startsWith("shot:")) {
+          void deleteShot(key.slice(5));
+        } else if (key.startsWith("note:")) {
+          setNotes((prev) => {
+            const next = prev.filter((item) => item.id !== key.slice(5));
+            persistNotes(next);
+            return next;
+          });
         } else if (key.startsWith("segment:")) {
           void removeSegment(key.slice(8));
         } else if (key.startsWith("placeholder:")) {
@@ -2819,19 +2839,15 @@ export default function ProjectCanvas({
           void removeInfoEntity(kind, key.slice(key.indexOf(":") + 1));
         }
       }
-      if (shotKeys.length > 0) {
-        const shot = scenes.flatMap((s) => s.shots).find((item) => item.id === shotKeys[0].slice(5));
-        if (shot) setDeleteShotTarget(shot);
-      }
       setSelection([]);
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
   }, [
     selKeys, detailFor, pickerFor, memberPick, addMenu, wireDraft, scriptPickOpen, locationPickOpen,
-    sceneForm, shotForm, deleteSceneTarget, deleteShotTarget, episodeId, scenes,
-    setEpisodeOutput, removeSegment, removePlaceholder, removeEntityPh, removeGroup, detachScript,
-    unlinkAsset, removeInfoEntity, setDeleteShotTarget, setSelection,
+    sceneForm, shotForm, deleteSceneTarget, episodeId,
+    setEpisodeOutput, deleteShot, setNotes, persistNotes, removeSegment, removePlaceholder,
+    removeEntityPh, removeGroup, detachScript, unlinkAsset, removeInfoEntity, setSelection,
   ]);
   // 成员装入面板（多选 + 装入确认）：eph 加载 / 组追加裁剪 / 默认节点转组。
   const applyMemberPick = useCallback(async () => {
@@ -3545,6 +3561,7 @@ export default function ProjectCanvas({
                   <b className="pc-shot-desc">{shot.description || t("project.shot.untitled")}</b>
                   {shot.dialogue && <i className="pc-shot-dialogue">{shot.dialogue}</i>}
                 </div>
+                {portEls(card.key)}
                   {shot.assets.length > 0 ? (
                     <div className="pc-shot-grid">
                       {card.assets.map(({ asset, w, h }) => {
@@ -3617,12 +3634,11 @@ export default function ProjectCanvas({
                     type="button"
                     data-tooltip={t("common.delete")}
                     className="danger"
-                    onClick={() => setDeleteShotTarget(shot)}
+                    onClick={() => void deleteShot(shot.id)}
                   >
                     {Icons.delete}
                   </button>
                 </span>
-                {portEls(card.key)}
               </div>
             );
           })}
@@ -3653,6 +3669,7 @@ export default function ProjectCanvas({
                   <span className="pc-node-kind">{t(assetKindBadgeKey(asset.kind))}</span>
                   <b className="pc-node-title">{asset.name || asset.file_path}</b>
                 </div>
+                {portEls(loose.key)}
                 {asset.missing ? (
                     <div className="pc-miss-card" style={{ height: nodeH }}>
                       {Icons.image}
@@ -3706,7 +3723,6 @@ export default function ProjectCanvas({
                   </button>
                 </span>
                 {resizeHandle}
-                {portEls(loose.key)}
               </div>
             );
           })}
@@ -3772,6 +3788,7 @@ export default function ProjectCanvas({
                   </span>
                   <b className="pc-node-title">{node.name}</b>
                 </div>
+                {portEls(node.key)}
                 <div className="pc-info-body">
                   {node.key.startsWith("grp:") ? (
                     // 组节点：照片堆放——首位成员的大图在上，其余成员的图
@@ -3840,7 +3857,6 @@ export default function ProjectCanvas({
                     {Icons.delete}
                   </button>
                 </span>
-                {portEls(node.key)}
               </div>
             );
           })}
@@ -4015,7 +4031,12 @@ export default function ProjectCanvas({
 
           {/* 便签节点：双击编辑、拖动挪位、按集记 localStorage */}
           {notes.map((note) => (
-            <div key={note.id} data-note={note.id} className="pc-note" style={{ left: note.x, top: note.y }}>
+            <div
+              key={note.id}
+              data-note={note.id}
+              className={`pc-note${selKeys.includes(`note:${note.id}`) ? " pc-selected" : ""}`}
+              style={{ left: note.x, top: note.y }}
+            >
               {editingNoteId === note.id ? (
                 <textarea
                   className="pc-note-input"
@@ -4479,17 +4500,6 @@ export default function ProjectCanvas({
             void deleteScene(target.id);
           }}
           onCancel={() => setDeleteSceneTarget(null)}
-        />
-      )}
-      {deleteShotTarget && (
-        <ConfirmDialog
-          message={t("project.shot.deleteConfirm")}
-          onConfirm={() => {
-            const target = deleteShotTarget;
-            setDeleteShotTarget(null);
-            void deleteShot(target.id);
-          }}
-          onCancel={() => setDeleteShotTarget(null)}
         />
       )}
       {/* 节点详情预览窗口：双击节点的独立窗口（预览 + 信息 + 上传/库选） */}
