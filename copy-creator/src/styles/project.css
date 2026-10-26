@@ -2221,29 +2221,36 @@
 .pc-wire-temp.invalid { stroke: var(--danger); }
 
 /* ── 节点尺寸手柄（ComfyUI 式四角角标） ── */
-/* 尺寸手柄：四角各一枚月牙弧钩（四分之一圆弧贴着节点角弯），可向任意
-   方向自由缩放（对角固定）。ComfyUI 的存在感原则——弧钩平时几乎隐入
-   卡片（淡灰细弧），只提示「角上可以抓」；悬停节点略提示，悬停/拖拽
-   手柄才完全亮出主色。 */
+/* 尺寸手柄：四角各一枚月牙弧钩，可向任意方向自由缩放（对角固定）。
+   弧与节点 12px 圆角同心同曲率，且只画贴合圆角的那 90° 段（conic 取
+   象限 + mask 挖成环），没有绕到卡外的多余弧段。存在感层级：常态淡灰、
+   悬停节点提亮、悬停/拖拽手柄完全亮出主色。 */
 .pc-resize {
   position: absolute;
-  width: 15px;
-  height: 15px;
-  border: 2.5px solid transparent;
+  width: 26px;
+  height: 26px;
   border-radius: 50%;
   z-index: 7;
+  --inner: 11px; /* 弧带内径；外径到 span 缘，带宽 2px、中线 12px = 圆角 */
+  --from: 225deg; /* 各角覆写：弧段所在象限 */
+  color: var(--text-tertiary);
+  background: conic-gradient(from var(--from), currentColor 0 90deg, transparent 90deg 360deg);
+  -webkit-mask: radial-gradient(circle, transparent var(--inner), #000 calc(var(--inner) + 0.5px));
+  mask: radial-gradient(circle, transparent var(--inner), #000 calc(var(--inner) + 0.5px));
   opacity: 0.55;
-  transition: opacity 0.12s ease, border-color 0.12s ease;
+  transition: opacity 0.12s ease, color 0.12s ease;
 }
-/* 各角只亮起朝外的四分之一弧：弧钩环抱节点角，月牙口朝节点外。 */
-.pc-resize.nw { left: -7.5px; top: -7.5px; border-left-color: var(--text-tertiary); border-top-color: var(--text-tertiary); cursor: nwse-resize; }
-.pc-resize.ne { right: -7.5px; top: -7.5px; border-right-color: var(--text-tertiary); border-top-color: var(--text-tertiary); cursor: nesw-resize; }
-.pc-resize.sw { left: -7.5px; bottom: -7.5px; border-left-color: var(--text-tertiary); border-bottom-color: var(--text-tertiary); cursor: nesw-resize; }
-.pc-resize.se { right: -7.5px; bottom: -7.5px; border-right-color: var(--text-tertiary); border-bottom-color: var(--text-tertiary); cursor: nwse-resize; }
+/* span 圆心落在节点圆角圆心上（偏移 -1px）。 */
+.pc-resize.nw { --from: 270deg; left: -1px; top: -1px; cursor: nwse-resize; }
+.pc-resize.ne { --from: 0deg; right: -1px; top: -1px; cursor: nesw-resize; }
+.pc-resize.sw { --from: 180deg; left: -1px; bottom: -1px; cursor: nesw-resize; }
+.pc-resize.se { --from: 90deg; right: -1px; bottom: -1px; cursor: nwse-resize; }
+/* 便签圆角 10px：同心适配（弧中线 10px）。 */
+.pc-note .pc-resize { width: 22px; height: 22px; --inner: 9px; }
 .pc-node:hover .pc-resize, .pc-note:hover .pc-resize { opacity: 0.8; }
 .pc-resize:hover, .pc-node.pc-resizing .pc-resize, .pc-note.pc-resizing .pc-resize {
+  color: var(--accent);
   opacity: 1;
-  border-color: var(--accent);
 }
 
 /* ── 节点详情预览窗口（双击节点的独立窗口：预览 + 信息 + 动作） ── */
