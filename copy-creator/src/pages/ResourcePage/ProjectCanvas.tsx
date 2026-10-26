@@ -522,6 +522,15 @@ export default function ProjectCanvas({
     [episodeId],
   );
 
+  // 选中状态（selRef 供鼠标事件同步读取，setSelKeys 驱动渲染）；位置
+  // 批量写入 / 撤销栈等下层机制都依赖它，故提前声明。
+  const [selKeys, setSelKeys] = useState<string[]>([]);
+  const selRef = useRef<string[]>([]);
+  const setSelection = useCallback((keys: string[]) => {
+    selRef.current = keys;
+    setSelKeys(keys);
+  }, []);
+
   // ── 便签节点（ComfyUI Note 的对应物）：文本与位置按集记 localStorage ──
   const [notes, setNotes] = useState<CanvasNote[]>([]);
   const [editingNoteId, setEditingNoteId] = useState<string | null>(null);
@@ -558,6 +567,7 @@ export default function ProjectCanvas({
       persistNotes([...notes, note]);
       setEditingNoteId(note.id);
       setNoteDraft("");
+      return note.id;
     },
     [notes, persistNotes],
   );
@@ -608,10 +618,12 @@ export default function ProjectCanvas({
   );
   const addPlaceholder = useCallback(
     (x: number, y: number) => {
+      const id = `p${Date.now()}${Math.floor(Math.random() * 1e4)}`;
       persistPlaceholders([
         ...placeholders,
-        { id: `p${Date.now()}${Math.floor(Math.random() * 1e4)}`, x, y },
+        { id, x, y },
       ]);
+      return id;
     },
     [placeholders, persistPlaceholders],
   );
@@ -645,10 +657,12 @@ export default function ProjectCanvas({
   );
   const addEntityPh = useCallback(
     (kind: EntityPhKind, x: number, y: number) => {
+      const id = `e${Date.now()}${Math.floor(Math.random() * 1e4)}`;
       persistEntityPhs([
         ...entityPhs,
-        { id: `e${Date.now()}${Math.floor(Math.random() * 1e4)}`, kind, x, y },
+        { id, kind, x, y },
       ]);
+      return id;
     },
     [entityPhs, persistEntityPhs],
   );
@@ -903,6 +917,31 @@ export default function ProjectCanvas({
     },
     [infoOffsetsKey],
   );
+  const persistCards = useCallback(
+    (nextCards: Record<string, Pos>) => {
+      const entries = Object.entries(nextCards);
+      void saveCanvasLayout({
+        assets: [],
+        shots: entries.map(([id, p]) => ({ id, x: p.x, y: p.y })),
+        scenes: [],
+      });
+    },
+    [saveCanvasLayout],
+  );
+  const persistLoose = useCallback(
+    (nextLoose: Record<string, Pos>) => {
+      const sizeOf = (id: string) => {
+        const node = layout.looses.find((l) => l.asset.id === id);
+        return node?.w ?? LOOSE_W;
+      };
+      void saveCanvasLayout({
+        assets: Object.entries(nextLoose).map(([id, p]) => ({ id, x: p.x, y: p.y, w: sizeOf(id) })),
+        shots: [],
+        scenes: [],
+      });
+    },
+    [layout, saveCanvasLayout],
+  );
   const infoNodePos = useCallback(
     (key: string): Pos => {
       if (infoOffsets[key]) return infoOffsets[key];
@@ -915,6 +954,222 @@ export default function ProjectCanvas({
     },
     [infoOffsets, infoPos, entityPhs],
   );
+
+  // ── 多选组拖 / 位置批量写入 / 复制粘贴 / 撤销栈 ──
+  // 选中组快照：全部选中节点（世界坐标）。任一成员位置未知则返回 null
+  // （调用方退回单节点行为）。minCount 控制最少成员数（组拖 2、复制 1）。
+  interface GroupMember { key: string; x: number; y: number }
+  const groupSnapshot = useCallback(
+    (minCount = 2): GroupMember[] | null => {
+      const sel = selRef.current;
+      if (sel.length < minCount) return null;
+      const members: GroupMember[] = [];
+      for (const key of sel) {
+        let p: Pos | undefined;
+        if (key.startsWith("shot:")) p = pos.cards[key.slice(5)];
+        else if (key.startsWith("asset:")) p = pos.loose[key.slice(6)];
+        else if (key.startsWith("segment:")) p = segPos[key.slice(8)];
+        else if (key.startsWith("placeholder:")) {
+          const ph = placeholders.find((item) => item.id === key.slice(12));
+          p = ph ? { x: ph.x, y: ph.y } : undefined;
+        } else if (key.startsWith("note:")) {
+          const note = notes.find((item) => item.id === key.slice(5));
+          p = note ? { x: note.x, y: note.y } : undefined;
+        } else if (key === "output") {
+          p = outputBox ? { x: outputBox.x, y: outputBox.y } : undefined;
+        } else {
+          p = infoNodePos(key);
+        }
+        if (!p) return null;
+        members.push({ key, x: p.x, y: p.y });
+      }
+      return members;
+    },
+    [pos, segPos, placeholders, notes, outputBox, infoNodePos],
+  );
+  // 批量写入各成员的绝对位置（组拖实时移动与撤销恢复共用）。
+  const moveGroupTo = useCallback((members: GroupMember[]) => {
+    const at = new Map(members.map((m) => [m.key, { x: m.x, y: m.y }]));
+    const pick = (prefix: string) => members.filter((m) => m.key.startsWith(prefix));
+    const cards = pick("shot:");
+    const looses = pick("asset:");
+    if (cards.length || looses.length) {
+      setPos((prev) => ({
+        cards: { ...prev.cards, ...Object.fromEntries(cards.map((m) => [m.key.slice(5), at.get(m.key)!])) },
+        loose: { ...prev.loose, ...Object.fromEntries(looses.map((m) => [m.key.slice(6), at.get(m.key)!])) },
+      }));
+    }
+    const segs = pick("segment:");
+    if (segs.length) setSegPos((prev) => ({ ...prev, ...Object.fromEntries(segs.map((m) => [m.key.slice(8), at.get(m.key)!])) }));
+    const noteSel = pick("note:");
+    if (noteSel.length) {
+      const map = new Map(noteSel.map((m) => [m.key.slice(5), at.get(m.key)!]));
+      setNotes((prev) => prev.map((item) => (map.has(item.id) ? { ...item, ...map.get(item.id)! } : item)));
+    }
+    const phSel = pick("placeholder:");
+    if (phSel.length) {
+      const map = new Map(phSel.map((m) => [m.key.slice(12), at.get(m.key)!]));
+      setPlaceholders((prev) => prev.map((item) => (map.has(item.id) ? { ...item, ...map.get(item.id)! } : item)));
+    }
+    const infos = members.filter((m) => !/^(shot|asset|segment|note|placeholder):/.test(m.key) && m.key !== "output");
+    if (infos.length) setInfoOffsets((prev) => ({ ...prev, ...Object.fromEntries(infos.map((m) => [m.key, at.get(m.key)!])) }));
+    const out = at.get("output");
+    if (out) setOutputPos(out);
+  }, []);
+  // 批量位置落盘（组拖松手与撤销恢复共用）：各切片合并后走对应持久化。
+  const persistPositions = useCallback(
+    (members: GroupMember[]) => {
+      const round = (m: GroupMember) => ({ x: Math.round(m.x), y: Math.round(m.y) });
+      const by = (prefix: string) => members.filter((m) => m.key.startsWith(prefix));
+      const cards = Object.fromEntries(by("shot:").map((m) => [m.key.slice(5), round(m)]));
+      const loose = Object.fromEntries(by("asset:").map((m) => [m.key.slice(6), round(m)]));
+      const segs = Object.fromEntries(by("segment:").map((m) => [m.key.slice(8), round(m)]));
+      if (Object.keys(cards).length) persistCards({ ...pos.cards, ...cards });
+      if (Object.keys(loose).length) persistLoose({ ...pos.loose, ...loose });
+      if (Object.keys(segs).length) persistSegments({ ...segPos, ...segs });
+      const noteMap = new Map(by("note:").map((m) => [m.key.slice(5), round(m)]));
+      if (noteMap.size) persistNotes(notes.map((item) => (noteMap.has(item.id) ? { ...item, ...noteMap.get(item.id)! } : item)));
+      const phMap = new Map(by("placeholder:").map((m) => [m.key.slice(12), round(m)]));
+      if (phMap.size) persistPlaceholders(placeholders.map((item) => (phMap.has(item.id) ? { ...item, ...phMap.get(item.id)! } : item)));
+      const infos = members.filter((m) => !/^(shot|asset|segment|note|placeholder):/.test(m.key) && m.key !== "output");
+      if (infos.length) persistInfoOffsets({ ...infoOffsets, ...Object.fromEntries(infos.map((m) => [m.key, round(m)])) });
+      const out = members.find((m) => m.key === "output");
+      if (out) saveOutputPos(round(out));
+    },
+    [pos, segPos, notes, placeholders, infoOffsets, persistCards, persistLoose, persistSegments, persistNotes, persistPlaceholders, persistInfoOffsets, saveOutputPos],
+  );
+  // 撤销栈：移动（单/组）、缩放、粘贴、可完整恢复的删除（便签/两类占位）。
+  // 镜头/片段等后端实体的删除涉及连线与挂接，无法无损重建，不入栈。
+  type UndoAction =
+    | { type: "move"; entries: GroupMember[] }
+    | { type: "resize"; key: string; size: { w: number; h: number } | null; pos?: Pos }
+    | { type: "paste"; keys: string[] }
+    | {
+        type: "restore";
+        notes?: CanvasNote[];
+        placeholders?: CanvasPlaceholder[];
+        ephs?: { id: string; kind: EntityPhKind; x: number; y: number }[];
+      };
+  const undoStackRef = useRef<UndoAction[]>([]);
+  const pushUndo = useCallback((action: UndoAction) => {
+    undoStackRef.current.push(action);
+    if (undoStackRef.current.length > 50) undoStackRef.current.shift();
+  }, []);
+  const runUndo = useCallback(() => {
+    if (undoingRef.current) return;
+    undoingRef.current = true;
+    try {
+      const action = undoStackRef.current.pop();
+      if (!action) return;
+      if (action.type === "move") {
+        moveGroupTo(action.entries);
+        persistPositions(action.entries);
+      } else if (action.type === "resize") {
+        setNodeSizes((prev) => {
+          const next = { ...prev };
+          if (action.size) next[action.key] = action.size;
+          else delete next[action.key];
+          persistSizes(next);
+          return next;
+        });
+        if (action.pos) {
+          moveGroupTo([{ key: action.key, ...action.pos }]);
+          persistPositions([{ key: action.key, ...action.pos }]);
+        }
+      } else if (action.type === "paste") {
+        const noteIds = new Set(action.keys.filter((k) => k.startsWith("note:")).map((k) => k.slice(5)));
+        const phIds = new Set(action.keys.filter((k) => k.startsWith("placeholder:")).map((k) => k.slice(12)));
+        const ephIds = new Set(action.keys.filter((k) => k.startsWith("eph:")).map((k) => k.slice(4)));
+        if (noteIds.size) persistNotes(notes.filter((item) => !noteIds.has(item.id)));
+        if (phIds.size) persistPlaceholders(placeholders.filter((item) => !phIds.has(item.id)));
+        if (ephIds.size) persistEntityPhs(entityPhs.filter((item) => !ephIds.has(item.id)));
+        for (const key of action.keys) {
+          if (key.startsWith("segment:")) void removeSegment(key.slice(8));
+        }
+        setSelection([]);
+      } else if (action.type === "restore") {
+        if (action.notes?.length) persistNotes([...notes, ...action.notes]);
+        if (action.placeholders?.length) persistPlaceholders([...placeholders, ...action.placeholders]);
+        if (action.ephs?.length) persistEntityPhs([...entityPhs, ...action.ephs]);
+      }
+    } finally {
+      // 撤销里的后端动作（片段删除）是异步的，锁放到下一宏任务才放开。
+      window.setTimeout(() => {
+        undoingRef.current = false;
+      }, 0);
+    }
+  }, [moveGroupTo, persistPositions, persistSizes, notes, placeholders, entityPhs, persistNotes, persistPlaceholders, persistEntityPhs, removeSegment, setSelection]);
+  // 复制 / 粘贴（Ctrl+C/V）：画布私有节点可复制（便签/素材占位/空白资料
+  // 占位/片段）。镜头卡、素材散件、资料实体节点是库实体的画布投影
+  // （一实体一节点），复制语义不成立，不参与。粘贴整组出现在原组右下
+  // 28px 处、组内相对位置保持，粘贴后选中新组（可整体拖走 / Ctrl+Z 撤销）。
+  type ClipItem =
+    | { kind: "note"; text: string; dx: number; dy: number }
+    | { kind: "placeholder"; dx: number; dy: number }
+    | { kind: "eph"; phKind: EntityPhKind; dx: number; dy: number }
+    | { kind: "segment"; dx: number; dy: number };
+  const clipRef = useRef<{ items: ClipItem[]; ax: number; ay: number } | null>(null);
+  // 防重入：StrictMode 开发态会双挂载键盘监听，一次 Ctrl+V 触发两次
+  // 粘贴、一次 Ctrl+Z 连撤两级；同步锁保证首个调用独占直到完成。
+  const pastingRef = useRef(false);
+  const undoingRef = useRef(false);
+  const copySelection = useCallback(() => {
+    const members = groupSnapshot(1);
+    if (!members) return;
+    const ax = Math.min(...members.map((m) => m.x));
+    const ay = Math.min(...members.map((m) => m.y));
+    const items: ClipItem[] = [];
+    for (const m of members) {
+      const dx = m.x - ax;
+      const dy = m.y - ay;
+      if (m.key.startsWith("note:")) {
+        const note = notes.find((item) => item.id === m.key.slice(5));
+        if (note) items.push({ kind: "note", text: note.text, dx, dy });
+      } else if (m.key.startsWith("placeholder:")) {
+        items.push({ kind: "placeholder", dx, dy });
+      } else if (m.key.startsWith("eph:")) {
+        const ph = entityPhs.find((item) => item.id === m.key.slice(4));
+        if (ph) items.push({ kind: "eph", phKind: ph.kind, dx, dy });
+      } else if (m.key.startsWith("segment:")) {
+        items.push({ kind: "segment", dx, dy });
+      }
+    }
+    if (items.length === 0) return;
+    clipRef.current = { items, ax, ay };
+  }, [groupSnapshot, notes, entityPhs]);
+  const pasteClipboard = useCallback(async () => {
+    if (pastingRef.current) return;
+    pastingRef.current = true;
+    try {
+      const clip = clipRef.current;
+      if (!clip || clip.items.length === 0) return;
+      const ax = clip.ax + 28;
+      const ay = clip.ay + 28;
+      const newKeys: string[] = [];
+      for (const item of clip.items) {
+        const x = Math.round(ax + item.dx);
+        const y = Math.round(ay + item.dy);
+        if (item.kind === "note") {
+          newKeys.push(`note:${addNote(x, y)}`);
+        } else if (item.kind === "placeholder") {
+          newKeys.push(`placeholder:${addPlaceholder(x, y)}`);
+        } else if (item.kind === "eph") {
+          newKeys.push(`eph:${addEntityPh(item.phKind, x, y)}`);
+        } else {
+          const segment = await addSegment(episodeId);
+          if (segment) {
+            await saveCanvasLayout({ assets: [], shots: [], scenes: [], segments: [{ id: segment.id, x, y }] });
+            newKeys.push(`segment:${segment.id}`);
+          }
+        }
+      }
+      if (newKeys.length === 0) return;
+      setSelection(newKeys);
+      pushUndo({ type: "paste", keys: newKeys });
+    } finally {
+      pastingRef.current = false;
+    }
+  }, [addNote, addPlaceholder, addEntityPh, addSegment, episodeId, saveCanvasLayout, setSelection, pushUndo]);
 
   // ── 新节点出生锚点：任何「加载」动作（添加菜单挑实体/挂剧本/详情窗
   // 添加）在触发瞬间记录世界坐标，概览刷新后新出现的资料节点直接出生
@@ -1642,14 +1897,6 @@ export default function ProjectCanvas({
     [episodeId, nodeKeyParts, portsOf, linkNode, linkAssets, setEpisodeOutput],
   );
 
-  // ── 选中与拖拽 ──
-  const [selKeys, setSelKeys] = useState<string[]>([]);
-  const selRef = useRef<string[]>([]);
-  const setSelection = useCallback((keys: string[]) => {
-    selRef.current = keys;
-    setSelKeys(keys);
-  }, []);
-
   // ── 场景框位置：scenes.canvas 之外再叠一层本地偏移（拖标签牌实时） ──
   const [scenePos, setScenePos] = useState<Record<string, Pos>>({});
   useEffect(() => {
@@ -1666,34 +1913,8 @@ export default function ProjectCanvas({
     });
   }, [scenes, layout.framePos]);
 
-  const persistCards = useCallback(
-    (nextCards: Record<string, Pos>) => {
-      const entries = Object.entries(nextCards);
-      void saveCanvasLayout({
-        assets: [],
-        shots: entries.map(([id, p]) => ({ id, x: p.x, y: p.y })),
-        scenes: [],
-      });
-    },
-    [saveCanvasLayout],
-  );
-  const persistLoose = useCallback(
-    (nextLoose: Record<string, Pos>) => {
-      const sizeOf = (id: string) => {
-        const node = layout.looses.find((l) => l.asset.id === id);
-        return node?.w ?? LOOSE_W;
-      };
-      void saveCanvasLayout({
-        assets: Object.entries(nextLoose).map(([id, p]) => ({ id, x: p.x, y: p.y, w: sizeOf(id) })),
-        shots: [],
-        scenes: [],
-      });
-    },
-    [layout, saveCanvasLayout],
-  );
-
   interface DragState {
-    kind: "pan" | "marquee" | "card" | "loose" | "group" | "infoframe" | "wire" | "outnode" | "note" | "addnode" | "segment" | "placeholder" | "resize" | "infonode";
+    kind: "pan" | "marquee" | "card" | "loose" | "group" | "infoframe" | "wire" | "outnode" | "note" | "addnode" | "segment" | "placeholder" | "resize" | "infonode" | "multidrag";
     sx: number;
     sy: number;
     moved?: boolean;
@@ -1701,6 +1922,8 @@ export default function ProjectCanvas({
     oy?: number;
     mq?: HTMLDivElement;
     moves?: { key: string; x: number; y: number }[];
+    // 多选组拖：按下时整组选中节点的初始位置（完整节点 key，世界坐标）。
+    members?: GroupMember[];
     frameKey?: string;
     corner?: "nw" | "ne" | "sw" | "se";
     px?: number;
@@ -1739,19 +1962,22 @@ export default function ProjectCanvas({
     (e: React.MouseEvent) => {
       const target = e.target instanceof Element ? e.target : null;
       setAddMenu(null);
-      // 便签卡：按下即拖动（编辑态与缩放手柄除外）。
+      // 便签卡：按下即拖动（编辑态与缩放手柄除外）；已在多选中时整组拖。
       const noteEl = target?.closest(".pc-note");
       if (noteEl && !target?.closest("textarea, button, .pc-resize")) {
         const noteId = noteEl.getAttribute("data-note") ?? "";
         const note = notes.find((item) => item.id === noteId);
         if (note) {
-          // 按下即选中（配合选中点亮样式），Delete 键可删除便签。
-          setSelection(selRef.current.includes(`note:${noteId}`) ? selRef.current : [`note:${noteId}`]);
+          const noteKey = `note:${noteId}`;
+          const group = selRef.current.length > 1 && selRef.current.includes(noteKey) ? groupSnapshot() : null;
+          setSelection(selRef.current.includes(noteKey) ? selRef.current : [noteKey]);
           noteEl.classList.add("pc-dragging");
-          dragRef.current = {
-            kind: "note", sx: e.clientX, sy: e.clientY, moved: false,
-            ox: note.x, oy: note.y, frameKey: noteId,
-          };
+          dragRef.current = group
+            ? { kind: "multidrag", sx: e.clientX, sy: e.clientY, moved: false, members: group }
+            : {
+                kind: "note", sx: e.clientX, sy: e.clientY, moved: false,
+                ox: note.x, oy: note.y, frameKey: noteId,
+              };
           e.preventDefault();
           return;
         }
@@ -1860,26 +2086,32 @@ export default function ProjectCanvas({
         if (key === "output" && outputBox) {
           // 成片输出节点：卡体拖动只挪位置（localStorage 按集记忆）。
           // 按下即选中：配合选中点亮样式，「在操作哪个节点」一眼可见。
+          const group = selRef.current.length > 1 && selRef.current.includes(key) ? groupSnapshot() : null;
           setSelection(selRef.current.includes(key) ? selRef.current : [key]);
           nodeEl.classList.add("pc-dragging");
-          dragRef.current = {
-            kind: "outnode", sx: e.clientX, sy: e.clientY, moved: false,
-            ox: outputBox.x, oy: outputBox.y,
-          };
+          dragRef.current = group
+            ? { kind: "multidrag", sx: e.clientX, sy: e.clientY, moved: false, members: group }
+            : {
+                kind: "outnode", sx: e.clientX, sy: e.clientY, moved: false,
+                ox: outputBox.x, oy: outputBox.y,
+              };
           e.preventDefault();
           return;
         }
         if (key.startsWith("segment:")) {
-          // 片段卡：按下即拖动，松手持久化坐标。
+          // 片段卡：按下即拖动，松手持久化坐标；已在多选中时整组拖。
           const segId = key.slice(8);
           const p = segPos[segId];
           if (p) {
+            const group = selRef.current.length > 1 && selRef.current.includes(key) ? groupSnapshot() : null;
             setSelection(selRef.current.includes(key) ? selRef.current : [key]);
             nodeEl.classList.add("pc-dragging");
-            dragRef.current = {
-              kind: "segment", sx: e.clientX, sy: e.clientY, moved: false,
-              ox: p.x, oy: p.y, frameKey: segId,
-            };
+            dragRef.current = group
+              ? { kind: "multidrag", sx: e.clientX, sy: e.clientY, moved: false, members: group }
+              : {
+                  kind: "segment", sx: e.clientX, sy: e.clientY, moved: false,
+                  ox: p.x, oy: p.y, frameKey: segId,
+                };
             e.preventDefault();
             return;
           }
@@ -1889,12 +2121,16 @@ export default function ProjectCanvas({
           const phId = key.slice(12);
           const ph = placeholders.find((item) => item.id === phId);
           if (ph) {
-            setSelection(selRef.current.includes(key) ? selRef.current : [key]);
+            const phKey = `placeholder:${phId}`;
+            const group = selRef.current.length > 1 && selRef.current.includes(phKey) ? groupSnapshot() : null;
+            setSelection(selRef.current.includes(phKey) ? selRef.current : [phKey]);
             nodeEl.classList.add("pc-dragging");
-            dragRef.current = {
-              kind: "placeholder", sx: e.clientX, sy: e.clientY, moved: false,
-              ox: ph.x, oy: ph.y, frameKey: phId,
-            };
+            dragRef.current = group
+              ? { kind: "multidrag", sx: e.clientX, sy: e.clientY, moved: false, members: group }
+              : {
+                  kind: "placeholder", sx: e.clientX, sy: e.clientY, moved: false,
+                  ox: ph.x, oy: ph.y, frameKey: phId,
+                };
             e.preventDefault();
             return;
           }
@@ -1908,34 +2144,40 @@ export default function ProjectCanvas({
           // 按绝对位置记忆，资料框退化为背景分组框，节点不再被网格钉死）。
           // 按下即选中：配合选中点亮样式，「在操作哪个节点」一眼可见。
           const p = infoNodePos(key);
+          const group = selRef.current.length > 1 && selRef.current.includes(key) ? groupSnapshot() : null;
           setSelection(selRef.current.includes(key) ? selRef.current : [key]);
           nodeEl.classList.add("pc-dragging");
-          dragRef.current = {
-            kind: "infonode", sx: e.clientX, sy: e.clientY, moved: false,
-            ox: p.x, oy: p.y, frameKey: key,
-          };
+          dragRef.current = group
+            ? { kind: "multidrag", sx: e.clientX, sy: e.clientY, moved: false, members: group }
+            : {
+                kind: "infonode", sx: e.clientX, sy: e.clientY, moved: false,
+                ox: p.x, oy: p.y, frameKey: key,
+              };
           e.preventDefault();
           return;
         }
         const nextSel = selRef.current.includes(key) ? selRef.current : [key];
+        // 镜头卡/散件：已在多选中时整组拖（跨类型混合选择同样成立）。
+        const group = nextSel.length > 1 ? groupSnapshot() : null;
         setSelection(nextSel);
         nodeEl.classList.add("pc-dragging");
-        const kind = key.startsWith("shot:") ? "card" : "loose";
-        dragRef.current = {
-          kind, sx: e.clientX, sy: e.clientY, moved: false,
-          moves: nextSel
-            .map((k) => {
-              if (k.startsWith("shot:")) {
-                const id = k.slice(5);
-                const p = pos.cards[id];
-                return p ? { key: id, x: p.x, y: p.y } : null;
-              }
-              const id = k.slice(6);
-              const p = pos.loose[id];
-              return p ? { key: id, x: p.x, y: p.y } : null;
-            })
-            .filter((item): item is { key: string; x: number; y: number } => item !== null),
-        };
+        dragRef.current = group
+          ? { kind: "multidrag", sx: e.clientX, sy: e.clientY, moved: false, members: group }
+          : {
+              kind: key.startsWith("shot:") ? "card" : "loose", sx: e.clientX, sy: e.clientY, moved: false,
+              moves: nextSel
+                .map((k) => {
+                  if (k.startsWith("shot:")) {
+                    const id = k.slice(5);
+                    const p = pos.cards[id];
+                    return p ? { key: id, x: p.x, y: p.y } : null;
+                  }
+                  const id = k.slice(6);
+                  const p = pos.loose[id];
+                  return p ? { key: id, x: p.x, y: p.y } : null;
+                })
+                .filter((item): item is { key: string; x: number; y: number } => item !== null),
+            };
         e.preventDefault();
         return;
       }
@@ -1971,7 +2213,7 @@ export default function ProjectCanvas({
       dragRef.current = { kind: "marquee", sx: e.clientX, sy: e.clientY, mq, moved: false };
       e.preventDefault();
     },
-    [layout, pos, setSelection, view, infoPos, scenePos, portsOf, outputBox, notes, segPos, placeholders, sizeOfNode, infoNodePos, nodeSizes],
+    [layout, pos, setSelection, view, infoPos, scenePos, portsOf, outputBox, notes, segPos, placeholders, sizeOfNode, infoNodePos, nodeSizes, groupSnapshot],
   );
 
 
@@ -2015,6 +2257,10 @@ export default function ProjectCanvas({
           });
           return { ...prev, cards };
         });
+      } else if (drag.kind === "multidrag") {
+        // 多选组拖：整组成员按同一位移移动（各类型切片批量写入）。
+        if (!drag.moved || !drag.members?.length) return;
+        moveGroupTo(drag.members.map((m) => ({ key: m.key, x: m.x + dx / view.scale, y: m.y + dy / view.scale })));
       } else if (drag.kind === "infoframe") {
         if (!drag.moved) return;
         setInfoFramePos({
@@ -2287,6 +2533,7 @@ export default function ProjectCanvas({
             x: (drag.ox ?? 0) + (e.clientX - drag.sx) / view.scale,
             y: (drag.oy ?? 0) + (e.clientY - drag.sy) / view.scale,
           });
+          pushUndo({ type: "move", entries: [{ key: "output", x: drag.ox ?? 0, y: drag.oy ?? 0 }] });
         }
       } else if (drag.kind === "segment") {
         if (drag.moved) {
@@ -2302,6 +2549,10 @@ export default function ProjectCanvas({
             persistSegments(next);
             return next;
           });
+          pushUndo({
+            type: "move",
+            entries: [{ key: `segment:${segId}`, x: drag.ox ?? 0, y: drag.oy ?? 0 }],
+          });
         }
       } else if (drag.kind === "resize") {
         // 改尺寸松手：尺寸已在移动中按角实时算好，这里落盘；西/北角
@@ -2311,6 +2562,12 @@ export default function ProjectCanvas({
           setNodeSizes((prev) => {
             if (prev[key]) persistSizes(prev);
             return prev;
+          });
+          pushUndo({
+            type: "resize",
+            key,
+            size: { w: drag.ox ?? 0, h: drag.oy ?? 0 },
+            pos: drag.px0 != null && drag.py0 != null ? { x: drag.px0, y: drag.py0 } : undefined,
           });
           const corner = drag.corner ?? "se";
           if (corner !== "se") {
@@ -2368,6 +2625,7 @@ export default function ProjectCanvas({
             persistInfoOffsets(next);
             return next;
           });
+          pushUndo({ type: "move", entries: [{ key, x: drag.ox ?? 0, y: drag.oy ?? 0 }] });
         }
       } else if (drag.kind === "note") {
         if (drag.moved) {
@@ -2382,6 +2640,10 @@ export default function ProjectCanvas({
                 : item,
             ),
           );
+          pushUndo({
+            type: "move",
+            entries: [{ key: `note:${drag.frameKey}`, x: drag.ox ?? 0, y: drag.oy ?? 0 }],
+          });
         }
       } else if (drag.kind === "placeholder") {
         if (drag.moved) {
@@ -2398,6 +2660,20 @@ export default function ProjectCanvas({
             persistPlaceholders(next);
             return next;
           });
+          pushUndo({
+            type: "move",
+            entries: [{ key: `placeholder:${drag.frameKey}`, x: drag.ox ?? 0, y: drag.oy ?? 0 }],
+          });
+        }
+      } else if (drag.kind === "multidrag") {
+        // 组拖松手：按总位移算出整组最终位置，一次落盘并记入撤销栈。
+        if (drag.moved && drag.members?.length) {
+          const dxW = (e.clientX - drag.sx) / view.scale;
+          const dyW = (e.clientY - drag.sy) / view.scale;
+          const finalMembers = drag.members.map((m) => ({ key: m.key, x: m.x + dxW, y: m.y + dyW }));
+          moveGroupTo(finalMembers);
+          persistPositions(finalMembers);
+          pushUndo({ type: "move", entries: drag.members.map((m) => ({ key: m.key, x: m.x, y: m.y })) });
         }
       } else if (drag.kind === "addnode") {
         // 点击（未拖动）落双击点；按住拖到画布松手落松手点；从「拖线
@@ -2491,8 +2767,16 @@ export default function ProjectCanvas({
         drag.mq?.remove();
       } else if (drag.kind === "card" && drag.moved) {
         persistCards(pos.cards);
+        pushUndo({
+          type: "move",
+          entries: (drag.moves ?? []).map((mv) => ({ key: `shot:${mv.key}`, x: mv.x, y: mv.y })),
+        });
       } else if (drag.kind === "loose" && drag.moved) {
         persistLoose(pos.loose);
+        pushUndo({
+          type: "move",
+          entries: (drag.moves ?? []).map((mv) => ({ key: `asset:${mv.key}`, x: mv.x, y: mv.y })),
+        });
       } else if (drag.kind === "group" && drag.moved) {
         const fk = drag.frameKey ?? "";
         const frame = layout.frames.find((f) => f.id === fk);
@@ -2527,7 +2811,7 @@ export default function ProjectCanvas({
       document.removeEventListener("mousemove", onMove);
       document.removeEventListener("mouseup", onUp);
     };
-  }, [layout, pos, view, scenePos, infoPos, boxOf, portsOf, outPointOf, inPointOf, linkAssets, persistCards, persistLoose, saveCanvasLayout, saveInfoFramePos, saveView, setSelection, saveOutputPos, setEpisodeOutput, episodeId, notes, persistNotes, addNote, addPlaceholder, addEntityPh, persistPlaceholders, persistSegments, linkNode, nodeKeyParts, addSegment, autoConnectNewNode, persistSizes, persistInfoOffsets, infoGroups, infoNodes, infoNodePos, entityPhs, segments, segPos, placeholders, sizeOfNode, outputBox]);
+  }, [layout, pos, view, scenePos, infoPos, boxOf, portsOf, outPointOf, inPointOf, linkAssets, persistCards, persistLoose, saveCanvasLayout, saveInfoFramePos, saveView, setSelection, saveOutputPos, setEpisodeOutput, episodeId, notes, persistNotes, addNote, addPlaceholder, addEntityPh, persistPlaceholders, persistSegments, linkNode, nodeKeyParts, addSegment, autoConnectNewNode, persistSizes, persistInfoOffsets, infoGroups, infoNodes, infoNodePos, entityPhs, segments, segPos, placeholders, sizeOfNode, outputBox, moveGroupTo, persistPositions, pushUndo]);
 
   // ── 节点操作 ──
   // 节点接口圆点（ComfyUI 式）：输入口列在左缘（片段五口按列分布）、
@@ -2839,13 +3123,11 @@ export default function ProjectCanvas({
     },
     [placeholders, persistPlaceholders],
   );
-  // ── 键盘删除：Delete/Backspace 删除选中节点，与各节点工具条同一套
-  // 语义（镜头卡有确认对话框，走同一确认流程；其余即时删除）。输入框
-  // 聚焦或任一弹层打开时不响应，避免误删。 ──
+  // ── 键盘：Delete/Backspace 删除选中节点（与各节点工具条同一套语义；
+  // 镜头卡有确认对话框，走同一确认流程）；Ctrl+C/V 复制粘贴选中组；
+  // Ctrl+Z 撤销。输入框聚焦或任一弹层打开时不响应。 ──
   useEffect(() => {
-    if (selKeys.length === 0) return;
     const onKey = (e: KeyboardEvent) => {
-      if (e.key !== "Delete" && e.key !== "Backspace") return;
       const target = e.target as HTMLElement | null;
       if (target && (target.tagName === "INPUT" || target.tagName === "TEXTAREA" || target.isContentEditable)) return;
       if (
@@ -2855,24 +3137,55 @@ export default function ProjectCanvas({
       ) {
         return;
       }
+      if (e.ctrlKey || e.metaKey) {
+        const k = e.key.toLowerCase();
+        if (k === "c") {
+          copySelection();
+          return;
+        }
+        if (k === "v") {
+          void pasteClipboard();
+          return;
+        }
+        if (k === "z") {
+          e.preventDefault();
+          runUndo();
+          return;
+        }
+        return;
+      }
+      if (e.key !== "Delete" && e.key !== "Backspace") return;
+      if (selKeys.length === 0) return;
       e.preventDefault();
+      // 可完整恢复的删除（便签/两类占位）先抓原对象，整批删除记一条撤销。
+      const restore: {
+        notes?: CanvasNote[];
+        placeholders?: CanvasPlaceholder[];
+        ephs?: { id: string; kind: EntityPhKind; x: number; y: number }[];
+      } = {};
       for (const key of selKeys) {
         if (key === "output") {
           if (episodeId) void setEpisodeOutput(episodeId, null);
         } else if (key.startsWith("shot:")) {
           void deleteShot(key.slice(5));
         } else if (key.startsWith("note:")) {
+          const removed = notes.find((item) => item.id === key.slice(5));
           setNotes((prev) => {
             const next = prev.filter((item) => item.id !== key.slice(5));
             persistNotes(next);
             return next;
           });
+          if (removed) (restore.notes ??= []).push(removed);
         } else if (key.startsWith("segment:")) {
           void removeSegment(key.slice(8));
         } else if (key.startsWith("placeholder:")) {
+          const removed = placeholders.find((item) => item.id === key.slice(12));
           removePlaceholder(key.slice(12));
+          if (removed) (restore.placeholders ??= []).push(removed);
         } else if (key.startsWith("eph:")) {
+          const removed = entityPhs.find((item) => item.id === key.slice(4));
           removeEntityPh(key.slice(4));
+          if (removed) (restore.ephs ??= []).push(removed);
         } else if (key.startsWith("grp:")) {
           removeGroup(key.slice(4));
         } else if (key === "script") {
@@ -2884,15 +3197,19 @@ export default function ProjectCanvas({
           void removeInfoEntity(kind, key.slice(key.indexOf(":") + 1));
         }
       }
+      if (restore.notes || restore.placeholders || restore.ephs) {
+        pushUndo({ type: "restore", notes: restore.notes, placeholders: restore.placeholders, ephs: restore.ephs });
+      }
       setSelection([]);
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
   }, [
     selKeys, detailFor, pickerFor, memberPick, addMenu, wireDraft, scriptPickOpen, locationPickOpen,
-    sceneForm, shotForm, deleteSceneTarget, episodeId,
+    sceneForm, shotForm, deleteSceneTarget, episodeId, notes, placeholders, entityPhs,
     setEpisodeOutput, deleteShot, setNotes, persistNotes, removeSegment, removePlaceholder,
     removeEntityPh, removeGroup, detachScript, unlinkAsset, removeInfoEntity, setSelection,
+    copySelection, pasteClipboard, runUndo, pushUndo,
   ]);
   // 成员装入面板（多选 + 装入确认）：eph 加载 / 组追加裁剪 / 默认节点转组。
   const applyMemberPick = useCallback(async () => {
