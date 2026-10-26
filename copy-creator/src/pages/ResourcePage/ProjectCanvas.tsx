@@ -44,8 +44,8 @@ const INFO_W = 132; // 资料卡宽（角色/道具/剧本）
 const INFO_H = 156;
 const SCRIPT_W = 210;
 const WORLD_MARGIN = 60;
-/** 连线 SVG 相对世界原点的负向余量（节点可被拖到世界原点左侧/上方）。 */
-const WIRE_PAD = 1200;
+/** 连线层视口外沿的世界余量（把可见区外一点的线也画进来，避免边缘裁切）。 */
+const WIRES_VIEWPORT_PAD = 64;
 const MINI_W = 150;
 const MINI_H = 96;
 const OUTPUT_W = 176; // 成片输出节点（每集工作流的总输出口）
@@ -1330,6 +1330,8 @@ export default function ProjectCanvas({
         const inPort = ports.ins.find((item) => item.id === portId);
         if (key && (dir === "out" ? ports.out : inPort)) {
           vp.classList.add("pc-wiring");
+          // 源端口点亮：即使草稿线被渲染环境吞掉，按下即有可见状态。
+          port.classList.add("pc-port-active");
           dragRef.current = {
             kind: "wire", sx: e.clientX, sy: e.clientY, fromKey: key, targetKey: null,
             targetPort: null, fromDir: dir,
@@ -1804,6 +1806,9 @@ export default function ProjectCanvas({
       }
       vpRef.current?.classList.remove("pc-panning");
       vpRef.current?.classList.remove("pc-wiring");
+      document
+        .querySelectorAll<HTMLElement>(".pc-port-active")
+        .forEach((el) => el.classList.remove("pc-port-active"));
       vpRef.current?.querySelectorAll<HTMLElement>(".pc-dragging").forEach((el) => el.classList.remove("pc-dragging"));
       if (drag.moved) {
         suppressClickRef.current = true;
@@ -1945,6 +1950,18 @@ export default function ProjectCanvas({
     MINI_H / Math.max(layout.worldH + 320, 1),
   );
 
+  // 连线层几何：SVG 尺寸恒等于视口（世界单位，外沿加少量余量），世界
+  // 坐标经一层平移换算为 SVG 局部坐标。此前 SVG 按整个世界范围铺（宽度
+  // 可达近万 px 的巨型图层），在部分 WebView2 的 GPU 栅格化下超限整层
+  // 不绘制，用户端表现为所有连线与拖线草稿不可见；等视口图层在任何
+  // 缩放下屏幕栅格尺寸都恒等于视口，从根上消除该问题。
+  const wiresVis = {
+    x: -view.x / view.scale - WIRES_VIEWPORT_PAD,
+    y: -view.y / view.scale - WIRES_VIEWPORT_PAD,
+    w: ((vpSize?.w ?? 0) || 1600) / view.scale + WIRES_VIEWPORT_PAD * 2,
+    h: ((vpSize?.h ?? 0) || 900) / view.scale + WIRES_VIEWPORT_PAD * 2,
+  };
+
   return (
     <div className="pc-root">
       <div
@@ -2068,19 +2085,20 @@ export default function ProjectCanvas({
             );
           })}
 
-          {/* 连线层（卡片之下）。显式尺寸覆盖世界范围（含负向余量）：
-              依赖 0×0 + overflow:visible 在部分 WebView2 上会被整体裁剪，
-              用户端表现为所有连线与拖线草稿都不可见。 */}
+          {/* 连线层（卡片之下）。按视口尺寸渲染 + 平移组换算世界坐标，
+              不再铺世界范围的巨型图层（部分 WebView2 GPU 栅格化超限时
+              会整层不绘制，表现为连线全不可见）。 */}
           <svg
             className="pc-wires"
             aria-hidden="true"
             style={{
-              left: -WIRE_PAD,
-              top: -WIRE_PAD,
-              width: layout.worldW + WIRE_PAD * 2 + 2400,
-              height: layout.worldH + WIRE_PAD * 2 + 1200,
+              left: wiresVis.x,
+              top: wiresVis.y,
+              width: wiresVis.w,
+              height: wiresVis.h,
             }}
           >
+            <g transform={`translate(${-wiresVis.x}, ${-wiresVis.y})`}>
             {wires.map((wire) => {
               const a = outPointOf(wire.fromKey);
               const b = inPointOf(wire.toKey);
@@ -2209,6 +2227,7 @@ export default function ProjectCanvas({
                 </g>
               );
             })()}
+            </g>
           </svg>
 
           {/* 镜头卡 */}
