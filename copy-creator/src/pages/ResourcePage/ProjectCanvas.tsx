@@ -590,32 +590,75 @@ export default function ProjectCanvas({
   const [addMenuQuery, setAddMenuQuery] = useState("");
   // 资料关联面板开关（挂产出走片段详情窗口，见 detailFor）。
   const [locationPickOpen, setLocationPickOpen] = useState(false);
-  // 挂剧本：选择库内文件设为本集 script_path；已有剧本时「剧本」菜单项
-  // 与缺项提醒改为定位。
+  // 挂剧本：双击空纸片从库选文件（两段式与其他节点统一）。
   const [scriptPickOpen, setScriptPickOpen] = useState(false);
-  // 剧本两段式（与其他节点统一）：「加载」只放一个未挂文件的空剧本节点
-  // 上画布，双击节点才从库选文件。空节点状态按集记 localStorage。
+  // 本次挂接的目标节点 key："script" = 主剧本重挂；"script:<id>" = 剧本纸片。
+  const [scriptPickTarget, setScriptPickTarget] = useState<string | null>(null);
+  // 剧本纸片（多实例，与其他节点统一）：添加菜单每次放一个空纸片，双击
+  // 从库选文件。本集还没剧本时，首个挂接的文件「转正」为主剧本节点
+  // （script_path 落库、自动接入全部片段）；其余纸片独立持文件、只存在
+  // 于画布层——剧本连线在后端以集为锚（from_id 必须是集 id），纸片的
+  // 连线走画布暂存线，不入库。
+  const scriptPhsKey = `project_canvas_scriptphs_${episodeId}`;
   const scriptNodeKey = `project_canvas_scriptnode_${episodeId}`;
-  const [scriptNodeAdded, setScriptNodeAdded] = useState(false);
+  const [scriptPhs, setScriptPhs] = useState<{ id: string; path: string }[]>([]);
   useEffect(() => {
     if (!episodeId) return; // 刷新瞬态。
     try {
-      setScriptNodeAdded(window.localStorage.getItem(scriptNodeKey) === "1");
+      const raw = window.localStorage.getItem(scriptPhsKey);
+      const list = raw ? (JSON.parse(raw) as { id: string; path: string }[]) : [];
+      setScriptPhs(Array.isArray(list) ? list.filter((item) => item && typeof item.id === "string") : []);
     } catch {
-      setScriptNodeAdded(false);
+      setScriptPhs([]);
     }
-  }, [scriptNodeKey, episodeId]);
-  const persistScriptNodeAdded = useCallback(
-    (next: boolean) => {
-      setScriptNodeAdded(next);
+  }, [scriptPhsKey, episodeId]);
+  const persistScriptPhs = useCallback(
+    (next: { id: string; path: string }[]) => {
+      setScriptPhs(next);
       try {
-        window.localStorage.setItem(scriptNodeKey, next ? "1" : "0");
+        window.localStorage.setItem(scriptPhsKey, JSON.stringify(next));
       } catch {
         // 存储不可用：仅不记忆。
       }
     },
-    [scriptNodeKey],
+    [scriptPhsKey],
   );
+  const addScriptPh = useCallback(() => {
+    persistScriptPhs([
+      ...scriptPhs,
+      { id: `sph${Date.now()}${Math.floor(Math.random() * 1e4)}`, path: "" },
+    ]);
+  }, [scriptPhs, persistScriptPhs]);
+  // 旧版「空主剧本」标志迁移：标志在且本集没挂剧本时补一个空纸片，迁移
+  // 完移除旧键（避免删光纸片后被复活）。直接读存储而非 state，绕开加载
+  // 时序竞争。
+  const scriptLegacyMigratedRef = useRef<string | null>(null);
+  useEffect(() => {
+    if (!episodeId || !overview) return;
+    if (scriptLegacyMigratedRef.current === episodeId) return;
+    scriptLegacyMigratedRef.current = episodeId;
+    let legacy: boolean;
+    try {
+      legacy = window.localStorage.getItem(scriptNodeKey) === "1";
+    } catch {
+      legacy = false;
+    }
+    if (!legacy) return;
+    try {
+      window.localStorage.removeItem(scriptNodeKey);
+    } catch {
+      // 忽略。
+    }
+    if (overview.episode.script_path) return; // 已挂接：主剧本节点照旧渲染。
+    let existing: { id: string; path: string }[];
+    try {
+      existing = JSON.parse(window.localStorage.getItem(scriptPhsKey) ?? "[]");
+    } catch {
+      existing = [];
+    }
+    if (Array.isArray(existing) && existing.length > 0) return;
+    persistScriptPhs([{ id: `sph${Date.now()}${Math.floor(Math.random() * 1e4)}`, path: "" }]);
+  }, [episodeId, overview, scriptNodeKey, scriptPhsKey, persistScriptPhs]);
 
   // ── 占位素材节点（双击填充后才入库为集级散件）：按集存 localStorage ──
   const [placeholders, setPlaceholders] = useState<CanvasPlaceholder[]>([]);
@@ -798,15 +841,18 @@ export default function ProjectCanvas({
         key: "script", kind: "script", name: scriptFileLabelOf(overview.episode.script_path),
         avatarPath: "", textPath: overview.episode.script_path, w: SCRIPT_W, h: INFO_H + 40,
       });
-    } else if (scriptNodeAdded) {
-      // 剧本两段式：先上空节点（未挂文件），双击节点再从库选文件。
-      list.push({
-        key: "script", kind: "script", name: t("project.canvas.scriptUntitled"),
-        avatarPath: "", textPath: "", w: SCRIPT_W, h: INFO_H + 40,
-      });
     }
+    // 剧本纸片（多实例）：空纸片显示「未挂接」，双击从库选文件；本集没
+    // 剧本时首个挂接的文件转正为主剧本节点（见 handleScriptPick）。
+    scriptPhs.forEach((ph) => {
+      list.push({
+        key: `script:${ph.id}`, kind: "script",
+        name: ph.path ? scriptFileLabelOf(ph.path) : t("project.canvas.scriptUntitled"),
+        avatarPath: "", textPath: ph.path, w: SCRIPT_W, h: INFO_H + 40,
+      });
+    });
     return list;
-  }, [castCharacters, episodeLocations, episodeProps, infoGroups, overview, scriptNodeAdded, t]);
+  }, [castCharacters, episodeLocations, episodeProps, infoGroups, overview, scriptPhs, t]);
 
   const infoPos = useMemo(() => {
     const frame = infoFramePos ?? { x: WORLD_MARGIN, y: layout.worldH + 48 };
@@ -1166,6 +1212,9 @@ export default function ProjectCanvas({
         notes?: CanvasNote[];
         placeholders?: CanvasPlaceholder[];
         ephs?: { id: string; kind: EntityPhKind; x: number; y: number }[];
+        scriptPhs?: { id: string; path: string }[];
+        // 剧本纸片的位置在 infoOffsets（不在纸片对象上），删除时一并抓取。
+        scriptOffsets?: { key: string; pos: Pos }[];
         // 被删占位的暂存线随删除一并清除，撤销恢复时一并还原。
         pending?: PendingLink[];
       };
@@ -1210,6 +1259,13 @@ export default function ProjectCanvas({
         if (action.notes?.length) persistNotes([...notes, ...action.notes]);
         if (action.placeholders?.length) persistPlaceholders([...placeholders, ...action.placeholders]);
         if (action.ephs?.length) persistEntityPhs([...entityPhs, ...action.ephs]);
+        if (action.scriptPhs?.length) persistScriptPhs([...scriptPhs, ...action.scriptPhs]);
+        if (action.scriptOffsets?.length) {
+          persistInfoOffsets({
+            ...infoOffsets,
+            ...Object.fromEntries(action.scriptOffsets.map((item) => [item.key, item.pos])),
+          });
+        }
         if (action.pending?.length) persistPendingLinks([...pendingLinks, ...action.pending]);
       }
     } finally {
@@ -1218,7 +1274,7 @@ export default function ProjectCanvas({
         undoingRef.current = false;
       }, 0);
     }
-  }, [moveGroupTo, persistPositions, persistSizes, notes, placeholders, entityPhs, persistNotes, persistPlaceholders, persistEntityPhs, persistPendingLinks, pendingLinks, removeSegment, setSelection]);
+  }, [moveGroupTo, persistPositions, persistSizes, notes, placeholders, entityPhs, scriptPhs, infoOffsets, persistNotes, persistPlaceholders, persistEntityPhs, persistScriptPhs, persistInfoOffsets, persistPendingLinks, pendingLinks, removeSegment, setSelection]);
   // 复制 / 粘贴（Ctrl+C/V）：画布私有节点可复制（便签/素材占位/空白资料
   // 占位/片段）。镜头卡、素材散件、资料实体节点是库实体的画布投影
   // （一实体一节点），复制语义不成立，不参与。粘贴整组出现在原组右下
@@ -1347,7 +1403,7 @@ export default function ProjectCanvas({
     | { kind: "entityPh"; id: string }
     | { kind: "segment"; id: string; scopes: { chars: DetailScope; locs: DetailScope; props: DetailScope } }
     | { kind: "info"; group: EntityPhKind; sourceKey: string; scope: DetailScope }
-    | { kind: "script" }
+    | { kind: "script"; phId?: string }
     | null
   >(null);
   // 成员装入面板（多选 + 装入确认）：eph 加载 / 组追加裁剪 / 默认节点转组。
@@ -1581,38 +1637,85 @@ export default function ProjectCanvas({
   }, [episodeId, overview, addSegment, linkNode, templateFlagKey]);
 
   // 剧本节点定位（视口居中到剧本纸片；纸片可被拖离资料框，用覆盖位置）。
-  const locateScript = useCallback(() => {
-    const el = vpRef.current;
-    const p = infoNodePos("script");
-    if (!el || !p) return;
-    const next = {
-      x: el.clientWidth / 2 - (p.x + SCRIPT_W / 2) * view.scale,
-      y: el.clientHeight / 2 - (p.y + (INFO_H + 40) / 2) * view.scale,
-      scale: view.scale,
-    };
-    setView(next);
-    saveView(next);
-  }, [infoNodePos, view.scale, setView, saveView]);
+  // key 缺省为主剧本节点，缺项提醒定位空纸片时传纸片 key。
+  const locateScript = useCallback(
+    (key = "script") => {
+      const el = vpRef.current;
+      const p = infoNodePos(key);
+      if (!el || !p) return;
+      const size = sizeOfNode(key) ?? { w: SCRIPT_W, h: INFO_H + 40 };
+      const next = {
+        x: el.clientWidth / 2 - (p.x + size.w / 2) * view.scale,
+        y: el.clientHeight / 2 - (p.y + size.h / 2) * view.scale,
+        scale: view.scale,
+      };
+      setView(next);
+      saveView(next);
+    },
+    [infoNodePos, sizeOfNode, view.scale, setView, saveView],
+  );
 
-  // 挂剧本：从资源库选文件设为本集剧本。剧本是全集共享输入，挂接成功
-  // 即自动接入所有已有片段的提示词口（linkNode 幂等，重复挂接不会写
-  // 重；挂接之后新建的片段仍手动连或拖线接）。
+  // 挂剧本（双击空纸片 / 详情窗重挂后从库选文件），按目标节点分派：
+  // - 主剧本节点（"script"）：换库内文件做本集剧本，挂接成功即自动接入
+  //   所有已有片段的提示词口（linkNode 幂等，重复挂接不会写重）。
+  // - 剧本纸片：本集还没剧本时该纸片「转正」为主剧本——位置/尺寸移交、
+  //   暂存线由全量接入覆盖、纸片移除；已有剧本时纸片独立持自己的文件
+  //   （画布层记忆），不动本集剧本。
   const handleScriptPick = useCallback(
     (filePath: string) => {
       const episode = overview?.episode;
-      if (!episode) return;
-      void updateEpisode(episode.id, {
-        title: episode.title,
-        status: episode.status,
-        script_path: filePath,
-      }).then(() => {
-        segments.forEach((segment) => {
-          void linkNode(episode.id, "script", episode.id, segment.id, "script");
-        });
+      const target = scriptPickTarget;
+      setScriptPickTarget(null);
+      if (!episode || !target) {
         setScriptPickOpen(false);
-      });
+        return;
+      }
+      const attachEpisode = () => {
+        void updateEpisode(episode.id, {
+          title: episode.title,
+          status: episode.status,
+          script_path: filePath,
+        }).then(() => {
+          segments.forEach((segment) => {
+            void linkNode(episode.id, "script", episode.id, segment.id, "script");
+          });
+          setScriptPickOpen(false);
+        });
+      };
+      if (target === "script") {
+        attachEpisode();
+        return;
+      }
+      const phId = target.slice(7);
+      if (!scriptPhs.some((item) => item.id === phId)) {
+        setScriptPickOpen(false);
+        return;
+      }
+      if (episode.script_path) {
+        persistScriptPhs(scriptPhs.map((item) => (item.id === phId ? { ...item, path: filePath } : item)));
+        setScriptPickOpen(false);
+        return;
+      }
+      const nextOffsets = { ...infoOffsets };
+      const phPos = nextOffsets[target];
+      delete nextOffsets[target];
+      if (phPos) nextOffsets.script = phPos;
+      persistInfoOffsets(nextOffsets);
+      const nextSizes = { ...nodeSizes };
+      const phSize = nextSizes[target];
+      delete nextSizes[target];
+      if (phSize) nextSizes.script = phSize;
+      persistSizes(nextSizes);
+      persistScriptPhs(scriptPhs.filter((item) => item.id !== phId));
+      dropPendingLinksOf(target);
+      // 清掉出生锚点：转正出的主剧本节点要留在纸片原位，不能被锚点挪走。
+      spawnAnchorRef.current = null;
+      attachEpisode();
     },
-    [overview, updateEpisode, segments, linkNode],
+    [
+      overview, scriptPickTarget, scriptPhs, segments, updateEpisode, linkNode,
+      persistScriptPhs, infoOffsets, persistInfoOffsets, nodeSizes, persistSizes, dropPendingLinksOf,
+    ],
   );
 
   useEffect(() => {
@@ -1964,7 +2067,9 @@ export default function ProjectCanvas({
           out: { label: t(assetKindBadgeKey(kind)), type: kind },
         };
       }
-      if (key === "script") return { ins: [], out: { label: t("project.canvas.typeScript"), type: "text" } };
+      if (key === "script" || key.startsWith("script:")) {
+        return { ins: [], out: { label: t("project.canvas.typeScript"), type: "text" } };
+      }
       if (key.startsWith("char:") || key.startsWith("loc:") || key.startsWith("prop:") || key.startsWith("grp:")) {
         return { ins: [], out: { label: t("project.canvas.portRefImg"), type: "image" } };
       }
@@ -2025,28 +2130,36 @@ export default function ProjectCanvas({
         return;
       }
       if (inKey.startsWith("segment:")) {
-        const source = nodeKeyParts(outKey);
-        if (!source) return;
         const fromType = wire.fromType ?? portsOf(outKey).out?.type;
         const port = portsOf(inKey).ins.find((item) =>
           fromType ? item.accepts.includes(fromType) : false,
         );
-        if (port) {
-          void linkNode(
-            episodeId,
-            source.kind,
-            source.id,
-            inKey.slice(8),
-            port.id as ProjectNodeLink["to_port"],
-          );
+        if (!port) return;
+        if (outKey.startsWith("script:")) {
+          // 剧本纸片的连线不入库（后端剧本连线以集为锚），落画布暂存线。
+          const segId = inKey.slice(8);
+          persistPendingLinks([
+            ...pendingLinks.filter((l) => !(l.fromKey === outKey && l.toSegmentId === segId && l.toPort === port.id)),
+            { fromKey: outKey, toSegmentId: segId, toPort: port.id },
+          ]);
+          return;
         }
+        const source = nodeKeyParts(outKey);
+        if (!source) return;
+        void linkNode(
+          episodeId,
+          source.kind,
+          source.id,
+          inKey.slice(8),
+          port.id as ProjectNodeLink["to_port"],
+        );
         return;
       }
       if (outKey.startsWith("asset:") && inKey.startsWith("asset:")) {
         void linkAssets(outKey.slice(6), inKey.slice(6), "");
       }
     },
-    [episodeId, nodeKeyParts, portsOf, linkNode, linkAssets, setEpisodeOutput],
+    [episodeId, nodeKeyParts, portsOf, linkNode, linkAssets, setEpisodeOutput, pendingLinks, persistPendingLinks],
   );
 
   // ── 场景框位置：scenes.canvas 之外再叠一层本地偏移（拖标签牌实时） ──
@@ -2289,8 +2402,8 @@ export default function ProjectCanvas({
         }
         if (
           key.startsWith("char:") || key.startsWith("loc:") ||
-          key.startsWith("prop:") || key === "script" || key.startsWith("eph:") ||
-          key.startsWith("grp:")
+          key.startsWith("prop:") || key === "script" || key.startsWith("script:") ||
+          key.startsWith("eph:") || key.startsWith("grp:")
         ) {
           // 资料节点（含组节点与空白资料占位）：按下即自由拖动（覆盖层
           // 按绝对位置记忆，资料框退化为背景分组框，节点不再被网格钉死）。
@@ -2552,6 +2665,7 @@ export default function ProjectCanvas({
               (outKeyOf.startsWith("asset:") || outKeyOf.startsWith("shot:") || outKeyOf.startsWith("segment:"))) ||
             (inKeyOf.startsWith("segment:") &&
               (outKeyOf === "script" ||
+                outKeyOf.startsWith("script:") ||
                 ["asset:", "shot:", "char:", "loc:", "prop:", "grp:", "segment:", "eph:", "placeholder:"].some((p) => outKeyOf.startsWith(p)))));
         let compatible = false;
         let targetPort: string | null = null;
@@ -2641,9 +2755,11 @@ export default function ProjectCanvas({
             }
           } else if (inKey.startsWith("segment:")) {
             const segId = inKey.slice(8);
-            if (outKey.startsWith("eph:") || outKey.startsWith("placeholder:")) {
-              // 未加载的占位节点：暂存线记在画布层，加载实体/填充素材后
-              // 转正为 node_link（promotePendingLinks）。
+            if (outKey.startsWith("eph:") || outKey.startsWith("placeholder:") || outKey.startsWith("script:")) {
+              // 未加载的占位节点与剧本纸片：暂存线记在画布层。占位加载
+              // 实体/填充素材后转正为 node_link（promotePendingLinks）；
+              // 剧本纸片不转正（空纸片挂接文件转正为主剧本时由全量接入
+              // 覆盖），纸片连线常驻画布层。
               const port = drag.fromDir === "in" ? drag.fromPortId : drag.targetPort;
               if (port) {
                 persistPendingLinks([
@@ -3124,7 +3240,7 @@ export default function ProjectCanvas({
   );
   // 资料节点 → 详情窗口（该类资源列表，当前/全部切换；剧本是单文件窗口）。
   // 双击节点与悬停工具条的「查看」按钮共用。剧本两段式：未挂文件的空
-  // 节点双击直接打开文件选择（选完即挂）。
+  // 节点双击直接打开文件选择（选完即挂，挂接目标记节点 key）。
   const openInfoDetail = (node: { kind: string; key: string; textPath?: string }) => {
     if (node.kind === "character") {
       setDetailFor({ kind: "info", group: "character", sourceKey: node.key, scope: "current" });
@@ -3132,10 +3248,13 @@ export default function ProjectCanvas({
       setDetailFor({ kind: "info", group: "location", sourceKey: node.key, scope: "current" });
     } else if (node.kind === "prop") {
       setDetailFor({ kind: "info", group: "prop", sourceKey: node.key, scope: "current" });
-    } else if (node.kind === "script" && !node.textPath) {
-      setScriptPickOpen(true);
-    } else {
-      setDetailFor({ kind: "script" });
+    } else if (node.kind === "script") {
+      if (!node.textPath) {
+        setScriptPickTarget(node.key);
+        setScriptPickOpen(true);
+      } else {
+        setDetailFor(node.key === "script" ? { kind: "script" } : { kind: "script", phId: node.key.slice(7) });
+      }
     }
   };
 
@@ -3283,17 +3402,27 @@ export default function ProjectCanvas({
     },
     [infoGroups, persistInfoGroups],
   );
-  // 剧本节点：解除挂接（剧本文件留在库内），提示词连线一并清理。
-  // 剧本节点：解除挂接（剧本文件留在库内），提示词连线一并清理；
-  // 两段式的空节点与已挂节点删除后都彻底从画布移除（不留空节点）。
+  // 主剧本节点：解除挂接（剧本文件留在库内），提示词连线一并清理；
+  // 删除后彻底从画布移除（空纸片走 removeScriptPh，互不相干）。
   const detachScript = useCallback(async () => {
     const episode = overview?.episode;
-    persistScriptNodeAdded(false);
     if (!episodeId || !episode?.script_path) return;
     const rows = (overview?.node_links ?? []).filter((l) => l.from_kind === "script");
     for (const row of rows) await unlinkNode(row.from_kind, row.from_id, row.to_segment, row.to_port);
     await updateEpisode(episodeId, { title: episode.title, status: episode.status, script_path: "" });
-  }, [episodeId, overview, unlinkNode, updateEpisode, persistScriptNodeAdded]);
+  }, [episodeId, overview, unlinkNode, updateEpisode]);
+  // 剧本纸片：从画布移除纸片记录、位置记忆与暂存线（不影响本集剧本）。
+  const removeScriptPh = useCallback(
+    (phId: string) => {
+      const key = `script:${phId}`;
+      const next = { ...infoOffsets };
+      delete next[key];
+      persistInfoOffsets(next);
+      persistScriptPhs(scriptPhs.filter((item) => item.id !== phId));
+      dropPendingLinksOf(key);
+    },
+    [scriptPhs, infoOffsets, persistScriptPhs, persistInfoOffsets, dropPendingLinksOf],
+  );
   // 空白资料占位：删除占位并清掉它拖动过的位置记忆与暂存线。
   const removeEntityPh = useCallback(
     (phId: string) => {
@@ -3339,6 +3468,9 @@ export default function ProjectCanvas({
         }
         if (k === "z") {
           e.preventDefault();
+          // 恢复出的资料节点不是「新加载」：先清掉可能残留的出生锚点，
+          // 免得恢复的节点被锚点重新定位、偏离删除前的原位。
+          spawnAnchorRef.current = null;
           runUndo();
           return;
         }
@@ -3378,12 +3510,14 @@ export default function ProjectCanvas({
       if (e.key !== "Delete" && e.key !== "Backspace") return;
       if (selKeys.length === 0) return;
       e.preventDefault();
-      // 可完整恢复的删除（便签/两类占位）先抓原对象与暂存线，整批删除
-      // 记一条撤销；恢复时原样还原（含线）。
+      // 可完整恢复的删除（便签/两类占位/剧本纸片）先抓原对象与暂存线，
+      // 整批删除记一条撤销；恢复时原样还原（含线）。
       const restore: {
         notes?: CanvasNote[];
         placeholders?: CanvasPlaceholder[];
         ephs?: { id: string; kind: EntityPhKind; x: number; y: number }[];
+        scriptPhs?: { id: string; path: string }[];
+        scriptOffsets?: { key: string; pos: Pos }[];
         pending?: PendingLink[];
       } = {};
       for (const key of selKeys) {
@@ -3417,6 +3551,16 @@ export default function ProjectCanvas({
           removeGroup(key.slice(4));
         } else if (key === "script") {
           void detachScript();
+        } else if (key.startsWith("script:")) {
+          const removed = scriptPhs.find((item) => item.id === key.slice(7));
+          const dropped = pendingLinks.filter((l) => l.fromKey === key);
+          // 无论纸片是否拖动过都按解析位置还原（拖过的=覆盖位置，
+          // 没拖过的=当前网格位），撤销后回到删除前的原位。
+          const phPos = infoNodePos(key);
+          removeScriptPh(key.slice(7));
+          if (removed) (restore.scriptPhs ??= []).push(removed);
+          if (phPos) (restore.scriptOffsets ??= []).push({ key, pos: phPos });
+          if (dropped.length) (restore.pending ??= []).push(...dropped);
         } else if (key.startsWith("asset:")) {
           void unlinkAsset(key.slice(6));
         } else if (key.startsWith("char:") || key.startsWith("loc:") || key.startsWith("prop:")) {
@@ -3424,8 +3568,12 @@ export default function ProjectCanvas({
           void removeInfoEntity(kind, key.slice(key.indexOf(":") + 1));
         }
       }
-      if (restore.notes || restore.placeholders || restore.ephs || restore.pending) {
-        pushUndo({ type: "restore", notes: restore.notes, placeholders: restore.placeholders, ephs: restore.ephs, pending: restore.pending });
+      if (restore.notes || restore.placeholders || restore.ephs || restore.scriptPhs || restore.pending) {
+        pushUndo({
+          type: "restore", notes: restore.notes, placeholders: restore.placeholders,
+          ephs: restore.ephs, scriptPhs: restore.scriptPhs, pending: restore.pending,
+          scriptOffsets: restore.scriptOffsets,
+        });
       }
       setSelection([]);
     };
@@ -3433,9 +3581,9 @@ export default function ProjectCanvas({
     return () => window.removeEventListener("keydown", onKey);
   }, [
     selKeys, detailFor, pickerFor, memberPick, addMenu, wireDraft, scriptPickOpen, locationPickOpen,
-    sceneForm, shotForm, deleteSceneTarget, episodeId, notes, placeholders, entityPhs,
+    sceneForm, shotForm, deleteSceneTarget, episodeId, notes, placeholders, entityPhs, scriptPhs, infoOffsets, infoNodePos,
     setEpisodeOutput, deleteShot, setNotes, persistNotes, removeSegment, removePlaceholder,
-    removeEntityPh, removeGroup, detachScript, unlinkAsset, removeInfoEntity, setSelection,
+    removeEntityPh, removeGroup, detachScript, removeScriptPh, unlinkAsset, removeInfoEntity, setSelection,
     copySelection, pasteClipboard, runUndo, pushUndo, nodeGroups, persistNodeGroups, t,
     pendingLinks, memberFrame,
   ]);
@@ -3842,8 +3990,10 @@ export default function ProjectCanvas({
         />
       );
     }
-    // script：单文件窗口（文本预览 + 路径 + 打开）。
-    const scriptPath = overview.episode.script_path;
+    // script：单文件窗口（文本预览 + 路径 + 打开）。主剧本节点读本集
+    // script_path；剧本纸片读自己的文件（重新挂接也只换纸片的文件）。
+    const scriptPh = detailFor.phId ? scriptPhs.find((item) => item.id === detailFor.phId) : null;
+    const scriptPath = scriptPh ? scriptPh.path : overview.episode.script_path;
     if (!scriptPath) return null;
     const scriptName = scriptFileLabelOf(scriptPath);
     return (
@@ -3861,12 +4011,15 @@ export default function ProjectCanvas({
               <button type="button" className="pc-detail-btn" onClick={() => void openResourceFile(fileHint(scriptPath))}>
                 {Icons.externalLink}{t("project.canvas.openFile")}
               </button>
-              {/* 重新挂接：换库内其他文件做本集剧本（窗口保持打开，
-                  重选后条目就地刷新；节点留在原位）。 */}
+              {/* 重新挂接：换库内其他文件（窗口保持打开，重选后条目就地
+                  刷新；节点留在原位；主剧本换的是本集剧本，纸片只换自己）。 */}
               <button
                 type="button"
                 className="pc-detail-btn"
-                onClick={() => setScriptPickOpen(true)}
+                onClick={() => {
+                  setScriptPickTarget(scriptPh ? `script:${scriptPh.id}` : "script");
+                  setScriptPickOpen(true);
+                }}
               >
                 {Icons.link}{t("project.canvas.detailRelinkScript")}
               </button>
@@ -4085,6 +4238,9 @@ export default function ProjectCanvas({
               const midX = (a.x + b.x) / 2;
               const midY = (a.y + b.y) / 2;
               const fromType = portsOf(link.fromKey).out?.type;
+              // 剧本纸片的暂存线不存在「加载转正」，画布层即最终形态：画
+              // 实线（低不透明度，与正式连线区分）；占位暂存线保持虚线。
+              const solid = link.fromKey.startsWith("script:");
               return (
                 <g key={`pending-${link.fromKey}-${link.toSegmentId}-${link.toPort}`} className="pc-wire">
                   <path className="pc-wire-hit" d={d} />
@@ -4093,8 +4249,8 @@ export default function ProjectCanvas({
                     d={d}
                     style={{
                       stroke: WIRE_TYPE_COLORS[fromType ?? ""] ?? "#94a3b8",
-                      strokeOpacity: 0.7,
-                      strokeDasharray: "7 5",
+                      strokeOpacity: solid ? 0.55 : 0.7,
+                      strokeDasharray: solid ? undefined : "7 5",
                     }}
                   />
                   <g
@@ -4497,7 +4653,8 @@ export default function ProjectCanvas({
                     className="danger"
                     onClick={() => {
                       if (node.key.startsWith("grp:")) removeGroup(node.key.slice(4));
-                      else if (node.kind === "script") void detachScript();
+                      else if (node.key === "script") void detachScript();
+                      else if (node.kind === "script") removeScriptPh(node.key.slice(7));
                       else void removeInfoEntity(node.kind as EntityPhKind, node.key.slice(node.key.indexOf(":") + 1));
                     }}
                   >
@@ -4814,13 +4971,14 @@ export default function ProjectCanvas({
                 onClick={(event) => {
                   if (issue.key === "output") locateOutput();
                   if (issue.key === "script") {
-                    // 剧本两段式：未放置节点 → 放空节点（出生在点击位置）；
-                    // 已放置空节点 → 定位到它（双击选文件）。
-                    if (scriptNodeAdded) {
-                      locateScript();
+                    // 剧本两段式：有空纸片 → 定位到它（双击选文件）；
+                    // 没有 → 放一个空纸片（出生在点击位置）。
+                    const emptyPh = scriptPhs.find((item) => !item.path);
+                    if (emptyPh) {
+                      locateScript(`script:${emptyPh.id}`);
                     } else {
                       armSpawnFromEvent(event.clientX, event.clientY);
-                      persistScriptNodeAdded(true);
+                      addScriptPh();
                     }
                   }
                   if (issue.key === "segAssets") {
@@ -4866,9 +5024,7 @@ export default function ProjectCanvas({
               {
                 key: "episodeScript",
                 label: t("project.canvas.typeEpisode"),
-                hint: overview?.episode.script_path
-                  ? t("project.canvas.typeEpisodeLocatedHint")
-                  : t("project.canvas.typeEpisodeHint"),
+                hint: t("project.canvas.typeEpisodeHint"),
                 icon: Icons.file,
                 panel: "script",
               },
@@ -4930,8 +5086,9 @@ export default function ProjectCanvas({
                   key={item.key}
                   type="button"
                   className="pc-addmenu-item"
-                  // 剧本项：已挂接则定位到剧本纸片，未挂接则只放空节点
-                  // （双击节点再选文件）；「关联场景」打开库场景挑选面板；
+                  // 剧本项：每次点击都放一个空纸片（双击纸片再选文件，
+                  // 与其他节点的加载节奏统一）；「关联场景」打开库场景挑选
+                  // 面板；
                   // 其余项（片段/角色/场景/道具/便签/提示词/素材）支持
                   // 点击与按住拖到画布松手两种落位（ComfyUI 搜索框惯例），
                   // 资料类先落空白节点、绝不先弹挑选面板；从「拖线到空
@@ -4942,14 +5099,11 @@ export default function ProjectCanvas({
                         onClick: () => {
                           setAddMenu(null);
                           setAddMenuQuery("");
-                          if (overview?.episode.script_path) {
-                            locateScript();
-                          } else {
-                            // 剧本两段式：只放空节点上画布（出生在双击位置），
-                            // 双击节点再从库选文件——与其他节点加载统一。
-                            armSpawnAt(addMenu.wx, addMenu.wy);
-                            persistScriptNodeAdded(true);
-                          }
+                          // 与其他节点统一：每次都放一个空剧本纸片（出生在
+                          // 双击位置），双击纸片再从库选文件；本集还没剧本
+                          // 时首个挂接的文件转正为主剧本。
+                          armSpawnAt(addMenu.wx, addMenu.wy);
+                          addScriptPh();
                         },
                       }
                     : item.panel === "linkScene"
@@ -5216,13 +5370,17 @@ export default function ProjectCanvas({
           onPick={(file) => attachSegmentFromLibrary(pickerFor.slice(8), file)}
         />
       )}
-      {/* 挂剧本：从资源库选文件设为本集剧本，挂接即自动连全部片段提示词口 */}
+      {/* 挂剧本：目标 = 主剧本时选文件设为本集剧本，挂接即自动连全部片段
+          提示词口；目标 = 剧本纸片时挂到纸片自己（本集无剧本则转正为主剧本） */}
       {scriptPickOpen && (
         <ProjectFilePickerDialog
           title={t("project.canvas.linkScript")}
           takenPaths={new Set()}
           takenLabel=""
-          onClose={() => setScriptPickOpen(false)}
+          onClose={() => {
+            setScriptPickOpen(false);
+            setScriptPickTarget(null);
+          }}
           onPick={(file) => handleScriptPick(file.filePath)}
         />
       )}

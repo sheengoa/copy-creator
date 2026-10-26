@@ -535,7 +535,6 @@
       "linkProps": "出场道具",
       "typeEpisode": "剧本",
       "typeEpisodeHint": "添加剧本节点 · 双击选择文件",
-      "typeEpisodeLocatedHint": "已挂接 · 点击定位",
       "scriptUntitled": "未挂接",
       "scriptEmpty": "双击选择剧本文件",
       "nodeGroup": "组",

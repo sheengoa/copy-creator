@@ -535,7 +535,6 @@
       "linkProps": "Props",
       "typeEpisode": "Episode script",
       "typeEpisodeHint": "Add a script node · double-click to pick a file",
-      "typeEpisodeLocatedHint": "Linked · click to locate",
       "scriptUntitled": "No file linked",
       "scriptEmpty": "Double-click to pick a script file",
       "nodeGroup": "Group",
