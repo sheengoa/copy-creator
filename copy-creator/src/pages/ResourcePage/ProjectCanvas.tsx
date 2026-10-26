@@ -2313,6 +2313,23 @@ export default function ProjectCanvas({
             layout.looses.forEach((loose) => {
               if (inBox(pos.loose[loose.asset.id], loose.w, loose.h)) list.push(loose.key);
             });
+            // 资料节点（含组/剧本）、空白资料占位、片段、素材占位、成片：
+            // 框选与点选同一套选中态（边缘点亮），删除也走同一套 Delete。
+            infoNodes.forEach((node) => {
+              if (inBox(infoNodePos(node.key), node.w, node.h)) list.push(node.key);
+            });
+            entityPhs.forEach((ph) => {
+              if (inBox(infoNodePos(`eph:${ph.id}`), INFO_W, INFO_H)) list.push(`eph:${ph.id}`);
+            });
+            segments.forEach((segment) => {
+              const size = sizeOfNode(`segment:${segment.id}`);
+              if (inBox(segPos[segment.id], size?.w ?? SEG_W, size?.h ?? SEG_H)) list.push(`segment:${segment.id}`);
+            });
+            placeholders.forEach((ph) => {
+              const size = sizeOfNode(`placeholder:${ph.id}`);
+              if (inBox({ x: ph.x, y: ph.y }, size?.w ?? LOOSE_W, size?.h ?? MISSING_H)) list.push(`placeholder:${ph.id}`);
+            });
+            if (outputBox && inBox({ x: outputBox.x, y: outputBox.y }, outputBox.w, outputBox.h)) list.push("output");
           }
         }
         setSelection(list);
@@ -2354,7 +2371,7 @@ export default function ProjectCanvas({
       document.removeEventListener("mousemove", onMove);
       document.removeEventListener("mouseup", onUp);
     };
-  }, [layout, pos, view, scenePos, infoPos, boxOf, portsOf, outPointOf, inPointOf, linkAssets, persistCards, persistLoose, saveCanvasLayout, saveInfoFramePos, saveView, setSelection, saveOutputPos, setEpisodeOutput, episodeId, notes, persistNotes, addNote, addPlaceholder, addEntityPh, persistPlaceholders, persistSegments, linkNode, nodeKeyParts, addSegment, autoConnectNewNode, persistSizes, persistInfoOffsets, infoGroups]);
+  }, [layout, pos, view, scenePos, infoPos, boxOf, portsOf, outPointOf, inPointOf, linkAssets, persistCards, persistLoose, saveCanvasLayout, saveInfoFramePos, saveView, setSelection, saveOutputPos, setEpisodeOutput, episodeId, notes, persistNotes, addNote, addPlaceholder, addEntityPh, persistPlaceholders, persistSegments, linkNode, nodeKeyParts, addSegment, autoConnectNewNode, persistSizes, persistInfoOffsets, infoGroups, infoNodes, infoNodePos, entityPhs, segments, segPos, placeholders, sizeOfNode, outputBox]);
 
   // ── 节点操作 ──
   // 节点接口圆点（ComfyUI 式）：输入口列在左缘（片段五口按列分布）、
@@ -2625,6 +2642,104 @@ export default function ProjectCanvas({
     },
     [infoGroups, associateEntities, groupWiredPorts, linkNode, episodeId, persistInfoGroups],
   );
+  // ── 节点删除（工具条与 Delete 键共用同一套语义）──
+  // 资料实体节点：解除连线 + 移出本集关联（实体保留在库里，可再关联）。
+  const removeInfoEntity = useCallback(
+    async (kind: EntityPhKind, entityId: string) => {
+      if (!episodeId || !overview) return;
+      await unlinkEntityLinks(kind, entityId);
+      const episode = overview.episode;
+      if (kind === "character") await setEpisodeCharacters(episodeId, (episode.character_ids ?? []).filter((id) => id !== entityId));
+      else if (kind === "location") await setEpisodeLocations(episodeId, (episode.location_ids ?? []).filter((id) => id !== entityId));
+      else await setEpisodeProps(episodeId, (episode.prop_ids ?? []).filter((id) => id !== entityId));
+    },
+    [episodeId, overview, setEpisodeCharacters, setEpisodeLocations, setEpisodeProps, unlinkEntityLinks],
+  );
+  // 组节点：解散分组（成员实体与连线保留，自动回到默认单实体节点）。
+  const removeGroup = useCallback(
+    (groupId: string) => {
+      persistInfoGroups(infoGroups.filter((g) => g.id !== groupId));
+    },
+    [infoGroups, persistInfoGroups],
+  );
+  // 剧本节点：解除挂接（剧本文件留在库内），提示词连线一并清理。
+  const detachScript = useCallback(async () => {
+    const episode = overview?.episode;
+    if (!episodeId || !episode?.script_path) return;
+    const rows = (overview?.node_links ?? []).filter((l) => l.from_kind === "script");
+    for (const row of rows) await unlinkNode(row.from_kind, row.from_id, row.to_segment, row.to_port);
+    await updateEpisode(episodeId, { title: episode.title, status: episode.status, script_path: "" });
+  }, [episodeId, overview, unlinkNode, updateEpisode]);
+  // 空白资料占位：删除占位并清掉它拖动过的位置记忆。
+  const removeEntityPh = useCallback(
+    (phId: string) => {
+      const next = { ...infoOffsets };
+      delete next[`eph:${phId}`];
+      persistInfoOffsets(next);
+      persistEntityPhs(entityPhs.filter((item) => item.id !== phId));
+    },
+    [entityPhs, infoOffsets, persistEntityPhs, persistInfoOffsets],
+  );
+  // 素材占位节点：从画布移除占位记录。
+  const removePlaceholder = useCallback(
+    (phId: string) => {
+      persistPlaceholders(placeholders.filter((item) => item.id !== phId));
+    },
+    [placeholders, persistPlaceholders],
+  );
+  // ── 键盘删除：Delete/Backspace 删除选中节点，与各节点工具条同一套
+  // 语义（镜头卡有确认对话框，走同一确认流程；其余即时删除）。输入框
+  // 聚焦或任一弹层打开时不响应，避免误删。 ──
+  useEffect(() => {
+    if (selKeys.length === 0) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key !== "Delete" && e.key !== "Backspace") return;
+      const target = e.target as HTMLElement | null;
+      if (target && (target.tagName === "INPUT" || target.tagName === "TEXTAREA" || target.isContentEditable)) return;
+      if (
+        detailFor || pickerFor || memberPick || addMenu || wireDraft ||
+        scriptPickOpen || locationPickOpen || sceneForm || shotForm ||
+        deleteSceneTarget || deleteShotTarget
+      ) {
+        return;
+      }
+      e.preventDefault();
+      const shotKeys = selKeys.filter((k) => k.startsWith("shot:"));
+      for (const key of selKeys) {
+        if (key.startsWith("shot:")) continue;
+        if (key === "output") {
+          if (episodeId) void setEpisodeOutput(episodeId, null);
+        } else if (key.startsWith("segment:")) {
+          void removeSegment(key.slice(8));
+        } else if (key.startsWith("placeholder:")) {
+          removePlaceholder(key.slice(12));
+        } else if (key.startsWith("eph:")) {
+          removeEntityPh(key.slice(4));
+        } else if (key.startsWith("grp:")) {
+          removeGroup(key.slice(4));
+        } else if (key === "script") {
+          void detachScript();
+        } else if (key.startsWith("asset:")) {
+          void unlinkAsset(key.slice(6));
+        } else if (key.startsWith("char:") || key.startsWith("loc:") || key.startsWith("prop:")) {
+          const kind: EntityPhKind = key.startsWith("char:") ? "character" : key.startsWith("loc:") ? "location" : "prop";
+          void removeInfoEntity(kind, key.slice(key.indexOf(":") + 1));
+        }
+      }
+      if (shotKeys.length > 0) {
+        const shot = scenes.flatMap((s) => s.shots).find((item) => item.id === shotKeys[0].slice(5));
+        if (shot) setDeleteShotTarget(shot);
+      }
+      setSelection([]);
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [
+    selKeys, detailFor, pickerFor, memberPick, addMenu, wireDraft, scriptPickOpen, locationPickOpen,
+    sceneForm, shotForm, deleteSceneTarget, deleteShotTarget, episodeId, scenes,
+    setEpisodeOutput, removeSegment, removePlaceholder, removeEntityPh, removeGroup, detachScript,
+    unlinkAsset, removeInfoEntity, setDeleteShotTarget, setSelection,
+  ]);
   // 成员装入面板（多选 + 装入确认）：eph 加载 / 组追加裁剪 / 默认节点转组。
   const applyMemberPick = useCallback(async () => {
     const pick = memberPick;
@@ -3665,13 +3780,7 @@ export default function ProjectCanvas({
                     type="button"
                     data-tooltip={t("common.delete")}
                     className="danger"
-                    onClick={() => {
-                      // 删除占位时一并清掉它拖动过的位置记忆。
-                      const next = { ...infoOffsets };
-                      delete next[key];
-                      persistInfoOffsets(next);
-                      persistEntityPhs(entityPhs.filter((item) => item.id !== ph.id));
-                    }}
+                    onClick={() => removeEntityPh(ph.id)}
                   >
                     {Icons.close}
                   </button>
@@ -3878,7 +3987,7 @@ export default function ProjectCanvas({
                     type="button"
                     data-tooltip={t("common.delete")}
                     className="danger"
-                    onClick={() => persistPlaceholders(placeholders.filter((item) => item.id !== ph.id))}
+                    onClick={() => removePlaceholder(ph.id)}
                   >
                     {Icons.close}
                   </button>
