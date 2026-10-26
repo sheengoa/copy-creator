@@ -14,7 +14,17 @@ const loadRoot = async () => {
   return (await import("./App")).default;
 };
 
-void loadRoot().then((Root) => {
+// 浏览器直开 dev 页面（无 Tauri 环境）时注入内存后端，供前端验证与模拟；
+// Tauri 应用存在 __TAURI_INTERNALS__，本分支不会执行。
+const boot = async () => {
+  if (!("__TAURI_INTERNALS__" in window)) {
+    const { installBrowserMock } = await import("./dev/tauriMock");
+    installBrowserMock();
+  }
+  return loadRoot();
+};
+
+void boot().then((Root) => {
   ReactDOM.createRoot(document.getElementById("root")!).render(
     <React.StrictMode>
       <Root />
