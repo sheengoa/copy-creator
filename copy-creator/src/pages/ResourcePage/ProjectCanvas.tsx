@@ -618,6 +618,43 @@ export default function ProjectCanvas({
     [placeholders, persistPlaceholders],
   );
 
+  // ── 空白资料占位节点（菜单选 角色/场景/道具 即创建，创建时绝不弹
+  // 挑选面板；双击节点从详情窗加载实体，加载后原位变成实体节点）：
+  // 按集存 localStorage ──
+  type EntityPhKind = "character" | "location" | "prop";
+  interface EntityPh { id: string; kind: EntityPhKind; x: number; y: number }
+  const [entityPhs, setEntityPhs] = useState<EntityPh[]>([]);
+  const entityPhKey = `project_canvas_entityph_${episodeId}`;
+  useEffect(() => {
+    if (!episodeId) return; // 刷新瞬态（见资料框位置处的说明）。
+    try {
+      const raw = window.localStorage.getItem(entityPhKey);
+      setEntityPhs(raw ? (JSON.parse(raw) as EntityPh[]) : []);
+    } catch {
+      setEntityPhs([]);
+    }
+  }, [entityPhKey, episodeId]);
+  const persistEntityPhs = useCallback(
+    (next: EntityPh[]) => {
+      setEntityPhs(next);
+      try {
+        window.localStorage.setItem(entityPhKey, JSON.stringify(next));
+      } catch {
+        // 存储不可用：仅不记忆。
+      }
+    },
+    [entityPhKey],
+  );
+  const addEntityPh = useCallback(
+    (kind: EntityPhKind, x: number, y: number) => {
+      persistEntityPhs([
+        ...entityPhs,
+        { id: `e${Date.now()}${Math.floor(Math.random() * 1e4)}`, kind, x, y },
+      ]);
+    },
+    [entityPhs, persistEntityPhs],
+  );
+
   // ── 布局与位置（state 驱动渲染） ──
   const layout = useMemo(() => {
     const base = buildLayout(scenes, looseAssets);
@@ -774,8 +811,16 @@ export default function ProjectCanvas({
     [infoOffsetsKey],
   );
   const infoNodePos = useCallback(
-    (key: string): Pos => infoOffsets[key] ?? infoPos.map[key],
-    [infoOffsets, infoPos],
+    (key: string): Pos => {
+      if (infoOffsets[key]) return infoOffsets[key];
+      // 空白资料占位节点：默认落创建点（拖动后同样走 infoOffsets）。
+      if (key.startsWith("eph:")) {
+        const ph = entityPhs.find((item) => `eph:${item.id}` === key);
+        if (ph) return { x: ph.x, y: ph.y };
+      }
+      return infoPos.map[key];
+    },
+    [infoOffsets, infoPos, entityPhs],
   );
 
   // ── 新节点出生锚点：任何「加载」动作（添加菜单挑实体/挂剧本/详情窗
@@ -827,11 +872,14 @@ export default function ProjectCanvas({
   const [detailFor, setDetailFor] = useState<
     | { kind: "asset"; id: string }
     | { kind: "placeholder"; id: string }
+    | { kind: "entityPh"; id: string }
     | { kind: "segment"; id: string; scopes: { chars: DetailScope; locs: DetailScope; props: DetailScope } }
     | { kind: "info"; group: "characters" | "locations" | "props"; sourceKey: string; scope: DetailScope }
     | { kind: "script" }
     | null
   >(null);
+  // 空白资料节点详情窗内的「加载」二级面板（单选即绑定即关）。
+  const [ephBindFor, setEphBindFor] = useState<string | null>(null);
   // 详情窗口内「从资源库选择」的二级选择器目标。
   const [pickerFor, setPickerFor] = useState<`placeholder:${string}` | `segment:${string}` | null>(null);
   const [detailError, setDetailError] = useState("");
@@ -846,6 +894,7 @@ export default function ProjectCanvas({
     prevRealEpisodeRef.current = episodeId;
     setDetailFor(null);
     setPickerFor(null);
+    setEphBindFor(null);
     setDetailError("");
     setPulseKeys([]);
     spawnAnchorRef.current = null;
@@ -916,6 +965,34 @@ export default function ProjectCanvas({
       await setSegmentAsset(segmentId, asset.id);
       await selectEpisode(episodeId);
     });
+  };
+  // 空白资料节点 → 加载实体：占位原位变成该实体的资料节点（位置迁移），
+  // 并把实体并进本集关联；详情窗切换到已加载实体形成「加载完成」反馈。
+  const bindEntityPh = async (phId: string, entityId: string) => {
+    const ph = entityPhs.find((item) => item.id === phId);
+    if (!ph || !episodeId || !overview) return;
+    setEphBindFor(null);
+    const prefix = ph.kind === "character" ? "char" : ph.kind === "location" ? "loc" : "prop";
+    const group: "characters" | "locations" | "props" =
+      ph.kind === "character" ? "characters" : ph.kind === "location" ? "locations" : "props";
+    const realKey = `${prefix}:${entityId}`;
+    const pos = infoNodePos(`eph:${phId}`);
+    const nextOffsets = { ...infoOffsets, [realKey]: pos };
+    delete nextOffsets[`eph:${phId}`];
+    persistInfoOffsets(nextOffsets);
+    persistEntityPhs(entityPhs.filter((item) => item.id !== phId));
+    const episode = overview.episode;
+    if (ph.kind === "prop") {
+      await setEpisodeProps(episodeId, [...new Set([...(episode.prop_ids ?? []), entityId])]);
+    } else if (ph.kind === "location") {
+      await setEpisodeLocations(episodeId, [...new Set([...(episode.location_ids ?? []), entityId])]);
+    } else {
+      await setEpisodeCharacters(episodeId, [...new Set([...(episode.character_ids ?? []), entityId])]);
+    }
+    setPulseKeys([realKey]);
+    if (pulseTimerRef.current) window.clearTimeout(pulseTimerRef.current);
+    pulseTimerRef.current = window.setTimeout(() => setPulseKeys([]), 2400);
+    setDetailFor({ kind: "info", group, sourceKey: realKey, scope: "current" });
   };
 
 
@@ -1103,6 +1180,12 @@ export default function ProjectCanvas({
       worldW = Math.max(worldW, p.x + node.w + 40);
       worldH = Math.max(worldH, p.y + node.h + 40);
     });
+    // 空白资料节点可能被拖到世界任意角落，同样要进包围盒。
+    entityPhs.forEach((ph) => {
+      const p = infoNodePos(`eph:${ph.id}`);
+      worldW = Math.max(worldW, p.x + INFO_W + 40);
+      worldH = Math.max(worldH, p.y + INFO_H + 40);
+    });
     Object.values(segPos).forEach((p) => {
       worldW = Math.max(worldW, p.x + SEG_W + 40);
       worldH = Math.max(worldH, p.y + SEG_H + 200);
@@ -1119,7 +1202,7 @@ export default function ProjectCanvas({
     };
     setView(next);
     saveView(next);
-  }, [layout, infoPos, infoNodes, infoNodePos, segPos, saveView, outputBox]);
+  }, [layout, infoPos, infoNodes, infoNodePos, segPos, saveView, outputBox, entityPhs]);
 
   const initializedRef = useRef("");
   useEffect(() => {
@@ -1648,10 +1731,10 @@ export default function ProjectCanvas({
         }
         if (
           key.startsWith("char:") || key.startsWith("loc:") ||
-          key.startsWith("prop:") || key === "script"
+          key.startsWith("prop:") || key === "script" || key.startsWith("eph:")
         ) {
-          // 资料节点：按下即自由拖动（覆盖层按绝对位置记忆，资料框退化为
-          // 背景分组框，节点不再被网格钉死）。
+          // 资料节点（含空白资料占位）：按下即自由拖动（覆盖层按绝对
+          // 位置记忆，资料框退化为背景分组框，节点不再被网格钉死）。
           const p = infoNodePos(key);
           nodeEl.classList.add("pc-dragging");
           dragRef.current = {
@@ -2075,6 +2158,14 @@ export default function ProjectCanvas({
               autoConnectNewNode(`segment:${segment.id}`, drag.wire);
             }
           });
+        } else if (
+          drag.frameKey === "character" ||
+          drag.frameKey === "location" ||
+          drag.frameKey === "prop"
+        ) {
+          // 「角色/场景/道具」：创建空白资料占位节点（不入库、不弹挑选
+          // 面板），双击占位节点从详情窗加载实体；加载后原位变成实体节点。
+          addEntityPh(drag.frameKey, dropPos.x, dropPos.y);
         } else {
           // 「素材」：创建空占位节点（不入库），双击占位节点才从库挑
           // 文件填充；填充后落位在占位节点处。
@@ -2144,7 +2235,7 @@ export default function ProjectCanvas({
       document.removeEventListener("mousemove", onMove);
       document.removeEventListener("mouseup", onUp);
     };
-  }, [layout, pos, view, scenePos, infoPos, boxOf, portsOf, outPointOf, inPointOf, linkAssets, persistCards, persistLoose, saveCanvasLayout, saveInfoFramePos, saveView, setSelection, saveOutputPos, setEpisodeOutput, episodeId, notes, persistNotes, addNote, addPlaceholder, persistPlaceholders, persistSegments, linkNode, nodeKeyParts, addSegment, autoConnectNewNode, persistSizes, persistInfoOffsets]);
+  }, [layout, pos, view, scenePos, infoPos, boxOf, portsOf, outPointOf, inPointOf, linkAssets, persistCards, persistLoose, saveCanvasLayout, saveInfoFramePos, saveView, setSelection, saveOutputPos, setEpisodeOutput, episodeId, notes, persistNotes, addNote, addPlaceholder, addEntityPh, persistPlaceholders, persistSegments, linkNode, nodeKeyParts, addSegment, autoConnectNewNode, persistSizes, persistInfoOffsets]);
 
   // ── 节点操作 ──
   // 节点接口圆点（ComfyUI 式）：输入口列在左缘（片段五口按列分布）、
@@ -2297,11 +2388,15 @@ export default function ProjectCanvas({
     setPickerFor(null);
     setDetailError("");
   };
-  // 窗口惯例：Esc 关闭最上层（二级选择器开着时先关它）。
+  // 窗口惯例：Esc 关闭最上层（二级选择器/加载面板开着时先关它）。
   useEffect(() => {
     if (!detailFor) return;
     const onKey = (e: KeyboardEvent) => {
       if (e.key !== "Escape") return;
+      if (ephBindFor) {
+        setEphBindFor(null);
+        return;
+      }
       if (pickerFor) {
         setPickerFor(null);
         return;
@@ -2311,7 +2406,7 @@ export default function ProjectCanvas({
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [detailFor, pickerFor]);
+  }, [detailFor, pickerFor, ephBindFor]);
   const detailDialog = (() => {
     if (!detailFor || !overview) return null;
     const fileHint = (relative: string) => joinLibraryPath(libraryRoot, relative);
@@ -2537,6 +2632,39 @@ export default function ProjectCanvas({
               </div>
             </div>
           )}
+          onClose={closeDetail}
+        />
+      );
+    }
+    if (detailFor.kind === "entityPh") {
+      const ph = entityPhs.find((item) => item.id === detailFor.id);
+      if (!ph) return null;
+      const group: "characters" | "locations" | "props" =
+        ph.kind === "character" ? "characters" : ph.kind === "location" ? "locations" : "props";
+      const kindLabel = kindLabelOf(group);
+      const openBind = () => setEphBindFor(ph.id);
+      return (
+        <ProjectNodeDetailDialog
+          title={kindLabel}
+          accent={NODE_ACCENTS[ph.kind] ?? "#94a3b8"}
+          error={detailError}
+          entries={[{
+            key: `eph:${ph.id}`,
+            title: t("project.canvas.ephUnloaded"),
+            badge: kindLabel,
+            preview: (
+              <button type="button" className="pc-detail-drop" onClick={openBind}>
+                {ph.kind === "character" ? Icons.clipboard : ph.kind === "location" ? Icons.resources : Icons.star}
+                {t("project.canvas.ephPickHint")}
+              </button>
+            ),
+            info: [{ label: t("project.canvas.detailStatus"), value: t("project.canvas.ephUnloaded") }],
+            actions: (
+              <button type="button" className="pc-detail-btn primary" onClick={openBind}>
+                {Icons.resources}{t("project.canvas.ephLoad")}
+              </button>
+            ),
+          }]}
           onClose={closeDetail}
         />
       );
@@ -3225,6 +3353,44 @@ export default function ProjectCanvas({
             );
           })}
 
+          {/* 空白资料占位节点：菜单创建（角色/场景/道具），双击从详情窗
+              加载实体，加载后原位变成实体节点 */}
+          {entityPhs.map((ph) => {
+            const key = `eph:${ph.id}`;
+            const p = infoNodePos(key);
+            const label = t(
+              ph.kind === "character"
+                ? "project.canvas.typeCharacter"
+                : ph.kind === "location"
+                  ? "project.canvas.typeLocation"
+                  : "project.canvas.typeProp",
+            );
+            return (
+              <div
+                key={key}
+                data-key={key}
+                className="pc-node pc-info pc-eph"
+                style={{ left: p.x, top: p.y, width: INFO_W, ["--node-accent" as string]: NODE_ACCENTS[ph.kind] ?? "#94a3b8" } as React.CSSProperties}
+                onDoubleClick={(event) => {
+                  event.stopPropagation();
+                  setDetailFor({ kind: "entityPh", id: ph.id });
+                }}
+              >
+                <div className="pc-node-head">
+                  <span className="pc-node-kind">{label}</span>
+                  <b className="pc-node-title">{t("project.canvas.ephTitle")}</b>
+                </div>
+                <div className="pc-info-body pc-eph-body">
+                  <span className="pc-info-ava">
+                    {ph.kind === "character" ? Icons.clipboard : ph.kind === "location" ? Icons.resources : Icons.star}
+                  </span>
+                  <b className="pc-info-name">{label}</b>
+                  <small className="pc-info-role">{t("project.canvas.ephHint")}</small>
+                </div>
+              </div>
+            );
+          })}
+
           {/* 片段节点：AI 分段生成的视频分段，按拼接序汇入本集成片 */}
           {segments.map((segment, index) => {
             const p = segPos[segment.id];
@@ -3508,21 +3674,21 @@ export default function ProjectCanvas({
                 label: t("project.canvas.typeCharacter"),
                 hint: t("project.canvas.typeCharacterHint"),
                 icon: Icons.clipboard,
-                panel: "characters",
+                panel: "",
               },
               {
                 key: "location",
                 label: t("project.canvas.typeLocation"),
                 hint: t("project.canvas.typeLocationHint"),
                 icon: Icons.resources,
-                panel: "locations",
+                panel: "",
               },
               {
                 key: "prop",
                 label: t("project.canvas.typeProp"),
                 hint: t("project.canvas.typePropHint"),
                 icon: Icons.star,
-                panel: "props",
+                panel: "",
               },
               {
                 key: "note",
@@ -3552,11 +3718,12 @@ export default function ProjectCanvas({
                   key={item.key}
                   type="button"
                   className="pc-addmenu-item"
-                  // 资料类节点点击打开库挑选面板（挑选即关联进资料框）；
                   // 剧本项：已挂接则定位到剧本纸片，未挂接则从库选文件挂
-                  // 到本集；创建类节点支持点击与按住拖到画布松手两种落位
-                  // （ComfyUI 搜索框惯例）；从「拖线到空白」进入时创建的
-                  // 节点自动接上那条线。
+                  // 到本集；其余项（片段/角色/场景/道具/便签/提示词/素材）
+                  // 支持点击与按住拖到画布松手两种落位（ComfyUI 搜索框惯
+                  // 例），资料类先落空白节点、绝不先弹挑选面板；从「拖线
+                  // 到空白」进入时创建的节点自动接上那条线（资料占位无
+                  // 端口，待加载实体后再连线）。
                   {...(item.panel === "script"
                     ? {
                         onClick: () => {
@@ -3571,19 +3738,7 @@ export default function ProjectCanvas({
                           }
                         },
                       }
-                    : item.panel
-                      ? {
-                          onClick: () => {
-                            setAddMenu(null);
-                            setAddMenuQuery("");
-                            // 挑中的实体节点出生在双击位置，而不是资料框网格。
-                            armSpawnAt(addMenu.wx, addMenu.wy);
-                            if (item.panel === "characters") setCastPickOpen(true);
-                            if (item.panel === "locations") setLocationPickOpen(true);
-                            if (item.panel === "props") setPropPickOpen(true);
-                          },
-                        }
-                      : {
+                    : {
                           onMouseDown: (event: React.MouseEvent) => {
                             if (event.button !== 0) return;
                             event.stopPropagation();
@@ -3915,6 +4070,31 @@ export default function ProjectCanvas({
           }}
         />
       )}
+      {/* 空白资料节点详情窗内的「加载」面板：单选即绑定到该节点 */}
+      {ephBindFor && (() => {
+        const ph = entityPhs.find((item) => item.id === ephBindFor);
+        if (!ph) return null;
+        const group: "characters" | "locations" | "props" =
+          ph.kind === "character" ? "characters" : ph.kind === "location" ? "locations" : "props";
+        const groupLabel = t(
+          group === "characters"
+            ? "project.canvas.typeCharacter"
+            : group === "locations"
+              ? "project.canvas.typeLocation"
+              : "project.canvas.typeProp",
+        );
+        return (
+          <ProjectLibraryPanel
+            kind={group}
+            mode="pick"
+            onClose={() => setEphBindFor(null)}
+            pickTitle={t("project.canvas.ephBindTitle", { kind: groupLabel })}
+            onPick={(id) => {
+              void bindEntityPh(ph.id, id);
+            }}
+          />
+        );
+      })()}
     </div>
   );
 }

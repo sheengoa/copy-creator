@@ -529,9 +529,9 @@
       "typeSegmentHint": "AI-generated video segment unit",
       "linkScene": "Link locations",
       "typePromptHint": "Pick a prompt asset from the library",
-      "typeCharacterHint": "Pick cast members from the character library",
-      "typeLocationHint": "Pick locations from the location library",
-      "typePropHint": "Pick props from the prop library",
+      "typeCharacterHint": "Create an empty character node; double-click to load",
+      "typeLocationHint": "Create an empty location node; double-click to load",
+      "typePropHint": "Create an empty prop node; double-click to load",
       "linkCast": "Cast",
       "linkProps": "Props",
       "typeEpisode": "Episode script",
@@ -557,7 +557,13 @@
       "detailNone": "Nothing to show",
       "detailAdd": "Add {{kind}}",
       "detailAddMore": "Add more",
-      "detailRelinkScript": "Relink script"
+      "detailRelinkScript": "Relink script",
+      "ephTitle": "Empty",
+      "ephHint": "Double-click to load",
+      "ephUnloaded": "Not loaded",
+      "ephPickHint": "Pick one from the library to load into this node",
+      "ephLoad": "Load from library…",
+      "ephBindTitle": "Load {{kind}}"
     },
     "library": {
       "characters": "Characters",

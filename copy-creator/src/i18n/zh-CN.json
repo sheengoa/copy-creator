@@ -529,9 +529,9 @@
       "typeSegmentHint": "AI 分段生成的视频单元",
       "linkScene": "关联场景",
       "typePromptHint": "从库选择提示词素材",
-      "typeCharacterHint": "从角色库勾选出场角色",
-      "typeLocationHint": "从场景库勾选出场场景",
-      "typePropHint": "从道具库勾选出场道具",
+      "typeCharacterHint": "创建空白角色节点，双击加载",
+      "typeLocationHint": "创建空白场景节点，双击加载",
+      "typePropHint": "创建空白道具节点，双击加载",
       "linkCast": "出场角色",
       "linkProps": "出场道具",
       "typeEpisode": "剧本",
@@ -557,7 +557,13 @@
       "detailNone": "暂无可展示的条目",
       "detailAdd": "添加{{kind}}",
       "detailAddMore": "继续添加",
-      "detailRelinkScript": "重新挂接剧本"
+      "detailRelinkScript": "重新挂接剧本",
+      "ephTitle": "未加载",
+      "ephHint": "双击加载",
+      "ephUnloaded": "未加载",
+      "ephPickHint": "点击从对应库挑选并加载到本节点",
+      "ephLoad": "从库加载…",
+      "ephBindTitle": "加载{{kind}}"
     },
     "library": {
       "characters": "角色库",

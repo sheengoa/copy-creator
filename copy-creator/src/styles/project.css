@@ -3036,6 +3036,16 @@
   gap: 7px;
   text-align: center;
 }
+
+/* 空白资料占位节点：虚线框 + 淡图标表达「待加载」，与已加载实体区分 */
+.pc-eph-body {
+  margin: 0 10px 10px;
+  border: 1.5px dashed color-mix(in srgb, var(--node-accent, var(--text-secondary)) 45%, transparent);
+  border-radius: 10px;
+  min-height: 76px;
+}
+.pc-eph-body .pc-info-ava { opacity: 0.45; }
+.pc-eph-body .pc-info-role { color: var(--text-secondary); }
 .pc-info-ava {
   width: 56px; height: 56px; border-radius: 50%; overflow: hidden;
   display: flex; align-items: center; justify-content: center;
