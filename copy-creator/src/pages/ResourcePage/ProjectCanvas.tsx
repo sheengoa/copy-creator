@@ -4114,8 +4114,9 @@ export default function ProjectCanvas({
             {outputBox &&
               segments.map((segment) => {
                 const a = outPointOf(`segment:${segment.id}`);
-                if (!a) return null;
-                const b = { x: outputBox.x, y: outputBox.y + outputBox.h / 2 };
+                // 终点 = 实测「成片」输入口（端口在卡内，随卡体尺寸实测）。
+                const b = inPointOf("output");
+                if (!a || !b) return null;
                 const d = wirePathD(a, b);
                 return (
                   <g key={`seg-out-${segment.id}`} className="pc-wire">
@@ -4140,8 +4141,8 @@ export default function ProjectCanvas({
               const outputKey = overview?.episode.output_asset_id;
               if (!outputKey || !outputBox) return null;
               const a = outPointOf(outputKey.startsWith("shot:") ? outputKey : `asset:${outputKey}`);
-              if (!a) return null;
-              const b = { x: outputBox.x, y: outputBox.y + outputBox.h / 2 };
+              const b = inPointOf("output");
+              if (!a || !b) return null;
               const d = wirePathD(a, b);
               const midX = (a.x + b.x) / 2;
               const midY = (a.y + b.y) / 2;
