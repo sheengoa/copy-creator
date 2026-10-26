@@ -2120,7 +2120,8 @@
 /* 节点 hover 工具条 */
 .pc-node-tools {
   position: absolute;
-  top: -36px;
+  /* 悬浮在节点上方并与节点保持一点间隙 */
+  top: -46px;
   left: 50%;
   transform: translateX(-50%);
   display: flex;
@@ -2133,6 +2134,7 @@
   pointer-events: none;
   transition: opacity 0.12s ease;
   z-index: 6;
+  white-space: nowrap;
 }
 .pc-node:hover .pc-node-tools { opacity: 1; pointer-events: auto; }
 .pc-node-tools button {
@@ -2233,33 +2235,30 @@
 .pc-wire-temp.invalid { stroke: var(--danger); }
 
 /* ── 节点尺寸手柄（ComfyUI 式右下角斜纹角标） ── */
+/* 尺寸手柄：四角各一枚小方块，可向任意方向自由缩放（对角固定）。
+   悬停节点浮现，悬停/拖拽中高亮。 */
 .pc-resize {
   position: absolute;
-  right: 2px;
-  bottom: 2px;
-  width: 15px;
-  height: 15px;
-  cursor: nwse-resize;
-  z-index: 6;
+  width: 11px;
+  height: 11px;
+  border-radius: 3px;
+  background: var(--bg-card);
+  border: 1px solid var(--separator);
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.18);
+  z-index: 7;
   opacity: 0;
-  transition: opacity 0.12s ease;
+  transition: opacity 0.12s ease, background 0.12s ease, border-color 0.12s ease;
 }
-.pc-resize::before {
-  content: "";
-  position: absolute;
-  inset: 2px;
-  border-radius: 2px;
-  background: linear-gradient(
-    135deg,
-    transparent 0 32%,
-    var(--text-secondary) 32% 43%,
-    transparent 43% 57%,
-    var(--text-secondary) 57% 68%,
-    transparent 68%
-  );
+.pc-resize.nw { left: -5px; top: -5px; cursor: nwse-resize; }
+.pc-resize.ne { right: -5px; top: -5px; cursor: nesw-resize; }
+.pc-resize.sw { left: -5px; bottom: -5px; cursor: nesw-resize; }
+.pc-resize.se { right: -5px; bottom: -5px; cursor: nwse-resize; }
+.pc-node:hover .pc-resize { opacity: 0.85; }
+.pc-resize:hover, .pc-node.pc-resizing .pc-resize {
+  opacity: 1;
+  background: var(--accent);
+  border-color: var(--accent);
 }
-.pc-node:hover .pc-resize { opacity: 0.65; }
-.pc-resize:hover, .pc-node.pc-resizing .pc-resize { opacity: 1; }
 
 /* ── 节点详情预览窗口（双击节点的独立窗口：预览 + 信息 + 动作） ── */
 .pc-detail-mask {
@@ -2674,23 +2673,27 @@
 }
 .pc-note-tools {
   position: absolute;
-  top: -14px;
-  right: 0;
-  display: inline-flex;
-  gap: 1px;
-  padding: 2px;
-  border-radius: 7px;
+  /* 与节点工具条同款：悬浮上方、居中、留一点间隙 */
+  top: -46px;
+  left: 50%;
+  transform: translateX(-50%);
+  display: flex;
+  gap: 2px;
+  padding: 3px;
+  border-radius: 9px;
   background: rgba(28, 28, 34, 0.94);
+  box-shadow: 0 6px 18px rgba(0, 0, 0, 0.3);
   opacity: 0;
   pointer-events: none;
   transition: opacity 0.12s ease;
   z-index: 6;
+  white-space: nowrap;
 }
 .pc-note:hover .pc-note-tools { opacity: 1; pointer-events: auto; }
 .pc-note-tools button {
-  width: 22px;
-  height: 22px;
-  border-radius: 5px;
+  width: 27px;
+  height: 27px;
+  border-radius: 7px;
   color: rgba(255, 255, 255, 0.85);
   display: inline-flex;
   align-items: center;
@@ -2698,6 +2701,8 @@
   cursor: pointer;
 }
 .pc-note-tools button:hover { background: rgba(255, 255, 255, 0.15); color: #fff; }
+.pc-note-tools button.danger:hover { background: var(--danger); }
+.pc-note-tools svg { width: 14px; height: 14px; }
 .pc-note-tools button.danger:hover { background: var(--danger); }
 .pc-note-tools svg { width: 12px; height: 12px; }
 

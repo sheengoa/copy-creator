@@ -1684,6 +1684,9 @@ export default function ProjectCanvas({
     mq?: HTMLDivElement;
     moves?: { key: string; x: number; y: number }[];
     frameKey?: string;
+    corner?: "nw" | "ne" | "sw" | "se";
+    px?: number;
+    py?: number;
     fox?: number;
     foy?: number;
     starts?: { key: string; x: number; y: number }[];
@@ -1736,6 +1739,23 @@ export default function ProjectCanvas({
         const key = nodeEl?.getAttribute("data-key") ?? "";
         const size = sizeOfNode(key);
         if (key && size) {
+          const corner = (resizeEl.getAttribute("data-corner") ?? "se") as DragState["corner"];
+          // 西/北角缩放会挪动节点，按下时记下原始位置。
+          let px: number | undefined;
+          let py: number | undefined;
+          if (key.startsWith("segment:")) {
+            const p = segPos[key.slice(8)];
+            px = p?.x;
+            py = p?.y;
+          } else if (key.startsWith("asset:")) {
+            const p = pos.loose[key.slice(6)];
+            px = p?.x;
+            py = p?.y;
+          } else if (key.startsWith("placeholder:")) {
+            const p = placeholders.find((item) => item.id === key.slice(12));
+            px = p?.x;
+            py = p?.y;
+          }
           nodeEl?.classList.add("pc-resizing");
           dragRef.current = {
             kind: "resize", sx: e.clientX, sy: e.clientY, moved: false,
@@ -1744,6 +1764,9 @@ export default function ProjectCanvas({
             ox: nodeSizes[key]?.w ?? nodeEl?.offsetWidth ?? size.w,
             oy: nodeSizes[key]?.h ?? (key.startsWith("segment:") ? nodeEl?.offsetHeight ?? size.h : size.h),
             frameKey: key,
+            corner,
+            px,
+            py,
           };
           e.preventDefault();
           return;
@@ -1987,12 +2010,40 @@ export default function ProjectCanvas({
           ),
         );
       } else if (drag.kind === "resize") {
-        // ComfyUI 式右下角改尺寸：实时预览，松手才持久化。
+        // 四角自由缩放：对角固定，实时预览；西/北角缩放联动挪动位置，
+        // 松手才持久化尺寸与位置。
         const key = drag.frameKey ?? "";
+        const corner = drag.corner ?? "se";
+        const dxW = dx / view.scale;
+        const dyW = dy / view.scale;
         const minW = key.startsWith("segment:") ? 180 : 150;
-        const w = Math.max(minW, (drag.ox ?? 0) + dx / view.scale);
-        const h = Math.max(90, (drag.oy ?? 0) + dy / view.scale);
+        const minH = 90;
+        let w = drag.ox ?? 0;
+        let h = drag.oy ?? 0;
+        if (corner === "ne" || corner === "se") w = Math.max(minW, w + dxW);
+        if (corner === "sw" || corner === "se") h = Math.max(minH, h + dyW);
+        if (corner === "nw" || corner === "sw") w = Math.max(minW, w - dxW);
+        if (corner === "nw" || corner === "ne") h = Math.max(minH, h - dyW);
         setNodeSizes((prev) => ({ ...prev, [key]: { w: Math.round(w), h: Math.round(h) } }));
+        const shiftX = corner === "nw" || corner === "sw";
+        const shiftY = corner === "nw" || corner === "ne";
+        if ((shiftX || shiftY) && drag.px != null && drag.py != null) {
+          const px = Math.round((drag.px ?? 0) + (shiftX ? (drag.ox ?? 0) - w : 0));
+          const py = Math.round((drag.py ?? 0) + (shiftY ? (drag.oy ?? 0) - h : 0));
+          // 回写进 drag 对象：mouseup 闭包可能拿不到最新 state，用它兜底。
+          drag.px = px;
+          drag.py = py;
+          if (key.startsWith("segment:")) {
+            const segId = key.slice(8);
+            setSegPos((prev) => ({ ...prev, [segId]: { x: px, y: py } }));
+          } else if (key.startsWith("asset:")) {
+            const assetId = key.slice(6);
+            setPos((prev) => ({ ...prev, loose: { ...prev.loose, [assetId]: { x: px, y: py } } }));
+          } else if (key.startsWith("placeholder:")) {
+            const phId = key.slice(12);
+            setPlaceholders((prev) => prev.map((item) => (item.id === phId ? { ...item, x: px, y: py } : item)));
+          }
+        }
       } else if (drag.kind === "infonode") {
         if (!drag.moved) return;
         const key = drag.frameKey ?? "";
@@ -2198,17 +2249,40 @@ export default function ProjectCanvas({
           });
         }
       } else if (drag.kind === "resize") {
-        // 改尺寸松手：把最终尺寸写入按集覆盖层。
+        // 改尺寸松手：尺寸已在移动中按角实时算好，这里落盘；西/北角
+        // 缩放挪过的位置一并持久化。
         const key = drag.frameKey ?? "";
         if (drag.moved && key) {
-          const minW = key.startsWith("segment:") ? 180 : 150;
-          const w = Math.max(minW, (drag.ox ?? 0) + (e.clientX - drag.sx) / view.scale);
-          const h = Math.max(90, (drag.oy ?? 0) + (e.clientY - drag.sy) / view.scale);
           setNodeSizes((prev) => {
-            const next = { ...prev, [key]: { w: Math.round(w), h: Math.round(h) } };
-            persistSizes(next);
-            return next;
+            if (prev[key]) persistSizes(prev);
+            return prev;
           });
+          const corner = drag.corner ?? "se";
+          if (corner !== "se") {
+            // mouseup 闭包里的 pos/segPos/placeholders 可能落后于拖拽中的
+            // 实时更新，用 drag 对象上的最终坐标覆盖后再落盘。
+            const finalX = drag.px;
+            const finalY = drag.py;
+            if (key.startsWith("segment:")) {
+              const segId = key.slice(8);
+              const p = segPos[segId];
+              persistSegments({ ...segPos, [segId]: finalX != null && finalY != null ? { x: finalX, y: finalY } : p });
+            } else if (key.startsWith("asset:")) {
+              const assetId = key.slice(6);
+              const p = pos.loose[assetId];
+              persistLoose({
+                ...pos.loose,
+                [assetId]: finalX != null && finalY != null ? { x: finalX, y: finalY } : (p ?? { x: 0, y: 0 }),
+              });
+            } else if (key.startsWith("placeholder:")) {
+              const phId = key.slice(12);
+              persistPlaceholders(
+                placeholders.map((item) =>
+                  item.id === phId && finalX != null && finalY != null ? { ...item, x: finalX, y: finalY } : item,
+                ),
+              );
+            }
+          }
         }
       } else if (drag.kind === "infonode") {
         if (drag.moved) {
@@ -2509,14 +2583,33 @@ export default function ProjectCanvas({
     h: ((vpSize?.h ?? 0) || 900) / view.scale + WIRES_VIEWPORT_PAD * 2,
   };
 
-  // 尺寸手柄（三处复用）：双击不冒泡到节点，避免连点手柄误开详情窗口。
+  // 尺寸手柄（四角）：双击不冒泡到节点，避免连点手柄误开详情窗口。
   const resizeHandle = (
-    <span
-      className="pc-resize"
-      aria-hidden="true"
-      onDoubleClick={(event) => event.stopPropagation()}
-    />
+    <>
+      {(["nw", "ne", "sw", "se"] as const).map((corner) => (
+        <span
+          key={corner}
+          className={`pc-resize ${corner}`}
+          data-corner={corner}
+          aria-hidden="true"
+          onDoubleClick={(event) => event.stopPropagation()}
+        />
+      ))}
+    </>
   );
+  // 资料节点 → 详情窗口（该类资源列表，当前/全部切换；剧本是单文件窗口）。
+  // 双击节点与悬停工具条的「查看」按钮共用。
+  const openInfoDetail = (node: { kind: string; key: string }) => {
+    if (node.kind === "character") {
+      setDetailFor({ kind: "info", group: "character", sourceKey: node.key, scope: "current" });
+    } else if (node.kind === "location") {
+      setDetailFor({ kind: "info", group: "location", sourceKey: node.key, scope: "current" });
+    } else if (node.kind === "prop") {
+      setDetailFor({ kind: "info", group: "prop", sourceKey: node.key, scope: "current" });
+    } else {
+      setDetailFor({ kind: "script" });
+    }
+  };
 
   // ── 节点详情窗口：按 detailFor 组装条目（预览 + 信息 + 动作）──
   const closeDetail = () => {
@@ -3609,7 +3702,7 @@ export default function ProjectCanvas({
                     className="danger"
                     onClick={() => void unlinkAsset(asset.id)}
                   >
-                    {Icons.close}
+                    {Icons.delete}
                   </button>
                 </span>
                 {resizeHandle}
@@ -3660,18 +3753,9 @@ export default function ProjectCanvas({
                 className={`pc-node pc-info${pulseKeys.includes(node.key) ? " pc-spawn" : ""}${selKeys.includes(node.key) ? " pc-selected" : ""}`}
                 style={{ left: p.x, top: p.y, width: node.w, ["--node-accent" as string]: NODE_ACCENTS[node.kind] ?? "#94a3b8" } as React.CSSProperties}
                 onDoubleClick={(event) => {
-                  // 双击资料节点 → 详情窗口（该类资源列表，当前/全部切换；
-                  // 剧本是单文件窗口）。
+                  // 双击资料节点 → 详情窗口（与工具条「查看」同语义）。
                   event.stopPropagation();
-                  if (node.kind === "character") {
-                    setDetailFor({ kind: "info", group: "character", sourceKey: node.key, scope: "current" });
-                  } else if (node.kind === "location") {
-                    setDetailFor({ kind: "info", group: "location", sourceKey: node.key, scope: "current" });
-                  } else if (node.kind === "prop") {
-                    setDetailFor({ kind: "info", group: "prop", sourceKey: node.key, scope: "current" });
-                  } else {
-                    setDetailFor({ kind: "script" });
-                  }
+                  openInfoDetail(node);
                 }}
               >
                 <div className="pc-node-head">
@@ -3739,6 +3823,23 @@ export default function ProjectCanvas({
                     </div>
                   )}
                 </div>
+                <span className="pc-node-tools">
+                  <button type="button" data-tooltip={t("project.canvas.view")} onClick={() => openInfoDetail(node)}>
+                    {Icons.expand}
+                  </button>
+                  <button
+                    type="button"
+                    data-tooltip={t("common.delete")}
+                    className="danger"
+                    onClick={() => {
+                      if (node.key.startsWith("grp:")) removeGroup(node.key.slice(4));
+                      else if (node.kind === "script") void detachScript();
+                      else void removeInfoEntity(node.kind as EntityPhKind, node.key.slice(node.key.indexOf(":") + 1));
+                    }}
+                  >
+                    {Icons.delete}
+                  </button>
+                </span>
                 {portEls(node.key)}
               </div>
             );
@@ -3776,13 +3877,16 @@ export default function ProjectCanvas({
                   <span>{t("project.canvas.ephHint")}</span>
                 </div>
                 <span className="pc-node-tools">
+                  <button type="button" data-tooltip={t("project.canvas.view")} onClick={() => setDetailFor({ kind: "entityPh", id: ph.id })}>
+                    {Icons.expand}
+                  </button>
                   <button
                     type="button"
                     data-tooltip={t("common.delete")}
                     className="danger"
                     onClick={() => removeEntityPh(ph.id)}
                   >
-                    {Icons.close}
+                    {Icons.delete}
                   </button>
                 </span>
               </div>
@@ -3894,6 +3998,18 @@ export default function ProjectCanvas({
                 </small>
               </div>
               <div className="pc-seg-ports">{portRows("output", "in")}</div>
+              <span className="pc-node-tools">
+                <button
+                  type="button"
+                  data-tooltip={t("project.canvas.remove")}
+                  className="danger"
+                  onClick={() => {
+                    if (episodeId) void setEpisodeOutput(episodeId, null);
+                  }}
+                >
+                  {Icons.delete}
+                </button>
+              </span>
             </div>
           )}
 
@@ -3989,7 +4105,7 @@ export default function ProjectCanvas({
                     className="danger"
                     onClick={() => removePlaceholder(ph.id)}
                   >
-                    {Icons.close}
+                    {Icons.delete}
                   </button>
                 </span>
                 {resizeHandle}
