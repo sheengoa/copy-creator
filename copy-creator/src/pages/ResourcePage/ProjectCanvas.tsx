@@ -593,6 +593,29 @@ export default function ProjectCanvas({
   // 挂剧本：选择库内文件设为本集 script_path；已有剧本时「剧本」菜单项
   // 与缺项提醒改为定位。
   const [scriptPickOpen, setScriptPickOpen] = useState(false);
+  // 剧本两段式（与其他节点统一）：「加载」只放一个未挂文件的空剧本节点
+  // 上画布，双击节点才从库选文件。空节点状态按集记 localStorage。
+  const scriptNodeKey = `project_canvas_scriptnode_${episodeId}`;
+  const [scriptNodeAdded, setScriptNodeAdded] = useState(false);
+  useEffect(() => {
+    if (!episodeId) return; // 刷新瞬态。
+    try {
+      setScriptNodeAdded(window.localStorage.getItem(scriptNodeKey) === "1");
+    } catch {
+      setScriptNodeAdded(false);
+    }
+  }, [scriptNodeKey, episodeId]);
+  const persistScriptNodeAdded = useCallback(
+    (next: boolean) => {
+      setScriptNodeAdded(next);
+      try {
+        window.localStorage.setItem(scriptNodeKey, next ? "1" : "0");
+      } catch {
+        // 存储不可用：仅不记忆。
+      }
+    },
+    [scriptNodeKey],
+  );
 
   // ── 占位素材节点（双击填充后才入库为集级散件）：按集存 localStorage ──
   const [placeholders, setPlaceholders] = useState<CanvasPlaceholder[]>([]);
@@ -775,9 +798,15 @@ export default function ProjectCanvas({
         key: "script", kind: "script", name: scriptFileLabelOf(overview.episode.script_path),
         avatarPath: "", textPath: overview.episode.script_path, w: SCRIPT_W, h: INFO_H + 40,
       });
+    } else if (scriptNodeAdded) {
+      // 剧本两段式：先上空节点（未挂文件），双击节点再从库选文件。
+      list.push({
+        key: "script", kind: "script", name: t("project.canvas.scriptUntitled"),
+        avatarPath: "", textPath: "", w: SCRIPT_W, h: INFO_H + 40,
+      });
     }
     return list;
-  }, [castCharacters, episodeLocations, episodeProps, infoGroups, overview]);
+  }, [castCharacters, episodeLocations, episodeProps, infoGroups, overview, scriptNodeAdded, t]);
 
   const infoPos = useMemo(() => {
     const frame = infoFramePos ?? { x: WORLD_MARGIN, y: layout.worldH + 48 };
@@ -1038,6 +1067,94 @@ export default function ProjectCanvas({
     },
     [pos, segPos, notes, placeholders, infoOffsets, persistCards, persistLoose, persistSegments, persistNotes, persistPlaceholders, persistInfoOffsets, saveOutputPos],
   );
+  // ── 占位节点的暂存连线（pendingLinks）──
+  // 空白资料占位/素材占位还没加载实体，连到片段口的线先记在画布层
+  // （localStorage 按集）；占位加载实体/填充素材后转正为 node_link。
+  interface PendingLink { fromKey: string; toSegmentId: string; toPort: string }
+  const [pendingLinks, setPendingLinks] = useState<PendingLink[]>([]);
+  const pendingLinksKey = `project_canvas_pendinglinks_${episodeId}`;
+  useEffect(() => {
+    if (!episodeId) return; // 刷新瞬态（与占位节点同批说明）。
+    try {
+      const raw = window.localStorage.getItem(pendingLinksKey);
+      setPendingLinks(raw ? (JSON.parse(raw) as PendingLink[]) : []);
+    } catch {
+      setPendingLinks([]);
+    }
+  }, [pendingLinksKey, episodeId]);
+  const persistPendingLinks = useCallback(
+    (next: PendingLink[]) => {
+      setPendingLinks(next);
+      try {
+        window.localStorage.setItem(pendingLinksKey, JSON.stringify(next));
+      } catch {
+        // 存储不可用：仅不记忆暂存线。
+      }
+    },
+    [pendingLinksKey],
+  );
+  const dropPendingLinksOf = useCallback(
+    (fromKey: string) => persistPendingLinks(pendingLinks.filter((l) => l.fromKey !== fromKey)),
+    [pendingLinks, persistPendingLinks],
+  );
+
+  // ── 节点分组（Ctrl+G，ComfyUI Group 的对应物）──
+  // 选中一个或多个节点打组成框（框自适应成员包围盒）；拖组框标题整组
+  // 移动（复用组拖管线）；选中整组再按 Ctrl+G 解组。按集存 localStorage。
+  interface NodeGroup { id: string; label: string; members: string[] }
+  const [nodeGroups, setNodeGroups] = useState<NodeGroup[]>([]);
+  const nodeGroupsKey = `project_canvas_nodegroups_${episodeId}`;
+  useEffect(() => {
+    if (!episodeId) return; // 刷新瞬态。
+    try {
+      const raw = window.localStorage.getItem(nodeGroupsKey);
+      setNodeGroups(raw ? (JSON.parse(raw) as NodeGroup[]) : []);
+    } catch {
+      setNodeGroups([]);
+    }
+  }, [nodeGroupsKey, episodeId]);
+  const persistNodeGroups = useCallback(
+    (next: NodeGroup[]) => {
+      setNodeGroups(next);
+      try {
+        window.localStorage.setItem(nodeGroupsKey, JSON.stringify(next));
+      } catch {
+        // 存储不可用：仅不记忆分组。
+      }
+    },
+    [nodeGroupsKey],
+  );
+  // 成员当前包围盒（世界坐标；节点已删除则 null，渲染与包围盒计算时
+  // 自动剔除——组员被删后框随之收缩）。
+  const memberFrame = useCallback(
+    (key: string): { x: number; y: number; w: number; h: number } | null => {
+      let p: Pos | undefined;
+      if (key.startsWith("shot:")) p = pos.cards[key.slice(5)];
+      else if (key.startsWith("asset:")) p = pos.loose[key.slice(6)];
+      else if (key.startsWith("segment:")) p = segPos[key.slice(8)];
+      else if (key.startsWith("placeholder:")) {
+        const ph = placeholders.find((item) => item.id === key.slice(12));
+        p = ph ? { x: ph.x, y: ph.y } : undefined;
+      } else if (key.startsWith("note:")) {
+        const note = notes.find((item) => item.id === key.slice(5));
+        p = note ? { x: note.x, y: note.y } : undefined;
+      } else if (key === "output") {
+        p = outputBox ? { x: outputBox.x, y: outputBox.y } : undefined;
+      } else {
+        p = infoNodePos(key);
+      }
+      if (!p) return null;
+      const size = sizeOfNode(key);
+      return {
+        x: p.x,
+        y: p.y,
+        w: size?.w ?? (key.startsWith("note:") ? 172 : 100),
+        h: size?.h ?? (key.startsWith("note:") ? 96 : 60),
+      };
+    },
+    [pos, segPos, placeholders, notes, outputBox, infoNodePos, sizeOfNode],
+  );
+
   // 撤销栈：移动（单/组）、缩放、粘贴、可完整恢复的删除（便签/两类占位）。
   // 镜头/片段等后端实体的删除涉及连线与挂接，无法无损重建，不入栈。
   type UndoAction =
@@ -1110,9 +1227,11 @@ export default function ProjectCanvas({
     | { kind: "segment"; dx: number; dy: number };
   const clipRef = useRef<{ items: ClipItem[]; ax: number; ay: number } | null>(null);
   // 防重入：StrictMode 开发态会双挂载键盘监听，一次 Ctrl+V 触发两次
-  // 粘贴、一次 Ctrl+Z 连撤两级；同步锁保证首个调用独占直到完成。
+  // 粘贴、一次 Ctrl+Z 连撤两级、一次 Ctrl+G 建组又解组；同步锁保证
+  // 首个调用独占直到完成。
   const pastingRef = useRef(false);
   const undoingRef = useRef(false);
+  const groupingRef = useRef(false);
   const copySelection = useCallback(() => {
     const members = groupSnapshot(1);
     if (!members) return;
@@ -1298,6 +1417,12 @@ export default function ProjectCanvas({
         delete next[phKey];
         persistSizes(next);
       }
+      // 占位的暂存线随填充转正：素材实体接管原占位的片段连线。
+      const myPending = pendingLinks.filter((l) => l.fromKey === phKey);
+      for (const l of myPending) {
+        void linkNode(episodeId, "asset", asset.id, l.toSegmentId, l.toPort as ProjectNodeLink["to_port"]);
+      }
+      if (myPending.length) persistPendingLinks(pendingLinks.filter((l) => l.fromKey !== phKey));
     });
   };
   const attachSegmentFromLibrary = (segmentId: string, file: { filePath: string; kind: string; name: string }) => {
@@ -1704,13 +1829,24 @@ export default function ProjectCanvas({
         const size = sizeOfNode(key) ?? { w: OUTPUT_W, h: OUTPUT_H };
         return outputBox ? finish(outputBox.x, outputBox.y, size.w, size.h) : null;
       }
+      if (key.startsWith("placeholder:")) {
+        const ph = placeholders.find((item) => item.id === key.slice(12));
+        if (!ph) return null;
+        const size = sizeOfNode(key);
+        return finish(ph.x, ph.y, size?.w ?? LOOSE_W, size?.h ?? Math.round(LOOSE_W * LOOSE_RATIO));
+      }
+      if (key.startsWith("eph:")) {
+        const p = infoNodePos(key);
+        const size = sizeOfNode(key);
+        return p ? finish(p.x, p.y, size?.w ?? INFO_W, size?.h ?? INFO_H) : null;
+      }
       // 资料节点（角色/场景/道具/剧本）：拖动过的用覆盖位置，否则网格。
       const infoNode = infoNodes.find((item) => item.key === key);
       const infoP = infoNode ? infoNodePos(key) : undefined;
       const infoSize = infoNode ? sizeOfNode(key) ?? { w: infoNode.w, h: infoNode.h } : null;
       return infoNode && infoP && infoSize ? finish(infoP.x, infoP.y, infoSize.w, infoSize.h) : null;
     },
-    [layout, pos, cardSizeOf, outputBox, segPos, infoNodes, nodeMetrics, sizeOfNode, infoNodePos],
+    [layout, pos, cardSizeOf, outputBox, segPos, infoNodes, nodeMetrics, sizeOfNode, infoNodePos, placeholders],
   );
 
   // 端口点：优先用实测端口坐标（标题条/端口行让卡体高度自适应），
@@ -1797,6 +1933,15 @@ export default function ProjectCanvas({
           ins: [{ id: "in", label: t("project.canvas.portRef"), accepts: REF_ACCEPTS }],
           out: { label: t(hasVideo ? "project.canvas.portFootage" : "project.canvas.typeImage"), type: hasVideo ? "video" : "image" },
         };
+      }
+      // 空白资料占位（未加载的角色/场景/道具）：与加载后的实体节点同款
+      // 参考图输出口——节点一上画布就能接入工作流，加载实体后暂存线转正。
+      if (key.startsWith("eph:")) {
+        return { ins: [], out: { label: t("project.canvas.portRefImg"), type: "image" } };
+      }
+      // 素材占位（未填充）：素材类型未定，按通用文件口接入片段「其他」。
+      if (key.startsWith("placeholder:")) {
+        return { ins: [], out: { label: t("project.canvas.typeFile"), type: "file" } };
       }
       if (key.startsWith("asset:")) {
         const assetId = key.slice(6);
@@ -2181,6 +2326,26 @@ export default function ProjectCanvas({
         e.preventDefault();
         return;
       }
+      // 组框标题（Ctrl+G 的组）：按下拖动整组移动（复用组拖管线）。
+      const ngLabel = target?.closest(".pc-nodegroup-label");
+      if (ngLabel) {
+        const gid = ngLabel.closest(".pc-nodegroup")?.getAttribute("data-group") ?? "";
+        const group = nodeGroups.find((g) => g.id === gid);
+        if (group) {
+          const members = group.members
+            .map((key) => {
+              const f = memberFrame(key);
+              return f ? { key, x: f.x, y: f.y } : null;
+            })
+            .filter((m): m is { key: string; x: number; y: number } => m !== null);
+          if (members.length > 0) {
+            setSelection(members.map((m) => m.key));
+            dragRef.current = { kind: "multidrag", sx: e.clientX, sy: e.clientY, moved: false, members };
+            e.preventDefault();
+            return;
+          }
+        }
+      }
       const labelEl = target?.closest(".pc-frame-label");
       if (labelEl) {
         const frameEl = labelEl.closest(".pc-frame");
@@ -2213,7 +2378,7 @@ export default function ProjectCanvas({
       dragRef.current = { kind: "marquee", sx: e.clientX, sy: e.clientY, mq, moved: false };
       e.preventDefault();
     },
-    [layout, pos, setSelection, view, infoPos, scenePos, portsOf, outputBox, notes, segPos, placeholders, sizeOfNode, infoNodePos, nodeSizes, groupSnapshot],
+    [layout, pos, setSelection, view, infoPos, scenePos, portsOf, outputBox, notes, segPos, placeholders, sizeOfNode, infoNodePos, nodeSizes, groupSnapshot, nodeGroups, memberFrame],
   );
 
 
@@ -2380,7 +2545,7 @@ export default function ProjectCanvas({
               (outKeyOf.startsWith("asset:") || outKeyOf.startsWith("shot:") || outKeyOf.startsWith("segment:"))) ||
             (inKeyOf.startsWith("segment:") &&
               (outKeyOf === "script" ||
-                ["asset:", "shot:", "char:", "loc:", "prop:", "grp:", "segment:"].some((p) => outKeyOf.startsWith(p)))));
+                ["asset:", "shot:", "char:", "loc:", "prop:", "grp:", "segment:", "eph:", "placeholder:"].some((p) => outKeyOf.startsWith(p)))));
         let compatible = false;
         let targetPort: string | null = null;
         if (tKey && tKey !== drag.fromKey && writable) {
@@ -2469,7 +2634,17 @@ export default function ProjectCanvas({
             }
           } else if (inKey.startsWith("segment:")) {
             const segId = inKey.slice(8);
-            if (outKey.startsWith("grp:")) {
+            if (outKey.startsWith("eph:") || outKey.startsWith("placeholder:")) {
+              // 未加载的占位节点：暂存线记在画布层，加载实体/填充素材后
+              // 转正为 node_link（promotePendingLinks）。
+              const port = drag.fromDir === "in" ? drag.fromPortId : drag.targetPort;
+              if (port) {
+                persistPendingLinks([
+                  ...pendingLinks.filter((l) => !(l.fromKey === outKey && l.toSegmentId === segId && l.toPort === port)),
+                  { fromKey: outKey, toSegmentId: segId, toPort: port },
+                ]);
+              }
+            } else if (outKey.startsWith("grp:")) {
               // 组节点一条线 = 组内全部成员分别落一条 node_link；且无论
               // 拖到哪个口，都按组类型进对应口（角色组进角色口）。
               const group = infoGroups.find((g) => `grp:${g.id}` === outKey);
@@ -2811,7 +2986,7 @@ export default function ProjectCanvas({
       document.removeEventListener("mousemove", onMove);
       document.removeEventListener("mouseup", onUp);
     };
-  }, [layout, pos, view, scenePos, infoPos, boxOf, portsOf, outPointOf, inPointOf, linkAssets, persistCards, persistLoose, saveCanvasLayout, saveInfoFramePos, saveView, setSelection, saveOutputPos, setEpisodeOutput, episodeId, notes, persistNotes, addNote, addPlaceholder, addEntityPh, persistPlaceholders, persistSegments, linkNode, nodeKeyParts, addSegment, autoConnectNewNode, persistSizes, persistInfoOffsets, infoGroups, infoNodes, infoNodePos, entityPhs, segments, segPos, placeholders, sizeOfNode, outputBox, moveGroupTo, persistPositions, pushUndo]);
+  }, [layout, pos, view, scenePos, infoPos, boxOf, portsOf, outPointOf, inPointOf, linkAssets, persistCards, persistLoose, saveCanvasLayout, saveInfoFramePos, saveView, setSelection, saveOutputPos, setEpisodeOutput, episodeId, notes, persistNotes, addNote, addPlaceholder, addEntityPh, persistPlaceholders, persistSegments, linkNode, nodeKeyParts, addSegment, autoConnectNewNode, persistSizes, persistInfoOffsets, infoGroups, infoNodes, infoNodePos, entityPhs, segments, segPos, placeholders, sizeOfNode, outputBox, moveGroupTo, persistPositions, pushUndo, pendingLinks, persistPendingLinks]);
 
   // ── 节点操作 ──
   // 节点接口圆点（ComfyUI 式）：输入口列在左缘（片段五口按列分布）、
@@ -2941,14 +3116,17 @@ export default function ProjectCanvas({
     </>
   );
   // 资料节点 → 详情窗口（该类资源列表，当前/全部切换；剧本是单文件窗口）。
-  // 双击节点与悬停工具条的「查看」按钮共用。
-  const openInfoDetail = (node: { kind: string; key: string }) => {
+  // 双击节点与悬停工具条的「查看」按钮共用。剧本两段式：未挂文件的空
+  // 节点双击直接打开文件选择（选完即挂）。
+  const openInfoDetail = (node: { kind: string; key: string; textPath?: string }) => {
     if (node.kind === "character") {
       setDetailFor({ kind: "info", group: "character", sourceKey: node.key, scope: "current" });
     } else if (node.kind === "location") {
       setDetailFor({ kind: "info", group: "location", sourceKey: node.key, scope: "current" });
     } else if (node.kind === "prop") {
       setDetailFor({ kind: "info", group: "prop", sourceKey: node.key, scope: "current" });
+    } else if (node.kind === "script" && !node.textPath) {
+      setScriptPickOpen(true);
     } else {
       setDetailFor({ kind: "script" });
     }
@@ -3099,29 +3277,34 @@ export default function ProjectCanvas({
     [infoGroups, persistInfoGroups],
   );
   // 剧本节点：解除挂接（剧本文件留在库内），提示词连线一并清理。
+  // 剧本节点：解除挂接（剧本文件留在库内），提示词连线一并清理；
+  // 两段式的空节点与已挂节点删除后都彻底从画布移除（不留空节点）。
   const detachScript = useCallback(async () => {
     const episode = overview?.episode;
+    persistScriptNodeAdded(false);
     if (!episodeId || !episode?.script_path) return;
     const rows = (overview?.node_links ?? []).filter((l) => l.from_kind === "script");
     for (const row of rows) await unlinkNode(row.from_kind, row.from_id, row.to_segment, row.to_port);
     await updateEpisode(episodeId, { title: episode.title, status: episode.status, script_path: "" });
-  }, [episodeId, overview, unlinkNode, updateEpisode]);
-  // 空白资料占位：删除占位并清掉它拖动过的位置记忆。
+  }, [episodeId, overview, unlinkNode, updateEpisode, persistScriptNodeAdded]);
+  // 空白资料占位：删除占位并清掉它拖动过的位置记忆与暂存线。
   const removeEntityPh = useCallback(
     (phId: string) => {
       const next = { ...infoOffsets };
       delete next[`eph:${phId}`];
       persistInfoOffsets(next);
       persistEntityPhs(entityPhs.filter((item) => item.id !== phId));
+      dropPendingLinksOf(`eph:${phId}`);
     },
-    [entityPhs, infoOffsets, persistEntityPhs, persistInfoOffsets],
+    [entityPhs, infoOffsets, persistEntityPhs, persistInfoOffsets, dropPendingLinksOf],
   );
-  // 素材占位节点：从画布移除占位记录。
+  // 素材占位节点：从画布移除占位记录与暂存线。
   const removePlaceholder = useCallback(
     (phId: string) => {
       persistPlaceholders(placeholders.filter((item) => item.id !== phId));
+      dropPendingLinksOf(`placeholder:${phId}`);
     },
-    [placeholders, persistPlaceholders],
+    [placeholders, persistPlaceholders, dropPendingLinksOf],
   );
   // ── 键盘：Delete/Backspace 删除选中节点（与各节点工具条同一套语义；
   // 镜头卡有确认对话框，走同一确认流程）；Ctrl+C/V 复制粘贴选中组；
@@ -3150,6 +3333,32 @@ export default function ProjectCanvas({
         if (k === "z") {
           e.preventDefault();
           runUndo();
+          return;
+        }
+        if (k === "g") {
+          // 打组 / 解组（ComfyUI Group）：选中若干节点 → 组框自适应包围
+          // 盒；选中恰好是某组全部成员 → 解组。成员从其他组移出（互斥）。
+          e.preventDefault();
+          if (groupingRef.current) return;
+          groupingRef.current = true;
+          window.setTimeout(() => {
+            groupingRef.current = false;
+          }, 0);
+          if (selKeys.length === 0) return;
+          const fullGroup = nodeGroups.find(
+            (g) => g.members.length === selKeys.length && selKeys.every((key) => g.members.includes(key)),
+          );
+          if (fullGroup) {
+            persistNodeGroups(nodeGroups.filter((g) => g.id !== fullGroup.id));
+          } else {
+            const kept = nodeGroups
+              .map((g) => ({ ...g, members: g.members.filter((key) => !selKeys.includes(key)) }))
+              .filter((g) => g.members.length > 0);
+            persistNodeGroups([
+              ...kept,
+              { id: `ng${Date.now()}${Math.floor(Math.random() * 1e4)}`, label: t("project.canvas.nodeGroup"), members: [...selKeys] },
+            ]);
+          }
           return;
         }
         return;
@@ -3209,7 +3418,7 @@ export default function ProjectCanvas({
     sceneForm, shotForm, deleteSceneTarget, episodeId, notes, placeholders, entityPhs,
     setEpisodeOutput, deleteShot, setNotes, persistNotes, removeSegment, removePlaceholder,
     removeEntityPh, removeGroup, detachScript, unlinkAsset, removeInfoEntity, setSelection,
-    copySelection, pasteClipboard, runUndo, pushUndo,
+    copySelection, pasteClipboard, runUndo, pushUndo, nodeGroups, persistNodeGroups, t,
   ]);
   // 成员装入面板（多选 + 装入确认）：eph 加载 / 组追加裁剪 / 默认节点转组。
   const applyMemberPick = useCallback(async () => {
@@ -3235,6 +3444,15 @@ export default function ProjectCanvas({
       persistInfoOffsets(nextOffsets);
       persistEntityPhs(entityPhs.filter((p) => p.id !== ph.id));
       persistInfoGroups([...infoGroups, { id: groupId, kind: pick.kind, members: [...pending] }]);
+      // 占位节点的暂存线随加载转正：组内每个成员各落一条 node_link。
+      const ephKey = `eph:${ph.id}`;
+      const myPending = pendingLinks.filter((l) => l.fromKey === ephKey);
+      for (const l of myPending) {
+        for (const memberId of pending) {
+          void linkNode(episodeId, pick.kind, memberId, l.toSegmentId, l.toPort as ProjectNodeLink["to_port"]);
+        }
+      }
+      if (myPending.length) persistPendingLinks(pendingLinks.filter((l) => l.fromKey !== ephKey));
       setPulseKeys([`grp:${groupId}`]);
       setDetailFor({ kind: "info", group: pick.kind, sourceKey: `grp:${groupId}`, scope: "current" });
       return;
@@ -3278,7 +3496,7 @@ export default function ProjectCanvas({
   }, [
     memberPick, episodeId, entityPhs, infoNodePos, infoOffsets, persistInfoOffsets, persistEntityPhs,
     infoGroups, persistInfoGroups, associateEntities, groupWiredPorts, linkNode, overview,
-    unlinkEntityLinks,
+    unlinkEntityLinks, pendingLinks, persistPendingLinks,
   ]);
 
   const detailDialog = (() => {
@@ -3838,6 +4056,41 @@ export default function ProjectCanvas({
                 </g>
               );
             })}
+            {/* 占位节点 → 片段的暂存线：虚线区别于正式连线（未加载实体，
+                加载后转正为实线 node_link）；悬停删除按钮直接移除暂存。 */}
+            {pendingLinks.map((link) => {
+              const a = outPointOf(link.fromKey);
+              const b = inPointOf(`segment:${link.toSegmentId}`, link.toPort);
+              if (!a || !b) return null;
+              const d = wirePathD(a, b);
+              const midX = (a.x + b.x) / 2;
+              const midY = (a.y + b.y) / 2;
+              const fromType = portsOf(link.fromKey).out?.type;
+              return (
+                <g key={`pending-${link.fromKey}-${link.toSegmentId}-${link.toPort}`} className="pc-wire">
+                  <path className="pc-wire-hit" d={d} />
+                  <path
+                    className="pc-wire-line"
+                    d={d}
+                    style={{
+                      stroke: WIRE_TYPE_COLORS[fromType ?? ""] ?? "#94a3b8",
+                      strokeOpacity: 0.7,
+                      strokeDasharray: "7 5",
+                    }}
+                  />
+                  <g
+                    className="pc-wire-del"
+                    data-tooltip={t("project.canvas.wireRemove")}
+                    onClick={() =>
+                      persistPendingLinks(pendingLinks.filter((l) => l !== link))
+                    }
+                  >
+                    <circle cx={midX} cy={midY} r="9" />
+                    <path d={`M${midX - 4} ${midY - 4} l8 8 M${midX + 4} ${midY - 4} l-8 8`} />
+                  </g>
+                </g>
+              );
+            })}
             {/* 片段 → 成片：按拼接序隐式聚合（无需连线数据，恒显示） */}
             {outputBox &&
               segments.map((segment) => {
@@ -4097,39 +4350,29 @@ export default function ProjectCanvas({
             );
           })}
 
-          {/* 资料框（出场角色/出镜道具/剧本）：只在本集有资料节点时出现——
-              空集时的空框没有信息量，只是画布上的占位噪音；创建资料走
-              双击空白的添加菜单。 */}
-          {infoNodes.length > 0 && (
-            <div
-              data-frame="info"
-              className="pc-frame"
-              style={{
-                left: infoPos.frame.x,
-                top: infoPos.frame.y,
-                width: Math.max(FRAME_MIN_W, FRAME_PAD_X * 2 + 3 * (INFO_W + CARD_GAP) - CARD_GAP),
-                height: Math.max(FRAME_MIN_H, FRAME_PAD_TOP + Math.ceil(infoNodes.length / 3) * (INFO_H + CARD_GAP) + 12),
-              }}
-            >
-              <div className="pc-frame-label">
-                <span className="pc-frame-name">{t("project.canvas.infoFrame")}</span>
-                <small>{infoNodes.length}</small>
-                <span className="pc-frame-ops">
-                  <button
-                    type="button"
-                    data-tooltip={t("project.canvas.linkScene")}
-                    onClick={(event) => {
-                      // 关联的新场景节点出生在点击位置附近。
-                      armSpawnFromEvent(event.clientX, event.clientY);
-                      setLocationPickOpen(true);
-                    }}
-                  >
-                    {Icons.add}
-                  </button>
-                </span>
+          {/* 节点分组框（Ctrl+G）：框自适应成员包围盒，渲染在节点层之下；
+              拖标题条整组移动（复用组拖管线），组员被删后框随之收缩。 */}
+          {nodeGroups.map((group) => {
+            const frames = group.members
+              .map((key) => memberFrame(key))
+              .filter((f): f is { x: number; y: number; w: number; h: number } => f !== null);
+            if (frames.length === 0) return null;
+            const pad = 14;
+            const left = Math.min(...frames.map((f) => f.x)) - pad;
+            const top = Math.min(...frames.map((f) => f.y)) - pad - 18;
+            const right = Math.max(...frames.map((f) => f.x + f.w)) + pad;
+            const bottom = Math.max(...frames.map((f) => f.y + f.h)) + pad;
+            return (
+              <div
+                key={group.id}
+                data-group={group.id}
+                className="pc-nodegroup"
+                style={{ left, top, width: right - left, height: bottom - top }}
+              >
+                <div className="pc-nodegroup-label">{group.label}</div>
               </div>
-            </div>
-          )}
+            );
+          })}
           {infoNodes.map((node) => {
             const p = infoNodePos(node.key);
             const nodeSize = sizeOfNode(node.key);
@@ -4205,9 +4448,17 @@ export default function ProjectCanvas({
                       );
                     })()
                   ) : node.kind === "script" ? (
-                    <div className="pc-info-script">
-                      <TextPaperBody path={joinLibraryPath(libraryRoot, node.textPath)} name={node.name} lines={5} />
-                    </div>
+                    node.textPath ? (
+                      <div className="pc-info-script">
+                        <TextPaperBody path={joinLibraryPath(libraryRoot, node.textPath)} name={node.name} lines={5} />
+                      </div>
+                    ) : (
+                      // 剧本两段式：空节点（未挂文件），双击从库选文件。
+                      <div className="pc-info-body pc-eph-body">
+                        {Icons.file}
+                        <span>{t("project.canvas.scriptEmpty")}</span>
+                      </div>
+                    )
                   ) : (
                     <div className="pc-photo">
                       <div className={`pc-photo-main${node.avatarPath ? "" : " pc-photo-empty"}`}>
@@ -4271,6 +4522,7 @@ export default function ProjectCanvas({
                   <span className="pc-node-kind">{label}</span>
                   <b className="pc-node-title">{t("project.canvas.ephTitle")}</b>
                 </div>
+                {portBar(key)}
                 <div className="pc-info-body pc-eph-body">
                   {ph.kind === "character" ? Icons.clipboard : ph.kind === "location" ? Icons.resources : Icons.star}
                   <span>{t("project.canvas.ephHint")}</span>
@@ -4509,6 +4761,7 @@ export default function ProjectCanvas({
                   <span className="pc-node-kind">{t("project.canvas.typeAsset")}</span>
                   <b className="pc-node-title">{t("project.canvas.placeholderTitle")}</b>
                 </div>
+                {portBar(phKey)}
                 <div className="pc-ph-empty" style={{ height: phSize?.h }}>
                   {Icons.image}
                   {t("project.canvas.placeholderEmpty")}
@@ -4541,9 +4794,14 @@ export default function ProjectCanvas({
                 onClick={(event) => {
                   if (issue.key === "output") locateOutput();
                   if (issue.key === "script") {
-                    // 挂接后剧本节点出生在点击位置附近。
-                    armSpawnFromEvent(event.clientX, event.clientY);
-                    setScriptPickOpen(true);
+                    // 剧本两段式：未放置节点 → 放空节点（出生在点击位置）；
+                    // 已放置空节点 → 定位到它（双击选文件）。
+                    if (scriptNodeAdded) {
+                      locateScript();
+                    } else {
+                      armSpawnFromEvent(event.clientX, event.clientY);
+                      persistScriptNodeAdded(true);
+                    }
                   }
                   if (issue.key === "segAssets") {
                     locateEmptySegment();
@@ -4657,9 +4915,10 @@ export default function ProjectCanvas({
                           if (overview?.episode.script_path) {
                             locateScript();
                           } else {
-                            // 挂接后剧本节点出生在双击位置（视线附近）。
+                            // 剧本两段式：只放空节点上画布（出生在双击位置），
+                            // 双击节点再从库选文件——与其他节点加载统一。
                             armSpawnAt(addMenu.wx, addMenu.wy);
-                            setScriptPickOpen(true);
+                            persistScriptNodeAdded(true);
                           }
                         },
                       }

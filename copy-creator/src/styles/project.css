@@ -2253,6 +2253,33 @@
   opacity: 1;
 }
 
+/* ── 节点分组框（Ctrl+G，ComfyUI Group 的对应物） ── */
+/* 框自适应成员包围盒、渲染在节点层之下（pointer-events none 不挡节点）；
+   只有标题条可抓——按下拖动整组移动（复用组拖管线）。 */
+.pc-nodegroup {
+  position: absolute;
+  border-radius: 14px;
+  background: color-mix(in srgb, var(--accent) 5%, transparent);
+  border: 1.5px solid color-mix(in srgb, var(--accent) 28%, transparent);
+  pointer-events: none;
+  z-index: 1;
+}
+.pc-nodegroup-label {
+  position: absolute;
+  top: 0;
+  left: 0;
+  pointer-events: auto;
+  cursor: grab;
+  padding: 3px 14px;
+  border-radius: 13px 0 12px 0;
+  background: color-mix(in srgb, var(--accent) 12%, var(--bg-card));
+  font-size: 11px;
+  font-weight: 500;
+  color: var(--text-secondary);
+  white-space: nowrap;
+}
+.pc-nodegroup-label:active { cursor: grabbing; }
+
 /* ── 节点详情预览窗口（双击节点的独立窗口：预览 + 信息 + 动作） ── */
 .pc-detail-mask {
   position: fixed;
