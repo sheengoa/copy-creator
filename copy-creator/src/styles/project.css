@@ -2117,7 +2117,9 @@
   overflow: hidden;
   margin: 0;
 }
-/* 节点 hover 工具条 */
+/* 节点工具条：选中驱动（非 hover）——点选/框选的节点常显工具条，
+   点空白或改选其他节点即消失；hover 显示会让工具条随鼠标离开节点
+   （含悬浮间隙）而闪没，永远点不到按钮。 */
 .pc-node-tools {
   position: absolute;
   /* 悬浮在节点上方并与节点保持一点间隙 */
@@ -2136,7 +2138,7 @@
   z-index: 6;
   white-space: nowrap;
 }
-.pc-node:hover .pc-node-tools { opacity: 1; pointer-events: auto; }
+.pc-node.pc-selected .pc-node-tools { opacity: 1; pointer-events: auto; }
 .pc-node-tools button {
   width: 27px;
   height: 27px;
@@ -2220,24 +2222,24 @@
 
 /* ── 节点尺寸手柄（ComfyUI 式四角角标） ── */
 /* 尺寸手柄：四角各一枚小方块，可向任意方向自由缩放（对角固定）。
-   常显低透明度——缩放能力要能被看见，悬停节点/手柄时增亮。 */
+   ComfyUI 的存在感原则——把手平时几乎隐入卡片（小、无阴影、半透明），
+   只提示「角上可以抓」；悬停节点略提示，悬停/拖拽手柄才完全亮出。 */
 .pc-resize {
   position: absolute;
-  width: 11px;
-  height: 11px;
-  border-radius: 3px;
+  width: 9px;
+  height: 9px;
+  border-radius: 2px;
   background: var(--bg-card);
-  border: 1px solid var(--separator);
-  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.18);
+  border: 1px solid color-mix(in srgb, var(--separator) 55%, transparent);
   z-index: 7;
-  opacity: 0.5;
+  opacity: 0.3;
   transition: opacity 0.12s ease, background 0.12s ease, border-color 0.12s ease;
 }
-.pc-resize.nw { left: -5px; top: -5px; cursor: nwse-resize; }
-.pc-resize.ne { right: -5px; top: -5px; cursor: nesw-resize; }
-.pc-resize.sw { left: -5px; bottom: -5px; cursor: nesw-resize; }
-.pc-resize.se { right: -5px; bottom: -5px; cursor: nwse-resize; }
-.pc-node:hover .pc-resize, .pc-note:hover .pc-resize { opacity: 0.9; }
+.pc-resize.nw { left: -4px; top: -4px; cursor: nwse-resize; }
+.pc-resize.ne { right: -4px; top: -4px; cursor: nesw-resize; }
+.pc-resize.sw { left: -4px; bottom: -4px; cursor: nesw-resize; }
+.pc-resize.se { right: -4px; bottom: -4px; cursor: nwse-resize; }
+.pc-node:hover .pc-resize, .pc-note:hover .pc-resize { opacity: 0.55; }
 .pc-resize:hover, .pc-node.pc-resizing .pc-resize, .pc-note.pc-resizing .pc-resize {
   opacity: 1;
   background: var(--accent);
@@ -2674,7 +2676,7 @@
   z-index: 6;
   white-space: nowrap;
 }
-.pc-note:hover .pc-note-tools { opacity: 1; pointer-events: auto; }
+.pc-note.pc-selected .pc-note-tools { opacity: 1; pointer-events: auto; }
 .pc-note-tools button {
   width: 27px;
   height: 27px;
