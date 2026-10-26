@@ -2221,28 +2221,28 @@
 .pc-wire-temp.invalid { stroke: var(--danger); }
 
 /* ── 节点尺寸手柄（ComfyUI 式四角角标） ── */
-/* 尺寸手柄：四角各一枚小方块，可向任意方向自由缩放（对角固定）。
-   ComfyUI 的存在感原则——把手平时几乎隐入卡片（小、无阴影、半透明），
-   只提示「角上可以抓」；悬停节点略提示，悬停/拖拽手柄才完全亮出。 */
+/* 尺寸手柄：四角各一枚月牙弧钩（四分之一圆弧贴着节点角弯），可向任意
+   方向自由缩放（对角固定）。ComfyUI 的存在感原则——弧钩平时几乎隐入
+   卡片（淡灰细弧），只提示「角上可以抓」；悬停节点略提示，悬停/拖拽
+   手柄才完全亮出主色。 */
 .pc-resize {
   position: absolute;
-  width: 9px;
-  height: 9px;
-  border-radius: 2px;
-  background: var(--bg-card);
-  border: 1px solid color-mix(in srgb, var(--separator) 55%, transparent);
+  width: 15px;
+  height: 15px;
+  border: 2.5px solid transparent;
+  border-radius: 50%;
   z-index: 7;
-  opacity: 0.3;
-  transition: opacity 0.12s ease, background 0.12s ease, border-color 0.12s ease;
+  opacity: 0.55;
+  transition: opacity 0.12s ease, border-color 0.12s ease;
 }
-.pc-resize.nw { left: -4px; top: -4px; cursor: nwse-resize; }
-.pc-resize.ne { right: -4px; top: -4px; cursor: nesw-resize; }
-.pc-resize.sw { left: -4px; bottom: -4px; cursor: nesw-resize; }
-.pc-resize.se { right: -4px; bottom: -4px; cursor: nwse-resize; }
-.pc-node:hover .pc-resize, .pc-note:hover .pc-resize { opacity: 0.55; }
+/* 各角只亮起朝外的四分之一弧：弧钩环抱节点角，月牙口朝节点外。 */
+.pc-resize.nw { left: -7.5px; top: -7.5px; border-left-color: var(--text-tertiary); border-top-color: var(--text-tertiary); cursor: nwse-resize; }
+.pc-resize.ne { right: -7.5px; top: -7.5px; border-right-color: var(--text-tertiary); border-top-color: var(--text-tertiary); cursor: nesw-resize; }
+.pc-resize.sw { left: -7.5px; bottom: -7.5px; border-left-color: var(--text-tertiary); border-bottom-color: var(--text-tertiary); cursor: nesw-resize; }
+.pc-resize.se { right: -7.5px; bottom: -7.5px; border-right-color: var(--text-tertiary); border-bottom-color: var(--text-tertiary); cursor: nwse-resize; }
+.pc-node:hover .pc-resize, .pc-note:hover .pc-resize { opacity: 0.8; }
 .pc-resize:hover, .pc-node.pc-resizing .pc-resize, .pc-note.pc-resizing .pc-resize {
   opacity: 1;
-  background: var(--accent);
   border-color: var(--accent);
 }
 
