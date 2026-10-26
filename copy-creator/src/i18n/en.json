@@ -490,7 +490,7 @@
       "statWires": "Wires {{count}}",
       "infoFrame": "Episode materials",
       "infoEmpty": "No cast / props / script for this episode",
-      "shotEmpty": "Link assets",
+      "shotEmpty": "No assets · double-click to link",
       "typeShot": "Shot",
       "typeImage": "Image",
       "typeVideo": "Video",

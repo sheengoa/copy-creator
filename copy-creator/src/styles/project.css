@@ -2214,13 +2214,14 @@
 }
 .pc-wire-hit { fill: none; stroke: transparent; stroke-width: 16; pointer-events: stroke; cursor: pointer; }
 .pc-wire-line { fill: none; stroke-width: 2.6; stroke-opacity: 0.95; }
-.pc-wire-line.manual { stroke-dasharray: 5, 5; stroke-opacity: 0.8; }
 .pc-wire:hover .pc-wire-line { stroke-width: 3.6; stroke-opacity: 1; }
 .pc-wire-del { opacity: 0; transition: opacity 0.12s ease; pointer-events: none; }
 .pc-wire:hover .pc-wire-del { opacity: 1; pointer-events: auto; }
 .pc-wire-del circle { fill: var(--danger); }
 .pc-wire-del path { stroke: #fff; stroke-width: 2; fill: none; }
-.pc-wire-temp { fill: none; stroke: var(--text-secondary); stroke-width: 2.2; stroke-dasharray: 5, 5; }
+/* 拖拽中的线与落定的线同一规格（实线、同粗细同透明度），全程视觉统一；
+   仅非法落点仍标红提示。 */
+.pc-wire-temp { fill: none; stroke: var(--text-secondary); stroke-width: 2.6; stroke-opacity: 0.95; }
 .pc-wire-temp.invalid { stroke: var(--danger); }
 
 /* ── 节点尺寸手柄（ComfyUI 式右下角斜纹角标） ── */

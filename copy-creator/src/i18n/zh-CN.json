@@ -490,7 +490,7 @@
       "statWires": "连线 {{count}}",
       "infoFrame": "本集资料",
       "infoEmpty": "本集暂无出场角色 / 出镜道具 / 剧本",
-      "shotEmpty": "挂靠素材",
+      "shotEmpty": "未挂素材 · 双击挂靠",
       "typeShot": "镜头",
       "typeImage": "图片",
       "typeVideo": "视频",
