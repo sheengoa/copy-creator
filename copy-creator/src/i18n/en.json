@@ -489,7 +489,6 @@
       "statAssets": "Assets {{count}}",
       "statWires": "Wires {{count}}",
       "infoFrame": "Episode materials",
-      "infoEmpty": "No cast / props / script for this episode",
       "shotEmpty": "No assets · double-click to link",
       "typeShot": "Shot",
       "typeImage": "Image",

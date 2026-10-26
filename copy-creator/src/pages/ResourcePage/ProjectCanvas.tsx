@@ -1245,8 +1245,11 @@ export default function ProjectCanvas({
       worldH = Math.max(worldH, p.y + SEG_H + 200);
     });
     const outputRight = outputBox ? outputBox.x + outputBox.w + 60 : 0;
-    const infoGridBottom = infoPos.frame.y + FRAME_PAD_TOP + Math.ceil(infoNodes.length / 3) * (INFO_H + CARD_GAP);
-    worldW = Math.max(worldW, infoPos.frame.x + FRAME_MIN_W + 60, outputRight);
+    // 空资料框不渲染，也不参与包围盒（否则空集会多出一块 invisible 区域）。
+    const infoGridBottom = infoNodes.length > 0
+      ? infoPos.frame.y + FRAME_PAD_TOP + Math.ceil(infoNodes.length / 3) * (INFO_H + CARD_GAP)
+      : 0;
+    worldW = Math.max(worldW, infoNodes.length > 0 ? infoPos.frame.x + FRAME_MIN_W + 60 : 0, outputRight);
     worldH = Math.max(worldH, infoGridBottom + 60);
     const scale = Math.min(el.clientWidth / worldW, el.clientHeight / worldH, 1);
     const next = {
@@ -3494,8 +3497,10 @@ export default function ProjectCanvas({
             );
           })}
 
-          {/* 资料框（出场角色/出镜道具/剧本） */}
-          {(
+          {/* 资料框（出场角色/出镜道具/剧本）：只在本集有资料节点时出现——
+              空集时的空框没有信息量，只是画布上的占位噪音；创建资料走
+              双击空白的添加菜单。 */}
+          {infoNodes.length > 0 && (
             <div
               data-frame="info"
               className="pc-frame"
@@ -3503,7 +3508,7 @@ export default function ProjectCanvas({
                 left: infoPos.frame.x,
                 top: infoPos.frame.y,
                 width: Math.max(FRAME_MIN_W, FRAME_PAD_X * 2 + 3 * (INFO_W + CARD_GAP) - CARD_GAP),
-                height: Math.max(FRAME_MIN_H, FRAME_PAD_TOP + Math.ceil(Math.max(infoNodes.length, 1) / 3) * (INFO_H + CARD_GAP) + 12),
+                height: Math.max(FRAME_MIN_H, FRAME_PAD_TOP + Math.ceil(infoNodes.length / 3) * (INFO_H + CARD_GAP) + 12),
               }}
             >
               <div className="pc-frame-label">
@@ -3521,9 +3526,6 @@ export default function ProjectCanvas({
                   >
                     {Icons.add}
                   </button>
-                  {infoNodes.length === 0 && (
-                    <small style={{ padding: "0 4px" }}>{t("project.canvas.infoEmpty")}</small>
-                  )}
                 </span>
               </div>
             </div>
