@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
+import { invoke } from "@tauri-apps/api/core";
 import { useShallow } from "zustand/react/shallow";
 import {
   useProjectStore,
@@ -11,6 +12,7 @@ import {
 } from "../../stores/projectStore";
 import { ConfirmDialog } from "../../components/ConfirmDialog";
 import ProjectFilePickerDialog from "./ProjectFilePickerDialog";
+import ProjectNodeDetailDialog, { type NodeDetailEntry } from "./ProjectNodeDetailDialog";
 import ProjectLibraryPanel from "./ProjectLibraryPanel";
 import { ResourceFileImage, ResourceVideoPoster, ResourceImage } from "./ResourceMedia";
 import { Icons } from "../../components/Icons";
@@ -289,7 +291,7 @@ function buildLayout(
           };
     looses.push({
       key: `asset:${asset.id}`, asset,
-      w: asset.missing ? MISSING_W : LOOSE_W,
+      w: asset.missing ? MISSING_W : asset.canvas_w ?? LOOSE_W,
       h: asset.missing ? MISSING_H : Math.round(LOOSE_W * LOOSE_RATIO),
     });
   });
@@ -428,6 +430,7 @@ export default function ProjectCanvas({
     removeSegment,
     moveSegment,
     setSegmentAsset,
+    selectEpisode,
     linkNode,
     unlinkNode,
     linkAsset,
@@ -453,6 +456,7 @@ export default function ProjectCanvas({
       removeSegment: state.removeSegment,
       moveSegment: state.moveSegment,
       setSegmentAsset: state.setSegmentAsset,
+      selectEpisode: state.selectEpisode,
       linkNode: state.linkNode,
       unlinkNode: state.unlinkNode,
       linkAsset: state.linkAsset,
@@ -569,8 +573,7 @@ export default function ProjectCanvas({
     };
   } | null>(null);
   const [addMenuQuery, setAddMenuQuery] = useState("");
-  // 挂产出：正在为哪个片段选择视频文件；资料关联面板开关。
-  const [segmentAssetPickFor, setSegmentAssetPickFor] = useState<string | null>(null);
+  // 资料关联面板开关（挂产出走片段详情窗口，见 detailFor）。
   const [locationPickOpen, setLocationPickOpen] = useState(false);
   const [castPickOpen, setCastPickOpen] = useState(false);
   const [propPickOpen, setPropPickOpen] = useState(false);
@@ -580,7 +583,6 @@ export default function ProjectCanvas({
 
   // ── 占位素材节点（双击填充后才入库为集级散件）：按集存 localStorage ──
   const [placeholders, setPlaceholders] = useState<CanvasPlaceholder[]>([]);
-  const [placeholderFillFor, setPlaceholderFillFor] = useState<string | null>(null);
   useEffect(() => {
     try {
       const raw = window.localStorage.getItem(`project_canvas_placeholders_${episodeId}`);
@@ -588,7 +590,6 @@ export default function ProjectCanvas({
     } catch {
       setPlaceholders([]);
     }
-    setPlaceholderFillFor(null);
   }, [episodeId]);
   const persistPlaceholders = useCallback(
     (next: CanvasPlaceholder[]) => {
@@ -698,6 +699,164 @@ export default function ProjectCanvas({
     },
     [saveCanvasLayout],
   );
+
+  // ── 节点尺寸（ComfyUI 式右下角手柄拖拽）：按集存 localStorage 覆盖层，
+  // 只记录改过的节点，渲染时未记录的回默认尺寸；线锚点由节点实测跟随。 ──
+  const [nodeSizes, setNodeSizes] = useState<Record<string, { w: number; h: number }>>({});
+  const sizesKey = `project_canvas_sizes_${episodeId}`;
+  useEffect(() => {
+    try {
+      const raw = window.localStorage.getItem(sizesKey);
+      setNodeSizes(raw ? (JSON.parse(raw) as Record<string, { w: number; h: number }>) : {});
+    } catch {
+      setNodeSizes({});
+    }
+  }, [sizesKey]);
+  const persistSizes = useCallback(
+    (next: Record<string, { w: number; h: number }>) => {
+      setNodeSizes(next);
+      try {
+        window.localStorage.setItem(sizesKey, JSON.stringify(next));
+      } catch {
+        // 存储不可用：仅不记忆尺寸。
+      }
+    },
+    [sizesKey],
+  );
+  const sizeOfNode = useCallback(
+    (key: string): { w: number; h: number } | null => {
+      const over = nodeSizes[key];
+      if (key.startsWith("asset:")) {
+        const loose = layout.looses.find((l) => l.key === key);
+        if (!loose) return null;
+        return { w: over?.w ?? loose.w, h: over?.h ?? loose.h };
+      }
+      if (key.startsWith("placeholder:")) {
+        return { w: over?.w ?? LOOSE_W, h: over?.h ?? Math.round(LOOSE_W * LOOSE_RATIO) };
+      }
+      if (key.startsWith("segment:")) {
+        return { w: over?.w ?? SEG_W, h: over?.h ?? SEG_H };
+      }
+      return null;
+    },
+    [nodeSizes, layout],
+  );
+
+  // ── 资料节点（角色/场景/道具/剧本）自由位置：默认仍在资料框网格，
+  // 拖动后按节点绝对位置记忆——框退化为背景分组框，节点不再被钉死。 ──
+  const [infoOffsets, setInfoOffsets] = useState<Record<string, Pos>>({});
+  const infoOffsetsKey = `project_canvas_infonodes_${episodeId}`;
+  useEffect(() => {
+    try {
+      const raw = window.localStorage.getItem(infoOffsetsKey);
+      setInfoOffsets(raw ? (JSON.parse(raw) as Record<string, Pos>) : {});
+    } catch {
+      setInfoOffsets({});
+    }
+  }, [infoOffsetsKey]);
+  const persistInfoOffsets = useCallback(
+    (next: Record<string, Pos>) => {
+      setInfoOffsets(next);
+      try {
+        window.localStorage.setItem(infoOffsetsKey, JSON.stringify(next));
+      } catch {
+        // 存储不可用：仅不记忆位置。
+      }
+    },
+    [infoOffsetsKey],
+  );
+  const infoNodePos = useCallback(
+    (key: string): Pos => infoOffsets[key] ?? infoPos.map[key],
+    [infoOffsets, infoPos],
+  );
+
+  // ── 节点详情窗口：双击节点弹出的独立预览窗口（预览 + 信息 + 上传/
+  // 库选）。资料类带 当前/全部 切换（如片段窗口的 当前角色/全部角色）。 ──
+  const [detailFor, setDetailFor] = useState<
+    | { kind: "asset"; id: string }
+    | { kind: "placeholder"; id: string }
+    | { kind: "segment"; id: string; scope: "current" | "all" }
+    | { kind: "info"; group: "characters" | "locations" | "props"; sourceKey: string; scope: "current" | "all" }
+    | { kind: "script" }
+    | null
+  >(null);
+  // 详情窗口内「从资源库选择」的二级选择器目标。
+  const [pickerFor, setPickerFor] = useState<`placeholder:${string}` | `segment:${string}` | null>(null);
+  const [detailError, setDetailError] = useState("");
+  // 切集即关闭详情窗口与其二级选择器。
+  useEffect(() => {
+    setDetailFor(null);
+    setPickerFor(null);
+    setDetailError("");
+  }, [episodeId]);
+  useEffect(() => {
+    setDetailError("");
+  }, [detailFor]);
+
+  // 详情窗口动作：本机上传（选文件 → 复制入库 → 回调挂接；与库选择器
+  // 的导入同一条链路）。
+  const uploadViaImport = async (after: (file: { filePath: string; kind: string; name: string }) => void) => {
+    setDetailError("");
+    try {
+      const { path } = await invoke<{ path: string }>("select_resource_trace_file");
+      const file = await invoke<{ file_path: string; kind: string; name: string }>(
+        "import_resource_file",
+        { sourcePath: path },
+      );
+      after({ filePath: file.file_path, kind: file.kind, name: file.name });
+    } catch (error) {
+      setDetailError(error instanceof Error ? error.message : String(error));
+    }
+  };
+  // 详情窗口 → 从资源库选择：占位填充（新散件落在占位位置并继承其尺寸）
+  // 与片段挂产出。
+  const fillPlaceholderFromLibrary = (phId: string, file: { filePath: string; kind: string; name: string }) => {
+    const ph = placeholders.find((item) => item.id === phId);
+    setPickerFor(null);
+    setDetailFor(null);
+    if (!ph) return;
+    const phKey = `placeholder:${ph.id}`;
+    const size = nodeSizes[phKey];
+    void linkAsset({
+      filePath: file.filePath,
+      kind: file.kind,
+      name: file.name,
+      episodeId,
+      shotId: "",
+    }).then((asset) => {
+      if (!asset) return;
+      void saveCanvasLayout({
+        assets: [{ id: asset.id, x: ph.x, y: ph.y, w: size?.w ?? LOOSE_W }],
+        shots: [],
+        scenes: [],
+      });
+      persistPlaceholders(placeholders.filter((item) => item.id !== ph.id));
+      if (size) {
+        const next = { ...nodeSizes, [`asset:${asset.id}`]: size };
+        delete next[phKey];
+        persistSizes(next);
+      }
+    });
+  };
+  const attachSegmentFromLibrary = (segmentId: string, file: { filePath: string; kind: string; name: string }) => {
+    // linkAsset 内部会整刷概览（画布随之重挂、UI 状态清空），窗口主动关；
+    // setSegmentAsset 只落库且发生在重取快照之后，末尾再刷一次让片段
+    // 缩略图立即出现，否则要等下次刷新。
+    setPickerFor(null);
+    setDetailFor(null);
+    void linkAsset({
+      filePath: file.filePath,
+      kind: file.kind,
+      name: file.name,
+      episodeId,
+      shotId: "",
+    }).then(async (asset) => {
+      if (!asset) return;
+      await setSegmentAsset(segmentId, asset.id);
+      await selectEpisode(episodeId);
+    });
+  };
+
 
   const outputKey = overview?.episode.output_asset_id ?? null;
 
@@ -1040,21 +1199,24 @@ export default function ProjectCanvas({
         const assetId = key.slice(6);
         const loose = layout.looses.find((l) => l.asset.id === assetId);
         const p = pos.loose[assetId];
-        return loose && p ? finish(p.x, p.y, loose.w, loose.h) : null;
+        if (!loose || !p) return null;
+        const size = sizeOfNode(key);
+        return finish(p.x, p.y, size?.w ?? loose.w, size?.h ?? loose.h);
       }
       if (key.startsWith("segment:")) {
         const p = segPos[key.slice(8)];
-        return p ? finish(p.x, p.y, SEG_W, SEG_H) : null;
+        const size = sizeOfNode(key);
+        return p ? finish(p.x, p.y, size?.w ?? SEG_W, SEG_H) : null;
       }
       if (key === "output") {
         return outputBox ? finish(outputBox.x, outputBox.y, OUTPUT_W, OUTPUT_H) : null;
       }
-      // 资料节点（角色/场景/道具/剧本）按资料框网格位置。
+      // 资料节点（角色/场景/道具/剧本）：拖动过的用覆盖位置，否则网格。
       const infoNode = infoNodes.find((item) => item.key === key);
-      const infoP = infoNode ? infoPos.map[key] : undefined;
+      const infoP = infoNode ? infoNodePos(key) : undefined;
       return infoNode && infoP ? finish(infoP.x, infoP.y, infoNode.w, infoNode.h) : null;
     },
-    [layout, pos, cardSizeOf, outputBox, segPos, infoNodes, infoPos, nodeMetrics],
+    [layout, pos, cardSizeOf, outputBox, segPos, infoNodes, nodeMetrics, sizeOfNode, infoNodePos],
   );
 
   // 端口点：优先用实测端口坐标（标题条/端口行让卡体高度自适应），
@@ -1249,7 +1411,7 @@ export default function ProjectCanvas({
   );
 
   interface DragState {
-    kind: "pan" | "marquee" | "card" | "loose" | "group" | "infoframe" | "wire" | "outnode" | "note" | "addnode" | "segment" | "placeholder";
+    kind: "pan" | "marquee" | "card" | "loose" | "group" | "infoframe" | "wire" | "outnode" | "note" | "addnode" | "segment" | "placeholder" | "resize" | "infonode";
     sx: number;
     sy: number;
     moved?: boolean;
@@ -1298,6 +1460,26 @@ export default function ProjectCanvas({
           dragRef.current = {
             kind: "note", sx: e.clientX, sy: e.clientY, moved: false,
             ox: note.x, oy: note.y, frameKey: noteId,
+          };
+          e.preventDefault();
+          return;
+        }
+      }
+      // 节点右下角尺寸手柄（ComfyUI 式）：按下即改尺寸，不挪位置。
+      const resizeEl = target?.closest(".pc-resize");
+      if (resizeEl) {
+        const nodeEl = resizeEl.closest(".pc-node") as HTMLElement | null;
+        const key = nodeEl?.getAttribute("data-key") ?? "";
+        const size = sizeOfNode(key);
+        if (key && size) {
+          nodeEl?.classList.add("pc-resizing");
+          dragRef.current = {
+            kind: "resize", sx: e.clientX, sy: e.clientY, moved: false,
+            // 首次拖拽从实际渲染尺寸起算（覆盖层只存改过的节点）；片段的
+            // 存量语义是节点总高，散件/占位是媒体区高度（默认值即吻合）。
+            ox: nodeSizes[key]?.w ?? nodeEl?.offsetWidth ?? size.w,
+            oy: nodeSizes[key]?.h ?? (key.startsWith("segment:") ? nodeEl?.offsetHeight ?? size.h : size.h),
+            frameKey: key,
           };
           e.preventDefault();
           return;
@@ -1383,6 +1565,21 @@ export default function ProjectCanvas({
             return;
           }
         }
+        if (
+          key.startsWith("char:") || key.startsWith("loc:") ||
+          key.startsWith("prop:") || key === "script"
+        ) {
+          // 资料节点：按下即自由拖动（覆盖层按绝对位置记忆，资料框退化为
+          // 背景分组框，节点不再被网格钉死）。
+          const p = infoNodePos(key);
+          nodeEl.classList.add("pc-dragging");
+          dragRef.current = {
+            kind: "infonode", sx: e.clientX, sy: e.clientY, moved: false,
+            ox: p.x, oy: p.y, frameKey: key,
+          };
+          e.preventDefault();
+          return;
+        }
         const nextSel = selRef.current.includes(key) ? selRef.current : [key];
         setSelection(nextSel);
         nodeEl.classList.add("pc-dragging");
@@ -1437,7 +1634,7 @@ export default function ProjectCanvas({
       dragRef.current = { kind: "marquee", sx: e.clientX, sy: e.clientY, mq, moved: false };
       e.preventDefault();
     },
-    [layout, pos, setSelection, view, infoPos, scenePos, portsOf, outputBox, notes, segPos, placeholders],
+    [layout, pos, setSelection, view, infoPos, scenePos, portsOf, outputBox, notes, segPos, placeholders, sizeOfNode, infoNodePos, nodeSizes],
   );
 
 
@@ -1518,6 +1715,20 @@ export default function ProjectCanvas({
               : item,
           ),
         );
+      } else if (drag.kind === "resize") {
+        // ComfyUI 式右下角改尺寸：实时预览，松手才持久化。
+        const key = drag.frameKey ?? "";
+        const minW = key.startsWith("segment:") ? 180 : 150;
+        const w = Math.max(minW, (drag.ox ?? 0) + dx / view.scale);
+        const h = Math.max(90, (drag.oy ?? 0) + dy / view.scale);
+        setNodeSizes((prev) => ({ ...prev, [key]: { w: Math.round(w), h: Math.round(h) } }));
+      } else if (drag.kind === "infonode") {
+        if (!drag.moved) return;
+        const key = drag.frameKey ?? "";
+        setInfoOffsets((prev) => ({
+          ...prev,
+          [key]: { x: (drag.ox ?? 0) + dx / view.scale, y: (drag.oy ?? 0) + dy / view.scale },
+        }));
       } else if (drag.kind === "wire") {
         const el = vpRef.current;
         if (!el || !drag.fromKey) return;
@@ -1703,6 +1914,34 @@ export default function ProjectCanvas({
             return next;
           });
         }
+      } else if (drag.kind === "resize") {
+        // 改尺寸松手：把最终尺寸写入按集覆盖层。
+        const key = drag.frameKey ?? "";
+        if (drag.moved && key) {
+          const minW = key.startsWith("segment:") ? 180 : 150;
+          const w = Math.max(minW, (drag.ox ?? 0) + (e.clientX - drag.sx) / view.scale);
+          const h = Math.max(90, (drag.oy ?? 0) + (e.clientY - drag.sy) / view.scale);
+          setNodeSizes((prev) => {
+            const next = { ...prev, [key]: { w: Math.round(w), h: Math.round(h) } };
+            persistSizes(next);
+            return next;
+          });
+        }
+      } else if (drag.kind === "infonode") {
+        if (drag.moved) {
+          const key = drag.frameKey ?? "";
+          setInfoOffsets((prev) => {
+            const next = {
+              ...prev,
+              [key]: {
+                x: (drag.ox ?? 0) + (e.clientX - drag.sx) / view.scale,
+                y: (drag.oy ?? 0) + (e.clientY - drag.sy) / view.scale,
+              },
+            };
+            persistInfoOffsets(next);
+            return next;
+          });
+        }
       } else if (drag.kind === "note") {
         if (drag.moved) {
           persistNotes(
@@ -1824,7 +2063,7 @@ export default function ProjectCanvas({
       document.removeEventListener("mousemove", onMove);
       document.removeEventListener("mouseup", onUp);
     };
-  }, [layout, pos, view, scenePos, infoPos, boxOf, portsOf, outPointOf, inPointOf, linkAssets, persistCards, persistLoose, saveCanvasLayout, saveInfoFramePos, saveView, setSelection, saveOutputPos, setEpisodeOutput, episodeId, notes, persistNotes, addNote, addPlaceholder, persistPlaceholders, persistSegments, linkNode, nodeKeyParts, addSegment, autoConnectNewNode]);
+  }, [layout, pos, view, scenePos, infoPos, boxOf, portsOf, outPointOf, inPointOf, linkAssets, persistCards, persistLoose, saveCanvasLayout, saveInfoFramePos, saveView, setSelection, saveOutputPos, setEpisodeOutput, episodeId, notes, persistNotes, addNote, addPlaceholder, persistPlaceholders, persistSegments, linkNode, nodeKeyParts, addSegment, autoConnectNewNode, persistSizes, persistInfoOffsets]);
 
   // ── 节点操作 ──
   // 节点接口圆点（ComfyUI 式）：输入口列在左缘（片段五口按列分布）、
@@ -1961,6 +2200,274 @@ export default function ProjectCanvas({
     w: ((vpSize?.w ?? 0) || 1600) / view.scale + WIRES_VIEWPORT_PAD * 2,
     h: ((vpSize?.h ?? 0) || 900) / view.scale + WIRES_VIEWPORT_PAD * 2,
   };
+
+  // ── 节点详情窗口：按 detailFor 组装条目（预览 + 信息 + 动作）──
+  const closeDetail = () => {
+    setDetailFor(null);
+    setPickerFor(null);
+    setDetailError("");
+  };
+  const detailDialog = (() => {
+    if (!detailFor || !overview) return null;
+    const fileHint = (relative: string) => joinLibraryPath(libraryRoot, relative);
+    const assetPreview = (asset: ProjectAsset): React.ReactNode => {
+      if (asset.missing) {
+        return <div className="pc-detail-preview-empty">{Icons.image}{t("project.asset.fileMissing")}</div>;
+      }
+      const path = fileHint(asset.file_path);
+      if (asset.kind === "image") {
+        return <ResourceFileImage path={path} alt={asset.name} version={asset.updated_at} className="pc-detail-img" />;
+      }
+      if (asset.kind === "video") {
+        return (
+          <div className="pc-detail-video">
+            <ResourceVideoPoster path={path} version={asset.updated_at} fallbackLabel={asset.name || asset.file_path} />
+            <span className="pc-detail-video-hint">{Icons.play}{t("project.canvas.view")}</span>
+          </div>
+        );
+      }
+      if (asset.kind === "text") {
+        return <TextPaperBody path={path} name={asset.name || asset.file_path} lines={12} />;
+      }
+      return <div className="pc-detail-preview-empty">{Icons.file}<span>{asset.name || asset.file_path}</span></div>;
+    };
+    // 某类资源（character/location/prop/asset）已连到哪些片段（#序号）。
+    const linkedSegmentLabel = (kind: string, id: string) => {
+      const segIds = overview.node_links
+        .filter((l) => l.from_kind === kind && l.from_id === id)
+        .map((l) => l.to_segment);
+      const labels = segments
+        .map((segment, index) => ({ id: segment.id, label: `#${index + 1}` }))
+        .filter(({ id }) => segIds.includes(id))
+        .map(({ label }) => label);
+      return labels.length > 0 ? labels.join("、") : "—";
+    };
+    // 「当前」集合：与某片段直连的该类资源；或与来源资源共片段的同 类资源（无则退为来源自身）。
+    const linkedToSegment = (kind: string, segId: string) =>
+      overview.node_links.filter((l) => l.to_segment === segId && l.from_kind === kind).map((l) => l.from_id);
+    const kindLabelOf = (group: "characters" | "locations" | "props") =>
+      t(group === "characters" ? "project.canvas.typeCharacter" : group === "locations" ? "project.canvas.typeLocation" : "project.canvas.typeProp");
+    const scopeLabelsOf = (group: "characters" | "locations" | "props") => ({
+      current: t(
+        group === "characters"
+          ? "project.canvas.scopeCurrentChars"
+          : group === "locations"
+            ? "project.canvas.scopeCurrentLocs"
+            : "project.canvas.scopeCurrentProps",
+      ),
+      all: t(
+        group === "characters"
+          ? "project.canvas.scopeAllChars"
+          : group === "locations"
+            ? "project.canvas.scopeAllLocs"
+            : "project.canvas.scopeAllProps",
+      ),
+    });
+    const avatarPreview = (name: string, path: string | null, fallback: React.ReactNode) =>
+      path ? (
+        <ResourceImage path={fileHint(path)} alt={name} className="pc-detail-img" />
+      ) : (
+        <span className={`pc-detail-ava pc-ava-p${characterAvatarPaletteIndex(name)}`}>{fallback}</span>
+      );
+
+    if (detailFor.kind === "placeholder") {
+      const ph = placeholders.find((item) => item.id === detailFor.id);
+      if (!ph) return null;
+      const startFill = (file: { filePath: string; kind: string; name: string }) => fillPlaceholderFromLibrary(ph.id, file);
+      return (
+        <ProjectNodeDetailDialog
+          title={t("project.canvas.placeholderTitle")}
+          accent="#94a3b8"
+          error={detailError}
+          entries={[{
+            key: `placeholder:${ph.id}`,
+            title: t("project.canvas.placeholderTitle"),
+            badge: t("project.canvas.typeAsset"),
+            preview: (
+              <button type="button" className="pc-detail-drop" onClick={() => void uploadViaImport(startFill)}>
+                {Icons.image}
+                {t("project.canvas.detailEmptyDrop")}
+              </button>
+            ),
+            info: [{ label: t("project.canvas.detailStatus"), value: t("project.canvas.placeholderEmpty") }],
+            actions: (
+              <>
+                <button type="button" className="pc-detail-btn primary" onClick={() => void uploadViaImport(startFill)}>
+                  {Icons.add}{t("project.canvas.detailUpload")}
+                </button>
+                <button type="button" className="pc-detail-btn" onClick={() => setPickerFor(`placeholder:${ph.id}`)}>
+                  {Icons.resources}{t("project.canvas.detailPickLibrary")}
+                </button>
+              </>
+            ),
+          }]}
+          onClose={closeDetail}
+        />
+      );
+    }
+    if (detailFor.kind === "asset") {
+      const asset = looseAssets.find((item) => item.id === detailFor.id)
+        ?? allAssetsOf(scenes, looseAssets).find((item) => item.id === detailFor.id);
+      if (!asset) return null;
+      return (
+        <ProjectNodeDetailDialog
+          title={asset.name || asset.file_path}
+          accent={NODE_ACCENTS[asset.kind] ?? "#94a3b8"}
+          error={detailError}
+          entries={[{
+            key: `asset:${asset.id}`,
+            title: asset.name || asset.file_path,
+            badge: t(assetKindBadgeKey(asset.kind)),
+            preview: assetPreview(asset),
+            info: [
+              { label: t("project.canvas.detailPath"), value: asset.file_path },
+              { label: t("project.canvas.detailKind"), value: t(assetKindBadgeKey(asset.kind)) },
+              { label: t("project.canvas.detailLinks"), value: linkedSegmentLabel("asset", asset.id) },
+            ],
+            actions: (
+              <button type="button" className="pc-detail-btn" onClick={() => handleLocate(asset)}>
+                {Icons.externalLink}{t("project.canvas.openFile")}
+              </button>
+            ),
+          }]}
+          onClose={closeDetail}
+        />
+      );
+    }
+    if (detailFor.kind === "segment") {
+      const segment = segments.find((item) => item.id === detailFor.id);
+      if (!segment) return null;
+      const segIndex = segments.indexOf(segment) + 1;
+      const linkedCharIds = linkedToSegment("character", segment.id);
+      const chars = detailFor.scope === "current"
+        ? castCharacters.filter((c) => linkedCharIds.includes(c.id))
+        : castCharacters;
+      const startAttach = (file: { filePath: string; kind: string; name: string }) => attachSegmentFromLibrary(segment.id, file);
+      return (
+        <ProjectNodeDetailDialog
+          title={segment.note || `${t("project.canvas.segName")} #${segIndex}`}
+          accent={NODE_ACCENTS.segment}
+          error={detailError}
+          scope={detailFor.scope}
+          scopeLabels={scopeLabelsOf("characters")}
+          onScopeChange={(scope) => setDetailFor({ kind: "segment", id: segment.id, scope })}
+          entries={chars.map((character) => ({
+            key: `char:${character.id}`,
+            title: character.name,
+            badge: kindLabelOf("characters"),
+            preview: avatarPreview(character.name, character.avatar_path, characterAvatarInitial(character.name)),
+            info: [{ label: t("project.canvas.detailLinks"), value: linkedSegmentLabel("character", character.id) }],
+          }))}
+          extra={(
+            <div className="pc-detail-extra">
+              <div className="pc-detail-extra-head">{t("project.canvas.segAttach")}</div>
+              {segment.asset ? (
+                <div className="pc-detail-extra-body">
+                  <div className="pc-detail-video small">
+                    <ResourceVideoPoster
+                      path={fileHint(segment.asset.file_path)}
+                      version={segment.asset.updated_at}
+                      fallbackLabel={segment.asset.name || segment.asset.file_path}
+                    />
+                  </div>
+                  <div className="pc-detail-extra-info">
+                    <b>{segment.asset.name || segment.asset.file_path}</b>
+                    <small>{segment.asset.file_path}</small>
+                    <button type="button" className="pc-detail-btn" onClick={() => handleLocate(segment.asset as ProjectAsset)}>
+                      {Icons.externalLink}{t("project.canvas.openFile")}
+                    </button>
+                  </div>
+                </div>
+              ) : (
+                <div className="pc-detail-extra-actions">
+                  <button type="button" className="pc-detail-btn primary" onClick={() => void uploadViaImport(startAttach)}>
+                    {Icons.add}{t("project.canvas.detailUpload")}
+                  </button>
+                  <button type="button" className="pc-detail-btn" onClick={() => setPickerFor(`segment:${segment.id}`)}>
+                    {Icons.resources}{t("project.canvas.detailPickLibrary")}
+                  </button>
+                </div>
+              )}
+            </div>
+          )}
+          onClose={closeDetail}
+        />
+      );
+    }
+    if (detailFor.kind === "info") {
+      const { group, sourceKey, scope } = detailFor;
+      const kindRaw = group === "characters" ? "character" : group === "locations" ? "location" : "prop";
+      const srcId = sourceKey.slice(sourceKey.indexOf(":") + 1);
+      // 来源资源自己连的片段集合；「当前」= 来源自身 + 与之共片段的同类资源。
+      const sourceSegs = overview.node_links
+        .filter((l) => l.from_kind === kindRaw && l.from_id === srcId)
+        .map((l) => l.to_segment);
+      const inCurrent = (id: string) => {
+        if (id === srcId) return true;
+        return overview.node_links.some(
+          (l) => l.from_kind === kindRaw && l.from_id === id && sourceSegs.includes(l.to_segment),
+        );
+      };
+      const entries: NodeDetailEntry[] =
+        group === "characters"
+          ? (scope === "current" ? castCharacters.filter((c) => inCurrent(c.id)) : castCharacters).map((character) => ({
+              key: `char:${character.id}`,
+              title: character.name,
+              badge: kindLabelOf("characters"),
+              preview: avatarPreview(character.name, character.avatar_path, characterAvatarInitial(character.name)),
+              info: [{ label: t("project.canvas.detailLinks"), value: linkedSegmentLabel("character", character.id) }],
+            }))
+          : group === "locations"
+            ? (scope === "current" ? episodeLocations.filter((l) => inCurrent(l.id)) : episodeLocations).map((location) => ({
+                key: `loc:${location.id}`,
+                title: location.name,
+                badge: kindLabelOf("locations"),
+                preview: avatarPreview(location.name, location.ref_path, Icons.resources),
+                info: [{ label: t("project.canvas.detailLinks"), value: linkedSegmentLabel("location", location.id) }],
+              }))
+            : (scope === "current" ? episodeProps.filter((p) => inCurrent(p.id)) : episodeProps).map((prop) => ({
+                key: `prop:${prop.id}`,
+                title: prop.name,
+                badge: kindLabelOf("props"),
+                preview: avatarPreview(prop.name, "", Icons.star),
+                info: [{ label: t("project.canvas.detailLinks"), value: linkedSegmentLabel("prop", prop.id) }],
+              }));
+      return (
+        <ProjectNodeDetailDialog
+          title={kindLabelOf(group)}
+          accent={NODE_ACCENTS[group === "characters" ? "character" : group === "locations" ? "location" : "prop"]}
+          entries={entries}
+          scope={scope}
+          scopeLabels={scopeLabelsOf(group)}
+          onScopeChange={(next) => setDetailFor({ kind: "info", group, sourceKey, scope: next })}
+          onClose={closeDetail}
+        />
+      );
+    }
+    // script：单文件窗口（文本预览 + 路径 + 打开）。
+    const scriptPath = overview.episode.script_path;
+    if (!scriptPath) return null;
+    const scriptName = scriptFileLabelOf(scriptPath);
+    return (
+      <ProjectNodeDetailDialog
+        title={scriptName}
+        accent={NODE_ACCENTS.script}
+        entries={[{
+          key: "script",
+          title: scriptName,
+          badge: t("project.canvas.typeScript"),
+          preview: <TextPaperBody path={fileHint(scriptPath)} name={scriptName} lines={16} />,
+          info: [{ label: t("project.canvas.detailPath"), value: scriptPath }],
+          actions: (
+            <button type="button" className="pc-detail-btn" onClick={() => void openResourceFile(fileHint(scriptPath))}>
+              {Icons.externalLink}{t("project.canvas.openFile")}
+            </button>
+          ),
+        }]}
+        onClose={closeDetail}
+      />
+    );
+  })();
 
   return (
     <div className="pc-root">
@@ -2339,25 +2846,34 @@ export default function ProjectCanvas({
             const p = pos.loose[loose.asset.id] ?? { x: 0, y: 0 };
             const selected = selKeys.includes(loose.key);
             const asset = loose.asset;
+            const size = sizeOfNode(loose.key);
+            const nodeW = size?.w ?? loose.w;
+            const nodeH = size?.h ?? loose.h;
             const mediaPath = joinLibraryPath(libraryRoot, asset.file_path);
             return (
               <div
                 key={loose.key}
                 data-key={loose.key}
                 className={`pc-node${selected ? " pc-selected" : ""}`}
-                style={{ left: p.x, top: p.y, width: loose.w, ["--node-accent" as string]: NODE_ACCENTS[asset.kind] ?? "#94a3b8" } as React.CSSProperties}
+                style={{ left: p.x, top: p.y, width: nodeW, ["--node-accent" as string]: NODE_ACCENTS[asset.kind] ?? "#94a3b8" } as React.CSSProperties}
+                onDoubleClick={(event) => {
+                  // 双击散件节点 → 详情预览窗口（丢失文件走「重新挂靠」工具）。
+                  if (asset.missing) return;
+                  event.stopPropagation();
+                  setDetailFor({ kind: "asset", id: asset.id });
+                }}
               >
                 <div className="pc-node-head">
                   <span className="pc-node-kind">{t(assetKindBadgeKey(asset.kind))}</span>
                   <b className="pc-node-title">{asset.name || asset.file_path}</b>
                 </div>
                 {asset.missing ? (
-                    <div className="pc-miss-card" style={{ height: loose.h }}>
+                    <div className="pc-miss-card" style={{ height: nodeH }}>
                       {Icons.image}
                       {t("project.asset.fileMissing")}
                     </div>
                   ) : asset.kind === "image" ? (
-                    <div className="pc-media" style={{ height: loose.h }}>
+                    <div className="pc-media" style={{ height: nodeH }}>
                       <ResourceFileImage
                         path={mediaPath}
                         alt={asset.name}
@@ -2366,7 +2882,7 @@ export default function ProjectCanvas({
                       />
                     </div>
                   ) : asset.kind === "video" ? (
-                    <div className="pc-media" style={{ height: loose.h }}>
+                    <div className="pc-media" style={{ height: nodeH }}>
                       <ResourceVideoPoster
                         path={mediaPath}
                         version={asset.updated_at}
@@ -2377,7 +2893,7 @@ export default function ProjectCanvas({
                   ) : asset.kind === "text" ? (
                     <TextPaperBody path={mediaPath} name={asset.name || asset.file_path} />
                   ) : (
-                    <div className="pc-media pc-media-file" style={{ height: loose.h }}>
+                    <div className="pc-media pc-media-file" style={{ height: nodeH }}>
                       {Icons.file}
                       <span>{asset.name || asset.file_path}</span>
                     </div>
@@ -2403,6 +2919,7 @@ export default function ProjectCanvas({
                     {Icons.close}
                   </button>
                 </span>
+                <span className="pc-resize" aria-hidden="true" />
                 {portEls(loose.key)}
               </div>
             );
@@ -2439,13 +2956,27 @@ export default function ProjectCanvas({
             </div>
           )}
           {infoNodes.map((node) => {
-            const p = infoPos.map[node.key];
+            const p = infoNodePos(node.key);
             return (
               <div
                 key={node.key}
                 data-key={node.key}
                 className="pc-node pc-info"
                 style={{ left: p.x, top: p.y, width: node.w, ["--node-accent" as string]: NODE_ACCENTS[node.kind] ?? "#94a3b8" } as React.CSSProperties}
+                onDoubleClick={(event) => {
+                  // 双击资料节点 → 详情窗口（该类资源列表，当前/全部切换；
+                  // 剧本是单文件窗口）。
+                  event.stopPropagation();
+                  if (node.kind === "character") {
+                    setDetailFor({ kind: "info", group: "characters", sourceKey: node.key, scope: "current" });
+                  } else if (node.kind === "location") {
+                    setDetailFor({ kind: "info", group: "locations", sourceKey: node.key, scope: "current" });
+                  } else if (node.kind === "prop") {
+                    setDetailFor({ kind: "info", group: "props", sourceKey: node.key, scope: "current" });
+                  } else {
+                    setDetailFor({ kind: "script" });
+                  }
+                }}
               >
                 <div className="pc-node-head">
                   <span className="pc-node-kind">
@@ -2516,18 +3047,22 @@ export default function ProjectCanvas({
             const p = segPos[segment.id];
             if (!p) return null;
             const key = `segment:${segment.id}`;
+            const segSize = sizeOfNode(key);
             return (
               <div
                 key={segment.id}
                 data-key={key}
                 className="pc-node pc-segment"
-                style={{ left: p.x, top: p.y, width: SEG_W, ["--node-accent" as string]: NODE_ACCENTS.segment } as React.CSSProperties}
+                style={{
+                  left: p.x, top: p.y, width: segSize?.w ?? SEG_W,
+                  height: segSize && segSize.h !== SEG_H ? segSize.h : undefined,
+                  ["--node-accent" as string]: NODE_ACCENTS.segment,
+                } as React.CSSProperties}
                 onDoubleClick={(event) => {
-                  // 空片段双击卡体即打开填充窗口（有产出时双击无操作，
-                  // 单击缩略图开素材详情）。
-                  if (segment.asset) return;
+                  // 双击片段节点 → 详情窗口：角色区（当前角色/全部角色切换）
+                  // + 底部视频挂接区（上传 / 从库选择）。
                   event.stopPropagation();
-                  setSegmentAssetPickFor(segment.id);
+                  setDetailFor({ kind: "segment", id: segment.id, scope: "current" });
                 }}
               >
                 <div className="pc-node-head">
@@ -2553,7 +3088,7 @@ export default function ProjectCanvas({
                     <button
                       type="button"
                       className="pc-seg-empty"
-                      onClick={() => setSegmentAssetPickFor(segment.id)}
+                      onClick={() => setDetailFor({ kind: "segment", id: segment.id, scope: "current" })}
                     >
                       {Icons.link}
                       {t("project.canvas.segEmpty")}
@@ -2578,7 +3113,7 @@ export default function ProjectCanvas({
                   <button
                     type="button"
                     data-tooltip={t("project.canvas.segAttach")}
-                    onClick={() => setSegmentAssetPickFor(segment.id)}
+                    onClick={() => setDetailFor({ kind: "segment", id: segment.id, scope: "current" })}
                   >
                     {Icons.file}
                   </button>
@@ -2591,6 +3126,7 @@ export default function ProjectCanvas({
                     {Icons.delete}
                   </button>
                 </span>
+                <span className="pc-resize" aria-hidden="true" />
               </div>
             );
           })}
@@ -2679,38 +3215,43 @@ export default function ProjectCanvas({
             </div>
           ))}
 
-          {/* 占位素材节点：「素材」菜单创建的空节点，双击打开填充窗口 */}
-          {placeholders.map((ph) => (
-            <div
-              key={ph.id}
-              data-key={`placeholder:${ph.id}`}
-              className="pc-node pc-placeholder"
-              style={{ left: ph.x, top: ph.y, width: LOOSE_W, ["--node-accent" as string]: "#94a3b8" } as React.CSSProperties}
-              onDoubleClick={(event) => {
-                event.stopPropagation();
-                setPlaceholderFillFor(ph.id);
-              }}
-            >
-              <div className="pc-node-head">
-                <span className="pc-node-kind">{t("project.canvas.typeAsset")}</span>
-                <b className="pc-node-title">{t("project.canvas.placeholderTitle")}</b>
+          {/* 占位素材节点：「素材」菜单创建的空节点，双击打开详情填充窗口 */}
+          {placeholders.map((ph) => {
+            const phKey = `placeholder:${ph.id}`;
+            const phSize = sizeOfNode(phKey);
+            return (
+              <div
+                key={ph.id}
+                data-key={phKey}
+                className="pc-node pc-placeholder"
+                style={{ left: ph.x, top: ph.y, width: phSize?.w ?? LOOSE_W, ["--node-accent" as string]: "#94a3b8" } as React.CSSProperties}
+                onDoubleClick={(event) => {
+                  event.stopPropagation();
+                  setDetailFor({ kind: "placeholder", id: ph.id });
+                }}
+              >
+                <div className="pc-node-head">
+                  <span className="pc-node-kind">{t("project.canvas.typeAsset")}</span>
+                  <b className="pc-node-title">{t("project.canvas.placeholderTitle")}</b>
+                </div>
+                <div className="pc-ph-empty" style={{ height: phSize?.h }}>
+                  {Icons.image}
+                  {t("project.canvas.placeholderEmpty")}
+                </div>
+                <span className="pc-node-tools">
+                  <button
+                    type="button"
+                    data-tooltip={t("common.delete")}
+                    className="danger"
+                    onClick={() => persistPlaceholders(placeholders.filter((item) => item.id !== ph.id))}
+                  >
+                    {Icons.close}
+                  </button>
+                </span>
+                <span className="pc-resize" aria-hidden="true" />
               </div>
-              <div className="pc-ph-empty">
-                {Icons.image}
-                {t("project.canvas.placeholderEmpty")}
-              </div>
-              <span className="pc-node-tools">
-                <button
-                  type="button"
-                  data-tooltip={t("common.delete")}
-                  className="danger"
-                  onClick={() => persistPlaceholders(placeholders.filter((item) => item.id !== ph.id))}
-                >
-                  {Icons.close}
-                </button>
-              </span>
-            </div>
-          ))}
+            );
+          })}
         </div>
 
         {/* 缺失提醒条（ComfyUI 缺节点警示的对应物）：缺项可点击定位 */}
@@ -2727,9 +3268,9 @@ export default function ProjectCanvas({
                   if (issue.key === "script") setScriptPickOpen(true);
                   if (issue.key === "segAssets") {
                     locateEmptySegment();
-                    // 定位之余直接打开填充窗口，形成"提醒→填充"闭环。
+                    // 定位之余直接打开片段详情窗口，形成"提醒→填充"闭环。
                     const firstEmpty = segments.find((item) => !item.asset);
-                    if (firstEmpty) setSegmentAssetPickFor(firstEmpty.id);
+                    if (firstEmpty) setDetailFor({ kind: "segment", id: firstEmpty.id, scope: "current" });
                   }
                 }}
               >
@@ -3094,26 +3635,25 @@ export default function ProjectCanvas({
           onCancel={() => setDeleteShotTarget(null)}
         />
       )}
-      {/* 片段挂产出：从资源库选视频文件，导入为集级素材并设为片段产出 */}
-      {segmentAssetPickFor && (
+      {/* 节点详情预览窗口：双击节点的独立窗口（预览 + 信息 + 上传/库选） */}
+      {detailDialog}
+      {/* 详情窗口内的「从资源库选择」二级选择器（占位填充 / 片段挂产出） */}
+      {pickerFor?.startsWith("placeholder:") && (
+        <ProjectFilePickerDialog
+          title={t("project.canvas.fillAsset")}
+          takenPaths={new Set()}
+          takenLabel=""
+          onClose={() => setPickerFor(null)}
+          onPick={(file) => fillPlaceholderFromLibrary(pickerFor.slice(12), file)}
+        />
+      )}
+      {pickerFor?.startsWith("segment:") && (
         <ProjectFilePickerDialog
           title={t("project.canvas.segAttach")}
           takenPaths={new Set()}
           takenLabel=""
-          onClose={() => setSegmentAssetPickFor(null)}
-          onPick={(file) => {
-            const segmentId = segmentAssetPickFor;
-            setSegmentAssetPickFor(null);
-            void linkAsset({
-              filePath: file.filePath,
-              kind: file.kind,
-              name: file.name,
-              episodeId,
-              shotId: "",
-            }).then((asset) => {
-              if (asset) void setSegmentAsset(segmentId, asset.id);
-            });
-          }}
+          onClose={() => setPickerFor(null)}
+          onPick={(file) => attachSegmentFromLibrary(pickerFor.slice(8), file)}
         />
       )}
       {/* 挂剧本：从资源库选文件设为本集剧本，挂接即自动连全部片段提示词口 */}
@@ -3124,35 +3664,6 @@ export default function ProjectCanvas({
           takenLabel=""
           onClose={() => setScriptPickOpen(false)}
           onPick={(file) => handleScriptPick(file.filePath)}
-        />
-      )}
-      {/* 占位素材填充窗口：从库挑文件，新散件落在占位节点位置并移除占位 */}
-      {placeholderFillFor && (
-        <ProjectFilePickerDialog
-          title={t("project.canvas.fillAsset")}
-          takenPaths={new Set()}
-          takenLabel=""
-          onClose={() => setPlaceholderFillFor(null)}
-          onPick={(file) => {
-            const ph = placeholders.find((item) => item.id === placeholderFillFor);
-            setPlaceholderFillFor(null);
-            if (!ph) return;
-            void linkAsset({
-              filePath: file.filePath,
-              kind: file.kind,
-              name: file.name,
-              episodeId,
-              shotId: "",
-            }).then((asset) => {
-              if (!asset) return;
-              void saveCanvasLayout({
-                assets: [{ id: asset.id, x: ph.x, y: ph.y, w: LOOSE_W }],
-                shots: [],
-                scenes: [],
-              });
-              persistPlaceholders(placeholders.filter((item) => item.id !== ph.id));
-            });
-          }}
         />
       )}
       {/* 资料框「关联场景」：多选切换，与出场角色同一交互模式 */}

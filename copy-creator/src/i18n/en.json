@@ -540,7 +540,21 @@
       "linkScript": "Link script",
       "fillAsset": "Fill asset",
       "placeholderTitle": "Empty",
-      "placeholderEmpty": "Double-click to pick a file"
+      "placeholderEmpty": "Double-click to open the detail window",
+      "scopeCurrentChars": "Linked",
+      "scopeAllChars": "All",
+      "scopeCurrentLocs": "Linked",
+      "scopeAllLocs": "All",
+      "scopeCurrentProps": "Linked",
+      "scopeAllProps": "All",
+      "detailUpload": "Upload file…",
+      "detailPickLibrary": "Pick from library…",
+      "detailPath": "Path",
+      "detailKind": "Type",
+      "detailLinks": "Linked segments",
+      "detailStatus": "Status",
+      "detailEmptyDrop": "No file attached — click to upload or pick from the library",
+      "detailNone": "Nothing to show"
     },
     "library": {
       "characters": "Characters",

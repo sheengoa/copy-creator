@@ -542,6 +542,12 @@ function handleInvoke(cmd: string, args: Record<string, unknown>): unknown {
     case "get_resource_groups":
       return [];
 
+    // ── 上传链路（详情窗口「上传文件」）：选本机文件 → 复制入库 ──
+    case "select_resource_trace_file":
+      return { path: `${libraryRoot}\\scripts\\第一集剧本.txt` };
+    case "import_resource_file":
+      return { file_path: "scripts/第一集剧本.txt", kind: "text", name: "第一集剧本.txt" };
+
     // ── 事件与窗口（Tauri 插件命令） ──
     default:
       if (cmd.startsWith("plugin:")) return null;

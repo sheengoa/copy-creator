@@ -540,7 +540,21 @@
       "linkScript": "挂接剧本",
       "fillAsset": "填充素材",
       "placeholderTitle": "待填充",
-      "placeholderEmpty": "双击选择素材文件"
+      "placeholderEmpty": "双击打开详情窗口填充",
+      "scopeCurrentChars": "当前角色",
+      "scopeAllChars": "全部角色",
+      "scopeCurrentLocs": "当前场景",
+      "scopeAllLocs": "全部场景",
+      "scopeCurrentProps": "当前道具",
+      "scopeAllProps": "全部道具",
+      "detailUpload": "上传文件…",
+      "detailPickLibrary": "从资源库选择…",
+      "detailPath": "路径",
+      "detailKind": "类型",
+      "detailLinks": "关联片段",
+      "detailStatus": "状态",
+      "detailEmptyDrop": "尚未挂接文件，点击上传或从资源库选择",
+      "detailNone": "暂无可展示的条目"
     },
     "library": {
       "characters": "角色库",
