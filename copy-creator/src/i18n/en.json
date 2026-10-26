@@ -510,7 +510,7 @@
       "outputNode": "Final Output",
       "outputEmpty": "No source linked",
       "checkTitle": "Workflow issues",
-      "checkScript": "Script missing (link it in the materials frame)",
+      "checkScript": "Script missing · click to link",
       "checkOutput": "Final output not linked · click to locate",
       "typeNote": "Note",
       "typeAsset": "Asset",
@@ -540,7 +540,11 @@
       "typeLocationHint": "Pick locations from the location library",
       "typePropHint": "Pick props from the prop library",
       "linkCast": "Cast",
-      "linkProps": "Props"
+      "linkProps": "Props",
+      "typeEpisode": "Episode script",
+      "typeEpisodeHint": "Pick a script file from the library for this episode",
+      "typeEpisodeLocatedHint": "Linked · click to locate",
+      "linkScript": "Link script"
     },
     "library": {
       "characters": "Characters",

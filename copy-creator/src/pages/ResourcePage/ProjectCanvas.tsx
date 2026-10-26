@@ -394,6 +394,7 @@ export default function ProjectCanvas({
     setEpisodeLocations,
     setEpisodeProps,
     setEpisodeCharacters,
+    updateEpisode,
     addSegment,
     removeSegment,
     moveSegment,
@@ -418,6 +419,7 @@ export default function ProjectCanvas({
       setEpisodeLocations: state.setEpisodeLocations,
       setEpisodeProps: state.setEpisodeProps,
       setEpisodeCharacters: state.setEpisodeCharacters,
+      updateEpisode: state.updateEpisode,
       addSegment: state.addSegment,
       removeSegment: state.removeSegment,
       moveSegment: state.moveSegment,
@@ -543,6 +545,11 @@ export default function ProjectCanvas({
   const [locationPickOpen, setLocationPickOpen] = useState(false);
   const [castPickOpen, setCastPickOpen] = useState(false);
   const [propPickOpen, setPropPickOpen] = useState(false);
+  // 挂剧本：选择库内文件设为本集 script_path（wire = 拖线到空白进入时
+  // 待自动接的线）；已有剧本时「剧本」菜单项与缺项提醒改为定位。
+  const [scriptPickState, setScriptPickState] = useState<{
+    wire?: { fromKey: string; fromDir: "out" | "in"; fromType?: string; fromAccepts?: string[]; fromPortId?: string };
+  } | null>(null);
   // 从库选完素材后落到指定点的世界坐标：loose_assets 出现新 id 即落位，
   // 若携带待接线（pendingLinkWire）则连上。
   const [pendingAddPos, setPendingAddPos] = useState<Pos | null>(null);
@@ -710,6 +717,43 @@ export default function ProjectCanvas({
     setView(next);
     saveView(next);
   }, [outputBox, view.scale, setView, saveView]);
+
+  // 剧本节点定位（视口居中到资料框剧本纸片）。
+  const locateScript = useCallback(() => {
+    const el = vpRef.current;
+    const p = infoPos.map.script;
+    if (!el || !p) return;
+    const next = {
+      x: el.clientWidth / 2 - (p.x + SCRIPT_W / 2) * view.scale,
+      y: el.clientHeight / 2 - (p.y + (INFO_H + 40) / 2) * view.scale,
+      scale: view.scale,
+    };
+    setView(next);
+    saveView(next);
+  }, [infoPos, view.scale, setView, saveView]);
+
+  // 挂剧本：从资源库选文件设为本集剧本；若从「拖线到空白」进入，挂接
+  // 成功后自动连到片段的提示词口。
+  const handleScriptPick = useCallback(
+    (filePath: string) => {
+      const episode = overview?.episode;
+      if (!episode) return;
+      void updateEpisode(episode.id, {
+        title: episode.title,
+        status: episode.status,
+        script_path: filePath,
+      }).then(() => {
+        const wire = scriptPickState?.wire;
+        const target = wire ? (wire.fromDir === "in" ? wire.fromKey : "script") : null;
+        const source = wire ? (wire.fromDir === "in" ? "script" : wire.fromKey) : null;
+        if (target?.startsWith("segment:") && source === "script") {
+          void linkNode(episode.id, "script", episode.id, target.slice(8), "script");
+        }
+        setScriptPickState(null);
+      });
+    },
+    [overview, updateEpisode, scriptPickState, linkNode],
+  );
 
   useEffect(() => {
     const el = vpRef.current;
@@ -2298,7 +2342,10 @@ export default function ProjectCanvas({
                 key={issue.key}
                 type="button"
                 className="pc-checkbar-chip"
-                onClick={issue.key === "output" ? locateOutput : undefined}
+                onClick={() => {
+                  if (issue.key === "output") locateOutput();
+                  if (issue.key === "script") setScriptPickState({});
+                }}
               >
                 {issue.label}
               </button>
@@ -2331,6 +2378,15 @@ export default function ProjectCanvas({
                 hint: t("project.canvas.typeSegmentHint"),
                 icon: Icons.clapperboard,
                 panel: "",
+              },
+              {
+                key: "episodeScript",
+                label: t("project.canvas.typeEpisode"),
+                hint: overview?.episode.script_path
+                  ? t("project.canvas.typeEpisodeLocatedHint")
+                  : t("project.canvas.typeEpisodeHint"),
+                icon: Icons.file,
+                panel: "script",
               },
               {
                 key: "character",
@@ -2382,33 +2438,47 @@ export default function ProjectCanvas({
                   type="button"
                   className="pc-addmenu-item"
                   // 资料类节点点击打开库挑选面板（挑选即关联进资料框）；
-                  // 创建类节点支持点击与按住拖到画布松手两种落位（ComfyUI
-                  // 搜索框惯例）；从「拖线到空白」进入时创建的节点自动接上
-                  // 那条线。
-                  {...(item.panel
+                  // 剧本项：已挂接则定位到剧本纸片，未挂接则从库选文件挂
+                  // 到本集；创建类节点支持点击与按住拖到画布松手两种落位
+                  // （ComfyUI 搜索框惯例）；从「拖线到空白」进入时创建的
+                  // 节点自动接上那条线。
+                  {...(item.panel === "script"
                     ? {
                         onClick: () => {
+                          const wire = addMenu.wire;
                           setAddMenu(null);
                           setAddMenuQuery("");
-                          if (item.panel === "characters") setCastPickOpen(true);
-                          if (item.panel === "locations") setLocationPickOpen(true);
-                          if (item.panel === "props") setPropPickOpen(true);
+                          if (overview?.episode.script_path) {
+                            locateScript();
+                          } else {
+                            setScriptPickState({ wire });
+                          }
                         },
                       }
-                    : {
-                        onMouseDown: (event: React.MouseEvent) => {
-                          if (event.button !== 0) return;
-                          event.stopPropagation();
-                          event.preventDefault();
-                          dragRef.current = {
-                            kind: "addnode", sx: event.clientX, sy: event.clientY, moved: false,
-                            fox: addMenu.wx, foy: addMenu.wy, frameKey: item.key,
-                            wire: addMenu.wire,
-                          };
-                          setAddMenu(null);
-                          setAddMenuQuery("");
-                        },
-                      })}
+                    : item.panel
+                      ? {
+                          onClick: () => {
+                            setAddMenu(null);
+                            setAddMenuQuery("");
+                            if (item.panel === "characters") setCastPickOpen(true);
+                            if (item.panel === "locations") setLocationPickOpen(true);
+                            if (item.panel === "props") setPropPickOpen(true);
+                          },
+                        }
+                      : {
+                          onMouseDown: (event: React.MouseEvent) => {
+                            if (event.button !== 0) return;
+                            event.stopPropagation();
+                            event.preventDefault();
+                            dragRef.current = {
+                              kind: "addnode", sx: event.clientX, sy: event.clientY, moved: false,
+                              fox: addMenu.wx, foy: addMenu.wy, frameKey: item.key,
+                              wire: addMenu.wire,
+                            };
+                            setAddMenu(null);
+                            setAddMenuQuery("");
+                          },
+                        })}
                 >
                   {item.icon}
                   <span>{item.label}</span>
@@ -2659,6 +2729,16 @@ export default function ProjectCanvas({
               if (asset) void setSegmentAsset(segmentId, asset.id);
             });
           }}
+        />
+      )}
+      {/* 挂剧本：从资源库选文件设为本集剧本（此前一直缺失的挂接入口） */}
+      {scriptPickState && (
+        <ProjectFilePickerDialog
+          title={t("project.canvas.linkScript")}
+          takenPaths={new Set()}
+          takenLabel=""
+          onClose={() => setScriptPickState(null)}
+          onPick={(file) => handleScriptPick(file.filePath)}
         />
       )}
       {/* 资料框「关联场景」：多选切换，与出场角色同一交互模式 */}

@@ -510,7 +510,7 @@
       "outputNode": "成片输出",
       "outputEmpty": "未连接来源",
       "checkTitle": "工作流缺项",
-      "checkScript": "缺少剧本（资料框挂接后消除）",
+      "checkScript": "缺少剧本 · 点击挂接",
       "checkOutput": "未连接成片输出 · 点击定位",
       "typeNote": "便签",
       "typeAsset": "素材",
@@ -540,7 +540,11 @@
       "typeLocationHint": "从场景库勾选出场场景",
       "typePropHint": "从道具库勾选出场道具",
       "linkCast": "出场角色",
-      "linkProps": "出场道具"
+      "linkProps": "出场道具",
+      "typeEpisode": "剧本",
+      "typeEpisodeHint": "从库选择剧本文件挂接到本集",
+      "typeEpisodeLocatedHint": "已挂接 · 点击定位",
+      "linkScript": "挂接剧本"
     },
     "library": {
       "characters": "角色库",
