@@ -523,7 +523,7 @@
       "segMoveUp": "拼接序前移",
       "segMoveDown": "拼接序后移",
       "segAttach": "挂产出视频",
-      "segEmpty": "未挂产出 · 点击选择视频",
+      "segEmpty": "未挂产出 · 双击打开详情挂接",
       "outputSummary": "已含 {{count}} 个片段按序拼接",
       "checkSegAssets": "{{count}} 个片段未挂产出",
       "typeSegmentHint": "AI 分段生成的视频单元",
@@ -563,7 +563,11 @@
       "ephUnloaded": "未加载",
       "ephPickHint": "点击从对应库挑选并加载到本节点",
       "ephLoad": "从库加载…",
-      "ephBindTitle": "加载{{kind}}"
+      "ephBindTitle": "加载{{kind}}",
+      "detailRemoveMember": "从本节点移除",
+      "detailAddMember": "加入本节点",
+      "memberPickTitle": "装入{{kind}}",
+      "memberPickConfirm": "装入 {{count}} 项"
     },
     "library": {
       "characters": "角色库",
@@ -574,6 +578,7 @@
       "linked": "已关联",
       "selected": "已选",
       "pick": "关联",
+      "inOtherNode": "已在其他节点",
       "newCharacter": "新建角色",
       "newLocation": "新建场景",
       "newProp": "新建道具",

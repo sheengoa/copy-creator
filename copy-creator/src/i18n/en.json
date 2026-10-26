@@ -523,7 +523,7 @@
       "segMoveUp": "Move earlier in cut",
       "segMoveDown": "Move later in cut",
       "segAttach": "Attach output video",
-      "segEmpty": "No output · click to pick a video",
+      "segEmpty": "No output · double-click to open details",
       "outputSummary": "{{count}} segments joined in order",
       "checkSegAssets": "{{count}} segment(s) without output",
       "typeSegmentHint": "AI-generated video segment unit",
@@ -563,7 +563,11 @@
       "ephUnloaded": "Not loaded",
       "ephPickHint": "Pick one from the library to load into this node",
       "ephLoad": "Load from library…",
-      "ephBindTitle": "Load {{kind}}"
+      "ephBindTitle": "Load {{kind}}",
+      "detailRemoveMember": "Remove from node",
+      "detailAddMember": "Add to this node",
+      "memberPickTitle": "Load into {{kind}}",
+      "memberPickConfirm": "Load {{count}} item(s)"
     },
     "library": {
       "characters": "Characters",
@@ -574,6 +578,7 @@
       "linked": "Linked",
       "selected": "Selected",
       "pick": "Link",
+      "inOtherNode": "In another node",
       "newCharacter": "New Character",
       "newLocation": "New Location",
       "newProp": "New Prop",

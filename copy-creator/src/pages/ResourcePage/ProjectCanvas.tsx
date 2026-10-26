@@ -44,6 +44,7 @@ const MISSING_W = 170;
 const MISSING_H = 96;
 const INFO_W = 132; // 资料卡宽（角色/道具/剧本）
 const INFO_H = 156;
+const INFO_ROW_H = 52; // 组节点内每个成员行的高度（标题条外追加）
 const SCRIPT_W = 210;
 const WORLD_MARGIN = 60;
 /** 连线层视口外沿的世界余量（把可见区外一点的线也画进来，避免边缘裁切）。 */
@@ -580,8 +581,6 @@ export default function ProjectCanvas({
   const [addMenuQuery, setAddMenuQuery] = useState("");
   // 资料关联面板开关（挂产出走片段详情窗口，见 detailFor）。
   const [locationPickOpen, setLocationPickOpen] = useState(false);
-  const [castPickOpen, setCastPickOpen] = useState(false);
-  const [propPickOpen, setPropPickOpen] = useState(false);
   // 挂剧本：选择库内文件设为本集 script_path；已有剧本时「剧本」菜单项
   // 与缺项提醒改为定位。
   const [scriptPickOpen, setScriptPickOpen] = useState(false);
@@ -655,29 +654,114 @@ export default function ProjectCanvas({
     [entityPhs, persistEntityPhs],
   );
 
+  // ── 资料组节点（一个节点装多个同类实体，一条线接入片段——线的含义
+  // = 片段要用组内全部成员）：按集存 localStorage。成员在组间互斥；
+  // 未被组认领的集关联实体仍各自渲染为默认单实体节点，旧数据零迁移。 ──
+  interface InfoGroup {
+    id: string;
+    kind: EntityPhKind;
+    members: string[];
+  }
+  const [infoGroups, setInfoGroups] = useState<InfoGroup[]>([]);
+  const infoGroupsKey = `project_canvas_infogroups_${episodeId}`;
+  useEffect(() => {
+    if (!episodeId) return; // 刷新瞬态（见资料框位置处的说明）。
+    try {
+      const raw = window.localStorage.getItem(infoGroupsKey);
+      setInfoGroups(raw ? (JSON.parse(raw) as InfoGroup[]) : []);
+    } catch {
+      setInfoGroups([]);
+    }
+  }, [infoGroupsKey, episodeId]);
+  const persistInfoGroups = useCallback(
+    (next: InfoGroup[]) => {
+      setInfoGroups(next);
+      try {
+        window.localStorage.setItem(infoGroupsKey, JSON.stringify(next));
+      } catch {
+        // 存储不可用：仅不记忆。
+      }
+    },
+    [infoGroupsKey],
+  );
+  // 组成员自愈：实体已不存在（库里被删）时从组里剔除，避免僵尸认领
+  // 挡住后续同名 id 的实体入集。概览未加载（实体列表为空的瞬态）时跳过。
+  useEffect(() => {
+    if (!overview) return;
+    const exists = (kind: EntityPhKind, id: string) =>
+      (kind === "character"
+        ? castCharacters
+        : kind === "location"
+          ? episodeLocations
+          : episodeProps
+      ).some((e) => e.id === id);
+    let changed = false;
+    const next = infoGroups
+      .map((g) => {
+        const members = g.members.filter((id) => exists(g.kind, id));
+        if (members.length === g.members.length) return g;
+        changed = true;
+        return { ...g, members };
+      })
+      .filter((g) => g.members.length > 0);
+    if (changed) persistInfoGroups(next);
+  }, [overview, infoGroups, castCharacters, episodeLocations, episodeProps, persistInfoGroups]);
+
   // ── 布局与位置（state 驱动渲染） ──
   const layout = useMemo(() => {
     const base = buildLayout(scenes, looseAssets);
     return base;
   }, [scenes, looseAssets]);
 
-  // 资料节点（出场角色/出场场景/出镜道具/剧本）：资料框内网格自动排。
+  // 资料节点（出场角色/出场场景/出镜道具/剧本）：默认每个集关联实体
+  // 一个节点；被组认领的实体不再单独渲染，组节点以多实体行呈现且高度
+  // 随成员数增长（标题条 + N 行，实测尺寸接管后只是首帧兜底）。
   const infoNodes = useMemo(() => {
     const list: CanvasInfo[] = [];
-    castCharacters.forEach((character) => {
-      list.push({
-        key: `char:${character.id}`, kind: "character", name: character.name,
-        avatarPath: character.avatar_path, textPath: "", w: INFO_W, h: INFO_H,
+    const claimed = new Set(infoGroups.flatMap((g) => g.members));
+    castCharacters
+      .filter((character) => !claimed.has(character.id))
+      .forEach((character) => {
+        list.push({
+          key: `char:${character.id}`, kind: "character", name: character.name,
+          avatarPath: character.avatar_path, textPath: "", w: INFO_W, h: INFO_H,
+        });
       });
-    });
-    episodeLocations.forEach((location) => {
-      list.push({
-        key: `loc:${location.id}`, kind: "location", name: location.name,
-        avatarPath: location.ref_path, textPath: "", w: INFO_W, h: INFO_H,
+    episodeLocations
+      .filter((location) => !claimed.has(location.id))
+      .forEach((location) => {
+        list.push({
+          key: `loc:${location.id}`, kind: "location", name: location.name,
+          avatarPath: location.ref_path, textPath: "", w: INFO_W, h: INFO_H,
+        });
       });
-    });
-    episodeProps.forEach((prop) => {
-      list.push({ key: `prop:${prop.id}`, kind: "prop", name: prop.name, avatarPath: "", textPath: "", w: INFO_W, h: INFO_H });
+    episodeProps
+      .filter((prop) => !claimed.has(prop.id))
+      .forEach((prop) => {
+        list.push({ key: `prop:${prop.id}`, kind: "prop", name: prop.name, avatarPath: "", textPath: "", w: INFO_W, h: INFO_H });
+      });
+    infoGroups.forEach((group) => {
+      // 只统计仍存在的成员（库里被删的 id 不占位）。
+      const members = group.members.filter((id) =>
+        (group.kind === "character"
+          ? castCharacters
+          : group.kind === "location"
+            ? episodeLocations
+            : episodeProps
+        ).some((e) => e.id === id),
+      );
+      if (members.length === 0) return;
+      const kindLabel = t(
+        group.kind === "character"
+          ? "project.canvas.typeCharacter"
+          : group.kind === "location"
+            ? "project.canvas.typeLocation"
+            : "project.canvas.typeProp",
+      );
+      list.push({
+        key: `grp:${group.id}`, kind: group.kind, name: `${kindLabel} ×${members.length}`,
+        avatarPath: "", textPath: "", w: INFO_W, h: INFO_H + (members.length - 1) * INFO_ROW_H,
+      });
     });
     if (overview?.episode.script_path) {
       list.push({
@@ -686,7 +770,7 @@ export default function ProjectCanvas({
       });
     }
     return list;
-  }, [castCharacters, episodeLocations, episodeProps, overview]);
+  }, [castCharacters, episodeLocations, episodeProps, infoGroups, overview, t]);
 
   const infoPos = useMemo(() => {
     const frame = infoFramePos ?? { x: WORLD_MARGIN, y: layout.worldH + 48 };
@@ -829,7 +913,13 @@ export default function ProjectCanvas({
   // 落到资料框网格里让人以为加载失败。同一次面板连选多个时按 28px 错开。 ──
   const spawnAnchorRef = useRef<{ wx: number; wy: number; used: number } | null>(null);
   const [pulseKeys, setPulseKeys] = useState<string[]>([]);
-  const pulseTimerRef = useRef<number | null>(null);
+  // 脉冲高亮 2.4s 后自动退场（effect 驱动，不用 timer ref——ref 会让
+  // 传递触底函数的写法被 react-hooks/refs 拦下）。
+  useEffect(() => {
+    if (pulseKeys.length === 0) return;
+    const timer = window.setTimeout(() => setPulseKeys([]), 2400);
+    return () => window.clearTimeout(timer);
+  }, [pulseKeys]);
   const armSpawnAt = useCallback((wx: number, wy: number) => {
     spawnAnchorRef.current = { wx, wy, used: 0 };
   }, []);
@@ -855,15 +945,7 @@ export default function ProjectCanvas({
     anchor.used += fresh.length;
     persistInfoOffsets(next);
     setPulseKeys(marks);
-    if (pulseTimerRef.current) window.clearTimeout(pulseTimerRef.current);
-    pulseTimerRef.current = window.setTimeout(() => setPulseKeys([]), 2400);
   }, [infoNodes, infoOffsets, persistInfoOffsets]);
-  useEffect(
-    () => () => {
-      if (pulseTimerRef.current) window.clearTimeout(pulseTimerRef.current);
-    },
-    [],
-  );
 
   // ── 节点详情窗口：双击节点弹出的独立预览窗口（预览 + 信息 + 上传/
   // 库选）。资料类带 当前/全部 切换；片段窗口按 角色/场景/道具 三区块
@@ -874,12 +956,18 @@ export default function ProjectCanvas({
     | { kind: "placeholder"; id: string }
     | { kind: "entityPh"; id: string }
     | { kind: "segment"; id: string; scopes: { chars: DetailScope; locs: DetailScope; props: DetailScope } }
-    | { kind: "info"; group: "characters" | "locations" | "props"; sourceKey: string; scope: DetailScope }
+    | { kind: "info"; group: EntityPhKind; sourceKey: string; scope: DetailScope }
     | { kind: "script" }
     | null
   >(null);
-  // 空白资料节点详情窗内的「加载」二级面板（单选即绑定即关）。
-  const [ephBindFor, setEphBindFor] = useState<string | null>(null);
+  // 成员装入面板（多选 + 装入确认）：eph 加载 / 组追加裁剪 / 默认节点转组。
+  // （pending 只是面板内的勾选草稿，点「装入」才由 applyMemberPick 落地。）
+  const [memberPick, setMemberPick] = useState<
+    | { mode: "eph"; ephId: string; kind: EntityPhKind; pending: string[] }
+    | { mode: "grp"; groupId: string; kind: EntityPhKind; pending: string[] }
+    | { mode: "convert"; sourceKey: string; kind: EntityPhKind; pending: string[] }
+    | null
+  >(null);
   // 详情窗口内「从资源库选择」的二级选择器目标。
   const [pickerFor, setPickerFor] = useState<`placeholder:${string}` | `segment:${string}` | null>(null);
   const [detailError, setDetailError] = useState("");
@@ -894,7 +982,7 @@ export default function ProjectCanvas({
     prevRealEpisodeRef.current = episodeId;
     setDetailFor(null);
     setPickerFor(null);
-    setEphBindFor(null);
+    setMemberPick(null);
     setDetailError("");
     setPulseKeys([]);
     spawnAnchorRef.current = null;
@@ -966,34 +1054,7 @@ export default function ProjectCanvas({
       await selectEpisode(episodeId);
     });
   };
-  // 空白资料节点 → 加载实体：占位原位变成该实体的资料节点（位置迁移），
-  // 并把实体并进本集关联；详情窗切换到已加载实体形成「加载完成」反馈。
-  const bindEntityPh = async (phId: string, entityId: string) => {
-    const ph = entityPhs.find((item) => item.id === phId);
-    if (!ph || !episodeId || !overview) return;
-    setEphBindFor(null);
-    const prefix = ph.kind === "character" ? "char" : ph.kind === "location" ? "loc" : "prop";
-    const group: "characters" | "locations" | "props" =
-      ph.kind === "character" ? "characters" : ph.kind === "location" ? "locations" : "props";
-    const realKey = `${prefix}:${entityId}`;
-    const pos = infoNodePos(`eph:${phId}`);
-    const nextOffsets = { ...infoOffsets, [realKey]: pos };
-    delete nextOffsets[`eph:${phId}`];
-    persistInfoOffsets(nextOffsets);
-    persistEntityPhs(entityPhs.filter((item) => item.id !== phId));
-    const episode = overview.episode;
-    if (ph.kind === "prop") {
-      await setEpisodeProps(episodeId, [...new Set([...(episode.prop_ids ?? []), entityId])]);
-    } else if (ph.kind === "location") {
-      await setEpisodeLocations(episodeId, [...new Set([...(episode.location_ids ?? []), entityId])]);
-    } else {
-      await setEpisodeCharacters(episodeId, [...new Set([...(episode.character_ids ?? []), entityId])]);
-    }
-    setPulseKeys([realKey]);
-    if (pulseTimerRef.current) window.clearTimeout(pulseTimerRef.current);
-    pulseTimerRef.current = window.setTimeout(() => setPulseKeys([]), 2400);
-    setDetailFor({ kind: "info", group, sourceKey: realKey, scope: "current" });
-  };
+  // 空白资料节点的「加载」已并入成员装入面板（applyMemberPick 的 eph 分支）：
 
 
   const outputKey = overview?.episode.output_asset_id ?? null;
@@ -1395,6 +1456,49 @@ export default function ProjectCanvas({
     [boxOf, nodeMetrics],
   );
 
+  // 实体 → 承载它的节点 key（组节点优先，否则默认单实体节点）。
+  const ownerKeyOf = useCallback(
+    (fromKind: string, fromId: string): string => {
+      if (fromKind === "character" || fromKind === "location" || fromKind === "prop") {
+        const group = infoGroups.find((g) => g.kind === fromKind && g.members.includes(fromId));
+        if (group) return `grp:${group.id}`;
+      }
+      return fromKind === "script"
+        ? "script"
+        : fromKind === "character"
+          ? `char:${fromId}`
+          : fromKind === "location"
+            ? `loc:${fromId}`
+            : fromKind === "prop"
+              ? `prop:${fromId}`
+              : fromKind === "segment"
+                ? `segment:${fromId}`
+                : fromKind === "shot"
+                  ? `shot:${fromId}`
+                  : `asset:${fromId}`;
+    },
+    [infoGroups],
+  );
+
+  // 片段输入口连线：按承载节点去重——组内多个成员各自落的 node_link
+  // 在画布上只画一条线（线的含义 = 组内全部成员接入；删线 = 全部断开）。
+  const segWires = useMemo(() => {
+    const list: { key: string; fromKey: string; links: typeof nodeLinks }[] = [];
+    const index = new Map<string, number>();
+    nodeLinks.forEach((link) => {
+      const fromKey = ownerKeyOf(link.from_kind, link.from_id);
+      const dedup = `${fromKey}|${link.to_segment}|${link.to_port}`;
+      const at = index.get(dedup);
+      if (at !== undefined) {
+        list[at].links.push(link);
+        return;
+      }
+      index.set(dedup, list.length);
+      list.push({ key: `segwire-${link.id}`, fromKey, links: [link] });
+    });
+    return list;
+  }, [nodeLinks, ownerKeyOf]);
+
   // 节点接口（ComfyUI 式）：输入口列在左缘、输出口在右缘，口带名称与
   // 数据类型；类型不兼容的连线在拖拽与落下时都会被拒绝。
   // 片段节点是核心生成单元：五输入口（角色/场景/道具/脚本/其他）+
@@ -1440,7 +1544,7 @@ export default function ProjectCanvas({
         };
       }
       if (key === "script") return { ins: [], out: { label: t("project.canvas.typeScript"), type: "text" } };
-      if (key.startsWith("char:") || key.startsWith("loc:") || key.startsWith("prop:")) {
+      if (key.startsWith("char:") || key.startsWith("loc:") || key.startsWith("prop:") || key.startsWith("grp:")) {
         return { ins: [], out: { label: t("project.canvas.portRefImg"), type: "image" } };
       }
       return { ins: [] };
@@ -1731,10 +1835,11 @@ export default function ProjectCanvas({
         }
         if (
           key.startsWith("char:") || key.startsWith("loc:") ||
-          key.startsWith("prop:") || key === "script" || key.startsWith("eph:")
+          key.startsWith("prop:") || key === "script" || key.startsWith("eph:") ||
+          key.startsWith("grp:")
         ) {
-          // 资料节点（含空白资料占位）：按下即自由拖动（覆盖层按绝对
-          // 位置记忆，资料框退化为背景分组框，节点不再被网格钉死）。
+          // 资料节点（含组节点与空白资料占位）：按下即自由拖动（覆盖层
+          // 按绝对位置记忆，资料框退化为背景分组框，节点不再被网格钉死）。
           const p = infoNodePos(key);
           nodeEl.classList.add("pc-dragging");
           dragRef.current = {
@@ -1921,7 +2026,7 @@ export default function ProjectCanvas({
               (outKeyOf.startsWith("asset:") || outKeyOf.startsWith("shot:") || outKeyOf.startsWith("segment:"))) ||
             (inKeyOf.startsWith("segment:") &&
               (outKeyOf === "script" ||
-                ["asset:", "shot:", "char:", "loc:", "prop:", "segment:"].some((p) => outKeyOf.startsWith(p)))));
+                ["asset:", "shot:", "char:", "loc:", "prop:", "grp:", "segment:"].some((p) => outKeyOf.startsWith(p)))));
         let compatible = false;
         let targetPort: string | null = null;
         if (tKey && tKey !== drag.fromKey && writable) {
@@ -2009,16 +2114,28 @@ export default function ProjectCanvas({
               );
             }
           } else if (inKey.startsWith("segment:")) {
-            const source = nodeKeyParts(outKey);
-            const port = drag.fromDir === "in" ? drag.fromPortId : drag.targetPort;
-            if (source && port) {
-              void linkNode(
-                episodeId,
-                source.kind,
-                source.id,
-                inKey.slice(8),
-                port as ProjectNodeLink["to_port"],
-              );
+            const segId = inKey.slice(8);
+            if (outKey.startsWith("grp:")) {
+              // 组节点一条线 = 组内全部成员分别落一条 node_link；且无论
+              // 拖到哪个口，都按组类型进对应口（角色组进角色口）。
+              const group = infoGroups.find((g) => `grp:${g.id}` === outKey);
+              if (group) {
+                group.members.forEach((memberId) => {
+                  void linkNode(episodeId, group.kind, memberId, segId, group.kind);
+                });
+              }
+            } else {
+              const source = nodeKeyParts(outKey);
+              const port = drag.fromDir === "in" ? drag.fromPortId : drag.targetPort;
+              if (source && port) {
+                void linkNode(
+                  episodeId,
+                  source.kind,
+                  source.id,
+                  segId,
+                  port as ProjectNodeLink["to_port"],
+                );
+              }
             }
           } else {
             // 可写模型已保证此处只会是散件↔散件。
@@ -2235,7 +2352,7 @@ export default function ProjectCanvas({
       document.removeEventListener("mousemove", onMove);
       document.removeEventListener("mouseup", onUp);
     };
-  }, [layout, pos, view, scenePos, infoPos, boxOf, portsOf, outPointOf, inPointOf, linkAssets, persistCards, persistLoose, saveCanvasLayout, saveInfoFramePos, saveView, setSelection, saveOutputPos, setEpisodeOutput, episodeId, notes, persistNotes, addNote, addPlaceholder, addEntityPh, persistPlaceholders, persistSegments, linkNode, nodeKeyParts, addSegment, autoConnectNewNode, persistSizes, persistInfoOffsets]);
+  }, [layout, pos, view, scenePos, infoPos, boxOf, portsOf, outPointOf, inPointOf, linkAssets, persistCards, persistLoose, saveCanvasLayout, saveInfoFramePos, saveView, setSelection, saveOutputPos, setEpisodeOutput, episodeId, notes, persistNotes, addNote, addPlaceholder, addEntityPh, persistPlaceholders, persistSegments, linkNode, nodeKeyParts, addSegment, autoConnectNewNode, persistSizes, persistInfoOffsets, infoGroups]);
 
   // ── 节点操作 ──
   // 节点接口圆点（ComfyUI 式）：输入口列在左缘（片段五口按列分布）、
@@ -2386,15 +2503,16 @@ export default function ProjectCanvas({
   const closeDetail = () => {
     setDetailFor(null);
     setPickerFor(null);
+    setMemberPick(null);
     setDetailError("");
   };
-  // 窗口惯例：Esc 关闭最上层（二级选择器/加载面板开着时先关它）。
+  // 窗口惯例：Esc 关闭最上层（二级选择器/装入面板开着时先关它）。
   useEffect(() => {
     if (!detailFor) return;
     const onKey = (e: KeyboardEvent) => {
       if (e.key !== "Escape") return;
-      if (ephBindFor) {
-        setEphBindFor(null);
+      if (memberPick) {
+        setMemberPick(null);
         return;
       }
       if (pickerFor) {
@@ -2406,7 +2524,155 @@ export default function ProjectCanvas({
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [detailFor, pickerFor, ephBindFor]);
+  }, [detailFor, pickerFor, memberPick]);
+  // ── 组成员操作：装入/移除/自动同步连线。连线语义 = 组内全部成员
+  // 接入片段，所以成员变化要把 node_link 同步到位。 ──
+  const entitiesOfKind = useCallback(
+    (kind: EntityPhKind) =>
+      kind === "character" ? castCharacters : kind === "location" ? episodeLocations : episodeProps,
+    [castCharacters, episodeLocations, episodeProps],
+  );
+  const kindTextOf = useCallback(
+    (kind: EntityPhKind) =>
+      t(kind === "character" ? "project.canvas.typeCharacter" : kind === "location" ? "project.canvas.typeLocation" : "project.canvas.typeProp"),
+    [t],
+  );
+  const groupWiredPorts = useCallback(
+    (group: InfoGroup) => {
+      const seen = new Set<string>();
+      const out: { to_segment: string; to_port: string }[] = [];
+      (overview?.node_links ?? []).forEach((l) => {
+        if (l.from_kind !== group.kind || !group.members.includes(l.from_id)) return;
+        const k = `${l.to_segment}|${l.to_port}`;
+        if (seen.has(k)) return;
+        seen.add(k);
+        out.push({ to_segment: l.to_segment, to_port: l.to_port });
+      });
+      return out;
+    },
+    [overview],
+  );
+  const unlinkEntityLinks = useCallback(
+    async (kind: EntityPhKind, entityId: string) => {
+      const rows = (overview?.node_links ?? []).filter((l) => l.from_kind === kind && l.from_id === entityId);
+      for (const row of rows) await unlinkNode(row.from_kind, row.from_id, row.to_segment, row.to_port);
+    },
+    [overview, unlinkNode],
+  );
+  const associateEntities = useCallback(
+    async (kind: EntityPhKind, ids: string[]) => {
+      if (!episodeId || !overview || ids.length === 0) return;
+      const episode = overview.episode;
+      if (kind === "character") await setEpisodeCharacters(episodeId, [...new Set([...(episode.character_ids ?? []), ...ids])]);
+      else if (kind === "location") await setEpisodeLocations(episodeId, [...new Set([...(episode.location_ids ?? []), ...ids])]);
+      else await setEpisodeProps(episodeId, [...new Set([...(episode.prop_ids ?? []), ...ids])]);
+    },
+    [episodeId, overview, setEpisodeCharacters, setEpisodeLocations, setEpisodeProps],
+  );
+  const removeGroupMember = useCallback(
+    async (groupId: string, entityId: string) => {
+      const group = infoGroups.find((g) => g.id === groupId);
+      if (!group) return;
+      await unlinkEntityLinks(group.kind, entityId);
+      const members = group.members.filter((m) => m !== entityId);
+      persistInfoGroups(
+        members.length
+          ? infoGroups.map((g) => (g.id === groupId ? { ...g, members } : g))
+          : infoGroups.filter((g) => g.id !== groupId),
+      );
+      // 被移除的实体回到默认单实体节点，出生在组旁看得见的位置。
+      const pos = infoNodePos(`grp:${groupId}`);
+      persistInfoOffsets({
+        ...infoOffsets,
+        [`${group.kind === "character" ? "char" : group.kind === "location" ? "loc" : "prop"}:${entityId}`]: {
+          x: Math.round(pos.x + INFO_W + 24),
+          y: Math.round(pos.y),
+        },
+      });
+    },
+    [infoGroups, infoNodePos, infoOffsets, persistInfoGroups, persistInfoOffsets, unlinkEntityLinks],
+  );
+  const addGroupMember = useCallback(
+    async (groupId: string, entityId: string) => {
+      const group = infoGroups.find((g) => g.id === groupId);
+      if (!group || group.members.includes(entityId)) return;
+      await associateEntities(group.kind, [entityId]);
+      const wired = groupWiredPorts(group);
+      for (const w of wired) await linkNode(episodeId, group.kind, entityId, w.to_segment, w.to_port as ProjectNodeLink["to_port"]);
+      persistInfoGroups(infoGroups.map((g) => (g.id === groupId ? { ...g, members: [...g.members, entityId] } : g)));
+    },
+    [infoGroups, associateEntities, groupWiredPorts, linkNode, episodeId, persistInfoGroups],
+  );
+  // 成员装入面板（多选 + 装入确认）：eph 加载 / 组追加裁剪 / 默认节点转组。
+  const applyMemberPick = useCallback(async () => {
+    const pick = memberPick;
+    if (!pick || !episodeId) return;
+    setMemberPick(null);
+    // 防御：已被其他组认领的实体不参与本次装入（成员在组间互斥）。
+    const claimedElsewhere = new Set(
+      infoGroups
+        .filter((g) => !(pick.mode === "grp" && g.id === pick.groupId))
+        .flatMap((g) => g.members),
+    );
+    const pending = pick.pending.filter((id) => !claimedElsewhere.has(id));
+    const groupIdOf = () => `g${Date.now()}${Math.floor(Math.random() * 1e4)}`;
+    if (pick.mode === "eph") {
+      const ph = entityPhs.find((p) => p.id === pick.ephId);
+      if (!ph || pending.length === 0) return;
+      await associateEntities(pick.kind, pending);
+      const groupId = groupIdOf();
+      const pos = infoNodePos(`eph:${ph.id}`);
+      const nextOffsets = { ...infoOffsets, [`grp:${groupId}`]: pos };
+      delete nextOffsets[`eph:${ph.id}`];
+      persistInfoOffsets(nextOffsets);
+      persistEntityPhs(entityPhs.filter((p) => p.id !== ph.id));
+      persistInfoGroups([...infoGroups, { id: groupId, kind: pick.kind, members: [...pending] }]);
+      setPulseKeys([`grp:${groupId}`]);
+      setDetailFor({ kind: "info", group: pick.kind, sourceKey: `grp:${groupId}`, scope: "current" });
+      return;
+    }
+    if (pick.mode === "grp") {
+      const group = infoGroups.find((g) => g.id === pick.groupId);
+      if (!group) return;
+      const additions = pending.filter((id) => !group.members.includes(id));
+      const removals = group.members.filter((id) => !pending.includes(id));
+      await associateEntities(pick.kind, additions);
+      const wired = groupWiredPorts(group);
+      for (const id of additions) {
+        for (const w of wired) await linkNode(episodeId, pick.kind, id, w.to_segment, w.to_port as ProjectNodeLink["to_port"]);
+      }
+      for (const id of removals) await unlinkEntityLinks(pick.kind, id);
+      persistInfoGroups(infoGroups.map((g) => (g.id === group.id ? { ...g, members: [...pending] } : g)));
+      return;
+    }
+    // convert：默认单实体节点继续装入 → 升级为组节点（原位；primary 已有
+    // 连线随归属解析自动归到组名下，新成员自动接入同样片段口）。
+    const srcId = pick.sourceKey.slice((pick.kind === "character" ? "char:" : pick.kind === "location" ? "loc:" : "prop:").length);
+    if (pending.length <= 1 || !pending.includes(srcId)) return;
+    await associateEntities(pick.kind, pending);
+    const groupId = groupIdOf();
+    const pos = infoNodePos(pick.sourceKey);
+    const nextOffsets = { ...infoOffsets, [`grp:${groupId}`]: pos };
+    delete nextOffsets[pick.sourceKey];
+    persistInfoOffsets(nextOffsets);
+    persistInfoGroups([...infoGroups, { id: groupId, kind: pick.kind, members: [...pending] }]);
+    const wiredRows = (overview?.node_links ?? []).filter((l) => l.from_kind === pick.kind && l.from_id === srcId);
+    const seen = new Set<string>();
+    for (const row of wiredRows) {
+      const k = `${row.to_segment}|${row.to_port}`;
+      if (seen.has(k)) continue;
+      seen.add(k);
+      for (const id of pending) {
+        if (id !== srcId) await linkNode(episodeId, pick.kind, id, row.to_segment, row.to_port);
+      }
+    }
+    setDetailFor({ kind: "info", group: pick.kind, sourceKey: `grp:${groupId}`, scope: "current" });
+  }, [
+    memberPick, episodeId, entityPhs, infoNodePos, infoOffsets, persistInfoOffsets, persistEntityPhs,
+    infoGroups, persistInfoGroups, associateEntities, groupWiredPorts, linkNode, overview,
+    unlinkEntityLinks,
+  ]);
+
   const detailDialog = (() => {
     if (!detailFor || !overview) return null;
     const fileHint = (relative: string) => joinLibraryPath(libraryRoot, relative);
@@ -2447,18 +2713,18 @@ export default function ProjectCanvas({
       overview.node_links.filter((l) => l.to_segment === segId && l.from_kind === kind).map((l) => l.from_id);
     const kindLabelOf = (group: "characters" | "locations" | "props") =>
       t(group === "characters" ? "project.canvas.typeCharacter" : group === "locations" ? "project.canvas.typeLocation" : "project.canvas.typeProp");
-    const scopeLabelsOf = (group: "characters" | "locations" | "props") => ({
+    const scopeLabelsOf = (group: EntityPhKind) => ({
       current: t(
-        group === "characters"
+        group === "character"
           ? "project.canvas.scopeCurrentChars"
-          : group === "locations"
+          : group === "location"
             ? "project.canvas.scopeCurrentLocs"
             : "project.canvas.scopeCurrentProps",
       ),
       all: t(
-        group === "characters"
+        group === "character"
           ? "project.canvas.scopeAllChars"
-          : group === "locations"
+          : group === "location"
             ? "project.canvas.scopeAllLocs"
             : "project.canvas.scopeAllProps",
       ),
@@ -2579,7 +2845,7 @@ export default function ProjectCanvas({
               key: "chars",
               title: kindLabelOf("characters"),
               scope: chars,
-              scopeLabels: scopeLabelsOf("characters"),
+              scopeLabels: scopeLabelsOf("character"),
               onScopeChange: (scope) => setSegScope("chars", scope),
               entries: segEntries.characters,
             },
@@ -2587,7 +2853,7 @@ export default function ProjectCanvas({
               key: "locs",
               title: kindLabelOf("locations"),
               scope: locs,
-              scopeLabels: scopeLabelsOf("locations"),
+              scopeLabels: scopeLabelsOf("location"),
               onScopeChange: (scope) => setSegScope("locs", scope),
               entries: segEntries.locations,
             },
@@ -2595,7 +2861,7 @@ export default function ProjectCanvas({
               key: "props",
               title: kindLabelOf("props"),
               scope: props,
-              scopeLabels: scopeLabelsOf("props"),
+              scopeLabels: scopeLabelsOf("prop"),
               onScopeChange: (scope) => setSegScope("props", scope),
               entries: segEntries.props,
             },
@@ -2639,10 +2905,8 @@ export default function ProjectCanvas({
     if (detailFor.kind === "entityPh") {
       const ph = entityPhs.find((item) => item.id === detailFor.id);
       if (!ph) return null;
-      const group: "characters" | "locations" | "props" =
-        ph.kind === "character" ? "characters" : ph.kind === "location" ? "locations" : "props";
-      const kindLabel = kindLabelOf(group);
-      const openBind = () => setEphBindFor(ph.id);
+      const kindLabel = kindTextOf(ph.kind);
+      const openBind = () => setMemberPick({ mode: "eph", ephId: ph.id, kind: ph.kind, pending: [] });
       return (
         <ProjectNodeDetailDialog
           title={kindLabel}
@@ -2671,55 +2935,50 @@ export default function ProjectCanvas({
     }
     if (detailFor.kind === "info") {
       const { group, sourceKey, scope } = detailFor;
-      const kindRaw = group === "characters" ? "character" : group === "locations" ? "location" : "prop";
       const srcId = sourceKey.slice(sourceKey.indexOf(":") + 1);
-      // 来源资源自己连的片段集合；「当前」= 来源自身 + 与之共片段的同类资源。
-      const sourceSegs = overview.node_links
-        .filter((l) => l.from_kind === kindRaw && l.from_id === srcId)
-        .map((l) => l.to_segment);
-      const inCurrent = (id: string) => {
-        if (id === srcId) return true;
-        return overview.node_links.some(
-          (l) => l.from_kind === kindRaw && l.from_id === id && sourceSegs.includes(l.to_segment),
+      const isGroup = sourceKey.startsWith("grp:");
+      const grp = isGroup ? infoGroups.find((g) => `grp:${g.id}` === sourceKey) : null;
+      const kindLabel = kindTextOf(group);
+      const entities = entitiesOfKind(group);
+      const members = grp ? grp.members : [srcId];
+      const scopeList = scope === "current" ? entities.filter((e) => members.includes(e.id)) : entities;
+      const entries: NodeDetailEntry[] = scopeList.map((entity) => {
+        const isMember = members.includes(entity.id);
+        const refPath = group === "character" ? (entity as { avatar_path: string }).avatar_path : (entity as { ref_path: string }).ref_path;
+        let actions: React.ReactNode;
+        if (isGroup && grp) {
+          actions = isMember ? (
+            <button type="button" className="pc-detail-btn" onClick={() => void removeGroupMember(grp.id, entity.id)}>
+              {Icons.close}{t("project.canvas.detailRemoveMember")}
+            </button>
+          ) : (
+            <button type="button" className="pc-detail-btn primary" onClick={() => void addGroupMember(grp.id, entity.id)}>
+              {Icons.add}{t("project.canvas.detailAddMember")}
+            </button>
+          );
+        }
+        return {
+          key: `${group}:${entity.id}`,
+          title: entity.name,
+          badge: kindLabel,
+          preview: avatarPreview(entity.name, refPath, group === "prop" ? Icons.star : characterAvatarInitial(entity.name)),
+          info: [{ label: t("project.canvas.detailLinks"), value: linkedSegmentLabel(group, entity.id) }],
+          actions,
+        };
+      });
+      // 继续装入：多选库面板 + 装入确认。默认节点装入第二个成员即升级
+      // 为组节点（原位、连线随归属解析自动归组）。
+      const openMemberPanel = () => {
+        setMemberPick(
+          grp
+            ? { mode: "grp", groupId: grp.id, kind: group, pending: [...grp.members] }
+            : { mode: "convert", sourceKey, kind: group, pending: [srcId] },
         );
-      };
-      const entries: NodeDetailEntry[] =
-        group === "characters"
-          ? (scope === "current" ? castCharacters.filter((c) => inCurrent(c.id)) : castCharacters).map((character) => ({
-              key: `char:${character.id}`,
-              title: character.name,
-              badge: kindLabelOf("characters"),
-              preview: avatarPreview(character.name, character.avatar_path, characterAvatarInitial(character.name)),
-              info: [{ label: t("project.canvas.detailLinks"), value: linkedSegmentLabel("character", character.id) }],
-            }))
-          : group === "locations"
-            ? (scope === "current" ? episodeLocations.filter((l) => inCurrent(l.id)) : episodeLocations).map((location) => ({
-                key: `loc:${location.id}`,
-                title: location.name,
-                badge: kindLabelOf("locations"),
-                preview: avatarPreview(location.name, location.ref_path, Icons.resources),
-                info: [{ label: t("project.canvas.detailLinks"), value: linkedSegmentLabel("location", location.id) }],
-              }))
-            : (scope === "current" ? episodeProps.filter((p) => inCurrent(p.id)) : episodeProps).map((prop) => ({
-                key: `prop:${prop.id}`,
-                title: prop.name,
-                badge: kindLabelOf("props"),
-                preview: avatarPreview(prop.name, prop.ref_path, Icons.star),
-                info: [{ label: t("project.canvas.detailLinks"), value: linkedSegmentLabel("prop", prop.id) }],
-              }));
-      // 详情窗内再次添加：打开对应库挑选面板（多选切换），新关联的节点
-      // 出生在来源节点旁——「已有一个文件也要能继续加」。
-      const openAddPanel = () => {
-        const p = infoNodePos(sourceKey);
-        if (p) armSpawnAt(p.x + INFO_W + 28, p.y);
-        if (group === "characters") setCastPickOpen(true);
-        else if (group === "locations") setLocationPickOpen(true);
-        else setPropPickOpen(true);
       };
       return (
         <ProjectNodeDetailDialog
-          title={kindLabelOf(group)}
-          accent={NODE_ACCENTS[group === "characters" ? "character" : group === "locations" ? "location" : "prop"]}
+          title={isGroup && grp ? `${kindLabel} ×${grp.members.length}` : kindLabel}
+          accent={NODE_ACCENTS[group] ?? "#94a3b8"}
           entries={entries}
           scope={scope}
           scopeLabels={scopeLabelsOf(group)}
@@ -2728,8 +2987,8 @@ export default function ProjectCanvas({
             <div className="pc-detail-extra">
               <div className="pc-detail-extra-head">{t("project.canvas.detailAddMore")}</div>
               <div className="pc-detail-extra-actions">
-                <button type="button" className="pc-detail-btn primary" onClick={openAddPanel}>
-                  {Icons.add}{t("project.canvas.detailAdd", { kind: kindLabelOf(group) })}
+                <button type="button" className="pc-detail-btn primary" onClick={openMemberPanel}>
+                  {Icons.add}{t("project.canvas.detailAdd", { kind: kindLabel })}
                 </button>
               </div>
             </div>
@@ -2940,32 +3199,20 @@ export default function ProjectCanvas({
                 </g>
               );
             })}
-            {/* 片段输入口连线（角色/场景/道具/剧本/素材/片段 → 片段口） */}
-            {nodeLinks.map((link) => {
-              const fromKey =
-                link.from_kind === "script"
-                  ? "script"
-                  : link.from_kind === "character"
-                    ? `char:${link.from_id}`
-                    : link.from_kind === "location"
-                      ? `loc:${link.from_id}`
-                      : link.from_kind === "prop"
-                        ? `prop:${link.from_id}`
-                        : link.from_kind === "segment"
-                          ? `segment:${link.from_id}`
-                          : link.from_kind === "shot"
-                            ? `shot:${link.from_id}`
-                            : `asset:${link.from_id}`;
-              const a = outPointOf(fromKey);
+            {/* 片段输入口连线（角色/场景/道具/剧本/素材/片段 → 片段口）。
+                组节点的多条成员连线按承载节点去重成一条，删线全断。 */}
+            {segWires.map((wire) => {
+              const link = wire.links[0];
+              const a = outPointOf(wire.fromKey);
               const b = inPointOf(`segment:${link.to_segment}`, link.to_port);
               if (!a || !b) return null;
               const d = wirePathD(a, b);
               const midX = (a.x + b.x) / 2;
               const midY = (a.y + b.y) / 2;
               // 线色随来源数据类型（角色/场景/道具图绿、剧本橙、片段紫）。
-              const fromType = portsOf(fromKey).out?.type;
+              const fromType = portsOf(wire.fromKey).out?.type;
               return (
-                <g key={link.id} className="pc-wire">
+                <g key={wire.key} className="pc-wire">
                   <path className="pc-wire-hit" d={d} />
                   <path
                     className="pc-wire-line"
@@ -2975,9 +3222,11 @@ export default function ProjectCanvas({
                   <g
                     className="pc-wire-del"
                     data-tooltip={t("project.canvas.wireRemove")}
-                    onClick={() =>
-                      void unlinkNode(link.from_kind, link.from_id, link.to_segment, link.to_port)
-                    }
+                    onClick={() => {
+                      wire.links.forEach((l) => {
+                        void unlinkNode(l.from_kind, l.from_id, l.to_segment, l.to_port);
+                      });
+                    }}
                   >
                     <circle cx={midX} cy={midY} r="9" />
                     <path d={`M${midX - 4} ${midY - 4} l8 8 M${midX + 4} ${midY - 4} l-8 8`} />
@@ -3277,11 +3526,11 @@ export default function ProjectCanvas({
                   // 剧本是单文件窗口）。
                   event.stopPropagation();
                   if (node.kind === "character") {
-                    setDetailFor({ kind: "info", group: "characters", sourceKey: node.key, scope: "current" });
+                    setDetailFor({ kind: "info", group: "character", sourceKey: node.key, scope: "current" });
                   } else if (node.kind === "location") {
-                    setDetailFor({ kind: "info", group: "locations", sourceKey: node.key, scope: "current" });
+                    setDetailFor({ kind: "info", group: "location", sourceKey: node.key, scope: "current" });
                   } else if (node.kind === "prop") {
-                    setDetailFor({ kind: "info", group: "props", sourceKey: node.key, scope: "current" });
+                    setDetailFor({ kind: "info", group: "prop", sourceKey: node.key, scope: "current" });
                   } else {
                     setDetailFor({ kind: "script" });
                   }
@@ -3302,7 +3551,39 @@ export default function ProjectCanvas({
                   <b className="pc-node-title">{node.name}</b>
                 </div>
                 <div className="pc-info-body">
-                  {node.kind === "character" ? (
+                  {node.key.startsWith("grp:") ? (
+                    // 组节点：多成员行（每行头像/参考图 + 名称）。
+                    <div className="pc-grp-rows">
+                      {(infoGroups.find((g) => `grp:${g.id}` === node.key)?.members ?? [])
+                        .map((id) => ({ id, entity: entitiesOfKind(node.kind as EntityPhKind).find((e) => e.id === id) }))
+                        .filter((row) => row.entity)
+                        .map(({ id, entity }) => {
+                          const name = (entity as { name: string }).name;
+                          const refPath =
+                            node.kind === "character"
+                              ? (entity as { avatar_path: string }).avatar_path
+                              : (entity as { ref_path: string }).ref_path;
+                          return (
+                            <div className="pc-grp-row" key={id}>
+                              <span className={`pc-grp-ava pc-ava-p${characterAvatarPaletteIndex(name)}`}>
+                                {refPath ? (
+                                  <ResourceImage
+                                    path={joinLibraryPath(libraryRoot, refPath)}
+                                    alt={name}
+                                    className="pc-grp-ava-img"
+                                  />
+                                ) : node.kind === "prop" ? (
+                                  Icons.star
+                                ) : (
+                                  characterAvatarInitial(name)
+                                )}
+                              </span>
+                              <span className="pc-grp-name">{name}</span>
+                            </div>
+                          );
+                        })}
+                    </div>
+                  ) : node.kind === "character" ? (
                     <>
                       <span className={`pc-info-ava pc-ava-p${characterAvatarPaletteIndex(node.name)}`}>
                         {node.avatarPath ? (
@@ -3449,14 +3730,10 @@ export default function ProjectCanvas({
                       <span className="pc-thumb-play">{Icons.play}</span>
                     </button>
                   ) : (
-                    <button
-                      type="button"
-                      className="pc-seg-empty"
-                      onClick={() => setDetailFor({ kind: "segment", id: segment.id, scopes: { chars: "current", locs: "current", props: "current" } })}
-                    >
+                    <div className="pc-seg-empty">
                       {Icons.link}
                       {t("project.canvas.segEmpty")}
-                    </button>
+                    </div>
                   )}
                 <div className="pc-seg-out">{portRows(key, "out")}</div>
                 <span className="pc-node-tools">
@@ -4046,65 +4323,42 @@ export default function ProjectCanvas({
           }}
         />
       )}
-      {/* 双击菜单「角色」：出场角色挑选面板 */}
-      {castPickOpen && (
-        <ProjectLibraryPanel
-          kind="characters"
-          mode="pick"
-          multi
-          selectedIds={overview?.episode.character_ids ?? []}
-          onClose={() => setCastPickOpen(false)}
-          pickTitle={t("project.canvas.linkCast")}
-          onTogglePick={(id) => {
-            if (!episodeId) return;
-            const existing = overview?.episode.character_ids ?? [];
-            const next = existing.includes(id)
-              ? existing.filter((item) => item !== id)
-              : [...existing, id];
-            void setEpisodeCharacters(episodeId, next);
-          }}
-        />
-      )}
-      {/* 双击菜单「道具」：出场道具挑选面板（与镜头挂靠按并集并存） */}
-      {propPickOpen && (
-        <ProjectLibraryPanel
-          kind="props"
-          mode="pick"
-          multi
-          selectedIds={overview?.episode.prop_ids ?? []}
-          onClose={() => setPropPickOpen(false)}
-          pickTitle={t("project.canvas.linkProps")}
-          onTogglePick={(id) => {
-            if (!episodeId) return;
-            const existing = overview?.episode.prop_ids ?? [];
-            const next = existing.includes(id)
-              ? existing.filter((item) => item !== id)
-              : [...existing, id];
-            void setEpisodeProps(episodeId, next);
-          }}
-        />
-      )}
-      {/* 空白资料节点详情窗内的「加载」面板：单选即绑定到该节点 */}
-      {ephBindFor && (() => {
-        const ph = entityPhs.find((item) => item.id === ephBindFor);
-        if (!ph) return null;
-        const group: "characters" | "locations" | "props" =
-          ph.kind === "character" ? "characters" : ph.kind === "location" ? "locations" : "props";
-        const groupLabel = t(
-          group === "characters"
-            ? "project.canvas.typeCharacter"
-            : group === "locations"
-              ? "project.canvas.typeLocation"
-              : "project.canvas.typeProp",
-        );
+      {/* 成员装入面板（多选勾选 + 装入确认）：空白节点加载 / 组追加裁剪 /
+          默认节点转组共用；勾选只是草稿，点「装入 N 项」一次性落地 */}
+      {memberPick && (() => {
+        const kindLabel = kindTextOf(memberPick.kind);
+        const libKind = memberPick.kind === "character" ? "characters" : memberPick.kind === "location" ? "locations" : "props";
+        // 已被其他组认领的实体不可选（成员在组间互斥）。
+        const disabledIds = infoGroups
+          .filter((g) => !(memberPick.mode === "grp" && g.id === memberPick.groupId))
+          .flatMap((g) => g.members);
         return (
           <ProjectLibraryPanel
-            kind={group}
+            kind={libKind}
             mode="pick"
-            onClose={() => setEphBindFor(null)}
-            pickTitle={t("project.canvas.ephBindTitle", { kind: groupLabel })}
-            onPick={(id) => {
-              void bindEntityPh(ph.id, id);
+            multi
+            selectedIds={memberPick.pending}
+            disabledIds={disabledIds}
+            onClose={() => setMemberPick(null)}
+            pickTitle={t("project.canvas.memberPickTitle", { kind: kindLabel })}
+            onTogglePick={(id) => {
+              setMemberPick((prev) =>
+                prev
+                  ? {
+                      ...prev,
+                      pending: prev.pending.includes(id)
+                        ? prev.pending.filter((item) => item !== id)
+                        : [...prev.pending, id],
+                    }
+                  : prev,
+              );
+            }}
+            confirm={{
+              count: memberPick.pending.length,
+              label: t("project.canvas.memberPickConfirm", { count: memberPick.pending.length }),
+              onConfirm: () => {
+                void applyMemberPick();
+              },
             }}
           />
         );

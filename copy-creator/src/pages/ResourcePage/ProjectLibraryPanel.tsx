@@ -70,6 +70,13 @@ export interface ProjectLibraryPanelProps {
   selectedIds?: string[];
   /** 多选模式：点选切换回调。 */
   onTogglePick?: (id: string) => void;
+  /** 多选 + 确认条：勾选只更新标记，点确认由调用方一次性落地
+   *  （节点装入成员等需要「选完一批再提交」的场景）。 */
+  confirm?: { count: number; label: string; onConfirm: () => void };
+  /** 不可选的实体（如已被其他组节点认领）：卡片禁点并显示标签。 */
+  disabledIds?: string[];
+  /** 不可选卡片的标签文案。 */
+  disabledLabel?: string;
 }
 
 const EMPTY_CHARACTER: CharacterDraft = { name: "", role_tag: "", bio: "", prompt: "", avatar_path: "", references: [] };
@@ -89,6 +96,9 @@ export default function ProjectLibraryPanel({
   multi,
   selectedIds,
   onTogglePick,
+  confirm,
+  disabledIds,
+  disabledLabel,
 }: ProjectLibraryPanelProps) {
   const { t } = useTranslation();
   const store = useProjectStore(
@@ -223,13 +233,16 @@ export default function ProjectLibraryPanel({
           )}
           {items.map(({ id, name, entity }) => {
             const isMarked = mode === "pick" && marked.has(id);
+            const isDisabled = mode === "pick" && multi && (disabledIds?.includes(id) ?? false);
             const handleClick =
               mode === "pick"
-                ? multi
-                  ? () => onTogglePick?.(id)
-                  : isMarked
-                    ? undefined
-                    : () => onPick?.(id)
+                ? isDisabled
+                  ? undefined
+                  : multi
+                    ? () => onTogglePick?.(id)
+                    : isMarked
+                      ? undefined
+                      : () => onPick?.(id)
                 : undefined;
             return (
               <div
@@ -284,9 +297,11 @@ export default function ProjectLibraryPanel({
                 </div>
                 {mode === "pick" ? (
                   <span className={`project-library-tag${isMarked ? " linked" : ""}`}>
-                    {isMarked
-                      ? t(multi ? "project.library.selected" : "project.library.linked")
-                      : t("project.library.pick")}
+                    {isDisabled
+                      ? (disabledLabel ?? t("project.library.inOtherNode"))
+                      : isMarked
+                        ? t(multi ? "project.library.selected" : "project.library.linked")
+                        : t("project.library.pick")}
                   </span>
                 ) : (
                   <span className="project-library-actions">
@@ -587,6 +602,20 @@ export default function ProjectLibraryPanel({
               </button>
             ))}
         </div>
+
+        {confirm && (
+          <div className="project-import-bar">
+            <button
+              type="button"
+              className="project-library-import"
+              onClick={confirm.onConfirm}
+              disabled={confirm.count === 0}
+            >
+              {Icons.add}
+              <span>{confirm.label}</span>
+            </button>
+          </div>
+        )}
       </div>
 
       {deleteConfirm && (

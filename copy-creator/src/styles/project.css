@@ -3046,6 +3046,26 @@
 }
 .pc-eph-body .pc-info-ava { opacity: 0.45; }
 .pc-eph-body .pc-info-role { color: var(--text-secondary); }
+
+/* 组节点：一个节点装多个同类实体，成员行（头像/参考图 + 名称） */
+.pc-info-body .pc-grp-rows { align-self: stretch; display: flex; flex-direction: column; padding: 0; }
+.pc-grp-row { display: flex; align-items: center; gap: 7px; padding: 5px 2px; min-width: 0; }
+.pc-grp-row + .pc-grp-row { border-top: 1px dashed var(--separator); }
+.pc-grp-ava {
+  width: 30px;
+  height: 30px;
+  border-radius: 7px;
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: #fff;
+  font-size: 12px;
+  overflow: hidden;
+}
+.pc-grp-ava svg { width: 14px; height: 14px; }
+.pc-grp-ava-img { width: 100%; height: 100%; object-fit: cover; }
+.pc-grp-name { font-size: 11.5px; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .pc-info-ava {
   width: 56px; height: 56px; border-radius: 50%; overflow: hidden;
   display: flex; align-items: center; justify-content: center;
