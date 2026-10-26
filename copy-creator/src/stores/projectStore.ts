@@ -1075,6 +1075,9 @@ export const useProjectStore = create<ProjectStoreState>((set, get) => ({
   setEpisodeLocations: async (episodeId, locationIds) => {
     try {
       await invoke("project_set_episode_locations", { episodeId, locationIds });
+      // 关联后概览重取：资料框新节点立即可见（与 setEpisodeCharacters 同策略；
+      // 不重取则面板标记与画布都毫无反应，像点击失效）。
+      await get().selectEpisode(episodeId);
     } catch (error) {
       console.error("project_set_episode_locations failed:", error);
     }
@@ -1083,6 +1086,7 @@ export const useProjectStore = create<ProjectStoreState>((set, get) => ({
   setEpisodeProps: async (episodeId, propIds) => {
     try {
       await invoke("project_set_episode_props", { episodeId, propIds });
+      await get().selectEpisode(episodeId);
     } catch (error) {
       console.error("project_set_episode_props failed:", error);
     }
