@@ -2484,6 +2484,35 @@
 .pc-detail-extra-info .pc-detail-btn { align-self: flex-start; margin-top: 4px; }
 .pc-detail-extra-actions { display: flex; gap: 8px; flex-wrap: wrap; }
 
+/* 详情窗口多区块（片段窗口的 角色/场景/道具 分组，各自带当前/全部切换） */
+.pc-detail-section { border-top: 1px solid var(--separator); padding-top: 12px; margin-top: 12px; }
+.pc-detail-section:first-of-type { border-top: none; padding-top: 0; margin-top: 0; }
+.pc-detail-section-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 12.5px;
+  margin-bottom: 10px;
+}
+.pc-detail-section-head .pc-detail-count { margin-left: 0; }
+.pc-detail-section-body { display: flex; flex-direction: column; gap: 10px; }
+.pc-detail-section-body.grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(215px, 1fr));
+  align-items: start;
+}
+
+/* 新节点出生脉冲：加载动作创建的资料节点在出生点以节点色扩散两轮，
+   明确「已加载在这里」，避免节点默默落到别处让人以为失败。 */
+.pc-node.pc-spawn { animation: pc-spawn-pulse 1.05s ease-out 2; }
+@keyframes pc-spawn-pulse {
+  0% { box-shadow: 0 0 0 0 color-mix(in srgb, var(--node-accent, #38bdf8) 55%, transparent); }
+  100% { box-shadow: 0 0 0 16px color-mix(in srgb, var(--node-accent, #38bdf8) 0%, transparent); }
+}
+@media (prefers-reduced-motion: reduce) {
+  .pc-node.pc-spawn { animation: none; }
+}
+
 /* ── 成片输出节点（每集工作流的总输出口） ── */
 .pc-outnode { cursor: grab; }
 .pc-outnode:active { cursor: grabbing; }

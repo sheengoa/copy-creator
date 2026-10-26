@@ -554,7 +554,10 @@
       "detailLinks": "关联片段",
       "detailStatus": "状态",
       "detailEmptyDrop": "尚未挂接文件，点击上传或从资源库选择",
-      "detailNone": "暂无可展示的条目"
+      "detailNone": "暂无可展示的条目",
+      "detailAdd": "添加{{kind}}",
+      "detailAddMore": "继续添加",
+      "detailRelinkScript": "重新挂接剧本"
     },
     "library": {
       "characters": "角色库",

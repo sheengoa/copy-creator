@@ -477,6 +477,9 @@ export default function ProjectCanvas({
   // ── 资料框位置（localStorage 按集） ──
   const [infoFramePos, setInfoFramePos] = useState<Pos | null>(null);
   useEffect(() => {
+    // episodeId 为空串是 selectEpisode 刷新途中的瞬态（概览先置空），
+    // 不能当作切集去清空按集记忆，否则每次刷新尺寸/位置/便签全部跳回默认。
+    if (!episodeId) return;
     try {
       const raw = window.localStorage.getItem(`project_canvas_info_${episodeId}`);
       setInfoFramePos(raw ? (JSON.parse(raw) as Pos) : null);
@@ -499,6 +502,7 @@ export default function ProjectCanvas({
   // ── 成片输出节点位置（localStorage 按集；默认挂世界右侧居中） ──
   const [outputPos, setOutputPos] = useState<Pos | null>(null);
   useEffect(() => {
+    if (!episodeId) return; // 刷新瞬态（见资料框位置处的说明）。
     try {
       const raw = window.localStorage.getItem(`project_canvas_output_${episodeId}`);
       setOutputPos(raw ? (JSON.parse(raw) as Pos) : null);
@@ -523,6 +527,7 @@ export default function ProjectCanvas({
   const [editingNoteId, setEditingNoteId] = useState<string | null>(null);
   const [noteDraft, setNoteDraft] = useState("");
   useEffect(() => {
+    if (!episodeId) return; // 刷新瞬态（见资料框位置处的说明）。
     try {
       const raw = window.localStorage.getItem(`project_canvas_notes_${episodeId}`);
       setNotes(raw ? (JSON.parse(raw) as CanvasNote[]) : []);
@@ -584,6 +589,7 @@ export default function ProjectCanvas({
   // ── 占位素材节点（双击填充后才入库为集级散件）：按集存 localStorage ──
   const [placeholders, setPlaceholders] = useState<CanvasPlaceholder[]>([]);
   useEffect(() => {
+    if (!episodeId) return; // 刷新瞬态（见资料框位置处的说明）。
     try {
       const raw = window.localStorage.getItem(`project_canvas_placeholders_${episodeId}`);
       setPlaceholders(raw ? (JSON.parse(raw) as CanvasPlaceholder[]) : []);
@@ -705,13 +711,14 @@ export default function ProjectCanvas({
   const [nodeSizes, setNodeSizes] = useState<Record<string, { w: number; h: number }>>({});
   const sizesKey = `project_canvas_sizes_${episodeId}`;
   useEffect(() => {
+    if (!episodeId) return; // 刷新瞬态（见资料框位置处的说明）。
     try {
       const raw = window.localStorage.getItem(sizesKey);
       setNodeSizes(raw ? (JSON.parse(raw) as Record<string, { w: number; h: number }>) : {});
     } catch {
       setNodeSizes({});
     }
-  }, [sizesKey]);
+  }, [sizesKey, episodeId]);
   const persistSizes = useCallback(
     (next: Record<string, { w: number; h: number }>) => {
       setNodeSizes(next);
@@ -747,13 +754,14 @@ export default function ProjectCanvas({
   const [infoOffsets, setInfoOffsets] = useState<Record<string, Pos>>({});
   const infoOffsetsKey = `project_canvas_infonodes_${episodeId}`;
   useEffect(() => {
+    if (!episodeId) return; // 刷新瞬态（见资料框位置处的说明）。
     try {
       const raw = window.localStorage.getItem(infoOffsetsKey);
       setInfoOffsets(raw ? (JSON.parse(raw) as Record<string, Pos>) : {});
     } catch {
       setInfoOffsets({});
     }
-  }, [infoOffsetsKey]);
+  }, [infoOffsetsKey, episodeId]);
   const persistInfoOffsets = useCallback(
     (next: Record<string, Pos>) => {
       setInfoOffsets(next);
@@ -770,24 +778,77 @@ export default function ProjectCanvas({
     [infoOffsets, infoPos],
   );
 
+  // ── 新节点出生锚点：任何「加载」动作（添加菜单挑实体/挂剧本/详情窗
+  // 添加）在触发瞬间记录世界坐标，概览刷新后新出现的资料节点直接出生
+  // 在那里并脉冲高亮——节点必须出现在用户视线（鼠标）附近，而不是默默
+  // 落到资料框网格里让人以为加载失败。同一次面板连选多个时按 28px 错开。 ──
+  const spawnAnchorRef = useRef<{ wx: number; wy: number; used: number } | null>(null);
+  const [pulseKeys, setPulseKeys] = useState<string[]>([]);
+  const pulseTimerRef = useRef<number | null>(null);
+  const armSpawnAt = useCallback((wx: number, wy: number) => {
+    spawnAnchorRef.current = { wx, wy, used: 0 };
+  }, []);
+  const prevInfoKeysRef = useRef<string[] | null>(null);
+  useEffect(() => {
+    // 概览刷新途中 selectEpisode 会先置空（infoNodes 短暂为空）：这个
+    // 空档不是「节点删光了」，跳过——否则刷新后所有节点都会被误判为
+    // 新出生，锚点也会在空档里被误消耗。
+    if (infoNodes.length === 0) return;
+    const prev = prevInfoKeysRef.current;
+    prevInfoKeysRef.current = infoNodes.map((node) => node.key);
+    const anchor = spawnAnchorRef.current;
+    if (!prev || !anchor) return;
+    const fresh = infoNodes.filter((node) => !prev.includes(node.key));
+    if (fresh.length === 0) return;
+    const next = { ...infoOffsets };
+    const marks: string[] = [];
+    fresh.forEach((node, index) => {
+      const step = anchor.used + index;
+      next[node.key] = { x: Math.round(anchor.wx + step * 28), y: Math.round(anchor.wy + step * 28) };
+      marks.push(node.key);
+    });
+    anchor.used += fresh.length;
+    persistInfoOffsets(next);
+    setPulseKeys(marks);
+    if (pulseTimerRef.current) window.clearTimeout(pulseTimerRef.current);
+    pulseTimerRef.current = window.setTimeout(() => setPulseKeys([]), 2400);
+  }, [infoNodes, infoOffsets, persistInfoOffsets]);
+  useEffect(
+    () => () => {
+      if (pulseTimerRef.current) window.clearTimeout(pulseTimerRef.current);
+    },
+    [],
+  );
+
   // ── 节点详情窗口：双击节点弹出的独立预览窗口（预览 + 信息 + 上传/
-  // 库选）。资料类带 当前/全部 切换（如片段窗口的 当前角色/全部角色）。 ──
+  // 库选）。资料类带 当前/全部 切换；片段窗口按 角色/场景/道具 三区块
+  // 各自独立切换。 ──
+  type DetailScope = "current" | "all";
   const [detailFor, setDetailFor] = useState<
     | { kind: "asset"; id: string }
     | { kind: "placeholder"; id: string }
-    | { kind: "segment"; id: string; scope: "current" | "all" }
-    | { kind: "info"; group: "characters" | "locations" | "props"; sourceKey: string; scope: "current" | "all" }
+    | { kind: "segment"; id: string; scopes: { chars: DetailScope; locs: DetailScope; props: DetailScope } }
+    | { kind: "info"; group: "characters" | "locations" | "props"; sourceKey: string; scope: DetailScope }
     | { kind: "script" }
     | null
   >(null);
   // 详情窗口内「从资源库选择」的二级选择器目标。
   const [pickerFor, setPickerFor] = useState<`placeholder:${string}` | `segment:${string}` | null>(null);
   const [detailError, setDetailError] = useState("");
-  // 切集即关闭详情窗口与其二级选择器。
+  // 真切集（两个非空集 id 之间切换）才关闭详情窗口与其二级选择器，并
+  // 丢弃未消费的出生锚点与脉冲。episodeId 为空串是 selectEpisode 刷新
+  // 途中的瞬态（概览先置空再取回）；空档与随后的「回到原集」都不算切
+  // 集——否则每次刷新都会把打开中的窗口、出生锚点误杀。
+  const prevRealEpisodeRef = useRef(episodeId);
   useEffect(() => {
+    if (!episodeId) return;
+    if (prevRealEpisodeRef.current === episodeId) return;
+    prevRealEpisodeRef.current = episodeId;
     setDetailFor(null);
     setPickerFor(null);
     setDetailError("");
+    setPulseKeys([]);
+    spawnAnchorRef.current = null;
   }, [episodeId]);
   useEffect(() => {
     setDetailError("");
@@ -895,6 +956,15 @@ export default function ProjectCanvas({
       }
     },
     [episodeId],
+  );
+  // 出生锚点的屏幕坐标换算版（vpRef 在本节声明，故放在此处）。
+  const armSpawnFromEvent = useCallback(
+    (clientX: number, clientY: number) => {
+      const rect = vpRef.current?.getBoundingClientRect();
+      if (!rect) return;
+      armSpawnAt((clientX - rect.left - view.x) / view.scale, (clientY - rect.top - view.y) / view.scale);
+    },
+    [armSpawnAt, view.x, view.y, view.scale],
   );
 
   // 工作流缺项检查（ComfyUI 缺节点的对应提醒）；「未连成片」可点击
@@ -2373,30 +2443,72 @@ export default function ProjectCanvas({
       const segment = segments.find((item) => item.id === detailFor.id);
       if (!segment) return null;
       const segIndex = segments.indexOf(segment) + 1;
+      const { chars, locs, props } = detailFor.scopes;
       const linkedCharIds = linkedToSegment("character", segment.id);
-      const chars = detailFor.scope === "current"
-        ? castCharacters.filter((c) => linkedCharIds.includes(c.id))
-        : castCharacters;
+      const linkedLocIds = linkedToSegment("location", segment.id);
+      const linkedPropIds = linkedToSegment("prop", segment.id);
+      const segEntries = {
+        characters: (chars === "current" ? castCharacters.filter((c) => linkedCharIds.includes(c.id)) : castCharacters).map((character) => ({
+          key: `char:${character.id}`,
+          title: character.name,
+          badge: kindLabelOf("characters"),
+          preview: avatarPreview(character.name, character.avatar_path, characterAvatarInitial(character.name)),
+          info: [{ label: t("project.canvas.detailLinks"), value: linkedSegmentLabel("character", character.id) }],
+        })),
+        locations: (locs === "current" ? episodeLocations.filter((l) => linkedLocIds.includes(l.id)) : episodeLocations).map((location) => ({
+          key: `loc:${location.id}`,
+          title: location.name,
+          badge: kindLabelOf("locations"),
+          preview: avatarPreview(location.name, location.ref_path, Icons.resources),
+          info: [{ label: t("project.canvas.detailLinks"), value: linkedSegmentLabel("location", location.id) }],
+        })),
+        props: (props === "current" ? episodeProps.filter((p) => linkedPropIds.includes(p.id)) : episodeProps).map((prop) => ({
+          key: `prop:${prop.id}`,
+          title: prop.name,
+          badge: kindLabelOf("props"),
+          preview: avatarPreview(prop.name, prop.ref_path, Icons.star),
+          info: [{ label: t("project.canvas.detailLinks"), value: linkedSegmentLabel("prop", prop.id) }],
+        })),
+      };
+      const setSegScope = (part: "chars" | "locs" | "props", scope: "current" | "all") =>
+        setDetailFor({ kind: "segment", id: segment.id, scopes: { ...detailFor.scopes, [part]: scope } });
       const startAttach = (file: { filePath: string; kind: string; name: string }) => attachSegmentFromLibrary(segment.id, file);
       return (
         <ProjectNodeDetailDialog
           title={segment.note || `${t("project.canvas.segName")} #${segIndex}`}
           accent={NODE_ACCENTS.segment}
           error={detailError}
-          scope={detailFor.scope}
-          scopeLabels={scopeLabelsOf("characters")}
-          onScopeChange={(scope) => setDetailFor({ kind: "segment", id: segment.id, scope })}
-          entries={chars.map((character) => ({
-            key: `char:${character.id}`,
-            title: character.name,
-            badge: kindLabelOf("characters"),
-            preview: avatarPreview(character.name, character.avatar_path, characterAvatarInitial(character.name)),
-            info: [{ label: t("project.canvas.detailLinks"), value: linkedSegmentLabel("character", character.id) }],
-          }))}
+          count={segEntries.characters.length + segEntries.locations.length + segEntries.props.length}
+          sections={[
+            {
+              key: "chars",
+              title: kindLabelOf("characters"),
+              scope: chars,
+              scopeLabels: scopeLabelsOf("characters"),
+              onScopeChange: (scope) => setSegScope("chars", scope),
+              entries: segEntries.characters,
+            },
+            {
+              key: "locs",
+              title: kindLabelOf("locations"),
+              scope: locs,
+              scopeLabels: scopeLabelsOf("locations"),
+              onScopeChange: (scope) => setSegScope("locs", scope),
+              entries: segEntries.locations,
+            },
+            {
+              key: "props",
+              title: kindLabelOf("props"),
+              scope: props,
+              scopeLabels: scopeLabelsOf("props"),
+              onScopeChange: (scope) => setSegScope("props", scope),
+              entries: segEntries.props,
+            },
+          ]}
           extra={(
             <div className="pc-detail-extra">
               <div className="pc-detail-extra-head">{t("project.canvas.segAttach")}</div>
-              {segment.asset ? (
+              {segment.asset && (
                 <div className="pc-detail-extra-body">
                   <div className="pc-detail-video small">
                     <ResourceVideoPoster
@@ -2413,16 +2525,16 @@ export default function ProjectCanvas({
                     </button>
                   </div>
                 </div>
-              ) : (
-                <div className="pc-detail-extra-actions">
-                  <button type="button" className="pc-detail-btn primary" onClick={() => void uploadViaImport(startAttach)}>
-                    {Icons.add}{t("project.canvas.detailUpload")}
-                  </button>
-                  <button type="button" className="pc-detail-btn" onClick={() => setPickerFor(`segment:${segment.id}`)}>
-                    {Icons.resources}{t("project.canvas.detailPickLibrary")}
-                  </button>
-                </div>
               )}
+              {/* 挂产出动作常驻：已有产出时可再次上传/库选直接更换。 */}
+              <div className="pc-detail-extra-actions">
+                <button type="button" className="pc-detail-btn primary" onClick={() => void uploadViaImport(startAttach)}>
+                  {Icons.add}{t("project.canvas.detailUpload")}
+                </button>
+                <button type="button" className="pc-detail-btn" onClick={() => setPickerFor(`segment:${segment.id}`)}>
+                  {Icons.resources}{t("project.canvas.detailPickLibrary")}
+                </button>
+              </div>
             </div>
           )}
           onClose={closeDetail}
@@ -2464,9 +2576,18 @@ export default function ProjectCanvas({
                 key: `prop:${prop.id}`,
                 title: prop.name,
                 badge: kindLabelOf("props"),
-                preview: avatarPreview(prop.name, "", Icons.star),
+                preview: avatarPreview(prop.name, prop.ref_path, Icons.star),
                 info: [{ label: t("project.canvas.detailLinks"), value: linkedSegmentLabel("prop", prop.id) }],
               }));
+      // 详情窗内再次添加：打开对应库挑选面板（多选切换），新关联的节点
+      // 出生在来源节点旁——「已有一个文件也要能继续加」。
+      const openAddPanel = () => {
+        const p = infoNodePos(sourceKey);
+        if (p) armSpawnAt(p.x + INFO_W + 28, p.y);
+        if (group === "characters") setCastPickOpen(true);
+        else if (group === "locations") setLocationPickOpen(true);
+        else setPropPickOpen(true);
+      };
       return (
         <ProjectNodeDetailDialog
           title={kindLabelOf(group)}
@@ -2475,6 +2596,16 @@ export default function ProjectCanvas({
           scope={scope}
           scopeLabels={scopeLabelsOf(group)}
           onScopeChange={(next) => setDetailFor({ kind: "info", group, sourceKey, scope: next })}
+          extra={(
+            <div className="pc-detail-extra">
+              <div className="pc-detail-extra-head">{t("project.canvas.detailAddMore")}</div>
+              <div className="pc-detail-extra-actions">
+                <button type="button" className="pc-detail-btn primary" onClick={openAddPanel}>
+                  {Icons.add}{t("project.canvas.detailAdd", { kind: kindLabelOf(group) })}
+                </button>
+              </div>
+            </div>
+          )}
           onClose={closeDetail}
         />
       );
@@ -2494,9 +2625,22 @@ export default function ProjectCanvas({
           preview: <TextPaperBody path={fileHint(scriptPath)} name={scriptName} lines={16} />,
           info: [{ label: t("project.canvas.detailPath"), value: scriptPath }],
           actions: (
-            <button type="button" className="pc-detail-btn" onClick={() => void openResourceFile(fileHint(scriptPath))}>
-              {Icons.externalLink}{t("project.canvas.openFile")}
-            </button>
+            <>
+              <button type="button" className="pc-detail-btn" onClick={() => void openResourceFile(fileHint(scriptPath))}>
+                {Icons.externalLink}{t("project.canvas.openFile")}
+              </button>
+              {/* 重新挂接：换库内其他文件做本集剧本（节点留在原位）。 */}
+              <button
+                type="button"
+                className="pc-detail-btn"
+                onClick={() => {
+                  closeDetail();
+                  setScriptPickOpen(true);
+                }}
+              >
+                {Icons.link}{t("project.canvas.detailRelinkScript")}
+              </button>
+            </>
           ),
         }]}
         onClose={closeDetail}
@@ -2979,7 +3123,11 @@ export default function ProjectCanvas({
                   <button
                     type="button"
                     data-tooltip={t("project.canvas.linkScene")}
-                    onClick={() => setLocationPickOpen(true)}
+                    onClick={(event) => {
+                      // 关联的新场景节点出生在点击位置附近。
+                      armSpawnFromEvent(event.clientX, event.clientY);
+                      setLocationPickOpen(true);
+                    }}
                   >
                     {Icons.add}
                   </button>
@@ -2996,7 +3144,7 @@ export default function ProjectCanvas({
               <div
                 key={node.key}
                 data-key={node.key}
-                className="pc-node pc-info"
+                className={`pc-node pc-info${pulseKeys.includes(node.key) ? " pc-spawn" : ""}`}
                 style={{ left: p.x, top: p.y, width: node.w, ["--node-accent" as string]: NODE_ACCENTS[node.kind] ?? "#94a3b8" } as React.CSSProperties}
                 onDoubleClick={(event) => {
                   // 双击资料节点 → 详情窗口（该类资源列表，当前/全部切换；
@@ -3098,7 +3246,7 @@ export default function ProjectCanvas({
                   // 双击片段节点 → 详情窗口：角色区（当前角色/全部角色切换）
                   // + 底部视频挂接区（上传 / 从库选择）。
                   event.stopPropagation();
-                  setDetailFor({ kind: "segment", id: segment.id, scope: "current" });
+                  setDetailFor({ kind: "segment", id: segment.id, scopes: { chars: "current", locs: "current", props: "current" } });
                 }}
               >
                 <div className="pc-node-head">
@@ -3124,7 +3272,7 @@ export default function ProjectCanvas({
                     <button
                       type="button"
                       className="pc-seg-empty"
-                      onClick={() => setDetailFor({ kind: "segment", id: segment.id, scope: "current" })}
+                      onClick={() => setDetailFor({ kind: "segment", id: segment.id, scopes: { chars: "current", locs: "current", props: "current" } })}
                     >
                       {Icons.link}
                       {t("project.canvas.segEmpty")}
@@ -3149,7 +3297,7 @@ export default function ProjectCanvas({
                   <button
                     type="button"
                     data-tooltip={t("project.canvas.segAttach")}
-                    onClick={() => setDetailFor({ kind: "segment", id: segment.id, scope: "current" })}
+                    onClick={() => setDetailFor({ kind: "segment", id: segment.id, scopes: { chars: "current", locs: "current", props: "current" } })}
                   >
                     {Icons.file}
                   </button>
@@ -3299,14 +3447,18 @@ export default function ProjectCanvas({
                 key={issue.key}
                 type="button"
                 className="pc-checkbar-chip"
-                onClick={() => {
+                onClick={(event) => {
                   if (issue.key === "output") locateOutput();
-                  if (issue.key === "script") setScriptPickOpen(true);
+                  if (issue.key === "script") {
+                    // 挂接后剧本节点出生在点击位置附近。
+                    armSpawnFromEvent(event.clientX, event.clientY);
+                    setScriptPickOpen(true);
+                  }
                   if (issue.key === "segAssets") {
                     locateEmptySegment();
                     // 定位之余直接打开片段详情窗口，形成"提醒→填充"闭环。
                     const firstEmpty = segments.find((item) => !item.asset);
-                    if (firstEmpty) setDetailFor({ kind: "segment", id: firstEmpty.id, scope: "current" });
+                    if (firstEmpty) setDetailFor({ kind: "segment", id: firstEmpty.id, scopes: { chars: "current", locs: "current", props: "current" } });
                   }
                 }}
               >
@@ -3413,6 +3565,8 @@ export default function ProjectCanvas({
                           if (overview?.episode.script_path) {
                             locateScript();
                           } else {
+                            // 挂接后剧本节点出生在双击位置（视线附近）。
+                            armSpawnAt(addMenu.wx, addMenu.wy);
                             setScriptPickOpen(true);
                           }
                         },
@@ -3422,6 +3576,8 @@ export default function ProjectCanvas({
                           onClick: () => {
                             setAddMenu(null);
                             setAddMenuQuery("");
+                            // 挑中的实体节点出生在双击位置，而不是资料框网格。
+                            armSpawnAt(addMenu.wx, addMenu.wy);
                             if (item.panel === "characters") setCastPickOpen(true);
                             if (item.panel === "locations") setLocationPickOpen(true);
                             if (item.panel === "props") setPropPickOpen(true);

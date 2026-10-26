@@ -554,7 +554,10 @@
       "detailLinks": "Linked segments",
       "detailStatus": "Status",
       "detailEmptyDrop": "No file attached — click to upload or pick from the library",
-      "detailNone": "Nothing to show"
+      "detailNone": "Nothing to show",
+      "detailAdd": "Add {{kind}}",
+      "detailAddMore": "Add more",
+      "detailRelinkScript": "Relink script"
     },
     "library": {
       "characters": "Characters",
