@@ -472,7 +472,20 @@ function handleInvoke(cmd: string, args: Record<string, unknown>): unknown {
     case "get_resource_library_path":
       return libraryRoot;
     case "get_clipboard_records":
-      return [];
+      // 供「从资源库选文件」浮层挑一个剧本文件（挂剧本链路验证用）。
+      return [
+        {
+          id: "rec-script-1",
+          type: "file",
+          content: `${libraryRoot}\\scripts\\第一集剧本.txt`,
+          source_app: "mock",
+          created_at: ts(),
+          storage_mode: "resource",
+          resource_path: `${libraryRoot}\\scripts\\第一集剧本.txt`,
+          resource_kind: "text",
+          resource_group: null,
+        },
+      ];
     case "get_image_thumbnail":
     case "get_resource_file_thumbnail":
     case "load_resource_video_poster":

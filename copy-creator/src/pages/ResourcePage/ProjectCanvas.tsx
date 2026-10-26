@@ -569,11 +569,9 @@ export default function ProjectCanvas({
   const [locationPickOpen, setLocationPickOpen] = useState(false);
   const [castPickOpen, setCastPickOpen] = useState(false);
   const [propPickOpen, setPropPickOpen] = useState(false);
-  // 挂剧本：选择库内文件设为本集 script_path（wire = 拖线到空白进入时
-  // 待自动接的线）；已有剧本时「剧本」菜单项与缺项提醒改为定位。
-  const [scriptPickState, setScriptPickState] = useState<{
-    wire?: { fromKey: string; fromDir: "out" | "in"; fromType?: string; fromAccepts?: string[]; fromPortId?: string };
-  } | null>(null);
+  // 挂剧本：选择库内文件设为本集 script_path；已有剧本时「剧本」菜单项
+  // 与缺项提醒改为定位。
+  const [scriptPickOpen, setScriptPickOpen] = useState(false);
   // 从库选完素材后落到指定点的世界坐标：loose_assets 出现新 id 即落位，
   // 若携带待接线（pendingLinkWire）则连上。
   const [pendingAddPos, setPendingAddPos] = useState<Pos | null>(null);
@@ -771,8 +769,9 @@ export default function ProjectCanvas({
     saveView(next);
   }, [infoPos, view.scale, setView, saveView]);
 
-  // 挂剧本：从资源库选文件设为本集剧本；若从「拖线到空白」进入，挂接
-  // 成功后自动连到片段的提示词口。
+  // 挂剧本：从资源库选文件设为本集剧本。剧本是全集共享输入，挂接成功
+  // 即自动接入所有已有片段的提示词口（linkNode 幂等，重复挂接不会写
+  // 重；挂接之后新建的片段仍手动连或拖线接）。
   const handleScriptPick = useCallback(
     (filePath: string) => {
       const episode = overview?.episode;
@@ -782,16 +781,13 @@ export default function ProjectCanvas({
         status: episode.status,
         script_path: filePath,
       }).then(() => {
-        const wire = scriptPickState?.wire;
-        const target = wire ? (wire.fromDir === "in" ? wire.fromKey : "script") : null;
-        const source = wire ? (wire.fromDir === "in" ? "script" : wire.fromKey) : null;
-        if (target?.startsWith("segment:") && source === "script") {
-          void linkNode(episode.id, "script", episode.id, target.slice(8), "script");
-        }
-        setScriptPickState(null);
+        segments.forEach((segment) => {
+          void linkNode(episode.id, "script", episode.id, segment.id, "script");
+        });
+        setScriptPickOpen(false);
       });
     },
-    [overview, updateEpisode, scriptPickState, linkNode],
+    [overview, updateEpisode, segments, linkNode],
   );
 
   useEffect(() => {
@@ -2552,7 +2548,7 @@ export default function ProjectCanvas({
                 className="pc-checkbar-chip"
                 onClick={() => {
                   if (issue.key === "output") locateOutput();
-                  if (issue.key === "script") setScriptPickState({});
+                  if (issue.key === "script") setScriptPickOpen(true);
                   if (issue.key === "segAssets") locateEmptySegment();
                 }}
               >
@@ -2654,13 +2650,12 @@ export default function ProjectCanvas({
                   {...(item.panel === "script"
                     ? {
                         onClick: () => {
-                          const wire = addMenu.wire;
                           setAddMenu(null);
                           setAddMenuQuery("");
                           if (overview?.episode.script_path) {
                             locateScript();
                           } else {
-                            setScriptPickState({ wire });
+                            setScriptPickOpen(true);
                           }
                         },
                       }
@@ -2940,13 +2935,13 @@ export default function ProjectCanvas({
           }}
         />
       )}
-      {/* 挂剧本：从资源库选文件设为本集剧本（此前一直缺失的挂接入口） */}
-      {scriptPickState && (
+      {/* 挂剧本：从资源库选文件设为本集剧本，挂接即自动连全部片段提示词口 */}
+      {scriptPickOpen && (
         <ProjectFilePickerDialog
           title={t("project.canvas.linkScript")}
           takenPaths={new Set()}
           takenLabel=""
-          onClose={() => setScriptPickState(null)}
+          onClose={() => setScriptPickOpen(false)}
           onPick={(file) => handleScriptPick(file.filePath)}
         />
       )}
