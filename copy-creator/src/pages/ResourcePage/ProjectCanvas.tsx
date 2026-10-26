@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { useShallow } from "zustand/react/shallow";
 import {
@@ -44,7 +44,6 @@ const INFO_W = 132; // 资料卡宽（角色/道具/剧本）
 const INFO_H = 156;
 const SCRIPT_W = 210;
 const WORLD_MARGIN = 60;
-const SCENE_PITCH = 380;
 const MINI_W = 150;
 const MINI_H = 96;
 const OUTPUT_W = 176; // 成片输出节点（每集工作流的总输出口）
@@ -108,6 +107,8 @@ interface CanvasLayout {
   frames: CanvasFrame[];
   cardPos: Record<string, Pos>;
   loosePos: Record<string, Pos>;
+  /** 场景框默认位置（顺序累计排布），未摆放过场景时使用。 */
+  framePos: Record<string, Pos>;
   infoFramePos: Pos;
   worldW: number;
   worldH: number;
@@ -166,9 +167,13 @@ function buildLayout(
   const frames: CanvasFrame[] = [];
   let worldW = 1200;
   let worldH = 900;
+  // 场景框默认位置：按上一帧右缘顺序累计（固定间距会让变宽的框互相
+  // 重叠）；用户摆过的场景用存储坐标，但游标仍吸收其占位。
+  const framePos: Record<string, Pos> = {};
+  let sceneCursorX = WORLD_MARGIN;
 
-  scenes.forEach((scene, index) => {
-    const fx = scene.canvas_x ?? WORLD_MARGIN + index * SCENE_PITCH;
+  scenes.forEach((scene) => {
+    const fx = scene.canvas_x ?? sceneCursorX;
     const fy = scene.canvas_y ?? 110;
     const sceneCards: CanvasCard[] = [];
     const occupied = new Set<string>(); // 已摆放卡占用的网格格位
@@ -240,6 +245,8 @@ function buildLayout(
       id: scene.id, scene, label: scene.heading || "",
       w: maxX - fx, h: maxY - fy,
     });
+    framePos[scene.id] = { x: fx, y: fy };
+    sceneCursorX = Math.max(sceneCursorX, maxX + 80);
     worldW = Math.max(worldW, maxX + 60);
     worldH = Math.max(worldH, maxY + 60);
   });
@@ -296,7 +303,7 @@ function buildLayout(
   worldW = Math.max(worldW, (looseFrame?.w ?? 0) + WORLD_MARGIN + 60);
   worldH = Math.max(worldH, looseY + (looseFrame?.h ?? 0) + 60);
 
-  return { cards, looses, infos: [], frames, cardPos, loosePos, worldW, worldH };
+  return { cards, looses, infos: [], frames, cardPos, loosePos, framePos, worldW, worldH };
 }
 
 /** 文本纸片内容（读资源文本头部，组件内自持请求）。 */
@@ -340,6 +347,23 @@ const WIRE_TYPE_COLORS: Record<string, string> = {
   video: "#a78bfa",
   text: "#fb923c",
   prompt: "#22d3ee",
+  audio: "#facc15",
+  file: "#94a3b8",
+};
+
+/** 节点类型色（标题条与类型名用，向 ComfyUI 的彩色节点语言对齐）。 */
+const NODE_ACCENTS: Record<string, string> = {
+  shot: "#60a5fa",
+  segment: "#a78bfa",
+  output: "#c084fc",
+  character: "#f472b6",
+  location: "#34d399",
+  prop: "#fbbf24",
+  script: "#fb923c",
+  note: "#f6e6a8",
+  image: "#4ade80",
+  video: "#a78bfa",
+  text: "#fb923c",
   audio: "#facc15",
   file: "#94a3b8",
 };
@@ -628,11 +652,11 @@ export default function ProjectCanvas({
   useEffect(() => {
     setSegPos((prev) => {
       const next: Record<string, Pos> = {};
-      const baseX = (outputBox?.x ?? layout.worldW + 260) - SEG_W - 140;
+      const baseX = (outputBox?.x ?? layout.worldW + 260) - SEG_W - 160;
       segments.forEach((segment, index) => {
         next[segment.id] = prev[segment.id] ?? {
           x: segment.canvas_x ?? baseX,
-          y: segment.canvas_y ?? Math.max(WORLD_MARGIN, 110 + index * (SEG_H + 28)),
+          y: segment.canvas_y ?? Math.max(WORLD_MARGIN, 110 + index * 260),
         };
       });
       return next;
@@ -718,6 +742,21 @@ export default function ProjectCanvas({
     saveView(next);
   }, [outputBox, view.scale, setView, saveView]);
 
+  // 提醒条「N 个片段未挂产出」：定位到第一个空片段。
+  const locateEmptySegment = useCallback(() => {
+    const el = vpRef.current;
+    const target = segments.find((item) => !item.asset);
+    const p = target ? segPos[target.id] : null;
+    if (!el || !p) return;
+    const next = {
+      x: el.clientWidth / 2 - (p.x + SEG_W / 2) * view.scale,
+      y: el.clientHeight / 2 - (p.y + SEG_H / 2) * view.scale,
+      scale: view.scale,
+    };
+    setView(next);
+    saveView(next);
+  }, [segments, segPos, view.scale, setView, saveView]);
+
   // 剧本节点定位（视口居中到资料框剧本纸片）。
   const locateScript = useCallback(() => {
     const el = vpRef.current;
@@ -769,8 +808,11 @@ export default function ProjectCanvas({
     const el = vpRef.current;
     if (!el) return;
     const infoBottom = infoPos.frame.y + FRAME_PAD_TOP + Math.ceil(infoNodes.length / 3) * (INFO_H + CARD_GAP);
-    const worldW = Math.max(layout.worldW, infoPos.frame.x + FRAME_MIN_W + 60);
-    const worldH = Math.max(layout.worldH, infoBottom + 60);
+    // 片段列与成片节点挂在主世界右侧，也要进适配包围盒。
+    const segBottom = 110 + segments.length * 260 + 60;
+    const outputRight = outputBox ? outputBox.x + outputBox.w + 60 : 0;
+    const worldW = Math.max(layout.worldW, infoPos.frame.x + FRAME_MIN_W + 60, outputRight);
+    const worldH = Math.max(layout.worldH, infoBottom + 60, segBottom);
     const scale = Math.min(el.clientWidth / worldW, el.clientHeight / worldH, 1);
     const next = {
       x: Math.max(12, (el.clientWidth - worldW * scale) / 2),
@@ -779,7 +821,7 @@ export default function ProjectCanvas({
     };
     setView(next);
     saveView(next);
-  }, [layout, infoPos, infoNodes, saveView]);
+  }, [layout, infoPos, infoNodes, saveView, outputBox, segments.length]);
 
   const initializedRef = useRef("");
   useEffect(() => {
@@ -850,40 +892,108 @@ export default function ProjectCanvas({
     return list;
   }, [scenes, looseAssets, links, containerOf, t]);
 
+  // ── 节点实测尺寸与端口位置：连线锚点跟随真实 DOM（内容自适应的
+  // 标题条/端口行/缩略图都会改变卡体高度，常量只是首帧兜底） ──
+  const [nodeMetrics, setNodeMetrics] = useState<{
+    boxes: Record<string, { w: number; h: number }>;
+    ports: Record<string, Record<string, Pos>>;
+  }>({ boxes: {}, ports: {} });
+  const nodeMetricsRef = useRef(nodeMetrics);
+  const viewScaleRef = useRef(view.scale);
+  const measureNodes = useCallback(() => {
+    const nodes = vpRef.current?.querySelectorAll<HTMLElement>(".pc-node[data-key]");
+    if (!nodes || nodes.length === 0) return;
+    const scale = viewScaleRef.current || 1;
+    const boxes: Record<string, { w: number; h: number }> = {};
+    const ports: Record<string, Record<string, Pos>> = {};
+    nodes.forEach((nodeEl) => {
+      const key = nodeEl.getAttribute("data-key") ?? "";
+      if (!key) return;
+      const nr = nodeEl.getBoundingClientRect();
+      boxes[key] = { w: nodeEl.offsetWidth, h: nodeEl.offsetHeight };
+      const map: Record<string, Pos> = {};
+      nodeEl.querySelectorAll<HTMLElement>(".pc-port").forEach((portEl) => {
+        const pr = portEl.getBoundingClientRect();
+        const pid =
+          portEl.getAttribute("data-port-id") ??
+          (portEl.getAttribute("data-port") === "out" ? "__out" : "__in");
+        map[pid] = {
+          x: (pr.x + pr.width / 2 - nr.x) / scale,
+          y: (pr.y + pr.height / 2 - nr.y) / scale,
+        };
+      });
+      ports[key] = map;
+    });
+    const prev = nodeMetricsRef.current;
+    if (
+      JSON.stringify(prev.boxes) === JSON.stringify(boxes) &&
+      JSON.stringify(prev.ports) === JSON.stringify(ports)
+    ) {
+      return;
+    }
+    const next = { boxes, ports };
+    nodeMetricsRef.current = next;
+    setNodeMetrics(next);
+  }, []);
+  const nodeRoRef = useRef<ResizeObserver | null>(null);
+  useLayoutEffect(() => {
+    viewScaleRef.current = view.scale;
+    if (!nodeRoRef.current) {
+      nodeRoRef.current = new ResizeObserver(() => measureNodes());
+    }
+    const ro = nodeRoRef.current;
+    const els = Array.from(vpRef.current?.querySelectorAll<HTMLElement>(".pc-node[data-key]") ?? []);
+    els.forEach((el) => ro.observe(el));
+    measureNodes();
+    return () => els.forEach((el) => ro.unobserve(el));
+  });
+
   const boxOf = useCallback(
     (key: string): WireBox | null => {
+      const measured = nodeMetrics.boxes[key];
+      const finish = (x: number, y: number, w: number, h: number): WireBox => ({
+        x,
+        y,
+        w: measured?.w ?? w,
+        h: measured?.h ?? h,
+      });
       if (key.startsWith("shot:")) {
-        const shotId = key.slice(5);
-        const size = cardSizeOf(shotId);
-        const p = pos.cards[shotId];
-        return p ? { x: p.x, y: p.y, w: size.w, h: size.h } : null;
+        const p = pos.cards[key.slice(5)];
+        if (!p) return null;
+        const size = cardSizeOf(key.slice(5));
+        return finish(p.x, p.y, size.w, size.h);
       }
       if (key.startsWith("asset:")) {
         const assetId = key.slice(6);
         const loose = layout.looses.find((l) => l.asset.id === assetId);
         const p = pos.loose[assetId];
-        return loose && p ? { x: p.x, y: p.y, w: loose.w, h: loose.h } : null;
+        return loose && p ? finish(p.x, p.y, loose.w, loose.h) : null;
       }
       if (key.startsWith("segment:")) {
         const p = segPos[key.slice(8)];
-        return p ? { x: p.x, y: p.y, w: SEG_W, h: SEG_H } : null;
+        return p ? finish(p.x, p.y, SEG_W, SEG_H) : null;
       }
-      if (key === "output") return outputBox;
+      if (key === "output") {
+        return outputBox ? finish(outputBox.x, outputBox.y, OUTPUT_W, OUTPUT_H) : null;
+      }
       // 资料节点（角色/场景/道具/剧本）按资料框网格位置。
       const infoNode = infoNodes.find((item) => item.key === key);
       const infoP = infoNode ? infoPos.map[key] : undefined;
-      return infoNode && infoP ? { x: infoP.x, y: infoP.y, w: infoNode.w, h: infoNode.h } : null;
+      return infoNode && infoP ? finish(infoP.x, infoP.y, infoNode.w, infoNode.h) : null;
     },
-    [layout, pos, cardSizeOf, outputBox, segPos, infoNodes, infoPos],
+    [layout, pos, cardSizeOf, outputBox, segPos, infoNodes, infoPos, nodeMetrics],
   );
 
-  // 端口点：输出口在右缘中点；输入口按片段端口列分布取左缘位置。
+  // 端口点：优先用实测端口坐标（标题条/端口行让卡体高度自适应），
+  // 未实测前退回「输出右缘中点 / 输入口按列分布」的常量估算。
   const outPointOf = useCallback(
     (key: string): { x: number; y: number } | null => {
       const box = boxOf(key);
-      return box ? { x: box.x + box.w, y: box.y + box.h / 2 } : null;
+      if (!box) return null;
+      const off = nodeMetrics.ports[key]?.__out;
+      return off ? { x: box.x + off.x, y: box.y + off.y } : { x: box.x + box.w, y: box.y + box.h / 2 };
     },
-    [boxOf],
+    [boxOf, nodeMetrics],
   );
 
   // 节点接口（ComfyUI 式）：输入口列在左缘、输出口在右缘，口带名称与
@@ -944,10 +1054,13 @@ export default function ProjectCanvas({
       const box = boxOf(key);
       if (!box) return null;
       const ins = portsOf(key).ins;
+      const pid = portId ?? ins[0]?.id;
+      const off = pid ? nodeMetrics.ports[key]?.[pid] : undefined;
+      if (off) return { x: box.x + off.x, y: box.y + off.y };
       const index = portId ? ins.findIndex((p) => p.id === portId) : 0;
       return { x: box.x, y: box.y + box.h * portRatio(index < 0 ? 0 : index, Math.max(ins.length, 1)) };
     },
-    [boxOf, portsOf],
+    [boxOf, portsOf, nodeMetrics],
   );
 
   // 画布节点 key → node_link 来源（片段输入口连线的落库形态）。
@@ -1047,15 +1160,16 @@ export default function ProjectCanvas({
   useEffect(() => {
     setScenePos((prev) => {
       const next: Record<string, Pos> = {};
-      scenes.forEach((scene, index) => {
-        next[scene.id] = prev[scene.id] ?? {
-          x: scene.canvas_x ?? WORLD_MARGIN + index * SCENE_PITCH,
-          y: scene.canvas_y ?? 110,
-        };
+      scenes.forEach((scene) => {
+        next[scene.id] = prev[scene.id] ?? (
+          scene.canvas_x != null && scene.canvas_y != null
+            ? { x: scene.canvas_x, y: scene.canvas_y }
+            : layout.framePos[scene.id] ?? { x: WORLD_MARGIN, y: 110 }
+        );
       });
       return next;
     });
-  }, [scenes]);
+  }, [scenes, layout.framePos]);
 
   const persistCards = useCallback(
     (nextCards: Record<string, Pos>) => {
@@ -1115,7 +1229,9 @@ export default function ProjectCanvas({
   const dragRef = useRef<DragState | null>(null);
   // 拖动后 mouseup 落在卡内按钮（挂靠/缩略图）上会派发 click，需吞掉这次误触。
   const suppressClickRef = useRef(false);
-  const [wireDraft, setWireDraft] = useState<{ d: string; invalid: boolean } | null>(null);
+  const [wireDraft, setWireDraft] = useState<{ d: string; invalid: boolean; color?: string } | null>(null);
+  // 拖线悬停高亮的目标节点（ComfyUI 落点亮框），松手/取消时清除。
+  const wireHoverRef = useRef<Element | null>(null);
 
   const onViewportMouseDown = useCallback(
     (e: React.MouseEvent) => {
@@ -1336,30 +1452,56 @@ export default function ProjectCanvas({
         const hit = document.elementFromPoint(e.clientX, e.clientY);
         const tEl = hit instanceof Element ? hit.closest(".pc-node") : null;
         const tKey = tEl?.getAttribute("data-key") ?? null;
-        // 类型校验（ComfyUI 式）：正拖在落点节点的输入口列里找可接该
-        // 类型的口；反拖找在出发口可接范围内的输出口。镜头卡的产出只
-        // 进片段/成片（素材参考线是素材间语义），不与散件互连。
+        // 可写连接模型：兼容性判断与松手后的落库动作一一对应，杜绝
+        // "看起来能连、松手却写不进"的死线。镜头卡的产出可进片段口与
+        // 成片（此前被误禁）；素材参考线仅散件之间（镜头/散件混连无
+        // 渲染语义，不假兼容）；片段→成片是按拼接序的隐式聚合。
+        const outKeyOf = drag.fromDir === "in" ? tKey : drag.fromKey;
+        const inKeyOf = drag.fromDir === "in" ? drag.fromKey : tKey;
+        const writable =
+          !!outKeyOf && !!inKeyOf &&
+          ((outKeyOf.startsWith("asset:") && inKeyOf.startsWith("asset:")) ||
+            (inKeyOf === "output" &&
+              (outKeyOf.startsWith("asset:") || outKeyOf.startsWith("shot:") || outKeyOf.startsWith("segment:"))) ||
+            (inKeyOf.startsWith("segment:") &&
+              (outKeyOf === "script" ||
+                ["asset:", "shot:", "char:", "loc:", "prop:", "segment:"].some((p) => outKeyOf.startsWith(p)))));
         let compatible = false;
         let targetPort: string | null = null;
-        const shotSource = drag.fromKey.startsWith("shot:");
-        if (
-          tKey &&
-          tKey !== drag.fromKey &&
-          !(tKey.startsWith("segment:") && shotSource) &&
-          !(shotSource && tKey.startsWith("asset:"))
-        ) {
+        if (tKey && tKey !== drag.fromKey && writable) {
           const ports = portsOf(tKey);
           if (drag.fromDir === "in") {
             compatible = !!ports.out && !!drag.fromAccepts?.includes(ports.out.type);
           } else if (drag.fromType) {
-            const hitPort = ports.ins.find((item) => item.accepts.includes(drag.fromType!));
-            compatible = !!hitPort;
-            targetPort = hitPort?.id ?? null;
+            // 吸附优先级：光标就近的可接输入口（ComfyUI 落点即所接口），
+            // 不就近时回退为第一个可接口。
+            let best: { id: string } | undefined;
+            let bestDist = Infinity;
+            const box = boxOf(tKey);
+            ports.ins.forEach((item, index) => {
+              if (!item.accepts.includes(drag.fromType!)) return;
+              const dist = box
+                ? Math.abs(box.y + box.h * portRatio(index, ports.ins.length) - wy)
+                : 0;
+              if (!best || dist <= bestDist) {
+                best = item;
+                bestDist = dist;
+              }
+            });
+            compatible = !!best;
+            targetPort = best?.id ?? null;
           }
         }
         drag.invalid = !!tKey && tKey !== drag.fromKey && !compatible;
         drag.targetKey = compatible ? tKey : null;
         drag.targetPort = targetPort;
+        // 落点节点高亮（可接亮框 / 不可接不亮）。
+        const hoverEl = compatible ? tEl : null;
+        if (wireHoverRef.current !== hoverEl) {
+          wireHoverRef.current?.classList.remove("pc-wire-target");
+          hoverEl?.classList.add("pc-wire-target");
+          wireHoverRef.current = hoverEl;
+        }
         // 草稿终点：正拖命中片段时吸附到匹配输入口的位置。
         const endPoint =
           compatible && drag.fromDir === "out" && tKey
@@ -1368,6 +1510,7 @@ export default function ProjectCanvas({
         setWireDraft({
           d: drag.fromDir === "in" ? wirePathD(cursor, startPoint) : wirePathD(startPoint, endPoint),
           invalid: drag.invalid,
+          color: drag.fromType ? WIRE_TYPE_COLORS[drag.fromType] : undefined,
         });
       } else if (drag.kind === "card") {
         setPos((prev) => {
@@ -1393,17 +1536,22 @@ export default function ProjectCanvas({
       if (drag.kind === "pan") {
         if (drag.moved) saveView(view);
       } else if (drag.kind === "wire") {
+        wireHoverRef.current?.classList.remove("pc-wire-target");
+        wireHoverRef.current = null;
         setWireDraft(null);
         if (drag.targetKey && drag.fromKey) {
           // 反拖（从输入口出发）时落点才是数据的来源方；落到成片节点
           // （key "output"）即设置本集总输出；落到片段的某个输入口则写
-          // 一条 node_link（角色/场景/道具/剧本/素材/片段 → 片段）。
+          // 一条 node_link（角色/场景/道具/剧本/素材/镜头/片段 → 片段）。
           const [outKey, inKey] = drag.fromDir === "in" ? [drag.targetKey, drag.fromKey] : [drag.fromKey, drag.targetKey];
           if (inKey === "output") {
-            void setEpisodeOutput(
-              episodeId,
-              outKey.startsWith("shot:") ? outKey : outKey.replace(/^asset:/, ""),
-            );
+            // 片段按拼接序隐式汇入成片（无库表可写）；镜头/散件才落总输出。
+            if (!outKey.startsWith("segment:")) {
+              void setEpisodeOutput(
+                episodeId,
+                outKey.startsWith("shot:") ? outKey : outKey.replace(/^asset:/, ""),
+              );
+            }
           } else if (inKey.startsWith("segment:")) {
             const source = nodeKeyParts(outKey);
             const port = drag.fromDir === "in" ? drag.fromPortId : drag.targetPort;
@@ -1417,6 +1565,7 @@ export default function ProjectCanvas({
               );
             }
           } else {
+            // 可写模型已保证此处只会是散件↔散件。
             void linkAssets(
               outKey.replace(/^(shot|asset):/, ""),
               inKey.replace(/^(shot|asset):/, ""),
@@ -1425,24 +1574,30 @@ export default function ProjectCanvas({
           }
         } else if (!drag.targetKey && drag.moved && drag.fromKey) {
           // ComfyUI 惯例：拖到空白松手 → 弹节点选择框，创建的节点自动
-          // 接上这条线（pendingWire 随菜单带入创建流程）。
-          const el = vpRef.current;
-          if (el) {
-            const rect = el.getBoundingClientRect();
-            setAddMenu({
-              sx: e.clientX - rect.left,
-              sy: e.clientY - rect.top,
-              wx: (e.clientX - rect.left - view.x) / view.scale,
-              wy: (e.clientY - rect.top - view.y) / view.scale,
-              wire: {
-                fromKey: drag.fromKey,
-                fromDir: drag.fromDir ?? "out",
-                fromType: drag.fromType,
-                fromAccepts: drag.fromAccepts,
-                fromPortId: drag.fromPortId,
-              },
-            });
-            setAddMenuQuery("");
+          // 接上这条线；落在任何节点/浮层上松手视为取消，不弹。
+          const hitEl = document.elementFromPoint(e.clientX, e.clientY);
+          const landed = hitEl instanceof Element
+            ? hitEl.closest(".pc-node, .pc-note, .pc-glass, .pc-checkbar")
+            : null;
+          if (!landed) {
+            const el = vpRef.current;
+            if (el) {
+              const rect = el.getBoundingClientRect();
+              setAddMenu({
+                sx: e.clientX - rect.left,
+                sy: e.clientY - rect.top,
+                wx: (e.clientX - rect.left - view.x) / view.scale,
+                wy: (e.clientY - rect.top - view.y) / view.scale,
+                wire: {
+                  fromKey: drag.fromKey,
+                  fromDir: drag.fromDir ?? "out",
+                  fromType: drag.fromType,
+                  fromAccepts: drag.fromAccepts,
+                  fromPortId: drag.fromPortId,
+                },
+              });
+              setAddMenuQuery("");
+            }
           }
         }
       } else if (drag.kind === "outnode") {
@@ -1599,6 +1754,34 @@ export default function ProjectCanvas({
     );
   };
 
+  // 工作流节点（片段/成片）的端口行：口点嵌在行首/行尾，接口名称常显
+  // （ComfyUI 槽位文字的对应物），端口坐标由实测驱动连线锚点。
+  const portRows = (key: string, dir: "in" | "out") => {
+    const { ins, out } = portsOf(key);
+    if (dir === "in") {
+      return (
+        <>
+          {ins.map((port) => (
+            <div key={port.id} className="pc-port-row">
+              <span className="pc-port pc-port-in" data-port="in" data-port-id={port.id} />
+              <span className="pc-port-name">{port.label}</span>
+            </div>
+          ))}
+        </>
+      );
+    }
+    return out ? (
+      <div className="pc-port-row pc-port-row-out">
+        <span className="pc-port-name">{out.label}</span>
+        <span
+          className="pc-port pc-port-out"
+          data-port="out"
+          style={{ background: WIRE_TYPE_COLORS[out.type] ?? "#94a3b8" }}
+        />
+      </div>
+    ) : null;
+  };
+
   const shotNoOf = useCallback(
     (sceneId: string, shotId: string): number => {
       const scene = scenes.find((item) => item.id === sceneId);
@@ -1708,7 +1891,7 @@ export default function ProjectCanvas({
         >
           {/* 场景分组框 + 集级框 + 资料框 */}
           {scenes.map((scene, sceneIndex) => {
-            const spos = scenePos[scene.id] ?? { x: scene.canvas_x ?? WORLD_MARGIN + sceneIndex * SCENE_PITCH, y: scene.canvas_y ?? 110 };
+            const spos = scenePos[scene.id] ?? layout.framePos[scene.id] ?? { x: WORLD_MARGIN, y: 110 };
             const sceneCards = layout.cards.filter((c) => c.sceneId === scene.id);
             const frameW = Math.max(
               FRAME_MIN_W,
@@ -1797,7 +1980,7 @@ export default function ProjectCanvas({
               if (!a || !b) return null;
               const d = wirePathD(a, b);
               const midX = (a.x + b.x) / 2;
-              const midY = (a.y + b.y) / 2 - 7;
+              const midY = (a.y + b.y) / 2;
               const color = WIRE_TYPE_COLORS[wire.type] ?? "#94a3b8";
               return (
                 <g key={`${wire.fromKey}->${wire.toKey}`} className="pc-wire">
@@ -1807,17 +1990,14 @@ export default function ProjectCanvas({
                     d={d}
                     style={{ stroke: color }}
                   />
-                  <text className="pc-wire-label" x={midX} y={midY} style={{ fill: color }}>
-                    {wire.label}
-                  </text>
                   {wire.kind === "manual" && (
                     <g
                       className="pc-wire-del"
                       data-tooltip={t("project.canvas.wireRemove")}
                       onClick={() => void unlinkAssets(wire.fromKey, wire.toKey)}
                     >
-                      <circle cx={midX + 36} cy={midY - 4} r="9" />
-                      <path d={`M${midX + 32} ${midY - 8} l8 8 M${midX + 40} ${midY - 8} l-8 8`} />
+                      <circle cx={midX} cy={midY} r="9" />
+                      <path d={`M${midX - 4} ${midY - 4} l8 8 M${midX + 4} ${midY - 4} l-8 8`} />
                     </g>
                   )}
                 </g>
@@ -1844,14 +2024,11 @@ export default function ProjectCanvas({
               if (!a || !b) return null;
               const d = wirePathD(a, b);
               const midX = (a.x + b.x) / 2;
-              const midY = (a.y + b.y) / 2 - 7;
+              const midY = (a.y + b.y) / 2;
               return (
                 <g key={link.id} className="pc-wire">
                   <path className="pc-wire-hit" d={d} />
                   <path className="pc-wire-line" d={d} style={{ stroke: WIRE_TYPE_COLORS.video, strokeOpacity: 0.55 }} />
-                  <text className="pc-wire-label" x={midX} y={midY}>
-                    {t(`project.canvas.port_${link.to_port}`)}
-                  </text>
                   <g
                     className="pc-wire-del"
                     data-tooltip={t("project.canvas.wireRemove")}
@@ -1859,14 +2036,36 @@ export default function ProjectCanvas({
                       void unlinkNode(link.from_kind, link.from_id, link.to_segment, link.to_port)
                     }
                   >
-                    <circle cx={midX + 36} cy={midY - 4} r="9" />
-                    <path d={`M${midX + 32} ${midY - 8} l8 8 M${midX + 40} ${midY - 8} l-8 8`} />
+                    <circle cx={midX} cy={midY} r="9" />
+                    <path d={`M${midX - 4} ${midY - 4} l8 8 M${midX + 4} ${midY - 4} l-8 8`} />
                   </g>
                 </g>
               );
             })}
+            {/* 片段 → 成片：按拼接序隐式聚合（无需连线数据，恒显示） */}
+            {outputBox &&
+              segments.map((segment) => {
+                const a = outPointOf(`segment:${segment.id}`);
+                if (!a) return null;
+                const b = { x: outputBox.x, y: outputBox.y + outputBox.h / 2 };
+                const d = wirePathD(a, b);
+                return (
+                  <g key={`seg-out-${segment.id}`} className="pc-wire">
+                    <path className="pc-wire-hit" d={d} />
+                    <path
+                      className="pc-wire-line"
+                      d={d}
+                      style={{ stroke: WIRE_TYPE_COLORS.video, strokeOpacity: 0.55 }}
+                    />
+                  </g>
+                );
+              })}
             {wireDraft && (
-              <path className={`pc-wire-temp${wireDraft.invalid ? " invalid" : ""}`} d={wireDraft.d} />
+              <path
+                className={`pc-wire-temp${wireDraft.invalid ? " invalid" : ""}`}
+                d={wireDraft.d}
+                style={wireDraft.color ? { stroke: wireDraft.color } : undefined}
+              />
             )}
             {/* 成片连线：总输出来源 → 成片节点（由 output_asset_id 推导） */}
             {(() => {
@@ -1877,7 +2076,7 @@ export default function ProjectCanvas({
               const b = { x: outputBox.x, y: outputBox.y + outputBox.h / 2 };
               const d = wirePathD(a, b);
               const midX = (a.x + b.x) / 2;
-              const midY = (a.y + b.y) / 2 - 7;
+              const midY = (a.y + b.y) / 2;
               return (
                 <g className="pc-wire">
                   <path className="pc-wire-hit" d={d} />
@@ -1886,16 +2085,13 @@ export default function ProjectCanvas({
                     d={d}
                     style={{ stroke: WIRE_TYPE_COLORS.video }}
                   />
-                  <text className="pc-wire-label" x={midX} y={midY} style={{ fill: WIRE_TYPE_COLORS.video }}>
-                    {t("project.canvas.portFinal")}
-                  </text>
                   <g
                     className="pc-wire-del"
                     data-tooltip={t("project.canvas.wireRemove")}
                     onClick={() => void setEpisodeOutput(episodeId, null)}
                   >
-                    <circle cx={midX + 36} cy={midY - 4} r="9" />
-                    <path d={`M${midX + 32} ${midY - 8} l8 8 M${midX + 40} ${midY - 8} l-8 8`} />
+                    <circle cx={midX} cy={midY} r="9" />
+                    <path d={`M${midX - 4} ${midY - 4} l8 8 M${midX + 4} ${midY - 4} l-8 8`} />
                   </g>
                 </g>
               );
@@ -1913,14 +2109,13 @@ export default function ProjectCanvas({
                 data-key={card.key}
                 data-frame={card.sceneId}
                 className={`pc-node pc-shotcard${selected ? " pc-selected" : ""}`}
-                style={{ left: p.x, top: p.y, width: card.w }}
+                style={{ left: p.x, top: p.y, width: card.w, ["--node-accent" as string]: NODE_ACCENTS.shot } as React.CSSProperties}
               >
-                <div className="pc-media-wrap pc-shot-card">
-                  <div className="pc-shot-head">
-                    <span className="pc-shot-no">{shotNoOf(card.sceneId, card.shot.id)}</span>
-                    <b className="pc-shot-desc">{shot.description || t("project.shot.untitled")}</b>
-                    {shot.dialogue && <i className="pc-shot-dialogue">{shot.dialogue}</i>}
-                  </div>
+                <div className="pc-shot-head">
+                  <span className="pc-shot-no">{shotNoOf(card.sceneId, card.shot.id)}</span>
+                  <b className="pc-shot-desc">{shot.description || t("project.shot.untitled")}</b>
+                  {shot.dialogue && <i className="pc-shot-dialogue">{shot.dialogue}</i>}
+                </div>
                   {shot.assets.length > 0 ? (
                     <div className="pc-shot-grid">
                       {card.assets.map(({ asset, w, h }) => {
@@ -1980,7 +2175,6 @@ export default function ProjectCanvas({
                       {t("project.canvas.shotEmpty")}
                     </button>
                   )}
-                </div>
                 <span className="pc-node-tools">
                   <button type="button" data-tooltip={t("project.asset.link")} onClick={() => onPickForShot(shot.id)}>
                     {Icons.file}
@@ -2003,7 +2197,6 @@ export default function ProjectCanvas({
                     {Icons.delete}
                   </button>
                 </span>
-                <span className="pc-type-badge">{t("project.canvas.typeShot")}</span>
                 {portEls(card.key)}
               </div>
             );
@@ -2020,10 +2213,13 @@ export default function ProjectCanvas({
                 key={loose.key}
                 data-key={loose.key}
                 className={`pc-node${selected ? " pc-selected" : ""}`}
-                style={{ left: p.x, top: p.y, width: loose.w }}
+                style={{ left: p.x, top: p.y, width: loose.w, ["--node-accent" as string]: NODE_ACCENTS[asset.kind] ?? "#94a3b8" } as React.CSSProperties}
               >
-                <div className="pc-media-wrap">
-                  {asset.missing ? (
+                <div className="pc-node-head">
+                  <span className="pc-node-kind">{t(assetKindBadgeKey(asset.kind))}</span>
+                  <b className="pc-node-title">{asset.name || asset.file_path}</b>
+                </div>
+                {asset.missing ? (
                     <div className="pc-miss-card" style={{ height: loose.h }}>
                       {Icons.image}
                       {t("project.asset.fileMissing")}
@@ -2054,8 +2250,6 @@ export default function ProjectCanvas({
                       <span>{asset.name || asset.file_path}</span>
                     </div>
                   )}
-                </div>
-                <span className="pc-type-badge">{t(assetKindBadgeKey(asset.kind))}</span>
                 <span className="pc-node-tools">
                   <button type="button" data-tooltip={t("project.canvas.view")} onClick={() => onOpenAsset(asset)}>
                     {Icons.expand}
@@ -2115,8 +2309,27 @@ export default function ProjectCanvas({
           {infoNodes.map((node) => {
             const p = infoPos.map[node.key];
             return (
-              <div key={node.key} data-key={node.key} className={`pc-node pc-info${""}`} style={{ left: p.x, top: p.y, width: node.w }}>
-                <div className="pc-media-wrap pc-info-card">
+              <div
+                key={node.key}
+                data-key={node.key}
+                className="pc-node pc-info"
+                style={{ left: p.x, top: p.y, width: node.w, ["--node-accent" as string]: NODE_ACCENTS[node.kind] ?? "#94a3b8" } as React.CSSProperties}
+              >
+                <div className="pc-node-head">
+                  <span className="pc-node-kind">
+                    {t(
+                      node.kind === "character"
+                        ? "project.canvas.typeCharacter"
+                        : node.kind === "location"
+                          ? "project.canvas.typeLocation"
+                          : node.kind === "prop"
+                            ? "project.canvas.typeProp"
+                            : "project.canvas.typeScript",
+                    )}
+                  </span>
+                  <b className="pc-node-title">{node.name}</b>
+                </div>
+                <div className="pc-info-body">
                   {node.kind === "character" ? (
                     <>
                       <span className={`pc-info-ava pc-ava-p${characterAvatarPaletteIndex(node.name)}`}>
@@ -2161,17 +2374,6 @@ export default function ProjectCanvas({
                     </div>
                   )}
                 </div>
-                <span className="pc-type-badge">
-                  {t(
-                    node.kind === "character"
-                      ? "project.canvas.typeCharacter"
-                      : node.kind === "location"
-                        ? "project.canvas.typeLocation"
-                        : node.kind === "prop"
-                          ? "project.canvas.typeProp"
-                          : "project.canvas.typeScript",
-                  )}
-                </span>
                 {portEls(node.key)}
               </div>
             );
@@ -2183,44 +2385,18 @@ export default function ProjectCanvas({
             if (!p) return null;
             const key = `segment:${segment.id}`;
             return (
-              <div key={segment.id} data-key={key} className="pc-node pc-segment" style={{ left: p.x, top: p.y, width: SEG_W }}>
-                <div className="pc-media-wrap pc-seg-card">
-                  <div className="pc-seg-head">
-                    <span className="pc-shot-no">{index + 1}</span>
-                    <b className="pc-shot-desc">{segment.note || t("project.canvas.segName")}</b>
-                    <span className="pc-node-tools">
-                      <button
-                        type="button"
-                        data-tooltip={t("project.canvas.segMoveUp")}
-                        onClick={() => void moveSegment(segment.id, -1)}
-                      >
-                        {Icons.chevronUp}
-                      </button>
-                      <button
-                        type="button"
-                        data-tooltip={t("project.canvas.segMoveDown")}
-                        onClick={() => void moveSegment(segment.id, 1)}
-                      >
-                        {Icons.chevronDown}
-                      </button>
-                      <button
-                        type="button"
-                        data-tooltip={t("project.canvas.segAttach")}
-                        onClick={() => setSegmentAssetPickFor(segment.id)}
-                      >
-                        {Icons.file}
-                      </button>
-                      <button
-                        type="button"
-                        data-tooltip={t("common.delete")}
-                        className="danger"
-                        onClick={() => void removeSegment(segment.id)}
-                      >
-                        {Icons.delete}
-                      </button>
-                    </span>
-                  </div>
-                  {segment.asset ? (
+              <div
+                key={segment.id}
+                data-key={key}
+                className="pc-node pc-segment"
+                style={{ left: p.x, top: p.y, width: SEG_W, ["--node-accent" as string]: NODE_ACCENTS.segment } as React.CSSProperties}
+              >
+                <div className="pc-node-head">
+                  <span className="pc-node-kind">{t("project.canvas.segName")}</span>
+                  <b className="pc-node-title">{segment.note || `#${index + 1}`}</b>
+                </div>
+                <div className="pc-seg-ports">{portRows(key, "in")}</div>
+                {segment.asset ? (
                     <button
                       type="button"
                       className={`pc-seg-thumb${segment.asset.missing ? " is-missing" : ""}`}
@@ -2244,8 +2420,38 @@ export default function ProjectCanvas({
                       {t("project.canvas.segEmpty")}
                     </button>
                   )}
-                </div>
-                {portEls(key)}
+                <div className="pc-seg-out">{portRows(key, "out")}</div>
+                <span className="pc-node-tools">
+                  <button
+                    type="button"
+                    data-tooltip={t("project.canvas.segMoveUp")}
+                    onClick={() => void moveSegment(segment.id, -1)}
+                  >
+                    {Icons.chevronUp}
+                  </button>
+                  <button
+                    type="button"
+                    data-tooltip={t("project.canvas.segMoveDown")}
+                    onClick={() => void moveSegment(segment.id, 1)}
+                  >
+                    {Icons.chevronDown}
+                  </button>
+                  <button
+                    type="button"
+                    data-tooltip={t("project.canvas.segAttach")}
+                    onClick={() => setSegmentAssetPickFor(segment.id)}
+                  >
+                    {Icons.file}
+                  </button>
+                  <button
+                    type="button"
+                    data-tooltip={t("common.delete")}
+                    className="danger"
+                    onClick={() => void removeSegment(segment.id)}
+                  >
+                    {Icons.delete}
+                  </button>
+                </span>
               </div>
             );
           })}
@@ -2255,18 +2461,20 @@ export default function ProjectCanvas({
             <div
               data-key="output"
               className="pc-node pc-outnode"
-              style={{ left: outputBox.x, top: outputBox.y, width: outputBox.w, height: outputBox.h }}
+              style={{ left: outputBox.x, top: outputBox.y, width: outputBox.w, ["--node-accent" as string]: NODE_ACCENTS.output } as React.CSSProperties}
             >
+              <div className="pc-node-head">
+                <span className="pc-node-kind">{t("project.canvas.outputNode")}</span>
+              </div>
               <div className="pc-outnode-body">
                 <span className="pc-outnode-icon">{Icons.clapperboard}</span>
-                <b>{t("project.canvas.outputNode")}</b>
                 <small>
                   {segments.length > 0
                     ? t("project.canvas.outputSummary", { count: segments.length })
                     : (outputSourceLabel ?? t("project.canvas.outputEmpty"))}
                 </small>
               </div>
-              {portEls("output")}
+              <div className="pc-seg-ports">{portRows("output", "in")}</div>
             </div>
           )}
 
@@ -2345,6 +2553,7 @@ export default function ProjectCanvas({
                 onClick={() => {
                   if (issue.key === "output") locateOutput();
                   if (issue.key === "script") setScriptPickState({});
+                  if (issue.key === "segAssets") locateEmptySegment();
                 }}
               >
                 {issue.label}

@@ -1983,26 +1983,56 @@
 .pc-frame-ops button:hover { background: var(--chip-bg); color: var(--text-primary); }
 .pc-frame-ops svg { width: 12px; height: 12px; }
 
-/* ── 素材节点 ── */
-.pc-node { position: absolute; border-radius: 14px; cursor: grab; }
-.pc-node:active { cursor: grabbing; }
-.pc-node:hover { z-index: 12; }
-.pc-node.pc-dragging { z-index: 20; }
-.pc-node > .pc-media-wrap {
-  border-radius: 14px;
-  overflow: hidden;
+/* ── 画布节点（ComfyUI 式）：卡体即节点 + 类型色标题条 ── */
+.pc-node {
+  position: absolute;
+  border-radius: 12px;
+  cursor: grab;
   background: var(--bg-card);
   border: 1px solid var(--separator);
-  box-shadow: 0 2px 12px rgba(0, 0, 0, 0.1), 0 1px 3px rgba(0, 0, 0, 0.06);
-  transition: box-shadow 0.16s ease, transform 0.16s ease;
+  box-shadow: 0 2px 10px rgba(0, 0, 0, 0.08), 0 1px 3px rgba(0, 0, 0, 0.05);
+  transition: box-shadow 0.16s ease, border-color 0.16s ease;
 }
-.pc-node:hover > .pc-media-wrap {
-  box-shadow: 0 14px 34px rgba(0, 0, 0, 0.2), 0 3px 8px rgba(0, 0, 0, 0.1);
-  transform: translateY(-2px);
+.pc-node:active { cursor: grabbing; }
+.pc-node:hover { z-index: 12; box-shadow: 0 14px 34px rgba(0, 0, 0, 0.16), 0 3px 8px rgba(0, 0, 0, 0.08); }
+.pc-node.pc-dragging { z-index: 20; }
+.pc-node.pc-selected { border-color: var(--text-primary); }
+.pc-node.pc-wire-target {
+  border-color: var(--card-glow);
+  box-shadow: 0 0 0 2px var(--card-glow), 0 8px 24px rgba(0, 0, 0, 0.14);
 }
-.pc-node.pc-selected > .pc-media-wrap { outline: 2px solid var(--text-primary); outline-offset: 3px; }
-.pc-node.pc-wire-target > .pc-media-wrap { outline: 2px solid var(--card-glow); outline-offset: 3px; }
-.pc-media { overflow: hidden; }
+/* 类型色标题条：类型名与名称常显（取代此前的 hover 徽标） */
+.pc-node-head {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  min-height: 27px;
+  padding: 2px 10px 2px 8px;
+  border-left: 3px solid var(--node-accent, var(--text-tertiary));
+  border-bottom: 1px solid var(--separator);
+  border-radius: 11px 11px 0 0;
+  background: color-mix(in srgb, var(--node-accent, transparent) 8%, transparent);
+  font-size: 10.5px;
+  color: var(--text-secondary);
+  overflow: hidden;
+  white-space: nowrap;
+}
+.pc-node-kind {
+  flex: none;
+  font-weight: 600;
+  letter-spacing: 0.3px;
+  color: color-mix(in srgb, var(--node-accent, var(--text-secondary)) 72%, var(--text-primary));
+}
+.pc-node-title {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  font-size: 11.5px;
+  font-weight: 500;
+  color: var(--text-primary);
+}
+.pc-media { overflow: hidden; border-radius: 0 0 11px 11px; }
 .pc-media-img { width: 100%; height: 100%; object-fit: cover; display: block; }
 .pc-media-img img { width: 100%; height: 100%; object-fit: cover; }
 .pc-media .resource-thumb-blur { width: 100%; height: 100%; }
@@ -2025,6 +2055,7 @@
 .pc-play svg { width: 16px; height: 16px; }
 .pc-miss-card {
   border: 1.5px dashed var(--danger);
+  border-radius: 0 0 11px 11px;
   color: var(--danger);
   font-size: 11.5px;
   background: repeating-linear-gradient(45deg, transparent, transparent 9px, rgba(194, 65, 65, 0.05) 9px, rgba(194, 65, 65, 0.05) 18px);
@@ -2047,11 +2078,10 @@
   text-align: center;
 }
 .pc-media-file span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 100%; }
-/* 文本纸片 */
+/* 文本纸片（节点内：贴满卡体，无内层边框） */
 .pc-paper {
-  border-radius: 13px;
-  background: var(--card-inner-bg);
-  border: 1px solid var(--separator);
+  border-radius: 0 0 11px 11px;
+  background: transparent;
   padding: 12px 14px;
 }
 .pc-paper h5 {
@@ -2146,27 +2176,8 @@
 .pc-node-tools button:hover { background: rgba(255, 255, 255, 0.15); color: #fff; }
 .pc-node-tools button.danger:hover { background: var(--danger); }
 .pc-node-tools svg { width: 14px; height: 14px; }
-/* 节点类型标注：hover 时浮现在节点左上角（镜头/图片/视频/角色…） */
-.pc-type-badge {
-  position: absolute;
-  top: -9px;
-  left: -7px;
-  z-index: 7;
-  padding: 2px 8px;
-  border-radius: 6px;
-  background: rgba(28, 28, 34, 0.92);
-  color: #fff;
-  font-size: 10.5px;
-  line-height: 1.5;
-  white-space: nowrap;
-  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.25);
-  opacity: 0;
-  pointer-events: none;
-  transition: opacity 0.12s ease;
-}
-.pc-node:hover .pc-type-badge { opacity: 1; }
-/* 节点接口（ComfyUI 式）：输入左缘空心、输出右缘实心类型色，hover
-   浮现接口名称；按下即拖线。 */
+/* 节点接口（ComfyUI 式）：输入左缘空心、输出右缘实心类型色；简单节点
+   hover 浮现接口名称，工作流节点用常显端口行（.pc-port-row）。 */
 .pc-port {
   position: absolute;
   top: 50%;
@@ -2179,6 +2190,8 @@
   box-shadow: 0 0 0 2px var(--bg-primary), 0 1px 4px rgba(0, 0, 0, 0.3);
   transition: transform 0.12s ease;
 }
+/* 扩大热区：细小的圆点很难精确按中（拖线起手全靠它）。 */
+.pc-port::before { content: ""; position: absolute; inset: -8px; border-radius: 50%; }
 .pc-port:hover { transform: translateY(-50%) scale(1.3); }
 .pc-port-in { left: -7px; background: var(--bg-primary); border: 2.5px solid var(--text-secondary); }
 .pc-port-out { right: -7px; }
@@ -2202,6 +2215,21 @@
 .pc-port-in::after { right: 16px; }
 .pc-port-out::after { left: 16px; }
 .pc-port:hover::after { opacity: 1; }
+/* 工作流节点端口行（片段/成片）：口点嵌行首/行尾，接口名称常显 */
+.pc-port-row {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  height: 24px;
+  padding: 0 12px 0 17px;
+  font-size: 11px;
+  color: var(--text-secondary);
+  white-space: nowrap;
+}
+.pc-port-row .pc-port { top: 50%; }
+.pc-port-row-out { justify-content: flex-end; padding: 0 17px 0 12px; }
+.pc-port-name { pointer-events: none; }
 
 /* ── 工作流连线 ── */
 .pc-wires {
@@ -2214,20 +2242,9 @@
   pointer-events: none;
 }
 .pc-wire-hit { fill: none; stroke: transparent; stroke-width: 16; pointer-events: stroke; cursor: pointer; }
-.pc-wire-line { fill: none; stroke-width: 2.2; stroke-opacity: 0.95; }
+.pc-wire-line { fill: none; stroke-width: 2.6; stroke-opacity: 0.95; }
 .pc-wire-line.manual { stroke-dasharray: 5, 5; stroke-opacity: 0.8; }
-.pc-wire:hover .pc-wire-line { stroke-width: 3.2; stroke-opacity: 1; }
-.pc-wire-label {
-  font-size: 11px;
-  fill: var(--text-secondary);
-  text-anchor: middle;
-  pointer-events: none;
-  paint-order: stroke;
-  stroke: var(--bg-primary);
-  stroke-width: 4px;
-  font-weight: 400;
-}
-.pc-wire:hover .pc-wire-label { fill: var(--text-primary); }
+.pc-wire:hover .pc-wire-line { stroke-width: 3.6; stroke-opacity: 1; }
 .pc-wire-del { opacity: 0; transition: opacity 0.12s ease; pointer-events: none; }
 .pc-wire:hover .pc-wire-del { opacity: 1; }
 .pc-wire-del circle { fill: var(--danger); }
@@ -2237,52 +2254,43 @@
 
 /* ── 成片输出节点（每集工作流的总输出口） ── */
 .pc-outnode { cursor: grab; }
-.pc-outnode:active { cursor: grabbing; }.pc-outnode-body {
-  height: 100%;
-  border-radius: 14px;
-  background: rgba(24, 24, 30, 0.92);
-  color: #fff;
-  border: 1px solid rgba(255, 255, 255, 0.14);
-  box-shadow: 0 10px 26px rgba(0, 0, 0, 0.35);
+.pc-outnode:active { cursor: grabbing; }
+.pc-outnode-body {
   display: flex;
   flex-direction: column;
   align-items: center;
   justify-content: center;
-  gap: 3px;
+  gap: 5px;
   text-align: center;
-  padding: 0 14px;
+  padding: 10px 12px;
+  color: var(--text-secondary);
 }
-.pc-outnode-body b { font-size: 13px; }
 .pc-outnode-body small {
   font-size: 10.5px;
-  color: rgba(255, 255, 255, 0.6);
+  color: var(--text-secondary);
   max-width: 100%;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
-.pc-outnode-icon svg { width: 16px; height: 16px; opacity: 0.85; }
-.pc-outnode .pc-port-in { border-color: var(--video-wire, #a78bfa); }
+.pc-outnode-icon { color: var(--node-accent, var(--text-secondary)); }
+.pc-outnode-icon svg { width: 18px; height: 18px; opacity: 0.85; }
+.pc-outnode .pc-port-in { border-color: var(--node-accent, #a78bfa); }
 
 /* ── 片段节点（AI 分段生成的视频分段，按序拼接成片） ── */
 .pc-segment { cursor: grab; }
 .pc-segment:active { cursor: grabbing; }
-.pc-seg-card { display: flex; flex-direction: column; cursor: grab; }
-.pc-seg-card:active { cursor: grabbing; }
-.pc-seg-head {
-  position: relative;
-  padding: 8px 11px 7px;
-  border-bottom: 1px solid var(--separator);
-  display: flex;
-  align-items: center;
-  gap: 7px;
+.pc-seg-ports { display: flex; flex-direction: column; padding: 3px 0; }
+.pc-seg-out {
+  border-top: 1px solid var(--separator);
+  background: color-mix(in srgb, var(--node-accent, transparent) 5%, transparent);
+  border-radius: 0 0 11px 11px;
 }
-.pc-seg-head .pc-shot-desc { flex: 1; font-size: 12px; -webkit-line-clamp: 1; }
 .pc-seg-thumb {
   position: relative;
   display: block;
-  margin: 8px;
-  height: 56px;
+  margin: 0 8px 8px;
+  height: 64px;
   border: 1px solid var(--separator);
   border-radius: 8px;
   overflow: hidden;
@@ -2298,8 +2306,8 @@
   align-items: center;
   justify-content: center;
   gap: 6px;
-  margin: 8px;
-  height: 56px;
+  margin: 0 8px 8px;
+  height: 64px;
   border: 1.5px dashed var(--separator);
   border-radius: 8px;
   color: var(--text-tertiary);
@@ -2675,9 +2683,18 @@
 .pc-media .resource-video-poster img { width: 100%; height: 100%; object-fit: cover; }
 
 /* ── 镜头卡（素材网格挂卡内）与资料卡 ── */
-.pc-shot-card { display: flex; flex-direction: column; cursor: grab; }
-.pc-shot-card:active { cursor: grabbing; }
-.pc-shot-head { position: relative; padding: 9px 11px 7px; border-bottom: 1px solid var(--separator); display: flex; flex-direction: column; gap: 3px; }
+.pc-shot-head {
+  position: relative;
+  min-height: 40px;
+  padding: 8px 30px 8px 9px;
+  border-left: 3px solid var(--node-accent, var(--text-tertiary));
+  border-bottom: 1px solid var(--separator);
+  border-radius: 11px 11px 0 0;
+  background: color-mix(in srgb, var(--node-accent, transparent) 5%, transparent);
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
 .pc-shot-no {
   position: absolute; top: 7px; right: 8px; height: 18px; min-width: 18px; padding: 0 5px;
   border-radius: 5px; background: var(--chip-bg); border: 1px solid var(--separator);
@@ -2729,9 +2746,14 @@
 .pc-shot-empty:hover { border-color: var(--text-tertiary); color: var(--text-primary); }
 .pc-shot-empty svg { width: 13px; height: 13px; }
 /* 资料卡（角色/道具/剧本） */
-.pc-info-card {
-  padding: 12px; display: flex; flex-direction: column; align-items: center;
-  justify-content: center; gap: 7px; text-align: center;
+.pc-info-body {
+  padding: 12px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  text-align: center;
 }
 .pc-info-ava {
   width: 56px; height: 56px; border-radius: 50%; overflow: hidden;
