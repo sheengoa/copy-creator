@@ -2757,14 +2757,12 @@ export default function ProjectCanvas({
               <button type="button" className="pc-detail-btn" onClick={() => void openResourceFile(fileHint(scriptPath))}>
                 {Icons.externalLink}{t("project.canvas.openFile")}
               </button>
-              {/* 重新挂接：换库内其他文件做本集剧本（节点留在原位）。 */}
+              {/* 重新挂接：换库内其他文件做本集剧本（窗口保持打开，
+                  重选后条目就地刷新；节点留在原位）。 */}
               <button
                 type="button"
                 className="pc-detail-btn"
-                onClick={() => {
-                  closeDetail();
-                  setScriptPickOpen(true);
-                }}
+                onClick={() => setScriptPickOpen(true)}
               >
                 {Icons.link}{t("project.canvas.detailRelinkScript")}
               </button>
@@ -3387,6 +3385,22 @@ export default function ProjectCanvas({
                   <b className="pc-info-name">{label}</b>
                   <small className="pc-info-role">{t("project.canvas.ephHint")}</small>
                 </div>
+                <span className="pc-node-tools">
+                  <button
+                    type="button"
+                    data-tooltip={t("common.delete")}
+                    className="danger"
+                    onClick={() => {
+                      // 删除占位时一并清掉它拖动过的位置记忆。
+                      const next = { ...infoOffsets };
+                      delete next[key];
+                      persistInfoOffsets(next);
+                      persistEntityPhs(entityPhs.filter((item) => item.id !== ph.id));
+                    }}
+                  >
+                    {Icons.close}
+                  </button>
+                </span>
               </div>
             );
           })}
