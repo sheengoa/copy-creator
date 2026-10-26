@@ -2343,7 +2343,9 @@
 }
 .pc-detail-scope button.on { background: var(--chip-bg); color: var(--text-primary); font-weight: 600; }
 .pc-detail-close {
-  margin-left: 4px;
+  /* 无头部切换的窗口（片段/剧本）：靠 auto 顶到最右；有切换的窗口由
+     .pc-detail-scope 的 auto 占位推右，这里保持常规间距。 */
+  margin-left: auto;
   border: 0;
   background: transparent;
   color: var(--text-secondary);
@@ -2356,6 +2358,7 @@
   justify-content: center;
   flex-shrink: 0;
 }
+.pc-detail-scope ~ .pc-detail-close { margin-left: 4px; }
 .pc-detail-close:hover { background: var(--chip-bg); color: var(--text-primary); }
 .pc-detail-close svg { width: 14px; height: 14px; }
 .pc-detail-body {
