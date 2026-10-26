@@ -1166,6 +1166,8 @@ export default function ProjectCanvas({
         notes?: CanvasNote[];
         placeholders?: CanvasPlaceholder[];
         ephs?: { id: string; kind: EntityPhKind; x: number; y: number }[];
+        // 被删占位的暂存线随删除一并清除，撤销恢复时一并还原。
+        pending?: PendingLink[];
       };
   const undoStackRef = useRef<UndoAction[]>([]);
   const pushUndo = useCallback((action: UndoAction) => {
@@ -1208,6 +1210,7 @@ export default function ProjectCanvas({
         if (action.notes?.length) persistNotes([...notes, ...action.notes]);
         if (action.placeholders?.length) persistPlaceholders([...placeholders, ...action.placeholders]);
         if (action.ephs?.length) persistEntityPhs([...entityPhs, ...action.ephs]);
+        if (action.pending?.length) persistPendingLinks([...pendingLinks, ...action.pending]);
       }
     } finally {
       // 撤销里的后端动作（片段删除）是异步的，锁放到下一宏任务才放开。
@@ -1215,7 +1218,7 @@ export default function ProjectCanvas({
         undoingRef.current = false;
       }, 0);
     }
-  }, [moveGroupTo, persistPositions, persistSizes, notes, placeholders, entityPhs, persistNotes, persistPlaceholders, persistEntityPhs, removeSegment, setSelection]);
+  }, [moveGroupTo, persistPositions, persistSizes, notes, placeholders, entityPhs, persistNotes, persistPlaceholders, persistEntityPhs, persistPendingLinks, pendingLinks, removeSegment, setSelection]);
   // 复制 / 粘贴（Ctrl+C/V）：画布私有节点可复制（便签/素材占位/空白资料
   // 占位/片段）。镜头卡、素材散件、资料实体节点是库实体的画布投影
   // （一实体一节点），复制语义不成立，不参与。粘贴整组出现在原组右下
@@ -1283,12 +1286,16 @@ export default function ProjectCanvas({
         }
       }
       if (newKeys.length === 0) return;
+      // addNote 会进编辑态（手动创建的惯例）；粘贴是批量落位，退出编辑，
+      // 让新组保持整组选中可直接拖走。
+      setEditingNoteId(null);
+      setNoteDraft("");
       setSelection(newKeys);
       pushUndo({ type: "paste", keys: newKeys });
     } finally {
       pastingRef.current = false;
     }
-  }, [addNote, addPlaceholder, addEntityPh, addSegment, episodeId, saveCanvasLayout, setSelection, pushUndo]);
+  }, [addNote, addPlaceholder, addEntityPh, addSegment, episodeId, saveCanvasLayout, setSelection, pushUndo, setEditingNoteId]);
 
   // ── 新节点出生锚点：任何「加载」动作（添加菜单挑实体/挂剧本/详情窗
   // 添加）在触发瞬间记录世界坐标，概览刷新后新出现的资料节点直接出生
@@ -3345,13 +3352,18 @@ export default function ProjectCanvas({
             groupingRef.current = false;
           }, 0);
           if (selKeys.length === 0) return;
-          const fullGroup = nodeGroups.find(
+          // 先剪枝：成员已被删除的组清掉死成员（空组丢弃），保证解组
+          // 判定与组框都基于存活成员。
+          const pruned = nodeGroups
+            .map((g) => ({ ...g, members: g.members.filter((key) => memberFrame(key) !== null) }))
+            .filter((g) => g.members.length > 0);
+          const fullGroup = pruned.find(
             (g) => g.members.length === selKeys.length && selKeys.every((key) => g.members.includes(key)),
           );
           if (fullGroup) {
-            persistNodeGroups(nodeGroups.filter((g) => g.id !== fullGroup.id));
+            persistNodeGroups(pruned.filter((g) => g.id !== fullGroup.id));
           } else {
-            const kept = nodeGroups
+            const kept = pruned
               .map((g) => ({ ...g, members: g.members.filter((key) => !selKeys.includes(key)) }))
               .filter((g) => g.members.length > 0);
             persistNodeGroups([
@@ -3366,11 +3378,13 @@ export default function ProjectCanvas({
       if (e.key !== "Delete" && e.key !== "Backspace") return;
       if (selKeys.length === 0) return;
       e.preventDefault();
-      // 可完整恢复的删除（便签/两类占位）先抓原对象，整批删除记一条撤销。
+      // 可完整恢复的删除（便签/两类占位）先抓原对象与暂存线，整批删除
+      // 记一条撤销；恢复时原样还原（含线）。
       const restore: {
         notes?: CanvasNote[];
         placeholders?: CanvasPlaceholder[];
         ephs?: { id: string; kind: EntityPhKind; x: number; y: number }[];
+        pending?: PendingLink[];
       } = {};
       for (const key of selKeys) {
         if (key === "output") {
@@ -3389,12 +3403,16 @@ export default function ProjectCanvas({
           void removeSegment(key.slice(8));
         } else if (key.startsWith("placeholder:")) {
           const removed = placeholders.find((item) => item.id === key.slice(12));
+          const dropped = pendingLinks.filter((l) => l.fromKey === key);
           removePlaceholder(key.slice(12));
           if (removed) (restore.placeholders ??= []).push(removed);
+          if (dropped.length) (restore.pending ??= []).push(...dropped);
         } else if (key.startsWith("eph:")) {
           const removed = entityPhs.find((item) => item.id === key.slice(4));
+          const dropped = pendingLinks.filter((l) => l.fromKey === key);
           removeEntityPh(key.slice(4));
           if (removed) (restore.ephs ??= []).push(removed);
+          if (dropped.length) (restore.pending ??= []).push(...dropped);
         } else if (key.startsWith("grp:")) {
           removeGroup(key.slice(4));
         } else if (key === "script") {
@@ -3406,8 +3424,8 @@ export default function ProjectCanvas({
           void removeInfoEntity(kind, key.slice(key.indexOf(":") + 1));
         }
       }
-      if (restore.notes || restore.placeholders || restore.ephs) {
-        pushUndo({ type: "restore", notes: restore.notes, placeholders: restore.placeholders, ephs: restore.ephs });
+      if (restore.notes || restore.placeholders || restore.ephs || restore.pending) {
+        pushUndo({ type: "restore", notes: restore.notes, placeholders: restore.placeholders, ephs: restore.ephs, pending: restore.pending });
       }
       setSelection([]);
     };
@@ -3419,6 +3437,7 @@ export default function ProjectCanvas({
     setEpisodeOutput, deleteShot, setNotes, persistNotes, removeSegment, removePlaceholder,
     removeEntityPh, removeGroup, detachScript, unlinkAsset, removeInfoEntity, setSelection,
     copySelection, pasteClipboard, runUndo, pushUndo, nodeGroups, persistNodeGroups, t,
+    pendingLinks, memberFrame,
   ]);
   // 成员装入面板（多选 + 装入确认）：eph 加载 / 组追加裁剪 / 默认节点转组。
   const applyMemberPick = useCallback(async () => {
@@ -4867,6 +4886,15 @@ export default function ProjectCanvas({
                 panel: "",
               },
               {
+                // 关联场景：把库内已有场景关联到本集（原「本集资料」框标签
+                // 条的 + 入口随框移除，改挂到添加菜单，功能不丢）。
+                key: "linkScene",
+                label: t("project.canvas.linkScene"),
+                hint: t("project.canvas.linkSceneHint"),
+                icon: Icons.resources,
+                panel: "linkScene",
+              },
+              {
                 key: "prop",
                 label: t("project.canvas.typeProp"),
                 hint: t("project.canvas.typePropHint"),
@@ -4901,12 +4929,13 @@ export default function ProjectCanvas({
                   key={item.key}
                   type="button"
                   className="pc-addmenu-item"
-                  // 剧本项：已挂接则定位到剧本纸片，未挂接则从库选文件挂
-                  // 到本集；其余项（片段/角色/场景/道具/便签/提示词/素材）
-                  // 支持点击与按住拖到画布松手两种落位（ComfyUI 搜索框惯
-                  // 例），资料类先落空白节点、绝不先弹挑选面板；从「拖线
-                  // 到空白」进入时创建的节点自动接上那条线（资料占位无
-                  // 端口，待加载实体后再连线）。
+                  // 剧本项：已挂接则定位到剧本纸片，未挂接则只放空节点
+                  // （双击节点再选文件）；「关联场景」打开库场景挑选面板；
+                  // 其余项（片段/角色/场景/道具/便签/提示词/素材）支持
+                  // 点击与按住拖到画布松手两种落位（ComfyUI 搜索框惯例），
+                  // 资料类先落空白节点、绝不先弹挑选面板；从「拖线到空
+                  // 白」进入时创建的节点自动接上那条线（占位未加载实体，
+                  // 连线先走暂存线）。
                   {...(item.panel === "script"
                     ? {
                         onClick: () => {
@@ -4922,7 +4951,17 @@ export default function ProjectCanvas({
                           }
                         },
                       }
-                    : {
+                    : item.panel === "linkScene"
+                      ? {
+                          onClick: () => {
+                            setAddMenu(null);
+                            setAddMenuQuery("");
+                            // 新关联的场景节点出生在双击位置（视线附近）。
+                            armSpawnAt(addMenu.wx, addMenu.wy);
+                            setLocationPickOpen(true);
+                          },
+                        }
+                      : {
                           onMouseDown: (event: React.MouseEvent) => {
                             if (event.button !== 0) return;
                             event.stopPropagation();

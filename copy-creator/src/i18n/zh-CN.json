@@ -539,6 +539,7 @@
       "scriptUntitled": "未挂接",
       "scriptEmpty": "双击选择剧本文件",
       "nodeGroup": "组",
+      "linkSceneHint": "把库内已有场景关联到本集",
       "linkScript": "挂接剧本",
       "fillAsset": "填充素材",
       "placeholderTitle": "待填充",

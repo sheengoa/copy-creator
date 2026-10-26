@@ -539,6 +539,7 @@
       "scriptUntitled": "No file linked",
       "scriptEmpty": "Double-click to pick a script file",
       "nodeGroup": "Group",
+      "linkSceneHint": "Link existing library scenes to this episode",
       "linkScript": "Link script",
       "fillAsset": "Fill asset",
       "placeholderTitle": "Empty",
