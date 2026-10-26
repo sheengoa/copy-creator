@@ -1995,7 +1995,8 @@
 }
 .pc-node:active { cursor: grabbing; }
 .pc-node:hover { z-index: 12; box-shadow: 0 14px 34px rgba(0, 0, 0, 0.16), 0 3px 8px rgba(0, 0, 0, 0.08); }
-.pc-node.pc-dragging { z-index: 20; }
+/* 拖动中的节点/便签压在同级之上（含 hover 态，松手清除） */
+.pc-node.pc-dragging, .pc-note.pc-dragging { z-index: 20; }
 .pc-node.pc-selected { border-color: var(--text-primary); }
 .pc-node.pc-wire-target {
   border-color: var(--card-glow);
@@ -2106,46 +2107,6 @@
   overflow: hidden;
   margin: 0;
 }
-/* 空镜头卡 */
-.pc-shotcard-body { padding: 11px 13px; display: flex; flex-direction: column; gap: 5px; height: 100%; }
-.pc-shotcard-body b {
-  font-size: 12px;
-  font-weight: 500;
-  color: var(--text-primary);
-  overflow: hidden;
-  text-overflow: ellipsis;
-  display: -webkit-box;
-  -webkit-line-clamp: 2;
-  -webkit-box-orient: vertical;
-}
-.pc-shotcard-body i {
-  font-style: normal;
-  font-size: 10.5px;
-  color: var(--text-secondary);
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-/* 镜头归属签 / 生成徽标 */
-.pc-shot-tag, .pc-gen-tag {
-  position: absolute;
-  height: 21px;
-  max-width: calc(100% - 18px);
-  padding: 0 8px;
-  border-radius: 7px;
-  color: #fff;
-  font-size: 10px;
-  letter-spacing: 0.3px;
-  display: inline-flex;
-  align-items: center;
-  gap: 4px;
-  pointer-events: none;
-  overflow: hidden;
-  white-space: nowrap;
-}
-.pc-shot-tag { left: 9px; top: 9px; background: rgba(28, 28, 34, 0.7); }
-.pc-gen-tag { right: 9px; top: 9px; background: rgba(84, 68, 160, 0.85); }
-.pc-shot-tag svg, .pc-gen-tag svg { width: 10px; height: 10px; flex: none; }
 /* 节点 hover 工具条 */
 .pc-node-tools {
   position: absolute;
@@ -2583,6 +2544,8 @@
   background: var(--glass-bg, rgba(255, 255, 255, 0.7));
   backdrop-filter: blur(6px);
   padding: 5px 11px;
+  /* 纯提示文案：不拦截其下画布元素的命中（拖线落点/点选）。 */
+  pointer-events: none;
   border-radius: 7px;
   white-space: nowrap;
   pointer-events: none;

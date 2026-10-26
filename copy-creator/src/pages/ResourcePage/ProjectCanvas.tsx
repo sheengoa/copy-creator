@@ -336,7 +336,6 @@ function TextPaperBody({ path, name, lines }: { path: string; name: string; line
 interface WireItem {
   fromKey: string; // 容器 key：shot:<id> | asset:<id>
   toKey: string;
-  label: string;
   kind: "gen" | "manual";
   type: string; // 线上流动的数据类型 = 来源素材的 kind
 }
@@ -391,6 +390,7 @@ export default function ProjectCanvas({
   onPickForShot,
   onRelinkAsset,
   onAddLooseAsset,
+  pickerEpoch,
 }: {
   libraryRoot: string;
   /** 集信息玻璃卡内容（标题/状态/角色/剧本入口），由 ProjectView 组装。 */
@@ -400,6 +400,8 @@ export default function ProjectCanvas({
   onRelinkAsset: (asset: ProjectAsset) => void;
   /** 双击菜单选「素材」时打开库选择器（添加为集级散件）。 */
   onAddLooseAsset: () => void;
+  /** 资源选择器取消计数：父组件在选择器被取消关闭（未挑选文件）时递增。 */
+  pickerEpoch?: number;
 }) {
   const { t } = useTranslation();
   const {
@@ -583,6 +585,16 @@ export default function ProjectCanvas({
     fromPortId?: string;
   } | null>(null);
   const lastLooseIdsRef = useRef<string[]>([]);
+
+  // 资源选择器被取消（未挑选文件，父组件递增 pickerEpoch）：丢弃待落位
+  // 与待接线状态，避免之后无关的新散件被吸附到过期落点或误接旧线。
+  // 成功挂靠不递增，异步落位仍会正常消费挂起状态。
+  useEffect(() => {
+    if (pickerEpoch) {
+      setPendingAddPos(null);
+      setPendingLinkWire(null);
+    }
+  }, [pickerEpoch]);
 
   // ── 布局与位置（state 驱动渲染） ──
   const layout = useMemo(() => {
@@ -854,6 +866,20 @@ export default function ProjectCanvas({
     [saveView],
   );
 
+  // 滚轮缩放走原生非被动监听：React 合成 onWheel 是 passive 的，
+  // preventDefault 不生效（ctrl+滚轮会触发网页缩放）。
+  useEffect(() => {
+    const el = vpRef.current;
+    if (!el) return;
+    const onWheel = (e: WheelEvent) => {
+      e.preventDefault();
+      const rect = el.getBoundingClientRect();
+      zoomAt(e.clientX - rect.left, e.clientY - rect.top, e.deltaY < 0 ? 1.12 : 1 / 1.12);
+    };
+    el.addEventListener("wheel", onWheel, { passive: false });
+    return () => el.removeEventListener("wheel", onWheel);
+  }, [zoomAt]);
+
   // ── 连线：容器（镜头卡/散件）之间的生成链 + 手动线 ──
   const containerOf = useCallback(
     (assetId: string): string | null => {
@@ -870,23 +896,23 @@ export default function ProjectCanvas({
   const wires = useMemo(() => {
     const list: WireItem[] = [];
     const kindOf = new Map(allAssetsOf(scenes, looseAssets).map((a) => [a.id, a.kind]));
-    const pushWire = (fromAsset: string, toAsset: string, label: string, kind: "gen" | "manual") => {
+    const pushWire = (fromAsset: string, toAsset: string, kind: "gen" | "manual") => {
       const from = containerOf(fromAsset);
       const to = containerOf(toAsset);
       if (!from || !to || from === to) return;
       if (list.some((w) => w.fromKey === from && w.toKey === to && w.kind === kind)) return;
-      list.push({ fromKey: from, toKey: to, label, kind, type: kindOf.get(fromAsset) ?? "file" });
+      list.push({ fromKey: from, toKey: to, kind, type: kindOf.get(fromAsset) ?? "file" });
     };
     allAssetsOf(scenes, looseAssets).forEach((asset) => {
       if (asset.gen_from_asset && kindOf.has(asset.gen_from_asset)) {
-        pushWire(asset.gen_from_asset, asset.id, t("project.canvas.wireGen"), "gen");
+        pushWire(asset.gen_from_asset, asset.id, "gen");
       }
     });
     links.forEach((link: ProjectAssetLink) => {
-      pushWire(link.from_asset, link.to_asset, link.label || t("project.canvas.wireRef"), "manual");
+      pushWire(link.from_asset, link.to_asset, "manual");
     });
     return list;
-  }, [scenes, looseAssets, links, containerOf, t]);
+  }, [scenes, looseAssets, links, containerOf]);
 
   // ── 节点实测尺寸与端口位置：连线锚点跟随真实 DOM（内容自适应的
   // 标题条/端口行/缩略图都会改变卡体高度，常量只是首帧兜底） ──
@@ -932,6 +958,7 @@ export default function ProjectCanvas({
     setNodeMetrics(next);
   }, []);
   const nodeRoRef = useRef<ResizeObserver | null>(null);
+  useEffect(() => () => nodeRoRef.current?.disconnect(), []);
   useLayoutEffect(() => {
     viewScaleRef.current = view.scale;
     if (!nodeRoRef.current) {
@@ -1123,7 +1150,12 @@ export default function ProjectCanvas({
 
   // 库选择落位：loose_assets 出现新 id 即落到指定点；若从「拖线到空白」
   // 菜单进入（pendingLinkWire），新素材自动接上那条线。
+  // 库选择落位：loose_assets 出现新 id 即落到指定点；若从「拖线到空白」
+  // 菜单进入（pendingLinkWire），新素材自动接上那条线。概览重取存在
+  // 空窗（selectEpisode 先置 null）：空窗期不更新 id 基线，否则新概览
+  // 会把全部旧散件误判为"新增"，把挂起落位错写到第一个旧散件上。
   useEffect(() => {
+    if (!overview) return;
     const ids = looseAssets.map((a) => a.id);
     const prev = lastLooseIdsRef.current;
     lastLooseIdsRef.current = ids;
@@ -1141,7 +1173,7 @@ export default function ProjectCanvas({
         setPendingLinkWire(null);
       }
     }
-  }, [looseAssets, pendingAddPos, pendingLinkWire, saveCanvasLayout, autoConnectNewNode]);
+  }, [overview, looseAssets, pendingAddPos, pendingLinkWire, saveCanvasLayout, autoConnectNewNode]);
 
   // ── 选中与拖拽 ──
   const [selKeys, setSelKeys] = useState<string[]>([]);
@@ -1239,6 +1271,7 @@ export default function ProjectCanvas({
         const noteId = noteEl.getAttribute("data-note") ?? "";
         const note = notes.find((item) => item.id === noteId);
         if (note) {
+          noteEl.classList.add("pc-dragging");
           dragRef.current = {
             kind: "note", sx: e.clientX, sy: e.clientY, moved: false,
             ox: note.x, oy: note.y, frameKey: noteId,
@@ -1288,6 +1321,7 @@ export default function ProjectCanvas({
         const key = nodeEl.getAttribute("data-key") ?? "";
         if (key === "output" && outputBox) {
           // 成片输出节点：卡体拖动只挪位置（localStorage 按集记忆）。
+          nodeEl.classList.add("pc-dragging");
           dragRef.current = {
             kind: "outnode", sx: e.clientX, sy: e.clientY, moved: false,
             ox: outputBox.x, oy: outputBox.y,
@@ -1300,6 +1334,7 @@ export default function ProjectCanvas({
           const segId = key.slice(8);
           const p = segPos[segId];
           if (p) {
+            nodeEl.classList.add("pc-dragging");
             dragRef.current = {
               kind: "segment", sx: e.clientX, sy: e.clientY, moved: false,
               ox: p.x, oy: p.y, frameKey: segId,
@@ -1310,6 +1345,7 @@ export default function ProjectCanvas({
         }
         const nextSel = selRef.current.includes(key) ? selRef.current : [key];
         setSelection(nextSel);
+        nodeEl.classList.add("pc-dragging");
         const kind = key.startsWith("shot:") ? "card" : "loose";
         dragRef.current = {
           kind, sx: e.clientX, sy: e.clientY, moved: false,
@@ -1704,6 +1740,7 @@ export default function ProjectCanvas({
         saveInfoFramePos(infoPos.frame);
       }
       vpRef.current?.classList.remove("pc-panning");
+      vpRef.current?.querySelectorAll<HTMLElement>(".pc-dragging").forEach((el) => el.classList.remove("pc-dragging"));
       if (drag.moved) {
         suppressClickRef.current = true;
         window.setTimeout(() => {
@@ -1754,18 +1791,23 @@ export default function ProjectCanvas({
   // （ComfyUI 槽位文字的对应物），端口坐标由实测驱动连线锚点。
   const portRows = (key: string, dir: "in" | "out") => {
     const { ins, out } = portsOf(key);
-    if (dir === "in") {
-      return (
-        <>
-          {ins.map((port) => (
-            <div key={port.id} className="pc-port-row">
-              <span className="pc-port pc-port-in" data-port="in" data-port-id={port.id} />
-              <span className="pc-port-name">{port.label}</span>
-            </div>
-          ))}
-        </>
-      );
-    }
+  if (dir === "in") {
+    return (
+      <>
+        {ins.map((port) => (
+          <div key={port.id} className="pc-port-row">
+            <span
+              className="pc-port pc-port-in"
+              data-port="in"
+              data-port-id={port.id}
+              style={{ borderColor: WIRE_TYPE_COLORS[port.accepts[0] ?? ""] ?? undefined }}
+            />
+            <span className="pc-port-name">{port.label}</span>
+          </div>
+        ))}
+      </>
+    );
+  }
     return out ? (
       <div className="pc-port-row pc-port-row-out">
         <span className="pc-port-name">{out.label}</span>
@@ -1850,12 +1892,6 @@ export default function ProjectCanvas({
           e.stopPropagation();
           e.preventDefault();
           suppressClickRef.current = false;
-        }}
-        onWheel={(e) => {
-          e.preventDefault();
-          const rect = vpRef.current?.getBoundingClientRect();
-          if (!rect) return;
-          zoomAt(e.clientX - rect.left, e.clientY - rect.top, e.deltaY < 0 ? 1.12 : 1 / 1.12);
         }}
         onDoubleClick={(e) => {
           const thumb = e.target instanceof Element ? e.target.closest(".pc-shot-asset-thumb") : null;
@@ -2021,10 +2057,16 @@ export default function ProjectCanvas({
               const d = wirePathD(a, b);
               const midX = (a.x + b.x) / 2;
               const midY = (a.y + b.y) / 2;
+              // 线色随来源数据类型（角色/场景/道具图绿、剧本橙、片段紫）。
+              const fromType = portsOf(fromKey).out?.type;
               return (
                 <g key={link.id} className="pc-wire">
                   <path className="pc-wire-hit" d={d} />
-                  <path className="pc-wire-line" d={d} style={{ stroke: WIRE_TYPE_COLORS.video, strokeOpacity: 0.55 }} />
+                  <path
+                    className="pc-wire-line"
+                    d={d}
+                    style={{ stroke: WIRE_TYPE_COLORS[fromType ?? ""] ?? WIRE_TYPE_COLORS.video, strokeOpacity: 0.55 }}
+                  />
                   <g
                     className="pc-wire-del"
                     data-tooltip={t("project.canvas.wireRemove")}

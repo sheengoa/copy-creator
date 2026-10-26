@@ -78,6 +78,9 @@ export default function ProjectView() {
   const [numberEditingId, setNumberEditingId] = useState<string | null>(null);
   const [numberDraft, setNumberDraft] = useState("");
   const [assetPickerShotId, setAssetPickerShotId] = useState<string | null>(null);
+  // 选择器会话计数：每次关闭（含取消）递增，通知画布丢弃「拖线到空白
+  // 待落位/待接线」的挂起状态，防止过期落点吸附之后无关的新散件。
+  const [pickerEpoch, setPickerEpoch] = useState(0);
   const [sheetAsset, setSheetAsset] = useState<ProjectAsset | null>(null);
   // 「重新挂靠」替换流：详情浮层对缺失档案发起时记录旧档案，选择器
   // 挂上新文件成功后把旧档案取消挂靠（两步都走既有命令）。
@@ -396,6 +399,7 @@ export default function ProjectView() {
               onOpenAsset={setSheetAsset}
               onPickForShot={setAssetPickerShotId}
               onAddLooseAsset={() => setAssetPickerShotId("")}
+              pickerEpoch={pickerEpoch}
               onRelinkAsset={(asset) => {
                 setReplaceAsset(asset);
                 setSheetAsset(null);
@@ -413,6 +417,7 @@ export default function ProjectView() {
             setAssetPickerShotId(null);
             setReplaceAsset(null);
           }}
+          onCancel={() => setPickerEpoch((epoch) => epoch + 1)}
           onLinked={
             replaceAsset
               ? () => {
