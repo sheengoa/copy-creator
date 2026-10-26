@@ -1793,6 +1793,8 @@ export default function ProjectCanvas({
         const key = nodeEl.getAttribute("data-key") ?? "";
         if (key === "output" && outputBox) {
           // 成片输出节点：卡体拖动只挪位置（localStorage 按集记忆）。
+          // 按下即选中：配合选中点亮样式，「在操作哪个节点」一眼可见。
+          setSelection(selRef.current.includes(key) ? selRef.current : [key]);
           nodeEl.classList.add("pc-dragging");
           dragRef.current = {
             kind: "outnode", sx: e.clientX, sy: e.clientY, moved: false,
@@ -1806,6 +1808,7 @@ export default function ProjectCanvas({
           const segId = key.slice(8);
           const p = segPos[segId];
           if (p) {
+            setSelection(selRef.current.includes(key) ? selRef.current : [key]);
             nodeEl.classList.add("pc-dragging");
             dragRef.current = {
               kind: "segment", sx: e.clientX, sy: e.clientY, moved: false,
@@ -1820,6 +1823,7 @@ export default function ProjectCanvas({
           const phId = key.slice(12);
           const ph = placeholders.find((item) => item.id === phId);
           if (ph) {
+            setSelection(selRef.current.includes(key) ? selRef.current : [key]);
             nodeEl.classList.add("pc-dragging");
             dragRef.current = {
               kind: "placeholder", sx: e.clientX, sy: e.clientY, moved: false,
@@ -1836,7 +1840,9 @@ export default function ProjectCanvas({
         ) {
           // 资料节点（含组节点与空白资料占位）：按下即自由拖动（覆盖层
           // 按绝对位置记忆，资料框退化为背景分组框，节点不再被网格钉死）。
+          // 按下即选中：配合选中点亮样式，「在操作哪个节点」一眼可见。
           const p = infoNodePos(key);
+          setSelection(selRef.current.includes(key) ? selRef.current : [key]);
           nodeEl.classList.add("pc-dragging");
           dragRef.current = {
             kind: "infonode", sx: e.clientX, sy: e.clientY, moved: false,
@@ -3536,7 +3542,7 @@ export default function ProjectCanvas({
               <div
                 key={node.key}
                 data-key={node.key}
-                className={`pc-node pc-info${pulseKeys.includes(node.key) ? " pc-spawn" : ""}`}
+                className={`pc-node pc-info${pulseKeys.includes(node.key) ? " pc-spawn" : ""}${selKeys.includes(node.key) ? " pc-selected" : ""}`}
                 style={{ left: p.x, top: p.y, width: node.w, ["--node-accent" as string]: NODE_ACCENTS[node.kind] ?? "#94a3b8" } as React.CSSProperties}
                 onDoubleClick={(event) => {
                   // 双击资料节点 → 详情窗口（该类资源列表，当前/全部切换；
@@ -3639,7 +3645,7 @@ export default function ProjectCanvas({
               <div
                 key={key}
                 data-key={key}
-                className="pc-node pc-info pc-eph"
+                className={`pc-node pc-info pc-eph${selKeys.includes(key) ? " pc-selected" : ""}`}
                 style={{ left: p.x, top: p.y, width: INFO_W, ["--node-accent" as string]: NODE_ACCENTS[ph.kind] ?? "#94a3b8" } as React.CSSProperties}
                 onDoubleClick={(event) => {
                   event.stopPropagation();
@@ -3684,7 +3690,7 @@ export default function ProjectCanvas({
               <div
                 key={segment.id}
                 data-key={key}
-                className="pc-node pc-segment"
+                className={`pc-node pc-segment${selKeys.includes(key) ? " pc-selected" : ""}`}
                 style={{
                   left: p.x, top: p.y, width: segSize?.w ?? SEG_W,
                   // 存量高度语义是节点总高：用 minHeight 兜底，缩小不裁切内容。
@@ -3764,7 +3770,7 @@ export default function ProjectCanvas({
           {outputBox && (
             <div
               data-key="output"
-              className="pc-node pc-outnode"
+              className={`pc-node pc-outnode${selKeys.includes("output") ? " pc-selected" : ""}`}
               style={{ left: outputBox.x, top: outputBox.y, width: outputBox.w, ["--node-accent" as string]: NODE_ACCENTS.output } as React.CSSProperties}
             >
               <div className="pc-node-head">

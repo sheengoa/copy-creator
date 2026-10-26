@@ -1999,7 +1999,15 @@
 .pc-node:hover { z-index: 12; box-shadow: 0 14px 34px rgba(0, 0, 0, 0.16), 0 3px 8px rgba(0, 0, 0, 0.08); }
 /* 拖动中的节点/便签压在同级之上（含 hover 态，松手清除） */
 .pc-node.pc-dragging, .pc-note.pc-dragging { z-index: 20; }
-.pc-node.pc-selected { border-color: var(--text-primary); }
+/* 选中态：节点类型色点亮边缘（实色描边 + 柔和泛光）——正在操作哪个
+   节点一目了然；类型未定（如便签外的特殊态）回退文字主色。 */
+.pc-node.pc-selected {
+  border-color: color-mix(in srgb, var(--node-accent, var(--text-primary)) 55%, var(--text-primary));
+  box-shadow:
+    0 0 0 2px color-mix(in srgb, var(--node-accent, var(--text-primary)) 80%, var(--text-primary)),
+    0 0 18px color-mix(in srgb, var(--node-accent, var(--text-secondary)) 38%, transparent),
+    0 14px 34px rgba(0, 0, 0, 0.16), 0 3px 8px rgba(0, 0, 0, 0.08);
+}
 .pc-node.pc-wire-target {
   border-color: var(--card-glow);
   box-shadow: 0 0 0 2px var(--card-glow), 0 8px 24px rgba(0, 0, 0, 0.14);
