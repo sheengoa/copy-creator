@@ -3181,11 +3181,7 @@ export default function ProjectCanvas({
               return (
                 <g key={`${wire.fromKey}->${wire.toKey}`} className="pc-wire">
                   <path className="pc-wire-hit" d={d} />
-                  <path
-                    className={`pc-wire-line${wire.kind === "manual" ? " manual" : ""}`}
-                    d={d}
-                    style={{ stroke: color }}
-                  />
+                  <path className="pc-wire-line" d={d} style={{ stroke: color }} />
                   {wire.kind === "manual" && (
                     <g
                       className="pc-wire-del"
@@ -3303,6 +3299,16 @@ export default function ProjectCanvas({
                 data-frame={card.sceneId}
                 className={`pc-node pc-shotcard${selected ? " pc-selected" : ""}`}
                 style={{ left: p.x, top: p.y, width: card.w, ["--node-accent" as string]: NODE_ACCENTS.shot } as React.CSSProperties}
+                onDoubleClick={(event) => {
+                  // 双击镜头卡 → 挂靠素材挑选面板（镜头没有详情窗，挑选面板
+                  // 就是它的挂靠窗口）。选择框只认双击：单击与拖卡松手都不弹；
+                  // 缩略图/工具条/缩放角标上的双击不抢（缩略图双击由视口层
+                  // 打开素材查看器）。
+                  const target = event.target instanceof Element ? event.target : null;
+                  if (target?.closest(".pc-shot-asset-thumb, .pc-node-tools, .pc-resize")) return;
+                  event.stopPropagation();
+                  onPickForShot(shot.id);
+                }}
               >
                 <div className="pc-shot-head">
                   <span className="pc-shot-no">{shotNoOf(card.sceneId, card.shot.id)}</span>
@@ -3359,14 +3365,10 @@ export default function ProjectCanvas({
                       })}
                     </div>
                   ) : (
-                    <button
-                      type="button"
-                      className="pc-shot-empty"
-                      onClick={() => onPickForShot(shot.id)}
-                    >
+                    <div className="pc-shot-empty">
                       {Icons.link}
                       {t("project.canvas.shotEmpty")}
-                    </button>
+                    </div>
                   )}
                 <span className="pc-node-tools">
                   <button type="button" data-tooltip={t("project.asset.link")} onClick={() => onPickForShot(shot.id)}>
