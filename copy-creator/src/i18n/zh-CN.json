@@ -560,6 +560,7 @@
       "detailRelinkScript": "重新挂接剧本",
       "ephTitle": "未加载",
       "ephHint": "双击加载",
+      "noRefImage": "无参考图",
       "ephUnloaded": "未加载",
       "ephPickHint": "点击从对应库挑选并加载到本节点",
       "ephLoad": "从库加载…",

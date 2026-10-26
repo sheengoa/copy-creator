@@ -560,6 +560,7 @@
       "detailRelinkScript": "Relink script",
       "ephTitle": "Empty",
       "ephHint": "Double-click to load",
+      "noRefImage": "No reference image",
       "ephUnloaded": "Not loaded",
       "ephPickHint": "Pick one from the library to load into this node",
       "ephLoad": "Load from library…",

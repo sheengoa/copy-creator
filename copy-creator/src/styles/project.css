@@ -3027,9 +3027,10 @@
 }
 .pc-shot-empty:hover { border-color: var(--text-tertiary); color: var(--text-primary); }
 .pc-shot-empty svg { width: 13px; height: 13px; }
-/* 资料卡（角色/道具/剧本） */
+/* 资料卡（角色/场景/道具/剧本）：首图大卡片预览（取代圆形小头像）。
+   卡高 109px + 标题条 27px + 上下边距，节点实际总高与 INFO_H 模型一致。 */
 .pc-info-body {
-  padding: 12px;
+  padding: 9px;
   display: flex;
   flex-direction: column;
   align-items: center;
@@ -3037,52 +3038,75 @@
   gap: 7px;
   text-align: center;
 }
-
-/* 空白资料占位节点：虚线框 + 淡图标表达「待加载」，与已加载实体区分 */
-.pc-eph-body {
-  margin: 0 10px 10px;
-  border: 1.5px dashed color-mix(in srgb, var(--node-accent, var(--text-secondary)) 45%, transparent);
-  border-radius: 10px;
-  min-height: 76px;
+.pc-photo {
+  position: relative;
+  height: 109px;
+  align-self: stretch;
 }
-.pc-eph-body .pc-info-ava { opacity: 0.45; }
-.pc-eph-body .pc-info-role { color: var(--text-secondary); }
-
-/* 组节点：一个节点装多个同类实体，成员行（头像/参考图 + 名称） */
-.pc-info-body .pc-grp-rows { align-self: stretch; display: flex; flex-direction: column; padding: 0; }
-.pc-grp-row { display: flex; align-items: center; gap: 7px; padding: 5px 2px; min-width: 0; }
-.pc-grp-row + .pc-grp-row { border-top: 1px dashed var(--separator); }
-.pc-grp-ava {
-  width: 30px;
-  height: 30px;
-  border-radius: 7px;
-  flex-shrink: 0;
+/* 组节点：其余成员的图边向右堆放（层数上限 2），右侧留出堆边空间 */
+.pc-photo.has-stack { margin-right: 14px; }
+.pc-photo-layer {
+  position: absolute;
+  inset: 0;
+  border-radius: 10px;
+  overflow: hidden;
+  background: color-mix(in srgb, var(--node-accent, var(--text-secondary)) 14%, var(--chip-bg));
+  border: 1px solid var(--separator);
+  box-shadow: 0 1px 5px rgba(0, 0, 0, 0.1);
+}
+.pc-photo-layer.l1 { transform: translate(7px, 2px); }
+.pc-photo-layer.l2 { transform: translate(14px, 4px); }
+.pc-photo-img { width: 100%; height: 100%; object-fit: cover; display: block; }
+.pc-photo-main {
+  position: absolute;
+  inset: 0;
+  border-radius: 10px;
+  overflow: hidden;
+  background: var(--chip-bg);
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.06);
+}
+/* 无参考图：类型色淡底 + 名字首字占位，同一卡片形态 */
+.pc-photo-main.pc-photo-empty {
   display: flex;
+  flex-direction: column;
   align-items: center;
   justify-content: center;
-  color: #fff;
-  font-size: 12px;
+  gap: 4px;
+  background: color-mix(in srgb, var(--node-accent, var(--text-secondary)) 14%, var(--chip-bg));
+  color: color-mix(in srgb, var(--node-accent, var(--text-secondary)) 78%, var(--text-primary));
+}
+.pc-photo-init { font-size: 24px; font-weight: 600; line-height: 1; }
+.pc-photo-sub { font-size: 10px; color: var(--text-secondary); }
+
+/* 空白资料占位节点：虚线待加载卡片，与照片卡同形态 */
+.pc-eph-body {
+  margin: 9px;
+  padding: 0 12px;
+  height: 109px;
+  border: 1.5px dashed color-mix(in srgb, var(--node-accent, var(--text-secondary)) 45%, transparent);
+  border-radius: 10px;
+  background: color-mix(in srgb, var(--node-accent, var(--text-secondary)) 5%, transparent);
+  color: var(--text-secondary);
+  font-size: 10.5px;
+}
+.pc-eph-body svg { width: 18px; height: 18px; opacity: 0.55; }
+
+/* 剧本：同系列纸片卡（描边 + 圆角对齐照片卡） */
+.pc-info-script {
+  width: 100%;
+  height: 109px;
+  border: 1px solid var(--separator);
+  border-radius: 10px;
+  background: color-mix(in srgb, var(--text-primary) 3%, transparent);
+  padding: 8px 10px 0;
   overflow: hidden;
 }
-.pc-grp-ava svg { width: 14px; height: 14px; }
-.pc-grp-ava-img { width: 100%; height: 100%; object-fit: cover; }
-.pc-grp-name { font-size: 11.5px; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.pc-info-ava {
-  width: 56px; height: 56px; border-radius: 50%; overflow: hidden;
-  display: flex; align-items: center; justify-content: center;
-  color: #fff; font-size: 20px; background: var(--chip-hover-bg);
-}
-.pc-info-ava svg { width: 22px; height: 22px; }
-.pc-info-ava-img { width: 100%; height: 100%; object-fit: cover; }
+.pc-info-script .pc-paper { padding: 0; background: transparent; }
+.pc-info-script .pc-paper p { -webkit-line-clamp: 4; }
+
+/* 头像渐变色板（详情窗等处仍在用） */
 .pc-ava-p0 { background: linear-gradient(135deg, #f6b7c9, #e78fb3); }
 .pc-ava-p1 { background: linear-gradient(135deg, #a8c5e8, #7a9fd4); }
 .pc-ava-p2 { background: linear-gradient(135deg, #b8dcc0, #7fb894); }
 .pc-ava-p3 { background: linear-gradient(135deg, #e8cf9f, #d4a96a); }
 .pc-ava-p4 { background: linear-gradient(135deg, #c9b8e8, #9a7fd4); }
-.pc-info-name {
-  font-size: 12px; font-weight: 500; color: var(--text-primary);
-  max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
-}
-.pc-info-role { font-size: 10px; color: var(--text-tertiary); }
-.pc-info-script { width: 100%; }
-.pc-info-script .pc-paper p { -webkit-line-clamp: 5; }

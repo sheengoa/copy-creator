@@ -44,7 +44,6 @@ const MISSING_W = 170;
 const MISSING_H = 96;
 const INFO_W = 132; // 资料卡宽（角色/道具/剧本）
 const INFO_H = 156;
-const INFO_ROW_H = 52; // 组节点内每个成员行的高度（标题条外追加）
 const SCRIPT_W = 210;
 const WORLD_MARGIN = 60;
 /** 连线层视口外沿的世界余量（把可见区外一点的线也画进来，避免边缘裁切）。 */
@@ -714,8 +713,8 @@ export default function ProjectCanvas({
   }, [scenes, looseAssets]);
 
   // 资料节点（出场角色/出场场景/出镜道具/剧本）：默认每个集关联实体
-  // 一个节点；被组认领的实体不再单独渲染，组节点以多实体行呈现且高度
-  // 随成员数增长（标题条 + N 行，实测尺寸接管后只是首帧兜底）。
+  // 一个节点；被组认领的实体不再单独渲染，组节点以照片堆放呈现成员
+  // （首位成员大图 + 其余成员图边），高度与单实体节点相同。
   const infoNodes = useMemo(() => {
     const list: CanvasInfo[] = [];
     const claimed = new Set(infoGroups.flatMap((g) => g.members));
@@ -738,7 +737,7 @@ export default function ProjectCanvas({
     episodeProps
       .filter((prop) => !claimed.has(prop.id))
       .forEach((prop) => {
-        list.push({ key: `prop:${prop.id}`, kind: "prop", name: prop.name, avatarPath: "", textPath: "", w: INFO_W, h: INFO_H });
+        list.push({ key: `prop:${prop.id}`, kind: "prop", name: prop.name, avatarPath: prop.ref_path, textPath: "", w: INFO_W, h: INFO_H });
       });
     infoGroups.forEach((group) => {
       // 只统计仍存在的成员（库里被删的 id 不占位）。
@@ -751,16 +750,10 @@ export default function ProjectCanvas({
         ).some((e) => e.id === id),
       );
       if (members.length === 0) return;
-      const kindLabel = t(
-        group.kind === "character"
-          ? "project.canvas.typeCharacter"
-          : group.kind === "location"
-            ? "project.canvas.typeLocation"
-            : "project.canvas.typeProp",
-      );
       list.push({
-        key: `grp:${group.id}`, kind: group.kind, name: `${kindLabel} ×${members.length}`,
-        avatarPath: "", textPath: "", w: INFO_W, h: INFO_H + (members.length - 1) * INFO_ROW_H,
+        // 标题只留 ×N：类型名在标题条左侧常显，重复会读成「角色 角色 ×2」。
+        key: `grp:${group.id}`, kind: group.kind, name: `×${members.length}`,
+        avatarPath: "", textPath: "", w: INFO_W, h: INFO_H,
       });
     });
     if (overview?.episode.script_path) {
@@ -770,7 +763,7 @@ export default function ProjectCanvas({
       });
     }
     return list;
-  }, [castCharacters, episodeLocations, episodeProps, infoGroups, overview, t]);
+  }, [castCharacters, episodeLocations, episodeProps, infoGroups, overview]);
 
   const infoPos = useMemo(() => {
     const frame = infoFramePos ?? { x: WORLD_MARGIN, y: layout.worldH + 48 };
@@ -2532,6 +2525,26 @@ export default function ProjectCanvas({
       kind === "character" ? castCharacters : kind === "location" ? episodeLocations : episodeProps,
     [castCharacters, episodeLocations, episodeProps],
   );
+  // 资料卡新预览：首图大卡片。实体参考图取角色头像/场景与道具参考图；
+  // 无图时用类型色淡底 + 名字首字占位（同一卡片形态）。
+  const entityRefOf = useCallback(
+    (kind: EntityPhKind, entity: { avatar_path?: string; ref_path?: string }) =>
+      kind === "character" ? (entity.avatar_path ?? "") : (entity.ref_path ?? ""),
+    [],
+  );
+  const photoMainOf = (name: string, refPath: string) =>
+    refPath ? (
+      <ResourceImage
+        path={joinLibraryPath(libraryRoot, refPath)}
+        alt={name}
+        className="pc-photo-img"
+      />
+    ) : (
+      <>
+        <span className="pc-photo-init">{characterAvatarInitial(name)}</span>
+        <span className="pc-photo-sub">{t("project.canvas.noRefImage")}</span>
+      </>
+    );
   const kindTextOf = useCallback(
     (kind: EntityPhKind) =>
       t(kind === "character" ? "project.canvas.typeCharacter" : kind === "location" ? "project.canvas.typeLocation" : "project.canvas.typeProp"),
@@ -3554,78 +3567,52 @@ export default function ProjectCanvas({
                 </div>
                 <div className="pc-info-body">
                   {node.key.startsWith("grp:") ? (
-                    // 组节点：多成员行（每行头像/参考图 + 名称）。
-                    <div className="pc-grp-rows">
-                      {(infoGroups.find((g) => `grp:${g.id}` === node.key)?.members ?? [])
-                        .map((id) => ({ id, entity: entitiesOfKind(node.kind as EntityPhKind).find((e) => e.id === id) }))
-                        .filter((row) => row.entity)
-                        .map(({ id, entity }) => {
-                          const name = (entity as { name: string }).name;
-                          const refPath =
-                            node.kind === "character"
-                              ? (entity as { avatar_path: string }).avatar_path
-                              : (entity as { ref_path: string }).ref_path;
-                          return (
-                            <div className="pc-grp-row" key={id}>
-                              <span className={`pc-grp-ava pc-ava-p${characterAvatarPaletteIndex(name)}`}>
-                                {refPath ? (
-                                  <ResourceImage
-                                    path={joinLibraryPath(libraryRoot, refPath)}
-                                    alt={name}
-                                    className="pc-grp-ava-img"
-                                  />
-                                ) : node.kind === "prop" ? (
-                                  Icons.star
-                                ) : (
-                                  characterAvatarInitial(name)
-                                )}
-                              </span>
-                              <span className="pc-grp-name">{name}</span>
-                            </div>
-                          );
-                        })}
-                    </div>
-                  ) : node.kind === "character" ? (
-                    <>
-                      <span className={`pc-info-ava pc-ava-p${characterAvatarPaletteIndex(node.name)}`}>
-                        {node.avatarPath ? (
-                          <ResourceImage
-                            path={joinLibraryPath(libraryRoot, node.avatarPath)}
-                            alt={node.name}
-                            className="pc-info-ava-img"
-                          />
-                        ) : (
-                          characterAvatarInitial(node.name)
-                        )}
-                      </span>
-                      <b className="pc-info-name">{node.name}</b>
-                      <small className="pc-info-role">{t("project.cast.title")}</small>
-                    </>
-                  ) : node.kind === "location" ? (
-                    <>
-                      <span className="pc-info-ava">
-                        {node.avatarPath ? (
-                          <ResourceImage
-                            path={joinLibraryPath(libraryRoot, node.avatarPath)}
-                            alt={node.name}
-                            className="pc-info-ava-img"
-                          />
-                        ) : (
-                          Icons.resources
-                        )}
-                      </span>
-                      <b className="pc-info-name">{node.name}</b>
-                      <small className="pc-info-role">{t("project.library.locations")}</small>
-                    </>
-                  ) : node.kind === "prop" ? (
-                    <>
-                      <span className="pc-info-ava">{Icons.star}</span>
-                      <b className="pc-info-name">{node.name}</b>
-                      <small className="pc-info-role">{t("project.library.props")}</small>
-                    </>
-                  ) : (
+                    // 组节点：照片堆放——首位成员的大图在上，其余成员的图
+                    // 边向右堆（层数上限 2，更多成员看标题 ×N 与详情窗成员
+                    // 列表）；成员已不可解析时退化为普通照片卡。
+                    (() => {
+                      const members = (infoGroups.find((g) => `grp:${g.id}` === node.key)?.members ?? [])
+                        .map((id) => {
+                          const kind = node.kind as EntityPhKind;
+                          const entity = entitiesOfKind(kind).find((e) => e.id === id) as
+                            | { id: string; name: string; avatar_path?: string; ref_path?: string }
+                            | undefined;
+                          return entity
+                            ? { id, name: entity.name, ref: entityRefOf(kind, entity) }
+                            : null;
+                        })
+                        .filter((m): m is { id: string; name: string; ref: string } => m !== null);
+                      const stack = members.slice(1, 3);
+                      const main = members[0];
+                      if (!main) return null;
+                      return (
+                        <div className={`pc-photo${stack.length > 0 ? " has-stack" : ""}`}>
+                          {stack.map((member, index) => (
+                            <span key={member.id} className={`pc-photo-layer l${index + 1}`}>
+                              {member.ref ? (
+                                <ResourceImage
+                                  path={joinLibraryPath(libraryRoot, member.ref)}
+                                  alt=""
+                                  className="pc-photo-img"
+                                />
+                              ) : null}
+                            </span>
+                          ))}
+                          <div className={`pc-photo-main${main.ref ? "" : " pc-photo-empty"}`}>
+                            {photoMainOf(main.name, main.ref)}
+                          </div>
+                        </div>
+                      );
+                    })()
+                  ) : node.kind === "script" ? (
                     <div className="pc-info-script">
                       <TextPaperBody path={joinLibraryPath(libraryRoot, node.textPath)} name={node.name} lines={5} />
+                    </div>
+                  ) : (
+                    <div className="pc-photo">
+                      <div className={`pc-photo-main${node.avatarPath ? "" : " pc-photo-empty"}`}>
+                        {photoMainOf(node.name, node.avatarPath)}
+                      </div>
                     </div>
                   )}
                 </div>
@@ -3662,11 +3649,8 @@ export default function ProjectCanvas({
                   <b className="pc-node-title">{t("project.canvas.ephTitle")}</b>
                 </div>
                 <div className="pc-info-body pc-eph-body">
-                  <span className="pc-info-ava">
-                    {ph.kind === "character" ? Icons.clipboard : ph.kind === "location" ? Icons.resources : Icons.star}
-                  </span>
-                  <b className="pc-info-name">{label}</b>
-                  <small className="pc-info-role">{t("project.canvas.ephHint")}</small>
+                  {ph.kind === "character" ? Icons.clipboard : ph.kind === "location" ? Icons.resources : Icons.star}
+                  <span>{t("project.canvas.ephHint")}</span>
                 </div>
                 <span className="pc-node-tools">
                   <button
