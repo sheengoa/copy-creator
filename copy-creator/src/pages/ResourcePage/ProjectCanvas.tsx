@@ -847,6 +847,14 @@ export default function ProjectCanvas({
   const sizeOfNode = useCallback(
     (key: string): { w: number; h: number } | null => {
       const over = nodeSizes[key];
+      if (key === "output") {
+        return { w: over?.w ?? OUTPUT_W, h: over?.h ?? OUTPUT_H };
+      }
+      if (key.startsWith("shot:")) {
+        const card = layout.cards.find((c) => c.key === key);
+        if (!card) return null;
+        return { w: over?.w ?? card.w, h: over?.h ?? card.h };
+      }
       if (key.startsWith("asset:")) {
         const loose = layout.looses.find((l) => l.key === key);
         if (!loose) return null;
@@ -858,9 +866,17 @@ export default function ProjectCanvas({
       if (key.startsWith("segment:")) {
         return { w: over?.w ?? SEG_W, h: over?.h ?? SEG_H };
       }
+      if (key.startsWith("eph:")) {
+        return { w: over?.w ?? INFO_W, h: over?.h ?? INFO_H };
+      }
+      // 资料节点（角色/场景/道具/组/剧本）：默认用网格尺寸。
+      const info = infoNodes.find((item) => item.key === key);
+      if (info) return { w: over?.w ?? info.w, h: over?.h ?? info.h };
+      // 便签无固定默认尺寸（内容自适应），只在拖过之后有值。
+      if (key.startsWith("note:")) return over ?? null;
       return null;
     },
-    [nodeSizes, layout],
+    [nodeSizes, layout, infoNodes],
   );
 
   // ── 资料节点（角色/场景/道具/剧本）自由位置：默认仍在资料框网格，
@@ -1413,7 +1429,7 @@ export default function ProjectCanvas({
       if (key.startsWith("shot:")) {
         const p = pos.cards[key.slice(5)];
         if (!p) return null;
-        const size = cardSizeOf(key.slice(5));
+        const size = sizeOfNode(key) ?? cardSizeOf(key.slice(5));
         return finish(p.x, p.y, size.w, size.h);
       }
       if (key.startsWith("asset:")) {
@@ -1430,12 +1446,14 @@ export default function ProjectCanvas({
         return p ? finish(p.x, p.y, size?.w ?? SEG_W, SEG_H) : null;
       }
       if (key === "output") {
-        return outputBox ? finish(outputBox.x, outputBox.y, OUTPUT_W, OUTPUT_H) : null;
+        const size = sizeOfNode(key) ?? { w: OUTPUT_W, h: OUTPUT_H };
+        return outputBox ? finish(outputBox.x, outputBox.y, size.w, size.h) : null;
       }
       // 资料节点（角色/场景/道具/剧本）：拖动过的用覆盖位置，否则网格。
       const infoNode = infoNodes.find((item) => item.key === key);
       const infoP = infoNode ? infoNodePos(key) : undefined;
-      return infoNode && infoP ? finish(infoP.x, infoP.y, infoNode.w, infoNode.h) : null;
+      const infoSize = infoNode ? sizeOfNode(key) ?? { w: infoNode.w, h: infoNode.h } : null;
+      return infoNode && infoP && infoSize ? finish(infoP.x, infoP.y, infoSize.w, infoSize.h) : null;
     },
     [layout, pos, cardSizeOf, outputBox, segPos, infoNodes, nodeMetrics, sizeOfNode, infoNodePos],
   );
@@ -1687,6 +1705,10 @@ export default function ProjectCanvas({
     corner?: "nw" | "ne" | "sw" | "se";
     px?: number;
     py?: number;
+    // 按下时的初始位置（世界坐标）：移动中每步的绝对计算基准；
+    // px/py 则是最新预览位置（回写供 mouseup 兜底），两者不能混用。
+    px0?: number;
+    py0?: number;
     fox?: number;
     foy?: number;
     starts?: { key: string; x: number; y: number }[];
@@ -1717,9 +1739,9 @@ export default function ProjectCanvas({
     (e: React.MouseEvent) => {
       const target = e.target instanceof Element ? e.target : null;
       setAddMenu(null);
-      // 便签卡：按下即拖动（编辑态除外）。
+      // 便签卡：按下即拖动（编辑态与缩放手柄除外）。
       const noteEl = target?.closest(".pc-note");
-      if (noteEl && !target?.closest("textarea, button")) {
+      if (noteEl && !target?.closest("textarea, button, .pc-resize")) {
         const noteId = noteEl.getAttribute("data-note") ?? "";
         const note = notes.find((item) => item.id === noteId);
         if (note) {
@@ -1734,13 +1756,15 @@ export default function ProjectCanvas({
           return;
         }
       }
-      // 节点右下角尺寸手柄（ComfyUI 式）：按下即改尺寸，不挪位置。
+      // 节点四角尺寸手柄（ComfyUI 式）：按下即改尺寸，不挪位置。
       const resizeEl = target?.closest(".pc-resize");
       if (resizeEl) {
-        const nodeEl = resizeEl.closest(".pc-node") as HTMLElement | null;
-        const key = nodeEl?.getAttribute("data-key") ?? "";
+        const nodeEl = resizeEl.closest(".pc-node, .pc-note") as HTMLElement | null;
+        const isNote = !!nodeEl?.classList.contains("pc-note");
+        const rawKey = nodeEl?.getAttribute(isNote ? "data-note" : "data-key") ?? "";
+        const key = isNote ? `note:${rawKey}` : rawKey;
         const size = sizeOfNode(key);
-        if (key && size) {
+        if (key && (size || isNote)) {
           const corner = (resizeEl.getAttribute("data-corner") ?? "se") as DragState["corner"];
           // 西/北角缩放会挪动节点，按下时记下原始位置。
           let px: number | undefined;
@@ -1757,18 +1781,35 @@ export default function ProjectCanvas({
             const p = placeholders.find((item) => item.id === key.slice(12));
             px = p?.x;
             py = p?.y;
+          } else if (key.startsWith("shot:")) {
+            const p = pos.cards[key.slice(5)];
+            px = p?.x;
+            py = p?.y;
+          } else if (key.startsWith("note:")) {
+            const note = notes.find((item) => item.id === key.slice(5));
+            px = note?.x;
+            py = note?.y;
+          } else if (key === "output") {
+            px = outputBox?.x;
+            py = outputBox?.y;
+          } else {
+            const p = infoNodePos(key);
+            px = p?.x;
+            py = p?.y;
           }
           nodeEl?.classList.add("pc-resizing");
           dragRef.current = {
             kind: "resize", sx: e.clientX, sy: e.clientY, moved: false,
             // 首次拖拽从实际渲染尺寸起算（覆盖层只存改过的节点）；片段的
-            // 存量语义是节点总高，散件/占位是媒体区高度（默认值即吻合）。
-            ox: nodeSizes[key]?.w ?? nodeEl?.offsetWidth ?? size.w,
-            oy: nodeSizes[key]?.h ?? (key.startsWith("segment:") ? nodeEl?.offsetHeight ?? size.h : size.h),
+            // 存量语义是节点总高，其余以渲染实测兜底。
+            ox: nodeSizes[key]?.w ?? nodeEl?.offsetWidth ?? size?.w ?? 0,
+            oy: nodeSizes[key]?.h ?? nodeEl?.offsetHeight ?? size?.h ?? 0,
             frameKey: key,
             corner,
             px,
             py,
+            px0: px,
+            py0: py,
           };
           e.preventDefault();
           return;
@@ -2018,8 +2059,8 @@ export default function ProjectCanvas({
         const corner = drag.corner ?? "se";
         const dxW = dx / view.scale;
         const dyW = dy / view.scale;
-        const minW = key.startsWith("segment:") ? 180 : 150;
-        const minH = 90;
+        const minW = key.startsWith("segment:") ? 180 : key.startsWith("note:") ? 120 : 140;
+        const minH = key === "output" ? 60 : key.startsWith("note:") ? 80 : 90;
         let w = drag.ox ?? 0;
         let h = drag.oy ?? 0;
         if (corner === "ne" || corner === "se") w = Math.max(minW, w + dxW);
@@ -2030,8 +2071,10 @@ export default function ProjectCanvas({
         const shiftX = corner === "nw" || corner === "sw";
         const shiftY = corner === "nw" || corner === "ne";
         if ((shiftX || shiftY) && drag.px != null && drag.py != null) {
-          const px = Math.round((drag.px ?? 0) + (shiftX ? (drag.ox ?? 0) - w : 0));
-          const py = Math.round((drag.py ?? 0) + (shiftY ? (drag.oy ?? 0) - h : 0));
+          // 每步都从按下时的初始位置绝对推导（对角固定 ⇒ 平移量 = 原尺寸
+          // − 新尺寸）；不能用回写的 drag.px 叠加，否则逐复合漂移。
+          const px = Math.round((drag.px0 ?? 0) + (shiftX ? (drag.ox ?? 0) - w : 0));
+          const py = Math.round((drag.py0 ?? 0) + (shiftY ? (drag.oy ?? 0) - h : 0));
           // 回写进 drag 对象：mouseup 闭包可能拿不到最新 state，用它兜底。
           drag.px = px;
           drag.py = py;
@@ -2044,6 +2087,16 @@ export default function ProjectCanvas({
           } else if (key.startsWith("placeholder:")) {
             const phId = key.slice(12);
             setPlaceholders((prev) => prev.map((item) => (item.id === phId ? { ...item, x: px, y: py } : item)));
+          } else if (key.startsWith("shot:")) {
+            const shotId = key.slice(5);
+            setPos((prev) => ({ ...prev, cards: { ...prev.cards, [shotId]: { x: px, y: py } } }));
+          } else if (key.startsWith("note:")) {
+            const noteId = key.slice(5);
+            setNotes((prev) => prev.map((item) => (item.id === noteId ? { ...item, x: px, y: py } : item)));
+          } else if (key === "output") {
+            setOutputPos({ x: px, y: py });
+          } else {
+            setInfoOffsets((prev) => ({ ...prev, [key]: { x: px, y: py } }));
           }
         }
       } else if (drag.kind === "infonode") {
@@ -2265,24 +2318,39 @@ export default function ProjectCanvas({
             // 实时更新，用 drag 对象上的最终坐标覆盖后再落盘。
             const finalX = drag.px;
             const finalY = drag.py;
+            const moved2 = finalX != null && finalY != null ? { x: finalX, y: finalY } : null;
             if (key.startsWith("segment:")) {
               const segId = key.slice(8);
               const p = segPos[segId];
-              persistSegments({ ...segPos, [segId]: finalX != null && finalY != null ? { x: finalX, y: finalY } : p });
+              persistSegments({ ...segPos, [segId]: moved2 ?? p });
             } else if (key.startsWith("asset:")) {
               const assetId = key.slice(6);
               const p = pos.loose[assetId];
-              persistLoose({
-                ...pos.loose,
-                [assetId]: finalX != null && finalY != null ? { x: finalX, y: finalY } : (p ?? { x: 0, y: 0 }),
-              });
+              persistLoose({ ...pos.loose, [assetId]: moved2 ?? (p ?? { x: 0, y: 0 }) });
             } else if (key.startsWith("placeholder:")) {
               const phId = key.slice(12);
               persistPlaceholders(
-                placeholders.map((item) =>
-                  item.id === phId && finalX != null && finalY != null ? { ...item, x: finalX, y: finalY } : item,
-                ),
+                placeholders.map((item) => (item.id === phId && moved2 ? { ...item, ...moved2 } : item)),
               );
+            } else if (key.startsWith("shot:")) {
+              const shotId = key.slice(5);
+              const p = pos.cards[shotId];
+              if (moved2) persistCards({ ...pos.cards, [shotId]: moved2 });
+              else if (p) persistCards(pos.cards);
+            } else if (key.startsWith("note:")) {
+              const noteId = key.slice(5);
+              persistNotes(
+                notes.map((item) => (item.id === noteId && moved2 ? { ...item, ...moved2 } : item)),
+              );
+            } else if (key === "output") {
+              if (moved2) saveOutputPos(moved2);
+            } else if (moved2) {
+              // 资料节点/空白资料占位：位置覆盖层持久化。
+              setInfoOffsets((prev) => {
+                const next = { ...prev, [key]: moved2 };
+                persistInfoOffsets(next);
+                return next;
+              });
             }
           }
         }
@@ -2383,7 +2451,7 @@ export default function ProjectCanvas({
               return cx >= rx1 && cx <= rx2 && cy >= ry1 && cy <= ry2;
             };
             layout.cards.forEach((card) => {
-              const size = shotCardSize(card.shot);
+              const size = sizeOfNode(card.key) ?? shotCardSize(card.shot);
               if (inBox(pos.cards[card.shot.id], size.w, size.h)) list.push(card.key);
             });
             layout.looses.forEach((loose) => {
@@ -2392,10 +2460,12 @@ export default function ProjectCanvas({
             // 资料节点（含组/剧本）、空白资料占位、片段、素材占位、成片：
             // 框选与点选同一套选中态（边缘点亮），删除也走同一套 Delete。
             infoNodes.forEach((node) => {
-              if (inBox(infoNodePos(node.key), node.w, node.h)) list.push(node.key);
+              const size = sizeOfNode(node.key) ?? { w: node.w, h: node.h };
+              if (inBox(infoNodePos(node.key), size.w, size.h)) list.push(node.key);
             });
             entityPhs.forEach((ph) => {
-              if (inBox(infoNodePos(`eph:${ph.id}`), INFO_W, INFO_H)) list.push(`eph:${ph.id}`);
+              const size = sizeOfNode(`eph:${ph.id}`) ?? { w: INFO_W, h: INFO_H };
+              if (inBox(infoNodePos(`eph:${ph.id}`), size.w, size.h)) list.push(`eph:${ph.id}`);
             });
             segments.forEach((segment) => {
               const size = sizeOfNode(`segment:${segment.id}`);
@@ -2405,7 +2475,16 @@ export default function ProjectCanvas({
               const size = sizeOfNode(`placeholder:${ph.id}`);
               if (inBox({ x: ph.x, y: ph.y }, size?.w ?? LOOSE_W, size?.h ?? MISSING_H)) list.push(`placeholder:${ph.id}`);
             });
-            if (outputBox && inBox({ x: outputBox.x, y: outputBox.y }, outputBox.w, outputBox.h)) list.push("output");
+            if (outputBox) {
+              const size = sizeOfNode("output") ?? { w: outputBox.w, h: outputBox.h };
+              if (inBox({ x: outputBox.x, y: outputBox.y }, size.w, size.h)) list.push("output");
+            }
+            notes.forEach((note) => {
+              const size = sizeOfNode(`note:${note.id}`);
+              const noteElW = size?.w ?? 172;
+              const noteElH = size?.h ?? 96;
+              if (inBox({ x: note.x, y: note.y }, noteElW, noteElH)) list.push(`note:${note.id}`);
+            });
           }
         }
         setSelection(list);
@@ -2433,6 +2512,7 @@ export default function ProjectCanvas({
         .querySelectorAll<HTMLElement>(".pc-port-active")
         .forEach((el) => el.classList.remove("pc-port-active"));
       vpRef.current?.querySelectorAll<HTMLElement>(".pc-dragging").forEach((el) => el.classList.remove("pc-dragging"));
+      vpRef.current?.querySelectorAll<HTMLElement>(".pc-resizing").forEach((el) => el.classList.remove("pc-resizing"));
       if (drag.moved) {
         suppressClickRef.current = true;
         window.setTimeout(() => {
@@ -2452,77 +2532,42 @@ export default function ProjectCanvas({
   // ── 节点操作 ──
   // 节点接口圆点（ComfyUI 式）：输入口列在左缘（片段五口按列分布）、
   // 输出口在右缘实心类型色，hover 浮现接口名称；按下即拖出连线，从
-  // 输入口反向拖也允许。
-  // 节点接口（ComfyUI 行位，与片段/成片的端口行同款）：卡片顶部一行，
-  // 输入口靠左（口点+名称）、输出口靠右（名称+口点），口点嵌在卡片两缘；
-  // 端口坐标由实测驱动连线锚点。
-  const portEls = (key: string) => {
+  // 节点接口（ComfyUI K 采样器同款行位）：实心类型色圆点落在卡内、
+  // 紧贴左右两缘；输入列自顶部起贴左缘，输出贴右缘且与首行输入同一
+  // 水平行；接口名称常显。端口坐标由实测驱动连线锚点。
+  const portBar = (key: string) => {
     const { ins, out } = portsOf(key);
     if (ins.length === 0 && !out) return null;
+    const rows = Math.max(ins.length, out ? 1 : 0);
     return (
       <div className="pc-port-bar">
-        {ins.length > 0 && (
-          <div className="pc-port-col">
-            {ins.map((port) => (
-              <div key={port.id} className="pc-port-row">
+        {Array.from({ length: rows }, (_, i) => (
+          <div key={i} className="pc-port-row">
+            {ins[i] ? (
+              <>
                 <span
                   className="pc-port pc-port-in"
                   data-port="in"
-                  data-port-id={port.id}
-                  style={{ borderColor: WIRE_TYPE_COLORS[port.accepts[0] ?? ""] ?? undefined }}
+                  data-port-id={ins[i].id}
+                  style={{ background: WIRE_TYPE_COLORS[ins[i].accepts[0] ?? ""] ?? undefined }}
                 />
-                <span className="pc-port-name">{port.label}</span>
-              </div>
-            ))}
-          </div>
-        )}
-        {out && (
-          <div className="pc-port-col">
-            <div className="pc-port-row pc-port-row-out">
-              <span className="pc-port-name">{out.label}</span>
-              <span
-                className="pc-port pc-port-out"
-                data-port="out"
-                style={{ background: WIRE_TYPE_COLORS[out.type] ?? "#94a3b8" }}
-              />
-            </div>
-          </div>
-        )}
-      </div>
-    );
-  };
-
-  // 工作流节点（片段/成片）的端口行：口点嵌在行首/行尾，接口名称常显
-  // （ComfyUI 槽位文字的对应物），端口坐标由实测驱动连线锚点。
-  const portRows = (key: string, dir: "in" | "out") => {
-    const { ins, out } = portsOf(key);
-  if (dir === "in") {
-    return (
-      <>
-        {ins.map((port) => (
-          <div key={port.id} className="pc-port-row">
-            <span
-              className="pc-port pc-port-in"
-              data-port="in"
-              data-port-id={port.id}
-              style={{ borderColor: WIRE_TYPE_COLORS[port.accepts[0] ?? ""] ?? undefined }}
-            />
-            <span className="pc-port-name">{port.label}</span>
+                <span className="pc-port-name">{ins[i].label}</span>
+              </>
+            ) : null}
+            {i === 0 && out ? (
+              <>
+                <span className="pc-port-name pc-port-name-out">{out.label}</span>
+                <span
+                  className="pc-port pc-port-out"
+                  data-port="out"
+                  style={{ background: WIRE_TYPE_COLORS[out.type] ?? "#94a3b8" }}
+                />
+              </>
+            ) : null}
           </div>
         ))}
-      </>
-    );
-  }
-    return out ? (
-      <div className="pc-port-row pc-port-row-out">
-        <span className="pc-port-name">{out.label}</span>
-        <span
-          className="pc-port pc-port-out"
-          data-port="out"
-          style={{ background: WIRE_TYPE_COLORS[out.type] ?? "#94a3b8" }}
-        />
       </div>
-    ) : null;
+    );
   };
 
   const shotNoOf = useCallback(
@@ -3538,13 +3583,20 @@ export default function ProjectCanvas({
             const p = pos.cards[card.shot.id] ?? { x: 0, y: 0 };
             const selected = selKeys.includes(card.key);
             const shot = card.shot;
+            const cardSize = sizeOfNode(card.key);
             return (
               <div
                 key={card.key}
                 data-key={card.key}
                 data-frame={card.sceneId}
                 className={`pc-node pc-shotcard${selected ? " pc-selected" : ""}`}
-                style={{ left: p.x, top: p.y, width: card.w, ["--node-accent" as string]: NODE_ACCENTS.shot } as React.CSSProperties}
+                style={{
+                  left: p.x, top: p.y,
+                  width: cardSize?.w ?? card.w,
+                  // 覆盖高度作 minHeight：内容不足时留白，内容超出时撑开。
+                  minHeight: cardSize && cardSize.h !== card.h ? cardSize.h : undefined,
+                  ["--node-accent" as string]: NODE_ACCENTS.shot,
+                } as React.CSSProperties}
                 onDoubleClick={(event) => {
                   // 双击镜头卡 → 挂靠素材挑选面板（镜头没有详情窗，挑选面板
                   // 就是它的挂靠窗口）。选择框只认双击：单击与拖卡松手都不弹；
@@ -3561,7 +3613,7 @@ export default function ProjectCanvas({
                   <b className="pc-shot-desc">{shot.description || t("project.shot.untitled")}</b>
                   {shot.dialogue && <i className="pc-shot-dialogue">{shot.dialogue}</i>}
                 </div>
-                {portEls(card.key)}
+                {portBar(card.key)}
                   {shot.assets.length > 0 ? (
                     <div className="pc-shot-grid">
                       {card.assets.map(({ asset, w, h }) => {
@@ -3639,6 +3691,7 @@ export default function ProjectCanvas({
                     {Icons.delete}
                   </button>
                 </span>
+                {resizeHandle}
               </div>
             );
           })}
@@ -3669,7 +3722,7 @@ export default function ProjectCanvas({
                   <span className="pc-node-kind">{t(assetKindBadgeKey(asset.kind))}</span>
                   <b className="pc-node-title">{asset.name || asset.file_path}</b>
                 </div>
-                {portEls(loose.key)}
+                {portBar(loose.key)}
                 {asset.missing ? (
                     <div className="pc-miss-card" style={{ height: nodeH }}>
                       {Icons.image}
@@ -3762,12 +3815,18 @@ export default function ProjectCanvas({
           )}
           {infoNodes.map((node) => {
             const p = infoNodePos(node.key);
+            const nodeSize = sizeOfNode(node.key);
             return (
               <div
                 key={node.key}
                 data-key={node.key}
                 className={`pc-node pc-info${pulseKeys.includes(node.key) ? " pc-spawn" : ""}${selKeys.includes(node.key) ? " pc-selected" : ""}`}
-                style={{ left: p.x, top: p.y, width: node.w, ["--node-accent" as string]: NODE_ACCENTS[node.kind] ?? "#94a3b8" } as React.CSSProperties}
+                style={{
+                  left: p.x, top: p.y,
+                  width: nodeSize?.w ?? node.w,
+                  minHeight: nodeSize && nodeSize.h !== node.h ? nodeSize.h : undefined,
+                  ["--node-accent" as string]: NODE_ACCENTS[node.kind] ?? "#94a3b8",
+                } as React.CSSProperties}
                 onDoubleClick={(event) => {
                   // 双击资料节点 → 详情窗口（与工具条「查看」同语义）。
                   event.stopPropagation();
@@ -3788,7 +3847,7 @@ export default function ProjectCanvas({
                   </span>
                   <b className="pc-node-title">{node.name}</b>
                 </div>
-                {portEls(node.key)}
+                {portBar(node.key)}
                 <div className="pc-info-body">
                   {node.key.startsWith("grp:") ? (
                     // 组节点：照片堆放——首位成员的大图在上，其余成员的图
@@ -3857,6 +3916,7 @@ export default function ProjectCanvas({
                     {Icons.delete}
                   </button>
                 </span>
+                {resizeHandle}
               </div>
             );
           })}
@@ -3866,6 +3926,7 @@ export default function ProjectCanvas({
           {entityPhs.map((ph) => {
             const key = `eph:${ph.id}`;
             const p = infoNodePos(key);
+            const phSize = sizeOfNode(key);
             const label = t(
               ph.kind === "character"
                 ? "project.canvas.typeCharacter"
@@ -3878,7 +3939,12 @@ export default function ProjectCanvas({
                 key={key}
                 data-key={key}
                 className={`pc-node pc-info pc-eph${selKeys.includes(key) ? " pc-selected" : ""}`}
-                style={{ left: p.x, top: p.y, width: INFO_W, ["--node-accent" as string]: NODE_ACCENTS[ph.kind] ?? "#94a3b8" } as React.CSSProperties}
+                style={{
+                  left: p.x, top: p.y,
+                  width: phSize?.w ?? INFO_W,
+                  minHeight: phSize?.h,
+                  ["--node-accent" as string]: NODE_ACCENTS[ph.kind] ?? "#94a3b8",
+                } as React.CSSProperties}
                 onDoubleClick={(event) => {
                   event.stopPropagation();
                   setDetailFor({ kind: "entityPh", id: ph.id });
@@ -3905,6 +3971,7 @@ export default function ProjectCanvas({
                     {Icons.delete}
                   </button>
                 </span>
+                {resizeHandle}
               </div>
             );
           })}
@@ -3937,7 +4004,7 @@ export default function ProjectCanvas({
                   <span className="pc-node-kind">{t("project.canvas.segName")}</span>
                   <b className="pc-node-title">{segment.note || `#${index + 1}`}</b>
                 </div>
-                <div className="pc-seg-ports">{portRows(key, "in")}</div>
+                <div className="pc-seg-ports">{portBar(key)}</div>
                 {segment.asset ? (
                     <button
                       type="button"
@@ -3958,7 +4025,6 @@ export default function ProjectCanvas({
                       {t("project.canvas.segEmpty")}
                     </div>
                   )}
-                <div className="pc-seg-out">{portRows(key, "out")}</div>
                 <span className="pc-node-tools">
                   <button
                     type="button"
@@ -4000,7 +4066,12 @@ export default function ProjectCanvas({
             <div
               data-key="output"
               className={`pc-node pc-outnode${selKeys.includes("output") ? " pc-selected" : ""}`}
-              style={{ left: outputBox.x, top: outputBox.y, width: outputBox.w, ["--node-accent" as string]: NODE_ACCENTS.output } as React.CSSProperties}
+              style={{
+                left: outputBox.x, top: outputBox.y,
+                width: sizeOfNode("output")?.w ?? outputBox.w,
+                minHeight: sizeOfNode("output")?.h,
+                ["--node-accent" as string]: NODE_ACCENTS.output,
+              } as React.CSSProperties}
             >
               <div className="pc-node-head">
                 <span className="pc-node-kind">{t("project.canvas.outputNode")}</span>
@@ -4013,7 +4084,7 @@ export default function ProjectCanvas({
                     : (outputSourceLabel ?? t("project.canvas.outputEmpty"))}
                 </small>
               </div>
-              <div className="pc-seg-ports">{portRows("output", "in")}</div>
+              <div className="pc-seg-ports">{portBar("output")}</div>
               <span className="pc-node-tools">
                 <button
                   type="button"
@@ -4026,6 +4097,7 @@ export default function ProjectCanvas({
                   {Icons.delete}
                 </button>
               </span>
+              {resizeHandle}
             </div>
           )}
 
@@ -4035,7 +4107,11 @@ export default function ProjectCanvas({
               key={note.id}
               data-note={note.id}
               className={`pc-note${selKeys.includes(`note:${note.id}`) ? " pc-selected" : ""}`}
-              style={{ left: note.x, top: note.y }}
+              style={{
+                left: note.x, top: note.y,
+                width: sizeOfNode(`note:${note.id}`)?.w,
+                height: sizeOfNode(`note:${note.id}`)?.h,
+              }}
             >
               {editingNoteId === note.id ? (
                 <textarea
@@ -4093,6 +4169,7 @@ export default function ProjectCanvas({
                   {Icons.close}
                 </button>
               </span>
+              {resizeHandle}
             </div>
           ))}
 
