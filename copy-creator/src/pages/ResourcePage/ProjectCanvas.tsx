@@ -976,10 +976,10 @@ export default function ProjectCanvas({
     })();
   }, [episodeId, overview, addSegment, linkNode, templateFlagKey]);
 
-  // 剧本节点定位（视口居中到资料框剧本纸片）。
+  // 剧本节点定位（视口居中到剧本纸片；纸片可被拖离资料框，用覆盖位置）。
   const locateScript = useCallback(() => {
     const el = vpRef.current;
-    const p = infoPos.map.script;
+    const p = infoNodePos("script");
     if (!el || !p) return;
     const next = {
       x: el.clientWidth / 2 - (p.x + SCRIPT_W / 2) * view.scale,
@@ -988,7 +988,7 @@ export default function ProjectCanvas({
     };
     setView(next);
     saveView(next);
-  }, [infoPos, view.scale, setView, saveView]);
+  }, [infoNodePos, view.scale, setView, saveView]);
 
   // 挂剧本：从资源库选文件设为本集剧本。剧本是全集共享输入，挂接成功
   // 即自动接入所有已有片段的提示词口（linkNode 幂等，重复挂接不会写
@@ -1024,12 +1024,23 @@ export default function ProjectCanvas({
   const fitAll = useCallback(() => {
     const el = vpRef.current;
     if (!el) return;
-    const infoBottom = infoPos.frame.y + FRAME_PAD_TOP + Math.ceil(infoNodes.length / 3) * (INFO_H + CARD_GAP);
-    // 片段列与成片节点挂在主世界右侧，也要进适配包围盒。
-    const segBottom = 110 + segments.length * 260 + 60;
+    // 包围盒 = 基础布局 ∪ 拖动过的资料节点实际位置 ∪ 片段实际位置 ∪
+    // 成片节点：自由拖动/改尺寸之后，「适配全部」仍覆盖所有内容。
+    let worldW = layout.worldW;
+    let worldH = layout.worldH;
+    infoNodes.forEach((node) => {
+      const p = infoNodePos(node.key);
+      worldW = Math.max(worldW, p.x + node.w + 40);
+      worldH = Math.max(worldH, p.y + node.h + 40);
+    });
+    Object.values(segPos).forEach((p) => {
+      worldW = Math.max(worldW, p.x + SEG_W + 40);
+      worldH = Math.max(worldH, p.y + SEG_H + 200);
+    });
     const outputRight = outputBox ? outputBox.x + outputBox.w + 60 : 0;
-    const worldW = Math.max(layout.worldW, infoPos.frame.x + FRAME_MIN_W + 60, outputRight);
-    const worldH = Math.max(layout.worldH, infoBottom + 60, segBottom);
+    const infoGridBottom = infoPos.frame.y + FRAME_PAD_TOP + Math.ceil(infoNodes.length / 3) * (INFO_H + CARD_GAP);
+    worldW = Math.max(worldW, infoPos.frame.x + FRAME_MIN_W + 60, outputRight);
+    worldH = Math.max(worldH, infoGridBottom + 60);
     const scale = Math.min(el.clientWidth / worldW, el.clientHeight / worldH, 1);
     const next = {
       x: Math.max(12, (el.clientWidth - worldW * scale) / 2),
@@ -1038,7 +1049,7 @@ export default function ProjectCanvas({
     };
     setView(next);
     saveView(next);
-  }, [layout, infoPos, infoNodes, saveView, outputBox, segments.length]);
+  }, [layout, infoPos, infoNodes, infoNodePos, segPos, saveView, outputBox]);
 
   const initializedRef = useRef("");
   useEffect(() => {
@@ -2201,12 +2212,36 @@ export default function ProjectCanvas({
     h: ((vpSize?.h ?? 0) || 900) / view.scale + WIRES_VIEWPORT_PAD * 2,
   };
 
+  // 尺寸手柄（三处复用）：双击不冒泡到节点，避免连点手柄误开详情窗口。
+  const resizeHandle = (
+    <span
+      className="pc-resize"
+      aria-hidden="true"
+      onDoubleClick={(event) => event.stopPropagation()}
+    />
+  );
+
   // ── 节点详情窗口：按 detailFor 组装条目（预览 + 信息 + 动作）──
   const closeDetail = () => {
     setDetailFor(null);
     setPickerFor(null);
     setDetailError("");
   };
+  // 窗口惯例：Esc 关闭最上层（二级选择器开着时先关它）。
+  useEffect(() => {
+    if (!detailFor) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key !== "Escape") return;
+      if (pickerFor) {
+        setPickerFor(null);
+        return;
+      }
+      setDetailFor(null);
+      setDetailError("");
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [detailFor, pickerFor]);
   const detailDialog = (() => {
     if (!detailFor || !overview) return null;
     const fileHint = (relative: string) => joinLibraryPath(libraryRoot, relative);
@@ -2919,7 +2954,7 @@ export default function ProjectCanvas({
                     {Icons.close}
                   </button>
                 </span>
-                <span className="pc-resize" aria-hidden="true" />
+                {resizeHandle}
                 {portEls(loose.key)}
               </div>
             );
@@ -3055,7 +3090,8 @@ export default function ProjectCanvas({
                 className="pc-node pc-segment"
                 style={{
                   left: p.x, top: p.y, width: segSize?.w ?? SEG_W,
-                  height: segSize && segSize.h !== SEG_H ? segSize.h : undefined,
+                  // 存量高度语义是节点总高：用 minHeight 兜底，缩小不裁切内容。
+                  minHeight: segSize && segSize.h !== SEG_H ? segSize.h : undefined,
                   ["--node-accent" as string]: NODE_ACCENTS.segment,
                 } as React.CSSProperties}
                 onDoubleClick={(event) => {
@@ -3126,7 +3162,7 @@ export default function ProjectCanvas({
                     {Icons.delete}
                   </button>
                 </span>
-                <span className="pc-resize" aria-hidden="true" />
+                {resizeHandle}
               </div>
             );
           })}
@@ -3248,7 +3284,7 @@ export default function ProjectCanvas({
                     {Icons.close}
                   </button>
                 </span>
-                <span className="pc-resize" aria-hidden="true" />
+                {resizeHandle}
               </div>
             );
           })}
