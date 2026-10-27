@@ -2,6 +2,7 @@ import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } fr
 import { useTranslation } from "react-i18next";
 import { invoke } from "@tauri-apps/api/core";
 import { useShallow } from "zustand/react/shallow";
+import { usePerEpisodeStorage } from "./usePerEpisodeStorage";
 import {
   useProjectStore,
   type ProjectAsset,
@@ -104,6 +105,43 @@ interface CanvasPlaceholder {
   x: number;
   y: number;
 }
+
+type EntityPhKind = "character" | "location" | "prop";
+/** 空白资料占位节点（角色/场景/道具未加载实体前的画布占位）。 */
+interface EntityPh { id: string; kind: EntityPhKind; x: number; y: number }
+
+/** 剧本纸片（多实例）：空纸片双击挂文件；本集无剧本时首个挂接转正为主剧本。 */
+interface ScriptPh { id: string; path: string }
+
+/** 资料组节点：一个节点装多个同类实体，一条线接入片段。 */
+interface InfoGroup {
+  id: string;
+  kind: EntityPhKind;
+  members: string[];
+}
+
+/** 占位节点/剧本纸片连到片段口的暂存线（画布层，localStorage 按集）。 */
+interface PendingLink { fromKey: string; toSegmentId: string; toPort: string }
+
+/** 节点分组（Ctrl+G，ComfyUI Group 的对应物）。 */
+interface NodeGroup { id: string; label: string; members: string[] }
+
+// usePerEpisodeStorage 的 fallback/parse 会进 effect 依赖，必须是模块级
+// 常量/纯函数（引用稳定），故统一定义在此。
+const EMPTY_NOTES: CanvasNote[] = [];
+const EMPTY_SCRIPT_PHS: ScriptPh[] = [];
+const EMPTY_PLACEHOLDERS: CanvasPlaceholder[] = [];
+const EMPTY_ENTITY_PHS: EntityPh[] = [];
+const EMPTY_INFO_GROUPS: InfoGroup[] = [];
+const EMPTY_SIZES: Record<string, { w: number; h: number }> = {};
+const EMPTY_INFO_OFFSETS: Record<string, Pos> = {};
+const EMPTY_PENDING_LINKS: PendingLink[] = [];
+const EMPTY_NODE_GROUPS: NodeGroup[] = [];
+// 剧本纸片做形状防御：历史脏数据（非数组/缺字段）不进画布，直接回退空。
+const parseScriptPhs = (raw: string): ScriptPh[] => {
+  const list = JSON.parse(raw) as ScriptPh[];
+  return Array.isArray(list) ? list.filter((item) => item && typeof item.id === "string") : [];
+};
 interface CanvasFrame {
   id: string; // sceneId | "loose" | "info"
   scene: ProjectScene | null;
@@ -476,52 +514,11 @@ export default function ProjectCanvas({
   const castCharacters = useMemo(() => overview?.characters ?? [], [overview]);
 
   // ── 资料框位置（localStorage 按集） ──
-  const [infoFramePos, setInfoFramePos] = useState<Pos | null>(null);
-  useEffect(() => {
-    // episodeId 为空串是 selectEpisode 刷新途中的瞬态（概览先置空），
-    // 不能当作切集去清空按集记忆，否则每次刷新尺寸/位置/便签全部跳回默认。
-    if (!episodeId) return;
-    try {
-      const raw = window.localStorage.getItem(`project_canvas_info_${episodeId}`);
-      setInfoFramePos(raw ? (JSON.parse(raw) as Pos) : null);
-    } catch {
-      setInfoFramePos(null);
-    }
-  }, [episodeId]);
-  const saveInfoFramePos = useCallback(
-    (next: Pos) => {
-      setInfoFramePos(next);
-      try {
-        window.localStorage.setItem(`project_canvas_info_${episodeId}`, JSON.stringify(next));
-      } catch {
-        // 存储不可用：仅不记忆。
-      }
-    },
-    [episodeId],
-  );
+  // ── 资料框位置：按集记 localStorage（拖标签牌挪动整个资料框）──
+  const [infoFramePos, setInfoFramePos, saveInfoFramePos] = usePerEpisodeStorage<Pos | null>(episodeId, "info", null);
 
   // ── 成片输出节点位置（localStorage 按集；默认挂世界右侧居中） ──
-  const [outputPos, setOutputPos] = useState<Pos | null>(null);
-  useEffect(() => {
-    if (!episodeId) return; // 刷新瞬态（见资料框位置处的说明）。
-    try {
-      const raw = window.localStorage.getItem(`project_canvas_output_${episodeId}`);
-      setOutputPos(raw ? (JSON.parse(raw) as Pos) : null);
-    } catch {
-      setOutputPos(null);
-    }
-  }, [episodeId]);
-  const saveOutputPos = useCallback(
-    (next: Pos) => {
-      setOutputPos(next);
-      try {
-        window.localStorage.setItem(`project_canvas_output_${episodeId}`, JSON.stringify(next));
-      } catch {
-        // 存储不可用：仅不记忆。
-      }
-    },
-    [episodeId],
-  );
+  const [outputPos, setOutputPos, saveOutputPos] = usePerEpisodeStorage<Pos | null>(episodeId, "output", null);
 
   // 选中状态（selRef 供鼠标事件同步读取，setSelKeys 驱动渲染）；位置
   // 批量写入 / 撤销栈等下层机制都依赖它，故提前声明。
@@ -533,30 +530,13 @@ export default function ProjectCanvas({
   }, []);
 
   // ── 便签节点（ComfyUI Note 的对应物）：文本与位置按集记 localStorage ──
-  const [notes, setNotes] = useState<CanvasNote[]>([]);
+  const [notes, setNotes, persistNotes] = usePerEpisodeStorage<CanvasNote[]>(episodeId, "notes", EMPTY_NOTES);
   const [editingNoteId, setEditingNoteId] = useState<string | null>(null);
   const [noteDraft, setNoteDraft] = useState("");
+  // 切集（含刷新瞬态）退出便签编辑态：编辑中的草稿属于旧集。
   useEffect(() => {
-    if (!episodeId) return; // 刷新瞬态（见资料框位置处的说明）。
-    try {
-      const raw = window.localStorage.getItem(`project_canvas_notes_${episodeId}`);
-      setNotes(raw ? (JSON.parse(raw) as CanvasNote[]) : []);
-    } catch {
-      setNotes([]);
-    }
     setEditingNoteId(null);
   }, [episodeId]);
-  const persistNotes = useCallback(
-    (next: CanvasNote[]) => {
-      setNotes(next);
-      try {
-        window.localStorage.setItem(`project_canvas_notes_${episodeId}`, JSON.stringify(next));
-      } catch {
-        // 存储不可用：仅不记忆。
-      }
-    },
-    [episodeId],
-  );
   const addNote = useCallback(
     (x: number, y: number) => {
       const note: CanvasNote = {
@@ -602,27 +582,8 @@ export default function ProjectCanvas({
   // 连线走画布暂存线，不入库。
   const scriptPhsKey = `project_canvas_scriptphs_${episodeId}`;
   const scriptNodeKey = `project_canvas_scriptnode_${episodeId}`;
-  const [scriptPhs, setScriptPhs] = useState<{ id: string; path: string }[]>([]);
-  useEffect(() => {
-    if (!episodeId) return; // 刷新瞬态。
-    try {
-      const raw = window.localStorage.getItem(scriptPhsKey);
-      const list = raw ? (JSON.parse(raw) as { id: string; path: string }[]) : [];
-      setScriptPhs(Array.isArray(list) ? list.filter((item) => item && typeof item.id === "string") : []);
-    } catch {
-      setScriptPhs([]);
-    }
-  }, [scriptPhsKey, episodeId]);
-  const persistScriptPhs = useCallback(
-    (next: { id: string; path: string }[]) => {
-      setScriptPhs(next);
-      try {
-        window.localStorage.setItem(scriptPhsKey, JSON.stringify(next));
-      } catch {
-        // 存储不可用：仅不记忆。
-      }
-    },
-    [scriptPhsKey],
+  const [scriptPhs, , persistScriptPhs] = usePerEpisodeStorage<ScriptPh[]>(
+    episodeId, "scriptphs", EMPTY_SCRIPT_PHS, parseScriptPhs,
   );
   const addScriptPh = useCallback(() => {
     persistScriptPhs([
@@ -662,26 +623,8 @@ export default function ProjectCanvas({
   }, [episodeId, overview, scriptNodeKey, scriptPhsKey, persistScriptPhs]);
 
   // ── 占位素材节点（双击填充后才入库为集级散件）：按集存 localStorage ──
-  const [placeholders, setPlaceholders] = useState<CanvasPlaceholder[]>([]);
-  useEffect(() => {
-    if (!episodeId) return; // 刷新瞬态（见资料框位置处的说明）。
-    try {
-      const raw = window.localStorage.getItem(`project_canvas_placeholders_${episodeId}`);
-      setPlaceholders(raw ? (JSON.parse(raw) as CanvasPlaceholder[]) : []);
-    } catch {
-      setPlaceholders([]);
-    }
-  }, [episodeId]);
-  const persistPlaceholders = useCallback(
-    (next: CanvasPlaceholder[]) => {
-      setPlaceholders(next);
-      try {
-        window.localStorage.setItem(`project_canvas_placeholders_${episodeId}`, JSON.stringify(next));
-      } catch {
-        // 存储不可用：仅不记忆。
-      }
-    },
-    [episodeId],
+  const [placeholders, setPlaceholders, persistPlaceholders] = usePerEpisodeStorage<CanvasPlaceholder[]>(
+    episodeId, "placeholders", EMPTY_PLACEHOLDERS,
   );
   const addPlaceholder = useCallback(
     (x: number, y: number) => {
@@ -698,29 +641,8 @@ export default function ProjectCanvas({
   // ── 空白资料占位节点（菜单选 角色/场景/道具 即创建，创建时绝不弹
   // 挑选面板；双击节点从详情窗加载实体，加载后原位变成实体节点）：
   // 按集存 localStorage ──
-  type EntityPhKind = "character" | "location" | "prop";
-  interface EntityPh { id: string; kind: EntityPhKind; x: number; y: number }
-  const [entityPhs, setEntityPhs] = useState<EntityPh[]>([]);
-  const entityPhKey = `project_canvas_entityph_${episodeId}`;
-  useEffect(() => {
-    if (!episodeId) return; // 刷新瞬态（见资料框位置处的说明）。
-    try {
-      const raw = window.localStorage.getItem(entityPhKey);
-      setEntityPhs(raw ? (JSON.parse(raw) as EntityPh[]) : []);
-    } catch {
-      setEntityPhs([]);
-    }
-  }, [entityPhKey, episodeId]);
-  const persistEntityPhs = useCallback(
-    (next: EntityPh[]) => {
-      setEntityPhs(next);
-      try {
-        window.localStorage.setItem(entityPhKey, JSON.stringify(next));
-      } catch {
-        // 存储不可用：仅不记忆。
-      }
-    },
-    [entityPhKey],
+  const [entityPhs, , persistEntityPhs] = usePerEpisodeStorage<EntityPh[]>(
+    episodeId, "entityph", EMPTY_ENTITY_PHS,
   );
   const addEntityPh = useCallback(
     (kind: EntityPhKind, x: number, y: number) => {
@@ -737,32 +659,8 @@ export default function ProjectCanvas({
   // ── 资料组节点（一个节点装多个同类实体，一条线接入片段——线的含义
   // = 片段要用组内全部成员）：按集存 localStorage。成员在组间互斥；
   // 未被组认领的集关联实体仍各自渲染为默认单实体节点，旧数据零迁移。 ──
-  interface InfoGroup {
-    id: string;
-    kind: EntityPhKind;
-    members: string[];
-  }
-  const [infoGroups, setInfoGroups] = useState<InfoGroup[]>([]);
-  const infoGroupsKey = `project_canvas_infogroups_${episodeId}`;
-  useEffect(() => {
-    if (!episodeId) return; // 刷新瞬态（见资料框位置处的说明）。
-    try {
-      const raw = window.localStorage.getItem(infoGroupsKey);
-      setInfoGroups(raw ? (JSON.parse(raw) as InfoGroup[]) : []);
-    } catch {
-      setInfoGroups([]);
-    }
-  }, [infoGroupsKey, episodeId]);
-  const persistInfoGroups = useCallback(
-    (next: InfoGroup[]) => {
-      setInfoGroups(next);
-      try {
-        window.localStorage.setItem(infoGroupsKey, JSON.stringify(next));
-      } catch {
-        // 存储不可用：仅不记忆。
-      }
-    },
-    [infoGroupsKey],
+  const [infoGroups, , persistInfoGroups] = usePerEpisodeStorage<InfoGroup[]>(
+    episodeId, "infogroups", EMPTY_INFO_GROUPS,
   );
   // 组成员自愈：实体已不存在（库里被删）时从组里剔除，避免僵尸认领
   // 挡住后续同名 id 的实体入集。概览未加载（实体列表为空的瞬态）时跳过。
@@ -912,27 +810,8 @@ export default function ProjectCanvas({
 
   // ── 节点尺寸（ComfyUI 式右下角手柄拖拽）：按集存 localStorage 覆盖层，
   // 只记录改过的节点，渲染时未记录的回默认尺寸；线锚点由节点实测跟随。 ──
-  const [nodeSizes, setNodeSizes] = useState<Record<string, { w: number; h: number }>>({});
-  const sizesKey = `project_canvas_sizes_${episodeId}`;
-  useEffect(() => {
-    if (!episodeId) return; // 刷新瞬态（见资料框位置处的说明）。
-    try {
-      const raw = window.localStorage.getItem(sizesKey);
-      setNodeSizes(raw ? (JSON.parse(raw) as Record<string, { w: number; h: number }>) : {});
-    } catch {
-      setNodeSizes({});
-    }
-  }, [sizesKey, episodeId]);
-  const persistSizes = useCallback(
-    (next: Record<string, { w: number; h: number }>) => {
-      setNodeSizes(next);
-      try {
-        window.localStorage.setItem(sizesKey, JSON.stringify(next));
-      } catch {
-        // 存储不可用：仅不记忆尺寸。
-      }
-    },
-    [sizesKey],
+  const [nodeSizes, setNodeSizes, persistSizes] = usePerEpisodeStorage<Record<string, { w: number; h: number }>>(
+    episodeId, "sizes", EMPTY_SIZES,
   );
   const sizeOfNode = useCallback(
     (key: string): { w: number; h: number } | null => {
@@ -971,27 +850,8 @@ export default function ProjectCanvas({
 
   // ── 资料节点（角色/场景/道具/剧本）自由位置：默认仍在资料框网格，
   // 拖动后按节点绝对位置记忆——框退化为背景分组框，节点不再被钉死。 ──
-  const [infoOffsets, setInfoOffsets] = useState<Record<string, Pos>>({});
-  const infoOffsetsKey = `project_canvas_infonodes_${episodeId}`;
-  useEffect(() => {
-    if (!episodeId) return; // 刷新瞬态（见资料框位置处的说明）。
-    try {
-      const raw = window.localStorage.getItem(infoOffsetsKey);
-      setInfoOffsets(raw ? (JSON.parse(raw) as Record<string, Pos>) : {});
-    } catch {
-      setInfoOffsets({});
-    }
-  }, [infoOffsetsKey, episodeId]);
-  const persistInfoOffsets = useCallback(
-    (next: Record<string, Pos>) => {
-      setInfoOffsets(next);
-      try {
-        window.localStorage.setItem(infoOffsetsKey, JSON.stringify(next));
-      } catch {
-        // 存储不可用：仅不记忆位置。
-      }
-    },
-    [infoOffsetsKey],
+  const [infoOffsets, setInfoOffsets, persistInfoOffsets] = usePerEpisodeStorage<Record<string, Pos>>(
+    episodeId, "infonodes", EMPTY_INFO_OFFSETS,
   );
   const persistCards = useCallback(
     (nextCards: Record<string, Pos>) => {
@@ -1091,7 +951,8 @@ export default function ProjectCanvas({
     if (infos.length) setInfoOffsets((prev) => ({ ...prev, ...Object.fromEntries(infos.map((m) => [m.key, at.get(m.key)!])) }));
     const out = at.get("output");
     if (out) setOutputPos(out);
-  }, []);
+    // hook 返回的 setter 是 useState 稳定引用，列出不引发重建。
+  }, [setInfoOffsets, setNotes, setOutputPos, setPlaceholders]);
   // 批量位置落盘（组拖松手与撤销恢复共用）：各切片合并后走对应持久化。
   const persistPositions = useCallback(
     (members: GroupMember[]) => {
@@ -1115,30 +976,11 @@ export default function ProjectCanvas({
     [pos, segPos, notes, placeholders, infoOffsets, persistCards, persistLoose, persistSegments, persistNotes, persistPlaceholders, persistInfoOffsets, saveOutputPos],
   );
   // ── 占位节点的暂存连线（pendingLinks）──
-  // 空白资料占位/素材占位还没加载实体，连到片段口的线先记在画布层
-  // （localStorage 按集）；占位加载实体/填充素材后转正为 node_link。
-  interface PendingLink { fromKey: string; toSegmentId: string; toPort: string }
-  const [pendingLinks, setPendingLinks] = useState<PendingLink[]>([]);
-  const pendingLinksKey = `project_canvas_pendinglinks_${episodeId}`;
-  useEffect(() => {
-    if (!episodeId) return; // 刷新瞬态（与占位节点同批说明）。
-    try {
-      const raw = window.localStorage.getItem(pendingLinksKey);
-      setPendingLinks(raw ? (JSON.parse(raw) as PendingLink[]) : []);
-    } catch {
-      setPendingLinks([]);
-    }
-  }, [pendingLinksKey, episodeId]);
-  const persistPendingLinks = useCallback(
-    (next: PendingLink[]) => {
-      setPendingLinks(next);
-      try {
-        window.localStorage.setItem(pendingLinksKey, JSON.stringify(next));
-      } catch {
-        // 存储不可用：仅不记忆暂存线。
-      }
-    },
-    [pendingLinksKey],
+  // 空白资料占位/素材占位/剧本纸片还没接入正式连线时，连到片段口的线
+  // 先记在画布层（localStorage 按集）；占位加载实体/填充素材后转正为
+  // node_link；剧本纸片不转正（画布层即最终形态）。
+  const [pendingLinks, , persistPendingLinks] = usePerEpisodeStorage<PendingLink[]>(
+    episodeId, "pendinglinks", EMPTY_PENDING_LINKS,
   );
   const dropPendingLinksOf = useCallback(
     (fromKey: string) => persistPendingLinks(pendingLinks.filter((l) => l.fromKey !== fromKey)),
@@ -1148,28 +990,8 @@ export default function ProjectCanvas({
   // ── 节点分组（Ctrl+G，ComfyUI Group 的对应物）──
   // 选中一个或多个节点打组成框（框自适应成员包围盒）；拖组框标题整组
   // 移动（复用组拖管线）；选中整组再按 Ctrl+G 解组。按集存 localStorage。
-  interface NodeGroup { id: string; label: string; members: string[] }
-  const [nodeGroups, setNodeGroups] = useState<NodeGroup[]>([]);
-  const nodeGroupsKey = `project_canvas_nodegroups_${episodeId}`;
-  useEffect(() => {
-    if (!episodeId) return; // 刷新瞬态。
-    try {
-      const raw = window.localStorage.getItem(nodeGroupsKey);
-      setNodeGroups(raw ? (JSON.parse(raw) as NodeGroup[]) : []);
-    } catch {
-      setNodeGroups([]);
-    }
-  }, [nodeGroupsKey, episodeId]);
-  const persistNodeGroups = useCallback(
-    (next: NodeGroup[]) => {
-      setNodeGroups(next);
-      try {
-        window.localStorage.setItem(nodeGroupsKey, JSON.stringify(next));
-      } catch {
-        // 存储不可用：仅不记忆分组。
-      }
-    },
-    [nodeGroupsKey],
+  const [nodeGroups, , persistNodeGroups] = usePerEpisodeStorage<NodeGroup[]>(
+    episodeId, "nodegroups", EMPTY_NODE_GROUPS,
   );
   // 成员当前包围盒（世界坐标；节点已删除则 null，渲染与包围盒计算时
   // 自动剔除——组员被删后框随之收缩）。
@@ -1275,7 +1097,7 @@ export default function ProjectCanvas({
         undoingRef.current = false;
       }, 0);
     }
-  }, [moveGroupTo, persistPositions, persistSizes, notes, placeholders, entityPhs, scriptPhs, infoOffsets, persistNotes, persistPlaceholders, persistEntityPhs, persistScriptPhs, persistInfoOffsets, persistPendingLinks, pendingLinks, removeSegment, setSelection]);
+  }, [moveGroupTo, persistPositions, persistSizes, notes, placeholders, entityPhs, scriptPhs, infoOffsets, persistNotes, persistPlaceholders, persistEntityPhs, persistScriptPhs, persistInfoOffsets, persistPendingLinks, pendingLinks, removeSegment, setSelection, setNodeSizes]);
   // 复制 / 粘贴（Ctrl+C/V）：画布私有节点可复制（便签/素材占位/空白资料
   // 占位/片段）。镜头卡、素材散件、资料实体节点是库实体的画布投影
   // （一实体一节点），复制语义不成立，不参与。粘贴整组出现在原组右下
@@ -3110,7 +2932,7 @@ export default function ProjectCanvas({
       document.removeEventListener("mousemove", onMove);
       document.removeEventListener("mouseup", onUp);
     };
-  }, [layout, pos, view, scenePos, infoPos, boxOf, portsOf, outPointOf, inPointOf, linkAssets, persistCards, persistLoose, saveCanvasLayout, saveInfoFramePos, saveView, setSelection, saveOutputPos, setEpisodeOutput, episodeId, notes, persistNotes, addNote, addPlaceholder, addEntityPh, persistPlaceholders, persistSegments, linkNode, nodeKeyParts, addSegment, autoConnectNewNode, persistSizes, persistInfoOffsets, infoGroups, infoNodes, infoNodePos, entityPhs, segments, segPos, placeholders, sizeOfNode, outputBox, moveGroupTo, persistPositions, pushUndo, pendingLinks, persistPendingLinks]);
+  }, [layout, pos, view, scenePos, infoPos, boxOf, portsOf, outPointOf, inPointOf, linkAssets, persistCards, persistLoose, saveCanvasLayout, saveInfoFramePos, saveView, setSelection, saveOutputPos, setEpisodeOutput, episodeId, notes, persistNotes, addNote, addPlaceholder, addEntityPh, persistPlaceholders, persistSegments, linkNode, nodeKeyParts, addSegment, autoConnectNewNode, persistSizes, persistInfoOffsets, infoGroups, infoNodes, infoNodePos, entityPhs, segments, segPos, placeholders, sizeOfNode, outputBox, moveGroupTo, persistPositions, pushUndo, pendingLinks, persistPendingLinks, setInfoFramePos, setInfoOffsets, setNodeSizes, setNotes, setOutputPos, setPlaceholders]);
 
   // ── 节点操作 ──
   // 节点接口圆点（ComfyUI 式）：输入口列在左缘（片段五口按列分布）、
