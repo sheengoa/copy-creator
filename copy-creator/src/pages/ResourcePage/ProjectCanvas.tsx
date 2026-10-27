@@ -3268,14 +3268,32 @@ export default function ProjectCanvas({
           setLiftedWire(null);
           if (!newKey) return;
           if (d.pending) {
-            // 片段新源走 autoConnect 正式线（只删旧暂存）；占位新源没有
-            // 库身份，autoConnect 不接线——旧暂存线换新源原样转接。
+            const pend = d.pending;
+            // 占位新源没有库身份：旧暂存线换新源原样转接。实体/片段新源
+            // 按原暂存线的目标口直接落正式线——目标口接受新源类型才连；
+            // 不接受则原暂存线原样保留（摘线换源的预期是松手即接上，选了
+            // 不兼容的节点不该把原有连线拆掉还不接新的）。
             const parts = nodeKeyParts(newKey);
-            const next = [...pendingLinks.filter((l) => l !== d.pending)];
             if (!parts) {
-              next.push({ fromKey: newKey, toSegmentId: d.pending.toSegmentId, toPort: d.pending.toPort });
+              persistPendingLinks([
+                ...pendingLinks.filter((l) => l !== pend),
+                { fromKey: newKey, toSegmentId: pend.toSegmentId, toPort: pend.toPort },
+              ]);
+              return;
             }
-            persistPendingLinks(next);
+            const targetPort = portsOf(`segment:${pend.toSegmentId}`).ins.find(
+              (item) => item.id === pend.toPort,
+            );
+            const outType = portsOf(newKey).out?.type;
+            if (targetPort && outType && targetPort.accepts.includes(outType)) {
+              persistPendingLinks(pendingLinks.filter((l) => l !== pend));
+              void linkNode(
+                episodeId, parts.kind, parts.id,
+                pend.toSegmentId, pend.toPort as ProjectNodeLink["to_port"],
+              );
+            } else {
+              persistPendingLinks(pendingLinks);
+            }
             return;
           }
           const parts = nodeKeyParts(newKey);
@@ -3304,7 +3322,10 @@ export default function ProjectCanvas({
                 assets: [], shots: [], scenes: [],
                 segments: [{ id: segment.id, x: dropPos.x, y: dropPos.y }],
               });
-              autoConnectNewNode(`segment:${segment.id}`, drag.wire);
+              // 摘线流程不走 autoConnect 的「按类型任意搜口」：预期是接回
+              // 被摘的原口，由 finishDetached 按兼容性落线；autoConnect 只
+              // 服务普通拖线到空白的建节点流程。
+              autoConnectNewNode(`segment:${segment.id}`, drag.detached ? null : drag.wire);
               finishDetached(`segment:${segment.id}`);
             } else {
               finishDetached(null);
