@@ -4799,7 +4799,10 @@ export default function ProjectCanvas({
                 } as React.CSSProperties}
                 onDoubleClick={(event) => {
                   // 双击片段节点 → 详情窗口：角色区（当前角色/全部角色切换）
-                  // + 底部视频挂接区（上传 / 从库选择）。
+                  // + 底部视频挂接区（上传 / 从库选择）。缩略图上的双击不抢
+                  // （缩略图双击由素材查看器接管，与镜头卡缩略图同节奏）。
+                  const target = event.target instanceof Element ? event.target : null;
+                  if (target?.closest(".pc-seg-thumb")) return;
                   event.stopPropagation();
                   setDetailFor({ kind: "segment", id: segment.id, scopes: { chars: "current", locs: "current", props: "current" } });
                 }}
@@ -4814,7 +4817,13 @@ export default function ProjectCanvas({
                       type="button"
                       className={`pc-seg-thumb${segment.asset.missing ? " is-missing" : ""}`}
                       title={segment.asset.missing ? t("project.asset.fileMissing") : segment.asset.name}
-                      onClick={() => onOpenAsset(segment.asset as ProjectAsset)}
+                      onDoubleClick={(event) => {
+                        // 双击缩略图 → 素材详情（缺失文件走窗内「重新挂靠」）。
+                        // 单击绝不动作：片段卡身大半是缩略图，单击即弹窗会
+                        // 抢掉「点节点=选中/拖动」的预期。
+                        event.stopPropagation();
+                        onOpenAsset(segment.asset as ProjectAsset);
+                      }}
                     >
                       <ResourceVideoPoster
                         path={joinLibraryPath(libraryRoot, segment.asset.file_path)}
