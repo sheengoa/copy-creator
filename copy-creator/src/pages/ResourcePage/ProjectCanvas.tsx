@@ -2612,8 +2612,13 @@ export default function ProjectCanvas({
         const rect = el.getBoundingClientRect();
         const wx = (e.clientX - rect.left - view.x) / view.scale;
         const wy = (e.clientY - rect.top - view.y) / view.scale;
-        const startPoint =
-          drag.fromDir === "in"
+        // 摘线拿着（rewire）时草稿线锚在「留在原地的另一端」——源头输出
+        // 口：线从源头拉到手里，刚拔空的输入口不再有线的视觉残留，才是
+        // 「拆掉电线拿在手里」的观感。
+        const lifted = drag.rewire ? liftedRef.current : null;
+        const startPoint = lifted
+          ? outPointOf(lifted.fromKey)
+          : drag.fromDir === "in"
             ? inPointOf(drag.fromKey, drag.fromPortId)
             : outPointOf(drag.fromKey);
         if (!startPoint) return;
@@ -2678,9 +2683,19 @@ export default function ProjectCanvas({
             ? inPointOf(tKey, targetPort ?? undefined) ?? cursor
             : cursor;
         setWireDraft({
-          d: drag.fromDir === "in" ? wirePathD(cursor, startPoint) : wirePathD(startPoint, endPoint),
+          // 摘线拿着：从源头画到手里（方向与正常连线一致）；普通拖线
+          // 保持原方向（输入口拖=手里→口，输出口拖=口→手里）。
+          d: lifted
+            ? wirePathD(startPoint, cursor)
+            : drag.fromDir === "in"
+              ? wirePathD(cursor, startPoint)
+              : wirePathD(startPoint, endPoint),
           invalid: drag.invalid,
-          color: drag.fromType ? WIRE_TYPE_COLORS[drag.fromType] : undefined,
+          color: lifted
+            ? WIRE_TYPE_COLORS[portsOf(lifted.fromKey).out?.type ?? ""] ?? undefined
+            : drag.fromType
+              ? WIRE_TYPE_COLORS[drag.fromType]
+              : undefined,
         });
       } else if (drag.kind === "card") {
         setPos((prev) => {
