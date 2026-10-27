@@ -2105,8 +2105,22 @@ export default function ProjectCanvas({
   // React 状态——滑动中每帧直写 polyline 的 points，避免整画布逐帧
   // 重渲染（表现为视图跳帧）；显示/隐藏由 pc-cutting 类驱动。
   const cutTrailRef = useRef<SVGPolylineElement | null>(null);
+  const cutTrailUnderRef = useRef<SVGPolylineElement | null>(null);
   const cutPointsRef = useRef<string[]>([]);
   const cutTargetsRef = useRef<{ pts: { x: number; y: number }[]; done: boolean; del: () => void }[] | null>(null);
+  // 统一双击判定（见 onUp）：记录上一次「按下即松手」的落点与时刻。
+  const dblRef = useRef<{ key: string; thumb: string | null; x: number; y: number; t: number } | null>(null);
+  // 首次移动时捕获指针（见 onMove）：拖拽中松手在窗口外，mouseup 仍送达。
+  const capturedRef = useRef(false);
+  // 画布区域一律不弹浏览器右键菜单：Shift+右键是切线手势，滑动滑出画布
+  // （扫到侧栏/顶栏）时弹出的系统菜单会打断手势——表现为闪烁加手势冻结。
+  useEffect(() => {
+    const onCtx = (e: MouseEvent) => {
+      if (e.target instanceof Element && e.target.closest(".pc-root")) e.preventDefault();
+    };
+    document.addEventListener("contextmenu", onCtx);
+    return () => document.removeEventListener("contextmenu", onCtx);
+  }, []);
 
   // 切线候选：所有可切连线（g[data-cut]）的屏幕坐标采样折线 + 删除分发。
   // 隐式聚合线（片段→成片）无 data-cut，不参与切线。
@@ -2161,6 +2175,17 @@ export default function ProjectCanvas({
       // 关闭节点选择框：摘线交给菜单（detached）而未落定时，放回原口。
       if (addMenu?.detached) setLiftedWire(null);
       setAddMenu(null);
+      // 上一场拖拽若有残留（松手事件在窗外丢失等），开新拖拽前先复位：
+      // 冻结的草稿线、拿着的摘线、切线态，避免「松手后线卡住」的残影。
+      setWireDraft(null);
+      setLiftedWire(null);
+      if (dragRef.current) {
+        dragRef.current = null;
+        wireHoverRef.current?.classList.remove("pc-wire-target");
+        wireHoverRef.current = null;
+        vpRef.current?.classList.remove("pc-cutting");
+        cutTargetsRef.current = null;
+      }
       // 便签卡：按下即拖动（编辑态与缩放手柄除外）；已在多选中时整组拖。
       const noteEl = target?.closest(".pc-note");
       if (noteEl && !target?.closest("textarea, button, .pc-resize")) {
@@ -2260,7 +2285,7 @@ export default function ProjectCanvas({
       // 拖出亮色切痕）。候选线在按下时采样缓存，滑动中逐段判定相交。
       if (e.button === 2 && e.shiftKey) {
         dragRef.current = { kind: "wirecut", sx: e.clientX, sy: e.clientY, moved: false };
-        cutPointsRef.current = [`${e.clientX},${e.clientY}`];
+        cutPointsRef.current = [];
         vp.classList.add("pc-cutting");
         cutTargetsRef.current = buildCutTargets();
         e.preventDefault();
@@ -2471,10 +2496,96 @@ export default function ProjectCanvas({
   );
 
 
+  // 资料节点 → 详情窗口（该类资源列表，当前/全部切换；剧本是单文件窗口）。
+  // 双击节点与悬停工具条的「查看」按钮共用。剧本两段式：未挂文件的空
+  // 节点双击直接打开文件选择（选完即挂，挂接目标记节点 key）。
+  const openInfoDetail = useCallback((node: { kind: string; key: string; textPath?: string }) => {
+    if (node.kind === "character") {
+      setDetailFor({ kind: "info", group: "character", sourceKey: node.key, scope: "current" });
+    } else if (node.kind === "location") {
+      setDetailFor({ kind: "info", group: "location", sourceKey: node.key, scope: "current" });
+    } else if (node.kind === "prop") {
+      setDetailFor({ kind: "info", group: "prop", sourceKey: node.key, scope: "current" });
+    } else if (node.kind === "script") {
+      if (!node.textPath) {
+        setScriptPickTarget(node.key);
+        setScriptPickOpen(true);
+      } else {
+        setDetailFor(node.key === "script" ? { kind: "script" } : { kind: "script", phId: node.key.slice(7) });
+      }
+    }
+  }, []);
+
+  // 画布全部节点统一「双击打开」（mouseup 判定，见 onUp）：镜头卡=挂靠
+  // 面板、剧本空纸片=文件选择、其余=详情窗口；片段/镜头缩略图上的双击
+  // =打开素材详情（缩略图优先于卡体语义）。
+  const openNodeDetail = useCallback(
+    (key: string, thumbAssetId: string | null) => {
+      if (key.startsWith("shot:")) {
+        if (thumbAssetId) {
+          const card = layout.cards.find((c) => c.key === key);
+          const asset = card?.assets.find((a) => a.asset.id === thumbAssetId)?.asset;
+          if (asset) {
+            onOpenAsset(asset);
+            return;
+          }
+        }
+        onPickForShot(key.slice(5));
+        return;
+      }
+      if (key.startsWith("segment:")) {
+        if (thumbAssetId) {
+          const segment = segments.find((s) => `segment:${s.id}` === key);
+          if (segment?.asset) {
+            onOpenAsset(segment.asset);
+            return;
+          }
+        }
+        setDetailFor({ kind: "segment", id: key.slice(8), scopes: { chars: "current", locs: "current", props: "current" } });
+        return;
+      }
+      if (key.startsWith("asset:")) {
+        const asset = layout.looses.find((l) => l.key === key)?.asset;
+        if (asset && !asset.missing) setDetailFor({ kind: "asset", id: asset.id });
+        return;
+      }
+      if (key.startsWith("eph:")) {
+        setDetailFor({ kind: "entityPh", id: key.slice(4) });
+        return;
+      }
+      if (key.startsWith("placeholder:")) {
+        setDetailFor({ kind: "placeholder", id: key.slice(12) });
+        return;
+      }
+      if (key.startsWith("note:")) {
+        const note = notes.find((item) => `note:${item.id}` === key);
+        if (note) {
+          setEditingNoteId(note.id);
+          setNoteDraft(note.text);
+        }
+        return;
+      }
+      if (key === "output") return;
+      const node = infoNodes.find((item) => item.key === key);
+      if (node) openInfoDetail(node);
+    },
+    [layout, segments, notes, infoNodes, onOpenAsset, onPickForShot, openInfoDetail],
+  );
+
   useEffect(() => {
     const onMove = (e: MouseEvent) => {
       const drag = dragRef.current;
       if (!drag) return;
+      // 首次移动即捕获指针：此后即使松手在窗口外，mouseup 仍送达（根治
+      // 「松在窗外 → 摘下的线/草稿线卡住冻结」）；纯点击不经此处不受影响。
+      if (!capturedRef.current) {
+        capturedRef.current = true;
+        try {
+          vpRef.current?.setPointerCapture((e as PointerEvent).pointerId);
+        } catch {
+          // 指针已不可捕获（如合成事件）：退化为无捕获，后续照旧。
+        }
+      }
       const dx = e.clientX - drag.sx;
       const dy = e.clientY - drag.sy;
       if (Math.abs(dx) + Math.abs(dy) > 4) drag.moved = true;
@@ -2613,8 +2724,23 @@ export default function ProjectCanvas({
         drag.px = to.x;
         drag.py = to.y;
         drag.moved = true;
-        cutPointsRef.current.push(`${to.x},${to.y}`);
-        cutTrailRef.current?.setAttribute("points", cutPointsRef.current.join(" "));
+        // 切痕画在视口直下的绝对定位层（屏幕坐标），盖在卡片之上。
+        const vpRect = vpRef.current?.getBoundingClientRect();
+        if (vpRect) {
+          const w = (cx: number, cy: number) => ({
+            x: cx - vpRect.left,
+            y: cy - vpRect.top,
+          });
+          const wTo = w(to.x, to.y);
+          if (cutPointsRef.current.length === 0) {
+            const wFrom = w(from.x, from.y);
+            cutPointsRef.current.push(`${wFrom.x},${wFrom.y}`);
+          }
+          cutPointsRef.current.push(`${wTo.x},${wTo.y}`);
+          const pts = cutPointsRef.current.join(" ");
+          cutTrailUnderRef.current?.setAttribute("points", pts);
+          cutTrailRef.current?.setAttribute("points", pts);
+        }
         const targets = cutTargetsRef.current;
         if (targets) {
           for (const t of targets) {
@@ -2736,13 +2862,62 @@ export default function ProjectCanvas({
     };
     const onUp = (e: MouseEvent) => {
       const drag = dragRef.current;
+      capturedRef.current = false;
       if (!drag) return;
+      // 统一双击判定：两次「按下即松手」（未拖动）在 450ms 内落在同一
+      // 目标（≤16px）上才算双击。不用原生 dblclick——它把拖拽轻抖的
+      // 松手也计成第二次点击，是「单击/拖完莫名弹窗」的根源。
+      const dblCountable = drag.kind === "marquee" ||
+        ["card", "loose", "segment", "placeholder", "outnode", "note", "infonode", "multidrag"].includes(drag.kind);
+      if (dblCountable && !drag.moved) {
+        const hitEl = document.elementFromPoint(e.clientX, e.clientY);
+        const hit = hitEl instanceof Element ? hitEl : null;
+        if (hit?.closest(".pc-checkbar, textarea, input, button") &&
+            !hit?.closest(".pc-seg-thumb, .pc-shot-asset-thumb")) {
+          // 控件上的两次点击是控件自己的事（如双击提醒条按钮），不算空白
+          // 双击；节点缩略图（也是 button）除外——缩略图双击=开素材详情。
+          dblRef.current = null;
+        } else {
+          const nodeEl = hit?.closest(".pc-node, .pc-note") ?? null;
+          const noteId = nodeEl?.getAttribute("data-note") ?? null;
+          const key = nodeEl?.getAttribute("data-key") ?? (noteId ? `note:${noteId}` : "");
+          const thumb = hit?.closest(".pc-seg-thumb, .pc-shot-asset-thumb");
+          const thumbAsset = thumb?.getAttribute("data-asset") ?? null;
+          const now = performance.now();
+          const prev = dblRef.current;
+          dblRef.current = { key, thumb: thumbAsset, x: e.clientX, y: e.clientY, t: now };
+          if (prev && prev.key === key && now - prev.t < 500 &&
+              Math.hypot(e.clientX - prev.x, e.clientY - prev.y) < 16) {
+            dblRef.current = null;
+            if (!key) {
+              // 双击空白 → 节点选择框（ComfyUI 式）。
+              const rect = vpRef.current?.getBoundingClientRect();
+              if (rect) {
+                setAddMenu({
+                  sx: e.clientX - rect.left,
+                  sy: e.clientY - rect.top,
+                  wx: (e.clientX - rect.left - view.x) / view.scale,
+                  wy: (e.clientY - rect.top - view.y) / view.scale,
+                });
+                setAddMenuQuery("");
+              }
+            } else {
+              openNodeDetail(key, thumbAsset);
+            }
+          }
+        }
+      } else if (drag.moved) {
+        dblRef.current = null;
+      }
       if (drag.kind === "pan") {
         if (drag.moved) saveView(view);
       } else if (drag.kind === "wirecut") {
-        // pc-cutting 类随移除隐藏切痕层，轨迹点下次按下时重置。
+        // pc-cutting 类仅管刀光标；切痕轨迹点清空即隐形，下次按下重建。
         vpRef.current?.classList.remove("pc-cutting");
         cutTargetsRef.current = null;
+        cutPointsRef.current = [];
+        cutTrailUnderRef.current?.setAttribute("points", "");
+        cutTrailRef.current?.setAttribute("points", "");
       } else if (drag.kind === "wire") {
         wireHoverRef.current?.classList.remove("pc-wire-target");
         wireHoverRef.current = null;
@@ -2772,11 +2947,15 @@ export default function ProjectCanvas({
               }
             }
           } else if (!drag.targetKey && drag.moved && lifted) {
-            const hitEl = document.elementFromPoint(e.clientX, e.clientY);
+            // 松手在画布内才谈「空白弹菜单」；出界（窗外松手）一律放回。
+            const vpRect = vpRef.current?.getBoundingClientRect();
+            const inside = !!vpRect && e.clientX >= vpRect.left && e.clientX <= vpRect.right &&
+              e.clientY >= vpRect.top && e.clientY <= vpRect.bottom;
+            const hitEl = inside ? document.elementFromPoint(e.clientX, e.clientY) : null;
             const landed = hitEl instanceof Element
               ? hitEl.closest(".pc-node, .pc-note, .pc-glass, .pc-checkbar")
               : null;
-            if (!landed) {
+            if (!landed && inside) {
               const el = vpRef.current;
               if (el) {
                 const rect = el.getBoundingClientRect();
@@ -3214,7 +3393,7 @@ export default function ProjectCanvas({
       document.removeEventListener("mousemove", onMove);
       document.removeEventListener("mouseup", onUp);
     };
-  }, [layout, pos, view, scenePos, infoPos, boxOf, portsOf, outPointOf, inPointOf, linkAssets, persistCards, persistLoose, saveCanvasLayout, saveInfoFramePos, saveView, setSelection, saveOutputPos, setEpisodeOutput, episodeId, notes, persistNotes, addNote, addPlaceholder, addEntityPh, persistPlaceholders, persistSegments, linkNode, unlinkNode, nodeKeyParts, addSegment, autoConnectNewNode, persistSizes, persistInfoOffsets, infoGroups, infoNodes, infoNodePos, entityPhs, segments, segPos, placeholders, sizeOfNode, outputBox, moveGroupTo, persistPositions, pushUndo, pendingLinks, persistPendingLinks, setInfoFramePos, setInfoOffsets, setNodeSizes, setNotes, setOutputPos, setPlaceholders]);
+  }, [layout, pos, view, scenePos, infoPos, boxOf, portsOf, outPointOf, inPointOf, linkAssets, persistCards, persistLoose, saveCanvasLayout, saveInfoFramePos, saveView, setSelection, saveOutputPos, setEpisodeOutput, episodeId, notes, persistNotes, addNote, addPlaceholder, addEntityPh, persistPlaceholders, persistSegments, linkNode, unlinkNode, nodeKeyParts, addSegment, autoConnectNewNode, persistSizes, persistInfoOffsets, infoGroups, infoNodes, infoNodePos, entityPhs, segments, segPos, placeholders, sizeOfNode, outputBox, moveGroupTo, persistPositions, pushUndo, pendingLinks, persistPendingLinks, setInfoFramePos, setInfoOffsets, setNodeSizes, setNotes, setOutputPos, setPlaceholders, openNodeDetail]);
 
   // ── 节点操作 ──
   // 节点接口圆点（ComfyUI 式）：输入口列在左缘（片段五口按列分布）、
@@ -3338,30 +3517,10 @@ export default function ProjectCanvas({
           className={`pc-resize ${corner}`}
           data-corner={corner}
           aria-hidden="true"
-          onDoubleClick={(event) => event.stopPropagation()}
         />
       ))}
     </>
   );
-  // 资料节点 → 详情窗口（该类资源列表，当前/全部切换；剧本是单文件窗口）。
-  // 双击节点与悬停工具条的「查看」按钮共用。剧本两段式：未挂文件的空
-  // 节点双击直接打开文件选择（选完即挂，挂接目标记节点 key）。
-  const openInfoDetail = (node: { kind: string; key: string; textPath?: string }) => {
-    if (node.kind === "character") {
-      setDetailFor({ kind: "info", group: "character", sourceKey: node.key, scope: "current" });
-    } else if (node.kind === "location") {
-      setDetailFor({ kind: "info", group: "location", sourceKey: node.key, scope: "current" });
-    } else if (node.kind === "prop") {
-      setDetailFor({ kind: "info", group: "prop", sourceKey: node.key, scope: "current" });
-    } else if (node.kind === "script") {
-      if (!node.textPath) {
-        setScriptPickTarget(node.key);
-        setScriptPickOpen(true);
-      } else {
-        setDetailFor(node.key === "script" ? { kind: "script" } : { kind: "script", phId: node.key.slice(7) });
-      }
-    }
-  };
 
   // ── 节点详情窗口：按 detailFor 组装条目（预览 + 信息 + 动作）──
   const closeDetail = () => {
@@ -4142,36 +4301,11 @@ export default function ProjectCanvas({
         ref={vpRef}
         className="pc-viewport"
         onMouseDown={onViewportMouseDown}
-        // Shift+右键是切线手势：不弹浏览器右键菜单。
-        onContextMenu={(e) => e.preventDefault()}
         onClickCapture={(e) => {
           if (!suppressClickRef.current) return;
           e.stopPropagation();
           e.preventDefault();
           suppressClickRef.current = false;
-        }}
-        onDoubleClick={(e) => {
-          const thumb = e.target instanceof Element ? e.target.closest(".pc-shot-asset-thumb") : null;
-          if (thumb) {
-            const assetId = thumb.getAttribute("data-asset") ?? "";
-            const node = layout.cards
-              .flatMap((c) => c.assets)
-              .find((a) => a.asset.id === assetId);
-            if (node) onOpenAsset(node.asset);
-            return;
-          }
-          // 双击空白（非节点/标签牌/浮层）：弹出节点选择框（ComfyUI 式）。
-          const target = e.target instanceof Element ? e.target : null;
-          if (target?.closest(".pc-node, .pc-frame-label, .pc-glass, .pc-checkbar, .pc-note, textarea, input, button")) return;
-          const rect = vpRef.current?.getBoundingClientRect();
-          if (!rect) return;
-          setAddMenu({
-            sx: e.clientX - rect.left,
-            sy: e.clientY - rect.top,
-            wx: (e.clientX - rect.left - view.x) / view.scale,
-            wy: (e.clientY - rect.top - view.y) / view.scale,
-          });
-          setAddMenuQuery("");
         }}
       >
         <div
@@ -4413,16 +4547,6 @@ export default function ProjectCanvas({
                   minHeight: cardSize && cardSize.h !== card.h ? cardSize.h : undefined,
                   ["--node-accent" as string]: NODE_ACCENTS.shot,
                 } as React.CSSProperties}
-                onDoubleClick={(event) => {
-                  // 双击镜头卡 → 挂靠素材挑选面板（镜头没有详情窗，挑选面板
-                  // 就是它的挂靠窗口）。选择框只认双击：单击与拖卡松手都不弹；
-                  // 缩略图/工具条/缩放角标上的双击不抢（缩略图双击由视口层
-                  // 打开素材查看器）。
-                  const target = event.target instanceof Element ? event.target : null;
-                  if (target?.closest(".pc-shot-asset-thumb, .pc-node-tools, .pc-resize")) return;
-                  event.stopPropagation();
-                  onPickForShot(shot.id);
-                }}
               >
                 <div className="pc-shot-head">
                   <span className="pc-shot-no">{shotNoOf(card.sceneId, card.shot.id)}</span>
@@ -4527,12 +4651,6 @@ export default function ProjectCanvas({
                 data-key={loose.key}
                 className={`pc-node${selected ? " pc-selected" : ""}`}
                 style={{ left: p.x, top: p.y, width: nodeW, ["--node-accent" as string]: NODE_ACCENTS[asset.kind] ?? "#94a3b8" } as React.CSSProperties}
-                onDoubleClick={(event) => {
-                  // 双击散件节点 → 详情预览窗口（丢失文件走「重新挂靠」工具）。
-                  if (asset.missing) return;
-                  event.stopPropagation();
-                  setDetailFor({ kind: "asset", id: asset.id });
-                }}
               >
                 <div className="pc-node-head">
                   <span className="pc-node-kind">{t(assetKindBadgeKey(asset.kind))}</span>
@@ -4633,11 +4751,6 @@ export default function ProjectCanvas({
                   minHeight: nodeSize && nodeSize.h !== node.h ? nodeSize.h : undefined,
                   ["--node-accent" as string]: NODE_ACCENTS[node.kind] ?? "#94a3b8",
                 } as React.CSSProperties}
-                onDoubleClick={(event) => {
-                  // 双击资料节点 → 详情窗口（与工具条「查看」同语义）。
-                  event.stopPropagation();
-                  openInfoDetail(node);
-                }}
               >
                 <div className="pc-node-head">
                   <span className="pc-node-kind">
@@ -4760,10 +4873,6 @@ export default function ProjectCanvas({
                   minHeight: phSize?.h,
                   ["--node-accent" as string]: NODE_ACCENTS[ph.kind] ?? "#94a3b8",
                 } as React.CSSProperties}
-                onDoubleClick={(event) => {
-                  event.stopPropagation();
-                  setDetailFor({ kind: "entityPh", id: ph.id });
-                }}
               >
                 <div className="pc-node-head">
                   <span className="pc-node-kind">{label}</span>
@@ -4809,15 +4918,6 @@ export default function ProjectCanvas({
                   minHeight: segSize && segSize.h !== SEG_H ? segSize.h : undefined,
                   ["--node-accent" as string]: NODE_ACCENTS.segment,
                 } as React.CSSProperties}
-                onDoubleClick={(event) => {
-                  // 双击片段节点 → 详情窗口：角色区（当前角色/全部角色切换）
-                  // + 底部视频挂接区（上传 / 从库选择）。缩略图上的双击不抢
-                  // （缩略图双击由素材查看器接管，与镜头卡缩略图同节奏）。
-                  const target = event.target instanceof Element ? event.target : null;
-                  if (target?.closest(".pc-seg-thumb")) return;
-                  event.stopPropagation();
-                  setDetailFor({ kind: "segment", id: segment.id, scopes: { chars: "current", locs: "current", props: "current" } });
-                }}
               >
                 <div className="pc-node-head">
                   <span className="pc-node-kind">{t("project.canvas.segName")}</span>
@@ -4829,13 +4929,7 @@ export default function ProjectCanvas({
                       type="button"
                       className={`pc-seg-thumb${segment.asset.missing ? " is-missing" : ""}`}
                       title={segment.asset.missing ? t("project.asset.fileMissing") : segment.asset.name}
-                      onDoubleClick={(event) => {
-                        // 双击缩略图 → 素材详情（缺失文件走窗内「重新挂靠」）。
-                        // 单击绝不动作：片段卡身大半是缩略图，单击即弹窗会
-                        // 抢掉「点节点=选中/拖动」的预期。
-                        event.stopPropagation();
-                        onOpenAsset(segment.asset as ProjectAsset);
-                      }}
+                      data-asset={segment.asset.id}
                     >
                       <ResourceVideoPoster
                         path={joinLibraryPath(libraryRoot, segment.asset.file_path)}
@@ -4960,17 +5054,9 @@ export default function ProjectCanvas({
                     }
                   }}
                   onMouseDown={(event) => event.stopPropagation()}
-                  onDoubleClick={(event) => event.stopPropagation()}
                 />
               ) : (
-                <div
-                  className="pc-note-body"
-                  onDoubleClick={(event) => {
-                    event.stopPropagation();
-                    setEditingNoteId(note.id);
-                    setNoteDraft(note.text);
-                  }}
-                >
+                <div className="pc-note-body">
                   {note.text || <i>{t("project.canvas.noteEmpty")}</i>}
                 </div>
               )}
@@ -5008,10 +5094,6 @@ export default function ProjectCanvas({
                 data-key={phKey}
                 className="pc-node pc-placeholder"
                 style={{ left: ph.x, top: ph.y, width: phSize?.w ?? LOOSE_W, ["--node-accent" as string]: "#94a3b8" } as React.CSSProperties}
-                onDoubleClick={(event) => {
-                  event.stopPropagation();
-                  setDetailFor({ kind: "placeholder", id: ph.id });
-                }}
               >
                 <div className="pc-node-head">
                   <span className="pc-node-kind">{t("project.canvas.typeAsset")}</span>
@@ -5038,10 +5120,13 @@ export default function ProjectCanvas({
           })}
         </div>
 
-        {/* 切线拖痕（Blender 式）：覆盖窗口的固定层，屏幕坐标即时绘制。
-            必须留在 pc-world（transform 层）之外——fixed 定位会被
-            transform 祖先劫持成世界坐标系，划痕就画不到屏幕上了。 */}
-        <svg className="pc-cutlayer" aria-hidden="true">
+        {/* 刀切痕层：视口直下的绝对定位层（pc-world 之后 → 盖在卡片上），
+            用视口屏幕坐标画折线——不进 pc-world（祖先 transform 会连
+            non-scaling-stroke 一起缩放），也不用 fixed（坐标系会被
+            transform 祖先劫持且部分环境逐帧重绘闪烁）。滑动中 ref 直写
+            双描边（暗衬 + 白芯），松手清空即隐形。 */}
+        <svg className="pc-trailayer" aria-hidden="true">
+          <polyline ref={cutTrailUnderRef} className="pc-wire-cut-under" points="" />
           <polyline ref={cutTrailRef} className="pc-wire-cut" points="" />
         </svg>
 
@@ -5087,7 +5172,6 @@ export default function ProjectCanvas({
             className="pc-addmenu"
             style={{ left: addMenu.sx, top: addMenu.sy }}
             onMouseDown={(event) => event.stopPropagation()}
-            onDoubleClick={(event) => event.stopPropagation()}
           >
             <input
               className="pc-addmenu-search"

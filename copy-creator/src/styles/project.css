@@ -1758,19 +1758,28 @@
 .pc-wire-hit { fill: none; stroke: transparent; stroke-width: 16; pointer-events: stroke; cursor: pointer; }
 .pc-wire-line { fill: none; stroke-width: 2.6; stroke-opacity: 0.95; }
 .pc-wire:hover .pc-wire-line { stroke-width: 3.6; stroke-opacity: 1; }
-/* 切线拖痕：白色亮线划过即断（Blender knife 手势的视觉对应物）。
-   层仅在切线手势期间显示（pc-cutting 类驱动）；fixed 层必须位于
-   transform 层（pc-world）之外，否则坐标被劫持为世界系。 */
-.pc-cutlayer { position: fixed; inset: 0; width: 100%; height: 100%; pointer-events: none; z-index: 80; display: none; }
-.pc-viewport.pc-cutting .pc-cutlayer { display: block; }
-.pc-wire-cut {
+/* 刀切痕：白色亮线划过即断（Blender knife 手势的视觉对应物）。
+   画在视口直下的绝对定位层（pc-trailayer，pc-world 之后 → 盖在卡片
+   之上）：fixed 覆层会被 transform 祖先劫持坐标系，放进 pc-world 则
+   被祖先 transform 连 non-scaling-stroke 一起缩放，故用视口屏幕坐标。
+   双描边（暗衬 + 白芯）保证亮暗主题都清晰。 */
+.pc-trailayer { position: absolute; inset: 0; width: 100%; height: 100%; pointer-events: none; z-index: 30; overflow: hidden; }
+.pc-wire-cut-under {
   fill: none;
-  stroke: #fff;
-  stroke-width: 2.4;
+  stroke: rgba(15, 23, 42, 0.4);
+  stroke-width: 4.6;
   stroke-linecap: round;
   stroke-linejoin: round;
   opacity: 0.9;
-  filter: drop-shadow(0 0 5px rgba(255, 255, 255, 0.75));
+}
+.pc-wire-cut {
+  fill: none;
+  stroke: #fff;
+  stroke-width: 2.2;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  opacity: 0.95;
+  filter: drop-shadow(0 0 4px rgba(255, 255, 255, 0.7));
 }
 [data-theme="dark"] .pc-wire-cut { filter: drop-shadow(0 0 5px rgba(255, 255, 255, 0.55)); }
 /* 拖拽中的线与落定的线同一规格（实线、同粗细同透明度），全程视觉统一；
