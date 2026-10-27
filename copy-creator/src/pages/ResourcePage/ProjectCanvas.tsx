@@ -567,8 +567,6 @@ export default function ProjectCanvas({
         y,
       };
       persistNotes([...notes, note]);
-      setEditingNoteId(note.id);
-      setNoteDraft("");
       return note.id;
     },
     [notes, persistNotes],
@@ -1189,16 +1187,12 @@ export default function ProjectCanvas({
         }
       }
       if (newKeys.length === 0) return;
-      // addNote 会进编辑态（手动创建的惯例）；粘贴是批量落位，退出编辑，
-      // 让新组保持整组选中可直接拖走。
-      setEditingNoteId(null);
-      setNoteDraft("");
       setSelection(newKeys);
       pushUndo({ type: "paste", keys: newKeys });
     } finally {
       pastingRef.current = false;
     }
-  }, [addNote, addPlaceholder, addEntityPh, addSegment, episodeId, saveCanvasLayout, setSelection, pushUndo, setEditingNoteId]);
+  }, [addNote, addPlaceholder, addEntityPh, addSegment, episodeId, saveCanvasLayout, setSelection, pushUndo]);
 
   // ── 新节点出生锚点：任何「加载」动作（添加菜单挑实体/挂剧本/详情窗
   // 添加）在触发瞬间记录世界坐标，概览刷新后新出现的资料节点直接出生
