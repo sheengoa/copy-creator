@@ -1151,7 +1151,7 @@ export const useProjectStore = create<ProjectStoreState>((set, get) => ({
             ...overview,
             node_links: [
               ...overview.node_links,
-              { id: `local-${Date.now()}`, from_kind: fromKind, from_id: fromId, to_segment: toSegment, to_port: toPort },
+              { id: `local-${Date.now()}-${Math.floor(Math.random() * 1e6)}`, from_kind: fromKind, from_id: fromId, to_segment: toSegment, to_port: toPort },
             ],
           },
         });

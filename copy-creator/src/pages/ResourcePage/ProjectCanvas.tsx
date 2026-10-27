@@ -607,7 +607,7 @@ export default function ProjectCanvas({
     };
     // 摘线到空白弹出的菜单：被摘的线（隐藏态）。菜单创建节点后转接并
     // 删旧行；取消（点空白/Esc/建无口节点）则放回原口。
-    detached?: { pending: PendingLink | null; rows: ProjectNodeLink[] };
+    detached?: { pendings: PendingLink[]; rows: ProjectNodeLink[] };
   } | null>(null);
   const [addMenuQuery, setAddMenuQuery] = useState("");
   // 资料关联面板开关（挂产出走片段详情窗口，见 detailFor）。
@@ -2103,7 +2103,7 @@ export default function ProjectCanvas({
     rewire?: boolean;
     // addnode：从「摘线到空白」菜单创建节点后要转接的摘下线
     //（pending 一条或 db 多行），创建成功即删旧写新，取消则放回。
-    detached?: { pending: PendingLink | null; rows: ProjectNodeLink[] };
+    detached?: { pendings: PendingLink[]; rows: ProjectNodeLink[] };
     wire?: { // addnode：从「拖线到空白」菜单创建节点后要自动接的线
       fromKey: string;
       fromDir: "out" | "in";
@@ -2118,12 +2118,13 @@ export default function ProjectCanvas({
   const [wireDraft, setWireDraft] = useState<{ d: string; invalid: boolean; color?: string } | null>(null);
   // 拖线悬停高亮的目标节点（ComfyUI 落点亮框），松手/取消时清除。
   const wireHoverRef = useRef<Element | null>(null);
-  // ComfyUI 摘线：点击已连线的输入口把线「摘下来拿着」——原线进入隐藏
-  // 态（渲染层过滤），松手时换源转接 / 交给添加菜单（建新节点即转接）/
-  // 无效落点原样放回。行数据不预先删除，收尾才落库。
+  // ComfyUI 摘线：点击已连线的输入口把线「摘下来拿着」——这个口上的
+  // 全部线（暂存线 + 正式线）进入隐藏态（渲染层过滤），松手时整组转接 /
+  // 交给添加菜单（建新节点即转接）/ 无效落点原样放回。行数据不预先删除，
+  // 收尾才落库。摘一个口 = 拿走这个口上所有线，不留残留。
   interface LiftedWire {
     fromKey: string; // 视觉线的源节点 key（组线为整组承载节点）
-    pending: PendingLink | null;
+    pendings: PendingLink[];
     rows: ProjectNodeLink[];
   }
   const [liftedWire, setLiftedWire] = useState<LiftedWire | null>(null);
@@ -2339,16 +2340,15 @@ export default function ProjectCanvas({
         // 而不是再拉一条新线。成片输入口是隐式聚合（无连线数据）不摘。
         if (dir === "in" && inPort && key.startsWith("segment:")) {
           const segId = key.slice(8);
-          const pend = pendingLinks.filter((l) => l.toSegmentId === segId && l.toPort === portId).at(-1) ?? null;
-          let rows: ProjectNodeLink[] = [];
-          const cand = nodeLinks.filter((l) => l.to_segment === segId && l.to_port === portId);
-          if (!pend && cand.length > 0) {
-            const last = cand[cand.length - 1];
-            rows = cand.filter((l) => l.from_kind === last.from_kind && l.from_id === last.from_id);
-          }
-          if (pend || rows.length > 0) {
-            const fromKey = pend ? pend.fromKey : ownerKeyOf(rows[0].from_kind, rows[0].from_id);
-            setLiftedWire({ fromKey, pending: pend, rows });
+          // 摘一个口 = 拿走这个口上的全部线：暂存线与正式线并存时都要
+          // 拿，只摘其一会留下「摘了还连着」的残留。
+          const pendings = pendingLinks.filter((l) => l.toSegmentId === segId && l.toPort === portId);
+          const rows = nodeLinks.filter((l) => l.to_segment === segId && l.to_port === portId);
+          if (pendings.length > 0 || rows.length > 0) {
+            const fromKey = pendings.length > 0
+              ? pendings[pendings.length - 1].fromKey
+              : ownerKeyOf(rows[0].from_kind, rows[0].from_id);
+            setLiftedWire({ fromKey, pendings, rows });
             vp.classList.add("pc-wiring");
             port.classList.add("pc-port-active");
             dragRef.current = {
@@ -2977,22 +2977,26 @@ export default function ProjectCanvas({
           if (drag.targetKey && drag.moved && lifted) {
             setLiftedWire(null);
             const source = nodeKeyParts(drag.targetKey);
-            const sameAsOld = lifted.pending
-              ? drag.targetKey === lifted.pending.fromKey
-              : !!source && lifted.rows.every((r) => r.from_kind === source.kind && r.from_id === source.id);
-            if (source && !sameAsOld) {
-              if (lifted.pending) {
-                persistPendingLinks(pendingLinks.filter((l) => l !== lifted.pending));
-                void linkNode(
-                  episodeId, source.kind, source.id,
-                  lifted.pending.toSegmentId, lifted.pending.toPort as ProjectNodeLink["to_port"],
-                );
-              } else {
-                lifted.rows.forEach((row) => {
-                  void unlinkNode(row.from_kind, row.from_id, row.to_segment, row.to_port);
-                  void linkNode(episodeId, source.kind, source.id, row.to_segment, row.to_port);
+            // 换源：口上全部线（暂存线 + 正式线）一并转到新源；落点就是
+            // 原源之一时视为放回，不动。
+            const pendSameAsOld = lifted.pendings.length > 0 &&
+              lifted.pendings.every((p) => drag.targetKey === p.fromKey);
+            const rowSameAsOld = lifted.rows.length > 0 && !!source &&
+              lifted.rows.every((r) => r.from_kind === source.kind && r.from_id === source.id);
+            if (source && !pendSameAsOld && !rowSameAsOld) {
+              if (lifted.pendings.length) {
+                persistPendingLinks(pendingLinks.filter((l) => !lifted.pendings.includes(l)));
+                lifted.pendings.forEach((p) => {
+                  void linkNode(
+                    episodeId, source.kind, source.id,
+                    p.toSegmentId, p.toPort as ProjectNodeLink["to_port"],
+                  );
                 });
               }
+              lifted.rows.forEach((row) => {
+                void unlinkNode(row.from_kind, row.from_id, row.to_segment, row.to_port);
+                void linkNode(episodeId, source.kind, source.id, row.to_segment, row.to_port);
+              });
             }
           } else if (!drag.targetKey && drag.moved && lifted) {
             // 松手在画布内才谈「空白弹菜单」；出界（窗外松手）一律放回。
@@ -3018,7 +3022,7 @@ export default function ProjectCanvas({
                     fromAccepts: drag.fromAccepts,
                     fromPortId: drag.fromPortId,
                   },
-                  detached: { pending: lifted.pending, rows: lifted.rows },
+                  detached: { pendings: lifted.pendings, rows: lifted.rows },
                 });
                 setAddMenuQuery("");
               } else {
@@ -3283,73 +3287,72 @@ export default function ProjectCanvas({
           setLiftedWire(null);
           if (!newKey) return;
           // 摘线语义优先「换目标」：线从某片段输入口摘下、新节点又有同名
-          // 输入口（片段家族）时，线改插到新节点的同端口——「这条线给了
-          // 新节点」，原口旧线移除。这是摘线+空白建节点最符合直觉的落点：
-          // 用户拿着的是「通往片段 #1 的线」，要的是接去新片段。
+          // 输入口（片段家族）时，这个口上的全部线（暂存线 + 正式线）改插
+          // 到新节点的同端口——「整条线交给新节点」，原口不留残留。这是
+          // 摘线+空白建节点最符合直觉的落点：用户拿着的是「通往片段 #1 的
+          // 线」，要的是接去新片段。
           const newIns = portsOf(newKey).ins;
-          if (d.pending) {
-            const pend = d.pending;
-            if (newIns.some((item) => item.id === pend.toPort)) {
+          const movedPorts = [...new Set([
+            ...d.pendings.map((p) => p.toPort),
+            ...d.rows.map((r) => r.to_port),
+          ])];
+          if (movedPorts.length > 0 && movedPorts.every((p) => newIns.some((item) => item.id === p))) {
+            const segId = newKey.slice(8);
+            if (d.pendings.length) {
               persistPendingLinks([
-                ...pendingLinks.filter((l) => l !== pend),
-                { fromKey: pend.fromKey, toSegmentId: newKey.slice(8), toPort: pend.toPort },
+                ...pendingLinks.filter((l) => !d.pendings.includes(l)),
+                ...d.pendings.map((p) => ({ fromKey: p.fromKey, toSegmentId: segId, toPort: p.toPort })),
               ]);
-              return;
             }
-            // 退回「换源头」：占位新源没有库身份，暂存线换新源原样转接。
-            // 实体/片段新源按原口落正式线——目标口接受新源类型才连；不接
-            // 受则原暂存线原样保留（不兼容的挑选不该拆掉原有连线）。
-            const parts = nodeKeyParts(newKey);
-            if (!parts) {
-              persistPendingLinks([
-                ...pendingLinks.filter((l) => l !== pend),
-                { fromKey: newKey, toSegmentId: pend.toSegmentId, toPort: pend.toPort },
-              ]);
-              return;
-            }
-            const targetPort = portsOf(`segment:${pend.toSegmentId}`).ins.find(
-              (item) => item.id === pend.toPort,
-            );
-            const outType = portsOf(newKey).out?.type;
-            if (targetPort && outType && targetPort.accepts.includes(outType)) {
-              persistPendingLinks(pendingLinks.filter((l) => l !== pend));
-              void linkNode(
-                episodeId, parts.kind, parts.id,
-                pend.toSegmentId, pend.toPort as ProjectNodeLink["to_port"],
-              );
-            } else {
-              persistPendingLinks(pendingLinks);
+            if (d.rows.length) {
+              d.rows.forEach((row) => {
+                void unlinkNode(row.from_kind, row.from_id, row.to_segment, row.to_port);
+              });
+              d.rows.forEach((row) => {
+                void linkNode(episodeId, row.from_kind, row.from_id, segId, row.to_port as ProjectNodeLink["to_port"]);
+              });
             }
             return;
           }
+          // 退回「换源头」：占位新源没有库身份，线换新源原样转接；实体新
+          // 源按原口兼容性落正式线；不兼容保留原线不动（不写入即保留）。
           const parts = nodeKeyParts(newKey);
-          const rowPorts = [...new Set(d.rows.map((row) => row.to_port))];
-          if (d.rows.length > 0 && rowPorts.every((p) => newIns.some((item) => item.id === p))) {
-            // 正式线换目标：原口整组解挂，同源改接新片段的同端口。
+          if (d.pendings.length) {
+            const p0 = d.pendings[0];
+            const targetPort = portsOf(`segment:${p0.toSegmentId}`).ins.find(
+              (item) => item.id === p0.toPort,
+            );
+            const outType = portsOf(newKey).out?.type;
+            if (!parts) {
+              persistPendingLinks([
+                ...pendingLinks.filter((l) => !d.pendings.includes(l)),
+                ...d.pendings.map((p) => ({ fromKey: newKey, toSegmentId: p.toSegmentId, toPort: p.toPort })),
+              ]);
+            } else if (targetPort && outType && targetPort.accepts.includes(outType)) {
+              persistPendingLinks(pendingLinks.filter((l) => !d.pendings.includes(l)));
+              d.pendings.forEach((p) => {
+                void linkNode(
+                  episodeId, parts.kind, parts.id,
+                  p.toSegmentId, p.toPort as ProjectNodeLink["to_port"],
+                );
+              });
+            }
+          }
+          if (d.rows.length) {
             d.rows.forEach((row) => {
               void unlinkNode(row.from_kind, row.from_id, row.to_segment, row.to_port);
             });
-            rowPorts.forEach((p) => {
-              const row = d.rows.find((item) => item.to_port === p);
-              if (row) {
-                void linkNode(episodeId, row.from_kind, row.from_id, newKey.slice(8), p as ProjectNodeLink["to_port"]);
-              }
-            });
-            return;
-          }
-          d.rows.forEach((row) => {
-            void unlinkNode(row.from_kind, row.from_id, row.to_segment, row.to_port);
-          });
-          if (parts) {
-            d.rows.forEach((row) => {
-              void linkNode(episodeId, parts.kind, parts.id, row.to_segment, row.to_port);
-            });
-          } else if (d.rows.length > 0) {
-            // 占位新源没有库身份：转暂存线，装载实体后照常转正。
-            persistPendingLinks([
-              ...pendingLinks,
-              { fromKey: newKey, toSegmentId: d.rows[0].to_segment, toPort: d.rows[0].to_port },
-            ]);
+            if (parts) {
+              d.rows.forEach((row) => {
+                void linkNode(episodeId, parts.kind, parts.id, row.to_segment, row.to_port);
+              });
+            } else {
+              const r0 = d.rows[0];
+              persistPendingLinks([
+                ...pendingLinks,
+                { fromKey: newKey, toSegmentId: r0.to_segment, toPort: r0.to_port },
+              ]);
+            }
           }
         };
         if (drag.frameKey === "note") {
@@ -4534,7 +4537,7 @@ export default function ProjectCanvas({
                 组节点的多条成员连线按承载节点去重成一条，删线全断。 */}
             {segWires.map((wire) => {
               // 被摘下的线（拿着换源中）暂时隐藏，收尾时转接或放回。
-              if (liftedWire && !liftedWire.pending && wire.links.some((l) => liftedWire.rows.some((r) => r.id === l.id))) return null;
+              if (liftedWire && wire.links.some((l) => liftedWire.rows.some((r) => r.id === l.id))) return null;
               const link = wire.links[0];
               const a = outPointOf(wire.fromKey);
               const b = inPointOf(`segment:${link.to_segment}`, link.to_port);
@@ -4557,7 +4560,7 @@ export default function ProjectCanvas({
                 视觉约定）；占位线不透明度略高作区分，加载实体后转正为
                 正式 node_link 连线。 */}
             {pendingLinks.map((link) => {
-              if (liftedWire?.pending && link === liftedWire.pending) return null;
+              if (liftedWire?.pendings.includes(link)) return null;
               const a = outPointOf(link.fromKey);
               const b = inPointOf(`segment:${link.toSegmentId}`, link.toPort);
               if (!a || !b) return null;
