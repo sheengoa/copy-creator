@@ -1327,7 +1327,7 @@ export default function ProjectCanvas({
       name: file.name,
       episodeId,
       shotId: "",
-    }).then((asset) => {
+    }).then(async (asset) => {
       if (!asset) return;
       void saveCanvasLayout({
         assets: [{ id: asset.id, x: ph.x, y: ph.y, w: size?.w ?? LOOSE_W }],
@@ -1343,9 +1343,13 @@ export default function ProjectCanvas({
       // 占位的暂存线随填充转正：素材实体接管原占位的片段连线。
       const myPending = pendingLinks.filter((l) => l.fromKey === phKey);
       for (const l of myPending) {
-        void linkNode(episodeId, "asset", asset.id, l.toSegmentId, l.toPort as ProjectNodeLink["to_port"]);
+        await linkNode(episodeId, "asset", asset.id, l.toSegmentId, l.toPort as ProjectNodeLink["to_port"]);
       }
       if (myPending.length) persistPendingLinks(pendingLinks.filter((l) => l.fromKey !== phKey));
+      // linkAsset 内部的 selectEpisode 整刷发生在上面落账之前：重挂的画布
+      // 读不到「旧占位已移除/暂存线已转正」，会留下幽灵占位与伪连接线。
+      // 这里再整刷一次，让重挂按最终账本重读。
+      await selectEpisode(episodeId);
     });
   };
   const attachSegmentFromLibrary = (segmentId: string, file: { filePath: string; kind: string; name: string }) => {
@@ -3693,10 +3697,11 @@ export default function ProjectCanvas({
     async (groupId: string, entityId: string) => {
       const group = infoGroups.find((g) => g.id === groupId);
       if (!group || group.members.includes(entityId)) return;
-      await associateEntities(group.kind, [entityId]);
+      // 连线与组员落账先于概览整刷（重挂读 localStorage，见 applyMemberPick）。
       const wired = groupWiredPorts(group);
       for (const w of wired) await linkNode(episodeId, group.kind, entityId, w.to_segment, w.to_port as ProjectNodeLink["to_port"]);
       persistInfoGroups(infoGroups.map((g) => (g.id === groupId ? { ...g, members: [...g.members, entityId] } : g)));
+      await associateEntities(group.kind, [entityId]);
     },
     [infoGroups, associateEntities, groupWiredPorts, linkNode, episodeId, persistInfoGroups],
   );
@@ -3918,10 +3923,14 @@ export default function ProjectCanvas({
     );
     const pending = pick.pending.filter((id) => !claimedElsewhere.has(id));
     const groupIdOf = () => `g${Date.now()}${Math.floor(Math.random() * 1e4)}`;
+    // 概览整刷（associateEntities → selectEpisode 先置空 overview）会令画布
+    // 卸载重挂，重挂后的按集状态读自 localStorage。因此画布层落账（位置/
+    // 组/占位/暂存线）与转正连线必须全部发生在刷新之前，且连线要逐条等
+    // 落库完成——否则重挂读到旧账：占位与暂存线成幽灵残影（伪连接）、
+    // 组节点落回网格旧位。
     if (pick.mode === "eph") {
       const ph = entityPhs.find((p) => p.id === pick.ephId);
       if (!ph || pending.length === 0) return;
-      await associateEntities(pick.kind, pending);
       const groupId = groupIdOf();
       const pos = infoNodePos(`eph:${ph.id}`);
       const nextOffsets = { ...infoOffsets, [`grp:${groupId}`]: pos };
@@ -3934,10 +3943,11 @@ export default function ProjectCanvas({
       const myPending = pendingLinks.filter((l) => l.fromKey === ephKey);
       for (const l of myPending) {
         for (const memberId of pending) {
-          void linkNode(episodeId, pick.kind, memberId, l.toSegmentId, l.toPort as ProjectNodeLink["to_port"]);
+          await linkNode(episodeId, pick.kind, memberId, l.toSegmentId, l.toPort as ProjectNodeLink["to_port"]);
         }
       }
       if (myPending.length) persistPendingLinks(pendingLinks.filter((l) => l.fromKey !== ephKey));
+      await associateEntities(pick.kind, pending);
       setPulseKeys([`grp:${groupId}`]);
       setDetailFor({ kind: "info", group: pick.kind, sourceKey: `grp:${groupId}`, scope: "current" });
       return;
@@ -3947,20 +3957,19 @@ export default function ProjectCanvas({
       if (!group) return;
       const additions = pending.filter((id) => !group.members.includes(id));
       const removals = group.members.filter((id) => !pending.includes(id));
-      await associateEntities(pick.kind, additions);
       const wired = groupWiredPorts(group);
       for (const id of additions) {
         for (const w of wired) await linkNode(episodeId, pick.kind, id, w.to_segment, w.to_port as ProjectNodeLink["to_port"]);
       }
       for (const id of removals) await unlinkEntityLinks(pick.kind, id);
       persistInfoGroups(infoGroups.map((g) => (g.id === group.id ? { ...g, members: [...pending] } : g)));
+      await associateEntities(pick.kind, additions);
       return;
     }
     // convert：默认单实体节点继续装入 → 升级为组节点（原位；primary 已有
     // 连线随归属解析自动归到组名下，新成员自动接入同样片段口）。
     const srcId = pick.sourceKey.slice((pick.kind === "character" ? "char:" : pick.kind === "location" ? "loc:" : "prop:").length);
     if (pending.length <= 1 || !pending.includes(srcId)) return;
-    await associateEntities(pick.kind, pending);
     const groupId = groupIdOf();
     const pos = infoNodePos(pick.sourceKey);
     const nextOffsets = { ...infoOffsets, [`grp:${groupId}`]: pos };
@@ -3977,6 +3986,7 @@ export default function ProjectCanvas({
         if (id !== srcId) await linkNode(episodeId, pick.kind, id, row.to_segment, row.to_port);
       }
     }
+    await associateEntities(pick.kind, pending);
     setDetailFor({ kind: "info", group: pick.kind, sourceKey: `grp:${groupId}`, scope: "current" });
   }, [
     memberPick, episodeId, entityPhs, infoNodePos, infoOffsets, persistInfoOffsets, persistEntityPhs,
