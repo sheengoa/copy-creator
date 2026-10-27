@@ -142,6 +142,27 @@ const parseScriptPhs = (raw: string): ScriptPh[] => {
   const list = JSON.parse(raw) as ScriptPh[];
   return Array.isArray(list) ? list.filter((item) => item && typeof item.id === "string") : [];
 };
+// 线段相交（同横坐标单调判定，经典叉积法）——切线的扫过判定用。
+const segsIntersect = (
+  a1: { x: number; y: number }, a2: { x: number; y: number },
+  b1: { x: number; y: number }, b2: { x: number; y: number },
+): boolean => {
+  const d = (b1.x - a1.x) * (a2.y - a1.y) - (b1.y - a1.y) * (a2.x - a1.x);
+  const e = (b2.x - a1.x) * (a2.y - a1.y) - (b2.y - a1.y) * (a2.x - a1.x);
+  const f = (b2.x - b1.x) * (a2.y - a1.y) - (b2.y - b1.y) * (a2.x - a1.x);
+  const g = (a1.x - b1.x) * (b2.y - b1.y) - (a1.y - b1.y) * (b2.x - b1.x);
+  return d * e < 0 && f * g < 0;
+};
+// 切割线段是否命中折线（连线按贝塞尔采样后的屏幕坐标点列）。
+const segHitsPolyline = (
+  a1: { x: number; y: number }, a2: { x: number; y: number },
+  pts: { x: number; y: number }[],
+): boolean => {
+  for (let i = 1; i < pts.length; i++) {
+    if (segsIntersect(a1, a2, pts[i - 1], pts[i])) return true;
+  }
+  return false;
+};
 interface CanvasFrame {
   id: string; // sceneId | "loose" | "info"
   scene: ProjectScene | null;
@@ -567,6 +588,9 @@ export default function ProjectCanvas({
       fromAccepts?: string[];
       fromPortId?: string;
     };
+    // 摘线到空白弹出的菜单：被摘的线（隐藏态）。菜单创建节点后转接并
+    // 删旧行；取消（点空白/Esc/建无口节点）则放回原口。
+    detached?: { pending: PendingLink | null; rows: ProjectNodeLink[] };
   } | null>(null);
   const [addMenuQuery, setAddMenuQuery] = useState("");
   // 资料关联面板开关（挂产出走片段详情窗口，见 detailFor）。
@@ -2002,7 +2026,7 @@ export default function ProjectCanvas({
   }, [scenes, layout.framePos]);
 
   interface DragState {
-    kind: "pan" | "marquee" | "card" | "loose" | "group" | "infoframe" | "wire" | "outnode" | "note" | "addnode" | "segment" | "placeholder" | "resize" | "infonode" | "multidrag";
+    kind: "pan" | "marquee" | "card" | "loose" | "group" | "infoframe" | "wire" | "outnode" | "note" | "addnode" | "segment" | "placeholder" | "resize" | "infonode" | "multidrag" | "wirecut";
     sx: number;
     sy: number;
     moved?: boolean;
@@ -2031,6 +2055,12 @@ export default function ProjectCanvas({
     fromPortId?: string; // 反拖：出发的输入口
     targetPort?: string | null; // 正拖：悬停片段上匹配的输入口
     invalid?: boolean; // 悬停目标类型不兼容
+    // ComfyUI 摘线：从已有连线的输入口按下，拿着原线换源/换节点，
+    // 而不是再拉一条新线。
+    rewire?: boolean;
+    // addnode：从「摘线到空白」菜单创建节点后要转接的摘下线
+    //（pending 一条或 db 多行），创建成功即删旧写新，取消则放回。
+    detached?: { pending: PendingLink | null; rows: ProjectNodeLink[] };
     wire?: { // addnode：从「拖线到空白」菜单创建节点后要自动接的线
       fromKey: string;
       fromDir: "out" | "in";
@@ -2045,10 +2075,74 @@ export default function ProjectCanvas({
   const [wireDraft, setWireDraft] = useState<{ d: string; invalid: boolean; color?: string } | null>(null);
   // 拖线悬停高亮的目标节点（ComfyUI 落点亮框），松手/取消时清除。
   const wireHoverRef = useRef<Element | null>(null);
+  // ComfyUI 摘线：点击已连线的输入口把线「摘下来拿着」——原线进入隐藏
+  // 态（渲染层过滤），松手时换源转接 / 交给添加菜单（建新节点即转接）/
+  // 无效落点原样放回。行数据不预先删除，收尾才落库。
+  interface LiftedWire {
+    fromKey: string; // 视觉线的源节点 key（组线为整组承载节点）
+    pending: PendingLink | null;
+    rows: ProjectNodeLink[];
+  }
+  const [liftedWire, setLiftedWire] = useState<LiftedWire | null>(null);
+  const liftedRef = useRef<LiftedWire | null>(null);
+  useEffect(() => {
+    liftedRef.current = liftedWire;
+  }, [liftedWire]);
+  // Blender 式切线（Shift+右键滑动）：切痕（屏幕坐标）与候选线缓存。
+  const [cutLine, setCutLine] = useState<{ x1: number; y1: number; x2: number; y2: number } | null>(null);
+  const cutTargetsRef = useRef<{ pts: { x: number; y: number }[]; done: boolean; del: () => void }[] | null>(null);
+
+  // 切线候选：所有可切连线（g[data-cut]）的屏幕坐标采样折线 + 删除分发。
+  // 隐式聚合线（片段→成片）无 data-cut，不参与切线。
+  const buildCutTargets = useCallback(() => {
+    const svg = vpRef.current?.querySelector("svg.pc-wires");
+    if (!svg) return [];
+    const targets: { pts: { x: number; y: number }[]; done: boolean; del: () => void }[] = [];
+    svg.querySelectorAll<SVGGElement>("g.pc-wire[data-cut]").forEach((g) => {
+      const path = g.querySelector("path.pc-wire-line") as SVGPathElement | null;
+      const ctm = path?.getScreenCTM();
+      if (!path || !ctm) return;
+      const len = path.getTotalLength();
+      if (len <= 0) return;
+      const pts: { x: number; y: number }[] = [];
+      const N = 24;
+      for (let i = 0; i <= N; i++) {
+        const pt = path.getPointAtLength((len * i) / N);
+        const sp = new DOMPoint(pt.x, pt.y).matrixTransform(ctm);
+        pts.push({ x: sp.x, y: sp.y });
+      }
+      const cutId = g.getAttribute("data-cut") ?? "";
+      targets.push({
+        pts,
+        done: false,
+        del: () => {
+          if (cutId.startsWith("m:")) {
+            const [fromKey, toKey] = cutId.slice(2).split("|");
+            void unlinkAssets(fromKey, toKey);
+          } else if (cutId.startsWith("s:")) {
+            const group = segWires.find((w) => w.links[0]?.id === cutId.slice(2));
+            group?.links.forEach((l) => {
+              void unlinkNode(l.from_kind, l.from_id, l.to_segment, l.to_port);
+            });
+          } else if (cutId.startsWith("p:")) {
+            const [fromKey, segId, port] = cutId.slice(2).split("|");
+            persistPendingLinks(
+              pendingLinks.filter((l) => !(l.fromKey === fromKey && l.toSegmentId === segId && l.toPort === port)),
+            );
+          } else if (cutId === "o") {
+            void setEpisodeOutput(episodeId, null);
+          }
+        },
+      });
+    });
+    return targets;
+  }, [segWires, pendingLinks, unlinkAssets, unlinkNode, persistPendingLinks, setEpisodeOutput, episodeId]);
 
   const onViewportMouseDown = useCallback(
     (e: React.MouseEvent) => {
       const target = e.target instanceof Element ? e.target : null;
+      // 关闭节点选择框：摘线交给菜单（detached）而未落定时，放回原口。
+      if (addMenu?.detached) setLiftedWire(null);
       setAddMenu(null);
       // 便签卡：按下即拖动（编辑态与缩放手柄除外）；已在多选中时整组拖。
       const noteEl = target?.closest(".pc-note");
@@ -2145,6 +2239,15 @@ export default function ProjectCanvas({
         e.preventDefault();
         return;
       }
+      // Blender 式切线：Shift+右键滑动，扫过的连线即时切断（光标变刀、
+      // 拖出亮色切痕）。候选线在按下时采样缓存，滑动中逐段判定相交。
+      if (e.button === 2 && e.shiftKey) {
+        dragRef.current = { kind: "wirecut", sx: e.clientX, sy: e.clientY, moved: false };
+        vp.classList.add("pc-cutting");
+        cutTargetsRef.current = buildCutTargets();
+        e.preventDefault();
+        return;
+      }
       if (e.button !== 0) return;
       const port = target?.closest(".pc-port") as HTMLElement | null;
       if (port) {
@@ -2154,6 +2257,31 @@ export default function ProjectCanvas({
         const portId = port.dataset.portId ?? "";
         const ports = portsOf(key);
         const inPort = ports.ins.find((item) => item.id === portId);
+        // ComfyUI 摘线：点击已连线的片段输入口 → 摘下那条线拿着（换源），
+        // 而不是再拉一条新线。成片输入口是隐式聚合（无连线数据）不摘。
+        if (dir === "in" && inPort && key.startsWith("segment:")) {
+          const segId = key.slice(8);
+          const pend = pendingLinks.filter((l) => l.toSegmentId === segId && l.toPort === portId).at(-1) ?? null;
+          let rows: ProjectNodeLink[] = [];
+          const cand = nodeLinks.filter((l) => l.to_segment === segId && l.to_port === portId);
+          if (!pend && cand.length > 0) {
+            const last = cand[cand.length - 1];
+            rows = cand.filter((l) => l.from_kind === last.from_kind && l.from_id === last.from_id);
+          }
+          if (pend || rows.length > 0) {
+            const fromKey = pend ? pend.fromKey : ownerKeyOf(rows[0].from_kind, rows[0].from_id);
+            setLiftedWire({ fromKey, pending: pend, rows });
+            vp.classList.add("pc-wiring");
+            port.classList.add("pc-port-active");
+            dragRef.current = {
+              kind: "wire", sx: e.clientX, sy: e.clientY, moved: false, rewire: true,
+              fromKey: key, targetKey: null, targetPort: null,
+              fromDir: "in", fromAccepts: inPort.accepts, fromPortId: portId,
+            };
+            e.preventDefault();
+            return;
+          }
+        }
         if (key && (dir === "out" ? ports.out : inPort)) {
           vp.classList.add("pc-wiring");
           // 源端口点亮：即使草稿线被渲染环境吞掉，按下即有可见状态。
@@ -2321,7 +2449,7 @@ export default function ProjectCanvas({
       dragRef.current = { kind: "marquee", sx: e.clientX, sy: e.clientY, mq, moved: false };
       e.preventDefault();
     },
-    [layout, pos, setSelection, view, infoPos, scenePos, portsOf, outputBox, notes, segPos, placeholders, sizeOfNode, infoNodePos, nodeSizes, groupSnapshot, nodeGroups, memberFrame],
+    [layout, pos, setSelection, view, infoPos, scenePos, portsOf, outputBox, notes, segPos, placeholders, sizeOfNode, infoNodePos, nodeSizes, groupSnapshot, nodeGroups, memberFrame, addMenu, nodeLinks, pendingLinks, ownerKeyOf, buildCutTargets, setLiftedWire],
   );
 
 
@@ -2460,6 +2588,24 @@ export default function ProjectCanvas({
           ...prev,
           [key]: { x: (drag.ox ?? 0) + dx / view.scale, y: (drag.oy ?? 0) + dy / view.scale },
         }));
+      } else if (drag.kind === "wirecut") {
+        // 切痕延伸 + 实时判定：本段轨迹扫过哪条连线就立即切断哪条。
+        const from = { x: drag.px ?? drag.sx, y: drag.py ?? drag.sy };
+        const to = { x: e.clientX, y: e.clientY };
+        drag.px = to.x;
+        drag.py = to.y;
+        drag.moved = true;
+        setCutLine({ x1: drag.sx, y1: drag.sy, x2: to.x, y2: to.y });
+        const targets = cutTargetsRef.current;
+        if (targets) {
+          for (const t of targets) {
+            if (t.done) continue;
+            if (segHitsPolyline(from, to, t.pts)) {
+              t.done = true;
+              t.del();
+            }
+          }
+        }
       } else if (drag.kind === "wire") {
         const el = vpRef.current;
         if (!el || !drag.fromKey) return;
@@ -2559,10 +2705,72 @@ export default function ProjectCanvas({
       if (!drag) return;
       if (drag.kind === "pan") {
         if (drag.moved) saveView(view);
+      } else if (drag.kind === "wirecut") {
+        vpRef.current?.classList.remove("pc-cutting");
+        cutTargetsRef.current = null;
+        setCutLine(null);
       } else if (drag.kind === "wire") {
         wireHoverRef.current?.classList.remove("pc-wire-target");
         wireHoverRef.current = null;
         setWireDraft(null);
+        if (drag.rewire) {
+          // ComfyUI 摘线收尾：换源转接 / 空白交给菜单（建节点即转接）/
+          // 其余一律放回（行数据未删，清掉 lifted 即恢复原线）。
+          const lifted = liftedRef.current;
+          if (drag.targetKey && drag.moved && lifted) {
+            setLiftedWire(null);
+            const source = nodeKeyParts(drag.targetKey);
+            const sameAsOld = lifted.pending
+              ? drag.targetKey === lifted.pending.fromKey
+              : !!source && lifted.rows.every((r) => r.from_kind === source.kind && r.from_id === source.id);
+            if (source && !sameAsOld) {
+              if (lifted.pending) {
+                persistPendingLinks(pendingLinks.filter((l) => l !== lifted.pending));
+                void linkNode(
+                  episodeId, source.kind, source.id,
+                  lifted.pending.toSegmentId, lifted.pending.toPort as ProjectNodeLink["to_port"],
+                );
+              } else {
+                lifted.rows.forEach((row) => {
+                  void unlinkNode(row.from_kind, row.from_id, row.to_segment, row.to_port);
+                  void linkNode(episodeId, source.kind, source.id, row.to_segment, row.to_port);
+                });
+              }
+            }
+          } else if (!drag.targetKey && drag.moved && lifted) {
+            const hitEl = document.elementFromPoint(e.clientX, e.clientY);
+            const landed = hitEl instanceof Element
+              ? hitEl.closest(".pc-node, .pc-note, .pc-glass, .pc-checkbar")
+              : null;
+            if (!landed) {
+              const el = vpRef.current;
+              if (el) {
+                const rect = el.getBoundingClientRect();
+                setAddMenu({
+                  sx: e.clientX - rect.left,
+                  sy: e.clientY - rect.top,
+                  wx: (e.clientX - rect.left - view.x) / view.scale,
+                  wy: (e.clientY - rect.top - view.y) / view.scale,
+                  wire: {
+                    fromKey: drag.fromKey ?? "",
+                    fromDir: "in",
+                    fromAccepts: drag.fromAccepts,
+                    fromPortId: drag.fromPortId,
+                  },
+                  detached: { pending: lifted.pending, rows: lifted.rows },
+                });
+                setAddMenuQuery("");
+              } else {
+                setLiftedWire(null);
+              }
+            } else {
+              setLiftedWire(null);
+            }
+          } else {
+            setLiftedWire(null);
+          }
+          return;
+        }
         if (drag.targetKey && drag.fromKey) {
           // 反拖（从输入口出发）时落点才是数据的来源方；落到成片节点
           // （key "output"）即设置本集总输出；落到片段的某个输入口则写
@@ -2806,8 +3014,43 @@ export default function ProjectCanvas({
               y: (e.clientY - rect.top - view.y) / view.scale,
             }
           : { x: drag.fox ?? 0, y: drag.foy ?? 0 };
+        // 摘线到空白后建节点的收尾：新节点接回原口（pending 转接或正式
+        // 行换源），并删除被摘的旧行；便签（无口）等放回。
+        const finishDetached = (newKey: string | null) => {
+          const d = drag.detached;
+          if (!d) return;
+          setLiftedWire(null);
+          if (!newKey) return;
+          if (d.pending) {
+            // 片段新源走 autoConnect 正式线（只删旧暂存）；占位新源没有
+            // 库身份，autoConnect 不接线——旧暂存线换新源原样转接。
+            const parts = nodeKeyParts(newKey);
+            const next = [...pendingLinks.filter((l) => l !== d.pending)];
+            if (!parts) {
+              next.push({ fromKey: newKey, toSegmentId: d.pending.toSegmentId, toPort: d.pending.toPort });
+            }
+            persistPendingLinks(next);
+            return;
+          }
+          const parts = nodeKeyParts(newKey);
+          d.rows.forEach((row) => {
+            void unlinkNode(row.from_kind, row.from_id, row.to_segment, row.to_port);
+          });
+          if (parts) {
+            d.rows.forEach((row) => {
+              void linkNode(episodeId, parts.kind, parts.id, row.to_segment, row.to_port);
+            });
+          } else if (d.rows.length > 0) {
+            // 占位新源没有库身份：转暂存线，装载实体后照常转正。
+            persistPendingLinks([
+              ...pendingLinks,
+              { fromKey: newKey, toSegmentId: d.rows[0].to_segment, toPort: d.rows[0].to_port },
+            ]);
+          }
+        };
         if (drag.frameKey === "note") {
           addNote(dropPos.x, dropPos.y);
+          finishDetached(null);
         } else if (drag.frameKey === "segment") {
           void addSegment(episodeId).then((segment) => {
             if (segment) {
@@ -2816,6 +3059,9 @@ export default function ProjectCanvas({
                 segments: [{ id: segment.id, x: dropPos.x, y: dropPos.y }],
               });
               autoConnectNewNode(`segment:${segment.id}`, drag.wire);
+              finishDetached(`segment:${segment.id}`);
+            } else {
+              finishDetached(null);
             }
           });
         } else if (
@@ -2825,11 +3071,13 @@ export default function ProjectCanvas({
         ) {
           // 「角色/场景/道具」：创建空白资料占位节点（不入库、不弹挑选
           // 面板），双击占位节点从详情窗加载实体；加载后原位变成实体节点。
-          addEntityPh(drag.frameKey, dropPos.x, dropPos.y);
+          const phId = addEntityPh(drag.frameKey, dropPos.x, dropPos.y);
+          finishDetached(`eph:${phId}`);
         } else {
           // 「素材」：创建空占位节点（不入库），双击占位节点才从库挑
           // 文件填充；填充后落位在占位节点处。
-          addPlaceholder(dropPos.x, dropPos.y);
+          const phId = addPlaceholder(dropPos.x, dropPos.y);
+          finishDetached(`placeholder:${phId}`);
         }
       } else if (drag.kind === "marquee") {
         const list: string[] = [];
@@ -2932,7 +3180,7 @@ export default function ProjectCanvas({
       document.removeEventListener("mousemove", onMove);
       document.removeEventListener("mouseup", onUp);
     };
-  }, [layout, pos, view, scenePos, infoPos, boxOf, portsOf, outPointOf, inPointOf, linkAssets, persistCards, persistLoose, saveCanvasLayout, saveInfoFramePos, saveView, setSelection, saveOutputPos, setEpisodeOutput, episodeId, notes, persistNotes, addNote, addPlaceholder, addEntityPh, persistPlaceholders, persistSegments, linkNode, nodeKeyParts, addSegment, autoConnectNewNode, persistSizes, persistInfoOffsets, infoGroups, infoNodes, infoNodePos, entityPhs, segments, segPos, placeholders, sizeOfNode, outputBox, moveGroupTo, persistPositions, pushUndo, pendingLinks, persistPendingLinks, setInfoFramePos, setInfoOffsets, setNodeSizes, setNotes, setOutputPos, setPlaceholders]);
+  }, [layout, pos, view, scenePos, infoPos, boxOf, portsOf, outPointOf, inPointOf, linkAssets, persistCards, persistLoose, saveCanvasLayout, saveInfoFramePos, saveView, setSelection, saveOutputPos, setEpisodeOutput, episodeId, notes, persistNotes, addNote, addPlaceholder, addEntityPh, persistPlaceholders, persistSegments, linkNode, unlinkNode, nodeKeyParts, addSegment, autoConnectNewNode, persistSizes, persistInfoOffsets, infoGroups, infoNodes, infoNodePos, entityPhs, segments, segPos, placeholders, sizeOfNode, outputBox, moveGroupTo, persistPositions, pushUndo, pendingLinks, persistPendingLinks, setInfoFramePos, setInfoOffsets, setNodeSizes, setNotes, setOutputPos, setPlaceholders]);
 
   // ── 节点操作 ──
   // 节点接口圆点（ComfyUI 式）：输入口列在左缘（片段五口按列分布）、
@@ -3860,6 +4108,8 @@ export default function ProjectCanvas({
         ref={vpRef}
         className="pc-viewport"
         onMouseDown={onViewportMouseDown}
+        // Shift+右键是切线手势：不弹浏览器右键菜单。
+        onContextMenu={(e) => e.preventDefault()}
         onClickCapture={(e) => {
           if (!suppressClickRef.current) return;
           e.stopPropagation();
@@ -3996,76 +4246,59 @@ export default function ProjectCanvas({
               const b = inPointOf(wire.toKey);
               if (!a || !b) return null;
               const d = wirePathD(a, b);
-              const midX = (a.x + b.x) / 2;
-              const midY = (a.y + b.y) / 2;
               const color = WIRE_TYPE_COLORS[wire.type] ?? "#94a3b8";
               return (
-                <g key={`${wire.fromKey}->${wire.toKey}`} className="pc-wire">
+                <g
+                  key={`${wire.fromKey}->${wire.toKey}`}
+                  className="pc-wire"
+                  data-cut={wire.kind === "manual" ? `m:${wire.fromKey}|${wire.toKey}` : undefined}
+                >
                   <path className="pc-wire-hit" d={d} />
                   <path className="pc-wire-line" d={d} style={{ stroke: color }} />
-                  {wire.kind === "manual" && (
-                    <g
-                      className="pc-wire-del"
-                      data-tooltip={t("project.canvas.wireRemove")}
-                      onClick={() => void unlinkAssets(wire.fromKey, wire.toKey)}
-                    >
-                      <circle cx={midX} cy={midY} r="9" />
-                      <path d={`M${midX - 4} ${midY - 4} l8 8 M${midX + 4} ${midY - 4} l-8 8`} />
-                    </g>
-                  )}
                 </g>
               );
             })}
             {/* 片段输入口连线（角色/场景/道具/剧本/素材/片段 → 片段口）。
                 组节点的多条成员连线按承载节点去重成一条，删线全断。 */}
             {segWires.map((wire) => {
+              // 被摘下的线（拿着换源中）暂时隐藏，收尾时转接或放回。
+              if (liftedWire && !liftedWire.pending && wire.links.some((l) => liftedWire.rows.some((r) => r.id === l.id))) return null;
               const link = wire.links[0];
               const a = outPointOf(wire.fromKey);
               const b = inPointOf(`segment:${link.to_segment}`, link.to_port);
               if (!a || !b) return null;
               const d = wirePathD(a, b);
-              const midX = (a.x + b.x) / 2;
-              const midY = (a.y + b.y) / 2;
               // 线色随来源数据类型（角色/场景/道具图绿、剧本橙、片段紫）。
               const fromType = portsOf(wire.fromKey).out?.type;
               return (
-                <g key={wire.key} className="pc-wire">
+                <g key={wire.key} className="pc-wire" data-cut={`s:${link.id}`}>
                   <path className="pc-wire-hit" d={d} />
                   <path
                     className="pc-wire-line"
                     d={d}
                     style={{ stroke: WIRE_TYPE_COLORS[fromType ?? ""] ?? WIRE_TYPE_COLORS.video, strokeOpacity: 0.55 }}
                   />
-                  <g
-                    className="pc-wire-del"
-                    data-tooltip={t("project.canvas.wireRemove")}
-                    onClick={() => {
-                      wire.links.forEach((l) => {
-                        void unlinkNode(l.from_kind, l.from_id, l.to_segment, l.to_port);
-                      });
-                    }}
-                  >
-                    <circle cx={midX} cy={midY} r="9" />
-                    <path d={`M${midX - 4} ${midY - 4} l8 8 M${midX + 4} ${midY - 4} l-8 8`} />
-                  </g>
                 </g>
               );
             })}
-            {/* 占位节点 → 片段的暂存线：虚线区别于正式连线（未加载实体，
-                加载后转正为实线 node_link）；悬停删除按钮直接移除暂存。 */}
+            {/* 占位/剧本纸片 → 片段的暂存线：占位线虚线（加载实体后转正
+                为实线 node_link），剧本纸片线实线（画布层即最终形态）。 */}
             {pendingLinks.map((link) => {
+              if (liftedWire?.pending && link === liftedWire.pending) return null;
               const a = outPointOf(link.fromKey);
               const b = inPointOf(`segment:${link.toSegmentId}`, link.toPort);
               if (!a || !b) return null;
               const d = wirePathD(a, b);
-              const midX = (a.x + b.x) / 2;
-              const midY = (a.y + b.y) / 2;
               const fromType = portsOf(link.fromKey).out?.type;
               // 剧本纸片的暂存线不存在「加载转正」，画布层即最终形态：画
               // 实线（低不透明度，与正式连线区分）；占位暂存线保持虚线。
               const solid = link.fromKey.startsWith("script:");
               return (
-                <g key={`pending-${link.fromKey}-${link.toSegmentId}-${link.toPort}`} className="pc-wire">
+                <g
+                  key={`pending-${link.fromKey}-${link.toSegmentId}-${link.toPort}`}
+                  className="pc-wire"
+                  data-cut={`p:${link.fromKey}|${link.toSegmentId}|${link.toPort}`}
+                >
                   <path className="pc-wire-hit" d={d} />
                   <path
                     className="pc-wire-line"
@@ -4076,16 +4309,6 @@ export default function ProjectCanvas({
                       strokeDasharray: solid ? undefined : "7 5",
                     }}
                   />
-                  <g
-                    className="pc-wire-del"
-                    data-tooltip={t("project.canvas.wireRemove")}
-                    onClick={() =>
-                      persistPendingLinks(pendingLinks.filter((l) => l !== link))
-                    }
-                  >
-                    <circle cx={midX} cy={midY} r="9" />
-                    <path d={`M${midX - 4} ${midY - 4} l8 8 M${midX + 4} ${midY - 4} l-8 8`} />
-                  </g>
                 </g>
               );
             })}
@@ -4123,29 +4346,26 @@ export default function ProjectCanvas({
               const b = inPointOf("output");
               if (!a || !b) return null;
               const d = wirePathD(a, b);
-              const midX = (a.x + b.x) / 2;
-              const midY = (a.y + b.y) / 2;
               return (
-                <g className="pc-wire">
+                <g className="pc-wire" data-cut="o">
                   <path className="pc-wire-hit" d={d} />
                   <path
                     className="pc-wire-line"
                     d={d}
                     style={{ stroke: WIRE_TYPE_COLORS.video }}
                   />
-                  <g
-                    className="pc-wire-del"
-                    data-tooltip={t("project.canvas.wireRemove")}
-                    onClick={() => void setEpisodeOutput(episodeId, null)}
-                  >
-                    <circle cx={midX} cy={midY} r="9" />
-                    <path d={`M${midX - 4} ${midY - 4} l8 8 M${midX + 4} ${midY - 4} l-8 8`} />
-                  </g>
                 </g>
               );
             })()}
             </g>
           </svg>
+
+          {/* 切线拖痕（Blender 式）：覆盖视口的固定层，屏幕坐标即时绘制 */}
+          {cutLine && (
+            <svg className="pc-cutlayer" aria-hidden="true">
+              <line className="pc-wire-cut" x1={cutLine.x1} y1={cutLine.y1} x2={cutLine.x2} y2={cutLine.y2} />
+            </svg>
+          )}
 
           {/* 镜头卡 */}
           {layout.cards.map((card) => {
@@ -4832,7 +5052,11 @@ export default function ProjectCanvas({
               value={addMenuQuery}
               onChange={(event) => setAddMenuQuery(event.target.value)}
               onKeyDown={(event) => {
-                if (event.key === "Escape") setAddMenu(null);
+                if (event.key === "Escape") {
+                  // 取消菜单：摘线交给菜单而未落定时放回原口。
+                  if (addMenu.detached) setLiftedWire(null);
+                  setAddMenu(null);
+                }
               }}
               autoFocus
             />
@@ -4920,6 +5144,8 @@ export default function ProjectCanvas({
                   {...(item.panel === "script"
                     ? {
                         onClick: () => {
+                          // 纸片不接线：被摘的线放回原口。
+                          if (addMenu.detached) setLiftedWire(null);
                           setAddMenu(null);
                           setAddMenuQuery("");
                           // 与其他节点统一：每次都放一个空剧本纸片（出生在
@@ -4932,6 +5158,8 @@ export default function ProjectCanvas({
                     : item.panel === "linkScene"
                       ? {
                           onClick: () => {
+                            // 场景挑选面板不自接线：被摘的线放回原口。
+                            if (addMenu.detached) setLiftedWire(null);
                             setAddMenu(null);
                             setAddMenuQuery("");
                             // 新关联的场景节点出生在双击位置（视线附近）。
@@ -4948,6 +5176,7 @@ export default function ProjectCanvas({
                               kind: "addnode", sx: event.clientX, sy: event.clientY, moved: false,
                               fox: addMenu.wx, foy: addMenu.wy, frameKey: item.key,
                               wire: addMenu.wire,
+                              detached: addMenu.detached,
                             };
                             setAddMenu(null);
                             setAddMenuQuery("");

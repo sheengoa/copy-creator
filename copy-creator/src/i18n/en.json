@@ -465,8 +465,7 @@
       }
     },
     "canvas": {
-      "tip": "Middle-drag to pan · Wheel to zoom · Left-drag to marquee · Drag nodes to arrange · Double-click empty space to add nodes · Drag from an output port (right edge) to an input port (left edge); types must match · Double-click episode title to rename",
-      "wireRemove": "Remove wire",
+      "tip": "Middle-drag to pan · Wheel to zoom · Left-drag to marquee · Drag nodes to arrange · Double-click empty space to add nodes · Drag from an output port (right edge) to an input port (left edge); types must match · Click a wired input port to lift its wire and re-source it · Shift + right-drag across a wire to cut it · Double-click episode title to rename",
       "view": "Inspect",
       "openFile": "Reveal in file manager",
       "remove": "Remove",

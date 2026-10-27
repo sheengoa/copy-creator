@@ -1461,6 +1461,10 @@
   background-size: 22px 22px;
 }
 .pc-viewport.pc-panning { cursor: grabbing; }
+/* Blender 式切线：光标换小刀（hotspot 3,3 = 刀尖），滑动中保持。 */
+.pc-viewport.pc-cutting, .pc-viewport.pc-cutting * {
+  cursor: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='24' height='24'><path d='M3 3 L14 14 L11.5 16.5 L3 8.5 Z' fill='%23ffffff' stroke='%23333333' stroke-width='1.4'/><path d='M12.5 16 L19.5 22.5' stroke='%23a07840' stroke-width='3.2' stroke-linecap='round'/><path d='M12.5 16 L19.5 22.5' stroke='%236b4f2a' stroke-width='1.2' stroke-linecap='round'/></svg>") 3 3, crosshair;
+}
 /* 拖线中：全程十字光标（即使草稿线被环境吞掉也有状态反馈） */
 .pc-viewport.pc-wiring, .pc-viewport.pc-wiring .pc-node, .pc-viewport.pc-wiring .pc-note { cursor: crosshair; }
 .pc-world { position: absolute; left: 0; top: 0; transform-origin: 0 0; }
@@ -1754,10 +1758,16 @@
 .pc-wire-hit { fill: none; stroke: transparent; stroke-width: 16; pointer-events: stroke; cursor: pointer; }
 .pc-wire-line { fill: none; stroke-width: 2.6; stroke-opacity: 0.95; }
 .pc-wire:hover .pc-wire-line { stroke-width: 3.6; stroke-opacity: 1; }
-.pc-wire-del { opacity: 0; transition: opacity 0.12s ease; pointer-events: none; }
-.pc-wire:hover .pc-wire-del { opacity: 1; pointer-events: auto; }
-.pc-wire-del circle { fill: var(--danger); }
-.pc-wire-del path { stroke: #fff; stroke-width: 2; fill: none; }
+/* 切线拖痕：白色亮线划过即断（Blender knife 手势的视觉对应物）。 */
+.pc-cutlayer { position: fixed; inset: 0; width: 100%; height: 100%; pointer-events: none; z-index: 80; }
+.pc-wire-cut {
+  stroke: #fff;
+  stroke-width: 2.4;
+  stroke-linecap: round;
+  opacity: 0.9;
+  filter: drop-shadow(0 0 5px rgba(255, 255, 255, 0.75));
+}
+[data-theme="dark"] .pc-wire-cut { filter: drop-shadow(0 0 5px rgba(255, 255, 255, 0.55)); }
 /* 拖拽中的线与落定的线同一规格（实线、同粗细同透明度），全程视觉统一；
    仅非法落点仍标红提示。 */
 .pc-wire-temp { fill: none; stroke: var(--text-secondary); stroke-width: 2.6; stroke-opacity: 0.95; }
