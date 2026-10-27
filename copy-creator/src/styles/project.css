@@ -1461,9 +1461,10 @@
   background-size: 22px 22px;
 }
 .pc-viewport.pc-panning { cursor: grabbing; }
-/* Blender 式切线：光标换小刀（hotspot 3,3 = 刀尖），滑动中保持。 */
+/* Blender 式切线：光标换小刀（hotspot 3,21 = 刀尖），滑动中保持。
+   刀刃朝下（刀尖在左下、刀柄伸向右上），与切割方向视觉一致。 */
 .pc-viewport.pc-cutting, .pc-viewport.pc-cutting * {
-  cursor: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='24' height='24'><path d='M3 3 L14 14 L11.5 16.5 L3 8.5 Z' fill='%23ffffff' stroke='%23333333' stroke-width='1.4'/><path d='M12.5 16 L19.5 22.5' stroke='%23a07840' stroke-width='3.2' stroke-linecap='round'/><path d='M12.5 16 L19.5 22.5' stroke='%236b4f2a' stroke-width='1.2' stroke-linecap='round'/></svg>") 3 3, crosshair;
+  cursor: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='24' height='24'><path d='M3 21 L14 10 L11.5 7.5 L3 15.5 Z' fill='%23ffffff' stroke='%23333333' stroke-width='1.4'/><path d='M12.5 8 L19.5 1.5' stroke='%23a07840' stroke-width='3.2' stroke-linecap='round'/><path d='M12.5 8 L19.5 1.5' stroke='%236b4f2a' stroke-width='1.2' stroke-linecap='round'/></svg>") 3 21, crosshair;
 }
 /* 拖线中：全程十字光标（即使草稿线被环境吞掉也有状态反馈） */
 .pc-viewport.pc-wiring, .pc-viewport.pc-wiring .pc-node, .pc-viewport.pc-wiring .pc-note { cursor: crosshair; }

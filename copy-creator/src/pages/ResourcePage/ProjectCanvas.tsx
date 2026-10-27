@@ -1676,6 +1676,21 @@ export default function ProjectCanvas({
     return () => el.removeEventListener("wheel", onWheel);
   }, [zoomAt]);
 
+  // 视口永远不该被滚动（平移/缩放都走 transform）：overflow:hidden 的
+  // 容器仍会被「聚焦滚动」推动——弹层搜索框、便签输入框等聚焦在视口
+  // 边缘外时，浏览器会滚动容器把聚焦元素露出，表现为整个画布节点集体
+  // 平移（连线/断线时位置漂移的根源）。这里把任何滚动立即归零，根治
+  // 所有聚焦滚动路径；归零引发的再入 scroll 事件值为 0，不会成环。
+  useEffect(() => {
+    const el = vpRef.current;
+    if (!el) return;
+    const onScroll = () => {
+      if (el.scrollLeft !== 0 || el.scrollTop !== 0) el.scrollTo(0, 0);
+    };
+    el.addEventListener("scroll", onScroll);
+    return () => el.removeEventListener("scroll", onScroll);
+  }, []);
+
   // ── 连线：容器（镜头卡/散件）之间的生成链 + 手动线 ──
   const containerOf = useCallback(
     (assetId: string): string | null => {
@@ -2185,6 +2200,11 @@ export default function ProjectCanvas({
         wireHoverRef.current = null;
         vpRef.current?.classList.remove("pc-cutting");
         cutTargetsRef.current = null;
+        // 残留若是切线手势，切痕 polyline 也要一并清空——上面只复位了
+        // 状态，轨迹点留在层上会以「白色划痕」形式常驻画布。
+        cutPointsRef.current = [];
+        cutTrailUnderRef.current?.setAttribute("points", "");
+        cutTrailRef.current?.setAttribute("points", "");
       }
       // 便签卡：按下即拖动（编辑态与缩放手柄除外）；已在多选中时整组拖。
       const noteEl = target?.closest(".pc-note");
@@ -2281,9 +2301,9 @@ export default function ProjectCanvas({
         e.preventDefault();
         return;
       }
-      // Blender 式切线：Shift+右键滑动，扫过的连线即时切断（光标变刀、
-      // 拖出亮色切痕）。候选线在按下时采样缓存，滑动中逐段判定相交。
-      if (e.button === 2 && e.shiftKey) {
+      // Blender 式切线：Shift/Ctrl+右键滑动，扫过的连线即时切断（光标变
+      // 刀、拖出亮色切痕）。候选线在按下时采样缓存，滑动中逐段判定相交。
+      if (e.button === 2 && (e.shiftKey || e.ctrlKey)) {
         dragRef.current = { kind: "wirecut", sx: e.clientX, sy: e.clientY, moved: false };
         cutPointsRef.current = [];
         vp.classList.add("pc-cutting");
@@ -2718,6 +2738,19 @@ export default function ProjectCanvas({
           [key]: { x: (drag.ox ?? 0) + dx / view.scale, y: (drag.oy ?? 0) + dy / view.scale },
         }));
       } else if (drag.kind === "wirecut") {
+        // 松手事件丢失（松在窗外、系统手势吞掉 mouseup）时右键已弹起，
+        // 拖拽态却还挂着：之后每次移动都会续画切痕并误切连线——表现为
+        // 「划痕满屏」。按 e.buttons 自愈：右键不在按下态即等同松手，
+        // 就地收尾（与 onUp 的 wirecut 分支同一套清理）。
+        if ((e.buttons & 2) === 0) {
+          vpRef.current?.classList.remove("pc-cutting");
+          cutTargetsRef.current = null;
+          cutPointsRef.current = [];
+          cutTrailUnderRef.current?.setAttribute("points", "");
+          cutTrailRef.current?.setAttribute("points", "");
+          dragRef.current = null;
+          return;
+        }
         // 切痕延伸 + 实时判定：本段轨迹扫过哪条连线就立即切断哪条。
         const from = { x: drag.px ?? drag.sx, y: drag.py ?? drag.sy };
         const to = { x: e.clientX, y: e.clientY };
@@ -4449,8 +4482,9 @@ export default function ProjectCanvas({
                 </g>
               );
             })}
-            {/* 占位/剧本纸片 → 片段的暂存线：占位线虚线（加载实体后转正
-                为实线 node_link），剧本纸片线实线（画布层即最终形态）。 */}
+            {/* 占位/剧本纸片 → 片段的暂存线：一律实线（连线无虚线是全局
+                视觉约定）；占位线不透明度略高作区分，加载实体后转正为
+                正式 node_link 连线。 */}
             {pendingLinks.map((link) => {
               if (liftedWire?.pending && link === liftedWire.pending) return null;
               const a = outPointOf(link.fromKey);
@@ -4458,8 +4492,6 @@ export default function ProjectCanvas({
               if (!a || !b) return null;
               const d = wirePathD(a, b);
               const fromType = portsOf(link.fromKey).out?.type;
-              // 剧本纸片的暂存线不存在「加载转正」，画布层即最终形态：画
-              // 实线（低不透明度，与正式连线区分）；占位暂存线保持虚线。
               const solid = link.fromKey.startsWith("script:");
               return (
                 <g
@@ -4474,7 +4506,6 @@ export default function ProjectCanvas({
                     style={{
                       stroke: WIRE_TYPE_COLORS[fromType ?? ""] ?? "#94a3b8",
                       strokeOpacity: solid ? 0.55 : 0.7,
-                      strokeDasharray: solid ? undefined : "7 5",
                     }}
                   />
                 </g>
@@ -5185,7 +5216,12 @@ export default function ProjectCanvas({
                   setAddMenu(null);
                 }
               }}
-              autoFocus
+              // 聚焦必须带 preventScroll：菜单常弹出在画布边缘，默认聚焦
+              // 会让浏览器滚动 overflow:hidden 的视口容器把输入框露出来，
+              // 表现为整个画布节点集体平移（连线/断线时位置漂移的根源）。
+              ref={(el) => {
+                el?.focus({ preventScroll: true });
+              }}
             />
             {[
               {
