@@ -23,6 +23,7 @@ import {
   intExtLabelKey,
   joinLibraryPath,
   locationSubtitleParts,
+  scriptFileLabel,
   timeHintLabelKey,
 } from "../../domain/projectView";
 
@@ -838,7 +839,7 @@ export default function ProjectCanvas({
     });
     if (overview?.episode.script_path) {
       list.push({
-        key: "script", kind: "script", name: scriptFileLabelOf(overview.episode.script_path),
+        key: "script", kind: "script", name: scriptFileLabel(overview.episode.script_path),
         avatarPath: "", textPath: overview.episode.script_path, w: SCRIPT_W, h: INFO_H + 40,
       });
     }
@@ -847,7 +848,7 @@ export default function ProjectCanvas({
     scriptPhs.forEach((ph) => {
       list.push({
         key: `script:${ph.id}`, kind: "script",
-        name: ph.path ? scriptFileLabelOf(ph.path) : t("project.canvas.scriptUntitled"),
+        name: ph.path ? scriptFileLabel(ph.path) : t("project.canvas.scriptUntitled"),
         avatarPath: "", textPath: ph.path, w: SCRIPT_W, h: INFO_H + 40,
       });
     });
@@ -3995,7 +3996,7 @@ export default function ProjectCanvas({
     const scriptPh = detailFor.phId ? scriptPhs.find((item) => item.id === detailFor.phId) : null;
     const scriptPath = scriptPh ? scriptPh.path : overview.episode.script_path;
     if (!scriptPath) return null;
-    const scriptName = scriptFileLabelOf(scriptPath);
+    const scriptName = scriptFileLabel(scriptPath);
     return (
       <ProjectNodeDetailDialog
         title={scriptName}
@@ -5445,9 +5446,4 @@ export default function ProjectCanvas({
       })()}
     </div>
   );
-}
-
-function scriptFileLabelOf(path: string): string {
-  const trimmed = path.replace(/\\/g, "/").split("/").pop() ?? path;
-  return trimmed;
 }

@@ -24,11 +24,11 @@ export function episodeNumberLabel(number: number): string {
   return String(number).padStart(2, "0");
 }
 
-/** 素材/剧本的显示名：显式 name 优先，回退路径末段文件名。 */
+/** 素材/剧本的显示名：显式 name 优先，回退路径末段文件名（容忍反斜杠分隔）。 */
 export function projectFileDisplayName(name: string, filePath: string): string {
   const explicit = name.trim();
   if (explicit) return explicit;
-  const segments = filePath.split("/").filter(Boolean);
+  const segments = filePath.replace(/\\/g, "/").split("/").filter(Boolean);
   return segments[segments.length - 1] ?? "";
 }
 
