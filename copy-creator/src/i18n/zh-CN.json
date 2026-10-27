@@ -467,8 +467,6 @@
     "canvas": {
       "tip": "中键拖动平移 · 滚轮缩放 · 左键框选 · 拖素材摆放 · 双击空白添加节点 · 从节点右侧输出口拖到左侧输入口连线（类型须匹配）· 双击集名改名",
       "wireRemove": "删除连线",
-      "wireHint": "按住拖到另一素材连出工作流",
-      "genTag": "AI 生成",
       "view": "放大查看",
       "openFile": "在文件管理器显示",
       "remove": "移除",
@@ -483,14 +481,11 @@
       "editShot": "编辑镜头",
       "sceneNo": "场景 {{no}}",
       "frameStats": "{{shots}} 镜头 · {{assets}} 素材",
-      "shotTag": "镜头 {{no}} · {{name}}",
       "statScenes": "场景 {{count}}",
       "statShots": "镜头 {{count}}",
       "statAssets": "素材 {{count}}",
       "statWires": "连线 {{count}}",
-      "infoFrame": "本集资料",
       "shotEmpty": "未挂素材 · 双击挂靠",
-      "typeShot": "镜头",
       "typeImage": "图片",
       "typeVideo": "视频",
       "typeText": "文本",
@@ -531,8 +526,6 @@
       "typeCharacterHint": "创建空白角色节点，双击加载",
       "typeLocationHint": "创建空白场景节点，双击加载",
       "typePropHint": "创建空白道具节点，双击加载",
-      "linkCast": "出场角色",
-      "linkProps": "出场道具",
       "typeEpisode": "剧本",
       "typeEpisodeHint": "添加剧本节点 · 双击选择文件",
       "scriptUntitled": "未挂接",
@@ -566,7 +559,6 @@
       "ephUnloaded": "未加载",
       "ephPickHint": "点击从对应库挑选并加载到本节点",
       "ephLoad": "从库加载…",
-      "ephBindTitle": "加载{{kind}}",
       "detailRemoveMember": "从本节点移除",
       "detailAddMember": "加入本节点",
       "memberPickTitle": "装入{{kind}}",
@@ -628,8 +620,6 @@
       }
     },
     "scene": {
-      "empty": "本集还没有场景，从剧本的每一场开始建",
-      "new": "新建场景",
       "untitled": "未命名场景",
       "field": {
         "heading": "场景标题",
@@ -637,28 +627,14 @@
         "location": "引用场景库",
         "freeLocation": "不引用（自由场景）"
       },
-      "moveUp": "上移",
-      "moveDown": "下移",
       "deleteConfirm": "该操作不可撤销。删除「{{heading}}」及其镜头？素材档案会保留为集级散件。"
     },
     "shot": {
-      "new": "镜头",
       "untitled": "未写镜头描述",
-      "pickCastTitle": "选择出镜角色",
-      "pickPropsTitle": "选择出场道具",
       "field": {
         "description": "镜头描述",
-        "dialogue": "对白 / 旁白",
-        "status": "状态",
-        "camera": "景别/运镜",
-        "cameraPlaceholder": "如：特写 · 缓推",
-        "duration": "时长",
-        "cast": "出镜",
-        "props": "道具"
-      },
-      "moveUp": "上移",
-      "moveDown": "下移",
-      "deleteConfirm": "该操作不可撤销。删除这个镜头？挂靠的素材档案会保留为集级散件。"
+        "dialogue": "对白 / 旁白"
+      }
     },
     "prompt": {
       "title": "提示词库",
@@ -699,7 +675,6 @@
       "open": "打开文件",
       "reveal": "在文件管理器显示",
       "locate": "在资源库中显示",
-      "traceBadge": "↳ {{title}}",
       "genParams": "生成参数",
       "genParamsPlaceholder": "模型 / seed / 分辨率等，便于复现",
       "audioRole": "音频用途",

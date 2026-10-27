@@ -467,8 +467,6 @@
     "canvas": {
       "tip": "Middle-drag to pan · Wheel to zoom · Left-drag to marquee · Drag nodes to arrange · Double-click empty space to add nodes · Drag from an output port (right edge) to an input port (left edge); types must match · Double-click episode title to rename",
       "wireRemove": "Remove wire",
-      "wireHint": "Drag onto another asset to wire a workflow",
-      "genTag": "AI generated",
       "view": "Inspect",
       "openFile": "Reveal in file manager",
       "remove": "Remove",
@@ -483,14 +481,11 @@
       "editShot": "Edit shot",
       "sceneNo": "Scene {{no}}",
       "frameStats": "{{shots}} shots · {{assets}} assets",
-      "shotTag": "Shot {{no}} · {{name}}",
       "statScenes": "Scenes {{count}}",
       "statShots": "Shots {{count}}",
       "statAssets": "Assets {{count}}",
       "statWires": "Wires {{count}}",
-      "infoFrame": "Episode materials",
       "shotEmpty": "No assets · double-click to link",
-      "typeShot": "Shot",
       "typeImage": "Image",
       "typeVideo": "Video",
       "typeText": "Text",
@@ -531,8 +526,6 @@
       "typeCharacterHint": "Create an empty character node; double-click to load",
       "typeLocationHint": "Create an empty location node; double-click to load",
       "typePropHint": "Create an empty prop node; double-click to load",
-      "linkCast": "Cast",
-      "linkProps": "Props",
       "typeEpisode": "Episode script",
       "typeEpisodeHint": "Add a script node · double-click to pick a file",
       "scriptUntitled": "No file linked",
@@ -566,7 +559,6 @@
       "ephUnloaded": "Not loaded",
       "ephPickHint": "Pick one from the library to load into this node",
       "ephLoad": "Load from library…",
-      "ephBindTitle": "Load {{kind}}",
       "detailRemoveMember": "Remove from node",
       "detailAddMember": "Add to this node",
       "memberPickTitle": "Load into {{kind}}",
@@ -628,8 +620,6 @@
       }
     },
     "scene": {
-      "empty": "No scenes yet — start from each scene of the script",
-      "new": "New Scene",
       "untitled": "Untitled scene",
       "field": {
         "heading": "Scene heading",
@@ -637,28 +627,14 @@
         "location": "Link location",
         "freeLocation": "None (free scene)"
       },
-      "moveUp": "Move up",
-      "moveDown": "Move down",
       "deleteConfirm": "This cannot be undone. Delete \"{{heading}}\" and its shots? Linked assets stay as episode loose files."
     },
     "shot": {
-      "new": "Shot",
       "untitled": "No description yet",
-      "pickCastTitle": "Select cast",
-      "pickPropsTitle": "Select props",
       "field": {
         "description": "Description",
-        "dialogue": "Dialogue / VO",
-        "status": "Status",
-        "camera": "Framing/Movement",
-        "cameraPlaceholder": "e.g. CU · slow push",
-        "duration": "Duration",
-        "cast": "Cast",
-        "props": "Props"
-      },
-      "moveUp": "Move up",
-      "moveDown": "Move down",
-      "deleteConfirm": "This cannot be undone. Delete this shot? Linked assets stay as episode loose files."
+        "dialogue": "Dialogue / VO"
+      }
     },
     "prompt": {
       "title": "Prompt Library",
@@ -699,7 +675,6 @@
       "open": "Open file",
       "reveal": "Reveal in file manager",
       "locate": "Show in library",
-      "traceBadge": "↳ {{title}}",
       "genParams": "Generation params",
       "genParamsPlaceholder": "Model / seed / resolution, for reproduction",
       "audioRole": "Audio role",
