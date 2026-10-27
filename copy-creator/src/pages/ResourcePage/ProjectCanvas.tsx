@@ -3326,6 +3326,10 @@ export default function ProjectCanvas({
                 assets: [], shots: [], scenes: [],
                 segments: [{ id: segment.id, x: dropPos.x, y: dropPos.y }],
               });
+              // addSegment 把新片段并入概览的瞬间，segPos effect 会抢先用
+              // 默认列位初始化它，位置落库排在后面就丢了松手点——表现为
+              // 新片段不在鼠标位置而在默认列。落库后直接覆写。
+              setSegPos((prev) => ({ ...prev, [segment.id]: dropPos }));
               // 摘线流程不走 autoConnect 的「按类型任意搜口」：预期是接回
               // 被摘的原口，由 finishDetached 按兼容性落线；autoConnect 只
               // 服务普通拖线到空白的建节点流程。
