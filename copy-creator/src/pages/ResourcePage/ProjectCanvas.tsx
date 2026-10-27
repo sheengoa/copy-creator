@@ -2208,6 +2208,9 @@ export default function ProjectCanvas({
       setAddMenu(null);
       // 上一场拖拽若有残留（松手事件在窗外丢失等），开新拖拽前先复位：
       // 冻结的草稿线、拿着的摘线、切线态，避免「松手后线卡住」的残影。
+      // 指针捕获标记一并复位——wirecut 的 buttons 自愈路径会清掉拖拽态
+      // 却不经 onUp，捕获标记若残留会让下一场拖拽首次移动不再捕获指针。
+      capturedRef.current = false;
       setWireDraft(null);
       setLiftedWire(null);
       if (dragRef.current) {
