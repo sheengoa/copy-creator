@@ -2024,7 +2024,18 @@ export default function ProjectCanvas({
           return;
         }
         const source = nodeKeyParts(outKey);
-        if (!source) return;
+        if (!source) {
+          // 占位/空白资料源没有库身份（nodeKeyParts 解析不出）：正式线无处
+          // 可落，改记画布暂存线，加载实体/填充素材后照常转正。
+          const segId = inKey.slice(8);
+          if (outKey.startsWith("eph:") || outKey.startsWith("placeholder:")) {
+            persistPendingLinks([
+              ...pendingLinks.filter((l) => !(l.fromKey === outKey && l.toSegmentId === segId && l.toPort === port.id)),
+              { fromKey: outKey, toSegmentId: segId, toPort: port.id },
+            ]);
+          }
+          return;
+        }
         void linkNode(
           episodeId,
           source.kind,
@@ -3271,12 +3282,23 @@ export default function ProjectCanvas({
           if (!d) return;
           setLiftedWire(null);
           if (!newKey) return;
+          // 摘线语义优先「换目标」：线从某片段输入口摘下、新节点又有同名
+          // 输入口（片段家族）时，线改插到新节点的同端口——「这条线给了
+          // 新节点」，原口旧线移除。这是摘线+空白建节点最符合直觉的落点：
+          // 用户拿着的是「通往片段 #1 的线」，要的是接去新片段。
+          const newIns = portsOf(newKey).ins;
           if (d.pending) {
             const pend = d.pending;
-            // 占位新源没有库身份：旧暂存线换新源原样转接。实体/片段新源
-            // 按原暂存线的目标口直接落正式线——目标口接受新源类型才连；
-            // 不接受则原暂存线原样保留（摘线换源的预期是松手即接上，选了
-            // 不兼容的节点不该把原有连线拆掉还不接新的）。
+            if (newIns.some((item) => item.id === pend.toPort)) {
+              persistPendingLinks([
+                ...pendingLinks.filter((l) => l !== pend),
+                { fromKey: pend.fromKey, toSegmentId: newKey.slice(8), toPort: pend.toPort },
+              ]);
+              return;
+            }
+            // 退回「换源头」：占位新源没有库身份，暂存线换新源原样转接。
+            // 实体/片段新源按原口落正式线——目标口接受新源类型才连；不接
+            // 受则原暂存线原样保留（不兼容的挑选不该拆掉原有连线）。
             const parts = nodeKeyParts(newKey);
             if (!parts) {
               persistPendingLinks([
@@ -3301,6 +3323,20 @@ export default function ProjectCanvas({
             return;
           }
           const parts = nodeKeyParts(newKey);
+          const rowPorts = [...new Set(d.rows.map((row) => row.to_port))];
+          if (d.rows.length > 0 && rowPorts.every((p) => newIns.some((item) => item.id === p))) {
+            // 正式线换目标：原口整组解挂，同源改接新片段的同端口。
+            d.rows.forEach((row) => {
+              void unlinkNode(row.from_kind, row.from_id, row.to_segment, row.to_port);
+            });
+            rowPorts.forEach((p) => {
+              const row = d.rows.find((item) => item.to_port === p);
+              if (row) {
+                void linkNode(episodeId, row.from_kind, row.from_id, newKey.slice(8), p as ProjectNodeLink["to_port"]);
+              }
+            });
+            return;
+          }
           d.rows.forEach((row) => {
             void unlinkNode(row.from_kind, row.from_id, row.to_segment, row.to_port);
           });
