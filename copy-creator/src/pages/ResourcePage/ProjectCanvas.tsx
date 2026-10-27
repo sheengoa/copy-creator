@@ -153,11 +153,30 @@ const segsIntersect = (
   const g = (a1.x - b1.x) * (b2.y - b1.y) - (a1.y - b1.y) * (b2.x - b1.x);
   return d * e < 0 && f * g < 0;
 };
+// 轨迹段到点的最短距离（刀刃擦过采样点也算切到）。
+const distToSeg = (
+  p: { x: number; y: number },
+  a1: { x: number; y: number }, a2: { x: number; y: number },
+): number => {
+  const dx = a2.x - a1.x;
+  const dy = a2.y - a1.y;
+  const len2 = dx * dx + dy * dy;
+  const t = len2 === 0 ? 0 : Math.max(0, Math.min(1, ((p.x - a1.x) * dx + (p.y - a1.y) * dy) / len2));
+  const ex = p.x - (a1.x + t * dx);
+  const ey = p.y - (a1.y + t * dy);
+  return Math.hypot(ex, ey);
+};
 // 切割线段是否命中折线（连线按贝塞尔采样后的屏幕坐标点列）。
+// 叉积法对「恰好穿过采样顶点」的零面积相交会漏判，补 2px 触碰判定：
+// 刀刃扫到即断，符合 knife 手势直觉。
+const CUT_TOUCH_PX = 2;
 const segHitsPolyline = (
   a1: { x: number; y: number }, a2: { x: number; y: number },
   pts: { x: number; y: number }[],
 ): boolean => {
+  for (let i = 0; i < pts.length; i++) {
+    if (distToSeg(pts[i], a1, a2) < CUT_TOUCH_PX) return true;
+  }
   for (let i = 1; i < pts.length; i++) {
     if (segsIntersect(a1, a2, pts[i - 1], pts[i])) return true;
   }
@@ -2082,8 +2101,11 @@ export default function ProjectCanvas({
   useEffect(() => {
     liftedRef.current = liftedWire;
   }, [liftedWire]);
-  // Blender 式切线（Shift+右键滑动）：切痕（屏幕坐标）与候选线缓存。
-  const [cutLine, setCutLine] = useState<{ x1: number; y1: number; x2: number; y2: number } | null>(null);
+  // Blender 式切线（Shift+右键滑动）：切痕与候选线缓存。切痕不经
+  // React 状态——滑动中每帧直写 polyline 的 points，避免整画布逐帧
+  // 重渲染（表现为视图跳帧）；显示/隐藏由 pc-cutting 类驱动。
+  const cutTrailRef = useRef<SVGPolylineElement | null>(null);
+  const cutPointsRef = useRef<string[]>([]);
   const cutTargetsRef = useRef<{ pts: { x: number; y: number }[]; done: boolean; del: () => void }[] | null>(null);
 
   // 切线候选：所有可切连线（g[data-cut]）的屏幕坐标采样折线 + 删除分发。
@@ -2111,8 +2133,9 @@ export default function ProjectCanvas({
         done: false,
         del: () => {
           if (cutId.startsWith("m:")) {
+            // data-cut 里存的是节点 key（asset:<id>），解连要的是素材 id。
             const [fromKey, toKey] = cutId.slice(2).split("|");
-            void unlinkAssets(fromKey, toKey);
+            void unlinkAssets(fromKey.slice(fromKey.indexOf(":") + 1), toKey.slice(toKey.indexOf(":") + 1));
           } else if (cutId.startsWith("s:")) {
             const group = segWires.find((w) => w.links[0]?.id === cutId.slice(2));
             group?.links.forEach((l) => {
@@ -2237,6 +2260,7 @@ export default function ProjectCanvas({
       // 拖出亮色切痕）。候选线在按下时采样缓存，滑动中逐段判定相交。
       if (e.button === 2 && e.shiftKey) {
         dragRef.current = { kind: "wirecut", sx: e.clientX, sy: e.clientY, moved: false };
+        cutPointsRef.current = [`${e.clientX},${e.clientY}`];
         vp.classList.add("pc-cutting");
         cutTargetsRef.current = buildCutTargets();
         e.preventDefault();
@@ -2589,7 +2613,8 @@ export default function ProjectCanvas({
         drag.px = to.x;
         drag.py = to.y;
         drag.moved = true;
-        setCutLine({ x1: drag.sx, y1: drag.sy, x2: to.x, y2: to.y });
+        cutPointsRef.current.push(`${to.x},${to.y}`);
+        cutTrailRef.current?.setAttribute("points", cutPointsRef.current.join(" "));
         const targets = cutTargetsRef.current;
         if (targets) {
           for (const t of targets) {
@@ -2715,9 +2740,9 @@ export default function ProjectCanvas({
       if (drag.kind === "pan") {
         if (drag.moved) saveView(view);
       } else if (drag.kind === "wirecut") {
+        // pc-cutting 类随移除隐藏切痕层，轨迹点下次按下时重置。
         vpRef.current?.classList.remove("pc-cutting");
         cutTargetsRef.current = null;
-        setCutLine(null);
       } else if (drag.kind === "wire") {
         wireHoverRef.current?.classList.remove("pc-wire-target");
         wireHoverRef.current = null;
@@ -4369,13 +4394,6 @@ export default function ProjectCanvas({
             </g>
           </svg>
 
-          {/* 切线拖痕（Blender 式）：覆盖视口的固定层，屏幕坐标即时绘制 */}
-          {cutLine && (
-            <svg className="pc-cutlayer" aria-hidden="true">
-              <line className="pc-wire-cut" x1={cutLine.x1} y1={cutLine.y1} x2={cutLine.x2} y2={cutLine.y2} />
-            </svg>
-          )}
-
           {/* 镜头卡 */}
           {layout.cards.map((card) => {
             const p = pos.cards[card.shot.id] ?? { x: 0, y: 0 };
@@ -5019,6 +5037,13 @@ export default function ProjectCanvas({
             );
           })}
         </div>
+
+        {/* 切线拖痕（Blender 式）：覆盖窗口的固定层，屏幕坐标即时绘制。
+            必须留在 pc-world（transform 层）之外——fixed 定位会被
+            transform 祖先劫持成世界坐标系，划痕就画不到屏幕上了。 */}
+        <svg className="pc-cutlayer" aria-hidden="true">
+          <polyline ref={cutTrailRef} className="pc-wire-cut" points="" />
+        </svg>
 
         {/* 缺失提醒条（ComfyUI 缺节点警示的对应物）：缺项可点击定位 */}
         {issues.length > 0 && (
