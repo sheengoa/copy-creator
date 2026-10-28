@@ -3042,25 +3042,37 @@ export default function ProjectCanvas({
           if (wireRelease === "commit" && targetKey && lifted) {
             setLiftedWire(null);
             const source = nodeKeyParts(targetKey);
+            const targetGroup = targetKey.startsWith("grp:")
+              ? infoGroups.find((group) => `grp:${group.id}` === targetKey)
+              : null;
+            const targetSources = targetGroup
+              ? targetGroup.members.map((id) => ({ kind: targetGroup.kind, id }))
+              : source
+                ? [source]
+                : [];
             // 换源：口上全部线（暂存线 + 正式线）一并转到新源；落点就是
             // 原源之一时视为放回，不动。
             const pendSameAsOld = lifted.pendings.length > 0 &&
               lifted.pendings.every((p) => targetKey === p.fromKey);
-            const rowSameAsOld = lifted.rows.length > 0 && !!source &&
-              lifted.rows.every((r) => r.from_kind === source.kind && r.from_id === source.id);
-            if (source && !pendSameAsOld && !rowSameAsOld) {
+            const rowSameAsOld = lifted.rows.length > 0 &&
+              lifted.rows.every((r) => ownerKeyOf(r.from_kind, r.from_id) === targetKey);
+            if (targetSources.length > 0 && !pendSameAsOld && !rowSameAsOld) {
               if (lifted.pendings.length) {
                 persistPendingLinks(pendingLinks.filter((l) => !lifted.pendings.includes(l)));
                 lifted.pendings.forEach((p) => {
-                  void linkNode(
-                    episodeId, source.kind, source.id,
-                    p.toSegmentId, p.toPort as ProjectNodeLink["to_port"],
-                  );
+                  targetSources.forEach((nextSource) => {
+                    void linkNode(
+                      episodeId, nextSource.kind, nextSource.id,
+                      p.toSegmentId, p.toPort as ProjectNodeLink["to_port"],
+                    );
+                  });
                 });
               }
               lifted.rows.forEach((row) => {
                 void unlinkNode(row.from_kind, row.from_id, row.to_segment, row.to_port);
-                void linkNode(episodeId, source.kind, source.id, row.to_segment, row.to_port);
+                targetSources.forEach((nextSource) => {
+                  void linkNode(episodeId, nextSource.kind, nextSource.id, row.to_segment, row.to_port);
+                });
               });
             }
           } else if (wireRelease === "picker" && lifted) {
