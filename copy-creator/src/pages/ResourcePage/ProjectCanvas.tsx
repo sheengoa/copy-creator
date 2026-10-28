@@ -17,6 +17,7 @@ import ProjectNodeDetailDialog, { type NodeDetailEntry } from "./ProjectNodeDeta
 import ProjectLibraryPanel from "./ProjectLibraryPanel";
 import { ResourceFileImage, ResourceVideoPoster, ResourceImage } from "./ResourceMedia";
 import { Icons } from "../../components/Icons";
+import { resolveWireRelease } from "../../utils/projectWireRelease";
 import { openResourceFile, readResourceTextPreview } from "../../domain/mediaAssets";
 import {
   characterAvatarInitial,
@@ -3019,17 +3020,32 @@ export default function ProjectCanvas({
         wireHoverRef.current?.classList.remove("pc-wire-target");
         wireHoverRef.current = null;
         setWireDraft(null);
+        const vpRect = vpRef.current?.getBoundingClientRect();
+        const insideViewport = !!vpRect && e.clientX >= vpRect.left && e.clientX <= vpRect.right
+          && e.clientY >= vpRect.top && e.clientY <= vpRect.bottom;
+        const hitEl = insideViewport ? document.elementFromPoint(e.clientX, e.clientY) : null;
+        const landed = hitEl instanceof Element
+          ? hitEl.closest(".pc-node, .pc-note, .pc-glass, .pc-checkbar")
+          : null;
+        const wireRelease = resolveWireRelease({
+          cancelled: false,
+          moved: !!drag.moved,
+          hasTarget: !!drag.targetKey,
+          landedOnCanvasItem: !!landed,
+          insideViewport,
+        });
+        const targetKey = drag.targetKey;
         if (drag.rewire) {
           // ComfyUI 摘线收尾：换源转接 / 空白交给菜单（建节点即转接）/
           // 其余一律放回（行数据未删，清掉 lifted 即恢复原线）。
           const lifted = liftedRef.current;
-          if (drag.targetKey && drag.moved && lifted) {
+          if (wireRelease === "commit" && targetKey && lifted) {
             setLiftedWire(null);
-            const source = nodeKeyParts(drag.targetKey);
+            const source = nodeKeyParts(targetKey);
             // 换源：口上全部线（暂存线 + 正式线）一并转到新源；落点就是
             // 原源之一时视为放回，不动。
             const pendSameAsOld = lifted.pendings.length > 0 &&
-              lifted.pendings.every((p) => drag.targetKey === p.fromKey);
+              lifted.pendings.every((p) => targetKey === p.fromKey);
             const rowSameAsOld = lifted.rows.length > 0 && !!source &&
               lifted.rows.every((r) => r.from_kind === source.kind && r.from_id === source.id);
             if (source && !pendSameAsOld && !rowSameAsOld) {
@@ -3047,43 +3063,30 @@ export default function ProjectCanvas({
                 void linkNode(episodeId, source.kind, source.id, row.to_segment, row.to_port);
               });
             }
-          } else if (!drag.targetKey && drag.moved && lifted) {
+          } else if (wireRelease === "picker" && lifted) {
             // 松手在画布内才谈「空白弹菜单」；出界（窗外松手）一律放回。
-            const vpRect = vpRef.current?.getBoundingClientRect();
-            const inside = !!vpRect && e.clientX >= vpRect.left && e.clientX <= vpRect.right &&
-              e.clientY >= vpRect.top && e.clientY <= vpRect.bottom;
-            const hitEl = inside ? document.elementFromPoint(e.clientX, e.clientY) : null;
-            const landed = hitEl instanceof Element
-              ? hitEl.closest(".pc-node, .pc-note, .pc-glass, .pc-checkbar")
-              : null;
-            if (!landed && inside) {
-              const el = vpRef.current;
-              if (el) {
-                const rect = el.getBoundingClientRect();
-                setAddMenu({
-                  sx: e.clientX - rect.left,
-                  sy: e.clientY - rect.top,
-                  wx: (e.clientX - rect.left - view.x) / view.scale,
-                  wy: (e.clientY - rect.top - view.y) / view.scale,
-                  wire: {
-                    fromKey: drag.fromKey ?? "",
-                    fromDir: "in",
-                    fromAccepts: drag.fromAccepts,
-                    fromPortId: drag.fromPortId,
-                  },
-                  detached: { pendings: lifted.pendings, rows: lifted.rows },
-                });
-                setAddMenuQuery("");
-              } else {
-                setLiftedWire(null);
-              }
+            if (vpRect) {
+              setAddMenu({
+                sx: e.clientX - vpRect.left,
+                sy: e.clientY - vpRect.top,
+                wx: (e.clientX - vpRect.left - view.x) / view.scale,
+                wy: (e.clientY - vpRect.top - view.y) / view.scale,
+                wire: {
+                  fromKey: drag.fromKey ?? "",
+                  fromDir: "in",
+                  fromAccepts: drag.fromAccepts,
+                  fromPortId: drag.fromPortId,
+                },
+                detached: { pendings: lifted.pendings, rows: lifted.rows },
+              });
+              setAddMenuQuery("");
             } else {
               setLiftedWire(null);
             }
           } else {
             setLiftedWire(null);
           }
-        } else if (drag.targetKey && drag.fromKey) {
+        } else if (wireRelease === "commit" && drag.targetKey && drag.fromKey) {
           // 反拖（从输入口出发）时落点才是数据的来源方；落到成片节点
           // （key "output"）即设置本集总输出；落到片段的某个输入口则写
           // 一条 node_link（角色/场景/道具/剧本/素材/镜头/片段 → 片段）。
@@ -3140,32 +3143,24 @@ export default function ProjectCanvas({
               "",
             );
           }
-        } else if (!drag.targetKey && drag.moved && drag.fromKey) {
+        } else if (wireRelease === "picker" && drag.fromKey) {
           // ComfyUI 惯例：拖到空白松手 → 弹节点选择框，创建的节点自动
           // 接上这条线；落在任何节点/浮层上松手视为取消，不弹。
-          const hitEl = document.elementFromPoint(e.clientX, e.clientY);
-          const landed = hitEl instanceof Element
-            ? hitEl.closest(".pc-node, .pc-note, .pc-glass, .pc-checkbar")
-            : null;
-          if (!landed) {
-            const el = vpRef.current;
-            if (el) {
-              const rect = el.getBoundingClientRect();
-              setAddMenu({
-                sx: e.clientX - rect.left,
-                sy: e.clientY - rect.top,
-                wx: (e.clientX - rect.left - view.x) / view.scale,
-                wy: (e.clientY - rect.top - view.y) / view.scale,
-                wire: {
-                  fromKey: drag.fromKey,
-                  fromDir: drag.fromDir ?? "out",
-                  fromType: drag.fromType,
-                  fromAccepts: drag.fromAccepts,
-                  fromPortId: drag.fromPortId,
-                },
-              });
-              setAddMenuQuery("");
-            }
+          if (vpRect) {
+            setAddMenu({
+              sx: e.clientX - vpRect.left,
+              sy: e.clientY - vpRect.top,
+              wx: (e.clientX - vpRect.left - view.x) / view.scale,
+              wy: (e.clientY - vpRect.top - view.y) / view.scale,
+              wire: {
+                fromKey: drag.fromKey,
+                fromDir: drag.fromDir ?? "out",
+                fromType: drag.fromType,
+                fromAccepts: drag.fromAccepts,
+                fromPortId: drag.fromPortId,
+              },
+            });
+            setAddMenuQuery("");
           }
         }
       } else if (drag.kind === "outnode") {
