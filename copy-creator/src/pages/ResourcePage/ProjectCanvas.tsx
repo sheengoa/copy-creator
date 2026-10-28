@@ -2917,13 +2917,50 @@ export default function ProjectCanvas({
         });
       }
     };
-    const onUp = (e: PointerEvent) => {
+    const cleanupPointerVisuals = (moved: boolean) => {
+      vpRef.current?.classList.remove("pc-panning");
+      vpRef.current?.classList.remove("pc-wiring");
+      document
+        .querySelectorAll<HTMLElement>(".pc-port-active")
+        .forEach((el) => el.classList.remove("pc-port-active"));
+      vpRef.current?.querySelectorAll<HTMLElement>(".pc-dragging").forEach((el) => el.classList.remove("pc-dragging"));
+      vpRef.current?.querySelectorAll<HTMLElement>(".pc-resizing").forEach((el) => el.classList.remove("pc-resizing"));
+      if (moved) {
+        suppressClickRef.current = true;
+        window.setTimeout(() => {
+          suppressClickRef.current = false;
+        }, 0);
+      }
+      dragRef.current = null;
+    };
+
+    const onUp = (e: PointerEvent, cancelled = false) => {
       const drag = dragRef.current;
       if (capturedRef.current && vpRef.current?.hasPointerCapture(e.pointerId)) {
         vpRef.current.releasePointerCapture(e.pointerId);
       }
       capturedRef.current = false;
       if (!drag) return;
+      if (cancelled) {
+        // pointercancel 表示系统手势/浏览器接管了指针，不能把最后一次
+        // 悬停目标当作有效落点提交；摘线与菜单建节点都恢复原连接。
+        if (drag.kind === "wire" || drag.detached) {
+          wireHoverRef.current?.classList.remove("pc-wire-target");
+          wireHoverRef.current = null;
+          setWireDraft(null);
+          setLiftedWire(null);
+        } else if (drag.kind === "wirecut") {
+          vpRef.current?.classList.remove("pc-cutting");
+          cutTargetsRef.current = null;
+          cutPointsRef.current = [];
+          cutTrailUnderRef.current?.setAttribute("points", "");
+          cutTrailRef.current?.setAttribute("points", "");
+        } else if (drag.kind === "marquee") {
+          drag.mq?.remove();
+        }
+        cleanupPointerVisuals(drag.moved ?? false);
+        return;
+      }
       // 统一双击判定：两次「按下即松手」（未拖动）在 450ms 内落在同一
       // 目标（≤16px）上才算双击。不用原生 dblclick——它把拖拽轻抖的
       // 松手也计成第二次点击，是「单击/拖完莫名弹窗」的根源。
@@ -3483,28 +3520,16 @@ export default function ProjectCanvas({
       } else if (drag.kind === "infoframe" && drag.moved) {
         saveInfoFramePos(infoPos.frame);
       }
-      vpRef.current?.classList.remove("pc-panning");
-      vpRef.current?.classList.remove("pc-wiring");
-      document
-        .querySelectorAll<HTMLElement>(".pc-port-active")
-        .forEach((el) => el.classList.remove("pc-port-active"));
-      vpRef.current?.querySelectorAll<HTMLElement>(".pc-dragging").forEach((el) => el.classList.remove("pc-dragging"));
-      vpRef.current?.querySelectorAll<HTMLElement>(".pc-resizing").forEach((el) => el.classList.remove("pc-resizing"));
-      if (drag.moved) {
-        suppressClickRef.current = true;
-        window.setTimeout(() => {
-          suppressClickRef.current = false;
-        }, 0);
-      }
-      dragRef.current = null;
+      cleanupPointerVisuals(drag.moved ?? false);
     };
+    const onCancel = (e: PointerEvent) => onUp(e, true);
     document.addEventListener("pointermove", onMove);
     document.addEventListener("pointerup", onUp);
-    document.addEventListener("pointercancel", onUp);
+    document.addEventListener("pointercancel", onCancel);
     return () => {
       document.removeEventListener("pointermove", onMove);
       document.removeEventListener("pointerup", onUp);
-      document.removeEventListener("pointercancel", onUp);
+      document.removeEventListener("pointercancel", onCancel);
     };
   }, [layout, pos, view, scenePos, infoPos, boxOf, portsOf, outPointOf, inPointOf, linkAssets, persistCards, persistLoose, saveCanvasLayout, saveInfoFramePos, saveView, setSelection, saveOutputPos, setEpisodeOutput, episodeId, notes, persistNotes, addNote, addPlaceholder, addEntityPh, persistPlaceholders, persistSegments, linkNode, unlinkNode, nodeKeyParts, addSegment, autoConnectNewNode, persistSizes, persistInfoOffsets, infoGroups, infoNodes, infoNodePos, entityPhs, segments, segPos, placeholders, sizeOfNode, outputBox, moveGroupTo, persistPositions, pushUndo, pendingLinks, persistPendingLinks, setInfoFramePos, setInfoOffsets, setNodeSizes, setNotes, setOutputPos, setPlaceholders, openNodeDetail]);
 
