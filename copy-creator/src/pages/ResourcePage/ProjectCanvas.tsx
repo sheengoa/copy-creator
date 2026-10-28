@@ -398,7 +398,7 @@ function buildLayout(
 }
 
 /** 文本纸片内容（读资源文本头部，组件内自持请求）。 */
-function TextPaperBody({ path, name, lines }: { path: string; name: string; lines?: number }) {
+function TextPaperBody({ path, name, lines, adaptive = false }: { path: string; name: string; lines?: number; adaptive?: boolean }) {
   const [preview, setPreview] = useState<string | null>(null);
   useEffect(() => {
     let cancelled = false;
@@ -419,7 +419,7 @@ function TextPaperBody({ path, name, lines }: { path: string; name: string; line
         {Icons.file}
         <span>{name}</span>
       </h5>
-      <p style={lines ? { WebkitLineClamp: lines } : undefined}>{preview === null ? "…" : preview}</p>
+      <p style={lines && !adaptive ? { WebkitLineClamp: lines } : undefined}>{preview === null ? "…" : preview}</p>
     </div>
   );
 }
@@ -1738,6 +1738,7 @@ export default function ProjectCanvas({
   }>({ boxes: {}, ports: {} });
   const nodeMetricsRef = useRef(nodeMetrics);
   const viewScaleRef = useRef(view.scale);
+  const measureRafRef = useRef<number | null>(null);
   const measureNodes = useCallback(() => {
     const nodes = vpRef.current?.querySelectorAll<HTMLElement>(".pc-node[data-key]");
     if (!nodes || nodes.length === 0) return;
@@ -1773,19 +1774,29 @@ export default function ProjectCanvas({
     nodeMetricsRef.current = next;
     setNodeMetrics(next);
   }, []);
+  const scheduleMeasureNodes = useCallback(() => {
+    if (measureRafRef.current !== null) return;
+    measureRafRef.current = window.requestAnimationFrame(() => {
+      measureRafRef.current = null;
+      measureNodes();
+    });
+  }, [measureNodes]);
   const nodeRoRef = useRef<ResizeObserver | null>(null);
-  useEffect(() => () => nodeRoRef.current?.disconnect(), []);
+  useEffect(() => () => {
+    nodeRoRef.current?.disconnect();
+    if (measureRafRef.current !== null) window.cancelAnimationFrame(measureRafRef.current);
+  }, []);
   useLayoutEffect(() => {
     viewScaleRef.current = view.scale;
     if (!nodeRoRef.current) {
-      nodeRoRef.current = new ResizeObserver(() => measureNodes());
+      nodeRoRef.current = new ResizeObserver(scheduleMeasureNodes);
     }
     const ro = nodeRoRef.current;
     const els = Array.from(vpRef.current?.querySelectorAll<HTMLElement>(".pc-node[data-key]") ?? []);
     els.forEach((el) => ro.observe(el));
-    measureNodes();
+    scheduleMeasureNodes();
     return () => els.forEach((el) => ro.unobserve(el));
-  });
+  }, [view.scale, measureNodes, scheduleMeasureNodes]);
 
   const boxOf = useCallback(
     (key: string): WireBox | null => {
@@ -3538,7 +3549,7 @@ export default function ProjectCanvas({
       document.removeEventListener("pointerup", onUp);
       document.removeEventListener("pointercancel", onCancel);
     };
-  }, [layout, pos, view, scenePos, infoPos, boxOf, portsOf, outPointOf, inPointOf, linkAssets, persistCards, persistLoose, saveCanvasLayout, saveInfoFramePos, saveView, setSelection, saveOutputPos, setEpisodeOutput, episodeId, notes, persistNotes, addNote, addPlaceholder, addEntityPh, persistPlaceholders, persistSegments, linkNode, unlinkNode, nodeKeyParts, addSegment, autoConnectNewNode, persistSizes, persistInfoOffsets, infoGroups, infoNodes, infoNodePos, entityPhs, segments, segPos, placeholders, sizeOfNode, outputBox, moveGroupTo, persistPositions, pushUndo, pendingLinks, persistPendingLinks, setInfoFramePos, setInfoOffsets, setNodeSizes, setNotes, setOutputPos, setPlaceholders, openNodeDetail]);
+  }, [layout, pos, view, scenePos, infoPos, boxOf, portsOf, outPointOf, inPointOf, linkAssets, persistCards, persistLoose, saveCanvasLayout, saveInfoFramePos, saveView, setSelection, saveOutputPos, setEpisodeOutput, episodeId, notes, persistNotes, addNote, addPlaceholder, addEntityPh, persistPlaceholders, persistSegments, linkNode, unlinkNode, nodeKeyParts, addSegment, autoConnectNewNode, persistSizes, persistInfoOffsets, infoGroups, infoNodes, infoNodePos, entityPhs, segments, segPos, placeholders, sizeOfNode, outputBox, moveGroupTo, persistPositions, pushUndo, pendingLinks, persistPendingLinks, setInfoFramePos, setInfoOffsets, setNodeSizes, setNotes, setOutputPos, setPlaceholders, openNodeDetail, ownerKeyOf]);
 
   // ── 节点操作 ──
   // 节点接口圆点（ComfyUI 式）：输入口列在左缘（片段五口按列分布）、
@@ -4683,17 +4694,19 @@ export default function ProjectCanvas({
             const selected = selKeys.includes(card.key);
             const shot = card.shot;
             const cardSize = sizeOfNode(card.key);
+            const resized = Boolean(nodeSizes[card.key]);
             return (
               <div
                 key={card.key}
                 data-key={card.key}
                 data-frame={card.sceneId}
-                className={`pc-node pc-shotcard${selected ? " pc-selected" : ""}`}
+                className={`pc-node pc-shotcard${resized ? " pc-resized" : ""}${selected ? " pc-selected" : ""}`}
                 style={{
                   left: p.x, top: p.y,
                   width: cardSize?.w ?? card.w,
+                  height: resized ? cardSize?.h : undefined,
                   // 覆盖高度作 minHeight：内容不足时留白，内容超出时撑开。
-                  minHeight: cardSize && cardSize.h !== card.h ? cardSize.h : undefined,
+                  minHeight: resized ? undefined : cardSize && cardSize.h !== card.h ? cardSize.h : undefined,
                   ["--node-accent" as string]: NODE_ACCENTS.shot,
                 } as React.CSSProperties}
               >
@@ -4713,7 +4726,7 @@ export default function ProjectCanvas({
                             type="button"
                             className={`pc-shot-asset-thumb${asset.missing ? " is-missing" : ""}`}
                             data-asset={asset.id}
-                            style={{ width: w, height: h }}
+                            style={resized ? undefined : { width: w, height: h }}
                             title={asset.missing ? `${t("project.asset.fileMissing")} · ${asset.file_path}` : asset.name}
                           >
                             {asset.missing ? (
@@ -4793,13 +4806,14 @@ export default function ProjectCanvas({
             const size = sizeOfNode(loose.key);
             const nodeW = size?.w ?? loose.w;
             const nodeH = size?.h ?? loose.h;
+            const resized = Boolean(nodeSizes[loose.key]);
             const mediaPath = joinLibraryPath(libraryRoot, asset.file_path);
             return (
               <div
                 key={loose.key}
                 data-key={loose.key}
-                className={`pc-node${selected ? " pc-selected" : ""}`}
-                style={{ left: p.x, top: p.y, width: nodeW, ["--node-accent" as string]: NODE_ACCENTS[asset.kind] ?? "#94a3b8" } as React.CSSProperties}
+                className={`pc-node${resized ? " pc-resized" : ""}${selected ? " pc-selected" : ""}`}
+                style={{ left: p.x, top: p.y, width: nodeW, height: resized ? nodeH : undefined, ["--node-accent" as string]: NODE_ACCENTS[asset.kind] ?? "#94a3b8" } as React.CSSProperties}
               >
                 <div className="pc-node-head">
                   <span className="pc-node-kind">{t(assetKindBadgeKey(asset.kind))}</span>
@@ -4807,12 +4821,12 @@ export default function ProjectCanvas({
                 </div>
                 {portBar(loose.key)}
                 {asset.missing ? (
-                    <div className="pc-miss-card" style={{ height: nodeH }}>
+                    <div className="pc-miss-card" style={resized ? undefined : { height: nodeH }}>
                       {Icons.image}
                       {t("project.asset.fileMissing")}
                     </div>
                   ) : asset.kind === "image" ? (
-                    <div className="pc-media" style={{ height: nodeH }}>
+                    <div className="pc-media" style={resized ? undefined : { height: nodeH }}>
                       <ResourceFileImage
                         path={mediaPath}
                         alt={asset.name}
@@ -4821,7 +4835,7 @@ export default function ProjectCanvas({
                       />
                     </div>
                   ) : asset.kind === "video" ? (
-                    <div className="pc-media" style={{ height: nodeH }}>
+                    <div className="pc-media" style={resized ? undefined : { height: nodeH }}>
                       <ResourceVideoPoster
                         path={mediaPath}
                         version={asset.updated_at}
@@ -4830,9 +4844,9 @@ export default function ProjectCanvas({
                       <span className="pc-play">{Icons.play}</span>
                     </div>
                   ) : asset.kind === "text" ? (
-                    <TextPaperBody path={mediaPath} name={asset.name || asset.file_path} />
+                    <TextPaperBody path={mediaPath} name={asset.name || asset.file_path} adaptive={resized} />
                   ) : (
-                    <div className="pc-media pc-media-file" style={{ height: nodeH }}>
+                    <div className="pc-media pc-media-file" style={resized ? undefined : { height: nodeH }}>
                       {Icons.file}
                       <span>{asset.name || asset.file_path}</span>
                     </div>
@@ -4889,15 +4903,17 @@ export default function ProjectCanvas({
           {infoNodes.map((node) => {
             const p = infoNodePos(node.key);
             const nodeSize = sizeOfNode(node.key);
+            const resized = Boolean(nodeSizes[node.key]);
             return (
               <div
                 key={node.key}
                 data-key={node.key}
-                className={`pc-node pc-info${pulseKeys.includes(node.key) ? " pc-spawn" : ""}${selKeys.includes(node.key) ? " pc-selected" : ""}`}
+                className={`pc-node pc-info${resized ? " pc-resized" : ""}${pulseKeys.includes(node.key) ? " pc-spawn" : ""}${selKeys.includes(node.key) ? " pc-selected" : ""}`}
                 style={{
                   left: p.x, top: p.y,
                   width: nodeSize?.w ?? node.w,
-                  minHeight: nodeSize && nodeSize.h !== node.h ? nodeSize.h : undefined,
+                  height: resized ? nodeSize?.h : undefined,
+                  minHeight: resized ? undefined : nodeSize && nodeSize.h !== node.h ? nodeSize.h : undefined,
                   ["--node-accent" as string]: NODE_ACCENTS[node.kind] ?? "#94a3b8",
                 } as React.CSSProperties}
               >
@@ -4958,7 +4974,7 @@ export default function ProjectCanvas({
                   ) : node.kind === "script" ? (
                     node.textPath ? (
                       <div className="pc-info-script">
-                        <TextPaperBody path={joinLibraryPath(libraryRoot, node.textPath)} name={node.name} lines={5} />
+                        <TextPaperBody path={joinLibraryPath(libraryRoot, node.textPath)} name={node.name} lines={5} adaptive={resized} />
                       </div>
                     ) : (
                       // 剧本两段式：空节点（未挂文件），双击从库选文件。
@@ -5004,6 +5020,7 @@ export default function ProjectCanvas({
             const key = `eph:${ph.id}`;
             const p = infoNodePos(key);
             const phSize = sizeOfNode(key);
+            const resized = Boolean(nodeSizes[key]);
             const label = t(
               ph.kind === "character"
                 ? "project.canvas.typeCharacter"
@@ -5015,11 +5032,12 @@ export default function ProjectCanvas({
               <div
                 key={key}
                 data-key={key}
-                className={`pc-node pc-info pc-eph${selKeys.includes(key) ? " pc-selected" : ""}`}
+                className={`pc-node pc-info pc-eph${resized ? " pc-resized" : ""}${selKeys.includes(key) ? " pc-selected" : ""}`}
                 style={{
                   left: p.x, top: p.y,
                   width: phSize?.w ?? INFO_W,
-                  minHeight: phSize?.h,
+                  height: resized ? phSize?.h : undefined,
+                  minHeight: resized ? undefined : phSize?.h,
                   ["--node-accent" as string]: NODE_ACCENTS[ph.kind] ?? "#94a3b8",
                 } as React.CSSProperties}
               >
@@ -5056,15 +5074,17 @@ export default function ProjectCanvas({
             if (!p) return null;
             const key = `segment:${segment.id}`;
             const segSize = sizeOfNode(key);
+            const resized = Boolean(nodeSizes[key]);
             return (
               <div
                 key={segment.id}
                 data-key={key}
-                className={`pc-node pc-segment${selKeys.includes(key) ? " pc-selected" : ""}`}
+                className={`pc-node pc-segment${resized ? " pc-resized" : ""}${selKeys.includes(key) ? " pc-selected" : ""}`}
                 style={{
                   left: p.x, top: p.y, width: segSize?.w ?? SEG_W,
+                  height: resized ? segSize?.h : undefined,
                   // 存量高度语义是节点总高：用 minHeight 兜底，缩小不裁切内容。
-                  minHeight: segSize && segSize.h !== SEG_H ? segSize.h : undefined,
+                  minHeight: resized ? undefined : segSize && segSize.h !== SEG_H ? segSize.h : undefined,
                   ["--node-accent" as string]: NODE_ACCENTS.segment,
                 } as React.CSSProperties}
               >
@@ -5133,11 +5153,12 @@ export default function ProjectCanvas({
           {outputBox && (
             <div
               data-key="output"
-              className={`pc-node pc-outnode${selKeys.includes("output") ? " pc-selected" : ""}`}
+              className={`pc-node pc-outnode${nodeSizes.output ? " pc-resized" : ""}${selKeys.includes("output") ? " pc-selected" : ""}`}
               style={{
                 left: outputBox.x, top: outputBox.y,
                 width: sizeOfNode("output")?.w ?? outputBox.w,
-                minHeight: sizeOfNode("output")?.h,
+                height: nodeSizes.output ? sizeOfNode("output")?.h : undefined,
+                minHeight: nodeSizes.output ? undefined : sizeOfNode("output")?.h,
                 ["--node-accent" as string]: NODE_ACCENTS.output,
               } as React.CSSProperties}
             >
@@ -5237,19 +5258,20 @@ export default function ProjectCanvas({
           {placeholders.map((ph) => {
             const phKey = `placeholder:${ph.id}`;
             const phSize = sizeOfNode(phKey);
+            const resized = Boolean(nodeSizes[phKey]);
             return (
               <div
                 key={ph.id}
                 data-key={phKey}
-                className="pc-node pc-placeholder"
-                style={{ left: ph.x, top: ph.y, width: phSize?.w ?? LOOSE_W, ["--node-accent" as string]: "#94a3b8" } as React.CSSProperties}
+                className={`pc-node pc-placeholder${resized ? " pc-resized" : ""}`}
+                style={{ left: ph.x, top: ph.y, width: phSize?.w ?? LOOSE_W, height: resized ? phSize?.h : undefined, ["--node-accent" as string]: "#94a3b8" } as React.CSSProperties}
               >
                 <div className="pc-node-head">
                   <span className="pc-node-kind">{t("project.canvas.typeAsset")}</span>
                   <b className="pc-node-title">{t("project.canvas.placeholderTitle")}</b>
                 </div>
                 {portBar(phKey)}
-                <div className="pc-ph-empty" style={{ height: phSize?.h }}>
+                <div className="pc-ph-empty" style={resized ? undefined : { height: phSize?.h }}>
                   {Icons.image}
                   {t("project.canvas.placeholderEmpty")}
                 </div>

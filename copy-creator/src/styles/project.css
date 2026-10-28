@@ -1468,7 +1468,16 @@
 }
 /* 拖线中：全程十字光标（即使草稿线被环境吞掉也有状态反馈） */
 .pc-viewport.pc-wiring, .pc-viewport.pc-wiring .pc-node, .pc-viewport.pc-wiring .pc-note { cursor: crosshair; }
-.pc-world { position: absolute; left: 0; top: 0; transform-origin: 0 0; }
+.pc-world {
+  position: absolute;
+  left: 0;
+  top: 0;
+  transform-origin: 0 0;
+  /* 平移/缩放与节点尺寸测量都在显示器帧边界合并，交给合成层处理，
+     避免高刷新率设备上画布跟不上指针。 */
+  will-change: transform;
+  backface-visibility: hidden;
+}
 .pc-marquee {
   position: absolute;
   z-index: 15;
@@ -1543,6 +1552,53 @@
   box-shadow: 0 2px 10px rgba(0, 0, 0, 0.08), 0 1px 3px rgba(0, 0, 0, 0.05);
   transition: box-shadow 0.16s ease, border-color 0.16s ease;
 }
+/* 自由缩放后的节点把预览区作为剩余空间使用，避免节点变大后媒体仍
+   停在默认高度，导致下方出现一整块空白。未缩放节点继续由内容自然撑开。 */
+.pc-node.pc-resized {
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+.pc-node.pc-resized .pc-media,
+.pc-node.pc-resized .pc-miss-card,
+.pc-node.pc-resized .pc-ph-empty,
+.pc-node.pc-resized .pc-seg-thumb,
+.pc-node.pc-resized .pc-seg-empty {
+  flex: 1 1 auto;
+  min-height: 0;
+  height: auto !important;
+}
+.pc-node.pc-resized .pc-paper,
+.pc-node.pc-resized .pc-info-body,
+.pc-node.pc-resized .pc-outnode-body {
+  flex: 1 1 auto;
+  min-height: 0;
+}
+.pc-node.pc-resized .pc-paper { overflow: hidden; }
+.pc-node.pc-resized .pc-paper p {
+  display: block;
+  overflow: auto;
+  -webkit-line-clamp: unset;
+}
+.pc-node.pc-resized .pc-shot-grid {
+  flex: 1 1 auto;
+  min-height: 0;
+  grid-auto-rows: minmax(0, 1fr);
+}
+.pc-node.pc-resized .pc-shot-asset-thumb {
+  width: auto !important;
+  height: auto !important;
+  min-height: 0;
+}
+.pc-node.pc-resized .pc-info-body { overflow: hidden; }
+.pc-node.pc-resized .pc-photo,
+.pc-node.pc-resized .pc-info-script,
+.pc-node.pc-resized .pc-eph-body {
+  height: auto;
+  min-height: 0;
+  flex: 1 1 auto;
+}
+.pc-node.pc-resized .pc-photo { width: 100%; }
 .pc-node:active { cursor: grabbing; }
 .pc-node:hover { z-index: 12; box-shadow: 0 14px 34px rgba(0, 0, 0, 0.16), 0 3px 8px rgba(0, 0, 0, 0.08); }
 /* 拖动中的节点/便签压在同级之上（含 hover 态，松手清除） */
