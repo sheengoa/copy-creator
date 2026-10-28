@@ -1794,9 +1794,12 @@ export default function ProjectCanvas({
     const ro = nodeRoRef.current;
     const els = Array.from(vpRef.current?.querySelectorAll<HTMLElement>(".pc-node[data-key]") ?? []);
     els.forEach((el) => ro.observe(el));
+    // 节点尺寸/内容刚由 React 提交时，连线本帧就必须拿到最新端口偏移；
+    // ResizeObserver 的 rAF 合帧只负责后续外部布局变化，不能成为首个测量。
+    measureNodes();
     scheduleMeasureNodes();
     return () => els.forEach((el) => ro.unobserve(el));
-  }, [view.scale, measureNodes, scheduleMeasureNodes]);
+  });
 
   const boxOf = useCallback(
     (key: string): WireBox | null => {
