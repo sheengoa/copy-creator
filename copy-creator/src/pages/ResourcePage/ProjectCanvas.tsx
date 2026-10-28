@@ -1799,7 +1799,7 @@ export default function ProjectCanvas({
     measureNodes();
     scheduleMeasureNodes();
     return () => els.forEach((el) => ro.unobserve(el));
-  });
+  }, [view.scale, layout, nodeSizes, infoNodes, segments, placeholders, entityPhs, measureNodes, scheduleMeasureNodes]);
 
   const boxOf = useCallback(
     (key: string): WireBox | null => {
@@ -5226,7 +5226,7 @@ export default function ProjectCanvas({
                       event.currentTarget.blur();
                     }
                   }}
-        onPointerDown={(event) => event.stopPropagation()}
+                  onPointerDown={(event) => event.stopPropagation()}
                 />
               ) : (
                 <div className="pc-note-body">
