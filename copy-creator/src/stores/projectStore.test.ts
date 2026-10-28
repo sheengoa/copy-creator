@@ -167,6 +167,25 @@ describe("projectStore", () => {
     expect(useProjectStore.getState().overview?.episode.id).toBe("ep-1");
   });
 
+  it("同一集并发刷新只接受最后一次响应", async () => {
+    const previous = { episode: episode1 } as unknown as EpisodeOverview;
+    useProjectStore.setState({ currentEpisodeId: "ep-1", overview: previous });
+    const resolvers: Array<(value: unknown) => void> = [];
+    invokeMock.mockImplementation((command: string) =>
+      command === "project_get_episode_overview"
+        ? new Promise((resolve) => { resolvers.push(resolve); })
+        : Promise.resolve([]),
+    );
+
+    const first = useProjectStore.getState().selectEpisode("ep-1");
+    const second = useProjectStore.getState().selectEpisode("ep-1");
+    resolvers[1]({ episode: { ...episode1, title: "最新概览" } });
+    resolvers[0]({ episode: { ...episode1, title: "过期概览" } });
+    await Promise.all([first, second]);
+
+    expect(useProjectStore.getState().overview?.episode.title).toBe("最新概览");
+  });
+
   it("setView 持久化到 localStorage", () => {
     useProjectStore.getState().setView("project");
     expect(window.localStorage.getItem("resource_view_mode")).toBe("project");

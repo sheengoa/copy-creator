@@ -375,6 +375,7 @@ interface ProjectStoreState {
 const VIEW_STORAGE_KEY = "resource_view_mode";
 const SHOW_STORAGE_KEY = "project_current_show";
 const EPISODE_STORAGE_KEY = "project_current_episode";
+let overviewRequestSeq = 0;
 
 function readStored(key: string): string | null {
   try {
@@ -578,6 +579,7 @@ export const useProjectStore = create<ProjectStoreState>((set, get) => ({
     // 新节点）让画布先卸载再挂载，造成整块视图闪烁。真正切集时仍清空
     // 旧概览，防止不同集的数据短暂串屏。
     const current = get();
+    const requestSeq = ++overviewRequestSeq;
     const keepOverview = current.currentEpisodeId === episodeId && current.overview?.episode.id === episodeId;
     set({ currentEpisodeId: episodeId, overview: keepOverview ? current.overview : null, overviewLoading: true });
     writeStored(EPISODE_STORAGE_KEY, episodeId);
@@ -586,10 +588,10 @@ export const useProjectStore = create<ProjectStoreState>((set, get) => ({
         episodeId,
       });
       // 请求期间可能已切走：以最新选中为准，避免旧数据闪现。
-      if (get().currentEpisodeId !== episodeId) return;
+      if (get().currentEpisodeId !== episodeId || requestSeq !== overviewRequestSeq) return;
       set({ overview, overviewLoading: false });
     } catch (error) {
-      if (get().currentEpisodeId !== episodeId) return;
+      if (get().currentEpisodeId !== episodeId || requestSeq !== overviewRequestSeq) return;
       console.error("project_get_episode_overview failed:", error);
       set({ overview: null, overviewLoading: false });
     }
