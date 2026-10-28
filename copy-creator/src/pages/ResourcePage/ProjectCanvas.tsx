@@ -2200,8 +2200,8 @@ export default function ProjectCanvas({
     return targets;
   }, [segWires, pendingLinks, unlinkAssets, unlinkNode, persistPendingLinks, setEpisodeOutput, episodeId]);
 
-  const onViewportMouseDown = useCallback(
-    (e: React.MouseEvent) => {
+  const onViewportPointerDown = useCallback(
+    (e: React.PointerEvent) => {
       const target = e.target instanceof Element ? e.target : null;
       // 节点搜索框是连线释放后的模态状态：点击外部只取消搜索框，
       // 摘线场景同时恢复原连接，不能继续落入画布空白的框选分支。
@@ -2617,7 +2617,7 @@ export default function ProjectCanvas({
   );
 
   useEffect(() => {
-    const onMove = (e: MouseEvent) => {
+    const onMove = (e: PointerEvent) => {
       const drag = dragRef.current;
       if (!drag) return;
       // 首次移动即捕获指针：此后即使松手在窗口外，mouseup 仍送达（根治
@@ -2625,7 +2625,7 @@ export default function ProjectCanvas({
       if (!capturedRef.current) {
         capturedRef.current = true;
         try {
-          vpRef.current?.setPointerCapture((e as PointerEvent).pointerId);
+          vpRef.current?.setPointerCapture(e.pointerId);
         } catch {
           // 指针已不可捕获（如合成事件）：退化为无捕获，后续照旧。
         }
@@ -2917,8 +2917,11 @@ export default function ProjectCanvas({
         });
       }
     };
-    const onUp = (e: MouseEvent) => {
+    const onUp = (e: PointerEvent) => {
       const drag = dragRef.current;
+      if (capturedRef.current && vpRef.current?.hasPointerCapture(e.pointerId)) {
+        vpRef.current.releasePointerCapture(e.pointerId);
+      }
       capturedRef.current = false;
       if (!drag) return;
       // 统一双击判定：两次「按下即松手」（未拖动）在 450ms 内落在同一
@@ -3495,11 +3498,13 @@ export default function ProjectCanvas({
       }
       dragRef.current = null;
     };
-    document.addEventListener("mousemove", onMove);
-    document.addEventListener("mouseup", onUp);
+    document.addEventListener("pointermove", onMove);
+    document.addEventListener("pointerup", onUp);
+    document.addEventListener("pointercancel", onUp);
     return () => {
-      document.removeEventListener("mousemove", onMove);
-      document.removeEventListener("mouseup", onUp);
+      document.removeEventListener("pointermove", onMove);
+      document.removeEventListener("pointerup", onUp);
+      document.removeEventListener("pointercancel", onUp);
     };
   }, [layout, pos, view, scenePos, infoPos, boxOf, portsOf, outPointOf, inPointOf, linkAssets, persistCards, persistLoose, saveCanvasLayout, saveInfoFramePos, saveView, setSelection, saveOutputPos, setEpisodeOutput, episodeId, notes, persistNotes, addNote, addPlaceholder, addEntityPh, persistPlaceholders, persistSegments, linkNode, unlinkNode, nodeKeyParts, addSegment, autoConnectNewNode, persistSizes, persistInfoOffsets, infoGroups, infoNodes, infoNodePos, entityPhs, segments, segPos, placeholders, sizeOfNode, outputBox, moveGroupTo, persistPositions, pushUndo, pendingLinks, persistPendingLinks, setInfoFramePos, setInfoOffsets, setNodeSizes, setNotes, setOutputPos, setPlaceholders, openNodeDetail]);
 
@@ -4414,7 +4419,7 @@ export default function ProjectCanvas({
       <div
         ref={vpRef}
         className="pc-viewport"
-        onMouseDown={onViewportMouseDown}
+        onPointerDown={onViewportPointerDown}
         onClickCapture={(e) => {
           if (!suppressClickRef.current) return;
           e.stopPropagation();
@@ -5165,7 +5170,7 @@ export default function ProjectCanvas({
                       event.currentTarget.blur();
                     }
                   }}
-                  onMouseDown={(event) => event.stopPropagation()}
+        onPointerDown={(event) => event.stopPropagation()}
                 />
               ) : (
                 <div className="pc-note-body">
@@ -5283,7 +5288,7 @@ export default function ProjectCanvas({
           <div
             className="pc-addmenu"
             style={{ left: addMenu.sx, top: addMenu.sy }}
-            onMouseDown={(event) => event.stopPropagation()}
+            onPointerDown={(event) => event.stopPropagation()}
           >
             <input
               className="pc-addmenu-search"
@@ -5412,7 +5417,7 @@ export default function ProjectCanvas({
                           },
                         }
                       : {
-                          onMouseDown: (event: React.MouseEvent) => {
+                          onPointerDown: (event: React.PointerEvent) => {
                             if (event.button !== 0) return;
                             event.stopPropagation();
                             event.preventDefault();
@@ -5481,7 +5486,7 @@ export default function ProjectCanvas({
             width={MINI_W}
             height={MINI_H}
             viewBox={`0 0 ${MINI_W} ${MINI_H}`}
-            onMouseDown={(e) => {
+            onPointerDown={(e) => {
               e.stopPropagation();
               const rect = (e.currentTarget as SVGSVGElement).getBoundingClientRect();
               const wx = (e.clientX - rect.left) / miniRatio;
