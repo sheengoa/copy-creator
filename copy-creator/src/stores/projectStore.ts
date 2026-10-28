@@ -574,7 +574,12 @@ export const useProjectStore = create<ProjectStoreState>((set, get) => ({
   },
 
   selectEpisode: async (episodeId) => {
-    set({ currentEpisodeId: episodeId, overview: null, overviewLoading: true });
+    // 同一集的静默刷新保留旧概览，避免项目变更（例如搜索框选中一个
+    // 新节点）让画布先卸载再挂载，造成整块视图闪烁。真正切集时仍清空
+    // 旧概览，防止不同集的数据短暂串屏。
+    const current = get();
+    const keepOverview = current.currentEpisodeId === episodeId && current.overview?.episode.id === episodeId;
+    set({ currentEpisodeId: episodeId, overview: keepOverview ? current.overview : null, overviewLoading: true });
     writeStored(EPISODE_STORAGE_KEY, episodeId);
     try {
       const overview = await invoke<EpisodeOverview>("project_get_episode_overview", {

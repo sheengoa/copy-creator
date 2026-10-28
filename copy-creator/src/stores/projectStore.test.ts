@@ -11,6 +11,7 @@ vi.mock("@tauri-apps/api/event", () => ({
   listen: vi.fn(),
 }));
 
+import type { EpisodeOverview } from "./projectStore";
 const { useProjectStore } = await import("./projectStore");
 
 const showA = {
@@ -147,6 +148,23 @@ describe("projectStore", () => {
 
     expect(useProjectStore.getState().overview?.episode.id).toBe("ep-2");
     expect(useProjectStore.getState().currentEpisodeId).toBe("ep-2");
+  });
+
+  it("同一集静默刷新保留画布概览，避免刷新瞬态闪烁", async () => {
+    const previous = { episode: episode1 } as unknown as EpisodeOverview;
+    useProjectStore.setState({ currentEpisodeId: "ep-1", overview: previous });
+    let resolveOverview: ((value: unknown) => void) | undefined;
+    invokeMock.mockImplementation((command: string) =>
+      command === "project_get_episode_overview"
+        ? new Promise((resolve) => { resolveOverview = resolve; })
+        : Promise.resolve([]),
+    );
+
+    const request = useProjectStore.getState().selectEpisode("ep-1");
+    expect(useProjectStore.getState().overview).toBe(previous);
+    resolveOverview?.({ episode: episode1 });
+    await request;
+    expect(useProjectStore.getState().overview?.episode.id).toBe("ep-1");
   });
 
   it("setView 持久化到 localStorage", () => {
