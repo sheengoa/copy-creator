@@ -1557,7 +1557,9 @@
 .pc-node.pc-resized {
   display: flex;
   flex-direction: column;
-  overflow: hidden;
+  /* 工具条位于节点上方（top: -46px），外层不能裁剪它；各预览子区
+     已分别设置 overflow，内容裁剪不依赖节点外壳。 */
+  overflow: visible;
 }
 .pc-node.pc-resized .pc-media,
 .pc-node.pc-resized .pc-miss-card,
