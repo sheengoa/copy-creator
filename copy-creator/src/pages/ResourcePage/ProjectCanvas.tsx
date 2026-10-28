@@ -2203,9 +2203,15 @@ export default function ProjectCanvas({
   const onViewportMouseDown = useCallback(
     (e: React.MouseEvent) => {
       const target = e.target instanceof Element ? e.target : null;
-      // 关闭节点选择框：摘线交给菜单（detached）而未落定时，放回原口。
-      if (addMenu?.detached) setLiftedWire(null);
-      setAddMenu(null);
+      // 节点搜索框是连线释放后的模态状态：点击外部只取消搜索框，
+      // 摘线场景同时恢复原连接，不能继续落入画布空白的框选分支。
+      if (addMenu && !target?.closest(".pc-addmenu")) {
+        if (addMenu.detached) setLiftedWire(null);
+        setAddMenu(null);
+        setAddMenuQuery("");
+        e.preventDefault();
+        return;
+      }
       // 上一场拖拽若有残留（松手事件在窗外丢失等），开新拖拽前先复位：
       // 冻结的草稿线、拿着的摘线、切线态，避免「松手后线卡住」的残影。
       // 指针捕获标记一并复位——wirecut 的 buttons 自愈路径会清掉拖拽态
@@ -3037,9 +3043,7 @@ export default function ProjectCanvas({
           } else {
             setLiftedWire(null);
           }
-          return;
-        }
-        if (drag.targetKey && drag.fromKey) {
+        } else if (drag.targetKey && drag.fromKey) {
           // 反拖（从输入口出发）时落点才是数据的来源方；落到成片节点
           // （key "output"）即设置本集总输出；落到片段的某个输入口则写
           // 一条 node_link（角色/场景/道具/剧本/素材/镜头/片段 → 片段）。
