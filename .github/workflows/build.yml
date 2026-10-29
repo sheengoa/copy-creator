@@ -1,7 +1,9 @@
 name: Build
 
-# 手动触发用于验证编译打包；推送 v* 标签时先跑质量门禁（lint / 前端测试 /
-# 类型检查 / Rust 测试），全部通过后才构建并发布 GitHub Release。
+# 手动触发用于验证编译打包；推送 v* 标签时先跑质量门禁（Linux：lint /
+# 前端测试 / 类型检查 / Rust 测试；Windows：Rust 编译检查与 lib 测试，
+# Windows 专属代码与分隔符敏感用例只在 Windows 上暴露），全部通过后才
+# 构建并发布 GitHub Release。
 on:
   workflow_dispatch:
   push:
@@ -66,8 +68,36 @@ jobs:
         run: cargo test
         working-directory: copy-creator/src-tauri
 
+  # Windows 侧门禁：与 ci.yml 的 windows job 同一套验证。gate 只跑 Linux，
+  # 而 Windows 专属代码（OLE 拖出、低级键盘钩子、注册表自启动）与分隔符
+  # 敏感用例的失败过去要等日常 CI 才暴露——打 tag 当天必须同水平把关。
+  gate-windows:
+    runs-on: windows-latest
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: 安装 Rust 工具链
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: 缓存 Rust 编译产物
+        uses: swatinem/rust-cache@v2
+        with:
+          workspaces: copy-creator/src-tauri
+
+      - name: Rust 编译检查
+        run: cargo check
+        working-directory: copy-creator/src-tauri
+
+      # lib 测试进程需要嵌入 Common-Controls v6 manifest 才能启动，
+      # test.cmd 经 RUSTFLAGS 注入（本仓库 Windows 跑测试的既定方式）。
+      - name: Rust lib 测试
+        shell: cmd
+        run: test.cmd
+        working-directory: copy-creator/src-tauri
+
   build:
-    needs: gate
+    needs: [gate, gate-windows]
     strategy:
       fail-fast: false
       matrix:
