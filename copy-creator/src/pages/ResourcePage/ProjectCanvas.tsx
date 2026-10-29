@@ -514,6 +514,8 @@ export default function ProjectCanvas({
     linkNode,
     unlinkNode,
     linkAsset,
+    characters,
+    props,
   } = useProjectStore(
     useShallow((state) => ({
       overview: state.overview,
@@ -540,6 +542,8 @@ export default function ProjectCanvas({
       linkNode: state.linkNode,
       unlinkNode: state.unlinkNode,
       linkAsset: state.linkAsset,
+      characters: state.characters,
+      props: state.props,
     })),
   );
   const episodeId = overview?.episode.id ?? "";
@@ -705,19 +709,22 @@ export default function ProjectCanvas({
     episodeId, "infogroups", EMPTY_INFO_GROUPS,
   );
   // 组成员自愈：实体已不存在（库里被删）时从组里剔除，避免僵尸认领
-  // 挡住后续同名 id 的实体入集。概览未加载（实体列表为空的瞬态）时跳过。
+  // 挡住后续同名 id 的实体入集。存在性按全局库判定而非集关联（概览）：
+  // 「装入」先写组、后 associateEntities 关联实体，两者之间概览尚未
+  // 带出新成员——凭集级列表会把这个空档误判成「成员已删」整组误删
+  // （裸占位装入没有暂存线转正的逐条 IPC 推刷新，空档必然出现）。
+  // 某个全局库尚未拉取时跳过该类组的判定，拉到后 effect 重跑再补判。
   useEffect(() => {
     if (!overview) return;
     const exists = (kind: EntityPhKind, id: string) =>
-      (kind === "character"
-        ? castCharacters
-        : kind === "location"
-          ? episodeLocations
-          : episodeProps
-      ).some((e) => e.id === id);
+      (kind === "character" ? characters : kind === "location" ? locations : props).some(
+        (e) => e.id === id,
+      );
     let changed = false;
     const next = infoGroups
       .map((g) => {
+        const pool = g.kind === "character" ? characters : g.kind === "location" ? locations : props;
+        if (pool.length === 0) return g;
         const members = g.members.filter((id) => exists(g.kind, id));
         if (members.length === g.members.length) return g;
         changed = true;
@@ -725,7 +732,7 @@ export default function ProjectCanvas({
       })
       .filter((g) => g.members.length > 0);
     if (changed) persistInfoGroups(next);
-  }, [overview, infoGroups, castCharacters, episodeLocations, episodeProps, persistInfoGroups]);
+  }, [overview, infoGroups, characters, locations, props, persistInfoGroups]);
 
   // ── 布局与位置（state 驱动渲染） ──
   const layout = useMemo(() => {
