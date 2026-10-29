@@ -1,5 +1,23 @@
 import { describe, expect, it } from "vitest";
-import { isResourceRecord, resourceTextPreviewPath } from "./records";
+import { getResourcePath, isResourceRecord, resourceTextPreviewPath } from "./records";
+
+describe("getResourcePath", () => {
+  it("prefers the current path for file and image records while retaining content fallback", () => {
+    expect(getResourcePath({
+      type: "file",
+      content: "C:/old/audio.mp3",
+      resource_path: "C:/new/audio.mp3",
+    })).toBe("C:/new/audio.mp3");
+    expect(getResourcePath({
+      type: "image",
+      content: "C:/old/cover.png",
+      resource_path: "C:/new/cover.png",
+    })).toBe("C:/new/cover.png");
+    expect(getResourcePath({ type: "image", content: "C:/stash/image.png" })).toBe(
+      "C:/stash/image.png",
+    );
+  });
+});
 
 describe("isResourceRecord", () => {
   it("recognizes records stored in the resource library", () => {

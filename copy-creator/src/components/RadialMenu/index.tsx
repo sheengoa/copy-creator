@@ -172,6 +172,7 @@ interface PreviewState {
 
 interface PendingNativeDrag {
   itemId: string;
+  dragIds?: string[];
   dragSource: RadialDragSource;
   dragPath?: string;
   sessionId: number;
@@ -1070,10 +1071,11 @@ export default function RadialMenu() {
     visibleRef.current = false;
     setVisible(false);
     void invoke("hide_radial_menu");
-    flog(`invoking start_radial_file_drag session=${next.sessionId} item=${next.itemId}`);
+    const dragId = next.dragIds ? JSON.stringify(next.dragIds) : next.itemId;
+    flog(`invoking start_radial_file_drag session=${next.sessionId} item=${dragId}`);
     void invoke("start_radial_file_drag", {
       source: next.dragSource,
-      id: next.itemId,
+      id: dragId,
       path: next.dragPath || null,
       sessionId: next.sessionId,
       dragImageBase64: captureDragThumbnail(next.itemId),
@@ -1096,9 +1098,10 @@ export default function RadialMenu() {
 
     const next = { ...pending, armRequested: true };
     nativeDragRef.current = next;
+    const dragId = next.dragIds ? JSON.stringify(next.dragIds) : next.itemId;
     void invoke("arm_radial_file_drag", {
       source: next.dragSource,
-      id: next.itemId,
+      id: dragId,
       path: next.dragPath || null,
       sessionId: next.sessionId,
       screenX: next.startScreenX,
@@ -1181,18 +1184,40 @@ export default function RadialMenu() {
     if (
       e.button !== 0
       || !e.isPrimary
-      || e.shiftKey
-      || shiftClickSelectionModeRef.current
       || dragActiveRef.current
       || nativeDragRef.current
     ) return;
 
     const itemId = target?.dataset.radialItemId;
-    const dragSource = target?.dataset.radialDragSource as RadialDragSource | undefined;
+    const selectedIds = shiftClickSelectionModeRef.current
+      ? selectedItemIdsRef.current
+      : [];
+    const isSelectedItem = Boolean(itemId && selectedIds.includes(itemId));
+    // Shift+按下未选中条目仍用于扩展选择；已选条目可直接拖出整组选中项。
+    if (e.shiftKey && !isSelectedItem) return;
+    let dragIds: string[] | undefined;
+    if (isSelectedItem && selectedIds.length > 1) {
+      const selectedElements = selectedIds.map((id) =>
+        document.querySelector<HTMLElement>(`[data-radial-item-id="${CSS.escape(id)}"]`),
+      );
+      if (selectedElements.every((element) => element?.dataset.radialDragKind === "files")) {
+        dragIds = selectedIds;
+      } else {
+        suppressClickRef.current = true;
+        return;
+      }
+    }
+    const itemDragSource = target?.dataset.radialDragSource as RadialDragSource | undefined;
+    const dragSource: RadialDragSource | undefined = dragIds
+      ? "selection"
+      : itemDragSource;
     if (
       !target
       || !itemId
-      || (dragSource !== "clipboard" && dragSource !== "phrase" && dragSource !== "group")
+      || (dragSource !== "clipboard"
+        && dragSource !== "phrase"
+        && dragSource !== "group"
+        && dragSource !== "selection")
     ) {
       nativeDragRef.current = null;
       setDragSessionItemId(null);
@@ -1204,8 +1229,9 @@ export default function RadialMenu() {
     setDragSessionItemId(itemId);
     const pending: PendingNativeDrag = {
       itemId,
+      dragIds,
       dragSource,
-      dragPath: target.dataset.radialDragPath || undefined,
+      dragPath: dragIds ? undefined : target.dataset.radialDragPath || undefined,
       sessionId: ++dragSessionIdRef.current,
       pointerId: e.pointerId,
       startX: e.clientX,

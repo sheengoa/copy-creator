@@ -302,24 +302,39 @@ describe("clipboardStore stash image paste routing", () => {
     expect(invokeMock).toHaveBeenCalledWith("touch_clipboard_usage", { ids: ["res-3"] });
   });
 
-  it("pastes non-text resource files as files", async () => {
+  it("pastes non-text resource files from their current resource path", async () => {
     await useClipboardStore.getState().pasteRecord({
       id: "res-4",
       type: "file",
-      content: "/lib/movie.mp4",
+      content: "/old-library/audio.mp3",
       source_app: "",
       created_at: "2026-09-01T00:00:00Z",
       storage_mode: "resource",
-      resource_path: "/lib/movie.mp4",
-      resource_kind: "video",
+      resource_path: "/lib/audio.mp3",
+      resource_kind: "audio",
       group_name: "",
     });
 
-    expect(invokeMock).toHaveBeenCalledWith("paste_file", { path: "/lib/movie.mp4" });
+    expect(invokeMock).toHaveBeenCalledWith("paste_file", { path: "/lib/audio.mp3" });
     expect(invokeMock).not.toHaveBeenCalledWith(
       "paste_text_file",
       expect.anything(),
     );
+  });
+
+  it("pastes resource images from their current resource path", async () => {
+    await useClipboardStore.getState().pasteRecord({
+      id: "res-image",
+      type: "image",
+      content: "/old-library/cover.png",
+      source_app: "",
+      created_at: "2026-09-01T00:00:00Z",
+      storage_mode: "resource",
+      resource_path: "/lib/cover.png",
+      group_name: "",
+    });
+
+    expect(invokeMock).toHaveBeenCalledWith("paste_image", { path: "/lib/cover.png" });
   });
 });
 

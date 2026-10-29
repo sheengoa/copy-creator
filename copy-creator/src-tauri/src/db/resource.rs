@@ -223,6 +223,34 @@ pub fn sync_resource_library<R: Runtime>(app: &AppHandle<R>) -> (usize, usize) {
         }
         return (0, 0);
     }
+
+    // 全量对账可能是启动或监听漏事件后的唯一恢复机会。先把缺失记录与磁盘现存文件
+    // 做保守的一对一重定向，再进入幽灵清理/新文件补录，避免旧元数据被回收后丢失。
+    let missing_paths = {
+        let state = app.state::<DbState>();
+        let Ok(conn) = state.conn.lock() else {
+            return (0, 0);
+        };
+        let Ok(mut stmt) = conn.prepare(
+            "SELECT resource_path FROM clipboard_records
+             WHERE storage_mode = 'resource'
+               AND COALESCE(resource_path, '') <> ''",
+        ) else {
+            return (0, 0);
+        };
+        let Ok(rows) = stmt.query_map([], |row| row.get::<_, String>(0)) else {
+            return (0, 0);
+        };
+        rows.flatten()
+            .map(PathBuf::from)
+            .filter(|path| path.starts_with(&root) && !path.exists())
+            .collect::<Vec<_>>()
+    };
+    if !missing_paths.is_empty() {
+        let arrived_paths: Vec<PathBuf> = entries.iter().map(|entry| entry.path.clone()).collect();
+        relocate_resource_records(app, &missing_paths, &arrived_paths);
+    }
+
     let state = app.state::<DbState>();
     let Ok(conn) = state.conn.lock() else {
         return (0, 0);
@@ -706,6 +734,7 @@ fn relocate_resource_records<R: Runtime>(
         .iter()
         .map(|(_, path, _)| watch_path_key(path))
         .collect();
+    let mut relocated_ids: HashSet<String> = HashSet::new();
 
     for gone in missing {
         let gone_key = watch_path_key(gone);
@@ -733,7 +762,7 @@ fn relocate_resource_records<R: Runtime>(
                 .map(|path| watch_path_key(path))
                 .collect();
             let mut moves: Vec<(String, PathBuf, String)> = Vec::new();
-            for (id, path, content) in &victims {
+            for (id, path, _) in &victims {
                 let victim_key = watch_path_key(path);
                 let Ok(relative) = victim_key.strip_prefix(&gone_key) else {
                     return None;
@@ -743,13 +772,13 @@ fn relocate_resource_records<R: Runtime>(
                 if !replacement_files.contains(&target_key) || occupied.contains(&target_key) {
                     return None;
                 }
-                moves.push((id.clone(), target, content.clone()));
+                moves.push((id.clone(), target, path.to_string_lossy().to_string()));
             }
             Some((candidate, moves))
         }) else {
             continue;
         };
-        for (id, target, old_content) in moves {
+        for (id, target, old_path) in moves {
             let new_id = resource_file_id(&target);
             let target_text = target.to_string_lossy().to_string();
             // 图片记录的展示/预览路径来自 content，文件记录则来自
@@ -764,10 +793,11 @@ fn relocate_resource_records<R: Runtime>(
                      END,
                      resource_missing = 0
                  WHERE id = ?4",
-                params![new_id, target_text, old_content, id],
+                params![new_id, target_text, old_path, id],
             );
             if updated == Ok(1) {
                 occupied.insert(watch_path_key(&target));
+                relocated_ids.insert(id.clone());
                 let _ = conn.execute(
                     "UPDATE api_key_labels SET record_id = ?1 WHERE record_id = ?2",
                     params![new_id, id],
@@ -778,6 +808,106 @@ fn relocate_resource_records<R: Runtime>(
                     target.display()
                 );
             }
+        }
+    }
+
+    // 文件被拆散到父目录或其他目录时，文件管理器可能只报告旧路径消失和新文件到达，
+    // 无法再靠目录相对路径配对。此时只接受“文件名 + 媒体类型”均匹配且候选唯一的
+    // 一对一关联；同名多候选保持缺失，避免把两个资源错误串联。
+    let mut arrived_files: Vec<PathBuf> = Vec::new();
+    for path in arrived {
+        if path.is_file() {
+            arrived_files.push(path.clone());
+        } else if path.is_dir() {
+            arrived_files.extend(collect_resource_files_under(path));
+        }
+    }
+    arrived_files.sort_by_key(|path| watch_path_key(path));
+    arrived_files.dedup_by_key(|path| watch_path_key(path));
+
+    let unmatched_records: Vec<&(String, PathBuf, String)> = records
+        .iter()
+        .filter(|(id, path, _)| {
+            !relocated_ids.contains(id)
+                && !path.exists()
+                && missing.iter().any(|gone| {
+                    let gone_key = watch_path_key(gone);
+                    let path_key = watch_path_key(path);
+                    path_key == gone_key || path_key.starts_with(&gone_key)
+                })
+                && path.file_name().is_some_and(|name| {
+                    let old_name = name.to_string_lossy().to_lowercase();
+                    let old_kind = crate::media_kind::media_kind_for_path(path);
+                    arrived_files.iter().any(|candidate| {
+                        candidate
+                            .file_name()
+                            .map(|candidate_name| {
+                                candidate_name.to_string_lossy().to_lowercase() == old_name
+                            })
+                            .unwrap_or(false)
+                            && crate::media_kind::media_kind_for_path(candidate) == old_kind
+                    })
+                })
+        })
+        .collect();
+    let candidate_matches: Vec<(&str, &PathBuf)> = unmatched_records
+        .iter()
+        .filter_map(|(id, old_path, _)| {
+            let old_name = old_path.file_name()?.to_string_lossy().to_lowercase();
+            let old_kind = crate::media_kind::media_kind_for_path(old_path);
+            let candidates: Vec<&PathBuf> = arrived_files
+                .iter()
+                .filter(|candidate| {
+                    !occupied.contains(&watch_path_key(candidate))
+                        && candidate
+                            .file_name()
+                            .map(|name| name.to_string_lossy().to_lowercase() == old_name)
+                            .unwrap_or(false)
+                        && crate::media_kind::media_kind_for_path(candidate) == old_kind
+                })
+                .collect();
+            (candidates.len() == 1).then(|| (id.as_str(), candidates[0]))
+        })
+        .collect();
+    let mut candidate_use_count: HashMap<PathBuf, usize> = HashMap::new();
+    for (_, candidate) in &candidate_matches {
+        *candidate_use_count
+            .entry(watch_path_key(candidate))
+            .or_default() += 1;
+    }
+    for (id, target) in candidate_matches {
+        let target_key = watch_path_key(target);
+        if candidate_use_count.get(&target_key) != Some(&1) || occupied.contains(&target_key) {
+            continue;
+        }
+        let Some((_, old_path, _)) = records.iter().find(|(record_id, _, _)| record_id == id) else {
+            continue;
+        };
+        let new_id = resource_file_id(target);
+        let target_text = target.to_string_lossy().to_string();
+        let updated = conn.execute(
+            "UPDATE clipboard_records
+             SET id = ?1, resource_path = ?2,
+                 content = CASE
+                     WHEN type = 'image' OR content = ?3 THEN ?2
+                     ELSE content
+                 END,
+                 resource_missing = 0
+             WHERE id = ?4",
+            params![new_id, target_text, old_path.to_string_lossy(), id],
+        );
+        if updated == Ok(1) {
+            occupied.insert(target_key);
+            relocated_ids.insert(id.to_string());
+            let _ = conn.execute(
+                "UPDATE api_key_labels SET record_id = ?1 WHERE record_id = ?2",
+                params![new_id, id],
+            );
+            log::info!(
+                "外部文件单文件重定向资源记录: {} -> {}",
+                old_path.display(),
+                target.display()
+            );
         }
     }
 }

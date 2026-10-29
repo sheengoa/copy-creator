@@ -64,7 +64,9 @@ export function resourceTextPreviewPath(
 export function getResourcePath(
   record: Pick<ClipboardRecord, "type" | "content" | "resource_path">,
 ): string {
-  return record.type === "file" ? record.resource_path || record.content : record.content;
+  return record.type === "file" || record.type === "image"
+    ? record.resource_path || record.content
+    : record.content;
 }
 
 /** 资源文件的媒体版本（文件修改毫秒，后端查询时 stat）：媒体 URL 与

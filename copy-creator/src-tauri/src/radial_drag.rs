@@ -48,6 +48,8 @@ thread_local! {
 pub enum RadialDragSource {
     Clipboard,
     Phrase,
+    /// 径向菜单 Shift 多选的文件条目，id 是 JSON 编码的记录 id 数组。
+    Selection,
     /// 资源分组整组拖出：id 为分组的多级路径，拖动其目录下全部文件。
     #[serde(rename = "group")]
     ResourceGroup,
@@ -67,17 +69,19 @@ fn stored_file_path(app: &AppHandle, path: &str) -> Result<PathBuf, String> {
 }
 
 fn clipboard_drag_paths(app: &AppHandle, id: &str) -> Result<Vec<PathBuf>, String> {
-    let (record_type, content, attachments) = {
+    let (record_type, content, attachments, resource_path) = {
         let state = app.state::<crate::db::DbState>();
         let conn = state.conn.lock().map_err(|error| error.to_string())?;
         conn.query_row(
-            "SELECT type, content, attachments FROM clipboard_records WHERE id = ?1",
+            "SELECT type, content, attachments, COALESCE(resource_path, '')
+             FROM clipboard_records WHERE id = ?1",
             params![id],
             |row| {
                 Ok((
                     row.get::<_, String>(0)?,
                     row.get::<_, String>(1)?,
                     row.get::<_, String>(2)?,
+                    row.get::<_, String>(3)?,
                 ))
             },
         )
@@ -86,13 +90,27 @@ fn clipboard_drag_paths(app: &AppHandle, id: &str) -> Result<Vec<PathBuf>, Strin
 
     let attachment_paths = serde_json::from_str::<Vec<String>>(&attachments)
         .map_err(|error| format!("解析图片附件失败: {error}"))?;
-    if let Some(path) = attachment_paths.first() {
-        return Ok(vec![canonical_file_path(stored_file_path(app, path)?)?]);
+    // 附件路径属于历史快照，资源记录移动后可能仍保留旧附件字符串。
+    // 逐个尝试可用附件，失败时继续使用当前 resource_path/content，避免拖动
+    // 因一条过期附件路径被提前中止。
+    for path in attachment_paths {
+        let Ok(stored_path) = stored_file_path(app, &path) else {
+            continue;
+        };
+        if let Ok(canonical_path) = canonical_file_path(stored_path) {
+            return Ok(vec![canonical_path]);
+        }
     }
 
     match record_type.as_str() {
-        "image" => Ok(vec![canonical_file_path(stored_file_path(app, &content)?)?]),
-        "file" => Ok(vec![canonical_file_path(PathBuf::from(content))?]),
+        "image" => {
+            let path = if resource_path.is_empty() { content } else { resource_path };
+            Ok(vec![canonical_file_path(stored_file_path(app, &path)?)?])
+        }
+        "file" => {
+            let path = if resource_path.is_empty() { content } else { resource_path };
+            Ok(vec![canonical_file_path(stored_file_path(app, &path)?)?])
+        }
         _ => Err("只有图片和文件内容支持系统文件拖拽".to_string()),
     }
 }
@@ -124,6 +142,23 @@ fn resolve_drag_paths(
     match source {
         RadialDragSource::Clipboard => clipboard_drag_paths(app, id),
         RadialDragSource::Phrase => phrase_drag_paths(app, id),
+        RadialDragSource::Selection => {
+            let ids = serde_json::from_str::<Vec<String>>(id)
+                .map_err(|error| format!("解析多选拖动条目失败: {error}"))?;
+            if ids.len() < 2 {
+                return Err("多选拖动至少需要两个条目".to_string());
+            }
+            let mut paths = Vec::with_capacity(ids.len());
+            for selected_id in ids {
+                let path = clipboard_drag_paths(app, &selected_id)
+                    .or_else(|_| phrase_drag_paths(app, &selected_id))?;
+                paths.extend(path);
+            }
+            if paths.is_empty() {
+                return Err("所选条目没有可拖动的文件".to_string());
+            }
+            Ok(paths)
+        }
         RadialDragSource::ResourceGroup => resource_group_drag_paths(app, id),
     }
 }
@@ -220,6 +255,39 @@ fn finish_radial_drag(
                     crate::db::touch_clipboard_usage_internal(app, std::slice::from_ref(id))
                 }
                 RadialDragSource::Phrase => crate::db::touch_phrase_usage_internal(app, id),
+                RadialDragSource::Selection => {
+                    let result = serde_json::from_str::<Vec<String>>(id)
+                        .map_err(|error| format!("解析多选拖动条目失败: {error}"))
+                        .and_then(|ids| {
+                            let mut clipboard_ids = Vec::new();
+                            let mut phrase_ids = Vec::new();
+                            for selected_id in ids {
+                                let state = app.state::<crate::db::DbState>();
+                                let conn = state.conn.lock().map_err(|error| error.to_string())?;
+                                let is_clipboard = conn
+                                    .query_row(
+                                        "SELECT EXISTS(SELECT 1 FROM clipboard_records WHERE id = ?1)",
+                                        params![selected_id],
+                                        |row| row.get::<_, bool>(0),
+                                    )
+                                    .unwrap_or(false);
+                                drop(conn);
+                                if is_clipboard {
+                                    clipboard_ids.push(selected_id);
+                                } else {
+                                    phrase_ids.push(selected_id);
+                                }
+                            }
+                            if !clipboard_ids.is_empty() {
+                                crate::db::touch_clipboard_usage_internal(app, &clipboard_ids)?;
+                            }
+                            for phrase_id in phrase_ids {
+                                crate::db::touch_phrase_usage_internal(app, &phrase_id)?;
+                            }
+                            Ok(())
+                        });
+                    result
+                }
                 RadialDragSource::ResourceGroup => {
                     crate::db::touch_resource_group_usage_internal(app, id)
                 }

@@ -3320,6 +3320,238 @@ mod resource_command_tests {
     }
 
     #[test]
+    fn moved_file_backed_text_resources_keep_their_content() {
+        let (app, root) = test_app();
+        let body = "Original text resource body";
+        let old_folder = root.join("old-folder");
+        let old_nested_text = old_folder.join("notes.txt");
+        std::fs::create_dir_all(&old_folder).unwrap();
+        std::fs::write(&old_nested_text, body).unwrap();
+        insert_typed_resource(
+            &app,
+            "nested-text",
+            "text",
+            body,
+            old_nested_text.to_str().unwrap(),
+        );
+        let new_folder = root.join("new-folder");
+        std::fs::rename(&old_folder, &new_folder).unwrap();
+        settle_external_resource_changes(app.handle(), &[old_folder, new_folder.clone()]);
+
+        let old_single = root.join("old-single").join("notes.txt");
+        std::fs::create_dir_all(old_single.parent().unwrap()).unwrap();
+        std::fs::write(&old_single, body).unwrap();
+        insert_typed_resource(
+            &app,
+            "single-text",
+            "text",
+            body,
+            old_single.to_str().unwrap(),
+        );
+        let new_single = root.join("new-single").join("notes.txt");
+        std::fs::create_dir_all(new_single.parent().unwrap()).unwrap();
+        std::fs::rename(&old_single, &new_single).unwrap();
+        settle_external_resource_changes(app.handle(), &[old_single, new_single.clone()]);
+
+        let state = app.state::<DbState>();
+        let conn = state.conn.lock().unwrap();
+        for (path, id) in [
+            (new_folder.join("notes.txt"), "nested-text"),
+            (new_single, "single-text"),
+        ] {
+            let (content, resource_path): (String, String) = conn
+                .query_row(
+                    "SELECT content, resource_path FROM clipboard_records WHERE id = ?1",
+                    [resource_file_id(&path)],
+                    |row| Ok((row.get(0)?, row.get(1)?)),
+                )
+                .unwrap_or_else(|error| panic!("record {id} should be relocated: {error}"));
+            assert_eq!(content, body, "moving a text resource must preserve its content");
+            assert_eq!(resource_path, path.to_string_lossy());
+        }
+        drop(conn);
+        cleanup(&root);
+    }
+
+    #[test]
+    fn settle_redirects_uniquely_moved_audio_and_image_files() {
+        let (app, root) = test_app();
+        let old_dir = root.join("1029").join("打扮").join("新建文件夹");
+        std::fs::create_dir_all(&old_dir).unwrap();
+        let old_female = old_dir.join("女.mp3");
+        let old_male = old_dir.join("男.mp3");
+        let old_image = old_dir.join("封面.png");
+        std::fs::write(&old_female, [1, 2, 3]).unwrap();
+        std::fs::write(&old_male, [4, 5, 6]).unwrap();
+        std::fs::write(&old_image, [7, 8, 9]).unwrap();
+        insert_typed_resource(
+            &app,
+            "female-audio",
+            "file",
+            old_female.to_str().unwrap(),
+            old_female.to_str().unwrap(),
+        );
+        insert_typed_resource(
+            &app,
+            "male-audio",
+            "file",
+            old_male.to_str().unwrap(),
+            old_male.to_str().unwrap(),
+        );
+        insert_typed_resource(
+            &app,
+            "cover-image",
+            "image",
+            old_image.to_str().unwrap(),
+            old_image.to_str().unwrap(),
+        );
+
+        let new_female = old_dir.parent().unwrap().join("女.mp3");
+        let new_male = old_dir.parent().unwrap().join("男.mp3");
+        let new_image = old_dir.parent().unwrap().join("封面.png");
+        std::fs::rename(&old_female, &new_female).unwrap();
+        std::fs::rename(&old_male, &new_male).unwrap();
+        std::fs::rename(&old_image, &new_image).unwrap();
+        settle_external_resource_changes(
+            app.handle(),
+            &[
+                old_dir.clone(),
+                old_female.clone(),
+                old_male.clone(),
+                old_image.clone(),
+                new_female.clone(),
+                new_male.clone(),
+                new_image.clone(),
+            ],
+        );
+
+        let records = get_clipboard_records_inner(
+            &app.handle().clone(),
+            None,
+            Some(50),
+            Some(0),
+            Some("resources".to_string()),
+            None,
+            Some("recent".into()),
+        )
+        .unwrap();
+        assert_eq!(records.len(), 3, "移动后应保留原资源记录，不应重建为新记录");
+        for (old_id, new_path, expected_kind) in [
+            ("female-audio", new_female, "audio"),
+            ("male-audio", new_male, "audio"),
+            ("cover-image", new_image, "image"),
+        ] {
+            let record = records
+                .iter()
+                .find(|record| record["resource_path"].as_str() == new_path.to_str())
+                .unwrap_or_else(|| panic!("应重定向至 {new_path:?}: {records:?}"));
+            assert_eq!(record["id"].as_str(), Some(resource_file_id(&new_path).as_str()));
+            assert_eq!(record["content"].as_str(), new_path.to_str());
+            assert_eq!(record["resource_kind"].as_str(), Some(expected_kind));
+            assert_eq!(record["resource_missing"].as_bool(), Some(false));
+            assert_ne!(record["id"].as_str(), Some(old_id));
+        }
+        cleanup(&root);
+    }
+
+    #[test]
+    fn settle_does_not_redirect_when_same_name_has_multiple_arrivals() {
+        let (app, root) = test_app();
+        let old_dir = root.join("old-group");
+        std::fs::create_dir_all(&old_dir).unwrap();
+        let old = old_dir.join("女.mp3");
+        std::fs::write(&old, [1, 2, 3]).unwrap();
+        insert_typed_resource(
+            &app,
+            "ambiguous-audio",
+            "file",
+            old.to_str().unwrap(),
+            old.to_str().unwrap(),
+        );
+        let first = root.join("group-a").join("女.mp3");
+        let second = root.join("group-b").join("女.mp3");
+        std::fs::create_dir_all(first.parent().unwrap()).unwrap();
+        std::fs::create_dir_all(second.parent().unwrap()).unwrap();
+        std::fs::write(&first, [4, 5, 6]).unwrap();
+        std::fs::write(&second, [7, 8, 9]).unwrap();
+        std::fs::remove_file(&old).unwrap();
+
+        settle_external_resource_changes(
+            app.handle(),
+            &[old, first.clone(), second.clone()],
+        );
+
+        let records = get_clipboard_records_inner(
+            &app.handle().clone(),
+            None,
+            Some(50),
+            Some(0),
+            Some("resources".to_string()),
+            None,
+            Some("recent".into()),
+        )
+        .unwrap();
+        assert_eq!(records.len(), 2, "歧义候选应按新文件发现处理，不继承旧记录");
+        assert!(records.iter().all(|record| record["id"] != "ambiguous-audio"));
+        assert!(records.iter().any(|record| record["resource_path"].as_str() == first.to_str()));
+        assert!(records.iter().any(|record| record["resource_path"].as_str() == second.to_str()));
+        cleanup(&root);
+    }
+
+    #[test]
+    fn sync_resource_library_recovers_moved_audio_after_missed_watch_events() {
+        let (app, root) = test_app();
+        let old_dir = root.join("1029").join("打扮").join("新建文件夹");
+        std::fs::create_dir_all(&old_dir).unwrap();
+        let old_female = old_dir.join("女.mp3");
+        let old_male = old_dir.join("男.mp3");
+        std::fs::write(&old_female, [1, 2, 3]).unwrap();
+        std::fs::write(&old_male, [4, 5, 6]).unwrap();
+        insert_typed_resource(
+            &app,
+            "female-audio",
+            "file",
+            old_female.to_str().unwrap(),
+            old_female.to_str().unwrap(),
+        );
+        insert_typed_resource(
+            &app,
+            "male-audio",
+            "file",
+            old_male.to_str().unwrap(),
+            old_male.to_str().unwrap(),
+        );
+        let new_female = old_dir.parent().unwrap().join("女.mp3");
+        let new_male = old_dir.parent().unwrap().join("男.mp3");
+        std::fs::rename(&old_female, &new_female).unwrap();
+        std::fs::rename(&old_male, &new_male).unwrap();
+
+        crate::db::sync_resource_library(app.handle());
+
+        let records = get_clipboard_records_inner(
+            &app.handle().clone(),
+            None,
+            Some(50),
+            Some(0),
+            Some("resources".to_string()),
+            None,
+            Some("recent".into()),
+        )
+        .unwrap();
+        assert_eq!(records.len(), 2, "对账应恢复原音频记录，避免清退后重新建档");
+        for (old_id, new_path) in [("female-audio", new_female), ("male-audio", new_male)] {
+            let record = records
+                .iter()
+                .find(|record| record["resource_path"].as_str() == new_path.to_str())
+                .unwrap_or_else(|| panic!("对账应恢复到 {new_path:?}: {records:?}"));
+            assert_eq!(record["resource_kind"].as_str(), Some("audio"));
+            assert_eq!(record["resource_missing"].as_bool(), Some(false));
+            assert_ne!(record["id"].as_str(), Some(old_id));
+        }
+        cleanup(&root);
+    }
+
+    #[test]
     fn settle_removes_records_when_directory_moved_out_of_library() {
         // 删除到回收站/剪切移出库外 = rename 出监听目录：旧路径事件按
         // stat 裁决为消失，子树记录清退——旧实现按「Modify=到达」处理

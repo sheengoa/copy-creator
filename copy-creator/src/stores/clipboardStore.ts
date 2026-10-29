@@ -173,7 +173,7 @@ async function runPaste(
     }
     const content = await getFullContent(record);
     if (record.type === "image") {
-      await invoke("paste_image", { path: content });
+      await invoke("paste_image", { path: getResourcePath(record) });
     } else if (record.type === "file") {
       if (isFileBackedTextResource(record)) {
         try {
@@ -187,7 +187,7 @@ async function runPaste(
           console.warn("文本资源按内容粘贴失败，回退为文件粘贴:", error);
         }
       }
-      await invoke("paste_file", { path: content });
+      await invoke("paste_file", { path: getResourcePath(record) });
     } else if (terminal) {
       await invoke("paste_text_terminal", { text: content });
     } else {
