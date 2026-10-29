@@ -604,11 +604,20 @@ input:focus-visible + .selection-checkbox {
   font-weight: 600;
 }
 
+/* 执行替换：白卡主操作——与工具栏按钮同语言 */
 .find-replace-submit {
   white-space: nowrap;
-  border: 1px solid var(--separator);
+  border: 0;
   padding: 0 8px;
   height: 26px;
+  background: var(--btn-card-bg);
+  color: var(--text-primary);
+  box-shadow: var(--btn-card-shadow);
+}
+
+.find-replace-btn.find-replace-submit:hover:not(:disabled) {
+  background: var(--btn-card-bg);
+  box-shadow: var(--btn-card-shadow-hover);
 }
 
 /* 交换按钮：两行左侧交界悬浮圆钮，点击对调查找/替换输入框内容 */
@@ -1010,13 +1019,14 @@ input:focus-visible + .selection-checkbox {
 }
 
 .dialog-btn.primary {
-  background: var(--accent);
-  color: white;
+  background: var(--btn-card-bg);
+  color: var(--accent);
+  box-shadow: var(--btn-card-shadow);
 }
 
 .dialog-btn.primary:hover {
   transform: translateY(-1px);
-  box-shadow: 0 4px 12px var(--accent-glow);
+  box-shadow: var(--btn-card-shadow-hover);
 }
 
 .dialog-btn.primary:active {

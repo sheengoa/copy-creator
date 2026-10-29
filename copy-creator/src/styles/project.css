@@ -1938,9 +1938,10 @@
   display: inline-flex;
   gap: 2px;
   margin-left: auto;
-  border: 1px solid var(--separator);
-  border-radius: 8px;
+  border: 0;
+  border-radius: 9px;
   padding: 2px;
+  background: var(--seg-track-bg);
   flex-shrink: 0;
 }
 .pc-detail-scope button {
@@ -1952,7 +1953,7 @@
   border-radius: 6px;
   cursor: pointer;
 }
-.pc-detail-scope button.on { background: var(--chip-bg); color: var(--text-primary); font-weight: 600; }
+.pc-detail-scope button.on { background: var(--seg-item-active-bg); color: var(--text-primary); font-weight: 600; box-shadow: var(--seg-item-active-shadow); }
 .pc-detail-close {
   /* 无头部切换的窗口（片段/剧本）：靠 auto 顶到最右；有切换的窗口由
      .pc-detail-scope 的 auto 占位推右，这里保持常规间距。 */
@@ -2069,17 +2070,19 @@
   display: inline-flex;
   align-items: center;
   gap: 5px;
-  border: 1px solid var(--separator);
-  background: var(--chip-bg);
+  border: 0;
+  background: var(--btn-card-bg);
   color: var(--text-primary);
   font-size: 12px;
   padding: 5px 10px;
   border-radius: 7px;
   cursor: pointer;
+  box-shadow: var(--btn-card-shadow);
+  transition: box-shadow 0.15s ease;
 }
-.pc-detail-btn:hover { filter: brightness(0.96); }
-.pc-detail-btn.primary { background: var(--node-accent, var(--text-secondary)); border-color: transparent; color: #fff; }
-.pc-detail-btn.primary:hover { filter: brightness(1.06); }
+.pc-detail-btn:hover { box-shadow: var(--btn-card-shadow-hover); }
+.pc-detail-btn.primary { color: var(--node-accent, var(--text-primary)); }
+.pc-detail-btn.primary:hover { box-shadow: var(--btn-card-shadow-hover); }
 .pc-detail-btn svg { width: 13px; height: 13px; }
 .pc-detail-ava {
   width: 64px;

@@ -944,15 +944,9 @@
   color: var(--danger);
 }
 
+/* 缺失筛选激活：白卡 + 红字——危险筛选语义靠色不靠实底 */
 .resource-filter-chip.is-missing.active {
-  border-color: var(--danger);
-  background: var(--danger);
-  color: #fff;
-}
-
-[data-theme="dark"] .resource-filter-chip.is-missing.active {
-  background: var(--danger);
-  border-color: var(--danger);
+  color: var(--danger);
 }
 
 .resource-missing-bar {
@@ -997,10 +991,15 @@
   padding: 0 11px;
   border-radius: 8px;
   font-size: var(--text-sm);
-  background: var(--bg-card);
-  border: 1px solid rgba(0, 0, 0, 0.12);
+  background: var(--btn-card-bg);
+  border: 0;
   color: var(--text-primary);
-  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.05);
+  box-shadow: var(--btn-card-shadow);
+  transition: box-shadow 0.15s ease;
+}
+
+.resource-missing-bar-btn:hover {
+  box-shadow: var(--btn-card-shadow-hover);
 }
 
 .resource-missing-bar-btn svg {
@@ -1012,30 +1011,14 @@
   transform: scale(0.96);
 }
 
+/* 全部删除：白卡 + 红字——危险语义靠色不靠实底 */
 .resource-missing-bar-btn.is-danger {
-  background: var(--danger);
-  border-color: var(--danger);
-  color: #fff;
-}
-
-.resource-missing-bar-btn.is-danger:hover {
-  background: #e6362b;
+  color: var(--danger);
 }
 
 [data-theme="dark"] .resource-missing-bar {
   background: rgba(255, 149, 0, 0.12);
   color: #ffb340;
-}
-
-[data-theme="dark"] .resource-missing-bar-btn {
-  background: rgba(255, 255, 255, 0.08);
-  border-color: rgba(255, 255, 255, 0.14);
-}
-
-[data-theme="dark"] .resource-missing-bar-btn.is-danger {
-  background: var(--danger);
-  border-color: var(--danger);
-  color: #fff;
 }
 
 @keyframes resource-missing-bar-in {
@@ -3119,13 +3102,11 @@
 }
 
 .resource-version-banner .resource-version-restore {
-  border-color: var(--accent);
-  background: var(--accent);
-  color: #fff;
+  color: var(--accent);
 }
 
 .resource-version-banner .resource-version-restore:hover:not(:disabled) {
-  opacity: 0.88;
+  box-shadow: var(--btn-card-shadow-hover);
 }
 
 /* 改动记录操作反馈（还原/清空/失败），页面底部居中悬浮。 */
