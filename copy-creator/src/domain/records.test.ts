@@ -151,3 +151,62 @@ describe("matchesResourceGroup", () => {
     expect(matchesResourceGroup(record("组员"), "组")).toBe(false);
   });
 });
+
+// 多选批量粘贴的单条归类：任意格式组合都能归并为「文本 + 文件列表」
+// 两条通道（用户需求：不分格式全选必可粘贴）。回归锚点：旧路由只认
+// 纯文本/纯文件两个组合，混合选区直接报 incompatible 错误退化逐条粘贴。
+import { classifyMultiPastePhrase, classifyMultiPasteRecord } from "./records";
+
+describe("classifyMultiPasteRecord", () => {
+  const record = (overrides: Record<string, unknown>) =>
+    ({ storage_mode: "database", ...overrides }) as never as Parameters<typeof classifyMultiPasteRecord>[0];
+
+  it("classifies database text and link records as text", () => {
+    expect(classifyMultiPasteRecord(record({ type: "text", content: "正文" }))).toBe("text");
+    expect(classifyMultiPasteRecord(record({ type: "link", content: "https://a.b" }))).toBe("text");
+  });
+
+  it("classifies file-backed text resources (.md/.json) as text", () => {
+    expect(classifyMultiPasteRecord(record({
+      type: "file",
+      content: "库/设计.md",
+      storage_mode: "resource",
+      resource_kind: "text",
+    }))).toBe("text");
+    expect(classifyMultiPasteRecord(record({
+      type: "file",
+      content: "库/配置.json",
+      storage_mode: "resource",
+      resource_kind: "text",
+    }))).toBe("text");
+  });
+
+  it("classifies files, videos, audios and images as file", () => {
+    expect(classifyMultiPasteRecord(record({ type: "file", content: "C:/a/报告.docx" }))).toBe("file");
+    expect(classifyMultiPasteRecord(record({ type: "file", content: "C:/v/演示.mp4" }))).toBe("file");
+    expect(classifyMultiPasteRecord(record({ type: "file", content: "C:/a/配乐.mp3" }))).toBe("file");
+    // 剪切板图片记录多选时以文件身份贴出（单条粘贴仍走位图通道，不经此分类）
+    expect(classifyMultiPasteRecord(record({ type: "image", content: "C:/stash/截图.png" }))).toBe("file");
+    expect(classifyMultiPasteRecord(record({
+      type: "file",
+      content: "库/渲染.mov",
+      storage_mode: "resource",
+      resource_kind: "video",
+    }))).toBe("file");
+  });
+
+  it("keeps stash records (text with embedded images) unmergeable for the per-item fallback", () => {
+    expect(classifyMultiPasteRecord(record({
+      type: "text",
+      content: "说明 [Image #1]",
+      has_images: true,
+    }))).toBe("unmergeable");
+  });
+});
+
+describe("classifyMultiPastePhrase", () => {
+  it("classifies text phrases as text and file phrases (incl. images) as file", () => {
+    expect(classifyMultiPastePhrase({ input_type: "text" })).toBe("text");
+    expect(classifyMultiPastePhrase({ input_type: "file" })).toBe("file");
+  });
+});

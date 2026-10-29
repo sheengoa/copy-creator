@@ -55,6 +55,8 @@ import { type ResourceMediaKind } from "../../domain/mediaKind";
 import { findResourceFolder, flattenResourceFoldersVisible, formatResourceFolderPath, isResourceFolderPath } from "../../domain/groups";
 import { fileMediaKindFromPath, inferResourceMediaKind } from "../../domain/mediaKind";
 import {
+  classifyMultiPastePhrase,
+  classifyMultiPasteRecord,
   getResourcePath,
   isFileBackedTextResource,
   recordMatchesCategory,
@@ -874,85 +876,108 @@ export default function RadialMenu() {
       const phrases = ids
         .map((id) => phrasesById.get(id))
         .filter((phrase): phrase is Phrase => Boolean(phrase));
-      const allItemsFound = records.length + phrases.length === ids.length;
-      const allText = allItemsFound
-        && (records.length === 0 || phrases.length === 0)
-        && records.every((record) => (
-          (record.type === "text"
-            || record.type === "link"
-            || isFileBackedTextResource(record))
-          && !record.has_images
-        ))
-        && phrases.every((phrase) => phrase.input_type === "text");
-      const allFiles = allItemsFound
-        && records.length + phrases.length > 0
-        && records.every((record) => (
-          (record.type === "file" && !isFileBackedTextResource(record))
-          || (
-            record.type !== "image"
-            && isResourceRecord(record)
-            && inferResourceMediaKind(record) !== "text"
-          )
-        ))
-        && phrases.every((phrase) => (
-          phrase.input_type === "file" && !isImageFilePath(phrase.content)
-        ));
 
-      try {
-        if (allText) {
-          const parts: string[] = [];
-          for (const id of ids) {
-            const record = recordsById.get(id);
-            if (record) {
+      // 逐条按域层归类（保持选择顺序）：文本类稍后读内容合并，文件类
+      // 收集路径。任一条目在 store 中找不到（已删除/未加载）或不可归并
+      // （图文暂存）时整体退回逐条粘贴兜底。
+      let classifiable = true;
+      const textEntries: Array<{ origin: "record" | "phrase"; id: string }> = [];
+      const filePaths: string[] = [];
+      for (const id of ids) {
+        const record = recordsById.get(id);
+        if (record) {
+          if (classifyMultiPasteRecord(record) === "text") {
+            textEntries.push({ origin: "record", id });
+          } else {
+            filePaths.push(getResourcePath(record));
+          }
+          continue;
+        }
+        const phrase = phrasesById.get(id);
+        if (phrase) {
+          if (classifyMultiPastePhrase(phrase) === "text") {
+            textEntries.push({ origin: "phrase", id });
+          } else {
+            filePaths.push(phrase.content);
+          }
+          continue;
+        }
+        classifiable = false;
+        break;
+      }
+
+      // 文本部分按选择顺序取全文：文件承载的文本资源读文件内容（读取
+      // 失败时整体退兜底），其余用记录全文；快捷输入短语用其正文。
+      const assembleTextParts = async (): Promise<string[] | null> => {
+        const parts: string[] = [];
+        for (const entry of textEntries) {
+          try {
+            if (entry.origin === "record") {
+              const record = recordsById.get(entry.id);
+              if (!record) return null;
               parts.push(isFileBackedTextResource(record)
                 ? await readTextFileContent(getResourcePath(record))
                 : await clipboard.getRecordContent(record));
-              continue;
+            } else {
+              const phrase = phrasesById.get(entry.id);
+              if (!phrase) return null;
+              parts.push(phrase.content);
             }
-            const phrase = phrasesById.get(id);
-            if (phrase) parts.push(phrase.content);
+          } catch (error) {
+            console.error("Failed to read text content for multi-paste:", error);
+            return null;
+          }
+        }
+        return parts;
+      };
+
+      if (classifiable) {
+        try {
+          if (filePaths.length === 0) {
+            // 纯文本合并。短语专属入口才会展开占位符：混入剪切板记录时
+            // 内容必须原样粘贴（占位符可能就是记录正文的一部分），统一
+            // 走 paste_text；纯短语选择保持 paste_phrase_text 语义。
+            const parts = await assembleTextParts();
+            if (parts === null) throw new Error("selected text items unavailable");
+            const phraseOnly = textEntries.every((entry) => entry.origin === "phrase");
+            if (phraseOnly) {
+              await invoke("paste_phrase_text", { text: parts.join("\n"), terminal });
+            } else {
+              await invoke(terminal ? "paste_text_terminal" : "paste_text", {
+                text: parts.join("\n"),
+              });
+            }
+          } else {
+            const resolvedPaths = await Promise.all(filePaths.map(resolveAbsoluteResourcePath));
+            if (textEntries.length === 0) {
+              await invoke("paste_files", { paths: resolvedPaths });
+            } else {
+              const parts = await assembleTextParts();
+              if (parts === null) throw new Error("selected text items unavailable");
+              await invoke("paste_mixed", {
+                paths: resolvedPaths,
+                text: parts.join("\n"),
+              });
+            }
+          }
+          if (records.length > 0) {
+            void invoke("touch_clipboard_usage", { ids: records.map((record) => record.id) }).catch((error) => {
+              console.error("Failed to update selected clipboard usage:", error);
+            });
           }
           if (phrases.length > 0) {
-            await invoke("paste_phrase_text", {
-              text: parts.join("\n"),
-              terminal,
-            });
-          } else {
-            await invoke(terminal ? "paste_text_terminal" : "paste_text", {
-              text: parts.join("\n"),
-            });
+            void Promise.all(phrases.map((phrase) => invoke("touch_phrase_usage", { id: phrase.id })))
+              .then(() => phraseStore.loadPhrases(
+                phraseStore.selectedGroupId ?? ALL_PHRASES_GROUP_ID,
+              ))
+              .catch((error) => {
+                console.error("Failed to update selected phrase usage:", error);
+              });
           }
-        } else if (allFiles) {
-          const paths = ids.flatMap((id) => {
-            const record = recordsById.get(id);
-            if (record) return [getResourcePath(record)];
-            const phrase = phrasesById.get(id);
-            return phrase ? [phrase.content] : [];
-          });
-          const resolvedPaths = await Promise.all(paths.map(resolveAbsoluteResourcePath));
-          await invoke("paste_files", { paths: resolvedPaths });
-        } else {
-          throw new Error("Selected items use incompatible clipboard formats");
+          return;
+        } catch (error) {
+          console.error("Failed to paste selected radial items:", error);
         }
-        const recordIds = records.map((record) => record.id);
-        const phraseIds = phrases.map((phrase) => phrase.id);
-        if (recordIds.length > 0) {
-          void invoke("touch_clipboard_usage", { ids: recordIds }).catch((error) => {
-            console.error("Failed to update selected clipboard usage:", error);
-          });
-        }
-        if (phraseIds.length > 0) {
-          void Promise.all(phraseIds.map((id) => invoke("touch_phrase_usage", { id })))
-            .then(() => phraseStore.loadPhrases(
-              phraseStore.selectedGroupId ?? ALL_PHRASES_GROUP_ID,
-            ))
-            .catch((error) => {
-              console.error("Failed to update selected phrase usage:", error);
-            });
-        }
-        return;
-      } catch (error) {
-        console.error("Failed to paste selected radial items:", error);
       }
     }
 

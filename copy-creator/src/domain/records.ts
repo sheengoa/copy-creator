@@ -1,7 +1,7 @@
 // 领域层：记录语义与能力判定（全项目唯一事实源）。
 // 「这条记录是什么资源 / 能否展开预览 / 怎么粘贴 / 显示什么标题」的规则
 // 全部定义在此，均为纯函数（可独立单测）；UI 与 recordView 只调用不判定。
-import type { ClipboardRecord } from "../types";
+import type { ClipboardRecord, Phrase } from "../types";
 import { fileNameFromPath, getResourceFileName, hasCustomResourceFileName } from "./fileName";
 import {
   fileMediaKindFromPath,
@@ -11,6 +11,32 @@ import {
 
 export type ExpandPreviewKind = "video" | "audio" | "image" | "text" | null;
 export type PasteStrategy = "text" | "file" | "stash";
+
+/** 多选批量粘贴的单条归类：文本类条目按选择顺序合并为一段文本，
+ * 文件类条目（含图片/视频/音频，以其文件路径进列表）进文件列表，
+ * 一次剪贴板事务同时提供两种格式由目标应用自取。图文暂存记录
+ * （正文含 [Image #N] 占位符、附件由暂存命令整体管理）不可归并，
+ * 保持逐条粘贴兜底。判定与既有单条粘贴路由同源：文件承载的文本
+ * 资源按内容归文本类，剪切板图片记录/图片文件短语按文件归文件类
+ * （多选下以文件身份贴出，单条粘贴仍走位图通道不变）。 */
+export type MultiPasteItemClass = "text" | "file" | "unmergeable";
+
+export function classifyMultiPasteRecord(
+  record: Pick<
+    ClipboardRecord,
+    "type" | "content" | "has_images" | "group_name" | "storage_mode" | "resource_kind"
+  >,
+): MultiPasteItemClass {
+  if (record.has_images) return "unmergeable";
+  if (record.type === "text" || record.type === "link") return "text";
+  return isFileBackedTextResource(record) ? "text" : "file";
+}
+
+export function classifyMultiPastePhrase(
+  phrase: Pick<Phrase, "input_type">,
+): MultiPasteItemClass {
+  return phrase.input_type === "text" ? "text" : "file";
+}
 
 export function isResourceRecord(
   record: Pick<ClipboardRecord, "group_name" | "storage_mode">,
