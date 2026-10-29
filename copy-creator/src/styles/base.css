@@ -77,6 +77,12 @@
   --seg-track-bg: #F2F2F2;
   --seg-item-active-bg: #FFFFFF;
   --seg-item-active-shadow: 0 2px 8px rgba(0, 0, 0, 0.10), 0 0 0 0.5px rgba(0, 0, 0, 0.02);
+
+  /* 浮起白卡按钮：新建/保存等主操作。黑底主按钮废除后的主按钮语言，
+     与分段槽选中态同源；亮暗两套必须同步。 */
+  --btn-card-bg: #FFFFFF;
+  --btn-card-shadow: 0 1px 3px rgba(0, 0, 0, 0.06), 0 2px 10px rgba(0, 0, 0, 0.10), 0 0 0 0.5px rgba(0, 0, 0, 0.04);
+  --btn-card-shadow-hover: 0 1px 3px rgba(0, 0, 0, 0.06), 0 4px 16px rgba(0, 0, 0, 0.16), 0 0 0 0.5px rgba(0, 0, 0, 0.05);
 }
 
 [data-theme="dark"] {
@@ -119,6 +125,9 @@
   --seg-track-bg: rgba(255, 255, 255, 0.07);
   --seg-item-active-bg: rgba(255, 255, 255, 0.14);
   --seg-item-active-shadow: 0 2px 8px rgba(0, 0, 0, 0.30);
+  --btn-card-bg: rgba(255, 255, 255, 0.14);
+  --btn-card-shadow: 0 2px 10px rgba(0, 0, 0, 0.45), 0 0 0 0.5px rgba(255, 255, 255, 0.07);
+  --btn-card-shadow-hover: 0 4px 16px rgba(0, 0, 0, 0.55), 0 0 0 0.5px rgba(255, 255, 255, 0.10);
 }
 
 * {

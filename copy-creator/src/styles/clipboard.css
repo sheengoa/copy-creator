@@ -40,8 +40,8 @@
   min-height: 30px;
   box-sizing: border-box;
   padding: 0 16px;
-  border: 0.5px solid var(--separator);
-  border-radius: 6px;
+  border: 0;
+  border-radius: 8px;
   background: var(--chip-bg);
   color: var(--text-secondary);
   font-family: var(--font);
@@ -540,8 +540,8 @@
   font-size: 12px;
 }
 
-/* chip 形按钮与径向菜单 chip 同规格；secondary=默认态灰底灰字、
-   primary=选中态黑底白字。 */
+/* 对话框 chip 形按钮：secondary=软灰无边框、primary=浮起白卡，
+   与工具栏次级/主按钮同语言。 */
 .label-panel-chip-btn {
   display: inline-flex;
   flex-shrink: 0;
@@ -549,35 +549,33 @@
   align-items: center;
   box-sizing: border-box;
   padding: 0 14px;
-  border-radius: 6px;
-  border: 0.5px solid var(--separator);
+  border-radius: 8px;
+  border: 0;
   font-family: var(--font);
   font-size: var(--text-sm);
   font-weight: var(--weight-medium);
   cursor: pointer;
-  transition: all 0.15s cubic-bezier(0.22, 1, 0.36, 1);
+  transition: background 0.15s ease, box-shadow 0.15s ease;
   white-space: nowrap;
 }
 
 .label-panel-chip-btn.secondary {
   background: var(--chip-bg);
-  color: var(--text-secondary);
+  color: var(--text-primary);
 }
 
 .label-panel-chip-btn.secondary:hover {
   background: var(--chip-hover-bg);
-  border-color: rgba(0, 0, 0, 0.1);
 }
 
 .label-panel-chip-btn.primary {
-  background: #333;
-  color: white;
-  border-color: #333;
+  background: var(--btn-card-bg);
+  color: var(--text-primary);
+  box-shadow: var(--btn-card-shadow);
 }
 
 .label-panel-chip-btn.primary:hover {
-  background: #555;
-  border-color: #555;
+  box-shadow: var(--btn-card-shadow-hover);
 }
 
 .label-panel-chip-btn.primary:disabled {

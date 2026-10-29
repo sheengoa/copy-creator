@@ -274,10 +274,10 @@
 .project-dialog-btn {
   height: 32px;
   padding: 0 14px;
-  border: 0.5px solid var(--separator);
+  border: 0;
   border-radius: 8px;
   background: var(--chip-bg);
-  color: var(--text-secondary);
+  color: var(--text-primary);
   font-family: var(--font);
   font-size: var(--text-sm);
   font-weight: var(--weight-medium);
@@ -286,19 +286,17 @@
 
 .project-dialog-btn:hover {
   background: var(--chip-hover-bg);
-  color: var(--text-primary);
 }
 
 .project-dialog-btn.primary {
-  border-color: #333;
-  background: #333;
-  color: #fff;
+  background: var(--btn-card-bg);
+  color: var(--text-primary);
+  box-shadow: var(--btn-card-shadow);
 }
 
 .project-dialog-btn.primary:hover {
-  border-color: #555;
-  background: #555;
-  color: #fff;
+  background: var(--btn-card-bg);
+  box-shadow: var(--btn-card-shadow-hover);
 }
 
 .project-dialog-btn:disabled {

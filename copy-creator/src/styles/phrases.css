@@ -67,23 +67,22 @@
 }
 
 .group-add-btn {
-  width: 30px;
-  height: 30px;
-  border-radius: 6px;
-  border: 0.5px solid var(--separator);
-  background: var(--chip-bg);
+  width: 28px;
+  height: 28px;
+  border-radius: 7px;
+  border: 0;
+  background: transparent;
   color: var(--text-secondary);
   display: flex;
   align-items: center;
   justify-content: center;
   cursor: pointer;
-  transition: all 0.15s cubic-bezier(0.22, 1, 0.36, 1);
+  transition: background 0.15s ease, color 0.15s ease;
   flex-shrink: 0;
 }
 
 .group-add-btn:hover {
-  background: var(--chip-hover-bg);
-  border-color: rgba(0, 0, 0, 0.1);
+  background: var(--chip-bg);
   color: var(--text-primary);
 }
 
@@ -113,17 +112,6 @@
 .group-manage-add-btn {
   width: 30px;
   height: 30px;
-}
-
-[data-theme="dark"] .group-add-btn {
-  background: var(--input-bg);
-  border-color: var(--card-border);
-  color: rgba(255, 255, 255, 0.7);
-}
-
-[data-theme="dark"] .group-add-btn:hover {
-  background: rgba(255, 255, 255, 0.12);
-  color: #fff;
 }
 
 .phrase-list {
@@ -370,26 +358,26 @@
   transform: scale(0.96);
 }
 
-/* 黑底主按钮（新建/选择）：高度与 chip 对齐（同处一行，chip 统一 30px 后
-   此前按内容撑起约 25px 会矮一截），圆角同步 chip 的 6px。 */
+/* 主按钮（新建）：浮起白卡——与分段槽选中态同语言；「选择」按钮由
+   selection-mode-btn 覆盖为软灰次级。高度 32px 与分段槽对齐。 */
 .phrase-add-btn {
   flex-shrink: 0;
   display: inline-flex;
   align-items: center;
   justify-content: center;
   gap: 4px;
-  min-height: 30px;
+  min-height: 32px;
   box-sizing: border-box;
   padding: 0 12px;
-  border-radius: 6px;
-  border: 0.5px solid var(--separator);
-  background: #333;
-  color: white;
+  border-radius: 8px;
+  border: 0;
+  background: var(--btn-card-bg);
+  color: var(--text-primary);
   font-size: var(--text-sm);
   font-weight: var(--weight-medium);
   font-family: var(--font);
   cursor: pointer;
-  transition: all 0.15s cubic-bezier(0.22, 1, 0.36, 1);
+  transition: box-shadow 0.15s ease, transform 0.15s ease;
   white-space: nowrap;
 }
 
@@ -398,22 +386,12 @@
   height: 13px;
 }
 
-[data-theme="dark"] .phrase-add-btn {
-  background: rgba(255, 255, 255, 0.18);
-  color: #fff;
-  border-color: rgba(255, 255, 255, 0.25);
-}
-
 .phrase-add-btn:hover {
-  background: #333;
-}
-
-[data-theme="dark"] .phrase-add-btn:hover {
-  background: rgba(255, 255, 255, 0.25);
+  box-shadow: var(--btn-card-shadow-hover);
 }
 
 .phrase-add-btn:active {
-  transform: scale(0.95);
+  transform: scale(0.97);
 }
 
 /* 统一快捷输入框：文件信息行与拖拽高亮 */
