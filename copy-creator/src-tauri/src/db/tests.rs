@@ -8016,6 +8016,9 @@ mod project_tests {
             .unwrap();
         crate::db::project::link_node_inner(&conn, "e1", "script", "e1", s2["id"].as_str().unwrap(), "script")
             .unwrap();
+        // 提示词口（新增）：剧本与提示词同为文本类互相兼容，剧本可接提示词口。
+        crate::db::project::link_node_inner(&conn, "e1", "script", "e1", s2["id"].as_str().unwrap(), "prompt")
+            .unwrap();
         assert!(
             crate::db::project::link_node_inner(&conn, "e1", "ghost", "x", s2["id"].as_str().unwrap(), "other").is_err(),
             "未知来源类型应被拒绝"
@@ -8044,7 +8047,7 @@ mod project_tests {
 
         let overview =
             crate::db::project::episode_overview_inner(&conn, "e1", &std::env::temp_dir()).unwrap();
-        assert_eq!(overview["node_links"].as_array().unwrap().len(), 3, "重复连线应幂等忽略");
+        assert_eq!(overview["node_links"].as_array().unwrap().len(), 4, "重复连线应幂等忽略");
 
         // 删片段后其输入口连线级联消失。
         crate::db::project::remove_segment_inner(&conn, s2["id"].as_str().unwrap()).unwrap();

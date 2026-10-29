@@ -473,6 +473,18 @@ const NODE_ACCENTS: Record<string, string> = {
 /** 参考类输入口可接的数据类型（图/视频/文本/提示词）。 */
 const REF_ACCEPTS = ["image", "video", "text", "prompt"];
 
+/** 片段输入口专属色：每口一色，与对应节点类型色一致，一眼分辨谁是谁；
+ *  「其他」口不限类型，用中性灰。未命中的口（镜头/成片/素材的通用口）
+ *  回退连线类型色。 */
+const PORT_COLORS: Record<string, string> = {
+  character: "#f472b6",
+  location: "#34d399",
+  prop: "#fbbf24",
+  prompt: "#22d3ee",
+  script: "#fb923c",
+  other: "#94a3b8",
+};
+
 /** 全集素材（镜头挂靠 + 集级散件）。 */
 function allAssetsOf(scenes: ProjectScene[], looseAssets: ProjectAsset[]): ProjectAsset[] {
   const list: ProjectAsset[] = [];
@@ -1586,7 +1598,7 @@ export default function ProjectCanvas({
 
   // 挂剧本（双击空纸片 / 详情窗重挂后从库选文件），按目标节点分派：
   // - 主剧本节点（"script"）：换库内文件做本集剧本，挂接成功即自动接入
-  //   所有已有片段的提示词口（linkNode 幂等，重复挂接不会写重）。
+  //   所有已有片段的剧本口（linkNode 幂等，重复挂接不会写重）。
   // - 剧本纸片：本集还没剧本时该纸片「转正」为主剧本——位置/尺寸移交、
   //   暂存线由全量接入覆盖、纸片移除；已有剧本时纸片独立持自己的文件
   //   （画布层记忆），不动本集剧本。
@@ -1974,8 +1986,11 @@ export default function ProjectCanvas({
 
   // 节点接口（ComfyUI 式）：输入口列在左缘、输出口在右缘，口带名称与
   // 数据类型；类型不兼容的连线在拖拽与落下时都会被拒绝。
-  // 片段节点是核心生成单元：五输入口（角色/场景/道具/脚本/其他）+
-  // 片段视频输出口；剧本与脚本同为 text，都连进片段的「脚本」口。
+  // 片段节点是核心生成单元：六输入口（角色/场景/道具/提示词/剧本/其他）+
+  // 片段视频输出口。兼容分三档：角色/场景/道具同为图片类可互相穿插；
+  // 剧本与提示词同为文本类可互相穿插；「其他」口不限类型全兼容。
+  // 口 id 沿用历史：port "script" 即剧本口（存量剧本连线落此口），
+  // port "prompt" 为提示词口。
   const portsOf = useCallback(
     (key: string): { ins: { id: string; label: string; accepts: string[] }[]; out?: { label: string; type: string } } => {
       if (key.startsWith("segment:")) {
@@ -1984,8 +1999,9 @@ export default function ProjectCanvas({
             { id: "character", label: t("project.canvas.typeCharacter"), accepts: ["image"] },
             { id: "location", label: t("project.canvas.typeLocation"), accepts: ["image"] },
             { id: "prop", label: t("project.canvas.typeProp"), accepts: ["image"] },
-            { id: "script", label: t("project.canvas.typePrompt"), accepts: ["prompt", "text"] },
-            { id: "other", label: t("project.canvas.typeOther"), accepts: ["video", "audio", "file", "image"] },
+            { id: "prompt", label: t("project.canvas.typePrompt"), accepts: ["prompt", "text"] },
+            { id: "script", label: t("project.canvas.typeScript"), accepts: ["text", "prompt"] },
+            { id: "other", label: t("project.canvas.typeOther"), accepts: ["image", "video", "audio", "file", "text", "prompt"] },
           ],
           out: { label: t("project.canvas.portSegment"), type: "video" },
         };
@@ -2093,9 +2109,19 @@ export default function ProjectCanvas({
       }
       if (inKey.startsWith("segment:")) {
         const fromType = wire.fromType ?? portsOf(outKey).out?.type;
-        const port = portsOf(inKey).ins.find((item) =>
-          fromType ? item.accepts.includes(fromType) : false,
-        );
+        // 反拖（从片段输入口拖出到空白建节点）：线回到出发的那个口——
+        // 用户拿着的是「通往这个口」的线，不是「通往第一个兼容口」的线；
+        // 口仍需兼容来源类型（拖出去的线换了个不兼容的新源则放不回）。
+        // 正拖或无口记录时按数据类型找第一个兼容口。
+        const port =
+          (wire.fromDir === "in" && wire.fromPortId
+            ? portsOf(inKey).ins.find(
+                (item) => item.id === wire.fromPortId && (!fromType || item.accepts.includes(fromType)),
+              )
+            : undefined) ??
+          portsOf(inKey).ins.find((item) =>
+            fromType ? item.accepts.includes(fromType) : false,
+          );
         if (!port) return;
         if (outKey.startsWith("script:")) {
           // 剧本纸片的连线不入库（后端剧本连线以集为锚），落画布暂存线。
@@ -3705,11 +3731,12 @@ export default function ProjectCanvas({
   }, [layout, pos, view, scenePos, infoPos, boxOf, portsOf, outPointOf, inPointOf, linkAssets, persistCards, persistLoose, saveCanvasLayout, saveInfoFramePos, saveView, setSelection, saveOutputPos, setEpisodeOutput, episodeId, notes, persistNotes, addNote, addPlaceholder, addEntityPh, addPromptPh, persistPlaceholders, persistSegments, linkNode, unlinkNode, nodeKeyParts, addSegment, autoConnectNewNode, persistSizes, persistInfoOffsets, infoGroups, infoNodes, infoNodePos, entityPhs, promptPhs, segments, segPos, placeholders, sizeOfNode, outputBox, moveGroupTo, persistPositions, pushUndo, pendingLinks, persistPendingLinks, setInfoFramePos, setInfoOffsets, setNodeSizes, setNotes, setOutputPos, setPlaceholders, openNodeDetail, ownerKeyOf]);
 
   // ── 节点操作 ──
-  // 节点接口圆点（ComfyUI 式）：输入口列在左缘（片段五口按列分布）、
+  // 节点接口圆点（ComfyUI 式）：输入口列在左缘（片段六口按列分布）、
   // 输出口在右缘实心类型色，hover 浮现接口名称；按下即拖出连线，从
   // 节点接口（ComfyUI K 采样器同款行位）：实心类型色圆点落在卡内、
   // 紧贴左右两缘；输入列自顶部起贴左缘，输出贴右缘且与首行输入同一
   // 水平行；接口名称常显。端口坐标由实测驱动连线锚点。
+  // 输入口优先用端口专属色（片段六口每口一色），未命中回退类型色。
   const portBar = (key: string) => {
     const { ins, out } = portsOf(key);
     if (ins.length === 0 && !out) return null;
@@ -3724,7 +3751,7 @@ export default function ProjectCanvas({
                   className="pc-port pc-port-in"
                   data-port="in"
                   data-port-id={ins[i].id}
-                  style={{ background: WIRE_TYPE_COLORS[ins[i].accepts[0] ?? ""] ?? undefined }}
+                  style={{ background: PORT_COLORS[ins[i].id] ?? WIRE_TYPE_COLORS[ins[i].accepts[0] ?? ""] ?? undefined }}
                 />
                 <span className="pc-port-name">{ins[i].label}</span>
               </>

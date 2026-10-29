@@ -158,9 +158,10 @@ CREATE TABLE IF NOT EXISTS project_segments (
 );
 CREATE INDEX IF NOT EXISTS idx_project_segments_episode ON project_segments(episode_id);
 
--- 片段输入口的连线（角色/场景/道具/脚本/其他 → 片段）：来源可以是库
--- 资料、剧本或素材（脚本/其他口），片段→片段的续生成线也走本表
+-- 片段输入口的连线（角色/场景/道具/提示词/剧本/其他 → 片段）：来源可
+-- 以是库资料、剧本或素材（其他口），片段→片段的续生成线也走本表
 -- （from_kind='segment'）；素材间参考线仍走 project_asset_links。
+-- to_port 沿用历史：script=剧本口，prompt=提示词口。
 CREATE TABLE IF NOT EXISTS project_node_links (
     id TEXT PRIMARY KEY,
     episode_id TEXT NOT NULL,
@@ -2169,7 +2170,10 @@ pub(crate) fn link_node_inner(
     to_port: &str,
 ) -> Result<serde_json::Value, String> {
     const FROM_KINDS: [&str; 7] = ["asset", "character", "location", "prop", "script", "segment", "shot"];
-    const TO_PORTS: [&str; 5] = ["character", "location", "prop", "script", "other"];
+    // 口 id 沿用历史：script=剧本口；prompt=提示词口（与剧本同为文本
+    // 类，互相兼容）。兼容性的细粒度拦截在前端按数据类型判定，后端只
+    // 做白名单与来源存在性校验。
+    const TO_PORTS: [&str; 6] = ["character", "location", "prop", "prompt", "script", "other"];
     if !FROM_KINDS.contains(&from_kind) {
         return Err(format!("未知连线来源类型：{from_kind}"));
     }

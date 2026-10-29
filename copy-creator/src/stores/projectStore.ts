@@ -177,13 +177,14 @@ export interface ProjectSegment {
   asset?: ProjectAsset & { missing?: boolean };
 }
 
-/** 片段输入口连线：来源跨库资料/剧本/素材/另一片段/镜头。 */
+/** 片段输入口连线：来源跨库资料/剧本/素材/另一片段/镜头。to_port 沿用
+ *  历史：script=剧本口，prompt=提示词口（新增）。 */
 export interface ProjectNodeLink {
   id: string;
   from_kind: "asset" | "character" | "location" | "prop" | "script" | "segment" | "shot";
   from_id: string;
   to_segment: string;
-  to_port: "character" | "location" | "prop" | "script" | "other";
+  to_port: "character" | "location" | "prop" | "prompt" | "script" | "other";
 }
 
 export interface EpisodeOverview {
