@@ -363,6 +363,8 @@ input:focus-visible + .selection-checkbox {
   gap: 6px;
 }
 
+/* 批量选择条动作按钮：浮起白卡——与其他动作按钮同语言；
+   删除以红字保留危险语义，转圈按白卡底取色。 */
 .batch-delete-btn,
 .batch-move-btn,
 .batch-cancel-btn {
@@ -372,16 +374,25 @@ input:focus-visible + .selection-checkbox {
   justify-content: center;
   gap: 4px;
   padding: 0 8px;
-  border-radius: 6px;
-  border: 1px solid var(--separator);
+  border-radius: 7px;
+  border: 0;
+  background: var(--btn-card-bg);
+  color: var(--text-primary);
+  box-shadow: var(--btn-card-shadow);
   font-family: var(--font);
   font-size: var(--text-sm);
   cursor: pointer;
   white-space: nowrap;
+  transition: box-shadow 0.15s ease;
+}
+
+.batch-delete-btn:hover,
+.batch-move-btn:hover,
+.batch-cancel-btn:hover {
+  box-shadow: var(--btn-card-shadow-hover);
 }
 
 .batch-move-btn {
-  background: var(--accent-bg, rgba(0, 0, 0, 0.05));
   color: var(--text-primary);
 }
 
@@ -396,9 +407,7 @@ input:focus-visible + .selection-checkbox {
 }
 
 .batch-delete-btn {
-  background: color-mix(in srgb, rgb(220, 38, 38) 88%, transparent);
-  border-color: transparent;
-  color: #fff;
+  color: var(--danger);
 }
 
 .batch-delete-btn:disabled {
@@ -415,19 +424,10 @@ input:focus-visible + .selection-checkbox {
   width: 13px;
   height: 13px;
   flex: 0 0 auto;
-  border: 2px solid rgba(255, 255, 255, 0.45);
-  border-top-color: #fff;
+  border: 2px solid color-mix(in srgb, var(--danger) 35%, transparent);
+  border-top-color: var(--danger);
   border-radius: 50%;
   animation: spin 0.7s linear infinite;
-}
-
-.batch-cancel-btn {
-  background: transparent;
-  color: var(--text-primary);
-}
-
-.batch-cancel-btn:hover {
-  background: var(--chip-hover-bg);
 }
 
 .batch-cancel-btn:disabled {
