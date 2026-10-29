@@ -1345,6 +1345,11 @@ pub fn paste_files_then_text(
         if text.is_empty() {
             return;
         }
+        // 等首次注入被目标应用消化完再替换剪切板：目标从收到 Ctrl+V 到
+        // 取走剪切板数据是异步的（X11 selection 协议尤甚，需若干轮事件
+        // 往返），立刻写文本会竞态掉文件列表，目标贴出的是文本而非文件。
+        // 400ms 覆盖本地文件的粘贴消化，用户感知为两段内容先后落地。
+        thread::sleep(Duration::from_millis(400));
         if let Err(e) = handle.clipboard().write_text(text.clone()) {
             log::error!("paste_files_then_text: 写入文本剪切板失败: {e}");
             return;
