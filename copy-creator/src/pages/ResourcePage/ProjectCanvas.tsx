@@ -3046,10 +3046,12 @@ export default function ProjectCanvas({
                   void linkNode(episodeId, nextSource.kind, nextSource.id, row.to_segment, row.to_port);
                 });
               });
-            } else if (!source && !targetGroup && !pendSameAsOld) {
-              // 无库身份目标（空白资料占位/素材占位）：落不了正式 node_link，
+            } else if (!source && !targetGroup && !pendSameAsOld && targetKey !== "output") {
+              // 无库身份目标（空白资料占位/提示词纸片）：落不了正式 node_link，
               // 但暂存线是画布层状态、fromKey 任意——整组改插到新目标；
-              // 正式线保持原样（lifted 已清，渲染自动恢复）。
+              // 正式线保持原样（lifted 已清，渲染自动恢复）。成片（output）
+              // 同为无库身份但没有输出口可作线的来源，改插会让渲染锚点
+              // 消失——不转接，随上面的放回分支恢复原线。
               if (lifted.pendings.length) {
                 persistPendingLinks([
                   ...pendingLinks.filter((l) => !lifted.pendings.includes(l)),
