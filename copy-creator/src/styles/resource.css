@@ -360,16 +360,6 @@
   height: 14px;
 }
 
-
-[data-theme="dark"] .resource-group-control.active .resource-group-chevron {
-  border-left-color: rgba(255, 255, 255, 0.2);
-}
-
-[data-theme="dark"] .resource-group-chevron:hover,
-[data-theme="dark"] .resource-group-control.active .resource-group-chevron:hover {
-  background: rgba(255, 255, 255, 0.08);
-}
-
 [data-theme="dark"] .resource-group-dropdown {
   border-color: rgba(255, 255, 255, 0.14);
   background: #2c2c2e;

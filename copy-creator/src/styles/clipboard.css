@@ -587,12 +587,6 @@
   transform: scale(0.95);
 }
 
-[data-theme="dark"] .label-panel-chip-btn.primary {
-  background: rgba(255, 255, 255, 0.18);
-  color: #fff;
-  border-color: rgba(255, 255, 255, 0.25);
-}
-
 /* === Context Menu === */
 .clipboard-ctx-menu {
   position: fixed;
