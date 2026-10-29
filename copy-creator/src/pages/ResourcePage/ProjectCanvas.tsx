@@ -1273,7 +1273,7 @@ export default function ProjectCanvas({
   // 添加）在触发瞬间记录世界坐标，概览刷新后新出现的资料节点直接出生
   // 在那里并脉冲高亮——节点必须出现在用户视线（鼠标）附近，而不是默默
   // 落到资料框网格里让人以为加载失败。同一次面板连选多个时按 28px 错开。 ──
-  const spawnAnchorRef = useRef<{ wx: number; wy: number; used: number } | null>(null);
+  const spawnAnchorRef = useRef<{ wx: number; wy: number; used: number; snapshot?: string[] } | null>(null);
   const [pulseKeys, setPulseKeys] = useState<string[]>([]);
   // 脉冲高亮 2.4s 后自动退场（effect 驱动，不用 timer ref——ref 会让
   // 传递触底函数的写法被 react-hooks/refs 拦下）。
@@ -1282,18 +1282,26 @@ export default function ProjectCanvas({
     const timer = window.setTimeout(() => setPulseKeys([]), 2400);
     return () => window.clearTimeout(timer);
   }, [pulseKeys]);
-  const armSpawnAt = useCallback((wx: number, wy: number) => {
-    spawnAnchorRef.current = { wx, wy, used: 0 };
-  }, []);
+  const armSpawnAt = useCallback(
+    (wx: number, wy: number) => {
+      // 武装时带上「当前存在节点集合」快照：锚点消费 effect 的首跑
+      // （prevInfoKeysRef 尚为 null——刚重挂、整页刷新或首次进画布）会
+      // 整体跳过 fresh 判定，武装进来的锚点将永远等不到消费，新节点
+      // 全部落回资料框网格。effect 侧以快照兜底首跑的 prev，此后新增
+      // 的节点才能被识别为 fresh。
+      spawnAnchorRef.current = { wx, wy, used: 0, snapshot: infoNodes.map((node) => node.key) };
+    },
+    [infoNodes],
+  );
   const prevInfoKeysRef = useRef<string[] | null>(null);
   useEffect(() => {
     // 概览刷新途中 selectEpisode 会先置空（infoNodes 短暂为空）：这个
     // 空档不是「节点删光了」，跳过——否则刷新后所有节点都会被误判为
     // 新出生，锚点也会在空档里被误消耗。
     if (infoNodes.length === 0) return;
-    const prev = prevInfoKeysRef.current;
-    prevInfoKeysRef.current = infoNodes.map((node) => node.key);
     const anchor = spawnAnchorRef.current;
+    const prev = prevInfoKeysRef.current ?? anchor?.snapshot ?? null;
+    prevInfoKeysRef.current = infoNodes.map((node) => node.key);
     if (!prev || !anchor) return;
     const fresh = infoNodes.filter((node) => !prev.includes(node.key));
     if (fresh.length === 0) return;
@@ -2936,7 +2944,30 @@ export default function ProjectCanvas({
         if (tKey && tKey !== drag.fromKey && writable) {
           const ports = portsOf(tKey);
           if (drag.fromDir === "in") {
-            compatible = !!ports.out && !!drag.fromAccepts?.includes(ports.out.type);
+            if (drag.rewire && tKey.startsWith("segment:")) {
+              // 摘线换目标：拖着被摘的线到另一个片段＝线整个改接到它的
+              // 输入口。目标口优先取光标悬停的那个口（用户指哪接哪），
+              // 不在口上时回退同名口（片段家族同名口语义一致）；都没有
+              // 即不兼容，松手放回。换到原片段松手走上面的 tKey 排除，
+              // 保持「放回」语义。
+              const hoverPortId =
+                hit instanceof Element
+                  ? hit.closest(".pc-port")?.getAttribute("data-port-id") ?? null
+                  : null;
+              const ins = ports.ins;
+              const hovered =
+                hoverPortId && ins.some((item) => item.id === hoverPortId && item.id !== "output")
+                  ? hoverPortId
+                  : null;
+              const sameName =
+                drag.fromPortId && ins.some((item) => item.id === drag.fromPortId)
+                  ? drag.fromPortId
+                  : null;
+              targetPort = hovered ?? sameName;
+              compatible = !!targetPort;
+            } else {
+              compatible = !!ports.out && !!drag.fromAccepts?.includes(ports.out.type);
+            }
           } else if (drag.fromType) {
             // 吸附优先级：光标就近的可接输入口（ComfyUI 落点即所接口），
             // 不就近时回退为第一个可接口。
@@ -3123,10 +3154,37 @@ export default function ProjectCanvas({
         });
         const targetKey = drag.targetKey;
         if (drag.rewire) {
-          // ComfyUI 摘线收尾：换源转接 / 空白交给菜单（建节点即转接）/
-          // 其余一律放回（行数据未删，清掉 lifted 即恢复原线）。
+          // ComfyUI 摘线收尾：换目标（拖到另一片段的口上）/ 换源转接 /
+          // 空白交给菜单（建节点即转接）/ 其余一律放回（行数据未删，
+          // 清掉 lifted 即恢复原线）。
           const lifted = liftedRef.current;
-          if (wireRelease === "commit" && targetKey && lifted) {
+          const rewireToSegment =
+            wireRelease === "commit" &&
+            !!targetKey &&
+            targetKey.startsWith("segment:") &&
+            targetKey !== drag.fromKey &&
+            !!drag.targetPort;
+          if (rewireToSegment && lifted) {
+            // 换目标：口上全部线（暂存线 + 正式线）整组改接到新片段的
+            // 目标口（onMove 定好的悬停口或同名口），原口不留残留。
+            setLiftedWire(null);
+            const segId = targetKey.slice(8);
+            const port = drag.targetPort as ProjectNodeLink["to_port"];
+            if (lifted.pendings.length) {
+              persistPendingLinks([
+                ...pendingLinks.filter((l) => !lifted.pendings.includes(l)),
+                ...lifted.pendings.map((p) => ({ fromKey: p.fromKey, toSegmentId: segId, toPort: port })),
+              ]);
+            }
+            if (lifted.rows.length) {
+              lifted.rows.forEach((row) => {
+                void unlinkNode(row.from_kind, row.from_id, row.to_segment, row.to_port);
+              });
+              lifted.rows.forEach((row) => {
+                void linkNode(episodeId, row.from_kind, row.from_id, segId, port);
+              });
+            }
+          } else if (wireRelease === "commit" && targetKey && lifted) {
             setLiftedWire(null);
             const source = nodeKeyParts(targetKey);
             const targetGroup = targetKey.startsWith("grp:")
