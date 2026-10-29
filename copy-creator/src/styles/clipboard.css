@@ -1074,9 +1074,8 @@
   gap: 2px;
   flex-shrink: 0;
   padding: 2px;
-  border: 1px solid var(--card-border);
   border-radius: 9px;
-  background: var(--input-bg);
+  background: var(--seg-track-bg);
 }
 
 .clipboard-create-dest-seg-item {
@@ -1098,10 +1097,10 @@
 }
 
 .clipboard-create-dest-seg-item.on {
-  background: var(--panel-bg);
+  background: var(--seg-item-active-bg);
   color: var(--text-primary);
   font-weight: var(--weight-medium);
-  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.14);
+  box-shadow: var(--seg-item-active-shadow);
 }
 
 /* 已有内容 chip：占据分段控件与动作按钮之间的剩余宽度。

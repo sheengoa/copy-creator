@@ -134,7 +134,7 @@
   margin: 16px 8px 0;
   padding: 5px;
   border-radius: 16px;
-  background: #F2F2F2;
+  background: var(--seg-track-bg);
   gap: 4px;
 }
 
@@ -168,9 +168,9 @@
 
 /* 激活态：容器内浮起的白色卡片 */
 .sidebar-nav-item.active {
-  background: #FFFFFF;
+  background: var(--seg-item-active-bg);
   color: var(--text-primary);
-  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.10), 0 0 0 0.5px rgba(0, 0, 0, 0.02);
+  box-shadow: var(--seg-item-active-shadow);
 }
 
 .sidebar-nav-icon {
@@ -210,22 +210,12 @@
   gap: 0;
 }
 
-[data-theme="dark"] .sidebar-nav {
-  background: rgba(255, 255, 255, 0.07);
-}
-
 [data-theme="dark"] .sidebar-nav-item {
   color: rgba(255, 255, 255, 0.55);
 }
 
 [data-theme="dark"] .sidebar-nav-item:hover {
   color: rgba(255, 255, 255, 0.85);
-}
-
-[data-theme="dark"] .sidebar-nav-item.active {
-  background: rgba(255, 255, 255, 0.14);
-  color: rgba(255, 255, 255, 0.95);
-  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.30);
 }
 
 /* --- Sidebar Footer --- */
@@ -239,7 +229,7 @@
   margin: 12px 8px 20px;
   padding: 5px;
   border-radius: 16px;
-  background: #F2F2F2;
+  background: var(--seg-track-bg);
   gap: 4px;
   margin-top: auto;
 }
@@ -273,9 +263,9 @@
 }
 
 .sidebar-footer-item.active {
-  background: #FFFFFF;
+  background: var(--seg-item-active-bg);
   color: var(--text-primary);
-  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.10), 0 0 0 0.5px rgba(0, 0, 0, 0.02);
+  box-shadow: var(--seg-item-active-shadow);
 }
 
 .sidebar-footer-icon {
@@ -309,22 +299,12 @@
   overflow: hidden;
 }
 
-[data-theme="dark"] .sidebar-footer {
-  background: rgba(255, 255, 255, 0.07);
-}
-
 [data-theme="dark"] .sidebar-footer-item {
   color: rgba(255, 255, 255, 0.45);
 }
 
 [data-theme="dark"] .sidebar-footer-item:hover {
   color: rgba(255, 255, 255, 0.8);
-}
-
-[data-theme="dark"] .sidebar-footer-item.active {
-  background: rgba(255, 255, 255, 0.14);
-  color: rgba(255, 255, 255, 0.9);
-  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.30);
 }
 
 /* --- Panel Area --- */

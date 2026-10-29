@@ -75,19 +75,20 @@
   gap: 6px;
   height: 32px;
   padding: 0 10px 0 11px;
-  border: 0.5px solid var(--separator);
+  border: 0;
   border-radius: 8px;
-  background: var(--chip-bg);
+  background: var(--btn-card-bg);
   color: var(--text-primary);
   font-family: var(--font);
   font-size: var(--text-sm);
   font-weight: var(--weight-medium);
   cursor: pointer;
   max-width: 220px;
+  box-shadow: var(--btn-card-shadow);
 }
 
 .project-show-pick:hover {
-  background: var(--chip-hover-bg);
+  box-shadow: var(--btn-card-shadow-hover);
 }
 
 .project-show-pick-icon {
@@ -391,8 +392,8 @@
 }
 
 .project-ep.active {
-  background: var(--bg-card);
-  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.10), 0 0 0 0.5px rgba(0, 0, 0, 0.02);
+  background: var(--seg-item-active-bg);
+  box-shadow: var(--seg-item-active-shadow);
   font-weight: var(--weight-medium);
 }
 
@@ -535,11 +536,6 @@
 }
 
 /* --- 暗色适配（菜单、头像同色系不区分主题；分段控件配色已由 --seg-* 令牌承担） --- */
-[data-theme="dark"] .project-ep.active {
-  background: rgba(255, 255, 255, 0.14);
-  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.30);
-}
-
 [data-theme="dark"] .project-menu-item.current .project-menu-item-icon {
   color: #30D158;
 }
