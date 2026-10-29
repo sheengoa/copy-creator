@@ -378,6 +378,7 @@
   font-family: var(--font);
   cursor: pointer;
   transition: box-shadow 0.15s ease, transform 0.15s ease;
+  box-shadow: var(--btn-card-shadow);
   white-space: nowrap;
 }
 
