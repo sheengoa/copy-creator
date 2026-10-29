@@ -25,6 +25,7 @@ import {
   intExtLabelKey,
   joinLibraryPath,
   locationSubtitleParts,
+  promptCategoryKey,
   scriptFileLabel,
   timeHintLabelKey,
 } from "../../domain/projectView";
@@ -114,6 +115,10 @@ interface EntityPh { id: string; kind: EntityPhKind; x: number; y: number }
 /** 剧本纸片（多实例）：空纸片双击挂文件；本集无剧本时首个挂接转正为主剧本。 */
 interface ScriptPh { id: string; path: string }
 
+/** 提示词纸片（多实例）：空纸片双击从提示词库选一条，promptId 为空即未填充；
+ *  出生点存 x/y（与空白资料占位一致），拖动后的位置走 infoOffsets。 */
+interface PromptPh { id: string; promptId: string; x: number; y: number }
+
 /** 资料组节点：一个节点装多个同类实体，一条线接入片段。 */
 interface InfoGroup {
   id: string;
@@ -131,6 +136,7 @@ interface NodeGroup { id: string; label: string; members: string[] }
 // 常量/纯函数（引用稳定），故统一定义在此。
 const EMPTY_NOTES: CanvasNote[] = [];
 const EMPTY_SCRIPT_PHS: ScriptPh[] = [];
+const EMPTY_PROMPT_PHS: PromptPh[] = [];
 const EMPTY_PLACEHOLDERS: CanvasPlaceholder[] = [];
 const EMPTY_ENTITY_PHS: EntityPh[] = [];
 const EMPTY_INFO_GROUPS: InfoGroup[] = [];
@@ -141,6 +147,11 @@ const EMPTY_NODE_GROUPS: NodeGroup[] = [];
 // 剧本纸片做形状防御：历史脏数据（非数组/缺字段）不进画布，直接回退空。
 const parseScriptPhs = (raw: string): ScriptPh[] => {
   const list = JSON.parse(raw) as ScriptPh[];
+  return Array.isArray(list) ? list.filter((item) => item && typeof item.id === "string") : [];
+};
+// 提示词纸片同款形状防御。
+const parsePromptPhs = (raw: string): PromptPh[] => {
+  const list = JSON.parse(raw) as PromptPh[];
   return Array.isArray(list) ? list.filter((item) => item && typeof item.id === "string") : [];
 };
 // 线段相交（同横坐标单调判定，经典叉积法）——切线的扫过判定用。
@@ -450,6 +461,7 @@ const NODE_ACCENTS: Record<string, string> = {
   location: "#34d399",
   prop: "#fbbf24",
   script: "#fb923c",
+  prompt: "#22d3ee",
   note: "#f6e6a8",
   image: "#4ade80",
   video: "#a78bfa",
@@ -516,6 +528,8 @@ export default function ProjectCanvas({
     linkAsset,
     characters,
     props,
+    prompts,
+    loadPrompts,
   } = useProjectStore(
     useShallow((state) => ({
       overview: state.overview,
@@ -544,6 +558,8 @@ export default function ProjectCanvas({
       linkAsset: state.linkAsset,
       characters: state.characters,
       props: state.props,
+      prompts: state.prompts,
+      loadPrompts: state.loadPrompts,
     })),
   );
   const episodeId = overview?.episode.id ?? "";
@@ -667,6 +683,29 @@ export default function ProjectCanvas({
     if (Array.isArray(existing) && existing.length > 0) return;
     persistScriptPhs([{ id: `sph${Date.now()}${Math.floor(Math.random() * 1e4)}`, path: "" }]);
   }, [episodeId, overview, scriptNodeKey, scriptPhsKey, persistScriptPhs]);
+
+  // ── 提示词纸片（多实例）：添加菜单每次放一个空纸片，双击从提示词库
+  // 选一条；连线走画布暂存线（提示词是画布层记忆，不入库）。 ──
+  const [promptPhs, , persistPromptPhs] = usePerEpisodeStorage<PromptPh[]>(
+    episodeId, "promptphs", EMPTY_PROMPT_PHS, parsePromptPhs,
+  );
+  const addPromptPh = useCallback(
+    (x: number, y: number) => {
+      const id = `pph${Date.now()}${Math.floor(Math.random() * 1e4)}`;
+      persistPromptPhs([...promptPhs, { id, promptId: "", x, y }]);
+      return id;
+    },
+    [promptPhs, persistPromptPhs],
+  );
+  // 双击空纸片弹提示词选择：目标节点 key（"prompt:<id>"）。
+  const [promptPickOpen, setPromptPickOpen] = useState(false);
+  const [promptPickTarget, setPromptPickTarget] = useState<string | null>(null);
+  const [promptPickQuery, setPromptPickQuery] = useState("");
+  // 纸片标题要显示已选提示词的名字：切集时刷新提示词库。
+  useEffect(() => {
+    if (!episodeId) return;
+    void loadPrompts();
+  }, [episodeId, loadPrompts]);
 
   // ── 占位素材节点（双击填充后才入库为集级散件）：按集存 localStorage ──
   const [placeholders, setPlaceholders, persistPlaceholders] = usePerEpisodeStorage<CanvasPlaceholder[]>(
@@ -935,9 +974,14 @@ export default function ProjectCanvas({
         const ph = entityPhs.find((item) => `eph:${item.id}` === key);
         if (ph) return { x: ph.x, y: ph.y };
       }
+      // 提示词纸片：同空白占位，默认落创建点。
+      if (key.startsWith("prompt:")) {
+        const ph = promptPhs.find((item) => `prompt:${item.id}` === key);
+        if (ph) return { x: ph.x, y: ph.y };
+      }
       return infoPos.map[key];
     },
-    [infoOffsets, infoPos, entityPhs],
+    [infoOffsets, infoPos, entityPhs, promptPhs],
   );
 
   // ── 多选组拖 / 位置批量写入 / 复制粘贴 / 撤销栈 ──
@@ -1087,6 +1131,9 @@ export default function ProjectCanvas({
         scriptPhs?: { id: string; path: string }[];
         // 剧本纸片的位置在 infoOffsets（不在纸片对象上），删除时一并抓取。
         scriptOffsets?: { key: string; pos: Pos }[];
+        promptPhs?: PromptPh[];
+        // 提示词纸片同款：拖动过的位置在 infoOffsets，删除时一并抓取。
+        promptOffsets?: { key: string; pos: Pos }[];
         // 被删占位的暂存线随删除一并清除，撤销恢复时一并还原。
         pending?: PendingLink[];
       };
@@ -1132,10 +1179,11 @@ export default function ProjectCanvas({
         if (action.placeholders?.length) persistPlaceholders([...placeholders, ...action.placeholders]);
         if (action.ephs?.length) persistEntityPhs([...entityPhs, ...action.ephs]);
         if (action.scriptPhs?.length) persistScriptPhs([...scriptPhs, ...action.scriptPhs]);
-        if (action.scriptOffsets?.length) {
+        if (action.promptPhs?.length) persistPromptPhs([...promptPhs, ...action.promptPhs]);
+        if (action.scriptOffsets?.length || action.promptOffsets?.length) {
           persistInfoOffsets({
             ...infoOffsets,
-            ...Object.fromEntries(action.scriptOffsets.map((item) => [item.key, item.pos])),
+            ...Object.fromEntries([...(action.scriptOffsets ?? []), ...(action.promptOffsets ?? [])].map((item) => [item.key, item.pos])),
           });
         }
         if (action.pending?.length) persistPendingLinks([...pendingLinks, ...action.pending]);
@@ -1146,7 +1194,7 @@ export default function ProjectCanvas({
         undoingRef.current = false;
       }, 0);
     }
-  }, [moveGroupTo, persistPositions, persistSizes, notes, placeholders, entityPhs, scriptPhs, infoOffsets, persistNotes, persistPlaceholders, persistEntityPhs, persistScriptPhs, persistInfoOffsets, persistPendingLinks, pendingLinks, removeSegment, setSelection, setNodeSizes]);
+  }, [moveGroupTo, persistPositions, persistSizes, notes, placeholders, entityPhs, scriptPhs, promptPhs, infoOffsets, persistNotes, persistPlaceholders, persistEntityPhs, persistScriptPhs, persistPromptPhs, persistInfoOffsets, persistPendingLinks, pendingLinks, removeSegment, setSelection, setNodeSizes]);
   // 复制 / 粘贴（Ctrl+C/V）：画布私有节点可复制（便签/素材占位/空白资料
   // 占位/片段）。镜头卡、素材散件、资料实体节点是库实体的画布投影
   // （一实体一节点），复制语义不成立，不参与。粘贴整组出现在原组右下
@@ -1269,6 +1317,7 @@ export default function ProjectCanvas({
     | { kind: "asset"; id: string }
     | { kind: "placeholder"; id: string }
     | { kind: "entityPh"; id: string }
+    | { kind: "promptPh"; id: string }
     | { kind: "segment"; id: string; scopes: { chars: DetailScope; locs: DetailScope; props: DetailScope } }
     | { kind: "info"; group: EntityPhKind; sourceKey: string; scope: DetailScope }
     | { kind: "script"; phId?: string }
@@ -1968,6 +2017,10 @@ export default function ProjectCanvas({
           out: { label: t(assetKindBadgeKey(kind)), type: kind },
         };
       }
+      // 提示词纸片：输出口为提示词类型（青色），接片段「提示词」口。
+      if (key.startsWith("prompt:")) {
+        return { ins: [], out: { label: t("project.canvas.typePrompt"), type: "prompt" } };
+      }
       if (key === "script" || key.startsWith("script:")) {
         return { ins: [], out: { label: t("project.canvas.typeScript"), type: "text" } };
       }
@@ -2047,10 +2100,11 @@ export default function ProjectCanvas({
         }
         const source = nodeKeyParts(outKey);
         if (!source) {
-          // 占位/空白资料源没有库身份（nodeKeyParts 解析不出）：正式线无处
-          // 可落，改记画布暂存线，加载实体/填充素材后照常转正。
+          // 占位/空白资料/提示词纸片源没有库身份（nodeKeyParts 解析不出）：
+          // 正式线无处可落，改记画布暂存线，加载实体后照常转正（提示词
+          // 纸片始终画布层记忆，暂存线即最终形态）。
           const segId = inKey.slice(8);
-          if (outKey.startsWith("eph:") || outKey.startsWith("placeholder:")) {
+          if (outKey.startsWith("eph:") || outKey.startsWith("placeholder:") || outKey.startsWith("prompt:")) {
             persistPendingLinks([
               ...pendingLinks.filter((l) => !(l.fromKey === outKey && l.toSegmentId === segId && l.toPort === port.id)),
               { fromKey: outKey, toSegmentId: segId, toPort: port.id },
@@ -2463,7 +2517,7 @@ export default function ProjectCanvas({
         if (
           key.startsWith("char:") || key.startsWith("loc:") ||
           key.startsWith("prop:") || key === "script" || key.startsWith("script:") ||
-          key.startsWith("eph:") || key.startsWith("grp:")
+          key.startsWith("eph:") || key.startsWith("prompt:") || key.startsWith("grp:")
         ) {
           // 资料节点（含组节点与空白资料占位）：按下即自由拖动（覆盖层
           // 按绝对位置记忆，资料框退化为背景分组框，节点不再被网格钉死）。
@@ -2619,6 +2673,18 @@ export default function ProjectCanvas({
         setDetailFor({ kind: "entityPh", id: key.slice(4) });
         return;
       }
+      if (key.startsWith("prompt:")) {
+        const ph = promptPhs.find((item) => `prompt:${item.id}` === key);
+        if (!ph) return;
+        if (!ph.promptId) {
+          // 空纸片：双击从提示词库选一条。
+          setPromptPickTarget(key);
+          setPromptPickOpen(true);
+        } else {
+          setDetailFor({ kind: "promptPh", id: ph.id });
+        }
+        return;
+      }
       if (key.startsWith("placeholder:")) {
         setDetailFor({ kind: "placeholder", id: key.slice(12) });
         return;
@@ -2635,7 +2701,7 @@ export default function ProjectCanvas({
       const node = infoNodes.find((item) => item.key === key);
       if (node) openInfoDetail(node);
     },
-    [layout, segments, notes, infoNodes, onOpenAsset, onPickForShot, openInfoDetail],
+    [layout, segments, notes, infoNodes, promptPhs, onOpenAsset, onPickForShot, openInfoDetail],
   );
 
   useEffect(() => {
@@ -3472,6 +3538,11 @@ export default function ProjectCanvas({
           // 面板），双击占位节点从详情窗加载实体；加载后原位变成实体节点。
           const phId = addEntityPh(drag.frameKey, dropPos.x, dropPos.y);
           finishDetached(`eph:${phId}`);
+        } else if (drag.frameKey === "prompt") {
+          // 「提示词」：创建空提示词纸片（不入库、不弹挑选面板），出生在
+          // 松手点，双击从提示词库选一条；连线走画布暂存线。
+          const phId = addPromptPh(dropPos.x, dropPos.y);
+          finishDetached(`prompt:${phId}`);
         } else {
           // 「素材」：创建空占位节点（不入库），双击占位节点才从库挑
           // 文件填充；填充后落位在占位节点处。
@@ -3510,6 +3581,10 @@ export default function ProjectCanvas({
             entityPhs.forEach((ph) => {
               const size = sizeOfNode(`eph:${ph.id}`) ?? { w: INFO_W, h: INFO_H };
               if (inBox(infoNodePos(`eph:${ph.id}`), size.w, size.h)) list.push(`eph:${ph.id}`);
+            });
+            promptPhs.forEach((ph) => {
+              const size = sizeOfNode(`prompt:${ph.id}`) ?? { w: SCRIPT_W, h: INFO_H + 40 };
+              if (inBox(infoNodePos(`prompt:${ph.id}`), size.w, size.h)) list.push(`prompt:${ph.id}`);
             });
             segments.forEach((segment) => {
               const size = sizeOfNode(`segment:${segment.id}`);
@@ -3569,7 +3644,7 @@ export default function ProjectCanvas({
       document.removeEventListener("pointerup", onUp);
       document.removeEventListener("pointercancel", onCancel);
     };
-  }, [layout, pos, view, scenePos, infoPos, boxOf, portsOf, outPointOf, inPointOf, linkAssets, persistCards, persistLoose, saveCanvasLayout, saveInfoFramePos, saveView, setSelection, saveOutputPos, setEpisodeOutput, episodeId, notes, persistNotes, addNote, addPlaceholder, addEntityPh, persistPlaceholders, persistSegments, linkNode, unlinkNode, nodeKeyParts, addSegment, autoConnectNewNode, persistSizes, persistInfoOffsets, infoGroups, infoNodes, infoNodePos, entityPhs, segments, segPos, placeholders, sizeOfNode, outputBox, moveGroupTo, persistPositions, pushUndo, pendingLinks, persistPendingLinks, setInfoFramePos, setInfoOffsets, setNodeSizes, setNotes, setOutputPos, setPlaceholders, openNodeDetail, ownerKeyOf]);
+  }, [layout, pos, view, scenePos, infoPos, boxOf, portsOf, outPointOf, inPointOf, linkAssets, persistCards, persistLoose, saveCanvasLayout, saveInfoFramePos, saveView, setSelection, saveOutputPos, setEpisodeOutput, episodeId, notes, persistNotes, addNote, addPlaceholder, addEntityPh, addPromptPh, persistPlaceholders, persistSegments, linkNode, unlinkNode, nodeKeyParts, addSegment, autoConnectNewNode, persistSizes, persistInfoOffsets, infoGroups, infoNodes, infoNodePos, entityPhs, promptPhs, segments, segPos, placeholders, sizeOfNode, outputBox, moveGroupTo, persistPositions, pushUndo, pendingLinks, persistPendingLinks, setInfoFramePos, setInfoOffsets, setNodeSizes, setNotes, setOutputPos, setPlaceholders, openNodeDetail, ownerKeyOf]);
 
   // ── 节点操作 ──
   // 节点接口圆点（ComfyUI 式）：输入口列在左缘（片段五口按列分布）、
@@ -3864,6 +3939,36 @@ export default function ProjectCanvas({
     },
     [scriptPhs, infoOffsets, persistScriptPhs, persistInfoOffsets, dropPendingLinksOf],
   );
+  // 提示词纸片：移除纸片、位置记忆与暂存线。
+  const removePromptPh = useCallback(
+    (phId: string) => {
+      const key = `prompt:${phId}`;
+      const next = { ...infoOffsets };
+      delete next[key];
+      persistInfoOffsets(next);
+      persistPromptPhs(promptPhs.filter((item) => item.id !== phId));
+      dropPendingLinksOf(key);
+    },
+    [promptPhs, infoOffsets, persistPromptPhs, persistInfoOffsets, dropPendingLinksOf],
+  );
+  // 提示词选择：把选中的提示词 id 写回目标纸片。
+  const handlePromptPick = useCallback(
+    (promptId: string) => {
+      const target = promptPickTarget;
+      setPromptPickOpen(false);
+      setPromptPickTarget(null);
+      if (!target || !target.startsWith("prompt:")) return;
+      const phId = target.slice(7);
+      if (!promptPhs.some((item) => item.id === phId)) return;
+      persistPromptPhs(promptPhs.map((item) => (item.id === phId ? { ...item, promptId } : item)));
+    },
+    [promptPickTarget, promptPhs, persistPromptPhs],
+  );
+  const closePromptPick = useCallback(() => {
+    setPromptPickOpen(false);
+    setPromptPickTarget(null);
+    setPromptPickQuery("");
+  }, []);
   // 空白资料占位：删除占位并清掉它拖动过的位置记忆与暂存线。
   const removeEntityPh = useCallback(
     (phId: string) => {
@@ -3959,6 +4064,8 @@ export default function ProjectCanvas({
         ephs?: { id: string; kind: EntityPhKind; x: number; y: number }[];
         scriptPhs?: { id: string; path: string }[];
         scriptOffsets?: { key: string; pos: Pos }[];
+        promptPhs?: PromptPh[];
+        promptOffsets?: { key: string; pos: Pos }[];
         pending?: PendingLink[];
       } = {};
       for (const key of selKeys) {
@@ -4002,6 +4109,14 @@ export default function ProjectCanvas({
           if (removed) (restore.scriptPhs ??= []).push(removed);
           if (phPos) (restore.scriptOffsets ??= []).push({ key, pos: phPos });
           if (dropped.length) (restore.pending ??= []).push(...dropped);
+        } else if (key.startsWith("prompt:")) {
+          const removed = promptPhs.find((item) => item.id === key.slice(7));
+          const dropped = pendingLinks.filter((l) => l.fromKey === key);
+          const phPos = infoNodePos(key);
+          removePromptPh(key.slice(7));
+          if (removed) (restore.promptPhs ??= []).push(removed);
+          if (phPos) (restore.promptOffsets ??= []).push({ key, pos: phPos });
+          if (dropped.length) (restore.pending ??= []).push(...dropped);
         } else if (key.startsWith("asset:")) {
           void unlinkAsset(key.slice(6));
         } else if (key.startsWith("char:") || key.startsWith("loc:") || key.startsWith("prop:")) {
@@ -4009,11 +4124,11 @@ export default function ProjectCanvas({
           void removeInfoEntity(kind, key.slice(key.indexOf(":") + 1));
         }
       }
-      if (restore.notes || restore.placeholders || restore.ephs || restore.scriptPhs || restore.pending) {
+      if (restore.notes || restore.placeholders || restore.ephs || restore.scriptPhs || restore.promptPhs || restore.pending) {
         pushUndo({
           type: "restore", notes: restore.notes, placeholders: restore.placeholders,
           ephs: restore.ephs, scriptPhs: restore.scriptPhs, pending: restore.pending,
-          scriptOffsets: restore.scriptOffsets,
+          scriptOffsets: restore.scriptOffsets, promptPhs: restore.promptPhs, promptOffsets: restore.promptOffsets,
         });
       }
       setSelection([]);
@@ -4022,9 +4137,9 @@ export default function ProjectCanvas({
     return () => window.removeEventListener("keydown", onKey);
   }, [
     selKeys, detailFor, pickerFor, memberPick, addMenu, wireDraft, scriptPickOpen, locationPickOpen,
-    sceneForm, shotForm, deleteSceneTarget, episodeId, notes, placeholders, entityPhs, scriptPhs, infoOffsets, infoNodePos,
+    sceneForm, shotForm, deleteSceneTarget, episodeId, notes, placeholders, entityPhs, scriptPhs, promptPhs, infoOffsets, infoNodePos,
     setEpisodeOutput, deleteShot, setNotes, persistNotes, removeSegment, removePlaceholder,
-    removeEntityPh, removeGroup, detachScript, removeScriptPh, unlinkAsset, removeInfoEntity, setSelection,
+    removeEntityPh, removeGroup, detachScript, removeScriptPh, removePromptPh, unlinkAsset, removeInfoEntity, setSelection,
     copySelection, pasteClipboard, runUndo, pushUndo, nodeGroups, persistNodeGroups, t,
     pendingLinks, memberFrame,
   ]);
@@ -4175,6 +4290,45 @@ export default function ProjectCanvas({
         <span className={`pc-detail-ava pc-ava-p${characterAvatarPaletteIndex(name)}`}>{fallback}</span>
       );
 
+    if (detailFor.kind === "promptPh") {
+      const ph = promptPhs.find((item) => item.id === detailFor.id);
+      if (!ph) return null;
+      const prompt = prompts.find((item) => item.id === ph.promptId);
+      return (
+        <ProjectNodeDetailDialog
+          title={prompt ? prompt.title : t("project.canvas.promptUntitled")}
+          accent={NODE_ACCENTS.prompt}
+          error={detailError}
+          entries={[{
+            key: `prompt:${ph.id}`,
+            title: prompt ? prompt.title : t("project.canvas.promptUntitled"),
+            badge: t("project.canvas.typePrompt"),
+            preview: prompt ? (
+              <div className="pc-detail-prompt">{prompt.content}</div>
+            ) : (
+              <div className="pc-detail-preview-empty">{Icons.file}{t("project.canvas.promptEmpty")}</div>
+            ),
+            info: prompt?.category
+              ? [{ label: t("project.prompt.field.category"), value: t(promptCategoryKey(prompt.category)) }]
+              : [],
+            actions: (
+              <button
+                type="button"
+                className="pc-detail-btn"
+                onClick={() => {
+                  setDetailFor(null);
+                  setPromptPickTarget(`prompt:${ph.id}`);
+                  setPromptPickOpen(true);
+                }}
+              >
+                {Icons.resources}{t("project.canvas.promptReselect")}
+              </button>
+            ),
+          }]}
+          onClose={closeDetail}
+        />
+      );
+    }
     if (detailFor.kind === "placeholder") {
       const ph = placeholders.find((item) => item.id === detailFor.id);
       if (!ph) return null;
@@ -4641,7 +4795,7 @@ export default function ProjectCanvas({
               if (!a || !b) return null;
               const d = wirePathD(a, b);
               const fromType = portsOf(link.fromKey).out?.type;
-              const solid = link.fromKey.startsWith("script:");
+              const solid = link.fromKey.startsWith("script:") || link.fromKey.startsWith("prompt:");
               return (
                 <g
                   key={`pending-${link.fromKey}-${link.toSegmentId}-${link.toPort}`}
@@ -5088,6 +5242,65 @@ export default function ProjectCanvas({
             );
           })}
 
+          {/* 提示词纸片：双击空纸片从提示词库选一条，内容直接显示在纸片上 */}
+          {promptPhs.map((ph) => {
+            const key = `prompt:${ph.id}`;
+            const p = infoNodePos(key);
+            const phSize = sizeOfNode(key);
+            const resized = Boolean(nodeSizes[key]);
+            const prompt = prompts.find((item) => item.id === ph.promptId);
+            const openPrompt = () => {
+              if (!ph.promptId) {
+                setPromptPickTarget(key);
+                setPromptPickOpen(true);
+              } else {
+                setDetailFor({ kind: "promptPh", id: ph.id });
+              }
+            };
+            return (
+              <div
+                key={key}
+                data-key={key}
+                className={`pc-node pc-info pc-eph${resized ? " pc-resized" : ""}${selKeys.includes(key) ? " pc-selected" : ""}`}
+                style={{
+                  left: p.x, top: p.y,
+                  width: phSize?.w ?? SCRIPT_W,
+                  height: resized ? phSize?.h : undefined,
+                  minHeight: resized ? undefined : phSize?.h,
+                  ["--node-accent" as string]: NODE_ACCENTS.prompt,
+                } as React.CSSProperties}
+              >
+                <div className="pc-node-head">
+                  <span className="pc-node-kind">{t("project.canvas.typePrompt")}</span>
+                  <b className="pc-node-title">{prompt ? prompt.title : t("project.canvas.promptUntitled")}</b>
+                </div>
+                {portBar(key)}
+                {prompt ? (
+                  <div className="pc-prompt-text">{prompt.content}</div>
+                ) : (
+                  <div className="pc-info-body pc-eph-body">
+                    {Icons.file}
+                    <span>{t("project.canvas.promptEmpty")}</span>
+                  </div>
+                )}
+                <span className="pc-node-tools">
+                  <button type="button" data-tooltip={t("project.canvas.view")} onClick={openPrompt}>
+                    {Icons.expand}
+                  </button>
+                  <button
+                    type="button"
+                    data-tooltip={t("common.delete")}
+                    className="danger"
+                    onClick={() => removePromptPh(ph.id)}
+                  >
+                    {Icons.delete}
+                  </button>
+                </span>
+                {resizeHandle}
+              </div>
+            );
+          })}
+
           {/* 片段节点：AI 分段生成的视频分段，按拼接序汇入本集成片 */}
           {segments.map((segment, index) => {
             const p = segPos[segment.id];
@@ -5436,7 +5649,7 @@ export default function ProjectCanvas({
                 panel: "",
               },
               {
-                key: "script",
+                key: "prompt",
                 label: t("project.canvas.typePrompt"),
                 hint: t("project.canvas.typePromptHint"),
                 icon: Icons.file,
@@ -5746,7 +5959,7 @@ export default function ProjectCanvas({
         />
       )}
       {/* 挂剧本：目标 = 主剧本时选文件设为本集剧本，挂接即自动连全部片段
-          提示词口；目标 = 剧本纸片时挂到纸片自己（本集无剧本则转正为主剧本） */}
+          剧本口；目标 = 剧本纸片时挂到纸片自己（本集无剧本则转正为主剧本） */}
       {scriptPickOpen && (
         <ProjectFilePickerDialog
           title={t("project.canvas.linkScript")}
@@ -5758,6 +5971,54 @@ export default function ProjectCanvas({
           }}
           onPick={(file) => handleScriptPick(file.filePath)}
         />
+      )}
+      {/* 提示词选择：空提示词纸片双击后从提示词库选一条写入纸片 */}
+      {promptPickOpen && (
+        <div className="pc-dialog-mask" onMouseDown={(e) => { if (e.target === e.currentTarget) closePromptPick(); }}>
+          <div className="pc-dialog pc-prompt-pick">
+            <h4>{t("project.canvas.promptPickTitle")}</h4>
+            <input
+              value={promptPickQuery}
+              placeholder={t("project.canvas.addNodeSearch")}
+              onChange={(event) => setPromptPickQuery(event.target.value)}
+              autoFocus
+              onKeyDown={(event) => {
+                if (event.key === "Escape") closePromptPick();
+              }}
+            />
+            <div className="pc-prompt-pick-list">
+              {prompts
+                .filter((prompt) => {
+                  const q = promptPickQuery.trim().toLowerCase();
+                  if (!q) return true;
+                  return (
+                    prompt.title.toLowerCase().includes(q) ||
+                    prompt.content.toLowerCase().includes(q) ||
+                    (prompt.category && t(promptCategoryKey(prompt.category)).toLowerCase().includes(q))
+                  );
+                })
+                .map((prompt) => (
+                  <button
+                    key={prompt.id}
+                    type="button"
+                    className="pc-prompt-pick-item"
+                    onClick={() => handlePromptPick(prompt.id)}
+                  >
+                    <span className="pc-prompt-pick-head">
+                      <span className="pc-prompt-pick-title">{prompt.title}</span>
+                      {prompt.category ? (
+                        <span className="pc-prompt-pick-cat">{t(promptCategoryKey(prompt.category))}</span>
+                      ) : null}
+                    </span>
+                    <span className="pc-prompt-pick-content">{prompt.content}</span>
+                  </button>
+                ))}
+              {prompts.length === 0 && (
+                <div className="pc-prompt-pick-empty">{t("project.canvas.promptPickEmpty")}</div>
+              )}
+            </div>
+          </div>
+        </div>
       )}
       {/* 资料框「关联场景」：多选切换，与出场角色同一交互模式 */}
       {locationPickOpen && (
