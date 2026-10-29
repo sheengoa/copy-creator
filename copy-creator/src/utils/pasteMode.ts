@@ -1,6 +1,6 @@
 export type PasteMode = "normal" | "terminal";
 export type PasteAction = "primary" | "secondary";
-export type PasteMouseTrigger = "left" | "left-shift" | "right";
+export type PasteMouseTrigger = "left" | "right";
 
 export function getPrimaryPasteKind(mode: PasteMode): PasteMode {
   return mode;

@@ -2,6 +2,7 @@ import { RadialImageBanner, ResourceItemVisual } from "./ResourceItemVisual";
 // 径向菜单窗口专属样式：随动态 import 的 root 分包，主窗口不加载。
 import "../../styles/radial-menu.css";
 import { readResourceTextPreview, readTextFileContent, readQuickInputTextPreview } from "../../domain/mediaAssets";
+import { resolveAbsoluteResourcePath } from "../../domain/mediaUrl";
 import { useEffect, useLayoutEffect, useRef, useState, useCallback, useMemo, type CSSProperties } from "react";
 import { createPortal } from "react-dom";
 import { useTranslation } from "react-i18next";
@@ -208,6 +209,7 @@ export default function RadialMenu() {
   const [visible, setVisible] = useState(false);
   const [activeTab, setActiveTab] = useState<TabKey>("phrases");
   const [selectedItemId, setSelectedItemId] = useState<string | null>(null);
+  const [selectedItemIds, setSelectedItemIds] = useState<string[]>([]);
   const [clipboardCategory, setClipboardCategory] = useState<ClipType>("all");
   const [resourceGroups, setResourceGroups] = useState<ResourceFolder[]>([]);
   const [resourceGroup, setResourceGroup] = useState<string | null>(null);
@@ -234,6 +236,8 @@ export default function RadialMenu() {
   // 最近一次已知的主题偏好（含 "system"）：系统深浅色变化时按它重解析。
   const themePrefRef = useRef<ThemePreference>("light");
   const selectedItemIdRef = useRef<string | null>(null);
+  const selectedItemIdsRef = useRef<string[]>([]);
+  const shiftSelectionPointerItemIdRef = useRef<string | null>(null);
   const activeTabRef = useRef<TabKey>("phrases");
   const clipboardCategoryRef = useRef<ClipType>("all");
   const resourceGroupRef = useRef<string | null>(null);
@@ -262,6 +266,7 @@ export default function RadialMenu() {
   const previewWidthRef = useRef(RADIAL_PREVIEW_WIDTH);
   const previewCacheRef = useRef(new Map<string, RadialPreviewSegment[]>());
   const dragActiveRef = useRef(false);
+  const shiftClickSelectionModeRef = useRef(false);
   const suppressClickRef = useRef(false);
   const nativeDragRef = useRef<PendingNativeDrag | null>(null);
   const dragSessionIdRef = useRef(0);
@@ -273,6 +278,7 @@ export default function RadialMenu() {
 
   useEffect(() => { visibleRef.current = visible; }, [visible]);
   useEffect(() => { selectedItemIdRef.current = selectedItemId; }, [selectedItemId]);
+  useEffect(() => { selectedItemIdsRef.current = selectedItemIds; }, [selectedItemIds]);
   useEffect(() => { activeTabRef.current = activeTab; }, [activeTab]);
   useEffect(() => { clipboardCategoryRef.current = clipboardCategory; }, [clipboardCategory]);
   useEffect(() => { resourceGroupRef.current = resourceGroup; }, [resourceGroup]);
@@ -661,6 +667,10 @@ export default function RadialMenu() {
     useClipboardStore.getState().loadRecords(false, "resources", nextGroup);
     setSelectedItemId(null);
     selectedItemIdRef.current = null;
+    setSelectedItemIds([]);
+    selectedItemIdsRef.current = [];
+    shiftSelectionPointerItemIdRef.current = null;
+    shiftClickSelectionModeRef.current = false;
     // 分组浏览位置跨重启记忆。null（"全部"视图）与 ""（未分组）语义不同，
     // 设置表只存字符串，故以 JSON 编码区分三种状态。
     void invoke("set_setting", {
@@ -701,6 +711,9 @@ export default function RadialMenu() {
     activeTabRef.current = tab;
     setSelectedItemId(null);
     selectedItemIdRef.current = null;
+    setSelectedItemIds([]);
+    selectedItemIdsRef.current = [];
+    shiftClickSelectionModeRef.current = false;
     if (tab === "clipboard") {
       setClipboardCategory("all");
       clipboardCategoryRef.current = "all";
@@ -769,6 +782,9 @@ export default function RadialMenu() {
     }
     setSelectedItemId(null);
     selectedItemIdRef.current = null;
+    setSelectedItemIds([]);
+    selectedItemIdsRef.current = [];
+    shiftClickSelectionModeRef.current = false;
   }, [collapsePreview]);
 
   const handleCategoryClick = useCallback((e: React.MouseEvent, key: string) => {
@@ -787,6 +803,10 @@ export default function RadialMenu() {
     setVisible(false);
     setSelectedItemId(null);
     selectedItemIdRef.current = null;
+    setSelectedItemIds([]);
+    selectedItemIdsRef.current = [];
+    shiftSelectionPointerItemIdRef.current = null;
+    shiftClickSelectionModeRef.current = false;
     setDragSessionItemId(null);
     setDraggingItemId(null);
     nativeDragRef.current = null;
@@ -799,7 +819,11 @@ export default function RadialMenu() {
   }, [resetState]);
 
   const updateHoverFromPoint = useCallback((cssX: number, cssY: number) => {
-    if (dragActiveRef.current || nativeDragRef.current) return;
+    if (
+      dragActiveRef.current
+      || nativeDragRef.current
+      || shiftClickSelectionModeRef.current
+    ) return;
     const el = document.elementFromPoint(cssX, cssY);
     if (!el) {
       selectedItemIdRef.current = null;
@@ -820,22 +844,135 @@ export default function RadialMenu() {
     }
   }, []);
 
-  const handleItemPaste = useCallback(async (itemId: string, terminal = false) => {
+  const selectItemWithShift = useCallback((itemId: string) => {
+    shiftClickSelectionModeRef.current = true;
+    const nextIds = selectedItemIdsRef.current.includes(itemId)
+      ? selectedItemIdsRef.current
+      : [...selectedItemIdsRef.current, itemId];
+    selectedItemIdsRef.current = nextIds;
+    setSelectedItemIds(nextIds);
+    selectedItemIdRef.current = itemId;
+    setSelectedItemId(itemId);
+  }, []);
+
+  const handleItemPaste = useCallback(async (itemIds: string | string[], terminal = false) => {
     // 先收起菜单再触发粘贴：后端的焦点沉降等待与窗口隐藏并行，
     // 点击到粘贴落地的延迟显著降低（原来串行等待粘贴命令返回后才隐藏）。
     resetState();
     void invoke("hide_radial_menu");
-    const { records, pasteRecord, pasteRecordTerminal } = useClipboardStore.getState();
-    const record = records.find((r) => r.id === itemId);
-    if (record) {
-      const copied = await (terminal ? pasteRecordTerminal(record) : pasteRecord(record));
-      // 菜单已按设计隐藏，无法就地反馈；失败必须留痕（否则用户拿旧内容误贴）。
-      if (!copied) flog(`paste-failed record=${itemId} terminal=${terminal}`);
-    } else {
-      const { phrases, pastePhrase, pastePhraseTerminal } = usePhraseStore.getState();
-      const phrase = phrases.find((p) => p.id === itemId);
-      if (phrase) {
-        await (terminal ? pastePhraseTerminal(phrase) : pastePhrase(phrase));
+    const ids = Array.isArray(itemIds) ? itemIds : [itemIds];
+
+    if (ids.length > 1) {
+      const clipboard = useClipboardStore.getState();
+      const phraseStore = usePhraseStore.getState();
+      const recordsById = new Map(clipboard.records.map((record) => [record.id, record]));
+      const phrasesById = new Map(phraseStore.phrases.map((phrase) => [phrase.id, phrase]));
+      const records = ids
+        .map((id) => recordsById.get(id))
+        .filter((record): record is ClipboardRecord => Boolean(record));
+      const phrases = ids
+        .map((id) => phrasesById.get(id))
+        .filter((phrase): phrase is Phrase => Boolean(phrase));
+      const allItemsFound = records.length + phrases.length === ids.length;
+      const allText = allItemsFound
+        && (records.length === 0 || phrases.length === 0)
+        && records.every((record) => (
+          (record.type === "text"
+            || record.type === "link"
+            || isFileBackedTextResource(record))
+          && !record.has_images
+        ))
+        && phrases.every((phrase) => phrase.input_type === "text");
+      const allFiles = allItemsFound
+        && records.length + phrases.length > 0
+        && records.every((record) => (
+          (record.type === "file" && !isFileBackedTextResource(record))
+          || (
+            record.type !== "image"
+            && isResourceRecord(record)
+            && inferResourceMediaKind(record) !== "text"
+          )
+        ))
+        && phrases.every((phrase) => (
+          phrase.input_type === "file" && !isImageFilePath(phrase.content)
+        ));
+
+      try {
+        if (allText) {
+          const parts: string[] = [];
+          for (const id of ids) {
+            const record = recordsById.get(id);
+            if (record) {
+              parts.push(isFileBackedTextResource(record)
+                ? await readTextFileContent(getResourcePath(record))
+                : await clipboard.getRecordContent(record));
+              continue;
+            }
+            const phrase = phrasesById.get(id);
+            if (phrase) parts.push(phrase.content);
+          }
+          if (phrases.length > 0) {
+            await invoke("paste_phrase_text", {
+              text: parts.join("\n"),
+              terminal,
+            });
+          } else {
+            await invoke(terminal ? "paste_text_terminal" : "paste_text", {
+              text: parts.join("\n"),
+            });
+          }
+        } else if (allFiles) {
+          const paths = ids.flatMap((id) => {
+            const record = recordsById.get(id);
+            if (record) return [getResourcePath(record)];
+            const phrase = phrasesById.get(id);
+            return phrase ? [phrase.content] : [];
+          });
+          const resolvedPaths = await Promise.all(paths.map(resolveAbsoluteResourcePath));
+          await invoke("paste_files", { paths: resolvedPaths });
+        } else {
+          throw new Error("Selected items use incompatible clipboard formats");
+        }
+        const recordIds = records.map((record) => record.id);
+        const phraseIds = phrases.map((phrase) => phrase.id);
+        if (recordIds.length > 0) {
+          void invoke("touch_clipboard_usage", { ids: recordIds }).catch((error) => {
+            console.error("Failed to update selected clipboard usage:", error);
+          });
+        }
+        if (phraseIds.length > 0) {
+          void Promise.all(phraseIds.map((id) => invoke("touch_phrase_usage", { id })))
+            .then(() => phraseStore.loadPhrases(
+              phraseStore.selectedGroupId ?? ALL_PHRASES_GROUP_ID,
+            ))
+            .catch((error) => {
+              console.error("Failed to update selected phrase usage:", error);
+            });
+        }
+        return;
+      } catch (error) {
+        console.error("Failed to paste selected radial items:", error);
+      }
+    }
+
+    for (const [index, itemId] of ids.entries()) {
+      if (index > 0) await new Promise((resolve) => window.setTimeout(resolve, 1500));
+      const clipboard = useClipboardStore.getState();
+      const record = clipboard.records.find((r) => r.id === itemId);
+      if (record) {
+        const copied = await (terminal
+          ? clipboard.pasteRecordTerminal(record)
+          : clipboard.pasteRecord(record));
+        // 菜单已按设计隐藏，无法就地反馈；失败必须留痕（否则用户拿旧内容误贴）。
+        if (!copied) flog(`paste-failed record=${itemId} terminal=${terminal}`);
+      } else {
+        const phraseStore = usePhraseStore.getState();
+        const phrase = phraseStore.phrases.find((p) => p.id === itemId);
+        if (phrase) {
+          await (terminal
+            ? phraseStore.pastePhraseTerminal(phrase)
+            : phraseStore.pastePhrase(phrase));
+        }
       }
     }
   }, [resetState]);
@@ -1044,6 +1181,8 @@ export default function RadialMenu() {
     if (
       e.button !== 0
       || !e.isPrimary
+      || e.shiftKey
+      || shiftClickSelectionModeRef.current
       || dragActiveRef.current
       || nativeDragRef.current
     ) return;
@@ -1191,6 +1330,9 @@ export default function RadialMenu() {
     closeResourceGroupMenu();
     setSelectedItemId(null);
     selectedItemIdRef.current = null;
+    setSelectedItemIds([]);
+    selectedItemIdsRef.current = [];
+    shiftClickSelectionModeRef.current = false;
   }, [collapsePreview, closeResourceGroupMenu]);
   useEffect(() => {
     let unlisteners: UnlistenFn[] = [];
@@ -1247,6 +1389,10 @@ export default function RadialMenu() {
           void loadPasteLeftClickSetting();
           setSelectedItemId(null);
           selectedItemIdRef.current = null;
+          setSelectedItemIds([]);
+          selectedItemIdsRef.current = [];
+          shiftSelectionPointerItemIdRef.current = null;
+          shiftClickSelectionModeRef.current = false;
           // 每次打开菜单恢复「记住的上次模式」：手动切 tab 时已持久化，
           // 无记忆（首次使用）时保持初始「最近」；异步返回前用户已手动
           // 切换 tab 时以用户选择为准。
@@ -1865,23 +2011,48 @@ export default function RadialMenu() {
               items.map((item) => (
                 <div
                   key={item.id}
-                  className={`radial-menu-item${selectedItemId === item.id ? " selected" : ""}${draggingItemId === item.id ? " dragging" : ""}${item.sourceLabel ? " has-source" : ""}${countSortOn && item.useCount != null ? " has-count" : ""}`}
+                  className={`radial-menu-item${selectedItemId === item.id || selectedItemIds.includes(item.id) ? " selected" : ""}${draggingItemId === item.id ? " dragging" : ""}${item.sourceLabel ? " has-source" : ""}${countSortOn && item.useCount != null ? " has-count" : ""}`}
                   data-radial-item-id={item.id}
                   data-radial-drag-kind={item.dragKind}
                   data-radial-drag-source={item.dragSource}
                   data-radial-drag-path={item.dragPath}
+                  onPointerDown={(e) => {
+                    if (!e.shiftKey || e.button !== 0) return;
+                    e.preventDefault();
+                    e.stopPropagation();
+                    shiftSelectionPointerItemIdRef.current = item.id;
+                    selectItemWithShift(item.id);
+                  }}
+                  onPointerUp={() => {
+                    if (shiftSelectionPointerItemIdRef.current !== item.id) return;
+                    window.setTimeout(() => {
+                      if (shiftSelectionPointerItemIdRef.current === item.id) {
+                        shiftSelectionPointerItemIdRef.current = null;
+                      }
+                    }, 0);
+                  }}
                   onClick={(e) => {
                     e.stopPropagation();
+                    if (shiftSelectionPointerItemIdRef.current === item.id) {
+                      shiftSelectionPointerItemIdRef.current = null;
+                      return;
+                    }
                     if (suppressClickRef.current) {
                       suppressClickRef.current = false;
                       return;
                     }
+                    if (e.shiftKey) {
+                      e.preventDefault();
+                      selectItemWithShift(item.id);
+                      return;
+                    }
+                    const itemIds = shiftClickSelectionModeRef.current
+                      && selectedItemIdsRef.current.length > 0
+                      ? selectedItemIdsRef.current
+                      : [item.id];
                     handleItemPaste(
-                      item.id,
-                      shouldUseTerminalPasteForMouseTrigger(
-                        pasteLeftClick,
-                        e.shiftKey ? "left-shift" : "left",
-                      ),
+                      itemIds,
+                      shouldUseTerminalPasteForMouseTrigger(pasteLeftClick, "left"),
                     );
                   }}
                   onContextMenu={(e) => {

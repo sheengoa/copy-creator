@@ -27,7 +27,6 @@ describe("paste mode routing", () => {
 
   it("maps mouse triggers to the expected paste action", () => {
     expect(getPasteActionForMouseTrigger("left")).toBe("primary");
-    expect(getPasteActionForMouseTrigger("left-shift")).toBe("secondary");
     expect(getPasteActionForMouseTrigger("right")).toBe("secondary");
   });
 
