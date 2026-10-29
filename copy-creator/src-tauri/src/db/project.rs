@@ -2265,6 +2265,25 @@ pub fn project_unlink_node(
     Ok(())
 }
 
+/// 清理本集画布的素材连线（素材节点整体移除后的一次性收尾）：删除
+/// from_kind='asset' 的全部 node_link，返回删除条数；有条目删除才广播
+/// project_changed。前端打开某集画布时调用一次，幂等。
+#[tauri::command]
+pub fn project_cleanup_asset_links(app: AppHandle, episode_id: String) -> Result<i64, String> {
+    let state = app.state::<DbState>();
+    let conn = state.conn.lock().map_err(|e| e.to_string())?;
+    let removed = conn
+        .execute(
+            "DELETE FROM project_node_links WHERE episode_id = ?1 AND from_kind = 'asset'",
+            params![episode_id],
+        )
+        .map_err(|e| e.to_string())? as i64;
+    if removed > 0 {
+        emit_project_changed(&app);
+    }
+    Ok(removed)
+}
+
 pub(crate) fn link_assets_inner(
     conn: &Connection,
     from_asset: &str,

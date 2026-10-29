@@ -574,6 +574,7 @@ pub fn run() {
             db::project_set_segment_note,
             db::project_link_node,
             db::project_unlink_node,
+            db::project_cleanup_asset_links,
             db::project_list_prompts,
             db::project_create_prompt,
             db::project_update_prompt,

@@ -42,10 +42,6 @@ const CARD_HEAD_H = 44; // 卡头（镜头号 + 描述）
 const THUMB_W = 116; // 卡内素材缩略宽（两列）
 const THUMB_RATIO = 0.68;
 const THUMB_GAP = 8;
-const LOOSE_W = 200;
-const LOOSE_RATIO = 0.62;
-const MISSING_W = 170;
-const MISSING_H = 96;
 const INFO_W = 132; // 资料卡宽（角色/道具/剧本）
 const INFO_H = 180; // 含标题条 + 接口行 + 预览卡（接口行内移后增高的估算值）
 const SCRIPT_W = 210;
@@ -60,7 +56,7 @@ const SEG_W = 208; // 片段节点（AI 分段生成的视频分段）
 const SEG_H = 108;
 
 type Pos = { x: number; y: number };
-type PosMap = { cards: Record<string, Pos>; loose: Record<string, Pos>; info?: Pos };
+type PosMap = { cards: Record<string, Pos>; info?: Pos };
 
 interface CardAsset {
   asset: ProjectAsset;
@@ -77,12 +73,6 @@ interface CanvasCard {
   h: number;
   assets: CardAsset[];
 }
-interface CanvasLoose {
-  key: string; // `asset:<id>`
-  asset: ProjectAsset;
-  w: number;
-  h: number;
-}
 interface CanvasInfo {
   key: string; // `char:<id>` | `loc:<id>` | `prop:<id>` | `script`
   kind: "character" | "location" | "prop" | "script";
@@ -97,13 +87,6 @@ interface CanvasInfo {
 interface CanvasNote {
   id: string;
   text: string;
-  x: number;
-  y: number;
-}
-/** 画布占位素材节点（「素材」菜单创建的空节点，双击填充后才入库为
- *  集级散件），按集存 localStorage。 */
-interface CanvasPlaceholder {
-  id: string;
   x: number;
   y: number;
 }
@@ -137,7 +120,6 @@ interface NodeGroup { id: string; label: string; members: string[] }
 const EMPTY_NOTES: CanvasNote[] = [];
 const EMPTY_SCRIPT_PHS: ScriptPh[] = [];
 const EMPTY_PROMPT_PHS: PromptPh[] = [];
-const EMPTY_PLACEHOLDERS: CanvasPlaceholder[] = [];
 const EMPTY_ENTITY_PHS: EntityPh[] = [];
 const EMPTY_INFO_GROUPS: InfoGroup[] = [];
 const EMPTY_SIZES: Record<string, { w: number; h: number }> = {};
@@ -195,7 +177,7 @@ const segHitsPolyline = (
   return false;
 };
 interface CanvasFrame {
-  id: string; // sceneId | "loose" | "info"
+  id: string; // sceneId | "info"
   scene: ProjectScene | null;
   label: string;
   w: number;
@@ -204,11 +186,9 @@ interface CanvasFrame {
 
 interface CanvasLayout {
   cards: CanvasCard[];
-  looses: CanvasLoose[];
   infos: CanvasInfo[];
   frames: CanvasFrame[];
   cardPos: Record<string, Pos>;
-  loosePos: Record<string, Pos>;
   /** 场景框默认位置（顺序累计排布），未摆放过场景时使用。 */
   framePos: Record<string, Pos>;
   infoFramePos: Pos;
@@ -244,28 +224,13 @@ function shotCardSize(shot: ProjectShot): { w: number; h: number } {
   return { w: CARD_W, h: CARD_HEAD_H + gridH };
 }
 
-/** 素材类型 → hover 标注的 i18n 键。 */
-function assetKindBadgeKey(kind: string): string {
-  switch (kind) {
-    case "image": return "project.canvas.typeImage";
-    case "video": return "project.canvas.typeVideo";
-    case "text": return "project.canvas.typeText";
-    case "audio": return "project.canvas.typeAudio";
-    case "prompt": return "project.canvas.typePrompt";
-    default: return "project.canvas.typeFile";
-  }
-}
-
 /** 确定性自动布局：已摆放的镜头卡/散件用存储坐标；未摆放的按场景
  *  横排 + 框内网格补位（跳过已占用格位，避免新卡叠在旧卡下）。 */
 function buildLayout(
   scenes: ProjectScene[],
-  looseAssets: ProjectAsset[],
 ): Omit<CanvasLayout, "infoFramePos"> {
   const cardPos: Record<string, Pos> = {};
-  const loosePos: Record<string, Pos> = {};
   const cards: CanvasCard[] = [];
-  const looses: CanvasLoose[] = [];
   const frames: CanvasFrame[] = [];
   let worldW = 1200;
   let worldH = 900;
@@ -353,59 +318,18 @@ function buildLayout(
     worldH = Math.max(worldH, maxY + 60);
   });
 
-  // 集级散件：铺在所有场景框下方，4 列网格（已摆放的用存储坐标）。
-  const scenesBottom = frames.reduce((acc, frame) => {
-    const isScene = frame.id !== "loose" && frame.id !== "info";
-    if (!isScene) return acc;
-    // 场景框位置在调用方 pos state 里（布局纯函数只产尺寸），这里用
-    // frame 的默认 y 推导：所有场景框 y 已定（fx/fy 在上方算好）。
-    return acc;
-  }, 0);
-  void scenesBottom;
-  // 场景框底部：直接由 frames 尺寸 + 已知 fy 推（fy 存在 frame.label 之外，
-  // 这里用 scenes 的 canvas 或默认值重推一次，与上方一致）。
+  // 集级散件已不再上画布（素材节点整体移除）：场景框之外只有资料框与
+  // 片段列，世界尺寸按场景框推导。
   let scenesMaxY = 0;
   scenes.forEach((scene) => {
     const fy = scene.canvas_y ?? 110;
     const frame = frames.find((f) => f.id === scene.id);
     scenesMaxY = Math.max(scenesMaxY, fy + (frame?.h ?? 0));
   });
-  const looseY = Math.max(620, scenesMaxY + 48);
-  frames.push({ id: "loose", scene: null, label: "", w: FRAME_MIN_W, h: FRAME_MIN_H });
-  looseAssets.forEach((asset, index) => {
-    loosePos[asset.id] =
-      asset.canvas_x != null && asset.canvas_y != null
-        ? { x: asset.canvas_x, y: asset.canvas_y }
-        : {
-            x: WORLD_MARGIN + FRAME_PAD_X + (index % 4) * (LOOSE_W + CARD_GAP),
-            y: looseY + FRAME_PAD_TOP + Math.floor(index / 4) * (LOOSE_W * LOOSE_RATIO + CARD_GAP + 8),
-          };
-    looses.push({
-      key: `asset:${asset.id}`, asset,
-      w: asset.missing ? MISSING_W : asset.canvas_w ?? LOOSE_W,
-      h: asset.missing ? MISSING_H : Math.round(LOOSE_W * LOOSE_RATIO),
-    });
-  });
-  const looseFrame = frames.find((f) => f.id === "loose");
-  if (looseFrame) {
-    const maxX = Math.max(
-      WORLD_MARGIN + FRAME_MIN_W,
-      ...looseAssets.map((a) => loosePos[a.id].x + (looses.find((l) => l.key === `asset:${a.id}`)?.w ?? LOOSE_W)),
-    );
-    const maxY = Math.max(
-      looseY + FRAME_MIN_H,
-      ...looseAssets.map((a) => {
-        const node = looses.find((l) => l.key === `asset:${a.id}`);
-        return loosePos[a.id].y + (node?.h ?? LOOSE_W * LOOSE_RATIO);
-      }),
-    );
-    looseFrame.w = maxX - WORLD_MARGIN;
-    looseFrame.h = maxY - looseY;
-  }
-  worldW = Math.max(worldW, (looseFrame?.w ?? 0) + WORLD_MARGIN + 60);
-  worldH = Math.max(worldH, looseY + (looseFrame?.h ?? 0) + 60);
+  worldW = Math.max(worldW, WORLD_MARGIN + 60);
+  worldH = Math.max(worldH, scenesMaxY + 60);
 
-  return { cards, looses, infos: [], frames, cardPos, loosePos, framePos, worldW, worldH };
+  return { cards, infos: [], frames, cardPos, framePos, worldW, worldH };
 }
 
 /** 文本纸片内容（读资源文本头部，组件内自持请求）。 */
@@ -436,7 +360,7 @@ function TextPaperBody({ path, name, lines, adaptive = false }: { path: string; 
 }
 
 interface WireItem {
-  fromKey: string; // 容器 key：shot:<id> | asset:<id>
+  fromKey: string; // 容器 key：shot:<id>
   toKey: string;
   kind: "gen" | "manual";
   type: string; // 线上流动的数据类型 = 来源素材的 kind
@@ -485,11 +409,10 @@ const PORT_COLORS: Record<string, string> = {
   other: "#94a3b8",
 };
 
-/** 全集素材（镜头挂靠 + 集级散件）。 */
-function allAssetsOf(scenes: ProjectScene[], looseAssets: ProjectAsset[]): ProjectAsset[] {
+/** 本集镜头挂靠的全部素材（散件不上画布，仅用于成片来源显示等回退）。 */
+function allAssetsOf(scenes: ProjectScene[]): ProjectAsset[] {
   const list: ProjectAsset[] = [];
   scenes.forEach((scene) => scene.shots.forEach((shot) => list.push(...shot.assets)));
-  list.push(...looseAssets);
   return list;
 }
 
@@ -503,14 +426,12 @@ export default function ProjectCanvas({
   overlay,
   onOpenAsset,
   onPickForShot,
-  onRelinkAsset,
 }: {
   libraryRoot: string;
   /** 集信息玻璃卡内容（标题/状态/角色/剧本入口），由 ProjectView 组装。 */
   overlay?: React.ReactNode;
   onOpenAsset: (asset: ProjectAsset) => void;
   onPickForShot: (shotId: string) => void;
-  onRelinkAsset: (asset: ProjectAsset) => void;
 }) {
   const { t } = useTranslation();
   const {
@@ -518,9 +439,7 @@ export default function ProjectCanvas({
     locations,
     loadLocations,
     saveCanvasLayout,
-    linkAssets,
     unlinkAssets,
-    unlinkAsset,
     saveScene,
     deleteScene,
     saveShot,
@@ -548,9 +467,7 @@ export default function ProjectCanvas({
       locations: state.locations,
       loadLocations: state.loadLocations,
       saveCanvasLayout: state.saveCanvasLayout,
-      linkAssets: state.linkAssets,
       unlinkAssets: state.unlinkAssets,
-      unlinkAsset: state.unlinkAsset,
       saveScene: state.saveScene,
       deleteScene: state.deleteScene,
       saveShot: state.saveShot,
@@ -719,22 +636,6 @@ export default function ProjectCanvas({
     void loadPrompts();
   }, [episodeId, loadPrompts]);
 
-  // ── 占位素材节点（双击填充后才入库为集级散件）：按集存 localStorage ──
-  const [placeholders, setPlaceholders, persistPlaceholders] = usePerEpisodeStorage<CanvasPlaceholder[]>(
-    episodeId, "placeholders", EMPTY_PLACEHOLDERS,
-  );
-  const addPlaceholder = useCallback(
-    (x: number, y: number) => {
-      const id = `p${Date.now()}${Math.floor(Math.random() * 1e4)}`;
-      persistPlaceholders([
-        ...placeholders,
-        { id, x, y },
-      ]);
-      return id;
-    },
-    [placeholders, persistPlaceholders],
-  );
-
   // ── 空白资料占位节点（菜单选 角色/场景/道具 即创建，创建时绝不弹
   // 挑选面板；双击节点从详情窗加载实体，加载后原位变成实体节点）：
   // 按集存 localStorage ──
@@ -786,10 +687,7 @@ export default function ProjectCanvas({
   }, [overview, infoGroups, characters, locations, props, persistInfoGroups]);
 
   // ── 布局与位置（state 驱动渲染） ──
-  const layout = useMemo(() => {
-    const base = buildLayout(scenes, looseAssets);
-    return base;
-  }, [scenes, looseAssets]);
+  const layout = useMemo(() => buildLayout(scenes), [scenes]);
 
   // 资料节点（出场角色/出场场景/出镜道具/剧本）：默认每个集关联实体
   // 一个节点；被组认领的实体不再单独渲染，组节点以照片堆放呈现成员
@@ -865,9 +763,9 @@ export default function ProjectCanvas({
     return { frame, map };
   }, [infoNodes, infoFramePos, layout.worldH]);
 
-  const [pos, setPos] = useState<PosMap>({ cards: layout.cardPos, loose: layout.loosePos });
+  const [pos, setPos] = useState<PosMap>({ cards: layout.cardPos });
   useEffect(() => {
-    setPos({ cards: layout.cardPos, loose: layout.loosePos });
+    setPos({ cards: layout.cardPos });
   }, [layout]);
 
   // 成片输出节点盒：默认挂世界右侧居中，位置按集记忆。
@@ -924,14 +822,6 @@ export default function ProjectCanvas({
         if (!card) return null;
         return { w: over?.w ?? card.w, h: over?.h ?? card.h };
       }
-      if (key.startsWith("asset:")) {
-        const loose = layout.looses.find((l) => l.key === key);
-        if (!loose) return null;
-        return { w: over?.w ?? loose.w, h: over?.h ?? loose.h };
-      }
-      if (key.startsWith("placeholder:")) {
-        return { w: over?.w ?? LOOSE_W, h: over?.h ?? Math.round(LOOSE_W * LOOSE_RATIO) };
-      }
       if (key.startsWith("segment:")) {
         return { w: over?.w ?? SEG_W, h: over?.h ?? SEG_H };
       }
@@ -964,20 +854,6 @@ export default function ProjectCanvas({
     },
     [saveCanvasLayout],
   );
-  const persistLoose = useCallback(
-    (nextLoose: Record<string, Pos>) => {
-      const sizeOf = (id: string) => {
-        const node = layout.looses.find((l) => l.asset.id === id);
-        return node?.w ?? LOOSE_W;
-      };
-      void saveCanvasLayout({
-        assets: Object.entries(nextLoose).map(([id, p]) => ({ id, x: p.x, y: p.y, w: sizeOf(id) })),
-        shots: [],
-        scenes: [],
-      });
-    },
-    [layout, saveCanvasLayout],
-  );
   const infoNodePos = useCallback(
     (key: string): Pos => {
       if (infoOffsets[key]) return infoOffsets[key];
@@ -1008,12 +884,8 @@ export default function ProjectCanvas({
       for (const key of sel) {
         let p: Pos | undefined;
         if (key.startsWith("shot:")) p = pos.cards[key.slice(5)];
-        else if (key.startsWith("asset:")) p = pos.loose[key.slice(6)];
         else if (key.startsWith("segment:")) p = segPos[key.slice(8)];
-        else if (key.startsWith("placeholder:")) {
-          const ph = placeholders.find((item) => item.id === key.slice(12));
-          p = ph ? { x: ph.x, y: ph.y } : undefined;
-        } else if (key.startsWith("note:")) {
+        else if (key.startsWith("note:")) {
           const note = notes.find((item) => item.id === key.slice(5));
           p = note ? { x: note.x, y: note.y } : undefined;
         } else if (key === "output") {
@@ -1026,18 +898,16 @@ export default function ProjectCanvas({
       }
       return members;
     },
-    [pos, segPos, placeholders, notes, outputBox, infoNodePos],
+    [pos, segPos, notes, outputBox, infoNodePos],
   );
   // 批量写入各成员的绝对位置（组拖实时移动与撤销恢复共用）。
   const moveGroupTo = useCallback((members: GroupMember[]) => {
     const at = new Map(members.map((m) => [m.key, { x: m.x, y: m.y }]));
     const pick = (prefix: string) => members.filter((m) => m.key.startsWith(prefix));
     const cards = pick("shot:");
-    const looses = pick("asset:");
-    if (cards.length || looses.length) {
+    if (cards.length) {
       setPos((prev) => ({
         cards: { ...prev.cards, ...Object.fromEntries(cards.map((m) => [m.key.slice(5), at.get(m.key)!])) },
-        loose: { ...prev.loose, ...Object.fromEntries(looses.map((m) => [m.key.slice(6), at.get(m.key)!])) },
       }));
     }
     const segs = pick("segment:");
@@ -1047,43 +917,34 @@ export default function ProjectCanvas({
       const map = new Map(noteSel.map((m) => [m.key.slice(5), at.get(m.key)!]));
       setNotes((prev) => prev.map((item) => (map.has(item.id) ? { ...item, ...map.get(item.id)! } : item)));
     }
-    const phSel = pick("placeholder:");
-    if (phSel.length) {
-      const map = new Map(phSel.map((m) => [m.key.slice(12), at.get(m.key)!]));
-      setPlaceholders((prev) => prev.map((item) => (map.has(item.id) ? { ...item, ...map.get(item.id)! } : item)));
-    }
-    const infos = members.filter((m) => !/^(shot|asset|segment|note|placeholder):/.test(m.key) && m.key !== "output");
+    const infos = members.filter((m) => !/^(shot|segment|note):/.test(m.key) && m.key !== "output");
     if (infos.length) setInfoOffsets((prev) => ({ ...prev, ...Object.fromEntries(infos.map((m) => [m.key, at.get(m.key)!])) }));
     const out = at.get("output");
     if (out) setOutputPos(out);
     // hook 返回的 setter 是 useState 稳定引用，列出不引发重建。
-  }, [setInfoOffsets, setNotes, setOutputPos, setPlaceholders]);
+  }, [setInfoOffsets, setNotes, setOutputPos]);
   // 批量位置落盘（组拖松手与撤销恢复共用）：各切片合并后走对应持久化。
   const persistPositions = useCallback(
     (members: GroupMember[]) => {
       const round = (m: GroupMember) => ({ x: Math.round(m.x), y: Math.round(m.y) });
       const by = (prefix: string) => members.filter((m) => m.key.startsWith(prefix));
       const cards = Object.fromEntries(by("shot:").map((m) => [m.key.slice(5), round(m)]));
-      const loose = Object.fromEntries(by("asset:").map((m) => [m.key.slice(6), round(m)]));
       const segs = Object.fromEntries(by("segment:").map((m) => [m.key.slice(8), round(m)]));
       if (Object.keys(cards).length) persistCards({ ...pos.cards, ...cards });
-      if (Object.keys(loose).length) persistLoose({ ...pos.loose, ...loose });
       if (Object.keys(segs).length) persistSegments({ ...segPos, ...segs });
       const noteMap = new Map(by("note:").map((m) => [m.key.slice(5), round(m)]));
       if (noteMap.size) persistNotes(notes.map((item) => (noteMap.has(item.id) ? { ...item, ...noteMap.get(item.id)! } : item)));
-      const phMap = new Map(by("placeholder:").map((m) => [m.key.slice(12), round(m)]));
-      if (phMap.size) persistPlaceholders(placeholders.map((item) => (phMap.has(item.id) ? { ...item, ...phMap.get(item.id)! } : item)));
-      const infos = members.filter((m) => !/^(shot|asset|segment|note|placeholder):/.test(m.key) && m.key !== "output");
+      const infos = members.filter((m) => !/^(shot|segment|note):/.test(m.key) && m.key !== "output");
       if (infos.length) persistInfoOffsets({ ...infoOffsets, ...Object.fromEntries(infos.map((m) => [m.key, round(m)])) });
       const out = members.find((m) => m.key === "output");
       if (out) saveOutputPos(round(out));
     },
-    [pos, segPos, notes, placeholders, infoOffsets, persistCards, persistLoose, persistSegments, persistNotes, persistPlaceholders, persistInfoOffsets, saveOutputPos],
+    [pos, segPos, notes, infoOffsets, persistCards, persistSegments, persistNotes, persistInfoOffsets, saveOutputPos],
   );
   // ── 占位节点的暂存连线（pendingLinks）──
-  // 空白资料占位/素材占位/剧本纸片还没接入正式连线时，连到片段口的线
-  // 先记在画布层（localStorage 按集）；占位加载实体/填充素材后转正为
-  // node_link；剧本纸片不转正（画布层即最终形态）。
+  // 空白资料占位/提示词/剧本纸片还没接入正式连线时，连到片段口的线
+  // 先记在画布层（localStorage 按集）；占位加载实体后转正为 node_link；
+  // 提示词/剧本纸片不转正（画布层即最终形态）。
   const [pendingLinks, , persistPendingLinks] = usePerEpisodeStorage<PendingLink[]>(
     episodeId, "pendinglinks", EMPTY_PENDING_LINKS,
   );
@@ -1091,6 +952,33 @@ export default function ProjectCanvas({
     (fromKey: string) => persistPendingLinks(pendingLinks.filter((l) => l.fromKey !== fromKey)),
     [pendingLinks, persistPendingLinks],
   );
+
+  // ── 存量清理：素材节点（占位与散件）已整体移除。老画布遗留的素材
+  // 占位（localStorage）、其暂存线与 DB 里的素材连线（from_kind='asset'）
+  // 打开本集时清一次；此后已无任何创建入口，清理幂等无害。 ──
+  const assetLinksCleanedRef = useRef<string | null>(null);
+  useEffect(() => {
+    if (!episodeId) return;
+    // 素材占位连线画布层剔除：从「已加载」的暂存线列表过滤（列表为空时
+    // 本分支不触发，不会把未加载完的空档误写成空）。
+    if (pendingLinks.some((l) => l.fromKey.startsWith("placeholder:"))) {
+      persistPendingLinks(pendingLinks.filter((l) => !l.fromKey.startsWith("placeholder:")));
+    }
+  }, [episodeId, pendingLinks, persistPendingLinks]);
+  useEffect(() => {
+    if (!episodeId || !overview) return;
+    if (assetLinksCleanedRef.current === episodeId) return;
+    assetLinksCleanedRef.current = episodeId;
+    try {
+      window.localStorage.removeItem(`project_canvas_placeholders_${episodeId}`);
+    } catch {
+      // 存储不可用：无碍，占位已无渲染入口。
+    }
+    void invoke("project_cleanup_asset_links", { episodeId }).catch(() => {
+      // 清理失败不阻断画布：素材连线已无渲染入口，下次打开再试。
+      assetLinksCleanedRef.current = null;
+    });
+  }, [episodeId, overview]);
 
   // ── 节点分组（Ctrl+G，ComfyUI Group 的对应物）──
   // 选中一个或多个节点打组成框（框自适应成员包围盒）；拖组框标题整组
@@ -1104,12 +992,8 @@ export default function ProjectCanvas({
     (key: string): { x: number; y: number; w: number; h: number } | null => {
       let p: Pos | undefined;
       if (key.startsWith("shot:")) p = pos.cards[key.slice(5)];
-      else if (key.startsWith("asset:")) p = pos.loose[key.slice(6)];
       else if (key.startsWith("segment:")) p = segPos[key.slice(8)];
-      else if (key.startsWith("placeholder:")) {
-        const ph = placeholders.find((item) => item.id === key.slice(12));
-        p = ph ? { x: ph.x, y: ph.y } : undefined;
-      } else if (key.startsWith("note:")) {
+      else if (key.startsWith("note:")) {
         const note = notes.find((item) => item.id === key.slice(5));
         p = note ? { x: note.x, y: note.y } : undefined;
       } else if (key === "output") {
@@ -1126,10 +1010,10 @@ export default function ProjectCanvas({
         h: size?.h ?? (key.startsWith("note:") ? 96 : 60),
       };
     },
-    [pos, segPos, placeholders, notes, outputBox, infoNodePos, sizeOfNode],
+    [pos, segPos, notes, outputBox, infoNodePos, sizeOfNode],
   );
 
-  // 撤销栈：移动（单/组）、缩放、粘贴、可完整恢复的删除（便签/两类占位）。
+  // 撤销栈：移动（单/组）、缩放、粘贴、可完整恢复的删除（便签/空白占位）。
   // 镜头/片段等后端实体的删除涉及连线与挂接，无法无损重建，不入栈。
   type UndoAction =
     | { type: "move"; entries: GroupMember[] }
@@ -1138,7 +1022,6 @@ export default function ProjectCanvas({
     | {
         type: "restore";
         notes?: CanvasNote[];
-        placeholders?: CanvasPlaceholder[];
         ephs?: { id: string; kind: EntityPhKind; x: number; y: number }[];
         scriptPhs?: { id: string; path: string }[];
         // 剧本纸片的位置在 infoOffsets（不在纸片对象上），删除时一并抓取。
@@ -1177,10 +1060,8 @@ export default function ProjectCanvas({
         }
       } else if (action.type === "paste") {
         const noteIds = new Set(action.keys.filter((k) => k.startsWith("note:")).map((k) => k.slice(5)));
-        const phIds = new Set(action.keys.filter((k) => k.startsWith("placeholder:")).map((k) => k.slice(12)));
         const ephIds = new Set(action.keys.filter((k) => k.startsWith("eph:")).map((k) => k.slice(4)));
         if (noteIds.size) persistNotes(notes.filter((item) => !noteIds.has(item.id)));
-        if (phIds.size) persistPlaceholders(placeholders.filter((item) => !phIds.has(item.id)));
         if (ephIds.size) persistEntityPhs(entityPhs.filter((item) => !ephIds.has(item.id)));
         for (const key of action.keys) {
           if (key.startsWith("segment:")) void removeSegment(key.slice(8));
@@ -1188,7 +1069,6 @@ export default function ProjectCanvas({
         setSelection([]);
       } else if (action.type === "restore") {
         if (action.notes?.length) persistNotes([...notes, ...action.notes]);
-        if (action.placeholders?.length) persistPlaceholders([...placeholders, ...action.placeholders]);
         if (action.ephs?.length) persistEntityPhs([...entityPhs, ...action.ephs]);
         if (action.scriptPhs?.length) persistScriptPhs([...scriptPhs, ...action.scriptPhs]);
         if (action.promptPhs?.length) persistPromptPhs([...promptPhs, ...action.promptPhs]);
@@ -1206,14 +1086,13 @@ export default function ProjectCanvas({
         undoingRef.current = false;
       }, 0);
     }
-  }, [moveGroupTo, persistPositions, persistSizes, notes, placeholders, entityPhs, scriptPhs, promptPhs, infoOffsets, persistNotes, persistPlaceholders, persistEntityPhs, persistScriptPhs, persistPromptPhs, persistInfoOffsets, persistPendingLinks, pendingLinks, removeSegment, setSelection, setNodeSizes]);
-  // 复制 / 粘贴（Ctrl+C/V）：画布私有节点可复制（便签/素材占位/空白资料
-  // 占位/片段）。镜头卡、素材散件、资料实体节点是库实体的画布投影
-  // （一实体一节点），复制语义不成立，不参与。粘贴整组出现在原组右下
-  // 28px 处、组内相对位置保持，粘贴后选中新组（可整体拖走 / Ctrl+Z 撤销）。
+  }, [moveGroupTo, persistPositions, persistSizes, notes, entityPhs, scriptPhs, promptPhs, infoOffsets, persistNotes, persistEntityPhs, persistScriptPhs, persistPromptPhs, persistInfoOffsets, persistPendingLinks, pendingLinks, removeSegment, setSelection, setNodeSizes]);
+  // 复制 / 粘贴（Ctrl+C/V）：画布私有节点可复制（便签/空白资料占位/片段）。
+  // 镜头卡、资料实体节点是库实体的画布投影（一实体一节点），复制语义
+  // 不成立，不参与。粘贴整组出现在原组右下 28px 处、组内相对位置保持，
+  // 粘贴后选中新组（可整体拖走 / Ctrl+Z 撤销）。
   type ClipItem =
     | { kind: "note"; text: string; dx: number; dy: number }
-    | { kind: "placeholder"; dx: number; dy: number }
     | { kind: "eph"; phKind: EntityPhKind; dx: number; dy: number }
     | { kind: "segment"; dx: number; dy: number };
   const clipRef = useRef<{ items: ClipItem[]; ax: number; ay: number } | null>(null);
@@ -1235,8 +1114,6 @@ export default function ProjectCanvas({
       if (m.key.startsWith("note:")) {
         const note = notes.find((item) => item.id === m.key.slice(5));
         if (note) items.push({ kind: "note", text: note.text, dx, dy });
-      } else if (m.key.startsWith("placeholder:")) {
-        items.push({ kind: "placeholder", dx, dy });
       } else if (m.key.startsWith("eph:")) {
         const ph = entityPhs.find((item) => item.id === m.key.slice(4));
         if (ph) items.push({ kind: "eph", phKind: ph.kind, dx, dy });
@@ -1261,8 +1138,6 @@ export default function ProjectCanvas({
         const y = Math.round(ay + item.dy);
         if (item.kind === "note") {
           newKeys.push(`note:${addNote(x, y)}`);
-        } else if (item.kind === "placeholder") {
-          newKeys.push(`placeholder:${addPlaceholder(x, y)}`);
         } else if (item.kind === "eph") {
           newKeys.push(`eph:${addEntityPh(item.phKind, x, y)}`);
         } else {
@@ -1279,7 +1154,7 @@ export default function ProjectCanvas({
     } finally {
       pastingRef.current = false;
     }
-  }, [addNote, addPlaceholder, addEntityPh, addSegment, episodeId, saveCanvasLayout, setSelection, pushUndo]);
+  }, [addNote, addEntityPh, addSegment, episodeId, saveCanvasLayout, setSelection, pushUndo]);
 
   // ── 新节点出生锚点：任何「加载」动作（添加菜单挑实体/挂剧本/详情窗
   // 添加）在触发瞬间记录世界坐标，概览刷新后新出现的资料节点直接出生
@@ -1334,8 +1209,6 @@ export default function ProjectCanvas({
   // 各自独立切换。 ──
   type DetailScope = "current" | "all";
   const [detailFor, setDetailFor] = useState<
-    | { kind: "asset"; id: string }
-    | { kind: "placeholder"; id: string }
     | { kind: "entityPh"; id: string }
     | { kind: "promptPh"; id: string }
     | { kind: "segment"; id: string; scopes: { chars: DetailScope; locs: DetailScope; props: DetailScope } }
@@ -1351,8 +1224,8 @@ export default function ProjectCanvas({
     | { mode: "convert"; sourceKey: string; kind: EntityPhKind; pending: string[] }
     | null
   >(null);
-  // 详情窗口内「从资源库选择」的二级选择器目标。
-  const [pickerFor, setPickerFor] = useState<`placeholder:${string}` | `segment:${string}` | null>(null);
+  // 详情窗口内「从资源库选择」的二级选择器目标（片段挂产出）。
+  const [pickerFor, setPickerFor] = useState<`segment:${string}` | null>(null);
   const [detailError, setDetailError] = useState("");
   // 真切集（两个非空集 id 之间切换）才关闭详情窗口与其二级选择器，并
   // 丢弃未消费的出生锚点与脉冲。episodeId 为空串是 selectEpisode 刷新
@@ -1389,46 +1262,7 @@ export default function ProjectCanvas({
       setDetailError(error instanceof Error ? error.message : String(error));
     }
   };
-  // 详情窗口 → 从资源库选择：占位填充（新散件落在占位位置并继承其尺寸）
-  // 与片段挂产出。
-  const fillPlaceholderFromLibrary = (phId: string, file: { filePath: string; kind: string; name: string }) => {
-    const ph = placeholders.find((item) => item.id === phId);
-    setPickerFor(null);
-    setDetailFor(null);
-    if (!ph) return;
-    const phKey = `placeholder:${ph.id}`;
-    const size = nodeSizes[phKey];
-    void linkAsset({
-      filePath: file.filePath,
-      kind: file.kind,
-      name: file.name,
-      episodeId,
-      shotId: "",
-    }).then(async (asset) => {
-      if (!asset) return;
-      void saveCanvasLayout({
-        assets: [{ id: asset.id, x: ph.x, y: ph.y, w: size?.w ?? LOOSE_W }],
-        shots: [],
-        scenes: [],
-      });
-      persistPlaceholders(placeholders.filter((item) => item.id !== ph.id));
-      if (size) {
-        const next = { ...nodeSizes, [`asset:${asset.id}`]: size };
-        delete next[phKey];
-        persistSizes(next);
-      }
-      // 占位的暂存线随填充转正：素材实体接管原占位的片段连线。
-      const myPending = pendingLinks.filter((l) => l.fromKey === phKey);
-      for (const l of myPending) {
-        await linkNode(episodeId, "asset", asset.id, l.toSegmentId, l.toPort as ProjectNodeLink["to_port"]);
-      }
-      if (myPending.length) persistPendingLinks(pendingLinks.filter((l) => l.fromKey !== phKey));
-      // linkAsset 内部的 selectEpisode 整刷发生在上面落账之前：重挂的画布
-      // 读不到「旧占位已移除/暂存线已转正」，会留下幽灵占位与伪连接线。
-      // 这里再整刷一次，让重挂按最终账本重读。
-      await selectEpisode(episodeId);
-    });
-  };
+  // 详情窗口 → 从资源库选择：片段挂产出。
   const attachSegmentFromLibrary = (segmentId: string, file: { filePath: string; kind: string; name: string }) => {
     // linkAsset 内部会整刷概览（画布随之重挂、UI 状态清空），窗口主动关；
     // setSegmentAsset 只落库且发生在重取快照之后，末尾再刷一次让片段
@@ -1449,10 +1283,9 @@ export default function ProjectCanvas({
   };
   // 空白资料节点的「加载」已并入成员装入面板（applyMemberPick 的 eph 分支）：
 
-
   const outputKey = overview?.episode.output_asset_id ?? null;
 
-  // 成片来源显示名：镜头描述或素材名。
+  // 成片来源显示名：镜头描述或素材名（散件不上画布，旧数据仍可回退显示）。
   const outputSourceLabel: string | null = useMemo(() => {
     if (!outputKey) return null;
     if (outputKey.startsWith("shot:")) {
@@ -1461,7 +1294,7 @@ export default function ProjectCanvas({
     }
     return (
       looseAssets.find((a) => a.id === outputKey)?.name ||
-      allAssetsOf(scenes, looseAssets).find((a) => a.id === outputKey)?.name ||
+      allAssetsOf(scenes).find((a) => a.id === outputKey)?.name ||
       null
     );
   }, [outputKey, scenes, looseAssets]);
@@ -1772,7 +1605,7 @@ export default function ProjectCanvas({
     return () => el.removeEventListener("scroll", onScroll);
   }, []);
 
-  // ── 连线：容器（镜头卡/散件）之间的生成链 + 手动线 ──
+  // ── 连线：容器（镜头卡）之间的生成链 + 手动线 ──
   const containerOf = useCallback(
     (assetId: string): string | null => {
       for (const scene of scenes) {
@@ -1780,14 +1613,14 @@ export default function ProjectCanvas({
           if (shot.assets.some((a) => a.id === assetId)) return `shot:${shot.id}`;
         }
       }
-      return looseAssets.some((a) => a.id === assetId) ? `asset:${assetId}` : null;
+      return null;
     },
-    [scenes, looseAssets],
+    [scenes],
   );
 
   const wires = useMemo(() => {
     const list: WireItem[] = [];
-    const kindOf = new Map(allAssetsOf(scenes, looseAssets).map((a) => [a.id, a.kind]));
+    const kindOf = new Map(allAssetsOf(scenes).map((a) => [a.id, a.kind]));
     const pushWire = (fromAsset: string, toAsset: string, kind: "gen" | "manual") => {
       const from = containerOf(fromAsset);
       const to = containerOf(toAsset);
@@ -1795,7 +1628,7 @@ export default function ProjectCanvas({
       if (list.some((w) => w.fromKey === from && w.toKey === to && w.kind === kind)) return;
       list.push({ fromKey: from, toKey: to, kind, type: kindOf.get(fromAsset) ?? "file" });
     };
-    allAssetsOf(scenes, looseAssets).forEach((asset) => {
+    allAssetsOf(scenes).forEach((asset) => {
       if (asset.gen_from_asset && kindOf.has(asset.gen_from_asset)) {
         pushWire(asset.gen_from_asset, asset.id, "gen");
       }
@@ -1804,7 +1637,7 @@ export default function ProjectCanvas({
       pushWire(link.from_asset, link.to_asset, "manual");
     });
     return list;
-  }, [scenes, looseAssets, links, containerOf]);
+  }, [scenes, links, containerOf]);
 
   // ── 节点实测尺寸与端口位置：连线锚点跟随真实 DOM（内容自适应的
   // 标题条/端口行/缩略图都会改变卡体高度，常量只是首帧兜底） ──
@@ -1875,7 +1708,7 @@ export default function ProjectCanvas({
     measureNodes();
     scheduleMeasureNodes();
     return () => els.forEach((el) => ro.unobserve(el));
-  }, [view.scale, layout, nodeSizes, infoNodes, segments, placeholders, entityPhs, measureNodes, scheduleMeasureNodes]);
+  }, [view.scale, layout, nodeSizes, infoNodes, segments, promptPhs, entityPhs, measureNodes, scheduleMeasureNodes]);
 
   const boxOf = useCallback(
     (key: string): WireBox | null => {
@@ -1892,14 +1725,6 @@ export default function ProjectCanvas({
         const size = sizeOfNode(key) ?? cardSizeOf(key.slice(5));
         return finish(p.x, p.y, size.w, size.h);
       }
-      if (key.startsWith("asset:")) {
-        const assetId = key.slice(6);
-        const loose = layout.looses.find((l) => l.asset.id === assetId);
-        const p = pos.loose[assetId];
-        if (!loose || !p) return null;
-        const size = sizeOfNode(key);
-        return finish(p.x, p.y, size?.w ?? loose.w, size?.h ?? loose.h);
-      }
       if (key.startsWith("segment:")) {
         const p = segPos[key.slice(8)];
         const size = sizeOfNode(key);
@@ -1908,12 +1733,6 @@ export default function ProjectCanvas({
       if (key === "output") {
         const size = sizeOfNode(key) ?? { w: OUTPUT_W, h: OUTPUT_H };
         return outputBox ? finish(outputBox.x, outputBox.y, size.w, size.h) : null;
-      }
-      if (key.startsWith("placeholder:")) {
-        const ph = placeholders.find((item) => item.id === key.slice(12));
-        if (!ph) return null;
-        const size = sizeOfNode(key);
-        return finish(ph.x, ph.y, size?.w ?? LOOSE_W, size?.h ?? Math.round(LOOSE_W * LOOSE_RATIO));
       }
       if (key.startsWith("eph:")) {
         const p = infoNodePos(key);
@@ -1926,7 +1745,7 @@ export default function ProjectCanvas({
       const infoSize = infoNode ? sizeOfNode(key) ?? { w: infoNode.w, h: infoNode.h } : null;
       return infoNode && infoP && infoSize ? finish(infoP.x, infoP.y, infoSize.w, infoSize.h) : null;
     },
-    [layout, pos, cardSizeOf, outputBox, segPos, infoNodes, nodeMetrics, sizeOfNode, infoNodePos, placeholders],
+    [pos, cardSizeOf, outputBox, segPos, infoNodes, nodeMetrics, sizeOfNode, infoNodePos],
   );
 
   // 端口点：优先用实测端口坐标（标题条/端口行让卡体高度自适应），
@@ -1958,9 +1777,7 @@ export default function ProjectCanvas({
               ? `prop:${fromId}`
               : fromKind === "segment"
                 ? `segment:${fromId}`
-                : fromKind === "shot"
-                  ? `shot:${fromId}`
-                  : `asset:${fromId}`;
+                : `shot:${fromId}`;
     },
     [infoGroups],
   );
@@ -2023,24 +1840,6 @@ export default function ProjectCanvas({
       if (key.startsWith("eph:")) {
         return { ins: [], out: { label: t("project.canvas.portRefImg"), type: "image" } };
       }
-      // 素材占位（未填充）：素材类型未定，按通用文件口接入片段「其他」。
-      if (key.startsWith("placeholder:")) {
-        return { ins: [], out: { label: t("project.canvas.typeFile"), type: "file" } };
-      }
-      if (key.startsWith("asset:")) {
-        const assetId = key.slice(6);
-        const loose = looseAssets.find((a) => a.id === assetId);
-        const kind =
-          loose?.kind ??
-          allAssetsOf(scenes, looseAssets).find((a) => a.id === assetId)?.kind;
-        if (!kind) return { ins: [] };
-        return {
-          ins: REF_ACCEPTS.includes(kind)
-            ? [{ id: "in", label: t("project.canvas.portRef"), accepts: REF_ACCEPTS }]
-            : [],
-          out: { label: t(assetKindBadgeKey(kind)), type: kind },
-        };
-      }
       // 提示词纸片：输出口为提示词类型（青色），接片段「提示词」口。
       if (key.startsWith("prompt:")) {
         return { ins: [], out: { label: t("project.canvas.typePrompt"), type: "prompt" } };
@@ -2053,7 +1852,7 @@ export default function ProjectCanvas({
       }
       return { ins: [] };
     },
-    [scenes, looseAssets, t],
+    [scenes, t],
   );
 
   const inPointOf = useCallback(
@@ -2073,7 +1872,6 @@ export default function ProjectCanvas({
   // 画布节点 key → node_link 来源（片段输入口连线的落库形态）。
   const nodeKeyParts = useCallback(
     (key: string): { kind: ProjectNodeLink["from_kind"]; id: string } | null => {
-      if (key.startsWith("asset:")) return { kind: "asset", id: key.slice(6) };
       if (key.startsWith("char:")) return { kind: "character", id: key.slice(5) };
       if (key.startsWith("loc:")) return { kind: "location", id: key.slice(4) };
       if (key.startsWith("prop:")) return { kind: "prop", id: key.slice(5) };
@@ -2103,8 +1901,7 @@ export default function ProjectCanvas({
       if (!wire) return;
       const [outKey, inKey] = wire.fromDir === "in" ? [newKey, wire.fromKey] : [wire.fromKey, newKey];
       if (inKey === "output") {
-        if (outKey.startsWith("asset:")) void setEpisodeOutput(episodeId, outKey.slice(6));
-        else if (outKey.startsWith("shot:")) void setEpisodeOutput(episodeId, outKey);
+        if (outKey.startsWith("shot:")) void setEpisodeOutput(episodeId, outKey);
         return;
       }
       if (inKey.startsWith("segment:")) {
@@ -2134,11 +1931,11 @@ export default function ProjectCanvas({
         }
         const source = nodeKeyParts(outKey);
         if (!source) {
-          // 占位/空白资料/提示词纸片源没有库身份（nodeKeyParts 解析不出）：
+          // 空白资料/提示词纸片源没有库身份（nodeKeyParts 解析不出）：
           // 正式线无处可落，改记画布暂存线，加载实体后照常转正（提示词
           // 纸片始终画布层记忆，暂存线即最终形态）。
           const segId = inKey.slice(8);
-          if (outKey.startsWith("eph:") || outKey.startsWith("placeholder:") || outKey.startsWith("prompt:")) {
+          if (outKey.startsWith("eph:") || outKey.startsWith("prompt:")) {
             persistPendingLinks([
               ...pendingLinks.filter((l) => !(l.fromKey === outKey && l.toSegmentId === segId && l.toPort === port.id)),
               { fromKey: outKey, toSegmentId: segId, toPort: port.id },
@@ -2155,11 +1952,8 @@ export default function ProjectCanvas({
         );
         return;
       }
-      if (outKey.startsWith("asset:") && inKey.startsWith("asset:")) {
-        void linkAssets(outKey.slice(6), inKey.slice(6), "");
-      }
     },
-    [episodeId, nodeKeyParts, portsOf, linkNode, linkAssets, setEpisodeOutput, pendingLinks, persistPendingLinks],
+    [episodeId, nodeKeyParts, portsOf, linkNode, setEpisodeOutput, pendingLinks, persistPendingLinks],
   );
 
   // ── 场景框位置：scenes.canvas 之外再叠一层本地偏移（拖标签牌实时） ──
@@ -2179,7 +1973,7 @@ export default function ProjectCanvas({
   }, [scenes, layout.framePos]);
 
   interface DragState {
-    kind: "pan" | "marquee" | "card" | "loose" | "group" | "infoframe" | "wire" | "outnode" | "note" | "addnode" | "segment" | "placeholder" | "resize" | "infonode" | "multidrag" | "wirecut";
+    kind: "pan" | "marquee" | "card" | "group" | "infoframe" | "wire" | "outnode" | "note" | "addnode" | "segment" | "resize" | "infonode" | "multidrag" | "wirecut";
     sx: number;
     sy: number;
     moved?: boolean;
@@ -2288,7 +2082,7 @@ export default function ProjectCanvas({
         done: false,
         del: () => {
           if (cutId.startsWith("m:")) {
-            // data-cut 里存的是节点 key（asset:<id>），解连要的是素材 id。
+            // data-cut 里存的是容器 key（shot:<id>），解连要的是素材 id。
             const [fromKey, toKey] = cutId.slice(2).split("|");
             void unlinkAssets(fromKey.slice(fromKey.indexOf(":") + 1), toKey.slice(toKey.indexOf(":") + 1));
           } else if (cutId.startsWith("s:")) {
@@ -2376,14 +2170,6 @@ export default function ProjectCanvas({
           let py: number | undefined;
           if (key.startsWith("segment:")) {
             const p = segPos[key.slice(8)];
-            px = p?.x;
-            py = p?.y;
-          } else if (key.startsWith("asset:")) {
-            const p = pos.loose[key.slice(6)];
-            px = p?.x;
-            py = p?.y;
-          } else if (key.startsWith("placeholder:")) {
-            const p = placeholders.find((item) => item.id === key.slice(12));
             px = p?.x;
             py = p?.y;
           } else if (key.startsWith("shot:")) {
@@ -2529,25 +2315,6 @@ export default function ProjectCanvas({
             return;
           }
         }
-        if (key.startsWith("placeholder:")) {
-          // 占位素材节点：按下即拖动，松手持久化到 localStorage。
-          const phId = key.slice(12);
-          const ph = placeholders.find((item) => item.id === phId);
-          if (ph) {
-            const phKey = `placeholder:${phId}`;
-            const group = selRef.current.length > 1 && selRef.current.includes(phKey) ? groupSnapshot() : null;
-            setSelection(selRef.current.includes(phKey) ? selRef.current : [phKey]);
-            nodeEl.classList.add("pc-dragging");
-            dragRef.current = group
-              ? { kind: "multidrag", sx: e.clientX, sy: e.clientY, moved: false, members: group }
-              : {
-                  kind: "placeholder", sx: e.clientX, sy: e.clientY, moved: false,
-                  ox: ph.x, oy: ph.y, frameKey: phId,
-                };
-            e.preventDefault();
-            return;
-          }
-        }
         if (
           key.startsWith("char:") || key.startsWith("loc:") ||
           key.startsWith("prop:") || key === "script" || key.startsWith("script:") ||
@@ -2569,30 +2336,27 @@ export default function ProjectCanvas({
           e.preventDefault();
           return;
         }
-        const nextSel = selRef.current.includes(key) ? selRef.current : [key];
-        // 镜头卡/散件：已在多选中时整组拖（跨类型混合选择同样成立）。
-        const group = nextSel.length > 1 ? groupSnapshot() : null;
-        setSelection(nextSel);
-        nodeEl.classList.add("pc-dragging");
-        dragRef.current = group
-          ? { kind: "multidrag", sx: e.clientX, sy: e.clientY, moved: false, members: group }
-          : {
-              kind: key.startsWith("shot:") ? "card" : "loose", sx: e.clientX, sy: e.clientY, moved: false,
-              moves: nextSel
-                .map((k) => {
-                  if (k.startsWith("shot:")) {
+        if (key.startsWith("shot:")) {
+          // 镜头卡：已在多选中时整组拖（跨类型混合选择同样成立）。
+          const nextSel = selRef.current.includes(key) ? selRef.current : [key];
+          const group = nextSel.length > 1 ? groupSnapshot() : null;
+          setSelection(nextSel);
+          nodeEl.classList.add("pc-dragging");
+          dragRef.current = group
+            ? { kind: "multidrag", sx: e.clientX, sy: e.clientY, moved: false, members: group }
+            : {
+                kind: "card", sx: e.clientX, sy: e.clientY, moved: false,
+                moves: nextSel
+                  .map((k) => {
                     const id = k.slice(5);
                     const p = pos.cards[id];
                     return p ? { key: id, x: p.x, y: p.y } : null;
-                  }
-                  const id = k.slice(6);
-                  const p = pos.loose[id];
-                  return p ? { key: id, x: p.x, y: p.y } : null;
-                })
-                .filter((item): item is { key: string; x: number; y: number } => item !== null),
-            };
-        e.preventDefault();
-        return;
+                  })
+                  .filter((item): item is { key: string; x: number; y: number } => item !== null),
+              };
+          e.preventDefault();
+          return;
+        }
       }
       // 组框标题（Ctrl+G 的组）：按下拖动整组移动（复用组拖管线）。
       const ngLabel = target?.closest(".pc-nodegroup-label");
@@ -2626,7 +2390,7 @@ export default function ProjectCanvas({
           e.preventDefault();
           return;
         }
-        if (frameKey && frameKey !== "loose") {
+        if (frameKey) {
           dragRef.current = {
             kind: "group", sx: e.clientX, sy: e.clientY, frameKey,
             fox: scenePos[frameKey]?.x ?? 0,
@@ -2646,7 +2410,7 @@ export default function ProjectCanvas({
       dragRef.current = { kind: "marquee", sx: e.clientX, sy: e.clientY, mq, moved: false };
       e.preventDefault();
     },
-    [layout, pos, setSelection, view, infoPos, scenePos, portsOf, outputBox, notes, segPos, placeholders, sizeOfNode, infoNodePos, nodeSizes, groupSnapshot, nodeGroups, memberFrame, addMenu, nodeLinks, pendingLinks, ownerKeyOf, buildCutTargets, setLiftedWire],
+    [layout, pos, setSelection, view, infoPos, scenePos, portsOf, outputBox, notes, segPos, sizeOfNode, infoNodePos, nodeSizes, groupSnapshot, nodeGroups, memberFrame, addMenu, nodeLinks, pendingLinks, ownerKeyOf, buildCutTargets, setLiftedWire],
   );
 
 
@@ -2698,11 +2462,6 @@ export default function ProjectCanvas({
         setDetailFor({ kind: "segment", id: key.slice(8), scopes: { chars: "current", locs: "current", props: "current" } });
         return;
       }
-      if (key.startsWith("asset:")) {
-        const asset = layout.looses.find((l) => l.key === key)?.asset;
-        if (asset && !asset.missing) setDetailFor({ kind: "asset", id: asset.id });
-        return;
-      }
       if (key.startsWith("eph:")) {
         setDetailFor({ kind: "entityPh", id: key.slice(4) });
         return;
@@ -2717,10 +2476,6 @@ export default function ProjectCanvas({
         } else {
           setDetailFor({ kind: "promptPh", id: ph.id });
         }
-        return;
-      }
-      if (key.startsWith("placeholder:")) {
-        setDetailFor({ kind: "placeholder", id: key.slice(12) });
         return;
       }
       if (key.startsWith("note:")) {
@@ -2820,15 +2575,6 @@ export default function ProjectCanvas({
               : item,
           ),
         );
-      } else if (drag.kind === "placeholder") {
-        if (!drag.moved) return;
-        setPlaceholders((prev) =>
-          prev.map((item) =>
-            item.id === drag.frameKey
-              ? { ...item, x: (drag.ox ?? 0) + dx / view.scale, y: (drag.oy ?? 0) + dy / view.scale }
-              : item,
-          ),
-        );
       } else if (drag.kind === "resize") {
         // 四角自由缩放：对角固定，实时预览；西/北角缩放联动挪动位置，
         // 松手才持久化尺寸与位置。
@@ -2858,12 +2604,6 @@ export default function ProjectCanvas({
           if (key.startsWith("segment:")) {
             const segId = key.slice(8);
             setSegPos((prev) => ({ ...prev, [segId]: { x: px, y: py } }));
-          } else if (key.startsWith("asset:")) {
-            const assetId = key.slice(6);
-            setPos((prev) => ({ ...prev, loose: { ...prev.loose, [assetId]: { x: px, y: py } } }));
-          } else if (key.startsWith("placeholder:")) {
-            const phId = key.slice(12);
-            setPlaceholders((prev) => prev.map((item) => (item.id === phId ? { ...item, x: px, y: py } : item)));
           } else if (key.startsWith("shot:")) {
             const shotId = key.slice(5);
             setPos((prev) => ({ ...prev, cards: { ...prev.cards, [shotId]: { x: px, y: py } } }));
@@ -2952,19 +2692,18 @@ export default function ProjectCanvas({
         const tKey = tEl?.getAttribute("data-key") ?? null;
         // 可写连接模型：兼容性判断与松手后的落库动作一一对应，杜绝
         // "看起来能连、松手却写不进"的死线。镜头卡的产出可进片段口与
-        // 成片（此前被误禁）；素材参考线仅散件之间（镜头/散件混连无
-        // 渲染语义，不假兼容）；片段→成片是按拼接序的隐式聚合。
+        // 成片；片段→成片是按拼接序的隐式聚合。
         const outKeyOf = drag.fromDir === "in" ? tKey : drag.fromKey;
         const inKeyOf = drag.fromDir === "in" ? drag.fromKey : tKey;
         const writable =
           !!outKeyOf && !!inKeyOf &&
-          ((outKeyOf.startsWith("asset:") && inKeyOf.startsWith("asset:")) ||
-            (inKeyOf === "output" &&
-              (outKeyOf.startsWith("asset:") || outKeyOf.startsWith("shot:") || outKeyOf.startsWith("segment:"))) ||
+          ((inKeyOf === "output" &&
+            (outKeyOf.startsWith("shot:") || outKeyOf.startsWith("segment:"))) ||
             (inKeyOf.startsWith("segment:") &&
               (outKeyOf === "script" ||
                 outKeyOf.startsWith("script:") ||
-                ["asset:", "shot:", "char:", "loc:", "prop:", "grp:", "segment:", "eph:", "placeholder:"].some((p) => outKeyOf.startsWith(p)))));
+                outKeyOf.startsWith("prompt:") ||
+                ["shot:", "char:", "loc:", "prop:", "grp:", "segment:", "eph:"].some((p) => outKeyOf.startsWith(p)))));
         let compatible = false;
         let targetPort: string | null = null;
         if (tKey && tKey !== drag.fromKey && writable) {
@@ -3052,14 +2791,6 @@ export default function ProjectCanvas({
           });
           return { ...prev, cards };
         });
-      } else if (drag.kind === "loose") {
-        setPos((prev) => {
-          const loose = { ...prev.loose };
-          drag.moves?.forEach((mv) => {
-            loose[mv.key] = { x: mv.x + dx / view.scale, y: mv.y + dy / view.scale };
-          });
-          return { ...prev, loose };
-        });
       }
     };
     const cleanupPointerVisuals = (moved: boolean) => {
@@ -3110,7 +2841,7 @@ export default function ProjectCanvas({
       // 目标（≤16px）上才算双击。不用原生 dblclick——它把拖拽轻抖的
       // 松手也计成第二次点击，是「单击/拖完莫名弹窗」的根源。
       const dblCountable = drag.kind === "marquee" ||
-        ["card", "loose", "segment", "placeholder", "outnode", "note", "infonode", "multidrag"].includes(drag.kind);
+        ["card", "segment", "outnode", "note", "infonode", "multidrag"].includes(drag.kind);
       if (dblCountable && !drag.moved) {
         const hitEl = document.elementFromPoint(e.clientX, e.clientY);
         const hit = hitEl instanceof Element ? hitEl : null;
@@ -3285,20 +3016,16 @@ export default function ProjectCanvas({
           // 一条 node_link（角色/场景/道具/剧本/素材/镜头/片段 → 片段）。
           const [outKey, inKey] = drag.fromDir === "in" ? [drag.targetKey, drag.fromKey] : [drag.fromKey, drag.targetKey];
           if (inKey === "output") {
-            // 片段按拼接序隐式汇入成片（无库表可写）；镜头/散件才落总输出。
+            // 片段按拼接序隐式汇入成片（无库表可写）；镜头卡才落总输出。
             if (!outKey.startsWith("segment:")) {
-              void setEpisodeOutput(
-                episodeId,
-                outKey.startsWith("shot:") ? outKey : outKey.replace(/^asset:/, ""),
-              );
+              void setEpisodeOutput(episodeId, outKey);
             }
           } else if (inKey.startsWith("segment:")) {
             const segId = inKey.slice(8);
-            if (outKey.startsWith("eph:") || outKey.startsWith("placeholder:") || outKey.startsWith("script:")) {
-              // 未加载的占位节点与剧本纸片：暂存线记在画布层。占位加载
-              // 实体/填充素材后转正为 node_link（promotePendingLinks）；
-              // 剧本纸片不转正（空纸片挂接文件转正为主剧本时由全量接入
-              // 覆盖），纸片连线常驻画布层。
+            if (outKey.startsWith("eph:") || outKey.startsWith("prompt:") || outKey.startsWith("script:")) {
+              // 未加载的空白占位/提示词纸片/剧本纸片：暂存线记在画布层。
+              // 空白占位加载实体后转正为 node_link（promotePendingLinks）；
+              // 提示词/剧本纸片不转正（画布层即最终形态）。
               const port = drag.fromDir === "in" ? drag.fromPortId : drag.targetPort;
               if (port) {
                 persistPendingLinks([
@@ -3328,13 +3055,6 @@ export default function ProjectCanvas({
                 );
               }
             }
-          } else {
-            // 可写模型已保证此处只会是散件↔散件。
-            void linkAssets(
-              outKey.replace(/^(shot|asset):/, ""),
-              inKey.replace(/^(shot|asset):/, ""),
-              "",
-            );
           }
         } else if (wireRelease === "picker" && drag.fromKey) {
           // ComfyUI 惯例：拖到空白松手 → 弹节点选择框，创建的节点自动
@@ -3400,7 +3120,7 @@ export default function ProjectCanvas({
           });
           const corner = drag.corner ?? "se";
           if (corner !== "se") {
-            // mouseup 闭包里的 pos/segPos/placeholders 可能落后于拖拽中的
+            // mouseup 闭包里的 pos/segPos/notes 可能落后于拖拽中的
             // 实时更新，用 drag 对象上的最终坐标覆盖后再落盘。
             const finalX = drag.px;
             const finalY = drag.py;
@@ -3409,15 +3129,6 @@ export default function ProjectCanvas({
               const segId = key.slice(8);
               const p = segPos[segId];
               persistSegments({ ...segPos, [segId]: moved2 ?? p });
-            } else if (key.startsWith("asset:")) {
-              const assetId = key.slice(6);
-              const p = pos.loose[assetId];
-              persistLoose({ ...pos.loose, [assetId]: moved2 ?? (p ?? { x: 0, y: 0 }) });
-            } else if (key.startsWith("placeholder:")) {
-              const phId = key.slice(12);
-              persistPlaceholders(
-                placeholders.map((item) => (item.id === phId && moved2 ? { ...item, ...moved2 } : item)),
-              );
             } else if (key.startsWith("shot:")) {
               const shotId = key.slice(5);
               const p = pos.cards[shotId];
@@ -3472,26 +3183,6 @@ export default function ProjectCanvas({
           pushUndo({
             type: "move",
             entries: [{ key: `note:${drag.frameKey}`, x: drag.ox ?? 0, y: drag.oy ?? 0 }],
-          });
-        }
-      } else if (drag.kind === "placeholder") {
-        if (drag.moved) {
-          setPlaceholders((prev) => {
-            const next = prev.map((item) =>
-              item.id === drag.frameKey
-                ? {
-                    ...item,
-                    x: (drag.ox ?? 0) + (e.clientX - drag.sx) / view.scale,
-                    y: (drag.oy ?? 0) + (e.clientY - drag.sy) / view.scale,
-                  }
-                : item,
-            );
-            persistPlaceholders(next);
-            return next;
-          });
-          pushUndo({
-            type: "move",
-            entries: [{ key: `placeholder:${drag.frameKey}`, x: drag.ox ?? 0, y: drag.oy ?? 0 }],
           });
         }
       } else if (drag.kind === "multidrag") {
@@ -3627,11 +3318,6 @@ export default function ProjectCanvas({
           // 松手点，双击从提示词库选一条；连线走画布暂存线。
           const phId = addPromptPh(dropPos.x, dropPos.y);
           finishDetached(`prompt:${phId}`);
-        } else {
-          // 「素材」：创建空占位节点（不入库），双击占位节点才从库挑
-          // 文件填充；填充后落位在占位节点处。
-          const phId = addPlaceholder(dropPos.x, dropPos.y);
-          finishDetached(`placeholder:${phId}`);
         }
       } else if (drag.kind === "marquee") {
         const list: string[] = [];
@@ -3653,10 +3339,7 @@ export default function ProjectCanvas({
               const size = sizeOfNode(card.key) ?? shotCardSize(card.shot);
               if (inBox(pos.cards[card.shot.id], size.w, size.h)) list.push(card.key);
             });
-            layout.looses.forEach((loose) => {
-              if (inBox(pos.loose[loose.asset.id], loose.w, loose.h)) list.push(loose.key);
-            });
-            // 资料节点（含组/剧本）、空白资料占位、片段、素材占位、成片：
+            // 资料节点（含组/剧本/提示词）、空白资料占位、片段、成片：
             // 框选与点选同一套选中态（边缘点亮），删除也走同一套 Delete。
             infoNodes.forEach((node) => {
               const size = sizeOfNode(node.key) ?? { w: node.w, h: node.h };
@@ -3673,10 +3356,6 @@ export default function ProjectCanvas({
             segments.forEach((segment) => {
               const size = sizeOfNode(`segment:${segment.id}`);
               if (inBox(segPos[segment.id], size?.w ?? SEG_W, size?.h ?? SEG_H)) list.push(`segment:${segment.id}`);
-            });
-            placeholders.forEach((ph) => {
-              const size = sizeOfNode(`placeholder:${ph.id}`);
-              if (inBox({ x: ph.x, y: ph.y }, size?.w ?? LOOSE_W, size?.h ?? MISSING_H)) list.push(`placeholder:${ph.id}`);
             });
             if (outputBox) {
               const size = sizeOfNode("output") ?? { w: outputBox.w, h: outputBox.h };
@@ -3697,12 +3376,6 @@ export default function ProjectCanvas({
         pushUndo({
           type: "move",
           entries: (drag.moves ?? []).map((mv) => ({ key: `shot:${mv.key}`, x: mv.x, y: mv.y })),
-        });
-      } else if (drag.kind === "loose" && drag.moved) {
-        persistLoose(pos.loose);
-        pushUndo({
-          type: "move",
-          entries: (drag.moves ?? []).map((mv) => ({ key: `asset:${mv.key}`, x: mv.x, y: mv.y })),
         });
       } else if (drag.kind === "group" && drag.moved) {
         const fk = drag.frameKey ?? "";
@@ -3728,7 +3401,7 @@ export default function ProjectCanvas({
       document.removeEventListener("pointerup", onUp);
       document.removeEventListener("pointercancel", onCancel);
     };
-  }, [layout, pos, view, scenePos, infoPos, boxOf, portsOf, outPointOf, inPointOf, linkAssets, persistCards, persistLoose, saveCanvasLayout, saveInfoFramePos, saveView, setSelection, saveOutputPos, setEpisodeOutput, episodeId, notes, persistNotes, addNote, addPlaceholder, addEntityPh, addPromptPh, persistPlaceholders, persistSegments, linkNode, unlinkNode, nodeKeyParts, addSegment, autoConnectNewNode, persistSizes, persistInfoOffsets, infoGroups, infoNodes, infoNodePos, entityPhs, promptPhs, segments, segPos, placeholders, sizeOfNode, outputBox, moveGroupTo, persistPositions, pushUndo, pendingLinks, persistPendingLinks, setInfoFramePos, setInfoOffsets, setNodeSizes, setNotes, setOutputPos, setPlaceholders, openNodeDetail, ownerKeyOf]);
+  }, [layout, pos, view, scenePos, infoPos, boxOf, portsOf, outPointOf, inPointOf, persistCards, saveCanvasLayout, saveInfoFramePos, saveView, setSelection, saveOutputPos, setEpisodeOutput, episodeId, notes, persistNotes, addNote, addEntityPh, addPromptPh, persistSegments, linkNode, unlinkNode, nodeKeyParts, addSegment, autoConnectNewNode, persistSizes, persistInfoOffsets, infoGroups, infoNodes, infoNodePos, entityPhs, promptPhs, segments, segPos, sizeOfNode, outputBox, moveGroupTo, persistPositions, pushUndo, pendingLinks, persistPendingLinks, setInfoFramePos, setInfoOffsets, setNodeSizes, setNotes, setOutputPos, openNodeDetail, ownerKeyOf]);
 
   // ── 节点操作 ──
   // 节点接口圆点（ComfyUI 式）：输入口列在左缘（片段六口按列分布）、
@@ -4065,14 +3738,6 @@ export default function ProjectCanvas({
     },
     [entityPhs, infoOffsets, persistEntityPhs, persistInfoOffsets, dropPendingLinksOf],
   );
-  // 素材占位节点：从画布移除占位记录与暂存线。
-  const removePlaceholder = useCallback(
-    (phId: string) => {
-      persistPlaceholders(placeholders.filter((item) => item.id !== phId));
-      dropPendingLinksOf(`placeholder:${phId}`);
-    },
-    [placeholders, persistPlaceholders, dropPendingLinksOf],
-  );
   // ── 键盘：Delete/Backspace 删除选中节点（与各节点工具条同一套语义；
   // 镜头卡有确认对话框，走同一确认流程）；Ctrl+C/V 复制粘贴选中组；
   // Ctrl+Z 撤销。输入框聚焦或任一弹层打开时不响应。 ──
@@ -4141,11 +3806,10 @@ export default function ProjectCanvas({
       if (e.key !== "Delete" && e.key !== "Backspace") return;
       if (selKeys.length === 0) return;
       e.preventDefault();
-      // 可完整恢复的删除（便签/两类占位/剧本纸片）先抓原对象与暂存线，
+      // 可完整恢复的删除（便签/空白占位/剧本纸片）先抓原对象与暂存线，
       // 整批删除记一条撤销；恢复时原样还原（含线）。
       const restore: {
         notes?: CanvasNote[];
-        placeholders?: CanvasPlaceholder[];
         ephs?: { id: string; kind: EntityPhKind; x: number; y: number }[];
         scriptPhs?: { id: string; path: string }[];
         scriptOffsets?: { key: string; pos: Pos }[];
@@ -4168,12 +3832,6 @@ export default function ProjectCanvas({
           if (removed) (restore.notes ??= []).push(removed);
         } else if (key.startsWith("segment:")) {
           void removeSegment(key.slice(8));
-        } else if (key.startsWith("placeholder:")) {
-          const removed = placeholders.find((item) => item.id === key.slice(12));
-          const dropped = pendingLinks.filter((l) => l.fromKey === key);
-          removePlaceholder(key.slice(12));
-          if (removed) (restore.placeholders ??= []).push(removed);
-          if (dropped.length) (restore.pending ??= []).push(...dropped);
         } else if (key.startsWith("eph:")) {
           const removed = entityPhs.find((item) => item.id === key.slice(4));
           const dropped = pendingLinks.filter((l) => l.fromKey === key);
@@ -4202,16 +3860,14 @@ export default function ProjectCanvas({
           if (removed) (restore.promptPhs ??= []).push(removed);
           if (phPos) (restore.promptOffsets ??= []).push({ key, pos: phPos });
           if (dropped.length) (restore.pending ??= []).push(...dropped);
-        } else if (key.startsWith("asset:")) {
-          void unlinkAsset(key.slice(6));
         } else if (key.startsWith("char:") || key.startsWith("loc:") || key.startsWith("prop:")) {
           const kind: EntityPhKind = key.startsWith("char:") ? "character" : key.startsWith("loc:") ? "location" : "prop";
           void removeInfoEntity(kind, key.slice(key.indexOf(":") + 1));
         }
       }
-      if (restore.notes || restore.placeholders || restore.ephs || restore.scriptPhs || restore.promptPhs || restore.pending) {
+      if (restore.notes || restore.ephs || restore.scriptPhs || restore.promptPhs || restore.pending) {
         pushUndo({
-          type: "restore", notes: restore.notes, placeholders: restore.placeholders,
+          type: "restore", notes: restore.notes,
           ephs: restore.ephs, scriptPhs: restore.scriptPhs, pending: restore.pending,
           scriptOffsets: restore.scriptOffsets, promptPhs: restore.promptPhs, promptOffsets: restore.promptOffsets,
         });
@@ -4222,9 +3878,9 @@ export default function ProjectCanvas({
     return () => window.removeEventListener("keydown", onKey);
   }, [
     selKeys, detailFor, pickerFor, memberPick, addMenu, wireDraft, scriptPickOpen, locationPickOpen,
-    sceneForm, shotForm, deleteSceneTarget, episodeId, notes, placeholders, entityPhs, scriptPhs, promptPhs, infoOffsets, infoNodePos,
-    setEpisodeOutput, deleteShot, setNotes, persistNotes, removeSegment, removePlaceholder,
-    removeEntityPh, removeGroup, detachScript, removeScriptPh, removePromptPh, unlinkAsset, removeInfoEntity, setSelection,
+    sceneForm, shotForm, deleteSceneTarget, episodeId, notes, entityPhs, scriptPhs, promptPhs, infoOffsets, infoNodePos,
+    setEpisodeOutput, deleteShot, setNotes, persistNotes, removeSegment,
+    removeEntityPh, removeGroup, detachScript, removeScriptPh, removePromptPh, removeInfoEntity, setSelection,
     copySelection, pasteClipboard, runUndo, pushUndo, nodeGroups, persistNodeGroups, t,
     pendingLinks, memberFrame,
   ]);
@@ -4315,28 +3971,7 @@ export default function ProjectCanvas({
   const detailDialog = (() => {
     if (!detailFor || !overview) return null;
     const fileHint = (relative: string) => joinLibraryPath(libraryRoot, relative);
-    const assetPreview = (asset: ProjectAsset): React.ReactNode => {
-      if (asset.missing) {
-        return <div className="pc-detail-preview-empty">{Icons.image}{t("project.asset.fileMissing")}</div>;
-      }
-      const path = fileHint(asset.file_path);
-      if (asset.kind === "image") {
-        return <ResourceFileImage path={path} alt={asset.name} version={asset.updated_at} className="pc-detail-img" />;
-      }
-      if (asset.kind === "video") {
-        return (
-          <div className="pc-detail-video">
-            <ResourceVideoPoster path={path} version={asset.updated_at} fallbackLabel={asset.name || asset.file_path} />
-            <span className="pc-detail-video-hint">{Icons.play}{t("project.canvas.view")}</span>
-          </div>
-        );
-      }
-      if (asset.kind === "text") {
-        return <TextPaperBody path={path} name={asset.name || asset.file_path} lines={12} />;
-      }
-      return <div className="pc-detail-preview-empty">{Icons.file}<span>{asset.name || asset.file_path}</span></div>;
-    };
-    // 某类资源（character/location/prop/asset）已连到哪些片段（#序号）。
+    // 某类资源（character/location/prop）已连到哪些片段（#序号）。
     const linkedSegmentLabel = (kind: string, id: string) => {
       const segIds = overview.node_links
         .filter((l) => l.from_kind === kind && l.from_id === id)
@@ -4407,70 +4042,6 @@ export default function ProjectCanvas({
                 }}
               >
                 {Icons.resources}{t("project.canvas.promptReselect")}
-              </button>
-            ),
-          }]}
-          onClose={closeDetail}
-        />
-      );
-    }
-    if (detailFor.kind === "placeholder") {
-      const ph = placeholders.find((item) => item.id === detailFor.id);
-      if (!ph) return null;
-      const startFill = (file: { filePath: string; kind: string; name: string }) => fillPlaceholderFromLibrary(ph.id, file);
-      return (
-        <ProjectNodeDetailDialog
-          title={t("project.canvas.placeholderTitle")}
-          accent="#94a3b8"
-          error={detailError}
-          entries={[{
-            key: `placeholder:${ph.id}`,
-            title: t("project.canvas.placeholderTitle"),
-            badge: t("project.canvas.typeAsset"),
-            preview: (
-              <button type="button" className="pc-detail-drop" onClick={() => void uploadViaImport(startFill)}>
-                {Icons.image}
-                {t("project.canvas.detailEmptyDrop")}
-              </button>
-            ),
-            info: [{ label: t("project.canvas.detailStatus"), value: t("project.canvas.placeholderEmpty") }],
-            actions: (
-              <>
-                <button type="button" className="pc-detail-btn primary" onClick={() => void uploadViaImport(startFill)}>
-                  {Icons.add}{t("project.canvas.detailUpload")}
-                </button>
-                <button type="button" className="pc-detail-btn" onClick={() => setPickerFor(`placeholder:${ph.id}`)}>
-                  {Icons.resources}{t("project.canvas.detailPickLibrary")}
-                </button>
-              </>
-            ),
-          }]}
-          onClose={closeDetail}
-        />
-      );
-    }
-    if (detailFor.kind === "asset") {
-      const asset = looseAssets.find((item) => item.id === detailFor.id)
-        ?? allAssetsOf(scenes, looseAssets).find((item) => item.id === detailFor.id);
-      if (!asset) return null;
-      return (
-        <ProjectNodeDetailDialog
-          title={asset.name || asset.file_path}
-          accent={NODE_ACCENTS[asset.kind] ?? "#94a3b8"}
-          error={detailError}
-          entries={[{
-            key: `asset:${asset.id}`,
-            title: asset.name || asset.file_path,
-            badge: t(assetKindBadgeKey(asset.kind)),
-            preview: assetPreview(asset),
-            info: [
-              { label: t("project.canvas.detailPath"), value: asset.file_path },
-              { label: t("project.canvas.detailKind"), value: t(assetKindBadgeKey(asset.kind)) },
-              { label: t("project.canvas.detailLinks"), value: linkedSegmentLabel("asset", asset.id) },
-            ],
-            actions: (
-              <button type="button" className="pc-detail-btn" onClick={() => handleLocate(asset)}>
-                {Icons.externalLink}{t("project.canvas.openFile")}
               </button>
             ),
           }]}
@@ -5057,85 +4628,6 @@ export default function ProjectCanvas({
             );
           })}
 
-          {/* 集级散件节点 */}
-          {layout.looses.map((loose) => {
-            const p = pos.loose[loose.asset.id] ?? { x: 0, y: 0 };
-            const selected = selKeys.includes(loose.key);
-            const asset = loose.asset;
-            const size = sizeOfNode(loose.key);
-            const nodeW = size?.w ?? loose.w;
-            const nodeH = size?.h ?? loose.h;
-            const resized = Boolean(nodeSizes[loose.key]);
-            const mediaPath = joinLibraryPath(libraryRoot, asset.file_path);
-            return (
-              <div
-                key={loose.key}
-                data-key={loose.key}
-                className={`pc-node${resized ? " pc-resized" : ""}${selected ? " pc-selected" : ""}`}
-                style={{ left: p.x, top: p.y, width: nodeW, height: resized ? nodeH : undefined, ["--node-accent" as string]: NODE_ACCENTS[asset.kind] ?? "#94a3b8" } as React.CSSProperties}
-              >
-                <div className="pc-node-head">
-                  <span className="pc-node-kind">{t(assetKindBadgeKey(asset.kind))}</span>
-                  <b className="pc-node-title">{asset.name || asset.file_path}</b>
-                </div>
-                {portBar(loose.key)}
-                {asset.missing ? (
-                    <div className="pc-miss-card" style={resized ? undefined : { height: nodeH }}>
-                      {Icons.image}
-                      {t("project.asset.fileMissing")}
-                    </div>
-                  ) : asset.kind === "image" ? (
-                    <div className="pc-media" style={resized ? undefined : { height: nodeH }}>
-                      <ResourceFileImage
-                        path={mediaPath}
-                        alt={asset.name}
-                        version={asset.updated_at}
-                        className="pc-media-img"
-                      />
-                    </div>
-                  ) : asset.kind === "video" ? (
-                    <div className="pc-media" style={resized ? undefined : { height: nodeH }}>
-                      <ResourceVideoPoster
-                        path={mediaPath}
-                        version={asset.updated_at}
-                        fallbackLabel={asset.name || asset.file_path}
-                      />
-                      <span className="pc-play">{Icons.play}</span>
-                    </div>
-                  ) : asset.kind === "text" ? (
-                    <TextPaperBody path={mediaPath} name={asset.name || asset.file_path} adaptive={resized} />
-                  ) : (
-                    <div className="pc-media pc-media-file" style={resized ? undefined : { height: nodeH }}>
-                      {Icons.file}
-                      <span>{asset.name || asset.file_path}</span>
-                    </div>
-                  )}
-                <span className="pc-node-tools">
-                  <button type="button" data-tooltip={t("project.canvas.view")} onClick={() => onOpenAsset(asset)}>
-                    {Icons.expand}
-                  </button>
-                  <button type="button" data-tooltip={t("project.canvas.openFile")} onClick={() => handleLocate(asset)}>
-                    {Icons.externalLink}
-                  </button>
-                  {asset.missing && (
-                    <button type="button" data-tooltip={t("project.sheet.relink")} onClick={() => onRelinkAsset(asset)}>
-                      {Icons.swap}
-                    </button>
-                  )}
-                  <button
-                    type="button"
-                    data-tooltip={t("project.canvas.remove")}
-                    className="danger"
-                    onClick={() => void unlinkAsset(asset.id)}
-                  >
-                    {Icons.delete}
-                  </button>
-                </span>
-                {resizeHandle}
-              </div>
-            );
-          })}
-
           {/* 节点分组框（Ctrl+G）：框自适应成员包围盒，渲染在节点层之下；
               拖标题条整组移动（复用组拖管线），组员被删后框随之收缩。 */}
           {nodeGroups.map((group) => {
@@ -5571,42 +5063,6 @@ export default function ProjectCanvas({
               {resizeHandle}
             </div>
           ))}
-
-          {/* 占位素材节点：「素材」菜单创建的空节点，双击打开详情填充窗口 */}
-          {placeholders.map((ph) => {
-            const phKey = `placeholder:${ph.id}`;
-            const phSize = sizeOfNode(phKey);
-            const resized = Boolean(nodeSizes[phKey]);
-            return (
-              <div
-                key={ph.id}
-                data-key={phKey}
-                className={`pc-node pc-placeholder${resized ? " pc-resized" : ""}`}
-                style={{ left: ph.x, top: ph.y, width: phSize?.w ?? LOOSE_W, height: resized ? phSize?.h : undefined, ["--node-accent" as string]: "#94a3b8" } as React.CSSProperties}
-              >
-                <div className="pc-node-head">
-                  <span className="pc-node-kind">{t("project.canvas.typeAsset")}</span>
-                  <b className="pc-node-title">{t("project.canvas.placeholderTitle")}</b>
-                </div>
-                {portBar(phKey)}
-                <div className="pc-ph-empty" style={resized ? undefined : { height: phSize?.h }}>
-                  {Icons.image}
-                  {t("project.canvas.placeholderEmpty")}
-                </div>
-                <span className="pc-node-tools">
-                  <button
-                    type="button"
-                    data-tooltip={t("common.delete")}
-                    className="danger"
-                    onClick={() => removePlaceholder(ph.id)}
-                  >
-                    {Icons.delete}
-                  </button>
-                </span>
-                {resizeHandle}
-              </div>
-            );
-          })}
         </div>
 
         {/* 刀切痕层：视口直下的绝对定位层（pc-world 之后 → 盖在卡片上），
@@ -5738,13 +5194,6 @@ export default function ProjectCanvas({
                 label: t("project.canvas.typePrompt"),
                 hint: t("project.canvas.typePromptHint"),
                 icon: Icons.file,
-                panel: "",
-              },
-              {
-                key: "asset",
-                label: t("project.canvas.typeAsset"),
-                hint: t("project.canvas.typeAssetHint"),
-                icon: Icons.image,
                 panel: "",
               },
             ]
@@ -6024,16 +5473,7 @@ export default function ProjectCanvas({
       )}
       {/* 节点详情预览窗口：双击节点的独立窗口（预览 + 信息 + 上传/库选） */}
       {detailDialog}
-      {/* 详情窗口内的「从资源库选择」二级选择器（占位填充 / 片段挂产出） */}
-      {pickerFor?.startsWith("placeholder:") && (
-        <ProjectFilePickerDialog
-          title={t("project.canvas.fillAsset")}
-          takenPaths={new Set()}
-          takenLabel=""
-          onClose={() => setPickerFor(null)}
-          onPick={(file) => fillPlaceholderFromLibrary(pickerFor.slice(12), file)}
-        />
-      )}
+      {/* 详情窗口内的「从资源库选择」二级选择器（片段挂产出） */}
       {pickerFor?.startsWith("segment:") && (
         <ProjectFilePickerDialog
           title={t("project.canvas.segAttach")}
