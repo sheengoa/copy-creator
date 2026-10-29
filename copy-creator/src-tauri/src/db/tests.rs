@@ -1199,6 +1199,63 @@ mod resource_command_tests {
     }
 
     #[test]
+    fn moving_group_updates_image_content_and_video_resource_paths() {
+        let (app, root) = test_app();
+        let old_dir = root.join("Source").join("Mixed");
+        std::fs::create_dir_all(&old_dir).unwrap();
+        let image = old_dir.join("cover.png");
+        let video = old_dir.join("clip.mp4");
+        std::fs::write(&image, [1_u8]).unwrap();
+        std::fs::write(&video, [2_u8]).unwrap();
+        insert_typed_resource(
+            &app,
+            "image-record",
+            "image",
+            image.to_str().unwrap(),
+            image.to_str().unwrap(),
+        );
+        insert_typed_resource(
+            &app,
+            "video-record",
+            "file",
+            video.to_str().unwrap(),
+            video.to_str().unwrap(),
+        );
+        std::fs::create_dir_all(root.join("Target")).unwrap();
+
+        move_resource_group_inner(
+            app.handle(),
+            "Source/Mixed".to_string(),
+            "Target".to_string(),
+        )
+        .unwrap();
+
+        let moved_image = root.join("Target/Mixed/cover.png");
+        let moved_video = root.join("Target/Mixed/clip.mp4");
+        let state = app.state::<DbState>();
+        let conn = state.conn.lock().unwrap();
+        let image_paths: (String, String) = conn
+            .query_row(
+                "SELECT content, resource_path FROM clipboard_records WHERE id = 'image-record'",
+                [],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )
+            .unwrap();
+        assert_eq!(image_paths.0, moved_image.to_string_lossy());
+        assert_eq!(image_paths.1, moved_image.to_string_lossy());
+        let video_paths: (String, String) = conn
+            .query_row(
+                "SELECT content, resource_path FROM clipboard_records WHERE id = 'video-record'",
+                [],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )
+            .unwrap();
+        assert_eq!(video_paths.0, moved_video.to_string_lossy());
+        assert_eq!(video_paths.1, moved_video.to_string_lossy());
+        cleanup(&root);
+    }
+
+    #[test]
     fn moving_group_to_top_level_restores_root_depth() {
         let (app, root) = test_app();
         let md_file = root.join("工作资料/角色/note.md");
@@ -3197,6 +3254,69 @@ mod resource_command_tests {
                 .unwrap();
             assert_eq!(label, "标签A", "api_key_labels 应级联迁移");
         }
+    }
+
+    #[test]
+    fn settle_redirects_moved_mixed_media_directory_to_another_group() {
+        // 文件管理器把包含视频和图片的分组移到另一层路径时，两个旧记录
+        // 都应按相对路径重定向；图片不能被误标记为缺失或作为新文件重建。
+        let (app, root) = test_app();
+        let old_dir = root.join("待整理").join("素材");
+        std::fs::create_dir_all(old_dir.join("原图")).unwrap();
+        let video = old_dir.join("镜头.mp4");
+        let image = old_dir.join("原图").join("封面.png");
+        std::fs::write(&video, [1, 2]).unwrap();
+        std::fs::write(&image, [3, 4]).unwrap();
+        insert_typed_resource(
+            &app,
+            "video-record",
+            "file",
+            video.to_str().unwrap(),
+            video.to_str().unwrap(),
+        );
+        insert_typed_resource(
+            &app,
+            "image-record",
+            "image",
+            image.to_str().unwrap(),
+            image.to_str().unwrap(),
+        );
+
+        let new_dir = root.join("已完成").join("成片素材");
+        std::fs::create_dir_all(new_dir.parent().unwrap()).unwrap();
+        std::fs::rename(&old_dir, &new_dir).unwrap();
+        settle_external_resource_changes(app.handle(), &[old_dir.clone(), new_dir.clone()]);
+
+        let records = get_clipboard_records_inner(
+            &app.handle().clone(),
+            None,
+            Some(50),
+            Some(0),
+            Some("resources".to_string()),
+            None,
+            Some("recent".into()),
+        )
+        .unwrap();
+        assert_eq!(records.len(), 2, "移动后应保留两条原记录");
+        for (old_id, expected_path, expected_kind) in [
+            ("video-record", new_dir.join("镜头.mp4"), "video"),
+            (
+                "image-record",
+                new_dir.join("原图").join("封面.png"),
+                "image",
+            ),
+        ] {
+            let record = records
+                .iter()
+                .find(|record| record["resource_path"].as_str() == expected_path.to_str())
+                .unwrap_or_else(|| panic!("应找到重定向后的资源 {expected_path:?}: {records:?}"));
+            assert_eq!(record["id"].as_str(), Some(resource_file_id(&expected_path).as_str()));
+            assert_eq!(record["content"].as_str(), expected_path.to_str());
+            assert_eq!(record["resource_kind"].as_str(), Some(expected_kind));
+            assert_eq!(record["resource_missing"].as_bool(), Some(false));
+            assert_ne!(record["id"].as_str(), Some(old_id));
+        }
+        cleanup(&root);
     }
 
     #[test]

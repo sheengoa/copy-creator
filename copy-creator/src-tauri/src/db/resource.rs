@@ -605,14 +605,6 @@ pub(crate) fn watch_path_key(path: &Path) -> PathBuf {
     simplify_windows_path(&path.components().collect::<PathBuf>())
 }
 
-/// 两个路径是否为同父目录下的兄弟节点（组件级比较，忽略分隔符形态）。
-fn same_parent(a: &Path, b: &Path) -> bool {
-    match (a.parent(), b.parent()) {
-        (Some(parent_a), Some(parent_b)) => watch_path_key(parent_a) == watch_path_key(parent_b),
-        _ => false,
-    }
-}
-
 // === 删除进行中注册表：堵死「监听清退与应用内删除竞态」的真丢文件路径 ===
 
 /// 应用内删除资源分三步：把库内文件改名成同目录隐藏 `.tmp` 暂存 → 数据库
@@ -668,13 +660,15 @@ where
     DeleteInFlightGuard { keys }
 }
 
-/// 外部目录改名/移动的重定向：旧目录路径消失、同批有同父目录的新目录
-/// 到达、且新目录的实际文件完全覆盖旧子树的记录时，把记录的
+/// 外部目录改名/移动的重定向：旧目录路径消失、同批有新目录到达、且
+/// 新目录的实际文件完全覆盖旧子树的记录时，把记录的
 /// resource_path 与 id 级联改写到新路径（备注、使用次数、创建时间等
 /// 元数据全部保留；分组归属查询时从 resource_path 现场推导，无需额外
 /// 改写）。找不到替身（真删除/移出库外）时不动，交给
 /// forget_resource_records 按子树清退。仅目录型消失参与重定向；单文件
-/// 改名维持「删旧建新」语义，避免同窗口内无关的删+建被误配对。
+/// 改名维持「删旧建新」语义，避免同窗口内无关的删+建被误配对。目录
+/// 可以被文件管理器移动到其他分组或更深层路径，因此不能要求新旧目录
+/// 共享父目录；用完整子树覆盖校验来避免把无关目录误配为替身。
 fn relocate_resource_records<R: Runtime>(
     app: &AppHandle<R>,
     missing: &[PathBuf],
@@ -688,31 +682,37 @@ fn relocate_resource_records<R: Runtime>(
         return;
     };
     let Ok(mut stmt) = conn.prepare(
-        "SELECT id, resource_path FROM clipboard_records
+        "SELECT id, resource_path, content FROM clipboard_records
          WHERE storage_mode = 'resource'
            AND COALESCE(resource_path, '') <> ''",
     ) else {
         return;
     };
-    let records: Vec<(String, PathBuf)> = match stmt.query_map([], |row| {
-        Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
+    let records: Vec<(String, PathBuf, String)> = match stmt.query_map([], |row| {
+        Ok((
+            row.get::<_, String>(0)?,
+            PathBuf::from(row.get::<_, String>(1)?),
+            row.get::<_, String>(2)?,
+        ))
     }) {
         Ok(rows) => rows
             .flatten()
-            .map(|(id, path)| (id, PathBuf::from(&path)))
             .collect(),
         Err(_) => return,
     };
     drop(stmt);
     // 现有路径占用表：重定向目标已被其他记录占用时放弃，防同路径重复。
-    let mut occupied: HashSet<PathBuf> = records.iter().map(|(_, path)| watch_path_key(path)).collect();
+    let mut occupied: HashSet<PathBuf> = records
+        .iter()
+        .map(|(_, path, _)| watch_path_key(path))
+        .collect();
 
     for gone in missing {
         let gone_key = watch_path_key(gone);
         // 子树受害者：位于消失目录之下的全部记录。
-        let victims: Vec<&(String, PathBuf)> = records
+        let victims: Vec<&(String, PathBuf, String)> = records
             .iter()
-            .filter(|(_, path)| {
+            .filter(|(_, path, _)| {
                 let key = watch_path_key(path);
                 key.starts_with(&gone_key) && key != gone_key
             })
@@ -720,44 +720,51 @@ fn relocate_resource_records<R: Runtime>(
         if victims.is_empty() {
             continue;
         }
-        // 替身：同父目录、本批到达、真实存在的目录（且不是消失路径本身）。
-        let Some(replacement) = arrived.iter().find(|candidate| {
-            candidate.is_dir()
-                && watch_path_key(candidate) != gone_key
-                && same_parent(candidate, gone)
+        // 替身：本批到达、真实存在的目录（且不是消失路径本身）。目录
+        // 移到其他分组时新旧父目录不同，不能用父目录关系裁决。
+        let Some((_replacement, moves)) = arrived.iter().find_map(|candidate| {
+            if !candidate.is_dir() || watch_path_key(candidate) == gone_key {
+                return None;
+            }
+
+            // 覆盖验证：替身下的实际文件必须包含全部受害记录的相对路径。
+            let replacement_files: HashSet<PathBuf> = collect_resource_files_under(candidate)
+                .iter()
+                .map(|path| watch_path_key(path))
+                .collect();
+            let mut moves: Vec<(String, PathBuf, String)> = Vec::new();
+            for (id, path, content) in &victims {
+                let victim_key = watch_path_key(path);
+                let Ok(relative) = victim_key.strip_prefix(&gone_key) else {
+                    return None;
+                };
+                let target = candidate.join(relative);
+                let target_key = watch_path_key(&target);
+                if !replacement_files.contains(&target_key) || occupied.contains(&target_key) {
+                    return None;
+                }
+                moves.push((id.clone(), target, content.clone()));
+            }
+            Some((candidate, moves))
         }) else {
             continue;
         };
-        // 覆盖验证：替身下的实际文件必须包含全部受害记录的相对路径。
-        let replacement_files: HashSet<PathBuf> = collect_resource_files_under(replacement)
-            .iter()
-            .map(|path| watch_path_key(path))
-            .collect();
-        let mut moves: Vec<(String, PathBuf)> = Vec::new();
-        let mut fully_covered = true;
-        for (id, path) in &victims {
-            let victim_key = watch_path_key(path);
-            let Ok(relative) = victim_key.strip_prefix(&gone_key) else {
-                fully_covered = false;
-                break;
-            };
-            let target = replacement.join(relative);
-            let target_key = watch_path_key(&target);
-            if !replacement_files.contains(&target_key) || occupied.contains(&target_key) {
-                fully_covered = false;
-                break;
-            }
-            moves.push(((id.clone()), target));
-        }
-        if !fully_covered {
-            continue;
-        }
-        for (id, target) in moves {
+        for (id, target, old_content) in moves {
             let new_id = resource_file_id(&target);
-            // 重定向目标经覆盖验证真实存在，缺失标志随之清零。
+            let target_text = target.to_string_lossy().to_string();
+            // 图片记录的展示/预览路径来自 content，文件记录则来自
+            // resource_path。两者原先都存着完整路径，外部移动时必须同步
+            // 更新，否则图片仍指向旧位置，即使缺失标志已清零也无法显示。
             let updated = conn.execute(
-                "UPDATE clipboard_records SET id = ?1, resource_path = ?2, resource_missing = 0 WHERE id = ?3",
-                params![new_id, target.to_string_lossy(), id],
+                "UPDATE clipboard_records
+                 SET id = ?1, resource_path = ?2,
+                     content = CASE
+                         WHEN type = 'image' OR content = ?3 THEN ?2
+                         ELSE content
+                     END,
+                     resource_missing = 0
+                 WHERE id = ?4",
+                params![new_id, target_text, old_content, id],
             );
             if updated == Ok(1) {
                 occupied.insert(watch_path_key(&target));
@@ -1347,7 +1354,11 @@ pub(crate) fn update_resource_record_paths<R: Runtime>(
     for (id, path) in updates {
         tx.execute(
             "UPDATE clipboard_records
-             SET resource_path = ?1, group_name = ?2
+             SET resource_path = ?1, group_name = ?2,
+                 content = CASE
+                     WHEN type = 'image' OR content = resource_path THEN ?1
+                     ELSE content
+                 END
              WHERE id = ?3 AND storage_mode = 'resource'",
             params![path, group_name, id],
         )
