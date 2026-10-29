@@ -954,7 +954,9 @@ export default function RadialMenu() {
             } else {
               const parts = await assembleTextParts();
               if (parts === null) throw new Error("selected text items unavailable");
-              await invoke("paste_mixed", {
+              // 混合选区串行两贴：目标应用只认领剪切板中的一种格式，
+              // 先落地文件列表再落地合并文本，任何目标里两者都能出来。
+              await invoke("paste_files_then_text", {
                 paths: resolvedPaths,
                 text: parts.join("\n"),
               });
@@ -1222,12 +1224,19 @@ export default function RadialMenu() {
     if (e.shiftKey && !isSelectedItem) return;
     let dragIds: string[] | undefined;
     if (isSelectedItem && selectedIds.length > 1) {
-      const selectedElements = selectedIds.map((id) =>
-        document.querySelector<HTMLElement>(`[data-radial-item-id="${CSS.escape(id)}"]`),
-      );
-      if (selectedElements.every((element) => element?.dataset.radialDragKind === "files")) {
-        dragIds = selectedIds;
-      } else {
+      // 混合选区（如文本+文件）拖拽放行：文本不可拖（OLE 拖不出剪切板
+      // 文本与文件并存的目标体验），拖出其中的文件子集。子集恰为一个
+      // 条目时退回普通单条拖拽（selection 来源要求 ≥2 个条目）；一个
+      // 可拖条目都没有时维持旧行为吞掉这次按下。
+      const fileKindIds = selectedIds.filter((id) => {
+        const element = document.querySelector<HTMLElement>(
+          `[data-radial-item-id="${CSS.escape(id)}"]`,
+        );
+        return element?.dataset.radialDragKind === "files";
+      });
+      if (fileKindIds.length > 1) {
+        dragIds = fileKindIds;
+      } else if (fileKindIds.length === 1 && fileKindIds[0] !== itemId) {
         suppressClickRef.current = true;
         return;
       }
