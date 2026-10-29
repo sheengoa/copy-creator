@@ -358,8 +358,8 @@
   transform: scale(0.96);
 }
 
-/* 主按钮（新建）：浮起白卡——与分段槽选中态同语言；「选择」按钮由
-   selection-mode-btn 覆盖为软灰次级。高度 32px 与分段槽对齐。 */
+/* 主按钮（新建/选择）：浮起白卡——与分段槽选中态同语言。
+   高度 32px 与分段槽对齐。 */
 .phrase-add-btn {
   flex-shrink: 0;
   display: inline-flex;

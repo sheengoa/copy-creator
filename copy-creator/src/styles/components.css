@@ -250,22 +250,6 @@
   cursor: pointer;
 }
 
-.selection-mode-btn {
-  background: var(--input-bg);
-  color: var(--text-primary);
-  box-shadow: none;
-}
-
-.selection-mode-btn:hover {
-  background: var(--chip-hover-bg);
-}
-
-[data-theme="dark"] .selection-mode-btn,
-[data-theme="dark"] .selection-mode-btn:hover {
-  background: var(--input-bg);
-  color: var(--text-primary);
-}
-
 .batch-selection-bar {
   min-height: 36px;
   display: flex;
@@ -1953,13 +1937,16 @@ input:focus-visible + .selection-checkbox {
   flex-direction: column;
 }
 
+/* 页面级次级按钮（回收站/资源库设置/详情页动作等）：与主按钮同为浮起白卡；
+   对话框内「取消」保留软灰以区分主次（.dialog-btn.secondary）。 */
 .resource-secondary-button {
-  background: var(--chip-bg);
+  background: var(--btn-card-bg);
   color: var(--text-primary);
+  box-shadow: var(--btn-card-shadow);
 }
 
 .resource-secondary-button:hover {
-  background: var(--chip-hover-bg);
+  box-shadow: var(--btn-card-shadow-hover);
 }
 
 /* 主按钮（新建等）：浮起白卡——与分段槽选中态同语言的唯一强调 */
