@@ -470,6 +470,30 @@
   gap: 4px;
 }
 
+/* 管理分组行内动作钮：灰底行上的白色卡片钮——与浮起白卡语言同源，
+   危险钮以红字表意。 */
+.resource-group-manage-actions .resource-icon-button,
+.resource-group-manage-actions .resource-delete-button {
+  border: 0;
+  background: var(--btn-card-bg);
+  color: var(--text-secondary);
+  box-shadow: var(--btn-card-shadow);
+}
+
+.resource-group-manage-actions .resource-icon-button:hover {
+  background: var(--btn-card-bg);
+  border-color: transparent;
+  color: var(--text-primary);
+  box-shadow: var(--btn-card-shadow-hover);
+}
+
+.resource-group-manage-actions .resource-delete-button:hover {
+  background: var(--btn-card-bg);
+  border-color: transparent;
+  color: var(--danger);
+  box-shadow: var(--btn-card-shadow-hover);
+}
+
 
 .resource-group-manage-count {
   flex-shrink: 0;
@@ -1480,11 +1504,22 @@
   width: auto;
   gap: 5px;
   padding: 0 8px;
-  border-color: color-mix(in srgb, var(--danger) 30%, var(--separator));
+  border: 0;
+  background: var(--btn-card-bg);
   color: var(--danger);
+  box-shadow: var(--btn-card-shadow);
+  transition: box-shadow 0.15s ease;
+}
+
+.resource-detail-delete:hover {
+  background: var(--btn-card-bg);
+  border-color: transparent;
+  color: var(--danger);
+  box-shadow: var(--btn-card-shadow-hover);
 }
 
 /* 正文编辑保存按钮：强调色主按钮，与次要按钮（放弃）形成主次区分。 */
+/* 正文编辑保存按钮：白卡 + accent 文字，与对话框主按钮同语言。 */
 .resource-primary-button {
   min-height: 30px;
   display: inline-flex;
@@ -1492,20 +1527,21 @@
   justify-content: center;
   gap: 5px;
   padding: 0 10px;
-  border: 1px solid var(--accent);
+  border: 0;
   border-radius: 7px;
-  background: var(--accent);
-  color: #fff;
+  background: var(--btn-card-bg);
+  color: var(--accent);
   font-family: var(--font);
   font-size: var(--text-sm);
   font-weight: var(--weight-medium);
   white-space: nowrap;
   cursor: pointer;
-  transition: background 0.15s ease, border-color 0.15s ease, opacity 0.15s ease;
+  transition: box-shadow 0.15s ease, opacity 0.15s ease;
+  box-shadow: var(--btn-card-shadow);
 }
 
-.resource-primary-button:hover {
-  background: color-mix(in srgb, var(--accent) 88%, #000);
+.resource-primary-button:hover:not(:disabled) {
+  box-shadow: var(--btn-card-shadow-hover);
 }
 
 .resource-primary-button:disabled {
