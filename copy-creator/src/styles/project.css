@@ -29,13 +29,14 @@
   flex-shrink: 0;
 }
 
-/* 分段控件：与侧栏导航同语言（浅灰圆角底 + 激活白卡） */
+/* 分段控件：与侧栏导航同语言（浅灰圆角底 + 激活白卡）。
+   配色走 base.css 的 --seg-* 分段槽令牌，与其他 chip 行共用一套。 */
 .project-switch {
   display: inline-flex;
   gap: 2px;
   padding: 2px;
   border-radius: 9px;
-  background: #F2F2F2;
+  background: var(--seg-track-bg);
 }
 
 .project-switch button {
@@ -57,9 +58,9 @@
 }
 
 .project-switch button.active {
-  background: #FFFFFF;
+  background: var(--seg-item-active-bg);
   color: var(--text-primary);
-  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.10), 0 0 0 0.5px rgba(0, 0, 0, 0.02);
+  box-shadow: var(--seg-item-active-shadow);
 }
 
 /* --- 剧选择器与下拉 --- */
@@ -535,17 +536,7 @@
   object-fit: cover;
 }
 
-/* --- 暗色适配（分段控件底、菜单、头像同色系不区分主题） --- */
-[data-theme="dark"] .project-switch {
-  background: rgba(255, 255, 255, 0.07);
-}
-
-[data-theme="dark"] .project-switch button.active {
-  background: rgba(255, 255, 255, 0.14);
-  color: var(--text-primary);
-  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.30);
-}
-
+/* --- 暗色适配（菜单、头像同色系不区分主题；分段控件配色已由 --seg-* 令牌承担） --- */
 [data-theme="dark"] .project-ep.active {
   background: rgba(255, 255, 255, 0.14);
   box-shadow: 0 2px 8px rgba(0, 0, 0, 0.30);

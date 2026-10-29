@@ -1863,6 +1863,20 @@ input:focus-visible + .selection-checkbox {
   min-height: 240px;
 }
 
+/* ── 分段槽容器：chip 行统一为 iOS 分段控件语言（浅灰槽 + 选中白卡，
+   配色走 base.css 的 --seg-* 令牌）。四个主窗口的分组/类型筛选 chip 行
+   共用；槽内条目样式在各页面文件，径向菜单（radial-menu.css）因自带
+   页边距与分隔线单独成段。 ── */
+.resource-group-scroll,
+.resource-filter-options,
+.clipboard-categories-scroll,
+.groups-scroll {
+  gap: 2px;
+  padding: 2px;
+  border-radius: 9px;
+  background: var(--seg-track-bg);
+}
+
 .resource-new-button,
 .resource-secondary-button {
   min-height: 30px;

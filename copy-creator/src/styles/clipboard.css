@@ -96,14 +96,15 @@
   padding: 2px 0;
 }
 
+/* 槽容器本体（底色/内衬/圆角/间距）由 components.css 的分段槽共享规则承担 */
 .clipboard-categories-scroll {
   display: flex;
   flex-wrap: nowrap;
-  gap: 6px;
   overflow-x: auto;
   flex: 1 1 0%;
   min-width: 0;
   width: 0;
+  scrollbar-width: none;
   -webkit-overflow-scrolling: touch;
 }
 
@@ -136,61 +137,37 @@
 }
 
 .clipboard-categories-scroll::-webkit-scrollbar {
-  height: 3px;
+  display: none;
 }
 
-.clipboard-categories-scroll::-webkit-scrollbar-track {
-  background: transparent;
-}
-
-.clipboard-categories-scroll::-webkit-scrollbar-thumb {
-  background: rgba(0, 0, 0, 0.15);
-  border-radius: 2px;
-}
-
-[data-theme="dark"] .clipboard-categories-scroll::-webkit-scrollbar-thumb {
-  background: rgba(255, 255, 255, 0.2);
-}
-
-/* 类型筛选 chip 与径向菜单同规格（radial-menu.css 的 radial-menu-category-chip）：
-   灰底灰字、黑底白字选中，颜色全部走主题变量。危险操作红系变体见上。 */
+/* 类型筛选 chip：分段槽内条目——透明底灰字，选中浮起白卡；颜色全部走
+   主题变量。危险操作红系变体见上。 */
 .category-chip {
   display: inline-flex;
   flex-shrink: 0;
-  min-height: 30px;
+  height: 28px;
   align-items: center;
   box-sizing: border-box;
-  padding: 0 14px;
-  border-radius: 6px;
-  border: 0.5px solid var(--separator);
-  background: var(--chip-bg);
+  padding: 0 13px;
+  border-radius: 7px;
+  border: 0;
+  background: transparent;
   color: var(--text-secondary);
   font-size: var(--text-sm);
   font-weight: var(--weight-medium);
   cursor: pointer;
-  transition: all 0.15s cubic-bezier(0.22, 1, 0.36, 1);
+  transition: background 0.15s ease, color 0.15s ease, box-shadow 0.15s ease;
   white-space: nowrap;
 }
 
 .category-chip:hover {
-  background: var(--chip-hover-bg);
-  border-color: rgba(0, 0, 0, 0.1);
+  color: var(--text-primary);
 }
 
 .category-chip.active {
-  background: #333;
-  color: white;
-  border-color: #333;
-}
-
-.category-chip:active {
-  transform: scale(0.95);
-}
-
-[data-theme="dark"] .category-chip.active {
-  background: rgba(255, 255, 255, 0.18);
-  color: #fff;
-  border-color: rgba(255, 255, 255, 0.25);
+  background: var(--seg-item-active-bg);
+  color: var(--text-primary);
+  box-shadow: var(--seg-item-active-shadow);
 }
 
 .noti-type-label {

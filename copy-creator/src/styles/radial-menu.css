@@ -136,87 +136,87 @@ html {
   height: 18px;
 }
 
-/* --- Categories --- */
+/* --- Categories：分段槽（浅灰槽 + 选中白卡，配色走 base.css 的 --seg-* 令牌） --- */
 .radial-menu-categories {
   display: flex;
-  gap: 8px;
-  padding: 12px 16px;
+  gap: 2px;
+  margin: 10px 16px 0;
+  padding: 2px;
+  border-radius: 9px;
+  background: var(--seg-track-bg);
   overflow-x: auto;
   overflow-y: hidden;
   flex-shrink: 0;
-  border-bottom: 0.5px solid var(--separator);
+  scrollbar-width: none;
 }
 
 .radial-menu-categories::-webkit-scrollbar {
-  height: 0;
+  display: none;
 }
 
 .radial-menu-category-chip {
   position: relative;
   display: inline-flex;
   flex-shrink: 0;
-  min-height: 30px;
+  height: 28px;
   align-items: center;
   justify-content: center;
   box-sizing: border-box;
-  padding: 6px 14px;
-  border-radius: 6px;
-  border: 0.5px solid var(--separator);
-  background: var(--chip-bg);
+  padding: 0 13px;
+  border-radius: 7px;
+  border: 0;
+  background: transparent;
   color: var(--text-secondary);
   font-family: var(--font);
   font-size: var(--text-sm);
   font-weight: var(--weight-medium);
   line-height: 1.2;
   cursor: pointer;
-  transition: all 0.15s cubic-bezier(0.22, 1, 0.36, 1);
+  transition: background 0.15s ease, color 0.15s ease, box-shadow 0.15s ease;
   white-space: nowrap;
   overflow: hidden;
 }
 
 .radial-menu-category-chip:hover {
-  background: var(--chip-hover-bg);
-  border-color: rgba(0, 0, 0, 0.1);
+  color: var(--text-primary);
 }
 
 .radial-menu-category-chip.active {
-  background: #333;
-  color: white;
-  border-color: #333;
+  background: var(--seg-item-active-bg);
+  color: var(--text-primary);
+  box-shadow: var(--seg-item-active-shadow);
 }
 
+/* 带子分组的组合 chip：主按钮 + ▾ 同处一张卡，选中整卡浮起白卡。 */
 .radial-menu-resource-group-control {
   display: inline-flex;
-  min-height: 30px;
+  height: 28px;
   flex: 0 0 auto;
   align-items: stretch;
   overflow: hidden;
-  border: 0.5px solid var(--separator);
-  border-radius: 6px;
-  background: var(--chip-bg);
+  border: 0;
+  border-radius: 7px;
+  background: transparent;
   color: var(--text-secondary);
 }
 
 .radial-menu-resource-group-control:hover {
-  border-color: rgba(0, 0, 0, 0.1);
-  background: var(--chip-hover-bg);
   color: var(--text-primary);
 }
 
 .radial-menu-resource-group-control.active {
-  border-color: #333;
-  background: #333;
-  color: #fff;
+  background: var(--seg-item-active-bg);
+  color: var(--text-primary);
+  box-shadow: var(--seg-item-active-shadow);
 }
 
 .radial-menu-resource-group-main {
   display: inline-flex;
   min-width: 0;
   max-width: 160px;
-  min-height: 29px;
   flex: 1 1 auto;
   align-items: center;
-  padding: 0 10px;
+  padding: 0 4px 0 13px;
   border: 0;
   background: transparent;
   color: inherit;
@@ -238,21 +238,19 @@ html {
 
 .radial-menu-resource-group-chevron {
   display: inline-flex;
-  width: 27px;
-  min-height: 29px;
-  flex: 0 0 27px;
+  width: 22px;
+  flex: 0 0 22px;
   align-items: center;
   justify-content: center;
   padding: 0;
   border: 0;
-  border-left: 1px solid var(--separator);
   background: transparent;
   color: inherit;
   cursor: pointer;
 }
 
 .radial-menu-resource-group-chevron:hover {
-  background: rgba(0, 0, 0, 0.06);
+  background: var(--chip-bg);
 }
 
 .radial-menu-resource-group-chevron svg {
@@ -263,14 +261,6 @@ html {
 
 .radial-menu-resource-group-control.open .radial-menu-resource-group-chevron svg {
   transform: rotate(180deg);
-}
-
-.radial-menu-resource-group-control.active .radial-menu-resource-group-chevron {
-  border-left-color: rgba(255, 255, 255, 0.2);
-}
-
-.radial-menu-resource-group-control.active .radial-menu-resource-group-chevron:hover {
-  background: rgba(255, 255, 255, 0.08);
 }
 
 .radial-menu-resource-group-main:focus-visible,
@@ -334,33 +324,7 @@ html {
   white-space: nowrap;
 }
 
-[data-theme="dark"] .radial-menu-category-chip {
-  background: rgba(255, 255, 255, 0.06);
-  border-color: rgba(255, 255, 255, 0.08);
-  color: rgba(255, 255, 255, 0.6);
-}
-
-[data-theme="dark"] .radial-menu-category-chip.active {
-  background: rgba(255, 255, 255, 0.18);
-  color: #fff;
-  border-color: rgba(255, 255, 255, 0.25);
-}
-
-[data-theme="dark"] .radial-menu-resource-group-control {
-  background: rgba(255, 255, 255, 0.06);
-  border-color: rgba(255, 255, 255, 0.08);
-  color: rgba(255, 255, 255, 0.6);
-}
-
-[data-theme="dark"] .radial-menu-resource-group-control.active {
-  background: rgba(255, 255, 255, 0.18);
-  border-color: rgba(255, 255, 255, 0.25);
-  color: #fff;
-}
-
-[data-theme="dark"] .radial-menu-resource-group-chevron {
-  border-left-color: rgba(255, 255, 255, 0.12);
-}
+/* 分类 chip 与组合 chip 的暗色适配由 --seg-* 分段槽令牌承担，无需单独覆盖。 */
 
 [data-theme="dark"] .radial-menu-resource-group-dropdown {
   border-color: rgba(255, 255, 255, 0.14);

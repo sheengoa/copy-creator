@@ -175,79 +175,54 @@
   display: flex;
   min-width: 0;
   align-items: center;
-  gap: 6px;
+  gap: 8px;
   flex-shrink: 0;
 }
 
+/* 槽容器本体（底色/内衬/圆角/间距）由 components.css 的分段槽共享规则承担 */
 .resource-group-scroll {
   display: flex;
   min-width: 0;
   width: 0;
   flex: 1 1 auto;
-  gap: 6px;
   overflow-x: auto;
-  padding: 2px 0;
+  scrollbar-width: none;
   -webkit-overflow-scrolling: touch;
 }
 
 .resource-group-scroll::-webkit-scrollbar {
-  height: 3px;
+  display: none;
 }
 
-.resource-group-scroll::-webkit-scrollbar-track {
-  background: transparent;
-}
-
-.resource-group-scroll::-webkit-scrollbar-thumb {
-  border-radius: 2px;
-  background: rgba(0, 0, 0, 0.14);
-}
-
-[data-theme="dark"] .resource-group-scroll::-webkit-scrollbar-thumb {
-  background: rgba(255, 255, 255, 0.18);
-}
-
-/* 分组 chip 与径向菜单同规格（radial-menu.css 的 radial-menu-category-chip）：
-   灰底灰字、黑底白字选中，颜色全部走主题变量。 */
+/* 分组 chip：分段槽内条目——透明底灰字，选中浮起白卡；颜色全部走主题变量。 */
 .resource-group-chip {
   display: inline-flex;
-  min-height: 30px;
+  height: 28px;
   flex: 0 0 auto;
   align-items: center;
   gap: 6px;
   box-sizing: border-box;
-  padding: 0 12px;
-  border: 0.5px solid var(--separator);
-  border-radius: 6px;
-  background: var(--chip-bg);
+  padding: 0 13px;
+  border: 0;
+  border-radius: 7px;
+  background: transparent;
   color: var(--text-secondary);
   font-family: var(--font);
   font-size: var(--text-sm);
   font-weight: var(--weight-medium);
   white-space: nowrap;
   cursor: pointer;
-  transition: all 0.15s cubic-bezier(0.22, 1, 0.36, 1);
+  transition: background 0.15s ease, color 0.15s ease, box-shadow 0.15s ease;
 }
 
 .resource-group-chip:hover {
-  background: var(--chip-hover-bg);
-  border-color: rgba(0, 0, 0, 0.1);
+  color: var(--text-primary);
 }
 
 .resource-group-chip.active {
-  border-color: #333;
-  background: #333;
-  color: #fff;
-}
-
-[data-theme="dark"] .resource-group-chip.active {
-  background: rgba(255, 255, 255, 0.18);
-  color: #fff;
-  border-color: rgba(255, 255, 255, 0.25);
-}
-
-.resource-group-chip:active {
-  transform: scale(0.97);
+  background: var(--seg-item-active-bg);
+  color: var(--text-primary);
+  box-shadow: var(--seg-item-active-shadow);
 }
 
 /* ── 分组 chip 拖拽（与快捷输入区分组拖拽同一套观感） ── */
@@ -258,14 +233,14 @@
 }
 
 .resource-group-chip.drag-overlay-chip {
-  min-height: 30px;
-  padding: 0 12px;
-  border-color: #333;
-  background: #333;
-  color: #fff;
+  height: 28px;
+  padding: 0 13px;
+  border: 0;
+  background: var(--seg-item-active-bg);
+  color: var(--text-primary);
   font-size: var(--text-sm);
   font-weight: var(--weight-medium);
-  box-shadow: 0 6px 18px rgba(0, 0, 0, 0.22);
+  box-shadow: var(--seg-item-active-shadow), 0 6px 18px rgba(0, 0, 0, 0.22);
   cursor: grabbing;
 }
 
@@ -274,49 +249,42 @@
   box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
 }
 
+/* 带子分组的组合 chip：主按钮 + ▾ 同处一张卡，选中整卡浮起白卡。 */
 .resource-group-control {
   display: inline-flex;
-  min-height: 30px;
+  height: 28px;
   flex: 0 0 auto;
   align-items: stretch;
   overflow: hidden;
-  border: 0.5px solid var(--separator);
-  border-radius: 6px;
-  background: var(--chip-bg);
+  border: 0;
+  border-radius: 7px;
+  background: transparent;
   color: var(--text-secondary);
-  transition: all 0.15s cubic-bezier(0.22, 1, 0.36, 1);
+  transition: background 0.15s ease, color 0.15s ease, box-shadow 0.15s ease;
 }
 
 .resource-group-control:hover {
-  background: var(--chip-hover-bg);
-  border-color: rgba(0, 0, 0, 0.1);
+  color: var(--text-primary);
 }
 
 .resource-group-control.active {
-  border-color: #333;
-  background: #333;
-  color: #fff;
-}
-
-[data-theme="dark"] .resource-group-control.active {
-  background: rgba(255, 255, 255, 0.18);
-  color: #fff;
-  border-color: rgba(255, 255, 255, 0.25);
+  background: var(--seg-item-active-bg);
+  color: var(--text-primary);
+  box-shadow: var(--seg-item-active-shadow);
 }
 
 .resource-group-chip-main {
   display: inline-flex;
   min-width: 0;
   max-width: 210px;
-  min-height: 30px;
   flex: 1 1 auto;
   align-items: center;
-  padding: 0 12px;
+  padding: 0 4px 0 13px;
   border: 0;
   background: transparent;
   color: inherit;
   font-family: var(--font);
-  font-size: var(--text-xs);
+  font-size: var(--text-sm);
   font-weight: var(--weight-medium);
   text-align: left;
   white-space: nowrap;
@@ -331,14 +299,12 @@
 
 .resource-group-chevron {
   display: inline-flex;
-  width: 26px;
-  min-height: 30px;
-  flex: 0 0 26px;
+  width: 22px;
+  flex: 0 0 22px;
   align-items: center;
   justify-content: center;
   padding: 0;
   border: 0;
-  border-left: 1px solid var(--separator);
   background: transparent;
   color: inherit;
   cursor: pointer;
@@ -356,14 +322,6 @@
 
 .resource-group-control.open .resource-group-chevron svg {
   transform: rotate(180deg);
-}
-
-.resource-group-control.active .resource-group-chevron {
-  border-left-color: rgba(255, 255, 255, 0.18);
-}
-
-.resource-group-control.active .resource-group-chevron:hover {
-  background: rgba(255, 255, 255, 0.08);
 }
 
 .resource-group-chip:focus-visible,
@@ -411,12 +369,6 @@
   height: 14px;
 }
 
-
-/* 默认态颜色已变量化（--chip-bg/--separator 均带暗色值），无需暗色覆盖；
-   选中态白玻璃规则见上方 [data-theme="dark"] .resource-group-control.active。 */
-[data-theme="dark"] .resource-group-chevron {
-  border-left-color: rgba(255, 255, 255, 0.12);
-}
 
 [data-theme="dark"] .resource-group-control.active .resource-group-chevron {
   border-left-color: rgba(255, 255, 255, 0.2);
@@ -574,52 +526,41 @@
   display: flex;
   min-width: 0;
   flex: 1 1 auto;
-  gap: 6px;
   overflow-x: auto;
-  padding: 2px 0;
+  scrollbar-width: none;
 }
 
 .resource-filter-options::-webkit-scrollbar {
-  height: 3px;
+  display: none;
 }
 
-/* 类型筛选 chip 与分组 chip 同规格（径向菜单样式语言）。 */
+/* 类型筛选 chip 与分组 chip 同规格：分段槽内条目，选中浮起白卡。 */
 .resource-filter-chip {
   display: inline-flex;
-  min-height: 30px;
+  height: 28px;
   align-items: center;
   box-sizing: border-box;
   flex: 0 0 auto;
-  padding: 0 12px;
-  border: 0.5px solid var(--separator);
-  border-radius: 6px;
-  background: var(--chip-bg);
+  padding: 0 13px;
+  border: 0;
+  border-radius: 7px;
+  background: transparent;
   color: var(--text-secondary);
   font-family: var(--font);
   font-size: var(--text-sm);
+  font-weight: var(--weight-medium);
   cursor: pointer;
-  transition: all 0.15s cubic-bezier(0.22, 1, 0.36, 1);
+  transition: background 0.15s ease, color 0.15s ease, box-shadow 0.15s ease;
 }
 
 .resource-filter-chip:hover {
-  border-color: rgba(0, 0, 0, 0.1);
-  background: var(--chip-hover-bg);
+  color: var(--text-primary);
 }
 
 .resource-filter-chip.active {
-  border-color: #333;
-  background: #333;
-  color: white;
-}
-
-.resource-filter-chip:active {
-  transform: scale(0.95);
-}
-
-[data-theme="dark"] .resource-filter-chip.active {
-  background: rgba(255, 255, 255, 0.18);
-  color: #fff;
-  border-color: rgba(255, 255, 255, 0.25);
+  background: var(--seg-item-active-bg);
+  color: var(--text-primary);
+  box-shadow: var(--seg-item-active-shadow);
 }
 
 .resource-sort-control {

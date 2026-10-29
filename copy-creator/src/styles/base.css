@@ -70,6 +70,13 @@
   --card-outer-bg: rgba(0, 0, 0, 0.06);
   --card-inner-bg: rgba(255, 255, 255, 0.78);
   --card-glow: rgba(0, 122, 255, 0.15);
+
+  /* 分段槽（iOS 分段控件语言）：chip 行统一为浅灰槽 + 选中白卡浮起。
+     视图切换（project-switch）与资源/剪切板/快捷输入/径向菜单的分组、
+     类型筛选 chip 行共用，改动时亮暗两套必须同步。 */
+  --seg-track-bg: #F2F2F2;
+  --seg-item-active-bg: #FFFFFF;
+  --seg-item-active-shadow: 0 2px 8px rgba(0, 0, 0, 0.10), 0 0 0 0.5px rgba(0, 0, 0, 0.02);
 }
 
 [data-theme="dark"] {
@@ -109,6 +116,9 @@
   --card-outer-bg: rgba(255, 255, 255, 0.04);
   --card-inner-bg: rgba(255, 255, 255, 0.05);
   --card-glow: rgba(255, 255, 255, 0.15);
+  --seg-track-bg: rgba(255, 255, 255, 0.07);
+  --seg-item-active-bg: rgba(255, 255, 255, 0.14);
+  --seg-item-active-shadow: 0 2px 8px rgba(0, 0, 0, 0.30);
 }
 
 * {
