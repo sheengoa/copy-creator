@@ -1241,8 +1241,14 @@ mod resource_command_tests {
                 |row| Ok((row.get(0)?, row.get(1)?)),
             )
             .unwrap();
-        assert_eq!(image_paths.0, moved_image.to_string_lossy());
-        assert_eq!(image_paths.1, moved_image.to_string_lossy());
+        assert_eq!(
+            slash_normalized(&image_paths.0),
+            slash_normalized(&moved_image.to_string_lossy())
+        );
+        assert_eq!(
+            slash_normalized(&image_paths.1),
+            slash_normalized(&moved_image.to_string_lossy())
+        );
         let video_paths: (String, String) = conn
             .query_row(
                 "SELECT content, resource_path FROM clipboard_records WHERE id = 'video-record'",
@@ -1250,8 +1256,14 @@ mod resource_command_tests {
                 |row| Ok((row.get(0)?, row.get(1)?)),
             )
             .unwrap();
-        assert_eq!(video_paths.0, moved_video.to_string_lossy());
-        assert_eq!(video_paths.1, moved_video.to_string_lossy());
+        assert_eq!(
+            slash_normalized(&video_paths.0),
+            slash_normalized(&moved_video.to_string_lossy())
+        );
+        assert_eq!(
+            slash_normalized(&video_paths.1),
+            slash_normalized(&moved_video.to_string_lossy())
+        );
         cleanup(&root);
     }
 

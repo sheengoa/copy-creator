@@ -531,6 +531,11 @@ pub fn discover_external_resource_files<R: Runtime>(
         by_path.insert(resource_path_key(Path::new(&resource_path)), id);
     }
     drop(stmt);
+    // 本批到达先展开成文件清单（目录递归收内容），并统计同名出现次数：
+    // 同批同名多候选时按名复活是一对一猜测，与 relocate「同名多候选保持
+    // 缺失」的裁决相抵触，会把刚清退的旧记录错链给先到的候选。歧义文件
+    // 一律按新文件补建，旧记录留在回收站可手动恢复。
+    let mut batch_files: Vec<PathBuf> = Vec::new();
     for path in paths {
         if !path.starts_with(&root) {
             continue;
@@ -542,16 +547,35 @@ pub fn discover_external_resource_files<R: Runtime>(
             if path_inside_ignored_dir(path) {
                 continue;
             }
-            for file in collect_resource_files_under(path) {
-                insert_external_resource_file(&conn, &mut by_path, &root, &roots, &file, &now, now_ms);
-            }
+            batch_files.extend(collect_resource_files_under(path));
             continue;
         }
-        insert_external_resource_file(&conn, &mut by_path, &root, &roots, path, &now, now_ms);
+        batch_files.push(path.to_path_buf());
+    }
+    let mut name_counts: HashMap<String, usize> = HashMap::new();
+    for file in &batch_files {
+        if let Some(name) = file.file_name() {
+            *name_counts
+                .entry(name.to_string_lossy().to_lowercase())
+                .or_default() += 1;
+        }
+    }
+    for file in &batch_files {
+        insert_external_resource_file(
+            &conn,
+            &mut by_path,
+            &root,
+            &roots,
+            file,
+            &now,
+            now_ms,
+            &name_counts,
+        );
     }
 }
 
 /// 单个外部文件按发现时间补建入库；已存在记录、库外路径与忽略文件跳过。
+/// name_counts 里同名出现多次的文件跳过按名复活（见 discover 处注释）。
 fn insert_external_resource_file(
     conn: &Connection,
     by_path: &mut HashMap<PathBuf, String>,
@@ -560,6 +584,7 @@ fn insert_external_resource_file(
     path: &Path,
     now: &str,
     now_ms: i64,
+    name_counts: &HashMap<String, usize>,
 ) {
     if !path.is_file() || !path.starts_with(root) {
         return;
@@ -574,7 +599,11 @@ fn insert_external_resource_file(
     if by_path.contains_key(&resource_path_key(path)) {
         return;
     }
-    if restore_trash_record_matching_name(conn, root, roots, path) {
+    let ambiguous = path
+        .file_name()
+        .and_then(|name| name_counts.get(&name.to_string_lossy().to_lowercase()))
+        .is_some_and(|&count| count > 1);
+    if !ambiguous && restore_trash_record_matching_name(conn, root, roots, path) {
         by_path.insert(resource_path_key(path), resource_file_id(path));
         return;
     }
