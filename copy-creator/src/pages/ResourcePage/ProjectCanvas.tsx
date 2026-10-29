@@ -136,6 +136,14 @@ const parsePromptPhs = (raw: string): PromptPh[] => {
   const list = JSON.parse(raw) as PromptPh[];
   return Array.isArray(list) ? list.filter((item) => item && typeof item.id === "string") : [];
 };
+// 素材占位节点已整体移除：加载暂存线时顺手过滤历史遗留的占位来源，
+// 画布层不再出现该类线（存储直清见组件内的存量清理 effect）。
+const parsePendingLinks = (raw: string): PendingLink[] => {
+  const parsed = JSON.parse(raw) as PendingLink[];
+  return Array.isArray(parsed)
+    ? parsed.filter((l) => l && typeof l.fromKey === "string" && !l.fromKey.startsWith("placeholder:"))
+    : [];
+};
 // 线段相交（同横坐标单调判定，经典叉积法）——切线的扫过判定用。
 const segsIntersect = (
   a1: { x: number; y: number }, a2: { x: number; y: number },
@@ -946,7 +954,7 @@ export default function ProjectCanvas({
   // 先记在画布层（localStorage 按集）；占位加载实体后转正为 node_link；
   // 提示词/剧本纸片不转正（画布层即最终形态）。
   const [pendingLinks, , persistPendingLinks] = usePerEpisodeStorage<PendingLink[]>(
-    episodeId, "pendinglinks", EMPTY_PENDING_LINKS,
+    episodeId, "pendinglinks", EMPTY_PENDING_LINKS, parsePendingLinks,
   );
   const dropPendingLinksOf = useCallback(
     (fromKey: string) => persistPendingLinks(pendingLinks.filter((l) => l.fromKey !== fromKey)),
@@ -959,12 +967,22 @@ export default function ProjectCanvas({
   const assetLinksCleanedRef = useRef<string | null>(null);
   useEffect(() => {
     if (!episodeId) return;
-    // 素材占位连线画布层剔除：从「已加载」的暂存线列表过滤（列表为空时
-    // 本分支不触发，不会把未加载完的空档误写成空）。
-    if (pendingLinks.some((l) => l.fromKey.startsWith("placeholder:"))) {
-      persistPendingLinks(pendingLinks.filter((l) => !l.fromKey.startsWith("placeholder:")));
+    // 素材占位暂存线：直改存储（不经 state——切集首帧 state 可能还是
+    // 上一集的旧值，写回会污染本集）；加载侧另有 parse 过滤兜底。
+    try {
+      const key = `project_canvas_pendinglinks_${episodeId}`;
+      const raw = window.localStorage.getItem(key);
+      if (raw) {
+        const parsed = JSON.parse(raw) as PendingLink[];
+        if (Array.isArray(parsed)) {
+          const kept = parsed.filter((l) => l && !String(l.fromKey ?? "").startsWith("placeholder:"));
+          if (kept.length !== parsed.length) window.localStorage.setItem(key, JSON.stringify(kept));
+        }
+      }
+    } catch {
+      // 存储不可用：无碍，加载侧 parse 已兜底。
     }
-  }, [episodeId, pendingLinks, persistPendingLinks]);
+  }, [episodeId]);
   useEffect(() => {
     if (!episodeId || !overview) return;
     if (assetLinksCleanedRef.current === episodeId) return;
@@ -1376,10 +1394,10 @@ export default function ProjectCanvas({
   }, [segments, segPos, view.scale, setView, saveView]);
 
   // ── 默认工作流模板：首次进入某集画布且集内尚无任何工作流数据时，
-  // 自动铺一套已连接骨架——两个空片段（片段→成片是隐式聚合线），已
-  // 关联的角色/场景/道具接入片段一的对应口；剧本挂接后自动连提示词
-  // 口。用户在其上双击填充、自由增删连线。标记落 localStorage，此后
-  // 即使删光片段也不再重建。
+  // 自动铺一套连线完整的骨架——两个空片段，每个片段各配 5 个空白占位
+  // 节点（角色/场景/道具/提示词/剧本）并连好对应输入口，「其他」口留空；
+  // 片段→成片是隐式聚合线。占位节点双击填充具体内容，用户在其上自由
+  // 增删连线。标记落 localStorage，此后即使删光片段也不再重建。 ──
   const templateFlagKey = `project_canvas_templated_${episodeId}`;
   useEffect(() => {
     if (!episodeId || !overview) return;
@@ -1399,16 +1417,68 @@ export default function ProjectCanvas({
       return; // 已有工作流数据的老集：保持原样。
     }
     void (async () => {
-      const first = await addSegment(episodeId);
-      if (!first) return;
-      const jobs: Promise<unknown>[] = [];
-      overview.characters.slice(0, 2).forEach((c) => jobs.push(linkNode(episodeId, "character", c.id, first.id, "character")));
-      overview.locations.slice(0, 2).forEach((l) => jobs.push(linkNode(episodeId, "location", l.id, first.id, "location")));
-      overview.props.slice(0, 2).forEach((p) => jobs.push(linkNode(episodeId, "prop", p.id, first.id, "prop")));
-      await Promise.all(jobs);
-      await addSegment(episodeId);
+      const created: string[] = [];
+      for (let i = 0; i < 2; i++) {
+        const segment = await addSegment(episodeId);
+        if (segment) created.push(segment.id);
+      }
+      if (created.length === 0) return;
+      // 绕开加载时序竞争：切集首帧的 state 可能还是上一集的旧值（按集
+      // 加载 effect 与本 effect 同批提交），直接读存储里本集的当前列表，
+      // 模板内容拼在其后一次性落盘（同 tick 多次追加会互相覆盖）。
+      const readStored = <T,>(name: string): T | null => {
+        try {
+          const raw = window.localStorage.getItem(`project_canvas_${name}_${episodeId}`);
+          return raw == null ? null : (JSON.parse(raw) as T);
+        } catch {
+          return null;
+        }
+      };
+      const listOf = <T,>(value: unknown): T[] => (Array.isArray(value) ? (value.filter((item) => item && typeof item === "object") as T[]) : []);
+      const offsetsRaw = readStored<Record<string, Pos>>("infonodes");
+      const newEphs: EntityPh[] = [];
+      const newPrompts: PromptPh[] = [];
+      const newScripts: ScriptPh[] = [];
+      const scriptOffsets: Record<string, Pos> = {};
+      const pendings: PendingLink[] = [];
+      // 片段默认列位与 segPos effect 同基准（成片节点默认挂 worldW+80）。
+      const segX = layout.worldW + 80 - SEG_W - 160;
+      created.forEach((segId, i) => {
+        const segY = Math.max(WORLD_MARGIN, 110 + i * 260);
+        // 片段左侧三列两行：角色/场景/道具靠片段，提示词/剧本纸片在最左
+        // （纸片更宽）。
+        const c0 = segX - 40 - INFO_W;
+        const c1 = c0 - 24 - INFO_W;
+        const c2 = c1 - 24 - SCRIPT_W;
+        const r0 = segY - 140;
+        const r1 = r0 + INFO_H + 28;
+        const r2 = r1 + INFO_H + 28;
+        const charId = `eph${Date.now()}${Math.floor(Math.random() * 1e4)}a${i}`;
+        const locId = `eph${Date.now()}${Math.floor(Math.random() * 1e4)}b${i}`;
+        const propId = `eph${Date.now()}${Math.floor(Math.random() * 1e4)}c${i}`;
+        const promptId = `pph${Date.now()}${Math.floor(Math.random() * 1e4)}${i}`;
+        const scriptId = `sph${Date.now()}${Math.floor(Math.random() * 1e4)}${i}`;
+        newEphs.push({ id: charId, kind: "character", x: c0, y: r0 });
+        newEphs.push({ id: locId, kind: "location", x: c1, y: r0 });
+        newEphs.push({ id: propId, kind: "prop", x: c0, y: r1 });
+        newPrompts.push({ id: promptId, promptId: "", x: c2, y: r1 });
+        newScripts.push({ id: scriptId, path: "" });
+        scriptOffsets[`script:${scriptId}`] = { x: c2, y: r2 };
+        pendings.push(
+          { fromKey: `eph:${charId}`, toSegmentId: segId, toPort: "character" },
+          { fromKey: `eph:${locId}`, toSegmentId: segId, toPort: "location" },
+          { fromKey: `eph:${propId}`, toSegmentId: segId, toPort: "prop" },
+          { fromKey: `prompt:${promptId}`, toSegmentId: segId, toPort: "prompt" },
+          { fromKey: `script:${scriptId}`, toSegmentId: segId, toPort: "script" },
+        );
+      });
+      persistEntityPhs([...listOf<EntityPh>(readStored<EntityPh[]>("entityph")), ...newEphs]);
+      persistPromptPhs([...listOf<PromptPh>(readStored<PromptPh[]>("promptphs")), ...newPrompts]);
+      persistScriptPhs([...listOf<ScriptPh>(readStored<ScriptPh[]>("scriptphs")), ...newScripts]);
+      persistInfoOffsets({ ...(offsetsRaw && typeof offsetsRaw === "object" && !Array.isArray(offsetsRaw) ? offsetsRaw : {}), ...scriptOffsets });
+      persistPendingLinks([...listOf<PendingLink>(readStored<PendingLink[]>("pendinglinks")), ...pendings]);
     })();
-  }, [episodeId, overview, addSegment, linkNode, templateFlagKey]);
+  }, [episodeId, overview, addSegment, layout.worldW, persistEntityPhs, persistPromptPhs, persistScriptPhs, persistInfoOffsets, persistPendingLinks, templateFlagKey]);
 
   // 剧本节点定位（视口居中到剧本纸片；纸片可被拖离资料框，用覆盖位置）。
   // key 缺省为主剧本节点，缺项提醒定位空纸片时传纸片 key。
