@@ -575,34 +575,6 @@ fn write_file_list(paths: &[std::path::PathBuf]) -> Result<(), String> {
     Ok(())
 }
 
-/// 混合批量粘贴的剪贴板写入：文件列表与合并文本在一次剪贴板事务中
-/// 同时提供，由目标应用自取所需格式。Windows 用一次 OpenClipboard
-/// 会话写入 CF_HDROP + CF_UNICODETEXT；Linux 侧 arboard 每次 set 都
-/// 整体替换剪贴板、无多格式事务能力，退化为文件列表优先（有文件时
-/// 忽略文本，与文件管理器复制文件时目标二选一的现状一致）。
-fn write_clipboard_mixed(paths: &[std::path::PathBuf], text: &str) -> Result<(), String> {
-    #[cfg(target_os = "windows")]
-    {
-        let normalized = normalize_clipboard_paths(paths);
-        let mut formats = vec![(CF_HDROP, hdrop_payload(&normalized))];
-        if !text.is_empty() {
-            formats.push((CF_UNICODETEXT, utf16_double_nul_payload(text)));
-        }
-        set_clipboard_windows(&formats)?;
-        log::info!(
-            "paste_mixed: wrote clipboard: {} file(s) + {} chars (CF_HDROP+CF_UNICODETEXT)",
-            paths.len(),
-            text.chars().count()
-        );
-        Ok(())
-    }
-    #[cfg(not(target_os = "windows"))]
-    {
-        let _ = text;
-        write_file_list(paths)
-    }
-}
-
 /// CF_HDROP 的线格式：DROPFILES 头 + 双 NUL 结尾的 UTF-16 路径表。
 #[cfg(target_os = "windows")]
 fn hdrop_payload(paths: &[std::path::PathBuf]) -> Vec<u8> {
@@ -646,23 +618,8 @@ fn hdrop_payload(paths: &[std::path::PathBuf]) -> Vec<u8> {
     data
 }
 
-/// CF_UNICODETEXT 的线格式：UTF-16LE + 双 NUL 结尾。
-#[cfg(target_os = "windows")]
-fn utf16_double_nul_payload(text: &str) -> Vec<u8> {
-    use std::os::windows::ffi::OsStrExt;
-    let mut data: Vec<u8> = Vec::new();
-    for unit in std::ffi::OsStr::new(text).encode_wide() {
-        data.extend_from_slice(&unit.to_le_bytes());
-    }
-    // 双 NUL（两个 u16）：CF_UNICODETEXT 的字符串表终止约定。
-    data.extend_from_slice(&[0, 0, 0, 0]);
-    data
-}
-
 #[cfg(target_os = "windows")]
 const CF_HDROP: u32 = 15;
-#[cfg(target_os = "windows")]
-const CF_UNICODETEXT: u32 = 13;
 
 /// 标准 Win32 剪贴板写入：一次 OpenClipboard 会话内 EmptyClipboard 后
 /// 依序放入多个 (format, bytes)。SetClipboardData 成功后系统接管内存，
@@ -1336,13 +1293,21 @@ pub fn paste_files(app: AppHandle, paths: Vec<String>) -> Result<(), String> {
     Ok(())
 }
 
-/// 混合批量粘贴（径向菜单多选）：文件列表与合并文本在一次剪贴板事务中
-/// 一并提供后模拟一次 Ctrl+V，由目标应用自取所需格式（资源管理器/聊天
-/// 窗口取文件列表，文本输入框取文本）。text 为空时等价 paste_files。
+/// 混合批量粘贴（径向菜单多选）：文件与文本混选时任何目标应用都只会
+/// 认领剪切板中的一种格式——双格式一次贴在文本框里文件消失、在聊天
+/// 窗口里文本消失，用户实测「贴不出去」。改为串行两贴：先把整个文件
+/// 列表作为一次文件粘贴落地（不认文件的目标应用自然忽略），再把合并
+/// 文本作为一次文本粘贴落地。两次注入在同一后台线程内串行，共享同一
+/// 个 PasteGuard，保证第二次不会被 PASTING 早退吞掉。text 为空时等价
+/// paste_files。
 #[tauri::command]
-pub fn paste_mixed(app: AppHandle, paths: Vec<String>, text: String) -> Result<(), String> {
+pub fn paste_files_then_text(
+    app: AppHandle,
+    paths: Vec<String>,
+    text: String,
+) -> Result<(), String> {
     log::info!(
-        "[paste] paste_mixed called — {} file(s) + {} chars (普通粘贴)",
+        "[paste] paste_files_then_text called — {} file(s) + {} chars (普通粘贴)",
         paths.len(),
         text.chars().count()
     );
@@ -1356,7 +1321,7 @@ pub fn paste_mixed(app: AppHandle, paths: Vec<String>, text: String) -> Result<(
     let mut resolved = Vec::with_capacity(paths.len());
     for path in &paths {
         if std::fs::metadata(path).is_err() {
-            log::error!("paste_mixed: file not found: {path}");
+            log::error!("paste_files_then_text: file not found: {path}");
             PASTING.store(false, Ordering::SeqCst);
             return Err(format!("File not found: {path}"));
         }
@@ -1364,8 +1329,8 @@ pub fn paste_mixed(app: AppHandle, paths: Vec<String>, text: String) -> Result<(
             std::fs::canonicalize(path).unwrap_or_else(|_| std::path::PathBuf::from(path)),
         );
     }
-    if let Err(e) = write_clipboard_mixed(&resolved, &text) {
-        log::error!("paste_mixed: {e}");
+    if let Err(e) = write_file_list(&resolved) {
+        log::error!("paste_files_then_text: {e}");
         PASTING.store(false, Ordering::SeqCst);
         return Err(e);
     }
@@ -1375,6 +1340,17 @@ pub fn paste_mixed(app: AppHandle, paths: Vec<String>, text: String) -> Result<(
         let _guard = PasteGuard;
 
         crate::clipboard::sync_monitor_cache(&handle);
+        paste_with_defocus(&handle, PasteShortcut::CtrlV).ok();
+
+        if text.is_empty() {
+            return;
+        }
+        if let Err(e) = handle.clipboard().write_text(text.clone()) {
+            log::error!("paste_files_then_text: 写入文本剪切板失败: {e}");
+            return;
+        }
+        crate::clipboard::sync_monitor_text(&text);
+        log::info!("[paste] paste_files_then_text: 文件粘贴已注入，继续注入合并文本");
         paste_with_defocus(&handle, PasteShortcut::CtrlV).ok();
     });
 
@@ -1481,11 +1457,11 @@ mod tests {
         assert!(error.contains("附件数量"));
     }
 
-    // ── 混合批量粘贴的剪贴板线格式（Windows 专属编码，随 Windows CI 跑） ──
+    // ── 文件列表粘贴的剪贴板线格式（Windows 专属编码，随 Windows CI 跑） ──
 
     #[cfg(target_os = "windows")]
     mod clipboard_payloads {
-        use super::super::{hdrop_payload, utf16_double_nul_payload};
+        use super::super::hdrop_payload;
 
         #[test]
         fn hdrop_payload_keeps_dropfiles_header_and_double_nul_terminator() {
@@ -1512,17 +1488,6 @@ mod tests {
             // 每条路径各一个 NUL 结尾，表尾再补一个 NUL
             assert_eq!(tail.len(), single * 2 + 2);
             assert_eq!(&tail[tail.len() - 2..], &[0, 0]);
-        }
-
-        #[test]
-        fn utf16_payload_encodes_non_ascii_with_double_nul_terminator() {
-            let payload = utf16_double_nul_payload("文本\n两行");
-
-            let text_units = "文本\n两行".encode_utf16().count();
-            assert_eq!(payload.len(), text_units * 2 + 4);
-            assert_eq!(&payload[payload.len() - 4..], &[0, 0, 0, 0]);
-            // 中文首字「文」= U+6587，小端编码
-            assert_eq!(&payload[0..2], &0x6587u16.to_le_bytes());
         }
     }
 }
