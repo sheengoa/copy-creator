@@ -3088,6 +3088,16 @@ export default function ProjectCanvas({
                   void linkNode(episodeId, nextSource.kind, nextSource.id, row.to_segment, row.to_port);
                 });
               });
+            } else if (!source && !targetGroup && !pendSameAsOld) {
+              // 无库身份目标（空白资料占位/素材占位）：落不了正式 node_link，
+              // 但暂存线是画布层状态、fromKey 任意——整组改插到新目标；
+              // 正式线保持原样（lifted 已清，渲染自动恢复）。
+              if (lifted.pendings.length) {
+                persistPendingLinks([
+                  ...pendingLinks.filter((l) => !lifted.pendings.includes(l)),
+                  ...lifted.pendings.map((p) => ({ fromKey: targetKey, toSegmentId: p.toSegmentId, toPort: p.toPort })),
+                ]);
+              }
             }
           } else if (wireRelease === "picker" && lifted) {
             // 松手在画布内才谈「空白弹菜单」；出界（窗外松手）一律放回。
