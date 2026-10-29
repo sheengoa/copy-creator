@@ -527,14 +527,12 @@ pub fn diagnose_paste_environment() {
 
 // ── File-paste helpers ──────────────────────────────────────────
 
-/// Write a file list to the system clipboard so Linux apps receive
-/// `text/uri-list`, not a plain-text path.
-fn write_file_list(paths: &[std::path::PathBuf]) -> Result<(), String> {
-    // Windows 资源管理器对 CF_HDROP 里的 `\\?\` 扩展路径前缀兼容性差
-    // （粘贴菜单/目标窗口直接忽略），这里统一转回常规路径；UNC 设备
-    // 路径（\\?\UNC\host\share）还原为 \\host\share。Linux 分支无此
-    // 前缀，不受影响。
-    let normalized: Vec<std::path::PathBuf> = paths
+/// 剪贴板里的路径统一转回常规形式：Windows 资源管理器对 CF_HDROP 里的
+/// `\\?\` 扩展路径前缀兼容性差（粘贴菜单/目标窗口直接忽略）；UNC 设备
+/// 路径（\\?\UNC\host\share）还原为 \\host\share。Linux 分支无此前缀，
+/// 不受影响。
+fn normalize_clipboard_paths(paths: &[std::path::PathBuf]) -> Vec<std::path::PathBuf> {
+    paths
         .iter()
         .map(|path| {
             let raw = path.to_string_lossy();
@@ -546,14 +544,20 @@ fn write_file_list(paths: &[std::path::PathBuf]) -> Result<(), String> {
                 path.clone()
             }
         })
-        .collect();
+        .collect()
+}
+
+/// Write a file list to the system clipboard so Linux apps receive
+/// `text/uri-list`, not a plain-text path.
+fn write_file_list(paths: &[std::path::PathBuf]) -> Result<(), String> {
+    let normalized = normalize_clipboard_paths(paths);
 
     // Windows 必须走标准 Win32 序列（EmptyClipboard + CF_HDROP）：
     // arboard 的 file_list 不先清空剪贴板，残留的旧文本格式会让
     // 资源管理器走文本粘贴分支，文件永远粘不进去（实测踩坑）。
     #[cfg(target_os = "windows")]
     {
-        write_file_list_windows(&normalized)?;
+        set_clipboard_windows(&[(CF_HDROP, hdrop_payload(&normalized))])?;
     }
     #[cfg(not(target_os = "windows"))]
     {
@@ -571,14 +575,38 @@ fn write_file_list(paths: &[std::path::PathBuf]) -> Result<(), String> {
     Ok(())
 }
 
-/// 标准 Win32 CF_HDROP 写入：DROPFILES 结构 + 双 NUL 结尾的宽字符路径表。
-#[cfg(target_os = "windows")]
-fn write_file_list_windows(paths: &[std::path::PathBuf]) -> Result<(), String> {
-    use std::os::windows::ffi::OsStrExt;
+/// 混合批量粘贴的剪贴板写入：文件列表与合并文本在一次剪贴板事务中
+/// 同时提供，由目标应用自取所需格式。Windows 用一次 OpenClipboard
+/// 会话写入 CF_HDROP + CF_UNICODETEXT；Linux 侧 arboard 每次 set 都
+/// 整体替换剪贴板、无多格式事务能力，退化为文件列表优先（有文件时
+/// 忽略文本，与文件管理器复制文件时目标二选一的现状一致）。
+fn write_clipboard_mixed(paths: &[std::path::PathBuf], text: &str) -> Result<(), String> {
+    #[cfg(target_os = "windows")]
+    {
+        let normalized = normalize_clipboard_paths(paths);
+        let mut formats = vec![(CF_HDROP, hdrop_payload(&normalized))];
+        if !text.is_empty() {
+            formats.push((CF_UNICODETEXT, utf16_double_nul_payload(text)));
+        }
+        set_clipboard_windows(&formats)?;
+        log::info!(
+            "paste_mixed: wrote clipboard: {} file(s) + {} chars (CF_HDROP+CF_UNICODETEXT)",
+            paths.len(),
+            text.chars().count()
+        );
+        Ok(())
+    }
+    #[cfg(not(target_os = "windows"))]
+    {
+        let _ = text;
+        write_file_list(paths)
+    }
+}
 
-    const CF_HDROP: u32 = 15;
-    const GMEM_MOVEABLE: u32 = 0x0002;
-    const GMEM_ZEROINIT: u32 = 0x0040;
+/// CF_HDROP 的线格式：DROPFILES 头 + 双 NUL 结尾的 UTF-16 路径表。
+#[cfg(target_os = "windows")]
+fn hdrop_payload(paths: &[std::path::PathBuf]) -> Vec<u8> {
+    use std::os::windows::ffi::OsStrExt;
 
     #[repr(C)]
     struct Point {
@@ -592,21 +620,6 @@ fn write_file_list_windows(paths: &[std::path::PathBuf]) -> Result<(), String> {
         pt: Point,
         f_nc: u32,
         f_wide: u32,
-    }
-
-    #[link(name = "user32")]
-    unsafe extern "system" {
-        fn OpenClipboard(hwnd_new_owner: *mut core::ffi::c_void) -> i32;
-        fn EmptyClipboard() -> i32;
-        fn SetClipboardData(format: u32, data: *mut core::ffi::c_void) -> *mut core::ffi::c_void;
-        fn CloseClipboard() -> i32;
-    }
-    #[link(name = "kernel32")]
-    unsafe extern "system" {
-        fn GlobalAlloc(flags: u32, bytes: usize) -> *mut core::ffi::c_void;
-        fn GlobalLock(h_mem: *mut core::ffi::c_void) -> *mut u8;
-        fn GlobalUnlock(h_mem: *mut core::ffi::c_void) -> i32;
-        fn GlobalFree(h_mem: *mut core::ffi::c_void) -> *mut core::ffi::c_void;
     }
 
     // DROPFILES 头 + 路径宽字符 + 双 NUL 结尾。
@@ -630,6 +643,49 @@ fn write_file_list_windows(paths: &[std::path::PathBuf]) -> Result<(), String> {
         data.extend_from_slice(&[0, 0]);
     }
     data.extend_from_slice(&[0, 0]);
+    data
+}
+
+/// CF_UNICODETEXT 的线格式：UTF-16LE + 双 NUL 结尾。
+#[cfg(target_os = "windows")]
+fn utf16_double_nul_payload(text: &str) -> Vec<u8> {
+    use std::os::windows::ffi::OsStrExt;
+    let mut data: Vec<u8> = Vec::new();
+    for unit in std::ffi::OsStr::new(text).encode_wide() {
+        data.extend_from_slice(&unit.to_le_bytes());
+    }
+    // 双 NUL（两个 u16）：CF_UNICODETEXT 的字符串表终止约定。
+    data.extend_from_slice(&[0, 0, 0, 0]);
+    data
+}
+
+#[cfg(target_os = "windows")]
+const CF_HDROP: u32 = 15;
+#[cfg(target_os = "windows")]
+const CF_UNICODETEXT: u32 = 13;
+
+/// 标准 Win32 剪贴板写入：一次 OpenClipboard 会话内 EmptyClipboard 后
+/// 依序放入多个 (format, bytes)。SetClipboardData 成功后系统接管内存，
+/// 失败时需自行 GlobalFree 归还。
+#[cfg(target_os = "windows")]
+fn set_clipboard_windows(formats: &[(u32, Vec<u8>)]) -> Result<(), String> {
+    const GMEM_MOVEABLE: u32 = 0x0002;
+    const GMEM_ZEROINIT: u32 = 0x0040;
+
+    #[link(name = "user32")]
+    unsafe extern "system" {
+        fn OpenClipboard(hwnd_new_owner: *mut core::ffi::c_void) -> i32;
+        fn EmptyClipboard() -> i32;
+        fn SetClipboardData(format: u32, data: *mut core::ffi::c_void) -> *mut core::ffi::c_void;
+        fn CloseClipboard() -> i32;
+    }
+    #[link(name = "kernel32")]
+    unsafe extern "system" {
+        fn GlobalAlloc(flags: u32, bytes: usize) -> *mut core::ffi::c_void;
+        fn GlobalLock(h_mem: *mut core::ffi::c_void) -> *mut u8;
+        fn GlobalUnlock(h_mem: *mut core::ffi::c_void) -> i32;
+        fn GlobalFree(h_mem: *mut core::ffi::c_void) -> *mut core::ffi::c_void;
+    }
 
     unsafe {
         if OpenClipboard(core::ptr::null_mut()) == 0 {
@@ -639,24 +695,25 @@ fn write_file_list_windows(paths: &[std::path::PathBuf]) -> Result<(), String> {
             CloseClipboard();
             return Err("清空剪贴板失败".to_string());
         }
-        let handle = GlobalAlloc(GMEM_MOVEABLE | GMEM_ZEROINIT, data.len());
-        if handle.is_null() {
-            CloseClipboard();
-            return Err("分配剪贴板内存失败".to_string());
-        }
-        let locked = GlobalLock(handle);
-        if locked.is_null() {
-            CloseClipboard();
-            GlobalFree(handle);
-            return Err("锁定剪贴板内存失败".to_string());
-        }
-        std::ptr::copy_nonoverlapping(data.as_ptr(), locked, data.len());
-        GlobalUnlock(handle);
-        // 成功后系统接管 handle，不再释放；失败时系统未接管，需自行归还。
-        if SetClipboardData(CF_HDROP, handle).is_null() {
-            CloseClipboard();
-            GlobalFree(handle);
-            return Err("写入 CF_HDROP 失败".to_string());
+        for (format, payload) in formats {
+            let handle = GlobalAlloc(GMEM_MOVEABLE | GMEM_ZEROINIT, payload.len());
+            if handle.is_null() {
+                CloseClipboard();
+                return Err("分配剪贴板内存失败".to_string());
+            }
+            let locked = GlobalLock(handle);
+            if locked.is_null() {
+                CloseClipboard();
+                GlobalFree(handle);
+                return Err("锁定剪贴板内存失败".to_string());
+            }
+            std::ptr::copy_nonoverlapping(payload.as_ptr(), locked, payload.len());
+            GlobalUnlock(handle);
+            if SetClipboardData(*format, handle).is_null() {
+                CloseClipboard();
+                GlobalFree(handle);
+                return Err(format!("写入剪贴板格式 {format} 失败"));
+            }
         }
         if CloseClipboard() == 0 {
             return Err("关闭剪贴板失败".to_string());
@@ -1279,6 +1336,51 @@ pub fn paste_files(app: AppHandle, paths: Vec<String>) -> Result<(), String> {
     Ok(())
 }
 
+/// 混合批量粘贴（径向菜单多选）：文件列表与合并文本在一次剪贴板事务中
+/// 一并提供后模拟一次 Ctrl+V，由目标应用自取所需格式（资源管理器/聊天
+/// 窗口取文件列表，文本输入框取文本）。text 为空时等价 paste_files。
+#[tauri::command]
+pub fn paste_mixed(app: AppHandle, paths: Vec<String>, text: String) -> Result<(), String> {
+    log::info!(
+        "[paste] paste_mixed called — {} file(s) + {} chars (普通粘贴)",
+        paths.len(),
+        text.chars().count()
+    );
+    if paths.is_empty() {
+        return Err("没有可粘贴的文件".to_string());
+    }
+    if PASTING.swap(true, Ordering::SeqCst) {
+        return Ok(());
+    }
+
+    let mut resolved = Vec::with_capacity(paths.len());
+    for path in &paths {
+        if std::fs::metadata(path).is_err() {
+            log::error!("paste_mixed: file not found: {path}");
+            PASTING.store(false, Ordering::SeqCst);
+            return Err(format!("File not found: {path}"));
+        }
+        resolved.push(
+            std::fs::canonicalize(path).unwrap_or_else(|_| std::path::PathBuf::from(path)),
+        );
+    }
+    if let Err(e) = write_clipboard_mixed(&resolved, &text) {
+        log::error!("paste_mixed: {e}");
+        PASTING.store(false, Ordering::SeqCst);
+        return Err(e);
+    }
+
+    let handle = app.clone();
+    std::thread::spawn(move || {
+        let _guard = PasteGuard;
+
+        crate::clipboard::sync_monitor_cache(&handle);
+        paste_with_defocus(&handle, PasteShortcut::CtrlV).ok();
+    });
+
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::{
@@ -1377,5 +1479,50 @@ mod tests {
         .unwrap_err();
 
         assert!(error.contains("附件数量"));
+    }
+
+    // ── 混合批量粘贴的剪贴板线格式（Windows 专属编码，随 Windows CI 跑） ──
+
+    #[cfg(target_os = "windows")]
+    mod clipboard_payloads {
+        use super::super::{hdrop_payload, utf16_double_nul_payload};
+
+        #[test]
+        fn hdrop_payload_keeps_dropfiles_header_and_double_nul_terminator() {
+            let payload = hdrop_payload(&[std::path::PathBuf::from("C:\\a\\b.txt")]);
+
+            let header_size = u32::from_le_bytes(payload[0..4].try_into().unwrap()) as usize;
+            assert_eq!(header_size, 20); // DROPFILES = pFiles + POINT + fNC + fWide
+            assert_eq!(payload[16], 1); // fWide = 1（宽字符路径）
+            // 路径 UTF-16LE + 双 NUL 结尾
+            let tail = &payload[header_size..];
+            assert_eq!(tail.len(), "C:\\a\\b.txt".encode_utf16().count() * 2 + 4);
+            assert_eq!(&tail[tail.len() - 4..], &[0, 0, 0, 0]);
+        }
+
+        #[test]
+        fn hdrop_payload_joins_multiple_paths_with_single_nul_each() {
+            let payload = hdrop_payload(&[
+                std::path::PathBuf::from("C:\\a.txt"),
+                std::path::PathBuf::from("C:\\b.txt"),
+            ]);
+
+            let tail = &payload[20..];
+            let single = "C:\\a.txt".encode_utf16().count() * 2 + 2;
+            // 每条路径各一个 NUL 结尾，表尾再补一个 NUL
+            assert_eq!(tail.len(), single * 2 + 2);
+            assert_eq!(&tail[tail.len() - 2..], &[0, 0]);
+        }
+
+        #[test]
+        fn utf16_payload_encodes_non_ascii_with_double_nul_terminator() {
+            let payload = utf16_double_nul_payload("文本\n两行");
+
+            let text_units = "文本\n两行".encode_utf16().count();
+            assert_eq!(payload.len(), text_units * 2 + 4);
+            assert_eq!(&payload[payload.len() - 4..], &[0, 0, 0, 0]);
+            // 中文首字「文」= U+6587，小端编码
+            assert_eq!(&payload[0..2], &0x6587u16.to_le_bytes());
+        }
     }
 }

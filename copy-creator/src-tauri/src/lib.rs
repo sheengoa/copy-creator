@@ -491,6 +491,7 @@ pub fn run() {
             paste::paste_stash_record,
             paste::paste_file,
             paste::paste_files,
+            paste::paste_mixed,
             radial_drag::arm_radial_file_drag,
             radial_drag::cancel_radial_file_drag,
             radial_drag::start_radial_file_drag,
