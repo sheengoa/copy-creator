@@ -2776,34 +2776,35 @@ export default function ProjectCanvas({
                 ["shot:", "char:", "loc:", "prop:", "grp:", "segment:", "eph:"].some((p) => outKeyOf.startsWith(p)))));
         let compatible = false;
         let targetPort: string | null = null;
-        if (tKey && tKey !== drag.fromKey && writable) {
+        if (tKey && writable) {
           const ports = portsOf(tKey);
           if (drag.fromDir === "in") {
             if (drag.rewire && tKey.startsWith("segment:")) {
-              // 摘线换目标：拖着被摘的线到另一个片段＝线整个改接到它的
-              // 输入口。目标口优先取光标悬停的那个口（用户指哪接哪），
-              // 不在口上时回退同名口（片段家族同名口语义一致）；都没有
-              // 即不兼容，松手放回。换到原片段松手走上面的 tKey 排除，
-              // 保持「放回」语义。
+              // 摘线换接口（同片段换口与跨片段换目标同一手势）：拖着被摘
+              // 的线到任何片段的某个输入口上松手＝线整个改接到那个口。
+              // 目标口只认光标悬停的那个输入口（用户指哪接哪）；跨片段
+              // 不在口上时回退同名口（片段家族同名口语义一致）。拖回原
+              // 口＝放回；同片段悬停非口位置＝放回（同名口即原口）。
+              const isSameNode = tKey === drag.fromKey;
               const hoverPortId =
                 hit instanceof Element
-                  ? hit.closest(".pc-port")?.getAttribute("data-port-id") ?? null
+                  ? hit.closest('.pc-port[data-port="in"]')?.getAttribute("data-port-id") ?? null
                   : null;
               const ins = ports.ins;
               const hovered =
-                hoverPortId && ins.some((item) => item.id === hoverPortId && item.id !== "output")
-                  ? hoverPortId
-                  : null;
+                hoverPortId && ins.some((item) => item.id === hoverPortId) ? hoverPortId : null;
               const sameName =
-                drag.fromPortId && ins.some((item) => item.id === drag.fromPortId)
+                !isSameNode &&
+                drag.fromPortId &&
+                ins.some((item) => item.id === drag.fromPortId)
                   ? drag.fromPortId
                   : null;
               targetPort = hovered ?? sameName;
-              compatible = !!targetPort;
-            } else {
+              compatible = !!targetPort && (!isSameNode || targetPort !== drag.fromPortId);
+            } else if (tKey !== drag.fromKey) {
               compatible = !!ports.out && !!drag.fromAccepts?.includes(ports.out.type);
             }
-          } else if (drag.fromType) {
+          } else if (drag.fromType && tKey !== drag.fromKey) {
             // 吸附优先级：光标就近的可接输入口（ComfyUI 落点即所接口），
             // 不就近时回退为第一个可接口。
             let best: { id: string } | undefined;
@@ -2989,7 +2990,6 @@ export default function ProjectCanvas({
             wireRelease === "commit" &&
             !!targetKey &&
             targetKey.startsWith("segment:") &&
-            targetKey !== drag.fromKey &&
             !!drag.targetPort;
           if (rewireToSegment && lifted) {
             // 换目标：口上全部线（暂存线 + 正式线）整组改接到新片段的
