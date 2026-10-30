@@ -1901,6 +1901,39 @@ export default function ProjectCanvas({
       link.owner_key ? link.owner_key : ownerKeyOf(link.from_kind, link.from_id),
     [ownerKeyOf],
   );
+  // ── 口的唯一来源：顶掉语义 ──
+  // 角色/场景/道具口是单槽位：新来源落上时整条断开既有线（后连替换
+  // 先连，而不是拒绝或并存）。一个"来源"= 一个承载节点（单实体或组）：
+  // 组线整条断开（组内成员行全部删除），占位/纸片的暂存线一并清。
+  // keep 排除"正要落上的来源自己"的行（放回原口/转正保留自身）。
+  // 剧本口、提示词口、其他口维持多来源语义，不参与顶掉。
+  const ENTITY_PORTS = useMemo(() => new Set(["character", "location", "prop"]), []);
+  const displacePortLinks = useCallback(
+    (segId: string, port: string, keep?: {
+      /** 保留的正式行 id（摘线转移时自己拿走的行）。 */
+      rows?: Set<string>;
+      /** 保留的暂存线（在手待转移的线）。 */
+      pendings?: PendingLink[];
+      /** 保留某来源节点的全部暂存线（占位转正时保留自己）。 */
+      pendingFromKey?: string;
+    }) => {
+      if (!ENTITY_PORTS.has(port)) return;
+      (overview?.node_links ?? [])
+        .filter((l) => l.to_segment === segId && l.to_port === port && !keep?.rows?.has(l.id))
+        .forEach((row) => {
+          void unlinkNode(row.from_kind, row.from_id, row.to_segment, row.to_port, row.owner_key);
+        });
+      const stale = pendingLinks.filter(
+        (l) =>
+          l.toSegmentId === segId &&
+          l.toPort === port &&
+          !keep?.pendings?.includes(l) &&
+          l.fromKey !== keep?.pendingFromKey,
+      );
+      if (stale.length) persistPendingLinks(pendingLinks.filter((l) => !stale.includes(l)));
+    },
+    [ENTITY_PORTS, overview, unlinkNode, pendingLinks, persistPendingLinks],
+  );
 
   // 片段输入口连线：按承载节点去重——组内多个成员各自落的 node_link
   // 在画布上只画一条线（线的含义 = 组内全部成员接入；删线 = 全部断开）。
@@ -3109,9 +3142,15 @@ export default function ProjectCanvas({
           if (rewireToSegment && lifted) {
             // 换目标：口上全部线（暂存线 + 正式线）整组改接到新片段的
             // 目标口（onMove 定好的悬停口或同名口），原口不留残留。
+            // 落点是资料口时先顶掉口上别的来源的线（自己拿走的行除外
+            // ——它们正要转移落上）。
             setLiftedWire(null);
             const segId = targetKey.slice(8);
             const port = drag.targetPort as ProjectNodeLink["to_port"];
+            displacePortLinks(segId, port, {
+              rows: new Set(lifted.rows.map((r) => r.id)),
+              pendings: lifted.pendings,
+            });
             if (lifted.pendings.length) {
               persistPendingLinks([
                 ...pendingLinks.filter((l) => !lifted.pendings.includes(l)),
@@ -3217,6 +3256,9 @@ export default function ProjectCanvas({
               // 空白占位加载实体后转正为 node_link（promotePendingLinks）；
               // 提示词/剧本纸片不转正（画布层即最终形态）。
               const port = drag.fromDir === "in" ? drag.fromPortId : drag.targetPort;
+              // 占位落到资料口＝新来源占口：顶掉既有线，保留自己已有的
+              // 暂存线（重复拖同占位到同口是幂等改写）。
+              if (port) displacePortLinks(segId, port, { pendingFromKey: outKey });
               if (port) {
                 persistPendingLinks([
                   ...pendingLinks.filter((l) => !(l.fromKey === outKey && l.toSegmentId === segId && l.toPort === port)),
@@ -3225,9 +3267,11 @@ export default function ProjectCanvas({
               }
             } else if (outKey.startsWith("grp:")) {
               // 组节点一条线 = 组内全部成员分别落一条 node_link（owner 记
-              // 组身份）；且无论拖到哪个口，都按组类型进对应口。
+              // 组身份）；且无论拖到哪个口，都按组类型进对应口。资料口
+              // 顶掉既有来源（组线整条断开，新组顶上）。
               const group = infoGroups.find((g) => `grp:${g.id}` === outKey);
               if (group) {
+                displacePortLinks(segId, group.kind);
                 group.members.forEach((memberId) => {
                   void linkNode(episodeId, group.kind, memberId, segId, group.kind, outKey);
                 });
@@ -3236,6 +3280,8 @@ export default function ProjectCanvas({
               const source = nodeKeyParts(outKey);
               const port = drag.fromDir === "in" ? drag.fromPortId : drag.targetPort;
               if (source && port) {
+                // 单实体落资料口＝新来源占口：顶掉既有线再落。
+                displacePortLinks(segId, port);
                 void linkNode(
                   episodeId,
                   source.kind,
@@ -3591,7 +3637,7 @@ export default function ProjectCanvas({
       document.removeEventListener("pointerup", onUp);
       document.removeEventListener("pointercancel", onCancel);
     };
-  }, [layout, pos, view, scenePos, infoPos, boxOf, portsOf, outPointOf, inPointOf, persistCards, saveCanvasLayout, saveInfoFramePos, saveView, setSelection, saveOutputPos, setEpisodeOutput, episodeId, notes, persistNotes, addNote, addEntityPh, addPromptPh, persistSegments, linkNode, unlinkNode, nodeKeyParts, addSegment, autoConnectNewNode, persistSizes, persistInfoOffsets, infoGroups, infoNodes, infoNodePos, entityPhs, promptPhs, segments, segPos, sizeOfNode, outputBox, moveGroupTo, persistPositions, pushUndo, pendingLinks, persistPendingLinks, setInfoFramePos, setInfoOffsets, setNodeSizes, setNotes, setOutputPos, openNodeDetail, ownerKeyOf, ownerKeyOfLink]);
+  }, [layout, pos, view, scenePos, infoPos, boxOf, portsOf, outPointOf, inPointOf, persistCards, saveCanvasLayout, saveInfoFramePos, saveView, setSelection, saveOutputPos, setEpisodeOutput, episodeId, notes, persistNotes, addNote, addEntityPh, addPromptPh, persistSegments, linkNode, unlinkNode, nodeKeyParts, addSegment, autoConnectNewNode, persistSizes, persistInfoOffsets, infoGroups, infoNodes, infoNodePos, entityPhs, promptPhs, segments, segPos, sizeOfNode, outputBox, moveGroupTo, persistPositions, pushUndo, pendingLinks, persistPendingLinks, setInfoFramePos, setInfoOffsets, setNodeSizes, setNotes, setOutputPos, openNodeDetail, ownerKeyOf, ownerKeyOfLink, displacePortLinks]);
 
   // ── 节点操作 ──
   // 节点接口圆点（ComfyUI 式）：输入口列在左缘（片段六口按列分布）、
@@ -4118,9 +4164,12 @@ export default function ProjectCanvas({
       persistEntityPhs(entityPhs.filter((p) => p.id !== ph.id));
       persistInfoGroups([...infoGroups, { id: groupId, kind: pick.kind, members: [...pending] }]);
       // 占位节点的暂存线随加载转正：组内每个成员各落一条 node_link
-      // （owner 记组身份，组删线/找组口按此精确匹配）。
+      // （owner 记组身份，组删线/找组口按此精确匹配）。转正落到资料口
+      // 时先顶掉口上既有来源——占位在口上挂着，实体加载后正式接上，
+      // 原来占着这个口的其他来源被替换（后连顶先连）。
       const ephKey = `eph:${ph.id}`;
       const myPending = pendingLinks.filter((l) => l.fromKey === ephKey);
+      myPending.forEach((l) => displacePortLinks(l.toSegmentId, l.toPort, { pendingFromKey: ephKey }));
       for (const l of myPending) {
         for (const memberId of pending) {
           await linkNode(episodeId, pick.kind, memberId, l.toSegmentId, l.toPort as ProjectNodeLink["to_port"], `grp:${groupId}`);
@@ -4173,7 +4222,7 @@ export default function ProjectCanvas({
   }, [
     memberPick, episodeId, entityPhs, infoNodePos, infoOffsets, persistInfoOffsets, persistEntityPhs,
     infoGroups, persistInfoGroups, associateEntities, groupWiredPorts, linkNode, overview,
-    unlinkEntityLinks, pendingLinks, persistPendingLinks,
+    unlinkEntityLinks, pendingLinks, persistPendingLinks, displacePortLinks,
   ]);
 
   const detailDialog = (() => {
