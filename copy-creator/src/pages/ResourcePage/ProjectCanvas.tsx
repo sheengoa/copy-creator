@@ -2115,7 +2115,8 @@ export default function ProjectCanvas({
   const [wireDraft, setWireDraft] = useState<{ d: string; invalid: boolean; color?: string } | null>(null);
   // 拖线悬停高亮的目标节点（ComfyUI 落点亮框），松手/取消时清除。
   const wireHoverRef = useRef<Element | null>(null);
-  // 拖线悬停点亮的输入口（与源口同款放大光圈），松手/取消时清除。
+  // 画布上唯一点亮的输入口（源口/落点共用的放大光圈）：拖线切换、
+  // 摘线按下登记原口，松手/取消时清除。
   const wirePortHoverRef = useRef<HTMLElement | null>(null);
   // ComfyUI 摘线：点击已连线的输入口把线「摘下来拿着」——这个口上的
   // 全部线（暂存线 + 正式线）进入隐藏态（渲染层过滤），松手时整组转接 /
@@ -2222,6 +2223,10 @@ export default function ProjectCanvas({
         dragRef.current = null;
         wireHoverRef.current?.classList.remove("pc-wire-target");
         wireHoverRef.current = null;
+        // 唯一亮口（摘线原口/拖线落点）一并复位：ref 记账与口上光圈
+        // 都清掉，下一场拖拽的切换逻辑才不会把残留口当成「当前亮口」。
+        wirePortHoverRef.current?.classList.remove("pc-port-active");
+        wirePortHoverRef.current = null;
         vpRef.current?.classList.remove("pc-cutting");
         cutTargetsRef.current = null;
         // 残留若是切线手势，切痕 polyline 也要一并清空——上面只复位了
@@ -2351,6 +2356,11 @@ export default function ProjectCanvas({
             setLiftedWire({ fromKey, pendings, rows });
             vp.classList.add("pc-wiring");
             port.classList.add("pc-port-active");
+            // 原口登记为「当前亮口」：亮口唯一由 wirePortHoverRef 管理，
+            // 拖走时悬停切换自然清它（原口与落点不同时亮），滑回原口
+            // （放回落点）也能正常重新点亮——不登记的话切换逻辑不知道
+            // 原口亮着，既清不掉（双口同亮）也亮不回（ref 与 DOM 脱节）。
+            wirePortHoverRef.current = port;
             dragRef.current = {
               kind: "wire", sx: e.clientX, sy: e.clientY, moved: false, rewire: true,
               fromKey: key, targetKey: null, targetPort: null,
@@ -2868,16 +2878,29 @@ export default function ProjectCanvas({
         }
         // 悬停口点亮：线要落去的那个输入口与源口同款放大光圈（亮＝接
         // 得上），摘线换口与连线吸附的落点一眼可见；不可接的口不亮。
+        // 摘线的原口在 pointerdown 时已登记为本 ref 的「当前亮口」：
+        // 拖走即被这里的切换清掉（双口不再同亮），滑回原口（放回）亮回。
         const portEl =
           compatible && tEl && targetPort
             ? tEl.querySelector<HTMLElement>(
                 `.pc-port[data-port="in"][data-port-id="${targetPort}"]`,
               )
             : null;
-        if (wirePortHoverRef.current !== portEl) {
+        // 拖回被摘的原口＝放回，也是合法落点（松手线落回这），同款点亮。
+        // 命中区放宽到原口整行（圆点 + 标签是兄弟元素，closest 沿祖先链
+        // 找不到圆点，光标停在标签上也该算「指着这个口」）；同片段悬停
+        // 别的口＝不可接，行的 querySelector 找不到原口，保持全灭。
+        const rewireBackEl =
+          !portEl && drag.rewire && tKey === drag.fromKey && hit instanceof Element
+            ? hit.closest<HTMLElement>(".pc-port-row")?.querySelector<HTMLElement>(
+              `.pc-port[data-port="in"][data-port-id="${drag.fromPortId ?? ""}"]`,
+            ) ?? null
+            : null;
+        const hoverPortEl = portEl ?? rewireBackEl;
+        if (wirePortHoverRef.current !== hoverPortEl) {
           wirePortHoverRef.current?.classList.remove("pc-port-active");
-          portEl?.classList.add("pc-port-active");
-          wirePortHoverRef.current = portEl;
+          hoverPortEl?.classList.add("pc-port-active");
+          wirePortHoverRef.current = hoverPortEl;
         }
         // 草稿终点：正拖命中片段时吸附到匹配输入口的位置。
         const endPoint =
