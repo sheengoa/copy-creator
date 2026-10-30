@@ -407,6 +407,16 @@ const NODE_ACCENTS: Record<string, string> = {
 /** 参考类输入口可接的数据类型（图/视频/文本/提示词）。 */
 const REF_ACCEPTS = ["image", "video", "text", "prompt"];
 
+/** 摘线到空白建节点：菜单项建出的新源输出口类型。摘线菜单按原口
+ *  兼容过滤时用（不接线原样放回的剧本纸片/关联场景/便签与走「换
+ *  目标」同名口的片段不在表内，任何来源都可选）。 */
+const ADDNODE_OUT_TYPES: Record<string, string> = {
+  character: "image",
+  location: "image",
+  prop: "image",
+  prompt: "prompt",
+};
+
 /** 片段输入口专属色：每口一色，与对应节点类型色一致，一眼分辨谁是谁；
  *  「其他」口不限类型，用中性灰。未命中的口（镜头/成片/素材的通用口）
  *  回退连线类型色。 */
@@ -2798,18 +2808,22 @@ export default function ProjectCanvas({
               // 目标口只认光标悬停的那个输入口（用户指哪接哪）；跨片段
               // 不在口上时回退同名口（片段家族同名口语义一致）。拖回原
               // 口＝放回；同片段悬停非口位置＝放回（同名口即原口）。
+              // 口须兼容被摘线的来源类型（与新连线同款校验）：剧本/提示
+              // 词线落不进角色/场景/道具口，悬停在不可接的口＝放回。
               const isSameNode = tKey === drag.fromKey;
               const hoverPortId =
                 hit instanceof Element
                   ? hit.closest('.pc-port[data-port="in"]')?.getAttribute("data-port-id") ?? null
                   : null;
               const ins = ports.ins;
-              const hovered =
-                hoverPortId && ins.some((item) => item.id === hoverPortId) ? hoverPortId : null;
+              const fromType = lifted ? portsOf(lifted.fromKey).out?.type : undefined;
+              const typeOk = (id: string | null) =>
+                !id || !fromType || !!ins.find((item) => item.id === id)?.accepts.includes(fromType);
+              const hovered = typeOk(hoverPortId) ? hoverPortId : null;
               const sameName =
                 !isSameNode &&
                 drag.fromPortId &&
-                ins.some((item) => item.id === drag.fromPortId)
+                typeOk(drag.fromPortId)
                   ? drag.fromPortId
                   : null;
               targetPort = hovered ?? sameName;
@@ -5283,6 +5297,17 @@ export default function ProjectCanvas({
               },
             ]
               .filter((item) => item.label.toLowerCase().includes(addMenuQuery.trim().toLowerCase()))
+              .filter((item) => {
+                // 摘线到空白的菜单按原口兼容过滤：建出来的新源接不回原
+                // 口的类型不再列出（摘剧本线甩空白不再给 角色/场景/道具）。
+                // 剧本纸片/关联场景/便签不接线原样放回、片段走「换目标」
+                // 同名口与来源类型无关——任何来源都保留。
+                if (!addMenu.detached) return true;
+                const accepts = addMenu.wire?.fromAccepts;
+                if (!accepts) return true;
+                const out = ADDNODE_OUT_TYPES[item.key];
+                return !out || accepts.includes(out);
+              })
               .map((item) => (
                 <button
                   key={item.key}
