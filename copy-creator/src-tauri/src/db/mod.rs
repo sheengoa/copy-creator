@@ -1293,7 +1293,7 @@ fn ensure_column(conn: &Connection, table: &str, column: &str, definition: &str)
 /// 当前 schema 版本。新增结构迁移（增列、历史数据回填/清退）时把版本 +1
 /// 并把步骤加进 run_schema_migrations；已升级的库启动时整段跳过——此前
 /// 全部步骤每次启动幂等重跑，启动成本随迁移数量线性增长。
-const SCHEMA_VERSION: i32 = 2;
+const SCHEMA_VERSION: i32 = 3;
 
 fn schema_version(conn: &Connection) -> i32 {
     conn.query_row("PRAGMA user_version", [], |row| row.get(0))
@@ -1545,6 +1545,60 @@ fn run_schema_migrations(conn: &Connection) -> Result<(), Box<dyn std::error::Er
     // 分组功能已删除，连同旧库中的分组表一起清理。
     conn.execute("DROP TABLE IF EXISTS resource_groups", [])
         .ok();
+
+    // project_node_links 的 UNIQUE 约束扩到 owner_key：旧约束
+    // (from_kind, from_id, to_segment, to_port) 不含线归属——同一实体被
+    // 多个组认领（跨节点复用）时，第二个组给同一片段口落线会被 UNIQUE
+    // 静默吞掉（INSERT OR IGNORE），表现为"新节点挂不上已连过的口"。
+    // SQLite 不能改约束，按"建新表→逐行搬→替换"重建；纯元数据小表，
+    // 行数有界。旧行 owner_key 已由 ensure_column 补列（可能在本迁移
+    // 之前执行），COALESCE 兜底更早的缺列库；旧约束保证同组合至多一行，
+    // 搬运不会撞新 UNIQUE。
+    {
+        let ddl_sql: Option<String> = conn
+            .prepare(
+                "SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'project_node_links'",
+            )
+            .and_then(|mut stmt| stmt.query_row([], |row| row.get::<_, String>(0)))
+            .ok();
+        let needs_rebuild = !ddl_sql
+            .as_deref()
+            .map(|sql| {
+                let lower = sql.to_lowercase();
+                lower.contains("owner_key") && lower.contains("owner_key)")
+            })
+            .unwrap_or(false);
+        if needs_rebuild {
+            conn.execute_batch(
+                "BEGIN IMMEDIATE;
+                 CREATE TABLE project_node_links_new (
+                     id TEXT PRIMARY KEY,
+                     episode_id TEXT NOT NULL,
+                     from_kind TEXT NOT NULL,
+                     from_id TEXT NOT NULL,
+                     to_segment TEXT NOT NULL,
+                     to_port TEXT NOT NULL,
+                     created_at TEXT NOT NULL,
+                     owner_key TEXT NOT NULL DEFAULT '',
+                     UNIQUE (from_kind, from_id, to_segment, to_port, owner_key),
+                     FOREIGN KEY (episode_id) REFERENCES project_episodes(id) ON DELETE CASCADE,
+                     FOREIGN KEY (to_segment) REFERENCES project_segments(id) ON DELETE CASCADE
+                 );
+                 INSERT OR IGNORE INTO project_node_links_new
+                     (id, episode_id, from_kind, from_id, to_segment, to_port, created_at, owner_key)
+                 SELECT id, episode_id, from_kind, from_id, to_segment, to_port, created_at,
+                        COALESCE(owner_key, '')
+                 FROM project_node_links;
+                 DROP TABLE project_node_links;
+                 ALTER TABLE project_node_links_new RENAME TO project_node_links;
+                 CREATE INDEX IF NOT EXISTS idx_project_node_links_to
+                     ON project_node_links(to_segment);
+                 COMMIT;",
+            )
+            .map_err(|e| format!("重建 project_node_links（UNIQUE 含 owner_key）失败: {e}"))?;
+            log::info!("已重建 project_node_links：UNIQUE 约束扩到 owner_key");
+        }
+    }
 
     Ok(())
 }

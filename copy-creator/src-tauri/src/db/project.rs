@@ -175,7 +175,7 @@ CREATE TABLE IF NOT EXISTS project_node_links (
     to_port TEXT NOT NULL,
     created_at TEXT NOT NULL,
     owner_key TEXT NOT NULL DEFAULT '',
-    UNIQUE (from_kind, from_id, to_segment, to_port),
+    UNIQUE (from_kind, from_id, to_segment, to_port, owner_key),
     FOREIGN KEY (episode_id) REFERENCES project_episodes(id) ON DELETE CASCADE,
     FOREIGN KEY (to_segment) REFERENCES project_segments(id) ON DELETE CASCADE
 );
