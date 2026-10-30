@@ -185,6 +185,9 @@ export interface ProjectNodeLink {
   from_id: string;
   to_segment: string;
   to_port: "character" | "location" | "prop" | "prompt" | "script" | "other";
+  /** 发出节点身份（grp:<组id>）：资料组的线归属。空串 = 非组来源。
+   *  同一实体可被多个组认领（跨片段复用），删组线/找组口按此精确匹配。 */
+  owner_key?: string;
 }
 
 export interface EpisodeOverview {
@@ -337,20 +340,24 @@ interface ProjectStoreState {
   moveSegment: (id: string, direction: -1 | 1) => Promise<void>;
   /** 挂靠/清除片段产出视频。 */
   setSegmentAsset: (id: string, assetId: string | null) => Promise<void>;
-  /** 片段输入口连线（幂等）：本地即时追加 + 落库。 */
+  /** 片段输入口连线（幂等）：本地即时追加 + 落库。ownerKey 为发出节点
+   *  身份（grp:<组id>），资料组的线归属标记；缺省空串 = 非组来源。 */
   linkNode: (
     episodeId: string,
     fromKind: ProjectNodeLink["from_kind"],
     fromId: string,
     toSegment: string,
     toPort: ProjectNodeLink["to_port"],
+    ownerKey?: string,
   ) => Promise<void>;
-  /** 摘除片段输入口连线：本地即时过滤 + 落库。 */
+  /** 摘除片段输入口连线：本地即时过滤 + 落库。ownerKey 传入时只删该
+   *  owner 名下的行（组线精确匹配），缺省按历史语义全删。 */
   unlinkNode: (
     fromKind: ProjectNodeLink["from_kind"],
     fromId: string,
     toSegment: string,
     toPort: ProjectNodeLink["to_port"],
+    ownerKey?: string,
   ) => Promise<void>;
 
   loadPrompts: (category?: string) => Promise<void>;
@@ -1142,7 +1149,7 @@ export const useProjectStore = create<ProjectStoreState>((set, get) => ({
     }
   },
 
-  linkNode: async (episodeId, fromKind, fromId, toSegment, toPort) => {
+  linkNode: async (episodeId, fromKind, fromId, toSegment, toPort, ownerKey) => {
     // 本地即时追加（与 linkAssets 同策略），落库由后端幂等兜底。
     const overview = get().overview;
     if (overview) {
@@ -1151,7 +1158,8 @@ export const useProjectStore = create<ProjectStoreState>((set, get) => ({
           item.from_kind === fromKind &&
           item.from_id === fromId &&
           item.to_segment === toSegment &&
-          item.to_port === toPort,
+          item.to_port === toPort &&
+          (item.owner_key ?? "") === (ownerKey ?? ""),
       );
       if (!exists) {
         set({
@@ -1159,20 +1167,20 @@ export const useProjectStore = create<ProjectStoreState>((set, get) => ({
             ...overview,
             node_links: [
               ...overview.node_links,
-              { id: `local-${Date.now()}-${Math.floor(Math.random() * 1e6)}`, from_kind: fromKind, from_id: fromId, to_segment: toSegment, to_port: toPort },
+              { id: `local-${Date.now()}-${Math.floor(Math.random() * 1e6)}`, from_kind: fromKind, from_id: fromId, to_segment: toSegment, to_port: toPort, owner_key: ownerKey ?? "" },
             ],
           },
         });
       }
     }
     try {
-      await invoke("project_link_node", { episodeId, fromKind, fromId, toSegment, toPort });
+      await invoke("project_link_node", { episodeId, fromKind, fromId, toSegment, toPort, ownerKey: ownerKey ?? "" });
     } catch (error) {
       console.error("project_link_node failed:", error);
     }
   },
 
-  unlinkNode: async (fromKind, fromId, toSegment, toPort) => {
+  unlinkNode: async (fromKind, fromId, toSegment, toPort, ownerKey) => {
     const overview = get().overview;
     if (overview) {
       set({
@@ -1184,14 +1192,15 @@ export const useProjectStore = create<ProjectStoreState>((set, get) => ({
                 item.from_kind === fromKind &&
                 item.from_id === fromId &&
                 item.to_segment === toSegment &&
-                item.to_port === toPort
+                item.to_port === toPort &&
+                (ownerKey ? (item.owner_key ?? "") === ownerKey : true)
               ),
           ),
         },
       });
     }
     try {
-      await invoke("project_unlink_node", { fromKind, fromId, toSegment, toPort });
+      await invoke("project_unlink_node", { fromKind, fromId, toSegment, toPort, ownerKey: ownerKey ?? null });
     } catch (error) {
       console.error("project_unlink_node failed:", error);
     }

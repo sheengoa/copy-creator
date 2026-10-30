@@ -19,7 +19,9 @@ interface MockNodeLink {
   from_kind: "asset" | "character" | "location" | "prop" | "script" | "segment" | "shot";
   from_id: string;
   to_segment: string;
-  to_port: "character" | "location" | "prop" | "script" | "other";
+  to_port: "character" | "location" | "prop" | "prompt" | "script" | "other";
+  /** 发出节点身份（grp:<组id>），空串 = 非组来源（与后端 owner_key 同义）。 */
+  owner_key?: string;
 }
 
 interface MockScene {
@@ -470,7 +472,8 @@ function handleInvoke(cmd: string, args: Record<string, unknown>): unknown {
           l.from_kind === args.fromKind &&
           l.from_id === args.fromId &&
           l.to_segment === args.toSegment &&
-          l.to_port === args.toPort,
+          l.to_port === args.toPort &&
+          (l.owner_key ?? "") === String(args.ownerKey ?? ""),
       );
       if (!exists) {
         db.node_links.push({
@@ -479,21 +482,25 @@ function handleInvoke(cmd: string, args: Record<string, unknown>): unknown {
           from_id: String(args.fromId ?? ""),
           to_segment: String(args.toSegment ?? ""),
           to_port: args.toPort as MockNodeLink["to_port"],
+          owner_key: String(args.ownerKey ?? ""),
         });
       }
       return null;
     }
-    case "project_unlink_node":
+    case "project_unlink_node": {
+      const owner = args.ownerKey != null ? String(args.ownerKey) : null;
       db.node_links = db.node_links.filter(
         (l) =>
           !(
             l.from_kind === args.fromKind &&
             l.from_id === args.fromId &&
             l.to_segment === args.toSegment &&
-            l.to_port === args.toPort
+            l.to_port === args.toPort &&
+            (owner ? (l.owner_key ?? "") === owner : true)
           ),
       );
       return null;
+    }
 
     // ── 资源域与通用命令（画布链路会碰到的） ──
     case "get_resource_library_path":

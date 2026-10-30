@@ -1183,6 +1183,9 @@ pub(crate) fn ensure_schema(conn: &Connection) -> Result<(), Box<dyn std::error:
     ensure_column(conn, "project_assets", "canvas_y", "REAL");
     ensure_column(conn, "project_assets", "canvas_w", "REAL");
     ensure_column(conn, "project_episodes", "output_asset_id", "TEXT");
+    // 资料组的线身份（见 project_node_links 表注释）：同一实体可被多个
+    // 组认领，组删线/找组口按 owner 精确匹配。存量行回填空串。
+    ensure_column(conn, "project_node_links", "owner_key", "TEXT NOT NULL DEFAULT ''");
 
     // ── 运行时迁移：只在库版本落后时执行一次（见 run_schema_migrations）──
     if schema_version(conn) < SCHEMA_VERSION {

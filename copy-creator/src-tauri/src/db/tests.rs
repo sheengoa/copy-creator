@@ -8004,7 +8004,7 @@ mod project_tests {
 
         // 输入口连线：剧本口要求集已挂接剧本；未知端口/来源拒绝；幂等。
         assert!(
-            crate::db::project::link_node_inner(&conn, "e1", "script", "e1", s2["id"].as_str().unwrap(), "script").is_err(),
+            crate::db::project::link_node_inner(&conn, "e1", "script", "e1", s2["id"].as_str().unwrap(), "script", "").is_err(),
             "未挂接剧本时应被拒绝"
         );
         conn.execute(
@@ -8012,23 +8012,23 @@ mod project_tests {
             [],
         )
         .unwrap();
-        crate::db::project::link_node_inner(&conn, "e1", "script", "e1", s2["id"].as_str().unwrap(), "script")
+        crate::db::project::link_node_inner(&conn, "e1", "script", "e1", s2["id"].as_str().unwrap(), "script", "")
             .unwrap();
-        crate::db::project::link_node_inner(&conn, "e1", "script", "e1", s2["id"].as_str().unwrap(), "script")
+        crate::db::project::link_node_inner(&conn, "e1", "script", "e1", s2["id"].as_str().unwrap(), "script", "")
             .unwrap();
         // 提示词口（新增）：剧本与提示词同为文本类互相兼容，剧本可接提示词口。
-        crate::db::project::link_node_inner(&conn, "e1", "script", "e1", s2["id"].as_str().unwrap(), "prompt")
+        crate::db::project::link_node_inner(&conn, "e1", "script", "e1", s2["id"].as_str().unwrap(), "prompt", "")
             .unwrap();
         assert!(
-            crate::db::project::link_node_inner(&conn, "e1", "ghost", "x", s2["id"].as_str().unwrap(), "other").is_err(),
+            crate::db::project::link_node_inner(&conn, "e1", "ghost", "x", s2["id"].as_str().unwrap(), "other", "").is_err(),
             "未知来源类型应被拒绝"
         );
         assert!(
-            crate::db::project::link_node_inner(&conn, "e1", "asset", "v1", s2["id"].as_str().unwrap(), "nonsense").is_err(),
+            crate::db::project::link_node_inner(&conn, "e1", "asset", "v1", s2["id"].as_str().unwrap(), "nonsense", "").is_err(),
             "未知输入口应被拒绝"
         );
         // 片段→片段续生成线（视频进其他口）；镜头产出也可作为片段来源。
-        crate::db::project::link_node_inner(&conn, "e1", "segment", s1["id"].as_str().unwrap(), s2["id"].as_str().unwrap(), "other")
+        crate::db::project::link_node_inner(&conn, "e1", "segment", s1["id"].as_str().unwrap(), s2["id"].as_str().unwrap(), "other", "")
             .unwrap();
         conn.execute(
             "INSERT INTO project_scenes (id, episode_id, location_id, heading, sort_order, note, created_at, updated_at) \
@@ -8042,7 +8042,7 @@ mod project_tests {
             [],
         )
         .unwrap();
-        crate::db::project::link_node_inner(&conn, "e1", "shot", "sh1", s2["id"].as_str().unwrap(), "other")
+        crate::db::project::link_node_inner(&conn, "e1", "shot", "sh1", s2["id"].as_str().unwrap(), "other", "")
             .unwrap();
 
         let overview =

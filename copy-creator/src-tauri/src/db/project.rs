@@ -162,6 +162,10 @@ CREATE INDEX IF NOT EXISTS idx_project_segments_episode ON project_segments(epis
 -- 以是库资料、剧本或素材（其他口），片段→片段的续生成线也走本表
 -- （from_kind='segment'）；素材间参考线仍走 project_asset_links。
 -- to_port 沿用历史：script=剧本口，prompt=提示词口。
+-- owner_key 标识连线由哪个节点发出（如 grp:<id>），是资料组的线身份：
+-- 同一实体可被多个组认领（跨片段复用），组删线/找组口都按 owner 精确
+-- 匹配，不再互相误伤。空串 = 非组来源（默认实体节点/剧本/素材等）。
+-- 旧库经 ensure_column 幂等补列，存量行回填空串（渲染按旧规则回退定位）。
 CREATE TABLE IF NOT EXISTS project_node_links (
     id TEXT PRIMARY KEY,
     episode_id TEXT NOT NULL,
@@ -170,6 +174,7 @@ CREATE TABLE IF NOT EXISTS project_node_links (
     to_segment TEXT NOT NULL,
     to_port TEXT NOT NULL,
     created_at TEXT NOT NULL,
+    owner_key TEXT NOT NULL DEFAULT '',
     UNIQUE (from_kind, from_id, to_segment, to_port),
     FOREIGN KEY (episode_id) REFERENCES project_episodes(id) ON DELETE CASCADE,
     FOREIGN KEY (to_segment) REFERENCES project_segments(id) ON DELETE CASCADE
@@ -2137,7 +2142,8 @@ pub fn project_set_segment_note(
 }
 
 /// 片段输入口连线：来源 = 库资料 / 剧本 / 素材 / 另一片段（续生成），
-/// 幂等；from_kind 与来源 id 必须真实存在。
+/// 幂等；from_kind 与来源 id 必须真实存在。owner_key 为发出节点身份
+/// （grp:<id>），可选，缺省空串 = 非组来源（行为与历史版本一致）。
 #[tauri::command]
 pub fn project_link_node(
     app: AppHandle,
@@ -2146,6 +2152,7 @@ pub fn project_link_node(
     from_id: String,
     to_segment: String,
     to_port: String,
+    owner_key: Option<String>,
 ) -> Result<serde_json::Value, String> {
     let state = app.state::<DbState>();
     let conn = state.conn.lock().map_err(|e| e.to_string())?;
@@ -2156,6 +2163,7 @@ pub fn project_link_node(
         &from_id,
         &to_segment,
         &to_port,
+        owner_key.as_deref().unwrap_or(""),
     )?;
     emit_project_changed(&app);
     Ok(link)
@@ -2168,6 +2176,7 @@ pub(crate) fn link_node_inner(
     from_id: &str,
     to_segment: &str,
     to_port: &str,
+    owner_key: &str,
 ) -> Result<serde_json::Value, String> {
     const FROM_KINDS: [&str; 7] = ["asset", "character", "location", "prop", "script", "segment", "shot"];
     // 口 id 沿用历史：script=剧本口；prompt=提示词口（与剧本同为文本
@@ -2230,9 +2239,9 @@ pub(crate) fn link_node_inner(
     let id = uuid::Uuid::new_v4().to_string();
     conn.execute(
         "INSERT OR IGNORE INTO project_node_links \
-         (id, episode_id, from_kind, from_id, to_segment, to_port, created_at) \
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
-        params![id, episode_id, from_kind, from_id, to_segment, to_port, project_now()],
+         (id, episode_id, from_kind, from_id, to_segment, to_port, created_at, owner_key) \
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
+        params![id, episode_id, from_kind, from_id, to_segment, to_port, project_now(), owner_key],
     )
     .map_err(|e| e.to_string())?;
     Ok(serde_json::json!({
@@ -2241,10 +2250,12 @@ pub(crate) fn link_node_inner(
         "from_id": from_id,
         "to_segment": to_segment,
         "to_port": to_port,
+        "owner_key": owner_key,
     }))
 }
 
-/// 摘除一条片段输入口连线。
+/// 摘除一条片段输入口连线。owner_key 可选：传入（组线）时只删该 owner
+/// 名下的行——同一实体被多个组认领时互不误伤；不传保持历史全删语义。
 #[tauri::command]
 pub fn project_unlink_node(
     app: AppHandle,
@@ -2252,16 +2263,27 @@ pub fn project_unlink_node(
     from_id: String,
     to_segment: String,
     to_port: String,
+    owner_key: Option<String>,
 ) -> Result<(), String> {
     let state = app.state::<DbState>();
     let conn = state.conn.lock().map_err(|e| e.to_string())?;
-    conn.execute(
-        "DELETE FROM project_node_links \
-         WHERE from_kind = ?1 AND from_id = ?2 AND to_segment = ?3 AND to_port = ?4",
-        params![from_kind, from_id, to_segment, to_port],
-    )
+    let removed = match owner_key.as_deref() {
+        Some(owner) if !owner.is_empty() => conn.execute(
+            "DELETE FROM project_node_links \
+             WHERE from_kind = ?1 AND from_id = ?2 AND to_segment = ?3 AND to_port = ?4 \
+             AND owner_key = ?5",
+            params![from_kind, from_id, to_segment, to_port, owner],
+        ),
+        _ => conn.execute(
+            "DELETE FROM project_node_links \
+             WHERE from_kind = ?1 AND from_id = ?2 AND to_segment = ?3 AND to_port = ?4",
+            params![from_kind, from_id, to_segment, to_port],
+        ),
+    }
     .map_err(|e| e.to_string())?;
-    emit_project_changed(&app);
+    if removed > 0 {
+        emit_project_changed(&app);
+    }
     Ok(())
 }
 
@@ -2729,7 +2751,7 @@ pub(crate) fn episode_overview_inner(
     }
     let node_links = query_all_params(
         conn,
-        "SELECT id, from_kind, from_id, to_segment, to_port \
+        "SELECT id, from_kind, from_id, to_segment, to_port, owner_key \
          FROM project_node_links WHERE episode_id = ?1 \
          ORDER BY created_at ASC, id ASC",
         params![episode_id],
@@ -2740,6 +2762,7 @@ pub(crate) fn episode_overview_inner(
                 "from_id": row.get::<_, String>(2)?,
                 "to_segment": row.get::<_, String>(3)?,
                 "to_port": row.get::<_, String>(4)?,
+                "owner_key": row.get::<_, String>(5)?,
             }))
         },
     )?;
