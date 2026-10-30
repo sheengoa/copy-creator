@@ -836,6 +836,10 @@ export default function ProjectCanvas({
       if (key.startsWith("eph:")) {
         return { w: over?.w ?? INFO_W, h: over?.h ?? INFO_H };
       }
+      // 提示词纸片：独立渲染块（不在 infoNodes），默认尺寸与剧本纸片一致。
+      if (key.startsWith("prompt:")) {
+        return { w: over?.w ?? SCRIPT_W, h: over?.h ?? INFO_H + 40 };
+      }
       // 资料节点（角色/场景/道具/组/剧本）：默认用网格尺寸。
       const info = infoNodes.find((item) => item.key === key);
       if (info) return { w: over?.w ?? info.w, h: over?.h ?? info.h };
@@ -1808,6 +1812,12 @@ export default function ProjectCanvas({
         const p = infoNodePos(key);
         const size = sizeOfNode(key);
         return p ? finish(p.x, p.y, size?.w ?? INFO_W, size?.h ?? INFO_H) : null;
+      }
+      // 提示词纸片：独立渲染块（不在 infoNodes），位置同空白占位解析。
+      if (key.startsWith("prompt:")) {
+        const p = infoNodePos(key);
+        const size = sizeOfNode(key);
+        return p ? finish(p.x, p.y, size?.w ?? SCRIPT_W, size?.h ?? INFO_H + 40) : null;
       }
       // 资料节点（角色/场景/道具/剧本）：拖动过的用覆盖位置，否则网格。
       const infoNode = infoNodes.find((item) => item.key === key);
@@ -4915,7 +4925,7 @@ export default function ProjectCanvas({
                   left: p.x, top: p.y,
                   width: phSize?.w ?? SCRIPT_W,
                   height: resized ? phSize?.h : undefined,
-                  minHeight: resized ? undefined : phSize?.h,
+                  // 未缩放时高度自适应内容（与剧本纸片一致），缩放后用记录值。
                   ["--node-accent" as string]: NODE_ACCENTS.prompt,
                 } as React.CSSProperties}
               >
