@@ -2115,6 +2115,8 @@ export default function ProjectCanvas({
   const [wireDraft, setWireDraft] = useState<{ d: string; invalid: boolean; color?: string } | null>(null);
   // 拖线悬停高亮的目标节点（ComfyUI 落点亮框），松手/取消时清除。
   const wireHoverRef = useRef<Element | null>(null);
+  // 拖线悬停点亮的输入口（与源口同款放大光圈），松手/取消时清除。
+  const wirePortHoverRef = useRef<HTMLElement | null>(null);
   // ComfyUI 摘线：点击已连线的输入口把线「摘下来拿着」——这个口上的
   // 全部线（暂存线 + 正式线）进入隐藏态（渲染层过滤），松手时整组转接 /
   // 交给添加菜单（建新节点即转接）/ 无效落点原样放回。行数据不预先删除，
@@ -2861,6 +2863,19 @@ export default function ProjectCanvas({
           hoverEl?.classList.add("pc-wire-target");
           wireHoverRef.current = hoverEl;
         }
+        // 悬停口点亮：线要落去的那个输入口与源口同款放大光圈（亮＝接
+        // 得上），摘线换口与连线吸附的落点一眼可见；不可接的口不亮。
+        const portEl =
+          compatible && tEl && targetPort
+            ? tEl.querySelector<HTMLElement>(
+                `.pc-port[data-port="in"][data-port-id="${targetPort}"]`,
+              )
+            : null;
+        if (wirePortHoverRef.current !== portEl) {
+          wirePortHoverRef.current?.classList.remove("pc-port-active");
+          portEl?.classList.add("pc-port-active");
+          wirePortHoverRef.current = portEl;
+        }
         // 草稿终点：正拖命中片段时吸附到匹配输入口的位置。
         const endPoint =
           compatible && drag.fromDir === "out" && tKey
@@ -2897,6 +2912,7 @@ export default function ProjectCanvas({
       document
         .querySelectorAll<HTMLElement>(".pc-port-active")
         .forEach((el) => el.classList.remove("pc-port-active"));
+      wirePortHoverRef.current = null;
       vpRef.current?.querySelectorAll<HTMLElement>(".pc-dragging").forEach((el) => el.classList.remove("pc-dragging"));
       vpRef.current?.querySelectorAll<HTMLElement>(".pc-resizing").forEach((el) => el.classList.remove("pc-resizing"));
       if (moved) {
