@@ -351,30 +351,34 @@ export default function ProjectView() {
             </button>
           )}
         </div>
-        <div className="project-tree-split" />
-        {LIBRARY_KINDS.map((kind) => (
+        {/* 树底库入口：保持文档流随集数逐级下落，集多时以栏底为下限
+            （sticky 钳底，见 .project-tree-libs），不再被顶出视野。 */}
+        <div className="project-tree-libs">
+          <div className="project-tree-split" />
+          {LIBRARY_KINDS.map((kind) => (
+            <button
+              key={kind}
+              type="button"
+              className="project-lib-row"
+              onClick={() => openLibraryPanel(kind)}
+            >
+              <span className="project-lib-icon">
+                {kind === "characters" ? Icons.clipboard : kind === "locations" ? Icons.resources : Icons.star}
+              </span>
+              <span className="project-lib-name">{t(`project.library.${kind}`)}</span>
+              <span className="project-lib-scope">{t("project.library.scope")}</span>
+            </button>
+          ))}
           <button
-            key={kind}
             type="button"
             className="project-lib-row"
-            onClick={() => openLibraryPanel(kind)}
+            onClick={() => openLibraryPanel("prompts")}
           >
-            <span className="project-lib-icon">
-              {kind === "characters" ? Icons.clipboard : kind === "locations" ? Icons.resources : Icons.star}
-            </span>
-            <span className="project-lib-name">{t(`project.library.${kind}`)}</span>
+            <span className="project-lib-icon">{Icons.copy}</span>
+            <span className="project-lib-name">{t("project.prompt.title")}</span>
             <span className="project-lib-scope">{t("project.library.scope")}</span>
           </button>
-        ))}
-        <button
-          type="button"
-          className="project-lib-row"
-          onClick={() => openLibraryPanel("prompts")}
-        >
-          <span className="project-lib-icon">{Icons.copy}</span>
-          <span className="project-lib-name">{t("project.prompt.title")}</span>
-          <span className="project-lib-scope">{t("project.library.scope")}</span>
-        </button>
+        </div>
       </aside>
 
       <section className="project-stage">

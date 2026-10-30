@@ -319,7 +319,10 @@
   display: flex;
   flex-direction: column;
   gap: 4px;
-  padding: 10px 8px;
+  /* 底部留白不设在这里：末尾的库入口区（.project-tree-libs）自带
+     padding-bottom 提供同样的 10px——钳位与自然落座两态的按钮位置
+     才能完全一致，滚动到底不会出现 10px 跳变（见库区规则注释）。 */
+  padding: 10px 8px 0;
   border-radius: var(--radius);
   background: var(--input-bg);
   overflow: hidden auto;
@@ -988,10 +991,42 @@
 }
 
 /* --- 剧集树底部：三库入口 --- */
+/* 库入口保持文档流（随集数逐级下落），但以栏可视底缘为下限：集多时
+   sticky 钳在栏底不再下沉，也不会被集列表顶出视野。设计要点（均经
+   真实应用逐步滚动实测）：
+   - 底部 10px 留白由本容器 padding-bottom 提供（栏的 padding-bottom
+     相应为 0）：钳位与自然落座两态下，最后一个库按钮距栏底都是
+     10px——滚动到底不会出现位置跳变（此前钳位贴底/落座留白的方案
+     会抖 10px，即「滑到底多出一丝丝」）。
+   - 钳位约束线是滚动容器 content box 底；栏 padding-bottom 为 0 后
+     它与可视底重合，bottom: 0 即贴合，底部无透缝。
+   - 背景必须不透明才能挡住从底下滚过的集行——--input-bg 是半透明
+     磨砂色，直接用会透出集行，因此用「实底 + 同款半透明罩」双层
+     背景合成出与侧栏一致的视觉。实底是 --panel-bg（主面板区
+     .panel-area 的底色）而不是 --window-bg：后者偏灰紫，叠罩后与
+     侧栏出现可见色差（真实应用 getComputedStyle 实测确认）。
+   - 负 margin 铺满栏的左右 padding 区；flex/gap 复刻栏的子项间距。 */
+.project-tree-libs {
+  position: sticky;
+  bottom: 0;
+  flex-shrink: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin: 0 -8px;
+  padding: 0 8px 10px;
+  background:
+    linear-gradient(var(--input-bg), var(--input-bg)),
+    var(--panel-bg);
+}
+
 .project-tree-split {
   height: 1px;
   background: var(--separator);
-  margin: 8px 4px;
+  /* 顶边不留 margin：分割线紧贴库区背景顶沿，集行正好消失在线上——
+     margin-top 会让背景在分割线上方多出一条遮住集行的小边。与下方
+     库行的间距走容器 gap + 自身 margin-bottom。 */
+  margin: 0 4px 8px;
   flex-shrink: 0;
 }
 
