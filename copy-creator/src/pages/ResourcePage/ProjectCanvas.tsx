@@ -2835,14 +2835,17 @@ export default function ProjectCanvas({
             }
           } else if (drag.fromType && tKey !== drag.fromKey) {
             // 吸附优先级：光标就近的可接输入口（ComfyUI 落点即所接口），
-            // 不就近时回退为第一个可接口。
+            // 不就近时回退为第一个可接口。口距用实测行位（nodeMetrics），
+            // 没量到才退回按口数均分的估算——估算会让光标下的口输给邻口。
             let best: { id: string } | undefined;
             let bestDist = Infinity;
             const box = boxOf(tKey);
+            const metrics = nodeMetricsRef.current.ports[tKey];
             ports.ins.forEach((item, index) => {
               if (!item.accepts.includes(drag.fromType!)) return;
+              const off = metrics?.[item.id];
               const dist = box
-                ? Math.abs(box.y + box.h * portRatio(index, ports.ins.length) - wy)
+                ? Math.abs((off ? box.y + off.y : box.y + box.h * portRatio(index, ports.ins.length)) - wy)
                 : 0;
               if (!best || dist <= bestDist) {
                 best = item;
