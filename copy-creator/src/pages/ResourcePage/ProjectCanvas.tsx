@@ -481,6 +481,8 @@ export default function ProjectCanvas({
     props,
     prompts,
     loadPrompts,
+    loadCharacters,
+    loadProps,
   } = useProjectStore(
     useShallow((state) => ({
       overview: state.overview,
@@ -509,6 +511,8 @@ export default function ProjectCanvas({
       props: state.props,
       prompts: state.prompts,
       loadPrompts: state.loadPrompts,
+      loadCharacters: state.loadCharacters,
+      loadProps: state.loadProps,
     })),
   );
   const episodeId = overview?.episode.id ?? "";
@@ -707,6 +711,18 @@ export default function ProjectCanvas({
     if (changed) persistInfoGroups(next);
   }, [overview, infoGroups, characters, locations, props, persistInfoGroups]);
 
+  // 全局三库兜底加载：组节点成员解析与组自愈按全局库判定存在性，
+  // 未拉取时（画布直达、没开过库面板）判定退化成空。列表轻量，
+  // 每次画布挂载拉一次（ref 守卫，概览整刷重挂不重复触发）。
+  const libsLoadedRef = useRef(false);
+  useEffect(() => {
+    if (libsLoadedRef.current) return;
+    libsLoadedRef.current = true;
+    void loadCharacters();
+    void loadLocations();
+    void loadProps();
+  }, [loadCharacters, loadLocations, loadProps]);
+
   // ── 布局与位置（state 驱动渲染） ──
   const layout = useMemo(() => buildLayout(scenes), [scenes]);
 
@@ -738,14 +754,15 @@ export default function ProjectCanvas({
         list.push({ key: `prop:${prop.id}`, kind: "prop", name: prop.name, avatarPath: prop.ref_path, textPath: "", w: INFO_W, h: INFO_H });
       });
     infoGroups.forEach((group) => {
-      // 只统计仍存在的成员（库里被删的 id 不占位）。
-      const members = group.members.filter((id) =>
-        (group.kind === "character"
-          ? castCharacters
-          : group.kind === "location"
-            ? episodeLocations
-            : episodeProps
-        ).some((e) => e.id === id),
+      // 只统计仍存在的成员：按集关联 ∪ 全局库判定（entitiesOfKind 同
+      // 规则，此处提前内联）。只按集关联判定时，装入的关联落库失败/
+      // 未整刷回来会把整组判成 0 成员而整节点消失（幽灵组），全局库
+      // 兜底保住可见性。
+      const episodeList =
+        group.kind === "character" ? castCharacters : group.kind === "location" ? episodeLocations : episodeProps;
+      const globalList = group.kind === "character" ? characters : group.kind === "location" ? locations : props;
+      const members = group.members.filter(
+        (id) => episodeList.some((e) => e.id === id) || globalList.some((e) => e.id === id),
       );
       if (members.length === 0) return;
       list.push({
@@ -770,7 +787,7 @@ export default function ProjectCanvas({
       });
     });
     return list;
-  }, [castCharacters, episodeLocations, episodeProps, infoGroups, overview, scriptPhs, t]);
+  }, [castCharacters, episodeLocations, episodeProps, characters, locations, props, infoGroups, overview, scriptPhs, t]);
 
   const infoPos = useMemo(() => {
     const frame = infoFramePos ?? { x: WORLD_MARGIN, y: layout.worldH + 48 };
@@ -1855,6 +1872,8 @@ export default function ProjectCanvas({
   );
 
   // 实体 → 承载它的节点 key（组节点优先，否则默认单实体节点）。
+  // 共享语义下同一实体可被多个组认领，此函数只用于「渲染位置」类回退
+  // （取第一个组）；线的归属一律看线自己的 owner_key（ownerKeyOfLink）。
   const ownerKeyOf = useCallback(
     (fromKind: string, fromId: string): string => {
       if (fromKind === "character" || fromKind === "location" || fromKind === "prop") {
@@ -1875,14 +1894,23 @@ export default function ProjectCanvas({
     },
     [infoGroups],
   );
+  // 连线 → 发出节点 key：优先线自身记录的 owner（资料组线身份，精确）；
+  // 旧数据无 owner 时按当前组账回退定位（历史互斥语义下唯一组，等价）。
+  const ownerKeyOfLink = useCallback(
+    (link: Pick<ProjectNodeLink, "from_kind" | "from_id" | "owner_key">): string =>
+      link.owner_key ? link.owner_key : ownerKeyOf(link.from_kind, link.from_id),
+    [ownerKeyOf],
+  );
 
   // 片段输入口连线：按承载节点去重——组内多个成员各自落的 node_link
   // 在画布上只画一条线（线的含义 = 组内全部成员接入；删线 = 全部断开）。
+  // 去重按发出节点（owner）分桶：同一实体被多个组认领时，各组的线各自
+  // 画在各自节点上，互不合并。
   const segWires = useMemo(() => {
     const list: { key: string; fromKey: string; links: typeof nodeLinks }[] = [];
     const index = new Map<string, number>();
     nodeLinks.forEach((link) => {
-      const fromKey = ownerKeyOf(link.from_kind, link.from_id);
+      const fromKey = ownerKeyOfLink(link);
       const dedup = `${fromKey}|${link.to_segment}|${link.to_port}`;
       const at = index.get(dedup);
       if (at !== undefined) {
@@ -1893,7 +1921,7 @@ export default function ProjectCanvas({
       list.push({ key: `segwire-${link.id}`, fromKey, links: [link] });
     });
     return list;
-  }, [nodeLinks, ownerKeyOf]);
+  }, [nodeLinks, ownerKeyOfLink]);
 
   // 节点接口（ComfyUI 式）：输入口列在左缘、输出口在右缘，口带名称与
   // 数据类型；类型不兼容的连线在拖拽与落下时都会被拒绝。
@@ -2139,7 +2167,7 @@ export default function ProjectCanvas({
   const discardDetachedWire = useCallback(
     (detached: { pendings: PendingLink[]; rows: ProjectNodeLink[] }) => {
       detached.rows.forEach((row) => {
-        void unlinkNode(row.from_kind, row.from_id, row.to_segment, row.to_port);
+        void unlinkNode(row.from_kind, row.from_id, row.to_segment, row.to_port, row.owner_key);
       });
       if (detached.pendings.length > 0) {
         persistPendingLinks(pendingLinks.filter((l) => !detached.pendings.includes(l)));
@@ -2200,7 +2228,7 @@ export default function ProjectCanvas({
           } else if (cutId.startsWith("s:")) {
             const group = segWires.find((w) => w.links[0]?.id === cutId.slice(2));
             group?.links.forEach((l) => {
-              void unlinkNode(l.from_kind, l.from_id, l.to_segment, l.to_port);
+              void unlinkNode(l.from_kind, l.from_id, l.to_segment, l.to_port, l.owner_key);
             });
           } else if (cutId.startsWith("p:")) {
             const [fromKey, segId, port] = cutId.slice(2).split("|");
@@ -2370,7 +2398,7 @@ export default function ProjectCanvas({
           if (pendings.length > 0 || rows.length > 0) {
             const fromKey = pendings.length > 0
               ? pendings[pendings.length - 1].fromKey
-              : ownerKeyOf(rows[0].from_kind, rows[0].from_id);
+              : ownerKeyOfLink(rows[0]);
             setLiftedWire({ fromKey, pendings, rows });
             vp.classList.add("pc-wiring");
             port.classList.add("pc-port-active");
@@ -2533,7 +2561,7 @@ export default function ProjectCanvas({
       dragRef.current = { kind: "marquee", sx: e.clientX, sy: e.clientY, mq, moved: false };
       e.preventDefault();
     },
-    [layout, pos, setSelection, view, infoPos, scenePos, portsOf, outputBox, notes, segPos, sizeOfNode, infoNodePos, nodeSizes, groupSnapshot, nodeGroups, memberFrame, addMenu, nodeLinks, pendingLinks, ownerKeyOf, buildCutTargets, setLiftedWire, discardDetachedWire],
+    [layout, pos, setSelection, view, infoPos, scenePos, portsOf, outputBox, notes, segPos, sizeOfNode, infoNodePos, nodeSizes, groupSnapshot, nodeGroups, memberFrame, addMenu, nodeLinks, pendingLinks, ownerKeyOfLink, buildCutTargets, setLiftedWire, discardDetachedWire],
   );
 
 
@@ -3092,10 +3120,10 @@ export default function ProjectCanvas({
             }
             if (lifted.rows.length) {
               lifted.rows.forEach((row) => {
-                void unlinkNode(row.from_kind, row.from_id, row.to_segment, row.to_port);
+                void unlinkNode(row.from_kind, row.from_id, row.to_segment, row.to_port, row.owner_key);
               });
               lifted.rows.forEach((row) => {
-                void linkNode(episodeId, row.from_kind, row.from_id, segId, port);
+                void linkNode(episodeId, row.from_kind, row.from_id, segId, port, row.owner_key);
               });
             }
           } else if (wireRelease === "commit" && targetKey && lifted) {
@@ -3114,7 +3142,7 @@ export default function ProjectCanvas({
             const pendSameAsOld = lifted.pendings.length > 0 &&
               lifted.pendings.every((p) => targetKey === p.fromKey);
             const rowSameAsOld = lifted.rows.length > 0 &&
-              lifted.rows.every((r) => ownerKeyOf(r.from_kind, r.from_id) === targetKey);
+              lifted.rows.every((r) => ownerKeyOfLink(r) === targetKey);
             if (targetSources.length > 0 && !pendSameAsOld && !rowSameAsOld) {
               if (lifted.pendings.length) {
                 persistPendingLinks(pendingLinks.filter((l) => !lifted.pendings.includes(l)));
@@ -3127,10 +3155,13 @@ export default function ProjectCanvas({
                   });
                 });
               }
+              // 换源后的线归属 = 落点节点（组落点带组 owner；单实体落点
+              // owner 空串），与组拖线落口同一套记账。
+              const nextOwner = targetGroup ? targetKey : "";
               lifted.rows.forEach((row) => {
-                void unlinkNode(row.from_kind, row.from_id, row.to_segment, row.to_port);
+                void unlinkNode(row.from_kind, row.from_id, row.to_segment, row.to_port, row.owner_key);
                 targetSources.forEach((nextSource) => {
-                  void linkNode(episodeId, nextSource.kind, nextSource.id, row.to_segment, row.to_port);
+                  void linkNode(episodeId, nextSource.kind, nextSource.id, row.to_segment, row.to_port, nextOwner);
                 });
               });
             } else if (!source && !targetGroup && !pendSameAsOld && targetKey !== "output") {
@@ -3193,12 +3224,12 @@ export default function ProjectCanvas({
                 ]);
               }
             } else if (outKey.startsWith("grp:")) {
-              // 组节点一条线 = 组内全部成员分别落一条 node_link；且无论
-              // 拖到哪个口，都按组类型进对应口（角色组进角色口）。
+              // 组节点一条线 = 组内全部成员分别落一条 node_link（owner 记
+              // 组身份）；且无论拖到哪个口，都按组类型进对应口。
               const group = infoGroups.find((g) => `grp:${g.id}` === outKey);
               if (group) {
                 group.members.forEach((memberId) => {
-                  void linkNode(episodeId, group.kind, memberId, segId, group.kind);
+                  void linkNode(episodeId, group.kind, memberId, segId, group.kind, outKey);
                 });
               }
             } else {
@@ -3391,10 +3422,10 @@ export default function ProjectCanvas({
             }
             if (d.rows.length) {
               d.rows.forEach((row) => {
-                void unlinkNode(row.from_kind, row.from_id, row.to_segment, row.to_port);
+                void unlinkNode(row.from_kind, row.from_id, row.to_segment, row.to_port, row.owner_key);
               });
               d.rows.forEach((row) => {
-                void linkNode(episodeId, row.from_kind, row.from_id, segId, row.to_port as ProjectNodeLink["to_port"]);
+                void linkNode(episodeId, row.from_kind, row.from_id, segId, row.to_port as ProjectNodeLink["to_port"], row.owner_key);
               });
             }
             return;
@@ -3425,7 +3456,7 @@ export default function ProjectCanvas({
           }
           if (d.rows.length) {
             d.rows.forEach((row) => {
-              void unlinkNode(row.from_kind, row.from_id, row.to_segment, row.to_port);
+              void unlinkNode(row.from_kind, row.from_id, row.to_segment, row.to_port, row.owner_key);
             });
             if (parts) {
               d.rows.forEach((row) => {
@@ -3560,7 +3591,7 @@ export default function ProjectCanvas({
       document.removeEventListener("pointerup", onUp);
       document.removeEventListener("pointercancel", onCancel);
     };
-  }, [layout, pos, view, scenePos, infoPos, boxOf, portsOf, outPointOf, inPointOf, persistCards, saveCanvasLayout, saveInfoFramePos, saveView, setSelection, saveOutputPos, setEpisodeOutput, episodeId, notes, persistNotes, addNote, addEntityPh, addPromptPh, persistSegments, linkNode, unlinkNode, nodeKeyParts, addSegment, autoConnectNewNode, persistSizes, persistInfoOffsets, infoGroups, infoNodes, infoNodePos, entityPhs, promptPhs, segments, segPos, sizeOfNode, outputBox, moveGroupTo, persistPositions, pushUndo, pendingLinks, persistPendingLinks, setInfoFramePos, setInfoOffsets, setNodeSizes, setNotes, setOutputPos, openNodeDetail, ownerKeyOf]);
+  }, [layout, pos, view, scenePos, infoPos, boxOf, portsOf, outPointOf, inPointOf, persistCards, saveCanvasLayout, saveInfoFramePos, saveView, setSelection, saveOutputPos, setEpisodeOutput, episodeId, notes, persistNotes, addNote, addEntityPh, addPromptPh, persistSegments, linkNode, unlinkNode, nodeKeyParts, addSegment, autoConnectNewNode, persistSizes, persistInfoOffsets, infoGroups, infoNodes, infoNodePos, entityPhs, promptPhs, segments, segPos, sizeOfNode, outputBox, moveGroupTo, persistPositions, pushUndo, pendingLinks, persistPendingLinks, setInfoFramePos, setInfoOffsets, setNodeSizes, setNotes, setOutputPos, openNodeDetail, ownerKeyOf, ownerKeyOfLink]);
 
   // ── 节点操作 ──
   // 节点接口圆点（ComfyUI 式）：输入口列在左缘（片段六口按列分布）、
@@ -3719,9 +3750,16 @@ export default function ProjectCanvas({
   // ── 组成员操作：装入/移除/自动同步连线。连线语义 = 组内全部成员
   // 接入片段，所以成员变化要把 node_link 同步到位。 ──
   const entitiesOfKind = useCallback(
-    (kind: EntityPhKind) =>
-      kind === "character" ? castCharacters : kind === "location" ? episodeLocations : episodeProps,
-    [castCharacters, episodeLocations, episodeProps],
+    (kind: EntityPhKind) => {
+      const episodeList =
+        kind === "character" ? castCharacters : kind === "location" ? episodeLocations : episodeProps;
+      const globalList = kind === "character" ? characters : kind === "location" ? locations : props;
+      // 集关联为主、全局库兜底：组成员在集关联写入空档/缺失时（装入的
+      // 关联落库失败或尚未整刷回来）仍可解析出成员实体，组节点不消失。
+      const seen = new Set(episodeList.map((e) => e.id));
+      return [...episodeList, ...globalList.filter((e) => !seen.has(e.id))];
+    },
+    [castCharacters, episodeLocations, episodeProps, characters, locations, props],
   );
   // 资料卡新预览：首图大卡片。实体参考图取角色头像/场景与道具参考图；
   // 无图时用类型色淡底 + 名字首字占位（同一卡片形态）。
@@ -3754,6 +3792,9 @@ export default function ProjectCanvas({
       const out: { to_segment: string; to_port: string }[] = [];
       (overview?.node_links ?? []).forEach((l) => {
         if (l.from_kind !== group.kind || !group.members.includes(l.from_id)) return;
+        // 只认本组名下的线：共享成员（同时在其他组）的他组线不算本组
+        // 的口。旧数据线无 owner，按成员匹配回退（历史互斥下等价）。
+        if (l.owner_key && l.owner_key !== `grp:${group.id}`) return;
         const k = `${l.to_segment}|${l.to_port}`;
         if (seen.has(k)) return;
         seen.add(k);
@@ -3764,9 +3805,15 @@ export default function ProjectCanvas({
     [overview],
   );
   const unlinkEntityLinks = useCallback(
-    async (kind: EntityPhKind, entityId: string) => {
-      const rows = (overview?.node_links ?? []).filter((l) => l.from_kind === kind && l.from_id === entityId);
-      for (const row of rows) await unlinkNode(row.from_kind, row.from_id, row.to_segment, row.to_port);
+    // ownerKey 传入（组移除成员）时只删该组名下的线——共享成员在其他
+    // 组的连线保留；旧数据线无 owner（历史互斥语义下该实体只可能在这
+    // 一个组里）视为本组一并清。不传（实体移出本集）全删。
+    async (kind: EntityPhKind, entityId: string, ownerKey?: string) => {
+      const rows = (overview?.node_links ?? []).filter((l) =>
+        l.from_kind === kind && l.from_id === entityId &&
+        (ownerKey ? !l.owner_key || l.owner_key === ownerKey : true),
+      );
+      for (const row of rows) await unlinkNode(row.from_kind, row.from_id, row.to_segment, row.to_port, row.owner_key);
     },
     [overview, unlinkNode],
   );
@@ -3784,7 +3831,9 @@ export default function ProjectCanvas({
     async (groupId: string, entityId: string) => {
       const group = infoGroups.find((g) => g.id === groupId);
       if (!group) return;
-      await unlinkEntityLinks(group.kind, entityId);
+      // 只删本组名下的线：共享语义下同一实体可同时在其他组，那些组的
+      // 连线不受影响（见 unlinkEntityLinks 的 owner 范围删除）。
+      await unlinkEntityLinks(group.kind, entityId, `grp:${groupId}`);
       const members = group.members.filter((m) => m !== entityId);
       persistInfoGroups(
         members.length
@@ -3808,8 +3857,9 @@ export default function ProjectCanvas({
       const group = infoGroups.find((g) => g.id === groupId);
       if (!group || group.members.includes(entityId)) return;
       // 连线与组员落账先于概览整刷（重挂读 localStorage，见 applyMemberPick）。
+      // 组口按本组 owner 名下的线取（共享成员的他组线不算本组的口）。
       const wired = groupWiredPorts(group);
-      for (const w of wired) await linkNode(episodeId, group.kind, entityId, w.to_segment, w.to_port as ProjectNodeLink["to_port"]);
+      for (const w of wired) await linkNode(episodeId, group.kind, entityId, w.to_segment, w.to_port as ProjectNodeLink["to_port"], `grp:${groupId}`);
       persistInfoGroups(infoGroups.map((g) => (g.id === groupId ? { ...g, members: [...g.members, entityId] } : g)));
       await associateEntities(group.kind, [entityId]);
     },
@@ -4048,13 +4098,9 @@ export default function ProjectCanvas({
     const pick = memberPick;
     if (!pick || !episodeId) return;
     setMemberPick(null);
-    // 防御：已被其他组认领的实体不参与本次装入（成员在组间互斥）。
-    const claimedElsewhere = new Set(
-      infoGroups
-        .filter((g) => !(pick.mode === "grp" && g.id === pick.groupId))
-        .flatMap((g) => g.members),
-    );
-    const pending = pick.pending.filter((id) => !claimedElsewhere.has(id));
+    // 成员可在多个组复用（同一角色可同时挂上多个片段，如同主角出场于
+    // 上下两个片段），不做组间互斥过滤。
+    const pending = pick.pending;
     const groupIdOf = () => `g${Date.now()}${Math.floor(Math.random() * 1e4)}`;
     // 概览整刷（associateEntities → selectEpisode 先置空 overview）会令画布
     // 卸载重挂，重挂后的按集状态读自 localStorage。因此画布层落账（位置/
@@ -4071,12 +4117,13 @@ export default function ProjectCanvas({
       persistInfoOffsets(nextOffsets);
       persistEntityPhs(entityPhs.filter((p) => p.id !== ph.id));
       persistInfoGroups([...infoGroups, { id: groupId, kind: pick.kind, members: [...pending] }]);
-      // 占位节点的暂存线随加载转正：组内每个成员各落一条 node_link。
+      // 占位节点的暂存线随加载转正：组内每个成员各落一条 node_link
+      // （owner 记组身份，组删线/找组口按此精确匹配）。
       const ephKey = `eph:${ph.id}`;
       const myPending = pendingLinks.filter((l) => l.fromKey === ephKey);
       for (const l of myPending) {
         for (const memberId of pending) {
-          await linkNode(episodeId, pick.kind, memberId, l.toSegmentId, l.toPort as ProjectNodeLink["to_port"]);
+          await linkNode(episodeId, pick.kind, memberId, l.toSegmentId, l.toPort as ProjectNodeLink["to_port"], `grp:${groupId}`);
         }
       }
       if (myPending.length) persistPendingLinks(pendingLinks.filter((l) => l.fromKey !== ephKey));
@@ -4092,9 +4139,11 @@ export default function ProjectCanvas({
       const removals = group.members.filter((id) => !pending.includes(id));
       const wired = groupWiredPorts(group);
       for (const id of additions) {
-        for (const w of wired) await linkNode(episodeId, pick.kind, id, w.to_segment, w.to_port as ProjectNodeLink["to_port"]);
+        for (const w of wired) await linkNode(episodeId, pick.kind, id, w.to_segment, w.to_port as ProjectNodeLink["to_port"], `grp:${group.id}`);
       }
-      for (const id of removals) await unlinkEntityLinks(pick.kind, id);
+      // 面板勾掉的成员 = 从本组移除：只删本组名下的线，成员在其他组
+      // 的连线保留（共享复用）。
+      for (const id of removals) await unlinkEntityLinks(pick.kind, id, `grp:${group.id}`);
       persistInfoGroups(infoGroups.map((g) => (g.id === group.id ? { ...g, members: [...pending] } : g)));
       await associateEntities(pick.kind, additions);
       return;
@@ -4116,7 +4165,7 @@ export default function ProjectCanvas({
       if (seen.has(k)) continue;
       seen.add(k);
       for (const id of pending) {
-        if (id !== srcId) await linkNode(episodeId, pick.kind, id, row.to_segment, row.to_port);
+        if (id !== srcId) await linkNode(episodeId, pick.kind, id, row.to_segment, row.to_port, `grp:${groupId}`);
       }
     }
     await associateEntities(pick.kind, pending);
@@ -5736,21 +5785,17 @@ export default function ProjectCanvas({
         />
       )}
       {/* 成员装入面板（多选勾选 + 装入确认）：空白节点加载 / 组追加裁剪 /
-          默认节点转组共用；勾选只是草稿，点「装入 N 项」一次性落地 */}
+          默认节点转组共用；勾选只是草稿，点「装入 N 项」一次性落地。
+          成员可被多个组复用（同一角色可出场于多个片段），不做组间互斥。 */}
       {memberPick && (() => {
         const kindLabel = kindTextOf(memberPick.kind);
         const libKind = memberPick.kind === "character" ? "characters" : memberPick.kind === "location" ? "locations" : "props";
-        // 已被其他组认领的实体不可选（成员在组间互斥）。
-        const disabledIds = infoGroups
-          .filter((g) => !(memberPick.mode === "grp" && g.id === memberPick.groupId))
-          .flatMap((g) => g.members);
         return (
           <ProjectLibraryPanel
             kind={libKind}
             mode="pick"
             multi
             selectedIds={memberPick.pending}
-            disabledIds={disabledIds}
             onClose={() => setMemberPick(null)}
             pickTitle={t("project.canvas.memberPickTitle", { kind: kindLabel })}
             onTogglePick={(id) => {
