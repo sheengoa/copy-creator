@@ -240,7 +240,9 @@ function buildLayout(
   const cardPos: Record<string, Pos> = {};
   const cards: CanvasCard[] = [];
   const frames: CanvasFrame[] = [];
-  let worldW = 1200;
+  // 世界宽度基线 1500：默认模板的片段占位横排（约 1000 宽）+ 片段列 +
+  // 成片节点都要落在正坐标内，首开视口即完整可见。
+  let worldW = 1500;
   let worldH = 900;
   // 场景框默认位置：按上一帧右缘顺序累计（固定间距会让变宽的框互相
   // 重叠）；用户摆过的场景用存储坐标，但游标仍吸收其占位。
@@ -1449,25 +1451,26 @@ export default function ProjectCanvas({
       const segX = layout.worldW + 80 - SEG_W - 160;
       created.forEach((segId, i) => {
         const segY = Math.max(WORLD_MARGIN, 110 + i * 260);
-        // 片段左侧三列两行：角色/场景/道具靠片段，提示词/剧本纸片在最左
-        // （纸片更宽）。
-        const c0 = segX - 40 - INFO_W;
-        const c1 = c0 - 24 - INFO_W;
-        const c2 = c1 - 24 - SCRIPT_W;
-        const r0 = segY - 140;
-        const r1 = r0 + INFO_H + 28;
-        const r2 = r1 + INFO_H + 28;
+        // 片段左侧一条横向占位带（右→左：角色/场景/道具/提示词/剧本），
+        // 等距 44px、卡片与片段留 56px；行带高约 220，垂直居中于片段。
+        // 片段纵向间距 260 > 行带高，两条占位带互不相交，彻底排开。
+        const rowY = segY - 50;
+        const colA = segX - 56 - INFO_W;
+        const colB = colA - 44 - INFO_W;
+        const colC = colB - 44 - INFO_W;
+        const colD = colC - 44 - SCRIPT_W;
+        const colE = colD - 44 - SCRIPT_W;
         const charId = `eph${Date.now()}${Math.floor(Math.random() * 1e4)}a${i}`;
         const locId = `eph${Date.now()}${Math.floor(Math.random() * 1e4)}b${i}`;
         const propId = `eph${Date.now()}${Math.floor(Math.random() * 1e4)}c${i}`;
         const promptId = `pph${Date.now()}${Math.floor(Math.random() * 1e4)}${i}`;
         const scriptId = `sph${Date.now()}${Math.floor(Math.random() * 1e4)}${i}`;
-        newEphs.push({ id: charId, kind: "character", x: c0, y: r0 });
-        newEphs.push({ id: locId, kind: "location", x: c1, y: r0 });
-        newEphs.push({ id: propId, kind: "prop", x: c0, y: r1 });
-        newPrompts.push({ id: promptId, promptId: "", x: c2, y: r1 });
+        newEphs.push({ id: charId, kind: "character", x: colA, y: rowY });
+        newEphs.push({ id: locId, kind: "location", x: colB, y: rowY });
+        newEphs.push({ id: propId, kind: "prop", x: colC, y: rowY });
+        newPrompts.push({ id: promptId, promptId: "", x: colD, y: rowY });
         newScripts.push({ id: scriptId, path: "" });
-        scriptOffsets[`script:${scriptId}`] = { x: c2, y: r2 };
+        scriptOffsets[`script:${scriptId}`] = { x: colE, y: rowY };
         pendings.push(
           { fromKey: `eph:${charId}`, toSegmentId: segId, toPort: "character" },
           { fromKey: `eph:${locId}`, toSegmentId: segId, toPort: "location" },
