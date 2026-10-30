@@ -576,7 +576,8 @@ export default function ProjectCanvas({
       fromPortId?: string;
     };
     // 摘线到空白弹出的菜单：被摘的线（隐藏态）。菜单创建节点后转接并
-    // 删旧行；取消（点空白/Esc/建无口节点）则放回原口。
+    // 删旧行；取消（点空白/Esc）则整组断开（discardDetachedWire）；
+    // 建出的节点接不回线（无口）才放回原口。
     detached?: { pendings: PendingLink[]; rows: ProjectNodeLink[] };
   } | null>(null);
   const [addMenuQuery, setAddMenuQuery] = useState("");
@@ -2099,7 +2100,7 @@ export default function ProjectCanvas({
     // 而不是再拉一条新线。
     rewire?: boolean;
     // addnode：从「摘线到空白」菜单创建节点后要转接的摘下线
-    //（pending 一条或 db 多行），创建成功即删旧写新，取消则放回。
+    //（pending 一条或 db 多行），创建成功即删旧写新，取消则断开。
     detached?: { pendings: PendingLink[]; rows: ProjectNodeLink[] };
     wire?: { // addnode：从「拖线到空白」菜单创建节点后要自动接的线
       fromKey: string;
@@ -2132,6 +2133,21 @@ export default function ProjectCanvas({
   useEffect(() => {
     liftedRef.current = liftedWire;
   }, [liftedWire]);
+  // 「摘线到空白」菜单的取消（Esc / 点空白）：「不建节点直接退出」＝
+  // 摘下的线就此断开——正式线删连接行、暂存线从画布层移除，不放回
+  // 原口（反悔走「拖回原口松手」手势）。
+  const discardDetachedWire = useCallback(
+    (detached: { pendings: PendingLink[]; rows: ProjectNodeLink[] }) => {
+      detached.rows.forEach((row) => {
+        void unlinkNode(row.from_kind, row.from_id, row.to_segment, row.to_port);
+      });
+      if (detached.pendings.length > 0) {
+        persistPendingLinks(pendingLinks.filter((l) => !detached.pendings.includes(l)));
+      }
+      setLiftedWire(null);
+    },
+    [pendingLinks, persistPendingLinks, unlinkNode],
+  );
   // Blender 式切线（Shift+右键滑动）：切痕与候选线缓存。切痕不经
   // React 状态——滑动中每帧直写 polyline 的 points，避免整画布逐帧
   // 重渲染（表现为视图跳帧）；显示/隐藏由 pc-cutting 类驱动。
@@ -2204,9 +2220,11 @@ export default function ProjectCanvas({
     (e: React.PointerEvent) => {
       const target = e.target instanceof Element ? e.target : null;
       // 节点搜索框是连线释放后的模态状态：点击外部只取消搜索框，
-      // 摘线场景同时恢复原连接，不能继续落入画布空白的框选分支。
+      // 摘线场景同时断开摘下的线，不能继续落入画布空白的框选分支。
       if (addMenu && !target?.closest(".pc-addmenu")) {
-        if (addMenu.detached) setLiftedWire(null);
+        // 点空白取消＝不建节点直接退出：摘下的线就此断开（见
+        // discardDetachedWire），不放回原口。
+        if (addMenu.detached) discardDetachedWire(addMenu.detached);
         setAddMenu(null);
         setAddMenuQuery("");
         e.preventDefault();
@@ -2515,7 +2533,7 @@ export default function ProjectCanvas({
       dragRef.current = { kind: "marquee", sx: e.clientX, sy: e.clientY, mq, moved: false };
       e.preventDefault();
     },
-    [layout, pos, setSelection, view, infoPos, scenePos, portsOf, outputBox, notes, segPos, sizeOfNode, infoNodePos, nodeSizes, groupSnapshot, nodeGroups, memberFrame, addMenu, nodeLinks, pendingLinks, ownerKeyOf, buildCutTargets, setLiftedWire],
+    [layout, pos, setSelection, view, infoPos, scenePos, portsOf, outputBox, notes, segPos, sizeOfNode, infoNodePos, nodeSizes, groupSnapshot, nodeGroups, memberFrame, addMenu, nodeLinks, pendingLinks, ownerKeyOf, buildCutTargets, setLiftedWire, discardDetachedWire],
   );
 
 
@@ -5266,8 +5284,9 @@ export default function ProjectCanvas({
               onChange={(event) => setAddMenuQuery(event.target.value)}
               onKeyDown={(event) => {
                 if (event.key === "Escape") {
-                  // 取消菜单：摘线交给菜单而未落定时放回原口。
-                  if (addMenu.detached) setLiftedWire(null);
+                  // 取消菜单＝不建节点直接退出：摘下的线就此断开
+                  // （见 discardDetachedWire），不放回原口。
+                  if (addMenu.detached) discardDetachedWire(addMenu.detached);
                   setAddMenu(null);
                 }
               }}
