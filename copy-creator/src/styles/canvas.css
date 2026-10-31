@@ -712,6 +712,25 @@
 
 /* ── 节点体系 v2：加载 / 保存 / 预览 / 菜单分组 ───────────── */
 
+/* 建节点菜单分组列表：菜单本体由 FreeCanvas 按视口剩余空间内联限高，
+   搜索框常驻在外，分组在这里区内滚动（贴近视口下缘打开不再被裁）。 */
+.pc-addmenu-list {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  scrollbar-width: thin;
+  scrollbar-color: rgba(255, 255, 255, 0.28) transparent;
+}
+
+.pc-addmenu-list::-webkit-scrollbar {
+  width: 6px;
+}
+
+.pc-addmenu-list::-webkit-scrollbar-thumb {
+  border-radius: 3px;
+  background: rgba(255, 255, 255, 0.28);
+}
+
 /* 建节点菜单分组：生成 / 加载 / 输出 三类链路 + 其他。 */
 .pc-addmenu-group {
   display: flex;
@@ -733,12 +752,45 @@
   padding: 0 10px 2px;
 }
 
-/* 加载文本节点：正文即节点体（form 内常驻编辑框，自适应高度）。 */
+/* 加载文本节点：白卡浮起的常驻编辑区（对齐 fc-node-input 的分段槽
+   语言，透明底在玻璃上看不出可输入范围）；flex 填满节点体，拉伸
+   手柄改变节点高度时编辑区随之适配，不再留无法点入的空白。 */
 .fc-root .fc-node-edit.is-inline {
-  flex: none;
+  flex: 1;
   min-height: 88px;
   width: 100%;
-  resize: vertical;
+  box-sizing: border-box;
+  border: none;
+  border-radius: 10px;
+  resize: none;
+  padding: 9px 11px;
+  background: rgba(255, 255, 255, 0.92);
+  color: var(--text-primary);
+  font-size: 12px;
+  line-height: 1.6;
+  outline: none;
+  font-family: inherit;
+  box-shadow: 0 1px 2.5px rgba(31, 35, 65, 0.1), 0 0 0 0.5px rgba(0, 0, 0, 0.055);
+}
+
+.fc-root .fc-node-edit.is-inline:focus {
+  background: #fff;
+  box-shadow:
+    0 1px 2.5px rgba(31, 35, 65, 0.1),
+    0 0 0 2px color-mix(in srgb, var(--node-accent, var(--accent)) 40%, transparent),
+    0 0 0 0.5px var(--node-accent, var(--accent));
+}
+
+[data-theme="dark"] .fc-root .fc-node-edit.is-inline {
+  background: rgba(255, 255, 255, 0.1);
+  box-shadow: inset 0 0.5px 0 rgba(255, 255, 255, 0.08), 0 0 0 0.5px rgba(255, 255, 255, 0.12);
+}
+
+[data-theme="dark"] .fc-root .fc-node-edit.is-inline:focus {
+  background: rgba(255, 255, 255, 0.14);
+  box-shadow:
+    0 0 0 2px color-mix(in srgb, var(--node-accent, var(--accent)) 45%, transparent),
+    0 0 0 0.5px var(--node-accent, var(--accent));
 }
 
 /* 加载节点：拖入提示 / 音频播放条。 */

@@ -2509,13 +2509,19 @@ export default function FreeCanvas({ canvasId }: { canvasId: string }) {
         </svg>
 
         {/* 双击空白的节点选择框（ComfyUI 搜索框的对应物）：按生成/加载/
-            输出三类分组。 */}
+            输出三类分组。左上角锚在指针处；贴近视口下缘时按剩余空间限高，
+            分组列表区内滚动——底部被裁掉又滚不到的项等于选不了。 */}
         {addMenu && (
-          <div
-            className="pc-addmenu"
-            style={{ left: addMenu.sx, top: addMenu.sy }}
-            onPointerDown={(event) => event.stopPropagation()}
-          >
+          <WheelGate>
+            <div
+              className="pc-addmenu"
+              style={{
+                left: Math.max(8, Math.min(addMenu.sx, (vpRef.current?.clientWidth ?? 600) - 266)),
+                top: addMenu.sy,
+                maxHeight: Math.max(150, (vpRef.current?.clientHeight ?? 600) - addMenu.sy - 12),
+              }}
+              onPointerDown={(event) => event.stopPropagation()}
+            >
             <input
               className="pc-addmenu-search"
               placeholder={t("project.canvas.addNodeSearch")}
@@ -2534,6 +2540,7 @@ export default function FreeCanvas({ canvasId }: { canvasId: string }) {
                 el?.focus({ preventScroll: true });
               }}
             />
+            <div className="pc-addmenu-list">
             {menuGroups
               .map((group) => ({
                 ...group,
@@ -2581,7 +2588,9 @@ export default function FreeCanvas({ canvasId }: { canvasId: string }) {
                   ))}
                 </div>
               ))}
-          </div>
+            </div>
+            </div>
+          </WheelGate>
         )}
 
         {/* 空画布示意：一键创建 文本→图像生成→预览 最小工作流 */}
@@ -2610,19 +2619,23 @@ export default function FreeCanvas({ canvasId }: { canvasId: string }) {
 
         {/* 资源库选择浮层：加载节点的「从资源库选择」入口 */}
         {pickerForNode && (
-          <LazyLibraryPicker
-            onPick={(filePath) => {
-              const targetId = pickerForNode;
-              setPickerForNode(null);
-              void store.getState().updateNode(targetId, { resourcePath: filePath });
-            }}
-            onClose={() => setPickerForNode(null)}
-          />
+          <WheelGate>
+            <LazyLibraryPicker
+              onPick={(filePath) => {
+                const targetId = pickerForNode;
+                setPickerForNode(null);
+                void store.getState().updateNode(targetId, { resourcePath: filePath });
+              }}
+              onClose={() => setPickerForNode(null)}
+            />
+          </WheelGate>
         )}
 
         {/* 大图预览（预览图像节点双击） */}
         {lightboxUrl && (
-          <ImageLightbox src={lightboxUrl} alt="" onClose={() => setLightboxSrc("")} />
+          <WheelGate>
+            <ImageLightbox src={lightboxUrl} alt="" onClose={() => setLightboxSrc("")} />
+          </WheelGate>
         )}
 
         {/* 画布信息玻璃卡 + 统计 */}
@@ -2715,6 +2728,22 @@ export default function FreeCanvas({ canvasId }: { canvasId: string }) {
       </div>
     </div>
   );
+}
+
+/** 弹层滚轮隔离：视口滚轮缩放挂在原生非被动监听上（React 合成事件的
+ *  stopPropagation 拦不住它），弹层内的滚轮必须在原生层停掉冒泡——否则
+ *  缩放监听的 preventDefault 会把弹层自身的默认滚动一并杀掉，表现为
+ *  「列表滚不动、画布在缩放」。资源库弹窗 / 大图灯箱 / 节点选择框都用。 */
+function WheelGate({ children }: { children: ReactNode }) {
+  const gateRef = useRef<HTMLDivElement | null>(null);
+  useEffect(() => {
+    const el = gateRef.current;
+    if (!el) return;
+    const isolate = (e: WheelEvent) => e.stopPropagation();
+    el.addEventListener("wheel", isolate);
+    return () => el.removeEventListener("wheel", isolate);
+  }, []);
+  return <div ref={gateRef}>{children}</div>;
 }
 
 /** 懒加载的资源库选择浮层：画布加载节点「从资源库选择」入口，薄壳复用
