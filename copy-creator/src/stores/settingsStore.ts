@@ -85,6 +85,14 @@ interface SettingsState {
   clipboardExclusions: string;
   /** 查找替换历史（全局共享，资源详情页与新建内容窗口共用）。 */
   findReplaceHistory: FindHistoryEntry[];
+  /** AI 生图（画布区）：提供商与双协议配置，Key 明文本机（与 google_api_key 同级）。 */
+  aiProvider: "openai" | "gemini";
+  aiOpenaiKey: string;
+  aiOpenaiBase: string;
+  aiGeminiKey: string;
+  aiGeminiBase: string;
+  aiModel: string;
+  aiTimeout: number;
 
   toggleTheme: () => void;
   setThemeMode: (mode: ThemeMode) => Promise<void>;
@@ -102,6 +110,16 @@ interface SettingsState {
   /** 函数式更新查找替换历史：持久化并广播跨窗口同步事件。 */
   setFindReplaceHistory: (update: (prev: FindHistoryEntry[]) => FindHistoryEntry[]) => Promise<void>;
   setAutostart: (enabled: boolean) => Promise<boolean>;
+  /** AI 生图配置：批量落库并同步本 store 字段（自持久化分区，不走统一保存按钮）。 */
+  saveAiSettings: (patch: {
+    aiProvider?: "openai" | "gemini";
+    aiOpenaiKey?: string;
+    aiOpenaiBase?: string;
+    aiGeminiKey?: string;
+    aiGeminiBase?: string;
+    aiModel?: string;
+    aiTimeout?: number;
+  }) => Promise<void>;
 }
 
 // 设置装载的窗口级缓存：径向菜单窗口没有 App 层的装载流程，各数据层
@@ -131,6 +149,13 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
   clipboardMaxRecords: 0,
   clipboardExclusions: "",
   findReplaceHistory: [],
+  aiProvider: "openai",
+  aiOpenaiKey: "",
+  aiOpenaiBase: "",
+  aiGeminiKey: "",
+  aiGeminiBase: "",
+  aiModel: "",
+  aiTimeout: 60,
 
   // 头部快捷切换：跟随系统模式下取当前解析值的反色落为显式偏好，
   // 其余模式在明暗间往返。
@@ -183,6 +208,13 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
         clipboardMaxRecords: parseMaxRecords(settings.clipboard_max_records),
         clipboardExclusions: settings.clipboard_exclusions || "",
         findReplaceHistory: parseFindHistory(settings.find_replace_history),
+        aiProvider: settings.ai_provider === "gemini" ? "gemini" : "openai",
+        aiOpenaiKey: settings.ai_openai_key || "",
+        aiOpenaiBase: settings.ai_openai_base || "",
+        aiGeminiKey: settings.ai_gemini_key || "",
+        aiGeminiBase: settings.ai_gemini_base || "",
+        aiModel: settings.ai_model || "",
+        aiTimeout: Number.parseInt(settings.ai_timeout || "60", 10) || 60,
       });
 
       // Read autostart state from the .desktop file
@@ -360,6 +392,31 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
       // Do NOT set autostartEnabled=true on failure — the caller
       // should surface the error to the user
       throw e;
+    }
+  },
+
+  saveAiSettings: async (patch) => {
+    const payload: Record<string, string> = {};
+    if (patch.aiProvider !== undefined) payload.ai_provider = patch.aiProvider;
+    if (patch.aiOpenaiKey !== undefined) payload.ai_openai_key = patch.aiOpenaiKey;
+    if (patch.aiOpenaiBase !== undefined) payload.ai_openai_base = patch.aiOpenaiBase;
+    if (patch.aiGeminiKey !== undefined) payload.ai_gemini_key = patch.aiGeminiKey;
+    if (patch.aiGeminiBase !== undefined) payload.ai_gemini_base = patch.aiGeminiBase;
+    if (patch.aiModel !== undefined) payload.ai_model = patch.aiModel;
+    if (patch.aiTimeout !== undefined) payload.ai_timeout = String(patch.aiTimeout);
+    try {
+      await invoke("set_settings_batch", { settings: payload });
+      const next: Partial<SettingsState> = {};
+      if (patch.aiProvider !== undefined) next.aiProvider = patch.aiProvider;
+      if (patch.aiOpenaiKey !== undefined) next.aiOpenaiKey = patch.aiOpenaiKey;
+      if (patch.aiOpenaiBase !== undefined) next.aiOpenaiBase = patch.aiOpenaiBase;
+      if (patch.aiGeminiKey !== undefined) next.aiGeminiKey = patch.aiGeminiKey;
+      if (patch.aiGeminiBase !== undefined) next.aiGeminiBase = patch.aiGeminiBase;
+      if (patch.aiModel !== undefined) next.aiModel = patch.aiModel;
+      if (patch.aiTimeout !== undefined) next.aiTimeout = patch.aiTimeout;
+      if (Object.keys(next).length > 0) set(next);
+    } catch (e) {
+      console.error("Failed to save AI settings:", e);
     }
   },
 }));
