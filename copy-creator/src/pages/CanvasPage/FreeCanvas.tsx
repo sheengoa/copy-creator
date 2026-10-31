@@ -421,39 +421,44 @@ export default function FreeCanvas({ canvasId }: { canvasId: string }) {
     detached?: { connId: string; fromKey: string };
   } | null>(null);
   const [addMenuQuery, setAddMenuQuery] = useState("");
-  /** 合集列表拖拽排序的进行时草稿（order 实时交换，松手落库）。 */
-  const [collectionDrag, setCollectionDrag] = useState<{ nodeId: string; order: string[] } | null>(null);
-  /** FLIP 动画待办：交换前各成员的基准槽位坐标 + 槽位表（均为未变换
-   *  几何），提交后由布局效果按差值回放——动画中的 transform 不参与
-   *  判定与测量，命中和位移完全解耦。 */
-  const collectionFlipRef = useRef<{ before: Map<string, number>; slots: number[] } | null>(null);
+  /** 合集列表拖拽排序（dnd-kit sortable 同款模型）：拖拽全程 DOM 顺序
+   *  不变——被抓行 1:1 跟手（指针位移直写 transform），其余行按槽位
+   *  让位（React 过渡）；松手才提交最终顺序并补一个落位动画。 */
+  const [collectionDrag, setCollectionDrag] = useState<{
+    nodeId: string;
+    baseOrder: string[];
+    slotTops: number[];
+    stride: number;
+    fromIndex: number;
+    dragIndex: number;
+    dy: number;
+    order: string[];
+  } | null>(null);
+  /** 松手落位动画待办：被抓行松手时的视觉 top，落位后由布局效果回放。 */
+  const collectionDropRef = useRef<{ nodeId: string; connId: string; fromTop: number } | null>(null);
 
-  // 合集排序 FLIP：DOM 提交后按交换前基准槽位差反向位移，再过渡归零。
+  // 松手落位：最终顺序渲染后，被抓行从松手视觉位置滑到落位槽。
   useLayoutEffect(() => {
-    const pending = collectionFlipRef.current;
-    collectionFlipRef.current = null;
-    if (!collectionDrag || !pending) return;
-    const listEl = document.querySelector(`.pc-node[data-key="${collectionDrag.nodeId}"] .fc-collection-list`);
-    if (!listEl) return;
-    listEl.querySelectorAll<HTMLElement>(".fc-collection-item").forEach((row) => {
-      const conn = row.dataset.conn ?? "";
-      const prevTop = pending.before.get(conn);
-      const pos = collectionDrag.order.indexOf(conn);
-      if (prevTop == null || pos < 0) return;
-      const delta = prevTop - pending.slots[Math.min(pos, pending.slots.length - 1)];
-      if (Math.abs(delta) < 1) return;
-      row.style.transition = "none";
-      row.style.transform = `translateY(${delta}px)`;
-      void row.offsetHeight; // 强制回流：让反向位移立刻生效
-      row.style.transition = "transform 0.18s cubic-bezier(0.2, 0.8, 0.3, 1)";
-      row.style.transform = "";
-      const settle = () => {
-        row.style.transition = "";
-        row.removeEventListener("transitionend", settle);
-      };
-      row.addEventListener("transitionend", settle);
-    });
-  }, [collectionDrag]);
+    const drop = collectionDropRef.current;
+    collectionDropRef.current = null;
+    if (!drop) return;
+    const row = document.querySelector<HTMLElement>(
+      `.pc-node[data-key="${drop.nodeId}"] .fc-collection-item[data-conn="${drop.connId}"]`,
+    );
+    if (!row) return;
+    const delta = drop.fromTop - row.getBoundingClientRect().top;
+    if (Math.abs(delta) < 1) return;
+    row.style.transition = "none";
+    row.style.transform = `translateY(${delta}px)`;
+    void row.offsetHeight; // 强制回流：让反向位移立刻生效
+    row.style.transition = "transform 0.16s cubic-bezier(0.2, 0.8, 0.3, 1)";
+    row.style.transform = "";
+    const settle = () => {
+      row.style.transition = "";
+      row.removeEventListener("transitionend", settle);
+    };
+    row.addEventListener("transitionend", settle);
+  }, []);
   const [wireDraft, setWireDraft] = useState<{ d: string; invalid: boolean; color?: string } | null>(null);
   /** 摘线拿着（rewire）中：该连线暂隐藏，松手转接或放回。 */
   const [liftedWire, setLiftedWire] = useState<{ connId: string; fromKey: string } | null>(null);
@@ -1833,7 +1838,9 @@ export default function FreeCanvas({ canvasId }: { canvasId: string }) {
       .filter((c) => c.to_node === node.id)
       .sort((a, b) => a.created_at.localeCompare(b.created_at));
     const byFrom = new Map(conns.map((c) => [c.from_node, c]));
-    const order = collectionDrag?.nodeId === node.id ? collectionDrag.order : meta.order;
+    // 拖拽进行时按开始顺序渲染（DOM 顺序全程不变，靠 transform 表达位移）。
+    const drag = collectionDrag?.nodeId === node.id ? collectionDrag : null;
+    const order = drag ? drag.baseOrder : meta.order;
     const orderedIds: string[] = [];
     for (const id of order) {
       if (byFrom.has(id) && !orderedIds.includes(id)) orderedIds.push(id);
@@ -1867,8 +1874,8 @@ export default function FreeCanvas({ canvasId }: { canvasId: string }) {
       .filter((x): x is NonNullable<typeof x> => x !== null);
   }
 
-  /** 列表把手拖拽排序（剪切板/快捷输入同款交互的指针实现）：按住把手
-   *  上下移动，经过哪行就实时交换到哪；松手把最终顺序落进 metadata。 */
+  /** 列表把手拖拽排序（剪切板/快捷输入 dnd-kit 手感的指针实现）：抓起
+   *  的行 1:1 跟手，其他行在跨槽时让位过渡；松手提交最终顺序并落位。 */
   const startCollectionReorder = (node: CanvasNode, index: number, e: React.PointerEvent<HTMLButtonElement>) => {
     const items = collectionItemsOf(node);
     if (items.length < 2) return;
@@ -1878,46 +1885,52 @@ export default function FreeCanvas({ canvasId }: { canvasId: string }) {
     if (!listEl) return;
     const meta = node.metadata;
     if (meta.kind !== "collection_image" && meta.kind !== "collection_text" && meta.kind !== "collection_video") return;
-    const order = items.map((i) => i.from.id);
-    let curIndex = index;
-    const rowEl = handle.closest(".fc-collection-item");
+    const baseOrder = items.map((i) => i.from.id);
+    const rowTops = items.map((_, i) => {
+      const r = listEl.querySelector<HTMLElement>(`.fc-collection-item[data-idx="${i}"]`);
+      return r ? r.getBoundingClientRect().top : 0;
+    });
+    const stride = items.length > 1 ? rowTops[1] - rowTops[0] : 0;
+    if (stride <= 0) return;
+    const draggedId = baseOrder[index];
+    const rowEl = handle.closest<HTMLElement>(".fc-collection-item");
     rowEl?.classList.add("is-dragging");
     try {
       handle.setPointerCapture(e.pointerId);
     } catch {
       // 指针不可捕获（合成事件等）：退化为元素监听。
     }
-    // 基准槽位（按下瞬间的未变换几何）：落点判定与 FLIP 全用这套数据，
-    // 滑动动画的 transform 不参与——elementFromPoint 会被位移中的行骗到。
-    const slotTops = items.map((_, i) => {
-      const r = listEl.querySelector<HTMLElement>(`.fc-collection-item[data-idx="${i}"]`);
-      return r ? r.getBoundingClientRect().top : 0;
-    });
-    const stride = items.length > 1 ? slotTops[1] - slotTops[0] : 0;
-    const slotTopOf = (connId: string, ord: string[]) => {
-      const pos = ord.indexOf(connId);
-      return pos >= 0 ? slotTops[Math.min(pos, slotTops.length - 1)] : 0;
-    };
+    const y0 = e.clientY;
+    let dragIndex = index;
+    const logical = [...baseOrder];
+    let dy = 0;
     const onMove = (ev: PointerEvent) => {
-      if (stride <= 0) return;
-      let idx = Math.floor((ev.clientY - slotTops[0]) / stride);
+      dy = ev.clientY - y0;
+      // 跟手：被抓行位移直写样式（不过 React，拖动零延迟）。
+      rowEl?.style.setProperty("transform", `translateY(${dy}px)`);
+      // 槽位判定：被抓行中心点落在哪个基准槽位（几何计算，不受动画影响）。
+      const centerY = rowTops[index] + dy + stride / 2;
+      let idx = Math.floor((centerY - rowTops[0]) / stride);
       idx = Math.max(0, Math.min(items.length - 1, idx));
-      if (idx === curIndex) return;
-      // FLIP 前置：交换前各成员的基准槽位（几何值，非动画位置）。
-      const before = new Map<string, number>();
-      order.forEach((connId) => before.set(connId, slotTopOf(connId, order)));
-      const [moved] = order.splice(curIndex, 1);
-      order.splice(idx, 0, moved);
-      curIndex = idx;
-      collectionFlipRef.current = { before, slots: slotTops };
-      setCollectionDrag({ nodeId: node.id, order: [...order] });
+      if (idx !== dragIndex) {
+        const pos = logical.indexOf(draggedId);
+        const [moved] = logical.splice(pos, 1);
+        logical.splice(idx, 0, moved);
+        dragIndex = idx;
+        setCollectionDrag({
+          nodeId: node.id, baseOrder, slotTops: rowTops, stride,
+          fromIndex: index, dragIndex, dy, order: [...logical],
+        });
+      }
     };
     const onUp = () => {
       handle.removeEventListener("pointermove", onMove);
       handle.removeEventListener("pointerup", onUp);
       handle.removeEventListener("pointercancel", onUp);
       rowEl?.classList.remove("is-dragging");
-      const finalOrder = [...order];
+      rowEl?.style.removeProperty("transform");
+      const finalOrder = [...logical];
+      collectionDropRef.current = { nodeId: node.id, connId: draggedId, fromTop: rowTops[index] + dy };
       setCollectionDrag(null);
       void store.getState().updateNode(node.id, {
         metadata: JSON.stringify({ ...meta, order: finalOrder }),
@@ -2707,8 +2720,23 @@ export default function FreeCanvas({ canvasId }: { canvasId: string }) {
                     <div className="fc-node-placeholder">{t("canvas.collectionEmpty")}</div>
                   ) : (
                     <div className="fc-collection-list">
-                      {items.map((item, i) => (
-                        <div key={item.connId} className="fc-collection-item" data-idx={i} data-conn={item.connId}>
+                      {items.map((item, i) => {
+                        const drag = collectionDrag?.nodeId === node.id ? collectionDrag : null;
+                        const orig = drag ? drag.baseOrder.indexOf(item.from.id) : -1;
+                        const isDragged = !!drag && orig === drag.fromIndex;
+                        let shift = 0;
+                        if (drag && orig >= 0 && !isDragged) {
+                          if (drag.fromIndex < drag.dragIndex && orig > drag.fromIndex && orig <= drag.dragIndex) shift = -drag.stride;
+                          else if (drag.fromIndex > drag.dragIndex && orig >= drag.dragIndex && orig < drag.fromIndex) shift = drag.stride;
+                        }
+                        return (
+                        <div
+                          key={item.connId}
+                          className={`fc-collection-item${isDragged ? " is-dragging" : ""}`}
+                          data-idx={i}
+                          data-conn={item.connId}
+                          style={shift ? { transform: `translateY(${shift}px)` } : undefined}
+                        >
                           <span className="fc-collection-idx">{i + 1}</span>
                           {item.kind === "image" && item.path ? (
                             <ResourceThumb path={item.path} className="fc-collection-thumb" />
@@ -2739,7 +2767,8 @@ export default function FreeCanvas({ canvasId }: { canvasId: string }) {
                             {Icons.close}
                           </button>
                         </div>
-                      ))}
+                        );
+                      })}
                     </div>
                   )}
                 </div>

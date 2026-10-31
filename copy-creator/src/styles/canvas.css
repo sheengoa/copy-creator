@@ -1074,13 +1074,17 @@
   background: rgba(31, 35, 65, 0.05);
 }
 
-/* 拖拽排序进行时：被抓的行浮起（投影加深），其余行由 FLIP 过渡滑动。 */
+/* 拖拽排序：其余行 transform 让位过渡；被抓行跟手（无 transform 过渡）
+   且浮起（投影 + 类型色描边 + 置顶）。 */
 .fc-root .fc-collection-item {
-  transition: box-shadow 0.15s ease;
+  transition: transform 0.18s cubic-bezier(0.2, 0.8, 0.3, 1), box-shadow 0.15s ease;
 }
 
 .fc-root .fc-collection-item.is-dragging {
-  box-shadow: 0 3px 10px rgba(31, 35, 65, 0.18), 0 0 0 0.5px color-mix(in srgb, var(--node-accent, var(--accent)) 45%, transparent);
+  position: relative;
+  z-index: 2;
+  transition: box-shadow 0.15s ease;
+  box-shadow: 0 4px 12px rgba(31, 35, 65, 0.2), 0 0 0 0.5px color-mix(in srgb, var(--node-accent, var(--accent)) 45%, transparent);
 }
 
 .fc-root .fc-collection-text {
