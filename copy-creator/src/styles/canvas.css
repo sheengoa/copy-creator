@@ -480,11 +480,6 @@
   display: none;
 }
 
-.fc-node-input.count {
-  width: 48px;
-  flex-shrink: 0;
-}
-
 .fc-node-input.grow {
   flex: 1;
   min-width: 0;
@@ -1025,6 +1020,218 @@
 
 [data-theme="dark"] .fc-combo-item:hover {
   background: rgba(255, 255, 255, 0.07);
+}
+
+/* 取值展示态：非编辑时以「主值 + 弱化尾注」呈现当前选择（与下拉条目
+   同款双段），点按换回原始输入框编辑——面板显示的是选择后的样子。 */
+.fc-combo-display {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  text-align: left;
+  cursor: text;
+  font-family: inherit;
+  padding-right: 26px;
+}
+
+.fc-combo-display-main {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.fc-combo-display-tail {
+  flex: none;
+  margin-left: auto;
+  font-size: 10.5px;
+  letter-spacing: 0.03em;
+  color: var(--text-tertiary);
+}
+
+/* ── 节点风悬浮说明（NodeHint）────────────────────────────── */
+
+/* 包裹层：中性弹性包裹（表单内让子按钮拉伸占满），行内场景由
+   .is-grow 接管横向伸展。 */
+.fc-hint-anchor {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.fc-node-row .fc-hint-anchor {
+  flex-direction: row;
+  align-items: center;
+}
+
+.fc-node-row .fc-hint-anchor.is-grow {
+  flex: 1;
+}
+
+/* 深玻璃小胶囊：与节点体同一语言（圆角/毛玻璃/0.5px 细环），fixed
+   定位 portal 到 body——不随画布缩放、不被节点滚动区裁切。 */
+.fc-hint {
+  position: fixed;
+  z-index: 1200;
+  transform: translate(-50%, -100%);
+  padding: 7px 10px;
+  border-radius: 8px;
+  background: rgba(30, 32, 38, 0.92);
+  backdrop-filter: blur(16px) saturate(1.6);
+  -webkit-backdrop-filter: blur(16px) saturate(1.6);
+  color: #f2f3f5;
+  font-size: 11.5px;
+  line-height: 1;
+  white-space: nowrap;
+  pointer-events: none;
+  box-shadow:
+    0 8px 24px rgba(10, 14, 25, 0.28),
+    inset 0 0 0 0.5px rgba(255, 255, 255, 0.14);
+  animation: fc-hint-in 0.16s ease both;
+}
+
+@keyframes fc-hint-in {
+  from {
+    opacity: 0;
+    margin-top: 3px;
+  }
+  to {
+    opacity: 1;
+    margin-top: 0;
+  }
+}
+
+[data-theme="dark"] .fc-hint {
+  background: rgba(64, 66, 74, 0.94);
+}
+
+/* 图标按钮：文字按钮的图标形态（图标居中的等高胶囊）。 */
+.fc-node-btn.grow {
+  flex: 1;
+  min-width: 0;
+}
+
+.fc-node-btn.is-icon {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding-left: 0;
+  padding-right: 0;
+}
+
+.fc-node-btn.is-icon svg {
+  width: 15px;
+  height: 15px;
+}
+
+.fc-node-btn.is-tiny.is-icon {
+  flex: none;
+  width: 24px;
+  height: 24px;
+  padding: 0;
+  border-radius: 7px;
+}
+
+.fc-node-btn.is-tiny.is-icon svg {
+  width: 13px;
+  height: 13px;
+}
+
+.fc-root .fc-node-btn.ghost:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+/* ── 生成参数区：图标参数位 + 取值展示 + 张数步进器 ───────── */
+
+/* 参数行：左侧图标位（悬停浮现参数名说明）+ 控件。 */
+.fc-param {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+}
+
+.fc-param .fc-combo {
+  flex: 1;
+  min-width: 0;
+}
+
+.fc-param-ico-host {
+  flex: none;
+  flex-direction: row;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 28px;
+  border-radius: 7px;
+}
+
+.fc-param-ico {
+  display: flex;
+  color: var(--text-tertiary);
+}
+
+.fc-param-ico svg {
+  width: 13px;
+  height: 13px;
+}
+
+.fc-param-ico-host:hover .fc-param-ico {
+  color: var(--text-secondary);
+}
+
+/* 张数步进器：白卡分段槽语言（对齐 fc-node-input 的内距与投影，
+   高度随行内输入框），−/值/+ 三段。 */
+.fc-stepper {
+  flex: none;
+  display: flex;
+  align-items: stretch;
+  padding: 6px 0;
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.92);
+  box-shadow: 0 1px 2.5px rgba(31, 35, 65, 0.1), 0 0 0 0.5px rgba(0, 0, 0, 0.055);
+  overflow: hidden;
+}
+
+.fc-stepper-btn {
+  width: 24px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  border: none;
+  background: none;
+  color: var(--text-secondary);
+  cursor: pointer;
+}
+
+.fc-stepper-btn:hover {
+  background: rgba(31, 35, 65, 0.06);
+  color: var(--text-primary);
+}
+
+.fc-stepper-btn svg {
+  width: 11px;
+  height: 11px;
+}
+
+.fc-stepper-val {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 18px;
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+  color: var(--text-primary);
+}
+
+[data-theme="dark"] .fc-stepper {
+  background: rgba(255, 255, 255, 0.1);
+  box-shadow: inset 0 0.5px 0 rgba(255, 255, 255, 0.08), 0 0 0 0.5px rgba(255, 255, 255, 0.12);
+}
+
+[data-theme="dark"] .fc-stepper-btn:hover {
+  background: rgba(255, 255, 255, 0.08);
 }
 
 .fc-root .fc-audio {

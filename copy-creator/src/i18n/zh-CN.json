@@ -847,6 +847,8 @@
     "generating": "生成中",
     "cancelGen": "取消",
     "genModelLabel": "模型",
+    "genSizeLabel": "分辨率",
+    "genCountLabel": "张数",
     "noPromptSource": "没有提示词来源：连线至少一个非空文本节点",
     "genSlotPending": "…",
     "genPrimary": "主图",

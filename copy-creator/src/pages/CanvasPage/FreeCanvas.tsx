@@ -145,6 +145,13 @@ const SIZE_PRESET_ITEMS: { value: string; label: string; hint?: string }[] = [
 ];
 const MODEL_PRESET_BASE = ["gpt-image-1", "gemini-2.5-flash-image"];
 
+/** 尺寸取值展示（用户 2026-11-01 定案）：命中预设时展示「主值 + 比例
+ *  尾注」双段（与下拉条目同款），自定义值原样展示。 */
+const formatSizeDisplay = (v: string): { main: string; tail?: string } => {
+  const item = SIZE_PRESET_ITEMS.find((i) => i.value === v);
+  return item ? { main: item.label, tail: item.hint } : { main: v };
+};
+
 interface PortDef {
   /** 输入口 id（连线 to_port / 实测锚点键）。 */
   id: string;
@@ -2592,12 +2599,24 @@ export default function FreeCanvas({ canvasId }: { canvasId: string }) {
                     <div className="fc-node-placeholder">{t("canvas.loadEmpty")}</div>
                   )}
                   <div className="fc-node-row">
-                    <button className="fc-node-btn ghost grow" onClick={() => pickFromLibrary(node, node.type)}>
-                      {t("canvas.loadFromLibrary")}
-                    </button>
-                    <button className="fc-node-btn ghost grow" onClick={() => void pickFromDisk(node)}>
-                      {t("canvas.loadFromFile")}
-                    </button>
+                    <NodeHint text={t("canvas.loadFromLibrary")} className="is-grow">
+                      <button
+                        className="fc-node-btn ghost is-icon grow"
+                        aria-label={t("canvas.loadFromLibrary")}
+                        onClick={() => pickFromLibrary(node, node.type)}
+                      >
+                        {Icons.resources}
+                      </button>
+                    </NodeHint>
+                    <NodeHint text={t("canvas.loadFromFile")} className="is-grow">
+                      <button
+                        className="fc-node-btn ghost is-icon grow"
+                        aria-label={t("canvas.loadFromFile")}
+                        onClick={() => void pickFromDisk(node)}
+                      >
+                        {Icons.folderOpen}
+                      </button>
+                    </NodeHint>
                   </div>
                   <div className="fc-load-hint">{t("canvas.loadDropHint")}</div>
                   {nodeErrors[node.id] && <div className="fc-gen-warn">{nodeErrors[node.id]}</div>}
@@ -2607,36 +2626,55 @@ export default function FreeCanvas({ canvasId }: { canvasId: string }) {
               const missing = genReadinessOf(node);
               body = (
                 <div className="fc-node-form">
-                  <ParamCombo
-                    comboKey={`gm-${node.id}-${node.updated_at}`}
-                    value={meta.params.model}
-                    items={[...new Set([modelFallback, ...MODEL_PRESET_BASE])].map((m) => ({ value: m, label: m }))}
-                    placeholder={`${t("canvas.genModelLabel")}：${modelFallback}`}
-                    toggleTitle={t("canvas.comboPresets")}
-                    onCommit={(model) => commitImageParams(node, { model })}
-                  />
-                  <div className="fc-node-row">
+                  <div className="fc-param">
+                    <NodeHint text={t("canvas.genModelLabel")} className="fc-param-ico-host">
+                      <span className="fc-param-ico">{Icons.chip}</span>
+                    </NodeHint>
+                    <ParamCombo
+                      comboKey={`gm-${node.id}-${node.updated_at}`}
+                      value={meta.params.model}
+                      items={[...new Set([modelFallback, ...MODEL_PRESET_BASE])].map((m) => ({ value: m, label: m }))}
+                      placeholder={modelFallback}
+                      toggleTitle={t("canvas.comboPresets")}
+                      onCommit={(model) => commitImageParams(node, { model })}
+                    />
+                  </div>
+                  <div className="fc-param">
+                    <NodeHint text={t("canvas.genSizeLabel")} className="fc-param-ico-host">
+                      <span className="fc-param-ico">{Icons.crop}</span>
+                    </NodeHint>
                     <ParamCombo
                       comboKey={`gs-${node.id}-${node.updated_at}`}
                       value={meta.params.size}
                       items={SIZE_PRESET_ITEMS}
-                      placeholder="auto / 1024x1024 / 3:2"
+                      placeholder="auto"
+                      display={formatSizeDisplay}
                       toggleTitle={t("canvas.comboPresets")}
                       onCommit={(size) => commitImageParams(node, { size })}
                     />
-                    <input
-                      className="fc-node-input count"
-                      key={`gc-${node.id}-${node.updated_at}`}
-                      type="number"
-                      min={1}
-                      max={15}
-                      defaultValue={meta.params.count}
-                      onBlur={(e) =>
-                        commitImageParams(node, {
-                          count: Math.max(1, Math.min(15, Number.parseInt(e.target.value, 10) || 1)),
-                        })
-                      }
-                    />
+                    <NodeHint text={t("canvas.genCountLabel")}>
+                      <div className="fc-stepper">
+                        <button
+                          type="button"
+                          className="fc-stepper-btn"
+                          aria-label={t("canvas.genCountLabel")}
+                          onPointerDown={(e) => e.stopPropagation()}
+                          onClick={() => commitImageParams(node, { count: Math.max(1, meta.params.count - 1) })}
+                        >
+                          {Icons.minus}
+                        </button>
+                        <span className="fc-stepper-val">{meta.params.count}</span>
+                        <button
+                          type="button"
+                          className="fc-stepper-btn"
+                          aria-label={t("canvas.genCountLabel")}
+                          onPointerDown={(e) => e.stopPropagation()}
+                          onClick={() => commitImageParams(node, { count: Math.min(15, meta.params.count + 1) })}
+                        >
+                          {Icons.add}
+                        </button>
+                      </div>
+                    </NodeHint>
                   </div>
                   {genProgress[node.id] ? (
                     <>
@@ -2663,16 +2701,15 @@ export default function FreeCanvas({ canvasId }: { canvasId: string }) {
                       </div>
                     </>
                   ) : (
-                    <button
-                      className="fc-node-btn accent"
-                      disabled={genStarting || missing.length > 0}
-                      onClick={() => void startGenerate(node)}
-                    >
-                      {meta.status === "done" ? t("canvas.regenerate") : t("canvas.genButton")}
-                    </button>
-                  )}
-                  {missing.length > 0 && !genProgress[node.id] && (
-                    <div className="fc-gen-warn">{t("canvas.genNotReady", { items: missing.join("、") })}</div>
+                    <NodeHint text={missing.length > 0 ? t("canvas.genNotReady", { items: missing.join("、") }) : ""}>
+                      <button
+                        className="fc-node-btn accent"
+                        disabled={genStarting || missing.length > 0}
+                        onClick={() => void startGenerate(node)}
+                      >
+                        {meta.status === "done" ? t("canvas.regenerate") : t("canvas.genButton")}
+                      </button>
+                    </NodeHint>
                   )}
                   {nodeErrors[node.id] && <div className="fc-gen-warn">{nodeErrors[node.id]}</div>}
                   {meta.status === "error" && meta.error && <div className="fc-gen-warn">{meta.error}</div>}
@@ -2702,18 +2739,24 @@ export default function FreeCanvas({ canvasId }: { canvasId: string }) {
               const notReadyKey = node.type === "gen_video" ? "canvas.genVideoNotReady" : "canvas.genAudioNotReady";
               body = (
                 <div className="fc-node-form">
-                  <ParamCombo
-                    comboKey={`gm-${node.id}-${node.updated_at}`}
-                    value={meta.kind === "gen_video" || meta.kind === "gen_audio" ? meta.params.model : ""}
-                    items={[...new Set([modelFallback, ...MODEL_PRESET_BASE])].map((m) => ({ value: m, label: m }))}
-                    placeholder={`${t("canvas.genModelLabel")}：${modelFallback}`}
-                    toggleTitle={t("canvas.comboPresets")}
-                    onCommit={(model) => commitImageParams(node, { model })}
-                  />
-                  <button className="fc-node-btn accent" disabled title={t(notReadyKey)}>
-                    {t("canvas.genButton")}
-                  </button>
-                  <div className="fc-gen-warn is-muted">{t(notReadyKey)}</div>
+                  <div className="fc-param">
+                    <NodeHint text={t("canvas.genModelLabel")} className="fc-param-ico-host">
+                      <span className="fc-param-ico">{Icons.chip}</span>
+                    </NodeHint>
+                    <ParamCombo
+                      comboKey={`gm-${node.id}-${node.updated_at}`}
+                      value={meta.kind === "gen_video" || meta.kind === "gen_audio" ? meta.params.model : ""}
+                      items={[...new Set([modelFallback, ...MODEL_PRESET_BASE])].map((m) => ({ value: m, label: m }))}
+                      placeholder={modelFallback}
+                      toggleTitle={t("canvas.comboPresets")}
+                      onCommit={(model) => commitImageParams(node, { model })}
+                    />
+                  </div>
+                  <NodeHint text={t(notReadyKey)}>
+                    <button className="fc-node-btn accent" disabled aria-label={t(notReadyKey)}>
+                      {t("canvas.genButton")}
+                    </button>
+                  </NodeHint>
                   {nodeErrors[node.id] && <div className="fc-gen-warn">{nodeErrors[node.id]}</div>}
                 </div>
               );
@@ -2802,31 +2845,40 @@ export default function FreeCanvas({ canvasId }: { canvasId: string }) {
                           ) : (
                             <span className="fc-save-name">{path.split(/[\\/]/).pop()}</span>
                           )}
-                          <button
-                            className="fc-node-btn ghost is-tiny"
-                            onClick={() => void saveUpstreamToPath(node, path, path.split(/[\\/]/).pop() ?? "产物")}
-                          >
-                            {t("canvas.saveSaveAs")}
-                          </button>
+                          <NodeHint text={t("canvas.saveSaveAs")}>
+                            <button
+                              className="fc-node-btn ghost is-tiny is-icon"
+                              aria-label={t("canvas.saveSaveAs")}
+                              onClick={() => void saveUpstreamToPath(node, path, path.split(/[\\/]/).pop() ?? "产物")}
+                            >
+                              {Icons.floppy}
+                            </button>
+                          </NodeHint>
                         </span>
                       ))}
                     </div>
                   )}
                   <div className="fc-node-row">
-                    <button
-                      className="fc-node-btn accent grow"
-                      disabled={!hasProduct}
-                      onClick={() => void saveUpstreamToLibrary(node)}
-                    >
-                      {t("canvas.saveToLibrary")}
-                    </button>
-                    <button
-                      className="fc-node-btn ghost grow"
-                      disabled={!hasProduct}
-                      onClick={() => void saveUpstreamToDir(node, upstream?.paths ?? [])}
-                    >
-                      {t("canvas.saveSaveAs")}
-                    </button>
+                    <NodeHint text={t("canvas.saveToLibrary")} className="is-grow">
+                      <button
+                        className="fc-node-btn accent is-icon grow"
+                        disabled={!hasProduct}
+                        aria-label={t("canvas.saveToLibrary")}
+                        onClick={() => void saveUpstreamToLibrary(node)}
+                      >
+                        {Icons.saveTray}
+                      </button>
+                    </NodeHint>
+                    <NodeHint text={t("canvas.saveSaveAs")} className="is-grow">
+                      <button
+                        className="fc-node-btn ghost is-icon grow"
+                        disabled={!hasProduct}
+                        aria-label={t("canvas.saveSaveAs")}
+                        onClick={() => void saveUpstreamToDir(node, upstream?.paths ?? [])}
+                      >
+                        {Icons.floppy}
+                      </button>
+                    </NodeHint>
                   </div>
                   {saved?.status === "saved" && saved.saved_path && (
                     <button
@@ -3149,12 +3201,57 @@ function WheelGate({ children }: { children: ReactNode }) {
 /** 参数组合框（用户 2026-11-01 定案：预设下拉 + 自定义输入）。输入框
  *  始终可自由键入（失焦提交），右侧箭头展开预设清单，点选立即提交。
  *  清单 portal 到 body：节点表单是 overflow 滚动容器，内联浮层会被裁。 */
+/** 节点风悬浮说明：悬停约 0.3s 后在目标上方淡入一枚深玻璃小胶囊
+ *  （portal 到 body，fixed 定位）——替代原生 title 的系统样式，与节点
+ *  体的圆角/毛玻璃/0.5px 细环同一视觉语言；不随画布缩放、不被节点滚
+ *  动区裁切。text 为空时只做透明包裹。禁用按钮的指针事件会落到包裹
+ *  层，因此禁用态同样能触发。 */
+function NodeHint({ text, children, className }: { text: string; children: ReactNode; className?: string }) {
+  const [tip, setTip] = useState<{ left: number; top: number } | null>(null);
+  const anchorRef = useRef<HTMLSpanElement | null>(null);
+  const timerRef = useRef<number | undefined>(undefined);
+
+  useEffect(() => () => window.clearTimeout(timerRef.current), []);
+
+  const show = () => {
+    if (!text) return;
+    window.clearTimeout(timerRef.current);
+    timerRef.current = window.setTimeout(() => {
+      // 包裹层可能零尺寸（内部是绝对定位的箭头钮），优先取子元素矩形。
+      const el = (anchorRef.current?.firstElementChild as HTMLElement | null) ?? anchorRef.current;
+      const rect = el?.getBoundingClientRect();
+      if (rect) setTip({ left: rect.left + rect.width / 2, top: rect.top - 7 });
+    }, 300);
+  };
+  const hide = () => {
+    window.clearTimeout(timerRef.current);
+    setTip(null);
+  };
+
+  return (
+    <span
+      ref={anchorRef}
+      className={`fc-hint-anchor${className ? ` ${className}` : ""}`}
+      onPointerEnter={show}
+      onPointerLeave={hide}
+      onPointerDown={hide}
+    >
+      {children}
+      {tip && text && createPortal(
+        <div className="fc-hint" style={{ left: tip.left, top: tip.top }}>{text}</div>,
+        document.body,
+      )}
+    </span>
+  );
+}
+
 function ParamCombo({
   comboKey,
   value,
   items,
   placeholder,
   toggleTitle,
+  display,
   onCommit,
 }: {
   comboKey: string;
@@ -3162,9 +3259,14 @@ function ParamCombo({
   items: { value: string; label: string; hint?: string }[];
   placeholder?: string;
   toggleTitle: string;
+  /** 非编辑态的取值展示：按当前值格式化为「主值 + 弱化尾注」（与下拉
+   *  条目同款双段），点按换回原始输入框编辑——面板显示的是「选择后的
+   *  样子」而非原始存储串。 */
+  display?: (value: string) => { main: string; tail?: string } | null;
   onCommit: (value: string) => void;
 }) {
   const [open, setOpen] = useState(false);
+  const [editing, setEditing] = useState(false);
   const [anchor, setAnchor] = useState<{ left: number; top: number; width: number } | null>(null);
   const rootRef = useRef<HTMLDivElement | null>(null);
   const inputRef = useRef<HTMLInputElement | null>(null);
@@ -3184,7 +3286,8 @@ function ParamCombo({
       setOpen(false);
       return;
     }
-    const rect = inputRef.current?.getBoundingClientRect();
+    // 展示态下输入框未挂载，锚点统一取容器矩形（宽度与控件一致）。
+    const rect = rootRef.current?.getBoundingClientRect();
     if (!rect) return;
     setAnchor({ left: rect.left, top: rect.bottom + 4, width: rect.width });
     setOpen(true);
@@ -3192,33 +3295,54 @@ function ParamCombo({
 
   const applyPreset = (v: string) => {
     if (inputRef.current) inputRef.current.value = v;
+    setEditing(false);
     setOpen(false);
     onCommit(v);
   };
 
+  const fmt = display ? display(value) : null;
+  const showDisplay = !editing && !!value && !!fmt?.tail;
+
   return (
     <div className="fc-combo" ref={rootRef}>
-      <input
-        ref={inputRef}
-        className="fc-node-input fc-combo-input"
-        key={comboKey}
-        defaultValue={value}
-        placeholder={placeholder}
-        onBlur={(e) => onCommit(e.target.value.trim())}
-        onKeyDown={(e) => {
-          if (e.key === "Escape") setOpen(false);
-        }}
-      />
-      <button
-        type="button"
-        className={`fc-combo-toggle${open ? " is-open" : ""}`}
-        title={toggleTitle}
-        aria-label={toggleTitle}
-        onPointerDown={(e) => e.stopPropagation()}
-        onClick={toggle}
-      >
-        {Icons.chevronDown}
-      </button>
+      {showDisplay && fmt ? (
+        <button
+          type="button"
+          className="fc-node-input fc-combo-display"
+          onPointerDown={(e) => e.stopPropagation()}
+          onClick={() => setEditing(true)}
+        >
+          <span className="fc-combo-display-main">{fmt.main}</span>
+          {fmt.tail && <span className="fc-combo-display-tail">{fmt.tail}</span>}
+        </button>
+      ) : (
+        <input
+          ref={inputRef}
+          className="fc-node-input fc-combo-input"
+          key={comboKey}
+          defaultValue={value}
+          placeholder={placeholder}
+          autoFocus={editing}
+          onBlur={(e) => {
+            onCommit(e.target.value.trim());
+            setEditing(false);
+          }}
+          onKeyDown={(e) => {
+            if (e.key === "Escape") setOpen(false);
+          }}
+        />
+      )}
+      <NodeHint text={toggleTitle}>
+        <button
+          type="button"
+          className={`fc-combo-toggle${open ? " is-open" : ""}`}
+          aria-label={toggleTitle}
+          onPointerDown={(e) => e.stopPropagation()}
+          onClick={toggle}
+        >
+          {Icons.chevronDown}
+        </button>
+      </NodeHint>
       {open && anchor && createPortal(
         <WheelGate>
           <div

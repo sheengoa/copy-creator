@@ -298,4 +298,44 @@ export const Icons = {
       <circle cx="15" cy="19" r="1.5" />
     </svg>
   ),
+  // 画布节点操作图标（与上方线性图标同一语言：1.7 圆头描边）。
+  chip: (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round">
+      <rect x="5" y="5" width="14" height="14" rx="2" />
+      <rect x="9.5" y="9.5" width="5" height="5" rx="1" />
+      <line x1="9" y1="2" x2="9" y2="4.5" />
+      <line x1="15" y1="2" x2="15" y2="4.5" />
+      <line x1="9" y1="19.5" x2="9" y2="22" />
+      <line x1="15" y1="19.5" x2="15" y2="22" />
+      <line x1="2" y1="9" x2="4.5" y2="9" />
+      <line x1="2" y1="15" x2="4.5" y2="15" />
+      <line x1="19.5" y1="9" x2="22" y2="9" />
+      <line x1="19.5" y1="15" x2="22" y2="15" />
+    </svg>
+  ),
+  crop: (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round">
+      <path d="M6 2v14a2 2 0 0 0 2 2h14" />
+      <path d="M18 22V8a2 2 0 0 0-2-2H2" />
+    </svg>
+  ),
+  minus: (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round">
+      <line x1="5" y1="12" x2="19" y2="12" />
+    </svg>
+  ),
+  saveTray: (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round">
+      <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
+      <polyline points="7 10 12 15 17 10" />
+      <line x1="12" y1="15" x2="12" y2="3" />
+    </svg>
+  ),
+  floppy: (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round">
+      <path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z" />
+      <polyline points="17 21 17 13 7 13 7 21" />
+      <polyline points="7 3 7 8 15 8" />
+    </svg>
+  ),
 };
