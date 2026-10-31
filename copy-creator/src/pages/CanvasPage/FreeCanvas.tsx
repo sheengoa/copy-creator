@@ -7,6 +7,7 @@ import { Icons } from "../../components/Icons";
 import { ImageLightbox } from "../../components/ImageLightbox";
 import { openResourceFile } from "../../domain/mediaAssets";
 import { resolveResourceMediaUrl } from "../../domain/mediaUrl";
+import { joinLibraryPath } from "../../domain/projectView";
 import ProjectFilePickerDialog from "../ResourcePage/ProjectFilePickerDialog";
 import { ResourceMediaPlayer } from "../ResourcePage/ResourceMedia";
 import { useSettingsStore } from "../../stores/settingsStore";
@@ -322,13 +323,33 @@ type UndoAction =
     }
   | { kind: "create"; ids: string[] };
 
+/** 画布媒体路径归一：resource_path 的相对路径语义是「资源库相对」
+ *  （选择器回填/旧 ref 数据），而 mediaUrl 域层把相对路径拼到存储根
+ *  （≠资源库根）——这里先转绝对再交给域层，存量相对路径数据同样修复。 */
+async function resolveCanvasMediaPath(path: string): Promise<string> {
+  const trimmed = path.trim();
+  if (!trimmed
+    || /^(?:https?:|data:|blob:|asset:|file:)/i.test(trimmed)
+    || /^[A-Za-z]:[\\/]/.test(trimmed)
+    || trimmed.startsWith("\\\\")) {
+    return trimmed;
+  }
+  const root = await invoke<string>("get_resource_library_path").catch(() => "");
+  return joinLibraryPath(root, trimmed);
+}
+
+/** 画布媒体 URL：路径归一 + 域层解析（token 媒体服务）。 */
+async function resolveCanvasMediaUrl(path: string, version?: string): Promise<string> {
+  return resolveResourceMediaUrl(await resolveCanvasMediaPath(path), version);
+}
+
 /** 资源缩略图：mediaUrl 域层唯一出口，路径变化重解析。 */
 function ResourceThumb({ path, className }: { path: string; className?: string }) {
   const [url, setUrl] = useState<string | null>(null);
   useEffect(() => {
     let alive = true;
     setUrl(null);
-    resolveResourceMediaUrl(path)
+    resolveCanvasMediaUrl(path)
       .then((u) => {
         if (alive) setUrl(u);
       })
@@ -347,7 +368,7 @@ function useMediaUrl(path: string): string | null {
   useEffect(() => {
     let alive = true;
     setUrl(null);
-    resolveResourceMediaUrl(path)
+    resolveCanvasMediaUrl(path)
       .then((u) => {
         if (alive) setUrl(u);
       })
@@ -3139,7 +3160,9 @@ function ParamCombo({
 }
 
 /** 懒加载的资源库选择浮层：画布加载节点「从资源库选择」入口，薄壳复用
- *  工程域的通用选择浮层（搜索/分页/缩略图/导入），点选即回填节点路径。 */
+ *  工程域的通用选择浮层（搜索/分页/缩略图/导入），点选即回填节点路径。
+ *  选择器给的是库内相对路径——mediaUrl 域层把相对路径拼到存储根（≠资源
+ *  库根），必须在这里转成绝对路径落节点，否则缩略图/媒体全部裂图。 */
 function LazyLibraryPicker({
   onPick,
   onClose,
@@ -3148,10 +3171,22 @@ function LazyLibraryPicker({
   onClose: () => void;
 }) {
   const { t } = useTranslation();
+  const [libraryRoot, setLibraryRoot] = useState("");
+  useEffect(() => {
+    let alive = true;
+    invoke<string>("get_resource_library_path")
+      .then((root) => {
+        if (alive) setLibraryRoot(root);
+      })
+      .catch(() => {});
+    return () => {
+      alive = false;
+    };
+  }, []);
   return (
     <ProjectFilePickerDialog
       title={t("canvas.loadPickerTitle")}
-      onPick={(file) => onPick(file.filePath)}
+      onPick={(file) => onPick(joinLibraryPath(libraryRoot, file.filePath))}
       onClose={onClose}
     />
   );

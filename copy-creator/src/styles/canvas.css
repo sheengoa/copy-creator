@@ -360,12 +360,19 @@
   color: var(--node-accent, var(--text-secondary));
 }
 
-/* 端口光晕：输出带类型色辉光，浮在玻璃卡沿。 */
+/* 端口光晕：输出带类型色辉光，浮在玻璃卡沿；合集节点的输入口同样
+   点亮——提示这里与别处不同、可以多线汇入。 */
 .fc-root .pc-port {
   box-shadow: 0 0 0 2.5px rgba(255, 255, 255, 0.92);
 }
 
 .fc-root .pc-port-out {
+  box-shadow: 0 0 0 2.5px rgba(255, 255, 255, 0.92), 0 0 8px 1px var(--node-accent, transparent);
+}
+
+.fc-root .fc-type-collection_image .pc-port-in,
+.fc-root .fc-type-collection_text .pc-port-in,
+.fc-root .fc-type-collection_video .pc-port-in {
   box-shadow: 0 0 0 2.5px rgba(255, 255, 255, 0.92), 0 0 8px 1px var(--node-accent, transparent);
 }
 
@@ -670,6 +677,12 @@
 }
 
 [data-theme="dark"] .fc-root .pc-port-out {
+  box-shadow: 0 0 0 2.5px rgba(20, 20, 24, 0.9), 0 0 8px 1px var(--node-accent, transparent);
+}
+
+[data-theme="dark"] .fc-root .fc-type-collection_image .pc-port-in,
+[data-theme="dark"] .fc-root .fc-type-collection_text .pc-port-in,
+[data-theme="dark"] .fc-root .fc-type-collection_video .pc-port-in {
   box-shadow: 0 0 0 2.5px rgba(20, 20, 24, 0.9), 0 0 8px 1px var(--node-accent, transparent);
 }
 
