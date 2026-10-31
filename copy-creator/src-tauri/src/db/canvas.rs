@@ -237,7 +237,7 @@ fn connection_row(row: &rusqlite::Row) -> rusqlite::Result<serde_json::Value> {
     }))
 }
 
-fn canvas_now() -> String {
+pub(crate) fn canvas_now() -> String {
     chrono::Utc::now().to_rfc3339()
 }
 
@@ -247,7 +247,7 @@ fn emit_canvas_changed<R: Runtime>(app: &AppHandle<R>) {
     let _ = app.emit("canvas-changed", ());
 }
 
-fn bump_canvas_updated_at(conn: &Connection, canvas_id: &str) -> Result<(), String> {
+pub(crate) fn bump_canvas_updated_at(conn: &Connection, canvas_id: &str) -> Result<(), String> {
     conn.execute(
         "UPDATE canvases SET updated_at = ?1 WHERE id = ?2",
         params![canvas_now(), canvas_id],

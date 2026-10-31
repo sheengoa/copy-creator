@@ -26,7 +26,9 @@ tauri-plugin-global-shortcut = "2"
 tauri-plugin-dialog = "2"
 rusqlite = { version = "0.31", features = ["bundled"] }
 # 仅用 spawn_blocking（rt）与 oneshot（sync），运行时由 tauri 自带。
-tokio = { version = "1", features = ["rt", "sync"] }
+tokio = { version = "1", features = ["rt", "sync", "macros"] }
+# 画布 AI 生图：HTTP 全转发（rustls 免系统依赖）；multipart 供 /images/edits 参考图上传
+reqwest = { version = "0.12", default-features = false, features = ["rustls-tls", "json", "multipart"] }
 uuid = { version = "1", features = ["v4"] }
 chrono = { version = "0.4", features = ["serde"] }
 enigo = "0.3"

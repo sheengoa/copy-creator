@@ -1,3 +1,4 @@
+mod ai;
 mod autostart;
 mod backup;
 mod clipboard;
@@ -594,6 +595,8 @@ pub fn run() {
             db::canvas_connect,
             db::canvas_rewire,
             db::canvas_delete_connection,
+            ai::ai_generate_image,
+            ai::ai_cancel_generation,
             media_server::get_media_server_origin,
             shortcut::update_shortcut,
             shortcut::update_radial_shortcut,
