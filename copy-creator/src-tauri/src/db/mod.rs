@@ -1569,7 +1569,13 @@ fn run_schema_migrations(conn: &Connection) -> Result<(), Box<dyn std::error::Er
             })
             .unwrap_or(false);
         if needs_rebuild {
-            conn.execute_batch(
+            // 搬运期间临时关闭外键：历史版本（foreign_keys 默认关闭、级联
+            // 不生效的时期）删集/删片段可能遗留孤儿连线行，严格校验会让
+            // 迁移失败并阻断启动；数据保真优先，孤儿行原样保留进新表
+            // （与存储迁移 migrate_storage_data 同一策略）。事务内改 PRAGMA
+            // 无效，故放在 BEGIN 之前；COMMIT 后恢复开启。
+            conn.execute("PRAGMA foreign_keys=OFF", []).map_err(|e| e.to_string())?;
+            let rebuild = conn.execute_batch(
                 "BEGIN IMMEDIATE;
                  CREATE TABLE project_node_links_new (
                      id TEXT PRIMARY KEY,
@@ -1594,8 +1600,10 @@ fn run_schema_migrations(conn: &Connection) -> Result<(), Box<dyn std::error::Er
                  CREATE INDEX IF NOT EXISTS idx_project_node_links_to
                      ON project_node_links(to_segment);
                  COMMIT;",
-            )
-            .map_err(|e| format!("重建 project_node_links（UNIQUE 含 owner_key）失败: {e}"))?;
+            );
+            let fk_back = conn.execute("PRAGMA foreign_keys=ON", []);
+            rebuild.map_err(|e| format!("重建 project_node_links（UNIQUE 含 owner_key）失败: {e}"))?;
+            fk_back.map_err(|e| format!("恢复 foreign_keys 失败: {e}"))?;
             log::info!("已重建 project_node_links：UNIQUE 约束扩到 owner_key");
         }
     }
