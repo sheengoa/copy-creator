@@ -611,3 +611,137 @@
 .fc-panel-delete:hover {
   background: rgba(255, 59, 48, 0.2);
 }
+
+/* ── AI 生图面板与槽位（方案 3.4/3.6） ─────────────────────── */
+
+.fc-gen {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding-top: 8px;
+  border-top: 1px solid var(--separator);
+}
+
+.fc-gen-summary {
+  font-size: 11px;
+  color: var(--text-secondary);
+}
+
+.fc-gen-btn {
+  padding: 7px 10px;
+  border: none;
+  border-radius: var(--radius-sm);
+  background: var(--accent);
+  color: #fff;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.fc-gen-btn:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+.fc-gen-progress-label {
+  font-size: 11px;
+  color: var(--text-secondary);
+  margin-bottom: 4px;
+}
+
+.fc-gen-slots,
+.fc-node-thumbs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+
+.fc-gen-slot,
+.fc-thumb.pending {
+  width: 44px;
+  height: 44px;
+  border-radius: 6px;
+  border: 1px dashed var(--text-tertiary);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--text-tertiary);
+  font-size: 12px;
+  box-sizing: border-box;
+  overflow: hidden;
+}
+
+.fc-gen-slot {
+  object-fit: cover;
+}
+
+.fc-gen-cancel {
+  padding: 5px 10px;
+  border: none;
+  border-radius: var(--radius-sm);
+  background: var(--bg-card-hover);
+  color: var(--text-primary);
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.fc-gen-warn {
+  font-size: 11px;
+  color: var(--danger);
+  word-break: break-all;
+}
+
+.fc-gen-thumbs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.fc-gen-thumb {
+  position: relative;
+  width: 56px;
+  height: 56px;
+  padding: 0;
+  border: 2px solid transparent;
+  border-radius: 8px;
+  background: none;
+  cursor: pointer;
+  overflow: hidden;
+}
+
+.fc-gen-thumb.primary {
+  border-color: var(--accent);
+}
+
+.fc-gen-thumb .fc-thumb {
+  width: 100%;
+  height: 100%;
+  border-radius: 6px;
+}
+
+.fc-gen-primary-badge {
+  position: absolute;
+  left: 0;
+  bottom: 0;
+  right: 0;
+  font-size: 9px;
+  line-height: 14px;
+  text-align: center;
+  background: rgba(0, 122, 255, 0.82);
+  color: #fff;
+}
+
+.fc-gen-library {
+  padding: 6px 10px;
+  border: none;
+  border-radius: var(--radius-sm);
+  background: var(--bg-card-hover);
+  color: var(--text-primary);
+  font-size: 12px;
+  cursor: pointer;
+  text-align: left;
+}
+
+.fc-gen-library:hover {
+  background: var(--accent-bg);
+}

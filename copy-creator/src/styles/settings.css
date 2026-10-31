@@ -624,3 +624,76 @@
   font-weight: var(--weight-medium);
   color: var(--text-secondary);
 }
+
+/* ── AI 生图配置区（自持久化分区） ─────────────────────── */
+
+.settings-ai-input {
+  width: 100%;
+  box-sizing: border-box;
+  padding: 6px 10px;
+  border: 1px solid var(--separator);
+  border-radius: var(--radius-sm);
+  background: var(--bg-primary);
+  color: var(--text-primary);
+  font-size: 12px;
+  outline: none;
+  font-family: inherit;
+}
+
+.settings-ai-input:focus {
+  border-color: var(--accent-border);
+}
+
+.settings-ai-provider {
+  display: flex;
+  gap: 6px;
+}
+
+.settings-ai-provider-btn {
+  padding: 5px 14px;
+  border-radius: 999px;
+  border: 1px solid var(--separator);
+  background: var(--bg-card);
+  color: var(--text-secondary);
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.settings-ai-provider-btn.active {
+  background: var(--accent-bg);
+  border-color: var(--accent-border-soft);
+  color: var(--accent);
+  font-weight: 600;
+}
+
+.settings-ai-key {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex: 1;
+  min-width: 0;
+}
+
+.settings-ai-key .settings-ai-input {
+  flex: 1;
+  min-width: 0;
+}
+
+.settings-ai-eye {
+  flex-shrink: 0;
+  padding: 4px 10px;
+  border: none;
+  border-radius: 999px;
+  background: var(--bg-card-hover);
+  color: var(--text-secondary);
+  font-size: 11px;
+  cursor: pointer;
+}
+
+.settings-ai-hint {
+  display: block;
+  font-size: 11px;
+  color: var(--text-tertiary);
+  font-weight: 400;
+  margin-top: 2px;
+}

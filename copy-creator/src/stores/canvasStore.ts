@@ -97,6 +97,15 @@ export interface CanvasLayoutEntry {
   height: number | null;
 }
 
+/** 生成进度（逐张回传）：按节点记录槽位预览与完成数。 */
+export interface GenerationProgress {
+  requestId: string;
+  total: number;
+  received: number;
+  errors: number;
+  previews: Record<number, string>;
+}
+
 interface CanvasState {
   /** 画布列表（后端按 updated_at 倒序）。 */
   canvases: CanvasSummary[];
@@ -107,6 +116,8 @@ interface CanvasState {
   /** 当前画布的节点与连线（图谱随 activeCanvasId 装载）。 */
   nodes: CanvasNode[];
   connections: CanvasConnection[];
+  /** 进行中的生成（方案 3.4 逐张回传）：节点 id → 槽位进度。 */
+  genProgress: Record<string, GenerationProgress>;
 
   loadCanvases: () => Promise<void>;
   openCanvas: (id: string) => Promise<void>;
@@ -140,6 +151,9 @@ interface CanvasState {
   /** 摘线换目标：后端合并语义下返回行 id 可能不同于入参 id。 */
   rewire: (id: string, toNode: string) => Promise<CanvasConnection | null>;
   deleteConnection: (id: string) => Promise<void>;
+  /** 发起生成：返回 requestId 供取消；前端禁用/提示由调用方据返回与状态处理。 */
+  generateImage: (canvasId: string, nodeId: string) => Promise<string | null>;
+  cancelGeneration: (requestId: string) => Promise<void>;
   /** 画布域事件订阅（幂等）：canvas-changed 时刷新列表与当前图谱。 */
   bindCanvasEvents: () => void;
 }
@@ -195,6 +209,7 @@ export const useCanvasStore = create<CanvasState>((set, get) => ({
   activeCanvas: null,
   nodes: [],
   connections: [],
+  genProgress: {},
 
   loadCanvases: async () => {
     try {
@@ -214,6 +229,15 @@ export const useCanvasStore = create<CanvasState>((set, get) => ({
         nodes: graph.nodes,
         connections: graph.connections,
       });
+      // 进度条目只保留仍处于 generating 的节点（最终结果随图谱刷新到达）。
+      const stillGenerating: Record<string, GenerationProgress> = {};
+      for (const [nodeId, progress] of Object.entries(get().genProgress)) {
+        const node = graph.nodes.find((n) => n.id === nodeId);
+        if (node?.metadata.kind === "image" && node.metadata.status === "generating") {
+          stillGenerating[nodeId] = progress;
+        }
+      }
+      set({ genProgress: stillGenerating });
     } catch (e) {
       console.error("Failed to open canvas:", e);
     }
@@ -387,6 +411,39 @@ export const useCanvasStore = create<CanvasState>((set, get) => ({
     }
   },
 
+  generateImage: async (canvasId, nodeId) => {
+    // 发起失败（无提示词来源/未配置模型等）：错误原样上抛给面板展示。
+    const result = await invoke<{ requestId: string; total?: number }>("ai_generate_image", {
+      canvasId,
+      nodeId,
+    });
+    // 发起即建进度条目（后端在 generating 落库后也发 canvas-changed，
+    // openCanvas 的裁剪会保留仍 generating 的条目）。
+    const node = get().nodes.find((n) => n.id === nodeId);
+    const total = node?.metadata.kind === "image" ? node.metadata.params.count : 1;
+    set({
+      genProgress: {
+        ...get().genProgress,
+        [nodeId]: {
+          requestId: result.requestId,
+          total: Math.max(1, total),
+          received: 0,
+          errors: 0,
+          previews: {},
+        },
+      },
+    });
+    return result.requestId;
+  },
+
+  cancelGeneration: async (requestId) => {
+    try {
+      await invoke("ai_cancel_generation", { requestId });
+    } catch (e) {
+      console.error("Failed to cancel generation:", e);
+    }
+  },
+
   bindCanvasEvents: () => {
     if (canvasEventsBound) return;
     canvasEventsBound = true;
@@ -395,5 +452,27 @@ export const useCanvasStore = create<CanvasState>((set, get) => ({
       const active = get().activeCanvasId;
       if (active) void get().openCanvas(active);
     });
+    // 逐张回传（方案 3.4）：slot 完成/失败即更新进度条目，节点体即时补格。
+    void listen<{ requestId: string; nodeId: string; slot: number; dataUrl?: string; error?: string }>(
+      "canvas-generation-progress",
+      (event) => {
+        const { nodeId, slot, dataUrl, error } = event.payload;
+        const prev = get().genProgress[nodeId];
+        if (!prev) return;
+        const previews = { ...prev.previews };
+        if (dataUrl) previews[slot] = dataUrl;
+        set({
+          genProgress: {
+            ...get().genProgress,
+            [nodeId]: {
+              ...prev,
+              previews,
+              received: prev.received + (dataUrl ? 1 : 0),
+              errors: prev.errors + (error ? 1 : 0),
+            },
+          },
+        });
+      },
+    );
   },
 }));

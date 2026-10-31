@@ -13,6 +13,8 @@ vi.mock("@tauri-apps/api/event", () => ({
   listen: listenMock,
 }));
 
+let progressHandler: ((e: { payload: unknown }) => void) | null = null;
+
 import {
   useCanvasStore,
   type CanvasConnection,
@@ -70,6 +72,7 @@ describe("canvasStore 画布域 wiring", () => {
       activeCanvasId: null,
       nodes: [],
       connections: [],
+      genProgress: {},
     });
   });
 
@@ -249,12 +252,19 @@ describe("canvasStore 画布域 wiring", () => {
     });
   });
 
-  it("bindCanvasEvents 幂等订阅 canvas-changed", () => {
+  it("bindCanvasEvents 首次注册事件、重复调用不增订", () => {
+    const before = listenMock.mock.calls.length;
     useCanvasStore.getState().bindCanvasEvents();
+    const afterFirst = listenMock.mock.calls.length;
     useCanvasStore.getState().bindCanvasEvents();
-
-    expect(listenMock).toHaveBeenCalledTimes(1);
-    expect(listenMock).toHaveBeenCalledWith("canvas-changed", expect.any(Function));
+    const afterSecond = listenMock.mock.calls.length;
+    // 首次进入本文件时绑定两类事件；模块级单例跨用例共享，重复调用不增订。
+    expect(afterSecond).toBe(afterFirst);
+    expect(afterFirst).toBeGreaterThanOrEqual(before + 2);
+    expect(listenMock.mock.calls.some(([name]) => name === "canvas-changed")).toBe(true);
+    const found = listenMock.mock.calls.find(([name]) => name === "canvas-generation-progress");
+    progressHandler = (found?.[1] as (e: { payload: unknown }) => void) ?? null;
+    expect(progressHandler).toBeTypeOf("function");
   });
 
   it("updateNode 以返回行替换本地节点", async () => {
@@ -294,5 +304,72 @@ describe("canvasStore 画布域 wiring", () => {
       canvasId: "c1",
       nodes: [{ id: "n1", pos_x: 50, pos_y: 60, width: 300, height: 200 }],
     });
+  });
+
+  it("generateImage 发起后建进度条目", async () => {
+    invokeMock.mockResolvedValue({ requestId: "req-1", status: "generating" });
+    const imageNode = makeNode({
+      id: "img1",
+      type: "image",
+      metadata: { kind: "image", params: { model: "", size: "", count: 3 }, status: "idle", error: "", images: [] },
+    });
+    useCanvasStore.setState({ activeCanvasId: "c1", nodes: [imageNode] });
+
+    const requestId = await useCanvasStore.getState().generateImage("c1", "img1");
+
+    expect(requestId).toBe("req-1");
+    expect(invokeMock).toHaveBeenCalledWith("ai_generate_image", { canvasId: "c1", nodeId: "img1" });
+    const progress = useCanvasStore.getState().genProgress["img1"];
+    expect(progress).toMatchObject({ requestId: "req-1", total: 3, received: 0, errors: 0 });
+  });
+
+  it("generateImage 发起失败上抛（无提示词来源等）", async () => {
+    invokeMock.mockRejectedValue("没有提示词来源");
+    const imageNode = makeNode({ id: "img1", type: "image" });
+    useCanvasStore.setState({ activeCanvasId: "c1", nodes: [imageNode] });
+
+    await expect(useCanvasStore.getState().generateImage("c1", "img1")).rejects.toThrow();
+    expect(useCanvasStore.getState().genProgress["img1"]).toBeUndefined();
+  });
+
+  it("进度事件逐格更新 previews 与计数", () => {
+    const handler = progressHandler;
+    useCanvasStore.setState({
+      genProgress: {
+        img1: { requestId: "req-1", total: 2, received: 0, errors: 0, previews: {} },
+      },
+    });
+
+    if (!handler) throw new Error("progress handler not captured");
+    handler({ payload: { requestId: "req-1", nodeId: "img1", slot: 0, dataUrl: "data:image/png;base64,AA" } });
+    handler({ payload: { requestId: "req-1", nodeId: "img1", slot: 1, error: "boom" } });
+
+    const progress = useCanvasStore.getState().genProgress["img1"];
+    expect(progress.received).toBe(1);
+    expect(progress.errors).toBe(1);
+    expect(progress.previews[0]).toBe("data:image/png;base64,AA");
+  });
+
+  it("openCanvas 裁剪掉已结束节点的进度条目", async () => {
+    const doneNode = makeNode({
+      id: "img1",
+      type: "image",
+      metadata: { kind: "image", params: { model: "", size: "", count: 1 }, status: "done", error: "", images: [] },
+    });
+    const graph: CanvasGraph = {
+      canvas: { id: "c1", name: "画布一", viewport_x: 0, viewport_y: 0, viewport_k: 1, created_at: "", updated_at: "" },
+      nodes: [doneNode],
+      connections: [],
+    };
+    invokeMock.mockImplementation((cmd: string) =>
+      cmd === "canvas_get" ? Promise.resolve(graph) : Promise.resolve([]),
+    );
+    useCanvasStore.setState({
+      genProgress: { img1: { requestId: "r", total: 1, received: 1, errors: 0, previews: {} } },
+    });
+
+    await useCanvasStore.getState().openCanvas("c1");
+
+    expect(useCanvasStore.getState().genProgress).toEqual({});
   });
 });

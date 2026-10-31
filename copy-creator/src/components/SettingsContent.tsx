@@ -4,7 +4,7 @@ import { useTranslation } from "react-i18next";
 import { invoke } from "@tauri-apps/api/core";
 import { emit } from "@tauri-apps/api/event";
 import { useSettingsStore } from "../stores/settingsStore";
-import { ClipboardSection, GeneralSection, ShortcutSection, RadialSection, StorageSection, BackupSection } from "./settings";
+import { ClipboardSection, GeneralSection, ShortcutSection, RadialSection, StorageSection, BackupSection, AiImageSection } from "./settings";
 import { useShortcutRecording } from "./settings/useShortcutRecording";
 
 interface Props {
@@ -362,6 +362,9 @@ export default function SettingsContent({ embedded }: Props) {
         localRadialMenuScale={localRadialMenuScale}
         setLocalRadialMenuScale={setLocalRadialMenuScale}
       />
+
+      {/* AI 生图：自持久化分区（改动即落库），不参与下方统一保存 */}
+      <AiImageSection />
 
       <StorageSection
         storagePath={storagePath}
