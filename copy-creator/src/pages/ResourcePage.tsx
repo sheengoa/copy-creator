@@ -1054,6 +1054,35 @@ export default function ResourcePage() {
     t,
   ]);
 
+  // 批量选择模式下按 Delete 键等同操作条删除按钮：复用同一确认流程；
+  // 焦点在输入框、详情页或任一对话框打开时不响应。
+  useEffect(() => {
+    if (!isSelecting || selectedCount === 0) return;
+    if (projectView !== "file" || trashOpen || detailRecordId) return;
+    if (confirmState || moveDialog || cleanupOpen || traceRecord || resourceGroupManageOpen) return;
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key !== "Delete" || event.ctrlKey || event.altKey || event.metaKey) return;
+      const target = event.target as HTMLElement | null;
+      if (target && (target.tagName === "INPUT" || target.tagName === "TEXTAREA" || target.isContentEditable)) return;
+      event.preventDefault();
+      handleDeleteSelected();
+    };
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [
+    cleanupOpen,
+    confirmState,
+    detailRecordId,
+    handleDeleteSelected,
+    isSelecting,
+    moveDialog,
+    projectView,
+    resourceGroupManageOpen,
+    selectedCount,
+    traceRecord,
+    trashOpen,
+  ]);
+
   const handleCleanupConfirm = useCallback(async (entries: CleanupMissingEntry[]) => {
     if (cleaningMissing || entries.length === 0) return;
     setCleaningMissing(true);
