@@ -1149,6 +1149,17 @@
   cursor: not-allowed;
 }
 
+/* 键盘焦点环：图标化后按钮没有文字反馈，补齐焦点可见性（仅键盘
+   导航触发，鼠标点击不出现）。 */
+.fc-root .fc-node-btn:focus-visible,
+.fc-stepper-btn:focus-visible,
+.fc-combo-toggle:focus-visible,
+.fc-combo-display:focus-visible,
+.fc-load-clear:focus-visible {
+  outline: 2px solid color-mix(in srgb, var(--node-accent, var(--accent)) 55%, transparent);
+  outline-offset: 1px;
+}
+
 /* ── 生成参数区：图标参数位 + 取值展示 + 张数步进器 ───────── */
 
 /* 参数行：左侧图标位（悬停浮现参数名说明）+ 控件。 */

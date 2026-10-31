@@ -2480,18 +2480,19 @@ export default function FreeCanvas({ canvasId }: { canvasId: string }) {
             const autoHeight = node.height == null;
             const tools = (
               <span className="pc-node-tools">
-                <button
-                  type="button"
-                  data-tooltip={t("common.delete")}
-                  className="danger"
-                  onPointerDown={(e) => e.stopPropagation()}
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    void deleteNodes([node.id]);
-                  }}
-                >
-                  {Icons.close}
-                </button>
+                <NodeHint text={t("common.delete")}>
+                  <button
+                    type="button"
+                    className="danger"
+                    onPointerDown={(e) => e.stopPropagation()}
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      void deleteNodes([node.id]);
+                    }}
+                  >
+                    {Icons.close}
+                  </button>
+                </NodeHint>
               </span>
             );
 
@@ -2540,31 +2541,33 @@ export default function FreeCanvas({ canvasId }: { canvasId: string }) {
                     </div>
                   )}
                   <span className="pc-node-tools">
-                    <button
-                      type="button"
-                      data-tooltip={t("common.edit")}
-                      onPointerDown={(e) => e.stopPropagation()}
-                      onClick={() => {
-                        if (meta.kind === "note") {
-                          setEditingNoteId(node.id);
-                          setNoteDraft(meta.content);
-                        }
-                      }}
-                    >
-                      {Icons.edit}
-                    </button>
-                    <button
-                      type="button"
-                      data-tooltip={t("common.delete")}
-                      className="danger"
-                      onPointerDown={(e) => e.stopPropagation()}
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        void deleteNodes([node.id]);
-                      }}
-                    >
-                      {Icons.close}
-                    </button>
+                    <NodeHint text={t("common.edit")}>
+                      <button
+                        type="button"
+                        onPointerDown={(e) => e.stopPropagation()}
+                        onClick={() => {
+                          if (meta.kind === "note") {
+                            setEditingNoteId(node.id);
+                            setNoteDraft(meta.content);
+                          }
+                        }}
+                      >
+                        {Icons.edit}
+                      </button>
+                    </NodeHint>
+                    <NodeHint text={t("common.delete")}>
+                      <button
+                        type="button"
+                        className="danger"
+                        onPointerDown={(e) => e.stopPropagation()}
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          void deleteNodes([node.id]);
+                        }}
+                      >
+                        {Icons.close}
+                      </button>
+                    </NodeHint>
                   </span>
                   {resizeHandle}
                 </div>
@@ -2888,8 +2891,12 @@ export default function FreeCanvas({ canvasId }: { canvasId: string }) {
                       ))}
                     </div>
                   )}
+                  {/* 禁用原因与占位符同款条件：未连上游 / 已连等待产物。 */}
                   <div className="fc-node-row">
-                    <NodeHint text={t("canvas.saveToLibrary")} className="is-grow">
+                    <NodeHint
+                      text={hasProduct ? t("canvas.saveToLibrary") : `${t("canvas.saveToLibrary")} · ${!upstreamNode ? t("canvas.previewEmpty") : t("canvas.waitingUpstream")}`}
+                      className="is-grow"
+                    >
                       <button
                         className="fc-node-btn accent is-icon grow"
                         disabled={!hasProduct}
@@ -2899,7 +2906,10 @@ export default function FreeCanvas({ canvasId }: { canvasId: string }) {
                         {Icons.saveTray}
                       </button>
                     </NodeHint>
-                    <NodeHint text={t("canvas.saveSaveAs")} className="is-grow">
+                    <NodeHint
+                      text={hasProduct ? t("canvas.saveSaveAs") : `${t("canvas.saveSaveAs")} · ${!upstreamNode ? t("canvas.previewEmpty") : t("canvas.waitingUpstream")}`}
+                      className="is-grow"
+                    >
                       <button
                         className="fc-node-btn ghost is-icon grow"
                         disabled={!hasProduct}
@@ -3130,32 +3140,35 @@ export default function FreeCanvas({ canvasId }: { canvasId: string }) {
 
         {/* 缩放条（工程画布同款）：缩小 / 百分比 / 放大 */}
         <div className="pc-glass pc-zoombar">
-          <button
-            type="button"
-            data-tooltip={t("project.canvas.zoomOut")}
-            onClick={() => {
-              const rect = vpRef.current?.getBoundingClientRect();
-              if (rect) zoomAt(rect.width / 2, rect.height / 2, 1 / 1.2);
-            }}
-          >
-            <span aria-hidden="true">−</span>
-          </button>
+          <NodeHint text={t("project.canvas.zoomOut")}>
+            <button
+              type="button"
+              onClick={() => {
+                const rect = vpRef.current?.getBoundingClientRect();
+                if (rect) zoomAt(rect.width / 2, rect.height / 2, 1 / 1.2);
+              }}
+            >
+              <span aria-hidden="true">−</span>
+            </button>
+          </NodeHint>
           <span className="pc-zpct">{Math.round(view.scale * 100)}%</span>
-          <button
-            type="button"
-            data-tooltip={t("project.canvas.zoomIn")}
-            onClick={() => {
-              const rect = vpRef.current?.getBoundingClientRect();
-              if (rect) zoomAt(rect.width / 2, rect.height / 2, 1.2);
-            }}
-          >
-            <span aria-hidden="true">+</span>
-          </button>
+          <NodeHint text={t("project.canvas.zoomIn")}>
+            <button
+              type="button"
+              onClick={() => {
+                const rect = vpRef.current?.getBoundingClientRect();
+                if (rect) zoomAt(rect.width / 2, rect.height / 2, 1.2);
+              }}
+            >
+              <span aria-hidden="true">+</span>
+            </button>
+          </NodeHint>
         </div>
 
         {/* 迷你地图（工程画布同款）：节点包围盒 + 视口矩形，点击跳转 */}
         {miniBBox && (
-          <div className="pc-glass pc-minimap" data-tooltip={t("project.canvas.minimap")}>
+          <NodeHint text={t("project.canvas.minimap")} className="is-minimap">
+            <div className="pc-glass pc-minimap">
             <svg
               width={MINI_W}
               height={MINI_H}
@@ -3204,6 +3217,7 @@ export default function FreeCanvas({ canvasId }: { canvasId: string }) {
               />
             </svg>
           </div>
+          </NodeHint>
         )}
       </div>
     </div>
@@ -3261,7 +3275,12 @@ function NodeHint({ text, children, className }: { text: string; children: React
       if (!rect) return;
       // 贴近视口顶缘时改在下方弹出，避免胶囊越出窗口。
       const below = rect.top < 48;
-      setTip({ left: rect.left + rect.width / 2, top: below ? rect.bottom + 7 : rect.top - 7, below });
+      // 水平夹紧：长文案（≤260px）贴近窗口左右缘时不越界；半宽按文案
+      // 长度估算（CJK ≈ 字号宽），短文案几乎不受影响。
+      const half = Math.min(130, (text.length * 11 + 24) / 2);
+      const cx = rect.left + rect.width / 2;
+      const left = Math.min(Math.max(cx, half + 8), window.innerWidth - half - 8);
+      setTip({ left, top: below ? rect.bottom + 7 : rect.top - 7, below });
     }, 300);
   };
   const hide = () => {
@@ -3373,7 +3392,13 @@ function ParamCombo({
             setEditing(false);
           }}
           onKeyDown={(e) => {
-            if (e.key === "Escape") setOpen(false);
+            if (e.key === "Escape") {
+              // Esc：回退到已提交值并退出编辑（blur 原值提交，无副作用）。
+              // 对展示态流程同样成立——输入框只在编辑态挂载。
+              e.currentTarget.value = value;
+              e.currentTarget.blur();
+              setOpen(false);
+            }
           }}
         />
       )}
