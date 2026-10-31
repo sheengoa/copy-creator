@@ -6,7 +6,8 @@
   "tabs": {
     "clipboard": "Clipboard",
     "phrases": "Quick Input",
-    "resources": "Resources"
+    "resources": "Resources",
+    "canvas": "Canvas"
   },
   "settings": {
     "title": "Settings",
@@ -766,5 +767,32 @@
     "closePreview": "Close preview",
     "previewImage": "Image in stashed content",
     "imageUnavailable": "Image unavailable"
+  },
+  "canvas": {
+    "newCanvas": "New Canvas",
+    "empty": "No canvases yet",
+    "emptyHint": "Tap \"New Canvas\" to start creating",
+    "rename": "Rename",
+    "renameTitle": "Rename Canvas",
+    "namePlaceholder": "Canvas name",
+    "delete": "Delete Canvas",
+    "deleteConfirm": "Delete canvas \"{{name}}\"? Its nodes and connections will be removed; images already saved to the resource library are not affected.",
+    "canvasMeta": "{{node}} nodes · {{conn}} connections",
+    "node": {
+      "text": "Text",
+      "image": "Image",
+      "ref": "Reference",
+      "note": "Note"
+    },
+    "addNode": "Add Node",
+    "panel": {
+      "title": "Properties",
+      "noSelection": "Select a node to edit its properties",
+      "titleLabel": "Title",
+      "contentLabel": "Content",
+      "pathLabel": "Resource Path",
+      "sizeLabel": "Size",
+      "deleteNode": "Delete Node"
+    }
   }
 }

@@ -6,7 +6,8 @@
   "tabs": {
     "clipboard": "剪切板",
     "phrases": "快捷输入",
-    "resources": "资源"
+    "resources": "资源",
+    "canvas": "画布"
   },
   "settings": {
     "title": "设置",
@@ -762,5 +763,32 @@
     "closePreview": "收起预览",
     "previewImage": "暂存内容中的图片",
     "imageUnavailable": "图片无法加载"
+  },
+  "canvas": {
+    "newCanvas": "新建画布",
+    "empty": "还没有画布",
+    "emptyHint": "点击「新建画布」开始自由创作",
+    "rename": "重命名",
+    "renameTitle": "重命名画布",
+    "namePlaceholder": "画布名",
+    "delete": "删除画布",
+    "deleteConfirm": "删除画布「{{name}}」？节点与连线将一并删除，已存入资源库的图片不受影响。",
+    "canvasMeta": "{{node}} 节点 · {{conn}} 连线",
+    "node": {
+      "text": "文本",
+      "image": "图片",
+      "ref": "参考图",
+      "note": "便签"
+    },
+    "addNode": "新建节点",
+    "panel": {
+      "title": "属性",
+      "noSelection": "选中节点后在这里编辑属性",
+      "titleLabel": "标题",
+      "contentLabel": "内容",
+      "pathLabel": "资源路径",
+      "sizeLabel": "尺寸",
+      "deleteNode": "删除节点"
+    }
   }
 }

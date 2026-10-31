@@ -1,0 +1,254 @@
+/* 画布区（自由生图工作流）：画布库条 + 主画布 + 属性面板。
+   布局与视觉对齐资源页惯例（iOS 磨砂玻璃 + 现有 CSS 变量 token）。 */
+
+.canvas-page {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  overflow: hidden;
+}
+
+/* ── 顶部画布库条 ─────────────────────────────────────────── */
+
+.canvas-topbar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 14px;
+  border-bottom: 1px solid var(--separator);
+  flex-shrink: 0;
+}
+
+.canvas-chips {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  overflow-x: auto;
+  flex: 1;
+  scrollbar-width: none;
+  min-width: 0;
+}
+
+.canvas-chips::-webkit-scrollbar {
+  display: none;
+}
+
+.canvas-chip {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 5px 12px;
+  border-radius: 999px;
+  border: 1px solid transparent;
+  background: var(--bg-card-hover);
+  color: var(--text-secondary);
+  font-size: 12px;
+  white-space: nowrap;
+  cursor: pointer;
+  transition: background 0.15s ease, color 0.15s ease;
+  flex-shrink: 0;
+}
+
+.canvas-chip:hover {
+  background: var(--accent-bg);
+  color: var(--text-primary);
+}
+
+.canvas-chip.active {
+  background: var(--accent-bg);
+  border-color: var(--accent-border-soft);
+  color: var(--accent);
+  font-weight: 600;
+}
+
+.canvas-chip-menu {
+  display: inline-flex;
+  align-items: center;
+  border-radius: 999px;
+  padding: 1px;
+  opacity: 0.65;
+}
+
+.canvas-chip-menu:hover {
+  opacity: 1;
+  background: rgba(0, 0, 0, 0.06);
+}
+
+.canvas-chip-menu svg {
+  width: 14px;
+  height: 14px;
+}
+
+.canvas-chip-popover {
+  position: absolute;
+  top: calc(100% + 4px);
+  left: 0;
+  z-index: 60;
+  min-width: 136px;
+  background: var(--bg-card);
+  border: 1px solid var(--separator);
+  border-radius: var(--radius);
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.14);
+  padding: 4px;
+}
+
+.canvas-chip-popover button {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  padding: 7px 10px;
+  border: none;
+  background: none;
+  border-radius: var(--radius-sm);
+  font-size: 13px;
+  color: var(--text-primary);
+  cursor: pointer;
+  text-align: left;
+}
+
+.canvas-chip-popover button:hover {
+  background: var(--bg-card-hover);
+}
+
+.canvas-chip-popover button.danger {
+  color: var(--danger);
+}
+
+.canvas-chip-popover button svg {
+  width: 14px;
+  height: 14px;
+  flex-shrink: 0;
+}
+
+.canvas-new-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 5px 12px;
+  border-radius: 999px;
+  border: none;
+  background: var(--accent);
+  color: #fff;
+  font-size: 12px;
+  cursor: pointer;
+  flex-shrink: 0;
+}
+
+.canvas-new-btn:hover {
+  filter: brightness(1.08);
+}
+
+.canvas-new-btn svg {
+  width: 14px;
+  height: 14px;
+}
+
+/* ── 主画布区 ─────────────────────────────────────────────── */
+
+.canvas-main {
+  position: relative;
+  flex: 1;
+  overflow: hidden;
+  background:
+    radial-gradient(circle at 1px 1px, var(--separator) 1px, transparent 0) 0 0 / 22px 22px,
+    var(--bg-primary);
+}
+
+.canvas-empty {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  color: var(--text-secondary);
+}
+
+.canvas-empty-icon {
+  width: 44px;
+  height: 44px;
+  opacity: 0.45;
+}
+
+.canvas-empty-icon svg {
+  width: 100%;
+  height: 100%;
+}
+
+.canvas-empty-title {
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+.canvas-empty-hint {
+  font-size: 12px;
+}
+
+/* ── 页面对话框（重命名） ─────────────────────────────────── */
+
+.canvas-dialog-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 80;
+  background: rgba(0, 0, 0, 0.28);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.canvas-dialog {
+  width: 320px;
+  background: var(--bg-card);
+  border-radius: var(--radius-lg);
+  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.2);
+  padding: 16px;
+}
+
+.canvas-dialog-title {
+  font-size: 14px;
+  font-weight: 600;
+  margin-bottom: 12px;
+  color: var(--text-primary);
+}
+
+.canvas-dialog-input {
+  width: 100%;
+  box-sizing: border-box;
+  padding: 8px 10px;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--separator);
+  background: var(--bg-primary);
+  color: var(--text-primary);
+  font-size: 13px;
+  outline: none;
+}
+
+.canvas-dialog-input:focus {
+  border-color: var(--accent-border);
+}
+
+.canvas-dialog-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-top: 14px;
+}
+
+.canvas-dialog-actions button {
+  padding: 6px 14px;
+  border-radius: 999px;
+  border: none;
+  font-size: 13px;
+  cursor: pointer;
+  background: var(--bg-card-hover);
+  color: var(--text-primary);
+}
+
+.canvas-dialog-actions button.primary {
+  background: var(--accent);
+  color: #fff;
+}

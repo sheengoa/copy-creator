@@ -7,6 +7,7 @@ import { invoke } from "@tauri-apps/api/core";
 import ClipboardPage from "./pages/ClipboardPage";
 import ResourcePage from "./pages/ResourcePage";
 import PhrasePage from "./pages/PhrasePage";
+import CanvasPage from "./pages/CanvasPage";
 import SettingsContent from "./components/SettingsContent";
 import ApiKeyToast from "./components/ApiKeyToast";
 import ShortcutToast from "./components/ShortcutToast";
@@ -23,17 +24,20 @@ import "./styles/resource.css";
 import "./styles/project.css";
 import "./styles/phrases.css";
 import "./styles/settings.css";
+import "./styles/canvas.css";
 
 const PANEL_MAP: Record<string, { titleKey: string; component: () => React.ReactNode }> = {
   clipboard: { titleKey: "tabs.clipboard", component: () => <ClipboardPage /> },
   phrases: { titleKey: "tabs.phrases", component: () => <PhrasePage /> },
   resources: { titleKey: "tabs.resources", component: () => <ResourcePage /> },
+  canvas: { titleKey: "tabs.canvas", component: () => <CanvasPage /> },
 };
 
 const NAV_ITEMS = [
   { panelType: "clipboard" },
   { panelType: "phrases" },
   { panelType: "resources" },
+  { panelType: "canvas" },
 ] as const;
 
 const PANEL_KEYS = NAV_ITEMS.map((item) => item.panelType);

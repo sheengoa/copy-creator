@@ -145,6 +145,15 @@ export const Icons = {
       <path d="M2 9V5a2 2 0 0 1 2-2h5l2 2h5" />
     </svg>
   ),
+  canvas: (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round">
+      <circle cx="6" cy="17.5" r="2.6" />
+      <circle cx="18" cy="6.5" r="2.6" />
+      <path d="M8 15.7 16 8.3" />
+      <circle cx="18" cy="17.5" r="2.6" />
+      <path d="M15.4 16.4c-2.6-.6-4.6-2-5.8-4.4" />
+    </svg>
+  ),
   empty: (
     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
       <rect x="3" y="3" width="18" height="18" rx="2" />
