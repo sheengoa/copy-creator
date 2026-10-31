@@ -117,18 +117,18 @@ const NODE_ACCENT: Record<CanvasNodeType, string> = {
 
 /** 生成参数预设（下拉清单；输入框仍可自由键入任意值）。尺寸值取后端
  *  可直接接受的「宽x高」（对齐 ai.rs SIZE_PRESETS_1K/2K），auto 交给
- *  模型自选；模型清单随提供方补一项当前回退值。 */
-const SIZE_PRESET_ITEMS: { value: string; label: string }[] = [
-  { value: "auto", label: "auto · 跟随模型" },
-  { value: "1024x1024", label: "1:1 · 1024x1024" },
-  { value: "1536x1024", label: "3:2 · 1536x1024" },
-  { value: "1024x1536", label: "2:3 · 1024x1536" },
-  { value: "1536x864", label: "16:9 · 1536x864" },
-  { value: "864x1536", label: "9:16 · 864x1536" },
-  { value: "1024x768", label: "4:3 · 1024x768" },
-  { value: "768x1024", label: "3:4 · 768x1024" },
-  { value: "2048x1152", label: "16:9 · 2048x1152（2K）" },
-  { value: "1152x2048", label: "9:16 · 1152x2048（2K）" },
+ *  模型自选；hint 作弱化尾注（比例/档位）。 */
+const SIZE_PRESET_ITEMS: { value: string; label: string; hint?: string }[] = [
+  { value: "auto", label: "auto", hint: "跟随模型" },
+  { value: "1024x1024", label: "1024x1024", hint: "1:1" },
+  { value: "1536x1024", label: "1536x1024", hint: "3:2" },
+  { value: "1024x1536", label: "1024x1536", hint: "2:3" },
+  { value: "1536x864", label: "1536x864", hint: "16:9" },
+  { value: "864x1536", label: "864x1536", hint: "9:16" },
+  { value: "1024x768", label: "1024x768", hint: "4:3" },
+  { value: "768x1024", label: "768x1024", hint: "3:4" },
+  { value: "2048x1152", label: "2048x1152", hint: "16:9 · 2K" },
+  { value: "1152x2048", label: "1152x2048", hint: "9:16 · 2K" },
 ];
 const MODEL_PRESET_BASE = ["gpt-image-1", "gemini-2.5-flash-image"];
 
@@ -2856,7 +2856,7 @@ function ParamCombo({
 }: {
   comboKey: string;
   value: string;
-  items: { value: string; label: string }[];
+  items: { value: string; label: string; hint?: string }[];
   placeholder?: string;
   toggleTitle: string;
   onCommit: (value: string) => void;
@@ -2930,7 +2930,8 @@ function ParamCombo({
                 className={`fc-combo-item${item.value === value ? " is-current" : ""}`}
                 onClick={() => applyPreset(item.value)}
               >
-                <span>{item.label}</span>
+                <span className="fc-combo-label">{item.label}</span>
+                {item.hint && <span className="fc-combo-hint">{item.hint}</span>}
                 {item.value === value && <i aria-hidden="true">{Icons.check}</i>}
               </button>
             ))}

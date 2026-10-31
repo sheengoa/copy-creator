@@ -894,61 +894,120 @@
   transform: rotate(180deg);
 }
 
+/* 下拉清单：与节点同源的毛玻璃卡——blur 饱和玻璃底 + 0.5px 描边 +
+   双层柔投影；条目双段文字（主文字 + 弱化尾注），当前项 accent 浸染。 */
 .fc-combo-pop {
   position: fixed;
   z-index: 1100;
   max-height: 264px;
   overflow-y: auto;
-  padding: 4px;
+  padding: 5px;
   box-sizing: border-box;
-  border-radius: 10px;
-  background: rgba(255, 255, 255, 0.97);
-  box-shadow: 0 8px 28px rgba(31, 35, 65, 0.18), 0 0 0 0.5px rgba(0, 0, 0, 0.08);
+  border-radius: 12px;
+  background: rgba(255, 255, 255, 0.88);
+  backdrop-filter: blur(22px) saturate(1.7);
+  -webkit-backdrop-filter: blur(22px) saturate(1.7);
+  box-shadow:
+    0 12px 34px rgba(31, 35, 65, 0.16),
+    0 2px 8px rgba(31, 35, 65, 0.08),
+    0 0 0 0.5px rgba(0, 0, 0, 0.06);
   display: flex;
   flex-direction: column;
   gap: 1px;
   scrollbar-width: thin;
+  scrollbar-color: rgba(31, 35, 65, 0.22) transparent;
+  animation: fc-combo-in 0.14s ease;
+}
+
+@keyframes fc-combo-in {
+  from {
+    opacity: 0;
+    transform: translateY(-3px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+/* 细滚动条：去原生箭头按钮，圆头细杆（Windows 默认滚动条太粗粝）。 */
+.fc-combo-pop::-webkit-scrollbar {
+  width: 6px;
+}
+
+.fc-combo-pop::-webkit-scrollbar-button {
+  display: none;
+}
+
+.fc-combo-pop::-webkit-scrollbar-thumb {
+  border-radius: 3px;
+  background: rgba(31, 35, 65, 0.2);
+}
+
+.fc-combo-pop::-webkit-scrollbar-track {
+  background: transparent;
 }
 
 .fc-combo-item {
   display: flex;
   align-items: center;
-  justify-content: space-between;
   gap: 8px;
   padding: 7px 10px;
   border: none;
-  border-radius: 7px;
+  border-radius: 8px;
   background: none;
   color: var(--text-primary);
   font-size: 12.5px;
+  line-height: 1.35;
   text-align: left;
   cursor: pointer;
   white-space: nowrap;
 }
 
 .fc-combo-item:hover {
-  background: rgba(0, 0, 0, 0.05);
+  background: rgba(31, 35, 65, 0.06);
+}
+
+.fc-combo-item .fc-combo-hint {
+  margin-left: auto;
+  font-size: 10.5px;
+  letter-spacing: 0.03em;
+  color: var(--text-tertiary);
 }
 
 .fc-combo-item.is-current {
   color: var(--accent);
   font-weight: 600;
+  background: color-mix(in srgb, var(--accent) 9%, transparent);
+}
+
+.fc-combo-item.is-current .fc-combo-hint {
+  color: color-mix(in srgb, var(--accent) 60%, var(--text-tertiary));
 }
 
 .fc-combo-item i {
   display: flex;
-  width: 12px;
-  height: 12px;
+  flex: none;
+  width: 13px;
+  height: 13px;
+  color: var(--accent);
 }
 
 .fc-combo-item i svg {
-  width: 12px;
-  height: 12px;
+  width: 13px;
+  height: 13px;
 }
 
 [data-theme="dark"] .fc-combo-pop {
-  background: rgba(34, 34, 42, 0.97);
-  box-shadow: 0 8px 28px rgba(0, 0, 0, 0.5), 0 0 0 0.5px rgba(255, 255, 255, 0.12);
+  background: rgba(30, 30, 38, 0.9);
+  box-shadow:
+    0 12px 34px rgba(0, 0, 0, 0.5),
+    0 0 0 0.5px rgba(255, 255, 255, 0.12);
+  scrollbar-color: rgba(255, 255, 255, 0.24) transparent;
+}
+
+[data-theme="dark"] .fc-combo-pop::-webkit-scrollbar-thumb {
+  background: rgba(255, 255, 255, 0.24);
 }
 
 [data-theme="dark"] .fc-combo-item:hover {
