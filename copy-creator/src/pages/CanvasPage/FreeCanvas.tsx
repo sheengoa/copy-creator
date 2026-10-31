@@ -818,6 +818,12 @@ export default function FreeCanvas({ canvasId }: { canvasId: string }) {
       if (el && (el.tagName === "INPUT" || el.tagName === "TEXTAREA" || el.isContentEditable)) {
         return;
       }
+      // 弹层打开时不响应（对齐工程画布惯例）：确认框焦点落在按钮上而非输入
+      // 元素，仅靠上面的 tagName 守卫拦不住——弹层开着时按 Delete 会在背后
+      // 删掉选中节点。覆盖确认框/重命名对话框与画布 chips 两个弹层。
+      if (document.querySelector(".dialog-overlay, .canvas-dialog-overlay, .canvas-chip-popover")) {
+        return;
+      }
       const ctrl = e.ctrlKey || e.metaKey;
       if ((e.key === "Delete" || e.key === "Backspace") && selectionRef.current.length) {
         e.preventDefault();
