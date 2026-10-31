@@ -1,6 +1,7 @@
 /* 画布区（自由生图工作流）：画布库条 + 主画布。
    画布引擎样式（节点/连线/菜单/迷你地图等）复用工程画布的 pc-* 体系
-   （project.css，全局加载），这里只保留页面骨架与画布区专属内容层。 */
+   （project.css，全局加载）；节点 chrome 在此按「画布区节点视觉标准」
+   覆盖（见下方标准块注释），作用域限定 .fc-root，不影响工程画布。 */
 
 .canvas-page {
   display: flex;
@@ -293,25 +294,84 @@
   color: #fff;
 }
 
-/* ── fork 适配层：工程画布 pc-* 节点骨架上的画布区专属内容 ──
-   pc-root 的高度在工程视图里由 .project-stage-shell 父级 flex 撑起，
-   画布区的 .canvas-main 是普通块级容器，这里用绝对定位铺满。
-   pc-node 默认不设 display（工程域节点由内容自然撑开）；画布区节点
-   是「固定尺寸 + 头部 + 内容层」，需要纵向 flex 让内容吃满剩余空间。
-   挂 .fc-root 限定作用域，不影响工程画布。 */
+/* ══ 画布区节点视觉标准（B+ 通透玻璃，用户确认稿定案） ══════
+   参数定案：卡面 rgba(255,255,255,0.62) · blur 24px · saturate 1.8 ·
+   顶部反光强度 0.85 · 参数框白卡浮起 · 生成按钮同色光晕投影。
+   覆盖工程画布 pc-node 的默认 chrome（色带头栏/实心白卡），作用域限定
+   .fc-root；亮暗两套必须同步。后续新增节点类型沿用此 chrome，只需在
+   FreeCanvas 的 NODE_ACCENT 注册类型色、body 用本文件内容层样式。 */
 
 .canvas-main > .pc-root {
   position: absolute;
   inset: 0;
 }
 
-.fc-root .pc-node,
-.fc-root .pc-note {
+.fc-root .pc-node {
   display: flex;
   flex-direction: column;
+  border-radius: 15px;
+  background: rgba(255, 255, 255, 0.62);
+  backdrop-filter: blur(24px) saturate(1.8);
+  -webkit-backdrop-filter: blur(24px) saturate(1.8);
+  border: 0.5px solid rgba(255, 255, 255, 0.78);
+  box-shadow:
+    0 1px 2px rgba(0, 0, 0, 0.04),
+    0 14px 40px rgba(31, 35, 65, 0.14),
+    inset 0 0.5px 0 rgba(255, 255, 255, 0.85),
+    inset 0 -0.5px 0 rgba(255, 255, 255, 0.35);
 }
 
-/* 文本节点：正文即节点体（textarea 常驻，失焦提交）。 */
+/* 玻璃斜面反光：顶部一道渐隐高光，盖在内容之上（真玻璃的表面反光），
+   不拦截命中。 */
+.fc-root .pc-node::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  pointer-events: none;
+  background: linear-gradient(168deg, rgba(255, 255, 255, 0.5) 0%, rgba(255, 255, 255, 0.12) 22%, rgba(255, 255, 255, 0) 42%);
+  opacity: 0.85;
+}
+
+/* 选中点亮：内 1px 类型色线 + 外 4.5px 柔光圈（双层 ring）。 */
+.fc-root .pc-node.pc-selected {
+  border-color: var(--node-accent, var(--accent));
+  box-shadow:
+    0 1px 2px rgba(0, 0, 0, 0.04),
+    0 14px 40px rgba(31, 35, 65, 0.14),
+    0 0 0 1px var(--node-accent, var(--accent)),
+    0 0 0 4.5px color-mix(in srgb, var(--node-accent, var(--accent)) 20%, transparent),
+    inset 0 0.5px 0 rgba(255, 255, 255, 0.85);
+}
+
+/* 头栏：去工程画布的类型色带与色底，改玻璃化精装头栏。 */
+.fc-root .pc-node-head {
+  min-height: 32px;
+  padding: 0 12px;
+  border-left: none;
+  border-bottom: 0.5px solid rgba(0, 0, 0, 0.045);
+  border-radius: 14.5px 14.5px 0 0;
+  background: transparent;
+}
+
+.fc-root .pc-node-kind {
+  font-weight: 500;
+  letter-spacing: 0.02em;
+  color: var(--node-accent, var(--text-secondary));
+}
+
+/* 端口光晕：输出带类型色辉光，浮在玻璃卡沿。 */
+.fc-root .pc-port {
+  box-shadow: 0 0 0 2.5px rgba(255, 255, 255, 0.92);
+}
+
+.fc-root .pc-port-out {
+  box-shadow: 0 0 0 2.5px rgba(255, 255, 255, 0.92), 0 0 8px 1px var(--node-accent, transparent);
+}
+
+/* ── 节点内容层（画布区专属） ────────────────────────────── */
+
+/* 文本节点：正文即节点体（textarea 常驻，失焦提交），透明底贴玻璃。 */
 .fc-root .fc-node-edit {
   flex: 1;
   min-height: 0;
@@ -319,21 +379,89 @@
   box-sizing: border-box;
   border: none;
   resize: none;
-  padding: 8px 10px;
+  padding: 10px 12px;
   font-size: 12px;
-  line-height: 1.5;
+  line-height: 1.6;
   background: transparent;
   color: var(--text-primary);
   outline: none;
   font-family: inherit;
 }
 
-/* 节点体内联参数（ComfyUI 式：参数与输入长在节点上）。 */
+/* 便签体：黄色内嵌块（琥珀 12% 底），高度随内容/节点撑开。 */
+.fc-root .fc-note-body {
+  flex: 1;
+  margin: 10px 12px 12px;
+  padding: 10px 12px;
+  border-radius: 10px;
+  background: rgba(230, 167, 0, 0.12);
+  color: #8A6A1E;
+  font-size: 12px;
+  line-height: 1.55;
+  word-break: break-word;
+  white-space: pre-wrap;
+  overflow-y: auto;
+  scrollbar-width: none;
+}
+
+.fc-root .fc-note-body::-webkit-scrollbar {
+  display: none;
+}
+
+.fc-root .fc-note-body i {
+  opacity: 0.55;
+}
+
+/* 便签编辑态：透明底 + 琥珀描边圈。 */
+.fc-root .fc-note-input {
+  display: block;
+  flex: 1;
+  min-height: 0;
+  width: calc(100% - 24px);
+  margin: 10px 12px 12px;
+  padding: 10px 12px;
+  box-sizing: border-box;
+  border: none;
+  border-radius: 10px;
+  background: rgba(255, 255, 255, 0.5);
+  color: var(--text-primary);
+  font: inherit;
+  font-size: 12px;
+  line-height: 1.55;
+  resize: none;
+  outline: none;
+  font-family: inherit;
+  box-shadow: 0 0 0 1.5px rgba(217, 144, 0, 0.4);
+}
+
+/* 参数输入：分段槽语言的白卡浮起——通透玻璃上嵌实体件，对比清晰。 */
+.fc-root .fc-node-input {
+  width: 100%;
+  box-sizing: border-box;
+  padding: 6px 9px;
+  border: none;
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.92);
+  color: var(--text-primary);
+  font-size: 11px;
+  outline: none;
+  font-family: inherit;
+  box-shadow: 0 1px 2.5px rgba(31, 35, 65, 0.1), 0 0 0 0.5px rgba(0, 0, 0, 0.055);
+}
+
+.fc-root .fc-node-input:focus {
+  background: #fff;
+  box-shadow:
+    0 1px 2.5px rgba(31, 35, 65, 0.1),
+    0 0 0 2px color-mix(in srgb, var(--node-accent, var(--accent)) 40%, transparent),
+    0 0 0 0.5px var(--node-accent, var(--accent));
+}
+
 .fc-node-form {
   flex: 1;
   min-height: 0;
   overflow-y: auto;
-  padding: 8px 10px;
+  padding: 10px 12px 12px;
   box-sizing: border-box;
   display: flex;
   flex-direction: column;
@@ -345,25 +473,8 @@
   display: none;
 }
 
-.fc-node-input {
-  width: 100%;
-  box-sizing: border-box;
-  padding: 5px 8px;
-  border: 1px solid var(--separator);
-  border-radius: var(--radius-sm);
-  background: var(--bg-primary);
-  color: var(--text-primary);
-  font-size: 11px;
-  outline: none;
-  font-family: inherit;
-}
-
-.fc-node-input:focus {
-  border-color: var(--accent-border);
-}
-
 .fc-node-input.count {
-  width: 56px;
+  width: 48px;
   flex-shrink: 0;
 }
 
@@ -379,34 +490,41 @@
 }
 
 .fc-node-btn {
-  padding: 6px 10px;
+  padding: 7px 10px;
   border: none;
-  border-radius: var(--radius-sm);
+  border-radius: 9px;
   font-size: 12px;
   cursor: pointer;
 }
 
-.fc-node-btn.accent {
+/* 生成主按钮：accent 胶囊 + 同色光晕投影（浮起感）。 */
+.fc-root .fc-node-btn.accent {
   background: var(--accent);
   color: #fff;
-  font-weight: 600;
+  font-weight: 500;
+  box-shadow:
+    0 1px 2px rgba(0, 0, 0, 0.14),
+    0 3px 10px color-mix(in srgb, var(--accent) 35%, transparent),
+    inset 0 0.5px 0 rgba(255, 255, 255, 0.3);
 }
 
-.fc-node-btn.accent:disabled {
+.fc-root .fc-node-btn.accent:disabled {
   opacity: 0.45;
   cursor: not-allowed;
+  box-shadow: none;
 }
 
-.fc-node-btn.ghost {
-  background: var(--bg-card-hover);
+.fc-root .fc-node-btn.ghost {
+  background: var(--chip-bg);
   color: var(--text-primary);
 }
 
-.fc-node-btn.ghost:hover {
-  background: var(--accent-bg);
+.fc-root .fc-node-btn.ghost:hover {
+  background: var(--chip-hover-bg);
 }
 
-.fc-node-placeholder {
+/* 参考图空态：虚线占位块。 */
+.fc-root .fc-node-placeholder {
   flex: 1;
   display: flex;
   align-items: center;
@@ -416,24 +534,25 @@
   color: var(--text-tertiary);
   text-align: center;
   border: 1px dashed var(--text-tertiary);
-  border-radius: var(--radius-sm);
+  border-radius: 10px;
   box-sizing: border-box;
-  margin: 6px;
 }
 
 .fc-thumb {
-  width: 60px;
-  height: 60px;
+  width: 52px;
+  height: 52px;
   object-fit: cover;
-  border-radius: 6px;
+  border-radius: 9px;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.14);
 }
 
 .fc-thumb-cover {
   width: 100%;
   height: 120px;
   object-fit: cover;
-  border-radius: var(--radius-sm);
+  border-radius: 10px;
   flex-shrink: 0;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.12);
 }
 
 /* ── AI 生成状态：槽位逐格填充 / 进度摘要 / 备选缩略图 ────── */
@@ -447,7 +566,7 @@
 .fc-gen-slot {
   width: 52px;
   height: 52px;
-  border-radius: var(--radius-sm);
+  border-radius: 9px;
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -457,7 +576,7 @@
 
 .fc-gen-slot.pending {
   border: 1px dashed var(--separator);
-  background: var(--bg-primary);
+  background: rgba(0, 0, 0, 0.03);
   animation: fc-slot-pulse 1.2s ease-in-out infinite;
 }
 
@@ -495,7 +614,7 @@
   position: relative;
   padding: 0;
   border: 2px solid transparent;
-  border-radius: var(--radius-sm);
+  border-radius: 9px;
   background: none;
   cursor: pointer;
   line-height: 0;
@@ -515,6 +634,80 @@
   line-height: 1.4;
   background: var(--accent);
   color: #fff;
+}
+
+/* ── 暗色主题（与亮色同步定案：深玻璃 + 浮起件） ─────────── */
+
+[data-theme="dark"] .fc-root .pc-node {
+  background: rgba(30, 30, 36, 0.66);
+  border-color: rgba(255, 255, 255, 0.12);
+  box-shadow:
+    0 1px 2px rgba(0, 0, 0, 0.3),
+    0 14px 40px rgba(0, 0, 0, 0.4),
+    inset 0 0.5px 0 rgba(255, 255, 255, 0.14),
+    inset 0 -0.5px 0 rgba(255, 255, 255, 0.06);
+}
+
+[data-theme="dark"] .fc-root .pc-node::before {
+  background: linear-gradient(168deg, rgba(255, 255, 255, 0.09) 0%, rgba(255, 255, 255, 0.02) 22%, rgba(255, 255, 255, 0) 42%);
+}
+
+[data-theme="dark"] .fc-root .pc-node.pc-selected {
+  box-shadow:
+    0 1px 2px rgba(0, 0, 0, 0.3),
+    0 14px 40px rgba(0, 0, 0, 0.4),
+    0 0 0 1px var(--node-accent, var(--accent)),
+    0 0 0 4.5px color-mix(in srgb, var(--node-accent, var(--accent)) 28%, transparent),
+    inset 0 0.5px 0 rgba(255, 255, 255, 0.14);
+}
+
+[data-theme="dark"] .fc-root .pc-node-head {
+  border-bottom-color: rgba(255, 255, 255, 0.08);
+}
+
+[data-theme="dark"] .fc-root .pc-port {
+  box-shadow: 0 0 0 2.5px rgba(20, 20, 24, 0.9);
+}
+
+[data-theme="dark"] .fc-root .pc-port-out {
+  box-shadow: 0 0 0 2.5px rgba(20, 20, 24, 0.9), 0 0 8px 1px var(--node-accent, transparent);
+}
+
+[data-theme="dark"] .fc-root .fc-node-edit {
+  color: var(--text-primary);
+}
+
+[data-theme="dark"] .fc-root .fc-note-body {
+  background: rgba(230, 167, 0, 0.16);
+  color: #FFD98A;
+}
+
+[data-theme="dark"] .fc-root .fc-note-input {
+  background: rgba(255, 255, 255, 0.08);
+  color: var(--text-primary);
+  box-shadow: 0 0 0 1.5px rgba(255, 200, 87, 0.35);
+}
+
+[data-theme="dark"] .fc-root .fc-node-input {
+  background: rgba(255, 255, 255, 0.1);
+  color: var(--text-primary);
+  box-shadow: inset 0 0.5px 0 rgba(255, 255, 255, 0.08), 0 0 0 0.5px rgba(255, 255, 255, 0.12);
+}
+
+[data-theme="dark"] .fc-root .fc-node-input:focus {
+  background: rgba(255, 255, 255, 0.14);
+  box-shadow:
+    0 0 0 2px color-mix(in srgb, var(--node-accent, var(--accent)) 45%, transparent),
+    0 0 0 0.5px var(--node-accent, var(--accent));
+}
+
+[data-theme="dark"] .fc-root .fc-node-placeholder {
+  border-color: var(--text-tertiary);
+}
+
+[data-theme="dark"] .fc-root .fc-gen-slot.pending {
+  background: rgba(255, 255, 255, 0.05);
+  border-color: rgba(255, 255, 255, 0.14);
 }
 
 /* ── 画布信息玻璃卡 / 空态示意 / 拖放遮罩 / 批量生成 ──────── */

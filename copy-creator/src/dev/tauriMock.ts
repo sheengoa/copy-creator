@@ -213,7 +213,7 @@ const db = {
     },
     {
       id: "cn-2", canvas_id: "cv-1", type: "image" as const, title: "",
-      pos_x: 480, pos_y: 110, width: 280, height: 400,
+      pos_x: 480, pos_y: 110, width: 280, height: null,
       metadata: { kind: "image", params: { model: "", size: "", count: 2 }, status: "idle", error: "", images: [] },
       resource_path: "", created_at: ts(), updated_at: ts(),
     },

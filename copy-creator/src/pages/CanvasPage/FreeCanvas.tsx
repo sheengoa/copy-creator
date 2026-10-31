@@ -29,12 +29,21 @@ const MINI_W = 150;
 const MINI_H = 96;
 const UNDO_LIMIT = 50;
 
-/** 节点默认尺寸：参数与输入都长在节点体上（ComfyUI 式），建节点即落库
- *  显式宽高。nodeMetrics 实测盒会覆盖常量做连线锚点。 */
-const NODE_DEFAULT_SIZE: Record<CanvasNodeType, { w: number; h: number }> = {
+/** 建节点落库的默认尺寸（画布区节点视觉标准，B+ 通透玻璃稿定案）：
+ *  高度不落库 = 内容自适应撑开（消灭固定高的大空白）；text 正文是
+ *  常驻编辑框需固定高。用户拖过尺寸手柄后 height 落库转固定。 */
+const NODE_DEFAULT_SIZE: Record<CanvasNodeType, { w: number; h: number | null }> = {
   text: { w: 260, h: 170 },
-  note: { w: 240, h: 160 },
-  image: { w: 280, h: 400 },
+  note: { w: 220, h: null },
+  image: { w: 280, h: null },
+  ref: { w: 260, h: null },
+};
+
+/** 连线锚点在 nodeMetrics 实测前的兜底尺寸（实测优先，常量只是首帧）。 */
+const NODE_FALLBACK_SIZE: Record<CanvasNodeType, { w: number; h: number }> = {
+  text: { w: 260, h: 170 },
+  note: { w: 220, h: 120 },
+  image: { w: 280, h: 320 },
   ref: { w: 260, h: 200 },
 };
 
@@ -108,7 +117,7 @@ function wirePathD(a: { x: number; y: number }, b: { x: number; y: number }): st
 }
 
 function nodeSize(node: CanvasNode): { w: number; h: number } {
-  const fallback = NODE_DEFAULT_SIZE[node.type];
+  const fallback = NODE_FALLBACK_SIZE[node.type];
   return { w: node.width ?? fallback.w, h: node.height ?? fallback.h };
 }
 
@@ -116,7 +125,7 @@ type DragState =
   | { kind: "pan"; sx: number; sy: number; ox: number; oy: number; moved: boolean }
   | { kind: "marquee"; sx: number; sy: number; mq: HTMLDivElement | null; moved: boolean }
   | {
-      kind: "node" | "note";
+      kind: "node";
       sx: number; sy: number;
       ox: number; oy: number;
       frameKey: string;
@@ -485,7 +494,7 @@ export default function FreeCanvas({ canvasId }: { canvasId: string }) {
   const viewScaleRef = useRef(view.scale);
   const measureRafRef = useRef<number | null>(null);
   const measureNodes = useCallback(() => {
-    const els = vpRef.current?.querySelectorAll<HTMLElement>(".pc-node[data-key], .pc-note[data-key]");
+    const els = vpRef.current?.querySelectorAll<HTMLElement>(".pc-node[data-key]");
     if (!els || els.length === 0) return;
     const scale = viewScaleRef.current || 1;
     const boxes: Record<string, { w: number; h: number }> = {};
@@ -538,7 +547,7 @@ export default function FreeCanvas({ canvasId }: { canvasId: string }) {
     }
     const ro = nodeRoRef.current;
     const els = Array.from(
-      vpRef.current?.querySelectorAll<HTMLElement>(".pc-node[data-key], .pc-note[data-key]") ?? [],
+      vpRef.current?.querySelectorAll<HTMLElement>(".pc-node[data-key]") ?? [],
     );
     els.forEach((el) => ro.observe(el));
     // 节点尺寸/内容刚由 React 提交时，连线本帧就必须拿到最新端口偏移；
@@ -851,7 +860,7 @@ export default function FreeCanvas({ canvasId }: { canvasId: string }) {
       // （ComfyUI 摘线换目标），无来线时反向拖（落点成为来源）。
       const port = target?.closest(".pc-port") as HTMLElement | null;
       if (port) {
-        const nodeEl = port.closest(".pc-node, .pc-note");
+        const nodeEl = port.closest(".pc-node");
         const key = nodeEl?.getAttribute("data-key") ?? "";
         const dir = port.dataset.port === "in" ? "in" : "out";
         if (key) {
@@ -890,7 +899,7 @@ export default function FreeCanvas({ canvasId }: { canvasId: string }) {
       // 节点四角尺寸手柄（ComfyUI 式）：按下即改尺寸，不挪位置。
       const resizeEl = target?.closest(".pc-resize");
       if (resizeEl) {
-        const nodeEl = resizeEl.closest(".pc-node, .pc-note") as HTMLElement | null;
+        const nodeEl = resizeEl.closest(".pc-node") as HTMLElement | null;
         const key = nodeEl?.getAttribute("data-key") ?? "";
         const node = nodesRef.current.find((n) => n.id === key);
         if (node) {
@@ -902,7 +911,7 @@ export default function FreeCanvas({ canvasId }: { canvasId: string }) {
           nodeEl?.classList.add("pc-resizing");
           dragRef.current = {
             kind: "resize", sx: e.clientX, sy: e.clientY, moved: false,
-            // 首次拖拽从实际渲染尺寸起算。
+            // 首次拖拽从实际渲染尺寸起算（自适应高度节点取实测高）。
             ox: nodeEl?.offsetWidth ?? size.w,
             oy: nodeEl?.offsetHeight ?? size.h,
             frameKey: key,
@@ -918,19 +927,18 @@ export default function FreeCanvas({ canvasId }: { canvasId: string }) {
       }
 
       // 节点主体：按下即选中（点亮描边）并拖动；已在多选中时整组拖。
-      const nodeEl = target?.closest(".pc-node, .pc-note") as HTMLElement | null;
+      const nodeEl = target?.closest(".pc-node") as HTMLElement | null;
       if (nodeEl) {
         const key = nodeEl.getAttribute("data-key") ?? "";
         const node = nodesRef.current.find((n) => n.id === key);
         if (node) {
-          const isNote = nodeEl.classList.contains("pc-note");
           const group = selRef.current.length > 1 && selRef.current.includes(key) ? groupSnapshot() : null;
           setSelection(selRef.current.includes(key) ? selRef.current : [key]);
           nodeEl.classList.add("pc-dragging");
           dragRef.current = group
             ? { kind: "multidrag", sx: e.clientX, sy: e.clientY, moved: false, members: group }
             : {
-                kind: isNote ? "note" : "node",
+                kind: "node",
                 sx: e.clientX, sy: e.clientY, moved: false,
                 ox: node.pos_x, oy: node.pos_y, frameKey: key,
               };
@@ -1005,7 +1013,7 @@ export default function FreeCanvas({ canvasId }: { canvasId: string }) {
         // 多选组拖：整组成员按同一位移移动。
         if (!drag.moved || !drag.members?.length) return;
         moveGroupTo(drag.members.map((m) => ({ key: m.key, x: m.x + dx / view.scale, y: m.y + dy / view.scale })));
-      } else if (drag.kind === "node" || drag.kind === "note") {
+      } else if (drag.kind === "node") {
         if (!drag.moved) return;
         moveGroupTo([{ key: drag.frameKey, x: drag.ox + dx / view.scale, y: drag.oy + dy / view.scale }]);
       } else if (drag.kind === "resize") {
@@ -1102,7 +1110,7 @@ export default function FreeCanvas({ canvasId }: { canvasId: string }) {
         if (!startPoint) return;
         const cursor = { x: wx, y: wy };
         const hit = document.elementFromPoint(e.clientX, e.clientY);
-        const tEl = hit instanceof Element ? hit.closest<HTMLElement>(".pc-node[data-key], .pc-note[data-key]") : null;
+        const tEl = hit instanceof Element ? hit.closest<HTMLElement>(".pc-node[data-key]") : null;
         const tKey = tEl?.getAttribute("data-key") ?? null;
         // 节点级兼容性：任何两个不同节点都可连（引用语义）；悬停自身
         // （非摘线场景）视为无效落点。
@@ -1198,7 +1206,7 @@ export default function FreeCanvas({ canvasId }: { canvasId: string }) {
       // 统一双击判定：两次「按下即松手」（未拖动）在 500ms 内落在同一
       // 目标（≤16px）上才算双击。不用原生 dblclick——它把拖拽轻抖的
       // 松手也计成第二次点击，是「单击/拖完莫名弹窗」的根源。
-      const dblCountable = drag.kind === "marquee" || drag.kind === "node" || drag.kind === "note" || drag.kind === "multidrag";
+      const dblCountable = drag.kind === "marquee" || drag.kind === "node" || drag.kind === "multidrag";
       if (dblCountable && !drag.moved) {
         const hitEl = document.elementFromPoint(e.clientX, e.clientY);
         const hit = hitEl instanceof Element ? hitEl : null;
@@ -1206,7 +1214,7 @@ export default function FreeCanvas({ canvasId }: { canvasId: string }) {
           // 控件上的两次点击是控件自己的事，不算空白双击。
           dblRef.current = null;
         } else {
-          const nodeEl = hit?.closest(".pc-node, .pc-note") ?? null;
+          const nodeEl = hit?.closest(".pc-node") ?? null;
           const key = nodeEl?.getAttribute("data-key") ?? "";
           const now = performance.now();
           const prev = dblRef.current;
@@ -1225,10 +1233,10 @@ export default function FreeCanvas({ canvasId }: { canvasId: string }) {
                   (e.clientY - rect.top - view.y) / view.scale,
                 );
               }
-            } else if (nodeEl?.classList.contains("pc-note")) {
+            } else {
               // 双击便签 → 编辑态（对齐工程画布便签惯例）。
               const node = nodesRef.current.find((n) => n.id === key);
-              if (node?.metadata.kind === "note") {
+              if (node?.type === "note" && node.metadata.kind === "note") {
                 setEditingNoteId(key);
                 setNoteDraft(node.metadata.content);
               }
@@ -1256,7 +1264,7 @@ export default function FreeCanvas({ canvasId }: { canvasId: string }) {
           && e.clientY >= vpRect.top && e.clientY <= vpRect.bottom;
         const hitEl = insideViewport ? document.elementFromPoint(e.clientX, e.clientY) : null;
         const landed = hitEl instanceof Element
-          ? hitEl.closest(".pc-node, .pc-note, .pc-glass, .pc-addmenu")
+          ? hitEl.closest(".pc-node, .pc-glass, .pc-addmenu")
           : null;
         const wireRelease = resolveWireRelease({
           cancelled: false,
@@ -1334,7 +1342,7 @@ export default function FreeCanvas({ canvasId }: { canvasId: string }) {
           };
           pushUndo({ kind: "layout", prev: [prevEntry], next: [nextEntry] });
         }
-      } else if (drag.kind === "node" || drag.kind === "note") {
+      } else if (drag.kind === "node") {
         // 拖动松手：commitLayout 已在移动中即时合并（防抖落盘），这里
         // 补记撤销（恢复到拖前位置）。
         if (drag.moved) {
@@ -1864,17 +1872,29 @@ export default function FreeCanvas({ canvasId }: { canvasId: string }) {
               </span>
             );
             if (node.type === "note") {
-              // 便签节点（工程画布 pc-note 样式）：双击编辑、拖动挪位。
+              // 便签节点：视觉标准与通用节点一致（B+ 头栏卡 + 黄色内嵌
+              // 便签体），双击进入编辑（对齐工程画布便签惯例）。
               return (
                 <div
                   key={node.id}
                   data-key={node.id}
-                  className={`pc-note${selected ? " pc-selected" : ""}${pulseKeys.includes(node.id) ? " pc-spawn" : ""}`}
-                  style={{ left: node.pos_x, top: node.pos_y, width: size.w, height: size.h }}
+                  className={`pc-node fc-type-note${selected ? " pc-selected" : ""}${pulseKeys.includes(node.id) ? " pc-spawn" : ""}`}
+                  style={
+                    {
+                      left: node.pos_x,
+                      top: node.pos_y,
+                      width: size.w,
+                      height: node.height != null ? size.h : undefined,
+                      "--node-accent": accent,
+                    } as CSSProperties
+                  }
                 >
+                  <div className="pc-node-head">
+                    <span className="pc-node-kind">{t(`canvas.node.${node.type}`)}</span>
+                  </div>
                   {editingNoteId === node.id ? (
                     <textarea
-                      className="pc-note-input"
+                      className="fc-note-input"
                       autoFocus
                       value={noteDraft}
                       onChange={(event) => setNoteDraft(event.target.value)}
@@ -1892,7 +1912,7 @@ export default function FreeCanvas({ canvasId }: { canvasId: string }) {
                       onPointerDown={(event) => event.stopPropagation()}
                     />
                   ) : (
-                    <div className="pc-note-body">
+                    <div className="fc-note-body">
                       {meta.kind === "note" && meta.content ? meta.content : <i>{t("project.canvas.noteEmpty")}</i>}
                     </div>
                   )}
@@ -1932,13 +1952,15 @@ export default function FreeCanvas({ canvasId }: { canvasId: string }) {
               <div
                 key={node.id}
                 data-key={node.id}
-                className={`pc-node${selected ? " pc-selected" : ""}${pulseKeys.includes(node.id) ? " pc-spawn" : ""}`}
+                className={`pc-node fc-type-${node.type}${selected ? " pc-selected" : ""}${pulseKeys.includes(node.id) ? " pc-spawn" : ""}`}
                 style={
                   {
                     left: node.pos_x,
                     top: node.pos_y,
                     width: size.w,
-                    height: size.h,
+                    // 视觉标准（B+）：未拖过尺寸手柄的节点高度由内容撑开
+                    // （height 不落库），text 常驻编辑框除外。
+                    height: node.height != null || node.type === "text" ? size.h : undefined,
                     "--node-accent": accent,
                   } as CSSProperties
                 }
