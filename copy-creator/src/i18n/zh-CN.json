@@ -774,6 +774,8 @@
     "delete": "删除画布",
     "deleteConfirm": "删除画布「{{name}}」？节点与连线将一并删除，已存入资源库的图片不受影响。",
     "canvasMeta": "{{node}} 节点 · {{conn}} 连线",
+    "imageEmpty": "生成产物将出现在这里",
+    "refEmpty": "未设置资源路径",
     "node": {
       "text": "文本",
       "image": "图片",

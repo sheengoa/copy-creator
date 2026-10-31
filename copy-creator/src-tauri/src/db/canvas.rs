@@ -421,6 +421,7 @@ pub(crate) fn update_node(
     id: &str,
     title: Option<String>,
     metadata_raw: Option<String>,
+    resource_path: Option<String>,
 ) -> Result<serde_json::Value, String> {
     let (node_type, canvas_id): (String, String) = conn
         .query_row(
@@ -444,6 +445,14 @@ pub(crate) fn update_node(
         conn.execute(
             "UPDATE canvas_nodes SET metadata = ?1 WHERE id = ?2",
             params![raw.trim(), id],
+        )
+        .map_err(|e| e.to_string())?;
+    }
+    if let Some(path) = &resource_path {
+        // 相对库根软路径，归一正斜杠（对齐工程域惯例）。
+        conn.execute(
+            "UPDATE canvas_nodes SET resource_path = ?1 WHERE id = ?2",
+            params![normalize_project_path(path), id],
         )
         .map_err(|e| e.to_string())?;
     }
@@ -707,11 +716,12 @@ pub fn canvas_update_node(
     id: String,
     title: Option<String>,
     metadata: Option<String>,
+    resource_path: Option<String>,
 ) -> Result<serde_json::Value, String> {
     let value = {
         let state = app.state::<DbState>();
         let conn = state.conn.lock().map_err(|e| e.to_string())?;
-        update_node(&conn, &id, title, metadata)?
+        update_node(&conn, &id, title, metadata, resource_path)?
     };
     emit_canvas_changed(&app);
     Ok(value)

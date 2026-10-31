@@ -8385,10 +8385,21 @@ mod canvas_tests {
             text_id,
             Some("新提示词".into()),
             Some(r#"{"kind":"text","content":"正文"}"#.into()),
+            None,
         )
         .unwrap();
         assert_eq!(updated["title"], "新提示词");
         assert_eq!(updated["metadata"]["content"], "正文");
+        // resource_path 更新并归一反斜杠。
+        let repath = crate::db::canvas::update_node(
+            &conn,
+            text_id,
+            None,
+            None,
+            Some("assets\\bar.png".into()),
+        )
+        .unwrap();
+        assert_eq!(repath["resource_path"], "assets/bar.png");
 
         // 删节点级联清两端连线。
         crate::db::canvas::delete_node(&conn, ref_id).unwrap();

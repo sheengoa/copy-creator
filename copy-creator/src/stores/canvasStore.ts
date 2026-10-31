@@ -102,6 +102,8 @@ interface CanvasState {
   canvases: CanvasSummary[];
   /** 当前打开的画布 id（null = 未打开）。 */
   activeCanvasId: string | null;
+  /** 当前画布本体行（视口恢复的来源）。 */
+  activeCanvas: CanvasRecord | null;
   /** 当前画布的节点与连线（图谱随 activeCanvasId 装载）。 */
   nodes: CanvasNode[];
   connections: CanvasConnection[];
@@ -127,10 +129,12 @@ interface CanvasState {
   }) => Promise<CanvasNode | null>;
   updateNode: (
     id: string,
-    patch: { title?: string; metadata?: string },
+    patch: { title?: string; metadata?: string; resourcePath?: string },
   ) => Promise<void>;
   /** 布局防抖批量落盘：同节点后写覆盖先写，按画布分组一次提交。 */
   saveLayout: (canvasId: string, entries: CanvasLayoutEntry[]) => void;
+  /** 拖拽/缩放松手后的提交：本地即时合并 + 防抖落盘。 */
+  commitLayout: (canvasId: string, entries: CanvasLayoutEntry[]) => void;
   deleteNode: (id: string) => Promise<void>;
   connect: (canvasId: string, fromNode: string, toNode: string) => Promise<CanvasConnection | null>;
   /** 摘线换目标：后端合并语义下返回行 id 可能不同于入参 id。 */
@@ -188,6 +192,7 @@ let canvasEventsBound = false;
 export const useCanvasStore = create<CanvasState>((set, get) => ({
   canvases: [],
   activeCanvasId: null,
+  activeCanvas: null,
   nodes: [],
   connections: [],
 
@@ -203,7 +208,12 @@ export const useCanvasStore = create<CanvasState>((set, get) => ({
   openCanvas: async (id) => {
     try {
       const graph = await invoke<CanvasGraph>("canvas_get", { canvasId: id });
-      set({ activeCanvasId: id, nodes: graph.nodes, connections: graph.connections });
+      set({
+        activeCanvasId: id,
+        activeCanvas: graph.canvas,
+        nodes: graph.nodes,
+        connections: graph.connections,
+      });
     } catch (e) {
       console.error("Failed to open canvas:", e);
     }
@@ -213,7 +223,7 @@ export const useCanvasStore = create<CanvasState>((set, get) => ({
     try {
       const canvas = await invoke<CanvasSummary>("canvas_create", { name: name ?? "" });
       await get().loadCanvases();
-      set({ activeCanvasId: canvas.id, nodes: [], connections: [] });
+      set({ activeCanvasId: canvas.id, activeCanvas: canvas, nodes: [], connections: [] });
       return canvas;
     } catch (e) {
       console.error("Failed to create canvas:", e);
@@ -234,7 +244,7 @@ export const useCanvasStore = create<CanvasState>((set, get) => ({
     try {
       await invoke("canvas_delete", { id });
       if (get().activeCanvasId === id) {
-        set({ activeCanvasId: null, nodes: [], connections: [] });
+        set({ activeCanvasId: null, activeCanvas: null, nodes: [], connections: [] });
       }
       await get().loadCanvases();
     } catch (e) {
@@ -277,6 +287,7 @@ export const useCanvasStore = create<CanvasState>((set, get) => ({
         id,
         title: patch.title ?? null,
         metadata: patch.metadata ?? null,
+        resourcePath: patch.resourcePath ?? null,
       });
       set({
         nodes: get().nodes.map((item) => (item.id === node.id ? node : item)),
@@ -292,6 +303,20 @@ export const useCanvasStore = create<CanvasState>((set, get) => ({
     }
     if (layoutTimer) clearTimeout(layoutTimer);
     layoutTimer = setTimeout(flushLayout, LAYOUT_DEBOUNCE_MS);
+  },
+
+  commitLayout: (canvasId, entries) => {
+    // 本地先合并（拖拽松手即落位，不等防抖窗口），再走防抖落盘。
+    const byId = new Map(entries.map((entry) => [entry.id, entry]));
+    set({
+      nodes: get().nodes.map((node) => {
+        const entry = byId.get(node.id);
+        return entry
+          ? { ...node, pos_x: entry.pos_x, pos_y: entry.pos_y, width: entry.width, height: entry.height }
+          : node;
+      }),
+    });
+    get().saveLayout(canvasId, entries);
   },
 
   deleteNode: async (id) => {

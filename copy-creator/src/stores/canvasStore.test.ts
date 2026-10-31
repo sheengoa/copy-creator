@@ -268,7 +268,31 @@ describe("canvasStore 画布域 wiring", () => {
       id: "n1",
       title: "新标题",
       metadata: null,
+      resourcePath: null,
     });
     expect(useCanvasStore.getState().nodes[0].title).toBe("新标题");
+  });
+
+  it("commitLayout 本地即时合并并进入防抖落盘", async () => {
+    vi.useFakeTimers();
+    useCanvasStore.setState({
+      activeCanvasId: "c1",
+      nodes: [makeNode({ id: "n1", pos_x: 0, pos_y: 0 })],
+    });
+
+    useCanvasStore.getState().commitLayout("c1", [
+      { id: "n1", pos_x: 50, pos_y: 60, width: 300, height: 200 },
+    ]);
+
+    // 松手即落位（不等防抖窗口）。
+    const [node] = useCanvasStore.getState().nodes;
+    expect(node.pos_x).toBe(50);
+    expect(node.width).toBe(300);
+
+    await vi.advanceTimersByTimeAsync(400);
+    expect(invokeMock).toHaveBeenCalledWith("canvas_save_layout", {
+      canvasId: "c1",
+      nodes: [{ id: "n1", pos_x: 50, pos_y: 60, width: 300, height: 200 }],
+    });
   });
 });

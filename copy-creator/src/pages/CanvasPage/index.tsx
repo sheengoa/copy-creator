@@ -3,10 +3,11 @@ import { useTranslation } from "react-i18next";
 import { ConfirmDialog } from "../../components/ConfirmDialog";
 import { Icons } from "../../components/Icons";
 import { useCanvasStore, type CanvasSummary } from "../../stores/canvasStore";
+import FreeCanvas from "./FreeCanvas";
 
-// 画布区（自由生图工作流）页面骨架：顶部画布库条（chips + 新建 + 每画布
-// 「⋯」菜单：重命名/删除）+ 主画布区。主画布由 FreeCanvas 承载（阶段 1d
-// 接入），本文件持骨架与画布库管理；删除确认文案注明资源库文件不受影响。
+// 画布区（自由生图工作流）页面：顶部画布库条（chips + 新建 + 每画布
+// 「⋯」菜单：重命名/删除）+ 主画布区（FreeCanvas，切换画布按 key 重载
+// 数据）。删除确认文案注明资源库文件不受影响。
 export default function CanvasPage() {
   const { t } = useTranslation();
   const canvases = useCanvasStore((s) => s.canvases);
@@ -127,17 +128,7 @@ export default function CanvasPage() {
 
       <div className="canvas-main">
         {activeCanvas ? (
-          // 阶段 1d 替换为 <FreeCanvas canvasId={activeCanvas.id} />。
-          <div className="canvas-empty">
-            <span className="canvas-empty-icon">{Icons.canvas}</span>
-            <span className="canvas-empty-title">{activeCanvas.name}</span>
-            <span className="canvas-empty-hint">
-              {t("canvas.canvasMeta", {
-                node: activeCanvas.node_count,
-                conn: activeCanvas.connection_count,
-              })}
-            </span>
-          </div>
+          <FreeCanvas key={activeCanvas.id} canvasId={activeCanvas.id} />
         ) : (
           <div className="canvas-empty">
             <span className="canvas-empty-icon">{Icons.canvas}</span>

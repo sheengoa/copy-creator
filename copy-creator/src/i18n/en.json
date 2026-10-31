@@ -778,6 +778,8 @@
     "delete": "Delete Canvas",
     "deleteConfirm": "Delete canvas \"{{name}}\"? Its nodes and connections will be removed; images already saved to the resource library are not affected.",
     "canvasMeta": "{{node}} nodes · {{conn}} connections",
+    "imageEmpty": "Generated images will appear here",
+    "refEmpty": "No resource path set",
     "node": {
       "text": "Text",
       "image": "Image",

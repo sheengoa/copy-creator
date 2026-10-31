@@ -252,3 +252,356 @@
   background: var(--accent);
   color: #fff;
 }
+
+/* ── 自由画布（FreeCanvas） ───────────────────────────────── */
+
+.fc-world {
+  position: absolute;
+  inset: 0;
+  overflow: hidden;
+  touch-action: none;
+  user-select: none;
+  cursor: default;
+}
+
+.fc-transform {
+  position: absolute;
+  top: 0;
+  left: 0;
+  transform-origin: 0 0;
+}
+
+/* 连线层：随世界变换缩放；SVG 元素本体极小 + overflow visible，
+   路径按世界坐标绘制在元素框外仍可见。 */
+.fc-wires {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 2px;
+  height: 2px;
+  overflow: visible;
+  pointer-events: none;
+}
+
+.fc-wire {
+  fill: none;
+  stroke-width: 2;
+  opacity: 0.85;
+}
+
+.fc-wire.draft {
+  stroke: var(--accent);
+  stroke-dasharray: 6 4;
+  opacity: 0.9;
+}
+
+.fc-wire.lifted {
+  opacity: 0.25;
+}
+
+.fc-marquee {
+  fill: var(--accent-bg);
+  stroke: var(--accent-border);
+  stroke-width: 1;
+}
+
+.fc-node {
+  position: absolute;
+  display: flex;
+  flex-direction: column;
+  background: var(--bg-card);
+  border: 1px solid var(--separator);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow);
+  overflow: visible;
+}
+
+.fc-node.selected {
+  border-color: var(--fc-accent);
+  box-shadow: 0 0 0 2px var(--accent-bg-strong);
+}
+
+.fc-node.hover {
+  border-color: var(--fc-accent);
+}
+
+.fc-node-head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 10px;
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--text-secondary);
+  border-bottom: 1px solid var(--separator);
+  flex-shrink: 0;
+  background: var(--bg-card);
+  border-radius: var(--radius) var(--radius) 0 0;
+}
+
+.fc-node-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--fc-accent);
+  flex-shrink: 0;
+}
+
+.fc-node-title {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.fc-node-body {
+  flex: 1;
+  min-height: 0;
+  overflow: hidden;
+  position: relative;
+  border-radius: 0 0 var(--radius) var(--radius);
+  background: var(--bg-card);
+}
+
+.fc-node-text {
+  padding: 8px 10px;
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--text-primary);
+  white-space: pre-wrap;
+  word-break: break-word;
+  overflow: hidden;
+  max-height: 100%;
+}
+
+.fc-node-note .fc-node-body {
+  background: rgba(255, 204, 0, 0.14);
+}
+
+.fc-node-placeholder {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 8px;
+  font-size: 11px;
+  color: var(--text-tertiary);
+  text-align: center;
+  border: 1px dashed var(--text-tertiary);
+  border-radius: 0 0 var(--radius) var(--radius);
+  box-sizing: border-box;
+  margin: 6px;
+  width: calc(100% - 12px);
+  height: calc(100% - 12px);
+}
+
+.fc-node-thumbs {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  padding: 6px;
+  overflow: hidden;
+}
+
+.fc-thumb {
+  width: 60px;
+  height: 60px;
+  object-fit: cover;
+  border-radius: 6px;
+}
+
+.fc-thumb-cover {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.fc-node-edit {
+  position: absolute;
+  inset: 0;
+  border: none;
+  resize: none;
+  padding: 8px 10px;
+  font-size: 12px;
+  line-height: 1.5;
+  background: var(--bg-card);
+  color: var(--text-primary);
+  outline: none;
+  font-family: inherit;
+}
+
+/* 端口：左入右出（节点级连线，每节点各一位）。 */
+.fc-port {
+  position: absolute;
+  top: 50%;
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  background: var(--bg-card);
+  border: 2px solid var(--fc-accent);
+  transform: translateY(-50%);
+  cursor: crosshair;
+  z-index: 2;
+}
+
+.fc-port-in {
+  left: -7px;
+}
+
+.fc-port-out {
+  right: -7px;
+}
+
+.fc-port:hover {
+  background: var(--fc-accent);
+}
+
+.fc-resize {
+  position: absolute;
+  right: 1px;
+  bottom: 1px;
+  width: 14px;
+  height: 14px;
+  cursor: nwse-resize;
+  z-index: 2;
+}
+
+.fc-resize::after {
+  content: "";
+  position: absolute;
+  right: 3px;
+  bottom: 3px;
+  width: 6px;
+  height: 6px;
+  border-right: 2px solid var(--text-tertiary);
+  border-bottom: 2px solid var(--text-tertiary);
+  border-radius: 1px;
+}
+
+/* 建节点菜单（双击空白 / 拖线到空白）。 */
+.fc-addmenu {
+  position: absolute;
+  z-index: 70;
+  min-width: 120px;
+  background: var(--bg-card);
+  border: 1px solid var(--separator);
+  border-radius: var(--radius);
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.16);
+  padding: 4px;
+}
+
+.fc-addmenu button {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  padding: 7px 10px;
+  border: none;
+  background: none;
+  border-radius: var(--radius-sm);
+  font-size: 13px;
+  color: var(--text-primary);
+  cursor: pointer;
+  text-align: left;
+}
+
+.fc-addmenu button:hover {
+  background: var(--bg-card-hover);
+}
+
+.fc-addmenu-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+
+/* 属性面板（右侧，磨砂玻璃）。 */
+.fc-panel {
+  position: absolute;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  width: 248px;
+  background: var(--glass-bg);
+  backdrop-filter: blur(18px);
+  -webkit-backdrop-filter: blur(18px);
+  border-left: 1px solid var(--separator);
+  padding: 12px;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  z-index: 5;
+}
+
+.fc-panel-title {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-secondary);
+}
+
+.fc-panel-body {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.fc-panel-empty {
+  font-size: 12px;
+  color: var(--text-tertiary);
+  padding: 12px 0;
+}
+
+.fc-field {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-size: 11px;
+  color: var(--text-secondary);
+}
+
+.fc-field input,
+.fc-field textarea {
+  border: 1px solid var(--separator);
+  border-radius: var(--radius-sm);
+  background: var(--bg-card);
+  color: var(--text-primary);
+  font-size: 12px;
+  padding: 6px 8px;
+  outline: none;
+  font-family: inherit;
+  resize: vertical;
+}
+
+.fc-field input:focus,
+.fc-field textarea:focus {
+  border-color: var(--accent-border);
+}
+
+.fc-field textarea {
+  min-height: 90px;
+}
+
+.fc-panel-meta {
+  font-size: 11px;
+  color: var(--text-tertiary);
+}
+
+.fc-panel-delete {
+  padding: 6px 10px;
+  border: none;
+  border-radius: var(--radius-sm);
+  background: rgba(255, 59, 48, 0.12);
+  color: var(--danger);
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.fc-panel-delete:hover {
+  background: rgba(255, 59, 48, 0.2);
+}
