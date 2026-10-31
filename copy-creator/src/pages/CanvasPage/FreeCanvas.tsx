@@ -423,21 +423,24 @@ export default function FreeCanvas({ canvasId }: { canvasId: string }) {
   const [addMenuQuery, setAddMenuQuery] = useState("");
   /** 合集列表拖拽排序的进行时草稿（order 实时交换，松手落库）。 */
   const [collectionDrag, setCollectionDrag] = useState<{ nodeId: string; order: string[] } | null>(null);
-  /** FLIP 动画待办：交换前的各行纵坐标（按成员键），提交后由布局效果
-   *  读取——先反向位移再过渡回位，得到快捷输入同款的丝滑换位。 */
-  const collectionFlipRef = useRef<Map<string, number> | null>(null);
+  /** FLIP 动画待办：交换前各成员的基准槽位坐标 + 槽位表（均为未变换
+   *  几何），提交后由布局效果按差值回放——动画中的 transform 不参与
+   *  判定与测量，命中和位移完全解耦。 */
+  const collectionFlipRef = useRef<{ before: Map<string, number>; slots: number[] } | null>(null);
 
-  // 合集排序 FLIP：DOM 提交后按交换前坐标差反向位移，再过渡归零。
+  // 合集排序 FLIP：DOM 提交后按交换前基准槽位差反向位移，再过渡归零。
   useLayoutEffect(() => {
-    const before = collectionFlipRef.current;
+    const pending = collectionFlipRef.current;
     collectionFlipRef.current = null;
-    if (!collectionDrag || !before) return;
+    if (!collectionDrag || !pending) return;
     const listEl = document.querySelector(`.pc-node[data-key="${collectionDrag.nodeId}"] .fc-collection-list`);
     if (!listEl) return;
     listEl.querySelectorAll<HTMLElement>(".fc-collection-item").forEach((row) => {
-      const prevTop = before.get(row.dataset.conn ?? "");
-      if (prevTop == null) return;
-      const delta = prevTop - row.getBoundingClientRect().top;
+      const conn = row.dataset.conn ?? "";
+      const prevTop = pending.before.get(conn);
+      const pos = collectionDrag.order.indexOf(conn);
+      if (prevTop == null || pos < 0) return;
+      const delta = prevTop - pending.slots[Math.min(pos, pending.slots.length - 1)];
       if (Math.abs(delta) < 1) return;
       row.style.transition = "none";
       row.style.transform = `translateY(${delta}px)`;
@@ -1884,20 +1887,29 @@ export default function FreeCanvas({ canvasId }: { canvasId: string }) {
     } catch {
       // 指针不可捕获（合成事件等）：退化为元素监听。
     }
+    // 基准槽位（按下瞬间的未变换几何）：落点判定与 FLIP 全用这套数据，
+    // 滑动动画的 transform 不参与——elementFromPoint 会被位移中的行骗到。
+    const slotTops = items.map((_, i) => {
+      const r = listEl.querySelector<HTMLElement>(`.fc-collection-item[data-idx="${i}"]`);
+      return r ? r.getBoundingClientRect().top : 0;
+    });
+    const stride = items.length > 1 ? slotTops[1] - slotTops[0] : 0;
+    const slotTopOf = (connId: string, ord: string[]) => {
+      const pos = ord.indexOf(connId);
+      return pos >= 0 ? slotTops[Math.min(pos, slotTops.length - 1)] : 0;
+    };
     const onMove = (ev: PointerEvent) => {
-      const row = document.elementFromPoint(ev.clientX, ev.clientY)?.closest(".fc-collection-item") as HTMLElement | null;
-      if (!row || !listEl.contains(row)) return;
-      const idx = Number(row.dataset.idx);
-      if (!Number.isInteger(idx) || idx === curIndex) return;
+      if (stride <= 0) return;
+      let idx = Math.floor((ev.clientY - slotTops[0]) / stride);
+      idx = Math.max(0, Math.min(items.length - 1, idx));
+      if (idx === curIndex) return;
+      // FLIP 前置：交换前各成员的基准槽位（几何值，非动画位置）。
+      const before = new Map<string, number>();
+      order.forEach((connId) => before.set(connId, slotTopOf(connId, order)));
       const [moved] = order.splice(curIndex, 1);
       order.splice(idx, 0, moved);
       curIndex = idx;
-      // FLIP 前置：记录交换前各行位置（按成员键），提交后布局效果回放。
-      const before = new Map<string, number>();
-      listEl.querySelectorAll<HTMLElement>(".fc-collection-item").forEach((r) => {
-        before.set(r.dataset.conn ?? "", r.getBoundingClientRect().top);
-      });
-      collectionFlipRef.current = before;
+      collectionFlipRef.current = { before, slots: slotTops };
       setCollectionDrag({ nodeId: node.id, order: [...order] });
     };
     const onUp = () => {
