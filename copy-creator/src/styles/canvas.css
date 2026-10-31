@@ -845,11 +845,16 @@
 }
 
 /* 参数组合框：白卡输入件 + 右侧箭头展开预设清单（portal 到 body，
-   fixed 定位随输入框锚点）。 */
+   fixed 定位随输入框锚点）。flex 只在横向参数行里撑宽——纵向表单的
+   直接子项绝不能 flex:1，否则竖向撑满整个节点体、箭头悬到中部。 */
 .fc-root .fc-combo {
   position: relative;
-  flex: 1;
+  flex: none;
   min-width: 0;
+}
+
+.fc-root .fc-node-row .fc-combo {
+  flex: 1;
 }
 
 .fc-root .fc-combo-input {
