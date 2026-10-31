@@ -76,7 +76,7 @@
 
 .canvas-chip-menu:hover {
   opacity: 1;
-  background: rgba(0, 0, 0, 0.06);
+  background: var(--bg-card-hover);
 }
 
 .canvas-chip-menu svg {
@@ -366,18 +366,9 @@
   background: var(--bg-card);
 }
 
-/* 节点正文（类名刻意避开 fc-node-text：类型修饰类 fc-node-text 会与其
-   冲突，规则命中节点自身导致 max-height 塌陷——实测踩坑）。 */
-.fc-node-content {
-  padding: 8px 10px;
-  font-size: 12px;
-  line-height: 1.5;
-  color: var(--text-primary);
-  white-space: pre-wrap;
-  word-break: break-word;
-  overflow: hidden;
-  max-height: 100%;
-}
+/* 节点正文用 .fc-node-edit（textarea 常驻）；类名不可用 fc-node-text——
+   与类型修饰类 fc-node-${type} 同名会把内容规则命中节点自身导致塌陷
+   （实测踩坑）。 */
 
 .fc-node-note .fc-node-body {
   background: rgba(255, 204, 0, 0.14);
@@ -399,16 +390,6 @@
   margin: 6px;
   width: calc(100% - 12px);
   height: calc(100% - 12px);
-}
-
-.fc-node-thumbs {
-  position: absolute;
-  inset: 0;
-  display: flex;
-  flex-wrap: wrap;
-  gap: 4px;
-  padding: 6px;
-  overflow: hidden;
 }
 
 .fc-thumb {
@@ -617,7 +598,7 @@
   justify-content: center;
   border: none;
   border-radius: 6px;
-  background: rgba(0, 0, 0, 0.06);
+  background: var(--bg-card-hover);
   color: var(--text-secondary);
   cursor: pointer;
   opacity: 0;

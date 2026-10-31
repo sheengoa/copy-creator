@@ -1294,7 +1294,7 @@ export default function FreeCanvas({ canvasId }: { canvasId: string }) {
                         className="fc-node-input"
                         key={`p-${node.id}-${node.updated_at}`}
                         defaultValue={node.resource_path}
-                        placeholder={t("canvas.panel.pathLabel")}
+                        placeholder={t("canvas.pathPlaceholder")}
                         onBlur={(e) => {
                           const path = e.target.value.trim();
                           if (path !== node.resource_path) {
