@@ -5,7 +5,7 @@
 // generateContent（无官方 n 参数 → Rust 侧并发多请求）、尺寸/比例映射、
 // 错误语义；不搬流式 SSE / function calling / 自定义脚本 / 生视频音频。
 // 成本防护：失败不自动重试（重试一律前端手动）；取消时已完成张数保留。
-use crate::db::{parse_node_meta_lenient, DbState, NodeMeta};
+use crate::db::{parse_node_meta_lenient, DbState, ImageNodeStatus, NodeMeta};
 use base64::engine::general_purpose::STANDARD as BASE64;
 use base64::Engine;
 use rusqlite::params;
@@ -796,9 +796,14 @@ pub async fn ai_generate_image(app: AppHandle, canvas_id: String, node_id: Strin
         let upstream = collect_upstream(&conn, &node_id)?;
         (settings, parse_node_meta_lenient("image", &row.1), row.2.unwrap_or_default(), upstream)
     };
-    let NodeMeta::Image { params: node_params, .. } = &node_meta else {
+    let NodeMeta::Image { params: node_params, status, .. } = &node_meta else {
         return Err("节点 metadata 类型异常".to_string());
     };
+    // 双保险（方案 3.4 成本防护）：前端进度条目可能因窗口刷新等丢失，
+    // UI 层拦不住对同一节点的并发二次发起——这里按落库状态兜底拒绝。
+    if *status == ImageNodeStatus::Generating {
+        return Err("该节点正在生成中，请等它完成或先取消".to_string());
+    }
 
     let model = if node_params.model.trim().is_empty() { settings.model.trim().to_string() } else { node_params.model.trim().to_string() };
     if model.is_empty() {

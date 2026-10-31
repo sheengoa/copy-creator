@@ -336,7 +336,7 @@ describe("canvasStore 画布域 wiring", () => {
     const handler = progressHandler;
     useCanvasStore.setState({
       genProgress: {
-        img1: { requestId: "req-1", total: 2, received: 0, errors: 0, previews: {} },
+        img1: { canvasId: "c1", requestId: "req-1", total: 2, received: 0, errors: 0, previews: {} },
       },
     });
 
@@ -365,11 +365,73 @@ describe("canvasStore 画布域 wiring", () => {
       cmd === "canvas_get" ? Promise.resolve(graph) : Promise.resolve([]),
     );
     useCanvasStore.setState({
-      genProgress: { img1: { requestId: "r", total: 1, received: 1, errors: 0, previews: {} } },
+      genProgress: { img1: { canvasId: "c1", requestId: "r", total: 1, received: 1, errors: 0, previews: {} } },
     });
 
     await useCanvasStore.getState().openCanvas("c1");
 
     expect(useCanvasStore.getState().genProgress).toEqual({});
+  });
+
+  it("openCanvas 保留其他画布在途生成的进度条目", async () => {
+    // 画布 c1 无任何节点；后台画布 c2 的 img1 仍在生成——条目必须保留，
+    // 否则切回 c2 丢进度与取消按钮，节点按钮还会重新可点（并发二次生成）。
+    const graph: CanvasGraph = {
+      canvas: { id: "c1", name: "画布一", viewport_x: 0, viewport_y: 0, viewport_k: 1, created_at: "", updated_at: "" },
+      nodes: [],
+      connections: [],
+    };
+    invokeMock.mockImplementation((cmd: string) =>
+      cmd === "canvas_get" ? Promise.resolve(graph) : Promise.resolve([]),
+    );
+    useCanvasStore.setState({
+      genProgress: {
+        img1: { canvasId: "c2", requestId: "r", total: 2, received: 1, errors: 0, previews: { 0: "data:1" } },
+      },
+    });
+
+    await useCanvasStore.getState().openCanvas("c1");
+
+    expect(useCanvasStore.getState().genProgress).toEqual({
+      img1: { canvasId: "c2", requestId: "r", total: 2, received: 1, errors: 0, previews: { 0: "data:1" } },
+    });
+  });
+
+  it("openCanvas 丢弃本画布查无此节点的残留条目", async () => {
+    const graph: CanvasGraph = {
+      canvas: { id: "c1", name: "画布一", viewport_x: 0, viewport_y: 0, viewport_k: 1, created_at: "", updated_at: "" },
+      nodes: [],
+      connections: [],
+    };
+    invokeMock.mockImplementation((cmd: string) =>
+      cmd === "canvas_get" ? Promise.resolve(graph) : Promise.resolve([]),
+    );
+    useCanvasStore.setState({
+      genProgress: {
+        ghost: { canvasId: "c1", requestId: "r", total: 1, received: 0, errors: 0, previews: {} },
+      },
+    });
+
+    await useCanvasStore.getState().openCanvas("c1");
+
+    expect(useCanvasStore.getState().genProgress).toEqual({});
+  });
+
+  it("deleteCanvas 取消该画布在途生成并清理条目", async () => {
+    useCanvasStore.setState({
+      genProgress: {
+        a: { canvasId: "c1", requestId: "r1", total: 1, received: 0, errors: 0, previews: {} },
+        b: { canvasId: "c2", requestId: "r2", total: 1, received: 0, errors: 0, previews: {} },
+      },
+    });
+    invokeMock.mockResolvedValue(undefined);
+
+    await useCanvasStore.getState().deleteCanvas("c1");
+
+    expect(invokeMock).toHaveBeenCalledWith("ai_cancel_generation", { requestId: "r1" });
+    expect(invokeMock).not.toHaveBeenCalledWith("ai_cancel_generation", { requestId: "r2" });
+    expect(useCanvasStore.getState().genProgress).toEqual({
+      b: { canvasId: "c2", requestId: "r2", total: 1, received: 0, errors: 0, previews: {} },
+    });
   });
 });

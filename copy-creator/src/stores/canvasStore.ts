@@ -97,8 +97,10 @@ export interface CanvasLayoutEntry {
   height: number | null;
 }
 
-/** 生成进度（逐张回传）：按节点记录槽位预览与完成数。 */
+/** 生成进度（逐张回传）：按节点记录槽位预览与完成数。canvasId 供切画布
+ *  保留后台进度与删画布时取消在途任务。 */
 export interface GenerationProgress {
+  canvasId: string;
   requestId: string;
   total: number;
   received: number;
@@ -229,11 +231,20 @@ export const useCanvasStore = create<CanvasState>((set, get) => ({
         nodes: graph.nodes,
         connections: graph.connections,
       });
-      // 进度条目只保留仍处于 generating 的节点（最终结果随图谱刷新到达）。
+      // 进度条目清理：节点仍在生成中→保留；不在当前图谱（其他画布的在途
+      // 生成）→保留，切回来进度与取消按钮都还在；已在图谱但状态脱离
+      // generating→丢弃（最终结果随图谱刷新到达）；条目归属本画布却查无
+      // 此节点→丢弃（删除残留）。之前一刀切只留当前图谱的条目，切画布会
+      // 掐掉后台生成的进度显示，还让图片节点按钮重新可点、能对同一节点
+      // 并发二次生成（重复计费）。
       const stillGenerating: Record<string, GenerationProgress> = {};
       for (const [nodeId, progress] of Object.entries(get().genProgress)) {
         const node = graph.nodes.find((n) => n.id === nodeId);
-        if (node?.metadata.kind === "image" && node.metadata.status === "generating") {
+        if (!node) {
+          if (progress.canvasId !== id) stillGenerating[nodeId] = progress;
+          continue;
+        }
+        if (node.metadata.kind === "image" && node.metadata.status === "generating") {
           stillGenerating[nodeId] = progress;
         }
       }
@@ -266,6 +277,17 @@ export const useCanvasStore = create<CanvasState>((set, get) => ({
 
   deleteCanvas: async (id) => {
     try {
+      // 先取消该画布全部在途生成再删：任务继续跑会照常入库产物、
+      // 落库 UPDATE 落在已删除的行上静默失效。
+      const remaining: Record<string, GenerationProgress> = {};
+      for (const [nodeId, progress] of Object.entries(get().genProgress)) {
+        if (progress.canvasId === id) {
+          void get().cancelGeneration(progress.requestId);
+        } else {
+          remaining[nodeId] = progress;
+        }
+      }
+      set({ genProgress: remaining });
       await invoke("canvas_delete", { id });
       if (get().activeCanvasId === id) {
         set({ activeCanvasId: null, activeCanvas: null, nodes: [], connections: [] });
@@ -425,6 +447,7 @@ export const useCanvasStore = create<CanvasState>((set, get) => ({
       genProgress: {
         ...get().genProgress,
         [nodeId]: {
+          canvasId,
           requestId: result.requestId,
           total: Math.max(1, total),
           received: 0,
