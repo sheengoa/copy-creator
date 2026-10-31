@@ -420,7 +420,7 @@ const ASSET_COLS: &str =
     "id, file_path, kind, name, shot_id, episode_id, gen_from_asset, gen_from_prompt, gen_params, audio_role, created_at, updated_at, canvas_x, canvas_y, canvas_w";
 const PROMPT_COLS: &str = "id, title, content, category, file_path, created_at, updated_at";
 
-fn query_all(
+pub(crate) fn query_all(
     conn: &Connection,
     sql: &str,
     map: fn(&rusqlite::Row) -> rusqlite::Result<serde_json::Value>,
@@ -442,7 +442,7 @@ fn query_all(
 }
 
 /// query_all 的带参版本：参数按位置绑定（SQL 用 ?1 ?2 … 编号占位符）。
-fn query_all_params(
+pub(crate) fn query_all_params(
     conn: &Connection,
     sql: &str,
     params: &[&dyn rusqlite::ToSql],

@@ -128,6 +128,7 @@ fn category_sql(category: &Option<String>) -> (String, String) {
 // 域内助手为 pub(crate)，跨域调用与测试经 crate::db:: 可达。
 mod annotation;
 mod apikeys;
+mod canvas;
 mod clipboard;
 mod media;
 mod migrate;
@@ -140,6 +141,7 @@ mod trash;
 mod trash_backend;
 pub(crate) use annotation::*;
 pub(crate) use apikeys::*;
+pub(crate) use canvas::*;
 pub(crate) use clipboard::*;
 pub(crate) use media::*;
 pub(crate) use migrate::*;
@@ -1164,6 +1166,10 @@ pub(crate) fn ensure_schema(conn: &Connection) -> Result<(), Box<dyn std::error:
     // 工程域（AI 视频制作）schema：与主批次分离保持域内聚，幂等建表
     // 对新库/旧库升级/存储迁移三条路径一致生效。
     conn.execute_batch(PROJECT_SCHEMA_SQL)?;
+
+    // 画布域（自由生图工作流）schema：与工程域同款分离批次，幂等建表
+    // 对新库/旧库升级/存储迁移三条路径一致生效。
+    conn.execute_batch(CANVAS_SCHEMA_SQL)?;
 
     // 一致性工作流扩展列：新库随建表语句带全列，这里只为旧库幂等补齐
     // （ensure_column 存在即跳过）。与「关键列存在性补齐」同模式——

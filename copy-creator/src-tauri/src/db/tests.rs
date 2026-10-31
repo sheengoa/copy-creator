@@ -8184,3 +8184,353 @@ mod project_tests {
         assert_eq!(episodes[1]["character_ids"], serde_json::json!(["c1"]));
     }
 }
+
+#[cfg(test)]
+mod canvas_tests {
+    use crate::db::canvas::{parse_node_meta_lenient, NodeMeta, CANVAS_SCHEMA_SQL};
+    use crate::db::{ensure_schema, Connection, MIGRATED_BUSINESS_TABLES};
+    use rusqlite::params;
+
+    fn canvas_conn() -> Connection {
+        let conn = Connection::open_in_memory().unwrap();
+        conn.execute_batch("PRAGMA foreign_keys=ON;").unwrap();
+        conn.execute_batch(CANVAS_SCHEMA_SQL).unwrap();
+        conn
+    }
+
+    fn full_conn() -> Connection {
+        // 走完整 ensure_schema（主批次 + 工程 + 画布三批次），验证画布
+        // 建表在真实启动路径下生效。
+        let conn = Connection::open_in_memory().unwrap();
+        conn.execute_batch("PRAGMA foreign_keys=ON;").unwrap();
+        ensure_schema(&conn).unwrap();
+        conn
+    }
+
+    fn count(conn: &Connection, sql: &str) -> i64 {
+        conn.query_row(sql, [], |row| row.get(0)).unwrap()
+    }
+
+    fn count_params(conn: &Connection, sql: &str, p: &[&dyn rusqlite::ToSql]) -> i64 {
+        conn.query_row(sql, p, |row| row.get(0)).unwrap()
+    }
+
+    #[test]
+    fn schema_creates_all_canvas_tables() {
+        let conn = canvas_conn();
+        for table in ["canvases", "canvas_nodes", "canvas_connections"] {
+            let n: i64 = conn
+                .query_row(
+                    "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name=?1",
+                    params![table],
+                    |row| row.get(0),
+                )
+                .unwrap();
+            assert_eq!(n, 1, "{table} 未建表");
+        }
+    }
+
+    #[test]
+    fn ensure_schema_creates_canvas_tables() {
+        let conn = full_conn();
+        for table in ["canvases", "canvas_nodes", "canvas_connections"] {
+            let n: i64 = conn
+                .query_row(
+                    "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name=?1",
+                    params![table],
+                    |row| row.get(0),
+                )
+                .unwrap();
+            assert_eq!(n, 1, "{table} 应随 ensure_schema 建立");
+        }
+        // canvases 表可查。
+        let n: i64 = count(&conn, "SELECT COUNT(*) FROM canvases");
+        assert_eq!(n, 0);
+    }
+
+    #[test]
+    fn migrated_tables_include_canvas_schema() {
+        // 新表漏登记 MIGRATED_BUSINESS_TABLES 会导致换存储目录丢画布数据。
+        for table in ["canvases", "canvas_nodes", "canvas_connections"] {
+            assert!(
+                MIGRATED_BUSINESS_TABLES.contains(&table),
+                "{table} 未登记进 MIGRATED_BUSINESS_TABLES"
+            );
+        }
+    }
+
+    #[test]
+    fn canvas_crud_and_aggregates() {
+        let conn = canvas_conn();
+        let canvas = crate::db::canvas::create_canvas(&conn, "  测试画布  ").unwrap();
+        let canvas_id = canvas["id"].as_str().unwrap();
+        assert_eq!(canvas["name"], "测试画布");
+
+        // 空名建画布给默认名。
+        let unnamed = crate::db::canvas::create_canvas(&conn, "   ").unwrap();
+        assert_eq!(unnamed["name"], "未命名画布");
+
+        crate::db::canvas::rename_canvas(&conn, canvas_id, "改名后").unwrap();
+        assert!(crate::db::canvas::rename_canvas(&conn, canvas_id, "  ").is_err());
+
+        // 四类节点：未传 metadata 用默认值。
+        let text = crate::db::canvas::create_node(
+            &conn, canvas_id, "text", "提示词", 10.0, 20.0, Some(200.0), Some(120.0), "", "",
+        )
+        .unwrap();
+        let image = crate::db::canvas::create_node(
+            &conn, canvas_id, "image", "生图", 300.0, 20.0, None, None, "", "",
+        )
+        .unwrap();
+        let refn = crate::db::canvas::create_node(
+            &conn, canvas_id, "ref", "参考图", 10.0, 200.0, None, None, "assets/foo.png", "",
+        )
+        .unwrap();
+        let note = crate::db::canvas::create_node(
+            &conn, canvas_id, "note", "", 300.0, 200.0, None, None, "", "",
+        )
+        .unwrap();
+        assert_eq!(text["metadata"]["kind"], "text");
+        assert_eq!(image["metadata"]["kind"], "image");
+        assert_eq!(image["metadata"]["status"], "idle");
+        assert_eq!(image["metadata"]["params"]["count"], 1);
+        assert_eq!(refn["metadata"]["kind"], "ref");
+        assert_eq!(refn["resource_path"], "assets/foo.png");
+        assert_eq!(note["metadata"]["kind"], "note");
+        assert_eq!(text["width"], 200.0);
+        assert!(image["width"].is_null());
+
+        let text_id = text["id"].as_str().unwrap();
+        let image_id = image["id"].as_str().unwrap();
+        let ref_id = refn["id"].as_str().unwrap();
+        let note_id = note["id"].as_str().unwrap();
+
+        // 多入线：两个上游连同一目标都成立（v2 连线语义）。
+        let w1 = crate::db::canvas::connect(&conn, canvas_id, text_id, image_id).unwrap();
+        crate::db::canvas::connect(&conn, canvas_id, ref_id, image_id).unwrap();
+        assert_eq!(
+            count_params(
+                &conn,
+                "SELECT COUNT(*) FROM canvas_connections WHERE canvas_id = ?1",
+                &[&canvas_id]
+            ),
+            2
+        );
+
+        // 同源重复：INSERT OR IGNORE 去重，返回既有行。
+        let dup = crate::db::canvas::connect(&conn, canvas_id, text_id, image_id).unwrap();
+        assert_eq!(dup["id"], w1["id"]);
+        assert_eq!(
+            count_params(
+                &conn,
+                "SELECT COUNT(*) FROM canvas_connections WHERE canvas_id = ?1",
+                &[&canvas_id]
+            ),
+            2
+        );
+
+        // 自连与跨画布拒绝。
+        assert!(crate::db::canvas::connect(&conn, canvas_id, text_id, text_id).is_err());
+        let other_canvas = unnamed["id"].as_str().unwrap();
+        assert!(crate::db::canvas::connect(&conn, other_canvas, text_id, image_id).is_err());
+
+        // 聚合视图。
+        let list = crate::db::canvas::list_canvases(&conn).unwrap();
+        assert_eq!(list.len(), 2);
+        let mine = list.iter().find(|c| c["id"] == canvas["id"]).unwrap();
+        assert_eq!(mine["node_count"], 4);
+        assert_eq!(mine["connection_count"], 2);
+
+        // 图谱加载。
+        let graph = crate::db::canvas::get_canvas_graph(&conn, canvas_id).unwrap();
+        assert_eq!(graph["canvas"]["name"], "改名后");
+        assert_eq!(graph["nodes"].as_array().unwrap().len(), 4);
+        assert_eq!(graph["connections"].as_array().unwrap().len(), 2);
+
+        // 摘线换目标：改写 to_node。
+        let rewired = crate::db::canvas::rewire(&conn, w1["id"].as_str().unwrap(), note_id).unwrap();
+        assert_eq!(rewired["to_node"], note_id);
+
+        // 换到已有同源连线的目标 = 合并：本线删除，返回既有行。
+        let again = crate::db::canvas::rewire(&conn, rewired["id"].as_str().unwrap(), image_id).unwrap();
+        assert_eq!(again["id"], w1["id"]);
+        assert_eq!(
+            count_params(
+                &conn,
+                "SELECT COUNT(*) FROM canvas_connections WHERE canvas_id = ?1",
+                &[&canvas_id]
+            ),
+            2
+        );
+
+        // 布局批量落盘。
+        crate::db::canvas::save_layout(
+            &conn,
+            canvas_id,
+            &[serde_json::json!({ "id": text_id, "pos_x": 111.0, "pos_y": 222.0 })],
+        )
+        .unwrap();
+        let (x, y): (f64, f64) = conn
+            .query_row(
+                "SELECT pos_x, pos_y FROM canvas_nodes WHERE id = ?1",
+                params![text_id],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )
+            .unwrap();
+        assert_eq!((x, y), (111.0, 222.0));
+
+        // 节点内容更新：标题与 metadata。
+        let updated = crate::db::canvas::update_node(
+            &conn,
+            text_id,
+            Some("新提示词".into()),
+            Some(r#"{"kind":"text","content":"正文"}"#.into()),
+        )
+        .unwrap();
+        assert_eq!(updated["title"], "新提示词");
+        assert_eq!(updated["metadata"]["content"], "正文");
+
+        // 删节点级联清两端连线。
+        crate::db::canvas::delete_node(&conn, ref_id).unwrap();
+        assert_eq!(
+            count_params(
+                &conn,
+                "SELECT COUNT(*) FROM canvas_connections WHERE canvas_id = ?1",
+                &[&canvas_id]
+            ),
+            1
+        );
+
+        // 删画布级联清节点与连线（未命名画布无节点无连线）。
+        crate::db::canvas::delete_canvas(&conn, canvas_id).unwrap();
+        assert_eq!(count(&conn, "SELECT COUNT(*) FROM canvas_nodes"), 0);
+        assert_eq!(count(&conn, "SELECT COUNT(*) FROM canvas_connections"), 0);
+        assert_eq!(count(&conn, "SELECT COUNT(*) FROM canvases"), 1);
+    }
+
+    #[test]
+    fn viewport_and_layout_do_not_bump_updated_at() {
+        let conn = canvas_conn();
+        let canvas = crate::db::canvas::create_canvas(&conn, "布局不重排").unwrap();
+        let canvas_id = canvas["id"].as_str().unwrap();
+        let node = crate::db::canvas::create_node(
+            &conn, canvas_id, "text", "", 0.0, 0.0, None, None, "", "",
+        )
+        .unwrap();
+        let before: String = conn
+            .query_row(
+                "SELECT updated_at FROM canvases WHERE id = ?1",
+                params![canvas_id],
+                |row| row.get(0),
+            )
+            .unwrap();
+
+        crate::db::canvas::set_viewport(&conn, canvas_id, 12.0, 34.0, 1.5).unwrap();
+        crate::db::canvas::save_layout(
+            &conn,
+            canvas_id,
+            &[serde_json::json!({ "id": node["id"], "pos_x": 1.0, "pos_y": 2.0, "width": 300.0, "height": 200.0 })],
+        )
+        .unwrap();
+
+        let after: String = conn
+            .query_row(
+                "SELECT updated_at FROM canvases WHERE id = ?1",
+                params![canvas_id],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(before, after, "视口/布局落盘不应重排画布列表");
+        let (vx, vy, vk): (f64, f64, f64) = conn
+            .query_row(
+                "SELECT viewport_x, viewport_y, viewport_k FROM canvases WHERE id = ?1",
+                params![canvas_id],
+                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+            )
+            .unwrap();
+        assert_eq!((vx, vy, vk), (12.0, 34.0, 1.5));
+    }
+
+    #[test]
+    fn node_meta_serde_roundtrip() {
+        // 四变体序列化 → 解析往返。
+        let metas = vec![
+            NodeMeta::Text { content: "你好".into() },
+            NodeMeta::Note { content: "便签".into() },
+            NodeMeta::Ref {},
+            NodeMeta::Image {
+                params: crate::db::canvas::ImageGenParams {
+                    model: "gpt-image-1".into(),
+                    size: "1024x1024".into(),
+                    count: 2,
+                },
+                status: crate::db::canvas::ImageNodeStatus::Generating,
+                error: String::new(),
+                images: vec![crate::db::canvas::GeneratedImage {
+                    width: 1024,
+                    height: 1024,
+                    bytes: 2048,
+                    resource_path: "画布产物/a.png".into(),
+                    primary: true,
+                }],
+            },
+        ];
+        for meta in metas {
+            let raw = serde_json::to_string(&meta).unwrap();
+            let back = serde_json::from_str::<NodeMeta>(&raw).unwrap();
+            assert_eq!(back, meta);
+        }
+    }
+
+    #[test]
+    fn node_meta_lenient_read_paths() {
+        // 缺字段补默认（Image JSON 只有 kind）。
+        let meta = parse_node_meta_lenient("image", r#"{"kind":"image"}"#);
+        match meta {
+            NodeMeta::Image { status, images, .. } => {
+                assert_eq!(status, crate::db::canvas::ImageNodeStatus::Idle);
+                assert!(images.is_empty());
+            }
+            _ => panic!("应为 Image 变体"),
+        }
+        // kind 与类型列不符 → 回退类型默认值，不阻断加载。
+        let meta = parse_node_meta_lenient("text", r#"{"kind":"note","content":"x"}"#);
+        assert_eq!(meta, NodeMeta::Text { content: String::new() });
+        // 损坏 JSON → 回退默认。
+        let meta = parse_node_meta_lenient("note", "not-json");
+        assert_eq!(meta, NodeMeta::Note { content: String::new() });
+    }
+
+    #[test]
+    fn node_meta_strict_write_paths() {
+        let conn = canvas_conn();
+        let canvas = crate::db::canvas::create_canvas(&conn, "t").unwrap();
+        let canvas_id = canvas["id"].as_str().unwrap();
+        // 未知节点类型拒绝。
+        assert!(crate::db::canvas::create_node(
+            &conn, canvas_id, "video", "", 0.0, 0.0, None, None, "", ""
+        )
+        .is_err());
+        // metadata kind 与类型列不符拒绝落库。
+        let raw = r#"{"kind":"image","params":{},"status":"idle","error":"","images":[]}"#;
+        assert!(crate::db::canvas::create_node(
+            &conn, canvas_id, "text", "", 0.0, 0.0, None, None, "", raw
+        )
+        .is_err());
+        // 合法 metadata 落库后原样返回。
+        let node = crate::db::canvas::create_node(
+            &conn,
+            canvas_id,
+            "text",
+            "",
+            0.0,
+            0.0,
+            None,
+            None,
+            "",
+            r#"{"kind":"text","content":"a"}"#,
+        )
+        .unwrap();
+        assert_eq!(node["metadata"]["content"], "a");
+    }
+}
