@@ -3269,13 +3269,17 @@ function ParamCombo({
   const [editing, setEditing] = useState(false);
   const [anchor, setAnchor] = useState<{ left: number; top: number; width: number } | null>(null);
   const rootRef = useRef<HTMLDivElement | null>(null);
+  const popRef = useRef<HTMLDivElement | null>(null);
   const inputRef = useRef<HTMLInputElement | null>(null);
 
-  // 外点关闭（捕获阶段：画布空白按下不该先触发框选）。
+  // 外点关闭（捕获阶段：画布空白按下不该先触发框选）。portal 弹层不在
+  // rootRef 内，须放行——否则按下瞬间卸载弹层，条目的 click 永远收不到。
   useEffect(() => {
     if (!open) return;
     const onDown = (e: PointerEvent) => {
-      if (!rootRef.current?.contains(e.target as Node)) setOpen(false);
+      const target = e.target as Node;
+      if (rootRef.current?.contains(target) || popRef.current?.contains(target)) return;
+      setOpen(false);
     };
     window.addEventListener("pointerdown", onDown, true);
     return () => window.removeEventListener("pointerdown", onDown, true);
@@ -3346,6 +3350,7 @@ function ParamCombo({
       {open && anchor && createPortal(
         <WheelGate>
           <div
+            ref={popRef}
             className="fc-combo-pop"
             style={{ left: anchor.left, top: anchor.top, width: anchor.width }}
             onPointerDown={(e) => e.stopPropagation()}
