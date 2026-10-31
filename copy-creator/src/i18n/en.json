@@ -852,6 +852,7 @@
     "cancelGen": "Cancel",
     "genModelLabel": "Model",
     "genSizeLabel": "Resolution",
+    "genSizeAutoHint": "Follow model",
     "genCountLabel": "Count",
     "noPromptSource": "No prompt source: connect at least one non-empty text node",
     "genSlotPending": "…",

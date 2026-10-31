@@ -130,9 +130,10 @@ const NODE_ACCENT: Record<CanvasNodeType, string> = {
 
 /** 生成参数预设（下拉清单；输入框仍可自由键入任意值）。尺寸值取后端
  *  可直接接受的「宽x高」（对齐 ai.rs SIZE_PRESETS_1K/2K），auto 交给
- *  模型自选；hint 作弱化尾注（比例/档位）。 */
-const SIZE_PRESET_ITEMS: { value: string; label: string; hint?: string }[] = [
-  { value: "auto", label: "auto", hint: "跟随模型" },
+ *  模型自选；hint 作弱化尾注（比例/档位，语言中立），需要本地化的
+ *  文案用 hintKey（渲染时经 t 解析）。 */
+const SIZE_PRESET_ITEMS: { value: string; label: string; hint?: string; hintKey?: string }[] = [
+  { value: "auto", label: "auto", hintKey: "genSizeAutoHint" },
   { value: "1024x1024", label: "1024x1024", hint: "1:1" },
   { value: "1536x1024", label: "1536x1024", hint: "3:2" },
   { value: "1024x1536", label: "1024x1536", hint: "2:3" },
@@ -147,8 +148,11 @@ const MODEL_PRESET_BASE = ["gpt-image-1", "gemini-2.5-flash-image"];
 
 /** 尺寸取值展示（用户 2026-11-01 定案）：命中预设时展示「主值 + 比例
  *  尾注」双段（与下拉条目同款），自定义值原样展示。 */
-const formatSizeDisplay = (v: string): { main: string; tail?: string } => {
-  const item = SIZE_PRESET_ITEMS.find((i) => i.value === v);
+const formatSizeDisplay = (
+  v: string,
+  items: { value: string; label: string; hint?: string }[] = SIZE_PRESET_ITEMS,
+): { main: string; tail?: string } => {
+  const item = items.find((i) => i.value === v);
   return item ? { main: item.label, tail: item.hint } : { main: v };
 };
 
@@ -2638,6 +2642,11 @@ export default function FreeCanvas({ canvasId }: { canvasId: string }) {
               );
             } else if (node.type === "gen_image" && meta.kind === "gen_image") {
               const missing = genReadinessOf(node);
+              // 尺寸档位：hintKey 在此解析为当前语言（比例尾注语言中立，映射随渲染重算）。
+              const sizeItems = SIZE_PRESET_ITEMS.map(({ hintKey, ...rest }) => ({
+                ...rest,
+                hint: hintKey ? t(`canvas.${hintKey}`) : rest.hint,
+              }));
               body = (
                 <div className="fc-node-form">
                   <div className="fc-param">
@@ -2660,9 +2669,9 @@ export default function FreeCanvas({ canvasId }: { canvasId: string }) {
                     <ParamCombo
                       comboKey={`gs-${node.id}-${node.updated_at}`}
                       value={meta.params.size}
-                      items={SIZE_PRESET_ITEMS}
+                      items={sizeItems}
                       placeholder="auto"
-                      display={formatSizeDisplay}
+                      display={(v) => formatSizeDisplay(v, sizeItems)}
                       toggleTitle={t("canvas.comboPresets")}
                       onCommit={(size) => commitImageParams(node, { size })}
                     />
@@ -2671,6 +2680,7 @@ export default function FreeCanvas({ canvasId }: { canvasId: string }) {
                         <button
                           type="button"
                           className="fc-stepper-btn"
+                          disabled={meta.params.count <= 1}
                           aria-label={t("canvas.genCountLabel")}
                           onPointerDown={(e) => e.stopPropagation()}
                           onClick={() => commitImageParams(node, { count: Math.max(1, meta.params.count - 1) })}
@@ -2681,6 +2691,7 @@ export default function FreeCanvas({ canvasId }: { canvasId: string }) {
                         <button
                           type="button"
                           className="fc-stepper-btn"
+                          disabled={meta.params.count >= 15}
                           aria-label={t("canvas.genCountLabel")}
                           onPointerDown={(e) => e.stopPropagation()}
                           onClick={() => commitImageParams(node, { count: Math.min(15, meta.params.count + 1) })}
@@ -3230,6 +3241,16 @@ function NodeHint({ text, children, className }: { text: string; children: React
 
   useEffect(() => () => window.clearTimeout(timerRef.current), []);
 
+  // 画布滚轮缩放时锚点随世界移位，说明浮层不跟随重测——就地隐没，
+  // 等下次进入锚点再重现。弹层内滚动已被 WheelGate 截住，不会到这里。
+  useEffect(() => {
+    if (!tip) return;
+    window.clearTimeout(timerRef.current);
+    const onWheel = () => setTip(null);
+    window.addEventListener("wheel", onWheel, { passive: true });
+    return () => window.removeEventListener("wheel", onWheel);
+  }, [tip]);
+
   const show = () => {
     if (!text) return;
     window.clearTimeout(timerRef.current);
@@ -3254,7 +3275,7 @@ function NodeHint({ text, children, className }: { text: string; children: React
       className={`fc-hint-anchor${className ? ` ${className}` : ""}`}
       onPointerEnter={show}
       onPointerLeave={hide}
-      onPointerDown={hide}
+      onPointerDownCapture={hide}
     >
       {children}
       {tip && text && createPortal(

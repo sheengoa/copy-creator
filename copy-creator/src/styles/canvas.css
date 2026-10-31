@@ -1074,6 +1074,7 @@
   position: fixed;
   z-index: 1200;
   transform: translate(-50%, -100%);
+  max-width: 260px;
   padding: 7px 10px;
   border-radius: 8px;
   background: rgba(30, 32, 38, 0.92);
@@ -1081,8 +1082,9 @@
   -webkit-backdrop-filter: blur(16px) saturate(1.6);
   color: #f2f3f5;
   font-size: 11.5px;
-  line-height: 1;
-  white-space: nowrap;
+  line-height: 1.25;
+  white-space: normal;
+  text-align: center;
   pointer-events: none;
   box-shadow:
     0 8px 24px rgba(10, 14, 25, 0.28),
@@ -1213,6 +1215,18 @@
 .fc-stepper-btn:hover {
   background: rgba(31, 35, 65, 0.06);
   color: var(--text-primary);
+}
+
+/* 边界禁用（张数到 1 / 15）：置灰且不再给悬停反馈。 */
+.fc-stepper-btn:disabled {
+  opacity: 0.35;
+  color: var(--text-tertiary);
+  cursor: default;
+}
+
+.fc-stepper-btn:disabled:hover {
+  background: none;
+  color: var(--text-tertiary);
 }
 
 .fc-stepper-btn svg {
