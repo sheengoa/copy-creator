@@ -79,6 +79,19 @@ pub async fn canvas_pick_save_path(
     }
 }
 
+/// 保存节点多产物「另存到…」：系统文件夹选择对话框（取消返回空串）。
+#[tauri::command]
+pub async fn canvas_pick_save_dir(app: AppHandle) -> Result<String, String> {
+    let (tx, rx) = std::sync::mpsc::channel();
+    app.dialog().file().pick_folder(move |path| {
+        let _ = tx.send(path);
+    });
+    match await_dialog(rx).await? {
+        Some(path) => Ok(path.to_string()),
+        None => Ok(String::new()),
+    }
+}
+
 /// 解析产物来源：库内相对路径拼资源库根，绝对路径原样（库内产物与
 /// 已加载外部文件都是绝对语义）。
 fn resolve_source<R: Runtime>(app: &AppHandle<R>, source_path: &str) -> Result<std::path::PathBuf, String> {

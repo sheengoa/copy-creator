@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, useState, type CSSProperties, type ReactNode } from "react";
+import { createPortal } from "react-dom";
 import { useTranslation } from "react-i18next";
 import { invoke } from "@tauri-apps/api/core";
 import { getCurrentWebview } from "@tauri-apps/api/webview";
@@ -113,6 +114,23 @@ const NODE_ACCENT: Record<CanvasNodeType, string> = {
   preview_audio: MEDIA_COLOR.audio,
   note: "#E6A700",
 };
+
+/** 生成参数预设（下拉清单；输入框仍可自由键入任意值）。尺寸值取后端
+ *  可直接接受的「宽x高」（对齐 ai.rs SIZE_PRESETS_1K/2K），auto 交给
+ *  模型自选；模型清单随提供方补一项当前回退值。 */
+const SIZE_PRESET_ITEMS: { value: string; label: string }[] = [
+  { value: "auto", label: "auto · 跟随模型" },
+  { value: "1024x1024", label: "1:1 · 1024x1024" },
+  { value: "1536x1024", label: "3:2 · 1536x1024" },
+  { value: "1024x1536", label: "2:3 · 1024x1536" },
+  { value: "1536x864", label: "16:9 · 1536x864" },
+  { value: "864x1536", label: "9:16 · 864x1536" },
+  { value: "1024x768", label: "4:3 · 1024x768" },
+  { value: "768x1024", label: "3:4 · 768x1024" },
+  { value: "2048x1152", label: "16:9 · 2048x1152（2K）" },
+  { value: "1152x2048", label: "9:16 · 1152x2048（2K）" },
+];
+const MODEL_PRESET_BASE = ["gpt-image-1", "gemini-2.5-flash-image"];
 
 interface PortDef {
   /** 输入口 id（连线 to_port / 实测锚点键）。 */
@@ -1657,6 +1675,9 @@ export default function FreeCanvas({ canvasId }: { canvasId: string }) {
     return conn ? nodes.find((n) => n.id === conn.from_node) : undefined;
   }
 
+  /** 上游产物聚合。null 严格表示「没有上游连接」；连了但暂无产物（生成
+   *  中 / 未生成 / 加载节点还没选文件）返回空 paths，供占位文案区分
+   *  「未连接上游」与「已连接，等待产物」。 */
   function upstreamMediaOf(nodeId: string): { paths: string[]; text: string } | null {
     const from = upstreamNodeOf(nodeId);
     if (!from) return null;
@@ -1664,13 +1685,18 @@ export default function FreeCanvas({ canvasId }: { canvasId: string }) {
       const sorted = [...from.metadata.images].sort((a, b) => (a.primary === b.primary ? 0 : a.primary ? -1 : 1));
       return { paths: sorted.map((img) => img.resource_path), text: "" };
     }
+    if (from.type === "gen_video" || from.type === "gen_audio") {
+      // 视频/音频生成协议未接入：连接成立但恒无产物。
+      return { paths: [], text: "" };
+    }
     if (from.type === "load_text" && from.metadata.kind === "load_text") {
       return { paths: [], text: from.metadata.content };
     }
     if (from.resource_path) {
       return { paths: [from.resource_path], text: "" };
     }
-    return null;
+    // 加载节点已连上但还没选文件。
+    return { paths: [], text: "" };
   }
 
   /** 生成前提校验（用户定案）：文本口已连非空文本 + 输出口已连保存/预览；
@@ -1788,6 +1814,44 @@ export default function FreeCanvas({ canvasId }: { canvasId: string }) {
         setNodeErrors((prev) => ({ ...prev, [node.id]: msg }));
       }
     }
+  };
+
+  /** 多产物「另存到…」：选目标文件夹，产物按原文件名逐张导出（重名覆盖，
+   *  与单文件另存同一显式动作语义）。单产物时走单文件对话框更精确。 */
+  const saveUpstreamToDir = async (node: CanvasNode, paths: string[]) => {
+    if (paths.length === 1) {
+      await saveUpstreamToPath(node, paths[0], paths[0].split(/[\\/]/).pop() ?? "产物");
+      return;
+    }
+    const writeMeta = (patch: { status: string; error: string; target?: string; saved_path?: string }) => {
+      if (node.metadata.kind === "save_image" || node.metadata.kind === "save_video" || node.metadata.kind === "save_audio") {
+        void store.getState().updateNode(node.id, {
+          metadata: JSON.stringify({ ...node.metadata, ...patch }),
+        });
+      } else {
+        if (patch.status === "error") setNodeErrors((prev) => ({ ...prev, [node.id]: patch.error }));
+      }
+    };
+    try {
+      const dir = await invoke<string>("canvas_pick_save_dir");
+      if (!dir) return; // 用户取消
+      const base = dir.replace(/[\\/]+$/, "");
+      for (const path of paths) {
+        const name = path.split(/[\\/]/).pop() ?? "产物";
+        await invoke("canvas_export_to_path", { sourcePath: path, target: `${base}/${name}` });
+      }
+      writeMeta({ status: "saved", error: "", target: "path", saved_path: base });
+    } catch (err) {
+      const msg = String(err);
+      if (msg.includes("cancelled") || msg.includes("取消")) return;
+      writeMeta({ status: "error", error: msg });
+    }
+  };
+
+  /** 清除加载节点已选文件（右上角悬浮 ×）：resource_path 置空串即回到
+   *  未加载态，节点保留可重选。 */
+  const clearLoadedMedia = (node: CanvasNode) => {
+    void store.getState().updateNode(node.id, { resourcePath: "" });
   };
 
   // ── 空画布示意（方案 3.6）：一键创建 文本→图像生成→预览 工作流 ──
@@ -2263,13 +2327,29 @@ export default function FreeCanvas({ canvasId }: { canvasId: string }) {
               body = (
                 <div className="fc-node-form">
                   {node.resource_path ? (
-                    node.type === "load_image" ? (
-                      <ResourceThumb path={node.resource_path} className="fc-thumb-cover" />
-                    ) : node.type === "load_video" ? (
-                      <ResourceMediaPlayer kind="video" path={node.resource_path} />
-                    ) : (
-                      <ResourceMediaPlayer kind="audio" path={node.resource_path} />
-                    )
+                    <div className="fc-load-media">
+                      {node.type === "load_image" ? (
+                        <ResourceThumb path={node.resource_path} className="fc-thumb-cover" />
+                      ) : node.type === "load_video" ? (
+                        <ResourceMediaPlayer kind="video" path={node.resource_path} />
+                      ) : (
+                        <ResourceMediaPlayer kind="audio" path={node.resource_path} />
+                      )}
+                      {/* 悬浮右上角的圆形 ×：清除已选文件回到未加载态，
+                          不必删节点重来。 */}
+                      <button
+                        type="button"
+                        className="fc-load-clear"
+                        title={t("canvas.clearLoaded")}
+                        aria-label={t("canvas.clearLoaded")}
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          clearLoadedMedia(node);
+                        }}
+                      >
+                        {Icons.close}
+                      </button>
+                    </div>
                   ) : (
                     <div className="fc-node-placeholder">{t("canvas.loadEmpty")}</div>
                   )}
@@ -2289,20 +2369,22 @@ export default function FreeCanvas({ canvasId }: { canvasId: string }) {
               const missing = genReadinessOf(node);
               body = (
                 <div className="fc-node-form">
-                  <input
-                    className="fc-node-input"
-                    key={`gm-${node.id}-${node.updated_at}`}
-                    defaultValue={meta.params.model}
+                  <ParamCombo
+                    comboKey={`gm-${node.id}-${node.updated_at}`}
+                    value={meta.params.model}
+                    items={[...new Set([modelFallback, ...MODEL_PRESET_BASE])].map((m) => ({ value: m, label: m }))}
                     placeholder={`${t("canvas.genModelLabel")}：${modelFallback}`}
-                    onBlur={(e) => commitImageParams(node, { model: e.target.value.trim() })}
+                    toggleTitle={t("canvas.comboPresets")}
+                    onCommit={(model) => commitImageParams(node, { model })}
                   />
                   <div className="fc-node-row">
-                    <input
-                      className="fc-node-input grow"
-                      key={`gs-${node.id}-${node.updated_at}`}
-                      defaultValue={meta.params.size}
+                    <ParamCombo
+                      comboKey={`gs-${node.id}-${node.updated_at}`}
+                      value={meta.params.size}
+                      items={SIZE_PRESET_ITEMS}
                       placeholder="auto / 1024x1024 / 3:2"
-                      onBlur={(e) => commitImageParams(node, { size: e.target.value.trim() })}
+                      toggleTitle={t("canvas.comboPresets")}
+                      onCommit={(size) => commitImageParams(node, { size })}
                     />
                     <input
                       className="fc-node-input count"
@@ -2382,12 +2464,13 @@ export default function FreeCanvas({ canvasId }: { canvasId: string }) {
               const notReadyKey = node.type === "gen_video" ? "canvas.genVideoNotReady" : "canvas.genAudioNotReady";
               body = (
                 <div className="fc-node-form">
-                  <input
-                    className="fc-node-input"
-                    key={`gm-${node.id}-${node.updated_at}`}
-                    defaultValue={meta.kind === "gen_video" || meta.kind === "gen_audio" ? meta.params.model : ""}
+                  <ParamCombo
+                    comboKey={`gm-${node.id}-${node.updated_at}`}
+                    value={meta.kind === "gen_video" || meta.kind === "gen_audio" ? meta.params.model : ""}
+                    items={[...new Set([modelFallback, ...MODEL_PRESET_BASE])].map((m) => ({ value: m, label: m }))}
                     placeholder={`${t("canvas.genModelLabel")}：${modelFallback}`}
-                    onBlur={(e) => commitImageParams(node, { model: e.target.value.trim() })}
+                    toggleTitle={t("canvas.comboPresets")}
+                    onCommit={(model) => commitImageParams(node, { model })}
                   />
                   <button className="fc-node-btn accent" disabled title={t(notReadyKey)}>
                     {t("canvas.genButton")}
@@ -2397,13 +2480,19 @@ export default function FreeCanvas({ canvasId }: { canvasId: string }) {
                 </div>
               );
             } else if (node.type === "save_image" || node.type === "save_video" || node.type === "save_audio") {
+              const upstreamNode = upstreamNodeOf(node.id);
               const upstream = upstreamMediaOf(node.id);
+              const hasProduct = !!upstream?.paths.length;
               const saved = meta.kind === "save_image" || meta.kind === "save_video" || meta.kind === "save_audio" ? meta : null;
               body = (
                 <div className="fc-node-form">
-                  {upstream?.paths.length ? (
+                  {!upstreamNode ? (
+                    <div className="fc-node-placeholder">{t("canvas.previewEmpty")}</div>
+                  ) : !hasProduct ? (
+                    <div className="fc-node-placeholder">{t("canvas.waitingUpstream")}</div>
+                  ) : (
                     <div className="fc-gen-thumbs">
-                      {upstream.paths.map((path, i) => (
+                      {upstream!.paths.map((path, i) => (
                         <span key={i} className="fc-save-item">
                           {node.type === "save_image" ? (
                             <ResourceThumb path={path} className="fc-thumb" />
@@ -2419,16 +2508,23 @@ export default function FreeCanvas({ canvasId }: { canvasId: string }) {
                         </span>
                       ))}
                     </div>
-                  ) : (
-                    <div className="fc-node-placeholder">{t("canvas.saveUpstreamEmpty")}</div>
                   )}
-                  <button
-                    className="fc-node-btn accent"
-                    disabled={!upstream?.paths.length}
-                    onClick={() => void saveUpstreamToLibrary(node)}
-                  >
-                    {t("canvas.saveToLibrary")}
-                  </button>
+                  <div className="fc-node-row">
+                    <button
+                      className="fc-node-btn accent grow"
+                      disabled={!hasProduct}
+                      onClick={() => void saveUpstreamToLibrary(node)}
+                    >
+                      {t("canvas.saveToLibrary")}
+                    </button>
+                    <button
+                      className="fc-node-btn ghost grow"
+                      disabled={!hasProduct}
+                      onClick={() => void saveUpstreamToDir(node, upstream?.paths ?? [])}
+                    >
+                      {t("canvas.saveSaveAs")}
+                    </button>
+                  </div>
                   {saved?.status === "saved" && saved.saved_path && (
                     <button
                       className="fc-node-btn ghost"
@@ -2444,11 +2540,12 @@ export default function FreeCanvas({ canvasId }: { canvasId: string }) {
                 </div>
               );
             } else if (node.type === "preview_image" || node.type === "preview_video" || node.type === "preview_audio") {
+              const upstreamNode = upstreamNodeOf(node.id);
               const upstream = upstreamMediaOf(node.id);
               const path = upstream?.paths[0] ?? "";
               body = (
                 <div className="fc-node-form">
-                  {!upstream ? (
+                  {!upstreamNode ? (
                     <div className="fc-node-placeholder">{t("canvas.previewEmpty")}</div>
                   ) : node.type === "preview_image" ? (
                     path ? (
@@ -2460,12 +2557,12 @@ export default function FreeCanvas({ canvasId }: { canvasId: string }) {
                         <ResourceThumb path={path} className="fc-thumb-cover" />
                       </button>
                     ) : (
-                      <div className="fc-node-placeholder">{t("canvas.previewEmpty")}</div>
+                      <div className="fc-node-placeholder">{t("canvas.waitingUpstream")}</div>
                     )
                   ) : node.type === "preview_video" ? (
-                    path ? <ResourceMediaPlayer kind="video" path={path} /> : <div className="fc-node-placeholder">{t("canvas.previewEmpty")}</div>
+                    path ? <ResourceMediaPlayer kind="video" path={path} /> : <div className="fc-node-placeholder">{t("canvas.waitingUpstream")}</div>
                   ) : (
-                    path ? <ResourceMediaPlayer kind="audio" path={path} /> : <div className="fc-node-placeholder">{t("canvas.previewEmpty")}</div>
+                    path ? <ResourceMediaPlayer kind="audio" path={path} /> : <div className="fc-node-placeholder">{t("canvas.waitingUpstream")}</div>
                   )}
                   {upstream?.text && <div className="fc-preview-text">{upstream.text}</div>}
                 </div>
@@ -2744,6 +2841,105 @@ function WheelGate({ children }: { children: ReactNode }) {
     return () => el.removeEventListener("wheel", isolate);
   }, []);
   return <div ref={gateRef}>{children}</div>;
+}
+
+/** 参数组合框（用户 2026-11-01 定案：预设下拉 + 自定义输入）。输入框
+ *  始终可自由键入（失焦提交），右侧箭头展开预设清单，点选立即提交。
+ *  清单 portal 到 body：节点表单是 overflow 滚动容器，内联浮层会被裁。 */
+function ParamCombo({
+  comboKey,
+  value,
+  items,
+  placeholder,
+  toggleTitle,
+  onCommit,
+}: {
+  comboKey: string;
+  value: string;
+  items: { value: string; label: string }[];
+  placeholder?: string;
+  toggleTitle: string;
+  onCommit: (value: string) => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const [anchor, setAnchor] = useState<{ left: number; top: number; width: number } | null>(null);
+  const rootRef = useRef<HTMLDivElement | null>(null);
+  const inputRef = useRef<HTMLInputElement | null>(null);
+
+  // 外点关闭（捕获阶段：画布空白按下不该先触发框选）。
+  useEffect(() => {
+    if (!open) return;
+    const onDown = (e: PointerEvent) => {
+      if (!rootRef.current?.contains(e.target as Node)) setOpen(false);
+    };
+    window.addEventListener("pointerdown", onDown, true);
+    return () => window.removeEventListener("pointerdown", onDown, true);
+  }, [open]);
+
+  const toggle = () => {
+    if (open) {
+      setOpen(false);
+      return;
+    }
+    const rect = inputRef.current?.getBoundingClientRect();
+    if (!rect) return;
+    setAnchor({ left: rect.left, top: rect.bottom + 4, width: rect.width });
+    setOpen(true);
+  };
+
+  const applyPreset = (v: string) => {
+    if (inputRef.current) inputRef.current.value = v;
+    setOpen(false);
+    onCommit(v);
+  };
+
+  return (
+    <div className="fc-combo" ref={rootRef}>
+      <input
+        ref={inputRef}
+        className="fc-node-input fc-combo-input"
+        key={comboKey}
+        defaultValue={value}
+        placeholder={placeholder}
+        onBlur={(e) => onCommit(e.target.value.trim())}
+        onKeyDown={(e) => {
+          if (e.key === "Escape") setOpen(false);
+        }}
+      />
+      <button
+        type="button"
+        className={`fc-combo-toggle${open ? " is-open" : ""}`}
+        title={toggleTitle}
+        aria-label={toggleTitle}
+        onPointerDown={(e) => e.stopPropagation()}
+        onClick={toggle}
+      >
+        {Icons.chevronDown}
+      </button>
+      {open && anchor && createPortal(
+        <WheelGate>
+          <div
+            className="fc-combo-pop"
+            style={{ left: anchor.left, top: anchor.top, width: anchor.width }}
+            onPointerDown={(e) => e.stopPropagation()}
+          >
+            {items.map((item) => (
+              <button
+                key={item.value}
+                type="button"
+                className={`fc-combo-item${item.value === value ? " is-current" : ""}`}
+                onClick={() => applyPreset(item.value)}
+              >
+                <span>{item.label}</span>
+                {item.value === value && <i aria-hidden="true">{Icons.check}</i>}
+              </button>
+            ))}
+          </div>
+        </WheelGate>,
+        document.body,
+      )}
+    </div>
+  );
 }
 
 /** 懒加载的资源库选择浮层：画布加载节点「从资源库选择」入口，薄壳复用

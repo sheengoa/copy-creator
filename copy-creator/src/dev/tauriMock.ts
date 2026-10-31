@@ -784,6 +784,10 @@ function handleInvoke(cmd: string, args: Record<string, unknown>): unknown {
       canvas.updated_at = ts();
       return { id: canvas.id, groups: clone(canvas.groups) };
     }
+    case "canvas_pick_save_path":
+    case "canvas_pick_save_dir":
+      // 浏览器环境没有系统对话框：返回空串＝用户取消（前端静默）。
+      return "";
     case "ai_generate_image":
       // 浏览器验证环境无 AI 配置：直接报错（节点上可见错误提示）。
       throw new Error("浏览器验证环境未配置 AI 生图");
