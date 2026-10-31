@@ -646,6 +646,11 @@ export default function FreeCanvas({ canvasId }: { canvasId: string }) {
     if (addMenu) setAddMenu(null);
     const target = e.target as HTMLElement;
 
+    // 可交互元素一律不进手势：button 上 begin() 会把指针捕获到视口容器，
+    // click 被重定向到捕获元素反而点不中（种子按钮实测被吞）；输入元素
+    // 要保住文本选择/光标。fc-addmenu/batchbar/节点 ✕ 自带 stopPropagation。
+    if (e.button === 0 && target.closest("input, textarea, button")) return;
+
     // 开始手势的统一入口：设指针捕获——拖出窗口边缘/快速滑出元素后
     // move/up 仍会送达，避免交互态卡死（截图里悬浮小条即卡死的框选）。
     const begin = (it: Interaction) => {
@@ -680,10 +685,6 @@ export default function FreeCanvas({ canvasId }: { canvasId: string }) {
 
     const nodeEl = target.closest(".fc-node") as HTMLElement | null;
     if (nodeEl) {
-      // 编辑中的输入框与节点内按钮不触发任何节点手势：输入框要保住文本
-      // 选择/光标；按钮若被 begin() 捕获指针，click 会重定向到捕获元素
-      // 反而点不中，按住按钮还会拖着节点跑。
-      if (target.closest("input, textarea, button")) return;
       const nodeId = nodeEl.dataset.nodeId ?? "";
       const node = nodesRef.current.find((n) => n.id === nodeId);
       if (!node) return;
@@ -841,7 +842,11 @@ export default function FreeCanvas({ canvasId }: { canvasId: string }) {
     await st.connect(canvasId, text.id, img.id);
     pushUndo({ kind: "create", ids: [text.id, img.id] });
     setSelection([text.id, img.id]);
-  }, [canvasId, pushUndo, store, t, toWorld]);
+    // 种子完成后整体适配窗口：fit effect 在首批节点（text 先落库）变化时
+    // 触发一次就标记结束，后落的图片节点会被留在视野外（窄窗口实测）。
+    fitAttemptedRef.current = true;
+    fitAll(store.getState().nodes);
+  }, [canvasId, fitAll, pushUndo, store, t, toWorld]);
 
   // 键盘：删除选中（输入框聚焦不响应）、撤销、全选、复制粘贴、Escape。
   useEffect(() => {
@@ -955,8 +960,10 @@ export default function FreeCanvas({ canvasId }: { canvasId: string }) {
   // ── 批量生成（阶段 3）：多选图片节点 → 队列顺序执行 ─────────
 
   const batchRunningRef = useRef(false);
+  // 用渲染期的 nodes 状态过滤（nodesRef 在 effect 提交、晚一拍），批量条
+  // 的计数与实选严格一致；runBatch 内部执行时再走 nodesRef 取最新。
   const selectedImageIds = selection.filter(
-    (id) => nodesRef.current.find((n) => n.id === id)?.type === "image",
+    (id) => nodes.find((n) => n.id === id)?.type === "image",
   );
   const runBatch = useCallback(async () => {
     if (batchRunningRef.current) return;
