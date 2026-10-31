@@ -1066,10 +1066,21 @@
 
 .fc-root .fc-collection-thumb {
   flex: none;
+  display: block;
   width: 34px;
   height: 26px;
   border-radius: 6px;
-  overflow: hidden;
+  object-fit: cover;
+  background: rgba(31, 35, 65, 0.05);
+}
+
+/* 拖拽排序进行时：被抓的行浮起（投影加深），其余行由 FLIP 过渡滑动。 */
+.fc-root .fc-collection-item {
+  transition: box-shadow 0.15s ease;
+}
+
+.fc-root .fc-collection-item.is-dragging {
+  box-shadow: 0 3px 10px rgba(31, 35, 65, 0.18), 0 0 0 0.5px color-mix(in srgb, var(--node-accent, var(--accent)) 45%, transparent);
 }
 
 .fc-root .fc-collection-text {

@@ -423,6 +423,34 @@ export default function FreeCanvas({ canvasId }: { canvasId: string }) {
   const [addMenuQuery, setAddMenuQuery] = useState("");
   /** 合集列表拖拽排序的进行时草稿（order 实时交换，松手落库）。 */
   const [collectionDrag, setCollectionDrag] = useState<{ nodeId: string; order: string[] } | null>(null);
+  /** FLIP 动画待办：交换前的各行纵坐标（按成员键），提交后由布局效果
+   *  读取——先反向位移再过渡回位，得到快捷输入同款的丝滑换位。 */
+  const collectionFlipRef = useRef<Map<string, number> | null>(null);
+
+  // 合集排序 FLIP：DOM 提交后按交换前坐标差反向位移，再过渡归零。
+  useLayoutEffect(() => {
+    const before = collectionFlipRef.current;
+    collectionFlipRef.current = null;
+    if (!collectionDrag || !before) return;
+    const listEl = document.querySelector(`.pc-node[data-key="${collectionDrag.nodeId}"] .fc-collection-list`);
+    if (!listEl) return;
+    listEl.querySelectorAll<HTMLElement>(".fc-collection-item").forEach((row) => {
+      const prevTop = before.get(row.dataset.conn ?? "");
+      if (prevTop == null) return;
+      const delta = prevTop - row.getBoundingClientRect().top;
+      if (Math.abs(delta) < 1) return;
+      row.style.transition = "none";
+      row.style.transform = `translateY(${delta}px)`;
+      void row.offsetHeight; // 强制回流：让反向位移立刻生效
+      row.style.transition = "transform 0.18s cubic-bezier(0.2, 0.8, 0.3, 1)";
+      row.style.transform = "";
+      const settle = () => {
+        row.style.transition = "";
+        row.removeEventListener("transitionend", settle);
+      };
+      row.addEventListener("transitionend", settle);
+    });
+  }, [collectionDrag]);
   const [wireDraft, setWireDraft] = useState<{ d: string; invalid: boolean; color?: string } | null>(null);
   /** 摘线拿着（rewire）中：该连线暂隐藏，松手转接或放回。 */
   const [liftedWire, setLiftedWire] = useState<{ connId: string; fromKey: string } | null>(null);
@@ -1849,6 +1877,8 @@ export default function FreeCanvas({ canvasId }: { canvasId: string }) {
     if (meta.kind !== "collection_image" && meta.kind !== "collection_text" && meta.kind !== "collection_video") return;
     const order = items.map((i) => i.from.id);
     let curIndex = index;
+    const rowEl = handle.closest(".fc-collection-item");
+    rowEl?.classList.add("is-dragging");
     try {
       handle.setPointerCapture(e.pointerId);
     } catch {
@@ -1862,12 +1892,19 @@ export default function FreeCanvas({ canvasId }: { canvasId: string }) {
       const [moved] = order.splice(curIndex, 1);
       order.splice(idx, 0, moved);
       curIndex = idx;
+      // FLIP 前置：记录交换前各行位置（按成员键），提交后布局效果回放。
+      const before = new Map<string, number>();
+      listEl.querySelectorAll<HTMLElement>(".fc-collection-item").forEach((r) => {
+        before.set(r.dataset.conn ?? "", r.getBoundingClientRect().top);
+      });
+      collectionFlipRef.current = before;
       setCollectionDrag({ nodeId: node.id, order: [...order] });
     };
     const onUp = () => {
       handle.removeEventListener("pointermove", onMove);
       handle.removeEventListener("pointerup", onUp);
       handle.removeEventListener("pointercancel", onUp);
+      rowEl?.classList.remove("is-dragging");
       const finalOrder = [...order];
       setCollectionDrag(null);
       void store.getState().updateNode(node.id, {
@@ -2659,7 +2696,7 @@ export default function FreeCanvas({ canvasId }: { canvasId: string }) {
                   ) : (
                     <div className="fc-collection-list">
                       {items.map((item, i) => (
-                        <div key={item.connId} className="fc-collection-item" data-idx={i}>
+                        <div key={item.connId} className="fc-collection-item" data-idx={i} data-conn={item.connId}>
                           <span className="fc-collection-idx">{i + 1}</span>
                           {item.kind === "image" && item.path ? (
                             <ResourceThumb path={item.path} className="fc-collection-thumb" />
