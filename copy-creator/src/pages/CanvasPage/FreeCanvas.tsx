@@ -434,8 +434,9 @@ export default function FreeCanvas({ canvasId }: { canvasId: string }) {
     dy: number;
     order: string[];
   } | null>(null);
-  /** 松手落位动画待办：被抓行松手时的视觉 top，落位后由布局效果回放。 */
-  const collectionDropRef = useRef<{ nodeId: string; connId: string; fromTop: number } | null>(null);
+  /** 松手落位动画待办：被抓行松手时的视觉 top 与落位槽 top（均为屏幕
+   *  几何），最终顺序渲染后由布局效果按差值滑入。 */
+  const collectionDropRef = useRef<{ nodeId: string; connId: string; fromTop: number; toTop: number } | null>(null);
 
   // 松手落位：最终顺序渲染后，被抓行从松手视觉位置滑到落位槽。
   useLayoutEffect(() => {
@@ -446,7 +447,7 @@ export default function FreeCanvas({ canvasId }: { canvasId: string }) {
       `.pc-node[data-key="${drop.nodeId}"] .fc-collection-item[data-conn="${drop.connId}"]`,
     );
     if (!row) return;
-    const delta = (drop.fromTop - row.getBoundingClientRect().top) / view.scale;
+    const delta = (drop.fromTop - drop.toTop) / view.scale;
     if (Math.abs(delta) < 1) return;
     row.style.transition = "none";
     row.style.transform = `translateY(${delta}px)`;
@@ -458,7 +459,7 @@ export default function FreeCanvas({ canvasId }: { canvasId: string }) {
       row.removeEventListener("transitionend", settle);
     };
     row.addEventListener("transitionend", settle);
-  }, [view.scale]);
+  }, [collectionDrag, view.scale]);
   const [wireDraft, setWireDraft] = useState<{ d: string; invalid: boolean; color?: string } | null>(null);
   /** 摘线拿着（rewire）中：该连线暂隐藏，松手转接或放回。 */
   const [liftedWire, setLiftedWire] = useState<{ connId: string; fromKey: string } | null>(null);
@@ -1893,6 +1894,7 @@ export default function FreeCanvas({ canvasId }: { canvasId: string }) {
     const stride = items.length > 1 ? rowTops[1] - rowTops[0] : 0;
     if (stride <= 0) return;
     const draggedId = baseOrder[index];
+    const draggedConnId = items[index].connId;
     const rowEl = handle.closest<HTMLElement>(".fc-collection-item");
     rowEl?.classList.add("is-dragging");
     try {
@@ -1929,10 +1931,14 @@ export default function FreeCanvas({ canvasId }: { canvasId: string }) {
       handle.removeEventListener("pointermove", onMove);
       handle.removeEventListener("pointerup", onUp);
       handle.removeEventListener("pointercancel", onUp);
-      rowEl?.classList.remove("is-dragging");
-      rowEl?.style.removeProperty("transform");
+      // transform 保持跟手值不动：DOM 重排提交后，布局效果会在绘制前
+      // 把 transform 换成「视觉保持不动」的落位补偿值再过渡归零——
+      // 提前设置会以旧布局为基准，松手瞬间跳一下。
       const finalOrder = [...logical];
-      collectionDropRef.current = { nodeId: node.id, connId: draggedId, fromTop: rowTops[index] + dy };
+      collectionDropRef.current = {
+        nodeId: node.id, connId: draggedConnId,
+        fromTop: rowTops[index] + dy, toTop: rowTops[dragIndex],
+      };
       setCollectionDrag(null);
       void store.getState().updateNode(node.id, {
         metadata: JSON.stringify({ ...meta, order: finalOrder }),
