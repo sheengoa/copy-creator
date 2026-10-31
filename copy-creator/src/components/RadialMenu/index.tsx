@@ -241,6 +241,9 @@ export default function RadialMenu() {
   const selectedItemIdRef = useRef<string | null>(null);
   const selectedItemIdsRef = useRef<string[]>([]);
   const shiftSelectionPointerItemIdRef = useRef<string | null>(null);
+  // Shift+按下已选条目：按下不立即取消（capture 层已就绪拖出整组选区的
+  // 拖拽会话），松手未成拖拽的 click 才取消加选——此 ref 标记待取消条目。
+  const shiftToggleItemIdRef = useRef<string | null>(null);
   const activeTabRef = useRef<TabKey>("phrases");
   const clipboardCategoryRef = useRef<ClipType>("all");
   const resourceGroupRef = useRef<string | null>(null);
@@ -673,6 +676,7 @@ export default function RadialMenu() {
     setSelectedItemIds([]);
     selectedItemIdsRef.current = [];
     shiftSelectionPointerItemIdRef.current = null;
+    shiftToggleItemIdRef.current = null;
     shiftClickSelectionModeRef.current = false;
     // 分组浏览位置跨重启记忆。null（"全部"视图）与 ""（未分组）语义不同，
     // 设置表只存字符串，故以 JSON 编码区分三种状态。
@@ -787,6 +791,7 @@ export default function RadialMenu() {
     selectedItemIdRef.current = null;
     setSelectedItemIds([]);
     selectedItemIdsRef.current = [];
+    shiftToggleItemIdRef.current = null;
     shiftClickSelectionModeRef.current = false;
   }, [collapsePreview]);
 
@@ -809,6 +814,7 @@ export default function RadialMenu() {
     setSelectedItemIds([]);
     selectedItemIdsRef.current = [];
     shiftSelectionPointerItemIdRef.current = null;
+    shiftToggleItemIdRef.current = null;
     shiftClickSelectionModeRef.current = false;
     setDragSessionItemId(null);
     setDraggingItemId(null);
@@ -856,6 +862,17 @@ export default function RadialMenu() {
     setSelectedItemIds(nextIds);
     selectedItemIdRef.current = itemId;
     setSelectedItemId(itemId);
+  }, []);
+
+  const deselectItemWithShift = useCallback((itemId: string) => {
+    shiftClickSelectionModeRef.current = true;
+    const nextIds = selectedItemIdsRef.current.filter((id) => id !== itemId);
+    selectedItemIdsRef.current = nextIds;
+    setSelectedItemIds(nextIds);
+    if (selectedItemIdRef.current === itemId) {
+      selectedItemIdRef.current = null;
+      setSelectedItemId(null);
+    }
   }, []);
 
   const handleItemPaste = useCallback(async (itemIds: string | string[], terminal = false) => {
@@ -1392,6 +1409,7 @@ export default function RadialMenu() {
     selectedItemIdRef.current = null;
     setSelectedItemIds([]);
     selectedItemIdsRef.current = [];
+    shiftToggleItemIdRef.current = null;
     shiftClickSelectionModeRef.current = false;
   }, [collapsePreview, closeResourceGroupMenu]);
   useEffect(() => {
@@ -2081,6 +2099,13 @@ export default function RadialMenu() {
                     e.preventDefault();
                     e.stopPropagation();
                     shiftSelectionPointerItemIdRef.current = item.id;
+                    // 已选条目：按下不立即取消——按住可拖出整组选区
+                    // （capture 层已就绪拖拽会话），松手未成拖拽的
+                    // click 再取消加选；未选条目按一下即加选。
+                    if (selectedItemIdsRef.current.includes(item.id)) {
+                      shiftToggleItemIdRef.current = item.id;
+                      return;
+                    }
                     selectItemWithShift(item.id);
                   }}
                   onPointerUp={() => {
@@ -2089,12 +2114,25 @@ export default function RadialMenu() {
                       if (shiftSelectionPointerItemIdRef.current === item.id) {
                         shiftSelectionPointerItemIdRef.current = null;
                       }
+                      if (shiftToggleItemIdRef.current === item.id) {
+                        shiftToggleItemIdRef.current = null;
+                      }
                     }, 0);
                   }}
                   onClick={(e) => {
                     e.stopPropagation();
                     if (shiftSelectionPointerItemIdRef.current === item.id) {
                       shiftSelectionPointerItemIdRef.current = null;
+                      if (shiftToggleItemIdRef.current === item.id) {
+                        shiftToggleItemIdRef.current = null;
+                        if (suppressClickRef.current) {
+                          // 拖拽已真实发生：幽灵 click 只消费抑制标记，不改选区。
+                          suppressClickRef.current = false;
+                        } else if (e.shiftKey) {
+                          e.preventDefault();
+                          deselectItemWithShift(item.id);
+                        }
+                      }
                       return;
                     }
                     if (suppressClickRef.current) {
@@ -2103,7 +2141,11 @@ export default function RadialMenu() {
                     }
                     if (e.shiftKey) {
                       e.preventDefault();
-                      selectItemWithShift(item.id);
+                      if (selectedItemIdsRef.current.includes(item.id)) {
+                        deselectItemWithShift(item.id);
+                      } else {
+                        selectItemWithShift(item.id);
+                      }
                       return;
                     }
                     const itemIds = shiftClickSelectionModeRef.current
