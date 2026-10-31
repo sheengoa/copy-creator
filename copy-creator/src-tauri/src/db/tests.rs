@@ -8511,6 +8511,9 @@ mod canvas_tests {
                 saved_path: "画布产物/a.png".into(),
             },
             NodeMeta::PreviewVideo {},
+            NodeMeta::CollectionImage { order: vec!["n-1".into(), "n-2".into()] },
+            NodeMeta::CollectionText { order: Vec::new() },
+            NodeMeta::CollectionVideo { order: vec!["n-3".into()] },
         ];
         for meta in metas {
             let raw = serde_json::to_string(&meta).unwrap();

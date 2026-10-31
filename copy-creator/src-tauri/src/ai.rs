@@ -523,52 +523,138 @@ struct UpstreamInput {
     references: Vec<PathBuf>,
 }
 
-/// 生成输入收集（方案 3.6）：上游按连线创建顺序——text→提示词换行拼接，
-/// ref→资源路径，image→主图路径；note 与空路径跳过。
+/// 合集成员的展示顺序：metadata.order 优先，未登记的新连线按连线时间
+/// 补尾。合集嵌套在端口语义上不允许，这里也只展开一层（成员若仍是
+/// 合集，展开 helpers 对其返回 None，自然跳过）。
+fn collection_member_order(
+    conn: &rusqlite::Connection,
+    collection_id: &str,
+    order: &[String],
+) -> Result<Vec<String>, String> {
+    let mut ids: Vec<String> = conn
+        .prepare(
+            "SELECT from_node FROM canvas_connections \
+             WHERE to_node = ?1 ORDER BY created_at ASC, id ASC",
+        )
+        .and_then(|mut stmt| {
+            stmt.query_map(params![collection_id], |row| row.get::<_, String>(0))
+                .map(|rows| rows.filter_map(|r| r.ok()).collect())
+        })
+        .map_err(|e| e.to_string())?;
+    let mut ordered = Vec::new();
+    for id in order {
+        if let Some(pos) = ids.iter().position(|x| x == id) {
+            ordered.push(ids.remove(pos));
+        }
+    }
+    ordered.extend(ids);
+    Ok(ordered)
+}
+
+/// 合集成员的文本贡献：load_text 非空内容（旧 text 类型兼容读）。
+fn member_text(conn: &rusqlite::Connection, node_id: &str) -> Result<Option<String>, String> {
+    let (node_type, meta_raw): (String, String) = conn
+        .query_row(
+            "SELECT type, metadata FROM canvas_nodes WHERE id = ?1",
+            params![node_id],
+            |row| Ok((row.get(0)?, row.get(1)?)),
+        )
+        .map_err(|e| e.to_string())?;
+    Ok(match parse_node_meta_lenient(&node_type, &meta_raw) {
+        NodeMeta::LoadText { content } | NodeMeta::Text { content } => {
+            let content = content.trim().to_string();
+            if content.is_empty() { None } else { Some(content) }
+        }
+        _ => None,
+    })
+}
+
+/// 合集成员的媒体贡献：加载媒体的资源路径 / 生成图像的主图路径。
+fn member_reference(conn: &rusqlite::Connection, node_id: &str) -> Result<Option<PathBuf>, String> {
+    let (node_type, meta_raw, resource_path): (String, String, String) = conn
+        .query_row(
+            "SELECT type, metadata, resource_path FROM canvas_nodes WHERE id = ?1",
+            params![node_id],
+            |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+        )
+        .map_err(|e| e.to_string())?;
+    Ok(match parse_node_meta_lenient(&node_type, &meta_raw) {
+        NodeMeta::Ref {} | NodeMeta::LoadImage {} | NodeMeta::LoadVideo {} | NodeMeta::LoadAudio {} => {
+            if resource_path.trim().is_empty() {
+                None
+            } else {
+                Some(PathBuf::from(resource_path))
+            }
+        }
+        NodeMeta::Image { images, .. } | NodeMeta::GenImage { images, .. } => {
+            let primary = images.iter().find(|i| i.primary).or_else(|| images.first());
+            primary.and_then(|img| {
+                if img.resource_path.trim().is_empty() {
+                    None
+                } else {
+                    Some(PathBuf::from(img.resource_path.clone()))
+                }
+            })
+        }
+        _ => None,
+    })
+}
+
+/// 生成输入收集（方案 3.6 + 节点体系 v2）：入线按连线创建顺序——
+/// load_text→提示词（旧 text 兼容），load_image/load_video/load_audio→
+/// 资源路径，gen_image→主图路径；合集节点按用户排序展开成员（文本合集
+/// 逐项拼提示词，图像/视频合集逐项入参考图）；note 与空路径跳过。
 fn collect_upstream(conn: &rusqlite::Connection, node_id: &str) -> Result<UpstreamInput, String> {
     let mut prompt_parts: Vec<String> = Vec::new();
     let mut references: Vec<PathBuf> = Vec::new();
-    let rows: Vec<(String, String, String)> = conn
+    let from_ids: Vec<String> = conn
         .prepare(
-            "SELECT n.id, n.type, n.metadata FROM canvas_connections c \
-             JOIN canvas_nodes n ON n.id = c.from_node \
-             WHERE c.to_node = ?1 ORDER BY c.created_at ASC, c.id ASC",
+            "SELECT from_node FROM canvas_connections \
+             WHERE to_node = ?1 ORDER BY created_at ASC, id ASC",
         )
         .and_then(|mut stmt| {
-            stmt.query_map(params![node_id], |row| {
-                Ok((row.get(0)?, row.get(1)?, row.get(2)?))
-            })
-            .map(|rows| rows.filter_map(|r| r.ok()).collect())
+            stmt.query_map(params![node_id], |row| row.get::<_, String>(0))
+                .map(|rows| rows.filter_map(|r| r.ok()).collect())
         })
         .map_err(|e| e.to_string())?;
-    for (_id, node_type, meta_raw) in rows {
-        match node_type.as_str() {
-            "text" => {
-                if let NodeMeta::Text { content } = parse_node_meta_lenient("text", &meta_raw) {
-                    if !content.trim().is_empty() {
-                        prompt_parts.push(content);
+    for from_id in from_ids {
+        let (node_type, meta_raw, resource_path): (String, String, String) = conn
+            .query_row(
+                "SELECT type, metadata, resource_path FROM canvas_nodes WHERE id = ?1",
+                params![&from_id],
+                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+            )
+            .map_err(|e| e.to_string())?;
+        match parse_node_meta_lenient(&node_type, &meta_raw) {
+            NodeMeta::Text { content } | NodeMeta::LoadText { content } => {
+                if !content.trim().is_empty() {
+                    prompt_parts.push(content);
+                }
+            }
+            NodeMeta::Ref {} | NodeMeta::LoadImage {} | NodeMeta::LoadVideo {} | NodeMeta::LoadAudio {} => {
+                if !resource_path.trim().is_empty() {
+                    references.push(PathBuf::from(resource_path));
+                }
+            }
+            NodeMeta::Image { images, .. } | NodeMeta::GenImage { images, .. } => {
+                let primary = images.iter().find(|i| i.primary).or_else(|| images.first());
+                if let Some(img) = primary {
+                    if !img.resource_path.trim().is_empty() {
+                        references.push(PathBuf::from(img.resource_path.clone()));
                     }
                 }
             }
-            "ref" => {
-                let path: String = conn
-                    .query_row(
-                        "SELECT resource_path FROM canvas_nodes WHERE id = ?1",
-                        params![&_id],
-                        |row| row.get(0),
-                    )
-                    .unwrap_or_default();
-                if !path.trim().is_empty() {
-                    references.push(PathBuf::from(path));
+            NodeMeta::CollectionText { order } => {
+                for member in collection_member_order(conn, &from_id, &order)? {
+                    if let Some(text) = member_text(conn, &member)? {
+                        prompt_parts.push(text);
+                    }
                 }
             }
-            "image" => {
-                if let NodeMeta::Image { images, .. } = parse_node_meta_lenient("image", &meta_raw) {
-                    let primary = images.iter().find(|i| i.primary).or_else(|| images.first());
-                    if let Some(img) = primary {
-                        if !img.resource_path.trim().is_empty() {
-                            references.push(PathBuf::from(img.resource_path.clone()));
-                        }
+            NodeMeta::CollectionImage { order } | NodeMeta::CollectionVideo { order } => {
+                for member in collection_member_order(conn, &from_id, &order)? {
+                    if let Some(path) = member_reference(conn, &member)? {
+                        references.push(path);
                     }
                 }
             }

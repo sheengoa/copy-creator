@@ -127,6 +127,23 @@ pub(crate) enum NodeMeta {
         error: String,
     },
 
+    // ── 合集节点 ──
+    /// 合集（图像/文本/视频）：画布上唯一允许多线汇入的节点，把多个
+    /// 同类来源排成有序组喂给生成节点。order 存成员 from 节点 id 的展示
+    /// 顺序（用户拖拽调序落库）；未登记的新连线按连线时间补尾。
+    CollectionImage {
+        #[serde(default)]
+        order: Vec<String>,
+    },
+    CollectionText {
+        #[serde(default)]
+        order: Vec<String>,
+    },
+    CollectionVideo {
+        #[serde(default)]
+        order: Vec<String>,
+    },
+
     // ── 输出节点 ──
     /// 保存节点：status = idle | saved | error；target = "library"（入库）
     /// 或 "path"（外部另存）；saved_path 记资源库相对路径或绝对路径。
@@ -273,6 +290,9 @@ impl NodeMeta {
             "preview_image" => Ok(NodeMeta::PreviewImage {}),
             "preview_video" => Ok(NodeMeta::PreviewVideo {}),
             "preview_audio" => Ok(NodeMeta::PreviewAudio {}),
+            "collection_image" => Ok(NodeMeta::CollectionImage { order: Vec::new() }),
+            "collection_text" => Ok(NodeMeta::CollectionText { order: Vec::new() }),
+            "collection_video" => Ok(NodeMeta::CollectionVideo { order: Vec::new() }),
             other => Err(format!("未知节点类型：{other}")),
         }
     }
@@ -301,6 +321,9 @@ impl NodeMeta {
             NodeMeta::PreviewImage { .. } => "preview_image",
             NodeMeta::PreviewVideo { .. } => "preview_video",
             NodeMeta::PreviewAudio { .. } => "preview_audio",
+            NodeMeta::CollectionImage { .. } => "collection_image",
+            NodeMeta::CollectionText { .. } => "collection_text",
+            NodeMeta::CollectionVideo { .. } => "collection_video",
         }
     }
 }
