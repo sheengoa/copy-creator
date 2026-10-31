@@ -157,7 +157,8 @@ type UndoAction =
       kind: "delete";
       nodes: CanvasNode[];
       connections: { from_node: string; to_node: string }[];
-    };
+    }
+  | { kind: "create"; ids: string[] };
 
 /** 资源缩略图：mediaUrl 域层唯一出口，路径变化重解析。 */
 function ResourceThumb({ path, className }: { path: string; className?: string }) {
@@ -184,6 +185,9 @@ export default function FreeCanvas({ canvasId }: { canvasId: string }) {
   const connections = useCanvasStore((s) => s.connections);
   const genProgress = useCanvasStore((s) => s.genProgress);
   const aiModel = useSettingsStore((s) => s.aiModel);
+  const aiProvider = useSettingsStore((s) => s.aiProvider);
+  /** 模型占位符兜底：节点未填且设置页默认模型为空时按提供商给示例名。 */
+  const modelFallback = aiModel || (aiProvider === "gemini" ? "gemini-2.5-flash-image" : "gpt-image-1");
 
   const vpRef = useRef<HTMLDivElement | null>(null);
   const [view, setView] = useState(() => {
@@ -245,7 +249,8 @@ export default function FreeCanvas({ canvasId }: { canvasId: string }) {
   }, []);
 
   /** 撤销（Ctrl+Z）：layout 恢复布局；delete 重建节点/连线——节点用新 id
-   *  重建（无外部锚引用 canvas 节点 id），连线按 id 映射改接两端。 */
+   *  重建（无外部锚引用 canvas 节点 id），连线按 id 映射改接两端；create
+   *  （粘贴/种子模板）整节点移除。 */
   const undo = useCallback(async () => {
     const action = undoRef.current.pop();
     if (!action) return;
@@ -254,8 +259,22 @@ export default function FreeCanvas({ canvasId }: { canvasId: string }) {
       st.commitLayout(canvasId, action.prev);
       return;
     }
+    if (action.kind === "create") {
+      for (const id of action.ids) {
+        await st.deleteNode(id);
+      }
+      setSelection([]);
+      return;
+    }
     const idMap = new Map<string, string>();
     for (const node of action.nodes) {
+      // 删除时仍在生成中的图片节点，恢复时归一为 error——后台任务已随
+      // 删除取消，留着 generating 会让节点永远转圈。
+      const restoredMeta = { ...node.metadata };
+      if (restoredMeta.kind === "image" && restoredMeta.status === "generating") {
+        restoredMeta.status = "error";
+        restoredMeta.error = "生成已中断";
+      }
       const created = await st.createNode({
         canvasId,
         nodeType: node.type,
@@ -265,7 +284,7 @@ export default function FreeCanvas({ canvasId }: { canvasId: string }) {
         width: node.width,
         height: node.height,
         resourcePath: node.resource_path,
-        metadata: JSON.stringify(node.metadata),
+        metadata: JSON.stringify(restoredMeta),
       });
       if (created) idMap.set(node.id, created.id);
     }
@@ -287,6 +306,10 @@ export default function FreeCanvas({ canvasId }: { canvasId: string }) {
       pushUndo({ kind: "delete", nodes: targets, connections: conns });
     }
     for (const node of targets) {
+      // 生成中的节点先取消后端任务再删：否则孤儿请求继续跑完，产物照常
+      // 入资源库、落库 UPDATE 落在已删除的行上静默失效。
+      const progress = store.getState().genProgress[node.id];
+      if (progress) void store.getState().cancelGeneration(progress.requestId);
       await store.getState().deleteNode(node.id);
     }
     setSelection([]);
@@ -556,7 +579,9 @@ export default function FreeCanvas({ canvasId }: { canvasId: string }) {
           break;
         }
         case "wire": {
-          const target = hoverRef.current;
+          // 松手时按最终光标位置重新命中，不依赖 hover 镜像 ref——最后
+          // 一次 pointermove 的渲染提交可能晚于 pointerup，镜像会滞后一帧。
+          const target = hitTestNode(it.cursor, it.fromNode);
           const source = st.nodes.find((n) => n.id === it.fromNode);
           if (target) {
             void st.connect(canvasId, it.fromNode, target);
@@ -569,7 +594,7 @@ export default function FreeCanvas({ canvasId }: { canvasId: string }) {
           break;
         }
         case "rewire": {
-          const target = hoverRef.current;
+          const target = hitTestNode(it.cursor, it.fromNode);
           const source = st.nodes.find((n) => n.id === it.fromNode);
           if (target) {
             // 摘线换目标：后端合并语义（同源重复时删本线保既有）。
@@ -587,7 +612,7 @@ export default function FreeCanvas({ canvasId }: { canvasId: string }) {
       setInteraction(null);
       setHoverId(null);
     },
-    [canvasId, openAddMenu, pushUndo, store],
+    [canvasId, hitTestNode, openAddMenu, pushUndo, store],
   );
 
   // 指针手势的窗口级监听：interaction 活跃期间挂载，up 后卸载。
@@ -655,8 +680,10 @@ export default function FreeCanvas({ canvasId }: { canvasId: string }) {
 
     const nodeEl = target.closest(".fc-node") as HTMLElement | null;
     if (nodeEl) {
-      // 编辑中的输入框不触发任何节点手势（选择文本/光标放置优先）。
-      if (target.closest("input, textarea")) return;
+      // 编辑中的输入框与节点内按钮不触发任何节点手势：输入框要保住文本
+      // 选择/光标；按钮若被 begin() 捕获指针，click 会重定向到捕获元素
+      // 反而点不中，按住按钮还会拖着节点跑。
+      if (target.closest("input, textarea, button")) return;
       const nodeId = nodeEl.dataset.nodeId ?? "";
       const node = nodesRef.current.find((n) => n.id === nodeId);
       if (!node) return;
@@ -776,8 +803,12 @@ export default function FreeCanvas({ canvasId }: { canvasId: string }) {
       const to = idMap.get(wire.to_node);
       if (from && to) await st.connect(canvasId, from, to);
     }
-    if (newIds.length) setSelection(newIds);
-  }, [canvasId, store]);
+    if (newIds.length) {
+      // 粘贴可撤销（方案 2.2 撤销栈范围含粘贴）：整批节点随 Ctrl+Z 移除。
+      pushUndo({ kind: "create", ids: newIds });
+      setSelection(newIds);
+    }
+  }, [canvasId, pushUndo, store]);
 
   const seedTemplate = useCallback(async () => {
     // 空画布示意（方案 3.6）：一键创建 提示词 → 生图 最小工作流，
@@ -808,8 +839,9 @@ export default function FreeCanvas({ canvasId }: { canvasId: string }) {
     });
     if (!img) return;
     await st.connect(canvasId, text.id, img.id);
+    pushUndo({ kind: "create", ids: [text.id, img.id] });
     setSelection([text.id, img.id]);
-  }, [canvasId, store, t, toWorld]);
+  }, [canvasId, pushUndo, store, t, toWorld]);
 
   // 键盘：删除选中（输入框聚焦不响应）、撤销、全选、复制粘贴、Escape。
   useEffect(() => {
@@ -818,6 +850,9 @@ export default function FreeCanvas({ canvasId }: { canvasId: string }) {
       if (el && (el.tagName === "INPUT" || el.tagName === "TEXTAREA" || el.isContentEditable)) {
         return;
       }
+      // 面板保挂载：画布被 display:none 隐藏（用户在其他顶级区）时不响应，
+      // 否则别的页面按 Delete/Backspace 会隔着隐藏面板删掉画布选中节点。
+      if (!vpRef.current || vpRef.current.offsetParent === null) return;
       // 弹层打开时不响应（对齐工程画布惯例）：确认框焦点落在按钮上而非输入
       // 元素，仅靠上面的 tagName 守卫拦不住——弹层开着时按 Delete 会在背后
       // 删掉选中节点。覆盖确认框/重命名对话框与画布 chips 两个弹层。
@@ -1157,7 +1192,7 @@ export default function FreeCanvas({ canvasId }: { canvasId: string }) {
                         className="fc-node-input"
                         key={`gm-${node.id}-${node.updated_at}`}
                         defaultValue={meta.params.model}
-                        placeholder={`${t("canvas.genModelLabel")}：${aiModel || "gpt-image-1"}`}
+                        placeholder={`${t("canvas.genModelLabel")}：${modelFallback}`}
                         onBlur={(e) => commitImageParams(node, { model: e.target.value.trim() })}
                       />
                       <div className="fc-node-row">

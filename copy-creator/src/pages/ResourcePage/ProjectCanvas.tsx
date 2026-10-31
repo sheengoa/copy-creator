@@ -4034,6 +4034,9 @@ export default function ProjectCanvas({
     const onKey = (e: KeyboardEvent) => {
       const target = e.target as HTMLElement | null;
       if (target && (target.tagName === "INPUT" || target.tagName === "TEXTAREA" || target.isContentEditable)) return;
+      // 面板保挂载：资源页被 display:none 隐藏（用户在剪切板等其他顶级区）
+      // 时不响应，否则别处按 Delete/Backspace 会隔着隐藏面板删掉工程选中。
+      if (!vpRef.current || vpRef.current.offsetParent === null) return;
       if (
         detailFor || pickerFor || memberPick || addMenu || wireDraft ||
         scriptPickOpen || locationPickOpen || sceneForm || shotForm ||
