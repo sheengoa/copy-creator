@@ -86,12 +86,14 @@ const NODE_MIN_SIZE: Record<CanvasNodeType, { w: number; h: number }> = {
   note: { w: 120, h: 80 },
 };
 
-/** 媒体类型色（节点 accent / 线色 / 端口点色同源：线色跟上游类型）。 */
+/** 媒体类型色（节点 accent / 线色 / 端口点色同源：线色跟上游类型）。
+ *  用户 2026-11-01 定案：文本黄、图像蓝、视频紫、音频绿；文本取深琥珀
+ *  黄而非系统黄 #FFCC00，保证 2.6px 连线在浅色画布上可读。 */
 const MEDIA_COLOR: Record<"text" | "image" | "video" | "audio", string> = {
-  text: "#007AFF",
-  image: "#AF52DE",
-  video: "#FF2D55",
-  audio: "#FF9500",
+  text: "#E6A700",
+  image: "#007AFF",
+  video: "#AF52DE",
+  audio: "#34C759",
 };
 
 /** 节点类型色通道（B+ 视觉标准）：按所属媒体链路取色。 */
