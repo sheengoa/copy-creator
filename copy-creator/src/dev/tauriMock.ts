@@ -47,6 +47,7 @@ interface MockCanvasNode {
     | "load_text" | "load_image" | "load_audio" | "load_video"
     | "save_image" | "save_video" | "save_audio"
     | "preview_image" | "preview_video" | "preview_audio"
+    | "collection_image" | "collection_text" | "collection_video"
     | "note";
   title: string;
   pos_x: number;
@@ -243,6 +244,8 @@ function canvasDefaultMeta(type: MockCanvasNode["type"]): MockCanvasMeta {
       return { kind: type, params: { model: "", size: "", count: 1 }, status: "idle", error: "" };
     case "save_image": case "save_video": case "save_audio":
       return { kind: type, status: "", error: "", target: "", saved_path: "" };
+    case "collection_image": case "collection_text": case "collection_video":
+      return { kind: type, order: [] };
   }
 }
 

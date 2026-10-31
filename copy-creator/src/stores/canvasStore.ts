@@ -21,6 +21,9 @@ export type CanvasNodeType =
   | "preview_image"
   | "preview_video"
   | "preview_audio"
+  | "collection_image"
+  | "collection_text"
+  | "collection_video"
   | "note";
 
 export interface ImageGenParams {
@@ -67,7 +70,10 @@ export type NodeMeta =
   | ({ kind: "save_audio" } & SaveMediaMeta)
   | { kind: "preview_image" }
   | { kind: "preview_video" }
-  | { kind: "preview_audio" };
+  | { kind: "preview_audio" }
+  | { kind: "collection_image"; order: string[] }
+  | { kind: "collection_text"; order: string[] }
+  | { kind: "collection_video"; order: string[] };
 
 /** 节点分组（Ctrl+G，ComfyUI Group 对应物）：与 Rust CanvasNodeGroup
  *  一一对应。框无独立坐标——渲染时自适应成员包围盒，成员删除由前端

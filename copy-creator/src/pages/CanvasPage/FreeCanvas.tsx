@@ -48,6 +48,9 @@ const NODE_DEFAULT_SIZE: Record<CanvasNodeType, { w: number; h: number | null }>
   preview_image: { w: 320, h: null },
   preview_video: { w: 360, h: null },
   preview_audio: { w: 280, h: null },
+  collection_image: { w: 240, h: null },
+  collection_text: { w: 240, h: null },
+  collection_video: { w: 260, h: null },
   note: { w: 220, h: null },
 };
 
@@ -66,6 +69,9 @@ const NODE_FALLBACK_SIZE: Record<CanvasNodeType, { w: number; h: number }> = {
   preview_image: { w: 320, h: 260 },
   preview_video: { w: 360, h: 240 },
   preview_audio: { w: 280, h: 130 },
+  collection_image: { w: 240, h: 160 },
+  collection_text: { w: 240, h: 160 },
+  collection_video: { w: 260, h: 160 },
   note: { w: 220, h: 120 },
 };
 
@@ -84,6 +90,9 @@ const NODE_MIN_SIZE: Record<CanvasNodeType, { w: number; h: number }> = {
   preview_image: { w: 200, h: 160 },
   preview_video: { w: 220, h: 160 },
   preview_audio: { w: 180, h: 110 },
+  collection_image: { w: 180, h: 110 },
+  collection_text: { w: 180, h: 110 },
+  collection_video: { w: 180, h: 110 },
   note: { w: 120, h: 80 },
 };
 
@@ -112,6 +121,9 @@ const NODE_ACCENT: Record<CanvasNodeType, string> = {
   preview_image: MEDIA_COLOR.image,
   preview_video: MEDIA_COLOR.video,
   preview_audio: MEDIA_COLOR.audio,
+  collection_image: MEDIA_COLOR.image,
+  collection_text: MEDIA_COLOR.text,
+  collection_video: MEDIA_COLOR.video,
   note: "#E6A700",
 };
 
@@ -138,6 +150,8 @@ interface PortDef {
   /** 接受的上游节点类型（类型匹配校验）。 */
   accepts: CanvasNodeType[];
   mediaKind: "text" | "image" | "video" | "audio";
+  /** 多线入口（仅合集节点）：落线追加不顶掉；其余口单线，落线顶掉旧线。 */
+  multi?: boolean;
 }
 
 /** 类型化端口矩阵（用户 2026-10-31 定案）：生成节点的文本口必连、
@@ -145,20 +159,21 @@ interface PortDef {
 const PORT_DEFS: Record<CanvasNodeType, { ins: PortDef[]; out: { mediaKind: "text" | "image" | "video" | "audio" } | null }> = {
   gen_image: {
     ins: [
-      { id: "text", accepts: ["load_text"], mediaKind: "text" },
-      { id: "image", accepts: ["load_image"], mediaKind: "image" },
+      { id: "text", accepts: ["load_text", "collection_text"], mediaKind: "text" },
+      { id: "image", accepts: ["load_image", "collection_image"], mediaKind: "image" },
     ],
     out: { mediaKind: "image" },
   },
   gen_video: {
     ins: [
-      { id: "text", accepts: ["load_text"], mediaKind: "text" },
-      { id: "image", accepts: ["load_image"], mediaKind: "image" },
+      { id: "text", accepts: ["load_text", "collection_text"], mediaKind: "text" },
+      { id: "video", accepts: ["load_video", "collection_video"], mediaKind: "video" },
+      { id: "image", accepts: ["load_image", "collection_image"], mediaKind: "image" },
     ],
     out: { mediaKind: "video" },
   },
   gen_audio: {
-    ins: [{ id: "text", accepts: ["load_text"], mediaKind: "text" }],
+    ins: [{ id: "text", accepts: ["load_text", "collection_text"], mediaKind: "text" }],
     out: { mediaKind: "audio" },
   },
   load_text: { ins: [], out: { mediaKind: "text" } },
@@ -171,6 +186,19 @@ const PORT_DEFS: Record<CanvasNodeType, { ins: PortDef[]; out: { mediaKind: "tex
   preview_image: { ins: [{ id: "in", accepts: ["gen_image", "load_image"], mediaKind: "image" }], out: null },
   preview_video: { ins: [{ id: "in", accepts: ["gen_video", "load_video"], mediaKind: "video" }], out: null },
   preview_audio: { ins: [{ id: "in", accepts: ["gen_audio", "load_audio"], mediaKind: "audio" }], out: null },
+  // 合集：画布上唯一的多线入口；成员为对应加载节点与对应生成产物。
+  collection_image: {
+    ins: [{ id: "image", accepts: ["load_image", "gen_image"], mediaKind: "image", multi: true }],
+    out: { mediaKind: "image" },
+  },
+  collection_text: {
+    ins: [{ id: "text", accepts: ["load_text"], mediaKind: "text", multi: true }],
+    out: { mediaKind: "text" },
+  },
+  collection_video: {
+    ins: [{ id: "video", accepts: ["load_video", "gen_video"], mediaKind: "video", multi: true }],
+    out: { mediaKind: "video" },
+  },
   note: { ins: [], out: null },
 };
 
@@ -372,6 +400,8 @@ export default function FreeCanvas({ canvasId }: { canvasId: string }) {
     detached?: { connId: string; fromKey: string };
   } | null>(null);
   const [addMenuQuery, setAddMenuQuery] = useState("");
+  /** 合集列表拖拽排序的进行时草稿（order 实时交换，松手落库）。 */
+  const [collectionDrag, setCollectionDrag] = useState<{ nodeId: string; order: string[] } | null>(null);
   const [wireDraft, setWireDraft] = useState<{ d: string; invalid: boolean; color?: string } | null>(null);
   /** 摘线拿着（rewire）中：该连线暂隐藏，松手转接或放回。 */
   const [liftedWire, setLiftedWire] = useState<{ connId: string; fromKey: string } | null>(null);
@@ -1410,6 +1440,13 @@ export default function FreeCanvas({ canvasId }: { canvasId: string }) {
           const lifted = liftedWire;
           if (wireRelease === "commit" && targetKey && targetPort && lifted) {
             setLiftedWire(null);
+            // 单线口：转接进来前顶掉口上其他旧线（合集 multi 口不顶）。
+            const toNode = nodesRef.current.find((n) => n.id === targetKey);
+            const multi = toNode ? PORT_DEFS[toNode.type].ins.find((p) => p.id === targetPort)?.multi : false;
+            if (!multi) {
+              const old = connectionsRef.current.find((c) => c.to_node === targetKey && c.to_port === targetPort && c.id !== lifted.connId);
+              if (old) void store.getState().deleteConnection(old.id);
+            }
             void store.getState().rewire(lifted.connId, targetKey, targetPort);
           } else if (wireRelease === "picker" && lifted) {
             if (vpRect) {
@@ -1427,12 +1464,17 @@ export default function FreeCanvas({ canvasId }: { canvasId: string }) {
             setLiftedWire(null);
           }
         } else if (wireRelease === "commit" && targetKey && targetPort && drag.fromKey) {
-          if (drag.fromDir === "out") {
-            void store.getState().connect(canvasId, drag.fromKey, targetKey, targetPort);
-          } else {
-            // 反拖：落点节点才是来源方。
-            void store.getState().connect(canvasId, targetKey, drag.fromKey, drag.fromPortId);
+          const fromKey = drag.fromDir === "out" ? drag.fromKey : targetKey;
+          const toKey = drag.fromDir === "out" ? targetKey : drag.fromKey;
+          const toPort = drag.fromDir === "out" ? targetPort : drag.fromPortId;
+          // 单线口语义：落线顶掉该口已有旧线（合集 multi 口追加不顶）。
+          const toNode = nodesRef.current.find((n) => n.id === toKey);
+          const multi = toNode ? PORT_DEFS[toNode.type].ins.find((p) => p.id === toPort)?.multi : false;
+          if (!multi) {
+            const old = connectionsRef.current.find((c) => c.to_node === toKey && c.to_port === toPort && c.from_node !== fromKey);
+            if (old) void store.getState().deleteConnection(old.id);
           }
+          void store.getState().connect(canvasId, fromKey, toKey, toPort);
         } else if (wireRelease === "picker" && drag.fromKey) {
           // ComfyUI 惯例：拖到空白松手 → 弹节点选择框，创建的节点自动
           // 接上这条线；落在任何节点/浮层上松手视为取消，不弹。
@@ -1700,19 +1742,121 @@ export default function FreeCanvas({ canvasId }: { canvasId: string }) {
   }
 
   /** 生成前提校验（用户定案）：文本口已连非空文本 + 输出口已连保存/预览；
-   *  图像口（参考图）可选。返回缺失清单供按钮旁提示。 */
+   *  图像口（参考图）可选。文本来源可以是文本合集（有成员即视为就绪，
+   *  空内容成员由后端聚合时跳过）。返回缺失清单供按钮旁提示。 */
   function genReadinessOf(node: CanvasNode): string[] {
     const missing: string[] = [];
     const textConn = connections.some((c) => {
       if (c.to_node !== node.id || c.to_port !== "text") return false;
       const from = nodes.find((n) => n.id === c.from_node);
-      return from?.type === "load_text" && from.metadata.kind === "load_text" && from.metadata.content.trim().length > 0;
+      if (!from) return false;
+      if (from.type === "load_text") {
+        return from.metadata.kind === "load_text" && from.metadata.content.trim().length > 0;
+      }
+      if (from.type === "collection_text") {
+        return connections.some((m) => m.to_node === from.id);
+      }
+      return false;
     });
     if (!textConn) missing.push(t("canvas.genMissingText"));
     const outConn = connections.some((c) => c.from_node === node.id);
     if (!outConn) missing.push(t("canvas.genMissingOut"));
     return missing;
   }
+
+  // ── 合集节点（唯一多线入口）：成员解析 + 拖拽排序 ─────────
+
+  /** 合集成员按用户排序（metadata.order，重排进行时用草稿）展开；
+   *  未登记的新连线按连线创建时间补尾。 */
+  function collectionItemsOf(node: CanvasNode): {
+    connId: string;
+    from: CanvasNode;
+    kind: "image" | "text" | "video";
+    path: string;
+    label: string;
+  }[] {
+    const meta = node.metadata;
+    if (meta.kind !== "collection_image" && meta.kind !== "collection_text" && meta.kind !== "collection_video") return [];
+    const conns = connections
+      .filter((c) => c.to_node === node.id)
+      .sort((a, b) => a.created_at.localeCompare(b.created_at));
+    const byFrom = new Map(conns.map((c) => [c.from_node, c]));
+    const order = collectionDrag?.nodeId === node.id ? collectionDrag.order : meta.order;
+    const orderedIds: string[] = [];
+    for (const id of order) {
+      if (byFrom.has(id) && !orderedIds.includes(id)) orderedIds.push(id);
+    }
+    for (const c of conns) {
+      if (!orderedIds.includes(c.from_node)) orderedIds.push(c.from_node);
+    }
+    return orderedIds
+      .map((fromId) => {
+        const conn = byFrom.get(fromId);
+        const from = nodes.find((n) => n.id === fromId);
+        if (!conn || !from) return null;
+        if (node.type === "collection_text") {
+          const content = from.metadata.kind === "load_text" ? from.metadata.content.trim() : "";
+          return { connId: conn.id, from, kind: "text" as const, path: "", label: content || t("canvas.collectionItemEmpty") };
+        }
+        // 图像 / 视频合集：加载节点取资源路径，生成节点取主产物。
+        let path = from.resource_path;
+        if (!path && from.metadata.kind === "gen_image") {
+          path = [...from.metadata.images]
+            .sort((a, b) => (a.primary === b.primary ? 0 : a.primary ? -1 : 1))[0]?.resource_path ?? "";
+        }
+        return {
+          connId: conn.id,
+          from,
+          kind: node.type === "collection_image" ? ("image" as const) : ("video" as const),
+          path,
+          label: path.split(/[\\/]/).pop() ?? "",
+        };
+      })
+      .filter((x): x is NonNullable<typeof x> => x !== null);
+  }
+
+  /** 列表把手拖拽排序（剪切板/快捷输入同款交互的指针实现）：按住把手
+   *  上下移动，经过哪行就实时交换到哪；松手把最终顺序落进 metadata。 */
+  const startCollectionReorder = (node: CanvasNode, index: number, e: React.PointerEvent<HTMLButtonElement>) => {
+    const items = collectionItemsOf(node);
+    if (items.length < 2) return;
+    e.preventDefault();
+    const handle = e.currentTarget;
+    const listEl = handle.closest(".fc-collection-list");
+    if (!listEl) return;
+    const meta = node.metadata;
+    if (meta.kind !== "collection_image" && meta.kind !== "collection_text" && meta.kind !== "collection_video") return;
+    const order = items.map((i) => i.from.id);
+    let curIndex = index;
+    try {
+      handle.setPointerCapture(e.pointerId);
+    } catch {
+      // 指针不可捕获（合成事件等）：退化为元素监听。
+    }
+    const onMove = (ev: PointerEvent) => {
+      const row = document.elementFromPoint(ev.clientX, ev.clientY)?.closest(".fc-collection-item") as HTMLElement | null;
+      if (!row || !listEl.contains(row)) return;
+      const idx = Number(row.dataset.idx);
+      if (!Number.isInteger(idx) || idx === curIndex) return;
+      const [moved] = order.splice(curIndex, 1);
+      order.splice(idx, 0, moved);
+      curIndex = idx;
+      setCollectionDrag({ nodeId: node.id, order: [...order] });
+    };
+    const onUp = () => {
+      handle.removeEventListener("pointermove", onMove);
+      handle.removeEventListener("pointerup", onUp);
+      handle.removeEventListener("pointercancel", onUp);
+      const finalOrder = [...order];
+      setCollectionDrag(null);
+      void store.getState().updateNode(node.id, {
+        metadata: JSON.stringify({ ...meta, order: finalOrder }),
+      });
+    };
+    handle.addEventListener("pointermove", onMove);
+    handle.addEventListener("pointerup", onUp);
+    handle.addEventListener("pointercancel", onUp);
+  };
 
   // ── 生图（图像生成节点）：参数编辑、生成、主图切换 ─────────
 
@@ -2095,16 +2239,19 @@ export default function FreeCanvas({ canvasId }: { canvasId: string }) {
   const menuGroups: { key: string; types: CanvasNodeType[] }[] = [
     { key: "gen", types: ["gen_image", "gen_video", "gen_audio"] },
     { key: "load", types: ["load_text", "load_image", "load_video", "load_audio"] },
+    { key: "collection", types: ["collection_text", "collection_image", "collection_video"] },
     { key: "output", types: ["save_image", "preview_image", "save_video", "preview_video", "save_audio", "preview_audio"] },
     { key: "misc", types: ["note"] },
   ];
   const menuIconOf = (type: CanvasNodeType): ReactNode => {
     switch (type) {
       case "gen_image": return Icons.image;
-      case "gen_video": case "load_video": case "preview_video": return Icons.video;
+      case "gen_video": case "load_video": case "preview_video": case "collection_video": return Icons.video;
       case "gen_audio": case "load_audio": case "save_audio": case "preview_audio": return Icons.audio;
       case "load_text": return Icons.file;
       case "load_image": return Icons.image;
+      case "collection_image": return Icons.copy;
+      case "collection_text": return Icons.copy;
       case "save_image": case "save_video": return Icons.resources;
       case "preview_image": return Icons.expand;
       default: return Icons.edit;
@@ -2477,6 +2624,54 @@ export default function FreeCanvas({ canvasId }: { canvasId: string }) {
                   </button>
                   <div className="fc-gen-warn is-muted">{t(notReadyKey)}</div>
                   {nodeErrors[node.id] && <div className="fc-gen-warn">{nodeErrors[node.id]}</div>}
+                </div>
+              );
+            } else if (node.type === "collection_image" || node.type === "collection_text" || node.type === "collection_video") {
+              // 合集节点：多线汇入的有序列表——序号 + 缩略/内容 + 拖拽
+              // 把手（剪切板/快捷输入同款）+ 悬停移除。节点体不再放其他
+              // 内容，为生成等待动画留白。
+              const items = collectionItemsOf(node);
+              body = (
+                <div className="fc-node-form">
+                  {items.length === 0 ? (
+                    <div className="fc-node-placeholder">{t("canvas.collectionEmpty")}</div>
+                  ) : (
+                    <div className="fc-collection-list">
+                      {items.map((item, i) => (
+                        <div key={item.connId} className="fc-collection-item" data-idx={i}>
+                          <span className="fc-collection-idx">{i + 1}</span>
+                          {item.kind === "image" && item.path ? (
+                            <ResourceThumb path={item.path} className="fc-collection-thumb" />
+                          ) : (
+                            <span className={`fc-collection-text${item.kind !== "text" && !item.path ? " is-empty" : ""}`}>
+                              {item.kind === "text" || item.label ? item.label : t("canvas.collectionItemEmpty")}
+                            </span>
+                          )}
+                          <button
+                            type="button"
+                            className="fc-collection-handle"
+                            title={t("canvas.collectionSortHint")}
+                            aria-label={t("canvas.collectionSortHint")}
+                            onPointerDown={(e) => startCollectionReorder(node, i, e)}
+                          >
+                            {Icons.drag}
+                          </button>
+                          <button
+                            type="button"
+                            className="fc-collection-remove"
+                            title={t("common.delete")}
+                            aria-label={t("common.delete")}
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              void store.getState().deleteConnection(item.connId);
+                            }}
+                          >
+                            {Icons.close}
+                          </button>
+                        </div>
+                      ))}
+                    </div>
+                  )}
                 </div>
               );
             } else if (node.type === "save_image" || node.type === "save_video" || node.type === "save_audio") {

@@ -1019,6 +1019,134 @@
   height: 36px;
 }
 
+/* 合集节点：多线汇入的有序成员列表——序号 + 缩略/内容 + 拖拽把手 +
+   悬停移除；行距紧凑，最上即 1（喂给生成节点的顺序）。 */
+.fc-root .fc-collection-list {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.fc-root .fc-collection-item {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  padding: 4px 6px;
+  border-radius: 9px;
+  background: rgba(255, 255, 255, 0.92);
+  box-shadow: 0 1px 2px rgba(31, 35, 65, 0.08), 0 0 0 0.5px rgba(0, 0, 0, 0.045);
+}
+
+.fc-root .fc-collection-idx {
+  flex: none;
+  width: 16px;
+  height: 16px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 50%;
+  background: color-mix(in srgb, var(--node-accent, var(--accent)) 14%, transparent);
+  color: var(--node-accent, var(--accent));
+  font-size: 10px;
+  font-weight: 700;
+}
+
+.fc-root .fc-collection-thumb {
+  flex: none;
+  width: 34px;
+  height: 26px;
+  border-radius: 6px;
+  overflow: hidden;
+}
+
+.fc-root .fc-collection-text {
+  flex: 1;
+  min-width: 0;
+  font-size: 11px;
+  color: var(--text-primary);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.fc-root .fc-collection-text.is-empty {
+  color: var(--text-tertiary);
+  font-style: italic;
+}
+
+.fc-root .fc-collection-handle {
+  flex: none;
+  margin-left: auto;
+  width: 20px;
+  height: 22px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  border: none;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--text-tertiary);
+  cursor: grab;
+  touch-action: none;
+}
+
+.fc-root .fc-collection-handle:hover {
+  background: rgba(0, 0, 0, 0.05);
+  color: var(--text-secondary);
+}
+
+.fc-root .fc-collection-handle:active {
+  cursor: grabbing;
+}
+
+.fc-root .fc-collection-handle svg {
+  width: 13px;
+  height: 13px;
+}
+
+.fc-root .fc-collection-remove {
+  flex: none;
+  width: 20px;
+  height: 22px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  border: none;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--text-tertiary);
+  cursor: pointer;
+  opacity: 0;
+  transition: opacity 0.12s ease;
+}
+
+.fc-root .fc-collection-item:hover .fc-collection-remove,
+.fc-root .fc-collection-remove:focus-visible {
+  opacity: 1;
+}
+
+.fc-root .fc-collection-remove:hover {
+  background: rgba(0, 0, 0, 0.05);
+  color: var(--text-primary);
+}
+
+.fc-root .fc-collection-remove svg {
+  width: 10px;
+  height: 10px;
+}
+
+[data-theme="dark"] .fc-root .fc-collection-item {
+  background: rgba(255, 255, 255, 0.08);
+  box-shadow: inset 0 0.5px 0 rgba(255, 255, 255, 0.06), 0 0 0 0.5px rgba(255, 255, 255, 0.1);
+}
+
+[data-theme="dark"] .fc-root .fc-collection-handle:hover,
+[data-theme="dark"] .fc-root .fc-collection-remove:hover {
+  background: rgba(255, 255, 255, 0.08);
+}
+
 /* 保存节点：产物条目（缩略图/文件名 + 单张另存）。 */
 .fc-save-item {
   display: inline-flex;

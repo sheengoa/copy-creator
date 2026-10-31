@@ -808,6 +808,9 @@
       "preview_image": "Preview Image",
       "preview_video": "Preview Video",
       "preview_audio": "Preview Audio",
+      "collection_image": "Image Collection",
+      "collection_text": "Text Collection",
+      "collection_video": "Video Collection",
       "note": "Note"
     },
     "port": {
@@ -819,6 +822,7 @@
     "menu": {
       "gen": "Generate",
       "load": "Load",
+      "collection": "Collection",
       "output": "Output",
       "misc": "Other"
     },
@@ -836,6 +840,9 @@
       "preview_image": "Show upstream image, dblclick to zoom",
       "preview_video": "Play upstream video",
       "preview_audio": "Play upstream audio",
+      "collection_image": "Feed multiple images to gen in order",
+      "collection_text": "Join multiple texts in order",
+      "collection_video": "Collect multiple videos in order",
       "note": "Double-click to edit"
     },
     "pathPlaceholder": "Resource Path",
@@ -870,6 +877,9 @@
     "loadEmpty": "No media loaded",
     "clearLoaded": "Remove loaded file",
     "waitingUpstream": "Connected — waiting for upstream output",
+    "collectionEmpty": "Connect multiple nodes to start a collection",
+    "collectionItemEmpty": "(nothing loaded)",
+    "collectionSortHint": "Drag up/down to reorder",
     "previewEmpty": "No upstream connected",
     "previewOpen": "Double-click to zoom",
     "saveToLibrary": "Save to library",

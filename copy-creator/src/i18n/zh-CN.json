@@ -804,6 +804,9 @@
       "preview_image": "预览图像",
       "preview_video": "预览视频",
       "preview_audio": "预览音频",
+      "collection_image": "图像合集",
+      "collection_text": "文本合集",
+      "collection_video": "视频合集",
       "note": "便签"
     },
     "port": {
@@ -815,6 +818,7 @@
     "menu": {
       "gen": "生成",
       "load": "加载",
+      "collection": "合集",
       "output": "输出",
       "misc": "其他"
     },
@@ -832,6 +836,9 @@
       "preview_image": "展示上游图像，双击放大",
       "preview_video": "播放上游视频",
       "preview_audio": "播放上游音频",
+      "collection_image": "多图按序喂给生成节点",
+      "collection_text": "多段文本按序拼接",
+      "collection_video": "多段视频按序合集",
       "note": "双击编辑的画布备注"
     },
     "pathPlaceholder": "资源路径",
@@ -866,6 +873,9 @@
     "loadEmpty": "未加载媒体",
     "clearLoaded": "移除已加载文件",
     "waitingUpstream": "已连接上游，等待产物",
+    "collectionEmpty": "连接多个节点开始合集",
+    "collectionItemEmpty": "（未加载内容）",
+    "collectionSortHint": "按住上下拖动排序",
     "previewEmpty": "未连接上游",
     "previewOpen": "双击放大查看",
     "saveToLibrary": "保存到资源库",
