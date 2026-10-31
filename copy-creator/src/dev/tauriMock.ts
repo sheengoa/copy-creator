@@ -73,7 +73,10 @@ interface MockAsset {
 }
 
 const ts = () => new Date().toISOString();
-let seq = 1;
+// id 计数从 100 起跳：初始样例数据的手写 id（nl-m1、nl-m2、seg-1…）占用
+// 了低位段，运行期新生成的 id 撞上会让「删一行/React key」错乱到另一行
+// （实测：新连线与初始连线同 id，摘一条删掉两条）。
+let seq = 100;
 const nextId = (prefix: string) => `${prefix}-m${seq++}`;
 
 // ── 内存数据库：一剧一集，覆盖八类节点与两类连线的最小样例 ──

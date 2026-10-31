@@ -2078,6 +2078,7 @@ export default function ProjectCanvas({
         if (outKey.startsWith("script:")) {
           // 剧本纸片的连线不入库（后端剧本连线以集为锚），落画布暂存线。
           const segId = inKey.slice(8);
+          displacePortLinks(segId, port.id, { pendingFromKey: outKey });
           persistPendingLinks([
             ...pendingLinks.filter((l) => !(l.fromKey === outKey && l.toSegmentId === segId && l.toPort === port.id)),
             { fromKey: outKey, toSegmentId: segId, toPort: port.id },
@@ -2088,9 +2089,11 @@ export default function ProjectCanvas({
         if (!source) {
           // 空白资料/提示词纸片源没有库身份（nodeKeyParts 解析不出）：
           // 正式线无处可落，改记画布暂存线，加载实体后照常转正（提示词
-          // 纸片始终画布层记忆，暂存线即最终形态）。
+          // 纸片始终画布层记忆，暂存线即最终形态）。反拖落到已有他人线
+          // 的资料口＝新来源占口，顶掉既有线（保留自己的暂存线）。
           const segId = inKey.slice(8);
           if (outKey.startsWith("eph:") || outKey.startsWith("prompt:")) {
+            displacePortLinks(segId, port.id, { pendingFromKey: outKey });
             persistPendingLinks([
               ...pendingLinks.filter((l) => !(l.fromKey === outKey && l.toSegmentId === segId && l.toPort === port.id)),
               { fromKey: outKey, toSegmentId: segId, toPort: port.id },
@@ -2108,7 +2111,7 @@ export default function ProjectCanvas({
         return;
       }
     },
-    [episodeId, nodeKeyParts, portsOf, linkNode, setEpisodeOutput, pendingLinks, persistPendingLinks],
+    [episodeId, nodeKeyParts, portsOf, linkNode, setEpisodeOutput, pendingLinks, persistPendingLinks, displacePortLinks],
   );
 
   // ── 场景框位置：scenes.canvas 之外再叠一层本地偏移（拖标签牌实时） ──
@@ -4166,10 +4169,29 @@ export default function ProjectCanvas({
       // 占位节点的暂存线随加载转正：组内每个成员各落一条 node_link
       // （owner 记组身份，组删线/找组口按此精确匹配）。转正落到资料口
       // 时先顶掉口上既有来源——占位在口上挂着，实体加载后正式接上，
-      // 原来占着这个口的其他来源被替换（后连顶先连）。
+      // 原来占着这个口的其他来源被替换（后连顶先连）。顶掉的既有线
+      // （他人正式行 + 他人暂存线）在这里一次性合并删除：同块逐口调用
+      // displace 的话，多次 persistPendingLinks 基于同一闭包旧值会互相
+      // 覆盖。
       const ephKey = `eph:${ph.id}`;
       const myPending = pendingLinks.filter((l) => l.fromKey === ephKey);
-      myPending.forEach((l) => displacePortLinks(l.toSegmentId, l.toPort, { pendingFromKey: ephKey }));
+      myPending.forEach((l) => {
+        if (!ENTITY_PORTS.has(l.toPort)) return;
+        (overview?.node_links ?? [])
+          .filter((row) => row.to_segment === l.toSegmentId && row.to_port === l.toPort)
+          .forEach((row) => {
+            void unlinkNode(row.from_kind, row.from_id, row.to_segment, row.to_port, row.owner_key);
+          });
+      });
+      const displacedStale = pendingLinks.filter(
+        (l) =>
+          l.fromKey !== ephKey &&
+          ENTITY_PORTS.has(l.toPort) &&
+          myPending.some((m) => m.toSegmentId === l.toSegmentId && m.toPort === l.toPort),
+      );
+      if (displacedStale.length) {
+        persistPendingLinks(pendingLinks.filter((l) => !displacedStale.includes(l)));
+      }
       for (const l of myPending) {
         for (const memberId of pending) {
           await linkNode(episodeId, pick.kind, memberId, l.toSegmentId, l.toPort as ProjectNodeLink["to_port"], `grp:${groupId}`);
@@ -4222,7 +4244,7 @@ export default function ProjectCanvas({
   }, [
     memberPick, episodeId, entityPhs, infoNodePos, infoOffsets, persistInfoOffsets, persistEntityPhs,
     infoGroups, persistInfoGroups, associateEntities, groupWiredPorts, linkNode, overview,
-    unlinkEntityLinks, pendingLinks, persistPendingLinks, displacePortLinks,
+    unlinkEntityLinks, pendingLinks, persistPendingLinks, ENTITY_PORTS, unlinkNode,
   ]);
 
   const detailDialog = (() => {
@@ -5511,6 +5533,17 @@ export default function ProjectCanvas({
                             if (event.button !== 0) return;
                             event.stopPropagation();
                             event.preventDefault();
+                            // 立即捕获指针：菜单按钮随 setAddMenu(null) 卸载，
+                            // 卸载后浏览器释放捕获，pointerup 按 hit-test 落到
+                            // 视口、照常冒泡给 document 的 onUp 收尾（落节点
+                            // /摘线转接）。不捕获的话，按住拖到窗外松手或松
+                            // 手恰逢按钮已卸载，up 丢失会让「摘下的线」永久
+                            // 悬空——无菜单可取消、无口可放回。
+                            try {
+                              event.currentTarget.setPointerCapture(event.pointerId);
+                            } catch {
+                              // 指针已不可捕获（合成事件等）：退化为无捕获。
+                            }
                             dragRef.current = {
                               kind: "addnode", sx: event.clientX, sy: event.clientY, moved: false,
                               fox: addMenu.wx, foy: addMenu.wy, frameKey: item.key,
