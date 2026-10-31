@@ -81,7 +81,7 @@ export default function CanvasPage() {
     const ro = new ResizeObserver(check);
     ro.observe(el);
     return () => ro.disconnect();
-  }, [canvases.length]);
+  }, [canvases]);
 
   // 「更多」弹层点外即关。
   useEffect(() => {

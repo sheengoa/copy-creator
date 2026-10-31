@@ -2,8 +2,11 @@ import { useState } from "react";
 import { useTranslation } from "react-i18next";
 import { useSettingsStore } from "../../stores/settingsStore";
 
-// AI 生图配置区（画布区方案 3.4）：自持久化——每项改动即落库，不走设置页
+// AI 生图配置区（画布区方案 3.4）：自持久化——失焦即落库，不走设置页
 // 统一保存按钮（Key 类配置改完即生效，避免「忘了点保存」的排查成本）。
+// 输入不用 onChange 逐键落库：受控值依赖异步 IPC 回写 store，快速输入
+// 长 Key 会吃字；超时输入逐键钳制还会把「30」拆成「5…」。失焦提交 +
+// key 随值重挂（接收外部装载/切换刷新），与画布节点参数输入同惯例。
 // Key 明文本机存储，与既有 google_api_key 同级安全。
 export function AiImageSection() {
   const { t } = useTranslation();
@@ -11,14 +14,14 @@ export function AiImageSection() {
   const [showOpenaiKey, setShowOpenaiKey] = useState(false);
   const [showGeminiKey, setShowGeminiKey] = useState(false);
 
-  const input = (value: string, onChange: (v: string) => void, type = "text") => (
+  const input = (value: string, onCommit: (v: string) => void, type = "text") => (
     <input
       className="settings-ai-input"
       type={type}
-      value={value}
+      key={value}
+      defaultValue={value}
       spellCheck={false}
-      onChange={(e) => onChange(e.target.value)}
-      onBlur={() => onChange(value.trim())}
+      onBlur={(e) => onCommit(e.target.value.trim())}
     />
   );
 
