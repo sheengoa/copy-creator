@@ -3,9 +3,25 @@ import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 
 // 画布域（自由生图工作流）：与 Rust db/canvas.rs 的 serde 结构一一对应。
-// 连线语义（方案 v2）：多入线、按类型分组累积，UNIQUE 仅防同源重复平行线。
+// 节点体系 v2（2026-10-31 用户定案）：生成（gen_x）/ 加载（load_x）/
+// 输出（save_x / preview_x）三类链路 + 便签；连线带落点端口 to_port，
+// 类型匹配校验在前端（accepts 矩阵），DB 层仅防同源重复。
 
-export type CanvasNodeType = "text" | "image" | "ref" | "note";
+export type CanvasNodeType =
+  | "gen_image"
+  | "gen_video"
+  | "gen_audio"
+  | "load_text"
+  | "load_image"
+  | "load_audio"
+  | "load_video"
+  | "save_image"
+  | "save_video"
+  | "save_audio"
+  | "preview_image"
+  | "preview_video"
+  | "preview_audio"
+  | "note";
 
 export interface ImageGenParams {
   model: string;
@@ -23,17 +39,35 @@ export interface GeneratedImage {
   primary: boolean;
 }
 
+/** 保存节点状态：target = "library"（入库）或 "path"（外部另存）。 */
+export type SaveMediaMeta = {
+  status: "" | "saved" | "error" | string;
+  error: string;
+  target: string;
+  saved_path: string;
+};
+
 export type NodeMeta =
-  | { kind: "text"; content: string }
   | { kind: "note"; content: string }
-  | { kind: "ref" }
+  | { kind: "load_text"; content: string }
+  | { kind: "load_image" }
+  | { kind: "load_video" }
+  | { kind: "load_audio" }
   | {
-      kind: "image";
+      kind: "gen_image";
       params: ImageGenParams;
       status: ImageNodeStatus;
       error: string;
       images: GeneratedImage[];
-    };
+    }
+  | { kind: "gen_video"; params: ImageGenParams; status: ImageNodeStatus; error: string }
+  | { kind: "gen_audio"; params: ImageGenParams; status: ImageNodeStatus; error: string }
+  | ({ kind: "save_image" } & SaveMediaMeta)
+  | ({ kind: "save_video" } & SaveMediaMeta)
+  | ({ kind: "save_audio" } & SaveMediaMeta)
+  | { kind: "preview_image" }
+  | { kind: "preview_video" }
+  | { kind: "preview_audio" };
 
 /** 节点分组（Ctrl+G，ComfyUI Group 对应物）：与 Rust CanvasNodeGroup
  *  一一对应。框无独立坐标——渲染时自适应成员包围盒，成员删除由前端
@@ -90,6 +124,8 @@ export interface CanvasConnection {
   canvas_id: string;
   from_node: string;
   to_node: string;
+  /** 落点输入口 id（如 "text"/"image"）；v4 迁移回填，空串 = 无口语义。 */
+  to_port: string;
   created_at: string;
 }
 
@@ -164,9 +200,10 @@ interface CanvasState {
   deleteNode: (id: string) => Promise<void>;
   /** 分组整体写入（打组/解组）：本地即时更新 + 后端全量替换。 */
   setGroups: (id: string, groups: CanvasGroup[]) => Promise<void>;
-  connect: (canvasId: string, fromNode: string, toNode: string) => Promise<CanvasConnection | null>;
-  /** 摘线换目标：后端合并语义下返回行 id 可能不同于入参 id。 */
-  rewire: (id: string, toNode: string) => Promise<CanvasConnection | null>;
+  /** 建连线：toPort 记落点输入口（类型匹配校验在前端）。 */
+  connect: (canvasId: string, fromNode: string, toNode: string, toPort: string) => Promise<CanvasConnection | null>;
+  /** 摘线换目标（含换口）：后端合并语义下返回行 id 可能不同于入参 id。 */
+  rewire: (id: string, toNode: string, toPort: string) => Promise<CanvasConnection | null>;
   deleteConnection: (id: string) => Promise<void>;
   /** 发起生成：返回 requestId 供取消；前端禁用/提示由调用方据返回与状态处理。 */
   generateImage: (canvasId: string, nodeId: string) => Promise<string | null>;
@@ -261,7 +298,7 @@ export const useCanvasStore = create<CanvasState>((set, get) => ({
           if (progress.canvasId !== id) stillGenerating[nodeId] = progress;
           continue;
         }
-        if (node.metadata.kind === "image" && node.metadata.status === "generating") {
+        if (node.metadata.kind === "gen_image" && node.metadata.status === "generating") {
           stillGenerating[nodeId] = progress;
         }
       }
@@ -397,12 +434,13 @@ export const useCanvasStore = create<CanvasState>((set, get) => ({
     }
   },
 
-  connect: async (canvasId, fromNode, toNode) => {
+  connect: async (canvasId, fromNode, toNode, toPort) => {
     try {
       const conn = await invoke<CanvasConnection>("canvas_connect", {
         canvasId,
         fromNode,
         toNode,
+        toPort,
       });
       set({
         // 同 id upsert：同源重复时后端返回既有行。
@@ -418,9 +456,9 @@ export const useCanvasStore = create<CanvasState>((set, get) => ({
     }
   },
 
-  rewire: async (id, toNode) => {
+  rewire: async (id, toNode, toPort) => {
     try {
-      const conn = await invoke<CanvasConnection>("canvas_rewire", { id, toNode });
+      const conn = await invoke<CanvasConnection>("canvas_rewire", { id, toNode, toPort });
       if (conn.id === id) {
         set({
           connections: get().connections.map((item) => (item.id === id ? conn : item)),
@@ -471,7 +509,7 @@ export const useCanvasStore = create<CanvasState>((set, get) => ({
     // 发起即建进度条目（后端在 generating 落库后也发 canvas-changed，
     // openCanvas 的裁剪会保留仍 generating 的条目）。
     const node = get().nodes.find((n) => n.id === nodeId);
-    const total = node?.metadata.kind === "image" ? node.metadata.params.count : 1;
+    const total = node?.metadata.kind === "gen_image" ? node.metadata.params.count : 1;
     set({
       genProgress: {
         ...get().genProgress,

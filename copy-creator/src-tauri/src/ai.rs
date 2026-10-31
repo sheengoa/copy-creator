@@ -949,7 +949,10 @@ pub async fn ai_generate_image(app: AppHandle, canvas_id: String, node_id: Strin
         .filter(|e| e.as_str() != "__cancelled__")
         .collect();
 
-    // 产物落库：临时文件 → import_file_into_library → images[] 元数据。
+    // 产物落托管暂存目录（不再自动入库，2026-10-31 节点体系 v2）：由
+    // 「保存图像」节点决定去向（canvas_save_to_library 入库 / 另存到
+    // 任意路径）。托管目录在应用管理目录内，媒体服务白名单直接放行；
+    // resource_path 记绝对路径（保存/预览节点直接用）。
     let canvas_name: String = {
         let state = app.state::<DbState>();
         let conn = state.conn.lock().map_err(|e| e.to_string())?;
@@ -957,6 +960,11 @@ pub async fn ai_generate_image(app: AppHandle, canvas_id: String, node_id: Strin
             .unwrap_or_else(|_| "画布".to_string())
     };
     let node_name = if node_title.trim().is_empty() { "图片".to_string() } else { node_title.trim().to_string() };
+    let gen_dir = {
+        let dir = crate::db::get_storage_dir(&app).join("canvas-gen");
+        std::fs::create_dir_all(&dir).map_err(|e| format!("创建产物目录失败：{e}"))?;
+        dir
+    };
     let mut saved: Vec<Value> = Vec::new();
     for (idx, ok) in successes.iter().enumerate() {
         let data_url = ok.data_url.clone().unwrap();
@@ -968,21 +976,18 @@ pub async fn ai_generate_image(app: AppHandle, canvas_id: String, node_id: Strin
             }
         };
         let ext = if mime.contains("jpeg") { "jpg" } else if mime.contains("webp") { "webp" } else { "png" };
-        let tmp = std::env::temp_dir().join(format!("copy-creator-gen-{}-{}.{}", uuid::Uuid::new_v4(), idx, ext));
-        std::fs::write(&tmp, &bytes).map_err(|e| format!("写入临时文件失败：{e}"))?;
-        let dims = image::io::Reader::open(&tmp)
+        let file = gen_dir.join(format!("{}-{}.{}", uuid::Uuid::new_v4(), idx, ext));
+        std::fs::write(&file, &bytes).map_err(|e| format!("写入产物失败：{e}"))?;
+        let dims = image::io::Reader::open(&file)
             .and_then(|r| r.with_guessed_format())
             .map_err(|e| e.to_string())
             .and_then(|r| r.into_dimensions().map_err(|e| e.to_string()))
             .map(|d| (d.0 as i64, d.1 as i64))
             .unwrap_or((0, 0));
-        let (rel_path, _kind, _name) =
-            crate::db::import_file_into_library(&app, tmp.to_string_lossy().as_ref())?;
-        let _ = std::fs::remove_file(&tmp);
         saved.push(json!({
             "width": dims.0, "height": dims.1,
             "bytes": bytes.len() as i64,
-            "resource_path": rel_path,
+            "resource_path": file.to_string_lossy(),
             "primary": idx == 0,
         }));
     }

@@ -40,13 +40,13 @@ const makeSummary = (overrides: Partial<CanvasSummary> = {}): CanvasSummary => (
 const makeNode = (overrides: Partial<CanvasNode> = {}): CanvasNode => ({
   id: "n1",
   canvas_id: "c1",
-  type: "text",
+  type: "load_text",
   title: "",
   pos_x: 0,
   pos_y: 0,
   width: null,
   height: null,
-  metadata: { kind: "text", content: "" },
+  metadata: { kind: "load_text", content: "" },
   resource_path: "",
   created_at: "2026-10-31T00:00:00Z",
   updated_at: "2026-10-31T00:00:00Z",
@@ -58,6 +58,7 @@ const makeConn = (overrides: Partial<CanvasConnection> = {}): CanvasConnection =
   canvas_id: "c1",
   from_node: "n1",
   to_node: "n2",
+  to_port: "text",
   created_at: "2026-10-31T00:00:00Z",
   ...overrides,
 });
@@ -136,20 +137,20 @@ describe("canvasStore 画布域 wiring", () => {
   });
 
   it("createNode 以 camelCase 参数落库并插入本地", async () => {
-    const node = makeNode({ id: "n9", type: "image" });
+    const node = makeNode({ id: "n9", type: "gen_image" });
     invokeMock.mockResolvedValue(node);
     useCanvasStore.setState({ activeCanvasId: "c1", nodes: [] });
 
     const result = await useCanvasStore.getState().createNode({
       canvasId: "c1",
-      nodeType: "image",
+      nodeType: "gen_image",
       posX: 100,
       posY: 200,
     });
 
     expect(invokeMock).toHaveBeenCalledWith("canvas_create_node", {
       canvasId: "c1",
-      nodeType: "image",
+      nodeType: "gen_image",
       title: "",
       posX: 100,
       posY: 200,
@@ -185,12 +186,13 @@ describe("canvasStore 画布域 wiring", () => {
       connections: [existing],
     });
 
-    await useCanvasStore.getState().connect("c1", "n1", "n2");
+    await useCanvasStore.getState().connect("c1", "n1", "n2", "text");
 
     expect(invokeMock).toHaveBeenCalledWith("canvas_connect", {
       canvasId: "c1",
       fromNode: "n1",
       toNode: "n2",
+      toPort: "text",
     });
     expect(useCanvasStore.getState().connections).toHaveLength(1);
   });
@@ -204,9 +206,9 @@ describe("canvasStore 画布域 wiring", () => {
       connections: [moved, existing],
     });
 
-    await useCanvasStore.getState().rewire("w-move", "n2");
+    await useCanvasStore.getState().rewire("w-move", "n2", "text");
 
-    expect(invokeMock).toHaveBeenCalledWith("canvas_rewire", { id: "w-move", toNode: "n2" });
+    expect(invokeMock).toHaveBeenCalledWith("canvas_rewire", { id: "w-move", toNode: "n2", toPort: "text" });
     const connections = useCanvasStore.getState().connections;
     expect(connections.map((c) => c.id)).toEqual(["w-existing"]);
   });
@@ -290,7 +292,7 @@ describe("canvasStore 画布域 wiring", () => {
   });
 
   it("updateNode 以返回行替换本地节点", async () => {
-    const updated = makeNode({ title: "新标题", metadata: { kind: "text", content: "正文" } });
+    const updated = makeNode({ title: "新标题", metadata: { kind: "load_text", content: "正文" } });
     invokeMock.mockResolvedValue(updated);
     useCanvasStore.setState({ activeCanvasId: "c1", nodes: [makeNode()] });
 
@@ -332,8 +334,8 @@ describe("canvasStore 画布域 wiring", () => {
     invokeMock.mockResolvedValue({ requestId: "req-1", status: "generating" });
     const imageNode = makeNode({
       id: "img1",
-      type: "image",
-      metadata: { kind: "image", params: { model: "", size: "", count: 3 }, status: "idle", error: "", images: [] },
+      type: "gen_image",
+      metadata: { kind: "gen_image", params: { model: "", size: "", count: 3 }, status: "idle", error: "", images: [] },
     });
     useCanvasStore.setState({ activeCanvasId: "c1", nodes: [imageNode] });
 
@@ -347,7 +349,7 @@ describe("canvasStore 画布域 wiring", () => {
 
   it("generateImage 发起失败上抛（无提示词来源等）", async () => {
     invokeMock.mockRejectedValue("没有提示词来源");
-    const imageNode = makeNode({ id: "img1", type: "image" });
+    const imageNode = makeNode({ id: "img1", type: "gen_image" });
     useCanvasStore.setState({ activeCanvasId: "c1", nodes: [imageNode] });
 
     await expect(useCanvasStore.getState().generateImage("c1", "img1")).rejects.toThrow();
@@ -375,8 +377,8 @@ describe("canvasStore 画布域 wiring", () => {
   it("openCanvas 裁剪掉已结束节点的进度条目", async () => {
     const doneNode = makeNode({
       id: "img1",
-      type: "image",
-      metadata: { kind: "image", params: { model: "", size: "", count: 1 }, status: "done", error: "", images: [] },
+      type: "gen_image",
+      metadata: { kind: "gen_image", params: { model: "", size: "", count: 1 }, status: "done", error: "", images: [] },
     });
     const graph: CanvasGraph = {
       canvas: { id: "c1", name: "画布一", viewport_x: 0, viewport_y: 0, viewport_k: 1, groups: [], created_at: "", updated_at: "" },

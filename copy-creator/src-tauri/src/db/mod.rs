@@ -1301,7 +1301,7 @@ fn ensure_column(conn: &Connection, table: &str, column: &str, definition: &str)
 /// 当前 schema 版本。新增结构迁移（增列、历史数据回填/清退）时把版本 +1
 /// 并把步骤加进 run_schema_migrations；已升级的库启动时整段跳过——此前
 /// 全部步骤每次启动幂等重跑，启动成本随迁移数量线性增长。
-const SCHEMA_VERSION: i32 = 3;
+const SCHEMA_VERSION: i32 = 4;
 
 fn schema_version(conn: &Connection) -> i32 {
     conn.query_row("PRAGMA user_version", [], |row| row.get(0))
@@ -1614,6 +1614,81 @@ fn run_schema_migrations(conn: &Connection) -> Result<(), Box<dyn std::error::Er
             fk_back.map_err(|e| format!("恢复 foreign_keys 失败: {e}"))?;
             log::info!("已重建 project_node_links：UNIQUE 约束扩到 owner_key");
         }
+    }
+
+    // ── v4：画布节点体系 v2——生成/加载/输出三类链路（2026-10-31） ──
+    {
+        // 1) 连线落点端口列：类型化端口语义（gen_image 的 text/image 口等）。
+        ensure_column(conn, "canvas_connections", "to_port", "TEXT NOT NULL DEFAULT ''");
+
+        // 2) 旧节点类型一次性映射：text→load_text、ref→load_image、
+        //    image→gen_image，metadata kind 随类型改写（字段结构不变）。
+        //    幂等：WHERE 限定旧类型，迁移后无旧类型行，重跑为空操作。
+        let legacy_rows: Vec<(String, String, String)> = {
+            let mut stmt = conn
+                .prepare("SELECT id, type, metadata FROM canvas_nodes WHERE type IN ('text','ref','image')")
+                .map_err(|e| e.to_string())?;
+            let mapped = stmt
+                .query_map([], |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)))
+                .map_err(|e| e.to_string())?
+                .collect::<Result<Vec<_>, _>>()
+                .map_err(|e| e.to_string())?;
+            mapped
+        };
+        for (id, node_type, raw) in &legacy_rows {
+            let id = id.clone();
+            let node_type = node_type.clone();
+            let raw = raw.clone();
+            let meta = crate::db::canvas::parse_node_meta_lenient(&node_type, &raw);
+            let converted = match (&node_type[..], meta) {
+                ("text", crate::db::canvas::NodeMeta::Text { content }) => {
+                    ("load_text", crate::db::canvas::NodeMeta::LoadText { content })
+                }
+                ("text", _) => (
+                    "load_text",
+                    crate::db::canvas::NodeMeta::LoadText { content: String::new() },
+                ),
+                ("ref", _) => ("load_image", crate::db::canvas::NodeMeta::LoadImage {}),
+                ("image", crate::db::canvas::NodeMeta::Image { params, status, error, images }) => (
+                    "gen_image",
+                    crate::db::canvas::NodeMeta::GenImage { params, status, error, images },
+                ),
+                ("image", _) => (
+                    "gen_image",
+                    crate::db::canvas::NodeMeta::default_for("gen_image")
+                        .map_err(|e| e.to_string())?,
+                ),
+                _ => continue,
+            };
+            let serialized = serde_json::to_string(&converted.1).map_err(|e| e.to_string())?;
+            conn.execute(
+                "UPDATE canvas_nodes SET type = ?1, metadata = ?2 WHERE id = ?3",
+                rusqlite::params![converted.0, serialized, id],
+            )
+            .map_err(|e| e.to_string())?;
+        }
+        if !legacy_rows.is_empty() {
+            log::info!("画布旧节点已迁移：{} 行（text→load_text、ref→load_image、image→gen_image）", legacy_rows.len());
+        }
+
+        // 3) 旧连线落点口回填：按两端类型推导（文本→生成落 text 口，
+        //    加载图像→图像生成落 image 口）。幂等：to_port='' 限定。
+        conn.execute(
+            "UPDATE canvas_connections SET to_port = 'text' \
+             WHERE to_port = '' \
+               AND from_node IN (SELECT id FROM canvas_nodes WHERE type = 'load_text') \
+               AND to_node IN (SELECT id FROM canvas_nodes WHERE type IN ('gen_image','gen_video','gen_audio'))",
+            [],
+        )
+        .map_err(|e| e.to_string())?;
+        conn.execute(
+            "UPDATE canvas_connections SET to_port = 'image' \
+             WHERE to_port = '' \
+               AND from_node IN (SELECT id FROM canvas_nodes WHERE type = 'load_image') \
+               AND to_node IN (SELECT id FROM canvas_nodes WHERE type IN ('gen_image'))",
+            [],
+        )
+        .map_err(|e| e.to_string())?;
     }
 
     Ok(())

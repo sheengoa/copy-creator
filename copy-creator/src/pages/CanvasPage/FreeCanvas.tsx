@@ -3,8 +3,11 @@ import { useTranslation } from "react-i18next";
 import { invoke } from "@tauri-apps/api/core";
 import { getCurrentWebview } from "@tauri-apps/api/webview";
 import { Icons } from "../../components/Icons";
+import { ImageLightbox } from "../../components/ImageLightbox";
 import { openResourceFile } from "../../domain/mediaAssets";
 import { resolveResourceMediaUrl } from "../../domain/mediaUrl";
+import ProjectFilePickerDialog from "../ResourcePage/ProjectFilePickerDialog";
+import { ResourceMediaPlayer } from "../ResourcePage/ResourceMedia";
 import { useSettingsStore } from "../../stores/settingsStore";
 import { resolveWireRelease } from "../../utils/projectWireRelease";
 import {
@@ -14,13 +17,12 @@ import {
   type CanvasNodeType,
 } from "../../stores/canvasStore";
 
-// 自由生图画布（画布区方案 3.3）：以 ProjectCanvas 为基座 fork——引擎框架
-// （视口平移/缩放/滚轮非被动监听/聚焦滚动归零、nodeMetrics 节点实测锚点、
-// wirePathD 贝塞尔、视口裁切连线层、ComfyUI 连线手势状态机、Blender 切线
-// 与切痕层、框选、四角尺寸手柄、双击建节点菜单、出生锚点脉冲、统一双击
-// 判定）自工程画布零改动搬运；连线落点按「节点级引用」语义重写（每节点
-// 右侧一个输出口、左侧一个输入位，多入线按类型分组累积，无端口体系）。
-// 数据全部走 canvasStore（SQLite），视口/布局防抖落盘。
+// 自由生图工作流画布（画布区方案 3.3 + 节点体系 v2）：以 ProjectCanvas 为
+// 基座 fork——引擎框架（视口/连线/切线/框选/分组/菜单）自工程画布搬运；
+// 连线为「类型化端口」语义（用户 2026-10-31 定案）：生成/加载/输出三类
+// 链路，多输入口 + 口名常显 + 类型匹配校验（accepts 矩阵），生成节点的
+// 生成前提 = 文本口已连非空文本 + 输出口已连保存/预览。产物由保存节点
+// 决定去向（入库 / 另存任意路径），生成节点只暂存在托管目录。
 
 const ZOOM_MIN = 0.3;
 const ZOOM_MAX = 2.2;
@@ -29,39 +31,136 @@ const MINI_W = 150;
 const MINI_H = 96;
 const UNDO_LIMIT = 50;
 
-/** 建节点落库的默认尺寸（画布区节点视觉标准，B+ 通透玻璃稿定案）：
- *  高度不落库 = 内容自适应撑开（消灭固定高的大空白）；text 正文是
- *  常驻编辑框需固定高。用户拖过尺寸手柄后 height 落库转固定。 */
+/** 建节点落库的默认尺寸（B+ 视觉标准）：高度不落库 = 内容自适应撑开；
+ *  text 类节点正文是常驻编辑框需固定高。拖过尺寸手柄后 height 落库转固定。 */
 const NODE_DEFAULT_SIZE: Record<CanvasNodeType, { w: number; h: number | null }> = {
-  text: { w: 260, h: 170 },
+  gen_image: { w: 280, h: null },
+  gen_video: { w: 280, h: null },
+  gen_audio: { w: 260, h: null },
+  load_text: { w: 260, h: null },
+  load_image: { w: 260, h: null },
+  load_video: { w: 280, h: null },
+  load_audio: { w: 260, h: null },
+  save_image: { w: 250, h: null },
+  save_video: { w: 280, h: null },
+  save_audio: { w: 260, h: null },
+  preview_image: { w: 320, h: null },
+  preview_video: { w: 360, h: null },
+  preview_audio: { w: 280, h: null },
   note: { w: 220, h: null },
-  image: { w: 280, h: null },
-  ref: { w: 260, h: null },
 };
 
 /** 连线锚点在 nodeMetrics 实测前的兜底尺寸（实测优先，常量只是首帧）。 */
 const NODE_FALLBACK_SIZE: Record<CanvasNodeType, { w: number; h: number }> = {
-  text: { w: 260, h: 170 },
+  gen_image: { w: 280, h: 300 },
+  gen_video: { w: 280, h: 240 },
+  gen_audio: { w: 260, h: 180 },
+  load_text: { w: 260, h: 150 },
+  load_image: { w: 260, h: 220 },
+  load_video: { w: 280, h: 220 },
+  load_audio: { w: 260, h: 140 },
+  save_image: { w: 250, h: 170 },
+  save_video: { w: 280, h: 150 },
+  save_audio: { w: 260, h: 130 },
+  preview_image: { w: 320, h: 260 },
+  preview_video: { w: 360, h: 240 },
+  preview_audio: { w: 280, h: 130 },
   note: { w: 220, h: 120 },
-  image: { w: 280, h: 320 },
-  ref: { w: 260, h: 200 },
 };
 
 /** 各类型缩放下限（对齐工程画布 resize 分类型的 minW/minH 惯例）。 */
 const NODE_MIN_SIZE: Record<CanvasNodeType, { w: number; h: number }> = {
-  text: { w: 180, h: 120 },
+  gen_image: { w: 200, h: 180 },
+  gen_video: { w: 200, h: 160 },
+  gen_audio: { w: 180, h: 130 },
+  load_text: { w: 180, h: 120 },
+  load_image: { w: 160, h: 140 },
+  load_video: { w: 180, h: 140 },
+  load_audio: { w: 180, h: 110 },
+  save_image: { w: 180, h: 130 },
+  save_video: { w: 180, h: 120 },
+  save_audio: { w: 180, h: 110 },
+  preview_image: { w: 200, h: 160 },
+  preview_video: { w: 220, h: 160 },
+  preview_audio: { w: 180, h: 110 },
   note: { w: 120, h: 80 },
-  image: { w: 180, h: 200 },
-  ref: { w: 150, h: 120 },
 };
 
-/** 节点类型色通道（连线取上游节点色，对齐工程画布「线色跟来源」惯例）。 */
-const NODE_ACCENT: Record<CanvasNodeType, string> = {
+/** 媒体类型色（节点 accent / 线色 / 端口点色同源：线色跟上游类型）。 */
+const MEDIA_COLOR: Record<"text" | "image" | "video" | "audio", string> = {
   text: "#007AFF",
   image: "#AF52DE",
-  ref: "#34C759",
+  video: "#FF2D55",
+  audio: "#FF9500",
+};
+
+/** 节点类型色通道（B+ 视觉标准）：按所属媒体链路取色。 */
+const NODE_ACCENT: Record<CanvasNodeType, string> = {
+  gen_image: MEDIA_COLOR.image,
+  gen_video: MEDIA_COLOR.video,
+  gen_audio: MEDIA_COLOR.audio,
+  load_text: MEDIA_COLOR.text,
+  load_image: MEDIA_COLOR.image,
+  load_video: MEDIA_COLOR.video,
+  load_audio: MEDIA_COLOR.audio,
+  save_image: MEDIA_COLOR.image,
+  save_video: MEDIA_COLOR.video,
+  save_audio: MEDIA_COLOR.audio,
+  preview_image: MEDIA_COLOR.image,
+  preview_video: MEDIA_COLOR.video,
+  preview_audio: MEDIA_COLOR.audio,
   note: "#E6A700",
 };
+
+interface PortDef {
+  /** 输入口 id（连线 to_port / 实测锚点键）。 */
+  id: string;
+  /** 接受的上游节点类型（类型匹配校验）。 */
+  accepts: CanvasNodeType[];
+  mediaKind: "text" | "image" | "video" | "audio";
+}
+
+/** 类型化端口矩阵（用户 2026-10-31 定案）：生成节点的文本口必连、
+ *  图像口可选（纯文生图）；输出节点的入口接受对应生成/加载节点。 */
+const PORT_DEFS: Record<CanvasNodeType, { ins: PortDef[]; out: { mediaKind: "text" | "image" | "video" | "audio" } | null }> = {
+  gen_image: {
+    ins: [
+      { id: "text", accepts: ["load_text"], mediaKind: "text" },
+      { id: "image", accepts: ["load_image"], mediaKind: "image" },
+    ],
+    out: { mediaKind: "image" },
+  },
+  gen_video: {
+    ins: [
+      { id: "text", accepts: ["load_text"], mediaKind: "text" },
+      { id: "image", accepts: ["load_image"], mediaKind: "image" },
+    ],
+    out: { mediaKind: "video" },
+  },
+  gen_audio: {
+    ins: [{ id: "text", accepts: ["load_text"], mediaKind: "text" }],
+    out: { mediaKind: "audio" },
+  },
+  load_text: { ins: [], out: { mediaKind: "text" } },
+  load_image: { ins: [], out: { mediaKind: "image" } },
+  load_video: { ins: [], out: { mediaKind: "video" } },
+  load_audio: { ins: [], out: { mediaKind: "audio" } },
+  save_image: { ins: [{ id: "in", accepts: ["gen_image"], mediaKind: "image" }], out: null },
+  save_video: { ins: [{ id: "in", accepts: ["gen_video"], mediaKind: "video" }], out: null },
+  save_audio: { ins: [{ id: "in", accepts: ["gen_audio"], mediaKind: "audio" }], out: null },
+  preview_image: { ins: [{ id: "in", accepts: ["gen_image", "load_image"], mediaKind: "image" }], out: null },
+  preview_video: { ins: [{ id: "in", accepts: ["gen_video", "load_video"], mediaKind: "video" }], out: null },
+  preview_audio: { ins: [{ id: "in", accepts: ["gen_audio", "load_audio"], mediaKind: "audio" }], out: null },
+  note: { ins: [], out: null },
+};
+
+const IMAGE_EXTS = ["png", "jpg", "jpeg", "webp", "gif", "bmp"];
+const VIDEO_EXTS = ["mp4", "webm", "mkv", "mov", "avi"];
+const AUDIO_EXTS = ["mp3", "m4a", "aac", "flac", "ogg", "wav", "opus"];
+
+function extOf(path: string): string {
+  return path.split(".").pop()?.toLowerCase() ?? "";
+}
 
 type Pos = { x: number; y: number };
 type WireBox = Pos & { w: number; h: number };
@@ -92,8 +191,6 @@ const distToSeg = (
   return Math.hypot(ex, ey);
 };
 // 切割线段是否命中折线（连线按贝塞尔采样后的屏幕坐标点列）。
-// 叉积法对「恰好穿过采样顶点」的零面积相交会漏判，补 2px 触碰判定：
-// 刀刃扫到即断，符合 knife 手势直觉。
 const CUT_TOUCH_PX = 2;
 const segHitsPolyline = (
   a1: { x: number; y: number }, a2: { x: number; y: number },
@@ -108,9 +205,7 @@ const segHitsPolyline = (
   return false;
 };
 
-/** ComfyUI 风格连线：直接接收两端端口点（输出在节点右缘、输入在左缘），
- *  控制点沿水平方向延伸两点距离的 1/4，任意角度都是平滑弯出的贝塞尔，
- *  不存在直线或拐角形态。（自 ProjectCanvas.tsx 零改动搬运） */
+/** ComfyUI 风格连线贝塞尔（自 ProjectCanvas.tsx 零改动搬运）。 */
 function wirePathD(a: { x: number; y: number }, b: { x: number; y: number }): string {
   const offset = Math.hypot(b.x - a.x, b.y - a.y) * 0.25;
   return `M ${a.x} ${a.y} C ${a.x + offset} ${a.y}, ${b.x - offset} ${b.y}, ${b.x} ${b.y}`;
@@ -147,11 +242,15 @@ type DragState =
       kind: "wire";
       sx: number; sy: number; moved: boolean;
       fromKey: string;
+      /** 拖线方向：out = 从输出口拖出建线；in = 从输入口反向拖（落点
+       *  为上游）或摘线换目标（rewire）。 */
       fromDir: "in" | "out";
+      fromPortId: string;
       /** 摘线换目标：拿着的那条连线（行数据未删，松手定去向）。 */
       rewire?: boolean;
       connId?: string;
       targetKey: string | null;
+      targetPort: string | null;
       invalid?: boolean;
     }
   | { kind: "wirecut"; sx: number; sy: number; moved: boolean; px?: number; py?: number }
@@ -161,7 +260,7 @@ type DragState =
       fox: number; foy: number;
       frameKey: CanvasNodeType;
       /** 拖线到空白建节点：创建后自动接上这条线。 */
-      wire?: { fromKey: string; fromDir: "in" | "out" };
+      wire?: { fromKey: string; fromDir: "in" | "out"; fromPortId: string };
       /** 摘线到空白建节点：创建后线改接新节点（原连线行删除）。 */
       detached?: { connId: string; fromKey: string };
     };
@@ -171,7 +270,7 @@ type UndoAction =
   | {
       kind: "delete";
       nodes: CanvasNode[];
-      connections: { from_node: string; to_node: string }[];
+      connections: { from_node: string; to_node: string; to_port: string }[];
     }
   | { kind: "create"; ids: string[] };
 
@@ -192,6 +291,24 @@ function ResourceThumb({ path, className }: { path: string; className?: string }
   }, [path]);
   if (!url) return null;
   return <img className={className} src={url} alt="" draggable={false} />;
+}
+
+/** 资源媒体 URL（视频/音频播放用），路径变化重解析。 */
+function useMediaUrl(path: string): string | null {
+  const [url, setUrl] = useState<string | null>(null);
+  useEffect(() => {
+    let alive = true;
+    setUrl(null);
+    resolveResourceMediaUrl(path)
+      .then((u) => {
+        if (alive) setUrl(u);
+      })
+      .catch(() => {});
+    return () => {
+      alive = false;
+    };
+  }, [path]);
+  return url;
 }
 
 export default function FreeCanvas({ canvasId }: { canvasId: string }) {
@@ -230,7 +347,7 @@ export default function FreeCanvas({ canvasId }: { canvasId: string }) {
     wx: number;
     wy: number;
     /** 拖线到空白：菜单创建的节点自动接上这条线。 */
-    wire?: { fromKey: string; fromDir: "in" | "out" };
+    wire?: { fromKey: string; fromDir: "in" | "out"; fromPortId: string };
     /** 摘线到空白：菜单创建的节点接走这条线（原连线行删除）。 */
     detached?: { connId: string; fromKey: string };
   } | null>(null);
@@ -243,6 +360,10 @@ export default function FreeCanvas({ canvasId }: { canvasId: string }) {
   const [genStarting, setGenStarting] = useState(false);
   const [nodeErrors, setNodeErrors] = useState<Record<string, string>>({});
   const [pulseKeys, setPulseKeys] = useState<string[]>([]);
+  /** 资源库选择浮层：load 节点的「从资源库选择」。 */
+  const [pickerForNode, setPickerForNode] = useState<string | null>(null);
+  /** 大图预览（预览图像节点双击）：暂存产物路径。 */
+  const [lightboxSrc, setLightboxSrc] = useState("");
 
   const dragRef = useRef<DragState | null>(null);
   const wireHoverRef = useRef<HTMLElement | null>(null);
@@ -275,9 +396,7 @@ export default function FreeCanvas({ canvasId }: { canvasId: string }) {
     if (undoStackRef.current.length > UNDO_LIMIT) undoStackRef.current.shift();
   }, []);
 
-  /** 撤销（Ctrl+Z）：layout 恢复布局；delete 重建节点/连线——节点用新 id
-   *  重建（无外部锚引用 canvas 节点 id），连线按 id 映射改接两端；create
-   *  （粘贴/种子模板）整节点移除。 */
+  /** 撤销（Ctrl+Z）：layout 恢复布局；delete 重建节点/连线；create 移除。 */
   const runUndo = useCallback(() => {
     if (undoingRef.current) return;
     undoingRef.current = true;
@@ -301,7 +420,7 @@ export default function FreeCanvas({ canvasId }: { canvasId: string }) {
           // 删除时仍在生成中的图片节点，恢复时归一为 error——后台任务已随
           // 删除取消，留着 generating 会让节点永远转圈。
           const restoredMeta = { ...node.metadata };
-          if (restoredMeta.kind === "image" && restoredMeta.status === "generating") {
+          if (restoredMeta.kind === "gen_image" && restoredMeta.status === "generating") {
             restoredMeta.status = "error";
             restoredMeta.error = "生成已中断";
           }
@@ -321,7 +440,7 @@ export default function FreeCanvas({ canvasId }: { canvasId: string }) {
         for (const conn of action.connections) {
           const from = idMap.get(conn.from_node) ?? conn.from_node;
           const to = idMap.get(conn.to_node) ?? conn.to_node;
-          await store.getState().connect(canvasId, from, to);
+          await store.getState().connect(canvasId, from, to, conn.to_port);
         }
         setSelection([...idMap.values()]);
       })();
@@ -340,13 +459,12 @@ export default function FreeCanvas({ canvasId }: { canvasId: string }) {
     const targets = nodesRef.current.filter((n) => ids.includes(n.id));
     const conns = connectionsRef.current
       .filter((c) => targets.some((n) => n.id === c.from_node || n.id === c.to_node))
-      .map((c) => ({ from_node: c.from_node, to_node: c.to_node }));
+      .map((c) => ({ from_node: c.from_node, to_node: c.to_node, to_port: c.to_port }));
     if (targets.length) {
       pushUndo({ kind: "delete", nodes: targets, connections: conns });
     }
     for (const node of targets) {
-      // 生成中的节点先取消后端任务再删：否则孤儿请求继续跑完，产物照常
-      // 入资源库、落库 UPDATE 落在已删除的行上静默失效。
+      // 生成中的节点先取消后端任务再删：否则孤儿请求继续跑完。
       const progress = store.getState().genProgress[node.id];
       if (progress) void store.getState().cancelGeneration(progress.requestId);
       await store.getState().deleteNode(node.id);
@@ -408,11 +526,8 @@ export default function FreeCanvas({ canvasId }: { canvasId: string }) {
     return () => el.removeEventListener("wheel", onWheel);
   }, [zoomAt]);
 
-  // 视口永远不该被滚动（平移/缩放都走 transform）：overflow:hidden 的
-  // 容器仍会被「聚焦滚动」推动——弹层搜索框、便签输入框等聚焦在视口
-  // 边缘外时，浏览器会滚动容器把聚焦元素露出，表现为整个画布节点集体
-  // 平移（连线/断线时位置漂移的根源）。这里把任何滚动立即归零，根治
-  // 所有聚焦滚动路径；归零引发的再入 scroll 事件值为 0，不会成环。
+  // 视口永远不该被滚动（平移/缩放都走 transform）：聚焦滚动会把容器
+  // 推走表现为节点集体平移。任何滚动立即归零。
   useEffect(() => {
     const el = vpRef.current;
     if (!el) return;
@@ -423,8 +538,7 @@ export default function FreeCanvas({ canvasId }: { canvasId: string }) {
     return () => el.removeEventListener("scroll", onScroll);
   }, []);
 
-  // 画布区域一律不弹浏览器右键菜单：Shift+右键是切线手势，滑动滑出画布
-  // （扫到侧栏/顶栏）时弹出的系统菜单会打断手势——表现为闪烁加手势冻结。
+  // 画布区域一律不弹浏览器右键菜单：Shift+右键是切线手势。
   useEffect(() => {
     const onCtx = (e: MouseEvent) => {
       if (e.target instanceof Element && e.target.closest(".pc-root")) e.preventDefault();
@@ -433,8 +547,7 @@ export default function FreeCanvas({ canvasId }: { canvasId: string }) {
     return () => document.removeEventListener("contextmenu", onCtx);
   }, []);
 
-  // 首入适配：视口仍是出厂默认（从未缩放/平移过）且画布已有节点时，
-  // fitAll 一次；已有保存视口则尊重恢复（对齐工程画布换集 fitAll 体验）。
+  // 首入适配：视口仍是出厂默认且画布已有节点时，fitAll 一次。
   const fitAttemptedRef = useRef(false);
   const fitAll = useCallback(
     (list: CanvasNode[]): boolean => {
@@ -458,7 +571,7 @@ export default function FreeCanvas({ canvasId }: { canvasId: string }) {
       const usableW = Math.max(200, rect.width);
       const bw = maxX - minX + pad * 2;
       const bh = maxY - minY + pad * 2;
-      // 只缩小不放大：内容小于视口时保持 1:1（单节点内容不该被怼到最大倍率）。
+      // 只缩小不放大：内容小于视口时保持 1:1。
       const scale = Math.min(1, Math.min(usableW / bw, rect.height / bh));
       const next = {
         x: (usableW - (maxX - minX) * scale) / 2 - minX * scale,
@@ -483,8 +596,8 @@ export default function FreeCanvas({ canvasId }: { canvasId: string }) {
     }
   }, [nodes, fitAll, view]);
 
-  // ── 节点实测尺寸与端口位置（自 ProjectCanvas 零改动搬运）：连线
-  //    锚点跟随真实 DOM（内容自适应的卡体高度，常量只是首帧兜底） ──
+  // ── 节点实测尺寸与端口位置（自 ProjectCanvas 搬运）：连线锚点跟随
+  //    真实 DOM（pc-port[data-port-id] 实测，常量只是首帧兜底） ──
 
   const [nodeMetrics, setNodeMetrics] = useState<{
     boxes: Record<string, { w: number; h: number }>;
@@ -507,9 +620,8 @@ export default function FreeCanvas({ canvasId }: { canvasId: string }) {
       const map: Record<string, Pos> = {};
       nodeEl.querySelectorAll<HTMLElement>(".pc-port").forEach((portEl) => {
         const pr = portEl.getBoundingClientRect();
-        const pid =
-          portEl.getAttribute("data-port-id") ??
-          (portEl.getAttribute("data-port") === "out" ? "__out" : "__in");
+        const pid = portEl.getAttribute("data-port-id") ?? "";
+        if (!pid) return;
         map[pid] = {
           x: (pr.x + pr.width / 2 - nr.x) / scale,
           y: (pr.y + pr.height / 2 - nr.y) / scale,
@@ -546,9 +658,7 @@ export default function FreeCanvas({ canvasId }: { canvasId: string }) {
       nodeRoRef.current = new ResizeObserver(scheduleMeasureNodes);
     }
     const ro = nodeRoRef.current;
-    const els = Array.from(
-      vpRef.current?.querySelectorAll<HTMLElement>(".pc-node[data-key]") ?? [],
-    );
+    const els = Array.from(vpRef.current?.querySelectorAll<HTMLElement>(".pc-node[data-key]") ?? []);
     els.forEach((el) => ro.observe(el));
     // 节点尺寸/内容刚由 React 提交时，连线本帧就必须拿到最新端口偏移；
     // ResizeObserver 的 rAF 合帧只负责后续外部布局变化，不能成为首个测量。
@@ -556,11 +666,6 @@ export default function FreeCanvas({ canvasId }: { canvasId: string }) {
     scheduleMeasureNodes();
     return () => els.forEach((el) => ro.unobserve(el));
   }, [view.scale, nodes, measureNodes, scheduleMeasureNodes]);
-
-  const nodeById = useCallback(
-    (id: string): CanvasNode | undefined => nodes.find((n) => n.id === id),
-    [nodes],
-  );
 
   const boxOf = useCallback(
     (key: string): WireBox | null => {
@@ -578,29 +683,33 @@ export default function FreeCanvas({ canvasId }: { canvasId: string }) {
     [nodes, nodeMetrics],
   );
 
-  // 端口点：优先用实测端口坐标（卡体高度自适应），未实测前退回
-  // 「输出右缘中点 / 输入左缘中点」的常量估算。
+  // 端口点：优先用实测端口坐标（portBar 行位随卡体内容变化），
+  // 未实测前退回「输出右缘中点 / 输入按口序分布」的常量估算。
   const outPointOf = useCallback(
     (key: string): { x: number; y: number } | null => {
       const box = boxOf(key);
       if (!box) return null;
       const off = nodeMetrics.ports[key]?.__out;
-      return off ? { x: box.x + off.x, y: box.y + off.y } : { x: box.x + box.w, y: box.y + box.h / 2 };
+      if (off) return { x: box.x + off.x, y: box.y + off.y };
+      return { x: box.x + box.w, y: box.y + box.h / 2 };
     },
     [boxOf, nodeMetrics],
   );
   const inPointOf = useCallback(
-    (key: string): { x: number; y: number } | null => {
+    (key: string, portId: string): { x: number; y: number } | null => {
       const box = boxOf(key);
       if (!box) return null;
-      const off = nodeMetrics.ports[key]?.__in;
-      return off ? { x: box.x + off.x, y: box.y + off.y } : { x: box.x, y: box.y + box.h / 2 };
+      const off = nodeMetrics.ports[key]?.[portId];
+      if (off) return { x: box.x + off.x, y: box.y + off.y };
+      const def = PORT_DEFS[nodes.find((n) => n.id === key)?.type ?? "note"];
+      const index = Math.max(0, def.ins.findIndex((p) => p.id === portId));
+      const rows = Math.max(1, def.ins.length);
+      return { x: box.x, y: box.y + (box.h * (index + 1)) / (rows + 1) };
     },
-    [boxOf, nodeMetrics],
+    [boxOf, nodeMetrics, nodes],
   );
 
-  // ── 出生锚点脉冲（自 ProjectCanvas 搬运）：新建节点出生在用户视线
-  //    （鼠标）附近时脉冲高亮，一眼可见「节点出现在这」。 ──
+  // ── 出生锚点脉冲：新建节点出生在用户视线附近时脉冲高亮。 ──
   useEffect(() => {
     if (pulseKeys.length === 0) return;
     const timer = window.setTimeout(() => setPulseKeys([]), 2400);
@@ -610,7 +719,7 @@ export default function FreeCanvas({ canvasId }: { canvasId: string }) {
     if (ids.length) setPulseKeys(ids);
   }, []);
 
-  // ── 多选组拖 / 位置批量写入（对齐工程画布管线） ───────────
+  // ── 多选组拖 / 位置批量写入 ─────────────────────────────
 
   /** 选中组快照：全部选中节点（世界坐标）。任一成员缺失则返回 null。 */
   const groupSnapshot = useCallback(
@@ -627,8 +736,7 @@ export default function FreeCanvas({ canvasId }: { canvasId: string }) {
     },
     [],
   );
-  /** 批量写入各成员的绝对位置（组拖实时移动与撤销恢复共用）：尺寸保持
-   *  各节点当前值，只挪位置。 */
+  /** 批量写入各成员的绝对位置（组拖实时移动与撤销恢复共用）。 */
   const moveGroupTo = useCallback(
     (members: { key: string; x: number; y: number }[]) => {
       const byId = new Map(nodesRef.current.map((n) => [n.id, n]));
@@ -644,12 +752,7 @@ export default function FreeCanvas({ canvasId }: { canvasId: string }) {
     [canvasId, store],
   );
 
-  // ── 节点分组（Ctrl+G，ComfyUI Group 的对应物）：选中若干节点打组成框
-  //    （框自适应成员包围盒）；拖组框标题整组移动（复用组拖管线）；选中
-  //    恰好是某组全部成员再按 Ctrl+G 解组。成员从其他组移出（互斥）。 ──
-
-  /** 成员当前包围盒（世界坐标；节点已删除则 null，渲染与剪枝自动剔除
-   *  ——组员被删后框随之收缩）。 */
+  /** 成员当前包围盒（世界坐标；节点已删除则 null）。 */
   const memberFrame = useCallback(
     (key: string): { x: number; y: number; w: number; h: number } | null => {
       const node = nodesRef.current.find((n) => n.id === key);
@@ -660,45 +763,9 @@ export default function FreeCanvas({ canvasId }: { canvasId: string }) {
     [],
   );
 
-  // 防重入：StrictMode 开发态会双挂载键盘监听，一次 Ctrl+G 建组又解组。
-  const groupingRef = useRef(false);
-  const toggleGroup = useCallback(() => {
-    if (groupingRef.current) return;
-    groupingRef.current = true;
-    window.setTimeout(() => {
-      groupingRef.current = false;
-    }, 0);
-    const sel = selRef.current;
-    if (sel.length === 0) return;
-    const st = store.getState();
-    // 先剪枝：成员已被删除的组清掉死成员（空组丢弃），保证解组判定与
-    // 组框都基于存活成员。
-    const pruned = st.groups
-      .map((g) => ({ ...g, members: g.members.filter((key) => memberFrame(key) !== null) }))
-      .filter((g) => g.members.length > 0);
-    const fullGroup = pruned.find(
-      (g) => g.members.length === sel.length && sel.every((key) => g.members.includes(key)),
-    );
-    if (fullGroup) {
-      void st.setGroups(canvasId, pruned.filter((g) => g.id !== fullGroup.id));
-    } else {
-      const kept = pruned
-        .map((g) => ({ ...g, members: g.members.filter((key) => !sel.includes(key)) }))
-        .filter((g) => g.members.length > 0);
-      void st.setGroups(canvasId, [
-        ...kept,
-        {
-          id: `ng${Date.now()}${Math.floor(Math.random() * 1e4)}`,
-          label: t("project.canvas.nodeGroup"),
-          members: [...sel],
-        },
-      ]);
-    }
-  }, [canvasId, memberFrame, store, t]);
-
   // ── 复制 / 粘贴（Ctrl+C/V） ──────────────────────────────
 
-  const clipRef = useRef<{ nodes: CanvasNode[]; wires: { from_node: string; to_node: string }[]; ax: number; ay: number } | null>(null);
+  const clipRef = useRef<{ nodes: CanvasNode[]; wires: { from_node: string; to_node: string; to_port: string }[]; ax: number; ay: number } | null>(null);
   const copySelection = useCallback(() => {
     const members = groupSnapshot(1);
     if (!members) return;
@@ -706,10 +773,9 @@ export default function FreeCanvas({ canvasId }: { canvasId: string }) {
     const ay = Math.min(...members.map((m) => m.y));
     const ids = members.map((m) => m.key);
     const copied = nodesRef.current.filter((n) => ids.includes(n.id));
-    // 只带内部连线：两端都在选区内的线随复制重建。
     const wires = connectionsRef.current
       .filter((c) => ids.includes(c.from_node) && ids.includes(c.to_node))
-      .map((c) => ({ from_node: c.from_node, to_node: c.to_node }));
+      .map((c) => ({ from_node: c.from_node, to_node: c.to_node, to_port: c.to_port }));
     if (copied.length) clipRef.current = { nodes: copied, wires, ax, ay };
   }, [groupSnapshot]);
   const pasteClipboard = useCallback(async () => {
@@ -741,10 +807,9 @@ export default function FreeCanvas({ canvasId }: { canvasId: string }) {
       for (const wire of clip.wires) {
         const from = idMap.get(wire.from_node);
         const to = idMap.get(wire.to_node);
-        if (from && to) await st.connect(canvasId, from, to);
+        if (from && to) await st.connect(canvasId, from, to, wire.to_port);
       }
       if (newIds.length) {
-        // 粘贴可撤销（对齐工程画布）：整批节点随 Ctrl+Z 移除。
         pushUndo({ kind: "create", ids: newIds });
         setSelection(newIds);
       }
@@ -753,7 +818,7 @@ export default function FreeCanvas({ canvasId }: { canvasId: string }) {
     }
   }, [canvasId, pushUndo, setSelection, store]);
 
-  // ── 连线手势（节点级语义 + 工程画布手势骨架） ─────────────
+  // ── 连线手势（类型化端口语义 + 工程画布手势骨架） ─────────
 
   /** 摘线到空白后取消菜单（Esc/点外部）＝线就此断开（ComfyUI 语义）。 */
   const discardDetachedWire = useCallback(
@@ -764,8 +829,7 @@ export default function FreeCanvas({ canvasId }: { canvasId: string }) {
     [store],
   );
 
-  // Blender 式切线（Shift/Ctrl+右键滑动）：候选线在按下时采样缓存，
-  // 滑动中逐段判定相交。（切痕层直写 polyline，不经 React 状态）
+  // Blender 式切线（Shift/Ctrl+右键滑动）：切痕层直写 polyline。
   const buildCutTargets = useCallback(() => {
     const svg = vpRef.current?.querySelector("svg.pc-wires");
     if (!svg) return [];
@@ -796,10 +860,18 @@ export default function FreeCanvas({ canvasId }: { canvasId: string }) {
   }, [store]);
 
   const openAddMenu = useCallback(
-    (sx: number, sy: number, wx: number, wy: number, pending?: { wire?: { fromKey: string; fromDir: "in" | "out" }; detached?: { connId: string; fromKey: string } }) => {
+    (sx: number, sy: number, wx: number, wy: number, pending?: { wire?: { fromKey: string; fromDir: "in" | "out"; fromPortId: string }; detached?: { connId: string; fromKey: string } }) => {
       setAddMenu({ sx, sy, wx, wy, wire: pending?.wire, detached: pending?.detached });
       setAddMenuQuery("");
     },
+    [],
+  );
+
+  /** 菜单建节点接回连线：算新节点上可接住的输入口 id（无可接口 = 空串
+   *  不接）；菜单项过滤同样用它。 */
+  const incomingPortFor = useCallback(
+    (newType: CanvasNodeType, fromType: CanvasNodeType): string =>
+      PORT_DEFS[newType].ins.find((p) => p.accepts.includes(fromType))?.id ?? "",
     [],
   );
 
@@ -815,8 +887,7 @@ export default function FreeCanvas({ canvasId }: { canvasId: string }) {
         e.preventDefault();
         return;
       }
-      // 上一场拖拽若有残留（松手事件在窗外丢失等），开新拖拽前先复位：
-      // 冻结的草稿线、拿着的摘线、切线态，避免「松手后线卡住」的残影。
+      // 上一场拖拽若有残留（松手事件在窗外丢失等），开新拖拽前先复位。
       capturedRef.current = false;
       setWireDraft(null);
       setLiftedWire(null);
@@ -834,7 +905,7 @@ export default function FreeCanvas({ canvasId }: { canvasId: string }) {
       }
       // 可交互元素一律不进手势：button 上 begin() 会把指针捕获到视口容器，
       // click 被重定向到捕获元素反而点不中；输入元素要保住文本选择/光标。
-      if (e.button === 0 && target?.closest("input, textarea, button")) return;
+      if (e.button === 0 && target?.closest("input, textarea, button, video, audio")) return;
 
       const vp = vpRef.current;
       if (!vp) return;
@@ -844,8 +915,7 @@ export default function FreeCanvas({ canvasId }: { canvasId: string }) {
         e.preventDefault();
         return;
       }
-      // Blender 式切线：Shift/Ctrl+右键滑动，扫过的连线即时切断（光标变
-      // 刀、拖出亮色切痕）。候选线在按下时采样缓存，滑动中逐段判定相交。
+      // Blender 式切线：Shift/Ctrl+右键滑动，扫过的连线即时切断。
       if (e.button === 2 && (e.shiftKey || e.ctrlKey)) {
         dragRef.current = { kind: "wirecut", sx: e.clientX, sy: e.clientY, moved: false };
         cutPointsRef.current = [];
@@ -856,43 +926,59 @@ export default function FreeCanvas({ canvasId }: { canvasId: string }) {
       }
       if (e.button !== 0) return;
 
-      // 连线端口：右侧输出口拖出建连线；左侧输入口有来线时按下即摘线
-      // （ComfyUI 摘线换目标），无来线时反向拖（落点成为来源）。
+      // 类型化端口：输入口按下 = 摘线（有来线时）或反向拖（无线时，落点
+      // 为上游）；输出口按下 = 正向拖线。
       const port = target?.closest(".pc-port") as HTMLElement | null;
       if (port) {
         const nodeEl = port.closest(".pc-node");
         const key = nodeEl?.getAttribute("data-key") ?? "";
-        const dir = port.dataset.port === "in" ? "in" : "out";
-        if (key) {
-          if (dir === "in") {
-            // 摘一个输入口 = 拿走这条线（节点级单入线）。
-            const incoming = connectionsRef.current.find((c) => c.to_node === key);
+        const node = nodesRef.current.find((n) => n.id === key);
+        if (node && PORT_DEFS[node.type].out !== null || node) {
+          const dir = port.dataset.port === "in" ? "in" : "out";
+          const portId = port.dataset.portId ?? "";
+          if (dir === "in" && portId) {
+            // 摘一个输入口 = 拿走这条线（ComfyUI 摘线换目标）。
+            const incoming = connectionsRef.current.find((c) => c.to_node === key && c.to_port === portId);
             if (incoming) {
               setLiftedWire({ connId: incoming.id, fromKey: incoming.from_node });
               vp.classList.add("pc-wiring");
               port.classList.add("pc-port-active");
-              // 原口登记为「当前亮口」：亮口唯一由 wirePortHoverRef 管理，
-              // 拖走时悬停切换自然清它，滑回原口也能正常重新点亮。
+              // 原口登记为「当前亮口」：拖走时悬停切换自然清它，滑回
+              // 原口（放回）也能正常重新点亮。
               wirePortHoverRef.current = port;
               dragRef.current = {
                 kind: "wire", sx: e.clientX, sy: e.clientY, moved: false,
                 rewire: true, connId: incoming.id,
-                fromKey: incoming.from_node, fromDir: "in",
-                targetKey: null,
+                fromKey: incoming.from_node, fromDir: "in", fromPortId: portId,
+                targetKey: null, targetPort: null,
               };
               e.preventDefault();
               return;
             }
+            // 无来线的输入口：反向拖（落点为上游来源）。
+            vp.classList.add("pc-wiring");
+            port.classList.add("pc-port-active");
+            dragRef.current = {
+              kind: "wire", sx: e.clientX, sy: e.clientY, moved: false,
+              fromKey: key, fromDir: "in", fromPortId: portId,
+              targetKey: null, targetPort: null,
+            };
+            e.preventDefault();
+            return;
           }
-          // 普通拖线：源端口点亮（即使草稿线被渲染环境吞掉，按下即有可见状态）。
-          vp.classList.add("pc-wiring");
-          port.classList.add("pc-port-active");
-          dragRef.current = {
-            kind: "wire", sx: e.clientX, sy: e.clientY, moved: false,
-            fromKey: key, fromDir: dir, targetKey: null,
-          };
-          e.preventDefault();
-          return;
+          if (dir === "out") {
+            // 正向拖线：源端口点亮（即使草稿线被渲染环境吞掉，按下即有
+            // 可见状态）。
+            vp.classList.add("pc-wiring");
+            port.classList.add("pc-port-active");
+            dragRef.current = {
+              kind: "wire", sx: e.clientX, sy: e.clientY, moved: false,
+              fromKey: key, fromDir: "out", fromPortId: "__out",
+              targetKey: null, targetPort: null,
+            };
+            e.preventDefault();
+            return;
+          }
         }
       }
 
@@ -905,7 +991,6 @@ export default function FreeCanvas({ canvasId }: { canvasId: string }) {
         if (node) {
           const corner = (resizeEl.getAttribute("data-corner") ?? "se") as "nw" | "ne" | "sw" | "se";
           const size = nodeSize(node);
-          // 西/北角缩放会挪动节点，按下时记下原始位置。
           const px = node.pos_x;
           const py = node.pos_y;
           nodeEl?.classList.add("pc-resizing");
@@ -982,8 +1067,7 @@ export default function FreeCanvas({ canvasId }: { canvasId: string }) {
     const onMove = (e: PointerEvent) => {
       const drag = dragRef.current;
       if (!drag) return;
-      // 首次移动即捕获指针：此后即使松手在窗口外，mouseup 仍送达（根治
-      // 「松在窗外 → 摘下的线/草稿线卡住冻结」）；纯点击不经此处不受影响。
+      // 首次移动即捕获指针：此后即使松手在窗口外，mouseup 仍送达。
       if (!capturedRef.current) {
         capturedRef.current = true;
         try {
@@ -1021,7 +1105,7 @@ export default function FreeCanvas({ canvasId }: { canvasId: string }) {
         // 松手才持久化尺寸与位置。
         const key = drag.frameKey;
         const node = nodesRef.current.find((n) => n.id === key);
-        const min = NODE_MIN_SIZE[node?.type ?? "text"];
+        const min = NODE_MIN_SIZE[node?.type ?? "gen_image"];
         const corner = drag.corner;
         const dxW = dx / view.scale;
         const dyW = dy / view.scale;
@@ -1047,10 +1131,7 @@ export default function FreeCanvas({ canvasId }: { canvasId: string }) {
           { id: key, pos_x: px ?? node?.pos_x ?? 0, pos_y: py ?? node?.pos_y ?? 0, width: Math.round(w), height: Math.round(h) },
         ]);
       } else if (drag.kind === "wirecut") {
-        // 松手事件丢失（松在窗外、系统手势吞掉 mouseup）时右键已弹起，
-        // 拖拽态却还挂着：之后每次移动都会续画切痕并误切连线——表现为
-        // 「划痕满屏」。按 e.buttons 自愈：右键不在按下态即等同松手，
-        // 就地收尾（与 onUp 的 wirecut 分支同一套清理）。
+        // 松手事件丢失时右键已弹起，拖拽态却还挂着：按 e.buttons 自愈。
         if ((e.buttons & 2) === 0) {
           vpRef.current?.classList.remove("pc-cutting");
           cutTargetsRef.current = null;
@@ -1066,7 +1147,6 @@ export default function FreeCanvas({ canvasId }: { canvasId: string }) {
         drag.px = to.x;
         drag.py = to.y;
         drag.moved = true;
-        // 切痕画在视口直下的绝对定位层（屏幕坐标），盖在卡片之上。
         const vpRect = vpRef.current?.getBoundingClientRect();
         if (vpRect) {
           const w = (cx: number, cy: number) => ({
@@ -1099,25 +1179,58 @@ export default function FreeCanvas({ canvasId }: { canvasId: string }) {
         const rect = el.getBoundingClientRect();
         const wx = (e.clientX - rect.left - view.x) / view.scale;
         const wy = (e.clientY - rect.top - view.y) / view.scale;
-        // 摘线拿着（rewire）时草稿线锚在「留在原地的另一端」——源头输出
-        // 口：线从源头拉到手里，刚拔空的输入口不再有线的视觉残留，才是
-        // 「拆掉电线拿在手里」的观感。
-        const startPoint = drag.rewire
+        // 摘线拿着（rewire）时草稿线锚在「留在原地的另一端」——线的真实
+        // 源头输出口，刚拔空的输入口不再有线的视觉残留。
+        const startPoint = drag.fromDir === "out"
           ? outPointOf(drag.fromKey)
-          : drag.fromDir === "in"
-            ? inPointOf(drag.fromKey)
-            : outPointOf(drag.fromKey);
+          : drag.rewire
+            ? outPointOf(drag.fromKey)
+            : inPointOf(drag.fromKey, drag.fromPortId);
         if (!startPoint) return;
         const cursor = { x: wx, y: wy };
         const hit = document.elementFromPoint(e.clientX, e.clientY);
         const tEl = hit instanceof Element ? hit.closest<HTMLElement>(".pc-node[data-key]") : null;
         const tKey = tEl?.getAttribute("data-key") ?? null;
-        // 节点级兼容性：任何两个不同节点都可连（引用语义）；悬停自身
-        // （非摘线场景）视为无效落点。
-        const isSelf = !!tKey && tKey === drag.fromKey;
-        const compatible = !!tKey && !isSelf;
-        drag.invalid = !!tKey && isSelf && !drag.rewire;
+        const tNode = tKey ? nodesRef.current.find((n) => n.id === tKey) : undefined;
+        const fromNode = nodesRef.current.find((n) => n.id === drag.fromKey);
+        // 类型化端口匹配：
+        //   正拖（out）：落点节点的某个输入口 accepts 包含源节点类型，
+        //     多口时吸附光标最近的口（实测行位）。
+        //   反拖/摘线（in）：落点节点必须有 out 且其类型被源输入口接受。
+        let targetPort: string | null = null;
+        let compatible = false;
+        if (drag.fromDir === "out") {
+          const sourceType = fromNode?.type;
+          if (tNode && tKey && sourceType && tKey !== drag.fromKey) {
+            const ins = PORT_DEFS[tNode.type].ins.filter((p) => p.accepts.includes(sourceType));
+            if (ins.length > 0) {
+              const box = boxOf(tKey);
+              const metrics = nodeMetricsRef.current.ports[tKey];
+              let best: PortDef | undefined;
+              let bestDist = Infinity;
+              ins.forEach((p) => {
+                const off = metrics?.[p.id];
+                const py = box && off ? box.y + off.y : box ? box.y + box.h / 2 : 0;
+                const dist = box ? Math.abs(py - wy) : 0;
+                if (!best || dist <= bestDist) {
+                  best = p;
+                  bestDist = dist;
+                }
+              });
+              targetPort = best?.id ?? null;
+              compatible = !!targetPort;
+            }
+          }
+        } else {
+          const inDef = PORT_DEFS[fromNode?.type ?? "note"].ins.find((p) => p.id === drag.fromPortId);
+          if (tNode && inDef && tKey !== drag.fromKey) {
+            compatible = inDef.accepts.includes(tNode.type);
+            targetPort = compatible ? drag.fromPortId : null;
+          }
+        }
+        drag.invalid = !!tKey && tKey !== drag.fromKey && !compatible;
         drag.targetKey = compatible ? tKey : null;
+        drag.targetPort = targetPort;
         // 落点节点高亮（可接亮框 / 不可接不亮）。
         const hoverEl = compatible ? tEl : null;
         if (wireHoverRef.current !== hoverEl) {
@@ -1125,36 +1238,28 @@ export default function FreeCanvas({ canvasId }: { canvasId: string }) {
           hoverEl?.classList.add("pc-wire-target");
           wireHoverRef.current = hoverEl;
         }
-        // 悬停口点亮：线要落去的那个口与源口同款放大光圈（亮＝接得上），
-        // 正拖亮输入口、反拖亮输出口。摘线的原口在 pointerdown 时已登记为
-        // 本 ref 的「当前亮口」：拖走即被这里的切换清掉，滑回原口（放回）
-        // 亮回。
-        const portEl = compatible && tEl
-          ? tEl.querySelector<HTMLElement>(
-              drag.fromDir === "out" ? '.pc-port[data-port="in"]' : '.pc-port[data-port="out"]',
-            )
+        // 悬停口点亮：线要落去的那个口与源口同款放大光圈（亮＝接得上）。
+        const portEl = compatible && tEl && targetPort
+          ? tEl.querySelector<HTMLElement>(`.pc-port[data-port-id="${targetPort}"]`)
           : null;
         if (wirePortHoverRef.current !== portEl) {
           wirePortHoverRef.current?.classList.remove("pc-port-active");
           portEl?.classList.add("pc-port-active");
           wirePortHoverRef.current = portEl;
         }
-        // 草稿终点：正拖命中节点时吸附到输入口的位置。
+        // 草稿终点：命中可接口时吸附到该口实测位置。
         const endPoint =
-          compatible && drag.fromDir === "out" && tKey
-            ? inPointOf(tKey) ?? cursor
+          compatible && drag.fromDir === "out" && tKey && targetPort
+            ? inPointOf(tKey, targetPort) ?? cursor
             : cursor;
-        const sourceNode = nodesRef.current.find((n) => n.id === drag.fromKey);
+        const draftColor = fromNode ? NODE_ACCENT[fromNode.type] : undefined;
         setWireDraft({
-          // 摘线拿着：从源头画到手里（方向与正常连线一致）；普通拖线
-          // 保持原方向（输入口拖=手里→口，输出口拖=口→手里）。
-          d: drag.rewire
-            ? wirePathD(startPoint, cursor)
-            : drag.fromDir === "in"
-              ? wirePathD(cursor, startPoint)
-              : wirePathD(startPoint, endPoint),
+          // 摘线拿着：从源头画到手里；普通正拖 out→口；反拖 手里→口。
+          d: drag.fromDir === "out"
+            ? wirePathD(startPoint, endPoint)
+            : wirePathD(cursor, startPoint),
           invalid: !!drag.invalid,
-          color: sourceNode ? NODE_ACCENT[sourceNode.type] : undefined,
+          color: draftColor,
         });
       }
     };
@@ -1210,7 +1315,7 @@ export default function FreeCanvas({ canvasId }: { canvasId: string }) {
       if (dblCountable && !drag.moved) {
         const hitEl = document.elementFromPoint(e.clientX, e.clientY);
         const hit = hitEl instanceof Element ? hitEl : null;
-        if (hit?.closest("textarea, input, button")) {
+        if (hit?.closest("textarea, input, button, video, audio")) {
           // 控件上的两次点击是控件自己的事，不算空白双击。
           dblRef.current = null;
         } else {
@@ -1234,11 +1339,15 @@ export default function FreeCanvas({ canvasId }: { canvasId: string }) {
                 );
               }
             } else {
-              // 双击便签 → 编辑态（对齐工程画布便签惯例）。
+              // 双击节点：便签进编辑；预览图像开大图；其余无全局动作。
               const node = nodesRef.current.find((n) => n.id === key);
               if (node?.type === "note" && node.metadata.kind === "note") {
                 setEditingNoteId(key);
                 setNoteDraft(node.metadata.content);
+              } else if (node?.type === "preview_image") {
+                const upstream = upstreamMediaOf(node.id);
+                const primary = upstream?.paths.find((_, i) => i === 0);
+                if (primary) setLightboxSrc(primary);
               }
             }
           }
@@ -1249,7 +1358,6 @@ export default function FreeCanvas({ canvasId }: { canvasId: string }) {
       if (drag.kind === "pan") {
         if (drag.moved) saveView(view);
       } else if (drag.kind === "wirecut") {
-        // pc-cutting 类仅管刀光标；切痕轨迹点清空即隐形，下次按下重建。
         vpRef.current?.classList.remove("pc-cutting");
         cutTargetsRef.current = null;
         cutPointsRef.current = [];
@@ -1274,18 +1382,16 @@ export default function FreeCanvas({ canvasId }: { canvasId: string }) {
           insideViewport,
         });
         const targetKey = drag.targetKey;
+        const targetPort = drag.targetPort;
         if (drag.rewire) {
-          // ComfyUI 摘线收尾：换目标（拖到另一节点）/ 空白交给菜单
-          // （建节点即转接）/ 其余一律放回（行数据未删，清掉 lifted 即
-          // 恢复原线）。
+          // ComfyUI 摘线收尾：换目标（拖到另一节点可接口上）/ 空白交给
+          // 菜单（建节点即转接）/ 其余一律放回（行数据未删，清掉 lifted
+          // 即恢复原线）。
           const lifted = liftedWire;
-          if (wireRelease === "commit" && targetKey && lifted) {
+          if (wireRelease === "commit" && targetKey && targetPort && lifted) {
             setLiftedWire(null);
-            // 摘线换目标：改写该线 to_node（后端合并语义：同源重复时
-            // 删本线保既有）。
-            void store.getState().rewire(lifted.connId, targetKey);
+            void store.getState().rewire(lifted.connId, targetKey, targetPort);
           } else if (wireRelease === "picker" && lifted) {
-            // 松手在画布内才谈「空白弹菜单」；出界（窗外松手）一律放回。
             if (vpRect) {
               openAddMenu(
                 e.clientX - vpRect.left,
@@ -1300,12 +1406,13 @@ export default function FreeCanvas({ canvasId }: { canvasId: string }) {
           } else {
             setLiftedWire(null);
           }
-        } else if (wireRelease === "commit" && targetKey && drag.fromKey) {
-          // 反拖（从输入口出发）时落点才是数据的来源方。
-          const [outKey, inKey] = drag.fromDir === "in"
-            ? [targetKey, drag.fromKey]
-            : [drag.fromKey, targetKey];
-          void store.getState().connect(canvasId, outKey, inKey);
+        } else if (wireRelease === "commit" && targetKey && targetPort && drag.fromKey) {
+          if (drag.fromDir === "out") {
+            void store.getState().connect(canvasId, drag.fromKey, targetKey, targetPort);
+          } else {
+            // 反拖：落点节点才是来源方。
+            void store.getState().connect(canvasId, targetKey, drag.fromKey, drag.fromPortId);
+          }
         } else if (wireRelease === "picker" && drag.fromKey) {
           // ComfyUI 惯例：拖到空白松手 → 弹节点选择框，创建的节点自动
           // 接上这条线；落在任何节点/浮层上松手视为取消，不弹。
@@ -1315,7 +1422,7 @@ export default function FreeCanvas({ canvasId }: { canvasId: string }) {
               e.clientY - vpRect.top,
               (e.clientX - vpRect.left - view.x) / view.scale,
               (e.clientY - vpRect.top - view.y) / view.scale,
-              { wire: { fromKey: drag.fromKey, fromDir: drag.fromDir } },
+              { wire: { fromKey: drag.fromKey, fromDir: drag.fromDir, fromPortId: drag.fromPortId } },
             );
           }
         }
@@ -1375,8 +1482,7 @@ export default function FreeCanvas({ canvasId }: { canvasId: string }) {
         }
       } else if (drag.kind === "addnode") {
         // 点击（未拖动）落双击点；按住拖到画布松手落松手点；从「拖线
-        // 到空白」菜单进入时（drag.wire / drag.detached），创建的节点
-        // 自动接上那条线。
+        // 到空白」菜单进入时，创建的节点自动接上那条线。
         const rect = vpRef.current?.getBoundingClientRect();
         const dropPos = drag.moved && rect
           ? {
@@ -1396,16 +1502,20 @@ export default function FreeCanvas({ canvasId }: { canvasId: string }) {
           });
           if (!created) return;
           pulseNodes([created.id]);
+          const fromNode = drag.wire ? nodesRef.current.find((n) => n.id === drag.wire!.fromKey) : undefined;
           if (drag.detached) {
-            // 摘线转接：线改接新节点（原连线行由后端合并语义处理）。
+            // 摘线转接：线改接新节点（新节点需要能接住原上游的口）。
             setLiftedWire(null);
-            await store.getState().rewire(drag.detached.connId, created.id);
-          } else if (drag.wire) {
-            if (drag.wire.fromDir === "in") {
-              // 反拖：新节点是来源方。
-              await store.getState().connect(canvasId, created.id, drag.wire.fromKey);
+            const toPort = fromNode ? incomingPortFor(created.type, fromNode.type) : "";
+            await store.getState().rewire(drag.detached.connId, created.id, toPort);
+          } else if (drag.wire && fromNode) {
+            if (drag.wire.fromDir === "out") {
+              // 正拖：新节点是下游，找它可接住上游的输入口。
+              const toPort = incomingPortFor(created.type, fromNode.type);
+              await store.getState().connect(canvasId, drag.wire.fromKey, created.id, toPort);
             } else {
-              await store.getState().connect(canvasId, drag.wire.fromKey, created.id);
+              // 反拖：新节点是上游，接进源输入口。
+              await store.getState().connect(canvasId, created.id, drag.wire.fromKey, drag.wire.fromPortId);
             }
           }
           setSelection([created.id]);
@@ -1450,19 +1560,52 @@ export default function FreeCanvas({ canvasId }: { canvasId: string }) {
     // 数据快照走 ref 镜像，重订阅只为拿到新鲜 view/store 闭包）。
   });
 
-  // ── 键盘：删除选中、撤销、全选、复制粘贴、Escape（输入框聚焦与
-  //    弹层打开时不响应；面板保挂载隐藏时不响应） ──────────────
+  // ── 键盘：删除选中、撤销、全选、复制粘贴、打组 ─────────────
+
+  // 防重入：StrictMode 开发态会双挂载键盘监听，一次 Ctrl+G 建组又解组。
+  const groupingRef = useRef(false);
+  const toggleGroup = useCallback(() => {
+    if (groupingRef.current) return;
+    groupingRef.current = true;
+    window.setTimeout(() => {
+      groupingRef.current = false;
+    }, 0);
+    const sel = selRef.current;
+    if (sel.length === 0) return;
+    const st = store.getState();
+    // 先剪枝：成员已被删除的组清掉死成员（空组丢弃）。
+    const pruned = st.groups
+      .map((g) => ({ ...g, members: g.members.filter((key) => memberFrame(key) !== null) }))
+      .filter((g) => g.members.length > 0);
+    const fullGroup = pruned.find(
+      (g) => g.members.length === sel.length && sel.every((key) => g.members.includes(key)),
+    );
+    if (fullGroup) {
+      void st.setGroups(canvasId, pruned.filter((g) => g.id !== fullGroup.id));
+    } else {
+      const kept = pruned
+        .map((g) => ({ ...g, members: g.members.filter((key) => !sel.includes(key)) }))
+        .filter((g) => g.members.length > 0);
+      void st.setGroups(canvasId, [
+        ...kept,
+        {
+          id: `ng${Date.now()}${Math.floor(Math.random() * 1e4)}`,
+          label: t("project.canvas.nodeGroup"),
+          members: [...sel],
+        },
+      ]);
+    }
+  }, [canvasId, memberFrame, store, t]);
+
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       const el = e.target as HTMLElement | null;
       if (el && (el.tagName === "INPUT" || el.tagName === "TEXTAREA" || el.isContentEditable)) {
         return;
       }
-      // 面板保挂载：画布被 display:none 隐藏（用户在其他顶级区）时不响应，
-      // 否则别的页面按 Delete/Backspace 会隔着隐藏面板删掉画布选中节点。
+      // 面板保挂载：画布被 display:none 隐藏（用户在其他顶级区）时不响应。
       if (!vpRef.current || vpRef.current.offsetParent === null) return;
-      // 弹层打开时不响应（对齐工程画布惯例）：确认框/重命名对话框/画布
-      // chips 弹层/节点选择框开着时，Delete 不该删到背后的选中节点。
+      // 弹层打开时不响应（对齐工程画布惯例）。
       if (document.querySelector(".dialog-overlay, .canvas-dialog-overlay, .canvas-chip-popover") || addMenu) {
         return;
       }
@@ -1502,21 +1645,51 @@ export default function FreeCanvas({ canvasId }: { canvasId: string }) {
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [addMenu, copySelection, deleteSelected, discardDetachedWire, pasteClipboard, runUndo, setSelection, toggleGroup]);
+  }, [addMenu, copySelection, deleteSelected, pasteClipboard, runUndo, setSelection, toggleGroup]);
 
-  // ── 生图（画布区特有，融入工程画布节点 chrome）：参数编辑、生成、
-  //    主图切换、参考图上传 ─────────────────────────────────────
+  // ── 上游媒体解析（预览/保存节点取上游产物） ────────────────
 
-  /** 提示词来源检查（方案 3.6）：至少一条来自非空文本节点的入线。 */
-  const hasPromptSourceFor = (node: CanvasNode): boolean =>
-    connections.some((c) => {
-      if (c.to_node !== node.id) return false;
+  /** 入线第一根的上游节点（预览/保存节点都是单入口）。 */
+  function upstreamNodeOf(nodeId: string): CanvasNode | undefined {
+    const conn = connections.find((c) => c.to_node === nodeId);
+    return conn ? nodes.find((n) => n.id === conn.from_node) : undefined;
+  }
+
+  function upstreamMediaOf(nodeId: string): { paths: string[]; text: string } | null {
+    const from = upstreamNodeOf(nodeId);
+    if (!from) return null;
+    if (from.type === "gen_image" && from.metadata.kind === "gen_image") {
+      const sorted = [...from.metadata.images].sort((a, b) => (a.primary === b.primary ? 0 : a.primary ? -1 : 1));
+      return { paths: sorted.map((img) => img.resource_path), text: "" };
+    }
+    if (from.type === "load_text" && from.metadata.kind === "load_text") {
+      return { paths: [], text: from.metadata.content };
+    }
+    if (from.resource_path) {
+      return { paths: [from.resource_path], text: "" };
+    }
+    return null;
+  }
+
+  /** 生成前提校验（用户定案）：文本口已连非空文本 + 输出口已连保存/预览；
+   *  图像口（参考图）可选。返回缺失清单供按钮旁提示。 */
+  function genReadinessOf(node: CanvasNode): string[] {
+    const missing: string[] = [];
+    const textConn = connections.some((c) => {
+      if (c.to_node !== node.id || c.to_port !== "text") return false;
       const from = nodes.find((n) => n.id === c.from_node);
-      if (!from || from.type !== "text") return false;
-      return from.metadata.kind === "text" && from.metadata.content.trim().length > 0;
+      return from?.type === "load_text" && from.metadata.kind === "load_text" && from.metadata.content.trim().length > 0;
     });
+    if (!textConn) missing.push(t("canvas.genMissingText"));
+    const outConn = connections.some((c) => c.from_node === node.id);
+    if (!outConn) missing.push(t("canvas.genMissingOut"));
+    return missing;
+  }
+
+  // ── 生图（图像生成节点）：参数编辑、生成、主图切换 ─────────
 
   const commitContent = (node: CanvasNode, content: string) => {
+    if (node.metadata.kind !== "load_text" && node.metadata.kind !== "note") return;
     const meta = { ...node.metadata, content } as CanvasNode["metadata"];
     void store.getState().updateNode(node.id, { metadata: JSON.stringify(meta) });
   };
@@ -1525,17 +1698,8 @@ export default function FreeCanvas({ canvasId }: { canvasId: string }) {
     node: CanvasNode,
     patch: { model?: string; size?: string; count?: number },
   ) => {
-    if (node.metadata.kind !== "image") return;
+    if (node.metadata.kind !== "gen_image" && node.metadata.kind !== "gen_video" && node.metadata.kind !== "gen_audio") return;
     const meta = { ...node.metadata, params: { ...node.metadata.params, ...patch } };
-    void store.getState().updateNode(node.id, { metadata: JSON.stringify(meta) });
-  };
-
-  const setImagePrimary = (node: CanvasNode, primaryIdx: number) => {
-    if (node.metadata.kind !== "image") return;
-    const meta = {
-      ...node.metadata,
-      images: node.metadata.images.map((img, i) => ({ ...img, primary: i === primaryIdx })),
-    };
     void store.getState().updateNode(node.id, { metadata: JSON.stringify(meta) });
   };
 
@@ -1551,23 +1715,80 @@ export default function FreeCanvas({ canvasId }: { canvasId: string }) {
     }
   };
 
-  const uploadReference = async (node: CanvasNode) => {
+  // ── 加载节点：资源库选择 / 本地文件 / 拖入 ────────────────
+
+  const pickFromLibrary = (node: CanvasNode, kind: string) => {
+    setPickerForNode(node.id);
+    // kind 供浮层标题区分（图像/视频/音频/文本）。
+    void kind;
+  };
+
+  const pickFromDisk = async (node: CanvasNode) => {
     try {
-      const picked = await invoke<{ path: string }>("select_resource_trace_file");
-      const imported = await invoke<{ file_path: string }>("import_resource_file", {
-        sourcePath: picked.path,
-      });
-      await store.getState().updateNode(node.id, { resourcePath: imported.file_path });
+      const picked = await invoke<{ path: string }>("canvas_pick_media_file");
+      await store.getState().updateNode(node.id, { resourcePath: picked.path });
     } catch (err) {
       // 用户在系统对话框取消：静默；其余错误在节点上提示。
       const msg = String(err);
-      if (!msg.includes("取消") && !msg.includes("cancel")) {
+      if (!msg.includes("cancelled") && !msg.includes("取消")) {
         setNodeErrors((prev) => ({ ...prev, [node.id]: msg }));
       }
     }
   };
 
-  // ── 空画布示意（方案 3.6）：一键创建 提示词 → 生图 最小工作流 ──
+  // ── 保存节点：入库 / 另存 ─────────────────────────────────
+
+  const saveUpstreamToLibrary = async (node: CanvasNode) => {
+    const upstream = upstreamMediaOf(node.id);
+    if (!upstream?.paths.length) return;
+    const savedPaths: string[] = [];
+    try {
+      for (const path of upstream.paths) {
+        const result = await invoke<{ file_path: string }>("canvas_save_to_library", { sourcePath: path });
+        savedPaths.push(result.file_path);
+      }
+      if (node.metadata.kind === "save_image" || node.metadata.kind === "save_video" || node.metadata.kind === "save_audio") {
+        const meta = {
+          ...node.metadata,
+          status: "saved",
+          error: "",
+          target: "library",
+          saved_path: savedPaths[0] ?? "",
+        };
+        void store.getState().updateNode(node.id, { metadata: JSON.stringify(meta) });
+      }
+    } catch (err) {
+      if (node.metadata.kind === "save_image" || node.metadata.kind === "save_video" || node.metadata.kind === "save_audio") {
+        const meta = { ...node.metadata, status: "error", error: String(err) };
+        void store.getState().updateNode(node.id, { metadata: JSON.stringify(meta) });
+      } else {
+        setNodeErrors((prev) => ({ ...prev, [node.id]: String(err) }));
+      }
+    }
+  };
+
+  const saveUpstreamToPath = async (node: CanvasNode, sourcePath: string, defaultName: string) => {
+    try {
+      const target = await invoke<string>("canvas_pick_save_path", { defaultName });
+      if (!target) return; // 用户取消
+      await invoke("canvas_export_to_path", { sourcePath, target });
+      if (node.metadata.kind === "save_image" || node.metadata.kind === "save_video" || node.metadata.kind === "save_audio") {
+        const meta = { ...node.metadata, status: "saved", error: "", target: "path", saved_path: target };
+        void store.getState().updateNode(node.id, { metadata: JSON.stringify(meta) });
+      }
+    } catch (err) {
+      const msg = String(err);
+      if (msg.includes("cancelled") || msg.includes("取消")) return;
+      if (node.metadata.kind === "save_image" || node.metadata.kind === "save_video" || node.metadata.kind === "save_audio") {
+        const meta = { ...node.metadata, status: "error", error: msg };
+        void store.getState().updateNode(node.id, { metadata: JSON.stringify(meta) });
+      } else {
+        setNodeErrors((prev) => ({ ...prev, [node.id]: msg }));
+      }
+    }
+  };
+
+  // ── 空画布示意（方案 3.6）：一键创建 文本→图像生成→预览 工作流 ──
 
   const seedTemplate = useCallback(async () => {
     const rect = vpRef.current?.getBoundingClientRect();
@@ -1580,45 +1801,48 @@ export default function FreeCanvas({ canvasId }: { canvasId: string }) {
     const st = store.getState();
     const text = await st.createNode({
       canvasId,
-      nodeType: "text",
-      posX: center.x - 340,
-      posY: center.y - 110,
-      width: NODE_DEFAULT_SIZE.text.w,
-      height: NODE_DEFAULT_SIZE.text.h,
-      metadata: JSON.stringify({ kind: "text", content: t("canvas.seedPrompt") }),
+      nodeType: "load_text",
+      posX: center.x - 420,
+      posY: center.y - 60,
+      width: NODE_DEFAULT_SIZE.load_text.w,
+      height: NODE_DEFAULT_SIZE.load_text.h,
+      metadata: JSON.stringify({ kind: "load_text", content: t("canvas.seedPrompt") }),
     });
     if (!text) return;
     const img = await st.createNode({
       canvasId,
-      nodeType: "image",
-      posX: center.x + 30,
-      posY: center.y - 170,
-      width: NODE_DEFAULT_SIZE.image.w,
-      height: NODE_DEFAULT_SIZE.image.h,
+      nodeType: "gen_image",
+      posX: center.x - 60,
+      posY: center.y - 130,
+      width: NODE_DEFAULT_SIZE.gen_image.w,
+      height: NODE_DEFAULT_SIZE.gen_image.h,
     });
     if (!img) return;
-    await st.connect(canvasId, text.id, img.id);
-    pushUndo({ kind: "create", ids: [text.id, img.id] });
-    pulseNodes([text.id, img.id]);
+    const preview = await st.createNode({
+      canvasId,
+      nodeType: "preview_image",
+      posX: center.x + 330,
+      posY: center.y - 110,
+      width: NODE_DEFAULT_SIZE.preview_image.w,
+      height: NODE_DEFAULT_SIZE.preview_image.h,
+    });
+    await st.connect(canvasId, text.id, img.id, "text");
+    if (preview) await st.connect(canvasId, img.id, preview.id, "in");
+    pushUndo({ kind: "create", ids: [text.id, img.id, ...(preview ? [preview.id] : [])] });
+    pulseNodes([text.id, img.id, ...(preview ? [preview.id] : [])]);
     setSelection([text.id, img.id]);
-    // 种子完成后整体适配窗口：fit effect 在首批节点（text 先落库）变化时
-    // 触发一次就标记结束，后落的图片节点会被留在视野外（窄窗口实测）。
+    // 种子完成后整体适配窗口。
     if (fitAll(store.getState().nodes)) {
       fitAttemptedRef.current = true;
     }
   }, [canvasId, fitAll, pushUndo, pulseNodes, setSelection, store, t, view.scale, view.x, view.y]);
 
-  // ── OS 文件拖入（阶段 3）：图片文件 → 入库 → 参考图节点 ──────
+  // ── OS 文件拖入：命中加载节点 = 加载到该节点；空白 = 新建加载节点 ──
 
   const [dropHint, setDropHint] = useState(false);
 
   const handleFileDrop = useCallback(
     async (paths: string[], logical: { x: number; y: number }) => {
-      const imageExts = ["png", "jpg", "jpeg", "webp", "gif", "bmp"];
-      const imagePaths = paths.filter(
-        (p) => imageExts.includes(p.split(".").pop()?.toLowerCase() ?? ""),
-      );
-      if (!imagePaths.length) return;
       const rect = vpRef.current?.getBoundingClientRect();
       const world = rect
         ? {
@@ -1626,28 +1850,41 @@ export default function FreeCanvas({ canvasId }: { canvasId: string }) {
             y: (logical.y - rect.top - view.y) / view.scale,
           }
         : { x: 0, y: 0 };
-      const st = store.getState();
+      // 命中加载节点：按节点类型过滤扩展名，加载到该节点（多文件取首张）。
+      const hitEl = document.elementFromPoint(logical.x, logical.y) as Element | null;
+      const targetNodeEl = hitEl?.closest(".pc-node[data-key]");
+      const targetId = targetNodeEl?.getAttribute("data-key") ?? "";
+      const targetNode = nodesRef.current.find((n) => n.id === targetId);
+      if (targetNode && (targetNode.type === "load_image" || targetNode.type === "load_video" || targetNode.type === "load_audio")) {
+        const allowed = targetNode.type === "load_image" ? IMAGE_EXTS : targetNode.type === "load_video" ? VIDEO_EXTS : AUDIO_EXTS;
+        const match = paths.find((p) => allowed.includes(extOf(p)));
+        if (match) {
+          await invoke("canvas_authorize_media", { path: match }).catch(() => {});
+          await store.getState().updateNode(targetNode.id, { resourcePath: match });
+          return;
+        }
+        return;
+      }
+      // 空白：图片 → 新建加载图像节点（每张一个，错开 24px）。
       let offset = 0;
       const createdIds: string[] = [];
-      for (const path of imagePaths) {
+      for (const path of paths) {
+        if (!IMAGE_EXTS.includes(extOf(path))) continue;
         try {
-          // 一切参考图先进资源库（方案 3.5）：拖入即入库再引用。
-          const imported = await invoke<{ file_path: string }>("import_resource_file", {
-            sourcePath: path,
-          });
-          const node = await st.createNode({
+          await invoke("canvas_authorize_media", { path }).catch(() => {});
+          const node = await store.getState().createNode({
             canvasId,
-            nodeType: "ref",
+            nodeType: "load_image",
             posX: world.x + offset,
             posY: world.y + offset,
-            width: NODE_DEFAULT_SIZE.ref.w,
-            height: NODE_DEFAULT_SIZE.ref.h,
-            resourcePath: imported.file_path,
+            width: NODE_DEFAULT_SIZE.load_image.w,
+            height: NODE_DEFAULT_SIZE.load_image.h,
+            resourcePath: path,
           });
           if (node) createdIds.push(node.id);
           offset += 24;
         } catch (err) {
-          console.error("拖入文件入库失败:", err);
+          console.error("拖入加载失败:", err);
         }
       }
       pulseNodes(createdIds);
@@ -1686,19 +1923,15 @@ export default function FreeCanvas({ canvasId }: { canvasId: string }) {
     };
   }, [handleFileDrop]);
 
-  // ── 批量生成（阶段 3）：多选图片节点 → 队列顺序执行 ─────────
+  // ── 批量生成：多选图像生成节点 → 队列顺序执行 ─────────────
 
   const batchRunningRef = useRef(false);
-  // 用渲染期的 nodes 状态过滤，批量条的计数与实选严格一致；runBatch 内部
-  // 执行时再走 nodesRef 取最新。
-  const selectedImageIds = selKeys.filter(
-    (id) => nodes.find((n) => n.id === id)?.type === "image",
-  );
+  const selectedGenIds = selKeys.filter((id) => nodes.find((n) => n.id === id)?.type === "gen_image");
   const runBatch = useCallback(async () => {
     if (batchRunningRef.current) return;
     batchRunningRef.current = true;
     try {
-      for (const id of selectedImageIds) {
+      for (const id of selectedGenIds) {
         const node = nodesRef.current.find((n) => n.id === id);
         if (node) await startGenerate(node);
       }
@@ -1707,13 +1940,11 @@ export default function FreeCanvas({ canvasId }: { canvasId: string }) {
     }
     // startGenerate 依赖 canvasId/store，经其闭包稳定；选中集变化由渲染期值传入。
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [selectedImageIds.join(",")]);
+  }, [selectedGenIds.join(",")]);
 
   // ── 渲染 ───────────────────────────────────────────────────
 
-  // 连线层（卡片之下）：按视口尺寸渲染 + 平移组换算世界坐标，不再铺
-  // 世界范围的巨型图层（部分 WebView2 GPU 栅格化超限时会整层不绘制，
-  // 表现为连线全不可见）。
+  // 连线层（卡片之下）：按视口尺寸渲染 + 平移组换算世界坐标。
   const wiresVis = {
     x: -view.x / view.scale - WIRES_VIEWPORT_PAD,
     y: -view.y / view.scale - WIRES_VIEWPORT_PAD,
@@ -1735,6 +1966,44 @@ export default function FreeCanvas({ canvasId }: { canvasId: string }) {
     </>
   );
 
+  // 端口行（对齐工程画布）：每行一个输入口（点 + 名称），首行右端输出
+  // 口。口点色按媒体类型；data-port-id 供实测锚点与摘线/落点识别。
+  function portBarOf(node: CanvasNode): ReactNode {
+    const def = PORT_DEFS[node.type];
+    if (def.ins.length === 0 && !def.out) return null;
+    const rows = Math.max(def.ins.length, def.out ? 1 : 0);
+    return (
+      <div className="pc-port-bar">
+        {Array.from({ length: rows }, (_, i) => (
+          <div key={i} className="pc-port-row">
+            {def.ins[i] ? (
+              <>
+                <span
+                  className="pc-port pc-port-in"
+                  data-port="in"
+                  data-port-id={def.ins[i].id}
+                  style={{ background: MEDIA_COLOR[def.ins[i].mediaKind] }}
+                />
+                <span className="pc-port-name">{t(`canvas.port.${def.ins[i].mediaKind}`)}</span>
+              </>
+            ) : null}
+            {i === 0 && def.out ? (
+              <>
+                <span className="pc-port-name pc-port-name-out">{t(`canvas.port.${def.out.mediaKind}`)}</span>
+                <span
+                  className="pc-port pc-port-out"
+                  data-port="out"
+                  data-port-id="__out"
+                  style={{ background: NODE_ACCENT[node.type] }}
+                />
+              </>
+            ) : null}
+          </div>
+        ))}
+      </div>
+    );
+  }
+
   // 迷你地图比例：内容包围盒铺满小地图。
   const miniBBox = (() => {
     let minX = Infinity;
@@ -1755,7 +2024,45 @@ export default function FreeCanvas({ canvasId }: { canvasId: string }) {
     ? Math.min(MINI_W / Math.max(miniBBox.w, 1), MINI_H / Math.max(miniBBox.h, 1))
     : 1;
 
-  // 连线渲染锚点取实时布局（拖动中 commitLayout 即时合并，天然跟随）。
+  // 菜单条目（按三类链路分组 + 便签）：搜索过滤 + 连线续接的 accepts
+  // 过滤（拖线/摘线到空白时只列能接上的节点类型）。
+  const menuGroups: { key: string; types: CanvasNodeType[] }[] = [
+    { key: "gen", types: ["gen_image", "gen_video", "gen_audio"] },
+    { key: "load", types: ["load_text", "load_image", "load_video", "load_audio"] },
+    { key: "output", types: ["save_image", "preview_image", "save_video", "preview_video", "save_audio", "preview_audio"] },
+    { key: "misc", types: ["note"] },
+  ];
+  const menuIconOf = (type: CanvasNodeType): ReactNode => {
+    switch (type) {
+      case "gen_image": return Icons.image;
+      case "gen_video": case "load_video": case "preview_video": return Icons.video;
+      case "gen_audio": case "load_audio": case "save_audio": case "preview_audio": return Icons.audio;
+      case "load_text": return Icons.file;
+      case "load_image": return Icons.image;
+      case "save_image": case "save_video": return Icons.resources;
+      case "preview_image": return Icons.expand;
+      default: return Icons.edit;
+    }
+  };
+  const menuFilterType = (type: CanvasNodeType): boolean => {
+    const pending = addMenu?.wire ?? (addMenu?.detached ? { fromKey: addMenu.detached.fromKey, fromDir: "in" as const, fromPortId: "" } : null);
+    if (!pending) return true;
+    const fromNode = nodes.find((n) => n.id === pending.fromKey);
+    if (!fromNode) return true;
+    if (pending.fromDir === "out") {
+      // 正拖：新节点需要能接住上游类型的输入口。
+      return PORT_DEFS[type].ins.some((p) => p.accepts.includes(fromNode.type));
+    }
+    if (pending.fromDir === "in" && !addMenu?.detached) {
+      // 反拖：新节点是上游，需有 out 且被源输入口接受。
+      const inDef = PORT_DEFS[fromNode.type].ins.find((p) => p.id === pending.fromPortId);
+      return !!PORT_DEFS[type].out && (!inDef || inDef.accepts.includes(type));
+    }
+    // 摘线：新节点作为下游，需要能接住原上游的口。
+    return PORT_DEFS[type].ins.some((p) => p.accepts.includes(fromNode.type));
+  };
+
+  const lightboxUrl = useMediaUrl(lightboxSrc);
 
   return (
     <div className="pc-root fc-root">
@@ -1788,11 +2095,11 @@ export default function FreeCanvas({ canvasId }: { canvasId: string }) {
               {connections.map((conn) => {
                 // 被摘下的线（拿着换目标中）暂时隐藏，收尾时转接或放回。
                 if (liftedWire && conn.id === liftedWire.connId) return null;
-                const from = nodeById(conn.from_node);
-                const to = nodeById(conn.to_node);
+                const from = nodes.find((n) => n.id === conn.from_node);
+                const to = nodes.find((n) => n.id === conn.to_node);
                 if (!from || !to) return null;
                 const a = outPointOf(from.id);
-                const b = inPointOf(to.id);
+                const b = inPointOf(to.id, conn.to_port || PORT_DEFS[to.type].ins[0]?.id || "in");
                 if (!a || !b) return null;
                 const d = wirePathD(a, b);
                 return (
@@ -1812,8 +2119,7 @@ export default function FreeCanvas({ canvasId }: { canvasId: string }) {
             </g>
           </svg>
 
-          {/* 节点分组框（Ctrl+G）：框自适应成员包围盒，渲染在节点层之下；
-              拖标题条整组移动（复用组拖管线），组员被删后框随之收缩。 */}
+          {/* 节点分组框（Ctrl+G）：框自适应成员包围盒，渲染在节点层之下。 */}
           {groups.map((group) => {
             const frames = group.members
               .map((key) => memberFrame(key))
@@ -1843,18 +2149,7 @@ export default function FreeCanvas({ canvasId }: { canvasId: string }) {
             // meta 提前捕获为 const：闭包（onClick/onBlur）拿不到属性
             // 链的判窄，const 变量的判窄可以跨闭包保留。
             const meta = node.metadata;
-            const portSpans = (
-              <>
-                <span className="pc-port pc-port-in" data-port="in" style={{ background: "var(--text-tertiary)" }} />
-                <span className="pc-port pc-port-out" data-port="out" style={{ background: accent }} />
-              </>
-            );
-            const head = (
-              <div className="pc-node-head">
-                <span className="pc-node-kind">{t(`canvas.node.${node.type}`)}</span>
-                {node.title && <b className="pc-node-title">{node.title}</b>}
-              </div>
-            );
+            const autoHeight = node.height == null;
             const tools = (
               <span className="pc-node-tools">
                 <button
@@ -1871,9 +2166,9 @@ export default function FreeCanvas({ canvasId }: { canvasId: string }) {
                 </button>
               </span>
             );
+
             if (node.type === "note") {
-              // 便签节点：视觉标准与通用节点一致（B+ 头栏卡 + 黄色内嵌
-              // 便签体），双击进入编辑（对齐工程画布便签惯例）。
+              // 便签节点：标准头栏卡 + 琥珀内嵌便签体，双击进入编辑。
               return (
                 <div
                   key={node.id}
@@ -1884,7 +2179,7 @@ export default function FreeCanvas({ canvasId }: { canvasId: string }) {
                       left: node.pos_x,
                       top: node.pos_y,
                       width: size.w,
-                      height: node.height != null ? size.h : undefined,
+                      height: autoHeight ? undefined : size.h,
                       "--node-accent": accent,
                     } as CSSProperties
                   }
@@ -1943,11 +2238,238 @@ export default function FreeCanvas({ canvasId }: { canvasId: string }) {
                       {Icons.close}
                     </button>
                   </span>
-                  {portSpans}
                   {resizeHandle}
                 </div>
               );
             }
+
+            // ── 节点体（按类型）：生成 / 加载 / 输出三类链路 ──
+            let body: ReactNode = null;
+            if (node.type === "load_text" && meta.kind === "load_text") {
+              body = (
+                <div className="fc-node-form">
+                  <textarea
+                    className="fc-node-edit is-inline"
+                    key={`t-${node.id}-${node.updated_at}`}
+                    defaultValue={meta.content}
+                    placeholder={t("canvas.loadTextPlaceholder")}
+                    onBlur={(e) => commitContent(node, e.target.value)}
+                  />
+                </div>
+              );
+            } else if (node.type === "load_image" || node.type === "load_video" || node.type === "load_audio") {
+              body = (
+                <div className="fc-node-form">
+                  {node.resource_path ? (
+                    node.type === "load_image" ? (
+                      <ResourceThumb path={node.resource_path} className="fc-thumb-cover" />
+                    ) : node.type === "load_video" ? (
+                      <ResourceMediaPlayer kind="video" path={node.resource_path} />
+                    ) : (
+                      <ResourceMediaPlayer kind="audio" path={node.resource_path} />
+                    )
+                  ) : (
+                    <div className="fc-node-placeholder">{t("canvas.loadEmpty")}</div>
+                  )}
+                  <div className="fc-node-row">
+                    <button className="fc-node-btn ghost grow" onClick={() => pickFromLibrary(node, node.type)}>
+                      {t("canvas.loadFromLibrary")}
+                    </button>
+                    <button className="fc-node-btn ghost grow" onClick={() => void pickFromDisk(node)}>
+                      {t("canvas.loadFromFile")}
+                    </button>
+                  </div>
+                  <div className="fc-load-hint">{t("canvas.loadDropHint")}</div>
+                  {nodeErrors[node.id] && <div className="fc-gen-warn">{nodeErrors[node.id]}</div>}
+                </div>
+              );
+            } else if (node.type === "gen_image" && meta.kind === "gen_image") {
+              const missing = genReadinessOf(node);
+              body = (
+                <div className="fc-node-form">
+                  <input
+                    className="fc-node-input"
+                    key={`gm-${node.id}-${node.updated_at}`}
+                    defaultValue={meta.params.model}
+                    placeholder={`${t("canvas.genModelLabel")}：${modelFallback}`}
+                    onBlur={(e) => commitImageParams(node, { model: e.target.value.trim() })}
+                  />
+                  <div className="fc-node-row">
+                    <input
+                      className="fc-node-input grow"
+                      key={`gs-${node.id}-${node.updated_at}`}
+                      defaultValue={meta.params.size}
+                      placeholder="auto / 1024x1024 / 3:2"
+                      onBlur={(e) => commitImageParams(node, { size: e.target.value.trim() })}
+                    />
+                    <input
+                      className="fc-node-input count"
+                      key={`gc-${node.id}-${node.updated_at}`}
+                      type="number"
+                      min={1}
+                      max={15}
+                      defaultValue={meta.params.count}
+                      onBlur={(e) =>
+                        commitImageParams(node, {
+                          count: Math.max(1, Math.min(15, Number.parseInt(e.target.value, 10) || 1)),
+                        })
+                      }
+                    />
+                  </div>
+                  {genProgress[node.id] ? (
+                    <>
+                      <div className="fc-gen-slots">
+                        {Array.from({ length: genProgress[node.id].total }, (_, i) => {
+                          const url = genProgress[node.id].previews[i];
+                          return url ? (
+                            <img key={i} className="fc-gen-slot filled" src={url} alt="" draggable={false} />
+                          ) : (
+                            <span key={i} className="fc-gen-slot pending">{t("canvas.genSlotPending")}</span>
+                          );
+                        })}
+                      </div>
+                      <div className="fc-node-row">
+                        <span className="fc-gen-summary">
+                          {t("canvas.generating")} {genProgress[node.id].received + genProgress[node.id].errors}/{genProgress[node.id].total}
+                        </span>
+                        <button
+                          className="fc-node-btn ghost"
+                          onClick={() => void store.getState().cancelGeneration(genProgress[node.id].requestId)}
+                        >
+                          {t("canvas.cancelGen")}
+                        </button>
+                      </div>
+                    </>
+                  ) : (
+                    <button
+                      className="fc-node-btn accent"
+                      disabled={genStarting || missing.length > 0}
+                      onClick={() => void startGenerate(node)}
+                    >
+                      {meta.status === "done" ? t("canvas.regenerate") : t("canvas.genButton")}
+                    </button>
+                  )}
+                  {missing.length > 0 && !genProgress[node.id] && (
+                    <div className="fc-gen-warn">{t("canvas.genNotReady", { items: missing.join("、") })}</div>
+                  )}
+                  {nodeErrors[node.id] && <div className="fc-gen-warn">{nodeErrors[node.id]}</div>}
+                  {meta.status === "error" && meta.error && <div className="fc-gen-warn">{meta.error}</div>}
+                  {meta.images.length > 0 && (
+                    <div className="fc-gen-thumbs">
+                      {meta.images.map((thumb, i) => (
+                        <button
+                          key={i}
+                          className={`fc-gen-thumb${thumb.primary ? " primary" : ""}`}
+                          title={thumb.primary ? t("canvas.genPrimary") : t("canvas.genSetPrimary")}
+                          onClick={() => {
+                            const images = meta.images.map((img, j) => ({ ...img, primary: j === i }));
+                            void store.getState().updateNode(node.id, {
+                              metadata: JSON.stringify({ ...meta, images } as CanvasNode["metadata"]),
+                            });
+                          }}
+                        >
+                          <ResourceThumb path={thumb.resource_path} className="fc-thumb" />
+                          {thumb.primary && <span className="fc-gen-primary-badge">{t("canvas.genPrimary")}</span>}
+                        </button>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              );
+            } else if (node.type === "gen_video" || node.type === "gen_audio") {
+              const notReadyKey = node.type === "gen_video" ? "canvas.genVideoNotReady" : "canvas.genAudioNotReady";
+              body = (
+                <div className="fc-node-form">
+                  <input
+                    className="fc-node-input"
+                    key={`gm-${node.id}-${node.updated_at}`}
+                    defaultValue={meta.kind === "gen_video" || meta.kind === "gen_audio" ? meta.params.model : ""}
+                    placeholder={`${t("canvas.genModelLabel")}：${modelFallback}`}
+                    onBlur={(e) => commitImageParams(node, { model: e.target.value.trim() })}
+                  />
+                  <button className="fc-node-btn accent" disabled title={t(notReadyKey)}>
+                    {t("canvas.genButton")}
+                  </button>
+                  <div className="fc-gen-warn is-muted">{t(notReadyKey)}</div>
+                  {nodeErrors[node.id] && <div className="fc-gen-warn">{nodeErrors[node.id]}</div>}
+                </div>
+              );
+            } else if (node.type === "save_image" || node.type === "save_video" || node.type === "save_audio") {
+              const upstream = upstreamMediaOf(node.id);
+              const saved = meta.kind === "save_image" || meta.kind === "save_video" || meta.kind === "save_audio" ? meta : null;
+              body = (
+                <div className="fc-node-form">
+                  {upstream?.paths.length ? (
+                    <div className="fc-gen-thumbs">
+                      {upstream.paths.map((path, i) => (
+                        <span key={i} className="fc-save-item">
+                          {node.type === "save_image" ? (
+                            <ResourceThumb path={path} className="fc-thumb" />
+                          ) : (
+                            <span className="fc-save-name">{path.split(/[\\/]/).pop()}</span>
+                          )}
+                          <button
+                            className="fc-node-btn ghost is-tiny"
+                            onClick={() => void saveUpstreamToPath(node, path, path.split(/[\\/]/).pop() ?? "产物")}
+                          >
+                            {t("canvas.saveSaveAs")}
+                          </button>
+                        </span>
+                      ))}
+                    </div>
+                  ) : (
+                    <div className="fc-node-placeholder">{t("canvas.saveUpstreamEmpty")}</div>
+                  )}
+                  <button
+                    className="fc-node-btn accent"
+                    disabled={!upstream?.paths.length}
+                    onClick={() => void saveUpstreamToLibrary(node)}
+                  >
+                    {t("canvas.saveToLibrary")}
+                  </button>
+                  {saved?.status === "saved" && saved.saved_path && (
+                    <button
+                      className="fc-node-btn ghost"
+                      onClick={() => {
+                        if (saved.target === "library") void openResourceFile(saved.saved_path);
+                      }}
+                    >
+                      {t("canvas.saveSaved", { path: saved.saved_path })}
+                    </button>
+                  )}
+                  {saved?.status === "error" && saved.error && <div className="fc-gen-warn">{saved.error}</div>}
+                  {nodeErrors[node.id] && <div className="fc-gen-warn">{nodeErrors[node.id]}</div>}
+                </div>
+              );
+            } else if (node.type === "preview_image" || node.type === "preview_video" || node.type === "preview_audio") {
+              const upstream = upstreamMediaOf(node.id);
+              const path = upstream?.paths[0] ?? "";
+              body = (
+                <div className="fc-node-form">
+                  {!upstream ? (
+                    <div className="fc-node-placeholder">{t("canvas.previewEmpty")}</div>
+                  ) : node.type === "preview_image" ? (
+                    path ? (
+                      <button
+                        className="fc-preview-media"
+                        onClick={() => setLightboxSrc(path)}
+                        title={t("canvas.previewOpen")}
+                      >
+                        <ResourceThumb path={path} className="fc-thumb-cover" />
+                      </button>
+                    ) : (
+                      <div className="fc-node-placeholder">{t("canvas.previewEmpty")}</div>
+                    )
+                  ) : node.type === "preview_video" ? (
+                    path ? <ResourceMediaPlayer kind="video" path={path} /> : <div className="fc-node-placeholder">{t("canvas.previewEmpty")}</div>
+                  ) : (
+                    path ? <ResourceMediaPlayer kind="audio" path={path} /> : <div className="fc-node-placeholder">{t("canvas.previewEmpty")}</div>
+                  )}
+                  {upstream?.text && <div className="fc-preview-text">{upstream.text}</div>}
+                </div>
+              );
+            }
+
             return (
               <div
                 key={node.id}
@@ -1958,164 +2480,34 @@ export default function FreeCanvas({ canvasId }: { canvasId: string }) {
                     left: node.pos_x,
                     top: node.pos_y,
                     width: size.w,
-                    // 视觉标准（B+）：未拖过尺寸手柄的节点高度由内容撑开
-                    // （height 不落库），text 常驻编辑框除外。
-                    height: node.height != null || node.type === "text" ? size.h : undefined,
+                    // 视觉标准（B+）：未拖过尺寸手柄的节点高度由内容撑开，
+                    // 文本常驻编辑框节点除外。
+                    height: !autoHeight || node.type === "load_text" ? size.h : undefined,
                     "--node-accent": accent,
                   } as CSSProperties
                 }
               >
-                {head}
-                {node.type === "text" && (
-                  // 正文即节点体：常驻可编辑，失焦提交。
-                  <textarea
-                    className="fc-node-edit"
-                    key={`t-${node.id}-${node.updated_at}`}
-                    defaultValue={node.metadata.kind === "text" ? node.metadata.content : ""}
-                    placeholder={t("canvas.textContentPlaceholder")}
-                    onBlur={(e) => commitContent(node, e.target.value)}
-                  />
-                )}
-                {node.type === "image" && meta.kind === "image" && (
-                  <div className="fc-node-form">
-                    <input
-                      className="fc-node-input"
-                      key={`gm-${node.id}-${node.updated_at}`}
-                      defaultValue={meta.params.model}
-                      placeholder={`${t("canvas.genModelLabel")}：${modelFallback}`}
-                      onBlur={(e) => commitImageParams(node, { model: e.target.value.trim() })}
-                    />
-                    <div className="fc-node-row">
-                      <input
-                        className="fc-node-input grow"
-                        key={`gs-${node.id}-${node.updated_at}`}
-                        defaultValue={meta.params.size}
-                        placeholder="auto / 1024x1024 / 3:2"
-                        onBlur={(e) => commitImageParams(node, { size: e.target.value.trim() })}
-                      />
-                      <input
-                        className="fc-node-input count"
-                        key={`gc-${node.id}-${node.updated_at}`}
-                        type="number"
-                        min={1}
-                        max={15}
-                        defaultValue={meta.params.count}
-                        onBlur={(e) =>
-                          commitImageParams(node, {
-                            count: Math.max(1, Math.min(15, Number.parseInt(e.target.value, 10) || 1)),
-                          })
-                        }
-                      />
-                    </div>
-                    {genProgress[node.id] ? (
-                      <>
-                        <div className="fc-gen-slots">
-                          {Array.from({ length: genProgress[node.id].total }, (_, i) => {
-                            const url = genProgress[node.id].previews[i];
-                            return url ? (
-                              <img key={i} className="fc-gen-slot filled" src={url} alt="" draggable={false} />
-                            ) : (
-                              <span key={i} className="fc-gen-slot pending">{t("canvas.genSlotPending")}</span>
-                            );
-                          })}
-                        </div>
-                        <div className="fc-node-row">
-                          <span className="fc-gen-summary">
-                            {t("canvas.generating")} {genProgress[node.id].received + genProgress[node.id].errors}/{genProgress[node.id].total}
-                          </span>
-                          <button
-                            className="fc-node-btn ghost"
-                            onClick={() => void store.getState().cancelGeneration(genProgress[node.id].requestId)}
-                          >
-                            {t("canvas.cancelGen")}
-                          </button>
-                        </div>
-                      </>
-                    ) : (
-                      <button
-                        className="fc-node-btn accent"
-                        disabled={genStarting || !hasPromptSourceFor(node)}
-                        onClick={() => void startGenerate(node)}
-                      >
-                        {meta.status === "done" ? t("canvas.regenerate") : t("canvas.genButton")}
-                      </button>
-                    )}
-                    {!hasPromptSourceFor(node) && !genProgress[node.id] && (
-                      <div className="fc-gen-warn">{t("canvas.noPromptSource")}</div>
-                    )}
-                    {nodeErrors[node.id] && <div className="fc-gen-warn">{nodeErrors[node.id]}</div>}
-                    {meta.status === "error" && meta.error && (
-                      <div className="fc-gen-warn">{meta.error}</div>
-                    )}
-                    {meta.images.length > 0 && (
-                      <>
-                        <div className="fc-gen-thumbs">
-                          {meta.images.map((thumb, i) => (
-                            <button
-                              key={i}
-                              className={`fc-gen-thumb${thumb.primary ? " primary" : ""}`}
-                              title={thumb.primary ? t("canvas.genPrimary") : t("canvas.genSetPrimary")}
-                              onClick={() => setImagePrimary(node, i)}
-                            >
-                              <ResourceThumb path={thumb.resource_path} className="fc-thumb" />
-                              {thumb.primary && <span className="fc-gen-primary-badge">{t("canvas.genPrimary")}</span>}
-                            </button>
-                          ))}
-                        </div>
-                        <button
-                          className="fc-node-btn ghost"
-                          onClick={() => {
-                            const target = meta.images.find((item) => item.primary) ?? meta.images[0];
-                            if (target?.resource_path) void openResourceFile(target.resource_path);
-                          }}
-                        >
-                          {t("canvas.showInLibrary")}
-                        </button>
-                      </>
-                    )}
-                  </div>
-                )}
-                {node.type === "ref" && (
-                  <div className="fc-node-form">
-                    {node.resource_path ? (
-                      <ResourceThumb path={node.resource_path} className="fc-thumb-cover" />
-                    ) : (
-                      <div className="fc-node-placeholder">{t("canvas.refEmpty")}</div>
-                    )}
-                    <input
-                      className="fc-node-input"
-                      key={`p-${node.id}-${node.updated_at}`}
-                      defaultValue={node.resource_path}
-                      placeholder={t("canvas.pathPlaceholder")}
-                      onBlur={(e) => {
-                        const path = e.target.value.trim();
-                        if (path !== node.resource_path) {
-                          void store.getState().updateNode(node.id, { resourcePath: path });
-                        }
-                      }}
-                    />
-                    <button className="fc-node-btn ghost" onClick={() => void uploadReference(node)}>
-                      {t("canvas.uploadRef")}
-                    </button>
-                  </div>
-                )}
+                <div className="pc-node-head">
+                  <span className="pc-node-kind">{t(`canvas.node.${node.type}`)}</span>
+                  {node.title && <b className="pc-node-title">{node.title}</b>}
+                </div>
+                {portBarOf(node)}
+                {body}
                 {tools}
-                {portSpans}
                 {resizeHandle}
               </div>
             );
           })}
         </div>
 
-        {/* 刀切痕层：视口直下的绝对定位层（pc-world 之后 → 盖在卡片上），
-            用视口屏幕坐标画折线。滑动中 ref 直写双描边（暗衬 + 白芯），
-            松手清空即隐形。 */}
+        {/* 刀切痕层：视口直下的绝对定位层（pc-world 之后 → 盖在卡片上）。 */}
         <svg className="pc-trailayer" aria-hidden="true">
           <polyline ref={cutTrailUnderRef} className="pc-wire-cut-under" points="" />
           <polyline ref={cutTrailRef} className="pc-wire-cut" points="" />
         </svg>
 
-        {/* 双击空白的节点选择框（ComfyUI 搜索框的对应物） */}
+        {/* 双击空白的节点选择框（ComfyUI 搜索框的对应物）：按生成/加载/
+            输出三类分组。 */}
         {addMenu && (
           <div
             className="pc-addmenu"
@@ -2129,84 +2521,68 @@ export default function FreeCanvas({ canvasId }: { canvasId: string }) {
               onChange={(event) => setAddMenuQuery(event.target.value)}
               onKeyDown={(event) => {
                 if (event.key === "Escape") {
-                  // 取消菜单＝不建节点直接退出：摘下的线就此断开
-                  // （见 discardDetachedWire），不放回原口。
+                  // 取消菜单＝不建节点直接退出：摘下的线就此断开。
                   if (addMenu.detached) discardDetachedWire(addMenu.detached);
                   setAddMenu(null);
                 }
               }}
-              // 聚焦必须带 preventScroll：菜单常弹出在画布边缘，默认聚焦
-              // 会让浏览器滚动 overflow:hidden 的视口容器把输入框露出来，
-              // 表现为整个画布节点集体平移（连线/断线时位置漂移的根源）。
+              // 聚焦必须带 preventScroll：默认聚焦会滚动视口容器把输入框
+              // 露出来，表现为整个画布节点集体平移。
               ref={(el) => {
                 el?.focus({ preventScroll: true });
               }}
             />
-            {([
-              {
-                key: "text",
-                label: t("canvas.node.text"),
-                hint: t("canvas.typeTextHint"),
-                icon: Icons.file,
-              },
-              {
-                key: "image",
-                label: t("canvas.node.image"),
-                hint: t("canvas.typeImageHint"),
-                icon: Icons.image,
-              },
-              {
-                key: "ref",
-                label: t("canvas.node.ref"),
-                hint: t("canvas.typeRefHint"),
-                icon: Icons.resources,
-              },
-              {
-                key: "note",
-                label: t("canvas.node.note"),
-                hint: t("project.canvas.typeNoteHint"),
-                icon: Icons.edit,
-              },
-            ] as { key: CanvasNodeType; label: string; hint: string; icon: ReactNode }[])
-              .filter((item) => item.label.toLowerCase().includes(addMenuQuery.trim().toLowerCase()))
-              .map((item) => (
-                <button
-                  key={item.key}
-                  type="button"
-                  className="pc-addmenu-item"
-                  onPointerDown={(event) => {
-                    if (event.button !== 0) return;
-                    event.stopPropagation();
-                    event.preventDefault();
-                    // 立即捕获指针：菜单按钮随 setAddMenu(null) 卸载，
-                    // 卸载后浏览器释放捕获，pointerup 按 hit-test 落到
-                    // 视口、照常冒泡给 window 的 onUp 收尾（落节点/摘线
-                    // 转接）。不捕获的话，按住拖到窗外松手或松手恰逢
-                    // 按钮已卸载，up 丢失会让「摘下的线」永久悬空。
-                    try {
-                      event.currentTarget.setPointerCapture(event.pointerId);
-                    } catch {
-                      // 指针已不可捕获（合成事件等）：退化为无捕获。
-                    }
-                    dragRef.current = {
-                      kind: "addnode", sx: event.clientX, sy: event.clientY, moved: false,
-                      fox: addMenu.wx, foy: addMenu.wy, frameKey: item.key,
-                      wire: addMenu.wire,
-                      detached: addMenu.detached,
-                    };
-                    setAddMenu(null);
-                    setAddMenuQuery("");
-                  }}
-                >
-                  {item.icon}
-                  <span>{item.label}</span>
-                  <small>{item.hint}</small>
-                </button>
+            {menuGroups
+              .map((group) => ({
+                ...group,
+                types: group.types.filter(
+                  (type) =>
+                    t(`canvas.node.${type}`).toLowerCase().includes(addMenuQuery.trim().toLowerCase()) &&
+                    menuFilterType(type),
+                ),
+              }))
+              .filter((group) => group.types.length > 0)
+              .map((group) => (
+                <div key={group.key} className="pc-addmenu-group">
+                  <div className="pc-addmenu-group-title">{t(`canvas.menu.${group.key}`)}</div>
+                  {group.types.map((type) => (
+                    <button
+                      key={type}
+                      type="button"
+                      className="pc-addmenu-item"
+                      onPointerDown={(event) => {
+                        if (event.button !== 0) return;
+                        event.stopPropagation();
+                        event.preventDefault();
+                        // 立即捕获指针：菜单按钮随 setAddMenu(null) 卸载，
+                        // 卸载后浏览器释放捕获，pointerup 按 hit-test 落到
+                        // 视口、照常冒泡给 window 的 onUp 收尾。
+                        try {
+                          event.currentTarget.setPointerCapture(event.pointerId);
+                        } catch {
+                          // 指针已不可捕获（合成事件等）：退化为无捕获。
+                        }
+                        dragRef.current = {
+                          kind: "addnode", sx: event.clientX, sy: event.clientY, moved: false,
+                          fox: addMenu.wx, foy: addMenu.wy, frameKey: type,
+                          wire: addMenu.wire,
+                          detached: addMenu.detached,
+                        };
+                        setAddMenu(null);
+                        setAddMenuQuery("");
+                      }}
+                    >
+                      {menuIconOf(type)}
+                      <span>{t(`canvas.node.${type}`)}</span>
+                      <small>{t(`canvas.typeHint.${type}`)}</small>
+                    </button>
+                  ))}
+                </div>
               ))}
           </div>
         )}
 
-        {/* 空画布示意（方案 3.6）：一键创建 提示词 → 生图 最小工作流 */}
+        {/* 空画布示意：一键创建 文本→图像生成→预览 最小工作流 */}
         {!nodes.length && !connections.length && !addMenu && (
           <button className="fc-seed" onClick={() => void seedTemplate()}>
             <span className="fc-seed-title">{t("canvas.seedCta")}</span>
@@ -2214,20 +2590,37 @@ export default function FreeCanvas({ canvasId }: { canvasId: string }) {
           </button>
         )}
 
-        {/* 拖放遮罩：OS 图片文件拖入提示 */}
+        {/* 拖放遮罩：OS 文件拖入提示 */}
         {dropHint && (
           <div className="fc-drop-overlay">
             <span>{t("canvas.dropHint")}</span>
           </div>
         )}
 
-        {/* 批量生成浮动条：多选图片节点时出现 */}
-        {selectedImageIds.length >= 2 && !genStarting && (
+        {/* 批量生成浮动条：多选图像生成节点时出现 */}
+        {selectedGenIds.length >= 2 && !genStarting && (
           <div className="fc-batchbar" onPointerDown={(e) => e.stopPropagation()}>
             <button onClick={() => void runBatch()}>
-              {t("canvas.batchGenerate", { count: selectedImageIds.length })}
+              {t("canvas.batchGenerate", { count: selectedGenIds.length })}
             </button>
           </div>
+        )}
+
+        {/* 资源库选择浮层：加载节点的「从资源库选择」入口 */}
+        {pickerForNode && (
+          <LazyLibraryPicker
+            onPick={(filePath) => {
+              const targetId = pickerForNode;
+              setPickerForNode(null);
+              void store.getState().updateNode(targetId, { resourcePath: filePath });
+            }}
+            onClose={() => setPickerForNode(null)}
+          />
+        )}
+
+        {/* 大图预览（预览图像节点双击） */}
+        {lightboxUrl && (
+          <ImageLightbox src={lightboxUrl} alt="" onClose={() => setLightboxSrc("")} />
         )}
 
         {/* 画布信息玻璃卡 + 统计 */}
@@ -2319,5 +2712,24 @@ export default function FreeCanvas({ canvasId }: { canvasId: string }) {
         )}
       </div>
     </div>
+  );
+}
+
+/** 懒加载的资源库选择浮层：画布加载节点「从资源库选择」入口，薄壳复用
+ *  工程域的通用选择浮层（搜索/分页/缩略图/导入），点选即回填节点路径。 */
+function LazyLibraryPicker({
+  onPick,
+  onClose,
+}: {
+  onPick: (filePath: string) => void;
+  onClose: () => void;
+}) {
+  const { t } = useTranslation();
+  return (
+    <ProjectFilePickerDialog
+      title={t("canvas.loadPickerTitle")}
+      onPick={(file) => onPick(file.filePath)}
+      onClose={onClose}
+    />
   );
 }

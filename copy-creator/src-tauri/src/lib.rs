@@ -1,4 +1,5 @@
 mod ai;
+mod canvas_media;
 mod autostart;
 mod backup;
 mod clipboard;
@@ -597,6 +598,11 @@ pub fn run() {
             db::canvas_delete_connection,
             db::canvas_set_groups,
             ai::ai_generate_image,
+            canvas_media::canvas_pick_media_file,
+            canvas_media::canvas_authorize_media,
+            canvas_media::canvas_pick_save_path,
+            canvas_media::canvas_save_to_library,
+            canvas_media::canvas_export_to_path,
             ai::ai_cancel_generation,
             media_server::get_media_server_origin,
             shortcut::update_shortcut,

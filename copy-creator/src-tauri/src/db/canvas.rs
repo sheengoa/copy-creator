@@ -46,6 +46,7 @@ CREATE TABLE IF NOT EXISTS canvas_connections (
     canvas_id TEXT NOT NULL,
     from_node TEXT NOT NULL,
     to_node TEXT NOT NULL,
+    to_port TEXT NOT NULL DEFAULT '',
     created_at TEXT NOT NULL,
     UNIQUE (canvas_id, from_node, to_node),
     FOREIGN KEY (canvas_id) REFERENCES canvases(id) ON DELETE CASCADE,
@@ -60,17 +61,19 @@ CREATE INDEX IF NOT EXISTS idx_canvas_connections_canvas ON canvas_connections(c
 /// 节点 metadata 按节点类型分变体（方案 3.2）：拒绝自由袋子腐化；字段
 /// 增删靠 serde default 幂等升级（旧 JSON 缺字段补默认值），与 ensure_column
 /// 同哲学。TS 侧类型与此一一对应。
+///
+/// 节点体系 v2（2026-10-31，用户定案）：生成（gen_x）/ 加载（load_x）/
+/// 输出（save_x / preview_x）三类链路 + 便签。旧 text/ref/image 为迁移
+/// 来源：schema v4 一次性数据迁移（text→load_text、ref→load_image、
+/// image→gen_image），变体保留作读兼容，创建入口已拒绝。
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub(crate) enum NodeMeta {
+    // ── 旧类型（v4 迁移来源，只读兼容） ──
     Text {
+        #[serde(default)]
         content: String,
     },
-    Note {
-        content: String,
-    },
-    /// 参考图节点：路径在节点行 resource_path 上，metadata 暂无额外字段；
-    /// 留空变体保位，后续字段走 serde default 升级。
     Ref {},
     Image {
         #[serde(default)]
@@ -81,6 +84,91 @@ pub(crate) enum NodeMeta {
         error: String,
         #[serde(default)]
         images: Vec<GeneratedImage>,
+    },
+
+    // ── 加载节点 ──
+    LoadText {
+        #[serde(default)]
+        content: String,
+    },
+    /// 加载媒体（image/video/audio）：文件在节点行 resource_path 上，
+    /// 加载来源（资源库/外部路径/拖入）不进 metadata。
+    LoadImage {},
+    LoadVideo {},
+    LoadAudio {},
+
+    // ── 生成节点 ──
+    GenImage {
+        #[serde(default)]
+        params: ImageGenParams,
+        #[serde(default)]
+        status: ImageNodeStatus,
+        #[serde(default)]
+        error: String,
+        #[serde(default)]
+        images: Vec<GeneratedImage>,
+    },
+    /// 视频/音频生成：协议层后接（方案决策：先图像全链），占位结构与
+    /// GenImage 同源，参数复用 ImageGenParams（model/size/count）。
+    GenVideo {
+        #[serde(default)]
+        params: ImageGenParams,
+        #[serde(default)]
+        status: ImageNodeStatus,
+        #[serde(default)]
+        error: String,
+    },
+    GenAudio {
+        #[serde(default)]
+        params: ImageGenParams,
+        #[serde(default)]
+        status: ImageNodeStatus,
+        #[serde(default)]
+        error: String,
+    },
+
+    // ── 输出节点 ──
+    /// 保存节点：status = idle | saved | error；target = "library"（入库）
+    /// 或 "path"（外部另存）；saved_path 记资源库相对路径或绝对路径。
+    SaveImage {
+        #[serde(default)]
+        status: String,
+        #[serde(default)]
+        error: String,
+        #[serde(default)]
+        target: String,
+        #[serde(default)]
+        saved_path: String,
+    },
+    SaveVideo {
+        #[serde(default)]
+        status: String,
+        #[serde(default)]
+        error: String,
+        #[serde(default)]
+        target: String,
+        #[serde(default)]
+        saved_path: String,
+    },
+    SaveAudio {
+        #[serde(default)]
+        status: String,
+        #[serde(default)]
+        error: String,
+        #[serde(default)]
+        target: String,
+        #[serde(default)]
+        saved_path: String,
+    },
+    /// 预览节点：内容来自上游（生成产物/加载媒体），metadata 暂无状态。
+    PreviewImage {},
+    PreviewVideo {},
+    PreviewAudio {},
+
+    // ── 画布备注（不属于三类链路） ──
+    Note {
+        #[serde(default)]
+        content: String,
     },
 }
 
@@ -131,11 +219,11 @@ impl Default for GeneratedImage {
 
 impl NodeMeta {
     /// 节点类型的默认 metadata（建节点未传 metadata 时）；未知类型在此
-    /// 一并拒绝。
+    /// 一并拒绝。旧三类型（text/ref/image）保留默认值供 v4 迁移与宽容读
+    /// 使用——创建入口（create_node）已拒绝。
     pub(crate) fn default_for(node_type: &str) -> Result<NodeMeta, String> {
         match node_type {
             "text" => Ok(NodeMeta::Text { content: String::new() }),
-            "note" => Ok(NodeMeta::Note { content: String::new() }),
             "ref" => Ok(NodeMeta::Ref {}),
             "image" => Ok(NodeMeta::Image {
                 params: ImageGenParams::default(),
@@ -143,16 +231,76 @@ impl NodeMeta {
                 error: String::new(),
                 images: Vec::new(),
             }),
+            "note" => Ok(NodeMeta::Note { content: String::new() }),
+            "load_text" => Ok(NodeMeta::LoadText { content: String::new() }),
+            "load_image" => Ok(NodeMeta::LoadImage {}),
+            "load_video" => Ok(NodeMeta::LoadVideo {}),
+            "load_audio" => Ok(NodeMeta::LoadAudio {}),
+            "gen_image" => Ok(NodeMeta::GenImage {
+                params: ImageGenParams::default(),
+                status: ImageNodeStatus::Idle,
+                error: String::new(),
+                images: Vec::new(),
+            }),
+            "gen_video" => Ok(NodeMeta::GenVideo {
+                params: ImageGenParams::default(),
+                status: ImageNodeStatus::Idle,
+                error: String::new(),
+            }),
+            "gen_audio" => Ok(NodeMeta::GenAudio {
+                params: ImageGenParams::default(),
+                status: ImageNodeStatus::Idle,
+                error: String::new(),
+            }),
+            "save_image" => Ok(NodeMeta::SaveImage {
+                status: String::new(),
+                error: String::new(),
+                target: String::new(),
+                saved_path: String::new(),
+            }),
+            "save_video" => Ok(NodeMeta::SaveVideo {
+                status: String::new(),
+                error: String::new(),
+                target: String::new(),
+                saved_path: String::new(),
+            }),
+            "save_audio" => Ok(NodeMeta::SaveAudio {
+                status: String::new(),
+                error: String::new(),
+                target: String::new(),
+                saved_path: String::new(),
+            }),
+            "preview_image" => Ok(NodeMeta::PreviewImage {}),
+            "preview_video" => Ok(NodeMeta::PreviewVideo {}),
+            "preview_audio" => Ok(NodeMeta::PreviewAudio {}),
             other => Err(format!("未知节点类型：{other}")),
         }
+    }
+
+    /// 旧三类型已在 v4 迁移为新类型，不再允许创建。
+    pub(crate) fn is_legacy_type(node_type: &str) -> bool {
+        matches!(node_type, "text" | "ref" | "image")
     }
 
     fn kind(&self) -> &'static str {
         match self {
             NodeMeta::Text { .. } => "text",
-            NodeMeta::Note { .. } => "note",
             NodeMeta::Ref { .. } => "ref",
             NodeMeta::Image { .. } => "image",
+            NodeMeta::Note { .. } => "note",
+            NodeMeta::LoadText { .. } => "load_text",
+            NodeMeta::LoadImage { .. } => "load_image",
+            NodeMeta::LoadVideo { .. } => "load_video",
+            NodeMeta::LoadAudio { .. } => "load_audio",
+            NodeMeta::GenImage { .. } => "gen_image",
+            NodeMeta::GenVideo { .. } => "gen_video",
+            NodeMeta::GenAudio { .. } => "gen_audio",
+            NodeMeta::SaveImage { .. } => "save_image",
+            NodeMeta::SaveVideo { .. } => "save_video",
+            NodeMeta::SaveAudio { .. } => "save_audio",
+            NodeMeta::PreviewImage { .. } => "preview_image",
+            NodeMeta::PreviewVideo { .. } => "preview_video",
+            NodeMeta::PreviewAudio { .. } => "preview_audio",
         }
     }
 }
@@ -193,7 +341,7 @@ const CANVAS_COLS: &str =
     "id, name, viewport_x, viewport_y, viewport_k, created_at, updated_at, groups";
 const NODE_COLS: &str =
     "id, canvas_id, type, title, pos_x, pos_y, width, height, metadata, resource_path, created_at, updated_at";
-const CONNECTION_COLS: &str = "id, canvas_id, from_node, to_node, created_at";
+const CONNECTION_COLS: &str = "id, canvas_id, from_node, to_node, to_port, created_at";
 
 fn canvas_row(row: &rusqlite::Row) -> rusqlite::Result<serde_json::Value> {
     // groups 旧库经 ensure_column 幂等补列后必有默认 '[]'；损坏 JSON 按
@@ -241,7 +389,8 @@ fn connection_row(row: &rusqlite::Row) -> rusqlite::Result<serde_json::Value> {
         "canvas_id": row.get::<_, String>(1)?,
         "from_node": row.get::<_, String>(2)?,
         "to_node": row.get::<_, String>(3)?,
-        "created_at": row.get::<_, String>(4)?,
+        "to_port": row.get::<_, String>(4)?,
+        "created_at": row.get::<_, String>(5)?,
     }))
 }
 
@@ -391,6 +540,9 @@ pub(crate) fn create_node(
     if exists == 0 {
         return Err(format!("画布不存在：{canvas_id}"));
     }
+    if NodeMeta::is_legacy_type(node_type) {
+        return Err(format!("旧节点类型 {node_type} 已迁移，不允许创建"));
+    }
     let meta = parse_node_meta_strict(node_type, metadata_raw)?;
     let id = uuid::Uuid::new_v4().to_string();
     let now = canvas_now();
@@ -515,13 +667,15 @@ pub(crate) fn delete_node(conn: &Connection, id: &str) -> Result<(), String> {
     Ok(())
 }
 
-/// 建连线（多入线语义，无顶掉）：同源重复由 UNIQUE + INSERT OR IGNORE
-/// 去重，返回落库后的那行（新建或既有）。两端节点必须同画布。
+/// 建连线（类型化端口语义）：to_port 记落点输入口 id（如 "text"/"image"），
+/// 前端做类型匹配校验，落库只防同源重复（UNIQUE + INSERT OR IGNORE）。
+/// 返回落库后的那行（新建或既有）。两端节点必须同画布。
 pub(crate) fn connect(
     conn: &Connection,
     canvas_id: &str,
     from_node: &str,
     to_node: &str,
+    to_port: &str,
 ) -> Result<serde_json::Value, String> {
     if from_node == to_node {
         return Err("不能把节点连到自己".to_string());
@@ -538,9 +692,9 @@ pub(crate) fn connect(
     }
     let id = uuid::Uuid::new_v4().to_string();
     conn.execute(
-        "INSERT OR IGNORE INTO canvas_connections (id, canvas_id, from_node, to_node, created_at) \
-         VALUES (?1, ?2, ?3, ?4, ?5)",
-        params![id, canvas_id, from_node, to_node, canvas_now()],
+        "INSERT OR IGNORE INTO canvas_connections (id, canvas_id, from_node, to_node, to_port, created_at) \
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+        params![id, canvas_id, from_node, to_node, to_port, canvas_now()],
     )
     .map_err(|e| e.to_string())?;
     bump_canvas_updated_at(conn, canvas_id)?;
@@ -555,9 +709,14 @@ pub(crate) fn connect(
     .map_err(|e| e.to_string())
 }
 
-/// 摘线换目标 = 改写 to_node（方案 3.3 改造点 3，无顶掉）。目标已存在
+/// 摘线换目标 = 改写 to_node 与落点口 to_port（无顶掉）。目标已存在
 /// 同源连线时合并：删除被移动的线，保留既有线（返回既有行）。
-pub(crate) fn rewire(conn: &Connection, id: &str, to_node: &str) -> Result<serde_json::Value, String> {
+pub(crate) fn rewire(
+    conn: &Connection,
+    id: &str,
+    to_node: &str,
+    to_port: &str,
+) -> Result<serde_json::Value, String> {
     let (canvas_id, from_node, old_to): (String, String, String) = conn
         .query_row(
             "SELECT canvas_id, from_node, to_node FROM canvas_connections WHERE id = ?1",
@@ -612,8 +771,8 @@ pub(crate) fn rewire(conn: &Connection, id: &str, to_node: &str) -> Result<serde
             .map_err(|e| e.to_string());
     }
     conn.execute(
-        "UPDATE canvas_connections SET to_node = ?1 WHERE id = ?2",
-        params![to_node, id],
+        "UPDATE canvas_connections SET to_node = ?1, to_port = ?2 WHERE id = ?3",
+        params![to_node, to_port, id],
     )
     .map_err(|e| e.to_string())?;
     bump_canvas_updated_at(conn, &canvas_id)?;
@@ -797,22 +956,28 @@ pub fn canvas_connect(
     canvas_id: String,
     from_node: String,
     to_node: String,
+    to_port: String,
 ) -> Result<serde_json::Value, String> {
     let value = {
         let state = app.state::<DbState>();
         let conn = state.conn.lock().map_err(|e| e.to_string())?;
-        connect(&conn, &canvas_id, &from_node, &to_node)?
+        connect(&conn, &canvas_id, &from_node, &to_node, &to_port)?
     };
     emit_canvas_changed(&app);
     Ok(value)
 }
 
 #[tauri::command]
-pub fn canvas_rewire(app: AppHandle, id: String, to_node: String) -> Result<serde_json::Value, String> {
+pub fn canvas_rewire(
+    app: AppHandle,
+    id: String,
+    to_node: String,
+    to_port: String,
+) -> Result<serde_json::Value, String> {
     let value = {
         let state = app.state::<DbState>();
         let conn = state.conn.lock().map_err(|e| e.to_string())?;
-        rewire(&conn, &id, &to_node)?
+        rewire(&conn, &id, &to_node, &to_port)?
     };
     emit_canvas_changed(&app);
     Ok(value)

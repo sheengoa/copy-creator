@@ -272,10 +272,37 @@ fn resolve_media_file<R: Runtime>(app: &AppHandle<R>, raw: &str) -> Option<PathB
     } else {
         db::get_storage_dir(app).join(value.trim_start_matches(['/', '\\']))
     };
-    if !db::is_app_managed_path(app, &resolved) && !db::is_recorded_file_path(app, value) {
+    if !db::is_app_managed_path(app, &resolved)
+        && !db::is_recorded_file_path(app, value)
+        && !is_authorized_external_path(&resolved)
+    {
         return None;
     }
     Some(resolved)
+}
+
+// ── 运行时授权外部文件（画布加载节点） ─────────────────────
+// 画布的加载节点允许引用用户通过系统文件对话框明确选择的任意路径文件
+// （仅预览/引用，不复制入库）。这类路径不在应用管理目录内，为让媒体
+// 服务放行，选择动作发生时把确切路径登记进运行时授权清单——注入者仍
+// 需同时猜中 token 与确切文件路径，安全边界与剪切板记录同哲学。
+static AUTHORIZED_EXTERNAL_FILES: std::sync::Mutex<Option<std::collections::HashSet<String>>> =
+    std::sync::Mutex::new(None);
+
+fn is_authorized_external_path(path: &std::path::Path) -> bool {
+    let guard = AUTHORIZED_EXTERNAL_FILES.lock().unwrap();
+    match guard.as_ref() {
+        Some(set) => set.contains(&path.to_string_lossy().to_string()),
+        None => false,
+    }
+}
+
+/// 登记用户通过系统对话框明确选择的文件路径（画布加载节点引用）。
+pub fn authorize_external_file(path: &str) {
+    let mut guard = AUTHORIZED_EXTERNAL_FILES.lock().unwrap();
+    guard
+        .get_or_insert_with(std::collections::HashSet::new)
+        .insert(path.to_string());
 }
 
 fn media_content_type(path: &Path) -> &'static str {

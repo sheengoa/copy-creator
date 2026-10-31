@@ -42,7 +42,12 @@ type MockCanvasMeta = Record<string, unknown>;
 interface MockCanvasNode {
   id: string;
   canvas_id: string;
-  type: "text" | "image" | "ref" | "note";
+  type:
+    | "gen_image" | "gen_video" | "gen_audio"
+    | "load_text" | "load_image" | "load_audio" | "load_video"
+    | "save_image" | "save_video" | "save_audio"
+    | "preview_image" | "preview_video" | "preview_audio"
+    | "note";
   title: string;
   pos_x: number;
   pos_y: number;
@@ -59,6 +64,7 @@ interface MockCanvasConnection {
   canvas_id: string;
   from_node: string;
   to_node: string;
+  to_port: string;
   created_at: string;
 }
 
@@ -206,31 +212,37 @@ const db = {
   ] as MockCanvas[],
   canvas_nodes: [
     {
-      id: "cn-1", canvas_id: "cv-1", type: "text" as const, title: "",
+      id: "cn-1", canvas_id: "cv-1", type: "load_text" as const, title: "",
       pos_x: 120, pos_y: 160, width: 260, height: 170,
-      metadata: { kind: "text", content: "一只戴礼帽的猫，水彩风格，高细节" },
+      metadata: { kind: "load_text", content: "一只戴礼帽的猫，水彩风格，高细节" },
       resource_path: "", created_at: ts(), updated_at: ts(),
     },
     {
-      id: "cn-2", canvas_id: "cv-1", type: "image" as const, title: "",
+      id: "cn-2", canvas_id: "cv-1", type: "gen_image" as const, title: "",
       pos_x: 480, pos_y: 110, width: 280, height: null,
-      metadata: { kind: "image", params: { model: "", size: "", count: 2 }, status: "idle", error: "", images: [] },
+      metadata: { kind: "gen_image", params: { model: "", size: "", count: 2 }, status: "idle", error: "", images: [] },
       resource_path: "", created_at: ts(), updated_at: ts(),
     },
   ] as MockCanvasNode[],
   canvas_connections: [
-    { id: "cc-1", canvas_id: "cv-1", from_node: "cn-1", to_node: "cn-2", created_at: ts() },
+    { id: "cc-1", canvas_id: "cv-1", from_node: "cn-1", to_node: "cn-2", to_port: "text", created_at: ts() },
   ] as MockCanvasConnection[],
 };
 
 /** 画布节点默认 metadata（对齐 Rust NodeMeta::default_for）。 */
 function canvasDefaultMeta(type: MockCanvasNode["type"]): MockCanvasMeta {
   switch (type) {
-    case "text": return { kind: "text", content: "" };
+    case "load_text": return { kind: "load_text", content: "" };
     case "note": return { kind: "note", content: "" };
-    case "ref": return { kind: "ref" };
-    case "image":
-      return { kind: "image", params: { model: "", size: "", count: 1 }, status: "idle", error: "", images: [] };
+    case "load_image": case "load_video": case "load_audio":
+    case "preview_image": case "preview_video": case "preview_audio":
+      return { kind: type };
+    case "gen_image":
+      return { kind: "gen_image", params: { model: "", size: "", count: 1 }, status: "idle", error: "", images: [] };
+    case "gen_video": case "gen_audio":
+      return { kind: type, params: { model: "", size: "", count: 1 }, status: "idle", error: "" };
+    case "save_image": case "save_video": case "save_audio":
+      return { kind: type, status: "", error: "", target: "", saved_path: "" };
   }
 }
 
@@ -742,7 +754,7 @@ function handleInvoke(cmd: string, args: Record<string, unknown>): unknown {
         (c) => c.canvas_id === canvasId && c.from_node === from && c.to_node === to,
       );
       if (existing) return clone(existing);
-      const conn: MockCanvasConnection = { id: nextId("cc"), canvas_id: canvasId, from_node: from, to_node: to, created_at: ts() };
+      const conn: MockCanvasConnection = { id: nextId("cc"), canvas_id: canvasId, from_node: from, to_node: to, to_port: String(args.toPort ?? ""), created_at: ts() };
       db.canvas_connections.push(conn);
       return clone(conn);
     }
@@ -758,6 +770,7 @@ function handleInvoke(cmd: string, args: Record<string, unknown>): unknown {
         return clone(merged);
       }
       row.to_node = to;
+      row.to_port = String(args.toPort ?? row.to_port ?? "");
       return clone(row);
     }
     case "canvas_delete_connection": {
