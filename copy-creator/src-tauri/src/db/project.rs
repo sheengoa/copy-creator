@@ -1705,7 +1705,6 @@ pub fn project_link_asset(
         .map_err(|e| e.to_string())?;
     }
     emit_project_changed(&app);
-    emit_project_changed(&app);
     // 返回值补 missing 标：ProjectAsset 类型要求该字段（overview 逐档案
     // 检测的同口径），挂靠/导入的即时返回也要带，免得类型谎报。先解析
     // 库根（内部要锁 conn 读设置），再锁连接取行。
