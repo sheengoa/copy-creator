@@ -1,5 +1,6 @@
-/* 画布区（自由生图工作流）：画布库条 + 主画布 + 属性面板。
-   布局与视觉对齐资源页惯例（iOS 磨砂玻璃 + 现有 CSS 变量 token）。 */
+/* 画布区（自由生图工作流）：画布库条 + 主画布。
+   画布引擎样式（节点/连线/菜单/迷你地图等）复用工程画布的 pc-* 体系
+   （project.css，全局加载），这里只保留页面骨架与画布区专属内容层。 */
 
 .canvas-page {
   display: flex;
@@ -18,7 +19,7 @@
   border-bottom: 1px solid var(--separator);
   flex-shrink: 0;
   /* 建立层叠上下文：⋯ 弹层（z-index 60）必须整体压过 .canvas-main 里的
-     fc-world 绝对定位层，否则弹层被画布盖住点不到（实测踩坑）。 */
+     pc-viewport 绝对定位层，否则弹层被画布盖住点不到（实测踩坑）。 */
   position: relative;
   z-index: 20;
 }
@@ -149,6 +150,41 @@
   height: 14px;
 }
 
+.canvas-more {
+  position: relative;
+  flex-shrink: 0;
+}
+
+.canvas-more-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 5px 10px;
+  border-radius: 999px;
+  border: 1px solid var(--separator);
+  background: var(--bg-card);
+  color: var(--text-secondary);
+  font-size: 12px;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.canvas-more-btn svg {
+  width: 12px;
+  height: 12px;
+}
+
+.canvas-more-btn.open,
+.canvas-more-btn:hover {
+  background: var(--accent-bg);
+  color: var(--accent);
+}
+
+.canvas-more-popover button.active {
+  color: var(--accent);
+  font-weight: 600;
+}
+
 /* ── 主画布区 ─────────────────────────────────────────────── */
 
 .canvas-main {
@@ -257,261 +293,45 @@
   color: #fff;
 }
 
-/* ── 自由画布（FreeCanvas） ───────────────────────────────── */
+/* ── fork 适配层：工程画布 pc-* 节点骨架上的画布区专属内容 ──
+   pc-root 的高度在工程视图里由 .project-stage-shell 父级 flex 撑起，
+   画布区的 .canvas-main 是普通块级容器，这里用绝对定位铺满。
+   pc-node 默认不设 display（工程域节点由内容自然撑开）；画布区节点
+   是「固定尺寸 + 头部 + 内容层」，需要纵向 flex 让内容吃满剩余空间。
+   挂 .fc-root 限定作用域，不影响工程画布。 */
 
-.fc-world {
+.canvas-main > .pc-root {
   position: absolute;
   inset: 0;
-  overflow: hidden;
-  touch-action: none;
-  user-select: none;
-  cursor: default;
 }
 
-.fc-transform {
-  position: absolute;
-  top: 0;
-  left: 0;
-  transform-origin: 0 0;
-}
-
-/* 连线层：随世界变换缩放；SVG 元素本体极小 + overflow visible，
-   路径按世界坐标绘制在元素框外仍可见。 */
-.fc-wires {
-  position: absolute;
-  top: 0;
-  left: 0;
-  width: 2px;
-  height: 2px;
-  overflow: visible;
-  pointer-events: none;
-}
-
-.fc-wire {
-  fill: none;
-  stroke-width: 2;
-  opacity: 0.85;
-}
-
-.fc-wire.draft {
-  stroke: var(--accent);
-  stroke-dasharray: 6 4;
-  opacity: 0.9;
-}
-
-.fc-wire.lifted {
-  opacity: 0.25;
-}
-
-.fc-marquee {
-  fill: var(--accent-bg);
-  stroke: var(--accent-border);
-  stroke-width: 1;
-}
-
-.fc-node {
-  position: absolute;
+.fc-root .pc-node,
+.fc-root .pc-note {
   display: flex;
   flex-direction: column;
-  background: var(--bg-card);
-  border: 1px solid var(--separator);
-  border-radius: var(--radius);
-  box-shadow: var(--shadow);
-  overflow: visible;
 }
 
-.fc-node.selected {
-  border-color: var(--fc-accent);
-  box-shadow: 0 0 0 2px var(--accent-bg-strong);
-}
-
-.fc-node.hover {
-  border-color: var(--fc-accent);
-}
-
-.fc-node-head {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  padding: 6px 10px;
-  font-size: 11px;
-  font-weight: 600;
-  color: var(--text-secondary);
-  border-bottom: 1px solid var(--separator);
-  flex-shrink: 0;
-  background: var(--bg-card);
-  border-radius: var(--radius) var(--radius) 0 0;
-}
-
-.fc-node-dot {
-  width: 8px;
-  height: 8px;
-  border-radius: 50%;
-  background: var(--fc-accent);
-  flex-shrink: 0;
-}
-
-.fc-node-title {
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.fc-node-body {
+/* 文本节点：正文即节点体（textarea 常驻，失焦提交）。 */
+.fc-root .fc-node-edit {
   flex: 1;
   min-height: 0;
-  overflow: hidden;
-  position: relative;
-  border-radius: 0 0 var(--radius) var(--radius);
-  background: var(--bg-card);
-}
-
-/* 节点正文用 .fc-node-edit（textarea 常驻）；类名不可用 fc-node-text——
-   与类型修饰类 fc-node-${type} 同名会把内容规则命中节点自身导致塌陷
-   （实测踩坑）。 */
-
-.fc-node-note .fc-node-body {
-  background: rgba(255, 204, 0, 0.14);
-}
-
-.fc-node-placeholder {
-  position: absolute;
-  inset: 0;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  padding: 8px;
-  font-size: 11px;
-  color: var(--text-tertiary);
-  text-align: center;
-  border: 1px dashed var(--text-tertiary);
-  border-radius: 0 0 var(--radius) var(--radius);
-  box-sizing: border-box;
-  margin: 6px;
-  width: calc(100% - 12px);
-  height: calc(100% - 12px);
-}
-
-.fc-thumb {
-  width: 60px;
-  height: 60px;
-  object-fit: cover;
-  border-radius: 6px;
-}
-
-.fc-thumb-cover {
-  position: absolute;
-  inset: 0;
   width: 100%;
-  height: 100%;
-  object-fit: cover;
-}
-
-.fc-node-edit {
-  position: absolute;
-  inset: 0;
+  box-sizing: border-box;
   border: none;
   resize: none;
   padding: 8px 10px;
   font-size: 12px;
   line-height: 1.5;
-  background: var(--bg-card);
+  background: transparent;
   color: var(--text-primary);
   outline: none;
   font-family: inherit;
 }
 
-/* 端口：左入右出（节点级连线，每节点各一位）。 */
-.fc-port {
-  position: absolute;
-  top: 50%;
-  width: 12px;
-  height: 12px;
-  border-radius: 50%;
-  background: var(--bg-card);
-  border: 2px solid var(--fc-accent);
-  transform: translateY(-50%);
-  cursor: crosshair;
-  z-index: 2;
-}
-
-.fc-port-in {
-  left: -7px;
-}
-
-.fc-port-out {
-  right: -7px;
-}
-
-.fc-port:hover {
-  background: var(--fc-accent);
-}
-
-.fc-resize {
-  position: absolute;
-  right: 1px;
-  bottom: 1px;
-  width: 14px;
-  height: 14px;
-  cursor: nwse-resize;
-  z-index: 2;
-}
-
-.fc-resize::after {
-  content: "";
-  position: absolute;
-  right: 3px;
-  bottom: 3px;
-  width: 6px;
-  height: 6px;
-  border-right: 2px solid var(--text-tertiary);
-  border-bottom: 2px solid var(--text-tertiary);
-  border-radius: 1px;
-}
-
-/* 建节点菜单（双击空白 / 拖线到空白）。 */
-.fc-addmenu {
-  position: absolute;
-  z-index: 70;
-  min-width: 120px;
-  background: var(--bg-card);
-  border: 1px solid var(--separator);
-  border-radius: var(--radius);
-  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.16);
-  padding: 4px;
-}
-
-.fc-addmenu button {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  width: 100%;
-  padding: 7px 10px;
-  border: none;
-  background: none;
-  border-radius: var(--radius-sm);
-  font-size: 13px;
-  color: var(--text-primary);
-  cursor: pointer;
-  text-align: left;
-}
-
-.fc-addmenu button:hover {
-  background: var(--bg-card-hover);
-}
-
-.fc-addmenu-dot {
-  width: 8px;
-  height: 8px;
-  border-radius: 50%;
-  flex-shrink: 0;
-}
-
-/* 属性面板（右侧，磨砂玻璃）。 */
-/* ── 节点体内联参数（ComfyUI 式：参数与输入长在节点上） ───── */
-
+/* 节点体内联参数（ComfyUI 式：参数与输入长在节点上）。 */
 .fc-node-form {
-  height: 100%;
+  flex: 1;
+  min-height: 0;
   overflow-y: auto;
   padding: 8px 10px;
   box-sizing: border-box;
@@ -586,42 +406,124 @@
   background: var(--accent-bg);
 }
 
-/* 悬停显示的节点删除按钮 */
-.fc-node-del {
-  position: absolute;
-  top: 4px;
-  right: 4px;
-  width: 18px;
-  height: 18px;
+.fc-node-placeholder {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 8px;
+  font-size: 11px;
+  color: var(--text-tertiary);
+  text-align: center;
+  border: 1px dashed var(--text-tertiary);
+  border-radius: var(--radius-sm);
+  box-sizing: border-box;
+  margin: 6px;
+}
+
+.fc-thumb {
+  width: 60px;
+  height: 60px;
+  object-fit: cover;
+  border-radius: 6px;
+}
+
+.fc-thumb-cover {
+  width: 100%;
+  height: 120px;
+  object-fit: cover;
+  border-radius: var(--radius-sm);
+  flex-shrink: 0;
+}
+
+/* ── AI 生成状态：槽位逐格填充 / 进度摘要 / 备选缩略图 ────── */
+
+.fc-gen-slots {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px;
+}
+
+.fc-gen-slot {
+  width: 52px;
+  height: 52px;
+  border-radius: var(--radius-sm);
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  border: none;
-  border-radius: 6px;
-  background: var(--bg-card-hover);
-  color: var(--text-secondary);
-  cursor: pointer;
-  opacity: 0;
-  transition: opacity 0.12s ease;
-  z-index: 3;
+  font-size: 11px;
+  color: var(--text-tertiary);
+}
+
+.fc-gen-slot.pending {
+  border: 1px dashed var(--separator);
+  background: var(--bg-primary);
+  animation: fc-slot-pulse 1.2s ease-in-out infinite;
+}
+
+@keyframes fc-slot-pulse {
+  0%, 100% { opacity: 0.55; }
+  50% { opacity: 1; }
+}
+
+.fc-gen-slot.filled {
   padding: 0;
+  object-fit: cover;
+  border: 1px solid var(--separator);
 }
 
-.fc-node-del svg {
-  width: 10px;
-  height: 10px;
+.fc-gen-summary {
+  flex: 1;
+  font-size: 11px;
+  color: var(--text-secondary);
 }
 
-.fc-node:hover .fc-node-del {
-  opacity: 1;
-}
-
-.fc-node-del:hover {
-  background: rgba(255, 59, 48, 0.15);
+.fc-gen-warn {
+  font-size: 11px;
+  line-height: 1.45;
   color: var(--danger);
+  word-break: break-all;
 }
 
-/* ── 阶段 3：空态示意 / 拖放遮罩 / 批量生成 / chips 更多 ───── */
+.fc-gen-thumbs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px;
+}
+
+.fc-gen-thumb {
+  position: relative;
+  padding: 0;
+  border: 2px solid transparent;
+  border-radius: var(--radius-sm);
+  background: none;
+  cursor: pointer;
+  line-height: 0;
+}
+
+.fc-gen-thumb.primary {
+  border-color: var(--accent);
+}
+
+.fc-gen-primary-badge {
+  position: absolute;
+  left: 3px;
+  bottom: 3px;
+  padding: 1px 5px;
+  border-radius: 999px;
+  font-size: 9px;
+  line-height: 1.4;
+  background: var(--accent);
+  color: #fff;
+}
+
+/* ── 画布信息玻璃卡 / 空态示意 / 拖放遮罩 / 批量生成 ──────── */
+
+.fc-statcard {
+  top: 16px;
+  left: 16px;
+  padding: 10px 14px;
+}
 
 .fc-seed {
   position: absolute;
@@ -693,39 +595,4 @@
 
 .fc-batchbar button:hover {
   filter: brightness(1.08);
-}
-
-.canvas-more {
-  position: relative;
-  flex-shrink: 0;
-}
-
-.canvas-more-btn {
-  display: inline-flex;
-  align-items: center;
-  gap: 4px;
-  padding: 5px 10px;
-  border-radius: 999px;
-  border: 1px solid var(--separator);
-  background: var(--bg-card);
-  color: var(--text-secondary);
-  font-size: 12px;
-  cursor: pointer;
-  white-space: nowrap;
-}
-
-.canvas-more-btn svg {
-  width: 12px;
-  height: 12px;
-}
-
-.canvas-more-btn.open,
-.canvas-more-btn:hover {
-  background: var(--accent-bg);
-  color: var(--accent);
-}
-
-.canvas-more-popover button.active {
-  color: var(--accent);
-  font-weight: 600;
 }

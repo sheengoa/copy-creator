@@ -818,6 +818,11 @@
     "seedPrompt": "A cat wearing a top hat, watercolor style, highly detailed",
     "dropHint": "Drop to import into the library and create reference nodes",
     "batchGenerate": "Generate {{count}} nodes",
-    "more": "More"
+    "more": "More",
+    "tip": "Middle-drag to pan · Scroll to zoom · Left-drag to marquee-select · Double-click empty space to add nodes · Drag from output to input port to connect · Click a wired input port to lift & rewire · Shift/Ctrl+Right-drag to cut wires · Ctrl+G to group",
+    "statNodes": "{{count}} nodes",
+    "typeTextHint": "Prompt text, wire into an image node",
+    "typeImageHint": "Image node: params & generate",
+    "typeRefHint": "Reference image, imported then cited"
   }
 }

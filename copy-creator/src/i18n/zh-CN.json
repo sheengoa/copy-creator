@@ -814,6 +814,11 @@
     "seedPrompt": "一只戴礼帽的猫，水彩风格，高细节",
     "dropHint": "松开以导入资源库并创建参考图节点",
     "batchGenerate": "批量生成 {{count}} 个节点",
-    "more": "更多"
+    "more": "更多",
+    "tip": "中键拖动平移 · 滚轮缩放 · 左键框选 · 双击空白添加节点 · 从输出口拖到输入口连线 · 点击已连线的输入口摘线换目标 · Shift/Ctrl+右键滑动切断连线 · Ctrl+G 打组",
+    "statNodes": "节点 {{count}}",
+    "typeTextHint": "提示词文本，连线到图片节点",
+    "typeImageHint": "生图节点：参数与生成按钮",
+    "typeRefHint": "参考图，入库后引用"
   }
 }

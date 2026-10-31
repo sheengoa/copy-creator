@@ -24,6 +24,43 @@ interface MockNodeLink {
   owner_key?: string;
 }
 
+// ── 画布域（db/canvas.rs 三表的内存对应物） ──────────────────
+
+interface MockCanvas {
+  id: string;
+  name: string;
+  viewport_x: number;
+  viewport_y: number;
+  viewport_k: number;
+  created_at: string;
+  updated_at: string;
+}
+
+type MockCanvasMeta = Record<string, unknown>;
+
+interface MockCanvasNode {
+  id: string;
+  canvas_id: string;
+  type: "text" | "image" | "ref" | "note";
+  title: string;
+  pos_x: number;
+  pos_y: number;
+  width: number | null;
+  height: number | null;
+  metadata: MockCanvasMeta;
+  resource_path: string;
+  created_at: string;
+  updated_at: string;
+}
+
+interface MockCanvasConnection {
+  id: string;
+  canvas_id: string;
+  from_node: string;
+  to_node: string;
+  created_at: string;
+}
+
 interface MockScene {
   id: string;
   episode_id: string;
@@ -162,7 +199,47 @@ const db = {
     { id: "nl-m1", from_kind: "character" as const, from_id: "char-1", to_segment: "seg-1", to_port: "character" as const },
     { id: "nl-m2", from_kind: "location" as const, from_id: "loc-1", to_segment: "seg-1", to_port: "location" as const },
   ] as MockNodeLink[],
+  // 画布域种子：预置一个画布 + 提示词→生图 最小工作流，浏览器直接有内容可查。
+  canvases: [
+    { id: "cv-1", name: "示例画布", viewport_x: 0, viewport_y: 0, viewport_k: 1, created_at: ts(), updated_at: ts() },
+  ] as MockCanvas[],
+  canvas_nodes: [
+    {
+      id: "cn-1", canvas_id: "cv-1", type: "text" as const, title: "",
+      pos_x: 120, pos_y: 160, width: 260, height: 170,
+      metadata: { kind: "text", content: "一只戴礼帽的猫，水彩风格，高细节" },
+      resource_path: "", created_at: ts(), updated_at: ts(),
+    },
+    {
+      id: "cn-2", canvas_id: "cv-1", type: "image" as const, title: "",
+      pos_x: 480, pos_y: 110, width: 280, height: 400,
+      metadata: { kind: "image", params: { model: "", size: "", count: 2 }, status: "idle", error: "", images: [] },
+      resource_path: "", created_at: ts(), updated_at: ts(),
+    },
+  ] as MockCanvasNode[],
+  canvas_connections: [
+    { id: "cc-1", canvas_id: "cv-1", from_node: "cn-1", to_node: "cn-2", created_at: ts() },
+  ] as MockCanvasConnection[],
 };
+
+/** 画布节点默认 metadata（对齐 Rust NodeMeta::default_for）。 */
+function canvasDefaultMeta(type: MockCanvasNode["type"]): MockCanvasMeta {
+  switch (type) {
+    case "text": return { kind: "text", content: "" };
+    case "note": return { kind: "note", content: "" };
+    case "ref": return { kind: "ref" };
+    case "image":
+      return { kind: "image", params: { model: "", size: "", count: 1 }, status: "idle", error: "", images: [] };
+  }
+}
+
+function canvasSummaryOf(canvas: MockCanvas) {
+  return {
+    ...clone(canvas),
+    node_count: db.canvas_nodes.filter((n) => n.canvas_id === canvas.id).length,
+    connection_count: db.canvas_connections.filter((c) => c.canvas_id === canvas.id).length,
+  };
+}
 
 const libraryRoot = "C:\\mock-library";
 const clone = <T,>(value: T): T => JSON.parse(JSON.stringify(value)) as T;
@@ -557,6 +634,140 @@ function handleInvoke(cmd: string, args: Record<string, unknown>): unknown {
       return { path: `${libraryRoot}\\scripts\\第一集剧本.txt` };
     case "import_resource_file":
       return { file_path: "scripts/第一集剧本.txt", kind: "text", name: "第一集剧本.txt" };
+
+    // ── 画布域（自由生图工作流） ──
+    case "canvas_list":
+      return clone(db.canvases.map(canvasSummaryOf))
+        .sort((a, b) => (a.updated_at < b.updated_at ? 1 : -1));
+    case "canvas_get": {
+      const canvas = db.canvases.find((c) => c.id === args.canvasId);
+      if (!canvas) throw new Error(`画布不存在：${String(args.canvasId)}`);
+      return {
+        canvas: clone(canvas),
+        nodes: clone(db.canvas_nodes.filter((n) => n.canvas_id === canvas.id)),
+        connections: clone(db.canvas_connections.filter((c) => c.canvas_id === canvas.id)),
+      };
+    }
+    case "canvas_create": {
+      const name = String(args.name ?? "").trim() || "未命名画布";
+      const created: MockCanvas = {
+        id: nextId("cv"), name,
+        viewport_x: 0, viewport_y: 0, viewport_k: 1,
+        created_at: ts(), updated_at: ts(),
+      };
+      db.canvases.push(created);
+      return canvasSummaryOf(created);
+    }
+    case "canvas_rename": {
+      const canvas = db.canvases.find((c) => c.id === args.id);
+      if (canvas) {
+        canvas.name = String(args.name ?? "").trim();
+        canvas.updated_at = ts();
+      }
+      return null;
+    }
+    case "canvas_delete": {
+      const id = String(args.id ?? "");
+      db.canvases = db.canvases.filter((c) => c.id !== id);
+      db.canvas_nodes = db.canvas_nodes.filter((n) => n.canvas_id !== id);
+      db.canvas_connections = db.canvas_connections.filter((c) => c.canvas_id !== id);
+      return null;
+    }
+    case "canvas_set_viewport": {
+      const canvas = db.canvases.find((c) => c.id === args.id);
+      if (canvas) {
+        canvas.viewport_x = Number(args.x ?? 0);
+        canvas.viewport_y = Number(args.y ?? 0);
+        canvas.viewport_k = Number(args.k ?? 1);
+      }
+      return null;
+    }
+    case "canvas_create_node": {
+      const node: MockCanvasNode = {
+        id: nextId("cn"),
+        canvas_id: String(args.canvasId ?? ""),
+        type: args.nodeType as MockCanvasNode["type"],
+        title: String(args.title ?? ""),
+        pos_x: Number(args.posX ?? 0),
+        pos_y: Number(args.posY ?? 0),
+        width: args.width != null ? Number(args.width) : null,
+        height: args.height != null ? Number(args.height) : null,
+        metadata: args.metadata ? (JSON.parse(String(args.metadata)) as MockCanvasMeta) : canvasDefaultMeta(args.nodeType as MockCanvasNode["type"]),
+        resource_path: String(args.resourcePath ?? ""),
+        created_at: ts(),
+        updated_at: ts(),
+      };
+      db.canvas_nodes.push(node);
+      const canvas = db.canvases.find((c) => c.id === node.canvas_id);
+      if (canvas) canvas.updated_at = ts();
+      return clone(node);
+    }
+    case "canvas_update_node": {
+      const node = db.canvas_nodes.find((n) => n.id === args.id);
+      if (node) {
+        if (args.title != null) node.title = String(args.title);
+        if (args.metadata != null) node.metadata = JSON.parse(String(args.metadata)) as MockCanvasMeta;
+        if (args.resourcePath != null) node.resource_path = String(args.resourcePath);
+        node.updated_at = ts();
+        const canvas = db.canvases.find((c) => c.id === node.canvas_id);
+        if (canvas) canvas.updated_at = ts();
+      }
+      return node ? clone(node) : null;
+    }
+    case "canvas_save_layout": {
+      const canvasId = String(args.canvasId ?? "");
+      for (const entry of (args.nodes as { id: string; pos_x: number; pos_y: number; width: number | null; height: number | null }[]) ?? []) {
+        const node = db.canvas_nodes.find((n) => n.id === entry.id && n.canvas_id === canvasId);
+        if (node) {
+          node.pos_x = entry.pos_x;
+          node.pos_y = entry.pos_y;
+          node.width = entry.width;
+          node.height = entry.height;
+        }
+      }
+      return null;
+    }
+    case "canvas_delete_node": {
+      const id = String(args.id ?? "");
+      db.canvas_nodes = db.canvas_nodes.filter((n) => n.id !== id);
+      db.canvas_connections = db.canvas_connections.filter((c) => c.from_node !== id && c.to_node !== id);
+      return null;
+    }
+    case "canvas_connect": {
+      const canvasId = String(args.canvasId ?? "");
+      const from = String(args.fromNode ?? "");
+      const to = String(args.toNode ?? "");
+      const existing = db.canvas_connections.find(
+        (c) => c.canvas_id === canvasId && c.from_node === from && c.to_node === to,
+      );
+      if (existing) return clone(existing);
+      const conn: MockCanvasConnection = { id: nextId("cc"), canvas_id: canvasId, from_node: from, to_node: to, created_at: ts() };
+      db.canvas_connections.push(conn);
+      return clone(conn);
+    }
+    case "canvas_rewire": {
+      const row = db.canvas_connections.find((c) => c.id === args.id);
+      if (!row) throw new Error(`连线不存在：${String(args.id)}`);
+      const to = String(args.toNode ?? "");
+      const merged = db.canvas_connections.find(
+        (c) => c.canvas_id === row.canvas_id && c.from_node === row.from_node && c.to_node === to,
+      );
+      if (merged && merged.id !== row.id) {
+        db.canvas_connections = db.canvas_connections.filter((c) => c.id !== row.id);
+        return clone(merged);
+      }
+      row.to_node = to;
+      return clone(row);
+    }
+    case "canvas_delete_connection": {
+      db.canvas_connections = db.canvas_connections.filter((c) => c.id !== args.id);
+      return null;
+    }
+    case "ai_generate_image":
+      // 浏览器验证环境无 AI 配置：直接报错（节点上可见错误提示）。
+      throw new Error("浏览器验证环境未配置 AI 生图");
+    case "ai_cancel_generation":
+      return null;
 
     // ── 事件与窗口（Tauri 插件命令） ──
     default:
