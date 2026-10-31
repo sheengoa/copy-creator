@@ -62,6 +62,16 @@ Copy Creator is a lightweight cross-platform (Windows / Linux) desktop productiv
 - Cross-view locating: "Show in library" jumps back to the Files view at the asset's group
 - Deleting project structures (shows/episodes/scenes/shots) only removes metadata — asset files always stay in the library
 
+### 🎨 Canvas (AI Image Generation)
+- A fourth top-level sidebar area: an infinite canvas with free node placement, full pan/zoom/marquee/multi-drag/undo gestures
+- Four node types: text (prompt), image (generation), reference (library asset), note; node-level connections mean "reference the upstream"
+- Full wiring gestures: drag to connect → lift & retarget → Shift+right-click to cut → drop on empty space to create a node and auto-connect
+- Multi-input wires grouped by type: multiple text wires concatenate into the prompt in order; reference/image wires accumulate as references
+- AI generation: OpenAI-compatible + Gemini, fully relayed through Rust (keys never reach the frontend); cancellable, no automatic retries on failure
+- Per-image streaming: concurrency capped at 4; each finished image fills its slot immediately; completed images survive cancellation
+- Outputs and references land in the resource library: generated images are imported automatically with one-click "Show in Library"; downstream references use the primary image (click an alternate to switch)
+- Canvas data (viewport/positions/sizes/wires) lives in SQLite, follows storage migration, and is covered by whole-DB backups
+
 ### 🧭 Radial Menu
 - A quick panel pops up at the mouse cursor, with Clipboard / Phrases / Resources tabs
 - The Resources tab supports batch operations on a whole group:
