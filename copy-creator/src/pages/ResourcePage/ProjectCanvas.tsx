@@ -826,7 +826,9 @@ export default function ProjectCanvas({
       segments.forEach((segment, index) => {
         next[segment.id] = prev[segment.id] ?? {
           x: segment.canvas_x ?? baseX,
-          y: segment.canvas_y ?? Math.max(WORLD_MARGIN, 110 + index * 260),
+          // 纵向间距 520 与模板两排阵型同基准：片段左侧一组占位高约两排，
+          // 260 的旧间距会让相邻两组的占位相交。
+          y: segment.canvas_y ?? Math.max(WORLD_MARGIN, 110 + index * 520),
         };
       });
       return next;
@@ -1478,27 +1480,29 @@ export default function ProjectCanvas({
       // 片段默认列位与 segPos effect 同基准（成片节点默认挂 worldW+80）。
       const segX = layout.worldW + 80 - SEG_W - 160;
       created.forEach((segId, i) => {
-        const segY = Math.max(WORLD_MARGIN, 110 + i * 260);
-        // 片段左侧一条横向占位带（右→左：角色/场景/道具/提示词/剧本），
-        // 等距 44px、卡片与片段留 56px；行带高约 220，垂直居中于片段。
-        // 片段纵向间距 260 > 行带高，两条占位带互不相交，彻底排开。
-        const rowY = segY - 50;
-        const colA = segX - 56 - INFO_W;
-        const colB = colA - 44 - INFO_W;
-        const colC = colB - 44 - INFO_W;
-        const colD = colC - 44 - SCRIPT_W;
-        const colE = colD - 44 - SCRIPT_W;
+        const segY = Math.max(WORLD_MARGIN, 110 + i * 520);
+        // 两排阵型（对齐设计稿）：上排三个占位横排（左→右 道具/场景/
+        // 角色），底边贴片段顶；下排剧本+提示词在片段左下（提示词在剧
+        // 本右侧、略高半格）。全部相对片段锚定，片段纵向间距 520 拉开，
+        // 相邻两组的占位互不相交。
+        const topY = segY - INFO_H;
+        const roleX = segX - 212 - INFO_W;
+        const sceneX = roleX - 40 - INFO_W;
+        const propX = sceneX - 40 - INFO_W;
+        const bottomY = segY + 88;
+        const scriptX = propX;
+        const promptX = scriptX + SCRIPT_W + 48;
         const charId = `eph${Date.now()}${Math.floor(Math.random() * 1e4)}a${i}`;
         const locId = `eph${Date.now()}${Math.floor(Math.random() * 1e4)}b${i}`;
         const propId = `eph${Date.now()}${Math.floor(Math.random() * 1e4)}c${i}`;
         const promptId = `pph${Date.now()}${Math.floor(Math.random() * 1e4)}${i}`;
         const scriptId = `sph${Date.now()}${Math.floor(Math.random() * 1e4)}${i}`;
-        newEphs.push({ id: charId, kind: "character", x: colA, y: rowY });
-        newEphs.push({ id: locId, kind: "location", x: colB, y: rowY });
-        newEphs.push({ id: propId, kind: "prop", x: colC, y: rowY });
-        newPrompts.push({ id: promptId, promptId: "", x: colD, y: rowY });
+        newEphs.push({ id: charId, kind: "character", x: roleX, y: topY });
+        newEphs.push({ id: locId, kind: "location", x: sceneX, y: topY });
+        newEphs.push({ id: propId, kind: "prop", x: propX, y: topY });
+        newPrompts.push({ id: promptId, promptId: "", x: promptX, y: bottomY - 24 });
         newScripts.push({ id: scriptId, path: "" });
-        scriptOffsets[`script:${scriptId}`] = { x: colE, y: rowY };
+        scriptOffsets[`script:${scriptId}`] = { x: scriptX, y: bottomY };
         pendings.push(
           { fromKey: `eph:${charId}`, toSegmentId: segId, toPort: "character" },
           { fromKey: `eph:${locId}`, toSegmentId: segId, toPort: "location" },
