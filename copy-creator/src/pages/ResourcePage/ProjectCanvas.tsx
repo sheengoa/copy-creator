@@ -2010,6 +2010,31 @@ export default function ProjectCanvas({
     [scenes, t],
   );
 
+  // ── 实体类型色通道：资料节点（角色/场景/道具，含空白占位与组）的
+  // 输出口与连线颜色跟片段对应输入口同色（角色粉/场景绿/道具橙），
+  // 与提示词青、剧本橙对齐——此前这些节点按数据类型取色（image=绿）
+  // 全部挤成绿色。返回 null = 非资料来源，回退数据类型色（素材/镜头
+  // /片段线维持原配色）。兼容性判定仍走 image 数据类型，互不影响。
+  const nodeWireColorOf = useCallback(
+    (key: string): string | null => {
+      if (key.startsWith("char:")) return PORT_COLORS.character;
+      if (key.startsWith("loc:")) return PORT_COLORS.location;
+      if (key.startsWith("prop:")) return PORT_COLORS.prop;
+      if (key.startsWith("grp:")) {
+        const kind = infoGroups.find((g) => `grp:${g.id}` === key)?.kind;
+        return kind ? PORT_COLORS[kind] : null;
+      }
+      if (key.startsWith("eph:")) {
+        const kind = entityPhs.find((p) => `eph:${p.id}` === key)?.kind;
+        return kind ? PORT_COLORS[kind] : null;
+      }
+      if (key === "script" || key.startsWith("script:")) return PORT_COLORS.script;
+      if (key.startsWith("prompt:")) return PORT_COLORS.prompt;
+      return null;
+    },
+    [infoGroups, entityPhs],
+  );
+
   const inPointOf = useCallback(
     (key: string, portId?: string): { x: number; y: number } | null => {
       const box = boxOf(key);
@@ -2999,10 +3024,8 @@ export default function ProjectCanvas({
               : wirePathD(startPoint, endPoint),
           invalid: drag.invalid,
           color: lifted
-            ? WIRE_TYPE_COLORS[portsOf(lifted.fromKey).out?.type ?? ""] ?? undefined
-            : drag.fromType
-              ? WIRE_TYPE_COLORS[drag.fromType]
-              : undefined,
+            ? nodeWireColorOf(lifted.fromKey) ?? WIRE_TYPE_COLORS[portsOf(lifted.fromKey).out?.type ?? ""] ?? undefined
+            : nodeWireColorOf(drag.fromKey) ?? (drag.fromType ? WIRE_TYPE_COLORS[drag.fromType] : undefined),
         });
       } else if (drag.kind === "card") {
         setPos((prev) => {
@@ -3640,7 +3663,7 @@ export default function ProjectCanvas({
       document.removeEventListener("pointerup", onUp);
       document.removeEventListener("pointercancel", onCancel);
     };
-  }, [layout, pos, view, scenePos, infoPos, boxOf, portsOf, outPointOf, inPointOf, persistCards, saveCanvasLayout, saveInfoFramePos, saveView, setSelection, saveOutputPos, setEpisodeOutput, episodeId, notes, persistNotes, addNote, addEntityPh, addPromptPh, persistSegments, linkNode, unlinkNode, nodeKeyParts, addSegment, autoConnectNewNode, persistSizes, persistInfoOffsets, infoGroups, infoNodes, infoNodePos, entityPhs, promptPhs, segments, segPos, sizeOfNode, outputBox, moveGroupTo, persistPositions, pushUndo, pendingLinks, persistPendingLinks, setInfoFramePos, setInfoOffsets, setNodeSizes, setNotes, setOutputPos, openNodeDetail, ownerKeyOf, ownerKeyOfLink, displacePortLinks]);
+  }, [layout, pos, view, scenePos, infoPos, boxOf, portsOf, outPointOf, inPointOf, persistCards, saveCanvasLayout, saveInfoFramePos, saveView, setSelection, saveOutputPos, setEpisodeOutput, episodeId, notes, persistNotes, addNote, addEntityPh, addPromptPh, persistSegments, linkNode, unlinkNode, nodeKeyParts, addSegment, autoConnectNewNode, persistSizes, persistInfoOffsets, infoGroups, infoNodes, infoNodePos, entityPhs, promptPhs, segments, segPos, sizeOfNode, outputBox, moveGroupTo, persistPositions, pushUndo, pendingLinks, persistPendingLinks, setInfoFramePos, setInfoOffsets, setNodeSizes, setNotes, setOutputPos, openNodeDetail, ownerKeyOf, ownerKeyOfLink, displacePortLinks, nodeWireColorOf]);
 
   // ── 节点操作 ──
   // 节点接口圆点（ComfyUI 式）：输入口列在左缘（片段六口按列分布）、
@@ -3674,7 +3697,7 @@ export default function ProjectCanvas({
                 <span
                   className="pc-port pc-port-out"
                   data-port="out"
-                  style={{ background: WIRE_TYPE_COLORS[out.type] ?? "#94a3b8" }}
+                  style={{ background: nodeWireColorOf(key) ?? WIRE_TYPE_COLORS[out.type] ?? "#94a3b8" }}
                 />
               </>
             ) : null}
@@ -4707,7 +4730,9 @@ export default function ProjectCanvas({
               const b = inPointOf(`segment:${link.to_segment}`, link.to_port);
               if (!a || !b) return null;
               const d = wirePathD(a, b);
-              // 线色随来源数据类型（角色/场景/道具图绿、剧本橙、片段紫）。
+              // 线色：资料来源跟片段对应输入口同色（角色粉/场景绿/道具橙），
+              // 其余（素材/镜头/片段）按数据类型（图绿/视频紫）。
+              const fromColor = nodeWireColorOf(wire.fromKey);
               const fromType = portsOf(wire.fromKey).out?.type;
               return (
                 <g key={wire.key} className="pc-wire" data-cut={`s:${link.id}`}>
@@ -4715,7 +4740,7 @@ export default function ProjectCanvas({
                   <path
                     className="pc-wire-line"
                     d={d}
-                    style={{ stroke: WIRE_TYPE_COLORS[fromType ?? ""] ?? WIRE_TYPE_COLORS.video, strokeOpacity: 0.55 }}
+                    style={{ stroke: fromColor ?? WIRE_TYPE_COLORS[fromType ?? ""] ?? WIRE_TYPE_COLORS.video, strokeOpacity: 0.55 }}
                   />
                 </g>
               );
@@ -4742,7 +4767,7 @@ export default function ProjectCanvas({
                     className="pc-wire-line"
                     d={d}
                     style={{
-                      stroke: WIRE_TYPE_COLORS[fromType ?? ""] ?? "#94a3b8",
+                      stroke: nodeWireColorOf(link.fromKey) ?? WIRE_TYPE_COLORS[fromType ?? ""] ?? "#94a3b8",
                       strokeOpacity: solid ? 0.55 : 0.7,
                     }}
                   />
