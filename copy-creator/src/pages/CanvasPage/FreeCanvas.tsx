@@ -455,17 +455,27 @@ export default function FreeCanvas({ canvasId }: { canvasId: string }) {
     );
     if (!row) return;
     const delta = (drop.fromTop - drop.toTop) / view.scale;
-    if (Math.abs(delta) < 1) return;
-    row.style.transition = "none";
-    row.style.transform = `translateY(${delta}px)`;
-    void row.offsetHeight; // 强制回流：让反向位移立刻生效
-    row.style.transition = "transform 0.16s cubic-bezier(0.2, 0.8, 0.3, 1)";
-    row.style.transform = "";
+    // 收尾：内联过渡还原为类定义。transitionend 在后台标签页可能不触发，
+    // 加超时兜底（幂等）。
     const settle = () => {
       row.style.transition = "";
       row.removeEventListener("transitionend", settle);
     };
     row.addEventListener("transitionend", settle);
+    window.setTimeout(settle, 240);
+    if (Math.abs(delta) < 1) {
+      // 落点几乎就是目标槽位：无需反向补偿，但拖拽跟手的残值 transform
+      // 还挂在行上（行是 keyed 复用的同一 DOM），必须过渡归零——否则行
+      // 永久停在松手位置，还撑出表单滚动区把后续行藏进去。
+      row.style.transition = "transform 0.16s cubic-bezier(0.2, 0.8, 0.3, 1)";
+      row.style.transform = "";
+      return;
+    }
+    row.style.transition = "none";
+    row.style.transform = `translateY(${delta}px)`;
+    void row.offsetHeight; // 强制回流：让反向位移立刻生效
+    row.style.transition = "transform 0.16s cubic-bezier(0.2, 0.8, 0.3, 1)";
+    row.style.transform = "";
   }, [collectionDrag, view.scale]);
   const [wireDraft, setWireDraft] = useState<{ d: string; invalid: boolean; color?: string } | null>(null);
   /** 摘线拿着（rewire）中：该连线暂隐藏，松手转接或放回。 */
@@ -1904,6 +1914,9 @@ export default function FreeCanvas({ canvasId }: { canvasId: string }) {
     const draggedConnId = items[index].connId;
     const rowEl = handle.closest<HTMLElement>(".fc-collection-item");
     rowEl?.classList.add("is-dragging");
+    // 上轮落位的内联过渡若还在（超时兜底前再次抓取），先清掉——内联
+    // 样式优先于 .is-dragging 的类定义，会让跟手产生 0.16s 的过渡延迟。
+    if (rowEl) rowEl.style.transition = "";
     try {
       handle.setPointerCapture(e.pointerId);
     } catch {
