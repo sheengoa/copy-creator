@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState, type CSSProperties } from "react";
 import { useTranslation } from "react-i18next";
 import { invoke } from "@tauri-apps/api/core";
+import { Icons } from "../../components/Icons";
 import { openResourceFile } from "../../domain/mediaAssets";
 import { resolveResourceMediaUrl } from "../../domain/mediaUrl";
 import { useSettingsStore } from "../../stores/settingsStore";
@@ -25,12 +26,13 @@ const MARQUEE_THRESHOLD = 4; // 屏幕像素：区分点击与框选
 const DRAG_THRESHOLD = 3; // 屏幕像素：区分点击与拖动
 const UNDO_LIMIT = 50;
 
-/** 节点默认尺寸：建节点即落库显式宽高（NULL 只作历史数据兜底）。 */
+/** 节点默认尺寸：参数与输入都长在节点体上（ComfyUI 式），建节点即落库
+ *  显式宽高（NULL 只作历史数据兜底）。 */
 const NODE_DEFAULT_SIZE: Record<CanvasNodeType, { w: number; h: number }> = {
-  text: { w: 210, h: 130 },
-  note: { w: 190, h: 130 },
-  image: { w: 220, h: 200 },
-  ref: { w: 210, h: 110 },
+  text: { w: 260, h: 170 },
+  note: { w: 240, h: 160 },
+  image: { w: 280, h: 400 },
+  ref: { w: 260, h: 200 },
 };
 
 /** 节点类型色通道（对齐工程画布类型色惯例，连线取上游节点色）。 */
@@ -222,9 +224,8 @@ export default function FreeCanvas({ canvasId }: { canvasId: string }) {
     wy: number;
     pending: PendingWire;
   } | null>(null);
-  const [editingId, setEditingId] = useState<string | null>(null);
   const [genStarting, setGenStarting] = useState(false);
-  const [panelError, setPanelError] = useState<string | null>(null);
+  const [nodeErrors, setNodeErrors] = useState<Record<string, string>>({});
 
   const store = useCanvasStore;
 
@@ -275,8 +276,7 @@ export default function FreeCanvas({ canvasId }: { canvasId: string }) {
     setSelection([...idMap.values()]);
   }, [canvasId, store]);
 
-  const deleteSelected = useCallback(async () => {
-    const ids = selectionRef.current;
+  const deleteNodes = useCallback(async (ids: string[]) => {
     if (!ids.length) return;
     const targets = nodesRef.current.filter((n) => ids.includes(n.id));
     const conns = connectionsRef.current
@@ -290,6 +290,10 @@ export default function FreeCanvas({ canvasId }: { canvasId: string }) {
     }
     setSelection([]);
   }, [pushUndo, store]);
+
+  const deleteSelected = useCallback(async () => {
+    await deleteNodes(selectionRef.current);
+  }, [deleteNodes]);
 
   // ── 视口引擎（自 ProjectCanvas 零改动搬运） ─────────────────
 
@@ -356,7 +360,7 @@ export default function FreeCanvas({ canvasId }: { canvasId: string }) {
         maxY = Math.max(maxY, r.y + r.h);
       }
       const pad = 60;
-      const usableW = Math.max(200, rect.width - 248); // 扣除右侧属性面板
+      const usableW = Math.max(200, rect.width);
       const bw = maxX - minX + pad * 2;
       const bh = maxY - minY + pad * 2;
       // 只缩小不放大：内容小于视口时保持 1:1（单节点内容不该被怼到最大倍率）。
@@ -721,15 +725,9 @@ export default function FreeCanvas({ canvasId }: { canvasId: string }) {
 
   const handleDoubleClick = (e: React.MouseEvent) => {
     const target = e.target as HTMLElement;
-    const nodeEl = target.closest(".fc-node") as HTMLElement | null;
-    if (nodeEl) {
-      const nodeId = nodeEl.dataset.nodeId ?? "";
-      const node = nodesRef.current.find((n) => n.id === nodeId);
-      if (node && (node.type === "text" || node.type === "note")) {
-        setEditingId(node.id);
-      }
-      return;
-    }
+    // 节点内双击不再有全局动作（正文/参数常驻在节点上，直接交互）；
+    // 空白双击弹建节点菜单。
+    if (target.closest(".fc-node")) return;
     const world = toWorld(e.clientX, e.clientY);
     openAddMenu(world, null);
   };
@@ -750,7 +748,6 @@ export default function FreeCanvas({ canvasId }: { canvasId: string }) {
       } else if (e.key === "Escape") {
         if (interactionRef.current) setInteraction(null);
         if (addMenu) setAddMenu(null);
-        setEditingId(null);
       }
     };
     window.addEventListener("keydown", onKey);
@@ -783,8 +780,6 @@ export default function FreeCanvas({ canvasId }: { canvasId: string }) {
     }
     return nodeSize(node);
   };
-
-  const selectedNode = nodes.find((n) => n.id === selection[0]) ?? null;
 
   const draftWire = (() => {
     if (interaction?.mode === "wire" || interaction?.mode === "rewire") {
@@ -825,10 +820,6 @@ export default function FreeCanvas({ canvasId }: { canvasId: string }) {
     void store.getState().updateNode(node.id, { metadata: JSON.stringify(meta) });
   };
 
-  const commitTitle = (node: CanvasNode, title: string) => {
-    if (title !== node.title) void store.getState().updateNode(node.id, { title });
-  };
-
   // ── 生图（方案 3.4/3.6）：参数编辑、生成、主图切换、参考图上传 ──
 
   /** 提示词来源检查（方案 3.6）：至少一条来自非空文本节点的入线。 */
@@ -860,11 +851,11 @@ export default function FreeCanvas({ canvasId }: { canvasId: string }) {
 
   const startGenerate = async (node: CanvasNode) => {
     setGenStarting(true);
-    setPanelError(null);
+    setNodeErrors((prev) => ({ ...prev, [node.id]: "" }));
     try {
       await store.getState().generateImage(canvasId, node.id);
     } catch (e) {
-      setPanelError(String(e));
+      setNodeErrors((prev) => ({ ...prev, [node.id]: String(e) }));
     } finally {
       setGenStarting(false);
     }
@@ -878,9 +869,11 @@ export default function FreeCanvas({ canvasId }: { canvasId: string }) {
       });
       await store.getState().updateNode(node.id, { resourcePath: imported.file_path });
     } catch (e) {
-      // 用户在系统对话框取消：静默；其余错误进面板提示。
+      // 用户在系统对话框取消：静默；其余错误在节点上提示。
       const msg = String(e);
-      if (!msg.includes("取消") && !msg.includes("cancel")) setPanelError(msg);
+      if (!msg.includes("取消") && !msg.includes("cancel")) {
+        setNodeErrors((prev) => ({ ...prev, [node.id]: msg }));
+      }
     }
   };
 
@@ -963,64 +956,153 @@ export default function FreeCanvas({ canvasId }: { canvasId: string }) {
                 </div>
                 <div className="fc-node-body">
                   {(node.type === "text" || node.type === "note") && (
-                    editingId === node.id ? (
-                      <textarea
-                        className="fc-node-edit"
-                        autoFocus
-                        defaultValue={meta.kind === "text" || meta.kind === "note" ? meta.content : ""}
+                    // 正文即节点体：常驻可编辑，失焦提交。类名不可用
+                    // fc-node-text——与类型修饰类 fc-node-${type} 同名会把
+                    // 内容规则（max-height）命中节点自身导致塌陷（实测踩坑）。
+                    <textarea
+                      key={`t-${node.id}-${node.updated_at}`}
+                      className="fc-node-edit"
+                      defaultValue={meta.kind === "text" || meta.kind === "note" ? meta.content : ""}
+                      placeholder={node.type === "text" ? t("canvas.textContentPlaceholder") : ""}
+                      onBlur={(e) => commitContent(node, e.target.value)}
+                    />
+                  )}
+                  {node.type === "image" && meta.kind === "image" && (
+                    <div className="fc-node-form">
+                      <input
+                        className="fc-node-input"
+                        key={`gm-${node.id}-${node.updated_at}`}
+                        defaultValue={meta.params.model}
+                        placeholder={`${t("canvas.genModelLabel")}：${aiModel || "gpt-image-1"}`}
+                        onBlur={(e) => commitImageParams(node, { model: e.target.value.trim() })}
+                      />
+                      <div className="fc-node-row">
+                        <input
+                          className="fc-node-input grow"
+                          key={`gs-${node.id}-${node.updated_at}`}
+                          defaultValue={meta.params.size}
+                          placeholder="auto / 1024x1024 / 3:2"
+                          onBlur={(e) => commitImageParams(node, { size: e.target.value.trim() })}
+                        />
+                        <input
+                          className="fc-node-input count"
+                          key={`gc-${node.id}-${node.updated_at}`}
+                          type="number"
+                          min={1}
+                          max={15}
+                          defaultValue={meta.params.count}
+                          onBlur={(e) =>
+                            commitImageParams(node, {
+                              count: Math.max(1, Math.min(15, Number.parseInt(e.target.value, 10) || 1)),
+                            })
+                          }
+                        />
+                      </div>
+                      {genProgress[node.id] ? (
+                        <>
+                          <div className="fc-gen-slots">
+                            {Array.from({ length: genProgress[node.id].total }, (_, i) => {
+                              const url = genProgress[node.id].previews[i];
+                              return url ? (
+                                <img key={i} className="fc-gen-slot filled" src={url} alt="" draggable={false} />
+                              ) : (
+                                <span key={i} className="fc-gen-slot pending">{t("canvas.genSlotPending")}</span>
+                              );
+                            })}
+                          </div>
+                          <div className="fc-node-row">
+                            <span className="fc-gen-summary">
+                              {t("canvas.generating")} {genProgress[node.id].received + genProgress[node.id].errors}/{genProgress[node.id].total}
+                            </span>
+                            <button
+                              className="fc-node-btn ghost"
+                              onClick={() => void store.getState().cancelGeneration(genProgress[node.id].requestId)}
+                            >
+                              {t("canvas.cancelGen")}
+                            </button>
+                          </div>
+                        </>
+                      ) : (
+                        <button
+                          className="fc-node-btn accent"
+                          disabled={genStarting || !hasPromptSourceFor(node)}
+                          onClick={() => void startGenerate(node)}
+                        >
+                          {meta.status === "done" ? t("canvas.regenerate") : t("canvas.genButton")}
+                        </button>
+                      )}
+                      {!hasPromptSourceFor(node) && !genProgress[node.id] && (
+                        <div className="fc-gen-warn">{t("canvas.noPromptSource")}</div>
+                      )}
+                      {nodeErrors[node.id] && <div className="fc-gen-warn">{nodeErrors[node.id]}</div>}
+                      {meta.status === "error" && meta.error && <div className="fc-gen-warn">{meta.error}</div>}
+                      {meta.images.length > 0 && (
+                        <>
+                          <div className="fc-gen-thumbs">
+                            {meta.images.map((thumb, i) => (
+                              <button
+                                key={i}
+                                className={`fc-gen-thumb${thumb.primary ? " primary" : ""}`}
+                                title={thumb.primary ? t("canvas.genPrimary") : t("canvas.genSetPrimary")}
+                                onClick={() => setImagePrimary(node, i)}
+                              >
+                                <ResourceThumb path={thumb.resource_path} className="fc-thumb" />
+                                {thumb.primary && <span className="fc-gen-primary-badge">{t("canvas.genPrimary")}</span>}
+                              </button>
+                            ))}
+                          </div>
+                          <button
+                            className="fc-node-btn ghost"
+                            onClick={() => {
+                              const target = meta.images.find((item) => item.primary) ?? meta.images[0];
+                              if (target?.resource_path) void openResourceFile(target.resource_path);
+                            }}
+                          >
+                            {t("canvas.showInLibrary")}
+                          </button>
+                        </>
+                      )}
+                    </div>
+                  )}
+                  {node.type === "ref" && (
+                    <div className="fc-node-form">
+                      {node.resource_path ? (
+                        <ResourceThumb path={node.resource_path} className="fc-thumb-cover" />
+                      ) : (
+                        <div className="fc-node-placeholder">{t("canvas.refEmpty")}</div>
+                      )}
+                      <input
+                        className="fc-node-input"
+                        key={`p-${node.id}-${node.updated_at}`}
+                        defaultValue={node.resource_path}
+                        placeholder={t("canvas.panel.pathLabel")}
                         onBlur={(e) => {
-                          commitContent(node, e.target.value);
-                          setEditingId(null);
-                        }}
-                        onKeyDown={(e) => {
-                          if (e.key === "Escape") {
-                            e.currentTarget.blur();
+                          const path = e.target.value.trim();
+                          if (path !== node.resource_path) {
+                            void store.getState().updateNode(node.id, { resourcePath: path });
                           }
                         }}
                       />
-                    ) : (
-                      // 类名不可用 fc-node-text：与类型修饰类 fc-node-${type}
-                      // 生成的 fc-node-text 同名，会把内容规则（max-height）
-                      // 命中到节点自身导致塌陷（实测踩坑）。
-                      <div className="fc-node-content">
-                        {meta.kind === "text" || meta.kind === "note" ? meta.content || "" : ""}
-                      </div>
-                    )
-                  )}
-                  {node.type === "image" && (
-                    genProgress[node.id] ? (
-                      // 生成中：逐张回传的槽位网格（已到填图，未到占位）。
-                      <div className="fc-node-thumbs">
-                        {Array.from({ length: genProgress[node.id].total }, (_, i) => {
-                          const url = genProgress[node.id].previews[i];
-                          return url ? (
-                            <img key={i} className="fc-thumb" src={url} alt="" draggable={false} />
-                          ) : (
-                            <span key={i} className="fc-thumb pending">{t("canvas.genSlotPending")}</span>
-                          );
-                        })}
-                      </div>
-                    ) : meta.kind === "image" && meta.images.length > 0 ? (
-                      <div className="fc-node-thumbs">
-                        {meta.images.map((img, i) => (
-                          <ResourceThumb key={i} path={img.resource_path} className="fc-thumb" />
-                        ))}
-                      </div>
-                    ) : (
-                      <div className="fc-node-placeholder">{t("canvas.imageEmpty")}</div>
-                    )
-                  )}
-                  {node.type === "ref" && (
-                    node.resource_path ? (
-                      <ResourceThumb path={node.resource_path} className="fc-thumb-cover" />
-                    ) : (
-                      <div className="fc-node-placeholder">{t("canvas.refEmpty")}</div>
-                    )
+                      <button className="fc-node-btn ghost" onClick={() => void uploadReference(node)}>
+                        {t("canvas.uploadRef")}
+                      </button>
+                    </div>
                   )}
                 </div>
                 <span className="fc-port fc-port-in" />
                 <span className="fc-port fc-port-out" />
                 <span className="fc-resize" />
+                <button
+                  className="fc-node-del"
+                  title={t("common.delete")}
+                  onPointerDown={(e) => e.stopPropagation()}
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    void deleteNodes([node.id]);
+                  }}
+                >
+                  {Icons.close}
+                </button>
               </div>
             );
           })}
@@ -1041,177 +1123,6 @@ export default function FreeCanvas({ canvasId }: { canvasId: string }) {
           </div>
         )}
       </div>
-
-      <aside className="fc-panel">
-        <div className="fc-panel-title">{t("canvas.panel.title")}</div>
-        {selectedNode ? (
-          <div className="fc-panel-body" key={selectedNode.id}>
-            <label className="fc-field">
-              <span>{t("canvas.panel.titleLabel")}</span>
-              <input
-                key={`title-${selectedNode.id}`}
-                defaultValue={selectedNode.title}
-                onBlur={(e) => commitTitle(selectedNode, e.target.value.trim())}
-                onKeyDown={(e) => {
-                  if (e.key === "Enter") e.currentTarget.blur();
-                }}
-              />
-            </label>
-            {(selectedNode.type === "text" || selectedNode.type === "note") &&
-              (selectedNode.metadata.kind === "text" || selectedNode.metadata.kind === "note") && (
-                <label className="fc-field">
-                  <span>{t("canvas.panel.contentLabel")}</span>
-                  <textarea
-                    key={`content-${selectedNode.id}`}
-                    defaultValue={selectedNode.metadata.content}
-                    onBlur={(e) => commitContent(selectedNode, e.target.value)}
-                  />
-                </label>
-              )}
-            {selectedNode.type === "ref" && (
-              <>
-                <label className="fc-field">
-                  <span>{t("canvas.panel.pathLabel")}</span>
-                  <input
-                    key={`path-${selectedNode.id}`}
-                    defaultValue={selectedNode.resource_path}
-                    placeholder={t("canvas.namePlaceholder")}
-                    onBlur={(e) => {
-                      const path = e.target.value.trim();
-                      if (path !== selectedNode.resource_path) {
-                        void store.getState().updateNode(selectedNode.id, { resourcePath: path });
-                      }
-                    }}
-                  />
-                </label>
-                <button className="fc-gen-library" onClick={() => void uploadReference(selectedNode)}>
-                  {t("canvas.uploadRef")}
-                </button>
-              </>
-            )}
-            {selectedNode.type === "image" && selectedNode.metadata.kind === "image" && (
-              <div className="fc-gen">
-                <div className="fc-panel-title">{t("canvas.genParamsTitle")}</div>
-                <label className="fc-field">
-                  <span>{t("canvas.genModelLabel")}</span>
-                  <input
-                    key={`gm-${selectedNode.id}`}
-                    defaultValue={selectedNode.metadata.params.model}
-                    placeholder={aiModel || "gpt-image-1"}
-                    onBlur={(e) => commitImageParams(selectedNode, { model: e.target.value.trim() })}
-                  />
-                </label>
-                <label className="fc-field">
-                  <span>{t("canvas.genSizeLabel")}</span>
-                  <input
-                    key={`gs-${selectedNode.id}`}
-                    defaultValue={selectedNode.metadata.params.size}
-                    placeholder="auto / 1024x1024 / 3:2"
-                    onBlur={(e) => commitImageParams(selectedNode, { size: e.target.value.trim() })}
-                  />
-                </label>
-                <label className="fc-field">
-                  <span>{t("canvas.genCountLabel")}</span>
-                  <input
-                    key={`gc-${selectedNode.id}`}
-                    type="number"
-                    min={1}
-                    max={15}
-                    defaultValue={selectedNode.metadata.params.count}
-                    onBlur={(e) =>
-                      commitImageParams(selectedNode, {
-                        count: Math.max(1, Math.min(15, Number.parseInt(e.target.value, 10) || 1)),
-                      })
-                    }
-                  />
-                </label>
-                {genProgress[selectedNode.id] ? (
-                  <div className="fc-gen-progress">
-                    <div className="fc-gen-progress-label">
-                      {t("canvas.generating")} {genProgress[selectedNode.id].received + genProgress[selectedNode.id].errors}/{genProgress[selectedNode.id].total}
-                    </div>
-                    <div className="fc-gen-slots">
-                      {Array.from({ length: genProgress[selectedNode.id].total }, (_, i) => {
-                        const url = genProgress[selectedNode.id].previews[i];
-                        return url ? (
-                          <img key={i} className="fc-gen-slot" src={url} alt="" draggable={false} />
-                        ) : (
-                          <span key={i} className="fc-gen-slot pending">{t("canvas.genSlotPending")}</span>
-                        );
-                      })}
-                    </div>
-                    <button
-                      className="fc-gen-cancel"
-                      onClick={() => void store.getState().cancelGeneration(genProgress[selectedNode.id].requestId)}
-                    >
-                      {t("canvas.cancelGen")}
-                    </button>
-                  </div>
-                ) : (
-                  <>
-                    <div className="fc-gen-summary">
-                      {t("canvas.genSummary", {
-                        model: selectedNode.metadata.params.model || aiModel || "—",
-                        count: selectedNode.metadata.params.count,
-                      })}
-                    </div>
-                    <button
-                      className="fc-gen-btn"
-                      disabled={genStarting || !hasPromptSourceFor(selectedNode)}
-                      onClick={() => void startGenerate(selectedNode)}
-                    >
-                      {selectedNode.metadata.status === "done" ? t("canvas.regenerate") : t("canvas.genButton")}
-                    </button>
-                    {!hasPromptSourceFor(selectedNode) && (
-                      <div className="fc-gen-warn">{t("canvas.noPromptSource")}</div>
-                    )}
-                  </>
-                )}
-                {panelError && <div className="fc-gen-warn">{panelError}</div>}
-                {selectedNode.metadata.kind === "image" && selectedNode.metadata.status === "error" && selectedNode.metadata.error && (
-                  <div className="fc-gen-warn">{selectedNode.metadata.error}</div>
-                )}
-                {selectedNode.metadata.kind === "image" && selectedNode.metadata.images.length > 0 && (
-                  <>
-                    <div className="fc-gen-thumbs">
-                      {selectedNode.metadata.images.map((img, i) => (
-                        <button
-                          key={i}
-                          className={`fc-gen-thumb${img.primary ? " primary" : ""}`}
-                          title={img.primary ? t("canvas.genPrimary") : t("canvas.genSetPrimary")}
-                          onClick={() => setImagePrimary(selectedNode, i)}
-                        >
-                          <ResourceThumb path={img.resource_path} className="fc-thumb" />
-                          {img.primary && <span className="fc-gen-primary-badge">{t("canvas.genPrimary")}</span>}
-                        </button>
-                      ))}
-                    </div>
-                    <button
-                      className="fc-gen-library"
-                      onClick={() => {
-                        const meta = selectedNode.metadata;
-                        if (meta.kind !== "image") return;
-                        const target = meta.images.find((img) => img.primary) ?? meta.images[0];
-                        if (target?.resource_path) void openResourceFile(target.resource_path);
-                      }}
-                    >
-                      {t("canvas.showInLibrary")}
-                    </button>
-                  </>
-                )}
-              </div>
-            )}
-            <div className="fc-panel-meta">
-              {Math.round(renderSize(selectedNode).w)} × {Math.round(renderSize(selectedNode).h)}
-            </div>
-            <button className="fc-panel-delete" onClick={() => void deleteSelected()}>
-              {t("canvas.panel.deleteNode")}
-            </button>
-          </div>
-        ) : (
-          <div className="fc-panel-empty">{t("canvas.panel.noSelection")}</div>
-        )}
-      </aside>
     </>
   );
 }

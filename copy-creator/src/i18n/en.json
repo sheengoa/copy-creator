@@ -826,6 +826,7 @@
     "showInLibrary": "Show in Library",
     "uploadRef": "Upload Reference",
     "genFailed": "Generation failed",
-    "genParamsTitle": "Generation Params"
+    "genParamsTitle": "Generation Params",
+    "textContentPlaceholder": "Type a prompt…"
   }
 }

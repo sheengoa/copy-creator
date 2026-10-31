@@ -822,6 +822,7 @@
     "showInLibrary": "在资源库中显示",
     "uploadRef": "上传参考图",
     "genFailed": "生成失败",
-    "genParamsTitle": "生成参数"
+    "genParamsTitle": "生成参数",
+    "textContentPlaceholder": "输入提示词…"
   }
 }
