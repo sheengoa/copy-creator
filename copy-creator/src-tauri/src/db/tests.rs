@@ -8544,4 +8544,63 @@ mod canvas_tests {
         .unwrap();
         assert_eq!(node["metadata"]["content"], "a");
     }
+
+    #[test]
+    fn groups_roundtrip_and_validation() {
+        let conn = canvas_conn();
+        let canvas = crate::db::canvas::create_canvas(&conn, "t").unwrap();
+        let canvas_id = canvas["id"].as_str().unwrap();
+        // 新画布 groups 为空数组。
+        assert_eq!(canvas["groups"], serde_json::json!([]));
+        let graph = crate::db::canvas::get_canvas_graph(&conn, canvas_id).unwrap();
+        assert_eq!(graph["canvas"]["groups"], serde_json::json!([]));
+
+        // 全量写入 → 读回一致；列表聚合行同样带 groups。
+        let groups = r#"[{"id":"ng1","label":"组","members":["n1","n2"]}]"#;
+        let value = crate::db::canvas::set_groups(&conn, canvas_id, groups).unwrap();
+        assert_eq!(value["groups"][0]["id"], "ng1");
+        assert_eq!(value["groups"][0]["members"][1], "n2");
+        let graph = crate::db::canvas::get_canvas_graph(&conn, canvas_id).unwrap();
+        assert_eq!(graph["canvas"]["groups"][0]["label"], "组");
+        let list = crate::db::canvas::list_canvases(&conn).unwrap();
+        assert_eq!(list[0]["groups"][0]["members"][0], "n1");
+
+        // 重复 id 的组不做合并语义（透传校验只看结构），写入原样保存。
+        // 不合法 JSON 拒绝；画布不存在拒绝。
+        assert!(crate::db::canvas::set_groups(&conn, canvas_id, "not-json").is_err());
+        assert!(crate::db::canvas::set_groups(&conn, "cv-none", "[]").is_err());
+        // members 缺字段按 serde default 补空（幂等升级哲学）。
+        crate::db::canvas::set_groups(&conn, canvas_id, r#"[{"id":"g2"}]"#).unwrap();
+        let graph = crate::db::canvas::get_canvas_graph(&conn, canvas_id).unwrap();
+        assert_eq!(graph["canvas"]["groups"][0]["members"], serde_json::json!([]));
+    }
+
+    #[test]
+    fn legacy_canvas_table_gets_groups_column() {
+        // 旧库升级路径：canvases 建表无 groups 列 → ensure_schema 幂等补列，
+        // 存量行回填 '[]'，数据不丢。
+        let conn = Connection::open_in_memory().unwrap();
+        conn.execute_batch("PRAGMA foreign_keys=ON;").unwrap();
+        conn.execute_batch(
+            "CREATE TABLE canvases (
+                id TEXT PRIMARY KEY,
+                name TEXT NOT NULL,
+                viewport_x REAL NOT NULL DEFAULT 0,
+                viewport_y REAL NOT NULL DEFAULT 0,
+                viewport_k REAL NOT NULL DEFAULT 1,
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL
+            );
+            INSERT INTO canvases (id, name, created_at, updated_at)
+            VALUES ('cv-old', '旧画布', '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z');",
+        )
+        .unwrap();
+        ensure_schema(&conn).unwrap();
+        let raw: String = conn
+            .query_row("SELECT groups FROM canvases WHERE id = 'cv-old'", [], |row| row.get(0))
+            .unwrap();
+        assert_eq!(raw, "[]");
+        let graph = crate::db::canvas::get_canvas_graph(&conn, "cv-old").unwrap();
+        assert_eq!(graph["canvas"]["groups"], serde_json::json!([]));
+    }
 }

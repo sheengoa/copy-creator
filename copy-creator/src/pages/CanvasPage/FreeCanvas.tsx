@@ -189,6 +189,7 @@ export default function FreeCanvas({ canvasId }: { canvasId: string }) {
   const { t } = useTranslation();
   const nodes = useCanvasStore((s) => s.nodes);
   const connections = useCanvasStore((s) => s.connections);
+  const groups = useCanvasStore((s) => s.groups);
   const genProgress = useCanvasStore((s) => s.genProgress);
   const aiModel = useSettingsStore((s) => s.aiModel);
   const aiProvider = useSettingsStore((s) => s.aiProvider);
@@ -634,6 +635,58 @@ export default function FreeCanvas({ canvasId }: { canvasId: string }) {
     [canvasId, store],
   );
 
+  // ── 节点分组（Ctrl+G，ComfyUI Group 的对应物）：选中若干节点打组成框
+  //    （框自适应成员包围盒）；拖组框标题整组移动（复用组拖管线）；选中
+  //    恰好是某组全部成员再按 Ctrl+G 解组。成员从其他组移出（互斥）。 ──
+
+  /** 成员当前包围盒（世界坐标；节点已删除则 null，渲染与剪枝自动剔除
+   *  ——组员被删后框随之收缩）。 */
+  const memberFrame = useCallback(
+    (key: string): { x: number; y: number; w: number; h: number } | null => {
+      const node = nodesRef.current.find((n) => n.id === key);
+      if (!node) return null;
+      const size = nodeSize(node);
+      return { x: node.pos_x, y: node.pos_y, w: size.w, h: size.h };
+    },
+    [],
+  );
+
+  // 防重入：StrictMode 开发态会双挂载键盘监听，一次 Ctrl+G 建组又解组。
+  const groupingRef = useRef(false);
+  const toggleGroup = useCallback(() => {
+    if (groupingRef.current) return;
+    groupingRef.current = true;
+    window.setTimeout(() => {
+      groupingRef.current = false;
+    }, 0);
+    const sel = selRef.current;
+    if (sel.length === 0) return;
+    const st = store.getState();
+    // 先剪枝：成员已被删除的组清掉死成员（空组丢弃），保证解组判定与
+    // 组框都基于存活成员。
+    const pruned = st.groups
+      .map((g) => ({ ...g, members: g.members.filter((key) => memberFrame(key) !== null) }))
+      .filter((g) => g.members.length > 0);
+    const fullGroup = pruned.find(
+      (g) => g.members.length === sel.length && sel.every((key) => g.members.includes(key)),
+    );
+    if (fullGroup) {
+      void st.setGroups(canvasId, pruned.filter((g) => g.id !== fullGroup.id));
+    } else {
+      const kept = pruned
+        .map((g) => ({ ...g, members: g.members.filter((key) => !sel.includes(key)) }))
+        .filter((g) => g.members.length > 0);
+      void st.setGroups(canvasId, [
+        ...kept,
+        {
+          id: `ng${Date.now()}${Math.floor(Math.random() * 1e4)}`,
+          label: t("project.canvas.nodeGroup"),
+          members: [...sel],
+        },
+      ]);
+    }
+  }, [canvasId, memberFrame, store, t]);
+
   // ── 复制 / 粘贴（Ctrl+C/V） ──────────────────────────────
 
   const clipRef = useRef<{ nodes: CanvasNode[]; wires: { from_node: string; to_node: string }[]; ax: number; ay: number } | null>(null);
@@ -886,6 +939,27 @@ export default function FreeCanvas({ canvasId }: { canvasId: string }) {
         }
       }
 
+      // 组框标题（Ctrl+G 的组）：按下拖动整组移动（复用组拖管线）。
+      const ngLabel = target?.closest(".pc-nodegroup-label");
+      if (ngLabel) {
+        const gid = ngLabel.closest(".pc-nodegroup")?.getAttribute("data-group") ?? "";
+        const group = groups.find((g) => g.id === gid);
+        if (group) {
+          const members = group.members
+            .map((key) => {
+              const f = memberFrame(key);
+              return f ? { key, x: f.x, y: f.y } : null;
+            })
+            .filter((m): m is { key: string; x: number; y: number } => m !== null);
+          if (members.length > 0) {
+            setSelection(members.map((m) => m.key));
+            dragRef.current = { kind: "multidrag", sx: e.clientX, sy: e.clientY, moved: false, members };
+            e.preventDefault();
+            return;
+          }
+        }
+      }
+
       // 左键空白：框选（DOM 直挂的 marquee 矩形，选中判定在松手）。
       const mq = document.createElement("div");
       mq.className = "pc-marquee";
@@ -893,7 +967,7 @@ export default function FreeCanvas({ canvasId }: { canvasId: string }) {
       dragRef.current = { kind: "marquee", sx: e.clientX, sy: e.clientY, mq, moved: false };
       e.preventDefault();
     },
-    [addMenu, buildCutTargets, discardDetachedWire, groupSnapshot, setSelection, view],
+    [addMenu, buildCutTargets, discardDetachedWire, groupSnapshot, groups, memberFrame, setSelection, view],
   );
 
   useEffect(() => {
@@ -1406,6 +1480,11 @@ export default function FreeCanvas({ canvasId }: { canvasId: string }) {
           setSelection(nodesRef.current.map((n) => n.id));
           return;
         }
+        if (k === "g") {
+          e.preventDefault();
+          toggleGroup();
+          return;
+        }
         return;
       }
       if ((e.key === "Delete" || e.key === "Backspace") && selRef.current.length) {
@@ -1415,7 +1494,7 @@ export default function FreeCanvas({ canvasId }: { canvasId: string }) {
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [addMenu, copySelection, deleteSelected, discardDetachedWire, pasteClipboard, runUndo, setSelection]);
+  }, [addMenu, copySelection, deleteSelected, discardDetachedWire, pasteClipboard, runUndo, setSelection, toggleGroup]);
 
   // ── 生图（画布区特有，融入工程画布节点 chrome）：参数编辑、生成、
   //    主图切换、参考图上传 ─────────────────────────────────────
@@ -1724,6 +1803,30 @@ export default function FreeCanvas({ canvasId }: { canvasId: string }) {
               )}
             </g>
           </svg>
+
+          {/* 节点分组框（Ctrl+G）：框自适应成员包围盒，渲染在节点层之下；
+              拖标题条整组移动（复用组拖管线），组员被删后框随之收缩。 */}
+          {groups.map((group) => {
+            const frames = group.members
+              .map((key) => memberFrame(key))
+              .filter((f): f is { x: number; y: number; w: number; h: number } => f !== null);
+            if (frames.length === 0) return null;
+            const pad = 14;
+            const left = Math.min(...frames.map((f) => f.x)) - pad;
+            const top = Math.min(...frames.map((f) => f.y)) - pad - 18;
+            const right = Math.max(...frames.map((f) => f.x + f.w)) + pad;
+            const bottom = Math.max(...frames.map((f) => f.y + f.h)) + pad;
+            return (
+              <div
+                key={group.id}
+                data-group={group.id}
+                className="pc-nodegroup"
+                style={{ left, top, width: right - left, height: bottom - top }}
+              >
+                <div className="pc-nodegroup-label">{group.label}</div>
+              </div>
+            );
+          })}
 
           {nodes.map((node) => {
             const selected = selKeys.includes(node.id);

@@ -19,6 +19,7 @@ CREATE TABLE IF NOT EXISTS canvases (
     viewport_x REAL NOT NULL DEFAULT 0,
     viewport_y REAL NOT NULL DEFAULT 0,
     viewport_k REAL NOT NULL DEFAULT 1,
+    groups TEXT NOT NULL DEFAULT '[]',
     created_at TEXT NOT NULL,
     updated_at TEXT NOT NULL
 );
@@ -188,12 +189,18 @@ fn parse_node_meta_strict(node_type: &str, raw: &str) -> Result<NodeMeta, String
 
 // ── 行映射 ──────────────────────────────────────────────────
 
-const CANVAS_COLS: &str = "id, name, viewport_x, viewport_y, viewport_k, created_at, updated_at";
+const CANVAS_COLS: &str =
+    "id, name, viewport_x, viewport_y, viewport_k, created_at, updated_at, groups";
 const NODE_COLS: &str =
     "id, canvas_id, type, title, pos_x, pos_y, width, height, metadata, resource_path, created_at, updated_at";
 const CONNECTION_COLS: &str = "id, canvas_id, from_node, to_node, created_at";
 
 fn canvas_row(row: &rusqlite::Row) -> rusqlite::Result<serde_json::Value> {
+    // groups 旧库经 ensure_column 幂等补列后必有默认 '[]'；损坏 JSON 按
+    // 空组处理（画布不可因脏数据打不开）。
+    let raw_groups: String = row.get(7)?;
+    let groups: serde_json::Value =
+        serde_json::from_str(&raw_groups).unwrap_or_else(|_| serde_json::json!([]));
     Ok(serde_json::json!({
         "id": row.get::<_, String>(0)?,
         "name": row.get::<_, String>(1)?,
@@ -202,6 +209,7 @@ fn canvas_row(row: &rusqlite::Row) -> rusqlite::Result<serde_json::Value> {
         "viewport_k": row.get::<_, f64>(4)?,
         "created_at": row.get::<_, String>(5)?,
         "updated_at": row.get::<_, String>(6)?,
+        "groups": groups,
     }))
 }
 
@@ -270,8 +278,8 @@ pub(crate) fn list_canvases(conn: &Connection) -> Result<Vec<serde_json::Value>,
         &[],
         |row| {
             let mut value = canvas_row(row)?;
-            value["node_count"] = serde_json::json!(row.get::<_, i64>(7)?);
-            value["connection_count"] = serde_json::json!(row.get::<_, i64>(8)?);
+            value["node_count"] = serde_json::json!(row.get::<_, i64>(8)?);
+            value["connection_count"] = serde_json::json!(row.get::<_, i64>(9)?);
             Ok(value)
         },
     )
@@ -631,6 +639,39 @@ pub(crate) fn delete_connection(conn: &Connection, id: &str) -> Result<(), Strin
     Ok(())
 }
 
+/// 节点分组（Ctrl+G，ComfyUI Group 对应物）：画布级 JSON 列存储。
+/// 组框无独立坐标——框自适应成员包围盒（前端渲染时算），成员删除后
+/// 前端按存活成员剪枝，这里只做透传校验。
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
+pub(crate) struct CanvasNodeGroup {
+    pub id: String,
+    #[serde(default)]
+    pub label: String,
+    #[serde(default)]
+    pub members: Vec<String>,
+}
+
+/// 分组整体写入（Ctrl+G 打组/解组都是全量替换，无并发编辑者）。
+pub(crate) fn set_groups(
+    conn: &Connection,
+    id: &str,
+    groups_json: &str,
+) -> Result<serde_json::Value, String> {
+    let parsed: Vec<CanvasNodeGroup> = serde_json::from_str(groups_json)
+        .map_err(|e| format!("groups JSON 不合法：{e}"))?;
+    let normalized = serde_json::to_string(&parsed).map_err(|e| e.to_string())?;
+    let changed = conn
+        .execute(
+            "UPDATE canvases SET groups = ?1, updated_at = ?2 WHERE id = ?3",
+            params![normalized, canvas_now(), id],
+        )
+        .map_err(|e| e.to_string())?;
+    if changed == 0 {
+        return Err(format!("画布不存在：{id}"));
+    }
+    Ok(serde_json::json!({ "id": id, "groups": parsed }))
+}
+
 // ── Tauri 命令薄壳 ─────────────────────────────────────────
 
 #[tauri::command]
@@ -786,4 +827,16 @@ pub fn canvas_delete_connection(app: AppHandle, id: String) -> Result<(), String
     }
     emit_canvas_changed(&app);
     Ok(())
+}
+
+#[tauri::command]
+pub fn canvas_set_groups(app: AppHandle, id: String, groups: String) -> Result<serde_json::Value, String> {
+    let value = {
+        let state = app.state::<DbState>();
+        let conn = state.conn.lock().map_err(|e| e.to_string())?;
+        set_groups(&conn, &id, &groups)?
+    };
+    // 不 emit canvas-changed：分组是打组/解组单发动作，前端本地已更新；
+    // emit 会触发图谱整体重取，反而可能拉回尚未防抖落盘的成员位置。
+    Ok(value)
 }

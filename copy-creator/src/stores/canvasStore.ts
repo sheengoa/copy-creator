@@ -35,6 +35,15 @@ export type NodeMeta =
       images: GeneratedImage[];
     };
 
+/** 节点分组（Ctrl+G，ComfyUI Group 对应物）：与 Rust CanvasNodeGroup
+ *  一一对应。框无独立坐标——渲染时自适应成员包围盒，成员删除由前端
+ *  剪枝（写回时机：下次打组/解组）。 */
+export interface CanvasGroup {
+  id: string;
+  label: string;
+  members: string[];
+}
+
 /** 画布库条目（含节点/连线计数聚合）。 */
 export interface CanvasSummary {
   id: string;
@@ -42,6 +51,7 @@ export interface CanvasSummary {
   viewport_x: number;
   viewport_y: number;
   viewport_k: number;
+  groups: CanvasGroup[];
   created_at: string;
   updated_at: string;
   node_count: number;
@@ -55,6 +65,7 @@ export interface CanvasRecord {
   viewport_x: number;
   viewport_y: number;
   viewport_k: number;
+  groups: CanvasGroup[];
   created_at: string;
   updated_at: string;
 }
@@ -118,6 +129,8 @@ interface CanvasState {
   /** 当前画布的节点与连线（图谱随 activeCanvasId 装载）。 */
   nodes: CanvasNode[];
   connections: CanvasConnection[];
+  /** 当前画布的节点分组（Ctrl+G 打组/解组，画布级全量替换）。 */
+  groups: CanvasGroup[];
   /** 进行中的生成（方案 3.4 逐张回传）：节点 id → 槽位进度。 */
   genProgress: Record<string, GenerationProgress>;
 
@@ -149,6 +162,8 @@ interface CanvasState {
   /** 拖拽/缩放松手后的提交：本地即时合并 + 防抖落盘。 */
   commitLayout: (canvasId: string, entries: CanvasLayoutEntry[]) => void;
   deleteNode: (id: string) => Promise<void>;
+  /** 分组整体写入（打组/解组）：本地即时更新 + 后端全量替换。 */
+  setGroups: (id: string, groups: CanvasGroup[]) => Promise<void>;
   connect: (canvasId: string, fromNode: string, toNode: string) => Promise<CanvasConnection | null>;
   /** 摘线换目标：后端合并语义下返回行 id 可能不同于入参 id。 */
   rewire: (id: string, toNode: string) => Promise<CanvasConnection | null>;
@@ -211,6 +226,7 @@ export const useCanvasStore = create<CanvasState>((set, get) => ({
   activeCanvas: null,
   nodes: [],
   connections: [],
+  groups: [],
   genProgress: {},
 
   loadCanvases: async () => {
@@ -230,6 +246,7 @@ export const useCanvasStore = create<CanvasState>((set, get) => ({
         activeCanvas: graph.canvas,
         nodes: graph.nodes,
         connections: graph.connections,
+        groups: graph.canvas.groups,
       });
       // 进度条目清理：节点仍在生成中→保留；不在当前图谱（其他画布的在途
       // 生成）→保留，切回来进度与取消按钮都还在；已在图谱但状态脱离
@@ -258,7 +275,7 @@ export const useCanvasStore = create<CanvasState>((set, get) => ({
     try {
       const canvas = await invoke<CanvasSummary>("canvas_create", { name: name ?? "" });
       await get().loadCanvases();
-      set({ activeCanvasId: canvas.id, activeCanvas: canvas, nodes: [], connections: [] });
+      set({ activeCanvasId: canvas.id, activeCanvas: canvas, nodes: [], connections: [], groups: [] });
       return canvas;
     } catch (e) {
       console.error("Failed to create canvas:", e);
@@ -290,7 +307,7 @@ export const useCanvasStore = create<CanvasState>((set, get) => ({
       set({ genProgress: remaining });
       await invoke("canvas_delete", { id });
       if (get().activeCanvasId === id) {
-        set({ activeCanvasId: null, activeCanvas: null, nodes: [], connections: [] });
+        set({ activeCanvasId: null, activeCanvas: null, nodes: [], connections: [], groups: [] });
       }
       await get().loadCanvases();
     } catch (e) {
@@ -430,6 +447,18 @@ export const useCanvasStore = create<CanvasState>((set, get) => ({
       set({ connections: get().connections.filter((item) => item.id !== id) });
     } catch (e) {
       console.error("Failed to delete canvas connection:", e);
+    }
+  },
+
+  setGroups: async (id, groups) => {
+    set({ groups });
+    if (get().activeCanvas?.id === id) {
+      set({ activeCanvas: { ...get().activeCanvas!, groups } });
+    }
+    try {
+      await invoke("canvas_set_groups", { id, groups: JSON.stringify(groups) });
+    } catch (e) {
+      console.error("Failed to save canvas groups:", e);
     }
   },
 

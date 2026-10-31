@@ -29,6 +29,7 @@ const makeSummary = (overrides: Partial<CanvasSummary> = {}): CanvasSummary => (
   viewport_x: 0,
   viewport_y: 0,
   viewport_k: 1,
+  groups: [],
   created_at: "2026-10-31T00:00:00Z",
   updated_at: "2026-10-31T00:00:00Z",
   node_count: 0,
@@ -72,6 +73,7 @@ describe("canvasStore 画布域 wiring", () => {
       activeCanvasId: null,
       nodes: [],
       connections: [],
+      groups: [],
       genProgress: {},
     });
   });
@@ -98,6 +100,7 @@ describe("canvasStore 画布域 wiring", () => {
         viewport_x: 10,
         viewport_y: 20,
         viewport_k: 1.5,
+        groups: [{ id: "g1", label: "组", members: ["n1"] }],
         created_at: "",
         updated_at: "",
       },
@@ -113,6 +116,7 @@ describe("canvasStore 画布域 wiring", () => {
     expect(state.activeCanvasId).toBe("c1");
     expect(state.nodes).toHaveLength(1);
     expect(state.connections).toHaveLength(1);
+    expect(state.groups).toEqual([{ id: "g1", label: "组", members: ["n1"] }]);
   });
 
   it("createCanvas 刷新列表并打开新画布", async () => {
@@ -205,6 +209,24 @@ describe("canvasStore 画布域 wiring", () => {
     expect(invokeMock).toHaveBeenCalledWith("canvas_rewire", { id: "w-move", toNode: "n2" });
     const connections = useCanvasStore.getState().connections;
     expect(connections.map((c) => c.id)).toEqual(["w-existing"]);
+  });
+
+  it("setGroups 本地即时更新并全量落库（打组/解组）", async () => {
+    useCanvasStore.setState({
+      activeCanvasId: "c1",
+      activeCanvas: makeSummary(),
+      groups: [],
+    });
+
+    const next = [{ id: "g1", label: "组", members: ["n1", "n2"] }];
+    await useCanvasStore.getState().setGroups("c1", next);
+
+    expect(invokeMock).toHaveBeenCalledWith("canvas_set_groups", {
+      id: "c1",
+      groups: JSON.stringify(next),
+    });
+    expect(useCanvasStore.getState().groups).toEqual(next);
+    expect(useCanvasStore.getState().activeCanvas?.groups).toEqual(next);
   });
 
   it("视口防抖：连续设置只落最后一次", async () => {
@@ -357,7 +379,7 @@ describe("canvasStore 画布域 wiring", () => {
       metadata: { kind: "image", params: { model: "", size: "", count: 1 }, status: "done", error: "", images: [] },
     });
     const graph: CanvasGraph = {
-      canvas: { id: "c1", name: "画布一", viewport_x: 0, viewport_y: 0, viewport_k: 1, created_at: "", updated_at: "" },
+      canvas: { id: "c1", name: "画布一", viewport_x: 0, viewport_y: 0, viewport_k: 1, groups: [], created_at: "", updated_at: "" },
       nodes: [doneNode],
       connections: [],
     };
@@ -377,7 +399,7 @@ describe("canvasStore 画布域 wiring", () => {
     // 画布 c1 无任何节点；后台画布 c2 的 img1 仍在生成——条目必须保留，
     // 否则切回 c2 丢进度与取消按钮，节点按钮还会重新可点（并发二次生成）。
     const graph: CanvasGraph = {
-      canvas: { id: "c1", name: "画布一", viewport_x: 0, viewport_y: 0, viewport_k: 1, created_at: "", updated_at: "" },
+      canvas: { id: "c1", name: "画布一", viewport_x: 0, viewport_y: 0, viewport_k: 1, groups: [], created_at: "", updated_at: "" },
       nodes: [],
       connections: [],
     };
@@ -399,7 +421,7 @@ describe("canvasStore 画布域 wiring", () => {
 
   it("openCanvas 丢弃本画布查无此节点的残留条目", async () => {
     const graph: CanvasGraph = {
-      canvas: { id: "c1", name: "画布一", viewport_x: 0, viewport_y: 0, viewport_k: 1, created_at: "", updated_at: "" },
+      canvas: { id: "c1", name: "画布一", viewport_x: 0, viewport_y: 0, viewport_k: 1, groups: [], created_at: "", updated_at: "" },
       nodes: [],
       connections: [],
     };

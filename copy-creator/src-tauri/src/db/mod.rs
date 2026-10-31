@@ -1170,6 +1170,8 @@ pub(crate) fn ensure_schema(conn: &Connection) -> Result<(), Box<dyn std::error:
     // 画布域（自由生图工作流）schema：与工程域同款分离批次，幂等建表
     // 对新库/旧库升级/存储迁移三条路径一致生效。
     conn.execute_batch(CANVAS_SCHEMA_SQL)?;
+    // 分组列后加（旧库无此列）：ensure_column 幂等补齐，存量行回填 '[]'。
+    ensure_column(conn, "canvases", "groups", "TEXT NOT NULL DEFAULT '[]'");
 
     // 一致性工作流扩展列：新库随建表语句带全列，这里只为旧库幂等补齐
     // （ensure_column 存在即跳过）。与「关键列存在性补齐」同模式——

@@ -32,6 +32,7 @@ interface MockCanvas {
   viewport_x: number;
   viewport_y: number;
   viewport_k: number;
+  groups: { id: string; label: string; members: string[] }[];
   created_at: string;
   updated_at: string;
 }
@@ -201,7 +202,7 @@ const db = {
   ] as MockNodeLink[],
   // 画布域种子：预置一个画布 + 提示词→生图 最小工作流，浏览器直接有内容可查。
   canvases: [
-    { id: "cv-1", name: "示例画布", viewport_x: 0, viewport_y: 0, viewport_k: 1, created_at: ts(), updated_at: ts() },
+    { id: "cv-1", name: "示例画布", viewport_x: 0, viewport_y: 0, viewport_k: 1, groups: [], created_at: ts(), updated_at: ts() },
   ] as MockCanvas[],
   canvas_nodes: [
     {
@@ -652,7 +653,7 @@ function handleInvoke(cmd: string, args: Record<string, unknown>): unknown {
       const name = String(args.name ?? "").trim() || "未命名画布";
       const created: MockCanvas = {
         id: nextId("cv"), name,
-        viewport_x: 0, viewport_y: 0, viewport_k: 1,
+        viewport_x: 0, viewport_y: 0, viewport_k: 1, groups: [],
         created_at: ts(), updated_at: ts(),
       };
       db.canvases.push(created);
@@ -762,6 +763,13 @@ function handleInvoke(cmd: string, args: Record<string, unknown>): unknown {
     case "canvas_delete_connection": {
       db.canvas_connections = db.canvas_connections.filter((c) => c.id !== args.id);
       return null;
+    }
+    case "canvas_set_groups": {
+      const canvas = db.canvases.find((c) => c.id === args.id);
+      if (!canvas) throw new Error(`画布不存在：${String(args.id)}`);
+      canvas.groups = JSON.parse(String(args.groups ?? "[]"));
+      canvas.updated_at = ts();
+      return { id: canvas.id, groups: clone(canvas.groups) };
     }
     case "ai_generate_image":
       // 浏览器验证环境无 AI 配置：直接报错（节点上可见错误提示）。

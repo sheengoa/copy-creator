@@ -595,6 +595,7 @@ pub fn run() {
             db::canvas_connect,
             db::canvas_rewire,
             db::canvas_delete_connection,
+            db::canvas_set_groups,
             ai::ai_generate_image,
             ai::ai_cancel_generation,
             media_server::get_media_server_origin,
