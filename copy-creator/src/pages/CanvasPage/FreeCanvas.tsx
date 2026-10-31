@@ -2582,18 +2582,19 @@ export default function FreeCanvas({ canvasId }: { canvasId: string }) {
                       )}
                       {/* 悬浮右上角的圆形 ×：清除已选文件回到未加载态，
                           不必删节点重来。 */}
-                      <button
-                        type="button"
-                        className="fc-load-clear"
-                        title={t("canvas.clearLoaded")}
-                        aria-label={t("canvas.clearLoaded")}
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          clearLoadedMedia(node);
-                        }}
-                      >
-                        {Icons.close}
-                      </button>
+                      <NodeHint text={t("canvas.clearLoaded")}>
+                        <button
+                          type="button"
+                          className="fc-load-clear"
+                          aria-label={t("canvas.clearLoaded")}
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            clearLoadedMedia(node);
+                          }}
+                        >
+                          {Icons.close}
+                        </button>
+                      </NodeHint>
                     </div>
                   ) : (
                     <div className="fc-node-placeholder">{t("canvas.loadEmpty")}</div>
@@ -2716,20 +2717,23 @@ export default function FreeCanvas({ canvasId }: { canvasId: string }) {
                   {meta.images.length > 0 && (
                     <div className="fc-gen-thumbs">
                       {meta.images.map((thumb, i) => (
-                        <button
+                        <NodeHint
                           key={i}
-                          className={`fc-gen-thumb${thumb.primary ? " primary" : ""}`}
-                          title={thumb.primary ? t("canvas.genPrimary") : t("canvas.genSetPrimary")}
-                          onClick={() => {
-                            const images = meta.images.map((img, j) => ({ ...img, primary: j === i }));
-                            void store.getState().updateNode(node.id, {
-                              metadata: JSON.stringify({ ...meta, images } as CanvasNode["metadata"]),
-                            });
-                          }}
+                          text={thumb.primary ? t("canvas.genPrimary") : t("canvas.genSetPrimary")}
                         >
-                          <ResourceThumb path={thumb.resource_path} className="fc-thumb" />
-                          {thumb.primary && <span className="fc-gen-primary-badge">{t("canvas.genPrimary")}</span>}
-                        </button>
+                          <button
+                            className={`fc-gen-thumb${thumb.primary ? " primary" : ""}`}
+                            onClick={() => {
+                              const images = meta.images.map((img, j) => ({ ...img, primary: j === i }));
+                              void store.getState().updateNode(node.id, {
+                                metadata: JSON.stringify({ ...meta, images } as CanvasNode["metadata"]),
+                              });
+                            }}
+                          >
+                            <ResourceThumb path={thumb.resource_path} className="fc-thumb" />
+                            {thumb.primary && <span className="fc-gen-primary-badge">{t("canvas.genPrimary")}</span>}
+                          </button>
+                        </NodeHint>
                       ))}
                     </div>
                   )}
@@ -2797,27 +2801,29 @@ export default function FreeCanvas({ canvasId }: { canvasId: string }) {
                               {item.kind === "text" || item.label ? item.label : t("canvas.collectionItemEmpty")}
                             </span>
                           )}
-                          <button
-                            type="button"
-                            className="fc-collection-handle"
-                            title={t("canvas.collectionSortHint")}
-                            aria-label={t("canvas.collectionSortHint")}
-                            onPointerDown={(e) => startCollectionReorder(node, i, e)}
-                          >
-                            {Icons.drag}
-                          </button>
-                          <button
-                            type="button"
-                            className="fc-collection-remove"
-                            title={t("common.delete")}
-                            aria-label={t("common.delete")}
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              void store.getState().deleteConnection(item.connId);
-                            }}
-                          >
-                            {Icons.close}
-                          </button>
+                          <NodeHint text={t("canvas.collectionSortHint")} className="is-handle">
+                            <button
+                              type="button"
+                              className="fc-collection-handle"
+                              aria-label={t("canvas.collectionSortHint")}
+                              onPointerDown={(e) => startCollectionReorder(node, i, e)}
+                            >
+                              {Icons.drag}
+                            </button>
+                          </NodeHint>
+                          <NodeHint text={t("common.delete")} className="is-remove">
+                            <button
+                              type="button"
+                              className="fc-collection-remove"
+                              aria-label={t("common.delete")}
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                void store.getState().deleteConnection(item.connId);
+                              }}
+                            >
+                              {Icons.close}
+                            </button>
+                          </NodeHint>
                         </div>
                         );
                       })}
@@ -2904,13 +2910,11 @@ export default function FreeCanvas({ canvasId }: { canvasId: string }) {
                     <div className="fc-node-placeholder">{t("canvas.previewEmpty")}</div>
                   ) : node.type === "preview_image" ? (
                     path ? (
-                      <button
-                        className="fc-preview-media"
-                        onClick={() => setLightboxSrc(path)}
-                        title={t("canvas.previewOpen")}
-                      >
-                        <ResourceThumb path={path} className="fc-thumb-cover" />
-                      </button>
+                      <NodeHint text={t("canvas.previewOpen")}>
+                        <button className="fc-preview-media" onClick={() => setLightboxSrc(path)}>
+                          <ResourceThumb path={path} className="fc-thumb-cover" />
+                        </button>
+                      </NodeHint>
                     ) : (
                       <div className="fc-node-placeholder">{t("canvas.waitingUpstream")}</div>
                     )
@@ -3207,7 +3211,7 @@ function WheelGate({ children }: { children: ReactNode }) {
  *  动区裁切。text 为空时只做透明包裹。禁用按钮的指针事件会落到包裹
  *  层，因此禁用态同样能触发。 */
 function NodeHint({ text, children, className }: { text: string; children: ReactNode; className?: string }) {
-  const [tip, setTip] = useState<{ left: number; top: number } | null>(null);
+  const [tip, setTip] = useState<{ left: number; top: number; below?: boolean } | null>(null);
   const anchorRef = useRef<HTMLSpanElement | null>(null);
   const timerRef = useRef<number | undefined>(undefined);
 
@@ -3220,7 +3224,10 @@ function NodeHint({ text, children, className }: { text: string; children: React
       // 包裹层可能零尺寸（内部是绝对定位的箭头钮），优先取子元素矩形。
       const el = (anchorRef.current?.firstElementChild as HTMLElement | null) ?? anchorRef.current;
       const rect = el?.getBoundingClientRect();
-      if (rect) setTip({ left: rect.left + rect.width / 2, top: rect.top - 7 });
+      if (!rect) return;
+      // 贴近视口顶缘时改在下方弹出，避免胶囊越出窗口。
+      const below = rect.top < 48;
+      setTip({ left: rect.left + rect.width / 2, top: below ? rect.bottom + 7 : rect.top - 7, below });
     }, 300);
   };
   const hide = () => {
@@ -3238,7 +3245,7 @@ function NodeHint({ text, children, className }: { text: string; children: React
     >
       {children}
       {tip && text && createPortal(
-        <div className="fc-hint" style={{ left: tip.left, top: tip.top }}>{text}</div>,
+        <div className={`fc-hint${tip.below ? " is-below" : ""}`} style={{ left: tip.left, top: tip.top }}>{text}</div>,
         document.body,
       )}
     </span>

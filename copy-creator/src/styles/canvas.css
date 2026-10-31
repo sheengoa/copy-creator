@@ -1090,6 +1090,11 @@
   animation: fc-hint-in 0.16s ease both;
 }
 
+/* 锚点贴近视口顶缘时的下方弹出形态。 */
+.fc-hint.is-below {
+  transform: translate(-50%, 0);
+}
+
 @keyframes fc-hint-in {
   from {
     opacity: 0;
@@ -1309,9 +1314,17 @@
   font-style: italic;
 }
 
-.fc-root .fc-collection-handle {
+/* 把手/移除的 NodeHint 包裹层：接管把手原有的 margin-left:auto 右推力
+   （margin 在按钮上时被包裹层隔开失效）。 */
+.fc-root .fc-collection-item .fc-hint-anchor {
   flex: none;
+}
+
+.fc-root .fc-collection-item .fc-hint-anchor.is-handle {
   margin-left: auto;
+}
+
+.fc-root .fc-collection-handle {
   width: 20px;
   height: 22px;
   display: flex;
