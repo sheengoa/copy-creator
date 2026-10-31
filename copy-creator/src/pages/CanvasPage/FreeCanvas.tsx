@@ -446,7 +446,7 @@ export default function FreeCanvas({ canvasId }: { canvasId: string }) {
       `.pc-node[data-key="${drop.nodeId}"] .fc-collection-item[data-conn="${drop.connId}"]`,
     );
     if (!row) return;
-    const delta = drop.fromTop - row.getBoundingClientRect().top;
+    const delta = (drop.fromTop - row.getBoundingClientRect().top) / view.scale;
     if (Math.abs(delta) < 1) return;
     row.style.transition = "none";
     row.style.transform = `translateY(${delta}px)`;
@@ -458,7 +458,7 @@ export default function FreeCanvas({ canvasId }: { canvasId: string }) {
       row.removeEventListener("transitionend", settle);
     };
     row.addEventListener("transitionend", settle);
-  }, []);
+  }, [view.scale]);
   const [wireDraft, setWireDraft] = useState<{ d: string; invalid: boolean; color?: string } | null>(null);
   /** 摘线拿着（rewire）中：该连线暂隐藏，松手转接或放回。 */
   const [liftedWire, setLiftedWire] = useState<{ connId: string; fromKey: string } | null>(null);
@@ -1906,8 +1906,10 @@ export default function FreeCanvas({ canvasId }: { canvasId: string }) {
     let dy = 0;
     const onMove = (ev: PointerEvent) => {
       dy = ev.clientY - y0;
-      // 跟手：被抓行位移直写样式（不过 React，拖动零延迟）。
-      rowEl?.style.setProperty("transform", `translateY(${dy}px)`);
+      // 跟手：行在缩放世界内，transform 必须换算成世界坐标——否则画布
+      // 缩放 k≠1 时行移动 k×指针位移，「滑一下跑老远」。
+      const dyWorld = dy / view.scale;
+      rowEl?.style.setProperty("transform", `translateY(${dyWorld}px)`);
       // 槽位判定：被抓行中心点落在哪个基准槽位（几何计算，不受动画影响）。
       const centerY = rowTops[index] + dy + stride / 2;
       let idx = Math.floor((centerY - rowTops[0]) / stride);
@@ -2724,10 +2726,11 @@ export default function FreeCanvas({ canvasId }: { canvasId: string }) {
                         const drag = collectionDrag?.nodeId === node.id ? collectionDrag : null;
                         const orig = drag ? drag.baseOrder.indexOf(item.from.id) : -1;
                         const isDragged = !!drag && orig === drag.fromIndex;
+                        // 让位位移：stride 是屏幕几何，transform 在缩放世界内，需换算。
                         let shift = 0;
                         if (drag && orig >= 0 && !isDragged) {
-                          if (drag.fromIndex < drag.dragIndex && orig > drag.fromIndex && orig <= drag.dragIndex) shift = -drag.stride;
-                          else if (drag.fromIndex > drag.dragIndex && orig >= drag.dragIndex && orig < drag.fromIndex) shift = drag.stride;
+                          if (drag.fromIndex < drag.dragIndex && orig > drag.fromIndex && orig <= drag.dragIndex) shift = -drag.stride / view.scale;
+                          else if (drag.fromIndex > drag.dragIndex && orig >= drag.dragIndex && orig < drag.fromIndex) shift = drag.stride / view.scale;
                         }
                         return (
                         <div
