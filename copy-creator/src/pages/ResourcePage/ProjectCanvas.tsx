@@ -828,7 +828,7 @@ export default function ProjectCanvas({
           x: segment.canvas_x ?? baseX,
           // 纵向间距 520 与模板两排阵型同基准：片段左侧一组占位高约两排，
           // 260 的旧间距会让相邻两组的占位相交。
-          y: segment.canvas_y ?? Math.max(WORLD_MARGIN, 110 + index * 520),
+          y: segment.canvas_y ?? Math.max(WORLD_MARGIN + INFO_H, 110 + index * 520),
         };
       });
       return next;
@@ -1480,7 +1480,9 @@ export default function ProjectCanvas({
       // 片段默认列位与 segPos effect 同基准（成片节点默认挂 worldW+80）。
       const segX = layout.worldW + 80 - SEG_W - 160;
       created.forEach((segId, i) => {
-        const segY = Math.max(WORLD_MARGIN, 110 + i * 520);
+        // 片段起点 = WORLD_MARGIN + INFO_H：上排占位顶（segY - INFO_H）正好
+        // 落在世界边距上，不越过世界顶被自适应视图裁掉。
+        const segY = Math.max(WORLD_MARGIN + INFO_H, 110 + i * 520);
         // 两排阵型（对齐设计稿）：上排三个占位横排（左→右 道具/场景/
         // 角色），底边贴片段顶；下排剧本+提示词在片段左下（提示词在剧
         // 本右侧、略高半格）。全部相对片段锚定，片段纵向间距 520 拉开，
