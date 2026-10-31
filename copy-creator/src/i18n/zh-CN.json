@@ -823,6 +823,12 @@
     "uploadRef": "上传参考图",
     "genFailed": "生成失败",
     "genParamsTitle": "生成参数",
-    "textContentPlaceholder": "输入提示词…"
+    "textContentPlaceholder": "输入提示词…",
+    "seedCta": "创建示例工作流",
+    "seedHint": "提示词 → 生图，一键摆好最小可用工作流",
+    "seedPrompt": "一只戴礼帽的猫，水彩风格，高细节",
+    "dropHint": "松开以导入资源库并创建参考图节点",
+    "batchGenerate": "批量生成 {{count}} 个节点",
+    "more": "更多"
   }
 }

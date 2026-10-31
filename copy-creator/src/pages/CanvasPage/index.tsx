@@ -66,10 +66,39 @@ export default function CanvasPage() {
     setRenaming(null);
   };
 
+  // chips 放不下收「更多」（方案 3.1）：横向滚动保留兜底，溢出时出现
+  // 「更多」下拉列出全部画布，点选直达。
+  const chipsRef = useRef<HTMLDivElement | null>(null);
+  const [chipsOverflow, setChipsOverflow] = useState(false);
+  const [moreOpen, setMoreOpen] = useState(false);
+  const moreRef = useRef<HTMLDivElement | null>(null);
+
+  useEffect(() => {
+    const el = chipsRef.current;
+    if (!el) return;
+    const check = () => setChipsOverflow(el.scrollWidth > el.clientWidth + 1);
+    check();
+    const ro = new ResizeObserver(check);
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, [canvases.length]);
+
+  // 「更多」弹层点外即关。
+  useEffect(() => {
+    if (!moreOpen) return;
+    const onPointerDown = (e: PointerEvent) => {
+      if (moreRef.current && !moreRef.current.contains(e.target as Node)) {
+        setMoreOpen(false);
+      }
+    };
+    window.addEventListener("pointerdown", onPointerDown);
+    return () => window.removeEventListener("pointerdown", onPointerDown);
+  }, [moreOpen]);
+
   return (
     <div className="canvas-page">
       <div className="canvas-topbar">
-        <div className="canvas-chips">
+        <div className="canvas-chips" ref={chipsRef}>
           {canvases.map((canvas) => (
             <div
               key={canvas.id}
@@ -97,6 +126,35 @@ export default function CanvasPage() {
             </div>
           ))}
         </div>
+        {chipsOverflow && (
+          <div className="canvas-more" ref={moreRef}>
+            <button
+              className={`canvas-more-btn${moreOpen ? " open" : ""}`}
+              onClick={() => setMoreOpen((v) => !v)}
+            >
+              {t("canvas.more")}
+              {Icons.expand}
+            </button>
+            {moreOpen &&
+              createPortal(
+                <div className="canvas-chip-popover canvas-more-popover" onClick={(e) => e.stopPropagation()}>
+                  {canvases.map((canvas) => (
+                    <button
+                      key={canvas.id}
+                      className={canvas.id === activeCanvasId ? "active" : ""}
+                      onClick={() => {
+                        if (canvas.id !== activeCanvasId) void openCanvas(canvas.id);
+                        setMoreOpen(false);
+                      }}
+                    >
+                      {canvas.name}
+                    </button>
+                  ))}
+                </div>,
+                document.body,
+              )}
+          </div>
+        )}
         <button className="canvas-new-btn" onClick={() => void createCanvas()}>
           {Icons.add}
           {t("canvas.newCanvas")}

@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState, type CSSProperties } from "react";
 import { useTranslation } from "react-i18next";
 import { invoke } from "@tauri-apps/api/core";
+import { getCurrentWebview } from "@tauri-apps/api/webview";
 import { Icons } from "../../components/Icons";
 import { openResourceFile } from "../../domain/mediaAssets";
 import { resolveResourceMediaUrl } from "../../domain/mediaUrl";
@@ -732,19 +733,106 @@ export default function FreeCanvas({ canvasId }: { canvasId: string }) {
     openAddMenu(world, null);
   };
 
-  // 键盘：删除选中（输入框聚焦不响应）、撤销、Escape 退出手势。
+  // ── 复制粘贴与全选（阶段 3：快捷键体系） ───────────────────
+
+  const clipboardRef = useRef<{ nodes: CanvasNode[]; wires: { from_node: string; to_node: string }[] } | null>(null);
+
+  const copySelection = useCallback(() => {
+    const ids = selectionRef.current;
+    if (!ids.length) return;
+    const nodes = nodesRef.current.filter((n) => ids.includes(n.id));
+    // 只带内部连线：两端都在选区内的线随复制重建。
+    const wires = connectionsRef.current
+      .filter((c) => ids.includes(c.from_node) && ids.includes(c.to_node))
+      .map((c) => ({ from_node: c.from_node, to_node: c.to_node }));
+    clipboardRef.current = { nodes, wires };
+  }, []);
+
+  const pasteClipboard = useCallback(async () => {
+    const clip = clipboardRef.current;
+    if (!clip?.nodes.length) return;
+    const st = store.getState();
+    const idMap = new Map<string, string>();
+    const newIds: string[] = [];
+    for (const node of clip.nodes) {
+      const created = await st.createNode({
+        canvasId,
+        nodeType: node.type,
+        title: node.title,
+        posX: node.pos_x + 24,
+        posY: node.pos_y + 24,
+        width: node.width,
+        height: node.height,
+        resourcePath: node.resource_path,
+        metadata: JSON.stringify(node.metadata),
+      });
+      if (created) {
+        idMap.set(node.id, created.id);
+        newIds.push(created.id);
+      }
+    }
+    for (const wire of clip.wires) {
+      const from = idMap.get(wire.from_node);
+      const to = idMap.get(wire.to_node);
+      if (from && to) await st.connect(canvasId, from, to);
+    }
+    if (newIds.length) setSelection(newIds);
+  }, [canvasId, store]);
+
+  const seedTemplate = useCallback(async () => {
+    // 空画布示意（方案 3.6）：一键创建 提示词 → 生图 最小工作流，
+    // 以当前视口中心为基准摆放；创建后即为真实节点，不重复出现。
+    const rect = vpRef.current?.getBoundingClientRect();
+    const center = toWorld(
+      (rect?.left ?? 0) + (rect?.width ?? 800) / 2,
+      (rect?.top ?? 0) + (rect?.height ?? 600) / 2,
+    );
+    const st = store.getState();
+    const text = await st.createNode({
+      canvasId,
+      nodeType: "text",
+      posX: center.x - 340,
+      posY: center.y - 110,
+      width: NODE_DEFAULT_SIZE.text.w,
+      height: NODE_DEFAULT_SIZE.text.h,
+      metadata: JSON.stringify({ kind: "text", content: t("canvas.seedPrompt") }),
+    });
+    if (!text) return;
+    const img = await st.createNode({
+      canvasId,
+      nodeType: "image",
+      posX: center.x + 30,
+      posY: center.y - 170,
+      width: NODE_DEFAULT_SIZE.image.w,
+      height: NODE_DEFAULT_SIZE.image.h,
+    });
+    if (!img) return;
+    await st.connect(canvasId, text.id, img.id);
+    setSelection([text.id, img.id]);
+  }, [canvasId, store, t, toWorld]);
+
+  // 键盘：删除选中（输入框聚焦不响应）、撤销、全选、复制粘贴、Escape。
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       const el = e.target as HTMLElement | null;
       if (el && (el.tagName === "INPUT" || el.tagName === "TEXTAREA" || el.isContentEditable)) {
         return;
       }
+      const ctrl = e.ctrlKey || e.metaKey;
       if ((e.key === "Delete" || e.key === "Backspace") && selectionRef.current.length) {
         e.preventDefault();
         void deleteSelected();
-      } else if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "z") {
+      } else if (ctrl && e.key.toLowerCase() === "z") {
         e.preventDefault();
         void undo();
+      } else if (ctrl && e.key.toLowerCase() === "a") {
+        e.preventDefault();
+        setSelection(nodesRef.current.map((n) => n.id));
+      } else if (ctrl && e.key.toLowerCase() === "c") {
+        copySelection();
+      } else if (ctrl && e.key.toLowerCase() === "v") {
+        e.preventDefault();
+        void pasteClipboard();
       } else if (e.key === "Escape") {
         if (interactionRef.current) setInteraction(null);
         if (addMenu) setAddMenu(null);
@@ -752,7 +840,97 @@ export default function FreeCanvas({ canvasId }: { canvasId: string }) {
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [addMenu, deleteSelected, undo]);
+  }, [addMenu, copySelection, deleteSelected, pasteClipboard, undo]);
+
+  // ── OS 文件拖入（阶段 3）：图片文件 → 入库 → 参考图节点 ──────
+
+  const [dropHint, setDropHint] = useState(false);
+
+  const handleFileDrop = useCallback(
+    async (paths: string[], logical: { x: number; y: number }) => {
+      const imageExts = ["png", "jpg", "jpeg", "webp", "gif", "bmp"];
+      const imagePaths = paths.filter(
+        (p) => imageExts.includes(p.split(".").pop()?.toLowerCase() ?? ""),
+      );
+      if (!imagePaths.length) return;
+      const world = toWorld(logical.x, logical.y);
+      const st = store.getState();
+      let offset = 0;
+      for (const path of imagePaths) {
+        try {
+          // 一切参考图先进资源库（方案 3.5）：拖入即入库再引用。
+          const imported = await invoke<{ file_path: string }>("import_resource_file", {
+            sourcePath: path,
+          });
+          await st.createNode({
+            canvasId,
+            nodeType: "ref",
+            posX: world.x + offset,
+            posY: world.y + offset,
+            width: NODE_DEFAULT_SIZE.ref.w,
+            height: NODE_DEFAULT_SIZE.ref.h,
+            resourcePath: imported.file_path,
+          });
+          offset += 24;
+        } catch (e) {
+          console.error("拖入文件入库失败:", e);
+        }
+      }
+    },
+    [canvasId, store, toWorld],
+  );
+
+  useEffect(() => {
+    let unlisten: (() => void) | null = null;
+    let cancelled = false;
+    void getCurrentWebview()
+      .onDragDropEvent((event) => {
+        // 保挂载面板：画布被 display:none 隐藏时不接管拖放。
+        if (!vpRef.current || vpRef.current.offsetParent === null) return;
+        const payload = event.payload;
+        if (payload.type === "over" || payload.type === "drop") {
+          const dpr = window.devicePixelRatio || 1;
+          const logical = { x: payload.position.x / dpr, y: payload.position.y / dpr };
+          if (payload.type === "over") {
+            setDropHint(true);
+          } else {
+            setDropHint(false);
+            void handleFileDrop(payload.paths, logical);
+          }
+        } else {
+          setDropHint(false);
+        }
+      })
+      .then((fn) => {
+        if (cancelled) fn();
+        else unlisten = fn;
+      });
+    return () => {
+      cancelled = true;
+      unlisten?.();
+    };
+  }, [handleFileDrop]);
+
+  // ── 批量生成（阶段 3）：多选图片节点 → 队列顺序执行 ─────────
+
+  const batchRunningRef = useRef(false);
+  const selectedImageIds = selection.filter(
+    (id) => nodesRef.current.find((n) => n.id === id)?.type === "image",
+  );
+  const runBatch = useCallback(async () => {
+    if (batchRunningRef.current) return;
+    batchRunningRef.current = true;
+    try {
+      for (const id of selectedImageIds) {
+        const node = nodesRef.current.find((n) => n.id === id);
+        if (node) await startGenerate(node);
+      }
+    } finally {
+      batchRunningRef.current = false;
+    }
+    // startGenerate 依赖 canvasId/store，经其闭包稳定；选中集变化由渲染期值传入。
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedImageIds.join(",")]);
 
   // ── 渲染 ───────────────────────────────────────────────────
 
@@ -1120,6 +1298,30 @@ export default function FreeCanvas({ canvasId }: { canvasId: string }) {
                 {t(`canvas.node.${type}`)}
               </button>
             ))}
+          </div>
+        )}
+
+        {/* 空画布示意（方案 3.6）：一键创建 提示词 → 生图 最小工作流 */}
+        {!nodes.length && !connections.length && !addMenu && (
+          <button className="fc-seed" onClick={() => void seedTemplate()}>
+            <span className="fc-seed-title">{t("canvas.seedCta")}</span>
+            <span className="fc-seed-sub">{t("canvas.seedHint")}</span>
+          </button>
+        )}
+
+        {/* 拖放遮罩：OS 图片文件拖入提示 */}
+        {dropHint && (
+          <div className="fc-drop-overlay">
+            <span>{t("canvas.dropHint")}</span>
+          </div>
+        )}
+
+        {/* 批量生成浮动条：多选图片节点时出现 */}
+        {selectedImageIds.length >= 2 && !genStarting && (
+          <div className="fc-batchbar" onPointerDown={(e) => e.stopPropagation()}>
+            <button onClick={() => void runBatch()}>
+              {t("canvas.batchGenerate", { count: selectedImageIds.length })}
+            </button>
           </div>
         )}
       </div>

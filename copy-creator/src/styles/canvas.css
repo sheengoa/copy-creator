@@ -639,3 +639,112 @@
   background: rgba(255, 59, 48, 0.15);
   color: var(--danger);
 }
+
+/* ── 阶段 3：空态示意 / 拖放遮罩 / 批量生成 / chips 更多 ───── */
+
+.fc-seed {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  transform: translate(-50%, -50%);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+  padding: 14px 22px;
+  border: 1px dashed var(--accent-border-soft);
+  border-radius: var(--radius-lg);
+  background: var(--bg-card);
+  cursor: pointer;
+  z-index: 4;
+}
+
+.fc-seed:hover {
+  background: var(--accent-bg);
+}
+
+.fc-seed-title {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+.fc-seed-sub {
+  font-size: 11px;
+  color: var(--text-tertiary);
+}
+
+.fc-drop-overlay {
+  position: absolute;
+  inset: 8px;
+  border: 2px dashed var(--accent-border);
+  border-radius: var(--radius-lg);
+  background: var(--accent-bg);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--accent);
+  pointer-events: none;
+  z-index: 50;
+}
+
+.fc-batchbar {
+  position: absolute;
+  left: 50%;
+  bottom: 18px;
+  transform: translateX(-50%);
+  z-index: 40;
+}
+
+.fc-batchbar button {
+  padding: 8px 18px;
+  border: none;
+  border-radius: 999px;
+  background: var(--accent);
+  color: #fff;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  box-shadow: 0 4px 14px rgba(0, 122, 255, 0.35);
+}
+
+.fc-batchbar button:hover {
+  filter: brightness(1.08);
+}
+
+.canvas-more {
+  position: relative;
+  flex-shrink: 0;
+}
+
+.canvas-more-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 5px 10px;
+  border-radius: 999px;
+  border: 1px solid var(--separator);
+  background: var(--bg-card);
+  color: var(--text-secondary);
+  font-size: 12px;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.canvas-more-btn svg {
+  width: 12px;
+  height: 12px;
+}
+
+.canvas-more-btn.open,
+.canvas-more-btn:hover {
+  background: var(--accent-bg);
+  color: var(--accent);
+}
+
+.canvas-more-popover button.active {
+  color: var(--accent);
+  font-weight: 600;
+}

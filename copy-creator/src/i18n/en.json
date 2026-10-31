@@ -827,6 +827,12 @@
     "uploadRef": "Upload Reference",
     "genFailed": "Generation failed",
     "genParamsTitle": "Generation Params",
-    "textContentPlaceholder": "Type a prompt…"
+    "textContentPlaceholder": "Type a prompt…",
+    "seedCta": "Create Sample Workflow",
+    "seedHint": "Prompt → image, one click to set up a minimal workflow",
+    "seedPrompt": "A cat wearing a top hat, watercolor style, highly detailed",
+    "dropHint": "Drop to import into the library and create reference nodes",
+    "batchGenerate": "Generate {{count}} nodes",
+    "more": "More"
   }
 }
