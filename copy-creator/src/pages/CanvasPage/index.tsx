@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import { useTranslation } from "react-i18next";
 import { ConfirmDialog } from "../../components/ConfirmDialog";
 import { Icons } from "../../components/Icons";
@@ -20,6 +21,7 @@ export default function CanvasPage() {
   const bindCanvasEvents = useCanvasStore((s) => s.bindCanvasEvents);
 
   const [menuFor, setMenuFor] = useState<string | null>(null);
+  const [menuPos, setMenuPos] = useState<{ x: number; y: number }>({ x: 0, y: 0 });
   const [renaming, setRenaming] = useState<{ id: string; name: string } | null>(null);
   const [renameInput, setRenameInput] = useState("");
   const [deleting, setDeleting] = useState<CanvasSummary | null>(null);
@@ -54,6 +56,7 @@ export default function CanvasPage() {
   }, [renaming]);
 
   const activeCanvas = canvases.find((c) => c.id === activeCanvasId) ?? null;
+  const menuCanvas = canvases.find((c) => c.id === menuFor) ?? null;
 
   const submitRename = async () => {
     if (!renaming) return;
@@ -84,39 +87,13 @@ export default function CanvasPage() {
                 className="canvas-chip-menu"
                 onClick={(e) => {
                   e.stopPropagation();
+                  const rect = (e.currentTarget as HTMLElement).getBoundingClientRect();
+                  setMenuPos({ x: rect.left, y: rect.bottom + 4 });
                   setMenuFor((prev) => (prev === canvas.id ? null : canvas.id));
                 }}
               >
                 {Icons.more}
               </span>
-              {menuFor === canvas.id && (
-                <div
-                  className="canvas-chip-popover"
-                  ref={popoverRef}
-                  onClick={(e) => e.stopPropagation()}
-                >
-                  <button
-                    onClick={() => {
-                      setRenaming({ id: canvas.id, name: canvas.name });
-                      setRenameInput(canvas.name);
-                      setMenuFor(null);
-                    }}
-                  >
-                    {Icons.edit}
-                    {t("canvas.rename")}
-                  </button>
-                  <button
-                    className="danger"
-                    onClick={() => {
-                      setDeleting(canvas);
-                      setMenuFor(null);
-                    }}
-                  >
-                    {Icons.delete}
-                    {t("canvas.delete")}
-                  </button>
-                </div>
-              )}
             </div>
           ))}
         </div>
@@ -137,6 +114,41 @@ export default function CanvasPage() {
           </div>
         )}
       </div>
+
+      {/* ⋯ 弹层 portal 到 body：.canvas-chips 的 overflow 滚动容器会把
+          绝对定位的悬挂弹层整段裁掉（画不出也点不到，实测踩坑），
+          fixed 定位 + body 层渲染彻底脱离裁剪上下文。 */}
+      {menuCanvas &&
+        createPortal(
+          <div
+            className="canvas-chip-popover"
+            ref={popoverRef}
+            style={{ left: menuPos.x, top: menuPos.y }}
+            onClick={(e) => e.stopPropagation()}
+          >
+            <button
+              onClick={() => {
+                setRenaming({ id: menuCanvas.id, name: menuCanvas.name });
+                setRenameInput(menuCanvas.name);
+                setMenuFor(null);
+              }}
+            >
+              {Icons.edit}
+              {t("canvas.rename")}
+            </button>
+            <button
+              className="danger"
+              onClick={() => {
+                setDeleting(menuCanvas);
+                setMenuFor(null);
+              }}
+            >
+              {Icons.delete}
+              {t("canvas.delete")}
+            </button>
+          </div>,
+          document.body,
+        )}
 
       {renaming && (
         <div

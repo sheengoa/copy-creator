@@ -330,6 +330,54 @@ export default function FreeCanvas({ canvasId }: { canvasId: string }) {
     return () => el.removeEventListener("scroll", onScroll);
   }, []);
 
+  // 首入适配：视口仍是出厂默认（从未缩放/平移过）且画布已有节点时，
+  // fitAll 一次；已有保存视口则尊重恢复（对齐工程画布换集 fitAll 体验）。
+  const fitAttemptedRef = useRef(false);
+  const fitAll = useCallback(
+    (list: CanvasNode[]) => {
+      const rect = vpRef.current?.getBoundingClientRect();
+      if (!rect || !list.length) return;
+      let minX = Infinity;
+      let minY = Infinity;
+      let maxX = -Infinity;
+      let maxY = -Infinity;
+      for (const n of list) {
+        const r = nodeRect(n);
+        minX = Math.min(minX, r.x);
+        minY = Math.min(minY, r.y);
+        maxX = Math.max(maxX, r.x + r.w);
+        maxY = Math.max(maxY, r.y + r.h);
+      }
+      const pad = 60;
+      const usableW = Math.max(200, rect.width - 248); // 扣除右侧属性面板
+      const bw = maxX - minX + pad * 2;
+      const bh = maxY - minY + pad * 2;
+      // 只缩小不放大：内容小于视口时保持 1:1（单节点内容不该被怼到最大倍率）。
+      const scale = Math.min(1, Math.min(usableW / bw, rect.height / bh));
+      const next = {
+        x: (usableW - (maxX - minX) * scale) / 2 - minX * scale,
+        y: (rect.height - (maxY - minY) * scale) / 2 - minY * scale,
+        scale,
+      };
+      viewRef.current = next;
+      setView(next);
+      store.getState().setViewport(canvasId, next.x, next.y, next.scale);
+    },
+    [canvasId, store],
+  );
+  useEffect(() => {
+    if (fitAttemptedRef.current) return;
+    const v = viewRef.current;
+    if (v.x !== 0 || v.y !== 0 || v.scale !== 1) {
+      fitAttemptedRef.current = true;
+      return;
+    }
+    if (nodes.length) {
+      fitAttemptedRef.current = true;
+      fitAll(nodes);
+    }
+  }, [nodes, fitAll]);
+
   // ── 手势（连线子系统按节点级语义重写） ─────────────────────
 
   const hitTestNode = useCallback((world: Point, excludeId?: string): string | null => {
@@ -542,14 +590,40 @@ export default function FreeCanvas({ canvasId }: { canvasId: string }) {
     };
   }, [interactionActive, handlePointerMove, handlePointerUp]);
 
+  // 兜底清理：pointercancel / 窗口失焦时任何挂起的手势一律作废，
+  // 不留卡死的框选矩形或悬空草稿线。
+  useEffect(() => {
+    const clear = () => {
+      setInteraction(null);
+      setHoverId(null);
+    };
+    window.addEventListener("pointercancel", clear);
+    window.addEventListener("blur", clear);
+    return () => {
+      window.removeEventListener("pointercancel", clear);
+      window.removeEventListener("blur", clear);
+    };
+  }, []);
+
   const handlePointerDown = (e: React.PointerEvent) => {
     if (addMenu) setAddMenu(null);
     const target = e.target as HTMLElement;
 
+    // 开始手势的统一入口：设指针捕获——拖出窗口边缘/快速滑出元素后
+    // move/up 仍会送达，避免交互态卡死（截图里悬浮小条即卡死的框选）。
+    const begin = (it: Interaction) => {
+      setInteraction(it);
+      try {
+        vpRef.current?.setPointerCapture(e.pointerId);
+      } catch {
+        // 指针已释放（如自动化环境），忽略。
+      }
+    };
+
     if (e.button === 1) {
       // 中键平移。
       e.preventDefault();
-      setInteraction({
+      begin({
         mode: "pan",
         startX: e.clientX,
         startY: e.clientY,
@@ -561,7 +635,7 @@ export default function FreeCanvas({ canvasId }: { canvasId: string }) {
     if (e.button === 2) {
       // Shift/Ctrl + 右键划线切线；普通右键无菜单（contextmenu 已屏蔽）。
       if (e.shiftKey || e.ctrlKey) {
-        setInteraction({ mode: "cut", last: toWorld(e.clientX, e.clientY) });
+        begin({ mode: "cut", last: toWorld(e.clientX, e.clientY) });
       }
       return;
     }
@@ -576,14 +650,14 @@ export default function FreeCanvas({ canvasId }: { canvasId: string }) {
       if (!node) return;
 
       if (target.closest(".fc-port-out")) {
-        setInteraction({ mode: "wire", fromNode: node.id, cursor: toWorld(e.clientX, e.clientY) });
+        begin({ mode: "wire", fromNode: node.id, cursor: toWorld(e.clientX, e.clientY) });
         return;
       }
       if (target.closest(".fc-port-in")) {
         // 摘线换目标：仅当该输入位有来线时可拿（v2 无顶掉语义）。
         const incoming = connectionsRef.current.find((c) => c.to_node === node.id);
         if (incoming) {
-          setInteraction({
+          begin({
             mode: "rewire",
             connId: incoming.id,
             fromNode: incoming.from_node,
@@ -594,7 +668,7 @@ export default function FreeCanvas({ canvasId }: { canvasId: string }) {
       }
       if (target.closest(".fc-resize")) {
         const { w, h } = nodeSize(node);
-        setInteraction({
+        begin({
           mode: "resize",
           id: node.id,
           startX: e.clientX,
@@ -622,7 +696,7 @@ export default function FreeCanvas({ canvasId }: { canvasId: string }) {
         .filter((n) => moving.includes(n.id))
         .map((n) => ({ id: n.id, x: n.pos_x, y: n.pos_y }));
       if (!origins.length) return;
-      setInteraction({
+      begin({
         mode: "node-drag",
         startX: e.clientX,
         startY: e.clientY,
@@ -635,7 +709,7 @@ export default function FreeCanvas({ canvasId }: { canvasId: string }) {
     }
 
     // 空白：框选（阈值区分双击建节点菜单的两次单击）。
-    setInteraction({ mode: "marquee", start: toWorld(e.clientX, e.clientY), cur: toWorld(e.clientX, e.clientY), moved: false });
+    begin({ mode: "marquee", start: toWorld(e.clientX, e.clientY), cur: toWorld(e.clientX, e.clientY), moved: false });
   };
 
   const handleDoubleClick = (e: React.MouseEvent) => {
@@ -843,7 +917,10 @@ export default function FreeCanvas({ canvasId }: { canvasId: string }) {
                         }}
                       />
                     ) : (
-                      <div className="fc-node-text">
+                      // 类名不可用 fc-node-text：与类型修饰类 fc-node-${type}
+                      // 生成的 fc-node-text 同名，会把内容规则（max-height）
+                      // 命中到节点自身导致塌陷（实测踩坑）。
+                      <div className="fc-node-content">
                         {meta.kind === "text" || meta.kind === "note" ? meta.content || "" : ""}
                       </div>
                     )

@@ -17,6 +17,10 @@
   padding: 10px 14px;
   border-bottom: 1px solid var(--separator);
   flex-shrink: 0;
+  /* 建立层叠上下文：⋯ 弹层（z-index 60）必须整体压过 .canvas-main 里的
+     fc-world 绝对定位层，否则弹层被画布盖住点不到（实测踩坑）。 */
+  position: relative;
+  z-index: 20;
 }
 
 .canvas-chips {
@@ -81,10 +85,10 @@
 }
 
 .canvas-chip-popover {
-  position: absolute;
-  top: calc(100% + 4px);
-  left: 0;
-  z-index: 60;
+  /* position: fixed + body portal（见 CanvasPage）：坐标由打开时的
+     ⋯ 图标矩形计算，脱离 .canvas-chips 裁剪上下文。 */
+  position: fixed;
+  z-index: 90;
   min-width: 136px;
   background: var(--bg-card);
   border: 1px solid var(--separator);
@@ -362,7 +366,9 @@
   background: var(--bg-card);
 }
 
-.fc-node-text {
+/* 节点正文（类名刻意避开 fc-node-text：类型修饰类 fc-node-text 会与其
+   冲突，规则命中节点自身导致 max-height 塌陷——实测踩坑）。 */
+.fc-node-content {
   padding: 8px 10px;
   font-size: 12px;
   line-height: 1.5;
