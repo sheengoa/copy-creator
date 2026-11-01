@@ -318,6 +318,21 @@ fn status_error(status: u16) -> Option<String> {
     }
 }
 
+/// reqwest 顶层错误只有「error sending request for url (...)」，真正的
+/// 原因（超时 / 连接被拒 / 连接被重置——代理链路抖动时全是这几类）藏在
+/// source 链里；不展开的话节点错误提示是一句废话，用户无从判断该重试
+/// 还是该查代理（2026-11-01 生成报错排查即此因）。
+fn reqwest_cause(e: &reqwest::Error) -> String {
+    let mut msg = e.to_string();
+    let mut source = std::error::Error::source(e);
+    while let Some(err) = source {
+        msg.push_str("：");
+        msg.push_str(&err.to_string());
+        source = err.source();
+    }
+    msg
+}
+
 // ── 请求组装（纯函数，单测对象） ──
 
 /// OpenAI base URL 拼接（buildApiUrl）：去尾斜杠；不以 /v1 结尾则补 /v1。
@@ -819,7 +834,7 @@ pub async fn ai_test_channel(app: AppHandle, channel_id: String) -> Result<Value
             .header("x-goog-api-key", &channel.api_key)
             .json(&body)
             .send();
-        let resp = fut.await.map_err(|e| format!("请求失败：{e}"))?;
+        let resp = fut.await.map_err(|e| format!("请求失败：{}", reqwest_cause(&e)))?;
         let status = resp.status().as_u16();
         let payload: Value = resp.bytes().await
             .map_err(|e| format!("响应读取失败：{e}"))
@@ -844,7 +859,7 @@ pub async fn ai_test_channel(app: AppHandle, channel_id: String) -> Result<Value
             .json(&body)
             .send()
             .await
-            .map_err(|e| format!("请求失败：{e}"))?;
+            .map_err(|e| format!("请求失败：{}", reqwest_cause(&e)))?;
         let status = resp.status().as_u16();
         let payload: Value = resp.bytes().await
             .map_err(|e| format!("响应读取失败：{e}"))
@@ -1090,7 +1105,7 @@ async fn request_openai(
             .json(&body)
             .send();
         let resp = tokio::select! {
-            r = fut => r.map_err(|e| format!("请求失败：{e}"))?,
+            r = fut => r.map_err(|e| format!("请求失败：{}", reqwest_cause(&e)))?,
             _ = notify.notified() => return Err("__cancelled__".to_string()),
         };
         let status = resp.status().as_u16();
@@ -1139,7 +1154,7 @@ async fn request_openai(
             .multipart(form)
             .send();
         let resp = tokio::select! {
-            r = fut => r.map_err(|e| format!("请求失败：{e}"))?,
+            r = fut => r.map_err(|e| format!("请求失败：{}", reqwest_cause(&e)))?,
             _ = notify.notified() => return Err("__cancelled__".to_string()),
         };
         let status = resp.status().as_u16();
@@ -1194,7 +1209,7 @@ async fn request_gemini(
         .json(&body)
         .send();
     let resp = tokio::select! {
-        r = fut => r.map_err(|e| format!("请求失败：{e}"))?,
+        r = fut => r.map_err(|e| format!("请求失败：{}", reqwest_cause(&e)))?,
         _ = notify.notified() => return Err("__cancelled__".to_string()),
     };
     let status = resp.status().as_u16();
