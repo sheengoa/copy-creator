@@ -1702,17 +1702,8 @@
 }
 
 .fc-save-opt svg {
-  width: 20px;
-  height: 20px;
-}
-
-.fc-save-opt-lbl {
-  font-size: 10px;
-  color: var(--text-tertiary);
-}
-
-.fc-save-opt:hover .fc-save-opt-lbl {
-  color: var(--accent);
+  width: 24px;
+  height: 24px;
 }
 
 /* 目标已设：与问号完全同构的三层状态点——外环（CSS 描边）+ 内圈

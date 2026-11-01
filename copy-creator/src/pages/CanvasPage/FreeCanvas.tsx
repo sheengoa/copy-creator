@@ -2916,9 +2916,9 @@ export default function FreeCanvas({ canvasId }: { canvasId: string }) {
               const autoState = saveMeta?.auto_state ?? "";
               const autoError = saveMeta?.auto_error ?? "";
               // 目标状态点：骑在等待/产物区顶边中央（与选择组问号同一位置
-              // 语言）。中心为对应目标的精致小版图标（资源库=托盘、文件
-              // 夹=文件夹），笔画重与问号一致；红叉=失败，点重试；点绿
-              // 点回目标选择。
+              // 语言）。中心为对应目标的精致小版图标（资源库=文件夹、
+              // 指定路径=下载），笔画重与问号一致；红叉=失败，点重试；
+              // 点绿点回目标选择。
               const saveDot = (
                 <NodeHint
                   text={
@@ -2946,7 +2946,7 @@ export default function FreeCanvas({ canvasId }: { canvasId: string }) {
                     }
                   >
                     <span className="fc-save-dot-ring">
-                      {autoState === "error" ? Icons.close : autoTarget === "dir" ? Icons.folderFine : Icons.saveTrayFine}
+                      {autoState === "error" ? Icons.close : autoTarget === "dir" ? Icons.saveTrayFine : Icons.folderFine}
                     </span>
                   </button>
                 </NodeHint>
@@ -2966,8 +2966,7 @@ export default function FreeCanvas({ canvasId }: { canvasId: string }) {
                           className="fc-save-opt"
                           onClick={() => setSaveAutoTarget(node.id, "library", "")}
                         >
-                          {Icons.saveTray}
-                          <span className="fc-save-opt-lbl">{t("canvas.saveAutoLibraryLbl")}</span>
+                          {Icons.folderFine}
                         </button>
                       </NodeHint>
                       <NodeHint text={t("canvas.saveAutoDir")}>
@@ -2976,8 +2975,7 @@ export default function FreeCanvas({ canvasId }: { canvasId: string }) {
                           className="fc-save-opt"
                           onClick={() => void pickSaveAutoDir(node.id)}
                         >
-                          {Icons.folderOpen}
-                          <span className="fc-save-opt-lbl">{t("canvas.saveAutoDirLbl")}</span>
+                          {Icons.saveTrayFine}
                         </button>
                       </NodeHint>
                     </div>
