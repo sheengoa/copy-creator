@@ -3147,54 +3147,63 @@ export default function FreeCanvas({ canvasId }: { canvasId: string }) {
                   {!upstreamNode ? (
                     /* 未连接：断链图形，无文字 */
                     <div className="fc-save-wait">{Icons.link}</div>
-                  ) : !autoTarget ? (
-                    /* 连线后的下一步：虚线选择组（问号点明二选一），点选即设 */
-                    <div className="fc-save-choose">
-                      <span className="fc-save-help">{Icons.help}</span>
-                      <NodeHint text={t("canvas.saveAutoLibrary")}>
-                        <button
-                          type="button"
-                          className="fc-save-opt"
-                          aria-label={t("canvas.saveAutoLibrary")}
-                          onClick={() => setSaveAutoTarget(node.id, "library", "")}
-                        >
-                          {Icons.folderFine}
-                        </button>
-                      </NodeHint>
-                      <NodeHint text={t("canvas.saveAutoDir")}>
-                        <button
-                          type="button"
-                          className="fc-save-opt"
-                          aria-label={t("canvas.saveAutoDir")}
-                          onClick={() => void pickSaveAutoDir(node.id)}
-                        >
-                          {Icons.saveTrayFine}
-                        </button>
-                      </NodeHint>
-                    </div>
                   ) : (
                     <>
+                      {/* 连线后的下一步：虚线选择组（问号点明二选一），点
+                          选即设。目标就位后整组复用加载入口/生成参数的
+                          「溜走」收合动效（高度收合 + 下滑淡出），产物区
+                          入场动画衔接；点绿点清目标时反向滑回。 */}
+                      <div className={`fc-load-entry${autoTarget ? " is-loaded" : ""}`}>
+                        <div className="fc-load-entry-clip">
+                          <div className="fc-save-choose">
+                            <span className="fc-save-help">{Icons.help}</span>
+                            <NodeHint text={t("canvas.saveAutoLibrary")}>
+                              <button
+                                type="button"
+                                className="fc-save-opt"
+                                aria-label={t("canvas.saveAutoLibrary")}
+                                onClick={() => setSaveAutoTarget(node.id, "library", "")}
+                              >
+                                {Icons.folderFine}
+                              </button>
+                            </NodeHint>
+                            <NodeHint text={t("canvas.saveAutoDir")}>
+                              <button
+                                type="button"
+                                className="fc-save-opt"
+                                aria-label={t("canvas.saveAutoDir")}
+                                onClick={() => void pickSaveAutoDir(node.id)}
+                              >
+                                {Icons.saveTrayFine}
+                              </button>
+                            </NodeHint>
+                          </div>
+                        </div>
+                      </div>
                       {/* 目标已设：16px 弱化绿点（外环 + 内圈 + 对应目标
                           的精致小版图标，与问号同构同笔画重）骑在等待/产
                           物区顶边中央，与选择组的问号同一位置语言——绿=
                           就绪（脉冲）/完成，红叉=失败（点重试），点回目
                           标选择；悬停浮出目标名。 */}
-                      {!hasProduct ? (
-                        /* 等待产物：沙漏图形（更高的区域） */
-                        <div className="fc-save-stage">
-                          {saveDot}
-                          {Icons.hourglass}
-                        </div>
-                      ) : (
-                        <div className="fc-save-stage filled">
-                          {saveDot}
-                          <ResourceThumb path={upstream!.paths[0]} className="fc-thumb-cover" />
-                          {upstream!.paths.length > 1 && (
-                            <span className="fc-save-more">+{upstream!.paths.length - 1}</span>
-                          )}
-                        </div>
+                      {autoTarget &&
+                        (!hasProduct ? (
+                          /* 等待产物：沙漏图形（更高的区域） */
+                          <div className="fc-save-stage">
+                            {saveDot}
+                            {Icons.hourglass}
+                          </div>
+                        ) : (
+                          <div className="fc-save-stage filled">
+                            {saveDot}
+                            <ResourceThumb path={upstream!.paths[0]} className="fc-thumb-cover" />
+                            {upstream!.paths.length > 1 && (
+                              <span className="fc-save-more">+{upstream!.paths.length - 1}</span>
+                            )}
+                          </div>
+                        ))}
+                      {autoTarget && autoState === "error" && autoError && (
+                        <div className="fc-gen-warn">{autoError}</div>
                       )}
-                      {autoState === "error" && autoError && <div className="fc-gen-warn">{autoError}</div>}
                     </>
                   )}
                   {nodeErrors[node.id] && <div className="fc-gen-warn">{nodeErrors[node.id]}</div>}
