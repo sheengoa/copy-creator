@@ -864,11 +864,10 @@
   text-align: center;
 }
 
-/* 带次级说明的确认框：主文案升级为重点句的分量。 */
+/* 带次级说明的确认框：主文案深色常规字重，介于标题与小字之间。 */
 .dialog-message.has-hint {
-  font-size: 15px;
+  font-size: 14px;
   color: var(--text-primary);
-  font-weight: 600;
   margin-bottom: 6px;
 }
 
