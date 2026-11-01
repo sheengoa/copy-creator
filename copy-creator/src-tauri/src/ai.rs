@@ -1218,7 +1218,7 @@ pub async fn ai_generate_image(app: AppHandle, canvas_id: String, node_id: Strin
 
     // 配置与节点状态同步读取（短锁），随后进入异步请求阶段。
     // 渠道调度：按策略排出尝试顺序；节点参数模型非空时覆盖所有渠道模型。
-    let (settings, sched, targets, node_meta, node_title, upstream) = {
+    let (settings, sched, targets, node_meta, node_title, upstream, node_type) = {
         let state = app.state::<DbState>();
         let conn = state.conn.lock().map_err(|e| e.to_string())?;
         let settings = load_ai_settings(&conn);
@@ -1230,12 +1230,20 @@ pub async fn ai_generate_image(app: AppHandle, canvas_id: String, node_id: Strin
                 |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
             )
             .map_err(|_| format!("节点不存在：{node_id}"))?;
-        if row.0 != "image" {
+        // v2 节点体系创建入口只产 gen_image（旧 image 类型为迁移宽容读
+        // 保留，创建已拒绝）——校验按行内实际类型放行，元数据也按同一
+        // 类型解析；回写 kind 必须随类型列，否则宽容读全部落默认值
+        // （2026-11-01：按旧 "image" 硬校验把 gen_image 节点全拒成
+        // 「只有图片节点可以生成」）。
+        let node_type = row.0;
+        if node_type != "gen_image" && node_type != "image" {
             return Err("只有图片节点可以生成".to_string());
         }
-        let node_meta = parse_node_meta_lenient("image", &row.1);
+        let node_meta = parse_node_meta_lenient(&node_type, &row.1);
         let node_model = match &node_meta {
-            NodeMeta::Image { params, .. } => params.model.trim().to_string(),
+            NodeMeta::Image { params, .. } | NodeMeta::GenImage { params, .. } => {
+                params.model.trim().to_string()
+            }
             _ => String::new(),
         };
         let mut targets = ordered_channel_targets(&conn, &sched)?;
@@ -1245,9 +1253,11 @@ pub async fn ai_generate_image(app: AppHandle, canvas_id: String, node_id: Strin
             }
         }
         let upstream = collect_upstream(&conn, &node_id)?;
-        (settings, sched, targets, node_meta, row.2.unwrap_or_default(), upstream)
+        (settings, sched, targets, node_meta, row.2.unwrap_or_default(), upstream, node_type)
     };
-    let NodeMeta::Image { params: node_params, status, .. } = &node_meta else {
+    let (NodeMeta::Image { params: node_params, status, .. }
+    | NodeMeta::GenImage { params: node_params, status, .. }) = &node_meta
+    else {
         return Err("节点 metadata 类型异常".to_string());
     };
     // 双保险（方案 3.4 成本防护）：前端进度条目可能因窗口刷新等丢失，
@@ -1278,7 +1288,7 @@ pub async fn ai_generate_image(app: AppHandle, canvas_id: String, node_id: Strin
         let state = app.state::<DbState>();
         let conn = state.conn.lock().map_err(|e| e.to_string())?;
         let meta = json!({
-            "kind": "image",
+            "kind": node_type.as_str(),
             "params": node_params,
             "status": "generating",
             "error": "",
@@ -1512,7 +1522,7 @@ pub async fn ai_generate_image(app: AppHandle, canvas_id: String, node_id: Strin
     };
 
     let final_meta = json!({
-        "kind": "image",
+        "kind": node_type.as_str(),
         "params": node_params,
         "status": status,
         "error": error_msg,
