@@ -22,6 +22,7 @@ import {
 } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
 import { useSettingsStore, type AiChannel, type AiChannelInput, type AiStrategy } from "../../stores/settingsStore";
+import { ConfirmDialog } from "../ConfirmDialog";
 import { Icons } from "../Icons";
 
 // ── 渠道行（可拖拽排序） ──
@@ -422,8 +423,8 @@ function ChannelCreateForm({ onCancel }: { onCancel: () => void }) {
 function RoutePreview() {
   const { t } = useTranslation();
   const { aiChannels: channels, aiStrategy, aiBalancePriceWeight, aiManualChannelId } = useSettingsStore();
-  const usable = channels.filter((c) => c.enabled && c.status !== "auto_disabled");
   const pick = useMemo<AiChannel | null>(() => {
+    const usable = channels.filter((c) => c.enabled && c.status !== "auto_disabled");
     const candidates = usable.length > 0 ? usable : [];
     if (candidates.length === 0) return null;
     switch (aiStrategy) {
@@ -467,7 +468,7 @@ function RoutePreview() {
           .reduce((a, b) => (b.score < a.score ? b : a)).c;
       }
     }
-  }, [usable, aiStrategy, aiBalancePriceWeight, aiManualChannelId]);
+  }, [channels, aiStrategy, aiBalancePriceWeight, aiManualChannelId]);
 
   const desc = (c: AiChannel): string => {
     const parts: string[] = [];
@@ -514,6 +515,18 @@ export function CanvasSettings() {
   // 测速进行中的渠道集合与「全部测速」进度（null = 空闲）。
   const [testingIds, setTestingIds] = useState<Set<string>>(new Set());
   const [testAllProgress, setTestAllProgress] = useState<{ done: number; total: number } | null>(null);
+  // 权重滑杆拖动中的草稿值（null = 空闲）：拖动只更新本地预览，
+  // 松手/松键/失焦才落库，避免拖一次写几十条设置。
+  const [weightDraft, setWeightDraft] = useState<number | null>(null);
+  // 待删除确认的渠道（删除会连带 Key，走应用内确认对话框）。
+  const [pendingDelete, setPendingDelete] = useState<AiChannel | null>(null);
+
+  const commitWeight = async () => {
+    if (weightDraft == null) return;
+    const value = weightDraft;
+    setWeightDraft(null);
+    await settings.saveAiScheduling({ aiBalancePriceWeight: value });
+  };
 
   const runTest = async (id: string) => {
     if (testingIds.has(id)) return;
@@ -624,10 +637,7 @@ export function CanvasSettings() {
                     testing={testingIds.has(channel.id)}
                     onToggle={() => setExpanded(expanded === channel.id ? null : channel.id)}
                     onEnabledChange={(enabled) => void settings.setAiChannelEnabled(channel.id, enabled)}
-                    onDelete={() => {
-                      if (expanded === channel.id) setExpanded(null);
-                      void settings.deleteAiChannel(channel.id);
-                    }}
+                    onDelete={() => setPendingDelete(channel)}
                     onTest={() => void runTest(channel.id)}
                   />
                 ))}
@@ -646,6 +656,19 @@ export function CanvasSettings() {
           )}
         </div>
       </div>
+
+      {/* 删除渠道确认：连带 Base URL 与 Key 且不可撤销 */}
+      {pendingDelete && (
+        <ConfirmDialog
+          message={t("settings.canvas.deleteConfirm", { name: pendingDelete.name })}
+          hint={t("settings.canvas.deleteConfirmHint")}
+          onCancel={() => setPendingDelete(null)}
+          onConfirm={() => {
+            if (expanded === pendingDelete.id) setExpanded(null);
+            void settings.deleteAiChannel(pendingDelete.id);
+          }}
+        />
+      )}
 
       {/* ── 2. 自动调度 ── */}
       <div className="canvas-sec">
@@ -701,13 +724,16 @@ export function CanvasSettings() {
                     className="canvas-slider"
                     min={0}
                     max={100}
-                    value={aiBalancePriceWeight}
-                    onChange={(e) => void settings.saveAiScheduling({ aiBalancePriceWeight: Number(e.target.value) })}
+                    value={weightDraft ?? aiBalancePriceWeight}
+                    onChange={(e) => setWeightDraft(Number(e.target.value))}
+                    onPointerUp={() => void commitWeight()}
+                    onKeyUp={() => void commitWeight()}
+                    onBlur={() => void commitWeight()}
                   />
                 </div>
                 <span className="canvas-slider-cap">{t("settings.canvas.preferLatency")}</span>
                 <span className="canvas-slider-val">
-                  {t("settings.canvas.weightPrice", { p: aiBalancePriceWeight, l: 100 - aiBalancePriceWeight })}
+                  {t("settings.canvas.weightPrice", { p: weightDraft ?? aiBalancePriceWeight, l: 100 - (weightDraft ?? aiBalancePriceWeight) })}
                 </span>
               </div>
             </div>

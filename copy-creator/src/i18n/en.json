@@ -174,7 +174,9 @@
       "testAll": "Test all",
       "testAllProgress": "Testing {{done}}/{{total}}",
       "testing": "Testing",
-      "testFailed": "Failed"
+      "testFailed": "Failed",
+      "deleteConfirm": "Delete channel \"{{name}}\"?",
+      "deleteConfirmHint": "Its Base URL and API key will be removed together. This cannot be undone."
     }
   },
   "clipboard": {

@@ -17,7 +17,8 @@ const SETTINGS_CATS: { key: SettingsCat; icon: ReactNode; labelKey: string }[] =
   { key: "shortcut", icon: Icons.keyboard, labelKey: "settings.nav.shortcut" },
   { key: "clipboard", icon: Icons.clipboard, labelKey: "settings.nav.clipboard" },
   { key: "radial", icon: Icons.radar, labelKey: "settings.nav.radial" },
-  { key: "canvas", icon: Icons.image, labelKey: "settings.nav.canvas" },
+  // 画布分类与主窗口侧栏的画布入口同图标（Icons.canvas）。
+  { key: "canvas", icon: Icons.canvas, labelKey: "settings.nav.canvas" },
   { key: "storage", icon: Icons.hardDrive, labelKey: "settings.nav.storage" },
   { key: "backup", icon: Icons.archive, labelKey: "settings.nav.backup" },
 ];

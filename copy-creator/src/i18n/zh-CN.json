@@ -174,7 +174,9 @@
       "testAll": "全部测速",
       "testAllProgress": "测速中 {{done}}/{{total}}",
       "testing": "测速中",
-      "testFailed": "失败"
+      "testFailed": "失败",
+      "deleteConfirm": "删除渠道「{{name}}」？",
+      "deleteConfirmHint": "渠道的 Base URL 与 API Key 将一并删除，此操作不可撤销。"
     }
   },
   "clipboard": {

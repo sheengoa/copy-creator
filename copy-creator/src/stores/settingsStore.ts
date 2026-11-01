@@ -545,7 +545,13 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
     set({
       aiChannels: get().aiChannels.map((c) =>
         c.id === id
-          ? { ...c, enabled, status: enabled ? ("normal" as const) : c.status, lastError: enabled ? "" : c.lastError }
+          ? {
+              ...c,
+              enabled,
+              status: enabled ? ("normal" as const) : c.status,
+              lastError: enabled ? "" : c.lastError,
+              cooldownUntilMs: enabled ? 0 : c.cooldownUntilMs,
+            }
           : c,
       ),
     });
