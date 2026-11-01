@@ -472,13 +472,10 @@ fn parse_gemini_payload(payload: &Value) -> Result<Vec<String>, String> {
 
 // ── 配置与上游收集 ──
 
+/// 生成请求的通用设置。渠道化之后（画布设置页）供应商/密钥都挂在
+/// ai_channels 上，这里只剩超时；旧 ai_provider/ai_openai_* 键仅由
+/// 迁移逻辑读取一次，不再参与运行时。
 struct AiSettings {
-    provider: String,
-    openai_base: String,
-    openai_key: String,
-    gemini_base: String,
-    gemini_key: String,
-    model: String,
     timeout_secs: u64,
 }
 
@@ -494,28 +491,8 @@ fn read_setting(conn: &rusqlite::Connection, key: &str) -> String {
 }
 
 fn load_ai_settings(conn: &rusqlite::Connection) -> AiSettings {
-    let provider = match read_setting(conn, "ai_provider").as_str() {
-        "gemini" => "gemini".to_string(),
-        _ => "openai".to_string(),
-    };
     let timeout = read_setting(conn, "ai_timeout").parse::<u64>().unwrap_or(60).clamp(5, 600);
-    let openai_base = {
-        let b = read_setting(conn, "ai_openai_base");
-        if b.trim().is_empty() { "https://api.openai.com".to_string() } else { b }
-    };
-    let gemini_base = {
-        let b = read_setting(conn, "ai_gemini_base");
-        if b.trim().is_empty() { "https://generativelanguage.googleapis.com".to_string() } else { b }
-    };
-    AiSettings {
-        provider,
-        openai_base,
-        openai_key: read_setting(conn, "ai_openai_key"),
-        gemini_base,
-        gemini_key: read_setting(conn, "ai_gemini_key"),
-        model: read_setting(conn, "ai_model"),
-        timeout_secs: timeout,
-    }
+    AiSettings { timeout_secs: timeout }
 }
 
 struct UpstreamInput {
@@ -590,10 +567,217 @@ fn record_channel_test_result(
     }
 }
 
+// ── 调度：策略排序 + 故障分类与标记（画布设置页配置，settings 通用键值） ──
+
+#[derive(Clone)]
+struct ChannelTarget {
+    id: String,
+    name: String,
+    protocol: String,
+    base_url: String,
+    api_key: String,
+    /// 已按「渠道配置 → 全局默认」解析好的模型；节点参数模型在生成时统一覆盖。
+    model: String,
+    /// 价格归一比较值（¥ 折 $；None = 未设价格，排序按最差处理）。
+    price_norm: Option<f64>,
+    /// 最近延迟（主动测速 + 被动 EMA；None = 从未测速）。
+    latency_ms: Option<i64>,
+}
+
+struct Scheduling {
+    strategy: String,
+    price_weight: i64,
+    failover: bool,
+    auto_disable_auth: bool,
+    cooldown_ms: i64,
+    manual_channel_id: String,
+    concurrency: i64,
+}
+
+fn load_scheduling(conn: &rusqlite::Connection) -> Scheduling {
+    Scheduling {
+        strategy: read_setting(conn, "ai_strategy"),
+        price_weight: read_setting(conn, "ai_balance_price_weight").parse::<i64>().unwrap_or(40).clamp(0, 100),
+        failover: read_setting(conn, "ai_failover") == "1",
+        auto_disable_auth: read_setting(conn, "ai_auto_disable_auth") != "0",
+        cooldown_ms: read_setting(conn, "ai_rate_limit_cooldown").parse::<i64>().unwrap_or(300).clamp(5, 3600) * 1000,
+        manual_channel_id: read_setting(conn, "ai_manual_channel_id"),
+        concurrency: read_setting(conn, "ai_concurrency").parse::<i64>().unwrap_or(4).clamp(1, 8),
+    }
+}
+
+fn now_epoch_ms() -> i64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_millis() as i64)
+        .unwrap_or(0)
+}
+
+/// 按调度策略排出本次生成的渠道尝试顺序：可用 = 启用 + 未自动停用 +
+/// 不在限流冷却期。manual 只取指定渠道；latency 按（主动测速 + 被动
+/// EMA）延迟升序；price 按归一化价格（¥ 简化按 7.2 折算）升序、同价比
+/// 延迟；balance 按归一化价格 × 权重 + 归一化延迟 ×（1-权重）打分。
+/// 无测速/价格数据的渠道排尾（视为最差），不阻断调度。
+fn ordered_channel_targets(conn: &rusqlite::Connection, sched: &Scheduling) -> Result<Vec<ChannelTarget>, String> {
+    let mut stmt = conn
+        .prepare(
+            "SELECT id, name, protocol, base_url, api_key, model, price, currency, \
+             last_latency_ms, cooldown_until_ms, status FROM ai_channels \
+             WHERE enabled = 1 ORDER BY sort_order ASC",
+        )
+        .map_err(|e| e.to_string())?;
+    let rows: Vec<(String, String, String, String, String, String, Option<f64>, String, Option<i64>, i64, String)> = stmt
+        .query_map([], |row| {
+            Ok((
+                row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?, row.get(4)?,
+                row.get(5)?, row.get(6)?, row.get(7)?, row.get(8)?, row.get(9)?, row.get(10)?,
+            ))
+        })
+        .map_err(|e| e.to_string())?
+        .collect::<Result<Vec<_>, _>>()
+        .map_err(|e| e.to_string())?;
+
+    let now_ms = now_epoch_ms();
+    let global_model = read_setting(conn, "ai_model");
+    let mut targets: Vec<ChannelTarget> = Vec::new();
+    for (id, name, protocol, base_url, api_key, model, price, currency, last_latency_ms, cooldown_until_ms, status) in &rows {
+        if status == "auto_disabled" || *cooldown_until_ms > now_ms {
+            continue;
+        }
+        let resolved = match channel_model_or_global(model, &global_model) {
+            Ok(m) => m,
+            Err(_) => continue, // 无可用模型的渠道剔除，不阻断其余渠道
+        };
+        // 价格归一比较值：¥ 简化按 7.2 折算为 $；未设价格按最大值排尾。
+        let price_norm = price.map(|p| p * if currency == "¥" { 0.1389 } else { 1.0 });
+        targets.push(ChannelTarget {
+            id: id.clone(),
+            name: name.clone(),
+            protocol: protocol.clone(),
+            base_url: base_url.clone(),
+            api_key: api_key.clone(),
+            model: resolved,
+            price_norm,
+            latency_ms: *last_latency_ms,
+        });
+    }
+    if targets.is_empty() {
+        return Err("没有可用的生成渠道：请到 设置 → 画布 添加或启用渠道".to_string());
+    }
+
+    match sched.strategy.as_str() {
+        "manual" => {
+            let picked: Vec<ChannelTarget> = targets.into_iter().filter(|t| t.id == sched.manual_channel_id).collect();
+            if picked.is_empty() {
+                return Err("手动指定的渠道不存在或已停用：请到 设置 → 画布 重新选择".to_string());
+            }
+            Ok(picked)
+        }
+        "price" => {
+            targets.sort_by(|a, b| {
+                let pa = a.price_norm.unwrap_or(f64::MAX);
+                let pb = b.price_norm.unwrap_or(f64::MAX);
+                pa.partial_cmp(&pb).unwrap_or(std::cmp::Ordering::Equal).then_with(|| {
+                    let la = a.latency_ms.unwrap_or(i64::MAX);
+                    let lb = b.latency_ms.unwrap_or(i64::MAX);
+                    la.cmp(&lb)
+                })
+            });
+            Ok(targets)
+        }
+        "latency" => {
+            targets.sort_by(|a, b| {
+                let la = a.latency_ms.unwrap_or(i64::MAX);
+                let lb = b.latency_ms.unwrap_or(i64::MAX);
+                la.cmp(&lb)
+            });
+            Ok(targets)
+        }
+        _ => {
+            // balance（默认）：归一化价格 × 权重 + 归一化延迟 ×（1-权重）。
+            // 归一范围只看本次可用渠道；无价格/延迟数据的渠道按最差值 1.0。
+            let p_values: Vec<f64> = targets.iter().filter_map(|t| t.price_norm).collect();
+            let l_values: Vec<i64> = targets.iter().filter_map(|t| t.latency_ms).collect();
+            let p_min = p_values.iter().copied().fold(f64::MAX, f64::min);
+            let p_max = p_values.iter().copied().fold(f64::MIN, f64::max);
+            let l_min = l_values.iter().copied().min().unwrap_or(0);
+            let l_max = l_values.iter().copied().max().unwrap_or(1);
+            let norm_f = |v: f64, min: f64, max: f64| if max > min { (v - min) / (max - min) } else { 0.5 };
+            let norm_i = |v: i64, min: i64, max: i64| if max > min { (v - min) as f64 / (max - min) as f64 } else { 0.5 };
+            let w = sched.price_weight as f64 / 100.0;
+            let score = |t: &ChannelTarget| -> f64 {
+                let price_score = t.price_norm.map(|p| norm_f(p, p_min, p_max)).unwrap_or(1.0);
+                let lat_score = t.latency_ms.map(|l| norm_i(l, l_min, l_max)).unwrap_or(1.0);
+                price_score * w + lat_score * (1.0 - w)
+            };
+            targets.sort_by(|a, b| score(a).partial_cmp(&score(b)).unwrap_or(std::cmp::Ordering::Equal));
+            Ok(targets)
+        }
+    }
+}
+
+fn latency_map(conn: &rusqlite::Connection) -> std::collections::HashMap<String, i64> {
+    conn.prepare("SELECT id, last_latency_ms FROM ai_channels WHERE last_latency_ms IS NOT NULL")
+        .and_then(|mut stmt| {
+            stmt.query_map([], |row| Ok((row.get::<_, String>(0)?, row.get::<_, i64>(1)?)))
+                .map(|rows| rows.filter_map(|r| r.ok()).collect())
+        })
+        .unwrap_or_default()
+}
+
+/// 生成失败分类：鉴权/欠费类（重试无意义）→ 自动停用；限流/超时类 →
+/// 冷却到期自动恢复；其余仅记录错误文案。
+fn classify_failure(message: &str) -> &'static str {
+    let m = message.to_lowercase();
+    let auth_keys = ["认证失败", "401", "403", "invalid_api_key", "unauthorized", "insufficient", "quota", "欠费", "余额不足", "billing", "permission"];
+    let rate_keys = ["429", "限流", "rate limit", "too many requests", "超时", "timeout", "timed out"];
+    if auth_keys.iter().any(|k| m.contains(k)) {
+        "auth"
+    } else if rate_keys.iter().any(|k| m.contains(k)) {
+        "rate"
+    } else {
+        "other"
+    }
+}
+
+fn mark_channel_failure(conn: &rusqlite::Connection, channel_id: &str, kind: &str, sched: &Scheduling, message: &str) {
+    let now = crate::db::canvas_now();
+    let update = match kind {
+        "auth" if sched.auto_disable_auth => conn.execute(
+            "UPDATE ai_channels SET status = 'auto_disabled', last_error = ?1, updated_at = ?2 WHERE id = ?3",
+            params![message, now, channel_id],
+        ),
+        "rate" => conn.execute(
+            "UPDATE ai_channels SET cooldown_until_ms = ?1, last_error = ?2, updated_at = ?3 WHERE id = ?4",
+            params![now_epoch_ms() + sched.cooldown_ms, message, now, channel_id],
+        ),
+        _ => conn.execute(
+            "UPDATE ai_channels SET last_error = ?1, updated_at = ?2 WHERE id = ?3",
+            params![message, now, channel_id],
+        ),
+    };
+    if let Err(error) = update {
+        log::error!("写入渠道故障状态失败: {error}");
+    }
+}
+
+/// 真实生成的耗时按渠道做 EMA（旧值 70% + 新值 30%）：让「延迟优先 /
+/// 综合最优」随真实使用自校准，主动测速只做初始标定。
+fn record_channel_latency(conn: &rusqlite::Connection, channel_id: &str, latency_ms: u64) {
+    let now = crate::db::canvas_now();
+    if let Err(error) = conn.execute(
+        "UPDATE ai_channels SET last_latency_ms = \
+         CASE WHEN last_latency_ms IS NULL THEN ?1 ELSE (last_latency_ms * 7 + ?1 * 3) / 10 END, \
+         last_tested_at = ?2 WHERE id = ?3",
+        params![latency_ms as i64, now, channel_id],
+    ) {
+        log::error!("写入渠道耗时统计失败: {error}");
+    }
+}
+
 /// 单渠道测速：真实发一次最小生图请求并计完整耗时。
 #[tauri::command]
-pub async fn ai_test_channel(app: AppHandle, channel_id: String) -> Result<Value, String> {
-    // 配置读取（短锁），网络阶段不持锁。
+pub async fn ai_test_channel(app: AppHandle, channel_id: String) -> Result<Value, String> {    // 配置读取（短锁），网络阶段不持锁。
     let (channel, model, timeout_secs) = {
         let state = app.state::<DbState>();
         let conn = state.conn.lock().map_err(|e| e.to_string())?;
@@ -876,6 +1060,8 @@ struct ImageTaskResult {
     slot: usize,
     data_url: Option<String>,
     error: Option<String>,
+    /// 实际使用的渠道名（成功或最终失败时记录，供排查与展示）。
+    channel: Option<String>,
 }
 
 async fn request_openai(
@@ -1025,10 +1211,12 @@ pub async fn ai_generate_image(app: AppHandle, canvas_id: String, node_id: Strin
     use tokio::sync::{Notify, Semaphore};
 
     // 配置与节点状态同步读取（短锁），随后进入异步请求阶段。
-    let (settings, node_meta, node_title, upstream) = {
+    // 渠道调度：按策略排出尝试顺序；节点参数模型非空时覆盖所有渠道模型。
+    let (settings, sched, targets, node_meta, node_title, upstream) = {
         let state = app.state::<DbState>();
         let conn = state.conn.lock().map_err(|e| e.to_string())?;
         let settings = load_ai_settings(&conn);
+        let sched = load_scheduling(&conn);
         let row: (String, String, Option<String>) = conn
             .query_row(
                 "SELECT type, metadata, title FROM canvas_nodes WHERE id = ?1 AND canvas_id = ?2",
@@ -1039,8 +1227,19 @@ pub async fn ai_generate_image(app: AppHandle, canvas_id: String, node_id: Strin
         if row.0 != "image" {
             return Err("只有图片节点可以生成".to_string());
         }
+        let node_meta = parse_node_meta_lenient("image", &row.1);
+        let node_model = match &node_meta {
+            NodeMeta::Image { params, .. } => params.model.trim().to_string(),
+            _ => String::new(),
+        };
+        let mut targets = ordered_channel_targets(&conn, &sched)?;
+        if !node_model.is_empty() {
+            for target in &mut targets {
+                target.model = node_model.clone();
+            }
+        }
         let upstream = collect_upstream(&conn, &node_id)?;
-        (settings, parse_node_meta_lenient("image", &row.1), row.2.unwrap_or_default(), upstream)
+        (settings, sched, targets, node_meta, row.2.unwrap_or_default(), upstream)
     };
     let NodeMeta::Image { params: node_params, status, .. } = &node_meta else {
         return Err("节点 metadata 类型异常".to_string());
@@ -1051,9 +1250,8 @@ pub async fn ai_generate_image(app: AppHandle, canvas_id: String, node_id: Strin
         return Err("该节点正在生成中，请等它完成或先取消".to_string());
     }
 
-    let model = if node_params.model.trim().is_empty() { settings.model.trim().to_string() } else { node_params.model.trim().to_string() };
-    if model.is_empty() {
-        return Err("未配置模型：请到 设置 → AI 生图 填写默认模型，或在节点参数里指定".to_string());
+    if targets.iter().all(|t| t.model.trim().is_empty()) {
+        return Err("未配置模型：请到 设置 → 画布 的渠道或默认值里填写模型，或在节点参数里指定".to_string());
     }
     if upstream.prompt.trim().is_empty() {
         return Err("没有提示词来源：请连线至少一个非空文本节点".to_string());
@@ -1089,11 +1287,13 @@ pub async fn ai_generate_image(app: AppHandle, canvas_id: String, node_id: Strin
     let _ = app.emit("canvas-changed", ());
 
     // 参考图准备：Gemini 走 dataUrl；OpenAI edits 直接传文件路径。
+    // 混合协议渠道并存时只要任一目标走 Gemini，就预转一份 dataUrl。
     let mut reference_paths = Vec::new();
     for rel in &upstream.references {
         reference_paths.push(resolve_library_path(&app, rel.to_string_lossy().as_ref())?);
     }
-    let reference_data_urls: Vec<String> = if settings.provider == "gemini" {
+    let any_gemini = targets.iter().any(|t| t.protocol == "gemini");
+    let reference_data_urls: Vec<String> = if any_gemini {
         let mut urls = Vec::new();
         for path in &reference_paths {
             urls.push(file_to_data_url(path)?);
@@ -1116,33 +1316,25 @@ pub async fn ai_generate_image(app: AppHandle, canvas_id: String, node_id: Strin
         .build()
         .map_err(|e| format!("HTTP 客户端初始化失败：{e}"))?;
 
-    let provider = settings.provider.clone();
-    let openai_base = settings.openai_base.clone();
-    let openai_key = settings.openai_key.clone();
-    let gemini_base = settings.gemini_base.clone();
-    let gemini_key = settings.gemini_key.clone();
-    let model_for_task = model.clone();
     let prompt_for_task = prompt.clone();
     let size_raw_for_task = size_raw.clone();
     let refs_for_task = reference_paths.clone();
     let refs_data_for_task = reference_data_urls.clone();
     let request_size_for_task = request_size.clone();
+    let targets_for_task = Arc::new(targets);
+    let sched_for_task = Arc::new(sched);
 
-    let semaphore = Arc::new(Semaphore::new(4));
+    let semaphore = Arc::new(Semaphore::new(sched_for_task.concurrency.max(1) as usize));
     let mut handles = Vec::new();
     for slot in 0..count as usize {
         let client = client.clone();
-        let provider = provider.clone();
-        let model = model_for_task.clone();
+        let targets = targets_for_task.clone();
+        let sched = sched_for_task.clone();
         let prompt = prompt_for_task.clone();
         let size_raw = size_raw_for_task.clone();
         let request_size = request_size_for_task.clone();
         let reference_paths = refs_for_task.clone();
         let reference_data_urls = refs_data_for_task.clone();
-        let openai_base = openai_base.clone();
-        let openai_key = openai_key.clone();
-        let gemini_base = gemini_base.clone();
-        let gemini_key = gemini_key.clone();
         let notify = notify.clone();
         let semaphore = semaphore.clone();
         let app2 = app.clone();
@@ -1150,31 +1342,76 @@ pub async fn ai_generate_image(app: AppHandle, canvas_id: String, node_id: Strin
         let request_id2 = request_id.clone();
         handles.push(tokio::spawn(async move {
             let _permit = semaphore.acquire().await;
-            let result = if provider == "gemini" {
-                request_gemini(&client, &gemini_base, &gemini_key, &model, &prompt, &reference_data_urls, &size_raw, notify.clone()).await
-            } else {
-                // 每槽位独立请求（n=1 × count 次）：与单请求 n=count 等价，
-                // 换来逐张回传的进度粒度。
-                request_openai(&client, &openai_base, &openai_key, &model, &prompt, &reference_paths, 1, None, request_size.as_deref(), notify.clone()).await
-            };
-            match result {
-                Ok(images) => {
-                    let data_url = images.into_iter().next();
-                    if let Some(url) = &data_url {
-                        let _ = app2.emit(
-                            "canvas-generation-progress",
-                            json!({ "requestId": request_id2, "nodeId": node_id2, "slot": slot, "dataUrl": url }),
-                        );
+            let started = std::time::Instant::now();
+            // 每槽位独立请求（n=1 × count 次）：与单请求 n=count 等价，
+            // 换来逐张回传的进度粒度。渠道按调度顺序尝试；失败（非取消）
+            // 先分类标记（鉴权停用 / 限流冷却），开启 failover 才换下一
+            // 渠道重试，否则维持「失败不自动重试」语义。
+            let mut attempt = 0usize;
+            let mut last_error = String::new();
+            let mut data_url: Option<String> = None;
+            let mut used_channel: Option<String> = None;
+            while attempt < targets.len() {
+                let target = &targets[attempt];
+                let result = if target.protocol == "gemini" {
+                    request_gemini(&client, &target.base_url, &target.api_key, &target.model, &prompt, &reference_data_urls, &size_raw, notify.clone()).await
+                } else {
+                    request_openai(&client, &target.base_url, &target.api_key, &target.model, &prompt, &reference_paths, 1, None, request_size.as_deref(), notify.clone()).await
+                };
+                match result {
+                    Ok(mut images) => {
+                        data_url = images.drain(..).next();
+                        used_channel = Some(target.name.clone());
+                        {
+                            let state = app2.state::<DbState>();
+                            let lock = state.conn.lock();
+                            if let Ok(conn) = lock.as_ref() {
+                                record_channel_latency(conn, &target.id, started.elapsed().as_millis() as u64);
+                            }
+                        }
+                        break;
                     }
-                    ImageTaskResult { slot, data_url, error: None }
+                    Err(e) if e == "__cancelled__" => {
+                        last_error = e;
+                        break;
+                    }
+                    Err(e) => {
+                        {
+                            let state = app2.state::<DbState>();
+                            let lock = state.conn.lock();
+                            if let Ok(conn) = lock.as_ref() {
+                                let kind = classify_failure(&e);
+                                mark_channel_failure(conn, &target.id, kind, &sched, &e);
+                            }
+                        }
+                        last_error = e;
+                        attempt += 1;
+                        if !sched.failover {
+                            break;
+                        }
+                    }
                 }
-                Err(e) if e == "__cancelled__" => ImageTaskResult { slot, data_url: None, error: Some("__cancelled__".to_string()) },
-                Err(e) => {
+            }
+            match data_url {
+                Some(url) => {
                     let _ = app2.emit(
                         "canvas-generation-progress",
-                        json!({ "requestId": request_id2, "nodeId": node_id2, "slot": slot, "error": e }),
+                        json!({ "requestId": request_id2, "nodeId": node_id2, "slot": slot, "dataUrl": url }),
                     );
-                    ImageTaskResult { slot, data_url: None, error: Some(e) }
+                    ImageTaskResult { slot, data_url: Some(url), error: None, channel: used_channel }
+                }
+                None if last_error == "__cancelled__" => ImageTaskResult { slot, data_url: None, error: Some("__cancelled__".to_string()), channel: used_channel },
+                None => {
+                    let error = if used_channel.is_some() {
+                        format!("[{}] {}", used_channel.clone().unwrap_or_default(), last_error)
+                    } else {
+                        last_error
+                    };
+                    let _ = app2.emit(
+                        "canvas-generation-progress",
+                        json!({ "requestId": request_id2, "nodeId": node_id2, "slot": slot, "error": error }),
+                    );
+                    ImageTaskResult { slot, data_url: None, error: Some(error), channel: used_channel }
                 }
             }
         }));
@@ -1398,6 +1635,23 @@ mod tests {
         assert_eq!(gemini_base_url("https://generativelanguage.googleapis.com"), "https://generativelanguage.googleapis.com/v1beta");
         assert_eq!(gemini_base_url("https://proxy.example.com/v1beta"), "https://proxy.example.com/v1beta");
         assert_eq!(gemini_model_name("models/gemini-2.5-flash"), "gemini-2.5-flash");
+    }
+
+    #[test]
+    fn failure_classification_rules() {
+        // 鉴权/欠费类：命中即停（重试无意义）
+        assert_eq!(classify_failure("认证失败，请检查 API Key"), "auth");
+        assert_eq!(classify_failure("HTTP 401"), "auth");
+        assert_eq!(classify_failure("insufficient_quota: 已欠费"), "auth");
+        // 限流/超时类：冷却后自动恢复
+        assert_eq!(classify_failure("请求过于频繁（限流），请稍后再试"), "rate");
+        assert_eq!(classify_failure("HTTP 429"), "rate");
+        assert_eq!(classify_failure("请求失败：operation timed out"), "rate");
+        // 其余（网络/参数/内容策略等）只记录不动作
+        assert_eq!(classify_failure("接口没有返回任何图片"), "other");
+        assert_eq!(classify_failure("图片尺寸无效"), "other");
+        // 优先级：同时含两类关键字时按鉴权处理（更保守，避免反复撞墙）
+        assert_eq!(classify_failure("401 rate limit"), "auth");
     }
 
     /// 极简 mock HTTP 服务器：读全请求（头 + content-length body）再响应，
