@@ -346,6 +346,20 @@ export const Icons = {
       <line x1="12" y1="15" x2="12" y2="3" />
     </svg>
   ),
+  /* 小尺寸精致版：专供保存状态点 6~7px 渲染——收窄托盘、拉开箭头与
+     托盘的间距，笔画重由 CSS 按尺寸换算，对齐问号字形的精细观感。 */
+  saveTrayFine: (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round">
+      <path d="M5.5 15.5v2a2 2 0 0 0 2 2h9a2 2 0 0 0 2-2v-2" />
+      <path d="M12 3.5v8" />
+      <path d="m8.75 8.25 3.25 3.25 3.25-3.25" />
+    </svg>
+  ),
+  folderFine: (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round">
+      <path d="M4 17.5v-11A1.5 1.5 0 0 1 5.5 5h3.5a1.5 1.5 0 0 1 1.2.6l.9 1.2a1.5 1.5 0 0 0 1.2.6H18.5A1.5 1.5 0 0 1 20 8.9v8.6a1.5 1.5 0 0 1-1.5 1.5h-13A1.5 1.5 0 0 1 4 17.5Z" />
+    </svg>
+  ),
   floppy: (
     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round">
       <path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z" />

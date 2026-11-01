@@ -2916,7 +2916,9 @@ export default function FreeCanvas({ canvasId }: { canvasId: string }) {
               const autoState = saveMeta?.auto_state ?? "";
               const autoError = saveMeta?.auto_error ?? "";
               // 目标状态点：骑在等待/产物区顶边中央（与选择组问号同一位置
-              // 语言）。淡绿底弱化；红叉=失败，点重试；点绿点回目标选择。
+              // 语言）。中心为对应目标的精致小版图标（资源库=托盘、文件
+              // 夹=文件夹），笔画重与问号一致；红叉=失败，点重试；点绿
+              // 点回目标选择。
               const saveDot = (
                 <NodeHint
                   text={
@@ -2944,7 +2946,7 @@ export default function FreeCanvas({ canvasId }: { canvasId: string }) {
                     }
                   >
                     <span className="fc-save-dot-ring">
-                      {autoState === "error" ? Icons.close : autoTarget === "dir" ? Icons.folderOpen : Icons.saveTray}
+                      {autoState === "error" ? Icons.close : autoTarget === "dir" ? Icons.folderFine : Icons.saveTrayFine}
                     </span>
                   </button>
                 </NodeHint>
@@ -2981,10 +2983,11 @@ export default function FreeCanvas({ canvasId }: { canvasId: string }) {
                     </div>
                   ) : (
                     <>
-                      {/* 目标已设：16px 弱化绿点（淡绿底 + 目标图标）骑在
-                          等待/产物区顶边中央，与选择组的问号同一位置语言——
-                          绿=就绪（脉冲）/完成，红叉=失败（点重试），点回
-                          目标选择；悬停浮出目标名。 */}
+                      {/* 目标已设：16px 弱化绿点（外环 + 内圈 + 对应目标
+                          的精致小版图标，与问号同构同笔画重）骑在等待/产
+                          物区顶边中央，与选择组的问号同一位置语言——绿=
+                          就绪（脉冲）/完成，红叉=失败（点重试），点回目
+                          标选择；悬停浮出目标名。 */}
                       {!hasProduct ? (
                         /* 等待产物：沙漏图形（更高的区域） */
                         <div className="fc-save-stage">
