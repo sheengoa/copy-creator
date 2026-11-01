@@ -1376,6 +1376,7 @@
   .fc-save-choose,
   .fc-save-stage {
     transition-duration: 0s;
+    transition-delay: 0s;
   }
   /* 流光舞台：常驻律动动画停掉，状态切换（浮现/融合/扩散/退场）直接到
      位——进度语义仍在，只是不再动。 */
@@ -2111,11 +2112,10 @@
   height: 16px;
 }
 
-/* 选择组 ⇄ 产物区：同槽叠放原位换场——目标就位后选择组下滑淡出、
-   产物区自下方升入，卡片高度全程不变（旧「收合容器 + 负边距后插」
-   会让卡片先膨胀再收缩、两框交叉、绿点被拖出表单裁剪边）；点绿点
-   清目标反向换回。visibility 延迟到退场末尾再切，不残留可交互透
-   明层。 */
+/* 选择组 ⇄ 产物区：同槽叠放、先后交接的原位换场——旧场先加速下沉
+   淡出（先快后慢），让干净之后新场再自下方升入落位；两段不重叠，
+   任何瞬间只有一框可见，卡片高度全程不变。点绿点清目标反向换回。
+   visibility 延迟到退场末尾再切，不残留可交互透明层。 */
 .fc-save-swap {
   display: grid;
 }
@@ -2127,7 +2127,8 @@
 
 /* 连线后的目标选择：虚线组包两张图标卡（资源库=文件夹、指定路径=
    下载，名称走悬停提示），右上角问号点明「二选一」。入场与加载节
-   点入口区滑回同语——easeOutQuint 淡入上浮。 */
+   点入口区滑回同语——easeOutQuint 淡入上浮。回归（升入）延迟
+   0.22s，等旧场沉完再接棒。 */
 .fc-save-choose {
   position: relative;
   border: 1.5px dashed var(--separator);
@@ -2138,8 +2139,8 @@
   background: color-mix(in srgb, var(--bg-card) 40%, transparent);
   animation: fc-save-choose-in 0.45s cubic-bezier(0.22, 1, 0.36, 1) backwards;
   transition:
-    opacity 0.3s ease-out,
-    transform 0.5s cubic-bezier(0.22, 1, 0.36, 1),
+    opacity 0.3s ease-out 0.22s,
+    transform 0.45s cubic-bezier(0.22, 1, 0.36, 1) 0.22s,
     visibility 0s;
 }
 
@@ -2149,9 +2150,9 @@
   visibility: hidden;
   pointer-events: none;
   transition:
-    opacity 0.42s cubic-bezier(0.7, 0, 0.84, 0),
-    transform 0.5s cubic-bezier(0.65, 0, 0.35, 1),
-    visibility 0s linear 0.5s;
+    opacity 0.22s ease-out,
+    transform 0.34s cubic-bezier(0.22, 1, 0.36, 1),
+    visibility 0s linear 0.34s;
 }
 
 @keyframes fc-save-choose-in {
@@ -2318,8 +2319,8 @@
   justify-content: center;
   color: var(--text-tertiary);
   transition:
-    opacity 0.3s ease-out,
-    transform 0.5s cubic-bezier(0.22, 1, 0.36, 1),
+    opacity 0.3s ease-out 0.22s,
+    transform 0.45s cubic-bezier(0.22, 1, 0.36, 1) 0.22s,
     visibility 0s;
 }
 
@@ -2333,9 +2334,9 @@
   visibility: hidden;
   pointer-events: none;
   transition:
-    opacity 0.42s cubic-bezier(0.7, 0, 0.84, 0),
-    transform 0.5s cubic-bezier(0.65, 0, 0.35, 1),
-    visibility 0s linear 0.5s;
+    opacity 0.22s ease-out,
+    transform 0.34s cubic-bezier(0.22, 1, 0.36, 1),
+    visibility 0s linear 0.34s;
 }
 
 @keyframes fc-save-stage-in {
