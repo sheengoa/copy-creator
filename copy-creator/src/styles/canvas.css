@@ -1729,7 +1729,7 @@
   border: none;
   padding: 0;
   background: color-mix(in srgb, #34c759 16%, var(--bg-card));
-  color: #34c759;
+  color: #2e9e52;
   cursor: pointer;
   display: inline-flex;
   align-items: center;
@@ -1746,8 +1746,8 @@
 }
 
 .fc-save-dot > svg {
-  width: 10px;
-  height: 10px;
+  width: 8px;
+  height: 8px;
 }
 
 .fc-save-dot.is-saving {
