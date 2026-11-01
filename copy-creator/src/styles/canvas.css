@@ -592,10 +592,11 @@
     inset 0 0.5px 0 rgba(255, 255, 255, 0.3);
 }
 
+/* 禁用（生成前提未满足）只靠整体减淡表达：透明度会把辉光一起压暗，
+   按钮形态保持完整——抹掉投影会让整块看起来像被什么东西盖住了。 */
 .fc-root .fc-node-btn.accent:disabled {
   opacity: 0.45;
   cursor: not-allowed;
-  box-shadow: none;
 }
 
 .fc-root .fc-node-btn.ghost {
@@ -1130,7 +1131,10 @@
   transition-delay: 0s, 0s, 0s;
 }
 
-.fc-root .fc-gen-layer .fc-node-btn.accent {
+/* 生成主按钮撑满整行：层的 flex 子项是 NodeHint 锚点壳，伸展要落在
+   锚点上——写在按钮自身不生效（宽度会塌缩成内容宽，与上方参数行
+   失去左右对齐）。完成/进行中两态无 accent 按钮，不受影响。 */
+.fc-root .fc-gen-layer > .fc-hint-anchor:has(> .fc-node-btn.accent) {
   flex: 1;
 }
 
