@@ -3,6 +3,8 @@ import { useTranslation } from "react-i18next";
 
 export interface ConfirmDialogState {
   message: string;
+  /** 次级说明（特别小的小字）：长串细节降级到这里，message 只留重点句。 */
+  hint?: string;
   onConfirm: () => void | Promise<void>;
 }
 
@@ -16,7 +18,7 @@ interface ConfirmDialogProps extends ConfirmDialogState {
 // 页面级确认对话框的统一实现：剪贴板、快捷输入、资源区原先各有一份
 // 相同结构的内联 dialog-overlay + 取消/确认按钮。确认后先关闭再执行，
 // 避免执行耗时长时确认框滞留。
-export function ConfirmDialog({ message, onConfirm, onCancel, onDismiss }: ConfirmDialogProps) {
+export function ConfirmDialog({ message, hint, onConfirm, onCancel, onDismiss }: ConfirmDialogProps) {
   const { t } = useTranslation();
   const dismiss = onDismiss ?? onCancel;
   const cancelButtonRef = useRef<HTMLButtonElement | null>(null);
@@ -34,7 +36,8 @@ export function ConfirmDialog({ message, onConfirm, onCancel, onDismiss }: Confi
     <div className="dialog-overlay" onClick={dismiss}>
       <div className="dialog-content" onClick={(event) => event.stopPropagation()}>
         <h3 className="dialog-title">{t("common.confirm")}</h3>
-        <p className="dialog-message">{message}</p>
+        <p className={`dialog-message${hint ? " has-hint" : ""}`}>{message}</p>
+        {hint && <p className="dialog-hint">{hint}</p>}
         <div className="dialog-actions">
           <button
             type="button"

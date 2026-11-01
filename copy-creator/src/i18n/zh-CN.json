@@ -787,7 +787,8 @@
     "renameTitle": "重命名画布",
     "namePlaceholder": "画布名",
     "delete": "删除画布",
-    "deleteConfirm": "删除画布「{{name}}」？节点与连线将一并删除，已存入资源库的图片不受影响。",
+    "deleteConfirm": "删除画布「{{name}}」？",
+    "deleteConfirmHint": "节点与连线将一并删除。已存入资源库的图片不受影响。",
     "canvasMeta": "{{node}} 节点 · {{conn}} 连线",
     "refEmpty": "未设置资源路径",
     "node": {

@@ -256,6 +256,7 @@ export default function CanvasPage() {
       {deleting && (
         <ConfirmDialog
           message={t("canvas.deleteConfirm", { name: deleting.name })}
+          hint={t("canvas.deleteConfirmHint")}
           onConfirm={async () => {
             await deleteCanvas(deleting.id);
           }}

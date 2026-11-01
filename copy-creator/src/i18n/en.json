@@ -791,7 +791,8 @@
     "renameTitle": "Rename Canvas",
     "namePlaceholder": "Canvas name",
     "delete": "Delete Canvas",
-    "deleteConfirm": "Delete canvas \"{{name}}\"? Its nodes and connections will be removed; images already saved to the resource library are not affected.",
+    "deleteConfirm": "Delete canvas \"{{name}}\"?",
+    "deleteConfirmHint": "Its nodes and connections will be removed. Images already saved to the resource library are not affected.",
     "canvasMeta": "{{node}} nodes · {{conn}} connections",
     "refEmpty": "No resource path set",
     "node": {
