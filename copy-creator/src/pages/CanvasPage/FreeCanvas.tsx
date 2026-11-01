@@ -3397,6 +3397,11 @@ export default function FreeCanvas({ canvasId }: { canvasId: string }) {
                           </button>
                         </NodeHint>
                       </div>
+                      {/* 与加载态同款可见提示行：两个状态的控制区等高，执行
+                          前后节点外框尺寸一点不变（用户 2026-11-01 定案）。 */}
+                      <div className="fc-frame-hint">
+                        {isLastFrame ? t("canvas.frameHintLast") : t("canvas.frameHintFirst")}
+                      </div>
                     </>
                   )}
                   {frameError && !frameBusyNow && <div className="fc-gen-warn">{frameError}</div>}
