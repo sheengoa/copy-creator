@@ -1920,8 +1920,8 @@
   display: flex;
   flex-direction: column;
   gap: 6px;
-  margin-top: 12px;
-  padding-top: 12px;
+  margin-top: 14px;
+  padding-top: 14px;
   border-top: 1px solid var(--separator);
 }
 
@@ -1936,29 +1936,63 @@
   gap: 6px;
   width: 100%;
   min-width: 0;
-  padding: 4px 9px;
+  padding: 5px 10px;
   border: 1px solid var(--separator);
   border-radius: 999px;
-  font-size: var(--text-xs);
+  font-size: var(--text-sm);
 }
 
+/* 嵌套分组路径按层级拆段展示（结构见 ResourceDetailPage）：空间不足时
+   前面的层级以 10 倍收缩权重先被压缩成省略号，最深一层（分组身份）
+   最后才截断；完整路径悬停可见（title）。 */
 .resource-group-pill-name {
+  display: flex;
+  align-items: baseline;
   min-width: 0;
   overflow: hidden;
-  text-overflow: ellipsis;
   white-space: nowrap;
 }
 
+.resource-group-crumb {
+  min-width: 16px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  flex: 10 1 auto;
+}
+
+/* 最深一层是分组身份：收缩权重降到 0.1，前面的层级压到下限才轮到它。 */
+.resource-group-crumb:last-child {
+  flex: 1 0.1 auto;
+}
+
+/* 嵌套超过 4 层时中段收起的「…」占位（结构见 ResourceDetailPage）。 */
+.resource-group-crumb-more {
+  flex-shrink: 0;
+}
+
+.resource-group-crumb-sep {
+  flex-shrink: 0;
+  margin: 0 2px;
+  color: var(--text-tertiary);
+}
+
+/* 「移动」链接对齐色彩边界：静态中性灰、悬停加深并出现下划线，
+   不再使用硬编码蓝色（蓝 = 交互反馈色）。 */
 .resource-group-pill button {
   flex-shrink: 0;
   white-space: nowrap;
   border: none;
   background: none;
   padding: 0;
-  color: #0a66d0;
-  font-size: var(--text-xs);
-  text-decoration: underline;
+  color: var(--text-secondary);
+  font-size: inherit;
   cursor: pointer;
+}
+
+.resource-group-pill button:hover {
+  color: var(--text-primary);
+  text-decoration: underline;
 }
 
 .resource-detail-subtitle {
@@ -2552,15 +2586,16 @@
 
 .resource-detail-aside dl {
   display: grid;
-  gap: 8px;
+  gap: 10px;
 }
 
+/* 键值行不再逐行画分隔线：标签保持 10.5px 次要灰、值升到 12px，
+   信息层级靠字号与间距表达，去掉琐碎的横线。 */
 .resource-detail-aside dl > div {
   display: grid;
   grid-template-columns: 50px minmax(0, 1fr);
   gap: 6px;
-  padding-bottom: 7px;
-  border-bottom: 1px solid var(--separator);
+  align-items: baseline;
   font-size: var(--text-xs);
 }
 
@@ -2572,18 +2607,13 @@
   min-width: 0;
   overflow-wrap: anywhere;
   color: var(--text-primary);
-}
-
-.resource-detail-aside > p {
-  margin-top: 11px;
-  color: var(--text-secondary);
-  font-size: var(--text-xs);
-  line-height: 1.5;
+  font-size: var(--text-sm);
+  line-height: 1.45;
 }
 
 .resource-note-block {
-  margin-top: 12px;
-  padding-top: 10px;
+  margin-top: 14px;
+  padding-top: 14px;
   border-top: 1px solid var(--separator);
 }
 
@@ -2594,22 +2624,32 @@
   font-size: var(--text-xs);
 }
 
+/* 对齐输入框基准（settings-textarea 同款形态）：12px 字号、
+   --card-border + --input-bg；高度由前端按内容自动伸缩，禁用手动拉伸。 */
 .resource-note-input {
   width: 100%;
-  min-height: 64px;
-  padding: 7px 9px;
-  border: 1px solid var(--separator);
+  min-height: 104px;
+  padding: 8px 10px;
+  border: 1px solid var(--card-border);
   border-radius: 8px;
-  background: var(--bg-secondary, rgba(0, 0, 0, 0.03));
+  background: var(--input-bg);
   color: var(--text-primary);
-  font-size: var(--text-xs);
+  font-family: var(--font);
+  font-size: var(--text-sm);
   line-height: 1.5;
-  resize: vertical;
+  resize: none;
+  overflow: hidden;
+  outline: none;
+  transition: border-color 0.2s, background 0.2s;
 }
 
 .resource-note-input:focus {
-  outline: none;
-  border-color: var(--accent-border-strong);
+  border-color: rgba(0, 0, 0, 0.25);
+  background: var(--input-focus-bg);
+}
+
+[data-theme="dark"] .resource-note-input:focus {
+  border-color: rgba(255, 255, 255, 0.4);
 }
 
 .resource-note-actions {
@@ -2617,23 +2657,18 @@
   align-items: center;
   justify-content: flex-end;
   gap: 8px;
-  min-height: 26px;
+  min-height: 28px;
   margin-top: 6px;
 }
 
+/* 「已保存」用语义绿，与设置页保存成功态同语言。 */
 .resource-note-saved {
-  color: var(--text-secondary);
+  color: var(--success);
   font-size: var(--text-xs);
 }
 
 .resource-note-error {
-  color: #e0483e;
-  font-size: var(--text-xs);
-}
-
-.resource-note-save {
-  min-height: 26px;
-  padding: 3px 12px;
+  color: var(--danger);
   font-size: var(--text-xs);
 }
 

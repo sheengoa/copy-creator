@@ -1,5 +1,34 @@
 import type { ClipboardRecord } from "../../types";
 
+/** 侧栏分组 pill 的面包屑段：`more` 为 true 的段是收起中段的「…」占位。 */
+export interface ResourceGroupCrumb {
+  text: string;
+  more?: boolean;
+}
+
+/**
+ * 嵌套分组路径的展示段拆分。侧栏 pill 很窄，深层路径放不下全部层级：
+ * ≤4 层全部展示（超宽时由 CSS 逐段压缩）；5-6 层收起中段为首段 + … + 末两段；
+ * 更深只保留首段 + … + 末段（最深一层是分组身份，必须完整）。
+ * 完整路径始终通过 pill 的 title 悬停查看。
+ */
+export function buildResourceGroupCrumbs(path: string): ResourceGroupCrumb[] {
+  const segments = path.split("/").filter(Boolean);
+  if (segments.length <= 4) return segments.map((text) => ({ text }));
+  if (segments.length <= 6) {
+    return [
+      { text: segments[0] },
+      { text: "…", more: true },
+      ...segments.slice(-2).map((text) => ({ text })),
+    ];
+  }
+  return [
+    { text: segments[0] },
+    { text: "…", more: true },
+    { text: segments[segments.length - 1] },
+  ];
+}
+
 
 
 

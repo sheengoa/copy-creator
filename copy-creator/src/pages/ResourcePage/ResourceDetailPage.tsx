@@ -5,7 +5,7 @@ import {
   revealResourceFile,
   type ResourceTextPreview,
 } from "../../domain/mediaAssets";
-import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { Fragment, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { invoke } from "@tauri-apps/api/core";
 import { useTranslation } from "react-i18next";
@@ -30,7 +30,7 @@ import {
   type AnnotationKind,
   type ResourceAnnotation,
 } from "../../domain/annotations";
-import { formatResourceBitrate, formatResourceDuration, formatResourceFileSize } from "./resourceUtils";
+import { buildResourceGroupCrumbs, formatResourceBitrate, formatResourceDuration, formatResourceFileSize } from "./resourceUtils";
 import {
   clearResourceTextVersions,
   fetchResourceTextVersions,
@@ -171,6 +171,7 @@ export default function ResourceDetailPage({
   const [noteSaved, setNoteSaved] = useState(false);
   const [noteError, setNoteError] = useState(false);
   const noteSavedTimerRef = useRef<number | null>(null);
+  const noteInputRef = useRef<HTMLTextAreaElement | null>(null);
   const [renameDraft, setRenameDraft] = useState<string | null>(null);
   const [renameSaving, setRenameSaving] = useState(false);
   const [renameError, setRenameError] = useState<string | null>(null);
@@ -245,6 +246,20 @@ export default function ResourceDetailPage({
     window.addEventListener("resize", syncHeight);
     return () => window.removeEventListener("resize", syncHeight);
   }, [contentDraft, contentEditing]);
+
+  // 备注输入框与正文编辑器同款：高度随内容自动伸缩（含分数缩放下
+  // scrollHeight 取整的 2px 余量），右下角不再提供手动拉伸把手。
+  useEffect(() => {
+    const el = noteInputRef.current;
+    if (!el) return;
+    const syncHeight = () => {
+      el.style.height = "auto";
+      el.style.height = `${el.scrollHeight + 2}px`;
+    };
+    syncHeight();
+    window.addEventListener("resize", syncHeight);
+    return () => window.removeEventListener("resize", syncHeight);
+  }, [noteDraft, record.id]);
 
   // 详情页自身不滚动，滚动发生在窗口内容容器（祖先节点）上；
   // 用统一 hook 解析该滚动容器，下滑后显示「回到顶部」按钮。
@@ -425,6 +440,13 @@ export default function ResourceDetailPage({
     }
     return rows;
   }, [kind, mediaMeta, record.resource_file_size, t]);
+
+  // 侧栏分组 pill 的面包屑段（拆分规则见 buildResourceGroupCrumbs）；
+  // 完整路径始终通过 pill 的 title 悬停查看。
+  const groupCrumbItems = useMemo(
+    () => (record.resource_folder ? buildResourceGroupCrumbs(record.resource_folder) : null),
+    [record.resource_folder],
+  );
 
   useEffect(() => {
     let cancelled = false;
@@ -1703,10 +1725,29 @@ export default function ResourceDetailPage({
             <div className="resource-group-line">
               <span className="resource-group-line-label">{t("resources.currentGroup")}</span>
               <span className="resource-group-pill">
-                <span className="resource-group-pill-name">
-                  {record.resource_folder
+                {/* 嵌套路径按层级拆成可收缩的面包屑小段：空间不足时前面
+                    的层级先压缩成省略号，最深一层（分组身份）最后才截断；
+                    嵌套超过 4 层时中段收起为一个「…」，完整路径悬停可见。 */}
+                <span
+                  className="resource-group-pill-name"
+                  title={record.resource_folder
                     ? formatResourceFolderPath(record.resource_folder)
-                    : t("resources.ungrouped")}
+                    : undefined}
+                >
+                  {groupCrumbItems
+                    ? groupCrumbItems.map((crumb, index) => (
+                        <Fragment key={`${index}-${crumb.text}`}>
+                          {index > 0 && (
+                            <span className="resource-group-crumb-sep" aria-hidden="true">/</span>
+                          )}
+                          <span className={crumb.more ? "resource-group-crumb-more" : "resource-group-crumb"}>
+                            {crumb.text}
+                          </span>
+                        </Fragment>
+                      ))
+                    : (
+                      <span className="resource-group-crumb">{t("resources.ungrouped")}</span>
+                    )}
                 </span>
                 <button type="button" onClick={() => onMoveRecord(record)}>
                   {t("resources.move")}
@@ -1720,8 +1761,8 @@ export default function ResourceDetailPage({
             </label>
             <textarea
               id="resource-note-input"
+              ref={noteInputRef}
               className="resource-note-input"
-              rows={3}
               maxLength={1000}
               value={noteDraft}
               placeholder={t("resources.notePlaceholder")}
@@ -1736,7 +1777,7 @@ export default function ResourceDetailPage({
               {noteDirty && (
                 <button
                   type="button"
-                  className="resource-secondary-button resource-note-save"
+                  className="ui-btn"
                   onClick={() => void handleSaveNote()}
                   disabled={noteSaving}
                 >
@@ -1745,7 +1786,6 @@ export default function ResourceDetailPage({
               )}
             </div>
           </div>
-          <p>{t("resources.detailHint")}</p>
         </aside>
       </main>
       {historyToast && (

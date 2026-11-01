@@ -9,7 +9,7 @@ vi.mock("@tauri-apps/api/core", () => ({
   invoke: invokeMock,
 }));
 
-import { computeResourceColumnCount, formatResourceBitrate, formatResourceDuration, formatResourceFileSize, resourceCardScale, splitResourceColumns } from "./resourceUtils";
+import { buildResourceGroupCrumbs, computeResourceColumnCount, formatResourceBitrate, formatResourceDuration, formatResourceFileSize, resourceCardScale, splitResourceColumns } from "./resourceUtils";
 import { resolveResourceMediaUrl } from "../../domain/mediaUrl";
 import { findResourceFolder, flattenResourceFolders } from "../../domain/groups";
 import { getResourceFileName, hasCustomResourceFileName, isResourceTitleRenameable, splitResourceFileName } from "../../domain/fileName";
@@ -315,5 +315,38 @@ describe("resourceUtils", () => {
     expect(isResourceFolderPath("人物三视图扩展", "人物三视图")).toBe(false);
     expect(getResourceFolderRoot("人物三视图/放大后/细节")).toBe("人物三视图");
     expect(getResourceFolderRoot("")).toBe("");
+  });
+});
+
+describe("buildResourceGroupCrumbs", () => {
+  it("shows all segments for shallow paths", () => {
+    expect(buildResourceGroupCrumbs("人像写真/棚拍/定稿")).toEqual([
+      { text: "人像写真" },
+      { text: "棚拍" },
+      { text: "定稿" },
+    ]);
+  });
+
+  it("collapses middle segments for deep paths but keeps the leaf", () => {
+    // 5-6 层：首段 + … + 末两段
+    expect(buildResourceGroupCrumbs("2026 短剧项目/第一季/人像写真/棚拍精修/定稿版")).toEqual([
+      { text: "2026 短剧项目" },
+      { text: "…", more: true },
+      { text: "棚拍精修" },
+      { text: "定稿版" },
+    ]);
+    // 更深：首段 + … + 末段（最深一层是分组身份，必须保留）
+    expect(buildResourceGroupCrumbs("a/b/c/d/e/f/g")).toEqual([
+      { text: "a" },
+      { text: "…", more: true },
+      { text: "g" },
+    ]);
+  });
+
+  it("drops empty segments from doubled separators", () => {
+    expect(buildResourceGroupCrumbs("人像写真//棚拍")).toEqual([
+      { text: "人像写真" },
+      { text: "棚拍" },
+    ]);
   });
 });
