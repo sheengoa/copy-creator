@@ -873,8 +873,9 @@ export default function FreeCanvas({ canvasId }: { canvasId: string }) {
       for (const m of members) {
         const node = byId.get(m.key);
         if (!node) continue;
-        const size = nodeSize(node);
-        entries.push({ id: m.key, pos_x: m.x, pos_y: m.y, width: size.w, height: size.h });
+        // 仅移动位置：宽高原样透传。height null = 自动高度，绝不能借
+        // nodeSize 的兜底值落成固定高——否则一拖动节点就被"定死"变形。
+        entries.push({ id: m.key, pos_x: m.x, pos_y: m.y, width: node.width, height: node.height });
       }
       store.getState().commitLayout(canvasId, entries);
     },
@@ -1596,11 +1597,11 @@ export default function FreeCanvas({ canvasId }: { canvasId: string }) {
         if (drag.moved) {
           const node = nodesRef.current.find((n) => n.id === drag.frameKey);
           if (node) {
-            const size = nodeSize(node);
+            // 撤销条目同样只动位置：宽高透传节点原值，保住 null 自动高。
             pushUndo({
               kind: "layout",
-              prev: [{ id: drag.frameKey, pos_x: drag.ox, pos_y: drag.oy, width: size.w, height: size.h }],
-              next: [{ id: drag.frameKey, pos_x: node.pos_x, pos_y: node.pos_y, width: size.w, height: size.h }],
+              prev: [{ id: drag.frameKey, pos_x: drag.ox, pos_y: drag.oy, width: node.width, height: node.height }],
+              next: [{ id: drag.frameKey, pos_x: node.pos_x, pos_y: node.pos_y, width: node.width, height: node.height }],
             });
           }
         }
@@ -1615,9 +1616,8 @@ export default function FreeCanvas({ canvasId }: { canvasId: string }) {
           for (const m of drag.members) {
             const node = byId.get(m.key);
             if (!node) continue;
-            const size = nodeSize(node);
-            prev.push({ id: m.key, pos_x: m.x, pos_y: m.y, width: size.w, height: size.h });
-            next.push({ id: m.key, pos_x: m.x + dxW, pos_y: m.y + dyW, width: size.w, height: size.h });
+            prev.push({ id: m.key, pos_x: m.x, pos_y: m.y, width: node.width, height: node.height });
+            next.push({ id: m.key, pos_x: m.x + dxW, pos_y: m.y + dyW, width: node.width, height: node.height });
           }
           pushUndo({ kind: "layout", prev, next });
         }
