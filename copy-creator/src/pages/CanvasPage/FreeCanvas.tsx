@@ -2919,6 +2919,31 @@ export default function FreeCanvas({ canvasId }: { canvasId: string }) {
                       </div>
                     </>
                   )}
+                  {/* 产物缩略图在动作行之上（对齐原型）：完成态图是主角，
+                      「重新生成」收在最底下，不卡在参数与产物中间。 */}
+                  {meta.images.length > 0 && (
+                    <div className={`fc-gen-thumbs${wait?.phase === "land" ? " is-land" : ""}`}>
+                      {meta.images.map((thumb, i) => (
+                        <NodeHint
+                          key={i}
+                          text={thumb.primary ? t("canvas.genPrimary") : t("canvas.genSetPrimary")}
+                        >
+                          <button
+                            className={`fc-gen-thumb${thumb.primary ? " primary" : ""}`}
+                            onClick={() => {
+                              const images = meta.images.map((img, j) => ({ ...img, primary: j === i }));
+                              void store.getState().updateNode(node.id, {
+                                metadata: JSON.stringify({ ...meta, images } as CanvasNode["metadata"]),
+                              });
+                            }}
+                          >
+                            <ResourceThumb path={thumb.resource_path} className="fc-thumb" />
+                            {thumb.primary && <span className="fc-gen-primary-badge">{t("canvas.genPrimary")}</span>}
+                          </button>
+                        </NodeHint>
+                      ))}
+                    </div>
+                  )}
                   <div className="fc-gen-foot">
                     <div className={`fc-gen-layer${busyOn ? "" : " is-on"}`}>
                       <NodeHint text={missing.length > 0 ? t("canvas.genNotReady", { items: missing.join("、") }) : ""}>
@@ -2948,29 +2973,6 @@ export default function FreeCanvas({ canvasId }: { canvasId: string }) {
                   {nodeErrors[node.id] && <div className="fc-gen-warn">{nodeErrors[node.id]}</div>}
                   {meta.status === "error" && meta.error && (
                     <div className={`fc-gen-warn${meta.error.startsWith("已取消") ? " is-muted" : ""}`}>{meta.error}</div>
-                  )}
-                  {meta.images.length > 0 && (
-                    <div className={`fc-gen-thumbs${wait?.phase === "land" ? " is-land" : ""}`}>
-                      {meta.images.map((thumb, i) => (
-                        <NodeHint
-                          key={i}
-                          text={thumb.primary ? t("canvas.genPrimary") : t("canvas.genSetPrimary")}
-                        >
-                          <button
-                            className={`fc-gen-thumb${thumb.primary ? " primary" : ""}`}
-                            onClick={() => {
-                              const images = meta.images.map((img, j) => ({ ...img, primary: j === i }));
-                              void store.getState().updateNode(node.id, {
-                                metadata: JSON.stringify({ ...meta, images } as CanvasNode["metadata"]),
-                              });
-                            }}
-                          >
-                            <ResourceThumb path={thumb.resource_path} className="fc-thumb" />
-                            {thumb.primary && <span className="fc-gen-primary-badge">{t("canvas.genPrimary")}</span>}
-                          </button>
-                        </NodeHint>
-                      ))}
-                    </div>
                   )}
                 </div>
               );
