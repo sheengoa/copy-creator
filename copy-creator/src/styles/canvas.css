@@ -128,25 +128,31 @@
   flex-shrink: 0;
 }
 
-.canvas-new-btn {
+/* 新建画布「＋」：画布栏末尾的轻量图标钮（原右上蓝色实心按钮已撤，
+   空态走画布中央 CTA）。 */
+.canvas-add-btn {
   display: inline-flex;
   align-items: center;
-  gap: 6px;
-  padding: 5px 12px;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  padding: 0;
   border-radius: 999px;
-  border: none;
-  background: var(--accent);
-  color: #fff;
-  font-size: 12px;
+  border: 1px solid transparent;
+  background: transparent;
+  color: var(--text-secondary);
   cursor: pointer;
   flex-shrink: 0;
+  transition: background 0.15s ease, color 0.15s ease, border-color 0.15s ease;
 }
 
-.canvas-new-btn:hover {
-  filter: brightness(1.08);
+.canvas-add-btn:hover {
+  background: var(--accent-bg);
+  border-color: var(--accent-border-soft);
+  color: var(--accent);
 }
 
-.canvas-new-btn svg {
+.canvas-add-btn svg {
   width: 14px;
   height: 14px;
 }
@@ -192,6 +198,8 @@
   position: relative;
   flex: 1;
   overflow: hidden;
+  /* 画布主区四角圆角：融入窗口圆角语言，点阵背景与内容随角裁剪。 */
+  border-radius: 14px;
   background:
     radial-gradient(circle at 1px 1px, var(--separator) 1px, transparent 0) 0 0 / 22px 22px,
     var(--bg-primary);
@@ -206,6 +214,34 @@
   justify-content: center;
   gap: 8px;
   color: var(--text-secondary);
+}
+
+/* 空态居中新建 CTA：柔和 accent 胶囊（替代原右上蓝色实心按钮）。 */
+.canvas-empty-cta {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  margin-top: 10px;
+  padding: 8px 18px;
+  border-radius: 999px;
+  border: 1px solid color-mix(in srgb, var(--accent) 28%, transparent);
+  background: color-mix(in srgb, var(--accent) 9%, transparent);
+  color: var(--accent);
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background 0.16s ease, box-shadow 0.16s ease, transform 0.16s ease;
+}
+
+.canvas-empty-cta:hover {
+  background: color-mix(in srgb, var(--accent) 15%, transparent);
+  box-shadow: 0 6px 18px color-mix(in srgb, var(--accent) 22%, transparent);
+  transform: translateY(-1px);
+}
+
+.canvas-empty-cta svg {
+  width: 14px;
+  height: 14px;
 }
 
 .canvas-empty-icon {

@@ -126,6 +126,18 @@ export default function CanvasPage() {
             </div>
           ))}
         </div>
+        {/* 新建画布入口：有画布时是画布栏末尾的「＋」；空态的居中新建
+            按钮见下方 canvas-empty。 */}
+        {canvases.length > 0 && (
+          <button
+            className="canvas-add-btn"
+            onClick={() => void createCanvas()}
+            aria-label={t("canvas.newCanvas")}
+            title={t("canvas.newCanvas")}
+          >
+            {Icons.add}
+          </button>
+        )}
         {chipsOverflow && (
           <div className="canvas-more" ref={moreRef}>
             <button
@@ -155,10 +167,6 @@ export default function CanvasPage() {
               )}
           </div>
         )}
-        <button className="canvas-new-btn" onClick={() => void createCanvas()}>
-          {Icons.add}
-          {t("canvas.newCanvas")}
-        </button>
       </div>
 
       <div className="canvas-main">
@@ -169,6 +177,13 @@ export default function CanvasPage() {
             <span className="canvas-empty-icon">{Icons.canvas}</span>
             <span className="canvas-empty-title">{t("canvas.empty")}</span>
             <span className="canvas-empty-hint">{t("canvas.emptyHint")}</span>
+            {/* 居中新建只在一张画布都没有时出现；有画布后新建走画布栏「＋」。 */}
+            {canvases.length === 0 && (
+              <button className="canvas-empty-cta" onClick={() => void createCanvas()}>
+                {Icons.add}
+                {t("canvas.newCanvas")}
+              </button>
+            )}
           </div>
         )}
       </div>
