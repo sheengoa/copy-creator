@@ -17,6 +17,11 @@ const loadRoot = async () => {
 // 浏览器直开 dev 页面（无 Tauri 环境）时注入内存后端，供前端验证与模拟；
 // Tauri 应用存在 __TAURI_INTERNALS__，本分支不会执行。
 const boot = async () => {
+  if (import.meta.env.DEV) {
+    // 渲染冻结探针（仅 DEV）：右下角小徽章，区分帧生产停摆与呈现丢帧。
+    const { installFreezeProbe } = await import("./dev/freezeProbe");
+    installFreezeProbe();
+  }
   if (!("__TAURI_INTERNALS__" in window)) {
     const { installBrowserMock } = await import("./dev/tauriMock");
     installBrowserMock();
