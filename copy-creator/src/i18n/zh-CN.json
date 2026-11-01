@@ -184,7 +184,12 @@
       "modelPlaceholder": "如 gpt-image-1",
       "concurrency": "单次并发上限",
       "concurrencyHint": "同一节点同时进行的生图请求数",
-      "timeout": "请求超时"
+      "timeout": "请求超时",
+      "test": "测速",
+      "testAll": "全部测速",
+      "testAllProgress": "测速中 {{done}}/{{total}}",
+      "testing": "测速中",
+      "testFailed": "失败"
     }
   },
   "clipboard": {

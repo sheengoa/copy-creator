@@ -190,6 +190,8 @@ interface SettingsState {
   deleteAiChannel: (id: string) => Promise<void>;
   reorderAiChannels: (ids: string[]) => Promise<void>;
   setAiChannelEnabled: (id: string, enabled: boolean) => Promise<void>;
+  /** 单渠道测速：真实发一次最小生图请求，结果（延迟/错误）写回列表。 */
+  testAiChannel: (id: string) => Promise<{ ok: boolean; latencyMs?: number; error?: string }>;
   /** 调度策略与故障处理：settings 批量落库 + 本地同步。 */
   saveAiScheduling: (patch: {
     aiStrategy?: AiStrategy;
@@ -582,6 +584,27 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
       console.error("Failed to toggle AI channel:", e);
       void get().loadAiChannels();
     }
+  },
+
+  testAiChannel: async (id) => {
+    const result = await invoke<{ ok: boolean; latencyMs?: number; error?: string }>(
+      "ai_test_channel",
+      { channelId: id },
+    );
+    set({
+      aiChannels: get().aiChannels.map((c) =>
+        c.id === id
+          ? {
+              ...c,
+              lastLatencyMs: result.ok ? (result.latencyMs ?? null) : c.lastLatencyMs,
+              lastTestedAt: result.ok ? new Date().toISOString() : c.lastTestedAt,
+              status: result.ok ? ("normal" as const) : c.status,
+              lastError: result.ok ? "" : (result.error ?? ""),
+            }
+          : c,
+      ),
+    });
+    return result;
   },
 
   saveAiScheduling: async (patch) => {

@@ -184,7 +184,12 @@
       "modelPlaceholder": "e.g. gpt-image-1",
       "concurrency": "Concurrent requests",
       "concurrencyHint": "Parallel image requests per node",
-      "timeout": "Request timeout"
+      "timeout": "Request timeout",
+      "test": "Speed test",
+      "testAll": "Test all",
+      "testAllProgress": "Testing {{done}}/{{total}}",
+      "testing": "Testing",
+      "testFailed": "Failed"
     }
   },
   "clipboard": {

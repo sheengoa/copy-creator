@@ -598,6 +598,7 @@ pub fn run() {
             db::canvas_delete_connection,
             db::canvas_set_groups,
             ai::ai_generate_image,
+            ai::ai_test_channel,
             canvas_media::canvas_pick_media_file,
             canvas_media::canvas_authorize_media,
             canvas_media::canvas_pick_save_path,

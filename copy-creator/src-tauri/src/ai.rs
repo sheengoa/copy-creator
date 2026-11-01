@@ -523,6 +523,166 @@ struct UpstreamInput {
     references: Vec<PathBuf>,
 }
 
+// ── 渠道读取与测速（画布设置页「测速」按钮） ──
+// 测速 = 按渠道协议发一次真实的最小生图请求并计完整耗时（发起 → 响应
+// 收完），与 new-api 的渠道测速同思路：只测真实生图链路，延迟才有调度
+// 意义；成功后丢弃响应体，不落产物。失败只记录错误文案，不自动停用——
+// 停用仅由真实生成的鉴权/欠费错误触发（见 generate 的故障处理）。
+
+struct AiChannelRow {
+    id: String,
+    protocol: String,
+    base_url: String,
+    api_key: String,
+    model: String,
+    enabled: bool,
+    status: String,
+}
+
+fn load_channel(conn: &rusqlite::Connection, channel_id: &str) -> Result<AiChannelRow, String> {
+    conn.query_row(
+        "SELECT id, protocol, base_url, api_key, model, enabled, status \
+         FROM ai_channels WHERE id = ?1",
+        params![channel_id],
+        |row| {
+            Ok(AiChannelRow {
+                id: row.get(0)?,
+                protocol: row.get(1)?,
+                base_url: row.get(2)?,
+                api_key: row.get(3)?,
+                model: row.get(4)?,
+                enabled: row.get::<_, i64>(5)? != 0,
+                status: row.get(6)?,
+            })
+        },
+    )
+    .map_err(|_| format!("渠道不存在：{channel_id}"))
+}
+
+/// 测速/生成共用的渠道模型解析：渠道配置的模型优先，空则回落全局默认。
+fn channel_model_or_global(channel_model: &str, global_model: &str) -> Result<String, String> {
+    let model = if channel_model.trim().is_empty() { global_model.trim().to_string() } else { channel_model.trim().to_string() };
+    if model.is_empty() {
+        return Err("渠道未配置模型且没有全局默认模型：请在渠道或默认值里填写模型".to_string());
+    }
+    Ok(model)
+}
+
+fn record_channel_test_result(
+    conn: &rusqlite::Connection,
+    channel_id: &str,
+    result: &Result<u64, String>,
+) {
+    let now = crate::db::canvas_now();
+    let update = match result {
+        Ok(latency_ms) => conn.execute(
+            "UPDATE ai_channels SET last_latency_ms = ?1, last_tested_at = ?2, \
+             status = 'normal', last_error = '', updated_at = ?2 WHERE id = ?3",
+            params![*latency_ms as i64, now, channel_id],
+        ),
+        Err(message) => conn.execute(
+            "UPDATE ai_channels SET last_error = ?1, updated_at = ?2 WHERE id = ?3",
+            params![message, now, channel_id],
+        ),
+    };
+    if let Err(error) = update {
+        log::error!("写入渠道测速结果失败: {error}");
+    }
+}
+
+/// 单渠道测速：真实发一次最小生图请求并计完整耗时。
+#[tauri::command]
+pub async fn ai_test_channel(app: AppHandle, channel_id: String) -> Result<Value, String> {
+    // 配置读取（短锁），网络阶段不持锁。
+    let (channel, model, timeout_secs) = {
+        let state = app.state::<DbState>();
+        let conn = state.conn.lock().map_err(|e| e.to_string())?;
+        let channel = load_channel(&conn, &channel_id)?;
+        if !channel.enabled {
+            return Err("渠道已停用，启用后再测速".to_string());
+        }
+        let global_model = read_setting(&conn, "ai_model");
+        let model = channel_model_or_global(&channel.model, &global_model)?;
+        let timeout = read_setting(&conn, "ai_timeout").parse::<u64>().unwrap_or(60).clamp(5, 600);
+        (channel, model, timeout)
+    };
+
+    let client = reqwest::Client::builder()
+        .timeout(Duration::from_secs(timeout_secs))
+        .build()
+        .map_err(|e| format!("HTTP 客户端初始化失败：{e}"))?;
+
+    let result: Result<u64, String> = if channel.protocol == "gemini" {
+        let parts = vec![json!({ "text": "a cute cat" })];
+        let body = json!({
+            "contents": [{ "role": "user", "parts": parts }],
+            "generationConfig": { "responseModalities": ["TEXT", "IMAGE"] },
+        });
+        let url = format!(
+            "{}/models/{}:generateContent",
+            gemini_base_url(&channel.base_url),
+            gemini_model_name(&model)
+        );
+        let started = std::time::Instant::now();
+        let fut = client
+            .post(&url)
+            .header("x-goog-api-key", &channel.api_key)
+            .json(&body)
+            .send();
+        let resp = fut.await.map_err(|e| format!("请求失败：{e}"))?;
+        let status = resp.status().as_u16();
+        let payload: Value = resp.bytes().await
+            .map_err(|e| format!("响应读取失败：{e}"))
+            .and_then(|bytes| serde_json::from_slice(&bytes).map_err(|e| format!("响应解析失败：{e}")))?;
+        if !(200..300).contains(&status) {
+            let msg = read_api_error_message(&payload);
+            Err(if msg.is_empty() {
+                status_error(status).unwrap_or_else(|| format!("请求失败（HTTP {status}）"))
+            } else {
+                msg
+            })
+        } else {
+            Ok(started.elapsed().as_millis() as u64)
+        }
+    } else {
+        let body = openai_generations_body(&model, "a cute cat", 1, None, Some("1024x1024"));
+        let url = openai_api_url(&channel.base_url, "/images/generations");
+        let started = std::time::Instant::now();
+        let resp = client
+            .post(&url)
+            .bearer_auth(&channel.api_key)
+            .json(&body)
+            .send()
+            .await
+            .map_err(|e| format!("请求失败：{e}"))?;
+        let status = resp.status().as_u16();
+        let payload: Value = resp.bytes().await
+            .map_err(|e| format!("响应读取失败：{e}"))
+            .and_then(|bytes| serde_json::from_slice(&bytes).map_err(|e| format!("响应解析失败：{e}")))?;
+        if !(200..300).contains(&status) {
+            let msg = read_api_error_message(&payload);
+            Err(if msg.is_empty() {
+                status_error(status).unwrap_or_else(|| format!("请求失败（HTTP {status}）"))
+            } else {
+                msg
+            })
+        } else {
+            Ok(started.elapsed().as_millis() as u64)
+        }
+    };
+
+    {
+        let state = app.state::<DbState>();
+        let conn = state.conn.lock().map_err(|e| e.to_string())?;
+        record_channel_test_result(&conn, &channel.id, &result);
+    }
+
+    match result {
+        Ok(latency_ms) => Ok(json!({ "ok": true, "latencyMs": latency_ms })),
+        Err(message) => Ok(json!({ "ok": false, "error": message })),
+    }
+}
+
 /// 合集成员的展示顺序：metadata.order 优先，未登记的新连线按连线时间
 /// 补尾。合集嵌套在端口语义上不允许，这里也只展开一层（成员若仍是
 /// 合集，展开 helpers 对其返回 None，自然跳过）。

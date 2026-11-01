@@ -29,15 +29,19 @@ import { Icons } from "../Icons";
 function ChannelRow({
   channel,
   open,
+  testing,
   onToggle,
   onEnabledChange,
   onDelete,
+  onTest,
 }: {
   channel: AiChannel;
   open: boolean;
+  testing: boolean;
   onToggle: () => void;
   onEnabledChange: (enabled: boolean) => void;
   onDelete: () => void;
+  onTest: () => void;
 }) {
   const { t } = useTranslation();
   const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({
@@ -57,12 +61,26 @@ function ChannelRow({
   const updateAiChannel = useSettingsStore((s) => s.updateAiChannel);
   const dimmed = !channel.enabled || channel.status === "auto_disabled";
 
-  const latencyText = channel.lastLatencyMs == null
-    ? t("settings.canvas.untested")
-    : `${channel.lastLatencyMs} ms`;
-  const latencyClass = channel.status === "auto_disabled"
-    ? " off"
-    : channel.lastLatencyMs == null ? " none" : " ok";
+  // 行首状态：测速中 → 转圈；自动停用 → 红点；最近一次测速失败 → 红点
+  //（tooltip 见错误）；有延迟 → 绿点；从未测速 → 灰点。
+  const failed = !testing && channel.lastError !== "";
+  const latencyText = testing
+    ? t("settings.canvas.testing")
+    : failed
+      ? t("settings.canvas.testFailed")
+      : channel.lastLatencyMs == null
+        ? t("settings.canvas.untested")
+        : `${channel.lastLatencyMs} ms`;
+  const latencyClass = testing
+    ? " testing"
+    : channel.status === "auto_disabled" || failed
+      ? " off"
+      : channel.lastLatencyMs == null ? " none" : " ok";
+  const dotClass = testing
+    ? " testing"
+    : channel.status === "auto_disabled" || failed
+      ? " bad"
+      : channel.lastLatencyMs == null ? " none" : " ok";
 
   const submit = async () => {
     setError("");
@@ -103,7 +121,7 @@ function ChannelRow({
           {Icons.drag}
         </button>
         <button type="button" className="canvas-ch-summary" onClick={onToggle}>
-          <span className={`canvas-dot${channel.status === "auto_disabled" ? " bad" : channel.lastLatencyMs == null ? " none" : " ok"}`} />
+          <span className={`canvas-dot${dotClass}`} />
           <span className="canvas-ch-txt">
             <span className="canvas-ch-name-row">
               <span className="canvas-ch-name">{channel.name}</span>
@@ -236,6 +254,16 @@ function ChannelRow({
             <div className="canvas-form-error" role="alert">{error}</div>
           )}
           <div className="canvas-form-actions">
+            <button
+              type="button"
+              className="settings-btn-soft"
+              data-testing={testing ? "1" : undefined}
+              onClick={onTest}
+            >
+              <i className="canvas-btn-spin" />
+              {Icons.activity}
+              <span>{testing ? t("settings.canvas.testing") : t("settings.canvas.test")}</span>
+            </button>
             <button type="button" className="settings-btn-danger" onClick={onDelete}>
               {Icons.delete}
               {t("settings.canvas.deleteChannel")}
@@ -467,6 +495,47 @@ export function CanvasSettings() {
   } = settings;
   // 互斥手风琴：同一时间只展开一条渠道（null = 全部收起；"__new__" = 新建表单）。
   const [expanded, setExpanded] = useState<string | null>(null);
+  // 测速进行中的渠道集合与「全部测速」进度（null = 空闲）。
+  const [testingIds, setTestingIds] = useState<Set<string>>(new Set());
+  const [testAllProgress, setTestAllProgress] = useState<{ done: number; total: number } | null>(null);
+
+  const runTest = async (id: string) => {
+    if (testingIds.has(id)) return;
+    setTestingIds((prev) => new Set(prev).add(id));
+    try {
+      await settings.testAiChannel(id);
+    } catch (e) {
+      console.error("Channel speed test failed:", e);
+    } finally {
+      setTestingIds((prev) => {
+        const next = new Set(prev);
+        next.delete(id);
+        return next;
+      });
+    }
+  };
+
+  // 全部测速：并发 2 逐条跑完启用渠道，按钮显示进度。
+  const runTestAll = async () => {
+    if (testAllProgress) return;
+    const targets = channels.filter((c) => c.enabled);
+    if (targets.length === 0) return;
+    const total = targets.length;
+    setTestAllProgress({ done: 0, total });
+    let done = 0;
+    const queue = [...targets];
+    const worker = async () => {
+      while (queue.length > 0) {
+        const channel = queue.shift();
+        if (!channel) break;
+        await runTest(channel.id);
+        done += 1;
+        setTestAllProgress({ done, total });
+      }
+    };
+    await Promise.all([worker(), worker()]);
+    setTestAllProgress(null);
+  };
 
   useEffect(() => {
     void settings.loadAiChannels();
@@ -500,6 +569,21 @@ export function CanvasSettings() {
       <div className="canvas-sec">
         <div className="canvas-sec-title">
           <span>{t("settings.canvas.channelsTitle")}</span>
+          <button
+            type="button"
+            className="settings-btn-soft"
+            data-testing={testAllProgress ? "1" : undefined}
+            disabled={channels.filter((c) => c.enabled).length === 0}
+            onClick={() => void runTestAll()}
+          >
+            <i className="canvas-btn-spin" />
+            {Icons.activity}
+            <span>
+              {testAllProgress
+                ? t("settings.canvas.testAllProgress", { done: testAllProgress.done, total: testAllProgress.total })
+                : t("settings.canvas.testAll")}
+            </span>
+          </button>
         </div>
         <p className="canvas-sec-note">{t("settings.canvas.channelsNote")}</p>
         <div className="settings-card canvas-channel-card">
@@ -515,12 +599,14 @@ export function CanvasSettings() {
                     key={channel.id}
                     channel={channel}
                     open={expanded === channel.id}
+                    testing={testingIds.has(channel.id)}
                     onToggle={() => setExpanded(expanded === channel.id ? null : channel.id)}
                     onEnabledChange={(enabled) => void settings.setAiChannelEnabled(channel.id, enabled)}
                     onDelete={() => {
                       if (expanded === channel.id) setExpanded(null);
                       void settings.deleteAiChannel(channel.id);
                     }}
+                    onTest={() => void runTest(channel.id)}
                   />
                 ))}
               </SortableContext>
