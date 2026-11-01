@@ -1757,8 +1757,8 @@
 }
 
 .fc-save-dot-ring svg {
-  width: 1px;
-  height: 1px;
+  width: 0.5px;
+  height: 0.5px;
 }
 
 .fc-save-dot.is-saving {
