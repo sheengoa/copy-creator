@@ -1756,10 +1756,12 @@
   justify-content: center;
 }
 
-/* 中心目标图标：3px——内圈 10px 中四周留约 3.5px 间隙。 */
+/* 中心目标图标：1px + 减细笔画——描边图形在亚像素下有渲染下限，
+   视觉的「更小」靠减细笔画与减淡共同达成。 */
 .fc-save-dot-ring svg {
-  width: 3px;
-  height: 3px;
+  width: 1px;
+  height: 1px;
+  stroke-width: 0.85;
 }
 
 .fc-save-dot.is-saving {
