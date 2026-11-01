@@ -1654,8 +1654,9 @@
 
 .fc-save-help {
   position: absolute;
-  top: -7px;
-  right: -7px;
+  top: -8px;
+  left: 50%;
+  transform: translateX(-50%);
   width: 16px;
   height: 16px;
   border-radius: 50%;
@@ -1714,38 +1715,39 @@
   color: var(--accent);
 }
 
-/* 目标已设：22px 绿圆内嵌目标图标——绿=就绪（脉冲）/完成叠白底绿勾
-   角标，红叉=失败（点重试）；点圆回目标选择。行内右对齐。 */
-.fc-save-row {
-  display: flex;
-  justify-content: flex-end;
-}
-
+/* 目标已设：16px 弱化绿点（淡绿底 + 目标图标），骑在等待/产物区顶边
+   中央——与选择组问号同一位置语言。绿=就绪（脉冲）/完成，红叉=失败
+   （点重试）；点绿点回目标选择；悬停浮出目标名。 */
 .fc-save-dot {
-  width: 22px;
-  height: 22px;
+  position: absolute;
+  top: -8px;
+  left: 50%;
+  transform: translateX(-50%);
+  width: 16px;
+  height: 16px;
   border-radius: 50%;
   border: none;
   padding: 0;
-  background: #34c759;
-  color: #fff;
+  background: color-mix(in srgb, #34c759 16%, var(--bg-card));
+  color: #34c759;
   cursor: pointer;
   display: inline-flex;
   align-items: center;
   justify-content: center;
   flex-shrink: 0;
-  position: relative;
-  transition: transform 0.12s ease, box-shadow 0.12s ease;
+  z-index: 2;
+  transition: background 0.14s ease, color 0.14s ease, transform 0.12s ease;
 }
 
 .fc-save-dot:hover {
-  transform: scale(1.12);
-  box-shadow: 0 0 0 3px color-mix(in srgb, #34c759 25%, transparent);
+  background: #34c759;
+  color: #fff;
+  transform: translateX(-50%) scale(1.08);
 }
 
 .fc-save-dot > svg {
-  width: 12px;
-  height: 12px;
+  width: 10px;
+  height: 10px;
 }
 
 .fc-save-dot.is-saving {
@@ -1758,36 +1760,19 @@
 }
 
 .fc-save-dot.is-error {
-  background: #ff453a;
+  background: rgba(255, 69, 58, 0.14);
+  color: #ff453a;
 }
 
 .fc-save-dot.is-error:hover {
-  box-shadow: 0 0 0 3px color-mix(in srgb, #ff453a 25%, transparent);
-}
-
-.fc-save-dot-tick {
-  position: absolute;
-  right: -4px;
-  bottom: -4px;
-  width: 12px;
-  height: 12px;
-  border-radius: 50%;
-  background: #fff;
-  color: #34c759;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  box-shadow: 0 0 0 1px rgba(52, 199, 89, 0.5);
-}
-
-.fc-save-dot-tick svg {
-  width: 7px;
-  height: 7px;
+  background: #ff453a;
+  color: #fff;
 }
 
 /* 等待 / 产物区：96px 高（占位沙漏虚线框；产物全宽封面 + 右下完成
    胶囊 + 左上多产物计数）。 */
 .fc-save-stage {
+  position: relative;
   border: 1px dashed var(--separator);
   border-radius: 10px;
   height: 96px;

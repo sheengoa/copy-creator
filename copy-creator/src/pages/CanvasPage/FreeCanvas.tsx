@@ -2916,6 +2916,38 @@ export default function FreeCanvas({ canvasId }: { canvasId: string }) {
               const autoState = saveMeta?.auto_state ?? "";
               const autoError = saveMeta?.auto_error ?? "";
               const autoSaved = autoState === "saved";
+              // 目标状态点：骑在等待/产物区顶边中央（与选择组问号同一位置
+              // 语言）。淡绿底弱化；红叉=失败，点重试；点绿点回目标选择。
+              const saveDot = (
+                <NodeHint
+                  text={
+                    autoState === "error"
+                      ? `${autoError} · ${t("canvas.saveAutoRetry")}`
+                      : autoState === "saving"
+                        ? t("canvas.saveAutoSaving")
+                        : `${autoTarget === "dir" ? (saveMeta?.auto_dir ?? "").split(/[\\/]/).pop() : t("canvas.saveAutoLibraryLbl")} · ${t("canvas.saveAutoChange")}`
+                  }
+                >
+                  <button
+                    type="button"
+                    className={`fc-save-dot${autoState === "error" ? " is-error" : ""}${autoState === "saving" ? " is-saving" : ""}`}
+                    aria-label={
+                      autoState === "error"
+                        ? t("canvas.saveAutoRetry")
+                        : autoTarget === "dir"
+                          ? (saveMeta?.auto_dir ?? "")
+                          : t("canvas.saveAutoLibraryLbl")
+                    }
+                    onClick={
+                      autoState === "error"
+                        ? () => retrySaveAuto(node.id)
+                        : () => clearSaveAutoTarget(node.id)
+                    }
+                  >
+                    {autoState === "error" ? Icons.close : autoTarget === "dir" ? Icons.folderOpen : Icons.resources}
+                  </button>
+                </NodeHint>
+              );
               body = (
                 <div className="fc-node-form">
                   {!upstreamNode ? (
@@ -2948,47 +2980,19 @@ export default function FreeCanvas({ canvasId }: { canvasId: string }) {
                     </div>
                   ) : (
                     <>
-                      {/* 目标已设：22px 绿圆内嵌目标图标——绿=就绪（脉冲）/
-                          完成叠白底绿勾角标，红叉=失败（悬停看原因，点重试）；
-                          点圆回目标选择。悬停浮出目标名。 */}
-                      <div className="fc-save-row">
-                        <NodeHint
-                          text={
-                            autoState === "error"
-                              ? `${autoError} · ${t("canvas.saveAutoRetry")}`
-                              : autoState === "saving"
-                                ? t("canvas.saveAutoSaving")
-                                : `${autoTarget === "dir" ? (saveMeta?.auto_dir ?? "").split(/[\\/]/).pop() : t("canvas.saveAutoLibraryLbl")} · ${t("canvas.saveAutoChange")}`
-                          }
-                        >
-                          <button
-                            type="button"
-                            className={`fc-save-dot${autoState === "error" ? " is-error" : ""}${autoState === "saving" ? " is-saving" : ""}`}
-                            aria-label={
-                              autoState === "error"
-                                ? t("canvas.saveAutoRetry")
-                                : autoTarget === "dir"
-                                  ? (saveMeta?.auto_dir ?? "")
-                                  : t("canvas.saveAutoLibraryLbl")
-                            }
-                            onClick={
-                              autoState === "error"
-                                ? () => retrySaveAuto(node.id)
-                                : () => clearSaveAutoTarget(node.id)
-                            }
-                          >
-                            {autoState === "error" ? Icons.close : autoTarget === "dir" ? Icons.folderOpen : Icons.resources}
-                            {autoSaved && (
-                              <span className="fc-save-dot-tick">{Icons.check}</span>
-                            )}
-                          </button>
-                        </NodeHint>
-                      </div>
+                      {/* 目标已设：16px 弱化绿点（淡绿底 + 目标图标）骑在
+                          等待/产物区顶边中央，与选择组的问号同一位置语言——
+                          绿=就绪（脉冲）/完成，红叉=失败（点重试），点回
+                          目标选择；悬停浮出目标名。 */}
                       {!hasProduct ? (
                         /* 等待产物：沙漏图形（更高的区域） */
-                        <div className="fc-save-stage">{Icons.hourglass}</div>
+                        <div className="fc-save-stage">
+                          {saveDot}
+                          {Icons.hourglass}
+                        </div>
                       ) : (
                         <div className="fc-save-stage filled">
+                          {saveDot}
                           <ResourceThumb path={upstream!.paths[0]} className="fc-thumb-cover" />
                           {autoSaved && (
                             <span className="fc-save-done">{Icons.check}{t("canvas.saveAutoDone")}</span>
