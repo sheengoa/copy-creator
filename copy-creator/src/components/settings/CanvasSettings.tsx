@@ -84,7 +84,23 @@ function ChannelRow({
 
   const submit = async () => {
     setError("");
+    // 无变更不提交：blur 逐字段触发，原样提交会顺带把后端的故障状态
+    //（auto_disabled / last_error / 测速记录）重置掉。
     const price = priceText.trim() === "" ? null : Number.parseFloat(priceText);
+    const priceDirty = priceText.trim() === ""
+      ? channel.price != null
+      : !Number.isFinite(price) || (price as number) !== channel.price;
+    if (
+      name === channel.name &&
+      protocol === channel.protocol &&
+      baseUrl === channel.baseUrl &&
+      apiKey.trim() === "" &&
+      model === channel.model &&
+      currency === channel.currency &&
+      !priceDirty
+    ) {
+      return;
+    }
     if (priceText.trim() !== "" && (!Number.isFinite(price) || (price as number) < 0)) {
       setError(t("settings.canvas.priceInvalid"));
       return;
@@ -556,10 +572,16 @@ export function CanvasSettings() {
   };
 
   // 本地数值输入（并发/冷却/超时）：失焦钳制提交，与既有 AI 设置同惯例。
+  // 文本状态跟随 store 装载同步：设置可能在组件挂载后才异步就绪，不同步
+  // 会把装载到的真实值在下次失焦时覆盖回默认值。
   const [cooldownText, setCooldownText] = useState(String(aiRateLimitCooldown));
   const [concurrencyText, setConcurrencyText] = useState(String(aiConcurrency));
   const [timeoutText, setTimeoutText] = useState(String(aiTimeout));
   const [modelText, setModelText] = useState(aiModel);
+  useEffect(() => setCooldownText(String(aiRateLimitCooldown)), [aiRateLimitCooldown]);
+  useEffect(() => setConcurrencyText(String(aiConcurrency)), [aiConcurrency]);
+  useEffect(() => setTimeoutText(String(aiTimeout)), [aiTimeout]);
+  useEffect(() => setModelText(aiModel), [aiModel]);
 
   const enabledChannels = channels.filter((c) => c.enabled);
 

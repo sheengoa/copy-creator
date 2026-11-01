@@ -492,7 +492,8 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
   loadAiChannels: async () => {
     try {
       const channels = await invoke<AiChannel[]>("list_ai_channels");
-      set({ aiChannels: channels });
+      // mock 等验证环境可能对未实现命令返回 null，防御回空数组。
+      set({ aiChannels: Array.isArray(channels) ? channels : [] });
     } catch (e) {
       console.error("Failed to load AI channels:", e);
     }

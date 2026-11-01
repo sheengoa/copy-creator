@@ -69,6 +69,26 @@ interface MockCanvasConnection {
   created_at: string;
 }
 
+/** 画布 AI 渠道（设置页 mock）：与 stores/settingsStore 的 AiChannel 对齐。 */
+interface MockAiChannel {
+  id: string;
+  name: string;
+  protocol: string;
+  baseUrl: string;
+  apiKeyPreview: string;
+  apiKeySet: boolean;
+  model: string;
+  price: number | null;
+  currency: string;
+  enabled: boolean;
+  status: string;
+  lastError: string;
+  lastLatencyMs: number | null;
+  lastTestedAt: string;
+  cooldownUntilMs: number;
+  sortOrder: number;
+}
+
 interface MockScene {
   id: string;
   episode_id: string;
@@ -228,6 +248,22 @@ const db = {
   canvas_connections: [
     { id: "cc-1", canvas_id: "cv-1", from_node: "cn-1", to_node: "cn-2", to_port: "text", created_at: ts() },
   ] as MockCanvasConnection[],
+  // 画布 AI 渠道（设置页）：两条示例渠道，覆盖健康/未测试两种状态，
+  // 供浏览器验证渠道管理与调度交互。
+  ai_channels: [
+    {
+      id: "ch-1", name: "示例渠道 A", protocol: "openai", baseUrl: "https://api.openai.com",
+      apiKeyPreview: "sk-mock1...abcd", apiKeySet: true, model: "gpt-image-1",
+      price: 0.04, currency: "$", enabled: true, status: "normal", lastError: "",
+      lastLatencyMs: 980, lastTestedAt: ts(), cooldownUntilMs: 0, sortOrder: 0,
+    },
+    {
+      id: "ch-2", name: "示例渠道 B", protocol: "gemini", baseUrl: "https://generativelanguage.googleapis.com",
+      apiKeyPreview: "AIza-mock...wxyz", apiKeySet: true, model: "",
+      price: null, currency: "$", enabled: true, status: "normal", lastError: "",
+      lastLatencyMs: null, lastTestedAt: "", cooldownUntilMs: 0, sortOrder: 1,
+    },
+  ] as MockAiChannel[],
 };
 
 /** 画布节点默认 metadata（对齐 Rust NodeMeta::default_for）。 */
@@ -796,6 +832,79 @@ function handleInvoke(cmd: string, args: Record<string, unknown>): unknown {
       throw new Error("浏览器验证环境未配置 AI 生图");
     case "ai_cancel_generation":
       return null;
+
+    // ── 画布 AI 渠道（设置页，内存 CRUD） ──
+    case "list_ai_channels":
+      return clone([...db.ai_channels].sort((a, b) => a.sortOrder - b.sortOrder));
+    case "create_ai_channel": {
+      const protocol = String(args.protocol ?? "openai");
+      const row = {
+        id: nextId("ch"),
+        name: String(args.name ?? "") || (protocol === "gemini" ? "Gemini" : "OpenAI 兼容"),
+        protocol,
+        baseUrl: String(args.baseUrl ?? ""),
+        apiKeyPreview: String(args.apiKey ?? "").slice(0, 8) + "..." + String(args.apiKey ?? "").slice(-4),
+        apiKeySet: String(args.apiKey ?? "").trim() !== "",
+        model: String(args.model ?? ""),
+        price: (args.price ?? null) as number | null,
+        currency: String(args.currency ?? "$"),
+        enabled: true,
+        status: "normal",
+        lastError: "",
+        lastLatencyMs: null as number | null,
+        lastTestedAt: "",
+        cooldownUntilMs: 0,
+        sortOrder: db.ai_channels.length,
+      };
+      db.ai_channels.push(row);
+      return clone(db.ai_channels);
+    }
+    case "update_ai_channel": {
+      const row = db.ai_channels.find((c) => c.id === args.id);
+      if (!row) throw new Error(`渠道不存在：${String(args.id)}`);
+      row.name = String(args.name ?? row.name);
+      row.protocol = String(args.protocol ?? row.protocol);
+      row.baseUrl = String(args.baseUrl ?? row.baseUrl);
+      const apiKey = args.apiKey == null ? "" : String(args.apiKey);
+      if (apiKey.trim() !== "") row.apiKeyPreview = apiKey.slice(0, 8) + "..." + apiKey.slice(-4);
+      row.model = String(args.model ?? "");
+      row.price = (args.price ?? null) as number | null;
+      row.currency = String(args.currency ?? "$");
+      return clone([...db.ai_channels].sort((a, b) => a.sortOrder - b.sortOrder));
+    }
+    case "delete_ai_channel":
+      db.ai_channels = db.ai_channels.filter((c) => c.id !== args.id);
+      return null;
+    case "reorder_ai_channels": {
+      const ids = (args.ids ?? []) as string[];
+      for (const [index, id] of ids.entries()) {
+        const row = db.ai_channels.find((c) => c.id === id);
+        if (row) row.sortOrder = index;
+      }
+      return null;
+    }
+    case "set_ai_channel_enabled": {
+      const row = db.ai_channels.find((c) => c.id === args.id);
+      if (row) {
+        row.enabled = Boolean(args.enabled);
+        if (row.enabled) {
+          row.status = "normal";
+          row.lastError = "";
+        }
+      }
+      return null;
+    }
+    case "ai_test_channel": {
+      const row = db.ai_channels.find((c) => c.id === args.channelId);
+      const latencyMs = 300 + Math.floor(Math.random() * 900);
+      if (row) {
+        row.lastLatencyMs = latencyMs;
+        row.lastTestedAt = ts();
+        row.status = "normal";
+        row.lastError = "";
+      }
+      return { ok: true, latencyMs };
+    }
 
     // ── 事件与窗口（Tauri 插件命令） ──
     default:
