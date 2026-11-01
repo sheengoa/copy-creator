@@ -125,19 +125,19 @@ export default function CanvasPage() {
               </span>
             </div>
           ))}
+          {/* 新建画布「＋」：紧跟最后一个画布标签（流内元素，新建后自然
+              排到新标签后面）；空态的居中新建按钮见下方 canvas-empty。 */}
+          {canvases.length > 0 && (
+            <button
+              className="canvas-add-btn"
+              onClick={() => void createCanvas()}
+              aria-label={t("canvas.newCanvas")}
+              title={t("canvas.newCanvas")}
+            >
+              {Icons.add}
+            </button>
+          )}
         </div>
-        {/* 新建画布入口：有画布时是画布栏末尾的「＋」；空态的居中新建
-            按钮见下方 canvas-empty。 */}
-        {canvases.length > 0 && (
-          <button
-            className="canvas-add-btn"
-            onClick={() => void createCanvas()}
-            aria-label={t("canvas.newCanvas")}
-            title={t("canvas.newCanvas")}
-          >
-            {Icons.add}
-          </button>
-        )}
         {chipsOverflow && (
           <div className="canvas-more" ref={moreRef}>
             <button
