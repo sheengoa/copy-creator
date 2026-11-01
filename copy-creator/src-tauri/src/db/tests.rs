@@ -8728,7 +8728,8 @@ mod canvas_tests {
 #[cfg(test)]
 mod ai_channel_tests {
     use crate::db::{
-        ensure_schema, migrate_legacy_ai_channels, AI_CHANNEL_SCHEMA_SQL, Connection,
+        ensure_schema, migrate_legacy_ai_channels, update_channel_row, AI_CHANNEL_SCHEMA_SQL,
+        ChannelUpdate, Connection,
     };
 
     fn conn_with_legacy(provider: &str, openai_key: &str, gemini_key: &str) -> Connection {
@@ -8807,5 +8808,110 @@ mod ai_channel_tests {
             .query_row("SELECT value FROM settings WHERE key = 'ai_concurrency'", [], |r| r.get(0))
             .unwrap();
         assert_eq!(concurrency, "4");
+    }
+
+    /// 钉住 update_channel_row 两条 SQL（不改 Key / 改 Key）的绑定正确性：
+    /// 历史版本用跳号占位符导致参数错位（Key 与 updated_at 互换）。
+    fn seed_channel(conn: &Connection) {
+        conn.execute(
+            "INSERT INTO ai_channels (id, name, protocol, base_url, api_key, model, price, currency, \
+             enabled, status, last_error, last_latency_ms, last_tested_at, cooldown_until_ms, sort_order, created_at, updated_at) \
+             VALUES ('ch-1', '旧名', 'openai', 'https://old.example.com', 'sk-old-key', 'old-model', 0.5, '$', \
+             1, 'auto_disabled', '认证失败', 1234, '2026-01-01T00:00:00Z', 999, 0, '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z')",
+            [],
+        )
+        .unwrap();
+    }
+
+    fn read_channel(conn: &Connection) -> (String, String, String, String, i64, String) {
+        conn.query_row(
+            "SELECT name, api_key, status, last_error, last_latency_ms, model FROM ai_channels WHERE id = 'ch-1'",
+            [],
+            |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?, r.get(4)?, r.get(5)?)),
+        )
+        .unwrap()
+    }
+
+    #[test]
+    fn update_channel_row_without_key_keeps_key_and_restores_status() {
+        let conn = Connection::open_in_memory().unwrap();
+        conn.execute_batch(AI_CHANNEL_SCHEMA_SQL).unwrap();
+        seed_channel(&conn);
+        update_channel_row(
+            &conn,
+            "ch-1",
+            &ChannelUpdate {
+                name: "新名",
+                protocol: "openai",
+                base_url: "https://old.example.com",
+                api_key: Some(""),
+                model: "new-model",
+                price: Some(0.25),
+                currency: "¥",
+            },
+        )
+        .unwrap();
+        let (name, api_key, status, last_error, latency, model) = read_channel(&conn);
+        assert_eq!(name, "新名");
+        // Key 留空 = 保留原值（历史 bug 会把它换成 updated_at 时间戳）
+        assert_eq!(api_key, "sk-old-key");
+        assert_eq!(model, "new-model");
+        // endpoint 未变更：测速记录保留
+        assert_eq!(latency, 1234);
+        // 保存即视为配置确认：故障状态恢复
+        assert_eq!(status, "normal");
+        assert_eq!(last_error, "");
+    }
+
+    #[test]
+    fn update_channel_row_with_key_updates_key_and_endpoint_change_resets_latency() {
+        let conn = Connection::open_in_memory().unwrap();
+        conn.execute_batch(AI_CHANNEL_SCHEMA_SQL).unwrap();
+        seed_channel(&conn);
+        update_channel_row(
+            &conn,
+            "ch-1",
+            &ChannelUpdate {
+                name: "新名",
+                protocol: "gemini",
+                base_url: "https://new.example.com",
+                api_key: Some("sk-new-key"),
+                model: "new-model",
+                price: None,
+                currency: "$",
+            },
+        )
+        .unwrap();
+        let (name, api_key, _status, last_error, latency, _model) = read_channel(&conn);
+        assert_eq!(name, "新名");
+        assert_eq!(api_key, "sk-new-key");
+        assert_eq!(last_error, "");
+        // 协议/URL 变更：旧测速记录失效
+        assert_eq!(latency, 0);
+        let is_null: i64 = conn
+            .query_row("SELECT last_latency_ms IS NULL FROM ai_channels WHERE id = 'ch-1'", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(is_null, 1);
+    }
+
+    #[test]
+    fn update_channel_row_missing_id_errors() {
+        let conn = Connection::open_in_memory().unwrap();
+        conn.execute_batch(AI_CHANNEL_SCHEMA_SQL).unwrap();
+        let err = update_channel_row(
+            &conn,
+            "no-such",
+            &ChannelUpdate {
+                name: "x",
+                protocol: "openai",
+                base_url: "https://x.example.com",
+                api_key: None,
+                model: "",
+                price: None,
+                currency: "$",
+            },
+        )
+        .unwrap_err();
+        assert!(err.contains("渠道不存在"));
     }
 }

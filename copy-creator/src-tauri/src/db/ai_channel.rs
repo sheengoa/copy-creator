@@ -244,8 +244,37 @@ pub fn update_ai_channel(
     let currency = if currency.is_empty() { "$".to_string() } else { currency };
     let state = app.state::<DbState>();
     let conn = state.conn.lock().map_err(|e| e.to_string())?;
-    // 现值读取：判断协议/URL 是否变更（变更则测速与故障状态失效重置）、
-    // Key 是否留空（留空 = 不修改）。
+    update_channel_row(
+        &conn,
+        &id,
+        &ChannelUpdate {
+            name: &name,
+            protocol: &protocol,
+            base_url: &base_url,
+            api_key: api_key.as_deref(),
+            model: &model,
+            price,
+            currency: &currency,
+        },
+    )?;
+    list_channels_internal(&conn)?.into_iter().find(|c| c["id"] == json!(id)).ok_or_else(|| "渠道更新后读取失败".to_string())
+}
+
+/// 渠道更新入参（校验后的干净值；api_key = None 或空白表示不修改）。
+pub(crate) struct ChannelUpdate<'a> {
+    pub name: &'a str,
+    pub protocol: &'a str,
+    pub base_url: &'a str,
+    pub api_key: Option<&'a str>,
+    pub model: &'a str,
+    pub price: Option<f64>,
+    pub currency: &'a str,
+}
+
+/// 渠道更新核心（命令层与测试共用）：Key 留空 = 不修改；协议或 Base URL
+/// 变更 = 旧测速/故障状态失效重置。两条 SQL 的占位符各自连续编号
+/// （rusqlite 按序绑定，跳号占位符会参数错位/数量不符——历史 bug）。
+pub(crate) fn update_channel_row(conn: &Connection, id: &str, input: &ChannelUpdate) -> Result<(), String> {
     let (old_protocol, old_base_url): (String, String) = conn
         .query_row(
             "SELECT protocol, base_url FROM ai_channels WHERE id = ?1",
@@ -253,22 +282,19 @@ pub fn update_ai_channel(
             |row| Ok((row.get(0)?, row.get(1)?)),
         )
         .map_err(|_| format!("渠道不存在：{id}"))?;
-    let endpoint_changed = old_protocol != protocol || old_base_url != base_url;
-    // Key 留空 = 不修改；协议或 Base URL 变更 = 旧测速/故障状态失效重置。
-    // 两条 SQL 的占位符各自连续编号（rusqlite 按序绑定，跳号占位符会
-    // 参数错位/数量不符）。
+    let endpoint_changed = old_protocol != input.protocol || old_base_url != input.base_url;
     let reset_latency = if endpoint_changed { "NULL" } else { "last_latency_ms" };
     let reset_tested = if endpoint_changed { "''" } else { "last_tested_at" };
-    let key_value = api_key.unwrap_or_default();
     let now = canvas_now();
-    let affected = if key_value.trim().is_empty() {
+    let key_value = input.api_key.unwrap_or_default().trim().to_string();
+    let affected = if key_value.is_empty() {
         conn.execute(
             &format!(
                 "UPDATE ai_channels SET name = ?1, protocol = ?2, base_url = ?3, model = ?4, price = ?5, currency = ?6,
                  last_latency_ms = {reset_latency}, last_tested_at = {reset_tested}, status = 'normal', last_error = '', cooldown_until_ms = 0,
                  updated_at = ?7 WHERE id = ?8"
             ),
-            params![name, protocol, base_url, model.trim(), price, currency, now, id],
+            params![input.name, input.protocol, input.base_url, input.model.trim(), input.price, input.currency, now, id],
         )
     } else {
         conn.execute(
@@ -277,11 +303,10 @@ pub fn update_ai_channel(
                  last_latency_ms = {reset_latency}, last_tested_at = {reset_tested}, status = 'normal', last_error = '', cooldown_until_ms = 0,
                  updated_at = ?8 WHERE id = ?9"
             ),
-            params![name, protocol, base_url, model.trim(), price, currency, key_value, now, id],
+            params![input.name, input.protocol, input.base_url, input.model.trim(), input.price, input.currency, key_value, now, id],
         )
     };
-    affected.map_err(|e| e.to_string())?;
-    list_channels_internal(&conn)?.into_iter().find(|c| c["id"] == json!(id)).ok_or_else(|| "渠道更新后读取失败".to_string())
+    affected.map(|_| ()).map_err(|e| e.to_string())
 }
 
 #[tauri::command]
@@ -313,12 +338,14 @@ pub fn reorder_ai_channels(app: AppHandle, ids: Vec<String>) -> Result<(), Strin
 pub fn set_ai_channel_enabled(app: AppHandle, id: String, enabled: bool) -> Result<(), String> {
     let state = app.state::<DbState>();
     let conn = state.conn.lock().map_err(|e| e.to_string())?;
-    // 手动重新启用视为用户确认渠道可用：清除自动停用状态与错误文案
-    //（测速记录保留，仍按历史延迟参与调度）。
+    // 手动重新启用视为用户确认渠道可用：清除自动停用状态、错误文案与
+    // 限流冷却（否则启用后仍被调度跳过）；测速记录保留，仍按历史延迟
+    // 参与调度。
     conn.execute(
         "UPDATE ai_channels SET enabled = ?1,
          status = CASE WHEN ?1 = 1 THEN 'normal' ELSE status END,
          last_error = CASE WHEN ?1 = 1 THEN '' ELSE last_error END,
+         cooldown_until_ms = CASE WHEN ?1 = 1 THEN 0 ELSE cooldown_until_ms END,
          updated_at = ?2 WHERE id = ?3",
         params![enabled as i64, canvas_now(), id],
     )
