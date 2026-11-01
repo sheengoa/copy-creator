@@ -587,4 +587,41 @@ describe("架构守卫：领域规则必须全局共享", () => {
       "设置页控件必须复用 ui/ 基准组件（Toggle/Segmented/IosSelect）与 ui-* 类，禁止原生 select/checkbox 开关与退役类名回归",
     ).toEqual([]);
   });
+
+  it("规则 26：确认弹窗文案两段式——主句单句问号，补充细节拆 *Hint 键走 hint 小字", () => {
+    // 事故锚点：资源删除确认「确定将此资源移入回收站吗？保留 30 天，可随时
+    // 恢复。」在 300px 弹窗里折行（用户 2026-11-01 定案：主句一行，补充说明
+    // 降级 ConfirmDialog 的 hint 10px 小字，约定见 components/ui/README.md
+    // 「确认弹窗」）。本规则扫中英两个语言包：键名含 confirm/prompt（Hint
+    // 键除外）的文案，问号不得与句号/分号/换行同串——混排即主句+补充未拆。
+    const offenders: string[] = [];
+    for (const locale of ["zh-CN.json", "en.json"]) {
+      const flatten = (obj: unknown, path: string, out: [string, string][]): [string, string][] => {
+        if (obj && typeof obj === "object") {
+          for (const [key, value] of Object.entries(obj as Record<string, unknown>)) {
+            if (typeof value === "string") out.push([path + key, value]);
+            else flatten(value, `${path}${key}.`, out);
+          }
+        }
+        return out;
+      };
+      const entries = flatten(JSON.parse(readSource(join("i18n", locale))), "", []);
+      for (const [key, value] of entries) {
+        if (/hint/i.test(key) || !/(confirm|prompt)/i.test(key)) continue;
+        const hasQuestion = /[?？]/.test(value);
+        // 中文以全角句读为句界（file.txt 这类半角缩写不误伤）；英文句界 =
+        // 句点/分号后跟大写句首，或句读收尾（"e.g. file" 小写续写不算）。
+        const hasSentenceBreak = locale === "zh-CN.json"
+          ? /[。；]/.test(value)
+          : /[.;]\s+[A-Z]/.test(value) || /[.;]\s*$/.test(value);
+        if (hasQuestion && hasSentenceBreak) {
+          offenders.push(`i18n/${locale} ${key} = ${value}`);
+        }
+      }
+    }
+    expect(
+      offenders,
+      "确认弹窗主句必须是单句问句：补充细节拆到同名 *ConfirmHint 键，经 ConfirmDialog 的 hint 小字展示（components/ui/README.md「确认弹窗」）",
+    ).toEqual([]);
+  });
 });
