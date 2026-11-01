@@ -2986,36 +2986,26 @@ export default function FreeCanvas({ canvasId }: { canvasId: string }) {
                   </div>
                   {wait && wait.phase !== "land" && (
                     <>
-                      {/* 生成等待编排（2026-11-01 定案）：执行中流光独占
-                          （is-solo 拉伸补位），槽位行整行退场——连已出图
-                          的缩略图也不露面；到齐进入谢幕（fuse/bloom）流
-                          光回落，缩略图行此刻才现身，exit 带 is-out 淡
-                          出交接完成态，失败红叉同场定格。 */}
+                      {/* 生成等待编排（2026-11-01 定案）：执行中到谢幕全程
+                          只有恒定加高的流光独占——到齐的融合/绽放就在这条
+                          流光里完成，不示任何缩略图行；exit 流光淡出，land
+                          直接落成完成态（缩略图即完成态胶片条），两态直切
+                          无中间帧。 */}
                       <GenAuroraStage
                         phase={wait.phase}
                         total={prog.total}
                         received={prog.received}
                         celebrated={wait.celebrated}
-                        solo={wait.phase === "wait"}
                       />
-                      {wait.phase !== "wait" && (
-                        <div className={`fc-gen-slots${wait.phase === "exit" ? " is-out" : ""}`}>
-                          {Array.from({ length: prog.total }, (_, i) => {
-                            const url = prog.previews[i];
-                            return url ? (
-                              <img key={i} className="fc-gen-slot filled" src={url} alt="" draggable={false} />
-                            ) : wait.errors > 0 ? (
-                              <span key={i} className="fc-gen-slot pending is-err">×</span>
-                            ) : null;
-                          })}
-                        </div>
-                      )}
                     </>
                   )}
                   {/* 完成态产物区（2026-11-01 定稿）：主图大图 + 横滑胶片条。
                       大图即当前主图，点看全屏原图；点小图换主图；仅 1 张时
-                      胶片条隐藏，多张也只占一行，节点高度恒定。 */}
-                  {meta.images.length > 0 &&
+                      胶片条隐藏，多张也只占一行，节点高度恒定。只在落定
+                      （land 或无等待编排）后现身——执行/谢幕期不预渲染，
+                      避免结果与流光同屏（两态直切，无中间帧）。 */}
+                  {(!wait || wait.phase === "land") &&
+                    meta.images.length > 0 &&
                     (() => {
                       const primary = [...meta.images]
                         .map((img, i) => ({ img, i }))
@@ -3801,14 +3791,11 @@ function GenAuroraStage({
   total,
   received,
   celebrated,
-  solo,
 }: {
   phase: GenWaitPhase;
   total: number;
   received: number;
   celebrated: boolean;
-  /** 执行中独占态：槽位行退场（2026-11-01 定案），流光拉伸补位。 */
-  solo?: boolean;
 }) {
   const blobs = useMemo(() => buildAuroraBlobs(), []);
   const [beat, setBeat] = useState(0);
@@ -3835,7 +3822,6 @@ function GenAuroraStage({
   const timeP = Math.min(elapsedMs / 30000, 0.93);
   const p = Math.max(progressP, timeP);
   const cls = ["fc-aurora"];
-  if (solo) cls.push("is-solo");
   if (p >= 0.5) cls.push("is-half");
   // 融合/扩散态一路保留到淡出（celebrated）：光满着谢幕，不在退场时散开。
   const merged = phase === "fuse" || phase === "bloom" || (phase === "exit" && celebrated);
