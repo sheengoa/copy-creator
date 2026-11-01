@@ -1133,8 +1133,9 @@
 
 /* 生成主按钮撑满整行：层的 flex 子项是 NodeHint 锚点壳，伸展要落在
    锚点上——写在按钮自身不生效（宽度会塌缩成内容宽，与上方参数行
-   失去左右对齐）。完成/进行中两态无 accent 按钮，不受影响。 */
-.fc-root .fc-gen-layer > .fc-hint-anchor:has(> .fc-node-btn.accent) {
+   失去左右对齐）。仅限按钮独占一行（空闲/全部失败）：行内还有摘要
+   「共 N 张」时按定稿走摘要靠左 + 动作胶囊靠右，不参与撑满。 */
+.fc-root .fc-gen-layer > .fc-hint-anchor:has(> .fc-node-btn.accent):first-child {
   flex: 1;
 }
 
