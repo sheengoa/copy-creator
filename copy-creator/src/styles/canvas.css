@@ -1756,10 +1756,10 @@
   justify-content: center;
 }
 
-/* 中心图标已到物理渲染极限（0.5 CSS px ≈ 1 物理像素，无法再小）：
-   彻底隐藏，状态点保持双环，目标语义由悬停提示承载。 */
+/* 中心目标图标 = 问号图形的视觉尺寸（约 5px），小而可辨。 */
 .fc-save-dot-ring svg {
-  display: none;
+  width: 5px;
+  height: 5px;
 }
 
 .fc-save-dot.is-saving {
