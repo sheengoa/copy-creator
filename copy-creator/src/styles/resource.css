@@ -2406,8 +2406,9 @@
   min-width: 18px;
   padding: 0 5px;
   border-radius: 999px;
-  background: var(--accent-bg);
-  color: var(--accent);
+  /* 计数是静态信息不是交互反馈：按「蓝 = 交互反馈色」边界用中性灰。 */
+  background: var(--chip-bg);
+  color: var(--text-secondary);
   font-size: var(--text-xs);
   font-weight: var(--weight-medium);
   text-align: center;
@@ -2613,6 +2614,24 @@
   color: var(--text-primary);
   font-size: var(--text-sm);
   line-height: 1.45;
+}
+
+/* 侧栏内部滚动条与详情正文列同款语言（8px/透明轨道/圆角 thumb）。 */
+.resource-detail-aside::-webkit-scrollbar {
+  width: 8px;
+}
+
+.resource-detail-aside::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.resource-detail-aside::-webkit-scrollbar-thumb {
+  background: rgba(0, 0, 0, 0.22);
+  border-radius: 4px;
+}
+
+[data-theme="dark"] .resource-detail-aside::-webkit-scrollbar-thumb {
+  background: rgba(255, 255, 255, 0.26);
 }
 
 .resource-note-block {
