@@ -89,6 +89,10 @@ const NODE_MIN_SIZE: Record<CanvasNodeType, { w: number; h: number }> = {
   load_image: { w: 160, h: 140 },
   load_video: { w: 180, h: 140 },
   load_audio: { w: 180, h: 110 },
+  // 视频抽帧节点：媒体盒 + 控制区较占空间；此前缺失条目，拖尺寸手柄时
+  // NODE_MIN_SIZE[type] 取 undefined 会抛 TypeError（2026-11-01 修复）。
+  video_first_frame: { w: 240, h: 200 },
+  video_last_frame: { w: 240, h: 200 },
   save_image: { w: 180, h: 130 },
   save_video: { w: 180, h: 120 },
   save_audio: { w: 180, h: 110 },
