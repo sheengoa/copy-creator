@@ -60,7 +60,8 @@ describe("架构守卫：领域规则必须全局共享", () => {
       .filter((file) => /<video|<audio/.test(sourceOf(file)))
       .map((file) => toPosix(file.replace(frontRoot, "")))
       .sort();
-    expect(offenders, "视频/音频渲染必须复用 VideoPoster/ResourceMediaPlayer/FileMediaVisual").toEqual([
+    expect(offenders, "视频/音频渲染必须复用 VideoPoster/ResourceMediaPlayer/FileMediaVisual/AudioMiniPlayer").toEqual([
+      "/components/AudioMiniPlayer.tsx",
       "/components/VideoPoster.tsx",
       "/pages/ResourcePage/ResourceMedia.tsx",
     ]);

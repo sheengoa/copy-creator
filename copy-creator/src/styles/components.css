@@ -2126,3 +2126,66 @@ input:focus-visible + .selection-checkbox {
   width: 100%;
 }
 
+
+/* ── 迷你音频播放条（AudioMiniPlayer，2026-11-02）：画布音轨节点完成态
+   试听用——播放点 + 细进度 + 时间的单行形态，黑底条与节点媒体盒同语言。
+   accent 跟随调用方作用域的 --node-accent（画布节点类型色）。 ── */
+.audio-mini {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 7px 9px;
+  border-radius: 8px;
+  background: #090909;
+}
+
+.audio-mini.is-failed {
+  justify-content: center;
+}
+
+.audio-mini .audio-mini-play {
+  width: 22px;
+  height: 22px;
+  border: none;
+  border-radius: 50%;
+  background: var(--node-accent, var(--accent));
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  flex: none;
+  color: #fff;
+  padding: 0;
+}
+
+.audio-mini .audio-mini-play svg {
+  width: 10px;
+  height: 10px;
+}
+
+.audio-mini .audio-mini-play:hover {
+  filter: brightness(1.08);
+}
+
+.audio-mini .audio-mini-bar {
+  flex: 1;
+  height: 3px;
+  border-radius: 2px;
+  background: rgba(255, 255, 255, 0.22);
+  position: relative;
+  pointer-events: none;
+}
+
+.audio-mini .audio-mini-bar > span {
+  position: absolute;
+  inset: 0 auto 0 0;
+  border-radius: 2px;
+  background: #fff;
+}
+
+.audio-mini .audio-mini-time {
+  font-size: 10px;
+  font-variant-numeric: tabular-nums;
+  color: rgba(255, 255, 255, 0.85);
+  flex: none;
+}

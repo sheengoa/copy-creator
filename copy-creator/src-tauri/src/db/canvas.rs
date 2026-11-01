@@ -423,7 +423,8 @@ impl NodeMeta {
             "video_to_gif" => Ok(NodeMeta::VideoToGif {
                 video_path: String::new(),
                 start_secs: 0.0,
-                duration_secs: 0.0,
+                // GIF 必须有有效时长（0.5–10s），默认 3.0s。
+                duration_secs: 3.0,
                 status: String::new(),
                 error: String::new(),
             }),

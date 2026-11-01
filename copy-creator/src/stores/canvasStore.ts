@@ -17,6 +17,9 @@ export type CanvasNodeType =
   | "load_video"
   | "video_first_frame"
   | "video_last_frame"
+  | "video_seek_frame"
+  | "video_to_gif"
+  | "video_extract_audio"
   | "save_image"
   | "save_video"
   | "save_audio"
@@ -69,6 +72,18 @@ export type FrameNodeMeta = {
   video_path: string;
 };
 
+/** 视频工具节点（2026-11-02）：抽帧（任意时刻）/ 转 GIF / 抽音轨，与
+ *  首帧/尾帧同构——视频进节点，产物写节点行 resource_path 供下游通用
+ *  分支消费。start_secs 为播放头/选区起点；duration_secs 为选区时长
+ *  （≤0 表示整段，仅音轨语义）；format = "mp3" | "aac"（空串按 mp3）。 */
+export type VideoToolMeta = {
+  kind: "video_seek_frame" | "video_to_gif" | "video_extract_audio";
+  video_path: string;
+  start_secs: number;
+  duration_secs: number;
+  format: string;
+};
+
 export type NodeMeta =
   | { kind: "note"; content: string }
   | { kind: "load_text"; content: string }
@@ -76,6 +91,7 @@ export type NodeMeta =
   | { kind: "load_video" }
   | { kind: "load_audio" }
   | FrameNodeMeta
+  | VideoToolMeta
   | {
       kind: "gen_image";
       params: ImageGenParams;

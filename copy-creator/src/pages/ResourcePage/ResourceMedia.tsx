@@ -321,6 +321,9 @@ export function ResourceMediaPlayer({
   resolvedSrc,
   onMediaMetadata,
   version,
+  autoPlay = true,
+  mediaRefCallback,
+  onTimeUpdate,
 }: {
   kind: "video" | "audio";
   path: string;
@@ -328,6 +331,12 @@ export function ResourceMediaPlayer({
   resolvedSrc?: string;
   onMediaMetadata?: (meta: ResourceMediaMetadata) => void;
   version?: string;
+  /** 画布工具节点预览窗关闭自动播放（用户拖时间轴定向查看）。 */
+  autoPlay?: boolean;
+  /** 媒体元素引用回调：调用方程序化 seek（播放头同步）时需要。 */
+  mediaRefCallback?: (el: HTMLVideoElement | HTMLAudioElement | null) => void;
+  /** 播放时刻回调：原生控件拖动时回写外部状态。 */
+  onTimeUpdate?: (t: number) => void;
 }) {
   const { t } = useTranslation();
   const { src, failed } = useResourceMediaUrl(path, resolvedSrc, version);
@@ -357,10 +366,20 @@ export function ResourceMediaPlayer({
   };
 
   const startPlayback = (media: HTMLMediaElement) => {
+    if (!autoPlay) return;
     const playResult = media.play();
     if (playResult) {
       void playResult.catch(handlePlaybackFailure);
     }
+  };
+
+  const handleRef = (el: HTMLVideoElement | HTMLAudioElement | null) => {
+    mediaRef.current = el;
+    mediaRefCallback?.(el);
+  };
+
+  const handleTimeUpdate = (event: React.SyntheticEvent<HTMLMediaElement>) => {
+    onTimeUpdate?.(event.currentTarget.currentTime);
   };
 
   useEffect(() => {
@@ -391,14 +410,15 @@ export function ResourceMediaPlayer({
 
   const player = kind === "video" ? (
     <video
-      ref={mediaRef as React.RefObject<HTMLVideoElement>}
+      ref={handleRef}
       className="resource-media-video"
       src={src}
       key={`video-${src}`}
       controls
-      autoPlay
+      autoPlay={autoPlay}
       playsInline
       preload="metadata"
+      onTimeUpdate={handleTimeUpdate}
       onLoadedMetadata={(event) => {
         setMediaFailed(false);
         const media = event.currentTarget;
@@ -424,13 +444,14 @@ export function ResourceMediaPlayer({
     />
   ) : (
     <audio
-      ref={mediaRef as React.RefObject<HTMLAudioElement>}
+      ref={handleRef}
       className="resource-media-audio"
       src={src}
       key={`audio-${src}`}
       controls
-      autoPlay
+      autoPlay={autoPlay}
       preload="metadata"
+      onTimeUpdate={handleTimeUpdate}
       onLoadedMetadata={(event) => {
         setMediaFailed(false);
         const media = event.currentTarget;

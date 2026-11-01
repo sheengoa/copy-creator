@@ -46,6 +46,7 @@ interface MockCanvasNode {
     | "gen_image" | "gen_video" | "gen_audio"
     | "load_text" | "load_image" | "load_audio" | "load_video"
     | "video_first_frame" | "video_last_frame"
+    | "video_seek_frame" | "video_to_gif" | "video_extract_audio"
     | "save_image" | "save_video" | "save_audio"
     | "preview_image" | "preview_video" | "preview_audio"
     | "collection_image" | "collection_text" | "collection_video"
@@ -265,6 +266,26 @@ const db = {
       metadata: { kind: "video_last_frame", video_path: "" },
       resource_path: "", created_at: ts(), updated_at: ts(),
     },
+    {
+      // 视频工具节点（2026-11-02）：抽帧已载视频（验证时间轴/选点/执行）、
+      // GIF 与音轨空态，验证建菜单/拖入链路。
+      id: "cn-6", canvas_id: "cv-1", type: "video_seek_frame" as const, title: "",
+      pos_x: 480, pos_y: 760, width: 460, height: null,
+      metadata: { kind: "video_seek_frame", video_path: "C:\\mock-library\\segments\\通道回头镜头.mp4", start_secs: 0, duration_secs: 0, format: "" },
+      resource_path: "", created_at: ts(), updated_at: ts(),
+    },
+    {
+      id: "cn-7", canvas_id: "cv-1", type: "video_to_gif" as const, title: "",
+      pos_x: 0, pos_y: 0, width: 460, height: null,
+      metadata: { kind: "video_to_gif", video_path: "", start_secs: 0, duration_secs: 3, format: "" },
+      resource_path: "", created_at: ts(), updated_at: ts(),
+    },
+    {
+      id: "cn-8", canvas_id: "cv-1", type: "video_extract_audio" as const, title: "",
+      pos_x: 0, pos_y: 0, width: 460, height: null,
+      metadata: { kind: "video_extract_audio", video_path: "", start_secs: 0, duration_secs: 0, format: "" },
+      resource_path: "", created_at: ts(), updated_at: ts(),
+    },
   ] as MockCanvasNode[],
   canvas_connections: [
     { id: "cc-1", canvas_id: "cv-1", from_node: "cn-1", to_node: "cn-2", to_port: "text", created_at: ts() },
@@ -298,6 +319,10 @@ function canvasDefaultMeta(type: MockCanvasNode["type"]): MockCanvasMeta {
       return { kind: type };
     case "video_first_frame": case "video_last_frame":
       return { kind: type, video_path: "" };
+    case "video_seek_frame": case "video_extract_audio":
+      return { kind: type, video_path: "", start_secs: 0, duration_secs: 0, format: "" };
+    case "video_to_gif":
+      return { kind: type, video_path: "", start_secs: 0, duration_secs: 3, format: "" };
     case "gen_image":
       return { kind: "gen_image", params: { model: "", size: "", count: 1 }, status: "idle", error: "", images: [] };
     case "gen_video": case "gen_audio":
@@ -368,6 +393,42 @@ function makeMockThumb(hue: number): string {
 }
 
 const MOCK_THUMBS = [214, 262, 22, 160, 330, 46, 190, 286, 100, 8, 244, 32, 58, 176, 306].map(makeMockThumb);
+
+/** 程序生成 440Hz 正弦波 wav dataURL（音轨节点 mock 产物，audio 可直接播）。 */
+function makeMockWav(seconds: number): string {
+  const sampleRate = 8000;
+  const samples = Math.floor(sampleRate * Math.max(0.2, seconds));
+  const dataSize = samples * 2;
+  const buffer = new ArrayBuffer(44 + dataSize);
+  const view = new DataView(buffer);
+  const writeStr = (offset: number, text: string) => {
+    for (let i = 0; i < text.length; i++) view.setUint8(offset + i, text.charCodeAt(i));
+  };
+  writeStr(0, "RIFF");
+  view.setUint32(4, 36 + dataSize, true);
+  writeStr(8, "WAVE");
+  writeStr(12, "fmt ");
+  view.setUint32(16, 16, true);
+  view.setUint16(20, 1, true);
+  view.setUint16(22, 1, true);
+  view.setUint32(24, sampleRate, true);
+  view.setUint32(28, sampleRate * 2, true);
+  view.setUint16(32, 2, true);
+  view.setUint16(34, 16, true);
+  writeStr(36, "data");
+  view.setUint32(40, dataSize, true);
+  for (let i = 0; i < samples; i++) {
+    const t = i / sampleRate;
+    const amp = 0.32 * Math.sin(2 * Math.PI * 440 * t) * (0.6 + 0.4 * Math.sin(2 * Math.PI * 2 * t));
+    view.setInt16(44 + i * 2, Math.max(-1, Math.min(1, amp)) * 32767, true);
+  }
+  const bytes = new Uint8Array(buffer);
+  let binary = "";
+  for (let i = 0; i < bytes.length; i += 0x8000) {
+    binary += String.fromCharCode(...bytes.subarray(i, i + 0x8000));
+  }
+  return `data:audio/wav;base64,${btoa(binary)}`;
+}
 
 /** ai_generate_image 模拟（2026-11-01 生成等待动效验证）：generating 落库
  *  → canvas-changed → started 事件 → 逐张回传（间隔 620-1140ms，与真实
@@ -1032,6 +1093,32 @@ function handleInvoke(cmd: string, args: Record<string, unknown>): unknown {
           const idx = which === "last" ? 7 : 3;
           resolve({ path: MOCK_THUMBS[idx % MOCK_THUMBS.length] });
         }, 900);
+      });
+    }
+    case "canvas_video_timeline": {
+      // 视频工具时间轴模拟（2026-11-02）：固定 30s 时长 + 10 张渐变小图。
+      const thumbs = MOCK_THUMBS.slice(0, 10).map((path, i) => ({ t: i * 3, path }));
+      return { duration: 30, thumbnails: thumbs };
+    }
+    case "canvas_seek_video_frame": {
+      // 任意时刻抽帧：按秒数取最近的 mock 帧图。
+      const secs = Number(args.secs ?? 0);
+      return new Promise((resolve) => {
+        setTimeout(() => {
+          const idx = Math.floor(secs) % MOCK_THUMBS.length;
+          resolve({ path: MOCK_THUMBS[Math.max(0, idx)] });
+        }, 900);
+      });
+    }
+    case "canvas_convert_video_gif":
+      // 转 GIF：回一张 mock 帧图当动图占位（img 可直接显示）。
+      return new Promise((resolve) => {
+        setTimeout(() => resolve({ path: MOCK_THUMBS[5] }), 1400);
+      });
+    case "canvas_extract_audio": {
+      // 抽音轨：程序生成一小段 wav dataURL（440Hz 正弦 2 秒），audio 元素可直接播。
+      return new Promise((resolve) => {
+        setTimeout(() => resolve({ path: makeMockWav(2) }), 900);
       });
     }
     case "ai_cancel_generation": {

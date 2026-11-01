@@ -1,0 +1,292 @@
+/* 视频工具节点（视频抽帧 / 视频转 GIF / 视频抽音轨，2026-11-02 定稿）：
+   监视器预览 + ffmpeg 缩略图时间轴 + 侧栏参数的横向长方形形态。
+   独立文件保持画布主样式内聚；由入口样式统一引入。 */
+
+/* ── 节点内布局：监视器（左） + 侧栏（右），下方时间轴常驻 ── */
+
+.fc-root .fc-vt-monitor {
+  display: flex;
+  gap: 12px;
+}
+
+/* 监视器：16:9 黑底圆角，与内容节点媒体盒同语言；播放器绝对填充。 */
+.fc-root .fc-vt-screen {
+  position: relative;
+  width: 224px;
+  aspect-ratio: 16 / 9;
+  flex: none;
+  border-radius: 10px;
+  overflow: hidden;
+  background: #090909;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.12);
+}
+
+.fc-root .fc-vt-screen .resource-media-player {
+  position: absolute;
+  inset: 0;
+}
+
+.fc-root .fc-vt-screen .resource-media-player > * {
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+}
+
+/* 完成态产物图/GIF 直接铺监视器（ResourceThumb 的 fc-media-box 类）。 */
+.fc-root .fc-vt-screen .fc-media-box {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  max-height: none;
+}
+
+/* 完成态徽标：左下角，与帧节点同款。 */
+.fc-root .fc-vt-screen .fc-frame-badge {
+  z-index: 2;
+}
+
+/* 侧栏：时间大字 / 参数 / 提示 / 主按钮，主按钮贴底。 */
+.fc-root .fc-vt-side {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.fc-root .fc-vt-time-big {
+  font-size: 20px;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: 0.02em;
+  line-height: 1.2;
+  color: var(--text-primary);
+}
+
+.fc-root .fc-vt-time-big.is-ok {
+  color: #34c759;
+}
+
+.fc-root .fc-vt-duo {
+  display: flex;
+  gap: 6px;
+}
+
+.fc-root .fc-vt-duo > div {
+  flex: 1;
+  min-width: 0;
+}
+
+.fc-root .fc-vt-duo .k {
+  font-size: 10px;
+  color: var(--text-tertiary);
+}
+
+.fc-root .fc-vt-duo .v {
+  font-size: 14px;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  color: var(--text-primary);
+}
+
+/* 输出格式 pill：选中用节点 accent（紫），未选中中性 chip。 */
+.fc-root .fc-vt-pills {
+  display: flex;
+  gap: 6px;
+}
+
+.fc-root .fc-vt-pill {
+  padding: 4px 11px;
+  border: none;
+  border-radius: 999px;
+  font-size: 11px;
+  cursor: pointer;
+  background: var(--chip-bg);
+  color: var(--text-primary);
+}
+
+.fc-root .fc-vt-pill.is-on {
+  background: var(--node-accent, var(--accent));
+  color: #fff;
+  font-weight: 500;
+}
+
+.fc-root .fc-vt-sidehint {
+  font-size: 11px;
+  line-height: 1.5;
+  color: var(--text-tertiary);
+}
+
+.fc-root .fc-vt-spacer {
+  flex: 1 1 6px;
+}
+
+/* 侧栏主按钮沿用 fc-node-btn（accent/ghost），此处只补满宽贴底。 */
+.fc-root .fc-vt-side .fc-node-btn {
+  width: 100%;
+}
+
+/* ── 缩略图时间轴 ── */
+
+.fc-root .fc-vtl {
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+}
+
+.fc-root .fc-vtl-strip {
+  position: relative;
+  height: 40px;
+  border-radius: 8px;
+  touch-action: none;
+}
+
+.fc-root .fc-vtl-cells {
+  display: flex;
+  gap: 1px;
+  height: 100%;
+  border-radius: 8px;
+  overflow: hidden;
+}
+
+.fc-root .fc-vtl-cell {
+  flex: 1;
+  background-color: #090909;
+  background-size: cover;
+  background-position: center;
+}
+
+/* 选区两侧压暗（亮暗同用近黑，压暗语义与主题无关）。 */
+.fc-root .fc-vtl-dim {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  background: rgba(0, 0, 0, 0.55);
+  pointer-events: none;
+}
+
+.fc-root .fc-vtl-dim.is-l {
+  left: 0;
+  border-radius: 8px 0 0 8px;
+}
+
+.fc-root .fc-vtl-dim.is-r {
+  right: 0;
+  border-radius: 0 8px 8px 0;
+}
+
+/* 选区白内框：非交互层，手势由轨道统一分发。 */
+.fc-root .fc-vtl-range {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  box-shadow: inset 0 0 0 2px #fff;
+  pointer-events: none;
+}
+
+/* 端点手柄：上下探出 4px 的白圆角条 + 把手纹。 */
+.fc-root .fc-vtl-handle {
+  position: absolute;
+  top: -4px;
+  bottom: -4px;
+  width: 12px;
+  margin-left: -6px;
+  border: none;
+  padding: 0;
+  border-radius: 6px;
+  background-color: #fff;
+  background-image: repeating-linear-gradient(
+    90deg,
+    transparent 0 3px,
+    rgba(0, 0, 0, 0.22) 3px 4.5px,
+    transparent 4.5px 6px
+  );
+  background-size: 7.5px 100%;
+  background-repeat: no-repeat;
+  background-position: center;
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.4);
+  cursor: ew-resize;
+}
+
+/* 选区时长徽标：悬在选区中点上方（负 top 探出节点内容区需父层不裁切）。 */
+.fc-root .fc-vtl-rbadge {
+  position: absolute;
+  top: -19px;
+  transform: translateX(-50%);
+  padding: 0 7px;
+  border-radius: 999px;
+  font-size: 10px;
+  line-height: 16px;
+  color: #fff;
+  background: rgba(0, 0, 0, 0.62);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+  pointer-events: none;
+}
+
+/* 播放头：白竖线 + 顶部圆点手柄。 */
+.fc-root .fc-vtl-playhead {
+  position: absolute;
+  top: -4px;
+  bottom: -4px;
+  width: 2px;
+  margin-left: -1px;
+  background: #fff;
+  box-shadow: 0 0 4px rgba(0, 0, 0, 0.5);
+  pointer-events: none;
+}
+
+.fc-root .fc-vtl-playhead::before {
+  content: "";
+  position: absolute;
+  top: -4px;
+  left: 50%;
+  transform: translateX(-50%);
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  background: #fff;
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.45);
+}
+
+.fc-root .fc-vtl-ticks {
+  display: flex;
+  justify-content: space-between;
+  font-size: 10px;
+  color: var(--text-tertiary);
+  font-variant-numeric: tabular-nums;
+  margin-top: 4px;
+  padding: 0 1px;
+  pointer-events: none;
+}
+
+/* 执行中禁用：整体减淡并拦手势（按钮文案即进度，同首/尾帧语义）。 */
+.fc-root .fc-vtl.is-disabled {
+  opacity: 0.55;
+  pointer-events: none;
+}
+
+/* ── 固定高度节点（pc-resized）：监视器吃掉表单剩余空间，时间轴与
+   侧栏按钮始终留在可视区内（照抽帧节点让位模式）。 ── */
+
+.fc-root .pc-node.pc-resized .fc-vt-monitor {
+  flex: 1 1 auto;
+  min-height: 0;
+}
+
+.fc-root .pc-node.pc-resized .fc-vt-screen {
+  height: auto;
+  min-height: 0;
+  aspect-ratio: auto;
+}
+
+.fc-root .pc-node.pc-resized .fc-vt-screen .resource-media-player {
+  display: flex;
+  flex-direction: column;
+}
+
+[data-theme="dark"] .fc-root .fc-vt-time-big,
+[data-theme="dark"] .fc-root .fc-vt-duo .v {
+  color: var(--text-primary);
+}
