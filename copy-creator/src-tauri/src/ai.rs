@@ -935,6 +935,8 @@ fn member_text(conn: &rusqlite::Connection, node_id: &str) -> Result<Option<Stri
 }
 
 /// 合集成员的媒体贡献：加载媒体的资源路径 / 生成图像的主图路径。
+/// 视频工具节点（首帧/尾帧等）的产物同写节点行 resource_path，走同一
+/// 「行级路径」臂——此前落到 `_ => {}` 被静默丢弃（2026-11-01 修复）。
 fn member_reference(conn: &rusqlite::Connection, node_id: &str) -> Result<Option<PathBuf>, String> {
     let (node_type, meta_raw, resource_path): (String, String, String) = conn
         .query_row(
@@ -944,7 +946,14 @@ fn member_reference(conn: &rusqlite::Connection, node_id: &str) -> Result<Option
         )
         .map_err(|e| e.to_string())?;
     Ok(match parse_node_meta_lenient(&node_type, &meta_raw) {
-        NodeMeta::Ref {} | NodeMeta::LoadImage {} | NodeMeta::LoadVideo {} | NodeMeta::LoadAudio {} => {
+        NodeMeta::Ref {}
+        | NodeMeta::LoadImage {}
+        | NodeMeta::LoadVideo {}
+        | NodeMeta::LoadAudio {}
+        | NodeMeta::VideoFirstFrame { .. }
+        | NodeMeta::VideoLastFrame { .. }
+        | NodeMeta::VideoSeekFrame { .. }
+        | NodeMeta::VideoToGif { .. } => {
             if resource_path.trim().is_empty() {
                 None
             } else {
@@ -996,7 +1005,14 @@ fn collect_upstream(conn: &rusqlite::Connection, node_id: &str) -> Result<Upstre
                     prompt_parts.push(content);
                 }
             }
-            NodeMeta::Ref {} | NodeMeta::LoadImage {} | NodeMeta::LoadVideo {} | NodeMeta::LoadAudio {} => {
+            NodeMeta::Ref {}
+            | NodeMeta::LoadImage {}
+            | NodeMeta::LoadVideo {}
+            | NodeMeta::LoadAudio {}
+            | NodeMeta::VideoFirstFrame { .. }
+            | NodeMeta::VideoLastFrame { .. }
+            | NodeMeta::VideoSeekFrame { .. }
+            | NodeMeta::VideoToGif { .. } => {
                 if !resource_path.trim().is_empty() {
                     references.push(PathBuf::from(resource_path));
                 }
@@ -1029,18 +1045,29 @@ fn collect_upstream(conn: &rusqlite::Connection, node_id: &str) -> Result<Upstre
     Ok(UpstreamInput { prompt: prompt_parts.join("\n"), references })
 }
 
-/// 库内相对路径 → 绝对路径（resource_path 与工程域同为相对库根软路径）。
-fn resolve_library_path(app: &AppHandle, rel: &str) -> Result<PathBuf, String> {
-    let root = crate::db::get_resource_library_dir(app);
+/// 参考路径解析（纯路径逻辑便于单测）：库内相对路径拼库根；画布工具
+/// 节点产物是 canvas-gen 绝对路径，直通使用（同 canvas_media resolve_source
+/// 的语义，不依赖 root.join 对绝对路径的隐式覆盖行为）。
+fn resolve_reference_path(root: &Path, rel: &str) -> Result<PathBuf, String> {
     let cleaned = rel.trim().replace('\\', "/");
     if cleaned.is_empty() {
         return Err("参考图路径为空".to_string());
     }
-    let abs = root.join(&cleaned);
+    let candidate = Path::new(&cleaned);
+    let abs = if candidate.is_absolute() {
+        candidate.to_path_buf()
+    } else {
+        root.join(&cleaned)
+    };
     if !abs.exists() {
         return Err(format!("参考图不存在：{cleaned}"));
     }
     Ok(abs)
+}
+
+/// 库内相对路径 → 绝对路径（resource_path 与工程域同为相对库根软路径）。
+fn resolve_library_path(app: &AppHandle, rel: &str) -> Result<PathBuf, String> {
+    resolve_reference_path(&crate::db::get_resource_library_dir(app), rel)
 }
 
 fn file_to_data_url(path: &Path) -> Result<String, String> {
@@ -1794,6 +1821,84 @@ mod tests {
         .await
         .unwrap();
         assert_eq!(images, vec!["data:image/png;base64,QUJD"]);
+    }
+
+    #[test]
+    fn resolve_reference_path_rules() {
+        // 相对路径拼库根；canvas-gen 绝对路径直通；空路径/缺失报错；
+        // 反斜杠统一归一为正斜杠。
+        let root = std::env::temp_dir().join(format!("cc-ai-ref-{}", uuid::Uuid::new_v4()));
+        std::fs::create_dir_all(&root).unwrap();
+        let file = root.join("frame.png");
+        std::fs::write(&file, b"png").unwrap();
+        assert_eq!(resolve_reference_path(&root, " frame.png ").unwrap(), file);
+        assert_eq!(
+            resolve_reference_path(&root, &file.to_string_lossy()).unwrap(),
+            file
+        );
+        assert_eq!(
+            resolve_reference_path(&root, "  "),
+            Err("参考图路径为空".to_string())
+        );
+        assert_eq!(
+            resolve_reference_path(&root, "sub\\frame.png"),
+            Err("参考图不存在：sub/frame.png".to_string())
+        );
+        std::fs::remove_dir_all(&root).ok();
+    }
+
+    #[test]
+    fn collect_upstream_video_tool_reference() {
+        // 帧产物（节点行 resource_path）经连线进 gen_image 参考——此前
+        // match 缺臂被静默丢弃；load_image 同臂回归对照，文本拼提示词。
+        let conn = rusqlite::Connection::open_in_memory().unwrap();
+        crate::db::ensure_schema(&conn).unwrap();
+        let now = "2026-11-01T00:00:00Z";
+        conn.execute(
+            "INSERT INTO canvases (id, name, created_at, updated_at) VALUES ('cv', 't', ?1, ?1)",
+            params![now],
+        )
+        .unwrap();
+        for (id, ty, meta, rp) in [
+            ("n_text", "load_text", r#"{"kind":"load_text","content":"画一只猫"}"#, ""),
+            ("n_img", "load_image", r#"{"kind":"load_image"}"#, "lib/cat.png"),
+            (
+                "n_frame",
+                "video_first_frame",
+                r#"{"kind":"video_first_frame","video_path":"v.mp4"}"#,
+                "C:\\cache\\canvas-gen\\u1-first.png",
+            ),
+        ] {
+            conn.execute(
+                "INSERT INTO canvas_nodes (id, canvas_id, type, metadata, resource_path, created_at, updated_at) \
+                 VALUES (?1, 'cv', ?2, ?3, ?4, ?5, ?5)",
+                params![id, ty, meta, rp, now],
+            )
+            .unwrap();
+        }
+        conn.execute(
+            "INSERT INTO canvas_nodes (id, canvas_id, type, metadata, resource_path, created_at, updated_at) \
+             VALUES ('g', 'cv', 'gen_image', '{\"kind\":\"gen_image\"}', '', ?1, ?1)",
+            params![now],
+        )
+        .unwrap();
+        for (cid, from) in [("c1", "n_text"), ("c2", "n_img"), ("c3", "n_frame")] {
+            conn.execute(
+                "INSERT INTO canvas_connections (id, canvas_id, from_node, to_node, to_port, created_at) \
+                 VALUES (?1, 'cv', ?2, 'g', 'image', ?3)",
+                params![cid, from, now],
+            )
+            .unwrap();
+        }
+        let input = collect_upstream(&conn, "g").unwrap();
+        assert_eq!(input.prompt, "画一只猫");
+        assert_eq!(
+            input.references,
+            vec![
+                PathBuf::from("lib/cat.png"),
+                PathBuf::from("C:\\cache\\canvas-gen\\u1-first.png"),
+            ]
+        );
     }
 }
 

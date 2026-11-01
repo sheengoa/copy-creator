@@ -8519,6 +8519,15 @@ mod canvas_tests {
             NodeMeta::CollectionImage { order: vec!["n-1".into(), "n-2".into()] },
             NodeMeta::CollectionText { order: Vec::new() },
             NodeMeta::CollectionVideo { order: vec!["n-3".into()] },
+            // 视频工具节点（2026-11-02）：三个新变体参数字段
+            NodeMeta::VideoFirstFrame {
+                video_path: "a.mp4".into(),
+                status: String::new(),
+                error: String::new(),
+            },
+            NodeMeta::VideoSeekFrame { video_path: "a.mp4".into(), start_secs: 12.48, status: String::new(), error: String::new() },
+            NodeMeta::VideoToGif { video_path: "a.mp4".into(), start_secs: 5.0, duration_secs: 3.0, status: String::new(), error: String::new() },
+            NodeMeta::VideoExtractAudio { video_path: "a.mp4".into(), start_secs: 0.0, duration_secs: 0.0, format: "aac".into(), status: String::new(), error: String::new() },
         ];
         for meta in metas {
             let raw = serde_json::to_string(&meta).unwrap();

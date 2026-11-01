@@ -237,6 +237,50 @@ pub(crate) enum NodeMeta {
         error: String,
     },
 
+    // ── 视频工具节点（2026-11-02）──
+    /// 视频抽帧（任意时刻）：start_secs 为播放头时间（秒，f64）；产物帧图
+    /// 写节点行 resource_path（同首帧/尾帧语义，下游通用分支消费）。
+    VideoSeekFrame {
+        #[serde(default)]
+        video_path: String,
+        #[serde(default)]
+        start_secs: f64,
+        #[serde(default)]
+        status: String,
+        #[serde(default)]
+        error: String,
+    },
+    /// 视频转 GIF：start_secs/duration_secs 为选区起点与时长（0.5–10s，
+    /// 后端命令层再钳制）；产物 GIF 写节点行 resource_path（图像族）。
+    VideoToGif {
+        #[serde(default)]
+        video_path: String,
+        #[serde(default)]
+        start_secs: f64,
+        #[serde(default)]
+        duration_secs: f64,
+        #[serde(default)]
+        status: String,
+        #[serde(default)]
+        error: String,
+    },
+    /// 视频抽音轨：选区起点与时长，duration_secs ≤ 0 表示整段；format =
+    /// "mp3" | "aac"（空串按 mp3）；产物音频写节点行 resource_path。
+    VideoExtractAudio {
+        #[serde(default)]
+        video_path: String,
+        #[serde(default)]
+        start_secs: f64,
+        #[serde(default)]
+        duration_secs: f64,
+        #[serde(default)]
+        format: String,
+        #[serde(default)]
+        status: String,
+        #[serde(default)]
+        error: String,
+    },
+
     // ── 画布备注（不属于三类链路） ──
     Note {
         #[serde(default)]
@@ -370,6 +414,27 @@ impl NodeMeta {
                 status: String::new(),
                 error: String::new(),
             }),
+            "video_seek_frame" => Ok(NodeMeta::VideoSeekFrame {
+                video_path: String::new(),
+                start_secs: 0.0,
+                status: String::new(),
+                error: String::new(),
+            }),
+            "video_to_gif" => Ok(NodeMeta::VideoToGif {
+                video_path: String::new(),
+                start_secs: 0.0,
+                duration_secs: 0.0,
+                status: String::new(),
+                error: String::new(),
+            }),
+            "video_extract_audio" => Ok(NodeMeta::VideoExtractAudio {
+                video_path: String::new(),
+                start_secs: 0.0,
+                duration_secs: 0.0,
+                format: String::new(),
+                status: String::new(),
+                error: String::new(),
+            }),
             "collection_image" => Ok(NodeMeta::CollectionImage { order: Vec::new() }),
             "collection_text" => Ok(NodeMeta::CollectionText { order: Vec::new() }),
             "collection_video" => Ok(NodeMeta::CollectionVideo { order: Vec::new() }),
@@ -403,6 +468,9 @@ impl NodeMeta {
             NodeMeta::PreviewAudio { .. } => "preview_audio",
             NodeMeta::VideoFirstFrame { .. } => "video_first_frame",
             NodeMeta::VideoLastFrame { .. } => "video_last_frame",
+            NodeMeta::VideoSeekFrame { .. } => "video_seek_frame",
+            NodeMeta::VideoToGif { .. } => "video_to_gif",
+            NodeMeta::VideoExtractAudio { .. } => "video_extract_audio",
             NodeMeta::CollectionImage { .. } => "collection_image",
             NodeMeta::CollectionText { .. } => "collection_text",
             NodeMeta::CollectionVideo { .. } => "collection_video",
