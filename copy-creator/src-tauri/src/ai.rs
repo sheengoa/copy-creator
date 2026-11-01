@@ -640,10 +640,12 @@ fn ordered_channel_targets(conn: &rusqlite::Connection, sched: &Scheduling) -> R
     let now_ms = now_epoch_ms();
     let global_model = read_setting(conn, "ai_model");
     let mut targets: Vec<ChannelTarget> = Vec::new();
+    let mut usable_rows = 0usize;
     for (id, name, protocol, base_url, api_key, model, price, currency, last_latency_ms, cooldown_until_ms, status) in &rows {
         if status == "auto_disabled" || *cooldown_until_ms > now_ms {
             continue;
         }
+        usable_rows += 1;
         let resolved = match channel_model_or_global(model, &global_model) {
             Ok(m) => m,
             Err(_) => continue, // 无可用模型的渠道剔除，不阻断其余渠道
@@ -662,7 +664,11 @@ fn ordered_channel_targets(conn: &rusqlite::Connection, sched: &Scheduling) -> R
         });
     }
     if targets.is_empty() {
-        return Err("没有可用的生成渠道：请到 设置 → 画布 添加或启用渠道".to_string());
+        return Err(if usable_rows > 0 {
+            "渠道都没有可用模型：请在渠道或 设置 → 画布 → 生成默认值 里填写模型".to_string()
+        } else {
+            "没有可用的生成渠道：请到 设置 → 画布 添加或启用渠道".to_string()
+        });
     }
 
     match sched.strategy.as_str() {
@@ -775,16 +781,16 @@ fn record_channel_latency(conn: &rusqlite::Connection, channel_id: &str, latency
     }
 }
 
-/// 单渠道测速：真实发一次最小生图请求并计完整耗时。
+/// 单渠道测速：真实发一次最小生图请求并计完整耗时。手动停用（enabled=0）
+/// 的渠道也允许测速——「先测通再启用」与「重新测速并恢复」都依赖它；
+/// 测速成功只恢复故障状态，不代替用户打开手动开关。
 #[tauri::command]
-pub async fn ai_test_channel(app: AppHandle, channel_id: String) -> Result<Value, String> {    // 配置读取（短锁），网络阶段不持锁。
+pub async fn ai_test_channel(app: AppHandle, channel_id: String) -> Result<Value, String> {
+    // 配置读取（短锁），网络阶段不持锁。
     let (channel, model, timeout_secs) = {
         let state = app.state::<DbState>();
         let conn = state.conn.lock().map_err(|e| e.to_string())?;
         let channel = load_channel(&conn, &channel_id)?;
-        if !channel.enabled {
-            return Err("渠道已停用，启用后再测速".to_string());
-        }
         let global_model = read_setting(&conn, "ai_model");
         let model = channel_model_or_global(&channel.model, &global_model)?;
         let timeout = read_setting(&conn, "ai_timeout").parse::<u64>().unwrap_or(60).clamp(5, 600);

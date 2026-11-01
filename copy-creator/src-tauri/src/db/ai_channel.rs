@@ -254,23 +254,31 @@ pub fn update_ai_channel(
         )
         .map_err(|_| format!("渠道不存在：{id}"))?;
     let endpoint_changed = old_protocol != protocol || old_base_url != base_url;
-    let key_clause = match api_key.as_deref().map(str::trim) {
-        Some(k) if !k.is_empty() => ", api_key = ?6",
-        _ => "",
-    };
-    let sql = format!(
-        "UPDATE ai_channels SET name = ?1, protocol = ?2, base_url = ?3, model = ?4, price = ?5, currency = ?7,
-         last_latency_ms = {reset_latency}, last_tested_at = {reset_tested}, status = 'normal', last_error = '', cooldown_until_ms = 0,
-         updated_at = ?8{key_clause} WHERE id = ?9",
-        reset_latency = if endpoint_changed { "NULL" } else { "last_latency_ms" },
-        reset_tested = if endpoint_changed { "''" } else { "last_tested_at" },
-    );
+    // Key 留空 = 不修改；协议或 Base URL 变更 = 旧测速/故障状态失效重置。
+    // 两条 SQL 的占位符各自连续编号（rusqlite 按序绑定，跳号占位符会
+    // 参数错位/数量不符）。
+    let reset_latency = if endpoint_changed { "NULL" } else { "last_latency_ms" };
+    let reset_tested = if endpoint_changed { "''" } else { "last_tested_at" };
     let key_value = api_key.unwrap_or_default();
     let now = canvas_now();
-    let affected = if key_clause.is_empty() {
-        conn.execute(&sql, params![name, protocol, base_url, model.trim(), price, currency, now, id])
+    let affected = if key_value.trim().is_empty() {
+        conn.execute(
+            &format!(
+                "UPDATE ai_channels SET name = ?1, protocol = ?2, base_url = ?3, model = ?4, price = ?5, currency = ?6,
+                 last_latency_ms = {reset_latency}, last_tested_at = {reset_tested}, status = 'normal', last_error = '', cooldown_until_ms = 0,
+                 updated_at = ?7 WHERE id = ?8"
+            ),
+            params![name, protocol, base_url, model.trim(), price, currency, now, id],
+        )
     } else {
-        conn.execute(&sql, params![name, protocol, base_url, model.trim(), price, currency, now, key_value, id])
+        conn.execute(
+            &format!(
+                "UPDATE ai_channels SET name = ?1, protocol = ?2, base_url = ?3, model = ?4, price = ?5, currency = ?6, api_key = ?7,
+                 last_latency_ms = {reset_latency}, last_tested_at = {reset_tested}, status = 'normal', last_error = '', cooldown_until_ms = 0,
+                 updated_at = ?8 WHERE id = ?9"
+            ),
+            params![name, protocol, base_url, model.trim(), price, currency, key_value, now, id],
+        )
     };
     affected.map_err(|e| e.to_string())?;
     list_channels_internal(&conn)?.into_iter().find(|c| c["id"] == json!(id)).ok_or_else(|| "渠道更新后读取失败".to_string())
