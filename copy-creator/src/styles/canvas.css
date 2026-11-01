@@ -650,41 +650,7 @@
   box-shadow: 0 1px 3px rgba(0, 0, 0, 0.12);
 }
 
-/* ── AI 生成状态：槽位逐格填充 / 进度摘要 / 备选缩略图 ────── */
-
-.fc-gen-slots {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 5px;
-}
-
-.fc-gen-slot {
-  width: 52px;
-  height: 52px;
-  border-radius: 9px;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  font-size: 11px;
-  color: var(--text-tertiary);
-}
-
-.fc-gen-slot.pending {
-  border: 1px dashed var(--separator);
-  background: rgba(0, 0, 0, 0.03);
-  animation: fc-slot-pulse 1.2s ease-in-out infinite;
-}
-
-@keyframes fc-slot-pulse {
-  0%, 100% { opacity: 0.55; }
-  50% { opacity: 1; }
-}
-
-.fc-gen-slot.filled {
-  padding: 0;
-  object-fit: cover;
-  border: 1px solid var(--separator);
-}
+/* ── AI 生成状态：进度摘要 / 警告 ────── */
 
 .fc-gen-summary {
   flex: 1;
@@ -1087,21 +1053,7 @@
   }
 }
 
-/* 槽位谢幕与落格：退场整体下沉淡出；最终缩略图入场。 */
-.fc-root .fc-gen-slots.is-out {
-  opacity: 0;
-  transform: translateY(6px);
-  transition:
-    opacity 0.24s ease,
-    transform 0.24s ease;
-}
-
-.fc-root .fc-gen-slot.is-err {
-  border-color: color-mix(in srgb, var(--danger) 55%, transparent);
-  color: var(--danger);
-  animation: none;
-}
-
+/* 完成态产物区落格：land 入场。 */
 .fc-root .fc-gen-result.is-land {
   animation: fc-au-land 0.4s cubic-bezier(0.22, 1, 0.36, 1) backwards;
 }
@@ -1224,11 +1176,6 @@
 
 [data-theme="dark"] .fc-root .fc-node-placeholder {
   border-color: var(--text-tertiary);
-}
-
-[data-theme="dark"] .fc-root .fc-gen-slot.pending {
-  background: rgba(255, 255, 255, 0.05);
-  border-color: rgba(255, 255, 255, 0.14);
 }
 
 [data-theme="dark"] .fc-root .fc-gen-hero {
@@ -1402,7 +1349,6 @@
   .fc-root .fc-aurora.is-out,
   .fc-root .fc-aurora .au-fb,
   .fc-root .fc-aurora .au-fused,
-  .fc-root .fc-gen-slots.is-out,
   .fc-root .fc-gen-result.is-land,
   .fc-root .fc-gen-layer {
     transition-duration: 0s;
@@ -2409,6 +2355,12 @@
   filter: brightness(1.15);
 }
 
+/* 键盘可达：Tab 聚焦时 accent 细环（深底上 UA 默认焦点环不可见）。 */
+.fc-save-more:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
 /* 多图观看（2026-11-01 定案）：+N 角标是单图/缩略图格的切换开关——点角标
    媒体盒整切缩略图格，点小图看那张，再点角标回选；缩略图态角标点亮
    accent。纯观看态：不改上游主图、不影响全量保存。 */
@@ -2459,6 +2411,22 @@
   cursor: pointer;
   line-height: 0;
   background: #141414;
+  /* 悬停提亮 + 平滑过渡：与生成胶片条的悬停同语（那里是 opacity 提升）。 */
+  transition: filter 0.15s ease, transform 0.15s ease;
+}
+
+.fc-save-cell:hover {
+  filter: brightness(1.12);
+}
+
+.fc-save-cell:active {
+  transform: scale(0.96);
+}
+
+/* 键盘可达：Tab 聚焦时给 accent 细环（鼠标用户无感）。 */
+.fc-save-cell:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: -2px;
 }
 
 .fc-save-cell-img {
@@ -2471,6 +2439,11 @@
 .fc-save-cell.is-cur {
   outline: 2px solid #fff;
   outline-offset: -2px;
+}
+
+/* 键盘焦点与当前张白环同框时用 accent 区分（白环留给指针语义）。 */
+.fc-save-cell.is-cur:focus-visible {
+  outline-color: var(--accent);
 }
 
 .fc-node-btn.is-tiny {
