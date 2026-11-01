@@ -1330,8 +1330,8 @@
   min-height: 0;
   /* clip + clip-margin 代替 hidden：收合容器原本把末行卡片（auto/张数）
      画在底边之外的下描边和投影一起裁掉——卡片看着像被吞了下边界。
-     允许越出盒边 8px 再裁（卡片投影 6px + 保存节点选择组顶上探出的
-     问号徽章 8px），边缘完整，布局与收合行为不变。 */
+     允许越出盒边 8px 再裁（卡片投影约 4px + 聚焦环 2px 的余量），
+     边缘完整，布局与收合行为不变。 */
   overflow: clip;
   overflow-clip-margin: 8px;
   display: flex;
@@ -1372,7 +1372,9 @@
   .fc-load-entry,
   .fc-load-entry-clip,
   .fc-gen-params,
-  .fc-gen-params .fc-load-entry-clip {
+  .fc-gen-params .fc-load-entry-clip,
+  .fc-save-choose,
+  .fc-save-stage {
     transition-duration: 0s;
   }
   /* 流光舞台：常驻律动动画停掉，状态切换（浮现/融合/扩散/退场）直接到
@@ -2109,6 +2111,20 @@
   height: 16px;
 }
 
+/* 选择组 ⇄ 产物区：同槽叠放原位换场——目标就位后选择组下滑淡出、
+   产物区自下方升入，卡片高度全程不变（旧「收合容器 + 负边距后插」
+   会让卡片先膨胀再收缩、两框交叉、绿点被拖出表单裁剪边）；点绿点
+   清目标反向换回。visibility 延迟到退场末尾再切，不残留可交互透
+   明层。 */
+.fc-save-swap {
+  display: grid;
+}
+
+.fc-save-swap > * {
+  grid-area: 1 / 1;
+  min-width: 0;
+}
+
 /* 连线后的目标选择：虚线组包两张图标卡（资源库=文件夹、指定路径=
    下载，名称走悬停提示），右上角问号点明「二选一」。入场与加载节
    点入口区滑回同语——easeOutQuint 淡入上浮。 */
@@ -2121,6 +2137,21 @@
   gap: 8px;
   background: color-mix(in srgb, var(--bg-card) 40%, transparent);
   animation: fc-save-choose-in 0.45s cubic-bezier(0.22, 1, 0.36, 1) backwards;
+  transition:
+    opacity 0.3s ease-out,
+    transform 0.5s cubic-bezier(0.22, 1, 0.36, 1),
+    visibility 0s;
+}
+
+.fc-save-choose.is-gone {
+  opacity: 0;
+  transform: translateY(14px);
+  visibility: hidden;
+  pointer-events: none;
+  transition:
+    opacity 0.42s cubic-bezier(0.7, 0, 0.84, 0),
+    transform 0.5s cubic-bezier(0.65, 0, 0.35, 1),
+    visibility 0s linear 0.5s;
 }
 
 @keyframes fc-save-choose-in {
@@ -2274,8 +2305,9 @@
 }
 
 /* 等待 / 产物区：96px 高（占位沙漏虚线框；产物全宽封面 + 右下完成
-   胶囊 + 左上多产物计数）。入场为同语淡入上浮，让位给状态点的弹跳
-   唱主角。 */
+   胶囊 + 左上多产物计数）。入场为同语淡入上浮（仅可见态挂载时播，
+   隐藏态挂载不闪），让位给状态点的弹跳唱主角；与选择组的换场走
+   transition（同槽叠放，见 .fc-save-swap）。 */
 .fc-save-stage {
   position: relative;
   border: 1px dashed var(--separator);
@@ -2285,7 +2317,25 @@
   align-items: center;
   justify-content: center;
   color: var(--text-tertiary);
+  transition:
+    opacity 0.3s ease-out,
+    transform 0.5s cubic-bezier(0.22, 1, 0.36, 1),
+    visibility 0s;
+}
+
+.fc-save-stage:not(.is-gone) {
   animation: fc-save-stage-in 0.45s cubic-bezier(0.22, 1, 0.36, 1) backwards;
+}
+
+.fc-save-stage.is-gone {
+  opacity: 0;
+  transform: translateY(14px);
+  visibility: hidden;
+  pointer-events: none;
+  transition:
+    opacity 0.42s cubic-bezier(0.7, 0, 0.84, 0),
+    transform 0.5s cubic-bezier(0.65, 0, 0.35, 1),
+    visibility 0s linear 0.5s;
 }
 
 @keyframes fc-save-stage-in {
