@@ -151,7 +151,7 @@ export const Icons = {
       <circle cx="18" cy="6.5" r="2.6" />
       <path d="M8 15.7 16 8.3" />
       <circle cx="18" cy="17.5" r="2.6" />
-      <path d="M15.4 16.4c-2.6-.6-4.6-2-5.8-4.4" />
+      <path d="M15.4 16.4c-2.6-.6-4.6-2-5-2.9" />
     </svg>
   ),
   empty: (
