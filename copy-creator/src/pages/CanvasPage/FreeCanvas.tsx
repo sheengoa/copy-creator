@@ -5,7 +5,6 @@ import { invoke } from "@tauri-apps/api/core";
 import { getCurrentWebview } from "@tauri-apps/api/webview";
 import { Icons } from "../../components/Icons";
 import { ImageLightbox } from "../../components/ImageLightbox";
-import { openResourceFile } from "../../domain/mediaAssets";
 import { resolveResourceMediaUrl } from "../../domain/mediaUrl";
 import { joinLibraryPath } from "../../domain/projectView";
 import ProjectFilePickerDialog from "../ResourcePage/ProjectFilePickerDialog";
@@ -17,6 +16,7 @@ import {
   type CanvasLayoutEntry,
   type CanvasNode,
   type CanvasNodeType,
+  type SaveMediaMeta,
 } from "../../stores/canvasStore";
 
 // 自由生图工作流画布（画布区方案 3.3 + 节点体系 v2）：以 ProjectCanvas 为
@@ -1791,34 +1791,40 @@ export default function FreeCanvas({ canvasId }: { canvasId: string }) {
   // ── 上游媒体解析（预览/保存节点取上游产物） ────────────────
 
   /** 入线第一根的上游节点（预览/保存节点都是单入口）。 */
-  function upstreamNodeOf(nodeId: string): CanvasNode | undefined {
-    const conn = connections.find((c) => c.to_node === nodeId);
-    return conn ? nodes.find((n) => n.id === conn.from_node) : undefined;
-  }
+  const upstreamNodeOf = useCallback(
+    (nodeId: string): CanvasNode | undefined => {
+      const conn = connections.find((c) => c.to_node === nodeId);
+      return conn ? nodes.find((n) => n.id === conn.from_node) : undefined;
+    },
+    [connections, nodes],
+  );
 
   /** 上游产物聚合。null 严格表示「没有上游连接」；连了但暂无产物（生成
    *  中 / 未生成 / 加载节点还没选文件）返回空 paths，供占位文案区分
    *  「未连接上游」与「已连接，等待产物」。 */
-  function upstreamMediaOf(nodeId: string): { paths: string[]; text: string } | null {
-    const from = upstreamNodeOf(nodeId);
-    if (!from) return null;
-    if (from.type === "gen_image" && from.metadata.kind === "gen_image") {
-      const sorted = [...from.metadata.images].sort((a, b) => (a.primary === b.primary ? 0 : a.primary ? -1 : 1));
-      return { paths: sorted.map((img) => img.resource_path), text: "" };
-    }
-    if (from.type === "gen_video" || from.type === "gen_audio") {
-      // 视频/音频生成协议未接入：连接成立但恒无产物。
+  const upstreamMediaOf = useCallback(
+    (nodeId: string): { paths: string[]; text: string } | null => {
+      const from = upstreamNodeOf(nodeId);
+      if (!from) return null;
+      if (from.type === "gen_image" && from.metadata.kind === "gen_image") {
+        const sorted = [...from.metadata.images].sort((a, b) => (a.primary === b.primary ? 0 : a.primary ? -1 : 1));
+        return { paths: sorted.map((img) => img.resource_path), text: "" };
+      }
+      if (from.type === "gen_video" || from.type === "gen_audio") {
+        // 视频/音频生成协议未接入：连接成立但恒无产物。
+        return { paths: [], text: "" };
+      }
+      if (from.type === "load_text" && from.metadata.kind === "load_text") {
+        return { paths: [], text: from.metadata.content };
+      }
+      if (from.resource_path) {
+        return { paths: [from.resource_path], text: "" };
+      }
+      // 加载节点已连上但还没选文件。
       return { paths: [], text: "" };
-    }
-    if (from.type === "load_text" && from.metadata.kind === "load_text") {
-      return { paths: [], text: from.metadata.content };
-    }
-    if (from.resource_path) {
-      return { paths: [from.resource_path], text: "" };
-    }
-    // 加载节点已连上但还没选文件。
-    return { paths: [], text: "" };
-  }
+    },
+    [upstreamNodeOf],
+  );
 
   /** 生成前提校验（用户定案）：文本口已连非空文本 + 输出口已连保存/预览；
    *  图像口（参考图）可选。文本来源可以是文本合集（有成员即视为就绪，
@@ -1840,6 +1846,18 @@ export default function FreeCanvas({ canvasId }: { canvasId: string }) {
     if (!textConn) missing.push(t("canvas.genMissingText"));
     const outConn = connections.some((c) => c.from_node === node.id);
     if (!outConn) missing.push(t("canvas.genMissingOut"));
+    // 输出口连的是保存节点时，须先设好自动保存目标（用户定案：未设目标
+    // 生成直接拦下提醒，而非发起后再补救）。
+    const saveTargetsMissing = connections
+      .filter((c) => c.from_node === node.id)
+      .map((c) => nodes.find((n) => n.id === c.to_node))
+      .some((down) => {
+        if (!down) return false;
+        const m = down.metadata;
+        if (m.kind !== "save_image" && m.kind !== "save_video" && m.kind !== "save_audio") return false;
+        return !m.auto_target;
+      });
+    if (saveTargetsMissing) missing.push(t("canvas.saveAutoMissing"));
     return missing;
   }
 
@@ -2023,88 +2041,104 @@ export default function FreeCanvas({ canvasId }: { canvasId: string }) {
     }
   };
 
-  // ── 保存节点：入库 / 另存 ─────────────────────────────────
+  // ── 保存节点：预设目标 + 产物自动落盘（2026-11-01 用户定案） ──
+  // 连线后先选保存位置（资源库 / 文件夹），上游产物一出现即自动导出；
+  // 指纹判重，重新生成（产物变化）自动重存。旧「生成完再手动点保存」
+  // 的入库/另存按钮与逐项另存撤销。
 
-  const saveUpstreamToLibrary = async (node: CanvasNode) => {
-    const upstream = upstreamMediaOf(node.id);
-    if (!upstream?.paths.length) return;
-    const savedPaths: string[] = [];
-    try {
-      for (const path of upstream.paths) {
-        const result = await invoke<{ file_path: string }>("canvas_save_to_library", { sourcePath: path });
-        savedPaths.push(result.file_path);
-      }
-      if (node.metadata.kind === "save_image" || node.metadata.kind === "save_video" || node.metadata.kind === "save_audio") {
-        const meta = {
-          ...node.metadata,
-          status: "saved",
-          error: "",
-          target: "library",
-          saved_path: savedPaths[0] ?? "",
-        };
-        void store.getState().updateNode(node.id, { metadata: JSON.stringify(meta) });
-      }
-    } catch (err) {
-      if (node.metadata.kind === "save_image" || node.metadata.kind === "save_video" || node.metadata.kind === "save_audio") {
-        const meta = { ...node.metadata, status: "error", error: String(err) };
-        void store.getState().updateNode(node.id, { metadata: JSON.stringify(meta) });
-      } else {
-        setNodeErrors((prev) => ({ ...prev, [node.id]: String(err) }));
-      }
-    }
+  /** 按节点 id 读最新 metadata 合并写回（自动保存各步都基于 store 最新
+   *  值，避免拖动等并发更新被旧闭包覆盖）。 */
+  const writeSaveMeta = useCallback(
+    (nodeId: string, patch: Partial<SaveMediaMeta>) => {
+      const node = store.getState().nodes.find((n) => n.id === nodeId);
+      if (!node) return;
+      const meta = node.metadata;
+      if (meta.kind !== "save_image" && meta.kind !== "save_video" && meta.kind !== "save_audio") return;
+      void store.getState().updateNode(nodeId, { metadata: JSON.stringify({ ...meta, ...patch }) });
+    },
+    [store],
+  );
+
+  /** 设置/清除自动保存目标：清指纹让管线对现有产物立即（重）存一次。 */
+  const setSaveAutoTarget = (nodeId: string, target: "library" | "dir", dir: string) => {
+    writeSaveMeta(nodeId, {
+      auto_target: target,
+      auto_dir: dir,
+      auto_state: "",
+      auto_error: "",
+      auto_fingerprint: "",
+    });
   };
 
-  const saveUpstreamToPath = async (node: CanvasNode, sourcePath: string, defaultName: string) => {
-    try {
-      const target = await invoke<string>("canvas_pick_save_path", { defaultName });
-      if (!target) return; // 用户取消
-      await invoke("canvas_export_to_path", { sourcePath, target });
-      if (node.metadata.kind === "save_image" || node.metadata.kind === "save_video" || node.metadata.kind === "save_audio") {
-        const meta = { ...node.metadata, status: "saved", error: "", target: "path", saved_path: target };
-        void store.getState().updateNode(node.id, { metadata: JSON.stringify(meta) });
-      }
-    } catch (err) {
-      const msg = String(err);
-      if (msg.includes("cancelled") || msg.includes("取消")) return;
-      if (node.metadata.kind === "save_image" || node.metadata.kind === "save_video" || node.metadata.kind === "save_audio") {
-        const meta = { ...node.metadata, status: "error", error: msg };
-        void store.getState().updateNode(node.id, { metadata: JSON.stringify(meta) });
-      } else {
-        setNodeErrors((prev) => ({ ...prev, [node.id]: msg }));
-      }
-    }
+  const clearSaveAutoTarget = (nodeId: string) => {
+    writeSaveMeta(nodeId, {
+      auto_target: "",
+      auto_dir: "",
+      auto_state: "",
+      auto_error: "",
+      auto_fingerprint: "",
+    });
   };
 
-  /** 多产物「另存到…」：选目标文件夹，产物按原文件名逐张导出（重名覆盖，
-   *  与单文件另存同一显式动作语义）。单产物时走单文件对话框更精确。 */
-  const saveUpstreamToDir = async (node: CanvasNode, paths: string[]) => {
-    if (paths.length === 1) {
-      await saveUpstreamToPath(node, paths[0], paths[0].split(/[\\/]/).pop() ?? "产物");
-      return;
-    }
-    const writeMeta = (patch: { status: string; error: string; target?: string; saved_path?: string }) => {
-      if (node.metadata.kind === "save_image" || node.metadata.kind === "save_video" || node.metadata.kind === "save_audio") {
-        void store.getState().updateNode(node.id, {
-          metadata: JSON.stringify({ ...node.metadata, ...patch }),
-        });
-      } else {
-        if (patch.status === "error") setNodeErrors((prev) => ({ ...prev, [node.id]: patch.error }));
-      }
-    };
+  const pickSaveAutoDir = async (nodeId: string) => {
     try {
       const dir = await invoke<string>("canvas_pick_save_dir");
       if (!dir) return; // 用户取消
-      const base = dir.replace(/[\\/]+$/, "");
-      for (const path of paths) {
-        const name = path.split(/[\\/]/).pop() ?? "产物";
-        await invoke("canvas_export_to_path", { sourcePath: path, target: `${base}/${name}` });
-      }
-      writeMeta({ status: "saved", error: "", target: "path", saved_path: base });
-    } catch (err) {
-      const msg = String(err);
-      if (msg.includes("cancelled") || msg.includes("取消")) return;
-      writeMeta({ status: "error", error: msg });
+      setSaveAutoTarget(nodeId, "dir", dir.replace(/[\\/]+$/, ""));
+    } catch {
+      // 目录选择取消/失败：保持未设置态
     }
+  };
+
+  const runAutoSave = useCallback(
+    async (nodeId: string, target: "library" | "dir", dir: string, paths: string[], fingerprint: string) => {
+      writeSaveMeta(nodeId, { auto_state: "saving", auto_error: "" });
+      try {
+        const base = dir.replace(/[\\/]+$/, "");
+        for (const path of paths) {
+          if (target === "library") {
+            await invoke("canvas_save_to_library", { sourcePath: path });
+          } else {
+            const name = path.split(/[\\/]/).pop() ?? "产物";
+            await invoke("canvas_export_to_path", { sourcePath: path, target: `${base}/${name}` });
+          }
+        }
+        writeSaveMeta(nodeId, {
+          auto_state: "saved",
+          auto_error: "",
+          auto_fingerprint: fingerprint,
+          status: "saved",
+          target: target === "library" ? "library" : "path",
+          saved_path: target === "dir" ? base : "",
+        });
+      } catch (err) {
+        // 失败不落指纹：徽章转红示错，点徽章重试（避免持续失败时自动重试风暴）
+        writeSaveMeta(nodeId, { auto_state: "error", auto_error: String(err) });
+      }
+    },
+    [writeSaveMeta],
+  );
+
+  /** 自动保存管线：目标已设的保存节点，上游产物指纹变化即自动导出。
+   *  error 态停自动重试（等用户点徽章），saving 态防并发。 */
+  useEffect(() => {
+    for (const node of nodes) {
+      const meta = node.metadata;
+      if (meta.kind !== "save_image" && meta.kind !== "save_video" && meta.kind !== "save_audio") continue;
+      const target = meta.auto_target ?? "";
+      if (!target || target === "error") continue;
+      if (meta.auto_state === "saving" || meta.auto_state === "error") continue;
+      const paths = upstreamMediaOf(node.id)?.paths ?? [];
+      if (!paths.length) continue;
+      const fingerprint = paths.join("\n");
+      if (meta.auto_fingerprint === fingerprint) continue;
+      void runAutoSave(node.id, target === "dir" ? "dir" : "library", meta.auto_dir ?? "", paths, fingerprint);
+    }
+  }, [nodes, connections, runAutoSave, upstreamMediaOf]);
+
+  /** 自动保存失败后的手动重试：清 error 态，管线下一拍自动重跑。 */
+  const retrySaveAuto = (nodeId: string) => {
+    writeSaveMeta(nodeId, { auto_state: "", auto_error: "" });
   };
 
   /** 清除加载节点已选文件（右上角悬浮 ×）：resource_path 置空串即回到
@@ -2877,75 +2911,89 @@ export default function FreeCanvas({ canvasId }: { canvasId: string }) {
               const upstreamNode = upstreamNodeOf(node.id);
               const upstream = upstreamMediaOf(node.id);
               const hasProduct = !!upstream?.paths.length;
-              const saved = meta.kind === "save_image" || meta.kind === "save_video" || meta.kind === "save_audio" ? meta : null;
+              const saveMeta = meta.kind === "save_image" || meta.kind === "save_video" || meta.kind === "save_audio" ? meta : null;
+              const autoTarget = saveMeta?.auto_target ?? "";
+              const autoState = saveMeta?.auto_state ?? "";
+              const autoError = saveMeta?.auto_error ?? "";
+              const autoSaved = autoState === "saved";
               body = (
                 <div className="fc-node-form">
                   {!upstreamNode ? (
-                    <div className="fc-node-placeholder">{t("canvas.previewEmpty")}</div>
-                  ) : !hasProduct ? (
-                    <div className="fc-node-placeholder">{t("canvas.waitingUpstream")}</div>
-                  ) : (
-                    <div className="fc-gen-thumbs">
-                      {upstream!.paths.map((path, i) => (
-                        <span key={i} className="fc-save-item">
-                          {node.type === "save_image" ? (
-                            <ResourceThumb path={path} className="fc-thumb" />
-                          ) : (
-                            <span className="fc-save-name">{path.split(/[\\/]/).pop()}</span>
-                          )}
-                          <NodeHint text={t("canvas.saveSaveAs")}>
-                            <button
-                              className="fc-node-btn ghost is-tiny is-icon"
-                              aria-label={t("canvas.saveSaveAs")}
-                              onClick={() => void saveUpstreamToPath(node, path, path.split(/[\\/]/).pop() ?? "产物")}
-                            >
-                              {Icons.floppy}
-                            </button>
-                          </NodeHint>
-                        </span>
-                      ))}
+                    /* 未连接：断链图形，无文字 */
+                    <div className="fc-save-wait">{Icons.link}</div>
+                  ) : !autoTarget ? (
+                    /* 连线后的下一步：点图标选保存目标（收纳盒=资源库 / 文件夹=磁盘） */
+                    <div className="fc-save-setup">
+                      <NodeHint text={t("canvas.saveAutoLibrary")}>
+                        <button
+                          type="button"
+                          className="fc-save-opt"
+                          onClick={() => setSaveAutoTarget(node.id, "library", "")}
+                        >
+                          {Icons.saveTray}
+                        </button>
+                      </NodeHint>
+                      <NodeHint text={t("canvas.saveAutoDir")}>
+                        <button
+                          type="button"
+                          className="fc-save-opt"
+                          onClick={() => void pickSaveAutoDir(node.id)}
+                        >
+                          {Icons.folderOpen}
+                        </button>
+                      </NodeHint>
                     </div>
-                  )}
-                  {/* 禁用原因与占位符同款条件：未连上游 / 已连等待产物。 */}
-                  <div className="fc-node-row">
-                    <NodeHint
-                      text={hasProduct ? t("canvas.saveToLibrary") : `${t("canvas.saveToLibrary")} · ${!upstreamNode ? t("canvas.previewEmpty") : t("canvas.waitingUpstream")}`}
-                      className="is-grow"
-                    >
-                      <button
-                        className="fc-node-btn accent is-icon grow"
-                        disabled={!hasProduct}
-                        aria-label={t("canvas.saveToLibrary")}
-                        onClick={() => void saveUpstreamToLibrary(node)}
+                  ) : (
+                    <>
+                      {/* 目标已设：小绿徽章（error 转红叉，点徽章重试） */}
+                      <div
+                        className={`fc-save-badge${autoState === "error" ? " is-error" : ""}${autoState === "saving" ? " is-saving" : ""}${autoState === "error" ? " cursor-interaction" : ""}`}
+                        onClick={autoState === "error" ? () => retrySaveAuto(node.id) : undefined}
+                        role={autoState === "error" ? "button" : undefined}
+                        title={autoState === "error" ? autoError : undefined}
                       >
-                        {Icons.saveTray}
-                      </button>
-                    </NodeHint>
-                    <NodeHint
-                      text={hasProduct ? t("canvas.saveSaveAs") : `${t("canvas.saveSaveAs")} · ${!upstreamNode ? t("canvas.previewEmpty") : t("canvas.waitingUpstream")}`}
-                      className="is-grow"
-                    >
-                      <button
-                        className="fc-node-btn ghost is-icon grow"
-                        disabled={!hasProduct}
-                        aria-label={t("canvas.saveSaveAs")}
-                        onClick={() => void saveUpstreamToDir(node, upstream?.paths ?? [])}
-                      >
-                        {Icons.floppy}
-                      </button>
-                    </NodeHint>
-                  </div>
-                  {saved?.status === "saved" && saved.saved_path && (
-                    <button
-                      className="fc-node-btn ghost"
-                      onClick={() => {
-                        if (saved.target === "library") void openResourceFile(saved.saved_path);
-                      }}
-                    >
-                      {t("canvas.saveSaved", { path: saved.saved_path })}
-                    </button>
+                        <span className="fc-save-badge-dot">
+                          {autoState === "error" ? Icons.close : autoState === "saving" ? Icons.hourglass : Icons.check}
+                        </span>
+                        <span className="fc-save-badge-ico">
+                          {autoTarget === "dir" ? Icons.folderOpen : Icons.resources}
+                        </span>
+                        {autoState === "error" && <span className="fc-save-badge-err">{autoError}</span>}
+                        <NodeHint text={t("canvas.saveAutoChange")}>
+                          <button
+                            type="button"
+                            className="fc-save-badge-swap"
+                            aria-label={t("canvas.saveAutoChange")}
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              clearSaveAutoTarget(node.id);
+                            }}
+                          >
+                            {Icons.swap}
+                          </button>
+                        </NodeHint>
+                      </div>
+                      {!hasProduct ? (
+                        /* 等待产物：沙漏图形，无文字 */
+                        <div className="fc-save-wait">{Icons.hourglass}</div>
+                      ) : (
+                        <div className="fc-gen-thumbs">
+                          {upstream!.paths.map((path, i) => (
+                            <span key={i} className="fc-save-item fc-save-thumb">
+                              {node.type === "save_image" ? (
+                                <ResourceThumb path={path} className="fc-thumb" />
+                              ) : (
+                                <span className="fc-save-name">{path.split(/[\\/]/).pop()}</span>
+                              )}
+                              {autoSaved && (
+                                <span className="fc-save-tick">{Icons.check}</span>
+                              )}
+                            </span>
+                          ))}
+                        </div>
+                      )}
+                    </>
                   )}
-                  {saved?.status === "error" && saved.error && <div className="fc-gen-warn">{saved.error}</div>}
                   {nodeErrors[node.id] && <div className="fc-gen-warn">{nodeErrors[node.id]}</div>}
                 </div>
               );

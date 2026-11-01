@@ -42,12 +42,21 @@ export interface GeneratedImage {
   primary: boolean;
 }
 
-/** 保存节点状态：target = "library"（入库）或 "path"（外部另存）。 */
+/** 保存节点状态：target = "library"（入库）或 "path"（外部另存）。
+ *  自动保存管线（2026-11-01）：auto_target = "" | "library" | "dir" 预设
+ *  目标；auto_dir 记文件夹目标；auto_state = "" | "saving" | "saved" |
+ *  "error"；auto_fingerprint 为已保存产物指纹；旧节点读出时由后端
+ *  serde default 补齐。 */
 export type SaveMediaMeta = {
   status: "" | "saved" | "error" | string;
   error: string;
   target: string;
   saved_path: string;
+  auto_target?: string;
+  auto_dir?: string;
+  auto_state?: string;
+  auto_error?: string;
+  auto_fingerprint?: string;
 };
 
 export type NodeMeta =

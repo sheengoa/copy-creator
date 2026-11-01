@@ -1623,7 +1623,189 @@
   background: rgba(255, 255, 255, 0.08);
 }
 
-/* 保存节点：产物条目（缩略图/文件名 + 单张另存）。 */
+/* ── 保存节点：预设目标 → 产物自动落盘 ────────────────────── */
+
+/* 未连接 / 等待产物：虚线占位 + 单图形（无文字） */
+.fc-save-wait {
+  border: 1px dashed var(--separator);
+  border-radius: 10px;
+  height: 58px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--text-tertiary);
+}
+
+.fc-save-wait svg {
+  width: 16px;
+  height: 16px;
+}
+
+/* 连线后的目标选择：两张纯图标选项卡 */
+.fc-save-setup {
+  display: flex;
+  gap: 6px;
+}
+
+.fc-save-setup .fc-hint-anchor {
+  flex: 1;
+  display: flex;
+}
+
+.fc-save-opt {
+  flex: 1;
+  height: 58px;
+  border-radius: 10px;
+  border: 1px solid var(--separator);
+  background: var(--bg-card);
+  color: var(--text-secondary);
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: border-color 0.15s ease, background 0.15s ease, color 0.15s ease;
+}
+
+.fc-save-opt:hover {
+  border-color: color-mix(in srgb, var(--accent) 45%, transparent);
+  background: color-mix(in srgb, var(--accent) 5%, transparent);
+  color: var(--accent);
+}
+
+.fc-save-opt svg {
+  width: 18px;
+  height: 18px;
+}
+
+/* 目标已设：紧凑绿徽章（saving 沙漏微动 / error 转红叉示错，点徽章重试） */
+.fc-save-badge {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  align-self: flex-start;
+  padding: 5px 6px 5px 9px;
+  border-radius: 999px;
+  background: color-mix(in srgb, #34c759 12%, transparent);
+  border: 0.5px solid color-mix(in srgb, #34c759 35%, transparent);
+}
+
+.fc-save-badge.is-saving .fc-save-badge-dot svg {
+  animation: fc-save-pulse-ico 1.1s ease-in-out infinite;
+}
+
+@keyframes fc-save-pulse-ico {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.35; }
+}
+
+.fc-save-badge.is-error {
+  background: rgba(255, 69, 58, 0.1);
+  border-color: rgba(255, 69, 58, 0.35);
+  cursor: pointer;
+}
+
+.fc-save-badge-dot {
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  background: #34c759;
+  color: #fff;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+}
+
+.fc-save-badge.is-error .fc-save-badge-dot {
+  background: #ff453a;
+}
+
+.fc-save-badge-dot svg {
+  width: 8px;
+  height: 8px;
+}
+
+.fc-save-badge-ico {
+  color: #34c759;
+  display: inline-flex;
+}
+
+.fc-save-badge.is-error .fc-save-badge-ico {
+  color: #ff453a;
+}
+
+.fc-save-badge-ico svg {
+  width: 13px;
+  height: 13px;
+}
+
+.fc-save-badge-err {
+  flex: 1;
+  font-size: 10px;
+  color: #ff453a;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  min-width: 0;
+}
+
+.fc-save-badge-swap {
+  width: 22px;
+  height: 22px;
+  border-radius: 6px;
+  border: none;
+  background: none;
+  color: #34c759;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+}
+
+.fc-save-badge.is-error .fc-save-badge-swap {
+  color: #ff453a;
+}
+
+.fc-save-badge-swap:hover {
+  background: rgba(52, 199, 89, 0.14);
+}
+
+.fc-save-badge.is-error .fc-save-badge-swap:hover {
+  background: rgba(255, 69, 58, 0.12);
+}
+
+.fc-save-badge-swap svg {
+  width: 12px;
+  height: 12px;
+}
+
+/* 自动保存完成：产物缩略图右下角绿勾 */
+.fc-save-thumb {
+  position: relative;
+}
+
+.fc-save-tick {
+  position: absolute;
+  right: -4px;
+  bottom: -4px;
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  background: #34c759;
+  color: #fff;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  box-shadow: 0 0 0 1.5px var(--bg-card, #fff);
+}
+
+.fc-save-tick svg {
+  width: 8px;
+  height: 8px;
+}
+
+/* 保存节点：产物条目（缩略图/文件名）。 */
 .fc-save-item {
   display: inline-flex;
   flex-direction: column;

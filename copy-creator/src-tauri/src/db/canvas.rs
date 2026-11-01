@@ -147,6 +147,10 @@ pub(crate) enum NodeMeta {
     // ── 输出节点 ──
     /// 保存节点：status = idle | saved | error；target = "library"（入库）
     /// 或 "path"（外部另存）；saved_path 记资源库相对路径或绝对路径。
+    /// 自动保存管线（2026-11-01）：auto_target = "" | "library" | "dir"
+    /// 为预设目标；auto_dir 记文件夹目标；auto_state = "" | "saving" |
+    /// "saved" | "error"；auto_fingerprint 为已保存产物指纹（上游产物
+    /// 路径拼接），变化即触发自动重存；auto_error 记最近一次失败原因。
     SaveImage {
         #[serde(default)]
         status: String,
@@ -156,6 +160,16 @@ pub(crate) enum NodeMeta {
         target: String,
         #[serde(default)]
         saved_path: String,
+        #[serde(default)]
+        auto_target: String,
+        #[serde(default)]
+        auto_dir: String,
+        #[serde(default)]
+        auto_state: String,
+        #[serde(default)]
+        auto_error: String,
+        #[serde(default)]
+        auto_fingerprint: String,
     },
     SaveVideo {
         #[serde(default)]
@@ -166,6 +180,16 @@ pub(crate) enum NodeMeta {
         target: String,
         #[serde(default)]
         saved_path: String,
+        #[serde(default)]
+        auto_target: String,
+        #[serde(default)]
+        auto_dir: String,
+        #[serde(default)]
+        auto_state: String,
+        #[serde(default)]
+        auto_error: String,
+        #[serde(default)]
+        auto_fingerprint: String,
     },
     SaveAudio {
         #[serde(default)]
@@ -176,6 +200,16 @@ pub(crate) enum NodeMeta {
         target: String,
         #[serde(default)]
         saved_path: String,
+        #[serde(default)]
+        auto_target: String,
+        #[serde(default)]
+        auto_dir: String,
+        #[serde(default)]
+        auto_state: String,
+        #[serde(default)]
+        auto_error: String,
+        #[serde(default)]
+        auto_fingerprint: String,
     },
     /// 预览节点：内容来自上游（生成产物/加载媒体），metadata 暂无状态。
     PreviewImage {},
@@ -274,18 +308,33 @@ impl NodeMeta {
                 error: String::new(),
                 target: String::new(),
                 saved_path: String::new(),
+                auto_target: String::new(),
+                auto_dir: String::new(),
+                auto_state: String::new(),
+                auto_error: String::new(),
+                auto_fingerprint: String::new(),
             }),
             "save_video" => Ok(NodeMeta::SaveVideo {
                 status: String::new(),
                 error: String::new(),
                 target: String::new(),
                 saved_path: String::new(),
+                auto_target: String::new(),
+                auto_dir: String::new(),
+                auto_state: String::new(),
+                auto_error: String::new(),
+                auto_fingerprint: String::new(),
             }),
             "save_audio" => Ok(NodeMeta::SaveAudio {
                 status: String::new(),
                 error: String::new(),
                 target: String::new(),
                 saved_path: String::new(),
+                auto_target: String::new(),
+                auto_dir: String::new(),
+                auto_state: String::new(),
+                auto_error: String::new(),
+                auto_fingerprint: String::new(),
             }),
             "preview_image" => Ok(NodeMeta::PreviewImage {}),
             "preview_video" => Ok(NodeMeta::PreviewVideo {}),
