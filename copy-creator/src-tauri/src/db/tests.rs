@@ -8724,3 +8724,88 @@ mod canvas_tests {
         assert_eq!(n, 0);
     }
 }
+
+#[cfg(test)]
+mod ai_channel_tests {
+    use crate::db::{
+        ensure_schema, migrate_legacy_ai_channels, AI_CHANNEL_SCHEMA_SQL, Connection,
+    };
+
+    fn conn_with_legacy(provider: &str, openai_key: &str, gemini_key: &str) -> Connection {
+        let conn = Connection::open_in_memory().unwrap();
+        ensure_schema(&conn).unwrap();
+        conn.execute(
+            "INSERT OR REPLACE INTO settings (key, value) VALUES ('ai_provider', ?1)",
+            [provider],
+        )
+        .unwrap();
+        conn.execute(
+            "INSERT OR REPLACE INTO settings (key, value) VALUES ('ai_openai_key', ?1)",
+            [openai_key],
+        )
+        .unwrap();
+        conn.execute(
+            "INSERT OR REPLACE INTO settings (key, value) VALUES ('ai_gemini_key', ?1)",
+            [gemini_key],
+        )
+        .unwrap();
+        conn
+    }
+
+    fn channels(conn: &Connection) -> Vec<(String, i64)> {
+        let mut stmt = conn
+            .prepare("SELECT protocol, sort_order FROM ai_channels ORDER BY sort_order ASC")
+            .unwrap();
+        stmt.query_map([], |row| Ok((row.get::<_, String>(0)?, row.get::<_, i64>(1)?)))
+            .unwrap()
+            .collect::<Result<Vec<_>, _>>()
+            .unwrap()
+    }
+
+    #[test]
+    fn legacy_both_keys_migrate_with_provider_first() {
+        let conn = conn_with_legacy("openai", "sk-legacy", "g-legacy");
+        migrate_legacy_ai_channels(&conn);
+        assert_eq!(channels(&conn), vec![("openai".into(), 0), ("gemini".into(), 1)]);
+        // 旧全局模型挂到 OpenAI 渠道
+        let model: String = conn
+            .query_row("SELECT model FROM ai_channels WHERE protocol = 'openai'", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(model, "");
+    }
+
+    #[test]
+    fn legacy_gemini_provider_orders_gemini_first() {
+        let conn = conn_with_legacy("gemini", "sk-legacy", "g-legacy");
+        migrate_legacy_ai_channels(&conn);
+        assert_eq!(channels(&conn), vec![("gemini".into(), 0), ("openai".into(), 1)]);
+    }
+
+    #[test]
+    fn legacy_migration_is_idempotent_and_skips_empty_keys() {
+        let conn = conn_with_legacy("openai", "sk-legacy", "");
+        migrate_legacy_ai_channels(&conn);
+        assert_eq!(channels(&conn).len(), 1);
+        // 非空表再跑一遍不再追加
+        migrate_legacy_ai_channels(&conn);
+        assert_eq!(channels(&conn).len(), 1);
+        // 完全没有旧配置时不建渠道
+        let fresh = conn_with_legacy("openai", "", "");
+        migrate_legacy_ai_channels(&fresh);
+        assert_eq!(channels(&fresh).len(), 0);
+    }
+
+    #[test]
+    fn ensure_schema_seeds_scheduling_settings() {
+        let conn = Connection::open_in_memory().unwrap();
+        conn.execute_batch(AI_CHANNEL_SCHEMA_SQL).unwrap();
+        let strategy: String = conn
+            .query_row("SELECT value FROM settings WHERE key = 'ai_strategy'", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(strategy, "balance");
+        let concurrency: String = conn
+            .query_row("SELECT value FROM settings WHERE key = 'ai_concurrency'", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(concurrency, "4");
+    }
+}

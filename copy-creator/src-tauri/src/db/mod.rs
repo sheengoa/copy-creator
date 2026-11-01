@@ -127,6 +127,7 @@ fn category_sql(category: &Option<String>) -> (String, String) {
 // 命令经 pub use 保持在 `db::` 路径下，lib.rs 注册路径不变；
 // 域内助手为 pub(crate)，跨域调用与测试经 crate::db:: 可达。
 mod annotation;
+mod ai_channel;
 mod apikeys;
 mod canvas;
 mod clipboard;
@@ -140,6 +141,7 @@ mod text_version;
 mod trash;
 mod trash_backend;
 pub(crate) use annotation::*;
+pub(crate) use ai_channel::*;
 pub(crate) use apikeys::*;
 pub(crate) use canvas::*;
 pub(crate) use clipboard::*;
@@ -1172,6 +1174,12 @@ pub(crate) fn ensure_schema(conn: &Connection) -> Result<(), Box<dyn std::error:
     conn.execute_batch(CANVAS_SCHEMA_SQL)?;
     // 分组列后加（旧库无此列）：ensure_column 幂等补齐，存量行回填 '[]'。
     ensure_column(conn, "canvases", "groups", "TEXT NOT NULL DEFAULT '[]'");
+
+    // 画布 AI 渠道域 schema 与调度设置种子；随后把旧单渠道配置
+    // （ai_openai_* / ai_gemini_*）迁移为渠道条目（幂等，失败不阻断启动）。
+    conn.execute_batch(AI_CHANNEL_SCHEMA_SQL)?;
+    conn.execute_batch(AI_SCHEDULING_SETTING_SEED_SQL)?;
+    migrate_legacy_ai_channels(conn);
 
     // 一致性工作流扩展列：新库随建表语句带全列，这里只为旧库幂等补齐
     // （ensure_column 存在即跳过）。与「关键列存在性补齐」同模式——
