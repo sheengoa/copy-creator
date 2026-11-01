@@ -5,7 +5,7 @@ import { useTranslation } from "react-i18next";
 import { useShallow } from "zustand/react/shallow";
 import { useProjectStore, type ProjectEpisode } from "../../stores/projectStore";
 import { ConfirmDialog } from "../../components/ConfirmDialog";
-import IosSelect from "../../components/IosSelect";
+import { IosSelect } from "../../components/ui";
 import { ResourceImage } from "./ResourceMedia";
 import ProjectLibraryPanel from "./ProjectLibraryPanel";
 import ProjectCanvas from "./ProjectCanvas";

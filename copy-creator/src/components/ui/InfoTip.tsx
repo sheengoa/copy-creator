@@ -1,12 +1,13 @@
 import { useTranslation } from "react-i18next";
 
-// 设置行尾的 ⓘ 信息图标：完整说明收进悬停气泡（原生 title），页面只保留
+// 行尾 ⓘ 信息图标：完整说明收进悬停气泡（原生 title），页面只保留
 // 控件本身。键盘可达：可聚焦，聚焦即显示同款气泡文本（aria-label）。
+// 设置页静态说明必须用它（架构守卫规则 22），不得新增可见 hint 元素。
 export function InfoTip({ text }: { text: string }) {
   const { t } = useTranslation();
   return (
     <span
-      className="settings-info-tip"
+      className="ui-info-tip"
       title={text}
       aria-label={`${t("common.moreInfo")}: ${text}`}
       role="note"

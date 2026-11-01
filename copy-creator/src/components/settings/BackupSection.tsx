@@ -5,7 +5,7 @@ import { useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { invoke } from "@tauri-apps/api/core";
 import { invokeNativeDialog } from "../../utils/nativeDialogGuard";
-import { InfoTip } from "./InfoTip";
+import { InfoTip } from "../ui";
 import { listen } from "@tauri-apps/api/event";
 import { relaunch } from "@tauri-apps/plugin-process";
 

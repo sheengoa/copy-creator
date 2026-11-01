@@ -24,7 +24,7 @@ import { useSettingsStore, RESOURCE_CARD_SIZE_MAX, RESOURCE_CARD_SIZE_MIN } from
 import { useMultiSelect } from "../hooks/useMultiSelect";
 import { useArrowKeyNav } from "../hooks/useArrowKeyNav";
 import { Icons } from "../components/Icons";
-import IosSelect from "../components/IosSelect";
+import { IosSelect } from "../components/ui";
 import SearchInput from "../components/SearchInput";
 import BatchSelectionBar from "../components/BatchSelectionBar";
 import type { ClipboardRecord, ResourceFolder } from "../types";

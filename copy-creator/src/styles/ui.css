@@ -1,0 +1,261 @@
+/* === UI 控件基准样式 === */
+/* 本文件是设置页控件统一基准的样式来源（src/components/ui/README.md 是
+   使用规则）。例外：IosSelect 的 .ios-select-* 仍在 components.css（既有
+   跨页共享实现），输入框基准 .settings-input/-textarea 仍在 settings.css。
+   新功能控件一律复用 ui/ 组件与本文件的 ui-* 类；禁止再手写第二套
+   开关/分段/按钮（由 src/testing/architectureGuard.test.ts 锁定）。
+   与其他全局样式的类名隔离由 src/testing/styleIsolation.test.ts 锁定。 */
+
+/* --- 开关（ui/Toggle）：40×24，亮色开态 #333、暗色开态白 --- */
+.ui-switch {
+  width: 40px;
+  height: 24px;
+  border-radius: 12px;
+  border: none;
+  cursor: pointer;
+  position: relative;
+  transition: background 0.25s cubic-bezier(0.22, 1, 0.36, 1);
+  flex-shrink: 0;
+  outline: none;
+  padding: 0;
+}
+
+.ui-switch.on {
+  background: #333;
+}
+
+.ui-switch.off {
+  background: rgba(0, 0, 0, 0.15);
+}
+
+[data-theme="dark"] .ui-switch.off {
+  background: rgba(255, 255, 255, 0.15);
+}
+
+[data-theme="dark"] .ui-switch.on {
+  background: #fff;
+}
+
+[data-theme="dark"] .ui-switch.on .ui-switch-thumb {
+  background: #333;
+}
+
+.ui-switch-thumb {
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  width: 20px;
+  height: 20px;
+  border-radius: 10px;
+  background: white;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.18), 0 0 0 0.5px rgba(0, 0, 0, 0.04);
+  transition: transform 0.25s cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+.ui-switch.on .ui-switch-thumb {
+  transform: translateX(16px);
+}
+
+.ui-switch:active .ui-switch-thumb {
+  width: 23px;
+}
+
+.ui-switch.on:active .ui-switch-thumb {
+  transform: translateX(13px);
+}
+
+.ui-switch:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+/* --- 分段（ui/Segmented）：灰槽 + 白卡浮起，正文字体统一 --- */
+.ui-seg {
+  display: flex;
+  gap: 2px;
+  background: var(--seg-track-bg);
+  border-radius: 9px;
+  padding: 2px;
+}
+
+.ui-seg-item {
+  padding: 4px 12px;
+  border-radius: 6px;
+  border: none;
+  background: transparent;
+  color: var(--text-secondary);
+  font-family: var(--font);
+  font-size: var(--text-sm);
+  font-weight: var(--weight-semibold);
+  cursor: pointer;
+  white-space: nowrap;
+  transition: all 0.2s cubic-bezier(0.83, 0, 0.17, 1);
+}
+
+.ui-seg-item.active {
+  background: var(--seg-item-active-bg);
+  color: var(--text-primary);
+  box-shadow: var(--seg-item-active-shadow);
+}
+
+.ui-seg-item:active {
+  transform: scale(0.95);
+}
+
+/* --- 按钮家族：软灰次要 / 凸起主操作 / 红字危险 --- */
+.ui-btn {
+  height: 28px;
+  padding: 0 13px;
+  border: none;
+  border-radius: 8px;
+  background: var(--tool-btn-bg);
+  color: var(--nav-item-active-color);
+  font-family: var(--font);
+  font-size: var(--text-sm);
+  font-weight: var(--weight-medium);
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  white-space: nowrap;
+  transition: background 0.15s;
+}
+
+.ui-btn:hover {
+  background: var(--tool-btn-hover-bg);
+}
+
+.ui-btn:disabled {
+  opacity: 0.6;
+  cursor: default;
+}
+
+.ui-btn svg {
+  width: 13px;
+  height: 13px;
+}
+
+.ui-btn-primary {
+  height: 30px;
+  padding: 0 16px;
+  border: none;
+  border-radius: 10px;
+  background: var(--btn-card-bg);
+  color: var(--text-primary);
+  font-family: var(--font);
+  font-size: var(--text-sm);
+  font-weight: var(--weight-semibold);
+  cursor: pointer;
+  box-shadow: var(--btn-card-shadow);
+  transition: all 0.3s cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+.ui-btn-primary:hover:not(:disabled) {
+  transform: translateY(-1px);
+  box-shadow: var(--btn-card-shadow-hover);
+}
+
+.ui-btn-primary:active:not(:disabled) {
+  transform: scale(0.96);
+}
+
+.ui-btn-primary:disabled {
+  opacity: 0.6;
+  cursor: default;
+}
+
+.ui-btn-danger {
+  height: 28px;
+  padding: 0 12px;
+  border: none;
+  border-radius: 8px;
+  background: none;
+  color: var(--danger);
+  font-family: var(--font);
+  font-size: var(--text-sm);
+  font-weight: var(--weight-medium);
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  white-space: nowrap;
+  transition: background 0.15s;
+}
+
+.ui-btn-danger:hover {
+  background: rgba(255, 59, 48, 0.12);
+}
+
+[data-theme="dark"] .ui-btn-danger:hover {
+  background: rgba(255, 59, 48, 0.16);
+}
+
+.ui-btn-danger svg {
+  width: 13px;
+  height: 13px;
+}
+
+/* --- 滑杆：轨道 r999 + thumb 18 + 按压缩放（原两处滑杆归一） --- */
+.ui-slider {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 100%;
+  height: 4px;
+  padding: 0;
+  border: none;
+  border-radius: 999px;
+  background: var(--chip-hover-bg);
+  outline: none;
+  cursor: pointer;
+}
+
+.ui-slider::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  background: #FFFFFF;
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.25), 0 0 0 0.5px rgba(0, 0, 0, 0.04);
+  cursor: pointer;
+  transition: transform 0.15s cubic-bezier(0.83, 0, 0.17, 1);
+}
+
+.ui-slider::-webkit-slider-thumb:active {
+  transform: scale(1.12);
+}
+
+/* --- 提示三形态：说明行 / 错误文字 / 行尾 ⓘ（悬停走原生 title） --- */
+.ui-sub {
+  font-size: var(--text-xs);
+  color: var(--text-secondary);
+  line-height: 1.45;
+  margin-top: 2px;
+}
+
+.ui-error {
+  margin-top: 8px;
+  font-size: var(--text-xs);
+  line-height: 1.4;
+  color: var(--danger);
+}
+
+.ui-info-tip {
+  display: inline-flex;
+  align-items: center;
+  margin-left: 6px;
+  color: var(--text-tertiary);
+  cursor: help;
+  transition: color 120ms ease-out;
+}
+
+.ui-info-tip:hover,
+.ui-info-tip:focus {
+  color: var(--text-secondary);
+  outline: none;
+}
+
+.ui-info-tip svg {
+  width: 13px;
+  height: 13px;
+}

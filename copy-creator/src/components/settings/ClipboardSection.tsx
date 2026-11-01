@@ -1,8 +1,7 @@
 import { useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
-import IosSelect from "../IosSelect";
+import { IosSelect, InfoTip } from "../ui";
 import { useSettingsStore } from "../../stores/settingsStore";
-import { InfoTip } from "./InfoTip";
 import { PasteEnvironmentCard } from "./PasteEnvironmentSection";
 
 type PasteMode = "normal" | "terminal";

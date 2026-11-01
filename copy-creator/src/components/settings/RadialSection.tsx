@@ -1,5 +1,5 @@
 import { useTranslation } from "react-i18next";
-import { InfoTip } from "./InfoTip";
+import { InfoTip } from "../ui";
 import {
   RADIAL_SCALE_DEFAULT,
   RADIAL_SCALE_MAX,

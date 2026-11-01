@@ -1,7 +1,7 @@
 import { useTranslation } from "react-i18next";
 import { useSettingsStore, type ContentSortMode } from "../../stores/settingsStore";
 import type { ThemePreference } from "../../utils/theme";
-import { InfoTip } from "./InfoTip";
+import { InfoTip } from "../ui";
 
 interface GeneralSectionProps {
   localLang: string;

@@ -10,9 +10,14 @@ interface IosSelectProps {
   options: Option[];
   onChange: (value: string) => void;
   placeholder?: string;
+  /** 附加到根容器的类（如窄宽度的货币下拉） */
+  className?: string;
+  disabled?: boolean;
 }
 
-export default function IosSelect({ value, options, onChange, placeholder }: IosSelectProps) {
+// 设置页下拉框基准：触发器 + 弹出面板（选中淡蓝 + 对勾）。
+// 样式为 components.css 的 .ios-select-*（既有跨页共享实现，保持不动）。
+export default function IosSelect({ value, options, onChange, placeholder, className, disabled }: IosSelectProps) {
   const [open, setOpen] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
   const dropdownRef = useRef<HTMLDivElement>(null);
@@ -52,11 +57,12 @@ export default function IosSelect({ value, options, onChange, placeholder }: Ios
   }, [open]);
 
   return (
-    <div className="ios-select" ref={ref}>
+    <div className={className ? `ios-select ${className}` : "ios-select"} ref={ref}>
       <button
         className={`ios-select-trigger${open ? " open" : ""}`}
         onClick={() => setOpen(!open)}
         type="button"
+        disabled={disabled}
       >
         <span className="ios-select-value">{selected?.label || placeholder}</span>
         <span className={`ios-select-arrow${open ? " open" : ""}`}>

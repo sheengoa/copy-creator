@@ -455,7 +455,7 @@ describe("架构守卫：领域规则必须全局共享", () => {
   it("规则 22：设置页静态说明必须用行尾 InfoTip，禁止可见 hint 元素回归", () => {
     // 回归锚点：设置页随功能增长不断堆积可见长注释（settings-row-hint /
     // settings-storage-hint），纵向噪声膨胀后统一收进行尾 InfoTip 悬停
-    // 气泡（components/settings/InfoTip.tsx）。此后设置组件里「整段内容
+    // 气泡（components/ui/InfoTip.tsx）。此后设置组件里「整段内容
     // 恰为一条 *Hint 文案」的静态 hint 元素一律禁止；操作反馈（进度、
     // 重启提示）、动作流内警告与安装命令等可操作/动态信息不受限。
     const settingsDir = join(frontRoot, "components/settings");

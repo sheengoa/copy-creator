@@ -4,7 +4,7 @@ import { invoke } from "@tauri-apps/api/core";
 import { invokeNativeDialog } from "../../utils/nativeDialogGuard";
 import { relaunch } from "@tauri-apps/plugin-process";
 import { ConfirmDialog } from "../ConfirmDialog";
-import { InfoTip } from "./InfoTip";
+import { InfoTip } from "../ui";
 
 interface StorageSectionProps {
   storagePath: string;
