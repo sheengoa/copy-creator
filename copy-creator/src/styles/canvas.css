@@ -826,6 +826,14 @@
   background: color-mix(in srgb, var(--accent) 6%, transparent);
   border: 1px solid var(--separator);
   animation: fc-au-in 0.45s cubic-bezier(0.22, 1, 0.36, 1) 0.14s backwards;
+  /* 执行中（is-solo）→ 谢幕回落：高度平滑交接，节点总高基本不变。 */
+  transition: height 0.32s cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+/* 执行中流光独占：槽位行退场（2026-11-01 定案），往下拉伸补回一行
+   缩略图的高度（96 + 52 + 间隙），节点执行前后总高基本不变。 */
+.fc-root .fc-aurora.is-solo {
+  height: 152px;
 }
 
 .fc-root .fc-aurora.is-out {

@@ -2986,27 +2986,30 @@ export default function FreeCanvas({ canvasId }: { canvasId: string }) {
                   </div>
                   {wait && wait.phase !== "land" && (
                     <>
+                      {/* 生成等待编排（2026-11-01 定案）：执行中流光独占
+                          （is-solo 拉伸补位），槽位行整行退场——连已出图
+                          的缩略图也不露面；到齐进入谢幕（fuse/bloom）流
+                          光回落，缩略图行此刻才现身，exit 带 is-out 淡
+                          出交接完成态，失败红叉同场定格。 */}
                       <GenAuroraStage
                         phase={wait.phase}
                         total={prog.total}
                         received={prog.received}
                         celebrated={wait.celebrated}
+                        solo={wait.phase === "wait"}
                       />
-                      <div className={`fc-gen-slots${wait.phase === "exit" ? " is-out" : ""}`}>
-                        {Array.from({ length: prog.total }, (_, i) => {
-                          const url = prog.previews[i];
-                          // 谢幕退场带失败槽：空位红叉定格（全部失败/部分失败
-                          // 同款）。执行中的未到槽位不再渲染「…」小方块占位
-                          // （用户 2026-11-01 定案：流光即进行中，出图才露面），
-                          // 空容器零高塌缩不占位。
-                          const failed = wait.phase === "exit" && wait.errors > 0;
-                          return url ? (
-                            <img key={i} className="fc-gen-slot filled" src={url} alt="" draggable={false} />
-                          ) : failed ? (
-                            <span key={i} className="fc-gen-slot pending is-err">×</span>
-                          ) : null;
-                        })}
-                      </div>
+                      {wait.phase !== "wait" && (
+                        <div className={`fc-gen-slots${wait.phase === "exit" ? " is-out" : ""}`}>
+                          {Array.from({ length: prog.total }, (_, i) => {
+                            const url = prog.previews[i];
+                            return url ? (
+                              <img key={i} className="fc-gen-slot filled" src={url} alt="" draggable={false} />
+                            ) : wait.errors > 0 ? (
+                              <span key={i} className="fc-gen-slot pending is-err">×</span>
+                            ) : null;
+                          })}
+                        </div>
+                      )}
                     </>
                   )}
                   {/* 完成态产物区（2026-11-01 定稿）：主图大图 + 横滑胶片条。
@@ -3798,11 +3801,14 @@ function GenAuroraStage({
   total,
   received,
   celebrated,
+  solo,
 }: {
   phase: GenWaitPhase;
   total: number;
   received: number;
   celebrated: boolean;
+  /** 执行中独占态：槽位行退场（2026-11-01 定案），流光拉伸补位。 */
+  solo?: boolean;
 }) {
   const blobs = useMemo(() => buildAuroraBlobs(), []);
   const [beat, setBeat] = useState(0);
@@ -3816,6 +3822,7 @@ function GenAuroraStage({
   }, [received]);
   const p = total > 0 ? received / total : 0;
   const cls = ["fc-aurora"];
+  if (solo) cls.push("is-solo");
   if (p >= 0.5) cls.push("is-half");
   // 融合/扩散态一路保留到淡出（celebrated）：光满着谢幕，不在退场时散开。
   const merged = phase === "fuse" || phase === "bloom" || (phase === "exit" && celebrated);
