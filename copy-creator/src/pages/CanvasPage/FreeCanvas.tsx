@@ -2090,8 +2090,16 @@ export default function FreeCanvas({ canvasId }: { canvasId: string }) {
     }
   };
 
+  /** 自动保存在飞锁：节点 id 级，跨 StrictMode 双跑与快速重渲染同拍生效。 */
+  const autoSaveInFlightRef = useRef<Set<string>>(new Set());
+
   const runAutoSave = useCallback(
     async (nodeId: string, target: "library" | "dir", dir: string, paths: string[], fingerprint: string) => {
+      // 在飞锁（ref 级，同拍即生效）：StrictMode 下 effect 双跑共用同一
+      // 快照，auto_state 检查拦不住同一拍的重入，这里保证单节点不并发
+      // 导出（开发模式防双份入库，生产同样受益）。
+      if (autoSaveInFlightRef.current.has(nodeId)) return;
+      autoSaveInFlightRef.current.add(nodeId);
       writeSaveMeta(nodeId, { auto_state: "saving", auto_error: "" });
       try {
         const base = dir.replace(/[\\/]+$/, "");
@@ -2114,6 +2122,8 @@ export default function FreeCanvas({ canvasId }: { canvasId: string }) {
       } catch (err) {
         // 失败不落指纹：徽章转红示错，点徽章重试（避免持续失败时自动重试风暴）
         writeSaveMeta(nodeId, { auto_state: "error", auto_error: String(err) });
+      } finally {
+        autoSaveInFlightRef.current.delete(nodeId);
       }
     },
     [writeSaveMeta],

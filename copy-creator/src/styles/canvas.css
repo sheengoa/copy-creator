@@ -1358,7 +1358,9 @@
 .fc-stepper-btn:focus-visible,
 .fc-combo-toggle:focus-visible,
 .fc-combo-display:focus-visible,
-.fc-load-clear:focus-visible {
+.fc-load-clear:focus-visible,
+.fc-save-dot:focus-visible,
+.fc-save-opt:focus-visible {
   outline: 2px solid color-mix(in srgb, var(--node-accent, var(--accent)) 55%, transparent);
   outline-offset: 1px;
 }
@@ -1772,13 +1774,13 @@
 }
 
 .fc-save-dot.is-error {
-  border-color: rgba(255, 69, 58, 0.55);
-  color: #ff453a;
+  border-color: color-mix(in srgb, var(--danger) 55%, transparent);
+  color: var(--danger);
 }
 
 .fc-save-dot.is-error:hover {
-  background: #ff453a;
-  border-color: #ff453a;
+  background: var(--danger);
+  border-color: var(--danger);
   color: #fff;
 }
 
