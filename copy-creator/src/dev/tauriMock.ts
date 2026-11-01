@@ -241,12 +241,19 @@ const db = {
     {
       id: "cn-2", canvas_id: "cv-1", type: "gen_image" as const, title: "",
       pos_x: 480, pos_y: 110, width: 280, height: null,
-      metadata: { kind: "gen_image", params: { model: "", size: "", count: 2 }, status: "idle", error: "", images: [] },
+      metadata: { kind: "gen_image", params: { model: "", size: "", count: 4 }, status: "idle", error: "", images: [] },
+      resource_path: "", created_at: ts(), updated_at: ts(),
+    },
+    {
+      id: "cn-3", canvas_id: "cv-1", type: "save_image" as const, title: "",
+      pos_x: 860, pos_y: 150, width: 250, height: null,
+      metadata: { kind: "save_image", status: "", error: "", target: "", saved_path: "" },
       resource_path: "", created_at: ts(), updated_at: ts(),
     },
   ] as MockCanvasNode[],
   canvas_connections: [
     { id: "cc-1", canvas_id: "cv-1", from_node: "cn-1", to_node: "cn-2", to_port: "text", created_at: ts() },
+    { id: "cc-2", canvas_id: "cv-1", from_node: "cn-2", to_node: "cn-3", to_port: "image", created_at: ts() },
   ] as MockCanvasConnection[],
   // 画布 AI 渠道（设置页）：两条示例渠道，覆盖健康/未测试两种状态，
   // 供浏览器验证渠道管理与调度交互。
@@ -296,6 +303,133 @@ function canvasSummaryOf(canvas: MockCanvas) {
 const libraryRoot = "C:\\mock-library";
 const clone = <T,>(value: T): T => JSON.parse(JSON.stringify(value)) as T;
 const assetById = (id: string) => db.assets.find((a) => a.id === id);
+
+// ── 事件回传通道：installBrowserMock 拦截 plugin:event|listen 登记回调，
+// mockEmit 按 {event,id,payload} 广播——逐张回传/canvas-changed 都走它。
+
+type MockEventListener = (e: { event: string; id: number; payload: unknown }) => void;
+const mockEventListeners: { event: string; cb: MockEventListener }[] = [];
+let mockEventSeq = 1;
+
+function mockEmit(event: string, payload: unknown): void {
+  for (const l of mockEventListeners) {
+    if (l.event === event) l.cb({ event, id: mockEventSeq++, payload });
+  }
+}
+
+/** 生成模拟运行句柄（供取消）。 */
+const mockGenRuns = new Map<string, { cancelled: boolean }>();
+
+/** 程序化产物图：渐变 + 光斑 dataURL（与原型 makeThumb 同思路）。 */
+function makeMockThumb(hue: number): string {
+  const c = document.createElement("canvas");
+  c.width = 104;
+  c.height = 104;
+  const g = c.getContext("2d");
+  if (!g) return "";
+  const grad = g.createLinearGradient(0, 0, 104, 104);
+  grad.addColorStop(0, `hsl(${hue} 72% 66%)`);
+  grad.addColorStop(1, `hsl(${hue + 46} 78% 38%)`);
+  g.fillStyle = grad;
+  g.fillRect(0, 0, 104, 104);
+  for (let i = 0; i < 4; i++) {
+    g.beginPath();
+    g.fillStyle = `hsla(${hue + 30 + i * 55} 92% 78% / 0.5)`;
+    g.arc(18 + Math.random() * 70, 16 + Math.random() * 72, 12 + Math.random() * 18, 0, 6.29);
+    g.fill();
+  }
+  g.beginPath();
+  g.fillStyle = "rgba(255,255,255,0.85)";
+  g.arc(76, 26, 9, 0, 6.29);
+  g.fill();
+  return c.toDataURL("image/png");
+}
+
+const MOCK_THUMBS = [214, 262, 22, 160, 330, 46, 190, 286, 100, 8, 244, 32, 58, 176, 306].map(makeMockThumb);
+
+/** ai_generate_image 模拟（2026-11-01 生成等待动效验证）：generating 落库
+ *  → canvas-changed → started 事件 → 逐张回传（间隔 620-1140ms，与真实
+ *  并发节奏同量级）→ 汇总落库 + canvas-changed → 命令 resolve（阻塞到
+ *  全部槽位落定，与后端一致）。走向由 window.__tauriMockGenMode 控制：
+ *  done 全成（默认）/ fail 全败 / partial 指定槽失败；取消走
+ *  ai_cancel_generation（被取消的槽位不回传，与后端 __cancelled__ 一致）。 */
+function simulateAiGenerateImage(args: Record<string, unknown>): Promise<unknown> {
+  const nodeId = String(args.nodeId ?? "");
+  const node = db.canvas_nodes.find((n) => n.id === nodeId);
+  if (!node) throw new Error("节点不存在");
+  const meta = node.metadata as { kind: string; params: { count: number }; status: string };
+  if (meta.kind !== "gen_image") throw new Error("节点 metadata 类型异常");
+  if (meta.status === "generating") throw new Error("该节点正在生成中，请等它完成或先取消");
+  const count = Math.min(15, Math.max(1, meta.params.count || 1));
+  const requestId = nextId("req");
+  const mode = (window as unknown as { __tauriMockGenMode?: string }).__tauriMockGenMode ?? "done";
+  node.metadata = { ...node.metadata, status: "generating", error: "", images: [] };
+  node.updated_at = ts();
+  mockEmit("canvas-changed", null);
+  mockEmit("canvas-generation-started", { requestId, nodeId });
+
+  const run = { cancelled: false };
+  mockGenRuns.set(requestId, run);
+  const received: { slot: number; url: string }[] = [];
+  const errors: string[] = [];
+  let slotDelay = 900;
+  const schedule: { at: number; slot: number; fail: boolean }[] = [];
+  for (let slot = 0; slot < count; slot++) {
+    const fail = mode === "fail" || (mode === "partial" && slot === 1);
+    schedule.push({ at: slotDelay, slot, fail });
+    slotDelay += 620 + Math.floor(Math.random() * 520);
+  }
+  const finalizeAt = slotDelay + 300;
+  return new Promise((resolve) => {
+    for (const { at, slot, fail } of schedule) {
+      window.setTimeout(() => {
+        if (run.cancelled) return; // 取消的槽位不回传（与后端语义一致）
+        if (fail) {
+          const err = "模拟生成失败：请求超时（60s）";
+          errors.push(err);
+          mockEmit("canvas-generation-progress", { requestId, nodeId, slot, error: err });
+          return;
+        }
+        const url = MOCK_THUMBS[slot % MOCK_THUMBS.length];
+        received.push({ slot, url });
+        mockEmit("canvas-generation-progress", { requestId, nodeId, slot, dataUrl: url });
+      }, at);
+    }
+    window.setTimeout(() => {
+      mockGenRuns.delete(requestId);
+      const sorted = [...received].sort((a, b) => a.slot - b.slot);
+      const saved = sorted.map(({ url }, idx) => ({
+        width: 1024,
+        height: 1024,
+        bytes: 1024,
+        resource_path: url,
+        primary: idx === 0,
+      }));
+      const cancelled = run.cancelled;
+      const status = saved.length === 0 || cancelled || errors.length > 0 ? "error" : "done";
+      const errorMsg =
+        cancelled
+          ? `已取消（保留 ${saved.length} 张已完成）`
+          : errors.length === 0
+            ? ""
+            : saved.length === 0
+              ? errors[0]
+              : `${saved.length}/${count} 张成功：${errors[0]}`;
+      node.metadata = { ...node.metadata, status, error: errorMsg, images: saved };
+      node.updated_at = ts();
+      mockEmit("canvas-changed", null);
+      resolve({
+        requestId,
+        status,
+        error: errorMsg,
+        images: clone(saved),
+        cancelled,
+        canvasName: "示例画布",
+        nodeName: "图片",
+      });
+    }, finalizeAt);
+  });
+}
 
 function overviewOf(episodeId: string) {
   const episode = db.episodes.find((e) => e.id === episodeId);
@@ -828,10 +962,13 @@ function handleInvoke(cmd: string, args: Record<string, unknown>): unknown {
       // 浏览器环境没有系统对话框：返回空串＝用户取消（前端静默）。
       return "";
     case "ai_generate_image":
-      // 浏览器验证环境无 AI 配置：直接报错（节点上可见错误提示）。
-      throw new Error("浏览器验证环境未配置 AI 生图");
-    case "ai_cancel_generation":
+      // 完整生成模拟：事件逐张回传 + 阻塞到完成（对齐后端时序）。
+      return simulateAiGenerateImage(args);
+    case "ai_cancel_generation": {
+      const run = mockGenRuns.get(String(args.requestId ?? ""));
+      if (run) run.cancelled = true;
       return null;
+    }
 
     // ── 画布 AI 渠道（设置页，内存 CRUD） ──
     case "list_ai_channels":
@@ -931,6 +1068,16 @@ export function installBrowserMock(): void {
     },
     invoke: (cmd: string, args?: Record<string, unknown>) => {
       try {
+        // 事件插件命令：listen 把 handler 回调登记进 mockEventListeners，
+        // 供 mockEmit 广播（unlisten 直接吞掉）。
+        if (cmd === "plugin:event|listen") {
+          const cb = callbacks.get(Number(args?.handler));
+          if (cb && typeof args?.event === "string") {
+            mockEventListeners.push({ event: args.event, cb: cb as MockEventListener });
+          }
+          return Promise.resolve(mockEventSeq++);
+        }
+        if (cmd === "plugin:event|unlisten") return Promise.resolve(null);
         return Promise.resolve(handleInvoke(cmd, args ?? {}));
       } catch (error) {
         return Promise.reject(error);
