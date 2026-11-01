@@ -5,7 +5,7 @@ import { useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { invoke } from "@tauri-apps/api/core";
 import { invokeNativeDialog } from "../../utils/nativeDialogGuard";
-import { InfoTip } from "../ui";
+import { InfoTip, Toggle } from "../ui";
 import { listen } from "@tauri-apps/api/event";
 import { relaunch } from "@tauri-apps/plugin-process";
 
@@ -149,28 +149,28 @@ export function BackupSection() {
           </div>
           <div className="settings-storage-row">
             <button
-              className="settings-storage-btn"
+              className="ui-btn"
               onClick={() => void handleExport()}
               disabled={exporting}
             >
               {exporting ? t("settings.backupExporting") : t("settings.backupExportAction")}
             </button>
             {exporting && (
-              <button className="settings-storage-btn" onClick={() => void handleCancelExport()}>
+              <button className="ui-btn" onClick={() => void handleCancelExport()}>
                 {t("settings.backupCancelExport")}
               </button>
             )}
             {exporting && <span className="settings-storage-hint">{t("settings.backupProcessed", { count: exportProcessed })}</span>}
           </div>
-          <label className="settings-storage-hint" style={{ display: "flex", alignItems: "center", gap: 6 }}>
-            <input
-              type="checkbox"
+          <div className="settings-storage-hint" style={{ display: "flex", alignItems: "center", gap: 6 }}>
+            <Toggle
               checked={includeLibrary}
+              onChange={setIncludeLibrary}
               disabled={exporting}
-              onChange={(e) => setIncludeLibrary(e.target.checked)}
+              ariaLabel={t("settings.backupIncludeLibrary")}
             />
             <span>{t("settings.backupIncludeLibrary")}</span>
-          </label>
+          </div>
         </div>
 
         <div className="settings-row vertical">
@@ -180,7 +180,7 @@ export function BackupSection() {
           </div>
           <div className="settings-storage-row">
             <button
-              className="settings-storage-btn"
+              className="ui-btn"
               onClick={() => void handlePickBackup()}
               disabled={importing}
             >
@@ -226,7 +226,7 @@ export function BackupSection() {
                 </div>
                 <div className="settings-storage-row">
                   <span className="settings-storage-path">{selection.libraryTarget}</span>
-                  <button className="settings-storage-btn" onClick={() => void handlePickLibraryTarget()}>
+                  <button className="ui-btn" onClick={() => void handlePickLibraryTarget()}>
                     {t("settings.changeFolder")}
                   </button>
                 </div>
@@ -235,14 +235,14 @@ export function BackupSection() {
             <div className="settings-storage-hint">{t("settings.backupImportCoverWarn")}</div>
             <div className="settings-storage-row">
               <button
-                className="settings-storage-btn"
+                className="ui-btn"
                 onClick={() => void handleImport()}
                 disabled={importing}
               >
                 {importing ? t("settings.backupImporting") : t("settings.backupStartImport")}
               </button>
               <button
-                className="settings-storage-btn"
+                className="ui-btn"
                 onClick={() => setSelection(null)}
                 disabled={importing}
               >

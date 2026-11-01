@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
-import { IosSelect, InfoTip } from "../ui";
+import { IosSelect, InfoTip, Segmented, Toggle } from "../ui";
 import { useSettingsStore } from "../../stores/settingsStore";
 import { PasteEnvironmentCard } from "./PasteEnvironmentSection";
 
@@ -70,13 +70,12 @@ export function ClipboardSection({
             {t("settings.pauseCapture")}
             <InfoTip text={t("settings.pauseCaptureHint")} />
           </div>
-          <button
-            className={`toggle-switch ${clipboardPaused ? "on" : "off"}`}
-            onClick={() => void setClipboardPaused(!clipboardPaused)}
+          <Toggle
+            checked={clipboardPaused}
+            onChange={(next) => void setClipboardPaused(next)}
             title={clipboardPaused ? t("common.on") : t("common.off")}
-          >
-            <span className="toggle-thumb" />
-          </button>
+            ariaLabel={t("settings.pauseCapture")}
+          />
         </div>
         <div className="settings-row vertical">
           <div className="settings-row-label">
@@ -95,20 +94,15 @@ export function ClipboardSection({
         </div>
         <div className="settings-row">
           <div className="settings-row-label">{t("settings.pasteLeftClick")}</div>
-          <div className="settings-lang-toggle">
-            <button
-              className={`lang-toggle-btn${localPasteLeftClick === "normal" ? " active" : ""}`}
-              onClick={() => setLocalPasteLeftClick("normal")}
-            >
-              {t("settings.pasteNormal")}
-            </button>
-            <button
-              className={`lang-toggle-btn${localPasteLeftClick === "terminal" ? " active" : ""}`}
-              onClick={() => setLocalPasteLeftClick("terminal")}
-            >
-              {t("settings.pasteTerminal")}
-            </button>
-          </div>
+          <Segmented
+            value={localPasteLeftClick}
+            options={[
+              { value: "normal", label: t("settings.pasteNormal") },
+              { value: "terminal", label: t("settings.pasteTerminal") },
+            ]}
+            onChange={setLocalPasteLeftClick}
+            ariaLabel={t("settings.pasteLeftClick")}
+          />
         </div>
       </div>
       <PasteEnvironmentCard />

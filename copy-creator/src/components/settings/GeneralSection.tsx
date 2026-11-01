@@ -1,7 +1,7 @@
 import { useTranslation } from "react-i18next";
 import { useSettingsStore, type ContentSortMode } from "../../stores/settingsStore";
 import type { ThemePreference } from "../../utils/theme";
-import { InfoTip } from "../ui";
+import { InfoTip, Segmented, Toggle } from "../ui";
 
 interface GeneralSectionProps {
   localLang: string;
@@ -45,77 +45,60 @@ export function GeneralSection({
       <div className="settings-card">
         <div className="settings-row">
           <div className="settings-row-label">{t("settings.language")}</div>
-          <div className="settings-lang-toggle">
-            <button
-              className={`lang-toggle-btn${localLang === "zh-CN" ? " active" : ""}`}
-              onClick={() => handleChangeLang("zh-CN")}
-            >
-              ZH
-            </button>
-            <button
-              className={`lang-toggle-btn${localLang === "en" ? " active" : ""}`}
-              onClick={() => handleChangeLang("en")}
-            >
-              EN
-            </button>
-          </div>
+          <Segmented
+            value={localLang}
+            options={[
+              { value: "zh-CN", label: "ZH" },
+              { value: "en", label: "EN" },
+            ]}
+            onChange={handleChangeLang}
+            ariaLabel={t("settings.language")}
+          />
         </div>
         <div className="settings-row">
           <div className="settings-row-label">{t("settings.theme")}</div>
-          <div className="settings-lang-toggle">
-            {themeOptions.map((option) => (
-              <button
-                key={option.value}
-                className={`lang-toggle-btn${themeMode === option.value ? " active" : ""}`}
-                onClick={() => void setThemeMode(option.value)}
-              >
-                {option.label}
-              </button>
-            ))}
-          </div>
+          <Segmented
+            value={themeMode}
+            options={themeOptions}
+            onChange={(mode) => void setThemeMode(mode)}
+            ariaLabel={t("settings.theme")}
+          />
         </div>
         <div className="settings-row">
           <div className="settings-row-label">{t("settings.startup")}</div>
-          <button
-            className={`toggle-switch ${localAutostart ? "on" : "off"}`}
-            onClick={() => setLocalAutostart(!localAutostart)}
+          <Toggle
+            checked={localAutostart}
+            onChange={setLocalAutostart}
             title={localAutostart ? t("common.on") : t("common.off")}
-          >
-            <span className="toggle-thumb" />
-          </button>
+            ariaLabel={t("settings.startup")}
+          />
         </div>
         <div className="settings-row">
           <div className="settings-row-label">
             {t("settings.autoHideOnBlur")}
             <InfoTip text={t("settings.autoHideOnBlurHint")} />
           </div>
-          <button
-            className={`toggle-switch ${autoHideOnBlur ? "on" : "off"}`}
-            onClick={() => void setAutoHideOnBlur(!autoHideOnBlur)}
+          <Toggle
+            checked={autoHideOnBlur}
+            onChange={(next) => void setAutoHideOnBlur(next)}
             title={autoHideOnBlur ? t("common.on") : t("common.off")}
-          >
-            <span className="toggle-thumb" />
-          </button>
+            ariaLabel={t("settings.autoHideOnBlur")}
+          />
         </div>
         <div className="settings-row">
           <div className="settings-row-label">
             {t("settings.contentListSort")}
             <InfoTip text={t("settings.contentSortHint")} />
           </div>
-          <div className="settings-lang-toggle">
-            <button
-              className={`lang-toggle-btn${localContentSort === "recent" ? " active" : ""}`}
-              onClick={() => setLocalContentSort("recent")}
-            >
-              {t("settings.sortRecent")}
-            </button>
-            <button
-              className={`lang-toggle-btn${localContentSort === "count" ? " active" : ""}`}
-              onClick={() => setLocalContentSort("count")}
-            >
-              {t("settings.sortCount")}
-            </button>
-          </div>
+          <Segmented
+            value={localContentSort}
+            options={[
+              { value: "recent", label: t("settings.sortRecent") },
+              { value: "count", label: t("settings.sortCount") },
+            ]}
+            onChange={setLocalContentSort}
+            ariaLabel={t("settings.contentListSort")}
+          />
         </div>
       </div>
     </div>

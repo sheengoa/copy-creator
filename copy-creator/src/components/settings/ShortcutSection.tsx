@@ -43,7 +43,7 @@ export function ShortcutSection({
                 {recording ? t("settings.recording") : (localShortcutKey || t("settings.shortcutPlaceholder"))}
               </span>
               <button
-                className="shortcut-record-btn"
+                className="ui-btn"
                 onClick={recording ? stopRecording : startRecording}
               >
                 {recording ? t("settings.stopRecord") : t("settings.recordShortcut")}
@@ -59,7 +59,7 @@ export function ShortcutSection({
                 {radialRecording ? t("settings.recording") : (localRadialShortcutKey || t("settings.shortcutPlaceholder"))}
               </span>
               <button
-                className="shortcut-record-btn"
+                className="ui-btn"
                 onClick={radialRecording ? stopRadialRecording : startRadialRecording}
               >
                 {radialRecording ? t("settings.stopRecord") : t("settings.recordShortcut")}
@@ -75,7 +75,7 @@ export function ShortcutSection({
                 {clipboardCreateRecording ? t("settings.recording") : (localClipboardCreateShortcutKey || t("settings.shortcutPlaceholder"))}
               </span>
               <button
-                className="shortcut-record-btn"
+                className="ui-btn"
                 onClick={clipboardCreateRecording ? stopClipboardCreateRecording : startClipboardCreateRecording}
               >
                 {clipboardCreateRecording ? t("settings.stopRecord") : t("settings.recordShortcut")}

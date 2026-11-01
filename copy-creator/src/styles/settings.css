@@ -25,13 +25,6 @@
   box-shadow: 0 0.5px 0 0 rgba(255,255,255,0.3) inset;
 }
 
-.settings-shortcut-error {
-  margin-top: 8px;
-  color: var(--danger);
-  font-size: var(--text-xs);
-  line-height: 1.4;
-}
-
 [data-theme="dark"] .settings-card {
   box-shadow: 0 0.5px 0 0 rgba(255,255,255,0.04) inset;
 }
@@ -65,37 +58,6 @@
   font-size: var(--text-sm);
   color: var(--text-secondary);
   white-space: nowrap;
-}
-
-.settings-lang-toggle {
-  display: flex;
-  gap: 2px;
-  background: var(--seg-track-bg);
-  border-radius: 9px;
-  padding: 2px;
-}
-
-.lang-toggle-btn {
-  padding: 4px 12px;
-  border-radius: 6px;
-  border: none;
-  background: transparent;
-  color: var(--text-secondary);
-  font-family: var(--font-mono);
-  font-size: var(--text-sm);
-  font-weight: var(--weight-semibold);
-  cursor: pointer;
-  transition: all 0.2s cubic-bezier(0.83, 0, 0.17, 1);
-}
-
-.lang-toggle-btn.active {
-  background: var(--seg-item-active-bg);
-  color: var(--text-primary);
-  box-shadow: var(--seg-item-active-shadow);
-}
-
-.lang-toggle-btn:active {
-  transform: scale(0.95);
 }
 
 .settings-input {
@@ -194,30 +156,6 @@
   background: var(--input-bg);
   padding: 6px 8px;
   border-radius: 6px;
-}
-
-.settings-storage-btn {
-  flex-shrink: 0;
-  padding: 6px 12px;
-  border-radius: 6px;
-  border: none;
-  background: var(--tool-btn-bg);
-  color: var(--tool-btn-color);
-  font-family: var(--font);
-  font-size: var(--text-xs);
-  font-weight: var(--weight-medium);
-  cursor: pointer;
-  transition: all 0.2s cubic-bezier(0.83, 0, 0.17, 1);
-  white-space: nowrap;
-}
-
-.settings-storage-btn:hover {
-  background: var(--tool-btn-hover-bg);
-  color: var(--tool-btn-hover-color);
-}
-
-.settings-storage-btn:active {
-  transform: scale(0.95);
 }
 
 /* 通用分区「内容列表排序」的说明行：辅助说明，弱于正文。 */
@@ -327,87 +265,6 @@
   border-color: rgba(255, 255, 255, 0.4);
 }
 
-.shortcut-record-btn {
-  height: 28px;
-  padding: 0 10px;
-  border-radius: 6px;
-  border: none;
-  background: var(--tool-btn-bg);
-  color: var(--tool-btn-color);
-  font-family: var(--font);
-  font-size: var(--text-xs);
-  font-weight: var(--weight-medium);
-  cursor: pointer;
-  transition: all 0.2s cubic-bezier(0.83, 0, 0.17, 1);
-  white-space: nowrap;
-}
-
-.shortcut-record-btn:hover {
-  background: var(--tool-btn-hover-bg);
-  color: var(--tool-btn-hover-color);
-}
-
-.shortcut-record-btn:active {
-  transform: scale(0.95);
-}
-
-.toggle-switch {
-  width: 40px;
-  height: 24px;
-  border-radius: 12px;
-  border: none;
-  cursor: pointer;
-  position: relative;
-  transition: background 0.25s cubic-bezier(0.22, 1, 0.36, 1);
-  flex-shrink: 0;
-  outline: none;
-  padding: 0;
-}
-
-.toggle-switch.on {
-  background: #333;
-}
-
-.toggle-switch.off {
-  background: rgba(0, 0, 0, 0.15);
-}
-
-[data-theme="dark"] .toggle-switch.off {
-  background: rgba(255, 255, 255, 0.15);
-}
-
-[data-theme="dark"] .toggle-switch.on {
-  background: #fff;
-}
-
-[data-theme="dark"] .toggle-switch.on .toggle-thumb {
-  background: #333;
-}
-
-.toggle-thumb {
-  position: absolute;
-  top: 2px;
-  left: 2px;
-  width: 20px;
-  height: 20px;
-  border-radius: 10px;
-  background: white;
-  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.18), 0 0 0 0.5px rgba(0, 0, 0, 0.04);
-  transition: transform 0.25s cubic-bezier(0.22, 1, 0.36, 1);
-}
-
-.toggle-switch.on .toggle-thumb {
-  transform: translateX(16px);
-}
-
-.toggle-switch:active .toggle-thumb {
-  width: 23px;
-}
-
-.toggle-switch.on:active .toggle-thumb {
-  transform: translateX(13px);
-}
-
 /* --- Shortcut Setup Guide --- */
 .settings-shortcut-guide {
   margin-top: 14px;
@@ -475,33 +332,9 @@
   gap: 10px;
 }
 
-.radial-scale-slider {
-  -webkit-appearance: none;
-  appearance: none;
+/* 滑杆视觉走 ui.css 的 .ui-slider；此处只保留径向页的固定宽度布局约束。 */
+.radial-scale-control .ui-slider {
   width: 160px;
-  height: 4px;
-  padding: 0;
-  border: none;
-  border-radius: 2px;
-  background: var(--separator);
-  outline: none;
-  cursor: pointer;
-}
-
-.radial-scale-slider::-webkit-slider-thumb {
-  -webkit-appearance: none;
-  appearance: none;
-  width: 18px;
-  height: 18px;
-  border-radius: 50%;
-  background: #FFFFFF;
-  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.25), 0 0 0 0.5px rgba(0, 0, 0, 0.04);
-  cursor: pointer;
-  transition: transform 0.15s cubic-bezier(0.83, 0, 0.17, 1);
-}
-
-.radial-scale-slider::-webkit-slider-thumb:active {
-  transform: scale(1.12);
 }
 
 .radial-scale-value {
@@ -512,29 +345,6 @@
   font-weight: var(--weight-semibold);
   color: var(--text-primary);
   font-variant-numeric: tabular-nums;
-}
-
-.radial-scale-reset {
-  padding: 3px 10px;
-  border: none;
-  border-radius: 6px;
-  background: var(--chip-bg);
-  color: var(--text-secondary);
-  font-family: var(--font);
-  font-size: var(--text-xs);
-  cursor: pointer;
-  transition: background 0.15s, color 0.15s;
-  white-space: nowrap;
-}
-
-.radial-scale-reset:hover:not(:disabled) {
-  background: var(--chip-hover-bg);
-  color: var(--text-primary);
-}
-
-.radial-scale-reset:disabled {
-  opacity: 0.4;
-  cursor: default;
 }
 
 /* 排除规则多行文本域：与 settings-input 同视觉语言，纵向可拉伸。 */

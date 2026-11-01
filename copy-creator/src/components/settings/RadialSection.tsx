@@ -29,7 +29,7 @@ export function RadialSection({
           <div className="radial-scale-control">
             <input
               type="range"
-              className="radial-scale-slider"
+              className="ui-slider"
               min={RADIAL_SCALE_MIN}
               max={RADIAL_SCALE_MAX}
               step={5}
@@ -40,7 +40,7 @@ export function RadialSection({
             <span className="radial-scale-value">{localRadialMenuScale}%</span>
             <button
               type="button"
-              className="radial-scale-reset"
+              className="ui-btn"
               disabled={localRadialMenuScale === RADIAL_SCALE_DEFAULT}
               onClick={() => setLocalRadialMenuScale(RADIAL_SCALE_DEFAULT)}
             >

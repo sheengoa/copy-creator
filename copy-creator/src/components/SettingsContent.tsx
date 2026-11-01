@@ -397,7 +397,7 @@ export default function SettingsContent({ embedded }: Props) {
           stopClipboardCreateRecording={ccShortcut.stopRecording}
         />
         {shortcutError && (
-          <div className="settings-shortcut-error" role="alert">
+          <div className="ui-error" role="alert">
             {t("settings.shortcutRegistrationFailed")}
           </div>
         )}

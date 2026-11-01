@@ -65,7 +65,7 @@ export function StorageSection({
           <div className="settings-storage-row">
             <span className="settings-storage-path">{storagePath}</span>
             <button
-              className="settings-storage-btn"
+              className="ui-btn"
               onClick={handleChangeFolder}
             >
               {t("settings.changeFolder")}
