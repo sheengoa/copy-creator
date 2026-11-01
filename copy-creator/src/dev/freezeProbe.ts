@@ -12,6 +12,8 @@ export function installFreezeProbe() {
     log.push({ t: Date.now(), kind, ms });
     if (log.length > 300) log.shift();
   };
+  // CDP 诊断入口：远程调试端可直接读取事件环形缓冲与当前采样。
+  (window as unknown as { __fcFreezeLog: unknown }).__fcFreezeLog = log;
 
   // rAF 采样：帧生产一旦恢复，首个回调报告整个停摆时长。
   let rafLast = performance.now();

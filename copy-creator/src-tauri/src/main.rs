@@ -35,21 +35,27 @@ fn configure_windows_webview_throttling() {
     // 整族关闭节流：遮挡判定本身、遮挡后台化、定时器节流、渲染进程
     // 降优先级。环境变量由 WebView2 加载器追加到 wry 参数之后，不影响
     // wry 自带的 msWebOOUI 等默认项。
-    const FIX_ARGS: &str = "--disable-features=CalculateNativeWinOcclusion \
+    const FIX_ARGS_BASE: &str = "--disable-features=CalculateNativeWinOcclusion \
         --disable-backgrounding-occluded-windows \
         --disable-background-timer-throttling \
         --disable-renderer-backgrounding";
+    let mut fix_args = String::from(FIX_ARGS_BASE);
+    // 调试构建额外开放 CDP 远程调试端口：冻结探针的日志与页面内部采样
+    // 由此读取（发布构建不受影响）。
+    if cfg!(debug_assertions) {
+        fix_args.push_str(" --remote-debugging-port=9222");
+    }
     match std::env::var("WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS") {
         // 已有自定义参数：不含本修复标志才追加，不重复。
         Ok(existing) => {
             if !existing.contains("CalculateNativeWinOcclusion") {
                 std::env::set_var(
                     "WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS",
-                    format!("{existing} {FIX_ARGS}"),
+                    format!("{existing} {fix_args}"),
                 );
             }
         }
-        Err(_) => std::env::set_var("WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS", FIX_ARGS),
+        Err(_) => std::env::set_var("WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS", fix_args),
     }
 }
 
