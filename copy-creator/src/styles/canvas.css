@@ -1503,6 +1503,24 @@
   max-height: none;
 }
 
+/* 抽帧节点完成态（手动调高节点）：提示锚点→媒体外框→帧图逐级让位，
+   与加载态播放器同一套填满行为——执行前后在调高的节点里同样不跳变。 */
+.fc-root .pc-node.pc-resized .fc-node-form > .fc-hint-anchor:has(> .fc-load-media > .fc-frame-thumb) {
+  flex: 1 1 auto;
+  min-height: 0;
+}
+
+.fc-root .pc-node.pc-resized .fc-load-media .fc-frame-thumb {
+  flex: 1;
+  min-height: 0;
+  width: 100%;
+}
+
+.fc-root .pc-node.pc-resized .fc-load-media .fc-frame-thumb .fc-media-box {
+  height: 100%;
+  max-height: none;
+}
+
 .fc-root .pc-node.pc-resized .fc-load-media .resource-media-player {
   flex: 1;
   min-height: 0;
