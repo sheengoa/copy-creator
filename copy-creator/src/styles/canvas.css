@@ -1756,9 +1756,10 @@
   justify-content: center;
 }
 
+/* 中心图标已到物理渲染极限（0.5 CSS px ≈ 1 物理像素，无法再小）：
+   彻底隐藏，状态点保持双环，目标语义由悬停提示承载。 */
 .fc-save-dot-ring svg {
-  width: 0.5px;
-  height: 0.5px;
+  display: none;
 }
 
 .fc-save-dot.is-saving {
