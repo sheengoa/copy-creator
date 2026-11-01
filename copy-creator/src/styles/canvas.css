@@ -852,6 +852,56 @@
   box-shadow: 0 1px 3px rgba(0, 0, 0, 0.4), 0 0 0 0.5px rgba(255, 255, 255, 0.14);
 }
 
+/* 固定高度节点（pc-resized：拖过尺寸手柄或历史落库高度）：预览媒体
+   吃掉表单剩余空间，按钮行/提示行始终留在可视区内——裁剪只发生在
+   媒体框内部，不再把下方内容推出节点。自动高度节点不命中这些规则，
+   仍由内容自然撑开。 */
+.fc-root .pc-node.pc-resized .fc-load-media {
+  flex: 1 1 auto;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.fc-root .pc-node.pc-resized .fc-load-media .fc-thumb-cover {
+  flex: 1;
+  min-height: 0;
+  height: auto;
+}
+
+.fc-root .pc-node.pc-resized .fc-load-media .resource-media-player {
+  flex: 1;
+  min-height: 0;
+}
+
+.fc-root .pc-node.pc-resized .fc-load-media .resource-media-video {
+  flex: 1;
+  min-height: 0;
+  height: auto;
+  max-height: none;
+}
+
+/* 预览节点的媒体按钮外面包着 NodeHint 锚点层——填充尺寸落在锚点
+   （表单的直接 flex 子项）上，按钮与内部缩略图再逐层撑满。 */
+.fc-root .pc-node.pc-resized .fc-node-form > .fc-hint-anchor:has(> .fc-preview-media) {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.fc-root .pc-node.pc-resized .fc-preview-media {
+  flex: 1;
+  min-height: 0;
+  width: 100%;
+}
+
+.fc-root .pc-node.pc-resized .fc-preview-media .fc-thumb-cover {
+  flex: 1;
+  min-height: 0;
+  height: auto;
+}
+
 /* 参数组合框：白卡输入件 + 右侧箭头展开预设清单（portal 到 body，
    fixed 定位随输入框锚点）。flex 只在横向参数行里撑宽——纵向表单的
    直接子项绝不能 flex:1，否则竖向撑满整个节点体、箭头悬到中部。 */

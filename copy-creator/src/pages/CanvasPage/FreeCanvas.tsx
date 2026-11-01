@@ -2966,7 +2966,9 @@ export default function FreeCanvas({ canvasId }: { canvasId: string }) {
               <div
                 key={node.id}
                 data-key={node.id}
-                className={`pc-node fc-type-${node.type}${selected ? " pc-selected" : ""}${pulseKeys.includes(node.id) ? " pc-spawn" : ""}`}
+                // pc-resized：落库固定高的节点（拖过手柄/历史高度），预览区
+                // 据此切换为「吃掉剩余空间」模式，按钮行永不被推出可视区。
+                className={`pc-node fc-type-${node.type}${!autoHeight ? " pc-resized" : ""}${selected ? " pc-selected" : ""}${pulseKeys.includes(node.id) ? " pc-spawn" : ""}`}
                 style={
                   {
                     left: node.pos_x,
