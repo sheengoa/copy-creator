@@ -917,6 +917,7 @@
     "genSizeLabel": "Resolution",
     "genSizeAutoHint": "Follow model",
     "genCountLabel": "Count",
+    "genCountSummary": "{{count}} images",
     "noPromptSource": "No prompt source: connect at least one non-empty text node",
     "genSlotPending": "…",
     "genPrimary": "Primary",

@@ -913,6 +913,7 @@
     "genSizeLabel": "分辨率",
     "genSizeAutoHint": "跟随模型",
     "genCountLabel": "张数",
+    "genCountSummary": "共 {{count}} 张",
     "noPromptSource": "没有提示词来源：连线至少一个非空文本节点",
     "genSlotPending": "…",
     "genPrimary": "主图",

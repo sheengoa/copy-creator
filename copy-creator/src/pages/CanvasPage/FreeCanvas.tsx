@@ -2919,39 +2919,69 @@ export default function FreeCanvas({ canvasId }: { canvasId: string }) {
                       </div>
                     </>
                   )}
-                  {/* 产物缩略图在动作行之上（对齐原型）：完成态图是主角，
-                      「重新生成」收在最底下，不卡在参数与产物中间。 */}
-                  {meta.images.length > 0 && (
-                    <div className={`fc-gen-thumbs${wait?.phase === "land" ? " is-land" : ""}`}>
-                      {meta.images.map((thumb, i) => (
-                        <NodeHint
-                          key={i}
-                          text={thumb.primary ? t("canvas.genPrimary") : t("canvas.genSetPrimary")}
-                        >
-                          <button
-                            className={`fc-gen-thumb${thumb.primary ? " primary" : ""}`}
-                            onClick={() => {
-                              const images = meta.images.map((img, j) => ({ ...img, primary: j === i }));
-                              void store.getState().updateNode(node.id, {
-                                metadata: JSON.stringify({ ...meta, images } as CanvasNode["metadata"]),
-                              });
-                            }}
-                          >
-                            <ResourceThumb path={thumb.resource_path} className="fc-thumb" />
-                            {thumb.primary && <span className="fc-gen-primary-badge">{t("canvas.genPrimary")}</span>}
-                          </button>
-                        </NodeHint>
-                      ))}
-                    </div>
-                  )}
+                  {/* 完成态产物区（2026-11-01 定稿）：主图大图 + 横滑胶片条。
+                      大图即当前主图，点看全屏原图；点小图换主图；仅 1 张时
+                      胶片条隐藏，多张也只占一行，节点高度恒定。 */}
+                  {meta.images.length > 0 &&
+                    (() => {
+                      const primary = [...meta.images]
+                        .map((img, i) => ({ img, i }))
+                        .sort((a, b) => (a.img.primary === b.img.primary ? 0 : a.img.primary ? -1 : 1))[0];
+                      return (
+                        <div className={`fc-gen-result${wait?.phase === "land" ? " is-land" : ""}`}>
+                          <NodeHint text={t("canvas.previewOpen")}>
+                            <button
+                              type="button"
+                              className="fc-gen-hero"
+                              onClick={() => setLightboxSrc(primary.img.resource_path)}
+                            >
+                              <ResourceThumb path={primary.img.resource_path} className="fc-gen-hero-img" />
+                              {meta.images.length > 1 && (
+                                <span className="fc-gen-hero-badge">{t("canvas.genPrimary")}</span>
+                              )}
+                            </button>
+                          </NodeHint>
+                          {meta.images.length > 1 && (
+                            <div className="fc-gen-strip">
+                              {meta.images.map((thumb, i) => (
+                                <NodeHint
+                                  key={i}
+                                  className="fc-gen-strip-item"
+                                  text={thumb.primary ? t("canvas.genPrimary") : t("canvas.genSetPrimary")}
+                                >
+                                  <button
+                                    type="button"
+                                    className={`fc-gen-strip-thumb${thumb.primary ? " primary" : ""}`}
+                                    onClick={() => {
+                                      const images = meta.images.map((img, j) => ({ ...img, primary: j === i }));
+                                      void store.getState().updateNode(node.id, {
+                                        metadata: JSON.stringify({ ...meta, images } as CanvasNode["metadata"]),
+                                      });
+                                    }}
+                                  >
+                                    <ResourceThumb path={thumb.resource_path} className="fc-strip-img" />
+                                  </button>
+                                </NodeHint>
+                              ))}
+                            </div>
+                          )}
+                        </div>
+                      );
+                    })()}
                   <div className="fc-gen-foot">
                     <div className={`fc-gen-layer${busyOn ? "" : " is-on"}`}>
+                      {meta.images.length > 0 && (
+                        <span className="fc-gen-summary">{t("canvas.genCountSummary", { count: meta.images.length })}</span>
+                      )}
                       <NodeHint text={missing.length > 0 ? t("canvas.genNotReady", { items: missing.join("、") }) : ""}>
+                        {/* 完成态重生成 = 定稿样式：中性胶囊 + 蓝色刷新图标，
+                            与「生成」的实心 accent 区分开——一个是发起，一个是再来一次。 */}
                         <button
-                          className="fc-node-btn accent"
+                          className={`fc-node-btn${meta.status === "done" ? " ghost fc-gen-regen" : " accent"}`}
                           disabled={genStarting || missing.length > 0}
                           onClick={() => void startGenerate(node)}
                         >
+                          {meta.status === "done" && <span className="fc-gen-regen-ico">{Icons.refresh}</span>}
                           {meta.status === "done" ? t("canvas.regenerate") : t("canvas.genButton")}
                         </button>
                       </NodeHint>

@@ -688,36 +688,112 @@
   word-break: break-all;
 }
 
-.fc-gen-thumbs {
+/* 完成态产物区（2026-11-01 定稿）：主图大图 + 横滑胶片条——大图即当前
+   主图（点击看全屏原图），点小图换主图；仅 1 张时胶片条隐藏。多张也只
+   占一行，节点高度恒定。 */
+.fc-root .fc-gen-result {
   display: flex;
-  flex-wrap: wrap;
-  gap: 5px;
+  flex-direction: column;
+  gap: 7px;
 }
 
-.fc-gen-thumb {
+.fc-root .fc-gen-hero {
   position: relative;
+  display: block;
+  width: 100%;
+  aspect-ratio: 16 / 10;
   padding: 0;
-  border: 2px solid transparent;
-  border-radius: 9px;
-  background: none;
+  border: none;
+  border-radius: 10px;
+  overflow: hidden;
   cursor: pointer;
   line-height: 0;
+  background: rgba(0, 0, 0, 0.04);
 }
 
-.fc-gen-thumb.primary {
-  border-color: var(--accent);
+.fc-root .fc-gen-hero-img {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
 }
 
-.fc-gen-primary-badge {
+.fc-root .fc-gen-hero-badge {
   position: absolute;
-  left: 3px;
-  bottom: 3px;
-  padding: 1px 5px;
+  left: 8px;
+  bottom: 8px;
+  padding: 1px 6px;
   border-radius: 999px;
   font-size: 9px;
   line-height: 1.4;
   background: var(--accent);
   color: #fff;
+}
+
+.fc-root .fc-gen-strip {
+  display: flex;
+  gap: 5px;
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+
+.fc-root .fc-gen-strip::-webkit-scrollbar {
+  display: none;
+}
+
+.fc-root .fc-gen-strip-item {
+  flex: none;
+  line-height: 0;
+}
+
+.fc-root .fc-gen-strip-thumb {
+  display: block;
+  width: 44px;
+  height: 44px;
+  padding: 0;
+  border: none;
+  border-radius: 8px;
+  overflow: hidden;
+  cursor: pointer;
+  line-height: 0;
+  opacity: 0.82;
+  transition: opacity 0.15s ease;
+}
+
+.fc-root .fc-gen-strip-thumb .fc-strip-img {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.fc-root .fc-gen-strip-thumb.primary {
+  outline: 2px solid var(--accent);
+  outline-offset: -2px;
+  opacity: 1;
+}
+
+.fc-root .fc-gen-strip-thumb:hover {
+  opacity: 1;
+}
+
+/* 完成态重生成按钮：中性胶囊 + 蓝色刷新图标（与发起用的实心 accent 区分）。 */
+.fc-root .fc-gen-regen {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  border-radius: 999px;
+}
+
+.fc-root .fc-gen-regen-ico {
+  display: inline-flex;
+  line-height: 0;
+}
+
+.fc-root .fc-gen-regen-ico svg {
+  width: 12px;
+  height: 12px;
+  color: var(--accent);
 }
 
 /* ── 生成等待「流光」舞台（2026-11-01 原型定稿移植） ────────
@@ -1013,7 +1089,7 @@
   animation: none;
 }
 
-.fc-root .fc-gen-thumbs.is-land {
+.fc-root .fc-gen-result.is-land {
   animation: fc-au-land 0.4s cubic-bezier(0.22, 1, 0.36, 1) backwards;
 }
 
@@ -1136,6 +1212,10 @@
 [data-theme="dark"] .fc-root .fc-gen-slot.pending {
   background: rgba(255, 255, 255, 0.05);
   border-color: rgba(255, 255, 255, 0.14);
+}
+
+[data-theme="dark"] .fc-root .fc-gen-hero {
+  background: rgba(255, 255, 255, 0.05);
 }
 
 /* ── 节点体系 v2：加载 / 保存 / 预览 / 菜单分组 ───────────── */
@@ -1298,12 +1378,12 @@
   .fc-root .fc-aurora .au-fb,
   .fc-root .fc-aurora .au-fused,
   .fc-root .fc-gen-slots.is-out,
-  .fc-root .fc-gen-thumbs.is-land,
+  .fc-root .fc-gen-result.is-land,
   .fc-root .fc-gen-layer {
     transition-duration: 0s;
   }
   .fc-root .fc-aurora,
-  .fc-root .fc-gen-thumbs.is-land {
+  .fc-root .fc-gen-result.is-land {
     animation: none;
   }
 }
@@ -1396,12 +1476,16 @@
   max-height: none;
 }
 
-/* 保存节点（固定高）：多产物缩略图列表内部滚动，按钮行留在可视区。 */
-.fc-root .pc-node.pc-resized .fc-gen-thumbs {
+/* 生成节点（固定高）：主图大图吃掉剩余空间，胶片条与动作行留在可视区。 */
+.fc-root .pc-node.pc-resized .fc-gen-result {
   flex: 1 1 auto;
   min-height: 0;
-  overflow-y: auto;
-  scrollbar-width: none;
+}
+
+.fc-root .pc-node.pc-resized .fc-gen-hero {
+  flex: 1 1 auto;
+  min-height: 0;
+  aspect-ratio: auto;
 }
 
 /* 预览节点的媒体按钮外面包着 NodeHint 锚点层——填充尺寸落在锚点
