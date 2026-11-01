@@ -1268,8 +1268,12 @@
    语言，透明底在玻璃上看不出可输入范围）；flex 填满节点体，拉伸
    手柄改变节点高度时编辑区随之适配，不再留无法点入的空白。 */
 .fc-root .fc-node-edit.is-inline {
-  flex: 1;
-  min-height: 88px;
+  /* 基准 88px 而非最小高度 88px：节点自适应高度时编辑区即默认高度；
+     节点被拉矮时随节点收缩（min-height: 0），表单不再进入滚动——
+     否则滚动到顶会把编辑区下边缘和表单底部内边距一起裁出视口，
+     白卡看着像被吞了下边界；内容溢出交由输入框内部滚动承接。 */
+  flex: 1 1 88px;
+  min-height: 0;
   width: 100%;
   box-sizing: border-box;
   border: none;
