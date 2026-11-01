@@ -1715,9 +1715,9 @@
   color: var(--accent);
 }
 
-/* 目标已设：16px 弱化绿点（淡绿底 + 目标图标），骑在等待/产物区顶边
-   中央——与选择组问号同一位置语言。绿=就绪（脉冲）/完成，红叉=失败
-   （点重试）；点绿点回目标选择；悬停浮出目标名。 */
+/* 目标已设：与问号完全同构的三层状态点——外环（CSS 描边）+ 内圈
+   （与问号内圈同大的圆环）+ 中心极小的目标图标。绿=就绪/保存中
+   （脉冲），红=失败（点重试）；点回目标选择；悬停浮出目标名。 */
 .fc-save-dot {
   position: absolute;
   top: -8px;
@@ -1726,28 +1726,39 @@
   width: 16px;
   height: 16px;
   border-radius: 50%;
-  border: none;
+  border: 1px solid rgba(52, 199, 89, 0.55);
   padding: 0;
-  background: color-mix(in srgb, #34c759 16%, var(--bg-card));
+  background: var(--bg-card);
   color: #2e9e52;
   cursor: pointer;
-  display: inline-flex;
+  display: flex;
   align-items: center;
   justify-content: center;
   flex-shrink: 0;
   z-index: 2;
-  transition: background 0.14s ease, color 0.14s ease, transform 0.12s ease;
+  transition: background 0.14s ease, color 0.14s ease, border-color 0.14s ease, transform 0.12s ease;
 }
 
 .fc-save-dot:hover {
   background: #34c759;
+  border-color: #34c759;
   color: #fff;
   transform: translateX(-50%) scale(1.08);
 }
 
-.fc-save-dot > svg {
-  width: 8px;
-  height: 8px;
+.fc-save-dot-ring {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  border: 1px solid currentColor;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.fc-save-dot-ring svg {
+  width: 4px;
+  height: 4px;
 }
 
 .fc-save-dot.is-saving {
@@ -1760,12 +1771,13 @@
 }
 
 .fc-save-dot.is-error {
-  background: rgba(255, 69, 58, 0.14);
+  border-color: rgba(255, 69, 58, 0.55);
   color: #ff453a;
 }
 
 .fc-save-dot.is-error:hover {
   background: #ff453a;
+  border-color: #ff453a;
   color: #fff;
 }
 
@@ -1797,27 +1809,6 @@
 .fc-save-stage.filled .fc-thumb-cover {
   height: 96px;
   border-radius: 10px;
-}
-
-.fc-save-done {
-  position: absolute;
-  right: 8px;
-  bottom: 8px;
-  height: 18px;
-  padding: 0 8px;
-  border-radius: 999px;
-  background: #34c759;
-  color: #fff;
-  display: flex;
-  align-items: center;
-  gap: 4px;
-  font-size: 10px;
-  font-weight: 600;
-}
-
-.fc-save-done svg {
-  width: 9px;
-  height: 9px;
 }
 
 .fc-save-more {

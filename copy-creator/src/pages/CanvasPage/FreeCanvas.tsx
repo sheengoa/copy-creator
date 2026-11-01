@@ -2915,7 +2915,6 @@ export default function FreeCanvas({ canvasId }: { canvasId: string }) {
               const autoTarget = saveMeta?.auto_target ?? "";
               const autoState = saveMeta?.auto_state ?? "";
               const autoError = saveMeta?.auto_error ?? "";
-              const autoSaved = autoState === "saved";
               // 目标状态点：骑在等待/产物区顶边中央（与选择组问号同一位置
               // 语言）。淡绿底弱化；红叉=失败，点重试；点绿点回目标选择。
               const saveDot = (
@@ -2944,7 +2943,9 @@ export default function FreeCanvas({ canvasId }: { canvasId: string }) {
                         : () => clearSaveAutoTarget(node.id)
                     }
                   >
-                    {autoState === "error" ? Icons.close : autoTarget === "dir" ? Icons.folderOpen : Icons.resources}
+                    <span className="fc-save-dot-ring">
+                      {autoState === "error" ? Icons.close : autoTarget === "dir" ? Icons.folderOpen : Icons.saveTray}
+                    </span>
                   </button>
                 </NodeHint>
               );
@@ -2994,9 +2995,6 @@ export default function FreeCanvas({ canvasId }: { canvasId: string }) {
                         <div className="fc-save-stage filled">
                           {saveDot}
                           <ResourceThumb path={upstream!.paths[0]} className="fc-thumb-cover" />
-                          {autoSaved && (
-                            <span className="fc-save-done">{Icons.check}{t("canvas.saveAutoDone")}</span>
-                          )}
                           {upstream!.paths.length > 1 && (
                             <span className="fc-save-more">+{upstream!.paths.length - 1}</span>
                           )}
