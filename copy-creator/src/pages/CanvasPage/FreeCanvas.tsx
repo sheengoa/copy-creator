@@ -3820,7 +3820,20 @@ function GenAuroraStage({
       setBeat((b) => b + 1);
     }
   }, [received]);
-  const p = total > 0 ? received / total : 0;
+  // 时间保底密度（2026-11-01 定案）：密度轴原来纯按回传进度
+  // （p = received/total），单张/极少张时进度没有中间值——执行全程只剩
+  // 起步两团大光干转，真机单张 ~28s 尤其明显。按 30s 标称时长给时间轴
+  // 兜底：有效进度取 max(真实进度, 时间进度)，密度随时间推移照样渐密，
+  // 真实回传快时自然接管；封顶 0.93 给谢幕融合留场。
+  const [elapsedMs, setElapsedMs] = useState(0);
+  useEffect(() => {
+    const started = Date.now();
+    const timer = window.setInterval(() => setElapsedMs(Date.now() - started), 600);
+    return () => window.clearInterval(timer);
+  }, []);
+  const progressP = total > 0 ? received / total : 0;
+  const timeP = Math.min(elapsedMs / 30000, 0.93);
+  const p = Math.max(progressP, timeP);
   const cls = ["fc-aurora"];
   if (solo) cls.push("is-solo");
   if (p >= 0.5) cls.push("is-half");
