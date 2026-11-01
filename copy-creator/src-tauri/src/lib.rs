@@ -708,6 +708,7 @@ pub fn run() {
             canvas_media::canvas_pick_save_dir,
             canvas_media::canvas_save_to_library,
             canvas_media::canvas_export_to_path,
+            canvas_media::canvas_extract_video_frame,
             ai::ai_cancel_generation,
             media_server::get_media_server_origin,
             shortcut::update_shortcut,

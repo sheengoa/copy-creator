@@ -36,3 +36,8 @@ copy-creator/dev.cmd
 
 # ZCode 会话工具产物（计划文件等）
 .zcode/
+
+# 视频抽帧引擎：ffmpeg 可执行文件体积大不入库（放置说明见
+# copy-creator/src-tauri/resources/ffmpeg/README.txt）
+copy-creator/src-tauri/resources/ffmpeg/ffmpeg.exe
+copy-creator/src-tauri/resources/ffmpeg/ffmpeg

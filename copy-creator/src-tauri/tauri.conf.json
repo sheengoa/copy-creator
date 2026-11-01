@@ -42,7 +42,8 @@
     "active": true,
     "targets": ["appimage", "deb", "nsis", "msi"],
     "resources": {
-      "../scripts/copy-creator-ctl": "copy-creator-ctl"
+      "../scripts/copy-creator-ctl": "copy-creator-ctl",
+      "resources/ffmpeg": "ffmpeg"
     },
     "icon": [
       "icons/32x32.png",

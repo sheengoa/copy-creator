@@ -216,6 +216,27 @@ pub(crate) enum NodeMeta {
     PreviewVideo {},
     PreviewAudio {},
 
+    // ── 视频抽帧节点（2026-11-01）──
+    /// 视频首帧/尾帧：video_path 记节点持有的视频；提取出的帧图片写在
+    /// 节点行 resource_path 上（下游 save/preview/合集/参考图聚合走通用
+    /// resource_path 分支，无需特判）。status/error 留空位。
+    VideoFirstFrame {
+        #[serde(default)]
+        video_path: String,
+        #[serde(default)]
+        status: String,
+        #[serde(default)]
+        error: String,
+    },
+    VideoLastFrame {
+        #[serde(default)]
+        video_path: String,
+        #[serde(default)]
+        status: String,
+        #[serde(default)]
+        error: String,
+    },
+
     // ── 画布备注（不属于三类链路） ──
     Note {
         #[serde(default)]
@@ -339,6 +360,16 @@ impl NodeMeta {
             "preview_image" => Ok(NodeMeta::PreviewImage {}),
             "preview_video" => Ok(NodeMeta::PreviewVideo {}),
             "preview_audio" => Ok(NodeMeta::PreviewAudio {}),
+            "video_first_frame" => Ok(NodeMeta::VideoFirstFrame {
+                video_path: String::new(),
+                status: String::new(),
+                error: String::new(),
+            }),
+            "video_last_frame" => Ok(NodeMeta::VideoLastFrame {
+                video_path: String::new(),
+                status: String::new(),
+                error: String::new(),
+            }),
             "collection_image" => Ok(NodeMeta::CollectionImage { order: Vec::new() }),
             "collection_text" => Ok(NodeMeta::CollectionText { order: Vec::new() }),
             "collection_video" => Ok(NodeMeta::CollectionVideo { order: Vec::new() }),
@@ -370,6 +401,8 @@ impl NodeMeta {
             NodeMeta::PreviewImage { .. } => "preview_image",
             NodeMeta::PreviewVideo { .. } => "preview_video",
             NodeMeta::PreviewAudio { .. } => "preview_audio",
+            NodeMeta::VideoFirstFrame { .. } => "video_first_frame",
+            NodeMeta::VideoLastFrame { .. } => "video_last_frame",
             NodeMeta::CollectionImage { .. } => "collection_image",
             NodeMeta::CollectionText { .. } => "collection_text",
             NodeMeta::CollectionVideo { .. } => "collection_video",
