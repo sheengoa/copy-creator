@@ -180,7 +180,7 @@ export default function CanvasPage() {
             {/* 居中新建只在一张画布都没有时出现；有画布后新建走画布栏「＋」。 */}
             {canvases.length === 0 && (
               <button className="canvas-empty-cta" onClick={() => void createCanvas()}>
-                {Icons.add}
+                <span className="canvas-empty-cta-ico">{Icons.add}</span>
                 {t("canvas.newCanvas")}
               </button>
             )}

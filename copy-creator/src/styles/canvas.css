@@ -216,42 +216,50 @@
   color: var(--text-secondary);
 }
 
-/* 空态居中新建 CTA：白卡玻璃胶囊——在点阵画布上以清晰的白卡浮起，
-   加号着 accent 点睛；hover 转柔和 accent 底并轻微上浮。 */
+/* 空态居中新建 CTA：大号白卡胶囊——空态唯一的动作点，尺寸与分量
+   撑起重点；加号做成 accent 实心圆徽标点睛。hover 上浮加深。 */
 .canvas-empty-cta {
   display: inline-flex;
   align-items: center;
-  gap: 8px;
-  margin-top: 12px;
-  padding: 9px 20px;
+  gap: 10px;
+  margin-top: 20px;
+  padding: 13px 32px;
   border-radius: 999px;
   border: 1px solid var(--separator);
   background: var(--bg-card);
   color: var(--text-primary);
-  font-size: 13px;
+  font-size: 15px;
   font-weight: 600;
   cursor: pointer;
-  box-shadow: 0 1px 2px rgba(31, 35, 65, 0.06), 0 6px 16px rgba(31, 35, 65, 0.08);
-  transition: background 0.16s ease, border-color 0.16s ease, color 0.16s ease,
-    box-shadow 0.16s ease, transform 0.16s ease;
+  box-shadow: 0 2px 4px rgba(31, 35, 65, 0.05), 0 10px 26px rgba(31, 35, 65, 0.1);
+  transition: border-color 0.16s ease, box-shadow 0.16s ease, transform 0.16s ease;
 }
 
-.canvas-empty-cta svg {
-  width: 13px;
-  height: 13px;
-  color: var(--accent);
+.canvas-empty-cta-ico {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  background: var(--accent);
+  color: #fff;
+  flex-shrink: 0;
+}
+
+.canvas-empty-cta-ico svg {
+  width: 12px;
+  height: 12px;
 }
 
 .canvas-empty-cta:hover {
-  background: var(--accent-bg);
   border-color: var(--accent-border-soft);
-  color: var(--accent);
-  box-shadow: 0 2px 4px rgba(31, 35, 65, 0.06), 0 10px 24px rgba(31, 35, 65, 0.12);
-  transform: translateY(-1px);
+  box-shadow: 0 3px 6px rgba(31, 35, 65, 0.06), 0 14px 32px rgba(31, 35, 65, 0.14);
+  transform: translateY(-2px);
 }
 
-.canvas-empty-cta:hover svg {
-  color: var(--accent);
+.canvas-empty-cta:hover .canvas-empty-cta-ico {
+  filter: brightness(1.06);
 }
 
 .canvas-empty-icon {
