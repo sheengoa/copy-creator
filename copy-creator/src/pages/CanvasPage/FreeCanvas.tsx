@@ -383,6 +383,56 @@ function ResourceThumb({ path, className }: { path: string; className?: string }
   return <img className={className} src={url} alt="" draggable={false} />;
 }
 
+/** 保存节点多图观看（2026-11-01 定案）：默认单图 + 计数角标；点角标媒体
+ *  盒整切缩略图格（与生成胶片条同语），点小图看那张，再点角标回选。纯
+ *  观看态——不改上游主图标记、不影响自动保存（本就全量保存）；上游产物
+ *  更替（数量或首图路径变化）即回单图第一张，观看态不跨代保留。 */
+function SaveMediaBox({ paths }: { paths: string[] }) {
+  const { t } = useTranslation();
+  const [view, setView] = useState({ sig: "", grid: false, idx: 0 });
+  const sig = `${paths.length}:${paths[0] ?? ""}`;
+  useEffect(() => {
+    setView((s) => (s.sig === sig ? s : { sig, grid: false, idx: 0 }));
+  }, [sig]);
+  const onTrack = view.sig === sig;
+  const idx = onTrack ? Math.min(view.idx, Math.max(paths.length - 1, 0)) : 0;
+  const grid = onTrack && view.grid && paths.length > 1;
+  return (
+    <>
+      {grid ? (
+        <div className="fc-save-grid">
+          {paths.map((p, i) => (
+            <button
+              key={`${i}:${p}`}
+              type="button"
+              className={`fc-save-cell${i === idx ? " is-cur" : ""}`}
+              aria-label={t("canvas.savePickN", { n: i + 1 })}
+              onClick={() => setView({ sig, grid: false, idx: i })}
+            >
+              <ResourceThumb path={p} className="fc-save-cell-img" />
+            </button>
+          ))}
+        </div>
+      ) : (
+        <ResourceThumb path={paths[idx]} className="fc-media-box" />
+      )}
+      {paths.length > 1 && (
+        <NodeHint text={grid ? t("canvas.saveBackSingle") : t("canvas.saveViewAll")}>
+          <button
+            type="button"
+            className={`fc-save-more${grid ? " is-on" : ""}`}
+            aria-pressed={grid}
+            aria-label={grid ? t("canvas.saveBackSingle") : t("canvas.saveViewAll")}
+            onClick={() => setView({ sig, grid: !grid, idx })}
+          >
+            +{paths.length - 1}
+          </button>
+        </NodeHint>
+      )}
+    </>
+  );
+}
+
 /** 资源媒体 URL（视频/音频播放用），路径变化重解析。 */
 function useMediaUrl(path: string): string | null {
   const [url, setUrl] = useState<string | null>(null);
@@ -3274,10 +3324,8 @@ export default function FreeCanvas({ canvasId }: { canvasId: string }) {
                       ) : (
                         <div className="fc-save-stage filled">
                           {autoState === "error" && saveDot}
-                          <ResourceThumb path={upstream!.paths[0]} className="fc-media-box" />
-                          {upstream!.paths.length > 1 && (
-                            <span className="fc-save-more">+{upstream!.paths.length - 1}</span>
-                          )}
+                          {/* 多图观看：单图/缩略图格由 +N 角标切换（SaveMediaBox） */}
+                          <SaveMediaBox paths={upstream!.paths} />
                         </div>
                       )}
                       {autoState === "error" && autoError && <div className="fc-gen-warn">{autoError}</div>}
