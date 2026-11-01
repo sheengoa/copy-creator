@@ -2358,9 +2358,10 @@
 .fc-save-stage.filled {
   border: none;
   padding: 0;
-  overflow: hidden;
   position: relative;
-  /* 产物落袋后展示区随素材比例撑开（媒体盒），不再是固定 96px 矮条。 */
+  /* 产物落袋后展示区随素材比例撑开（媒体盒），不再是固定 96px 矮条。
+     不裁切：媒体盒自带 10px 圆角，而目标状态点（失败红叉）要探出顶边
+     一半，overflow:hidden 会正好裁掉上半（用户 2026-11-01 定案）。 */
   height: auto;
 }
 
