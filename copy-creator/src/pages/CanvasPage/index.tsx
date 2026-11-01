@@ -174,20 +174,18 @@ export default function CanvasPage() {
           <FreeCanvas key={activeCanvas.id} canvasId={activeCanvas.id} />
         ) : (
           <div className="canvas-empty">
-            {/* 空态横向 hero 条（方案 C）：图标位 + 文案列 + 主按钮；居中
-                新建只在一张画布都没有时出现，有画布后新建走画布栏「＋」。 */}
+            {/* 空态横向 hero 条（方案 C）：图标位 + 文案列 + 主按钮，与
+                原型 1:1——空态即带按钮；画布打开后整个空态不渲染。 */}
             <div className="canvas-empty-hero">
               <span className="canvas-empty-ico">{Icons.canvas}</span>
               <div className="canvas-empty-text">
                 <span className="canvas-empty-title">{t("canvas.empty")}</span>
                 <span className="canvas-empty-sub">{t("canvas.emptySub")}</span>
               </div>
-              {canvases.length === 0 && (
-                <button className="canvas-empty-btn" onClick={() => void createCanvas()}>
-                  {Icons.add}
-                  {t("canvas.newCanvas")}
-                </button>
-              )}
+              <button className="canvas-empty-btn" onClick={() => void createCanvas()}>
+                {Icons.add}
+                {t("canvas.newCanvas")}
+              </button>
             </div>
           </div>
         )}
