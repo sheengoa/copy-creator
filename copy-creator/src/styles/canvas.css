@@ -2371,6 +2371,9 @@
      不裁切：媒体盒自带 10px 圆角，而目标状态点（失败红叉）要探出顶边
      一半，overflow:hidden 会正好裁掉上半（用户 2026-11-01 定案）。 */
   height: auto;
+  /* 块级排版：滚轮隔离层（WheelGate 的 div）作为普通块撑满宽度，
+     缩略图格的 width:100% 才有确定的包含块可参照。 */
+  display: block;
 }
 
 .fc-save-stage.filled .fc-media-box {
@@ -2421,6 +2424,28 @@
   border-radius: 10px;
   background: #090909;
   animation: fc-thumb-in 0.4s cubic-bezier(0.22, 1, 0.36, 1) backwards;
+  /* 限高滚动（2026-11-02 确认）：与单图媒体盒 max-height 330 同一上限，
+     单图/缩略图两态节点高度同量级不跳变；16 张也只是矮柱，第 4 行露边
+     示意可滚。滚轮由 WheelGate 截留给格子，不惊动画布缩放。 */
+  max-height: 330px;
+  overflow-y: auto;
+  scrollbar-width: thin;
+  scrollbar-color: rgba(255, 255, 255, 0.28) transparent;
+}
+
+/* 常挂载 + hidden 切换（保 scrollTop）：类选择器会盖过 UA 的 [hidden]
+   display:none，这里显式压回。 */
+.fc-save-grid[hidden] {
+  display: none;
+}
+
+.fc-save-grid::-webkit-scrollbar {
+  width: 6px;
+}
+
+.fc-save-grid::-webkit-scrollbar-thumb {
+  border-radius: 3px;
+  background: rgba(255, 255, 255, 0.28);
 }
 
 .fc-save-cell {

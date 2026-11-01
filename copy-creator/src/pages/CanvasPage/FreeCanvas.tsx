@@ -384,7 +384,10 @@ function ResourceThumb({ path, className }: { path: string; className?: string }
 }
 
 /** 保存节点多图观看（2026-11-01 定案）：默认单图 + 计数角标；点角标媒体
- *  盒整切缩略图格（与生成胶片条同语），点小图看那张，再点角标回选。纯
+ *  盒整切缩略图格（与生成胶片条同语），点小图看那张，再点角标回选。格子
+ *  区限高 330px 内部滚动（2026-11-02 确认：与单图媒体盒同上限，两态节点
+ *  高度同量级），滚轮由 WheelGate 截留给格子、不惊动画布缩放；格子常挂
+ *  载 + hidden 切换——scrollTop 跨切换保留，换一张回来不用重新滚。纯
  *  观看态——不改上游主图标记、不影响自动保存（本就全量保存）；上游产物
  *  更替（数量或首图路径变化）即回单图第一张，观看态不跨代保留。 */
 function SaveMediaBox({ paths }: { paths: string[] }) {
@@ -399,22 +402,23 @@ function SaveMediaBox({ paths }: { paths: string[] }) {
   const grid = onTrack && view.grid && paths.length > 1;
   return (
     <>
-      {grid ? (
-        <div className="fc-save-grid">
-          {paths.map((p, i) => (
-            <button
-              key={`${i}:${p}`}
-              type="button"
-              className={`fc-save-cell${i === idx ? " is-cur" : ""}`}
-              aria-label={t("canvas.savePickN", { n: i + 1 })}
-              onClick={() => setView({ sig, grid: false, idx: i })}
-            >
-              <ResourceThumb path={p} className="fc-save-cell-img" />
-            </button>
-          ))}
-        </div>
-      ) : (
-        <ResourceThumb path={paths[idx]} className="fc-media-box" />
+      {!grid && <ResourceThumb path={paths[idx]} className="fc-media-box" />}
+      {paths.length > 1 && (
+        <WheelGate>
+          <div className="fc-save-grid" hidden={!grid}>
+            {paths.map((p, i) => (
+              <button
+                key={`${i}:${p}`}
+                type="button"
+                className={`fc-save-cell${i === idx ? " is-cur" : ""}`}
+                aria-label={t("canvas.savePickN", { n: i + 1 })}
+                onClick={() => setView({ sig, grid: false, idx: i })}
+              >
+                <ResourceThumb path={p} className="fc-save-cell-img" />
+              </button>
+            ))}
+          </div>
+        </WheelGate>
       )}
       {paths.length > 1 && (
         <NodeHint text={grid ? t("canvas.saveBackSingle") : t("canvas.saveViewAll")}>
