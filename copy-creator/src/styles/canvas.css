@@ -808,6 +808,58 @@
   text-align: center;
 }
 
+/* 加载入口区（按钮行 + 提示）收合动效：空节点时是唯一选择途径，加载
+   完成后整体"溜走"——grid 行高 1fr→0fr 收合让位给媒体（自动高节点
+   随之收缩、固定高节点媒体随之放大），内容同时下滑淡出；× 清除后
+   反向滑回。负 margin 抵消表单 row-gap，收合后不留空缝。生成节点
+   的参数收起将复用这套动效。 */
+.fc-load-entry {
+  display: grid;
+  grid-template-rows: 1fr;
+  transition:
+    grid-template-rows 0.32s cubic-bezier(0.2, 0.8, 0.3, 1),
+    margin 0.32s cubic-bezier(0.2, 0.8, 0.3, 1);
+}
+
+.fc-load-entry-clip {
+  min-height: 0;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  opacity: 1;
+  transform: translateY(0);
+  visibility: visible;
+  transition:
+    opacity 0.22s ease,
+    transform 0.32s cubic-bezier(0.2, 0.8, 0.3, 1),
+    visibility 0s linear 0s;
+}
+
+.fc-load-entry.is-loaded {
+  grid-template-rows: 0fr;
+  margin-top: -6px;
+  margin-bottom: -6px;
+}
+
+.fc-load-entry.is-loaded .fc-load-entry-clip {
+  opacity: 0;
+  transform: translateY(14px);
+  visibility: hidden;
+  pointer-events: none;
+  transition:
+    opacity 0.22s ease,
+    transform 0.32s cubic-bezier(0.2, 0.8, 0.3, 1),
+    visibility 0s linear 0.32s;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .fc-load-entry,
+  .fc-load-entry-clip {
+    transition-duration: 0s;
+  }
+}
+
 /* 已加载媒体容器：右上角悬浮圆形 × 清除已选文件（悬停浮现）。 */
 .fc-root .fc-load-media {
   position: relative;

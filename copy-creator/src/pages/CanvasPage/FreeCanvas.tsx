@@ -2628,27 +2628,34 @@ export default function FreeCanvas({ canvasId }: { canvasId: string }) {
                   ) : (
                     <div className="fc-node-placeholder">{t("canvas.loadEmpty")}</div>
                   )}
-                  <div className="fc-node-row">
-                    <NodeHint text={t("canvas.loadFromLibrary")} className="is-grow">
-                      <button
-                        className="fc-node-btn ghost is-icon grow"
-                        aria-label={t("canvas.loadFromLibrary")}
-                        onClick={() => pickFromLibrary(node, node.type)}
-                      >
-                        {Icons.resources}
-                      </button>
-                    </NodeHint>
-                    <NodeHint text={t("canvas.loadFromFile")} className="is-grow">
-                      <button
-                        className="fc-node-btn ghost is-icon grow"
-                        aria-label={t("canvas.loadFromFile")}
-                        onClick={() => void pickFromDisk(node)}
-                      >
-                        {Icons.folderOpen}
-                      </button>
-                    </NodeHint>
+                  {/* 入口区（按钮行 + 提示）只在空节点时有意义：加载完成后
+                      整体"溜走"收起（grid 行高收合 + 下滑淡出），× 清除后
+                      反向滑回。生成节点的参数收起将复用这套动效。 */}
+                  <div className={`fc-load-entry${node.resource_path ? " is-loaded" : ""}`}>
+                    <div className="fc-load-entry-clip">
+                      <div className="fc-node-row">
+                        <NodeHint text={t("canvas.loadFromLibrary")} className="is-grow">
+                          <button
+                            className="fc-node-btn ghost is-icon grow"
+                            aria-label={t("canvas.loadFromLibrary")}
+                            onClick={() => pickFromLibrary(node, node.type)}
+                          >
+                            {Icons.resources}
+                          </button>
+                        </NodeHint>
+                        <NodeHint text={t("canvas.loadFromFile")} className="is-grow">
+                          <button
+                            className="fc-node-btn ghost is-icon grow"
+                            aria-label={t("canvas.loadFromFile")}
+                            onClick={() => void pickFromDisk(node)}
+                          >
+                            {Icons.folderOpen}
+                          </button>
+                        </NodeHint>
+                      </div>
+                      <div className="fc-load-hint">{t("canvas.loadDropHint")}</div>
+                    </div>
                   </div>
-                  <div className="fc-load-hint">{t("canvas.loadDropHint")}</div>
                   {nodeErrors[node.id] && <div className="fc-gen-warn">{nodeErrors[node.id]}</div>}
                 </div>
               );
