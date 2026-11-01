@@ -2190,20 +2190,29 @@ export default function FreeCanvas({ canvasId }: { canvasId: string }) {
         }
         return;
       }
-      // 空白：图片 → 新建加载图像节点（每张一个，错开 24px）。
+      // 空白：按扩展名分发到对应加载节点（图像/视频/音频，每文件一个，
+      // 错开 24px）；不认识的扩展名忽略。
       let offset = 0;
       const createdIds: string[] = [];
       for (const path of paths) {
-        if (!IMAGE_EXTS.includes(extOf(path))) continue;
+        const ext = extOf(path);
+        const kind = IMAGE_EXTS.includes(ext)
+          ? "load_image"
+          : VIDEO_EXTS.includes(ext)
+            ? "load_video"
+            : AUDIO_EXTS.includes(ext)
+              ? "load_audio"
+              : null;
+        if (!kind) continue;
         try {
           await invoke("canvas_authorize_media", { path }).catch(() => {});
           const node = await store.getState().createNode({
             canvasId,
-            nodeType: "load_image",
+            nodeType: kind,
             posX: world.x + offset,
             posY: world.y + offset,
-            width: NODE_DEFAULT_SIZE.load_image.w,
-            height: NODE_DEFAULT_SIZE.load_image.h,
+            width: NODE_DEFAULT_SIZE[kind].w,
+            height: NODE_DEFAULT_SIZE[kind].h,
             resourcePath: path,
           });
           if (node) createdIds.push(node.id);
