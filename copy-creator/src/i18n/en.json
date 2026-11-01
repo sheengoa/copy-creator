@@ -876,7 +876,6 @@
     "loadPickerTitle": "Pick from library",
     "loadFromLibrary": "Library",
     "loadFromFile": "Local file",
-    "loadDropHint": "Or drop a file here",
     "loadEmpty": "No media loaded",
     "clearLoaded": "Remove loaded file",
     "waitingUpstream": "Connected — waiting for upstream output",

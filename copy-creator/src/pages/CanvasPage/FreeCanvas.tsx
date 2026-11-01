@@ -2653,7 +2653,6 @@ export default function FreeCanvas({ canvasId }: { canvasId: string }) {
                           </button>
                         </NodeHint>
                       </div>
-                      <div className="fc-load-hint">{t("canvas.loadDropHint")}</div>
                     </div>
                   </div>
                   {nodeErrors[node.id] && <div className="fc-gen-warn">{nodeErrors[node.id]}</div>}

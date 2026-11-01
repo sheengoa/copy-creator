@@ -872,7 +872,6 @@
     "loadPickerTitle": "从资源库选择",
     "loadFromLibrary": "资源库",
     "loadFromFile": "本地文件",
-    "loadDropHint": "也可直接拖入文件",
     "loadEmpty": "未加载媒体",
     "clearLoaded": "移除已加载文件",
     "waitingUpstream": "已连接上游，等待产物",

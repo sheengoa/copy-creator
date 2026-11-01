@@ -801,14 +801,7 @@
     0 0 0 0.5px var(--node-accent, var(--accent));
 }
 
-/* 加载节点：拖入提示 / 音频播放条。 */
-.fc-load-hint {
-  font-size: 10px;
-  color: var(--text-tertiary);
-  text-align: center;
-}
-
-/* 加载入口区（按钮行 + 提示）收合动效：空节点时是唯一选择途径，加载
+/* 加载入口区（按钮行）收合动效：空节点时是唯一选择途径，加载
    完成后整体"溜走"，× 清除后反向滑回。两个方向各自调校——
    溜走：easeInOutCubic 高度同步收合，透明度用 easeInQuart（前段几乎
    不透明、全程可见地滑离，最后才消隐，没有"被抽走"的逃遁感）；
