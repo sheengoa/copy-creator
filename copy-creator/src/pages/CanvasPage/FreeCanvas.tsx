@@ -2490,7 +2490,7 @@ export default function FreeCanvas({ canvasId }: { canvasId: string }) {
                       void deleteNodes([node.id]);
                     }}
                   >
-                    {Icons.close}
+                    {Icons.delete}
                   </button>
                 </NodeHint>
               </span>
@@ -2565,7 +2565,7 @@ export default function FreeCanvas({ canvasId }: { canvasId: string }) {
                           void deleteNodes([node.id]);
                         }}
                       >
-                        {Icons.close}
+                        {Icons.delete}
                       </button>
                     </NodeHint>
                   </span>
