@@ -2855,7 +2855,7 @@ export default function FreeCanvas({ canvasId }: { canvasId: string }) {
                   {node.resource_path ? (
                     <div className="fc-load-media">
                       {node.type === "load_image" ? (
-                        <ResourceThumb path={node.resource_path} className="fc-thumb-cover" />
+                        <ResourceThumb path={node.resource_path} className="fc-media-box" />
                       ) : node.type === "load_video" ? (
                         <ResourceMediaPlayer kind="video" path={node.resource_path} />
                       ) : (
@@ -3277,7 +3277,7 @@ export default function FreeCanvas({ canvasId }: { canvasId: string }) {
                       ) : (
                         <div className="fc-save-stage filled">
                           {saveDot}
-                          <ResourceThumb path={upstream!.paths[0]} className="fc-thumb-cover" />
+                          <ResourceThumb path={upstream!.paths[0]} className="fc-media-box" />
                           {upstream!.paths.length > 1 && (
                             <span className="fc-save-more">+{upstream!.paths.length - 1}</span>
                           )}
@@ -3368,7 +3368,7 @@ export default function FreeCanvas({ canvasId }: { canvasId: string }) {
                             className="fc-frame-thumb"
                             onClick={() => setLightboxSrc(framePath)}
                           >
-                            <ResourceThumb path={framePath} className="fc-thumb-cover" />
+                            <ResourceThumb path={framePath} className="fc-media-box" />
                             <span className="fc-frame-badge">
                               {isLastFrame ? t("canvas.frameLastBadge") : t("canvas.frameFirstBadge")}
                             </span>
@@ -3414,7 +3414,7 @@ export default function FreeCanvas({ canvasId }: { canvasId: string }) {
                     path ? (
                       <NodeHint text={t("canvas.previewOpen")}>
                         <button className="fc-preview-media" onClick={() => setLightboxSrc(path)}>
-                          <ResourceThumb path={path} className="fc-thumb-cover" />
+                          <ResourceThumb path={path} className="fc-media-box" />
                         </button>
                       </NodeHint>
                     ) : (
