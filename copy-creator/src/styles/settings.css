@@ -1038,8 +1038,9 @@
   color: var(--accent);
 }
 
-/* 测速进行中按钮态：ui-btn 基准类 + data-testing 属性（画布页专用反馈） */
-.ui-btn[data-testing="1"] {
+/* 测速进行中按钮态：ui-btn 基准类 + data-testing 属性（画布页专属反馈，
+   作用域限定在画布设置页根内） */
+.canvas-settings .ui-btn[data-testing="1"] {
   pointer-events: none;
   opacity: 0.75;
 }
@@ -1054,10 +1055,10 @@
   animation: canvas-spin 0.8s linear infinite;
 }
 
-.ui-btn[data-testing="1"] .canvas-btn-spin {
+.canvas-settings .ui-btn[data-testing="1"] .canvas-btn-spin {
   display: block;
 }
 
-.ui-btn[data-testing="1"] svg {
+.canvas-settings .ui-btn[data-testing="1"] svg {
   display: none;
 }

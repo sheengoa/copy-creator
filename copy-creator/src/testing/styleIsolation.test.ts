@@ -1,7 +1,7 @@
 /// <reference types="node" />
 
 import { describe, expect, it } from "vitest";
-import { readFileSync } from "node:fs";
+import { readFileSync, readdirSync } from "node:fs";
 
 function readStyle(name: string) {
   return readFileSync(new URL(`../styles/${name}`, import.meta.url), "utf8");
@@ -23,5 +23,24 @@ describe("styles 全局类名隔离", () => {
     const canvas = topLevelClassNames(readStyle("canvas.css"));
     const shared = [...settings].filter((name) => canvas.has(name));
     expect(shared).toEqual([]);
+  });
+
+  it("ui.css 与其他全局样式文件无同名类（控件基准命名空间防线）", () => {
+    // 2026-11 控件统一落位 styles/ui.css 后，基准类（ui-*）必须全仓唯一：
+    // 任何全局样式与它同名都会按加载顺序静默覆盖基准样式。
+    const ui = topLevelClassNames(readStyle("ui.css"));
+    const others = readdirSync(new URL("../styles/", import.meta.url)).filter(
+      (f) => f.endsWith(".css") && f !== "ui.css",
+    );
+    const shared = new Set<string>();
+    for (const file of others) {
+      for (const name of topLevelClassNames(readStyle(file))) {
+        if (ui.has(name)) shared.add(name);
+      }
+    }
+    expect(
+      [...shared].sort(),
+      "ui.css 基准类名必须全仓唯一，同名即被外层样式静默覆盖",
+    ).toEqual([]);
   });
 });

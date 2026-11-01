@@ -549,4 +549,42 @@ describe("架构守卫：领域规则必须全局共享", () => {
       "CSS ::before/::after 已生成该符号，JSX 不得再写同字面量文本（重复渲染且溢出容器）",
     ).toEqual([]);
   });
+
+  it("规则 25：设置页控件必须走 ui/ 基准——禁止原生 select/checkbox 开关与退役控件类回归", () => {
+    // 2026-11 控件统一：开关/分段/下拉/按钮/滑杆/提示收敛到 components/ui
+    // 与 styles/ui.css（基准规则见其 README）。此前设置域并存 3 种开关、
+    // 2 种下拉、4 套分段与 10+ 种按钮类（历史映射见 ui/README.md），此
+    // 规则锁定它们不再回来：新控件只能复用基准组件与 ui-* 类。
+    const settingsDir = join(frontRoot, "components/settings");
+    const targets = [
+      join(frontRoot, "components/SettingsContent.tsx"),
+      ...readdirSync(settingsDir)
+        .filter((entry) => entry.endsWith(".tsx"))
+        .map((entry) => join(settingsDir, entry)),
+    ];
+    // canvas-slider 为前缀的布局类（-row/-cap/-mid/-val）仍在使用：
+    // 否定前瞻只拦裸的滑杆控件类，不误伤布局类。
+    const retiredPatterns: [RegExp, string][] = [
+      [/<select[\s>]/, "原生 <select>（应换 IosSelect）"],
+      [/type="checkbox"/, "原生 checkbox 开关（应换 Toggle）"],
+      [
+        /\b(?:toggle-switch|toggle-thumb|canvas-switch|canvas-pills|canvas-pill|lang-toggle|settings-btn-soft|settings-btn-danger|settings-btn-raised|settings-storage-btn|shortcut-record-btn|radial-scale-reset|radial-scale-slider|settings-shortcut-error|canvas-form-error|canvas-row-sub|canvas-sec-note|settings-info-tip)\b/,
+        "退役控件类",
+      ],
+      [/canvas-slider(?![-\w])/, "退役滑杆类 canvas-slider（应换 .ui-slider）"],
+    ];
+    const offenders: string[] = [];
+    for (const file of targets) {
+      const source = readFileSync(file, "utf8");
+      for (const [pattern, label] of retiredPatterns) {
+        if (pattern.test(source)) {
+          offenders.push(`${toPosix(file)}: ${label}`);
+        }
+      }
+    }
+    expect(
+      offenders,
+      "设置页控件必须复用 ui/ 基准组件（Toggle/Segmented/IosSelect）与 ui-* 类，禁止原生 select/checkbox 开关与退役类名回归",
+    ).toEqual([]);
+  });
 });
