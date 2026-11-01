@@ -1323,7 +1323,11 @@
 
 .fc-load-entry-clip {
   min-height: 0;
-  overflow: hidden;
+  /* clip + clip-margin 代替 hidden：收合容器原本把末行卡片（auto/张数）
+     画在底边之外的下描边和投影一起裁掉——卡片看着像被吞了下边界。
+     允许越出盒边 6px 再裁，边缘完整，布局与收合行为不变。 */
+  overflow: clip;
+  overflow-clip-margin: 6px;
   display: flex;
   flex-direction: column;
   gap: 6px;
