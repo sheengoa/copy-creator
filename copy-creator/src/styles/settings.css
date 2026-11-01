@@ -815,12 +815,13 @@
   font-family: inherit;
   font-size: var(--text-sm);
   font-weight: var(--weight-semibold);
-  color: var(--accent);
+  color: var(--text-secondary);
   cursor: pointer;
 }
 
 .canvas-ch-add:hover {
-  background: var(--accent-bg);
+  background: var(--tool-btn-bg);
+  color: var(--text-primary);
 }
 
 .canvas-ch-add svg {
@@ -862,8 +863,9 @@
   background: rgba(255, 255, 255, 0.035);
 }
 
+/* 策略选中态：灰行 + 深色圆点填充（与开关开态同语言，蓝只留给交互反馈） */
 .canvas-strategy.on {
-  background: var(--accent-bg);
+  background: var(--tool-btn-bg);
 }
 
 .canvas-radio {
@@ -877,7 +879,7 @@
 }
 
 .canvas-strategy.on .canvas-radio {
-  border: 5px solid var(--accent);
+  border: 5px solid var(--text-primary);
 }
 
 .canvas-st-main {
@@ -932,23 +934,23 @@
 
 .canvas-slider-val {
   font-size: 11px;
-  color: var(--accent);
+  color: var(--text-primary);
   font-weight: var(--weight-semibold);
   white-space: nowrap;
   font-variant-numeric: tabular-nums;
 }
 
-/* 生效渠道预览条 */
+/* 生效渠道预览条：中性信息条（蓝只留给交互反馈） */
 .canvas-route {
   display: flex;
   align-items: center;
   gap: 7px;
   margin: 11px 14px 12px;
   padding: 8px 12px;
-  background: var(--accent-bg);
+  background: var(--chip-bg);
   border-radius: 9px;
   font-size: var(--text-sm);
-  color: var(--accent);
+  color: var(--text-secondary);
 }
 
 .canvas-route svg {
