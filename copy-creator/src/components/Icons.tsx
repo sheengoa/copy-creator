@@ -351,9 +351,9 @@ export const Icons = {
      糊成一团。 */
   saveTrayFine: (
     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round">
-      <path d="M5.5 15.5v2a2 2 0 0 0 2 2h9a2 2 0 0 0 2-2v-2" />
-      <path d="M12 3.5v8" />
-      <path d="m8.75 8.25 3.25 3.25 3.25-3.25" />
+      <path d="M5.5 16v2a2 2 0 0 0 2 2h9a2 2 0 0 0 2-2v-2" />
+      <path d="M12 4v8" />
+      <path d="m8.75 8.75 3.25 3.25 3.25-3.25" />
     </svg>
   ),
   folderFine: (

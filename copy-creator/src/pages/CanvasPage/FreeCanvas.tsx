@@ -2964,6 +2964,7 @@ export default function FreeCanvas({ canvasId }: { canvasId: string }) {
                         <button
                           type="button"
                           className="fc-save-opt"
+                          aria-label={t("canvas.saveAutoLibrary")}
                           onClick={() => setSaveAutoTarget(node.id, "library", "")}
                         >
                           {Icons.folderFine}
@@ -2973,6 +2974,7 @@ export default function FreeCanvas({ canvasId }: { canvasId: string }) {
                         <button
                           type="button"
                           className="fc-save-opt"
+                          aria-label={t("canvas.saveAutoDir")}
                           onClick={() => void pickSaveAutoDir(node.id)}
                         >
                           {Icons.saveTrayFine}
