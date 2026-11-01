@@ -479,6 +479,7 @@ export default function ProjectView() {
           message={t("project.episode.deleteConfirm", {
             title: deleteTarget.title || t("project.episode.untitled"),
           })}
+          hint={t("project.episode.deleteConfirmHint")}
           onConfirm={() => {
             const target = deleteTarget;
             setDeleteTarget(null);

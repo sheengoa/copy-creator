@@ -621,6 +621,7 @@ export default function ProjectLibraryPanel({
       {deleteConfirm && (
         <ConfirmDialog
           message={t("project.library.deleteConfirm", { name: deleteConfirm.name })}
+          hint={t("project.library.deleteConfirmHint")}
           onConfirm={() => {
             const target = deleteConfirm;
             setDeleteConfirm(null);

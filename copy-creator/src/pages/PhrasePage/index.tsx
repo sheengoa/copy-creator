@@ -62,6 +62,7 @@ export default function PhrasePage() {
   const [manageGroupsOpen, setManageGroupsOpen] = useState(false);
   const [confirmState, setConfirmState] = useState<{
     message: string;
+    hint?: string;
     onConfirm: () => void | Promise<void>;
   } | null>(null);
   const [renameId, setRenameId] = useState<string | null>(null);
@@ -453,6 +454,7 @@ export default function PhrasePage() {
     const ids = [...selectedIds];
     setConfirmState({
       message: t("phrases.confirmDeleteSelected", { count: ids.length }),
+      hint: t("phrases.confirmDeleteHint"),
       onConfirm: async () => {
         await deletePhrases(ids);
         exitSelection();
@@ -473,6 +475,7 @@ export default function PhrasePage() {
   const handleDeleteGroup = (id: string) => {
     setConfirmState({
       message: t("phrases.confirmDeleteGroup"),
+      hint: t("phrases.confirmDeleteHint"),
       onConfirm: async () => {
         await deleteGroup(id);
         if (groups.length <= 1) {
@@ -605,6 +608,7 @@ export default function PhrasePage() {
       {confirmState && (
         <ConfirmDialog
           message={confirmState.message}
+          hint={confirmState.hint}
           onConfirm={confirmState.onConfirm}
           onCancel={() => setConfirmState(null)}
         />

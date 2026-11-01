@@ -329,6 +329,7 @@ export function TrashPanel({ onBack }: { onBack: () => void }) {
           message={t("resources.trashRestoreMissingConfirm", {
             name: confirmRestoreMissing.file_name,
           })}
+          hint={t("resources.trashRestoreMissingHint")}
           onConfirm={() => {
             const item = confirmRestoreMissing;
             setConfirmRestoreMissing(null);
@@ -343,6 +344,7 @@ export function TrashPanel({ onBack }: { onBack: () => void }) {
           message={t("resources.trashPurgeAllConfirm", {
             count: items?.length ?? 0,
           })}
+          hint={t("resources.trashPurgeHint")}
           onConfirm={() => {
             setConfirmPurgeAll(false);
             void act("purge", () => invoke("purge_trash_items", { ids: [] }));
@@ -356,6 +358,7 @@ export function TrashPanel({ onBack }: { onBack: () => void }) {
           message={t("resources.trashPurgeSelectedConfirm", {
             count: selectedIds.length,
           })}
+          hint={t("resources.trashPurgeHint")}
           onConfirm={() => {
             setConfirmPurgeSelected(false);
             void runBatchPurge();

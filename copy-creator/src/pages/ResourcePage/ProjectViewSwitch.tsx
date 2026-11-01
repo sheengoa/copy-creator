@@ -312,6 +312,7 @@ export default function ProjectViewSwitch({ children }: { children?: ReactNode }
       {deleteShowConfirm && currentShow && (
         <ConfirmDialog
           message={t("project.show.deleteConfirm", { name: currentShow.name })}
+          hint={t("project.show.deleteConfirmHint")}
           onConfirm={() => {
             setDeleteShowConfirm(false);
             void deleteShow(currentShow.id);

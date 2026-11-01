@@ -94,6 +94,7 @@ export function StorageSection({
       {pendingMigratePath !== null && (
         <ConfirmDialog
           message={t("settings.migratePrompt")}
+          hint={t("settings.migratePromptHint")}
           onConfirm={() => {
             void applyStoragePath(pendingMigratePath, true);
           }}

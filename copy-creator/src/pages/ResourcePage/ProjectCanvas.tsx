@@ -5801,6 +5801,7 @@ export default function ProjectCanvas({
           message={t("project.scene.deleteConfirm", {
             heading: deleteSceneTarget.heading || t("project.scene.untitled"),
           })}
+          hint={t("project.scene.deleteConfirmHint")}
           onConfirm={() => {
             const target = deleteSceneTarget;
             setDeleteSceneTarget(null);

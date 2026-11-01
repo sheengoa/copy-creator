@@ -185,6 +185,7 @@ export default function ResourcePage() {
   const resourceSettingsPopoverRef = useRef<HTMLElement>(null);
   const [confirmState, setConfirmState] = useState<{
     message: string;
+    hint?: string;
     onConfirm: () => void | Promise<void>;
   } | null>(null);
   // 回收站：入口角标随 resource-groups-changed 刷新（删除入站即触发）。
@@ -824,6 +825,7 @@ export default function ResourcePage() {
   const handleDeleteResourceGroup = useCallback((name: string) => {
     setConfirmState({
       message: t("resources.confirmDeleteGroup", { name }),
+      hint: t("resources.confirmDeleteGroupHint"),
       onConfirm: async () => {
         try {
           await invoke("delete_resource_group", { name });
@@ -855,6 +857,7 @@ export default function ResourcePage() {
   const handleDeleteRecord = useCallback((id: string) => {
     setConfirmState({
       message: t("resources.confirmDelete"),
+      hint: t("resources.confirmDeleteHint"),
       onConfirm: async () => {
         try {
           const summary = await deleteRecord(id);
@@ -1027,6 +1030,7 @@ export default function ResourcePage() {
     const ids = [...selectedIds];
     setConfirmState({
       message: t("resources.confirmDeleteSelected", { count: ids.length }),
+      hint: t("resources.confirmDeleteHint"),
       onConfirm: async () => {
         setDeletingSelected(true);
         try {
@@ -1139,6 +1143,7 @@ export default function ResourcePage() {
   const confirmDialog = confirmState ? (
     <ConfirmDialog
       message={confirmState.message}
+      hint={confirmState.hint}
       onConfirm={confirmState.onConfirm}
       onCancel={() => setConfirmState(null)}
     />

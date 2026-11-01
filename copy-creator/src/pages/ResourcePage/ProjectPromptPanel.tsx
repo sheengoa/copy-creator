@@ -240,6 +240,7 @@ export default function ProjectPromptPanel({ onClose }: { onClose: () => void })
       {deleteTarget && (
         <ConfirmDialog
           message={t("project.prompt.deleteConfirm", { title: deleteTarget.title })}
+          hint={t("project.prompt.deleteConfirmHint")}
           onConfirm={() => {
             const target = deleteTarget;
             setDeleteTarget(null);

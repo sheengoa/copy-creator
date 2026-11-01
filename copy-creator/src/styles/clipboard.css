@@ -855,7 +855,8 @@
   white-space: pre-line;
 }
 
-/* 确认框次级说明：特别小的小字（稍微能看到即可），承载长串细节。 */
+/* 确认框次级说明：特别小的小字（稍微能看到即可），承载长串细节。
+   pre-line 支持存储迁移等多行说明（\n 换行、普通空格折叠）。 */
 .dialog-hint {
   font-size: 10px;
   color: var(--text-tertiary);
@@ -863,6 +864,7 @@
   line-height: 1.5;
   margin: -9px 0 14px 0;
   text-align: center;
+  white-space: pre-line;
 }
 
 /* === Clipboard Create Dialog (standalone window) === */

@@ -72,6 +72,7 @@ export default function ClipboardPage() {
   const pasteLeftClick = useSettingsStore((s) => s.pasteLeftClick);
   const [confirmState, setConfirmState] = useState<{
     message: string;
+    hint?: string;
     onConfirm: () => void | Promise<void>;
   } | null>(null);
   const [deletingSelected, setDeletingSelected] = useState(false);
@@ -306,6 +307,7 @@ export default function ClipboardPage() {
         "clipboard.confirmDeleteSelected",
         { count: ids.length },
       ),
+      hint: t("clipboard.confirmDeleteSelectedHint"),
       onConfirm: async () => {
         setDeletingSelected(true);
         try {
@@ -409,6 +411,7 @@ export default function ClipboardPage() {
       {confirmState && (
         <ConfirmDialog
           message={confirmState.message}
+          hint={confirmState.hint}
           onConfirm={confirmState.onConfirm}
           onCancel={() => setConfirmState(null)}
         />
