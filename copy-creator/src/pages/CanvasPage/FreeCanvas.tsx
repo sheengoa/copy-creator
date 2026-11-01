@@ -398,9 +398,8 @@ export default function FreeCanvas({ canvasId }: { canvasId: string }) {
   const groups = useCanvasStore((s) => s.groups);
   const genProgress = useCanvasStore((s) => s.genProgress);
   const aiModel = useSettingsStore((s) => s.aiModel);
-  const aiProvider = useSettingsStore((s) => s.aiProvider);
-  /** 模型占位符兜底：节点未填且设置页默认模型为空时按提供商给示例名。 */
-  const modelFallback = aiModel || (aiProvider === "gemini" ? "gemini-2.5-flash-image" : "gpt-image-1");
+  /** 模型占位符兜底：节点未填且设置页默认模型为空时给通用示例名。 */
+  const modelFallback = aiModel || "gpt-image-1";
 
   const store = useCanvasStore;
   const nodesRef = useRef(nodes);
