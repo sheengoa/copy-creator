@@ -1677,107 +1677,54 @@
   height: 18px;
 }
 
-/* 目标已设：紧凑绿徽章（saving 沙漏微动 / error 转红叉示错，点徽章重试） */
-.fc-save-badge {
+/* 目标已设：单点绿徽章（13px，与端口点同级稍大）——绿=就绪/保存中
+   （脉冲），红叉=失败（点重试）；点绿点回到目标选择。行内右对齐。 */
+.fc-save-row {
   display: flex;
-  align-items: center;
-  gap: 7px;
-  align-self: flex-start;
-  padding: 5px 6px 5px 9px;
-  border-radius: 999px;
-  background: color-mix(in srgb, #34c759 12%, transparent);
-  border: 0.5px solid color-mix(in srgb, #34c759 35%, transparent);
+  justify-content: flex-end;
 }
 
-.fc-save-badge.is-saving .fc-save-badge-dot svg {
-  animation: fc-save-pulse-ico 1.1s ease-in-out infinite;
-}
-
-@keyframes fc-save-pulse-ico {
-  0%, 100% { opacity: 1; }
-  50% { opacity: 0.35; }
-}
-
-.fc-save-badge.is-error {
-  background: rgba(255, 69, 58, 0.1);
-  border-color: rgba(255, 69, 58, 0.35);
-  cursor: pointer;
-}
-
-.fc-save-badge-dot {
-  width: 14px;
-  height: 14px;
+.fc-save-dot {
+  width: 13px;
+  height: 13px;
   border-radius: 50%;
+  border: none;
+  padding: 0;
   background: #34c759;
   color: #fff;
+  cursor: pointer;
   display: inline-flex;
   align-items: center;
   justify-content: center;
   flex-shrink: 0;
+  transition: transform 0.12s ease, box-shadow 0.12s ease;
 }
 
-.fc-save-badge.is-error .fc-save-badge-dot {
+.fc-save-dot:hover {
+  transform: scale(1.2);
+  box-shadow: 0 0 0 3px color-mix(in srgb, #34c759 25%, transparent);
+}
+
+.fc-save-dot svg {
+  width: 7px;
+  height: 7px;
+}
+
+.fc-save-dot.is-saving {
+  animation: fc-save-dot-pulse 1.1s ease-in-out infinite;
+}
+
+@keyframes fc-save-dot-pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.4; }
+}
+
+.fc-save-dot.is-error {
   background: #ff453a;
 }
 
-.fc-save-badge-dot svg {
-  width: 8px;
-  height: 8px;
-}
-
-.fc-save-badge-ico {
-  color: #34c759;
-  display: inline-flex;
-}
-
-.fc-save-badge.is-error .fc-save-badge-ico {
-  color: #ff453a;
-}
-
-.fc-save-badge-ico svg {
-  width: 13px;
-  height: 13px;
-}
-
-.fc-save-badge-err {
-  flex: 1;
-  font-size: 10px;
-  color: #ff453a;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  min-width: 0;
-}
-
-.fc-save-badge-swap {
-  width: 22px;
-  height: 22px;
-  border-radius: 6px;
-  border: none;
-  background: none;
-  color: #34c759;
-  cursor: pointer;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  flex-shrink: 0;
-}
-
-.fc-save-badge.is-error .fc-save-badge-swap {
-  color: #ff453a;
-}
-
-.fc-save-badge-swap:hover {
-  background: rgba(52, 199, 89, 0.14);
-}
-
-.fc-save-badge.is-error .fc-save-badge-swap:hover {
-  background: rgba(255, 69, 58, 0.12);
-}
-
-.fc-save-badge-swap svg {
-  width: 12px;
-  height: 12px;
+.fc-save-dot.is-error:hover {
+  box-shadow: 0 0 0 3px color-mix(in srgb, #ff453a 25%, transparent);
 }
 
 /* 自动保存完成：产物缩略图右下角绿勾 */

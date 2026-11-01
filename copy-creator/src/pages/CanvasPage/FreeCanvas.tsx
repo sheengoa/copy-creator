@@ -2945,31 +2945,36 @@ export default function FreeCanvas({ canvasId }: { canvasId: string }) {
                     </div>
                   ) : (
                     <>
-                      {/* 目标已设：小绿徽章（error 转红叉，点徽章重试） */}
-                      <div
-                        className={`fc-save-badge${autoState === "error" ? " is-error" : ""}${autoState === "saving" ? " is-saving" : ""}${autoState === "error" ? " cursor-interaction" : ""}`}
-                        onClick={autoState === "error" ? () => retrySaveAuto(node.id) : undefined}
-                        role={autoState === "error" ? "button" : undefined}
-                        title={autoState === "error" ? autoError : undefined}
-                      >
-                        <span className="fc-save-badge-dot">
-                          {autoState === "error" ? Icons.close : autoState === "saving" ? Icons.hourglass : Icons.check}
-                        </span>
-                        <span className="fc-save-badge-ico">
-                          {autoTarget === "dir" ? Icons.folderOpen : Icons.resources}
-                        </span>
-                        {autoState === "error" && <span className="fc-save-badge-err">{autoError}</span>}
-                        <NodeHint text={t("canvas.saveAutoChange")}>
+                      {/* 目标已设：单点绿徽章（与端口点同级大小）——绿=就绪/
+                          保存中，红叉=失败（悬停看原因，点红叉重试），点绿点
+                          回到目标选择。悬停浮出目标名。 */}
+                      <div className="fc-save-row">
+                        <NodeHint
+                          text={
+                            autoState === "error"
+                              ? `${autoError} · ${t("canvas.saveAutoRetry")}`
+                              : autoState === "saving"
+                                ? t("canvas.saveAutoSaving")
+                                : `${autoTarget === "dir" ? (saveMeta?.auto_dir ?? "").split(/[\\/]/).pop() : t("canvas.saveAutoLibrary")} · ${t("canvas.saveAutoChange")}`
+                          }
+                        >
                           <button
                             type="button"
-                            className="fc-save-badge-swap"
-                            aria-label={t("canvas.saveAutoChange")}
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              clearSaveAutoTarget(node.id);
-                            }}
+                            className={`fc-save-dot${autoState === "error" ? " is-error" : ""}${autoState === "saving" ? " is-saving" : ""}`}
+                            aria-label={
+                              autoState === "error"
+                                ? t("canvas.saveAutoRetry")
+                                : autoTarget === "dir"
+                                  ? (saveMeta?.auto_dir ?? "")
+                                  : t("canvas.saveAutoLibrary")
+                            }
+                            onClick={
+                              autoState === "error"
+                                ? () => retrySaveAuto(node.id)
+                                : () => clearSaveAutoTarget(node.id)
+                            }
                           >
-                            {Icons.swap}
+                            {autoState === "error" ? Icons.close : Icons.check}
                           </button>
                         </NodeHint>
                       </div>
