@@ -530,13 +530,18 @@ export default function FreeCanvas({ canvasId }: { canvasId: string }) {
     setGenWait((prev) => {
       const next = { ...prev };
       let changed = false;
-      for (const [nodeId, prog] of Object.entries(genProgress)) {
+      // 遍历 store 条目与既有快照的并集：条目随最终 canvas-changed 被裁掉
+      // 后键会消失，只按条目遍历会让「条目已消失」的定调分支永远轮不到
+      // （取消路径必现：received+errors 摸不到 total，快照卡死在 wait）。
+      const ids = new Set([...Object.keys(genProgress), ...Object.keys(prev)]);
+      for (const nodeId of ids) {
+        const prog = genProgress[nodeId];
         const node = nodes.find((n) => n.id === nodeId);
         const meta = node?.metadata;
         const generating = meta?.kind === "gen_image" && meta.status === "generating";
         const snap = next[nodeId];
         if (!snap) {
-          if (generating) {
+          if (generating && prog) {
             next[nodeId] = {
               phase: "wait",
               celebrated: false,

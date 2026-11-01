@@ -1496,10 +1496,12 @@ pub async fn ai_generate_image(app: AppHandle, canvas_id: String, node_id: Strin
     } else {
         "done"
     };
-    let error_msg = if errors.is_empty() {
-        String::new()
-    } else if cancelled {
+    let error_msg = if cancelled {
+        // 取消无论是否伴随槽位错误都要给出原因：状态落 error 且保留部分
+        // 产物，节点上需要一行说明（前端灰字展示），否则像凭空失败。
         format!("已取消（保留 {} 张已完成）", saved.len())
+    } else if errors.is_empty() {
+        String::new()
     } else {
         let first = errors[0].clone();
         if saved.is_empty() {
