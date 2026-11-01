@@ -33,6 +33,7 @@ export function installFreezeProbe() {
   // 徽章：直接写 DOM（不进 React，零干扰）。定格在屏幕上的最后数值
   // 就是冻结瞬间的内部状态快照。
   const badge = document.createElement("div");
+  badge.id = "fc-freeze-probe";
   badge.style.cssText =
     "position:fixed;right:10px;bottom:10px;z-index:2147483647;" +
     "font:10px/1.5 Consolas,monospace;background:rgba(20,22,30,.85);color:#dfe3ee;" +
