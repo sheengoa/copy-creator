@@ -342,20 +342,22 @@ const mockGenRuns = new Map<string, { cancelled: boolean }>();
 
 /** 程序化产物图：渐变 + 光斑 dataURL（与原型 makeThumb 同思路）。 */
 function makeMockThumb(hue: number): string {
+  // 9:16 竖版产物：贴近短视频工作流的素材比例，让「内容节点完整显示
+  // （媒体盒两侧留黑边）vs 控制台紧凑封面」的差异在 mock 里真实可见。
   const c = document.createElement("canvas");
   c.width = 104;
-  c.height = 104;
+  c.height = 185;
   const g = c.getContext("2d");
   if (!g) return "";
-  const grad = g.createLinearGradient(0, 0, 104, 104);
+  const grad = g.createLinearGradient(0, 0, 104, 185);
   grad.addColorStop(0, `hsl(${hue} 72% 66%)`);
   grad.addColorStop(1, `hsl(${hue + 46} 78% 38%)`);
   g.fillStyle = grad;
-  g.fillRect(0, 0, 104, 104);
+  g.fillRect(0, 0, 104, 185);
   for (let i = 0; i < 4; i++) {
     g.beginPath();
     g.fillStyle = `hsla(${hue + 30 + i * 55} 92% 78% / 0.5)`;
-    g.arc(18 + Math.random() * 70, 16 + Math.random() * 72, 12 + Math.random() * 18, 0, 6.29);
+    g.arc(18 + Math.random() * 70, 16 + Math.random() * 155, 12 + Math.random() * 18, 0, 6.29);
     g.fill();
   }
   g.beginPath();
