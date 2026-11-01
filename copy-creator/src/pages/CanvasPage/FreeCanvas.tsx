@@ -2922,8 +2922,9 @@ export default function FreeCanvas({ canvasId }: { canvasId: string }) {
                     /* 未连接：断链图形，无文字 */
                     <div className="fc-save-wait">{Icons.link}</div>
                   ) : !autoTarget ? (
-                    /* 连线后的下一步：点图标选保存目标（收纳盒=资源库 / 文件夹=磁盘） */
-                    <div className="fc-save-setup">
+                    /* 连线后的下一步：虚线选择组（问号点明二选一），点选即设 */
+                    <div className="fc-save-choose">
+                      <span className="fc-save-help">{Icons.help}</span>
                       <NodeHint text={t("canvas.saveAutoLibrary")}>
                         <button
                           type="button"
@@ -2931,6 +2932,7 @@ export default function FreeCanvas({ canvasId }: { canvasId: string }) {
                           onClick={() => setSaveAutoTarget(node.id, "library", "")}
                         >
                           {Icons.saveTray}
+                          <span className="fc-save-opt-lbl">{t("canvas.saveAutoLibraryLbl")}</span>
                         </button>
                       </NodeHint>
                       <NodeHint text={t("canvas.saveAutoDir")}>
@@ -2940,14 +2942,15 @@ export default function FreeCanvas({ canvasId }: { canvasId: string }) {
                           onClick={() => void pickSaveAutoDir(node.id)}
                         >
                           {Icons.folderOpen}
+                          <span className="fc-save-opt-lbl">{t("canvas.saveAutoDirLbl")}</span>
                         </button>
                       </NodeHint>
                     </div>
                   ) : (
                     <>
-                      {/* 目标已设：单点绿徽章（与端口点同级大小）——绿=就绪/
-                          保存中，红叉=失败（悬停看原因，点红叉重试），点绿点
-                          回到目标选择。悬停浮出目标名。 */}
+                      {/* 目标已设：22px 绿圆内嵌目标图标——绿=就绪（脉冲）/
+                          完成叠白底绿勾角标，红叉=失败（悬停看原因，点重试）；
+                          点圆回目标选择。悬停浮出目标名。 */}
                       <div className="fc-save-row">
                         <NodeHint
                           text={
@@ -2955,7 +2958,7 @@ export default function FreeCanvas({ canvasId }: { canvasId: string }) {
                               ? `${autoError} · ${t("canvas.saveAutoRetry")}`
                               : autoState === "saving"
                                 ? t("canvas.saveAutoSaving")
-                                : `${autoTarget === "dir" ? (saveMeta?.auto_dir ?? "").split(/[\\/]/).pop() : t("canvas.saveAutoLibrary")} · ${t("canvas.saveAutoChange")}`
+                                : `${autoTarget === "dir" ? (saveMeta?.auto_dir ?? "").split(/[\\/]/).pop() : t("canvas.saveAutoLibraryLbl")} · ${t("canvas.saveAutoChange")}`
                           }
                         >
                           <button
@@ -2966,7 +2969,7 @@ export default function FreeCanvas({ canvasId }: { canvasId: string }) {
                                 ? t("canvas.saveAutoRetry")
                                 : autoTarget === "dir"
                                   ? (saveMeta?.auto_dir ?? "")
-                                  : t("canvas.saveAutoLibrary")
+                                  : t("canvas.saveAutoLibraryLbl")
                             }
                             onClick={
                               autoState === "error"
@@ -2974,29 +2977,28 @@ export default function FreeCanvas({ canvasId }: { canvasId: string }) {
                                 : () => clearSaveAutoTarget(node.id)
                             }
                           >
-                            {autoState === "error" ? Icons.close : Icons.check}
+                            {autoState === "error" ? Icons.close : autoTarget === "dir" ? Icons.folderOpen : Icons.resources}
+                            {autoSaved && (
+                              <span className="fc-save-dot-tick">{Icons.check}</span>
+                            )}
                           </button>
                         </NodeHint>
                       </div>
                       {!hasProduct ? (
-                        /* 等待产物：沙漏图形，无文字 */
-                        <div className="fc-save-wait">{Icons.hourglass}</div>
+                        /* 等待产物：沙漏图形（更高的区域） */
+                        <div className="fc-save-stage">{Icons.hourglass}</div>
                       ) : (
-                        <div className="fc-gen-thumbs">
-                          {upstream!.paths.map((path, i) => (
-                            <span key={i} className="fc-save-item fc-save-thumb">
-                              {node.type === "save_image" ? (
-                                <ResourceThumb path={path} className="fc-thumb" />
-                              ) : (
-                                <span className="fc-save-name">{path.split(/[\\/]/).pop()}</span>
-                              )}
-                              {autoSaved && (
-                                <span className="fc-save-tick">{Icons.check}</span>
-                              )}
-                            </span>
-                          ))}
+                        <div className="fc-save-stage filled">
+                          <ResourceThumb path={upstream!.paths[0]} className="fc-thumb-cover" />
+                          {autoSaved && (
+                            <span className="fc-save-done">{Icons.check}{t("canvas.saveAutoDone")}</span>
+                          )}
+                          {upstream!.paths.length > 1 && (
+                            <span className="fc-save-more">+{upstream!.paths.length - 1}</span>
+                          )}
                         </div>
                       )}
+                      {autoState === "error" && autoError && <div className="fc-gen-warn">{autoError}</div>}
                     </>
                   )}
                   {nodeErrors[node.id] && <div className="fc-gen-warn">{nodeErrors[node.id]}</div>}

@@ -1629,7 +1629,6 @@
 .fc-save-wait {
   border: 1px dashed var(--separator);
   border-radius: 10px;
-  height: 58px;
   display: flex;
   align-items: center;
   justify-content: center;
@@ -1641,52 +1640,90 @@
   height: 16px;
 }
 
-/* 连线后的目标选择：两张纯图标选项卡 */
-.fc-save-setup {
+/* 连线后的目标选择：虚线组包两张图标卡（图标 + 微标签），右上角问号
+   点明「二选一」。 */
+.fc-save-choose {
+  position: relative;
+  border: 1.5px dashed var(--separator);
+  border-radius: 12px;
+  padding: 12px;
   display: flex;
-  gap: 6px;
+  gap: 8px;
+  background: color-mix(in srgb, var(--bg-card) 40%, transparent);
 }
 
-.fc-save-setup .fc-hint-anchor {
+.fc-save-help {
+  position: absolute;
+  top: -7px;
+  right: -7px;
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  background: var(--bg-card);
+  border: 1px solid var(--separator);
+  color: var(--text-tertiary);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.fc-save-help svg {
+  width: 10px;
+  height: 10px;
+}
+
+.fc-save-choose .fc-hint-anchor {
   flex: 1;
   display: flex;
 }
 
 .fc-save-opt {
   flex: 1;
-  height: 58px;
+  height: 74px;
   border-radius: 10px;
   border: 1px solid var(--separator);
   background: var(--bg-card);
   color: var(--text-secondary);
   cursor: pointer;
   display: flex;
+  flex-direction: column;
   align-items: center;
   justify-content: center;
-  transition: border-color 0.15s ease, background 0.15s ease, color 0.15s ease;
+  gap: 5px;
+  transition: border-color 0.15s ease, background 0.15s ease, color 0.15s ease, transform 0.15s ease;
 }
 
 .fc-save-opt:hover {
   border-color: color-mix(in srgb, var(--accent) 45%, transparent);
   background: color-mix(in srgb, var(--accent) 5%, transparent);
   color: var(--accent);
+  transform: translateY(-1px);
 }
 
 .fc-save-opt svg {
-  width: 18px;
-  height: 18px;
+  width: 20px;
+  height: 20px;
 }
 
-/* 目标已设：单点绿徽章（13px，与端口点同级稍大）——绿=就绪/保存中
-   （脉冲），红叉=失败（点重试）；点绿点回到目标选择。行内右对齐。 */
+.fc-save-opt-lbl {
+  font-size: 10px;
+  color: var(--text-tertiary);
+}
+
+.fc-save-opt:hover .fc-save-opt-lbl {
+  color: var(--accent);
+}
+
+/* 目标已设：22px 绿圆内嵌目标图标——绿=就绪（脉冲）/完成叠白底绿勾
+   角标，红叉=失败（点重试）；点圆回目标选择。行内右对齐。 */
 .fc-save-row {
   display: flex;
   justify-content: flex-end;
 }
 
 .fc-save-dot {
-  width: 13px;
-  height: 13px;
+  width: 22px;
+  height: 22px;
   border-radius: 50%;
   border: none;
   padding: 0;
@@ -1697,17 +1734,18 @@
   align-items: center;
   justify-content: center;
   flex-shrink: 0;
+  position: relative;
   transition: transform 0.12s ease, box-shadow 0.12s ease;
 }
 
 .fc-save-dot:hover {
-  transform: scale(1.2);
+  transform: scale(1.12);
   box-shadow: 0 0 0 3px color-mix(in srgb, #34c759 25%, transparent);
 }
 
-.fc-save-dot svg {
-  width: 7px;
-  height: 7px;
+.fc-save-dot > svg {
+  width: 12px;
+  height: 12px;
 }
 
 .fc-save-dot.is-saving {
@@ -1727,45 +1765,89 @@
   box-shadow: 0 0 0 3px color-mix(in srgb, #ff453a 25%, transparent);
 }
 
-/* 自动保存完成：产物缩略图右下角绿勾 */
-.fc-save-thumb {
-  position: relative;
-}
-
-.fc-save-tick {
+.fc-save-dot-tick {
   position: absolute;
   right: -4px;
   bottom: -4px;
-  width: 14px;
-  height: 14px;
+  width: 12px;
+  height: 12px;
   border-radius: 50%;
+  background: #fff;
+  color: #34c759;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  box-shadow: 0 0 0 1px rgba(52, 199, 89, 0.5);
+}
+
+.fc-save-dot-tick svg {
+  width: 7px;
+  height: 7px;
+}
+
+/* 等待 / 产物区：96px 高（占位沙漏虚线框；产物全宽封面 + 右下完成
+   胶囊 + 左上多产物计数）。 */
+.fc-save-stage {
+  border: 1px dashed var(--separator);
+  border-radius: 10px;
+  height: 96px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--text-tertiary);
+}
+
+.fc-save-stage svg {
+  width: 18px;
+  height: 18px;
+}
+
+.fc-save-stage.filled {
+  border: none;
+  padding: 0;
+  overflow: hidden;
+  position: relative;
+}
+
+.fc-save-stage.filled .fc-thumb-cover {
+  height: 96px;
+  border-radius: 10px;
+}
+
+.fc-save-done {
+  position: absolute;
+  right: 8px;
+  bottom: 8px;
+  height: 18px;
+  padding: 0 8px;
+  border-radius: 999px;
   background: #34c759;
   color: #fff;
   display: flex;
   align-items: center;
-  justify-content: center;
-  box-shadow: 0 0 0 1.5px var(--bg-card, #fff);
+  gap: 4px;
+  font-size: 10px;
+  font-weight: 600;
 }
 
-.fc-save-tick svg {
-  width: 8px;
-  height: 8px;
+.fc-save-done svg {
+  width: 9px;
+  height: 9px;
 }
 
-/* 保存节点：产物条目（缩略图/文件名）。 */
-.fc-save-item {
-  display: inline-flex;
-  flex-direction: column;
-  gap: 3px;
-}
-
-.fc-save-name {
-  width: 52px;
-  font-size: 9px;
-  line-height: 1.4;
-  color: var(--text-secondary);
-  word-break: break-all;
-  display: inline-block;
+.fc-save-more {
+  position: absolute;
+  left: 8px;
+  top: 8px;
+  height: 18px;
+  padding: 0 7px;
+  border-radius: 999px;
+  background: rgba(31, 33, 38, 0.7);
+  color: #fff;
+  display: flex;
+  align-items: center;
+  font-size: 10px;
+  font-weight: 600;
 }
 
 .fc-node-btn.is-tiny {
