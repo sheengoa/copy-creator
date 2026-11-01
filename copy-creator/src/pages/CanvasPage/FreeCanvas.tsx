@@ -3112,7 +3112,6 @@ export default function FreeCanvas({ canvasId }: { canvasId: string }) {
               // 点绿点回目标选择。
               const saveDot = (
                 <NodeHint
-                  key={autoTarget}
                   text={
                     autoState === "error"
                       ? `${autoError} · ${t("canvas.saveAutoRetry")}`
@@ -3148,61 +3147,54 @@ export default function FreeCanvas({ canvasId }: { canvasId: string }) {
                   {!upstreamNode ? (
                     /* 未连接：断链图形，无文字 */
                     <div className="fc-save-wait">{Icons.link}</div>
+                  ) : !autoTarget ? (
+                    /* 连线后的下一步：虚线选择组（问号点明二选一），点选即设 */
+                    <div className="fc-save-choose">
+                      <span className="fc-save-help">{Icons.help}</span>
+                      <NodeHint text={t("canvas.saveAutoLibrary")}>
+                        <button
+                          type="button"
+                          className="fc-save-opt"
+                          aria-label={t("canvas.saveAutoLibrary")}
+                          onClick={() => setSaveAutoTarget(node.id, "library", "")}
+                        >
+                          {Icons.folderFine}
+                        </button>
+                      </NodeHint>
+                      <NodeHint text={t("canvas.saveAutoDir")}>
+                        <button
+                          type="button"
+                          className="fc-save-opt"
+                          aria-label={t("canvas.saveAutoDir")}
+                          onClick={() => void pickSaveAutoDir(node.id)}
+                        >
+                          {Icons.saveTrayFine}
+                        </button>
+                      </NodeHint>
+                    </div>
                   ) : (
                     <>
-                      {/* 连线后的下一步：虚线选择组（问号点明二选一），点
-                          选即设。选择组与产物区同槽叠放原位换场——目标就
-                          位后选择组下滑淡出、产物区自下方升入（卡片高度
-                          全程不变）；点绿点清目标时反向换回。 */}
-                      <div className="fc-save-swap">
-                        <div className={`fc-save-choose${autoTarget ? " is-gone" : ""}`}>
-                          <span className="fc-save-help">{Icons.help}</span>
-                          <NodeHint text={t("canvas.saveAutoLibrary")}>
-                            <button
-                              type="button"
-                              className="fc-save-opt"
-                              aria-label={t("canvas.saveAutoLibrary")}
-                              onClick={() => setSaveAutoTarget(node.id, "library", "")}
-                            >
-                              {Icons.folderFine}
-                            </button>
-                          </NodeHint>
-                          <NodeHint text={t("canvas.saveAutoDir")}>
-                            <button
-                              type="button"
-                              className="fc-save-opt"
-                              aria-label={t("canvas.saveAutoDir")}
-                              onClick={() => void pickSaveAutoDir(node.id)}
-                            >
-                              {Icons.saveTrayFine}
-                            </button>
-                          </NodeHint>
+                      {/* 目标已设：16px 弱化绿点（外环 + 内圈 + 对应目标
+                          的精致小版图标，与问号同构同笔画重）骑在等待/产
+                          物区顶边中央，与选择组的问号同一位置语言——绿=
+                          就绪（脉冲）/完成，红叉=失败（点重试），点回目
+                          标选择；悬停浮出目标名。 */}
+                      {!hasProduct ? (
+                        /* 等待产物：沙漏图形（更高的区域） */
+                        <div className="fc-save-stage">
+                          {saveDot}
+                          {Icons.hourglass}
                         </div>
-                        {/* 目标已设：16px 弱化绿点（外环 + 内圈 + 对应目标
-                            的精致小版图标，与问号同构同笔画重）骑在等待/
-                            产物区顶边中央，与选择组的问号同一位置语言—
-                            —绿=就绪（脉冲）/完成，红叉=失败（点重试），
-                            点回目标选择；悬停浮出目标名。key=autoTarget
-                            让目标切换/清空时绿点重落下。 */}
-                        {!hasProduct ? (
-                          /* 等待产物：沙漏图形（更高的区域） */
-                          <div className={`fc-save-stage${autoTarget ? "" : " is-gone"}`}>
-                            {saveDot}
-                            {Icons.hourglass}
-                          </div>
-                        ) : (
-                          <div className={`fc-save-stage filled${autoTarget ? "" : " is-gone"}`}>
-                            {saveDot}
-                            <ResourceThumb path={upstream!.paths[0]} className="fc-thumb-cover" />
-                            {upstream!.paths.length > 1 && (
-                              <span className="fc-save-more">+{upstream!.paths.length - 1}</span>
-                            )}
-                          </div>
-                        )}
-                      </div>
-                      {autoTarget && autoState === "error" && autoError && (
-                        <div className="fc-gen-warn">{autoError}</div>
+                      ) : (
+                        <div className="fc-save-stage filled">
+                          {saveDot}
+                          <ResourceThumb path={upstream!.paths[0]} className="fc-thumb-cover" />
+                          {upstream!.paths.length > 1 && (
+                            <span className="fc-save-more">+{upstream!.paths.length - 1}</span>
+                          )}
+                        </div>
                       )}
+                      {autoState === "error" && autoError && <div className="fc-gen-warn">{autoError}</div>}
                     </>
                   )}
                   {nodeErrors[node.id] && <div className="fc-gen-warn">{nodeErrors[node.id]}</div>}
