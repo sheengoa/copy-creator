@@ -782,7 +782,7 @@
   "canvas": {
     "newCanvas": "新建画布",
     "empty": "还没有画布",
-    "emptyHint": "点击「新建画布」开始自由创作",
+    "emptySub": "新建画布后，即可自由排布节点开始创作",
     "rename": "重命名",
     "renameTitle": "重命名画布",
     "namePlaceholder": "画布名",

@@ -786,7 +786,7 @@
   "canvas": {
     "newCanvas": "New Canvas",
     "empty": "No canvases yet",
-    "emptyHint": "Tap \"New Canvas\" to start creating",
+    "emptySub": "Create a canvas to start arranging nodes freely",
     "rename": "Rename",
     "renameTitle": "Rename Canvas",
     "namePlaceholder": "Canvas name",
