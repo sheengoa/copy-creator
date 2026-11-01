@@ -1641,7 +1641,8 @@
 }
 
 /* 连线后的目标选择：虚线组包两张图标卡（图标 + 微标签），右上角问号
-   点明「二选一」。 */
+   点明「二选一」。入场与加载节点入口区滑回同语——easeOutQuint 淡入
+   上浮。 */
 .fc-save-choose {
   position: relative;
   border: 1.5px dashed var(--separator);
@@ -1650,6 +1651,11 @@
   display: flex;
   gap: 8px;
   background: color-mix(in srgb, var(--bg-card) 40%, transparent);
+  animation: fc-save-choose-in 0.45s cubic-bezier(0.22, 1, 0.36, 1) backwards;
+}
+
+@keyframes fc-save-choose-in {
+  from { opacity: 0; transform: translateY(5px); }
 }
 
 .fc-save-help {
@@ -1775,8 +1781,35 @@
   color: #fff;
 }
 
+/* 状态点入场：苹果落地——加速下落、触地压扁、两段递减回弹；时长与
+   加载节点入口区动效同量级。保存中由脉冲接管；保存完成（is-saving
+   移除）会自然重放一次弹跳，作为落定提示。 */
+.fc-save-dot {
+  animation: fc-save-dot-drop 0.55s backwards;
+}
+
+@keyframes fc-save-dot-drop {
+  /* 加速下落 */
+  0% { transform: translateX(-50%) translateY(-7px) scale(0.72); opacity: 0;
+       animation-timing-function: cubic-bezier(0.55, 0, 1, 1); }
+  /* 触地压扁 */
+  36% { transform: translateX(-50%) translateY(0) scale(1.12, 0.84); opacity: 1;
+       animation-timing-function: cubic-bezier(0, 0, 0.18, 1); }
+  /* 第一段弹起 */
+  58% { transform: translateX(-50%) translateY(-3.5px) scale(0.96, 1.05);
+       animation-timing-function: cubic-bezier(0.55, 0, 1, 1); }
+  /* 二次触地 */
+  76% { transform: translateX(-50%) translateY(0) scale(1.05, 0.94);
+       animation-timing-function: cubic-bezier(0, 0, 0.18, 1); }
+  /* 第二段小弹 */
+  90% { transform: translateX(-50%) translateY(-1px) scale(1);
+       animation-timing-function: cubic-bezier(0.55, 0, 1, 1); }
+  100% { transform: translateX(-50%) translateY(0) scale(1); }
+}
+
 /* 等待 / 产物区：96px 高（占位沙漏虚线框；产物全宽封面 + 右下完成
-   胶囊 + 左上多产物计数）。 */
+   胶囊 + 左上多产物计数）。入场为同语淡入上浮，让位给状态点的弹跳
+   唱主角。 */
 .fc-save-stage {
   position: relative;
   border: 1px dashed var(--separator);
@@ -1786,6 +1819,11 @@
   align-items: center;
   justify-content: center;
   color: var(--text-tertiary);
+  animation: fc-save-stage-in 0.45s cubic-bezier(0.22, 1, 0.36, 1) backwards;
+}
+
+@keyframes fc-save-stage-in {
+  from { opacity: 0; transform: translateY(3px); }
 }
 
 .fc-save-stage svg {
@@ -1803,6 +1841,12 @@
 .fc-save-stage.filled .fc-thumb-cover {
   height: 96px;
   border-radius: 10px;
+  /* 产物落袋：轻微缩放回落 + 淡入（从大于 1 缩小，避免露边）。 */
+  animation: fc-thumb-in 0.4s cubic-bezier(0.22, 1, 0.36, 1) backwards;
+}
+
+@keyframes fc-thumb-in {
+  from { opacity: 0; transform: scale(1.04); }
 }
 
 .fc-save-more {
