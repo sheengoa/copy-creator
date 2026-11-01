@@ -15,6 +15,8 @@ export type CanvasNodeType =
   | "load_image"
   | "load_audio"
   | "load_video"
+  | "video_first_frame"
+  | "video_last_frame"
   | "save_image"
   | "save_video"
   | "save_audio"
@@ -59,12 +61,21 @@ export type SaveMediaMeta = {
   auto_fingerprint?: string;
 };
 
+/** 视频抽帧节点（2026-11-01）：video_path 记节点持有的视频；提取出的
+ *  帧图片写在节点行 resource_path 上（下游 save/preview/合集/参考图
+ *  聚合走通用 resource_path 分支）。两个节点结构一致，仅提取位置不同。 */
+export type FrameNodeMeta = {
+  kind: "video_first_frame" | "video_last_frame";
+  video_path: string;
+};
+
 export type NodeMeta =
   | { kind: "note"; content: string }
   | { kind: "load_text"; content: string }
   | { kind: "load_image" }
   | { kind: "load_video" }
   | { kind: "load_audio" }
+  | FrameNodeMeta
   | {
       kind: "gen_image";
       params: ImageGenParams;

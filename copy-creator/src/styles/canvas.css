@@ -1445,6 +1445,49 @@
   box-shadow: 0 1px 3px rgba(0, 0, 0, 0.4), 0 0 0 0.5px rgba(255, 255, 255, 0.14);
 }
 
+/* 视频抽帧节点（2026-11-01）：产物帧展示（点击放大）+ 执行按钮区。
+   帧图外框复用 fc-load-media（相对定位承载悬浮 ×）。 */
+.fc-root .fc-frame-thumb {
+  display: block;
+  width: 100%;
+  height: 120px;
+  padding: 0;
+  border: none;
+  border-radius: 10px;
+  overflow: hidden;
+  background: rgba(0, 0, 0, 0.04);
+  cursor: pointer;
+}
+
+.fc-root .fc-frame-thumb .fc-thumb-cover {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
+
+.fc-root .fc-frame-badge {
+  position: absolute;
+  left: 8px;
+  bottom: 8px;
+  padding: 1px 7px;
+  border-radius: 999px;
+  font-size: 10px;
+  color: #fff;
+  background: rgba(0, 0, 0, 0.4);
+  pointer-events: none;
+}
+
+.fc-root .fc-frame-hint {
+  font-size: 11px;
+  color: var(--text-tertiary);
+}
+
+.fc-root .fc-frame-ok {
+  font-size: 11px;
+  color: #34c759;
+}
+
 /* 固定高度节点（pc-resized：拖过尺寸手柄或历史落库高度）：预览媒体
    吃掉表单剩余空间，按钮行/提示行始终留在可视区内——裁剪只发生在
    媒体框内部，不再把下方内容推出节点。自动高度节点不命中这些规则，

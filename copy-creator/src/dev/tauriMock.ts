@@ -45,6 +45,7 @@ interface MockCanvasNode {
   type:
     | "gen_image" | "gen_video" | "gen_audio"
     | "load_text" | "load_image" | "load_audio" | "load_video"
+    | "video_first_frame" | "video_last_frame"
     | "save_image" | "save_video" | "save_audio"
     | "preview_image" | "preview_video" | "preview_audio"
     | "collection_image" | "collection_text" | "collection_video"
@@ -250,6 +251,13 @@ const db = {
       metadata: { kind: "save_image", status: "", error: "", target: "", saved_path: "" },
       resource_path: "", created_at: ts(), updated_at: ts(),
     },
+    {
+      // 视频首帧节点（2026-11-01）：预置已加载视频，供抽帧链路验证。
+      id: "cn-4", canvas_id: "cv-1", type: "video_first_frame" as const, title: "",
+      pos_x: 480, pos_y: 430, width: 280, height: null,
+      metadata: { kind: "video_first_frame", video_path: "C:\\mock-library\\segments\\通道回头镜头.mp4" },
+      resource_path: "", created_at: ts(), updated_at: ts(),
+    },
   ] as MockCanvasNode[],
   canvas_connections: [
     { id: "cc-1", canvas_id: "cv-1", from_node: "cn-1", to_node: "cn-2", to_port: "text", created_at: ts() },
@@ -281,6 +289,8 @@ function canvasDefaultMeta(type: MockCanvasNode["type"]): MockCanvasMeta {
     case "load_image": case "load_video": case "load_audio":
     case "preview_image": case "preview_video": case "preview_audio":
       return { kind: type };
+    case "video_first_frame": case "video_last_frame":
+      return { kind: type, video_path: "" };
     case "gen_image":
       return { kind: "gen_image", params: { model: "", size: "", count: 1 }, status: "idle", error: "", images: [] };
     case "gen_video": case "gen_audio":
@@ -772,7 +782,8 @@ function handleInvoke(cmd: string, args: Record<string, unknown>): unknown {
     case "get_resource_library_path":
       return libraryRoot;
     case "get_clipboard_records":
-      // 供「从资源库选文件」浮层挑一个剧本文件（挂剧本链路验证用）。
+      // 供「从资源库选文件」浮层挑一个剧本文件（挂剧本链路验证用）+
+      // 一条视频（视频首帧/尾帧节点选片用，2026-11-01）。
       return [
         {
           id: "rec-script-1",
@@ -783,6 +794,17 @@ function handleInvoke(cmd: string, args: Record<string, unknown>): unknown {
           storage_mode: "resource",
           resource_path: `${libraryRoot}\\scripts\\第一集剧本.txt`,
           resource_kind: "text",
+          resource_group: null,
+        },
+        {
+          id: "rec-video-1",
+          type: "file",
+          content: `${libraryRoot}\\segments\\通道回头镜头.mp4`,
+          source_app: "mock",
+          created_at: ts(),
+          storage_mode: "resource",
+          resource_path: `${libraryRoot}\\segments\\通道回头镜头.mp4`,
+          resource_kind: "video",
           resource_group: null,
         },
       ];
@@ -964,6 +986,17 @@ function handleInvoke(cmd: string, args: Record<string, unknown>): unknown {
     case "ai_generate_image":
       // 完整生成模拟：事件逐张回传 + 阻塞到完成（对齐后端时序）。
       return simulateAiGenerateImage(args);
+    case "canvas_extract_video_frame": {
+      // 视频抽帧模拟（2026-11-01）：约 0.9s 后回一张 mock 帧图（dataURL
+      // 直接可显示，下游聚合/自动保存走通用 resource_path 语义）。
+      const which = String(args.which ?? "first");
+      return new Promise((resolve) => {
+        setTimeout(() => {
+          const idx = which === "last" ? 7 : 3;
+          resolve({ path: MOCK_THUMBS[idx % MOCK_THUMBS.length] });
+        }, 900);
+      });
+    }
     case "ai_cancel_generation": {
       const run = mockGenRuns.get(String(args.requestId ?? ""));
       if (run) run.cancelled = true;

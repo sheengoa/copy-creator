@@ -510,8 +510,12 @@ describe("integration regressions", () => {
     expect(config.app.security.csp).not.toContain("https:");
     expect(config.app.security.csp).toContain("media-src 'self' data: blob: http://127.0.0.1:*");
     expect(config.app.security.assetProtocol.enable).toBe(false);
-    // ctl 脚本随安装包分发（F1 收尾）。
-    expect(config.bundle.resources).toEqual({ "../scripts/copy-creator-ctl": "copy-creator-ctl" });
+    // ctl 脚本随安装包分发（F1 收尾）；ffmpeg 资源目录随包分发（视频
+    // 首帧/尾帧节点 2026-11-01，二进制本体不入库、缺失时退回 PATH）。
+    expect(config.bundle.resources).toEqual({
+      "../scripts/copy-creator-ctl": "copy-creator-ctl",
+      "resources/ffmpeg": "ffmpeg",
+    });
     // 发布产物与 GitHub Releases 四件套一致（E8）。
     expect(config.bundle.targets).toEqual(["appimage", "deb", "nsis", "msi"]);
     // asset 协议已停用（E7），img-src 只放行自身、内联数据与本机 media server。

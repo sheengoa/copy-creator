@@ -43,6 +43,8 @@ const NODE_DEFAULT_SIZE: Record<CanvasNodeType, { w: number; h: number | null }>
   load_image: { w: 260, h: null },
   load_video: { w: 280, h: null },
   load_audio: { w: 260, h: null },
+  video_first_frame: { w: 280, h: null },
+  video_last_frame: { w: 280, h: null },
   save_image: { w: 250, h: null },
   save_video: { w: 280, h: null },
   save_audio: { w: 260, h: null },
@@ -64,6 +66,8 @@ const NODE_FALLBACK_SIZE: Record<CanvasNodeType, { w: number; h: number }> = {
   load_image: { w: 260, h: 220 },
   load_video: { w: 280, h: 220 },
   load_audio: { w: 260, h: 140 },
+  video_first_frame: { w: 280, h: 240 },
+  video_last_frame: { w: 280, h: 240 },
   save_image: { w: 250, h: 170 },
   save_video: { w: 280, h: 150 },
   save_audio: { w: 260, h: 130 },
@@ -116,6 +120,8 @@ const NODE_ACCENT: Record<CanvasNodeType, string> = {
   load_image: MEDIA_COLOR.image,
   load_video: MEDIA_COLOR.video,
   load_audio: MEDIA_COLOR.audio,
+  video_first_frame: MEDIA_COLOR.video,
+  video_last_frame: MEDIA_COLOR.video,
   save_image: MEDIA_COLOR.image,
   save_video: MEDIA_COLOR.video,
   save_audio: MEDIA_COLOR.audio,
@@ -172,7 +178,7 @@ const PORT_DEFS: Record<CanvasNodeType, { ins: PortDef[]; out: { mediaKind: "tex
   gen_image: {
     ins: [
       { id: "text", accepts: ["load_text", "collection_text"], mediaKind: "text" },
-      { id: "image", accepts: ["load_image", "collection_image"], mediaKind: "image" },
+      { id: "image", accepts: ["load_image", "collection_image", "video_first_frame", "video_last_frame"], mediaKind: "image" },
     ],
     out: { mediaKind: "image" },
   },
@@ -180,7 +186,7 @@ const PORT_DEFS: Record<CanvasNodeType, { ins: PortDef[]; out: { mediaKind: "tex
     ins: [
       { id: "text", accepts: ["load_text", "collection_text"], mediaKind: "text" },
       { id: "video", accepts: ["load_video", "collection_video"], mediaKind: "video" },
-      { id: "image", accepts: ["load_image", "collection_image"], mediaKind: "image" },
+      { id: "image", accepts: ["load_image", "collection_image", "video_first_frame", "video_last_frame"], mediaKind: "image" },
     ],
     out: { mediaKind: "video" },
   },
@@ -192,15 +198,19 @@ const PORT_DEFS: Record<CanvasNodeType, { ins: PortDef[]; out: { mediaKind: "tex
   load_image: { ins: [], out: { mediaKind: "image" } },
   load_video: { ins: [], out: { mediaKind: "video" } },
   load_audio: { ins: [], out: { mediaKind: "audio" } },
-  save_image: { ins: [{ id: "in", accepts: ["gen_image"], mediaKind: "image" }], out: null },
+  // 视频抽帧（2026-11-01）：视频自己加载进节点（无输入口），产物是
+  // 一张图片——输出口按图像类型走，下游一切图像消费口都能接。
+  video_first_frame: { ins: [], out: { mediaKind: "image" } },
+  video_last_frame: { ins: [], out: { mediaKind: "image" } },
+  save_image: { ins: [{ id: "in", accepts: ["gen_image", "video_first_frame", "video_last_frame"], mediaKind: "image" }], out: null },
   save_video: { ins: [{ id: "in", accepts: ["gen_video"], mediaKind: "video" }], out: null },
   save_audio: { ins: [{ id: "in", accepts: ["gen_audio"], mediaKind: "audio" }], out: null },
-  preview_image: { ins: [{ id: "in", accepts: ["gen_image", "load_image"], mediaKind: "image" }], out: null },
+  preview_image: { ins: [{ id: "in", accepts: ["gen_image", "load_image", "video_first_frame", "video_last_frame"], mediaKind: "image" }], out: null },
   preview_video: { ins: [{ id: "in", accepts: ["gen_video", "load_video"], mediaKind: "video" }], out: null },
   preview_audio: { ins: [{ id: "in", accepts: ["gen_audio", "load_audio"], mediaKind: "audio" }], out: null },
   // 合集：画布上唯一的多线入口；成员为对应加载节点与对应生成产物。
   collection_image: {
-    ins: [{ id: "image", accepts: ["load_image", "gen_image"], mediaKind: "image", multi: true }],
+    ins: [{ id: "image", accepts: ["load_image", "gen_image", "video_first_frame", "video_last_frame"], mediaKind: "image", multi: true }],
     out: { mediaKind: "image" },
   },
   collection_text: {
@@ -2141,16 +2151,35 @@ export default function FreeCanvas({ canvasId }: { canvasId: string }) {
 
   // ── 加载节点：资源库选择 / 本地文件 / 拖入 ────────────────
 
+  // 资源库浮层的写入意图：加载节点写 resourcePath；视频抽帧节点写
+  // metadata.video_path（视频是输入，帧产物占 resource_path）。
+  const pickerApplyRef = useRef<"resource" | "frame-video">("resource");
+
   const pickFromLibrary = (node: CanvasNode, kind: string) => {
+    pickerApplyRef.current =
+      node.type === "video_first_frame" || node.type === "video_last_frame" ? "frame-video" : "resource";
     setPickerForNode(node.id);
     // kind 供浮层标题区分（图像/视频/音频/文本）。
     void kind;
   };
 
+  /** 抽帧节点换视频：清旧帧产物（resource_path）+ 写新视频路径，下游
+   *  自动保存对空产物自然停摆。 */
+  const applyFrameVideo = async (nodeId: string, type: CanvasNodeType, videoPath: string) => {
+    await store.getState().updateNode(nodeId, {
+      resourcePath: "",
+      metadata: JSON.stringify({ kind: type, video_path: videoPath }),
+    });
+  };
+
   const pickFromDisk = async (node: CanvasNode) => {
     try {
       const picked = await invoke<{ path: string }>("canvas_pick_media_file");
-      await store.getState().updateNode(node.id, { resourcePath: picked.path });
+      if (node.type === "video_first_frame" || node.type === "video_last_frame") {
+        await applyFrameVideo(node.id, node.type, picked.path);
+      } else {
+        await store.getState().updateNode(node.id, { resourcePath: picked.path });
+      }
     } catch (err) {
       // 用户在系统对话框取消：静默；其余错误在节点上提示。
       const msg = String(err);
@@ -2158,6 +2187,42 @@ export default function FreeCanvas({ canvasId }: { canvasId: string }) {
         setNodeErrors((prev) => ({ ...prev, [node.id]: msg }));
       }
     }
+  };
+
+  // ── 视频抽帧节点（视频首帧/尾帧，2026-11-01）：ffmpeg 提取单帧 ──
+
+  const [frameBusy, setFrameBusy] = useState<Record<string, boolean>>({});
+
+  const runFrameExtract = async (node: CanvasNode) => {
+    if (node.metadata.kind !== "video_first_frame" && node.metadata.kind !== "video_last_frame") return;
+    const videoPath = node.metadata.video_path;
+    if (!videoPath) return;
+    setFrameBusy((prev) => ({ ...prev, [node.id]: true }));
+    try {
+      const res = await invoke<{ path: string }>("canvas_extract_video_frame", {
+        path: videoPath,
+        which: node.type === "video_last_frame" ? "last" : "first",
+      });
+      await store.getState().updateNode(node.id, { resourcePath: res.path });
+      setNodeErrors((prev) => {
+        if (!prev[node.id]) return prev;
+        const next = { ...prev };
+        delete next[node.id];
+        return next;
+      });
+    } catch (err) {
+      setNodeErrors((prev) => ({ ...prev, [node.id]: String(err) }));
+    } finally {
+      setFrameBusy((prev) => ({ ...prev, [node.id]: false }));
+    }
+  };
+
+  const clearFrameVideo = (node: CanvasNode) => {
+    if (node.metadata.kind !== "video_first_frame" && node.metadata.kind !== "video_last_frame") return;
+    void store.getState().updateNode(node.id, {
+      resourcePath: "",
+      metadata: JSON.stringify({ kind: node.type, video_path: "" }),
+    });
   };
 
   // ── 保存节点：预设目标 + 产物自动落盘（2026-11-01 用户定案） ──
@@ -2525,7 +2590,7 @@ export default function FreeCanvas({ canvasId }: { canvasId: string }) {
   // 过滤（拖线/摘线到空白时只列能接上的节点类型）。
   const menuGroups: { key: string; types: CanvasNodeType[] }[] = [
     { key: "gen", types: ["gen_image", "gen_video", "gen_audio"] },
-    { key: "load", types: ["load_text", "load_image", "load_video", "load_audio"] },
+    { key: "load", types: ["load_text", "load_image", "load_video", "load_audio", "video_first_frame", "video_last_frame"] },
     { key: "collection", types: ["collection_text", "collection_image", "collection_video"] },
     { key: "output", types: ["save_image", "preview_image", "save_video", "preview_video", "save_audio", "preview_audio"] },
     { key: "misc", types: ["note"] },
@@ -2534,6 +2599,7 @@ export default function FreeCanvas({ canvasId }: { canvasId: string }) {
     switch (type) {
       case "gen_image": return Icons.image;
       case "gen_video": case "load_video": case "preview_video": case "collection_video": return Icons.video;
+      case "video_first_frame": case "video_last_frame": return Icons.clapperboard;
       case "gen_audio": case "load_audio": case "save_audio": case "preview_audio": return Icons.audio;
       case "load_text": return Icons.file;
       case "load_image": return Icons.image;
@@ -3200,6 +3266,119 @@ export default function FreeCanvas({ canvasId }: { canvasId: string }) {
                   {nodeErrors[node.id] && <div className="fc-gen-warn">{nodeErrors[node.id]}</div>}
                 </div>
               );
+            } else if (node.type === "video_first_frame" || node.type === "video_last_frame") {
+              // 视频抽帧节点（2026-11-01）：视频进、图片出。视频在
+              // metadata.video_path（来源：资源库/本地磁盘），提取出的帧
+              // 图片占节点行 resource_path（下游图像消费口通用聚合）。
+              const isLastFrame = node.type === "video_last_frame";
+              const frameMeta =
+                node.metadata.kind === "video_first_frame" || node.metadata.kind === "video_last_frame"
+                  ? node.metadata
+                  : null;
+              const videoPath = frameMeta?.video_path ?? "";
+              const framePath = node.resource_path;
+              const frameBusyNow = !!frameBusy[node.id];
+              const frameError = nodeErrors[node.id];
+              body = (
+                <div className="fc-node-form">
+                  {/* 视频来源入口：选定后与加载节点同款「溜走」收合，×清除后滑回 */}
+                  <div className={`fc-load-entry${videoPath ? " is-loaded" : ""}`}>
+                    <div className="fc-load-entry-clip">
+                      <div className="fc-node-placeholder">
+                        <i>{t("canvas.frameEmpty")}</i>
+                      </div>
+                      <div className="fc-node-row">
+                        <NodeHint text={t("canvas.loadFromLibrary")} className="is-grow">
+                          <button
+                            type="button"
+                            className="fc-node-btn ghost is-icon grow"
+                            aria-label={t("canvas.loadFromLibrary")}
+                            onClick={() => pickFromLibrary(node, "video")}
+                          >
+                            {Icons.resources}
+                          </button>
+                        </NodeHint>
+                        <NodeHint text={t("canvas.loadFromFile")} className="is-grow">
+                          <button
+                            type="button"
+                            className="fc-node-btn ghost is-icon grow"
+                            aria-label={t("canvas.loadFromFile")}
+                            onClick={() => void pickFromDisk(node)}
+                          >
+                            {Icons.folderOpen}
+                          </button>
+                        </NodeHint>
+                      </div>
+                    </div>
+                  </div>
+                  {videoPath && !framePath && !frameBusyNow && (
+                    <>
+                      <ResourceMediaPlayer kind="video" path={videoPath} />
+                      <NodeHint text={frameError ? frameError : ""}>
+                        <button
+                          type="button"
+                          className="fc-node-btn accent"
+                          onClick={() => void runFrameExtract(node)}
+                        >
+                          {t("canvas.frameExec")}
+                        </button>
+                      </NodeHint>
+                      <div className="fc-frame-hint">
+                        {isLastFrame ? t("canvas.frameHintLast") : t("canvas.frameHintFirst")}
+                      </div>
+                    </>
+                  )}
+                  {videoPath && frameBusyNow && (
+                    <>
+                      <ResourceMediaPlayer kind="video" path={videoPath} />
+                      <button type="button" className="fc-node-btn accent" disabled>
+                        {t("canvas.frameRunning")}
+                      </button>
+                    </>
+                  )}
+                  {framePath && !frameBusyNow && (
+                    <>
+                      <NodeHint text={t("canvas.previewOpen")}>
+                        <div className="fc-load-media">
+                          <button
+                            type="button"
+                            className="fc-frame-thumb"
+                            onClick={() => setLightboxSrc(framePath)}
+                          >
+                            <ResourceThumb path={framePath} className="fc-thumb-cover" />
+                            <span className="fc-frame-badge">
+                              {isLastFrame ? t("canvas.frameLastBadge") : t("canvas.frameFirstBadge")}
+                            </span>
+                          </button>
+                          <NodeHint text={t("canvas.frameChangeVideo")}>
+                            <button
+                              type="button"
+                              className="fc-load-clear"
+                              aria-label={t("canvas.frameChangeVideo")}
+                              onClick={() => clearFrameVideo(node)}
+                            >
+                              {Icons.close}
+                            </button>
+                          </NodeHint>
+                        </div>
+                      </NodeHint>
+                      <div className="fc-node-row">
+                        <span className="fc-frame-ok">{t("canvas.frameDone")}</span>
+                        <NodeHint text={isLastFrame ? t("canvas.frameHintLast") : t("canvas.frameHintFirst")}>
+                          <button
+                            type="button"
+                            className="fc-node-btn ghost"
+                            onClick={() => void runFrameExtract(node)}
+                          >
+                            {t("canvas.frameRedo")}
+                          </button>
+                        </NodeHint>
+                      </div>
+                    </>
+                  )}
+                  {frameError && !frameBusyNow && <div className="fc-gen-warn">{frameError}</div>}
+                </div>
+              );
             } else if (node.type === "preview_image" || node.type === "preview_video" || node.type === "preview_audio") {
               const upstreamNode = upstreamNodeOf(node.id);
               const upstream = upstreamMediaOf(node.id);
@@ -3375,13 +3554,18 @@ export default function FreeCanvas({ canvasId }: { canvasId: string }) {
           </div>
         )}
 
-        {/* 资源库选择浮层：加载节点的「从资源库选择」入口 */}
+        {/* 资源库选择浮层：加载节点与抽帧节点的「从资源库选择」入口 */}
         {pickerForNode && (
           <WheelGate>
             <LazyLibraryPicker
               onPick={(filePath) => {
                 const targetId = pickerForNode;
                 setPickerForNode(null);
+                if (pickerApplyRef.current === "frame-video") {
+                  const target = store.getState().nodes.find((n) => n.id === targetId);
+                  if (target) void applyFrameVideo(targetId, target.type, filePath);
+                  return;
+                }
                 void store.getState().updateNode(targetId, { resourcePath: filePath });
               }}
               onClose={() => setPickerForNode(null)}
