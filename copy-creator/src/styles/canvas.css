@@ -882,6 +882,28 @@
   max-height: none;
 }
 
+/* 预览节点（视频/音频）：播放器是表单直接子项，同一套让位——填满
+   剩余空间，上游文本行留在可视区内。 */
+.fc-root .pc-node.pc-resized .fc-node-form > .resource-media-player {
+  flex: 1 1 auto;
+  min-height: 0;
+}
+
+.fc-root .pc-node.pc-resized .fc-node-form > .resource-media-player .resource-media-video {
+  flex: 1;
+  min-height: 0;
+  height: auto;
+  max-height: none;
+}
+
+/* 保存节点（固定高）：多产物缩略图列表内部滚动，按钮行留在可视区。 */
+.fc-root .pc-node.pc-resized .fc-gen-thumbs {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  scrollbar-width: none;
+}
+
 /* 预览节点的媒体按钮外面包着 NodeHint 锚点层——填充尺寸落在锚点
    （表单的直接 flex 子项）上，按钮与内部缩略图再逐层撑满。 */
 .fc-root .pc-node.pc-resized .fc-node-form > .fc-hint-anchor:has(> .fc-preview-media) {
