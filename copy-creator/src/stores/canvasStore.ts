@@ -516,29 +516,56 @@ export const useCanvasStore = create<CanvasState>((set, get) => ({
   },
 
   generateImage: async (canvasId, nodeId) => {
-    // 发起失败（无提示词来源/未配置模型等）：错误原样上抛给面板展示。
-    const result = await invoke<{ requestId: string; total?: number }>("ai_generate_image", {
-      canvasId,
-      nodeId,
-    });
-    // 发起即建进度条目（后端在 generating 落库后也发 canvas-changed，
-    // openCanvas 的裁剪会保留仍 generating 的条目）。
+    // 发起即建进度条目：逐张回传监听以条目存在为前提，而 ai_generate_image
+    // 阻塞到全部槽位完成才 resolve——此前先 await 后建条目，等待期永远收
+    // 不到进度事件（槽位/取消按钮从未真正出现过）。requestId 先占位空串，
+    // 由 canvas-generation-started 事件回填（取消按钮在等待中拿句柄全靠
+    // 它）。完成后的条目由最终 canvas-changed 的 openCanvas 裁剪收走
+    // （节点状态脱离 generating）。
     const node = get().nodes.find((n) => n.id === nodeId);
     const total = node?.metadata.kind === "gen_image" ? node.metadata.params.count : 1;
-    set({
-      genProgress: {
-        ...get().genProgress,
-        [nodeId]: {
-          canvasId,
-          requestId: result.requestId,
-          total: Math.max(1, total),
-          received: 0,
-          errors: 0,
-          previews: {},
+    // 已有真实在途条目（requestId 已回填且节点仍 generating）不覆盖：
+    // 双保险拒绝路径上误删它会掐断正在进行的进度显示。僵尸条目（生成
+    // 已结束、等最终刷新裁剪）与无条目时正常重建占位。
+    const existing = get().genProgress[nodeId];
+    const inFlight =
+      !!existing &&
+      existing.requestId !== "" &&
+      node?.metadata.kind === "gen_image" &&
+      node.metadata.status === "generating";
+    if (!inFlight) {
+      set({
+        genProgress: {
+          ...get().genProgress,
+          [nodeId]: {
+            canvasId,
+            requestId: "",
+            total: Math.max(1, total),
+            received: 0,
+            errors: 0,
+            previews: {},
+          },
         },
-      },
-    });
-    return result.requestId;
+      });
+    }
+    try {
+      const result = await invoke<{ requestId: string }>("ai_generate_image", {
+        canvasId,
+        nodeId,
+      });
+      return result.requestId;
+    } catch (err) {
+      // 发起失败（无渠道/无提示词来源等）：撤掉条目再原样上抛，面板就地
+      // 提示、不进等待态。仅当仍是本次的占位条目（requestId 未回填）才撤，
+      // 防误删同节点真实在途生成的进度。
+      const current = get().genProgress[nodeId];
+      if (current && current.requestId === "") {
+        const rest = { ...get().genProgress };
+        delete rest[nodeId];
+        set({ genProgress: rest });
+      }
+      throw err;
+    }
   },
 
   cancelGeneration: async (requestId) => {
@@ -556,6 +583,20 @@ export const useCanvasStore = create<CanvasState>((set, get) => ({
       void get().loadCanvases();
       const active = get().activeCanvasId;
       if (active) void get().openCanvas(active);
+    });
+    // requestId 提前回传：ai_generate_image 阻塞到全部完成才 resolve，
+    // 等待中的取消按钮拿不到返回值——后端在 generating 落库后即发此事件，
+    // 这里回填到发起时建的占位条目上。
+    void listen<{ requestId: string; nodeId: string }>("canvas-generation-started", (event) => {
+      const { requestId, nodeId } = event.payload;
+      const prev = get().genProgress[nodeId];
+      if (!prev || prev.requestId) return;
+      set({
+        genProgress: {
+          ...get().genProgress,
+          [nodeId]: { ...prev, requestId },
+        },
+      });
     });
     // 逐张回传（方案 3.4）：slot 完成/失败即更新进度条目，节点体即时补格。
     void listen<{ requestId: string; nodeId: string; slot: number; dataUrl?: string; error?: string }>(

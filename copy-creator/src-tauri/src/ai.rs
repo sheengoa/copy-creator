@@ -1291,6 +1291,13 @@ pub async fn ai_generate_image(app: AppHandle, canvas_id: String, node_id: Strin
         .map_err(|e| e.to_string())?;
     }
     let _ = app.emit("canvas-changed", ());
+    // requestId 提前回传：本命令阻塞到全部槽位完成才 resolve，等待中的
+    // 取消按钮拿不到返回值——前端监听此事件把句柄回填进发起时建的占位
+    // 进度条目。
+    let _ = app.emit(
+        "canvas-generation-started",
+        json!({ "requestId": request_id.clone(), "nodeId": node_id.clone() }),
+    );
 
     // 参考图准备：Gemini 走 dataUrl；OpenAI edits 直接传文件路径。
     // 混合协议渠道并存时只要任一目标走 Gemini，就预转一份 dataUrl。

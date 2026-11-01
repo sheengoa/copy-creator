@@ -14,6 +14,7 @@ vi.mock("@tauri-apps/api/event", () => ({
 }));
 
 let progressHandler: ((e: { payload: unknown }) => void) | null = null;
+let startedHandler: ((e: { payload: unknown }) => void) | null = null;
 
 import {
   useCanvasStore,
@@ -282,13 +283,16 @@ describe("canvasStore 画布域 wiring", () => {
     const afterFirst = listenMock.mock.calls.length;
     useCanvasStore.getState().bindCanvasEvents();
     const afterSecond = listenMock.mock.calls.length;
-    // 首次进入本文件时绑定两类事件；模块级单例跨用例共享，重复调用不增订。
+    // 首次进入本文件时绑定三类事件；模块级单例跨用例共享，重复调用不增订。
     expect(afterSecond).toBe(afterFirst);
-    expect(afterFirst).toBeGreaterThanOrEqual(before + 2);
+    expect(afterFirst).toBeGreaterThanOrEqual(before + 3);
     expect(listenMock.mock.calls.some(([name]) => name === "canvas-changed")).toBe(true);
     const found = listenMock.mock.calls.find(([name]) => name === "canvas-generation-progress");
     progressHandler = (found?.[1] as (e: { payload: unknown }) => void) ?? null;
     expect(progressHandler).toBeTypeOf("function");
+    const started = listenMock.mock.calls.find(([name]) => name === "canvas-generation-started");
+    startedHandler = (started?.[1] as (e: { payload: unknown }) => void) ?? null;
+    expect(startedHandler).toBeTypeOf("function");
   });
 
   it("updateNode 以返回行替换本地节点", async () => {
@@ -330,8 +334,15 @@ describe("canvasStore 画布域 wiring", () => {
     });
   });
 
-  it("generateImage 发起后建进度条目", async () => {
-    invokeMock.mockResolvedValue({ requestId: "req-1", status: "generating" });
+  it("generateImage 发起即建占位进度条目，完成后条目保留等事件回填/裁剪", async () => {
+    // ai_generate_image 阻塞到全部完成才 resolve：条目必须在发起时就存在，
+    // 否则逐张回传监听收不到任何事件（等待 UI 与取消从未真正出现过的根因）。
+    let resolveInvoke!: (v: { requestId: string }) => void;
+    invokeMock.mockReturnValue(
+      new Promise<{ requestId: string }>((resolve) => {
+        resolveInvoke = resolve;
+      }),
+    );
     const imageNode = makeNode({
       id: "img1",
       type: "gen_image",
@@ -339,21 +350,58 @@ describe("canvasStore 画布域 wiring", () => {
     });
     useCanvasStore.setState({ activeCanvasId: "c1", nodes: [imageNode] });
 
-    const requestId = await useCanvasStore.getState().generateImage("c1", "img1");
+    const pending = useCanvasStore.getState().generateImage("c1", "img1");
+    expect(useCanvasStore.getState().genProgress["img1"]).toMatchObject({
+      requestId: "",
+      total: 3,
+      received: 0,
+      errors: 0,
+    });
 
+    // started 事件回填 requestId（等待中的取消按钮拿句柄全靠它）。
+    if (!startedHandler) throw new Error("started handler not captured");
+    startedHandler({ payload: { requestId: "req-1", nodeId: "img1" } });
+    expect(useCanvasStore.getState().genProgress["img1"]).toMatchObject({ requestId: "req-1", total: 3 });
+
+    resolveInvoke({ requestId: "req-1" });
+    const requestId = await pending;
     expect(requestId).toBe("req-1");
     expect(invokeMock).toHaveBeenCalledWith("ai_generate_image", { canvasId: "c1", nodeId: "img1" });
-    const progress = useCanvasStore.getState().genProgress["img1"];
-    expect(progress).toMatchObject({ requestId: "req-1", total: 3, received: 0, errors: 0 });
+    // 完成后条目由最终 canvas-changed 的 openCanvas 裁剪收走，store 不动它。
+    expect(useCanvasStore.getState().genProgress["img1"]).toMatchObject({ requestId: "req-1", total: 3 });
   });
 
-  it("generateImage 发起失败上抛（无提示词来源等）", async () => {
+  it("generateImage 发起失败撤掉占位条目再上抛（无提示词来源等）", async () => {
     invokeMock.mockRejectedValue("没有提示词来源");
-    const imageNode = makeNode({ id: "img1", type: "gen_image" });
+    const imageNode = makeNode({
+      id: "img1",
+      type: "gen_image",
+      metadata: { kind: "gen_image", params: { model: "", size: "", count: 2 }, status: "idle", error: "", images: [] },
+    });
     useCanvasStore.setState({ activeCanvasId: "c1", nodes: [imageNode] });
 
     await expect(useCanvasStore.getState().generateImage("c1", "img1")).rejects.toThrow();
     expect(useCanvasStore.getState().genProgress["img1"]).toBeUndefined();
+  });
+
+  it("generateImage 发起失败不撤已回填 requestId 的真实条目", async () => {
+    // 同节点重复发起被后端双保险拒绝时，不能覆盖/误删在途生成的进度条目。
+    invokeMock.mockRejectedValue("该节点正在生成中");
+    const imageNode = makeNode({
+      id: "img1",
+      type: "gen_image",
+      metadata: { kind: "gen_image", params: { model: "", size: "", count: 2 }, status: "generating", error: "", images: [] },
+    });
+    useCanvasStore.setState({
+      activeCanvasId: "c1",
+      nodes: [imageNode],
+      genProgress: {
+        img1: { canvasId: "c1", requestId: "req-real", total: 2, received: 1, errors: 0, previews: {} },
+      },
+    });
+
+    await expect(useCanvasStore.getState().generateImage("c1", "img1")).rejects.toThrow();
+    expect(useCanvasStore.getState().genProgress["img1"]).toMatchObject({ requestId: "req-real", received: 1 });
   });
 
   it("进度事件逐格更新 previews 与计数", () => {

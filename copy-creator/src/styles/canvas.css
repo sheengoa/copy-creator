@@ -720,6 +720,344 @@
   color: #fff;
 }
 
+/* ── 生成等待「流光」舞台（2026-11-01 原型定稿移植） ────────
+   起步两团大光缓慢游移；随逐张回传（--p = received/total）新光团
+   一团团浮现挤进来——密度即进展；过半（.is-half）后第二道光带以
+   2.7s 周期加密扫过，每张回传全场提亮一拍（.au-beatflash）；全部
+   到齐时光团向中心融合收拢成一团辉光（.is-merge），再从中心膨开
+   铺满舞台（.is-bloom）——光满即结果生成好了。融合位移用容器查询
+   单位（cqw/cqh）把「光团百分比位置→舞台中心」表达成纯 CSS，舞台
+   宽度随节点尺寸自适应。 */
+.fc-root .fc-aurora {
+  --au-violet: #af52de;
+  position: relative;
+  height: 96px;
+  flex: none;
+  border-radius: 10px;
+  overflow: hidden;
+  container-type: size;
+  background: color-mix(in srgb, var(--accent) 6%, transparent);
+  border: 1px solid var(--separator);
+  animation: fc-au-in 0.45s cubic-bezier(0.22, 1, 0.36, 1) 0.14s backwards;
+}
+
+.fc-root .fc-aurora.is-out {
+  opacity: 0;
+  transform: scale(0.97) translateY(2px);
+  transition:
+    opacity 0.28s cubic-bezier(0.5, 0, 0.75, 0),
+    transform 0.28s cubic-bezier(0.5, 0, 0.75, 0);
+}
+
+@keyframes fc-au-in {
+  from {
+    opacity: 0;
+    transform: translateY(4px);
+  }
+}
+
+/* 起步两团大光：蓝紫各一，随进度渐浓、缓慢游移。 */
+.fc-root .fc-aurora .au-blob {
+  position: absolute;
+  border-radius: 50%;
+  filter: blur(16px);
+}
+
+.fc-root .fc-aurora .au-a {
+  width: 150px;
+  height: 110px;
+  left: -30px;
+  top: -34px;
+  background: radial-gradient(closest-side, color-mix(in srgb, var(--accent) 52%, transparent), transparent 72%);
+  opacity: calc(0.62 + var(--p, 0) * 0.38);
+  animation: fc-au-a 7.5s ease-in-out infinite alternate;
+}
+
+.fc-root .fc-aurora .au-b {
+  width: 150px;
+  height: 120px;
+  right: -36px;
+  bottom: -44px;
+  background: radial-gradient(closest-side, color-mix(in srgb, var(--au-violet) 44%, transparent), transparent 72%);
+  opacity: calc(0.55 + var(--p, 0) * 0.45);
+  animation: fc-au-b 9.5s ease-in-out infinite alternate;
+}
+
+@keyframes fc-au-a {
+  from {
+    transform: translate(0, 0) scale(1);
+  }
+  to {
+    transform: translate(46px, 20px) scale(1.22);
+  }
+}
+
+@keyframes fc-au-b {
+  from {
+    transform: translate(0, 0) scale(1.1);
+  }
+  to {
+    transform: translate(-40px, -18px) scale(0.92);
+  }
+}
+
+/* 斜向光带：常驻一道 4.6s；过半后第二道以 2.7s 加密扫过。 */
+.fc-root .fc-aurora .au-sheen {
+  position: absolute;
+  inset: -40% -60%;
+  background: linear-gradient(105deg, transparent 42%, rgba(255, 255, 255, 0.22) 50%, transparent 58%);
+  animation: fc-au-sheen 4.6s ease-in-out infinite;
+}
+
+.fc-root .fc-aurora .au-sheen2 {
+  position: absolute;
+  inset: -40% -60%;
+  opacity: 0;
+  transition: opacity 0.9s ease;
+  pointer-events: none;
+}
+
+.fc-root .fc-aurora.is-half .au-sheen2 {
+  opacity: 1;
+}
+
+.fc-root .fc-aurora .au-sheen2 span {
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(105deg, transparent 42%, rgba(255, 255, 255, 0.18) 50%, transparent 58%);
+  animation: fc-au-sheen 2.7s ease-in-out infinite;
+}
+
+@keyframes fc-au-sheen {
+  0%,
+  55% {
+    transform: translateX(-38%);
+    opacity: 0;
+  }
+  70% {
+    opacity: 1;
+  }
+  100% {
+    transform: translateX(38%);
+    opacity: 0;
+  }
+}
+
+/* 光团群：外层管浮现（缩放+淡入），中层管律动波（明暗按横向相位差
+   此起彼伏，--wx = 光团横向位置），内层管各自的缓慢漂移与呼吸。 */
+.fc-root .fc-aurora .au-field {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+}
+
+.fc-root .fc-aurora .au-fb {
+  position: absolute;
+  border-radius: 50%;
+  opacity: 0;
+  transform: translate(-50%, -50%) scale(0.5);
+  filter: blur(var(--b-blur, 10px));
+  transition:
+    opacity 0.7s ease,
+    transform 0.7s cubic-bezier(0.22, 1, 0.36, 1),
+    filter 0.7s ease;
+  pointer-events: none;
+}
+
+.fc-root .fc-aurora .au-fb.is-on {
+  opacity: var(--b-o, 0.7);
+  transform: translate(-50%, -50%) scale(1);
+}
+
+/* 融合：全部到齐——各光团向舞台中心收拢（--gl/--gt 为各自横纵位置
+   百分数，cqw/cqh 换算成位移）、模糊加深彼此溶解成一团完整辉光。 */
+.fc-root .fc-aurora.is-merge .au-fb {
+  transform: translate(-50%, -50%)
+    translate(calc((50 - var(--gl, 50)) * 1cqw), calc((50 - var(--gt, 50)) * 1cqh))
+    scale(1.5);
+  filter: blur(26px);
+}
+
+.fc-root .fc-aurora .au-fused {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  width: 170px;
+  height: 170px;
+  border-radius: 50%;
+  transform: translate(-50%, -50%) scale(0.6);
+  background: radial-gradient(
+    circle,
+    rgba(255, 255, 255, 0.92) 0%,
+    color-mix(in srgb, var(--accent) 52%, transparent) 32%,
+    color-mix(in srgb, var(--au-violet) 30%, transparent) 52%,
+    transparent 72%
+  );
+  filter: blur(4px);
+  opacity: 0;
+  transition:
+    opacity 0.65s ease,
+    transform 0.7s cubic-bezier(0.22, 1, 0.36, 1);
+  pointer-events: none;
+}
+
+.fc-root .fc-aurora.is-merge .au-fused {
+  opacity: 1;
+  transform: translate(-50%, -50%) scale(1);
+}
+
+/* 扩散全屏：融合完成后辉光从中心膨开铺满舞台；收束闪光也放在这一拍
+   （光散开的一瞬）。 */
+.fc-root .fc-aurora.is-bloom .au-fused {
+  opacity: 1;
+  transform: translate(-50%, -50%) scale(2.9);
+  transition:
+    opacity 0.3s ease,
+    transform 0.75s cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+.fc-root .fc-aurora .au-fb > span {
+  position: absolute;
+  inset: 0;
+  animation: fc-au-wave 3.2s ease-in-out calc(var(--wx, 0) * -3.2s) infinite;
+}
+
+@keyframes fc-au-wave {
+  0%,
+  100% {
+    opacity: 0.68;
+  }
+  50% {
+    opacity: 1;
+  }
+}
+
+.fc-root .fc-aurora .au-fb > span > span {
+  position: absolute;
+  inset: 0;
+  border-radius: 50%;
+  background: radial-gradient(closest-side, var(--b-c, var(--accent)), transparent 72%);
+  animation: fc-au-drift var(--d-dur, 8s) ease-in-out var(--d-del, 0s) infinite alternate;
+}
+
+@keyframes fc-au-drift {
+  from {
+    transform: translate(0, 0) scale(1);
+    opacity: 0.72;
+  }
+  to {
+    transform: translate(var(--dx, 20px), var(--dy, 12px)) scale(var(--ds, 1.15));
+    opacity: 1;
+  }
+}
+
+/* 心跳亮拍：每张图回传时全场提亮一拍（前端按回传 key 重挂重放）。 */
+.fc-root .fc-aurora .au-beatflash {
+  position: absolute;
+  inset: 0;
+  background: radial-gradient(circle at 50% 55%, rgba(255, 255, 255, 0.4), transparent 68%);
+  opacity: 0;
+  animation: fc-au-beat 0.48s ease-out 1;
+  pointer-events: none;
+}
+
+@keyframes fc-au-beat {
+  0% {
+    opacity: 0;
+  }
+  30% {
+    opacity: 1;
+  }
+  100% {
+    opacity: 0;
+  }
+}
+
+/* 收束闪光：膨开的一瞬扫一遍。 */
+.fc-root .fc-aurora .au-flare {
+  position: absolute;
+  inset: 0;
+  background: radial-gradient(circle at 50% 55%, rgba(255, 255, 255, 0.55), transparent 60%);
+  opacity: 0;
+  pointer-events: none;
+}
+
+.fc-root .fc-aurora.is-bloom .au-flare {
+  animation: fc-au-flare 0.56s ease-out 1;
+}
+
+@keyframes fc-au-flare {
+  0% {
+    opacity: 0;
+  }
+  30% {
+    opacity: 0.9;
+  }
+  100% {
+    opacity: 0;
+  }
+}
+
+/* 槽位谢幕与落格：退场整体下沉淡出；最终缩略图入场。 */
+.fc-root .fc-gen-slots.is-out {
+  opacity: 0;
+  transform: translateY(6px);
+  transition:
+    opacity 0.24s ease,
+    transform 0.24s ease;
+}
+
+.fc-root .fc-gen-slot.is-err {
+  border-color: color-mix(in srgb, var(--danger) 55%, transparent);
+  color: var(--danger);
+  animation: none;
+}
+
+.fc-root .fc-gen-thumbs.is-land {
+  animation: fc-au-land 0.4s cubic-bezier(0.22, 1, 0.36, 1) backwards;
+}
+
+@keyframes fc-au-land {
+  from {
+    opacity: 0;
+    transform: translateY(4px);
+  }
+}
+
+/* 底部动作行换位（生成 / 进行中两层互斥淡换，原型同构）。 */
+.fc-root .fc-gen-foot {
+  position: relative;
+  min-height: 30px;
+}
+
+.fc-root .fc-gen-layer {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  opacity: 0;
+  visibility: hidden;
+  transform: translateY(3px);
+  pointer-events: none;
+  transition:
+    opacity 0.16s ease,
+    transform 0.16s ease,
+    visibility 0s linear 0.16s;
+}
+
+.fc-root .fc-gen-layer.is-on {
+  opacity: 1;
+  visibility: visible;
+  transform: none;
+  pointer-events: auto;
+  transition-delay: 0s, 0s, 0s;
+}
+
+.fc-root .fc-gen-layer .fc-node-btn.accent {
+  flex: 1;
+}
+
 /* ── 暗色主题（与亮色同步定案：深玻璃 + 浮起件） ─────────── */
 
 [data-theme="dark"] .fc-root .pc-node {
@@ -888,8 +1226,10 @@
    溜走：easeInOutCubic 高度同步收合，透明度用 easeInQuart（前段几乎
    不透明、全程可见地滑离，最后才消隐，没有"被抽走"的逃遁感）；
    滑回：easeOutQuint 快进缓停的归位感。负 margin 抵消表单 row-gap，
-   收合后不留空缝。生成节点的参数收起将复用这套动效。 */
-.fc-load-entry {
+   收合后不留空缝。生成节点的参数收起（.fc-gen-params，生成等待期
+   溜走、完成后滑回）复用这套动效。 */
+.fc-load-entry,
+.fc-gen-params {
   display: grid;
   grid-template-rows: 1fr;
   transition:
@@ -912,7 +1252,8 @@
     visibility 0s linear 0s;
 }
 
-.fc-load-entry.is-loaded {
+.fc-load-entry.is-loaded,
+.fc-gen-params.is-loaded {
   grid-template-rows: 0fr;
   margin-top: -6px;
   margin-bottom: -6px;
@@ -921,7 +1262,8 @@
     margin 0.5s cubic-bezier(0.65, 0, 0.35, 1);
 }
 
-.fc-load-entry.is-loaded .fc-load-entry-clip {
+.fc-load-entry.is-loaded .fc-load-entry-clip,
+.fc-gen-params.is-loaded .fc-load-entry-clip {
   opacity: 0;
   transform: translateY(14px);
   visibility: hidden;
@@ -934,8 +1276,35 @@
 
 @media (prefers-reduced-motion: reduce) {
   .fc-load-entry,
-  .fc-load-entry-clip {
+  .fc-load-entry-clip,
+  .fc-gen-params,
+  .fc-gen-params .fc-load-entry-clip {
     transition-duration: 0s;
+  }
+  /* 流光舞台：常驻律动动画停掉，状态切换（浮现/融合/扩散/退场）直接到
+     位——进度语义仍在，只是不再动。 */
+  .fc-root .fc-aurora .au-a,
+  .fc-root .fc-aurora .au-b,
+  .fc-root .fc-aurora .au-sheen,
+  .fc-root .fc-aurora .au-sheen2 span,
+  .fc-root .fc-aurora .au-fb > span,
+  .fc-root .fc-aurora .au-fb > span > span,
+  .fc-root .fc-aurora .au-beatflash,
+  .fc-root .fc-aurora .au-flare {
+    animation: none !important;
+  }
+  .fc-root .fc-aurora,
+  .fc-root .fc-aurora.is-out,
+  .fc-root .fc-aurora .au-fb,
+  .fc-root .fc-aurora .au-fused,
+  .fc-root .fc-gen-slots.is-out,
+  .fc-root .fc-gen-thumbs.is-land,
+  .fc-root .fc-gen-layer {
+    transition-duration: 0s;
+  }
+  .fc-root .fc-aurora,
+  .fc-root .fc-gen-thumbs.is-land {
+    animation: none;
   }
 }
 
