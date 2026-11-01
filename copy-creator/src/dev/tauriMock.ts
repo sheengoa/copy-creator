@@ -258,6 +258,13 @@ const db = {
       metadata: { kind: "video_first_frame", video_path: "C:\\mock-library\\segments\\通道回头镜头.mp4" },
       resource_path: "", created_at: ts(), updated_at: ts(),
     },
+    {
+      // 视频尾帧节点（2026-11-01）：空态展示，验证拖入/执行链路。
+      id: "cn-5", canvas_id: "cv-1", type: "video_last_frame" as const, title: "",
+      pos_x: 800, pos_y: 430, width: 280, height: null,
+      metadata: { kind: "video_last_frame", video_path: "" },
+      resource_path: "", created_at: ts(), updated_at: ts(),
+    },
   ] as MockCanvasNode[],
   canvas_connections: [
     { id: "cc-1", canvas_id: "cv-1", from_node: "cn-1", to_node: "cn-2", to_port: "text", created_at: ts() },
@@ -319,10 +326,13 @@ const assetById = (id: string) => db.assets.find((a) => a.id === id);
 
 type MockEventListener = (e: { event: string; id: number; payload: unknown }) => void;
 const mockEventListeners: { event: string; cb: MockEventListener }[] = [];
+// listen 返回的 eventId → 条目：unlisten 据此真正摘除。不摘会导致
+// 组件随依赖重挂时监听器滚雪球，一次 mockEmit 触发多次响应。
+const mockEventEntries = new Map<number, { event: string; cb: MockEventListener }>();
 let mockEventSeq = 1;
 
 function mockEmit(event: string, payload: unknown): void {
-  for (const l of mockEventListeners) {
+  for (const l of [...mockEventListeners]) {
     if (l.event === event) l.cb({ event, id: mockEventSeq++, payload });
   }
 }
@@ -1102,15 +1112,27 @@ export function installBrowserMock(): void {
     invoke: (cmd: string, args?: Record<string, unknown>) => {
       try {
         // 事件插件命令：listen 把 handler 回调登记进 mockEventListeners，
-        // 供 mockEmit 广播（unlisten 直接吞掉）。
+        // 供 mockEmit 广播；unlisten 按 eventId 真正摘除。
         if (cmd === "plugin:event|listen") {
           const cb = callbacks.get(Number(args?.handler));
           if (cb && typeof args?.event === "string") {
-            mockEventListeners.push({ event: args.event, cb: cb as MockEventListener });
+            const entry = { event: args.event, cb: cb as MockEventListener };
+            const eventId = mockEventSeq++;
+            mockEventListeners.push(entry);
+            mockEventEntries.set(eventId, entry);
+            return Promise.resolve(eventId);
           }
           return Promise.resolve(mockEventSeq++);
         }
-        if (cmd === "plugin:event|unlisten") return Promise.resolve(null);
+        if (cmd === "plugin:event|unlisten") {
+          const entry = mockEventEntries.get(Number(args?.eventId));
+          if (entry) {
+            const idx = mockEventListeners.indexOf(entry);
+            if (idx >= 0) mockEventListeners.splice(idx, 1);
+            mockEventEntries.delete(Number(args?.eventId));
+          }
+          return Promise.resolve(null);
+        }
         return Promise.resolve(handleInvoke(cmd, args ?? {}));
       } catch (error) {
         return Promise.reject(error);
@@ -1123,6 +1145,10 @@ export function installBrowserMock(): void {
     registerListener: () => eventSeq++,
     unregisterListener: () => {},
   };
+  // 测试钩子：允许页面上下文（Playwright 等）广播 mock 事件，例如驱动
+  // OS 拖入链路 mockEmit("tauri://drag-drop", { paths, position })。
+  (window as unknown as { __TAURI_MOCK_EMIT__?: (event: string, payload: unknown) => void }).__TAURI_MOCK_EMIT__ =
+    mockEmit;
 
   try {
     window.localStorage.setItem("resource_view_mode", "project");
