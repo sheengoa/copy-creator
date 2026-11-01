@@ -1640,9 +1640,9 @@
   height: 16px;
 }
 
-/* 连线后的目标选择：虚线组包两张图标卡（图标 + 微标签），右上角问号
-   点明「二选一」。入场与加载节点入口区滑回同语——easeOutQuint 淡入
-   上浮。 */
+/* 连线后的目标选择：虚线组包两张图标卡（资源库=文件夹、指定路径=
+   下载，名称走悬停提示），右上角问号点明「二选一」。入场与加载节
+   点入口区滑回同语——easeOutQuint 淡入上浮。 */
 .fc-save-choose {
   position: relative;
   border: 1.5px dashed var(--separator);

@@ -346,8 +346,9 @@ export const Icons = {
       <line x1="12" y1="15" x2="12" y2="3" />
     </svg>
   ),
-  /* 小尺寸精致版：专供保存状态点 6~7px 渲染——收窄托盘、拉开箭头与
-     托盘的间距，笔画重由 CSS 按尺寸换算，对齐问号字形的精细观感。 */
+  /* 精致小版：保存状态点（5px，笔画重由 CSS 换算成发丝线）与目标
+     选择卡（24px）共用——收窄托盘、拉开箭头与托盘的间距，小尺寸不
+     糊成一团。 */
   saveTrayFine: (
     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round">
       <path d="M5.5 15.5v2a2 2 0 0 0 2 2h9a2 2 0 0 0 2-2v-2" />
