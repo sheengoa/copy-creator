@@ -24,10 +24,72 @@ const boot = async () => {
   return loadRoot();
 };
 
+// 根级崩溃兜底：渲染层任何未捕获异常会清空 #root，而透明窗口的空白 =
+// 整个应用隐形（2026-11-01「窗口凭空消失」事故的同类根因）。这里兜住
+// 渲染异常，保证窗口至少有一块不透明面板与自救入口。文案不经 i18n——
+// 崩溃源可能就是 i18n 本身。
+class RootErrorBoundary extends React.Component<
+  { children: React.ReactNode },
+  { error: Error | null }
+> {
+  state: { error: Error | null } = { error: null };
+
+  static getDerivedStateFromError(error: Error) {
+    return { error };
+  }
+
+  componentDidCatch(error: Error) {
+    console.error("[root] render crash:", error);
+  }
+
+  render() {
+    if (this.state.error) {
+      return (
+        <div
+          style={{
+            position: "fixed",
+            inset: "20px", // 与 --window-shadow-margin / WINDOW_SHADOW_MARGIN 一致
+            background: "#FFFFFF",
+            borderRadius: 18,
+            display: "flex",
+            flexDirection: "column",
+            alignItems: "center",
+            justifyContent: "center",
+            gap: 12,
+            fontFamily: "'Noto Sans SC', 'PingFang SC', 'Microsoft YaHei', sans-serif",
+          }}
+        >
+          <div style={{ color: "#1C1C1E", fontSize: 14 }}>界面出现异常</div>
+          <button
+            onClick={() => location.reload()}
+            style={{
+              padding: "8px 28px",
+              borderRadius: 10,
+              border: "none",
+              background: "#FFFFFF",
+              boxShadow:
+                "0 1px 3px rgba(0,0,0,0.06), 0 2px 10px rgba(0,0,0,0.10), 0 0 0 0.5px rgba(0,0,0,0.04)",
+              color: "#1C1C1E",
+              fontSize: 12,
+              fontWeight: 600,
+              cursor: "pointer",
+            }}
+          >
+            重新加载
+          </button>
+        </div>
+      );
+    }
+    return this.props.children;
+  }
+}
+
 void boot().then((Root) => {
   ReactDOM.createRoot(document.getElementById("root")!).render(
     <React.StrictMode>
-      <Root />
+      <RootErrorBoundary>
+        <Root />
+      </RootErrorBoundary>
     </React.StrictMode>,
   );
 });
