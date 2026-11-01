@@ -1747,12 +1747,12 @@
   justify-content: center;
 }
 
-/* 中心目标图标（精致小版）：5.5px + 笔画 3——屏上约 0.7px，与问号
-   字形（10px svg × 1.7 笔画 ≈ 0.7px）笔画同重，体量也对齐问号字形。 */
+/* 中心目标图标（精致小版）：5px + 笔画 2.6——屏上约 0.54px 发丝线，
+   与外圈 1px @55% 描边的纤细感匹配；体量也再缩一档。 */
 .fc-save-dot-ring svg {
-  width: 5.5px;
-  height: 5.5px;
-  stroke-width: 3;
+  width: 5px;
+  height: 5px;
+  stroke-width: 2.6;
 }
 
 .fc-save-dot.is-saving {
