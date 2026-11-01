@@ -47,7 +47,8 @@ function App() {
   const [activePanel, setActivePanel] = useState<string>("clipboard");
   const { themeMode, resolvedTheme, toggleTheme, loadSettings } = useSettingsStore();
   const [isPinned, setIsPinned] = useState(false);
-  usePersistWindowSize("main_window_width", "main_window_height");
+  // 落库下限与 tauri.conf.json 的 min 尺寸一致，防异常小值入库。
+  usePersistWindowSize("main_window_width", "main_window_height", { width: 480, height: 460 });
   // 已访问面板保挂载：首次进入才挂载，之后仅显隐切换。卸载重挂会让每次
   // 切换都重新查询、重建整棵卡片树并重取缩略图，是切换卡顿的另一半原因。
   // 隐藏面板 display:none，IntersectionObserver 视其为不可见，缩略图

@@ -71,7 +71,11 @@ export default function ClipboardCreateDialog() {
   const [findCaseSensitive, setFindCaseSensitive] = useState(false);
   const [findMatchCount, setFindMatchCount] = useState(0);
   const [findIndex, setFindIndex] = useState(0);
-  const cancelResizeSave = usePersistWindowSize("clipboard_create_width", "clipboard_create_height");
+  // 下限与 lib.rs 的 min_inner_size（含阴影边距）一致，防异常小值入库。
+  const cancelResizeSave = usePersistWindowSize("clipboard_create_width", "clipboard_create_height", {
+    width: 520,
+    height: 420,
+  });
 
   const resetDraft = useCallback((nextContent = "", nextImages: StashImage[] = []) => {
     setContent(nextContent);

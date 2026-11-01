@@ -193,7 +193,10 @@ describe("standalone window chrome", () => {
     expect(css).not.toContain("clipboard-create-close-btn");
     expect(getRule(css, ".clipboard-create-header")).toContain("-webkit-app-region: drag");
     expect(componentSource).toContain("<WindowResizeHandles />");
-    expect(componentSource).toContain('usePersistWindowSize("clipboard_create_width", "clipboard_create_height")');
+    // 尺寸落库带最小值钳制（与窗口 min_inner_size 同口径）。
+    expect(componentSource).toContain('"clipboard_create_width", "clipboard_create_height"');
+    expect(componentSource).toContain("width: 520");
+    expect(componentSource).toContain("height: 420");
     expect(componentSource).toContain("onCloseRequested");
   });
 
@@ -215,7 +218,9 @@ describe("standalone window chrome", () => {
     const libSource = readSource("../../src-tauri/src/lib.rs");
 
     expect(appSource).toContain("<WindowResizeHandles />");
-    expect(appSource).toContain('usePersistWindowSize("main_window_width", "main_window_height")');
+    expect(appSource).toContain(
+      'usePersistWindowSize("main_window_width", "main_window_height", { width: 480, height: 460 })',
+    );
 
     // Frontend saves logical pixels via the shared debounce hook.
     expect(persistHookSource).toContain("onResized");
