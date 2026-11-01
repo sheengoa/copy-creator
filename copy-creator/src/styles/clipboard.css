@@ -855,20 +855,14 @@
   white-space: pre-line;
 }
 
-/* 确认框次级说明：特别小的小字，承载长串细节（重点留给主文案）。 */
+/* 确认框次级说明：特别小的小字（稍微能看到即可），承载长串细节。 */
 .dialog-hint {
-  font-size: 11px;
+  font-size: 10px;
   color: var(--text-tertiary);
+  opacity: 0.8;
   line-height: 1.5;
-  margin: -8px 0 14px 0;
+  margin: -9px 0 14px 0;
   text-align: center;
-}
-
-/* 带次级说明的确认框：主文案深色常规字重，介于标题与小字之间。 */
-.dialog-message.has-hint {
-  font-size: 14px;
-  color: var(--text-primary);
-  margin-bottom: 6px;
 }
 
 /* === Clipboard Create Dialog (standalone window) === */

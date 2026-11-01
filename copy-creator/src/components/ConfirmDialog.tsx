@@ -36,7 +36,7 @@ export function ConfirmDialog({ message, hint, onConfirm, onCancel, onDismiss }:
     <div className="dialog-overlay" onClick={dismiss}>
       <div className="dialog-content" onClick={(event) => event.stopPropagation()}>
         <h3 className="dialog-title">{t("common.confirm")}</h3>
-        <p className={`dialog-message${hint ? " has-hint" : ""}`}>{message}</p>
+        <p className="dialog-message">{message}</p>
         {hint && <p className="dialog-hint">{hint}</p>}
         <div className="dialog-actions">
           <button
