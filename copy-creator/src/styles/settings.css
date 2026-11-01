@@ -1160,7 +1160,10 @@
   height: 14px;
 }
 
-.canvas-empty {
+/* 渠道空状态。勿复用无线画布页的 .canvas-empty——同名类在 canvas.css 里
+   带 position:absolute; inset:0（铺满画布区居中），会越级劫持这里的空状态
+   铺满整个设置页，透明层吃掉全部点击（2026-11 设置页点击失效的根因）。 */
+.canvas-ch-empty {
   padding: 18px 14px;
   text-align: center;
   font-size: var(--text-sm);

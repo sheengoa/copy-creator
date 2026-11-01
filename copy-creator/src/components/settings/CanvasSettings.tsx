@@ -675,7 +675,7 @@ export function CanvasSettings() {
               </SortableContext>
             </DndContext>
           ) : (
-            <div className="canvas-empty">{t("settings.canvas.emptyHint")}</div>
+            <div className="canvas-ch-empty">{t("settings.canvas.emptyHint")}</div>
           )}
           {expanded === "__new__" ? (
             <ChannelCreateForm onCancel={() => setExpanded(null)} />
