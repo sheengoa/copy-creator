@@ -10,6 +10,15 @@
     "canvas": "Canvas"
   },
   "settings": {
+    "nav": {
+      "general": "General",
+      "shortcut": "Shortcuts",
+      "clipboard": "Clipboard",
+      "radial": "Radial Menu",
+      "canvas": "Canvas",
+      "storage": "Storage",
+      "backup": "Backup"
+    },
     "title": "Settings",
     "generalSection": "General",
     "clipboardSection": "Clipboard",

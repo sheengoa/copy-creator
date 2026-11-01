@@ -10,6 +10,15 @@
     "canvas": "画布"
   },
   "settings": {
+    "nav": {
+      "general": "通用",
+      "shortcut": "快捷键",
+      "clipboard": "剪切板",
+      "radial": "径向菜单",
+      "canvas": "画布",
+      "storage": "存储",
+      "backup": "备份"
+    },
     "title": "设置",
     "generalSection": "通用",
     "clipboardSection": "剪切板",

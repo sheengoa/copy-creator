@@ -697,3 +697,86 @@
   font-weight: 400;
   margin-top: 2px;
 }
+
+/* ── 设置页分类导航：设置升级为「左导航 + 右独立页」，每个分类一页 ── */
+.settings-layout {
+  display: flex;
+  align-items: flex-start;
+  gap: 14px;
+}
+
+.settings-cat-nav {
+  position: sticky;
+  top: -14px; /* 抵消 panel-window-body 的 14px 上内边距，滚动时贴住面板顶 */
+  width: 148px;
+  flex-shrink: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 2px 0 8px;
+}
+
+.settings-cat-item {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  width: 100%;
+  padding: 7px 10px;
+  border: none;
+  border-radius: 8px;
+  background: none;
+  font-family: inherit;
+  font-size: var(--text-sm);
+  color: var(--text-secondary);
+  text-align: left;
+  cursor: pointer;
+  transition: background 0.15s;
+}
+
+.settings-cat-item:hover {
+  background: rgba(0, 0, 0, 0.04);
+}
+
+[data-theme="dark"] .settings-cat-item:hover {
+  background: rgba(255, 255, 255, 0.06);
+}
+
+.settings-cat-item.on {
+  background: var(--nav-item-active-bg);
+  color: var(--nav-item-active-color);
+  font-weight: var(--weight-semibold);
+}
+
+.settings-cat-icon {
+  display: flex;
+  flex-shrink: 0;
+  width: 15px;
+  height: 15px;
+}
+
+.settings-cat-icon svg {
+  width: 15px;
+  height: 15px;
+}
+
+.settings-cat-item.on .settings-cat-icon {
+  color: var(--accent);
+}
+
+.settings-page {
+  flex: 1;
+  min-width: 0;
+}
+
+@media (max-width: 760px) {
+  .settings-cat-nav {
+    width: 52px;
+  }
+  .settings-cat-item {
+    justify-content: center;
+    padding: 8px;
+  }
+  .settings-cat-label {
+    display: none;
+  }
+}

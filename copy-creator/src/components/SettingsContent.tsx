@@ -1,11 +1,26 @@
 import { getStoragePath } from "../domain/mediaUrl";
-import { useState, useEffect, useRef } from "react";
+import { useState, useEffect, useRef, type ReactNode } from "react";
 import { useTranslation } from "react-i18next";
 import { invoke } from "@tauri-apps/api/core";
 import { emit } from "@tauri-apps/api/event";
 import { useSettingsStore } from "../stores/settingsStore";
 import { ClipboardSection, GeneralSection, ShortcutSection, RadialSection, StorageSection, BackupSection, AiImageSection } from "./settings";
 import { useShortcutRecording } from "./settings/useShortcutRecording";
+import { Icons } from "./Icons";
+
+// 设置页分类：设置从纵向长列表升级为「左导航 + 右独立页」，
+// 每个分类一个单独页（画布页承载画布专属设置）。
+type SettingsCat = "general" | "shortcut" | "clipboard" | "radial" | "canvas" | "storage" | "backup";
+
+const SETTINGS_CATS: { key: SettingsCat; icon: ReactNode; labelKey: string }[] = [
+  { key: "general", icon: Icons.slidersHorizontal, labelKey: "settings.nav.general" },
+  { key: "shortcut", icon: Icons.keyboard, labelKey: "settings.nav.shortcut" },
+  { key: "clipboard", icon: Icons.clipboard, labelKey: "settings.nav.clipboard" },
+  { key: "radial", icon: Icons.radar, labelKey: "settings.nav.radial" },
+  { key: "canvas", icon: Icons.image, labelKey: "settings.nav.canvas" },
+  { key: "storage", icon: Icons.hardDrive, labelKey: "settings.nav.storage" },
+  { key: "backup", icon: Icons.archive, labelKey: "settings.nav.backup" },
+];
 
 interface Props {
   embedded?: boolean;
@@ -36,6 +51,7 @@ export default function SettingsContent({ embedded }: Props) {
   const [storagePath, setStoragePath] = useState("");
   const [saved, setSaved] = useState(false);
   const [shortcutError, setShortcutError] = useState(false);
+  const [activeCat, setActiveCat] = useState<SettingsCat>("general");
   const syncedSettingsRef = useRef<{
     clipboardRetention: string;
     language: string;
@@ -314,71 +330,109 @@ export default function SettingsContent({ embedded }: Props) {
     }
   };
 
+  // 统一保存按钮：通用/快捷键/剪切板/径向菜单四页的局部状态都走
+  // handleSave 一次性提交（未改动的键提交原值，无副作用），因此每页
+  // 底部放同一个 SaveBar。
+  const saveBar = (
+    <div className="settings-actions">
+      <button className={`settings-save-btn${saved ? " saved" : ""}`} onClick={handleSave}>
+        {saved ? t("common.saved") : t("common.save")}
+      </button>
+    </div>
+  );
+
+  const catPages: Record<SettingsCat, ReactNode> = {
+    general: (
+      <>
+        <GeneralSection
+          localLang={localLang}
+          setLocalLang={setLocalLang}
+          localAutostart={localAutostart}
+          setLocalAutostart={setLocalAutostart}
+          localContentSort={localContentSort}
+          setLocalContentSort={(mode) => {
+            setLocalContentSort(mode);
+            settings.setContentSort(mode);
+          }}
+        />
+        {saveBar}
+      </>
+    ),
+    shortcut: (
+      <>
+        <ShortcutSection
+          localShortcutKey={localShortcutKey}
+          recording={recording}
+          startRecording={startRecording}
+          stopRecording={stopRecording}
+          localRadialShortcutKey={localRadialShortcutKey}
+          radialRecording={radialRecording}
+          startRadialRecording={startRadialRecording}
+          stopRadialRecording={stopRadialRecording}
+          localClipboardCreateShortcutKey={ccShortcut.shortcut}
+          clipboardCreateRecording={ccShortcut.recording}
+          startClipboardCreateRecording={ccShortcut.startRecording}
+          stopClipboardCreateRecording={ccShortcut.stopRecording}
+        />
+        {shortcutError && (
+          <div className="settings-shortcut-error" role="alert">
+            {t("settings.shortcutRegistrationFailed")}
+          </div>
+        )}
+        {saveBar}
+      </>
+    ),
+    clipboard: (
+      <>
+        <ClipboardSection
+          localRetention={localRetention}
+          setLocalRetention={setLocalRetention}
+          localPasteLeftClick={localPasteLeftClick}
+          setLocalPasteLeftClick={(mode) => {
+            setLocalPasteLeftClick(mode);
+            settings.setPasteLeftClick(mode);
+          }}
+        />
+        {saveBar}
+      </>
+    ),
+    radial: (
+      <>
+        <RadialSection
+          localRadialMenuScale={localRadialMenuScale}
+          setLocalRadialMenuScale={setLocalRadialMenuScale}
+        />
+        {saveBar}
+      </>
+    ),
+    canvas: (
+      <>
+        {/* AI 生图：自持久化分区（改动即落库），不参与统一保存。
+            画布独立设置页的阶段一占位，后续替换为完整画布设置。 */}
+        <AiImageSection />
+      </>
+    ),
+    storage: <StorageSection storagePath={storagePath} setStoragePath={setStoragePath} />,
+    backup: <BackupSection />,
+  };
+
   const content = (
-    <>
-      <GeneralSection
-        localLang={localLang}
-        setLocalLang={setLocalLang}
-        localAutostart={localAutostart}
-        setLocalAutostart={setLocalAutostart}
-        localContentSort={localContentSort}
-        setLocalContentSort={(mode) => {
-          setLocalContentSort(mode);
-          settings.setContentSort(mode);
-        }}
-      />
-
-      <ShortcutSection
-        localShortcutKey={localShortcutKey}
-        recording={recording}
-        startRecording={startRecording}
-        stopRecording={stopRecording}
-        localRadialShortcutKey={localRadialShortcutKey}
-        radialRecording={radialRecording}
-        startRadialRecording={startRadialRecording}
-        stopRadialRecording={stopRadialRecording}
-        localClipboardCreateShortcutKey={ccShortcut.shortcut}
-        clipboardCreateRecording={ccShortcut.recording}
-        startClipboardCreateRecording={ccShortcut.startRecording}
-        stopClipboardCreateRecording={ccShortcut.stopRecording}
-      />
-      {shortcutError && (
-        <div className="settings-shortcut-error" role="alert">
-          {t("settings.shortcutRegistrationFailed")}
-        </div>
-      )}
-
-      <ClipboardSection
-        localRetention={localRetention}
-        setLocalRetention={setLocalRetention}
-        localPasteLeftClick={localPasteLeftClick}
-        setLocalPasteLeftClick={(mode) => {
-          setLocalPasteLeftClick(mode);
-          settings.setPasteLeftClick(mode);
-        }}
-      />
-
-      <RadialSection
-        localRadialMenuScale={localRadialMenuScale}
-        setLocalRadialMenuScale={setLocalRadialMenuScale}
-      />
-
-      {/* AI 生图：自持久化分区（改动即落库），不参与下方统一保存 */}
-      <AiImageSection />
-
-      <StorageSection
-        storagePath={storagePath}
-        setStoragePath={setStoragePath}
-      />
-
-      <BackupSection />
-
-      <div className="settings-actions">
-        <button className={`settings-save-btn${saved ? " saved" : ""}`} onClick={handleSave}>
-          {saved ? t("common.saved") : t("common.save")}
-        </button>
-      </div>
-    </>
+    <div className="settings-layout">
+      <nav className="settings-cat-nav" aria-label={t("settings.title")}>
+        {SETTINGS_CATS.map((cat) => (
+          <button
+            key={cat.key}
+            type="button"
+            className={`settings-cat-item${activeCat === cat.key ? " on" : ""}`}
+            onClick={() => setActiveCat(cat.key)}
+          >
+            <span className="settings-cat-icon">{cat.icon}</span>
+            <span className="settings-cat-label">{t(cat.labelKey)}</span>
+          </button>
+        ))}
+      </nav>
+      <div className="settings-page">{catPages[activeCat]}</div>
+    </div>
   );
 
   if (embedded) {
