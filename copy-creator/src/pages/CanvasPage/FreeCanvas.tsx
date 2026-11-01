@@ -3195,10 +3195,12 @@ export default function FreeCanvas({ canvasId }: { canvasId: string }) {
               const autoTarget = saveMeta?.auto_target ?? "";
               const autoState = saveMeta?.auto_state ?? "";
               const autoError = saveMeta?.auto_error ?? "";
-              // 目标状态点：骑在等待/产物区顶边中央（与选择组问号同一位置
+              // 目标状态点：骑在等待产物区顶边中央（与选择组问号同一位置
               // 语言）。中心为对应目标的精致小版图标（资源库=文件夹、
               // 指定路径=下载），笔画重与问号一致；红叉=失败，点重试；
-              // 点绿点回目标选择。
+              // 点绿点回目标选择。产物到位后绿点退场——图像即输出，不
+              // 再挂状态点（用户 2026-11-01 定案），输出删掉回到等待态
+              // 再恢复；仅保存失败保留红叉点重试。
               const saveDot = (
                 <NodeHint
                   text={
@@ -3263,11 +3265,12 @@ export default function FreeCanvas({ canvasId }: { canvasId: string }) {
                     </div>
                   ) : (
                     <>
-                      {/* 目标已设：16px 弱化绿点（外环 + 内圈 + 对应目标
-                          的精致小版图标，与问号同构同笔画重）骑在等待/产
-                          物区顶边中央，与选择组的问号同一位置语言——绿=
-                          就绪（脉冲）/完成，红叉=失败（点重试），点回目
-                          标选择；悬停浮出目标名。 */}
+                      {/* 目标已设：等待产物时骑等待区顶边中央的 16px 状态点
+                          （外环 + 内圈 + 对应目标的精致小版图标，与问号同构
+                          同笔画重）——绿=就绪，点回目标选择，悬停浮出目
+                          标名。产物一到媒体盒即输出本身，状态点退场（用
+                          户 2026-11-01 定案：有图就不显示小绿点，输出删掉
+                          回到等待态再恢复）；仅保存失败保留红叉点重试。 */}
                       {!hasProduct ? (
                         /* 等待产物：沙漏图形（更高的区域） */
                         <div className="fc-save-stage">
@@ -3276,7 +3279,7 @@ export default function FreeCanvas({ canvasId }: { canvasId: string }) {
                         </div>
                       ) : (
                         <div className="fc-save-stage filled">
-                          {saveDot}
+                          {autoState === "error" && saveDot}
                           <ResourceThumb path={upstream!.paths[0]} className="fc-media-box" />
                           {upstream!.paths.length > 1 && (
                             <span className="fc-save-more">+{upstream!.paths.length - 1}</span>
