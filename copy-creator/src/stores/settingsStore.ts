@@ -564,10 +564,23 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
   },
 
   testAiChannel: async (id) => {
-    const result = await invoke<{ ok: boolean; latencyMs?: number; error?: string }>(
-      "ai_test_channel",
-      { channelId: id },
-    );
+    let result: { ok: boolean; latencyMs?: number; error?: string };
+    try {
+      result = await invoke<{ ok: boolean; latencyMs?: number; error?: string }>(
+        "ai_test_channel",
+        { channelId: id },
+      );
+    } catch (e) {
+      // 命令级失败（后端缺命令/参数被拒等）不会产生后端测速记录，静默吞掉
+      // 会让行首状态与徽标纹丝不动（2026-11-01 旧后端实例点测速无任何反应
+      // 即此因）。走与 HTTP 失败同一显示路径：写入 lastError → 行首红点 +
+      // 「测速失败」tooltip 见错误；不落库，重载后回到「未测试」。
+      const message = typeof e === "string" ? e : e instanceof Error ? e.message : String(e);
+      set({
+        aiChannels: get().aiChannels.map((c) => (c.id === id ? { ...c, lastError: message } : c)),
+      });
+      return { ok: false, error: message };
+    }
     set({
       aiChannels: get().aiChannels.map((c) =>
         c.id === id

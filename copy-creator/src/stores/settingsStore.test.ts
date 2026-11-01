@@ -158,3 +158,74 @@ describe("parseMaxRecords", () => {
     expect(parseMaxRecords("10000")).toBe(10000);
   });
 });
+
+const baseChannel = {
+  id: "ch-1",
+  name: "鬼鬼",
+  protocol: "openai" as const,
+  baseUrl: "https://relay.example.com",
+  apiKeyPreview: "sk-…",
+  apiKeySet: true,
+  model: "gpt-image-2",
+  price: 0.07,
+  currency: "$",
+  enabled: true,
+  status: "normal" as const,
+  lastError: "",
+  lastLatencyMs: null,
+  lastTestedAt: "",
+  cooldownUntilMs: 0,
+  sortOrder: 0,
+};
+
+describe("testAiChannel 结果回写", () => {
+  beforeEach(() => {
+    invokeMock.mockReset();
+    invokeMock.mockResolvedValue(undefined);
+    useSettingsStore.setState({ aiChannels: [{ ...baseChannel }] });
+  });
+
+  it("命令级失败写入 lastError 供行首红点展示，不动延迟与测试时间", async () => {
+    invokeMock.mockRejectedValue("Command ai_test_channel not found");
+
+    const result = await useSettingsStore.getState().testAiChannel("ch-1");
+
+    expect(result).toEqual({ ok: false, error: "Command ai_test_channel not found" });
+    const channel = useSettingsStore.getState().aiChannels.find((c) => c.id === "ch-1");
+    expect(channel?.lastError).toBe("Command ai_test_channel not found");
+    expect(channel?.lastLatencyMs).toBeNull();
+    expect(channel?.lastTestedAt).toBe("");
+    expect(channel?.status).toBe("normal");
+  });
+
+  it("成功回写延迟与测试时间并清掉旧错误", async () => {
+    invokeMock.mockResolvedValue({ ok: true, latencyMs: 888 });
+    useSettingsStore.setState({
+      aiChannels: [{ ...baseChannel, lastError: "旧错误" }],
+    });
+
+    const result = await useSettingsStore.getState().testAiChannel("ch-1");
+
+    expect(result).toEqual({ ok: true, latencyMs: 888 });
+    const channel = useSettingsStore.getState().aiChannels.find((c) => c.id === "ch-1");
+    expect(channel?.lastLatencyMs).toBe(888);
+    expect(channel?.lastTestedAt).not.toBe("");
+    expect(channel?.lastError).toBe("");
+    expect(channel?.status).toBe("normal");
+  });
+
+  it("HTTP 失败写入错误信息，延迟与测试时间保持原值", async () => {
+    invokeMock.mockResolvedValue({ ok: false, error: "余额不足" });
+    useSettingsStore.setState({
+      aiChannels: [{ ...baseChannel, lastLatencyMs: 500, lastTestedAt: "2026-01-01T00:00:00.000Z" }],
+    });
+
+    const result = await useSettingsStore.getState().testAiChannel("ch-1");
+
+    expect(result).toEqual({ ok: false, error: "余额不足" });
+    const channel = useSettingsStore.getState().aiChannels.find((c) => c.id === "ch-1");
+    expect(channel?.lastError).toBe("余额不足");
+    expect(channel?.lastLatencyMs).toBe(500);
+    expect(channel?.lastTestedAt).toBe("2026-01-01T00:00:00.000Z");
+  });
+});
