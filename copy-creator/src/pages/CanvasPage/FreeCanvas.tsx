@@ -2164,13 +2164,17 @@ export default function FreeCanvas({ canvasId }: { canvasId: string }) {
   };
 
   /** 抽帧节点换视频：清旧帧产物（resource_path）+ 写新视频路径，下游
-   *  自动保存对空产物自然停摆。 */
-  const applyFrameVideo = async (nodeId: string, type: CanvasNodeType, videoPath: string) => {
-    await store.getState().updateNode(nodeId, {
-      resourcePath: "",
-      metadata: JSON.stringify({ kind: type, video_path: videoPath }),
-    });
-  };
+   *  自动保存对空产物自然停摆。useCallback 化：OS 拖入命中节点时也走
+   *  这里，引用稳定才不致全局拖放监听随渲染反复重挂。 */
+  const applyFrameVideo = useCallback(
+    async (nodeId: string, type: CanvasNodeType, videoPath: string) => {
+      await store.getState().updateNode(nodeId, {
+        resourcePath: "",
+        metadata: JSON.stringify({ kind: type, video_path: videoPath }),
+      });
+    },
+    [store],
+  );
 
   const pickFromDisk = async (node: CanvasNode) => {
     try {
@@ -2390,7 +2394,7 @@ export default function FreeCanvas({ canvasId }: { canvasId: string }) {
     }
   }, [canvasId, fitAll, pushUndo, pulseNodes, setSelection, store, t, view.scale, view.x, view.y]);
 
-  // ── OS 文件拖入：命中加载节点 = 加载到该节点；空白 = 新建加载节点 ──
+  // ── OS 文件拖入：命中加载/抽帧节点 = 加载到该节点；空白 = 新建加载节点 ──
 
   const [dropHint, setDropHint] = useState(false);
 
@@ -2404,16 +2408,35 @@ export default function FreeCanvas({ canvasId }: { canvasId: string }) {
           }
         : { x: 0, y: 0 };
       // 命中加载节点：按节点类型过滤扩展名，加载到该节点（多文件取首张）。
+      // 抽帧节点与 load_video 同吃视频扩展名，但写入 metadata.video_path
+      // 并清旧帧产物（视频是输入，帧产物占 resource_path）。
       const hitEl = document.elementFromPoint(logical.x, logical.y) as Element | null;
       const targetNodeEl = hitEl?.closest(".pc-node[data-key]");
       const targetId = targetNodeEl?.getAttribute("data-key") ?? "";
       const targetNode = nodesRef.current.find((n) => n.id === targetId);
-      if (targetNode && (targetNode.type === "load_image" || targetNode.type === "load_video" || targetNode.type === "load_audio")) {
-        const allowed = targetNode.type === "load_image" ? IMAGE_EXTS : targetNode.type === "load_video" ? VIDEO_EXTS : AUDIO_EXTS;
+      const targetIsFrame =
+        targetNode?.type === "video_first_frame" || targetNode?.type === "video_last_frame";
+      if (
+        targetNode &&
+        (targetIsFrame ||
+          targetNode.type === "load_image" ||
+          targetNode.type === "load_video" ||
+          targetNode.type === "load_audio")
+      ) {
+        const allowed =
+          targetIsFrame || targetNode.type === "load_video"
+            ? VIDEO_EXTS
+            : targetNode.type === "load_image"
+              ? IMAGE_EXTS
+              : AUDIO_EXTS;
         const match = paths.find((p) => allowed.includes(extOf(p)));
         if (match) {
           await invoke("canvas_authorize_media", { path: match }).catch(() => {});
-          await store.getState().updateNode(targetNode.id, { resourcePath: match });
+          if (targetIsFrame) {
+            await applyFrameVideo(targetNode.id, targetNode.type, match);
+          } else {
+            await store.getState().updateNode(targetNode.id, { resourcePath: match });
+          }
           return;
         }
         return;
@@ -2451,7 +2474,7 @@ export default function FreeCanvas({ canvasId }: { canvasId: string }) {
       }
       pulseNodes(createdIds);
     },
-    [canvasId, pulseNodes, store, view.scale, view.x, view.y],
+    [applyFrameVideo, canvasId, pulseNodes, store, view.scale, view.x, view.y],
   );
 
   useEffect(() => {

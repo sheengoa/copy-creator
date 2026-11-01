@@ -922,7 +922,7 @@
     "genSizeAutoHint": "Follow model",
     "genCountLabel": "Count",
     "genCountSummary": "{{count}} images",
-    "frameEmpty": "Pick a video from the library or local disk",
+    "frameEmpty": "Drop a video here, or pick from library / local disk",
     "frameExec": "Run",
     "frameRunning": "Extracting…",
     "frameRedo": "Run again",

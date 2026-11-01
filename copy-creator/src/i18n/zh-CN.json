@@ -918,7 +918,7 @@
     "genSizeAutoHint": "跟随模型",
     "genCountLabel": "张数",
     "genCountSummary": "共 {{count}} 张",
-    "frameEmpty": "从资源库或本地磁盘选择视频",
+    "frameEmpty": "拖入视频，或从资源库 / 本地文件选择",
     "frameExec": "执行",
     "frameRunning": "提取中…",
     "frameRedo": "重新执行",
