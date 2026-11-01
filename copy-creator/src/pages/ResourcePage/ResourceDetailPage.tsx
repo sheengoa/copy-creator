@@ -239,6 +239,8 @@ export default function ResourceDetailPage({
     const el = contentEditorRef.current;
     if (!el) return;
     const syncHeight = () => {
+      // 同备注输入框：面板隐藏时 scrollHeight 为 0，跳过防止压扁。
+      if (el.clientWidth === 0) return;
       el.style.height = "auto";
       el.style.height = `${el.scrollHeight + 2}px`;
     };
@@ -248,11 +250,16 @@ export default function ResourceDetailPage({
   }, [contentDraft, contentEditing]);
 
   // 备注输入框与正文编辑器同款：高度随内容自动伸缩（含分数缩放下
-  // scrollHeight 取整的 2px 余量），右下角不再提供手动拉伸把手。
+  // scrollHeight 取整的 2px 余量），右下角不再提供手动拉伸把手；
+  // CSS 侧用 max-height 封顶（粘性侧栏不随页面滚动，不封顶时长备注
+  // 会把底部的保存按钮顶出视口外），封顶后由输入框内部滚动承接。
   useEffect(() => {
     const el = noteInputRef.current;
     if (!el) return;
     const syncHeight = () => {
+      // 所在面板 display:none 时 scrollHeight 恒为 0，会把高度压成 2px
+      // 且切回时依赖不变不会重算——此时跳过，等下次内容变化再校准。
+      if (el.clientWidth === 0) return;
       el.style.height = "auto";
       el.style.height = `${el.scrollHeight + 2}px`;
     };

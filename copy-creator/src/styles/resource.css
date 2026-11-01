@@ -2566,10 +2566,14 @@
   position: sticky;
   top: 12px;
   /* 粘性定位生效的前提：侧栏高度由自身内容决定（不随 flex 拉伸到与
-     正文等高）。注意侧栏自身不能设 overflow（auto/scroll 会使元素
-     成为滚动容器、粘性随即失效）；标记列表的独立滚动由
-     .marker-list 的 max-height 承担。 */
+     正文等高）。会破坏粘性的是【祖先】出现 overflow（把粘性约束到祖
+     先的滚动容器）；侧栏自身限高 + overflow-y 是安全的——2026-11 实
+     测：粘住后内部滚动可达底部操作区，粘性不失效。长备注（自动增高
+     封顶 40vh）与标记面板较高时，底部保存按钮由此保证始终可达。标记
+     列表的独立滚动仍由 .marker-list 的 max-height 承担。 */
   align-self: flex-start;
+  max-height: calc(100vh - 24px);
+  overflow-y: auto;
   min-width: 0;
   padding: 12px;
   border: 1px solid var(--separator);
@@ -2625,10 +2629,13 @@
 }
 
 /* 对齐输入框基准（settings-textarea 同款形态）：12px 字号、
-   --card-border + --input-bg；高度由前端按内容自动伸缩，禁用手动拉伸。 */
+   --card-border + --input-bg；高度由前端按内容自动伸缩，禁用手动拉伸。
+   max-height 封顶是粘性侧栏的硬约束：侧栏粘住后不随页面滚动，长备注
+   不封顶会把底部的保存按钮顶出视口外；封顶后转入内部滚动。 */
 .resource-note-input {
   width: 100%;
   min-height: 104px;
+  max-height: 40vh;
   padding: 8px 10px;
   border: 1px solid var(--card-border);
   border-radius: 8px;
@@ -2638,7 +2645,7 @@
   font-size: var(--text-sm);
   line-height: 1.5;
   resize: none;
-  overflow: hidden;
+  overflow-y: auto;
   outline: none;
   transition: border-color 0.2s, background 0.2s;
 }
