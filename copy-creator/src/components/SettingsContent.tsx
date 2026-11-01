@@ -4,7 +4,7 @@ import { useTranslation } from "react-i18next";
 import { invoke } from "@tauri-apps/api/core";
 import { emit } from "@tauri-apps/api/event";
 import { useSettingsStore } from "../stores/settingsStore";
-import { ClipboardSection, GeneralSection, ShortcutSection, RadialSection, StorageSection, BackupSection, AiImageSection } from "./settings";
+import { ClipboardSection, GeneralSection, ShortcutSection, RadialSection, StorageSection, BackupSection, CanvasSettings } from "./settings";
 import { useShortcutRecording } from "./settings/useShortcutRecording";
 import { Icons } from "./Icons";
 
@@ -405,13 +405,7 @@ export default function SettingsContent({ embedded }: Props) {
         {saveBar}
       </>
     ),
-    canvas: (
-      <>
-        {/* AI 生图：自持久化分区（改动即落库），不参与统一保存。
-            画布独立设置页的阶段一占位，后续替换为完整画布设置。 */}
-        <AiImageSection />
-      </>
-    ),
+    canvas: <CanvasSettings />,
     storage: <StorageSection storagePath={storagePath} setStoragePath={setStoragePath} />,
     backup: <BackupSection />,
   };

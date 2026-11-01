@@ -1,0 +1,719 @@
+// 画布设置页（画布设置独立成页）：生成服务渠道（多组 Base URL + Key，
+// 拖拽排序 + 互斥手风琴编辑）→ 自动调度（手动/延迟/价格/综合四策略 +
+// 价格权重滑杆）→ 故障处理（失败切换 / 鉴权自动停用 / 限流冷却）→
+// 生成默认值（默认模型 / 单次并发 / 请求超时）。全部自持久化：改动即
+// 落库，不走设置页统一保存按钮（与原 AI 生图分区同惯例）。
+// Key 不回传前端：列表只有掩码，编辑表单 Key 留空 = 保留原值。
+import { useEffect, useMemo, useState } from "react";
+import { useTranslation } from "react-i18next";
+import {
+  DndContext,
+  closestCenter,
+  PointerSensor,
+  useSensor,
+  useSensors,
+  type DragEndEvent,
+} from "@dnd-kit/core";
+import {
+  SortableContext,
+  arrayMove,
+  useSortable,
+  verticalListSortingStrategy,
+} from "@dnd-kit/sortable";
+import { CSS } from "@dnd-kit/utilities";
+import { useSettingsStore, type AiChannel, type AiChannelInput, type AiStrategy } from "../../stores/settingsStore";
+import { Icons } from "../Icons";
+
+// ── 渠道行（可拖拽排序） ──
+
+function ChannelRow({
+  channel,
+  open,
+  onToggle,
+  onEnabledChange,
+  onDelete,
+}: {
+  channel: AiChannel;
+  open: boolean;
+  onToggle: () => void;
+  onEnabledChange: (enabled: boolean) => void;
+  onDelete: () => void;
+}) {
+  const { t } = useTranslation();
+  const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({
+    id: channel.id,
+  });
+  const [showKey, setShowKey] = useState(false);
+  // 展开编辑为本地表单：装载/切换渠道时以外部值重挂（key=渠道 id），与
+  // 节点参数输入同惯例（失焦提交，不吃快速输入的字）。
+  const [name, setName] = useState(channel.name);
+  const [protocol, setProtocol] = useState(channel.protocol);
+  const [baseUrl, setBaseUrl] = useState(channel.baseUrl);
+  const [apiKey, setApiKey] = useState("");
+  const [model, setModel] = useState(channel.model);
+  const [priceText, setPriceText] = useState(channel.price == null ? "" : String(channel.price));
+  const [currency, setCurrency] = useState(channel.currency);
+  const [error, setError] = useState("");
+  const updateAiChannel = useSettingsStore((s) => s.updateAiChannel);
+  const dimmed = !channel.enabled || channel.status === "auto_disabled";
+
+  const latencyText = channel.lastLatencyMs == null
+    ? t("settings.canvas.untested")
+    : `${channel.lastLatencyMs} ms`;
+  const latencyClass = channel.status === "auto_disabled"
+    ? " off"
+    : channel.lastLatencyMs == null ? " none" : " ok";
+
+  const submit = async () => {
+    setError("");
+    const price = priceText.trim() === "" ? null : Number.parseFloat(priceText);
+    if (priceText.trim() !== "" && (!Number.isFinite(price) || (price as number) < 0)) {
+      setError(t("settings.canvas.priceInvalid"));
+      return;
+    }
+    try {
+      await updateAiChannel(channel.id, {
+        name,
+        protocol,
+        baseUrl,
+        apiKey: apiKey.trim() === "" ? null : apiKey.trim(),
+        model,
+        price,
+        currency,
+      });
+    } catch (e) {
+      setError(String(e));
+    }
+  };
+
+  return (
+    <div
+      ref={setNodeRef}
+      className={`canvas-ch${open ? " open" : ""}${dimmed ? " dim" : ""}${isDragging ? " dragging" : ""}`}
+      style={{ transform: CSS.Transform.toString(transform), transition }}
+    >
+      <div className="canvas-ch-head">
+        <button
+          type="button"
+          className="canvas-ch-grip"
+          aria-label={t("settings.canvas.dragHandle")}
+          {...attributes}
+          {...listeners}
+        >
+          {Icons.drag}
+        </button>
+        <button type="button" className="canvas-ch-summary" onClick={onToggle}>
+          <span className={`canvas-dot${channel.status === "auto_disabled" ? " bad" : channel.lastLatencyMs == null ? " none" : " ok"}`} />
+          <span className="canvas-ch-txt">
+            <span className="canvas-ch-name-row">
+              <span className="canvas-ch-name">{channel.name}</span>
+              <span className={`canvas-tag ${channel.protocol === "gemini" ? "gemini" : "openai"}`}>
+                {channel.protocol === "gemini" ? t("settings.canvas.protocolGemini") : t("settings.canvas.protocolOpenai")}
+              </span>
+            </span>
+            <span className="canvas-ch-sub">
+              {channel.baseUrl.replace(/^https?:\/\//, "")}
+              {" · "}
+              {channel.model || t("settings.canvas.globalModel")}
+              {" · "}
+              {channel.price == null
+                ? t("settings.canvas.noPrice")
+                : `${channel.currency}${channel.price}/${t("settings.canvas.perImage")}`}
+            </span>
+          </span>
+          {channel.status === "auto_disabled" && channel.lastError && (
+            <span className="canvas-lat off" title={channel.lastError}>{t("settings.canvas.autoDisabled")}</span>
+          )}
+          <span className={`canvas-lat${latencyClass}`}>{latencyText}</span>
+          <label className="canvas-switch" onClick={(e) => e.stopPropagation()}>
+            <input
+              type="checkbox"
+              checked={channel.enabled}
+              onChange={(e) => onEnabledChange(e.target.checked)}
+            />
+            <i />
+          </label>
+          <span className="canvas-chev">{Icons.chevronRight}</span>
+        </button>
+      </div>
+      {open && (
+        <div className="canvas-ch-body">
+          <div className="canvas-form-grid">
+            <div className="canvas-field">
+              <span className="canvas-field-label">{t("settings.canvas.fieldName")}</span>
+              <input className="settings-input" value={name} onChange={(e) => setName(e.target.value)} onBlur={() => void submit()} />
+            </div>
+            <div className="canvas-field">
+              <span className="canvas-field-label">{t("settings.canvas.fieldProtocol")}</span>
+              <div className="canvas-pills">
+                {(["openai", "gemini"] as const).map((p) => (
+                  <button
+                    key={p}
+                    type="button"
+                    className={`canvas-pill${protocol === p ? " on" : ""}`}
+                    onClick={() => setProtocol(p)}
+                  >
+                    {p === "gemini" ? t("settings.canvas.protocolGemini") : t("settings.canvas.protocolOpenai")}
+                  </button>
+                ))}
+              </div>
+            </div>
+            <div className="canvas-field full">
+              <span className="canvas-field-label">
+                {t("settings.canvas.fieldBaseUrl")}
+                <em> · {t("settings.canvas.baseUrlHint")}</em>
+              </span>
+              <input
+                className="settings-input canvas-mono"
+                value={baseUrl}
+                onChange={(e) => setBaseUrl(e.target.value)}
+                onBlur={() => void submit()}
+                spellCheck={false}
+              />
+            </div>
+            <div className="canvas-field full">
+              <span className="canvas-field-label">
+                {t("settings.canvas.fieldApiKey")}
+                <em> · {channel.apiKeySet ? t("settings.canvas.apiKeyKeep") : t("settings.canvas.apiKeyMissing")}</em>
+              </span>
+              <div className="canvas-key-wrap">
+                <input
+                  className="settings-input canvas-mono"
+                  type={showKey ? "text" : "password"}
+                  value={apiKey}
+                  placeholder={channel.apiKeySet ? channel.apiKeyPreview : ""}
+                  onChange={(e) => setApiKey(e.target.value)}
+                  onBlur={() => void submit()}
+                  spellCheck={false}
+                  autoComplete="new-password"
+                />
+                <button type="button" className="canvas-eye" onClick={() => setShowKey((v) => !v)}>
+                  {showKey ? Icons.eyeOff : Icons.eye}
+                </button>
+              </div>
+            </div>
+            <div className="canvas-field">
+              <span className="canvas-field-label">
+                {t("settings.canvas.fieldModel")}
+                <em> · {t("settings.canvas.modelHint")}</em>
+              </span>
+              <input
+                className="settings-input canvas-mono"
+                value={model}
+                onChange={(e) => setModel(e.target.value)}
+                onBlur={() => void submit()}
+                spellCheck={false}
+              />
+            </div>
+            <div className="canvas-field">
+              <span className="canvas-field-label">
+                {t("settings.canvas.fieldPrice")}
+                <em> · {t("settings.canvas.priceHint")}</em>
+              </span>
+              <div className="canvas-price">
+                <input
+                  className="settings-input"
+                  value={priceText}
+                  inputMode="decimal"
+                  onChange={(e) => setPriceText(e.target.value)}
+                  onBlur={() => void submit()}
+                />
+                <select
+                  className="settings-input canvas-currency"
+                  value={currency}
+                  onChange={(e) => {
+                    setCurrency(e.target.value);
+                    void submit();
+                  }}
+                >
+                  <option value="$">$</option>
+                  <option value="¥">¥</option>
+                </select>
+              </div>
+            </div>
+          </div>
+          {error && (
+            <div className="canvas-form-error" role="alert">{error}</div>
+          )}
+          <div className="canvas-form-actions">
+            <button type="button" className="settings-btn-danger" onClick={onDelete}>
+              {Icons.delete}
+              {t("settings.canvas.deleteChannel")}
+            </button>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ── 新建渠道表单（列表尾部展开） ──
+
+function ChannelCreateForm({ onCancel }: { onCancel: () => void }) {
+  const { t } = useTranslation();
+  const createAiChannel = useSettingsStore((s) => s.createAiChannel);
+  const [name, setName] = useState("");
+  const [protocol, setProtocol] = useState<"openai" | "gemini">("openai");
+  const [baseUrl, setBaseUrl] = useState("");
+  const [apiKey, setApiKey] = useState("");
+  const [model, setModel] = useState("");
+  const [priceText, setPriceText] = useState("");
+  const [currency, setCurrency] = useState("$");
+  const [error, setError] = useState("");
+  const [saving, setSaving] = useState(false);
+
+  const submit = async () => {
+    setError("");
+    if (baseUrl.trim() === "") {
+      setError(t("settings.canvas.baseUrlRequired"));
+      return;
+    }
+    if (apiKey.trim() === "") {
+      setError(t("settings.canvas.apiKeyRequired"));
+      return;
+    }
+    const price = priceText.trim() === "" ? null : Number.parseFloat(priceText);
+    if (priceText.trim() !== "" && (!Number.isFinite(price) || (price as number) < 0)) {
+      setError(t("settings.canvas.priceInvalid"));
+      return;
+    }
+    setSaving(true);
+    try {
+      const input: AiChannelInput = {
+        name,
+        protocol,
+        baseUrl,
+        apiKey: apiKey.trim(),
+        model,
+        price,
+        currency,
+      };
+      await createAiChannel(input);
+      onCancel();
+    } catch (e) {
+      setError(String(e));
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <div className="canvas-ch open">
+      <div className="canvas-ch-body">
+        <div className="canvas-form-grid">
+          <div className="canvas-field">
+            <span className="canvas-field-label">{t("settings.canvas.fieldName")}</span>
+            <input className="settings-input" value={name} placeholder={t("settings.canvas.namePlaceholder")} onChange={(e) => setName(e.target.value)} />
+          </div>
+          <div className="canvas-field">
+            <span className="canvas-field-label">{t("settings.canvas.fieldProtocol")}</span>
+            <div className="canvas-pills">
+              {(["openai", "gemini"] as const).map((p) => (
+                <button
+                  key={p}
+                  type="button"
+                  className={`canvas-pill${protocol === p ? " on" : ""}`}
+                  onClick={() => setProtocol(p)}
+                >
+                  {p === "gemini" ? t("settings.canvas.protocolGemini") : t("settings.canvas.protocolOpenai")}
+                </button>
+              ))}
+            </div>
+          </div>
+          <div className="canvas-field full">
+            <span className="canvas-field-label">
+              {t("settings.canvas.fieldBaseUrl")}
+              <em> · {t("settings.canvas.baseUrlHint")}</em>
+            </span>
+            <input className="settings-input canvas-mono" value={baseUrl} onChange={(e) => setBaseUrl(e.target.value)} spellCheck={false} />
+          </div>
+          <div className="canvas-field full">
+            <span className="canvas-field-label">{t("settings.canvas.fieldApiKey")}</span>
+            <input
+              className="settings-input canvas-mono"
+              type="password"
+              value={apiKey}
+              onChange={(e) => setApiKey(e.target.value)}
+              spellCheck={false}
+              autoComplete="new-password"
+            />
+          </div>
+          <div className="canvas-field">
+            <span className="canvas-field-label">
+              {t("settings.canvas.fieldModel")}
+              <em> · {t("settings.canvas.modelHint")}</em>
+            </span>
+            <input className="settings-input canvas-mono" value={model} onChange={(e) => setModel(e.target.value)} spellCheck={false} />
+          </div>
+          <div className="canvas-field">
+            <span className="canvas-field-label">
+              {t("settings.canvas.fieldPrice")}
+              <em> · {t("settings.canvas.priceHint")}</em>
+            </span>
+            <div className="canvas-price">
+              <input className="settings-input" value={priceText} inputMode="decimal" onChange={(e) => setPriceText(e.target.value)} />
+              <select className="settings-input canvas-currency" value={currency} onChange={(e) => setCurrency(e.target.value)}>
+                <option value="$">$</option>
+                <option value="¥">¥</option>
+              </select>
+            </div>
+          </div>
+        </div>
+        {error && <div className="canvas-form-error" role="alert">{error}</div>}
+        <div className="canvas-form-actions">
+          <button type="button" className="settings-btn-soft" onClick={onCancel}>
+            {t("common.cancel")}
+          </button>
+          <button type="button" className="settings-btn-raised" disabled={saving} onClick={() => void submit()}>
+            {t("common.save")}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ── 生效渠道预览：按当前策略与渠道数据本地演算下次生成会用谁 ──
+
+function RoutePreview() {
+  const { t } = useTranslation();
+  const { aiChannels: channels, aiStrategy, aiBalancePriceWeight, aiManualChannelId } = useSettingsStore();
+  const usable = channels.filter((c) => c.enabled && c.status !== "auto_disabled");
+  const pick = useMemo<AiChannel | null>(() => {
+    const candidates = usable.length > 0 ? usable : [];
+    if (candidates.length === 0) return null;
+    switch (aiStrategy) {
+      case "manual":
+        return candidates.find((c) => c.id === aiManualChannelId) ?? null;
+      case "latency": {
+        const withLatency = candidates.filter((c) => c.lastLatencyMs != null);
+        if (withLatency.length === 0) return candidates[0];
+        return withLatency.reduce((a, b) => ((b.lastLatencyMs as number) < (a.lastLatencyMs as number) ? b : a));
+      }
+      case "price": {
+        const withPrice = candidates.filter((c) => c.price != null);
+        if (withPrice.length === 0) return candidates[0];
+        return withPrice.reduce((a, b) => {
+          const pa = (a.price as number) * (a.currency === "¥" ? 1 / 7.2 : 1);
+          const pb = (b.price as number) * (b.currency === "¥" ? 1 / 7.2 : 1);
+          if (pb !== pa) return pb < pa ? b : a;
+          return ((b.lastLatencyMs ?? Infinity) < (a.lastLatencyMs ?? Infinity) ? b : a);
+        });
+      }
+      case "balance": {
+        const scored = candidates.map((c) => ({
+          c,
+          price: c.price == null ? null : c.price * (c.currency === "¥" ? 1 / 7.2 : 1),
+        }));
+        const prices = scored.map((s) => s.price).filter((p): p is number => p != null);
+        const lats = candidates.map((c) => c.lastLatencyMs).filter((l): l is number => l != null);
+        const pMin = Math.min(...(prices.length > 0 ? prices : [0]));
+        const pMax = Math.max(...(prices.length > 0 ? prices : [1]));
+        const lMin = Math.min(...(lats.length > 0 ? lats : [0]));
+        const lMax = Math.max(...(lats.length > 0 ? lats : [1]));
+        const norm = (v: number, min: number, max: number) =>
+          max > min ? (v - min) / (max - min) : 0.5;
+        const w = aiBalancePriceWeight / 100;
+        return scored
+          .map(({ c, price }) => {
+            const priceScore = price == null ? 1 : norm(price, pMin, pMax);
+            const latScore = c.lastLatencyMs == null ? 1 : norm(c.lastLatencyMs, lMin, lMax);
+            return { c, score: priceScore * w + latScore * (1 - w) };
+          })
+          .reduce((a, b) => (b.score < a.score ? b : a)).c;
+      }
+    }
+  }, [usable, aiStrategy, aiBalancePriceWeight, aiManualChannelId]);
+
+  const desc = (c: AiChannel): string => {
+    const parts: string[] = [];
+    if (c.price != null) parts.push(`${c.currency}${c.price}/${t("settings.canvas.perImage")}`);
+    if (c.lastLatencyMs != null) parts.push(`${c.lastLatencyMs} ms`);
+    return parts.length > 0 ? ` · ${parts.join(" · ")}` : "";
+  };
+
+  return (
+    <div className="canvas-route">
+      {Icons.route}
+      {pick ? (
+        <span>
+          {t("settings.canvas.routePrefix")}
+          <b>{pick.name}</b>
+          <span>{desc(pick)}</span>
+        </span>
+      ) : (
+        <span>{t("settings.canvas.routeEmpty")}</span>
+      )}
+    </div>
+  );
+}
+
+// ── 页面主体 ──
+
+export function CanvasSettings() {
+  const { t } = useTranslation();
+  const settings = useSettingsStore();
+  const {
+    aiChannels: channels,
+    aiStrategy,
+    aiBalancePriceWeight,
+    aiFailover,
+    aiAutoDisableAuth,
+    aiRateLimitCooldown,
+    aiConcurrency,
+    aiManualChannelId,
+    aiModel,
+    aiTimeout,
+  } = settings;
+  // 互斥手风琴：同一时间只展开一条渠道（null = 全部收起；"__new__" = 新建表单）。
+  const [expanded, setExpanded] = useState<string | null>(null);
+
+  useEffect(() => {
+    void settings.loadAiChannels();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  const sensors = useSensors(
+    useSensor(PointerSensor, { activationConstraint: { distance: 5 } }),
+  );
+
+  const onDragEnd = (event: DragEndEvent) => {
+    const { active, over } = event;
+    if (!over || active.id === over.id) return;
+    const oldIndex = channels.findIndex((c) => c.id === active.id);
+    const newIndex = channels.findIndex((c) => c.id === over.id);
+    if (oldIndex < 0 || newIndex < 0) return;
+    void settings.reorderAiChannels(arrayMove(channels.map((c) => c.id), oldIndex, newIndex));
+  };
+
+  // 本地数值输入（并发/冷却/超时）：失焦钳制提交，与既有 AI 设置同惯例。
+  const [cooldownText, setCooldownText] = useState(String(aiRateLimitCooldown));
+  const [concurrencyText, setConcurrencyText] = useState(String(aiConcurrency));
+  const [timeoutText, setTimeoutText] = useState(String(aiTimeout));
+  const [modelText, setModelText] = useState(aiModel);
+
+  const enabledChannels = channels.filter((c) => c.enabled);
+
+  return (
+    <div className="canvas-settings">
+      {/* ── 1. 生成服务渠道 ── */}
+      <div className="canvas-sec">
+        <div className="canvas-sec-title">
+          <span>{t("settings.canvas.channelsTitle")}</span>
+        </div>
+        <p className="canvas-sec-note">{t("settings.canvas.channelsNote")}</p>
+        <div className="settings-card canvas-channel-card">
+          {channels.length > 0 ? (
+            <DndContext
+              sensors={sensors}
+              collisionDetection={closestCenter}
+              onDragEnd={onDragEnd}
+            >
+              <SortableContext items={channels.map((c) => c.id)} strategy={verticalListSortingStrategy}>
+                {channels.map((channel) => (
+                  <ChannelRow
+                    key={channel.id}
+                    channel={channel}
+                    open={expanded === channel.id}
+                    onToggle={() => setExpanded(expanded === channel.id ? null : channel.id)}
+                    onEnabledChange={(enabled) => void settings.setAiChannelEnabled(channel.id, enabled)}
+                    onDelete={() => {
+                      if (expanded === channel.id) setExpanded(null);
+                      void settings.deleteAiChannel(channel.id);
+                    }}
+                  />
+                ))}
+              </SortableContext>
+            </DndContext>
+          ) : (
+            <div className="canvas-empty">{t("settings.canvas.emptyHint")}</div>
+          )}
+          {expanded === "__new__" ? (
+            <ChannelCreateForm onCancel={() => setExpanded(null)} />
+          ) : (
+            <button type="button" className="canvas-ch-add" onClick={() => setExpanded("__new__")}>
+              {Icons.add}
+              {t("settings.canvas.addChannel")}
+            </button>
+          )}
+        </div>
+      </div>
+
+      {/* ── 2. 自动调度 ── */}
+      <div className="canvas-sec">
+        <div className="canvas-sec-title"><span>{t("settings.canvas.strategyTitle")}</span></div>
+        <p className="canvas-sec-note">{t("settings.canvas.strategyNote")}</p>
+        <div className="settings-card">
+          {(
+            [
+              ["manual", t("settings.canvas.strategyManual"), t("settings.canvas.strategyManualDesc")],
+              ["latency", t("settings.canvas.strategyLatency"), t("settings.canvas.strategyLatencyDesc")],
+              ["price", t("settings.canvas.strategyPrice"), t("settings.canvas.strategyPriceDesc")],
+              ["balance", t("settings.canvas.strategyBalance"), t("settings.canvas.strategyBalanceDesc")],
+            ] as [AiStrategy, string, string][]
+          ).map(([key, label, desc]) => (
+            <button
+              key={key}
+              type="button"
+              className={`canvas-strategy${aiStrategy === key ? " on" : ""}`}
+              onClick={() => void settings.saveAiScheduling({ aiStrategy: key })}
+            >
+              <span className="canvas-radio" />
+              <span className="canvas-st-main">
+                <span className="canvas-st-name">{label}</span>
+                <span className="canvas-st-desc">{desc}</span>
+              </span>
+            </button>
+          ))}
+          {aiStrategy === "manual" && (
+            <div className="canvas-st-extra">
+              <select
+                className="settings-input canvas-st-select"
+                value={aiManualChannelId}
+                onChange={(e) => void settings.saveAiScheduling({ aiManualChannelId: e.target.value })}
+              >
+                {enabledChannels.length === 0 && <option value="">{t("settings.canvas.noEnabledChannels")}</option>}
+                {enabledChannels.map((c) => (
+                  <option key={c.id} value={c.id}>
+                    {c.name}
+                    {c.price != null ? `（${c.currency}${c.price}/${t("settings.canvas.perImage")}` : ""}
+                    {c.lastLatencyMs != null ? ` · ${c.lastLatencyMs} ms）` : c.price != null ? "）" : ""}
+                  </option>
+                ))}
+              </select>
+            </div>
+          )}
+          {aiStrategy === "balance" && (
+            <div className="canvas-st-extra">
+              <div className="canvas-slider-row">
+                <span className="canvas-slider-cap">{t("settings.canvas.preferPrice")}</span>
+                <div className="canvas-slider-mid">
+                  <input
+                    type="range"
+                    className="canvas-slider"
+                    min={0}
+                    max={100}
+                    value={aiBalancePriceWeight}
+                    onChange={(e) => void settings.saveAiScheduling({ aiBalancePriceWeight: Number(e.target.value) })}
+                  />
+                </div>
+                <span className="canvas-slider-cap">{t("settings.canvas.preferLatency")}</span>
+                <span className="canvas-slider-val">
+                  {t("settings.canvas.weightPrice", { p: aiBalancePriceWeight, l: 100 - aiBalancePriceWeight })}
+                </span>
+              </div>
+            </div>
+          )}
+          <RoutePreview />
+        </div>
+      </div>
+
+      {/* ── 3. 故障处理 ── */}
+      <div className="canvas-sec">
+        <div className="canvas-sec-title"><span>{t("settings.canvas.faultTitle")}</span></div>
+        <div className="settings-card">
+          <div className="canvas-row">
+            <div className="canvas-row-main">
+              <div className="canvas-row-label">{t("settings.canvas.failover")}</div>
+              <div className="canvas-row-sub">{t("settings.canvas.failoverHint")}</div>
+            </div>
+            <label className="canvas-switch">
+              <input
+                type="checkbox"
+                checked={aiFailover}
+                onChange={(e) => void settings.saveAiScheduling({ aiFailover: e.target.checked })}
+              />
+              <i />
+            </label>
+          </div>
+          <div className="canvas-row">
+            <div className="canvas-row-main">
+              <div className="canvas-row-label">{t("settings.canvas.autoDisable")}</div>
+              <div className="canvas-row-sub">{t("settings.canvas.autoDisableHint")}</div>
+            </div>
+            <label className="canvas-switch">
+              <input
+                type="checkbox"
+                checked={aiAutoDisableAuth}
+                onChange={(e) => void settings.saveAiScheduling({ aiAutoDisableAuth: e.target.checked })}
+              />
+              <i />
+            </label>
+          </div>
+          <div className="canvas-row">
+            <div className="canvas-row-main">
+              <div className="canvas-row-label">{t("settings.canvas.cooldown")}</div>
+              <div className="canvas-row-sub">{t("settings.canvas.cooldownHint")}</div>
+            </div>
+            <input
+              className="settings-input canvas-w-md"
+              value={cooldownText}
+              inputMode="numeric"
+              onChange={(e) => setCooldownText(e.target.value)}
+              onBlur={() => {
+                const n = Number.parseInt(cooldownText, 10);
+                const secs = Number.isFinite(n) ? Math.min(3600, Math.max(5, n)) : 300;
+                setCooldownText(String(secs));
+                void settings.saveAiScheduling({ aiRateLimitCooldown: secs });
+              }}
+            />
+            <span className="canvas-suffix">{t("settings.canvas.seconds")}</span>
+          </div>
+        </div>
+      </div>
+
+      {/* ── 4. 生成默认值 ── */}
+      <div className="canvas-sec">
+        <div className="canvas-sec-title"><span>{t("settings.canvas.defaultsTitle")}</span></div>
+        <p className="canvas-sec-note">{t("settings.canvas.defaultsNote")}</p>
+        <div className="settings-card">
+          <div className="canvas-row">
+            <div className="canvas-row-main"><div className="canvas-row-label">{t("settings.canvas.defaultModel")}</div></div>
+            <input
+              className="settings-input canvas-mono canvas-w-lg"
+              value={modelText}
+              placeholder={t("settings.canvas.modelPlaceholder")}
+              onChange={(e) => setModelText(e.target.value)}
+              onBlur={() => void settings.saveAiSettings({ aiModel: modelText.trim() })}
+              spellCheck={false}
+            />
+          </div>
+          <div className="canvas-row">
+            <div className="canvas-row-main">
+              <div className="canvas-row-label">{t("settings.canvas.concurrency")}</div>
+              <div className="canvas-row-sub">{t("settings.canvas.concurrencyHint")}</div>
+            </div>
+            <input
+              className="settings-input canvas-w-sm"
+              value={concurrencyText}
+              inputMode="numeric"
+              onChange={(e) => setConcurrencyText(e.target.value)}
+              onBlur={() => {
+                const n = Number.parseInt(concurrencyText, 10);
+                const v = Number.isFinite(n) ? Math.min(8, Math.max(1, n)) : 4;
+                setConcurrencyText(String(v));
+                void settings.saveAiScheduling({ aiConcurrency: v });
+              }}
+            />
+          </div>
+          <div className="canvas-row">
+            <div className="canvas-row-main"><div className="canvas-row-label">{t("settings.canvas.timeout")}</div></div>
+            <input
+              className="settings-input canvas-w-md"
+              value={timeoutText}
+              inputMode="numeric"
+              onChange={(e) => setTimeoutText(e.target.value)}
+              onBlur={() => {
+                const n = Number.parseInt(timeoutText, 10);
+                const v = Number.isFinite(n) ? Math.min(600, Math.max(5, n)) : 60;
+                setTimeoutText(String(v));
+                void settings.saveAiSettings({ aiTimeout: v });
+              }}
+            />
+            <span className="canvas-suffix">{t("settings.canvas.seconds")}</span>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}

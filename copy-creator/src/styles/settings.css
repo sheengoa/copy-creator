@@ -780,3 +780,713 @@
     display: none;
   }
 }
+
+/* ── 画布设置页（画布设置独立成页）：渠道管理 / 自动调度 / 故障处理 / 生成默认值 ── */
+/* 视觉语言与定稿原型一致：浮白卡片 + 浅灰输入 + 胶囊协议 + 软灰次级按钮 + 红字危险操作。 */
+
+.canvas-settings .canvas-sec {
+  margin-bottom: 22px;
+}
+
+.canvas-settings .canvas-sec:last-child {
+  margin-bottom: 0;
+}
+
+.canvas-settings .canvas-sec-title {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  font-size: var(--text-xs);
+  font-weight: var(--weight-semibold);
+  color: var(--text-secondary);
+  text-transform: uppercase;
+  letter-spacing: 0.6px;
+  margin-bottom: 6px;
+  padding: 0 2px;
+}
+
+.canvas-settings .canvas-sec-title button {
+  text-transform: none;
+  letter-spacing: 0;
+}
+
+.canvas-settings .canvas-sec-note {
+  font-size: 11px;
+  color: var(--text-tertiary);
+  margin: 0 2px 8px;
+  line-height: 1.5;
+}
+
+/* 渠道卡片列表：条目间淡分隔，展开区浅灰内嵌面板 */
+.canvas-channel-card .canvas-ch + .canvas-ch {
+  border-top: 1px solid var(--separator);
+}
+
+.canvas-ch {
+  border-radius: 0;
+}
+
+.canvas-ch.dragging {
+  z-index: 10;
+  background: var(--card-hover-bg);
+  box-shadow: var(--seg-item-active-shadow);
+  border-radius: var(--radius);
+}
+
+.canvas-ch.dim {
+  opacity: 0.55;
+}
+
+.canvas-ch-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 12px 10px 6px;
+}
+
+.canvas-ch-grip {
+  display: flex;
+  flex-shrink: 0;
+  width: 22px;
+  height: 22px;
+  align-items: center;
+  justify-content: center;
+  border-radius: 6px;
+  color: var(--text-tertiary);
+  cursor: grab;
+  touch-action: none;
+}
+
+.canvas-ch-grip:hover {
+  background: var(--chip-bg);
+  color: var(--text-secondary);
+}
+
+.canvas-ch-grip svg {
+  width: 14px;
+  height: 14px;
+}
+
+.canvas-ch-summary {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  flex: 1;
+  min-width: 0;
+  width: 100%;
+  text-align: left;
+  font-family: inherit;
+  color: inherit;
+  cursor: pointer;
+  border: none;
+  background: none;
+}
+
+.canvas-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+
+.canvas-dot.ok {
+  background: #34C759;
+  box-shadow: 0 0 0 3px rgba(52, 199, 89, 0.14);
+}
+
+.canvas-dot.bad {
+  background: var(--danger);
+  box-shadow: 0 0 0 3px rgba(255, 59, 48, 0.12);
+}
+
+.canvas-dot.none {
+  background: var(--text-tertiary);
+}
+
+.canvas-ch-txt {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.canvas-ch-name-row {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  min-width: 0;
+}
+
+.canvas-ch-name {
+  font-size: var(--text-sm);
+  font-weight: var(--weight-semibold);
+  white-space: nowrap;
+}
+
+.canvas-tag {
+  flex-shrink: 0;
+  font-size: 10px;
+  font-weight: var(--weight-semibold);
+  padding: 2px 8px;
+  border-radius: 999px;
+  white-space: nowrap;
+}
+
+.canvas-tag.openai {
+  background: var(--accent-bg);
+  color: var(--accent);
+}
+
+.canvas-tag.gemini {
+  background: rgba(255, 149, 0, 0.16);
+  color: #C77700;
+}
+
+[data-theme="dark"] .canvas-tag.gemini {
+  color: #FFB340;
+}
+
+.canvas-ch-sub {
+  font-size: 11px;
+  color: var(--text-secondary);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.canvas-lat {
+  flex-shrink: 0;
+  font-size: 11px;
+  font-weight: var(--weight-semibold);
+  padding: 3px 9px;
+  border-radius: 999px;
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+}
+
+.canvas-lat.ok {
+  background: rgba(52, 199, 89, 0.14);
+  color: #1E9E46;
+}
+
+[data-theme="dark"] .canvas-lat.ok {
+  color: #4CD964;
+}
+
+.canvas-lat.none {
+  background: var(--chip-bg);
+  color: var(--text-secondary);
+}
+
+.canvas-lat.off {
+  background: rgba(255, 59, 48, 0.12);
+  color: var(--danger);
+}
+
+/* 展开编辑区 */
+.canvas-ch-body {
+  display: none;
+  padding: 12px 14px 12px 36px;
+  background: rgba(0, 0, 0, 0.02);
+  border-top: 1px solid var(--separator);
+}
+
+[data-theme="dark"] .canvas-ch-body {
+  background: rgba(0, 0, 0, 0.2);
+}
+
+.canvas-ch.open .canvas-ch-body {
+  display: block;
+}
+
+.canvas-form-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px 12px;
+}
+
+.canvas-field {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+}
+
+.canvas-field.full {
+  grid-column: 1 / -1;
+}
+
+.canvas-field-label {
+  font-size: 11px;
+  font-weight: var(--weight-medium);
+  color: var(--text-secondary);
+}
+
+.canvas-field-label em {
+  font-style: normal;
+  font-weight: 400;
+  color: var(--text-tertiary);
+}
+
+.canvas-mono {
+  font-family: var(--font-mono, "SF Mono", Consolas, monospace);
+  font-size: 11.5px;
+}
+
+.canvas-key-wrap {
+  position: relative;
+  display: flex;
+}
+
+.canvas-key-wrap .settings-input {
+  width: 100%;
+  padding-right: 36px;
+}
+
+.canvas-eye {
+  position: absolute;
+  right: 4px;
+  top: 50%;
+  transform: translateY(-50%);
+  display: flex;
+  padding: 5px;
+  border: none;
+  border-radius: 6px;
+  background: none;
+  color: var(--text-secondary);
+  cursor: pointer;
+}
+
+.canvas-eye:hover {
+  color: var(--accent);
+}
+
+.canvas-eye svg {
+  width: 14px;
+  height: 14px;
+}
+
+/* 协议胶囊（与既有 settings-ai-provider 同语言） */
+.canvas-pills {
+  display: flex;
+  gap: 6px;
+}
+
+.canvas-pill {
+  padding: 5px 14px;
+  border-radius: 999px;
+  border: 1px solid var(--separator);
+  background: var(--bg-card);
+  color: var(--text-secondary);
+  font-size: var(--text-sm);
+  font-family: inherit;
+  cursor: pointer;
+}
+
+.canvas-pill.on {
+  background: var(--accent-bg);
+  border-color: var(--accent-border-soft);
+  color: var(--accent);
+  font-weight: var(--weight-semibold);
+}
+
+.canvas-price {
+  display: flex;
+  gap: 6px;
+}
+
+.canvas-price .settings-input {
+  flex: 1;
+  min-width: 0;
+}
+
+.canvas-currency {
+  width: 56px !important;
+  flex-shrink: 0;
+}
+
+.canvas-form-error {
+  margin-top: 8px;
+  font-size: 11px;
+  color: var(--danger);
+}
+
+.canvas-form-actions {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-top: 12px;
+}
+
+/* 软灰次级按钮 / 红字危险按钮 / 浮起白卡主按钮（与项目按钮家族同语言） */
+.settings-btn-soft {
+  height: 28px;
+  padding: 0 13px;
+  border: none;
+  border-radius: 8px;
+  background: var(--tool-btn-bg);
+  color: var(--nav-item-active-color);
+  font-family: inherit;
+  font-size: var(--text-sm);
+  font-weight: var(--weight-medium);
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  transition: background 0.15s;
+}
+
+.settings-btn-soft:hover {
+  background: var(--tool-btn-hover-bg);
+}
+
+.settings-btn-soft:disabled {
+  opacity: 0.6;
+  cursor: default;
+}
+
+.settings-btn-soft svg {
+  width: 13px;
+  height: 13px;
+}
+
+.settings-btn-danger {
+  height: 28px;
+  padding: 0 12px;
+  border: none;
+  border-radius: 8px;
+  background: none;
+  color: var(--danger);
+  font-family: inherit;
+  font-size: var(--text-sm);
+  font-weight: var(--weight-medium);
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+}
+
+.settings-btn-danger:hover {
+  background: rgba(255, 59, 48, 0.12);
+}
+
+.settings-btn-danger svg {
+  width: 13px;
+  height: 13px;
+}
+
+.settings-btn-raised {
+  height: 30px;
+  padding: 0 16px;
+  border: none;
+  border-radius: 10px;
+  background: var(--btn-card-bg);
+  color: var(--text-primary);
+  font-family: inherit;
+  font-size: var(--text-sm);
+  font-weight: var(--weight-semibold);
+  cursor: pointer;
+  box-shadow: var(--btn-card-shadow);
+  transition: all 0.3s cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+.settings-btn-raised:hover:not(:disabled) {
+  transform: translateY(-1px);
+  box-shadow: var(--btn-card-shadow-hover);
+}
+
+.settings-btn-raised:active:not(:disabled) {
+  transform: scale(0.96);
+}
+
+.settings-btn-raised:disabled {
+  opacity: 0.6;
+  cursor: default;
+}
+
+.canvas-ch-add {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  margin: 11px 14px 13px;
+  padding: 9px;
+  width: calc(100% - 28px);
+  border: 1.5px dashed var(--separator);
+  border-radius: 10px;
+  background: none;
+  font-family: inherit;
+  font-size: var(--text-sm);
+  font-weight: var(--weight-semibold);
+  color: var(--accent);
+  cursor: pointer;
+}
+
+.canvas-ch-add:hover {
+  background: var(--accent-bg);
+}
+
+.canvas-ch-add svg {
+  width: 14px;
+  height: 14px;
+}
+
+.canvas-empty {
+  padding: 18px 14px;
+  text-align: center;
+  font-size: var(--text-sm);
+  color: var(--text-secondary);
+}
+
+/* 策略选择行（radio 自绘 + 选中淡蓝） */
+.canvas-strategy {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  width: 100%;
+  padding: 10px 14px;
+  border: none;
+  background: none;
+  font-family: inherit;
+  text-align: left;
+  color: inherit;
+  cursor: pointer;
+  transition: background 0.15s;
+}
+
+.canvas-strategy:hover {
+  background: rgba(0, 0, 0, 0.02);
+}
+
+[data-theme="dark"] .canvas-strategy:hover {
+  background: rgba(255, 255, 255, 0.035);
+}
+
+.canvas-strategy.on {
+  background: var(--accent-bg);
+}
+
+.canvas-radio {
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  flex-shrink: 0;
+  margin-top: 2px;
+  border: 1.5px solid var(--text-tertiary);
+  transition: border 0.15s;
+}
+
+.canvas-strategy.on .canvas-radio {
+  border: 5px solid var(--accent);
+}
+
+.canvas-st-main {
+  flex: 1;
+  min-width: 0;
+}
+
+.canvas-st-name {
+  display: block;
+  font-size: var(--text-sm);
+  font-weight: var(--weight-semibold);
+}
+
+.canvas-st-desc {
+  display: block;
+  font-size: 11px;
+  color: var(--text-secondary);
+  margin-top: 2px;
+  line-height: 1.45;
+}
+
+.canvas-st-extra {
+  padding: 12px 14px;
+  border-top: 1px solid var(--separator);
+  background: rgba(0, 0, 0, 0.02);
+}
+
+[data-theme="dark"] .canvas-st-extra {
+  background: rgba(0, 0, 0, 0.2);
+}
+
+.canvas-st-select {
+  width: 100%;
+  max-width: 440px;
+}
+
+/* 权重滑杆 */
+.canvas-slider-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.canvas-slider-cap {
+  font-size: 11px;
+  color: var(--text-secondary);
+  white-space: nowrap;
+}
+
+.canvas-slider-mid {
+  flex: 1;
+  min-width: 150px;
+}
+
+.canvas-slider {
+  width: 100%;
+  -webkit-appearance: none;
+  appearance: none;
+  height: 4px;
+  border-radius: 999px;
+  background: var(--chip-hover-bg);
+  outline: none;
+}
+
+.canvas-slider::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  background: #fff;
+  box-shadow: 0 1px 5px rgba(0, 0, 0, 0.32), 0 0 0 0.5px rgba(0, 0, 0, 0.06);
+  cursor: pointer;
+}
+
+.canvas-slider-val {
+  font-size: 11px;
+  color: var(--accent);
+  font-weight: var(--weight-semibold);
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+}
+
+/* 生效渠道预览条 */
+.canvas-route {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  margin: 11px 14px 12px;
+  padding: 8px 12px;
+  background: var(--accent-bg);
+  border-radius: 9px;
+  font-size: var(--text-sm);
+  color: var(--accent);
+}
+
+.canvas-route svg {
+  width: 13px;
+  height: 13px;
+  flex-shrink: 0;
+}
+
+.canvas-route b {
+  font-weight: var(--weight-semibold);
+}
+
+/* 通用设置行（故障处理 / 生成默认值） */
+.canvas-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 14px;
+}
+
+.canvas-row + .canvas-row {
+  border-top: 1px solid var(--separator);
+}
+
+.canvas-row-main {
+  flex: 1;
+  min-width: 200px;
+}
+
+.canvas-row-label {
+  font-size: var(--text-sm);
+  font-weight: var(--weight-medium);
+}
+
+.canvas-row-sub {
+  font-size: 11px;
+  color: var(--text-secondary);
+  margin-top: 2px;
+  line-height: 1.45;
+}
+
+.canvas-suffix {
+  font-size: var(--text-sm);
+  color: var(--text-secondary);
+  flex-shrink: 0;
+}
+
+.canvas-w-sm {
+  width: 76px !important;
+}
+
+.canvas-w-md {
+  width: 120px !important;
+}
+
+.canvas-w-lg {
+  width: 220px !important;
+}
+
+/* iOS 开关（与径向菜单开关同形） */
+.canvas-switch {
+  position: relative;
+  width: 34px;
+  height: 21px;
+  flex-shrink: 0;
+  cursor: pointer;
+  display: inline-block;
+}
+
+.canvas-switch input {
+  position: absolute;
+  opacity: 0;
+  width: 100%;
+  height: 100%;
+  margin: 0;
+  cursor: pointer;
+}
+
+.canvas-switch i {
+  position: absolute;
+  inset: 0;
+  border-radius: 99px;
+  background: var(--chip-hover-bg);
+  transition: background 0.18s;
+}
+
+.canvas-switch i::after {
+  content: "";
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  width: 17px;
+  height: 17px;
+  border-radius: 50%;
+  background: #fff;
+  box-shadow: 0 1.5px 4px rgba(0, 0, 0, 0.28);
+  transition: transform 0.18s;
+}
+
+.canvas-switch input:checked + i {
+  background: #34C759;
+}
+
+.canvas-switch input:checked + i::after {
+  transform: translateX(13px);
+}
+
+@media (max-width: 720px) {
+  .canvas-form-grid {
+    grid-template-columns: 1fr;
+  }
+  .canvas-row input.settings-input {
+    width: 140px !important;
+  }
+}

@@ -41,6 +41,60 @@ export const parseResourceCardSize = (raw: string | undefined): number => {
 /** 内容列表排序偏好：最近使用（默认）| 最多使用。作用于剪切板、资源、快捷输入主列表。 */
 export type ContentSortMode = "recent" | "count";
 
+/** 画布 AI 生图渠道：一个条目 = 一组 Base URL + Key，测速与故障状态随条目持久化。 */
+export interface AiChannel {
+  id: string;
+  name: string;
+  protocol: "openai" | "gemini";
+  baseUrl: string;
+  /** Key 掩码（后端只回掩码不回明文），前端编辑留空表示不修改。 */
+  apiKeyPreview: string;
+  apiKeySet: boolean;
+  model: string;
+  price: number | null;
+  currency: string;
+  enabled: boolean;
+  /** normal = 可用；auto_disabled = 鉴权/欠费类错误命中后自动停用。 */
+  status: "normal" | "auto_disabled";
+  lastError: string;
+  lastLatencyMs: number | null;
+  lastTestedAt: string;
+  /** 限流/超时冷却截止（epoch ms），到期自动恢复参与调度。 */
+  cooldownUntilMs: number;
+  sortOrder: number;
+}
+
+export type AiStrategy = "manual" | "latency" | "price" | "balance";
+
+export interface AiChannelInput {
+  name: string;
+  protocol: "openai" | "gemini";
+  baseUrl: string;
+  /** 新建必填；编辑传 null 表示保留原 Key。 */
+  apiKey: string | null;
+  model: string;
+  price: number | null;
+  currency: string;
+}
+
+export const parseAiStrategy = (raw: string | undefined): AiStrategy =>
+  raw === "manual" || raw === "latency" || raw === "price" || raw === "balance" ? raw : "balance";
+
+const clampWeight = (raw: string | undefined): number => {
+  const n = Number.parseInt((raw ?? "").trim(), 10);
+  return Number.isFinite(n) ? Math.min(100, Math.max(0, n)) : 40;
+};
+
+const clampCooldown = (raw: string | undefined): number => {
+  const n = Number.parseInt((raw ?? "").trim(), 10);
+  return Number.isFinite(n) ? Math.min(3600, Math.max(5, n)) : 300;
+};
+
+const clampConcurrency = (raw: string | undefined): number => {
+  const n = Number.parseInt((raw ?? "").trim(), 10);
+  return Number.isFinite(n) ? Math.min(8, Math.max(1, n)) : 4;
+};
+
 export const parseContentSort = (raw: string | undefined): ContentSortMode =>
   raw === "count" ? "count" : "recent";
 
@@ -93,6 +147,15 @@ interface SettingsState {
   aiGeminiBase: string;
   aiModel: string;
   aiTimeout: number;
+  /** 画布 AI 渠道与调度（画布设置页，自持久化）。 */
+  aiChannels: AiChannel[];
+  aiStrategy: AiStrategy;
+  aiBalancePriceWeight: number;
+  aiFailover: boolean;
+  aiAutoDisableAuth: boolean;
+  aiRateLimitCooldown: number;
+  aiConcurrency: number;
+  aiManualChannelId: string;
 
   toggleTheme: () => void;
   setThemeMode: (mode: ThemeMode) => Promise<void>;
@@ -119,6 +182,23 @@ interface SettingsState {
     aiGeminiBase?: string;
     aiModel?: string;
     aiTimeout?: number;
+  }) => Promise<void>;
+  /** 画布 AI 渠道：重取列表（画布设置页挂载时调用）。 */
+  loadAiChannels: () => Promise<void>;
+  createAiChannel: (input: AiChannelInput) => Promise<void>;
+  updateAiChannel: (id: string, input: AiChannelInput) => Promise<void>;
+  deleteAiChannel: (id: string) => Promise<void>;
+  reorderAiChannels: (ids: string[]) => Promise<void>;
+  setAiChannelEnabled: (id: string, enabled: boolean) => Promise<void>;
+  /** 调度策略与故障处理：settings 批量落库 + 本地同步。 */
+  saveAiScheduling: (patch: {
+    aiStrategy?: AiStrategy;
+    aiBalancePriceWeight?: number;
+    aiFailover?: boolean;
+    aiAutoDisableAuth?: boolean;
+    aiRateLimitCooldown?: number;
+    aiConcurrency?: number;
+    aiManualChannelId?: string;
   }) => Promise<void>;
 }
 
@@ -156,6 +236,14 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
   aiGeminiBase: "",
   aiModel: "",
   aiTimeout: 60,
+  aiChannels: [],
+  aiStrategy: "balance",
+  aiBalancePriceWeight: 40,
+  aiFailover: false,
+  aiAutoDisableAuth: true,
+  aiRateLimitCooldown: 300,
+  aiConcurrency: 4,
+  aiManualChannelId: "",
 
   // 头部快捷切换：跟随系统模式下取当前解析值的反色落为显式偏好，
   // 其余模式在明暗间往返。
@@ -215,6 +303,13 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
         aiGeminiBase: settings.ai_gemini_base || "",
         aiModel: settings.ai_model || "",
         aiTimeout: Number.parseInt(settings.ai_timeout || "60", 10) || 60,
+        aiStrategy: parseAiStrategy(settings.ai_strategy),
+        aiBalancePriceWeight: clampWeight(settings.ai_balance_price_weight),
+        aiFailover: settings.ai_failover === "1",
+        aiAutoDisableAuth: settings.ai_auto_disable_auth !== "0",
+        aiRateLimitCooldown: clampCooldown(settings.ai_rate_limit_cooldown),
+        aiConcurrency: clampConcurrency(settings.ai_concurrency),
+        aiManualChannelId: settings.ai_manual_channel_id || "",
       });
 
       // Read autostart state from the .desktop file
@@ -417,6 +512,100 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
       if (Object.keys(next).length > 0) set(next);
     } catch (e) {
       console.error("Failed to save AI settings:", e);
+    }
+  },
+
+  // ── 画布 AI 渠道：CRUD 直连 Rust 命令，成功后以返回列表整体替换 ──
+
+  loadAiChannels: async () => {
+    try {
+      const channels = await invoke<AiChannel[]>("list_ai_channels");
+      set({ aiChannels: channels });
+    } catch (e) {
+      console.error("Failed to load AI channels:", e);
+    }
+  },
+
+  createAiChannel: async (input) => {
+    const channels = await invoke<AiChannel[]>("create_ai_channel", {
+      name: input.name,
+      protocol: input.protocol,
+      baseUrl: input.baseUrl,
+      apiKey: input.apiKey ?? "",
+      model: input.model,
+      price: input.price,
+      currency: input.currency,
+    });
+    set({ aiChannels: channels });
+  },
+
+  updateAiChannel: async (id, input) => {
+    const channels = await invoke<AiChannel[]>("update_ai_channel", {
+      id,
+      name: input.name,
+      protocol: input.protocol,
+      baseUrl: input.baseUrl,
+      apiKey: input.apiKey ?? null,
+      model: input.model,
+      price: input.price,
+      currency: input.currency,
+    });
+    set({ aiChannels: channels });
+  },
+
+  deleteAiChannel: async (id) => {
+    await invoke("delete_ai_channel", { id });
+    set({ aiChannels: get().aiChannels.filter((c) => c.id !== id) });
+  },
+
+  reorderAiChannels: async (ids) => {
+    set({ aiChannels: ids.map((id) => get().aiChannels.find((c) => c.id === id)).filter(Boolean) as AiChannel[] });
+    try {
+      await invoke("reorder_ai_channels", { ids });
+    } catch (e) {
+      console.error("Failed to reorder AI channels:", e);
+      void get().loadAiChannels();
+    }
+  },
+
+  setAiChannelEnabled: async (id, enabled) => {
+    set({
+      aiChannels: get().aiChannels.map((c) =>
+        c.id === id
+          ? { ...c, enabled, status: enabled ? ("normal" as const) : c.status, lastError: enabled ? "" : c.lastError }
+          : c,
+      ),
+    });
+    try {
+      await invoke("set_ai_channel_enabled", { id, enabled });
+    } catch (e) {
+      console.error("Failed to toggle AI channel:", e);
+      void get().loadAiChannels();
+    }
+  },
+
+  saveAiScheduling: async (patch) => {
+    const payload: Record<string, string> = {};
+    if (patch.aiStrategy !== undefined) payload.ai_strategy = patch.aiStrategy;
+    if (patch.aiBalancePriceWeight !== undefined) payload.ai_balance_price_weight = String(patch.aiBalancePriceWeight);
+    if (patch.aiFailover !== undefined) payload.ai_failover = patch.aiFailover ? "1" : "0";
+    if (patch.aiAutoDisableAuth !== undefined) payload.ai_auto_disable_auth = patch.aiAutoDisableAuth ? "1" : "0";
+    if (patch.aiRateLimitCooldown !== undefined) payload.ai_rate_limit_cooldown = String(patch.aiRateLimitCooldown);
+    if (patch.aiConcurrency !== undefined) payload.ai_concurrency = String(patch.aiConcurrency);
+    if (patch.aiManualChannelId !== undefined) payload.ai_manual_channel_id = patch.aiManualChannelId;
+    try {
+      await invoke("set_settings_batch", { settings: payload });
+      const next: Partial<SettingsState> = {};
+      if (patch.aiStrategy !== undefined) next.aiStrategy = patch.aiStrategy;
+      if (patch.aiBalancePriceWeight !== undefined) next.aiBalancePriceWeight = patch.aiBalancePriceWeight;
+      if (patch.aiFailover !== undefined) next.aiFailover = patch.aiFailover;
+      if (patch.aiAutoDisableAuth !== undefined) next.aiAutoDisableAuth = patch.aiAutoDisableAuth;
+      if (patch.aiRateLimitCooldown !== undefined) next.aiRateLimitCooldown = patch.aiRateLimitCooldown;
+      if (patch.aiConcurrency !== undefined) next.aiConcurrency = patch.aiConcurrency;
+      if (patch.aiManualChannelId !== undefined) next.aiManualChannelId = patch.aiManualChannelId;
+      if (Object.keys(next).length > 0) set(next);
+    } catch (e) {
+      console.error("Failed to save AI scheduling settings:", e);
     }
   },
 }));

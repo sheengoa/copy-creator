@@ -5,6 +5,7 @@ import { RadialSection } from "./RadialSection";
 import { ShortcutSection } from "./ShortcutSection";
 import { StorageSection } from "./StorageSection";
 import { BackupSection } from "./BackupSection";
+import { CanvasSettings } from "./CanvasSettings";
 
 export {
   ClipboardSection,
@@ -14,4 +15,5 @@ export {
   ShortcutSection,
   StorageSection,
   BackupSection,
+  CanvasSettings,
 };
