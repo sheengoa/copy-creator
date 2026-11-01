@@ -4303,8 +4303,14 @@ function GenAuroraStage({
       <span className="au-field">
         {blobs.map((b, i) => (
           <span key={i} className={p >= b.th ? "au-fb is-on" : "au-fb"} style={b.outer}>
-            <span style={b.mid} />
-            <span style={b.inner} />
+            {/* 三层结构与 CSS 选择器一一对应：外层浮现（.au-fb）、
+                中层律动波（> span，--wx 相位）、内层渐变+漂移
+                （> span > span，--dx/--dy/--ds）。此前拍扁成两个兄弟
+                span，`> span > span` 渐变规则匹配不到任何元素，光团群
+                从未绘制——整场只剩常驻双光，「渐密」不可见。 */}
+            <span style={b.mid}>
+              <span style={b.inner} />
+            </span>
           </span>
         ))}
       </span>
