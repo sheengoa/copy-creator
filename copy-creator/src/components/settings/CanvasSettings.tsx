@@ -21,6 +21,7 @@ import {
   verticalListSortingStrategy,
 } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
+import { useShallow } from "zustand/react/shallow";
 import { useSettingsStore, type AiChannel, type AiChannelInput, type AiStrategy } from "../../stores/settingsStore";
 import { ConfirmDialog } from "../ConfirmDialog";
 import { Icons } from "../Icons";
@@ -422,7 +423,15 @@ function ChannelCreateForm({ onCancel }: { onCancel: () => void }) {
 
 function RoutePreview() {
   const { t } = useTranslation();
-  const { aiChannels: channels, aiStrategy, aiBalancePriceWeight, aiManualChannelId } = useSettingsStore();
+  // 精确订阅：只挑演算要用的字段，仓库其他设置变化不触发本组件重渲染。
+  const { aiChannels: channels, aiStrategy, aiBalancePriceWeight, aiManualChannelId } = useSettingsStore(
+    useShallow((s) => ({
+      aiChannels: s.aiChannels,
+      aiStrategy: s.aiStrategy,
+      aiBalancePriceWeight: s.aiBalancePriceWeight,
+      aiManualChannelId: s.aiManualChannelId,
+    })),
+  );
   const pick = useMemo<AiChannel | null>(() => {
     const usable = channels.filter((c) => c.enabled && c.status !== "auto_disabled");
     const candidates = usable.length > 0 ? usable : [];
@@ -497,7 +506,29 @@ function RoutePreview() {
 
 export function CanvasSettings() {
   const { t } = useTranslation();
-  const settings = useSettingsStore();
+  // 精确订阅：逐字段挑本页实际用到的数据与动作，仓库其他设置变化
+  //（如剪切板、径向菜单）不再触发整页重渲染。
+  const settings = useSettingsStore(
+    useShallow((s) => ({
+      aiChannels: s.aiChannels,
+      aiStrategy: s.aiStrategy,
+      aiBalancePriceWeight: s.aiBalancePriceWeight,
+      aiFailover: s.aiFailover,
+      aiAutoDisableAuth: s.aiAutoDisableAuth,
+      aiRateLimitCooldown: s.aiRateLimitCooldown,
+      aiConcurrency: s.aiConcurrency,
+      aiManualChannelId: s.aiManualChannelId,
+      aiModel: s.aiModel,
+      aiTimeout: s.aiTimeout,
+      saveAiScheduling: s.saveAiScheduling,
+      testAiChannel: s.testAiChannel,
+      loadAiChannels: s.loadAiChannels,
+      reorderAiChannels: s.reorderAiChannels,
+      setAiChannelEnabled: s.setAiChannelEnabled,
+      deleteAiChannel: s.deleteAiChannel,
+      saveAiSettings: s.saveAiSettings,
+    })),
+  );
   const {
     aiChannels: channels,
     aiStrategy,

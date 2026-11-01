@@ -4,6 +4,7 @@ import { useTranslation } from "react-i18next";
 import { invoke } from "@tauri-apps/api/core";
 import { emit } from "@tauri-apps/api/event";
 import { useSettingsStore } from "../stores/settingsStore";
+import { useShallow } from "zustand/react/shallow";
 import { ClipboardSection, GeneralSection, ShortcutSection, RadialSection, StorageSection, BackupSection, CanvasSettings } from "./settings";
 import { useShortcutRecording } from "./settings/useShortcutRecording";
 import { Icons } from "./Icons";
@@ -29,7 +30,27 @@ interface Props {
 
 export default function SettingsContent({ embedded }: Props) {
   const { i18n, t } = useTranslation();
-  const settings = useSettingsStore();
+  // 精确订阅：只挑本容器与各分区实际读写的字段，仓库其他设置变化
+  //（如画布渠道测速回写）不再触发整个设置容器重渲染。
+  const settings = useSettingsStore(
+    useShallow((s) => ({
+      loadSettings: s.loadSettings,
+      clipboardRetention: s.clipboardRetention,
+      shortcutKey: s.shortcutKey,
+      radialShortcutKey: s.radialShortcutKey,
+      radialMenuEnabled: s.radialMenuEnabled,
+      radialMenuScale: s.radialMenuScale,
+      autostartEnabled: s.autostartEnabled,
+      pasteLeftClick: s.pasteLeftClick,
+      contentSort: s.contentSort,
+      clipboardCreateShortcutKey: s.clipboardCreateShortcutKey,
+      setSettingsBatch: s.setSettingsBatch,
+      setSetting: s.setSetting,
+      setAutostart: s.setAutostart,
+      setContentSort: s.setContentSort,
+      setPasteLeftClick: s.setPasteLeftClick,
+    })),
+  );
   const loadSettings = settings.loadSettings;
 
   const [localRetention, setLocalRetention] = useState(settings.clipboardRetention);
