@@ -945,7 +945,6 @@
     "frameLastBadge": "Last frame",
     "frameChangeVideo": "Change video",
     "noPromptSource": "No prompt source: connect at least one non-empty text node",
-    "genSlotPending": "…",
     "genPrimary": "Primary",
     "genSetPrimary": "Set as Primary",
     "showInLibrary": "Show in Library",

@@ -608,6 +608,12 @@
   background: var(--chip-hover-bg);
 }
 
+/* 生成中取消按钮：与完成态「重新生成」同款中性胶囊——执行层操作统一
+   胶囊语言，不再用基础的 9px 大圆角。 */
+.fc-root .fc-gen-cancel {
+  border-radius: 999px;
+}
+
 /* 参考图空态：虚线占位块。 */
 .fc-root .fc-node-placeholder {
   flex: 1;

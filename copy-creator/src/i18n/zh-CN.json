@@ -941,7 +941,6 @@
     "frameLastBadge": "尾帧",
     "frameChangeVideo": "换一个视频",
     "noPromptSource": "没有提示词来源：连线至少一个非空文本节点",
-    "genSlotPending": "…",
     "genPrimary": "主图",
     "genSetPrimary": "设为主图",
     "showInLibrary": "在资源库中显示",

@@ -2995,15 +2995,16 @@ export default function FreeCanvas({ canvasId }: { canvasId: string }) {
                       <div className={`fc-gen-slots${wait.phase === "exit" ? " is-out" : ""}`}>
                         {Array.from({ length: prog.total }, (_, i) => {
                           const url = prog.previews[i];
-                          // 谢幕退场带失败槽：空位红叉定格（全部失败/部分失败同款）。
+                          // 谢幕退场带失败槽：空位红叉定格（全部失败/部分失败
+                          // 同款）。执行中的未到槽位不再渲染「…」小方块占位
+                          // （用户 2026-11-01 定案：流光即进行中，出图才露面），
+                          // 空容器零高塌缩不占位。
                           const failed = wait.phase === "exit" && wait.errors > 0;
                           return url ? (
                             <img key={i} className="fc-gen-slot filled" src={url} alt="" draggable={false} />
-                          ) : (
-                            <span key={i} className={`fc-gen-slot pending${failed ? " is-err" : ""}`}>
-                              {failed ? "×" : t("canvas.genSlotPending")}
-                            </span>
-                          );
+                          ) : failed ? (
+                            <span key={i} className="fc-gen-slot pending is-err">×</span>
+                          ) : null;
                         })}
                       </div>
                     </>
@@ -3081,7 +3082,7 @@ export default function FreeCanvas({ canvasId }: { canvasId: string }) {
                           {t("canvas.generating")} {prog.received + prog.errors}/{prog.total}
                         </span>
                         <button
-                          className="fc-node-btn ghost"
+                          className="fc-node-btn ghost fc-gen-cancel"
                           onClick={() => void store.getState().cancelGeneration(prog.requestId)}
                         >
                           {t("canvas.cancelGen")}
