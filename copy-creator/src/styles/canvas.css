@@ -1756,10 +1756,10 @@
   justify-content: center;
 }
 
-/* 中心目标图标 = 问号图形的视觉尺寸（约 5px），小而可辨。 */
+/* 中心目标图标：3px——内圈 10px 中四周留约 3.5px 间隙。 */
 .fc-save-dot-ring svg {
-  width: 5px;
-  height: 5px;
+  width: 3px;
+  height: 3px;
 }
 
 .fc-save-dot.is-saving {
