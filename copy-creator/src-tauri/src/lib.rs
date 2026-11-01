@@ -20,7 +20,7 @@ mod tray;
 #[cfg(target_os = "windows")]
 mod win_hook;
 
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use tauri::{Emitter, Manager};
 
 /// 用户置顶的唯一事实源。不能用 tao 的 `is_always_on_top()`：它读的是
@@ -42,6 +42,23 @@ fn set_user_pinned(pinned: bool) {
 /// 裁剪，因此所有窗口实际尺寸比可见面板大一圈，阴影落在边距内。与 CSS 变量
 /// `--window-shadow-margin`（src/styles/base.css）保持一致，改动时必须同步。
 pub(crate) const WINDOW_SHADOW_MARGIN: f64 = 20.0;
+
+/// 主窗口前端心跳时间戳（Unix 毫秒）。看门狗据此判定 WebView 渲染层是否
+/// 存活，见 run() setup 里的看门狗注释。
+static LAST_HEARTBEAT_MS: AtomicU64 = AtomicU64::new(0);
+
+fn now_millis() -> u64 {
+  std::time::SystemTime::now()
+    .duration_since(std::time::UNIX_EPOCH)
+    .map(|d| d.as_millis() as u64)
+    .unwrap_or(0)
+}
+
+/// 前端主窗口心跳：空实现，仅刷新心跳时间戳。
+#[tauri::command]
+fn main_window_heartbeat() {
+  LAST_HEARTBEAT_MS.store(now_millis(), Ordering::Release);
+}
 
 pub(crate) fn show_main_window(app: &tauri::AppHandle, reason: &str, center: bool) {
     let Some(window) = app.get_webview_window("main") else {
@@ -94,6 +111,16 @@ pub(crate) fn show_main_window(app: &tauri::AppHandle, reason: &str, center: boo
                 } else {
                     let _ = window.set_focus();
                 }
+            }
+            // 合成层保活踢：透明窗口的 WebView2 合成表面失效后（GPU 设备
+            // 丢失、整页重载竞态等），窗口保持 OS 可见但渲染近乎全透明——
+            // 用户视角即「窗口凭空消失」。每次显示路径都做一次 ±1px 尺寸
+            // 抖动强制重合成；前端落库防抖 300ms 会把两次抖动合并回原值，
+            // 不会污染窗口尺寸持久化。
+            if let Ok(size) = window.outer_size() {
+                let _ = window.set_size(tauri::PhysicalSize::new(size.width + 1, size.height + 1));
+                std::thread::sleep(std::time::Duration::from_millis(120));
+                let _ = window.set_size(tauri::PhysicalSize::new(size.width, size.height));
             }
         } else {
             log::error!("[show_main_window] main window not found (delayed startup)");
@@ -252,6 +279,65 @@ pub fn run() {
             std::thread::spawn(move || loop {
                 std::thread::sleep(std::time::Duration::from_secs(3600));
                 db::prune_old_records(&prune_handle).ok();
+            });
+
+            // ── 主窗口渲染层自愈看门狗 ──
+            // 透明窗口的 WebView2 合成表面一旦死亡（GPU 设备丢失、整页重载
+            // 竞态等），窗口保持 OS 可见但渲染近乎全透明——用户视角就是
+            // 「窗口凭空消失」，且快捷键反复 show 也毫无视觉反馈（2026-11-01
+            // 实测：画布页测速操作后窗口隐形，Ctrl+Alt+V 连按 8 次只能让
+            // OS 状态横跳）。前端每 3s 发 main_window_heartbeat 心跳，本
+            // 看门狗据此判定渲染层是否存活：超时先 hide/show 强制重合成，
+            // 仍无心跳则由 Rust 侧触发 location.reload()——JS 已死时前端
+            // 无法自救，必须由原生侧兜底。窗口隐藏（启动器常态）期间不判定。
+            LAST_HEARTBEAT_MS.store(now_millis(), Ordering::Release);
+            let watchdog_handle = app.handle().clone();
+            std::thread::spawn(move || {
+                let mut miss: u32 = 0;
+                loop {
+                    std::thread::sleep(std::time::Duration::from_secs(5));
+                    let Some(window) = watchdog_handle.get_webview_window("main") else {
+                        continue;
+                    };
+                    if !window.is_visible().unwrap_or(false) {
+                        continue;
+                    }
+                    let last = LAST_HEARTBEAT_MS.load(Ordering::Acquire);
+                    let now = now_millis();
+                    if now.saturating_sub(last) < 15_000 {
+                        if miss > 0 {
+                            log::info!("[watchdog] main window heartbeat recovered");
+                        }
+                        miss = 0;
+                        continue;
+                    }
+                    miss += 1;
+                    match miss {
+                        1 => {
+                            log::warn!(
+                                "[watchdog] main window heartbeat stale ({} ms) — hide/show kick",
+                                now - last
+                            );
+                            let _ = window.hide();
+                            std::thread::sleep(std::time::Duration::from_millis(120));
+                            let _ = window.show();
+                        }
+                        2 => {
+                            log::warn!("[watchdog] heartbeat still stale — reloading main webview");
+                            let _ = window.eval("location.reload()");
+                        }
+                        _ => {
+                            // 每 30s 重试重载，直到心跳恢复（人工重启前的自动兜底）。
+                            if miss % 6 == 0 {
+                                log::error!(
+                                    "[watchdog] main webview not recovering ({} ms) — reload retry",
+                                    now - last
+                                );
+                                let _ = window.eval("location.reload()");
+                            }
+                        }
+                    }
+                }
             });
 
             clipboard::start_monitor(app.handle())?;
@@ -434,6 +520,23 @@ pub fn run() {
             }
 
             Ok(())
+        })
+        .on_window_event(|window, event| {
+            // 主窗口焦点/关闭事件落日志：窗口「凭空消失」类问题的取证依赖
+            // 这条时间线（2026-11-01 事故：快捷键反复 show 却无任何日志可
+            // 查时序）。仅记录主窗口，事件量与用户交互同频，不刷屏。
+            if window.label() != "main" {
+                return;
+            }
+            match event {
+                tauri::WindowEvent::Focused(focused) => {
+                    log::info!("[window] main focused={focused}");
+                }
+                tauri::WindowEvent::CloseRequested { .. } => {
+                    log::info!("[window] main close requested");
+                }
+                _ => {}
+            }
         })
         .invoke_handler(tauri::generate_handler![
             db::get_clipboard_records,
@@ -646,6 +749,7 @@ pub fn run() {
             db::move_phrases_to_top,
             shortcut::take_startup_shortcut_failures,
             toggle_always_on_top,
+            main_window_heartbeat,
             autostart::set_autostart,
             autostart::is_autostart_enabled,
             autostart::validate_autostart,

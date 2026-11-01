@@ -136,6 +136,17 @@ function App() {
     };
   }, []);
 
+  // 渲染层自愈心跳：Rust 看门狗据此判定 WebView 是否存活（见 src-tauri
+  // lib.rs 看门狗注释）。透明窗口的合成表面死亡时整个窗口渲染为透明
+  // （用户视角 = 窗口凭空消失），心跳停止即触发原生侧 hide/show 与页面
+  // 重载自愈——JS 自身死亡时由 Rust 直接 reload，不依赖本循环。
+  useEffect(() => {
+    const beat = () => void invoke("main_window_heartbeat").catch(() => {});
+    beat();
+    const timer = window.setInterval(beat, 3000);
+    return () => window.clearInterval(timer);
+  }, []);
+
   const handleResizeMouseDown = useCallback((e: React.MouseEvent) => {
     e.preventDefault();
     isDragging.current = true;

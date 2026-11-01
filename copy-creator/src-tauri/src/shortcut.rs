@@ -81,8 +81,17 @@ pub fn toggle_window(app: &AppHandle) {
     log::info!("[toggle_window] visible={visible}, minimized={minimized}");
 
     if visible && !minimized {
-        if let Err(error) = window.hide() {
-            log::warn!("[toggle_window] hide failed: {error}");
+        // 可见但未聚焦（焦点在别的窗口）：再次按快捷键应把它带回前台而不是
+        // 藏掉——启动器惯例（PowerToys Run 同款）。否则窗口一旦被压到后面，
+        // 连按快捷键只会反复 hide，用户视角等同于「窗口消失」（2026-11-01
+        // 事故：用户连按 8 次快捷键，窗口在 show/hide 间横跳始终看不见）。
+        if window.is_focused().unwrap_or(false) {
+            if let Err(error) = window.hide() {
+                log::warn!("[toggle_window] hide failed: {error}");
+            }
+        } else {
+            log::info!("[toggle_window] visible but unfocused — raising instead of hiding");
+            crate::show_main_window(app, "shortcut-raise", false);
         }
     } else {
         crate::show_main_window(app, "shortcut", false);
