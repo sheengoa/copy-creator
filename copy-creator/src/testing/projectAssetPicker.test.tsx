@@ -1,7 +1,9 @@
 // @vitest-environment jsdom
 // 挂靠选择器回归钉子：后端搜索分页（500/页 + 显示更多）、防抖搜索、
 // 挂靠成功回调 onLinked（「重新挂靠替换」挂新撤旧依赖它）、已挂靠文件
-// 不可再点。曾在实机暴露「硬编码 200 条、大库后半选不到」的缺陷。
+// 不可再点、分组树过滤（resourceGroup 含子级）与分组内搜索空态的
+// 「在全部文件中搜索」兜底。曾在实机暴露「硬编码 200 条、大库后半选
+// 不到」的缺陷。
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 
@@ -16,6 +18,27 @@ const invokeMock = vi.fn(async (cmd: string, args?: Record<string, unknown>) => 
   switch (cmd) {
     case "get_resource_library_path":
       return "/lib";
+    case "get_resource_groups": {
+      // 分组树 mock：与 allRecords 里 /lib/<组>/ 的目录对应，首项固定为
+      // 「未分组」空路径根（后端 get_resource_groups 同约定）。
+      const topPaths = new Set(
+        allRecords
+          .map((record) => String(record.resource_path).replace(/^\/lib\//, ""))
+          .filter((relative) => relative.includes("/"))
+          .map((relative) => relative.split("/")[0]),
+      );
+      return [
+        { name: "", path: "", count: 0, children: [] },
+        ...[...topPaths].map((dir) => ({
+          name: dir,
+          path: dir,
+          count: allRecords.filter((record) =>
+            String(record.resource_path).startsWith(`/lib/${dir}/`),
+          ).length,
+          children: [],
+        })),
+      ];
+    }
     case "get_clipboard_records": {
       const offset = Number(args?.offset ?? 0);
       const limit = Number(args?.limit ?? 200);
@@ -23,7 +46,18 @@ const invokeMock = vi.fn(async (cmd: string, args?: Record<string, unknown>) => 
       const matched = search
         ? allRecords.filter((record) => String(record.resource_path).toLowerCase().includes(search))
         : allRecords;
-      return matched.slice(offset, offset + limit);
+      // 分组过滤与后端同语义：""=库根未分组，路径=该分组含子级。
+      const group = typeof args?.resourceGroup === "string" ? args.resourceGroup : null;
+      const grouped =
+        group === null
+          ? matched
+          : matched.filter((record) => {
+              const parts = String(record.resource_path).replace(/^\/lib\//, "").split("/");
+              const dir = parts.slice(0, -1).join("/");
+              if (group === "") return dir === "";
+              return dir === group || dir.startsWith(`${group}/`);
+            });
+      return grouped.slice(offset, offset + limit);
     }
     case "project_link_asset":
       return { id: "a9", file_path: args?.filePath, missing: false };
@@ -83,14 +117,15 @@ describe("ProjectAssetPicker", () => {
     allRecords = makeRecords(530);
     seedStore();
     render(<ProjectAssetPicker shotId="" onClose={() => {}} />);
+    // 头部计数与分组树徽章可能同值，断言一律收敛到头部计数元素
     await waitFor(() => {
-      expect(screen.getByText("500")).toBeTruthy();
+      expect(screen.getByText("500", { selector: ".project-library-count" })).toBeTruthy();
     });
     const searchCall = invokeMock.mock.calls.find(([cmd]) => cmd === "get_clipboard_records");
     expect(searchCall?.[1]).toMatchObject({ limit: PAGE, offset: 0 });
     fireEvent.click(screen.getByText("显示更多"));
     await waitFor(() => {
-      expect(screen.getByText("530")).toBeTruthy();
+      expect(screen.getByText("530", { selector: ".project-library-count" })).toBeTruthy();
     });
     // 追加页走 offset 推进，且不再出现「显示更多」（末页 30 < 500）
     expect(invokeMock.mock.calls.some(([, args]) => args?.offset === PAGE)).toBe(true);
@@ -105,12 +140,12 @@ describe("ProjectAssetPicker", () => {
     seedStore();
     render(<ProjectAssetPicker shotId="" onClose={() => {}} />);
     await waitFor(() => {
-      expect(screen.getByText("4")).toBeTruthy();
+      expect(screen.getByText("4", { selector: ".project-library-count" })).toBeTruthy();
     });
     const input = screen.getByPlaceholderText("搜索文件名…") as HTMLInputElement;
     fireEvent.change(input, { target: { value: "补位" } });
     await waitFor(() => {
-      expect(screen.getByText("1")).toBeTruthy();
+      expect(screen.getByText("1", { selector: ".project-library-count" })).toBeTruthy();
     });
     const searched = invokeMock.mock.calls.filter(([cmd, args]) => cmd === "get_clipboard_records" && args?.search === "补位");
     expect(searched.length).toBeGreaterThan(0);
@@ -209,5 +244,67 @@ describe("ProjectAssetPicker", () => {
     });
     expect(onLinked).not.toHaveBeenCalled();
     expect(onClose).not.toHaveBeenCalled();
+  });
+
+  it("点分组树后按分组过滤（含子级），请求带 resourceGroup", async () => {
+    allRecords = [
+      ...makeRecords(2),
+      { id: "rb", type: "file", content: "/lib/组B/别的.png", resource_path: "/lib/组B/别的.png", storage_mode: "resource" },
+    ];
+    seedStore();
+    render(<ProjectAssetPicker shotId="" onClose={() => {}} />);
+    await waitFor(() => {
+      expect(screen.getByText("组A")).toBeTruthy();
+    });
+    fireEvent.click(screen.getByText("组A"));
+    await waitFor(() => {
+      expect(screen.queryByText("别的.png")).toBeNull();
+    });
+    expect(screen.getByText("文件0.png")).toBeTruthy();
+    const grouped = invokeMock.mock.calls.filter(
+      ([cmd, args]) => cmd === "get_clipboard_records" && args?.resourceGroup === "组A",
+    );
+    expect(grouped.length).toBeGreaterThan(0);
+    // 回到全部文件：不带 resourceGroup 参数（null 即全库）
+    fireEvent.click(screen.getByText("全部文件"));
+    await waitFor(() => {
+      expect(screen.getByText("别的.png")).toBeTruthy();
+    });
+    expect(
+      invokeMock.mock.calls.some(
+        ([cmd, args]) => cmd === "get_clipboard_records" && args?.resourceGroup === undefined,
+      ),
+    ).toBe(true);
+  });
+
+  it("分组内搜索无结果时给「在全部文件中搜索」兜底并跳出分组", async () => {
+    allRecords = [
+      ...makeRecords(1),
+      { id: "rb2", type: "file", content: "/lib/组B/目标文件.png", resource_path: "/lib/组B/目标文件.png", storage_mode: "resource" },
+    ];
+    seedStore();
+    render(<ProjectAssetPicker shotId="" onClose={() => {}} />);
+    await waitFor(() => {
+      expect(screen.getByText("组A")).toBeTruthy();
+    });
+    fireEvent.click(screen.getByText("组A"));
+    await waitFor(() => {
+      expect(screen.getByPlaceholderText("在 组A 中搜索…")).toBeTruthy();
+    });
+    const input = screen.getByPlaceholderText("在 组A 中搜索…") as HTMLInputElement;
+    fireEvent.change(input, { target: { value: "目标" } });
+    await waitFor(() => {
+      expect(screen.getByText("当前分组下没有匹配的文件")).toBeTruthy();
+    });
+    fireEvent.click(screen.getByText("在全部文件中搜索「目标」"));
+    await waitFor(() => {
+      expect(screen.getByText("目标文件.png")).toBeTruthy();
+    });
+    expect(
+      invokeMock.mock.calls.some(
+        ([cmd, args]) =>
+          cmd === "get_clipboard_records" && args?.search === "目标" && args?.resourceGroup === undefined,
+      ),
+    ).toBe(true);
   });
 });

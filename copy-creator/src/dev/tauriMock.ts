@@ -793,10 +793,11 @@ function handleInvoke(cmd: string, args: Record<string, unknown>): unknown {
     // ── 资源域与通用命令（画布链路会碰到的） ──
     case "get_resource_library_path":
       return libraryRoot;
-    case "get_clipboard_records":
+    case "get_clipboard_records": {
       // 供「从资源库选文件」浮层挑一个剧本文件（挂剧本链路验证用）+
-      // 一条视频（视频首帧/尾帧节点选片用，2026-11-01）。
-      return [
+      // 一条视频（视频首帧/尾帧节点选片用，2026-11-01）。resourceGroup
+      // 过滤与后端同语义：""=库根未分组，路径=该分组含子级。
+      const mockRecords = [
         {
           id: "rec-script-1",
           type: "file",
@@ -820,6 +821,24 @@ function handleInvoke(cmd: string, args: Record<string, unknown>): unknown {
           resource_group: null,
         },
       ];
+      const group = typeof args?.resourceGroup === "string" ? args.resourceGroup : null;
+      // 关键词过滤与后端同语义（文件名/路径子串，大小写不敏感）——浮层的
+      // 「分组内搜索空态 → 在全部文件中搜索」兜底依赖它才可验证。
+      const query = typeof args?.search === "string" ? args.search.trim().toLowerCase() : "";
+      return mockRecords
+        .filter((record) => !query || record.resource_path.toLowerCase().includes(query))
+        .filter((record) => {
+          if (group === null) return true;
+          const prefix = `${libraryRoot}\\`;
+          if (!record.resource_path.startsWith(prefix)) return false;
+          const dir = record.resource_path
+            .slice(prefix.length)
+            .replace(/[^\\/]+$/, "")
+            .replace(/[\\/]+$/, "");
+          if (group === "") return dir === "";
+          return dir === group || dir.startsWith(`${group}/`) || dir.startsWith(`${group}\\`);
+        });
+    }
     case "get_image_thumbnail":
     case "get_resource_file_thumbnail":
     case "load_resource_video_poster":
@@ -847,7 +866,13 @@ function handleInvoke(cmd: string, args: Record<string, unknown>): unknown {
     case "project_search":
       return [];
     case "get_resource_groups":
-      return [];
+      // 「从资源库选文件」浮层的分组树：mock 库里 scripts/、segments/ 两个
+      // 顶级分组（与上方资源路径对应），首项固定为「未分组」空路径根。
+      return [
+        { name: "", path: "", count: 0, children: [] },
+        { name: "scripts", path: "scripts", count: 1, children: [] },
+        { name: "segments", path: "segments", count: 1, children: [] },
+      ];
 
     // ── 上传链路（详情窗口「上传文件」）：选本机文件 → 复制入库 ──
     case "select_resource_trace_file":

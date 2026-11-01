@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { Fragment, useEffect, useMemo, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { useTranslation } from "react-i18next";
 import type { ClipboardRecord } from "../../types";
@@ -38,6 +38,15 @@ export interface ProjectFilePickerDialogProps {
 /** 单页条数：后端按关键词搜索 + 偏移分页，大库不再只有最新 200 条可选。 */
 const PAGE_SIZE = 500;
 
+/** get_resource_groups 的树节点：path 为相对库根的分组路径（"" 即库根
+ *  「未分组」，首项固定是它），count 为含全部子级的文件数。 */
+interface PickerFolder {
+  name: string;
+  path: string;
+  count: number;
+  children: PickerFolder[];
+}
+
 /** 选择器卡片缩略图：图片/视频出真预览（真懒加载，滚动到才解码，大库
  *  不卡），音频/文本/文件出类型占位——预览让「选哪个」选得有把握。 */
 function PickerCardThumb({
@@ -73,9 +82,76 @@ function PickerCardThumb({
   );
 }
 
-/** 通用「从资源库选文件」浮层：后端搜索分页 + 缩略图预览 + 库外文件
- *  导入（复制进库根「未分组」）。工程域的挂靠、三库图片路径等都以
- *  薄壳复用它，只各自的 onPick 里做回填/挂靠。 */
+/** 分组树行：递归渲染多级分组。行本体点击选中分组，展开箭头只管折叠
+ *  （stopPropagation），计数用后端给的含子级总量，不随搜索词变化。 */
+function PickerTreeRow({
+  folder,
+  depth,
+  selectedGroup,
+  expandedPaths,
+  onSelect,
+  onToggle,
+}: {
+  folder: PickerFolder;
+  depth: number;
+  selectedGroup: string | null;
+  expandedPaths: Set<string>;
+  onSelect: (path: string) => void;
+  onToggle: (path: string) => void;
+}) {
+  const { t } = useTranslation();
+  const hasChildren = folder.children.length > 0;
+  const isOpen = expandedPaths.has(folder.path);
+  return (
+    <Fragment key={folder.path}>
+      <div
+        className={`project-picker-tree-row${selectedGroup === folder.path ? " active" : ""}`}
+        style={{ paddingLeft: 4 + depth * 14 }}
+        onClick={() => onSelect(folder.path)}
+      >
+        {hasChildren ? (
+          <button
+            type="button"
+            className={`project-picker-tree-twist${isOpen ? " open" : ""}`}
+            aria-label={isOpen ? t("resources.collapseGroup") : t("resources.expandGroup")}
+            onClick={(event) => {
+              event.stopPropagation();
+              onToggle(folder.path);
+            }}
+          >
+            {Icons.chevronDown}
+          </button>
+        ) : (
+          <span className="project-picker-tree-twist is-leaf" aria-hidden="true" />
+        )}
+        <span className="project-picker-tree-label">
+          {Icons.folderFine}
+          <span className="project-picker-tree-name">{folder.name}</span>
+          <span className="project-picker-tree-count">{folder.count}</span>
+        </span>
+      </div>
+      {hasChildren &&
+        isOpen &&
+        folder.children.map((child) => (
+          <PickerTreeRow
+            key={child.path}
+            folder={child}
+            depth={depth + 1}
+            selectedGroup={selectedGroup}
+            expandedPaths={expandedPaths}
+            onSelect={onSelect}
+            onToggle={onToggle}
+          />
+        ))}
+    </Fragment>
+  );
+}
+
+/** 通用「从资源库选文件」浮层：左侧多级分组树（后端分组过滤，含子级
+ *  聚合语义）+ 搜索分页 + 缩略图预览 + 库外文件导入（复制进库根「未
+ *  分组」）。工程域的挂靠、三库图片路径等都以薄壳复用它，只各自的
+ *  onPick 里做回填/挂靠。搜索跟随当前分组（后端 AND 叠加），分组内搜
+ *  不到时给「在全部文件中搜索」一键跳出，避免「明明有却搜不到」。 */
 export default function ProjectFilePickerDialog({
   title,
   onPick,
@@ -87,6 +163,13 @@ export default function ProjectFilePickerDialog({
 }: ProjectFilePickerDialogProps) {
   const { t } = useTranslation();
   const [libraryRoot, setLibraryRoot] = useState("");
+  const [groups, setGroups] = useState<PickerFolder[]>([]);
+  // 当前分组：null=全部文件（不传参），""=未分组（库根），路径=该分组
+  // 及其全部子级——与资源页文件视图同一套过滤语义。
+  const [group, setGroup] = useState<string | null>(null);
+  // 默认展开全部顶层分组、子级收起；分组树加载失败静默，仅剩「全部
+  // 文件/未分组」两行，选择能力不受影响。
+  const [expandedPaths, setExpandedPaths] = useState<Set<string>>(new Set());
   const [records, setRecords] = useState<ClipboardRecord[]>([]);
   const [loading, setLoading] = useState(true);
   const [loadingMore, setLoadingMore] = useState(false);
@@ -99,6 +182,20 @@ export default function ProjectFilePickerDialog({
   const [importing, setImporting] = useState(false);
   const [importFile, setImportFile] = useState("");
   const [importError, setImportError] = useState("");
+
+  useEffect(() => {
+    let cancelled = false;
+    invoke<PickerFolder[]>("get_resource_groups")
+      .then((tree) => {
+        if (cancelled || !Array.isArray(tree)) return;
+        setGroups(tree);
+        setExpandedPaths(new Set(tree.filter((folder) => folder.path !== "").map((folder) => folder.path)));
+      })
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   useEffect(() => {
     const timer = window.setTimeout(() => setSearch(query.trim()), 250);
@@ -115,6 +212,8 @@ export default function ProjectFilePickerDialog({
         offset: 0,
         category: "resources",
         search: search || undefined,
+        // 分组过滤（含子级）由后端完成；null 即全库，不传参。
+        ...(group !== null ? { resourceGroup: group } : {}),
       }),
     ])
       .then(([root, rows]) => {
@@ -131,7 +230,7 @@ export default function ProjectFilePickerDialog({
     return () => {
       cancelled = true;
     };
-  }, [search]);
+  }, [search, group]);
 
   const loadMore = () => {
     if (loadingMore) return;
@@ -141,6 +240,7 @@ export default function ProjectFilePickerDialog({
       offset: offset + PAGE_SIZE,
       category: "resources",
       search: search || undefined,
+      ...(group !== null ? { resourceGroup: group } : {}),
     })
       .then((rows) => {
         setRecords((prev) => [...prev, ...rows]);
@@ -151,8 +251,23 @@ export default function ProjectFilePickerDialog({
       .finally(() => setLoadingMore(false));
   };
 
+  const toggleFolder = (path: string) => {
+    setExpandedPaths((prev) => {
+      const next = new Set(prev);
+      if (next.has(path)) {
+        next.delete(path);
+      } else {
+        next.add(path);
+      }
+      return next;
+    });
+  };
+
+  const topLevelGroups = useMemo(() => groups.filter((folder) => folder.path !== ""), [groups]);
+  const ungroupedFolder = groups.find((folder) => folder.path === "");
+
   // 仅保留有库内文件的记录（工程档案的路径约定必须相对库根），同一
-  // 文件多记录跨页去重；关键词过滤已由后端完成。
+  // 文件多记录跨页去重；关键词与分组过滤均已由后端完成。
   const candidates = useMemo(() => {
     const seen = new Set<string>();
     const list: PickedLibraryFile[] = [];
@@ -203,7 +318,7 @@ export default function ProjectFilePickerDialog({
         if (event.target === event.currentTarget) onClose();
       }}
     >
-      <div className="project-dialog project-library-panel">
+      <div className="project-dialog project-library-panel project-picker-panel">
         <div className="project-dialog-head">
           <h4>
             {title}
@@ -218,56 +333,115 @@ export default function ProjectFilePickerDialog({
             {Icons.close}
           </button>
         </div>
-        <div className="project-dialog-body" style={{ paddingBottom: 8 }}>
-          <input
-            className="project-dialog-input"
-            value={query}
-            placeholder={t("project.asset.pickerSearch")}
-            onChange={(event) => setQuery(event.target.value)}
-            autoFocus
-          />
-        </div>
-        <div className="project-library-body">
-          {loading ? (
-            <div className="project-library-empty">{t("project.loading")}</div>
-          ) : candidates.length === 0 ? (
-            <div className="project-library-empty">
-              {Icons.empty}
-              <p>{t("project.asset.pickerEmpty")}</p>
-            </div>
-          ) : (
-            candidates.map((item) => {
-              const taken = takenPaths?.has(item.filePath) ?? false;
-              return (
-                <div
-                  key={item.filePath}
-                  className={`project-library-card${taken ? "" : " pick"}`}
-                  onClick={taken ? undefined : () => onPick(item)}
-                >
-                  <PickerCardThumb item={item} libraryRoot={libraryRoot} />
-                  <div className="project-library-main">
-                    <b>{item.name}</b>
-                    <i>{item.filePath}</i>
-                  </div>
-                  <span className={`project-library-tag${taken ? " linked" : ""}`}>
-                    {taken
-                      ? (takenLabel ?? t("project.asset.alreadyLinked"))
-                      : (pickLabel ?? t("project.asset.linkAction"))}
-                  </span>
-                </div>
-              );
-            })
-          )}
-          {hasMore && !loading && candidates.length > 0 && (
-            <button
-              type="button"
-              className="project-library-more"
-              onClick={loadMore}
-              disabled={loadingMore}
+        <div className="project-picker-cols">
+          <div className="project-picker-tree" role="tree" aria-label={t("resources.groups")}>
+            <div
+              className={`project-picker-tree-row${group === null ? " active" : ""}`}
+              onClick={() => setGroup(null)}
             >
-              {loadingMore ? t("project.loading") : t("resources.loadMore")}
-            </button>
-          )}
+              <span className="project-picker-tree-twist is-leaf" aria-hidden="true" />
+              <span className="project-picker-tree-label">
+                {Icons.resources}
+                <span className="project-picker-tree-name">{t("resources.allFiles")}</span>
+              </span>
+            </div>
+            <div
+              className={`project-picker-tree-row${group === "" ? " active" : ""}`}
+              onClick={() => setGroup("")}
+            >
+              <span className="project-picker-tree-twist is-leaf" aria-hidden="true" />
+              <span className="project-picker-tree-label">
+                {Icons.folderFine}
+                <span className="project-picker-tree-name">{t("resources.ungrouped")}</span>
+                {ungroupedFolder && (
+                  <span className="project-picker-tree-count">{ungroupedFolder.count}</span>
+                )}
+              </span>
+            </div>
+            {topLevelGroups.map((folder) => (
+              <PickerTreeRow
+                key={folder.path}
+                folder={folder}
+                depth={0}
+                selectedGroup={group}
+                expandedPaths={expandedPaths}
+                onSelect={setGroup}
+                onToggle={toggleFolder}
+              />
+            ))}
+          </div>
+          <div className="project-picker-main">
+            <div className="project-dialog-body" style={{ paddingBottom: 8 }}>
+              <input
+                className="project-dialog-input"
+                value={query}
+                placeholder={
+                  group === null
+                    ? t("project.asset.pickerSearch")
+                    : t("project.asset.pickerSearchInGroup", {
+                        group: group === "" ? t("resources.ungrouped") : group,
+                      })
+                }
+                onChange={(event) => setQuery(event.target.value)}
+                autoFocus
+              />
+            </div>
+            <div className="project-library-body">
+              {loading ? (
+                <div className="project-library-empty">{t("project.loading")}</div>
+              ) : candidates.length === 0 ? (
+                <div className="project-library-empty">
+                  {Icons.empty}
+                  <p>
+                    {group === null
+                      ? t("project.asset.pickerEmpty")
+                      : t("project.asset.pickerEmptyInGroup")}
+                  </p>
+                  {group !== null && search !== "" && (
+                    <button
+                      type="button"
+                      className="project-picker-search-all"
+                      onClick={() => setGroup(null)}
+                    >
+                      {t("project.asset.pickerSearchAllGroups", { query: search })}
+                    </button>
+                  )}
+                </div>
+              ) : (
+                candidates.map((item) => {
+                  const taken = takenPaths?.has(item.filePath) ?? false;
+                  return (
+                    <div
+                      key={item.filePath}
+                      className={`project-library-card${taken ? "" : " pick"}`}
+                      onClick={taken ? undefined : () => onPick(item)}
+                    >
+                      <PickerCardThumb item={item} libraryRoot={libraryRoot} />
+                      <div className="project-library-main">
+                        <b>{item.name}</b>
+                        <i>{item.filePath}</i>
+                      </div>
+                      <span className={`project-library-tag${taken ? " linked" : ""}`}>
+                        {taken
+                          ? (takenLabel ?? t("project.asset.alreadyLinked"))
+                          : (pickLabel ?? t("project.asset.linkAction"))}
+                      </span>
+                    </div>
+                  );
+                })
+              )}
+              {hasMore && !loading && candidates.length > 0 && (
+                <button
+                  type="button"
+                  className="project-library-more"
+                  onClick={loadMore}
+                  disabled={loadingMore}
+                >
+                  {loadingMore ? t("project.loading") : t("resources.loadMore")}
+                </button>
+              )}
+            </div>
+          </div>
         </div>
         <div className="project-import-bar">
           <button
