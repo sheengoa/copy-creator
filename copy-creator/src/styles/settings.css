@@ -116,7 +116,7 @@
 }
 
 .settings-save-btn.saved {
-  background: #34C759;
+  background: var(--success);
   color: white;
   pointer-events: none;
   animation: saveSuccess 2s ease forwards;
@@ -180,15 +180,10 @@
   margin-top: 6px;
   padding: 8px 10px;
   border-radius: 8px;
-  background: rgba(255, 149, 0, 0.08);
-  border: 1px solid rgba(255, 149, 0, 0.2);
+  background: var(--warning-bg);
+  border: 1px solid var(--warning-border);
   font-size: var(--text-xs);
-  color: #FF9500;
-}
-
-[data-theme="dark"] .settings-restart-hint {
-  background: rgba(255, 149, 0, 0.1);
-  border-color: rgba(255, 149, 0, 0.25);
+  color: var(--warning);
 }
 
 .settings-restart-btn {
@@ -196,7 +191,7 @@
   padding: 4px 12px;
   border-radius: 6px;
   border: none;
-  background: #FF9500;
+  background: var(--warning);
   color: white;
   font-family: var(--font);
   font-size: var(--text-xs);
@@ -207,7 +202,7 @@
 }
 
 .settings-restart-btn:hover {
-  background: #e68600;
+  filter: brightness(0.92);
   transform: translateY(-1px);
 }
 
@@ -527,11 +522,9 @@
   letter-spacing: 0;
 }
 
-.canvas-settings .canvas-sec-note {
-  font-size: 11px;
-  color: var(--text-tertiary);
+/* 区块引言说明：文字样式走 .ui-sub，此处只保留区块内的布局间距。 */
+.canvas-settings p.ui-sub {
   margin: 0 2px 8px;
-  line-height: 1.5;
 }
 
 /* 渠道卡片列表：条目间淡分隔，展开区浅灰内嵌面板 */
@@ -607,8 +600,8 @@
 }
 
 .canvas-dot.ok {
-  background: #34C759;
-  box-shadow: 0 0 0 3px rgba(52, 199, 89, 0.14);
+  background: var(--success);
+  box-shadow: 0 0 0 3px var(--success-bg);
 }
 
 .canvas-dot.bad {
@@ -683,7 +676,7 @@
 }
 
 .canvas-lat.ok {
-  background: rgba(52, 199, 89, 0.14);
+  background: var(--success-bg);
   color: #1E9E46;
 }
 
@@ -784,30 +777,6 @@
   height: 14px;
 }
 
-/* 协议胶囊（项目既有胶囊按钮语言） */
-.canvas-pills {
-  display: flex;
-  gap: 6px;
-}
-
-.canvas-pill {
-  padding: 5px 14px;
-  border-radius: 999px;
-  border: 1px solid var(--separator);
-  background: var(--bg-card);
-  color: var(--text-secondary);
-  font-size: var(--text-sm);
-  font-family: inherit;
-  cursor: pointer;
-}
-
-.canvas-pill.on {
-  background: var(--accent-bg);
-  border-color: var(--accent-border-soft);
-  color: var(--accent);
-  font-weight: var(--weight-semibold);
-}
-
 .canvas-price {
   display: flex;
   gap: 6px;
@@ -818,15 +787,11 @@
   min-width: 0;
 }
 
+/* 货币窄下拉（IosSelect 根容器）：宽度由本页布局约束 */
 .canvas-currency {
-  width: 56px !important;
+  width: 56px;
+  min-width: 56px;
   flex-shrink: 0;
-}
-
-.canvas-form-error {
-  margin-top: 8px;
-  font-size: 11px;
-  color: var(--danger);
 }
 
 .canvas-form-actions {
@@ -834,92 +799,6 @@
   align-items: center;
   justify-content: space-between;
   margin-top: 12px;
-}
-
-/* 软灰次级按钮 / 红字危险按钮 / 浮起白卡主按钮（与项目按钮家族同语言） */
-.settings-btn-soft {
-  height: 28px;
-  padding: 0 13px;
-  border: none;
-  border-radius: 8px;
-  background: var(--tool-btn-bg);
-  color: var(--nav-item-active-color);
-  font-family: inherit;
-  font-size: var(--text-sm);
-  font-weight: var(--weight-medium);
-  cursor: pointer;
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  transition: background 0.15s;
-}
-
-.settings-btn-soft:hover {
-  background: var(--tool-btn-hover-bg);
-}
-
-.settings-btn-soft:disabled {
-  opacity: 0.6;
-  cursor: default;
-}
-
-.settings-btn-soft svg {
-  width: 13px;
-  height: 13px;
-}
-
-.settings-btn-danger {
-  height: 28px;
-  padding: 0 12px;
-  border: none;
-  border-radius: 8px;
-  background: none;
-  color: var(--danger);
-  font-family: inherit;
-  font-size: var(--text-sm);
-  font-weight: var(--weight-medium);
-  cursor: pointer;
-  display: inline-flex;
-  align-items: center;
-  gap: 5px;
-}
-
-.settings-btn-danger:hover {
-  background: rgba(255, 59, 48, 0.12);
-}
-
-.settings-btn-danger svg {
-  width: 13px;
-  height: 13px;
-}
-
-.settings-btn-raised {
-  height: 30px;
-  padding: 0 16px;
-  border: none;
-  border-radius: 10px;
-  background: var(--btn-card-bg);
-  color: var(--text-primary);
-  font-family: inherit;
-  font-size: var(--text-sm);
-  font-weight: var(--weight-semibold);
-  cursor: pointer;
-  box-shadow: var(--btn-card-shadow);
-  transition: all 0.3s cubic-bezier(0.22, 1, 0.36, 1);
-}
-
-.settings-btn-raised:hover:not(:disabled) {
-  transform: translateY(-1px);
-  box-shadow: var(--btn-card-shadow-hover);
-}
-
-.settings-btn-raised:active:not(:disabled) {
-  transform: scale(0.96);
-}
-
-.settings-btn-raised:disabled {
-  opacity: 0.6;
-  cursor: default;
 }
 
 .canvas-ch-add {
@@ -1012,12 +891,9 @@
   font-weight: var(--weight-semibold);
 }
 
+/* 策略行描述文字：块级布局 + 基准 .ui-sub 文字样式（JSX 双类） */
 .canvas-st-desc {
   display: block;
-  font-size: 11px;
-  color: var(--text-secondary);
-  margin-top: 2px;
-  line-height: 1.45;
 }
 
 .canvas-st-extra {
@@ -1052,27 +928,6 @@
 .canvas-slider-mid {
   flex: 1;
   min-width: 150px;
-}
-
-.canvas-slider {
-  width: 100%;
-  -webkit-appearance: none;
-  appearance: none;
-  height: 4px;
-  border-radius: 999px;
-  background: var(--chip-hover-bg);
-  outline: none;
-}
-
-.canvas-slider::-webkit-slider-thumb {
-  -webkit-appearance: none;
-  appearance: none;
-  width: 18px;
-  height: 18px;
-  border-radius: 50%;
-  background: #fff;
-  box-shadow: 0 1px 5px rgba(0, 0, 0, 0.32), 0 0 0 0.5px rgba(0, 0, 0, 0.06);
-  cursor: pointer;
 }
 
 .canvas-slider-val {
@@ -1128,13 +983,6 @@
   font-weight: var(--weight-medium);
 }
 
-.canvas-row-sub {
-  font-size: 11px;
-  color: var(--text-secondary);
-  margin-top: 2px;
-  line-height: 1.45;
-}
-
 .canvas-suffix {
   font-size: var(--text-sm);
   color: var(--text-secondary);
@@ -1151,54 +999,6 @@
 
 .canvas-w-lg {
   width: 220px !important;
-}
-
-/* iOS 开关（与径向菜单开关同形） */
-.canvas-switch {
-  position: relative;
-  width: 34px;
-  height: 21px;
-  flex-shrink: 0;
-  cursor: pointer;
-  display: inline-block;
-}
-
-.canvas-switch input {
-  position: absolute;
-  opacity: 0;
-  width: 100%;
-  height: 100%;
-  margin: 0;
-  cursor: pointer;
-}
-
-.canvas-switch i {
-  position: absolute;
-  inset: 0;
-  border-radius: 99px;
-  background: var(--chip-hover-bg);
-  transition: background 0.18s;
-}
-
-.canvas-switch i::after {
-  content: "";
-  position: absolute;
-  top: 2px;
-  left: 2px;
-  width: 17px;
-  height: 17px;
-  border-radius: 50%;
-  background: #fff;
-  box-shadow: 0 1.5px 4px rgba(0, 0, 0, 0.28);
-  transition: transform 0.18s;
-}
-
-.canvas-switch input:checked + i {
-  background: #34C759;
-}
-
-.canvas-switch input:checked + i::after {
-  transform: translateX(13px);
 }
 
 @media (max-width: 720px) {
@@ -1238,7 +1038,8 @@
   color: var(--accent);
 }
 
-.settings-btn-soft[data-testing="1"] {
+/* 测速进行中按钮态：ui-btn 基准类 + data-testing 属性（画布页专用反馈） */
+.ui-btn[data-testing="1"] {
   pointer-events: none;
   opacity: 0.75;
 }
@@ -1253,10 +1054,10 @@
   animation: canvas-spin 0.8s linear infinite;
 }
 
-.settings-btn-soft[data-testing="1"] .canvas-btn-spin {
+.ui-btn[data-testing="1"] .canvas-btn-spin {
   display: block;
 }
 
-.settings-btn-soft[data-testing="1"] svg {
+.ui-btn[data-testing="1"] svg {
   display: none;
 }

@@ -29,7 +29,7 @@
 
 ## 语义色
 
-控件色值一律引用 token：`--accent` / `--danger` / `--success` / `--warning`（后两个 2026-11 补入 base.css）及既有表面/文字 token，禁止在控件里硬编码 hex。
+控件色值一律引用 token（base.css）：`--accent` / `--danger` / `--success` / `--warning` 及其浅底衍生 `--success-bg` / `--warning-bg` / `--warning-border`，加既有表面/文字 token，禁止在控件里硬编码 hex。
 
 ## 历史映射（2026-11 统一，旧类已退役）
 

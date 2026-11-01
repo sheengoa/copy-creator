@@ -25,6 +25,7 @@ import { useShallow } from "zustand/react/shallow";
 import { useSettingsStore, type AiChannel, type AiChannelInput, type AiStrategy } from "../../stores/settingsStore";
 import { ConfirmDialog } from "../ConfirmDialog";
 import { Icons } from "../Icons";
+import { IosSelect, Segmented, Toggle } from "../ui";
 
 // ── 渠道行（可拖拽排序） ──
 
@@ -161,14 +162,12 @@ function ChannelRow({
             <span className="canvas-lat off" title={channel.lastError}>{t("settings.canvas.autoDisabled")}</span>
           )}
           <span className={`canvas-lat${latencyClass}`}>{latencyText}</span>
-          <label className="canvas-switch" onClick={(e) => e.stopPropagation()}>
-            <input
-              type="checkbox"
-              checked={channel.enabled}
-              onChange={(e) => onEnabledChange(e.target.checked)}
-            />
-            <i />
-          </label>
+          <Toggle
+            checked={channel.enabled}
+            onChange={onEnabledChange}
+            ariaLabel={channel.name}
+            onClick={(e) => e.stopPropagation()}
+          />
           <span className="canvas-chev">{Icons.chevronRight}</span>
         </button>
       </div>
@@ -181,18 +180,15 @@ function ChannelRow({
             </div>
             <div className="canvas-field">
               <span className="canvas-field-label">{t("settings.canvas.fieldProtocol")}</span>
-              <div className="canvas-pills">
-                {(["openai", "gemini"] as const).map((p) => (
-                  <button
-                    key={p}
-                    type="button"
-                    className={`canvas-pill${protocol === p ? " on" : ""}`}
-                    onClick={() => setProtocol(p)}
-                  >
-                    {p === "gemini" ? t("settings.canvas.protocolGemini") : t("settings.canvas.protocolOpenai")}
-                  </button>
-                ))}
-              </div>
+              <Segmented
+                value={protocol}
+                options={[
+                  { value: "openai", label: t("settings.canvas.protocolOpenai") },
+                  { value: "gemini", label: t("settings.canvas.protocolGemini") },
+                ]}
+                onChange={setProtocol}
+                ariaLabel={t("settings.canvas.fieldProtocol")}
+              />
             </div>
             <div className="canvas-field full">
               <span className="canvas-field-label">
@@ -254,27 +250,28 @@ function ChannelRow({
                   onChange={(e) => setPriceText(e.target.value)}
                   onBlur={() => void submit()}
                 />
-                <select
-                  className="settings-input canvas-currency"
+                <IosSelect
+                  className="canvas-currency"
                   value={currency}
-                  onChange={(e) => {
-                    setCurrency(e.target.value);
+                  options={[
+                    { value: "$", label: "$" },
+                    { value: "¥", label: "¥" },
+                  ]}
+                  onChange={(v) => {
+                    setCurrency(v);
                     void submit();
                   }}
-                >
-                  <option value="$">$</option>
-                  <option value="¥">¥</option>
-                </select>
+                />
               </div>
             </div>
           </div>
           {error && (
-            <div className="canvas-form-error" role="alert">{error}</div>
+            <div className="ui-error" role="alert">{error}</div>
           )}
           <div className="canvas-form-actions">
             <button
               type="button"
-              className="settings-btn-soft"
+              className="ui-btn"
               data-testing={testing ? "1" : undefined}
               onClick={onTest}
             >
@@ -282,7 +279,7 @@ function ChannelRow({
               {Icons.activity}
               <span>{testing ? t("settings.canvas.testing") : t("settings.canvas.test")}</span>
             </button>
-            <button type="button" className="settings-btn-danger" onClick={onDelete}>
+            <button type="button" className="ui-btn-danger" onClick={onDelete}>
               {Icons.delete}
               {t("settings.canvas.deleteChannel")}
             </button>
@@ -353,18 +350,15 @@ function ChannelCreateForm({ onCancel }: { onCancel: () => void }) {
           </div>
           <div className="canvas-field">
             <span className="canvas-field-label">{t("settings.canvas.fieldProtocol")}</span>
-            <div className="canvas-pills">
-              {(["openai", "gemini"] as const).map((p) => (
-                <button
-                  key={p}
-                  type="button"
-                  className={`canvas-pill${protocol === p ? " on" : ""}`}
-                  onClick={() => setProtocol(p)}
-                >
-                  {p === "gemini" ? t("settings.canvas.protocolGemini") : t("settings.canvas.protocolOpenai")}
-                </button>
-              ))}
-            </div>
+          <Segmented
+            value={protocol}
+            options={[
+              { value: "openai", label: t("settings.canvas.protocolOpenai") },
+              { value: "gemini", label: t("settings.canvas.protocolGemini") },
+            ]}
+            onChange={setProtocol}
+            ariaLabel={t("settings.canvas.fieldProtocol")}
+          />
           </div>
           <div className="canvas-field full">
             <span className="canvas-field-label">
@@ -398,19 +392,24 @@ function ChannelCreateForm({ onCancel }: { onCancel: () => void }) {
             </span>
             <div className="canvas-price">
               <input className="settings-input" value={priceText} inputMode="decimal" onChange={(e) => setPriceText(e.target.value)} />
-              <select className="settings-input canvas-currency" value={currency} onChange={(e) => setCurrency(e.target.value)}>
-                <option value="$">$</option>
-                <option value="¥">¥</option>
-              </select>
+              <IosSelect
+                className="canvas-currency"
+                value={currency}
+                options={[
+                  { value: "$", label: "$" },
+                  { value: "¥", label: "¥" },
+                ]}
+                onChange={setCurrency}
+              />
             </div>
           </div>
         </div>
-        {error && <div className="canvas-form-error" role="alert">{error}</div>}
+        {error && <div className="ui-error" role="alert">{error}</div>}
         <div className="canvas-form-actions">
-          <button type="button" className="settings-btn-soft" onClick={onCancel}>
+          <button type="button" className="ui-btn" onClick={onCancel}>
             {t("common.cancel")}
           </button>
-          <button type="button" className="settings-btn-raised" disabled={saving} onClick={() => void submit()}>
+          <button type="button" className="ui-btn-primary" disabled={saving} onClick={() => void submit()}>
             {t("common.save")}
           </button>
         </div>
@@ -637,7 +636,7 @@ export function CanvasSettings() {
           <span>{t("settings.canvas.channelsTitle")}</span>
           <button
             type="button"
-            className="settings-btn-soft"
+            className="ui-btn"
             data-testing={testAllProgress ? "1" : undefined}
             disabled={channels.filter((c) => c.enabled).length === 0}
             onClick={() => void runTestAll()}
@@ -651,7 +650,7 @@ export function CanvasSettings() {
             </span>
           </button>
         </div>
-        <p className="canvas-sec-note">{t("settings.canvas.channelsNote")}</p>
+        <p className="ui-sub">{t("settings.canvas.channelsNote")}</p>
         <div className="settings-card canvas-channel-card">
           {channels.length > 0 ? (
             <DndContext
@@ -704,7 +703,7 @@ export function CanvasSettings() {
       {/* ── 2. 自动调度 ── */}
       <div className="canvas-sec">
         <div className="canvas-sec-title"><span>{t("settings.canvas.strategyTitle")}</span></div>
-        <p className="canvas-sec-note">{t("settings.canvas.strategyNote")}</p>
+        <p className="ui-sub">{t("settings.canvas.strategyNote")}</p>
         <div className="settings-card">
           {(
             [
@@ -723,26 +722,26 @@ export function CanvasSettings() {
               <span className="canvas-radio" />
               <span className="canvas-st-main">
                 <span className="canvas-st-name">{label}</span>
-                <span className="canvas-st-desc">{desc}</span>
+                <span className="canvas-st-desc ui-sub">{desc}</span>
               </span>
             </button>
           ))}
           {aiStrategy === "manual" && (
             <div className="canvas-st-extra">
-              <select
-                className="settings-input canvas-st-select"
+              <IosSelect
+                className="canvas-st-select"
                 value={aiManualChannelId}
-                onChange={(e) => void settings.saveAiScheduling({ aiManualChannelId: e.target.value })}
-              >
-                {enabledChannels.length === 0 && <option value="">{t("settings.canvas.noEnabledChannels")}</option>}
-                {enabledChannels.map((c) => (
-                  <option key={c.id} value={c.id}>
-                    {c.name}
-                    {c.price != null ? `（${c.currency}${c.price}/${t("settings.canvas.perImage")}` : ""}
-                    {c.lastLatencyMs != null ? ` · ${c.lastLatencyMs} ms）` : c.price != null ? "）" : ""}
-                  </option>
-                ))}
-              </select>
+                disabled={enabledChannels.length === 0}
+                placeholder={t("settings.canvas.noEnabledChannels")}
+                options={enabledChannels.map((c) => ({
+                  value: c.id,
+                  label:
+                    c.name +
+                    (c.price != null ? `（${c.currency}${c.price}/${t("settings.canvas.perImage")}` : "") +
+                    (c.lastLatencyMs != null ? ` · ${c.lastLatencyMs} ms）` : c.price != null ? "）" : ""),
+                }))}
+                onChange={(v) => void settings.saveAiScheduling({ aiManualChannelId: v })}
+              />
             </div>
           )}
           {aiStrategy === "balance" && (
@@ -752,7 +751,7 @@ export function CanvasSettings() {
                 <div className="canvas-slider-mid">
                   <input
                     type="range"
-                    className="canvas-slider"
+                    className="ui-slider"
                     min={0}
                     max={100}
                     value={weightDraft ?? aiBalancePriceWeight}
@@ -780,35 +779,29 @@ export function CanvasSettings() {
           <div className="canvas-row">
             <div className="canvas-row-main">
               <div className="canvas-row-label">{t("settings.canvas.failover")}</div>
-              <div className="canvas-row-sub">{t("settings.canvas.failoverHint")}</div>
+              <div className="ui-sub">{t("settings.canvas.failoverHint")}</div>
             </div>
-            <label className="canvas-switch">
-              <input
-                type="checkbox"
-                checked={aiFailover}
-                onChange={(e) => void settings.saveAiScheduling({ aiFailover: e.target.checked })}
-              />
-              <i />
-            </label>
+            <Toggle
+              checked={aiFailover}
+              onChange={(next) => void settings.saveAiScheduling({ aiFailover: next })}
+              ariaLabel={t("settings.canvas.failover")}
+            />
           </div>
           <div className="canvas-row">
             <div className="canvas-row-main">
               <div className="canvas-row-label">{t("settings.canvas.autoDisable")}</div>
-              <div className="canvas-row-sub">{t("settings.canvas.autoDisableHint")}</div>
+              <div className="ui-sub">{t("settings.canvas.autoDisableHint")}</div>
             </div>
-            <label className="canvas-switch">
-              <input
-                type="checkbox"
-                checked={aiAutoDisableAuth}
-                onChange={(e) => void settings.saveAiScheduling({ aiAutoDisableAuth: e.target.checked })}
-              />
-              <i />
-            </label>
+            <Toggle
+              checked={aiAutoDisableAuth}
+              onChange={(next) => void settings.saveAiScheduling({ aiAutoDisableAuth: next })}
+              ariaLabel={t("settings.canvas.autoDisable")}
+            />
           </div>
           <div className="canvas-row">
             <div className="canvas-row-main">
               <div className="canvas-row-label">{t("settings.canvas.cooldown")}</div>
-              <div className="canvas-row-sub">{t("settings.canvas.cooldownHint")}</div>
+              <div className="ui-sub">{t("settings.canvas.cooldownHint")}</div>
             </div>
             <input
               className="settings-input canvas-w-md"
@@ -830,7 +823,7 @@ export function CanvasSettings() {
       {/* ── 4. 生成默认值 ── */}
       <div className="canvas-sec">
         <div className="canvas-sec-title"><span>{t("settings.canvas.defaultsTitle")}</span></div>
-        <p className="canvas-sec-note">{t("settings.canvas.defaultsNote")}</p>
+        <p className="ui-sub">{t("settings.canvas.defaultsNote")}</p>
         <div className="settings-card">
           <div className="canvas-row">
             <div className="canvas-row-main"><div className="canvas-row-label">{t("settings.canvas.defaultModel")}</div></div>
@@ -846,7 +839,7 @@ export function CanvasSettings() {
           <div className="canvas-row">
             <div className="canvas-row-main">
               <div className="canvas-row-label">{t("settings.canvas.concurrency")}</div>
-              <div className="canvas-row-sub">{t("settings.canvas.concurrencyHint")}</div>
+              <div className="ui-sub">{t("settings.canvas.concurrencyHint")}</div>
             </div>
             <input
               className="settings-input canvas-w-sm"
