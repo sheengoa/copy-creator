@@ -1591,8 +1591,11 @@
 
 /* ══ 工程画布（无限画布视图）：pc- 前缀 ═══════════════════════ */
 
-/* 画布内按钮统一去 UA 默认边框/底色（:where 零优先级，不影响下方具体规则） */
-.pc-root :where(button) {
+/* 画布内按钮统一去 UA 默认边框/底色（整个选择器进 :where 才是真零
+   优先级——此前写成 .pc-root :where(button)，.pc-root 的 (0,1,0) 仍参与
+   竞争，后来加载的具体按钮样式（如 components.css 的媒体播放条）被它
+   平级压掉，注释的「不影响具体规则」从未成立）。 */
+:where(.pc-root button) {
   border: none;
   background: none;
   padding: 0;

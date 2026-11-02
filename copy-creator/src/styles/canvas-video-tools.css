@@ -32,6 +32,30 @@
   object-fit: contain;
 }
 
+/* 统一播放条（MediaPlayback）同语适配：监视器内绝对填充，画面吃满
+   16:9，播放条悬浮画面下沿（原原生控件即悬浮形态，完成态与侧栏试听
+   条并存是原有布局）。 */
+.fc-root .fc-vt-screen .media-playback {
+  position: absolute;
+  inset: 0;
+  gap: 0;
+}
+
+.fc-root .fc-vt-screen .media-playback-video {
+  width: 100%;
+  height: 100%;
+  max-height: none;
+  object-fit: contain;
+  border-radius: 0;
+}
+
+.fc-root .fc-vt-screen .media-playback-bar {
+  position: absolute;
+  left: 8px;
+  right: 8px;
+  bottom: 8px;
+}
+
 /* 完成态产物图/GIF 直接铺监视器（ResourceThumb 的 fc-media-box 类）。 */
 .fc-root .fc-vt-screen .fc-media-box {
   position: absolute;
