@@ -158,6 +158,15 @@ const NODE_ACCENT: Record<CanvasNodeType, string> = {
   note: "#E6A700",
 };
 
+/** 输出口/连线取色：按产物媒体类型（图像蓝/视频紫/音频绿），不跟节点
+ *  主题色——视频工具节点主题是视频紫，但图像/音频产物口不该被带紫
+ *  （用户 2026-11-02 定案）；其余节点的主题色本就等于产物类型色，外观
+ *  不变。无产物口的节点（note）回退主题色。 */
+function outMediaColor(type: CanvasNodeType): string {
+  const out = PORT_DEFS[type].out;
+  return out ? MEDIA_COLOR[out.mediaKind] : NODE_ACCENT[type];
+}
+
 /** 生成参数预设（下拉清单；输入框仍可自由键入任意值）。尺寸值取后端
  *  可直接接受的「宽x高」（对齐 ai.rs SIZE_PRESETS_1K/2K），auto 交给
  *  模型自选；hint 作弱化尾注（比例/档位，语言中立），需要本地化的
@@ -1607,7 +1616,7 @@ export default function FreeCanvas({ canvasId }: { canvasId: string }) {
           compatible && drag.fromDir === "out" && tKey && targetPort
             ? inPointOf(tKey, targetPort) ?? cursor
             : cursor;
-        const draftColor = fromNode ? NODE_ACCENT[fromNode.type] : undefined;
+        const draftColor = fromNode ? outMediaColor(fromNode.type) : undefined;
         setWireDraft({
           // 摘线拿着：从源头画到手里；普通正拖 out→口；反拖 手里→口。
           d: drag.fromDir === "out"
@@ -2829,7 +2838,7 @@ export default function FreeCanvas({ canvasId }: { canvasId: string }) {
                   className="pc-port pc-port-out"
                   data-port="out"
                   data-port-id="__out"
-                  style={{ background: NODE_ACCENT[node.type] }}
+                  style={{ background: outMediaColor(node.type) }}
                 />
               </>
             ) : null}
@@ -2947,7 +2956,7 @@ export default function FreeCanvas({ canvasId }: { canvasId: string }) {
                 return (
                   <g key={conn.id} className="pc-wire" data-cut={conn.id}>
                     <path className="pc-wire-hit" d={d} />
-                    <path className="pc-wire-line" d={d} style={{ stroke: NODE_ACCENT[from.type] }} />
+                    <path className="pc-wire-line" d={d} style={{ stroke: outMediaColor(from.type) }} />
                   </g>
                 );
               })}
