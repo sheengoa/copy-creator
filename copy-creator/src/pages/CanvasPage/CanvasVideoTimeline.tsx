@@ -133,21 +133,25 @@ export default function CanvasVideoTimeline({
     const strip = stripRef.current;
     if (!strip) return;
     const t = timeAt(event.clientX);
-    // range 模式按命中元素分类手柄/选区/空白，其余场景一律按播放头拖。
+    // range 模式按命中分类手柄/选区/空白，其余场景一律按播放头拖。
+    // 选区内/外判定用纯几何（时间落点），不依赖元素命中——选区框是
+    // pointer-events:none 的视觉层，元素级 closest 永远测不到（实测
+    // 中段平移因此整个失效，按下全落「就近端吸附」把端点拉走）。
     let kind = 1;
     if (mode === "range") {
       const range = value as VideoRange;
       const target = event.target as HTMLElement;
+      const end = range.start + range.duration;
       if (target.closest("[data-vtl-handle='start']")) {
         kind = 2;
       } else if (target.closest("[data-vtl-handle='end']")) {
         kind = 3;
-      } else if (target.closest("[data-vtl-range]")) {
+      } else if (t > range.start && t < end) {
+        // 选区内按住 = 整段平移。
         kind = 4;
         grabOffsetRef.current = t - range.start;
       } else {
         // 空白轨道：把更近的一端拖到点击处（剪辑软件直觉）。
-        const end = range.start + range.duration;
         kind = Math.abs(t - range.start) <= Math.abs(end - t) ? 2 : 3;
       }
     }

@@ -1271,7 +1271,7 @@ export default function FreeCanvas({ canvasId }: { canvasId: string }) {
       // click 被重定向到捕获元素反而点不中；输入元素要保住文本选择/光标。
       // .fc-vtl-strip 是视频工具时间轴：视口抢捕获会吞掉轨道的 pointerup，
       // 拖拽会话残留成「点一下跟鼠标走」，且轨道拖动会连带拖走节点
-      // （浏览器实测实锤：lostpointercapture 后节点被拖出数百 px）。
+      // （实测实锤：lostpointercapture 后节点被拖出 800px）。
       if (e.button === 0 && target?.closest("input, textarea, button, video, audio, .fc-vtl-strip")) return;
 
       const vp = vpRef.current;
@@ -3688,12 +3688,13 @@ export default function FreeCanvas({ canvasId }: { canvasId: string }) {
               const seekT = draft?.t ?? toolMeta?.start_secs ?? 0;
               const rangeStart = draft?.start ?? toolMeta?.start_secs ?? 0;
               const rangeDurRaw = draft?.dur ?? toolMeta?.duration_secs ?? 0;
-              // 选区值合成：draft 优先；音轨未拖过（dur≤0）显示整段，GIF 由
-              // 建节点默认 3s 兜底（执行时同样兜底，前后端一致）。
+              // 选区值合成：draft 优先；GIF 永远有具体时长（未拖过 =
+              // 默认 3s，与侧栏显示、执行兜底一致）；音轨未拖过（≤0）
+              // 显示整段。
               const rangeValue =
                 rangeDurRaw > 0
                   ? { start: rangeStart, duration: rangeDurRaw }
-                  : { start: 0, duration: Math.max(trackDur, 0.5) };
+                  : { start: 0, duration: isGif ? 3 : Math.max(trackDur, 0.5) };
               const rangeLimits = isGif
                 ? { min: 0.5, max: 10 }
                 : { min: 0.5, max: Math.max(trackDur, 0.5) };
