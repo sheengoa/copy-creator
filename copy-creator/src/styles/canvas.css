@@ -674,16 +674,14 @@
   gap: 7px;
 }
 
+/* 主图只做展示不可点（点开大图走下游预览/保存节点），故无手型光标。 */
 .fc-root .fc-gen-hero {
   position: relative;
   display: block;
   width: 100%;
   aspect-ratio: 16 / 10;
-  padding: 0;
-  border: none;
   border-radius: 10px;
   overflow: hidden;
-  cursor: pointer;
   line-height: 0;
   background: rgba(0, 0, 0, 0.04);
 }
