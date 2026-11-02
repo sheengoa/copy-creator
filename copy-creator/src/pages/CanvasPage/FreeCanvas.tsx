@@ -1,9 +1,6 @@
-import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { invoke } from "@tauri-apps/api/core";
-import { ImageLightbox } from "../../components/ImageLightbox";
-import { joinLibraryPath } from "../../domain/projectView";
-import ProjectFilePickerDialog from "../ResourcePage/ProjectFilePickerDialog";
 import {
   useCanvasStore,
   type CanvasNode,
@@ -13,19 +10,10 @@ import { extOf } from "./nodes/exts";
 import {
   LIBRARY_PICKER_KINDS,
   loadAllowedExts,
-  menuGroups,
-  menuIconOf,
   NODE_DEFAULT_SIZE,
   NODE_DEFS,
-  outMediaColor,
-  PORT_DEFS,
   isVideoToolType,
 } from "./nodes/registry";
-import { NodeHint } from "./nodes/NodeHint";
-import { NodeShell } from "./nodes/shell";
-import { WheelGate } from "./nodes/WheelGate";
-import { MINI_H, MINI_W, WIRES_VIEWPORT_PAD } from "./engine/gestureTypes";
-import { nodeSize, wirePathD } from "./engine/wireGeom";
 import { groupSnapshotOf, memberFrameOf } from "./engine/groupOps";
 import { useViewport } from "./engine/useViewport";
 import { useNodeMetrics } from "./engine/useNodeMetrics";
@@ -34,10 +22,23 @@ import { useClipboardOps } from "./engine/useClipboardOps";
 import { useCanvasGestures } from "./engine/useCanvasGestures";
 import { useKeyboardShortcuts } from "./engine/useKeyboardShortcuts";
 import { useFileDrop } from "./engine/useFileDrop";
-import { useMediaUrl } from "./nodes/mediaPath";
+import { WiresLayer, CutTrailLayer } from "./layers/WiresLayer";
+import { NodeGroupsLayer } from "./layers/NodeGroupsLayer";
+import { NodesLayer } from "./layers/NodesLayer";
+import { AddMenu } from "./layers/AddMenu";
+import { MiniMap } from "./layers/MiniMap";
+import {
+  CanvasStatCard,
+  CanvasTip,
+  ZoomBar,
+  SeedButton,
+  DropHintOverlay,
+  LightboxLayer,
+  BatchBarLayer,
+  LibraryPickerLayer,
+} from "./layers/CanvasOverlays";
 import { SaveRuntimeProvider } from "./nodes/saveRuntime";
 import { GenRuntimeProvider } from "./nodes/genRuntime";
-import { BatchBar } from "./nodes/BatchBar";
 import { useVideoToolRuntimeController } from "./nodes/videoToolRuntime";
 import { VideoToolRuntimeProvider } from "./nodes/VideoToolRuntimeProvider";
 import { useNodeErrors } from "./nodes/nodeErrors";
@@ -328,56 +329,6 @@ export default function FreeCanvas({ canvasId }: { canvasId: string }) {
     return !!n && NODE_DEFS[n.type].batchGenerate === true;
   });
 
-  // 连线层（卡片之下）：按视口尺寸渲染 + 平移组换算世界坐标。
-  const wiresVis = {
-    x: -view.x / view.scale - WIRES_VIEWPORT_PAD,
-    y: -view.y / view.scale - WIRES_VIEWPORT_PAD,
-    w: ((vpSize?.w ?? 0) || 1600) / view.scale + WIRES_VIEWPORT_PAD * 2,
-    h: ((vpSize?.h ?? 0) || 900) / view.scale + WIRES_VIEWPORT_PAD * 2,
-  };
-
-  // 迷你地图比例：内容包围盒铺满小地图。
-  const miniBBox = (() => {
-    let minX = Infinity;
-    let minY = Infinity;
-    let maxX = -Infinity;
-    let maxY = -Infinity;
-    for (const n of nodes) {
-      const size = nodeSize(n);
-      minX = Math.min(minX, n.pos_x);
-      minY = Math.min(minY, n.pos_y);
-      maxX = Math.max(maxX, n.pos_x + size.w);
-      maxY = Math.max(maxY, n.pos_y + size.h);
-    }
-    if (!Number.isFinite(minX)) return null;
-    return { x: minX, y: minY, w: maxX - minX, h: maxY - minY };
-  })();
-  const miniRatio = miniBBox
-    ? Math.min(MINI_W / Math.max(miniBBox.w, 1), MINI_H / Math.max(miniBBox.h, 1))
-    : 1;
-
-  // 菜单条目数据（menuGroups/menuIconOf）在 nodes/registry；这里只保留
-  // 连线续接的 accepts 过滤（拖线/摘线到空白时只列能接上的节点类型）。
-  const menuFilterType = (type: CanvasNodeType): boolean => {
-    const pending = addMenu?.wire ?? (addMenu?.detached ? { fromKey: addMenu.detached.fromKey, fromDir: "in" as const, fromPortId: "" } : null);
-    if (!pending) return true;
-    const fromNode = nodes.find((n) => n.id === pending.fromKey);
-    if (!fromNode) return true;
-    if (pending.fromDir === "out") {
-      // 正拖：新节点需要能接住上游类型的输入口。
-      return PORT_DEFS[type].ins.some((p) => p.accepts.includes(fromNode.type));
-    }
-    if (pending.fromDir === "in" && !addMenu?.detached) {
-      // 反拖：新节点是上游，需有 out 且被源输入口接受。
-      const inDef = PORT_DEFS[fromNode.type].ins.find((p) => p.id === pending.fromPortId);
-      return !!PORT_DEFS[type].out && (!inDef || inDef.accepts.includes(type));
-    }
-    // 摘线：新节点作为下游，需要能接住原上游的口。
-    return PORT_DEFS[type].ins.some((p) => p.accepts.includes(fromNode.type));
-  };
-
-  const lightboxUrl = useMediaUrl(lightboxSrc);
-
   return (
     <GenRuntimeProvider canvasId={canvasId} selectedGenIds={selectedGenIds}>
     <div className="pc-root fc-root">
@@ -396,388 +347,91 @@ export default function FreeCanvas({ canvasId }: { canvasId: string }) {
           className="pc-world"
           style={{ transform: `translate(${view.x}px, ${view.y}px) scale(${view.scale})` }}
         >
-          <svg
-            className="pc-wires"
-            aria-hidden="true"
-            style={{
-              left: wiresVis.x,
-              top: wiresVis.y,
-              width: wiresVis.w,
-              height: wiresVis.h,
-            }}
-          >
-            <g transform={`translate(${-wiresVis.x}, ${-wiresVis.y})`}>
-              {connections.map((conn) => {
-                // 被摘下的线（拿着换目标中）暂时隐藏，收尾时转接或放回。
-                if (liftedWire && conn.id === liftedWire.connId) return null;
-                const from = nodes.find((n) => n.id === conn.from_node);
-                const to = nodes.find((n) => n.id === conn.to_node);
-                if (!from || !to) return null;
-                const a = outPointOf(from.id);
-                const b = inPointOf(to.id, conn.to_port || PORT_DEFS[to.type].ins[0]?.id || "in");
-                if (!a || !b) return null;
-                const d = wirePathD(a, b);
-                return (
-                  <g key={conn.id} className="pc-wire" data-cut={conn.id}>
-                    <path className="pc-wire-hit" d={d} />
-                    <path className="pc-wire-line" d={d} style={{ stroke: outMediaColor(from.type) }} />
-                  </g>
-                );
-              })}
-              {wireDraft && (
-                <path
-                  className={`pc-wire-temp${wireDraft.invalid ? " invalid" : ""}`}
-                  d={wireDraft.d}
-                  style={wireDraft.color ? { stroke: wireDraft.color } : undefined}
-                />
-              )}
-            </g>
-          </svg>
+          <WiresLayer
+            connections={connections}
+            nodes={nodes}
+            view={view}
+            vpSize={vpSize}
+            liftedWire={liftedWire}
+            wireDraft={wireDraft}
+            outPointOf={outPointOf}
+            inPointOf={inPointOf}
+          />
 
-          {/* 节点分组框（Ctrl+G）：框自适应成员包围盒，渲染在节点层之下。
-              memberFrame 读 nodeMetrics 实测缓存（手势层维护的 ref）——
-              引擎既有惯例：测量值以 ref 承载、渲染期直读，React Compiler
-              的 refs 规则不适用于该模式（工程画布同款），定点豁免。 */}
-          {/* eslint-disable-next-line react-hooks/refs -- 引擎实测缓存渲染期直读，见上 */ }
-          {groups.map((group) => {
-            const frames = group.members
-              .map((key) => memberFrame(key))
-              .filter((f): f is { x: number; y: number; w: number; h: number } => f !== null);
-            if (frames.length === 0) return null;
-            const pad = 14;
-            const left = Math.min(...frames.map((f) => f.x)) - pad;
-            const top = Math.min(...frames.map((f) => f.y)) - pad - 18;
-            const right = Math.max(...frames.map((f) => f.x + f.w)) + pad;
-            const bottom = Math.max(...frames.map((f) => f.y + f.h)) + pad;
-            return (
-              <div
-                key={group.id}
-                data-group={group.id}
-                className="pc-nodegroup"
-                style={{ left, top, width: right - left, height: bottom - top }}
-              >
-                <div className="pc-nodegroup-label">{group.label}</div>
-              </div>
-            );
-          })}
+          <NodeGroupsLayer groups={groups} memberFrame={memberFrame} />
 
           {/* 保存节点自动保存管线运行时（SaveMediaBody 经 Context 取操作） */}
           <VideoToolRuntimeProvider runtime={videoToolRuntime}>
           <SaveRuntimeProvider>
-          {nodes.map((node) => {
-            const selected = selKeys.includes(node.id);
-            const size = nodeSize(node);
-            // meta 提前捕获为 const：闭包（onClick/onBlur）拿不到属性
-            // 链的判窄，const 变量的判窄可以跨闭包保留。
-            // ── 节点体：全部 22 种类型经注册表 def.Component 分发（新增
-            // 节点 = 写一个 Body 模块 + def 登记，此处不再有类型分支）。──
-            const Body = NODE_DEFS[node.type].Component;
-            const body: ReactNode = (
-              <Body
-                node={node}
-                selected={selected}
-                pulsing={pulseKeys.includes(node.id)}
-                autoHeight={node.height == null}
-                scale={view.scale}
-                services={canvasServices}
-              />
-            );
-
-            return (
-              <NodeShell
-                key={node.id}
-                def={NODE_DEFS[node.type]}
-                node={node}
-                selected={selected}
-                pulsing={pulseKeys.includes(node.id)}
-                size={size}
-                onDelete={(id) => void deleteNodes(nodesRef, connectionsRef, [id])}
-              >
-                {body}
-              </NodeShell>
-            );
-          })}
+          <NodesLayer
+            nodes={nodes}
+            selKeys={selKeys}
+            pulseKeys={pulseKeys}
+            scale={view.scale}
+            canvasServices={canvasServices}
+            nodesRef={nodesRef}
+            connectionsRef={connectionsRef}
+            deleteNodes={deleteNodes}
+          />
           </SaveRuntimeProvider>
           </VideoToolRuntimeProvider>
         </div>
-        {/* 刀切痕层：视口直下的绝对定位层（pc-world 之后 → 盖在卡片上）。 */}
-        <svg className="pc-trailayer" aria-hidden="true">
-          <polyline ref={cutTrailUnderRef} className="pc-wire-cut-under" points="" />
-          <polyline ref={cutTrailRef} className="pc-wire-cut" points="" />
-        </svg>
+        <CutTrailLayer cutTrailUnderRef={cutTrailUnderRef} cutTrailRef={cutTrailRef} />
 
-        {/* 双击空白的节点选择框（ComfyUI 搜索框的对应物）：按生成/加载/
-            输出三类分组。左上角锚在指针处；贴近视口下缘时按剩余空间限高，
-            分组列表区内滚动——底部被裁掉又滚不到的项等于选不了。 */}
+        {/* 双击空白的节点选择框（ComfyUI 搜索框的对应物） */}
         {addMenu && (
-          <WheelGate>
-            <div
-              // 菜单锚定读视口实测尺寸（vpRef）——引擎既有惯例：视口实测
-              // 以 ref 承载、弹出时直读，定点豁免 react-hooks/refs。
-              className="pc-addmenu"
-              style={{
-                // eslint-disable-next-line react-hooks/refs -- 视口实测渲染期直读，见上
-                left: Math.max(8, Math.min(addMenu.sx, (vpRef.current?.clientWidth ?? 600) - 266)),
-                top: addMenu.sy,
-                // eslint-disable-next-line react-hooks/refs -- 同上
-                maxHeight: Math.max(150, (vpRef.current?.clientHeight ?? 600) - addMenu.sy - 12),
-              }}
-              onPointerDown={(event) => event.stopPropagation()}
-            >
-            <input
-              className="pc-addmenu-search"
-              placeholder={t("project.canvas.addNodeSearch")}
-              value={addMenuQuery}
-              onChange={(event) => setAddMenuQuery(event.target.value)}
-              onKeyDown={(event) => {
-                if (event.key === "Escape") {
-                  // 取消菜单＝不建节点直接退出：摘下的线就此断开。
-                  if (addMenu.detached) discardDetachedWire(addMenu.detached);
-                  closeAddMenu();
-                }
-              }}
-              // 聚焦必须带 preventScroll：默认聚焦会滚动视口容器把输入框
-              // 露出来，表现为整个画布节点集体平移。
-              ref={(el) => {
-                el?.focus({ preventScroll: true });
-              }}
-            />
-            <div className="pc-addmenu-list">
-            {menuGroups
-              .map((group) => ({
-                ...group,
-                types: group.types.filter(
-                  (type) =>
-                    t(`canvas.node.${type}`).toLowerCase().includes(addMenuQuery.trim().toLowerCase()) &&
-                    menuFilterType(type),
-                ),
-              }))
-              .filter((group) => group.types.length > 0)
-              .map((group) => (
-                <div key={group.key} className="pc-addmenu-group">
-                  <div className="pc-addmenu-group-title">{t(`canvas.menu.${group.key}`)}</div>
-                  {group.types.map((type) => (
-                    <button
-                      key={type}
-                      type="button"
-                      className="pc-addmenu-item"
-                      onPointerDown={(event) => {
-                        if (event.button !== 0) return;
-                        event.stopPropagation();
-                        event.preventDefault();
-                        // 立即捕获指针：菜单按钮随 setAddMenu(null) 卸载，
-                        // 卸载后浏览器释放捕获，pointerup 按 hit-test 落到
-                        // 视口、照常冒泡给 window 的 onUp 收尾。
-                        try {
-                          event.currentTarget.setPointerCapture(event.pointerId);
-                        } catch {
-                          // 指针已不可捕获（合成事件等）：退化为无捕获。
-                        }
-                        dragRef.current = {
-                          kind: "addnode", sx: event.clientX, sy: event.clientY, moved: false,
-                          fox: addMenu.wx, foy: addMenu.wy, frameKey: type,
-                          wire: addMenu.wire,
-                          detached: addMenu.detached,
-                        };
-                        closeAddMenu();
-                      }}
-                    >
-                      {menuIconOf(type)}
-                      <span>{t(`canvas.node.${type}`)}</span>
-                      <small>{t(`canvas.typeHint.${type}`)}</small>
-                    </button>
-                  ))}
-                </div>
-              ))}
-            </div>
-            </div>
-          </WheelGate>
+          <AddMenu
+            addMenu={addMenu}
+            addMenuQuery={addMenuQuery}
+            setAddMenuQuery={setAddMenuQuery}
+            closeAddMenu={closeAddMenu}
+            discardDetachedWire={discardDetachedWire}
+            dragRef={dragRef}
+            vpRef={vpRef}
+            nodes={nodes}
+          />
         )}
 
-        {/* 空画布示意：一键创建 文本→图像生成→预览 最小工作流 */}
-        {!nodes.length && !connections.length && !addMenu && (
-          <button className="fc-seed" onClick={() => void seedTemplate()}>
-            <span className="fc-seed-title">{t("canvas.seedCta")}</span>
-            <span className="fc-seed-sub">{t("canvas.seedHint")}</span>
-          </button>
-        )}
+        <SeedButton
+          nodes={nodes}
+          connections={connections}
+          addMenuOpen={!!addMenu}
+          onSeed={() => void seedTemplate()}
+        />
 
-        {/* 拖放遮罩：OS 文件拖入提示 */}
-        {dropHint && (
-          <div className="fc-drop-overlay">
-            <span>{t("canvas.dropHint")}</span>
-          </div>
-        )}
+        <DropHintOverlay visible={dropHint} />
 
-        {/* 批量生成浮动条：多选图像生成节点时出现（执行走 GenRuntime） */}
-        <BatchBar selectedGenIds={selectedGenIds} />
+        <BatchBarLayer selectedGenIds={selectedGenIds} />
 
         {/* 资源库选择浮层：加载节点与抽帧节点的「从资源库选择」入口 */}
         {pickerForNode && (
-          <WheelGate>
-            <LazyLibraryPicker
-              // 引擎既有惯例：白名单 ref 在同一次事件里先于 state 更新，
-              // 渲染期直读必是新值（见 pickFromLibrary），定点豁免。
-              // eslint-disable-next-line react-hooks/refs -- 见上
-              kinds={pickerKindsRef.current ?? undefined}
-              onPick={(filePath) => {
-                const targetId = pickerForNode;
-                setPickerForNode(null);
-                if (pickerApplyRef.current === "frame-video") {
-                  const target = store.getState().nodes.find((n) => n.id === targetId);
-                  if (target) void applyFrameVideo(targetId, target.type, filePath);
-                  return;
-                }
-                void store.getState().updateNode(targetId, { resourcePath: filePath });
-              }}
-              onClose={() => setPickerForNode(null)}
-            />
-          </WheelGate>
+          <LibraryPickerLayer
+            pickerForNode={pickerForNode}
+            pickerApplyRef={pickerApplyRef}
+            pickerKindsRef={pickerKindsRef}
+            applyFrameVideo={applyFrameVideo}
+            onClose={() => setPickerForNode(null)}
+          />
         )}
 
-        {/* 大图预览（预览图像节点双击） */}
-        {lightboxUrl && (
-          <WheelGate>
-            <ImageLightbox src={lightboxUrl} alt="" onClose={() => setLightboxSrc("")} />
-          </WheelGate>
-        )}
+        <LightboxLayer src={lightboxSrc} onClose={() => setLightboxSrc("")} />
 
-        {/* 画布信息玻璃卡 + 统计 */}
-        <div className="pc-glass fc-statcard">
-          <div className="pc-ep-stats">
-            <span>{t("canvas.statNodes", { count: nodes.length })}</span>
-            <span>{t("project.canvas.statWires", { count: connections.length })}</span>
-          </div>
-        </div>
+        <CanvasStatCard nodes={nodes} connections={connections} />
 
-        <div className="pc-tip">{t("canvas.tip")}</div>
+        <CanvasTip />
 
-        {/* 缩放条（工程画布同款）：缩小 / 百分比 / 放大 */}
-        <div className="pc-glass pc-zoombar">
-          <NodeHint text={t("project.canvas.zoomOut")}>
-            <button
-              type="button"
-              onClick={() => {
-                const rect = vpRef.current?.getBoundingClientRect();
-                if (rect) zoomAt(rect.width / 2, rect.height / 2, 1 / 1.2);
-              }}
-            >
-              <span aria-hidden="true">−</span>
-            </button>
-          </NodeHint>
-          <span className="pc-zpct">{Math.round(view.scale * 100)}%</span>
-          <NodeHint text={t("project.canvas.zoomIn")}>
-            <button
-              type="button"
-              onClick={() => {
-                const rect = vpRef.current?.getBoundingClientRect();
-                if (rect) zoomAt(rect.width / 2, rect.height / 2, 1.2);
-              }}
-            >
-              <span aria-hidden="true">+</span>
-            </button>
-          </NodeHint>
-        </div>
+        <ZoomBar view={view} zoomAt={zoomAt} vpRef={vpRef} />
 
-        {/* 迷你地图（工程画布同款）：节点包围盒 + 视口矩形，点击跳转 */}
-        {miniBBox && (
-          <NodeHint text={t("project.canvas.minimap")} className="is-minimap">
-            <div className="pc-glass pc-minimap">
-            <svg
-              width={MINI_W}
-              height={MINI_H}
-              viewBox={`0 0 ${MINI_W} ${MINI_H}`}
-              onPointerDown={(e) => {
-                e.stopPropagation();
-                const rect = (e.currentTarget as SVGSVGElement).getBoundingClientRect();
-                const wx = (e.clientX - rect.left) / miniRatio + miniBBox.x;
-                const wy = (e.clientY - rect.top) / miniRatio + miniBBox.y;
-                const vpRect = vpRef.current?.getBoundingClientRect();
-                if (!vpRect) return;
-                setView((prev) => {
-                  const next = {
-                    ...prev,
-                    x: vpRect.width / 2 - wx * prev.scale,
-                    y: vpRect.height / 2 - wy * prev.scale,
-                  };
-                  saveView(next);
-                  return next;
-                });
-              }}
-            >
-              {nodes.map((node) => {
-                const size = nodeSize(node);
-                return (
-                  <rect
-                    key={node.id}
-                    x={(node.pos_x - miniBBox.x) * miniRatio}
-                    y={(node.pos_y - miniBBox.y) * miniRatio}
-                    width={Math.max(3, size.w * miniRatio)}
-                    height={Math.max(2.5, size.h * miniRatio)}
-                    rx="1.5"
-                    fill="var(--text-tertiary)"
-                  />
-                );
-              })}
-              <rect
-                x={(((-view.x / view.scale) - miniBBox.x) * miniRatio)}
-                y={(((-view.y / view.scale) - miniBBox.y) * miniRatio)}
-                width={((vpSize?.w ?? 1200) / view.scale) * miniRatio}
-                height={((vpSize?.h ?? 700) / view.scale) * miniRatio}
-                fill="rgba(127,127,140,.1)"
-                stroke="var(--text-primary)"
-                strokeWidth="1.2"
-                rx="2"
-              />
-            </svg>
-          </div>
-          </NodeHint>
-        )}
+        <MiniMap
+          nodes={nodes}
+          view={view}
+          setView={setView}
+          saveView={saveView}
+          vpSize={vpSize}
+          vpRef={vpRef}
+        />
       </div>
     </div>
     </GenRuntimeProvider>
-  );
-}
-
-/** 弹层滚轮隔离：视口滚轮缩放挂在原生非被动监听上（React 合成事件的
- *  stopPropagation 拦不住它），弹层内的滚轮必须在原生层停掉冒泡——否则
- *  缩放监听的 preventDefault 会把弹层自身的默认滚动一并杀掉，表现为
- *  「列表滚不动、画布在缩放」。资源库弹窗 / 大图灯箱 / 节点选择框都用。 */
-// ── 生成等待「流光」动效（2026-11-01 原型定稿移植） ─────────────
-
-/** 懒加载的资源库选择浮层：画布加载节点「从资源库选择」入口，薄壳复用
- *  工程域的通用选择浮层（搜索/分页/缩略图/导入），点选即回填节点路径。
- *  kinds 透传为浮层的类型白名单（图像节点只见图片、视频工具只见视频）。
- *  选择器给的是库内相对路径——mediaUrl 域层把相对路径拼到存储根（≠资源
- *  库根），必须在这里转成绝对路径落节点，否则缩略图/媒体全部裂图。 */
-function LazyLibraryPicker({
-  kinds,
-  onPick,
-  onClose,
-}: {
-  kinds?: string[];
-  onPick: (filePath: string) => void;
-  onClose: () => void;
-}) {
-  const { t } = useTranslation();
-  const [libraryRoot, setLibraryRoot] = useState("");
-  useEffect(() => {
-    let alive = true;
-    invoke<string>("get_resource_library_path")
-      .then((root) => {
-        if (alive) setLibraryRoot(root);
-      })
-      .catch(() => {});
-    return () => {
-      alive = false;
-    };
-  }, []);
-  return (
-    <ProjectFilePickerDialog
-      title={t("canvas.loadPickerTitle")}
-      kindFilter={kinds}
-      onPick={(file) => onPick(joinLibraryPath(libraryRoot, file.filePath))}
-      onClose={onClose}
-    />
   );
 }
