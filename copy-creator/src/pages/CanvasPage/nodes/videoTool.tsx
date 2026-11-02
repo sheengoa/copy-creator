@@ -1,6 +1,7 @@
 import { Icons } from "../../../components/Icons";
 import { MEDIA_COLOR } from "./colors";
 import { VIDEO_EXTS } from "./exts";
+import { VideoToolBody } from "./VideoToolBody";
 import type { NodeDefinition } from "./types";
 
 // 视频工具三节点（2026-11-02 定稿）：剪辑器式横向长方形——监视器 + 侧栏
@@ -27,6 +28,7 @@ export const videoSeekFrameDef: NodeDefinition = {
   fallbackSize: toolFallback,
   ports: { ins: [], out: { mediaKind: "image" } },
   ...toolMedia,
+  Component: VideoToolBody,
 };
 
 export const videoToGifDef: NodeDefinition = {
@@ -40,6 +42,7 @@ export const videoToGifDef: NodeDefinition = {
   fallbackSize: toolFallback,
   ports: { ins: [], out: { mediaKind: "image" } },
   ...toolMedia,
+  Component: VideoToolBody,
 };
 
 export const videoExtractAudioDef: NodeDefinition = {
@@ -52,4 +55,5 @@ export const videoExtractAudioDef: NodeDefinition = {
   fallbackSize: toolFallback,
   ports: { ins: [], out: { mediaKind: "audio" } },
   ...toolMedia,
+  Component: VideoToolBody,
 };

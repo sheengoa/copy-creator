@@ -1,5 +1,6 @@
 import { Icons } from "../../../components/Icons";
 import { MEDIA_COLOR } from "./colors";
+import { FrameExtractBody } from "./FrameExtractBody";
 import { VIDEO_EXTS } from "./exts";
 import type { NodeDefinition } from "./types";
 
@@ -22,6 +23,7 @@ export const videoFirstFrameDef: NodeDefinition = {
   applyMode: "video-tool",
   dropAccept: true,
   dropExtensions: VIDEO_EXTS,
+  Component: FrameExtractBody,
 };
 
 export const videoLastFrameDef: NodeDefinition = {
@@ -37,4 +39,5 @@ export const videoLastFrameDef: NodeDefinition = {
   applyMode: "video-tool",
   dropAccept: true,
   dropExtensions: VIDEO_EXTS,
+  Component: FrameExtractBody,
 };

@@ -107,6 +107,9 @@ export const VIDEO_TOOL_TYPES: readonly CanvasNodeType[] = MENU_TYPE_ORDER.filte
   (t) => NODE_DEFS[t].applyMode === "video-tool",
 );
 
+export const isVideoToolType = (type: CanvasNodeType | undefined): boolean =>
+  !!type && VIDEO_TOOL_TYPES.includes(type);
+
 /** 输出口/连线取色：按产物媒体类型（图像蓝/视频紫/音频绿），不跟节点
  *  主题色——视频工具节点主题是视频紫，但图像/音频产物口不该被带紫
  *  （用户 2026-11-02 定案）；其余节点的主题色本就等于产物类型色，外观

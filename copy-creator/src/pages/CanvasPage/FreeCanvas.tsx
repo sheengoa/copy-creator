@@ -3,13 +3,10 @@ import { useTranslation } from "react-i18next";
 import { invoke } from "@tauri-apps/api/core";
 import { getCurrentWebview } from "@tauri-apps/api/webview";
 import { Icons } from "../../components/Icons";
-import { MediaPlayback } from "../../components/MediaPlayback";
 import { ImageLightbox } from "../../components/ImageLightbox";
 import { joinLibraryPath } from "../../domain/projectView";
 import ProjectFilePickerDialog from "../ResourcePage/ProjectFilePickerDialog";
 import { resolveWireRelease } from "../../utils/projectWireRelease";
-import CanvasVideoTimeline from "./CanvasVideoTimeline";
-import { formatTimecode } from "./videoTimeline";
 import {
   useCanvasStore,
   type CanvasLayoutEntry,
@@ -29,16 +26,17 @@ import {
   NODE_MIN_SIZE,
   outMediaColor,
   PORT_DEFS,
-  VIDEO_TOOL_TYPES,
+  isVideoToolType,
 } from "./nodes/registry";
 import { NodeHint } from "./nodes/NodeHint";
 import { NodeShell } from "./nodes/shell";
 import { WheelGate } from "./nodes/WheelGate";
-import { ResourceThumb } from "./nodes/media";
 import { useMediaUrl } from "./nodes/mediaPath";
 import { SaveRuntimeProvider } from "./nodes/saveRuntime";
 import { GenRuntimeProvider } from "./nodes/genRuntime";
 import { BatchBar } from "./nodes/BatchBar";
+import { useVideoToolRuntimeController } from "./nodes/videoToolRuntime";
+import { VideoToolRuntimeProvider } from "./nodes/VideoToolRuntimeProvider";
 import { useNodeErrors } from "./nodes/nodeErrors";
 import { useNoteEditing } from "./nodes/noteEditing";
 import { upstreamMediaOf as upstreamMediaQuery } from "./nodes/upstream";
@@ -57,9 +55,6 @@ const WIRES_VIEWPORT_PAD = 64;
 const MINI_W = 150;
 const MINI_H = 96;
 const UNDO_LIMIT = 50;
-
-const isVideoToolType = (type: CanvasNodeType | undefined): boolean =>
-  !!type && VIDEO_TOOL_TYPES.includes(type);
 
 type Pos = { x: number; y: number };
 type WireBox = Pos & { w: number; h: number };
@@ -218,7 +213,6 @@ export default function FreeCanvas({ canvasId }: { canvasId: string }) {
   const noteDraft = useNoteEditing((s) => s.draft);
   const setNoteDraft = useNoteEditing((s) => s.setDraft);
   const closeNoteEdit = useNoteEditing((s) => s.close);
-  const nodeErrors = useNodeErrors((s) => s.errors);
   const setNodeErrors = useNodeErrors((s) => s.setErrors);
   const [pulseKeys, setPulseKeys] = useState<string[]>([]);
   /** 资源库选择浮层：load 节点的「从资源库选择」。 */
@@ -736,6 +730,110 @@ export default function FreeCanvas({ canvasId }: { canvasId: string }) {
       PORT_DEFS[newType].ins.find((p) => p.accepts.includes(fromType))?.id ?? "",
     [],
   );
+
+  // ── 上游媒体解析（预览/保存节点取上游产物） ────────────────
+
+  /** 上游产物聚合。null 严格表示「没有上游连接」；连了但暂无产物（生成
+   *  中 / 未生成 / 加载节点还没选文件）返回空 paths，供占位文案区分
+   *  「未连接上游」与「已连接，等待产物」。聚合与就绪判定查
+   *  nodes/upstream 的 def 注册表（gen_image 主图置顶、load_text 文本，
+   *  缺省走 resource_path）。 */
+  const upstreamMediaOf = useCallback(
+    (nodeId: string) => upstreamMediaQuery(nodes, connections, nodeId),
+    [connections, nodes],
+  );
+
+  // 视频工具运行时（时间轴预取/拖动会话/执行命令）：controller 由本组件
+  // 持有（applyFrameVideo 换片也要清会话态），Provider 下发给节点模块。
+  const videoToolRuntime = useVideoToolRuntimeController();
+
+  // 资源库浮层的写入意图：加载节点写 resourcePath；视频工具节点写
+  // metadata.video_path（视频是输入，产物占 resource_path）。
+
+  const pickerApplyRef = useRef<"resource" | "frame-video">("resource");
+  /** 打开浮层时记录的类型白名单（渲染时传给浮层过滤列表；ref 在同一次
+   *  事件里先于 setPickerForNode 更新，渲染读到的必是新值）。 */
+  const pickerKindsRef = useRef<string[] | null>(null);
+
+  const pickFromLibrary = (node: CanvasNode) => {
+    pickerApplyRef.current = isVideoToolType(node.type) ? "frame-video" : "resource";
+    pickerKindsRef.current = LIBRARY_PICKER_KINDS[node.type] ?? null;
+    setPickerForNode(node.id);
+  };
+
+  /** 视频工具节点换视频：清旧产物（resource_path）+ 写新视频路径并重置
+   *  选点/选区参数（format 与视频无关，保留用户选择），下游自动保存对
+   *  空产物自然停摆。useCallback 化：OS 拖入命中节点时也走这里，引用
+   *  稳定才不致全局拖放监听随渲染反复重挂。 */
+  const applyFrameVideo = useCallback(
+    async (nodeId: string, type: CanvasNodeType, videoPath: string) => {
+      const prev = store.getState().nodes.find((n) => n.id === nodeId);
+      const prevMeta = prev?.metadata as { format?: unknown } | undefined;
+      const prevFormat = typeof prevMeta?.format === "string" ? prevMeta.format : "";
+      const base: Record<string, unknown> = { kind: type, video_path: videoPath };
+      if (type === "video_seek_frame" || type === "video_to_gif" || type === "video_extract_audio") {
+        base.start_secs = 0;
+        base.duration_secs = 0;
+        base.format = prevFormat;
+      }
+      // 换视频后旧选点/选区不再成立，会话态一并清；旧视频的轨道失败
+      // 记账也清掉（同一坏路径重新选入时允许再试一次），旧错误文案随
+      // 换片过期，一并摘除。
+      videoToolRuntime.resetToolSession(nodeId, videoPath);
+      setNodeErrors((prev) => {
+        if (!prev[nodeId]) return prev;
+        const next = { ...prev };
+        delete next[nodeId];
+        return next;
+      });
+      await store.getState().updateNode(nodeId, {
+        resourcePath: "",
+        metadata: JSON.stringify(base),
+      });
+    },
+    [store, setNodeErrors, videoToolRuntime],
+  );
+
+  const pickFromDisk = async (node: CanvasNode) => {
+    try {
+      const allowed = loadAllowedExts(node.type);
+      const picked = await invoke<{ path: string }>("canvas_pick_media_file", {
+        extensions: allowed,
+      });
+      // 对话框 filter 可被「所有文件」输入绕过：返回后再按扩展名校验一次。
+      if (allowed.length > 0 && !allowed.includes(extOf(picked.path))) {
+        setNodeErrors((prev) => ({ ...prev, [node.id]: t("canvas.loadTypeMismatch") }));
+        return;
+      }
+      if (isVideoToolType(node.type)) {
+        await applyFrameVideo(node.id, node.type, picked.path);
+      } else {
+        await store.getState().updateNode(node.id, { resourcePath: picked.path });
+      }
+    } catch (err) {
+      // 用户在系统对话框取消：静默；其余错误在节点上提示。
+      const msg = String(err);
+      if (!msg.includes("cancelled") && !msg.includes("取消")) {
+        setNodeErrors((prev) => ({ ...prev, [node.id]: msg }));
+      }
+    }
+  };
+
+  // 跨模块服务（下发 def.onDoubleClick 与节点模块）。取媒浮层/清除的
+  // 写回分派按 def.applyMode：video-tool 写 video_path（applyFrameVideo），
+  // resource 直写 resource_path。闭包引用渲染期状态，事件期执行时已初始化。
+  const canvasServices: NodeServices = {
+    openLightbox: (path) => setLightboxSrc(path),
+    upstream: (nodeId) => upstreamMediaOf(nodeId),
+    pickMedia: (node, source) => {
+      if (source === "library") pickFromLibrary(node);
+      else void pickFromDisk(node);
+    },
+    clearMedia: (node) => {
+      if (isVideoToolType(node.type)) videoToolRuntime.clearFrameVideo(node);
+      else void store.getState().updateNode(node.id, { resourcePath: "" });
+    },
+  };
 
   const onViewportPointerDown = useCallback(
     (e: React.PointerEvent) => {
@@ -1517,34 +1615,6 @@ export default function FreeCanvas({ canvasId }: { canvasId: string }) {
     return () => window.removeEventListener("keydown", onKey);
   }, [addMenu, copySelection, deleteSelected, pasteClipboard, runUndo, setSelection, toggleGroup]);
 
-  // ── 上游媒体解析（预览/保存节点取上游产物） ────────────────
-
-  /** 上游产物聚合。null 严格表示「没有上游连接」；连了但暂无产物（生成
-   *  中 / 未生成 / 加载节点还没选文件）返回空 paths，供占位文案区分
-   *  「未连接上游」与「已连接，等待产物」。聚合与就绪判定查
-   *  nodes/upstream 的 def 注册表（gen_image 主图置顶、load_text 文本，
-   *  缺省走 resource_path）。 */
-  const upstreamMediaOf = useCallback(
-    (nodeId: string) => upstreamMediaQuery(nodes, connections, nodeId),
-    [connections, nodes],
-  );
-
-  // 跨模块服务（下发 def.onDoubleClick 与节点模块）。取媒浮层/清除的
-  // 写回分派按 def.applyMode：video-tool 写 video_path（applyFrameVideo），
-  // resource 直写 resource_path。闭包引用渲染期状态，事件期执行时已初始化。
-  const canvasServices: NodeServices = {
-    openLightbox: (path) => setLightboxSrc(path),
-    upstream: (nodeId) => upstreamMediaOf(nodeId),
-    pickMedia: (node, source) => {
-      if (source === "library") pickFromLibrary(node);
-      else void pickFromDisk(node);
-    },
-    clearMedia: (node) => {
-      if (isVideoToolType(node.type)) clearFrameVideo(node);
-      else void store.getState().updateNode(node.id, { resourcePath: "" });
-    },
-  };
-
   // ── 合集节点（唯一多线入口）：成员解析 + 拖拽排序 ─────────
 
   // ── 生图（图像生成节点）：参数编辑、生成、主图切换 ─────────
@@ -1553,278 +1623,6 @@ export default function FreeCanvas({ canvasId }: { canvasId: string }) {
     if (node.metadata.kind !== "load_text" && node.metadata.kind !== "note") return;
     const meta = { ...node.metadata, content } as CanvasNode["metadata"];
     void store.getState().updateNode(node.id, { metadata: JSON.stringify(meta) });
-  };
-
-  // ── 加载节点：资源库选择 / 本地文件 / 拖入 ────────────────
-
-  // 资源库浮层的写入意图：加载节点写 resourcePath；视频工具节点写
-  // metadata.video_path（视频是输入，产物占 resource_path）。
-  // ── 视频工具节点（视频抽帧/转GIF/抽音轨，2026-11-02）：缩略图时间轴 ──
-
-  /** 时间轴缓存（按视频路径）：canvas_video_timeline 后端自带产物级缓存，
-   *  这里只挡重复 invoke。w/h 是帧宽高（后端 IHDR 实测，读不出为 0），
-   *  轨道按它铺格还原画面。轨道失败（非视频/无 ffmpeg）在节点上红字报因。 */
-  const [videoTimelines, setVideoTimelines] = useState<
-    Record<string, { duration: number; w?: number; h?: number; thumbnails: { t: number; path: string }[] }>
-  >({});
-  const timelineInflight = useRef<Set<string>>(new Set());
-
-  /** 拖动会话态（key=节点 id）：t=播放头，start/dur=选区；拖动中只影响
-   *  显示与预览 seek，松手（onCommit）才落 metadata。draftRef 镜像供
-   *  commit 读最新值。 */
-  const [videoToolDraft, setVideoToolDraft] = useState<
-    Record<string, { t?: number; start?: number; dur?: number }>
-  >({});
-  const videoToolDraftRef = useRef(videoToolDraft);
-  videoToolDraftRef.current = videoToolDraft;
-
-  /** 视频预览元素（nodeId → element）：拖播放头/选区时程序 seek 同步画面
-   *  （经 MediaPlayback 的 mediaRefCallback 转交；元素宽型与共享组件签名
-   *  对齐，调用侧只用 HTMLMediaElement 的 currentTime）。 */
-  const videoElsRef = useRef<Record<string, HTMLVideoElement | HTMLAudioElement | null>>({});
-
-  /** 已失败的轨道路径：effect 以 nodes 为依赖，任何节点变动都会重跑——
-   *  失败不记账就会对同一坏视频反复 invoke（拖动画布每帧一次 ffmpeg
-   *  探测）。重新选片时由 applyFrameVideo 清账允许重试。 */
-  const timelineFailedRef = useRef<Set<string>>(new Set());
-
-  useEffect(() => {
-    for (const node of nodes) {
-      if (!isVideoToolType(node.type)) continue;
-      const meta = node.metadata as { video_path?: string };
-      const vp = meta?.video_path ?? "";
-      if (vp && !videoTimelines[vp] && !timelineInflight.current.has(vp) && !timelineFailedRef.current.has(vp)) {
-        timelineInflight.current.add(vp);
-        invoke<{ duration: number; w?: number; h?: number; thumbnails: { t: number; path: string }[] }>(
-          "canvas_video_timeline",
-          { path: vp },
-        )
-          .then((res) => setVideoTimelines((prev) => ({ ...prev, [vp]: res })))
-          .catch((err) => {
-            timelineFailedRef.current.add(vp);
-            setNodeErrors((prev) => ({ ...prev, [node.id]: String(err) }));
-          })
-          .finally(() => {
-            timelineInflight.current.delete(vp);
-          });
-      }
-    }
-  }, [nodes, videoTimelines, setNodeErrors]);
-
-  const seekToolTo = (nodeId: string, t: number) => {
-    setVideoToolDraft((prev) => ({ ...prev, [nodeId]: { ...(prev[nodeId] ?? {}), t } }));
-    const el = videoElsRef.current[nodeId];
-    if (el) {
-      try {
-        el.currentTime = t;
-      } catch {
-        // 元数据未就绪时忽略：video 元素会延迟生效或自然失败。
-      }
-    }
-  };
-
-  const rangeToolTo = (nodeId: string, start: number, dur: number, seekPreview: boolean) => {
-    setVideoToolDraft((prev) => ({ ...prev, [nodeId]: { ...(prev[nodeId] ?? {}), start, dur } }));
-    if (seekPreview) {
-      const el = videoElsRef.current[nodeId];
-      // 暂停中才把画面拨到选区起点（拖动实时跟手）；播放中不打断——
-      // 越出选区的部分由 onTimeUpdate 的循环钳制拉回选区内。
-      if (el && el.paused) {
-        try {
-          el.currentTime = start;
-        } catch {
-          // 元数据未就绪时忽略。
-        }
-      }
-    }
-  };
-
-  const commitVideoTool = (nodeId: string) => {
-    const d = videoToolDraftRef.current[nodeId];
-    if (!d) return;
-    const node = store.getState().nodes.find((n) => n.id === nodeId);
-    if (!node) return;
-    const meta = node.metadata;
-    if (meta.kind !== "video_seek_frame" && meta.kind !== "video_to_gif" && meta.kind !== "video_extract_audio") return;
-    const patch: Record<string, unknown> = {};
-    if (d.t !== undefined) patch.start_secs = d.t;
-    if (d.start !== undefined) patch.start_secs = d.start;
-    if (d.dur !== undefined) patch.duration_secs = d.dur;
-    void store.getState().updateNode(nodeId, { metadata: JSON.stringify({ ...meta, ...patch }) });
-  };
-
-  const runVideoTool = async (node: CanvasNode) => {
-    const kind = node.metadata.kind;
-    if (kind !== "video_seek_frame" && kind !== "video_to_gif" && kind !== "video_extract_audio") return;
-    const videoPath = node.metadata.video_path;
-    if (!videoPath) return;
-    // 抽帧的播放头除了轨道拖动（松手即落 metadata）还会被原生进度条
-    // 拖动改写（只进 draft）——执行前把 draft 冲进 metadata，保证「所见
-    // 时间 = 所抽帧」；选区两参数只走轨道手势，本就落库。
-    const draft = videoToolDraftRef.current[node.id];
-    let meta = node.metadata;
-    if (kind === "video_seek_frame" && draft?.t !== undefined && draft.t !== meta.start_secs) {
-      meta = { ...meta, start_secs: draft.t };
-      await store.getState().updateNode(node.id, { metadata: JSON.stringify(meta) });
-    }
-    setFrameBusy((prev) => ({ ...prev, [node.id]: true }));
-    try {
-      let res: { path: string };
-      if (kind === "video_seek_frame") {
-        res = await invoke<{ path: string }>("canvas_seek_video_frame", {
-          path: videoPath,
-          secs: meta.start_secs,
-        });
-      } else if (kind === "video_to_gif") {
-        res = await invoke<{ path: string }>("canvas_convert_video_gif", {
-          path: videoPath,
-          start: meta.start_secs,
-          duration: meta.duration_secs > 0 ? meta.duration_secs : 3.0,
-        });
-      } else {
-        res = await invoke<{ path: string }>("canvas_extract_audio", {
-          path: videoPath,
-          start: meta.start_secs,
-          duration: meta.duration_secs,
-          format: meta.format || "mp3",
-        });
-      }
-      await store.getState().updateNode(node.id, { resourcePath: res.path });
-      setNodeErrors((prev) => {
-        if (!prev[node.id]) return prev;
-        const next = { ...prev };
-        delete next[node.id];
-        return next;
-      });
-    } catch (err) {
-      setNodeErrors((prev) => ({ ...prev, [node.id]: String(err) }));
-    } finally {
-      setFrameBusy((prev) => ({ ...prev, [node.id]: false }));
-    }
-  };
-
-  const pickerApplyRef = useRef<"resource" | "frame-video">("resource");
-  /** 打开浮层时记录的类型白名单（渲染时传给浮层过滤列表；ref 在同一次
-   *  事件里先于 setPickerForNode 更新，渲染读到的必是新值）。 */
-  const pickerKindsRef = useRef<string[] | null>(null);
-
-  const pickFromLibrary = (node: CanvasNode) => {
-    pickerApplyRef.current = isVideoToolType(node.type) ? "frame-video" : "resource";
-    pickerKindsRef.current = LIBRARY_PICKER_KINDS[node.type] ?? null;
-    setPickerForNode(node.id);
-  };
-
-  /** 视频工具节点换视频：清旧产物（resource_path）+ 写新视频路径并重置
-   *  选点/选区参数（format 与视频无关，保留用户选择），下游自动保存对
-   *  空产物自然停摆。useCallback 化：OS 拖入命中节点时也走这里，引用
-   *  稳定才不致全局拖放监听随渲染反复重挂。 */
-  const applyFrameVideo = useCallback(
-    async (nodeId: string, type: CanvasNodeType, videoPath: string) => {
-      const prev = store.getState().nodes.find((n) => n.id === nodeId);
-      const prevMeta = prev?.metadata as { format?: unknown } | undefined;
-      const prevFormat = typeof prevMeta?.format === "string" ? prevMeta.format : "";
-      const base: Record<string, unknown> = { kind: type, video_path: videoPath };
-      if (type === "video_seek_frame" || type === "video_to_gif" || type === "video_extract_audio") {
-        base.start_secs = 0;
-        base.duration_secs = 0;
-        base.format = prevFormat;
-      }
-      // 换视频后旧选点/选区不再成立，会话态一并清；旧视频的轨道失败
-      // 记账也清掉（同一坏路径重新选入时允许再试一次），旧错误文案随
-      // 换片过期，一并摘除。
-      timelineFailedRef.current.delete(videoPath);
-      setNodeErrors((prev) => {
-        if (!prev[nodeId]) return prev;
-        const next = { ...prev };
-        delete next[nodeId];
-        return next;
-      });
-      setVideoToolDraft((p) => {
-        if (!p[nodeId]) return p;
-        const next = { ...p };
-        delete next[nodeId];
-        return next;
-      });
-      await store.getState().updateNode(nodeId, {
-        resourcePath: "",
-        metadata: JSON.stringify(base),
-      });
-    },
-    [store, setNodeErrors],
-  );
-
-  const pickFromDisk = async (node: CanvasNode) => {
-    try {
-      const allowed = loadAllowedExts(node.type);
-      const picked = await invoke<{ path: string }>("canvas_pick_media_file", {
-        extensions: allowed,
-      });
-      // 对话框 filter 可被「所有文件」输入绕过：返回后再按扩展名校验一次。
-      if (allowed.length > 0 && !allowed.includes(extOf(picked.path))) {
-        setNodeErrors((prev) => ({ ...prev, [node.id]: t("canvas.loadTypeMismatch") }));
-        return;
-      }
-      if (isVideoToolType(node.type)) {
-        await applyFrameVideo(node.id, node.type, picked.path);
-      } else {
-        await store.getState().updateNode(node.id, { resourcePath: picked.path });
-      }
-    } catch (err) {
-      // 用户在系统对话框取消：静默；其余错误在节点上提示。
-      const msg = String(err);
-      if (!msg.includes("cancelled") && !msg.includes("取消")) {
-        setNodeErrors((prev) => ({ ...prev, [node.id]: msg }));
-      }
-    }
-  };
-
-  // ── 视频抽帧节点（视频首帧/尾帧，2026-11-01）：ffmpeg 提取单帧 ──
-
-  const [frameBusy, setFrameBusy] = useState<Record<string, boolean>>({});
-
-  const runFrameExtract = async (node: CanvasNode) => {
-    if (node.metadata.kind !== "video_first_frame" && node.metadata.kind !== "video_last_frame") return;
-    const videoPath = node.metadata.video_path;
-    if (!videoPath) return;
-    setFrameBusy((prev) => ({ ...prev, [node.id]: true }));
-    try {
-      const res = await invoke<{ path: string }>("canvas_extract_video_frame", {
-        path: videoPath,
-        which: node.type === "video_last_frame" ? "last" : "first",
-      });
-      await store.getState().updateNode(node.id, { resourcePath: res.path });
-      setNodeErrors((prev) => {
-        if (!prev[node.id]) return prev;
-        const next = { ...prev };
-        delete next[node.id];
-        return next;
-      });
-    } catch (err) {
-      setNodeErrors((prev) => ({ ...prev, [node.id]: String(err) }));
-    } finally {
-      setFrameBusy((prev) => ({ ...prev, [node.id]: false }));
-    }
-  };
-
-  const clearFrameVideo = (node: CanvasNode) => {
-    if (!isVideoToolType(node.type)) return;
-    setVideoToolDraft((prev) => {
-      if (!prev[node.id]) return prev;
-      const next = { ...prev };
-      delete next[node.id];
-      return next;
-    });
-    // 音轨节点的格式选择与视频无关，清片换片时保留（applyFrameVideo 读
-    // prevMeta.format 回写）；卸载的监视器元素引用一并清掉。
-    const keepFormat =
-      node.metadata.kind === "video_extract_audio" && node.metadata.format
-        ? { format: node.metadata.format }
-        : {};
-    delete videoElsRef.current[node.id];
-    void store.getState().updateNode(node.id, {
-      resourcePath: "",
-      metadata: JSON.stringify({ kind: node.type, video_path: "", ...keepFormat }),
-    });
   };
 
   // ── 空画布示意（方案 3.6）：一键创建 文本→图像生成→预览 工作流 ──
@@ -2095,7 +1893,11 @@ export default function FreeCanvas({ canvasId }: { canvasId: string }) {
             </g>
           </svg>
 
-          {/* 节点分组框（Ctrl+G）：框自适应成员包围盒，渲染在节点层之下。 */}
+          {/* 节点分组框（Ctrl+G）：框自适应成员包围盒，渲染在节点层之下。
+              memberFrame 读 nodeMetrics 实测缓存（手势层维护的 ref）——
+              引擎既有惯例：测量值以 ref 承载、渲染期直读，React Compiler
+              的 refs 规则不适用于该模式（工程画布同款），定点豁免。 */}
+          {/* eslint-disable-next-line react-hooks/refs -- 引擎实测缓存渲染期直读，见上 */ }
           {groups.map((group) => {
             const frames = group.members
               .map((key) => memberFrame(key))
@@ -2119,6 +1921,7 @@ export default function FreeCanvas({ canvasId }: { canvasId: string }) {
           })}
 
           {/* 保存节点自动保存管线运行时（SaveMediaBody 经 Context 取操作） */}
+          <VideoToolRuntimeProvider runtime={videoToolRuntime}>
           <SaveRuntimeProvider>
           {nodes.map((node) => {
             const selected = selKeys.includes(node.id);
@@ -2196,396 +1999,6 @@ export default function FreeCanvas({ canvasId }: { canvasId: string }) {
                   services={canvasServices}
                 />
               );
-            } else if (node.type === "video_first_frame" || node.type === "video_last_frame") {
-              // 视频抽帧节点（2026-11-01）：视频进、图片出。视频在
-              // metadata.video_path（来源：资源库/本地磁盘），提取出的帧
-              // 图片占节点行 resource_path（下游图像消费口通用聚合）。
-              const isLastFrame = node.type === "video_last_frame";
-              const frameMeta =
-                node.metadata.kind === "video_first_frame" || node.metadata.kind === "video_last_frame"
-                  ? node.metadata
-                  : null;
-              const videoPath = frameMeta?.video_path ?? "";
-              const framePath = node.resource_path;
-              const frameBusyNow = !!frameBusy[node.id];
-              const frameError = nodeErrors[node.id];
-              body = (
-                <div className="fc-node-form">
-                  {/* 视频来源入口：选定后与加载节点同款「溜走」收合，×清除后滑回 */}
-                  <div className={`fc-load-entry${videoPath ? " is-loaded" : ""}`}>
-                    <div className="fc-load-entry-clip">
-                      <div className="fc-node-placeholder">
-                        <i>{t("canvas.frameEmpty")}</i>
-                      </div>
-                      <div className="fc-node-row">
-                        <NodeHint text={t("canvas.loadFromLibrary")} className="is-grow">
-                          <button
-                            type="button"
-                            className="fc-node-btn ghost is-icon grow"
-                            aria-label={t("canvas.loadFromLibrary")}
-                            onClick={() => pickFromLibrary(node)}
-                          >
-                            {Icons.resources}
-                          </button>
-                        </NodeHint>
-                        <NodeHint text={t("canvas.loadFromFile")} className="is-grow">
-                          <button
-                            type="button"
-                            className="fc-node-btn ghost is-icon grow"
-                            aria-label={t("canvas.loadFromFile")}
-                            onClick={() => void pickFromDisk(node)}
-                          >
-                            {Icons.folderOpen}
-                          </button>
-                        </NodeHint>
-                      </div>
-                    </div>
-                  </div>
-                  {videoPath && !framePath && !frameBusyNow && (
-                    <>
-                      <MediaPlayback kind="video" path={videoPath} />
-                      <NodeHint text={frameError ? frameError : ""}>
-                        <button
-                          type="button"
-                          className="fc-node-btn accent"
-                          onClick={() => void runFrameExtract(node)}
-                        >
-                          {t("canvas.frameExec")}
-                        </button>
-                      </NodeHint>
-                      <div className="fc-frame-hint">
-                        {isLastFrame ? t("canvas.frameHintLast") : t("canvas.frameHintFirst")}
-                      </div>
-                    </>
-                  )}
-                  {videoPath && frameBusyNow && (
-                    <>
-                      <MediaPlayback kind="video" path={videoPath} />
-                      <button type="button" className="fc-node-btn accent" disabled>
-                        {t("canvas.frameRunning")}
-                      </button>
-                    </>
-                  )}
-                  {framePath && !frameBusyNow && (
-                    <>
-                      <NodeHint text={t("canvas.previewOpen")}>
-                        <div className="fc-load-media">
-                          <button
-                            type="button"
-                            className="fc-frame-thumb"
-                            onClick={() => setLightboxSrc(framePath)}
-                          >
-                            <ResourceThumb path={framePath} className="fc-media-box" />
-                            <span className="fc-frame-badge">
-                              {isLastFrame ? t("canvas.frameLastBadge") : t("canvas.frameFirstBadge")}
-                            </span>
-                          </button>
-                          <NodeHint text={t("canvas.frameChangeVideo")}>
-                            <button
-                              type="button"
-                              className="fc-load-clear"
-                              aria-label={t("canvas.frameChangeVideo")}
-                              onClick={() => clearFrameVideo(node)}
-                            >
-                              {Icons.close}
-                            </button>
-                          </NodeHint>
-                        </div>
-                      </NodeHint>
-                      <div className="fc-node-row">
-                        <span className="fc-frame-ok">{t("canvas.frameDone")}</span>
-                        <NodeHint text={isLastFrame ? t("canvas.frameHintLast") : t("canvas.frameHintFirst")}>
-                          <button
-                            type="button"
-                            className="fc-node-btn ghost"
-                            onClick={() => void runFrameExtract(node)}
-                          >
-                            {t("canvas.frameRedo")}
-                          </button>
-                        </NodeHint>
-                      </div>
-                      {/* 与加载态同款可见提示行：两个状态的控制区等高，执行
-                          前后节点外框尺寸一点不变（用户 2026-11-01 定案）。 */}
-                      <div className="fc-frame-hint">
-                        {isLastFrame ? t("canvas.frameHintLast") : t("canvas.frameHintFirst")}
-                      </div>
-                    </>
-                  )}
-                  {frameError && !frameBusyNow && <div className="fc-gen-warn">{frameError}</div>}
-                </div>
-              );
-            } else if (node.type === "video_seek_frame" || node.type === "video_to_gif" || node.type === "video_extract_audio") {
-              // 视频工具节点（2026-11-02 定稿）：监视器预览 + ffmpeg 缩略图
-              // 时间轴 + 侧栏参数的横向长方形。视频进节点（拖入/选片），
-              // 产物写节点行 resource_path（抽帧/GIF 归图像族、音轨归音频）。
-              const isGif = node.type === "video_to_gif";
-              const isAudio = node.type === "video_extract_audio";
-              const toolMeta =
-                node.metadata.kind === "video_seek_frame" ||
-                node.metadata.kind === "video_to_gif" ||
-                node.metadata.kind === "video_extract_audio"
-                  ? node.metadata
-                  : null;
-              const videoPath = toolMeta?.video_path ?? "";
-              const productPath = node.resource_path;
-              const toolBusy = !!frameBusy[node.id];
-              const toolError = nodeErrors[node.id];
-              const timeline = videoPath ? videoTimelines[videoPath] : undefined;
-              const trackDur = timeline?.duration ?? 0;
-              const draft = videoToolDraft[node.id];
-              const seekT = draft?.t ?? toolMeta?.start_secs ?? 0;
-              const rangeStart = draft?.start ?? toolMeta?.start_secs ?? 0;
-              const rangeDurRaw = draft?.dur ?? toolMeta?.duration_secs ?? 0;
-              // 选区值合成：draft 优先；GIF 永远有具体时长（未拖过 =
-              // 默认 3s，与侧栏显示、执行兜底一致）；音轨未拖过（≤0）
-              // 显示整段。
-              const rangeValue =
-                rangeDurRaw > 0
-                  ? { start: rangeStart, duration: rangeDurRaw }
-                  : { start: 0, duration: isGif ? 3 : Math.max(trackDur, 0.5) };
-              const rangeLimits = isGif
-                ? { min: 0.5, max: 10 }
-                : { min: 0.5, max: Math.max(trackDur, 0.5) };
-              const isRange = isGif || isAudio;
-              const fmtNow = (toolMeta?.format || "mp3") as "mp3" | "aac" | string;
-              body = (
-                <div className="fc-node-form">
-                  {/* 视频来源入口：选定后与加载节点同款「溜走」收合，×清除后滑回 */}
-                  <div className={`fc-load-entry${videoPath ? " is-loaded" : ""}`}>
-                    <div className="fc-load-entry-clip">
-                      <div className="fc-node-placeholder">
-                        <i>{t("canvas.toolEmpty")}</i>
-                      </div>
-                      <div className="fc-node-row">
-                        <NodeHint text={t("canvas.loadFromLibrary")} className="is-grow">
-                          <button
-                            type="button"
-                            className="fc-node-btn ghost is-icon grow"
-                            aria-label={t("canvas.loadFromLibrary")}
-                            onClick={() => pickFromLibrary(node)}
-                          >
-                            {Icons.resources}
-                          </button>
-                        </NodeHint>
-                        <NodeHint text={t("canvas.loadFromFile")} className="is-grow">
-                          <button
-                            type="button"
-                            className="fc-node-btn ghost is-icon grow"
-                            aria-label={t("canvas.loadFromFile")}
-                            onClick={() => void pickFromDisk(node)}
-                          >
-                            {Icons.folderOpen}
-                          </button>
-                        </NodeHint>
-                      </div>
-                    </div>
-                  </div>
-                  {videoPath && (
-                    <>
-                      <div className="fc-vt-monitor">
-                        <div
-                          className="fc-vt-screen"
-                          /* 监视器随视频真实宽高比自适应（后端时间轴实测的
-                             w/h；未回传前回退 16:9）——竖版视频不再被 16:9
-                             固定窗缩成小画面，与图钉预期「完整展示视频尺寸」
-                             一致。完成态产物帧比例与视频一致，容器同样跟随。 */
-                          style={
-                            timeline && (timeline.w ?? 0) > 0 && (timeline.h ?? 0) > 0
-                              ? { aspectRatio: `${timeline.w} / ${timeline.h}` }
-                              : undefined
-                          }
-                        >
-                          {/* 抽帧/GIF 完成态显示产物图（点击放大）；音轨完成态
-                              保留视频画面；其余一律视频预览。 */}
-                          {productPath && !toolBusy && !isAudio ? (
-                            <NodeHint text={t("canvas.previewOpen")}>
-                              <button
-                                type="button"
-                                className="fc-frame-thumb"
-                                onClick={() => setLightboxSrc(productPath)}
-                              >
-                                <ResourceThumb path={productPath} className="fc-media-box" />
-                              </button>
-                            </NodeHint>
-                          ) : (
-                            <MediaPlayback
-                              kind="video"
-                              path={videoPath}
-                              mediaRefCallback={(el) => {
-                                videoElsRef.current[node.id] = el;
-                              }}
-                              onTimeUpdate={(t2) => {
-                                if (isRange) {
-                                  // 选区预览（GIF/音轨）：播放只发生在两针
-                                  // 之间——越出末端回跳起点循环小样，落在
-                                  // 起点前（拖到选区外）拉回起点；画面的
-                                  // 拖动跟随由 rangeToolTo 的程序 seek 负责。
-                                  const start = draft?.start ?? toolMeta?.start_secs ?? 0;
-                                  const dur = rangeDurRaw > 0 ? rangeDurRaw : trackDur;
-                                  const end = start + dur;
-                                  if (trackDur > 0 && (t2 >= end || t2 < start - 0.3)) {
-                                    const el = videoElsRef.current[node.id];
-                                    if (el) {
-                                      try {
-                                        el.currentTime = start;
-                                      } catch {
-                                        // 元数据未就绪时忽略。
-                                      }
-                                    }
-                                  }
-                                  return;
-                                }
-                                // 播放条拖动/走带回写播放头（seek 模式）。
-                                if (toolBusy || productPath) return;
-                                setVideoToolDraft((prev) => ({
-                                  ...prev,
-                                  [node.id]: { ...(prev[node.id] ?? {}), t: t2 },
-                                }));
-                              }}
-                            />
-                          )}
-                          {productPath && !toolBusy && (
-                            <span className="fc-frame-badge">
-                              {isGif
-                                ? t("canvas.gifBadge", { d: (rangeDurRaw > 0 ? rangeDurRaw : 3).toFixed(1) })
-                                : isAudio
-                                  ? t("canvas.audioBadge", { fmt: String(fmtNow).toUpperCase() })
-                                  : formatTimecode(seekT)}
-                            </span>
-                          )}
-                          {/* 悬浮右上角的圆形 ×（与加载节点同款）：清除视频回
-                              空态、产物一并清掉重新选片；执行中不显示。 */}
-                          {videoPath && !toolBusy && (
-                            <NodeHint text={t("canvas.clearLoaded")}>
-                              <button
-                                type="button"
-                                className="fc-load-clear"
-                                aria-label={t("canvas.clearLoaded")}
-                                onClick={(e) => {
-                                  e.stopPropagation();
-                                  clearFrameVideo(node);
-                                }}
-                              >
-                                {Icons.close}
-                              </button>
-                            </NodeHint>
-                          )}
-                        </div>
-                        <div className="fc-vt-side">
-                          {productPath && !toolBusy ? (
-                            <>
-                              <div className="fc-vt-time-big is-ok">
-                                {isGif ? t("canvas.gifDone") : t("canvas.seekDone")}
-                              </div>
-                              {isAudio && (
-                                <MediaPlayback kind="audio" path={productPath} />
-                              )}
-                              <div className="fc-vt-sidehint">{t("canvas.toolDoneHint")}</div>
-                            </>
-                          ) : isGif ? (
-                            <>
-                              <div className="fc-vt-duo">
-                                <div>
-                                  <div className="k">{t("canvas.gifStart")}</div>
-                                  <div className="v">{formatTimecode(rangeStart)}</div>
-                                </div>
-                                <div>
-                                  <div className="k">{t("canvas.gifDur")}</div>
-                                  <div className="v">
-                                    {(rangeDurRaw > 0 ? rangeDurRaw : 3).toFixed(1)}s
-                                  </div>
-                                </div>
-                              </div>
-                              <div className="fc-vt-sidehint">{t("canvas.gifHint")}</div>
-                            </>
-                          ) : isAudio ? (
-                            <>
-                              <div className="fc-vt-pills">
-                                <button
-                                  type="button"
-                                  className={`fc-vt-pill${fmtNow === "mp3" ? " is-on" : ""}`}
-                                  onClick={() =>
-                                    void store.getState().updateNode(node.id, {
-                                      metadata: JSON.stringify({ ...toolMeta, format: "mp3" }),
-                                    })
-                                  }
-                                >
-                                  {t("canvas.audioMp3")}
-                                </button>
-                                <button
-                                  type="button"
-                                  className={`fc-vt-pill${fmtNow === "aac" ? " is-on" : ""}`}
-                                  onClick={() =>
-                                    void store.getState().updateNode(node.id, {
-                                      metadata: JSON.stringify({ ...toolMeta, format: "aac" }),
-                                    })
-                                  }
-                                >
-                                  {t("canvas.audioAac")}
-                                </button>
-                              </div>
-                              <div className="fc-vt-duo">
-                                <div>
-                                  <div className="k">{t("canvas.audioStart")}</div>
-                                  <div className="v">{formatTimecode(rangeStart)}</div>
-                                </div>
-                                <div>
-                                  <div className="k">{t("canvas.audioDur")}</div>
-                                  <div className="v">
-                                    {rangeDurRaw > 0 ? `${rangeDurRaw.toFixed(1)}s` : t("canvas.audioWhole")}
-                                  </div>
-                                </div>
-                              </div>
-                              <div className="fc-vt-sidehint">{t("canvas.audioHint")}</div>
-                            </>
-                          ) : (
-                            <>
-                              <div className="fc-vt-time-big">{formatTimecode(seekT)}</div>
-                              <div className="fc-vt-sidehint">{t("canvas.seekHint")}</div>
-                            </>
-                          )}
-                          <div className="fc-vt-spacer" />
-                          <NodeHint text={toolError ?? ""}>
-                            <button
-                              type="button"
-                              className="fc-node-btn accent"
-                              disabled={toolBusy}
-                              onClick={() => void runVideoTool(node)}
-                            >
-                              {toolBusy
-                                ? t("canvas.toolRunning")
-                                : productPath
-                                  ? isGif
-                                    ? t("canvas.gifRedo")
-                                    : t("canvas.seekRedo")
-                                  : isGif
-                                    ? t("canvas.gifExec")
-                                    : isAudio
-                                      ? t("canvas.audioExec")
-                                      : t("canvas.seekExec")}
-                            </button>
-                          </NodeHint>
-                        </div>
-                      </div>
-                      {timeline && (
-                        <CanvasVideoTimeline
-                          duration={timeline.duration}
-                          thumbnails={timeline.thumbnails}
-                          frameAspect={timeline.w && timeline.h ? timeline.w / timeline.h : undefined}
-                          mode={isRange ? "range" : "seek"}
-                          value={isRange ? rangeValue : seekT}
-                          onSeek={(t2) => seekToolTo(node.id, t2)}
-                          onRange={(r) => rangeToolTo(node.id, r.start, r.duration, isRange)}
-                          onCommit={() => commitVideoTool(node.id)}
-                          rangeLimits={rangeLimits}
-                          disabled={toolBusy}
-                        />
-                      )}
-                      {toolError && !toolBusy && <div className="fc-gen-warn">{toolError}</div>}
-                    </>
-                  )}
-                </div>
-              );
             }
 
             return (
@@ -2603,8 +2016,8 @@ export default function FreeCanvas({ canvasId }: { canvasId: string }) {
             );
           })}
           </SaveRuntimeProvider>
+          </VideoToolRuntimeProvider>
         </div>
-
         {/* 刀切痕层：视口直下的绝对定位层（pc-world 之后 → 盖在卡片上）。 */}
         <svg className="pc-trailayer" aria-hidden="true">
           <polyline ref={cutTrailUnderRef} className="pc-wire-cut-under" points="" />
@@ -2617,10 +2030,14 @@ export default function FreeCanvas({ canvasId }: { canvasId: string }) {
         {addMenu && (
           <WheelGate>
             <div
+              // 菜单锚定读视口实测尺寸（vpRef）——引擎既有惯例：视口实测
+              // 以 ref 承载、弹出时直读，定点豁免 react-hooks/refs。
               className="pc-addmenu"
               style={{
+                // eslint-disable-next-line react-hooks/refs -- 视口实测渲染期直读，见上
                 left: Math.max(8, Math.min(addMenu.sx, (vpRef.current?.clientWidth ?? 600) - 266)),
                 top: addMenu.sy,
+                // eslint-disable-next-line react-hooks/refs -- 同上
                 maxHeight: Math.max(150, (vpRef.current?.clientHeight ?? 600) - addMenu.sy - 12),
               }}
               onPointerDown={(event) => event.stopPropagation()}
@@ -2718,6 +2135,9 @@ export default function FreeCanvas({ canvasId }: { canvasId: string }) {
         {pickerForNode && (
           <WheelGate>
             <LazyLibraryPicker
+              // 引擎既有惯例：白名单 ref 在同一次事件里先于 state 更新，
+              // 渲染期直读必是新值（见 pickFromLibrary），定点豁免。
+              // eslint-disable-next-line react-hooks/refs -- 见上
               kinds={pickerKindsRef.current ?? undefined}
               onPick={(filePath) => {
                 const targetId = pickerForNode;
