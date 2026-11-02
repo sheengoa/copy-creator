@@ -1,0 +1,460 @@
+/* 工程视图样式（自 project.css 按原分区与顺序切片，2026-11-03 阶段 8）：
+   六段按原文件级联顺序在 App.tsx 依次引入，拆文件不改任何规则。 */
+
+/* ══ 工程画布（无限画布视图）：pc- 前缀 ═══════════════════════ */
+
+/* 画布内按钮统一去 UA 默认边框/底色（整个选择器进 :where 才是真零
+   优先级——此前写成 .pc-root :where(button)，.pc-root 的 (0,1,0) 仍参与
+   竞争，后来加载的具体按钮样式（如 components.css 的媒体播放条）被它
+   平级压掉，注释的「不影响具体规则」从未成立）。 */
+:where(.pc-root button) {
+  border: none;
+  background: none;
+  padding: 0;
+  font: inherit;
+  color: inherit;
+  cursor: pointer;
+}
+
+
+.project-stage-shell {
+  flex: 1;
+  min-height: 0;
+  position: relative;
+  display: flex;
+  flex-direction: column;
+}
+.project-stage-shell > .pc-root { flex: 1; min-height: 0; }
+
+.pc-root { position: relative; display: flex; flex-direction: column; }
+.pc-viewport {
+  position: relative;
+  flex: 1;
+  min-height: 0;
+  overflow: hidden;
+  touch-action: none;
+  user-select: none;
+  -webkit-user-select: none;
+  cursor: default;
+  background-color: var(--bg-primary);
+  background-image: radial-gradient(circle, var(--separator) 1px, transparent 1px);
+  background-size: 22px 22px;
+}
+.pc-viewport.pc-panning { cursor: grabbing; }
+/* Blender 式切线：光标换小刀（hotspot 3,21 = 刀尖），滑动中保持。
+   刀刃朝下（刀尖在左下、刀柄伸向右上），与切割方向视觉一致。 */
+.pc-viewport.pc-cutting, .pc-viewport.pc-cutting * {
+  cursor: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='24' height='24'><path d='M3 21 L14 10 L11.5 7.5 L3 15.5 Z' fill='%23ffffff' stroke='%23333333' stroke-width='1.4'/><path d='M12.5 8 L19.5 1.5' stroke='%23a07840' stroke-width='3.2' stroke-linecap='round'/><path d='M12.5 8 L19.5 1.5' stroke='%236b4f2a' stroke-width='1.2' stroke-linecap='round'/></svg>") 3 21, crosshair;
+}
+/* 拖线中：全程十字光标（即使草稿线被环境吞掉也有状态反馈） */
+.pc-viewport.pc-wiring, .pc-viewport.pc-wiring .pc-node, .pc-viewport.pc-wiring .pc-note { cursor: crosshair; }
+.pc-world {
+  position: absolute;
+  left: 0;
+  top: 0;
+  transform-origin: 0 0;
+  /* 平移/缩放与节点尺寸测量都在显示器帧边界合并，交给合成层处理，
+     避免高刷新率设备上画布跟不上指针。 */
+  will-change: transform;
+  backface-visibility: hidden;
+}
+.pc-marquee {
+  position: absolute;
+  z-index: 15;
+  border: 1.5px dashed var(--text-primary);
+  background: rgba(127, 127, 140, 0.08);
+  border-radius: 4px;
+  pointer-events: none;
+}
+
+/* ── 场景分组框 ── */
+.pc-frame {
+  position: absolute;
+  border: 1.5px dashed var(--separator);
+  border-radius: 18px;
+  background: var(--card-bg);
+  pointer-events: none;
+}
+.pc-frame-label {
+  position: absolute;
+  top: -14px;
+  left: 18px;
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  background: var(--panel-bg, var(--bg-primary));
+  border: 1px solid var(--separator);
+  border-radius: 9px;
+  padding: 5px 11px;
+  box-shadow: var(--shadow);
+  font-size: 12.5px;
+  font-weight: 500;
+  white-space: nowrap;
+  cursor: grab;
+  pointer-events: auto;
+}
+.pc-frame-label:active { cursor: grabbing; }
+.pc-frame-no { color: var(--text-tertiary); font-size: 10.5px; }
+.pc-frame-name { max-width: 180px; overflow: hidden; text-overflow: ellipsis; }
+.pc-frame-label small { color: var(--text-tertiary); font-size: 10.5px; font-weight: 400; }
+.pc-int {
+  height: 18px;
+  padding: 0 6px;
+  border-radius: 5px;
+  background: var(--chip-bg);
+  font-size: 10px;
+  color: var(--text-secondary);
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+}
+.pc-int svg { width: 10px; height: 10px; }
+.pc-int em { font-style: normal; opacity: 0.75; }
+.pc-frame-ops { display: inline-flex; gap: 1px; color: var(--text-tertiary); }
+.pc-frame-ops button {
+  width: 20px;
+  height: 20px;
+  border-radius: 5px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+.pc-frame-ops button:hover { background: var(--chip-bg); color: var(--text-primary); }
+.pc-frame-ops svg { width: 12px; height: 12px; }
+
+/* ── 画布节点（ComfyUI 式）：卡体即节点 + 类型色标题条 ── */
+.pc-node {
+  position: absolute;
+  border-radius: 12px;
+  cursor: grab;
+  background: var(--bg-card);
+  border: 1px solid var(--separator);
+  box-shadow: 0 2px 10px rgba(0, 0, 0, 0.08), 0 1px 3px rgba(0, 0, 0, 0.05);
+  transition: box-shadow 0.16s ease, border-color 0.16s ease;
+}
+/* 自由缩放后的节点把预览区作为剩余空间使用，避免节点变大后媒体仍
+   停在默认高度，导致下方出现一整块空白。未缩放节点继续由内容自然撑开。 */
+.pc-node.pc-resized {
+  display: flex;
+  flex-direction: column;
+  /* 工具条位于节点上方（top: -46px），外层不能裁剪它；各预览子区
+     已分别设置 overflow，内容裁剪不依赖节点外壳。 */
+  overflow: visible;
+}
+.pc-node.pc-resized .pc-media,
+.pc-node.pc-resized .pc-seg-thumb,
+.pc-node.pc-resized .pc-seg-empty {
+  flex: 1 1 auto;
+  min-height: 0;
+  height: auto !important;
+}
+.pc-node.pc-resized .pc-paper,
+.pc-node.pc-resized .pc-info-body,
+.pc-node.pc-resized .pc-outnode-body {
+  flex: 1 1 auto;
+  min-height: 0;
+}
+.pc-node.pc-resized .pc-paper { overflow: hidden; }
+.pc-node.pc-resized .pc-paper p {
+  display: block;
+  overflow: auto;
+  -webkit-line-clamp: unset;
+}
+.pc-node.pc-resized .pc-shot-grid {
+  flex: 1 1 auto;
+  min-height: 0;
+  grid-auto-rows: minmax(0, 1fr);
+}
+.pc-node.pc-resized .pc-shot-asset-thumb {
+  width: auto !important;
+  height: auto !important;
+  min-height: 0;
+}
+.pc-node.pc-resized .pc-info-body { overflow: hidden; }
+.pc-node.pc-resized .pc-photo,
+.pc-node.pc-resized .pc-info-script,
+.pc-node.pc-resized .pc-eph-body {
+  height: auto;
+  min-height: 0;
+  flex: 1 1 auto;
+}
+.pc-node.pc-resized .pc-photo { width: 100%; }
+.pc-node:active { cursor: grabbing; }
+.pc-node:hover { z-index: 12; box-shadow: 0 14px 34px rgba(0, 0, 0, 0.16), 0 3px 8px rgba(0, 0, 0, 0.08); }
+/* 拖动中的节点/便签压在同级之上（含 hover 态，松手清除） */
+.pc-node.pc-dragging, .pc-note.pc-dragging { z-index: 20; }
+/* 选中态：节点类型色点亮边缘（实色描边 + 柔和泛光）——正在操作哪个
+   节点一目了然；类型未定（如便签外的特殊态）回退文字主色。 */
+.pc-node.pc-selected {
+  border-color: color-mix(in srgb, var(--node-accent, var(--text-primary)) 55%, var(--text-primary));
+  box-shadow:
+    0 0 0 2px color-mix(in srgb, var(--node-accent, var(--text-primary)) 80%, var(--text-primary)),
+    0 0 18px color-mix(in srgb, var(--node-accent, var(--text-secondary)) 38%, transparent),
+    0 14px 34px rgba(0, 0, 0, 0.16), 0 3px 8px rgba(0, 0, 0, 0.08);
+}
+.pc-node.pc-wire-target {
+  border-color: var(--card-glow);
+  box-shadow: 0 0 0 2px var(--card-glow), 0 8px 24px rgba(0, 0, 0, 0.14);
+}
+/* 类型色标题条：类型名与名称常显（取代此前的 hover 徽标） */
+.pc-node-head {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  min-height: 27px;
+  padding: 2px 10px 2px 8px;
+  border-left: 3px solid var(--node-accent, var(--text-tertiary));
+  border-bottom: 1px solid var(--separator);
+  border-radius: 11px 11px 0 0;
+  background: color-mix(in srgb, var(--node-accent, transparent) 8%, transparent);
+  font-size: 10.5px;
+  color: var(--text-secondary);
+  overflow: hidden;
+  white-space: nowrap;
+}
+.pc-node-kind {
+  flex: none;
+  font-weight: 600;
+  letter-spacing: 0.3px;
+  color: color-mix(in srgb, var(--node-accent, var(--text-secondary)) 72%, var(--text-primary));
+}
+.pc-node-title {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  font-size: 11.5px;
+  font-weight: 500;
+  color: var(--text-primary);
+}
+.pc-media { overflow: hidden; border-radius: 0 0 11px 11px; }
+.pc-media-img { width: 100%; height: 100%; object-fit: cover; display: block; }
+.pc-media-img img { width: 100%; height: 100%; object-fit: cover; }
+.pc-media .resource-thumb-blur { width: 100%; height: 100%; }
+.pc-media .resource-thumb-blur img { width: 100%; height: 100%; object-fit: cover; }
+.pc-media .resource-media-loading { width: 100%; height: 100%; }
+.pc-play {
+  position: absolute;
+  inset: 0;
+  margin: auto;
+  width: 40px;
+  height: 40px;
+  border-radius: 50%;
+  background: rgba(20, 20, 26, 0.5);
+  color: #fff;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  pointer-events: none;
+}
+.pc-play svg { width: 16px; height: 16px; }
+/* 文本纸片（节点内：贴满卡体，无内层边框） */
+.pc-paper {
+  border-radius: 0 0 11px 11px;
+  background: transparent;
+  padding: 12px 14px;
+}
+.pc-paper h5 {
+  font-size: 12px;
+  font-weight: 500;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-bottom: 7px;
+  color: var(--text-primary);
+}
+.pc-paper h5 svg { width: 12px; height: 12px; flex: none; }
+.pc-paper h5 span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.pc-paper p {
+  font-size: 10.5px;
+  line-height: 1.7;
+  color: var(--text-secondary);
+  white-space: pre-wrap;
+  display: -webkit-box;
+  -webkit-line-clamp: 6;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+  margin: 0;
+}
+/* 节点工具条：选中驱动（非 hover）——点选/框选的节点常显工具条，
+   点空白或改选其他节点即消失；hover 显示会让工具条随鼠标离开节点
+   （含悬浮间隙）而闪没，永远点不到按钮。 */
+.pc-node-tools {
+  position: absolute;
+  /* 悬浮在节点上方并与节点保持一点间隙 */
+  top: -46px;
+  left: 50%;
+  transform: translateX(-50%);
+  display: flex;
+  gap: 2px;
+  padding: 3px;
+  border-radius: 9px;
+  background: rgba(28, 28, 34, 0.94);
+  box-shadow: 0 6px 18px rgba(0, 0, 0, 0.3);
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.12s ease;
+  z-index: 6;
+  white-space: nowrap;
+}
+.pc-node.pc-selected .pc-node-tools { opacity: 1; pointer-events: auto; }
+.pc-node-tools button {
+  width: 27px;
+  height: 27px;
+  border-radius: 7px;
+  color: rgba(255, 255, 255, 0.85);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+.pc-node-tools button:hover { background: rgba(255, 255, 255, 0.15); color: #fff; }
+.pc-node-tools button.danger:hover { background: var(--danger); }
+.pc-node-tools svg { width: 14px; height: 14px; }
+/* 节点接口（ComfyUI 式）：实心类型色圆点完全落在卡内、紧贴左右两缘
+   （输入距左缘 6px、输出距右缘 6px），接口名称常显；端口行上行输入、
+   首行右侧即输出（与 K 采样器同款行位）。 */
+.pc-port {
+  position: absolute;
+  top: 50%;
+  width: 11px;
+  height: 11px;
+  border-radius: 50%;
+  transform: translateY(-50%);
+  z-index: 6;
+  cursor: crosshair;
+  background: var(--text-secondary);
+  transition: transform 0.12s ease;
+}
+/* 扩大热区：细小的圆点很难精确按中（拖线起手全靠它）。 */
+.pc-port::before { content: ""; position: absolute; inset: -8px; border-radius: 50%; }
+.pc-port:hover { transform: translateY(-50%) scale(1.3); }
+.pc-port-in { left: 6px; }
+.pc-port-out { right: 6px; }
+/* 拖线起手的源端口点亮：不依赖 SVG 渲染成功的兜底可见反馈。 */
+.pc-port-active {
+  transform: translateY(-50%) scale(1.45);
+  z-index: 7;
+  box-shadow: 0 0 0 4px color-mix(in srgb, var(--node-accent, var(--text-secondary)) 45%, transparent);
+}
+/* 端口行：输入口点+名称靠左，输出名称+口点靠右（首行两端） */
+.pc-port-row {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  height: 24px;
+  padding: 0 22px;
+  font-size: 11px;
+  color: var(--text-secondary);
+  white-space: nowrap;
+}
+.pc-port-row .pc-port { top: 50%; }
+.pc-port-name { pointer-events: none; }
+.pc-port-name-out { margin-left: auto; }
+/* 卡内接口行位（全部节点统一）：输入列自顶部起贴左缘，输出列贴右缘。 */
+.pc-port-bar {
+  display: flex;
+  flex-direction: column;
+  padding: 2px 0 0;
+}
+
+/* ── 工作流连线 ── */
+/* 尺寸由 JSX 按视口给出（世界单位），超出部分即视口外，默认裁剪即可；
+   不铺世界范围的巨型图层——部分 WebView2 的 GPU 栅格化对超大图层会
+   超限整层不绘制，表现为连线全不可见。 */
+.pc-wires {
+  position: absolute;
+  overflow: hidden;
+  pointer-events: none;
+}
+.pc-wire-hit { fill: none; stroke: transparent; stroke-width: 16; pointer-events: stroke; cursor: pointer; }
+.pc-wire-line { fill: none; stroke-width: 2.6; stroke-opacity: 0.95; }
+.pc-wire:hover .pc-wire-line { stroke-width: 3.6; stroke-opacity: 1; }
+/* 刀切痕：白色亮线划过即断（Blender knife 手势的视觉对应物）。
+   画在视口直下的绝对定位层（pc-trailayer，pc-world 之后 → 盖在卡片
+   之上）：fixed 覆层会被 transform 祖先劫持坐标系，放进 pc-world 则
+   被祖先 transform 连 non-scaling-stroke 一起缩放，故用视口屏幕坐标。
+   双描边（暗衬 + 白芯）保证亮暗主题都清晰。 */
+.pc-trailayer { position: absolute; inset: 0; width: 100%; height: 100%; pointer-events: none; z-index: 30; overflow: hidden; }
+.pc-wire-cut-under {
+  fill: none;
+  stroke: rgba(15, 23, 42, 0.4);
+  stroke-width: 4.6;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  opacity: 0.9;
+}
+.pc-wire-cut {
+  fill: none;
+  stroke: #fff;
+  stroke-width: 2.2;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  opacity: 0.95;
+  filter: drop-shadow(0 0 4px rgba(255, 255, 255, 0.7));
+}
+[data-theme="dark"] .pc-wire-cut { filter: drop-shadow(0 0 5px rgba(255, 255, 255, 0.55)); }
+/* 拖拽中的线与落定的线同一规格（实线、同粗细同透明度），全程视觉统一；
+   仅非法落点仍标红提示。 */
+.pc-wire-temp { fill: none; stroke: var(--text-secondary); stroke-width: 2.6; stroke-opacity: 0.95; }
+.pc-wire-temp.invalid { stroke: var(--danger); }
+
+/* ── 节点尺寸手柄（ComfyUI 式四角角标） ── */
+/* 尺寸手柄：四角各一枚月牙弧钩，可向任意方向自由缩放（对角固定）。
+   弧与节点 12px 圆角同心同曲率，且只画贴合圆角的那 90° 段（conic 取
+   象限 + mask 挖成环），没有绕到卡外的多余弧段。存在感层级：常态淡灰、
+   悬停节点提亮、悬停/拖拽手柄完全亮出主色。 */
+.pc-resize {
+  position: absolute;
+  width: 26px;
+  height: 26px;
+  border-radius: 50%;
+  z-index: 7;
+  --inner: 11px; /* 弧带内径；外径到 span 缘，带宽 2px、中线 12px = 圆角 */
+  --from: 225deg; /* 各角覆写：弧段所在象限 */
+  color: var(--text-tertiary);
+  background: conic-gradient(from var(--from), currentColor 0 90deg, transparent 90deg 360deg);
+  -webkit-mask: radial-gradient(circle, transparent var(--inner), #000 calc(var(--inner) + 0.5px));
+  mask: radial-gradient(circle, transparent var(--inner), #000 calc(var(--inner) + 0.5px));
+  opacity: 0.55;
+  transition: opacity 0.12s ease, color 0.12s ease;
+}
+/* span 圆心落在节点圆角圆心上（偏移 -1px）。 */
+.pc-resize.nw { --from: 270deg; left: -1px; top: -1px; cursor: nwse-resize; }
+.pc-resize.ne { --from: 0deg; right: -1px; top: -1px; cursor: nesw-resize; }
+.pc-resize.sw { --from: 180deg; left: -1px; bottom: -1px; cursor: nesw-resize; }
+.pc-resize.se { --from: 90deg; right: -1px; bottom: -1px; cursor: nwse-resize; }
+/* 便签圆角 10px：同心适配（弧中线 10px）。 */
+.pc-note .pc-resize { width: 22px; height: 22px; --inner: 9px; }
+.pc-node:hover .pc-resize, .pc-note:hover .pc-resize { opacity: 0.8; }
+.pc-resize:hover, .pc-node.pc-resizing .pc-resize, .pc-note.pc-resizing .pc-resize {
+  color: var(--accent);
+  opacity: 1;
+}
+
+/* ── 节点分组框（Ctrl+G，ComfyUI Group 的对应物） ── */
+/* 框自适应成员包围盒、渲染在节点层之下（pointer-events none 不挡节点）；
+   只有标题条可抓——按下拖动整组移动（复用组拖管线）。 */
+.pc-nodegroup {
+  position: absolute;
+  border-radius: 14px;
+  background: color-mix(in srgb, var(--accent) 5%, transparent);
+  border: 1.5px solid color-mix(in srgb, var(--accent) 28%, transparent);
+  pointer-events: none;
+  z-index: 1;
+}
+.pc-nodegroup-label {
+  position: absolute;
+  top: 0;
+  left: 0;
+  pointer-events: auto;
+  cursor: grab;
+  padding: 3px 14px;
+  border-radius: 13px 0 12px 0;
+  background: color-mix(in srgb, var(--accent) 12%, var(--bg-card));
+  font-size: 11px;
+  font-weight: 500;
+  color: var(--text-secondary);
+  white-space: nowrap;
+}
+.pc-nodegroup-label:active { cursor: grabbing; }

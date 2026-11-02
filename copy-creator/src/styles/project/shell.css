@@ -1,0 +1,564 @@
+/* 工程视图样式（自 project.css 按原分区与顺序切片，2026-11-03 阶段 8）：
+   六段按原文件级联顺序在 App.tsx 依次引入，拆文件不改任何规则。 */
+
+/* === 工程视图（AI 视频制作）===
+   资源页内与文件视图并列的剧集工作台。视觉规格与资源页同源：
+   chip/卡片/分段控件全部消费 base.css 变量，无一处硬编码颜色。 */
+
+/* --- 视图切换栏：文件视图 | 工程视图 + 剧选择器 --- */
+.project-viewbar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-shrink: 0;
+  position: relative;
+  z-index: 30;
+}
+
+.project-viewbar-spacer {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+/* 文件视图：分组条上移到切换按钮同一行（children），占满右侧剩余空间，
+   分组多时行内横向滚动（resource-group-scroll 自带 overflow-x）。
+   工程视图无分组条，此规则无目标不生效（spacer 把剧选择器推到行尾）。 */
+.project-viewbar .resource-group-section {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.project-viewbar .project-switch {
+  flex-shrink: 0;
+}
+
+/* 分段控件：与侧栏导航同语言（浅灰圆角底 + 激活白卡）。
+   配色走 base.css 的 --seg-* 分段槽令牌，与其他 chip 行共用一套。 */
+.project-switch {
+  display: inline-flex;
+  gap: 2px;
+  padding: 2px;
+  border-radius: 9px;
+  background: var(--seg-track-bg);
+}
+
+.project-switch button {
+  height: 28px;
+  padding: 0 14px;
+  border: none;
+  border-radius: 7px;
+  background: transparent;
+  color: var(--text-secondary);
+  font-family: var(--font);
+  font-size: var(--text-sm);
+  font-weight: var(--weight-medium);
+  cursor: pointer;
+  transition: background 0.15s ease, color 0.15s ease;
+}
+
+.project-switch button:hover {
+  color: var(--text-primary);
+}
+
+.project-switch button.active {
+  background: var(--seg-item-active-bg);
+  color: var(--text-primary);
+  box-shadow: var(--seg-item-active-shadow);
+}
+
+/* --- 剧选择器与下拉 --- */
+.project-show-pick-wrap {
+  position: relative;
+  flex-shrink: 0;
+}
+
+.project-show-pick {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 32px;
+  padding: 0 10px 0 11px;
+  border: 0;
+  border-radius: 8px;
+  background: var(--btn-card-bg);
+  color: var(--text-primary);
+  font-family: var(--font);
+  font-size: var(--text-sm);
+  font-weight: var(--weight-medium);
+  cursor: pointer;
+  max-width: 220px;
+  box-shadow: var(--btn-card-shadow);
+}
+
+.project-show-pick:hover {
+  box-shadow: var(--btn-card-shadow-hover);
+}
+
+.project-show-pick-icon {
+  display: grid;
+  place-items: center;
+  color: var(--text-secondary);
+  flex-shrink: 0;
+}
+
+.project-show-pick-icon svg {
+  width: 15px;
+  height: 15px;
+}
+
+.project-show-pick-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.project-show-pick-caret {
+  display: grid;
+  place-items: center;
+  opacity: 0.6;
+  flex-shrink: 0;
+}
+
+.project-show-pick-caret svg {
+  width: 13px;
+  height: 13px;
+}
+
+.project-menu {
+  position: absolute;
+  top: 38px;
+  right: 0;
+  min-width: 180px;
+  padding: 5px;
+  border: 1px solid var(--card-border);
+  border-radius: 10px;
+  background: var(--bg-card);
+  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.12), 0 0 0 0.5px rgba(0, 0, 0, 0.04);
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  z-index: 40;
+}
+
+.project-menu-item {
+  height: 32px;
+  border: none;
+  border-radius: 7px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 0 10px;
+  background: transparent;
+  color: var(--text-primary);
+  font-family: var(--font);
+  font-size: var(--text-sm);
+  cursor: pointer;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  text-align: left;
+}
+
+.project-menu-item:hover {
+  background: var(--chip-hover-bg);
+}
+
+.project-menu-item-icon {
+  display: grid;
+  place-items: center;
+  color: var(--text-secondary);
+  flex-shrink: 0;
+}
+
+.project-menu-item-icon svg {
+  width: 14px;
+  height: 14px;
+}
+
+.project-menu-item.current .project-menu-item-icon {
+  color: #34C759;
+}
+
+.project-menu-danger {
+  color: var(--danger);
+}
+
+/* --- 通用小对话框（新建剧）--- */
+.project-dialog-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 200;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(0, 0, 0, 0.3);
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+}
+
+.project-dialog {
+  width: min(380px, calc(100vw - 48px));
+  border-radius: 14px;
+  background: var(--bg-card);
+  box-shadow: 0 20px 60px rgba(0, 0, 0, 0.3);
+  overflow: hidden;
+  animation: pageEnter 0.22s cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+
+.project-dialog-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 14px 16px 10px;
+}
+
+.project-dialog-head h4 {
+  margin: 0;
+  font-size: var(--text-md);
+  font-weight: var(--weight-semibold);
+}
+
+.project-dialog-close {
+  width: 28px;
+  height: 28px;
+  border: none;
+  border-radius: 50%;
+  display: grid;
+  place-items: center;
+  background: var(--chip-bg);
+  color: var(--text-secondary);
+  cursor: pointer;
+}
+
+.project-dialog-close:hover {
+  color: var(--text-primary);
+}
+
+.project-dialog-close svg {
+  width: 14px;
+  height: 14px;
+}
+
+.project-dialog-body {
+  padding: 4px 16px 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+}
+
+.project-dialog-label {
+  font-size: var(--text-xs);
+  color: var(--text-secondary);
+}
+
+.project-dialog-input {
+  height: 34px;
+  padding: 0 10px;
+  border: 1px solid var(--separator);
+  border-radius: 8px;
+  background: var(--input-bg);
+  color: var(--text-primary);
+  font-family: var(--font);
+  font-size: var(--text-sm);
+  outline: none;
+}
+
+.project-dialog-input:focus {
+  border-color: var(--accent-border);
+}
+
+.project-dialog-foot {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  padding: 10px 16px 14px;
+  border-top: 0.5px solid var(--separator);
+}
+
+.project-dialog-btn {
+  height: 32px;
+  padding: 0 14px;
+  border: 0;
+  border-radius: 8px;
+  background: var(--chip-bg);
+  color: var(--text-primary);
+  font-family: var(--font);
+  font-size: var(--text-sm);
+  font-weight: var(--weight-medium);
+  cursor: pointer;
+}
+
+.project-dialog-btn:hover {
+  background: var(--chip-hover-bg);
+}
+
+.project-dialog-btn.primary {
+  background: var(--btn-card-bg);
+  color: var(--text-primary);
+  box-shadow: var(--btn-card-shadow);
+}
+
+.project-dialog-btn.primary:hover {
+  background: var(--btn-card-bg);
+  box-shadow: var(--btn-card-shadow-hover);
+}
+
+.project-dialog-btn:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+
+/* --- 工作区：左剧集树 + 右集工作台 --- */
+.project-workspace {
+  flex: 1 1 auto;
+  min-height: 0;
+  display: flex;
+  gap: 12px;
+}
+
+.project-tree {
+  width: 196px;
+  flex-shrink: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  /* 底部留白不设在这里：末尾的库入口区（.project-tree-libs）自带
+     padding-bottom 提供同样的 10px——钳位与自然落座两态的按钮位置
+     才能完全一致，滚动到底不会出现 10px 跳变（见库区规则注释）。 */
+  padding: 10px 8px 0;
+  border-radius: var(--radius);
+  background: var(--input-bg);
+  overflow: hidden auto;
+}
+
+.project-show-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 2px 6px 8px;
+  flex-shrink: 0;
+}
+
+.project-show-icon {
+  display: grid;
+  place-items: center;
+  color: var(--text-secondary);
+  flex-shrink: 0;
+}
+
+.project-show-icon svg {
+  width: 17px;
+  height: 17px;
+}
+
+.project-show-name {
+  font-size: var(--text-sm);
+  font-weight: var(--weight-semibold);
+  line-height: 1.25;
+  min-width: 0;
+  overflow: hidden;
+}
+
+.project-show-name span {
+  display: block;
+  font-size: var(--text-xs);
+  font-weight: var(--weight-normal);
+  color: var(--text-secondary);
+  margin-top: 1px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.project-ep-list {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.project-ep {
+  height: 36px;
+  border: none;
+  border-radius: 8px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 0 8px;
+  background: transparent;
+  color: var(--text-primary);
+  font-family: var(--font);
+  font-size: var(--text-sm);
+  cursor: pointer;
+  white-space: nowrap;
+  transition: background 0.15s ease;
+}
+
+.project-ep:hover {
+  background: var(--chip-hover-bg);
+}
+
+.project-ep.active {
+  background: var(--seg-item-active-bg);
+  box-shadow: var(--seg-item-active-shadow);
+  font-weight: var(--weight-medium);
+}
+
+.project-ep-no {
+  font-size: var(--text-xs);
+  color: var(--text-secondary);
+  font-variant-numeric: tabular-nums;
+  flex-shrink: 0;
+}
+
+.project-ep-name {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  text-align: left;
+}
+
+.project-ep-done {
+  display: grid;
+  place-items: center;
+  color: #34C759;
+  flex-shrink: 0;
+}
+
+.project-ep-done svg {
+  width: 14px;
+  height: 14px;
+}
+
+.project-ep-chip {
+  flex-shrink: 0;
+  font-size: var(--text-xs);
+  color: var(--text-secondary);
+  padding: 2px 6px;
+  border-radius: 5px;
+  background: var(--chip-bg);
+}
+
+.project-ep-chip.on {
+  color: #9a6b1f;
+  background: rgba(234, 179, 8, 0.16);
+}
+
+.project-new-ep {
+  color: var(--text-secondary);
+  font-size: var(--text-sm);
+  justify-content: flex-start;
+}
+
+.project-new-ep svg {
+  width: 14px;
+  height: 14px;
+}
+
+/* --- 集工作台 --- */
+.project-stage {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  overflow: hidden;
+}
+
+.project-stage-empty {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  color: var(--text-secondary);
+  font-size: var(--text-sm);
+}
+
+.project-stage-empty svg {
+  width: 24px;
+  height: 24px;
+  opacity: 0.5;
+}
+
+.project-title-spacer {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.project-mini-btn {
+  width: 28px;
+  height: 28px;
+  border: none;
+  border-radius: 7px;
+  display: grid;
+  place-items: center;
+  background: var(--chip-bg);
+  color: var(--text-secondary);
+  cursor: pointer;
+  flex-shrink: 0;
+}
+
+.project-mini-btn:hover {
+  background: var(--chip-hover-bg);
+  color: var(--text-primary);
+}
+
+.project-mini-btn svg {
+  width: 14px;
+  height: 14px;
+}
+
+/* 角色头像：有图显示图（圆裁切），无图显示名字首字 + 稳定配色 */
+.project-avatar {
+  width: 32px;
+  height: 32px;
+  border-radius: 50%;
+  display: grid;
+  place-items: center;
+  overflow: hidden;
+  color: #fff;
+  font-size: var(--text-sm);
+  font-weight: var(--weight-medium);
+  flex-shrink: 0;
+}
+
+.project-avatar-p0 { background: linear-gradient(135deg, #2E6E63, #17453E); }
+.project-avatar-p1 { background: linear-gradient(135deg, #E8703A, #B4431F); }
+.project-avatar-p2 { background: linear-gradient(135deg, #D9A62E, #9C6F14); }
+.project-avatar-p3 { background: linear-gradient(135deg, #7A5FB5, #4A3585); }
+.project-avatar-p4 { background: linear-gradient(135deg, #4E7AB0, #2D4E78); }
+
+.project-avatar-img {
+  width: 100%;
+  height: 100%;
+}
+
+.project-avatar-img img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+/* --- 暗色适配（菜单、头像同色系不区分主题；分段控件配色已由 --seg-* 令牌承担） --- */
+[data-theme="dark"] .project-menu-item.current .project-menu-item-icon {
+  color: #30D158;
+}
+
+[data-theme="dark"] .project-ep-done {
+  color: #30D158;
+}
+
+[data-theme="dark"] .project-ep-chip.on {
+  color: rgba(253, 224, 132, 0.95);
+  background: rgba(234, 179, 8, 0.14);
+}
+
+/* --- 窄视口 --- */
+@media (max-width: 760px) {
+
+  .project-tree {
+    width: 160px;
+  }
+}

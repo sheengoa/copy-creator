@@ -1,0 +1,456 @@
+/* 工程视图样式（自 project.css 按原分区与顺序切片，2026-11-03 阶段 8）：
+   六段按原文件级联顺序在 App.tsx 依次引入，拆文件不改任何规则。 */
+
+/* --- 剧集树底部：三库入口 --- */
+/* 库入口保持文档流（随集数逐级下落），但以栏可视底缘为下限：集多时
+   sticky 钳在栏底不再下沉，也不会被集列表顶出视野。设计要点（均经
+   真实应用逐步滚动实测）：
+   - 底部 10px 留白由本容器 padding-bottom 提供（栏的 padding-bottom
+     相应为 0）：钳位与自然落座两态下，最后一个库按钮距栏底都是
+     10px——滚动到底不会出现位置跳变（此前钳位贴底/落座留白的方案
+     会抖 10px，即「滑到底多出一丝丝」）。
+   - 钳位约束线是滚动容器 content box 底；栏 padding-bottom 为 0 后
+     它与可视底重合，bottom: 0 即贴合，底部无透缝。
+   - 背景必须不透明才能挡住从底下滚过的集行——--input-bg 是半透明
+     磨砂色，直接用会透出集行，因此用「实底 + 同款半透明罩」双层
+     背景合成出与侧栏一致的视觉。实底是 --panel-bg（主面板区
+     .panel-area 的底色）而不是 --window-bg：后者偏灰紫，叠罩后与
+     侧栏出现可见色差（真实应用 getComputedStyle 实测确认）。
+   - 负 margin 铺满栏的左右 padding 区；flex/gap 复刻栏的子项间距。 */
+.project-tree-libs {
+  position: sticky;
+  bottom: 0;
+  flex-shrink: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin: 0 -8px;
+  padding: 0 8px 10px;
+  background:
+    linear-gradient(var(--input-bg), var(--input-bg)),
+    var(--panel-bg);
+}
+
+.project-tree-split {
+  height: 1px;
+  background: var(--separator);
+  /* 顶边不留 margin：分割线紧贴库区背景顶沿，集行正好消失在线上——
+     margin-top 会让背景在分割线上方多出一条遮住集行的小边。与下方
+     库行的间距走容器 gap + 自身 margin-bottom。 */
+  margin: 0 4px 8px;
+  flex-shrink: 0;
+}
+
+.project-lib-row {
+  height: 34px;
+  border: none;
+  border-radius: 8px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 0 8px;
+  background: transparent;
+  color: var(--text-primary);
+  font-family: var(--font);
+  font-size: var(--text-sm);
+  cursor: pointer;
+  flex-shrink: 0;
+}
+
+.project-lib-row:hover {
+  background: var(--chip-hover-bg);
+}
+
+.project-lib-icon {
+  display: grid;
+  place-items: center;
+  color: var(--text-secondary);
+}
+
+.project-lib-icon svg {
+  width: 15px;
+  height: 15px;
+}
+
+.project-lib-name {
+  flex: 1;
+  min-width: 0;
+  text-align: left;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.project-lib-scope {
+  font-size: var(--text-xs);
+  color: var(--text-tertiary);
+  flex-shrink: 0;
+}
+
+[data-theme="dark"] .project-library-tag.linked {
+  color: #42d06a;
+}
+
+/* --- 提示词库与素材详情浮层 --- */
+.project-prompt-card {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 12px;
+  border-radius: 10px;
+  background: var(--card-inner-bg);
+  border: 0.5px solid var(--card-border);
+}
+
+.project-prompt-main {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.project-prompt-main b {
+  font-size: var(--text-sm);
+  font-weight: var(--weight-medium);
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.project-prompt-cat {
+  flex-shrink: 0;
+  height: 18px;
+  padding: 0 6px;
+  border-radius: 5px;
+  display: inline-flex;
+  align-items: center;
+  background: var(--chip-bg);
+  color: var(--text-secondary);
+  font-size: var(--text-xs);
+  font-weight: var(--weight-normal);
+}
+
+.project-prompt-main i {
+  font-style: normal;
+  font-size: var(--text-xs);
+  color: var(--text-secondary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.project-mini-btn.copied {
+  color: #1d7a38;
+}
+
+.project-mini-btn:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+
+.project-sheet-preview {
+  border-radius: 10px;
+  overflow: hidden;
+  background: var(--input-bg);
+  aspect-ratio: 16 / 9;
+  display: grid;
+  place-items: center;
+  flex-shrink: 0;
+}
+
+.project-sheet-img {
+  width: 100%;
+  height: 100%;
+}
+
+.project-sheet-img img {
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+}
+
+.project-sheet-meta {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.project-sheet-kv {
+  display: flex;
+  gap: 8px;
+  align-items: baseline;
+  font-size: var(--text-xs);
+  color: var(--text-secondary);
+}
+
+.project-sheet-kv b {
+  flex-shrink: 0;
+  min-width: 3em;
+  color: var(--text-primary);
+  font-weight: var(--weight-medium);
+}
+
+.project-sheet-kv span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.project-dialog-btn.danger {
+  color: var(--danger);
+}
+
+/* 素材详情浮层的缺失横幅：口径同列表标记，附「重新挂靠」入口 */
+.project-sheet-missing {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 10px;
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--danger) 10%, transparent);
+  color: var(--danger);
+  font-size: var(--text-sm);
+}
+
+.project-sheet-missing span {
+  flex: 1;
+  min-width: 0;
+}
+
+.project-sheet-missing .project-dialog-btn {
+  flex-shrink: 0;
+  height: 28px;
+  padding: 0 12px;
+}
+
+[data-theme="dark"] .project-mini-btn.copied {
+  color: #42d06a;
+}
+
+/* --- 工程搜索结果浮层 --- */
+.project-search-results {
+  position: relative;
+  z-index: 25;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 5px;
+  border: 1px solid var(--card-border);
+  border-radius: 10px;
+  background: var(--bg-card);
+  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.12), 0 0 0 0.5px rgba(0, 0, 0, 0.04);
+  flex-shrink: 0;
+  max-height: 260px;
+  overflow-y: auto;
+}
+
+.project-search-empty {
+  padding: 12px;
+  text-align: center;
+  color: var(--text-secondary);
+  font-size: var(--text-sm);
+}
+
+.project-search-item {
+  height: 34px;
+  border: none;
+  border-radius: 7px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 0 10px;
+  background: transparent;
+  color: var(--text-primary);
+  font-family: var(--font);
+  font-size: var(--text-sm);
+  cursor: pointer;
+  min-width: 0;
+}
+
+.project-search-item:hover {
+  background: var(--chip-hover-bg);
+}
+
+.project-search-item svg {
+  width: 13px;
+  height: 13px;
+  color: var(--text-secondary);
+  flex-shrink: 0;
+}
+
+.project-search-kind {
+  flex-shrink: 0;
+  height: 18px;
+  padding: 0 6px;
+  border-radius: 5px;
+  display: inline-flex;
+  align-items: center;
+  background: var(--chip-bg);
+  color: var(--text-secondary);
+  font-size: var(--text-xs);
+}
+
+.project-search-title {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.project-search-sub {
+  min-width: 0;
+  flex: 0 1 40%;
+  font-size: var(--text-xs);
+  color: var(--text-secondary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* --- 排序与集号编辑（P0 接线）--- */
+/* 树集行改为 wrapper div + 内层 main 按钮：movers hover 浮现替换状态标签 */
+.project-ep {
+  position: relative;
+}
+
+.project-ep-main {
+  flex: 1;
+  min-width: 0;
+  height: 100%;
+  border: none;
+  border-radius: 8px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 0 8px;
+  background: transparent;
+  color: inherit;
+  font-family: inherit;
+  font-size: inherit;
+  cursor: pointer;
+  text-align: left;
+}
+
+.project-ep-movers {
+  display: none;
+  align-items: center;
+  gap: 1px;
+  flex-shrink: 0;
+  padding-right: 4px;
+}
+
+.project-ep:hover .project-ep-movers,
+.project-ep.active .project-ep-movers {
+  display: inline-flex;
+}
+
+.project-ep:hover .project-ep-chip,
+.project-ep:hover .project-ep-done {
+  display: none;
+}
+
+.project-ep-mover {
+  width: 16px;
+  height: 15px;
+  border-radius: 4px;
+  display: grid;
+  place-items: center;
+  color: var(--text-secondary);
+  cursor: pointer;
+}
+
+.project-ep-mover:hover {
+  background: var(--chip-hover-bg);
+  color: var(--text-primary);
+}
+
+.project-ep-mover.disabled {
+  opacity: 0.3;
+  cursor: default;
+}
+
+.project-ep-mover svg {
+  width: 11px;
+  height: 11px;
+}
+
+.project-ep-no-input {
+  width: 34px;
+  height: 22px;
+  border: 1px solid var(--accent-border);
+  border-radius: 5px;
+  background: var(--input-focus-bg);
+  color: var(--text-primary);
+  font-family: var(--font);
+  font-size: var(--text-xs);
+  text-align: center;
+  outline: none;
+  flex-shrink: 0;
+}
+
+.project-mini-btn:disabled {
+  opacity: 0.3;
+  cursor: default;
+}
+
+/* --- 一致性工作流扩展（P1）：镜头状态/元数据、参考图集、完成度 --- */
+.project-ep-progress {
+  margin-left: 6px;
+  flex-shrink: 0;
+  font-size: var(--text-xs);
+  color: var(--text-tertiary);
+  font-variant-numeric: tabular-nums;
+}
+
+.project-ref-list {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+}
+
+.project-ref-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 4px 6px;
+  border-radius: 8px;
+  background: var(--bg-card);
+  border: 0.5px solid var(--separator);
+}
+
+.project-ref-thumb {
+  width: 32px;
+  height: 32px;
+  border-radius: 6px;
+  overflow: hidden;
+  background: var(--chip-bg);
+  flex-shrink: 0;
+  display: grid;
+  place-items: center;
+}
+
+.project-ref-thumb-img {
+  width: 100%;
+  height: 100%;
+}
+
+.project-ref-thumb-img img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.project-ref-path {
+  flex: 1;
+  min-width: 0;
+  font-size: var(--text-xs);
+  color: var(--text-secondary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
