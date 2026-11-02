@@ -26,13 +26,15 @@ function mmss(secs: number): string {
 export function MediaPlayback({
   kind,
   path,
-  autoPlay = true,
+  autoPlay = false,
   mediaRefCallback,
   onTimeUpdate,
 }: {
   kind: "audio" | "video";
   path: string;
-  /** 画布加载/预览节点保持「进来即播」的现状默认；保存盒/监视器显式关。 */
+  /** 一律不自动播放（2026-11-02 用户定案：媒体挂载/节点重挂——包括切
+   *  画布——都不得未经点击开播，默认 false 令全部接入点安全；保存盒/
+   *  监视器/试听条此前的显式 false 已是冗余）。播放只由点击触发。 */
   autoPlay?: boolean;
   /** 媒体元素引用回调：调用方程序化 seek（视频工具播放头同步）时需要。 */
   mediaRefCallback?: (el: HTMLVideoElement | HTMLAudioElement | null) => void;

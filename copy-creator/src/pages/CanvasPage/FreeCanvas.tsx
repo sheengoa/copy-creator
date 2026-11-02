@@ -461,7 +461,7 @@ function ResourceThumb({ path, className }: { path: string; className?: string }
 /** 画布产物播放器（保存节点的视频/音频产物预览用）：统一播放条
  *  （MediaPlayback）不感知画布相对路径语义（resource_path 存量数据是
  *  库相对语义），这里先归一再交给组件——与 ResourceThumb 同一归一语义。
- *  autoPlay 关：保存盒是产物确认位，不自动出声/出画。 */
+ *  组件默认不自动播放（用户定案），保存盒天然静默。 */
 function CanvasMediaPlayer({ kind, path }: { kind: "video" | "audio"; path: string }) {
   const [absolute, setAbsolute] = useState("");
   useEffect(() => {
@@ -477,7 +477,7 @@ function CanvasMediaPlayer({ kind, path }: { kind: "video" | "audio"; path: stri
     };
   }, [path]);
   if (!absolute) return null;
-  return <MediaPlayback kind={kind} path={absolute} autoPlay={false} />;
+  return <MediaPlayback kind={kind} path={absolute} />;
 }
 
 /** 保存节点产物的展示类型：随节点类型（save_image/save_video/save_audio），
@@ -3869,7 +3869,6 @@ export default function FreeCanvas({ canvasId }: { canvasId: string }) {
                             <MediaPlayback
                               kind="video"
                               path={videoPath}
-                              autoPlay={false}
                               mediaRefCallback={(el) => {
                                 videoElsRef.current[node.id] = el;
                               }}
@@ -3937,7 +3936,7 @@ export default function FreeCanvas({ canvasId }: { canvasId: string }) {
                                 {isGif ? t("canvas.gifDone") : t("canvas.seekDone")}
                               </div>
                               {isAudio && (
-                                <MediaPlayback kind="audio" path={productPath} autoPlay={false} />
+                                <MediaPlayback kind="audio" path={productPath} />
                               )}
                               <div className="fc-vt-sidehint">{t("canvas.toolDoneHint")}</div>
                             </>
