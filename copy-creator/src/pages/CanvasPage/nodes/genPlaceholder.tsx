@@ -1,5 +1,6 @@
 import { Icons } from "../../../components/Icons";
 import { MEDIA_COLOR } from "./colors";
+import { GenPlaceholderBody } from "./GenPlaceholderBody";
 import type { NodeDefinition } from "./types";
 
 // 视频/音频生成节点：协议未接入（决策 10：按钮置灰留置），当前仅模型
@@ -24,6 +25,7 @@ export const genVideoDef: NodeDefinition = {
     ],
     out: { mediaKind: "video" },
   },
+  Component: GenPlaceholderBody,
 };
 
 export const genAudioDef: NodeDefinition = {
@@ -38,4 +40,5 @@ export const genAudioDef: NodeDefinition = {
     ins: [{ id: "text", accepts: ["load_text", "collection_text"], mediaKind: "text" }],
     out: { mediaKind: "audio" },
   },
+  Component: GenPlaceholderBody,
 };

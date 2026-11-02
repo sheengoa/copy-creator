@@ -1,5 +1,4 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from "react";
-import { createPortal } from "react-dom";
 import { useTranslation } from "react-i18next";
 import { invoke } from "@tauri-apps/api/core";
 import { getCurrentWebview } from "@tauri-apps/api/webview";
@@ -39,6 +38,8 @@ import { WheelGate } from "./nodes/WheelGate";
 import { ResourceThumb } from "./nodes/media";
 import { useMediaUrl } from "./nodes/mediaPath";
 import { SaveRuntimeProvider } from "./nodes/saveRuntime";
+import { ParamCombo } from "./nodes/ParamCombo";
+import { commitImageParams, formatSizeDisplay, MODEL_PRESET_BASE, SIZE_PRESET_ITEMS } from "./nodes/genParams";
 import { useNodeErrors } from "./nodes/nodeErrors";
 import { useNoteEditing } from "./nodes/noteEditing";
 import {
@@ -60,34 +61,6 @@ const WIRES_VIEWPORT_PAD = 64;
 const MINI_W = 150;
 const MINI_H = 96;
 const UNDO_LIMIT = 50;
-
-/** 生成参数预设（下拉清单；输入框仍可自由键入任意值）。尺寸值取后端
- *  可直接接受的「宽x高」（对齐 ai.rs SIZE_PRESETS_1K/2K），auto 交给
- *  模型自选；hint 作弱化尾注（比例/档位，语言中立），需要本地化的
- *  文案用 hintKey（渲染时经 t 解析）。 */
-const SIZE_PRESET_ITEMS: { value: string; label: string; hint?: string; hintKey?: string }[] = [
-  { value: "auto", label: "auto", hintKey: "genSizeAutoHint" },
-  { value: "1024x1024", label: "1024x1024", hint: "1:1" },
-  { value: "1536x1024", label: "1536x1024", hint: "3:2" },
-  { value: "1024x1536", label: "1024x1536", hint: "2:3" },
-  { value: "1536x864", label: "1536x864", hint: "16:9" },
-  { value: "864x1536", label: "864x1536", hint: "9:16" },
-  { value: "1024x768", label: "1024x768", hint: "4:3" },
-  { value: "768x1024", label: "768x1024", hint: "3:4" },
-  { value: "2048x1152", label: "2048x1152", hint: "16:9 · 2K" },
-  { value: "1152x2048", label: "1152x2048", hint: "9:16 · 2K" },
-];
-const MODEL_PRESET_BASE = ["gpt-image-1", "gemini-2.5-flash-image"];
-
-/** 尺寸取值展示（用户 2026-11-01 定案）：命中预设时展示「主值 + 比例
- *  尾注」双段（与下拉条目同款），自定义值原样展示。 */
-const formatSizeDisplay = (
-  v: string,
-  items: { value: string; label: string; hint?: string }[] = SIZE_PRESET_ITEMS,
-): { main: string; tail?: string } => {
-  const item = items.find((i) => i.value === v);
-  return item ? { main: item.label, tail: item.hint } : { main: v };
-};
 
 const isVideoToolType = (type: CanvasNodeType | undefined): boolean =>
   !!type && VIDEO_TOOL_TYPES.includes(type);
@@ -1716,15 +1689,6 @@ export default function FreeCanvas({ canvasId }: { canvasId: string }) {
     void store.getState().updateNode(node.id, { metadata: JSON.stringify(meta) });
   };
 
-  const commitImageParams = (
-    node: CanvasNode,
-    patch: { model?: string; size?: string; count?: number },
-  ) => {
-    if (node.metadata.kind !== "gen_image" && node.metadata.kind !== "gen_video" && node.metadata.kind !== "gen_audio") return;
-    const meta = { ...node.metadata, params: { ...node.metadata.params, ...patch } };
-    void store.getState().updateNode(node.id, { metadata: JSON.stringify(meta) });
-  };
-
   const startGenerate = async (node: CanvasNode) => {
     setGenStarting(true);
     setNodeErrors((prev) => ({ ...prev, [node.id]: "" }));
@@ -2568,31 +2532,6 @@ export default function FreeCanvas({ canvasId }: { canvasId: string }) {
                   )}
                 </div>
               );
-            } else if (node.type === "gen_video" || node.type === "gen_audio") {
-              const notReadyKey = node.type === "gen_video" ? "canvas.genVideoNotReady" : "canvas.genAudioNotReady";
-              body = (
-                <div className="fc-node-form">
-                  <div className="fc-param">
-                    <NodeHint text={t("canvas.genModelLabel")} className="fc-param-ico-host">
-                      <span className="fc-param-ico">{Icons.chip}</span>
-                    </NodeHint>
-                    <ParamCombo
-                      comboKey={`gm-${node.id}-${node.updated_at}`}
-                      value={meta.kind === "gen_video" || meta.kind === "gen_audio" ? meta.params.model : ""}
-                      items={[...new Set([modelFallback, ...MODEL_PRESET_BASE])].map((m) => ({ value: m, label: m }))}
-                      placeholder={modelFallback}
-                      toggleTitle={t("canvas.comboPresets")}
-                      onCommit={(model) => commitImageParams(node, { model })}
-                    />
-                  </div>
-                  <NodeHint text={t(notReadyKey)}>
-                    <button className="fc-node-btn accent" disabled aria-label={t(notReadyKey)}>
-                      {t("canvas.genButton")}
-                    </button>
-                  </NodeHint>
-                  {nodeErrors[node.id] && <div className="fc-gen-warn">{nodeErrors[node.id]}</div>}
-                </div>
-              );
             } else if (node.type === "video_first_frame" || node.type === "video_last_frame") {
               // 视频抽帧节点（2026-11-01）：视频进、图片出。视频在
               // metadata.video_path（来源：资源库/本地磁盘），提取出的帧
@@ -3380,150 +3319,6 @@ function GenAuroraStage({
       </span>
       <span className="au-flare" />
       {beat > 0 && <span key={beat} className="au-beatflash" />}
-    </div>
-  );
-}
-
-/** 参数组合框（用户 2026-11-01 定案：预设下拉 + 自定义输入）。输入框
- *  始终可自由键入（失焦提交），右侧箭头展开预设清单，点选立即提交。
- *  清单 portal 到 body：节点表单是 overflow 滚动容器，内联浮层会被裁。 */
-/** 节点风悬浮说明：悬停约 0.3s 后在目标上方淡入一枚深玻璃小胶囊
- *  （portal 到 body，fixed 定位）——替代原生 title 的系统样式，与节点
- *  体的圆角/毛玻璃/0.5px 细环同一视觉语言；不随画布缩放、不被节点滚
- *  动区裁切。text 为空时只做透明包裹。禁用按钮的指针事件会落到包裹
- *  层，因此禁用态同样能触发。 */
-function ParamCombo({
-  comboKey,
-  value,
-  items,
-  placeholder,
-  toggleTitle,
-  display,
-  onCommit,
-}: {
-  comboKey: string;
-  value: string;
-  items: { value: string; label: string; hint?: string }[];
-  placeholder?: string;
-  toggleTitle: string;
-  /** 非编辑态的取值展示：按当前值格式化为「主值 + 弱化尾注」（与下拉
-   *  条目同款双段），点按换回原始输入框编辑——面板显示的是「选择后的
-   *  样子」而非原始存储串。 */
-  display?: (value: string) => { main: string; tail?: string } | null;
-  onCommit: (value: string) => void;
-}) {
-  const [open, setOpen] = useState(false);
-  const [editing, setEditing] = useState(false);
-  const [anchor, setAnchor] = useState<{ left: number; top: number; width: number } | null>(null);
-  const rootRef = useRef<HTMLDivElement | null>(null);
-  const popRef = useRef<HTMLDivElement | null>(null);
-  const inputRef = useRef<HTMLInputElement | null>(null);
-
-  // 外点关闭（捕获阶段：画布空白按下不该先触发框选）。portal 弹层不在
-  // rootRef 内，须放行——否则按下瞬间卸载弹层，条目的 click 永远收不到。
-  useEffect(() => {
-    if (!open) return;
-    const onDown = (e: PointerEvent) => {
-      const target = e.target as Node;
-      if (rootRef.current?.contains(target) || popRef.current?.contains(target)) return;
-      setOpen(false);
-    };
-    window.addEventListener("pointerdown", onDown, true);
-    return () => window.removeEventListener("pointerdown", onDown, true);
-  }, [open]);
-
-  const toggle = () => {
-    if (open) {
-      setOpen(false);
-      return;
-    }
-    // 展示态下输入框未挂载，锚点统一取容器矩形（宽度与控件一致）。
-    const rect = rootRef.current?.getBoundingClientRect();
-    if (!rect) return;
-    setAnchor({ left: rect.left, top: rect.bottom + 4, width: rect.width });
-    setOpen(true);
-  };
-
-  const applyPreset = (v: string) => {
-    if (inputRef.current) inputRef.current.value = v;
-    setEditing(false);
-    setOpen(false);
-    onCommit(v);
-  };
-
-  const fmt = display ? display(value) : null;
-  const showDisplay = !editing && !!value && !!fmt?.tail;
-
-  return (
-    <div className="fc-combo" ref={rootRef}>
-      {showDisplay && fmt ? (
-        <button
-          type="button"
-          className="fc-node-input fc-combo-display"
-          onPointerDown={(e) => e.stopPropagation()}
-          onClick={() => setEditing(true)}
-        >
-          <span className="fc-combo-display-main">{fmt.main}</span>
-          {fmt.tail && <span className="fc-combo-display-tail">{fmt.tail}</span>}
-        </button>
-      ) : (
-        <input
-          ref={inputRef}
-          className="fc-node-input fc-combo-input"
-          key={comboKey}
-          defaultValue={value}
-          placeholder={placeholder}
-          autoFocus={editing}
-          onBlur={(e) => {
-            onCommit(e.target.value.trim());
-            setEditing(false);
-          }}
-          onKeyDown={(e) => {
-            if (e.key === "Escape") {
-              // Esc：回退到已提交值并退出编辑（blur 原值提交，无副作用）。
-              // 对展示态流程同样成立——输入框只在编辑态挂载。
-              e.currentTarget.value = value;
-              e.currentTarget.blur();
-              setOpen(false);
-            }
-          }}
-        />
-      )}
-      <NodeHint text={toggleTitle}>
-        <button
-          type="button"
-          className={`fc-combo-toggle${open ? " is-open" : ""}`}
-          aria-label={toggleTitle}
-          onPointerDown={(e) => e.stopPropagation()}
-          onClick={toggle}
-        >
-          {Icons.chevronDown}
-        </button>
-      </NodeHint>
-      {open && anchor && createPortal(
-        <WheelGate>
-          <div
-            ref={popRef}
-            className="fc-combo-pop"
-            style={{ left: anchor.left, top: anchor.top, width: anchor.width }}
-            onPointerDown={(e) => e.stopPropagation()}
-          >
-            {items.map((item) => (
-              <button
-                key={item.value}
-                type="button"
-                className={`fc-combo-item${item.value === value ? " is-current" : ""}`}
-                onClick={() => applyPreset(item.value)}
-              >
-                <span className="fc-combo-label">{item.label}</span>
-                {item.hint && <span className="fc-combo-hint">{item.hint}</span>}
-                {item.value === value && <i aria-hidden="true">{Icons.check}</i>}
-              </button>
-            ))}
-          </div>
-        </WheelGate>,
-        document.body,
-      )}
     </div>
   );
 }
