@@ -2,6 +2,14 @@
 // 时由 main.tsx 动态注入，用于在普通浏览器里跑通工程画布等界面的前端验证
 // 与模拟（自动化截图、交互走查）。真实 Tauri 应用永远不会加载本模块。
 
+// 可真实播放的 8 秒测试视频（testsrc 烧录时间码，dev 资产由 vite 静态
+// 服务）：浏览器 mock 里 <video> 要有真画面/可播放，才能验证视频工具
+// 节点的预览 seek、选区钳制播放等时间更新类交互。vite 给根相对 URL
+// （/src/...），会被媒体解析当成 POSIX 绝对本地路径转进媒体服务（浏览器
+// mock 无服务，实测「媒体无法加载」）；补全为完整 http URL 走直通分支。
+import mockClipSrc from "./mock-clip.mp4?url";
+const mockClipUrl = new URL(mockClipSrc, window.location.origin).href;
+
 interface MockSegment {
   id: string;
   episode_id: string;
@@ -256,7 +264,7 @@ const db = {
       // 视频首帧节点（2026-11-01）：预置已加载视频，供抽帧链路验证。
       id: "cn-4", canvas_id: "cv-1", type: "video_first_frame" as const, title: "",
       pos_x: 480, pos_y: 430, width: 280, height: null,
-      metadata: { kind: "video_first_frame", video_path: "C:\\mock-library\\segments\\通道回头镜头.mp4" },
+      metadata: { kind: "video_first_frame", video_path: mockClipUrl },
       resource_path: "", created_at: ts(), updated_at: ts(),
     },
     {
@@ -271,7 +279,7 @@ const db = {
       // GIF 与音轨空态，验证建菜单/拖入链路。
       id: "cn-6", canvas_id: "cv-1", type: "video_seek_frame" as const, title: "",
       pos_x: 480, pos_y: 760, width: 460, height: null,
-      metadata: { kind: "video_seek_frame", video_path: "C:\\mock-library\\segments\\通道回头镜头.mp4", start_secs: 0, duration_secs: 0, format: "" },
+      metadata: { kind: "video_seek_frame", video_path: mockClipUrl, start_secs: 0, duration_secs: 0, format: "" },
       resource_path: "", created_at: ts(), updated_at: ts(),
     },
     {
@@ -342,7 +350,11 @@ function canvasSummaryOf(canvas: MockCanvas) {
   };
 }
 
-const libraryRoot = "C:\\mock-library";
+// 库根指向 vite 静态目录：资源浮层按「库内相对路径」约定过滤记录
+// （relativeLibraryPath 为空即丢弃），mock 视频须在库根之内才会出现在
+// 浮层；库内路径经 joinLibraryPath 拼回后是可播放的 http URL，预览/
+// 视频工具节点全链路可用。文本记录同改斜杠风格保持一致。
+const libraryRoot = `${window.location.origin}/src/dev`;
 const clone = <T,>(value: T): T => JSON.parse(JSON.stringify(value)) as T;
 const assetById = (id: string) => db.assets.find((a) => a.id === id);
 
@@ -862,22 +874,24 @@ function handleInvoke(cmd: string, args: Record<string, unknown>): unknown {
         {
           id: "rec-script-1",
           type: "file",
-          content: `${libraryRoot}\\scripts\\第一集剧本.txt`,
+          content: `${libraryRoot}/scripts/第一集剧本.txt`,
           source_app: "mock",
           created_at: ts(),
           storage_mode: "resource",
-          resource_path: `${libraryRoot}\\scripts\\第一集剧本.txt`,
+          resource_path: `${libraryRoot}/scripts/第一集剧本.txt`,
           resource_kind: "text",
           resource_group: null,
         },
         {
           id: "rec-video-1",
           type: "file",
-          content: `${libraryRoot}\\segments\\通道回头镜头.mp4`,
+          // 指向可真实播放的 vite 静态视频（浏览器 mock 里 <video> 有真
+          // 画面，视频工具节点的预览/钳制播放才可验证）。
+          content: `${libraryRoot}/mock-clip.mp4`,
           source_app: "mock",
           created_at: ts(),
           storage_mode: "resource",
-          resource_path: `${libraryRoot}\\segments\\通道回头镜头.mp4`,
+          resource_path: `${libraryRoot}/mock-clip.mp4`,
           resource_kind: "video",
           resource_group: null,
         },
@@ -890,7 +904,7 @@ function handleInvoke(cmd: string, args: Record<string, unknown>): unknown {
         .filter((record) => !query || record.resource_path.toLowerCase().includes(query))
         .filter((record) => {
           if (group === null) return true;
-          const prefix = `${libraryRoot}\\`;
+          const prefix = `${libraryRoot}/`;
           if (!record.resource_path.startsWith(prefix)) return false;
           const dir = record.resource_path
             .slice(prefix.length)
@@ -1096,14 +1110,14 @@ function handleInvoke(cmd: string, args: Record<string, unknown>): unknown {
       });
     }
     case "canvas_video_timeline": {
-      // 视频工具时间轴模拟（2026-11-02）：固定 30s 时长 + 24 帧渐变小图
-      // 铺「画面轨」（后端真实实现按 4 帧/秒 24–150 生成，mock 取中量级）。
-      const thumbs = Array.from({ length: 24 }, (_, i) => ({
-        t: (i * 30) / 24,
+      // 视频工具时间轴模拟（2026-11-02）：时长与 mock 短片对齐（8s，
+      // 真机后端按 4 帧/秒 24–150 生成），32 帧渐变小图铺「画面轨」；
+      // 竖屏 9:16 验证竖版画面的铺格还原。
+      const thumbs = Array.from({ length: 32 }, (_, i) => ({
+        t: (i * 8) / 32,
         path: MOCK_THUMBS[i % MOCK_THUMBS.length],
       }));
-      // 竖屏 9:16 与 makeMockThumb 画布同比例，铺格还原竖版画面轨。
-      return { duration: 30, w: 104, h: 185, thumbnails: thumbs };
+      return { duration: 8, w: 104, h: 185, thumbnails: thumbs };
     }
     case "canvas_seek_video_frame": {
       // 任意时刻抽帧：按秒数取最近的 mock 帧图。
