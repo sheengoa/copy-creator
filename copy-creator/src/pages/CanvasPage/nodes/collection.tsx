@@ -1,9 +1,10 @@
 import { Icons } from "../../../components/Icons";
 import { MEDIA_COLOR } from "./colors";
+import { CollectionBody } from "./CollectionBody";
 import type { NodeDefinition } from "./types";
 
 // 合集三族：画布上唯一的多线入口（multi，落线追加不顶掉）；成员为对应
-// 加载节点与对应生成产物。渲染三族合一（阶段 4c 迁入）。
+// 加载节点与对应生成产物。渲染三族合一（CollectionBody，阶段 4c 迁入）。
 export const collectionTextDef: NodeDefinition = {
   type: "collection_text",
   chrome: "standard",
@@ -18,6 +19,7 @@ export const collectionTextDef: NodeDefinition = {
   },
   // 生成前提：文本合集有任意成员连线即就绪（空内容成员由后端聚合跳过）。
   ready: (node, connections) => connections.some((m) => m.to_node === node.id),
+  Component: CollectionBody,
 };
 
 export const collectionImageDef: NodeDefinition = {
@@ -39,6 +41,7 @@ export const collectionImageDef: NodeDefinition = {
     ],
     out: { mediaKind: "image" },
   },
+  Component: CollectionBody,
 };
 
 export const collectionVideoDef: NodeDefinition = {
@@ -53,4 +56,5 @@ export const collectionVideoDef: NodeDefinition = {
     ins: [{ id: "video", accepts: ["load_video", "gen_video"], mediaKind: "video", multi: true }],
     out: { mediaKind: "video" },
   },
+  Component: CollectionBody,
 };
