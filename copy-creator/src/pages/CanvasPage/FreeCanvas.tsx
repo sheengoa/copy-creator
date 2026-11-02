@@ -3841,7 +3841,18 @@ export default function FreeCanvas({ canvasId }: { canvasId: string }) {
                   {videoPath && (
                     <>
                       <div className="fc-vt-monitor">
-                        <div className="fc-vt-screen">
+                        <div
+                          className="fc-vt-screen"
+                          /* 监视器随视频真实宽高比自适应（后端时间轴实测的
+                             w/h；未回传前回退 16:9）——竖版视频不再被 16:9
+                             固定窗缩成小画面，与图钉预期「完整展示视频尺寸」
+                             一致。完成态产物帧比例与视频一致，容器同样跟随。 */
+                          style={
+                            timeline && (timeline.w ?? 0) > 0 && (timeline.h ?? 0) > 0
+                              ? { aspectRatio: `${timeline.w} / ${timeline.h}` }
+                              : undefined
+                          }
+                        >
                           {/* 抽帧/GIF 完成态显示产物图（点击放大）；音轨完成态
                               保留视频画面；其余一律视频预览。 */}
                           {productPath && !toolBusy && !isAudio ? (
