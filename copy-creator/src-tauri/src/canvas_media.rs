@@ -340,12 +340,30 @@ pub async fn canvas_video_timeline(
             return Err("视频时长为 0，无法生成时间轴".to_string());
         }
 
-        // 生成到临时目录，完成后原子改名——并发请求同一视频不互相撕裂。
+        // 生成到临时目录，完成后整体改名落位（meta.json 随目录一起原子
+        // 出现）——并发请求同一视频不互相撕裂。meta.json 必须等落位后再
+        // 写：strip_dir 在改名前并不存在。
         let tmp_dir = out_root.join(format!(
             "strip-{:016x}.tmp-{}",
             hasher.finish(),
             uuid::Uuid::new_v4()
         ));
+        // 失败运行可能遗留同源临时目录（ffmpeg 中断、落位前报错退出），
+        // 清掉一小时前的陈旧残留；活跃生成的目录 mtime 持续更新，不受影响。
+        let stale_prefix = format!("strip-{:016x}.tmp-", hasher.finish());
+        if let Ok(entries) = std::fs::read_dir(&out_root) {
+            let stale_before = std::time::SystemTime::now() - std::time::Duration::from_secs(3600);
+            for entry in entries.flatten() {
+                if !entry.file_name().to_string_lossy().starts_with(&stale_prefix) {
+                    continue;
+                }
+                if let Ok(m) = entry.metadata().and_then(|m| m.modified()) {
+                    if m < stale_before {
+                        let _ = std::fs::remove_dir_all(entry.path());
+                    }
+                }
+            }
+        }
         std::fs::create_dir_all(&tmp_dir).map_err(|e| format!("创建产物目录失败：{e}"))?;
         let step = duration / STRIP_COUNT as f64;
         let mut cmd = std::process::Command::new(&ffmpeg);
@@ -362,35 +380,35 @@ pub async fn canvas_video_timeline(
         cmd.arg(tmp_dir.join("strip-%02d.png"));
         run_ffmpeg_checked(&mut cmd, "ffmpeg 生成缩略图时间轴失败")?;
 
-        // 实际产出几张记几张（超短视频可能不足 10 张）。
+        // 实际产出几张记几张（超短视频可能不足 10 张）；路径直接记落位
+        // 后的最终位置，改名后即生效。
         let mut thumbnails: Vec<serde_json::Value> = Vec::new();
         for i in 0..STRIP_COUNT {
-            let file = tmp_dir.join(format!("strip-{i:02}.png"));
-            if !file.is_file() {
+            if !tmp_dir.join(format!("strip-{i:02}.png")).is_file() {
                 break;
             }
             thumbnails.push(json!({
                 "t": (i as f64 * step).min(duration),
-                "path": file.to_string_lossy(),
+                "path": strip_dir.join(format!("strip-{i:02}.png")).to_string_lossy(),
             }));
         }
         if thumbnails.is_empty() {
             let _ = std::fs::remove_dir_all(&tmp_dir);
             return Err("ffmpeg 未产出缩略图（视频可能没有视频轨）".to_string());
         }
+        // 整体改名落位；目标已存在（并发先完成）则放弃本次产物，直接用
+        // 已落位目录里的同名图（同源同参，内容一致）。
+        if std::fs::rename(&tmp_dir, &strip_dir).is_err() {
+            let _ = std::fs::remove_dir_all(&tmp_dir);
+        }
+        if !strip_dir.is_dir() {
+            return Err("时间轴缓存目录落位失败".to_string());
+        }
+        // meta.json 此时才可写（目录已存在）；缓存自此完整，下次命中直接
+        // 返回，不再走 ffmpeg。
         let value = json!({ "duration": duration, "thumbnails": thumbnails });
         std::fs::write(&meta_file, serde_json::to_string(&value).unwrap_or_default())
             .map_err(|e| format!("写入时间轴缓存失败：{e}"))?;
-        // 临时目录里的图已是最终名字，整体改名落位；目标已存在（并发先
-        // 完成）则放弃本次产物直接读缓存。
-        if std::fs::rename(&tmp_dir, &strip_dir).is_err() {
-            let _ = std::fs::remove_dir_all(&tmp_dir);
-            if let Ok(text) = std::fs::read_to_string(&meta_file) {
-                if let Ok(v) = serde_json::from_str::<serde_json::Value>(&text) {
-                    return Ok(v);
-                }
-            }
-        }
         Ok(value)
     })
     .await
