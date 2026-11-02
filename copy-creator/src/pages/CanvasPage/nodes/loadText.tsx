@@ -1,5 +1,6 @@
 import { Icons } from "../../../components/Icons";
 import { MEDIA_COLOR } from "./colors";
+import { LoadTextBody } from "./LoadTextBody";
 import type { NodeDefinition } from "./types";
 
 // 加载文本节点：正文是常驻编辑框——视觉标准 B+ 的固定高特例
@@ -18,4 +19,5 @@ export const loadTextDef: NodeDefinition = {
   aggregate: (from) => (from.metadata.kind === "load_text" ? { paths: [], text: from.metadata.content } : { paths: [], text: "" }),
   // 生成前提：作为文本口来源时内容须非空。
   ready: (node) => node.metadata.kind === "load_text" && node.metadata.content.trim().length > 0,
+  Component: LoadTextBody,
 };

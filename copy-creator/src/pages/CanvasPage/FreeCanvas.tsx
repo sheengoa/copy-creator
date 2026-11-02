@@ -1690,11 +1690,20 @@ export default function FreeCanvas({ canvasId }: { canvasId: string }) {
     return genReadinessQuery(nodes, connections, node, t);
   }
 
-  // 跨模块服务（下发 def.onDoubleClick，阶段 4 起随节点模块下发
-  // pickMedia/clearMedia）。闭包引用渲染期状态，事件期执行时已初始化。
+  // 跨模块服务（下发 def.onDoubleClick 与节点模块）。取媒浮层/清除的
+  // 写回分派按 def.applyMode：video-tool 写 video_path（applyFrameVideo），
+  // resource 直写 resource_path。闭包引用渲染期状态，事件期执行时已初始化。
   const canvasServices: NodeServices = {
     openLightbox: (path) => setLightboxSrc(path),
     upstream: (nodeId) => upstreamMediaOf(nodeId),
+    pickMedia: (node, source) => {
+      if (source === "library") pickFromLibrary(node);
+      else void pickFromDisk(node);
+    },
+    clearMedia: (node) => {
+      if (isVideoToolType(node.type)) clearFrameVideo(node);
+      else void store.getState().updateNode(node.id, { resourcePath: "" });
+    },
   };
 
   // ── 合集节点（唯一多线入口）：成员解析 + 拖拽排序 ─────────
@@ -1998,12 +2007,6 @@ export default function FreeCanvas({ canvasId }: { canvasId: string }) {
       resourcePath: "",
       metadata: JSON.stringify({ kind: node.type, video_path: "", ...keepFormat }),
     });
-  };
-
-  /** 清除加载节点已选文件（右上角悬浮 ×）：resource_path 置空串即回到
-   *  未加载态，节点保留可重选。 */
-  const clearLoadedMedia = (node: CanvasNode) => {
-    void store.getState().updateNode(node.id, { resourcePath: "" });
   };
 
   // ── 空画布示意（方案 3.6）：一键创建 文本→图像生成→预览 工作流 ──
@@ -2389,79 +2392,6 @@ export default function FreeCanvas({ canvasId }: { canvasId: string }) {
                   scale={view.scale}
                   services={canvasServices}
                 />
-              );
-            } else if (node.type === "load_text" && meta.kind === "load_text") {
-              body = (
-                <div className="fc-node-form">
-                  <textarea
-                    className="fc-node-edit is-inline"
-                    key={`t-${node.id}-${node.updated_at}`}
-                    defaultValue={meta.content}
-                    placeholder={t("canvas.loadTextPlaceholder")}
-                    onBlur={(e) => commitContent(node, e.target.value)}
-                  />
-                </div>
-              );
-            } else if (node.type === "load_image" || node.type === "load_video" || node.type === "load_audio") {
-              body = (
-                <div className="fc-node-form">
-                  {node.resource_path ? (
-                    <div className="fc-load-media">
-                      {node.type === "load_image" ? (
-                        <ResourceThumb path={node.resource_path} className="fc-media-box" />
-                      ) : node.type === "load_video" ? (
-                        <MediaPlayback kind="video" path={node.resource_path} />
-                      ) : (
-                        <MediaPlayback kind="audio" path={node.resource_path} />
-                      )}
-                      {/* 悬浮右上角的圆形 ×：清除已选文件回到未加载态，
-                          不必删节点重来。 */}
-                      <NodeHint text={t("canvas.clearLoaded")}>
-                        <button
-                          type="button"
-                          className="fc-load-clear"
-                          aria-label={t("canvas.clearLoaded")}
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            clearLoadedMedia(node);
-                          }}
-                        >
-                          {Icons.close}
-                        </button>
-                      </NodeHint>
-                    </div>
-                  ) : (
-                    <div className="fc-node-placeholder">{t("canvas.loadEmpty")}</div>
-                  )}
-                  {/* 入口区（按钮行 + 提示）只在空节点时有意义：加载完成后
-                      整体"溜走"收起（grid 行高收合 + 下滑淡出），× 清除后
-                      反向滑回。生成节点的参数收起将复用这套动效。 */}
-                  <div className={`fc-load-entry${node.resource_path ? " is-loaded" : ""}`}>
-                    <div className="fc-load-entry-clip">
-                      <div className="fc-node-row">
-                        <NodeHint text={t("canvas.loadFromLibrary")} className="is-grow">
-                          <button
-                            className="fc-node-btn ghost is-icon grow"
-                            aria-label={t("canvas.loadFromLibrary")}
-                            onClick={() => pickFromLibrary(node)}
-                          >
-                            {Icons.resources}
-                          </button>
-                        </NodeHint>
-                        <NodeHint text={t("canvas.loadFromFile")} className="is-grow">
-                          <button
-                            className="fc-node-btn ghost is-icon grow"
-                            aria-label={t("canvas.loadFromFile")}
-                            onClick={() => void pickFromDisk(node)}
-                          >
-                            {Icons.folderOpen}
-                          </button>
-                        </NodeHint>
-                      </div>
-                    </div>
-                  </div>
-                  {nodeErrors[node.id] && <div className="fc-gen-warn">{nodeErrors[node.id]}</div>}
-                </div>
               );
             } else if (node.type === "gen_image" && meta.kind === "gen_image") {
               const missing = genReadinessOf(node);

@@ -39,8 +39,9 @@ export interface UpstreamMedia {
 /** 跨模块服务（浮层/大图等有状态能力，由 FreeCanvas 构建下发；数据变更
  *  各模块直接 useCanvasStore 订阅，不过此处）。 */
 export interface NodeServices {
-  /** 统一取媒入口：库选/盘选浮层，按 def.applyMode 分派写回。 */
-  pickMedia?(node: CanvasNode): void;
+  /** 统一取媒入口：库选/盘选浮层（浮层状态在 FreeCanvas），按
+   *  def.applyMode 分派写回（resource 直写 / video-tool 写 video_path）。 */
+  pickMedia?(node: CanvasNode, source: "library" | "disk"): void;
   /** 清除已装媒体（load 族清引用 / 视频工具清 video_path 与产物）。 */
   clearMedia?(node: CanvasNode): void;
   /** 全屏大图预览。 */

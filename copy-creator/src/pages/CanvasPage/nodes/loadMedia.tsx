@@ -1,5 +1,6 @@
 import { Icons } from "../../../components/Icons";
 import { MEDIA_COLOR } from "./colors";
+import { LoadMediaBody } from "./LoadMediaBody";
 import { AUDIO_EXTS, IMAGE_EXTS, VIDEO_EXTS } from "./exts";
 import type { NodeDefinition } from "./types";
 
@@ -18,6 +19,7 @@ export const loadImageDef: NodeDefinition = {
   dropAccept: true,
   dropExtensions: IMAGE_EXTS,
   blankDropExtensions: IMAGE_EXTS,
+  Component: LoadMediaBody,
 };
 
 export const loadVideoDef: NodeDefinition = {
@@ -33,6 +35,7 @@ export const loadVideoDef: NodeDefinition = {
   dropAccept: true,
   dropExtensions: VIDEO_EXTS,
   blankDropExtensions: VIDEO_EXTS,
+  Component: LoadMediaBody,
 };
 
 export const loadAudioDef: NodeDefinition = {
@@ -48,4 +51,5 @@ export const loadAudioDef: NodeDefinition = {
   dropAccept: true,
   dropExtensions: AUDIO_EXTS,
   blankDropExtensions: AUDIO_EXTS,
+  Component: LoadMediaBody,
 };
