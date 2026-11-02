@@ -1,0 +1,380 @@
+/* 画布区样式（自 canvas.css 按原分区与顺序切片，2026-11-03 阶段 7）：
+   六段按原文件级联顺序在 App.tsx 依次引入，拆文件不改任何规则。 */
+
+/* 画布区（自由生图工作流）：画布库条 + 主画布。
+   画布引擎样式（节点/连线/菜单/迷你地图等）复用工程画布的 pc-* 体系
+   （project.css，全局加载）；节点 chrome 在此按「画布区节点视觉标准」
+   覆盖（见下方标准块注释），作用域限定 .fc-root，不影响工程画布。 */
+
+.canvas-page {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  overflow: hidden;
+}
+
+/* ── 顶部画布库条 ─────────────────────────────────────────── */
+
+.canvas-topbar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 14px;
+  border-bottom: 1px solid var(--separator);
+  flex-shrink: 0;
+  /* 建立层叠上下文：⋯ 弹层（z-index 60）必须整体压过 .canvas-main 里的
+     pc-viewport 绝对定位层，否则弹层被画布盖住点不到（实测踩坑）。 */
+  position: relative;
+  z-index: 20;
+}
+
+.canvas-chips {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  overflow-x: auto;
+  flex: 1;
+  scrollbar-width: none;
+  min-width: 0;
+}
+
+.canvas-chips::-webkit-scrollbar {
+  display: none;
+}
+
+.canvas-chip {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 5px 12px;
+  border-radius: 999px;
+  border: 1px solid transparent;
+  background: var(--bg-card-hover);
+  color: var(--text-secondary);
+  font-size: 12px;
+  white-space: nowrap;
+  cursor: pointer;
+  transition: background 0.15s ease, color 0.15s ease;
+  flex-shrink: 0;
+}
+
+.canvas-chip:hover {
+  background: var(--accent-bg);
+  color: var(--text-primary);
+}
+
+.canvas-chip.active {
+  background: var(--accent-bg);
+  border-color: var(--accent-border-soft);
+  color: var(--accent);
+  font-weight: 600;
+}
+
+.canvas-chip-menu {
+  display: inline-flex;
+  align-items: center;
+  border-radius: 999px;
+  padding: 1px;
+  opacity: 0.65;
+}
+
+.canvas-chip-menu:hover {
+  opacity: 1;
+  background: var(--bg-card-hover);
+}
+
+.canvas-chip-menu svg {
+  width: 14px;
+  height: 14px;
+}
+
+.canvas-chip-popover {
+  /* position: fixed + body portal（见 CanvasPage）：坐标由打开时的
+     ⋯ 图标矩形计算，脱离 .canvas-chips 裁剪上下文。 */
+  position: fixed;
+  z-index: 90;
+  min-width: 136px;
+  background: var(--bg-card);
+  border: 1px solid var(--separator);
+  border-radius: var(--radius);
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.14);
+  padding: 4px;
+}
+
+.canvas-chip-popover button {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  padding: 7px 10px;
+  border: none;
+  background: none;
+  border-radius: var(--radius-sm);
+  font-size: 13px;
+  color: var(--text-primary);
+  cursor: pointer;
+  text-align: left;
+}
+
+.canvas-chip-popover button:hover {
+  background: var(--bg-card-hover);
+}
+
+.canvas-chip-popover button.danger {
+  color: var(--danger);
+}
+
+.canvas-chip-popover button svg {
+  width: 14px;
+  height: 14px;
+  flex-shrink: 0;
+}
+
+/* 新建画布「＋」：贴着最后一个画布标签的圆圈加号（流内元素，新建后
+   自然排到新标签后面）。空态（零画布）走画布中央 CTA。 */
+.canvas-add-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 26px;
+  height: 26px;
+  padding: 0;
+  border-radius: 50%;
+  border: 1px solid var(--separator);
+  background: var(--bg-card);
+  color: var(--text-secondary);
+  cursor: pointer;
+  flex-shrink: 0;
+  transition: background 0.15s ease, color 0.15s ease, border-color 0.15s ease;
+}
+
+.canvas-add-btn:hover {
+  background: var(--accent-bg);
+  border-color: var(--accent-border-soft);
+  color: var(--accent);
+}
+
+.canvas-add-btn svg {
+  width: 12px;
+  height: 12px;
+}
+
+.canvas-more {
+  position: relative;
+  flex-shrink: 0;
+}
+
+.canvas-more-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 5px 10px;
+  border-radius: 999px;
+  border: 1px solid var(--separator);
+  background: var(--bg-card);
+  color: var(--text-secondary);
+  font-size: 12px;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.canvas-more-btn svg {
+  width: 12px;
+  height: 12px;
+}
+
+.canvas-more-btn.open,
+.canvas-more-btn:hover {
+  background: var(--accent-bg);
+  color: var(--accent);
+}
+
+.canvas-more-popover button.active {
+  color: var(--accent);
+  font-weight: 600;
+}
+
+/* ── 主画布区 ─────────────────────────────────────────────── */
+
+.canvas-main {
+  position: relative;
+  flex: 1;
+  overflow: hidden;
+  /* 画布主区四角圆角：融入窗口圆角语言，点阵背景与内容随角裁剪。 */
+  border-radius: 14px;
+  background:
+    radial-gradient(circle at 1px 1px, var(--separator) 1px, transparent 0) 0 0 / 22px 22px,
+    var(--bg-primary);
+}
+
+.canvas-empty {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0 24px;
+  color: var(--text-secondary);
+}
+
+/* 空态横向 hero 条（方案 C）：白底图标位 + 左对齐文案列 + accent 实心
+   主按钮；窄幅时按钮换行仍居中。 */
+.canvas-empty-hero {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-wrap: wrap;
+  gap: 16px;
+}
+
+.canvas-empty-ico {
+  width: 52px;
+  height: 52px;
+  border-radius: 14px;
+  background: var(--bg-card);
+  color: var(--accent);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  box-shadow: 0 1px 2px rgba(31, 35, 65, 0.05), 0 8px 20px rgba(31, 35, 65, 0.08);
+}
+
+.canvas-empty-ico svg {
+  width: 26px;
+  height: 26px;
+}
+
+.canvas-empty-text {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  min-width: 0;
+}
+
+.canvas-empty-title {
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+.canvas-empty-sub {
+  margin-top: 4px;
+  font-size: 12px;
+  color: var(--text-tertiary);
+}
+
+.canvas-empty-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin-left: 10px;
+  padding: 9px 20px;
+  border-radius: 999px;
+  border: none;
+  background: var(--accent);
+  color: #fff;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  flex-shrink: 0;
+  box-shadow: 0 6px 16px color-mix(in srgb, var(--accent) 28%, transparent);
+  transition: transform 0.15s ease, box-shadow 0.15s ease;
+}
+
+.canvas-empty-btn:hover {
+  transform: translateY(-1px);
+  box-shadow: 0 9px 22px color-mix(in srgb, var(--accent) 34%, transparent);
+}
+
+.canvas-empty-btn svg {
+  width: 13px;
+  height: 13px;
+}
+
+.canvas-empty-icon {
+  width: 44px;
+  height: 44px;
+  opacity: 0.45;
+}
+
+.canvas-empty-icon svg {
+  width: 100%;
+  height: 100%;
+}
+
+.canvas-empty-title {
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+.canvas-empty-hint {
+  font-size: 12px;
+}
+
+/* ── 页面对话框（重命名） ─────────────────────────────────── */
+
+.canvas-dialog-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 80;
+  background: rgba(0, 0, 0, 0.28);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.canvas-dialog {
+  width: 320px;
+  background: var(--bg-card);
+  border-radius: var(--radius-lg);
+  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.2);
+  padding: 16px;
+}
+
+.canvas-dialog-title {
+  font-size: 14px;
+  font-weight: 600;
+  margin-bottom: 12px;
+  color: var(--text-primary);
+}
+
+.canvas-dialog-input {
+  width: 100%;
+  box-sizing: border-box;
+  padding: 8px 10px;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--separator);
+  background: var(--bg-primary);
+  color: var(--text-primary);
+  font-size: 13px;
+  outline: none;
+}
+
+.canvas-dialog-input:focus {
+  border-color: var(--accent-border);
+}
+
+.canvas-dialog-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-top: 14px;
+}
+
+.canvas-dialog-actions button {
+  padding: 6px 14px;
+  border-radius: 999px;
+  border: none;
+  font-size: 13px;
+  cursor: pointer;
+  background: var(--bg-card-hover);
+  color: var(--text-primary);
+}
+
+.canvas-dialog-actions button.primary {
+  background: var(--accent);
+  color: #fff;
+}

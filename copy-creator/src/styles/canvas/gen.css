@@ -1,0 +1,532 @@
+/* 画布区样式（自 canvas.css 按原分区与顺序切片，2026-11-03 阶段 7）：
+   六段按原文件级联顺序在 App.tsx 依次引入，拆文件不改任何规则。 */
+
+/* ── AI 生成状态：进度摘要 / 警告 ────── */
+
+.fc-gen-summary {
+  flex: 1;
+  font-size: 11px;
+  color: var(--text-secondary);
+}
+
+.fc-gen-warn {
+  font-size: 11px;
+  line-height: 1.45;
+  color: var(--danger);
+  word-break: break-all;
+}
+
+/* 完成态产物区（2026-11-01 定稿）：主图大图 + 横滑胶片条——大图即当前
+   主图（点击看全屏原图），点小图换主图；仅 1 张时胶片条隐藏。多张也只
+   占一行，节点高度恒定。 */
+.fc-root .fc-gen-result {
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+}
+
+/* 主图只做展示不可点（点开大图走下游预览/保存节点），故无手型光标。 */
+.fc-root .fc-gen-hero {
+  position: relative;
+  display: block;
+  width: 100%;
+  aspect-ratio: 16 / 10;
+  border-radius: 10px;
+  overflow: hidden;
+  line-height: 0;
+  background: rgba(0, 0, 0, 0.04);
+}
+
+.fc-root .fc-gen-hero-img {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.fc-root .fc-gen-hero-badge {
+  position: absolute;
+  left: 8px;
+  bottom: 8px;
+  padding: 1px 6px;
+  border-radius: 999px;
+  font-size: 9px;
+  line-height: 1.4;
+  background: var(--accent);
+  color: #fff;
+}
+
+.fc-root .fc-gen-strip {
+  display: flex;
+  gap: 5px;
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+
+.fc-root .fc-gen-strip::-webkit-scrollbar {
+  display: none;
+}
+
+.fc-root .fc-gen-strip-item {
+  flex: none;
+  line-height: 0;
+}
+
+.fc-root .fc-gen-strip-thumb {
+  display: block;
+  width: 44px;
+  height: 44px;
+  padding: 0;
+  border: none;
+  border-radius: 8px;
+  overflow: hidden;
+  cursor: pointer;
+  line-height: 0;
+  opacity: 0.82;
+  transition: opacity 0.15s ease;
+}
+
+.fc-root .fc-gen-strip-thumb .fc-strip-img {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.fc-root .fc-gen-strip-thumb.primary {
+  outline: 2px solid var(--accent);
+  outline-offset: -2px;
+  opacity: 1;
+}
+
+.fc-root .fc-gen-strip-thumb:hover {
+  opacity: 1;
+}
+
+/* 完成态重生成按钮：中性胶囊 + 蓝色刷新图标（与发起用的实心 accent 区分）。 */
+.fc-root .fc-gen-regen {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  border-radius: 999px;
+}
+
+.fc-root .fc-gen-regen-ico {
+  display: inline-flex;
+  line-height: 0;
+}
+
+.fc-root .fc-gen-regen-ico svg {
+  width: 12px;
+  height: 12px;
+  color: var(--accent);
+}
+
+/* ── 生成等待「流光」舞台（2026-11-01 原型定稿移植） ────────
+   起步两团大光缓慢游移；随逐张回传（--p = received/total）新光团
+   一团团浮现挤进来——密度即进展；过半（.is-half）后第二道光带以
+   2.7s 周期加密扫过，每张回传全场提亮一拍（.au-beatflash）；全部
+   到齐时光团向中心融合收拢成一团辉光（.is-merge），再从中心膨开
+   铺满舞台（.is-bloom）——光满即结果生成好了。融合位移用容器查询
+   单位（cqw/cqh）把「光团百分比位置→舞台中心」表达成纯 CSS，舞台
+   宽度随节点尺寸自适应。 */
+.fc-root .fc-aurora {
+  --au-violet: #af52de;
+  position: relative;
+  /* 恒定加高（2026-11-01 定案）：执行中到谢幕全程独占节点产物区
+     （槽位行已整行退场），152px = 原 96px + 一行缩略图的高度。 */
+  height: 152px;
+  flex: none;
+  border-radius: 10px;
+  overflow: hidden;
+  container-type: size;
+  background: color-mix(in srgb, var(--accent) 6%, transparent);
+  border: 1px solid var(--separator);
+  animation: fc-au-in 0.45s cubic-bezier(0.22, 1, 0.36, 1) 0.14s backwards;
+}
+
+.fc-root .fc-aurora.is-out {
+  opacity: 0;
+  transform: scale(0.97) translateY(2px);
+  transition:
+    opacity 0.28s cubic-bezier(0.5, 0, 0.75, 0),
+    transform 0.28s cubic-bezier(0.5, 0, 0.75, 0);
+}
+
+@keyframes fc-au-in {
+  from {
+    opacity: 0;
+    transform: translateY(4px);
+  }
+}
+
+/* 起步两团大光：蓝紫各一，随进度渐浓、缓慢游移。 */
+.fc-root .fc-aurora .au-blob {
+  position: absolute;
+  border-radius: 50%;
+  filter: blur(16px);
+}
+
+.fc-root .fc-aurora .au-a {
+  width: 150px;
+  height: 110px;
+  left: -30px;
+  top: -34px;
+  background: radial-gradient(closest-side, color-mix(in srgb, var(--accent) 52%, transparent), transparent 72%);
+  opacity: calc(0.62 + var(--p, 0) * 0.38);
+  animation: fc-au-a 7.5s ease-in-out infinite alternate;
+}
+
+.fc-root .fc-aurora .au-b {
+  width: 150px;
+  height: 120px;
+  right: -36px;
+  bottom: -44px;
+  background: radial-gradient(closest-side, color-mix(in srgb, var(--au-violet) 44%, transparent), transparent 72%);
+  opacity: calc(0.55 + var(--p, 0) * 0.45);
+  animation: fc-au-b 9.5s ease-in-out infinite alternate;
+}
+
+@keyframes fc-au-a {
+  from {
+    transform: translate(0, 0) scale(1);
+  }
+  to {
+    transform: translate(46px, 20px) scale(1.22);
+  }
+}
+
+@keyframes fc-au-b {
+  from {
+    transform: translate(0, 0) scale(1.1);
+  }
+  to {
+    transform: translate(-40px, -18px) scale(0.92);
+  }
+}
+
+/* 斜向光带：常驻一道 4.6s；过半后第二道以 2.7s 加密扫过。 */
+.fc-root .fc-aurora .au-sheen {
+  position: absolute;
+  inset: -40% -60%;
+  background: linear-gradient(105deg, transparent 42%, rgba(255, 255, 255, 0.22) 50%, transparent 58%);
+  animation: fc-au-sheen 4.6s ease-in-out infinite;
+}
+
+.fc-root .fc-aurora .au-sheen2 {
+  position: absolute;
+  inset: -40% -60%;
+  opacity: 0;
+  transition: opacity 0.9s ease;
+  pointer-events: none;
+}
+
+.fc-root .fc-aurora.is-half .au-sheen2 {
+  opacity: 1;
+}
+
+.fc-root .fc-aurora .au-sheen2 span {
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(105deg, transparent 42%, rgba(255, 255, 255, 0.18) 50%, transparent 58%);
+  animation: fc-au-sheen 2.7s ease-in-out infinite;
+}
+
+@keyframes fc-au-sheen {
+  0%,
+  55% {
+    transform: translateX(-38%);
+    opacity: 0;
+  }
+  70% {
+    opacity: 1;
+  }
+  100% {
+    transform: translateX(38%);
+    opacity: 0;
+  }
+}
+
+/* 光团群：外层管浮现（缩放+淡入），中层管律动波（明暗按横向相位差
+   此起彼伏，--wx = 光团横向位置），内层管各自的缓慢漂移与呼吸。 */
+.fc-root .fc-aurora .au-field {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+}
+
+.fc-root .fc-aurora .au-fb {
+  position: absolute;
+  border-radius: 50%;
+  opacity: 0;
+  transform: translate(-50%, -50%) scale(0.5);
+  filter: blur(var(--b-blur, 10px));
+  transition:
+    opacity 0.7s ease,
+    transform 0.7s cubic-bezier(0.22, 1, 0.36, 1),
+    filter 0.7s ease;
+  pointer-events: none;
+}
+
+.fc-root .fc-aurora .au-fb.is-on {
+  opacity: var(--b-o, 0.7);
+  transform: translate(-50%, -50%) scale(1);
+}
+
+/* 融合：全部到齐——各光团向舞台中心收拢（--gl/--gt 为各自横纵位置
+   百分数，cqw/cqh 换算成位移）、模糊加深彼此溶解成一团完整辉光。 */
+.fc-root .fc-aurora.is-merge .au-fb {
+  transform: translate(-50%, -50%)
+    translate(calc((50 - var(--gl, 50)) * 1cqw), calc((50 - var(--gt, 50)) * 1cqh))
+    scale(1.5);
+  filter: blur(26px);
+}
+
+.fc-root .fc-aurora .au-fused {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  width: 170px;
+  height: 170px;
+  border-radius: 50%;
+  transform: translate(-50%, -50%) scale(0.6);
+  background: radial-gradient(
+    circle,
+    rgba(255, 255, 255, 0.92) 0%,
+    color-mix(in srgb, var(--accent) 52%, transparent) 32%,
+    color-mix(in srgb, var(--au-violet) 30%, transparent) 52%,
+    transparent 72%
+  );
+  filter: blur(4px);
+  opacity: 0;
+  transition:
+    opacity 0.65s ease,
+    transform 0.7s cubic-bezier(0.22, 1, 0.36, 1);
+  pointer-events: none;
+}
+
+.fc-root .fc-aurora.is-merge .au-fused {
+  opacity: 1;
+  transform: translate(-50%, -50%) scale(1);
+}
+
+/* 扩散全屏：融合完成后辉光从中心膨开铺满舞台；收束闪光也放在这一拍
+   （光散开的一瞬）。 */
+.fc-root .fc-aurora.is-bloom .au-fused {
+  opacity: 1;
+  transform: translate(-50%, -50%) scale(2.9);
+  transition:
+    opacity 0.3s ease,
+    transform 0.75s cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+.fc-root .fc-aurora .au-fb > span {
+  position: absolute;
+  inset: 0;
+  animation: fc-au-wave 3.2s ease-in-out calc(var(--wx, 0) * -3.2s) infinite;
+}
+
+@keyframes fc-au-wave {
+  0%,
+  100% {
+    opacity: 0.68;
+  }
+  50% {
+    opacity: 1;
+  }
+}
+
+.fc-root .fc-aurora .au-fb > span > span {
+  position: absolute;
+  inset: 0;
+  border-radius: 50%;
+  background: radial-gradient(closest-side, var(--b-c, var(--accent)), transparent 72%);
+  animation: fc-au-drift var(--d-dur, 8s) ease-in-out var(--d-del, 0s) infinite alternate;
+}
+
+@keyframes fc-au-drift {
+  from {
+    transform: translate(0, 0) scale(1);
+    opacity: 0.72;
+  }
+  to {
+    transform: translate(var(--dx, 20px), var(--dy, 12px)) scale(var(--ds, 1.15));
+    opacity: 1;
+  }
+}
+
+/* 心跳亮拍：每张图回传时全场提亮一拍（前端按回传 key 重挂重放）。 */
+.fc-root .fc-aurora .au-beatflash {
+  position: absolute;
+  inset: 0;
+  background: radial-gradient(circle at 50% 55%, rgba(255, 255, 255, 0.4), transparent 68%);
+  opacity: 0;
+  animation: fc-au-beat 0.48s ease-out 1;
+  pointer-events: none;
+}
+
+@keyframes fc-au-beat {
+  0% {
+    opacity: 0;
+  }
+  30% {
+    opacity: 1;
+  }
+  100% {
+    opacity: 0;
+  }
+}
+
+/* 收束闪光：膨开的一瞬扫一遍。 */
+.fc-root .fc-aurora .au-flare {
+  position: absolute;
+  inset: 0;
+  background: radial-gradient(circle at 50% 55%, rgba(255, 255, 255, 0.55), transparent 60%);
+  opacity: 0;
+  pointer-events: none;
+}
+
+.fc-root .fc-aurora.is-bloom .au-flare {
+  animation: fc-au-flare 0.56s ease-out 1;
+}
+
+@keyframes fc-au-flare {
+  0% {
+    opacity: 0;
+  }
+  30% {
+    opacity: 0.9;
+  }
+  100% {
+    opacity: 0;
+  }
+}
+
+/* 完成态产物区落格：land 入场。 */
+.fc-root .fc-gen-result.is-land {
+  animation: fc-au-land 0.4s cubic-bezier(0.22, 1, 0.36, 1) backwards;
+}
+
+@keyframes fc-au-land {
+  from {
+    opacity: 0;
+    transform: translateY(4px);
+  }
+}
+
+/* 底部动作行换位（生成 / 进行中两层互斥淡换，原型同构）。 */
+.fc-root .fc-gen-foot {
+  position: relative;
+  min-height: 30px;
+}
+
+.fc-root .fc-gen-layer {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  opacity: 0;
+  visibility: hidden;
+  transform: translateY(3px);
+  pointer-events: none;
+  transition:
+    opacity 0.16s ease,
+    transform 0.16s ease,
+    visibility 0s linear 0.16s;
+}
+
+.fc-root .fc-gen-layer.is-on {
+  opacity: 1;
+  visibility: visible;
+  transform: none;
+  pointer-events: auto;
+  transition-delay: 0s, 0s, 0s;
+}
+
+/* 生成主按钮撑满整行：层的 flex 子项是 NodeHint 锚点壳，伸展要落在
+   锚点上——写在按钮自身不生效（宽度会塌缩成内容宽，与上方参数行
+   失去左右对齐）。仅限按钮独占一行（空闲/全部失败）：行内还有摘要
+   「共 N 张」时按定稿走摘要靠左 + 动作胶囊靠右，不参与撑满。 */
+.fc-root .fc-gen-layer > .fc-hint-anchor:has(> .fc-node-btn.accent):first-child {
+  flex: 1;
+}
+
+/* ── 暗色主题（与亮色同步定案：深玻璃 + 浮起件） ─────────── */
+
+[data-theme="dark"] .fc-root .pc-node {
+  background: rgba(30, 30, 36, 0.66);
+  border-color: rgba(255, 255, 255, 0.12);
+  box-shadow:
+    0 1px 2px rgba(0, 0, 0, 0.3),
+    0 14px 40px rgba(0, 0, 0, 0.4),
+    inset 0 0.5px 0 rgba(255, 255, 255, 0.14),
+    inset 0 -0.5px 0 rgba(255, 255, 255, 0.06);
+}
+
+[data-theme="dark"] .fc-root .pc-node::before {
+  background: linear-gradient(168deg, rgba(255, 255, 255, 0.09) 0%, rgba(255, 255, 255, 0.02) 22%, rgba(255, 255, 255, 0) 42%);
+}
+
+[data-theme="dark"] .fc-root .pc-node.pc-selected {
+  box-shadow:
+    0 1px 2px rgba(0, 0, 0, 0.3),
+    0 14px 40px rgba(0, 0, 0, 0.4),
+    0 0 0 1px var(--node-accent, var(--accent)),
+    0 0 0 4.5px color-mix(in srgb, var(--node-accent, var(--accent)) 28%, transparent),
+    inset 0 0.5px 0 rgba(255, 255, 255, 0.14);
+}
+
+[data-theme="dark"] .fc-root .pc-node-head {
+  border-bottom-color: rgba(255, 255, 255, 0.08);
+}
+
+[data-theme="dark"] .fc-root .pc-port {
+  box-shadow: 0 0 0 2.5px rgba(20, 20, 24, 0.9);
+}
+
+[data-theme="dark"] .fc-root .pc-port-out {
+  box-shadow: 0 0 0 2.5px rgba(20, 20, 24, 0.9), 0 0 8px 1px var(--node-accent, transparent);
+}
+
+[data-theme="dark"] .fc-root .fc-type-collection_image .pc-port-in,
+[data-theme="dark"] .fc-root .fc-type-collection_text .pc-port-in,
+[data-theme="dark"] .fc-root .fc-type-collection_video .pc-port-in {
+  box-shadow: 0 0 0 2.5px rgba(20, 20, 24, 0.9), 0 0 8px 1px var(--node-accent, transparent);
+}
+
+[data-theme="dark"] .fc-root .fc-node-edit {
+  color: var(--text-primary);
+}
+
+[data-theme="dark"] .fc-root .fc-note-body {
+  background: rgba(230, 167, 0, 0.16);
+  color: #FFD98A;
+}
+
+[data-theme="dark"] .fc-root .fc-note-input {
+  background: rgba(255, 255, 255, 0.08);
+  color: var(--text-primary);
+  box-shadow: 0 0 0 1.5px rgba(255, 200, 87, 0.35);
+}
+
+[data-theme="dark"] .fc-root .fc-node-input {
+  background: rgba(255, 255, 255, 0.1);
+  color: var(--text-primary);
+  box-shadow: inset 0 0.5px 0 rgba(255, 255, 255, 0.08), 0 0 0 0.5px rgba(255, 255, 255, 0.12);
+}
+
+[data-theme="dark"] .fc-root .fc-node-input:focus {
+  background: rgba(255, 255, 255, 0.14);
+  box-shadow:
+    0 0 0 2px color-mix(in srgb, var(--node-accent, var(--accent)) 45%, transparent),
+    0 0 0 0.5px var(--node-accent, var(--accent));
+}
+
+[data-theme="dark"] .fc-root .fc-node-placeholder {
+  border-color: var(--text-tertiary);
+}
+
+[data-theme="dark"] .fc-root .fc-gen-hero {
+  background: rgba(255, 255, 255, 0.05);
+}

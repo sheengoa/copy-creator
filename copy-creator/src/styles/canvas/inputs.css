@@ -1,0 +1,551 @@
+/* 画布区样式（自 canvas.css 按原分区与顺序切片，2026-11-03 阶段 7）：
+   六段按原文件级联顺序在 App.tsx 依次引入，拆文件不改任何规则。 */
+
+/* ── 节点体系 v2：加载 / 保存 / 预览 / 菜单分组 ───────────── */
+
+/* 建节点菜单分组列表：菜单本体由 FreeCanvas 按视口剩余空间内联限高，
+   搜索框常驻在外，分组在这里区内滚动（贴近视口下缘打开不再被裁）。 */
+.pc-addmenu-list {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  scrollbar-width: thin;
+  scrollbar-color: rgba(255, 255, 255, 0.28) transparent;
+}
+
+.pc-addmenu-list::-webkit-scrollbar {
+  width: 6px;
+}
+
+.pc-addmenu-list::-webkit-scrollbar-thumb {
+  border-radius: 3px;
+  background: rgba(255, 255, 255, 0.28);
+}
+
+/* 建节点菜单分组：生成 / 加载 / 输出 三类链路 + 其他。 */
+.pc-addmenu-group {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 4px 0;
+}
+
+.pc-addmenu-group + .pc-addmenu-group {
+  border-top: 0.5px solid rgba(255, 255, 255, 0.1);
+  margin-top: 3px;
+  padding-top: 7px;
+}
+
+.pc-addmenu-group-title {
+  font-size: 9.5px;
+  letter-spacing: 0.08em;
+  color: rgba(255, 255, 255, 0.4);
+  padding: 0 10px 2px;
+}
+
+/* 加载文本节点：白卡浮起的常驻编辑区（对齐 fc-node-input 的分段槽
+   语言，透明底在玻璃上看不出可输入范围）；flex 填满节点体，拉伸
+   手柄改变节点高度时编辑区随之适配，不再留无法点入的空白。 */
+.fc-root .fc-node-edit.is-inline {
+  /* 基准 88px 而非最小高度 88px：节点自适应高度时编辑区即默认高度；
+     节点被拉矮时随节点收缩（min-height: 0），表单不再进入滚动——
+     否则滚动到顶会把编辑区下边缘和表单底部内边距一起裁出视口，
+     白卡看着像被吞了下边界；内容溢出交由输入框内部滚动承接。 */
+  flex: 1 1 88px;
+  min-height: 0;
+  width: 100%;
+  box-sizing: border-box;
+  border: none;
+  border-radius: 10px;
+  resize: none;
+  padding: 9px 11px;
+  background: rgba(255, 255, 255, 0.92);
+  color: var(--text-primary);
+  font-size: 12px;
+  line-height: 1.6;
+  outline: none;
+  font-family: inherit;
+  box-shadow: 0 1px 2.5px rgba(31, 35, 65, 0.1), 0 0 0 0.5px rgba(0, 0, 0, 0.055);
+}
+
+.fc-root .fc-node-edit.is-inline:focus {
+  background: #fff;
+  box-shadow:
+    0 1px 2.5px rgba(31, 35, 65, 0.1),
+    0 0 0 2px color-mix(in srgb, var(--node-accent, var(--accent)) 40%, transparent),
+    0 0 0 0.5px var(--node-accent, var(--accent));
+}
+
+[data-theme="dark"] .fc-root .fc-node-edit.is-inline {
+  background: rgba(255, 255, 255, 0.1);
+  box-shadow: inset 0 0.5px 0 rgba(255, 255, 255, 0.08), 0 0 0 0.5px rgba(255, 255, 255, 0.12);
+}
+
+[data-theme="dark"] .fc-root .fc-node-edit.is-inline:focus {
+  background: rgba(255, 255, 255, 0.14);
+  box-shadow:
+    0 0 0 2px color-mix(in srgb, var(--node-accent, var(--accent)) 45%, transparent),
+    0 0 0 0.5px var(--node-accent, var(--accent));
+}
+
+/* 加载入口区（按钮行）收合动效：空节点时是唯一选择途径，加载
+   完成后整体"溜走"，× 清除后反向滑回。两个方向各自调校——
+   溜走：easeInOutCubic 高度同步收合，透明度用 easeInQuart（前段几乎
+   不透明、全程可见地滑离，最后才消隐，没有"被抽走"的逃遁感）；
+   滑回：easeOutQuint 快进缓停的归位感。负 margin 抵消表单 row-gap，
+   收合后不留空缝。生成节点的参数收起（.fc-gen-params，生成等待期
+   溜走、完成后滑回）复用这套动效。 */
+.fc-load-entry,
+.fc-gen-params {
+  display: grid;
+  grid-template-rows: 1fr;
+  transition:
+    grid-template-rows 0.5s cubic-bezier(0.22, 1, 0.36, 1),
+    margin 0.5s cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+.fc-load-entry-clip {
+  min-height: 0;
+  /* clip + clip-margin 代替 hidden：收合容器原本把末行卡片（auto/张数）
+     画在底边之外的下描边和投影一起裁掉——卡片看着像被吞了下边界。
+     允许越出盒边 6px 再裁，边缘完整，布局与收合行为不变。 */
+  overflow: clip;
+  overflow-clip-margin: 6px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  opacity: 1;
+  transform: translateY(0);
+  visibility: visible;
+  transition:
+    opacity 0.3s ease-out,
+    transform 0.5s cubic-bezier(0.22, 1, 0.36, 1),
+    visibility 0s linear 0s;
+}
+
+.fc-load-entry.is-loaded,
+.fc-gen-params.is-loaded {
+  grid-template-rows: 0fr;
+  margin-top: -6px;
+  margin-bottom: -6px;
+  transition:
+    grid-template-rows 0.5s cubic-bezier(0.65, 0, 0.35, 1),
+    margin 0.5s cubic-bezier(0.65, 0, 0.35, 1);
+}
+
+.fc-load-entry.is-loaded .fc-load-entry-clip,
+.fc-gen-params.is-loaded .fc-load-entry-clip {
+  opacity: 0;
+  transform: translateY(14px);
+  visibility: hidden;
+  pointer-events: none;
+  transition:
+    opacity 0.42s cubic-bezier(0.7, 0, 0.84, 0),
+    transform 0.5s cubic-bezier(0.65, 0, 0.35, 1),
+    visibility 0s linear 0.5s;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .fc-load-entry,
+  .fc-load-entry-clip,
+  .fc-gen-params,
+  .fc-gen-params .fc-load-entry-clip {
+    transition-duration: 0s;
+  }
+  /* 流光舞台：常驻律动动画停掉，状态切换（浮现/融合/扩散/退场）直接到
+     位——进度语义仍在，只是不再动。 */
+  .fc-root .fc-aurora .au-a,
+  .fc-root .fc-aurora .au-b,
+  .fc-root .fc-aurora .au-sheen,
+  .fc-root .fc-aurora .au-sheen2 span,
+  .fc-root .fc-aurora .au-fb > span,
+  .fc-root .fc-aurora .au-fb > span > span,
+  .fc-root .fc-aurora .au-beatflash,
+  .fc-root .fc-aurora .au-flare {
+    animation: none !important;
+  }
+  .fc-root .fc-aurora,
+  .fc-root .fc-aurora.is-out,
+  .fc-root .fc-aurora .au-fb,
+  .fc-root .fc-aurora .au-fused,
+  .fc-root .fc-gen-result.is-land,
+  .fc-root .fc-gen-layer {
+    transition-duration: 0s;
+  }
+  .fc-root .fc-aurora,
+  .fc-root .fc-gen-result.is-land {
+    animation: none;
+  }
+}
+
+/* 已加载媒体容器：右上角悬浮圆形 × 清除已选文件（悬停浮现）。 */
+.fc-root .fc-load-media {
+  position: relative;
+}
+
+.fc-root .fc-load-clear {
+  position: absolute;
+  top: 6px;
+  right: 6px;
+  width: 22px;
+  height: 22px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  border: none;
+  border-radius: 50%;
+  background: rgba(255, 255, 255, 0.92);
+  color: var(--text-primary);
+  cursor: pointer;
+  opacity: 0;
+  transition: opacity 0.15s ease, box-shadow 0.15s ease;
+  box-shadow: 0 1px 3px rgba(31, 35, 65, 0.18), 0 0 0 0.5px rgba(0, 0, 0, 0.08);
+}
+
+.fc-root .fc-load-clear svg {
+  width: 11px;
+  height: 11px;
+}
+
+.fc-root .fc-load-media:hover .fc-load-clear,
+.fc-root .fc-load-clear:focus-visible {
+  opacity: 1;
+}
+
+.fc-root .fc-load-clear:hover {
+  box-shadow: 0 1px 4px rgba(31, 35, 65, 0.24), 0 0 0 0.5px rgba(0, 0, 0, 0.12);
+}
+
+[data-theme="dark"] .fc-root .fc-load-clear {
+  background: rgba(40, 40, 48, 0.92);
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.4), 0 0 0 0.5px rgba(255, 255, 255, 0.14);
+}
+
+/* 视频抽帧节点（2026-11-01）：产物帧展示（点击放大）+ 执行按钮区。
+   帧图外框复用 fc-load-media（相对定位承载悬浮 ×）；帧图本体走
+   fc-media-box——与加载视频同一块展示区，执行前后节点尺寸不变。 */
+.fc-root .fc-frame-thumb {
+  display: block;
+  width: 100%;
+  padding: 0;
+  border: none;
+  background: none;
+  cursor: pointer;
+  line-height: 0;
+}
+
+.fc-root .fc-frame-badge {
+  position: absolute;
+  left: 8px;
+  bottom: 8px;
+  padding: 1px 7px;
+  border-radius: 999px;
+  font-size: 10px;
+  color: #fff;
+  background: rgba(0, 0, 0, 0.4);
+  pointer-events: none;
+}
+
+.fc-root .fc-frame-hint {
+  font-size: 11px;
+  color: var(--text-tertiary);
+}
+
+.fc-root .fc-frame-ok {
+  font-size: 11px;
+  color: #34c759;
+}
+
+/* 固定高度节点（pc-resized：拖过尺寸手柄或历史落库高度）：预览媒体
+   吃掉表单剩余空间，按钮行/提示行始终留在可视区内——裁剪只发生在
+   媒体框内部，不再把下方内容推出节点。自动高度节点不命中这些规则，
+   仍由内容自然撑开。 */
+.fc-root .pc-node.pc-resized .fc-load-media {
+  flex: 1 1 auto;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.fc-root .pc-node.pc-resized .fc-load-media .fc-media-box {
+  flex: 1;
+  min-height: 0;
+  height: auto;
+  max-height: none;
+}
+
+/* 抽帧节点完成态（手动调高节点）：提示锚点→媒体外框→帧图逐级让位，
+   与加载态播放器同一套填满行为——执行前后在调高的节点里同样不跳变。 */
+.fc-root .pc-node.pc-resized .fc-node-form > .fc-hint-anchor:has(> .fc-load-media > .fc-frame-thumb) {
+  flex: 1 1 auto;
+  min-height: 0;
+}
+
+.fc-root .pc-node.pc-resized .fc-load-media .fc-frame-thumb {
+  flex: 1;
+  min-height: 0;
+  width: 100%;
+}
+
+.fc-root .pc-node.pc-resized .fc-load-media .fc-frame-thumb .fc-media-box {
+  height: 100%;
+  max-height: none;
+}
+
+.fc-root .pc-node.pc-resized .fc-load-media .resource-media-player {
+  flex: 1;
+  min-height: 0;
+}
+
+.fc-root .pc-node.pc-resized .fc-load-media .resource-media-video {
+  flex: 1;
+  min-height: 0;
+  height: auto;
+  max-height: none;
+}
+
+/* 预览节点（视频/音频）：播放器是表单直接子项，同一套让位——填满
+   剩余空间，上游文本行留在可视区内。 */
+.fc-root .pc-node.pc-resized .fc-node-form > .resource-media-player {
+  flex: 1 1 auto;
+  min-height: 0;
+}
+
+.fc-root .pc-node.pc-resized .fc-node-form > .resource-media-player .resource-media-video {
+  flex: 1;
+  min-height: 0;
+  height: auto;
+  max-height: none;
+}
+
+/* 生成节点（固定高）：主图大图吃掉剩余空间，胶片条与动作行留在可视区。 */
+.fc-root .pc-node.pc-resized .fc-gen-result {
+  flex: 1 1 auto;
+  min-height: 0;
+}
+
+.fc-root .pc-node.pc-resized .fc-gen-hero {
+  flex: 1 1 auto;
+  min-height: 0;
+  aspect-ratio: auto;
+}
+
+/* 预览节点的媒体按钮外面包着 NodeHint 锚点层——填充尺寸落在锚点
+   （表单的直接 flex 子项）上，按钮与内部缩略图再逐层撑满。 */
+.fc-root .pc-node.pc-resized .fc-node-form > .fc-hint-anchor:has(> .fc-preview-media) {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.fc-root .pc-node.pc-resized .fc-preview-media {
+  flex: 1;
+  min-height: 0;
+  width: 100%;
+}
+
+.fc-root .pc-node.pc-resized .fc-preview-media .fc-media-box {
+  flex: 1;
+  min-height: 0;
+  height: auto;
+  max-height: none;
+}
+
+/* 参数组合框：白卡输入件 + 右侧箭头展开预设清单（portal 到 body，
+   fixed 定位随输入框锚点）。flex 只在横向参数行里撑宽——纵向表单的
+   直接子项绝不能 flex:1，否则竖向撑满整个节点体、箭头悬到中部。 */
+.fc-root .fc-combo {
+  position: relative;
+  flex: none;
+  min-width: 0;
+}
+
+.fc-root .fc-node-row .fc-combo {
+  flex: 1;
+}
+
+.fc-root .fc-combo-input {
+  padding-right: 26px;
+}
+
+.fc-root .fc-combo-toggle {
+  position: absolute;
+  top: 50%;
+  right: 3px;
+  transform: translateY(-50%);
+  width: 20px;
+  height: 20px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  border: none;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--text-tertiary);
+  cursor: pointer;
+}
+
+.fc-root .fc-combo-toggle:hover {
+  background: rgba(0, 0, 0, 0.05);
+  color: var(--text-primary);
+}
+
+.fc-root .fc-combo-toggle svg {
+  width: 12px;
+  height: 12px;
+  transition: transform 0.15s ease;
+}
+
+.fc-root .fc-combo-toggle.is-open svg {
+  transform: rotate(180deg);
+}
+
+/* 下拉清单：与节点同源的毛玻璃卡——blur 饱和玻璃底 + 0.5px 描边 +
+   双层柔投影；条目双段文字（主文字 + 弱化尾注），当前项 accent 浸染。 */
+.fc-combo-pop {
+  position: fixed;
+  z-index: 1100;
+  max-height: 264px;
+  overflow-y: auto;
+  padding: 5px;
+  box-sizing: border-box;
+  border-radius: 12px;
+  background: rgba(255, 255, 255, 0.88);
+  backdrop-filter: blur(22px) saturate(1.7);
+  -webkit-backdrop-filter: blur(22px) saturate(1.7);
+  box-shadow:
+    0 12px 34px rgba(31, 35, 65, 0.16),
+    0 2px 8px rgba(31, 35, 65, 0.08),
+    0 0 0 0.5px rgba(0, 0, 0, 0.06);
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  scrollbar-width: thin;
+  scrollbar-color: rgba(31, 35, 65, 0.22) transparent;
+  animation: fc-combo-in 0.14s ease;
+}
+
+@keyframes fc-combo-in {
+  from {
+    opacity: 0;
+    transform: translateY(-3px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+/* 细滚动条：去原生箭头按钮，圆头细杆（Windows 默认滚动条太粗粝）。 */
+.fc-combo-pop::-webkit-scrollbar {
+  width: 6px;
+}
+
+.fc-combo-pop::-webkit-scrollbar-button {
+  display: none;
+}
+
+.fc-combo-pop::-webkit-scrollbar-thumb {
+  border-radius: 3px;
+  background: rgba(31, 35, 65, 0.2);
+}
+
+.fc-combo-pop::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.fc-combo-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 7px 10px;
+  border: none;
+  border-radius: 8px;
+  background: none;
+  color: var(--text-primary);
+  font-size: 12.5px;
+  line-height: 1.35;
+  text-align: left;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.fc-combo-item:hover {
+  background: rgba(31, 35, 65, 0.06);
+}
+
+.fc-combo-item .fc-combo-hint {
+  margin-left: auto;
+  font-size: 10.5px;
+  letter-spacing: 0.03em;
+  color: var(--text-tertiary);
+}
+
+.fc-combo-item.is-current {
+  color: var(--accent);
+  font-weight: 600;
+  background: color-mix(in srgb, var(--accent) 9%, transparent);
+}
+
+.fc-combo-item.is-current .fc-combo-hint {
+  color: color-mix(in srgb, var(--accent) 60%, var(--text-tertiary));
+}
+
+.fc-combo-item i {
+  display: flex;
+  flex: none;
+  width: 13px;
+  height: 13px;
+  color: var(--accent);
+}
+
+.fc-combo-item i svg {
+  width: 13px;
+  height: 13px;
+}
+
+[data-theme="dark"] .fc-combo-pop {
+  background: rgba(30, 30, 38, 0.9);
+  box-shadow:
+    0 12px 34px rgba(0, 0, 0, 0.5),
+    0 0 0 0.5px rgba(255, 255, 255, 0.12);
+  scrollbar-color: rgba(255, 255, 255, 0.24) transparent;
+}
+
+[data-theme="dark"] .fc-combo-pop::-webkit-scrollbar-thumb {
+  background: rgba(255, 255, 255, 0.24);
+}
+
+[data-theme="dark"] .fc-combo-item:hover {
+  background: rgba(255, 255, 255, 0.07);
+}
+
+/* 取值展示态：非编辑时以「主值 + 弱化尾注」呈现当前选择（与下拉条目
+   同款双段），点按换回原始输入框编辑——面板显示的是选择后的样子。 */
+.fc-combo-display {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  text-align: left;
+  cursor: text;
+  font-family: inherit;
+  padding-right: 26px;
+}
+
+.fc-combo-display-main {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.fc-combo-display-tail {
+  flex: none;
+  margin-left: auto;
+  font-size: 10.5px;
+  letter-spacing: 0.03em;
+  color: var(--text-tertiary);
+}

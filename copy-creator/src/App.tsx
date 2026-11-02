@@ -24,7 +24,12 @@ import "./styles/resource.css";
 import "./styles/project.css";
 import "./styles/phrases.css";
 import "./styles/settings.css";
-import "./styles/canvas.css";
+import "./styles/canvas/shell.css";
+import "./styles/canvas/nodes.css";
+import "./styles/canvas/gen.css";
+import "./styles/canvas/inputs.css";
+import "./styles/canvas/hints.css";
+import "./styles/canvas/save.css";
 import "./styles/canvas-video-tools.css";
 
 const PANEL_MAP: Record<string, { titleKey: string; component: () => React.ReactNode }> = {
