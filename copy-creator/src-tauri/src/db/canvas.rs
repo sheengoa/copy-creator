@@ -646,6 +646,9 @@ pub(crate) fn create_canvas(conn: &Connection, name: &str) -> Result<serde_json:
         "id": id, "name": name,
         "viewport_x": 0.0, "viewport_y": 0.0, "viewport_k": 1.0,
         "created_at": now, "updated_at": now, "node_count": 0, "connection_count": 0,
+        // groups 列默认 '[]'，返回行与其他读取路径（canvas_row）字段对齐，
+        // 前端不必对新建画布做 null 特判。
+        "groups": [],
     }))
 }
 

@@ -8738,7 +8738,7 @@ mod canvas_tests {
 mod ai_channel_tests {
     use crate::db::{
         ensure_schema, migrate_legacy_ai_channels, update_channel_row, AI_CHANNEL_SCHEMA_SQL,
-        ChannelUpdate, Connection,
+        AI_SCHEDULING_SETTING_SEED_SQL, ChannelUpdate, Connection,
     };
 
     fn conn_with_legacy(provider: &str, openai_key: &str, gemini_key: &str) -> Connection {
@@ -8808,7 +8808,12 @@ mod ai_channel_tests {
     #[test]
     fn ensure_schema_seeds_scheduling_settings() {
         let conn = Connection::open_in_memory().unwrap();
+        // settings 表由主 schema 建（ensure_schema 先建表后执行种子 SQL），
+        // 这里按同一顺序复刻两条批次。
+        conn.execute_batch("CREATE TABLE settings (key TEXT PRIMARY KEY, value TEXT NOT NULL);")
+            .unwrap();
         conn.execute_batch(AI_CHANNEL_SCHEMA_SQL).unwrap();
+        conn.execute_batch(AI_SCHEDULING_SETTING_SEED_SQL).unwrap();
         let strategy: String = conn
             .query_row("SELECT value FROM settings WHERE key = 'ai_strategy'", [], |r| r.get(0))
             .unwrap();
@@ -8832,7 +8837,7 @@ mod ai_channel_tests {
         .unwrap();
     }
 
-    fn read_channel(conn: &Connection) -> (String, String, String, String, i64, String) {
+    fn read_channel(conn: &Connection) -> (String, String, String, String, Option<i64>, String) {
         conn.query_row(
             "SELECT name, api_key, status, last_error, last_latency_ms, model FROM ai_channels WHERE id = 'ch-1'",
             [],
@@ -8866,7 +8871,7 @@ mod ai_channel_tests {
         assert_eq!(api_key, "sk-old-key");
         assert_eq!(model, "new-model");
         // endpoint 未变更：测速记录保留
-        assert_eq!(latency, 1234);
+        assert_eq!(latency, Some(1234));
         // 保存即视为配置确认：故障状态恢复
         assert_eq!(status, "normal");
         assert_eq!(last_error, "");
@@ -8895,8 +8900,8 @@ mod ai_channel_tests {
         assert_eq!(name, "新名");
         assert_eq!(api_key, "sk-new-key");
         assert_eq!(last_error, "");
-        // 协议/URL 变更：旧测速记录失效
-        assert_eq!(latency, 0);
+        // 协议/URL 变更：旧测速记录失效（置 NULL，与实现的有意语义一致）
+        assert_eq!(latency, None);
         let is_null: i64 = conn
             .query_row("SELECT last_latency_ms IS NULL FROM ai_channels WHERE id = 'ch-1'", [], |r| r.get(0))
             .unwrap();
