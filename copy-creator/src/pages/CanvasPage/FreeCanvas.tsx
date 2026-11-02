@@ -2320,11 +2320,13 @@ export default function FreeCanvas({ canvasId }: { canvasId: string }) {
     setVideoToolDraft((prev) => ({ ...prev, [nodeId]: { ...(prev[nodeId] ?? {}), start, dur } }));
     if (seekPreview) {
       const el = videoElsRef.current[nodeId];
-      if (el) {
+      // 暂停中才把画面拨到选区起点（拖动实时跟手）；播放中不打断——
+      // 越出选区的部分由 onTimeUpdate 的循环钳制拉回选区内。
+      if (el && el.paused) {
         try {
           el.currentTime = start;
         } catch {
-          // 同上。
+          // 元数据未就绪时忽略。
         }
       }
     }
@@ -3751,9 +3753,28 @@ export default function FreeCanvas({ canvasId }: { canvasId: string }) {
                                 videoElsRef.current[node.id] = el;
                               }}
                               onTimeUpdate={(t2) => {
-                                // 原生控件拖动回写播放头（seek 模式；GIF/音轨
-                                // 选区是参数不跟播）。
-                                if (isRange || toolBusy || productPath) return;
+                                if (isRange) {
+                                  // 选区预览（GIF/音轨）：播放只发生在两针
+                                  // 之间——越出末端回跳起点循环小样，落在
+                                  // 起点前（原生拖到选区外）拉回起点；画面的
+                                  // 拖动跟随由 rangeToolTo 的程序 seek 负责。
+                                  const start = draft?.start ?? toolMeta?.start_secs ?? 0;
+                                  const dur = rangeDurRaw > 0 ? rangeDurRaw : trackDur;
+                                  const end = start + dur;
+                                  if (trackDur > 0 && (t2 >= end || t2 < start - 0.3)) {
+                                    const el = videoElsRef.current[node.id];
+                                    if (el) {
+                                      try {
+                                        el.currentTime = start;
+                                      } catch {
+                                        // 元数据未就绪时忽略。
+                                      }
+                                    }
+                                  }
+                                  return;
+                                }
+                                // 原生控件拖动回写播放头（seek 模式）。
+                                if (toolBusy || productPath) return;
                                 setVideoToolDraft((prev) => ({
                                   ...prev,
                                   [node.id]: { ...(prev[node.id] ?? {}), t: t2 },
