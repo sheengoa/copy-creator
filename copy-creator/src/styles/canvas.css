@@ -2325,8 +2325,37 @@
   animation: fc-thumb-in 0.4s cubic-bezier(0.22, 1, 0.36, 1) backwards;
 }
 
+/* 音频/视频产物播放器与图像媒体盒同动效同约束（2026-11-02：保存盒从
+   全 <img> 改为按产物类型分流后，音视频产物落袋同样有可见过渡）。
+   video/audio 控件自身的宽度/限高在 components.css 的
+   resource-media-video/audio 已定义，这里只补动效与圆角对齐。 */
+.fc-save-stage.filled .resource-media-player {
+  animation: fc-thumb-in 0.4s cubic-bezier(0.22, 1, 0.36, 1) backwards;
+  width: 100%;
+}
+
+.fc-save-stage.filled .resource-media-player video {
+  border-radius: 10px;
+}
+
 @keyframes fc-thumb-in {
   from { opacity: 0; transform: scale(1.04); }
+}
+
+/* 保存格子内件（音/视频无画面帧）：类型图标居中占位，点击切单件态
+   看播放器。 */
+.fc-save-cell-icon {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 100%;
+  height: 100%;
+  color: rgba(255, 255, 255, 0.55);
+}
+
+.fc-save-cell-icon svg {
+  width: 22px;
+  height: 22px;
 }
 
 .fc-save-more {

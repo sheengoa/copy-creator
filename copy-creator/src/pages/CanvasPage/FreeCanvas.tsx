@@ -459,6 +459,52 @@ function ResourceThumb({ path, className }: { path: string; className?: string }
   return <img className={className} src={url} alt="" draggable={false} />;
 }
 
+/** 画布产物播放器（保存节点的视频/音频产物预览用）：ResourceMediaPlayer
+ *  内部解析不走画布相对路径归一（resource_path 存量数据是库相对语义），
+ *  这里先归一再整条解析出 URL，经 resolvedSrc 直供播放器——与 ResourceThumb
+ *  同一归一语义。autoPlay 关：保存盒是产物确认位，不自动出声/出画。 */
+function CanvasMediaPlayer({ kind, path }: { kind: "video" | "audio"; path: string }) {
+  const [state, setState] = useState<{ url: string; absolute: string } | null>(null);
+  useEffect(() => {
+    let alive = true;
+    setState(null);
+    (async () => {
+      const absolute = await resolveCanvasMediaPath(path);
+      const url = await resolveResourceMediaUrl(absolute);
+      if (alive) setState({ url, absolute });
+    })().catch(() => {});
+    return () => {
+      alive = false;
+    };
+  }, [path]);
+  if (!state) return null;
+  return (
+    <ResourceMediaPlayer kind={kind} path={state.absolute} resolvedSrc={state.url} autoPlay={false} />
+  );
+}
+
+/** 保存节点产物的展示类型：随节点类型（save_image/save_video/save_audio），
+ *  上游口类型矩阵保证产物类型吻合；other 兜底未知形态（占位图标）。 */
+type SaveProductKind = "image" | "video" | "audio" | "other";
+
+/** 保存节点产物单件视图：图像走缩略图；音频/视频走可播放播放器（2026-11-02
+ *  定案：保存后可直接确认内容——此前一律 <img>，音视频解码失败渲染成空白
+ *  盒，产物到位毫无视觉反馈）。kind 随保存节点类型（上游口类型矩阵保证
+ *  产物类型吻合），非媒体类型兜底占位图标。 */
+function SaveProductView({ path, kind }: { path: string; kind: SaveProductKind }) {
+  if (kind === "video") return <CanvasMediaPlayer kind="video" path={path} />;
+  if (kind === "audio") return <CanvasMediaPlayer kind="audio" path={path} />;
+  if (kind === "image") return <ResourceThumb path={path} className="fc-media-box" />;
+  return <span className="fc-save-cell-icon">{Icons.file}</span>;
+}
+
+/** 保存格子内件：图像出缩略图；音/视频没有画面帧，出类型图标占位
+ *  （点击仍切单件态看播放器）。 */
+function SaveProductCell({ path, kind }: { path: string; kind: SaveProductKind }) {
+  if (kind === "image") return <ResourceThumb path={path} className="fc-save-cell-img" />;
+  return <span className="fc-save-cell-icon">{kind === "video" ? Icons.video : Icons.audio}</span>;
+}
+
 /** 保存节点多图观看（2026-11-01 定案）：默认单图 + 计数角标；点角标媒体
  *  盒整切缩略图格（与生成胶片条同语），点小图看那张，再点角标回选。格子
  *  区限高 330px 内部滚动（2026-11-02 确认：与单图媒体盒同上限，两态节点
@@ -466,7 +512,7 @@ function ResourceThumb({ path, className }: { path: string; className?: string }
  *  载 + hidden 切换——scrollTop 跨切换保留，换一张回来不用重新滚。纯
  *  观看态——不改上游主图标记、不影响自动保存（本就全量保存）；上游产物
  *  更替（数量或首图路径变化）即回单图第一张，观看态不跨代保留。 */
-function SaveMediaBox({ paths }: { paths: string[] }) {
+function SaveMediaBox({ paths, kind }: { paths: string[]; kind: SaveProductKind }) {
   const { t } = useTranslation();
   const [view, setView] = useState({ sig: "", grid: false, idx: 0 });
   const sig = `${paths.length}:${paths[0] ?? ""}`;
@@ -478,7 +524,7 @@ function SaveMediaBox({ paths }: { paths: string[] }) {
   const grid = onTrack && view.grid && paths.length > 1;
   return (
     <>
-      {!grid && <ResourceThumb path={paths[idx]} className="fc-media-box" />}
+      {!grid && <SaveProductView path={paths[idx] ?? ""} kind={kind} />}
       {paths.length > 1 && (
         <WheelGate>
           <div className="fc-save-grid" hidden={!grid}>
@@ -490,7 +536,7 @@ function SaveMediaBox({ paths }: { paths: string[] }) {
                 aria-label={t("canvas.savePickN", { n: i + 1 })}
                 onClick={() => setView({ sig, grid: false, idx: i })}
               >
-                <ResourceThumb path={p} className="fc-save-cell-img" />
+                <SaveProductCell path={p} kind={kind} />
               </button>
             ))}
           </div>
@@ -3593,7 +3639,16 @@ export default function FreeCanvas({ canvasId }: { canvasId: string }) {
                         <div className="fc-save-stage filled">
                           {autoState === "error" && saveDot}
                           {/* 多图观看：单图/缩略图格由 +N 角标切换（SaveMediaBox） */}
-                          <SaveMediaBox paths={upstream!.paths} />
+                          <SaveMediaBox
+                            paths={upstream!.paths}
+                            kind={
+                              node.type === "save_image"
+                                ? "image"
+                                : node.type === "save_video"
+                                  ? "video"
+                                  : "audio"
+                            }
+                          />
                         </div>
                       )}
                       {autoState === "error" && autoError && <div className="fc-gen-warn">{autoError}</div>}
