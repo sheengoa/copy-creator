@@ -1096,9 +1096,14 @@ function handleInvoke(cmd: string, args: Record<string, unknown>): unknown {
       });
     }
     case "canvas_video_timeline": {
-      // 视频工具时间轴模拟（2026-11-02）：固定 30s 时长 + 10 张渐变小图。
-      const thumbs = MOCK_THUMBS.slice(0, 10).map((path, i) => ({ t: i * 3, path }));
-      return { duration: 30, thumbnails: thumbs };
+      // 视频工具时间轴模拟（2026-11-02）：固定 30s 时长 + 24 帧渐变小图
+      // 铺「画面轨」（后端真实实现按 4 帧/秒 24–150 生成，mock 取中量级）。
+      const thumbs = Array.from({ length: 24 }, (_, i) => ({
+        t: (i * 30) / 24,
+        path: MOCK_THUMBS[i % MOCK_THUMBS.length],
+      }));
+      // 竖屏 9:16 与 makeMockThumb 画布同比例，铺格还原竖版画面轨。
+      return { duration: 30, w: 104, h: 185, thumbnails: thumbs };
     }
     case "canvas_seek_video_frame": {
       // 任意时刻抽帧：按秒数取最近的 mock 帧图。

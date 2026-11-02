@@ -11,6 +11,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { resolveResourceMediaUrl } from "../../domain/mediaUrl";
 import {
+  filmstripCells,
   formatTimecode,
   rangeHandleEnd,
   rangeHandleStart,
@@ -23,6 +24,9 @@ export interface TimelineThumb {
   t: number;
   path: string;
 }
+
+/** 轨道像素高：与 canvas-video-tools.css 的 .fc-vtl-strip height 对齐。 */
+const STRIP_H = 40;
 
 interface CanvasVideoTimelineProps {
   duration: number;
@@ -37,6 +41,9 @@ interface CanvasVideoTimelineProps {
   /** 选区时长钳制（GIF 0.5–10s；音轨 min 0.5、max 取总时长）。 */
   rangeLimits?: { min: number; max: number };
   disabled?: boolean;
+  /** 帧宽高比（后端 IHDR 实测 w/h）：格子按它取宽，铺出的画面轨以接近
+   *  原始比例还原视频画面；缺省回退 16:9。 */
+  frameAspect?: number;
 }
 
 /** 选区时长徽标：3.0s 风格（≥60s 收敛为时间码）。 */
@@ -55,15 +62,37 @@ export default function CanvasVideoTimeline({
   onCommit,
   rangeLimits = { min: 0.5, max: 10 },
   disabled = false,
+  frameAspect,
 }: CanvasVideoTimelineProps) {
   const stripRef = useRef<HTMLDivElement | null>(null);
   // 拖动会话态：0=无 1=播放头 2=左手柄 3=右手柄 4=中段平移。
   const dragKindRef = useRef(0);
   const grabOffsetRef = useRef(0);
 
-  // 缩略图路径 → 媒体服务 URL（resolveResourceMediaUrl 异步，路径集合
-  // 变化才重解析；dataURL 原样直通）。
-  const pathsKey = useMemo(() => thumbnails.map((t) => t.path).join("\n"), [thumbnails]);
+  // 轨道实测宽度：格子数随宽度走（节点缩放、窗口变化都跟着重铺）。
+  const [stripW, setStripW] = useState(0);
+  useEffect(() => {
+    const el = stripRef.current;
+    if (!el) return;
+    const ro = new ResizeObserver((entries) => {
+      const w = entries[0]?.contentRect.width ?? 0;
+      if (w > 0) setStripW(w);
+    });
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, []);
+
+  // 铺格：每格取用第几帧（帧富余时均匀抽稀，不足时一格一帧）。
+  const cellIdxs = useMemo(
+    () => filmstripCells(thumbnails.length, stripW || 460, frameAspect ?? 16 / 9, STRIP_H),
+    [thumbnails.length, stripW, frameAspect],
+  );
+
+  // 格子路径 → 媒体服务 URL（只解析上格的那几张；dataURL 原样直通）。
+  const pathsKey = useMemo(
+    () => cellIdxs.map((i) => thumbnails[i]?.path ?? "").join("\n"),
+    [cellIdxs, thumbnails],
+  );
   const [cellUrls, setCellUrls] = useState<string[]>([]);
   useEffect(() => {
     let alive = true;
@@ -155,7 +184,7 @@ export default function CanvasVideoTimeline({
         onPointerCancel={endDrag}
       >
         <div className="fc-vtl-cells">
-          {(thumbnails.length ? cellUrls : []).map((url, i) => (
+          {cellUrls.map((url, i) => (
             <span key={i} className="fc-vtl-cell" style={url ? { backgroundImage: `url("${url}")` } : undefined} />
           ))}
         </div>

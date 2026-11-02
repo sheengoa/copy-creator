@@ -87,3 +87,29 @@ export function formatTimecode(secs: number): string {
   if (h > 0) return `${h}:${two(m)}:${two(s)}`;
   return `${two(m)}:${two(s)}.${two(cs)}`;
 }
+
+/**
+ * 画面轨铺帧：轨道是「还原视频画面」的胶片带，格子数按「格宽 ≈ 帧宽
+ * （frameAspect × stripHeight）」从轨道宽推出——竖屏/横屏都以接近原始
+ * 比例的格子铺满轨道，cover 裁切几乎不可见。后端帧富余时按均匀步长抽
+ * 格（格 i 的时间落在 [i, i+1)/格数 区间内），帧不足时一格一帧。
+ * 返回每格取用的帧下标（升序、可重复），空数组表示无帧可铺。
+ */
+export function filmstripCells(
+  totalFrames: number,
+  trackWidth: number,
+  frameAspect: number,
+  stripHeight: number,
+): number[] {
+  if (!(totalFrames > 0)) return [];
+  const aspect = Number.isFinite(frameAspect) && frameAspect > 0 ? frameAspect : 16 / 9;
+  const cellW = Math.max(aspect * stripHeight, 1);
+  const maxCells = Math.max(2, Math.round(trackWidth / cellW));
+  if (totalFrames <= maxCells) {
+    return Array.from({ length: totalFrames }, (_, i) => i);
+  }
+  const stride = totalFrames / maxCells;
+  return Array.from({ length: maxCells }, (_, i) =>
+    Math.min(totalFrames - 1, Math.floor(i * stride)),
+  );
+}

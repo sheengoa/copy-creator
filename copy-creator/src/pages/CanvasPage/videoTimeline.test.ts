@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   clampRange,
+  filmstripCells,
   formatTimecode,
   rangeHandleEnd,
   rangeHandleStart,
@@ -91,5 +92,39 @@ describe("formatTimecode", () => {
   it("非法输入归零", () => {
     expect(formatTimecode(Number.NaN)).toBe("00:00.00");
     expect(formatTimecode(-3)).toBe("00:00.00");
+  });
+});
+
+describe("filmstripCells", () => {
+  it("帧富余：按轨道宽/帧宽定格数并均匀抽稀（460 宽轨道、16:9 帧 ≈ 6 格）", () => {
+    const cells = filmstripCells(120, 460, 16 / 9, 40);
+    const maxCells = Math.round(460 / ((16 / 9) * 40));
+    expect(cells.length).toBe(maxCells);
+    // 升序抽稀：首帧必取、间隔均匀，末格落在自己覆盖区间内。
+    expect(cells[0]).toBe(0);
+    expect(cells.every((v, i) => i === 0 || v > cells[i - 1])).toBe(true);
+    expect(cells[cells.length - 1]).toBe(Math.floor(((maxCells - 1) * 120) / maxCells));
+    expect(cells[cells.length - 1]).toBeLessThan(120);
+  });
+
+  it("竖屏帧格子更窄更密（9:16 → 460/22.5 ≈ 20 格）", () => {
+    const cells = filmstripCells(120, 460, 9 / 16, 40);
+    expect(cells.length).toBe(Math.round(460 / ((9 / 16) * 40)));
+    expect(cells.length).toBeGreaterThan(15);
+  });
+
+  it("帧不足时一格一帧（不重复铺满）", () => {
+    expect(filmstripCells(4, 460, 16 / 9, 40)).toEqual([0, 1, 2, 3]);
+  });
+
+  it("退化输入：无帧返回空、非法比例回退 16:9、极窄轨道保底 2 格", () => {
+    expect(filmstripCells(0, 460, 16 / 9, 40)).toEqual([]);
+    expect(filmstripCells(10, 460, Number.NaN, 40).length).toBe(
+      Math.round(460 / ((16 / 9) * 40)),
+    );
+    const narrow = filmstripCells(120, 10, 16 / 9, 40);
+    expect(narrow.length).toBe(2);
+    expect(narrow[0]).toBe(0);
+    expect(narrow[1]).toBeLessThan(120);
   });
 });

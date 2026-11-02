@@ -284,10 +284,28 @@ fn clamp_gif_duration(duration_secs: f64) -> f64 {
     duration_secs.clamp(0.5, 10.0)
 }
 
+/// 读 PNG 头部 IHDR 里的宽高（签名 8B + 长度 4B + "IHDR" 4B + 宽 4B + 高
+/// 4B，均大端）。解析不出返回 (0, 0)，调用侧按需兜底。
+fn png_dims(path: &std::path::Path) -> (u32, u32) {
+    let mut head = [0u8; 24];
+    let read = std::fs::File::open(path).and_then(|mut f| {
+        std::io::Read::read_exact(&mut f, &mut head)
+    });
+    if read.is_err() || &head[12..16] != b"IHDR" {
+        return (0, 0);
+    }
+    (
+        u32::from_be_bytes([head[16], head[17], head[18], head[19]]),
+        u32::from_be_bytes([head[20], head[21], head[22], head[23]]),
+    )
+}
+
 /// 缩略图时间轴（视频工具节点 2026-11-02）：ffmpeg 批量抽 10 张小图铺
 /// 轨道——选点/选区直接在画面上拖，不依赖前端解码（HEVC/MKV 照样能选）。
-/// 产物按「源路径+修改时间+大小」哈希缓存于 canvas-gen/strip-*（meta.json
-/// 记录时长与缩略图，源更换自动重建），返回 { duration, thumbnails }。
+/// 帧带按「定高 80、帧数约 4 帧/秒（24–150）」生成，前端按帧宽高比铺格，
+/// 竖屏/横屏都以接近原始比例还原视频画面轨。产物按「源路径+修改时间+
+/// 大小」哈希缓存于 canvas-gen/strip-*（meta.json 记录时长/帧宽高/帧表，
+/// 源更换自动重建），返回 { duration, w, h, thumbnails }。
 #[tauri::command]
 pub async fn canvas_video_timeline(
     app: AppHandle,
@@ -301,7 +319,6 @@ pub async fn canvas_video_timeline(
     let ffmpeg = resolve_ffmpeg(&app)?;
     let out_root = crate::db::get_storage_dir(&app).join("canvas-gen");
     tokio::task::spawn_blocking(move || -> Result<serde_json::Value, String> {
-        const STRIP_COUNT: usize = 10;
         let meta = std::fs::metadata(&path).map_err(|e| format!("读取视频失败：{e}"))?;
         let mtime = meta
             .modified()
@@ -310,7 +327,8 @@ pub async fn canvas_video_timeline(
             .map(|d| d.as_secs())
             .unwrap_or(0);
         let mut hasher = std::collections::hash_map::DefaultHasher::new();
-        format!("{path}:{mtime}:{}", meta.len()).hash(&mut hasher);
+        // v2：帧带几何改版（定高 80、帧数随时长），旧几何的缓存作废重建。
+        format!("v2:{path}:{mtime}:{}", meta.len()).hash(&mut hasher);
         let strip_dir = out_root.join(format!("strip-{:016x}", hasher.finish()));
 
         // 缓存命中：meta.json 有效即直接返回（换视频/重录后哈希变，自动重建）。
@@ -365,25 +383,29 @@ pub async fn canvas_video_timeline(
             }
         }
         std::fs::create_dir_all(&tmp_dir).map_err(|e| format!("创建产物目录失败：{e}"))?;
-        let step = duration / STRIP_COUNT as f64;
+        // 帧数随时长（约 4 帧/秒，24–150 封顶）：画面轨要还原镜头运动，采样
+        // 太稀读不出内容；解码反正要过整段视频，多出的只是几张 80px 小图。
+        let count = ((duration * 4.0).round() as usize).clamp(24, 150);
+        let step = duration / count as f64;
         let mut cmd = std::process::Command::new(&ffmpeg);
         cmd.args(["-y", "-nostdin", "-hide_banner", "-loglevel", "error"]);
         cmd.arg("-i").arg(&path);
         cmd.args([
             "-vf",
-            &format!("fps={STRIP_COUNT}/{:.3},scale=80:-2", duration),
+            // 定高 80、宽随源比例：竖屏/横屏都保完整画面，前端按此比例铺格。
+            &format!("fps={count}/{:.3},scale=-2:80", duration),
             "-frames:v",
-            &STRIP_COUNT.to_string(),
+            &count.to_string(),
             "-start_number",
             "0",
         ]);
         cmd.arg(tmp_dir.join("strip-%02d.png"));
         run_ffmpeg_checked(&mut cmd, "ffmpeg 生成缩略图时间轴失败")?;
 
-        // 实际产出几张记几张（超短视频可能不足 10 张）；路径直接记落位
+        // 实际产出几张记几张（超短视频可能不足帧数）；路径直接记落位
         // 后的最终位置，改名后即生效。
         let mut thumbnails: Vec<serde_json::Value> = Vec::new();
-        for i in 0..STRIP_COUNT {
+        for i in 0..count {
             if !tmp_dir.join(format!("strip-{i:02}.png")).is_file() {
                 break;
             }
@@ -396,6 +418,9 @@ pub async fn canvas_video_timeline(
             let _ = std::fs::remove_dir_all(&tmp_dir);
             return Err("ffmpeg 未产出缩略图（视频可能没有视频轨）".to_string());
         }
+        // 帧宽高读首张 PNG 的 IHDR（同源视频 scale 后所有帧同尺寸）；读不
+        // 出给 0，前端回退 16:9。
+        let (frame_w, frame_h) = png_dims(&tmp_dir.join("strip-00.png"));
         // 整体改名落位；目标已存在（并发先完成）则放弃本次产物，直接用
         // 已落位目录里的同名图（同源同参，内容一致）。
         if std::fs::rename(&tmp_dir, &strip_dir).is_err() {
@@ -406,7 +431,12 @@ pub async fn canvas_video_timeline(
         }
         // meta.json 此时才可写（目录已存在）；缓存自此完整，下次命中直接
         // 返回，不再走 ffmpeg。
-        let value = json!({ "duration": duration, "thumbnails": thumbnails });
+        let value = json!({
+            "duration": duration,
+            "w": frame_w,
+            "h": frame_h,
+            "thumbnails": thumbnails,
+        });
         std::fs::write(&meta_file, serde_json::to_string(&value).unwrap_or_default())
             .map_err(|e| format!("写入时间轴缓存失败：{e}"))?;
         Ok(value)

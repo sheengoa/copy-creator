@@ -2261,9 +2261,10 @@ export default function FreeCanvas({ canvasId }: { canvasId: string }) {
   // ── 视频工具节点（视频抽帧/转GIF/抽音轨，2026-11-02）：缩略图时间轴 ──
 
   /** 时间轴缓存（按视频路径）：canvas_video_timeline 后端自带产物级缓存，
-   *  这里只挡重复 invoke。轨道失败（非视频/无 ffmpeg）在节点上红字报因。 */
+   *  这里只挡重复 invoke。w/h 是帧宽高（后端 IHDR 实测，读不出为 0），
+   *  轨道按它铺格还原画面。轨道失败（非视频/无 ffmpeg）在节点上红字报因。 */
   const [videoTimelines, setVideoTimelines] = useState<
-    Record<string, { duration: number; thumbnails: { t: number; path: string }[] }>
+    Record<string, { duration: number; w?: number; h?: number; thumbnails: { t: number; path: string }[] }>
   >({});
   const timelineInflight = useRef<Set<string>>(new Set());
 
@@ -2288,7 +2289,7 @@ export default function FreeCanvas({ canvasId }: { canvasId: string }) {
       const vp = meta?.video_path ?? "";
       if (vp && !videoTimelines[vp] && !timelineInflight.current.has(vp)) {
         timelineInflight.current.add(vp);
-        invoke<{ duration: number; thumbnails: { t: number; path: string }[] }>(
+        invoke<{ duration: number; w?: number; h?: number; thumbnails: { t: number; path: string }[] }>(
           "canvas_video_timeline",
           { path: vp },
         )
@@ -3891,6 +3892,7 @@ export default function FreeCanvas({ canvasId }: { canvasId: string }) {
                         <CanvasVideoTimeline
                           duration={timeline.duration}
                           thumbnails={timeline.thumbnails}
+                          frameAspect={timeline.w && timeline.h ? timeline.w / timeline.h : undefined}
                           mode={isRange ? "range" : "seek"}
                           value={isRange ? rangeValue : seekT}
                           onSeek={(t2) => seekToolTo(node.id, t2)}
