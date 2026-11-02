@@ -159,6 +159,31 @@ jobs:
             echo "::notice::未配置 TAURI_SIGNING_PRIVATE_KEY，本次构建不生成更新产物"
           fi
 
+      # 抽帧引擎（视频首帧/尾帧、视频工具）按「资源目录 → PATH」解析
+      # ffmpeg（canvas_media.rs），打包产物必须自带，否则成品里该功能
+      # 报「未找到 ffmpeg」。二进制不进 git（resources/ffmpeg/README.txt），
+      # 由 CI 在构建前放置：Windows 用 BtbN LGPL 构建（免 GPL 传染、
+      # latest 标签恒可用），Linux 用 runner 的 apt 版。
+      - name: 放置 ffmpeg（抽帧引擎，Windows）
+        if: matrix.os == 'windows-latest'
+        shell: pwsh
+        run: |
+          $zip = "$env:RUNNER_TEMP\ffmpeg.zip"
+          Invoke-WebRequest -Uri "https://github.com/BtbN/FFmpeg-Builds/releases/download/latest/ffmpeg-master-latest-win64-lgpl.zip" -OutFile $zip
+          Expand-Archive -Path $zip -DestinationPath "$env:RUNNER_TEMP\ffmpeg" -Force
+          $exe = Get-ChildItem "$env:RUNNER_TEMP\ffmpeg" -Recurse -Filter ffmpeg.exe | Select-Object -First 1
+          if (-not $exe) { throw "下载的压缩包中未找到 ffmpeg.exe" }
+          Copy-Item $exe.FullName "copy-creator\src-tauri\resources\ffmpeg\ffmpeg.exe"
+          (Get-Item "copy-creator\src-tauri\resources\ffmpeg\ffmpeg.exe").Length
+
+      - name: 放置 ffmpeg（抽帧引擎，Linux）
+        if: matrix.os == 'ubuntu-latest'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends ffmpeg
+          cp "$(command -v ffmpeg)" copy-creator/src-tauri/resources/ffmpeg/ffmpeg
+          ls -la copy-creator/src-tauri/resources/ffmpeg/
+
       - name: 构建并发布
         uses: tauri-apps/tauri-action@v0
         env:
