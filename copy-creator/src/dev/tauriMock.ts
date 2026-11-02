@@ -284,13 +284,13 @@ const db = {
     },
     {
       id: "cn-7", canvas_id: "cv-1", type: "video_to_gif" as const, title: "",
-      pos_x: 0, pos_y: 0, width: 460, height: null,
+      pos_x: 900, pos_y: 760, width: 460, height: null,
       metadata: { kind: "video_to_gif", video_path: "", start_secs: 0, duration_secs: 3, format: "" },
       resource_path: "", created_at: ts(), updated_at: ts(),
     },
     {
       id: "cn-8", canvas_id: "cv-1", type: "video_extract_audio" as const, title: "",
-      pos_x: 0, pos_y: 0, width: 460, height: null,
+      pos_x: 1420, pos_y: 760, width: 460, height: null,
       metadata: { kind: "video_extract_audio", video_path: "", start_secs: 0, duration_secs: 0, format: "" },
       resource_path: "", created_at: ts(), updated_at: ts(),
     },
