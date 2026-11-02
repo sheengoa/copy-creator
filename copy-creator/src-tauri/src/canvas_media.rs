@@ -25,12 +25,48 @@ async fn await_dialog<T: Send + 'static>(
     .map_err(|e| format!("对话框等待失败: {e}"))
 }
 
+/// 选片对话框过滤器的显示名（Windows 下拉里的唯一一项）：按传入扩展名
+/// 全员归属给「图片/视频/音频」，混合或陌生扩展名统称「文件」。
+fn pick_filter_name(exts: &[String]) -> String {
+    const IMAGE_EXTS: [&str; 6] = ["png", "jpg", "jpeg", "webp", "gif", "bmp"];
+    const VIDEO_EXTS: [&str; 5] = ["mp4", "webm", "mkv", "mov", "avi"];
+    const AUDIO_EXTS: [&str; 7] = ["mp3", "m4a", "aac", "flac", "ogg", "wav", "opus"];
+    let all_in = |set: &[&str]| exts.iter().all(|e| set.contains(&e.as_str()));
+    if all_in(&IMAGE_EXTS) {
+        "图片".to_string()
+    } else if all_in(&VIDEO_EXTS) {
+        "视频".to_string()
+    } else if all_in(&AUDIO_EXTS) {
+        "音频".to_string()
+    } else {
+        "文件".to_string()
+    }
+}
+
 /// 加载节点「从电脑选择」：任意路径媒体文件，选择即登记媒体服务授权
 /// （只引用预览，不复制入库）。取消返回 cancelled（前端静默）。
+/// extensions 非空时对话框限定可选类型（前端按节点类型传图像/视频/音频
+/// 扩展名，与资源库浮层的类型白名单同语义——图像节点选到视频只会得到
+/// 一块空白格）；前端对返回路径仍做一次扩展名校验兜底。
 #[tauri::command]
-pub async fn canvas_pick_media_file(app: AppHandle) -> Result<serde_json::Value, String> {
+pub async fn canvas_pick_media_file(
+    app: AppHandle,
+    extensions: Option<Vec<String>>,
+) -> Result<serde_json::Value, String> {
     let (tx, rx) = std::sync::mpsc::channel();
-    app.dialog().file().pick_file(move |path| {
+    let mut dialog = app.dialog().file();
+    if let Some(raw) = extensions.as_ref() {
+        let exts: Vec<String> = raw
+            .iter()
+            .map(|e| e.trim().trim_start_matches('.').to_ascii_lowercase())
+            .filter(|e| !e.is_empty())
+            .collect();
+        if !exts.is_empty() {
+            let names: Vec<&str> = exts.iter().map(String::as_str).collect();
+            dialog = dialog.add_filter(pick_filter_name(&exts), &names);
+        }
+    }
+    dialog.pick_file(move |path| {
         let _ = tx.send(path);
     });
     match await_dialog(rx).await? {

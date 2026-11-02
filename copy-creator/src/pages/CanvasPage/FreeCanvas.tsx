@@ -279,9 +279,34 @@ const isVideoToolType = (type: CanvasNodeType | undefined): boolean =>
   !!type && VIDEO_TOOL_TYPES.includes(type);
 const AUDIO_EXTS = ["mp3", "m4a", "aac", "flac", "ogg", "wav", "opus"];
 
+/** 「从资源库选择」浮层的类型白名单：加载/视频工具节点只允许选自己
+ *  吃的类型（加载图像选到视频只会得到一块空白格，反之亦然）。表外
+ *  节点类型（文本加载等不走浮层）缺省不过滤。 */
+const LIBRARY_PICKER_KINDS: Partial<Record<CanvasNodeType, string[]>> = {
+  load_image: ["image"],
+  load_video: ["video"],
+  load_audio: ["audio"],
+  video_first_frame: ["video"],
+  video_last_frame: ["video"],
+  video_seek_frame: ["video"],
+  video_to_gif: ["video"],
+  video_extract_audio: ["video"],
+};
+
 function extOf(path: string): string {
   return path.split(".").pop()?.toLowerCase() ?? "";
 }
+
+/** 加载/视频工具节点允许的文件扩展名：OS 拖入、本地选片对话框与选后
+ *  校验共用同一份（类型不符的媒体在本节点只能得到空白/裂图）。 */
+const loadAllowedExts = (type: CanvasNodeType): string[] =>
+  isVideoToolType(type) || type === "load_video"
+    ? VIDEO_EXTS
+    : type === "load_image"
+      ? IMAGE_EXTS
+      : type === "load_audio"
+        ? AUDIO_EXTS
+        : [];
 
 type Pos = { x: number; y: number };
 type WireBox = Pos & { w: number; h: number };
@@ -2406,12 +2431,14 @@ export default function FreeCanvas({ canvasId }: { canvasId: string }) {
   };
 
   const pickerApplyRef = useRef<"resource" | "frame-video">("resource");
+  /** 打开浮层时记录的类型白名单（渲染时传给浮层过滤列表；ref 在同一次
+   *  事件里先于 setPickerForNode 更新，渲染读到的必是新值）。 */
+  const pickerKindsRef = useRef<string[] | null>(null);
 
-  const pickFromLibrary = (node: CanvasNode, kind: string) => {
+  const pickFromLibrary = (node: CanvasNode) => {
     pickerApplyRef.current = isVideoToolType(node.type) ? "frame-video" : "resource";
+    pickerKindsRef.current = LIBRARY_PICKER_KINDS[node.type] ?? null;
     setPickerForNode(node.id);
-    // kind 供浮层标题区分（图像/视频/音频/文本）。
-    void kind;
   };
 
   /** 视频工具节点换视频：清旧产物（resource_path）+ 写新视频路径并重置
@@ -2455,7 +2482,15 @@ export default function FreeCanvas({ canvasId }: { canvasId: string }) {
 
   const pickFromDisk = async (node: CanvasNode) => {
     try {
-      const picked = await invoke<{ path: string }>("canvas_pick_media_file");
+      const allowed = loadAllowedExts(node.type);
+      const picked = await invoke<{ path: string }>("canvas_pick_media_file", {
+        extensions: allowed,
+      });
+      // 对话框 filter 可被「所有文件」输入绕过：返回后再按扩展名校验一次。
+      if (allowed.length > 0 && !allowed.includes(extOf(picked.path))) {
+        setNodeErrors((prev) => ({ ...prev, [node.id]: t("canvas.loadTypeMismatch") }));
+        return;
+      }
       if (isVideoToolType(node.type)) {
         await applyFrameVideo(node.id, node.type, picked.path);
       } else {
@@ -2712,12 +2747,7 @@ export default function FreeCanvas({ canvasId }: { canvasId: string }) {
           targetNode.type === "load_video" ||
           targetNode.type === "load_audio")
       ) {
-        const allowed =
-          targetIsVideoTool || targetNode.type === "load_video"
-            ? VIDEO_EXTS
-            : targetNode.type === "load_image"
-              ? IMAGE_EXTS
-              : AUDIO_EXTS;
+        const allowed = loadAllowedExts(targetNode.type);
         const match = paths.find((p) => allowed.includes(extOf(p)));
         if (match) {
           await invoke("canvas_authorize_media", { path: match }).catch(() => {});
@@ -3182,7 +3212,7 @@ export default function FreeCanvas({ canvasId }: { canvasId: string }) {
                           <button
                             className="fc-node-btn ghost is-icon grow"
                             aria-label={t("canvas.loadFromLibrary")}
-                            onClick={() => pickFromLibrary(node, node.type)}
+                            onClick={() => pickFromLibrary(node)}
                           >
                             {Icons.resources}
                           </button>
@@ -3599,7 +3629,7 @@ export default function FreeCanvas({ canvasId }: { canvasId: string }) {
                             type="button"
                             className="fc-node-btn ghost is-icon grow"
                             aria-label={t("canvas.loadFromLibrary")}
-                            onClick={() => pickFromLibrary(node, "video")}
+                            onClick={() => pickFromLibrary(node)}
                           >
                             {Icons.resources}
                           </button>
@@ -3738,7 +3768,7 @@ export default function FreeCanvas({ canvasId }: { canvasId: string }) {
                             type="button"
                             className="fc-node-btn ghost is-icon grow"
                             aria-label={t("canvas.loadFromLibrary")}
-                            onClick={() => pickFromLibrary(node, isAudio ? "audio" : "video")}
+                            onClick={() => pickFromLibrary(node)}
                           >
                             {Icons.resources}
                           </button>
@@ -4135,6 +4165,7 @@ export default function FreeCanvas({ canvasId }: { canvasId: string }) {
         {pickerForNode && (
           <WheelGate>
             <LazyLibraryPicker
+              kinds={pickerKindsRef.current ?? undefined}
               onPick={(filePath) => {
                 const targetId = pickerForNode;
                 setPickerForNode(null);
@@ -4612,12 +4643,15 @@ function ParamCombo({
 
 /** 懒加载的资源库选择浮层：画布加载节点「从资源库选择」入口，薄壳复用
  *  工程域的通用选择浮层（搜索/分页/缩略图/导入），点选即回填节点路径。
+ *  kinds 透传为浮层的类型白名单（图像节点只见图片、视频工具只见视频）。
  *  选择器给的是库内相对路径——mediaUrl 域层把相对路径拼到存储根（≠资源
  *  库根），必须在这里转成绝对路径落节点，否则缩略图/媒体全部裂图。 */
 function LazyLibraryPicker({
+  kinds,
   onPick,
   onClose,
 }: {
+  kinds?: string[];
   onPick: (filePath: string) => void;
   onClose: () => void;
 }) {
@@ -4637,6 +4671,7 @@ function LazyLibraryPicker({
   return (
     <ProjectFilePickerDialog
       title={t("canvas.loadPickerTitle")}
+      kindFilter={kinds}
       onPick={(file) => onPick(joinLibraryPath(libraryRoot, file.filePath))}
       onClose={onClose}
     />

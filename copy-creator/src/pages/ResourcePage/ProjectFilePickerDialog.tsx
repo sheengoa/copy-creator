@@ -33,6 +33,10 @@ export interface ProjectFilePickerDialogProps {
    *  三库回填语境「选择/从电脑导入」。 */
   pickLabel?: string;
   importLabel?: string;
+  /** 媒体类型白名单（image/video/audio 等，按扩展名推断）：画布加载
+   *  节点「从资源库选择」按节点类型传入，类型不符的文件不再列出——
+   *  图像节点选到视频只会得到一块空白。缺省不过滤（挂靠等全类型场景）。 */
+  kindFilter?: string[];
 }
 
 /** 单页条数：后端按关键词搜索 + 偏移分页，大库不再只有最新 200 条可选。 */
@@ -160,6 +164,7 @@ export default function ProjectFilePickerDialog({
   takenLabel,
   pickLabel,
   importLabel,
+  kindFilter,
 }: ProjectFilePickerDialogProps) {
   const { t } = useTranslation();
   const [libraryRoot, setLibraryRoot] = useState("");
@@ -267,7 +272,8 @@ export default function ProjectFilePickerDialog({
   const ungroupedFolder = groups.find((folder) => folder.path === "");
 
   // 仅保留有库内文件的记录（工程档案的路径约定必须相对库根），同一
-  // 文件多记录跨页去重；关键词与分组过滤均已由后端完成。
+  // 文件多记录跨页去重；关键词与分组过滤均已由后端完成。kindFilter 在
+  // 此处按推断类型过滤（后端不产类型，kind 本就是前端按扩展名算的）。
   const candidates = useMemo(() => {
     const seen = new Set<string>();
     const list: PickedLibraryFile[] = [];
@@ -277,14 +283,16 @@ export default function ProjectFilePickerDialog({
       const relative = relativeLibraryPath(libraryRoot, absolute);
       if (!relative || seen.has(relative)) continue;
       seen.add(relative);
+      const kind = inferResourceMediaKind({ type: "file", content: relative });
+      if (kindFilter && !kindFilter.includes(kind)) continue;
       list.push({
         filePath: relative,
         name: projectFileDisplayName("", relative),
-        kind: inferResourceMediaKind({ type: "file", content: relative }),
+        kind,
       });
     }
     return list;
-  }, [records, libraryRoot]);
+  }, [records, libraryRoot, kindFilter]);
 
   const importAndPick = async () => {
     if (importing) return;
@@ -293,6 +301,19 @@ export default function ProjectFilePickerDialog({
     try {
       const { path } = await invoke<{ path: string }>("select_resource_trace_file");
       setImportFile(path.split(/[\\/]/).pop() ?? path);
+      // 类型白名单在导入前拦截（复制入库之前就拒掉，不给库里塞进选不
+      // 了的文件）：选择器给出的 kind 是按扩展名推断的，导入前同样按
+      // 扩展名推断，语义一致。
+      const wantKind = kindFilter?.[0];
+      if (wantKind) {
+        const pickedKind = inferResourceMediaKind({ type: "file", content: path });
+        if (pickedKind !== wantKind) {
+          setImportError(
+            t("project.asset.importKindMismatch", { kind: t(assetKindLabelKey(wantKind)) }),
+          );
+          return;
+        }
+      }
       // 只入库不挂靠（import_resource_file 不落工程档案）；怎么用交给
       // 调用方——挂靠壳在 onPick 里挂，三库壳回填路径。关闭也归调用方
       // （单选在 onPick 后关，多选保持打开供连续挑选）。
@@ -393,9 +414,18 @@ export default function ProjectFilePickerDialog({
                 <div className="project-library-empty">
                   {Icons.empty}
                   <p>
-                    {group === null
-                      ? t("project.asset.pickerEmpty")
-                      : t("project.asset.pickerEmptyInGroup")}
+                    {kindFilter
+                      ? // 类型过滤空态：点名「这个库/分组里没有该类型」，与全类型空态区分。
+                        group === null
+                          ? t("project.asset.pickerKindEmptyAll", {
+                              kind: t(assetKindLabelKey(kindFilter[0])),
+                            })
+                          : t("project.asset.pickerKindEmptyGroup", {
+                              kind: t(assetKindLabelKey(kindFilter[0])),
+                            })
+                      : group === null
+                        ? t("project.asset.pickerEmpty")
+                        : t("project.asset.pickerEmptyInGroup")}
                   </p>
                   {group !== null && search !== "" && (
                     <button
