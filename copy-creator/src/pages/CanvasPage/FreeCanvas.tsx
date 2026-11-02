@@ -21,7 +21,6 @@ import {
   menuIconOf,
   NODE_DEFAULT_SIZE,
   NODE_DEFS,
-  NODE_FALLBACK_SIZE,
   NODE_MIN_SIZE,
   outMediaColor,
   PORT_DEFS,
@@ -31,6 +30,9 @@ import {
 import { NodeHint } from "./nodes/NodeHint";
 import { NodeShell } from "./nodes/shell";
 import { WheelGate } from "./nodes/WheelGate";
+import type { DragState, Pos, UndoAction, WireBox } from "./engine/gestureTypes";
+import { MINI_H, MINI_W, UNDO_LIMIT, WIRES_VIEWPORT_PAD, ZOOM_MAX, ZOOM_MIN } from "./engine/gestureTypes";
+import { nodeSize, segHitsPolyline, wirePathD } from "./engine/wireGeom";
 import { useMediaUrl } from "./nodes/mediaPath";
 import { SaveRuntimeProvider } from "./nodes/saveRuntime";
 import { GenRuntimeProvider } from "./nodes/genRuntime";
@@ -48,124 +50,7 @@ import type { NodeServices } from "./nodes/types";
 // 生成前提 = 文本口已连非空文本 + 输出口已连保存/预览。产物由保存节点
 // 决定去向（入库 / 另存任意路径），生成节点只暂存在托管目录。
 
-const ZOOM_MIN = 0.3;
-const ZOOM_MAX = 2.2;
-const WIRES_VIEWPORT_PAD = 64;
-const MINI_W = 150;
-const MINI_H = 96;
-const UNDO_LIMIT = 50;
-
-type Pos = { x: number; y: number };
-type WireBox = Pos & { w: number; h: number };
-
-// 线段相交（同横坐标单调判定，经典叉积法）——切线的扫过判定用。
-// （自 ProjectCanvas.tsx 零改动搬运）
-const segsIntersect = (
-  a1: { x: number; y: number }, a2: { x: number; y: number },
-  b1: { x: number; y: number }, b2: { x: number; y: number },
-): boolean => {
-  const d = (b1.x - a1.x) * (a2.y - a1.y) - (b1.y - a1.y) * (a2.x - a1.x);
-  const e = (b2.x - a1.x) * (a2.y - a1.y) - (b2.y - a1.y) * (a2.x - a1.x);
-  const f = (b2.x - b1.x) * (a2.y - a1.y) - (b2.y - b1.y) * (a2.x - a1.x);
-  const g = (a1.x - b1.x) * (b2.y - b1.y) - (a1.y - b1.y) * (b2.x - b1.x);
-  return d * e < 0 && f * g < 0;
-};
-// 轨迹段到点的最短距离（刀刃擦过采样点也算切到）。
-const distToSeg = (
-  p: { x: number; y: number },
-  a1: { x: number; y: number }, a2: { x: number; y: number },
-): number => {
-  const dx = a2.x - a1.x;
-  const dy = a2.y - a1.y;
-  const len2 = dx * dx + dy * dy;
-  const t = len2 === 0 ? 0 : Math.max(0, Math.min(1, ((p.x - a1.x) * dx + (p.y - a1.y) * dy) / len2));
-  const ex = p.x - (a1.x + t * dx);
-  const ey = p.y - (a1.y + t * dy);
-  return Math.hypot(ex, ey);
-};
-// 切割线段是否命中折线（连线按贝塞尔采样后的屏幕坐标点列）。
-const CUT_TOUCH_PX = 2;
-const segHitsPolyline = (
-  a1: { x: number; y: number }, a2: { x: number; y: number },
-  pts: { x: number; y: number }[],
-): boolean => {
-  for (let i = 0; i < pts.length; i++) {
-    if (distToSeg(pts[i], a1, a2) < CUT_TOUCH_PX) return true;
-  }
-  for (let i = 1; i < pts.length; i++) {
-    if (segsIntersect(a1, a2, pts[i - 1], pts[i])) return true;
-  }
-  return false;
-};
-
-/** ComfyUI 风格连线贝塞尔（自 ProjectCanvas.tsx 零改动搬运）。 */
-function wirePathD(a: { x: number; y: number }, b: { x: number; y: number }): string {
-  const offset = Math.hypot(b.x - a.x, b.y - a.y) * 0.25;
-  return `M ${a.x} ${a.y} C ${a.x + offset} ${a.y}, ${b.x - offset} ${b.y}, ${b.x} ${b.y}`;
-}
-
-function nodeSize(node: CanvasNode): { w: number; h: number } {
-  const fallback = NODE_FALLBACK_SIZE[node.type];
-  return { w: node.width ?? fallback.w, h: node.height ?? fallback.h };
-}
-
-type DragState =
-  | { kind: "pan"; sx: number; sy: number; ox: number; oy: number; moved: boolean }
-  | { kind: "marquee"; sx: number; sy: number; mq: HTMLDivElement | null; moved: boolean }
-  | {
-      kind: "node";
-      sx: number; sy: number;
-      ox: number; oy: number;
-      frameKey: string;
-      moved: boolean;
-    }
-  | { kind: "multidrag"; sx: number; sy: number; moved: boolean; members: { key: string; x: number; y: number }[] }
-  | {
-      kind: "resize";
-      sx: number; sy: number; moved: boolean;
-      ox: number; oy: number;
-      frameKey: string;
-      corner: "nw" | "ne" | "sw" | "se";
-      px?: number;
-      py?: number;
-      px0?: number;
-      py0?: number;
-    }
-  | {
-      kind: "wire";
-      sx: number; sy: number; moved: boolean;
-      fromKey: string;
-      /** 拖线方向：out = 从输出口拖出建线；in = 从输入口反向拖（落点
-       *  为上游）或摘线换目标（rewire）。 */
-      fromDir: "in" | "out";
-      fromPortId: string;
-      /** 摘线换目标：拿着的那条连线（行数据未删，松手定去向）。 */
-      rewire?: boolean;
-      connId?: string;
-      targetKey: string | null;
-      targetPort: string | null;
-      invalid?: boolean;
-    }
-  | { kind: "wirecut"; sx: number; sy: number; moved: boolean; px?: number; py?: number }
-  | {
-      kind: "addnode";
-      sx: number; sy: number; moved: boolean;
-      fox: number; foy: number;
-      frameKey: CanvasNodeType;
-      /** 拖线到空白建节点：创建后自动接上这条线。 */
-      wire?: { fromKey: string; fromDir: "in" | "out"; fromPortId: string };
-      /** 摘线到空白建节点：创建后线改接新节点（原连线行删除）。 */
-      detached?: { connId: string; fromKey: string };
-    };
-
-type UndoAction =
-  | { kind: "layout"; prev: CanvasLayoutEntry[]; next: CanvasLayoutEntry[] }
-  | {
-      kind: "delete";
-      nodes: CanvasNode[];
-      connections: { from_node: string; to_node: string; to_port: string }[];
-    }
-  | { kind: "create"; ids: string[] };
+// ── 手势状态类型与连线几何已上移 engine/（gestureTypes.ts / wireGeom.ts）──
 
 export default function FreeCanvas({ canvasId }: { canvasId: string }) {
   const { t } = useTranslation();
