@@ -20,7 +20,6 @@ import {
   type CanvasNodeType,
   type SaveMediaMeta,
 } from "../../stores/canvasStore";
-import { MEDIA_COLOR } from "./nodes/colors";
 import { AUDIO_EXTS, extOf, IMAGE_EXTS, VIDEO_EXTS } from "./nodes/exts";
 import type { PortDef } from "./nodes/types";
 import {
@@ -28,14 +27,16 @@ import {
   loadAllowedExts,
   menuGroups,
   menuIconOf,
-  NODE_ACCENT,
   NODE_DEFAULT_SIZE,
+  NODE_DEFS,
   NODE_FALLBACK_SIZE,
   NODE_MIN_SIZE,
   outMediaColor,
   PORT_DEFS,
   VIDEO_TOOL_TYPES,
 } from "./nodes/registry";
+import { NodeHint } from "./nodes/NodeHint";
+import { NodeShell } from "./nodes/shell";
 
 // 自由生图工作流画布（画布区方案 3.3 + 节点体系 v2）：以 ProjectCanvas 为
 // 基座 fork——引擎框架（视口/连线/切线/框选/分组/菜单）自工程画布搬运；
@@ -2674,58 +2675,6 @@ export default function FreeCanvas({ canvasId }: { canvasId: string }) {
     h: ((vpSize?.h ?? 0) || 900) / view.scale + WIRES_VIEWPORT_PAD * 2,
   };
 
-  // 尺寸手柄（四角）：双击不冒泡到节点。
-  const resizeHandle = (
-    <>
-      {(["nw", "ne", "sw", "se"] as const).map((corner) => (
-        <span
-          key={corner}
-          className={`pc-resize ${corner}`}
-          data-corner={corner}
-          aria-hidden="true"
-        />
-      ))}
-    </>
-  );
-
-  // 端口行（对齐工程画布）：每行一个输入口（点 + 名称），首行右端输出
-  // 口。口点色按媒体类型；data-port-id 供实测锚点与摘线/落点识别。
-  function portBarOf(node: CanvasNode): ReactNode {
-    const def = PORT_DEFS[node.type];
-    if (def.ins.length === 0 && !def.out) return null;
-    const rows = Math.max(def.ins.length, def.out ? 1 : 0);
-    return (
-      <div className="pc-port-bar">
-        {Array.from({ length: rows }, (_, i) => (
-          <div key={i} className="pc-port-row">
-            {def.ins[i] ? (
-              <>
-                <span
-                  className="pc-port pc-port-in"
-                  data-port="in"
-                  data-port-id={def.ins[i].id}
-                  style={{ background: MEDIA_COLOR[def.ins[i].mediaKind] }}
-                />
-                <span className="pc-port-name">{t(`canvas.port.${def.ins[i].mediaKind}`)}</span>
-              </>
-            ) : null}
-            {i === 0 && def.out ? (
-              <>
-                <span className="pc-port-name pc-port-name-out">{t(`canvas.port.${def.out.mediaKind}`)}</span>
-                <span
-                  className="pc-port pc-port-out"
-                  data-port="out"
-                  data-port-id="__out"
-                  style={{ background: outMediaColor(node.type) }}
-                />
-              </>
-            ) : null}
-          </div>
-        ))}
-      </div>
-    );
-  }
-
   // 迷你地图比例：内容包围盒铺满小地图。
   const miniBBox = (() => {
     let minX = Infinity;
@@ -2849,49 +2798,38 @@ export default function FreeCanvas({ canvasId }: { canvasId: string }) {
           {nodes.map((node) => {
             const selected = selKeys.includes(node.id);
             const size = nodeSize(node);
-            const accent = NODE_ACCENT[node.type];
             // meta 提前捕获为 const：闭包（onClick/onBlur）拿不到属性
             // 链的判窄，const 变量的判窄可以跨闭包保留。
             const meta = node.metadata;
-            const autoHeight = node.height == null;
-            const tools = (
-              <span className="pc-node-tools">
-                <NodeHint text={t("common.delete")}>
-                  <button
-                    type="button"
-                    className="danger"
-                    onPointerDown={(e) => e.stopPropagation()}
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      void deleteNodes([node.id]);
-                    }}
-                  >
-                    {Icons.delete}
-                  </button>
-                </NodeHint>
-              </span>
-            );
 
             if (node.type === "note") {
               // 便签节点：标准头栏卡 + 琥珀内嵌便签体，双击进入编辑。
               return (
-                <div
+                <NodeShell
                   key={node.id}
-                  data-key={node.id}
-                  className={`pc-node fc-type-note${selected ? " pc-selected" : ""}${pulseKeys.includes(node.id) ? " pc-spawn" : ""}`}
-                  style={
-                    {
-                      left: node.pos_x,
-                      top: node.pos_y,
-                      width: size.w,
-                      height: autoHeight ? undefined : size.h,
-                      "--node-accent": accent,
-                    } as CSSProperties
+                  def={NODE_DEFS[node.type]}
+                  node={node}
+                  selected={selected}
+                  pulsing={pulseKeys.includes(node.id)}
+                  size={size}
+                  onDelete={(id) => void deleteNodes([id])}
+                  toolsExtra={
+                    <NodeHint text={t("common.edit")}>
+                      <button
+                        type="button"
+                        onPointerDown={(e) => e.stopPropagation()}
+                        onClick={() => {
+                          if (meta.kind === "note") {
+                            setEditingNoteId(node.id);
+                            setNoteDraft(meta.content);
+                          }
+                        }}
+                      >
+                        {Icons.edit}
+                      </button>
+                    </NodeHint>
                   }
                 >
-                  <div className="pc-node-head">
-                    <span className="pc-node-kind">{t(`canvas.node.${node.type}`)}</span>
-                  </div>
                   {editingNoteId === node.id ? (
                     <textarea
                       className="fc-note-input"
@@ -2916,37 +2854,7 @@ export default function FreeCanvas({ canvasId }: { canvasId: string }) {
                       {meta.kind === "note" && meta.content ? meta.content : <i>{t("project.canvas.noteEmpty")}</i>}
                     </div>
                   )}
-                  <span className="pc-node-tools">
-                    <NodeHint text={t("common.edit")}>
-                      <button
-                        type="button"
-                        onPointerDown={(e) => e.stopPropagation()}
-                        onClick={() => {
-                          if (meta.kind === "note") {
-                            setEditingNoteId(node.id);
-                            setNoteDraft(meta.content);
-                          }
-                        }}
-                      >
-                        {Icons.edit}
-                      </button>
-                    </NodeHint>
-                    <NodeHint text={t("common.delete")}>
-                      <button
-                        type="button"
-                        className="danger"
-                        onPointerDown={(e) => e.stopPropagation()}
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          void deleteNodes([node.id]);
-                        }}
-                      >
-                        {Icons.delete}
-                      </button>
-                    </NodeHint>
-                  </span>
-                  {resizeHandle}
-                </div>
+                </NodeShell>
               );
             }
 
@@ -3823,33 +3731,17 @@ export default function FreeCanvas({ canvasId }: { canvasId: string }) {
             }
 
             return (
-              <div
+              <NodeShell
                 key={node.id}
-                data-key={node.id}
-                // pc-resized：落库固定高的节点（拖过手柄/历史高度），预览区
-                // 据此切换为「吃掉剩余空间」模式，按钮行永不被推出可视区。
-                className={`pc-node fc-type-${node.type}${!autoHeight ? " pc-resized" : ""}${selected ? " pc-selected" : ""}${pulseKeys.includes(node.id) ? " pc-spawn" : ""}`}
-                style={
-                  {
-                    left: node.pos_x,
-                    top: node.pos_y,
-                    width: size.w,
-                    // 视觉标准（B+）：未拖过尺寸手柄的节点高度由内容撑开，
-                    // 文本常驻编辑框节点除外。
-                    height: !autoHeight || node.type === "load_text" ? size.h : undefined,
-                    "--node-accent": accent,
-                  } as CSSProperties
-                }
+                def={NODE_DEFS[node.type]}
+                node={node}
+                selected={selected}
+                pulsing={pulseKeys.includes(node.id)}
+                size={size}
+                onDelete={(id) => void deleteNodes([id])}
               >
-                <div className="pc-node-head">
-                  <span className="pc-node-kind">{t(`canvas.node.${node.type}`)}</span>
-                  {node.title && <b className="pc-node-title">{node.title}</b>}
-                </div>
-                {portBarOf(node)}
                 {body}
-                {tools}
-                {resizeHandle}
-              </div>
+              </NodeShell>
             );
           })}
         </div>
@@ -4256,63 +4148,6 @@ function GenAuroraStage({
  *  体的圆角/毛玻璃/0.5px 细环同一视觉语言；不随画布缩放、不被节点滚
  *  动区裁切。text 为空时只做透明包裹。禁用按钮的指针事件会落到包裹
  *  层，因此禁用态同样能触发。 */
-function NodeHint({ text, children, className }: { text: string; children: ReactNode; className?: string }) {
-  const [tip, setTip] = useState<{ left: number; top: number; below?: boolean } | null>(null);
-  const anchorRef = useRef<HTMLSpanElement | null>(null);
-  const timerRef = useRef<number | undefined>(undefined);
-
-  useEffect(() => () => window.clearTimeout(timerRef.current), []);
-
-  // 画布滚轮缩放时锚点随世界移位，说明浮层不跟随重测——就地隐没，
-  // 等下次进入锚点再重现。弹层内滚动已被 WheelGate 截住，不会到这里。
-  useEffect(() => {
-    if (!tip) return;
-    window.clearTimeout(timerRef.current);
-    const onWheel = () => setTip(null);
-    window.addEventListener("wheel", onWheel, { passive: true });
-    return () => window.removeEventListener("wheel", onWheel);
-  }, [tip]);
-
-  const show = () => {
-    if (!text) return;
-    window.clearTimeout(timerRef.current);
-    timerRef.current = window.setTimeout(() => {
-      // 包裹层可能零尺寸（内部是绝对定位的箭头钮），优先取子元素矩形。
-      const el = (anchorRef.current?.firstElementChild as HTMLElement | null) ?? anchorRef.current;
-      const rect = el?.getBoundingClientRect();
-      if (!rect) return;
-      // 贴近视口顶缘时改在下方弹出，避免胶囊越出窗口。
-      const below = rect.top < 48;
-      // 水平夹紧：长文案（≤260px）贴近窗口左右缘时不越界；半宽按文案
-      // 长度估算（CJK ≈ 字号宽），短文案几乎不受影响。
-      const half = Math.min(130, (text.length * 11 + 24) / 2);
-      const cx = rect.left + rect.width / 2;
-      const left = Math.min(Math.max(cx, half + 8), window.innerWidth - half - 8);
-      setTip({ left, top: below ? rect.bottom + 7 : rect.top - 7, below });
-    }, 300);
-  };
-  const hide = () => {
-    window.clearTimeout(timerRef.current);
-    setTip(null);
-  };
-
-  return (
-    <span
-      ref={anchorRef}
-      className={`fc-hint-anchor${className ? ` ${className}` : ""}`}
-      onPointerEnter={show}
-      onPointerLeave={hide}
-      onPointerDownCapture={hide}
-    >
-      {children}
-      {tip && text && createPortal(
-        <div className={`fc-hint${tip.below ? " is-below" : ""}`} style={{ left: tip.left, top: tip.top }}>{text}</div>,
-        document.body,
-      )}
-    </span>
-  );
-}
-
 function ParamCombo({
   comboKey,
   value,
