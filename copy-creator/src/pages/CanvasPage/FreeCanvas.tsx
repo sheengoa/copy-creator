@@ -1269,7 +1269,10 @@ export default function FreeCanvas({ canvasId }: { canvasId: string }) {
       }
       // 可交互元素一律不进手势：button 上 begin() 会把指针捕获到视口容器，
       // click 被重定向到捕获元素反而点不中；输入元素要保住文本选择/光标。
-      if (e.button === 0 && target?.closest("input, textarea, button, video, audio")) return;
+      // .fc-vtl-strip 是视频工具时间轴：视口抢捕获会吞掉轨道的 pointerup，
+      // 拖拽会话残留成「点一下跟鼠标走」，且轨道拖动会连带拖走节点
+      // （浏览器实测实锤：lostpointercapture 后节点被拖出数百 px）。
+      if (e.button === 0 && target?.closest("input, textarea, button, video, audio, .fc-vtl-strip")) return;
 
       const vp = vpRef.current;
       if (!vp) return;
