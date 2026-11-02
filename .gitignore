@@ -41,3 +41,6 @@ copy-creator/dev.cmd
 # copy-creator/src-tauri/resources/ffmpeg/README.txt）
 copy-creator/src-tauri/resources/ffmpeg/ffmpeg.exe
 copy-creator/src-tauri/resources/ffmpeg/ffmpeg
+
+# 误在仓库根跑 vitest 留下的缓存目录（真实依赖在 copy-creator/node_modules）
+/node_modules/
