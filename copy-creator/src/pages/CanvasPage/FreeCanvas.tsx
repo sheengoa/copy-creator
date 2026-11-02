@@ -2467,9 +2467,16 @@ export default function FreeCanvas({ canvasId }: { canvasId: string }) {
       delete next[node.id];
       return next;
     });
+    // 音轨节点的格式选择与视频无关，清片换片时保留（applyFrameVideo 读
+    // prevMeta.format 回写）；卸载的监视器元素引用一并清掉。
+    const keepFormat =
+      node.metadata.kind === "video_extract_audio" && node.metadata.format
+        ? { format: node.metadata.format }
+        : {};
+    delete videoElsRef.current[node.id];
     void store.getState().updateNode(node.id, {
       resourcePath: "",
-      metadata: JSON.stringify({ kind: node.type, video_path: "" }),
+      metadata: JSON.stringify({ kind: node.type, video_path: "", ...keepFormat }),
     });
   };
 
@@ -3752,6 +3759,23 @@ export default function FreeCanvas({ canvasId }: { canvasId: string }) {
                                   ? t("canvas.audioBadge", { fmt: String(fmtNow).toUpperCase() })
                                   : formatTimecode(seekT)}
                             </span>
+                          )}
+                          {/* 悬浮右上角的圆形 ×（与加载节点同款）：清除视频回
+                              空态、产物一并清掉重新选片；执行中不显示。 */}
+                          {videoPath && !toolBusy && (
+                            <NodeHint text={t("canvas.clearLoaded")}>
+                              <button
+                                type="button"
+                                className="fc-load-clear"
+                                aria-label={t("canvas.clearLoaded")}
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  clearFrameVideo(node);
+                                }}
+                              >
+                                {Icons.close}
+                              </button>
+                            </NodeHint>
                           )}
                         </div>
                         <div className="fc-vt-side">

@@ -46,6 +46,17 @@
   z-index: 2;
 }
 
+/* 监视器悬浮 ×：复用加载节点 .fc-load-clear（右上角圆钮、悬停显形），
+   但监视器不是 .fc-load-media，悬停选择器与层级在此补齐。 */
+.fc-root .fc-vt-screen .fc-load-clear {
+  z-index: 3;
+}
+
+.fc-root .fc-vt-screen:hover .fc-load-clear,
+.fc-root .fc-vt-screen .fc-load-clear:focus-visible {
+  opacity: 1;
+}
+
 /* 侧栏：时间大字 / 参数 / 提示 / 主按钮，主按钮贴底。 */
 .fc-root .fc-vt-side {
   flex: 1;
