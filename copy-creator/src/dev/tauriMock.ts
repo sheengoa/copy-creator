@@ -297,7 +297,7 @@ const db = {
   ] as MockCanvasNode[],
   canvas_connections: [
     { id: "cc-1", canvas_id: "cv-1", from_node: "cn-1", to_node: "cn-2", to_port: "text", created_at: ts() },
-    { id: "cc-2", canvas_id: "cv-1", from_node: "cn-2", to_node: "cn-3", to_port: "image", created_at: ts() },
+    { id: "cc-2", canvas_id: "cv-1", from_node: "cn-2", to_node: "cn-3", to_port: "in", created_at: ts() },
   ] as MockCanvasConnection[],
   // 画布 AI 渠道（设置页）：两条示例渠道，覆盖健康/未测试两种状态，
   // 供浏览器验证渠道管理与调度交互。
