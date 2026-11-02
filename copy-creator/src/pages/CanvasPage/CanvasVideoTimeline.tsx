@@ -159,13 +159,23 @@ export default function CanvasVideoTimeline({
 
   const onStripPointerMove = (event: React.PointerEvent<HTMLDivElement>) => {
     if (dragKindRef.current === 0) return;
+    // 主键已松开却没收到 pointerup（外层手势抢走捕获等情形）时，move 仍会
+    // 以 buttons=0 到达——此时结束会话，绝不「点一下就跟着悬停走」。
+    if ((event.buttons & 1) === 0) {
+      endDrag(event);
+      return;
+    }
     applyMove(event.clientX);
   };
 
   const endDrag = (event: React.PointerEvent<HTMLDivElement>) => {
     if (dragKindRef.current === 0) return;
     dragKindRef.current = 0;
-    stripRef.current?.releasePointerCapture?.(event.pointerId);
+    try {
+      stripRef.current?.releasePointerCapture(event.pointerId);
+    } catch {
+      // 捕获已被外层接管/指针已失效：会话已在上面结束，无须补救。
+    }
     onCommit?.();
   };
 
