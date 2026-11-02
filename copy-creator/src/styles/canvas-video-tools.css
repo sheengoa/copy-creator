@@ -313,7 +313,9 @@
 .fc-root .pc-node.pc-resized .fc-vt-screen {
   height: auto;
   min-height: 0;
-  aspect-ratio: auto;
+  /* !important 压过视频比例的内联 aspect-ratio：用户拖过尺寸手柄即接管
+     布局，监视器回退「填满节点」行为（画面 contain 不变形）。 */
+  aspect-ratio: auto !important;
 }
 
 .fc-root .pc-node.pc-resized .fc-vt-screen .resource-media-player {
