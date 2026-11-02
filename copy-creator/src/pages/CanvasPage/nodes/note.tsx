@@ -1,5 +1,6 @@
 import { Icons } from "../../../components/Icons";
 import { MEDIA_COLOR } from "./colors";
+import { useNoteEditing } from "./noteEditing";
 import type { NodeDefinition } from "./types";
 
 // 便签节点：标准头栏卡 + 琥珀内嵌便签体（琥珀即文本黄），双击进入编辑。
@@ -15,4 +16,7 @@ export const noteDef: NodeDefinition = {
   fallbackSize: { w: 220, h: 120 },
   ports: { ins: [], out: null },
   formWrap: false,
+  onDoubleClick: (node) => {
+    if (node.metadata.kind === "note") useNoteEditing.getState().start(node.id, node.metadata.content);
+  },
 };

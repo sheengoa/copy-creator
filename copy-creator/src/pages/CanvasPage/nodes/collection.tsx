@@ -16,6 +16,8 @@ export const collectionTextDef: NodeDefinition = {
     ins: [{ id: "text", accepts: ["load_text"], mediaKind: "text", multi: true }],
     out: { mediaKind: "text" },
   },
+  // 生成前提：文本合集有任意成员连线即就绪（空内容成员由后端聚合跳过）。
+  ready: (node, connections) => connections.some((m) => m.to_node === node.id),
 };
 
 export const collectionImageDef: NodeDefinition = {

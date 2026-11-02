@@ -37,6 +37,15 @@ import {
 } from "./nodes/registry";
 import { NodeHint } from "./nodes/NodeHint";
 import { NodeShell } from "./nodes/shell";
+import { useNodeErrors } from "./nodes/nodeErrors";
+import { useNoteEditing } from "./nodes/noteEditing";
+import {
+  collectionItemsOf as collectionItemsQuery,
+  genReadinessOf as genReadinessQuery,
+  upstreamMediaOf as upstreamMediaQuery,
+  upstreamNodeOf as upstreamNodeQuery,
+} from "./nodes/upstream";
+import type { NodeServices } from "./nodes/types";
 
 // 自由生图工作流画布（画布区方案 3.3 + 节点体系 v2）：以 ProjectCanvas 为
 // 基座 fork——引擎框架（视口/连线/切线/框选/分组/菜单）自工程画布搬运；
@@ -442,10 +451,15 @@ export default function FreeCanvas({ canvasId }: { canvasId: string }) {
   const [wireDraft, setWireDraft] = useState<{ d: string; invalid: boolean; color?: string } | null>(null);
   /** 摘线拿着（rewire）中：该连线暂隐藏，松手转接或放回。 */
   const [liftedWire, setLiftedWire] = useState<{ connId: string; fromKey: string } | null>(null);
-  const [editingNoteId, setEditingNoteId] = useState<string | null>(null);
-  const [noteDraft, setNoteDraft] = useState("");
+  // 便签编辑会话与节点错误文案：UI 层小 store（nodes/noteEditing、
+  // nodes/nodeErrors），双击手势/家族模块与节点体共享。
+  const editingNoteId = useNoteEditing((s) => s.editingId);
+  const noteDraft = useNoteEditing((s) => s.draft);
+  const setNoteDraft = useNoteEditing((s) => s.setDraft);
+  const closeNoteEdit = useNoteEditing((s) => s.close);
+  const nodeErrors = useNodeErrors((s) => s.errors);
+  const setNodeErrors = useNodeErrors((s) => s.setErrors);
   const [genStarting, setGenStarting] = useState(false);
-  const [nodeErrors, setNodeErrors] = useState<Record<string, string>>({});
   // 生成等待编排（流光谢幕相位机）：节点 id → 快照。wait 跟随逐张回传；
   // 到齐后 fuse/bloom/exit/land 谢幕与 store 解耦（条目已被最终刷新裁掉）。
   const [genWait, setGenWait] = useState<Record<string, GenWaitSnap>>({});
@@ -1550,16 +1564,10 @@ export default function FreeCanvas({ canvasId }: { canvasId: string }) {
                 );
               }
             } else {
-              // 双击节点：便签进编辑；预览图像开大图；其余无全局动作。
+              // 双击节点：def.onDoubleClick（便签进编辑；预览图像开大图）；
+              // 其余类型无全局动作。
               const node = nodesRef.current.find((n) => n.id === key);
-              if (node?.type === "note" && node.metadata.kind === "note") {
-                setEditingNoteId(key);
-                setNoteDraft(node.metadata.content);
-              } else if (node?.type === "preview_image") {
-                const upstream = upstreamMediaOf(node.id);
-                const primary = upstream?.paths.find((_, i) => i === 0);
-                if (primary) setLightboxSrc(primary);
-              }
+              if (node) NODE_DEFS[node.type].onDoubleClick?.(node, canvasServices);
             }
           }
         }
@@ -1871,12 +1879,11 @@ export default function FreeCanvas({ canvasId }: { canvasId: string }) {
 
   // ── 上游媒体解析（预览/保存节点取上游产物） ────────────────
 
-  /** 入线第一根的上游节点（预览/保存节点都是单入口）。 */
+  /** 入线第一根的上游节点（预览/保存节点都是单入口）。聚合与就绪判定
+   *  查 nodes/upstream 的 def 注册表（gen_image 主图置顶、load_text 文本，
+   *  缺省走 resource_path）。 */
   const upstreamNodeOf = useCallback(
-    (nodeId: string): CanvasNode | undefined => {
-      const conn = connections.find((c) => c.to_node === nodeId);
-      return conn ? nodes.find((n) => n.id === conn.from_node) : undefined;
-    },
+    (nodeId: string): CanvasNode | undefined => upstreamNodeQuery(nodes, connections, nodeId),
     [connections, nodes],
   );
 
@@ -1884,115 +1891,34 @@ export default function FreeCanvas({ canvasId }: { canvasId: string }) {
    *  中 / 未生成 / 加载节点还没选文件）返回空 paths，供占位文案区分
    *  「未连接上游」与「已连接，等待产物」。 */
   const upstreamMediaOf = useCallback(
-    (nodeId: string): { paths: string[]; text: string } | null => {
-      const from = upstreamNodeOf(nodeId);
-      if (!from) return null;
-      if (from.type === "gen_image" && from.metadata.kind === "gen_image") {
-        const sorted = [...from.metadata.images].sort((a, b) => (a.primary === b.primary ? 0 : a.primary ? -1 : 1));
-        return { paths: sorted.map((img) => img.resource_path), text: "" };
-      }
-      if (from.type === "gen_video" || from.type === "gen_audio") {
-        // 视频/音频生成协议未接入：连接成立但恒无产物。
-        return { paths: [], text: "" };
-      }
-      if (from.type === "load_text" && from.metadata.kind === "load_text") {
-        return { paths: [], text: from.metadata.content };
-      }
-      if (from.resource_path) {
-        return { paths: [from.resource_path], text: "" };
-      }
-      // 加载节点已连上但还没选文件。
-      return { paths: [], text: "" };
-    },
-    [upstreamNodeOf],
+    (nodeId: string) => upstreamMediaQuery(nodes, connections, nodeId),
+    [connections, nodes],
   );
 
-  /** 生成前提校验（用户定案）：文本口已连非空文本 + 输出口已连保存/预览；
-   *  图像口（参考图）可选。文本来源可以是文本合集（有成员即视为就绪，
-   *  空内容成员由后端聚合时跳过）。返回缺失清单供按钮旁提示。 */
+  /** 生成前提校验：缺失清单查 def.ready（文本源与保存节点各自声明）。 */
   function genReadinessOf(node: CanvasNode): string[] {
-    const missing: string[] = [];
-    const textConn = connections.some((c) => {
-      if (c.to_node !== node.id || c.to_port !== "text") return false;
-      const from = nodes.find((n) => n.id === c.from_node);
-      if (!from) return false;
-      if (from.type === "load_text") {
-        return from.metadata.kind === "load_text" && from.metadata.content.trim().length > 0;
-      }
-      if (from.type === "collection_text") {
-        return connections.some((m) => m.to_node === from.id);
-      }
-      return false;
-    });
-    if (!textConn) missing.push(t("canvas.genMissingText"));
-    const outConn = connections.some((c) => c.from_node === node.id);
-    if (!outConn) missing.push(t("canvas.genMissingOut"));
-    // 输出口连的是保存节点时，须先设好自动保存目标（用户定案：未设目标
-    // 生成直接拦下提醒，而非发起后再补救）。
-    const saveTargetsMissing = connections
-      .filter((c) => c.from_node === node.id)
-      .map((c) => nodes.find((n) => n.id === c.to_node))
-      .some((down) => {
-        if (!down) return false;
-        const m = down.metadata;
-        if (m.kind !== "save_image" && m.kind !== "save_video" && m.kind !== "save_audio") return false;
-        return !m.auto_target;
-      });
-    if (saveTargetsMissing) missing.push(t("canvas.saveAutoMissing"));
-    return missing;
+    return genReadinessQuery(nodes, connections, node, t);
   }
+
+  // 跨模块服务（下发 def.onDoubleClick，阶段 4 起随节点模块下发
+  // pickMedia/clearMedia）。闭包引用渲染期状态，事件期执行时已初始化。
+  const canvasServices: NodeServices = {
+    openLightbox: (path) => setLightboxSrc(path),
+    upstream: (nodeId) => upstreamMediaOf(nodeId),
+  };
 
   // ── 合集节点（唯一多线入口）：成员解析 + 拖拽排序 ─────────
 
-  /** 合集成员按用户排序（metadata.order，重排进行时用草稿）展开；
-   *  未登记的新连线按连线创建时间补尾。 */
-  function collectionItemsOf(node: CanvasNode): {
-    connId: string;
-    from: CanvasNode;
-    kind: "image" | "text" | "video";
-    path: string;
-    label: string;
-  }[] {
-    const meta = node.metadata;
-    if (meta.kind !== "collection_image" && meta.kind !== "collection_text" && meta.kind !== "collection_video") return [];
-    const conns = connections
-      .filter((c) => c.to_node === node.id)
-      .sort((a, b) => a.created_at.localeCompare(b.created_at));
-    const byFrom = new Map(conns.map((c) => [c.from_node, c]));
-    // 拖拽进行时按开始顺序渲染（DOM 顺序全程不变，靠 transform 表达位移）。
-    const drag = collectionDrag?.nodeId === node.id ? collectionDrag : null;
-    const order = drag ? drag.baseOrder : meta.order;
-    const orderedIds: string[] = [];
-    for (const id of order) {
-      if (byFrom.has(id) && !orderedIds.includes(id)) orderedIds.push(id);
-    }
-    for (const c of conns) {
-      if (!orderedIds.includes(c.from_node)) orderedIds.push(c.from_node);
-    }
-    return orderedIds
-      .map((fromId) => {
-        const conn = byFrom.get(fromId);
-        const from = nodes.find((n) => n.id === fromId);
-        if (!conn || !from) return null;
-        if (node.type === "collection_text") {
-          const content = from.metadata.kind === "load_text" ? from.metadata.content.trim() : "";
-          return { connId: conn.id, from, kind: "text" as const, path: "", label: content || t("canvas.collectionItemEmpty") };
-        }
-        // 图像 / 视频合集：加载节点取资源路径，生成节点取主产物。
-        let path = from.resource_path;
-        if (!path && from.metadata.kind === "gen_image") {
-          path = [...from.metadata.images]
-            .sort((a, b) => (a.primary === b.primary ? 0 : a.primary ? -1 : 1))[0]?.resource_path ?? "";
-        }
-        return {
-          connId: conn.id,
-          from,
-          kind: node.type === "collection_image" ? ("image" as const) : ("video" as const),
-          path,
-          label: path.split(/[\\/]/).pop() ?? "",
-        };
-      })
-      .filter((x): x is NonNullable<typeof x> => x !== null);
+  /** 合集成员按用户排序展开（重排进行时用拖拽草稿序）；成员取值查
+   *  def.aggregate（文本合集取 text，图像/视频合集取首路径即主产物）。 */
+  function collectionItemsOf(node: CanvasNode) {
+    return collectionItemsQuery(
+      nodes,
+      connections,
+      node,
+      collectionDrag?.nodeId === node.id ? collectionDrag.baseOrder : null,
+      t,
+    );
   }
 
   /** 列表把手拖拽排序（剪切板/快捷输入 dnd-kit 手感的指针实现）：抓起
@@ -2155,7 +2081,7 @@ export default function FreeCanvas({ canvasId }: { canvasId: string }) {
           });
       }
     }
-  }, [nodes, videoTimelines]);
+  }, [nodes, videoTimelines, setNodeErrors]);
 
   const seekToolTo = (nodeId: string, t: number) => {
     setVideoToolDraft((prev) => ({ ...prev, [nodeId]: { ...(prev[nodeId] ?? {}), t } }));
@@ -2296,7 +2222,7 @@ export default function FreeCanvas({ canvasId }: { canvasId: string }) {
         metadata: JSON.stringify(base),
       });
     },
-    [store],
+    [store, setNodeErrors],
   );
 
   const pickFromDisk = async (node: CanvasNode) => {
@@ -2819,10 +2745,7 @@ export default function FreeCanvas({ canvasId }: { canvasId: string }) {
                         type="button"
                         onPointerDown={(e) => e.stopPropagation()}
                         onClick={() => {
-                          if (meta.kind === "note") {
-                            setEditingNoteId(node.id);
-                            setNoteDraft(meta.content);
-                          }
+                          if (meta.kind === "note") useNoteEditing.getState().start(node.id, meta.content);
                         }}
                       >
                         {Icons.edit}
@@ -2838,10 +2761,10 @@ export default function FreeCanvas({ canvasId }: { canvasId: string }) {
                       onChange={(event) => setNoteDraft(event.target.value)}
                       onBlur={() => {
                         if (meta.kind === "note") commitContent(node, noteDraft.trim());
-                        setEditingNoteId(null);
+                        closeNoteEdit();
                       }}
                       onKeyDown={(event) => {
-                        if (event.key === "Escape") setEditingNoteId(null);
+                        if (event.key === "Escape") closeNoteEdit();
                         if (event.key === "Enter" && !event.shiftKey) {
                           event.preventDefault();
                           event.currentTarget.blur();

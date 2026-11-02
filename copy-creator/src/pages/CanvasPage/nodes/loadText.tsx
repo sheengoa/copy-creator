@@ -14,4 +14,8 @@ export const loadTextDef: NodeDefinition = {
   fallbackSize: { w: 260, h: 150 },
   ports: { ins: [], out: { mediaKind: "text" } },
   fixedHeight: true,
+  // 聚合：文本节点向下游提供提示词文本。
+  aggregate: (from) => (from.metadata.kind === "load_text" ? { paths: [], text: from.metadata.content } : { paths: [], text: "" }),
+  // 生成前提：作为文本口来源时内容须非空。
+  ready: (node) => node.metadata.kind === "load_text" && node.metadata.content.trim().length > 0,
 };

@@ -22,4 +22,10 @@ export const genImageDef: NodeDefinition = {
     ],
     out: { mediaKind: "image" },
   },
+  // 产物聚合：备选按主图置顶排序（下游引用取主图，点备选可切换）。
+  aggregate: (from) => {
+    if (from.metadata.kind !== "gen_image") return { paths: [], text: "" };
+    const sorted = [...from.metadata.images].sort((a, b) => (a.primary === b.primary ? 0 : a.primary ? -1 : 1));
+    return { paths: sorted.map((img) => img.resource_path), text: "" };
+  },
 };

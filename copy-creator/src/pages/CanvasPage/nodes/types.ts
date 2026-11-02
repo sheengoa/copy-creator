@@ -1,5 +1,5 @@
 import type { ReactNode } from "react";
-import type { CanvasNode, CanvasNodeType } from "../../../stores/canvasStore";
+import type { CanvasConnection, CanvasNode, CanvasNodeType } from "../../../stores/canvasStore";
 
 // 节点基座契约（画布节点基座化 2026-11-03）：每个节点类型在 nodes/ 下的
 // def 文件里注册一份 NodeDefinition——声明式元数据（端口/颜色/尺寸/菜单/
@@ -28,15 +28,25 @@ export interface NodeIO {
   out: { mediaKind: MediaKind } | null;
 }
 
+/** 上游产物聚合结果：paths=参考图/产物路径；text=提示词文本。
+ *  null（查询层）严格表示「没有上游连接」；连了但暂无产物返回空 paths，
+ *  供占位文案区分「未连接上游」与「已连接，等待产物」。 */
+export interface UpstreamMedia {
+  paths: string[];
+  text: string;
+}
+
 /** 跨模块服务（浮层/大图等有状态能力，由 FreeCanvas 构建下发；数据变更
  *  各模块直接 useCanvasStore 订阅，不过此处）。 */
 export interface NodeServices {
   /** 统一取媒入口：库选/盘选浮层，按 def.applyMode 分派写回。 */
-  pickMedia(node: CanvasNode): void;
+  pickMedia?(node: CanvasNode): void;
   /** 清除已装媒体（load 族清引用 / 视频工具清 video_path 与产物）。 */
-  clearMedia(node: CanvasNode): void;
+  clearMedia?(node: CanvasNode): void;
   /** 全屏大图预览。 */
   openLightbox(path: string): void;
+  /** 上游产物聚合查询（生成输入收集 / 预览 / 双击放大共用）。 */
+  upstream(nodeId: string): UpstreamMedia | null;
 }
 
 export interface NodeProps {
@@ -81,6 +91,14 @@ export interface NodeDefinition {
   dropExtensions?: readonly string[];
   /** 拖到空白时按扩展名建此节点（load 三族）。 */
   blankDropExtensions?: readonly string[];
+  /** 上游产物聚合覆写（预览/保存/合集/生成输入收集共用；缺省走
+   *  resource_path 软路径）。gen_image 主图置顶排序、load_text 提供文本。 */
+  aggregate?(from: CanvasNode): UpstreamMedia;
+  /** 生成链路就绪钩子：文本源（内容非空/有成员）与保存节点（自动保存
+   *  目标已设）各自声明；genReadiness 查表收集缺失项。 */
+  ready?(node: CanvasNode, connections: CanvasConnection[]): boolean;
+  /** 双击节点动作（便签进编辑 / 预览图像开大图）；缺省无全局动作。 */
+  onDoubleClick?(node: CanvasNode, services: NodeServices): void;
   /** 内容层渲染（阶段 4 逐族迁入；缺省时 FreeCanvas 沿用旧条件链）。 */
   Component?: (props: NodeProps) => ReactNode;
 }
