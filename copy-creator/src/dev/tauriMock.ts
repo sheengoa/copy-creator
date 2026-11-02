@@ -1046,9 +1046,12 @@ function handleInvoke(cmd: string, args: Record<string, unknown>): unknown {
       const canvas = db.canvases.find((c) => c.id === node.canvas_id);
       if (canvas) canvas.updated_at = ts();
       // 真实后端建节点不 emit（前端 store 本地 push）；mock 补发是为了让
-      // 绕过 store 的测试钩子（evaluate 直调 IPC 建节点）也能刷进图谱，
-      // 对走 store 的正常路径是幂等重取，无害。
-      mockEmit("canvas-changed", null);
+      // 绕过 store 的测试钩子（evaluate 直调 IPC 建节点）也能刷进图谱。
+      // 补发必须延后到宏任务：同步 emit 会在 invoke 未 resolve、store 未
+      // 本地 push 时触发重取，store 的本地 append 随后落在重取之后，同一
+      // 节点进两次（2026-11-03 修复）。延后重取发生在 push 落定之后，
+      // 正常路径幂等（整体替换），绕过 store 的写入照常刷进。
+      setTimeout(() => mockEmit("canvas-changed", null), 0);
       return clone(node);
     }
     case "canvas_update_node": {
