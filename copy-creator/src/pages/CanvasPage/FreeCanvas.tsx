@@ -2285,12 +2285,17 @@ export default function FreeCanvas({ canvasId }: { canvasId: string }) {
    *  组件签名对齐，调用侧只用 HTMLMediaElement 的 currentTime）。 */
   const videoElsRef = useRef<Record<string, HTMLVideoElement | HTMLAudioElement | null>>({});
 
+  /** 已失败的轨道路径：effect 以 nodes 为依赖，任何节点变动都会重跑——
+   *  失败不记账就会对同一坏视频反复 invoke（拖动画布每帧一次 ffmpeg
+   *  探测）。重新选片时由 applyFrameVideo 清账允许重试。 */
+  const timelineFailedRef = useRef<Set<string>>(new Set());
+
   useEffect(() => {
     for (const node of nodes) {
       if (!isVideoToolType(node.type)) continue;
       const meta = node.metadata as { video_path?: string };
       const vp = meta?.video_path ?? "";
-      if (vp && !videoTimelines[vp] && !timelineInflight.current.has(vp)) {
+      if (vp && !videoTimelines[vp] && !timelineInflight.current.has(vp) && !timelineFailedRef.current.has(vp)) {
         timelineInflight.current.add(vp);
         invoke<{ duration: number; w?: number; h?: number; thumbnails: { t: number; path: string }[] }>(
           "canvas_video_timeline",
@@ -2298,6 +2303,7 @@ export default function FreeCanvas({ canvasId }: { canvasId: string }) {
         )
           .then((res) => setVideoTimelines((prev) => ({ ...prev, [vp]: res })))
           .catch((err) => {
+            timelineFailedRef.current.add(vp);
             setNodeErrors((prev) => ({ ...prev, [node.id]: String(err) }));
           })
           .finally(() => {
@@ -2354,26 +2360,35 @@ export default function FreeCanvas({ canvasId }: { canvasId: string }) {
     if (kind !== "video_seek_frame" && kind !== "video_to_gif" && kind !== "video_extract_audio") return;
     const videoPath = node.metadata.video_path;
     if (!videoPath) return;
+    // 抽帧的播放头除了轨道拖动（松手即落 metadata）还会被原生进度条
+    // 拖动改写（只进 draft）——执行前把 draft 冲进 metadata，保证「所见
+    // 时间 = 所抽帧」；选区两参数只走轨道手势，本就落库。
+    const draft = videoToolDraftRef.current[node.id];
+    let meta = node.metadata;
+    if (kind === "video_seek_frame" && draft?.t !== undefined && draft.t !== meta.start_secs) {
+      meta = { ...meta, start_secs: draft.t };
+      await store.getState().updateNode(node.id, { metadata: JSON.stringify(meta) });
+    }
     setFrameBusy((prev) => ({ ...prev, [node.id]: true }));
     try {
       let res: { path: string };
       if (kind === "video_seek_frame") {
         res = await invoke<{ path: string }>("canvas_seek_video_frame", {
           path: videoPath,
-          secs: node.metadata.start_secs,
+          secs: meta.start_secs,
         });
       } else if (kind === "video_to_gif") {
         res = await invoke<{ path: string }>("canvas_convert_video_gif", {
           path: videoPath,
-          start: node.metadata.start_secs,
-          duration: node.metadata.duration_secs > 0 ? node.metadata.duration_secs : 3.0,
+          start: meta.start_secs,
+          duration: meta.duration_secs > 0 ? meta.duration_secs : 3.0,
         });
       } else {
         res = await invoke<{ path: string }>("canvas_extract_audio", {
           path: videoPath,
-          start: node.metadata.start_secs,
-          duration: node.metadata.duration_secs,
-          format: node.metadata.format || "mp3",
+          start: meta.start_secs,
+          duration: meta.duration_secs,
+          format: meta.format || "mp3",
         });
       }
       await store.getState().updateNode(node.id, { resourcePath: res.path });
@@ -2414,7 +2429,16 @@ export default function FreeCanvas({ canvasId }: { canvasId: string }) {
         base.duration_secs = 0;
         base.format = prevFormat;
       }
-      // 换视频后旧选点/选区不再成立，会话态一并清。
+      // 换视频后旧选点/选区不再成立，会话态一并清；旧视频的轨道失败
+      // 记账也清掉（同一坏路径重新选入时允许再试一次），旧错误文案随
+      // 换片过期，一并摘除。
+      timelineFailedRef.current.delete(videoPath);
+      setNodeErrors((prev) => {
+        if (!prev[nodeId]) return prev;
+        const next = { ...prev };
+        delete next[nodeId];
+        return next;
+      });
       setVideoToolDraft((p) => {
         if (!p[nodeId]) return p;
         const next = { ...p };
