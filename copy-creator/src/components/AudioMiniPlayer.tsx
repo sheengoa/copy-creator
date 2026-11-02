@@ -84,22 +84,30 @@ export function AudioMiniPlayer({
           ref={audioRef}
           src={url}
           preload="metadata"
-          onTimeUpdate={(e) =>
+          onTimeUpdate={(e) => {
+            // 合成事件的 currentTarget 在派发结束后即被 React 置 null，
+            // 而 setState updater 是派发后才执行的——必须在此同步取值，
+            // updater 只闭包普通量（实测在 updater 里读会整树崩溃）。
+            const el = e.currentTarget;
+            const t = el.currentTime;
+            const d = el.duration;
+            const playing = !el.paused;
             setPos((prev) => ({
-              t: e.currentTarget.currentTime,
-              dur: e.currentTarget.duration || prev.dur,
-              playing: !e.currentTarget.paused,
-            }))
-          }
+              t,
+              dur: Number.isFinite(d) && d > 0 ? d : prev.dur,
+              playing,
+            }));
+          }}
           onPlay={() => setPos((prev) => ({ ...prev, playing: true }))}
           onPause={() => setPos((prev) => ({ ...prev, playing: false }))}
           onEnded={() => setPos((prev) => ({ ...prev, playing: false, t: 0 }))}
-          onLoadedMetadata={(e) =>
+          onLoadedMetadata={(e) => {
+            const d = e.currentTarget.duration;
             setPos((prev) => ({
               ...prev,
-              dur: Number.isFinite(e.currentTarget.duration) ? e.currentTarget.duration : prev.dur,
-            }))
-          }
+              dur: Number.isFinite(d) && d > 0 ? d : prev.dur,
+            }));
+          }}
         />
       )}
     </div>
