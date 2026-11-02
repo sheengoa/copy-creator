@@ -20,6 +20,22 @@ import {
   type CanvasNodeType,
   type SaveMediaMeta,
 } from "../../stores/canvasStore";
+import { MEDIA_COLOR } from "./nodes/colors";
+import { AUDIO_EXTS, extOf, IMAGE_EXTS, VIDEO_EXTS } from "./nodes/exts";
+import type { PortDef } from "./nodes/types";
+import {
+  LIBRARY_PICKER_KINDS,
+  loadAllowedExts,
+  menuGroups,
+  menuIconOf,
+  NODE_ACCENT,
+  NODE_DEFAULT_SIZE,
+  NODE_FALLBACK_SIZE,
+  NODE_MIN_SIZE,
+  outMediaColor,
+  PORT_DEFS,
+  VIDEO_TOOL_TYPES,
+} from "./nodes/registry";
 
 // 自由生图工作流画布（画布区方案 3.3 + 节点体系 v2）：以 ProjectCanvas 为
 // 基座 fork——引擎框架（视口/连线/切线/框选/分组/菜单）自工程画布搬运；
@@ -34,137 +50,6 @@ const WIRES_VIEWPORT_PAD = 64;
 const MINI_W = 150;
 const MINI_H = 96;
 const UNDO_LIMIT = 50;
-
-/** 建节点落库的默认尺寸（B+ 视觉标准）：高度不落库 = 内容自适应撑开；
- *  text 类节点正文是常驻编辑框需固定高。拖过尺寸手柄后 height 落库转固定。 */
-const NODE_DEFAULT_SIZE: Record<CanvasNodeType, { w: number; h: number | null }> = {
-  gen_image: { w: 280, h: null },
-  gen_video: { w: 280, h: null },
-  gen_audio: { w: 260, h: null },
-  load_text: { w: 260, h: null },
-  load_image: { w: 260, h: null },
-  load_video: { w: 280, h: null },
-  load_audio: { w: 260, h: null },
-  video_first_frame: { w: 280, h: null },
-  video_last_frame: { w: 280, h: null },
-  // 视频工具节点（2026-11-02 定稿）：剪辑器式横向长方形——监视器 + 侧栏 +
-  // 缩略图时间轴，460 宽才有可拖的轨道。
-  video_seek_frame: { w: 460, h: null },
-  video_to_gif: { w: 460, h: null },
-  video_extract_audio: { w: 460, h: null },
-  save_image: { w: 250, h: null },
-  save_video: { w: 280, h: null },
-  save_audio: { w: 260, h: null },
-  preview_image: { w: 320, h: null },
-  preview_video: { w: 360, h: null },
-  preview_audio: { w: 280, h: null },
-  collection_image: { w: 240, h: null },
-  collection_text: { w: 240, h: null },
-  collection_video: { w: 260, h: null },
-  note: { w: 220, h: null },
-};
-
-/** 连线锚点在 nodeMetrics 实测前的兜底尺寸（实测优先，常量只是首帧）。 */
-const NODE_FALLBACK_SIZE: Record<CanvasNodeType, { w: number; h: number }> = {
-  gen_image: { w: 280, h: 300 },
-  gen_video: { w: 280, h: 240 },
-  gen_audio: { w: 260, h: 180 },
-  load_text: { w: 260, h: 150 },
-  load_image: { w: 260, h: 220 },
-  load_video: { w: 280, h: 220 },
-  load_audio: { w: 260, h: 140 },
-  video_first_frame: { w: 280, h: 240 },
-  video_last_frame: { w: 280, h: 240 },
-  video_seek_frame: { w: 460, h: 250 },
-  video_to_gif: { w: 460, h: 250 },
-  video_extract_audio: { w: 460, h: 250 },
-  save_image: { w: 250, h: 170 },
-  save_video: { w: 280, h: 150 },
-  save_audio: { w: 260, h: 130 },
-  preview_image: { w: 320, h: 260 },
-  preview_video: { w: 360, h: 240 },
-  preview_audio: { w: 280, h: 130 },
-  collection_image: { w: 240, h: 160 },
-  collection_text: { w: 240, h: 160 },
-  collection_video: { w: 260, h: 160 },
-  note: { w: 220, h: 120 },
-};
-
-/** 各类型缩放下限（对齐工程画布 resize 分类型的 minW/minH 惯例）。 */
-const NODE_MIN_SIZE: Record<CanvasNodeType, { w: number; h: number }> = {
-  gen_image: { w: 200, h: 180 },
-  gen_video: { w: 200, h: 160 },
-  gen_audio: { w: 180, h: 130 },
-  load_text: { w: 180, h: 120 },
-  load_image: { w: 160, h: 140 },
-  load_video: { w: 180, h: 140 },
-  load_audio: { w: 180, h: 110 },
-  // 视频抽帧节点：媒体盒 + 控制区较占空间；此前缺失条目，拖尺寸手柄时
-  // NODE_MIN_SIZE[type] 取 undefined 会抛 TypeError（2026-11-01 修复）。
-  video_first_frame: { w: 240, h: 200 },
-  video_last_frame: { w: 240, h: 200 },
-  // 视频工具节点：轨道+监视器再窄就摆不下（监视器 224 + 侧栏最低可读）。
-  video_seek_frame: { w: 380, h: 220 },
-  video_to_gif: { w: 380, h: 220 },
-  video_extract_audio: { w: 380, h: 220 },
-  save_image: { w: 180, h: 130 },
-  save_video: { w: 180, h: 120 },
-  save_audio: { w: 180, h: 110 },
-  preview_image: { w: 200, h: 160 },
-  preview_video: { w: 220, h: 160 },
-  preview_audio: { w: 180, h: 110 },
-  collection_image: { w: 180, h: 110 },
-  collection_text: { w: 180, h: 110 },
-  collection_video: { w: 180, h: 110 },
-  note: { w: 120, h: 80 },
-};
-
-/** 媒体类型色（节点 accent / 线色 / 端口点色同源：线色跟上游类型）。
- *  用户 2026-11-01 定案：文本黄、图像蓝、视频紫、音频绿；文本取深琥珀
- *  黄而非系统黄 #FFCC00，保证 2.6px 连线在浅色画布上可读。 */
-const MEDIA_COLOR: Record<"text" | "image" | "video" | "audio", string> = {
-  text: "#E6A700",
-  image: "#007AFF",
-  video: "#AF52DE",
-  audio: "#34C759",
-};
-
-/** 节点类型色通道（B+ 视觉标准）：按所属媒体链路取色。 */
-const NODE_ACCENT: Record<CanvasNodeType, string> = {
-  gen_image: MEDIA_COLOR.image,
-  gen_video: MEDIA_COLOR.video,
-  gen_audio: MEDIA_COLOR.audio,
-  load_text: MEDIA_COLOR.text,
-  load_image: MEDIA_COLOR.image,
-  load_video: MEDIA_COLOR.video,
-  load_audio: MEDIA_COLOR.audio,
-  video_first_frame: MEDIA_COLOR.video,
-  video_last_frame: MEDIA_COLOR.video,
-  video_seek_frame: MEDIA_COLOR.video,
-  video_to_gif: MEDIA_COLOR.video,
-  // 音轨节点同样取视频紫：三节点是「视频工具」同族（原型定稿 2026-11-02），
-  // 产物去向由输出口 mediaKind=audio 表达。
-  video_extract_audio: MEDIA_COLOR.video,
-  save_image: MEDIA_COLOR.image,
-  save_video: MEDIA_COLOR.video,
-  save_audio: MEDIA_COLOR.audio,
-  preview_image: MEDIA_COLOR.image,
-  preview_video: MEDIA_COLOR.video,
-  preview_audio: MEDIA_COLOR.audio,
-  collection_image: MEDIA_COLOR.image,
-  collection_text: MEDIA_COLOR.text,
-  collection_video: MEDIA_COLOR.video,
-  note: "#E6A700",
-};
-
-/** 输出口/连线取色：按产物媒体类型（图像蓝/视频紫/音频绿），不跟节点
- *  主题色——视频工具节点主题是视频紫，但图像/音频产物口不该被带紫
- *  （用户 2026-11-02 定案）；其余节点的主题色本就等于产物类型色，外观
- *  不变。无产物口的节点（note）回退主题色。 */
-function outMediaColor(type: CanvasNodeType): string {
-  const out = PORT_DEFS[type].out;
-  return out ? MEDIA_COLOR[out.mediaKind] : NODE_ACCENT[type];
-}
 
 /** 生成参数预设（下拉清单；输入框仍可自由键入任意值）。尺寸值取后端
  *  可直接接受的「宽x高」（对齐 ai.rs SIZE_PRESETS_1K/2K），auto 交给
@@ -194,118 +79,8 @@ const formatSizeDisplay = (
   return item ? { main: item.label, tail: item.hint } : { main: v };
 };
 
-interface PortDef {
-  /** 输入口 id（连线 to_port / 实测锚点键）。 */
-  id: string;
-  /** 接受的上游节点类型（类型匹配校验）。 */
-  accepts: CanvasNodeType[];
-  mediaKind: "text" | "image" | "video" | "audio";
-  /** 多线入口（仅合集节点）：落线追加不顶掉；其余口单线，落线顶掉旧线。 */
-  multi?: boolean;
-}
-
-/** 类型化端口矩阵（用户 2026-10-31 定案）：生成节点的文本口必连、
- *  图像口可选（纯文生图）；输出节点的入口接受对应生成/加载节点。 */
-const PORT_DEFS: Record<CanvasNodeType, { ins: PortDef[]; out: { mediaKind: "text" | "image" | "video" | "audio" } | null }> = {
-  gen_image: {
-    ins: [
-      { id: "text", accepts: ["load_text", "collection_text"], mediaKind: "text" },
-      { id: "image", accepts: ["load_image", "collection_image", "video_first_frame", "video_last_frame", "video_seek_frame", "video_to_gif"], mediaKind: "image" },
-    ],
-    out: { mediaKind: "image" },
-  },
-  gen_video: {
-    ins: [
-      { id: "text", accepts: ["load_text", "collection_text"], mediaKind: "text" },
-      { id: "video", accepts: ["load_video", "collection_video"], mediaKind: "video" },
-      { id: "image", accepts: ["load_image", "collection_image", "video_first_frame", "video_last_frame", "video_seek_frame", "video_to_gif"], mediaKind: "image" },
-    ],
-    out: { mediaKind: "video" },
-  },
-  gen_audio: {
-    ins: [{ id: "text", accepts: ["load_text", "collection_text"], mediaKind: "text" }],
-    out: { mediaKind: "audio" },
-  },
-  load_text: { ins: [], out: { mediaKind: "text" } },
-  load_image: { ins: [], out: { mediaKind: "image" } },
-  load_video: { ins: [], out: { mediaKind: "video" } },
-  load_audio: { ins: [], out: { mediaKind: "audio" } },
-  // 视频抽帧（2026-11-01）：视频自己加载进节点（无输入口），产物是
-  // 一张图片——输出口按图像类型走，下游一切图像消费口都能接。
-  video_first_frame: { ins: [], out: { mediaKind: "image" } },
-  video_last_frame: { ins: [], out: { mediaKind: "image" } },
-  // 视频工具节点（2026-11-02）：抽帧/GIF 产物归图像族；音轨产物按音频
-  // 类型走，下游 save_audio/preview_audio 通用分支消费。
-  video_seek_frame: { ins: [], out: { mediaKind: "image" } },
-  video_to_gif: { ins: [], out: { mediaKind: "image" } },
-  video_extract_audio: { ins: [], out: { mediaKind: "audio" } },
-  save_image: { ins: [{ id: "in", accepts: ["gen_image", "video_first_frame", "video_last_frame", "video_seek_frame", "video_to_gif"], mediaKind: "image" }], out: null },
-  save_video: { ins: [{ id: "in", accepts: ["gen_video"], mediaKind: "video" }], out: null },
-  save_audio: { ins: [{ id: "in", accepts: ["gen_audio", "video_extract_audio"], mediaKind: "audio" }], out: null },
-  preview_image: { ins: [{ id: "in", accepts: ["gen_image", "load_image", "video_first_frame", "video_last_frame", "video_seek_frame", "video_to_gif"], mediaKind: "image" }], out: null },
-  preview_video: { ins: [{ id: "in", accepts: ["gen_video", "load_video"], mediaKind: "video" }], out: null },
-  preview_audio: { ins: [{ id: "in", accepts: ["gen_audio", "load_audio", "video_extract_audio"], mediaKind: "audio" }], out: null },
-  // 合集：画布上唯一的多线入口；成员为对应加载节点与对应生成产物。
-  collection_image: {
-    ins: [{ id: "image", accepts: ["load_image", "gen_image", "video_first_frame", "video_last_frame", "video_seek_frame", "video_to_gif"], mediaKind: "image", multi: true }],
-    out: { mediaKind: "image" },
-  },
-  collection_text: {
-    ins: [{ id: "text", accepts: ["load_text"], mediaKind: "text", multi: true }],
-    out: { mediaKind: "text" },
-  },
-  collection_video: {
-    ins: [{ id: "video", accepts: ["load_video", "gen_video"], mediaKind: "video", multi: true }],
-    out: { mediaKind: "video" },
-  },
-  note: { ins: [], out: null },
-};
-
-const IMAGE_EXTS = ["png", "jpg", "jpeg", "webp", "gif", "bmp"];
-const VIDEO_EXTS = ["mp4", "webm", "mkv", "mov", "avi"];
-
-/** 视频进节点的五类型（首/尾帧 + 任意抽帧/转 GIF/抽音轨）：OS 拖入与
- *  资源库/本地选片都写 metadata.video_path 并清旧产物，语义与抽帧一致。 */
-const VIDEO_TOOL_TYPES: readonly CanvasNodeType[] = [
-  "video_first_frame",
-  "video_last_frame",
-  "video_seek_frame",
-  "video_to_gif",
-  "video_extract_audio",
-];
-
 const isVideoToolType = (type: CanvasNodeType | undefined): boolean =>
   !!type && VIDEO_TOOL_TYPES.includes(type);
-const AUDIO_EXTS = ["mp3", "m4a", "aac", "flac", "ogg", "wav", "opus"];
-
-/** 「从资源库选择」浮层的类型白名单：加载/视频工具节点只允许选自己
- *  吃的类型（加载图像选到视频只会得到一块空白格，反之亦然）。表外
- *  节点类型（文本加载等不走浮层）缺省不过滤。 */
-const LIBRARY_PICKER_KINDS: Partial<Record<CanvasNodeType, string[]>> = {
-  load_image: ["image"],
-  load_video: ["video"],
-  load_audio: ["audio"],
-  video_first_frame: ["video"],
-  video_last_frame: ["video"],
-  video_seek_frame: ["video"],
-  video_to_gif: ["video"],
-  video_extract_audio: ["video"],
-};
-
-function extOf(path: string): string {
-  return path.split(".").pop()?.toLowerCase() ?? "";
-}
-
-/** 加载/视频工具节点允许的文件扩展名：OS 拖入、本地选片对话框与选后
- *  校验共用同一份（类型不符的媒体在本节点只能得到空白/裂图）。 */
-const loadAllowedExts = (type: CanvasNodeType): string[] =>
-  isVideoToolType(type) || type === "load_video"
-    ? VIDEO_EXTS
-    : type === "load_image"
-      ? IMAGE_EXTS
-      : type === "load_audio"
-        ? AUDIO_EXTS
-        : [];
 
 type Pos = { x: number; y: number };
 type WireBox = Pos & { w: number; h: number };
@@ -2971,33 +2746,8 @@ export default function FreeCanvas({ canvasId }: { canvasId: string }) {
     ? Math.min(MINI_W / Math.max(miniBBox.w, 1), MINI_H / Math.max(miniBBox.h, 1))
     : 1;
 
-  // 菜单条目（按三类链路分组 + 便签）：搜索过滤 + 连线续接的 accepts
-  // 过滤（拖线/摘线到空白时只列能接上的节点类型）。
-  const menuGroups: { key: string; types: CanvasNodeType[] }[] = [
-    { key: "gen", types: ["gen_image", "gen_video", "gen_audio"] },
-    { key: "load", types: ["load_text", "load_image", "load_video", "load_audio", "video_first_frame", "video_last_frame", "video_seek_frame", "video_to_gif", "video_extract_audio"] },
-    { key: "collection", types: ["collection_text", "collection_image", "collection_video"] },
-    { key: "output", types: ["save_image", "preview_image", "save_video", "preview_video", "save_audio", "preview_audio"] },
-    { key: "misc", types: ["note"] },
-  ];
-  const menuIconOf = (type: CanvasNodeType): ReactNode => {
-    switch (type) {
-      case "gen_image": return Icons.image;
-      case "gen_video": case "load_video": case "preview_video": case "collection_video": return Icons.video;
-      case "video_first_frame": case "video_last_frame": case "video_seek_frame": return Icons.clapperboard;
-      // GIF 产物归图像族；音轨产物是音频。
-      case "video_to_gif": return Icons.image;
-      case "video_extract_audio": return Icons.audio;
-      case "gen_audio": case "load_audio": case "save_audio": case "preview_audio": return Icons.audio;
-      case "load_text": return Icons.file;
-      case "load_image": return Icons.image;
-      case "collection_image": return Icons.copy;
-      case "collection_text": return Icons.copy;
-      case "save_image": case "save_video": return Icons.resources;
-      case "preview_image": return Icons.expand;
-      default: return Icons.edit;
-    }
-  };
+  // 菜单条目数据（menuGroups/menuIconOf）在 nodes/registry；这里只保留
+  // 连线续接的 accepts 过滤（拖线/摘线到空白时只列能接上的节点类型）。
   const menuFilterType = (type: CanvasNodeType): boolean => {
     const pending = addMenu?.wire ?? (addMenu?.detached ? { fromKey: addMenu.detached.fromKey, fromDir: "in" as const, fromPortId: "" } : null);
     if (!pending) return true;
