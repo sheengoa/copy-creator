@@ -867,9 +867,11 @@ function handleInvoke(cmd: string, args: Record<string, unknown>): unknown {
     case "get_resource_library_path":
       return libraryRoot;
     case "get_clipboard_records": {
-      // 供「从资源库选文件」浮层挑一个剧本文件（挂剧本链路验证用）+
-      // 一条视频（视频首帧/尾帧节点选片用，2026-11-01）。resourceGroup
-      // 过滤与后端同语义：""=库根未分组，路径=该分组含子级。
+      // 供「从资源库选文件」浮层挑选：剧本文件（挂剧本链路验证）、视频
+      // （视频首帧/尾帧节点选片，2026-11-01）、图片与音频（类型过滤与
+      // 音频保存/预览链路验证，2026-11-02——浮层按节点类型白名单过滤后
+      // 各节点只见自己吃得掉的类型）。resourceGroup 过滤与后端同语义：
+      // ""=库根未分组，路径=该分组含子级。
       const mockRecords = [
         {
           id: "rec-script-1",
@@ -893,6 +895,28 @@ function handleInvoke(cmd: string, args: Record<string, unknown>): unknown {
           storage_mode: "resource",
           resource_path: `${libraryRoot}/mock-clip.mp4`,
           resource_kind: "video",
+          resource_group: null,
+        },
+        {
+          id: "rec-image-1",
+          type: "file",
+          content: `${libraryRoot}/mock-image.png`,
+          source_app: "mock",
+          created_at: ts(),
+          storage_mode: "resource",
+          resource_path: `${libraryRoot}/mock-image.png`,
+          resource_kind: "image",
+          resource_group: null,
+        },
+        {
+          id: "rec-audio-1",
+          type: "file",
+          content: `${libraryRoot}/mock-tone.wav`,
+          source_app: "mock",
+          created_at: ts(),
+          storage_mode: "resource",
+          resource_path: `${libraryRoot}/mock-tone.wav`,
+          resource_kind: "audio",
           resource_group: null,
         },
       ];
@@ -942,9 +966,10 @@ function handleInvoke(cmd: string, args: Record<string, unknown>): unknown {
       return [];
     case "get_resource_groups":
       // 「从资源库选文件」浮层的分组树：mock 库里 scripts/、segments/ 两个
-      // 顶级分组（与上方资源路径对应），首项固定为「未分组」空路径根。
+      // 顶级分组（与上方资源路径对应），根下另有三个直放文件（视频/图片/
+      // 音频），首项固定为「未分组」空路径根。
       return [
-        { name: "", path: "", count: 0, children: [] },
+        { name: "", path: "", count: 3, children: [] },
         { name: "scripts", path: "scripts", count: 1, children: [] },
         { name: "segments", path: "segments", count: 1, children: [] },
       ];
@@ -1020,6 +1045,10 @@ function handleInvoke(cmd: string, args: Record<string, unknown>): unknown {
       db.canvas_nodes.push(node);
       const canvas = db.canvases.find((c) => c.id === node.canvas_id);
       if (canvas) canvas.updated_at = ts();
+      // 真实后端建节点不 emit（前端 store 本地 push）；mock 补发是为了让
+      // 绕过 store 的测试钩子（evaluate 直调 IPC 建节点）也能刷进图谱，
+      // 对走 store 的正常路径是幂等重取，无害。
+      mockEmit("canvas-changed", null);
       return clone(node);
     }
     case "canvas_update_node": {
@@ -1031,6 +1060,8 @@ function handleInvoke(cmd: string, args: Record<string, unknown>): unknown {
         node.updated_at = ts();
         const canvas = db.canvases.find((c) => c.id === node.canvas_id);
         if (canvas) canvas.updated_at = ts();
+        // 对齐真实后端（canvas_update_node emit canvas-changed，跨窗口同步）。
+        mockEmit("canvas-changed", null);
       }
       return node ? clone(node) : null;
     }
@@ -1051,6 +1082,7 @@ function handleInvoke(cmd: string, args: Record<string, unknown>): unknown {
       const id = String(args.id ?? "");
       db.canvas_nodes = db.canvas_nodes.filter((n) => n.id !== id);
       db.canvas_connections = db.canvas_connections.filter((c) => c.from_node !== id && c.to_node !== id);
+      mockEmit("canvas-changed", null);
       return null;
     }
     case "canvas_connect": {
@@ -1063,6 +1095,7 @@ function handleInvoke(cmd: string, args: Record<string, unknown>): unknown {
       if (existing) return clone(existing);
       const conn: MockCanvasConnection = { id: nextId("cc"), canvas_id: canvasId, from_node: from, to_node: to, to_port: String(args.toPort ?? ""), created_at: ts() };
       db.canvas_connections.push(conn);
+      mockEmit("canvas-changed", null);
       return clone(conn);
     }
     case "canvas_rewire": {
