@@ -4,12 +4,11 @@ import { useTranslation } from "react-i18next";
 import { invoke } from "@tauri-apps/api/core";
 import { getCurrentWebview } from "@tauri-apps/api/webview";
 import { Icons } from "../../components/Icons";
-import { AudioMiniPlayer } from "../../components/AudioMiniPlayer";
+import { MediaPlayback } from "../../components/MediaPlayback";
 import { ImageLightbox } from "../../components/ImageLightbox";
 import { resolveResourceMediaUrl } from "../../domain/mediaUrl";
 import { joinLibraryPath } from "../../domain/projectView";
 import ProjectFilePickerDialog from "../ResourcePage/ProjectFilePickerDialog";
-import { ResourceMediaPlayer } from "../ResourcePage/ResourceMedia";
 import { useSettingsStore } from "../../stores/settingsStore";
 import { resolveWireRelease } from "../../utils/projectWireRelease";
 import CanvasVideoTimeline from "./CanvasVideoTimeline";
@@ -459,28 +458,26 @@ function ResourceThumb({ path, className }: { path: string; className?: string }
   return <img className={className} src={url} alt="" draggable={false} />;
 }
 
-/** 画布产物播放器（保存节点的视频/音频产物预览用）：ResourceMediaPlayer
- *  内部解析不走画布相对路径归一（resource_path 存量数据是库相对语义），
- *  这里先归一再整条解析出 URL，经 resolvedSrc 直供播放器——与 ResourceThumb
- *  同一归一语义。autoPlay 关：保存盒是产物确认位，不自动出声/出画。 */
+/** 画布产物播放器（保存节点的视频/音频产物预览用）：统一播放条
+ *  （MediaPlayback）不感知画布相对路径语义（resource_path 存量数据是
+ *  库相对语义），这里先归一再交给组件——与 ResourceThumb 同一归一语义。
+ *  autoPlay 关：保存盒是产物确认位，不自动出声/出画。 */
 function CanvasMediaPlayer({ kind, path }: { kind: "video" | "audio"; path: string }) {
-  const [state, setState] = useState<{ url: string; absolute: string } | null>(null);
+  const [absolute, setAbsolute] = useState("");
   useEffect(() => {
     let alive = true;
-    setState(null);
-    (async () => {
-      const absolute = await resolveCanvasMediaPath(path);
-      const url = await resolveResourceMediaUrl(absolute);
-      if (alive) setState({ url, absolute });
-    })().catch(() => {});
+    setAbsolute("");
+    resolveCanvasMediaPath(path)
+      .then((p) => {
+        if (alive) setAbsolute(p);
+      })
+      .catch(() => {});
     return () => {
       alive = false;
     };
   }, [path]);
-  if (!state) return null;
-  return (
-    <ResourceMediaPlayer kind={kind} path={state.absolute} resolvedSrc={state.url} autoPlay={false} />
-  );
+  if (!absolute) return null;
+  return <MediaPlayback kind={kind} path={absolute} autoPlay={false} />;
 }
 
 /** 保存节点产物的展示类型：随节点类型（save_image/save_video/save_audio），
@@ -2352,8 +2349,8 @@ export default function FreeCanvas({ canvasId }: { canvasId: string }) {
   videoToolDraftRef.current = videoToolDraft;
 
   /** 视频预览元素（nodeId → element）：拖播放头/选区时程序 seek 同步画面
-   *  （经 ResourceMediaPlayer 的 mediaRefCallback 转交；元素宽型与共享
-   *  组件签名对齐，调用侧只用 HTMLMediaElement 的 currentTime）。 */
+   *  （经 MediaPlayback 的 mediaRefCallback 转交；元素宽型与共享组件签名
+   *  对齐，调用侧只用 HTMLMediaElement 的 currentTime）。 */
   const videoElsRef = useRef<Record<string, HTMLVideoElement | HTMLAudioElement | null>>({});
 
   /** 已失败的轨道路径：effect 以 nodes 为依赖，任何节点变动都会重跑——
@@ -3225,9 +3222,9 @@ export default function FreeCanvas({ canvasId }: { canvasId: string }) {
                       {node.type === "load_image" ? (
                         <ResourceThumb path={node.resource_path} className="fc-media-box" />
                       ) : node.type === "load_video" ? (
-                        <ResourceMediaPlayer kind="video" path={node.resource_path} />
+                        <MediaPlayback kind="video" path={node.resource_path} />
                       ) : (
-                        <ResourceMediaPlayer kind="audio" path={node.resource_path} />
+                        <MediaPlayback kind="audio" path={node.resource_path} />
                       )}
                       {/* 悬浮右上角的圆形 ×：清除已选文件回到未加载态，
                           不必删节点重来。 */}
@@ -3704,7 +3701,7 @@ export default function FreeCanvas({ canvasId }: { canvasId: string }) {
                   </div>
                   {videoPath && !framePath && !frameBusyNow && (
                     <>
-                      <ResourceMediaPlayer kind="video" path={videoPath} />
+                      <MediaPlayback kind="video" path={videoPath} />
                       <NodeHint text={frameError ? frameError : ""}>
                         <button
                           type="button"
@@ -3721,7 +3718,7 @@ export default function FreeCanvas({ canvasId }: { canvasId: string }) {
                   )}
                   {videoPath && frameBusyNow && (
                     <>
-                      <ResourceMediaPlayer kind="video" path={videoPath} />
+                      <MediaPlayback kind="video" path={videoPath} />
                       <button type="button" className="fc-node-btn accent" disabled>
                         {t("canvas.frameRunning")}
                       </button>
@@ -3858,7 +3855,7 @@ export default function FreeCanvas({ canvasId }: { canvasId: string }) {
                               </button>
                             </NodeHint>
                           ) : (
-                            <ResourceMediaPlayer
+                            <MediaPlayback
                               kind="video"
                               path={videoPath}
                               autoPlay={false}
@@ -3869,7 +3866,7 @@ export default function FreeCanvas({ canvasId }: { canvasId: string }) {
                                 if (isRange) {
                                   // 选区预览（GIF/音轨）：播放只发生在两针
                                   // 之间——越出末端回跳起点循环小样，落在
-                                  // 起点前（原生拖到选区外）拉回起点；画面的
+                                  // 起点前（拖到选区外）拉回起点；画面的
                                   // 拖动跟随由 rangeToolTo 的程序 seek 负责。
                                   const start = draft?.start ?? toolMeta?.start_secs ?? 0;
                                   const dur = rangeDurRaw > 0 ? rangeDurRaw : trackDur;
@@ -3886,7 +3883,7 @@ export default function FreeCanvas({ canvasId }: { canvasId: string }) {
                                   }
                                   return;
                                 }
-                                // 原生控件拖动回写播放头（seek 模式）。
+                                // 播放条拖动/走带回写播放头（seek 模式）。
                                 if (toolBusy || productPath) return;
                                 setVideoToolDraft((prev) => ({
                                   ...prev,
@@ -3929,11 +3926,7 @@ export default function FreeCanvas({ canvasId }: { canvasId: string }) {
                                 {isGif ? t("canvas.gifDone") : t("canvas.seekDone")}
                               </div>
                               {isAudio && (
-                                <AudioMiniPlayer
-                                  path={productPath}
-                                  playLabel={t("canvas.audioPlay")}
-                                  pauseLabel={t("canvas.audioPause")}
-                                />
+                                <MediaPlayback kind="audio" path={productPath} autoPlay={false} />
                               )}
                               <div className="fc-vt-sidehint">{t("canvas.toolDoneHint")}</div>
                             </>
@@ -4060,9 +4053,9 @@ export default function FreeCanvas({ canvasId }: { canvasId: string }) {
                       <div className="fc-node-placeholder">{t("canvas.waitingUpstream")}</div>
                     )
                   ) : node.type === "preview_video" ? (
-                    path ? <ResourceMediaPlayer kind="video" path={path} /> : <div className="fc-node-placeholder">{t("canvas.waitingUpstream")}</div>
+                    path ? <MediaPlayback kind="video" path={path} /> : <div className="fc-node-placeholder">{t("canvas.waitingUpstream")}</div>
                   ) : (
-                    path ? <ResourceMediaPlayer kind="audio" path={path} /> : <div className="fc-node-placeholder">{t("canvas.waitingUpstream")}</div>
+                    path ? <MediaPlayback kind="audio" path={path} /> : <div className="fc-node-placeholder">{t("canvas.waitingUpstream")}</div>
                   )}
                   {upstream?.text && <div className="fc-preview-text">{upstream.text}</div>}
                 </div>
