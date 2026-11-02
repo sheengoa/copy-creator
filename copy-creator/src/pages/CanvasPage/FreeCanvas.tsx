@@ -17,7 +17,6 @@ import {
   type CanvasLayoutEntry,
   type CanvasNode,
   type CanvasNodeType,
-  type SaveMediaMeta,
 } from "../../stores/canvasStore";
 import { AUDIO_EXTS, extOf, IMAGE_EXTS, VIDEO_EXTS } from "./nodes/exts";
 import type { PortDef } from "./nodes/types";
@@ -38,15 +37,14 @@ import { NodeHint } from "./nodes/NodeHint";
 import { NodeShell } from "./nodes/shell";
 import { WheelGate } from "./nodes/WheelGate";
 import { ResourceThumb } from "./nodes/media";
-import { SaveMediaBox } from "./nodes/SaveMediaBox";
 import { useMediaUrl } from "./nodes/mediaPath";
+import { SaveRuntimeProvider } from "./nodes/saveRuntime";
 import { useNodeErrors } from "./nodes/nodeErrors";
 import { useNoteEditing } from "./nodes/noteEditing";
 import {
   collectionItemsOf as collectionItemsQuery,
   genReadinessOf as genReadinessQuery,
   upstreamMediaOf as upstreamMediaQuery,
-  upstreamNodeOf as upstreamNodeQuery,
 } from "./nodes/upstream";
 import type { NodeServices } from "./nodes/types";
 
@@ -1727,17 +1725,11 @@ export default function FreeCanvas({ canvasId }: { canvasId: string }) {
 
   // ── 上游媒体解析（预览/保存节点取上游产物） ────────────────
 
-  /** 入线第一根的上游节点（预览/保存节点都是单入口）。聚合与就绪判定
-   *  查 nodes/upstream 的 def 注册表（gen_image 主图置顶、load_text 文本，
-   *  缺省走 resource_path）。 */
-  const upstreamNodeOf = useCallback(
-    (nodeId: string): CanvasNode | undefined => upstreamNodeQuery(nodes, connections, nodeId),
-    [connections, nodes],
-  );
-
   /** 上游产物聚合。null 严格表示「没有上游连接」；连了但暂无产物（生成
    *  中 / 未生成 / 加载节点还没选文件）返回空 paths，供占位文案区分
-   *  「未连接上游」与「已连接，等待产物」。 */
+   *  「未连接上游」与「已连接，等待产物」。聚合与就绪判定查
+   *  nodes/upstream 的 def 注册表（gen_image 主图置顶、load_text 文本，
+   *  缺省走 resource_path）。 */
   const upstreamMediaOf = useCallback(
     (nodeId: string) => upstreamMediaQuery(nodes, connections, nodeId),
     [connections, nodes],
@@ -2147,116 +2139,6 @@ export default function FreeCanvas({ canvasId }: { canvasId: string }) {
     });
   };
 
-  // ── 保存节点：预设目标 + 产物自动落盘（2026-11-01 用户定案） ──
-  // 连线后先选保存位置（资源库 / 文件夹），上游产物一出现即自动导出；
-  // 指纹判重，重新生成（产物变化）自动重存。旧「生成完再手动点保存」
-  // 的入库/另存按钮与逐项另存撤销。
-
-  /** 按节点 id 读最新 metadata 合并写回（自动保存各步都基于 store 最新
-   *  值，避免拖动等并发更新被旧闭包覆盖）。 */
-  const writeSaveMeta = useCallback(
-    (nodeId: string, patch: Partial<SaveMediaMeta>) => {
-      const node = store.getState().nodes.find((n) => n.id === nodeId);
-      if (!node) return;
-      const meta = node.metadata;
-      if (meta.kind !== "save_image" && meta.kind !== "save_video" && meta.kind !== "save_audio") return;
-      void store.getState().updateNode(nodeId, { metadata: JSON.stringify({ ...meta, ...patch }) });
-    },
-    [store],
-  );
-
-  /** 设置/清除自动保存目标：清指纹让管线对现有产物立即（重）存一次。 */
-  const setSaveAutoTarget = (nodeId: string, target: "library" | "dir", dir: string) => {
-    writeSaveMeta(nodeId, {
-      auto_target: target,
-      auto_dir: dir,
-      auto_state: "",
-      auto_error: "",
-      auto_fingerprint: "",
-    });
-  };
-
-  const clearSaveAutoTarget = (nodeId: string) => {
-    writeSaveMeta(nodeId, {
-      auto_target: "",
-      auto_dir: "",
-      auto_state: "",
-      auto_error: "",
-      auto_fingerprint: "",
-    });
-  };
-
-  const pickSaveAutoDir = async (nodeId: string) => {
-    try {
-      const dir = await invoke<string>("canvas_pick_save_dir");
-      if (!dir) return; // 用户取消
-      setSaveAutoTarget(nodeId, "dir", dir.replace(/[\\/]+$/, ""));
-    } catch {
-      // 目录选择取消/失败：保持未设置态
-    }
-  };
-
-  /** 自动保存在飞锁：节点 id 级，跨 StrictMode 双跑与快速重渲染同拍生效。 */
-  const autoSaveInFlightRef = useRef<Set<string>>(new Set());
-
-  const runAutoSave = useCallback(
-    async (nodeId: string, target: "library" | "dir", dir: string, paths: string[], fingerprint: string) => {
-      // 在飞锁（ref 级，同拍即生效）：StrictMode 下 effect 双跑共用同一
-      // 快照，auto_state 检查拦不住同一拍的重入，这里保证单节点不并发
-      // 导出（开发模式防双份入库，生产同样受益）。
-      if (autoSaveInFlightRef.current.has(nodeId)) return;
-      autoSaveInFlightRef.current.add(nodeId);
-      writeSaveMeta(nodeId, { auto_state: "saving", auto_error: "" });
-      try {
-        const base = dir.replace(/[\\/]+$/, "");
-        for (const path of paths) {
-          if (target === "library") {
-            await invoke("canvas_save_to_library", { sourcePath: path });
-          } else {
-            const name = path.split(/[\\/]/).pop() ?? "产物";
-            await invoke("canvas_export_to_path", { sourcePath: path, target: `${base}/${name}` });
-          }
-        }
-        writeSaveMeta(nodeId, {
-          auto_state: "saved",
-          auto_error: "",
-          auto_fingerprint: fingerprint,
-          status: "saved",
-          target: target === "library" ? "library" : "path",
-          saved_path: target === "dir" ? base : "",
-        });
-      } catch (err) {
-        // 失败不落指纹：徽章转红示错，点徽章重试（避免持续失败时自动重试风暴）
-        writeSaveMeta(nodeId, { auto_state: "error", auto_error: String(err) });
-      } finally {
-        autoSaveInFlightRef.current.delete(nodeId);
-      }
-    },
-    [writeSaveMeta],
-  );
-
-  /** 自动保存管线：目标已设的保存节点，上游产物指纹变化即自动导出。
-   *  error 态停自动重试（等用户点徽章），saving 态防并发。 */
-  useEffect(() => {
-    for (const node of nodes) {
-      const meta = node.metadata;
-      if (meta.kind !== "save_image" && meta.kind !== "save_video" && meta.kind !== "save_audio") continue;
-      const target = meta.auto_target ?? "";
-      if (!target || target === "error") continue;
-      if (meta.auto_state === "saving" || meta.auto_state === "error") continue;
-      const paths = upstreamMediaOf(node.id)?.paths ?? [];
-      if (!paths.length) continue;
-      const fingerprint = paths.join("\n");
-      if (meta.auto_fingerprint === fingerprint) continue;
-      void runAutoSave(node.id, target === "dir" ? "dir" : "library", meta.auto_dir ?? "", paths, fingerprint);
-    }
-  }, [nodes, connections, runAutoSave, upstreamMediaOf]);
-
-  /** 自动保存失败后的手动重试：清 error 态，管线下一拍自动重跑。 */
-  const retrySaveAuto = (nodeId: string) => {
-    writeSaveMeta(nodeId, { auto_state: "", auto_error: "" });
-  };
-
   /** 清除加载节点已选文件（右上角悬浮 ×）：resource_path 置空串即回到
    *  未加载态，节点保留可重选。 */
   const clearLoadedMedia = (node: CanvasNode) => {
@@ -2569,6 +2451,8 @@ export default function FreeCanvas({ canvasId }: { canvasId: string }) {
             );
           })}
 
+          {/* 保存节点自动保存管线运行时（SaveMediaBody 经 Context 取操作） */}
+          <SaveRuntimeProvider>
           {nodes.map((node) => {
             const selected = selKeys.includes(node.id);
             const size = nodeSize(node);
@@ -2985,118 +2869,6 @@ export default function FreeCanvas({ canvasId }: { canvasId: string }) {
                   )}
                 </div>
               );
-            } else if (node.type === "save_image" || node.type === "save_video" || node.type === "save_audio") {
-              const upstreamNode = upstreamNodeOf(node.id);
-              const upstream = upstreamMediaOf(node.id);
-              const hasProduct = !!upstream?.paths.length;
-              const saveMeta = meta.kind === "save_image" || meta.kind === "save_video" || meta.kind === "save_audio" ? meta : null;
-              const autoTarget = saveMeta?.auto_target ?? "";
-              const autoState = saveMeta?.auto_state ?? "";
-              const autoError = saveMeta?.auto_error ?? "";
-              // 目标状态点：骑在等待产物区顶边中央（与选择组问号同一位置
-              // 语言）。中心为对应目标的精致小版图标（资源库=文件夹、
-              // 指定路径=下载），笔画重与问号一致；红叉=失败，点重试；
-              // 点绿点回目标选择。产物到位后绿点退场——图像即输出，不
-              // 再挂状态点（用户 2026-11-01 定案），输出删掉回到等待态
-              // 再恢复；仅保存失败保留红叉点重试。
-              const saveDot = (
-                <NodeHint
-                  text={
-                    autoState === "error"
-                      ? `${autoError} · ${t("canvas.saveAutoRetry")}`
-                      : autoState === "saving"
-                        ? t("canvas.saveAutoSaving")
-                        : `${autoTarget === "dir" ? (saveMeta?.auto_dir ?? "").split(/[\\/]/).pop() : t("canvas.saveAutoLibraryLbl")} · ${t("canvas.saveAutoChange")}`
-                  }
-                >
-                  <button
-                    type="button"
-                    className={`fc-save-dot${autoState === "error" ? " is-error" : ""}${autoState === "saving" ? " is-saving" : ""}`}
-                    aria-label={
-                      autoState === "error"
-                        ? t("canvas.saveAutoRetry")
-                        : autoTarget === "dir"
-                          ? (saveMeta?.auto_dir ?? "")
-                          : t("canvas.saveAutoLibraryLbl")
-                    }
-                    onClick={
-                      autoState === "error"
-                        ? () => retrySaveAuto(node.id)
-                        : () => clearSaveAutoTarget(node.id)
-                    }
-                  >
-                    <span className="fc-save-dot-ring">
-                      {autoState === "error" ? Icons.close : autoTarget === "dir" ? Icons.saveTrayFine : Icons.folderFine}
-                    </span>
-                  </button>
-                </NodeHint>
-              );
-              body = (
-                <div className="fc-node-form">
-                  {!upstreamNode ? (
-                    /* 未连接：断链图形，无文字 */
-                    <div className="fc-save-wait">{Icons.link}</div>
-                  ) : !autoTarget ? (
-                    /* 连线后的下一步：虚线选择组（问号点明二选一），点选即设 */
-                    <div className="fc-save-choose">
-                      <span className="fc-save-help">{Icons.help}</span>
-                      <NodeHint text={t("canvas.saveAutoLibrary")}>
-                        <button
-                          type="button"
-                          className="fc-save-opt"
-                          aria-label={t("canvas.saveAutoLibrary")}
-                          onClick={() => setSaveAutoTarget(node.id, "library", "")}
-                        >
-                          {Icons.folderFine}
-                        </button>
-                      </NodeHint>
-                      <NodeHint text={t("canvas.saveAutoDir")}>
-                        <button
-                          type="button"
-                          className="fc-save-opt"
-                          aria-label={t("canvas.saveAutoDir")}
-                          onClick={() => void pickSaveAutoDir(node.id)}
-                        >
-                          {Icons.saveTrayFine}
-                        </button>
-                      </NodeHint>
-                    </div>
-                  ) : (
-                    <>
-                      {/* 目标已设：等待产物时骑等待区顶边中央的 16px 状态点
-                          （外环 + 内圈 + 对应目标的精致小版图标，与问号同构
-                          同笔画重）——绿=就绪，点回目标选择，悬停浮出目
-                          标名。产物一到媒体盒即输出本身，状态点退场（用
-                          户 2026-11-01 定案：有图就不显示小绿点，输出删掉
-                          回到等待态再恢复）；仅保存失败保留红叉点重试。 */}
-                      {!hasProduct ? (
-                        /* 等待产物：沙漏图形（更高的区域） */
-                        <div className="fc-save-stage">
-                          {saveDot}
-                          {Icons.hourglass}
-                        </div>
-                      ) : (
-                        <div className="fc-save-stage filled">
-                          {autoState === "error" && saveDot}
-                          {/* 多图观看：单图/缩略图格由 +N 角标切换（SaveMediaBox） */}
-                          <SaveMediaBox
-                            paths={upstream!.paths}
-                            kind={
-                              node.type === "save_image"
-                                ? "image"
-                                : node.type === "save_video"
-                                  ? "video"
-                                  : "audio"
-                            }
-                          />
-                        </div>
-                      )}
-                      {autoState === "error" && autoError && <div className="fc-gen-warn">{autoError}</div>}
-                    </>
-                  )}
-                  {nodeErrors[node.id] && <div className="fc-gen-warn">{nodeErrors[node.id]}</div>}
-                </div>
-              );
             } else if (node.type === "video_first_frame" || node.type === "video_last_frame") {
               // 视频抽帧节点（2026-11-01）：视频进、图片出。视频在
               // metadata.video_path（来源：资源库/本地磁盘），提取出的帧
@@ -3503,6 +3275,7 @@ export default function FreeCanvas({ canvasId }: { canvasId: string }) {
               </NodeShell>
             );
           })}
+          </SaveRuntimeProvider>
         </div>
 
         {/* 刀切痕层：视口直下的绝对定位层（pc-world 之后 → 盖在卡片上）。 */}

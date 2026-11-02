@@ -1,5 +1,6 @@
 import { Icons } from "../../../components/Icons";
 import { MEDIA_COLOR } from "./colors";
+import { SaveMediaBody } from "./SaveMediaBody";
 import type { NodeDefinition } from "./types";
 
 // 保存三族：入口接受对应生成/加载节点，产物去向由自动保存管线决定
@@ -20,6 +21,7 @@ export const saveImageDef: NodeDefinition = {
     out: null,
   },
   ready: (node) => node.metadata.kind === "save_image" && !!node.metadata.auto_target,
+  Component: SaveMediaBody,
 };
 
 export const saveVideoDef: NodeDefinition = {
@@ -35,6 +37,7 @@ export const saveVideoDef: NodeDefinition = {
     out: null,
   },
   ready: (node) => node.metadata.kind === "save_video" && !!node.metadata.auto_target,
+  Component: SaveMediaBody,
 };
 
 export const saveAudioDef: NodeDefinition = {
@@ -50,4 +53,5 @@ export const saveAudioDef: NodeDefinition = {
     out: null,
   },
   ready: (node) => node.metadata.kind === "save_audio" && !!node.metadata.auto_target,
+  Component: SaveMediaBody,
 };
