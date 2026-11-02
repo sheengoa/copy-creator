@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from "react";
+import { useCallback, useEffect, useLayoutEffect, useRef, useState, type ReactNode } from "react";
 import { useTranslation } from "react-i18next";
 import { invoke } from "@tauri-apps/api/core";
 import { getCurrentWebview } from "@tauri-apps/api/webview";
@@ -7,7 +7,6 @@ import { MediaPlayback } from "../../components/MediaPlayback";
 import { ImageLightbox } from "../../components/ImageLightbox";
 import { joinLibraryPath } from "../../domain/projectView";
 import ProjectFilePickerDialog from "../ResourcePage/ProjectFilePickerDialog";
-import { useSettingsStore } from "../../stores/settingsStore";
 import { resolveWireRelease } from "../../utils/projectWireRelease";
 import CanvasVideoTimeline from "./CanvasVideoTimeline";
 import { formatTimecode } from "./videoTimeline";
@@ -38,14 +37,11 @@ import { WheelGate } from "./nodes/WheelGate";
 import { ResourceThumb } from "./nodes/media";
 import { useMediaUrl } from "./nodes/mediaPath";
 import { SaveRuntimeProvider } from "./nodes/saveRuntime";
-import { ParamCombo } from "./nodes/ParamCombo";
-import { commitImageParams, formatSizeDisplay, MODEL_PRESET_BASE, SIZE_PRESET_ITEMS } from "./nodes/genParams";
+import { GenRuntimeProvider } from "./nodes/genRuntime";
+import { BatchBar } from "./nodes/BatchBar";
 import { useNodeErrors } from "./nodes/nodeErrors";
 import { useNoteEditing } from "./nodes/noteEditing";
-import {
-  genReadinessOf as genReadinessQuery,
-  upstreamMediaOf as upstreamMediaQuery,
-} from "./nodes/upstream";
+import { upstreamMediaOf as upstreamMediaQuery } from "./nodes/upstream";
 import type { NodeServices } from "./nodes/types";
 
 // 自由生图工作流画布（画布区方案 3.3 + 节点体系 v2）：以 ProjectCanvas 为
@@ -182,10 +178,6 @@ export default function FreeCanvas({ canvasId }: { canvasId: string }) {
   const nodes = useCanvasStore((s) => s.nodes);
   const connections = useCanvasStore((s) => s.connections);
   const groups = useCanvasStore((s) => s.groups);
-  const genProgress = useCanvasStore((s) => s.genProgress);
-  const aiModel = useSettingsStore((s) => s.aiModel);
-  /** 模型占位符兜底：节点未填且设置页默认模型为空时给通用示例名。 */
-  const modelFallback = aiModel || "gpt-image-1";
 
   const store = useCanvasStore;
   const nodesRef = useRef(nodes);
@@ -228,11 +220,6 @@ export default function FreeCanvas({ canvasId }: { canvasId: string }) {
   const closeNoteEdit = useNoteEditing((s) => s.close);
   const nodeErrors = useNodeErrors((s) => s.errors);
   const setNodeErrors = useNodeErrors((s) => s.setErrors);
-  const [genStarting, setGenStarting] = useState(false);
-  // 生成等待编排（流光谢幕相位机）：节点 id → 快照。wait 跟随逐张回传；
-  // 到齐后 fuse/bloom/exit/land 谢幕与 store 解耦（条目已被最终刷新裁掉）。
-  const [genWait, setGenWait] = useState<Record<string, GenWaitSnap>>({});
-  const genWaitTimersRef = useRef(new Map<string, number>());
   const [pulseKeys, setPulseKeys] = useState<string[]>([]);
   /** 资源库选择浮层：load 节点的「从资源库选择」。 */
   const [pickerForNode, setPickerForNode] = useState<string | null>(null);
@@ -259,122 +246,6 @@ export default function FreeCanvas({ canvasId }: { canvasId: string }) {
   useEffect(() => {
     selRef.current = selKeys;
   }, [selKeys]);
-
-  // ── 生成等待编排：store 进度 → 本地快照（wait）→ 谢幕相位机 ─────
-
-  // 镜像 + 到齐判定：进度条目出现即建快照（仅限节点仍在 generating，
-  // 完成后的残留条目不进等待态）；wait 态持续镜像逐张回传；全部槽位
-  // 落定即转入谢幕——全部成功走融合庆祝（fuse），有失败/取消走静默
-  // 退场（exit）。条目先于事件被裁（切画布等）时按节点最终状态定调，
-  // 满额成功仍补融合。genWait 入 deps：land 落格清掉快照后，同节点的
-  // 新一轮生成条目能立刻重新入册。
-  useEffect(() => {
-    setGenWait((prev) => {
-      const next = { ...prev };
-      let changed = false;
-      // 遍历 store 条目与既有快照的并集：条目随最终 canvas-changed 被裁掉
-      // 后键会消失，只按条目遍历会让「条目已消失」的定调分支永远轮不到
-      // （取消路径必现：received+errors 摸不到 total，快照卡死在 wait）。
-      const ids = new Set([...Object.keys(genProgress), ...Object.keys(prev)]);
-      for (const nodeId of ids) {
-        const prog = genProgress[nodeId];
-        const node = nodes.find((n) => n.id === nodeId);
-        const meta = node?.metadata;
-        const generating = meta?.kind === "gen_image" && meta.status === "generating";
-        const snap = next[nodeId];
-        if (!snap) {
-          if (generating && prog) {
-            next[nodeId] = {
-              phase: "wait",
-              celebrated: false,
-              total: prog.total,
-              received: prog.received,
-              errors: prog.errors,
-              requestId: prog.requestId,
-              previews: prog.previews,
-            };
-            changed = true;
-          }
-          continue;
-        }
-        if (snap.phase !== "wait") continue;
-        if (prog) {
-          let cur = snap;
-          if (
-            prog.received !== snap.received ||
-            prog.errors !== snap.errors ||
-            prog.total !== snap.total ||
-            prog.requestId !== snap.requestId ||
-            prog.previews !== snap.previews
-          ) {
-            cur = {
-              ...snap,
-              total: prog.total,
-              received: prog.received,
-              errors: prog.errors,
-              requestId: prog.requestId,
-              previews: prog.previews,
-            };
-            next[nodeId] = cur;
-            changed = true;
-          }
-          // 到齐即谢幕：received+errors 摸到 total（取消的槽位不回传，
-          // 收不到齐信号，由下方条目消失分支兜底）。
-          if (cur.received + cur.errors >= cur.total) {
-            const full = cur.errors === 0;
-            next[nodeId] = { ...cur, phase: full ? "fuse" : "exit", celebrated: full };
-            changed = true;
-          }
-        } else if (meta?.kind === "gen_image" && meta.status !== "generating") {
-          const full =
-            meta.status === "done" && meta.images.length === snap.total && snap.errors === 0;
-          next[nodeId] = { ...snap, phase: full ? "fuse" : "exit", celebrated: full };
-          changed = true;
-        }
-      }
-      return changed ? next : prev;
-    });
-  }, [genProgress, nodes, genWait]);
-
-  // 谢幕节拍：fuse →(950ms)→ bloom →(1200ms)→ exit →(300ms)→ land
-  // →(520ms)→ 清快照。定时器按「节点:相位」键入册，effect 因其他节点
-  // 变化重跑时已在册的不重排——节拍不漂移；卸载统一清空。
-  useEffect(() => {
-    const advance = (id: string, phase: GenWaitPhase) =>
-      setGenWait((prev) => {
-        const snap = prev[id];
-        if (!snap || snap.phase === phase) return prev;
-        return { ...prev, [id]: { ...snap, phase } };
-      });
-    const schedule = (key: string, id: string, delay: number, next: GenWaitPhase | null) => {
-      if (genWaitTimersRef.current.has(key)) return;
-      const timer = window.setTimeout(() => {
-        genWaitTimersRef.current.delete(key);
-        if (next) advance(id, next);
-        else
-          setGenWait((prev) => {
-            if (!(id in prev)) return prev;
-            const rest = { ...prev };
-            delete rest[id];
-            return rest;
-          });
-      }, delay);
-      genWaitTimersRef.current.set(key, timer);
-    };
-    for (const [id, snap] of Object.entries(genWait)) {
-      if (snap.phase === "fuse") schedule(`fuse:${id}`, id, GEN_WAIT_FUSE_MS, "bloom");
-      else if (snap.phase === "bloom") schedule(`bloom:${id}`, id, GEN_WAIT_BLOOM_MS, "exit");
-      else if (snap.phase === "exit") schedule(`exit:${id}`, id, GEN_WAIT_EXIT_MS, "land");
-      else if (snap.phase === "land") schedule(`land:${id}`, id, GEN_WAIT_LAND_MS, null);
-    }
-  }, [genWait]);
-  useEffect(
-    () => () => {
-      for (const timer of genWaitTimersRef.current.values()) window.clearTimeout(timer);
-      genWaitTimersRef.current.clear();
-    },
-    [],
-  );
 
   // ── 撤销栈（对齐工程画布惯例：undoingRef 锁防 StrictMode 双触发） ──
 
@@ -1658,11 +1529,6 @@ export default function FreeCanvas({ canvasId }: { canvasId: string }) {
     [connections, nodes],
   );
 
-  /** 生成前提校验：缺失清单查 def.ready（文本源与保存节点各自声明）。 */
-  function genReadinessOf(node: CanvasNode): string[] {
-    return genReadinessQuery(nodes, connections, node, t);
-  }
-
   // 跨模块服务（下发 def.onDoubleClick 与节点模块）。取媒浮层/清除的
   // 写回分派按 def.applyMode：video-tool 写 video_path（applyFrameVideo），
   // resource 直写 resource_path。闭包引用渲染期状态，事件期执行时已初始化。
@@ -1687,18 +1553,6 @@ export default function FreeCanvas({ canvasId }: { canvasId: string }) {
     if (node.metadata.kind !== "load_text" && node.metadata.kind !== "note") return;
     const meta = { ...node.metadata, content } as CanvasNode["metadata"];
     void store.getState().updateNode(node.id, { metadata: JSON.stringify(meta) });
-  };
-
-  const startGenerate = async (node: CanvasNode) => {
-    setGenStarting(true);
-    setNodeErrors((prev) => ({ ...prev, [node.id]: "" }));
-    try {
-      await store.getState().generateImage(canvasId, node.id);
-    } catch (err) {
-      setNodeErrors((prev) => ({ ...prev, [node.id]: String(err) }));
-    } finally {
-      setGenStarting(false);
-    }
   };
 
   // ── 加载节点：资源库选择 / 本地文件 / 拖入 ────────────────
@@ -2130,26 +1984,10 @@ export default function FreeCanvas({ canvasId }: { canvasId: string }) {
     };
   }, [handleFileDrop]);
 
-  // ── 批量生成：多选图像生成节点 → 队列顺序执行 ─────────────
-
-  const batchRunningRef = useRef(false);
-  const selectedGenIds = selKeys.filter((id) => nodes.find((n) => n.id === id)?.type === "gen_image");
-  const runBatch = useCallback(async () => {
-    if (batchRunningRef.current) return;
-    batchRunningRef.current = true;
-    try {
-      for (const id of selectedGenIds) {
-        const node = nodesRef.current.find((n) => n.id === id);
-        if (node) await startGenerate(node);
-      }
-    } finally {
-      batchRunningRef.current = false;
-    }
-    // startGenerate 依赖 canvasId/store，经其闭包稳定；选中集变化由渲染期值传入。
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [selectedGenIds.join(",")]);
-
   // ── 渲染 ───────────────────────────────────────────────────
+
+  /** 多选中的图像生成节点（批量生成队列；执行在 GenRuntimeProvider）。 */
+  const selectedGenIds = selKeys.filter((id) => nodes.find((n) => n.id === id)?.type === "gen_image");
 
   // 连线层（卡片之下）：按视口尺寸渲染 + 平移组换算世界坐标。
   const wiresVis = {
@@ -2202,6 +2040,7 @@ export default function FreeCanvas({ canvasId }: { canvasId: string }) {
   const lightboxUrl = useMediaUrl(lightboxSrc);
 
   return (
+    <GenRuntimeProvider canvasId={canvasId} selectedGenIds={selectedGenIds}>
     <div className="pc-root fc-root">
       <div
         ref={vpRef}
@@ -2356,181 +2195,6 @@ export default function FreeCanvas({ canvasId }: { canvasId: string }) {
                   scale={view.scale}
                   services={canvasServices}
                 />
-              );
-            } else if (node.type === "gen_image" && meta.kind === "gen_image") {
-              const missing = genReadinessOf(node);
-              // 尺寸档位：hintKey 在此解析为当前语言（比例尾注语言中立，映射随渲染重算）。
-              const sizeItems = SIZE_PRESET_ITEMS.map(({ hintKey, ...rest }) => ({
-                ...rest,
-                hint: hintKey ? t(`canvas.${hintKey}`) : rest.hint,
-              }));
-              // 等待编排：快照在册即全程接管节点体——参数收起（溜走）、
-              // 流光舞台、槽位谢幕、底部动作行换位。store 条目活着优先读
-              // 它（跟得紧），谢幕期读快照（条目已随最终刷新被裁）。
-              const wait = genWait[node.id];
-              const prog = genProgress[node.id] ?? wait;
-              // 动作行换位与原型一致：busy 层亮到退场（exit）为止——融合/
-              // 扩散期间仍是「生成中 n/m + 取消」，避免提前露出的重新生成
-              // 按钮撞上后端双保险拒绝。
-              const busyOn = !!wait && wait.phase !== "exit" && wait.phase !== "land";
-              body = (
-                <div className="fc-node-form">
-                  <div className={`fc-gen-params${busyOn ? " is-loaded" : ""}`}>
-                    <div className="fc-load-entry-clip">
-                      <div className="fc-param">
-                        <NodeHint text={t("canvas.genModelLabel")} className="fc-param-ico-host">
-                          <span className="fc-param-ico">{Icons.chip}</span>
-                        </NodeHint>
-                        <ParamCombo
-                          comboKey={`gm-${node.id}-${node.updated_at}`}
-                          value={meta.params.model}
-                          items={[...new Set([modelFallback, ...MODEL_PRESET_BASE])].map((m) => ({ value: m, label: m }))}
-                          placeholder={modelFallback}
-                          toggleTitle={t("canvas.comboPresets")}
-                          onCommit={(model) => commitImageParams(node, { model })}
-                        />
-                      </div>
-                      <div className="fc-param">
-                        <NodeHint text={t("canvas.genSizeLabel")} className="fc-param-ico-host">
-                          <span className="fc-param-ico">{Icons.crop}</span>
-                        </NodeHint>
-                        <ParamCombo
-                          comboKey={`gs-${node.id}-${node.updated_at}`}
-                          value={meta.params.size}
-                          items={sizeItems}
-                          placeholder="auto"
-                          display={(v) => formatSizeDisplay(v, sizeItems)}
-                          toggleTitle={t("canvas.comboPresets")}
-                          onCommit={(size) => commitImageParams(node, { size })}
-                        />
-                        <NodeHint text={t("canvas.genCountLabel")}>
-                          <div className="fc-stepper">
-                            <button
-                              type="button"
-                              className="fc-stepper-btn"
-                              disabled={meta.params.count <= 1}
-                              aria-label={t("canvas.genCountLabel")}
-                              onPointerDown={(e) => e.stopPropagation()}
-                              onClick={() => commitImageParams(node, { count: Math.max(1, meta.params.count - 1) })}
-                            >
-                              {Icons.minus}
-                            </button>
-                            <span className="fc-stepper-val">{meta.params.count}</span>
-                            <button
-                              type="button"
-                              className="fc-stepper-btn"
-                              disabled={meta.params.count >= 15}
-                              aria-label={t("canvas.genCountLabel")}
-                              onPointerDown={(e) => e.stopPropagation()}
-                              onClick={() => commitImageParams(node, { count: Math.min(15, meta.params.count + 1) })}
-                            >
-                              {Icons.add}
-                            </button>
-                          </div>
-                        </NodeHint>
-                      </div>
-                    </div>
-                  </div>
-                  {wait && wait.phase !== "land" && (
-                    <>
-                      {/* 生成等待编排（2026-11-01 定案）：执行中到谢幕全程
-                          只有恒定加高的流光独占——到齐的融合/绽放就在这条
-                          流光里完成，不示任何缩略图行；exit 流光淡出，land
-                          直接落成完成态（缩略图即完成态胶片条），两态直切
-                          无中间帧。 */}
-                      <GenAuroraStage
-                        phase={wait.phase}
-                        total={prog.total}
-                        received={prog.received}
-                        celebrated={wait.celebrated}
-                      />
-                    </>
-                  )}
-                  {/* 完成态产物区（2026-11-01 定稿；2026-11-02 砍掉主图点开
-                      大图——生成节点内只做缩略图级预览，看大图走下游预览/
-                      保存节点）：主图大图 + 横滑胶片条。大图即当前主图，
-                      只随切换换图不可点；点小图换主图；仅 1 张时胶片条隐
-                      藏，多张也只占一行，节点高度恒定。只在落定（land 或
-                      无等待编排）后现身——执行/谢幕期不预渲染，避免结果
-                      与流光同屏（两态直切，无中间帧）。 */}
-                  {(!wait || wait.phase === "land") &&
-                    meta.images.length > 0 &&
-                    (() => {
-                      const primary = [...meta.images]
-                        .map((img, i) => ({ img, i }))
-                        .sort((a, b) => (a.img.primary === b.img.primary ? 0 : a.img.primary ? -1 : 1))[0];
-                      return (
-                        <div className={`fc-gen-result${wait?.phase === "land" ? " is-land" : ""}`}>
-                          <div className="fc-gen-hero">
-                            <ResourceThumb path={primary.img.resource_path} className="fc-gen-hero-img" />
-                            {meta.images.length > 1 && (
-                              <span className="fc-gen-hero-badge">{t("canvas.genPrimary")}</span>
-                            )}
-                          </div>
-                          {meta.images.length > 1 && (
-                            <div className="fc-gen-strip">
-                              {meta.images.map((thumb, i) => (
-                                <NodeHint
-                                  key={i}
-                                  className="fc-gen-strip-item"
-                                  text={thumb.primary ? t("canvas.genPrimary") : t("canvas.genSetPrimary")}
-                                >
-                                  <button
-                                    type="button"
-                                    className={`fc-gen-strip-thumb${thumb.primary ? " primary" : ""}`}
-                                    onClick={() => {
-                                      const images = meta.images.map((img, j) => ({ ...img, primary: j === i }));
-                                      void store.getState().updateNode(node.id, {
-                                        metadata: JSON.stringify({ ...meta, images } as CanvasNode["metadata"]),
-                                      });
-                                    }}
-                                  >
-                                    <ResourceThumb path={thumb.resource_path} className="fc-strip-img" />
-                                  </button>
-                                </NodeHint>
-                              ))}
-                            </div>
-                          )}
-                        </div>
-                      );
-                    })()}
-                  <div className="fc-gen-foot">
-                    <div className={`fc-gen-layer${busyOn ? "" : " is-on"}`}>
-                      {meta.images.length > 0 && (
-                        <span className="fc-gen-summary">{t("canvas.genCountSummary", { count: meta.images.length })}</span>
-                      )}
-                      <NodeHint text={missing.length > 0 ? t("canvas.genNotReady", { items: missing.join("、") }) : ""}>
-                        {/* 完成态重生成 = 定稿样式：中性胶囊 + 蓝色刷新图标，
-                            与「生成」的实心 accent 区分开——一个是发起，一个是再来一次。 */}
-                        <button
-                          className={`fc-node-btn${meta.status === "done" ? " ghost fc-gen-regen" : " accent"}`}
-                          disabled={genStarting || missing.length > 0}
-                          onClick={() => void startGenerate(node)}
-                        >
-                          {meta.status === "done" && <span className="fc-gen-regen-ico">{Icons.refresh}</span>}
-                          {meta.status === "done" ? t("canvas.regenerate") : t("canvas.genButton")}
-                        </button>
-                      </NodeHint>
-                    </div>
-                    {prog && (
-                      <div className={`fc-gen-layer${busyOn ? " is-on" : ""}`}>
-                        <span className="fc-gen-summary" aria-live="polite">
-                          {t("canvas.generating")} {prog.received + prog.errors}/{prog.total}
-                        </span>
-                        <button
-                          className="fc-node-btn ghost fc-gen-cancel"
-                          onClick={() => void store.getState().cancelGeneration(prog.requestId)}
-                        >
-                          {t("canvas.cancelGen")}
-                        </button>
-                      </div>
-                    )}
-                  </div>
-                  {nodeErrors[node.id] && <div className="fc-gen-warn">{nodeErrors[node.id]}</div>}
-                  {meta.status === "error" && meta.error && (
-                    <div className={`fc-gen-warn${meta.error.startsWith("已取消") ? " is-muted" : ""}`}>{meta.error}</div>
-                  )}
-                </div>
               );
             } else if (node.type === "video_first_frame" || node.type === "video_last_frame") {
               // 视频抽帧节点（2026-11-01）：视频进、图片出。视频在
@@ -3047,14 +2711,8 @@ export default function FreeCanvas({ canvasId }: { canvasId: string }) {
           </div>
         )}
 
-        {/* 批量生成浮动条：多选图像生成节点时出现 */}
-        {selectedGenIds.length >= 2 && !genStarting && (
-          <div className="fc-batchbar" onPointerDown={(e) => e.stopPropagation()}>
-            <button onClick={() => void runBatch()}>
-              {t("canvas.batchGenerate", { count: selectedGenIds.length })}
-            </button>
-          </div>
-        )}
+        {/* 批量生成浮动条：多选图像生成节点时出现（执行走 GenRuntime） */}
+        <BatchBar selectedGenIds={selectedGenIds} />
 
         {/* 资源库选择浮层：加载节点与抽帧节点的「从资源库选择」入口 */}
         {pickerForNode && (
@@ -3176,6 +2834,7 @@ export default function FreeCanvas({ canvasId }: { canvasId: string }) {
         )}
       </div>
     </div>
+    </GenRuntimeProvider>
   );
 }
 
@@ -3184,144 +2843,6 @@ export default function FreeCanvas({ canvasId }: { canvasId: string }) {
  *  缩放监听的 preventDefault 会把弹层自身的默认滚动一并杀掉，表现为
  *  「列表滚不动、画布在缩放」。资源库弹窗 / 大图灯箱 / 节点选择框都用。 */
 // ── 生成等待「流光」动效（2026-11-01 原型定稿移植） ─────────────
-
-/** 谢幕节拍（ms）：全部到齐 → 融合收拢 → 膨开铺满 → 舞台淡出 → 缩略图
- *  落格。与原型时序一致，canvas.css 的过渡时长与之对齐。 */
-const GEN_WAIT_FUSE_MS = 950;
-const GEN_WAIT_BLOOM_MS = 1200;
-const GEN_WAIT_EXIT_MS = 300;
-const GEN_WAIT_LAND_MS = 520;
-
-type GenWaitPhase = "wait" | "fuse" | "bloom" | "exit" | "land";
-
-/** 等待编排快照：跟随 store 逐张回传镜像（wait 态持续更新），store 条目
- *  被最终 canvas-changed 裁掉后冻结——谢幕序列不能依赖 store，它比节点
- *  状态刷新先消失。 */
-interface GenWaitSnap {
-  phase: GenWaitPhase;
-  /** 走过融合庆祝（全部成功）：exit 淡出时保留融合态，光满着谢幕。 */
-  celebrated: boolean;
-  total: number;
-  received: number;
-  errors: number;
-  requestId: string;
-  previews: Record<number, string>;
-}
-
-/** 光团群布局：3×6 抖动网格铺 18 团（避免随机留空隙），阈值均匀铺在
- *  进度轴上（data-th → p=received/total 逐团点亮）。浮现后各自缓慢漂移
- *  呼吸；律动波相位 = 横向位置（--wx）；融合向量指向舞台中心——百分比
- *  存 --gl/--gt，CSS 端用 cqw/cqh 换算成位移，节点宽窄自适应。 */
-function buildAuroraBlobs(): { th: number; outer: CSSProperties; mid: CSSProperties; inner: CSSProperties }[] {
-  const colors = ["var(--accent)", "var(--au-violet, #AF52DE)"];
-  const blobs: { th: number; outer: CSSProperties; mid: CSSProperties; inner: CSSProperties }[] = [];
-  let k = 0;
-  for (let r = 0; r < 3; r++) {
-    for (let c = 0; c < 6; c++) {
-      const size = (k % 7 === 3 ? 78 : 34) + Math.random() * 34;
-      const leftPct = ((c + 0.5) / 6) * 100 + (Math.random() * 12 - 6);
-      const topPct = ((r + 0.5) / 3) * 100 + (Math.random() * 18 - 9);
-      blobs.push({
-        th: (k + 1) / 19,
-        outer: {
-          width: `${size.toFixed(0)}px`,
-          height: `${size.toFixed(0)}px`,
-          left: `${leftPct.toFixed(1)}%`,
-          top: `${topPct.toFixed(1)}%`,
-          "--b-o": (0.46 + Math.random() * 0.3).toFixed(2),
-          "--b-c": colors[k % 2],
-          "--b-blur": `${(8 + Math.random() * 6).toFixed(1)}px`,
-          "--gl": leftPct.toFixed(1),
-          "--gt": topPct.toFixed(1),
-        } as CSSProperties,
-        mid: { "--wx": Math.min(1, Math.max(0, leftPct / 100)).toFixed(3) } as CSSProperties,
-        inner: {
-          "--dx": `${(Math.random() * 40 - 20).toFixed(0)}px`,
-          "--dy": `${(Math.random() * 22 - 11).toFixed(0)}px`,
-          "--ds": (1.05 + Math.random() * 0.26).toFixed(2),
-          "--d-dur": `${(6 + Math.random() * 5).toFixed(2)}s`,
-          "--d-del": `${(-Math.random() * 6).toFixed(2)}s`,
-        } as CSSProperties,
-      });
-      k++;
-    }
-  }
-  return blobs;
-}
-
-/** 流光舞台：起步两团大光 + 随 p=received/total 逐团点亮的光团群 +
- *  律动波/斜向光带 + 每张回传一拍的心跳亮拍；fuse/bloom 谢幕由相位机
- *  驱动（is-merge → is-bloom），exit 淡出。 */
-function GenAuroraStage({
-  phase,
-  total,
-  received,
-  celebrated,
-}: {
-  phase: GenWaitPhase;
-  total: number;
-  received: number;
-  celebrated: boolean;
-}) {
-  const blobs = useMemo(() => buildAuroraBlobs(), []);
-  const [beat, setBeat] = useState(0);
-  const beatSeen = useRef(0);
-  useEffect(() => {
-    // 心跳亮拍：每张回传一拍（key 重挂重放动画）。
-    if (received > beatSeen.current) {
-      beatSeen.current = received;
-      setBeat((b) => b + 1);
-    }
-  }, [received]);
-  // 时间保底密度（2026-11-01 定案）：密度轴原来纯按回传进度
-  // （p = received/total），单张/极少张时进度没有中间值——执行全程只剩
-  // 起步两团大光干转，真机单张 ~28s 尤其明显。按 30s 标称时长给时间轴
-  // 兜底：有效进度取 max(真实进度, 时间进度)，密度随时间推移照样渐密，
-  // 真实回传快时自然接管；封顶 0.93 给谢幕融合留场。
-  const [elapsedMs, setElapsedMs] = useState(0);
-  useEffect(() => {
-    const started = Date.now();
-    const timer = window.setInterval(() => setElapsedMs(Date.now() - started), 600);
-    return () => window.clearInterval(timer);
-  }, []);
-  const progressP = total > 0 ? received / total : 0;
-  const timeP = Math.min(elapsedMs / 30000, 0.93);
-  const p = Math.max(progressP, timeP);
-  const cls = ["fc-aurora"];
-  if (p >= 0.5) cls.push("is-half");
-  // 融合/扩散态一路保留到淡出（celebrated）：光满着谢幕，不在退场时散开。
-  const merged = phase === "fuse" || phase === "bloom" || (phase === "exit" && celebrated);
-  if (merged) cls.push("is-merge");
-  if (phase === "bloom" || (phase === "exit" && celebrated)) cls.push("is-bloom");
-  if (phase === "exit") cls.push("is-out");
-  return (
-    <div className={cls.join(" ")} style={{ "--p": p.toFixed(3) } as CSSProperties} aria-hidden>
-      <span className="au-blob au-a" />
-      <span className="au-blob au-b" />
-      <span className="au-field">
-        {blobs.map((b, i) => (
-          <span key={i} className={p >= b.th ? "au-fb is-on" : "au-fb"} style={b.outer}>
-            {/* 三层结构与 CSS 选择器一一对应：外层浮现（.au-fb）、
-                中层律动波（> span，--wx 相位）、内层渐变+漂移
-                （> span > span，--dx/--dy/--ds）。此前拍扁成两个兄弟
-                span，`> span > span` 渐变规则匹配不到任何元素，光团群
-                从未绘制——整场只剩常驻双光，「渐密」不可见。 */}
-            <span style={b.mid}>
-              <span style={b.inner} />
-            </span>
-          </span>
-        ))}
-      </span>
-      <span className="au-fused" />
-      <span className="au-sheen" />
-      <span className="au-sheen2">
-        <span />
-      </span>
-      <span className="au-flare" />
-      {beat > 0 && <span key={beat} className="au-beatflash" />}
-    </div>
-  );
-}
 
 /** 懒加载的资源库选择浮层：画布加载节点「从资源库选择」入口，薄壳复用
  *  工程域的通用选择浮层（搜索/分页/缩略图/导入），点选即回填节点路径。

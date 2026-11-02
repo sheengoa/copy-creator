@@ -1,5 +1,6 @@
 import { Icons } from "../../../components/Icons";
 import { MEDIA_COLOR } from "./colors";
+import { GenImageBody } from "./GenImageBody";
 import type { NodeDefinition } from "./types";
 
 // 图像生成节点（渲染自 FreeCanvas 条件链 L3278 迁入，阶段 4f）。
@@ -28,4 +29,5 @@ export const genImageDef: NodeDefinition = {
     const sorted = [...from.metadata.images].sort((a, b) => (a.primary === b.primary ? 0 : a.primary ? -1 : 1));
     return { paths: sorted.map((img) => img.resource_path), text: "" };
   },
+  Component: GenImageBody,
 };
