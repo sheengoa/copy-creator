@@ -41,9 +41,9 @@ export interface UpstreamMedia {
 export interface NodeServices {
   /** 统一取媒入口：库选/盘选浮层（浮层状态在 FreeCanvas），按
    *  def.applyMode 分派写回（resource 直写 / video-tool 写 video_path）。 */
-  pickMedia?(node: CanvasNode, source: "library" | "disk"): void;
+  pickMedia(node: CanvasNode, source: "library" | "disk"): void;
   /** 清除已装媒体（load 族清引用 / 视频工具清 video_path 与产物）。 */
-  clearMedia?(node: CanvasNode): void;
+  clearMedia(node: CanvasNode): void;
   /** 全屏大图预览。 */
   openLightbox(path: string): void;
   /** 上游产物聚合查询（生成输入收集 / 预览 / 双击放大共用）。 */
@@ -52,8 +52,6 @@ export interface NodeServices {
 
 export interface NodeProps {
   node: CanvasNode;
-  /** metadata（模块内按 kind 守卫判窄，与 FreeCanvas 现状同款）。 */
-  meta: CanvasNode["metadata"];
   selected: boolean;
   pulsing: boolean;
   autoHeight: boolean;

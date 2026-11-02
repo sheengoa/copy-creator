@@ -1914,7 +1914,6 @@ export default function FreeCanvas({ canvasId }: { canvasId: string }) {
             const body: ReactNode = (
               <Body
                 node={node}
-                meta={node.metadata}
                 selected={selected}
                 pulsing={pulseKeys.includes(node.id)}
                 autoHeight={node.height == null}

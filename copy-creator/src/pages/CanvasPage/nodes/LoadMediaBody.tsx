@@ -31,7 +31,7 @@ export function LoadMediaBody({ node, services }: NodeProps) {
               aria-label={t("canvas.clearLoaded")}
               onClick={(e) => {
                 e.stopPropagation();
-                services.clearMedia?.(node);
+                services.clearMedia(node);
               }}
             >
               {Icons.close}
@@ -51,7 +51,7 @@ export function LoadMediaBody({ node, services }: NodeProps) {
               <button
                 className="fc-node-btn ghost is-icon grow"
                 aria-label={t("canvas.loadFromLibrary")}
-                onClick={() => services.pickMedia?.(node, "library")}
+                onClick={() => services.pickMedia(node, "library")}
               >
                 {Icons.resources}
               </button>
@@ -60,7 +60,7 @@ export function LoadMediaBody({ node, services }: NodeProps) {
               <button
                 className="fc-node-btn ghost is-icon grow"
                 aria-label={t("canvas.loadFromFile")}
-                onClick={() => services.pickMedia?.(node, "disk")}
+                onClick={() => services.pickMedia(node, "disk")}
               >
                 {Icons.folderOpen}
               </button>

@@ -16,8 +16,9 @@ export function aggregateOf(from: CanvasNode): UpstreamMedia {
   );
 }
 
-/** 入线第一根的上游节点（预览/保存节点都是单入口）。 */
-export function upstreamNodeOf(
+/** 入线第一根的上游节点（预览/保存节点都是单入口；模块内部使用，
+ *  外部一律走 upstreamMediaOf / aggregateOf）。 */
+function upstreamNodeOf(
   nodes: CanvasNode[],
   connections: CanvasConnection[],
   nodeId: string,
