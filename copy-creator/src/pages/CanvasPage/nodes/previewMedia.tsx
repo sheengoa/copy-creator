@@ -1,9 +1,11 @@
 import { Icons } from "../../../components/Icons";
 import { MEDIA_COLOR } from "./colors";
+import { PreviewMediaBody } from "./PreviewMediaBody";
 import type { NodeDefinition } from "./types";
 
-// 预览三族：入口接受对应生成/加载节点，仅试听/试看不落盘。渲染三族
-// 合一（阶段 4a 迁入）。
+// 预览三族 def：入口接受对应生成/加载节点，仅试听/试看不落盘。渲染三族
+// 合一（PreviewMediaBody，阶段 4a 迁入）。
+
 export const previewImageDef: NodeDefinition = {
   type: "preview_image",
   chrome: "standard",
@@ -21,6 +23,7 @@ export const previewImageDef: NodeDefinition = {
     const primary = services.upstream(node.id)?.paths[0];
     if (primary) services.openLightbox(primary);
   },
+  Component: PreviewMediaBody,
 };
 
 export const previewVideoDef: NodeDefinition = {
@@ -35,6 +38,7 @@ export const previewVideoDef: NodeDefinition = {
     ins: [{ id: "in", accepts: ["gen_video", "load_video"], mediaKind: "video" }],
     out: null,
   },
+  Component: PreviewMediaBody,
 };
 
 export const previewAudioDef: NodeDefinition = {
@@ -49,4 +53,5 @@ export const previewAudioDef: NodeDefinition = {
     ins: [{ id: "in", accepts: ["gen_audio", "load_audio", "video_extract_audio"], mediaKind: "audio" }],
     out: null,
   },
+  Component: PreviewMediaBody,
 };

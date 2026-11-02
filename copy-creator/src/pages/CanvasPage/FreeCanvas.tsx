@@ -6,7 +6,6 @@ import { getCurrentWebview } from "@tauri-apps/api/webview";
 import { Icons } from "../../components/Icons";
 import { MediaPlayback } from "../../components/MediaPlayback";
 import { ImageLightbox } from "../../components/ImageLightbox";
-import { resolveResourceMediaUrl } from "../../domain/mediaUrl";
 import { joinLibraryPath } from "../../domain/projectView";
 import ProjectFilePickerDialog from "../ResourcePage/ProjectFilePickerDialog";
 import { useSettingsStore } from "../../stores/settingsStore";
@@ -37,6 +36,10 @@ import {
 } from "./nodes/registry";
 import { NodeHint } from "./nodes/NodeHint";
 import { NodeShell } from "./nodes/shell";
+import { WheelGate } from "./nodes/WheelGate";
+import { ResourceThumb } from "./nodes/media";
+import { SaveMediaBox } from "./nodes/SaveMediaBox";
+import { useMediaUrl } from "./nodes/mediaPath";
 import { useNodeErrors } from "./nodes/nodeErrors";
 import { useNoteEditing } from "./nodes/noteEditing";
 import {
@@ -203,161 +206,6 @@ type UndoAction =
       connections: { from_node: string; to_node: string; to_port: string }[];
     }
   | { kind: "create"; ids: string[] };
-
-/** 画布媒体路径归一：resource_path 的相对路径语义是「资源库相对」
- *  （选择器回填/旧 ref 数据），而 mediaUrl 域层把相对路径拼到存储根
- *  （≠资源库根）——这里先转绝对再交给域层，存量相对路径数据同样修复。 */
-async function resolveCanvasMediaPath(path: string): Promise<string> {
-  const trimmed = path.trim();
-  if (!trimmed
-    || /^(?:https?:|data:|blob:|asset:|file:)/i.test(trimmed)
-    || /^[A-Za-z]:[\\/]/.test(trimmed)
-    || trimmed.startsWith("\\\\")) {
-    return trimmed;
-  }
-  const root = await invoke<string>("get_resource_library_path").catch(() => "");
-  return joinLibraryPath(root, trimmed);
-}
-
-/** 画布媒体 URL：路径归一 + 域层解析（token 媒体服务）。 */
-async function resolveCanvasMediaUrl(path: string, version?: string): Promise<string> {
-  return resolveResourceMediaUrl(await resolveCanvasMediaPath(path), version);
-}
-
-/** 资源缩略图：mediaUrl 域层唯一出口，路径变化重解析。 */
-function ResourceThumb({ path, className }: { path: string; className?: string }) {
-  const [url, setUrl] = useState<string | null>(null);
-  useEffect(() => {
-    let alive = true;
-    setUrl(null);
-    resolveCanvasMediaUrl(path)
-      .then((u) => {
-        if (alive) setUrl(u);
-      })
-      .catch(() => {});
-    return () => {
-      alive = false;
-    };
-  }, [path]);
-  if (!url) return null;
-  return <img className={className} src={url} alt="" draggable={false} />;
-}
-
-/** 画布产物播放器（保存节点的视频/音频产物预览用）：统一播放条
- *  （MediaPlayback）不感知画布相对路径语义（resource_path 存量数据是
- *  库相对语义），这里先归一再交给组件——与 ResourceThumb 同一归一语义。
- *  组件默认不自动播放（用户定案），保存盒天然静默。 */
-function CanvasMediaPlayer({ kind, path }: { kind: "video" | "audio"; path: string }) {
-  const [absolute, setAbsolute] = useState("");
-  useEffect(() => {
-    let alive = true;
-    setAbsolute("");
-    resolveCanvasMediaPath(path)
-      .then((p) => {
-        if (alive) setAbsolute(p);
-      })
-      .catch(() => {});
-    return () => {
-      alive = false;
-    };
-  }, [path]);
-  if (!absolute) return null;
-  return <MediaPlayback kind={kind} path={absolute} />;
-}
-
-/** 保存节点产物的展示类型：随节点类型（save_image/save_video/save_audio），
- *  上游口类型矩阵保证产物类型吻合；other 兜底未知形态（占位图标）。 */
-type SaveProductKind = "image" | "video" | "audio" | "other";
-
-/** 保存节点产物单件视图：图像走缩略图；音频/视频走可播放播放器（2026-11-02
- *  定案：保存后可直接确认内容——此前一律 <img>，音视频解码失败渲染成空白
- *  盒，产物到位毫无视觉反馈）。kind 随保存节点类型（上游口类型矩阵保证
- *  产物类型吻合），非媒体类型兜底占位图标。 */
-function SaveProductView({ path, kind }: { path: string; kind: SaveProductKind }) {
-  if (kind === "video") return <CanvasMediaPlayer kind="video" path={path} />;
-  if (kind === "audio") return <CanvasMediaPlayer kind="audio" path={path} />;
-  if (kind === "image") return <ResourceThumb path={path} className="fc-media-box" />;
-  return <span className="fc-save-cell-icon">{Icons.file}</span>;
-}
-
-/** 保存格子内件：图像出缩略图；音/视频没有画面帧，出类型图标占位
- *  （点击仍切单件态看播放器）。 */
-function SaveProductCell({ path, kind }: { path: string; kind: SaveProductKind }) {
-  if (kind === "image") return <ResourceThumb path={path} className="fc-save-cell-img" />;
-  return <span className="fc-save-cell-icon">{kind === "video" ? Icons.video : Icons.audio}</span>;
-}
-
-/** 保存节点多图观看（2026-11-01 定案）：默认单图 + 计数角标；点角标媒体
- *  盒整切缩略图格（与生成胶片条同语），点小图看那张，再点角标回选。格子
- *  区限高 330px 内部滚动（2026-11-02 确认：与单图媒体盒同上限，两态节点
- *  高度同量级），滚轮由 WheelGate 截留给格子、不惊动画布缩放；格子常挂
- *  载 + hidden 切换——scrollTop 跨切换保留，换一张回来不用重新滚。纯
- *  观看态——不改上游主图标记、不影响自动保存（本就全量保存）；上游产物
- *  更替（数量或首图路径变化）即回单图第一张，观看态不跨代保留。 */
-function SaveMediaBox({ paths, kind }: { paths: string[]; kind: SaveProductKind }) {
-  const { t } = useTranslation();
-  const [view, setView] = useState({ sig: "", grid: false, idx: 0 });
-  const sig = `${paths.length}:${paths[0] ?? ""}`;
-  useEffect(() => {
-    setView((s) => (s.sig === sig ? s : { sig, grid: false, idx: 0 }));
-  }, [sig]);
-  const onTrack = view.sig === sig;
-  const idx = onTrack ? Math.min(view.idx, Math.max(paths.length - 1, 0)) : 0;
-  const grid = onTrack && view.grid && paths.length > 1;
-  return (
-    <>
-      {!grid && <SaveProductView path={paths[idx] ?? ""} kind={kind} />}
-      {paths.length > 1 && (
-        <WheelGate>
-          <div className="fc-save-grid" hidden={!grid}>
-            {paths.map((p, i) => (
-              <button
-                key={`${i}:${p}`}
-                type="button"
-                className={`fc-save-cell${i === idx ? " is-cur" : ""}`}
-                aria-label={t("canvas.savePickN", { n: i + 1 })}
-                onClick={() => setView({ sig, grid: false, idx: i })}
-              >
-                <SaveProductCell path={p} kind={kind} />
-              </button>
-            ))}
-          </div>
-        </WheelGate>
-      )}
-      {paths.length > 1 && (
-        <NodeHint text={grid ? t("canvas.saveBackSingle") : t("canvas.saveViewAll")}>
-          <button
-            type="button"
-            className={`fc-save-more${grid ? " is-on" : ""}`}
-            aria-pressed={grid}
-            aria-label={grid ? t("canvas.saveBackSingle") : t("canvas.saveViewAll")}
-            onClick={() => setView({ sig, grid: !grid, idx })}
-          >
-            +{paths.length - 1}
-          </button>
-        </NodeHint>
-      )}
-    </>
-  );
-}
-
-/** 资源媒体 URL（视频/音频播放用），路径变化重解析。 */
-function useMediaUrl(path: string): string | null {
-  const [url, setUrl] = useState<string | null>(null);
-  useEffect(() => {
-    let alive = true;
-    setUrl(null);
-    resolveCanvasMediaUrl(path)
-      .then((u) => {
-        if (alive) setUrl(u);
-      })
-      .catch(() => {});
-    return () => {
-      alive = false;
-    };
-  }, [path]);
-  return url;
-}
 
 export default function FreeCanvas({ canvasId }: { canvasId: string }) {
   const { t } = useTranslation();
@@ -2781,9 +2629,23 @@ export default function FreeCanvas({ canvasId }: { canvasId: string }) {
               );
             }
 
-            // ── 节点体（按类型）：生成 / 加载 / 输出三类链路 ──
+            // ── 节点体（按类型）：已迁移家族走 def.Component（节点注册表
+            // 分发）；其余仍走旧条件链，阶段 4 逐族迁入后删除。 ──
             let body: ReactNode = null;
-            if (node.type === "load_text" && meta.kind === "load_text") {
+            const MigratedBody = NODE_DEFS[node.type].Component;
+            if (MigratedBody) {
+              body = (
+                <MigratedBody
+                  node={node}
+                  meta={meta}
+                  selected={selected}
+                  pulsing={pulseKeys.includes(node.id)}
+                  autoHeight={node.height == null}
+                  scale={view.scale}
+                  services={canvasServices}
+                />
+              );
+            } else if (node.type === "load_text" && meta.kind === "load_text") {
               body = (
                 <div className="fc-node-form">
                   <textarea
@@ -3625,32 +3487,6 @@ export default function FreeCanvas({ canvasId }: { canvasId: string }) {
                   )}
                 </div>
               );
-            } else if (node.type === "preview_image" || node.type === "preview_video" || node.type === "preview_audio") {
-              const upstreamNode = upstreamNodeOf(node.id);
-              const upstream = upstreamMediaOf(node.id);
-              const path = upstream?.paths[0] ?? "";
-              body = (
-                <div className="fc-node-form">
-                  {!upstreamNode ? (
-                    <div className="fc-node-placeholder">{t("canvas.previewEmpty")}</div>
-                  ) : node.type === "preview_image" ? (
-                    path ? (
-                      <NodeHint text={t("canvas.previewOpen")}>
-                        <button className="fc-preview-media" onClick={() => setLightboxSrc(path)}>
-                          <ResourceThumb path={path} className="fc-media-box" />
-                        </button>
-                      </NodeHint>
-                    ) : (
-                      <div className="fc-node-placeholder">{t("canvas.waitingUpstream")}</div>
-                    )
-                  ) : node.type === "preview_video" ? (
-                    path ? <MediaPlayback kind="video" path={path} /> : <div className="fc-node-placeholder">{t("canvas.waitingUpstream")}</div>
-                  ) : (
-                    path ? <MediaPlayback kind="audio" path={path} /> : <div className="fc-node-placeholder">{t("canvas.waitingUpstream")}</div>
-                  )}
-                  {upstream?.text && <div className="fc-preview-text">{upstream.text}</div>}
-                </div>
-              );
             }
 
             return (
@@ -3911,18 +3747,6 @@ export default function FreeCanvas({ canvasId }: { canvasId: string }) {
  *  stopPropagation 拦不住它），弹层内的滚轮必须在原生层停掉冒泡——否则
  *  缩放监听的 preventDefault 会把弹层自身的默认滚动一并杀掉，表现为
  *  「列表滚不动、画布在缩放」。资源库弹窗 / 大图灯箱 / 节点选择框都用。 */
-function WheelGate({ children }: { children: ReactNode }) {
-  const gateRef = useRef<HTMLDivElement | null>(null);
-  useEffect(() => {
-    const el = gateRef.current;
-    if (!el) return;
-    const isolate = (e: WheelEvent) => e.stopPropagation();
-    el.addEventListener("wheel", isolate);
-    return () => el.removeEventListener("wheel", isolate);
-  }, []);
-  return <div ref={gateRef}>{children}</div>;
-}
-
 // ── 生成等待「流光」动效（2026-11-01 原型定稿移植） ─────────────
 
 /** 谢幕节拍（ms）：全部到齐 → 融合收拢 → 膨开铺满 → 舞台淡出 → 缩略图
