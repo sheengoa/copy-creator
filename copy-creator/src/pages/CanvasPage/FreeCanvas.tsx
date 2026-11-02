@@ -1,19 +1,15 @@
-import { useCallback, useEffect, useLayoutEffect, useRef, useState, type ReactNode } from "react";
+import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
 import { useTranslation } from "react-i18next";
 import { invoke } from "@tauri-apps/api/core";
-import { getCurrentWebview } from "@tauri-apps/api/webview";
 import { ImageLightbox } from "../../components/ImageLightbox";
 import { joinLibraryPath } from "../../domain/projectView";
 import ProjectFilePickerDialog from "../ResourcePage/ProjectFilePickerDialog";
-import { resolveWireRelease } from "../../utils/projectWireRelease";
 import {
   useCanvasStore,
-  type CanvasLayoutEntry,
   type CanvasNode,
   type CanvasNodeType,
 } from "../../stores/canvasStore";
 import { extOf } from "./nodes/exts";
-import type { PortDef } from "./nodes/types";
 import {
   LIBRARY_PICKER_KINDS,
   loadAllowedExts,
@@ -21,18 +17,23 @@ import {
   menuIconOf,
   NODE_DEFAULT_SIZE,
   NODE_DEFS,
-  NODE_MIN_SIZE,
   outMediaColor,
   PORT_DEFS,
-  MENU_TYPE_ORDER,
   isVideoToolType,
 } from "./nodes/registry";
 import { NodeHint } from "./nodes/NodeHint";
 import { NodeShell } from "./nodes/shell";
 import { WheelGate } from "./nodes/WheelGate";
-import type { DragState, Pos, UndoAction, WireBox } from "./engine/gestureTypes";
-import { MINI_H, MINI_W, UNDO_LIMIT, WIRES_VIEWPORT_PAD, ZOOM_MAX, ZOOM_MIN } from "./engine/gestureTypes";
-import { nodeSize, segHitsPolyline, wirePathD } from "./engine/wireGeom";
+import { MINI_H, MINI_W, WIRES_VIEWPORT_PAD } from "./engine/gestureTypes";
+import { nodeSize, wirePathD } from "./engine/wireGeom";
+import { groupSnapshotOf, memberFrameOf } from "./engine/groupOps";
+import { useViewport } from "./engine/useViewport";
+import { useNodeMetrics } from "./engine/useNodeMetrics";
+import { useUndoStack } from "./engine/useUndoStack";
+import { useClipboardOps } from "./engine/useClipboardOps";
+import { useCanvasGestures } from "./engine/useCanvasGestures";
+import { useKeyboardShortcuts } from "./engine/useKeyboardShortcuts";
+import { useFileDrop } from "./engine/useFileDrop";
 import { useMediaUrl } from "./nodes/mediaPath";
 import { SaveRuntimeProvider } from "./nodes/saveRuntime";
 import { GenRuntimeProvider } from "./nodes/genRuntime";
@@ -63,52 +64,18 @@ export default function FreeCanvas({ canvasId }: { canvasId: string }) {
   const connectionsRef = useRef(connections);
   const selRef = useRef<string[]>([]);
 
-  const vpRef = useRef<HTMLDivElement | null>(null);
-  const [view, setView] = useState(() => {
-    const c = useCanvasStore.getState().activeCanvas;
-    return c && c.id === canvasId
-      ? { x: c.viewport_x, y: c.viewport_y, scale: c.viewport_k }
-      : { x: 0, y: 0, scale: 1 };
-  });
-  const [vpSize, setVpSize] = useState<{ w: number; h: number } | null>(null);
   const [selKeys, setSelKeys] = useState<string[]>([]);
   const setSelection = useCallback((keys: string[]) => {
     selRef.current = keys;
     setSelKeys(keys);
   }, []);
 
-  const [addMenu, setAddMenu] = useState<{
-    sx: number;
-    sy: number;
-    wx: number;
-    wy: number;
-    /** 拖线到空白：菜单创建的节点自动接上这条线。 */
-    wire?: { fromKey: string; fromDir: "in" | "out"; fromPortId: string };
-    /** 摘线到空白：菜单创建的节点接走这条线（原连线行删除）。 */
-    detached?: { connId: string; fromKey: string };
-  } | null>(null);
-  const [addMenuQuery, setAddMenuQuery] = useState("");
-  const [wireDraft, setWireDraft] = useState<{ d: string; invalid: boolean; color?: string } | null>(null);
-  /** 摘线拿着（rewire）中：该连线暂隐藏，松手转接或放回。 */
-  const [liftedWire, setLiftedWire] = useState<{ connId: string; fromKey: string } | null>(null);
   // 节点错误文案（UI 层小 store nodes/nodeErrors）：取媒/换片失败写。
   const setNodeErrors = useNodeErrors((s) => s.setErrors);
-  const [pulseKeys, setPulseKeys] = useState<string[]>([]);
   /** 资源库选择浮层：load 节点的「从资源库选择」。 */
   const [pickerForNode, setPickerForNode] = useState<string | null>(null);
   /** 大图预览（预览图像节点双击）：暂存产物路径。 */
   const [lightboxSrc, setLightboxSrc] = useState("");
-
-  const dragRef = useRef<DragState | null>(null);
-  const wireHoverRef = useRef<HTMLElement | null>(null);
-  const wirePortHoverRef = useRef<HTMLElement | null>(null);
-  const cutTrailRef = useRef<SVGPolylineElement | null>(null);
-  const cutTrailUnderRef = useRef<SVGPolylineElement | null>(null);
-  const cutPointsRef = useRef<string[]>([]);
-  const cutTargetsRef = useRef<{ pts: { x: number; y: number }[]; done: boolean; del: () => void }[] | null>(null);
-  const dblRef = useRef<{ key: string; x: number; y: number; t: number } | null>(null);
-  const capturedRef = useRef(false);
-  const suppressClickRef = useRef(false);
 
   // 渲染后同步镜像：窗口级手势回调读 ref 免闭包陈旧（react-hooks/refs
   // 禁止渲染期写 ref，统一在 effect 提交）。
@@ -120,492 +87,27 @@ export default function FreeCanvas({ canvasId }: { canvasId: string }) {
     selRef.current = selKeys;
   }, [selKeys]);
 
-  // ── 撤销栈（对齐工程画布惯例：undoingRef 锁防 StrictMode 双触发） ──
+  // ── 视口引擎 + 节点实测（engine/useViewport / useNodeMetrics；fork 自
+  //    ProjectCanvas，回灌对齐点不变） ──
+  const { vpRef, view, setView, vpSize, saveView, zoomAt, fitAll, fitAttemptedRef } = useViewport(canvasId, nodes);
+  const { nodeMetricsRef, boxOf, outPointOf, inPointOf } = useNodeMetrics(vpRef, view, nodes);
 
-  const undoStackRef = useRef<UndoAction[]>([]);
-  const undoingRef = useRef(false);
-  const pastingRef = useRef(false);
-  const pushUndo = useCallback((action: UndoAction) => {
-    undoStackRef.current.push(action);
-    if (undoStackRef.current.length > UNDO_LIMIT) undoStackRef.current.shift();
-  }, []);
-
-  /** 撤销（Ctrl+Z）：layout 恢复布局；delete 重建节点/连线；create 移除。 */
-  const runUndo = useCallback(() => {
-    if (undoingRef.current) return;
-    undoingRef.current = true;
-    try {
-      const action = undoStackRef.current.pop();
-      if (!action) return;
-      if (action.kind === "layout") {
-        store.getState().commitLayout(canvasId, action.prev);
-        return;
-      }
-      if (action.kind === "create") {
-        for (const id of action.ids) {
-          void store.getState().deleteNode(id);
-        }
-        setSelection([]);
-        return;
-      }
-      void (async () => {
-        const idMap = new Map<string, string>();
-        for (const node of action.nodes) {
-          // 删除时仍在生成中的节点，恢复时按 def 归一为终态——后台任务已
-          // 随删除取消，留着 generating 会让节点永远转圈（gen_image 归一
-          // 为 error「生成已中断」）。
-          const restoredMeta =
-            NODE_DEFS[node.type].normalizeRestored?.({ ...node.metadata }) ?? { ...node.metadata };
-          const created = await store.getState().createNode({
-            canvasId,
-            nodeType: node.type,
-            title: node.title,
-            posX: node.pos_x,
-            posY: node.pos_y,
-            width: node.width,
-            height: node.height,
-            resourcePath: node.resource_path,
-            metadata: JSON.stringify(restoredMeta),
-          });
-          if (created) idMap.set(node.id, created.id);
-        }
-        for (const conn of action.connections) {
-          const from = idMap.get(conn.from_node) ?? conn.from_node;
-          const to = idMap.get(conn.to_node) ?? conn.to_node;
-          await store.getState().connect(canvasId, from, to, conn.to_port);
-        }
-        setSelection([...idMap.values()]);
-      })();
-    } finally {
-      // 撤销里的后端动作是异步的，锁放到下一宏任务才放开。
-      window.setTimeout(() => {
-        undoingRef.current = false;
-      }, 0);
-    }
-  }, [canvasId, setSelection, store]);
-
-  // ── 删除（可完整恢复，记撤销栈） ─────────────────────────
-
-  const deleteNodes = useCallback(async (ids: string[]) => {
-    if (!ids.length) return;
-    const targets = nodesRef.current.filter((n) => ids.includes(n.id));
-    const conns = connectionsRef.current
-      .filter((c) => targets.some((n) => n.id === c.from_node || n.id === c.to_node))
-      .map((c) => ({ from_node: c.from_node, to_node: c.to_node, to_port: c.to_port }));
-    if (targets.length) {
-      pushUndo({ kind: "delete", nodes: targets, connections: conns });
-    }
-    for (const node of targets) {
-      // 生成中的节点先取消后端任务再删：否则孤儿请求继续跑完。
-      const progress = store.getState().genProgress[node.id];
-      if (progress) void store.getState().cancelGeneration(progress.requestId);
-      await store.getState().deleteNode(node.id);
-    }
-    setSelection([]);
-  }, [pushUndo, setSelection, store]);
-
+  // ── 撤销栈与删除（engine/useUndoStack） ──
+  const { pushUndo, runUndo, deleteNodes } = useUndoStack(canvasId, setSelection);
   const deleteSelected = useCallback(async () => {
-    await deleteNodes(selRef.current);
-  }, [deleteNodes]);
+    await deleteNodes(nodesRef, connectionsRef, selRef.current);
+  }, [connectionsRef, deleteNodes, nodesRef]);
 
-  // ── 视口引擎（自 ProjectCanvas 零改动搬运） ─────────────────
-
-  const saveView = useCallback(
-    (next: { x: number; y: number; scale: number }) => {
-      store.getState().setViewport(canvasId, next.x, next.y, next.scale);
-    },
-    [canvasId, store],
-  );
-
-  // 视口实测尺寸：迷你地图的视口矩形与连线层视口裁切都要用。
-  useEffect(() => {
-    const el = vpRef.current;
-    if (!el) return;
-    const update = () => setVpSize({ w: el.clientWidth, h: el.clientHeight });
-    update();
-    const observer = new ResizeObserver(update);
-    observer.observe(el);
-    return () => observer.disconnect();
-  }, []);
-
-  const zoomAt = useCallback(
-    (mx: number, my: number, factor: number) => {
-      setView((prev) => {
-        const ns = Math.min(ZOOM_MAX, Math.max(ZOOM_MIN, prev.scale * factor));
-        const next = {
-          x: mx - (mx - prev.x) * (ns / prev.scale),
-          y: my - (my - prev.y) * (ns / prev.scale),
-          scale: ns,
-        };
-        saveView(next);
-        return next;
-      });
-    },
-    [saveView],
-  );
-
-  // 滚轮缩放走原生非被动监听：React 合成 onWheel 是 passive 的，
-  // preventDefault 不生效（ctrl+滚轮会触发网页缩放）。
-  useEffect(() => {
-    const el = vpRef.current;
-    if (!el) return;
-    const onWheel = (e: WheelEvent) => {
-      e.preventDefault();
-      const rect = el.getBoundingClientRect();
-      zoomAt(e.clientX - rect.left, e.clientY - rect.top, e.deltaY < 0 ? 1.12 : 1 / 1.12);
-    };
-    el.addEventListener("wheel", onWheel, { passive: false });
-    return () => el.removeEventListener("wheel", onWheel);
-  }, [zoomAt]);
-
-  // 视口永远不该被滚动（平移/缩放都走 transform）：聚焦滚动会把容器
-  // 推走表现为节点集体平移。任何滚动立即归零。
-  useEffect(() => {
-    const el = vpRef.current;
-    if (!el) return;
-    const onScroll = () => {
-      if (el.scrollLeft !== 0 || el.scrollTop !== 0) el.scrollTo(0, 0);
-    };
-    el.addEventListener("scroll", onScroll);
-    return () => el.removeEventListener("scroll", onScroll);
-  }, []);
-
-  // 画布区域一律不弹浏览器右键菜单：Shift+右键是切线手势。
-  useEffect(() => {
-    const onCtx = (e: MouseEvent) => {
-      if (e.target instanceof Element && e.target.closest(".pc-root")) e.preventDefault();
-    };
-    document.addEventListener("contextmenu", onCtx);
-    return () => document.removeEventListener("contextmenu", onCtx);
-  }, []);
-
-  // 首入适配：视口仍是出厂默认且画布已有节点时，fitAll 一次。
-  const fitAttemptedRef = useRef(false);
-  const fitAll = useCallback(
-    (list: CanvasNode[]): boolean => {
-      const rect = vpRef.current?.getBoundingClientRect();
-      // 视口还没完成布局（刚切区/首帧）时不 fit：高度为 0 会算出 scale 0
-      // 并随视口落库，画布从此整体缩没（实测踩坑）。返回 false 让调用方
-      // 稍后重试。
-      if (!rect || rect.width === 0 || rect.height === 0 || !list.length) return false;
-      let minX = Infinity;
-      let minY = Infinity;
-      let maxX = -Infinity;
-      let maxY = -Infinity;
-      for (const n of list) {
-        const size = nodeSize(n);
-        minX = Math.min(minX, n.pos_x);
-        minY = Math.min(minY, n.pos_y);
-        maxX = Math.max(maxX, n.pos_x + size.w);
-        maxY = Math.max(maxY, n.pos_y + size.h);
-      }
-      const pad = 60;
-      const usableW = Math.max(200, rect.width);
-      const bw = maxX - minX + pad * 2;
-      const bh = maxY - minY + pad * 2;
-      // 只缩小不放大：内容小于视口时保持 1:1。
-      const scale = Math.min(1, Math.min(usableW / bw, rect.height / bh));
-      const next = {
-        x: (usableW - (maxX - minX) * scale) / 2 - minX * scale,
-        y: (rect.height - (maxY - minY) * scale) / 2 - minY * scale,
-        scale,
-      };
-      setView(next);
-      saveView(next);
-      return true;
-    },
-    [saveView],
-  );
-  useEffect(() => {
-    if (fitAttemptedRef.current) return;
-    const v = view;
-    if (v.x !== 0 || v.y !== 0 || v.scale !== 1) {
-      fitAttemptedRef.current = true;
-      return;
-    }
-    if (nodes.length && fitAll(nodes)) {
-      fitAttemptedRef.current = true;
-    }
-  }, [nodes, fitAll, view]);
-
-  // ── 节点实测尺寸与端口位置（自 ProjectCanvas 搬运）：连线锚点跟随
-  //    真实 DOM（pc-port[data-port-id] 实测，常量只是首帧兜底） ──
-
-  const [nodeMetrics, setNodeMetrics] = useState<{
-    boxes: Record<string, { w: number; h: number }>;
-    ports: Record<string, Record<string, Pos>>;
-  }>({ boxes: {}, ports: {} });
-  const nodeMetricsRef = useRef(nodeMetrics);
-  const viewScaleRef = useRef(view.scale);
-  const measureRafRef = useRef<number | null>(null);
-  const measureNodes = useCallback(() => {
-    const els = vpRef.current?.querySelectorAll<HTMLElement>(".pc-node[data-key]");
-    if (!els || els.length === 0) return;
-    const scale = viewScaleRef.current || 1;
-    const boxes: Record<string, { w: number; h: number }> = {};
-    const ports: Record<string, Record<string, Pos>> = {};
-    els.forEach((nodeEl) => {
-      const key = nodeEl.getAttribute("data-key") ?? "";
-      if (!key) return;
-      const nr = nodeEl.getBoundingClientRect();
-      boxes[key] = { w: nodeEl.offsetWidth, h: nodeEl.offsetHeight };
-      const map: Record<string, Pos> = {};
-      nodeEl.querySelectorAll<HTMLElement>(".pc-port").forEach((portEl) => {
-        const pr = portEl.getBoundingClientRect();
-        const pid = portEl.getAttribute("data-port-id") ?? "";
-        if (!pid) return;
-        map[pid] = {
-          x: (pr.x + pr.width / 2 - nr.x) / scale,
-          y: (pr.y + pr.height / 2 - nr.y) / scale,
-        };
-      });
-      ports[key] = map;
-    });
-    const prev = nodeMetricsRef.current;
-    if (
-      JSON.stringify(prev.boxes) === JSON.stringify(boxes) &&
-      JSON.stringify(prev.ports) === JSON.stringify(ports)
-    ) {
-      return;
-    }
-    const next = { boxes, ports };
-    nodeMetricsRef.current = next;
-    setNodeMetrics(next);
-  }, []);
-  const scheduleMeasureNodes = useCallback(() => {
-    if (measureRafRef.current !== null) return;
-    measureRafRef.current = window.requestAnimationFrame(() => {
-      measureRafRef.current = null;
-      measureNodes();
-    });
-  }, [measureNodes]);
-  const nodeRoRef = useRef<ResizeObserver | null>(null);
-  useEffect(() => () => {
-    nodeRoRef.current?.disconnect();
-    if (measureRafRef.current !== null) window.cancelAnimationFrame(measureRafRef.current);
-  }, []);
-  useLayoutEffect(() => {
-    viewScaleRef.current = view.scale;
-    if (!nodeRoRef.current) {
-      nodeRoRef.current = new ResizeObserver(scheduleMeasureNodes);
-    }
-    const ro = nodeRoRef.current;
-    const els = Array.from(vpRef.current?.querySelectorAll<HTMLElement>(".pc-node[data-key]") ?? []);
-    els.forEach((el) => ro.observe(el));
-    // 节点尺寸/内容刚由 React 提交时，连线本帧就必须拿到最新端口偏移；
-    // ResizeObserver 的 rAF 合帧只负责后续外部布局变化，不能成为首个测量。
-    measureNodes();
-    scheduleMeasureNodes();
-    return () => els.forEach((el) => ro.unobserve(el));
-  }, [view.scale, nodes, measureNodes, scheduleMeasureNodes]);
-
-  const boxOf = useCallback(
-    (key: string): WireBox | null => {
-      const node = nodes.find((n) => n.id === key);
-      if (!node) return null;
-      const measured = nodeMetrics.boxes[key];
-      const size = nodeSize(node);
-      return {
-        x: node.pos_x,
-        y: node.pos_y,
-        w: measured?.w ?? size.w,
-        h: measured?.h ?? size.h,
-      };
-    },
-    [nodes, nodeMetrics],
-  );
-
-  // 端口点：优先用实测端口坐标（portBar 行位随卡体内容变化），
-  // 未实测前退回「输出右缘中点 / 输入按口序分布」的常量估算。
-  const outPointOf = useCallback(
-    (key: string): { x: number; y: number } | null => {
-      const box = boxOf(key);
-      if (!box) return null;
-      const off = nodeMetrics.ports[key]?.__out;
-      if (off) return { x: box.x + off.x, y: box.y + off.y };
-      return { x: box.x + box.w, y: box.y + box.h / 2 };
-    },
-    [boxOf, nodeMetrics],
-  );
-  const inPointOf = useCallback(
-    (key: string, portId: string): { x: number; y: number } | null => {
-      const box = boxOf(key);
-      if (!box) return null;
-      const off = nodeMetrics.ports[key]?.[portId];
-      if (off) return { x: box.x + off.x, y: box.y + off.y };
-      const def = PORT_DEFS[nodes.find((n) => n.id === key)?.type ?? "note"];
-      const index = Math.max(0, def.ins.findIndex((p) => p.id === portId));
-      const rows = Math.max(1, def.ins.length);
-      return { x: box.x, y: box.y + (box.h * (index + 1)) / (rows + 1) };
-    },
-    [boxOf, nodeMetrics, nodes],
-  );
-
-  // ── 出生锚点脉冲：新建节点出生在用户视线附近时脉冲高亮。 ──
-  useEffect(() => {
-    if (pulseKeys.length === 0) return;
-    const timer = window.setTimeout(() => setPulseKeys([]), 2400);
-    return () => window.clearTimeout(timer);
-  }, [pulseKeys]);
-  const pulseNodes = useCallback((ids: string[]) => {
-    if (ids.length) setPulseKeys(ids);
-  }, []);
-
-  // ── 多选组拖 / 位置批量写入 ─────────────────────────────
-
-  /** 选中组快照：全部选中节点（世界坐标）。任一成员缺失则返回 null。 */
+  // ── 组布局操作（engine/groupOps 纯函数 + 本组件 ref 薄包装） ──
   const groupSnapshot = useCallback(
-    (minCount = 2): { key: string; x: number; y: number }[] | null => {
-      const sel = selRef.current;
-      if (sel.length < minCount) return null;
-      const members: { key: string; x: number; y: number }[] = [];
-      for (const key of sel) {
-        const node = nodesRef.current.find((n) => n.id === key);
-        if (!node) return null;
-        members.push({ key, x: node.pos_x, y: node.pos_y });
-      }
-      return members;
-    },
-    [],
+    (minCount = 2) => groupSnapshotOf(selRef, nodesRef, minCount),
+    [nodesRef, selRef],
   );
-  /** 批量写入各成员的绝对位置（组拖实时移动与撤销恢复共用）。 */
-  const moveGroupTo = useCallback(
-    (members: { key: string; x: number; y: number }[]) => {
-      const byId = new Map(nodesRef.current.map((n) => [n.id, n]));
-      const entries: CanvasLayoutEntry[] = [];
-      for (const m of members) {
-        const node = byId.get(m.key);
-        if (!node) continue;
-        // 仅移动位置：宽高原样透传。height null = 自动高度，绝不能借
-        // nodeSize 的兜底值落成固定高——否则一拖动节点就被"定死"变形。
-        entries.push({ id: m.key, pos_x: m.x, pos_y: m.y, width: node.width, height: node.height });
-      }
-      store.getState().commitLayout(canvasId, entries);
-    },
-    [canvasId, store],
-  );
+  const memberFrame = useCallback((key: string) => memberFrameOf(nodesRef, key), [nodesRef]);
 
-  /** 成员当前包围盒（世界坐标；节点已删除则 null）。 */
-  const memberFrame = useCallback(
-    (key: string): { x: number; y: number; w: number; h: number } | null => {
-      const node = nodesRef.current.find((n) => n.id === key);
-      if (!node) return null;
-      const size = nodeSize(node);
-      return { x: node.pos_x, y: node.pos_y, w: size.w, h: size.h };
-    },
-    [],
-  );
-
-  // ── 复制 / 粘贴（Ctrl+C/V） ──────────────────────────────
-
-  const clipRef = useRef<{ nodes: CanvasNode[]; wires: { from_node: string; to_node: string; to_port: string }[]; ax: number; ay: number } | null>(null);
-  const copySelection = useCallback(() => {
-    const members = groupSnapshot(1);
-    if (!members) return;
-    const ax = Math.min(...members.map((m) => m.x));
-    const ay = Math.min(...members.map((m) => m.y));
-    const ids = members.map((m) => m.key);
-    const copied = nodesRef.current.filter((n) => ids.includes(n.id));
-    const wires = connectionsRef.current
-      .filter((c) => ids.includes(c.from_node) && ids.includes(c.to_node))
-      .map((c) => ({ from_node: c.from_node, to_node: c.to_node, to_port: c.to_port }));
-    if (copied.length) clipRef.current = { nodes: copied, wires, ax, ay };
-  }, [groupSnapshot]);
-  const pasteClipboard = useCallback(async () => {
-    if (pastingRef.current) return;
-    pastingRef.current = true;
-    try {
-      const clip = clipRef.current;
-      if (!clip?.nodes.length) return;
-      const st = store.getState();
-      const idMap = new Map<string, string>();
-      const newIds: string[] = [];
-      for (const node of clip.nodes) {
-        const created = await st.createNode({
-          canvasId,
-          nodeType: node.type,
-          title: node.title,
-          posX: node.pos_x - clip.ax + 28,
-          posY: node.pos_y - clip.ay + 28,
-          width: node.width,
-          height: node.height,
-          resourcePath: node.resource_path,
-          metadata: JSON.stringify(node.metadata),
-        });
-        if (created) {
-          idMap.set(node.id, created.id);
-          newIds.push(created.id);
-        }
-      }
-      for (const wire of clip.wires) {
-        const from = idMap.get(wire.from_node);
-        const to = idMap.get(wire.to_node);
-        if (from && to) await st.connect(canvasId, from, to, wire.to_port);
-      }
-      if (newIds.length) {
-        pushUndo({ kind: "create", ids: newIds });
-        setSelection(newIds);
-      }
-    } finally {
-      pastingRef.current = false;
-    }
-  }, [canvasId, pushUndo, setSelection, store]);
-
-  // ── 连线手势（类型化端口语义 + 工程画布手势骨架） ─────────
-
-  /** 摘线到空白后取消菜单（Esc/点外部）＝线就此断开（ComfyUI 语义）。 */
-  const discardDetachedWire = useCallback(
-    (detached: { connId: string }) => {
-      setLiftedWire(null);
-      void store.getState().deleteConnection(detached.connId);
-    },
-    [store],
-  );
-
-  // Blender 式切线（Shift/Ctrl+右键滑动）：切痕层直写 polyline。
-  const buildCutTargets = useCallback(() => {
-    const svg = vpRef.current?.querySelector("svg.pc-wires");
-    if (!svg) return [];
-    const targets: { pts: { x: number; y: number }[]; done: boolean; del: () => void }[] = [];
-    svg.querySelectorAll<SVGGElement>("g.pc-wire[data-cut]").forEach((g) => {
-      const path = g.querySelector("path.pc-wire-line") as SVGPathElement | null;
-      const ctm = path?.getScreenCTM();
-      if (!path || !ctm) return;
-      const len = path.getTotalLength();
-      if (len <= 0) return;
-      const pts: { x: number; y: number }[] = [];
-      const N = 24;
-      for (let i = 0; i <= N; i++) {
-        const pt = path.getPointAtLength((len * i) / N);
-        const sp = new DOMPoint(pt.x, pt.y).matrixTransform(ctm);
-        pts.push({ x: sp.x, y: sp.y });
-      }
-      const connId = g.getAttribute("data-cut") ?? "";
-      targets.push({
-        pts,
-        done: false,
-        del: () => {
-          void store.getState().deleteConnection(connId);
-        },
-      });
-    });
-    return targets;
-  }, [store]);
-
-  const openAddMenu = useCallback(
-    (sx: number, sy: number, wx: number, wy: number, pending?: { wire?: { fromKey: string; fromDir: "in" | "out"; fromPortId: string }; detached?: { connId: string; fromKey: string } }) => {
-      setAddMenu({ sx, sy, wx, wy, wire: pending?.wire, detached: pending?.detached });
-      setAddMenuQuery("");
-    },
-    [],
-  );
-
-  /** 菜单建节点接回连线：算新节点上可接住的输入口 id（无可接口 = 空串
-   *  不接）；菜单项过滤同样用它。 */
-  const incomingPortFor = useCallback(
-    (newType: CanvasNodeType, fromType: CanvasNodeType): string =>
-      PORT_DEFS[newType].ins.find((p) => p.accepts.includes(fromType))?.id ?? "",
-    [],
+  // ── 复制 / 粘贴（engine/useClipboardOps） ──
+  const { copySelection, pasteClipboard } = useClipboardOps(
+    canvasId, nodesRef, connectionsRef, selRef, setSelection, pushUndo,
   );
 
   // ── 上游媒体解析（预览/保存节点取上游产物） ────────────────
@@ -619,11 +121,9 @@ export default function FreeCanvas({ canvasId }: { canvasId: string }) {
     (nodeId: string) => upstreamMediaQuery(nodes, connections, nodeId),
     [connections, nodes],
   );
-
   // 视频工具运行时（时间轴预取/拖动会话/执行命令）：controller 由本组件
   // 持有（applyFrameVideo 换片也要清会话态），Provider 下发给节点模块。
   const videoToolRuntime = useVideoToolRuntimeController();
-
   // 资源库浮层的写入意图：加载节点写 resourcePath；视频工具节点写
   // metadata.video_path（视频是输入，产物占 resource_path）。
 
@@ -695,7 +195,6 @@ export default function FreeCanvas({ canvasId }: { canvasId: string }) {
       }
     }
   };
-
   // 跨模块服务（下发 def.onDoubleClick 与节点模块）。取媒浮层/清除的
   // 写回分派按 def.applyMode：video-tool 写 video_path（applyFrameVideo），
   // resource 直写 resource_path。闭包引用渲染期状态，事件期执行时已初始化。
@@ -711,789 +210,57 @@ export default function FreeCanvas({ canvasId }: { canvasId: string }) {
       else void store.getState().updateNode(node.id, { resourcePath: "" });
     },
   };
-
-  const onViewportPointerDown = useCallback(
-    (e: React.PointerEvent) => {
-      const target = e.target instanceof Element ? e.target : null;
-      // 节点搜索框是连线释放后的模态状态：点击外部只取消搜索框，
-      // 摘线场景同时断开摘下的线，不能继续落入画布空白的框选分支。
-      if (addMenu && !target?.closest(".pc-addmenu")) {
-        if (addMenu.detached) discardDetachedWire(addMenu.detached);
-        setAddMenu(null);
-        setAddMenuQuery("");
-        e.preventDefault();
-        return;
-      }
-      // 上一场拖拽若有残留（松手事件在窗外丢失等），开新拖拽前先复位。
-      capturedRef.current = false;
-      setWireDraft(null);
-      setLiftedWire(null);
-      if (dragRef.current) {
-        dragRef.current = null;
-        wireHoverRef.current?.classList.remove("pc-wire-target");
-        wireHoverRef.current = null;
-        wirePortHoverRef.current?.classList.remove("pc-port-active");
-        wirePortHoverRef.current = null;
-        vpRef.current?.classList.remove("pc-cutting");
-        cutTargetsRef.current = null;
-        cutPointsRef.current = [];
-        cutTrailUnderRef.current?.setAttribute("points", "");
-        cutTrailRef.current?.setAttribute("points", "");
-      }
-      // 可交互元素一律不进手势：button 上 begin() 会把指针捕获到视口容器，
-      // click 被重定向到捕获元素反而点不中；输入元素要保住文本选择/光标。
-      // .fc-vtl-strip 是视频工具时间轴：视口抢捕获会吞掉轨道的 pointerup，
-      // 拖拽会话残留成「点一下跟鼠标走」，且轨道拖动会连带拖走节点
-      // （实测实锤：lostpointercapture 后节点被拖出 800px）。
-      if (e.button === 0 && target?.closest("input, textarea, button, video, audio, .fc-vtl-strip")) return;
-
-      const vp = vpRef.current;
-      if (!vp) return;
-      if (e.button === 1) {
-        dragRef.current = { kind: "pan", sx: e.clientX, sy: e.clientY, ox: view.x, oy: view.y, moved: false };
-        vp.classList.add("pc-panning");
-        e.preventDefault();
-        return;
-      }
-      // Blender 式切线：Shift/Ctrl+右键滑动，扫过的连线即时切断。
-      if (e.button === 2 && (e.shiftKey || e.ctrlKey)) {
-        dragRef.current = { kind: "wirecut", sx: e.clientX, sy: e.clientY, moved: false };
-        cutPointsRef.current = [];
-        vp.classList.add("pc-cutting");
-        cutTargetsRef.current = buildCutTargets();
-        e.preventDefault();
-        return;
-      }
-      if (e.button !== 0) return;
-
-      // 类型化端口：输入口按下 = 摘线（有来线时）或反向拖（无线时，落点
-      // 为上游）；输出口按下 = 正向拖线。
-      const port = target?.closest(".pc-port") as HTMLElement | null;
-      if (port) {
-        const nodeEl = port.closest(".pc-node");
-        const key = nodeEl?.getAttribute("data-key") ?? "";
-        const node = nodesRef.current.find((n) => n.id === key);
-        // 所有注册节点都参与连线（note 的 out 为 null 也不可连——按下即
-        // 摘线/反拖路径自身按口元数据处理）。原式 `node && …out !== null
-        // || node` 因运算符优先级恒等于下式，予以化简（行为不变）。
-        if (node) {
-          const dir = port.dataset.port === "in" ? "in" : "out";
-          const portId = port.dataset.portId ?? "";
-          if (dir === "in" && portId) {
-            // 摘一个输入口 = 拿走这条线（ComfyUI 摘线换目标）。
-            const incoming = connectionsRef.current.find((c) => c.to_node === key && c.to_port === portId);
-            if (incoming) {
-              setLiftedWire({ connId: incoming.id, fromKey: incoming.from_node });
-              vp.classList.add("pc-wiring");
-              port.classList.add("pc-port-active");
-              // 原口登记为「当前亮口」：拖走时悬停切换自然清它，滑回
-              // 原口（放回）也能正常重新点亮。
-              wirePortHoverRef.current = port;
-              dragRef.current = {
-                kind: "wire", sx: e.clientX, sy: e.clientY, moved: false,
-                rewire: true, connId: incoming.id,
-                fromKey: incoming.from_node, fromDir: "in", fromPortId: portId,
-                targetKey: null, targetPort: null,
-              };
-              e.preventDefault();
-              return;
-            }
-            // 无来线的输入口：反向拖（落点为上游来源）。
-            vp.classList.add("pc-wiring");
-            port.classList.add("pc-port-active");
-            dragRef.current = {
-              kind: "wire", sx: e.clientX, sy: e.clientY, moved: false,
-              fromKey: key, fromDir: "in", fromPortId: portId,
-              targetKey: null, targetPort: null,
-            };
-            e.preventDefault();
-            return;
-          }
-          if (dir === "out") {
-            // 正向拖线：源端口点亮（即使草稿线被渲染环境吞掉，按下即有
-            // 可见状态）。
-            vp.classList.add("pc-wiring");
-            port.classList.add("pc-port-active");
-            dragRef.current = {
-              kind: "wire", sx: e.clientX, sy: e.clientY, moved: false,
-              fromKey: key, fromDir: "out", fromPortId: "__out",
-              targetKey: null, targetPort: null,
-            };
-            e.preventDefault();
-            return;
-          }
-        }
-      }
-
-      // 节点四角尺寸手柄（ComfyUI 式）：按下即改尺寸，不挪位置。
-      const resizeEl = target?.closest(".pc-resize");
-      if (resizeEl) {
-        const nodeEl = resizeEl.closest(".pc-node") as HTMLElement | null;
-        const key = nodeEl?.getAttribute("data-key") ?? "";
-        const node = nodesRef.current.find((n) => n.id === key);
-        if (node) {
-          const corner = (resizeEl.getAttribute("data-corner") ?? "se") as "nw" | "ne" | "sw" | "se";
-          const size = nodeSize(node);
-          const px = node.pos_x;
-          const py = node.pos_y;
-          nodeEl?.classList.add("pc-resizing");
-          dragRef.current = {
-            kind: "resize", sx: e.clientX, sy: e.clientY, moved: false,
-            // 首次拖拽从实际渲染尺寸起算（自适应高度节点取实测高）。
-            ox: nodeEl?.offsetWidth ?? size.w,
-            oy: nodeEl?.offsetHeight ?? size.h,
-            frameKey: key,
-            corner,
-            px,
-            py,
-            px0: px,
-            py0: py,
-          };
-          e.preventDefault();
-          return;
-        }
-      }
-
-      // 节点主体：按下即选中（点亮描边）并拖动；已在多选中时整组拖。
-      const nodeEl = target?.closest(".pc-node") as HTMLElement | null;
-      if (nodeEl) {
-        const key = nodeEl.getAttribute("data-key") ?? "";
-        const node = nodesRef.current.find((n) => n.id === key);
-        if (node) {
-          const group = selRef.current.length > 1 && selRef.current.includes(key) ? groupSnapshot() : null;
-          setSelection(selRef.current.includes(key) ? selRef.current : [key]);
-          nodeEl.classList.add("pc-dragging");
-          dragRef.current = group
-            ? { kind: "multidrag", sx: e.clientX, sy: e.clientY, moved: false, members: group }
-            : {
-                kind: "node",
-                sx: e.clientX, sy: e.clientY, moved: false,
-                ox: node.pos_x, oy: node.pos_y, frameKey: key,
-              };
-          e.preventDefault();
-          return;
-        }
-      }
-
-      // 组框标题（Ctrl+G 的组）：按下拖动整组移动（复用组拖管线）。
-      const ngLabel = target?.closest(".pc-nodegroup-label");
-      if (ngLabel) {
-        const gid = ngLabel.closest(".pc-nodegroup")?.getAttribute("data-group") ?? "";
-        const group = groups.find((g) => g.id === gid);
-        if (group) {
-          const members = group.members
-            .map((key) => {
-              const f = memberFrame(key);
-              return f ? { key, x: f.x, y: f.y } : null;
-            })
-            .filter((m): m is { key: string; x: number; y: number } => m !== null);
-          if (members.length > 0) {
-            setSelection(members.map((m) => m.key));
-            dragRef.current = { kind: "multidrag", sx: e.clientX, sy: e.clientY, moved: false, members };
-            e.preventDefault();
-            return;
-          }
-        }
-      }
-
-      // 左键空白：框选（DOM 直挂的 marquee 矩形，选中判定在松手）。
-      const mq = document.createElement("div");
-      mq.className = "pc-marquee";
-      vp.appendChild(mq);
-      dragRef.current = { kind: "marquee", sx: e.clientX, sy: e.clientY, mq, moved: false };
-      e.preventDefault();
-    },
-    [addMenu, buildCutTargets, discardDetachedWire, groupSnapshot, groups, memberFrame, setSelection, view],
-  );
-
-  useEffect(() => {
-    const onMove = (e: PointerEvent) => {
-      const drag = dragRef.current;
-      if (!drag) return;
-      // 首次移动即捕获指针：此后即使松手在窗口外，mouseup 仍送达。
-      if (!capturedRef.current) {
-        capturedRef.current = true;
-        try {
-          vpRef.current?.setPointerCapture(e.pointerId);
-        } catch {
-          // 指针已不可捕获（如合成事件）：退化为无捕获，后续照旧。
-        }
-      }
-      const dx = e.clientX - drag.sx;
-      const dy = e.clientY - drag.sy;
-      if (Math.abs(dx) + Math.abs(dy) > 4) drag.moved = true;
-      if (drag.kind === "pan") {
-        setView((prev) => ({ ...prev, x: (drag.ox) + dx, y: (drag.oy) + dy }));
-      } else if (drag.kind === "marquee") {
-        const el = vpRef.current;
-        if (!el || !drag.mq) return;
-        const rect = el.getBoundingClientRect();
-        const x1 = Math.max(0, Math.min(drag.sx, e.clientX) - rect.left);
-        const y1 = Math.max(0, Math.min(drag.sy, e.clientY) - rect.top);
-        const x2 = Math.min(rect.width, Math.max(drag.sx, e.clientX) - rect.left);
-        const y2 = Math.min(rect.height, Math.max(drag.sy, e.clientY) - rect.top);
-        drag.mq.style.left = `${x1}px`;
-        drag.mq.style.top = `${y1}px`;
-        drag.mq.style.width = `${x2 - x1}px`;
-        drag.mq.style.height = `${y2 - y1}px`;
-      } else if (drag.kind === "multidrag") {
-        // 多选组拖：整组成员按同一位移移动。
-        if (!drag.moved || !drag.members?.length) return;
-        moveGroupTo(drag.members.map((m) => ({ key: m.key, x: m.x + dx / view.scale, y: m.y + dy / view.scale })));
-      } else if (drag.kind === "node") {
-        if (!drag.moved) return;
-        moveGroupTo([{ key: drag.frameKey, x: drag.ox + dx / view.scale, y: drag.oy + dy / view.scale }]);
-      } else if (drag.kind === "resize") {
-        // 四角自由缩放：对角固定，实时预览；西/北角缩放联动挪动位置，
-        // 松手才持久化尺寸与位置。
-        const key = drag.frameKey;
-        const node = nodesRef.current.find((n) => n.id === key);
-        const min = NODE_MIN_SIZE[node?.type ?? "gen_image"];
-        const corner = drag.corner;
-        const dxW = dx / view.scale;
-        const dyW = dy / view.scale;
-        let w = drag.ox;
-        let h = drag.oy;
-        if (corner === "ne" || corner === "se") w = Math.max(min.w, w + dxW);
-        if (corner === "sw" || corner === "se") h = Math.max(min.h, h + dyW);
-        if (corner === "nw" || corner === "sw") w = Math.max(min.w, w - dxW);
-        if (corner === "nw" || corner === "ne") h = Math.max(min.h, h - dyW);
-        const shiftX = corner === "nw" || corner === "sw";
-        const shiftY = corner === "nw" || corner === "ne";
-        let px: number | undefined;
-        let py: number | undefined;
-        if ((shiftX || shiftY) && drag.px0 != null && drag.py0 != null) {
-          // 每步都从按下时的初始位置绝对推导（对角固定 ⇒ 平移量 = 原尺寸
-          // − 新尺寸）；不能用回写的 drag.px 叠加，否则逐复合漂移。
-          px = Math.round(drag.px0 + (shiftX ? drag.ox - w : 0));
-          py = Math.round(drag.py0 + (shiftY ? drag.oy - h : 0));
-          drag.px = px;
-          drag.py = py;
-        }
-        store.getState().commitLayout(canvasId, [
-          { id: key, pos_x: px ?? node?.pos_x ?? 0, pos_y: py ?? node?.pos_y ?? 0, width: Math.round(w), height: Math.round(h) },
-        ]);
-      } else if (drag.kind === "wirecut") {
-        // 松手事件丢失时右键已弹起，拖拽态却还挂着：按 e.buttons 自愈。
-        if ((e.buttons & 2) === 0) {
-          vpRef.current?.classList.remove("pc-cutting");
-          cutTargetsRef.current = null;
-          cutPointsRef.current = [];
-          cutTrailUnderRef.current?.setAttribute("points", "");
-          cutTrailRef.current?.setAttribute("points", "");
-          dragRef.current = null;
-          return;
-        }
-        // 切痕延伸 + 实时判定：本段轨迹扫过哪条连线就立即切断哪条。
-        const from = { x: drag.px ?? drag.sx, y: drag.py ?? drag.sy };
-        const to = { x: e.clientX, y: e.clientY };
-        drag.px = to.x;
-        drag.py = to.y;
-        drag.moved = true;
-        const vpRect = vpRef.current?.getBoundingClientRect();
-        if (vpRect) {
-          const w = (cx: number, cy: number) => ({
-            x: cx - vpRect.left,
-            y: cy - vpRect.top,
-          });
-          const wTo = w(to.x, to.y);
-          if (cutPointsRef.current.length === 0) {
-            const wFrom = w(from.x, from.y);
-            cutPointsRef.current.push(`${wFrom.x},${wFrom.y}`);
-          }
-          cutPointsRef.current.push(`${wTo.x},${wTo.y}`);
-          const pts = cutPointsRef.current.join(" ");
-          cutTrailUnderRef.current?.setAttribute("points", pts);
-          cutTrailRef.current?.setAttribute("points", pts);
-        }
-        const targets = cutTargetsRef.current;
-        if (targets) {
-          for (const tg of targets) {
-            if (tg.done) continue;
-            if (segHitsPolyline(from, to, tg.pts)) {
-              tg.done = true;
-              tg.del();
-            }
-          }
-        }
-      } else if (drag.kind === "wire") {
-        const el = vpRef.current;
-        if (!el || !drag.fromKey) return;
-        const rect = el.getBoundingClientRect();
-        const wx = (e.clientX - rect.left - view.x) / view.scale;
-        const wy = (e.clientY - rect.top - view.y) / view.scale;
-        // 摘线拿着（rewire）时草稿线锚在「留在原地的另一端」——线的真实
-        // 源头输出口，刚拔空的输入口不再有线的视觉残留。
-        const startPoint = drag.fromDir === "out"
-          ? outPointOf(drag.fromKey)
-          : drag.rewire
-            ? outPointOf(drag.fromKey)
-            : inPointOf(drag.fromKey, drag.fromPortId);
-        if (!startPoint) return;
-        const cursor = { x: wx, y: wy };
-        const hit = document.elementFromPoint(e.clientX, e.clientY);
-        const tEl = hit instanceof Element ? hit.closest<HTMLElement>(".pc-node[data-key]") : null;
-        const tKey = tEl?.getAttribute("data-key") ?? null;
-        const tNode = tKey ? nodesRef.current.find((n) => n.id === tKey) : undefined;
-        const fromNode = nodesRef.current.find((n) => n.id === drag.fromKey);
-        // 类型化端口匹配：
-        //   正拖（out）：落点节点的某个输入口 accepts 包含源节点类型，
-        //     多口时吸附光标最近的口（实测行位）。
-        //   反拖/摘线（in）：落点节点必须有 out 且其类型被源输入口接受。
-        let targetPort: string | null = null;
-        let compatible = false;
-        if (drag.fromDir === "out") {
-          const sourceType = fromNode?.type;
-          if (tNode && tKey && sourceType && tKey !== drag.fromKey) {
-            const ins = PORT_DEFS[tNode.type].ins.filter((p) => p.accepts.includes(sourceType));
-            if (ins.length > 0) {
-              const box = boxOf(tKey);
-              const metrics = nodeMetricsRef.current.ports[tKey];
-              let best: PortDef | undefined;
-              let bestDist = Infinity;
-              ins.forEach((p) => {
-                const off = metrics?.[p.id];
-                const py = box && off ? box.y + off.y : box ? box.y + box.h / 2 : 0;
-                const dist = box ? Math.abs(py - wy) : 0;
-                if (!best || dist <= bestDist) {
-                  best = p;
-                  bestDist = dist;
-                }
-              });
-              targetPort = best?.id ?? null;
-              compatible = !!targetPort;
-            }
-          }
-        } else {
-          const inDef = PORT_DEFS[fromNode?.type ?? "note"].ins.find((p) => p.id === drag.fromPortId);
-          if (tNode && inDef && tKey !== drag.fromKey) {
-            compatible = inDef.accepts.includes(tNode.type);
-            targetPort = compatible ? drag.fromPortId : null;
-          }
-        }
-        drag.invalid = !!tKey && tKey !== drag.fromKey && !compatible;
-        drag.targetKey = compatible ? tKey : null;
-        drag.targetPort = targetPort;
-        // 落点节点高亮（可接亮框 / 不可接不亮）。
-        const hoverEl = compatible ? tEl : null;
-        if (wireHoverRef.current !== hoverEl) {
-          wireHoverRef.current?.classList.remove("pc-wire-target");
-          hoverEl?.classList.add("pc-wire-target");
-          wireHoverRef.current = hoverEl;
-        }
-        // 悬停口点亮：线要落去的那个口与源口同款放大光圈（亮＝接得上）。
-        const portEl = compatible && tEl && targetPort
-          ? tEl.querySelector<HTMLElement>(`.pc-port[data-port-id="${targetPort}"]`)
-          : null;
-        if (wirePortHoverRef.current !== portEl) {
-          wirePortHoverRef.current?.classList.remove("pc-port-active");
-          portEl?.classList.add("pc-port-active");
-          wirePortHoverRef.current = portEl;
-        }
-        // 草稿终点：命中可接口时吸附到该口实测位置。
-        const endPoint =
-          compatible && drag.fromDir === "out" && tKey && targetPort
-            ? inPointOf(tKey, targetPort) ?? cursor
-            : cursor;
-        const draftColor = fromNode ? outMediaColor(fromNode.type) : undefined;
-        setWireDraft({
-          // 摘线拿着：从源头画到手里；普通正拖 out→口；反拖 手里→口。
-          d: drag.fromDir === "out"
-            ? wirePathD(startPoint, endPoint)
-            : wirePathD(cursor, startPoint),
-          invalid: !!drag.invalid,
-          color: draftColor,
-        });
-      }
-    };
-    const cleanupPointerVisuals = (moved: boolean) => {
-      vpRef.current?.classList.remove("pc-panning");
-      vpRef.current?.classList.remove("pc-wiring");
-      document
-        .querySelectorAll<HTMLElement>(".pc-port-active")
-        .forEach((el) => el.classList.remove("pc-port-active"));
-      wirePortHoverRef.current = null;
-      vpRef.current?.querySelectorAll<HTMLElement>(".pc-dragging").forEach((el) => el.classList.remove("pc-dragging"));
-      vpRef.current?.querySelectorAll<HTMLElement>(".pc-resizing").forEach((el) => el.classList.remove("pc-resizing"));
-      if (moved) {
-        suppressClickRef.current = true;
-        window.setTimeout(() => {
-          suppressClickRef.current = false;
-        }, 0);
-      }
-      dragRef.current = null;
-    };
-
-    const onUp = (e: PointerEvent, cancelled = false) => {
-      const drag = dragRef.current;
-      if (capturedRef.current && vpRef.current?.hasPointerCapture(e.pointerId)) {
-        vpRef.current.releasePointerCapture(e.pointerId);
-      }
-      capturedRef.current = false;
-      if (!drag) return;
-      if (cancelled) {
-        // pointercancel 表示系统手势/浏览器接管了指针，不能把最后一次
-        // 悬停目标当作有效落点提交；摘线恢复原连接。
-        if (drag.kind === "wire") {
-          wireHoverRef.current?.classList.remove("pc-wire-target");
-          wireHoverRef.current = null;
-          setWireDraft(null);
-          setLiftedWire(null);
-        } else if (drag.kind === "wirecut") {
-          vpRef.current?.classList.remove("pc-cutting");
-          cutTargetsRef.current = null;
-          cutPointsRef.current = [];
-          cutTrailUnderRef.current?.setAttribute("points", "");
-          cutTrailRef.current?.setAttribute("points", "");
-        } else if (drag.kind === "marquee") {
-          drag.mq?.remove();
-        }
-        cleanupPointerVisuals(drag.moved ?? false);
-        return;
-      }
-      // 统一双击判定：两次「按下即松手」（未拖动）在 500ms 内落在同一
-      // 目标（≤16px）上才算双击。不用原生 dblclick——它把拖拽轻抖的
-      // 松手也计成第二次点击，是「单击/拖完莫名弹窗」的根源。
-      const dblCountable = drag.kind === "marquee" || drag.kind === "node" || drag.kind === "multidrag";
-      if (dblCountable && !drag.moved) {
-        const hitEl = document.elementFromPoint(e.clientX, e.clientY);
-        const hit = hitEl instanceof Element ? hitEl : null;
-        if (hit?.closest("textarea, input, button, video, audio")) {
-          // 控件上的两次点击是控件自己的事，不算空白双击。
-          dblRef.current = null;
-        } else {
-          const nodeEl = hit?.closest(".pc-node") ?? null;
-          const key = nodeEl?.getAttribute("data-key") ?? "";
-          const now = performance.now();
-          const prev = dblRef.current;
-          dblRef.current = { key, x: e.clientX, y: e.clientY, t: now };
-          if (prev && prev.key === key && now - prev.t < 500 &&
-              Math.hypot(e.clientX - prev.x, e.clientY - prev.y) < 16) {
-            dblRef.current = null;
-            if (!key) {
-              // 双击空白 → 节点选择框（ComfyUI 式）。
-              const rect = vpRef.current?.getBoundingClientRect();
-              if (rect) {
-                openAddMenu(
-                  e.clientX - rect.left,
-                  e.clientY - rect.top,
-                  (e.clientX - rect.left - view.x) / view.scale,
-                  (e.clientY - rect.top - view.y) / view.scale,
-                );
-              }
-            } else {
-              // 双击节点：def.onDoubleClick（便签进编辑；预览图像开大图）；
-              // 其余类型无全局动作。
-              const node = nodesRef.current.find((n) => n.id === key);
-              if (node) NODE_DEFS[node.type].onDoubleClick?.(node, canvasServices);
-            }
-          }
-        }
-      } else if (drag.moved) {
-        dblRef.current = null;
-      }
-      if (drag.kind === "pan") {
-        if (drag.moved) saveView(view);
-      } else if (drag.kind === "wirecut") {
-        vpRef.current?.classList.remove("pc-cutting");
-        cutTargetsRef.current = null;
-        cutPointsRef.current = [];
-        cutTrailUnderRef.current?.setAttribute("points", "");
-        cutTrailRef.current?.setAttribute("points", "");
-      } else if (drag.kind === "wire") {
-        wireHoverRef.current?.classList.remove("pc-wire-target");
-        wireHoverRef.current = null;
-        setWireDraft(null);
-        const vpRect = vpRef.current?.getBoundingClientRect();
-        const insideViewport = !!vpRect && e.clientX >= vpRect.left && e.clientX <= vpRect.right
-          && e.clientY >= vpRect.top && e.clientY <= vpRect.bottom;
-        const hitEl = insideViewport ? document.elementFromPoint(e.clientX, e.clientY) : null;
-        const landed = hitEl instanceof Element
-          ? hitEl.closest(".pc-node, .pc-glass, .pc-addmenu")
-          : null;
-        const wireRelease = resolveWireRelease({
-          cancelled: false,
-          moved: !!drag.moved,
-          hasTarget: !!drag.targetKey,
-          landedOnCanvasItem: !!landed,
-          insideViewport,
-        });
-        const targetKey = drag.targetKey;
-        const targetPort = drag.targetPort;
-        if (drag.rewire) {
-          // ComfyUI 摘线收尾：换目标（拖到另一节点可接口上）/ 空白交给
-          // 菜单（建节点即转接）/ 其余一律放回（行数据未删，清掉 lifted
-          // 即恢复原线）。
-          const lifted = liftedWire;
-          if (wireRelease === "commit" && targetKey && targetPort && lifted) {
-            setLiftedWire(null);
-            // 单线口：转接进来前顶掉口上其他旧线（合集 multi 口不顶）。
-            const toNode = nodesRef.current.find((n) => n.id === targetKey);
-            const multi = toNode ? PORT_DEFS[toNode.type].ins.find((p) => p.id === targetPort)?.multi : false;
-            if (!multi) {
-              const old = connectionsRef.current.find((c) => c.to_node === targetKey && c.to_port === targetPort && c.id !== lifted.connId);
-              if (old) void store.getState().deleteConnection(old.id);
-            }
-            void store.getState().rewire(lifted.connId, targetKey, targetPort);
-          } else if (wireRelease === "picker" && lifted) {
-            if (vpRect) {
-              openAddMenu(
-                e.clientX - vpRect.left,
-                e.clientY - vpRect.top,
-                (e.clientX - vpRect.left - view.x) / view.scale,
-                (e.clientY - vpRect.top - view.y) / view.scale,
-                { detached: { connId: lifted.connId, fromKey: lifted.fromKey } },
-              );
-            } else {
-              setLiftedWire(null);
-            }
-          } else {
-            setLiftedWire(null);
-          }
-        } else if (wireRelease === "commit" && targetKey && targetPort && drag.fromKey) {
-          const fromKey = drag.fromDir === "out" ? drag.fromKey : targetKey;
-          const toKey = drag.fromDir === "out" ? targetKey : drag.fromKey;
-          const toPort = drag.fromDir === "out" ? targetPort : drag.fromPortId;
-          // 单线口语义：落线顶掉该口已有旧线（合集 multi 口追加不顶）。
-          const toNode = nodesRef.current.find((n) => n.id === toKey);
-          const multi = toNode ? PORT_DEFS[toNode.type].ins.find((p) => p.id === toPort)?.multi : false;
-          if (!multi) {
-            const old = connectionsRef.current.find((c) => c.to_node === toKey && c.to_port === toPort && c.from_node !== fromKey);
-            if (old) void store.getState().deleteConnection(old.id);
-          }
-          void store.getState().connect(canvasId, fromKey, toKey, toPort);
-        } else if (wireRelease === "picker" && drag.fromKey) {
-          // ComfyUI 惯例：拖到空白松手 → 弹节点选择框，创建的节点自动
-          // 接上这条线；落在任何节点/浮层上松手视为取消，不弹。
-          if (vpRect) {
-            openAddMenu(
-              e.clientX - vpRect.left,
-              e.clientY - vpRect.top,
-              (e.clientX - vpRect.left - view.x) / view.scale,
-              (e.clientY - vpRect.top - view.y) / view.scale,
-              { wire: { fromKey: drag.fromKey, fromDir: drag.fromDir, fromPortId: drag.fromPortId } },
-            );
-          }
-        }
-      } else if (drag.kind === "resize") {
-        // 改尺寸松手：尺寸已在移动中按角实时算好（commitLayout 已同步
-        // 本地与防抖落盘），这里补记撤销；西/北角缩放挪过的位置一并记。
-        const key = drag.frameKey;
-        const node = nodesRef.current.find((n) => n.id === key);
-        if (drag.moved && node) {
-          const size = nodeSize(node);
-          const prevEntry: CanvasLayoutEntry = {
-            id: key,
-            pos_x: drag.px0 ?? node.pos_x,
-            pos_y: drag.py0 ?? node.pos_y,
-            width: drag.ox,
-            height: drag.oy,
-          };
-          const nextEntry: CanvasLayoutEntry = {
-            id: key,
-            pos_x: drag.px ?? node.pos_x,
-            pos_y: drag.py ?? node.pos_y,
-            width: size.w,
-            height: size.h,
-          };
-          pushUndo({ kind: "layout", prev: [prevEntry], next: [nextEntry] });
-        }
-      } else if (drag.kind === "node") {
-        // 拖动松手：commitLayout 已在移动中即时合并（防抖落盘），这里
-        // 补记撤销（恢复到拖前位置）。
-        if (drag.moved) {
-          const node = nodesRef.current.find((n) => n.id === drag.frameKey);
-          if (node) {
-            // 撤销条目同样只动位置：宽高透传节点原值，保住 null 自动高。
-            pushUndo({
-              kind: "layout",
-              prev: [{ id: drag.frameKey, pos_x: drag.ox, pos_y: drag.oy, width: node.width, height: node.height }],
-              next: [{ id: drag.frameKey, pos_x: node.pos_x, pos_y: node.pos_y, width: node.width, height: node.height }],
-            });
-          }
-        }
-      } else if (drag.kind === "multidrag") {
-        // 组拖松手：按总位移算出整组最终位置，补记撤销（整组恢复）。
-        if (drag.moved && drag.members?.length) {
-          const dxW = (e.clientX - drag.sx) / view.scale;
-          const dyW = (e.clientY - drag.sy) / view.scale;
-          const byId = new Map(nodesRef.current.map((n) => [n.id, n]));
-          const prev: CanvasLayoutEntry[] = [];
-          const next: CanvasLayoutEntry[] = [];
-          for (const m of drag.members) {
-            const node = byId.get(m.key);
-            if (!node) continue;
-            prev.push({ id: m.key, pos_x: m.x, pos_y: m.y, width: node.width, height: node.height });
-            next.push({ id: m.key, pos_x: m.x + dxW, pos_y: m.y + dyW, width: node.width, height: node.height });
-          }
-          pushUndo({ kind: "layout", prev, next });
-        }
-      } else if (drag.kind === "addnode") {
-        // 点击（未拖动）落双击点；按住拖到画布松手落松手点；从「拖线
-        // 到空白」菜单进入时，创建的节点自动接上那条线。
-        const rect = vpRef.current?.getBoundingClientRect();
-        const dropPos = drag.moved && rect
-          ? {
-              x: (e.clientX - rect.left - view.x) / view.scale,
-              y: (e.clientY - rect.top - view.y) / view.scale,
-            }
-          : { x: drag.fox, y: drag.foy };
-        void (async () => {
-          const size = NODE_DEFAULT_SIZE[drag.frameKey];
-          const created = await store.getState().createNode({
-            canvasId,
-            nodeType: drag.frameKey,
-            posX: dropPos.x - size.w / 2,
-            posY: dropPos.y - 14,
-            width: size.w,
-            height: size.h,
-          });
-          if (!created) return;
-          pulseNodes([created.id]);
-          const fromNode = drag.wire ? nodesRef.current.find((n) => n.id === drag.wire!.fromKey) : undefined;
-          if (drag.detached) {
-            // 摘线转接：线改接新节点（新节点需要能接住原上游的口）。
-            setLiftedWire(null);
-            const toPort = fromNode ? incomingPortFor(created.type, fromNode.type) : "";
-            await store.getState().rewire(drag.detached.connId, created.id, toPort);
-          } else if (drag.wire && fromNode) {
-            if (drag.wire.fromDir === "out") {
-              // 正拖：新节点是下游，找它可接住上游的输入口。
-              const toPort = incomingPortFor(created.type, fromNode.type);
-              await store.getState().connect(canvasId, drag.wire.fromKey, created.id, toPort);
-            } else {
-              // 反拖：新节点是上游，接进源输入口。
-              await store.getState().connect(canvasId, created.id, drag.wire.fromKey, drag.wire.fromPortId);
-            }
-          }
-          setSelection([created.id]);
-        })();
-      } else if (drag.kind === "marquee") {
-        const list: string[] = [];
-        if (drag.moved) {
-          const el = vpRef.current;
-          if (el) {
-            const rect = el.getBoundingClientRect();
-            const rx1 = (Math.min(drag.sx, e.clientX) - rect.left - view.x) / view.scale;
-            const ry1 = (Math.min(drag.sy, e.clientY) - rect.top - view.y) / view.scale;
-            const rx2 = (Math.max(drag.sx, e.clientX) - rect.left - view.x) / view.scale;
-            const ry2 = (Math.max(drag.sy, e.clientY) - rect.top - view.y) / view.scale;
-            // 框选判定对齐工程画布：节点中心落入框内即选中。
-            const inBox = (p: Pos, w: number, h: number) => {
-              const cx = p.x + w / 2;
-              const cy = p.y + h / 2;
-              return cx >= rx1 && cx <= rx2 && cy >= ry1 && cy <= ry2;
-            };
-            for (const node of nodesRef.current) {
-              const size = nodeSize(node);
-              if (inBox({ x: node.pos_x, y: node.pos_y }, size.w, size.h)) list.push(node.id);
-            }
-          }
-        }
-        setSelection(list);
-        drag.mq?.remove();
-      }
-      cleanupPointerVisuals(drag.moved ?? false);
-    };
-    const onCancel = (e: PointerEvent) => onUp(e, true);
-    window.addEventListener("pointermove", onMove);
-    window.addEventListener("pointerup", onUp);
-    window.addEventListener("pointercancel", onCancel);
-    return () => {
-      window.removeEventListener("pointermove", onMove);
-      window.removeEventListener("pointerup", onUp);
-      window.removeEventListener("pointercancel", onCancel);
-    };
-    // 闭包随渲染刷新（对齐工程画布手势重订阅惯例：拖拽状态在 dragRef，
-    // 数据快照走 ref 镜像，重订阅只为拿到新鲜 view/store 闭包）。
+  // ── 手势会话（engine/useCanvasGestures）：按下分派 + 窗口级 move/up/cancel ──
+  const {
+    onViewportPointerDown,
+    dragRef,
+    suppressClickRef,
+    cutTrailRef,
+    cutTrailUnderRef,
+    wireDraft,
+    liftedWire,
+    addMenu,
+    addMenuQuery,
+    setAddMenuQuery,
+    closeAddMenu,
+    discardDetachedWire,
+    pulseKeys,
+    pulseNodes,
+  } = useCanvasGestures({
+    canvasId,
+    vpRef,
+    view,
+    setView,
+    saveView,
+    nodesRef,
+    connectionsRef,
+    selRef,
+    setSelection,
+    groups,
+    memberFrame,
+    groupSnapshot,
+    boxOf,
+    outPointOf,
+    inPointOf,
+    nodeMetricsRef,
+    canvasServices,
+    pushUndo,
   });
 
-  // ── 键盘：删除选中、撤销、全选、复制粘贴、打组 ─────────────
+  // ── 键盘快捷键（engine/useKeyboardShortcuts）：删除/撤销/全选/复制粘贴/打组 ──
+  useKeyboardShortcuts(
+    canvasId,
+    vpRef,
+    nodesRef,
+    selRef,
+    setSelection,
+    !!addMenu,
+    copySelection,
+    pasteClipboard,
+    runUndo,
+    deleteSelected,
+  );
 
-  // 防重入：StrictMode 开发态会双挂载键盘监听，一次 Ctrl+G 建组又解组。
-  const groupingRef = useRef(false);
-  const toggleGroup = useCallback(() => {
-    if (groupingRef.current) return;
-    groupingRef.current = true;
-    window.setTimeout(() => {
-      groupingRef.current = false;
-    }, 0);
-    const sel = selRef.current;
-    if (sel.length === 0) return;
-    const st = store.getState();
-    // 先剪枝：成员已被删除的组清掉死成员（空组丢弃）。
-    const pruned = st.groups
-      .map((g) => ({ ...g, members: g.members.filter((key) => memberFrame(key) !== null) }))
-      .filter((g) => g.members.length > 0);
-    const fullGroup = pruned.find(
-      (g) => g.members.length === sel.length && sel.every((key) => g.members.includes(key)),
-    );
-    if (fullGroup) {
-      void st.setGroups(canvasId, pruned.filter((g) => g.id !== fullGroup.id));
-    } else {
-      const kept = pruned
-        .map((g) => ({ ...g, members: g.members.filter((key) => !sel.includes(key)) }))
-        .filter((g) => g.members.length > 0);
-      void st.setGroups(canvasId, [
-        ...kept,
-        {
-          id: `ng${Date.now()}${Math.floor(Math.random() * 1e4)}`,
-          label: t("project.canvas.nodeGroup"),
-          members: [...sel],
-        },
-      ]);
-    }
-  }, [canvasId, memberFrame, store, t]);
-
-  useEffect(() => {
-    const onKey = (e: KeyboardEvent) => {
-      const el = e.target as HTMLElement | null;
-      if (el && (el.tagName === "INPUT" || el.tagName === "TEXTAREA" || el.isContentEditable)) {
-        return;
-      }
-      // 面板保挂载：画布被 display:none 隐藏（用户在其他顶级区）时不响应。
-      if (!vpRef.current || vpRef.current.offsetParent === null) return;
-      // 弹层打开时不响应（对齐工程画布惯例）。
-      if (document.querySelector(".dialog-overlay, .canvas-dialog-overlay, .canvas-chip-popover") || addMenu) {
-        return;
-      }
-      const ctrl = e.ctrlKey || e.metaKey;
-      if (ctrl) {
-        const k = e.key.toLowerCase();
-        if (k === "c") {
-          copySelection();
-          return;
-        }
-        if (k === "v") {
-          e.preventDefault();
-          void pasteClipboard();
-          return;
-        }
-        if (k === "z") {
-          e.preventDefault();
-          runUndo();
-          return;
-        }
-        if (k === "a") {
-          e.preventDefault();
-          setSelection(nodesRef.current.map((n) => n.id));
-          return;
-        }
-        if (k === "g") {
-          e.preventDefault();
-          toggleGroup();
-          return;
-        }
-        return;
-      }
-      if ((e.key === "Delete" || e.key === "Backspace") && selRef.current.length) {
-        e.preventDefault();
-        void deleteSelected();
-      }
-    };
-    window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
-  }, [addMenu, copySelection, deleteSelected, pasteClipboard, runUndo, setSelection, toggleGroup]);
 
   // ── 合集节点（唯一多线入口）：成员解析 + 拖拽排序 ─────────
 
@@ -1546,103 +313,12 @@ export default function FreeCanvas({ canvasId }: { canvasId: string }) {
     if (fitAll(store.getState().nodes)) {
       fitAttemptedRef.current = true;
     }
-  }, [canvasId, fitAll, pushUndo, pulseNodes, setSelection, store, t, view.scale, view.x, view.y]);
+  }, [canvasId, fitAll, fitAttemptedRef, pushUndo, pulseNodes, setSelection, store, t, view.scale, view.x, view.y, vpRef]);
 
-  // ── OS 文件拖入：命中加载/抽帧节点 = 加载到该节点；空白 = 新建加载节点 ──
+  // ── OS 文件拖入（engine/useFileDrop）：命中加载/抽帧节点 = 加载到该
+  //    节点；空白 = 新建加载节点 ──
+  const dropHint = useFileDrop(canvasId, vpRef, view, nodesRef, applyFrameVideo, pulseNodes);
 
-  const [dropHint, setDropHint] = useState(false);
-
-  const handleFileDrop = useCallback(
-    async (paths: string[], logical: { x: number; y: number }) => {
-      const rect = vpRef.current?.getBoundingClientRect();
-      const world = rect
-        ? {
-            x: (logical.x - rect.left - view.x) / view.scale,
-            y: (logical.y - rect.top - view.y) / view.scale,
-          }
-        : { x: 0, y: 0 };
-      // 命中加载节点：按节点类型过滤扩展名，加载到该节点（多文件取首张）。
-      // 抽帧节点与 load_video 同吃视频扩展名，但写入 metadata.video_path
-      // 并清旧帧产物（视频是输入，帧产物占 resource_path）。
-      const hitEl = document.elementFromPoint(logical.x, logical.y) as Element | null;
-      const targetNodeEl = hitEl?.closest(".pc-node[data-key]");
-      const targetId = targetNodeEl?.getAttribute("data-key") ?? "";
-      const targetNode = nodesRef.current.find((n) => n.id === targetId);
-      // 命中节点是否接收拖入，查 def（dropAccept + 扩展名白名单 + 写回模式）。
-      if (targetNode && NODE_DEFS[targetNode.type].dropAccept) {
-        const allowed = loadAllowedExts(targetNode.type);
-        const match = paths.find((p) => allowed.includes(extOf(p)));
-        if (match) {
-          await invoke("canvas_authorize_media", { path: match }).catch(() => {});
-          if (NODE_DEFS[targetNode.type].applyMode === "video-tool") {
-            await applyFrameVideo(targetNode.id, targetNode.type, match);
-          } else {
-            await store.getState().updateNode(targetNode.id, { resourcePath: match });
-          }
-          return;
-        }
-        return;
-      }
-      // 空白：按扩展名分发到声明了 blankDropExtensions 的加载节点（图像/
-      // 视频/音频，每文件一个，错开 24px）；不认识的扩展名忽略。
-      let offset = 0;
-      const createdIds: string[] = [];
-      for (const path of paths) {
-        const ext = extOf(path);
-        const kind = MENU_TYPE_ORDER.find((t) => NODE_DEFS[t].blankDropExtensions?.includes(ext)) ?? null;
-        if (!kind) continue;
-        try {
-          await invoke("canvas_authorize_media", { path }).catch(() => {});
-          const node = await store.getState().createNode({
-            canvasId,
-            nodeType: kind,
-            posX: world.x + offset,
-            posY: world.y + offset,
-            width: NODE_DEFAULT_SIZE[kind].w,
-            height: NODE_DEFAULT_SIZE[kind].h,
-            resourcePath: path,
-          });
-          if (node) createdIds.push(node.id);
-          offset += 24;
-        } catch (err) {
-          console.error("拖入加载失败:", err);
-        }
-      }
-      pulseNodes(createdIds);
-    },
-    [applyFrameVideo, canvasId, pulseNodes, store, view.scale, view.x, view.y],
-  );
-
-  useEffect(() => {
-    let unlisten: (() => void) | null = null;
-    let cancelled = false;
-    void getCurrentWebview()
-      .onDragDropEvent((event) => {
-        // 保挂载面板：画布被 display:none 隐藏时不接管拖放。
-        if (!vpRef.current || vpRef.current.offsetParent === null) return;
-        const payload = event.payload;
-        if (payload.type === "over" || payload.type === "drop") {
-          const dpr = window.devicePixelRatio || 1;
-          const logical = { x: payload.position.x / dpr, y: payload.position.y / dpr };
-          if (payload.type === "over") {
-            setDropHint(true);
-          } else {
-            setDropHint(false);
-            void handleFileDrop(payload.paths, logical);
-          }
-        } else {
-          setDropHint(false);
-        }
-      })
-      .then((fn) => {
-        if (cancelled) fn();
-        else unlisten = fn;
-      });
-    return () => {
-      cancelled = true;
-      unlisten?.();
-    };
-  }, [handleFileDrop]);
 
   // ── 渲染 ───────────────────────────────────────────────────
 
@@ -1815,7 +491,7 @@ export default function FreeCanvas({ canvasId }: { canvasId: string }) {
                 selected={selected}
                 pulsing={pulseKeys.includes(node.id)}
                 size={size}
-                onDelete={(id) => void deleteNodes([id])}
+                onDelete={(id) => void deleteNodes(nodesRef, connectionsRef, [id])}
               >
                 {body}
               </NodeShell>
@@ -1857,7 +533,7 @@ export default function FreeCanvas({ canvasId }: { canvasId: string }) {
                 if (event.key === "Escape") {
                   // 取消菜单＝不建节点直接退出：摘下的线就此断开。
                   if (addMenu.detached) discardDetachedWire(addMenu.detached);
-                  setAddMenu(null);
+                  closeAddMenu();
                 }
               }}
               // 聚焦必须带 preventScroll：默认聚焦会滚动视口容器把输入框
@@ -1903,8 +579,7 @@ export default function FreeCanvas({ canvasId }: { canvasId: string }) {
                           wire: addMenu.wire,
                           detached: addMenu.detached,
                         };
-                        setAddMenu(null);
-                        setAddMenuQuery("");
+                        closeAddMenu();
                       }}
                     >
                       {menuIconOf(type)}
