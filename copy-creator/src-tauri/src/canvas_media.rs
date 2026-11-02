@@ -405,6 +405,27 @@ pub async fn canvas_video_timeline(
         format!("v2:{path}:{mtime}:{}", meta.len()).hash(&mut hasher);
         let strip_dir = out_root.join(format!("strip-{:016x}", hasher.finish()));
 
+        // 失败运行可能遗留临时目录（ffmpeg 中断、落位前报错退出）：清掉一
+        // 小时前的陈旧残留，不限本视频哈希——画布任何视频的残留都借这次
+        // 生成顺手全局回收（旧逻辑只清同源，跨视频的 .tmp- 目录会无限积
+        // 压）；放在缓存命中判断之前，命中也不跳过回收。活跃生成的目录
+        // mtime 持续更新，不受影响。
+        if let Ok(entries) = std::fs::read_dir(&out_root) {
+            let stale_before = std::time::SystemTime::now() - std::time::Duration::from_secs(3600);
+            for entry in entries.flatten() {
+                let name = entry.file_name();
+                let name = name.to_string_lossy();
+                if !(name.starts_with("strip-") && name.contains(".tmp-")) {
+                    continue;
+                }
+                if let Ok(m) = entry.metadata().and_then(|m| m.modified()) {
+                    if m < stale_before {
+                        let _ = std::fs::remove_dir_all(entry.path());
+                    }
+                }
+            }
+        }
+
         // 缓存命中：meta.json 有效即直接返回（换视频/重录后哈希变，自动重建）。
         let meta_file = strip_dir.join("meta.json");
         if let Ok(text) = std::fs::read_to_string(&meta_file) {
@@ -440,22 +461,6 @@ pub async fn canvas_video_timeline(
             hasher.finish(),
             uuid::Uuid::new_v4()
         ));
-        // 失败运行可能遗留同源临时目录（ffmpeg 中断、落位前报错退出），
-        // 清掉一小时前的陈旧残留；活跃生成的目录 mtime 持续更新，不受影响。
-        let stale_prefix = format!("strip-{:016x}.tmp-", hasher.finish());
-        if let Ok(entries) = std::fs::read_dir(&out_root) {
-            let stale_before = std::time::SystemTime::now() - std::time::Duration::from_secs(3600);
-            for entry in entries.flatten() {
-                if !entry.file_name().to_string_lossy().starts_with(&stale_prefix) {
-                    continue;
-                }
-                if let Ok(m) = entry.metadata().and_then(|m| m.modified()) {
-                    if m < stale_before {
-                        let _ = std::fs::remove_dir_all(entry.path());
-                    }
-                }
-            }
-        }
         std::fs::create_dir_all(&tmp_dir).map_err(|e| format!("创建产物目录失败：{e}"))?;
         // 帧数随时长（约 4 帧/秒，24–150 封顶）：画面轨要还原镜头运动，采样
         // 太稀读不出内容；解码反正要过整段视频，多出的只是几张 80px 小图。
