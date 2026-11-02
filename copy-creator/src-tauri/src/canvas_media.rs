@@ -199,11 +199,79 @@ fn resolve_ffmpeg<R: Runtime>(app: &AppHandle<R>) -> Result<std::path::PathBuf, 
     Err("未找到 ffmpeg：请将 ffmpeg 可执行文件放入应用资源目录 ffmpeg/ 下，或加入 PATH 后重启应用".to_string())
 }
 
+/// 单次单帧提取尝试：pre_args 为 -i 之前的输入侧参数（-ss/-sseof）。
+/// single = true 时输出限 1 帧（首帧/任意寻址语义）；false 时无帧数
+/// 上限，-update 1 逐帧覆盖写文件至流结束（末帧语义）。命令失败或零
+/// 产出返回 Err（带 stderr 末两行，供兜底链最终如实报错）。
+fn frame_extract_attempt(
+    ffmpeg: &std::path::Path,
+    path: &std::path::Path,
+    out: &std::path::Path,
+    pre_args: &[&str],
+    single: bool,
+) -> Result<(), String> {
+    let mut cmd = std::process::Command::new(ffmpeg);
+    cmd.args(["-y", "-nostdin", "-hide_banner", "-loglevel", "error"]);
+    cmd.args(pre_args);
+    cmd.arg("-i").arg(path);
+    cmd.arg("-update").arg("1");
+    if single {
+        cmd.arg("-frames:v").arg("1");
+    }
+    cmd.arg(out);
+    cmd.stdin(std::process::Stdio::null());
+    cmd.stdout(std::process::Stdio::null());
+    cmd.stderr(std::process::Stdio::piped());
+    let output = cmd.output().map_err(|e| format!("启动 ffmpeg 失败：{e}"))?;
+    if !output.status.success() {
+        let tail = String::from_utf8_lossy(&output.stderr);
+        let tail = tail
+            .lines()
+            .filter(|l| !l.trim().is_empty())
+            .rev()
+            .take(2)
+            .collect::<Vec<_>>()
+            .into_iter()
+            .rev()
+            .collect::<Vec<_>>()
+            .join("；");
+        return Err(format!(
+            "ffmpeg 抽帧失败：{}",
+            if tail.is_empty() { "未知错误".to_string() } else { tail }
+        ));
+    }
+    let written = std::fs::metadata(out).map(|m| m.len()).unwrap_or(0);
+    if written == 0 {
+        return Err("ffmpeg 未产出帧文件（视频可能没有视频轨）".to_string());
+    }
+    Ok(())
+}
+
+/// 真尾帧提取（尾帧节点主路径 + 任意抽帧末端兜底共用）：从末尾反向
+/// 1s 寻址、无帧数上限逐帧覆盖写至流结束——最后留在文件里的即真尾帧。
+/// 窗口取 1s：需 ≥ 一帧间隔（覆盖低至 1fps 的源；旧参数 0.5s 对低帧率
+/// 视频连「末帧之后无更多帧」都保证不了）。实测 1080p30 全程 0.2s、
+/// 4K60 0.8s，逐帧 PNG 编码代价可忽略。寻位点越过真实末帧（时长元数
+/// 据偏大）时零产出，退回无寻址全量解码再取末帧——代价仅在坏元数据
+/// 视频上发生。
+fn extract_tail_frame(
+    ffmpeg: &std::path::Path,
+    path: &std::path::Path,
+    out: &std::path::Path,
+) -> Result<(), String> {
+    if frame_extract_attempt(ffmpeg, path, out, &["-sseof", "-1"], false).is_ok() {
+        return Ok(());
+    }
+    frame_extract_attempt(ffmpeg, path, out, &[], false)
+}
+
 /// 视频抽帧（视频首帧/尾帧节点 2026-11-01）：ffmpeg 提取单帧写入
 /// canvas-gen 产物目录（与生成产物同源），返回绝对路径供节点行
 /// resource_path 引用（下游 save/preview/合集/参考图聚合通用分支）。
-/// which = "first"（第 1 帧）| "last"（结尾处最后一帧，从末尾反向
-/// 半秒寻帧，不依赖时长元数据的准确性）。
+/// which = "first"（第 1 帧）| "last"（真尾帧。2026-11-02 修复「抽的
+/// 不是最后一帧」：旧命令 -sseof -0.5 + -frames:v 1 停在寻位点后的第
+/// 一帧，实为结尾前半秒的画面——红 9.5s/绿 0.3s/蓝 0.2s 分段实验实证
+/// 抽出绿帧；现走 extract_tail_frame，解码至流结束取真尾帧）。
 #[tauri::command]
 pub async fn canvas_extract_video_frame(
     app: AppHandle,
@@ -225,40 +293,10 @@ pub async fn canvas_extract_video_frame(
     tokio::task::spawn_blocking(move || -> Result<serde_json::Value, String> {
         std::fs::create_dir_all(&out_dir).map_err(|e| format!("创建产物目录失败：{e}"))?;
         let out = out_dir.join(format!("{}-{which}.png", uuid::Uuid::new_v4()));
-        let mut cmd = std::process::Command::new(&ffmpeg);
-        cmd.args(["-y", "-nostdin", "-hide_banner", "-loglevel", "error"]);
         if which == "last" {
-            cmd.arg("-sseof").arg("-0.5");
-        }
-        cmd.arg("-i").arg(&path);
-        cmd.args(["-update", "1", "-frames:v", "1"]);
-        cmd.arg(&out);
-        cmd.stdin(std::process::Stdio::null());
-        cmd.stdout(std::process::Stdio::null());
-        let output = cmd
-            .stderr(std::process::Stdio::piped())
-            .output()
-            .map_err(|e| format!("启动 ffmpeg 失败：{e}"))?;
-        if !output.status.success() {
-            let tail = String::from_utf8_lossy(&output.stderr);
-            let tail = tail
-                .lines()
-                .filter(|l| !l.trim().is_empty())
-                .rev()
-                .take(2)
-                .collect::<Vec<_>>()
-                .into_iter()
-                .rev()
-                .collect::<Vec<_>>()
-                .join("；");
-            return Err(format!(
-                "ffmpeg 抽帧失败：{}",
-                if tail.is_empty() { "未知错误".to_string() } else { tail }
-            ));
-        }
-        let written = std::fs::metadata(&out).map(|m| m.len()).unwrap_or(0);
-        if written == 0 {
-            return Err("ffmpeg 未产出帧文件（视频可能没有视频轨）".to_string());
+            extract_tail_frame(&ffmpeg, std::path::Path::new(&path), &out)?;
+        } else {
+            frame_extract_attempt(&ffmpeg, std::path::Path::new(&path), &out, &[], true)?;
         }
         Ok(json!({ "path": out.to_string_lossy() }))
     })
@@ -482,7 +520,11 @@ pub async fn canvas_video_timeline(
 }
 
 /// 任意时刻抽帧（视频抽帧节点 2026-11-02）：播放头时间 secs 输入侧快
-/// seek 后精确解码单帧，产物写 canvas-gen 并返回绝对路径。
+/// seek 后精确解码单帧，产物写 canvas-gen 并返回绝对路径。末端兜底
+/// （2026-11-02）：播放头贴轨道最右端（t=总时长）或落在末帧之后的空隙
+/// （低帧率源空隙更大）时，-ss 之后已无帧可解（ffmpeg 退出码 0 但零
+/// 产出）——监视器此刻显示的就是尾帧，退回真尾帧提取，不再报「没有
+/// 视频轨」的误导错误；t=0 时保持原错误（首帧语义不静默替换）。
 #[tauri::command]
 pub async fn canvas_seek_video_frame(
     app: AppHandle,
@@ -500,16 +542,12 @@ pub async fn canvas_seek_video_frame(
     tokio::task::spawn_blocking(move || -> Result<serde_json::Value, String> {
         std::fs::create_dir_all(&out_dir).map_err(|e| format!("创建产物目录失败：{e}"))?;
         let out = out_dir.join(format!("{}-seek.png", uuid::Uuid::new_v4()));
-        let mut cmd = std::process::Command::new(&ffmpeg);
-        cmd.args(["-y", "-nostdin", "-hide_banner", "-loglevel", "error"]);
-        cmd.arg("-ss").arg(format!("{secs:.3}"));
-        cmd.arg("-i").arg(&path);
-        cmd.args(["-update", "1", "-frames:v", "1"]);
-        cmd.arg(&out);
-        run_ffmpeg_checked(&mut cmd, "ffmpeg 抽帧失败")?;
-        let written = std::fs::metadata(&out).map(|m| m.len()).unwrap_or(0);
-        if written == 0 {
-            return Err("ffmpeg 未产出帧文件（视频可能没有视频轨）".to_string());
+        let secs_str = format!("{secs:.3}");
+        if secs > 0.0 {
+            frame_extract_attempt(&ffmpeg, std::path::Path::new(&path), &out, &["-ss", secs_str.as_str()], true)
+                .or_else(|_| extract_tail_frame(&ffmpeg, std::path::Path::new(&path), &out))?;
+        } else {
+            frame_extract_attempt(&ffmpeg, std::path::Path::new(&path), &out, &["-ss", "0"], true)?;
         }
         Ok(json!({ "path": out.to_string_lossy() }))
     })
