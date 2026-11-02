@@ -1,5 +1,6 @@
 import { Icons } from "../../../components/Icons";
 import { MEDIA_COLOR } from "./colors";
+import { NoteBody, NoteEditTool } from "./NoteBody";
 import { useNoteEditing } from "./noteEditing";
 import type { NodeDefinition } from "./types";
 
@@ -19,4 +20,6 @@ export const noteDef: NodeDefinition = {
   onDoubleClick: (node) => {
     if (node.metadata.kind === "note") useNoteEditing.getState().start(node.id, node.metadata.content);
   },
+  ToolsExtra: NoteEditTool,
+  Component: NoteBody,
 };

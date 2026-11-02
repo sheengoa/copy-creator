@@ -29,12 +29,11 @@ interface NodeShellProps {
   size: { w: number; h: number };
   /** 默认删除工具的回调（调用方包装 deleteNodes([id])）。 */
   onDelete: (id: string) => void;
-  /** 附加工具按钮（note 的 edit），渲染在删除钮之前。 */
-  toolsExtra?: ReactNode;
   children?: ReactNode;
 }
 
-export function NodeShell({ def, node, selected, pulsing, size, onDelete, toolsExtra, children }: NodeShellProps) {
+export function NodeShell({ def, node, selected, pulsing, size, onDelete, children }: NodeShellProps) {
+  const ToolsExtra = def.ToolsExtra;
   const { t } = useTranslation();
   const autoHeight = node.height == null;
   const resized = !autoHeight && def.chrome === "standard";
@@ -61,7 +60,7 @@ export function NodeShell({ def, node, selected, pulsing, size, onDelete, toolsE
       {portBarOf(def, node, t)}
       {children}
       <span className="pc-node-tools">
-        {toolsExtra}
+        {ToolsExtra && <ToolsExtra node={node} />}
         <NodeHint text={t("common.delete")}>
           <button
             type="button"

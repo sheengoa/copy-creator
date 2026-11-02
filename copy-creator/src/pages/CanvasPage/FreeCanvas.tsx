@@ -2,7 +2,6 @@ import { useCallback, useEffect, useLayoutEffect, useRef, useState, type ReactNo
 import { useTranslation } from "react-i18next";
 import { invoke } from "@tauri-apps/api/core";
 import { getCurrentWebview } from "@tauri-apps/api/webview";
-import { Icons } from "../../components/Icons";
 import { ImageLightbox } from "../../components/ImageLightbox";
 import { joinLibraryPath } from "../../domain/projectView";
 import ProjectFilePickerDialog from "../ResourcePage/ProjectFilePickerDialog";
@@ -13,7 +12,7 @@ import {
   type CanvasNode,
   type CanvasNodeType,
 } from "../../stores/canvasStore";
-import { AUDIO_EXTS, extOf, IMAGE_EXTS, VIDEO_EXTS } from "./nodes/exts";
+import { extOf } from "./nodes/exts";
 import type { PortDef } from "./nodes/types";
 import {
   LIBRARY_PICKER_KINDS,
@@ -26,6 +25,7 @@ import {
   NODE_MIN_SIZE,
   outMediaColor,
   PORT_DEFS,
+  MENU_TYPE_ORDER,
   isVideoToolType,
 } from "./nodes/registry";
 import { NodeHint } from "./nodes/NodeHint";
@@ -38,7 +38,6 @@ import { BatchBar } from "./nodes/BatchBar";
 import { useVideoToolRuntimeController } from "./nodes/videoToolRuntime";
 import { VideoToolRuntimeProvider } from "./nodes/VideoToolRuntimeProvider";
 import { useNodeErrors } from "./nodes/nodeErrors";
-import { useNoteEditing } from "./nodes/noteEditing";
 import { upstreamMediaOf as upstreamMediaQuery } from "./nodes/upstream";
 import type { NodeServices } from "./nodes/types";
 
@@ -207,12 +206,7 @@ export default function FreeCanvas({ canvasId }: { canvasId: string }) {
   const [wireDraft, setWireDraft] = useState<{ d: string; invalid: boolean; color?: string } | null>(null);
   /** 摘线拿着（rewire）中：该连线暂隐藏，松手转接或放回。 */
   const [liftedWire, setLiftedWire] = useState<{ connId: string; fromKey: string } | null>(null);
-  // 便签编辑会话与节点错误文案：UI 层小 store（nodes/noteEditing、
-  // nodes/nodeErrors），双击手势/家族模块与节点体共享。
-  const editingNoteId = useNoteEditing((s) => s.editingId);
-  const noteDraft = useNoteEditing((s) => s.draft);
-  const setNoteDraft = useNoteEditing((s) => s.setDraft);
-  const closeNoteEdit = useNoteEditing((s) => s.close);
+  // 节点错误文案（UI 层小 store nodes/nodeErrors）：取媒/换片失败写。
   const setNodeErrors = useNodeErrors((s) => s.setErrors);
   const [pulseKeys, setPulseKeys] = useState<string[]>([]);
   /** 资源库选择浮层：load 节点的「从资源库选择」。 */
@@ -272,13 +266,11 @@ export default function FreeCanvas({ canvasId }: { canvasId: string }) {
       void (async () => {
         const idMap = new Map<string, string>();
         for (const node of action.nodes) {
-          // 删除时仍在生成中的图片节点，恢复时归一为 error——后台任务已随
-          // 删除取消，留着 generating 会让节点永远转圈。
-          const restoredMeta = { ...node.metadata };
-          if (restoredMeta.kind === "gen_image" && restoredMeta.status === "generating") {
-            restoredMeta.status = "error";
-            restoredMeta.error = "生成已中断";
-          }
+          // 删除时仍在生成中的节点，恢复时按 def 归一为终态——后台任务已
+          // 随删除取消，留着 generating 会让节点永远转圈（gen_image 归一
+          // 为 error「生成已中断」）。
+          const restoredMeta =
+            NODE_DEFS[node.type].normalizeRestored?.({ ...node.metadata }) ?? { ...node.metadata };
           const created = await store.getState().createNode({
             canvasId,
             nodeType: node.type,
@@ -896,7 +888,10 @@ export default function FreeCanvas({ canvasId }: { canvasId: string }) {
         const nodeEl = port.closest(".pc-node");
         const key = nodeEl?.getAttribute("data-key") ?? "";
         const node = nodesRef.current.find((n) => n.id === key);
-        if (node && PORT_DEFS[node.type].out !== null || node) {
+        // 所有注册节点都参与连线（note 的 out 为 null 也不可连——按下即
+        // 摘线/反拖路径自身按口元数据处理）。原式 `node && …out !== null
+        // || node` 因运算符优先级恒等于下式，予以化简（行为不变）。
+        if (node) {
           const dir = port.dataset.port === "in" ? "in" : "out";
           const portId = port.dataset.portId ?? "";
           if (dir === "in" && portId) {
@@ -1619,12 +1614,6 @@ export default function FreeCanvas({ canvasId }: { canvasId: string }) {
 
   // ── 生图（图像生成节点）：参数编辑、生成、主图切换 ─────────
 
-  const commitContent = (node: CanvasNode, content: string) => {
-    if (node.metadata.kind !== "load_text" && node.metadata.kind !== "note") return;
-    const meta = { ...node.metadata, content } as CanvasNode["metadata"];
-    void store.getState().updateNode(node.id, { metadata: JSON.stringify(meta) });
-  };
-
   // ── 空画布示意（方案 3.6）：一键创建 文本→图像生成→预览 工作流 ──
 
   const seedTemplate = useCallback(async () => {
@@ -1694,19 +1683,13 @@ export default function FreeCanvas({ canvasId }: { canvasId: string }) {
       const targetNodeEl = hitEl?.closest(".pc-node[data-key]");
       const targetId = targetNodeEl?.getAttribute("data-key") ?? "";
       const targetNode = nodesRef.current.find((n) => n.id === targetId);
-      const targetIsVideoTool = targetNode ? isVideoToolType(targetNode.type) : false;
-      if (
-        targetNode &&
-        (targetIsVideoTool ||
-          targetNode.type === "load_image" ||
-          targetNode.type === "load_video" ||
-          targetNode.type === "load_audio")
-      ) {
+      // 命中节点是否接收拖入，查 def（dropAccept + 扩展名白名单 + 写回模式）。
+      if (targetNode && NODE_DEFS[targetNode.type].dropAccept) {
         const allowed = loadAllowedExts(targetNode.type);
         const match = paths.find((p) => allowed.includes(extOf(p)));
         if (match) {
           await invoke("canvas_authorize_media", { path: match }).catch(() => {});
-          if (targetIsVideoTool) {
+          if (NODE_DEFS[targetNode.type].applyMode === "video-tool") {
             await applyFrameVideo(targetNode.id, targetNode.type, match);
           } else {
             await store.getState().updateNode(targetNode.id, { resourcePath: match });
@@ -1715,19 +1698,13 @@ export default function FreeCanvas({ canvasId }: { canvasId: string }) {
         }
         return;
       }
-      // 空白：按扩展名分发到对应加载节点（图像/视频/音频，每文件一个，
-      // 错开 24px）；不认识的扩展名忽略。
+      // 空白：按扩展名分发到声明了 blankDropExtensions 的加载节点（图像/
+      // 视频/音频，每文件一个，错开 24px）；不认识的扩展名忽略。
       let offset = 0;
       const createdIds: string[] = [];
       for (const path of paths) {
         const ext = extOf(path);
-        const kind = IMAGE_EXTS.includes(ext)
-          ? "load_image"
-          : VIDEO_EXTS.includes(ext)
-            ? "load_video"
-            : AUDIO_EXTS.includes(ext)
-              ? "load_audio"
-              : null;
+        const kind = MENU_TYPE_ORDER.find((t) => NODE_DEFS[t].blankDropExtensions?.includes(ext)) ?? null;
         if (!kind) continue;
         try {
           await invoke("canvas_authorize_media", { path }).catch(() => {});
@@ -1784,8 +1761,11 @@ export default function FreeCanvas({ canvasId }: { canvasId: string }) {
 
   // ── 渲染 ───────────────────────────────────────────────────
 
-  /** 多选中的图像生成节点（批量生成队列；执行在 GenRuntimeProvider）。 */
-  const selectedGenIds = selKeys.filter((id) => nodes.find((n) => n.id === id)?.type === "gen_image");
+  /** 多选中的可批量生成节点（def.batchGenerate；执行在 GenRuntimeProvider）。 */
+  const selectedGenIds = selKeys.filter((id) => {
+    const n = nodes.find((m) => m.id === id);
+    return !!n && NODE_DEFS[n.type].batchGenerate === true;
+  });
 
   // 连线层（卡片之下）：按视口尺寸渲染 + 平移组换算世界坐标。
   const wiresVis = {
@@ -1928,78 +1908,20 @@ export default function FreeCanvas({ canvasId }: { canvasId: string }) {
             const size = nodeSize(node);
             // meta 提前捕获为 const：闭包（onClick/onBlur）拿不到属性
             // 链的判窄，const 变量的判窄可以跨闭包保留。
-            const meta = node.metadata;
-
-            if (node.type === "note") {
-              // 便签节点：标准头栏卡 + 琥珀内嵌便签体，双击进入编辑。
-              return (
-                <NodeShell
-                  key={node.id}
-                  def={NODE_DEFS[node.type]}
-                  node={node}
-                  selected={selected}
-                  pulsing={pulseKeys.includes(node.id)}
-                  size={size}
-                  onDelete={(id) => void deleteNodes([id])}
-                  toolsExtra={
-                    <NodeHint text={t("common.edit")}>
-                      <button
-                        type="button"
-                        onPointerDown={(e) => e.stopPropagation()}
-                        onClick={() => {
-                          if (meta.kind === "note") useNoteEditing.getState().start(node.id, meta.content);
-                        }}
-                      >
-                        {Icons.edit}
-                      </button>
-                    </NodeHint>
-                  }
-                >
-                  {editingNoteId === node.id ? (
-                    <textarea
-                      className="fc-note-input"
-                      autoFocus
-                      value={noteDraft}
-                      onChange={(event) => setNoteDraft(event.target.value)}
-                      onBlur={() => {
-                        if (meta.kind === "note") commitContent(node, noteDraft.trim());
-                        closeNoteEdit();
-                      }}
-                      onKeyDown={(event) => {
-                        if (event.key === "Escape") closeNoteEdit();
-                        if (event.key === "Enter" && !event.shiftKey) {
-                          event.preventDefault();
-                          event.currentTarget.blur();
-                        }
-                      }}
-                      onPointerDown={(event) => event.stopPropagation()}
-                    />
-                  ) : (
-                    <div className="fc-note-body">
-                      {meta.kind === "note" && meta.content ? meta.content : <i>{t("project.canvas.noteEmpty")}</i>}
-                    </div>
-                  )}
-                </NodeShell>
-              );
-            }
-
-            // ── 节点体（按类型）：已迁移家族走 def.Component（节点注册表
-            // 分发）；其余仍走旧条件链，阶段 4 逐族迁入后删除。 ──
-            let body: ReactNode = null;
-            const MigratedBody = NODE_DEFS[node.type].Component;
-            if (MigratedBody) {
-              body = (
-                <MigratedBody
-                  node={node}
-                  meta={meta}
-                  selected={selected}
-                  pulsing={pulseKeys.includes(node.id)}
-                  autoHeight={node.height == null}
-                  scale={view.scale}
-                  services={canvasServices}
-                />
-              );
-            }
+            // ── 节点体：全部 22 种类型经注册表 def.Component 分发（新增
+            // 节点 = 写一个 Body 模块 + def 登记，此处不再有类型分支）。──
+            const Body = NODE_DEFS[node.type].Component;
+            const body: ReactNode = (
+              <Body
+                node={node}
+                meta={node.metadata}
+                selected={selected}
+                pulsing={pulseKeys.includes(node.id)}
+                autoHeight={node.height == null}
+                scale={view.scale}
+                services={canvasServices}
+              />
+            );
 
             return (
               <NodeShell

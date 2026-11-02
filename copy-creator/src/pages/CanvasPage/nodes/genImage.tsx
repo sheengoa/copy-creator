@@ -29,5 +29,12 @@ export const genImageDef: NodeDefinition = {
     const sorted = [...from.metadata.images].sort((a, b) => (a.primary === b.primary ? 0 : a.primary ? -1 : 1));
     return { paths: sorted.map((img) => img.resource_path), text: "" };
   },
+  // 撤销恢复归一：删除时取消的后台生成，恢复时不再转圈（引擎 undo 调用）。
+  normalizeRestored: (meta) =>
+    meta.kind === "gen_image" && meta.status === "generating"
+      ? { ...meta, status: "error", error: "生成已中断" }
+      : meta,
+  // 批量生成队列白名单（多选 ≥2 出浮动条，GenRuntime 顺序执行）。
+  batchGenerate: true,
   Component: GenImageBody,
 };

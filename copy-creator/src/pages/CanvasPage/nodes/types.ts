@@ -1,4 +1,4 @@
-import type { ReactNode } from "react";
+import type { ComponentType, ReactNode } from "react";
 import type { CanvasConnection, CanvasNode, CanvasNodeType } from "../../../stores/canvasStore";
 
 // 节点基座契约（画布节点基座化 2026-11-03）：每个节点类型在 nodes/ 下的
@@ -100,6 +100,13 @@ export interface NodeDefinition {
   ready?(node: CanvasNode, connections: CanvasConnection[]): boolean;
   /** 双击节点动作（便签进编辑 / 预览图像开大图）；缺省无全局动作。 */
   onDoubleClick?(node: CanvasNode, services: NodeServices): void;
-  /** 内容层渲染（阶段 4 逐族迁入；缺省时 FreeCanvas 沿用旧条件链）。 */
-  Component?: (props: NodeProps) => ReactNode;
+  /** 撤销恢复钩子：删除时仍在进行的任务随删除取消，恢复时按 def 归一
+   *  状态（gen_image：generating → error「生成已中断」）。 */
+  normalizeRestored?(meta: CanvasNode["metadata"]): CanvasNode["metadata"];
+  /** 可被批量生成队列选中（gen 家族）。 */
+  batchGenerate?: boolean;
+  /** 工具条附加按钮（note 的 edit 钮），渲染在默认删除钮之前。 */
+  ToolsExtra?: ComponentType<{ node: CanvasNode }>;
+  /** 内容层渲染（基座化后全部 22 类型必填——Record 形状 + typecheck 守护）。 */
+  Component: (props: NodeProps) => ReactNode;
 }
