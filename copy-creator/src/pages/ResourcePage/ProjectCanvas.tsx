@@ -20,26 +20,20 @@ import { openResourceFile } from "../../domain/mediaAssets";
 import {
   characterAvatarInitial,
   characterAvatarPaletteIndex,
-  intExtLabelKey,
   joinLibraryPath,
-  locationSubtitleParts,
   promptCategoryKey,
   scriptFileLabel,
-  timeHintLabelKey,
 } from "../../domain/projectView";
 
 import {
   allAssetsOf,
   buildLayout,
   portRatio,
-  shotCardSize,
   wirePathD,
   CARD_GAP,
   CARD_W,
-  FRAME_MIN_H,
   FRAME_MIN_W,
   FRAME_PAD_TOP,
-  FRAME_PAD_BOTTOM,
   FRAME_PAD_X,
   WORLD_MARGIN,
   INFO_H,
@@ -82,6 +76,7 @@ import { NODE_ACCENTS, PORT_COLORS, REF_ACCEPTS, WIRE_TYPE_COLORS, ADDNODE_OUT_T
 import { TextPaperBody } from "./ProjectCanvas/TextPaperBody";
 import { useCanvasGestures } from "./ProjectCanvas/engine/useGestures";
 import { MiniMap, ZoomBar } from "./ProjectCanvas/layers/chrome";
+import { SceneFrames } from "./ProjectCanvas/layers/SceneFrames";
 
 // ── 模块层已拆出 ProjectCanvas/（types/layout/colors/TextPaperBody，
 //    2026-11-03 引擎拆分阶段 11a；下方为组件体）──
@@ -2769,88 +2764,15 @@ export default function ProjectCanvas({
           className="pc-world"
           style={{ transform: `translate(${view.x}px, ${view.y}px) scale(${view.scale})` }}
         >
-          {/* 场景分组框 + 集级框 + 资料框 */}
-          {scenes.map((scene, sceneIndex) => {
-            const spos = scenePos[scene.id] ?? layout.framePos[scene.id] ?? { x: WORLD_MARGIN, y: 110 };
-            const sceneCards = layout.cards.filter((c) => c.sceneId === scene.id);
-            const frameW = Math.max(
-              FRAME_MIN_W,
-              ...sceneCards.map((c) => {
-                const p = pos.cards[c.shot.id] ?? { x: spos.x + FRAME_PAD_X, y: spos.y };
-                const size = shotCardSize(c.shot);
-                return p.x - spos.x + size.w + FRAME_PAD_X;
-              }),
-            );
-            const frameH = Math.max(
-              FRAME_MIN_H,
-              ...sceneCards.map((c) => {
-                const p = pos.cards[c.shot.id] ?? { x: spos.x, y: spos.y };
-                const size = shotCardSize(c.shot);
-                return p.y - spos.y + size.h + FRAME_PAD_BOTTOM;
-              }),
-            );
-            const assetsCount = scene.shots.reduce((acc, s) => acc + s.assets.length, 0);
-            return (
-              <div
-                key={scene.id}
-                data-frame={scene.id}
-                className="pc-frame"
-                style={{ left: spos.x, top: spos.y, width: frameW, height: frameH }}
-              >
-                <div className="pc-frame-label">
-                  <small className="pc-frame-no">
-                    {t("project.canvas.sceneNo", { no: sceneIndex + 1 })}
-                  </small>
-                  <span className="pc-frame-name">
-                    {scene.heading || t("project.scene.untitled")}
-                  </span>
-                  {scene.location && (
-                    <span className="pc-int" title={scene.location.name}>
-                      {Icons.resources}
-                      {scene.location.name}
-                      {locationSubtitleParts(scene.location.int_ext, scene.location.time_hint).length > 0 && (
-                        <em>
-                          {locationSubtitleParts(scene.location.int_ext, scene.location.time_hint)
-                            .map((part) =>
-                              t(
-                                part === scene.location?.int_ext
-                                  ? intExtLabelKey(part)
-                                  : timeHintLabelKey(part),
-                              ),
-                            )
-                            .join("/")}
-                        </em>
-                      )}
-                    </span>
-                  )}
-                  <small>
-                    {t("project.canvas.frameStats", { shots: scene.shots.length, assets: assetsCount })}
-                  </small>
-                  <span className="pc-frame-ops">
-                    <button
-                      type="button"
-                      data-tooltip={t("common.edit")}
-                      onClick={() =>
-                        setSceneForm({ id: scene.id, heading: scene.heading, locationId: scene.location_id })
-                      }
-                    >
-                      {Icons.edit}
-                    </button>
-                    <button
-                      type="button"
-                      data-tooltip={t("project.canvas.addShot")}
-                      onClick={() => setShotForm({ id: "", sceneId: scene.id, description: "", dialogue: "" })}
-                    >
-                      {Icons.add}
-                    </button>
-                    <button type="button" data-tooltip={t("common.delete")} onClick={() => setDeleteSceneTarget(scene)}>
-                      {Icons.delete}
-                    </button>
-                  </span>
-                </div>
-              </div>
-            );
-          })}
+          <SceneFrames
+            scenes={scenes}
+            scenePos={scenePos}
+            layout={layout}
+            pos={pos}
+            setSceneForm={setSceneForm}
+            setShotForm={setShotForm}
+            setDeleteSceneTarget={setDeleteSceneTarget}
+          />
 
           {/* 连线层（卡片之下）。按视口尺寸渲染 + 平移组换算世界坐标，
               不再铺世界范围的巨型图层（部分 WebView2 GPU 栅格化超限时
