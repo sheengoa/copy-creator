@@ -27,6 +27,7 @@ export function MediaPlayback({
   kind,
   path,
   autoPlay = false,
+  ratioFit = false,
   mediaRefCallback,
   onTimeUpdate,
 }: {
@@ -36,6 +37,12 @@ export function MediaPlayback({
    *  画布——都不得未经点击开播，默认 false 令全部接入点安全；保存盒/
    *  监视器/试听条此前的显式 false 已是冗余）。播放只由点击触发。 */
   autoPlay?: boolean;
+  /** 视频比例贴合（画布节点预览用）：加载后读真实宽高，把画面元素宽度
+   *  收敛到「容器宽与 330px 高帽按比例换算的较小值」并锁定 aspect-ratio
+   *  ——元素盒恒等于视频盒，object-fit: contain 不再产生黑边，任意
+   *  横/竖/方屏都完整展示视频比例。默认关（监视器等自行控制比例的
+   *  场景不受影响）。 */
+  ratioFit?: boolean;
   /** 媒体元素引用回调：调用方程序化 seek（视频工具播放头同步）时需要。 */
   mediaRefCallback?: (el: HTMLVideoElement | HTMLAudioElement | null) => void;
   /** 播放时刻回调：播放条拖动/走带时回写外部状态（选区循环钳制等）。 */
@@ -48,6 +55,9 @@ export function MediaPlayback({
   const [openFailed, setOpenFailed] = useState(false);
   const [pos, setPos] = useState({ t: 0, dur: 0, playing: false });
   const [blocked, setBlocked] = useState(false);
+  // 视频真实宽高（ratioFit 用）：loadedmetadata 实测，宽高为 0（未就绪/
+  // 音频流）时不干预布局。
+  const [ratio, setRatio] = useState<{ w: number; h: number } | null>(null);
   // 音量走 state：直接改元素的 muted/volume 不触发重渲染，图标与滑条
   // 填充就不会更新。mute 与拖动都经这里统一应用。
   const [vol, setVol] = useState({ v: 1, muted: false });
@@ -60,6 +70,7 @@ export function MediaPlayback({
     setBlocked(false);
     setPos({ t: 0, dur: 0, playing: false });
     setVol({ v: 1, muted: false });
+    setRatio(null);
     resolveResourceMediaUrl(path)
       .then((u) => {
         if (alive) setUrl(u);
@@ -158,10 +169,23 @@ export function MediaPlayback({
   const dur = pos.dur > 0 ? pos.dur : 0;
   const pct = dur > 0 ? Math.min(100, (pos.t / dur) * 100) : 0;
 
+  const ratioStyle =
+    ratioFit && ratio && ratio.w > 0 && ratio.h > 0
+      ? {
+          // 宽度 = 容器宽与「330px 高帽 × 比例」的较小者：横屏吃满容器
+          // 宽，竖/方屏按高度帽收敛居中；aspect-ratio 锁定后高度随之
+          // ≤330，元素盒 = 视频盒，contain 不再出黑边。
+          width: `min(100%, ${Math.round(330 * (ratio.w / ratio.h))}px)`,
+          aspectRatio: `${ratio.w} / ${ratio.h}`,
+          marginInline: "auto",
+        }
+      : undefined;
+
   const player = kind === "video" ? (
     <video
       ref={handleRef}
       className="media-playback-video"
+      style={ratioStyle}
       src={url || undefined}
       key={`video-${url}`}
       // 无 controls：控制全部走下方自绘播放条。
@@ -175,6 +199,7 @@ export function MediaPlayback({
       onLoadedMetadata={(e) => {
         const d = e.currentTarget.duration;
         setPos((prev) => ({ ...prev, dur: Number.isFinite(d) && d > 0 ? d : prev.dur }));
+        setRatio({ w: e.currentTarget.videoWidth, h: e.currentTarget.videoHeight });
         if (autoPlay) {
           const r = e.currentTarget.play();
           if (r) void r.catch(() => setBlocked(true));

@@ -28,7 +28,7 @@ export function PreviewMediaBody({ node, services }: NodeProps) {
           <div className="fc-node-placeholder">{t("canvas.waitingUpstream")}</div>
         )
       ) : kind === "video" ? (
-        path ? <MediaPlayback kind="video" path={path} /> : <div className="fc-node-placeholder">{t("canvas.waitingUpstream")}</div>
+        path ? <MediaPlayback kind="video" path={path} ratioFit /> : <div className="fc-node-placeholder">{t("canvas.waitingUpstream")}</div>
       ) : (
         path ? <MediaPlayback kind="audio" path={path} /> : <div className="fc-node-placeholder">{t("canvas.waitingUpstream")}</div>
       )}

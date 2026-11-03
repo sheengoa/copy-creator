@@ -46,7 +46,7 @@ export function CanvasMediaPlayer({ kind, path }: { kind: "video" | "audio"; pat
     };
   }, [path]);
   if (!absolute) return null;
-  return <MediaPlayback kind={kind} path={absolute} />;
+  return <MediaPlayback kind={kind} path={absolute} ratioFit={kind === "video"} />;
 }
 
 /** 保存节点产物的展示类型：随节点类型（save_image/save_video/save_audio），

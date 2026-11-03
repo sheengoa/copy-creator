@@ -21,7 +21,7 @@ export function LoadMediaBody({ node, services }: NodeProps) {
           {kind === "image" ? (
             <ResourceThumb path={node.resource_path} className="fc-media-box" />
           ) : (
-            <MediaPlayback kind={kind} path={node.resource_path} />
+            <MediaPlayback kind={kind} path={node.resource_path} ratioFit={kind === "video"} />
           )}
           {/* 悬浮右上角的圆形 ×：清除已选文件回到未加载态，不必删节点重来。 */}
           <NodeHint text={t("canvas.clearLoaded")}>
