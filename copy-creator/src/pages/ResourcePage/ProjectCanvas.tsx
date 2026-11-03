@@ -9,7 +9,6 @@ import {
   type ProjectAssetLink,
   type ProjectNodeLink,
   type ProjectScene,
-  type ProjectShot,
 } from "../../stores/projectStore";
 import { ConfirmDialog } from "../../components/ConfirmDialog";
 import ProjectFilePickerDialog from "./ProjectFilePickerDialog";
@@ -18,7 +17,7 @@ import ProjectLibraryPanel from "./ProjectLibraryPanel";
 import { ResourceFileImage, ResourceVideoPoster, ResourceImage } from "./ResourceMedia";
 import { Icons } from "../../components/Icons";
 import { resolveWireRelease } from "../../utils/projectWireRelease";
-import { openResourceFile, readResourceTextPreview } from "../../domain/mediaAssets";
+import { openResourceFile } from "../../domain/mediaAssets";
 import {
   characterAvatarInitial,
   characterAvatarPaletteIndex,
@@ -30,411 +29,65 @@ import {
   timeHintLabelKey,
 } from "../../domain/projectView";
 
-// ── 布局常量（世界像素） ──────────────────────────────────────
-const FRAME_MIN_W = 340;
-const FRAME_MIN_H = 260;
-const FRAME_PAD_X = 32;
-const FRAME_PAD_TOP = 60;
-const FRAME_PAD_BOTTOM = 32;
-const CARD_GAP = 24;
-const CARD_W = 268; // 镜头卡宽
-const CARD_HEAD_H = 44; // 卡头（镜头号 + 描述）
-const THUMB_W = 116; // 卡内素材缩略宽（两列）
-const THUMB_RATIO = 0.68;
-const THUMB_GAP = 8;
-const INFO_W = 132; // 资料卡宽（角色/道具/剧本）
-const INFO_H = 180; // 含标题条 + 接口行 + 预览卡（接口行内移后增高的估算值）
-const SCRIPT_W = 210;
-const WORLD_MARGIN = 60;
-/** 连线层视口外沿的世界余量（把可见区外一点的线也画进来，避免边缘裁切）。 */
-const WIRES_VIEWPORT_PAD = 64;
-const MINI_W = 150;
-const MINI_H = 96;
-const OUTPUT_W = 176; // 成片输出节点（每集工作流的总输出口）
-const OUTPUT_H = 72;
-const SEG_W = 208; // 片段节点（AI 分段生成的视频分段）
-const SEG_H = 108;
+import {
+  allAssetsOf,
+  buildLayout,
+  portRatio,
+  segHitsPolyline,
+  shotCardSize,
+  wirePathD,
+  CARD_GAP,
+  CARD_W,
+  FRAME_MIN_H,
+  FRAME_MIN_W,
+  FRAME_PAD_TOP,
+  FRAME_PAD_BOTTOM,
+  FRAME_PAD_X,
+  WORLD_MARGIN,
+  INFO_H,
+  INFO_W,
+  MINI_H,
+  MINI_W,
+  OUTPUT_H,
+  OUTPUT_W,
+  SCRIPT_W,
+  SEG_H,
+  SEG_W,
+  WIRES_VIEWPORT_PAD,
+} from "./ProjectCanvas/layout";
+import {
+  EMPTY_ENTITY_PHS,
+  EMPTY_INFO_GROUPS,
+  EMPTY_INFO_OFFSETS,
+  EMPTY_NODE_GROUPS,
+  EMPTY_NOTES,
+  EMPTY_PENDING_LINKS,
+  EMPTY_PROMPT_PHS,
+  EMPTY_SIZES,
+  EMPTY_SCRIPT_PHS,
+  parsePendingLinks,
+  parsePromptPhs,
+  parseScriptPhs,
+  type CanvasInfo,
+  type CanvasNote,
+  type EntityPh,
+  type EntityPhKind,
+  type InfoGroup,
+  type NodeGroup,
+  type PendingLink,
+  type Pos,
+  type PosMap,
+  type PromptPh,
+  type ScriptPh,
+  type WireBox,
+  type WireItem,
+} from "./ProjectCanvas/types";
+import { NODE_ACCENTS, PORT_COLORS, REF_ACCEPTS, WIRE_TYPE_COLORS, ADDNODE_OUT_TYPES } from "./ProjectCanvas/colors";
+import { TextPaperBody } from "./ProjectCanvas/TextPaperBody";
 
-type Pos = { x: number; y: number };
-type PosMap = { cards: Record<string, Pos>; info?: Pos };
+// ── 模块层已拆出 ProjectCanvas/（types/layout/colors/TextPaperBody，
+//    2026-11-03 引擎拆分阶段 11a；下方为组件体）──
 
-interface CardAsset {
-  asset: ProjectAsset;
-  w: number;
-  h: number;
-}
-
-/** 镜头卡（含素材网格）/ 散件 / 资料节点的统一渲染模型。 */
-interface CanvasCard {
-  key: string; // `shot:<id>`
-  shot: ProjectShot;
-  sceneId: string;
-  w: number;
-  h: number;
-  assets: CardAsset[];
-}
-interface CanvasInfo {
-  key: string; // `char:<id>` | `loc:<id>` | `prop:<id>` | `script`
-  kind: "character" | "location" | "prop" | "script";
-  name: string;
-  avatarPath: string; // 角色/场景参考图（相对库根）
-  textPath: string; // 剧本正文（相对库根）
-  w: number;
-  h: number;
-}
-
-/** 画布便签节点（ComfyUI Note 的对应物），按集存 localStorage。 */
-interface CanvasNote {
-  id: string;
-  text: string;
-  x: number;
-  y: number;
-}
-
-type EntityPhKind = "character" | "location" | "prop";
-/** 空白资料占位节点（角色/场景/道具未加载实体前的画布占位）。 */
-interface EntityPh { id: string; kind: EntityPhKind; x: number; y: number }
-
-/** 剧本纸片（多实例）：空纸片双击挂文件；本集无剧本时首个挂接转正为主剧本。 */
-interface ScriptPh { id: string; path: string }
-
-/** 提示词纸片（多实例）：空纸片双击从提示词库选一条，promptId 为空即未填充；
- *  出生点存 x/y（与空白资料占位一致），拖动后的位置走 infoOffsets。 */
-interface PromptPh { id: string; promptId: string; x: number; y: number }
-
-/** 资料组节点：一个节点装多个同类实体，一条线接入片段。 */
-interface InfoGroup {
-  id: string;
-  kind: EntityPhKind;
-  members: string[];
-}
-
-/** 占位节点/剧本纸片连到片段口的暂存线（画布层，localStorage 按集）。 */
-interface PendingLink { fromKey: string; toSegmentId: string; toPort: string }
-
-/** 节点分组（Ctrl+G，ComfyUI Group 的对应物）。 */
-interface NodeGroup { id: string; label: string; members: string[] }
-
-// usePerEpisodeStorage 的 fallback/parse 会进 effect 依赖，必须是模块级
-// 常量/纯函数（引用稳定），故统一定义在此。
-const EMPTY_NOTES: CanvasNote[] = [];
-const EMPTY_SCRIPT_PHS: ScriptPh[] = [];
-const EMPTY_PROMPT_PHS: PromptPh[] = [];
-const EMPTY_ENTITY_PHS: EntityPh[] = [];
-const EMPTY_INFO_GROUPS: InfoGroup[] = [];
-const EMPTY_SIZES: Record<string, { w: number; h: number }> = {};
-const EMPTY_INFO_OFFSETS: Record<string, Pos> = {};
-const EMPTY_PENDING_LINKS: PendingLink[] = [];
-const EMPTY_NODE_GROUPS: NodeGroup[] = [];
-// 剧本纸片做形状防御：历史脏数据（非数组/缺字段）不进画布，直接回退空。
-const parseScriptPhs = (raw: string): ScriptPh[] => {
-  const list = JSON.parse(raw) as ScriptPh[];
-  return Array.isArray(list) ? list.filter((item) => item && typeof item.id === "string") : [];
-};
-// 提示词纸片同款形状防御。
-const parsePromptPhs = (raw: string): PromptPh[] => {
-  const list = JSON.parse(raw) as PromptPh[];
-  return Array.isArray(list) ? list.filter((item) => item && typeof item.id === "string") : [];
-};
-// 素材占位节点已整体移除：加载暂存线时顺手过滤历史遗留的占位来源，
-// 画布层不再出现该类线（存储直清见组件内的存量清理 effect）。
-const parsePendingLinks = (raw: string): PendingLink[] => {
-  const parsed = JSON.parse(raw) as PendingLink[];
-  return Array.isArray(parsed)
-    ? parsed.filter((l) => l && typeof l.fromKey === "string" && !l.fromKey.startsWith("placeholder:"))
-    : [];
-};
-// 线段相交（同横坐标单调判定，经典叉积法）——切线的扫过判定用。
-const segsIntersect = (
-  a1: { x: number; y: number }, a2: { x: number; y: number },
-  b1: { x: number; y: number }, b2: { x: number; y: number },
-): boolean => {
-  const d = (b1.x - a1.x) * (a2.y - a1.y) - (b1.y - a1.y) * (a2.x - a1.x);
-  const e = (b2.x - a1.x) * (a2.y - a1.y) - (b2.y - a1.y) * (a2.x - a1.x);
-  const f = (b2.x - b1.x) * (a2.y - a1.y) - (b2.y - b1.y) * (a2.x - a1.x);
-  const g = (a1.x - b1.x) * (b2.y - b1.y) - (a1.y - b1.y) * (b2.x - b1.x);
-  return d * e < 0 && f * g < 0;
-};
-// 轨迹段到点的最短距离（刀刃擦过采样点也算切到）。
-const distToSeg = (
-  p: { x: number; y: number },
-  a1: { x: number; y: number }, a2: { x: number; y: number },
-): number => {
-  const dx = a2.x - a1.x;
-  const dy = a2.y - a1.y;
-  const len2 = dx * dx + dy * dy;
-  const t = len2 === 0 ? 0 : Math.max(0, Math.min(1, ((p.x - a1.x) * dx + (p.y - a1.y) * dy) / len2));
-  const ex = p.x - (a1.x + t * dx);
-  const ey = p.y - (a1.y + t * dy);
-  return Math.hypot(ex, ey);
-};
-// 切割线段是否命中折线（连线按贝塞尔采样后的屏幕坐标点列）。
-// 叉积法对「恰好穿过采样顶点」的零面积相交会漏判，补 2px 触碰判定：
-// 刀刃扫到即断，符合 knife 手势直觉。
-const CUT_TOUCH_PX = 2;
-const segHitsPolyline = (
-  a1: { x: number; y: number }, a2: { x: number; y: number },
-  pts: { x: number; y: number }[],
-): boolean => {
-  for (let i = 0; i < pts.length; i++) {
-    if (distToSeg(pts[i], a1, a2) < CUT_TOUCH_PX) return true;
-  }
-  for (let i = 1; i < pts.length; i++) {
-    if (segsIntersect(a1, a2, pts[i - 1], pts[i])) return true;
-  }
-  return false;
-};
-interface CanvasFrame {
-  id: string; // sceneId | "info"
-  scene: ProjectScene | null;
-  label: string;
-  w: number;
-  h: number;
-}
-
-interface CanvasLayout {
-  cards: CanvasCard[];
-  infos: CanvasInfo[];
-  frames: CanvasFrame[];
-  cardPos: Record<string, Pos>;
-  /** 场景框默认位置（顺序累计排布），未摆放过场景时使用。 */
-  framePos: Record<string, Pos>;
-  infoFramePos: Pos;
-  worldW: number;
-  worldH: number;
-}
-
-interface WireBox extends Pos {
-  w: number;
-  h: number;
-}
-
-/** ComfyUI 风格连线：直接接收两端端口点（输出在节点右缘、输入在左缘），
- *  控制点沿水平方向延伸两点距离的 1/4，任意角度都是平滑弯出的贝塞尔，
- *  不存在直线或拐角形态。 */
-function wirePathD(a: { x: number; y: number }, b: { x: number; y: number }): string {
-  const offset = Math.hypot(b.x - a.x, b.y - a.y) * 0.25;
-  return `M ${a.x} ${a.y} C ${a.x + offset} ${a.y}, ${b.x - offset} ${b.y}, ${b.x} ${b.y}`;
-}
-
-/** 输入端口列的垂直比例：第 i 口（0 起）位于节点高度的 (i+1)/(n+1) 处
- *  （ComfyUI 槽位分布），单口即中点。 */
-function portRatio(index: number, count: number): number {
-  return (index + 1) / (count + 1);
-}
-
-/** 镜头卡尺寸：卡头 + 素材两列网格（空镜头为挂靠占位高度）。 */
-function shotCardSize(shot: ProjectShot): { w: number; h: number } {
-  const rows = Math.ceil(shot.assets.length / 2);
-  const gridH = shot.assets.length
-    ? rows * (THUMB_W * THUMB_RATIO + THUMB_GAP) + 10
-    : 64;
-  return { w: CARD_W, h: CARD_HEAD_H + gridH };
-}
-
-/** 确定性自动布局：已摆放的镜头卡/散件用存储坐标；未摆放的按场景
- *  横排 + 框内网格补位（跳过已占用格位，避免新卡叠在旧卡下）。 */
-function buildLayout(
-  scenes: ProjectScene[],
-): Omit<CanvasLayout, "infoFramePos"> {
-  const cardPos: Record<string, Pos> = {};
-  const cards: CanvasCard[] = [];
-  const frames: CanvasFrame[] = [];
-  // 世界宽度基线 1500：默认模板的片段占位横排（约 1000 宽）+ 片段列 +
-  // 成片节点都要落在正坐标内，首开视口即完整可见。
-  let worldW = 1500;
-  let worldH = 900;
-  // 场景框默认位置：按上一帧右缘顺序累计（固定间距会让变宽的框互相
-  // 重叠）；用户摆过的场景用存储坐标，但游标仍吸收其占位。
-  const framePos: Record<string, Pos> = {};
-  let sceneCursorX = WORLD_MARGIN;
-
-  scenes.forEach((scene) => {
-    const fx = scene.canvas_x ?? sceneCursorX;
-    const fy = scene.canvas_y ?? 110;
-    const sceneCards: CanvasCard[] = [];
-    const occupied = new Set<string>(); // 已摆放卡占用的网格格位
-    const CELL_W = CARD_W + CARD_GAP;
-    const cellKey = (col: number, row: number) => `${col}:${row}`;
-
-    scene.shots.forEach((shot) => {
-      const size = shotCardSize(shot);
-      const fixed =
-        shot.canvas_x != null && shot.canvas_y != null
-          ? { x: shot.canvas_x, y: shot.canvas_y }
-          : null;
-      if (fixed) {
-        cardPos[shot.id] = fixed;
-        // 反推占用格位（以框原点为网格原点）。
-        const col = Math.round((fixed.x - fx - FRAME_PAD_X) / CELL_W);
-        const row = Math.round((fixed.y - fy - FRAME_PAD_TOP) / CELL_W);
-        for (let dc = -1; dc <= 1; dc++) {
-          for (let dr = -1; dr <= 1; dr++) occupied.add(cellKey(col + dc, row + dr));
-        }
-      }
-      const assets: CardAsset[] = shot.assets.map((asset) => {
-        const w = THUMB_W;
-        return { asset, w, h: Math.round(w * THUMB_RATIO) };
-      });
-      sceneCards.push({ key: `shot:${shot.id}`, shot, sceneId: scene.id, w: size.w, h: size.h, assets });
-    });
-
-    // 未摆放卡按网格找空位（3 列，跳过占用）。
-    let col = 0;
-    let row = 0;
-    sceneCards.forEach((card) => {
-      if (cardPos[card.shot.id]) return;
-      while (occupied.has(cellKey(col, row))) {
-        col += 1;
-        if (col === 3) {
-          col = 0;
-          row += 1;
-        }
-      }
-      cardPos[card.shot.id] = { x: fx + FRAME_PAD_X + col * CELL_W, y: fy + FRAME_PAD_TOP + row * CELL_W };
-      occupied.add(cellKey(col, row));
-      const colNext = col + 1;
-      if (colNext === 3) {
-        col = 0;
-        row += 1;
-      } else {
-        col = colNext;
-      }
-    });
-
-    sceneCards.forEach((card) => {
-      const pos = cardPos[card.shot.id];
-      card.w = CARD_W;
-      card.h = shotCardSize(card.shot).h;
-      void pos;
-    });
-    cards.push(...sceneCards);
-
-    const maxX = Math.max(
-      fx + FRAME_MIN_W,
-      ...sceneCards.map((c) => cardPos[c.shot.id].x + c.w),
-    );
-    const maxY = Math.max(
-      fy + FRAME_MIN_H,
-      ...sceneCards.map((c) => cardPos[c.shot.id].y + c.h),
-    );
-    frames.push({
-      id: scene.id, scene, label: scene.heading || "",
-      w: maxX - fx, h: maxY - fy,
-    });
-    framePos[scene.id] = { x: fx, y: fy };
-    sceneCursorX = Math.max(sceneCursorX, maxX + 80);
-    worldW = Math.max(worldW, maxX + 60);
-    worldH = Math.max(worldH, maxY + 60);
-  });
-
-  // 集级散件已不再上画布（素材节点整体移除）：场景框之外只有资料框与
-  // 片段列，世界尺寸按场景框推导。
-  let scenesMaxY = 0;
-  scenes.forEach((scene) => {
-    const fy = scene.canvas_y ?? 110;
-    const frame = frames.find((f) => f.id === scene.id);
-    scenesMaxY = Math.max(scenesMaxY, fy + (frame?.h ?? 0));
-  });
-  worldW = Math.max(worldW, WORLD_MARGIN + 60);
-  worldH = Math.max(worldH, scenesMaxY + 60);
-
-  return { cards, infos: [], frames, cardPos, framePos, worldW, worldH };
-}
-
-/** 文本纸片内容（读资源文本头部，组件内自持请求）。 */
-function TextPaperBody({ path, name, lines, adaptive = false }: { path: string; name: string; lines?: number; adaptive?: boolean }) {
-  const [preview, setPreview] = useState<string | null>(null);
-  useEffect(() => {
-    let cancelled = false;
-    readResourceTextPreview(path)
-      .then((result) => {
-        if (!cancelled) setPreview(result.content);
-      })
-      .catch(() => {
-        if (!cancelled) setPreview("");
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [path]);
-  return (
-    <div className="pc-paper">
-      <h5>
-        {Icons.file}
-        <span>{name}</span>
-      </h5>
-      <p style={lines && !adaptive ? { WebkitLineClamp: lines } : undefined}>{preview === null ? "…" : preview}</p>
-    </div>
-  );
-}
-
-interface WireItem {
-  fromKey: string; // 容器 key：shot:<id>
-  toKey: string;
-  kind: "gen" | "manual";
-  type: string; // 线上流动的数据类型 = 来源素材的 kind
-}
-
-/** 连线数据类型色（ComfyUI 每类型一色的惯例）。 */
-const WIRE_TYPE_COLORS: Record<string, string> = {
-  image: "#4ade80",
-  video: "#a78bfa",
-  text: "#fb923c",
-  prompt: "#22d3ee",
-  audio: "#facc15",
-  file: "#94a3b8",
-};
-
-/** 节点类型色（标题条与类型名用，向 ComfyUI 的彩色节点语言对齐）。 */
-const NODE_ACCENTS: Record<string, string> = {
-  shot: "#60a5fa",
-  segment: "#a78bfa",
-  output: "#c084fc",
-  character: "#f472b6",
-  location: "#34d399",
-  prop: "#fbbf24",
-  script: "#fb923c",
-  prompt: "#22d3ee",
-  note: "#f6e6a8",
-  image: "#4ade80",
-  video: "#a78bfa",
-  text: "#fb923c",
-  audio: "#facc15",
-  file: "#94a3b8",
-};
-
-/** 参考类输入口可接的数据类型（图/视频/文本/提示词）。 */
-const REF_ACCEPTS = ["image", "video", "text", "prompt"];
-
-/** 摘线到空白建节点：菜单项建出的新源输出口类型。摘线菜单按原口
- *  兼容过滤时用（不接线原样放回的剧本纸片/关联场景/便签与走「换
- *  目标」同名口的片段不在表内，任何来源都可选）。 */
-const ADDNODE_OUT_TYPES: Record<string, string> = {
-  character: "image",
-  location: "image",
-  prop: "image",
-  prompt: "prompt",
-};
-
-/** 片段输入口专属色：每口一色，与对应节点类型色一致，一眼分辨谁是谁；
- *  「其他」口不限类型，用中性灰。未命中的口（镜头/成片/素材的通用口）
- *  回退连线类型色。 */
-const PORT_COLORS: Record<string, string> = {
-  character: "#f472b6",
-  location: "#34d399",
-  prop: "#fbbf24",
-  prompt: "#22d3ee",
-  script: "#fb923c",
-  other: "#94a3b8",
-};
-
-/** 本集镜头挂靠的全部素材（散件不上画布，仅用于成片来源显示等回退）。 */
-function allAssetsOf(scenes: ProjectScene[]): ProjectAsset[] {
-  const list: ProjectAsset[] = [];
-  scenes.forEach((scene) => scene.shots.forEach((shot) => list.push(...shot.assets)));
-  return list;
-}
 
 /** 工程画布：集素材的无限画布（看/摆/连）。镜头卡与散件坐标持久化进
  *  工程库；资料框（出场角色/出镜道具/剧本）与视口按集记 localStorage。
