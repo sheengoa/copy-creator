@@ -625,4 +625,59 @@ describe("架构守卫：领域规则必须全局共享", () => {
       "确认弹窗主句必须是单句问句：补充细节拆到同名 *ConfirmHint 键，经 ConfirmDialog 的 hint 小字展示（components/ui/README.md「确认弹窗」）",
     ).toEqual([]);
   });
+
+  it("规则 27：画布域源文件行数上限 1000（防大文件回潮）", () => {
+    // 画布域全套：页面组合层、节点基座、引擎 hooks、渲染 layers、样式
+    // 切片与测试。上限 1000 为硬上限（目标 700-800）；新增例外必须修改
+    // 本清单（= 强制过评审）。useGestures 是窗口级手势单 effect（fork 自
+    // ProjectCanvas 单体的对齐区），重拆会破坏回灌对照，显式豁免并在
+    // 文件头注明。
+    const limits: Array<[string, number]> = [
+      ["src/pages/CanvasPage", 1000],
+      ["src/pages/ResourcePage/ProjectCanvas", 1000],
+      ["src/styles/canvas", 1000],
+      ["src/styles/project", 1000],
+      ["src/dev/mock", 1000],
+      ["src/dev/tauriMock.ts", 1000],
+    ];
+    const exempt = (posix: string) =>
+      posix.endsWith("src/pages/ResourcePage/ProjectCanvas/engine/useGestures.ts");
+    const offenders: string[] = [];
+    const walk = (dir: string, limit: number) => {
+      const full = join(frontRoot, dir);
+      let entries: string[] = [];
+      try {
+        entries = readdirSync(full);
+      } catch {
+        return;
+      }
+      for (const entry of entries) {
+        const rel = `${dir}/${entry}`;
+        const abs = join(frontRoot, rel);
+        if (statSync(abs).isDirectory()) {
+          walk(rel, limit);
+          continue;
+        }
+        const isStyle = entry.endsWith(".css");
+        const isTest = entry.endsWith(".test.ts") || entry.endsWith(".test.tsx");
+        if (!entry.endsWith(".ts") && !entry.endsWith(".tsx") && !isStyle) continue;
+        if (isTest) continue;
+        const posix = toPosix(abs);
+        if (exempt(posix)) continue;
+        const lines = readFileSync(abs, "utf8").split("\n").length;
+        if (lines > limit) offenders.push(`${rel} = ${lines} 行`);
+      }
+    };
+    for (const [dir, limit] of limits) walk(dir, limit);
+    // Rust 画布域
+    for (const rel of ["src-tauri/src/ai/mod.rs", "src-tauri/src/db/canvas/mod.rs", "src-tauri/src/db/canvas/meta.rs", "src-tauri/src/db/canvas/store.rs"]) {
+      try {
+        const lines = readFileSync(join(repoRoot, "copy-creator", rel), "utf8").split("\n").length;
+        if (lines > 1000) offenders.push(`${rel} = ${lines} 行`);
+      } catch {
+        // 前端仓单独检出时跳过。
+      }
+    }
+    expect(offenders, "画布域文件不得超过 1000 行（拆分目标 700-800）：超限文件继续按既有模式拆 engine/layers 子模块").toEqual([]);
+  });
 });
