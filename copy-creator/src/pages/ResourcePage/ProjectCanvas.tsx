@@ -14,7 +14,7 @@ import { ConfirmDialog } from "../../components/ConfirmDialog";
 import ProjectFilePickerDialog from "./ProjectFilePickerDialog";
 import ProjectNodeDetailDialog, { type NodeDetailEntry } from "./ProjectNodeDetailDialog";
 import ProjectLibraryPanel from "./ProjectLibraryPanel";
-import { ResourceFileImage, ResourceVideoPoster, ResourceImage } from "./ResourceMedia";
+import { ResourceVideoPoster, ResourceImage } from "./ResourceMedia";
 import { Icons } from "../../components/Icons";
 import { openResourceFile } from "../../domain/mediaAssets";
 import {
@@ -77,6 +77,7 @@ import { useCanvasGestures } from "./ProjectCanvas/engine/useGestures";
 import { MiniMap, ZoomBar } from "./ProjectCanvas/layers/chrome";
 import { SceneFrames } from "./ProjectCanvas/layers/SceneFrames";
 import { WiresLayer } from "./ProjectCanvas/layers/WiresLayer";
+import { ShotCards } from "./ProjectCanvas/layers/ShotCards";
 
 // ── 模块层已拆出 ProjectCanvas/（types/layout/colors/TextPaperBody，
 //    2026-11-03 引擎拆分阶段 11a；下方为组件体）──
@@ -2789,115 +2790,20 @@ export default function ProjectCanvas({
             portsOf={portsOf}
             nodeWireColorOf={nodeWireColorOf}
           />
-          {/* 镜头卡 */}
-          {layout.cards.map((card) => {
-            const p = pos.cards[card.shot.id] ?? { x: 0, y: 0 };
-            const selected = selKeys.includes(card.key);
-            const shot = card.shot;
-            const cardSize = sizeOfNode(card.key);
-            const resized = Boolean(nodeSizes[card.key]);
-            return (
-              <div
-                key={card.key}
-                data-key={card.key}
-                data-frame={card.sceneId}
-                className={`pc-node pc-shotcard${resized ? " pc-resized" : ""}${selected ? " pc-selected" : ""}`}
-                style={{
-                  left: p.x, top: p.y,
-                  width: cardSize?.w ?? card.w,
-                  height: resized ? cardSize?.h : undefined,
-                  // 覆盖高度作 minHeight：内容不足时留白，内容超出时撑开。
-                  minHeight: resized ? undefined : cardSize && cardSize.h !== card.h ? cardSize.h : undefined,
-                  ["--node-accent" as string]: NODE_ACCENTS.shot,
-                } as React.CSSProperties}
-              >
-                <div className="pc-shot-head">
-                  <span className="pc-shot-no">{shotNoOf(card.sceneId, card.shot.id)}</span>
-                  <b className="pc-shot-desc">{shot.description || t("project.shot.untitled")}</b>
-                  {shot.dialogue && <i className="pc-shot-dialogue">{shot.dialogue}</i>}
-                </div>
-                {portBar(card.key)}
-                  {shot.assets.length > 0 ? (
-                    <div className="pc-shot-grid">
-                      {card.assets.map(({ asset, w, h }) => {
-                        const mediaPath = joinLibraryPath(libraryRoot, asset.file_path);
-                        return (
-                          <button
-                            key={asset.id}
-                            type="button"
-                            className={`pc-shot-asset-thumb${asset.missing ? " is-missing" : ""}`}
-                            data-asset={asset.id}
-                            style={resized ? undefined : { width: w, height: h }}
-                            title={asset.missing ? `${t("project.asset.fileMissing")} · ${asset.file_path}` : asset.name}
-                          >
-                            {asset.missing ? (
-                              <span className="pc-thumb-miss">
-                                {Icons.image}
-                                {t("project.asset.fileMissing")}
-                              </span>
-                            ) : asset.kind === "image" ? (
-                              <ResourceFileImage
-                                path={mediaPath}
-                                alt={asset.name}
-                                version={asset.updated_at}
-                                className="pc-thumb-img"
-                              />
-                            ) : asset.kind === "video" ? (
-                              <>
-                                <ResourceVideoPoster
-                                  path={mediaPath}
-                                  version={asset.updated_at}
-                                  fallbackLabel={asset.name || asset.file_path}
-                                />
-                                <span className="pc-thumb-play">{Icons.play}</span>
-                              </>
-                            ) : asset.kind === "text" ? (
-                              <span className="pc-thumb-text">
-                                {Icons.file}
-                                {asset.name || asset.file_path}
-                              </span>
-                            ) : (
-                              <span className="pc-thumb-text">
-                                {Icons.file}
-                                {asset.name || asset.file_path}
-                              </span>
-                            )}
-                          </button>
-                        );
-                      })}
-                    </div>
-                  ) : (
-                    <div className="pc-shot-empty">
-                      {Icons.link}
-                      {t("project.canvas.shotEmpty")}
-                    </div>
-                  )}
-                <span className="pc-node-tools">
-                  <button type="button" data-tooltip={t("project.asset.link")} onClick={() => onPickForShot(shot.id)}>
-                    {Icons.file}
-                  </button>
-                  <button
-                    type="button"
-                    data-tooltip={t("common.edit")}
-                    onClick={() =>
-                      setShotForm({ id: shot.id, sceneId: shot.scene_id, description: shot.description, dialogue: shot.dialogue })
-                    }
-                  >
-                    {Icons.edit}
-                  </button>
-                  <button
-                    type="button"
-                    data-tooltip={t("common.delete")}
-                    className="danger"
-                    onClick={() => void deleteShot(shot.id)}
-                  >
-                    {Icons.delete}
-                  </button>
-                </span>
-                {resizeHandle}
-              </div>
-            );
-          })}
+          <ShotCards
+            cards={layout.cards}
+            pos={pos}
+            selKeys={selKeys}
+            nodeSizes={nodeSizes}
+            sizeOfNode={sizeOfNode}
+            shotNoOf={shotNoOf}
+            portBar={portBar}
+            resizeHandle={resizeHandle}
+            libraryRoot={libraryRoot}
+            onPickForShot={onPickForShot}
+            setShotForm={setShotForm}
+            deleteShot={deleteShot}
+          />
 
           {/* 节点分组框（Ctrl+G）：框自适应成员包围盒，渲染在节点层之下；
               拖标题条整组移动（复用组拖管线），组员被删后框随之收缩。 */}
