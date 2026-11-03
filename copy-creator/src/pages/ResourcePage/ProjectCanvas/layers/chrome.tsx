@@ -134,7 +134,7 @@ export function MiniMap({
       fill="rgba(127,127,140,.1)"
       stroke="var(--text-primary)"
       strokeWidth="1.2"
-      rx="2"
+      rx="4"
     />
   </svg>
 </div>

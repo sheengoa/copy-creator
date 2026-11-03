@@ -640,7 +640,9 @@
 }
 .pc-zoombar .pc-sep { width: 1px; height: 16px; background: var(--separator); margin: 0 3px; }
 .pc-minimap { bottom: 58px; right: 16px; padding: 5px; cursor: crosshair; }
-.pc-minimap svg { display: block; }
+/* 内层缩略画布随外框圆角：玻璃外框 13px − padding 5px = 8px，裁掉
+   视口矩形等方形内容探出 svg 圆角的直角。 */
+.pc-minimap svg { display: block; border-radius: 8px; }
 .pc-addbtn { bottom: 16px; right: 16px; display: flex; gap: 8px; padding: 6px; }
 .pc-addbtn button {
   height: 30px;
