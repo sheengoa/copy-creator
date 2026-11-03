@@ -67,7 +67,7 @@ export interface DragState {
   };
 }
 
-interface LiftedWire {
+export interface LiftedWire {
   fromKey: string; // 视觉线的源节点 key（组线为整组承载节点）
   pendings: PendingLink[];
   rows: ProjectNodeLink[];
