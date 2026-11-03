@@ -20,6 +20,7 @@ export type DetailForState =
   | { kind: "info"; group: EntityPhKind; sourceKey: string; scope: DetailScope }
   | { kind: "script"; phId?: string };
 export type SetDetailFor = Dispatch<SetStateAction<DetailForState | null>>;
+export type DetailForArg = DetailForState;
 
 /** 空白资料占位节点：菜单创建（角色/场景/道具），双击从详情窗加载实体。 */
 export function EntityPhNodes({

@@ -10,15 +10,9 @@ import {
   type ProjectNodeLink,
   type ProjectScene,
 } from "../../stores/projectStore";
-import ProjectNodeDetailDialog, { type NodeDetailEntry } from "./ProjectNodeDetailDialog";
-import { ResourceVideoPoster, ResourceImage } from "./ResourceMedia";
-import { Icons } from "../../components/Icons";
-import { openResourceFile } from "../../domain/mediaAssets";
 import {
   characterAvatarInitial,
-  characterAvatarPaletteIndex,
   joinLibraryPath,
-  promptCategoryKey,
   scriptFileLabel,
 } from "../../domain/projectView";
 
@@ -68,10 +62,13 @@ import {
   type WireBox,
   type WireItem,
 } from "./ProjectCanvas/types";
-import { NODE_ACCENTS, PORT_COLORS, REF_ACCEPTS, WIRE_TYPE_COLORS } from "./ProjectCanvas/colors";
-import { TextPaperBody } from "./ProjectCanvas/TextPaperBody";
+import { ResourceImage } from "./ResourceMedia";
+import { PORT_COLORS, REF_ACCEPTS, WIRE_TYPE_COLORS } from "./ProjectCanvas/colors";
 import { useCanvasGestures } from "./ProjectCanvas/engine/useGestures";
 import { useWorkflowSeed } from "./ProjectCanvas/engine/useWorkflowSeed";
+import { useDetailActions } from "./ProjectCanvas/engine/useDetailActions";
+import { DetailDialog } from "./ProjectCanvas/layers/DetailDialog";
+import type { DetailForArg } from "./ProjectCanvas/layers/NodeExtras";
 import { MiniMap, ZoomBar } from "./ProjectCanvas/layers/chrome";
 import { SceneFrames } from "./ProjectCanvas/layers/SceneFrames";
 import { WiresLayer } from "./ProjectCanvas/layers/WiresLayer";
@@ -931,15 +928,7 @@ export default function ProjectCanvas({
   // ── 节点详情窗口：双击节点弹出的独立预览窗口（预览 + 信息 + 上传/
   // 库选）。资料类带 当前/全部 切换；片段窗口按 角色/场景/道具 三区块
   // 各自独立切换。 ──
-  type DetailScope = "current" | "all";
-  const [detailFor, setDetailFor] = useState<
-    | { kind: "entityPh"; id: string }
-    | { kind: "promptPh"; id: string }
-    | { kind: "segment"; id: string; scopes: { chars: DetailScope; locs: DetailScope; props: DetailScope } }
-    | { kind: "info"; group: EntityPhKind; sourceKey: string; scope: DetailScope }
-    | { kind: "script"; phId?: string }
-    | null
-  >(null);
+  const [detailFor, setDetailFor] = useState<DetailForArg | null>(null);
   // 成员装入面板（多选 + 装入确认）：eph 加载 / 组追加裁剪 / 默认节点转组。
   // （pending 只是面板内的勾选草稿，点「装入」才由 applyMemberPick 落地。）
   const [memberPick, setMemberPick] = useState<
@@ -971,21 +960,6 @@ export default function ProjectCanvas({
     setDetailError("");
   }, [detailFor]);
 
-  // 详情窗口动作：本机上传（选文件 → 复制入库 → 回调挂接；与库选择器
-  // 的导入同一条链路）。
-  const uploadViaImport = async (after: (file: { filePath: string; kind: string; name: string }) => void) => {
-    setDetailError("");
-    try {
-      const { path } = await invoke<{ path: string }>("select_resource_trace_file");
-      const file = await invoke<{ file_path: string; kind: string; name: string }>(
-        "import_resource_file",
-        { sourcePath: path },
-      );
-      after({ filePath: file.file_path, kind: file.kind, name: file.name });
-    } catch (error) {
-      setDetailError(error instanceof Error ? error.message : String(error));
-    }
-  };
   // 详情窗口 → 从资源库选择：片段挂产出。
   const attachSegmentFromLibrary = (segmentId: string, file: { filePath: string; kind: string; name: string }) => {
     // linkAsset 内部会整刷概览（画布随之重挂、UI 状态清空），窗口主动关；
@@ -1813,13 +1787,6 @@ export default function ProjectCanvas({
     [scenes],
   );
 
-  const handleLocate = useCallback(
-    (asset: ProjectAsset) => {
-      void openResourceFile(joinLibraryPath(libraryRoot, asset.file_path));
-    },
-    [libraryRoot],
-  );
-
   // ── 场景/镜头快速管理 ──
   const [sceneForm, setSceneForm] = useState<{ id?: string; heading: string; locationId: string } | null>(null);
   const [shotForm, setShotForm] = useState<{ id: string; sceneId: string; description: string; dialogue: string } | null>(null);
@@ -1991,44 +1958,13 @@ export default function ProjectCanvas({
     },
     [episodeId, overview, setEpisodeCharacters, setEpisodeLocations, setEpisodeProps],
   );
-  const removeGroupMember = useCallback(
-    async (groupId: string, entityId: string) => {
-      const group = infoGroups.find((g) => g.id === groupId);
-      if (!group) return;
-      // 只删本组名下的线：共享语义下同一实体可同时在其他组，那些组的
-      // 连线不受影响（见 unlinkEntityLinks 的 owner 范围删除）。
-      await unlinkEntityLinks(group.kind, entityId, `grp:${groupId}`);
-      const members = group.members.filter((m) => m !== entityId);
-      persistInfoGroups(
-        members.length
-          ? infoGroups.map((g) => (g.id === groupId ? { ...g, members } : g))
-          : infoGroups.filter((g) => g.id !== groupId),
-      );
-      // 被移除的实体回到默认单实体节点，出生在组旁看得见的位置。
-      const pos = infoNodePos(`grp:${groupId}`);
-      persistInfoOffsets({
-        ...infoOffsets,
-        [`${group.kind === "character" ? "char" : group.kind === "location" ? "loc" : "prop"}:${entityId}`]: {
-          x: Math.round(pos.x + INFO_W + 24),
-          y: Math.round(pos.y),
-        },
-      });
-    },
-    [infoGroups, infoNodePos, infoOffsets, persistInfoGroups, persistInfoOffsets, unlinkEntityLinks],
-  );
-  const addGroupMember = useCallback(
-    async (groupId: string, entityId: string) => {
-      const group = infoGroups.find((g) => g.id === groupId);
-      if (!group || group.members.includes(entityId)) return;
-      // 连线与组员落账先于概览整刷（重挂读 localStorage，见 applyMemberPick）。
-      // 组口按本组 owner 名下的线取（共享成员的他组线不算本组的口）。
-      const wired = groupWiredPorts(group);
-      for (const w of wired) await linkNode(episodeId, group.kind, entityId, w.to_segment, w.to_port as ProjectNodeLink["to_port"], `grp:${groupId}`);
-      persistInfoGroups(infoGroups.map((g) => (g.id === groupId ? { ...g, members: [...g.members, entityId] } : g)));
-      await associateEntities(group.kind, [entityId]);
-    },
-    [infoGroups, associateEntities, groupWiredPorts, linkNode, episodeId, persistInfoGroups],
-  );
+  // ── 详情窗动作集（engine/useDetailActions，2026-11-03 阶段 11d）：
+  //    本机上传/打开定位/组员增删，代码零改动搬移 ──
+  const { uploadViaImport, handleLocate, removeGroupMember, addGroupMember } = useDetailActions({
+    libraryRoot, setDetailError, episodeId, infoGroups, persistInfoGroups,
+    infoOffsets, persistInfoOffsets, infoNodePos, unlinkEntityLinks,
+    groupWiredPorts, linkNode, associateEntities,
+  });
   // ── 节点删除（工具条与 Delete 键共用同一套语义）──
   // 资料实体节点：解除连线 + 移出本集关联（实体保留在库里，可再关联）。
   const removeInfoEntity = useCallback(
@@ -2365,324 +2301,40 @@ export default function ProjectCanvas({
     unlinkEntityLinks, pendingLinks, persistPendingLinks, ENTITY_PORTS, unlinkNode,
   ]);
 
-  const detailDialog = (() => {
-    if (!detailFor || !overview) return null;
-    const fileHint = (relative: string) => joinLibraryPath(libraryRoot, relative);
-    // 某类资源（character/location/prop）已连到哪些片段（#序号）。
-    const linkedSegmentLabel = (kind: string, id: string) => {
-      const segIds = overview.node_links
-        .filter((l) => l.from_kind === kind && l.from_id === id)
-        .map((l) => l.to_segment);
-      const labels = segments
-        .map((segment, index) => ({ id: segment.id, label: `#${index + 1}` }))
-        .filter(({ id }) => segIds.includes(id))
-        .map(({ label }) => label);
-      return labels.length > 0 ? labels.join("、") : "—";
-    };
-    // 「当前」集合：与某片段直连的该类资源；或与来源资源共片段的同 类资源（无则退为来源自身）。
-    const linkedToSegment = (kind: string, segId: string) =>
-      overview.node_links.filter((l) => l.to_segment === segId && l.from_kind === kind).map((l) => l.from_id);
-    const kindLabelOf = (group: "characters" | "locations" | "props") =>
-      t(group === "characters" ? "project.canvas.typeCharacter" : group === "locations" ? "project.canvas.typeLocation" : "project.canvas.typeProp");
-    const scopeLabelsOf = (group: EntityPhKind) => ({
-      current: t(
-        group === "character"
-          ? "project.canvas.scopeCurrentChars"
-          : group === "location"
-            ? "project.canvas.scopeCurrentLocs"
-            : "project.canvas.scopeCurrentProps",
-      ),
-      all: t(
-        group === "character"
-          ? "project.canvas.scopeAllChars"
-          : group === "location"
-            ? "project.canvas.scopeAllLocs"
-            : "project.canvas.scopeAllProps",
-      ),
-    });
-    const avatarPreview = (name: string, path: string | null, fallback: React.ReactNode) =>
-      path ? (
-        <ResourceImage path={fileHint(path)} alt={name} className="pc-detail-img" />
-      ) : (
-        <span className={`pc-detail-ava pc-ava-p${characterAvatarPaletteIndex(name)}`}>{fallback}</span>
-      );
-
-    if (detailFor.kind === "promptPh") {
-      const ph = promptPhs.find((item) => item.id === detailFor.id);
-      if (!ph) return null;
-      const prompt = prompts.find((item) => item.id === ph.promptId);
-      return (
-        <ProjectNodeDetailDialog
-          title={prompt ? prompt.title : t("project.canvas.promptUntitled")}
-          accent={NODE_ACCENTS.prompt}
-          error={detailError}
-          entries={[{
-            key: `prompt:${ph.id}`,
-            title: prompt ? prompt.title : t("project.canvas.promptUntitled"),
-            badge: t("project.canvas.typePrompt"),
-            preview: prompt ? (
-              <div className="pc-detail-prompt">{prompt.content}</div>
-            ) : (
-              <div className="pc-detail-preview-empty">{Icons.file}{t("project.canvas.promptEmpty")}</div>
-            ),
-            info: prompt?.category
-              ? [{ label: t("project.prompt.field.category"), value: t(promptCategoryKey(prompt.category)) }]
-              : [],
-            actions: (
-              <button
-                type="button"
-                className="pc-detail-btn"
-                onClick={() => {
-                  setDetailFor(null);
-                  setPromptPickTarget(`prompt:${ph.id}`);
-                  setPromptPickOpen(true);
-                }}
-              >
-                {Icons.resources}{t("project.canvas.promptReselect")}
-              </button>
-            ),
-          }]}
-          onClose={closeDetail}
-        />
-      );
-    }
-    if (detailFor.kind === "segment") {
-      const segment = segments.find((item) => item.id === detailFor.id);
-      if (!segment) return null;
-      const segIndex = segments.indexOf(segment) + 1;
-      const { chars, locs, props } = detailFor.scopes;
-      const linkedCharIds = linkedToSegment("character", segment.id);
-      const linkedLocIds = linkedToSegment("location", segment.id);
-      const linkedPropIds = linkedToSegment("prop", segment.id);
-      const segEntries = {
-        characters: (chars === "current" ? castCharacters.filter((c) => linkedCharIds.includes(c.id)) : castCharacters).map((character) => ({
-          key: `char:${character.id}`,
-          title: character.name,
-          badge: kindLabelOf("characters"),
-          preview: avatarPreview(character.name, character.avatar_path, characterAvatarInitial(character.name)),
-          info: [{ label: t("project.canvas.detailLinks"), value: linkedSegmentLabel("character", character.id) }],
-        })),
-        locations: (locs === "current" ? episodeLocations.filter((l) => linkedLocIds.includes(l.id)) : episodeLocations).map((location) => ({
-          key: `loc:${location.id}`,
-          title: location.name,
-          badge: kindLabelOf("locations"),
-          preview: avatarPreview(location.name, location.ref_path, Icons.resources),
-          info: [{ label: t("project.canvas.detailLinks"), value: linkedSegmentLabel("location", location.id) }],
-        })),
-        props: (props === "current" ? episodeProps.filter((p) => linkedPropIds.includes(p.id)) : episodeProps).map((prop) => ({
-          key: `prop:${prop.id}`,
-          title: prop.name,
-          badge: kindLabelOf("props"),
-          preview: avatarPreview(prop.name, prop.ref_path, Icons.star),
-          info: [{ label: t("project.canvas.detailLinks"), value: linkedSegmentLabel("prop", prop.id) }],
-        })),
-      };
-      const setSegScope = (part: "chars" | "locs" | "props", scope: "current" | "all") =>
-        setDetailFor({ kind: "segment", id: segment.id, scopes: { ...detailFor.scopes, [part]: scope } });
-      const startAttach = (file: { filePath: string; kind: string; name: string }) => attachSegmentFromLibrary(segment.id, file);
-      return (
-        <ProjectNodeDetailDialog
-          title={segment.note || `${t("project.canvas.segName")} #${segIndex}`}
-          accent={NODE_ACCENTS.segment}
-          error={detailError}
-          count={segEntries.characters.length + segEntries.locations.length + segEntries.props.length}
-          sections={[
-            {
-              key: "chars",
-              title: kindLabelOf("characters"),
-              scope: chars,
-              scopeLabels: scopeLabelsOf("character"),
-              onScopeChange: (scope) => setSegScope("chars", scope),
-              entries: segEntries.characters,
-            },
-            {
-              key: "locs",
-              title: kindLabelOf("locations"),
-              scope: locs,
-              scopeLabels: scopeLabelsOf("location"),
-              onScopeChange: (scope) => setSegScope("locs", scope),
-              entries: segEntries.locations,
-            },
-            {
-              key: "props",
-              title: kindLabelOf("props"),
-              scope: props,
-              scopeLabels: scopeLabelsOf("prop"),
-              onScopeChange: (scope) => setSegScope("props", scope),
-              entries: segEntries.props,
-            },
-          ]}
-          extra={(
-            <div className="pc-detail-extra">
-              <div className="pc-detail-extra-head">{t("project.canvas.segAttach")}</div>
-              {segment.asset && (
-                <div className="pc-detail-extra-body">
-                  <div className="pc-detail-video small">
-                    <ResourceVideoPoster
-                      path={fileHint(segment.asset.file_path)}
-                      version={segment.asset.updated_at}
-                      fallbackLabel={segment.asset.name || segment.asset.file_path}
-                    />
-                  </div>
-                  <div className="pc-detail-extra-info">
-                    <b>{segment.asset.name || segment.asset.file_path}</b>
-                    <small>{segment.asset.file_path}</small>
-                    <button type="button" className="pc-detail-btn" onClick={() => handleLocate(segment.asset as ProjectAsset)}>
-                      {Icons.externalLink}{t("project.canvas.openFile")}
-                    </button>
-                  </div>
-                </div>
-              )}
-              {/* 挂产出动作常驻：已有产出时可再次上传/库选直接更换。 */}
-              <div className="pc-detail-extra-actions">
-                <button type="button" className="pc-detail-btn primary" onClick={() => void uploadViaImport(startAttach)}>
-                  {Icons.add}{t("project.canvas.detailUpload")}
-                </button>
-                <button type="button" className="pc-detail-btn" onClick={() => setPickerFor(`segment:${segment.id}`)}>
-                  {Icons.resources}{t("project.canvas.detailPickLibrary")}
-                </button>
-              </div>
-            </div>
-          )}
-          onClose={closeDetail}
-        />
-      );
-    }
-    if (detailFor.kind === "entityPh") {
-      const ph = entityPhs.find((item) => item.id === detailFor.id);
-      if (!ph) return null;
-      const kindLabel = kindTextOf(ph.kind);
-      const openBind = () => setMemberPick({ mode: "eph", ephId: ph.id, kind: ph.kind, pending: [] });
-      return (
-        <ProjectNodeDetailDialog
-          title={kindLabel}
-          accent={NODE_ACCENTS[ph.kind] ?? "#94a3b8"}
-          error={detailError}
-          entries={[{
-            key: `eph:${ph.id}`,
-            title: t("project.canvas.ephUnloaded"),
-            badge: kindLabel,
-            preview: (
-              <button type="button" className="pc-detail-drop" onClick={openBind}>
-                {ph.kind === "character" ? Icons.clipboard : ph.kind === "location" ? Icons.resources : Icons.star}
-                {t("project.canvas.ephPickHint")}
-              </button>
-            ),
-            info: [{ label: t("project.canvas.detailStatus"), value: t("project.canvas.ephUnloaded") }],
-            actions: (
-              <button type="button" className="pc-detail-btn primary" onClick={openBind}>
-                {Icons.resources}{t("project.canvas.ephLoad")}
-              </button>
-            ),
-          }]}
-          onClose={closeDetail}
-        />
-      );
-    }
-    if (detailFor.kind === "info") {
-      const { group, sourceKey, scope } = detailFor;
-      const srcId = sourceKey.slice(sourceKey.indexOf(":") + 1);
-      const isGroup = sourceKey.startsWith("grp:");
-      const grp = isGroup ? infoGroups.find((g) => `grp:${g.id}` === sourceKey) : null;
-      const kindLabel = kindTextOf(group);
-      const entities = entitiesOfKind(group);
-      const members = grp ? grp.members : [srcId];
-      const scopeList = scope === "current" ? entities.filter((e) => members.includes(e.id)) : entities;
-      const entries: NodeDetailEntry[] = scopeList.map((entity) => {
-        const isMember = members.includes(entity.id);
-        const refPath = group === "character" ? (entity as { avatar_path: string }).avatar_path : (entity as { ref_path: string }).ref_path;
-        let actions: React.ReactNode;
-        if (isGroup && grp) {
-          actions = isMember ? (
-            <button type="button" className="pc-detail-btn" onClick={() => void removeGroupMember(grp.id, entity.id)}>
-              {Icons.close}{t("project.canvas.detailRemoveMember")}
-            </button>
-          ) : (
-            <button type="button" className="pc-detail-btn primary" onClick={() => void addGroupMember(grp.id, entity.id)}>
-              {Icons.add}{t("project.canvas.detailAddMember")}
-            </button>
-          );
-        }
-        return {
-          key: `${group}:${entity.id}`,
-          title: entity.name,
-          badge: kindLabel,
-          preview: avatarPreview(entity.name, refPath, group === "prop" ? Icons.star : characterAvatarInitial(entity.name)),
-          info: [{ label: t("project.canvas.detailLinks"), value: linkedSegmentLabel(group, entity.id) }],
-          actions,
-        };
-      });
-      // 继续装入：多选库面板 + 装入确认。默认节点装入第二个成员即升级
-      // 为组节点（原位、连线随归属解析自动归组）。
-      const openMemberPanel = () => {
-        setMemberPick(
-          grp
-            ? { mode: "grp", groupId: grp.id, kind: group, pending: [...grp.members] }
-            : { mode: "convert", sourceKey, kind: group, pending: [srcId] },
-        );
-      };
-      return (
-        <ProjectNodeDetailDialog
-          title={isGroup && grp ? `${kindLabel} ×${grp.members.length}` : kindLabel}
-          accent={NODE_ACCENTS[group] ?? "#94a3b8"}
-          entries={entries}
-          scope={scope}
-          scopeLabels={scopeLabelsOf(group)}
-          onScopeChange={(next) => setDetailFor({ kind: "info", group, sourceKey, scope: next })}
-          extra={(
-            <div className="pc-detail-extra">
-              <div className="pc-detail-extra-head">{t("project.canvas.detailAddMore")}</div>
-              <div className="pc-detail-extra-actions">
-                <button type="button" className="pc-detail-btn primary" onClick={openMemberPanel}>
-                  {Icons.add}{t("project.canvas.detailAdd", { kind: kindLabel })}
-                </button>
-              </div>
-            </div>
-          )}
-          onClose={closeDetail}
-        />
-      );
-    }
-    // script：单文件窗口（文本预览 + 路径 + 打开）。主剧本节点读本集
-    // script_path；剧本纸片读自己的文件（重新挂接也只换纸片的文件）。
-    const scriptPh = detailFor.phId ? scriptPhs.find((item) => item.id === detailFor.phId) : null;
-    const scriptPath = scriptPh ? scriptPh.path : overview.episode.script_path;
-    if (!scriptPath) return null;
-    const scriptName = scriptFileLabel(scriptPath);
-    return (
-      <ProjectNodeDetailDialog
-        title={scriptName}
-        accent={NODE_ACCENTS.script}
-        entries={[{
-          key: "script",
-          title: scriptName,
-          badge: t("project.canvas.typeScript"),
-          preview: <TextPaperBody path={fileHint(scriptPath)} name={scriptName} lines={16} />,
-          info: [{ label: t("project.canvas.detailPath"), value: scriptPath }],
-          actions: (
-            <>
-              <button type="button" className="pc-detail-btn" onClick={() => void openResourceFile(fileHint(scriptPath))}>
-                {Icons.externalLink}{t("project.canvas.openFile")}
-              </button>
-              {/* 重新挂接：换库内其他文件（窗口保持打开，重选后条目就地
-                  刷新；节点留在原位；主剧本换的是本集剧本，纸片只换自己）。 */}
-              <button
-                type="button"
-                className="pc-detail-btn"
-                onClick={() => {
-                  setScriptPickTarget(scriptPh ? `script:${scriptPh.id}` : "script");
-                  setScriptPickOpen(true);
-                }}
-              >
-                {Icons.link}{t("project.canvas.detailRelinkScript")}
-              </button>
-            </>
-          ),
-        }]}
-        onClose={closeDetail}
-      />
-    );
-  })();
+  // ── 节点详情窗口（layers/DetailDialog，2026-11-03 阶段 11d）：按
+  //    detailFor 组装预览/信息/动作，IIFE 组装体零改动搬移 ──
+  const detailDialog = (
+    <DetailDialog
+      detailFor={detailFor}
+      detailError={detailError}
+      overview={overview}
+      libraryRoot={libraryRoot}
+      segments={segments}
+      scriptPhs={scriptPhs}
+      infoGroups={infoGroups}
+      promptPhs={promptPhs}
+      entityPhs={entityPhs}
+      prompts={prompts}
+      kindTextOf={kindTextOf}
+      uploadViaImport={uploadViaImport}
+      handleLocate={handleLocate}
+      removeGroupMember={removeGroupMember}
+      addGroupMember={addGroupMember}
+      castCharacters={castCharacters}
+      episodeLocations={episodeLocations}
+      episodeProps={episodeProps}
+      entitiesOfKind={entitiesOfKind}
+      setPromptPickTarget={setPromptPickTarget}
+      setMemberPick={setMemberPick}
+      closeDetail={closeDetail}
+      attachSegmentFromLibrary={attachSegmentFromLibrary}
+      setScriptPickTarget={setScriptPickTarget}
+      setScriptPickOpen={setScriptPickOpen}
+      setPickerFor={setPickerFor}
+      setPromptPickOpen={setPromptPickOpen}
+      setDetailFor={setDetailFor}
+    />
+  );
 
   return (
     <div className="pc-root">
