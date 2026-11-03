@@ -104,7 +104,14 @@ export default function FreeCanvas({ canvasId }: { canvasId: string }) {
     (minCount = 2) => groupSnapshotOf(selRef, nodesRef, minCount),
     [nodesRef, selRef],
   );
-  const memberFrame = useCallback((key: string) => memberFrameOf(nodesRef, key), [nodesRef]);
+  // 组成员包围盒：实测尺寸优先（boxOf，nodeMetrics 缓存）。height=null 的
+  // 自动高度节点按内容撑开，store 兜底高会比实际矮——只用兜底值时组框
+  // 下缘算小，成员向下拖就会跑出框（上/左/右只涉及 x/y min-max 不受
+  // 影响）。未实测首帧回退 store 尺寸。
+  const memberFrame = useCallback(
+    (key: string) => boxOf(key) ?? memberFrameOf(nodesRef, key),
+    [boxOf, nodesRef],
+  );
 
   // ── 复制 / 粘贴（engine/useClipboardOps） ──
   const { copySelection, pasteClipboard } = useClipboardOps(
