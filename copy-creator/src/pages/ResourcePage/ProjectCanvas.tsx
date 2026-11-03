@@ -10,10 +10,7 @@ import {
   type ProjectNodeLink,
   type ProjectScene,
 } from "../../stores/projectStore";
-import { ConfirmDialog } from "../../components/ConfirmDialog";
-import ProjectFilePickerDialog from "./ProjectFilePickerDialog";
 import ProjectNodeDetailDialog, { type NodeDetailEntry } from "./ProjectNodeDetailDialog";
-import ProjectLibraryPanel from "./ProjectLibraryPanel";
 import { ResourceVideoPoster, ResourceImage } from "./ResourceMedia";
 import { Icons } from "../../components/Icons";
 import { openResourceFile } from "../../domain/mediaAssets";
@@ -93,6 +90,16 @@ import {
   EpisodeCard,
   IssueBar,
 } from "./ProjectCanvas/layers/CanvasBars";
+import {
+  DeleteSceneConfirm,
+  LocationPickPanel,
+  MemberPickPanel,
+  PromptPickDialog,
+  SceneFormDialog,
+  ScriptPickDialog,
+  SegmentAttachPicker,
+  ShotFormDialog,
+} from "./ProjectCanvas/layers/Dialogs";
 
 // ── 模块层已拆出 ProjectCanvas/（types/layout/colors/TextPaperBody，
 //    2026-11-03 引擎拆分阶段 11a；下方为组件体）──
@@ -2950,220 +2957,58 @@ export default function ProjectCanvas({
         <AddBtnBar onPickForShot={onPickForShot} setSceneForm={setSceneForm} />
       </div>
 
-      {/* 场景快速编辑 */}
-      {sceneForm && (
-        <div className="pc-dialog-mask" onMouseDown={(e) => { if (e.target === e.currentTarget) setSceneForm(null); }}>
-          <div className="pc-dialog">
-            <h4>{sceneForm.id ? t("project.canvas.editScene") : t("project.canvas.newScene")}</h4>
-            <label>
-              <span>{t("project.scene.field.heading")}</span>
-              <input
-                value={sceneForm.heading}
-                placeholder={t("project.scene.field.headingPlaceholder")}
-                onChange={(event) => setSceneForm({ ...sceneForm, heading: event.target.value })}
-                autoFocus
-                onKeyDown={(event) => {
-                  if (event.key === "Enter") submitSceneForm();
-                  if (event.key === "Escape") setSceneForm(null);
-                }}
-              />
-            </label>
-            <label>
-              <span>{t("project.scene.field.location")}</span>
-              <select
-                value={sceneForm.locationId}
-                onChange={(event) => setSceneForm({ ...sceneForm, locationId: event.target.value })}
-              >
-                <option value="">{t("project.scene.field.freeLocation")}</option>
-                {locations.map((location) => (
-                  <option key={location.id} value={location.id}>
-                    {location.name}
-                  </option>
-                ))}
-              </select>
-            </label>
-            <div className="pc-dialog-foot">
-              <button type="button" onClick={() => setSceneForm(null)}>{t("common.cancel")}</button>
-              <button type="button" className="primary" onClick={submitSceneForm}>{t("common.save")}</button>
-            </div>
-          </div>
-        </div>
-      )}
+      <SceneFormDialog
+        sceneForm={sceneForm}
+        setSceneForm={setSceneForm}
+        locations={locations}
+        submitSceneForm={submitSceneForm}
+      />
 
-      {/* 镜头快速编辑 */}
-      {shotForm && (
-        <div className="pc-dialog-mask" onMouseDown={(e) => { if (e.target === e.currentTarget) setShotForm(null); }}>
-          <div className="pc-dialog">
-            <h4>{shotForm.id ? t("project.canvas.editShot") : t("project.canvas.addShot")}</h4>
-            <label>
-              <span>{t("project.shot.field.description")}</span>
-              <textarea
-                rows={2}
-                value={shotForm.description}
-                placeholder={t("project.shot.untitled")}
-                onChange={(event) => setShotForm({ ...shotForm, description: event.target.value })}
-                autoFocus
-              />
-            </label>
-            <label>
-              <span>{t("project.shot.field.dialogue")}</span>
-              <textarea
-                rows={2}
-                value={shotForm.dialogue}
-                onChange={(event) => setShotForm({ ...shotForm, dialogue: event.target.value })}
-              />
-            </label>
-            <div className="pc-dialog-foot">
-              <button type="button" onClick={() => setShotForm(null)}>{t("common.cancel")}</button>
-              <button type="button" className="primary" onClick={submitShotForm}>{t("common.save")}</button>
-            </div>
-          </div>
-        </div>
-      )}
+      <ShotFormDialog
+        shotForm={shotForm}
+        setShotForm={setShotForm}
+        submitShotForm={submitShotForm}
+      />
 
-      {deleteSceneTarget && (
-        <ConfirmDialog
-          message={t("project.scene.deleteConfirm", {
-            heading: deleteSceneTarget.heading || t("project.scene.untitled"),
-          })}
-          hint={t("project.scene.deleteConfirmHint")}
-          onConfirm={() => {
-            const target = deleteSceneTarget;
-            setDeleteSceneTarget(null);
-            void deleteScene(target.id);
-          }}
-          onCancel={() => setDeleteSceneTarget(null)}
-        />
-      )}
+      <DeleteSceneConfirm
+        deleteSceneTarget={deleteSceneTarget}
+        setDeleteSceneTarget={setDeleteSceneTarget}
+        deleteScene={deleteScene}
+      />
       {/* 节点详情预览窗口：双击节点的独立窗口（预览 + 信息 + 上传/库选） */}
       {detailDialog}
-      {/* 详情窗口内的「从资源库选择」二级选择器（片段挂产出） */}
-      {pickerFor?.startsWith("segment:") && (
-        <ProjectFilePickerDialog
-          title={t("project.canvas.segAttach")}
-          takenPaths={new Set()}
-          takenLabel=""
-          onClose={() => setPickerFor(null)}
-          onPick={(file) => attachSegmentFromLibrary(pickerFor.slice(8), file)}
-        />
-      )}
-      {/* 挂剧本：目标 = 主剧本时选文件设为本集剧本，挂接即自动连全部片段
-          剧本口；目标 = 剧本纸片时挂到纸片自己（本集无剧本则转正为主剧本） */}
-      {scriptPickOpen && (
-        <ProjectFilePickerDialog
-          title={t("project.canvas.linkScript")}
-          takenPaths={new Set()}
-          takenLabel=""
-          onClose={() => {
-            setScriptPickOpen(false);
-            setScriptPickTarget(null);
-          }}
-          onPick={(file) => handleScriptPick(file.filePath)}
-        />
-      )}
-      {/* 提示词选择：空提示词纸片双击后从提示词库选一条写入纸片 */}
-      {promptPickOpen && (
-        <div className="pc-dialog-mask" onMouseDown={(e) => { if (e.target === e.currentTarget) closePromptPick(); }}>
-          <div className="pc-dialog pc-prompt-pick">
-            <h4>{t("project.canvas.promptPickTitle")}</h4>
-            <input
-              value={promptPickQuery}
-              placeholder={t("project.canvas.addNodeSearch")}
-              onChange={(event) => setPromptPickQuery(event.target.value)}
-              autoFocus
-              onKeyDown={(event) => {
-                if (event.key === "Escape") closePromptPick();
-              }}
-            />
-            <div className="pc-prompt-pick-list">
-              {prompts
-                .filter((prompt) => {
-                  const q = promptPickQuery.trim().toLowerCase();
-                  if (!q) return true;
-                  return (
-                    prompt.title.toLowerCase().includes(q) ||
-                    prompt.content.toLowerCase().includes(q) ||
-                    (prompt.category && t(promptCategoryKey(prompt.category)).toLowerCase().includes(q))
-                  );
-                })
-                .map((prompt) => (
-                  <button
-                    key={prompt.id}
-                    type="button"
-                    className="pc-prompt-pick-item"
-                    onClick={() => handlePromptPick(prompt.id)}
-                  >
-                    <span className="pc-prompt-pick-head">
-                      <span className="pc-prompt-pick-title">{prompt.title}</span>
-                      {prompt.category ? (
-                        <span className="pc-prompt-pick-cat">{t(promptCategoryKey(prompt.category))}</span>
-                      ) : null}
-                    </span>
-                    <span className="pc-prompt-pick-content">{prompt.content}</span>
-                  </button>
-                ))}
-              {prompts.length === 0 && (
-                <div className="pc-prompt-pick-empty">{t("project.canvas.promptPickEmpty")}</div>
-              )}
-            </div>
-          </div>
-        </div>
-      )}
-      {/* 资料框「关联场景」：多选切换，与出场角色同一交互模式 */}
-      {locationPickOpen && (
-        <ProjectLibraryPanel
-          kind="locations"
-          mode="pick"
-          multi
-          selectedIds={overview?.episode.location_ids ?? []}
-          onClose={() => setLocationPickOpen(false)}
-          pickTitle={t("project.canvas.linkScene")}
-          onTogglePick={(id) => {
-            if (!episodeId) return;
-            const existing = overview?.episode.location_ids ?? [];
-            const next = existing.includes(id)
-              ? existing.filter((item) => item !== id)
-              : [...existing, id];
-            void setEpisodeLocations(episodeId, next);
-          }}
-        />
-      )}
-      {/* 成员装入面板（多选勾选 + 装入确认）：空白节点加载 / 组追加裁剪 /
-          默认节点转组共用；勾选只是草稿，点「装入 N 项」一次性落地。
-          成员可被多个组复用（同一角色可出场于多个片段），不做组间互斥。 */}
-      {memberPick && (() => {
-        const kindLabel = kindTextOf(memberPick.kind);
-        const libKind = memberPick.kind === "character" ? "characters" : memberPick.kind === "location" ? "locations" : "props";
-        return (
-          <ProjectLibraryPanel
-            kind={libKind}
-            mode="pick"
-            multi
-            selectedIds={memberPick.pending}
-            onClose={() => setMemberPick(null)}
-            pickTitle={t("project.canvas.memberPickTitle", { kind: kindLabel })}
-            onTogglePick={(id) => {
-              setMemberPick((prev) =>
-                prev
-                  ? {
-                      ...prev,
-                      pending: prev.pending.includes(id)
-                        ? prev.pending.filter((item) => item !== id)
-                        : [...prev.pending, id],
-                    }
-                  : prev,
-              );
-            }}
-            confirm={{
-              count: memberPick.pending.length,
-              label: t("project.canvas.memberPickConfirm", { count: memberPick.pending.length }),
-              onConfirm: () => {
-                void applyMemberPick();
-              },
-            }}
-          />
-        );
-      })()}
+      <SegmentAttachPicker
+        pickerFor={pickerFor}
+        setPickerFor={setPickerFor}
+        attachSegmentFromLibrary={attachSegmentFromLibrary}
+      />
+      <ScriptPickDialog
+        scriptPickOpen={scriptPickOpen}
+        setScriptPickTarget={setScriptPickTarget}
+        setScriptPickOpen={setScriptPickOpen}
+        handleScriptPick={handleScriptPick}
+      />
+      <PromptPickDialog
+        promptPickOpen={promptPickOpen}
+        closePromptPick={closePromptPick}
+        promptPickQuery={promptPickQuery}
+        setPromptPickQuery={setPromptPickQuery}
+        prompts={prompts}
+        handlePromptPick={handlePromptPick}
+      />
+      <LocationPickPanel
+        locationPickOpen={locationPickOpen}
+        setLocationPickOpen={setLocationPickOpen}
+        episodeId={episodeId}
+        locationIds={overview?.episode.location_ids ?? []}
+        setEpisodeLocations={setEpisodeLocations}
+      />
+      <MemberPickPanel
+        memberPick={memberPick}
+        setMemberPick={setMemberPick}
+        kindTextOf={kindTextOf}
+        applyMemberPick={applyMemberPick}
+      />
     </div>
   );
 }
