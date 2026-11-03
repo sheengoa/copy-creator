@@ -188,7 +188,7 @@ export default function CanvasVideoTimeline({
   const ticks = [0, 0.25, 0.5, 0.75, 1].map((r) => r * duration);
 
   return (
-    <div className={`fc-vtl${disabled ? " is-disabled" : ""}`}>
+    <div className={`fc-vtl${disabled ? " is-disabled" : ""}${mode === "range" ? " is-range" : ""}`}>
       <div
         ref={stripRef}
         className="fc-vtl-strip"

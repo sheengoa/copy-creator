@@ -70,6 +70,12 @@
   z-index: 2;
 }
 
+/* 音轨完成态：监视器内视频播放条与徽标并存——徽标抬到播放条上方，
+   不再与时间码/音量重叠（GIF/抽帧完成态监视器内无播放条，不受影响）。 */
+.fc-root .fc-vt-screen .media-playback ~ .fc-frame-badge {
+  bottom: 48px;
+}
+
 /* 监视器悬浮 ×：复用加载节点 .fc-load-clear（右上角圆钮、悬停显形），
    但监视器不是 .fc-load-media，悬停选择器与层级在此补齐。 */
 .fc-root .fc-vt-screen .fc-load-clear {
@@ -168,6 +174,12 @@
   display: flex;
   flex-direction: column;
   gap: 0;
+}
+
+/* 选区模式：时长徽标从条带上沿探出（top:-19px）——在此预留等高空间，
+   徽标落在预留区内，不再与时间轴上方的按钮/文字重叠。 */
+.fc-root .fc-vtl.is-range {
+  padding-top: 20px;
 }
 
 .fc-root .fc-vtl-strip {
