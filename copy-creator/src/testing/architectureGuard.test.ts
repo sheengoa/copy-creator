@@ -645,7 +645,7 @@ describe("架构守卫：领域规则必须全局共享", () => {
     const offenders: string[] = [];
     const walk = (dir: string, limit: number) => {
       const full = join(frontRoot, dir);
-      let entries: string[] = [];
+      let entries: string[];
       try {
         entries = readdirSync(full);
       } catch {
