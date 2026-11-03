@@ -229,6 +229,28 @@ pnpm tauri build
 
 > **Windows 提示**：若 Visual Studio 被安装在非默认位置（SDK 注册表信息缺失），或在 Git Bash 中构建时报 `link.exe` 冲突（误用了 `/usr/bin/link.exe`），需要一个本地启动脚本设置 MSVC/SDK 环境变量：把真实 MSVC 的 `bin\Hostx64\x64` 置于 `PATH` 最前，并设置 `INCLUDE`/`LIB` 指向 MSVC 与 Windows SDK 的 include/lib 目录（本仓库开发者使用未纳入版本控制的 `copy-creator\dev.cmd`，其内含个人路径故不入库）。
 
+### 画布架构与新增节点
+
+画布域（自由画布 + 工程画布）源文件上限 1000 行（目标 700-800），由
+`src/testing/architectureGuard.test.ts` 规则 27 固化，超限即红。
+
+- **自由画布** `src/pages/CanvasPage/`：`FreeCanvas.tsx` 是组合层；`nodes/`
+  是编译期注册式节点基座（`NODE_DEFS: Record<CanvasNodeType, NodeDefinition>`
+  声明端口/配色/尺寸/菜单分组，`NodeShell` 统一 chrome，内容组件单路径分
+  发），`engine/` 与 `layers/` 是手势引擎与渲染子层。
+- **工程画布** `src/pages/ResourcePage/ProjectCanvas.tsx` + `ProjectCanvas/`：
+  `types/layout/colors` 模块层、`engine/` 数据与手势 hooks（useCanvasData/
+  useGroupOps/useCanvasView/usePorts/useNodeMetrics/useDeleteOps/
+  useGestures）、`layers/` 渲染组件（SceneFrames/WiresLayer/ShotCards/
+  InfoLayer/NodeExtras/CanvasBars/Dialogs/DetailDialog/chrome）。
+- **新增节点步骤**（自由画布）：1) `CanvasNodeType` 加类型（store 联合类
+  型 + Rust `NodeMeta` serde 变体 + i18n 双语两条）；2) `nodes/` 写一个自
+  包含 def 文件（端口、配色、默认尺寸、菜单分组，需要交互再加
+  `Component`/`onDoubleClick`）；3) `nodes/registry.ts` 登记一行。类型系
+  统保证注册完整性，其余查询（上游聚合/菜单过滤/拖入分发）自动查表。
+- **fork 对齐**：工程画布引擎件 fork 自 ProjectCanvas 单体（现与 FreeCanvas
+  同源骨架），各拆出文件头注明搬运来源与阶段，回灌/对照按原注释定位。
+
 ## 项目结构
 
 ```
@@ -236,6 +258,7 @@ copy-creator/
 ├── src/                    # 前端源码
 │   ├── components/         # React 组件（含径向菜单 RadialMenu）
 │   ├── pages/              # 页面组件（剪切板 / 快捷输入 / 资源）
+│   │   └── CanvasPage、ResourcePage/ProjectCanvas  # 画布域（节点基座 nodes/ + 引擎 engine/ + 渲染 layers/）
 │   ├── stores/             # Zustand 状态管理
 │   ├── domain/             # 领域层：类型判定 / 记录语义 / 预览 / 媒体 URL 唯一出口
 │   ├── hooks/              # 共享 Hooks
