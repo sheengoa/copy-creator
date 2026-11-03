@@ -517,18 +517,26 @@ describe("架构守卫：领域规则必须全局共享", () => {
     const offenders: string[] = [];
     const stylesDir = join(frontRoot, "styles");
     const cssLiteralContents: Array<{ cls: string; literal: string; cssFile: string }> = [];
-    for (const file of readdirSync(stylesDir)) {
-      if (!file.endsWith(".css")) continue;
-      const css = readFileSync(join(stylesDir, file), "utf8");
-      const rule = /\.([a-zA-Z0-9_-]+)(?:::before|::after)[^{]*\{[^}]*content:\s*"([^"]+)"/g;
-      for (const match of css.matchAll(rule)) {
-        cssLiteralContents.push({
-          cls: match[1],
-          literal: match[2],
-          cssFile: file,
-        });
+    // 递归收集：canvas.css/project.css 拆成同名子目录后仍全覆盖。
+    const walkCss = (dir: string) => {
+      for (const entry of readdirSync(dir)) {
+        const full = join(dir, entry);
+        if (statSync(full).isDirectory()) {
+          walkCss(full);
+        } else if (entry.endsWith(".css")) {
+          const css = readFileSync(full, "utf8");
+          const rule = /\.([a-zA-Z0-9_-]+)(?:::before|::after)[^{]*\{[^}]*content:\s*"([^"]+)"/g;
+          for (const match of css.matchAll(rule)) {
+            cssLiteralContents.push({
+              cls: match[1],
+              literal: match[2],
+              cssFile: toPosix(full).replace(toPosix(stylesDir) + "/", ""),
+            });
+          }
+        }
       }
-    }
+    };
+    walkCss(stylesDir);
     expect(
       cssLiteralContents.length,
       "下方断言依赖字面量 content 清单；删除生成内容时请同步清理本规则",
@@ -632,13 +640,14 @@ describe("架构守卫：领域规则必须全局共享", () => {
     // 本清单（= 强制过评审）。useGestures 是窗口级手势单 effect（fork 自
     // ProjectCanvas 单体的对齐区），重拆会破坏回灌对照，显式豁免并在
     // 文件头注明。
+    // 路径相对 frontRoot（= src/）：walk 用 join(frontRoot, dir) 解析。
     const limits: Array<[string, number]> = [
-      ["src/pages/CanvasPage", 1000],
-      ["src/pages/ResourcePage/ProjectCanvas", 1000],
-      ["src/styles/canvas", 1000],
-      ["src/styles/project", 1000],
-      ["src/dev/mock", 1000],
-      ["src/dev/tauriMock.ts", 1000],
+      ["pages/CanvasPage", 1000],
+      ["ResourcePage/ProjectCanvas", 1000],
+      ["styles/canvas", 1000],
+      ["styles/project", 1000],
+      ["dev/mock", 1000],
+      ["dev/tauriMock.ts", 1000],
     ];
     const exempt = (posix: string) =>
       posix.endsWith("src/pages/ResourcePage/ProjectCanvas/engine/useGestures.ts");
@@ -669,13 +678,19 @@ describe("架构守卫：领域规则必须全局共享", () => {
       }
     };
     for (const [dir, limit] of limits) walk(dir, limit);
-    // Rust 画布域
-    for (const rel of ["src-tauri/src/ai/mod.rs", "src-tauri/src/db/canvas/mod.rs", "src-tauri/src/db/canvas/meta.rs", "src-tauri/src/db/canvas/store.rs"]) {
+    // Rust 画布域：ai/ 与 db/canvas/ 目录下全部 .rs（含未来新增子模块）。
+    for (const dir of ["src-tauri/src/ai", "src-tauri/src/db/canvas"]) {
+      let files: string[] = [];
       try {
-        const lines = readFileSync(join(repoRoot, "copy-creator", rel), "utf8").split("\n").length;
-        if (lines > 1000) offenders.push(`${rel} = ${lines} 行`);
+        files = readdirSync(join(repoRoot, "copy-creator", dir))
+          .filter((name) => name.endsWith(".rs"))
+          .map((name) => `${dir}/${name}`);
       } catch {
         // 前端仓单独检出时跳过。
+      }
+      for (const rel of files) {
+        const lines = readFileSync(join(repoRoot, "copy-creator", rel), "utf8").split("\n").length;
+        if (lines > 1000) offenders.push(`${rel} = ${lines} 行`);
       }
     }
     expect(offenders, "画布域文件不得超过 1000 行（拆分目标 700-800）：超限文件继续按既有模式拆 engine/layers 子模块").toEqual([]);
