@@ -13,13 +13,13 @@ import type { CanvasNote, EntityPh, EntityPhKind, Pos, PromptPh, WireBox } from 
 
 type DetailScope = "current" | "all";
 /** 详情窗口目标（与主文件 detailFor state 同构，见 ProjectCanvas.tsx）。 */
-type DetailForState =
+export type DetailForState =
   | { kind: "entityPh"; id: string }
   | { kind: "promptPh"; id: string }
   | { kind: "segment"; id: string; scopes: { chars: DetailScope; locs: DetailScope; props: DetailScope } }
   | { kind: "info"; group: EntityPhKind; sourceKey: string; scope: DetailScope }
   | { kind: "script"; phId?: string };
-type SetDetailFor = Dispatch<SetStateAction<DetailForState | null>>;
+export type SetDetailFor = Dispatch<SetStateAction<DetailForState | null>>;
 
 /** 空白资料占位节点：菜单创建（角色/场景/道具），双击从详情窗加载实体。 */
 export function EntityPhNodes({
