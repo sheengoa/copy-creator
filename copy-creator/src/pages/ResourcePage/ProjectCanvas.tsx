@@ -78,6 +78,7 @@ import { MiniMap, ZoomBar } from "./ProjectCanvas/layers/chrome";
 import { SceneFrames } from "./ProjectCanvas/layers/SceneFrames";
 import { WiresLayer } from "./ProjectCanvas/layers/WiresLayer";
 import { ShotCards } from "./ProjectCanvas/layers/ShotCards";
+import { InfoNodesLayer, NodeGroupsLayer } from "./ProjectCanvas/layers/InfoLayer";
 
 // ── 模块层已拆出 ProjectCanvas/（types/layout/colors/TextPaperBody，
 //    2026-11-03 引擎拆分阶段 11a；下方为组件体）──
@@ -2805,142 +2806,27 @@ export default function ProjectCanvas({
             deleteShot={deleteShot}
           />
 
-          {/* 节点分组框（Ctrl+G）：框自适应成员包围盒，渲染在节点层之下；
-              拖标题条整组移动（复用组拖管线），组员被删后框随之收缩。 */}
-          {nodeGroups.map((group) => {
-            const frames = group.members
-              .map((key) => memberFrame(key))
-              .filter((f): f is { x: number; y: number; w: number; h: number } => f !== null);
-            if (frames.length === 0) return null;
-            const pad = 14;
-            const left = Math.min(...frames.map((f) => f.x)) - pad;
-            const top = Math.min(...frames.map((f) => f.y)) - pad - 18;
-            const right = Math.max(...frames.map((f) => f.x + f.w)) + pad;
-            const bottom = Math.max(...frames.map((f) => f.y + f.h)) + pad;
-            return (
-              <div
-                key={group.id}
-                data-group={group.id}
-                className="pc-nodegroup"
-                style={{ left, top, width: right - left, height: bottom - top }}
-              >
-                <div className="pc-nodegroup-label">{group.label}</div>
-              </div>
-            );
-          })}
-          {infoNodes.map((node) => {
-            const p = infoNodePos(node.key);
-            const nodeSize = sizeOfNode(node.key);
-            const resized = Boolean(nodeSizes[node.key]);
-            return (
-              <div
-                key={node.key}
-                data-key={node.key}
-                className={`pc-node pc-info${resized ? " pc-resized" : ""}${pulseKeys.includes(node.key) ? " pc-spawn" : ""}${selKeys.includes(node.key) ? " pc-selected" : ""}`}
-                style={{
-                  left: p.x, top: p.y,
-                  width: nodeSize?.w ?? node.w,
-                  height: resized ? nodeSize?.h : undefined,
-                  minHeight: resized ? undefined : nodeSize && nodeSize.h !== node.h ? nodeSize.h : undefined,
-                  ["--node-accent" as string]: NODE_ACCENTS[node.kind] ?? "#94a3b8",
-                } as React.CSSProperties}
-              >
-                <div className="pc-node-head">
-                  <span className="pc-node-kind">
-                    {t(
-                      node.kind === "character"
-                        ? "project.canvas.typeCharacter"
-                        : node.kind === "location"
-                          ? "project.canvas.typeLocation"
-                          : node.kind === "prop"
-                            ? "project.canvas.typeProp"
-                            : "project.canvas.typeScript",
-                    )}
-                  </span>
-                  <b className="pc-node-title">{node.name}</b>
-                </div>
-                {portBar(node.key)}
-                <div className="pc-info-body">
-                  {node.key.startsWith("grp:") ? (
-                    // 组节点：照片堆放——首位成员的大图在上，其余成员的图
-                    // 边向右堆（层数上限 2，更多成员看标题 ×N 与详情窗成员
-                    // 列表）；成员已不可解析时退化为普通照片卡。
-                    (() => {
-                      const members = (infoGroups.find((g) => `grp:${g.id}` === node.key)?.members ?? [])
-                        .map((id) => {
-                          const kind = node.kind as EntityPhKind;
-                          const entity = entitiesOfKind(kind).find((e) => e.id === id) as
-                            | { id: string; name: string; avatar_path?: string; ref_path?: string }
-                            | undefined;
-                          return entity
-                            ? { id, name: entity.name, ref: entityRefOf(kind, entity) }
-                            : null;
-                        })
-                        .filter((m): m is { id: string; name: string; ref: string } => m !== null);
-                      const stack = members.slice(1, 3);
-                      const main = members[0];
-                      if (!main) return null;
-                      return (
-                        <div className={`pc-photo${stack.length > 0 ? " has-stack" : ""}`}>
-                          {stack.map((member, index) => (
-                            <span key={member.id} className={`pc-photo-layer l${index + 1}`}>
-                              {member.ref ? (
-                                <ResourceImage
-                                  path={joinLibraryPath(libraryRoot, member.ref)}
-                                  alt=""
-                                  className="pc-photo-img"
-                                />
-                              ) : null}
-                            </span>
-                          ))}
-                          <div className={`pc-photo-main${main.ref ? "" : " pc-photo-empty"}`}>
-                            {photoMainOf(main.name, main.ref)}
-                          </div>
-                        </div>
-                      );
-                    })()
-                  ) : node.kind === "script" ? (
-                    node.textPath ? (
-                      <div className="pc-info-script">
-                        <TextPaperBody path={joinLibraryPath(libraryRoot, node.textPath)} name={node.name} lines={5} adaptive={resized} />
-                      </div>
-                    ) : (
-                      // 剧本两段式：空节点（未挂文件），双击从库选文件。
-                      <div className="pc-info-body pc-eph-body">
-                        {Icons.file}
-                        <span>{t("project.canvas.scriptEmpty")}</span>
-                      </div>
-                    )
-                  ) : (
-                    <div className="pc-photo">
-                      <div className={`pc-photo-main${node.avatarPath ? "" : " pc-photo-empty"}`}>
-                        {photoMainOf(node.name, node.avatarPath)}
-                      </div>
-                    </div>
-                  )}
-                </div>
-                <span className="pc-node-tools">
-                  <button type="button" data-tooltip={t("project.canvas.view")} onClick={() => openInfoDetail(node)}>
-                    {Icons.expand}
-                  </button>
-                  <button
-                    type="button"
-                    data-tooltip={t("common.delete")}
-                    className="danger"
-                    onClick={() => {
-                      if (node.key.startsWith("grp:")) removeGroup(node.key.slice(4));
-                      else if (node.key === "script") void detachScript();
-                      else if (node.kind === "script") removeScriptPh(node.key.slice(7));
-                      else void removeInfoEntity(node.kind as EntityPhKind, node.key.slice(node.key.indexOf(":") + 1));
-                    }}
-                  >
-                    {Icons.delete}
-                  </button>
-                </span>
-                {resizeHandle}
-              </div>
-            );
-          })}
+          <NodeGroupsLayer nodeGroups={nodeGroups} memberFrame={memberFrame} />
+          <InfoNodesLayer
+            infoNodes={infoNodes}
+            infoGroups={infoGroups}
+            infoNodePos={infoNodePos}
+            sizeOfNode={sizeOfNode}
+            nodeSizes={nodeSizes}
+            pulseKeys={pulseKeys}
+            selKeys={selKeys}
+            portBar={portBar}
+            resizeHandle={resizeHandle}
+            libraryRoot={libraryRoot}
+            entitiesOfKind={entitiesOfKind}
+            entityRefOf={entityRefOf}
+            photoMainOf={photoMainOf}
+            openInfoDetail={openInfoDetail}
+            removeGroup={removeGroup}
+            detachScript={detachScript}
+            removeScriptPh={removeScriptPh}
+            removeInfoEntity={removeInfoEntity}
+          />
 
           {/* 空白资料占位节点：菜单创建（角色/场景/道具），双击从详情窗
               加载实体，加载后原位变成实体节点 */}
