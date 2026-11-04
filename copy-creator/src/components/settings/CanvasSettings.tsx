@@ -863,7 +863,7 @@ export function CanvasSettings() {
               onChange={(e) => setTimeoutText(e.target.value)}
               onBlur={() => {
                 const n = Number.parseInt(timeoutText, 10);
-                const v = Number.isFinite(n) ? Math.min(600, Math.max(5, n)) : 60;
+                const v = Number.isFinite(n) ? Math.min(600, Math.max(5, n)) : 300;
                 setTimeoutText(String(v));
                 void settings.saveAiSettings({ aiTimeout: v });
               }}

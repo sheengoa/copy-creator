@@ -142,7 +142,12 @@ fn read_setting(conn: &rusqlite::Connection, key: &str) -> String {
 }
 
 fn load_ai_settings(conn: &rusqlite::Connection) -> AiSettings {
-    let timeout = read_setting(conn, "ai_timeout").parse::<u64>().unwrap_or(60).clamp(5, 600);
+    // 默认 300s（2026-11-04）：生图接口单张常需 30–90s，多张并发经同一
+    // 代理渠道还会被排队（第二张总时长 = 排队 + 生成），旧默认 60s 是
+    // 文本对话量级——多张生成必现「operation timed out」（用户实测 1/2
+    // 张成功）；reqwest 总超时无法区分「还在生成」与「连接挂死」，只能
+    // 给足量级，显式设置仍以其为准。
+    let timeout = read_setting(conn, "ai_timeout").parse::<u64>().unwrap_or(300).clamp(5, 600);
     AiSettings { timeout_secs: timeout }
 }
 
@@ -231,7 +236,8 @@ pub async fn ai_test_channel(app: AppHandle, channel_id: String) -> Result<Value
         let channel = load_channel(&conn, &channel_id)?;
         let global_model = read_setting(&conn, "ai_model");
         let model = channel_model_or_global(&channel.model, &global_model)?;
-        let timeout = read_setting(&conn, "ai_timeout").parse::<u64>().unwrap_or(60).clamp(5, 600);
+        // 与生成同一默认（测速发的是真实最小生图请求，排队时同样超 60s）。
+        let timeout = read_setting(&conn, "ai_timeout").parse::<u64>().unwrap_or(300).clamp(5, 600);
         (channel, model, timeout)
     };
 

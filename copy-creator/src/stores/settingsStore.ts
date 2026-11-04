@@ -222,7 +222,8 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
   clipboardExclusions: "",
   findReplaceHistory: [],
   aiModel: "",
-  aiTimeout: 60,
+  // 与后端默认一致（生图请求分钟级量级，60s 是文本对话量级会掐断多张生成）。
+  aiTimeout: 300,
   aiChannels: [],
   aiStrategy: "balance",
   aiBalancePriceWeight: 40,
@@ -284,7 +285,7 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
         clipboardExclusions: settings.clipboard_exclusions || "",
         findReplaceHistory: parseFindHistory(settings.find_replace_history),
         aiModel: settings.ai_model || "",
-        aiTimeout: Number.parseInt(settings.ai_timeout || "60", 10) || 60,
+        aiTimeout: Number.parseInt(settings.ai_timeout || "300", 10) || 300,
         aiStrategy: parseAiStrategy(settings.ai_strategy),
         aiBalancePriceWeight: clampWeight(settings.ai_balance_price_weight),
         aiFailover: settings.ai_failover === "1",
