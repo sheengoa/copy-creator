@@ -105,7 +105,7 @@ export function ParamCombo({
           }}
         />
       )}
-      <NodeHint text={toggleTitle}>
+      <NodeHint text={toggleTitle} side>
         <button
           type="button"
           className={`fc-combo-toggle${open ? " is-open" : ""}`}

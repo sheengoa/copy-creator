@@ -50,7 +50,7 @@ export function GenImageBody({ node }: NodeProps) {
       <div className={`fc-gen-params${busyOn ? " is-loaded" : ""}`}>
         <div className="fc-load-entry-clip">
           <div className="fc-param">
-            <NodeHint text={t("canvas.genModelLabel")} className="fc-param-ico-host">
+            <NodeHint text={t("canvas.genModelLabel")} className="fc-param-ico-host" side>
               <span className="fc-param-ico">{Icons.chip}</span>
             </NodeHint>
             <ParamCombo
@@ -63,7 +63,7 @@ export function GenImageBody({ node }: NodeProps) {
             />
           </div>
           <div className="fc-param">
-            <NodeHint text={t("canvas.genSizeLabel")} className="fc-param-ico-host">
+            <NodeHint text={t("canvas.genSizeLabel")} className="fc-param-ico-host" side>
               <span className="fc-param-ico">{Icons.crop}</span>
             </NodeHint>
             <ParamCombo
@@ -75,7 +75,7 @@ export function GenImageBody({ node }: NodeProps) {
               toggleTitle={t("canvas.comboPresets")}
               onCommit={(size) => commitImageParams(node, { size })}
             />
-            <NodeHint text={t("canvas.genCountLabel")}>
+            <NodeHint text={t("canvas.genCountLabel")} side>
               <div className="fc-stepper">
                 <button
                   type="button"

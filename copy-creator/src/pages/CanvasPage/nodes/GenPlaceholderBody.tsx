@@ -21,7 +21,7 @@ export function GenPlaceholderBody({ node }: NodeProps) {
   return (
     <div className="fc-node-form">
       <div className="fc-param">
-        <NodeHint text={t("canvas.genModelLabel")} className="fc-param-ico-host">
+        <NodeHint text={t("canvas.genModelLabel")} className="fc-param-ico-host" side>
           <span className="fc-param-ico">{Icons.chip}</span>
         </NodeHint>
         <ParamCombo

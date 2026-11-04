@@ -49,6 +49,16 @@
   transform: translate(-50%, 0);
 }
 
+/* 卡侧弹出形态（参数行专用）：左缘对齐节点卡右外缘，垂直居中锚点行；
+   卡右贴视口缘时翻到卡左侧。 */
+.fc-hint.is-side {
+  transform: translate(0, -50%);
+}
+
+.fc-hint.is-side.is-flip {
+  transform: translate(-100%, -50%);
+}
+
 @keyframes fc-hint-in {
   from {
     opacity: 0;
