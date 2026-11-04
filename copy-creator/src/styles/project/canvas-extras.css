@@ -513,6 +513,7 @@
 .pc-addmenu-search input::placeholder { color: rgba(31, 35, 65, 0.38); }
 .pc-addmenu-esc {
   flex: none;
+  pointer-events: none;
   font-size: 9px;
   font-weight: 600;
   letter-spacing: 0.04em;
