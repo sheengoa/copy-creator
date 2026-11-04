@@ -24,7 +24,7 @@ interface CollectionDragState {
   order: string[];
 }
 
-export function CollectionBody({ node, scale }: NodeProps) {
+export function CollectionBody({ node, scale, services }: NodeProps) {
   const { t } = useTranslation();
   const nodes = useCanvasStore((s) => s.nodes);
   const connections = useCanvasStore((s) => s.connections);
@@ -171,6 +171,10 @@ export function CollectionBody({ node, scale }: NodeProps) {
                 data-idx={i}
                 data-conn={item.connId}
                 style={shift ? { transform: `translateY(${shift}px)` } : undefined}
+                /* 行点击 = 追踪源节点（2026-11-04）：平移居中 + 边缘脉冲
+                   闪烁；把手/移除各自挡冒泡，排序拖拽的 click 由视口手势
+                   压制（suppressClickRef）。 */
+                onClick={() => services.locateNode(item.from.id)}
               >
                 <span className="fc-collection-idx">{i + 1}</span>
                 {item.kind === "image" && item.path ? (
@@ -186,6 +190,7 @@ export function CollectionBody({ node, scale }: NodeProps) {
                     className="fc-collection-handle"
                     aria-label={t("canvas.collectionSortHint")}
                     onPointerDown={(e) => startReorder(i, e)}
+                    onClick={(e) => e.stopPropagation()}
                   >
                     {Icons.drag}
                   </button>

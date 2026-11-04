@@ -77,6 +77,9 @@ export default function FreeCanvas({ canvasId }: { canvasId: string }) {
   const [pickerForNode, setPickerForNode] = useState<string | null>(null);
   /** 大图预览（预览图像节点双击）：暂存产物路径。 */
   const [lightboxSrc, setLightboxSrc] = useState("");
+  /** 合集行定位请求（2026-11-04）：n 自增让同节点连点也能重触发；
+   *  实际平移 + 脉冲在手势钩子构建后的效果里执行（那边才有 pulseNodes）。 */
+  const [locate, setLocate] = useState<{ id: string; n: number } | null>(null);
 
   // 渲染后同步镜像：窗口级手势回调读 ref 免闭包陈旧（react-hooks/refs
   // 禁止渲染期写 ref，统一在 effect 提交）。
@@ -209,6 +212,7 @@ export default function FreeCanvas({ canvasId }: { canvasId: string }) {
   const canvasServices: NodeServices = {
     openLightbox: (path) => setLightboxSrc(path),
     upstream: (nodeId) => upstreamMediaOf(nodeId),
+    locateNode: (nodeId) => setLocate((p) => ({ id: nodeId, n: (p?.n ?? 0) + 1 })),
     pickMedia: (node, source) => {
       if (source === "library") pickFromLibrary(node);
       else void pickFromDisk(node);
@@ -254,6 +258,33 @@ export default function FreeCanvas({ canvasId }: { canvasId: string }) {
     canvasServices,
     pushUndo,
   });
+
+  // 合集行定位执行（2026-11-04）：canvasServices 先于手势钩子构建，
+  // 行点击经 locate 状态中转到这里——先触发边缘脉冲闪烁（复用出生脉冲
+  // pc-spawn 的现成视觉语言，不另做一套光晕），源节点四周留 48px 边距
+  // 仍不完整可见时再平移居中（缩放不动，与手势平移同落库）。
+  // 处理完立即清零：locate 是一次性请求，残留会在 view/memberFrame 等
+  // 依赖因无关更新换身份时把旧定位重放（拖拽排序落库即复现，浏览器实测）。
+  useEffect(() => {
+    if (!locate) return;
+    setLocate(null);
+    pulseNodes([locate.id]);
+    const rect = vpRef.current?.getBoundingClientRect();
+    const box = memberFrame(locate.id);
+    if (!rect || rect.width === 0 || !box) return;
+    const { scale, x, y } = view;
+    const pad = 48;
+    const sx = box.x * scale + x;
+    const sy = box.y * scale + y;
+    if (sx >= pad && sy >= pad && sx + box.w * scale <= rect.width - pad && sy + box.h * scale <= rect.height - pad) return;
+    const next = {
+      x: rect.width / 2 - (box.x + box.w / 2) * scale,
+      y: rect.height / 2 - (box.y + box.h / 2) * scale,
+      scale,
+    };
+    setView(next);
+    saveView(next);
+  }, [locate, memberFrame, pulseNodes, saveView, setLocate, setView, view, vpRef]);
 
   // ── 键盘快捷键（engine/useKeyboardShortcuts）：删除/撤销/全选/复制粘贴/打组 ──
   useKeyboardShortcuts(

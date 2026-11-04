@@ -48,6 +48,9 @@ export interface NodeServices {
   openLightbox(path: string): void;
   /** 上游产物聚合查询（生成输入收集 / 预览 / 双击放大共用）。 */
   upstream(nodeId: string): UpstreamMedia | null;
+  /** 合集成员行点击定位（2026-11-04）：源节点不在视口内则平移居中，
+   *  并做边缘脉冲闪烁（复用出生脉冲 pc-spawn 视觉）方便快速定位。 */
+  locateNode(nodeId: string): void;
 }
 
 export interface NodeProps {
