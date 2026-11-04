@@ -21,7 +21,7 @@ export function PreviewMediaBody({ node, services }: NodeProps) {
         path ? (
           <NodeHint text={t("canvas.previewOpen")}>
             <button className="fc-preview-media" onClick={() => services.openLightbox(path)}>
-              <ResourceThumb path={path} className="fc-media-box" />
+              <ResourceThumb path={path} className="fc-media-box" ratioFit />
             </button>
           </NodeHint>
         ) : (

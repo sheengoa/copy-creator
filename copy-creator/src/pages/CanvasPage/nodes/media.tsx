@@ -8,12 +8,20 @@ import { resolveCanvasMediaPath, resolveCanvasMediaUrl } from "./mediaPath";
 // 供各节点家族模块复用。路径归一见 mediaPath.ts。自 FreeCanvas.tsx 整体
 // 迁出（基座化 2026-11-03）。
 
-/** 资源缩略图：mediaUrl 域层唯一出口，路径变化重解析。 */
-export function ResourceThumb({ path, className }: { path: string; className?: string }) {
+/** 资源缩略图：mediaUrl 域层唯一出口，路径变化重解析。
+ *  ratioFit（2026-11-04）：内容节点媒体盒的黑边根除——img 元素盒（全宽
+ *  × 330 高帽）大于图像盒时 contain 留黑边（竖版加载图像左右黑条，与
+ *  视频侧修复前同病），onLoad 读 naturalWidth/Height 后把宽度收敛到
+ *  「容器宽与 330px 高帽按比例换算的较小值」并锁 aspect-ratio，与
+ *  MediaPlayback 的 ratioFit 同一公式（直接复用同套几何）。url 经异步
+ *  解析后才赋给 src，onLoad 监听必先就位，缓存图也不会漏计。 */
+export function ResourceThumb({ path, className, ratioFit = false }: { path: string; className?: string; ratioFit?: boolean }) {
   const [url, setUrl] = useState<string | null>(null);
+  const [ratio, setRatio] = useState<{ w: number; h: number } | null>(null);
   useEffect(() => {
     let alive = true;
     setUrl(null);
+    setRatio(null);
     resolveCanvasMediaUrl(path)
       .then((u) => {
         if (alive) setUrl(u);
@@ -23,8 +31,28 @@ export function ResourceThumb({ path, className }: { path: string; className?: s
       alive = false;
     };
   }, [path]);
+  const fitStyle =
+    ratioFit && ratio && ratio.w > 0 && ratio.h > 0
+      ? {
+          width: `min(100%, ${Math.round(330 * (ratio.w / ratio.h))}px)`,
+          aspectRatio: `${ratio.w} / ${ratio.h}`,
+          marginInline: "auto",
+        }
+      : undefined;
   if (!url) return null;
-  return <img className={className} src={url} alt="" draggable={false} />;
+  return (
+    <img
+      className={className}
+      style={fitStyle}
+      src={url}
+      alt=""
+      draggable={false}
+      onLoad={(e) => {
+        const el = e.currentTarget;
+        setRatio({ w: el.naturalWidth, h: el.naturalHeight });
+      }}
+    />
+  );
 }
 
 /** 画布产物播放器（保存节点的视频/音频产物预览用）：统一播放条
@@ -60,7 +88,7 @@ export type SaveProductKind = "image" | "video" | "audio" | "other";
 export function SaveProductView({ path, kind }: { path: string; kind: SaveProductKind }) {
   if (kind === "video") return <CanvasMediaPlayer kind="video" path={path} />;
   if (kind === "audio") return <CanvasMediaPlayer kind="audio" path={path} />;
-  if (kind === "image") return <ResourceThumb path={path} className="fc-media-box" />;
+  if (kind === "image") return <ResourceThumb path={path} className="fc-media-box" ratioFit />;
   return <span className="fc-save-cell-icon">{Icons.file}</span>;
 }
 

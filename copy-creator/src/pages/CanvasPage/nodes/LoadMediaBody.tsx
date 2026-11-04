@@ -19,7 +19,7 @@ export function LoadMediaBody({ node, services }: NodeProps) {
       {node.resource_path ? (
         <div className="fc-load-media">
           {kind === "image" ? (
-            <ResourceThumb path={node.resource_path} className="fc-media-box" />
+            <ResourceThumb path={node.resource_path} className="fc-media-box" ratioFit />
           ) : (
             <MediaPlayback kind={kind} path={node.resource_path} ratioFit={kind === "video"} />
           )}
