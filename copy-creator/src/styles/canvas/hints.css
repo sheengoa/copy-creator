@@ -174,7 +174,10 @@
   flex: none;
   display: flex;
   align-items: stretch;
-  padding: 6px 0;
+  /* 上下内距 4.5px（2026-11-04）：按钮定高 20px 后容器 29px，与同行
+     尺寸输入框（约 29px，6px 内距 + 12.5px 字号 1.35 行高）精确齐平；
+     6px 内距会把容器撑到 32px、高出输入框一截。 */
+  padding: 4.5px 0;
   border-radius: 8px;
   background: rgba(255, 255, 255, 0.92);
   box-shadow: 0 1px 2.5px rgba(31, 35, 65, 0.1), 0 0 0 0.5px rgba(0, 0, 0, 0.055);
