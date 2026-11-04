@@ -29,6 +29,7 @@ import "./styles/project/canvas-extras.css";
 import "./styles/project/cards.css";
 // 画布域共享节点 chrome（工程画布与自由画布同源配方）
 import "./styles/canvas/shared-chrome.css";
+import "./styles/project/detail-window.css";
 import "./styles/phrases.css";
 import "./styles/settings.css";
 import "./styles/canvas/shell.css";

@@ -17,7 +17,7 @@ import type {
   PromptPh,
   ScriptPh,
 } from "../../../ResourcePage/ProjectCanvas/types";
-import type { DetailForState } from "../../../ResourcePage/ProjectCanvas/layers/NodeExtras";
+import type { DetailTarget } from "../../../ResourcePage/ProjectShell/DetailWindow";
 
 // 工程节点内容层的数据源（工程视图节点化 2026-11-05 阶段 B）：工程节点
 // defs 的 Component 经此读取工程库概览/按集画布状态与操作——旧 ProjectCanvas
@@ -57,8 +57,8 @@ export interface ProjectCanvasContextValue {
   setShotForm(form: { id: string; sceneId: string; description: string; dialogue: string } | null): void;
   deleteShot(shotId: string): void;
   /** 详情窗/选择器（阶段 D 重做详情窗，B 阶段先接旧状态位）。 */
-  detailFor: DetailForState | null;
-  setDetailFor: (value: DetailForState | null) => void;
+  detailFor: DetailTarget | null;
+  setDetailFor: (value: DetailTarget | null) => void;
   removeGroup(groupId: string): void;
   detachScript(): unknown;
   removeScriptPh(phId: string): void;

@@ -798,6 +798,28 @@
         "prop": "道具",
         "prompt": "提示词"
       }
+    },
+    "detail": {
+      "refs": "参考图",
+      "refCount": "共 {{n}} 张",
+      "loadMore": "滚动加载剩余 {{rest}} 张…",
+      "voice": "音色",
+      "voiceEmpty": "未设置音色",
+      "voicePick": "更换",
+      "profile": "人设 / 提示词",
+      "stats": "统计",
+      "statLine": "出场 {{episodes}} 集 · 接入 {{segments}} 个片段",
+      "output": "产出",
+      "outputEmpty": "未挂产出",
+      "inputs": "输入清单",
+      "groupLine": "资料组 · {{n}} 名成员",
+      "remove": "移除",
+      "attachPick": "批量挂靠（可多选）",
+      "attachN": "挂靠 {{n}} 项",
+      "loadEntity": "从库中装入实体",
+      "empty": "暂无内容",
+      "setAvatar": "设为头像",
+      "pendingPh": "画布占位（未装入）"
     }
   },
   "common": {

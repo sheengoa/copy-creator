@@ -52,7 +52,7 @@ import type { ViewState } from "./engine/useViewport";
 
 // ── 手势状态类型与连线几何已上移 engine/（gestureTypes.ts / wireGeom.ts）──
 
-export default function FreeCanvas({ canvasId, renderWires }: { canvasId: string; /** 连线渲染插槽（工程视图节点化阶段 C）：提供时替代内置连线层，工程作用域经此接入旧 WiresLayer（gen 链/端口线/暂存线/成片线）。 */ renderWires?: (ctx: { view: ViewState; vpSize: { w: number; h: number } | null; liftedWire: { connId: string; fromKey: string } | null; wireDraft: { d: string; invalid: boolean; color?: string } | null; outPointOf(key: string): { x: number; y: number } | null; inPointOf(key: string, portId?: string): { x: number; y: number } | null }) => React.ReactNode }) {
+export default function FreeCanvas({ canvasId, renderWires, onOpenNodeDetail }: { canvasId: string; /** 工程作用域注入：双击节点开详情（自由画布不传，无此能力）。 */ onOpenNodeDetail?: (node: CanvasNode) => void; /** 连线渲染插槽（工程视图节点化阶段 C）：提供时替代内置连线层，工程作用域经此接入旧 WiresLayer（gen 链/端口线/暂存线/成片线）。 */ renderWires?: (ctx: { view: ViewState; vpSize: { w: number; h: number } | null; liftedWire: { connId: string; fromKey: string } | null; wireDraft: { d: string; invalid: boolean; color?: string } | null; outPointOf(key: string): { x: number; y: number } | null; inPointOf(key: string, portId?: string): { x: number; y: number } | null }) => React.ReactNode }) {
   const { t } = useTranslation();
   // 几何层数据源（dataContext）：默认实现转发 canvasStore；工程视图
   // （ProjectShell）注入工程 provider 后本组件与其引擎链零改动复用。
@@ -213,6 +213,7 @@ export default function FreeCanvas({ canvasId, renderWires }: { canvasId: string
     openLightbox: (path) => setLightboxSrc(path),
     upstream: (nodeId) => upstreamMediaOf(nodeId),
     locateNode: (nodeId) => setLocate((p) => ({ id: nodeId, n: (p?.n ?? 0) + 1 })),
+    ...(onOpenNodeDetail ? { openNodeDetail: (node: CanvasNode) => onOpenNodeDetail(node) } : {}),
     pickMedia: (node, source) => {
       if (source === "library") pickFromLibrary(node);
       else void pickFromDisk(node);

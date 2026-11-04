@@ -13,7 +13,7 @@ import {
   type PendingLink,
 } from "../ProjectCanvas/types";
 import type { LiftedWire } from "../ProjectCanvas/engine/useGestures";
-import type { DetailForState } from "../ProjectCanvas/layers/NodeExtras";
+import { ProjectDetailWindow, type DetailTarget, type DetailWindowOps } from "./DetailWindow";
 import { usePerEpisodeStorage } from "../usePerEpisodeStorage";
 import { useCanvasData } from "../ProjectCanvas/engine/useCanvasData";
 import { useNodeMetrics } from "../ProjectCanvas/engine/useNodeMetrics";
@@ -21,6 +21,7 @@ import { usePorts } from "../ProjectCanvas/engine/usePorts";
 import { WIRES_VIEWPORT_PAD } from "../ProjectCanvas/layout";
 import { WiresLayer } from "../ProjectCanvas/layers/WiresLayer";
 import { buildProjectCanvasApi, buildProjectNodes } from "./projectProvider";
+import type { EntityPhKind } from "../ProjectCanvas/types";
 
 /** updateEpisode 补丁的状态字段（store 的 ProjectEpisodeStatus）。 */
 type ProjectEpisodeStatusLike = Parameters<ReturnType<typeof useProjectStore.getState>["updateEpisode"]>[1]["status"];
@@ -70,6 +71,8 @@ export default function ProjectCanvasShell({
     linkNode,
     unlinkNode,
     unlinkAssets,
+    saveCharacter,
+    setCharacterVoice,
   } = useProjectStore(
     useShallow((state) => ({
       overview: state.overview,
@@ -94,6 +97,8 @@ export default function ProjectCanvasShell({
       linkNode: state.linkNode,
       unlinkNode: state.unlinkNode,
       unlinkAssets: state.unlinkAssets,
+      saveCharacter: state.saveCharacter,
+      setCharacterVoice: state.setCharacterVoice,
     })),
   );
 
@@ -122,7 +127,7 @@ export default function ProjectCanvasShell({
   );
 
   // 详情窗状态（阶段 D 重做详情窗前，工具按钮先接状态位）。
-  const [detailFor, setDetailFor] = useState<DetailForState | null>(null);
+  const [detailFor, setDetailFor] = useState<DetailTarget | null>(null);
 
   const promptUntitled = t("project.canvas.promptUntitled");
   const ephTitle = t("project.canvas.ephTitle");
@@ -298,10 +303,82 @@ export default function ProjectCanvasShell({
     );
   };
 
+  // ── 详情窗装配（阶段 D）：按 detailFor 分派骨架与操作集 ──
+  const closeDetail = () => setDetailFor(null);
+  const detailOps: DetailWindowOps = {
+    libraryRoot,
+    overview,
+    segments,
+    nodeLinks,
+    pendingLinks,
+    characters,
+    locations,
+    props,
+    setVoice: (id, voicePath) => void setCharacterVoice(id, voicePath),
+    setAvatar: (character, refPath) => {
+      void saveCharacter({
+        id: character.id,
+        name: character.name,
+        role_tag: character.role_tag,
+        bio: character.bio,
+        prompt: character.prompt,
+        avatar_path: refPath,
+        reference_paths: character.reference_paths,
+        voice_path: character.voice_path ?? "",
+      });
+    },
+    loadEntity: (ephId, kind, entityId) => {
+      // 装入：先关联到集（概览带出实体节点），再把该占位的暂存线转正为
+      // node_link（语义对齐旧占位转正），最后移除占位、跳到实体详情。
+      void (async () => {
+        if (kind === "character") await setEpisodeCharacters(episodeId, [...new Set([...(overview?.episode.character_ids ?? []), entityId])]);
+        else if (kind === "location") await setEpisodeLocations(episodeId, [...new Set([...(overview?.episode.location_ids ?? []), entityId])]);
+        else await setEpisodeProps(episodeId, [...new Set([...(overview?.episode.prop_ids ?? []), entityId])]);
+        const phKey = `eph:${ephId}`;
+        for (const p of pendingLinks.filter((l) => l.fromKey === phKey)) {
+          linkNode(episodeId, kind, entityId, p.toSegmentId, p.toPort as Parameters<typeof linkNode>[4], "");
+        }
+        persistPendingLinks(pendingLinks.filter((l) => l.fromKey !== phKey));
+        data.persistEntityPhs(data.entityPhs.filter((ph) => ph.id !== ephId));
+        setDetailFor({ kind: "info", group: kind, sourceKey: `${kind === "character" ? "char" : kind === "location" ? "loc" : "prop"}:${entityId}` });
+      })();
+    },
+    removeLink: (row) => {
+      if (row.pending) {
+        persistPendingLinks(pendingLinks.filter((l) => !(l.fromKey === row.fromKey && l.toSegmentId === row.toSegment && l.toPort === row.toPort)));
+        return;
+      }
+      // 正式行：组认领线整组断（与切线同语义）。
+      const group = ports.segWires.find((w) => w.links[0]?.id === row.rowId);
+      const rows = group && group.links[0]?.id === row.rowId ? group.links : nodeLinks.filter((l) => l.id === row.rowId);
+      rows.forEach((l) => {
+        void unlinkNode(l.from_kind, l.from_id, l.to_segment, l.to_port, l.owner_key);
+      });
+    },
+    attachEntities: (segmentId, port, entities) => {
+      entities.forEach((e) => {
+        linkNode(episodeId, e.kind, e.id, segmentId, port as Parameters<typeof linkNode>[4], "");
+      });
+    },
+    onClose: closeDetail,
+  };
+
   return (
     <CanvasDataContext.Provider value={api}>
       <ProjectCanvasContext.Provider value={projectCtx}>
-        <FreeCanvas canvasId={episodeId} renderWires={renderWires} />
+        <FreeCanvas
+          canvasId={episodeId}
+          renderWires={renderWires}
+          onOpenNodeDetail={(node) => {
+            const key = node.id;
+            if (key.startsWith("segment:")) setDetailFor({ kind: "segment", id: key.slice(8) });
+            else if (key.startsWith("eph:")) setDetailFor({ kind: "entityPh", id: key.slice(4), group: node.type as EntityPhKind });
+            else if (/^(char|loc|prop|grp):/.test(key)) setDetailFor({ kind: "info", group: node.type as EntityPhKind, sourceKey: key });
+          }}
+        />
+        {detailFor && (detailFor.kind === "info" || detailFor.kind === "segment" || detailFor.kind === "entityPh") && (
+          <ProjectDetailWindow target={detailFor} ops={detailOps} />
+        )}
       </ProjectCanvasContext.Provider>
     </CanvasDataContext.Provider>
   );

@@ -38,6 +38,9 @@ export const segmentDef: NodeDefinition = {
     })),
     out: { mediaKind: "video", dataType: "video", color: WIRE_TYPE_COLORS.video },
   },
+  onDoubleClick: (node, services) => {
+    services.openNodeDetail?.(node);
+  },
   Component: SegmentBody,
   ToolsExtra: SegmentTools,
 };

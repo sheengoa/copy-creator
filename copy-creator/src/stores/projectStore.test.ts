@@ -216,6 +216,7 @@ describe("projectStore", () => {
       prompt: "中年掌柜…",
       avatarPath: "角色库/陆离/设定图.png",
       referencePaths: "[]",
+      voicePath: "",
     });
 
     const okEdit = await useProjectStore.getState().saveCharacter({
@@ -236,6 +237,7 @@ describe("projectStore", () => {
       prompt: "",
       avatarPath: "",
       referencePaths: "[]",
+      voicePath: "",
     });
   });
 

@@ -113,8 +113,8 @@ export function EntityViewTool({ node }: { node: CanvasNode }) {
         type="button"
         onPointerDown={(e) => e.stopPropagation()}
         onClick={() => {
-          if (node.id.startsWith("eph:")) ctx.setDetailFor({ kind: "entityPh", id: node.id.slice(4) });
-          else ctx.setDetailFor({ kind: "info", group: node.type as EntityPhKind, sourceKey: node.id, scope: "current" });
+          if (node.id.startsWith("eph:")) ctx.setDetailFor({ kind: "entityPh", id: node.id.slice(4), group: node.type as EntityPhKind });
+          else ctx.setDetailFor({ kind: "info", group: node.type as EntityPhKind, sourceKey: node.id });
         }}
       >
         {Icons.expand}
@@ -262,7 +262,7 @@ export function SegmentTools({ node }: { node: CanvasNode }) {
         <button
           type="button"
           onPointerDown={(e) => e.stopPropagation()}
-          onClick={() => ctx.setDetailFor({ kind: "segment", id: segmentId, scopes: { chars: "current", locs: "current", props: "current" } })}
+          onClick={() => ctx.setDetailFor({ kind: "segment", id: segmentId })}
         >
           {Icons.file}
         </button>
@@ -331,7 +331,7 @@ export function PromptPaperTools({ node }: { node: CanvasNode }) {
             ctx.setPromptPickTarget(node.id);
             ctx.setPromptPickOpen(true);
           } else {
-            ctx.setDetailFor({ kind: "promptPh", id: phId });
+            ctx.setDetailFor({ kind: "promptPh", id: phId } as never);
           }
         }}
       >

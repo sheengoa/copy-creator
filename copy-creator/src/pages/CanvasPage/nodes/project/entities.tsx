@@ -28,6 +28,11 @@ const defOfKind = (kind: EntityPhKind): NodeDefinition => ({
     // 参考图输出口（占位节点同款）：上画布即可接入工作流。
     out: { mediaKind: "image", dataType: "image", color: PORT_COLORS[kind] },
   },
+  // 双击开详情窗（占位=实体装入；实体/组=实体详情），经 services 通道
+  // 由 Shell 分派（工程作用域注入）。
+  onDoubleClick: (node, services) => {
+    services.openNodeDetail?.(node);
+  },
   Component: EntityBody,
   ToolsExtra: EntityViewTool,
 });

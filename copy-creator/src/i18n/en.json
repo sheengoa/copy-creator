@@ -798,6 +798,28 @@
         "prop": "Prop",
         "prompt": "Prompt"
       }
+    },
+    "detail": {
+      "refs": "Reference images",
+      "refCount": "{{n}} total",
+      "loadMore": "Scroll to load {{rest}} more…",
+      "voice": "Voice",
+      "voiceEmpty": "No voice set",
+      "voicePick": "Change",
+      "profile": "Profile / Prompt",
+      "stats": "Stats",
+      "statLine": "In {{episodes}} episodes · wired to {{segments}} segments",
+      "output": "Output",
+      "outputEmpty": "No output",
+      "inputs": "Inputs",
+      "groupLine": "Group · {{n}} members",
+      "remove": "Remove",
+      "attachPick": "Attach (multi-select)",
+      "attachN": "Attach {{n}}",
+      "loadEntity": "Load entity from library",
+      "empty": "Empty",
+      "setAvatar": "Set as avatar",
+      "pendingPh": "Canvas placeholder (unloaded)"
     }
   },
   "common": {
