@@ -1,4 +1,4 @@
-import type { CanvasLayoutEntry, CanvasNode, CanvasNodeType } from "../../../stores/canvasStore";
+import type { CanvasLayoutEntry, CanvasNode } from "../../../stores/canvasStore";
 
 // 画布手势共享类型与常量（自 FreeCanvas.tsx 零改动搬运，2026-11-03 引擎
 // 拆分阶段 6a）。引擎框架 fork 自 ProjectCanvas——回灌对齐时按
@@ -56,7 +56,8 @@ export type DragState =
       kind: "addnode";
       sx: number; sy: number; moved: boolean;
       fox: number; foy: number;
-      frameKey: CanvasNodeType;
+      /** 新节点类型（工程作用域为工程类型 id，放宽为 string）。 */
+      frameKey: string;
       /** 拖线到空白建节点：创建后自动接上这条线。 */
       wire?: { fromKey: string; fromDir: "in" | "out"; fromPortId: string };
       /** 摘线到空白建节点：创建后线改接新节点（原连线行删除）。 */

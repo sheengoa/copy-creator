@@ -430,6 +430,7 @@ export default function FreeCanvas({ canvasId }: { canvasId: string }) {
           connections={connections}
           addMenuOpen={!!addMenu}
           onSeed={() => void seedTemplate()}
+          hidden={data.scope === "project"}
         />
 
         <DropHintOverlay visible={dropHint} />

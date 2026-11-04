@@ -73,14 +73,16 @@ export function ZoomBar({ view, zoomAt, vpRef }: {
 }
 
 /** 空画布示意：一键创建 文本→图像生成→预览 最小工作流。 */
-export function SeedButton({ nodes, connections, addMenuOpen, onSeed }: {
+export function SeedButton({ nodes, connections, addMenuOpen, onSeed, hidden }: {
   nodes: CanvasNode[];
   connections: unknown[];
   addMenuOpen: boolean;
   onSeed(): void;
+  /** 工程作用域隐藏（工程画布的空集引导走默认工作流种子，阶段 E1 迁入）。 */
+  hidden?: boolean;
 }) {
   const { t } = useTranslation();
-  if (nodes.length || connections.length || addMenuOpen) return null;
+  if (hidden || nodes.length || connections.length || addMenuOpen) return null;
   return (
     <button className="fc-seed" onClick={onSeed}>
       <span className="fc-seed-title">{t("canvas.seedCta")}</span>

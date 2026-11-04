@@ -38,6 +38,9 @@ export interface CanvasNodePatch {
 }
 
 export interface CanvasDataApi {
+  /** 作用域（工程视图节点化 2026-11-05）：建节点菜单/文件拖入分发按它
+   *  过滤节点 def 的 scope，两画布完全互斥；缺省实现 = "free"。 */
+  scope: "free" | "project";
   // ── 读（快照；响应式订阅见下方三个 use*） ──
   nodes(): CanvasNode[];
   connections(): CanvasConnection[];
@@ -84,6 +87,7 @@ const useStoreGroups = () => useCanvasStore((s) => s.groups);
 /** 默认实现（自由画布）：逐方法转发 canvasStore，canvasId 烤入闭包。 */
 export function createStoreCanvasData(canvasId: string): CanvasDataApi {
   return {
+    scope: "free",
     nodes: () => useCanvasStore.getState().nodes,
     connections: () => useCanvasStore.getState().connections,
     groups: () => useCanvasStore.getState().groups,

@@ -900,7 +900,15 @@
       "collection_image": "Image Collection",
       "collection_text": "Text Collection",
       "collection_video": "Video Collection",
-      "note": "Note"
+      "note": "Note",
+      "shot": "Shot",
+      "segment": "Segment",
+      "character": "Character",
+      "location": "Location",
+      "prop": "Prop",
+      "scriptPaper": "Script paper",
+      "promptPaper": "Prompt paper",
+      "output": "Final cut"
     },
     "port": {
       "text": "Text",
@@ -913,7 +921,8 @@
       "load": "Load",
       "collection": "Collection",
       "output": "Output",
-      "misc": "Other"
+      "misc": "Other",
+      "project": "Project"
     },
     "typeHint": {
       "gen_image": "Text-to-image / image-to-image",
@@ -937,7 +946,15 @@
       "collection_image": "Feed multiple images to gen in order",
       "collection_text": "Join multiple texts in order",
       "collection_video": "Collect multiple videos in order",
-      "note": "Double-click to edit"
+      "note": "Double-click to edit",
+      "shot": "Asset grid card inside scene frame",
+      "segment": "AI-generated video segment",
+      "character": "Blank holder, load entity on dbl-click",
+      "location": "Blank holder, load entity on dbl-click",
+      "prop": "Blank holder, load entity on dbl-click",
+      "scriptPaper": "Adds an empty paper, attach file on dbl-click",
+      "promptPaper": "Pick one from prompt library on dbl-click",
+      "output": "Total output of this episode"
     },
     "pathPlaceholder": "Resource Path",
     "genButton": "Generate",

@@ -2,9 +2,10 @@ import { useEffect, useRef, useState } from "react";
 import type { CSSProperties } from "react";
 import { useTranslation } from "react-i18next";
 import { Icons } from "../../../components/Icons";
-import type { CanvasNode, CanvasNodeType } from "../../../stores/canvasStore";
+import type { CanvasNode } from "../../../stores/canvasStore";
 import type { RefObject } from "react";
-import { menuGroups, menuIconOf, NODE_DEFS, PORT_DEFS } from "../nodes/registry";
+import { useCanvasData } from "../dataContext";
+import { menuGroups, menuIconOf, NODE_DEFS, portFits, scopeFits } from "../nodes/registry";
 import { WheelGate } from "../nodes/WheelGate";
 import type { DragState } from "../engine/gestureTypes";
 import type { AddMenuState } from "../engine/useCanvasGestures";
@@ -14,6 +15,8 @@ import type { AddMenuState } from "../engine/useCanvasGestures";
 // 分组标题吸顶带计数 + 底部键位提示条；键盘 ↑↓ 选择、↵ 添加（与指针
 // 建节点共用 commitAddNode，落菜单打开点）。分组过滤、连线续接的
 // accepts 过滤、贴近视口下缘的限高滚动不变。
+// 作用域互斥（2026-11-05 阶段 B）：按数据源 scope 过滤 def.scope——
+// 工程视图只出 project+both，自由画布只出 free+both。
 export function AddMenu({
   addMenu,
   addMenuQuery,
@@ -36,27 +39,29 @@ export function AddMenu({
   nodes: CanvasNode[];
 }) {
   const { t } = useTranslation();
+  const scope = useCanvasData().scope;
   const listRef = useRef<HTMLDivElement | null>(null);
   /** 键盘导航的扁平序号（可见条目顺序）；悬停同步它，滚动跟随高亮。 */
   const [activeIdx, setActiveIdx] = useState(0);
 
   // 连线续接的 accepts 过滤（拖线/摘线到空白时只列能接上的节点类型）。
-  const menuFilterType = (type: CanvasNodeType): boolean => {
+  const menuFilterType = (type: string): boolean => {
     const pending = addMenu.wire ?? (addMenu.detached ? { fromKey: addMenu.detached.fromKey, fromDir: "in" as const, fromPortId: "" } : null);
     if (!pending) return true;
     const fromNode = nodes.find((n) => n.id === pending.fromKey);
     if (!fromNode) return true;
+    const io = NODE_DEFS[type].ports;
     if (pending.fromDir === "out") {
       // 正拖：新节点需要能接住上游类型的输入口。
-      return PORT_DEFS[type].ins.some((p) => p.accepts.includes(fromNode.type));
+      return io.ins.some((p) => portFits(p, fromNode));
     }
     if (pending.fromDir === "in" && !addMenu.detached) {
       // 反拖：新节点是上游，需有 out 且被源输入口接受。
-      const inDef = PORT_DEFS[fromNode.type].ins.find((p) => p.id === pending.fromPortId);
-      return !!PORT_DEFS[type].out && (!inDef || inDef.accepts.includes(type));
+      const inDef = NODE_DEFS[fromNode.type].ports.ins.find((p) => p.id === pending.fromPortId);
+      return !!io.out && (!inDef || portFits(inDef, { type, metadata: {} }));
     }
     // 摘线：新节点作为下游，需要能接住原上游的口。
-    return PORT_DEFS[type].ins.some((p) => p.accepts.includes(fromNode.type));
+    return io.ins.some((p) => portFits(p, fromNode));
   };
 
   const query = addMenuQuery.trim().toLowerCase();
@@ -64,9 +69,9 @@ export function AddMenu({
   const groups = menuGroups
     .map((group) => ({
       ...group,
-      types: group.types.filter(
-        (type) => t(`canvas.node.${type}`).toLowerCase().includes(query) && menuFilterType(type),
-      ),
+      types: group.types
+        .filter((type) => scopeFits(NODE_DEFS[type].scope, scope))
+        .filter((type) => t(`canvas.node.${type}`).toLowerCase().includes(query) && menuFilterType(type)),
     }))
     .filter((group) => group.types.length > 0);
   const visible = groups.flatMap((g) => g.types);

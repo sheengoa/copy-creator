@@ -1,9 +1,9 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { Dispatch, RefObject, SetStateAction } from "react";
-import type { CanvasConnection, CanvasGroup, CanvasLayoutEntry, CanvasNode, CanvasNodeType } from "../../../stores/canvasStore";
+import type { CanvasConnection, CanvasGroup, CanvasLayoutEntry, CanvasNode } from "../../../stores/canvasStore";
 import { useCanvasData } from "../dataContext";
 import { resolveWireRelease } from "../../../utils/projectWireRelease";
-import { NODE_DEFAULT_SIZE, NODE_DEFS, NODE_MIN_SIZE, PORT_DEFS, outMediaColor } from "../nodes/registry";
+import { NODE_DEFAULT_SIZE, NODE_DEFS, NODE_MIN_SIZE, PORT_DEFS, outWireColorOf, portFits } from "../nodes/registry";
 import type { PortDef } from "../nodes/types";
 import type { NodeServices } from "../nodes/types";
 import type { DragState, Pos, UndoAction, WireBox } from "./gestureTypes";
@@ -143,11 +143,12 @@ export function useCanvasGestures(deps: GestureDeps) {
     setAddMenuQuery("");
   }, []);
 
-  /** 菜单建节点接回连线：算新节点上可接住的输入口 id（无可接口 = 空串
-   *  不接）；菜单项过滤同样用它。 */
+  /** 菜单建节点接回连线：算新节点上可接住来源的输入口 id（无可接口
+   *  = 空串不接）；菜单项过滤同样用它。来源传完整节点（工程 data 匹配
+   *  需要来源输出口的动态类型，如镜头卡图/视频）。 */
   const incomingPortFor = useCallback(
-    (newType: CanvasNodeType, fromType: CanvasNodeType): string =>
-      PORT_DEFS[newType].ins.find((p) => p.accepts.includes(fromType))?.id ?? "",
+    (newType: string, fromNode: { type: string; metadata: CanvasNode["metadata"] }): string =>
+      PORT_DEFS[newType]?.ins.find((p) => portFits(p, fromNode))?.id ?? "",
     [],
   );
 
@@ -179,12 +180,12 @@ export function useCanvasGestures(deps: GestureDeps) {
         if (drag.detached) {
           // 摘线转接：线改接新节点（新节点需要能接住原上游的口）。
           setLiftedWire(null);
-          const toPort = fromNode ? incomingPortFor(created.type, fromNode.type) : "";
+          const toPort = fromNode ? incomingPortFor(created.type, fromNode) : "";
           await data.rewire(drag.detached.connId, created.id, toPort);
         } else if (drag.wire && fromNode) {
           if (drag.wire.fromDir === "out") {
             // 正拖：新节点是下游，找它可接住上游的输入口。
-            const toPort = incomingPortFor(created.type, fromNode.type);
+            const toPort = incomingPortFor(created.type, fromNode);
             await data.connect(drag.wire.fromKey, created.id, toPort);
           } else {
             // 反拖：新节点是上游，接进源输入口。
@@ -522,15 +523,15 @@ export function useCanvasGestures(deps: GestureDeps) {
         const tNode = tKey ? nodesRef.current.find((n) => n.id === tKey) : undefined;
         const fromNode = nodesRef.current.find((n) => n.id === drag.fromKey);
         // 类型化端口匹配：
-        //   正拖（out）：落点节点的某个输入口 accepts 包含源节点类型，
+        //   正拖（out）：落点节点的某个输入口 accepts 包含来源（node
+        //     匹配按类型 / 工程 data 匹配按来源输出口数据类型），
         //     多口时吸附光标最近的口（实测行位）。
-        //   反拖/摘线（in）：落点节点必须有 out 且其类型被源输入口接受。
+        //   反拖/摘线（in）：落点节点必须有 out 且被源输入口接受。
         let targetPort: string | null = null;
         let compatible = false;
         if (drag.fromDir === "out") {
-          const sourceType = fromNode?.type;
-          if (tNode && tKey && sourceType && tKey !== drag.fromKey) {
-            const ins = PORT_DEFS[tNode.type].ins.filter((p) => p.accepts.includes(sourceType));
+          if (tNode && tKey && fromNode && tKey !== drag.fromKey) {
+            const ins = PORT_DEFS[tNode.type].ins.filter((p) => portFits(p, fromNode));
             if (ins.length > 0) {
               const box = boxOf(tKey);
               const metrics = nodeMetricsRef.current.ports[tKey];
@@ -550,9 +551,9 @@ export function useCanvasGestures(deps: GestureDeps) {
             }
           }
         } else {
-          const inDef = PORT_DEFS[fromNode?.type ?? "note"].ins.find((p) => p.id === drag.fromPortId);
+          const inDef = PORT_DEFS[fromNode?.type ?? "note"]?.ins.find((p) => p.id === drag.fromPortId);
           if (tNode && inDef && tKey !== drag.fromKey) {
-            compatible = inDef.accepts.includes(tNode.type);
+            compatible = portFits(inDef, tNode);
             targetPort = compatible ? drag.fromPortId : null;
           }
         }
@@ -580,7 +581,7 @@ export function useCanvasGestures(deps: GestureDeps) {
           compatible && drag.fromDir === "out" && tKey && targetPort
             ? inPointOf(tKey, targetPort) ?? cursor
             : cursor;
-        const draftColor = fromNode ? outMediaColor(fromNode.type) : undefined;
+        const draftColor = fromNode ? outWireColorOf(fromNode) : undefined;
         setWireDraft({
           // 摘线拿着：从源头画到手里；普通正拖 out→口；反拖 手里→口。
           d: drag.fromDir === "out"

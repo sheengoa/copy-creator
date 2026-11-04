@@ -5,7 +5,7 @@ import { getCurrentWebview } from "@tauri-apps/api/webview";
 import type { CanvasNode } from "../../../stores/canvasStore";
 import { useCanvasData } from "../dataContext";
 import { extOf } from "../nodes/exts";
-import { MENU_TYPE_ORDER, NODE_DEFAULT_SIZE, NODE_DEFS, loadAllowedExts } from "../nodes/registry";
+import { MENU_TYPE_ORDER, NODE_DEFAULT_SIZE, NODE_DEFS, loadAllowedExts, scopeFits } from "../nodes/registry";
 import type { ViewState } from "./useViewport";
 
 // OS 文件拖入（自 FreeCanvas.tsx 零改动搬运，2026-11-03 引擎拆分阶段 6b）：
@@ -21,6 +21,7 @@ export function useFileDrop(
   pulseNodes: (ids: string[]) => void,
 ) {
   const data = useCanvasData();
+  const scope = data.scope;
   const [dropHint, setDropHint] = useState(false);
 
   const handleFileDrop = useCallback(
@@ -55,12 +56,15 @@ export function useFileDrop(
         return;
       }
       // 空白：按扩展名分发到声明了 blankDropExtensions 的加载节点（图像/
-      // 视频/音频，每文件一个，错开 24px）；不认识的扩展名忽略。
+      // 视频/音频，每文件一个，错开 24px）；不认识的扩展名忽略。作用域
+      // 互斥（2026-11-05 阶段 B）：工程视图不创建自由画布加载节点。
       let offset = 0;
       const createdIds: string[] = [];
       for (const path of paths) {
         const ext = extOf(path);
-        const kind = MENU_TYPE_ORDER.find((t) => NODE_DEFS[t].blankDropExtensions?.includes(ext)) ?? null;
+        const kind = MENU_TYPE_ORDER.find(
+          (t) => NODE_DEFS[t].blankDropExtensions?.includes(ext) && scopeFits(NODE_DEFS[t].scope, scope),
+        ) ?? null;
         if (!kind) continue;
         try {
           await invoke("canvas_authorize_media", { path }).catch(() => {});
@@ -80,7 +84,7 @@ export function useFileDrop(
       }
       pulseNodes(createdIds);
     },
-    [applyFrameVideo, data, nodesRef, pulseNodes, view.scale, view.x, view.y, vpRef],
+    [applyFrameVideo, data, nodesRef, pulseNodes, scope, view.scale, view.x, view.y, vpRef],
   );
 
   useEffect(() => {

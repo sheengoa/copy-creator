@@ -3,8 +3,8 @@ import type { CSSProperties, ReactNode } from "react";
 import { Icons } from "../../../components/Icons";
 import type { CanvasNode } from "../../../stores/canvasStore";
 import { MEDIA_COLOR } from "./colors";
+import { ioOf, outWireColorOf } from "./registry";
 import { NodeHint } from "./NodeHint";
-import { outMediaColor } from "./registry";
 import type { NodeDefinition } from "./types";
 
 // 节点壳（NodeShell，基座 chrome）：外壳 div（pc-node / fc-type-* /
@@ -37,6 +37,7 @@ export function NodeShell({ def, node, selected, pulsing, size, onDelete, childr
   const { t } = useTranslation();
   const autoHeight = node.height == null;
   const resized = !autoHeight && def.chrome === "standard";
+  const minHeight = def.minHeightOf?.(node);
   return (
     <div
       data-key={node.id}
@@ -49,15 +50,19 @@ export function NodeShell({ def, node, selected, pulsing, size, onDelete, childr
           top: node.pos_y,
           width: size.w,
           height: !autoHeight || def.fixedHeight ? size.h : undefined,
+          // 自适应高节点的视觉底高（工程成片/占位卡的固定卡面高度）。
+          minHeight: autoHeight ? minHeight : undefined,
           "--node-accent": def.accent,
         } as CSSProperties
       }
     >
-      <div className="pc-node-head">
-        <span className="pc-node-kind">{t(`canvas.node.${node.type}`)}</span>
-        {node.title && <b className="pc-node-title">{node.title}</b>}
-      </div>
-      {portBarOf(def, node, t)}
+      {!def.hideHead && (
+        <div className="pc-node-head">
+          <span className="pc-node-kind">{t(`canvas.node.${node.type}`)}</span>
+          {node.title && <b className="pc-node-title">{node.title}</b>}
+        </div>
+      )}
+      {portBarOf(node, t)}
       {children}
       <span className="pc-node-tools">
         {ToolsExtra && <ToolsExtra node={node} />}
@@ -85,32 +90,35 @@ export function NodeShell({ def, node, selected, pulsing, size, onDelete, childr
 // 端口行（对齐工程画布）：每行一个输入口（点 + 名称），首行右端输出
 // 口。口点色按媒体类型；data-port-id 供实测锚点与摘线/落点识别。
 // note（无口）天然返回 null，与基座化前「不渲染端口条」一致。
-function portBarOf(def: NodeDefinition, node: CanvasNode, t: (key: string) => string): ReactNode {
-  if (def.ports.ins.length === 0 && !def.ports.out) return null;
-  const rows = Math.max(def.ports.ins.length, def.ports.out ? 1 : 0);
+// portsOf 逐节点覆写优先（工程镜头卡图/视频动态输出口）；口名读
+// labelKey（工程实体口自带名称），口点色读 color（工程六口每口一色）。
+function portBarOf(node: CanvasNode, t: (key: string) => string): ReactNode {
+  const io = ioOf(node);
+  if (io.ins.length === 0 && !io.out) return null;
+  const rows = Math.max(io.ins.length, io.out ? 1 : 0);
   return (
     <div className="pc-port-bar">
       {Array.from({ length: rows }, (_, i) => (
         <div key={i} className="pc-port-row">
-          {def.ports.ins[i] ? (
+          {io.ins[i] ? (
             <>
               <span
                 className="pc-port pc-port-in"
                 data-port="in"
-                data-port-id={def.ports.ins[i].id}
-                style={{ background: MEDIA_COLOR[def.ports.ins[i].mediaKind] }}
+                data-port-id={io.ins[i].id}
+                style={{ background: io.ins[i].color ?? MEDIA_COLOR[io.ins[i].mediaKind] }}
               />
-              <span className="pc-port-name">{t(`canvas.port.${def.ports.ins[i].mediaKind}`)}</span>
+              <span className="pc-port-name">{t(io.ins[i].labelKey ?? `canvas.port.${io.ins[i].mediaKind}`)}</span>
             </>
           ) : null}
-          {i === 0 && def.ports.out ? (
+          {i === 0 && io.out ? (
             <>
-              <span className="pc-port-name pc-port-name-out">{t(`canvas.port.${def.ports.out.mediaKind}`)}</span>
+              <span className="pc-port-name pc-port-name-out">{t(`canvas.port.${io.out.mediaKind}`)}</span>
               <span
                 className="pc-port pc-port-out"
                 data-port="out"
                 data-port-id="__out"
-                style={{ background: outMediaColor(node.type) }}
+                style={{ background: outWireColorOf(node) }}
               />
             </>
           ) : null}

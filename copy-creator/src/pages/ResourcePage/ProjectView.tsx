@@ -8,7 +8,7 @@ import { ConfirmDialog } from "../../components/ConfirmDialog";
 import { IosSelect } from "../../components/ui";
 import { ResourceImage } from "./ResourceMedia";
 import ProjectLibraryPanel from "./ProjectLibraryPanel";
-import ProjectCanvas from "./ProjectCanvas";
+import ProjectCanvasShell from "./ProjectShell/ProjectCanvasShell";
 import ProjectAssetPicker from "./ProjectAssetPicker";
 import ProjectPromptPanel from "./ProjectPromptPanel";
 import ProjectAssetSheet from "./ProjectAssetSheet";
@@ -394,7 +394,7 @@ export default function ProjectView() {
           </div>
         ) : (
           <div className="project-stage-shell">
-            <ProjectCanvas
+            <ProjectCanvasShell
               libraryRoot={libraryRoot}
               overlay={epOverlay}
               onOpenAsset={setSheetAsset}

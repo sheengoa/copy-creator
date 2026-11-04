@@ -896,7 +896,15 @@
       "collection_image": "图像合集",
       "collection_text": "文本合集",
       "collection_video": "视频合集",
-      "note": "便签"
+      "note": "便签",
+      "shot": "镜头",
+      "segment": "片段",
+      "character": "角色",
+      "location": "场景",
+      "prop": "道具",
+      "scriptPaper": "剧本纸片",
+      "promptPaper": "提示词纸片",
+      "output": "成片输出"
     },
     "port": {
       "text": "文本",
@@ -909,7 +917,8 @@
       "load": "加载",
       "collection": "合集",
       "output": "输出",
-      "misc": "其他"
+      "misc": "其他",
+      "project": "工程"
     },
     "typeHint": {
       "gen_image": "文生图 / 图生图",
@@ -933,7 +942,15 @@
       "collection_image": "多图按序喂给生成节点",
       "collection_text": "多段文本按序拼接",
       "collection_video": "多段视频按序合集",
-      "note": "双击编辑的画布备注"
+      "note": "双击编辑的画布备注",
+      "shot": "场景框内的素材网格卡",
+      "segment": "AI 分段生成的视频单元",
+      "character": "空白资料占位，双击装实体",
+      "location": "空白资料占位，双击装实体",
+      "prop": "空白资料占位，双击装实体",
+      "scriptPaper": "每次放一张空纸片，双击挂文件",
+      "promptPaper": "双击从提示词库选一条",
+      "output": "本集工作流的总输出口"
     },
     "pathPlaceholder": "资源路径",
     "genButton": "生成",

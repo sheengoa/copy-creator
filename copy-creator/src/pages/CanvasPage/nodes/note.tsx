@@ -6,9 +6,10 @@ import type { NodeDefinition } from "./types";
 
 // 便签节点：标准头栏卡 + 琥珀内嵌便签体（琥珀即文本黄），双击进入编辑。
 // 无端口、无 pc-resized、自包 fc-note-body、工具条多 edit 钮——chrome
-// 走 note 变体。
+// 走 note 变体。两画布共用（scope both）：工程视图与自由画布都可加载。
 export const noteDef: NodeDefinition = {
   type: "note",
+  scope: "both",
   chrome: "note",
   menu: { group: "misc", icon: Icons.stickyNote },
   accent: MEDIA_COLOR.text,
