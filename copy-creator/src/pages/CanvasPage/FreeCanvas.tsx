@@ -238,6 +238,7 @@ export default function FreeCanvas({ canvasId }: { canvasId: string }) {
     discardDetachedWire,
     pulseKeys,
     pulseNodes,
+    commitAddNode,
   } = useCanvasGestures({
     canvasId,
     vpRef,
@@ -424,6 +425,7 @@ export default function FreeCanvas({ canvasId }: { canvasId: string }) {
             setAddMenuQuery={setAddMenuQuery}
             closeAddMenu={closeAddMenu}
             discardDetachedWire={discardDetachedWire}
+            commitAdd={commitAddNode}
             dragRef={dragRef}
             vpRef={vpRef}
             nodes={nodes}

@@ -151,6 +151,53 @@ export function useCanvasGestures(deps: GestureDeps) {
     [],
   );
 
+  /** addnode 落点提交（2026-11-04 自 onUp 指针分支抽出）：指针松手与菜单
+   *  键盘回车共用——moved=false 落菜单打开的世界点 (fox/foy)，moved=true
+   *  落松手屏幕点；「拖线到空白」与「摘线转接」的自动接线语义原样保留。
+   *  clientX/Y 仅 moved 时参与换算。 */
+  const commitAddNode = useCallback(
+    (drag: Extract<DragState, { kind: "addnode" }>, moved = false, clientX = 0, clientY = 0) => {
+      const rect = vpRef.current?.getBoundingClientRect();
+      const dropPos = moved && rect
+        ? {
+            x: (clientX - rect.left - view.x) / view.scale,
+            y: (clientY - rect.top - view.y) / view.scale,
+          }
+        : { x: drag.fox, y: drag.foy };
+      void (async () => {
+        const size = NODE_DEFAULT_SIZE[drag.frameKey];
+        const created = await store.getState().createNode({
+          canvasId,
+          nodeType: drag.frameKey,
+          posX: dropPos.x - size.w / 2,
+          posY: dropPos.y - 14,
+          width: size.w,
+          height: size.h,
+        });
+        if (!created) return;
+        pulseNodes([created.id]);
+        const fromNode = drag.wire ? nodesRef.current.find((n) => n.id === drag.wire!.fromKey) : undefined;
+        if (drag.detached) {
+          // 摘线转接：线改接新节点（新节点需要能接住原上游的口）。
+          setLiftedWire(null);
+          const toPort = fromNode ? incomingPortFor(created.type, fromNode.type) : "";
+          await store.getState().rewire(drag.detached.connId, created.id, toPort);
+        } else if (drag.wire && fromNode) {
+          if (drag.wire.fromDir === "out") {
+            // 正拖：新节点是下游，找它可接住上游的输入口。
+            const toPort = incomingPortFor(created.type, fromNode.type);
+            await store.getState().connect(canvasId, drag.wire.fromKey, created.id, toPort);
+          } else {
+            // 反拖：新节点是上游，接进源输入口。
+            await store.getState().connect(canvasId, created.id, drag.wire.fromKey, drag.wire.fromPortId);
+          }
+        }
+        setSelection([created.id]);
+      })();
+    },
+    [canvasId, incomingPortFor, nodesRef, pulseNodes, setLiftedWire, setSelection, store, view, vpRef],
+  );
+
   const onViewportPointerDown = useCallback(
     (e: React.PointerEvent) => {
       const target = e.target instanceof Element ? e.target : null;
@@ -769,44 +816,9 @@ export function useCanvasGestures(deps: GestureDeps) {
         }
       } else if (drag.kind === "addnode") {
         // 点击（未拖动）落双击点；按住拖到画布松手落松手点；从「拖线
-        // 到空白」菜单进入时，创建的节点自动接上那条线。
-        const rect = vpRef.current?.getBoundingClientRect();
-        const dropPos = drag.moved && rect
-          ? {
-              x: (e.clientX - rect.left - view.x) / view.scale,
-              y: (e.clientY - rect.top - view.y) / view.scale,
-            }
-          : { x: drag.fox, y: drag.foy };
-        void (async () => {
-          const size = NODE_DEFAULT_SIZE[drag.frameKey];
-          const created = await store.getState().createNode({
-            canvasId,
-            nodeType: drag.frameKey,
-            posX: dropPos.x - size.w / 2,
-            posY: dropPos.y - 14,
-            width: size.w,
-            height: size.h,
-          });
-          if (!created) return;
-          pulseNodes([created.id]);
-          const fromNode = drag.wire ? nodesRef.current.find((n) => n.id === drag.wire!.fromKey) : undefined;
-          if (drag.detached) {
-            // 摘线转接：线改接新节点（新节点需要能接住原上游的口）。
-            setLiftedWire(null);
-            const toPort = fromNode ? incomingPortFor(created.type, fromNode.type) : "";
-            await store.getState().rewire(drag.detached.connId, created.id, toPort);
-          } else if (drag.wire && fromNode) {
-            if (drag.wire.fromDir === "out") {
-              // 正拖：新节点是下游，找它可接住上游的输入口。
-              const toPort = incomingPortFor(created.type, fromNode.type);
-              await store.getState().connect(canvasId, drag.wire.fromKey, created.id, toPort);
-            } else {
-              // 反拖：新节点是上游，接进源输入口。
-              await store.getState().connect(canvasId, created.id, drag.wire.fromKey, drag.wire.fromPortId);
-            }
-          }
-          setSelection([created.id]);
-        })();
+        // 到空白」菜单进入时，创建的节点自动接上那条线。提交逻辑抽出
+        // 共用（菜单键盘回车走同一函数，见 commitAddNode）。
+        commitAddNode(drag, drag.moved ?? false, e.clientX, e.clientY);
       } else if (drag.kind === "marquee") {
         const list: string[] = [];
         if (drag.moved) {
@@ -863,5 +875,6 @@ export function useCanvasGestures(deps: GestureDeps) {
     pulseKeys,
     pulseNodes,
     openAddMenu,
+    commitAddNode,
   };
 }
