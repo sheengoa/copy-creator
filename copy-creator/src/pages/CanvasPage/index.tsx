@@ -242,6 +242,9 @@ export default function CanvasPage() {
               placeholder={t("canvas.namePlaceholder")}
               onChange={(e) => setRenameInput(e.target.value)}
               onKeyDown={(e) => {
+                // 输入法组合期间不响应：确认候选词的 Enter 会提前提交
+                // 重命名、取消候选的 Esc 会误关对话框。
+                if (e.nativeEvent.isComposing) return;
                 if (e.key === "Enter") void submitRename();
                 if (e.key === "Escape") setRenaming(null);
               }}

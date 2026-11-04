@@ -123,6 +123,10 @@ export function AddMenu({
             value={addMenuQuery}
             onChange={(event) => setAddMenuQuery(event.target.value)}
             onKeyDown={(event) => {
+              // 输入法组合期间不响应菜单键位：确认候选词的 Enter 会误建
+              // 节点、选词的 ↑↓ 会误移高亮、取消候选的 Esc 会误关菜单
+              // （与 doubleEnterShortcut/StashEditor 同一守卫惯例）。
+              if (event.nativeEvent.isComposing) return;
               if (event.key === "Escape") {
                 // 取消菜单＝不建节点直接退出：摘下的线就此断开。
                 if (addMenu.detached) discardDetachedWire(addMenu.detached);

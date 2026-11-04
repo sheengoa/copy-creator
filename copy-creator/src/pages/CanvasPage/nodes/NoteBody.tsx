@@ -30,6 +30,9 @@ export function NoteBody({ node }: NodeProps) {
         closeNoteEdit();
       }}
       onKeyDown={(event) => {
+        // 输入法组合期间不响应：确认候选词的 Enter 会误退出编辑并提前
+        // 落库半截内容，取消候选的 Esc 会误关编辑。
+        if (event.nativeEvent.isComposing) return;
         if (event.key === "Escape") closeNoteEdit();
         if (event.key === "Enter" && !event.shiftKey) {
           event.preventDefault();
