@@ -30,6 +30,7 @@ export function MediaPlayback({
   ratioFit = false,
   mediaRefCallback,
   onTimeUpdate,
+  onVideoRatio,
 }: {
   kind: "audio" | "video";
   path: string;
@@ -47,6 +48,10 @@ export function MediaPlayback({
   mediaRefCallback?: (el: HTMLVideoElement | HTMLAudioElement | null) => void;
   /** 播放时刻回调：播放条拖动/走带时回写外部状态（选区循环钳制等）。 */
   onTimeUpdate?: (t: number) => void;
+  /** 视频真实宽高上报（视频工具监视器兜底用）：loadedmetadata 实测，
+   *  与内部 ratioFit 同一测量点；调用方拿它撑容器比例（时间轴回传前/
+   *  失败时不再卡 16:9 黑边窗）。音频流宽高为 0 不回调。 */
+  onVideoRatio?: (w: number, h: number) => void;
 }) {
   const { t } = useTranslation();
   const mediaRef = useRef<HTMLVideoElement | HTMLAudioElement | null>(null);
@@ -200,6 +205,9 @@ export function MediaPlayback({
         const d = e.currentTarget.duration;
         setPos((prev) => ({ ...prev, dur: Number.isFinite(d) && d > 0 ? d : prev.dur }));
         setRatio({ w: e.currentTarget.videoWidth, h: e.currentTarget.videoHeight });
+        if (e.currentTarget.videoWidth > 0 && e.currentTarget.videoHeight > 0) {
+          onVideoRatio?.(e.currentTarget.videoWidth, e.currentTarget.videoHeight);
+        }
         if (autoPlay) {
           const r = e.currentTarget.play();
           if (r) void r.catch(() => setBlocked(true));

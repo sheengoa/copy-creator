@@ -1,3 +1,4 @@
+import { useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Icons } from "../../../components/Icons";
 import { MediaPlayback } from "../../../components/MediaPlayback";
@@ -19,6 +20,11 @@ export function VideoToolBody({ node, services }: NodeProps) {
   const nodeErrors = useNodeErrors((s) => s.errors);
   const updateNode = useCanvasStore((s) => s.updateNode);
   const rt = useVideoToolRuntime();
+  // 监视器比例兜底（2026-11-04）：时间轴回传前/失败时画面盒回退 16:9，
+  // 竖版视频在窗口期内露黑边——用视频元素 loadedmetadata 实测值补位
+  // （与 timeline 实测取先到优先，掺路径防换片残留）。真实后端两者同源
+  // （IHDR 即帧宽高），兜底只为消窗口期与失败态。hook 须在提前 return 前。
+  const [measured, setMeasured] = useState<{ path: string; w: number; h: number } | null>(null);
   const isGif = node.type === "video_to_gif";
   const isAudio = node.type === "video_extract_audio";
   const meta = node.metadata;
@@ -29,6 +35,12 @@ export function VideoToolBody({ node, services }: NodeProps) {
   const toolError = nodeErrors[node.id];
   const timeline = videoPath ? rt.videoTimelines[videoPath] : undefined;
   const trackDur = timeline?.duration ?? 0;
+  const measuredRatio =
+    measured && measured.path === videoPath && measured.w > 0 && measured.h > 0 ? measured : null;
+  const screenRatio =
+    timeline && (timeline.w ?? 0) > 0 && (timeline.h ?? 0) > 0
+      ? { w: timeline.w, h: timeline.h }
+      : measuredRatio;
   const draft = rt.videoToolDraft[node.id];
   const seekT = draft?.t ?? meta.start_secs ?? 0;
   const rangeStart = draft?.start ?? meta.start_secs ?? 0;
@@ -83,14 +95,11 @@ export function VideoToolBody({ node, services }: NodeProps) {
             <div
               className="fc-vt-screen"
               /* 监视器随视频真实宽高比自适应（后端时间轴实测的
-                 w/h；未回传前回退 16:9）——竖版视频不再被 16:9
-                 固定窗缩成小画面，与图钉预期「完整展示视频尺寸」
-                 一致。完成态产物帧比例与视频一致，容器同样跟随。 */
-              style={
-                timeline && (timeline.w ?? 0) > 0 && (timeline.h ?? 0) > 0
-                  ? { aspectRatio: `${timeline.w} / ${timeline.h}` }
-                  : undefined
-              }
+                 w/h，未回传前用视频元素 loadedmetadata 实测兜底）
+                 ——竖版视频不再被 16:9 固定窗缩成小画面，与图钉
+                 预期「完整展示视频尺寸」一致。完成态产物帧比例与
+                 视频一致，容器同样跟随。 */
+              style={screenRatio ? { aspectRatio: `${screenRatio.w} / ${screenRatio.h}` } : undefined}
             >
               {/* 抽帧/GIF 完成态显示产物图（点击放大）；音轨完成态
                   保留视频画面；其余一律视频预览。 */}
@@ -108,6 +117,7 @@ export function VideoToolBody({ node, services }: NodeProps) {
                 <MediaPlayback
                   kind="video"
                   path={videoPath}
+                  onVideoRatio={(w, h) => setMeasured({ path: videoPath, w, h })}
                   mediaRefCallback={(el) => {
                     rt.registerVideoEl(node.id, el);
                   }}

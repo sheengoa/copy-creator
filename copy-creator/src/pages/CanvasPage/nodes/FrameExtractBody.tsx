@@ -57,7 +57,7 @@ export function FrameExtractBody({ node, services }: NodeProps) {
       </div>
       {videoPath && !framePath && !frameBusyNow && (
         <>
-          <MediaPlayback kind="video" path={videoPath} />
+          <MediaPlayback kind="video" path={videoPath} ratioFit />
           <NodeHint text={frameError ? frameError : ""}>
             <button
               type="button"
@@ -74,7 +74,7 @@ export function FrameExtractBody({ node, services }: NodeProps) {
       )}
       {videoPath && frameBusyNow && (
         <>
-          <MediaPlayback kind="video" path={videoPath} />
+          <MediaPlayback kind="video" path={videoPath} ratioFit />
           <button type="button" className="fc-node-btn accent" disabled>
             {t("canvas.frameRunning")}
           </button>
@@ -89,7 +89,7 @@ export function FrameExtractBody({ node, services }: NodeProps) {
                 className="fc-frame-thumb"
                 onClick={() => services.openLightbox(framePath)}
               >
-                <ResourceThumb path={framePath} className="fc-media-box" />
+                <ResourceThumb path={framePath} className="fc-media-box" ratioFit />
                 <span className="fc-frame-badge">
                   {isLastFrame ? t("canvas.frameLastBadge") : t("canvas.frameFirstBadge")}
                 </span>
