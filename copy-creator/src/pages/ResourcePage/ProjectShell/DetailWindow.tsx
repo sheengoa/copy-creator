@@ -12,7 +12,7 @@ import type {
 } from "../../../stores/projectStore";
 import { joinLibraryPath } from "../../../domain/projectView";
 import { ResourceFileImage, ResourceImage, ResourceVideoPoster } from "../ResourceMedia";
-import type { EntityPhKind, PendingLink } from "../ProjectCanvas/types";
+import type { EntityPhKind, PendingLink } from "./types";
 import { MediaPlayback } from "../../../components/MediaPlayback";
 
 // 工程节点详情窗（工程视图节点化 2026-11-05 阶段 D，方案 §D2-D5）：

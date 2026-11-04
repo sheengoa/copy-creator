@@ -47,7 +47,6 @@
   cursor: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='24' height='24'><path d='M3 21 L14 10 L11.5 7.5 L3 15.5 Z' fill='%23ffffff' stroke='%23333333' stroke-width='1.4'/><path d='M12.5 8 L19.5 1.5' stroke='%23a07840' stroke-width='3.2' stroke-linecap='round'/><path d='M12.5 8 L19.5 1.5' stroke='%236b4f2a' stroke-width='1.2' stroke-linecap='round'/></svg>") 3 21, crosshair;
 }
 /* 拖线中：全程十字光标（即使草稿线被环境吞掉也有状态反馈） */
-.pc-viewport.pc-wiring, .pc-viewport.pc-wiring .pc-node, .pc-viewport.pc-wiring .pc-note { cursor: crosshair; }
 .pc-world {
   position: absolute;
   left: 0;
@@ -154,13 +153,6 @@
      已分别设置 overflow，内容裁剪不依赖节点外壳。 */
   overflow: visible;
 }
-.pc-node.pc-resized .pc-media,
-.pc-node.pc-resized .pc-seg-thumb,
-.pc-node.pc-resized .pc-seg-empty {
-  flex: 1 1 auto;
-  min-height: 0;
-  height: auto !important;
-}
 .pc-node.pc-resized .pc-paper,
 .pc-node.pc-resized .pc-info-body,
 .pc-node.pc-resized .pc-outnode-body {
@@ -196,7 +188,6 @@
 /* hover 只负责把节点提到同级之上（浮起阴影由共享配方的常态阴影承担）。 */
 .pc-node:hover { z-index: 12; }
 /* 拖动中的节点/便签压在同级之上（含 hover 态，松手清除） */
-.pc-node.pc-dragging, .pc-note.pc-dragging { z-index: 20; }
 .pc-node.pc-wire-target {
   border-color: var(--card-glow);
   box-shadow: 0 0 0 2px var(--card-glow), 0 8px 24px rgba(0, 0, 0, 0.14);
@@ -227,27 +218,6 @@
   font-weight: 500;
   color: var(--text-primary);
 }
-.pc-media { overflow: hidden; border-radius: 0 0 14px 14px; }
-.pc-media-img { width: 100%; height: 100%; object-fit: cover; display: block; }
-.pc-media-img img { width: 100%; height: 100%; object-fit: cover; }
-.pc-media .resource-thumb-blur { width: 100%; height: 100%; }
-.pc-media .resource-thumb-blur img { width: 100%; height: 100%; object-fit: cover; }
-.pc-media .resource-media-loading { width: 100%; height: 100%; }
-.pc-play {
-  position: absolute;
-  inset: 0;
-  margin: auto;
-  width: 40px;
-  height: 40px;
-  border-radius: 50%;
-  background: rgba(20, 20, 26, 0.5);
-  color: #fff;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  pointer-events: none;
-}
-.pc-play svg { width: 16px; height: 16px; }
 /* 文本纸片（节点内：贴满卡体，无内层边框） */
 .pc-paper {
   border-radius: 0 0 14px 14px;
@@ -425,12 +395,6 @@
 .pc-resize.ne { --from: 0deg; right: -1px; top: -1px; cursor: nesw-resize; }
 .pc-resize.sw { --from: 180deg; left: -1px; bottom: -1px; cursor: nesw-resize; }
 .pc-resize.se { --from: 90deg; right: -1px; bottom: -1px; cursor: nwse-resize; }
-.pc-node:hover .pc-resize, .pc-note:hover .pc-resize { opacity: 0.8; }
-.pc-resize:hover, .pc-node.pc-resizing .pc-resize, .pc-note.pc-resizing .pc-resize {
-  color: var(--accent);
-  opacity: 1;
-}
-
 /* ── 节点分组框（Ctrl+G，ComfyUI Group 的对应物） ── */
 /* 框自适应成员包围盒、渲染在节点层之下（pointer-events none 不挡节点）；
    只有标题条可抓——按下拖动整组移动（复用组拖管线）。 */

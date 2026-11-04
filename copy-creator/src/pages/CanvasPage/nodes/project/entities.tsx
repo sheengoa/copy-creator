@@ -1,7 +1,7 @@
 import { Icons } from "../../../../components/Icons";
-import { NODE_ACCENTS, PORT_COLORS, } from "../../../ResourcePage/ProjectCanvas/colors";
-import { INFO_H, INFO_W } from "../../../ResourcePage/ProjectCanvas/layout";
-import type { EntityPhKind } from "../../../ResourcePage/ProjectCanvas/types";
+import { NODE_ACCENTS, PORT_COLORS, } from "../../../ResourcePage/ProjectShell/colors";
+import { INFO_H, INFO_W } from "../../../ResourcePage/ProjectShell/layout";
+import type { EntityPhKind } from "../../../ResourcePage/ProjectShell/types";
 import { EntityBody, EntityViewTool } from "./bodies";
 import type { NodeDefinition } from "../types";
 

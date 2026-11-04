@@ -11,18 +11,18 @@ import {
   parsePendingLinks,
   type CanvasLayout,
   type PendingLink,
-} from "../ProjectCanvas/types";
-import type { LiftedWire } from "../ProjectCanvas/engine/useGestures";
+} from "./types";
+import type { LiftedWire } from "./types";
 import { ProjectDetailWindow, type DetailTarget, type DetailWindowOps } from "./DetailWindow";
 import { usePerEpisodeStorage } from "../usePerEpisodeStorage";
-import { useCanvasData } from "../ProjectCanvas/engine/useCanvasData";
-import { useNodeMetrics } from "../ProjectCanvas/engine/useNodeMetrics";
-import { usePorts } from "../ProjectCanvas/engine/usePorts";
-import { WIRES_VIEWPORT_PAD } from "../ProjectCanvas/layout";
-import { WiresLayer } from "../ProjectCanvas/layers/WiresLayer";
+import { useCanvasData } from "./engine/useCanvasData";
+import { useNodeMetrics } from "./engine/useNodeMetrics";
+import { usePorts } from "./engine/usePorts";
+import { WIRES_VIEWPORT_PAD } from "./layout";
+import { WiresLayer } from "./layers/WiresLayer";
 import { buildProjectCanvasApi, buildProjectNodes } from "./projectProvider";
-import { SceneFrames } from "../ProjectCanvas/layers/SceneFrames";
-import { EpisodeCard, AddBtnBar, IssueBar } from "../ProjectCanvas/layers/CanvasBars";
+import { SceneFrames } from "./layers/SceneFrames";
+import { EpisodeCard, AddBtnBar, IssueBar } from "./layers/CanvasBars";
 import {
   DeleteSceneConfirm,
   LocationPickPanel,
@@ -30,14 +30,14 @@ import {
   SceneFormDialog,
   ScriptPickDialog,
   ShotFormDialog,
-} from "../ProjectCanvas/layers/Dialogs";
-import { useGroupOps } from "../ProjectCanvas/engine/useGroupOps";
-import { useCanvasView } from "../ProjectCanvas/engine/useCanvasView";
-import { useWorkflowSeed } from "../ProjectCanvas/engine/useWorkflowSeed";
+} from "./layers/Dialogs";
+import { useGroupOps } from "./engine/useGroupOps";
+import { useCanvasView } from "./engine/useCanvasView";
+import { useWorkflowSeed } from "./engine/useWorkflowSeed";
 import type { ProjectScene } from "../../../stores/projectStore";
-import type { Pos } from "../ProjectCanvas/types";
-import { WORLD_MARGIN } from "../ProjectCanvas/layout";
-import type { EntityPhKind } from "../ProjectCanvas/types";
+import type { Pos } from "./types";
+import { WORLD_MARGIN } from "./layout";
+import type { EntityPhKind } from "./types";
 
 /** updateEpisode 补丁的状态字段（store 的 ProjectEpisodeStatus）。 */
 type ProjectEpisodeStatusLike = Parameters<ReturnType<typeof useProjectStore.getState>["updateEpisode"]>[1]["status"];

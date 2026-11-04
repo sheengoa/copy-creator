@@ -165,21 +165,6 @@
 }
 .pc-node.pc-resized .pc-prompt-text { overflow: auto; -webkit-line-clamp: unset; }
 /* 详情窗里的提示词全文 */
-.pc-detail-prompt {
-  margin: 0;
-  padding: 10px 12px;
-  border: 1px solid var(--separator);
-  border-radius: 10px;
-  background: color-mix(in srgb, var(--text-primary) 3%, transparent);
-  font-size: 12px;
-  line-height: 1.6;
-  color: var(--text-primary);
-  white-space: pre-wrap;
-  word-break: break-word;
-  max-height: 320px;
-  overflow: auto;
-}
-
 /* 提示词选择弹窗：搜索 + 分类列表，选中即写入纸片 */
 .pc-prompt-pick { width: min(420px, calc(100vw - 48px)); }
 .pc-prompt-pick input { width: 100%; }
@@ -226,8 +211,3 @@
 .pc-prompt-pick-empty { padding: 18px 0; text-align: center; font-size: 12px; color: var(--text-secondary); }
 
 /* 头像渐变色板（详情窗等处仍在用） */
-.pc-ava-p0 { background: linear-gradient(135deg, #f6b7c9, #e78fb3); }
-.pc-ava-p1 { background: linear-gradient(135deg, #a8c5e8, #7a9fd4); }
-.pc-ava-p2 { background: linear-gradient(135deg, #b8dcc0, #7fb894); }
-.pc-ava-p3 { background: linear-gradient(135deg, #e8cf9f, #d4a96a); }
-.pc-ava-p4 { background: linear-gradient(135deg, #c9b8e8, #9a7fd4); }

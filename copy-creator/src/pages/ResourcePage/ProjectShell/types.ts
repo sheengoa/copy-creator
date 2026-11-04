@@ -1,3 +1,4 @@
+import type { ProjectNodeLink } from "../../../stores/projectStore";
 // 工程画布实体类型与引用稳定常量（自 ProjectCanvas.tsx 零改动搬运，
 // 2026-11-03 引擎拆分阶段 11a；fork 对齐点按原注释保持）。
 
@@ -123,4 +124,11 @@ export interface WireItem {
   toKey: string;
   kind: "gen" | "manual";
   type: string; // 线上流动的数据类型 = 来源素材的 kind
+}
+
+/** 摘线状态（旧手势引擎 LiftedWire 同构）：整口拿走的暂存线与正式行。 */
+export interface LiftedWire {
+  fromKey: string;
+  pendings: PendingLink[];
+  rows: ProjectNodeLink[];
 }

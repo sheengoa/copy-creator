@@ -1,5 +1,5 @@
 import { Icons } from "../../../../components/Icons";
-import { NODE_ACCENTS, REF_ACCEPTS, WIRE_TYPE_COLORS } from "../../../ResourcePage/ProjectCanvas/colors";
+import { NODE_ACCENTS, REF_ACCEPTS, WIRE_TYPE_COLORS } from "../../../ResourcePage/ProjectShell/colors";
 import { ShotBody, ShotTools } from "./bodies";
 import type { NodeDefinition, NodeIO } from "../types";
 

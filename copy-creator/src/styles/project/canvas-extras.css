@@ -115,52 +115,6 @@
   align-items: center;
   justify-content: center;
 }
-.pc-detail-img { width: 100%; height: 100%; object-fit: contain; }
-.pc-detail-video { position: relative; width: 100%; height: 100%; }
-.pc-detail-video-hint {
-  position: absolute;
-  left: 50%;
-  top: 50%;
-  transform: translate(-50%, -50%);
-  display: inline-flex;
-  align-items: center;
-  gap: 4px;
-  padding: 4px 10px;
-  border-radius: 8px;
-  background: rgba(20, 20, 26, 0.72);
-  color: #fff;
-  font-size: 11px;
-  pointer-events: none;
-}
-.pc-detail-video-hint svg { width: 12px; height: 12px; }
-.pc-detail-preview-empty {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  gap: 6px;
-  color: var(--text-secondary);
-  font-size: 12px;
-  padding: 12px;
-  text-align: center;
-}
-.pc-detail-drop {
-  width: 100%;
-  height: 100%;
-  border: 1.5px dashed var(--separator);
-  border-radius: 8px;
-  background: transparent;
-  color: var(--text-secondary);
-  font-size: 12px;
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  gap: 6px;
-  cursor: pointer;
-  padding: 12px;
-  text-align: center;
-}
-.pc-detail-drop:hover { border-color: var(--node-accent, var(--text-secondary)); color: var(--text-primary); }
 .pc-detail-meta { display: flex; align-items: center; gap: 6px; min-width: 0; }
 .pc-detail-name { font-size: 13px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .pc-detail-badge {
@@ -176,37 +130,6 @@
 .pc-detail-row dt { flex-shrink: 0; color: var(--text-secondary); }
 .pc-detail-row dd { margin: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .pc-detail-actions { display: flex; flex-wrap: wrap; gap: 6px; }
-.pc-detail-btn {
-  display: inline-flex;
-  align-items: center;
-  gap: 5px;
-  border: 0;
-  background: var(--btn-card-bg);
-  color: var(--text-primary);
-  font-size: 12px;
-  padding: 5px 10px;
-  border-radius: 7px;
-  cursor: pointer;
-  box-shadow: var(--btn-card-shadow);
-  transition: box-shadow 0.15s ease;
-}
-.pc-detail-btn:hover { box-shadow: var(--btn-card-shadow-hover); }
-.pc-detail-btn.primary { color: var(--node-accent, var(--text-primary)); }
-.pc-detail-btn.primary:hover { box-shadow: var(--btn-card-shadow-hover); }
-.pc-detail-btn svg { width: 13px; height: 13px; }
-.pc-detail-ava {
-  width: 64px;
-  height: 64px;
-  border-radius: 50%;
-  flex-shrink: 0;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  font-size: 24px;
-  color: #fff;
-  overflow: hidden;
-}
-.pc-detail-ava svg { width: 26px; height: 26px; }
 .pc-detail-empty {
   padding: 30px 0;
   text-align: center;
@@ -223,22 +146,6 @@
   text-overflow: ellipsis;
   white-space: nowrap;
 }
-.pc-detail-extra { border-top: 1px solid var(--separator); padding: 12px 16px; }
-.pc-detail-extra-head { font-size: 12px; color: var(--text-secondary); margin-bottom: 8px; }
-.pc-detail-extra-body { display: flex; gap: 12px; align-items: center; min-width: 0; }
-.pc-detail-extra-body .pc-detail-video {
-  width: 180px;
-  aspect-ratio: 16 / 9;
-  border-radius: 8px;
-  overflow: hidden;
-  background: var(--chip-bg);
-  flex-shrink: 0;
-}
-.pc-detail-extra-info { display: flex; flex-direction: column; gap: 4px; min-width: 0; font-size: 12.5px; }
-.pc-detail-extra-info small { color: var(--text-secondary); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.pc-detail-extra-info .pc-detail-btn { align-self: flex-start; margin-top: 4px; }
-.pc-detail-extra-actions { display: flex; gap: 8px; flex-wrap: wrap; }
-
 /* 详情窗口多区块（片段窗口的 角色/场景/道具 分组，各自带当前/全部切换） */
 .pc-detail-section { border-top: 1px solid var(--separator); padding-top: 12px; margin-top: 12px; }
 .pc-detail-section:first-of-type { border-top: none; padding-top: 0; margin-top: 0; }
@@ -293,9 +200,6 @@
 .pc-outnode-icon svg { width: 18px; height: 18px; opacity: 0.85; }
 
 /* ── 片段节点（AI 分段生成的视频分段，按序拼接成片） ── */
-.pc-segment { cursor: grab; }
-.pc-segment:active { cursor: grabbing; }
-.pc-seg-ports { display: flex; flex-direction: column; padding: 3px 0; }
 .pc-seg-thumb {
   position: relative;
   display: block;
@@ -362,128 +266,9 @@
    玻璃卡 + 内嵌琥珀块：与自由画布 fc-note-body 同一语言（便签 DOM
    无 .pc-node 类，共享配方不命中，玻璃参数按配方同值手写，改动需
    与 canvas/shared-chrome.css 保持同步）。 */
-.pc-note {
-  position: absolute;
-  display: flex;
-  flex-direction: column;
-  width: 172px;
-  border-radius: 15px;
-  background: rgba(255, 255, 255, 0.62);
-  backdrop-filter: blur(24px) saturate(1.8);
-  -webkit-backdrop-filter: blur(24px) saturate(1.8);
-  border: 0.5px solid rgba(255, 255, 255, 0.78);
-  box-shadow:
-    0 1px 2px rgba(0, 0, 0, 0.04),
-    0 14px 40px rgba(31, 35, 65, 0.14),
-    inset 0 0.5px 0 rgba(255, 255, 255, 0.85),
-    inset 0 -0.5px 0 rgba(255, 255, 255, 0.35);
-  color: var(--text-primary);
-  cursor: grab;
-  z-index: 4;
-}
-[data-theme="dark"] .pc-note {
-  background: rgba(30, 30, 36, 0.66);
-  border-color: rgba(255, 255, 255, 0.12);
-  box-shadow:
-    0 1px 2px rgba(0, 0, 0, 0.3),
-    0 14px 40px rgba(0, 0, 0, 0.4),
-    inset 0 0.5px 0 rgba(255, 255, 255, 0.14),
-    inset 0 -0.5px 0 rgba(255, 255, 255, 0.06);
-}
-.pc-note:active { cursor: grabbing; }
 /* 便签选中点亮：与节点同语言的双层 ring（琥珀 accent）。 */
-.pc-note.pc-selected {
-  border-color: #E6A700;
-  box-shadow:
-    0 1px 2px rgba(0, 0, 0, 0.04),
-    0 14px 40px rgba(31, 35, 65, 0.14),
-    0 0 0 1px #E6A700,
-    0 0 0 4.5px color-mix(in srgb, #E6A700 20%, transparent),
-    inset 0 0.5px 0 rgba(255, 255, 255, 0.85);
-}
-[data-theme="dark"] .pc-note.pc-selected {
-  box-shadow:
-    0 1px 2px rgba(0, 0, 0, 0.3),
-    0 14px 40px rgba(0, 0, 0, 0.4),
-    0 0 0 1px #E6A700,
-    0 0 0 4.5px color-mix(in srgb, #E6A700 28%, transparent),
-    inset 0 0.5px 0 rgba(255, 255, 255, 0.14);
-}
 /* 内容区撑满卡体：四角缩放改尺寸时文字随宽度重排、随高度延展，
    未缩放过的便签高度仍是内容自适应（flex-basis auto 无多余空间）。 */
-.pc-note-body {
-  flex: 1;
-  margin: 10px 12px 12px;
-  padding: 10px 12px;
-  border-radius: 10px;
-  background: rgba(230, 167, 0, 0.12);
-  color: #8A6A1E;
-  font-size: 11.5px;
-  line-height: 1.55;
-  word-break: break-word;
-  white-space: pre-wrap;
-  min-height: 40px;
-}
-[data-theme="dark"] .pc-note-body { background: rgba(230, 167, 0, 0.16); color: #FFD98A; }
-.pc-note-body i { opacity: 0.55; }
-.pc-note-input {
-  display: block;
-  flex: 1;
-  width: auto;
-  min-height: 72px;
-  margin: 10px 12px 12px;
-  border: none;
-  background: rgba(255, 255, 255, 0.5);
-  padding: 10px 12px;
-  font: inherit;
-  font-size: 11.5px;
-  line-height: 1.55;
-  color: var(--text-primary);
-  resize: none;
-  outline: none;
-  box-shadow: 0 0 0 1.5px rgba(217, 144, 0, 0.4);
-  border-radius: 10px;
-}
-[data-theme="dark"] .pc-note-input {
-  background: rgba(255, 255, 255, 0.08);
-  color: var(--text-primary);
-  box-shadow: 0 0 0 1.5px rgba(255, 200, 87, 0.35);
-}
-.pc-note-tools {
-  position: absolute;
-  /* 与节点工具条同款：悬浮上方、居中、留一点间隙 */
-  top: -46px;
-  left: 50%;
-  transform: translateX(-50%);
-  display: flex;
-  gap: 2px;
-  padding: 3px;
-  border-radius: 9px;
-  background: rgba(28, 28, 34, 0.94);
-  box-shadow: 0 6px 18px rgba(0, 0, 0, 0.3);
-  opacity: 0;
-  pointer-events: none;
-  transition: opacity 0.12s ease;
-  z-index: 6;
-  white-space: nowrap;
-}
-.pc-note.pc-selected .pc-note-tools { opacity: 1; pointer-events: auto; }
-.pc-note-tools button {
-  width: 27px;
-  height: 27px;
-  border-radius: 7px;
-  color: rgba(255, 255, 255, 0.85);
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  cursor: pointer;
-}
-.pc-note-tools button:hover { background: rgba(255, 255, 255, 0.15); color: #fff; }
-.pc-note-tools button.danger:hover { background: var(--danger); }
-.pc-note-tools svg { width: 14px; height: 14px; }
-.pc-note-tools button.danger:hover { background: var(--danger); }
-.pc-note-tools svg { width: 12px; height: 12px; }
-
 /* ── 双击空白的节点选择框（2026-11-04 白玻璃精修定案）──
    材质：近实心渐变面 + 渐变描边（顶缘亮线→底部沉灰）+ 三层投影 +
    顶缘内高光；刻意不用 backdrop-filter——毛玻璃与圆角的组合在
@@ -837,7 +622,6 @@
   text-align: center;
   font-variant-numeric: tabular-nums;
 }
-.pc-zoombar .pc-sep { width: 1px; height: 16px; background: var(--separator); margin: 0 3px; }
 .pc-minimap { bottom: 58px; right: 16px; padding: 5px; cursor: crosshair; }
 /* 内层缩略画布随外框圆角：玻璃外框 13px − padding 5px = 8px，裁掉
    视口矩形等方形内容探出 svg 圆角的直角。 */
@@ -911,5 +695,3 @@
 .pc-dialog-foot button.primary:hover { opacity: 0.88; }
 
 /* 画布内的视频封面：撑满节点盒 */
-.pc-media .resource-video-poster { width: 100%; height: 100%; }
-.pc-media .resource-video-poster img { width: 100%; height: 100%; object-fit: cover; }

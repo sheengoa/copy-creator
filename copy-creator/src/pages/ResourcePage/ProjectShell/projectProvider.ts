@@ -6,8 +6,8 @@ import type {
   ProjectSegment,
 } from "../../../stores/projectStore";
 import type { CanvasDataApi } from "../../CanvasPage/dataContext";
-import type { CanvasLayout, CanvasNote, EntityPhKind, InfoGroup, NodeGroup, PendingLink, PromptPh, ScriptPh } from "../ProjectCanvas/types";
-import { INFO_H, INFO_W, OUTPUT_W, SCRIPT_W, SEG_H, SEG_W } from "../ProjectCanvas/layout";
+import type { CanvasLayout, CanvasNote, EntityPhKind, InfoGroup, NodeGroup, PendingLink, PromptPh, ScriptPh } from "./types";
+import { INFO_H, INFO_W, OUTPUT_W, SCRIPT_W, SEG_H, SEG_W } from "./layout";
 
 // 工程视图几何层数据源（工程视图节点化 2026-11-05 阶段 B/C，方案 §1.3）：
 // CanvasDataApi 的工程实现——节点=工程库 overview 派生（镜头卡/资料/片段/

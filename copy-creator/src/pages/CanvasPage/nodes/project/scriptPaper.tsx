@@ -1,6 +1,6 @@
 import { Icons } from "../../../../components/Icons";
-import { NODE_ACCENTS, PORT_COLORS } from "../../../ResourcePage/ProjectCanvas/colors";
-import { INFO_H, SCRIPT_W } from "../../../ResourcePage/ProjectCanvas/layout";
+import { NODE_ACCENTS, PORT_COLORS } from "../../../ResourcePage/ProjectShell/colors";
+import { INFO_H, SCRIPT_W } from "../../../ResourcePage/ProjectShell/layout";
 import { ScriptPaperBody } from "./bodies";
 import type { NodeDefinition } from "../types";
 

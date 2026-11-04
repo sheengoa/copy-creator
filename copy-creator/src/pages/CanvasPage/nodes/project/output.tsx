@@ -1,6 +1,6 @@
 import { Icons } from "../../../../components/Icons";
-import { NODE_ACCENTS } from "../../../ResourcePage/ProjectCanvas/colors";
-import { OUTPUT_H, OUTPUT_W } from "../../../ResourcePage/ProjectCanvas/layout";
+import { NODE_ACCENTS } from "../../../ResourcePage/ProjectShell/colors";
+import { OUTPUT_H, OUTPUT_W } from "../../../ResourcePage/ProjectShell/layout";
 import { OutputBody } from "./bodies";
 import type { NodeDefinition } from "../types";
 

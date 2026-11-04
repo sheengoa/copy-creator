@@ -16,7 +16,7 @@ import type {
   InfoGroup,
   PromptPh,
   ScriptPh,
-} from "../../../ResourcePage/ProjectCanvas/types";
+} from "../../../ResourcePage/ProjectShell/types";
 import type { DetailTarget } from "../../../ResourcePage/ProjectShell/DetailWindow";
 
 // 工程节点内容层的数据源（工程视图节点化 2026-11-05 阶段 B）：工程节点

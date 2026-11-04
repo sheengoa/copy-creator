@@ -2,10 +2,10 @@
 // 2026-11-03 引擎拆分阶段 11c；fork 对齐点按原注释保持）。含素材连线、
 // 片段输入口连线、占位暂存线、片段→成片聚合线、拖线草稿与成片连线。
 import type { EpisodeOverview, ProjectNodeLink, ProjectSegment } from "../../../../stores/projectStore";
-import type { LiftedWire } from "../engine/useGestures";
+
 import { WIRE_TYPE_COLORS } from "../colors";
 import { wirePathD } from "../layout";
-import type { PendingLink, Pos, WireBox, WireItem } from "../types";
+import type { LiftedWire, PendingLink, Pos, WireBox, WireItem } from "../types";
 
 type WireDraftT = { d: string; invalid: boolean; color?: string } | null;
 type WiresVis = { x: number; y: number; w: number; h: number };
@@ -66,7 +66,7 @@ export function WiresLayer({
       组节点的多条成员连线按承载节点去重成一条，删线全断。 */}
   {segWires.map((wire) => {
     // 被摘下的线（拿着换源中）暂时隐藏，收尾时转接或放回。
-    if (liftedWire && wire.links.some((l) => liftedWire.rows.some((r) => r.id === l.id))) return null;
+    if (liftedWire && wire.links.some((l) => liftedWire.rows.some((r: { id: string }) => r.id === l.id))) return null;
     const link = wire.links[0];
     const a = outPointOf(wire.fromKey);
     const b = inPointOf(`segment:${link.to_segment}`, link.to_port);

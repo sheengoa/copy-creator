@@ -1,6 +1,6 @@
 import { Icons } from "../../../../components/Icons";
-import { NODE_ACCENTS, PORT_COLORS, WIRE_TYPE_COLORS } from "../../../ResourcePage/ProjectCanvas/colors";
-import { SEG_H, SEG_W } from "../../../ResourcePage/ProjectCanvas/layout";
+import { NODE_ACCENTS, PORT_COLORS, WIRE_TYPE_COLORS } from "../../../ResourcePage/ProjectShell/colors";
+import { SEG_H, SEG_W } from "../../../ResourcePage/ProjectShell/layout";
 import { SegmentBody, SegmentTools } from "./bodies";
 import type { NodeDefinition } from "../types";
 
