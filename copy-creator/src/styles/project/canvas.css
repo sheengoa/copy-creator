@@ -371,25 +371,6 @@
 .pc-wire-hit { fill: none; stroke: transparent; stroke-width: 16; pointer-events: stroke; cursor: pointer; }
 .pc-wire-line { fill: none; stroke-width: 2.6; stroke-opacity: 0.95; }
 .pc-wire:hover .pc-wire-line { stroke-width: 3.6; stroke-opacity: 1; }
-/* 流动光点：一段短亮斑沿线跑（stroke-dashoffset 递减 = path 正向 =
-   from→to 数据方向）。生成链与片段→成片产出流快、手动线中速、
-   资料→片段口缓；dash 周期 226px 控制光点密度（长线 2-3 个、短线
-   1 个，避免密集成蚂蚁线）。仅装饰（pointer-events none 不挡切线
-   命中）；prefers-reduced-motion 下隐藏光点退回静态线。 */
-.pc-wire-flow {
-  fill: none;
-  stroke-linecap: round;
-  stroke-width: 3.4;
-  stroke-dasharray: 4 222;
-  animation: pc-wire-flow 3s linear infinite;
-  pointer-events: none;
-}
-.pc-wire-flow.is-fast { animation-duration: 2.2s; }
-.pc-wire-flow.is-slow { stroke-width: 2.6; opacity: 0.6; animation-duration: 3.6s; }
-@keyframes pc-wire-flow { from { stroke-dashoffset: 226; } to { stroke-dashoffset: 0; } }
-@media (prefers-reduced-motion: reduce) {
-  .pc-wire-flow { animation: none; opacity: 0; }
-}
 /* 刀切痕：白色亮线划过即断（Blender knife 手势的视觉对应物）。
    画在视口直下的绝对定位层（pc-trailayer，pc-world 之后 → 盖在卡片
    之上）：fixed 覆层会被 transform 祖先劫持坐标系，放进 pc-world 则

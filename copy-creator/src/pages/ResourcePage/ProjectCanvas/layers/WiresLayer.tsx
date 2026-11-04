@@ -1,23 +1,14 @@
 // 工程画布连线层：等视口 SVG（自 ProjectCanvas.tsx 渲染区零改动搬运，
 // 2026-11-03 引擎拆分阶段 11c；fork 对齐点按原注释保持）。含素材连线、
 // 片段输入口连线、占位暂存线、片段→成片聚合线、拖线草稿与成片连线。
-// 2026-11-05 数据流指引：每条线上叠加流动光点（stroke-dashoffset 动画，
-// path 正向即 from→to 数据方向）与线色同色箭头——「数据从哪来、到哪去」
-// 一眼可循；渲染几何与切线/摘线命中层不变。
 import type { EpisodeOverview, ProjectNodeLink, ProjectSegment } from "../../../../stores/projectStore";
 import type { LiftedWire } from "../engine/useGestures";
-import { NODE_ACCENTS, WIRE_TYPE_COLORS } from "../colors";
+import { WIRE_TYPE_COLORS } from "../colors";
 import { wirePathD } from "../layout";
 import type { PendingLink, Pos, WireBox, WireItem } from "../types";
 
 type WireDraftT = { d: string; invalid: boolean; color?: string } | null;
 type WiresVis = { x: number; y: number; w: number; h: number };
-
-/** 箭头 marker id：按线色注册（十六进制去 # 即可作稳定 id）。 */
-const arrowIdOf = (color: string) => `pc-arrow-${color.replace("#", "")}`;
-/** 光点速度档：生成链/产出汇聚快，参考/组成缓，手动线中速。 */
-const flowClassOf = (kind: "fast" | "mid" | "slow") =>
-  kind === "fast" ? "pc-wire-flow is-fast" : kind === "slow" ? "pc-wire-flow is-slow" : "pc-wire-flow";
 
 /** 连线层（卡片之下）：按视口尺寸渲染 + 平移组换算世界坐标。 */
 export function WiresLayer({
@@ -54,29 +45,6 @@ export function WiresLayer({
   }}
 >
   <g transform={`translate(${-wiresVis.x}, ${-wiresVis.y})`}>
-  {/* 箭头 marker：按线色注册一枚（颜色集合 = 线色表 ∪ 节点类型色 ∪
-      兜底灰），线只引用不重复定义。 */}
-  <defs>
-    {(() => {
-      const colors = new Set<string>(["#94a3b8"]);
-      Object.values(WIRE_TYPE_COLORS).forEach((c) => colors.add(c));
-      Object.values(NODE_ACCENTS).forEach((c) => colors.add(c));
-      return [...colors].map((c) => (
-        <marker
-          key={c}
-          id={arrowIdOf(c)}
-          viewBox="0 0 10 10"
-          refX={8}
-          refY={5}
-          markerWidth={6.5}
-          markerHeight={6.5}
-          orient="auto-start-reverse"
-        >
-          <path d="M0 0 L10 5 L0 10 z" fill={c} />
-        </marker>
-      ));
-    })()}
-  </defs>
   {wires.map((wire) => {
     const a = outPointOf(wire.fromKey);
     const b = inPointOf(wire.toKey);
@@ -90,9 +58,7 @@ export function WiresLayer({
         data-cut={wire.kind === "manual" ? `m:${wire.fromKey}|${wire.toKey}` : undefined}
       >
         <path className="pc-wire-hit" d={d} />
-        <path className="pc-wire-line" d={d} style={{ stroke: color }} markerEnd={`url(#${arrowIdOf(color)})`} />
-        {/* 流动光点：gen 生成链快、manual 手动线中速 */}
-        <path className={flowClassOf(wire.kind === "gen" ? "fast" : "mid")} d={d} style={{ stroke: color }} />
+        <path className="pc-wire-line" d={d} style={{ stroke: color }} />
       </g>
     );
   })}
@@ -107,20 +73,17 @@ export function WiresLayer({
     if (!a || !b) return null;
     const d = wirePathD(a, b);
     // 线色：资料来源跟片段对应输入口同色（角色粉/场景绿/道具橙），
-    // 其余（素材/镜头/片段）按数据类型（图蓝/视频紫）。
+    // 其余（素材/镜头/片段）按数据类型（图绿/视频紫）。
     const fromColor = nodeWireColorOf(wire.fromKey);
     const fromType = portsOf(wire.fromKey).out?.type;
-    const color = fromColor ?? WIRE_TYPE_COLORS[fromType ?? ""] ?? WIRE_TYPE_COLORS.video;
     return (
       <g key={wire.key} className="pc-wire" data-cut={`s:${link.id}`}>
         <path className="pc-wire-hit" d={d} />
         <path
           className="pc-wire-line"
           d={d}
-          style={{ stroke: color, strokeOpacity: 0.55 }}
-          markerEnd={`url(#${arrowIdOf(color)})`}
+          style={{ stroke: fromColor ?? WIRE_TYPE_COLORS[fromType ?? ""] ?? WIRE_TYPE_COLORS.video, strokeOpacity: 0.55 }}
         />
-        <path className={flowClassOf("slow")} d={d} style={{ stroke: color }} />
       </g>
     );
   })}
@@ -135,7 +98,6 @@ export function WiresLayer({
     const d = wirePathD(a, b);
     const fromType = portsOf(link.fromKey).out?.type;
     const solid = link.fromKey.startsWith("script:") || link.fromKey.startsWith("prompt:");
-    const color = nodeWireColorOf(link.fromKey) ?? WIRE_TYPE_COLORS[fromType ?? ""] ?? "#94a3b8";
     return (
       <g
         key={`pending-${link.fromKey}-${link.toSegmentId}-${link.toPort}`}
@@ -147,12 +109,10 @@ export function WiresLayer({
           className="pc-wire-line"
           d={d}
           style={{
-            stroke: color,
+            stroke: nodeWireColorOf(link.fromKey) ?? WIRE_TYPE_COLORS[fromType ?? ""] ?? "#94a3b8",
             strokeOpacity: solid ? 0.55 : 0.7,
           }}
-          markerEnd={`url(#${arrowIdOf(color)})`}
         />
-        <path className={flowClassOf("slow")} d={d} style={{ stroke: color }} />
       </g>
     );
   })}
@@ -164,17 +124,14 @@ export function WiresLayer({
       const b = inPointOf("output");
       if (!a || !b) return null;
       const d = wirePathD(a, b);
-      const color = WIRE_TYPE_COLORS.video;
       return (
         <g key={`seg-out-${segment.id}`} className="pc-wire">
           <path className="pc-wire-hit" d={d} />
           <path
             className="pc-wire-line"
             d={d}
-            style={{ stroke: color, strokeOpacity: 0.55 }}
-            markerEnd={`url(#${arrowIdOf(color)})`}
+            style={{ stroke: WIRE_TYPE_COLORS.video, strokeOpacity: 0.55 }}
           />
-          <path className={flowClassOf("fast")} d={d} style={{ stroke: color }} />
         </g>
       );
     })}
@@ -193,17 +150,14 @@ export function WiresLayer({
     const b = inPointOf("output");
     if (!a || !b) return null;
     const d = wirePathD(a, b);
-    const color = WIRE_TYPE_COLORS.video;
     return (
       <g className="pc-wire" data-cut="o">
         <path className="pc-wire-hit" d={d} />
         <path
           className="pc-wire-line"
           d={d}
-          style={{ stroke: color }}
-          markerEnd={`url(#${arrowIdOf(color)})`}
+          style={{ stroke: WIRE_TYPE_COLORS.video }}
         />
-        <path className={flowClassOf("fast")} d={d} style={{ stroke: color }} />
       </g>
     );
   })()}
