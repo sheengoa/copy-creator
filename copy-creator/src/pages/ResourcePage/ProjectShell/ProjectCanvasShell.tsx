@@ -1,4 +1,4 @@
-import { useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useShallow } from "zustand/react/shallow";
 import { useTranslation } from "react-i18next";
 import { useProjectStore, type ProjectAsset } from "../../../stores/projectStore";
@@ -21,6 +21,22 @@ import { usePorts } from "../ProjectCanvas/engine/usePorts";
 import { WIRES_VIEWPORT_PAD } from "../ProjectCanvas/layout";
 import { WiresLayer } from "../ProjectCanvas/layers/WiresLayer";
 import { buildProjectCanvasApi, buildProjectNodes } from "./projectProvider";
+import { SceneFrames } from "../ProjectCanvas/layers/SceneFrames";
+import { EpisodeCard, AddBtnBar, IssueBar } from "../ProjectCanvas/layers/CanvasBars";
+import {
+  DeleteSceneConfirm,
+  LocationPickPanel,
+  PromptPickDialog,
+  SceneFormDialog,
+  ScriptPickDialog,
+  ShotFormDialog,
+} from "../ProjectCanvas/layers/Dialogs";
+import { useGroupOps } from "../ProjectCanvas/engine/useGroupOps";
+import { useCanvasView } from "../ProjectCanvas/engine/useCanvasView";
+import { useWorkflowSeed } from "../ProjectCanvas/engine/useWorkflowSeed";
+import type { ProjectScene } from "../../../stores/projectStore";
+import type { Pos } from "../ProjectCanvas/types";
+import { WORLD_MARGIN } from "../ProjectCanvas/layout";
 import type { EntityPhKind } from "../ProjectCanvas/types";
 
 /** updateEpisode 补丁的状态字段（store 的 ProjectEpisodeStatus）。 */
@@ -73,6 +89,13 @@ export default function ProjectCanvasShell({
     unlinkAssets,
     saveCharacter,
     setCharacterVoice,
+    saveScene,
+    deleteScene,
+    saveShot,
+    linkAsset,
+    setSegmentAsset,
+    selectEpisode,
+    loadLocations: storeLoadLocations,
   } = useProjectStore(
     useShallow((state) => ({
       overview: state.overview,
@@ -99,6 +122,12 @@ export default function ProjectCanvasShell({
       unlinkAssets: state.unlinkAssets,
       saveCharacter: state.saveCharacter,
       setCharacterVoice: state.setCharacterVoice,
+      saveScene: state.saveScene,
+      deleteScene: state.deleteScene,
+      saveShot: state.saveShot,
+      linkAsset: state.linkAsset,
+      setSegmentAsset: state.setSegmentAsset,
+      selectEpisode: state.selectEpisode,
     })),
   );
 
@@ -106,11 +135,11 @@ export default function ProjectCanvasShell({
   // provider/ctx 共用的单参形态（updateEpisode 需要集 id，这里烤入）。
   const updateEpisode = (patch: { title: string; status: ProjectEpisodeStatusLike; script_path: string }) =>
     void storeUpdateEpisode(episodeId, patch);
-  const scenes = overview?.scenes ?? [];
-  const segments = overview?.segments ?? [];
-  const castCharacters = overview?.characters ?? [];
-  const episodeLocations = overview?.locations ?? [];
-  const episodeProps = overview?.props ?? [];
+  const scenes = useMemo(() => overview?.scenes ?? [], [overview]);
+  const segments = useMemo(() => overview?.segments ?? [], [overview]);
+  const castCharacters = useMemo(() => overview?.characters ?? [], [overview]);
+  const episodeLocations = useMemo(() => overview?.locations ?? [], [overview]);
+  const episodeProps = useMemo(() => overview?.props ?? [], [overview]);
 
   // ── 数据层（旧引擎钩子原样复用：按集状态 + 布局派生 + 自愈/兜底加载）──
   const data = useCanvasData({
@@ -131,6 +160,217 @@ export default function ProjectCanvasShell({
 
   const promptUntitled = t("project.canvas.promptUntitled");
   const ephTitle = t("project.canvas.ephTitle");
+
+  // ── 工程外围件引擎链（阶段 E1 收编）：组操作（暂存线转正/出生锚点）
+  // → 视图（缺项检查/定位/剧本挑挂）→ 空集工作流种子。选择态由基座
+  // 自管，这里给组操作挂空实现（其复制粘贴/组拖路径不被外围件使用）。 ──
+  const overlaySelRef = useRef<string[]>([]);
+  const groupOps = useGroupOps({
+    selRef: overlaySelRef,
+    pos: data.pos,
+    segPos: data.segPos,
+    infoOffsets: data.infoOffsets,
+    notes: data.notes,
+    outputBox: data.outputBox,
+    infoNodePos: data.infoNodePos,
+    setPos: data.setPos,
+    setSegPos: data.setSegPos,
+    setNotes: data.setNotes,
+    setInfoOffsets: data.setInfoOffsets,
+    setOutputPos: data.setOutputPos,
+    persistCards: data.persistCards,
+    persistSegments: data.persistSegments,
+    persistNotes: data.persistNotes,
+    persistInfoOffsets: data.persistInfoOffsets,
+    saveOutputPos: data.saveOutputPos,
+    episodeId,
+    overview,
+    infoNodes: data.infoNodes,
+    entityPhs: data.entityPhs,
+    persistEntityPhs: data.persistEntityPhs,
+    scriptPhs: data.scriptPhs,
+    persistScriptPhs: data.persistScriptPhs,
+    promptPhs: data.promptPhs,
+    persistPromptPhs: data.persistPromptPhs,
+    saveCanvasLayout,
+    setSelection: () => {},
+    sizeOfNode: data.sizeOfNode,
+    setNodeSizes: data.setNodeSizes,
+    persistSizes: data.persistSizes,
+    removeSegment,
+    addNote: data.addNote,
+    addEntityPh: data.addEntityPh,
+    addSegment,
+  });
+  // 剧本/提示词纸片的库选弹窗状态（双击纸片 → 选文件/选提示词）。
+  const [scriptPickOpen, setScriptPickOpen] = useState(false);
+  const [scriptPickTarget, setScriptPickTarget] = useState<string | null>(null);
+  const [promptPickOpen, setPromptPickOpen] = useState(false);
+  const [promptPickTarget, setPromptPickTarget] = useState<string | null>(null);
+  const [promptPickQuery, setPromptPickQuery] = useState("");
+  const canvasView = useCanvasView({
+    episodeId,
+    overview,
+    scenes,
+    segments,
+    looseAssets: overview?.loose_assets ?? [],
+    segPos: data.segPos,
+    entityPhs: data.entityPhs,
+    infoPos: data.infoPos,
+    infoNodes: data.infoNodes,
+    outputBox: data.outputBox,
+    layout: data.layout,
+    sizeOfNode: data.sizeOfNode,
+    infoNodePos: data.infoNodePos,
+    updateEpisode: storeUpdateEpisode,
+    linkNode,
+    linkAsset,
+    setSegmentAsset,
+    selectEpisode,
+    scriptPhs: data.scriptPhs,
+    persistScriptPhs: data.persistScriptPhs,
+    infoOffsets: data.infoOffsets,
+    persistInfoOffsets: data.persistInfoOffsets,
+    nodeSizes: data.nodeSizes,
+    persistSizes: data.persistSizes,
+    dropPendingLinksOf: groupOps.dropPendingLinksOf,
+    scriptPickTarget,
+    setScriptPickOpen,
+    setScriptPickTarget,
+    setPulseKeys: groupOps.setPulseKeys,
+    spawnAnchorRef: groupOps.spawnAnchorRef,
+    armSpawnAt: groupOps.armSpawnAt,
+  });
+  // 空集默认工作流种子（首次进入自动铺片段+占位骨架）。
+  useWorkflowSeed({
+    episodeId,
+    overview,
+    addSegment,
+    layout: data.layout,
+    persistEntityPhs: data.persistEntityPhs,
+    persistPromptPhs: data.persistPromptPhs,
+    persistScriptPhs: data.persistScriptPhs,
+    persistInfoOffsets: data.persistInfoOffsets,
+    persistPendingLinks,
+  });
+
+  // ── 场景框：位置（scenes.canvas 之外叠本地实时层）+ 标签牌整组拖动 ──
+  const [scenePos, setScenePos] = useState<Record<string, Pos>>({});
+  useEffect(() => {
+    setScenePos((prev) => {
+      const next: Record<string, Pos> = {};
+      scenes.forEach((scene) => {
+        next[scene.id] = prev[scene.id] ?? (scene.canvas_x != null && scene.canvas_y != null
+          ? { x: scene.canvas_x, y: scene.canvas_y }
+          : data.layout.framePos[scene.id] ?? { x: WORLD_MARGIN, y: 110 });
+      });
+      return next;
+    });
+  }, [scenes, data.layout.framePos]);
+  // 标签牌拖动 = 整组移动（框 + 场景内全部镜头卡），松手落工程表。
+  const sceneDragRef = useRef<{ id: string; sx: number; sy: number; ox: number; oy: number; members: string[] } | null>(null);
+  const handleSceneLabelPointerDown = (e: React.PointerEvent) => {
+    const label = (e.target as Element).closest(".pc-frame-label");
+    if (!label || e.button !== 0) return;
+    const frame = label.closest(".pc-frame");
+    const sceneId = frame?.getAttribute("data-scene") ?? "";
+    const base = scenePos[sceneId];
+    if (!base) return;
+    e.preventDefault();
+    const members = data.layout.cards.filter((c) => c.sceneId === sceneId).map((c) => c.shot.id);
+    sceneDragRef.current = { id: sceneId, sx: e.clientX, sy: e.clientY, ox: base.x, oy: base.y, members };
+    const onMove = (ev: PointerEvent) => {
+      const drag = sceneDragRef.current;
+      if (!drag) return;
+      const dx = (ev.clientX - drag.sx) / (canvasView.view.scale || 1);
+      const dy = (ev.clientY - drag.sy) / (canvasView.view.scale || 1);
+      setScenePos((prev) => ({ ...prev, [drag.id]: { x: drag.ox + dx, y: drag.oy + dy } }));
+      data.setPos((prev) => {
+        const cards = { ...prev.cards };
+        drag.members.forEach((shotId) => {
+          const origin = data.layout.cardPos[shotId];
+          if (origin) cards[shotId] = { x: origin.x + dx, y: origin.y + dy };
+        });
+        return { ...prev, cards };
+      });
+    };
+    const onUp = () => {
+      const drag = sceneDragRef.current;
+      sceneDragRef.current = null;
+      window.removeEventListener("pointermove", onMove);
+      window.removeEventListener("pointerup", onUp);
+      if (!drag) return;
+      const dx = (dragLastX - drag.sx) / (canvasView.view.scale || 1);
+      const dy = (dragLastY - drag.sy) / (canvasView.view.scale || 1);
+      void saveCanvasLayout({
+        assets: [],
+        shots: drag.members.map((shotId) => {
+          const origin = data.layout.cardPos[shotId];
+          return { id: shotId, x: (origin?.x ?? 0) + dx, y: (origin?.y ?? 0) + dy };
+        }),
+        scenes: [{ id: drag.id, x: drag.ox + dx, y: drag.oy + dy }],
+      });
+    };
+    let dragLastX = e.clientX;
+    let dragLastY = e.clientY;
+    const trackMove = (ev: PointerEvent) => {
+      dragLastX = ev.clientX;
+      dragLastY = ev.clientY;
+    };
+    window.addEventListener("pointermove", onMove);
+    window.addEventListener("pointermove", trackMove);
+    window.addEventListener("pointerup", onUp, { once: true });
+  };
+
+  // ── 场景/镜头快速表单 ──
+  const [sceneForm, setSceneForm] = useState<{ id?: string; heading: string; locationId: string } | null>(null);
+  const [shotForm, setShotForm] = useState<{ id: string; sceneId: string; description: string; dialogue: string } | null>(null);
+  const [deleteSceneTarget, setDeleteSceneTarget] = useState<ProjectScene | null>(null);
+  const [locationPickOpen, setLocationPickOpen] = useState(false);
+  useEffect(() => {
+    if ((sceneForm || shotForm) && locations.length === 0) void storeLoadLocations();
+  }, [sceneForm, shotForm, locations.length, storeLoadLocations]);
+  const submitSceneForm = () => {
+    const draft = sceneForm;
+    setSceneForm(null);
+    if (!draft || !draft.heading.trim()) return;
+    void saveScene({
+      id: draft.id,
+      episodeId,
+      heading: draft.heading.trim(),
+      locationId: draft.locationId,
+      note: "",
+    });
+  };
+  const submitShotForm = () => {
+    const draft = shotForm;
+    setShotForm(null);
+    if (!draft) return;
+    void saveShot({
+      id: draft.id || undefined,
+      sceneId: draft.sceneId,
+      description: draft.description.trim(),
+      dialogue: draft.dialogue.trim(),
+      status: "none",
+      camera: "",
+      duration: "",
+    });
+  };
+  // 提示词库选确认（纸片记 promptId，画布层状态）。
+  const handlePromptPick = (promptId: string) => {
+    setPromptPickOpen(false);
+    const target = promptPickTarget;
+    setPromptPickTarget(null);
+    if (!target || !target.startsWith("prompt:")) return;
+    const phId = target.slice(7);
+    if (!data.promptPhs.some((item) => item.id === phId)) return;
+    data.persistPromptPhs(data.promptPhs.map((item) => (item.id === phId ? { ...item, promptId } : item)));
+  };
+  const closePromptPick = () => {
+    setPromptPickOpen(false);
+    setPromptPickTarget(null);
+    setPromptPickQuery("");
+  };
 
   // ── 连线层（阶段 C）：旧引擎钩子复用——wires（gen 链+手动素材线聚合）、
   // segWires（node_links 按承载节点去重）、口色与顶掉/换源语义。实测锚点
@@ -280,6 +520,18 @@ export default function ProjectCanvasShell({
       }
     }
     return (
+      <>
+      <div onPointerDown={handleSceneLabelPointerDown}>
+      <SceneFrames
+        scenes={scenes}
+        scenePos={scenePos}
+        layout={data.layout}
+        pos={data.pos}
+        setSceneForm={setSceneForm}
+        setShotForm={setShotForm}
+        setDeleteSceneTarget={setDeleteSceneTarget}
+      />
+      </div>
       <WiresLayer
         wires={metrics.wires}
         segWires={ports.segWires}
@@ -300,6 +552,7 @@ export default function ProjectCanvasShell({
         portsOf={ports.portsOf}
         nodeWireColorOf={ports.nodeWireColorOf}
       />
+      </>
     );
   };
 
@@ -369,11 +622,66 @@ export default function ProjectCanvasShell({
         <FreeCanvas
           canvasId={episodeId}
           renderWires={renderWires}
+          overlays={(
+            <>
+              <IssueBar
+                issues={canvasView.issues}
+                scriptPhs={data.scriptPhs}
+                segments={segments}
+                locateOutput={() => canvasView.locateOutput()}
+                locateScript={(key) => canvasView.locateScript(key)}
+                armSpawnFromEvent={(x, y) => canvasView.armSpawnFromEvent(x, y)}
+                addScriptPh={data.addScriptPh}
+                locateEmptySegment={() => canvasView.locateEmptySegment()}
+                setDetailFor={(v) => {
+                  const target = typeof v === "function" ? null : v;
+                  if (target && target.kind === "segment") setDetailFor({ kind: "segment", id: target.id });
+                }}
+              />
+              <AddBtnBar onPickForShot={onPickForShot} setSceneForm={setSceneForm} />
+              <EpisodeCard overlay={overlay} scenes={scenes} looseAssets={overview?.loose_assets ?? []} wires={metrics.wires} />
+              <SceneFormDialog sceneForm={sceneForm} setSceneForm={setSceneForm} locations={locations} submitSceneForm={submitSceneForm} />
+              <ShotFormDialog shotForm={shotForm} setShotForm={setShotForm} submitShotForm={submitShotForm} />
+              <DeleteSceneConfirm deleteSceneTarget={deleteSceneTarget} setDeleteSceneTarget={setDeleteSceneTarget} deleteScene={(id) => void deleteScene(id)} />
+              <ScriptPickDialog
+                scriptPickOpen={scriptPickOpen}
+                setScriptPickTarget={setScriptPickTarget}
+                setScriptPickOpen={setScriptPickOpen}
+                handleScriptPick={canvasView.handleScriptPick}
+              />
+              <PromptPickDialog
+                promptPickOpen={promptPickOpen}
+                closePromptPick={closePromptPick}
+                promptPickQuery={promptPickQuery}
+                setPromptPickQuery={setPromptPickQuery}
+                prompts={prompts}
+                handlePromptPick={handlePromptPick}
+              />
+              <LocationPickPanel
+                locationPickOpen={locationPickOpen}
+                setLocationPickOpen={setLocationPickOpen}
+                episodeId={episodeId}
+                locationIds={overview?.episode.location_ids ?? []}
+                setEpisodeLocations={setEpisodeLocations}
+              />
+            </>
+          )}
           onOpenNodeDetail={(node) => {
             const key = node.id;
             if (key.startsWith("segment:")) setDetailFor({ kind: "segment", id: key.slice(8) });
             else if (key.startsWith("eph:")) setDetailFor({ kind: "entityPh", id: key.slice(4), group: node.type as EntityPhKind });
             else if (/^(char|loc|prop|grp):/.test(key)) setDetailFor({ kind: "info", group: node.type as EntityPhKind, sourceKey: key });
+            else if (key === "script" || key.startsWith("script:")) {
+              setScriptPickTarget(key);
+              setScriptPickOpen(true);
+            } else if (key.startsWith("prompt:")) {
+              const ph = data.promptPhs.find((item) => `prompt:${item.id}` === key);
+              if (ph?.promptId) setDetailFor({ kind: "promptPh", id: ph.id } as never);
+              else {
+                setPromptPickTarget(key);
+                setPromptPickOpen(true);
+              }
+            }
           }}
         />
         {detailFor && (detailFor.kind === "info" || detailFor.kind === "segment" || detailFor.kind === "entityPh") && (
