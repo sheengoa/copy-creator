@@ -939,6 +939,7 @@
     "cancelGen": "取消",
     "genModelLabel": "模型",
     "genSizeLabel": "分辨率",
+    "genSizeApprox": "约",
     "genSizeAutoHint": "跟随模型",
     "genCountLabel": "张数",
     "genCountSummary": "共 {{count}} 张",

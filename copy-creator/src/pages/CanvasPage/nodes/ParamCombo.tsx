@@ -19,7 +19,17 @@ export function ParamCombo({
 }: {
   comboKey: string;
   value: string;
-  items: { value: string; label: string; hint?: string }[];
+  /** desc/tier/shape 齐备时走双段条目（尺寸按模型分流 2026-11-04）：
+   *  上行比例主文案 + 档位角标 + 宽高比示意小框，下行弱化分辨率注；
+   *  模型等单段条目（仅 label/hint）走原结构。 */
+  items: {
+    value: string;
+    label: string;
+    hint?: string;
+    desc?: string;
+    tier?: string;
+    shape?: readonly [number, number];
+  }[];
   placeholder?: string;
   toggleTitle: string;
   /** 非编辑态的取值展示：按当前值格式化为「主值 + 弱化尾注」（与下拉
@@ -124,18 +134,53 @@ export function ParamCombo({
             style={{ left: anchor.left, top: anchor.top, width: anchor.width }}
             onPointerDown={(e) => e.stopPropagation()}
           >
-            {items.map((item) => (
-              <button
-                key={item.value}
-                type="button"
-                className={`fc-combo-item${item.value === value ? " is-current" : ""}`}
-                onClick={() => applyPreset(item.value)}
-              >
-                <span className="fc-combo-label">{item.label}</span>
-                {item.hint && <span className="fc-combo-hint">{item.hint}</span>}
-                {item.value === value && <i aria-hidden="true">{Icons.check}</i>}
-              </button>
-            ))}
+            {items.map((item) => {
+              const rich = !!item.desc || !!item.shape;
+              return (
+                <button
+                  key={item.value}
+                  type="button"
+                  className={`fc-combo-item${item.value === value ? " is-current" : ""}`}
+                  onClick={() => applyPreset(item.value)}
+                >
+                  {rich ? (
+                    <span className="fc-combo-item-stack">
+                      <span className="fc-combo-item-l1">
+                        <span className="fc-combo-label">{item.label}</span>
+                        {item.tier && <span className="fc-combo-item-tier">{item.tier}</span>}
+                        {item.shape && (
+                          <svg
+                            className="fc-combo-item-shape"
+                            width={item.shape[0]}
+                            height={item.shape[1]}
+                            viewBox={`0 0 ${item.shape[0]} ${item.shape[1]}`}
+                            aria-hidden="true"
+                          >
+                            <rect
+                              x="0.75"
+                              y="0.75"
+                              width={item.shape[0] - 1.5}
+                              height={item.shape[1] - 1.5}
+                              rx="2"
+                              fill="none"
+                              stroke="currentColor"
+                              strokeWidth="1.5"
+                            />
+                          </svg>
+                        )}
+                      </span>
+                      {item.desc && <span className="fc-combo-item-desc">{item.desc}</span>}
+                    </span>
+                  ) : (
+                    <>
+                      <span className="fc-combo-label">{item.label}</span>
+                      {item.hint && <span className="fc-combo-hint">{item.hint}</span>}
+                    </>
+                  )}
+                  {item.value === value && <i aria-hidden="true">{Icons.check}</i>}
+                </button>
+              );
+            })}
           </div>
         </WheelGate>,
         document.body,

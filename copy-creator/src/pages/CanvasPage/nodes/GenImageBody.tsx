@@ -4,7 +4,7 @@ import { useCanvasStore } from "../../../stores/canvasStore";
 import { useSettingsStore } from "../../../stores/settingsStore";
 import { GenAuroraStage } from "./GenAuroraStage";
 import { useGenRuntime } from "./genRuntimeCtx";
-import { commitImageParams, formatSizeDisplay, MODEL_PRESET_BASE, SIZE_PRESET_ITEMS } from "./genParams";
+import { commitImageParams, formatSizeDisplay, MODEL_PRESET_BASE, sizePresetItemsFor } from "./genParams";
 import { ResourceThumb } from "./media";
 import { useNodeErrors } from "./nodeErrors";
 import { NodeHint } from "./NodeHint";
@@ -31,11 +31,9 @@ export function GenImageBody({ node }: NodeProps) {
   const meta = node.metadata;
   if (meta.kind !== "gen_image") return null;
   const missing = genReadinessOf(nodes, connections, node, t);
-  // 尺寸档位：hintKey 在此解析为当前语言（比例尾注语言中立，映射随渲染重算）。
-  const sizeItems = SIZE_PRESET_ITEMS.map(({ hintKey, ...rest }) => ({
-    ...rest,
-    hint: hintKey ? t(`canvas.${hintKey}`) : rest.hint,
-  }));
+  // 尺寸档位（2026-11-04 按模型分流）：生效模型 = 节点值 → 设置页默认
+  // 兜底；gpt-image 只给官方支持项，gemini/自定义给全比例清单。
+  const sizeItems = sizePresetItemsFor(meta.params.model || modelFallback, t);
   // 等待编排：快照在册即全程接管节点体——参数收起（溜走）、
   // 流光舞台、槽位谢幕、底部动作行换位。store 条目活着优先读
   // 它（跟得紧），谢幕期读快照（条目已随最终刷新被裁）。
