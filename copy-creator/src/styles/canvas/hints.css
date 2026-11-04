@@ -188,6 +188,10 @@
   justify-content: center;
   padding: 0;
   border: none;
+  /* 悬停反馈块圆角与组合框下拉钮（.fc-combo-toggle）同款 6px——
+     2026-11-04 修复：无圆角时悬停灰块为直角，与下拉钮悬停块
+     观感不统一（用户 2026-11-01 即指出「图二那个块没圆角」）。 */
+  border-radius: 6px;
   background: none;
   color: var(--text-secondary);
   cursor: pointer;
