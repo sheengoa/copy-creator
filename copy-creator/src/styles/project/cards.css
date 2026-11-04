@@ -2,18 +2,21 @@
    六段按原文件级联顺序在 App.tsx 依次引入，拆文件不改任何规则。 */
 
 /* ── 镜头卡（素材网格挂卡内）与资料卡 ── */
+/* 镜头卡头：与资料/片段头栏同走玻璃化（共享配方管 chrome，此处保留
+   镜头卡专属排版——描述为主文案、无类型名，序号徽标右上）。 */
 .pc-shot-head {
   position: relative;
   min-height: 40px;
   padding: 8px 30px 8px 9px;
-  border-left: 3px solid var(--node-accent, var(--text-tertiary));
-  border-bottom: 1px solid var(--separator);
-  border-radius: 11px 11px 0 0;
-  background: color-mix(in srgb, var(--node-accent, transparent) 5%, transparent);
+  border-left: none;
+  border-bottom: 0.5px solid rgba(0, 0, 0, 0.045);
+  border-radius: 14.5px 14.5px 0 0;
+  background: transparent;
   display: flex;
   flex-direction: column;
   gap: 3px;
 }
+[data-theme="dark"] .pc-shot-head { border-bottom-color: rgba(255, 255, 255, 0.08); }
 .pc-shot-no {
   position: absolute; top: 7px; right: 8px; height: 18px; min-width: 18px; padding: 0 5px;
   border-radius: 5px; background: var(--chip-bg); border: 1px solid var(--separator);

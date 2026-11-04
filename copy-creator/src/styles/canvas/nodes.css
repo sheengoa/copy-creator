@@ -1,12 +1,12 @@
 /* 画布区样式（自 canvas.css 按原分区与顺序切片，2026-11-03 阶段 7）：
    六段按原文件级联顺序在 App.tsx 依次引入，拆文件不改任何规则。 */
 
-/* ══ 画布区节点视觉标准（B+ 通透玻璃，用户确认稿定案） ══════
-   参数定案：卡面 rgba(255,255,255,0.62) · blur 24px · saturate 1.8 ·
-   顶部反光强度 0.85 · 参数框白卡浮起 · 生成按钮同色光晕投影。
-   覆盖工程画布 pc-node 的默认 chrome（色带头栏/实心白卡），作用域限定
-   .fc-root；亮暗两套必须同步。后续新增节点类型沿用此 chrome，只需在
-   FreeCanvas 的 NODE_ACCENT 注册类型色、body 用本文件内容层样式。 */
+/* ══ 画布区节点内容层（B+ 通透玻璃配套件） ══════════════════
+   节点 chrome（卡面/头栏/端口辉光/选中态，亮暗两套）已上提到
+   canvas/shared-chrome.css 共享配方，与工程画布同源——本文件不再
+   覆盖 chrome，只保留自由画布专属的内容层样式。后续新增节点类型
+   只需在 FreeCanvas 的 NODE_ACCENT 注册类型色、body 用本文件内容
+   层样式。 */
 
 .canvas-main > .pc-root {
   position: absolute;
@@ -16,67 +16,10 @@
 .fc-root .pc-node {
   display: flex;
   flex-direction: column;
-  border-radius: 15px;
-  background: rgba(255, 255, 255, 0.62);
-  backdrop-filter: blur(24px) saturate(1.8);
-  -webkit-backdrop-filter: blur(24px) saturate(1.8);
-  border: 0.5px solid rgba(255, 255, 255, 0.78);
-  box-shadow:
-    0 1px 2px rgba(0, 0, 0, 0.04),
-    0 14px 40px rgba(31, 35, 65, 0.14),
-    inset 0 0.5px 0 rgba(255, 255, 255, 0.85),
-    inset 0 -0.5px 0 rgba(255, 255, 255, 0.35);
 }
 
-/* 玻璃斜面反光：顶部一道渐隐高光，盖在内容之上（真玻璃的表面反光），
-   不拦截命中。 */
-.fc-root .pc-node::before {
-  content: "";
-  position: absolute;
-  inset: 0;
-  border-radius: inherit;
-  pointer-events: none;
-  background: linear-gradient(168deg, rgba(255, 255, 255, 0.5) 0%, rgba(255, 255, 255, 0.12) 22%, rgba(255, 255, 255, 0) 42%);
-  opacity: 0.85;
-}
-
-/* 选中点亮：内 1px 类型色线 + 外 4.5px 柔光圈（双层 ring）。 */
-.fc-root .pc-node.pc-selected {
-  border-color: var(--node-accent, var(--accent));
-  box-shadow:
-    0 1px 2px rgba(0, 0, 0, 0.04),
-    0 14px 40px rgba(31, 35, 65, 0.14),
-    0 0 0 1px var(--node-accent, var(--accent)),
-    0 0 0 4.5px color-mix(in srgb, var(--node-accent, var(--accent)) 20%, transparent),
-    inset 0 0.5px 0 rgba(255, 255, 255, 0.85);
-}
-
-/* 头栏：去工程画布的类型色带与色底，改玻璃化精装头栏。 */
-.fc-root .pc-node-head {
-  min-height: 32px;
-  padding: 0 12px;
-  border-left: none;
-  border-bottom: 0.5px solid rgba(0, 0, 0, 0.045);
-  border-radius: 14.5px 14.5px 0 0;
-  background: transparent;
-}
-
-.fc-root .pc-node-kind {
-  font-weight: 500;
-  letter-spacing: 0.02em;
-  color: var(--node-accent, var(--text-secondary));
-}
-
-/* 端口光晕：输出带类型色辉光，浮在玻璃卡沿；合集节点的输入口同样
-   点亮——提示这里与别处不同、可以多线汇入。 */
-.fc-root .pc-port {
-  box-shadow: 0 0 0 2.5px rgba(255, 255, 255, 0.92);
-}
-
-.fc-root .pc-port-out {
-  box-shadow: 0 0 0 2.5px rgba(255, 255, 255, 0.92), 0 0 8px 1px var(--node-accent, transparent);
-}
-
+/* 端口光晕补充：合集节点的输入口同样点亮——提示这里与别处不同、
+   可以多线汇入（工程画布无合集节点）。 */
 .fc-root .fc-type-collection_image .pc-port-in,
 .fc-root .fc-type-collection_text .pc-port-in,
 .fc-root .fc-type-collection_video .pc-port-in {

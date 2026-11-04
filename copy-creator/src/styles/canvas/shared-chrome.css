@@ -1,0 +1,106 @@
+/* ══ 画布区节点视觉标准（共享配方，工程画布与自由画布同源） ════
+   两画布根同为 .pc-root（自由画布附加 .fc-root），故本文件用不带
+   作用域前缀的画布域选择器，两边同时生效。参数定案沿用画布区
+   B+ 通透玻璃确认稿：卡面 rgba(255,255,255,0.62) · blur 24px ·
+   saturate 1.8 · 顶部反光 0.85 · 端口白环辉光 · 选中双层 ring；
+   亮暗两套必须同步。修改本文件即同时作用于两个画布。
+   画布专属件（工程侧场景框/便签/镜头卡头/端口行布局、自由画布
+   内容层 fc-*）仍在各自文件；本文件只收「两边必须一致」的 chrome。
+   （2026-11-05 由 canvas/nodes.css 的 .fc-root 覆盖块上提合并，
+   工程画布旧实底 chrome 同步下线，见 project/canvas.css 注释。） */
+
+.pc-node {
+  border-radius: 15px;
+  background: rgba(255, 255, 255, 0.62);
+  backdrop-filter: blur(24px) saturate(1.8);
+  -webkit-backdrop-filter: blur(24px) saturate(1.8);
+  border: 0.5px solid rgba(255, 255, 255, 0.78);
+  box-shadow:
+    0 1px 2px rgba(0, 0, 0, 0.04),
+    0 14px 40px rgba(31, 35, 65, 0.14),
+    inset 0 0.5px 0 rgba(255, 255, 255, 0.85),
+    inset 0 -0.5px 0 rgba(255, 255, 255, 0.35);
+}
+
+/* 玻璃斜面反光：顶部一道渐隐高光，盖在内容之上（真玻璃的表面反光），
+   不拦截命中。 */
+.pc-node::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  pointer-events: none;
+  background: linear-gradient(168deg, rgba(255, 255, 255, 0.5) 0%, rgba(255, 255, 255, 0.12) 22%, rgba(255, 255, 255, 0) 42%);
+  opacity: 0.85;
+}
+
+/* 选中点亮：内 1px 类型色线 + 外 4.5px 柔光圈（双层 ring）。 */
+.pc-node.pc-selected {
+  border-color: var(--node-accent, var(--accent));
+  box-shadow:
+    0 1px 2px rgba(0, 0, 0, 0.04),
+    0 14px 40px rgba(31, 35, 65, 0.14),
+    0 0 0 1px var(--node-accent, var(--accent)),
+    0 0 0 4.5px color-mix(in srgb, var(--node-accent, var(--accent)) 20%, transparent),
+    inset 0 0.5px 0 rgba(255, 255, 255, 0.85);
+}
+
+/* 头栏：去类型色带与色底，改玻璃化精装头栏。 */
+.pc-node-head {
+  border-left: none;
+  border-bottom: 0.5px solid rgba(0, 0, 0, 0.045);
+  border-radius: 14.5px 14.5px 0 0;
+  background: transparent;
+}
+
+.pc-node-kind {
+  font-weight: 500;
+  letter-spacing: 0.02em;
+  color: var(--node-accent, var(--text-secondary));
+}
+
+/* 端口光晕：白环浮在玻璃卡沿；输出带类型色辉光。 */
+.pc-port {
+  box-shadow: 0 0 0 2.5px rgba(255, 255, 255, 0.92);
+}
+
+.pc-port-out {
+  box-shadow: 0 0 0 2.5px rgba(255, 255, 255, 0.92), 0 0 8px 1px var(--node-accent, transparent);
+}
+
+/* ── 暗色主题（与亮色同步定案：深玻璃 + 浮起件） ───────────── */
+
+[data-theme="dark"] .pc-node {
+  background: rgba(30, 30, 36, 0.66);
+  border-color: rgba(255, 255, 255, 0.12);
+  box-shadow:
+    0 1px 2px rgba(0, 0, 0, 0.3),
+    0 14px 40px rgba(0, 0, 0, 0.4),
+    inset 0 0.5px 0 rgba(255, 255, 255, 0.14),
+    inset 0 -0.5px 0 rgba(255, 255, 255, 0.06);
+}
+
+[data-theme="dark"] .pc-node::before {
+  background: linear-gradient(168deg, rgba(255, 255, 255, 0.09) 0%, rgba(255, 255, 255, 0.02) 22%, rgba(255, 255, 255, 0) 42%);
+}
+
+[data-theme="dark"] .pc-node.pc-selected {
+  box-shadow:
+    0 1px 2px rgba(0, 0, 0, 0.3),
+    0 14px 40px rgba(0, 0, 0, 0.4),
+    0 0 0 1px var(--node-accent, var(--accent)),
+    0 0 0 4.5px color-mix(in srgb, var(--node-accent, var(--accent)) 28%, transparent),
+    inset 0 0.5px 0 rgba(255, 255, 255, 0.14);
+}
+
+[data-theme="dark"] .pc-node-head {
+  border-bottom-color: rgba(255, 255, 255, 0.08);
+}
+
+[data-theme="dark"] .pc-port {
+  box-shadow: 0 0 0 2.5px rgba(20, 20, 24, 0.9);
+}
+
+[data-theme="dark"] .pc-port-out {
+  box-shadow: 0 0 0 2.5px rgba(20, 20, 24, 0.9), 0 0 8px 1px var(--node-accent, transparent);
+}

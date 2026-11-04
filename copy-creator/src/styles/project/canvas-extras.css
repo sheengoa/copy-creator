@@ -358,54 +358,96 @@
 }
 .pc-checkbar-chip:hover { background: rgba(255, 255, 255, 0.18); }
 
-/* ── 便签节点（ComfyUI Note 的对应物） ── */
+/* ── 便签节点（ComfyUI Note 的对应物）──
+   玻璃卡 + 内嵌琥珀块：与自由画布 fc-note-body 同一语言（便签 DOM
+   无 .pc-node 类，共享配方不命中，玻璃参数按配方同值手写，改动需
+   与 canvas/shared-chrome.css 保持同步）。 */
 .pc-note {
   position: absolute;
   display: flex;
   flex-direction: column;
   width: 172px;
-  border-radius: 10px;
-  background: #f6e6a8;
-  color: #4a3f14;
-  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.18);
+  border-radius: 15px;
+  background: rgba(255, 255, 255, 0.62);
+  backdrop-filter: blur(24px) saturate(1.8);
+  -webkit-backdrop-filter: blur(24px) saturate(1.8);
+  border: 0.5px solid rgba(255, 255, 255, 0.78);
+  box-shadow:
+    0 1px 2px rgba(0, 0, 0, 0.04),
+    0 14px 40px rgba(31, 35, 65, 0.14),
+    inset 0 0.5px 0 rgba(255, 255, 255, 0.85),
+    inset 0 -0.5px 0 rgba(255, 255, 255, 0.35);
+  color: var(--text-primary);
   cursor: grab;
   z-index: 4;
 }
-.pc-note:active { cursor: grabbing; }
-/* 便签选中点亮：与节点同语言（描边 + 泛光，便签黄混文字主色） */
-.pc-note.pc-selected {
+[data-theme="dark"] .pc-note {
+  background: rgba(30, 30, 36, 0.66);
+  border-color: rgba(255, 255, 255, 0.12);
   box-shadow:
-    0 0 0 2px color-mix(in srgb, #f6e6a8 45%, var(--text-primary)),
-    0 0 16px color-mix(in srgb, #f6e6a8 40%, transparent),
-    0 4px 14px rgba(0, 0, 0, 0.18);
+    0 1px 2px rgba(0, 0, 0, 0.3),
+    0 14px 40px rgba(0, 0, 0, 0.4),
+    inset 0 0.5px 0 rgba(255, 255, 255, 0.14),
+    inset 0 -0.5px 0 rgba(255, 255, 255, 0.06);
+}
+.pc-note:active { cursor: grabbing; }
+/* 便签选中点亮：与节点同语言的双层 ring（琥珀 accent）。 */
+.pc-note.pc-selected {
+  border-color: #E6A700;
+  box-shadow:
+    0 1px 2px rgba(0, 0, 0, 0.04),
+    0 14px 40px rgba(31, 35, 65, 0.14),
+    0 0 0 1px #E6A700,
+    0 0 0 4.5px color-mix(in srgb, #E6A700 20%, transparent),
+    inset 0 0.5px 0 rgba(255, 255, 255, 0.85);
+}
+[data-theme="dark"] .pc-note.pc-selected {
+  box-shadow:
+    0 1px 2px rgba(0, 0, 0, 0.3),
+    0 14px 40px rgba(0, 0, 0, 0.4),
+    0 0 0 1px #E6A700,
+    0 0 0 4.5px color-mix(in srgb, #E6A700 28%, transparent),
+    inset 0 0.5px 0 rgba(255, 255, 255, 0.14);
 }
 /* 内容区撑满卡体：四角缩放改尺寸时文字随宽度重排、随高度延展，
    未缩放过的便签高度仍是内容自适应（flex-basis auto 无多余空间）。 */
 .pc-note-body {
   flex: 1;
+  margin: 10px 12px 12px;
   padding: 10px 12px;
+  border-radius: 10px;
+  background: rgba(230, 167, 0, 0.12);
+  color: #8A6A1E;
   font-size: 11.5px;
   line-height: 1.55;
   word-break: break-word;
   white-space: pre-wrap;
   min-height: 40px;
 }
+[data-theme="dark"] .pc-note-body { background: rgba(230, 167, 0, 0.16); color: #FFD98A; }
 .pc-note-body i { opacity: 0.55; }
 .pc-note-input {
   display: block;
   flex: 1;
-  width: 100%;
+  width: auto;
   min-height: 72px;
+  margin: 10px 12px 12px;
   border: none;
-  background: transparent;
+  background: rgba(255, 255, 255, 0.5);
   padding: 10px 12px;
   font: inherit;
   font-size: 11.5px;
   line-height: 1.55;
-  color: inherit;
+  color: var(--text-primary);
   resize: none;
-  outline: 2px solid rgba(74, 63, 20, 0.4);
+  outline: none;
+  box-shadow: 0 0 0 1.5px rgba(217, 144, 0, 0.4);
   border-radius: 10px;
+}
+[data-theme="dark"] .pc-note-input {
+  background: rgba(255, 255, 255, 0.08);
+  color: var(--text-primary);
+  box-shadow: 0 0 0 1.5px rgba(255, 200, 87, 0.35);
 }
 .pc-note-tools {
   position: absolute;

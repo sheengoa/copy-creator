@@ -67,13 +67,19 @@
   pointer-events: none;
 }
 
-/* ── 场景分组框 ── */
+/* ── 场景分组框（玻璃化：淡玻璃底 + 虚线弱化，标签牌玻璃胶囊） ── */
 .pc-frame {
   position: absolute;
-  border: 1.5px dashed var(--separator);
+  border: 1.5px dashed color-mix(in srgb, var(--text-primary) 14%, transparent);
   border-radius: 18px;
-  background: var(--card-bg);
+  background: rgba(255, 255, 255, 0.34);
+  backdrop-filter: blur(6px);
+  -webkit-backdrop-filter: blur(6px);
   pointer-events: none;
+}
+[data-theme="dark"] .pc-frame {
+  background: rgba(255, 255, 255, 0.045);
+  border-color: rgba(255, 255, 255, 0.13);
 }
 .pc-frame-label {
   position: absolute;
@@ -82,16 +88,23 @@
   display: inline-flex;
   align-items: center;
   gap: 7px;
-  background: var(--panel-bg, var(--bg-primary));
-  border: 1px solid var(--separator);
-  border-radius: 9px;
-  padding: 5px 11px;
-  box-shadow: var(--shadow);
+  background: rgba(255, 255, 255, 0.66);
+  backdrop-filter: blur(16px) saturate(1.6);
+  -webkit-backdrop-filter: blur(16px) saturate(1.6);
+  border: 0.5px solid rgba(255, 255, 255, 0.8);
+  border-radius: 999px;
+  padding: 5px 12px;
+  box-shadow: 0 4px 14px rgba(31, 35, 65, 0.12);
   font-size: 12.5px;
   font-weight: 500;
   white-space: nowrap;
   cursor: grab;
   pointer-events: auto;
+}
+[data-theme="dark"] .pc-frame-label {
+  background: rgba(44, 46, 56, 0.66);
+  border-color: rgba(255, 255, 255, 0.12);
+  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.4);
 }
 .pc-frame-label:active { cursor: grabbing; }
 .pc-frame-no { color: var(--text-tertiary); font-size: 10.5px; }
@@ -122,14 +135,14 @@
 .pc-frame-ops button:hover { background: var(--chip-bg); color: var(--text-primary); }
 .pc-frame-ops svg { width: 12px; height: 12px; }
 
-/* ── 画布节点（ComfyUI 式）：卡体即节点 + 类型色标题条 ── */
+/* ── 画布节点（ComfyUI 式）：卡体即节点 ──
+   卡面 chrome（玻璃面/描边/阴影/选中态/头栏/端口辉光，亮暗两套）
+   已上提到 canvas/shared-chrome.css 共享配方，与自由画布同源；
+   此处只保留工程画布的布局与交互属性。 */
 .pc-node {
   position: absolute;
-  border-radius: 12px;
+  border-radius: 15px;
   cursor: grab;
-  background: var(--bg-card);
-  border: 1px solid var(--separator);
-  box-shadow: 0 2px 10px rgba(0, 0, 0, 0.08), 0 1px 3px rgba(0, 0, 0, 0.05);
   transition: box-shadow 0.16s ease, border-color 0.16s ease;
 }
 /* 自由缩放后的节点把预览区作为剩余空间使用，避免节点变大后媒体仍
@@ -180,33 +193,22 @@
 }
 .pc-node.pc-resized .pc-photo { width: 100%; }
 .pc-node:active { cursor: grabbing; }
-.pc-node:hover { z-index: 12; box-shadow: 0 14px 34px rgba(0, 0, 0, 0.16), 0 3px 8px rgba(0, 0, 0, 0.08); }
+/* hover 只负责把节点提到同级之上（浮起阴影由共享配方的常态阴影承担）。 */
+.pc-node:hover { z-index: 12; }
 /* 拖动中的节点/便签压在同级之上（含 hover 态，松手清除） */
 .pc-node.pc-dragging, .pc-note.pc-dragging { z-index: 20; }
-/* 选中态：节点类型色点亮边缘（实色描边 + 柔和泛光）——正在操作哪个
-   节点一目了然；类型未定（如便签外的特殊态）回退文字主色。 */
-.pc-node.pc-selected {
-  border-color: color-mix(in srgb, var(--node-accent, var(--text-primary)) 55%, var(--text-primary));
-  box-shadow:
-    0 0 0 2px color-mix(in srgb, var(--node-accent, var(--text-primary)) 80%, var(--text-primary)),
-    0 0 18px color-mix(in srgb, var(--node-accent, var(--text-secondary)) 38%, transparent),
-    0 14px 34px rgba(0, 0, 0, 0.16), 0 3px 8px rgba(0, 0, 0, 0.08);
-}
 .pc-node.pc-wire-target {
   border-color: var(--card-glow);
   box-shadow: 0 0 0 2px var(--card-glow), 0 8px 24px rgba(0, 0, 0, 0.14);
 }
-/* 类型色标题条：类型名与名称常显（取代此前的 hover 徽标） */
+/* 类型标题条：类型名与名称常显（取代此前的 hover 徽标）；玻璃化
+   （去色带/色底、发丝分隔）由共享配方提供，这里只留排版。 */
 .pc-node-head {
   display: flex;
   align-items: center;
   gap: 7px;
-  min-height: 27px;
-  padding: 2px 10px 2px 8px;
-  border-left: 3px solid var(--node-accent, var(--text-tertiary));
-  border-bottom: 1px solid var(--separator);
-  border-radius: 11px 11px 0 0;
-  background: color-mix(in srgb, var(--node-accent, transparent) 8%, transparent);
+  min-height: 32px;
+  padding: 0 12px;
   font-size: 10.5px;
   color: var(--text-secondary);
   overflow: hidden;
@@ -214,9 +216,7 @@
 }
 .pc-node-kind {
   flex: none;
-  font-weight: 600;
-  letter-spacing: 0.3px;
-  color: color-mix(in srgb, var(--node-accent, var(--text-secondary)) 72%, var(--text-primary));
+  font-weight: 500;
 }
 .pc-node-title {
   flex: 1;
@@ -227,7 +227,7 @@
   font-weight: 500;
   color: var(--text-primary);
 }
-.pc-media { overflow: hidden; border-radius: 0 0 11px 11px; }
+.pc-media { overflow: hidden; border-radius: 0 0 14px 14px; }
 .pc-media-img { width: 100%; height: 100%; object-fit: cover; display: block; }
 .pc-media-img img { width: 100%; height: 100%; object-fit: cover; }
 .pc-media .resource-thumb-blur { width: 100%; height: 100%; }
@@ -250,7 +250,7 @@
 .pc-play svg { width: 16px; height: 16px; }
 /* 文本纸片（节点内：贴满卡体，无内层边框） */
 .pc-paper {
-  border-radius: 0 0 11px 11px;
+  border-radius: 0 0 14px 14px;
   background: transparent;
   padding: 12px 14px;
 }
@@ -330,8 +330,9 @@
 .pc-port:hover { transform: translateY(-50%) scale(1.3); }
 .pc-port-in { left: 6px; }
 .pc-port-out { right: 6px; }
-/* 拖线起手的源端口点亮：不依赖 SVG 渲染成功的兜底可见反馈。 */
-.pc-port-active {
+/* 拖线起手的源端口点亮：不依赖 SVG 渲染成功的兜底可见反馈。
+   双类提权压过共享配方的端口白环（同为后加载会输 specificity）。 */
+.pc-port.pc-port-active {
   transform: translateY(-50%) scale(1.45);
   z-index: 7;
   box-shadow: 0 0 0 4px color-mix(in srgb, var(--node-accent, var(--text-secondary)) 45%, transparent);
@@ -410,7 +411,7 @@
   height: 26px;
   border-radius: 50%;
   z-index: 7;
-  --inner: 11px; /* 弧带内径；外径到 span 缘，带宽 2px、中线 12px = 圆角 */
+  --inner: 14px; /* 弧带内径；外径到 span 缘，带宽 2px、中线 15px = 节点圆角 */
   --from: 225deg; /* 各角覆写：弧段所在象限 */
   color: var(--text-tertiary);
   background: conic-gradient(from var(--from), currentColor 0 90deg, transparent 90deg 360deg);
@@ -424,8 +425,6 @@
 .pc-resize.ne { --from: 0deg; right: -1px; top: -1px; cursor: nesw-resize; }
 .pc-resize.sw { --from: 180deg; left: -1px; bottom: -1px; cursor: nesw-resize; }
 .pc-resize.se { --from: 90deg; right: -1px; bottom: -1px; cursor: nwse-resize; }
-/* 便签圆角 10px：同心适配（弧中线 10px）。 */
-.pc-note .pc-resize { width: 22px; height: 22px; --inner: 9px; }
 .pc-node:hover .pc-resize, .pc-note:hover .pc-resize { opacity: 0.8; }
 .pc-resize:hover, .pc-node.pc-resizing .pc-resize, .pc-note.pc-resizing .pc-resize {
   color: var(--accent);

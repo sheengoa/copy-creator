@@ -452,42 +452,8 @@
   flex: 1;
 }
 
-/* ── 暗色主题（与亮色同步定案：深玻璃 + 浮起件） ─────────── */
-
-[data-theme="dark"] .fc-root .pc-node {
-  background: rgba(30, 30, 36, 0.66);
-  border-color: rgba(255, 255, 255, 0.12);
-  box-shadow:
-    0 1px 2px rgba(0, 0, 0, 0.3),
-    0 14px 40px rgba(0, 0, 0, 0.4),
-    inset 0 0.5px 0 rgba(255, 255, 255, 0.14),
-    inset 0 -0.5px 0 rgba(255, 255, 255, 0.06);
-}
-
-[data-theme="dark"] .fc-root .pc-node::before {
-  background: linear-gradient(168deg, rgba(255, 255, 255, 0.09) 0%, rgba(255, 255, 255, 0.02) 22%, rgba(255, 255, 255, 0) 42%);
-}
-
-[data-theme="dark"] .fc-root .pc-node.pc-selected {
-  box-shadow:
-    0 1px 2px rgba(0, 0, 0, 0.3),
-    0 14px 40px rgba(0, 0, 0, 0.4),
-    0 0 0 1px var(--node-accent, var(--accent)),
-    0 0 0 4.5px color-mix(in srgb, var(--node-accent, var(--accent)) 28%, transparent),
-    inset 0 0.5px 0 rgba(255, 255, 255, 0.14);
-}
-
-[data-theme="dark"] .fc-root .pc-node-head {
-  border-bottom-color: rgba(255, 255, 255, 0.08);
-}
-
-[data-theme="dark"] .fc-root .pc-port {
-  box-shadow: 0 0 0 2.5px rgba(20, 20, 24, 0.9);
-}
-
-[data-theme="dark"] .fc-root .pc-port-out {
-  box-shadow: 0 0 0 2.5px rgba(20, 20, 24, 0.9), 0 0 8px 1px var(--node-accent, transparent);
-}
+/* ── 暗色主题（节点 chrome 暗色已上提 canvas/shared-chrome.css
+   共享配方，此处只留自由画布内容层） ───────────── */
 
 [data-theme="dark"] .fc-root .fc-type-collection_image .pc-port-in,
 [data-theme="dark"] .fc-root .fc-type-collection_text .pc-port-in,
