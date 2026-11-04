@@ -524,8 +524,15 @@
 }
 
 /* 取值展示态：非编辑时以「主值 + 弱化尾注」呈现当前选择（与下拉条目
-   同款双段），点按换回原始输入框编辑——面板显示的是选择后的样子。 */
-.fc-combo-display {
+   同款双段），点按换回原始输入框编辑——面板显示的是选择后的样子。
+   选择器必须带 .fc-root 前缀（2026-11-04 修复角标被 chevron 遮挡）：
+   本件同时挂 .fc-node-input 类，nodes.css 的 `.fc-root .fc-node-input
+   { padding: 6px 9px }`（双类 0,2,0）会压过这里单类的 padding-right，
+   26px chevron 预留位失效、比例尾注滑到下拉箭头底下被盖住（实测
+   尾注右缘越过箭头左缘 8.5px）；补齐前缀到 0,2,0 且本文件在
+   nodes.css 之后引入，预留位恢复生效——与下方 .fc-root
+   .fc-combo-input 同一取胜方式。 */
+.fc-root .fc-combo-display {
   display: flex;
   align-items: center;
   gap: 8px;
