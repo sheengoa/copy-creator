@@ -13,7 +13,7 @@ const framePorts = { ins: [], out: { mediaKind: "image" as const } };
 export const videoFirstFrameDef: NodeDefinition = {
   type: "video_first_frame",
   chrome: "standard",
-  menu: { group: "load", icon: Icons.clapperboard },
+  menu: { group: "load", icon: Icons.arrowLeftToLine },
   accent: MEDIA_COLOR.video,
   size: { w: 280, h: null },
   minSize: { w: 240, h: 200 },
@@ -29,7 +29,7 @@ export const videoFirstFrameDef: NodeDefinition = {
 export const videoLastFrameDef: NodeDefinition = {
   type: "video_last_frame",
   chrome: "standard",
-  menu: { group: "load", icon: Icons.clapperboard },
+  menu: { group: "load", icon: Icons.arrowRightToLine },
   accent: MEDIA_COLOR.video,
   size: { w: 280, h: null },
   minSize: { w: 240, h: 200 },

@@ -11,7 +11,7 @@ import type { NodeDefinition } from "./types";
 export const saveImageDef: NodeDefinition = {
   type: "save_image",
   chrome: "standard",
-  menu: { group: "output", icon: Icons.resources },
+  menu: { group: "output", icon: Icons.arrowDownToLine },
   accent: MEDIA_COLOR.image,
   size: { w: 250, h: null },
   minSize: { w: 180, h: 130 },
@@ -27,7 +27,7 @@ export const saveImageDef: NodeDefinition = {
 export const saveVideoDef: NodeDefinition = {
   type: "save_video",
   chrome: "standard",
-  menu: { group: "output", icon: Icons.resources },
+  menu: { group: "output", icon: Icons.arrowDownToLine },
   accent: MEDIA_COLOR.video,
   size: { w: 280, h: null },
   minSize: { w: 180, h: 120 },
@@ -43,7 +43,7 @@ export const saveVideoDef: NodeDefinition = {
 export const saveAudioDef: NodeDefinition = {
   type: "save_audio",
   chrome: "standard",
-  menu: { group: "output", icon: Icons.audio },
+  menu: { group: "output", icon: Icons.arrowDownToLine },
   accent: MEDIA_COLOR.audio,
   size: { w: 260, h: null },
   minSize: { w: 180, h: 110 },

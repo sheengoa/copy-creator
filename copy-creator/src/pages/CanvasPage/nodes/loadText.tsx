@@ -8,7 +8,7 @@ import type { NodeDefinition } from "./types";
 export const loadTextDef: NodeDefinition = {
   type: "load_text",
   chrome: "standard",
-  menu: { group: "load", icon: Icons.file },
+  menu: { group: "load", icon: Icons.typeT },
   accent: MEDIA_COLOR.text,
   size: { w: 260, h: null },
   minSize: { w: 180, h: 120 },

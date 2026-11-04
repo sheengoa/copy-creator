@@ -9,7 +9,7 @@ import type { NodeDefinition } from "./types";
 export const previewImageDef: NodeDefinition = {
   type: "preview_image",
   chrome: "standard",
-  menu: { group: "output", icon: Icons.expand },
+  menu: { group: "output", icon: Icons.eye },
   accent: MEDIA_COLOR.image,
   size: { w: 320, h: null },
   minSize: { w: 200, h: 160 },
@@ -29,7 +29,7 @@ export const previewImageDef: NodeDefinition = {
 export const previewVideoDef: NodeDefinition = {
   type: "preview_video",
   chrome: "standard",
-  menu: { group: "output", icon: Icons.video },
+  menu: { group: "output", icon: Icons.eye },
   accent: MEDIA_COLOR.video,
   size: { w: 360, h: null },
   minSize: { w: 220, h: 160 },
@@ -44,7 +44,7 @@ export const previewVideoDef: NodeDefinition = {
 export const previewAudioDef: NodeDefinition = {
   type: "preview_audio",
   chrome: "standard",
-  menu: { group: "output", icon: Icons.audio },
+  menu: { group: "output", icon: Icons.eye },
   accent: MEDIA_COLOR.audio,
   size: { w: 280, h: null },
   minSize: { w: 180, h: 110 },

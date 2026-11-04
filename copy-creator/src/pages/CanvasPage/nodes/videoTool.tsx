@@ -21,7 +21,7 @@ const toolMedia = {
 export const videoSeekFrameDef: NodeDefinition = {
   type: "video_seek_frame",
   chrome: "standard",
-  menu: { group: "load", icon: Icons.clapperboard },
+  menu: { group: "load", icon: Icons.scan },
   accent: MEDIA_COLOR.video,
   size: toolSize,
   minSize: toolMin,
@@ -35,7 +35,7 @@ export const videoToGifDef: NodeDefinition = {
   type: "video_to_gif",
   chrome: "standard",
   // GIF 产物归图像族，菜单图标跟产物。
-  menu: { group: "load", icon: Icons.image },
+  menu: { group: "load", icon: Icons.film },
   accent: MEDIA_COLOR.video,
   size: toolSize,
   minSize: toolMin,
@@ -48,7 +48,7 @@ export const videoToGifDef: NodeDefinition = {
 export const videoExtractAudioDef: NodeDefinition = {
   type: "video_extract_audio",
   chrome: "standard",
-  menu: { group: "load", icon: Icons.audio },
+  menu: { group: "load", icon: Icons.activity },
   accent: MEDIA_COLOR.video,
   size: toolSize,
   minSize: toolMin,

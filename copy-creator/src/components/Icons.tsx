@@ -480,4 +480,55 @@ export const Icons = {
       <line x1="16" y1="9" x2="22" y2="15" />
     </svg>
   ),
+  // 建节点菜单的极简线形（2026-11-04 定稿）：几何最少的一笔画语言，
+  // 与其余图标同一描边惯例；仅供菜单 def 引用。
+  arrowLeftToLine: (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round">
+      <path d="M3 5v14" />
+      <path d="M20 12H8" />
+      <path d="m12 6-6 6 6 6" />
+    </svg>
+  ),
+  arrowRightToLine: (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round">
+      <path d="M21 5v14" />
+      <path d="M4 12h12" />
+      <path d="m12 6 6 6-6 6" />
+    </svg>
+  ),
+  arrowDownToLine: (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round">
+      <path d="M12 3v14" />
+      <path d="m6 11 6 6 6-6" />
+      <path d="M5 21h14" />
+    </svg>
+  ),
+  scan: (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round">
+      <path d="M3 7V5a2 2 0 0 1 2-2h2" />
+      <path d="M17 3h2a2 2 0 0 1 2 2v2" />
+      <path d="M21 17v2a2 2 0 0 1-2 2h-2" />
+      <path d="M7 21H5a2 2 0 0 1-2-2v-2" />
+    </svg>
+  ),
+  typeT: (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round">
+      <polyline points="4 7 4 4 20 4 20 7" />
+      <line x1="9" y1="20" x2="15" y2="20" />
+      <line x1="12" y1="4" x2="12" y2="20" />
+    </svg>
+  ),
+  film: (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round">
+      <rect x="3" y="4" width="18" height="16" rx="2" />
+      <path d="M8 4v16" />
+      <path d="M16 4v16" />
+    </svg>
+  ),
+  stickyNote: (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round">
+      <path d="M16 3H5a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h11l5-5V5a2 2 0 0 0-2-2Z" />
+      <path d="M15 21v-4a2 2 0 0 1 2-2h4" />
+    </svg>
+  ),
 };

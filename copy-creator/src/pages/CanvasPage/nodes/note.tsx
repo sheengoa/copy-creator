@@ -10,7 +10,7 @@ import type { NodeDefinition } from "./types";
 export const noteDef: NodeDefinition = {
   type: "note",
   chrome: "note",
-  menu: { group: "misc", icon: Icons.edit },
+  menu: { group: "misc", icon: Icons.stickyNote },
   accent: MEDIA_COLOR.text,
   size: { w: 220, h: null },
   minSize: { w: 120, h: 80 },

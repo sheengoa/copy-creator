@@ -47,7 +47,7 @@ export const collectionImageDef: NodeDefinition = {
 export const collectionVideoDef: NodeDefinition = {
   type: "collection_video",
   chrome: "standard",
-  menu: { group: "collection", icon: Icons.video },
+  menu: { group: "collection", icon: Icons.copy },
   accent: MEDIA_COLOR.video,
   size: { w: 260, h: null },
   minSize: { w: 180, h: 110 },
