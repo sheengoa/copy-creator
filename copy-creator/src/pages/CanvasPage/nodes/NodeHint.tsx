@@ -54,10 +54,12 @@ export function NodeHint({
         if (card) {
           const w = Math.min(260, text.length * 11 + 24);
           const cy = rect.top + rect.height / 2;
-          const left = card.right + 10;
+          // 间隙取 24px（卡 padding 13px ≈ 距行末控件 37px）：第一版 10px
+          // 时悬浮体贴着行末控件（+ 按钮等），观感仍是堆在控件上。
+          const left = card.right + 24;
           if (left + w > window.innerWidth - 8) {
             // 卡右贴视口缘：翻到卡左侧（同样卡外无遮挡带）。
-            setTip({ left: card.left - 10, top: cy, mode: "side-flip" });
+            setTip({ left: card.left - 24, top: cy, mode: "side-flip" });
           } else {
             setTip({ left, top: cy, mode: "side" });
           }

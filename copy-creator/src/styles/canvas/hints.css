@@ -20,15 +20,18 @@
   flex: 1;
 }
 
-/* 深玻璃小胶囊：与节点体同一语言（圆角/毛玻璃/0.5px 细环），fixed
-   定位 portal 到 body——不随画布缩放、不被节点滚动区裁切。 */
+/* 深玻璃小胶囊：与节点体同一语言（毛玻璃/0.5px 细环），fixed
+   定位 portal 到 body——不随画布缩放、不被节点滚动区裁切。
+   全胶囊圆角（2026-11-04）：8px 在矮盒子上读不出圆弧，用户观测
+   「张数」「选择预设」圆角观感不一致，改 99px 端部全圆后短长文案
+   均为明确胶囊形，单一来源天然统一。 */
 .fc-hint {
   position: fixed;
   z-index: 1200;
   transform: translate(-50%, -100%);
   max-width: 260px;
-  padding: 7px 10px;
-  border-radius: 8px;
+  padding: 7px 12px;
+  border-radius: 99px;
   background: rgba(30, 32, 38, 0.92);
   backdrop-filter: blur(16px) saturate(1.6);
   -webkit-backdrop-filter: blur(16px) saturate(1.6);
