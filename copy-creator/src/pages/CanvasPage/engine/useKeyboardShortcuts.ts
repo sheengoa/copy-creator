@@ -2,14 +2,13 @@ import { useCallback, useEffect, useRef } from "react";
 import type { RefObject } from "react";
 import { useTranslation } from "react-i18next";
 import type { CanvasNode } from "../../../stores/canvasStore";
-import { useCanvasStore } from "../../../stores/canvasStore";
+import { useCanvasData } from "../dataContext";
 import { memberFrameOf } from "./groupOps";
 
 // 键盘快捷键（自 FreeCanvas.tsx 零改动搬运，2026-11-03 引擎拆分阶段 6b）：
 // 删除选中、撤销、全选、复制粘贴、Ctrl+G 打组/解组。
 
 export function useKeyboardShortcuts(
-  canvasId: string,
   vpRef: RefObject<HTMLDivElement | null>,
   nodesRef: RefObject<CanvasNode[]>,
   selRef: RefObject<string[]>,
@@ -20,7 +19,7 @@ export function useKeyboardShortcuts(
   runUndo: () => void,
   deleteSelected: () => Promise<void> | void,
 ) {
-  const store = useCanvasStore;
+  const data = useCanvasData();
   const { t } = useTranslation();
 
   // 防重入：StrictMode 开发态会双挂载键盘监听，一次 Ctrl+G 建组又解组。
@@ -33,21 +32,21 @@ export function useKeyboardShortcuts(
     }, 0);
     const sel = selRef.current;
     if (sel.length === 0) return;
-    const st = store.getState();
     // 先剪枝：成员已被删除的组清掉死成员（空组丢弃）。
-    const pruned = st.groups
+    const pruned = data
+      .groups()
       .map((g) => ({ ...g, members: g.members.filter((key) => memberFrameOf(nodesRef, key) !== null) }))
       .filter((g) => g.members.length > 0);
     const fullGroup = pruned.find(
       (g) => g.members.length === sel.length && sel.every((key) => g.members.includes(key)),
     );
     if (fullGroup) {
-      void st.setGroups(canvasId, pruned.filter((g) => g.id !== fullGroup.id));
+      void data.setGroups(pruned.filter((g) => g.id !== fullGroup.id));
     } else {
       const kept = pruned
         .map((g) => ({ ...g, members: g.members.filter((key) => !sel.includes(key)) }))
         .filter((g) => g.members.length > 0);
-      void st.setGroups(canvasId, [
+      void data.setGroups([
         ...kept,
         {
           id: `ng${Date.now()}${Math.floor(Math.random() * 1e4)}`,
@@ -56,7 +55,7 @@ export function useKeyboardShortcuts(
         },
       ]);
     }
-  }, [canvasId, nodesRef, selRef, store, t]);
+  }, [data, nodesRef, selRef, t]);
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {

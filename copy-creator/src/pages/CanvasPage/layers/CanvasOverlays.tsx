@@ -1,12 +1,12 @@
 import { useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
-import { useCanvasStore } from "../../../stores/canvasStore";
 import type { CanvasNode } from "../../../stores/canvasStore";
 import type { RefObject } from "react";
 import { ImageLightbox } from "../../../components/ImageLightbox";
 import { invoke } from "@tauri-apps/api/core";
 import { joinLibraryPath } from "../../../domain/projectView";
 import ProjectFilePickerDialog from "../../ResourcePage/ProjectFilePickerDialog";
+import { useCanvasData } from "../dataContext";
 import { NodeHint } from "../nodes/NodeHint";
 import { WheelGate } from "../nodes/WheelGate";
 import { useMediaUrl } from "../nodes/mediaPath";
@@ -169,7 +169,7 @@ export function LibraryPickerLayer({
   applyFrameVideo(nodeId: string, type: CanvasNode["type"], videoPath: string): Promise<void>;
   onClose(): void;
 }) {
-  const store = useCanvasStore;
+  const data = useCanvasData();
   return (
     <WheelGate>
       <LazyLibraryPicker
@@ -181,11 +181,11 @@ export function LibraryPickerLayer({
           const targetId = pickerForNode;
           onClose();
           if (pickerApplyRef.current === "frame-video") {
-            const target = store.getState().nodes.find((n) => n.id === targetId);
+            const target = data.nodes().find((n) => n.id === targetId);
             if (target) void applyFrameVideo(targetId, target.type, filePath);
             return;
           }
-          void store.getState().updateNode(targetId, { resourcePath: filePath });
+          void data.updateNode(targetId, { resourcePath: filePath });
         }}
         onClose={onClose}
       />

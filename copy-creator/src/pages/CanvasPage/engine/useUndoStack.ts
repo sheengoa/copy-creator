@@ -2,15 +2,18 @@ import { useCallback, useRef } from "react";
 import type { RefObject } from "react";
 import type { CanvasConnection, CanvasNode } from "../../../stores/canvasStore";
 import { useCanvasStore } from "../../../stores/canvasStore";
+import { useCanvasData } from "../dataContext";
 import { NODE_DEFS } from "../nodes/registry";
 import type { UndoAction } from "./gestureTypes";
 import { UNDO_LIMIT } from "./gestureTypes";
 
 // 撤销栈与节点删除（自 FreeCanvas.tsx 零改动搬运，2026-11-03 引擎拆分
 // 阶段 6b）。对齐工程画布惯例：undoingRef 锁防 StrictMode 双触发。
+// 几何读写走 dataContext；genProgress/cancelGeneration 是生成运行时层
+// （自由画布专属，工程作用域无生成节点、该分支永不触发），保持直连。
 
-export function useUndoStack(canvasId: string, setSelection: (keys: string[]) => void) {
-  const store = useCanvasStore;
+export function useUndoStack(setSelection: (keys: string[]) => void) {
+  const data = useCanvasData();
   const undoStackRef = useRef<UndoAction[]>([]);
   const undoingRef = useRef(false);
 
@@ -27,12 +30,12 @@ export function useUndoStack(canvasId: string, setSelection: (keys: string[]) =>
       const action = undoStackRef.current.pop();
       if (!action) return;
       if (action.kind === "layout") {
-        store.getState().commitLayout(canvasId, action.prev);
+        data.commitLayout(action.prev);
         return;
       }
       if (action.kind === "create") {
         for (const id of action.ids) {
-          void store.getState().deleteNode(id);
+          void data.deleteNode(id);
         }
         setSelection([]);
         return;
@@ -45,8 +48,7 @@ export function useUndoStack(canvasId: string, setSelection: (keys: string[]) =>
           // 为 error「生成已中断」）。
           const restoredMeta =
             NODE_DEFS[node.type].normalizeRestored?.({ ...node.metadata }) ?? { ...node.metadata };
-          const created = await store.getState().createNode({
-            canvasId,
+          const created = await data.createNode({
             nodeType: node.type,
             title: node.title,
             posX: node.pos_x,
@@ -61,7 +63,7 @@ export function useUndoStack(canvasId: string, setSelection: (keys: string[]) =>
         for (const conn of action.connections) {
           const from = idMap.get(conn.from_node) ?? conn.from_node;
           const to = idMap.get(conn.to_node) ?? conn.to_node;
-          await store.getState().connect(canvasId, from, to, conn.to_port);
+          await data.connect(from, to, conn.to_port);
         }
         setSelection([...idMap.values()]);
       })();
@@ -71,7 +73,7 @@ export function useUndoStack(canvasId: string, setSelection: (keys: string[]) =>
         undoingRef.current = false;
       }, 0);
     }
-  }, [canvasId, setSelection, store]);
+  }, [data, setSelection]);
 
   // ── 删除（可完整恢复，记撤销栈） ─────────────────────────
 
@@ -87,13 +89,13 @@ export function useUndoStack(canvasId: string, setSelection: (keys: string[]) =>
       }
       for (const node of targets) {
         // 生成中的节点先取消后端任务再删：否则孤儿请求继续跑完。
-        const progress = store.getState().genProgress[node.id];
-        if (progress) void store.getState().cancelGeneration(progress.requestId);
-        await store.getState().deleteNode(node.id);
+        const progress = useCanvasStore.getState().genProgress[node.id];
+        if (progress) void useCanvasStore.getState().cancelGeneration(progress.requestId);
+        await data.deleteNode(node.id);
       }
       setSelection([]);
     },
-    [pushUndo, setSelection, store],
+    [data, pushUndo, setSelection],
   );
 
   return { pushUndo, runUndo, deleteNodes };

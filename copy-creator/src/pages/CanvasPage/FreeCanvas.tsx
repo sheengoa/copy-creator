@@ -1,11 +1,8 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { invoke } from "@tauri-apps/api/core";
-import {
-  useCanvasStore,
-  type CanvasNode,
-  type CanvasNodeType,
-} from "../../stores/canvasStore";
+import type { CanvasNode, CanvasNodeType } from "../../stores/canvasStore";
+import { useCanvasData } from "./dataContext";
 import { extOf } from "./nodes/exts";
 import {
   LIBRARY_PICKER_KINDS,
@@ -56,11 +53,13 @@ import type { NodeServices } from "./nodes/types";
 
 export default function FreeCanvas({ canvasId }: { canvasId: string }) {
   const { t } = useTranslation();
-  const nodes = useCanvasStore((s) => s.nodes);
-  const connections = useCanvasStore((s) => s.connections);
-  const groups = useCanvasStore((s) => s.groups);
+  // 几何层数据源（dataContext）：默认实现转发 canvasStore；工程视图
+  // （ProjectShell）注入工程 provider 后本组件与其引擎链零改动复用。
+  const data = useCanvasData();
+  const nodes = data.useNodes();
+  const connections = data.useConnections();
+  const groups = data.useGroups();
 
-  const store = useCanvasStore;
   const nodesRef = useRef(nodes);
   const connectionsRef = useRef(connections);
   const selRef = useRef<string[]>([]);
@@ -93,11 +92,11 @@ export default function FreeCanvas({ canvasId }: { canvasId: string }) {
 
   // ── 视口引擎 + 节点实测（engine/useViewport / useNodeMetrics；fork 自
   //    ProjectCanvas，回灌对齐点不变） ──
-  const { vpRef, view, setView, vpSize, saveView, zoomAt, fitAll, fitAttemptedRef } = useViewport(canvasId, nodes);
+  const { vpRef, view, setView, vpSize, saveView, zoomAt, fitAll, fitAttemptedRef } = useViewport(nodes);
   const { nodeMetricsRef, boxOf, outPointOf, inPointOf } = useNodeMetrics(vpRef, view, nodes);
 
   // ── 撤销栈与删除（engine/useUndoStack） ──
-  const { pushUndo, runUndo, deleteNodes } = useUndoStack(canvasId, setSelection);
+  const { pushUndo, runUndo, deleteNodes } = useUndoStack(setSelection);
   const deleteSelected = useCallback(async () => {
     await deleteNodes(nodesRef, connectionsRef, selRef.current);
   }, [connectionsRef, deleteNodes, nodesRef]);
@@ -118,7 +117,7 @@ export default function FreeCanvas({ canvasId }: { canvasId: string }) {
 
   // ── 复制 / 粘贴（engine/useClipboardOps） ──
   const { copySelection, pasteClipboard } = useClipboardOps(
-    canvasId, nodesRef, connectionsRef, selRef, setSelection, pushUndo,
+    nodesRef, connectionsRef, selRef, setSelection, pushUndo,
   );
 
   // ── 上游媒体解析（预览/保存节点取上游产物） ────────────────
@@ -155,7 +154,7 @@ export default function FreeCanvas({ canvasId }: { canvasId: string }) {
    *  稳定才不致全局拖放监听随渲染反复重挂。 */
   const applyFrameVideo = useCallback(
     async (nodeId: string, type: CanvasNodeType, videoPath: string) => {
-      const prev = store.getState().nodes.find((n) => n.id === nodeId);
+      const prev = data.nodes().find((n) => n.id === nodeId);
       const prevMeta = prev?.metadata as { format?: unknown } | undefined;
       const prevFormat = typeof prevMeta?.format === "string" ? prevMeta.format : "";
       const base: Record<string, unknown> = { kind: type, video_path: videoPath };
@@ -174,12 +173,12 @@ export default function FreeCanvas({ canvasId }: { canvasId: string }) {
         delete next[nodeId];
         return next;
       });
-      await store.getState().updateNode(nodeId, {
+      await data.updateNode(nodeId, {
         resourcePath: "",
         metadata: JSON.stringify(base),
       });
     },
-    [store, setNodeErrors, videoToolRuntime],
+    [data, setNodeErrors, videoToolRuntime],
   );
 
   const pickFromDisk = async (node: CanvasNode) => {
@@ -196,7 +195,7 @@ export default function FreeCanvas({ canvasId }: { canvasId: string }) {
       if (isVideoToolType(node.type)) {
         await applyFrameVideo(node.id, node.type, picked.path);
       } else {
-        await store.getState().updateNode(node.id, { resourcePath: picked.path });
+        await data.updateNode(node.id, { resourcePath: picked.path });
       }
     } catch (err) {
       // 用户在系统对话框取消：静默；其余错误在节点上提示。
@@ -219,7 +218,7 @@ export default function FreeCanvas({ canvasId }: { canvasId: string }) {
     },
     clearMedia: (node) => {
       if (isVideoToolType(node.type)) videoToolRuntime.clearFrameVideo(node);
-      else void store.getState().updateNode(node.id, { resourcePath: "" });
+      else void data.updateNode(node.id, { resourcePath: "" });
     },
   };
   // ── 手势会话（engine/useCanvasGestures）：按下分派 + 窗口级 move/up/cancel ──
@@ -240,7 +239,6 @@ export default function FreeCanvas({ canvasId }: { canvasId: string }) {
     pulseNodes,
     commitAddNode,
   } = useCanvasGestures({
-    canvasId,
     vpRef,
     view,
     setView,
@@ -289,7 +287,6 @@ export default function FreeCanvas({ canvasId }: { canvasId: string }) {
 
   // ── 键盘快捷键（engine/useKeyboardShortcuts）：删除/撤销/全选/复制粘贴/打组 ──
   useKeyboardShortcuts(
-    canvasId,
     vpRef,
     nodesRef,
     selRef,
@@ -316,9 +313,7 @@ export default function FreeCanvas({ canvasId }: { canvasId: string }) {
           y: (rect.top + rect.height / 2 - rect.top - view.y) / view.scale,
         }
       : { x: 0, y: 0 };
-    const st = store.getState();
-    const text = await st.createNode({
-      canvasId,
+    const text = await data.createNode({
       nodeType: "load_text",
       posX: center.x - 420,
       posY: center.y - 60,
@@ -327,8 +322,7 @@ export default function FreeCanvas({ canvasId }: { canvasId: string }) {
       metadata: JSON.stringify({ kind: "load_text", content: t("canvas.seedPrompt") }),
     });
     if (!text) return;
-    const img = await st.createNode({
-      canvasId,
+    const img = await data.createNode({
       nodeType: "gen_image",
       posX: center.x - 60,
       posY: center.y - 130,
@@ -336,28 +330,27 @@ export default function FreeCanvas({ canvasId }: { canvasId: string }) {
       height: NODE_DEFAULT_SIZE.gen_image.h,
     });
     if (!img) return;
-    const preview = await st.createNode({
-      canvasId,
+    const preview = await data.createNode({
       nodeType: "preview_image",
       posX: center.x + 330,
       posY: center.y - 110,
       width: NODE_DEFAULT_SIZE.preview_image.w,
       height: NODE_DEFAULT_SIZE.preview_image.h,
     });
-    await st.connect(canvasId, text.id, img.id, "text");
-    if (preview) await st.connect(canvasId, img.id, preview.id, "in");
+    await data.connect(text.id, img.id, "text");
+    if (preview) await data.connect(img.id, preview.id, "in");
     pushUndo({ kind: "create", ids: [text.id, img.id, ...(preview ? [preview.id] : [])] });
     pulseNodes([text.id, img.id, ...(preview ? [preview.id] : [])]);
     setSelection([text.id, img.id]);
     // 种子完成后整体适配窗口。
-    if (fitAll(store.getState().nodes)) {
+    if (fitAll(data.nodes())) {
       fitAttemptedRef.current = true;
     }
-  }, [canvasId, fitAll, fitAttemptedRef, pushUndo, pulseNodes, setSelection, store, t, view.scale, view.x, view.y, vpRef]);
+  }, [data, fitAll, fitAttemptedRef, pushUndo, pulseNodes, setSelection, t, view.scale, view.x, view.y, vpRef]);
 
   // ── OS 文件拖入（engine/useFileDrop）：命中加载/抽帧节点 = 加载到该
   //    节点；空白 = 新建加载节点 ──
-  const dropHint = useFileDrop(canvasId, vpRef, view, nodesRef, applyFrameVideo, pulseNodes);
+  const dropHint = useFileDrop(vpRef, view, nodesRef, applyFrameVideo, pulseNodes);
 
 
   // ── 渲染 ───────────────────────────────────────────────────

@@ -1,7 +1,7 @@
 import { useCallback, useRef } from "react";
 import type { RefObject } from "react";
 import type { CanvasConnection, CanvasNode } from "../../../stores/canvasStore";
-import { useCanvasStore } from "../../../stores/canvasStore";
+import { useCanvasData } from "../dataContext";
 import type { UndoAction } from "./gestureTypes";
 import { groupSnapshotOf } from "./groupOps";
 
@@ -9,14 +9,13 @@ import { groupSnapshotOf } from "./groupOps";
 // 拆分阶段 6b）。对齐工程画布惯例：pastingRef 防重入。
 
 export function useClipboardOps(
-  canvasId: string,
   nodesRef: RefObject<CanvasNode[]>,
   connectionsRef: RefObject<CanvasConnection[]>,
   selRef: RefObject<string[]>,
   setSelection: (keys: string[]) => void,
   pushUndo: (action: UndoAction) => void,
 ) {
-  const store = useCanvasStore;
+  const data = useCanvasData();
   const clipRef = useRef<{ nodes: CanvasNode[]; wires: { from_node: string; to_node: string; to_port: string }[]; ax: number; ay: number } | null>(null);
   const pastingRef = useRef(false);
 
@@ -39,12 +38,10 @@ export function useClipboardOps(
     try {
       const clip = clipRef.current;
       if (!clip?.nodes.length) return;
-      const st = store.getState();
       const idMap = new Map<string, string>();
       const newIds: string[] = [];
       for (const node of clip.nodes) {
-        const created = await st.createNode({
-          canvasId,
+        const created = await data.createNode({
           nodeType: node.type,
           title: node.title,
           posX: node.pos_x - clip.ax + 28,
@@ -62,7 +59,7 @@ export function useClipboardOps(
       for (const wire of clip.wires) {
         const from = idMap.get(wire.from_node);
         const to = idMap.get(wire.to_node);
-        if (from && to) await st.connect(canvasId, from, to, wire.to_port);
+        if (from && to) await data.connect(from, to, wire.to_port);
       }
       if (newIds.length) {
         pushUndo({ kind: "create", ids: newIds });
@@ -71,7 +68,7 @@ export function useClipboardOps(
     } finally {
       pastingRef.current = false;
     }
-  }, [canvasId, pushUndo, setSelection, store]);
+  }, [data, pushUndo, setSelection]);
 
   return { copySelection, pasteClipboard };
 }

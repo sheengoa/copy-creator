@@ -3,7 +3,7 @@ import type { RefObject } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { getCurrentWebview } from "@tauri-apps/api/webview";
 import type { CanvasNode } from "../../../stores/canvasStore";
-import { useCanvasStore } from "../../../stores/canvasStore";
+import { useCanvasData } from "../dataContext";
 import { extOf } from "../nodes/exts";
 import { MENU_TYPE_ORDER, NODE_DEFAULT_SIZE, NODE_DEFS, loadAllowedExts } from "../nodes/registry";
 import type { ViewState } from "./useViewport";
@@ -14,14 +14,13 @@ import type { ViewState } from "./useViewport";
 // blankDropExtensions）。
 
 export function useFileDrop(
-  canvasId: string,
   vpRef: RefObject<HTMLDivElement | null>,
   view: ViewState,
   nodesRef: RefObject<CanvasNode[]>,
   applyFrameVideo: (nodeId: string, type: CanvasNode["type"], videoPath: string) => Promise<void>,
   pulseNodes: (ids: string[]) => void,
 ) {
-  const store = useCanvasStore;
+  const data = useCanvasData();
   const [dropHint, setDropHint] = useState(false);
 
   const handleFileDrop = useCallback(
@@ -49,7 +48,7 @@ export function useFileDrop(
           if (NODE_DEFS[targetNode.type].applyMode === "video-tool") {
             await applyFrameVideo(targetNode.id, targetNode.type, match);
           } else {
-            await store.getState().updateNode(targetNode.id, { resourcePath: match });
+            await data.updateNode(targetNode.id, { resourcePath: match });
           }
           return;
         }
@@ -65,8 +64,7 @@ export function useFileDrop(
         if (!kind) continue;
         try {
           await invoke("canvas_authorize_media", { path }).catch(() => {});
-          const node = await store.getState().createNode({
-            canvasId,
+          const node = await data.createNode({
             nodeType: kind,
             posX: world.x + offset,
             posY: world.y + offset,
@@ -82,7 +80,7 @@ export function useFileDrop(
       }
       pulseNodes(createdIds);
     },
-    [applyFrameVideo, canvasId, nodesRef, pulseNodes, store, view.scale, view.x, view.y, vpRef],
+    [applyFrameVideo, data, nodesRef, pulseNodes, view.scale, view.x, view.y, vpRef],
   );
 
   useEffect(() => {

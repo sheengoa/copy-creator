@@ -1,9 +1,10 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { useTranslation } from "react-i18next";
 import { ConfirmDialog } from "../../components/ConfirmDialog";
 import { Icons } from "../../components/Icons";
 import { useCanvasStore, type CanvasSummary } from "../../stores/canvasStore";
+import { CanvasDataContext, createStoreCanvasData } from "./dataContext";
 import FreeCanvas from "./FreeCanvas";
 
 // 画布区（自由生图工作流）页面：顶部画布库条（chips + 新建 + 每画布
@@ -57,6 +58,11 @@ export default function CanvasPage() {
 
   const activeCanvas = canvases.find((c) => c.id === activeCanvasId) ?? null;
   const menuCanvas = canvases.find((c) => c.id === menuFor) ?? null;
+  // 自由画布几何层数据源（dataContext）：默认实现转发 canvasStore。
+  const canvasData = useMemo(
+    () => (activeCanvas ? createStoreCanvasData(activeCanvas.id) : null),
+    [activeCanvas],
+  );
 
   const submitRename = async () => {
     if (!renaming) return;
@@ -170,8 +176,10 @@ export default function CanvasPage() {
       </div>
 
       <div className="canvas-main">
-        {activeCanvas ? (
-          <FreeCanvas key={activeCanvas.id} canvasId={activeCanvas.id} />
+        {activeCanvas && canvasData ? (
+          <CanvasDataContext.Provider value={canvasData}>
+            <FreeCanvas key={activeCanvas.id} canvasId={activeCanvas.id} />
+          </CanvasDataContext.Provider>
         ) : (
           <div className="canvas-empty">
             {/* 空态横向 hero 条（方案 C）：图标位 + 文案列 + 主按钮，与

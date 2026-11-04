@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { CanvasNode } from "../../../stores/canvasStore";
-import { useCanvasStore } from "../../../stores/canvasStore";
+import { useCanvasData } from "../dataContext";
 import type { Pos } from "./gestureTypes";
 import { ZOOM_MAX, ZOOM_MIN } from "./gestureTypes";
 import { nodeSize } from "./wireGeom";
@@ -8,25 +8,25 @@ import { nodeSize } from "./wireGeom";
 // 视口引擎（自 FreeCanvas.tsx 零改动搬运，2026-11-03 引擎拆分阶段 6b）。
 // 平移/缩放状态、滚轮缩放（原生非被动监听）、滚动归零、右键菜单抑制、
 // 首入 fitAll——全部 fork 自 ProjectCanvas，回灌对齐按其同名区段对照。
+// 视口恢复/落盘走 dataContext（默认实现=canvasStore，工程视图=按集存档）。
 
 export type ViewState = { x: number; y: number; scale: number };
 
-export function useViewport(canvasId: string, nodes: CanvasNode[]) {
-  const store = useCanvasStore;
+export function useViewport(nodes: CanvasNode[]) {
+  const data = useCanvasData();
   const vpRef = useRef<HTMLDivElement | null>(null);
   const [view, setView] = useState<ViewState>(() => {
-    const c = store.getState().activeCanvas;
-    return c && c.id === canvasId
-      ? { x: c.viewport_x, y: c.viewport_y, scale: c.viewport_k }
-      : { x: 0, y: 0, scale: 1 };
+    // api 视口为 {x,y,k}（k=缩放），这里映射进 ViewState 的 scale 键。
+    const v = data.viewport();
+    return v ? { x: v.x, y: v.y, scale: v.k } : { x: 0, y: 0, scale: 1 };
   });
   const [vpSize, setVpSize] = useState<{ w: number; h: number } | null>(null);
 
   const saveView = useCallback(
     (next: ViewState) => {
-      store.getState().setViewport(canvasId, next.x, next.y, next.scale);
+      data.setViewport(next.x, next.y, next.scale);
     },
-    [canvasId, store],
+    [data],
   );
 
   // 视口实测尺寸：迷你地图的视口矩形与连线层视口裁切都要用。

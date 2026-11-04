@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { Dispatch, RefObject, SetStateAction } from "react";
 import type { CanvasConnection, CanvasGroup, CanvasLayoutEntry, CanvasNode, CanvasNodeType } from "../../../stores/canvasStore";
-import { useCanvasStore } from "../../../stores/canvasStore";
+import { useCanvasData } from "../dataContext";
 import { resolveWireRelease } from "../../../utils/projectWireRelease";
 import { NODE_DEFAULT_SIZE, NODE_DEFS, NODE_MIN_SIZE, PORT_DEFS, outMediaColor } from "../nodes/registry";
 import type { PortDef } from "../nodes/types";
@@ -32,7 +32,6 @@ export interface AddMenuState {
 }
 
 export interface GestureDeps {
-  canvasId: string;
   vpRef: RefObject<HTMLDivElement | null>;
   /** 视口状态：手势回调闭包随渲染刷新读取（重订阅惯例）。 */
   view: ViewState;
@@ -59,8 +58,9 @@ export interface GestureDeps {
 }
 
 export function useCanvasGestures(deps: GestureDeps) {
-  const { canvasId, vpRef, view, setView, saveView, nodesRef, connectionsRef, selRef, setSelection, groups, memberFrame, groupSnapshot, boxOf, outPointOf, inPointOf, nodeMetricsRef, canvasServices, pushUndo } = deps;
-  const store = useCanvasStore;
+  const { vpRef, view, setView, saveView, nodesRef, connectionsRef, selRef, setSelection, groups, memberFrame, groupSnapshot, boxOf, outPointOf, inPointOf, nodeMetricsRef, canvasServices, pushUndo } = deps;
+  // 几何读写数据源（默认实现=canvasStore 转发；工程视图=工程 provider）。
+  const data = useCanvasData();
 
   const [addMenu, setAddMenu] = useState<AddMenuState | null>(null);
   const [addMenuQuery, setAddMenuQuery] = useState("");
@@ -94,9 +94,9 @@ export function useCanvasGestures(deps: GestureDeps) {
   const discardDetachedWire = useCallback(
     (detached: { connId: string }) => {
       setLiftedWire(null);
-      void store.getState().deleteConnection(detached.connId);
+      void data.deleteConnection(detached.connId);
     },
-    [store],
+    [data],
   );
 
   // Blender 式切线（Shift/Ctrl+右键滑动）：切痕层直写 polyline。
@@ -122,12 +122,12 @@ export function useCanvasGestures(deps: GestureDeps) {
         pts,
         done: false,
         del: () => {
-          void store.getState().deleteConnection(connId);
+          void data.deleteConnection(connId);
         },
       });
     });
     return targets;
-  }, [store, vpRef]);
+  }, [data, vpRef]);
 
   const openAddMenu = useCallback(
     (sx: number, sy: number, wx: number, wy: number, pending?: { wire?: { fromKey: string; fromDir: "in" | "out"; fromPortId: string }; detached?: { connId: string; fromKey: string } }) => {
@@ -166,8 +166,7 @@ export function useCanvasGestures(deps: GestureDeps) {
         : { x: drag.fox, y: drag.foy };
       void (async () => {
         const size = NODE_DEFAULT_SIZE[drag.frameKey];
-        const created = await store.getState().createNode({
-          canvasId,
+        const created = await data.createNode({
           nodeType: drag.frameKey,
           posX: dropPos.x - size.w / 2,
           posY: dropPos.y - 14,
@@ -181,21 +180,21 @@ export function useCanvasGestures(deps: GestureDeps) {
           // 摘线转接：线改接新节点（新节点需要能接住原上游的口）。
           setLiftedWire(null);
           const toPort = fromNode ? incomingPortFor(created.type, fromNode.type) : "";
-          await store.getState().rewire(drag.detached.connId, created.id, toPort);
+          await data.rewire(drag.detached.connId, created.id, toPort);
         } else if (drag.wire && fromNode) {
           if (drag.wire.fromDir === "out") {
             // 正拖：新节点是下游，找它可接住上游的输入口。
             const toPort = incomingPortFor(created.type, fromNode.type);
-            await store.getState().connect(canvasId, drag.wire.fromKey, created.id, toPort);
+            await data.connect(drag.wire.fromKey, created.id, toPort);
           } else {
             // 反拖：新节点是上游，接进源输入口。
-            await store.getState().connect(canvasId, created.id, drag.wire.fromKey, drag.wire.fromPortId);
+            await data.connect(created.id, drag.wire.fromKey, drag.wire.fromPortId);
           }
         }
         setSelection([created.id]);
       })();
     },
-    [canvasId, incomingPortFor, nodesRef, pulseNodes, setLiftedWire, setSelection, store, view, vpRef],
+    [data, incomingPortFor, nodesRef, pulseNodes, setLiftedWire, setSelection, view, vpRef],
   );
 
   const onViewportPointerDown = useCallback(
@@ -425,10 +424,10 @@ export function useCanvasGestures(deps: GestureDeps) {
       } else if (drag.kind === "multidrag") {
         // 多选组拖：整组成员按同一位移移动。
         if (!drag.moved || !drag.members?.length) return;
-        moveGroupTo(canvasId, nodesRef, drag.members.map((m) => ({ key: m.key, x: m.x + dx / view.scale, y: m.y + dy / view.scale })));
+        moveGroupTo(data, nodesRef, drag.members.map((m) => ({ key: m.key, x: m.x + dx / view.scale, y: m.y + dy / view.scale })));
       } else if (drag.kind === "node") {
         if (!drag.moved) return;
-        moveGroupTo(canvasId, nodesRef, [{ key: drag.frameKey, x: drag.ox + dx / view.scale, y: drag.oy + dy / view.scale }]);
+        moveGroupTo(data, nodesRef, [{ key: drag.frameKey, x: drag.ox + dx / view.scale, y: drag.oy + dy / view.scale }]);
       } else if (drag.kind === "resize") {
         // 四角自由缩放：对角固定，实时预览；西/北角缩放联动挪动位置，
         // 松手才持久化尺寸与位置。
@@ -456,7 +455,7 @@ export function useCanvasGestures(deps: GestureDeps) {
           drag.px = px;
           drag.py = py;
         }
-        store.getState().commitLayout(canvasId, [
+        data.commitLayout([
           { id: key, pos_x: px ?? node?.pos_x ?? 0, pos_y: py ?? node?.pos_y ?? 0, width: Math.round(w), height: Math.round(h) },
         ]);
       } else if (drag.kind === "wirecut") {
@@ -718,9 +717,9 @@ export function useCanvasGestures(deps: GestureDeps) {
             const multi = toNode ? PORT_DEFS[toNode.type].ins.find((p) => p.id === targetPort)?.multi : false;
             if (!multi) {
               const old = connectionsRef.current.find((c) => c.to_node === targetKey && c.to_port === targetPort && c.id !== lifted.connId);
-              if (old) void store.getState().deleteConnection(old.id);
+              if (old) void data.deleteConnection(old.id);
             }
-            void store.getState().rewire(lifted.connId, targetKey, targetPort);
+            void data.rewire(lifted.connId, targetKey, targetPort);
           } else if (wireRelease === "picker" && lifted) {
             if (vpRect) {
               openAddMenu(
@@ -745,9 +744,9 @@ export function useCanvasGestures(deps: GestureDeps) {
           const multi = toNode ? PORT_DEFS[toNode.type].ins.find((p) => p.id === toPort)?.multi : false;
           if (!multi) {
             const old = connectionsRef.current.find((c) => c.to_node === toKey && c.to_port === toPort && c.from_node !== fromKey);
-            if (old) void store.getState().deleteConnection(old.id);
+            if (old) void data.deleteConnection(old.id);
           }
-          void store.getState().connect(canvasId, fromKey, toKey, toPort);
+          void data.connect(fromKey, toKey, toPort);
         } else if (wireRelease === "picker" && drag.fromKey) {
           // ComfyUI 惯例：拖到空白松手 → 弹节点选择框，创建的节点自动
           // 接上这条线；落在任何节点/浮层上松手视为取消，不弹。

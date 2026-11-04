@@ -1,6 +1,6 @@
 import type { RefObject } from "react";
 import type { CanvasLayoutEntry, CanvasNode } from "../../../stores/canvasStore";
-import { useCanvasStore } from "../../../stores/canvasStore";
+import type { CanvasDataApi } from "../dataContext";
 import { nodeSize } from "./wireGeom";
 
 // 组布局操作（自 FreeCanvas.tsx 零改动搬运，2026-11-03 引擎拆分阶段 6b）：
@@ -26,7 +26,7 @@ export function groupSnapshotOf(
 
 /** 批量写入各成员的绝对位置（组拖实时移动与撤销恢复共用）。 */
 export function moveGroupTo(
-  canvasId: string,
+  data: CanvasDataApi,
   nodesRef: RefObject<CanvasNode[]>,
   members: { key: string; x: number; y: number }[],
 ): void {
@@ -39,7 +39,7 @@ export function moveGroupTo(
     // nodeSize 的兜底值落成固定高——否则一拖动节点就被"定死"变形。
     entries.push({ id: m.key, pos_x: m.x, pos_y: m.y, width: node.width, height: node.height });
   }
-  useCanvasStore.getState().commitLayout(canvasId, entries);
+  data.commitLayout(entries);
 }
 
 /** 成员当前包围盒（世界坐标；节点已删除则 null）。 */
