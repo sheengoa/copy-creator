@@ -5,6 +5,8 @@
 //! ProjectFilePickerDialog）；保存节点：产物可入库（import_file_into_library
 //! 复制登记）或另存到任意路径（纯复制）。
 
+#[cfg(windows)]
+use std::os::windows::process::CommandExt;
 use serde_json::json;
 use std::hash::{Hash, Hasher};
 use tauri::AppHandle;
@@ -199,6 +201,21 @@ fn resolve_ffmpeg<R: Runtime>(app: &AppHandle<R>) -> Result<std::path::PathBuf, 
     Err("未找到 ffmpeg：请将 ffmpeg 可执行文件放入应用资源目录 ffmpeg/ 下，或加入 PATH 后重启应用".to_string())
 }
 
+/// ffmpeg 命令统一入口（唯一合法启动点，禁止直接 Command::new）：
+/// Windows 下应用是 GUI 子系统（无控制台），启动控制台子系统的
+/// ffmpeg.exe 时系统会为子进程新建一闪而过的控制台窗口；CREATE_NO_WINDOW
+/// 抑制之（2026-11-04 修复）。进程参数/产物行为不受影响，非 Windows 无此
+/// 语义原样返回。
+fn spawn_ffmpeg(ffmpeg: &std::path::Path) -> std::process::Command {
+    let mut cmd = std::process::Command::new(ffmpeg);
+    #[cfg(windows)]
+    {
+        const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+        cmd.creation_flags(CREATE_NO_WINDOW);
+    }
+    cmd
+}
+
 /// 单次单帧提取尝试：pre_args 为 -i 之前的输入侧参数（-ss/-sseof）。
 /// single = true 时输出限 1 帧（首帧/任意寻址语义）；false 时无帧数
 /// 上限，-update 1 逐帧覆盖写文件至流结束（末帧语义）。命令失败或零
@@ -210,7 +227,7 @@ fn frame_extract_attempt(
     pre_args: &[&str],
     single: bool,
 ) -> Result<(), String> {
-    let mut cmd = std::process::Command::new(ffmpeg);
+    let mut cmd = spawn_ffmpeg(ffmpeg);
     cmd.args(["-y", "-nostdin", "-hide_banner", "-loglevel", "error"]);
     cmd.args(pre_args);
     cmd.arg("-i").arg(path);
@@ -439,7 +456,7 @@ pub async fn canvas_video_timeline(
         }
 
         // 时长：ffmpeg -i 无输出文件立即退出（exit 1 属预期），Duration 在 stderr。
-        let mut probe = std::process::Command::new(&ffmpeg);
+        let mut probe = spawn_ffmpeg(&ffmpeg);
         probe.args(["-nostdin", "-hide_banner", "-i"]).arg(&path);
         probe.stdin(std::process::Stdio::null());
         probe.stdout(std::process::Stdio::null());
@@ -466,7 +483,7 @@ pub async fn canvas_video_timeline(
         // 太稀读不出内容；解码反正要过整段视频，多出的只是几张 80px 小图。
         let count = ((duration * 4.0).round() as usize).clamp(24, 150);
         let step = duration / count as f64;
-        let mut cmd = std::process::Command::new(&ffmpeg);
+        let mut cmd = spawn_ffmpeg(&ffmpeg);
         cmd.args(["-y", "-nostdin", "-hide_banner", "-loglevel", "error"]);
         cmd.arg("-i").arg(&path);
         cmd.args([
@@ -581,7 +598,7 @@ pub async fn canvas_convert_video_gif(
     tokio::task::spawn_blocking(move || -> Result<serde_json::Value, String> {
         std::fs::create_dir_all(&out_dir).map_err(|e| format!("创建产物目录失败：{e}"))?;
         let out = out_dir.join(format!("{}.gif", uuid::Uuid::new_v4()));
-        let mut cmd = std::process::Command::new(&ffmpeg);
+        let mut cmd = spawn_ffmpeg(&ffmpeg);
         cmd.args(["-y", "-nostdin", "-hide_banner", "-loglevel", "error"]);
         cmd.arg("-ss").arg(format!("{start:.3}"));
         cmd.arg("-t").arg(format!("{duration:.3}"));
@@ -634,7 +651,7 @@ pub async fn canvas_extract_audio(
     tokio::task::spawn_blocking(move || -> Result<serde_json::Value, String> {
         std::fs::create_dir_all(&out_dir).map_err(|e| format!("创建产物目录失败：{e}"))?;
         let out = out_dir.join(format!("{}.{ext}", uuid::Uuid::new_v4()));
-        let mut cmd = std::process::Command::new(&ffmpeg);
+        let mut cmd = spawn_ffmpeg(&ffmpeg);
         cmd.args(["-y", "-nostdin", "-hide_banner", "-loglevel", "error"]);
         cmd.arg("-ss").arg(format!("{start:.3}"));
         if !whole {
