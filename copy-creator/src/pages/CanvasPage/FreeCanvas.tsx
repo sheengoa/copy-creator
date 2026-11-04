@@ -41,6 +41,7 @@ import { VideoToolRuntimeProvider } from "./nodes/VideoToolRuntimeProvider";
 import { useNodeErrors } from "./nodes/nodeErrors";
 import { upstreamMediaOf as upstreamMediaQuery } from "./nodes/upstream";
 import type { NodeServices } from "./nodes/types";
+import type { ViewState } from "./engine/useViewport";
 
 // 自由生图工作流画布（画布区方案 3.3 + 节点体系 v2）：以 ProjectCanvas 为
 // 基座 fork——引擎框架（视口/连线/切线/框选/分组/菜单）自工程画布搬运；
@@ -51,7 +52,7 @@ import type { NodeServices } from "./nodes/types";
 
 // ── 手势状态类型与连线几何已上移 engine/（gestureTypes.ts / wireGeom.ts）──
 
-export default function FreeCanvas({ canvasId }: { canvasId: string }) {
+export default function FreeCanvas({ canvasId, renderWires }: { canvasId: string; /** 连线渲染插槽（工程视图节点化阶段 C）：提供时替代内置连线层，工程作用域经此接入旧 WiresLayer（gen 链/端口线/暂存线/成片线）。 */ renderWires?: (ctx: { view: ViewState; vpSize: { w: number; h: number } | null; liftedWire: { connId: string; fromKey: string } | null; wireDraft: { d: string; invalid: boolean; color?: string } | null; outPointOf(key: string): { x: number; y: number } | null; inPointOf(key: string, portId?: string): { x: number; y: number } | null }) => React.ReactNode }) {
   const { t } = useTranslation();
   // 几何层数据源（dataContext）：默认实现转发 canvasStore；工程视图
   // （ProjectShell）注入工程 provider 后本组件与其引擎链零改动复用。
@@ -379,16 +380,20 @@ export default function FreeCanvas({ canvasId }: { canvasId: string }) {
           className="pc-world"
           style={{ transform: `translate(${view.x}px, ${view.y}px) scale(${view.scale})` }}
         >
-          <WiresLayer
-            connections={connections}
-            nodes={nodes}
-            view={view}
-            vpSize={vpSize}
-            liftedWire={liftedWire}
-            wireDraft={wireDraft}
-            outPointOf={outPointOf}
-            inPointOf={inPointOf}
-          />
+          {renderWires ? (
+            renderWires({ view, vpSize, liftedWire, wireDraft, outPointOf, inPointOf })
+          ) : (
+            <WiresLayer
+              connections={connections}
+              nodes={nodes}
+              view={view}
+              vpSize={vpSize}
+              liftedWire={liftedWire}
+              wireDraft={wireDraft}
+              outPointOf={outPointOf}
+              inPointOf={inPointOf}
+            />
+          )}
 
           <NodeGroupsLayer groups={groups} memberFrame={memberFrame} />
 

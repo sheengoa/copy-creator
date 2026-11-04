@@ -1,20 +1,22 @@
-import type { CanvasConnection, CanvasNode } from "../../../stores/canvasStore";
+import type { CanvasConnection, CanvasLayoutEntry, CanvasNode } from "../../../stores/canvasStore";
 import type {
   EpisodeOverview,
+  ProjectNodeLink,
   ProjectPrompt,
   ProjectSegment,
 } from "../../../stores/projectStore";
 import type { CanvasDataApi } from "../../CanvasPage/dataContext";
-import type { CanvasLayoutEntry } from "../../../stores/canvasStore";
-import type { CanvasLayout, CanvasNote, EntityPhKind, InfoGroup, NodeGroup, PromptPh, ScriptPh } from "../ProjectCanvas/types";
+import type { CanvasLayout, CanvasNote, EntityPhKind, InfoGroup, NodeGroup, PendingLink, PromptPh, ScriptPh } from "../ProjectCanvas/types";
 import { INFO_H, INFO_W, OUTPUT_W, SCRIPT_W, SEG_H, SEG_W } from "../ProjectCanvas/layout";
 
-// 工程视图几何层数据源（工程视图节点化 2026-11-05 阶段 B，方案 §1.3）：
+// 工程视图几何层数据源（工程视图节点化 2026-11-05 阶段 B/C，方案 §1.3）：
 // CanvasDataApi 的工程实现——节点=工程库 overview 派生（镜头卡/资料/片段/
 // 成片/纸片/便签，节点 id 沿用旧画布 key，位置/尺寸记忆层各归其主），
 // 位置落盘分流 persistCards/persistSegments/persistInfoOffsets/notes/
-// output，内容删除分流工程库操作。连线落库（六口/顶掉/暂存线）在阶段 C
-// 接入，B 阶段为 no-op。无组件模块。
+// output，内容删除分流工程库操作。阶段 C 接入连线语义：connections 合成
+// node_links/暂存线（供引擎摘线命中），connect/rewire/deleteConnection
+// 按 data-cut 前缀分派（六口顶掉 displacePortLinks + 组认领 owner_key +
+// 成片 setEpisodeOutput + 手动素材线 unlinkAssets）。无组件模块。
 
 export interface ProjectCanvasDataDeps {
   episodeId: string;
@@ -40,6 +42,21 @@ export interface ProjectCanvasDataDeps {
   /** 派生节点与分组（Shell useMemo，响应式读的来源）。 */
   nodes: CanvasNode[];
   nodeGroups: NodeGroup[];
+  /** 连线落库（阶段 C）：工程库连线操作与口语义（usePorts 产出）。 */
+  nodeLinks: ProjectNodeLink[];
+  segWires: Array<{ key: string; fromKey: string; links: ProjectNodeLink[] }>;
+  pendingLinks: PendingLink[];
+  persistPendingLinks(next: PendingLink[]): void;
+  displacePortLinks(segId: string, port: string, keep?: {
+    rows?: Set<string>;
+    pendings?: PendingLink[];
+    pendingFromKey?: string;
+  }): void;
+  nodeKeyParts(key: string): { kind: ProjectNodeLink["from_kind"]; id: string } | null;
+  ownerKeyOfLink(link: Pick<ProjectNodeLink, "from_kind" | "from_id" | "owner_key">): string;
+  linkNode(episodeId: string, kind: ProjectNodeLink["from_kind"], id: string, segmentId: string, port: string, ownerKey?: string): void;
+  unlinkNode(kind: string, id: string, segmentId: string, port: string, ownerKey?: string): void;
+  unlinkAssets(fromAsset: string, toAsset: string): void;
   /** 状态写入。 */
   setPos: (updater: (prev: { cards: Record<string, { x: number; y: number }> }) => { cards: Record<string, { x: number; y: number }> }) => void;
   setSegPos: (updater: (prev: Record<string, { x: number; y: number }>) => Record<string, { x: number; y: number }>) => void;
@@ -127,24 +144,6 @@ export function buildProjectNodes(deps: ProjectCanvasDataDeps): CanvasNode[] {
       ),
     );
   }
-  // 片段（默认位置未落 segPos 前不渲染——与旧渲染层一致）。
-  segments.forEach((segment, index) => {
-    const p = segPos[segment.id];
-    if (!p) return;
-    const key = `segment:${segment.id}`;
-    list.push(
-      recordNode(
-        key,
-        "segment",
-        segment.note || `#${index + 1}`,
-        p,
-        sizeOfNode(key)?.w ?? SEG_W,
-        nodeSizes[key]?.h ?? null,
-        episodeId,
-        { kind: "segment", segmentId: segment.id },
-      ),
-    );
-  });
   // 资料节点：单实体（char:/loc:/prop:）、组（grp:）、主剧本与剧本纸片。
   for (const info of infoNodes) {
     const type = info.kind === "script" ? "scriptPaper" : info.kind;
@@ -195,6 +194,24 @@ export function buildProjectNodes(deps: ProjectCanvasDataDeps): CanvasNode[] {
       ),
     );
   }
+  // 片段（默认位置未落 segPos 前不渲染——与旧渲染层一致）。
+  segments.forEach((segment, index) => {
+    const p = segPos[segment.id];
+    if (!p) return;
+    const key = `segment:${segment.id}`;
+    list.push(
+      recordNode(
+        key,
+        "segment",
+        segment.note || `#${index + 1}`,
+        p,
+        sizeOfNode(key)?.w ?? SEG_W,
+        nodeSizes[key]?.h ?? null,
+        episodeId,
+        { kind: "segment", segmentId: segment.id },
+      ),
+    );
+  });
   // 成片输出节点（overview 存在即渲染）。
   if (outputBox) {
     list.push(
@@ -279,8 +296,31 @@ export function buildProjectCanvasApi(deps: ProjectCanvasDataDeps): CanvasDataAp
   };
   return {
     scope: "project",
+    displacesOnConnect: false,
     nodes: () => deps.nodes,
-    connections: (): CanvasConnection[] => [],
+    connections: (): CanvasConnection[] => {
+      // 合成引擎可摘/可切的连线视图：正式 node_link（s: 行 id，from 取
+      // 承载节点 key——组认领线锚在组节点上）+ 暂存线（p: 伪 id）。gen
+      // 链/手动线/成片线不可摘，由插槽渲染层的 data-cut 前缀直分派。
+      const list: CanvasConnection[] = [];
+      for (const row of deps.nodeLinks) {
+        list.push({
+          id: `s:${row.id}`,
+          from_node: deps.ownerKeyOfLink(row),
+          to_node: `segment:${row.to_segment}`,
+          to_port: row.to_port,
+        } as CanvasConnection);
+      }
+      for (const p of deps.pendingLinks) {
+        list.push({
+          id: `p:${p.fromKey}|${p.toSegmentId}|${p.toPort}`,
+          from_node: p.fromKey,
+          to_node: `segment:${p.toSegmentId}`,
+          to_port: p.toPort,
+        } as CanvasConnection);
+      }
+      return list;
+    },
     groups: () => deps.nodeGroups,
     viewport: () => {
       try {
@@ -396,12 +436,134 @@ export function buildProjectCanvasApi(deps: ProjectCanvasDataDeps): CanvasDataAp
     },
     saveLayout: commitEntries,
     commitLayout: commitEntries,
-    connect: async () => {
-      // 连线落库（六口/顶掉/暂存线/组认领）在阶段 C 接入。
+    connect: async (from, to, toPort) => {
+      // 落线提交（语义对齐旧 useGestures 落点分支，2026-11-05 阶段 C）：
+      // 成片=镜头卡设置总输出；片段六口=顶掉后落 node_link（组来源按组
+      // 类型进对应口、owner 记组身份）；占位/纸片=暂存线（画布层）。
+      if (to === "output") {
+        if (!from.startsWith("segment:")) deps.setEpisodeOutput(episodeId, from);
+        return null;
+      }
+      if (!to.startsWith("segment:")) return null;
+      const segId = to.slice(8);
+      if (from.startsWith("eph:") || from.startsWith("prompt:") || from.startsWith("script:")) {
+        // 未加载占位/提示词纸片/剧本纸片：暂存线记画布层（占位加载实体
+        // 后转正）。落到资料口＝占口，顶掉既有线、保留自己的暂存线。
+        if (toPort) deps.displacePortLinks(segId, toPort, { pendingFromKey: from });
+        if (toPort) {
+          deps.persistPendingLinks([
+            ...deps.pendingLinks.filter((l) => !(l.fromKey === from && l.toSegmentId === segId && l.toPort === toPort)),
+            { fromKey: from, toSegmentId: segId, toPort },
+          ]);
+        }
+        return null;
+      }
+      if (from.startsWith("grp:")) {
+        // 组节点一条线 = 组内全部成员各落一条 node_link（owner 记组身份），
+        // 且无论拖到哪个口都按组类型进对应口；资料口顶掉既有来源。
+        const group = deps.infoGroups.find((g) => `grp:${g.id}` === from);
+        if (group) {
+          deps.displacePortLinks(segId, group.kind);
+          group.members.forEach((memberId) => {
+            deps.linkNode(episodeId, group.kind, memberId, segId, group.kind, from);
+          });
+        }
+        return null;
+      }
+      const source = deps.nodeKeyParts(from);
+      if (source && toPort) {
+        // 单实体/镜头/片段落资料口＝占口：顶掉既有线再落。
+        deps.displacePortLinks(segId, toPort);
+        deps.linkNode(episodeId, source.kind, source.id, segId, toPort);
+      }
       return null;
     },
-    rewire: async () => null,
-    deleteConnection: async () => {},
+    rewire: async (connId, to, toPort) => {
+      // 摘线收尾（对齐旧 useGestures 摘线分支）：换目标片段=整线改接（先
+      // 顶掉新口、保留自己）；落到来源类节点=换源（组落点按成员展开）。
+      if (to.startsWith("segment:")) {
+        const segId = to.slice(8);
+        const port = toPort;
+        if (!port) return null;
+        if (connId.startsWith("s:")) {
+          const row = deps.nodeLinks.find((l) => l.id === connId.slice(2));
+          if (!row) return null;
+          deps.displacePortLinks(segId, port, { rows: new Set([row.id]) });
+          deps.unlinkNode(row.from_kind, row.from_id, row.to_segment, row.to_port, row.owner_key);
+          deps.linkNode(episodeId, row.from_kind, row.from_id, segId, port, row.owner_key);
+        } else if (connId.startsWith("p:")) {
+          const [, fromKey, oldSeg, oldPort] = connId.split("|");
+          void oldSeg;
+          void oldPort;
+          const pending = deps.pendingLinks.find((l) => l.fromKey === fromKey && l.toSegmentId === connId.split("|")[2] && l.toPort === connId.split("|")[3]);
+          if (!pending) return null;
+          deps.displacePortLinks(segId, port, { pendings: [pending] });
+          deps.persistPendingLinks([
+            ...deps.pendingLinks.filter((l) => l !== pending),
+            { fromKey: pending.fromKey, toSegmentId: segId, toPort: port },
+          ]);
+        }
+        return null;
+      }
+      // 换源：落点为来源类节点（组/单实体/剧本主节点），片段口不变。
+      const targetGroup = to.startsWith("grp:")
+        ? deps.infoGroups.find((g) => `grp:${g.id}` === to)
+        : null;
+      const source = targetGroup ? null : deps.nodeKeyParts(to);
+      const targetSources = targetGroup
+        ? targetGroup.members.map((id) => ({ kind: targetGroup.kind, id }))
+        : source
+          ? [source]
+          : [];
+      if (targetSources.length === 0) return null;
+      if (connId.startsWith("s:")) {
+        const row = deps.nodeLinks.find((l) => l.id === connId.slice(2));
+        if (!row) return null;
+        const nextOwner = targetGroup ? to : "";
+        deps.unlinkNode(row.from_kind, row.from_id, row.to_segment, row.to_port, row.owner_key);
+        targetSources.forEach((ns) => {
+          deps.linkNode(episodeId, ns.kind, ns.id, row.to_segment, row.to_port, nextOwner);
+        });
+      } else if (connId.startsWith("p:")) {
+        const parts = connId.slice(2).split("|");
+        const pending = deps.pendingLinks.find((l) => l.fromKey === parts[0] && l.toSegmentId === parts[1] && l.toPort === parts[2]);
+        if (!pending) return null;
+        deps.persistPendingLinks(deps.pendingLinks.filter((l) => l !== pending));
+        targetSources.forEach((ns) => {
+          deps.linkNode(episodeId, ns.kind, ns.id, pending.toSegmentId, pending.toPort);
+        });
+      }
+      return null;
+    },
+    deleteConnection: async (id) => {
+      // 切线分派（data-cut 前缀，对齐旧 buildCutTargets.del）：
+      // s:=片段口线（组认领线整组断）；p:=暂存线；o:=成片来源清空；
+      // m:=镜头卡之间的手动素材线。
+      if (id.startsWith("s:")) {
+        const group = deps.segWires.find((w) => w.links[0]?.id === id.slice(2));
+        group?.links.forEach((l) => {
+          deps.unlinkNode(l.from_kind, l.from_id, l.to_segment, l.to_port, l.owner_key);
+        });
+        return;
+      }
+      if (id.startsWith("p:")) {
+        const [fromKey, segId, port] = id.slice(2).split("|");
+        deps.persistPendingLinks(
+          deps.pendingLinks.filter((l) => !(l.fromKey === fromKey && l.toSegmentId === segId && l.toPort === port)),
+        );
+        return;
+      }
+      if (id === "o") {
+        deps.setEpisodeOutput(episodeId, null);
+        return;
+      }
+      if (id.startsWith("m:")) {
+        // data-cut 里存的是容器 key（shot:<id>），解连要的是素材 id。
+        const [fromKey, toKey] = id.slice(2).split("|");
+        deps.unlinkAssets(fromKey.slice(fromKey.indexOf(":") + 1), toKey.slice(toKey.indexOf(":") + 1));
+        return;
+      }
+    },
     setGroups: async (groups) => deps.persistNodeGroups(groups),
     setViewport: (x, y, k) => {
       try {

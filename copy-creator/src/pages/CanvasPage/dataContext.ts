@@ -41,6 +41,11 @@ export interface CanvasDataApi {
   /** 作用域（工程视图节点化 2026-11-05）：建节点菜单/文件拖入分发按它
    *  过滤节点 def 的 scope，两画布完全互斥；缺省实现 = "free"。 */
   scope: "free" | "project";
+  /** 落线前的「单线口顶掉」是否由引擎代做：自由画布端口无记忆层语义，
+   *  引擎在 connect/rewire 前先删旧线；工程 provider 在 connect/rewire
+   *  内部按口语义自管顶掉（displacePortLinks + keep），置 false 关掉
+   *  引擎代删，避免把组认领的整组线误清。缺省 true。 */
+  displacesOnConnect?: boolean;
   // ── 读（快照；响应式订阅见下方三个 use*） ──
   nodes(): CanvasNode[];
   connections(): CanvasConnection[];
@@ -88,6 +93,7 @@ const useStoreGroups = () => useCanvasStore((s) => s.groups);
 export function createStoreCanvasData(canvasId: string): CanvasDataApi {
   return {
     scope: "free",
+    displacesOnConnect: true,
     nodes: () => useCanvasStore.getState().nodes,
     connections: () => useCanvasStore.getState().connections,
     groups: () => useCanvasStore.getState().groups,

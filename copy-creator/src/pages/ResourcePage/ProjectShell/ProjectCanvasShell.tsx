@@ -1,18 +1,29 @@
-import { useState } from "react";
+import { useRef, useState } from "react";
 import { useShallow } from "zustand/react/shallow";
 import { useTranslation } from "react-i18next";
 import { useProjectStore, type ProjectAsset } from "../../../stores/projectStore";
 import { CanvasDataContext } from "../../CanvasPage/dataContext";
 import FreeCanvas from "../../CanvasPage/FreeCanvas";
 import { ProjectCanvasContext, type ProjectCanvasContextValue } from "../../CanvasPage/nodes/project/projectContext";
-import { EMPTY_NODE_GROUPS, type CanvasLayout } from "../ProjectCanvas/types";
+import {
+  EMPTY_PENDING_LINKS,
+  EMPTY_NODE_GROUPS,
+  parsePendingLinks,
+  type CanvasLayout,
+  type PendingLink,
+} from "../ProjectCanvas/types";
+import type { LiftedWire } from "../ProjectCanvas/engine/useGestures";
 import type { DetailForState } from "../ProjectCanvas/layers/NodeExtras";
 import { usePerEpisodeStorage } from "../usePerEpisodeStorage";
 import { useCanvasData } from "../ProjectCanvas/engine/useCanvasData";
+import { useNodeMetrics } from "../ProjectCanvas/engine/useNodeMetrics";
+import { usePorts } from "../ProjectCanvas/engine/usePorts";
+import { WIRES_VIEWPORT_PAD } from "../ProjectCanvas/layout";
+import { WiresLayer } from "../ProjectCanvas/layers/WiresLayer";
+import { buildProjectCanvasApi, buildProjectNodes } from "./projectProvider";
 
 /** updateEpisode 补丁的状态字段（store 的 ProjectEpisodeStatus）。 */
 type ProjectEpisodeStatusLike = Parameters<ReturnType<typeof useProjectStore.getState>["updateEpisode"]>[1]["status"];
-import { buildProjectCanvasApi, buildProjectNodes } from "./projectProvider";
 
 // 工程画布壳（工程视图节点化 2026-11-05 阶段 B，方案 §B3）：自由画布
 // 节点基座上的「工程作用域实例」——挂工程数据源 provider（overview 派生
@@ -56,6 +67,9 @@ export default function ProjectCanvasShell({
     addSegment,
     removeSegment,
     moveSegment,
+    linkNode,
+    unlinkNode,
+    unlinkAssets,
   } = useProjectStore(
     useShallow((state) => ({
       overview: state.overview,
@@ -77,6 +91,9 @@ export default function ProjectCanvasShell({
       addSegment: state.addSegment,
       removeSegment: state.removeSegment,
       moveSegment: state.moveSegment,
+      linkNode: state.linkNode,
+      unlinkNode: state.unlinkNode,
+      unlinkAssets: state.unlinkAssets,
     })),
   );
 
@@ -99,12 +116,56 @@ export default function ProjectCanvasShell({
 
   // 节点分组（Ctrl+G，按集 localStorage——与旧画布同键）。
   const [nodeGroups, , persistNodeGroups] = usePerEpisodeStorage(episodeId, "nodegroups", EMPTY_NODE_GROUPS);
+  // 占位/纸片 → 片段口的暂存线（按集 localStorage——与旧画布同键）。
+  const [pendingLinks, , persistPendingLinks] = usePerEpisodeStorage<PendingLink[]>(
+    episodeId, "pendinglinks", EMPTY_PENDING_LINKS, parsePendingLinks,
+  );
 
   // 详情窗状态（阶段 D 重做详情窗前，工具按钮先接状态位）。
   const [detailFor, setDetailFor] = useState<DetailForState | null>(null);
 
   const promptUntitled = t("project.canvas.promptUntitled");
   const ephTitle = t("project.canvas.ephTitle");
+
+  // ── 连线层（阶段 C）：旧引擎钩子复用——wires（gen 链+手动素材线聚合）、
+  // segWires（node_links 按承载节点去重）、口色与顶掉/换源语义。实测锚点
+  // 由基座（FreeCanvas 的 useNodeMetrics）经 renderWires 插槽下发，这里的
+  // useNodeMetrics 只取纯数据派生（vpRef 给空 ref，DOM 实测跳过）。
+  const dummyVpRef = useRef<HTMLDivElement | null>(null);
+  const metrics = useNodeMetrics({
+    vpRef: dummyVpRef,
+    view: { x: 0, y: 0, scale: 1 },
+    layout: data.layout,
+    scenes,
+    links: overview?.links ?? [],
+    nodeSizes: data.nodeSizes,
+    infoNodes: data.infoNodes,
+    segments,
+    promptPhs: data.promptPhs,
+    entityPhs: data.entityPhs,
+    pos: data.pos,
+    cardSizeOf: () => ({ w: 240, h: 200 }),
+    outputBox: data.outputBox,
+    segPos: data.segPos,
+    sizeOfNode: data.sizeOfNode,
+    infoNodePos: data.infoNodePos,
+    infoGroups: data.infoGroups,
+  });
+  const nodeLinks = overview?.node_links ?? [];
+  const ports = usePorts({
+    overview,
+    unlinkNode,
+    pendingLinks,
+    persistPendingLinks,
+    nodeLinks,
+    ownerKeyOfLink: metrics.ownerKeyOfLink,
+    scenes,
+    infoGroups: data.infoGroups,
+    entityPhs: data.entityPhs,
+    episodeId,
+    linkNode,
+    setEpisodeOutput,
+  });
 
   // provider 公共依赖（两个装配共用；data 对象随渲染换身份，正好让
   // api/nodes 每次渲染重建——与旧 ProjectCanvas 的订阅渲染频率一致）。
@@ -116,6 +177,11 @@ export default function ProjectCanvasShell({
     entityPhs: data.entityPhs, scriptPhs: data.scriptPhs, promptPhs: data.promptPhs,
     notes: data.notes, infoGroups: data.infoGroups, prompts,
     nodeGroups,
+    // 连线落库（阶段 C）
+    nodeLinks, segWires: ports.segWires, pendingLinks, persistPendingLinks,
+    displacePortLinks: ports.displacePortLinks, nodeKeyParts: ports.nodeKeyParts,
+    ownerKeyOfLink: metrics.ownerKeyOfLink,
+    linkNode, unlinkNode, unlinkAssets,
     setPos: data.setPos, setSegPos: data.setSegPos, setInfoOffsets: data.setInfoOffsets,
     setNodeSizes: data.setNodeSizes, setNotes: data.setNotes,
     persistCards: data.persistCards, persistSegments: data.persistSegments,
@@ -183,10 +249,59 @@ export default function ProjectCanvasShell({
     setEpisodeOutput,
   };
 
+  // ── 连线渲染插槽（阶段 C）：基座下发实测锚点与手势状态，这里组装旧
+  // WiresLayer（gen 链/端口线/暂存线/成片线 + 拖线草稿）。摘线中的线隐藏
+  // 按 fc 的单线 lifted（connId 前缀）适配旧 LiftedWire 形状。
+  const renderWires = (slot: {
+    view: { x: number; y: number; scale: number };
+    vpSize: { w: number; h: number } | null;
+    liftedWire: { connId: string; fromKey: string } | null;
+    wireDraft: { d: string; invalid: boolean; color?: string } | null;
+    outPointOf(key: string): { x: number; y: number } | null;
+    inPointOf(key: string, portId?: string): { x: number; y: number } | null;
+  }) => {
+    let lifted: LiftedWire | null = null;
+    if (slot.liftedWire) {
+      const { connId, fromKey } = slot.liftedWire;
+      if (connId.startsWith("p:")) {
+        const [fk, seg, port] = connId.slice(2).split("|");
+        lifted = {
+          fromKey,
+          pendings: pendingLinks.filter((l) => l.fromKey === fk && l.toSegmentId === seg && l.toPort === port),
+          rows: [],
+        };
+      } else if (connId.startsWith("s:")) {
+        lifted = { fromKey, pendings: [], rows: nodeLinks.filter((l) => l.id === connId.slice(2)) };
+      }
+    }
+    return (
+      <WiresLayer
+        wires={metrics.wires}
+        segWires={ports.segWires}
+        pendingLinks={pendingLinks}
+        liftedWire={lifted}
+        wireDraft={slot.wireDraft}
+        outputBox={data.outputBox}
+        segments={segments}
+        overview={overview}
+        wiresVis={{
+          x: -slot.view.x / slot.view.scale - WIRES_VIEWPORT_PAD,
+          y: -slot.view.y / slot.view.scale - WIRES_VIEWPORT_PAD,
+          w: ((slot.vpSize?.w ?? 0) || 1600) / slot.view.scale + WIRES_VIEWPORT_PAD * 2,
+          h: ((slot.vpSize?.h ?? 0) || 900) / slot.view.scale + WIRES_VIEWPORT_PAD * 2,
+        }}
+        outPointOf={slot.outPointOf}
+        inPointOf={slot.inPointOf}
+        portsOf={ports.portsOf}
+        nodeWireColorOf={ports.nodeWireColorOf}
+      />
+    );
+  };
+
   return (
     <CanvasDataContext.Provider value={api}>
       <ProjectCanvasContext.Provider value={projectCtx}>
-        <FreeCanvas canvasId={episodeId} />
+        <FreeCanvas canvasId={episodeId} renderWires={renderWires} />
       </ProjectCanvasContext.Provider>
     </CanvasDataContext.Provider>
   );

@@ -714,9 +714,11 @@ export function useCanvasGestures(deps: GestureDeps) {
           if (wireRelease === "commit" && targetKey && targetPort && lifted) {
             setLiftedWire(null);
             // 单线口：转接进来前顶掉口上其他旧线（合集 multi 口不顶）。
+            // 工程 provider（displacesOnConnect=false）在 rewire 内部按口
+            // 语义自管顶掉（keep 自己拿走的行），引擎代删会误清组线。
             const toNode = nodesRef.current.find((n) => n.id === targetKey);
             const multi = toNode ? PORT_DEFS[toNode.type].ins.find((p) => p.id === targetPort)?.multi : false;
-            if (!multi) {
+            if (data.displacesOnConnect !== false && !multi) {
               const old = connectionsRef.current.find((c) => c.to_node === targetKey && c.to_port === targetPort && c.id !== lifted.connId);
               if (old) void data.deleteConnection(old.id);
             }
@@ -741,9 +743,12 @@ export function useCanvasGestures(deps: GestureDeps) {
           const toKey = drag.fromDir === "out" ? targetKey : drag.fromKey;
           const toPort = drag.fromDir === "out" ? targetPort : drag.fromPortId;
           // 单线口语义：落线顶掉该口已有旧线（合集 multi 口追加不顶）。
+          // 工程 provider（displacesOnConnect=false）在 connect 内部按口
+          // 语义自管顶掉（组线落资料口按组类型进对应口），引擎代删会按
+          // 错误的口清线。
           const toNode = nodesRef.current.find((n) => n.id === toKey);
           const multi = toNode ? PORT_DEFS[toNode.type].ins.find((p) => p.id === toPort)?.multi : false;
-          if (!multi) {
+          if (data.displacesOnConnect !== false && !multi) {
             const old = connectionsRef.current.find((c) => c.to_node === toKey && c.to_port === toPort && c.from_node !== fromKey);
             if (old) void data.deleteConnection(old.id);
           }
