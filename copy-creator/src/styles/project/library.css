@@ -48,9 +48,11 @@
 }
 
 /* --- 资源选择浮层（通用「从资源库选文件」）：左分组树 + 右列表。
-       仅选择器加宽，三库面板等共用 .project-library-panel 的浮层不动 --- */
+       仅选择器加宽，三库面板等共用 .project-library-panel 的浮层不动。
+       960px（2026-11-05）：缩略图放大到 88×64 后行内文字/路径需要横向
+       余量，780px 会让文件名列提前截断 --- */
 .project-picker-panel {
-  width: min(780px, calc(100vw - 48px));
+  width: min(960px, calc(100vw - 48px));
 }
 
 .project-picker-cols {
@@ -76,6 +78,11 @@
   min-height: 0;
   display: flex;
   flex-direction: column;
+}
+
+/* 选择器行距：放大缩略图后行与行再留一口气（三库面板的 8px 不动） */
+.project-picker-panel .project-library-body {
+  gap: 10px;
 }
 
 .project-picker-tree-row {
@@ -202,13 +209,14 @@
   border: 0.5px solid var(--card-border);
 }
 
-/* 选择器卡片缩略图：图片/视频真预览，音频/文本/文件类型占位 */
+/* 卡片缩略图（图片/视频真预览，音频/文本/文件类型占位）。只给结构，
+   尺寸按语境分流：三库面板参考图 44×44 小方图（下方默认尺寸块），
+   选择器浮层 88×64 放大版（.project-picker-panel 覆盖块）——挑文件靠
+   肉眼比对，图太小等于没预览。此前基块写死 64×48 被后面的 44×44 块
+   级联覆盖，选择器缩略图缩成小方图的根源即在此，现显式拆开。 */
 .project-library-thumb {
   position: relative;
   flex-shrink: 0;
-  width: 64px;
-  height: 48px;
-  border-radius: 6px;
   overflow: hidden;
   background: var(--chip-bg);
 }
@@ -258,6 +266,31 @@
 .project-library-card.pick:hover {
   border-color: color-mix(in srgb, var(--text-primary) 22%, var(--card-border));
   box-shadow: 0 4px 14px rgba(0, 0, 0, 0.06);
+}
+
+/* 选择器浮层的行与缩略图放大版（2026-11-05）：缩略图 88×64（约为面板
+   44×44 的 2.9 倍面积，横条比例与行结构相称），行加高（内边距 10→12）
+   、行距 8→10，播放角标/占位图标同步放大一号。scope 在选择浮层根上，
+   三库面板的紧凑小图行完全不动。 */
+.project-picker-panel .project-library-card {
+  padding: 12px 14px;
+  gap: 14px;
+}
+
+.project-picker-panel .project-library-thumb {
+  width: 88px;
+  height: 64px;
+  border-radius: 8px;
+}
+
+.project-picker-panel .project-library-thumb-play svg {
+  width: 20px;
+  height: 20px;
+}
+
+.project-picker-panel .project-library-thumb.is-placeholder svg {
+  width: 16px;
+  height: 16px;
 }
 
 /* 挂靠选择器「显示更多」：与次级按钮家族同规格（灰底 6px 圆角 30px 高） */
@@ -410,7 +443,8 @@
   flex-shrink: 0;
 }
 
-/* 场景/道具参考图：无图显示图标占位 */
+/* 缩略图默认尺寸（三库面板参考图）：44×44 小方图，无图显示图标占位；
+   选择器浮层的放大版见上方 .project-picker-panel 覆盖块 */
 .project-library-thumb {
   width: 44px;
   height: 44px;
