@@ -393,7 +393,26 @@ function handleInvoke(cmd: string, args: Record<string, unknown>): unknown {
         });
     }
     case "get_image_thumbnail":
-    case "get_resource_file_thumbnail":
+    case "get_resource_file_thumbnail": {
+      // 浏览器 mock 的真预览：mock 库根即 vite 静态目录（mock/db.ts 的
+      // libraryRoot），图片缩略图命令直接取原文件字节转 base64，列表与
+      // 选择浮层的图片行因此有真画面可看（此前恒回空串 → 空 data URL
+      // 永远裂图）。调用方按 image/png 包 data URL，故仅对 png 静态资产
+      // 生效；非 http 路径或取不到回空串，走「无预览」占位回退，与后端
+      // 解不动格式的语义一致。视频封面帧不在此列：load_resource_video_
+      // poster 会被包成 image/jpeg，字节错配必裂图，现场抽帧已可用。
+      const thumbPath = String(args?.path ?? "");
+      if (!/^https?:/i.test(thumbPath)) return "";
+      return fetch(thumbPath)
+        .then((res) => (res.ok ? res.arrayBuffer() : Promise.reject(new Error(String(res.status)))))
+        .then((buffer) => {
+          const bytes = new Uint8Array(buffer);
+          let binary = "";
+          for (let i = 0; i < bytes.length; i += 1) binary += String.fromCharCode(bytes[i]);
+          return btoa(binary);
+        })
+        .catch(() => "");
+    }
     case "load_resource_video_poster":
       return "";
     case "read_resource_text_preview":
