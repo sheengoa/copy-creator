@@ -653,7 +653,10 @@
       "detailRemoveMember": "从本节点移除",
       "detailAddMember": "加入本节点",
       "memberPickTitle": "装入{{kind}}",
-      "memberPickConfirm": "装入 {{count}} 项"
+      "memberPickConfirm": "装入 {{count}} 项",
+      "addNodeKbdSelect": "选择",
+      "addNodeKbdAdd": "添加",
+      "addNodeKbdClose": "关闭"
     },
     "library": {
       "characters": "角色库",

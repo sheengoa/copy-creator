@@ -4,13 +4,18 @@
 /* ── 节点体系 v2：加载 / 保存 / 预览 / 菜单分组 ───────────── */
 
 /* 建节点菜单分组列表：菜单本体由 FreeCanvas 按视口剩余空间内联限高，
-   搜索框常驻在外，分组在这里区内滚动（贴近视口下缘打开不再被裁）。 */
+   搜索框常驻在外，分组在这里区内滚动（贴近视口下缘打开不再被裁）。
+   滚动条收敛（2026-11-04 白玻璃精修）：悬停列表才显形，不常驻。 */
 .pc-addmenu-list {
   flex: 1;
   min-height: 0;
   overflow-y: auto;
   scrollbar-width: thin;
-  scrollbar-color: rgba(255, 255, 255, 0.28) transparent;
+  scrollbar-color: transparent transparent;
+}
+
+.pc-addmenu-list:hover {
+  scrollbar-color: rgba(31, 35, 65, 0.24) transparent;
 }
 
 .pc-addmenu-list::-webkit-scrollbar {
@@ -19,28 +24,80 @@
 
 .pc-addmenu-list::-webkit-scrollbar-thumb {
   border-radius: 3px;
-  background: rgba(255, 255, 255, 0.28);
+  background: transparent;
 }
 
-/* 建节点菜单分组：生成 / 加载 / 输出 三类链路 + 其他。 */
+.pc-addmenu-list:hover::-webkit-scrollbar-thumb {
+  background: rgba(31, 35, 65, 0.24);
+}
+
+/* 建节点菜单分组：生成 / 加载 / 合集 / 输出 + 其他（组间以标题的
+   吸顶渐隐底与细分隔线分层，不再用组间框线）。 */
 .pc-addmenu-group {
   display: flex;
   flex-direction: column;
   gap: 2px;
-  padding: 4px 0;
+  padding: 0 0 4px;
 }
 
 .pc-addmenu-group + .pc-addmenu-group {
-  border-top: 0.5px solid rgba(255, 255, 255, 0.1);
   margin-top: 3px;
-  padding-top: 7px;
 }
 
+/* 分组标题：滚动吸顶 + 渐隐底（钉住时条目从标题下方淡入不硬切），
+   标题右侧为过滤后计数角标。 */
 .pc-addmenu-group-title {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  display: flex;
+  align-items: center;
+  gap: 7px;
   font-size: 9.5px;
-  letter-spacing: 0.08em;
+  font-weight: 600;
+  letter-spacing: 0.14em;
+  color: rgba(31, 35, 65, 0.46);
+  padding: 8px 10px 5px;
+  background: linear-gradient(180deg, rgba(250, 250, 252, 0.92) 78%, rgba(250, 250, 252, 0));
+}
+
+.pc-addmenu-group-title::after {
+  content: "";
+  flex: 1;
+  height: 1px;
+  background: rgba(31, 35, 65, 0.1);
+}
+
+.pc-addmenu-count {
+  font-size: 9px;
+  letter-spacing: 0;
+  font-weight: 500;
+  color: rgba(31, 35, 65, 0.38);
+  background: rgba(31, 35, 65, 0.055);
+  border-radius: 6px;
+  padding: 0.5px 5px;
+}
+
+[data-theme="dark"] .pc-addmenu-list:hover {
+  scrollbar-color: rgba(255, 255, 255, 0.24) transparent;
+}
+
+[data-theme="dark"] .pc-addmenu-list:hover::-webkit-scrollbar-thumb {
+  background: rgba(255, 255, 255, 0.24);
+}
+
+[data-theme="dark"] .pc-addmenu-group-title {
+  color: rgba(255, 255, 255, 0.44);
+  background: linear-gradient(180deg, rgba(33, 35, 42, 0.92) 78%, rgba(33, 35, 42, 0));
+}
+
+[data-theme="dark"] .pc-addmenu-group-title::after {
+  background: rgba(255, 255, 255, 0.1);
+}
+
+[data-theme="dark"] .pc-addmenu-count {
   color: rgba(255, 255, 255, 0.4);
-  padding: 0 10px 2px;
+  background: rgba(255, 255, 255, 0.07);
 }
 
 /* 加载文本节点：白卡浮起的常驻编辑区（对齐 fc-node-input 的分段槽

@@ -653,7 +653,10 @@
       "detailRemoveMember": "Remove from node",
       "detailAddMember": "Add to this node",
       "memberPickTitle": "Load into {{kind}}",
-      "memberPickConfirm": "Load {{count}} item(s)"
+      "memberPickConfirm": "Load {{count}} item(s)",
+      "addNodeKbdSelect": "Select",
+      "addNodeKbdAdd": "Add",
+      "addNodeKbdClose": "Close"
     },
     "library": {
       "characters": "Characters",

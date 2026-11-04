@@ -442,54 +442,210 @@
 .pc-note-tools button.danger:hover { background: var(--danger); }
 .pc-note-tools svg { width: 12px; height: 12px; }
 
-/* ── 双击空白的节点选择框 ── */
+/* ── 双击空白的节点选择框（2026-11-04 白玻璃精修定案）──
+   材质：近实心渐变面 + 渐变描边（顶缘亮线→底部沉灰）+ 三层投影 +
+   顶缘内高光；刻意不用 backdrop-filter——毛玻璃与圆角的组合在
+   WebView2 真机 GPU 合成路径存在圆角裁剪失效类（悬浮胶囊同教训，
+   纯色根除），近实心面观感等价。工程画布同类菜单共用本壳与条目
+   样式（那边是裸 input，无放大镜/ESC 键帽/键位条也成立）。 */
 .pc-addmenu {
   position: absolute;
   z-index: 40;
-  min-width: 240px;
-  padding: 6px;
-  border-radius: 12px;
-  background: rgba(28, 28, 34, 0.96);
-  border: 1px solid rgba(255, 255, 255, 0.12);
-  box-shadow: 0 14px 38px rgba(0, 0, 0, 0.4);
+  width: 284px;
+  padding: 8px 8px 6px;
+  border-radius: 16px;
+  border: 1px solid transparent;
+  background:
+    linear-gradient(180deg, #fcfcfd, #f6f7fa) padding-box,
+    linear-gradient(180deg, rgba(255, 255, 255, 1), rgba(31, 35, 65, 0.16)) border-box;
+  box-shadow:
+    0 1px 2px rgba(31, 35, 65, 0.07),
+    0 12px 32px rgba(31, 35, 65, 0.13),
+    0 36px 90px rgba(31, 35, 65, 0.2),
+    inset 0 1px 0 rgba(255, 255, 255, 0.85);
   display: flex;
   flex-direction: column;
-  gap: 2px;
+  animation: pc-addmenu-in 0.19s cubic-bezier(0.2, 0.9, 0.3, 1) both;
+}
+@keyframes pc-addmenu-in {
+  from { opacity: 0; transform: translateY(5px) scale(0.985); }
+}
+@media (prefers-reduced-motion: reduce) {
+  .pc-addmenu { animation: none; }
 }
 .pc-addmenu-search {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex: none;
+  border-radius: 10px;
+  padding: 7px 9px;
+  margin-bottom: 5px;
+  background: rgba(31, 35, 65, 0.045);
+  border: 1px solid rgba(31, 35, 65, 0.09);
+  box-shadow: inset 0 1px 2px rgba(31, 35, 65, 0.05);
+  color: #1f2341;
+  outline: none;
+  transition: border-color 0.15s ease, box-shadow 0.15s ease, background 0.15s ease;
+}
+.pc-addmenu-search:focus-within {
+  background: rgba(255, 255, 255, 0.7);
+  border-color: rgba(0, 122, 255, 0.55);
+  box-shadow: 0 0 0 3px rgba(0, 122, 255, 0.13), inset 0 1px 2px rgba(31, 35, 65, 0.03);
+}
+.pc-addmenu-search svg {
+  width: 13px;
+  height: 13px;
+  flex: none;
+  color: rgba(31, 35, 65, 0.4);
+  transition: color 0.15s ease;
+}
+.pc-addmenu-search:focus-within svg { color: #007aff; }
+.pc-addmenu-search input {
   border: none;
-  background: rgba(255, 255, 255, 0.08);
-  border-radius: 8px;
-  padding: 7px 10px;
-  margin-bottom: 3px;
-  color: #fff;
-  font-size: 12px;
+  background: transparent;
+  padding: 0;
+  width: 100%;
+  color: inherit;
+  font-size: 12.5px;
   outline: none;
 }
-.pc-addmenu-search::placeholder { color: rgba(255, 255, 255, 0.4); }
+.pc-addmenu-search input::placeholder { color: rgba(31, 35, 65, 0.38); }
+.pc-addmenu-esc {
+  flex: none;
+  font-size: 9px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  color: rgba(31, 35, 65, 0.42);
+  background: rgba(255, 255, 255, 0.85);
+  border: 1px solid rgba(31, 35, 65, 0.13);
+  border-bottom-width: 2px;
+  border-radius: 5px;
+  padding: 1px 5px;
+}
 .pc-addmenu-item {
   display: flex;
   align-items: center;
-  gap: 9px;
+  gap: 11px;
   border: none;
   background: none;
-  border-radius: 8px;
-  padding: 8px 10px;
-  color: rgba(255, 255, 255, 0.88);
+  border-radius: 10px;
+  padding: 7px 10px;
+  color: #1c2030;
   font-size: 12.5px;
   text-align: left;
   cursor: pointer;
+  transition: background 0.13s ease, box-shadow 0.13s ease;
 }
-.pc-addmenu-item:hover { background: rgba(255, 255, 255, 0.12); }
-.pc-addmenu-item svg { width: 15px; height: 15px; flex: none; opacity: 0.8; }
+.pc-addmenu-item:hover,
+.pc-addmenu-item.is-active {
+  background: linear-gradient(180deg, rgba(31, 35, 65, 0.05), rgba(31, 35, 65, 0.022));
+  box-shadow: inset 0 0 0 1px rgba(31, 35, 65, 0.055);
+}
+.pc-addmenu-item svg {
+  width: 16px;
+  height: 16px;
+  flex: none;
+  stroke-width: 1.5;
+  color: var(--tint, var(--text-secondary));
+  transition: transform 0.14s ease;
+}
+.pc-addmenu-item:hover svg,
+.pc-addmenu-item.is-active svg { transform: scale(1.09); }
 .pc-addmenu-item span { flex: none; }
 .pc-addmenu-item small {
   flex: 1;
   font-size: 10.5px;
-  color: rgba(255, 255, 255, 0.45);
+  color: rgba(31, 35, 65, 0.44);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+  transition: opacity 0.13s ease;
+}
+.pc-addmenu-item:hover small,
+.pc-addmenu-item.is-active small { opacity: 0.62; }
+.pc-addmenu-go {
+  flex: none;
+  display: flex;
+  align-items: center;
+  color: #007aff;
+  opacity: 0;
+  transform: translateX(-4px);
+  transition: opacity 0.14s ease, transform 0.14s ease;
+}
+.pc-addmenu-item:hover .pc-addmenu-go,
+.pc-addmenu-item.is-active .pc-addmenu-go { opacity: 0.85; transform: translateX(0); }
+.pc-addmenu-go svg { width: 13px; height: 13px; }
+.pc-addmenu-foot {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 6px 10px 3px;
+  margin-top: 3px;
+  border-top: 1px solid rgba(31, 35, 65, 0.07);
+  font-size: 9.5px;
+  color: rgba(31, 35, 65, 0.42);
+}
+.pc-addmenu-foot span { display: flex; align-items: center; gap: 2px; }
+.pc-addmenu-foot kbd {
+  font-family: inherit;
+  font-size: 8.5px;
+  font-weight: 600;
+  color: rgba(31, 35, 65, 0.5);
+  background: rgba(255, 255, 255, 0.9);
+  border: 1px solid rgba(31, 35, 65, 0.14);
+  border-bottom-width: 2px;
+  border-radius: 4px;
+  padding: 0 4px;
+  margin-right: 2px;
+}
+/* 暗色主题：同工艺的墨玻璃（近实心渐变 + 亮缘描边 + 深投影）。 */
+[data-theme="dark"] .pc-addmenu {
+  background:
+    linear-gradient(180deg, #23252c, #1b1c22) padding-box,
+    linear-gradient(180deg, rgba(255, 255, 255, 0.14), rgba(255, 255, 255, 0.05)) border-box;
+  box-shadow:
+    0 1px 2px rgba(0, 0, 0, 0.3),
+    0 12px 32px rgba(0, 0, 0, 0.4),
+    0 36px 90px rgba(0, 0, 0, 0.55),
+    inset 0 1px 0 rgba(255, 255, 255, 0.08);
+}
+[data-theme="dark"] .pc-addmenu-search {
+  background: rgba(255, 255, 255, 0.06);
+  border-color: rgba(255, 255, 255, 0.09);
+  box-shadow: inset 0 1px 2px rgba(0, 0, 0, 0.3);
+  color: #eef0f3;
+}
+[data-theme="dark"] .pc-addmenu-search:focus-within {
+  background: rgba(255, 255, 255, 0.09);
+  border-color: rgba(64, 140, 255, 0.65);
+  box-shadow: 0 0 0 3px rgba(0, 122, 255, 0.22), inset 0 1px 2px rgba(0, 0, 0, 0.2);
+}
+[data-theme="dark"] .pc-addmenu-search svg { color: rgba(255, 255, 255, 0.42); }
+[data-theme="dark"] .pc-addmenu-search input::placeholder { color: rgba(255, 255, 255, 0.36); }
+[data-theme="dark"] .pc-addmenu-esc {
+  color: rgba(255, 255, 255, 0.5);
+  background: rgba(255, 255, 255, 0.08);
+  border-color: rgba(255, 255, 255, 0.16);
+}
+[data-theme="dark"] .pc-addmenu-item { color: #eef0f3; }
+[data-theme="dark"] .pc-addmenu-item:hover,
+[data-theme="dark"] .pc-addmenu-item.is-active {
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.07), rgba(255, 255, 255, 0.03));
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.07);
+}
+[data-theme="dark"] .pc-addmenu-item svg { color: var(--tint, rgba(255, 255, 255, 0.75)); }
+[data-theme="dark"] .pc-addmenu-item small { color: rgba(255, 255, 255, 0.45); }
+[data-theme="dark"] .pc-addmenu-go { color: #4da3ff; }
+[data-theme="dark"] .pc-addmenu-foot {
+  border-top-color: rgba(255, 255, 255, 0.08);
+  color: rgba(255, 255, 255, 0.45);
+}
+[data-theme="dark"] .pc-addmenu-foot kbd {
+  color: rgba(255, 255, 255, 0.55);
+  background: rgba(255, 255, 255, 0.07);
+  border-color: rgba(255, 255, 255, 0.16);
 }
 
 /* ── 玻璃 overlay 控件 ── */
