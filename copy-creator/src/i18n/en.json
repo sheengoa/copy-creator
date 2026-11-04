@@ -943,7 +943,6 @@
     "cancelGen": "Cancel",
     "genModelLabel": "Model",
     "genSizeLabel": "Resolution",
-    "genSizeApprox": "~",
     "genSizeAutoHint": "Follow model",
     "genCountLabel": "Count",
     "genCountSummary": "{{count}} images",
