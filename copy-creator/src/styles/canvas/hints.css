@@ -20,11 +20,16 @@
   flex: 1;
 }
 
-/* 深玻璃小胶囊：与节点体同一语言（毛玻璃/0.5px 细环），fixed
+/* 深色小胶囊：与节点体同一语言（99px 全胶囊圆角 + 0.5px 细环），fixed
    定位 portal 到 body——不随画布缩放、不被节点滚动区裁切。
    全胶囊圆角（2026-11-04）：8px 在矮盒子上读不出圆弧，用户观测
    「张数」「选择预设」圆角观感不一致，改 99px 端部全圆后短长文案
-   均为明确胶囊形，单一来源天然统一。 */
+   均为明确胶囊形，单一来源天然统一。
+   纯色底（2026-11-04 二轮）：毛玻璃 backdrop-filter 与 border-radius
+   组合在 WebView2 真机 GPU 合成路径下存在圆角裁剪失效的已知问题类
+   （同一 Chromium 版本、不同 GPU/驱动即表现分叉——验证环境胶囊、
+   真机方角），伪影恰为方角；胶囊底色原为 92% 不透明深色、毛玻璃
+   视觉上几乎不可感，改纯色根除该类伪影，观感无差。 */
 .fc-hint {
   position: fixed;
   z-index: 1200;
@@ -32,9 +37,7 @@
   max-width: 260px;
   padding: 7px 12px;
   border-radius: 99px;
-  background: rgba(30, 32, 38, 0.92);
-  backdrop-filter: blur(16px) saturate(1.6);
-  -webkit-backdrop-filter: blur(16px) saturate(1.6);
+  background: #26282e;
   color: #f2f3f5;
   font-size: 11.5px;
   line-height: 1.25;
@@ -74,7 +77,7 @@
 }
 
 [data-theme="dark"] .fc-hint {
-  background: rgba(64, 66, 74, 0.94);
+  background: #40424a;
 }
 
 /* 图标按钮：文字按钮的图标形态（图标居中的等高胶囊）。 */
