@@ -1185,6 +1185,9 @@ pub(crate) fn ensure_schema(conn: &Connection) -> Result<(), Box<dyn std::error:
     // （ensure_column 存在即跳过）。与「关键列存在性补齐」同模式——
     // 版本号前滚后迁移不重试，列补齐必须每次启动执行。
     ensure_column(conn, "project_characters", "reference_paths", "TEXT NOT NULL DEFAULT '[]'");
+    // 角色音色（详情窗音色行，工程视图节点化 2026-11-05 阶段 D）：
+    // 旧库幂等补列，存量行回填空串（无音色）。
+    ensure_column(conn, "project_characters", "voice_path", "TEXT NOT NULL DEFAULT ''");
     ensure_column(conn, "project_shots", "status", "TEXT NOT NULL DEFAULT 'none'");
     ensure_column(conn, "project_shots", "camera", "TEXT NOT NULL DEFAULT ''");
     ensure_column(conn, "project_shots", "duration", "TEXT NOT NULL DEFAULT ''");

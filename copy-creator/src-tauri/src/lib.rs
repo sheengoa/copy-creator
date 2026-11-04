@@ -642,6 +642,7 @@ pub fn run() {
             db::project_set_episode_characters,
             db::project_list_characters,
             db::project_create_character,
+            db::project_set_character_voice,
             db::project_update_character,
             db::project_delete_character,
             db::project_list_locations,

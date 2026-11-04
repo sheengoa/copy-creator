@@ -7439,6 +7439,7 @@ mod project_tests {
         crate::db::ensure_schema(&conn).unwrap();
         for (table, column) in [
             ("project_characters", "reference_paths"),
+            ("project_characters", "voice_path"),
             ("project_shots", "status"),
             ("project_shots", "camera"),
             ("project_shots", "duration"),
@@ -7499,6 +7500,41 @@ mod project_tests {
                 "{table} 未登记进 MIGRATED_BUSINESS_TABLES"
             );
         }
+    }
+
+    #[test]
+    fn character_voice_path_roundtrip() {
+        // 角色音色（详情窗音色行）：set_character_voice 只改音色列；读回
+        // 带出 voice_path；空串清除（选择器的「清除」语义）。
+        let conn = project_conn();
+        conn.execute(
+            "INSERT INTO project_characters (id, name, role_tag, bio, prompt, avatar_path, created_at, updated_at) \
+             VALUES ('c1', '小雨', '', '', '', '', '2026-01-01', '2026-01-01')",
+            [],
+        )
+        .unwrap();
+        crate::db::project_set_character_voice_conn(&conn, "c1", "voices/小雨-清冷女声.wav").unwrap();
+        let (voice_path, updated_at): (String, String) = conn
+            .query_row(
+                "SELECT voice_path, updated_at FROM project_characters WHERE id = 'c1'",
+                [],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )
+            .unwrap();
+        assert_eq!(voice_path, "voices/小雨-清冷女声.wav");
+        assert!(updated_at.as_str() >= "2026-01-01");
+        // 清除：回空串。
+        crate::db::project_set_character_voice_conn(&conn, "c1", "").unwrap();
+        let voice_path: String = conn
+            .query_row(
+                "SELECT voice_path FROM project_characters WHERE id = 'c1'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(voice_path, "");
+        // 不存在的角色：更新零行，不报错（幂等）。
+        crate::db::project_set_character_voice_conn(&conn, "ghost", "x.wav").unwrap();
     }
 
     #[test]

@@ -43,6 +43,8 @@ export interface ProjectCharacter {
   prompt: string;
   avatar_path: string;
   reference_paths: string;
+  /** 音色文件（相对库根；空 = 未设置）。详情窗音色行选择/清除。 */
+  voice_path?: string;
   episode_ref_count?: number;
   created_at: string;
   updated_at: string;
@@ -242,9 +244,11 @@ interface ProjectStoreState {
 
   loadCharacters: () => Promise<void>;
   saveCharacter: (
-    payload: { id?: string; name: string; role_tag: string; bio: string; prompt: string; avatar_path: string; reference_paths: string },
+    payload: { id?: string; name: string; role_tag: string; bio: string; prompt: string; avatar_path: string; reference_paths: string; voice_path?: string },
   ) => Promise<boolean>;
   deleteCharacter: (id: string) => Promise<void>;
+  /** 只改角色音色（详情窗音色行选择/清除；传空串清除）。 */
+  setCharacterVoice: (id: string, voicePath: string) => Promise<void>;
 
   loadLocations: () => Promise<void>;
   saveLocation: (
@@ -662,6 +666,7 @@ export const useProjectStore = create<ProjectStoreState>((set, get) => ({
       prompt: payload.prompt,
       avatarPath: payload.avatar_path,
       referencePaths: payload.reference_paths,
+      voicePath: payload.voice_path ?? "",
     };
     try {
       if (payload.id) {
@@ -677,6 +682,15 @@ export const useProjectStore = create<ProjectStoreState>((set, get) => ({
     } catch (error) {
       console.error("save character failed:", error);
       return false;
+    }
+  },
+
+  setCharacterVoice: async (id, voicePath) => {
+    try {
+      await invoke("project_set_character_voice", { id, voicePath });
+      await get().loadCharacters();
+    } catch (error) {
+      console.error("project_set_character_voice:", error);
     }
   },
 

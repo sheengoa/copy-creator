@@ -46,6 +46,7 @@ CREATE TABLE IF NOT EXISTS project_characters (
     prompt TEXT NOT NULL DEFAULT '',
     avatar_path TEXT NOT NULL DEFAULT '',
     reference_paths TEXT NOT NULL DEFAULT '[]',
+    voice_path TEXT NOT NULL DEFAULT '',
     created_at TEXT NOT NULL,
     updated_at TEXT NOT NULL
 );
@@ -284,8 +285,9 @@ fn character_row(row: &rusqlite::Row) -> rusqlite::Result<serde_json::Value> {
         "prompt": row.get::<_, String>(4)?,
         "avatar_path": row.get::<_, String>(5)?,
         "reference_paths": row.get::<_, String>(6)?,
-        "created_at": row.get::<_, String>(7)?,
-        "updated_at": row.get::<_, String>(8)?,
+        "voice_path": row.get::<_, String>(7)?,
+        "created_at": row.get::<_, String>(8)?,
+        "updated_at": row.get::<_, String>(9)?,
     }))
 }
 
@@ -408,7 +410,7 @@ fn segment_row(row: &rusqlite::Row) -> rusqlite::Result<serde_json::Value> {
 const EPISODE_COLS: &str =
     "id, show_id, number, title, status, script_path, sort_order, created_at, updated_at, output_asset_id";
 const CHARACTER_COLS: &str =
-    "id, name, role_tag, bio, prompt, avatar_path, reference_paths, created_at, updated_at";
+    "id, name, role_tag, bio, prompt, avatar_path, reference_paths, voice_path, created_at, updated_at";
 const LOCATION_COLS: &str =
     "id, name, int_ext, time_hint, bio, prompt, ref_path, created_at, updated_at";
 const PROP_COLS: &str = "id, name, bio, prompt, ref_path, created_at, updated_at";
@@ -1036,6 +1038,7 @@ pub fn project_create_character(
     prompt: String,
     avatar_path: String,
     reference_paths: String,
+    voice_path: String,
 ) -> Result<serde_json::Value, String> {
     let name = name.trim().to_string();
     if name.is_empty() {
@@ -1044,14 +1047,15 @@ pub fn project_create_character(
     let id = uuid::Uuid::new_v4().to_string();
     let now = project_now();
     let avatar_path = normalize_project_path(&avatar_path);
+    let voice_path = normalize_project_path(&voice_path);
     {
         let state = app.state::<DbState>();
         let conn = state.conn.lock().map_err(|e| e.to_string())?;
         conn.execute(
             "INSERT INTO project_characters \
-             (id, name, role_tag, bio, prompt, avatar_path, reference_paths, created_at, updated_at) \
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
-            params![id, name, role_tag, bio, prompt, avatar_path, reference_paths, &now, &now],
+             (id, name, role_tag, bio, prompt, avatar_path, reference_paths, voice_path, created_at, updated_at) \
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)",
+            params![id, name, role_tag, bio, prompt, avatar_path, reference_paths, voice_path, &now, &now],
         )
         .map_err(|e| e.to_string())?;
     }
@@ -1059,7 +1063,7 @@ pub fn project_create_character(
     Ok(serde_json::json!({
         "id": id, "name": name, "role_tag": role_tag, "bio": bio,
         "prompt": prompt, "avatar_path": avatar_path,
-        "reference_paths": reference_paths,
+        "reference_paths": reference_paths, "voice_path": voice_path,
         "created_at": now, "updated_at": now, "episode_ref_count": 0,
     }))
 }
@@ -1074,6 +1078,7 @@ pub fn project_update_character(
     prompt: String,
     avatar_path: String,
     reference_paths: String,
+    voice_path: String,
 ) -> Result<(), String> {
     let name = name.trim().to_string();
     if name.is_empty() {
@@ -1083,12 +1088,38 @@ pub fn project_update_character(
         let state = app.state::<DbState>();
         let conn = state.conn.lock().map_err(|e| e.to_string())?;
         conn.execute(
-            "UPDATE project_characters SET name = ?1, role_tag = ?2, bio = ?3, prompt = ?4, avatar_path = ?5, reference_paths = ?6, updated_at = ?7 WHERE id = ?8",
-            params![name, role_tag, bio, prompt, normalize_project_path(&avatar_path), reference_paths, project_now(), id],
+            "UPDATE project_characters SET name = ?1, role_tag = ?2, bio = ?3, prompt = ?4, avatar_path = ?5, reference_paths = ?6, voice_path = ?7, updated_at = ?8 WHERE id = ?9",
+            params![name, role_tag, bio, prompt, normalize_project_path(&avatar_path), reference_paths, normalize_project_path(&voice_path), project_now(), id],
         )
         .map_err(|e| e.to_string())?;
     }
     emit_project_changed(&app);
+    Ok(())
+}
+
+/// 只改角色音色（详情窗音色行的选择/清除，不整行重写人设）。
+#[tauri::command]
+pub fn project_set_character_voice(app: AppHandle, id: String, voice_path: String) -> Result<(), String> {
+    {
+        let state = app.state::<DbState>();
+        let conn = state.conn.lock().map_err(|e| e.to_string())?;
+        project_set_character_voice_conn(&conn, &id, &voice_path)?;
+    }
+    emit_project_changed(&app);
+    Ok(())
+}
+
+/// 音色落库内核（命令与迁移/往返单测共用）：幂等更新，角色不存在时零行。
+pub(crate) fn project_set_character_voice_conn(
+    conn: &Connection,
+    id: &str,
+    voice_path: &str,
+) -> Result<(), String> {
+    conn.execute(
+        "UPDATE project_characters SET voice_path = ?1, updated_at = ?2 WHERE id = ?3",
+        params![normalize_project_path(voice_path), project_now(), id],
+    )
+    .map_err(|e| e.to_string())?;
     Ok(())
 }
 

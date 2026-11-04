@@ -201,8 +201,8 @@ export const db = {
     },
   ],
   characters: [
-    { id: "char-1", name: "小雨", role_tag: "主角", bio: "", prompt: "", avatar_path: "", reference_paths: "", created_at: ts(), updated_at: ts() },
-    { id: "char-2", name: "老周", role_tag: "配角", bio: "", prompt: "", avatar_path: "", reference_paths: "", created_at: ts(), updated_at: ts() },
+    { id: "char-1", name: "小雨", role_tag: "主角", bio: "", prompt: "", avatar_path: "", reference_paths: "", voice_path: "tones/xiaoyu-qingleng.wav", created_at: ts(), updated_at: ts() },
+    { id: "char-2", name: "老周", role_tag: "配角", bio: "", prompt: "", avatar_path: "", reference_paths: "", voice_path: "", created_at: ts(), updated_at: ts() },
   ],
   locations: [
     { id: "loc-1", name: "废弃地铁站", int_ext: "int", time_hint: "night", bio: "", prompt: "", ref_path: "", created_at: ts(), updated_at: ts() },

@@ -98,8 +98,32 @@ function handleInvoke(cmd: string, args: Record<string, unknown>): unknown {
     case "project_list_props":
       return clone(db.props);
     case "project_create_character":
-      db.characters.push({ id: nextId("char"), name: String(args.name ?? ""), role_tag: String(args.roleTag ?? ""), bio: String(args.bio ?? ""), prompt: String(args.prompt ?? ""), avatar_path: String(args.avatarPath ?? ""), reference_paths: String(args.referencePaths ?? ""), created_at: ts(), updated_at: ts() });
+      db.characters.push({ id: nextId("char"), name: String(args.name ?? ""), role_tag: String(args.roleTag ?? ""), bio: String(args.bio ?? ""), prompt: String(args.prompt ?? ""), avatar_path: String(args.avatarPath ?? ""), reference_paths: String(args.referencePaths ?? ""), voice_path: String(args.voicePath ?? ""), created_at: ts(), updated_at: ts() });
       return null;
+    case "project_update_character":
+      {
+        const c = db.characters.find((row) => row.id === args.id);
+        if (c) {
+          c.name = String(args.name ?? c.name);
+          c.role_tag = String(args.roleTag ?? c.role_tag);
+          c.bio = String(args.bio ?? c.bio);
+          c.prompt = String(args.prompt ?? c.prompt);
+          c.avatar_path = String(args.avatarPath ?? c.avatar_path);
+          c.reference_paths = String(args.referencePaths ?? c.reference_paths);
+          c.voice_path = String(args.voicePath ?? c.voice_path ?? "");
+          c.updated_at = ts();
+        }
+        return null;
+      }
+    case "project_set_character_voice":
+      {
+        const c = db.characters.find((row) => row.id === args.id);
+        if (c) {
+          c.voice_path = String(args.voicePath ?? "");
+          c.updated_at = ts();
+        }
+        return null;
+      }
     case "project_create_location":
       db.locations.push({ id: nextId("loc"), name: String(args.name ?? ""), int_ext: String(args.intExt ?? ""), time_hint: String(args.timeHint ?? ""), bio: String(args.bio ?? ""), prompt: String(args.prompt ?? ""), ref_path: String(args.refPath ?? ""), created_at: ts(), updated_at: ts() });
       return null;
