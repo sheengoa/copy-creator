@@ -20,7 +20,9 @@
   display: flex;
   flex-direction: column;
   border-radius: 16px;
-  background: var(--bg-card);
+  /* 面板级不透明底：--bg-card 在暗色下是 6% 玻璃白，弹窗浮在画布上时
+     节点透底可见（用户截图）——弹窗必须用不透明的 panel-bg。 */
+  background: var(--panel-bg);
   border: 0.5px solid var(--separator);
   box-shadow: 0 24px 64px rgba(10, 14, 28, 0.28);
   overflow: hidden;
@@ -81,19 +83,19 @@
 }
 .pdetail-sec-c {
   font-size: 11px;
-  color: var(--text-tertiary);
+  color: var(--text-secondary);
 }
 .pdetail-sec-fold {
   margin-left: auto;
   width: 20px;
   height: 20px;
   border-radius: 6px;
-  color: var(--text-tertiary);
+  color: var(--text-secondary);
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  font-size: 10px;
 }
+.pdetail-sec-fold svg { width: 12px; height: 12px; }
 .pdetail-sec-fold:hover { background: var(--chip-bg); color: var(--text-primary); }
 .pdetail-dot {
   width: 8px;
@@ -123,7 +125,7 @@
   padding: 14px 10px;
   border: 1px dashed var(--separator);
   border-radius: 10px;
-  color: var(--text-tertiary);
+  color: var(--text-secondary);
   font-size: 11.5px;
 }
 .pdetail-empty svg { width: 14px; height: 14px; }
@@ -196,7 +198,7 @@
 .pdetail-voice-act {
   flex: none;
   font-size: 11px;
-  color: var(--text-tertiary);
+  color: var(--text-secondary);
   padding: 3px 6px;
   border-radius: 6px;
 }
@@ -238,7 +240,11 @@
   border-radius: 8px;
   background: var(--chip-bg);
 }
-.pdetail-row.is-pending { opacity: 0.72; }
+/* 暗淡度收敛（2026-11-06）：占位行此前 0.72 整行透明叠加三级灰文字，
+   亮色主题下读起来像整窗禁用（用户反馈）；保留「未装入」的弱化语义，
+   但正文与按钮保持可读对比。 */
+.pdetail-row.is-pending { opacity: 0.8; }
+.pdetail-row.is-pending .pdetail-row-name { font-style: italic; }
 .pdetail-row-name {
   flex: 1;
   min-width: 0;
@@ -258,7 +264,7 @@
 .pdetail-row-x {
   flex: none;
   font-size: 11px;
-  color: var(--text-tertiary);
+  color: var(--text-secondary);
   padding: 2px 7px;
   border-radius: 6px;
 }
@@ -270,7 +276,6 @@
   border-radius: 12px;
   overflow: hidden;
   margin-top: 8px;
-  background: var(--bg-card);
 }
 .pdetail-attach-tabs {
   display: flex;
@@ -353,7 +358,8 @@
   border-radius: 9px;
   border: 1px solid var(--separator);
   font-size: 12px;
-  color: var(--text-secondary);
+  font-weight: 500;
+  color: var(--text-primary);
 }
 .pdetail-foot-btn:hover {
   border-color: var(--accent);

@@ -468,8 +468,9 @@ export default function ProjectCanvasShell({
       return index + 1;
     },
     onPickForShot,
-    // 场景/镜头表单与提示词库选面板随阶段 E1/D 接回，先接空实现。
-    setShotForm: () => {},
+    // 场景/镜头表单与提示词库选面板阶段 E1/D 已接回：镜头卡编辑钮与
+    // 纸片库选经 ctx 到真实状态（此前空实现=镜头编辑/纸片双击无响应）。
+    setShotForm: setShotForm,
     deleteShot,
     detailFor,
     setDetailFor,
@@ -487,8 +488,10 @@ export default function ProjectCanvasShell({
       else void setEpisodeProps(episodeId, (overview.episode.prop_ids ?? []).filter((v) => v !== entityId));
     },
     removeEntityPh: (id) => data.persistEntityPhs(data.entityPhs.filter((p) => p.id !== id)),
-    setPromptPickTarget: () => {},
-    setPromptPickOpen: () => {},
+    // 纸片双击/工具钮的库选入口：接真实状态（此前是空实现——纸片双击
+    // 与工具钮全部无响应，用户报告「双击弹窗都有问题」的根源之一）。
+    setPromptPickTarget: setPromptPickTarget,
+    setPromptPickOpen: setPromptPickOpen,
     moveSegment: (id, dir) => void moveSegment(id, dir < 0 ? -1 : 1),
     removeSegment: (id) => void removeSegment(id),
     outputSourceLabel: null,
@@ -568,6 +571,8 @@ export default function ProjectCanvasShell({
     characters,
     locations,
     props,
+    prompts,
+    promptPhs: data.promptPhs,
     setVoice: (id, voicePath) => void setCharacterVoice(id, voicePath),
     setAvatar: (character, refPath) => {
       void saveCharacter({
@@ -613,6 +618,11 @@ export default function ProjectCanvasShell({
       entities.forEach((e) => {
         linkNode(episodeId, e.kind, e.id, segmentId, port as Parameters<typeof linkNode>[4], "");
       });
+    },
+    reopenPromptPick: (phKey) => {
+      setDetailFor(null);
+      setPromptPickTarget(phKey);
+      setPromptPickOpen(true);
     },
     onClose: closeDetail,
   };
@@ -677,7 +687,7 @@ export default function ProjectCanvasShell({
               setScriptPickOpen(true);
             } else if (key.startsWith("prompt:")) {
               const ph = data.promptPhs.find((item) => `prompt:${item.id}` === key);
-              if (ph?.promptId) setDetailFor({ kind: "promptPh", id: ph.id } as never);
+              if (ph?.promptId) setDetailFor({ kind: "promptPh", id: ph.id });
               else {
                 setPromptPickTarget(key);
                 setPromptPickOpen(true);
@@ -685,7 +695,7 @@ export default function ProjectCanvasShell({
             }
           }}
         />
-        {detailFor && (detailFor.kind === "info" || detailFor.kind === "segment" || detailFor.kind === "entityPh") && (
+        {detailFor && (
           <ProjectDetailWindow target={detailFor} ops={detailOps} />
         )}
       </ProjectCanvasContext.Provider>

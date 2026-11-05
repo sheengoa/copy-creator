@@ -31,11 +31,14 @@ function makeOps(overrides: Partial<DetailWindowOps> = {}): DetailWindowOps {
     characters: [baseCharacter],
     locations: [],
     props: [],
+    prompts: [],
+    promptPhs: [],
     setVoice: vi.fn(),
     setAvatar: vi.fn(),
     loadEntity: vi.fn(),
     removeLink: vi.fn(),
     attachEntities: vi.fn(),
+    reopenPromptPick: vi.fn(),
     onClose: vi.fn(),
     ...overrides,
   };
@@ -122,5 +125,23 @@ describe("DetailWindow", () => {
     fireEvent.click(screen.getByText("旧怀表"));
     fireEvent.click(screen.getByText(/挂靠 1 项/));
     expect(attachEntities).toHaveBeenCalledWith("seg-1", "prop", [{ kind: "prop", id: "prop-9" }]);
+  });
+
+  it("提示词纸片详情：标题+全文只读展示，更换提示词路由 reopenPromptPick", () => {
+    const reopenPromptPick = vi.fn();
+    render(
+      <ProjectDetailWindow
+        target={{ kind: "promptPh", id: "ph-1" }}
+        ops={makeOps({
+          reopenPromptPick,
+          prompts: [{ id: "p-1", title: "末班车氛围", content: "地铁车厢内，冷白灯光闪烁。", category: "scene", file_path: "", created_at: "", updated_at: "" }],
+          promptPhs: [{ id: "ph-1", promptId: "p-1", x: 0, y: 0 }],
+        })}
+      />,
+    );
+    expect(screen.getByText("末班车氛围")).toBeTruthy();
+    expect(screen.getByText(/地铁车厢内，冷白灯光闪烁。/)).toBeTruthy();
+    fireEvent.click(screen.getByText("更换提示词"));
+    expect(reopenPromptPick).toHaveBeenCalledWith("prompt:ph-1");
   });
 });

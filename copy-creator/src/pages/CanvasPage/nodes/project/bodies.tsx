@@ -331,7 +331,7 @@ export function PromptPaperTools({ node }: { node: CanvasNode }) {
             ctx.setPromptPickTarget(node.id);
             ctx.setPromptPickOpen(true);
           } else {
-            ctx.setDetailFor({ kind: "promptPh", id: phId } as never);
+            ctx.setDetailFor({ kind: "promptPh", id: phId });
           }
         }}
       >

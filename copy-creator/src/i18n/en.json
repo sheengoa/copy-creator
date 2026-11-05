@@ -782,7 +782,13 @@
       "loadEntity": "Load entity from library",
       "empty": "Empty",
       "setAvatar": "Set as avatar",
-      "pendingPh": "Canvas placeholder (unloaded)"
+      "pendingPh": "Canvas placeholder (unloaded)",
+      "expand": "Expand",
+      "collapse": "Collapse",
+      "promptKind": "Prompt paper",
+      "promptChange": "Change prompt",
+      "promptTitleLabel": "Title",
+      "promptContentLabel": "Prompt content"
     }
   },
   "common": {

@@ -21,6 +21,10 @@ export const promptPaperDef: NodeDefinition = {
     ins: [],
     out: { mediaKind: "text", dataType: "prompt", color: PORT_COLORS.prompt },
   },
+  // 双击：空纸片开提示词库选，已挂接开提示词详情窗（Shell 按挂接态分派）。
+  onDoubleClick: (node, services) => {
+    services.openNodeDetail?.(node);
+  },
   Component: PromptPaperBody,
   ToolsExtra: PromptPaperTools,
 };

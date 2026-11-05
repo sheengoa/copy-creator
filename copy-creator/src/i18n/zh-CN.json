@@ -782,7 +782,13 @@
       "loadEntity": "从库中装入实体",
       "empty": "暂无内容",
       "setAvatar": "设为头像",
-      "pendingPh": "画布占位（未装入）"
+      "pendingPh": "画布占位（未装入）",
+      "expand": "展开",
+      "collapse": "折叠",
+      "promptKind": "提示词纸片",
+      "promptChange": "更换提示词",
+      "promptTitleLabel": "标题",
+      "promptContentLabel": "提示词内容"
     }
   },
   "common": {

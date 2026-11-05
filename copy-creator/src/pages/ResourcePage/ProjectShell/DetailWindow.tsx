@@ -7,12 +7,13 @@ import type {
   ProjectCharacter,
   ProjectLocation,
   ProjectNodeLink,
+  ProjectPrompt,
   ProjectProp,
   ProjectSegment,
 } from "../../../stores/projectStore";
 import { joinLibraryPath } from "../../../domain/projectView";
 import { ResourceFileImage, ResourceImage, ResourceVideoPoster } from "../ResourceMedia";
-import type { EntityPhKind, PendingLink } from "./types";
+import type { EntityPhKind, PendingLink, PromptPh } from "./types";
 import { MediaPlayback } from "../../../components/MediaPlayback";
 
 // 工程节点详情窗（工程视图节点化 2026-11-05 阶段 D，方案 §D2-D5）：
@@ -26,7 +27,8 @@ import { MediaPlayback } from "../../../components/MediaPlayback";
 export type DetailTarget =
   | { kind: "info"; group: EntityPhKind; sourceKey: string }
   | { kind: "entityPh"; id: string; group: EntityPhKind }
-  | { kind: "segment"; id: string };
+  | { kind: "segment"; id: string }
+  | { kind: "promptPh"; id: string };
 
 export interface DetailWindowOps {
   libraryRoot: string;
@@ -37,6 +39,8 @@ export interface DetailWindowOps {
   characters: ProjectCharacter[];
   locations: ProjectLocation[];
   props: ProjectProp[];
+  prompts: ProjectPrompt[];
+  promptPhs: PromptPh[];
   /** 音色行：选择/清除（set_character_voice）。 */
   setVoice(id: string, voicePath: string): void;
   /** 设头像（参考图网格的「设为头像」）。 */
@@ -47,6 +51,8 @@ export interface DetailWindowOps {
   removeLink(row: { pending: boolean; fromKey: string; toSegment: string; toPort: string; ownerKey: string; rowId?: string }): void;
   /** 批量挂靠（多选实体逐条落 node_link）。 */
   attachEntities(segmentId: string, port: string, entities: Array<{ kind: EntityPhKind; id: string }>): void;
+  /** 提示词纸片「更换提示词」：关详情窗、开提示词库选浮层（同一纸片目标）。 */
+  reopenPromptPick(phKey: string): void;
   onClose(): void;
 }
 
@@ -91,7 +97,9 @@ export function DetailWindow({ title, accent, children, foot, onClose }: {
   );
 }
 
-/** 通用段落头：段名 + 计数 + 右侧附加（折叠箭头/懒加载提示）。 */
+/** 通用段落头：段名 + 计数 + 右侧附加（折叠箭头/懒加载提示）。折叠箭头
+ *  用 SVG chevron（U+25B8/25BE 字符三角在部分 Windows WebView 字体栈里
+ *  渲染成 tofu 方框——用户实测截图）。 */
 export function DetailSection({ label, count, extra, children, foldable, defaultFold }: {
   label: string;
   count?: React.ReactNode;
@@ -100,6 +108,7 @@ export function DetailSection({ label, count, extra, children, foldable, default
   foldable?: boolean;
   defaultFold?: boolean;
 }) {
+  const { t } = useTranslation();
   const [folded, setFolded] = useState(!!defaultFold);
   return (
     <section className="pdetail-sec">
@@ -107,8 +116,8 @@ export function DetailSection({ label, count, extra, children, foldable, default
         <span className="pdetail-sec-t">{label}</span>
         {count != null && <span className="pdetail-sec-c">{count}</span>}
         {foldable ? (
-          <button type="button" className="pdetail-sec-fold" onClick={() => setFolded((v) => !v)}>
-            {folded ? "▸" : "▾"}
+          <button type="button" className="pdetail-sec-fold" aria-label={t(folded ? "project.detail.expand" : "project.detail.collapse")} onClick={() => setFolded((v) => !v)}>
+            {folded ? Icons.chevronRight : Icons.chevronDown}
           </button>
         ) : null}
         {extra}
@@ -477,5 +486,41 @@ function EntityPhDetail({ id, group, ops }: { id: string; group: EntityPhKind; o
 export function ProjectDetailWindow({ target, ops }: { target: DetailTarget; ops: DetailWindowOps }) {
   if (target.kind === "segment") return <SegmentDetail segmentId={target.id} ops={ops} />;
   if (target.kind === "entityPh") return <EntityPhDetail id={target.id} group={target.group} ops={ops} />;
+  if (target.kind === "promptPh") return <PromptPhDetail id={target.id} ops={ops} />;
   return <EntityDetail group={target.group} sourceKey={target.sourceKey} ops={ops} />;
+}
+
+/** 提示词纸片详情：挂接的提示词标题 + 全文只读（纸片节点小窗看不全），
+ *  动作区「更换提示词」关窗重开库选浮层。 */
+function PromptPhDetail({ id, ops }: { id: string; ops: DetailWindowOps }) {
+  const { t } = useTranslation();
+  const ph = ops.promptPhs.find((item) => item.id === id);
+  const prompt = ph ? ops.prompts.find((item) => item.id === ph.promptId) : undefined;
+  return (
+    <DetailWindow
+      title={<><span className="pdetail-kind-label">{t("project.detail.promptKind")}</span> · {prompt?.title ?? t("project.canvas.promptEmpty")}</>}
+      accent="#22d3ee"
+      onClose={ops.onClose}
+      foot={(
+        <button type="button" className="pdetail-foot-btn" onClick={() => ops.reopenPromptPick(`prompt:${id}`)}>
+          {t("project.detail.promptChange")}
+        </button>
+      )}
+    >
+      {prompt ? (
+        <>
+          <DetailSection label={t("project.detail.promptTitleLabel")}>
+            <p className="pdetail-text">{prompt.title}</p>
+          </DetailSection>
+          <DetailSection label={t("project.detail.promptContentLabel")}>
+            <p className="pdetail-text pdetail-text-prompt">{prompt.content || t("project.detail.empty")}</p>
+          </DetailSection>
+        </>
+      ) : (
+        <DetailSection label={t("project.detail.promptContentLabel")}>
+          <div className="pdetail-empty">{Icons.link}{t("project.canvas.promptEmpty")}</div>
+        </DetailSection>
+      )}
+    </DetailWindow>
+  );
 }

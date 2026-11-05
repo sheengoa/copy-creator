@@ -22,5 +22,9 @@ export const scriptPaperDef: NodeDefinition = {
     ins: [],
     out: { mediaKind: "text", dataType: "text", color: PORT_COLORS.script },
   },
+  // 双击挑剧本文件（空纸片挂接 / 已挂接重选），经 services 通道由 Shell 分派。
+  onDoubleClick: (node, services) => {
+    services.openNodeDetail?.(node);
+  },
   Component: ScriptPaperBody,
 };
