@@ -43,7 +43,7 @@ import { upstreamMediaOf as upstreamMediaQuery } from "./nodes/upstream";
 import type { NodeServices } from "./nodes/types";
 import type { ViewState } from "./engine/useViewport";
 
-// 自由生图工作流画布（画布区方案 3.3 + 节点体系 v2）：以 ProjectCanvas 为
+// 自由生图工作流画布（画布区方案 3.3 + 节点体系 v2）：以旧 ProjectCanvas（已退役）为
 // 基座 fork——引擎框架（视口/连线/切线/框选/分组/菜单）自工程画布搬运；
 // 连线为「类型化端口」语义（用户 2026-10-31 定案）：生成/加载/输出三类
 // 链路，多输入口 + 口名常显 + 类型匹配校验（accepts 矩阵），生成节点的
@@ -92,7 +92,7 @@ export default function FreeCanvas({ canvasId, renderWires, onOpenNodeDetail, ov
   }, [selKeys]);
 
   // ── 视口引擎 + 节点实测（engine/useViewport / useNodeMetrics；fork 自
-  //    ProjectCanvas，回灌对齐点不变） ──
+  //    旧 ProjectCanvas，已退役） ──
   const { vpRef, view, setView, vpSize, saveView, zoomAt, fitAll, fitAttemptedRef } = useViewport(nodes);
   const { nodeMetricsRef, boxOf, outPointOf, inPointOf } = useNodeMetrics(vpRef, view, nodes);
 

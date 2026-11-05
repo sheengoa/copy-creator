@@ -637,20 +637,15 @@ describe("架构守卫：领域规则必须全局共享", () => {
   it("规则 27：画布域源文件行数上限 1000（防大文件回潮）", () => {
     // 画布域全套：页面组合层、节点基座、引擎 hooks、渲染 layers、样式
     // 切片与测试。上限 1000 为硬上限（目标 700-800）；新增例外必须修改
-    // 本清单（= 强制过评审）。useGestures 是窗口级手势单 effect（fork 自
-    // ProjectCanvas 单体的对齐区），重拆会破坏回灌对照，显式豁免并在
-    // 文件头注明。
+    // 本清单（= 强制过评审）。
     // 路径相对 frontRoot（= src/）：walk 用 join(frontRoot, dir) 解析。
     const limits: Array<[string, number]> = [
       ["pages/CanvasPage", 1000],
-      ["ResourcePage/ProjectCanvas", 1000],
       ["styles/canvas", 1000],
       ["styles/project", 1000],
       ["dev/mock", 1000],
       ["dev/tauriMock.ts", 1000],
     ];
-    const exempt = (posix: string) =>
-      posix.endsWith("src/pages/ResourcePage/ProjectCanvas/engine/useGestures.ts");
     const offenders: string[] = [];
     const walk = (dir: string, limit: number) => {
       const full = join(frontRoot, dir);
@@ -671,8 +666,6 @@ describe("架构守卫：领域规则必须全局共享", () => {
         const isTest = entry.endsWith(".test.ts") || entry.endsWith(".test.tsx");
         if (!entry.endsWith(".ts") && !entry.endsWith(".tsx") && !isStyle) continue;
         if (isTest) continue;
-        const posix = toPosix(abs);
-        if (exempt(posix)) continue;
         const lines = readFileSync(abs, "utf8").split("\n").length;
         if (lines > limit) offenders.push(`${rel} = ${lines} 行`);
       }

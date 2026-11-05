@@ -1,8 +1,7 @@
 import type { CanvasLayoutEntry, CanvasNode } from "../../../stores/canvasStore";
 
 // 画布手势共享类型与常量（自 FreeCanvas.tsx 零改动搬运，2026-11-03 引擎
-// 拆分阶段 6a）。引擎框架 fork 自 ProjectCanvas——回灌对齐时按
-// ProjectCanvas.tsx 同名区段逐字节对照。
+// 拆分阶段 6a）。引擎框架 fork 自旧 ProjectCanvas（已退役）。
 
 export const ZOOM_MIN = 0.3;
 export const ZOOM_MAX = 2.2;

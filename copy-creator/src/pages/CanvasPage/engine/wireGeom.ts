@@ -2,11 +2,10 @@ import type { CanvasNode } from "../../../stores/canvasStore";
 import { NODE_FALLBACK_SIZE } from "../nodes/registry";
 
 // 连线几何纯函数（自 FreeCanvas.tsx 零改动搬运，2026-11-03 引擎拆分阶段
-// 6a）。贝塞尔路径 / 切线命中判定 fork 自 ProjectCanvas.tsx——回灌对齐
-// 时按 ProjectCanvas 同名函数逐字节对照。
+// 6a）。贝塞尔路径 / 切线命中判定 fork 自旧 ProjectCanvas.tsx（已退役）。
 
 // 线段相交（同横坐标单调判定，经典叉积法）——切线的扫过判定用。
-// （自 ProjectCanvas.tsx 零改动搬运）
+// （自旧 ProjectCanvas.tsx 零改动搬运）
 export const segsIntersect = (
   a1: { x: number; y: number }, a2: { x: number; y: number },
   b1: { x: number; y: number }, b2: { x: number; y: number },
@@ -47,7 +46,7 @@ export const segHitsPolyline = (
   return false;
 };
 
-/** ComfyUI 风格连线贝塞尔（自 ProjectCanvas.tsx 零改动搬运）。 */
+/** ComfyUI 风格连线贝塞尔（自旧 ProjectCanvas.tsx 零改动搬运）。 */
 export function wirePathD(a: { x: number; y: number }, b: { x: number; y: number }): string {
   const offset = Math.hypot(b.x - a.x, b.y - a.y) * 0.25;
   return `M ${a.x} ${a.y} C ${a.x + offset} ${a.y}, ${b.x - offset} ${b.y}, ${b.x} ${b.y}`;

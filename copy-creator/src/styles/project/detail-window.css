@@ -185,25 +185,6 @@
   padding: 8px 10px;
 }
 .pdetail-voice-empty .pdetail-voice-name { color: var(--text-tertiary); }
-.pdetail-voice-play {
-  flex: none;
-  width: 30px;
-  height: 30px;
-  border-radius: 50%;
-  border: 1px solid var(--separator);
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  color: var(--text-secondary);
-}
-.pdetail-voice-play:hover { border-color: var(--accent); color: var(--accent); }
-.pdetail-voice-play svg { width: 13px; height: 13px; }
-.pdetail-voice-wave {
-  flex: 1;
-  height: 22px;
-  border-radius: 6px;
-  background: repeating-linear-gradient(90deg, var(--separator) 0 2px, transparent 2px 6px);
-}
 .pdetail-voice-name {
   font-size: 11px;
   color: var(--text-secondary);

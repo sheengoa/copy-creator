@@ -13,11 +13,10 @@ import type { NodeMetrics } from "./useNodeMetrics";
 import type { ViewState } from "./useViewport";
 
 // 画布手势会话（自 FreeCanvas.tsx 零改动搬运，2026-11-03 引擎拆分阶段 6b）。
-// 引擎框架 fork 自 ProjectCanvas——按下分派（onViewportPointerDown）与窗口
+// 引擎框架 fork 自旧 ProjectCanvas（已退役）——按下分派（onViewportPointerDown）与窗口
 // 级 move/up/cancel 的分支结构、DOM 契约（.pc-node[data-key] / .pc-port
 // [data-port-id] / .pc-resize[data-corner] / .fc-vtl-strip 手势排除）、
-// 「闭包随渲染刷新重订阅」惯例全部保真；回灌对齐按 ProjectCanvas 同名
-// 区段逐字节对照。连线为类型化端口语义（accepts 矩阵匹配），见 nodes/registry。
+// 「闭包随渲染刷新重订阅」惯例全部保真。连线为类型化端口语义（accepts 矩阵匹配），见 nodes/registry。
 
 /** 双击空白的节点选择框状态（含连线续接意图）。 */
 export interface AddMenuState {

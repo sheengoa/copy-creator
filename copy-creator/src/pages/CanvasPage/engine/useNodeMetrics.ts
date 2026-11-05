@@ -6,7 +6,7 @@ import type { ViewState } from "./useViewport";
 import { nodeSize } from "./wireGeom";
 
 // 节点实测尺寸与端口位置（自 FreeCanvas.tsx 零改动搬运，2026-11-03 引擎
-// 拆分阶段 6b；fork 自 ProjectCanvas）。连线锚点跟随真实 DOM——
+// 拆分阶段 6b；fork 自旧 ProjectCanvas，已退役）。连线锚点跟随真实 DOM——
 // pc-port[data-port-id] 实测，常量只是首帧兜底。
 
 export interface NodeMetrics {

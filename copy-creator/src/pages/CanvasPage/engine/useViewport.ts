@@ -7,7 +7,7 @@ import { nodeSize } from "./wireGeom";
 
 // 视口引擎（自 FreeCanvas.tsx 零改动搬运，2026-11-03 引擎拆分阶段 6b）。
 // 平移/缩放状态、滚轮缩放（原生非被动监听）、滚动归零、右键菜单抑制、
-// 首入 fitAll——全部 fork 自 ProjectCanvas，回灌对齐按其同名区段对照。
+// 首入 fitAll——全部 fork 自旧 ProjectCanvas（已退役）。
 // 视口恢复/落盘走 dataContext（默认实现=canvasStore，工程视图=按集存档）。
 
 export type ViewState = { x: number; y: number; scale: number };
