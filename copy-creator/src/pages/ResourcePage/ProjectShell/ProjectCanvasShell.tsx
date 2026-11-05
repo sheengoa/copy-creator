@@ -160,6 +160,7 @@ export default function ProjectCanvasShell({
 
   const promptUntitled = t("project.canvas.promptUntitled");
   const ephTitle = t("project.canvas.ephTitle");
+  const scriptUntitled = t("project.canvas.scriptUntitled");
 
   // ── 工程外围件引擎链（阶段 E1 收编）：组操作（暂存线转正/出生锚点）
   // → 视图（缺项检查/定位/剧本挑挂）→ 空集工作流种子。选择态由基座
@@ -439,7 +440,7 @@ export default function ProjectCanvasShell({
     addScriptPh: data.addScriptPh, addPromptPh: data.addPromptPh,
     addSegment, deleteShot, removeSegment, setEpisodeOutput,
     setEpisodeCharacters, setEpisodeLocations, setEpisodeProps, updateEpisode,
-    ephTitle, promptUntitled,
+    ephTitle, promptUntitled, scriptUntitled,
   };
 
   const nodes = buildProjectNodes({ ...providerDeps, nodes: [] });

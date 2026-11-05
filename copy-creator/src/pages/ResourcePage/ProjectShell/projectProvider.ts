@@ -6,6 +6,7 @@ import type {
   ProjectSegment,
 } from "../../../stores/projectStore";
 import type { CanvasDataApi } from "../../CanvasPage/dataContext";
+import { scriptFileLabel } from "../../../domain/projectView";
 import type { CanvasLayout, CanvasNote, EntityPhKind, InfoGroup, NodeGroup, PendingLink, PromptPh, ScriptPh } from "./types";
 import { INFO_H, INFO_W, OUTPUT_W, SCRIPT_W, SEG_H, SEG_W } from "./layout";
 
@@ -24,7 +25,7 @@ export interface ProjectCanvasDataDeps {
   segments: ProjectSegment[];
   /** 布局与位置状态（useCanvasData 引擎钩子产出）。 */
   layout: CanvasLayout;
-  infoNodes: Array<{ key: string; kind: string; name: string; w: number; h: number }>;
+  infoNodes: Array<{ key: string; kind: string; name: string; avatarPath: string; textPath: string; w: number; h: number }>;
   pos: { cards: Record<string, { x: number; y: number }> };
   segPos: Record<string, { x: number; y: number }>;
   infoOffsets: Record<string, { x: number; y: number }>;
@@ -92,6 +93,7 @@ export interface ProjectCanvasDataDeps {
   /** 空状态文案（i18n 由 Shell 传入，模块层不触 i18n）。 */
   ephTitle: string;
   promptUntitled: string;
+  scriptUntitled: string;
 }
 
 const recordNode = (
@@ -156,7 +158,9 @@ export function buildProjectNodes(deps: ProjectCanvasDataDeps): CanvasNode[] {
         sizeOfNode(info.key)?.w ?? info.w,
         nodeSizes[info.key]?.h ?? null,
         episodeId,
-        { kind: info.kind },
+        // path 随 metadata 入节点记录：删除后 undo 恢复（scriptPaper 分支）
+        // 才能带回文件关联；其余 info 节点 textPath 恒空、字段无感。
+        { kind: info.kind, path: info.textPath },
       ),
     );
   }
@@ -190,7 +194,9 @@ export function buildProjectNodes(deps: ProjectCanvasDataDeps): CanvasNode[] {
         sizeOfNode(key)?.w ?? SCRIPT_W,
         nodeSizes[key]?.h ?? null,
         episodeId,
-        { kind: "prompt" },
+        // promptId 随 metadata 入节点记录：删除后 undo 恢复（promptPaper
+        // 分支）才能带回挂接的提示词。
+        { kind: "prompt", promptId: ph.promptId },
       ),
     );
   }
@@ -357,8 +363,35 @@ export function buildProjectCanvasApi(deps: ProjectCanvasDataDeps): CanvasDataAp
           return recordNode(`eph:${id}`, input.nodeType, deps.ephTitle, { x, y }, INFO_W, INFO_H, episodeId, { kind: input.nodeType });
         }
         case "promptPaper": {
-          const id = deps.addPromptPh(x, y);
-          return recordNode(`prompt:${id}`, "promptPaper", deps.promptUntitled, { x, y }, SCRIPT_W, null, episodeId, { kind: "prompt" });
+          // 提示词纸片（undo 恢复 / 粘贴）：promptId 自快照 metadata 带回
+          // （缺 = 未挂接空纸片，双击重选）；与 addPromptPh 同构生成 id，
+          // 不走 addPromptPh 是为了带上 promptId。
+          let promptId = "";
+          try {
+            promptId = (JSON.parse(input.metadata ?? "{}") as { promptId?: string }).promptId ?? "";
+          } catch {
+            // 快照 metadata 缺失/损坏：按空纸片恢复。
+          }
+          const id = `pph${Date.now()}${Math.floor(Math.random() * 1e4)}`;
+          deps.persistPromptPhs([...deps.promptPhs, { id, promptId, x, y }]);
+          const prompt = deps.prompts.find((item) => item.id === promptId);
+          return recordNode(`prompt:${id}`, "promptPaper", prompt ? prompt.title : deps.promptUntitled, { x, y }, SCRIPT_W, null, episodeId, { kind: "prompt", promptId });
+        }
+        case "scriptPaper": {
+          // 剧本纸片（undo 恢复 / 粘贴）：纸片实体按集 scriptPhs、位置按集
+          // infoOffsets；path 自快照 metadata 带回（缺 = 未挂接空纸片）。
+          // 与 addScriptPh 同构生成 id。
+          let path = "";
+          try {
+            path = (JSON.parse(input.metadata ?? "{}") as { path?: string }).path ?? "";
+          } catch {
+            // 快照 metadata 缺失/损坏：按空纸片恢复。
+          }
+          const id = `sph${Date.now()}${Math.floor(Math.random() * 1e4)}`;
+          deps.persistScriptPhs([...deps.scriptPhs, { id, path }]);
+          const key = `script:${id}`;
+          deps.persistInfoOffsets({ ...deps.infoOffsets, [key]: { x, y } });
+          return recordNode(key, "scriptPaper", path ? scriptFileLabel(path) : deps.scriptUntitled, { x, y }, SCRIPT_W, null, episodeId, { kind: "script", path });
         }
         default:
           // 双保险：工程作用域拒收自由画布类型（scope 过滤之外的第二道）。
