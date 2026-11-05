@@ -1,12 +1,12 @@
 import { useTranslation } from "react-i18next";
 import { MediaPlayback } from "../../../components/MediaPlayback";
 import { ResourceThumb } from "./media";
-import { NodeHint } from "./NodeHint";
 import { NODE_DEFS } from "./registry";
 import type { NodeProps } from "./types";
 
-// 预览三族内容层：媒体形态由入口 mediaKind 驱动——image 点开大图，
+// 预览三族内容层：媒体形态由入口 mediaKind 驱动——image 静态缩略图，
 // video/audio 内嵌 MediaPlayback；未连上游与已连等产物区分占位。
+// （点击/双击放大已移除——2026-11-06 用户定案：节点媒体一律原位查看。）
 export function PreviewMediaBody({ node, services }: NodeProps) {
   const { t } = useTranslation();
   const upstreamNode = services.upstream(node.id);
@@ -19,11 +19,7 @@ export function PreviewMediaBody({ node, services }: NodeProps) {
         <div className="fc-node-placeholder">{t("canvas.previewEmpty")}</div>
       ) : kind === "image" ? (
         path ? (
-          <NodeHint text={t("canvas.previewOpen")}>
-            <button className="fc-preview-media" onClick={() => services.openLightbox(path)}>
-              <ResourceThumb path={path} className="fc-media-box" ratioFit />
-            </button>
-          </NodeHint>
+          <ResourceThumb path={path} className="fc-media-box" ratioFit />
         ) : (
           <div className="fc-node-placeholder">{t("canvas.waitingUpstream")}</div>
         )

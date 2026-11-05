@@ -83,7 +83,7 @@ export function VideoToolBody({ node, services }: NodeProps) {
                 aria-label={t("canvas.loadFromFile")}
                 onClick={() => services.pickMedia(node, "disk")}
               >
-                {Icons.folderOpen}
+                {Icons.hardDrive}
               </button>
             </NodeHint>
           </div>
@@ -101,18 +101,12 @@ export function VideoToolBody({ node, services }: NodeProps) {
                  视频一致，容器同样跟随。 */
               style={screenRatio ? { aspectRatio: `${screenRatio.w} / ${screenRatio.h}` } : undefined}
             >
-              {/* 抽帧/GIF 完成态显示产物图（点击放大）；音轨完成态
-                  保留视频画面；其余一律视频预览。 */}
+              {/* 抽帧/GIF 完成态显示产物图（原位展示，点击放大已移除）；
+                  音轨完成态保留视频画面；其余一律视频预览。 */}
               {productPath && !toolBusy && !isAudio ? (
-                <NodeHint text={t("canvas.previewOpen")}>
-                  <button
-                    type="button"
-                    className="fc-frame-thumb"
-                    onClick={() => services.openLightbox(productPath)}
-                  >
-                    <ResourceThumb path={productPath} className="fc-media-box" />
-                  </button>
-                </NodeHint>
+                <div className="fc-frame-thumb">
+                  <ResourceThumb path={productPath} className="fc-media-box" />
+                </div>
               ) : (
                 <MediaPlayback
                   kind="video"

@@ -279,8 +279,9 @@
   box-shadow: 0 1px 3px rgba(0, 0, 0, 0.4), 0 0 0 0.5px rgba(255, 255, 255, 0.14);
 }
 
-/* 视频抽帧节点（2026-11-01）：产物帧展示（点击放大）+ 执行按钮区。
-   帧图外框复用 fc-load-media（相对定位承载悬浮 ×）；帧图本体走
+/* 视频抽帧节点（2026-11-01）：产物帧展示 + 执行按钮区。点击放大已
+   移除（2026-11-06 用户定案：节点媒体一律原位查看），帧图容器为静态
+   div。帧图外框复用 fc-load-media（相对定位承载悬浮 ×）；帧图本体走
    fc-media-box——与加载视频同一块展示区，执行前后节点尺寸不变。 */
 .fc-root .fc-frame-thumb {
   display: block;
@@ -288,7 +289,6 @@
   padding: 0;
   border: none;
   background: none;
-  cursor: pointer;
   line-height: 0;
 }
 
@@ -389,22 +389,10 @@
   aspect-ratio: auto;
 }
 
-/* 预览节点的媒体按钮外面包着 NodeHint 锚点层——填充尺寸落在锚点
-   （表单的直接 flex 子项）上，按钮与内部缩略图再逐层撑满。 */
-.fc-root .pc-node.pc-resized .fc-node-form > .fc-hint-anchor:has(> .fc-preview-media) {
+/* 预览节点（图像）：缩略图是表单直接子项（点击放大已移除，原位展示），
+   与视频/音频播放器同一套让位——填满剩余空间，上游文本行留在可视区。 */
+.fc-root .pc-node.pc-resized .fc-node-form > .fc-media-box {
   flex: 1 1 auto;
-  min-height: 0;
-  overflow: hidden;
-}
-
-.fc-root .pc-node.pc-resized .fc-preview-media {
-  flex: 1;
-  min-height: 0;
-  width: 100%;
-}
-
-.fc-root .pc-node.pc-resized .fc-preview-media .fc-media-box {
-  flex: 1;
   min-height: 0;
   height: auto;
   max-height: none;

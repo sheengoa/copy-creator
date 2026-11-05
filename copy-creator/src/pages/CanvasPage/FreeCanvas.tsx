@@ -30,7 +30,6 @@ import {
   ZoomBar,
   SeedButton,
   DropHintOverlay,
-  LightboxLayer,
   BatchBarLayer,
   LibraryPickerLayer,
 } from "./layers/CanvasOverlays";
@@ -75,8 +74,6 @@ export default function FreeCanvas({ canvasId, renderWires, onOpenNodeDetail, ov
   const setNodeErrors = useNodeErrors((s) => s.setErrors);
   /** 资源库选择浮层：load 节点的「从资源库选择」。 */
   const [pickerForNode, setPickerForNode] = useState<string | null>(null);
-  /** 大图预览（预览图像节点双击）：暂存产物路径。 */
-  const [lightboxSrc, setLightboxSrc] = useState("");
   /** 合集行定位请求（2026-11-04）：n 自增让同节点连点也能重触发；
    *  实际平移 + 脉冲在手势钩子构建后的效果里执行（那边才有 pulseNodes）。 */
   const [locate, setLocate] = useState<{ id: string; n: number } | null>(null);
@@ -210,7 +207,6 @@ export default function FreeCanvas({ canvasId, renderWires, onOpenNodeDetail, ov
   // 写回分派按 def.applyMode：video-tool 写 video_path（applyFrameVideo），
   // resource 直写 resource_path。闭包引用渲染期状态，事件期执行时已初始化。
   const canvasServices: NodeServices = {
-    openLightbox: (path) => setLightboxSrc(path),
     upstream: (nodeId) => upstreamMediaOf(nodeId),
     locateNode: (nodeId) => setLocate((p) => ({ id: nodeId, n: (p?.n ?? 0) + 1 })),
     ...(onOpenNodeDetail ? { openNodeDetail: (node: CanvasNode) => onOpenNodeDetail(node) } : {}),
@@ -453,8 +449,6 @@ export default function FreeCanvas({ canvasId, renderWires, onOpenNodeDetail, ov
             onClose={() => setPickerForNode(null)}
           />
         )}
-
-        <LightboxLayer src={lightboxSrc} onClose={() => setLightboxSrc("")} />
 
         <CanvasStatCard nodes={nodes} connections={connections} />
 

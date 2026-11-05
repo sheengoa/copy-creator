@@ -68,9 +68,7 @@ export interface NodeServices {
   pickMedia(node: CanvasNode, source: "library" | "disk"): void;
   /** 清除已装媒体（load 族清引用 / 视频工具清 video_path 与产物）。 */
   clearMedia(node: CanvasNode): void;
-  /** 全屏大图预览。 */
-  openLightbox(path: string): void;
-  /** 上游产物聚合查询（生成输入收集 / 预览 / 双击放大共用）。 */
+  /** 上游产物聚合查询（生成输入收集 / 预览共用）。 */
   upstream(nodeId: string): UpstreamMedia | null;
   /** 合集成员行点击定位（2026-11-04）：源节点不在视口内则平移居中，
    *  并做边缘脉冲闪烁（复用出生脉冲 pc-spawn 视觉）方便快速定位。 */

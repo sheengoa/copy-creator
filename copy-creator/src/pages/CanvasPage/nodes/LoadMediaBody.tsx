@@ -62,7 +62,7 @@ export function LoadMediaBody({ node, services }: NodeProps) {
                 aria-label={t("canvas.loadFromFile")}
                 onClick={() => services.pickMedia(node, "disk")}
               >
-                {Icons.folderOpen}
+                {Icons.hardDrive}
               </button>
             </NodeHint>
           </div>

@@ -2,20 +2,19 @@ import { useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
 import type { CanvasNode } from "../../../stores/canvasStore";
 import type { RefObject } from "react";
-import { ImageLightbox } from "../../../components/ImageLightbox";
 import { invoke } from "@tauri-apps/api/core";
 import { joinLibraryPath } from "../../../domain/projectView";
 import ProjectFilePickerDialog from "../../ResourcePage/ProjectFilePickerDialog";
 import { useCanvasData } from "../dataContext";
 import { NodeHint } from "../nodes/NodeHint";
 import { WheelGate } from "../nodes/WheelGate";
-import { useMediaUrl } from "../nodes/mediaPath";
 import { BatchBar } from "../nodes/BatchBar";
 import type { ViewState } from "../engine/useViewport";
 
 // 画布浮层集合（自 FreeCanvas.tsx 渲染区零改动搬运，2026-11-03 引擎拆分
 // 阶段 6c）：统计卡 / 提示条 / 缩放条 / 空画布种子钮 / 拖放遮罩 / 资源库
-// 选择浮层 / 大图灯箱 / 批量生成条壳。
+// 选择浮层 / 批量生成条壳。（大图灯箱已随「节点禁止点击放大」移除，
+// 2026-11-06 用户定案。）
 
 /** 画布信息玻璃卡 + 统计。 */
 export function CanvasStatCard({ nodes, connections }: { nodes: CanvasNode[]; connections: unknown[] }) {
@@ -99,17 +98,6 @@ export function DropHintOverlay({ visible }: { visible: boolean }) {
     <div className="fc-drop-overlay">
       <span>{t("canvas.dropHint")}</span>
     </div>
-  );
-}
-
-/** 大图预览（预览图像节点双击）。 */
-export function LightboxLayer({ src, onClose }: { src: string; onClose(): void }) {
-  const url = useMediaUrl(src);
-  if (!url) return null;
-  return (
-    <WheelGate>
-      <ImageLightbox src={url} alt="" onClose={onClose} />
-    </WheelGate>
   );
 }
 

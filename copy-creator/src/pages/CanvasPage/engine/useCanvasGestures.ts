@@ -667,8 +667,9 @@ export function useCanvasGestures(deps: GestureDeps) {
                 );
               }
             } else {
-              // 双击节点：def.onDoubleClick（便签进编辑；预览图像开大图）；
-              // 其余类型无全局动作。
+              // 双击节点：def.onDoubleClick（便签进编辑；工程实体/片段开
+              // 详情窗）；自由画布媒体节点无双击动作（点击放大已移除，
+              // 2026-11-06 用户定案：媒体一律原位查看）。
               const node = nodesRef.current.find((n) => n.id === key);
               if (node) NODE_DEFS[node.type].onDoubleClick?.(node, canvasServices);
             }

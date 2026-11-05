@@ -1017,7 +1017,6 @@
     "collectionItemEmpty": "(nothing loaded)",
     "collectionSortHint": "Drag up/down to reorder",
     "previewEmpty": "No upstream connected",
-    "previewOpen": "Double-click to zoom",
     "saveAutoLibrary": "Save to library",
     "saveAutoLibraryLbl": "Library",
     "saveAutoDir": "Save to custom path",

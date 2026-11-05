@@ -378,18 +378,7 @@
   border-radius: 6px;
 }
 
-/* 预览节点：媒体展示 + 上游文本。 */
-.fc-root .fc-preview-media {
-  display: block;
-  width: 100%;
-  padding: 0;
-  border: none;
-  background: none;
-  cursor: zoom-in;
-  border-radius: 10px;
-  line-height: 0;
-}
-
+/* 预览节点：媒体展示（点击放大已移除，缩略图静态展示）+ 上游文本。 */
 .fc-preview-text {
   font-size: 11px;
   line-height: 1.5;

@@ -49,7 +49,7 @@ export function FrameExtractBody({ node, services }: NodeProps) {
                 aria-label={t("canvas.loadFromFile")}
                 onClick={() => services.pickMedia(node, "disk")}
               >
-                {Icons.folderOpen}
+                {Icons.hardDrive}
               </button>
             </NodeHint>
           </div>
@@ -82,30 +82,24 @@ export function FrameExtractBody({ node, services }: NodeProps) {
       )}
       {framePath && !frameBusyNow && (
         <>
-          <NodeHint text={t("canvas.previewOpen")}>
-            <div className="fc-load-media">
+          <div className="fc-load-media">
+            <div className="fc-frame-thumb">
+              <ResourceThumb path={framePath} className="fc-media-box" ratioFit />
+              <span className="fc-frame-badge">
+                {isLastFrame ? t("canvas.frameLastBadge") : t("canvas.frameFirstBadge")}
+              </span>
+            </div>
+            <NodeHint text={t("canvas.frameChangeVideo")}>
               <button
                 type="button"
-                className="fc-frame-thumb"
-                onClick={() => services.openLightbox(framePath)}
+                className="fc-load-clear"
+                aria-label={t("canvas.frameChangeVideo")}
+                onClick={() => rt.clearFrameVideo(node)}
               >
-                <ResourceThumb path={framePath} className="fc-media-box" ratioFit />
-                <span className="fc-frame-badge">
-                  {isLastFrame ? t("canvas.frameLastBadge") : t("canvas.frameFirstBadge")}
-                </span>
+                {Icons.close}
               </button>
-              <NodeHint text={t("canvas.frameChangeVideo")}>
-                <button
-                  type="button"
-                  className="fc-load-clear"
-                  aria-label={t("canvas.frameChangeVideo")}
-                  onClick={() => rt.clearFrameVideo(node)}
-                >
-                  {Icons.close}
-                </button>
-              </NodeHint>
-            </div>
-          </NodeHint>
+            </NodeHint>
+          </div>
           <div className="fc-node-row">
             <span className="fc-frame-ok">{t("canvas.frameDone")}</span>
             <NodeHint text={isLastFrame ? t("canvas.frameHintLast") : t("canvas.frameHintFirst")}>

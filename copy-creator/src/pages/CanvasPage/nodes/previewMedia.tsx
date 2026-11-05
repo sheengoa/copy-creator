@@ -18,11 +18,6 @@ export const previewImageDef: NodeDefinition = {
     ins: [{ id: "in", accepts: ["gen_image", "load_image", "video_first_frame", "video_last_frame", "video_seek_frame", "video_to_gif"], mediaKind: "image" }],
     out: null,
   },
-  // 双击开大图（上游主产物）。
-  onDoubleClick: (node, services) => {
-    const primary = services.upstream(node.id)?.paths[0];
-    if (primary) services.openLightbox(primary);
-  },
   Component: PreviewMediaBody,
 };
 
