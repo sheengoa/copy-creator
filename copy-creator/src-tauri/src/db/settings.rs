@@ -66,7 +66,7 @@ pub fn set_setting_skip_migrate(app: AppHandle, key: String, value: String) -> R
     set_setting_inner(&app, &key, &value)
 }
 
-pub(crate) fn set_setting_inner(app: &AppHandle, key: &str, value: &str) -> Result<(), String> {
+pub(crate) fn set_setting_inner<R: Runtime>(app: &AppHandle<R>, key: &str, value: &str) -> Result<(), String> {
     let state = app.state::<DbState>();
     let conn = state.conn.lock().map_err(|e| e.to_string())?;
     conn.execute(

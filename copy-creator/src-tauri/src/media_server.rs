@@ -60,6 +60,10 @@ pub fn spawn<R: Runtime>(app: &AppHandle<R>) {
     });
     log::info!("[media-server] listening on {origin}");
 
+    // 启动恢复落库的外部媒体授权清单（盘选/拖入文件的跨会话预览）。
+    // init_db 先于本函数执行，DbState 必已就绪。
+    restore_authorized_external_files(app);
+
     let app = app.clone();
     std::thread::spawn(move || {
         for stream in listener.incoming() {
@@ -284,25 +288,85 @@ fn resolve_media_file<R: Runtime>(app: &AppHandle<R>, raw: &str) -> Option<PathB
 // ── 运行时授权外部文件（画布加载节点） ─────────────────────
 // 画布的加载节点允许引用用户通过系统文件对话框明确选择的任意路径文件
 // （仅预览/引用，不复制入库）。这类路径不在应用管理目录内，为让媒体
-// 服务放行，选择动作发生时把确切路径登记进运行时授权清单——注入者仍
-// 需同时猜中 token 与确切文件路径，安全边界与剪切板记录同哲学。
+// 服务放行，选择动作发生时把确切路径登记进授权清单——注入者仍需同时
+// 猜中 token 与确切文件路径，安全边界与剪切板记录同哲学。
+//
+// 授权清单持久化在 settings 表（2026-11-06）：节点行的 resource_path
+// 落库跨会话存在，而清单此前只在内存——应用重启后所有盘选/拖入的本地
+// 文件预览一律 404（用户报告「加载节点无法显示预览图」的根源）。清单
+// 落库后重启即恢复，安全面不变：放行的仍只是「用户明确选择过的那些路
+// 径」的精确全等匹配，注入者依旧要同时猜中 token 与确切路径。
 static AUTHORIZED_EXTERNAL_FILES: std::sync::Mutex<Option<std::collections::HashSet<String>>> =
     std::sync::Mutex::new(None);
 
+/// settings 表键：已授权外部媒体路径（JSON 字符串数组）。
+const AUTHORIZED_MEDIA_KEY: &str = "canvas_authorized_media";
+/// 清单上限（FIFO 淘汰最旧）：只作引用预览，历史路径无限累积无意义。
+const AUTHORIZED_MEDIA_CAP: usize = 500;
+
+/// 授权路径归一：剥 Windows canonicalize 残留的 `\\?\` / `\\?\UNC\`
+/// 扩展前缀。登记侧（对话框返回值）与请求侧（前端 resolveAbsoluteResourcePath
+/// 已剥前缀）必须落在同一形态上，前缀差异不能成为 404 的暗坑。
+fn normalize_external_path(value: &str) -> String {
+    let trimmed = value.trim();
+    let lower = trimmed.to_ascii_lowercase();
+    // 前缀均为 ASCII，按字符数切原串不越字节界。
+    if lower.starts_with(r"\\?\unc\") {
+        format!("\\\\{}", &trimmed[8..])
+    } else if lower.starts_with(r"\\?\") {
+        trimmed[4..].to_string()
+    } else {
+        trimmed.to_string()
+    }
+}
+
 fn is_authorized_external_path(path: &std::path::Path) -> bool {
+    let wanted = normalize_external_path(&path.to_string_lossy());
     let guard = AUTHORIZED_EXTERNAL_FILES.lock().unwrap();
     match guard.as_ref() {
-        Some(set) => set.contains(&path.to_string_lossy().to_string()),
+        Some(set) => set.contains(&wanted),
         None => false,
     }
 }
 
-/// 登记用户通过系统对话框明确选择的文件路径（画布加载节点引用）。
-pub fn authorize_external_file(path: &str) {
-    let mut guard = AUTHORIZED_EXTERNAL_FILES.lock().unwrap();
-    guard
+/// 登记用户通过系统对话框明确选择的文件路径（画布加载节点引用）：
+/// 运行时清单即时生效，并写通 settings 表供下次启动恢复。
+pub fn authorize_external_file<R: Runtime>(app: &AppHandle<R>, path: &str) {
+    let normalized = normalize_external_path(path);
+    AUTHORIZED_EXTERNAL_FILES
+        .lock()
+        .unwrap()
         .get_or_insert_with(std::collections::HashSet::new)
-        .insert(path.to_string());
+        .insert(normalized.clone());
+    // 落库：读取现有清单 → 去重插入 → FIFO 截断 → 写回。重复路径直接
+    // 跳过（绝大多数重选是同一路径），避免无谓的写放大。
+    let mut list = authorized_media_from_db(app);
+    if list.iter().any(|item| item == &normalized) {
+        return;
+    }
+    list.push(normalized);
+    let start = list.len().saturating_sub(AUTHORIZED_MEDIA_CAP);
+    let value = serde_json::to_string(&list[start..]).unwrap_or_default();
+    if let Err(error) = db::set_setting_inner(app, AUTHORIZED_MEDIA_KEY, &value) {
+        log::warn!("[media-server] 授权清单落库失败（重启后该文件预览会失效）: {error}");
+    }
+}
+
+/// 从 settings 读已授权清单（缺表/坏 JSON 容错为空）。
+fn authorized_media_from_db<R: Runtime>(app: &AppHandle<R>) -> Vec<String> {
+    db::get_setting_sync(app, AUTHORIZED_MEDIA_KEY)
+        .and_then(|value| serde_json::from_str::<Vec<String>>(&value).ok())
+        .unwrap_or_default()
+}
+
+/// 启动恢复：媒体服务开始接客前把落库清单装回运行时集合。
+pub fn restore_authorized_external_files<R: Runtime>(app: &AppHandle<R>) {
+    let list = authorized_media_from_db(app);
+    let mut guard = AUTHORIZED_EXTERNAL_FILES.lock().unwrap();
+    let set = guard.get_or_insert_with(std::collections::HashSet::new);
+    for path in list {
+        set.insert(normalize_external_path(&path));
+    }
 }
 
 fn media_content_type(path: &Path) -> &'static str {
@@ -803,5 +867,68 @@ mod media_serving_tests {
         assert_eq!(status, 403);
 
         std::fs::remove_dir_all(&library).ok();
+    }
+}
+
+#[cfg(test)]
+mod external_authorization_tests {
+    use super::{
+        authorize_external_file, is_authorized_external_path, normalize_external_path,
+        restore_authorized_external_files, AUTHORIZED_EXTERNAL_FILES,
+    };
+    use crate::db::{get_setting_sync, DbState};
+    use tauri::Manager;
+
+    #[test]
+    fn normalize_strips_windows_extended_prefixes() {
+        assert_eq!(normalize_external_path(r"\\?\C:\a\b.png"), r"C:\a\b.png");
+        assert_eq!(
+            normalize_external_path(r"\\?\UNC\server\share\a.png"),
+            r"\\server\share\a.png"
+        );
+        assert_eq!(normalize_external_path(r"C:\a\b.png"), r"C:\a\b.png");
+        assert_eq!(normalize_external_path("  C:\\a\\b.png  "), r"C:\a\b.png");
+    }
+
+    /// 盘选/拖入的外部媒体授权：登记即时生效并落库；模拟重启（运行时
+    /// 清单清空）后从 settings 恢复，预览不再 404。verbatim `\\?\` 变体
+    /// 与剥前缀形态在归一后互相命中。
+    #[test]
+    fn authorization_persists_across_restart() {
+        let app = tauri::test::mock_app();
+        {
+            let conn = rusqlite::Connection::open_in_memory().unwrap();
+            conn.execute(
+                "CREATE TABLE settings (key TEXT PRIMARY KEY, value TEXT NOT NULL)",
+                [],
+            )
+            .unwrap();
+            app.manage(DbState {
+                conn: std::sync::Mutex::new(conn),
+            });
+        }
+
+        let picked = r"C:\Users\someone\Pictures\盘选图.png";
+        authorize_external_file(app.handle(), picked);
+        assert!(is_authorized_external_path(std::path::Path::new(picked)));
+        assert!(is_authorized_external_path(std::path::Path::new(
+            r"\\?\C:\Users\someone\Pictures\盘选图.png"
+        )));
+        let stored = get_setting_sync(app.handle(), "canvas_authorized_media")
+            .unwrap_or_default();
+        assert!(stored.contains("盘选图.png"), "授权应落库: {stored}");
+
+        // 模拟重启：内存清单随进程消失，settings 恢复后重新放行。
+        *AUTHORIZED_EXTERNAL_FILES.lock().unwrap() = None;
+        assert!(!is_authorized_external_path(std::path::Path::new(picked)));
+        restore_authorized_external_files(app.handle());
+        assert!(is_authorized_external_path(std::path::Path::new(picked)));
+
+        // 重复登记同一文件不产生重复条目。
+        authorize_external_file(app.handle(), picked);
+        let stored = get_setting_sync(app.handle(), "canvas_authorized_media")
+            .unwrap_or_default();
+        let list: Vec<String> = serde_json::from_str(&stored).unwrap();
+        assert_eq!(list.len(), 1);
     }
 }

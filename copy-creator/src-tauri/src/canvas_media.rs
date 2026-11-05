@@ -79,7 +79,7 @@ pub async fn canvas_pick_media_file(
             if !meta.is_file() {
                 return Err("请选择一个文件".to_string());
             }
-            crate::media_server::authorize_external_file(&path_string);
+            crate::media_server::authorize_external_file(&app, &path_string);
             Ok(json!({ "path": path_string }))
         }
         None => Err("cancelled".to_string()),
@@ -87,15 +87,15 @@ pub async fn canvas_pick_media_file(
 }
 
 /// 加载节点拖入文件：与系统对话框选择同语义（明确来源），登记媒体
-/// 服务运行时授权后即可预览。
+/// 服务授权（运行时生效 + 落库供重启恢复）后即可预览。
 #[tauri::command]
-pub fn canvas_authorize_media(path: String) -> Result<(), String> {
+pub fn canvas_authorize_media(app: AppHandle, path: String) -> Result<(), String> {
     let meta = std::fs::metadata(std::path::PathBuf::from(path.trim()))
         .map_err(|e| format!("读取文件失败: {e}"))?;
     if !meta.is_file() {
         return Err("请拖入一个文件".to_string());
     }
-    crate::media_server::authorize_external_file(path.trim());
+    crate::media_server::authorize_external_file(&app, path.trim());
     Ok(())
 }
 
@@ -299,7 +299,7 @@ pub async fn canvas_extract_video_frame(
     if path.is_empty() {
         return Err("未加载视频".to_string());
     }
-    canvas_authorize_media(path.clone())?;
+    canvas_authorize_media(app.clone(), path.clone())?;
     let ffmpeg = resolve_ffmpeg(&app)?;
     let which = match which.as_str() {
         "first" => "first",
@@ -406,7 +406,7 @@ pub async fn canvas_video_timeline(
     if path.is_empty() {
         return Err("未加载视频".to_string());
     }
-    canvas_authorize_media(path.clone())?;
+    canvas_authorize_media(app.clone(), path.clone())?;
     let ffmpeg = resolve_ffmpeg(&app)?;
     let out_root = crate::db::get_storage_dir(&app).join("canvas-gen");
     tokio::task::spawn_blocking(move || -> Result<serde_json::Value, String> {
@@ -557,7 +557,7 @@ pub async fn canvas_seek_video_frame(
     if path.is_empty() {
         return Err("未加载视频".to_string());
     }
-    canvas_authorize_media(path.clone())?;
+    canvas_authorize_media(app.clone(), path.clone())?;
     let ffmpeg = resolve_ffmpeg(&app)?;
     let secs = if secs.is_finite() { secs.max(0.0) } else { 0.0 };
     let out_dir = crate::db::get_storage_dir(&app).join("canvas-gen");
@@ -590,7 +590,7 @@ pub async fn canvas_convert_video_gif(
     if path.is_empty() {
         return Err("未加载视频".to_string());
     }
-    canvas_authorize_media(path.clone())?;
+    canvas_authorize_media(app.clone(), path.clone())?;
     let ffmpeg = resolve_ffmpeg(&app)?;
     let start = if start.is_finite() { start.max(0.0) } else { 0.0 };
     let duration = clamp_gif_duration(duration);
@@ -636,7 +636,7 @@ pub async fn canvas_extract_audio(
     if path.is_empty() {
         return Err("未加载视频".to_string());
     }
-    canvas_authorize_media(path.clone())?;
+    canvas_authorize_media(app.clone(), path.clone())?;
     let ffmpeg = resolve_ffmpeg(&app)?;
     let start = if start.is_finite() { start.max(0.0) } else { 0.0 };
     let whole = !(duration.is_finite() && duration > 0.0);
