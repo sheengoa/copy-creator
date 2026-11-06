@@ -287,20 +287,21 @@
   border-radius: 12px;
   padding: 12px;
 }
-/* 段头「添加形象」入口（沿用 pill 形态）。 */
+/* 段头「添加形象」入口：中性 chip（用户定案「不要蓝色，统一风格」，
+   不再用 accent 底/字）。 */
 .pdetail-ref-add {
   display: inline-flex;
   align-items: center;
   gap: 4px;
   font-size: 11px;
-  color: var(--accent);
+  color: var(--text-secondary);
   padding: 3px 9px;
   border-radius: 999px;
-  border: 1px solid var(--accent-border-soft);
-  background: var(--accent-bg);
+  border: 1px solid var(--separator);
+  background: var(--chip-bg);
 }
 .pdetail-ref-add svg { width: 12px; height: 12px; }
-.pdetail-ref-add:hover { background: var(--accent-bg-strong); border-color: var(--accent-border-strong); }
+.pdetail-ref-add:hover { background: var(--chip-hover-bg); color: var(--text-primary); border-color: var(--accent-border-soft); }
 .pdetail-more {
   margin-top: 6px;
   text-align: center;
