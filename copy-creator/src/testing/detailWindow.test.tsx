@@ -95,7 +95,7 @@ describe("DetailWindow", () => {
     expect(screen.getByText("laozhou.wav")).toBeTruthy();
   });
 
-  it("片段输入按口分组展示，逐项移除路由 removeLink（组认领线带行 id）", () => {
+  it("片段输入按口分组展示，删除=右上角图标且确认后才路由 removeLink", () => {
     const removeLink = vi.fn();
     render(
       <ProjectDetailWindow
@@ -114,11 +114,23 @@ describe("DetailWindow", () => {
       />,
     );
     expect(screen.getByText("老周")).toBeTruthy();
-    const removeButtons = screen.getAllByText("移除");
-    expect(removeButtons.length).toBe(2);
-    fireEvent.click(removeButtons[0]);
+    // 删除键弱化为右上角悬浮图标（不再有「移除」文字大按钮）。
+    expect(screen.queryByText("移除")).toBeNull();
+    const xs = () => document.querySelectorAll(".pdetail-incard-x");
+    expect(xs().length).toBe(2);
+    // 首击只弹确认框，不直接移除。
+    fireEvent.click(xs()[0]);
+    expect(removeLink).not.toHaveBeenCalled();
+    expect(screen.getByText(/确定将「老周」从本片段移除/)).toBeTruthy();
+    fireEvent.click(document.querySelector(".dialog-btn.save") as HTMLElement);
     expect(removeLink).toHaveBeenCalledWith(
       expect.objectContaining({ pending: false, fromKey: "char-2", toSegment: "seg-1", toPort: "character", ownerKey: "", rowId: "nl-1" }),
+    );
+    // 组卡（资料组）同样先确认再移除（mock ops 不真删，图标位次不变）。
+    fireEvent.click(xs()[1]);
+    fireEvent.click(document.querySelector(".dialog-btn.save") as HTMLElement);
+    expect(removeLink).toHaveBeenCalledWith(
+      expect.objectContaining({ pending: false, fromKey: "loc-1", toSegment: "seg-1", toPort: "location", ownerKey: "grp:g1", rowId: "nl-g1" }),
     );
   });
 

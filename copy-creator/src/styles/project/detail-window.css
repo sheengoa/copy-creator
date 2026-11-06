@@ -291,16 +291,19 @@
   white-space: nowrap;
 }
 
-/* ── 输入清单卡片网格：与参考图卡同形态（16:10 预览 contain + 名称 +
-   移除），列宽收窄适配多口分组同屏；可跳卡 hover 提示可点（点击展开
-   对应详情窗）。 ── */
+/* ── 输入清单横滑条带：每组一行横向陈列全部输入（用户定案「有多少就
+   陈列清楚，多了滚轮左右滑」，不再换行堆高窗口）；卡片定宽串行，删除键
+   弱化为右上角悬浮小图标（hover 显形），点击先弹确认框再移除。 ── */
 .pdetail-ingrid {
-  display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
-  align-items: start;
+  display: flex;
+  align-items: stretch;
   gap: 8px;
+  overflow-x: auto;
+  padding: 2px;
 }
 .pdetail-incard {
+  position: relative;
+  flex: 0 0 150px;
   border: 1px solid var(--separator);
   border-radius: 10px;
   padding: 8px;
@@ -360,16 +363,28 @@
   text-overflow: ellipsis;
   white-space: nowrap;
 }
+/* 删除键：右上角悬浮小图标（用户定案「弱化成图标、右上角、悬浮时出
+   现」）——平时透明不占视觉，卡片 hover 或键盘聚焦才显形；点击先弹
+   确认框（ConfirmDialog z1000）再移除。半透明芯片底保证浮在图上可读。 */
 .pdetail-incard-x {
-  font-size: 11px;
+  position: absolute;
+  top: 6px;
+  right: 6px;
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
   color: var(--text-secondary);
-  padding: 4px 0;
-  border-radius: 7px;
-  border: 1px solid var(--separator);
-  background: var(--chip-bg);
-  text-align: center;
+  background: color-mix(in srgb, var(--panel-bg) 82%, transparent);
+  opacity: 0;
+  transition: opacity 0.15s ease;
 }
-.pdetail-incard-x:hover { background: var(--danger); border-color: var(--danger); color: #fff; }
+.pdetail-incard:hover .pdetail-incard-x,
+.pdetail-incard-x:focus-visible { opacity: 1; }
+.pdetail-incard-x:hover { background: var(--danger); color: #fff; }
+.pdetail-incard-x svg { width: 11px; height: 11px; }
 
 /* ── 批量挂靠浮层 ── */
 .pdetail-attach {

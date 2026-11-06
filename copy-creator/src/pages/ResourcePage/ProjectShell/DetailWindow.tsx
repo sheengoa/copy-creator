@@ -16,6 +16,7 @@ import { readResourceTextPreview } from "../../../domain/mediaAssets";
 import { ResourceFileImage, ResourceImage, ResourceVideoPoster } from "../ResourceMedia";
 import type { EntityPhKind, PendingLink, PromptPh, ScriptPh } from "./types";
 import { MediaPlayback } from "../../../components/MediaPlayback";
+import { ConfirmDialog } from "../../../components/ConfirmDialog";
 import ProjectFilePickerDialog from "../ProjectFilePickerDialog";
 
 // 工程节点详情窗（工程视图节点化 2026-11-05 阶段 D，方案 §D2-D5）：
@@ -383,11 +384,40 @@ function parseRefs(raw: string | undefined): string[] {
 }
 
 /** 片段输入分组：按口聚合（角色/场景/道具/提示词/剧本/其他），组头计数
- *  + 折叠；卡片网格呈现（与参考图卡同形态：16:10 预览 + 名称 + 移除），
- *  点卡片本体跳转对应详情窗（点击展开预览，用户定案）。组卡显示成员数
- *  与成员名，预览=成员图堆叠；暂存占位卡=虚线图标块。 */
+ *  + 折叠；每组一行横滑条带陈列全部输入（用户定案「有多少陈列清楚，
+ *  多了滚轮左右滑」，不再换行堆高窗口），卡片=16:10 预览 + 名称，点卡片
+ *  本体跳转对应详情窗（点击展开预览）；移除键弱化为右上角悬浮小图标
+ *  （hover 显形），点击先弹确认框再移除。组卡显示成员数与成员名，
+ *  预览=成员图堆叠；暂存占位卡=虚线图标块。 */
+
+/** 横滑条带：竖向滚轮增量映射为横向滚动（React 根代理的 wheel 是被动
+ *  监听，preventDefault 需原生非被动监听）；条带装得下时不拦截，页面
+ *  照常竖滚。 */
+function HStrip({ children }: { children: React.ReactNode }) {
+  const ref = useRef<HTMLDivElement | null>(null);
+  useEffect(() => {
+    const el = ref.current;
+    if (!el) return;
+    const onWheel = (event: WheelEvent) => {
+      if (event.deltaY === 0 || el.scrollWidth <= el.clientWidth) return;
+      event.preventDefault();
+      el.scrollLeft += event.deltaY;
+    };
+    el.addEventListener("wheel", onWheel, { passive: false });
+    return () => el.removeEventListener("wheel", onWheel);
+  }, []);
+  return (
+    <div ref={ref} className="pdetail-ingrid">
+      {children}
+    </div>
+  );
+}
+
 function SegmentInputs({ segmentId, ops }: { segmentId: string; ops: DetailWindowOps }) {
   const { t } = useTranslation();
+  // 移除确认（用户定案「删除要有确定选项」）：确认框 portal body z1000
+  // 压过详情窗与全部二级浮层，确认后才真正调 removeLink。
+  const [removeAsk, setRemoveAsk] = useState<{ message: string; run(): void } | null>(null);
   const rows = ops.nodeLinks.filter((l) => l.to_segment === segmentId);
   const pends = ops.pendingLinks.filter((l) => l.toSegmentId === segmentId);
   const ports: Array<{ id: string; label: string; color: string }> = [
@@ -425,13 +455,14 @@ function SegmentInputs({ segmentId, ops }: { segmentId: string; ops: DetailWindo
         return (
           <DetailSection key={port.id} label={port.label} count={total} foldable defaultFold={false}>
             <div className="pdetail-dot" style={{ background: port.color }} />
-            <div className="pdetail-ingrid">
+            <HStrip>
               {portRows.map((row) => {
                 const owner = row.owner_key ?? "";
                 const isGroup = owner.startsWith("grp:");
                 const members = isGroup
                   ? (ops.overview?.node_links ?? []).filter((l) => l.owner_key === owner && l.to_segment === segmentId && l.to_port === row.to_port)
                   : [row];
+                const cardLabel = isGroup ? t("project.detail.groupLine", { n: members.length }) : nameOf(row.from_kind, row.from_id);
                 const paths = members
                   .map((m) => linkThumbPath(m.from_kind, m.from_id, ops))
                   .filter(Boolean)
@@ -452,7 +483,7 @@ function SegmentInputs({ segmentId, ops }: { segmentId: string; ops: DetailWindo
                       type="button"
                       className="pdetail-incard-view"
                       onClick={openable ? openCard : undefined}
-                      aria-label={isGroup ? t("project.detail.groupLine", { n: members.length }) : nameOf(row.from_kind, row.from_id)}
+                      aria-label={cardLabel}
                     >
                       {paths.length > 0 ? (
                         paths.map((p, i) => (
@@ -463,42 +494,64 @@ function SegmentInputs({ segmentId, ops }: { segmentId: string; ops: DetailWindo
                       )}
                     </button>
                     <div className="pdetail-incard-meta">
-                      <b className="pdetail-incard-name" title={isGroup ? t("project.detail.groupLine", { n: members.length }) : nameOf(row.from_kind, row.from_id)}>
-                        {isGroup ? t("project.detail.groupLine", { n: members.length }) : nameOf(row.from_kind, row.from_id)}
+                      <b className="pdetail-incard-name" title={cardLabel}>
+                        {cardLabel}
                       </b>
                       {isGroup && <small className="pdetail-incard-members">{members.map((m) => nameOf(m.from_kind, m.from_id)).join(" · ")}</small>}
                     </div>
+                    {/* 移除键：右上角悬浮小图标（hover 显形），点击先确认。 */}
                     <button
                       type="button"
                       className="pdetail-incard-x"
-                      onClick={() => ops.removeLink({ pending: false, fromKey: row.from_id, toSegment: segmentId, toPort: row.to_port, ownerKey: row.owner_key ?? "", rowId: row.id })}
+                      title={t("project.detail.remove")}
+                      aria-label={t("project.detail.remove")}
+                      onClick={() =>
+                        setRemoveAsk({
+                          message: t("project.detail.segRemoveConfirm", { name: cardLabel }),
+                          run: () => ops.removeLink({ pending: false, fromKey: row.from_id, toSegment: segmentId, toPort: row.to_port, ownerKey: row.owner_key ?? "", rowId: row.id }),
+                        })
+                      }
                     >
-                      {t("project.detail.remove")}
+                      {Icons.close}
                     </button>
                   </div>
                 );
               })}
-              {portPends.map((p) => (
-                <div key={`pend-${p.fromKey}`} className="pdetail-incard is-pending">
-                  <span className="pdetail-incard-view is-static">
-                    <span className="pdetail-incard-fallback">{Icons.image}</span>
-                  </span>
-                  <div className="pdetail-incard-meta">
-                    <b className="pdetail-incard-name">{pendingFromLabel(p.fromKey)}</b>
+              {portPends.map((p) => {
+                const pendLabel = pendingFromLabel(p.fromKey);
+                return (
+                  <div key={`pend-${p.fromKey}`} className="pdetail-incard is-pending">
+                    <span className="pdetail-incard-view is-static">
+                      <span className="pdetail-incard-fallback">{Icons.image}</span>
+                    </span>
+                    <div className="pdetail-incard-meta">
+                      <b className="pdetail-incard-name">{pendLabel}</b>
+                    </div>
+                    <button
+                      type="button"
+                      className="pdetail-incard-x"
+                      title={t("project.detail.remove")}
+                      aria-label={t("project.detail.remove")}
+                      onClick={() =>
+                        setRemoveAsk({
+                          message: t("project.detail.segRemoveConfirm", { name: pendLabel }),
+                          run: () => ops.removeLink({ pending: true, fromKey: p.fromKey, toSegment: segmentId, toPort: p.toPort, ownerKey: "" }),
+                        })
+                      }
+                    >
+                      {Icons.close}
+                    </button>
                   </div>
-                  <button
-                    type="button"
-                    className="pdetail-incard-x"
-                    onClick={() => ops.removeLink({ pending: true, fromKey: p.fromKey, toSegment: segmentId, toPort: p.toPort, ownerKey: "" })}
-                  >
-                    {t("project.detail.remove")}
-                  </button>
-                </div>
-              ))}
-            </div>
+                );
+              })}
+            </HStrip>
           </DetailSection>
         );
       })}
+      {/* 移除确认框：顶层 portal（z1000），确认后才执行 removeAsk.run。 */}
+      {removeAsk && (
+        <ConfirmDialog message={removeAsk.message} onConfirm={removeAsk.run} onCancel={() => setRemoveAsk(null)} />
+      )}
     </>
   );
 }

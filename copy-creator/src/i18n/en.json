@@ -777,6 +777,7 @@
       "inputs": "Inputs",
       "groupLine": "Group · {{n}} members",
       "remove": "Remove",
+      "segRemoveConfirm": "Remove \"{{name}}\" from this segment?",
       "attachPick": "Attach (multi-select)",
       "attachN": "Attach {{n}}",
       "loadEntity": "Load entity from library",
