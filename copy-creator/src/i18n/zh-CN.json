@@ -1006,6 +1006,7 @@
     "loadFromLibrary": "资源库",
     "loadFromFile": "本地文件",
     "loadEmpty": "未加载媒体",
+    "mediaBroken": "媒体无法加载，请重新选择",
     "loadTypeMismatch": "所选文件类型与本节点不匹配",
     "clearLoaded": "移除已加载文件",
     "waitingUpstream": "已连接上游，等待产物",

@@ -217,3 +217,26 @@
   border-radius: 10px;
   box-shadow: 0 1px 3px rgba(0, 0, 0, 0.12);
 }
+
+/* 缩略图加载失败占位（2026-11-06）：img onError 此前静默，授权失配/
+   文件缺失整盒空白无从分辨。样式随媒体盒（暗底圆角），文案居中可读。 */
+.fc-root .fc-media-broken {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  width: 100%;
+  min-height: 64px;
+  padding: 10px 12px;
+  box-sizing: border-box;
+  border-radius: 10px;
+  background: #090909;
+  color: var(--text-secondary);
+  font-size: 11.5px;
+}
+.fc-root .fc-media-broken svg {
+  width: 15px;
+  height: 15px;
+  flex: none;
+  color: var(--text-tertiary);
+}

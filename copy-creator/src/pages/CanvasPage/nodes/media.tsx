@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { useTranslation } from "react-i18next";
 import { Icons } from "../../../components/Icons";
 import { MediaPlayback } from "../../../components/MediaPlayback";
 import { resolveCanvasMediaPath, resolveCanvasMediaUrl } from "./mediaPath";
@@ -14,14 +15,20 @@ import { resolveCanvasMediaPath, resolveCanvasMediaUrl } from "./mediaPath";
  *  视频侧修复前同病），onLoad 读 naturalWidth/Height 后把宽度收敛到
  *  「容器宽与 330px 高帽按比例换算的较小值」并锁 aspect-ratio，与
  *  MediaPlayback 的 ratioFit 同一公式（直接复用同套几何）。url 经异步
- *  解析后才赋给 src，onLoad 监听必先就位，缓存图也不会漏计。 */
+ *  解析后才赋给 src，onLoad 监听必先就位，缓存图也不会漏计。
+ *  加载失败给可见占位（2026-11-06）：此前 onError 静默，盘选文件授权
+ *  失配/文件缺失时整盒空白（用户无法分辨「没加载」与「加载失败」），
+ *  与 MediaPlayback 的失败态同一处理哲学。 */
 export function ResourceThumb({ path, className, ratioFit = false }: { path: string; className?: string; ratioFit?: boolean }) {
+  const { t } = useTranslation();
   const [url, setUrl] = useState<string | null>(null);
   const [ratio, setRatio] = useState<{ w: number; h: number } | null>(null);
+  const [failed, setFailed] = useState(false);
   useEffect(() => {
     let alive = true;
     setUrl(null);
     setRatio(null);
+    setFailed(false);
     resolveCanvasMediaUrl(path)
       .then((u) => {
         if (alive) setUrl(u);
@@ -40,6 +47,14 @@ export function ResourceThumb({ path, className, ratioFit = false }: { path: str
         }
       : undefined;
   if (!url) return null;
+  if (failed) {
+    return (
+      <span className={`fc-media-broken${className ? ` ${className}` : ""}`}>
+        {Icons.image}
+        {t("canvas.mediaBroken")}
+      </span>
+    );
+  }
   return (
     <img
       className={className}
@@ -47,6 +62,7 @@ export function ResourceThumb({ path, className, ratioFit = false }: { path: str
       src={url}
       alt=""
       draggable={false}
+      onError={() => setFailed(true)}
       onLoad={(e) => {
         const el = e.currentTarget;
         setRatio({ w: el.naturalWidth, h: el.naturalHeight });

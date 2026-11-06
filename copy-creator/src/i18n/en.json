@@ -1010,6 +1010,7 @@
     "loadFromLibrary": "Library",
     "loadFromFile": "Local file",
     "loadEmpty": "No media loaded",
+    "mediaBroken": "Media failed to load — reselect the file",
     "loadTypeMismatch": "The selected file type doesn't match this node",
     "clearLoaded": "Remove loaded file",
     "waitingUpstream": "Connected — waiting for upstream output",

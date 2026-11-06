@@ -336,6 +336,37 @@ pub(crate) fn delete_node(conn: &Connection, id: &str) -> Result<(), String> {
     Ok(())
 }
 
+/// 画布节点引用的媒体路径全集（resource_path + metadata.video_path）：
+/// 媒体服务启动扫描用——外部文件（盘选/拖入）的授权曾只存内存，升级或
+/// 重启后历史引用全部 404，按节点引用自愈补登记，免逐个重选。
+pub(crate) fn canvas_referenced_media_paths<R: Runtime>(app: &AppHandle<R>) -> Vec<String> {
+    let state = app.state::<DbState>();
+    let Ok(conn) = state.conn.lock() else {
+        return Vec::new();
+    };
+    let mut out = Vec::new();
+    let Ok(mut stmt) = conn.prepare("SELECT resource_path, metadata FROM canvas_nodes") else {
+        return out;
+    };
+    let Ok(mut rows) = stmt.query([]) else {
+        return out;
+    };
+    while let Ok(Some(row)) = rows.next() {
+        let Ok(resource) = row.get::<_, String>(0) else { continue };
+        if !resource.trim().is_empty() {
+            out.push(resource);
+        }
+        let Ok(meta) = row.get::<_, String>(1) else { continue };
+        let Ok(value) = serde_json::from_str::<serde_json::Value>(&meta) else { continue };
+        if let Some(video) = value.get("video_path").and_then(|v| v.as_str()) {
+            if !video.trim().is_empty() {
+                out.push(video.to_string());
+            }
+        }
+    }
+    out
+}
+
 /// 建连线（类型化端口语义）：to_port 记落点输入口 id（如 "text"/"image"），
 /// 前端做类型匹配校验，落库只防同源重复（UNIQUE + INSERT OR IGNORE）。
 /// 返回落库后的那行（新建或既有）。两端节点必须同画布。

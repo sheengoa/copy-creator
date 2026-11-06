@@ -60,9 +60,12 @@ pub fn spawn<R: Runtime>(app: &AppHandle<R>) {
     });
     log::info!("[media-server] listening on {origin}");
 
-    // 启动恢复落库的外部媒体授权清单（盘选/拖入文件的跨会话预览）。
+    // 启动恢复落库的外部媒体授权清单（盘选/拖入文件的跨会话预览）；
+    // 再按画布节点已引用的路径自愈补登记——旧版本盘选授权只存内存且
+    // 登记形态（反斜杠）与落库引用（正斜杠）失配，历史节点重启即 404。
     // init_db 先于本函数执行，DbState 必已就绪。
     restore_authorized_external_files(app);
+    authorize_canvas_referenced_files(app);
 
     let app = app.clone();
     std::thread::spawn(move || {
@@ -128,6 +131,9 @@ fn handle_connection<R: Runtime>(
         return write_simple_response(&stream, 400, "Bad Request");
     };
     let Some(local_path) = resolve_media_file(app, raw_path) else {
+        // 404 原因留痕：未授权（管理目录外且不在清单）或文件缺失，现场
+        // 排障看日志即可分辨，不必再猜。
+        log::warn!("[media-server] 404：路径未获授权或文件缺失 path={raw_path}");
         return write_simple_response(&stream, 404, "Not Found");
     };
     let Ok(metadata) = std::fs::metadata(&local_path) else {
@@ -304,20 +310,22 @@ const AUTHORIZED_MEDIA_KEY: &str = "canvas_authorized_media";
 /// 清单上限（FIFO 淘汰最旧）：只作引用预览，历史路径无限累积无意义。
 const AUTHORIZED_MEDIA_CAP: usize = 500;
 
-/// 授权路径归一：剥 Windows canonicalize 残留的 `\\?\` / `\\?\UNC\`
-/// 扩展前缀。登记侧（对话框返回值）与请求侧（前端 resolveAbsoluteResourcePath
-/// 已剥前缀）必须落在同一形态上，前缀差异不能成为 404 的暗坑。
+/// 授权路径归一：① 剥 Windows canonicalize 残留的 `\\?\` / `\\?\UNC\`
+/// 扩展前缀；② `\` 统一转 `/`——与节点行落库归一（normalize_project_path）
+/// 同形：对话框登记的是反斜杠路径，节点行回读的是正斜杠路径，两侧必须
+/// 落在同一形态上，否则精确全等匹配必然失约（盘选预览 404 的真根因）。
 fn normalize_external_path(value: &str) -> String {
     let trimmed = value.trim();
     let lower = trimmed.to_ascii_lowercase();
     // 前缀均为 ASCII，按字符数切原串不越字节界。
-    if lower.starts_with(r"\\?\unc\") {
+    let stripped = if lower.starts_with(r"\\?\unc\") {
         format!("\\\\{}", &trimmed[8..])
     } else if lower.starts_with(r"\\?\") {
         trimmed[4..].to_string()
     } else {
         trimmed.to_string()
-    }
+    };
+    stripped.replace('\\', "/")
 }
 
 fn is_authorized_external_path(path: &std::path::Path) -> bool {
@@ -366,6 +374,23 @@ pub fn restore_authorized_external_files<R: Runtime>(app: &AppHandle<R>) {
     let set = guard.get_or_insert_with(std::collections::HashSet::new);
     for path in list {
         set.insert(normalize_external_path(&path));
+    }
+}
+
+/// 画布节点已引用的外部媒体自愈：遍历节点行 resource_path 与
+/// metadata.video_path，存在的管理目录外文件补登记（只增授权面，不碰
+/// 节点数据；管理目录内的文件本就放行，跳过）。
+pub fn authorize_canvas_referenced_files<R: Runtime>(app: &AppHandle<R>) {
+    for raw in db::canvas_referenced_media_paths(app) {
+        let normalized = normalize_external_path(&raw);
+        if normalized.is_empty() {
+            continue;
+        }
+        let path = std::path::PathBuf::from(&normalized);
+        if !path.is_file() || db::is_app_managed_path(app, &path) {
+            continue;
+        }
+        authorize_external_file(app, &normalized);
     }
 }
 
@@ -742,8 +767,7 @@ mod media_serving_tests {
     use std::sync::Mutex;
     use tauri::Manager;
 
-    pub(crate) fn encode_query_value(value: &str) -> String {
-        let mut out = String::new();
+    pub(crate) fn encode_query_value(value: &str) -> String {        let mut out = String::new();
         for byte in value.as_bytes() {
             match byte {
                 b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'_' | b'.' | b'~' | b'/' => {
@@ -755,7 +779,7 @@ mod media_serving_tests {
         out
     }
 
-    fn http_get(origin: &str, target: &str) -> (u16, String, Vec<u8>) {
+    pub(crate) fn http_get(origin: &str, target: &str) -> (u16, String, Vec<u8>) {
         let address = origin.trim_start_matches("http://");
         let mut stream = std::net::TcpStream::connect(address).unwrap();
         let request = format!("GET {target} HTTP/1.1\r\nHost: 127.0.0.1\r\nConnection: close\r\n\r\n");
@@ -873,28 +897,40 @@ mod media_serving_tests {
 #[cfg(test)]
 mod external_authorization_tests {
     use super::{
-        authorize_external_file, is_authorized_external_path, normalize_external_path,
-        restore_authorized_external_files, AUTHORIZED_EXTERNAL_FILES,
+        authorize_canvas_referenced_files, authorize_external_file, is_authorized_external_path,
+        normalize_external_path, restore_authorized_external_files, spawn, MediaServerState,
+        AUTHORIZED_EXTERNAL_FILES,
     };
-    use crate::db::{get_setting_sync, DbState};
+    use super::media_serving_tests::{encode_query_value, http_get};
+    use crate::db::canvas_referenced_media_paths;
+    use crate::db::{ensure_schema, get_setting_sync, DbState};
+    use std::sync::Mutex;
     use tauri::Manager;
 
+    /// 触碰全局授权集合的测试串行执行：并行测试共享进程级集合，清空/
+    /// 恢复操作会互相踩踏。
+    static AUTH_TEST_SEQ: Mutex<()> = Mutex::new(());
+
     #[test]
-    fn normalize_strips_windows_extended_prefixes() {
-        assert_eq!(normalize_external_path(r"\\?\C:\a\b.png"), r"C:\a\b.png");
+    fn normalize_unifies_prefixes_and_separators() {
+        // 落库归一（normalize_project_path）把 `\` 换 `/`：请求侧永远是
+        // 正斜杠形态，登记侧（对话框返回反斜杠）必须归一到同一形态。
+        assert_eq!(normalize_external_path(r"\\?\C:\a\b.png"), "C:/a/b.png");
         assert_eq!(
             normalize_external_path(r"\\?\UNC\server\share\a.png"),
-            r"\\server\share\a.png"
+            "//server/share/a.png"
         );
-        assert_eq!(normalize_external_path(r"C:\a\b.png"), r"C:\a\b.png");
-        assert_eq!(normalize_external_path("  C:\\a\\b.png  "), r"C:\a\b.png");
+        assert_eq!(normalize_external_path(r"C:\a\b.png"), "C:/a/b.png");
+        assert_eq!(normalize_external_path("C:/a/b.png"), "C:/a/b.png");
+        assert_eq!(normalize_external_path("  C:\\a\\b.png  "), "C:/a/b.png");
     }
 
     /// 盘选/拖入的外部媒体授权：登记即时生效并落库；模拟重启（运行时
-    /// 清单清空）后从 settings 恢复，预览不再 404。verbatim `\\?\` 变体
-    /// 与剥前缀形态在归一后互相命中。
+    /// 清单清空）后从 settings 恢复，预览不再 404。对话框反斜杠、verbatim
+    /// 前缀、落库正斜杠三种形态在归一后互相命中。
     #[test]
     fn authorization_persists_across_restart() {
+        let _seq = AUTH_TEST_SEQ.lock().unwrap();
         let app = tauri::test::mock_app();
         {
             let conn = rusqlite::Connection::open_in_memory().unwrap();
@@ -910,9 +946,13 @@ mod external_authorization_tests {
 
         let picked = r"C:\Users\someone\Pictures\盘选图.png";
         authorize_external_file(app.handle(), picked);
+        // 反斜杠（对话框原样）、verbatim 前缀、正斜杠（落库回读）都命中。
         assert!(is_authorized_external_path(std::path::Path::new(picked)));
         assert!(is_authorized_external_path(std::path::Path::new(
             r"\\?\C:\Users\someone\Pictures\盘选图.png"
+        )));
+        assert!(is_authorized_external_path(std::path::Path::new(
+            "C:/Users/someone/Pictures/盘选图.png"
         )));
         let stored = get_setting_sync(app.handle(), "canvas_authorized_media")
             .unwrap_or_default();
@@ -930,5 +970,103 @@ mod external_authorization_tests {
             .unwrap_or_default();
         let list: Vec<String> = serde_json::from_str(&stored).unwrap();
         assert_eq!(list.len(), 1);
+    }
+
+    /// 端到端：磁盘选片的真实形态全链路——对话框返回反斜杠路径授权 →
+    /// 落库经 normalize_project_path 存正斜杠 → 前端以正斜杠路径构造
+    /// 媒体 URL → 服务放行返回完整字节。此前的失配正是盘选预览 404
+    /// 的真根因（授权存反斜杠、请求带正斜杠）。
+    #[test]
+    fn serves_authorized_external_file_picked_via_dialog() {
+        let _seq = AUTH_TEST_SEQ.lock().unwrap();
+        let app = tauri::test::mock_app();
+        let conn = rusqlite::Connection::open_in_memory().unwrap();
+        ensure_schema(&conn).unwrap();
+        app.manage(DbState { conn: Mutex::new(conn) });
+
+        // 管理目录之外的「用户文件」。
+        let dir = std::env::temp_dir().join(format!(
+            "copy-creator-ext-media-{}",
+            uuid::Uuid::new_v4()
+        ));
+        std::fs::create_dir_all(&dir).unwrap();
+        let png_bytes: [u8; 8] = [0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A];
+        let picked = dir.join("盘选图.png");
+        std::fs::write(&picked, png_bytes).unwrap();
+
+        // ① 对话框形态登记（反斜杠）。
+        authorize_external_file(app.handle(), picked.to_string_lossy().as_ref());
+        // ② 落库形态（normalize_project_path → 正斜杠）也必须命中。
+        let stored_form = picked.to_string_lossy().replace('\\', "/");
+        assert!(is_authorized_external_path(std::path::Path::new(&stored_form)));
+
+        spawn(app.handle());
+        let (origin, token) = {
+            let state = app.state::<MediaServerState>();
+            (state.origin.clone(), state.token.clone())
+        };
+        // ③ 前端 URL：正斜杠路径 + encodeURIComponent 语义。
+        let (status, _, body) = http_get(
+            &origin,
+            &format!(
+                "/media?token={}&path={}",
+                encode_query_value(&token),
+                encode_query_value(&stored_form)
+            ),
+        );
+        assert_eq!(status, 200, "盘选文件必须可预览");
+        assert_eq!(body, png_bytes);
+
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    /// 启动自愈：旧版本盘选的节点（授权从未落库且形态失配）重启后由
+    /// 节点引用扫描补登记，预览恢复，无需逐个重选。
+    #[test]
+    fn startup_scan_heals_canvas_referenced_files() {
+        let _seq = AUTH_TEST_SEQ.lock().unwrap();
+        let app = tauri::test::mock_app();
+        let conn = rusqlite::Connection::open_in_memory().unwrap();
+        ensure_schema(&conn).unwrap();
+        app.manage(DbState { conn: Mutex::new(conn) });
+
+        let dir = std::env::temp_dir().join(format!(
+            "copy-creator-heal-media-{}",
+            uuid::Uuid::new_v4()
+        ));
+        std::fs::create_dir_all(&dir).unwrap();
+        let healed = dir.join("旧盘选.png");
+        std::fs::write(&healed, b"png").unwrap();
+
+        // 模拟旧数据：节点行引用该文件（落库正斜杠形态），授权清单为空。
+        {
+            let handle = app.handle();
+            let state = handle.state::<DbState>();
+            let conn = state.conn.lock().unwrap();
+            let stored = healed.to_string_lossy().replace('\\', "/");
+            conn.execute(
+                "INSERT INTO canvases (id, name, viewport_x, viewport_y, viewport_k, groups, created_at, updated_at)
+                 VALUES ('c1', '画布', 0, 0, 1, '[]', '2026-01-01', '2026-01-01')",
+                [],
+            )
+            .unwrap();
+            conn.execute(
+                "INSERT INTO canvas_nodes (id, canvas_id, type, title, pos_x, pos_y, width, height, metadata, resource_path, created_at, updated_at)
+                 VALUES ('n1', 'c1', 'load_image', '', 0, 0, NULL, NULL, '{}', ?1, '2026-01-01', '2026-01-01')",
+                rusqlite::params![stored],
+            )
+            .unwrap();
+        }
+
+        let refs = canvas_referenced_media_paths(app.handle());
+        assert_eq!(refs.len(), 1);
+        *AUTHORIZED_EXTERNAL_FILES.lock().unwrap() = None;
+        authorize_canvas_referenced_files(app.handle());
+        assert!(
+            is_authorized_external_path(std::path::Path::new(&healed)),
+            "节点引用的外部文件应被自愈授权"
+        );
+
+        std::fs::remove_dir_all(&dir).ok();
     }
 }
