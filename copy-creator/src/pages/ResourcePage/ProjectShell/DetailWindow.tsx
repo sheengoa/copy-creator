@@ -52,6 +52,8 @@ export interface DetailWindowOps {
   setAvatar(character: ProjectCharacter, refPath: string): void;
   /** 三库参考图集整体覆写（详情窗添加/移除；kind: character|location|prop）。 */
   setReferences(kind: EntityPhKind, id: string, paths: string[]): void;
+  /** 窗内跳转其它详情（输入卡点击展开：实体/组/片段窗互跳）。 */
+  openDetail(target: DetailTarget): void;
   /** 装入占位实体（关联到集 + 暂存线转正 + 占位移除）。 */
   loadEntity(ephId: string, kind: EntityPhKind, entityId: string): void;
   /** 移除片段输入（正式行/暂存线分派）。 */
@@ -353,42 +355,36 @@ function EntityDetail({ group, sourceKey, ops }: { group: EntityPhKind; sourceKe
   );
 }
 
-/** 输入行缩略图：实体取头像/参考图（组行=成员头像堆叠，最多 3 张），
- *  文本类（提示词/剧本）与暂存占位给图标块——详情窗是预览窗，行内必须
- *  能直接看到挂的是什么素材（用户反馈）。 */
+/** 输入行缩略图路径：实体取头像/参考图，文本类与暂存占位无图。 */
 function linkThumbPath(kind: string, id: string, ops: DetailWindowOps): string {
   if (kind === "character") return ops.characters.find((c) => c.id === id)?.avatar_path ?? "";
-  if (kind === "location") return ops.locations.find((l) => l.id === id)?.ref_path ?? "";
-  if (kind === "prop") return ops.props.find((p) => p.id === id)?.ref_path ?? "";
+  if (kind === "location") {
+    const loc = ops.locations.find((l) => l.id === id);
+    const refs = parseRefs(loc?.reference_paths);
+    return refs[0] ?? loc?.ref_path ?? "";
+  }
+  if (kind === "prop") {
+    const prop = ops.props.find((p) => p.id === id);
+    const refs = parseRefs(prop?.reference_paths);
+    return refs[0] ?? prop?.ref_path ?? "";
+  }
   return "";
 }
 
-function LinkThumb({ kind, id, ops, extraPaths }: { kind: string; id: string; ops: DetailWindowOps; extraPaths?: string[] }) {
-  const paths = extraPaths?.length ? extraPaths : [linkThumbPath(kind, id, ops)];
-  const hasImage = paths.some(Boolean);
-  if (!hasImage) {
-    return (
-      <span className={`pdetail-row-thumb is-icon${kind === "prompt" || kind === "script" ? "" : " is-empty"}`}>
-        {kind === "prompt" || kind === "script" ? Icons.file : Icons.image}
-      </span>
-    );
+/** JSON 数组安全解析（三库 reference_paths，非法/缺省按空）。 */
+function parseRefs(raw: string | undefined): string[] {
+  try {
+    const list = JSON.parse(raw ?? "[]") as unknown;
+    return Array.isArray(list) ? list.filter((p): p is string => typeof p === "string") : [];
+  } catch {
+    return [];
   }
-  return (
-    <span className="pdetail-row-thumb is-stack">
-      {paths.filter(Boolean).slice(0, 3).map((p, i) => (
-        <ResourceFileImage
-          key={`${p}-${i}`}
-          path={joinLibraryPath(ops.libraryRoot, p)}
-          alt=""
-          className="pdetail-row-thumbimg"
-        />
-      ))}
-    </span>
-  );
 }
 
 /** 片段输入分组：按口聚合（角色/场景/道具/提示词/剧本/其他），组头计数
- *  + 折叠；行=缩略图 + 承载节点名（组行展开成员）+ 移除。 */
+ *  + 折叠；卡片网格呈现（与参考图卡同形态：16:10 预览 + 名称 + 移除），
+ *  点卡片本体跳转对应详情窗（点击展开预览，用户定案）。组卡显示成员数
+ *  与成员名，预览=成员图堆叠；暂存占位卡=虚线图标块。 */
 function SegmentInputs({ segmentId, ops }: { segmentId: string; ops: DetailWindowOps }) {
   const { t } = useTranslation();
   const rows = ops.nodeLinks.filter((l) => l.to_segment === segmentId);
@@ -428,28 +424,52 @@ function SegmentInputs({ segmentId, ops }: { segmentId: string; ops: DetailWindo
         return (
           <DetailSection key={port.id} label={port.label} count={total} foldable defaultFold={false}>
             <div className="pdetail-dot" style={{ background: port.color }} />
-            <div className="pdetail-rows">
+            <div className="pdetail-ingrid">
               {portRows.map((row) => {
                 const owner = row.owner_key ?? "";
                 const isGroup = owner.startsWith("grp:");
                 const members = isGroup
                   ? (ops.overview?.node_links ?? []).filter((l) => l.owner_key === owner && l.to_segment === segmentId && l.to_port === row.to_port)
                   : [row];
+                const paths = members
+                  .map((m) => linkThumbPath(m.from_kind, m.from_id, ops))
+                  .filter(Boolean)
+                  .slice(0, 3);
+                const isText = row.from_kind === "script";
+                const openCard = () => {
+                  if (row.from_kind === "character" || row.from_kind === "location" || row.from_kind === "prop") {
+                    const prefix = row.from_kind === "character" ? "char" : row.from_kind === "location" ? "loc" : "prop";
+                    ops.openDetail({ kind: "info", group: row.from_kind as EntityPhKind, sourceKey: isGroup ? owner : `${prefix}:${row.from_id}` });
+                  } else if (row.from_kind === "segment" || row.from_kind === "shot") {
+                    ops.openDetail({ kind: "segment", id: row.from_id });
+                  }
+                };
+                const openable = ["character", "location", "prop", "segment", "shot"].includes(row.from_kind);
                 return (
-                  <div key={row.id} className="pdetail-row">
-                    <LinkThumb
-                      kind={row.from_kind}
-                      id={row.from_id}
-                      ops={ops}
-                      extraPaths={isGroup ? members.map((m) => linkThumbPath(m.from_kind, m.from_id, ops)) : undefined}
-                    />
-                    <span className="pdetail-row-name">
-                      {isGroup ? t("project.detail.groupLine", { n: members.length }) : nameOf(row.from_kind, row.from_id)}
-                      {isGroup && <small className="pdetail-row-members">{members.map((m) => nameOf(m.from_kind, m.from_id)).join(" · ")}</small>}
-                    </span>
+                  <div key={row.id} className={`pdetail-incard${openable ? " is-openable" : ""}`}>
                     <button
                       type="button"
-                      className="pdetail-row-x"
+                      className="pdetail-incard-view"
+                      onClick={openable ? openCard : undefined}
+                      aria-label={isGroup ? t("project.detail.groupLine", { n: members.length }) : nameOf(row.from_kind, row.from_id)}
+                    >
+                      {paths.length > 0 ? (
+                        paths.map((p, i) => (
+                          <ResourceFileImage key={`${p}-${i}`} path={joinLibraryPath(ops.libraryRoot, p)} alt="" className="pdetail-incard-img" />
+                        ))
+                      ) : (
+                        <span className="pdetail-incard-fallback">{isText ? Icons.file : Icons.image}</span>
+                      )}
+                    </button>
+                    <div className="pdetail-incard-meta">
+                      <b className="pdetail-incard-name" title={isGroup ? t("project.detail.groupLine", { n: members.length }) : nameOf(row.from_kind, row.from_id)}>
+                        {isGroup ? t("project.detail.groupLine", { n: members.length }) : nameOf(row.from_kind, row.from_id)}
+                      </b>
+                      {isGroup && <small className="pdetail-incard-members">{members.map((m) => nameOf(m.from_kind, m.from_id)).join(" · ")}</small>}
+                    </div>
+                    <button
+                      type="button"
+                      className="pdetail-incard-x"
                       onClick={() => ops.removeLink({ pending: false, fromKey: row.from_id, toSegment: segmentId, toPort: row.to_port, ownerKey: row.owner_key ?? "", rowId: row.id })}
                     >
                       {t("project.detail.remove")}
@@ -458,12 +478,16 @@ function SegmentInputs({ segmentId, ops }: { segmentId: string; ops: DetailWindo
                 );
               })}
               {portPends.map((p) => (
-                <div key={`pend-${p.fromKey}`} className="pdetail-row is-pending">
-                  <span className="pdetail-row-thumb is-icon is-empty">{Icons.image}</span>
-                  <span className="pdetail-row-name">{pendingFromLabel(p.fromKey)}</span>
+                <div key={`pend-${p.fromKey}`} className="pdetail-incard is-pending">
+                  <span className="pdetail-incard-view is-static">
+                    <span className="pdetail-incard-fallback">{Icons.image}</span>
+                  </span>
+                  <div className="pdetail-incard-meta">
+                    <b className="pdetail-incard-name">{pendingFromLabel(p.fromKey)}</b>
+                  </div>
                   <button
                     type="button"
-                    className="pdetail-row-x"
+                    className="pdetail-incard-x"
                     onClick={() => ops.removeLink({ pending: true, fromKey: p.fromKey, toSegment: segmentId, toPort: p.toPort, ownerKey: "" })}
                   >
                     {t("project.detail.remove")}

@@ -646,6 +646,7 @@ export default function ProjectCanvasShell({
       setScriptPickTarget(key);
       setScriptPickOpen(true);
     },
+    openDetail: (target) => setDetailFor(target),
     onClose: closeDetail,
   };
 

@@ -37,6 +37,7 @@ function makeOps(overrides: Partial<DetailWindowOps> = {}): DetailWindowOps {
     setVoice: vi.fn(),
     setAvatar: vi.fn(),
     setReferences: vi.fn(),
+    openDetail: vi.fn(),
     loadEntity: vi.fn(),
     removeLink: vi.fn(),
     attachEntities: vi.fn(),
@@ -121,11 +122,13 @@ describe("DetailWindow", () => {
     );
   });
 
-  it("输入行素材缩略图：角色行显示头像图；参考图空的角色详情回退显示头像", () => {
+  it("输入卡预览：角色输入卡显示头像图，点击卡片路由 openDetail 展开实体窗", () => {
+    const openDetail = vi.fn();
     render(
       <ProjectDetailWindow
         target={{ kind: "segment", id: "seg-1" }}
         ops={makeOps({
+          openDetail,
           segments: [
             { id: "seg-1", episode_id: "e1", asset_id: null, sort_order: 0, note: "", canvas_x: null, canvas_y: null, created_at: "", updated_at: "" },
           ],
@@ -136,7 +139,9 @@ describe("DetailWindow", () => {
         })}
       />,
     );
-    expect(document.querySelectorAll(".pdetail-row-thumbimg").length).toBe(1);
+    expect(document.querySelectorAll(".pdetail-incard-img").length).toBe(1);
+    fireEvent.click(document.querySelector(".pdetail-incard-view") as HTMLElement);
+    expect(openDetail).toHaveBeenCalledWith({ kind: "info", group: "character", sourceKey: "char:char-2" });
   });
 
   it("参考图管理：段头「添加参考图」开选择浮层，选图路由 setReferences 追加；移除路由过滤后覆写", () => {
