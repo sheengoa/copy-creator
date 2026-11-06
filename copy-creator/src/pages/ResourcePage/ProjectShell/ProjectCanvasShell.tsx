@@ -633,7 +633,8 @@ export default function ProjectCanvasShell({
     },
     loadEntity: (ephId, kind, entityId) => {
       // 装入：先关联到集（概览带出实体节点），再把该占位的暂存线转正为
-      // node_link（语义对齐旧占位转正），最后移除占位、跳到实体详情。
+      // node_link（语义对齐旧占位转正），最后移除占位。装入选完即关窗
+      // （用户实测「点完了窗口就消失，之后双击节点再看详情」）。
       void (async () => {
         if (kind === "character") await setEpisodeCharacters(episodeId, [...new Set([...(overview?.episode.character_ids ?? []), entityId])]);
         else if (kind === "location") await setEpisodeLocations(episodeId, [...new Set([...(overview?.episode.location_ids ?? []), entityId])]);
@@ -644,10 +645,8 @@ export default function ProjectCanvasShell({
         }
         persistPendingLinks(pendingLinks.filter((l) => l.fromKey !== phKey));
         data.persistEntityPhs(data.entityPhs.filter((ph) => ph.id !== ephId));
-        // 占位装入也是窗内跳转：压栈占位窗语义（此处占位窗已随装入消失，
-        // 直接压当前窗保持返回链可用）。
-        setDetailBack((s) => (detailFor ? [...s, detailFor] : s));
-        setDetailFor({ kind: "info", group: kind, sourceKey: `${kind === "character" ? "char" : kind === "location" ? "loc" : "prop"}:${entityId}` });
+        setDetailFor(null);
+        setDetailBack([]);
       })();
     },
     removeLink: (row) => {

@@ -25,12 +25,17 @@ function entityOf(ctx: ReturnType<typeof useProjectCanvas>, kind: EntityPhKind, 
   return (episodeList.find((e) => e.id === id) ?? globalList.find((e) => e.id === id)) as EntityLike | undefined;
 }
 
-/** 实体参考图卡：首图大卡 + 类型色淡底首字占位（同一卡片形态）。 */
+/** 实体参考图卡：定框 + 虚影 + 主图 contain（用户定案「节点里限制一个
+ *  具体的框，保持比例完整展示，多余空间上下虚影」，头像/主图切换同规）。
+ *  无图 = 类型色淡底首字占位（同一卡片形态）。 */
 function PhotoMain({ name, refPath }: { name: string; refPath: string }) {
   const { t } = useTranslation();
   const libraryRoot = useProjectCanvas().libraryRoot;
   return refPath ? (
-    <ResourceImage path={joinLibraryPath(libraryRoot, refPath)} alt={name} className="pc-photo-img" />
+    <>
+      <ResourceImage path={joinLibraryPath(libraryRoot, refPath)} alt="" className="pc-photo-ghost" />
+      <ResourceImage path={joinLibraryPath(libraryRoot, refPath)} alt={name} className="pc-photo-img" />
+    </>
   ) : (
     <>
       <span className="pc-photo-init">{characterAvatarInitial(name)}</span>
