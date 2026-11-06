@@ -1192,6 +1192,12 @@ pub(crate) fn ensure_schema(conn: &Connection) -> Result<(), Box<dyn std::error:
     // 补列，存量行回填 '[]'；主图 ref_path 语义不变（生成链路兼容）。
     ensure_column(conn, "project_locations", "reference_paths", "TEXT NOT NULL DEFAULT '[]'");
     ensure_column(conn, "project_props", "reference_paths", "TEXT NOT NULL DEFAULT '[]'");
+    // 每图绑定（形象卡：一张图对应一份音色/人设/提示词，方案 A 默认兜底
+    // ——未绑定或字段为空回退实体级列，用户定案 2026-11-06）：三库幂等
+    // 补列，存量行回填 '[]'（= 全部跟随默认，行为与旧版一致）。
+    ensure_column(conn, "project_characters", "image_bindings", "TEXT NOT NULL DEFAULT '[]'");
+    ensure_column(conn, "project_locations", "image_bindings", "TEXT NOT NULL DEFAULT '[]'");
+    ensure_column(conn, "project_props", "image_bindings", "TEXT NOT NULL DEFAULT '[]'");
     ensure_column(conn, "project_shots", "status", "TEXT NOT NULL DEFAULT 'none'");
     ensure_column(conn, "project_shots", "camera", "TEXT NOT NULL DEFAULT ''");
     ensure_column(conn, "project_shots", "duration", "TEXT NOT NULL DEFAULT ''");

@@ -135,6 +135,18 @@ function handleInvoke(cmd: string, args: Record<string, unknown>): unknown {
         }
         return null;
       }
+    case "project_set_image_bindings":
+      {
+        // 每图绑定（形象卡方案 A）：按 kind 分派整体覆写（后端序列化会按
+        // path 去重归一，mock 直存即可）。
+        const table = args.kind === "character" ? db.characters : args.kind === "location" ? db.locations : db.props;
+        const row = (table as Array<Record<string, unknown>>).find((r) => r.id === args.id);
+        if (row) {
+          row.image_bindings = JSON.stringify(args.bindings ?? []);
+          row.updated_at = ts();
+        }
+        return null;
+      }
     case "project_create_location":
       db.locations.push({ id: nextId("loc"), name: String(args.name ?? ""), int_ext: String(args.intExt ?? ""), time_hint: String(args.timeHint ?? ""), bio: String(args.bio ?? ""), prompt: String(args.prompt ?? ""), ref_path: String(args.refPath ?? ""), created_at: ts(), updated_at: ts() });
       return null;
@@ -747,7 +759,17 @@ function handleInvoke(cmd: string, args: Record<string, unknown>): unknown {
         if (row.enabled) {
           row.status = "normal";
           row.lastError = "";
+          row.cooldownUntilMs = 0;
         }
+      }
+      return null;
+    }
+    case "restore_ai_channel": {
+      const row = db.ai_channels.find((c) => c.id === args.id);
+      if (row) {
+        row.status = "normal";
+        row.lastError = "";
+        row.cooldownUntilMs = 0;
       }
       return null;
     }

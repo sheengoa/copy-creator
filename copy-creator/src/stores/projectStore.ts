@@ -35,6 +35,17 @@ export interface ProjectEpisode {
   output_asset_id: string | null;
 }
 
+/** 每图绑定条目（形象卡方案 A）：一张形象图对应的一份数据（角色=音色+
+ *  人设+提示词；场景=时段+描述+提示词；道具=描述+提示词；字段按类取用，
+ *  落库统一透传）。空字段回退实体级默认列。 */
+export interface ImageBinding {
+  path: string;
+  voice_path: string;
+  bio: string;
+  prompt: string;
+  time_hint: string;
+}
+
 export interface ProjectCharacter {
   id: string;
   name: string;
@@ -45,6 +56,9 @@ export interface ProjectCharacter {
   reference_paths: string;
   /** 音色文件（相对库根；空 = 未设置）。详情窗音色行选择/清除。 */
   voice_path?: string;
+  /** 每图绑定（形象卡方案 A：[{path, voice_path, bio, prompt}]；未绑定/
+   *  空字段回退实体级默认 voice_path/bio/prompt）。 */
+  image_bindings?: string;
   episode_ref_count?: number;
   created_at: string;
   updated_at: string;
@@ -60,6 +74,9 @@ export interface ProjectLocation {
   ref_path: string;
   /** 参考图集（JSON 数组；详情窗大图预览，素材天然多张无上限）。 */
   reference_paths?: string;
+  /** 每图绑定（形象卡方案 A：[{path, voice_path, bio, prompt}]，角色用
+   *  voice_path，场景/道具恒空；未绑定/空字段回退实体级默认）。 */
+  image_bindings?: string;
   created_at: string;
   updated_at: string;
 }
@@ -72,6 +89,9 @@ export interface ProjectProp {
   ref_path: string;
   /** 参考图集（JSON 数组；详情窗大图预览，素材天然多张无上限）。 */
   reference_paths?: string;
+  /** 每图绑定（形象卡方案 A：[{path, voice_path, bio, prompt}]，角色用
+   *  voice_path，场景/道具恒空；未绑定/空字段回退实体级默认）。 */
+  image_bindings?: string;
   created_at: string;
   updated_at: string;
 }
@@ -255,6 +275,8 @@ interface ProjectStoreState {
   setCharacterVoice: (id: string, voicePath: string) => Promise<void>;
   /** 只改三库实体参考图集（详情窗大图列表添加/移除；kind: character|location|prop）。 */
   setReferences: (kind: "character" | "location" | "prop", id: string, paths: string[]) => Promise<void>;
+  /** 只改三库实体每图绑定（形象卡独立开关/音色/人设/提示词编辑，整体覆写）。 */
+  setImageBindings: (kind: "character" | "location" | "prop", id: string, bindings: ImageBinding[]) => Promise<void>;
 
   loadLocations: () => Promise<void>;
   saveLocation: (
@@ -710,6 +732,19 @@ export const useProjectStore = create<ProjectStoreState>((set, get) => ({
       if (currentEpisodeId) await get().selectEpisode(currentEpisodeId);
     } catch (error) {
       console.error("project_set_references:", error);
+    }
+  },
+
+  setImageBindings: async (kind, id, bindings) => {
+    try {
+      await invoke("project_set_image_bindings", { kind, id, bindings });
+      if (kind === "character") await get().loadCharacters();
+      else if (kind === "location") await get().loadLocations();
+      else await get().loadProps();
+      const { currentEpisodeId } = get();
+      if (currentEpisodeId) await get().selectEpisode(currentEpisodeId);
+    } catch (error) {
+      console.error("project_set_image_bindings:", error);
     }
   },
 

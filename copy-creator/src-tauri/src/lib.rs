@@ -644,6 +644,7 @@ pub fn run() {
             db::project_create_character,
             db::project_set_character_voice,
             db::project_set_references,
+            db::project_set_image_bindings,
             db::project_update_character,
             db::project_delete_character,
             db::project_list_locations,

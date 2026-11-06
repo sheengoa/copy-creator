@@ -7587,6 +7587,84 @@ mod project_tests {
     }
 
     #[test]
+    fn project_image_bindings_roundtrip() {
+        // 三库每图绑定（形象卡方案 A）：set_image_bindings 整体覆写三表的
+        // image_bindings；按 path 去重保序 + 路径归一化；空 path 条目丢弃；
+        // 只保留 path/voice_path/bio/prompt 四字段；空列表清空；实体不存在
+        // 报错；默认兜底语义 = 绑定覆写不动实体级列（旧数据行为不变）。
+        let conn = project_conn();
+        conn.execute(
+            "INSERT INTO project_characters (id, name, role_tag, bio, prompt, avatar_path, voice_path, created_at, updated_at) \
+             VALUES ('c1', '卡哇伊', '', '默认人设', '默认提示词', '', 'kawai.wav', '2026-01-01', '2026-01-01')",
+            [],
+        )
+        .unwrap();
+        conn.execute(
+            "INSERT INTO project_locations (id, name, created_at, updated_at) \
+             VALUES ('l1', '天台', '2026-01-01', '2026-01-01')",
+            [],
+        )
+        .unwrap();
+        let b = |path: &str, voice: &str, bio: &str, prompt: &str, time_hint: &str| {
+            serde_json::json!({ "path": path, "voice_path": voice, "bio": bio, "prompt": prompt, "time_hint": time_hint })
+        };
+        // 角色两条绑定写入 + 读回（保序）。
+        crate::db::project_set_image_bindings_conn(
+            &conn,
+            "character",
+            "c1",
+            &[b("refs/a.png", "v1.wav", "形象一人设", "", ""), b("refs/b.png", "", "形象二人设", "形象二提示词", "")],
+        )
+        .unwrap();
+        let stored: String = conn
+            .query_row("SELECT image_bindings FROM project_characters WHERE id = 'c1'", [], |r| r.get(0))
+            .unwrap();
+        let parsed: Vec<serde_json::Value> = serde_json::from_str(&stored).unwrap();
+        assert_eq!(parsed.len(), 2);
+        assert_eq!(parsed[0]["path"], "refs/a.png");
+        assert_eq!(parsed[0]["voice_path"], "v1.wav");
+        assert_eq!(parsed[1]["prompt"], "形象二提示词");
+        // 去重（同 path 首条保留）+ 空 path 丢弃 + 路径归一化（反斜杠）。
+        crate::db::project_set_image_bindings_conn(
+            &conn,
+            "character",
+            "c1",
+            &[b("refs/a.png", "x.wav", "", "", ""), b("refs\\a.png", "y.wav", "", "", ""), b("", "", "", "", "")],
+        )
+        .unwrap();
+        let stored: String = conn
+            .query_row("SELECT image_bindings FROM project_characters WHERE id = 'c1'", [], |r| r.get(0))
+            .unwrap();
+        let parsed: Vec<serde_json::Value> = serde_json::from_str(&stored).unwrap();
+        assert_eq!(parsed.len(), 1);
+        assert_eq!(parsed[0]["path"], "refs/a.png");
+        assert_eq!(parsed[0]["voice_path"], "x.wav");
+        // 场景可用（时段绑定为场景图的专属字段）+ 空列表清空。
+        crate::db::project_set_image_bindings_conn(&conn, "location", "l1", &[b("refs/night.png", "", "夜行人设", "", "夜")]).unwrap();
+        let stored: String = conn
+            .query_row("SELECT image_bindings FROM project_locations WHERE id = 'l1'", [], |r| r.get(0))
+            .unwrap();
+        let parsed: Vec<serde_json::Value> = serde_json::from_str(&stored).unwrap();
+        assert_eq!(parsed.len(), 1);
+        assert_eq!(parsed[0]["path"], "refs/night.png");
+        assert_eq!(parsed[0]["time_hint"], "夜");
+        crate::db::project_set_image_bindings_conn(&conn, "location", "l1", &[]).unwrap();
+        let stored: String = conn
+            .query_row("SELECT image_bindings FROM project_locations WHERE id = 'l1'", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(stored, "[]");
+        // 默认兜底语义：绑定覆写不动实体级列（旧数据行为不变）。
+        let (bio, voice): (String, String) = conn
+            .query_row("SELECT bio, voice_path FROM project_characters WHERE id = 'c1'", [], |r| Ok((r.get(0)?, r.get(1)?)))
+            .unwrap();
+        assert_eq!(bio, "默认人设");
+        assert_eq!(voice, "kawai.wav");
+        // 未知类别 / 不存在的实体：报错。
+        assert!(crate::db::project_set_image_bindings_conn(&conn, "shot", "s1", &[]).is_err());
+        assert!(crate::db::project_set_image_bindings_conn(&conn, "character", "ghost", &[]).is_err());
+    }
+
+    #[test]
     fn search_matches_description_fields() {
         // 工程搜索除名称/标题外还应命中描述性正文：角色/道具的 bio
         // （剧的 note 同列机制，提示词正文原本已覆盖）。

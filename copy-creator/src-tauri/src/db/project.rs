@@ -48,7 +48,8 @@ CREATE TABLE IF NOT EXISTS project_characters (
     reference_paths TEXT NOT NULL DEFAULT '[]',
     voice_path TEXT NOT NULL DEFAULT '',
     created_at TEXT NOT NULL,
-    updated_at TEXT NOT NULL
+    updated_at TEXT NOT NULL,
+    image_bindings TEXT NOT NULL DEFAULT '[]'
 );
 
 CREATE TABLE IF NOT EXISTS project_locations (
@@ -61,7 +62,8 @@ CREATE TABLE IF NOT EXISTS project_locations (
     ref_path TEXT NOT NULL DEFAULT '',
     reference_paths TEXT NOT NULL DEFAULT '[]',
     created_at TEXT NOT NULL,
-    updated_at TEXT NOT NULL
+    updated_at TEXT NOT NULL,
+    image_bindings TEXT NOT NULL DEFAULT '[]'
 );
 
 CREATE TABLE IF NOT EXISTS project_props (
@@ -72,7 +74,8 @@ CREATE TABLE IF NOT EXISTS project_props (
     ref_path TEXT NOT NULL DEFAULT '',
     reference_paths TEXT NOT NULL DEFAULT '[]',
     created_at TEXT NOT NULL,
-    updated_at TEXT NOT NULL
+    updated_at TEXT NOT NULL,
+    image_bindings TEXT NOT NULL DEFAULT '[]'
 );
 
 CREATE TABLE IF NOT EXISTS project_scenes (
@@ -290,6 +293,7 @@ fn character_row(row: &rusqlite::Row) -> rusqlite::Result<serde_json::Value> {
         "voice_path": row.get::<_, String>(7)?,
         "created_at": row.get::<_, String>(8)?,
         "updated_at": row.get::<_, String>(9)?,
+        "image_bindings": row.get::<_, String>(10)?,
     }))
 }
 
@@ -305,6 +309,7 @@ fn location_row(row: &rusqlite::Row) -> rusqlite::Result<serde_json::Value> {
         "reference_paths": row.get::<_, String>(7)?,
         "created_at": row.get::<_, String>(8)?,
         "updated_at": row.get::<_, String>(9)?,
+        "image_bindings": row.get::<_, String>(10)?,
     }))
 }
 
@@ -318,6 +323,7 @@ fn prop_row(row: &rusqlite::Row) -> rusqlite::Result<serde_json::Value> {
         "reference_paths": row.get::<_, String>(5)?,
         "created_at": row.get::<_, String>(6)?,
         "updated_at": row.get::<_, String>(7)?,
+        "image_bindings": row.get::<_, String>(8)?,
     }))
 }
 
@@ -414,11 +420,11 @@ fn segment_row(row: &rusqlite::Row) -> rusqlite::Result<serde_json::Value> {
 const EPISODE_COLS: &str =
     "id, show_id, number, title, status, script_path, sort_order, created_at, updated_at, output_asset_id";
 const CHARACTER_COLS: &str =
-    "id, name, role_tag, bio, prompt, avatar_path, reference_paths, voice_path, created_at, updated_at";
+    "id, name, role_tag, bio, prompt, avatar_path, reference_paths, voice_path, created_at, updated_at, image_bindings";
 const LOCATION_COLS: &str =
-    "id, name, int_ext, time_hint, bio, prompt, ref_path, reference_paths, created_at, updated_at";
+    "id, name, int_ext, time_hint, bio, prompt, ref_path, reference_paths, created_at, updated_at, image_bindings";
 const PROP_COLS: &str =
-    "id, name, bio, prompt, ref_path, reference_paths, created_at, updated_at";
+    "id, name, bio, prompt, ref_path, reference_paths, created_at, updated_at, image_bindings";
 const SCENE_COLS: &str =
     "id, episode_id, location_id, heading, sort_order, note, created_at, updated_at, canvas_x, canvas_y";
 const SHOT_COLS: &str =
@@ -1137,6 +1143,84 @@ fn serialize_reference_paths(paths: &[String]) -> String {
         .filter(|p| !p.is_empty() && seen.insert(p.clone()))
         .collect();
     serde_json::to_string(&list).unwrap_or_else(|_| "[]".to_string())
+}
+
+/// 每图绑定（方案 A，用户定案）落库序列化：按 path 去重保序（一条图一条
+/// 绑定），只保留 path/voice_path/bio/prompt/time_hint 字段（角色=音色+
+/// 人设+提示词；场景=时段+描述+提示词；道具=描述+提示词；字段按类取用，
+/// 落库统一透传）；空 path 的条目丢弃。未绑定的图由前端回退实体级默认
+/// （voice_path/bio/prompt/time_hint 列），这里不做合并。
+fn serialize_image_bindings(bindings: &[serde_json::Value]) -> String {
+    let mut seen = std::collections::HashSet::new();
+    let list: Vec<serde_json::Value> = bindings
+        .iter()
+        .filter_map(|b| {
+            let path = normalize_project_path(b.get("path").and_then(|v| v.as_str()).unwrap_or(""));
+            if path.is_empty() || !seen.insert(path.clone()) {
+                return None;
+            }
+            let text = |key: &str| {
+                b.get(key)
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("")
+                    .to_string()
+            };
+            Some(serde_json::json!({
+                "path": path,
+                "voice_path": text("voice_path"),
+                "bio": text("bio"),
+                "prompt": text("prompt"),
+                "time_hint": text("time_hint"),
+            }))
+        })
+        .collect();
+    serde_json::to_string(&list).unwrap_or_else(|_| "[]".to_string())
+}
+
+/// 每图绑定落库内核（命令与单测共用）：按表分派，幂等整体覆写（形象卡
+/// 的开关/编辑都以当前全量列表提交）。
+pub(crate) fn project_set_image_bindings_conn(
+    conn: &Connection,
+    kind: &str,
+    id: &str,
+    bindings: &[serde_json::Value],
+) -> Result<(), String> {
+    let serialized = serialize_image_bindings(bindings);
+    let now = project_now();
+    let (table, kind_label) = match kind {
+        "character" => ("project_characters", "角色"),
+        "location" => ("project_locations", "场景"),
+        "prop" => ("project_props", "道具"),
+        _ => return Err(format!("未知参考图类别: {kind}")),
+    };
+    let n = conn
+        .execute(
+            &format!("UPDATE {table} SET image_bindings = ?1, updated_at = ?2 WHERE id = ?3"),
+            params![serialized, now, id],
+        )
+        .map_err(|e| e.to_string())?;
+    if n == 0 {
+        return Err(format!("{kind_label}不存在: {id}"));
+    }
+    Ok(())
+}
+
+/// 只改三库实体的每图绑定（形象卡的独立开关/音色/人设/提示词编辑，不整
+/// 行重写其它字段）。
+#[tauri::command]
+pub fn project_set_image_bindings(
+    app: AppHandle,
+    kind: String,
+    id: String,
+    bindings: Vec<serde_json::Value>,
+) -> Result<(), String> {
+    {
+        let state = app.state::<DbState>();
+        let conn = state.conn.lock().map_err(|e| e.to_string())?;
+        project_set_image_bindings_conn(&conn, &kind, &id, &bindings)?;
+    }
+    emit_project_changed(&app);
+    Ok(())
 }
 
 /// 参考图集落库内核（命令与单测共用）：按表分派，幂等整体覆写（详情窗
