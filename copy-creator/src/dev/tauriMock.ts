@@ -124,6 +124,17 @@ function handleInvoke(cmd: string, args: Record<string, unknown>): unknown {
         }
         return null;
       }
+    case "project_set_references":
+      {
+        // 三库参考图集（详情窗大图列表添加/移除）：按 kind 分派整体覆写。
+        const table = args.kind === "character" ? db.characters : args.kind === "location" ? db.locations : db.props;
+        const row = (table as Array<Record<string, unknown>>).find((r) => r.id === args.id);
+        if (row) {
+          row.reference_paths = JSON.stringify(args.paths ?? []);
+          row.updated_at = ts();
+        }
+        return null;
+      }
     case "project_create_location":
       db.locations.push({ id: nextId("loc"), name: String(args.name ?? ""), int_ext: String(args.intExt ?? ""), time_hint: String(args.timeHint ?? ""), bio: String(args.bio ?? ""), prompt: String(args.prompt ?? ""), ref_path: String(args.refPath ?? ""), created_at: ts(), updated_at: ts() });
       return null;

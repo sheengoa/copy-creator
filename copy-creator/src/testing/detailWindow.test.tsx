@@ -36,6 +36,7 @@ function makeOps(overrides: Partial<DetailWindowOps> = {}): DetailWindowOps {
     scriptPhs: [],
     setVoice: vi.fn(),
     setAvatar: vi.fn(),
+    setReferences: vi.fn(),
     loadEntity: vi.fn(),
     removeLink: vi.fn(),
     attachEntities: vi.fn(),
@@ -56,7 +57,7 @@ describe("DetailWindow", () => {
         ops={makeOps()}
       />,
     );
-    const grid = document.querySelector(".pdetail-refgrid") as HTMLElement;
+    const grid = document.querySelector(".pdetail-reflist") as HTMLElement;
     expect(grid.children.length).toBe(30);
     expect(screen.getByText(/剩余 74/)).toBeTruthy();
     // jsdom 无布局：滚动量读数全 0，任意 scroll 事件即满足「到底」条件，
@@ -64,6 +65,18 @@ describe("DetailWindow", () => {
     fireEvent.scroll(grid);
     expect(grid.children.length).toBe(60);
     expect(screen.getByText(/剩余 44/)).toBeTruthy();
+  });
+
+  it("参考图大图列表：头像并入展示且计数与实际一致（不再出现共 0 张下有图）", () => {
+    render(
+      <ProjectDetailWindow
+        target={{ kind: "info", group: "character", sourceKey: "char:char-2" }}
+        ops={makeOps({ characters: [{ ...baseCharacter, reference_paths: "[]", avatar_path: "avatars/kawayi.png" }] })}
+      />,
+    );
+    expect(document.querySelectorAll(".pdetail-reflist .pdetail-refbigimg").length).toBe(1);
+    expect(screen.getByText("共 1 张")).toBeTruthy();
+    expect(screen.queryByText("无参考图")).toBeNull();
   });
 
   it("音色行两态：空态只给更换入口；有音色给播放件与清除", () => {
@@ -126,15 +139,41 @@ describe("DetailWindow", () => {
     expect(document.querySelectorAll(".pdetail-row-thumbimg").length).toBe(1);
   });
 
-  it("参考图空但已有头像的角色：详情网格回退显示头像而非空态", () => {
+  it("参考图管理：段头「添加参考图」开选择浮层，选图路由 setReferences 追加；移除路由过滤后覆写", () => {
+    const setReferences = vi.fn();
+    const refs = ["refs/a.png", "refs/b.png"];
     render(
       <ProjectDetailWindow
         target={{ kind: "info", group: "character", sourceKey: "char:char-2" }}
-        ops={makeOps({ characters: [{ ...baseCharacter, reference_paths: "[]", avatar_path: "avatars/kawayi.png" }] })}
+        ops={makeOps({ setReferences, characters: [{ ...baseCharacter, reference_paths: JSON.stringify(refs) }] })}
       />,
     );
-    expect(document.querySelector(".pdetail-refgrid .pdetail-refimg")).toBeTruthy();
-    expect(screen.queryByText("无参考图")).toBeNull();
+    // 逐张移除：整体覆写路由（首张 a.png 被过滤）。
+    const removeButtons = screen.getAllByText("移除");
+    expect(removeButtons.length).toBe(2);
+    fireEvent.click(removeButtons[0]);
+    expect(setReferences).toHaveBeenCalledWith("character", "char-2", ["refs/b.png"]);
+    // 添加浮层打开（jsdom 下 portal 渲染选择器遮罩）。
+    fireEvent.click(screen.getByText("添加参考图"));
+    expect(document.querySelector(".project-dialog-overlay")).toBeTruthy();
+  });
+
+  it("场景/道具参考图集：reference_paths 数组多图全展示，旧单张 ref_path 并入", () => {
+    const setReferences = vi.fn();
+    render(
+      <ProjectDetailWindow
+        target={{ kind: "info", group: "location", sourceKey: "loc:loc-9" }}
+        ops={makeOps({
+          setReferences,
+          locations: [{ id: "loc-9", name: "天台", int_ext: "", time_hint: "", bio: "", prompt: "", ref_path: "refs/main.png", reference_paths: JSON.stringify(["refs/2.png", "refs/3.png"]), created_at: "", updated_at: "" }],
+        })}
+      />,
+    );
+    // 旧主图并入首 + 数组两张 = 3 张全展示。
+    expect(document.querySelectorAll(".pdetail-reflist .pdetail-refbigimg").length).toBe(3);
+    const removeButtons = screen.getAllByText("移除");
+    fireEvent.click(removeButtons[2]);
+    expect(setReferences).toHaveBeenCalledWith("location", "loc-9", ["refs/main.png", "refs/2.png"]);
   });
 
   it("批量挂靠：勾选后确认按 {kind, id} 逐条路由 attachEntities", () => {

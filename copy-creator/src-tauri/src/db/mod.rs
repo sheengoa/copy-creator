@@ -1188,6 +1188,10 @@ pub(crate) fn ensure_schema(conn: &Connection) -> Result<(), Box<dyn std::error:
     // 角色音色（详情窗音色行，工程视图节点化 2026-11-05 阶段 D）：
     // 旧库幂等补列，存量行回填空串（无音色）。
     ensure_column(conn, "project_characters", "voice_path", "TEXT NOT NULL DEFAULT ''");
+    // 场景/道具参考图集（详情窗大图预览，素材天然多张无上限）：旧库幂等
+    // 补列，存量行回填 '[]'；主图 ref_path 语义不变（生成链路兼容）。
+    ensure_column(conn, "project_locations", "reference_paths", "TEXT NOT NULL DEFAULT '[]'");
+    ensure_column(conn, "project_props", "reference_paths", "TEXT NOT NULL DEFAULT '[]'");
     ensure_column(conn, "project_shots", "status", "TEXT NOT NULL DEFAULT 'none'");
     ensure_column(conn, "project_shots", "camera", "TEXT NOT NULL DEFAULT ''");
     ensure_column(conn, "project_shots", "duration", "TEXT NOT NULL DEFAULT ''");

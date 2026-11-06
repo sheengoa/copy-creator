@@ -16,6 +16,7 @@ import { readResourceTextPreview } from "../../../domain/mediaAssets";
 import { ResourceFileImage, ResourceImage, ResourceVideoPoster } from "../ResourceMedia";
 import type { EntityPhKind, PendingLink, PromptPh, ScriptPh } from "./types";
 import { MediaPlayback } from "../../../components/MediaPlayback";
+import ProjectFilePickerDialog from "../ProjectFilePickerDialog";
 
 // 工程节点详情窗（工程视图节点化 2026-11-05 阶段 D，方案 §D2-D5）：
 // 三段式——头部（标题+关闭）/主体（内部滚动，顶到哪滚到哪）/动作区钉底
@@ -47,8 +48,10 @@ export interface DetailWindowOps {
   scriptPhs: ScriptPh[];
   /** 音色行：选择/清除（set_character_voice）。 */
   setVoice(id: string, voicePath: string): void;
-  /** 设头像（参考图网格的「设为头像」）。 */
+  /** 设头像（参考图大图的「设为头像」）。 */
   setAvatar(character: ProjectCharacter, refPath: string): void;
+  /** 三库参考图集整体覆写（详情窗添加/移除；kind: character|location|prop）。 */
+  setReferences(kind: EntityPhKind, id: string, paths: string[]): void;
   /** 装入占位实体（关联到集 + 暂存线转正 + 占位移除）。 */
   loadEntity(ephId: string, kind: EntityPhKind, entityId: string): void;
   /** 移除片段输入（正式行/暂存线分派）。 */
@@ -134,11 +137,16 @@ export function DetailSection({ label, count, extra, children, foldable, default
   );
 }
 
-/** 参考图网格：30/批懒加载（滚到底自动续），图卡悬浮「设为头像」。 */
-function RefGrid({ paths, libraryRoot, onSetAvatar }: {
+/** 参考图大图列表：30/批懒加载（滚到底自动续），纵向全宽每张完整展示
+ *  （contain 不裁切）——详情窗是预览窗，素材天然多张，必须大图铺开看全
+ *  （用户反馈：网格小格子「还不如没有」），图卡悬浮「设为头像 / 移除」。 */
+function RefList({ paths, libraryRoot, onSetAvatar, removableOf, onRemove }: {
   paths: string[];
   libraryRoot: string;
   onSetAvatar?(refPath: string): void;
+  /** 哪些图可移除（头像并入展示的行不可移除，只作形象展示）。 */
+  removableOf?(refPath: string): boolean;
+  onRemove?(refPath: string): void;
 }) {
   const { t } = useTranslation();
   const [loaded, setLoaded] = useState(REF_PAGE);
@@ -156,18 +164,28 @@ function RefGrid({ paths, libraryRoot, onSetAvatar }: {
     return <div className="pdetail-empty">{Icons.image}{t("project.canvas.noRefImage")}</div>;
   }
   return (
-    <div className="pdetail-refgrid-wrap">
-      <div className="pdetail-refgrid" ref={listRef} onScroll={onScroll}>
-        {paths.slice(0, loaded).map((refPath, i) => (
-          <div key={`${refPath}-${i}`} className="pdetail-refcell">
-            <ResourceImage path={joinLibraryPath(libraryRoot, refPath)} alt="" className="pdetail-refimg" />
-            {onSetAvatar && (
-              <button type="button" className="pdetail-refavatar" onClick={() => onSetAvatar(refPath)}>
-                {t("project.detail.setAvatar")}
-              </button>
-            )}
-          </div>
-        ))}
+    <div className="pdetail-reflist-wrap">
+      <div className="pdetail-reflist" ref={listRef} onScroll={onScroll}>
+        {paths.slice(0, loaded).map((refPath, i) => {
+          const removable = removableOf?.(refPath) ?? false;
+          return (
+            <div key={`${refPath}-${i}`} className="pdetail-refbig">
+              <ResourceImage path={joinLibraryPath(libraryRoot, refPath)} alt="" className="pdetail-refbigimg" />
+              <span className="pdetail-refops">
+                {onSetAvatar && (
+                  <button type="button" className="pdetail-refavatar" onClick={() => onSetAvatar(refPath)}>
+                    {t("project.detail.setAvatar")}
+                  </button>
+                )}
+                {removable && onRemove && (
+                  <button type="button" className="pdetail-refavatar is-remove" onClick={() => onRemove(refPath)}>
+                    {t("project.detail.refRemove")}
+                  </button>
+                )}
+              </span>
+            </div>
+          );
+        })}
       </div>
       {loaded < paths.length && (
         <div className="pdetail-more">{t("project.detail.loadMore", { rest: paths.length - loaded })}</div>
@@ -214,23 +232,36 @@ function EntityDetail({ group, sourceKey, ops }: { group: EntityPhKind; sourceKe
       : group === "location" ? locations.find((l) => l.id === entityId)
         : props.find((p) => p.id === entityId);
   const name = entity?.name ?? "";
+  // 参考图集（三库统一）：reference_paths JSON 数组为主，场景/道具的旧
+  // 单张 ref_path 并入展示（素材天然多张无上限，用户反馈）。头像排首位
+  // 仅作形象展示（不可移除），计数与实际展示一致。
   const refPaths = useMemo(() => {
-    if (group !== "character") {
-      const ref = (entity as ProjectLocation | ProjectProp | undefined)?.ref_path ?? "";
-      return ref ? [ref] : [];
-    }
+    let list: string[] = [];
     try {
-      const list = JSON.parse((entity as ProjectCharacter | undefined)?.reference_paths ?? "[]") as string[];
-      return Array.isArray(list) ? list : [];
+      const parsed = JSON.parse(entity?.reference_paths ?? "[]") as unknown;
+      if (Array.isArray(parsed)) list = parsed.filter((p): p is string => typeof p === "string");
     } catch {
-      return [];
+      // 旧数据非法 JSON：按空处理。
     }
+    const mainRef = group !== "character" ? ((entity as ProjectLocation | ProjectProp | undefined)?.ref_path ?? "") : "";
+    if (mainRef && !list.includes(mainRef)) list.unshift(mainRef);
+    return list;
   }, [entity, group]);
   const voice = group === "character" ? ((entity as ProjectCharacter | undefined)?.voice_path ?? "") : "";
-  // 预览兜底：角色参考图未上传但已有形象头像时，网格回退显示头像——
-  // 详情窗是预览窗，不能给"无参考图"空态而看不见已有形象（用户反馈）。
+  // 展示列表 = 参考图 + 形象头像（头像排首位）——详情窗是预览窗，已有
+  // 形象必须直接可见，计数与实际展示一致（用户反馈「共 0 张」下却有图）。
   const avatarPath = group === "character" ? ((entity as ProjectCharacter | undefined)?.avatar_path ?? "") : "";
-  const gridPaths = refPaths.length ? refPaths : avatarPath ? [avatarPath] : [];
+  const gridPaths = useMemo(() => {
+    const list = [...refPaths];
+    if (avatarPath && !list.includes(avatarPath)) list.unshift(avatarPath);
+    return list;
+  }, [refPaths, avatarPath]);
+  // 参考图管理：添加（库选/导入，浮层保持连续加）与逐张移除，整体覆写
+  // reference_paths（project_set_references）。
+  const [pickerOpen, setPickerOpen] = useState(false);
+  const removeRef = (refPath: string) => {
+    ops.setReferences(group, entityId, refPaths.filter((p) => p !== refPath));
+  };
   const linkedSegments = (ops.nodeLinks ?? []).filter(
     (l) => l.from_kind === group && l.from_id === entityId,
   );
@@ -257,13 +288,37 @@ function EntityDetail({ group, sourceKey, ops }: { group: EntityPhKind; sourceKe
       accent={accent}
       onClose={ops.onClose}
     >
-      <DetailSection label={t("project.detail.refs")} count={t("project.detail.refCount", { n: refPaths.length })}>
-        <RefGrid
+      <DetailSection
+        label={t("project.detail.refs")}
+        count={t("project.detail.refCount", { n: gridPaths.length })}
+        extra={(
+          <button type="button" className="pdetail-ref-add" onClick={() => setPickerOpen(true)}>
+            {Icons.add}{t("project.detail.refAdd")}
+          </button>
+        )}
+      >
+        <RefList
           paths={gridPaths}
           libraryRoot={ops.libraryRoot}
-          onSetAvatar={refPaths.length && group === "character" ? (ref) => entity && ops.setAvatar(entity as ProjectCharacter, ref) : undefined}
+          onSetAvatar={group === "character" ? (ref) => entity && ops.setAvatar(entity as ProjectCharacter, ref) : undefined}
+          removableOf={(p) => refPaths.includes(p)}
+          onRemove={removeRef}
         />
       </DetailSection>
+      {pickerOpen && (
+        <ProjectFilePickerDialog
+          title={t("project.detail.refAdd")}
+          pickLabel={t("project.library.pickAction")}
+          importLabel={t("project.library.importAction")}
+          onClose={() => setPickerOpen(false)}
+          onPick={(file) => {
+            // 选一张加一张，浮层保持打开供连续挑选（与三库面板同语义）。
+            if (!refPaths.includes(file.filePath)) {
+              ops.setReferences(group, entityId, [...refPaths, file.filePath]);
+            }
+          }}
+        />
+      )}
       {group === "character" && (
         <DetailSection label={t("project.detail.voice")} count={voice ? "1" : "0"}>
           <VoiceRow

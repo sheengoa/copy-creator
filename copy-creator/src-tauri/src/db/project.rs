@@ -59,6 +59,7 @@ CREATE TABLE IF NOT EXISTS project_locations (
     bio TEXT NOT NULL DEFAULT '',
     prompt TEXT NOT NULL DEFAULT '',
     ref_path TEXT NOT NULL DEFAULT '',
+    reference_paths TEXT NOT NULL DEFAULT '[]',
     created_at TEXT NOT NULL,
     updated_at TEXT NOT NULL
 );
@@ -69,6 +70,7 @@ CREATE TABLE IF NOT EXISTS project_props (
     bio TEXT NOT NULL DEFAULT '',
     prompt TEXT NOT NULL DEFAULT '',
     ref_path TEXT NOT NULL DEFAULT '',
+    reference_paths TEXT NOT NULL DEFAULT '[]',
     created_at TEXT NOT NULL,
     updated_at TEXT NOT NULL
 );
@@ -300,8 +302,9 @@ fn location_row(row: &rusqlite::Row) -> rusqlite::Result<serde_json::Value> {
         "bio": row.get::<_, String>(4)?,
         "prompt": row.get::<_, String>(5)?,
         "ref_path": row.get::<_, String>(6)?,
-        "created_at": row.get::<_, String>(7)?,
-        "updated_at": row.get::<_, String>(8)?,
+        "reference_paths": row.get::<_, String>(7)?,
+        "created_at": row.get::<_, String>(8)?,
+        "updated_at": row.get::<_, String>(9)?,
     }))
 }
 
@@ -312,8 +315,9 @@ fn prop_row(row: &rusqlite::Row) -> rusqlite::Result<serde_json::Value> {
         "bio": row.get::<_, String>(2)?,
         "prompt": row.get::<_, String>(3)?,
         "ref_path": row.get::<_, String>(4)?,
-        "created_at": row.get::<_, String>(5)?,
-        "updated_at": row.get::<_, String>(6)?,
+        "reference_paths": row.get::<_, String>(5)?,
+        "created_at": row.get::<_, String>(6)?,
+        "updated_at": row.get::<_, String>(7)?,
     }))
 }
 
@@ -412,8 +416,9 @@ const EPISODE_COLS: &str =
 const CHARACTER_COLS: &str =
     "id, name, role_tag, bio, prompt, avatar_path, reference_paths, voice_path, created_at, updated_at";
 const LOCATION_COLS: &str =
-    "id, name, int_ext, time_hint, bio, prompt, ref_path, created_at, updated_at";
-const PROP_COLS: &str = "id, name, bio, prompt, ref_path, created_at, updated_at";
+    "id, name, int_ext, time_hint, bio, prompt, ref_path, reference_paths, created_at, updated_at";
+const PROP_COLS: &str =
+    "id, name, bio, prompt, ref_path, reference_paths, created_at, updated_at";
 const SCENE_COLS: &str =
     "id, episode_id, location_id, heading, sort_order, note, created_at, updated_at, canvas_x, canvas_y";
 const SHOT_COLS: &str =
@@ -1120,6 +1125,62 @@ pub(crate) fn project_set_character_voice_conn(
         params![normalize_project_path(voice_path), project_now(), id],
     )
     .map_err(|e| e.to_string())?;
+    Ok(())
+}
+
+/// 参考图集序列化：去重保序、路径归一化，JSON 数组落库。
+fn serialize_reference_paths(paths: &[String]) -> String {
+    let mut seen = std::collections::HashSet::new();
+    let list: Vec<String> = paths
+        .iter()
+        .map(|p| normalize_project_path(p))
+        .filter(|p| !p.is_empty() && seen.insert(p.clone()))
+        .collect();
+    serde_json::to_string(&list).unwrap_or_else(|_| "[]".to_string())
+}
+
+/// 参考图集落库内核（命令与单测共用）：按表分派，幂等整体覆写（详情窗
+/// 的添加/移除都以当前全量列表提交——素材天然多张无上限，顺序即展示序）。
+pub(crate) fn project_set_references_conn(
+    conn: &Connection,
+    kind: &str,
+    id: &str,
+    paths: &[String],
+) -> Result<(), String> {
+    let serialized = serialize_reference_paths(paths);
+    let now = project_now();
+    let (table, kind_label) = match kind {
+        "character" => ("project_characters", "角色"),
+        "location" => ("project_locations", "场景"),
+        "prop" => ("project_props", "道具"),
+        _ => return Err(format!("未知参考图类别: {kind}")),
+    };
+    let n = conn
+        .execute(
+            &format!("UPDATE {table} SET reference_paths = ?1, updated_at = ?2 WHERE id = ?3"),
+            params![serialized, now, id],
+        )
+        .map_err(|e| e.to_string())?;
+    if n == 0 {
+        return Err(format!("{kind_label}不存在: {id}"));
+    }
+    Ok(())
+}
+
+/// 只改三库实体的参考图集（详情窗大图列表的添加/移除，不整行重写人设）。
+#[tauri::command]
+pub fn project_set_references(
+    app: AppHandle,
+    kind: String,
+    id: String,
+    paths: Vec<String>,
+) -> Result<(), String> {
+    {
+        let state = app.state::<DbState>();
+        let conn = state.conn.lock().map_err(|e| e.to_string())?;
+        project_set_references_conn(&conn, &kind, &id, &paths)?;
+    }
+    emit_project_changed(&app);
     Ok(())
 }
 

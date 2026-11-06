@@ -799,7 +799,9 @@
       "outputEmptyHint": "No final cut attached yet · segments roll up here once produced",
       "promptEmptyHint": "No prompt picked yet · use the button below to pick one",
       "scriptEmptyHint": "No script attached yet · use the button below to pick a file",
-      "segOutputEmpty": "No output attached yet · use Batch attach below, or wire assets into this segment"
+      "segOutputEmpty": "No output attached yet · use Batch attach below, or wire assets into this segment",
+      "refAdd": "Add reference",
+      "refRemove": "Remove"
     }
   },
   "common": {

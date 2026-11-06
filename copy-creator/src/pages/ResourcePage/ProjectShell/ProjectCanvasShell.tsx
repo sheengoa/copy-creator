@@ -89,6 +89,7 @@ export default function ProjectCanvasShell({
     unlinkAssets,
     saveCharacter,
     setCharacterVoice,
+    setReferences,
     saveScene,
     deleteScene,
     saveShot,
@@ -122,6 +123,7 @@ export default function ProjectCanvasShell({
       unlinkAssets: state.unlinkAssets,
       saveCharacter: state.saveCharacter,
       setCharacterVoice: state.setCharacterVoice,
+      setReferences: state.setReferences,
       saveScene: state.saveScene,
       deleteScene: state.deleteScene,
       saveShot: state.saveShot,
@@ -590,6 +592,7 @@ export default function ProjectCanvasShell({
     promptPhs: data.promptPhs,
     scriptPhs: data.scriptPhs,
     setVoice: (id, voicePath) => void setCharacterVoice(id, voicePath),
+    setReferences: (kind, id, paths) => void setReferences(kind, id, paths),
     setAvatar: (character, refPath) => {
       void saveCharacter({
         id: character.id,

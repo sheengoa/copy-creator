@@ -58,6 +58,8 @@ export interface ProjectLocation {
   bio: string;
   prompt: string;
   ref_path: string;
+  /** 参考图集（JSON 数组；详情窗大图预览，素材天然多张无上限）。 */
+  reference_paths?: string;
   created_at: string;
   updated_at: string;
 }
@@ -68,6 +70,8 @@ export interface ProjectProp {
   bio: string;
   prompt: string;
   ref_path: string;
+  /** 参考图集（JSON 数组；详情窗大图预览，素材天然多张无上限）。 */
+  reference_paths?: string;
   created_at: string;
   updated_at: string;
 }
@@ -249,6 +253,8 @@ interface ProjectStoreState {
   deleteCharacter: (id: string) => Promise<void>;
   /** 只改角色音色（详情窗音色行选择/清除；传空串清除）。 */
   setCharacterVoice: (id: string, voicePath: string) => Promise<void>;
+  /** 只改三库实体参考图集（详情窗大图列表添加/移除；kind: character|location|prop）。 */
+  setReferences: (kind: "character" | "location" | "prop", id: string, paths: string[]) => Promise<void>;
 
   loadLocations: () => Promise<void>;
   saveLocation: (
@@ -691,6 +697,19 @@ export const useProjectStore = create<ProjectStoreState>((set, get) => ({
       await get().loadCharacters();
     } catch (error) {
       console.error("project_set_character_voice:", error);
+    }
+  },
+
+  setReferences: async (kind, id, paths) => {
+    try {
+      await invoke("project_set_references", { kind, id, paths });
+      if (kind === "character") await get().loadCharacters();
+      else if (kind === "location") await get().loadLocations();
+      else await get().loadProps();
+      const { currentEpisodeId } = get();
+      if (currentEpisodeId) await get().selectEpisode(currentEpisodeId);
+    } catch (error) {
+      console.error("project_set_references:", error);
     }
   },
 

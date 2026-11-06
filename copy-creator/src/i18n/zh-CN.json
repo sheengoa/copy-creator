@@ -799,7 +799,9 @@
       "outputEmptyHint": "本集尚未挂出成片 · 片段产出后在此汇总",
       "promptEmptyHint": "尚未选择提示词 · 点下方按钮从库中选择",
       "scriptEmptyHint": "尚未挂接剧本 · 点下方按钮选择文件",
-      "segOutputEmpty": "尚未挂接产出 · 点下方「批量挂靠」从库选择，或将素材连线到本片段"
+      "segOutputEmpty": "尚未挂接产出 · 点下方「批量挂靠」从库选择，或将素材连线到本片段",
+      "refAdd": "添加参考图",
+      "refRemove": "移除"
     }
   },
   "common": {

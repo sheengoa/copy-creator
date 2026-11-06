@@ -7538,6 +7538,55 @@ mod project_tests {
     }
 
     #[test]
+    fn project_references_roundtrip() {
+        // 三库参考图集（详情窗大图列表）：set_references 整体覆写三表的
+        // reference_paths；去重保序归一化；空列表清空；实体不存在报错。
+        let conn = project_conn();
+        conn.execute(
+            "INSERT INTO project_locations (id, name, created_at, updated_at) \
+             VALUES ('l1', '天台', '2026-01-01', '2026-01-01')",
+            [],
+        )
+        .unwrap();
+        conn.execute(
+            "INSERT INTO project_props (id, name, created_at, updated_at) \
+             VALUES ('p1', '旧怀表', '2026-01-01', '2026-01-01')",
+            [],
+        )
+        .unwrap();
+        conn.execute(
+            "INSERT INTO project_characters (id, name, role_tag, bio, prompt, avatar_path, created_at, updated_at) \
+             VALUES ('c1', '小雨', '', '', '', '', '2026-01-01', '2026-01-01')",
+            [],
+        )
+        .unwrap();
+        // 场景多张写入 + 读回（JSON 数组、保序去重）。
+        crate::db::project_set_references_conn(
+            &conn,
+            "location",
+            "l1",
+            &["refs/b.png".into(), "refs/a.png".into(), "refs/b.png".into()],
+        )
+        .unwrap();
+        let refs: String = conn
+            .query_row("SELECT reference_paths FROM project_locations WHERE id = 'l1'", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(refs, r#"["refs/b.png","refs/a.png"]"#);
+        // 道具写入 + 清空。
+        crate::db::project_set_references_conn(&conn, "prop", "p1", &["refs/watch.png".into()]).unwrap();
+        crate::db::project_set_references_conn(&conn, "prop", "p1", &[]).unwrap();
+        let refs: String = conn
+            .query_row("SELECT reference_paths FROM project_props WHERE id = 'p1'", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(refs, "[]");
+        // 角色同命令可用（与 saveCharacter 全量覆写互补）。
+        crate::db::project_set_references_conn(&conn, "character", "c1", &["refs/1.png".into()]).unwrap();
+        // 未知类别 / 不存在的实体：报错。
+        assert!(crate::db::project_set_references_conn(&conn, "shot", "s1", &[]).is_err());
+        assert!(crate::db::project_set_references_conn(&conn, "location", "ghost", &[]).is_err());
+    }
+
+    #[test]
     fn search_matches_description_fields() {
         // 工程搜索除名称/标题外还应命中描述性正文：角色/道具的 bio
         // （剧的 note 同列机制，提示词正文原本已覆盖）。
@@ -8773,8 +8822,8 @@ mod canvas_tests {
 #[cfg(test)]
 mod ai_channel_tests {
     use crate::db::{
-        ensure_schema, migrate_legacy_ai_channels, update_channel_row, AI_CHANNEL_SCHEMA_SQL,
-        AI_SCHEDULING_SETTING_SEED_SQL, ChannelUpdate, Connection,
+        ensure_schema, migrate_legacy_ai_channels, restore_channel_internal, update_channel_row,
+        AI_CHANNEL_SCHEMA_SQL, AI_SCHEDULING_SETTING_SEED_SQL, ChannelUpdate, Connection,
     };
 
     fn conn_with_legacy(provider: &str, openai_key: &str, gemini_key: &str) -> Connection {
@@ -8963,5 +9012,29 @@ mod ai_channel_tests {
         )
         .unwrap_err();
         assert!(err.contains("渠道不存在"));
+    }
+
+    /// 恢复命令核心：三清（自动停用/错误文案/限流冷却）且两不动（启用
+    /// 开关/测速记录）——设置页「恢复」按钮的语义钉住。
+    #[test]
+    fn restore_channel_clears_fault_state_only() {
+        let conn = Connection::open_in_memory().unwrap();
+        conn.execute_batch(AI_CHANNEL_SCHEMA_SQL).unwrap();
+        seed_channel(&conn); // auto_disabled + last_error + cooldown=999 + latency=1234
+        // 手动停用：enabled=0，恢复不应替用户打开开关
+        conn.execute("UPDATE ai_channels SET enabled = 0 WHERE id = 'ch-1'", []).unwrap();
+        restore_channel_internal(&conn, "ch-1").unwrap();
+        let (status, last_error, cooldown, enabled, latency): (String, String, i64, i64, Option<i64>) = conn
+            .query_row(
+                "SELECT status, last_error, cooldown_until_ms, enabled, last_latency_ms FROM ai_channels WHERE id = 'ch-1'",
+                [],
+                |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?, r.get(4)?)),
+            )
+            .unwrap();
+        assert_eq!(status, "normal");
+        assert_eq!(last_error, "");
+        assert_eq!(cooldown, 0);
+        assert_eq!(enabled, 0, "恢复不动启用开关");
+        assert_eq!(latency, Some(1234), "测速记录保留，仍按历史延迟参与调度");
     }
 }

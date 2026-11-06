@@ -30,8 +30,9 @@
 
 .pdetail {
   --pdetail-accent: #94a3b8;
-  width: min(560px, 100%);
-  max-height: min(640px, 100%);
+  /* 预览窗：宽体给大图留空间（参考图纵向全宽展示）。 */
+  width: min(720px, 100%);
+  max-height: min(720px, 100%);
   display: flex;
   flex-direction: column;
   border-radius: 16px;
@@ -152,43 +153,65 @@
 }
 .pdetail-empty svg { width: 14px; height: 14px; }
 
-/* ── 参考图网格（30/批懒加载） ── */
-.pdetail-refgrid-wrap { display: flex; flex-direction: column; }
-.pdetail-refgrid {
-  display: grid;
-  grid-template-columns: repeat(4, 1fr);
-  gap: 6px;
-  max-height: 264px;
+/* ── 参考图大图列表（30/批懒加载）：纵向全宽，每张完整不裁切
+   （contain）——素材天然多张，预览窗必须大图铺开看全。 ── */
+.pdetail-reflist-wrap { display: flex; flex-direction: column; }
+.pdetail-reflist {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  max-height: 520px;
   overflow-y: auto;
   padding: 2px;
 }
-.pdetail-refcell {
+.pdetail-refbig {
   position: relative;
-  aspect-ratio: 1;
-  border-radius: 9px;
+  border-radius: 12px;
   overflow: hidden;
   background: var(--chip-bg);
+  border: 0.5px solid var(--separator);
 }
-.pdetail-refimg {
-  width: 100%;
-  height: 100%;
-  object-fit: cover;
+.pdetail-refbigimg {
   display: block;
+  width: 100%;
+  height: auto;
+  max-height: 420px;
+  object-fit: contain;
 }
-.pdetail-refavatar {
+/* 图上操作钮组（悬浮出现）：设为头像 / 移除。 */
+.pdetail-refops {
   position: absolute;
-  left: 0;
-  right: 0;
-  bottom: 0;
-  padding: 3px 0;
-  font-size: 10px;
-  color: #fff;
-  background: rgba(20, 20, 26, 0.55);
+  right: 8px;
+  bottom: 8px;
+  display: inline-flex;
+  gap: 6px;
   opacity: 0;
   transition: opacity 0.14s ease;
 }
-.pdetail-refcell:hover .pdetail-refavatar { opacity: 1; }
+.pdetail-refbig:hover .pdetail-refops { opacity: 1; }
+.pdetail-refavatar {
+  padding: 4px 10px;
+  border-radius: 999px;
+  font-size: 10.5px;
+  color: #fff;
+  background: rgba(20, 20, 26, 0.55);
+}
 .pdetail-refavatar:hover { background: var(--accent); }
+.pdetail-refavatar.is-remove:hover { background: var(--danger); }
+/* 段头「添加参考图」入口。 */
+.pdetail-ref-add {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 11px;
+  color: var(--accent);
+  padding: 3px 9px;
+  border-radius: 999px;
+  border: 1px solid var(--accent-border-soft);
+  background: var(--accent-bg);
+}
+.pdetail-ref-add svg { width: 12px; height: 12px; }
+.pdetail-ref-add:hover { background: var(--accent-bg-strong); border-color: var(--accent-border-strong); }
 .pdetail-more {
   margin-top: 6px;
   text-align: center;
@@ -235,10 +258,10 @@
 /* ── 片段输出 ── */
 .pdetail-output {
   position: relative;
-  border-radius: 10px;
+  border-radius: 12px;
   overflow: hidden;
   aspect-ratio: 16 / 9;
-  max-height: 220px;
+  max-height: 320px;
   background: var(--chip-bg);
 }
 .pdetail-output video,
