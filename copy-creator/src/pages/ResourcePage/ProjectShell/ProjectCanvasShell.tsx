@@ -644,6 +644,9 @@ export default function ProjectCanvasShell({
           linkNode(episodeId, kind, entityId, p.toSegmentId, p.toPort as Parameters<typeof linkNode>[4], "");
         }
         persistPendingLinks(pendingLinks.filter((l) => l.fromKey !== phKey));
+        // 占位位置转交给实体节点（key 变化不丢位置——用户定案「位置绝不
+        // 自己动」）。
+        data.adoptInfoOffset(phKey, `${kind === "character" ? "char" : kind === "location" ? "loc" : "prop"}:${entityId}`);
         data.persistEntityPhs(data.entityPhs.filter((ph) => ph.id !== ephId));
         setDetailFor(null);
         setDetailBack([]);

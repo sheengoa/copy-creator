@@ -464,9 +464,42 @@ export function useCanvasData(deps: {
     [infoOffsets, infoPos, entityPhs, promptPhs],
   );
 
+  // 节点首次出现的位置永久钉住（用户定案「只要不是我拖动的，节点位置
+  // 绝对不动」）：实体增删引发的网格重排不再移动已有节点；新节点以当
+  // 次网格槽位为初始位置写入记忆，此后永不变。
+  useEffect(() => {
+    const missing: Record<string, Pos> = {};
+    for (const node of infoNodes) {
+      if (infoOffsets[node.key]) continue;
+      missing[node.key] = infoPos.map[node.key];
+    }
+    if (Object.keys(missing).length > 0) {
+      persistInfoOffsets({ ...infoOffsets, ...missing });
+    }
+  }, [infoNodes, infoOffsets, infoPos, persistInfoOffsets]);
+
+  // 占位装入实体：占位节点从画布消失、实体节点以新 key 出现，把占位的
+  // 当前位置转交给实体节点（否则新 key 无记忆会跳回资料框网格——用户
+  // 实测「装入后节点位置变了」）。占位拖过用记忆值，没拖过用创建点。
+  const adoptInfoOffset = useCallback(
+    (fromKey: string, toKey: string) => {
+      if (infoOffsets[toKey]) return;
+      const from =
+        infoOffsets[fromKey] ??
+        (() => {
+          const ph = entityPhs.find((item) => `eph:${item.id}` === fromKey);
+          return ph ? { x: ph.x, y: ph.y } : undefined;
+        })();
+      if (!from) return;
+      persistInfoOffsets({ ...infoOffsets, [toKey]: from });
+    },
+    [infoOffsets, entityPhs, persistInfoOffsets],
+  );
+
 
   return {
     infoFramePos, setInfoFramePos, saveInfoFramePos,
+    adoptInfoOffset,
     outputPos, setOutputPos, saveOutputPos,
     selKeys, selRef, setSelection,
     notes, setNotes, persistNotes, editingNoteId, setEditingNoteId, noteDraft, setNoteDraft, addNote,
