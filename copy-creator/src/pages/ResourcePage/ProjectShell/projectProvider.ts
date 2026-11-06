@@ -68,6 +68,7 @@ export interface ProjectCanvasDataDeps {
   persistCards(nextCards: Record<string, { x: number; y: number }>): void;
   persistSegments(next: Record<string, { x: number; y: number }>): void;
   persistInfoOffsets(next: Record<string, { x: number; y: number }>): void;
+  mergeInfoOffsets(patch: Record<string, { x: number; y: number }>): void;
   persistSizes(next: Record<string, { w: number; h: number }>): void;
   persistNotes(next: CanvasNote[]): void;
   persistEntityPhs(next: Array<{ id: string; kind: EntityPhKind; x: number; y: number }>): void;
@@ -290,8 +291,9 @@ export function buildProjectCanvasApi(deps: ProjectCanvasDataDeps): CanvasDataAp
       deps.persistSegments({ ...deps.segPos, ...segUpdates });
     }
     if (Object.keys(infoUpdates).length > 0) {
-      deps.setInfoOffsets((prev) => ({ ...prev, ...infoUpdates }));
-      deps.persistInfoOffsets({ ...deps.infoOffsets, ...infoUpdates });
+      // 读-改-写：以存储最新值为基线合并（防挂载竞态下用陈旧快照整表
+      // 覆盖抹掉其它节点的位置记忆）。
+      deps.mergeInfoOffsets(infoUpdates);
     }
     if (Object.keys(noteUpdates).length > 0) {
       const next = deps.notes.map((n) => (noteUpdates[n.id] ? { ...n, x: noteUpdates[n.id].x, y: noteUpdates[n.id].y } : n));
@@ -390,7 +392,7 @@ export function buildProjectCanvasApi(deps: ProjectCanvasDataDeps): CanvasDataAp
           const id = `sph${Date.now()}${Math.floor(Math.random() * 1e4)}`;
           deps.persistScriptPhs([...deps.scriptPhs, { id, path }]);
           const key = `script:${id}`;
-          deps.persistInfoOffsets({ ...deps.infoOffsets, [key]: { x, y } });
+          deps.mergeInfoOffsets({ [key]: { x, y } });
           return recordNode(key, "scriptPaper", path ? scriptFileLabel(path) : deps.scriptUntitled, { x, y }, SCRIPT_W, null, episodeId, { kind: "script", path });
         }
         default:

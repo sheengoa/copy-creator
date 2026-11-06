@@ -467,33 +467,79 @@ export function useCanvasData(deps: {
     [infoOffsets, infoPos, entityPhs, promptPhs],
   );
 
+  // 位置记忆统一「读-改-写」入口：以 localStorage 最新值为基线合并写入
+  // （state 同步跟随）。此前各写入方（装入转交/首现钉住/拖动落点）各自
+  // 用渲染期快照整表覆盖，实机时序下会用陈旧快照抹掉刚写入的键——装入
+  // 同一实体时节点位置被改（用户实测「合并且节点移动」顽固复现的根源）。
+  const mergeInfoOffsets = useCallback(
+    (patch: Record<string, Pos>) => {
+      let base = infoOffsets;
+      try {
+        const raw = window.localStorage.getItem(`project_canvas_infonodes_${episodeId}`);
+        if (raw) base = JSON.parse(raw) as Record<string, Pos>;
+      } catch {
+        // 存储不可用：退回当前 state 为基线。
+      }
+      const next = { ...base, ...patch };
+      setInfoOffsets(next);
+      try {
+        window.localStorage.setItem(`project_canvas_infonodes_${episodeId}`, JSON.stringify(next));
+      } catch {
+        // 存储不可用：仅不落盘，state 仍更新。
+      }
+    },
+    [episodeId, infoOffsets],
+  );
+
   // 节点首次出现的位置永久钉住（用户定案「只要不是我拖动的，节点位置
   // 绝对不动」）：实体增删引发的网格重排不再移动已有节点；新节点以当
   // 次网格槽位为初始位置写入记忆，此后永不变。
+  // 「首次出现」按 localStorage 最新值判定而非渲染期 state：挂载竞态下
+  // （资料节点列表已渲染、位置记忆尚未从存储加载完）state 还是空表，
+  // 旧写法会把全部已有节点当新节点钉回网格槽位——拖动过的位置在重载/
+  // 切集后被悄悄抹掉（用户实测「节点乱跑」的另一根源）。存储里有记忆
+  // 的节点一律不动。
   useEffect(() => {
+    if (infoNodes.length === 0) return;
+    let base: Record<string, Pos> = infoOffsets;
+    try {
+      const raw = window.localStorage.getItem(`project_canvas_infonodes_${episodeId}`);
+      if (raw) base = JSON.parse(raw) as Record<string, Pos>;
+    } catch {
+      // 存储不可用：退回当前 state 判定。
+    }
     const missing: Record<string, Pos> = {};
     for (const node of infoNodes) {
-      if (infoOffsets[node.key]) continue;
+      if (base[node.key]) continue;
       missing[node.key] = infoPos.map[node.key];
     }
     if (Object.keys(missing).length > 0) {
-      persistInfoOffsets({ ...infoOffsets, ...missing });
+      mergeInfoOffsets(missing);
     }
-  }, [infoNodes, infoOffsets, infoPos, persistInfoOffsets]);
+  }, [infoNodes, infoOffsets, infoPos, mergeInfoOffsets, episodeId]);
 
   // 占位装入实体：占位节点从画布消失、实体节点以新 key 出现，把占位的
   // 当前位置转交给实体节点（否则新 key 无记忆会跳回资料框网格——用户
   // 实测「装入后节点位置变了」）。占位拖过用记忆值，没拖过用创建点。
-  // 两条铁律（2026-11-07 根治）：
-  // ① 目标实体节点已在画布（重复装入同一实体）→ 直接跳过：一实体一节点，
-  //    绝不把已有节点拖到占位处（用户实测「两个节点合并到一起」）。
+  // 三条铁律（2026-11-07 二次根治）：
+  // ① 目标实体已在画布（单实体节点或被组认领——infoNodes 会排除被认领
+  //    成员，漏判会让转交改写组内实体位置）→ 直接跳过：一实体一节点，
+  //    绝不动已有节点（用户实测「合并且节点移动」）。
   // ② 否则强制写，不用「已有记忆即跳过」：首现钉住 effect 在实机时序下
   //    可能抢先给新 key 钉了网格槽位，旧跳过逻辑会让转交失效 → 装入后
   //    节点跳格（用户实测「节点就会跑」）。转交必须赢，配合 Shell 在关联
   //    落库前先转交，钉住 effect 无从抢跑。
+  // ③ 写入一律走 mergeInfoOffsets 读-改-写，任何写入方不再互相覆盖。
   const adoptInfoOffset = useCallback(
     (fromKey: string, toKey: string) => {
-      if (infoNodes.some((n) => n.key === toKey)) return;
+      const sep = toKey.indexOf(":");
+      const kindPrefix = toKey.slice(0, sep);
+      const entityId = toKey.slice(sep + 1);
+      const groupKind = kindPrefix === "char" ? "character" : kindPrefix === "loc" ? "location" : kindPrefix === "prop" ? "prop" : "";
+      const onCanvas =
+        infoNodes.some((n) => n.key === toKey) ||
+        (groupKind !== "" && infoGroups.some((g) => g.kind === groupKind && g.members.includes(entityId)));
+      if (onCanvas) return;
       const from =
         infoOffsets[fromKey] ??
         (() => {
@@ -501,15 +547,15 @@ export function useCanvasData(deps: {
           return ph ? { x: ph.x, y: ph.y } : undefined;
         })();
       if (!from) return;
-      persistInfoOffsets({ ...infoOffsets, [toKey]: from });
+      mergeInfoOffsets({ [toKey]: from });
     },
-    [infoNodes, infoOffsets, entityPhs, persistInfoOffsets],
+    [infoNodes, infoGroups, infoOffsets, entityPhs, mergeInfoOffsets],
   );
 
 
   return {
     infoFramePos, setInfoFramePos, saveInfoFramePos,
-    adoptInfoOffset,
+    adoptInfoOffset, mergeInfoOffsets,
     outputPos, setOutputPos, saveOutputPos,
     selKeys, selRef, setSelection,
     notes, setNotes, persistNotes, editingNoteId, setEditingNoteId, noteDraft, setNoteDraft, addNote,

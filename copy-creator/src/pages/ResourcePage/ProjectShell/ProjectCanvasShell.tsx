@@ -444,7 +444,7 @@ export default function ProjectCanvasShell({
     setPos: data.setPos, setSegPos: data.setSegPos, setInfoOffsets: data.setInfoOffsets,
     setNodeSizes: data.setNodeSizes, setNotes: data.setNotes,
     persistCards: data.persistCards, persistSegments: data.persistSegments,
-    persistInfoOffsets: data.persistInfoOffsets, persistSizes: data.persistSizes,
+    persistInfoOffsets: data.persistInfoOffsets, mergeInfoOffsets: data.mergeInfoOffsets, persistSizes: data.persistSizes,
     persistNotes: data.persistNotes, persistEntityPhs: data.persistEntityPhs,
     persistScriptPhs: data.persistScriptPhs, persistPromptPhs: data.persistPromptPhs,
     persistInfoGroups: data.persistInfoGroups, persistNodeGroups,
@@ -634,6 +634,10 @@ export default function ProjectCanvasShell({
     loadEntity: (ephId, kind, entityId) => {
       const phKey = `eph:${ephId}`;
       const entityKey = `${kind === "character" ? "char" : kind === "location" ? "loc" : "prop"}:${entityId}`;
+      // 已在画布的实体：记下当前位置，装入全程结束后自愈断言——无论概览
+      // 刷新/钉住 effect 在任何时序动了它的位置记忆，都立刻拨回原位
+      // （用户实测「重复装入同一实体时合并且节点移动」的兜底铁闸）。
+      const posBefore = data.infoNodes.some((n) => n.key === entityKey) ? data.infoNodePos(entityKey) : null;
       // 占位位置转交先于关联落库：实体节点首次出现前占位位置已在记忆，
       // 首现钉住 effect 无从抢跑（实机时序下曾抢先钉住网格槽位 → 转交被
       // 跳过 → 装入后节点跳格，用户实测「节点就会跑」）。key 变化不丢
@@ -653,6 +657,23 @@ export default function ProjectCanvasShell({
         data.persistEntityPhs(data.entityPhs.filter((ph) => ph.id !== ephId));
         setDetailFor(null);
         setDetailBack([]);
+        if (posBefore) {
+          const verify = () => {
+            // 直读 localStorage 最新值断言（state 闭包可能是陈旧快照）。
+            let now: { x: number; y: number } | null = null;
+            try {
+              const raw = window.localStorage.getItem(`project_canvas_infonodes_${episodeId}`);
+              if (raw) now = (JSON.parse(raw) as Record<string, { x: number; y: number }>)[entityKey] ?? null;
+            } catch {
+              now = null;
+            }
+            if (!now || now.x !== posBefore.x || now.y !== posBefore.y) {
+              data.mergeInfoOffsets({ [entityKey]: posBefore });
+            }
+          };
+          verify();
+          window.setTimeout(verify, 600);
+        }
       })();
     },
     removeLink: (row) => {
