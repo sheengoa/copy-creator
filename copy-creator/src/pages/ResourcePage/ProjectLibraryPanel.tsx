@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
+import { createPortal } from "react-dom";
 import { invoke } from "@tauri-apps/api/core";
 import { useTranslation } from "react-i18next";
 import { useShallow } from "zustand/react/shallow";
@@ -201,7 +202,9 @@ export default function ProjectLibraryPanel({
         ? (locationDraft?.ref_path ?? "")
         : (propDraft?.ref_path ?? "");
 
-  return (
+  // portal 到 body：祖先 transform 容器会困住 fixed 层级（被 portal 的
+  // 详情窗压住，用户实测），顶层挂载后 z200 直接与 body 层比较。
+  return createPortal(
     <div
       className="project-dialog-overlay"
       onMouseDown={(event) => {
@@ -660,7 +663,8 @@ export default function ProjectLibraryPanel({
           }}
         />
       )}
-    </div>
+    </div>,
+    document.body,
   );
 }
 

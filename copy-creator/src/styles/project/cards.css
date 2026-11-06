@@ -165,20 +165,9 @@
 }
 .pc-node.pc-resized .pc-prompt-text { overflow: auto; -webkit-line-clamp: unset; }
 /* 详情窗里的提示词全文 */
-/* 提示词选择弹窗：搜索 + 分类列表，选中即写入纸片 */
+/* 提示词选择弹窗：搜索 + 分类列表，选中即写入纸片（遮罩复用 PortalMask
+   的 pc-dialog-mask fixed z95，组件已 portal body）。 */
 .pc-prompt-pick { width: min(420px, calc(100vw - 48px)); }
-/* 二级浮层遮罩：详情窗（portal body z90）之上打开，pc-dialog-mask 是画布
-   内 absolute z50 压不住，专用 fixed z100（project-dialog-overlay z200 更高，
-   两者不同时开）。 */
-.pc-prompt-pick-mask {
-  position: fixed;
-  inset: 0;
-  z-index: 100;
-  background: rgba(18, 18, 24, 0.4);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-}
 .pc-prompt-pick-topbar { display: flex; align-items: center; gap: 8px; }
 .pc-prompt-pick-topbar h4 { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .pc-prompt-pick-x {

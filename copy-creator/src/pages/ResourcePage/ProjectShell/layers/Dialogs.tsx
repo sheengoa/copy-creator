@@ -3,6 +3,7 @@
 // 确认、片段挂产出选择器、挂剧本选择器、提示词挑选、关联场景与成员装入。
 import { useTranslation } from "react-i18next";
 import type { Dispatch, SetStateAction } from "react";
+import { createPortal } from "react-dom";
 import type { ProjectScene } from "../../../../stores/projectStore";
 import { promptCategoryKey } from "../../../../domain/projectView";
 import { ConfirmDialog } from "../../../../components/ConfirmDialog";
@@ -26,7 +27,7 @@ export function SceneFormDialog({
     <>
 {/* 场景快速编辑 */}
 {sceneForm && (
-  <div className="pc-dialog-mask" onMouseDown={(e) => { if (e.target === e.currentTarget) setSceneForm(null); }}>
+  <PortalMask>
     <div className="pc-dialog">
       <h4>{sceneForm.id ? t("project.canvas.editScene") : t("project.canvas.newScene")}</h4>
       <label>
@@ -61,7 +62,7 @@ export function SceneFormDialog({
         <button type="button" className="primary" onClick={submitSceneForm}>{t("common.save")}</button>
       </div>
     </div>
-  </div>
+  </PortalMask>
 )}
     </>
   );
@@ -80,7 +81,7 @@ export function ShotFormDialog({
     <>
 {/* 镜头快速编辑 */}
 {shotForm && (
-  <div className="pc-dialog-mask" onMouseDown={(e) => { if (e.target === e.currentTarget) setShotForm(null); }}>
+  <PortalMask>
     <div className="pc-dialog">
       <h4>{shotForm.id ? t("project.canvas.editShot") : t("project.canvas.addShot")}</h4>
       <label>
@@ -106,7 +107,7 @@ export function ShotFormDialog({
         <button type="button" className="primary" onClick={submitShotForm}>{t("common.save")}</button>
       </div>
     </div>
-  </div>
+  </PortalMask>
 )}
     </>
   );
@@ -196,9 +197,24 @@ export function ScriptPickDialog({
   );
 }
 
+/** 画布小对话框统一遮罩：portal 到 body 的 fixed 全屏层——画布/面板祖先
+ *  链的 transform 容器会困住非 portal 层级（被 portal 的详情窗压住，用户
+ *  实测），统一顶层挂载根治；层级 95（详情窗 90 之上、库选 200 之下）。 */
+function PortalMask({ children, onDismiss }: { children: React.ReactNode; onDismiss?(): void }) {
+  return createPortal(
+    <div
+      className="pc-dialog-mask"
+      onMouseDown={(e) => { if (onDismiss && e.target === e.currentTarget) onDismiss(); }}
+    >
+      {children}
+    </div>,
+    document.body,
+  );
+}
+
 /** 提示词选择：空提示词纸片双击从提示词库选一条写入纸片。作为详情窗的
- *  二级浮层打开（fixed z100 压过 portal 到 body 的详情窗 z90；pc-dialog-mask
- *  是画布内 absolute z50 压不住），标题栏带 ×，Esc/遮罩/× 都走关闭。 */
+ *  二级浮层打开（portal body z100 压过详情窗 z90），标题栏带 ×，
+ *  Esc/遮罩/× 都走关闭。 */
 export function PromptPickDialog({
   promptPickOpen, closePromptPick, promptPickQuery, setPromptPickQuery, prompts, handlePromptPick,
 }: {
@@ -214,7 +230,7 @@ export function PromptPickDialog({
     <>
 {/* 提示词选择：空提示词纸片双击后从提示词库选一条写入纸片 */}
 {promptPickOpen && (
-  <div className="pc-prompt-pick-mask" onMouseDown={(e) => { if (e.target === e.currentTarget) closePromptPick(); }}>
+  <PortalMask onDismiss={closePromptPick}>
     <div className="pc-dialog pc-prompt-pick">
       <div className="pc-prompt-pick-topbar">
         <h4>{t("project.canvas.promptPickTitle")}</h4>
@@ -268,7 +284,7 @@ export function PromptPickDialog({
         )}
       </div>
     </div>
-  </div>
+  </PortalMask>
 )}
     </>
   );

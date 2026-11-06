@@ -483,9 +483,11 @@
 
 /* ── 快速编辑对话框 ── */
 .pc-dialog-mask {
-  position: absolute;
+  position: fixed;
   inset: 0;
-  z-index: 50;
+  /* 画布小对话框统一层：95（详情窗 90 之上；组件已 portal body，不受
+     祖先 transform 困层级影响）。 */
+  z-index: 95;
   background: rgba(18, 18, 24, 0.4);
   display: flex;
   align-items: center;

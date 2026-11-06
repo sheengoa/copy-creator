@@ -1,4 +1,5 @@
 import { useEffect, useRef } from "react";
+import { createPortal } from "react-dom";
 import { useTranslation } from "react-i18next";
 
 export interface ConfirmDialogState {
@@ -32,7 +33,10 @@ export function ConfirmDialog({ message, hint, onConfirm, onCancel, onDismiss }:
     cancelButtonRef.current?.focus();
     return () => window.removeEventListener("keydown", onKeyDown);
   }, [onCancel]);
-  return (
+  // portal 到 body：画布/面板祖先链的 transform 容器会困住 fixed 层级
+  // （z1000 也压不过 portal 的详情窗），顶层挂载后与本项目全部浮层同域
+  // 比较（统一层规：详情窗 90 < 提示词选 100 < 文件/库选 200 < 确认 1000）。
+  return createPortal(
     <div className="dialog-overlay" onClick={dismiss}>
       <div className="dialog-content" onClick={(event) => event.stopPropagation()}>
         <h3 className="dialog-title">{t("common.confirm")}</h3>
@@ -59,6 +63,7 @@ export function ConfirmDialog({ message, hint, onConfirm, onCancel, onDismiss }:
           </button>
         </div>
       </div>
-    </div>
+    </div>,
+    document.body,
   );
 }

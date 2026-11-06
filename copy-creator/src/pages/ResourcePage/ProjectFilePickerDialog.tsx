@@ -1,4 +1,5 @@
 import { Fragment, useEffect, useMemo, useState } from "react";
+import { createPortal } from "react-dom";
 import { invoke } from "@tauri-apps/api/core";
 import { useTranslation } from "react-i18next";
 import type { ClipboardRecord } from "../../types";
@@ -332,7 +333,10 @@ export default function ProjectFilePickerDialog({
     }
   };
 
-  return (
+  // portal 到 body：画布/工程面板祖先链上的 transform 容器会把 fixed
+  // 层级困进其 stacking context，被 portal 的详情窗（z90）压住（用户实测
+  // 「选择框被窗口遮挡」）——顶层挂载后 z200 直接与 body 层比较，永远在上。
+  return createPortal(
     <div
       className="project-dialog-overlay"
       onMouseDown={(event) => {
@@ -494,6 +498,7 @@ export default function ProjectFilePickerDialog({
           )}
         </div>
       </div>
-    </div>
+    </div>,
+    document.body,
   );
 }
