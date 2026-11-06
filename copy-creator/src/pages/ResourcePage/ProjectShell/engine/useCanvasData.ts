@@ -395,9 +395,12 @@ export function useCanvasData(deps: {
   );
 
   // ── 节点尺寸（ComfyUI 式右下角手柄拖拽）：按集存 localStorage 覆盖层，
-  // 只记录改过的节点，渲染时未记录的回默认尺寸；线锚点由节点实测跟随。 ──
+  // 只记录改过的节点，渲染时未记录的回默认尺寸；线锚点由节点实测跟随。
+  // 键名带版本号：sizes2（2026-11-06 默认宽统一 208）——旧 sizes 记的是
+  // 旧默认时代的拖动覆盖（资料节点普遍为看清图拖大），统一默认后整体
+  // 作废一次，换键即换血；位置记忆（infonodes）不受影响。 ──
   const [nodeSizes, setNodeSizes, persistSizes] = usePerEpisodeStorage<Record<string, { w: number; h: number }>>(
-    episodeId, "sizes", EMPTY_SIZES,
+    episodeId, "sizes2", EMPTY_SIZES,
   );
   const sizeOfNode = useCallback(
     (key: string): { w: number; h: number } | null => {

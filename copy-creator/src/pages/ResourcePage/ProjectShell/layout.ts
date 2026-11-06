@@ -5,26 +5,29 @@ import type { ProjectAsset, ProjectScene, ProjectShot } from "../../../stores/pr
 import type { CanvasCard, CanvasFrame, CanvasLayout, CardAsset, Pos } from "./types";
 
 // ── 布局常量（世界像素） ──────────────────────────────────────
+// 节点默认宽统一 208（2026-11-06 用户定案「默认尺寸不能有的很大有的
+// 非常小」）：资料/镜头/片段/剧本纸片/提示词纸片/成片输出同宽，高度
+// 按内容分化（图框 16:9 节奏：资料预览 190×109、片段缩略 192×108）。
 export const FRAME_MIN_W = 340;
 export const FRAME_MIN_H = 260;
 export const FRAME_PAD_X = 32;
 export const FRAME_PAD_TOP = 60;
 export const FRAME_PAD_BOTTOM = 32;
 export const CARD_GAP = 24;
-export const CARD_W = 268; // 镜头卡宽
+export const CARD_W = 208; // 镜头卡宽（统一默认宽）
 export const CARD_HEAD_H = 44; // 卡头（镜头号 + 描述）
-export const THUMB_W = 116; // 卡内素材缩略宽（两列）
+export const THUMB_W = 95; // 卡内素材缩略宽（两列铺满 208 内宽）
 export const THUMB_RATIO = 0.68;
 export const THUMB_GAP = 8;
-export const INFO_W = 132; // 资料卡宽（角色/道具/剧本）
+export const INFO_W = 208; // 资料卡宽（角色/场景/道具/组/占位，统一默认宽）
 export const INFO_H = 180; // 含标题条 + 接口行 + 预览卡（接口行内移后增高的估算值）
-export const SCRIPT_W = 210;
+export const SCRIPT_W = 208; // 剧本/提示词纸片宽（统一默认宽）
 export const WORLD_MARGIN = 60;
 /** 连线层视口外沿的世界余量（把可见区外一点的线也画进来，避免边缘裁切）。 */
 export const WIRES_VIEWPORT_PAD = 64;
 export const MINI_W = 150;
 export const MINI_H = 96;
-export const OUTPUT_W = 176; // 成片输出节点（每集工作流的总输出口）
+export const OUTPUT_W = 208; // 成片输出节点（每集工作流的总输出口，统一默认宽）
 export const OUTPUT_H = 72;
 export const SEG_W = 208; // 片段节点（AI 分段生成的视频分段）
 export const SEG_H = 108;
