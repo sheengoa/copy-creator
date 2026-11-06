@@ -190,7 +190,13 @@ export function ScriptPickDialog({
       setScriptPickOpen(false);
       setScriptPickTarget(null);
     }}
-    onPick={(file) => handleScriptPick(file.filePath)}
+    onPick={(file) => {
+      // 选完即关（用户实测「选完不消失」）；handleScriptPick 闭包已捕获
+      // target，转正/挂接落库在其后异步完成，不受关闭影响。
+      handleScriptPick(file.filePath);
+      setScriptPickOpen(false);
+      setScriptPickTarget(null);
+    }}
   />
 )}
     </>

@@ -323,10 +323,11 @@ function EntityDetail({ group, sourceKey, ops }: { group: EntityPhKind; sourceKe
           importLabel={t("project.library.importAction")}
           onClose={() => setPickerOpen(false)}
           onPick={(file) => {
-            // 选一张加一张，浮层保持打开供连续挑选（与三库面板同语义）。
+            // 选一张加一张即关（用户实测「选完不消失」）；要再加点段头按钮重开。
             if (!refPaths.includes(file.filePath)) {
               ops.setReferences(group, entityId, [...refPaths, file.filePath]);
             }
+            setPickerOpen(false);
           }}
         />
       )}
