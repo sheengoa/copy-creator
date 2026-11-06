@@ -9,15 +9,20 @@
   gap: 12px;
 }
 
-/* 监视器：16:9 黑底圆角，与内容节点媒体盒同语言；播放器绝对填充。 */
+/* 监视器 = 等比舞台（2026-11-06 统一准则：画布媒体唯一呈现形态是等比
+   精确盒，监视器自备 16:9 黑框废除——旧设计 224px 黑底 contain 视频，
+   竖版两侧/横版上下全是黑边，用户实测否决）。舞台盒随视频真实比例
+   收缩（组件写 --media-fitw/--media-ar，与 is-ratio-fit 同一机制），
+   画面/产物帧 100% 填满舞台即盒=画面盒，零留白零黑边；悬浮 ×/徽章/
+   播放条贴舞台边即贴画面边。实测未到的窗口期回退 16:9/224px（与旧
+   形态同框），留白透节点表面。 */
 .fc-root .fc-vt-screen {
   position: relative;
-  width: 224px;
-  aspect-ratio: 16 / 9;
+  width: min(100%, var(--media-fitw, 224px));
+  aspect-ratio: var(--media-ar, 16 / 9);
   flex: none;
   border-radius: 10px;
   overflow: hidden;
-  background: #090909;
   box-shadow: 0 1px 3px rgba(0, 0, 0, 0.12);
 }
 
@@ -47,6 +52,10 @@
   max-height: none;
   object-fit: contain;
   border-radius: 0;
+  /* 黑底移除（统一准则）：舞台比例与视频解码比例存在失配窗口（时间轴
+     探测值 vs loadedmetadata 实测，mock/异常流下不等），contain 留白
+     一旦发生不许落在黑底上——露节点表面。 */
+  background: none;
 }
 
 .fc-root .fc-vt-screen .media-playback-bar {
@@ -56,13 +65,16 @@
   bottom: 8px;
 }
 
-/* 完成态产物图/GIF 直接铺监视器（ResourceThumb 的 fc-media-box 类）。 */
+/* 完成态产物图/GIF 直接铺监视器（ResourceThumb 的 fc-media-box 类）。
+   舞台=视频比例=帧比例，填满即盒=图；黑底移除（统一准则：媒体预览
+   不自备底色）。 */
 .fc-root .fc-vt-screen .fc-media-box {
   position: absolute;
   inset: 0;
   width: 100%;
   height: 100%;
   max-height: none;
+  background: none;
 }
 
 /* 完成态徽标：左下角，与帧节点同款。 */
@@ -314,8 +326,8 @@
   pointer-events: none;
 }
 
-/* ── 固定高度节点（pc-resized）：监视器吃掉表单剩余空间，时间轴与
-   侧栏按钮始终留在可视区内（照抽帧节点让位模式）。 ── */
+/* ── 固定高度节点（pc-resized）：监视器吃掉表单剩余空间做等比居中
+   舞台，时间轴与侧栏按钮始终留在可视区内（照抽帧节点让位模式）。 ── */
 
 .fc-root .pc-node.pc-resized .fc-vt-monitor {
   flex: 1 1 auto;
@@ -323,11 +335,42 @@
 }
 
 .fc-root .pc-node.pc-resized .fc-vt-screen {
-  height: auto;
+  /* 舞台本身即等比盒：解除基础态宽度帽（width:auto），高度被 flex 行
+     拉伸吃满监视器区后宽度随 --media-ar 自动推导——节点拉高画面跟着
+     放大（盒=画面盒，零留白）。max-width 保底防横版视频把侧栏挤没。 */
+  width: auto;
+  min-width: 0;
   min-height: 0;
-  /* !important 压过视频比例的内联 aspect-ratio：用户拖过尺寸手柄即接管
-     布局，监视器回退「填满节点」行为（画面 contain 不变形）。 */
-  aspect-ratio: auto !important;
+  max-width: 100%;
+}
+
+/* 画面：舞台内等比盒（与图像侧同一公式），黑底移除；播放条仍悬浮
+   舞台下沿。 */
+.fc-root .pc-node.pc-resized .fc-vt-screen .media-playback {
+  display: grid;
+  grid-template-rows: minmax(0, 1fr) auto;
+}
+
+.fc-root .pc-node.pc-resized .fc-vt-screen .media-playback-video {
+  width: auto;
+  height: auto;
+  max-width: 100%;
+  max-height: 100%;
+  margin: auto;
+  min-height: 0;
+  aspect-ratio: auto;
+  background: none;
+}
+
+/* 完成态产物图：舞台内等比盒（GIF/帧比例随视频，窗口期外盒=图）。 */
+.fc-root .pc-node.pc-resized .fc-vt-screen .fc-media-box {
+  width: auto;
+  height: auto;
+  max-width: 100%;
+  max-height: 100%;
+  margin: auto;
+  aspect-ratio: auto;
+  background: none;
 }
 
 .fc-root .pc-node.pc-resized .fc-vt-screen .resource-media-player {

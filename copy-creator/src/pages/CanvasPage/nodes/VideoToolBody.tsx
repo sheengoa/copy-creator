@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, type CSSProperties } from "react";
 import { useTranslation } from "react-i18next";
 import { Icons } from "../../../components/Icons";
 import { MediaPlayback } from "../../../components/MediaPlayback";
@@ -39,7 +39,7 @@ export function VideoToolBody({ node, services }: NodeProps) {
     measured && measured.path === videoPath && measured.w > 0 && measured.h > 0 ? measured : null;
   const screenRatio =
     timeline && (timeline.w ?? 0) > 0 && (timeline.h ?? 0) > 0
-      ? { w: timeline.w, h: timeline.h }
+      ? { w: timeline.w as number, h: timeline.h as number }
       : measuredRatio;
   const draft = rt.videoToolDraft[node.id];
   const seekT = draft?.t ?? meta.start_secs ?? 0;
@@ -96,10 +96,19 @@ export function VideoToolBody({ node, services }: NodeProps) {
               className="fc-vt-screen"
               /* 监视器随视频真实宽高比自适应（后端时间轴实测的
                  w/h，未回传前用视频元素 loadedmetadata 实测兜底）
-                 ——竖版视频不再被 16:9 固定窗缩成小画面，与图钉
-                 预期「完整展示视频尺寸」一致。完成态产物帧比例与
-                 视频一致，容器同样跟随。 */
-              style={screenRatio ? { aspectRatio: `${screenRatio.w} / ${screenRatio.h}` } : undefined}
+                 ——竖版视频不再被 16:9 固定窗缩成小画面。几何走
+                 统一机制：组件只写实测变量（--media-fitw/--media-ar），
+                 呈现形态由 CSS 消费（canvas-video-tools.css 的等比
+                 舞台），与 is-ratio-fit 画布媒体同一套准则。回退值
+                 16:9/224px 仅覆盖实测未到的窗口期。 */
+              style={
+                screenRatio
+                  ? ({
+                      "--media-fitw": `${Math.round(330 * (screenRatio.w / screenRatio.h))}px`,
+                      "--media-ar": `${screenRatio.w} / ${screenRatio.h}`,
+                    } as CSSProperties)
+                  : undefined
+              }
             >
               {/* 抽帧/GIF 完成态显示产物图（原位展示，点击放大已移除）；
                   音轨完成态保留视频画面；其余一律视频预览。 */}
