@@ -787,7 +787,7 @@
       "pendingPh": "Canvas placeholder (unloaded)",
       "expand": "Expand",
       "collapse": "Collapse",
-      "promptKind": "Prompt paper",
+      "promptKind": "Prompt",
       "promptChange": "Change prompt",
       "promptTitleLabel": "Title",
       "promptContentLabel": "Prompt content",
@@ -932,8 +932,8 @@
       "character": "Character",
       "location": "Location",
       "prop": "Prop",
-      "scriptPaper": "Script paper",
-      "promptPaper": "Prompt paper",
+      "scriptPaper": "Script",
+      "promptPaper": "Prompt",
       "output": "Final cut"
     },
     "port": {
@@ -978,7 +978,7 @@
       "character": "Blank holder, load entity on dbl-click",
       "location": "Blank holder, load entity on dbl-click",
       "prop": "Blank holder, load entity on dbl-click",
-      "scriptPaper": "Adds an empty paper, attach file on dbl-click",
+      "scriptPaper": "Adds an empty script, attach file on dbl-click",
       "promptPaper": "Pick one from prompt library on dbl-click",
       "output": "Total output of this episode"
     },

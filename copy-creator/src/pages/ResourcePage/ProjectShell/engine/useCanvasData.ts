@@ -484,9 +484,16 @@ export function useCanvasData(deps: {
   // 占位装入实体：占位节点从画布消失、实体节点以新 key 出现，把占位的
   // 当前位置转交给实体节点（否则新 key 无记忆会跳回资料框网格——用户
   // 实测「装入后节点位置变了」）。占位拖过用记忆值，没拖过用创建点。
+  // 两条铁律（2026-11-07 根治）：
+  // ① 目标实体节点已在画布（重复装入同一实体）→ 直接跳过：一实体一节点，
+  //    绝不把已有节点拖到占位处（用户实测「两个节点合并到一起」）。
+  // ② 否则强制写，不用「已有记忆即跳过」：首现钉住 effect 在实机时序下
+  //    可能抢先给新 key 钉了网格槽位，旧跳过逻辑会让转交失效 → 装入后
+  //    节点跳格（用户实测「节点就会跑」）。转交必须赢，配合 Shell 在关联
+  //    落库前先转交，钉住 effect 无从抢跑。
   const adoptInfoOffset = useCallback(
     (fromKey: string, toKey: string) => {
-      if (infoOffsets[toKey]) return;
+      if (infoNodes.some((n) => n.key === toKey)) return;
       const from =
         infoOffsets[fromKey] ??
         (() => {
@@ -496,7 +503,7 @@ export function useCanvasData(deps: {
       if (!from) return;
       persistInfoOffsets({ ...infoOffsets, [toKey]: from });
     },
-    [infoOffsets, entityPhs, persistInfoOffsets],
+    [infoNodes, infoOffsets, entityPhs, persistInfoOffsets],
   );
 
 

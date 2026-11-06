@@ -787,7 +787,7 @@
       "pendingPh": "画布占位（未装入）",
       "expand": "展开",
       "collapse": "折叠",
-      "promptKind": "提示词纸片",
+      "promptKind": "提示词",
       "promptChange": "更换提示词",
       "promptTitleLabel": "标题",
       "promptContentLabel": "提示词内容",
@@ -928,8 +928,8 @@
       "character": "角色",
       "location": "场景",
       "prop": "道具",
-      "scriptPaper": "剧本纸片",
-      "promptPaper": "提示词纸片",
+      "scriptPaper": "剧本",
+      "promptPaper": "提示词",
       "output": "成片输出"
     },
     "port": {
@@ -974,7 +974,7 @@
       "character": "空白资料占位，双击装实体",
       "location": "空白资料占位，双击装实体",
       "prop": "空白资料占位，双击装实体",
-      "scriptPaper": "每次放一张空纸片，双击挂文件",
+      "scriptPaper": "每次放一张空白剧本，双击挂文件",
       "promptPaper": "双击从提示词库选一条",
       "output": "本集工作流的总输出口"
     },

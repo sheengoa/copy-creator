@@ -632,6 +632,13 @@ export default function ProjectCanvasShell({
       });
     },
     loadEntity: (ephId, kind, entityId) => {
+      const phKey = `eph:${ephId}`;
+      const entityKey = `${kind === "character" ? "char" : kind === "location" ? "loc" : "prop"}:${entityId}`;
+      // 占位位置转交先于关联落库：实体节点首次出现前占位位置已在记忆，
+      // 首现钉住 effect 无从抢跑（实机时序下曾抢先钉住网格槽位 → 转交被
+      // 跳过 → 装入后节点跳格，用户实测「节点就会跑」）。key 变化不丢
+      // 位置——用户定案「位置绝不自己动」。
+      data.adoptInfoOffset(phKey, entityKey);
       // 装入：先关联到集（概览带出实体节点），再把该占位的暂存线转正为
       // node_link（语义对齐旧占位转正），最后移除占位。装入选完即关窗
       // （用户实测「点完了窗口就消失，之后双击节点再看详情」）。
@@ -639,14 +646,10 @@ export default function ProjectCanvasShell({
         if (kind === "character") await setEpisodeCharacters(episodeId, [...new Set([...(overview?.episode.character_ids ?? []), entityId])]);
         else if (kind === "location") await setEpisodeLocations(episodeId, [...new Set([...(overview?.episode.location_ids ?? []), entityId])]);
         else await setEpisodeProps(episodeId, [...new Set([...(overview?.episode.prop_ids ?? []), entityId])]);
-        const phKey = `eph:${ephId}`;
         for (const p of pendingLinks.filter((l) => l.fromKey === phKey)) {
           linkNode(episodeId, kind, entityId, p.toSegmentId, p.toPort as Parameters<typeof linkNode>[4], "");
         }
         persistPendingLinks(pendingLinks.filter((l) => l.fromKey !== phKey));
-        // 占位位置转交给实体节点（key 变化不丢位置——用户定案「位置绝不
-        // 自己动」）。
-        data.adoptInfoOffset(phKey, `${kind === "character" ? "char" : kind === "location" ? "loc" : "prop"}:${entityId}`);
         data.persistEntityPhs(data.entityPhs.filter((ph) => ph.id !== ephId));
         setDetailFor(null);
         setDetailBack([]);

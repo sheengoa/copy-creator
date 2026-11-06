@@ -116,13 +116,17 @@ export function useNodeMetrics(
     [boxOf, nodeMetrics],
   );
   const inPointOf = useCallback(
-    (key: string, portId: string): { x: number; y: number } | null => {
+    (key: string, portId?: string): { x: number; y: number } | null => {
       const box = boxOf(key);
       if (!box) return null;
-      const off = nodeMetrics.ports[key]?.[portId];
-      if (off) return { x: box.x + off.x, y: box.y + off.y };
+      // portId 省略时取该节点首个输入口（工程成片线只报到节点不报到口）：
+      // 否则实测表查 undefined 键恒 miss，永远退到「左缘中点」常数估算，
+      // 口点不在中点时线就错位（用户实测成片输入口与线错开）。
       const def = PORT_DEFS[nodes.find((n) => n.id === key)?.type ?? "note"];
-      const index = Math.max(0, def.ins.findIndex((p) => p.id === portId));
+      const pid = portId ?? def.ins[0]?.id;
+      const off = pid ? nodeMetrics.ports[key]?.[pid] : undefined;
+      if (off) return { x: box.x + off.x, y: box.y + off.y };
+      const index = Math.max(0, def.ins.findIndex((p) => p.id === pid));
       const rows = Math.max(1, def.ins.length);
       return { x: box.x, y: box.y + (box.h * (index + 1)) / (rows + 1) };
     },
