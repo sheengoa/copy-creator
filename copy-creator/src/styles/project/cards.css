@@ -78,9 +78,10 @@
   gap: 7px;
   text-align: center;
 }
+/* 节点预览图自然比例完整展示（用户定案「视图里的节点预览完美展示图
+   像，不裁切」）：容器高度随图走（首图撑高），堆叠装饰层绝对定位随容器。 */
 .pc-photo {
   position: relative;
-  height: 109px;
   align-self: stretch;
 }
 /* 组节点：其余成员的图边向右堆放（层数上限 2），右侧留出堆边空间 */
@@ -96,10 +97,9 @@
 }
 .pc-photo-layer.l1 { transform: translate(7px, 2px); }
 .pc-photo-layer.l2 { transform: translate(14px, 4px); }
-.pc-photo-img { width: 100%; height: 100%; object-fit: cover; display: block; }
+.pc-photo-img { width: 100%; height: auto; display: block; }
 .pc-photo-main {
-  position: absolute;
-  inset: 0;
+  position: relative;
   border-radius: 10px;
   overflow: hidden;
   background: var(--chip-bg);
@@ -107,6 +107,7 @@
 }
 /* 无参考图：类型色淡底 + 名字首字占位，同一卡片形态 */
 .pc-photo-main.pc-photo-empty {
+  min-height: 109px;
   display: flex;
   flex-direction: column;
   align-items: center;

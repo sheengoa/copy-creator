@@ -40,6 +40,8 @@ export interface ProjectEpisode {
  *  落库统一透传）。空字段回退实体级默认列。 */
 export interface ImageBinding {
   path: string;
+  /** 形象名称（库选条目自动带入；独立可改，空回退实体名）。 */
+  name: string;
   voice_path: string;
   bio: string;
   prompt: string;

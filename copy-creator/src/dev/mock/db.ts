@@ -206,7 +206,7 @@ export const db = {
   ],
   locations: [
     { id: "loc-1", name: "废弃地铁站", int_ext: "int", time_hint: "night", bio: "", prompt: "", ref_path: "mock/scenes/station-main.png", reference_paths: JSON.stringify(["mock/scenes/station-corridor.png", "mock/scenes/station-platform.png", "mock/scenes/station-hall.png"]), created_at: ts(), updated_at: ts() },
-    { id: "loc-2", name: "天台", int_ext: "ext", time_hint: "day", bio: "", prompt: "", ref_path: "", created_at: ts(), updated_at: ts() },
+    { id: "loc-2", name: "天台", int_ext: "ext", time_hint: "day", bio: "高楼天台的开阔夜景", prompt: "城市天台，栏杆剪影", ref_path: "mock/scenes/rooftop-main.png", created_at: ts(), updated_at: ts() },
   ],
   props: [
     { id: "prop-1", name: "旧怀表", bio: "", prompt: "", ref_path: "", created_at: ts(), updated_at: ts() },
