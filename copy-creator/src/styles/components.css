@@ -2107,6 +2107,17 @@ input:focus-visible + .selection-checkbox {
   object-fit: contain;
 }
 
+/* 比例贴合默认态（is-ratio-fit，2026-11-06 几何交接样式层）：组件按实测
+   宽高写 --media-fitw/--media-ar，画面收敛为 330 帽等比盒——元素盒恒等
+   于视频盒，contain 留白无处产生。仅画布预览挂 ratioFit；监视器/保存盒
+   等自行控制比例的用法不挂，不受影响。固定高节点（pc-resized）的等比
+   精确盒由画布样式以更高特异性接管（inputs.css）。 */
+.media-playback-video.is-ratio-fit {
+  width: min(100%, var(--media-fitw, 100%));
+  aspect-ratio: var(--media-ar);
+  margin-inline: auto;
+}
+
 .media-playback-bar {
   display: flex;
   align-items: center;

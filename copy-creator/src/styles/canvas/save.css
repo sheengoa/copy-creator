@@ -241,6 +241,45 @@
   from { opacity: 0; transform: scale(1.04); }
 }
 
+/* 固定高节点（pc-resized）：产物舞台吃掉表单剩余空间做居中舞台，媒体
+   等比精确盒（2026-11-06 与加载/预览节点同一语言，规则详解见
+   canvas/inputs.css）——拉伸保存节点产物只放大、永无黑边；多图格子态
+   不参与（330px 限高内部滚动是既定行为）。 */
+.fc-root .pc-node.pc-resized .fc-save-stage.filled {
+  flex: 1 1 auto;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.fc-root .pc-node.pc-resized .fc-save-stage.filled .fc-media-box {
+  flex: none;
+  width: auto;
+  height: auto;
+  max-width: 100%;
+  max-height: 100%;
+  margin: auto;
+  aspect-ratio: auto;
+  background: none;
+}
+
+.fc-root .pc-node.pc-resized .fc-save-stage.filled .media-playback.has-video {
+  flex: 1 1 auto;
+  min-height: 0;
+  display: grid;
+  grid-template-rows: minmax(0, 1fr) auto;
+}
+
+.fc-root .pc-node.pc-resized .fc-save-stage.filled .media-playback-video {
+  width: auto;
+  height: auto;
+  max-width: 100%;
+  max-height: 100%;
+  margin: auto;
+  aspect-ratio: auto;
+  background: none;
+}
+
 /* 保存格子内件（音/视频无画面帧）：类型图标居中占位，点击切单件态
    看播放器。 */
 .fc-save-cell-icon {

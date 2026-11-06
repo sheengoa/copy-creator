@@ -218,6 +218,17 @@
   box-shadow: 0 1px 3px rgba(0, 0, 0, 0.12);
 }
 
+/* 比例贴合默认态（is-ratio-fit，2026-11-06 几何交接样式层）：组件按实测
+   宽高写 --media-fitw/--media-ar，这里收敛为「容器宽与 330px 帽按比例
+   换算的较小值」的等比盒——元素盒恒等于图像盒，contain 留白无处产生，
+   黑底同不可见（纯加载兜底）。自动高节点（height:null）始终走本规则；
+   固定高节点（pc-resized）的等比精确盒在 inputs.css 以更高特异性接管。 */
+.fc-root .fc-media-box.is-ratio-fit {
+  width: min(100%, var(--media-fitw, 100%));
+  aspect-ratio: var(--media-ar);
+  margin-inline: auto;
+}
+
 /* 缩略图加载失败占位（2026-11-06）：img onError 此前静默，授权失配/
    文件缺失整盒空白无从分辨。样式随媒体盒（暗底圆角），文案居中可读。 */
 .fc-root .fc-media-broken {

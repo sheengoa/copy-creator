@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useState, type CSSProperties } from "react";
 import { useTranslation } from "react-i18next";
 import { Icons } from "../../../components/Icons";
 import { MediaPlayback } from "../../../components/MediaPlayback";
@@ -12,9 +12,12 @@ import { resolveCanvasMediaPath, resolveCanvasMediaUrl } from "./mediaPath";
 /** 资源缩略图：mediaUrl 域层唯一出口，路径变化重解析。
  *  ratioFit（2026-11-04）：内容节点媒体盒的黑边根除——img 元素盒（全宽
  *  × 330 高帽）大于图像盒时 contain 留黑边（竖版加载图像左右黑条，与
- *  视频侧修复前同病），onLoad 读 naturalWidth/Height 后把宽度收敛到
- *  「容器宽与 330px 高帽按比例换算的较小值」并锁 aspect-ratio，与
- *  MediaPlayback 的 ratioFit 同一公式（直接复用同套几何）。url 经异步
+ *  视频侧修复前同病），onLoad 读 naturalWidth/Height 后按实测比例收敛
+ *  元素盒，与 MediaPlayback 的 ratioFit 同一公式（直接复用同套几何）。
+ *  2026-11-06 起几何改经 CSS 交接：组件只写实测变量（--media-fitw/
+ *  --media-ar）并挂 is-ratio-fit 类，具体呈现（自动高的 330 帽等比盒/
+ *  固定高节点的填充区内最大等比盒）由样式层按节点态接管——内联样式
+ *  会压住 pc-resized 规则，节点拉伸就永远无法放大媒体了。url 经异步
  *  解析后才赋给 src，onLoad 监听必先就位，缓存图也不会漏计。
  *  加载失败给可见占位（2026-11-06）：此前 onError 静默，盘选文件授权
  *  失配/文件缺失时整盒空白（用户无法分辨「没加载」与「加载失败」），
@@ -38,13 +41,14 @@ export function ResourceThumb({ path, className, ratioFit = false }: { path: str
       alive = false;
     };
   }, [path]);
+  // 实测几何只进变量，不直接落样式：is-ratio-fit 类的规则消费这两个
+  // 变量（自动高 330 帽 / 固定高等比精确盒两态各有各的用法）。
   const fitStyle =
     ratioFit && ratio && ratio.w > 0 && ratio.h > 0
-      ? {
-          width: `min(100%, ${Math.round(330 * (ratio.w / ratio.h))}px)`,
-          aspectRatio: `${ratio.w} / ${ratio.h}`,
-          marginInline: "auto",
-        }
+      ? ({
+          "--media-fitw": `${Math.round(330 * (ratio.w / ratio.h))}px`,
+          "--media-ar": `${ratio.w} / ${ratio.h}`,
+        } as CSSProperties)
       : undefined;
   if (!url) return null;
   if (failed) {
@@ -57,7 +61,7 @@ export function ResourceThumb({ path, className, ratioFit = false }: { path: str
   }
   return (
     <img
-      className={className}
+      className={ratioFit ? `is-ratio-fit${className ? ` ${className}` : ""}` : className}
       style={fitStyle}
       src={url}
       alt=""

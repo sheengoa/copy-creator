@@ -9,7 +9,7 @@
  * 播放条与进度/音量的承载元素用 button：画布视口手势按 closest("button")
  * 放行，拖动不会拖走节点。
  */
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, type CSSProperties } from "react";
 import { useTranslation } from "react-i18next";
 import { Icons } from "./Icons";
 import { resolveResourceMediaUrl } from "../domain/mediaUrl";
@@ -38,11 +38,12 @@ export function MediaPlayback({
    *  画布——都不得未经点击开播，默认 false 令全部接入点安全；保存盒/
    *  监视器/试听条此前的显式 false 已是冗余）。播放只由点击触发。 */
   autoPlay?: boolean;
-  /** 视频比例贴合（画布节点预览用）：加载后读真实宽高，把画面元素宽度
-   *  收敛到「容器宽与 330px 高帽按比例换算的较小值」并锁定 aspect-ratio
-   *  ——元素盒恒等于视频盒，object-fit: contain 不再产生黑边，任意
-   *  横/竖/方屏都完整展示视频比例。默认关（监视器等自行控制比例的
-   *  场景不受影响）。 */
+  /** 视频比例贴合（画布节点预览用）：加载后读真实宽高，把画面元素收敛到
+   *  等比盒。2026-11-06 起几何改经 CSS 交接：组件只写实测变量
+   *  （--media-fitw/--media-ar）并挂 is-ratio-fit 类——自动高态为「容器
+   *  宽与 330px 高帽按比例换算的较小值」锁比例（与画布图像侧同一公式），
+   *  固定高节点（pc-resized）由样式层接管为填充区内最大等比盒（拉伸只
+   *  放大、永无黑边）。默认关（监视器等自行控制比例的场景不受影响）。 */
   ratioFit?: boolean;
   /** 媒体元素引用回调：调用方程序化 seek（视频工具播放头同步）时需要。 */
   mediaRefCallback?: (el: HTMLVideoElement | HTMLAudioElement | null) => void;
@@ -174,22 +175,21 @@ export function MediaPlayback({
   const dur = pos.dur > 0 ? pos.dur : 0;
   const pct = dur > 0 ? Math.min(100, (pos.t / dur) * 100) : 0;
 
-  const ratioStyle =
+  const ratioStyle: CSSProperties | undefined =
     ratioFit && ratio && ratio.w > 0 && ratio.h > 0
       ? {
-          // 宽度 = 容器宽与「330px 高帽 × 比例」的较小者：横屏吃满容器
-          // 宽，竖/方屏按高度帽收敛居中；aspect-ratio 锁定后高度随之
-          // ≤330，元素盒 = 视频盒，contain 不再出黑边。
-          width: `min(100%, ${Math.round(330 * (ratio.w / ratio.h))}px)`,
-          aspectRatio: `${ratio.w} / ${ratio.h}`,
-          marginInline: "auto",
+          // 实测几何只进变量：具体盒形（自动高 330 帽 / pc-resized 等比
+          // 精确盒）由 is-ratio-fit 类的规则按节点态消费（画布图像侧
+          // ResourceThumb 同一套变量与公式）。
+          "--media-fitw": `${Math.round(330 * (ratio.w / ratio.h))}px`,
+          "--media-ar": `${ratio.w} / ${ratio.h}`,
         }
       : undefined;
 
   const player = kind === "video" ? (
     <video
       ref={handleRef}
-      className="media-playback-video"
+      className={`media-playback-video${ratioFit ? " is-ratio-fit" : ""}`}
       style={ratioStyle}
       src={url || undefined}
       key={`video-${url}`}

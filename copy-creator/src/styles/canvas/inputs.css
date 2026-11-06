@@ -314,10 +314,18 @@
   color: #34c759;
 }
 
-/* 固定高度节点（pc-resized：拖过尺寸手柄或历史落库高度）：预览媒体
-   吃掉表单剩余空间，按钮行/提示行始终留在可视区内——裁剪只发生在
-   媒体框内部，不再把下方内容推出节点。自动高度节点不命中这些规则，
-   仍由内容自然撑开。 */
+/* 固定高度节点（pc-resized：拖过尺寸手柄或历史落库高度）——等比精确盒
+   （2026-11-06 用户定案，ComfyUI 同款行为）：媒体区吃掉表单剩余空间做
+   居中舞台，媒体本体不再被 flex 拉伸，width/height 交还内在尺寸、双 max
+   约束按内在比例缩到「恰好填满」，margin:auto 居中——元素盒恒等于图像/
+   画面盒：拉伸节点媒体只放大、contain 留白无处产生、黑底移除留白透出
+   节点表面，任意拉伸永无黑边。自动高度节点不命中这些规则，仍由内容
+   自然撑开（is-ratio-fit 的 330 帽默认态，见 nodes.css/components.css）。
+
+   旧让位规则的教训：媒体被 flex:1 拉伸后元素盒与图像盒脱钩，contain
+   留白露出 fc-media-box 的 #090909 黑底——怎么拉伸都是黑边。此前的
+   .resource-media-player 规则指向的类在画布并不存在（画布播放器是
+   .media-playback），视频的固定高让位实际从未生效过，一并废弃重写。 */
 .fc-root .pc-node.pc-resized .fc-load-media {
   flex: 1 1 auto;
   min-height: 0;
@@ -326,15 +334,26 @@
   overflow: hidden;
 }
 
-.fc-root .pc-node.pc-resized .fc-load-media .fc-media-box {
-  flex: 1;
-  min-height: 0;
+/* 图像/产物帧等比盒（加载媒体外框直接子项 / 预览节点表单直接子项）。 */
+.fc-root .pc-node.pc-resized .fc-load-media .fc-media-box,
+.fc-root .pc-node.pc-resized .fc-node-form > .fc-media-box {
+  flex: none;
+  width: auto;
   height: auto;
-  max-height: none;
+  max-width: 100%;
+  max-height: 100%;
+  margin: auto;
+  aspect-ratio: auto;
+  background: none;
 }
 
-/* 抽帧节点完成态（手动调高节点）：提示锚点→媒体外框→帧图逐级让位，
-   与加载态播放器同一套填满行为——执行前后在调高的节点里同样不跳变。 */
+/* 失败占位与媒体盒同一居中语言（外框舞台中央）。 */
+.fc-root .pc-node.pc-resized .fc-load-media .fc-media-broken {
+  margin: auto;
+}
+
+/* 抽帧节点完成态：提示锚点→帧图外框逐级让位，帧图外框成为等比盒的
+   居中舞台（帧徽章/悬浮 × 与外框对齐，同加载节点的框语言）。 */
 .fc-root .pc-node.pc-resized .fc-node-form > .fc-hint-anchor:has(> .fc-load-media > .fc-frame-thumb) {
   flex: 1 1 auto;
   min-height: 0;
@@ -344,40 +363,38 @@
   flex: 1;
   min-height: 0;
   width: 100%;
+  display: flex;
 }
 
-.fc-root .pc-node.pc-resized .fc-load-media .fc-frame-thumb .fc-media-box {
-  height: 100%;
-  max-height: none;
-}
-
-.fc-root .pc-node.pc-resized .fc-load-media .resource-media-player {
-  flex: 1;
-  min-height: 0;
-}
-
-.fc-root .pc-node.pc-resized .fc-load-media .resource-media-video {
-  flex: 1;
-  min-height: 0;
-  height: auto;
-  max-height: none;
-}
-
-/* 预览节点（视频/音频）：播放器是表单直接子项，同一套让位——填满
-   剩余空间，上游文本行留在可视区内。 */
-.fc-root .pc-node.pc-resized .fc-node-form > .resource-media-player {
+/* 视频播放器（加载/抽帧执行态/预览节点）：吃满剩余空间改 grid 两行——
+   画面轨道 1fr、播放条 auto 钉底；画面在轨道内等比精确盒居中（video
+   与 img 同享内在比例双 max 缩放），不再被 flex 拉伸脱钩比例。 */
+.fc-root .pc-node.pc-resized .fc-load-media .media-playback,
+.fc-root .pc-node.pc-resized .fc-node-form > .media-playback {
   flex: 1 1 auto;
   min-height: 0;
 }
 
-.fc-root .pc-node.pc-resized .fc-node-form > .resource-media-player .resource-media-video {
-  flex: 1;
-  min-height: 0;
-  height: auto;
-  max-height: none;
+.fc-root .pc-node.pc-resized .fc-load-media .media-playback.has-video,
+.fc-root .pc-node.pc-resized .fc-node-form > .media-playback.has-video {
+  display: grid;
+  grid-template-rows: minmax(0, 1fr) auto;
 }
 
-/* 生成节点（固定高）：主图大图吃掉剩余空间，胶片条与动作行留在可视区。 */
+.fc-root .pc-node.pc-resized .fc-load-media .media-playback-video,
+.fc-root .pc-node.pc-resized .fc-node-form > .media-playback .media-playback-video {
+  width: auto;
+  height: auto;
+  max-width: 100%;
+  max-height: 100%;
+  margin: auto;
+  min-height: 0;
+  aspect-ratio: auto;
+  background: none;
+}
+
+/* 生成节点（固定高）：主图大图吃掉剩余空间，胶片条与动作行留在可视区。
+   主图是 cover 裁切语言（fc-gen-hero），填满即无黑边，保持原让位即可。 */
 .fc-root .pc-node.pc-resized .fc-gen-result {
   flex: 1 1 auto;
   min-height: 0;
@@ -387,15 +404,6 @@
   flex: 1 1 auto;
   min-height: 0;
   aspect-ratio: auto;
-}
-
-/* 预览节点（图像）：缩略图是表单直接子项（点击放大已移除，原位展示），
-   与视频/音频播放器同一套让位——填满剩余空间，上游文本行留在可视区。 */
-.fc-root .pc-node.pc-resized .fc-node-form > .fc-media-box {
-  flex: 1 1 auto;
-  min-height: 0;
-  height: auto;
-  max-height: none;
 }
 
 /* 参数组合框：白卡输入件 + 右侧箭头展开预设清单（portal 到 body，
