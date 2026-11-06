@@ -159,6 +159,9 @@ export default function ProjectCanvasShell({
 
   // 详情窗状态（阶段 D 重做详情窗前，工具按钮先接状态位）。
   const [detailFor, setDetailFor] = useState<DetailTarget | null>(null);
+  // 返回栈：窗内点击输入卡跳转（ops.openDetail）时压入上一窗，头部返回
+  // 键（ops.goBack）弹出跳回；画布双击/定位是全新意图，重置栈。
+  const [detailBack, setDetailBack] = useState<DetailTarget[]>([]);
 
   const promptUntitled = t("project.canvas.promptUntitled");
   const ephTitle = t("project.canvas.ephTitle");
@@ -578,6 +581,7 @@ export default function ProjectCanvasShell({
       return;
     }
     setDetailFor(null);
+    setDetailBack([]);
   };
   const detailOps: DetailWindowOps = {
     libraryRoot,
@@ -618,6 +622,9 @@ export default function ProjectCanvasShell({
         }
         persistPendingLinks(pendingLinks.filter((l) => l.fromKey !== phKey));
         data.persistEntityPhs(data.entityPhs.filter((ph) => ph.id !== ephId));
+        // 占位装入也是窗内跳转：压栈占位窗语义（此处占位窗已随装入消失，
+        // 直接压当前窗保持返回链可用）。
+        setDetailBack((s) => (detailFor ? [...s, detailFor] : s));
         setDetailFor({ kind: "info", group: kind, sourceKey: `${kind === "character" ? "char" : kind === "location" ? "loc" : "prop"}:${entityId}` });
       })();
     },
@@ -646,7 +653,19 @@ export default function ProjectCanvasShell({
       setScriptPickTarget(key);
       setScriptPickOpen(true);
     },
-    openDetail: (target) => setDetailFor(target),
+    openDetail: (target) => {
+      // 窗内跳转（输入卡点击）：压栈当前窗供返回键跳回（用户定案「跳过
+      // 去也要跳回来」）。
+      setDetailBack((s) => (detailFor ? [...s, detailFor] : s));
+      setDetailFor(target);
+    },
+    backTarget: detailBack[detailBack.length - 1] ?? null,
+    goBack: () => {
+      const prev = detailBack[detailBack.length - 1];
+      if (!prev) return;
+      setDetailBack((s) => s.slice(0, -1));
+      setDetailFor(prev);
+    },
     onClose: closeDetail,
   };
 
@@ -669,7 +688,11 @@ export default function ProjectCanvasShell({
                 locateEmptySegment={() => canvasView.locateEmptySegment()}
                 setDetailFor={(v) => {
                   const target = typeof v === "function" ? null : v;
-                  if (target && target.kind === "segment") setDetailFor({ kind: "segment", id: target.id });
+                  if (target && target.kind === "segment") {
+                    // 缺项条定位也是全新意图，重置返回栈。
+                    setDetailBack([]);
+                    setDetailFor({ kind: "segment", id: target.id });
+                  }
                 }}
               />
               <AddBtnBar onPickForShot={onPickForShot} setSceneForm={setSceneForm} />
@@ -703,6 +726,8 @@ export default function ProjectCanvasShell({
           onOpenNodeDetail={(node) => {
             // 双击必出详情窗（用户定案）：剧本/提示词纸片的挂靠动作收进
             // 窗内钉底钮，点开二级选择浮层；不再直弹选择框。
+            // 双击是全新意图：清空返回栈（栈只在窗内跳转链上增长）。
+            setDetailBack([]);
             const key = node.id;
             if (key.startsWith("segment:")) setDetailFor({ kind: "segment", id: key.slice(8) });
             else if (key.startsWith("eph:")) setDetailFor({ kind: "entityPh", id: key.slice(4), group: node.type as EntityPhKind });

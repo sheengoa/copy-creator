@@ -778,6 +778,7 @@
       "groupLine": "资料组 · {{n}} 名成员",
       "remove": "移除",
       "segRemoveConfirm": "确定将「{{name}}」从本片段移除？",
+      "back": "返回",
       "attachPick": "批量挂靠（可多选）",
       "attachN": "挂靠 {{n}} 项",
       "loadEntity": "从库中装入实体",

@@ -43,6 +43,8 @@ function makeOps(overrides: Partial<DetailWindowOps> = {}): DetailWindowOps {
     attachEntities: vi.fn(),
     openPromptPick: vi.fn(),
     openScriptPick: vi.fn(),
+    backTarget: null,
+    goBack: vi.fn(),
     onClose: vi.fn(),
     ...overrides,
   };
@@ -109,7 +111,8 @@ describe("DetailWindow", () => {
             { id: "nl-1", from_kind: "character", from_id: "char-2", to_segment: "seg-1", to_port: "character", owner_key: "" },
             { id: "nl-g1", from_kind: "location", from_id: "loc-1", to_segment: "seg-1", to_port: "location", owner_key: "grp:g1" },
           ],
-          characters: [baseCharacter],
+          // 无图实体各占一张占位卡，聚焦确认流本身。
+          characters: [{ ...baseCharacter, reference_paths: "[]" }],
         })}
       />,
     );
@@ -134,7 +137,7 @@ describe("DetailWindow", () => {
     );
   });
 
-  it("输入卡预览：角色输入卡显示头像图，点击卡片路由 openDetail 展开实体窗", () => {
+  it("输入卡一图一卡：实体逐张参考图各成一卡，点击卡片路由 openDetail 展开实体窗", () => {
     const openDetail = vi.fn();
     render(
       <ProjectDetailWindow
@@ -147,13 +150,52 @@ describe("DetailWindow", () => {
           nodeLinks: [
             { id: "nl-1", from_kind: "character", from_id: "char-2", to_segment: "seg-1", to_port: "character", owner_key: "" },
           ],
-          characters: [{ ...baseCharacter, avatar_path: "avatars/laozhou.png" }],
+          characters: [{ ...baseCharacter, avatar_path: "avatars/laozhou.png", reference_paths: JSON.stringify(["refs/a.png", "refs/b.png"]) }],
         })}
       />,
     );
-    expect(document.querySelectorAll(".pdetail-incard-img").length).toBe(1);
+    // 一图一卡：头像 + 2 张参考图 = 3 张独立卡（不再挤在一张卡内）。
+    expect(document.querySelectorAll(".pdetail-incard").length).toBe(3);
+    expect(document.querySelectorAll(".pdetail-incard-img").length).toBe(3);
     fireEvent.click(document.querySelector(".pdetail-incard-view") as HTMLElement);
     expect(openDetail).toHaveBeenCalledWith({ kind: "info", group: "character", sourceKey: "char:char-2" });
+  });
+
+  it("输入卡图集与实体窗对称：头像排首位并入参考图，多图各成一卡不落占位", () => {
+    render(
+      <ProjectDetailWindow
+        target={{ kind: "segment", id: "seg-1" }}
+        ops={makeOps({
+          segments: [
+            { id: "seg-1", episode_id: "e1", asset_id: null, sort_order: 0, note: "", canvas_x: null, canvas_y: null, created_at: "", updated_at: "" },
+          ],
+          nodeLinks: [
+            { id: "nl-1", from_kind: "character", from_id: "char-2", to_segment: "seg-1", to_port: "character", owner_key: "" },
+          ],
+          characters: [{ ...baseCharacter, avatar_path: "avatars/kawayi.png", reference_paths: JSON.stringify(["refs/cat.png"]) }],
+        })}
+      />,
+    );
+    // 头像 + 1 张参考图 = 2 张独立卡（实体窗「共 2 张」的对称展示），且
+    // 不落图标占位；src 为懒加载异步属性，jsdom 断言不了，顺序在浏览器
+    // 实机核对。
+    expect(document.querySelectorAll(".pdetail-incard").length).toBe(2);
+    expect(document.querySelectorAll(".pdetail-incard-img").length).toBe(2);
+    expect(document.querySelector(".pdetail-incard-fallback")).toBeNull();
+  });
+
+  it("输入卡跳转后头部显示返回键，点击路由 goBack 跳回上一窗", () => {
+    const goBack = vi.fn();
+    const backTarget = { kind: "segment" as const, id: "seg-1" };
+    const { rerender } = render(
+      <ProjectDetailWindow target={{ kind: "info", group: "character", sourceKey: "char:char-2" }} ops={makeOps({ backTarget, goBack })} />,
+    );
+    expect(screen.getByTitle("返回")).toBeTruthy();
+    fireEvent.click(screen.getByTitle("返回"));
+    expect(goBack).toHaveBeenCalledTimes(1);
+    // 无返回目标（画布双击直接打开）不渲染返回键。
+    rerender(<ProjectDetailWindow target={{ kind: "info", group: "character", sourceKey: "char:char-2" }} ops={makeOps()} />);
+    expect(screen.queryByTitle("返回")).toBeNull();
   });
 
   it("参考图管理：段头「添加参考图」开选择浮层，选图路由 setReferences 追加；移除路由过滤后覆写", () => {

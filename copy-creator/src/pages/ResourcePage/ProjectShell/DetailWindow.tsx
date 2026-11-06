@@ -66,6 +66,10 @@ export interface DetailWindowOps {
   openPromptPick(phKey: string): void;
   /** 剧本详情窗「挂接/更换剧本」：开文件选择浮层（详情窗保持打开）。 */
   openScriptPick(key: string): void;
+  /** 返回目标：经输入卡跳入当前窗时为上一窗（头部显示返回键），否则
+   *  null。跳转由 ops.openDetail 压栈、goBack 弹出。 */
+  backTarget: DetailTarget | null;
+  goBack(): void;
   onClose(): void;
 }
 
@@ -77,12 +81,15 @@ const voiceLabel = (path: string) => path.split(/[\\/]/).pop() ?? path;
 
 /** 三段式骨架：头部标题/主体内部滚动/动作区钉底；portal 到 body 脱离
  *  画布裁剪与 transform 坐标系（与旧 DetailDialog 同挂载策略）。 */
-export function DetailWindow({ title, accent, children, foot, onClose }: {
+export function DetailWindow({ title, accent, children, foot, onClose, back }: {
   title: React.ReactNode;
   accent: string;
   children: React.ReactNode;
   foot?: React.ReactNode;
   onClose(): void;
+  /** 返回上一窗（输入卡跳入时显示 ‹ 返回键，用户定案「跳过去也要跳回
+   *  来」）；缺省无返回键。 */
+  back?: { onBack(): void };
 }) {
   const { t } = useTranslation();
   // Esc 关最上层（无二级面板，直接关）。
@@ -97,6 +104,17 @@ export function DetailWindow({ title, accent, children, foot, onClose }: {
     <div className="pdetail-overlay" onPointerDown={(e) => { if (e.target === e.currentTarget) onClose(); }}>
       <div className="pdetail" style={{ "--pdetail-accent": accent } as React.CSSProperties}>
         <div className="pdetail-head">
+          {back && (
+            <button
+              type="button"
+              className="pdetail-back"
+              title={t("project.detail.back")}
+              aria-label={t("project.detail.back")}
+              onClick={back.onBack}
+            >
+              {Icons.arrowLeft}
+            </button>
+          )}
           <span className="pdetail-kind">{title}</span>
           <button type="button" className="pdetail-close" aria-label={t("common.close")} onClick={onClose}>
             {Icons.close}
@@ -299,6 +317,7 @@ function EntityDetail({ group, sourceKey, ops }: { group: EntityPhKind; sourceKe
       title={<><span className="pdetail-kind-label">{kindLabel}</span> · {name}</>}
       accent={accent}
       onClose={ops.onClose}
+      back={ops.backTarget ? { onBack: ops.goBack } : undefined}
     >
       <DetailSection
         label={t("project.detail.refs")}
@@ -357,20 +376,25 @@ function EntityDetail({ group, sourceKey, ops }: { group: EntityPhKind; sourceKe
   );
 }
 
-/** 输入行缩略图路径：实体取头像/参考图，文本类与暂存占位无图。 */
-function linkThumbPath(kind: string, id: string, ops: DetailWindowOps): string {
-  if (kind === "character") return ops.characters.find((c) => c.id === id)?.avatar_path ?? "";
-  if (kind === "location") {
-    const loc = ops.locations.find((l) => l.id === id);
-    const refs = parseRefs(loc?.reference_paths);
-    return refs[0] ?? loc?.ref_path ?? "";
+/** 实体全量图集（与实体详情窗参考图集同语义：头像/旧主图排首位并入，
+ *  已在数组中不重复入列）——片段输入卡据此一图一卡陈列（用户定案），
+ *  与实体窗参考图集对称。 */
+function entityThumbPaths(kind: string, id: string, ops: DetailWindowOps): string[] {
+  if (kind === "character") {
+    const c = ops.characters.find((x) => x.id === id);
+    if (!c) return [];
+    const list = parseRefs(c.reference_paths);
+    if (c.avatar_path && !list.includes(c.avatar_path)) list.unshift(c.avatar_path);
+    return list;
   }
-  if (kind === "prop") {
-    const prop = ops.props.find((p) => p.id === id);
-    const refs = parseRefs(prop?.reference_paths);
-    return refs[0] ?? prop?.ref_path ?? "";
+  if (kind === "location" || kind === "prop") {
+    const e = kind === "location" ? ops.locations.find((x) => x.id === id) : ops.props.find((x) => x.id === id);
+    if (!e) return [];
+    const list = parseRefs(e.reference_paths);
+    if (e.ref_path && !list.includes(e.ref_path)) list.unshift(e.ref_path);
+    return list;
   }
-  return "";
+  return [];
 }
 
 /** JSON 数组安全解析（三库 reference_paths，非法/缺省按空）。 */
@@ -385,10 +409,10 @@ function parseRefs(raw: string | undefined): string[] {
 
 /** 片段输入分组：按口聚合（角色/场景/道具/提示词/剧本/其他），组头计数
  *  + 折叠；每组一行横滑条带陈列全部输入（用户定案「有多少陈列清楚，
- *  多了滚轮左右滑」，不再换行堆高窗口），卡片=16:10 预览 + 名称，点卡片
- *  本体跳转对应详情窗（点击展开预览）；移除键弱化为右上角悬浮小图标
- *  （hover 显形），点击先弹确认框再移除。组卡显示成员数与成员名，
- *  预览=成员图堆叠；暂存占位卡=虚线图标块。 */
+ *  多了滚轮左右滑」）。一图一卡：单实体逐张参考图各成一卡、组逐成员各
+ *  成一卡（卡名=成员名），图按原始比例完整展示（复用画布图像逻辑）；
+ *  点卡片跳对应详情窗（头部返回键跳回来）；移除键=右上角悬浮小图标
+ *  （hover 显形）+ 确认框；暂存占位卡=虚线图标块。 */
 
 /** 横滑条带：竖向滚轮增量映射为横向滚动（React 根代理的 wheel 是被动
  *  监听，preventDefault 需原生非被动监听）；条带装得下时不拦截，页面
@@ -445,78 +469,100 @@ function SegmentInputs({ segmentId, ops }: { segmentId: string; ops: DetailWindo
     if (fromKey.startsWith("script:")) return t("project.canvas.typeScript");
     return fromKey;
   };
+  // 一图一卡展开（用户定案「一个[图]一个卡片，不要挤在一张卡里」）：
+  // 单实体 = 全量图集逐张成卡（与实体窗参考图集对称，素材无上限不设
+  // 帽）；组 = 逐成员逐张成卡（卡名=成员名）；无图实体 = 一张图标占位
+  // 卡。组头计数与实际卡数一致。
+  type InCard = {
+    key: string;
+    row: ProjectNodeLink;
+    label: string;
+    path: string;
+    fileName: string | null;
+    openable: boolean;
+    isText: boolean;
+  };
+  const expandCards = (row: ProjectNodeLink): InCard[] => {
+    const owner = row.owner_key ?? "";
+    const isGroup = owner.startsWith("grp:");
+    const resolved = isGroup
+      ? (ops.overview?.node_links ?? []).filter((l) => l.owner_key === owner && l.to_segment === row.to_segment && l.to_port === row.to_port)
+      : [row];
+    // 概览未载/组线悬空：退化为认领行自身成卡，不吞卡。
+    const members = resolved.length > 0 ? resolved : [row];
+    return members.flatMap((m) => {
+      const imgs = entityThumbPaths(m.from_kind, m.from_id, ops);
+      const list = imgs.length > 0 ? imgs : [""];
+      const label = nameOf(m.from_kind, m.from_id);
+      return list.map((p, i) => ({
+        key: `${m.id}-${i}`,
+        row: m,
+        label,
+        path: p,
+        fileName: list.length > 1 && p ? (p.split(/[\\/]/).pop() ?? null) : null,
+        openable: ["character", "location", "prop", "segment", "shot"].includes(m.from_kind),
+        isText: m.from_kind === "script",
+      }));
+    });
+  };
+  const openCardOf = (c: InCard) => () => {
+    const k = c.row.from_kind;
+    if (k === "character" || k === "location" || k === "prop") {
+      const prefix = k === "character" ? "char" : k === "location" ? "loc" : "prop";
+      ops.openDetail({ kind: "info", group: k as EntityPhKind, sourceKey: `${prefix}:${c.row.from_id}` });
+    } else if (k === "segment" || k === "shot") {
+      ops.openDetail({ kind: "segment", id: c.row.from_id });
+    }
+  };
   return (
     <>
       {ports.map((port) => {
         const portRows = rows.filter((l) => l.to_port === port.id);
         const portPends = pends.filter((l) => l.toPort === port.id);
-        const total = portRows.length + portPends.length;
-        if (total === 0) return null;
+        const cards = portRows.flatMap(expandCards);
+        if (cards.length + portPends.length === 0) return null;
         return (
-          <DetailSection key={port.id} label={port.label} count={total} foldable defaultFold={false}>
+          <DetailSection key={port.id} label={port.label} count={cards.length + portPends.length} foldable defaultFold={false}>
             <div className="pdetail-dot" style={{ background: port.color }} />
             <HStrip>
-              {portRows.map((row) => {
-                const owner = row.owner_key ?? "";
-                const isGroup = owner.startsWith("grp:");
-                const members = isGroup
-                  ? (ops.overview?.node_links ?? []).filter((l) => l.owner_key === owner && l.to_segment === segmentId && l.to_port === row.to_port)
-                  : [row];
-                const cardLabel = isGroup ? t("project.detail.groupLine", { n: members.length }) : nameOf(row.from_kind, row.from_id);
-                const paths = members
-                  .map((m) => linkThumbPath(m.from_kind, m.from_id, ops))
-                  .filter(Boolean)
-                  .slice(0, 3);
-                const isText = row.from_kind === "script";
-                const openCard = () => {
-                  if (row.from_kind === "character" || row.from_kind === "location" || row.from_kind === "prop") {
-                    const prefix = row.from_kind === "character" ? "char" : row.from_kind === "location" ? "loc" : "prop";
-                    ops.openDetail({ kind: "info", group: row.from_kind as EntityPhKind, sourceKey: isGroup ? owner : `${prefix}:${row.from_id}` });
-                  } else if (row.from_kind === "segment" || row.from_kind === "shot") {
-                    ops.openDetail({ kind: "segment", id: row.from_id });
-                  }
-                };
-                const openable = ["character", "location", "prop", "segment", "shot"].includes(row.from_kind);
-                return (
-                  <div key={row.id} className={`pdetail-incard${openable ? " is-openable" : ""}`}>
-                    <button
-                      type="button"
-                      className="pdetail-incard-view"
-                      onClick={openable ? openCard : undefined}
-                      aria-label={cardLabel}
-                    >
-                      {paths.length > 0 ? (
-                        paths.map((p, i) => (
-                          <ResourceFileImage key={`${p}-${i}`} path={joinLibraryPath(ops.libraryRoot, p)} alt="" className="pdetail-incard-img" />
-                        ))
-                      ) : (
-                        <span className="pdetail-incard-fallback">{isText ? Icons.file : Icons.image}</span>
-                      )}
-                    </button>
-                    <div className="pdetail-incard-meta">
-                      <b className="pdetail-incard-name" title={cardLabel}>
-                        {cardLabel}
-                      </b>
-                      {isGroup && <small className="pdetail-incard-members">{members.map((m) => nameOf(m.from_kind, m.from_id)).join(" · ")}</small>}
-                    </div>
-                    {/* 移除键：右上角悬浮小图标（hover 显形），点击先确认。 */}
-                    <button
-                      type="button"
-                      className="pdetail-incard-x"
-                      title={t("project.detail.remove")}
-                      aria-label={t("project.detail.remove")}
-                      onClick={() =>
-                        setRemoveAsk({
-                          message: t("project.detail.segRemoveConfirm", { name: cardLabel }),
-                          run: () => ops.removeLink({ pending: false, fromKey: row.from_id, toSegment: segmentId, toPort: row.to_port, ownerKey: row.owner_key ?? "", rowId: row.id }),
-                        })
-                      }
-                    >
-                      {Icons.close}
-                    </button>
+              {cards.map((c) => (
+                <div key={c.key} className={`pdetail-incard${c.openable ? " is-openable" : ""}`}>
+                  <button
+                    type="button"
+                    className="pdetail-incard-view"
+                    onClick={c.openable ? openCardOf(c) : undefined}
+                    aria-label={c.label}
+                  >
+                    {c.path ? (
+                      <ResourceFileImage path={joinLibraryPath(ops.libraryRoot, c.path)} alt="" className="pdetail-incard-img" />
+                    ) : (
+                      <span className="pdetail-incard-fallback">{c.isText ? Icons.file : Icons.image}</span>
+                    )}
+                  </button>
+                  <div className="pdetail-incard-meta">
+                    <b className="pdetail-incard-name" title={c.label}>
+                      {c.label}
+                    </b>
+                    {c.fileName && <small className="pdetail-incard-members">{c.fileName}</small>}
                   </div>
-                );
-              })}
+                  {/* 移除键：右上角悬浮小图标（hover 显形），点击先确认；
+                      同实体多卡共享一条认领线，任一卡移除即整线断。 */}
+                  <button
+                    type="button"
+                    className="pdetail-incard-x"
+                    title={t("project.detail.remove")}
+                    aria-label={t("project.detail.remove")}
+                    onClick={() =>
+                      setRemoveAsk({
+                        message: t("project.detail.segRemoveConfirm", { name: c.label }),
+                        run: () => ops.removeLink({ pending: false, fromKey: c.row.from_id, toSegment: segmentId, toPort: c.row.to_port, ownerKey: c.row.owner_key ?? "", rowId: c.row.id }),
+                      })
+                    }
+                  >
+                    {Icons.close}
+                  </button>
+                </div>
+              ))}
               {portPends.map((p) => {
                 const pendLabel = pendingFromLabel(p.fromKey);
                 return (
@@ -618,6 +664,7 @@ function SegmentDetail({ segmentId, ops }: { segmentId: string; ops: DetailWindo
       title={<><span className="pdetail-kind-label">{t("project.canvas.segName")}</span> · {segment.note || `#${index + 1}`}</>}
       accent="#a78bfa"
       onClose={ops.onClose}
+      back={ops.backTarget ? { onBack: ops.goBack } : undefined}
       foot={(
         <>
           <button type="button" className="pdetail-foot-btn" onClick={() => setAttachOpen(true)}>
@@ -660,7 +707,8 @@ function EntityPhDetail({ id, group, ops }: { id: string; group: EntityPhKind; o
         : "project.canvas.typeProp",
   );
   return (
-    <DetailWindow title={<><span className="pdetail-kind-label">{kindLabel}</span> · {t("project.canvas.ephTitle")}</>} accent="#94a3b8" onClose={ops.onClose}>
+    <DetailWindow title={<><span className="pdetail-kind-label">{kindLabel}</span> · {t("project.canvas.ephTitle")}</>} accent="#94a3b8" onClose={ops.onClose}
+      back={ops.backTarget ? { onBack: ops.goBack } : undefined}>
       <DetailSection label={t("project.detail.loadEntity")}>
         <div className="pdetail-attach-list is-flat">
           {list.map((e) => (
@@ -724,6 +772,7 @@ function ScriptPhDetail({ phKey, ops }: { phKey: string; ops: DetailWindowOps })
       title={<><span className="pdetail-kind-label">{t("project.detail.scriptKind")}</span> · {isMain ? t("project.detail.scriptMain") : fileName || t("project.detail.scriptNotLinked")}</>}
       accent="#fb923c"
       onClose={ops.onClose}
+      back={ops.backTarget ? { onBack: ops.goBack } : undefined}
       foot={(
         <button type="button" className="pdetail-foot-btn" onClick={() => ops.openScriptPick(phKey)}>
           {path ? t("project.detail.scriptChange") : t("project.canvas.linkScript")}
@@ -763,6 +812,7 @@ function OutputDetail({ ops }: { ops: DetailWindowOps }) {
       title={<><span className="pdetail-kind-label">{t("project.detail.outputKind")}</span>{asset ? <> · {asset.name || asset.file_path}</> : null}</>}
       accent="#c084fc"
       onClose={ops.onClose}
+      back={ops.backTarget ? { onBack: ops.goBack } : undefined}
     >
       <DetailSection label={t("project.detail.output")} count={asset ? "" : t("project.detail.outputEmpty")}>
         {asset ? (
@@ -794,6 +844,7 @@ function PromptPhDetail({ id, ops }: { id: string; ops: DetailWindowOps }) {
       title={<><span className="pdetail-kind-label">{t("project.detail.promptKind")}</span> · {prompt?.title ?? t("project.canvas.promptEmpty")}</>}
       accent="#22d3ee"
       onClose={ops.onClose}
+      back={ops.backTarget ? { onBack: ops.goBack } : undefined}
       foot={(
         <button type="button" className="pdetail-foot-btn" onClick={() => ops.openPromptPick(`prompt:${id}`)}>
           {prompt ? t("project.detail.promptChange") : t("project.canvas.promptPickTitle")}

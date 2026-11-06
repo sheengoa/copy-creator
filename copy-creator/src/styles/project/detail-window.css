@@ -66,6 +66,19 @@
 .pdetail-kind-label {
   color: color-mix(in srgb, var(--pdetail-accent) 78%, var(--text-secondary));
 }
+/* 返回键：窗内跳转链（输入卡点击）进入时显示，跳回上一窗。 */
+.pdetail-back {
+  flex: none;
+  width: 26px;
+  height: 26px;
+  border-radius: 8px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--accent);
+}
+.pdetail-back svg { width: 15px; height: 15px; }
+.pdetail-back:hover { background: var(--chip-bg); color: var(--accent); }
 .pdetail-close {
   flex: none;
   width: 26px;
@@ -292,56 +305,53 @@
 }
 
 /* ── 输入清单横滑条带：每组一行横向陈列全部输入（用户定案「有多少就
-   陈列清楚，多了滚轮左右滑」，不再换行堆高窗口）；卡片定宽串行，删除键
-   弱化为右上角悬浮小图标（hover 显形），点击先弹确认框再移除。 ── */
+   陈列清楚，多了滚轮左右滑」，不再换行堆高窗口）；一图一卡（单实体逐
+   张参考图各成一卡、组逐成员各成一卡），卡规格对齐实体窗参考卡
+   （215px 定宽 + 自然比例完整展示，复用画布图像逻辑）；删除键=右上角
+   悬浮小图标（hover 显形），点击先弹确认框再移除。 ── */
 .pdetail-ingrid {
   display: flex;
-  align-items: stretch;
-  gap: 8px;
+  align-items: flex-start;
+  gap: 10px;
   overflow-x: auto;
   padding: 2px;
 }
 .pdetail-incard {
   position: relative;
-  flex: 0 0 150px;
+  flex: 0 0 215px;
   border: 1px solid var(--separator);
-  border-radius: 10px;
-  padding: 8px;
+  border-radius: 12px;
+  padding: 10px;
   display: flex;
   flex-direction: column;
-  gap: 6px;
+  gap: 8px;
   min-width: 0;
 }
 .pdetail-incard.is-pending { opacity: 0.8; }
 .pdetail-incard.is-pending .pdetail-incard-name { font-style: italic; }
 .pdetail-incard-view {
   display: flex;
-  align-items: stretch;
+  align-items: center;
   justify-content: center;
   width: 100%;
-  aspect-ratio: 16 / 10;
   border-radius: 8px;
   overflow: hidden;
   background: var(--chip-bg);
+  min-height: 90px;
   padding: 0;
 }
 .pdetail-incard.is-openable .pdetail-incard-view { cursor: pointer; }
 .pdetail-incard.is-openable:hover { border-color: var(--accent-border-soft); }
 .pdetail-incard-view.is-static { cursor: default; }
-.pdetail-incard-img {
-  flex: 1;
-  min-width: 0;
-  height: 100%;
-  object-fit: contain;
-  display: block;
-}
-.pdetail-incard-img + .pdetail-incard-img { border-left: 1px solid var(--separator); }
+/* 自然比例完整展示（复用无限画布图像逻辑：按真实宽高渲染，不裁切
+   不强塞固定框——用户定案）；加载前 min-height 占位防塌陷。 */
+.pdetail-incard-img { width: 100%; height: auto; display: block; }
 .pdetail-incard-fallback {
   display: inline-flex;
   align-items: center;
   justify-content: center;
   width: 100%;
-  height: 100%;
+  height: 90px;
   border: 1px dashed var(--separator);
   border-radius: 8px;
   color: var(--text-tertiary);
