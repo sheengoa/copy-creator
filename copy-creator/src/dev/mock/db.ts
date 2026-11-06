@@ -205,7 +205,7 @@ export const db = {
     { id: "char-2", name: "老周", role_tag: "配角", bio: "", prompt: "", avatar_path: "", reference_paths: "", voice_path: "", created_at: ts(), updated_at: ts() },
   ],
   locations: [
-    { id: "loc-1", name: "废弃地铁站", int_ext: "int", time_hint: "night", bio: "", prompt: "", ref_path: "", created_at: ts(), updated_at: ts() },
+    { id: "loc-1", name: "废弃地铁站", int_ext: "int", time_hint: "night", bio: "", prompt: "", ref_path: "mock/scenes/station-main.png", reference_paths: JSON.stringify(["mock/scenes/station-corridor.png", "mock/scenes/station-platform.png", "mock/scenes/station-hall.png"]), created_at: ts(), updated_at: ts() },
     { id: "loc-2", name: "天台", int_ext: "ext", time_hint: "day", bio: "", prompt: "", ref_path: "", created_at: ts(), updated_at: ts() },
   ],
   props: [

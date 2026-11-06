@@ -57,7 +57,7 @@ describe("DetailWindow", () => {
         ops={makeOps()}
       />,
     );
-    const grid = document.querySelector(".pdetail-reflist") as HTMLElement;
+    const grid = document.querySelector(".pdetail-refgrid") as HTMLElement;
     expect(grid.children.length).toBe(30);
     expect(screen.getByText(/剩余 74/)).toBeTruthy();
     // jsdom 无布局：滚动量读数全 0，任意 scroll 事件即满足「到底」条件，
@@ -74,7 +74,7 @@ describe("DetailWindow", () => {
         ops={makeOps({ characters: [{ ...baseCharacter, reference_paths: "[]", avatar_path: "avatars/kawayi.png" }] })}
       />,
     );
-    expect(document.querySelectorAll(".pdetail-reflist .pdetail-refbigimg").length).toBe(1);
+    expect(document.querySelectorAll(".pdetail-refgrid .pdetail-refcard-img").length).toBe(1);
     expect(screen.getByText("共 1 张")).toBeTruthy();
     expect(screen.queryByText("无参考图")).toBeNull();
   });
@@ -170,7 +170,7 @@ describe("DetailWindow", () => {
       />,
     );
     // 旧主图并入首 + 数组两张 = 3 张全展示。
-    expect(document.querySelectorAll(".pdetail-reflist .pdetail-refbigimg").length).toBe(3);
+    expect(document.querySelectorAll(".pdetail-refgrid .pdetail-refcard-img").length).toBe(3);
     const removeButtons = screen.getAllByText("移除");
     fireEvent.click(removeButtons[2]);
     expect(setReferences).toHaveBeenCalledWith("location", "loc-9", ["refs/main.png", "refs/2.png"]);

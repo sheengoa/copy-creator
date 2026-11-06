@@ -137,10 +137,11 @@ export function DetailSection({ label, count, extra, children, foldable, default
   );
 }
 
-/** 参考图大图列表：30/批懒加载（滚到底自动续），纵向全宽每张完整展示
- *  （contain 不裁切）——详情窗是预览窗，素材天然多张，必须大图铺开看全
- *  （用户反馈：网格小格子「还不如没有」），图卡悬浮「设为头像 / 移除」。 */
-function RefList({ paths, libraryRoot, onSetAvatar, removableOf, onRemove }: {
+/** 参考图卡片网格：1:1 复刻旧 ProjectNodeDetailDialog 的 pc-detail-card
+ *  形态（16:10 预览框 contain 完整展示 + 卡底常驻动作行，auto-fill
+ *  minmax(215px,1fr) 多列网格）——素材天然多张，网格规整铺开（用户定案
+ *  还原旧实现展示）。30/批懒加载滚动续载保留。 */
+function RefGrid({ paths, libraryRoot, onSetAvatar, removableOf, onRemove }: {
   paths: string[];
   libraryRoot: string;
   onSetAvatar?(refPath: string): void;
@@ -150,11 +151,11 @@ function RefList({ paths, libraryRoot, onSetAvatar, removableOf, onRemove }: {
 }) {
   const { t } = useTranslation();
   const [loaded, setLoaded] = useState(REF_PAGE);
-  const listRef = useRef<HTMLDivElement | null>(null);
+  const gridRef = useRef<HTMLDivElement | null>(null);
   // 懒加载：滚动到底自动续一批（重置列表时回首批）。
   useEffect(() => setLoaded(REF_PAGE), [paths]);
   const onScroll = () => {
-    const el = listRef.current;
+    const el = gridRef.current;
     if (!el) return;
     if (el.scrollTop + el.clientHeight >= el.scrollHeight - 24) {
       setLoaded((v) => (v < paths.length ? Math.min(v + REF_PAGE, paths.length) : v));
@@ -164,25 +165,33 @@ function RefList({ paths, libraryRoot, onSetAvatar, removableOf, onRemove }: {
     return <div className="pdetail-empty">{Icons.image}{t("project.canvas.noRefImage")}</div>;
   }
   return (
-    <div className="pdetail-reflist-wrap">
-      <div className="pdetail-reflist" ref={listRef} onScroll={onScroll}>
+    <div className="pdetail-refgrid-wrap">
+      <div className="pdetail-refgrid" ref={gridRef} onScroll={onScroll}>
         {paths.slice(0, loaded).map((refPath, i) => {
           const removable = removableOf?.(refPath) ?? false;
+          const fileName = refPath.split(/[\\/]/).pop() ?? refPath;
           return (
-            <div key={`${refPath}-${i}`} className="pdetail-refbig">
-              <ResourceImage path={joinLibraryPath(libraryRoot, refPath)} alt="" className="pdetail-refbigimg" />
-              <span className="pdetail-refops">
-                {onSetAvatar && (
-                  <button type="button" className="pdetail-refavatar" onClick={() => onSetAvatar(refPath)}>
-                    {t("project.detail.setAvatar")}
-                  </button>
-                )}
-                {removable && onRemove && (
-                  <button type="button" className="pdetail-refavatar is-remove" onClick={() => onRemove(refPath)}>
-                    {t("project.detail.refRemove")}
-                  </button>
-                )}
-              </span>
+            <div key={`${refPath}-${i}`} className="pdetail-refcard">
+              <div className="pdetail-refcard-view">
+                <ResourceImage path={joinLibraryPath(libraryRoot, refPath)} alt={fileName} className="pdetail-refcard-img" />
+              </div>
+              <div className="pdetail-refcard-meta">
+                <b className="pdetail-refcard-name" title={fileName}>{fileName}</b>
+              </div>
+              {(onSetAvatar || (removable && onRemove)) && (
+                <div className="pdetail-refcard-ops">
+                  {onSetAvatar && (
+                    <button type="button" className="pdetail-refact" onClick={() => onSetAvatar(refPath)}>
+                      {t("project.detail.setAvatar")}
+                    </button>
+                  )}
+                  {removable && onRemove && (
+                    <button type="button" className="pdetail-refact is-danger" onClick={() => onRemove(refPath)}>
+                      {t("project.detail.refRemove")}
+                    </button>
+                  )}
+                </div>
+              )}
             </div>
           );
         })}
@@ -297,7 +306,7 @@ function EntityDetail({ group, sourceKey, ops }: { group: EntityPhKind; sourceKe
           </button>
         )}
       >
-        <RefList
+        <RefGrid
           paths={gridPaths}
           libraryRoot={ops.libraryRoot}
           onSetAvatar={group === "character" ? (ref) => entity && ops.setAvatar(entity as ProjectCharacter, ref) : undefined}
