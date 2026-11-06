@@ -13,6 +13,21 @@
   padding: 24px;
 }
 
+/* 域内按钮统一剥原生外观：WebView 给 button 的默认灰底+边框会从一切
+   未显式设 background/border 的按钮（×关闭、▼折叠等图标钮）透出来，
+   读似一排灰色方框（用户截图实锤）。:where 不抬优先级，后面的类样式
+   照常覆盖；本规则必须保持在文件最前。 */
+.pdetail :where(button) {
+  appearance: none;
+  -webkit-appearance: none;
+  background: transparent;
+  border: none;
+  padding: 0;
+  font: inherit;
+  color: inherit;
+  cursor: pointer;
+}
+
 .pdetail {
   --pdetail-accent: #94a3b8;
   width: min(560px, 100%);
@@ -58,10 +73,10 @@
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  color: var(--text-tertiary);
+  color: var(--text-secondary);
 }
 .pdetail-close:hover { background: var(--chip-bg); color: var(--text-primary); }
-.pdetail-close svg { width: 14px; height: 14px; }
+.pdetail-close svg { width: 15px; height: 15px; }
 
 .pdetail-body {
   flex: 1;
@@ -85,17 +100,19 @@
   font-size: 11px;
   color: var(--text-secondary);
 }
+/* 折叠钮：轻量图标钮——无边框无底（此前透出 WebView 原生灰方框，用户
+   反馈「下拉框按钮不应该是灰色的」），hover 才给 chip 底。 */
 .pdetail-sec-fold {
   margin-left: auto;
-  width: 20px;
-  height: 20px;
+  width: 24px;
+  height: 22px;
   border-radius: 6px;
   color: var(--text-secondary);
   display: inline-flex;
   align-items: center;
   justify-content: center;
 }
-.pdetail-sec-fold svg { width: 12px; height: 12px; }
+.pdetail-sec-fold svg { width: 13px; height: 13px; }
 .pdetail-sec-fold:hover { background: var(--chip-bg); color: var(--text-primary); }
 .pdetail-dot {
   width: 8px;
@@ -117,6 +134,11 @@
   border-radius: 8px;
   background: var(--chip-bg);
   color: var(--text-tertiary);
+}
+.pdetail-text-strong {
+  font-size: 12.5px;
+  color: var(--text-primary);
+  font-weight: 500;
 }
 .pdetail-empty {
   display: flex;
@@ -195,14 +217,20 @@
   white-space: nowrap;
   max-width: 160px;
 }
+/* 行内小钮（移除/更换/清除）：显式按钮态——底+边框（此前只有 hover 底色，
+   WebView 原生钮底透出来与窗底融为一体，亮色主题读似禁用块——用户反馈
+   「只有一种底色的感觉」）。 */
 .pdetail-voice-act {
   flex: none;
   font-size: 11px;
   color: var(--text-secondary);
-  padding: 3px 6px;
+  padding: 3px 8px;
   border-radius: 6px;
+  border: 1px solid var(--separator);
+  background: var(--chip-bg);
 }
-.pdetail-voice-act:hover { background: var(--chip-bg); color: var(--text-primary); }
+.pdetail-voice-act:hover { background: var(--chip-hover-bg); color: var(--text-primary); }
+.pdetail-voice-act.is-danger:hover { background: var(--danger); border-color: var(--danger); color: #fff; }
 
 /* ── 片段输出 ── */
 .pdetail-output {
@@ -240,6 +268,37 @@
   border-radius: 8px;
   background: var(--chip-bg);
 }
+/* 行首素材缩略图（预览窗语义：行内直接可见挂的是什么）。 */
+.pdetail-row-thumb {
+  flex: none;
+  width: 30px;
+  height: 26px;
+  border-radius: 6px;
+  overflow: hidden;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+.pdetail-row-thumb.is-icon {
+  border: 1px dashed var(--separator);
+  color: var(--text-tertiary);
+}
+.pdetail-row-thumb.is-icon svg { width: 13px; height: 13px; }
+.pdetail-row-thumb.is-stack { gap: 0; }
+.pdetail-row-thumb.is-stack .pdetail-row-thumbimg {
+  width: 20px;
+  height: 26px;
+  object-fit: cover;
+  flex: none;
+  border-radius: 0;
+}
+.pdetail-row-thumb.is-stack .pdetail-row-thumbimg + .pdetail-row-thumbimg {
+  margin-left: -6px;
+  box-shadow: -1px 0 0 var(--panel-bg);
+}
+.pdetail-row-thumb.is-stack .pdetail-row-thumbimg:first-child { border-radius: 6px 0 0 6px; }
+.pdetail-row-thumb.is-stack .pdetail-row-thumbimg:last-child { border-radius: 0 6px 6px 0; }
+.pdetail-row-thumb.is-stack .pdetail-row-thumbimg:only-child { width: 30px; border-radius: 6px; }
 /* 暗淡度收敛（2026-11-06）：占位行此前 0.72 整行透明叠加三级灰文字，
    亮色主题下读起来像整窗禁用（用户反馈）；保留「未装入」的弱化语义，
    但正文与按钮保持可读对比。 */
@@ -265,10 +324,12 @@
   flex: none;
   font-size: 11px;
   color: var(--text-secondary);
-  padding: 2px 7px;
+  padding: 2px 8px;
   border-radius: 6px;
+  border: 1px solid var(--separator);
+  background: var(--chip-bg);
 }
-.pdetail-row-x:hover { background: var(--danger); color: #fff; }
+.pdetail-row-x:hover { background: var(--danger); border-color: var(--danger); color: #fff; }
 
 /* ── 批量挂靠浮层 ── */
 .pdetail-attach {
@@ -279,18 +340,21 @@
 }
 .pdetail-attach-tabs {
   display: flex;
-  gap: 2px;
-  padding: 6px 8px 0;
+  gap: 4px;
+  padding: 6px 8px;
 }
 .pdetail-attach-tabs button {
-  padding: 5px 12px;
-  border-radius: 8px 8px 0 0;
+  padding: 4px 12px;
+  border-radius: 999px;
   font-size: 11.5px;
-  color: var(--text-tertiary);
+  color: var(--text-secondary);
+  border: 1px solid transparent;
 }
+.pdetail-attach-tabs button:hover { color: var(--text-primary); }
 .pdetail-attach-tabs button.is-active {
-  background: var(--chip-bg);
-  color: var(--text-primary);
+  background: var(--accent-bg);
+  color: var(--accent);
+  border-color: var(--accent-border-soft);
   font-weight: 500;
 }
 .pdetail-attach-list {
@@ -312,8 +376,10 @@
   color: var(--text-secondary);
   cursor: pointer;
   text-align: left;
+  border: 1px solid var(--separator);
+  background: var(--chip-bg);
 }
-.pdetail-attach-row:hover { background: var(--chip-bg); }
+.pdetail-attach-row:hover { background: var(--chip-hover-bg); border-color: var(--accent-border-soft); color: var(--text-primary); }
 .pdetail-attach-row input { accent-color: var(--accent); }
 .pdetail-attach-thumb {
   width: 30px;
@@ -334,8 +400,10 @@
   border-radius: 8px;
   font-size: 11.5px;
   color: var(--text-secondary);
+  border: 1px solid var(--separator);
+  background: var(--chip-bg);
 }
-.pdetail-attach-ops button:hover { background: var(--chip-bg); }
+.pdetail-attach-ops button:hover { background: var(--chip-hover-bg); color: var(--text-primary); }
 .pdetail-attach-ops button.is-primary {
   background: var(--accent);
   color: #fff;
@@ -352,16 +420,20 @@
   border-top: 0.5px solid var(--separator);
   background: color-mix(in srgb, var(--pdetail-accent) 5%, var(--bg-card));
 }
+/* 钉底动作钮 = 该窗口的主操作：accent 浅底 + accent 描边（此前透明底灰
+   边框，亮色主题下读似禁用大灰条）。 */
 .pdetail-foot-btn {
   flex: 1;
   height: 32px;
   border-radius: 9px;
-  border: 1px solid var(--separator);
+  border: 1px solid var(--accent-border-soft);
+  background: var(--accent-bg);
   font-size: 12px;
   font-weight: 500;
-  color: var(--text-primary);
+  color: var(--accent);
 }
 .pdetail-foot-btn:hover {
-  border-color: var(--accent);
+  border-color: var(--accent-border-strong);
+  background: var(--accent-bg-strong);
   color: var(--accent);
 }

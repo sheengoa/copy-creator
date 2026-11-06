@@ -12,8 +12,9 @@ import type {
   ProjectSegment,
 } from "../../../stores/projectStore";
 import { joinLibraryPath } from "../../../domain/projectView";
+import { readResourceTextPreview } from "../../../domain/mediaAssets";
 import { ResourceFileImage, ResourceImage, ResourceVideoPoster } from "../ResourceMedia";
-import type { EntityPhKind, PendingLink, PromptPh } from "./types";
+import type { EntityPhKind, PendingLink, PromptPh, ScriptPh } from "./types";
 import { MediaPlayback } from "../../../components/MediaPlayback";
 
 // 工程节点详情窗（工程视图节点化 2026-11-05 阶段 D，方案 §D2-D5）：
@@ -28,7 +29,9 @@ export type DetailTarget =
   | { kind: "info"; group: EntityPhKind; sourceKey: string }
   | { kind: "entityPh"; id: string; group: EntityPhKind }
   | { kind: "segment"; id: string }
-  | { kind: "promptPh"; id: string };
+  | { kind: "promptPh"; id: string }
+  | { kind: "scriptPh"; key: string }
+  | { kind: "output" };
 
 export interface DetailWindowOps {
   libraryRoot: string;
@@ -41,6 +44,7 @@ export interface DetailWindowOps {
   props: ProjectProp[];
   prompts: ProjectPrompt[];
   promptPhs: PromptPh[];
+  scriptPhs: ScriptPh[];
   /** 音色行：选择/清除（set_character_voice）。 */
   setVoice(id: string, voicePath: string): void;
   /** 设头像（参考图网格的「设为头像」）。 */
@@ -51,8 +55,11 @@ export interface DetailWindowOps {
   removeLink(row: { pending: boolean; fromKey: string; toSegment: string; toPort: string; ownerKey: string; rowId?: string }): void;
   /** 批量挂靠（多选实体逐条落 node_link）。 */
   attachEntities(segmentId: string, port: string, entities: Array<{ kind: EntityPhKind; id: string }>): void;
-  /** 提示词纸片「更换提示词」：关详情窗、开提示词库选浮层（同一纸片目标）。 */
-  reopenPromptPick(phKey: string): void;
+  /** 提示词纸片「选择/更换提示词」：开提示词库选浮层（详情窗保持打开，
+   *  浮层叠加在其上，选完纸片内容经状态刷新）。 */
+  openPromptPick(phKey: string): void;
+  /** 剧本详情窗「挂接/更换剧本」：开文件选择浮层（详情窗保持打开）。 */
+  openScriptPick(key: string): void;
   onClose(): void;
 }
 
@@ -190,7 +197,7 @@ function VoiceRow({ voicePath, onPick, onClear }: {
       <MediaPlayback kind="audio" path={voicePath} />
       <span className="pdetail-voice-name">{voiceLabel(voicePath)}</span>
       <button type="button" className="pdetail-voice-act" onClick={onPick}>{t("project.detail.voicePick")}</button>
-      <button type="button" className="pdetail-voice-act" onClick={onClear}>{t("common.delete")}</button>
+      <button type="button" className="pdetail-voice-act is-danger" onClick={onClear}>{t("common.delete")}</button>
     </div>
   );
 }
@@ -220,6 +227,10 @@ function EntityDetail({ group, sourceKey, ops }: { group: EntityPhKind; sourceKe
     }
   }, [entity, group]);
   const voice = group === "character" ? ((entity as ProjectCharacter | undefined)?.voice_path ?? "") : "";
+  // 预览兜底：角色参考图未上传但已有形象头像时，网格回退显示头像——
+  // 详情窗是预览窗，不能给"无参考图"空态而看不见已有形象（用户反馈）。
+  const avatarPath = group === "character" ? ((entity as ProjectCharacter | undefined)?.avatar_path ?? "") : "";
+  const gridPaths = refPaths.length ? refPaths : avatarPath ? [avatarPath] : [];
   const linkedSegments = (ops.nodeLinks ?? []).filter(
     (l) => l.from_kind === group && l.from_id === entityId,
   );
@@ -247,7 +258,11 @@ function EntityDetail({ group, sourceKey, ops }: { group: EntityPhKind; sourceKe
       onClose={ops.onClose}
     >
       <DetailSection label={t("project.detail.refs")} count={t("project.detail.refCount", { n: refPaths.length })}>
-        <RefGrid paths={refPaths} libraryRoot={ops.libraryRoot} onSetAvatar={group === "character" ? (ref) => entity && ops.setAvatar(entity as ProjectCharacter, ref) : undefined} />
+        <RefGrid
+          paths={gridPaths}
+          libraryRoot={ops.libraryRoot}
+          onSetAvatar={refPaths.length && group === "character" ? (ref) => entity && ops.setAvatar(entity as ProjectCharacter, ref) : undefined}
+        />
       </DetailSection>
       {group === "character" && (
         <DetailSection label={t("project.detail.voice")} count={voice ? "1" : "0"}>
@@ -274,8 +289,42 @@ function EntityDetail({ group, sourceKey, ops }: { group: EntityPhKind; sourceKe
   );
 }
 
+/** 输入行缩略图：实体取头像/参考图（组行=成员头像堆叠，最多 3 张），
+ *  文本类（提示词/剧本）与暂存占位给图标块——详情窗是预览窗，行内必须
+ *  能直接看到挂的是什么素材（用户反馈）。 */
+function linkThumbPath(kind: string, id: string, ops: DetailWindowOps): string {
+  if (kind === "character") return ops.characters.find((c) => c.id === id)?.avatar_path ?? "";
+  if (kind === "location") return ops.locations.find((l) => l.id === id)?.ref_path ?? "";
+  if (kind === "prop") return ops.props.find((p) => p.id === id)?.ref_path ?? "";
+  return "";
+}
+
+function LinkThumb({ kind, id, ops, extraPaths }: { kind: string; id: string; ops: DetailWindowOps; extraPaths?: string[] }) {
+  const paths = extraPaths?.length ? extraPaths : [linkThumbPath(kind, id, ops)];
+  const hasImage = paths.some(Boolean);
+  if (!hasImage) {
+    return (
+      <span className={`pdetail-row-thumb is-icon${kind === "prompt" || kind === "script" ? "" : " is-empty"}`}>
+        {kind === "prompt" || kind === "script" ? Icons.file : Icons.image}
+      </span>
+    );
+  }
+  return (
+    <span className="pdetail-row-thumb is-stack">
+      {paths.filter(Boolean).slice(0, 3).map((p, i) => (
+        <ResourceFileImage
+          key={`${p}-${i}`}
+          path={joinLibraryPath(ops.libraryRoot, p)}
+          alt=""
+          className="pdetail-row-thumbimg"
+        />
+      ))}
+    </span>
+  );
+}
+
 /** 片段输入分组：按口聚合（角色/场景/道具/提示词/剧本/其他），组头计数
- *  + 折叠；行=承载节点名（组行展开成员）+ 移除。 */
+ *  + 折叠；行=缩略图 + 承载节点名（组行展开成员）+ 移除。 */
 function SegmentInputs({ segmentId, ops }: { segmentId: string; ops: DetailWindowOps }) {
   const { t } = useTranslation();
   const rows = ops.nodeLinks.filter((l) => l.to_segment === segmentId);
@@ -324,6 +373,12 @@ function SegmentInputs({ segmentId, ops }: { segmentId: string; ops: DetailWindo
                   : [row];
                 return (
                   <div key={row.id} className="pdetail-row">
+                    <LinkThumb
+                      kind={row.from_kind}
+                      id={row.from_id}
+                      ops={ops}
+                      extraPaths={isGroup ? members.map((m) => linkThumbPath(m.from_kind, m.from_id, ops)) : undefined}
+                    />
                     <span className="pdetail-row-name">
                       {isGroup ? t("project.detail.groupLine", { n: members.length }) : nameOf(row.from_kind, row.from_id)}
                       {isGroup && <small className="pdetail-row-members">{members.map((m) => nameOf(m.from_kind, m.from_id)).join(" · ")}</small>}
@@ -340,6 +395,7 @@ function SegmentInputs({ segmentId, ops }: { segmentId: string; ops: DetailWindo
               })}
               {portPends.map((p) => (
                 <div key={`pend-${p.fromKey}`} className="pdetail-row is-pending">
+                  <span className="pdetail-row-thumb is-icon is-empty">{Icons.image}</span>
                   <span className="pdetail-row-name">{pendingFromLabel(p.fromKey)}</span>
                   <button
                     type="button"
@@ -439,7 +495,7 @@ function SegmentDetail({ segmentId, ops }: { segmentId: string; ops: DetailWindo
             <span className="pdetail-output-name">{segment.asset.name || segment.asset.file_path}</span>
           </div>
         ) : (
-          <div className="pdetail-empty">{Icons.link}{t("project.canvas.segEmpty")}</div>
+          <div className="pdetail-empty">{Icons.link}{t("project.detail.segOutputEmpty")}</div>
         )}
       </DetailSection>
       <DetailSection label={t("project.detail.inputs")}>
@@ -487,11 +543,106 @@ export function ProjectDetailWindow({ target, ops }: { target: DetailTarget; ops
   if (target.kind === "segment") return <SegmentDetail segmentId={target.id} ops={ops} />;
   if (target.kind === "entityPh") return <EntityPhDetail id={target.id} group={target.group} ops={ops} />;
   if (target.kind === "promptPh") return <PromptPhDetail id={target.id} ops={ops} />;
+  if (target.kind === "scriptPh") return <ScriptPhDetail phKey={target.key} ops={ops} />;
+  if (target.kind === "output") return <OutputDetail ops={ops} />;
   return <EntityDetail group={target.group} sourceKey={target.sourceKey} ops={ops} />;
 }
 
+/** 剧本详情体（主剧本 key="script" / 画布剧本纸片 script:<phid>）：已挂接
+ *  = 文件名 + 头部内容预览（readResourceTextPreview 与纸片同源）；未挂接 =
+ *  空态。动作区钉底「挂接/更换剧本」开文件选择浮层（详情窗保持打开）。 */
+function ScriptPhDetail({ phKey, ops }: { phKey: string; ops: DetailWindowOps }) {
+  const { t } = useTranslation();
+  const isMain = phKey === "script";
+  const path = isMain
+    ? (ops.overview?.episode.script_path ?? "")
+    : (ops.scriptPhs.find((ph) => `script:${ph.id}` === phKey)?.path ?? "");
+  const fileName = path.split(/[\\/]/).pop() ?? "";
+  const [preview, setPreview] = useState<string | null>(null);
+  useEffect(() => {
+    if (!path) {
+      setPreview(null);
+      return;
+    }
+    let cancelled = false;
+    setPreview(null);
+    readResourceTextPreview(joinLibraryPath(ops.libraryRoot, path))
+      .then((result) => {
+        if (!cancelled) setPreview(result.content);
+      })
+      .catch(() => {
+        if (!cancelled) setPreview("");
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [path, ops.libraryRoot]);
+  return (
+    <DetailWindow
+      title={<><span className="pdetail-kind-label">{t("project.detail.scriptKind")}</span> · {isMain ? t("project.detail.scriptMain") : fileName || t("project.detail.scriptNotLinked")}</>}
+      accent="#fb923c"
+      onClose={ops.onClose}
+      foot={(
+        <button type="button" className="pdetail-foot-btn" onClick={() => ops.openScriptPick(phKey)}>
+          {path ? t("project.detail.scriptChange") : t("project.canvas.linkScript")}
+        </button>
+      )}
+    >
+      {path ? (
+        <>
+          <DetailSection label={t("project.detail.scriptFile")}>
+            <p className="pdetail-text pdetail-text-strong">{fileName || path}</p>
+          </DetailSection>
+          <DetailSection label={t("project.detail.scriptPreview")}>
+            <p className="pdetail-text pdetail-text-prompt">{preview === null ? "…" : preview || t("project.detail.empty")}</p>
+          </DetailSection>
+        </>
+      ) : (
+        <DetailSection label={t("project.detail.scriptFile")}>
+          <div className="pdetail-empty">{Icons.file}{t("project.detail.scriptEmptyHint")}</div>
+        </DetailSection>
+      )}
+    </DetailWindow>
+  );
+}
+
+/** 成片详情体（成片卡双击）：output_asset_id 定位资产，视频海报预览 +
+ *  文件名；未产出=空态。 */
+function OutputDetail({ ops }: { ops: DetailWindowOps }) {
+  const { t } = useTranslation();
+  const overview = ops.overview;
+  const outputId = overview?.episode.output_asset_id ?? "";
+  const asset = outputId
+    ? overview?.loose_assets.find((a) => a.id === outputId)
+      ?? overview?.scenes.flatMap((s) => s.shots).flatMap((sh) => sh.assets).find((a) => a.id === outputId)
+    : undefined;
+  return (
+    <DetailWindow
+      title={<><span className="pdetail-kind-label">{t("project.detail.outputKind")}</span>{asset ? <> · {asset.name || asset.file_path}</> : null}</>}
+      accent="#c084fc"
+      onClose={ops.onClose}
+    >
+      <DetailSection label={t("project.detail.output")} count={asset ? "" : t("project.detail.outputEmpty")}>
+        {asset ? (
+          <div className="pdetail-output">
+            <ResourceVideoPoster
+              path={joinLibraryPath(ops.libraryRoot, asset.file_path)}
+              version={asset.updated_at}
+              fallbackLabel={asset.name || asset.file_path}
+            />
+            <span className="pdetail-output-name">{asset.name || asset.file_path}</span>
+          </div>
+        ) : (
+          <div className="pdetail-empty">{Icons.clapperboard}{t("project.detail.outputEmptyHint")}</div>
+        )}
+      </DetailSection>
+    </DetailWindow>
+  );
+}
+
 /** 提示词纸片详情：挂接的提示词标题 + 全文只读（纸片节点小窗看不全），
- *  动作区「更换提示词」关窗重开库选浮层。 */
+ *  空纸片=空态。动作区钉底「选择/更换提示词」开提示词库选浮层（详情窗
+ *  保持打开，浮层叠加在其上）。 */
 function PromptPhDetail({ id, ops }: { id: string; ops: DetailWindowOps }) {
   const { t } = useTranslation();
   const ph = ops.promptPhs.find((item) => item.id === id);
@@ -502,8 +653,8 @@ function PromptPhDetail({ id, ops }: { id: string; ops: DetailWindowOps }) {
       accent="#22d3ee"
       onClose={ops.onClose}
       foot={(
-        <button type="button" className="pdetail-foot-btn" onClick={() => ops.reopenPromptPick(`prompt:${id}`)}>
-          {t("project.detail.promptChange")}
+        <button type="button" className="pdetail-foot-btn" onClick={() => ops.openPromptPick(`prompt:${id}`)}>
+          {prompt ? t("project.detail.promptChange") : t("project.canvas.promptPickTitle")}
         </button>
       )}
     >
@@ -518,7 +669,7 @@ function PromptPhDetail({ id, ops }: { id: string; ops: DetailWindowOps }) {
         </>
       ) : (
         <DetailSection label={t("project.detail.promptContentLabel")}>
-          <div className="pdetail-empty">{Icons.link}{t("project.canvas.promptEmpty")}</div>
+          <div className="pdetail-empty">{Icons.link}{t("project.detail.promptEmptyHint")}</div>
         </DetailSection>
       )}
     </DetailWindow>

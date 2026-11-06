@@ -357,9 +357,11 @@ export default function ProjectCanvasShell({
       duration: "",
     });
   };
-  // 提示词库选确认（纸片记 promptId，画布层状态）。
+  // 提示词库选确认（纸片记 promptId，画布层状态）；详情窗保持打开，
+  // 纸片内容经 promptPhs 状态刷新。
   const handlePromptPick = (promptId: string) => {
     setPromptPickOpen(false);
+    setPromptPickQuery("");
     const target = promptPickTarget;
     setPromptPickTarget(null);
     if (!target || !target.startsWith("prompt:")) return;
@@ -561,7 +563,20 @@ export default function ProjectCanvasShell({
   };
 
   // ── 详情窗装配（阶段 D）：按 detailFor 分派骨架与操作集 ──
-  const closeDetail = () => setDetailFor(null);
+  // closeDetail 统一出口（×/遮罩/Esc）：二级选择浮层（提示词库选/剧本
+  // 文件选）开着时只关浮层不关详情窗——先关最上层，再按一次才关窗。
+  const closeDetail = () => {
+    if (promptPickOpen) {
+      closePromptPick();
+      return;
+    }
+    if (scriptPickOpen) {
+      setScriptPickOpen(false);
+      setScriptPickTarget(null);
+      return;
+    }
+    setDetailFor(null);
+  };
   const detailOps: DetailWindowOps = {
     libraryRoot,
     overview,
@@ -573,6 +588,7 @@ export default function ProjectCanvasShell({
     props,
     prompts,
     promptPhs: data.promptPhs,
+    scriptPhs: data.scriptPhs,
     setVoice: (id, voicePath) => void setCharacterVoice(id, voicePath),
     setAvatar: (character, refPath) => {
       void saveCharacter({
@@ -619,10 +635,13 @@ export default function ProjectCanvasShell({
         linkNode(episodeId, e.kind, e.id, segmentId, port as Parameters<typeof linkNode>[4], "");
       });
     },
-    reopenPromptPick: (phKey) => {
-      setDetailFor(null);
+    openPromptPick: (phKey) => {
       setPromptPickTarget(phKey);
       setPromptPickOpen(true);
+    },
+    openScriptPick: (key) => {
+      setScriptPickTarget(key);
+      setScriptPickOpen(true);
     },
     onClose: closeDetail,
   };
@@ -678,21 +697,15 @@ export default function ProjectCanvasShell({
             </>
           )}
           onOpenNodeDetail={(node) => {
+            // 双击必出详情窗（用户定案）：剧本/提示词纸片的挂靠动作收进
+            // 窗内钉底钮，点开二级选择浮层；不再直弹选择框。
             const key = node.id;
             if (key.startsWith("segment:")) setDetailFor({ kind: "segment", id: key.slice(8) });
             else if (key.startsWith("eph:")) setDetailFor({ kind: "entityPh", id: key.slice(4), group: node.type as EntityPhKind });
             else if (/^(char|loc|prop|grp):/.test(key)) setDetailFor({ kind: "info", group: node.type as EntityPhKind, sourceKey: key });
-            else if (key === "script" || key.startsWith("script:")) {
-              setScriptPickTarget(key);
-              setScriptPickOpen(true);
-            } else if (key.startsWith("prompt:")) {
-              const ph = data.promptPhs.find((item) => `prompt:${item.id}` === key);
-              if (ph?.promptId) setDetailFor({ kind: "promptPh", id: ph.id });
-              else {
-                setPromptPickTarget(key);
-                setPromptPickOpen(true);
-              }
-            }
+            else if (key === "script" || key.startsWith("script:")) setDetailFor({ kind: "scriptPh", key });
+            else if (key.startsWith("prompt:")) setDetailFor({ kind: "promptPh", id: key.slice(7) });
+            else if (key === "output") setDetailFor({ kind: "output" });
           }}
         />
         {detailFor && (

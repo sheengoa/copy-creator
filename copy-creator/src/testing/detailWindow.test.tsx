@@ -33,12 +33,14 @@ function makeOps(overrides: Partial<DetailWindowOps> = {}): DetailWindowOps {
     props: [],
     prompts: [],
     promptPhs: [],
+    scriptPhs: [],
     setVoice: vi.fn(),
     setAvatar: vi.fn(),
     loadEntity: vi.fn(),
     removeLink: vi.fn(),
     attachEntities: vi.fn(),
-    reopenPromptPick: vi.fn(),
+    openPromptPick: vi.fn(),
+    openScriptPick: vi.fn(),
     onClose: vi.fn(),
     ...overrides,
   };
@@ -106,6 +108,35 @@ describe("DetailWindow", () => {
     );
   });
 
+  it("输入行素材缩略图：角色行显示头像图；参考图空的角色详情回退显示头像", () => {
+    render(
+      <ProjectDetailWindow
+        target={{ kind: "segment", id: "seg-1" }}
+        ops={makeOps({
+          segments: [
+            { id: "seg-1", episode_id: "e1", asset_id: null, sort_order: 0, note: "", canvas_x: null, canvas_y: null, created_at: "", updated_at: "" },
+          ],
+          nodeLinks: [
+            { id: "nl-1", from_kind: "character", from_id: "char-2", to_segment: "seg-1", to_port: "character", owner_key: "" },
+          ],
+          characters: [{ ...baseCharacter, avatar_path: "avatars/laozhou.png" }],
+        })}
+      />,
+    );
+    expect(document.querySelectorAll(".pdetail-row-thumbimg").length).toBe(1);
+  });
+
+  it("参考图空但已有头像的角色：详情网格回退显示头像而非空态", () => {
+    render(
+      <ProjectDetailWindow
+        target={{ kind: "info", group: "character", sourceKey: "char:char-2" }}
+        ops={makeOps({ characters: [{ ...baseCharacter, reference_paths: "[]", avatar_path: "avatars/kawayi.png" }] })}
+      />,
+    );
+    expect(document.querySelector(".pdetail-refgrid .pdetail-refimg")).toBeTruthy();
+    expect(screen.queryByText("无参考图")).toBeNull();
+  });
+
   it("批量挂靠：勾选后确认按 {kind, id} 逐条路由 attachEntities", () => {
     const attachEntities = vi.fn();
     render(
@@ -120,20 +151,20 @@ describe("DetailWindow", () => {
         })}
       />,
     );
-    fireEvent.click(screen.getByText(/批量挂靠/));
+    fireEvent.click(screen.getByText("批量挂靠（可多选）"));
     fireEvent.click(screen.getByText("道具"));
     fireEvent.click(screen.getByText("旧怀表"));
     fireEvent.click(screen.getByText(/挂靠 1 项/));
     expect(attachEntities).toHaveBeenCalledWith("seg-1", "prop", [{ kind: "prop", id: "prop-9" }]);
   });
 
-  it("提示词纸片详情：标题+全文只读展示，更换提示词路由 reopenPromptPick", () => {
-    const reopenPromptPick = vi.fn();
+  it("提示词纸片详情：标题+全文只读展示，更换提示词路由 openPromptPick", () => {
+    const openPromptPick = vi.fn();
     render(
       <ProjectDetailWindow
         target={{ kind: "promptPh", id: "ph-1" }}
         ops={makeOps({
-          reopenPromptPick,
+          openPromptPick,
           prompts: [{ id: "p-1", title: "末班车氛围", content: "地铁车厢内，冷白灯光闪烁。", category: "scene", file_path: "", created_at: "", updated_at: "" }],
           promptPhs: [{ id: "ph-1", promptId: "p-1", x: 0, y: 0 }],
         })}
@@ -142,6 +173,67 @@ describe("DetailWindow", () => {
     expect(screen.getByText("末班车氛围")).toBeTruthy();
     expect(screen.getByText(/地铁车厢内，冷白灯光闪烁。/)).toBeTruthy();
     fireEvent.click(screen.getByText("更换提示词"));
-    expect(reopenPromptPick).toHaveBeenCalledWith("prompt:ph-1");
+    expect(openPromptPick).toHaveBeenCalledWith("prompt:ph-1");
+  });
+
+  it("空提示词纸片详情：空态展示，钉底「选择提示词」路由 openPromptPick（双击统一出窗）", () => {
+    const openPromptPick = vi.fn();
+    render(
+      <ProjectDetailWindow
+        target={{ kind: "promptPh", id: "ph-2" }}
+        ops={makeOps({ openPromptPick, promptPhs: [{ id: "ph-2", promptId: "", x: 0, y: 0 }] })}
+      />,
+    );
+    expect(screen.getByText("尚未选择提示词 · 点下方按钮从库中选择")).toBeTruthy();
+    fireEvent.click(screen.getByText("选择提示词"));
+    expect(openPromptPick).toHaveBeenCalledWith("prompt:ph-2");
+  });
+
+  it("剧本纸片详情：空态给「挂接剧本」；已挂接显示文件名与「更换剧本」路由 openScriptPick", () => {
+    const openScriptPick = vi.fn();
+    const { rerender } = render(
+      <ProjectDetailWindow
+        target={{ kind: "scriptPh", key: "script:sp-1" }}
+        ops={makeOps({ openScriptPick, scriptPhs: [{ id: "sp-1", path: "" }] })}
+      />,
+    );
+    expect(screen.getByText("尚未挂接剧本 · 点下方按钮选择文件")).toBeTruthy();
+    fireEvent.click(screen.getByText("挂接剧本"));
+    expect(openScriptPick).toHaveBeenCalledWith("script:sp-1");
+    rerender(
+      <ProjectDetailWindow
+        target={{ kind: "scriptPh", key: "script:sp-1" }}
+        ops={makeOps({ openScriptPick, scriptPhs: [{ id: "sp-1", path: "scripts/第一集剧本.txt" }] })}
+      />,
+    );
+    expect(screen.getByText("第一集剧本.txt")).toBeTruthy();
+    fireEvent.click(screen.getByText("更换剧本"));
+    expect(openScriptPick).toHaveBeenCalledWith("script:sp-1");
+  });
+
+  it("成片卡详情：output_asset_id 命中散素材时展示名称，未产出给空态", () => {
+    // ResourceVideoPoster 的懒加载观察器 jsdom 未实现，桩掉即可。
+    class IOStub {
+      observe() {}
+      unobserve() {}
+      disconnect() {}
+    }
+    (window as { IntersectionObserver?: unknown }).IntersectionObserver = IOStub;
+    const { rerender } = render(<ProjectDetailWindow target={{ kind: "output" }} ops={makeOps()} />);
+    expect(screen.getByText("本集尚未挂出成片 · 片段产出后在此汇总")).toBeTruthy();
+    rerender(
+      <ProjectDetailWindow
+        target={{ kind: "output" }}
+        ops={makeOps({
+          overview: {
+            episode: { id: "e1", output_asset_id: "a-1" },
+            loose_assets: [{ id: "a-1", file_path: "final/ep1.mp4", kind: "video", name: "第一集成片", shot_id: "", episode_id: "e1", gen_from_asset: "", gen_from_prompt: "", gen_params: "", audio_role: "", missing: false, canvas_x: null, canvas_y: null, created_at: "", updated_at: "" }],
+            characters: [], locations: [], props: [], scenes: [], links: [], segments: [], node_links: [],
+          },
+        } as never)}
+      />,
+    );
+    // 标题与视频角标各展示一次资产名。
+    expect(screen.getAllByText("第一集成片").length).toBe(2);
   });
 });

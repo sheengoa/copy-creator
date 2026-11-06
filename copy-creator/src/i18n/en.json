@@ -788,7 +788,18 @@
       "promptKind": "Prompt paper",
       "promptChange": "Change prompt",
       "promptTitleLabel": "Title",
-      "promptContentLabel": "Prompt content"
+      "promptContentLabel": "Prompt content",
+      "scriptKind": "Script",
+      "scriptMain": "Main script",
+      "scriptNotLinked": "Not linked",
+      "scriptChange": "Change script",
+      "scriptFile": "Script file",
+      "scriptPreview": "Content preview",
+      "outputKind": "Final cut",
+      "outputEmptyHint": "No final cut attached yet · segments roll up here once produced",
+      "promptEmptyHint": "No prompt picked yet · use the button below to pick one",
+      "scriptEmptyHint": "No script attached yet · use the button below to pick a file",
+      "segOutputEmpty": "No output attached yet · use Batch attach below, or wire assets into this segment"
     }
   },
   "common": {

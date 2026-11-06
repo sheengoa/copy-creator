@@ -6,6 +6,7 @@ import type { Dispatch, SetStateAction } from "react";
 import type { ProjectScene } from "../../../../stores/projectStore";
 import { promptCategoryKey } from "../../../../domain/projectView";
 import { ConfirmDialog } from "../../../../components/ConfirmDialog";
+import { Icons } from "../../../../components/Icons";
 import ProjectFilePickerDialog from "../../ProjectFilePickerDialog";
 import ProjectLibraryPanel from "../../ProjectLibraryPanel";
 import type { EntityPhKind } from "../types";
@@ -195,7 +196,9 @@ export function ScriptPickDialog({
   );
 }
 
-/** 提示词选择：空提示词纸片双击后从提示词库选一条写入纸片。 */
+/** 提示词选择：空提示词纸片双击从提示词库选一条写入纸片。作为详情窗的
+ *  二级浮层打开（fixed z100 压过 portal 到 body 的详情窗 z90；pc-dialog-mask
+ *  是画布内 absolute z50 压不住），标题栏带 ×，Esc/遮罩/× 都走关闭。 */
 export function PromptPickDialog({
   promptPickOpen, closePromptPick, promptPickQuery, setPromptPickQuery, prompts, handlePromptPick,
 }: {
@@ -211,9 +214,19 @@ export function PromptPickDialog({
     <>
 {/* 提示词选择：空提示词纸片双击后从提示词库选一条写入纸片 */}
 {promptPickOpen && (
-  <div className="pc-dialog-mask" onMouseDown={(e) => { if (e.target === e.currentTarget) closePromptPick(); }}>
+  <div className="pc-prompt-pick-mask" onMouseDown={(e) => { if (e.target === e.currentTarget) closePromptPick(); }}>
     <div className="pc-dialog pc-prompt-pick">
-      <h4>{t("project.canvas.promptPickTitle")}</h4>
+      <div className="pc-prompt-pick-topbar">
+        <h4>{t("project.canvas.promptPickTitle")}</h4>
+        <button
+          type="button"
+          className="pc-prompt-pick-x"
+          aria-label={t("common.close")}
+          onClick={closePromptPick}
+        >
+          {Icons.close}
+        </button>
+      </div>
       <input
         value={promptPickQuery}
         placeholder={t("project.canvas.addNodeSearch")}
