@@ -7605,15 +7605,15 @@ mod project_tests {
             [],
         )
         .unwrap();
-        let b = |path: &str, voice: &str, bio: &str, prompt: &str, time_hint: &str| {
-            serde_json::json!({ "path": path, "voice_path": voice, "bio": bio, "prompt": prompt, "time_hint": time_hint })
+        let b = |path: &str, name: &str, voice: &str, bio: &str, prompt: &str, time_hint: &str| {
+            serde_json::json!({ "path": path, "name": name, "voice_path": voice, "bio": bio, "prompt": prompt, "time_hint": time_hint })
         };
         // 角色两条绑定写入 + 读回（保序）。
         crate::db::project_set_image_bindings_conn(
             &conn,
             "character",
             "c1",
-            &[b("refs/a.png", "v1.wav", "形象一人设", "", ""), b("refs/b.png", "", "形象二人设", "形象二提示词", "")],
+            &[b("refs/a.png", "睡衣形态", "v1.wav", "形象一人设", "", ""), b("refs/b.png", "战斗形态", "", "形象二人设", "形象二提示词", "")],
         )
         .unwrap();
         let stored: String = conn
@@ -7622,6 +7622,7 @@ mod project_tests {
         let parsed: Vec<serde_json::Value> = serde_json::from_str(&stored).unwrap();
         assert_eq!(parsed.len(), 2);
         assert_eq!(parsed[0]["path"], "refs/a.png");
+        assert_eq!(parsed[0]["name"], "睡衣形态");
         assert_eq!(parsed[0]["voice_path"], "v1.wav");
         assert_eq!(parsed[1]["prompt"], "形象二提示词");
         // 去重（同 path 首条保留）+ 空 path 丢弃 + 路径归一化（反斜杠）。
@@ -7629,7 +7630,7 @@ mod project_tests {
             &conn,
             "character",
             "c1",
-            &[b("refs/a.png", "x.wav", "", "", ""), b("refs\\a.png", "y.wav", "", "", ""), b("", "", "", "", "")],
+            &[b("refs/a.png", "睡衣", "x.wav", "", "", ""), b("refs\\a.png", "战斗", "y.wav", "", "", ""), b("", "", "", "", "", "")],
         )
         .unwrap();
         let stored: String = conn
@@ -7640,7 +7641,7 @@ mod project_tests {
         assert_eq!(parsed[0]["path"], "refs/a.png");
         assert_eq!(parsed[0]["voice_path"], "x.wav");
         // 场景可用（时段绑定为场景图的专属字段）+ 空列表清空。
-        crate::db::project_set_image_bindings_conn(&conn, "location", "l1", &[b("refs/night.png", "", "夜行人设", "", "夜")]).unwrap();
+        crate::db::project_set_image_bindings_conn(&conn, "location", "l1", &[b("refs/night.png", "夜景", "", "夜行人设", "", "夜")]).unwrap();
         let stored: String = conn
             .query_row("SELECT image_bindings FROM project_locations WHERE id = 'l1'", [], |r| r.get(0))
             .unwrap();

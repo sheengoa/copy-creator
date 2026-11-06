@@ -1146,10 +1146,10 @@ fn serialize_reference_paths(paths: &[String]) -> String {
 }
 
 /// 每图绑定（方案 A，用户定案）落库序列化：按 path 去重保序（一条图一条
-/// 绑定），只保留 path/voice_path/bio/prompt/time_hint 字段（角色=音色+
-/// 人设+提示词；场景=时段+描述+提示词；道具=描述+提示词；字段按类取用，
-/// 落库统一透传）；空 path 的条目丢弃。未绑定的图由前端回退实体级默认
-/// （voice_path/bio/prompt/time_hint 列），这里不做合并。
+/// 绑定），白名单透传 path/name/voice_path/bio/prompt/time_hint（name=形象
+/// 名称，库选条目自动带入、独立可改；角色=音色+人设+提示词；场景=时段+
+/// 描述+提示词；道具=描述+提示词；字段按类取用）；空 path 的条目丢弃。
+/// 未绑定的图由前端回退实体级默认（名称回退实体名），这里不做合并。
 fn serialize_image_bindings(bindings: &[serde_json::Value]) -> String {
     let mut seen = std::collections::HashSet::new();
     let list: Vec<serde_json::Value> = bindings
@@ -1167,6 +1167,7 @@ fn serialize_image_bindings(bindings: &[serde_json::Value]) -> String {
             };
             Some(serde_json::json!({
                 "path": path,
+                "name": text("name"),
                 "voice_path": text("voice_path"),
                 "bio": text("bio"),
                 "prompt": text("prompt"),

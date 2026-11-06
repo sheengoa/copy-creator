@@ -90,6 +90,9 @@ export default function ProjectCanvasShell({
     saveCharacter,
     setCharacterVoice,
     setReferences,
+    setImageBindings,
+    saveLocation,
+    saveProp,
     saveScene,
     deleteScene,
     saveShot,
@@ -124,6 +127,9 @@ export default function ProjectCanvasShell({
       saveCharacter: state.saveCharacter,
       setCharacterVoice: state.setCharacterVoice,
       setReferences: state.setReferences,
+      setImageBindings: state.setImageBindings,
+      saveLocation: state.saveLocation,
+      saveProp: state.saveProp,
       saveScene: state.saveScene,
       deleteScene: state.deleteScene,
       saveShot: state.saveShot,
@@ -597,6 +603,22 @@ export default function ProjectCanvasShell({
     scriptPhs: data.scriptPhs,
     setVoice: (id, voicePath) => void setCharacterVoice(id, voicePath),
     setReferences: (kind, id, paths) => void setReferences(kind, id, paths),
+    setImageBindings: (kind, id, bindings) => void setImageBindings(kind, id, bindings),
+    saveProfile: (kind, id, bio, prompt) => {
+      // 实体级默认人设/提示词（形象卡默认区）：按类分流保留各自其它字段。
+      if (kind === "character") {
+        const c = characters.find((x) => x.id === id);
+        if (c) {
+          void saveCharacter({ id: c.id, name: c.name, role_tag: c.role_tag, bio, prompt, avatar_path: c.avatar_path, reference_paths: c.reference_paths, voice_path: c.voice_path ?? "" });
+        }
+      } else if (kind === "location") {
+        const l = locations.find((x) => x.id === id);
+        if (l) void saveLocation({ id: l.id, name: l.name, int_ext: l.int_ext, time_hint: l.time_hint, bio, prompt, ref_path: l.ref_path });
+      } else {
+        const p = props.find((x) => x.id === id);
+        if (p) void saveProp({ id: p.id, name: p.name, bio, prompt, ref_path: p.ref_path });
+      }
+    },
     setAvatar: (character, refPath) => {
       void saveCharacter({
         id: character.id,

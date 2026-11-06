@@ -166,63 +166,128 @@
 }
 .pdetail-empty svg { width: 14px; height: 14px; }
 
-/* ── 参考图卡片网格：1:1 复刻旧 .pc-detail-body.grid/.pc-detail-card
-   规格（auto-fill minmax(215px,1fr) 多列 + 16:10 预览框 contain +
-   卡底动作行），30/批懒加载。 ── */
-.pdetail-refgrid-wrap { display: flex; flex-direction: column; }
-.pdetail-refgrid {
-  display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(215px, 1fr));
-  align-items: start;
-  gap: 10px;
-  max-height: 460px;
-  overflow-y: auto;
-  padding: 2px;
-}
-.pdetail-refcard {
+/* ── 形象分组卡（方案 A，用户定案「一张图片对应一份数据」）：
+   一图一卡纵向陈列；图区=定框 16:10 + 保比例 contain + 上下虚影（用户
+   定案「窗口里规矩框，比例不裁切」）；跟随/独立=白卡胶囊两段切换（用户
+   指定样式）；段头「添加形象」沿用 pdetail-ref-add；30/批点「显示剩余」
+   续载。 ── */
+.pdetail-facelist { display: flex; flex-direction: column; gap: 10px; }
+.pdetail-face {
+  display: flex;
+  gap: 12px;
   border: 1px solid var(--separator);
   border-radius: 12px;
-  padding: 10px;
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
+  padding: 12px;
   min-width: 0;
 }
-.pdetail-refcard-view {
+.pdetail-face.is-avatar { border-color: color-mix(in srgb, var(--pdetail-accent) 45%, var(--separator)); }
+/* 图区：定框 + 虚影（模糊放大铺底）+ 主图 contain，比例不裁切。 */
+.pdetail-face-img {
+  flex: 0 0 168px;
+  align-self: flex-start;
+  position: relative;
+  aspect-ratio: 16 / 10;
   border-radius: 8px;
   overflow: hidden;
   background: var(--chip-bg);
-  /* 自然比例完整展示（复用无限画布图像逻辑：按真实宽高渲染，不裁切
-     不强塞固定框——用户定案）；加载前 min-height 占位防塌陷。 */
-  min-height: 90px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
 }
-.pdetail-refcard-img { width: 100%; height: auto; display: block; }
-.pdetail-refcard-meta { display: flex; align-items: center; gap: 6px; min-width: 0; }
-.pdetail-refcard-name {
-  font-size: 11.5px;
+.pdetail-face-ghost {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  filter: blur(16px) saturate(0.85);
+  opacity: 0.45;
+  transform: scale(1.12);
+}
+.pdetail-face-picture {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+  z-index: 1;
+}
+.pdetail-face-main { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 8px; }
+.pdetail-face-top { display: flex; align-items: center; gap: 8px; min-width: 0; }
+.pdetail-face-name {
+  font-size: 12.5px;
   font-weight: 500;
   color: var(--text-primary);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
-.pdetail-refcard-ops { display: flex; gap: 6px; }
-.pdetail-refact {
-  flex: 1;
-  font-size: 11px;
-  color: var(--text-secondary);
-  padding: 4px 0;
-  border-radius: 7px;
-  border: 1px solid var(--separator);
+.pdetail-badge {
+  flex: none;
+  font-size: 10.5px;
+  padding: 2px 8px;
+  border-radius: 999px;
   background: var(--chip-bg);
-  text-align: center;
+  color: var(--text-secondary);
 }
-.pdetail-refact:hover { background: var(--chip-hover-bg); color: var(--text-primary); border-color: var(--accent-border-soft); }
-.pdetail-refact.is-danger:hover { background: var(--danger); border-color: var(--danger); color: #fff; }
-/* 段头「添加参考图」入口。 */
+/* 跟随/独立：白卡胶囊两段切换（active=白卡浮起，对齐 文件/工程视图 切换）。 */
+.pdetail-seg {
+  margin-left: auto;
+  flex: none;
+  display: inline-flex;
+  gap: 2px;
+  padding: 2px;
+  border-radius: 9px;
+  background: var(--chip-bg);
+  border: 1px solid var(--separator);
+}
+.pdetail-seg-btn {
+  font-size: 11px;
+  padding: 3px 10px;
+  border-radius: 7px;
+  color: var(--text-secondary);
+  background: transparent;
+  border: none;
+  white-space: nowrap;
+}
+.pdetail-seg-btn:hover:not(.is-active) { color: var(--text-primary); }
+.pdetail-seg-btn.is-active {
+  background: light-dark(#ffffff, #3d3d4a);
+  color: var(--text-primary);
+  font-weight: 500;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.14);
+}
+.pdetail-f { display: flex; flex-direction: column; gap: 4px; min-width: 0; }
+.pdetail-f-label { font-size: 11px; color: var(--text-tertiary); }
+.pdetail-f textarea,
+.pdetail-f-input {
+  width: 100%;
+  box-sizing: border-box;
+  font: inherit;
+  font-size: 11.5px;
+  line-height: 1.6;
+  color: var(--text-primary);
+  background: var(--chip-bg);
+  border: 1px solid var(--separator);
+  border-radius: 9px;
+  padding: 6px 10px;
+}
+.pdetail-f textarea { resize: vertical; min-height: 42px; }
+.pdetail-f-input { height: 28px; }
+.pdetail-f textarea:disabled,
+.pdetail-f-input:disabled { opacity: 0.62; }
+.pdetail-f textarea:focus,
+.pdetail-f-input:focus { outline: none; border-color: var(--accent-border-soft); }
+.pdetail-face-foot { display: flex; gap: 8px; justify-content: flex-end; }
+.pdetail-note { margin: 0 0 8px; font-size: 11px; color: var(--text-tertiary); line-height: 1.6; }
+.pdetail-f-gap { margin-bottom: 8px; }
+/* 默认区：实体级兜底三件套（角色含音色），与形象卡视觉区分的轻框。 */
+.pdetail-default {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  border: 1px dashed var(--separator);
+  border-radius: 12px;
+  padding: 12px;
+}
+/* 段头「添加形象」入口（沿用 pill 形态）。 */
 .pdetail-ref-add {
   display: inline-flex;
   align-items: center;
@@ -245,6 +310,7 @@
   border: 1px dashed var(--separator);
   border-radius: 8px;
 }
+.pdetail-more:hover { background: var(--chip-bg); color: var(--text-secondary); }
 
 /* ── 音色行 ── */
 .pdetail-voice {
@@ -277,6 +343,7 @@
   background: var(--chip-bg);
 }
 .pdetail-voice-act:hover { background: var(--chip-hover-bg); color: var(--text-primary); }
+.pdetail-voice-act:disabled { opacity: 0.5; cursor: default; }
 .pdetail-voice-act.is-danger:hover { background: var(--danger); border-color: var(--danger); color: #fff; }
 
 /* ── 片段输出（预览框规格对齐旧 pc-detail：16/10 contain） ── */
@@ -330,28 +397,43 @@
 .pdetail-incard.is-pending { opacity: 0.8; }
 .pdetail-incard.is-pending .pdetail-incard-name { font-style: italic; }
 .pdetail-incard-view {
-  display: flex;
-  align-items: center;
-  justify-content: center;
+  display: block;
+  position: relative;
   width: 100%;
+  aspect-ratio: 16 / 10;
   border-radius: 8px;
   overflow: hidden;
   background: var(--chip-bg);
-  min-height: 90px;
   padding: 0;
 }
 .pdetail-incard.is-openable .pdetail-incard-view { cursor: pointer; }
 .pdetail-incard.is-openable:hover { border-color: var(--accent-border-soft); }
 .pdetail-incard-view.is-static { cursor: default; }
-/* 自然比例完整展示（复用无限画布图像逻辑：按真实宽高渲染，不裁切
-   不强塞固定框——用户定案）；加载前 min-height 占位防塌陷。 */
-.pdetail-incard-img { width: 100%; height: auto; display: block; }
+/* 定框 + 虚影（模糊放大铺底）+ 主图 contain，比例不裁切（用户定案）。 */
+.pdetail-incard-ghost {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  filter: blur(14px) saturate(0.85);
+  opacity: 0.45;
+  transform: scale(1.12);
+}
+.pdetail-incard-img {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+  z-index: 1;
+}
 .pdetail-incard-fallback {
   display: inline-flex;
   align-items: center;
   justify-content: center;
   width: 100%;
-  height: 90px;
+  height: 100%;
   border: 1px dashed var(--separator);
   border-radius: 8px;
   color: var(--text-tertiary);

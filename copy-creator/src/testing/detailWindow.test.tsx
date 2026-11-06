@@ -37,6 +37,8 @@ function makeOps(overrides: Partial<DetailWindowOps> = {}): DetailWindowOps {
     setVoice: vi.fn(),
     setAvatar: vi.fn(),
     setReferences: vi.fn(),
+    setImageBindings: vi.fn(),
+    saveProfile: vi.fn(),
     openDetail: vi.fn(),
     loadEntity: vi.fn(),
     removeLink: vi.fn(),
@@ -53,37 +55,36 @@ function makeOps(overrides: Partial<DetailWindowOps> = {}): DetailWindowOps {
 afterEach(cleanup);
 
 describe("DetailWindow", () => {
-  it("参考图首屏 30 张 + 滚动续载一批（30/批，104 总量）", () => {
+  it("形象卡首屏 30 张 + 点击显示剩余续载一批（30/批，104 总量）", () => {
     render(
       <ProjectDetailWindow
         target={{ kind: "info", group: "character", sourceKey: "char:char-2" }}
         ops={makeOps()}
       />,
     );
-    const grid = document.querySelector(".pdetail-refgrid") as HTMLElement;
-    expect(grid.children.length).toBe(30);
-    expect(screen.getByText(/剩余 74/)).toBeTruthy();
-    // jsdom 无布局：滚动量读数全 0，任意 scroll 事件即满足「到底」条件，
-    // 恰好用于驱动续载分支。
-    fireEvent.scroll(grid);
-    expect(grid.children.length).toBe(60);
-    expect(screen.getByText(/剩余 44/)).toBeTruthy();
+    expect(document.querySelectorAll(".pdetail-face").length).toBe(30);
+    expect(screen.getByText(/显示剩余 74/)).toBeTruthy();
+    // 点「显示剩余」续载一批。
+    fireEvent.click(screen.getByText(/显示剩余 74/));
+    expect(document.querySelectorAll(".pdetail-face").length).toBe(60);
+    expect(screen.getByText(/显示剩余 44/)).toBeTruthy();
   });
 
-  it("参考图大图列表：头像并入展示且计数与实际一致（不再出现共 0 张下有图）", () => {
+  it("形象卡：头像并入展示且计数与实际一致（不再出现共 0 张下有图）", () => {
     render(
       <ProjectDetailWindow
         target={{ kind: "info", group: "character", sourceKey: "char:char-2" }}
         ops={makeOps({ characters: [{ ...baseCharacter, reference_paths: "[]", avatar_path: "avatars/kawayi.png" }] })}
       />,
     );
-    expect(document.querySelectorAll(".pdetail-refgrid .pdetail-refcard-img").length).toBe(1);
+    expect(document.querySelectorAll(".pdetail-face").length).toBe(1);
     expect(screen.getByText("共 1 张")).toBeTruthy();
-    expect(screen.queryByText("无参考图")).toBeNull();
+    // 头像卡不在 reference_paths 内：不提供移除。
+    expect(screen.queryByText("移除")).toBeNull();
   });
 
-  it("音色行两态：空态只给更换入口；有音色给播放件与清除", () => {
-    const ops = makeOps();
+  it("默认区音色两态：空态只给更换入口；有音色给播放件与清除", () => {
+    const ops = makeOps({ characters: [{ ...baseCharacter, reference_paths: "[]" }] });
     const { rerender } = render(
       <ProjectDetailWindow target={{ kind: "info", group: "character", sourceKey: "char:char-2" }} ops={ops} />,
     );
@@ -91,7 +92,7 @@ describe("DetailWindow", () => {
     rerender(
       <ProjectDetailWindow
         target={{ kind: "info", group: "character", sourceKey: "char:char-2" }}
-        ops={{ ...ops, characters: [{ ...baseCharacter, voice_path: "tones/laozhou.wav" }] }}
+        ops={{ ...ops, characters: [{ ...baseCharacter, reference_paths: "[]", voice_path: "tones/laozhou.wav" }] }}
       />,
     );
     expect(screen.getByText("laozhou.wav")).toBeTruthy();
@@ -198,26 +199,98 @@ describe("DetailWindow", () => {
     expect(screen.queryByTitle("返回")).toBeNull();
   });
 
-  it("参考图管理：段头「添加参考图」开选择浮层，选图路由 setReferences 追加；移除路由过滤后覆写", () => {
+  it("形象管理：段头「添加形象」开选择浮层；移除路由 setReferences 过滤；独立开关预填默认", () => {
     const setReferences = vi.fn();
+    const setImageBindings = vi.fn();
     const refs = ["refs/a.png", "refs/b.png"];
     render(
       <ProjectDetailWindow
         target={{ kind: "info", group: "character", sourceKey: "char:char-2" }}
-        ops={makeOps({ setReferences, characters: [{ ...baseCharacter, reference_paths: JSON.stringify(refs) }] })}
+        ops={makeOps({ setReferences, setImageBindings, characters: [{ ...baseCharacter, reference_paths: JSON.stringify(refs) }] })}
       />,
     );
+    // 跟随默认态：形象卡字段禁用（镜像默认，不可编辑）；胶囊停在「跟随」。
+    expect(document.querySelectorAll(".pdetail-face").length).toBe(2);
+    const firstBio = document.querySelector(".pdetail-face .pdetail-f textarea") as HTMLTextAreaElement;
+    expect(firstBio.disabled).toBe(true);
+    expect(firstBio.value).toBe("沉稳寡言的老周");
+    const faceSeg = document.querySelectorAll(".pdetail-face")[0].querySelectorAll(".pdetail-seg-btn");
+    expect(faceSeg[0].classList.contains("is-active")).toBe(true);
+    // 点「独立」→ setImageBindings 预填默认数据（仅该形象有条目）。
+    fireEvent.click(faceSeg[1]);
+    expect(setImageBindings).toHaveBeenCalledWith("character", "char-2", [
+      { path: "refs/a.png", voice_path: "", bio: "沉稳寡言的老周", prompt: "", time_hint: "" },
+    ]);
     // 逐张移除：整体覆写路由（首张 a.png 被过滤）。
     const removeButtons = screen.getAllByText("移除");
     expect(removeButtons.length).toBe(2);
     fireEvent.click(removeButtons[0]);
     expect(setReferences).toHaveBeenCalledWith("character", "char-2", ["refs/b.png"]);
     // 添加浮层打开（jsdom 下 portal 渲染选择器遮罩）。
-    fireEvent.click(screen.getByText("添加参考图"));
+    fireEvent.click(screen.getByText("添加形象"));
     expect(document.querySelector(".project-dialog-overlay")).toBeTruthy();
   });
 
-  it("场景/道具参考图集：reference_paths 数组多图全展示，旧单张 ref_path 并入", () => {
+  it("独立形象：编辑失焦提交绑定；音色清除路由空 voice_path；关闭开关移除条目", () => {
+    const setImageBindings = vi.fn();
+    const setVoice = vi.fn();
+    const bindings = [{ path: "refs/a.png", voice_path: "v.wav", bio: "形象一人设", prompt: "", time_hint: "" }];
+    render(
+      <ProjectDetailWindow
+        target={{ kind: "info", group: "character", sourceKey: "char:char-2" }}
+        ops={makeOps({
+          setImageBindings,
+          setVoice,
+          characters: [{ ...baseCharacter, reference_paths: JSON.stringify(["refs/a.png", "refs/b.png"]), image_bindings: JSON.stringify(bindings), voice_path: "tone.wav" }],
+        })}
+      />,
+    );
+    // a 独立（可编辑、预载绑定值）；b 跟随默认（禁用）。
+    const tas = [...document.querySelectorAll(".pdetail-face textarea")] as HTMLTextAreaElement[];
+    expect(tas.length).toBe(4);
+    expect(tas[0].value).toBe("形象一人设");
+    expect(tas[0].disabled).toBe(false);
+    expect(tas[2].disabled).toBe(true);
+    // 编辑 a 的人设 → 失焦提交整体覆写（b 无条目不落列表）。
+    fireEvent.change(tas[0], { target: { value: "改过的人设" } });
+    fireEvent.blur(tas[0]);
+    expect(setImageBindings).toHaveBeenCalledWith("character", "char-2", [
+      { path: "refs/a.png", voice_path: "v.wav", bio: "改过的人设", prompt: "", time_hint: "" },
+    ]);
+    // 独立形象的音色清除 → 绑定条目 voice_path 置空（不动实体级默认）。
+    const clears = screen.getAllByText("删除");
+    fireEvent.click(clears[0]);
+    expect(setImageBindings).toHaveBeenCalledWith("character", "char-2", [
+      { path: "refs/a.png", voice_path: "", bio: "形象一人设", prompt: "", time_hint: "" },
+    ]);
+    // 点回「跟随」→ 条目移除（回跟随默认）。
+    const aSeg = document.querySelectorAll(".pdetail-face")[0].querySelectorAll(".pdetail-seg-btn");
+    expect(aSeg[1].classList.contains("is-active")).toBe(true);
+    fireEvent.click(aSeg[0]);
+    expect(setImageBindings).toHaveBeenCalledWith("character", "char-2", []);
+    // 跟随形象的清除指向实体级默认（setVoice），不走绑定。
+    fireEvent.click(clears[1]);
+    expect(setVoice).toHaveBeenCalledWith("char-2", "");
+    expect(setImageBindings).toHaveBeenCalledTimes(3);
+  });
+
+  it("默认区编辑：人设失焦路由 saveProfile（Shell 按类保留其它字段落库）", () => {
+    const saveProfile = vi.fn();
+    render(
+      <ProjectDetailWindow
+        target={{ kind: "info", group: "character", sourceKey: "char:char-2" }}
+        ops={makeOps({ saveProfile, characters: [{ ...baseCharacter, reference_paths: "[]" }] })}
+      />,
+    );
+    const tas = [...document.querySelectorAll(".pdetail-default textarea")] as HTMLTextAreaElement[];
+    expect(tas.length).toBe(2);
+    expect(tas[0].value).toBe("沉稳寡言的老周");
+    fireEvent.change(tas[0], { target: { value: "新默认人设" } });
+    fireEvent.blur(tas[0]);
+    expect(saveProfile).toHaveBeenCalledWith("character", "char-2", "新默认人设", "");
+  });
+
+  it("场景形象卡：reference_paths 数组多图全展示，旧单张 ref_path 并入；无音色行只有人设/提示词", () => {
     const setReferences = vi.fn();
     render(
       <ProjectDetailWindow
@@ -228,8 +301,9 @@ describe("DetailWindow", () => {
         })}
       />,
     );
-    // 旧主图并入首 + 数组两张 = 3 张全展示。
-    expect(document.querySelectorAll(".pdetail-refgrid .pdetail-refcard-img").length).toBe(3);
+    // 旧主图并入首 + 数组两张 = 3 张形象卡全展示（场景无音色行）。
+    expect(document.querySelectorAll(".pdetail-face").length).toBe(3);
+    expect(document.querySelectorAll(".pdetail-face .pdetail-voice").length).toBe(0);
     const removeButtons = screen.getAllByText("移除");
     fireEvent.click(removeButtons[2]);
     expect(setReferences).toHaveBeenCalledWith("location", "loc-9", ["refs/main.png", "refs/2.png"]);

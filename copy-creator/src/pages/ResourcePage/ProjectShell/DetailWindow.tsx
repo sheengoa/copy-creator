@@ -4,6 +4,7 @@ import { useTranslation } from "react-i18next";
 import { Icons } from "../../../components/Icons";
 import type {
   EpisodeOverview,
+  ImageBinding,
   ProjectCharacter,
   ProjectLocation,
   ProjectNodeLink,
@@ -53,6 +54,10 @@ export interface DetailWindowOps {
   setAvatar(character: ProjectCharacter, refPath: string): void;
   /** 三库参考图集整体覆写（详情窗添加/移除；kind: character|location|prop）。 */
   setReferences(kind: EntityPhKind, id: string, paths: string[]): void;
+  /** 每图绑定（形象卡方案 A）：整体覆写三库 image_bindings（独立开关/音色/人设/提示词提交）。 */
+  setImageBindings(kind: EntityPhKind, id: string, bindings: ImageBinding[]): void;
+  /** 实体级默认人设/提示词（形象卡默认区编辑；保留各自其它字段落库）。 */
+  saveProfile(kind: EntityPhKind, id: string, bio: string, prompt: string): void;
   /** 窗内跳转其它详情（输入卡点击展开：实体/组/片段窗互跳）。 */
   openDetail(target: DetailTarget): void;
   /** 装入占位实体（关联到集 + 暂存线转正 + 占位移除）。 */
@@ -158,68 +163,135 @@ export function DetailSection({ label, count, extra, children, foldable, default
   );
 }
 
-/** 参考图卡片网格：1:1 复刻旧 ProjectNodeDetailDialog 的 pc-detail-card
- *  形态（16:10 预览框 contain 完整展示 + 卡底常驻动作行，auto-fill
- *  minmax(215px,1fr) 多列网格）——素材天然多张，网格规整铺开（用户定案
- *  还原旧实现展示）。30/批懒加载滚动续载保留。 */
-function RefGrid({ paths, libraryRoot, onSetAvatar, removableOf, onRemove }: {
-  paths: string[];
+/** 形象卡（方案 A，用户定案「一张图片对应一份数据」）：一图一卡，图与
+ *  该形象的数据同框——角色=音色/人设/提示词；场景=时段/描述/提示词；
+ *  道具=描述/提示词。跟随默认时字段镜像默认值且不可编辑；「跟随/独立」
+ *  白卡胶囊切换（用户指定样式）打开即预填默认、逐字段编辑（落库整体覆
+ *  写 image_bindings，空字段=跟随默认）；音色行操作指向当前生效目标：
+ *  跟随→实体级 setVoice，独立→绑定条目。图区=定框 16:10 + 保比例
+ *  contain + 上下虚影（用户定案「窗口里规矩框，比例不裁」）。编辑本地
+ *  镜像 + 失焦提交（防光标跳、防逐键落库）。 */
+function FaceCard({ path, group, isAvatar, binding, defProfile, removable, libraryRoot, onSetAvatar, onRemove, onCommit, onPickVoiceFace, onClearVoiceFace }: {
+  path: string;
+  group: EntityPhKind;
+  isAvatar: boolean;
+  /** null = 跟随默认（无绑定条目）。 */
+  binding: ImageBinding | null;
+  defProfile: { voice_path: string; bio: string; prompt: string; time_hint: string };
+  removable: boolean;
   libraryRoot: string;
-  onSetAvatar?(refPath: string): void;
-  /** 哪些图可移除（头像并入展示的行不可移除，只作形象展示）。 */
-  removableOf?(refPath: string): boolean;
-  onRemove?(refPath: string): void;
+  onSetAvatar(): void;
+  onRemove(): void;
+  /** 提交该形象的绑定：null = 移除条目回到跟随默认。 */
+  onCommit(next: ImageBinding | null): void;
+  /** 音色更换（跟随→写实体级；独立→写绑定条目）。 */
+  onPickVoiceFace(): void;
+  /** 音色清除（跟随→清实体级；独立→清绑定条目）。 */
+  onClearVoiceFace(): void;
 }) {
   const { t } = useTranslation();
-  const [loaded, setLoaded] = useState(REF_PAGE);
-  const gridRef = useRef<HTMLDivElement | null>(null);
-  // 懒加载：滚动到底自动续一批（重置列表时回首批）。
-  useEffect(() => setLoaded(REF_PAGE), [paths]);
-  const onScroll = () => {
-    const el = gridRef.current;
-    if (!el) return;
-    if (el.scrollTop + el.clientHeight >= el.scrollHeight - 24) {
-      setLoaded((v) => (v < paths.length ? Math.min(v + REF_PAGE, paths.length) : v));
-    }
+  const ind = !!binding;
+  const dv = defProfile.voice_path;
+  const db = defProfile.bio;
+  const dp = defProfile.prompt;
+  const dt = defProfile.time_hint;
+  const bv = binding?.voice_path ?? "";
+  const bb = binding?.bio ?? "";
+  const bp = binding?.prompt ?? "";
+  const bt = binding?.time_hint ?? "";
+  // 本地镜像：输入中不回写（防光标跳），失焦才提交。
+  const [voiceText, setVoiceText] = useState(ind ? bv : dv);
+  const [bioText, setBioText] = useState(ind ? bb : db);
+  const [promptText, setPromptText] = useState(ind ? bp : dp);
+  const [timeText, setTimeText] = useState(ind ? bt : dt);
+  useEffect(() => {
+    setVoiceText(ind ? bv : dv);
+    setBioText(ind ? bb : db);
+    setPromptText(ind ? bp : dp);
+    setTimeText(ind ? bt : dt);
+  }, [path, ind, bv, bb, bp, bt, dv, db, dp, dt]);
+  const fileName = path.split(/[\\/]/).pop() ?? path;
+  const commitFields = () => {
+    if (binding) onCommit({ path, voice_path: voiceText, bio: bioText, prompt: promptText, time_hint: timeText });
   };
-  if (paths.length === 0) {
-    return <div className="pdetail-empty">{Icons.image}{t("project.canvas.noRefImage")}</div>;
-  }
+  const bioLabel = group === "character" ? t("project.detail.bioLabel") : t("project.detail.describeLabel");
   return (
-    <div className="pdetail-refgrid-wrap">
-      <div className="pdetail-refgrid" ref={gridRef} onScroll={onScroll}>
-        {paths.slice(0, loaded).map((refPath, i) => {
-          const removable = removableOf?.(refPath) ?? false;
-          const fileName = refPath.split(/[\\/]/).pop() ?? refPath;
-          return (
-            <div key={`${refPath}-${i}`} className="pdetail-refcard">
-              <div className="pdetail-refcard-view">
-                <ResourceImage path={joinLibraryPath(libraryRoot, refPath)} alt={fileName} className="pdetail-refcard-img" />
-              </div>
-              <div className="pdetail-refcard-meta">
-                <b className="pdetail-refcard-name" title={fileName}>{fileName}</b>
-              </div>
-              {(onSetAvatar || (removable && onRemove)) && (
-                <div className="pdetail-refcard-ops">
-                  {onSetAvatar && (
-                    <button type="button" className="pdetail-refact" onClick={() => onSetAvatar(refPath)}>
-                      {t("project.detail.setAvatar")}
-                    </button>
-                  )}
-                  {removable && onRemove && (
-                    <button type="button" className="pdetail-refact is-danger" onClick={() => onRemove(refPath)}>
-                      {t("project.detail.refRemove")}
-                    </button>
-                  )}
-                </div>
-              )}
-            </div>
-          );
-        })}
+    <div className={`pdetail-face${isAvatar ? " is-avatar" : ""}`}>
+      <div className="pdetail-face-img">
+        <ResourceImage path={joinLibraryPath(libraryRoot, path)} alt="" className="pdetail-face-ghost" />
+        <ResourceImage path={joinLibraryPath(libraryRoot, path)} alt={fileName} className="pdetail-face-picture" />
       </div>
-      {loaded < paths.length && (
-        <div className="pdetail-more">{t("project.detail.loadMore", { rest: paths.length - loaded })}</div>
-      )}
+      <div className="pdetail-face-main">
+        <div className="pdetail-face-top">
+          <b className="pdetail-face-name" title={fileName}>{fileName}</b>
+          {isAvatar && <span className="pdetail-badge">{t("project.detail.avatarBadge")}</span>}
+          {/* 跟随/独立：白卡胶囊两段切换（用户指定样式） */}
+          <div className="pdetail-seg" role="group" aria-label={t("project.detail.independentToggle")}>
+            <button
+              type="button"
+              className={`pdetail-seg-btn${ind ? "" : " is-active"}`}
+              onClick={() => ind && onCommit(null)}
+            >
+              {t("project.detail.segFollow")}
+            </button>
+            <button
+              type="button"
+              className={`pdetail-seg-btn${ind ? " is-active" : ""}`}
+              onClick={() => !ind && onCommit({ path, voice_path: dv, bio: db, prompt: dp, time_hint: dt })}
+            >
+              {t("project.detail.segIndependent")}
+            </button>
+          </div>
+        </div>
+        {group === "character" && (
+          <VoiceRow voicePath={ind ? voiceText : dv} onPick={onPickVoiceFace} onClear={onClearVoiceFace} />
+        )}
+        {group === "location" && (
+          <div className="pdetail-f">
+            <span className="pdetail-f-label">{t("project.detail.timeLabel")}</span>
+            <input
+              className="pdetail-f-input"
+              value={timeText}
+              disabled={!ind}
+              placeholder={ind ? t("project.detail.timePlaceholder") : t("project.detail.followHint")}
+              onChange={(e) => setTimeText(e.target.value)}
+              onBlur={commitFields}
+            />
+          </div>
+        )}
+        <div className="pdetail-f">
+          <span className="pdetail-f-label">{bioLabel}</span>
+          <textarea
+            rows={2}
+            value={bioText}
+            disabled={!ind}
+            placeholder={ind ? t("project.detail.bioPlaceholder") : t("project.detail.followHint")}
+            onChange={(e) => setBioText(e.target.value)}
+            onBlur={commitFields}
+          />
+        </div>
+        <div className="pdetail-f">
+          <span className="pdetail-f-label">{t("project.detail.promptLabel")}</span>
+          <textarea
+            rows={2}
+            value={promptText}
+            disabled={!ind}
+            placeholder={ind ? t("project.detail.promptPlaceholder") : t("project.detail.followHint")}
+            onChange={(e) => setPromptText(e.target.value)}
+            onBlur={commitFields}
+          />
+        </div>
+        <div className="pdetail-face-foot">
+          {group === "character" && (isAvatar ? (
+            <button type="button" className="pdetail-voice-act" disabled>{t("project.detail.wasAvatar")}</button>
+          ) : (
+            <button type="button" className="pdetail-voice-act" onClick={onSetAvatar}>{t("project.detail.setAvatar")}</button>
+          ))}
+          {removable && (
+            <button type="button" className="pdetail-voice-act is-danger" onClick={onRemove}>{t("project.detail.refRemove")}</button>
+          )}
+        </div>
+      </div>
     </div>
   );
 }
@@ -250,7 +322,52 @@ function VoiceRow({ voicePath, onPick, onClear }: {
   );
 }
 
-/** 实体详情体（角色/场景/道具）：参考图网格 + 音色[角色] + 人设 + 统计。 */
+/** 默认区人设/提示词（实体级列编辑，方案 A 的兜底值）：本地镜像 + 失焦
+ *  提交（saveProfile 保留各自其它字段落库）。 */
+function DefaultProfileFields({ initialBio, initialPrompt, onCommit }: {
+  initialBio: string;
+  initialPrompt: string;
+  onCommit(bio: string, prompt: string): void;
+}) {
+  const { t } = useTranslation();
+  const [bio, setBio] = useState(initialBio);
+  const [prompt, setPrompt] = useState(initialPrompt);
+  useEffect(() => {
+    setBio(initialBio);
+    setPrompt(initialPrompt);
+  }, [initialBio, initialPrompt]);
+  return (
+    <div className="pdetail-default">
+      <div className="pdetail-f">
+        <span className="pdetail-f-label">{t("project.detail.bioLabel")}</span>
+        <textarea
+          rows={2}
+          value={bio}
+          placeholder={t("project.detail.bioPlaceholder")}
+          onChange={(e) => setBio(e.target.value)}
+          onBlur={() => {
+            if (bio !== initialBio) onCommit(bio, prompt);
+          }}
+        />
+      </div>
+      <div className="pdetail-f">
+        <span className="pdetail-f-label">{t("project.detail.promptLabel")}</span>
+        <textarea
+          rows={2}
+          value={prompt}
+          placeholder={t("project.detail.promptPlaceholder")}
+          onChange={(e) => setPrompt(e.target.value)}
+          onBlur={() => {
+            if (prompt !== initialPrompt) onCommit(bio, prompt);
+          }}
+        />
+      </div>
+    </div>
+  );
+}
+
+/** 实体详情体（角色/场景/道具）：形象分组卡（一图 = 音色[角色]/人设/
+ *  提示词同框，方案 A）+ 默认区（未绑定形象的兜底值）+ 统计。 */
 function EntityDetail({ group, sourceKey, ops }: { group: EntityPhKind; sourceKey: string; ops: DetailWindowOps }) {
   const { t } = useTranslation();
   const { overview, characters, locations, props } = ops;
@@ -286,6 +403,62 @@ function EntityDetail({ group, sourceKey, ops }: { group: EntityPhKind; sourceKe
     if (avatarPath && !list.includes(avatarPath)) list.unshift(avatarPath);
     return list;
   }, [refPaths, avatarPath]);
+  // 每图绑定（形象卡方案 A，用户定案「一张图片对应一份数据」）：path →
+  // 独立值；未绑定 path 或字段为空 = 跟随实体级默认。
+  const bindingsMap = useMemo(() => {
+    const map: Record<string, ImageBinding> = {};
+    try {
+      const parsed = JSON.parse(entity?.image_bindings ?? "[]") as unknown;
+      if (Array.isArray(parsed)) {
+        for (const item of parsed) {
+          const p = (item as { path?: unknown } | null)?.path;
+          if (item && typeof item === "object" && typeof p === "string") {
+            const b = item as Partial<ImageBinding>;
+            map[p] = { path: p, voice_path: b.voice_path ?? "", bio: b.bio ?? "", prompt: b.prompt ?? "", time_hint: b.time_hint ?? "" };
+          }
+        }
+      }
+    } catch {
+      // 非法 JSON：按无绑定处理（全部跟随默认）。
+    }
+    return map;
+  }, [entity]);
+  // 绑定提交：以 gridPaths 顺序重建全量列表（该形象 null = 移除条目回跟
+  // 随），整体覆写 image_bindings。
+  const commitBinding = (facePath: string, next: ImageBinding | null) => {
+    const list = gridPaths.flatMap((p) => {
+      if (p === facePath) return next ? [next] : [];
+      const b = bindingsMap[p];
+      return b ? [b] : [];
+    });
+    ops.setImageBindings(group, entityId, list);
+  };
+  // 形象卡音色操作目标：跟随默认→实体级 setVoice；独立→该绑定条目。
+  const pickVoiceFor = (facePath: string, binding: ImageBinding | null) => {
+    void (async () => {
+      try {
+        const { invoke } = await import("@tauri-apps/api/core");
+        const picked = await invoke<{ path: string }>("canvas_pick_media_file", { extensions: ["wav", "mp3", "flac", "ogg"] });
+        if (binding) commitBinding(facePath, { ...binding, voice_path: picked.path });
+        else ops.setVoice(entityId, picked.path);
+      } catch {
+        // 用户取消或 mock 环境无后端：静默。
+      }
+    })();
+  };
+  const clearVoiceFor = (facePath: string, binding: ImageBinding | null) => {
+    if (binding) commitBinding(facePath, { ...binding, voice_path: "" });
+    else ops.setVoice(entityId, "");
+  };
+  const defProfile = {
+    voice_path: voice,
+    bio: entity?.bio ?? "",
+    prompt: (entity as { prompt?: string } | undefined)?.prompt ?? "",
+    time_hint: group === "location" ? ((entity as ProjectLocation | undefined)?.time_hint ?? "") : "",
+  };
+  // 30/批分页（形象卡含编辑字段比纯图重，点「显示剩余」续载一批）。
+  const [faceLimit, setFaceLimit] = useState(REF_PAGE);
+  useEffect(() => setFaceLimit(REF_PAGE), [entityId, group]);
   // 参考图管理：添加（库选/导入，浮层保持连续加）与逐张移除，整体覆写
   // reference_paths（project_set_references）。
   const [pickerOpen, setPickerOpen] = useState(false);
@@ -301,17 +474,6 @@ function EntityDetail({ group, sourceKey, ops }: { group: EntityPhKind; sourceKe
         : "project.canvas.typeProp",
   );
   const accent = group === "character" ? "#f472b6" : group === "location" ? "#34d399" : "#fbbf24";
-  const pickVoice = () => {
-    void (async () => {
-      try {
-        const { invoke } = await import("@tauri-apps/api/core");
-        const picked = await invoke<{ path: string }>("canvas_pick_media_file", { extensions: ["wav", "mp3", "flac", "ogg"] });
-        ops.setVoice(entityId, picked.path);
-      } catch {
-        // 用户取消或 mock 环境无后端：静默。
-      }
-    })();
-  };
   return (
     <DetailWindow
       title={<><span className="pdetail-kind-label">{kindLabel}</span> · {name}</>}
@@ -320,7 +482,7 @@ function EntityDetail({ group, sourceKey, ops }: { group: EntityPhKind; sourceKe
       back={ops.backTarget ? { onBack: ops.goBack } : undefined}
     >
       <DetailSection
-        label={t("project.detail.refs")}
+        label={t("project.detail.faces")}
         count={t("project.detail.refCount", { n: gridPaths.length })}
         extra={(
           <button type="button" className="pdetail-ref-add" onClick={() => setPickerOpen(true)}>
@@ -328,13 +490,30 @@ function EntityDetail({ group, sourceKey, ops }: { group: EntityPhKind; sourceKe
           </button>
         )}
       >
-        <RefGrid
-          paths={gridPaths}
-          libraryRoot={ops.libraryRoot}
-          onSetAvatar={group === "character" ? (ref) => entity && ops.setAvatar(entity as ProjectCharacter, ref) : undefined}
-          removableOf={(p) => refPaths.includes(p)}
-          onRemove={removeRef}
-        />
+        <div className="pdetail-facelist">
+          {gridPaths.slice(0, faceLimit).map((path) => (
+            <FaceCard
+              key={path}
+              path={path}
+              group={group}
+              isAvatar={group === "character" && path === avatarPath && avatarPath !== ""}
+              binding={bindingsMap[path] ?? null}
+              defProfile={defProfile}
+              removable={refPaths.includes(path)}
+              libraryRoot={ops.libraryRoot}
+              onSetAvatar={() => entity && ops.setAvatar(entity as ProjectCharacter, path)}
+              onRemove={() => removeRef(path)}
+              onCommit={(next) => commitBinding(path, next)}
+              onPickVoiceFace={() => pickVoiceFor(path, bindingsMap[path] ?? null)}
+              onClearVoiceFace={() => clearVoiceFor(path, bindingsMap[path] ?? null)}
+            />
+          ))}
+          {gridPaths.length > faceLimit && (
+            <button type="button" className="pdetail-more" onClick={() => setFaceLimit((n) => n + REF_PAGE)}>
+              {t("project.detail.loadMore", { rest: gridPaths.length - faceLimit })}
+            </button>
+          )}
+        </div>
       </DetailSection>
       {pickerOpen && (
         <ProjectFilePickerDialog
@@ -351,18 +530,33 @@ function EntityDetail({ group, sourceKey, ops }: { group: EntityPhKind; sourceKe
           }}
         />
       )}
-      {group === "character" && (
-        <DetailSection label={t("project.detail.voice")} count={voice ? "1" : "0"}>
-          <VoiceRow
-            voicePath={voice}
-            onPick={pickVoice}
-            onClear={() => ops.setVoice(entityId, "")}
-          />
-        </DetailSection>
-      )}
-      <DetailSection label={t("project.detail.profile")}>
-        <p className="pdetail-text">{(entity?.bio ?? "") || t("project.detail.empty")}</p>
-        {(entity?.prompt ?? "") && <p className="pdetail-text pdetail-text-prompt">{(entity as { prompt?: string }).prompt}</p>}
+      <DetailSection label={t("project.detail.defaultSection", { kind: kindLabel })}>
+        <p className="pdetail-note">{t("project.detail.defaultHint")}</p>
+        {group === "character" && (
+          <div className="pdetail-f-gap">
+            <VoiceRow
+              voicePath={voice}
+              onPick={() => {
+                void (async () => {
+                  try {
+                    const { invoke } = await import("@tauri-apps/api/core");
+                    const picked = await invoke<{ path: string }>("canvas_pick_media_file", { extensions: ["wav", "mp3", "flac", "ogg"] });
+                    ops.setVoice(entityId, picked.path);
+                  } catch {
+                    // 用户取消或 mock 环境无后端：静默。
+                  }
+                })();
+              }}
+              onClear={() => ops.setVoice(entityId, "")}
+            />
+          </div>
+        )}
+        <DefaultProfileFields
+          key={`${group}-${entityId}`}
+          initialBio={entity?.bio ?? ""}
+          initialPrompt={(entity as { prompt?: string } | undefined)?.prompt ?? ""}
+          onCommit={(bio, prompt) => ops.saveProfile(group, entityId, bio, prompt)}
+        />
       </DetailSection>
       <DetailSection label={t("project.detail.stats")}>
         <p className="pdetail-text">
@@ -534,7 +728,10 @@ function SegmentInputs({ segmentId, ops }: { segmentId: string; ops: DetailWindo
                     aria-label={c.label}
                   >
                     {c.path ? (
-                      <ResourceFileImage path={joinLibraryPath(ops.libraryRoot, c.path)} alt="" className="pdetail-incard-img" />
+                      <>
+                        <ResourceFileImage path={joinLibraryPath(ops.libraryRoot, c.path)} alt="" className="pdetail-incard-ghost" />
+                        <ResourceFileImage path={joinLibraryPath(ops.libraryRoot, c.path)} alt="" className="pdetail-incard-img" />
+                      </>
                     ) : (
                       <span className="pdetail-incard-fallback">{c.isText ? Icons.file : Icons.image}</span>
                     )}
