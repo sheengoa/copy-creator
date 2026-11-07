@@ -18,7 +18,13 @@
    形态同框），留白透节点表面。 */
 .fc-root .fc-vt-screen {
   position: relative;
-  width: min(100%, var(--media-fitw, 224px));
+  /* 横版视频的 fitw（330×16/9≈587px）会超过监视器可用宽：min() 的
+     100% 一旦吃满整行，flex 行内 flex:none 的舞台不退让，侧栏
+     （flex:1 min-width:0）被压成 0 宽——选区参数与执行按钮全部不可见
+     （2026-11-07 用户实测横版视频挤压）。恒为侧栏预留 132px（含 gap
+     12px，恰为 min 宽 380 节点的原侧栏宽 120px），画面宽度上限取
+     min(预留后可用宽, fitw)；竖版 fitw 更窄不受影响。 */
+  width: min(calc(100% - 132px), var(--media-fitw, 224px));
   aspect-ratio: var(--media-ar, 16 / 9);
   flex: none;
   border-radius: 10px;
@@ -337,11 +343,13 @@
 .fc-root .pc-node.pc-resized .fc-vt-screen {
   /* 舞台本身即等比盒：解除基础态宽度帽（width:auto），高度被 flex 行
      拉伸吃满监视器区后宽度随 --media-ar 自动推导——节点拉高画面跟着
-     放大（盒=画面盒，零留白）。max-width 保底防横版视频把侧栏挤没。 */
+     放大（盒=画面盒，零留白）。max-width 保底防横版视频把侧栏挤没：
+     同基础态恒预留侧栏 132px（100% 会吃满整行，横版侧栏 0 宽，
+     2026-11-07 用户实测；超限后画面盒 contain 居中留白不变形）。 */
   width: auto;
   min-width: 0;
   min-height: 0;
-  max-width: 100%;
+  max-width: calc(100% - 132px);
 }
 
 /* 画面：舞台内等比盒（与图像侧同一公式），黑底移除；播放条仍悬浮
