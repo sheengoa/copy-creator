@@ -312,6 +312,18 @@ export const useCanvasStore = create<CanvasState>((set, get) => ({
     try {
       const canvases = await invoke<CanvasSummary[]>("canvas_list");
       set({ canvases });
+      // 选中态守护：列表有画布但当前没打开任何一张（应用重启后内存选中
+      // 态为 null、删除当前画布后置空、选中 id 已不在列表=悬空）时，自
+      // 动打开列表第一条（顶栏第一颗 chip，列表按最近更新在前=最近使用
+      // 的画布）。否则「还没有画布」空态在还有画布时照常显示，诱导用户
+      // 新建导致画布积压（2026-11-07 用户反馈）。选中态正常不触发。
+      const { activeCanvasId } = get();
+      if (canvases.length > 0 && !canvases.some((c) => c.id === activeCanvasId)) {
+        // 乐观占位选中 id：主区立即按第一条渲染，图谱随 openCanvas 到达，
+        // 空态一帧都不闪；canvas_get 失败时停留在空画布（日志有错误）。
+        set({ activeCanvasId: canvases[0].id });
+        void get().openCanvas(canvases[0].id);
+      }
     } catch (e) {
       console.error("Failed to load canvases:", e);
     }

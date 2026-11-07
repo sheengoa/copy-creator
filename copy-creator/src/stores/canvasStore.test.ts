@@ -86,7 +86,12 @@ describe("canvasStore 画布域 wiring", () => {
 
   it("loadCanvases 拉取列表", async () => {
     const list = [makeSummary(), makeSummary({ id: "c2", name: "画布二" })];
-    invokeMock.mockResolvedValue(list);
+    invokeMock.mockImplementation((cmd: string) => {
+      if (cmd === "canvas_list") return Promise.resolve(list);
+      // 选中态守护会自动打开第一条，canvas_get 需返回合法图谱
+      if (cmd === "canvas_get") return Promise.resolve(makeGraph("c1"));
+      return Promise.resolve(undefined);
+    });
 
     await useCanvasStore.getState().loadCanvases();
 
@@ -126,6 +131,8 @@ describe("canvasStore 画布域 wiring", () => {
     invokeMock.mockImplementation((cmd: string) => {
       if (cmd === "canvas_create") return Promise.resolve(created);
       if (cmd === "canvas_list") return Promise.resolve([created]);
+      // 选中态守护在 createCanvas 内部 loadCanvases 时会先开第一条
+      if (cmd === "canvas_get") return Promise.resolve(makeGraph("new"));
       return Promise.resolve(undefined);
     });
 
@@ -496,7 +503,11 @@ describe("canvasStore 画布域 wiring", () => {
         b: { canvasId: "c2", requestId: "r2", total: 1, received: 0, errors: 0, previews: {} },
       },
     });
-    invokeMock.mockResolvedValue(undefined);
+    invokeMock.mockImplementation((cmd: string) => {
+      // 删除后列表已空：选中态守护不触发
+      if (cmd === "canvas_list") return Promise.resolve([]);
+      return Promise.resolve(undefined);
+    });
 
     await useCanvasStore.getState().deleteCanvas("c1");
 
@@ -505,5 +516,86 @@ describe("canvasStore 画布域 wiring", () => {
     expect(useCanvasStore.getState().genProgress).toEqual({
       b: { canvasId: "c2", requestId: "r2", total: 1, received: 0, errors: 0, previews: {} },
     });
+  });
+
+  // ── 选中态守护：列表有画布但当前没打开任何一张时自动开第一条 ──
+  // 否则「还没有画布」空态在还有画布时照常显示，诱导用户新建导致积压。
+
+  const makeGraph = (id: string): CanvasGraph => ({
+    canvas: {
+      id,
+      name: `画布 ${id}`,
+      viewport_x: 0,
+      viewport_y: 0,
+      viewport_k: 1,
+      groups: [],
+      created_at: "",
+      updated_at: "",
+    },
+    nodes: [],
+    connections: [],
+  });
+
+  const routeList = (list: CanvasSummary[]) => {
+    invokeMock.mockImplementation((cmd: string) => {
+      if (cmd === "canvas_list") return Promise.resolve(list);
+      if (cmd === "canvas_get") return Promise.resolve(makeGraph(list[0].id));
+      return Promise.resolve(undefined);
+    });
+  };
+
+  it("loadCanvases 选中态守护：未选中时自动打开第一条", async () => {
+    routeList([makeSummary(), makeSummary({ id: "c2", name: "画布二" })]);
+
+    await useCanvasStore.getState().loadCanvases();
+
+    expect(useCanvasStore.getState().activeCanvasId).toBe("c1");
+    expect(invokeMock).toHaveBeenCalledWith("canvas_get", { canvasId: "c1" });
+  });
+
+  it("loadCanvases 选中态守护：选中态正常不重复打开", async () => {
+    useCanvasStore.setState({ activeCanvasId: "c2" });
+    routeList([makeSummary(), makeSummary({ id: "c2", name: "画布二" })]);
+
+    await useCanvasStore.getState().loadCanvases();
+
+    expect(invokeMock).not.toHaveBeenCalledWith("canvas_get", expect.anything());
+    expect(useCanvasStore.getState().activeCanvasId).toBe("c2");
+  });
+
+  it("loadCanvases 选中态守护：选中 id 悬空（已被删）改开第一条", async () => {
+    useCanvasStore.setState({ activeCanvasId: "ghost" });
+    routeList([makeSummary()]);
+
+    await useCanvasStore.getState().loadCanvases();
+
+    expect(useCanvasStore.getState().activeCanvasId).toBe("c1");
+    expect(invokeMock).toHaveBeenCalledWith("canvas_get", { canvasId: "c1" });
+  });
+
+  it("loadCanvases 选中态守护：列表为空不触发保持空态", async () => {
+    routeList([]);
+
+    await useCanvasStore.getState().loadCanvases();
+
+    expect(useCanvasStore.getState().activeCanvasId).toBeNull();
+    expect(invokeMock).not.toHaveBeenCalledWith("canvas_get", expect.anything());
+  });
+
+  it("deleteCanvas 删除当前画布后自动切到剩余第一条", async () => {
+    useCanvasStore.setState({
+      activeCanvasId: "c1",
+      canvases: [makeSummary(), makeSummary({ id: "c2", name: "画布二" })],
+    });
+    invokeMock.mockImplementation((cmd: string) => {
+      if (cmd === "canvas_list") return Promise.resolve([makeSummary({ id: "c2", name: "画布二" })]);
+      if (cmd === "canvas_get") return Promise.resolve(makeGraph("c2"));
+      return Promise.resolve(undefined);
+    });
+
+    await useCanvasStore.getState().deleteCanvas("c1");
+
+    expect(useCanvasStore.getState().activeCanvasId).toBe("c2");
+    expect(invokeMock).toHaveBeenCalledWith("canvas_get", { canvasId: "c2" });
   });
 });
