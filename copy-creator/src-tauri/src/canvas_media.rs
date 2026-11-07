@@ -227,7 +227,7 @@ fn frame_extract_attempt(
     pre_args: &[&str],
     single: bool,
 ) -> Result<(), String> {
-    let mut cmd = spawn_ffmpeg(ffmpeg);
+    let mut cmd = spawn_ffmpeg(&ffmpeg);
     cmd.args(["-y", "-nostdin", "-hide_banner", "-loglevel", "error"]);
     cmd.args(pre_args);
     cmd.arg("-i").arg(path);
@@ -235,6 +235,12 @@ fn frame_extract_attempt(
     if single {
         cmd.arg("-frames:v").arg("1");
     }
+    // 产物帧走 JPEG q:v 2（2026-11-08 执行后平移卡顿）：帧产物此前是无损
+    // PNG，4K 视频一帧 10-40MB，WebView 端首次显示的解码 CPU 数秒——弱
+    // 机器上「执行完的几秒平移卡顿」与之吻合。JPEG 高画质文件/解码成本
+    // 降一个量级，源是视频帧（本身有损编码）视觉无差；PNG 输出忽略 -q:v
+    // 无副作用。
+    cmd.args(["-q:v", "2"]);
     cmd.arg(out);
     cmd.stdin(std::process::Stdio::null());
     cmd.stdout(std::process::Stdio::null());
@@ -309,7 +315,7 @@ pub async fn canvas_extract_video_frame(
     let out_dir = crate::db::get_storage_dir(&app).join("canvas-gen");
     tokio::task::spawn_blocking(move || -> Result<serde_json::Value, String> {
         std::fs::create_dir_all(&out_dir).map_err(|e| format!("创建产物目录失败：{e}"))?;
-        let out = out_dir.join(format!("{}-{which}.png", uuid::Uuid::new_v4()));
+        let out = out_dir.join(format!("{}-{which}.jpg", uuid::Uuid::new_v4()));
         if which == "last" {
             extract_tail_frame(&ffmpeg, std::path::Path::new(&path), &out)?;
         } else {
@@ -563,7 +569,7 @@ pub async fn canvas_seek_video_frame(
     let out_dir = crate::db::get_storage_dir(&app).join("canvas-gen");
     tokio::task::spawn_blocking(move || -> Result<serde_json::Value, String> {
         std::fs::create_dir_all(&out_dir).map_err(|e| format!("创建产物目录失败：{e}"))?;
-        let out = out_dir.join(format!("{}-seek.png", uuid::Uuid::new_v4()));
+        let out = out_dir.join(format!("{}-seek.jpg", uuid::Uuid::new_v4()));
         let secs_str = format!("{secs:.3}");
         if secs > 0.0 {
             frame_extract_attempt(&ffmpeg, std::path::Path::new(&path), &out, &["-ss", secs_str.as_str()], true)
