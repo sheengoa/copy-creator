@@ -158,108 +158,95 @@ describe("DetailWindow", () => {
     ]);
   });
 
-  it("当前视角添加形象：双来源面板（已有形象点选即加 + 库条目收形象进节点），留在当前不切走", () => {
-    const addNodeFace = vi.fn();
-    render(
-      <ProjectDetailWindow
-        target={{ kind: "info", group: "character", sourceKey: "char:char-2", nodeKey: "eph:p1" }}
-        ops={makeOps({
-          addNodeFace,
-          characters: [
-            { ...baseCharacter, avatar_path: "avatars/k.png", reference_paths: JSON.stringify(["refs/a.png"]) },
-            { ...baseCharacter, id: "char-9", name: "卡哇伊", bio: "", avatar_path: "avatars/kww.png", reference_paths: "[]" },
-          ],
-        })}
-      />,
-    );
-    // 当前视角：头像兜底 1 张；点「添加形象」→ 双来源面板：段 1 列已有
-    // 未加入的 a.png（头像不列），段 2 列库条目（自身不列，列卡哇伊）。
-    fireEvent.click(screen.getByText("添加形象"));
-    const picker1 = document.querySelector(".pdetail-attach");
-    expect(picker1?.textContent).toContain("从该角色已有的形象中点选");
-    expect(picker1?.textContent).toContain("a.png");
-    expect(picker1?.textContent).not.toContain("k.png");
-    expect(picker1?.textContent).toContain("或从角色库挑一条");
-    expect(picker1?.textContent).toContain("卡哇伊");
-    expect(picker1?.textContent).not.toContain("老周");
-    // 段 1 点选 → addNodeFace 路由 + 面板关 + 视角仍「当前」（不切走）。
-    fireEvent.click(screen.getByText("a.png"));
-    expect(addNodeFace).toHaveBeenCalledWith("eph:p1", "refs/a.png");
-    expect(document.querySelector(".pdetail-attach")).toBeNull();
-    expect((screen.getByText("当前") as HTMLButtonElement).classList.contains("is-active")).toBe(true);
-    expect(screen.queryByText("本集全部角色")).toBeNull();
-  });
-
-  it("节点形象挑选面板排除已加入的：段 1 只列未加入的参考图", () => {
-    render(
-      <ProjectDetailWindow
-        target={{ kind: "info", group: "character", sourceKey: "char:char-2", nodeKey: "eph:p1" }}
-        ops={makeOps({
-          nodeFaces: { "eph:p1": ["refs/a.png"] },
-          characters: [{ ...baseCharacter, avatar_path: "avatars/k.png", reference_paths: JSON.stringify(["refs/a.png", "refs/b.png"]) }],
-        })}
-      />,
-    );
-    fireEvent.click(screen.getByText("添加形象"));
-    // refs/a.png 已在节点选用集 → 段 1 只列 refs/b.png。
-    const picker2 = document.querySelector(".pdetail-attach");
-    expect(picker2?.textContent).not.toContain("a.png");
-    expect(picker2?.textContent).toContain("b.png");
-  });
-
-  it("库条目点选三连：形象收进该角色（setReferences+setImageBindings）并同步加入本节点（addNodeFace）", () => {
+  it("当前视角添加形象：弹标准库面板，点条目纯挂载到本节点（不动库），留在当前", () => {
     const addNodeFace = vi.fn();
     const setReferences = vi.fn();
     const setImageBindings = vi.fn();
-    render(
-      <ProjectDetailWindow
-        target={{ kind: "info", group: "character", sourceKey: "char:char-2", nodeKey: "eph:p1" }}
-        ops={makeOps({
-          addNodeFace,
-          setReferences,
-          setImageBindings,
-          characters: [
-            { ...baseCharacter, avatar_path: "avatars/k.png", reference_paths: JSON.stringify(["refs/a.png"]) },
-            { ...baseCharacter, id: "char-9", name: "卡哇伊", bio: "卡哇伊人设", avatar_path: "avatars/kww.png", reference_paths: "[]", voice_path: "kww.wav" },
-          ],
-        })}
-      />,
-    );
-    fireEvent.click(screen.getByText("添加形象"));
-    // 段 2 点库条目「卡哇伊」→ 其头像成为本角色新形象（落库）并加入本节点。
-    fireEvent.click(screen.getByText("卡哇伊"));
-    expect(setReferences).toHaveBeenCalledWith("character", "char-2", ["refs/a.png", "avatars/kww.png"]);
-    // refs/a.png 无独立绑定（跟随默认）不落列表，仅新形象条目入库。
-    expect(setImageBindings).toHaveBeenCalledWith("character", "char-2", [
-      { path: "avatars/kww.png", name: "卡哇伊", voice_path: "kww.wav", bio: "卡哇伊人设", prompt: "", time_hint: "" },
-    ]);
-    expect(addNodeFace).toHaveBeenCalledWith("eph:p1", "avatars/kww.png");
+    const fixture = [
+      { ...baseCharacter, avatar_path: "avatars/k.png", reference_paths: "[]" },
+      { ...baseCharacter, id: "char-9", name: "卡哇伊", bio: "", avatar_path: "avatars/kww.png", reference_paths: "[]" },
+    ];
+    useProjectStore.setState({ characters: fixture });
+    try {
+      render(
+        <ProjectDetailWindow
+          target={{ kind: "info", group: "character", sourceKey: "char:char-2", nodeKey: "eph:p1" }}
+          ops={makeOps({ addNodeFace, setReferences, setImageBindings, characters: fixture })}
+        />,
+      );
+      // 当前视角：头像兜底 1 张；点「添加形象」→ 标准「选择角色形象」库面板。
+      fireEvent.click(screen.getByText("添加形象"));
+      expect(document.querySelector(".project-library-panel")).toBeTruthy();
+      expect(screen.getByText("选择角色形象")).toBeTruthy();
+      // 自身条目（头像已兜底显示）标「已关联」禁点；库内其它条目可点。
+      const selfRow = [...document.querySelectorAll(".project-library-card")].find((c) => c.textContent?.includes("老周"));
+      expect(selfRow?.querySelector(".project-library-tag")?.textContent).toBe("已关联");
+      fireEvent.click(selfRow as HTMLElement);
+      expect(addNodeFace).not.toHaveBeenCalled();
+      // 点库内其它条目「卡哇伊」→ 纯挂载：只 addNodeFace，库/角色数据零改动。
+      const kwwRow = [...document.querySelectorAll(".project-library-card")].find((c) => c.textContent?.includes("卡哇伊"));
+      fireEvent.click(kwwRow as HTMLElement);
+      expect(addNodeFace).toHaveBeenCalledWith("eph:p1", "avatars/kww.png");
+      expect(setReferences).not.toHaveBeenCalled();
+      expect(setImageBindings).not.toHaveBeenCalled();
+      // 面板关 + 视角仍「当前」（不切走）。
+      expect(document.querySelector(".project-library-panel")).toBeNull();
+      expect((screen.getByText("当前") as HTMLButtonElement).classList.contains("is-active")).toBe(true);
+      expect(screen.queryByText("本集全部角色")).toBeNull();
+    } finally {
+      useProjectStore.setState({ characters: [] });
+    }
   });
 
-  it("无形象图库条目在挑选面板禁点（行尾「无形象图」），点击不触发任何路由", () => {
+  it("已挂到本节点的条目标「已关联」不可重复挂", () => {
     const addNodeFace = vi.fn();
-    const setReferences = vi.fn();
-    render(
-      <ProjectDetailWindow
-        target={{ kind: "info", group: "character", sourceKey: "char:char-2", nodeKey: "eph:p1" }}
-        ops={makeOps({
-          addNodeFace,
-          setReferences,
-          characters: [
-            { ...baseCharacter, avatar_path: "avatars/k.png", reference_paths: "[]" },
-            { ...baseCharacter, id: "char-9", name: "无图角色", bio: "", avatar_path: "", reference_paths: "[]" },
-          ],
-        })}
-      />,
-    );
-    fireEvent.click(screen.getByText("添加形象"));
-    // 段 1 无可选（无参考图）不渲染；段 2 无图条目 disabled。
-    expect(screen.getByText("无形象图")).toBeTruthy();
-    fireEvent.click(screen.getByText("无图角色"));
-    expect(addNodeFace).not.toHaveBeenCalled();
-    expect(setReferences).not.toHaveBeenCalled();
-    // 面板保持打开。
-    expect(document.querySelector(".pdetail-attach")).toBeTruthy();
+    const fixture = [
+      { ...baseCharacter, avatar_path: "avatars/k.png", reference_paths: "[]" },
+      { ...baseCharacter, id: "char-9", name: "卡哇伊", bio: "", avatar_path: "avatars/kww.png", reference_paths: "[]" },
+    ];
+    useProjectStore.setState({ characters: fixture });
+    try {
+      render(
+        <ProjectDetailWindow
+          target={{ kind: "info", group: "character", sourceKey: "char:char-2", nodeKey: "eph:p1" }}
+          ops={makeOps({ addNodeFace, nodeFaces: { "eph:p1": ["avatars/kww.png"] }, characters: fixture })}
+        />,
+      );
+      fireEvent.click(screen.getByText("添加形象"));
+      // 卡哇伊条目头像已在节点挂载集 → 「已关联」禁点。
+      const kwwRow = [...document.querySelectorAll(".project-library-card")].find((c) => c.textContent?.includes("卡哇伊"));
+      expect(kwwRow?.querySelector(".project-library-tag")?.textContent).toBe("已关联");
+      fireEvent.click(kwwRow as HTMLElement);
+      expect(addNodeFace).not.toHaveBeenCalled();
+    } finally {
+      useProjectStore.setState({ characters: [] });
+    }
+  });
+
+  it("无形象图库条目禁点：面板行尾标「无形象图」，点击不触发挂载", () => {
+    const addNodeFace = vi.fn();
+    const fixture = [
+      { ...baseCharacter, avatar_path: "avatars/k.png", reference_paths: "[]" },
+      { ...baseCharacter, id: "char-9", name: "无图角色", bio: "", avatar_path: "", reference_paths: "[]" },
+    ];
+    useProjectStore.setState({ characters: fixture });
+    try {
+      render(
+        <ProjectDetailWindow
+          target={{ kind: "info", group: "character", sourceKey: "char:char-2", nodeKey: "eph:p1" }}
+          ops={makeOps({ addNodeFace, characters: fixture })}
+        />,
+      );
+      fireEvent.click(screen.getByText("添加形象"));
+      expect(screen.getByText("无形象图")).toBeTruthy();
+      const emptyRow = [...document.querySelectorAll(".project-library-card")].find((c) => c.textContent?.includes("无图角色"));
+      fireEvent.click(emptyRow as HTMLElement);
+      expect(addNodeFace).not.toHaveBeenCalled();
+      // 面板保持打开（无效点击不关闭）。
+      expect(document.querySelector(".project-library-panel")).toBeTruthy();
+    } finally {
+      useProjectStore.setState({ characters: [] });
+    }
   });
 
   it("节点选用形象在当前视角陈列（头像兜底首张）+「移出本节点」路由且头像不可移出", () => {

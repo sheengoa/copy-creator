@@ -632,8 +632,6 @@
       "pick": "关联",
       "inOtherNode": "已在其他节点",
       "noFaceImage": "无形象图",
-      "nodeFacePickTitle": "从该角色已有的形象中点选，加入本节点（可多次添加）",
-      "nodeFaceFromLibrary": "或从{{kind}}库挑一条，把它的形象图加入本节点",
       "removeFromNode": "移出本节点",
       "newCharacter": "新建角色",
       "newLocation": "新建场景",

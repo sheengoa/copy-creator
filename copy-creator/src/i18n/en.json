@@ -632,8 +632,6 @@
       "pick": "Link",
       "inOtherNode": "In another node",
       "noFaceImage": "No image",
-      "nodeFacePickTitle": "Pick from this character's faces to add to this node (repeatable)",
-      "nodeFaceFromLibrary": "Or pick from the {{kind}} library to add its image to this node",
       "removeFromNode": "Remove from node",
       "newCharacter": "New Character",
       "newLocation": "New Location",
