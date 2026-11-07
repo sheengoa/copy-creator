@@ -74,10 +74,15 @@ export function FrameExtractBody({ node, services }: NodeProps) {
           </div>
         </div>
       </div>
-      {videoPath && !frameBusyNow && (
+      {/* 媒体盒单实例：videoPath 有值期间 MediaPlayback 恒在同一树位，
+          执行瞬间（busy 翻转）video 原地保留不卸载重挂——此前未执行/执行
+          中两分支各渲染一份 MediaPlayback，点击执行的瞬间 video 被重建
+          重新加载，白闪一帧＋播放条重置（2026-11-07 用户反馈执行闪烁）。
+          完成态产物图在同一位置替换 video，为一次预期内容切换。 */}
+      {videoPath && (
         <>
           <div className="fc-load-media">
-            {framePath ? (
+            {framePath && !frameBusyNow ? (
               <div className="fc-frame-thumb">
                 <ResourceThumb path={framePath} className="fc-media-box" ratioFit />
                 <span className="fc-frame-badge">
@@ -87,9 +92,13 @@ export function FrameExtractBody({ node, services }: NodeProps) {
             ) : (
               <MediaPlayback kind="video" path={videoPath} ratioFit />
             )}
-            {clearBtn}
+            {!frameBusyNow && clearBtn}
           </div>
-          {framePath ? (
+          {frameBusyNow ? (
+            <button type="button" className="fc-node-btn accent" disabled>
+              {t("canvas.frameRunning")}
+            </button>
+          ) : framePath ? (
             <div className="fc-node-row">
               <span className="fc-frame-ok">{t("canvas.frameDone")}</span>
               <NodeHint text={isLastFrame ? t("canvas.frameHintLast") : t("canvas.frameHintFirst")}>
@@ -118,14 +127,6 @@ export function FrameExtractBody({ node, services }: NodeProps) {
           <div className="fc-frame-hint">
             {isLastFrame ? t("canvas.frameHintLast") : t("canvas.frameHintFirst")}
           </div>
-        </>
-      )}
-      {videoPath && frameBusyNow && (
-        <>
-          <MediaPlayback kind="video" path={videoPath} ratioFit />
-          <button type="button" className="fc-node-btn accent" disabled>
-            {t("canvas.frameRunning")}
-          </button>
         </>
       )}
       {frameError && !frameBusyNow && <div className="fc-gen-warn">{frameError}</div>}
