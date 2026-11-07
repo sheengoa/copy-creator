@@ -496,9 +496,26 @@ export default function ProjectCanvasShell({
     removeScriptPh: (phId) => data.persistScriptPhs(data.scriptPhs.filter((p) => p.id !== phId)),
     removeInfoEntity: (kind, entityId) => {
       if (!overview) return;
-      if (kind === "character") void setEpisodeCharacters(episodeId, (overview.episode.character_ids ?? []).filter((v) => v !== entityId));
-      else if (kind === "location") void setEpisodeLocations(episodeId, (overview.episode.location_ids ?? []).filter((v) => v !== entityId));
-      else void setEpisodeProps(episodeId, (overview.episode.prop_ids ?? []).filter((v) => v !== entityId));
+      // 主节点名下的正式线（owner 为空 = 锚在主节点上）一并清：节点删了
+      // 线留着会成为僵尸，同实体再次装入时复活成「自动连线」（问题二）。
+      nodeLinks
+        .filter((l) => l.from_kind === kind && l.from_id === entityId && !l.owner_key)
+        .forEach((l) => unlinkNode(l.from_kind, l.from_id, l.to_segment, l.to_port, l.owner_key));
+      // 移除基线同装入：概览 id 字段与渲染名单取并集兜底——字段缺漏
+      // （历史版本 episode.character_ids 未下发）时 filter(空表) 曾把
+      // 整集出场角色/场景清空。道具渲染名单含镜头挂靠并集，不能当
+      // 集级基线，字段缺失时宁可不写也不清空。
+      if (kind === "character")
+        void setEpisodeCharacters(
+          episodeId,
+          [...new Set([...(overview.episode.character_ids ?? []), ...castCharacters.map((c) => c.id)])].filter((v) => v !== entityId),
+        );
+      else if (kind === "location")
+        void setEpisodeLocations(
+          episodeId,
+          [...new Set([...(overview.episode.location_ids ?? []), ...episodeLocations.map((l) => l.id)])].filter((v) => v !== entityId),
+        );
+      else if (overview.episode.prop_ids) void setEpisodeProps(episodeId, overview.episode.prop_ids.filter((v) => v !== entityId));
     },
     removeEntityPh: (id) => data.persistEntityPhs(data.entityPhs.filter((p) => p.id !== id)),
     // 纸片双击/工具钮的库选入口：接真实状态（此前是空实现——纸片双击
@@ -634,21 +651,67 @@ export default function ProjectCanvasShell({
     loadEntity: (ephId, kind, entityId) => {
       const phKey = `eph:${ephId}`;
       const entityKey = `${kind === "character" ? "char" : kind === "location" ? "loc" : "prop"}:${entityId}`;
+      const phRow = data.entityPhs.find((ph) => ph.id === ephId);
+      // ── 分支 0：已装实例换装（双击实例不会走到这，兜底）——只换实体
+      // 数据，位置/线/key 全不动。 ──
+      if (phRow?.entityId) {
+        data.persistEntityPhs(data.entityPhs.map((ph) => (ph.id === ephId ? { ...ph, entityId } : ph)));
+        setDetailFor(null);
+        setDetailBack([]);
+        return;
+      }
+      const castIds =
+        kind === "character"
+          ? castCharacters.map((c) => c.id)
+          : kind === "location"
+            ? episodeLocations.map((l) => l.id)
+            : episodeProps.map((p) => p.id);
+      const wasAssociated = castIds.includes(entityId);
+      if (wasAssociated) {
+        // ── 分支 1：重复装入已有关联的实体（用户实测问题一/三）——占位
+        // 原地转正为该实体的独立实例节点：key 不变（eph:<id>，位置记忆/
+        // 拖动/尺寸记忆全部延续）、主节点分毫不动、暂存线转正时 owner 记
+        // 本实例（线锚在实例上，不串到主节点）。同素材从此允许多节点，
+        // 每个片段口各挂一个；绝不消失、绝不合并。 ──
+        void (async () => {
+          for (const p of pendingLinks.filter((l) => l.fromKey === phKey)) {
+            linkNode(episodeId, kind, entityId, p.toSegmentId, p.toPort as Parameters<typeof linkNode>[4], phKey);
+          }
+          persistPendingLinks(pendingLinks.filter((l) => l.fromKey !== phKey));
+          data.persistEntityPhs(data.entityPhs.map((ph) => (ph.id === ephId ? { ...ph, entityId } : ph)));
+          setDetailFor(null);
+          setDetailBack([]);
+        })();
+        return;
+      }
+      // ── 分支 2：首次装入（实体尚未关联到集）——占位转正为主节点。
+      // 关联前该实体在画布上没有任何承载节点，其名下 owner 为空的正式线
+      // 全是历史僵尸（节点被删线未删的残留）——不清理会在关联带出主节点
+      // 的瞬间全部复活渲染，表现为「装入自动连出旧线」（用户实测问题二）。
+      // 组线（owner=grp:）跟组走、实例线（owner=eph:）跟实例走，均不动。
+      nodeLinks
+        .filter((l) => l.from_kind === kind && l.from_id === entityId && !l.owner_key)
+        .forEach((l) => unlinkNode(l.from_kind, l.from_id, l.to_segment, l.to_port, l.owner_key));
       // 已在画布的实体：记下当前位置，装入全程结束后自愈断言——无论概览
-      // 刷新/钉住 effect 在任何时序动了它的位置记忆，都立刻拨回原位
-      // （用户实测「重复装入同一实体时合并且节点移动」的兜底铁闸）。
+      // 刷新/钉住 effect 在任何时序动了它的位置记忆，都立刻拨回原位。
       const posBefore = data.infoNodes.some((n) => n.key === entityKey) ? data.infoNodePos(entityKey) : null;
       // 占位位置转交先于关联落库：实体节点首次出现前占位位置已在记忆，
       // 首现钉住 effect 无从抢跑（实机时序下曾抢先钉住网格槽位 → 转交被
-      // 跳过 → 装入后节点跳格，用户实测「节点就会跑」）。key 变化不丢
-      // 位置——用户定案「位置绝不自己动」。
+      // 跳过 → 装入后节点跳格）。key 变化不丢位置——用户定案「位置绝不自己动」。
       data.adoptInfoOffset(phKey, entityKey);
       // 装入：先关联到集（概览带出实体节点），再把该占位的暂存线转正为
       // node_link（语义对齐旧占位转正），最后移除占位。装入选完即关窗
-      // （用户实测「点完了窗口就消失，之后双击节点再看详情」）。
+      // （用户定案「点完了窗口就消失，之后双击节点再看详情」）。
       void (async () => {
-        if (kind === "character") await setEpisodeCharacters(episodeId, [...new Set([...(overview?.episode.character_ids ?? []), entityId])]);
-        else if (kind === "location") await setEpisodeLocations(episodeId, [...new Set([...(overview?.episode.location_ids ?? []), entityId])]);
+        // 关联基线 = 概览 id 字段 ∪ 画布渲染名单：概览字段缺漏（历史
+        // 版本 episode.character_ids 未下发，前端恒读到空表）时以渲染
+        // 名单兜底，装入绝不整表替换掉已有出场角色/场景（用户实测
+        // 「装入第二个实体后旧角色节点连 wire 一起消失、像被合并」）。
+        // 道具渲染名单含镜头挂靠并集，不能当集级基线，维持字段原值。
+        if (kind === "character")
+          await setEpisodeCharacters(episodeId, [...new Set([...(overview?.episode.character_ids ?? []), ...castCharacters.map((c) => c.id), entityId])]);
+        else if (kind === "location")
+          await setEpisodeLocations(episodeId, [...new Set([...(overview?.episode.location_ids ?? []), ...episodeLocations.map((l) => l.id), entityId])]);
         else await setEpisodeProps(episodeId, [...new Set([...(overview?.episode.prop_ids ?? []), entityId])]);
         for (const p of pendingLinks.filter((l) => l.fromKey === phKey)) {
           linkNode(episodeId, kind, entityId, p.toSegmentId, p.toPort as Parameters<typeof linkNode>[4], "");
@@ -778,7 +841,15 @@ export default function ProjectCanvasShell({
             setDetailBack([]);
             const key = node.id;
             if (key.startsWith("segment:")) setDetailFor({ kind: "segment", id: key.slice(8) });
-            else if (key.startsWith("eph:")) setDetailFor({ kind: "entityPh", id: key.slice(4), group: node.type as EntityPhKind });
+            else if (key.startsWith("eph:")) {
+              // 已装实例 = 实体节点：双击开实体详情（与主节点一致）；
+              // 空白占位才开装入窗。
+              const loadedId = data.entityPhs.find((p) => p.id === key.slice(4))?.entityId;
+              const k = node.type as EntityPhKind;
+              if (loadedId)
+                setDetailFor({ kind: "info", group: k, sourceKey: `${k === "character" ? "char" : k === "location" ? "loc" : "prop"}:${loadedId}` });
+              else setDetailFor({ kind: "entityPh", id: key.slice(4), group: k });
+            }
             else if (/^(char|loc|prop|grp):/.test(key)) setDetailFor({ kind: "info", group: node.type as EntityPhKind, sourceKey: key });
             else if (key === "script" || key.startsWith("script:")) setDetailFor({ kind: "scriptPh", key });
             else if (key.startsWith("prompt:")) setDetailFor({ kind: "promptPh", id: key.slice(7) });

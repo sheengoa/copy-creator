@@ -165,14 +165,22 @@ export function buildProjectNodes(deps: ProjectCanvasDataDeps): CanvasNode[] {
       ),
     );
   }
-  // 空白资料占位（角色/场景/道具，菜单创建）。
+  // 空白资料占位（角色/场景/道具，菜单创建）；entityId 非空 = 已装入
+  // 的实例节点（同实体多节点）：标题/渲染体跟实体走，位置/key 不变。
   for (const ph of entityPhs) {
     const key = `eph:${ph.id}`;
+    const entity = !ph.entityId
+      ? undefined
+      : ph.kind === "character"
+        ? deps.overview?.characters.find((c) => c.id === ph.entityId)
+        : ph.kind === "location"
+          ? deps.overview?.locations.find((l) => l.id === ph.entityId)
+          : deps.overview?.props.find((p) => p.id === ph.entityId);
     list.push(
       recordNode(
         key,
         ph.kind,
-        ephTitle,
+        entity?.name ?? ephTitle,
         infoNodePos(key),
         sizeOfNode(key)?.w ?? INFO_W,
         nodeSizes[key]?.h ?? null,
@@ -431,6 +439,13 @@ export function buildProjectCanvasApi(deps: ProjectCanvasDataDeps): CanvasDataAp
         return;
       }
       if (id.startsWith("eph:")) {
+        // 删占位/实例节点：它的暂存线与名下正式线（owner 记本节点）一并
+        // 清——此前只删节点不清线，僵尸线会在同实体再次装入时复活渲染
+        // （用户实测「装入自动连出两条线」的根源之一）。
+        deps.persistPendingLinks(deps.pendingLinks.filter((l) => l.fromKey !== id));
+        (deps.overview?.node_links ?? [])
+          .filter((l) => l.owner_key === id)
+          .forEach((l) => deps.unlinkNode(l.from_kind, l.from_id, l.to_segment, l.to_port, l.owner_key));
         deps.persistEntityPhs(deps.entityPhs.filter((p) => p.id !== id.slice(4)));
         return;
       }
@@ -459,9 +474,26 @@ export function buildProjectCanvasApi(deps: ProjectCanvasDataDeps): CanvasDataAp
         const sep = id.indexOf(":");
         const kind = id.slice(0, sep) as "char" | "loc" | "prop";
         const eid = id.slice(sep + 1);
-        if (kind === "char") deps.setEpisodeCharacters(episodeId, deps.overview?.episode.character_ids?.filter((v) => v !== eid) ?? []);
-        else if (kind === "loc") deps.setEpisodeLocations(episodeId, deps.overview?.episode.location_ids?.filter((v) => v !== eid) ?? []);
-        else deps.setEpisodeProps(episodeId, deps.overview?.episode.prop_ids?.filter((v) => v !== eid) ?? []);
+        // 主节点移除：它名下的正式线（owner 为空 = 锚在主节点上）一并清，
+        // 已装入的实例节点（eph）与其暂存线不受影响（独立节点语义）。
+        const fromKind = kind === "char" ? "character" : kind === "loc" ? "location" : "prop";
+        (deps.overview?.node_links ?? [])
+          .filter((l) => l.from_kind === fromKind && l.from_id === eid && !l.owner_key)
+          .forEach((l) => deps.unlinkNode(l.from_kind, l.from_id, l.to_segment, l.to_port, l.owner_key));
+        // 移除基线兜底（同 Shell 装入/移除）：概览 id 字段缺漏时以渲染
+        // 名单（characters/locations 与集级关联 1:1）为底，绝不清空整集
+        // 名单；道具渲染名单含镜头挂靠并集，字段缺失时宁可不写。
+        if (kind === "char")
+          deps.setEpisodeCharacters(
+            episodeId,
+            [...new Set([...(deps.overview?.episode.character_ids ?? []), ...(deps.overview?.characters ?? []).map((c) => c.id)])].filter((v) => v !== eid),
+          );
+        else if (kind === "loc")
+          deps.setEpisodeLocations(
+            episodeId,
+            [...new Set([...(deps.overview?.episode.location_ids ?? []), ...(deps.overview?.locations ?? []).map((l) => l.id)])].filter((v) => v !== eid),
+          );
+        else if (deps.overview?.episode.prop_ids) deps.setEpisodeProps(episodeId, deps.overview.episode.prop_ids.filter((v) => v !== eid));
         return;
       }
       if (id === "output") {

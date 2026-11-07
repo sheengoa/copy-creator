@@ -52,8 +52,25 @@ export function EntityBody({ node }: NodeProps) {
   const key = node.id;
   const kind = node.type as EntityPhKind;
 
-  // 空白占位：菜单创建后未加载实体的画布占位，双击从详情窗加载（阶段 D）。
+  // 占位/实例：菜单创建后未加载实体的画布占位，双击从详情窗加载（阶段 D）。
+  // entityId 非空 = 已装入的实例节点（同实体多节点）：渲染体与单实体
+  // 节点同款，key/位置不变——占位原地变成实体节点，绝不消失不合并。
   if (key.startsWith("eph:")) {
+    const ph = ctx.entityPhs.find((p) => p.id === key.slice(4));
+    const loadedId = ph?.entityId;
+    if (loadedId) {
+      const entity = entityOf(ctx, kind, loadedId);
+      const refPath = entity ? (kind === "character" ? entity.avatar_path : entity.ref_path) : "";
+      return (
+        <div className="pc-info-body">
+          <div className="pc-photo">
+            <div className={`pc-photo-main${refPath ? "" : " pc-photo-empty"}`}>
+              <PhotoMain name={entity?.name ?? node.title} refPath={refPath ?? ""} />
+            </div>
+          </div>
+        </div>
+      );
+    }
     return (
       <div className="pc-info-body pc-eph-body">
         {kind === "character" ? Icons.clipboard : kind === "location" ? Icons.resources : Icons.star}
@@ -108,7 +125,7 @@ export function EntityBody({ node }: NodeProps) {
   );
 }
 
-/** 资料节点查看工具：占位开实体加载详情，单实体/组开节点详情。 */
+/** 资料节点查看工具：空白占位开实体加载详情；已装实例/单实体/组开节点详情。 */
 export function EntityViewTool({ node }: { node: CanvasNode }) {
   const ctx = useProjectCanvas();
   const { t } = useTranslation();
@@ -118,8 +135,17 @@ export function EntityViewTool({ node }: { node: CanvasNode }) {
         type="button"
         onPointerDown={(e) => e.stopPropagation()}
         onClick={() => {
-          if (node.id.startsWith("eph:")) ctx.setDetailFor({ kind: "entityPh", id: node.id.slice(4), group: node.type as EntityPhKind });
-          else ctx.setDetailFor({ kind: "info", group: node.type as EntityPhKind, sourceKey: node.id });
+          if (node.id.startsWith("eph:")) {
+            const loadedId = ctx.entityPhs.find((p) => p.id === node.id.slice(4))?.entityId;
+            if (loadedId) {
+              const k = node.type as EntityPhKind;
+              ctx.setDetailFor({ kind: "info", group: k, sourceKey: `${k === "character" ? "char" : k === "location" ? "loc" : "prop"}:${loadedId}` });
+            } else {
+              ctx.setDetailFor({ kind: "entityPh", id: node.id.slice(4), group: node.type as EntityPhKind });
+            }
+          } else {
+            ctx.setDetailFor({ kind: "info", group: node.type as EntityPhKind, sourceKey: node.id });
+          }
         }}
       >
         {Icons.expand}

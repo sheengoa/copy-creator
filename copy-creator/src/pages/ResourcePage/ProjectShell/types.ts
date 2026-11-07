@@ -41,8 +41,11 @@ export interface CanvasNote {
 }
 
 export type EntityPhKind = "character" | "location" | "prop";
-/** 空白资料占位节点（角色/场景/道具未加载实体前的画布占位）。 */
-export interface EntityPh { id: string; kind: EntityPhKind; x: number; y: number }
+/** 空白资料占位节点（角色/场景/道具未加载实体前的画布占位）。
+ * entityId 非空 = 已装入的实例节点：同实体允许多个节点（每个片段口
+ * 各挂一个），占位装入后保留自身 key/位置/暂存线原地变成实体节点，
+ * 绝不消失、绝不并进已有节点（用户定案 2026-11-07）。 */
+export interface EntityPh { id: string; kind: EntityPhKind; x: number; y: number; entityId?: string }
 
 /** 剧本纸片（多实例）：空纸片双击挂文件；本集无剧本时首个挂接转正为主剧本。 */
 export interface ScriptPh { id: string; path: string }

@@ -358,7 +358,9 @@ function handleInvoke(cmd: string, args: Record<string, unknown>): unknown {
             l.from_id === args.fromId &&
             l.to_segment === args.toSegment &&
             l.to_port === args.toPort &&
-            (owner ? (l.owner_key ?? "") === owner : true)
+            // 空 owner 只删无主行：实例线（owner=eph:）/组线不受牵连
+            //（与 Rust project_unlink_node 同语义，同实体多节点）。
+            (owner ? (l.owner_key ?? "") === owner : !(l.owner_key ?? ""))
           ),
       );
       return null;

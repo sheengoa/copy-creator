@@ -2450,9 +2450,13 @@ pub fn project_unlink_node(
              AND owner_key = ?5",
             params![from_kind, from_id, to_segment, to_port, owner],
         ),
+        // 空 owner 只删无主（主节点锚）行：同实体的实例线（owner=eph:）
+        // 与组线（owner=grp:）共用 (kind,id,口)，整口通删会误伤它们
+        //（同实体多节点语义下剪一条线必须只断自己那条）。
         _ => conn.execute(
             "DELETE FROM project_node_links \
-             WHERE from_kind = ?1 AND from_id = ?2 AND to_segment = ?3 AND to_port = ?4",
+             WHERE from_kind = ?1 AND from_id = ?2 AND to_segment = ?3 AND to_port = ?4 \
+             AND (owner_key IS NULL OR owner_key = '')",
             params![from_kind, from_id, to_segment, to_port],
         ),
     }
@@ -2709,6 +2713,11 @@ pub(crate) fn episode_overview_inner(
         }
     }
     let mut episode = episode;
+    // 出场角色 id 列表与 location_ids/prop_ids 同规下发：此前漏了这一
+    // 行，前端概览里 episode.character_ids 恒为 undefined，装入/移除以
+    // 空表为基线整表替换关联，装入第二个实体就把整集已有出场角色清掉
+    //（用户实测「装入后旧角色节点连 wire 一起消失、像被合并」的根源）。
+    episode["character_ids"] = serde_json::json!(character_ids);
     episode["location_ids"] = serde_json::json!(location_ids);
 
     // 本集出场道具 = 集级关联 ∪ 镜头挂靠并集（画布道具节点数据源）。

@@ -7824,6 +7824,51 @@ mod project_tests {
     }
 
     #[test]
+    fn episode_overview_exposes_episode_character_ids() {
+        // 回归锚点（装入整表替换出场名单的根源）：单集概览的 episode
+        // 对象必须带 character_ids（与 location_ids/prop_ids 同规）。
+        // 此前缺这一字段，前端装入基线恒为空表，set_episode_characters
+        // 整表替换把整集已有出场角色清掉——装入第二个实体后旧角色节点
+        // 连 wire 一起消失。
+        let conn = project_conn();
+        conn.execute(
+            "INSERT INTO project_shows (id, name, note, created_at, updated_at) VALUES ('s1', '剧', '', '2026-01-01', '2026-01-01')",
+            [],
+        )
+        .unwrap();
+        conn.execute(
+            "INSERT INTO project_episodes (id, show_id, number, title, status, script_path, sort_order, created_at, updated_at) \
+             VALUES ('e1', 's1', 1, '第一集', 'none', '', 0, '2026-01-01', '2026-01-01')",
+            [],
+        )
+        .unwrap();
+        conn.execute(
+            "INSERT INTO project_characters (id, name, role_tag, bio, prompt, avatar_path, created_at, updated_at) \
+             VALUES ('c1', '陆离', '掌柜', '', '', '', '2026-01-01', '2026-01-01')",
+            [],
+        )
+        .unwrap();
+        conn.execute(
+            "INSERT INTO project_characters (id, name, role_tag, bio, prompt, avatar_path, created_at, updated_at) \
+             VALUES ('c2', '发顺丰', '伙计', '', '', '', '2026-01-01', '2026-01-01')",
+            [],
+        )
+        .unwrap();
+        conn.execute(
+            "INSERT INTO project_episode_characters (episode_id, character_id) VALUES ('e1', 'c1')",
+            [],
+        )
+        .unwrap();
+
+        let overview =
+            crate::db::project::episode_overview_inner(&conn, "e1", std::path::Path::new(""))
+                .unwrap();
+        assert_eq!(overview["episode"]["character_ids"], serde_json::json!(["c1"]));
+        assert_eq!(overview["episode"]["location_ids"], serde_json::json!([]));
+        assert_eq!(overview["characters"].as_array().unwrap().len(), 1);
+    }
+
+    #[test]
     fn episode_overview_flags_missing_asset_files() {
         // 缺失口径锚点：overview 给每个素材档案带 missing 标记——文件在
         // 库根下存在为 false，不在为 true。库里删文件后工程悬空档案靠它
