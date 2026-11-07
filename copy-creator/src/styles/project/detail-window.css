@@ -238,6 +238,15 @@
   background: var(--chip-bg);
   border: 1px solid var(--separator);
 }
+/* 段头工具位（形象段：当前/全部切换 + 添加形象）；容器内胶囊自带的
+   auto 边距失效（无剩余空间），显式归零防将来布局变化时顶开。 */
+.pdetail-sec-tools {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+}
+.pdetail-sec-tools .pdetail-seg { margin-left: 0; }
 .pdetail-seg-btn {
   font-size: 11px;
   padding: 3px 10px;

@@ -765,6 +765,8 @@
     "detail": {
       "refs": "Reference images",
       "refCount": "{{n}} total",
+      "scopeCurrent": "Current",
+      "scopeAll": "All",
       "loadMore": "Show {{rest}} more",
       "voice": "Voice",
       "voiceEmpty": "No voice set",

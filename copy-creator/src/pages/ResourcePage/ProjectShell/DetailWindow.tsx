@@ -473,9 +473,16 @@ function EntityDetail({ group, sourceKey, ops }: { group: EntityPhKind; sourceKe
     prompt: (entity as { prompt?: string } | undefined)?.prompt ?? "",
     time_hint: group === "location" ? ((entity as ProjectLocation | undefined)?.time_hint ?? "") : "",
   };
+  // 视角切换（恢复旧详情窗的 当前/全部 双钮，用户定案）：当前=画布节点
+  // 显示的那张形象（角色=头像、场景/道具=主图，与节点渲染同源），全部=
+  // 实体全量形象卡。默认当前——双击节点即看节点所用；换实体重置。
+  const [scope, setScope] = useState<"current" | "all">("current");
+  useEffect(() => setScope("current"), [entityId, group]);
+  const nodePath = group === "character" ? avatarPath : ((entity as ProjectLocation | ProjectProp | undefined)?.ref_path ?? "");
   // 30/批分页（形象卡含编辑字段比纯图重，点「显示剩余」续载一批）。
   const [faceLimit, setFaceLimit] = useState(REF_PAGE);
   useEffect(() => setFaceLimit(REF_PAGE), [entityId, group]);
+  const shownPaths = scope === "current" ? (nodePath ? [nodePath] : []) : gridPaths;
   // 参考图管理：添加（弹对应库面板选条目，用户定案——库条目自带名称/人
   // 设/提示词/音色，选入即成该形象的独立绑定，不弹原始文件框）与逐张移
   // 除；参考图集整体覆写 reference_paths，选条目的绑定落 image_bindings。
@@ -501,15 +508,36 @@ function EntityDetail({ group, sourceKey, ops }: { group: EntityPhKind; sourceKe
     >
       <DetailSection
         label={t("project.detail.faces")}
-        count={t("project.detail.refCount", { n: gridPaths.length })}
+        count={t("project.detail.refCount", { n: shownPaths.length })}
         extra={(
-          <button type="button" className="pdetail-ref-add" onClick={() => setPickerOpen(true)}>
-            {Icons.add}{t("project.detail.refAdd")}
-          </button>
+          <span className="pdetail-sec-tools">
+            <div className="pdetail-seg" role="group">
+              <button
+                type="button"
+                className={`pdetail-seg-btn${scope === "current" ? " is-active" : ""}`}
+                onClick={() => setScope("current")}
+              >
+                {t("project.detail.scopeCurrent")}
+              </button>
+              <button
+                type="button"
+                className={`pdetail-seg-btn${scope === "all" ? " is-active" : ""}`}
+                onClick={() => setScope("all")}
+              >
+                {t("project.detail.scopeAll")}
+              </button>
+            </div>
+            <button type="button" className="pdetail-ref-add" onClick={() => setPickerOpen(true)}>
+              {Icons.add}{t("project.detail.refAdd")}
+            </button>
+          </span>
         )}
       >
         <div className="pdetail-facelist">
-          {gridPaths.slice(0, faceLimit).map((path) => (
+          {shownPaths.length === 0 && (
+            <div className="pdetail-empty">{t("project.detail.empty")}</div>
+          )}
+          {shownPaths.slice(0, faceLimit).map((path) => (
             <FaceCard
               key={path}
               path={path}

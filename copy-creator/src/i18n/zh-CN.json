@@ -765,6 +765,8 @@
     "detail": {
       "refs": "参考图",
       "refCount": "共 {{n}} 张",
+      "scopeCurrent": "当前",
+      "scopeAll": "全部",
       "loadMore": "显示剩余 {{rest}} 张",
       "voice": "音色",
       "voiceEmpty": "未设置音色",
