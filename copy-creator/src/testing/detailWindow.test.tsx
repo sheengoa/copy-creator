@@ -4,6 +4,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import "../i18n";
 import { ProjectDetailWindow, type DetailWindowOps } from "../pages/ResourcePage/ProjectShell/DetailWindow";
 import type { ProjectCharacter } from "../stores/projectStore";
+import { useProjectStore } from "../stores/projectStore";
 
 // 详情窗守卫（工程视图节点化阶段 D6）：参考图 30/批懒加载分页与续载、
 // 音色行两态、片段输入分组与逐项移除、批量挂靠确认路由。
@@ -152,6 +153,32 @@ describe("DetailWindow", () => {
     expect(setImageBindings).toHaveBeenCalledWith("character", "char-9", [
       { path: "avatars/kww.png", name: "卡哇伊", voice_path: "", bio: "另一角色", prompt: "", time_hint: "" },
     ]);
+  });
+
+  it("当前视角添加形象：选库条目成功后自动切「全部」让新形象立即可见（用户实测反馈）", () => {
+    // 库面板从 projectStore 读条目（非 ops）：塞入与 ops 同 id 的条目供面板挑选。
+    useProjectStore.setState({ characters: [{ ...baseCharacter, reference_paths: "[]" }] });
+    const setReferences = vi.fn();
+    const setImageBindings = vi.fn();
+    try {
+      render(
+        <ProjectDetailWindow
+          target={{ kind: "info", group: "character", sourceKey: "char:char-2" }}
+          ops={makeOps({ setReferences, setImageBindings, characters: [{ ...baseCharacter, avatar_path: "avatars/k.png", reference_paths: "[]" }] })}
+        />,
+      );
+      // 默认当前视角：仅节点头像 1 张。点「添加形象」开库面板，选条目。
+      fireEvent.click(screen.getByText("添加形象"));
+      fireEvent.click(document.querySelector(".project-library-card.pick") as HTMLElement);
+      // 添加成功：自动切「全部」——段头标签变「本集全部角色」、组头出现；
+      // 新形象落库路由 setReferences（条目头像并进本实体参考图集）。
+      expect((screen.getByText("全部") as HTMLButtonElement).classList.contains("is-active")).toBe(true);
+      expect(screen.getByText("本集全部角色")).toBeTruthy();
+      expect(document.querySelector(".pdetail-facegroup-name")?.textContent).toBe("老周");
+      expect(setReferences).toHaveBeenCalledWith("character", "char-2", ["avatars/k.png"]);
+    } finally {
+      useProjectStore.setState({ characters: [] });
+    }
   });
 
   it("默认区音色两态：空态只给更换入口；有音色给播放件与清除", () => {

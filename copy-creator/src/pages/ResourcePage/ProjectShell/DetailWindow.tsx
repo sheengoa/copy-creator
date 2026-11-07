@@ -674,7 +674,10 @@ function EntityDetail({ group, sourceKey, ops }: { group: EntityPhKind; sourceKe
           onPick={(id) => {
             // 库条目选入即关（选一张加一张）：该条目的头像/主图成为新形象，
             // 名称/人设/提示词/音色（角色）自动带入为该形象的独立绑定。
-            if (entity) addPickedFace(group, entity, id, ops);
+            // 添加发生在「当前」视角时新形象不在节点显示那张里（用户实测
+            // 「添加了但没显示，全局里才有」）——成功即自动切「全部」让
+            // 结果立即可见；未添加（条目无图/图重复）保持原视角。
+            if (entity && addPickedFace(group, entity, id, ops)) setScope("all");
             setPickerOpen(false);
           }}
         />
@@ -789,16 +792,17 @@ function entityBindings(entity: ProjectCharacter | ProjectLocation | ProjectProp
 }
 
 /** 库面板选条目加入形象（添加形象钮共用）：该条目头像/主图成为新形象，
- *  名称/人设/提示词/音色（角色）自动带入为该形象的独立绑定。 */
+ *  名称/人设/提示词/音色（角色）自动带入为该形象的独立绑定。返回是否
+ *  真的添加了（条目无图或图已存在 = 未添加，调用方据此决定是否切视角）。 */
 function addPickedFace(
   group: EntityPhKind,
   entity: ProjectCharacter | ProjectLocation | ProjectProp,
   id: string,
   ops: DetailWindowOps,
-) {
+): boolean {
   const lib = group === "character" ? ops.characters : group === "location" ? ops.locations : ops.props;
   const picked = lib.find((x) => x.id === id);
-  if (!picked) return;
+  if (!picked) return false;
   const imgPath = group === "character"
     ? (picked as ProjectCharacter).avatar_path
     : (picked as ProjectLocation | ProjectProp).ref_path;
@@ -818,7 +822,9 @@ function addPickedFace(
         time_hint: group === "location" ? ((picked as ProjectLocation).time_hint ?? "") : "",
       },
     ]);
+    return true;
   }
+  return false;
 }
 
 /** 片段输入分组：按口聚合（角色/场景/道具/提示词/剧本/其他），组头计数
