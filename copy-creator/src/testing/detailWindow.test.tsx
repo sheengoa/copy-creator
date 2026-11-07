@@ -46,6 +46,9 @@ function makeOps(overrides: Partial<DetailWindowOps> = {}): DetailWindowOps {
     attachEntities: vi.fn(),
     openPromptPick: vi.fn(),
     openScriptPick: vi.fn(),
+    nodeFaces: {},
+    addNodeFace: vi.fn(),
+    removeNodeFace: vi.fn(),
     backTarget: null,
     goBack: vi.fn(),
     onClose: vi.fn(),
@@ -155,53 +158,81 @@ describe("DetailWindow", () => {
     ]);
   });
 
-  it("当前视角添加形象：选库条目成功后自动切「全部」让新形象立即可见（用户实测反馈）", () => {
-    // 库面板从 projectStore 读条目（非 ops）：塞入与 ops 同 id 的条目供面板挑选。
-    useProjectStore.setState({ characters: [{ ...baseCharacter, reference_paths: "[]" }] });
-    const setReferences = vi.fn();
-    const setImageBindings = vi.fn();
-    try {
-      render(
-        <ProjectDetailWindow
-          target={{ kind: "info", group: "character", sourceKey: "char:char-2" }}
-          ops={makeOps({ setReferences, setImageBindings, characters: [{ ...baseCharacter, avatar_path: "avatars/k.png", reference_paths: "[]" }] })}
-        />,
-      );
-      // 默认当前视角：仅节点头像 1 张。点「添加形象」开库面板，选条目。
-      fireEvent.click(screen.getByText("添加形象"));
-      fireEvent.click(document.querySelector(".project-library-card.pick") as HTMLElement);
-      // 添加成功：自动切「全部」——段头标签变「本集全部角色」、组头出现；
-      // 新形象落库路由 setReferences（条目头像并进本实体参考图集）。
-      expect((screen.getByText("全部") as HTMLButtonElement).classList.contains("is-active")).toBe(true);
-      expect(screen.getByText("本集全部角色")).toBeTruthy();
-      expect(document.querySelector(".pdetail-facegroup-name")?.textContent).toBe("老周");
-      expect(setReferences).toHaveBeenCalledWith("character", "char-2", ["avatars/k.png"]);
-    } finally {
-      useProjectStore.setState({ characters: [] });
-    }
+  it("当前视角添加形象：弹本实体形象集点选即加，留在当前视角不切走（用户定案「当前是当前的」）", () => {
+    const addNodeFace = vi.fn();
+    render(
+      <ProjectDetailWindow
+        target={{ kind: "info", group: "character", sourceKey: "char:char-2", nodeKey: "eph:p1" }}
+        ops={makeOps({
+          addNodeFace,
+          characters: [{ ...baseCharacter, avatar_path: "avatars/k.png", reference_paths: JSON.stringify(["refs/a.png"]) }],
+        })}
+      />,
+    );
+    // 当前视角：头像兜底 1 张；点「添加形象」弹节点形象挑选（列实体形象
+    // 集中未加入的——refs/a.png，头像恒显示不列）。
+    fireEvent.click(screen.getByText("添加形象"));
+    expect(screen.getByText(/从该角色已有的形象中点选/)).toBeTruthy();
+    const picker1 = document.querySelector(".pdetail-attach");
+    expect(picker1?.textContent).toContain("a.png");
+    expect(picker1?.textContent).not.toContain("k.png");
+    // 点选 → addNodeFace 路由 + 面板关 + 视角仍「当前」（不切走）。
+    fireEvent.click(screen.getByText("a.png"));
+    expect(addNodeFace).toHaveBeenCalledWith("eph:p1", "refs/a.png");
+    expect(document.querySelector(".pdetail-attach")).toBeNull();
+    expect((screen.getByText("当前") as HTMLButtonElement).classList.contains("is-active")).toBe(true);
+    expect(screen.queryByText("本集全部角色")).toBeNull();
   });
 
-  it("重复添加已存在形象：同样自动切「全部」（不静默装失败），且不再落库", () => {
-    useProjectStore.setState({ characters: [{ ...baseCharacter, reference_paths: "[]" }] });
-    const setReferences = vi.fn();
-    const setImageBindings = vi.fn();
-    try {
-      render(
-        <ProjectDetailWindow
-          target={{ kind: "info", group: "character", sourceKey: "char:char-2" }}
-          ops={makeOps({ setReferences, setImageBindings, characters: [{ ...baseCharacter, avatar_path: "avatars/k.png", reference_paths: JSON.stringify(["avatars/k.png"]) }] })}
-        />,
-      );
-      fireEvent.click(screen.getByText("添加形象"));
-      // 该条目头像已在参考图集 → exists：仍切「全部」让用户看到它已在，
-      // 但不重复落库。
-      fireEvent.click(document.querySelector(".project-library-card.pick") as HTMLElement);
-      expect((screen.getByText("全部") as HTMLButtonElement).classList.contains("is-active")).toBe(true);
-      expect(setReferences).not.toHaveBeenCalled();
-      expect(setImageBindings).not.toHaveBeenCalled();
-    } finally {
-      useProjectStore.setState({ characters: [] });
-    }
+  it("节点形象挑选面板排除已加入的：重复添加在面板层就不出现", () => {
+    render(
+      <ProjectDetailWindow
+        target={{ kind: "info", group: "character", sourceKey: "char:char-2", nodeKey: "eph:p1" }}
+        ops={makeOps({
+          nodeFaces: { "eph:p1": ["refs/a.png"] },
+          characters: [{ ...baseCharacter, avatar_path: "avatars/k.png", reference_paths: JSON.stringify(["refs/a.png", "refs/b.png"]) }],
+        })}
+      />,
+    );
+    fireEvent.click(screen.getByText("添加形象"));
+    // refs/a.png 已在节点选用集 → 面板只列 refs/b.png。
+    const picker2 = document.querySelector(".pdetail-attach");
+    expect(picker2?.textContent).not.toContain("a.png");
+    expect(picker2?.textContent).toContain("b.png");
+  });
+
+  it("节点选用形象在当前视角陈列（头像兜底首张）+「移出本节点」路由且头像不可移出", () => {
+    const removeNodeFace = vi.fn();
+    render(
+      <ProjectDetailWindow
+        target={{ kind: "info", group: "character", sourceKey: "char:char-2", nodeKey: "eph:p1" }}
+        ops={makeOps({
+          removeNodeFace,
+          nodeFaces: { "eph:p1": ["refs/a.png", "refs/b.png"] },
+          characters: [{ ...baseCharacter, avatar_path: "avatars/k.png", reference_paths: JSON.stringify(["refs/a.png", "refs/b.png"]) }],
+        })}
+      />,
+    );
+    // 当前视角 = 头像 + 选用 2 张 = 3 卡；计数与实际一致。
+    expect(document.querySelectorAll(".pdetail-face").length).toBe(3);
+    expect(screen.getByText("共 3 张")).toBeTruthy();
+    // 移出钮：头像卡没有；选用卡有，点击路由 removeNodeFace（不动库）。
+    const faces = [...document.querySelectorAll(".pdetail-face")];
+    expect(faces[0].querySelector(".pdetail-face-foot")?.textContent).not.toContain("移出本节点");
+    const removes = faces[1].querySelectorAll(".pdetail-face-foot .pdetail-voice-act.is-danger");
+    fireEvent.click(removes[0]);
+    expect(removeNodeFace).toHaveBeenCalledWith("eph:p1", "refs/a.png");
+  });
+
+  it("无来源节点（输入卡跳转）：当前视角退化为头像单卡只读，无添加入口", () => {
+    render(
+      <ProjectDetailWindow
+        target={{ kind: "info", group: "character", sourceKey: "char:char-2" }}
+        ops={makeOps({ characters: [{ ...baseCharacter, avatar_path: "avatars/k.png", reference_paths: JSON.stringify(["refs/a.png"]) }] })}
+      />,
+    );
+    expect(document.querySelectorAll(".pdetail-face").length).toBe(1);
+    expect(screen.queryByText("添加形象")).toBeNull();
   });
 
   it("无形象图条目禁点：面板行显示「无形象图」，点击不触发添加", () => {
@@ -219,7 +250,11 @@ describe("DetailWindow", () => {
           ops={makeOps({ setReferences, characters: [{ ...baseCharacter, avatar_path: "avatars/k.png", reference_paths: "[]" }, { ...baseCharacter, id: "char-empty", name: "无图角色", avatar_path: "", reference_paths: "[]" }] })}
         />,
       );
-      fireEvent.click(screen.getByText("添加形象"));
+      // 无 nodeKey 的窗口自身无添加入口——切到「全部」走实体级添加（库面
+      // 板）验证禁点仍生效。
+      fireEvent.click(screen.getByText("全部"));
+      const addBtn = [...document.querySelectorAll(".pdetail-ref-add")].find((b) => b.textContent?.includes("添加形象"));
+      fireEvent.click(addBtn as HTMLElement);
       // 无头像条目 tag = 「无形象图」且整卡禁点。
       expect(screen.getByText("无形象图")).toBeTruthy();
       const emptyCard = [...document.querySelectorAll(".project-library-card")].find((c) => c.textContent?.includes("无图角色"));

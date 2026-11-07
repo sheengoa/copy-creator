@@ -27,9 +27,12 @@ import ProjectLibraryPanel from "../ProjectLibraryPanel";
 // 片段=产出常显 + 输入按口分组折叠 + 批量挂靠 + 逐项移除；空白占位=实体
 // 装入（选择即关联+暂存线转正+占位移除）。
 
-/** 详情窗目标（Shell 的 detailFor 状态同构，B 阶段已接工具按钮）。 */
+/** 详情窗目标（Shell 的 detailFor 状态同构，B 阶段已接工具按钮）。
+ *  info 的 nodeKey=来源画布节点 key（eph:<phid> / char:<id> 等）：有它
+ *  「当前」视角才是节点选用形象集（可多选增删）；缺省（输入卡跳转/组）
+ *  退化为只读的头像单卡。 */
 export type DetailTarget =
-  | { kind: "info"; group: EntityPhKind; sourceKey: string }
+  | { kind: "info"; group: EntityPhKind; sourceKey: string; nodeKey?: string }
   | { kind: "entityPh"; id: string; group: EntityPhKind }
   | { kind: "segment"; id: string }
   | { kind: "promptPh"; id: string }
@@ -60,6 +63,13 @@ export interface DetailWindowOps {
   saveProfile(kind: EntityPhKind, id: string, bio: string, prompt: string): void;
   /** 窗内跳转其它详情（输入卡点击展开：实体/组/片段窗互跳）。 */
   openDetail(target: DetailTarget): void;
+  /** 节点选用形象集（nodeKey → 形象 path 列表，按集 localStorage）：
+   *  「当前」视角的数据源——节点可多选形象，与库数据互不影响。 */
+  nodeFaces: Record<string, string[]>;
+  /** 节点选用形象：追加（当前视角添加形象点选即加）。 */
+  addNodeFace(nodeKey: string, path: string): void;
+  /** 节点选用形象：移出（不动库数据；头像不在此列，恒兜底显示）。 */
+  removeNodeFace(nodeKey: string, path: string): void;
   /** 装入占位实体（关联到集 + 暂存线转正 + 占位移除）。 */
   loadEntity(ephId: string, kind: EntityPhKind, entityId: string): void;
   /** 移除片段输入（正式行/暂存线分派）。 */
@@ -171,7 +181,7 @@ export function DetailSection({ label, count, extra, children, foldable, default
  *  跟随→实体级 setVoice，独立→绑定条目。图区=定框 16:10 + 保比例
  *  contain + 上下虚影（用户定案「窗口里规矩框，比例不裁」）。编辑本地
  *  镜像 + 失焦提交（防光标跳、防逐键落库）。 */
-function FaceCard({ path, group, isAvatar, binding, defProfile, entityName, removable, libraryRoot, onSetAvatar, onRemove, onCommit, onPickVoiceFace, onClearVoiceFace }: {
+function FaceCard({ path, group, isAvatar, binding, defProfile, entityName, removable, libraryRoot, onSetAvatar, onRemove, onCommit, onPickVoiceFace, onClearVoiceFace, nodeRemove }: {
   path: string;
   group: EntityPhKind;
   isAvatar: boolean;
@@ -184,6 +194,9 @@ function FaceCard({ path, group, isAvatar, binding, defProfile, entityName, remo
   libraryRoot: string;
   onSetAvatar(): void;
   onRemove(): void;
+  /** 节点级移出（当前视角专用）：从本节点选用集合去掉这张，不动库。
+   *  头像卡不传（恒兜底显示，不提供移出）。 */
+  nodeRemove?: () => void;
   /** 提交该形象的绑定：null = 移除条目回到跟随默认。 */
   onCommit(next: ImageBinding | null): void;
   /** 音色更换（跟随→写实体级；独立→写绑定条目）。 */
@@ -304,6 +317,9 @@ function FaceCard({ path, group, isAvatar, binding, defProfile, entityName, remo
           ) : (
             <button type="button" className="pdetail-voice-act" onClick={onSetAvatar}>{t("project.detail.setAvatar")}</button>
           ))}
+          {nodeRemove && (
+            <button type="button" className="pdetail-voice-act is-danger" onClick={nodeRemove}>{t("project.detail.removeFromNode")}</button>
+          )}
           {removable && (
             <button type="button" className="pdetail-voice-act is-danger" onClick={onRemove}>{t("project.detail.refRemove")}</button>
           )}
@@ -400,6 +416,8 @@ function faceCardsOf(args: {
   clearVoice(path: string, binding: ImageBinding | null): void;
   remove(path: string): void;
   setAvatar(path: string): void;
+  /** 节点级移出（当前视角，头像除外——头像恒兜底显示不可移出）。 */
+  nodeRemove?: (path: string) => void;
 }) {
   return args.paths.map((path) => (
     <FaceCard
@@ -417,8 +435,42 @@ function faceCardsOf(args: {
       onCommit={(next) => args.commit(path, next)}
       onPickVoiceFace={() => args.pickVoice(path, args.bindingsMap[path] ?? null)}
       onClearVoiceFace={() => args.clearVoice(path, args.bindingsMap[path] ?? null)}
+      nodeRemove={args.nodeRemove && !(args.group === "character" && path === args.avatarPath && args.avatarPath !== "")
+        ? () => args.nodeRemove!(path)
+        : undefined}
     />
   ));
+}
+
+/** 节点选用形象挑选浮层（当前视角「添加形象」）：列出该实体形象集中
+ *  尚未加入本节点的图（头像恒显示不列），点选即加即关——用户定案
+ *  「节点可多选形象，添加就显示在当前里」，不弹库条目、不切视角。 */
+function NodeFacePicker({ paths, libraryRoot, emptyText, title, onPick, onClose }: {
+  paths: string[];
+  libraryRoot: string;
+  emptyText: string;
+  title: string;
+  onPick(path: string): void;
+  onClose(): void;
+}) {
+  const { t } = useTranslation();
+  return (
+    <div className="pdetail-attach">
+      <p className="pdetail-note">{title}</p>
+      <div className="pdetail-attach-list is-flat">
+        {paths.map((p) => (
+          <button key={p} type="button" className="pdetail-attach-row" onClick={() => onPick(p)}>
+            <ResourceFileImage path={joinLibraryPath(libraryRoot, p)} alt="" className="pdetail-attach-thumb" />
+            <span>{p.split(/[\\/]/).pop() ?? p}</span>
+          </button>
+        ))}
+        {paths.length === 0 && <div className="pdetail-empty">{emptyText}</div>}
+      </div>
+      <div className="pdetail-attach-ops">
+        <button type="button" onClick={onClose}>{t("common.cancel")}</button>
+      </div>
+    </div>
+  );
 }
 /** 实体形象组（全部视角的每实体分块，用户定案「本集分组·可直接编辑」）：
  *  组头 = 实体名 + 张数 + 该组自己的添加形象钮；组内形象卡与单实体窗完全
@@ -512,8 +564,10 @@ function EntityFaceGroup({ group, entity, ops }: {
 }
 
 /** 实体详情体（角色/场景/道具）：形象分组卡（一图 = 音色[角色]/人设/
- *  提示词同框，方案 A）+ 默认区（未绑定形象的兜底值）+ 统计。 */
-function EntityDetail({ group, sourceKey, ops }: { group: EntityPhKind; sourceKey: string; ops: DetailWindowOps }) {
+ *  提示词同框，方案 A）+ 默认区（未绑定形象的兜底值）+ 统计。
+ *  nodeKey=来源画布节点：有则「当前」=节点选用形象集（可多选增删，
+ *  与库互不影响），无则退化为头像单卡只读。 */
+function EntityDetail({ group, sourceKey, nodeKey, ops }: { group: EntityPhKind; sourceKey: string; nodeKey?: string; ops: DetailWindowOps }) {
   const { t } = useTranslation();
   const { overview, characters, locations, props } = ops;
   const entityId = sourceKey.startsWith("grp:")
@@ -569,14 +623,29 @@ function EntityDetail({ group, sourceKey, ops }: { group: EntityPhKind; sourceKe
     prompt: (entity as { prompt?: string } | undefined)?.prompt ?? "",
     time_hint: group === "location" ? ((entity as ProjectLocation | undefined)?.time_hint ?? "") : "",
   };
-  // 视角切换（恢复旧详情窗的 当前/全部 双钮，用户定案）：当前=画布节点
-  // 显示的那张形象（角色=头像、场景/道具=主图，与节点渲染同源）；全部=
-  // 本集挂接的该类全部实体分组陈列（「本集分组·可直接编辑」，可跨实体
-  // 直接改形象数据）。默认当前——双击节点即看节点所用；换实体重置。
+  // 视角切换（恢复旧详情窗的 当前/全部 双钮，用户定案）：当前=本节点
+  // 选用的形象集（头像/主图恒兜底首张 + 节点多选追加，添加就显示在
+  // 当前里，不切视角）；全部=本集挂接的该类全部实体分组陈列（可跨实
+  // 体直接改形象数据）。默认当前——双击节点即看节点所用；换实体重置。
   const [scope, setScope] = useState<"current" | "all">("current");
   useEffect(() => setScope("current"), [entityId, group]);
   const nodePath = group === "character" ? avatarPath : ((entity as ProjectLocation | ProjectProp | undefined)?.ref_path ?? "");
-  const nodeViewPaths = scope === "current" ? (nodePath ? [nodePath] : []) : [];
+  // 节点选用形象集：nodeFaces[nodeKey] 过滤掉实体已不存在的图（库侧
+  // 删图后节点残留防脏）；无来源节点（输入卡跳转/组）为空。
+  const nodeFaceList = useMemo(() => {
+    if (!nodeKey || !entity) return [];
+    const valid = new Set(entityFacePaths(group, entity));
+    return (ops.nodeFaces[nodeKey] ?? []).filter((p) => valid.has(p));
+  }, [nodeKey, entity, group, ops.nodeFaces]);
+  const nodeViewPaths = scope === "current"
+    ? (nodePath ? [nodePath, ...nodeFaceList.filter((p) => p !== nodePath)] : nodeFaceList)
+    : [];
+  // 当前视角可挑选加入的形象 = 实体形象集中尚未加入本节点的（头像恒
+  // 兜底显示不列）。
+  const pickablePaths = useMemo(() => {
+    if (!entity) return [];
+    return entityRefPaths(group, entity).filter((p) => !nodeFaceList.includes(p));
+  }, [entity, group, nodeFaceList]);
   // 本集该类实体（全部视角数据源）：本集 node_links 收集去重；当前实体
   // 恒排首位（不在本集挂接里也兜底并入，自己的形象集始终可见）。
   const episodeEntities = useMemo(() => {
@@ -637,7 +706,7 @@ function EntityDetail({ group, sourceKey, ops }: { group: EntityPhKind; sourceKe
                 {t("project.detail.scopeAll")}
               </button>
             </div>
-            {scope === "current" && (
+            {scope === "current" && nodeKey && (
               <button type="button" className="pdetail-ref-add" onClick={() => setPickerOpen(true)}>
                 {Icons.add}{t("project.detail.refAdd")}
               </button>
@@ -656,6 +725,7 @@ function EntityDetail({ group, sourceKey, ops }: { group: EntityPhKind; sourceKe
               entity: entity as ProjectCharacter | ProjectLocation | ProjectProp,
               commit: commitBinding, pickVoice: pickVoiceFor, clearVoice: clearVoiceFor, remove: removeRef,
               setAvatar: (p) => entity && ops.setAvatar(entity as ProjectCharacter, p),
+              nodeRemove: nodeKey ? (p) => ops.removeNodeFace(nodeKey, p) : undefined,
             })}
           </div>
         ) : (
@@ -667,24 +737,19 @@ function EntityDetail({ group, sourceKey, ops }: { group: EntityPhKind; sourceKe
           </div>
         )}
       </DetailSection>
-      {pickerOpen && (
-        <ProjectLibraryPanel
-          kind={group === "character" ? "characters" : group === "location" ? "locations" : "props"}
-          mode="pick"
-          pickTitle={t("project.detail.facePickTitle", { kind: kindLabel })}
-          disabledIds={facelessIds(group, ops)}
-          disabledLabel={t("project.library.noFaceImage")}
-          onClose={() => setPickerOpen(false)}
-          onPick={(id) => {
-            // 库条目选入即关（选一张加一张）：该条目的头像/主图成为新形象，
-            // 名称/人设/提示词/音色（角色）自动带入为该形象的独立绑定。
-            // 添加发生在「当前」视角时新形象不在节点显示那张里（用户实测
-            // 「添加了但没显示，全局里才有」）——成功与重复都切「全部」：
-            // 重复添加静默不动会被当成失败（用户实测二连），切过去即见
-            // 该形象已在；仅条目无图不切（结果无从展示）。
-            if (entity && addPickedFace(group, entity, id, ops) !== "empty") setScope("all");
+      {pickerOpen && nodeKey && (
+        <NodeFacePicker
+          paths={pickablePaths}
+          libraryRoot={ops.libraryRoot}
+          title={t("project.detail.nodeFacePickTitle")}
+          emptyText={t("project.detail.nodeFaceAllIn")}
+          onPick={(p) => {
+            // 点选即加即关：写入本节点选用集，当前视角立即多一张卡；
+            // 不切视角、不动库数据（用户定案「当前是当前的」）。
+            if (nodeKey) ops.addNodeFace(nodeKey, p);
             setPickerOpen(false);
           }}
+          onClose={() => setPickerOpen(false)}
         />
       )}
       <DetailSection label={t("project.detail.defaultSection", { kind: kindLabel })}>
@@ -1174,7 +1239,7 @@ export function ProjectDetailWindow({ target, ops }: { target: DetailTarget; ops
   if (target.kind === "promptPh") return <PromptPhDetail id={target.id} ops={ops} />;
   if (target.kind === "scriptPh") return <ScriptPhDetail phKey={target.key} ops={ops} />;
   if (target.kind === "output") return <OutputDetail ops={ops} />;
-  return <EntityDetail group={target.group} sourceKey={target.sourceKey} ops={ops} />;
+  return <EntityDetail group={target.group} sourceKey={target.sourceKey} nodeKey={target.nodeKey} ops={ops} />;
 }
 
 /** 剧本详情体（主剧本 key="script" / 画布剧本纸片 script:<phid>）：已挂接

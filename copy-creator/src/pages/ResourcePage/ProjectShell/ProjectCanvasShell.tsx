@@ -6,6 +6,7 @@ import { CanvasDataContext } from "../../CanvasPage/dataContext";
 import FreeCanvas from "../../CanvasPage/FreeCanvas";
 import { ProjectCanvasContext, type ProjectCanvasContextValue } from "../../CanvasPage/nodes/project/projectContext";
 import {
+  EMPTY_NODE_FACES,
   EMPTY_PENDING_LINKS,
   EMPTY_NODE_GROUPS,
   parsePendingLinks,
@@ -158,6 +159,11 @@ export default function ProjectCanvasShell({
 
   // 节点分组（Ctrl+G，按集 localStorage——与旧画布同键）。
   const [nodeGroups, , persistNodeGroups] = usePerEpisodeStorage(episodeId, "nodegroups", EMPTY_NODE_GROUPS);
+  // 节点选用形象集（nodeKey → 形象 path 列表，按集 localStorage）：实体
+  // 详情窗「当前」视角的多选数据源，与库数据互不影响。
+  const [nodeFaces, , persistNodeFaces] = usePerEpisodeStorage<Record<string, string[]>>(
+    episodeId, "nodefaces", EMPTY_NODE_FACES,
+  );
   // 占位/纸片 → 片段口的暂存线（按集 localStorage——与旧画布同键）。
   const [pendingLinks, , persistPendingLinks] = usePerEpisodeStorage<PendingLink[]>(
     episodeId, "pendinglinks", EMPTY_PENDING_LINKS, parsePendingLinks,
@@ -627,6 +633,15 @@ export default function ProjectCanvasShell({
     prompts,
     promptPhs: data.promptPhs,
     scriptPhs: data.scriptPhs,
+    nodeFaces,
+    addNodeFace: (nodeKey, path) => {
+      const cur = nodeFaces[nodeKey] ?? [];
+      if (!cur.includes(path)) persistNodeFaces({ ...nodeFaces, [nodeKey]: [...cur, path] });
+    },
+    removeNodeFace: (nodeKey, path) => {
+      const cur = nodeFaces[nodeKey] ?? [];
+      persistNodeFaces({ ...nodeFaces, [nodeKey]: cur.filter((p) => p !== path) });
+    },
     setVoice: (id, voicePath) => void setCharacterVoice(id, voicePath),
     setReferences: (kind, id, paths) => void setReferences(kind, id, paths),
     setImageBindings: (kind, id, bindings) => void setImageBindings(kind, id, bindings),
@@ -852,14 +867,15 @@ export default function ProjectCanvasShell({
             if (key.startsWith("segment:")) setDetailFor({ kind: "segment", id: key.slice(8) });
             else if (key.startsWith("eph:")) {
               // 已装实例 = 实体节点：双击开实体详情（与主节点一致）；
-              // 空白占位才开装入窗。
+              // 空白占位才开装入窗。nodeKey 随窗传递——「当前」视角按节点
+              // 记忆选用形象集。
               const loadedId = data.entityPhs.find((p) => p.id === key.slice(4))?.entityId;
               const k = node.type as EntityPhKind;
               if (loadedId)
-                setDetailFor({ kind: "info", group: k, sourceKey: `${k === "character" ? "char" : k === "location" ? "loc" : "prop"}:${loadedId}` });
+                setDetailFor({ kind: "info", group: k, sourceKey: `${k === "character" ? "char" : k === "location" ? "loc" : "prop"}:${loadedId}`, nodeKey: key });
               else setDetailFor({ kind: "entityPh", id: key.slice(4), group: k });
             }
-            else if (/^(char|loc|prop|grp):/.test(key)) setDetailFor({ kind: "info", group: node.type as EntityPhKind, sourceKey: key });
+            else if (/^(char|loc|prop|grp):/.test(key)) setDetailFor({ kind: "info", group: node.type as EntityPhKind, sourceKey: key, nodeKey: key.startsWith("grp:") ? undefined : key });
             else if (key === "script" || key.startsWith("script:")) setDetailFor({ kind: "scriptPh", key });
             else if (key.startsWith("prompt:")) setDetailFor({ kind: "promptPh", id: key.slice(7) });
             else if (key.startsWith("shot:")) onPickForShot(key.slice(5));

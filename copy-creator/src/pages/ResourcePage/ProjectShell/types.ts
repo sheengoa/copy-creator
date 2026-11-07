@@ -78,6 +78,8 @@ export const EMPTY_SIZES: Record<string, { w: number; h: number }> = {};
 export const EMPTY_INFO_OFFSETS: Record<string, Pos> = {};
 export const EMPTY_PENDING_LINKS: PendingLink[] = [];
 export const EMPTY_NODE_GROUPS: NodeGroup[] = [];
+// 节点选用形象集（nodeKey → 形象 path 列表，按集 localStorage）。
+export const EMPTY_NODE_FACES: Record<string, string[]> = {};
 // 剧本纸片做形状防御：历史脏数据（非数组/缺字段）不进画布，直接回退空。
 export const parseScriptPhs = (raw: string): ScriptPh[] => {
   const list = JSON.parse(raw) as ScriptPh[];
