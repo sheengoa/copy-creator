@@ -17,6 +17,7 @@ export function useKeyboardShortcuts(
   copySelection: () => void,
   pasteClipboard: () => Promise<void> | void,
   runUndo: () => void,
+  runRedo: () => void,
   deleteSelected: () => Promise<void> | void,
 ) {
   const data = useCanvasData();
@@ -83,7 +84,14 @@ export function useKeyboardShortcuts(
         }
         if (k === "z") {
           e.preventDefault();
-          runUndo();
+          // Shift 组合＝重做（与 Ctrl+Y 等价，照顾两派手感）。
+          if (e.shiftKey) runRedo();
+          else runUndo();
+          return;
+        }
+        if (k === "y") {
+          e.preventDefault();
+          runRedo();
           return;
         }
         if (k === "a") {
@@ -105,5 +113,5 @@ export function useKeyboardShortcuts(
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [addMenuOpen, copySelection, deleteSelected, nodesRef, pasteClipboard, runUndo, selRef, setSelection, toggleGroup, vpRef]);
+  }, [addMenuOpen, copySelection, deleteSelected, nodesRef, pasteClipboard, runRedo, runUndo, selRef, setSelection, toggleGroup, vpRef]);
 }

@@ -94,7 +94,7 @@ export default function FreeCanvas({ canvasId, renderWires, onOpenNodeDetail, ov
   const { nodeMetricsRef, boxOf, outPointOf, inPointOf } = useNodeMetrics(vpRef, view, nodes);
 
   // ── 撤销栈与删除（engine/useUndoStack） ──
-  const { pushUndo, runUndo, deleteNodes } = useUndoStack(setSelection);
+  const { pushUndo, runUndo, runRedo, deleteNodes } = useUndoStack(setSelection, nodesRef, connectionsRef);
   const deleteSelected = useCallback(async () => {
     await deleteNodes(nodesRef, connectionsRef, selRef.current);
   }, [connectionsRef, deleteNodes, nodesRef]);
@@ -283,7 +283,7 @@ export default function FreeCanvas({ canvasId, renderWires, onOpenNodeDetail, ov
     saveView(next);
   }, [locate, memberFrame, pulseNodes, saveView, setLocate, setView, view, vpRef]);
 
-  // ── 键盘快捷键（engine/useKeyboardShortcuts）：删除/撤销/全选/复制粘贴/打组 ──
+  // ── 键盘快捷键（engine/useKeyboardShortcuts）：删除/撤销重做/全选/复制粘贴/打组 ──
   useKeyboardShortcuts(
     vpRef,
     nodesRef,
@@ -293,6 +293,7 @@ export default function FreeCanvas({ canvasId, renderWires, onOpenNodeDetail, ov
     copySelection,
     pasteClipboard,
     runUndo,
+    runRedo,
     deleteSelected,
   );
 
@@ -337,7 +338,12 @@ export default function FreeCanvas({ canvasId, renderWires, onOpenNodeDetail, ov
     });
     await data.connect(text.id, img.id, "text");
     if (preview) await data.connect(img.id, preview.id, "in");
-    pushUndo({ kind: "create", ids: [text.id, img.id, ...(preview ? [preview.id] : [])] });
+    // 带节点快照：撤销删除后，重做才能按快照原样重建。
+    pushUndo({
+      kind: "create",
+      ids: [text.id, img.id, ...(preview ? [preview.id] : [])],
+      nodes: [text, img, ...(preview ? [preview] : [])],
+    });
     pulseNodes([text.id, img.id, ...(preview ? [preview.id] : [])]);
     setSelection([text.id, img.id]);
     // 种子完成后整体适配窗口。

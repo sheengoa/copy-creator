@@ -69,5 +69,12 @@ export type UndoAction =
       kind: "delete";
       nodes: CanvasNode[];
       connections: { from_node: string; to_node: string; to_port: string }[];
+      /** 撤销（重建）后拿到的新节点 id：重做（再删）按它定位，避免 id 换代后失联。 */
+      restoredIds?: string[];
     }
-  | { kind: "create"; ids: string[] };
+  | {
+      kind: "create";
+      ids: string[];
+      /** 节点快照：重做（重建）按它恢复；缺省（旧栈遗留）时重做不可用。 */
+      nodes?: CanvasNode[];
+    };
