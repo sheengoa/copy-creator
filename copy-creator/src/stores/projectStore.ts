@@ -8,6 +8,30 @@ export type ResourceViewMode = "file" | "project";
 
 export type ProjectEpisodeStatus = "none" | "script" | "storyboard" | "generating" | "done";
 
+// ── 刚建连线行的「乐观 id → 行参数」旁路缓存 ──
+// linkNode 先乐观追加一行（id=local-*），落库重取后后端行的 id 会换代；
+// 切线/断线若只按 id 查渲染期快照，撞上换代窗口就查不到（用户实测
+// 「摘线后快速断线失效」的根源）。linkNode 时顺手记下行参数，断线按 id
+// 查不到时按参数兜底 unlink（unlink 按参数幂等，语义与常规断线一致）。
+const linkRowCache = new Map<
+  string,
+  { fromKind: string; fromId: string; toSegment: string; toPort: string; ownerKey: string }
+>();
+function rememberLinkRow(
+  id: string,
+  row: { fromKind: string; fromId: string; toSegment: string; toPort: string; ownerKey: string },
+) {
+  linkRowCache.set(id, row);
+  // 上限防涨：只服务「刚画完就断」的窄窗口，留最近 100 条绰绰有余。
+  if (linkRowCache.size > 100) {
+    const oldest = linkRowCache.keys().next().value;
+    if (oldest !== undefined) linkRowCache.delete(oldest);
+  }
+}
+export function recallLinkRow(id: string) {
+  return linkRowCache.get(id);
+}
+
 export interface ProjectShow {
   id: string;
   name: string;
@@ -1232,12 +1256,16 @@ export const useProjectStore = create<ProjectStoreState>((set, get) => ({
           (item.owner_key ?? "") === (ownerKey ?? ""),
       );
       if (!exists) {
+        const localId = `local-${Date.now()}-${Math.floor(Math.random() * 1e6)}`;
+        // 顺手记下「乐观 id → 行参数」：落库重取后后端行 id 换代，切线/
+        // 断线按乐观 id 查不到时靠它兜底（见 recallLinkRow）。
+        rememberLinkRow(localId, { fromKind, fromId, toSegment, toPort, ownerKey: ownerKey ?? "" });
         set({
           overview: {
             ...overview,
             node_links: [
               ...overview.node_links,
-              { id: `local-${Date.now()}-${Math.floor(Math.random() * 1e6)}`, from_kind: fromKind, from_id: fromId, to_segment: toSegment, to_port: toPort, owner_key: ownerKey ?? "" },
+              { id: localId, from_kind: fromKind, from_id: fromId, to_segment: toSegment, to_port: toPort, owner_key: ownerKey ?? "" },
             ],
           },
         });

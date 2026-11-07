@@ -1,4 +1,5 @@
 import type { CanvasConnection, CanvasLayoutEntry, CanvasNode } from "../../../stores/canvasStore";
+import { recallLinkRow } from "../../../stores/projectStore";
 import type {
   EpisodeOverview,
   ProjectNodeLink,
@@ -607,10 +608,32 @@ export function buildProjectCanvasApi(deps: ProjectCanvasDataDeps): CanvasDataAp
       // s:=片段口线（组认领线整组断）；p:=暂存线；o:=成片来源清空；
       // m:=镜头卡之间的手动素材线。
       if (id.startsWith("s:")) {
-        const group = deps.segWires.find((w) => w.links[0]?.id === id.slice(2));
-        group?.links.forEach((l) => {
-          deps.unlinkNode(l.from_kind, l.from_id, l.to_segment, l.to_port, l.owner_key);
-        });
+        const linkId = id.slice(2);
+        const group = deps.segWires.find((w) => w.links[0]?.id === linkId);
+        if (group) {
+          group.links.forEach((l) => {
+            deps.unlinkNode(l.from_kind, l.from_id, l.to_segment, l.to_port, l.owner_key);
+          });
+          return;
+        }
+        // 快照 miss 兜底（刚画完的线：乐观 id 在落库重取后被后端 id 换代，
+        // segWires/概览行都按旧 id 找不到）——先按 id 查概览行，再回退
+        // linkNode 记下的行参数按参数 unlink（幂等，语义同常规断线）。
+        const row =
+          deps.nodeLinks.find((l) => l.id === linkId) ??
+          (recallLinkRow(linkId)
+            ? (() => {
+                const r = recallLinkRow(linkId)!;
+                return {
+                  from_kind: r.fromKind,
+                  from_id: r.fromId,
+                  to_segment: r.toSegment,
+                  to_port: r.toPort,
+                  owner_key: r.ownerKey,
+                };
+              })()
+            : null);
+        if (row) deps.unlinkNode(row.from_kind, row.from_id, row.to_segment, row.to_port, row.owner_key);
         return;
       }
       if (id.startsWith("p:")) {
