@@ -162,6 +162,15 @@ export default function ProjectCanvasShell({
   const [pendingLinks, , persistPendingLinks] = usePerEpisodeStorage<PendingLink[]>(
     episodeId, "pendinglinks", EMPTY_PENDING_LINKS, parsePendingLinks,
   );
+  // 孤儿暂存线自愈：目标片段已不存在（片段被删/概览刷新换代）的暂存线
+  // 一律清掉——残留会在画布上渲染成指向空气的僵尸线（实测 mock 刷新与
+  // 删片段路径都产生过）。概览未到（加载瞬态）不动，防误清。
+  useEffect(() => {
+    if (!overview) return;
+    const valid = new Set(overview.segments.map((s) => s.id));
+    const kept = pendingLinks.filter((l) => valid.has(l.toSegmentId));
+    if (kept.length !== pendingLinks.length) persistPendingLinks(kept);
+  }, [overview, pendingLinks, persistPendingLinks]);
 
   // 详情窗状态（阶段 D 重做详情窗前，工具按钮先接状态位）。
   const [detailFor, setDetailFor] = useState<DetailTarget | null>(null);

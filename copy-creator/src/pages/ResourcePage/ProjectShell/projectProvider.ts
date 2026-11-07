@@ -8,7 +8,7 @@ import type {
 } from "../../../stores/projectStore";
 import type { CanvasDataApi } from "../../CanvasPage/dataContext";
 import { scriptFileLabel } from "../../../domain/projectView";
-import type { CanvasLayout, CanvasNote, EntityPhKind, InfoGroup, NodeGroup, PendingLink, PromptPh, ScriptPh } from "./types";
+import type { CanvasLayout, CanvasNote, EntityPh, EntityPhKind, InfoGroup, NodeGroup, PendingLink, PromptPh, ScriptPh } from "./types";
 import { INFO_H, INFO_W, OUTPUT_W, SCRIPT_W, SEG_H, SEG_W } from "./layout";
 
 // 工程视图几何层数据源（工程视图节点化 2026-11-05 阶段 B/C，方案 §1.3）：
@@ -34,8 +34,9 @@ export interface ProjectCanvasDataDeps {
   nodeSizes: Record<string, { w: number; h: number }>;
   infoNodePos(key: string): { x: number; y: number };
   sizeOfNode(key: string): { w: number; h: number } | null;
-  /** 按集画布内容（useCanvasData）。 */
-  entityPhs: Array<{ id: string; kind: EntityPhKind; x: number; y: number }>;
+  /** 按集画布内容（useCanvasData）。占位/实例节点用完整 EntityPh：
+   *  entityId 非空 = 已装入实例，标题/渲染体跟实体走。 */
+  entityPhs: EntityPh[];
   scriptPhs: ScriptPh[];
   promptPhs: PromptPh[];
   notes: CanvasNote[];
@@ -72,7 +73,7 @@ export interface ProjectCanvasDataDeps {
   mergeInfoOffsets(patch: Record<string, { x: number; y: number }>): void;
   persistSizes(next: Record<string, { w: number; h: number }>): void;
   persistNotes(next: CanvasNote[]): void;
-  persistEntityPhs(next: Array<{ id: string; kind: EntityPhKind; x: number; y: number }>): void;
+  persistEntityPhs(next: EntityPh[]): void;
   persistScriptPhs(next: ScriptPh[]): void;
   persistPromptPhs(next: PromptPh[]): void;
   persistInfoGroups(next: InfoGroup[]): void;
@@ -96,6 +97,15 @@ export interface ProjectCanvasDataDeps {
   ephTitle: string;
   promptUntitled: string;
   scriptUntitled: string;
+}
+
+/** 删节点时清掉它的位置记忆（infoOffsets 条目）：残留会在同 key 节点
+ *  再次出现时顶出旧位置，也会永久占着存储（实测 eph: 僵尸条目来源）。 */
+function dropOffsetOf(deps: ProjectCanvasDataDeps, key: string) {
+  if (!(key in deps.infoOffsets)) return;
+  const next = { ...deps.infoOffsets };
+  delete next[key];
+  deps.persistInfoOffsets(next);
 }
 
 const recordNode = (
@@ -436,26 +446,35 @@ export function buildProjectCanvasApi(deps: ProjectCanvasDataDeps): CanvasDataAp
         return;
       }
       if (id.startsWith("segment:")) {
-        deps.removeSegment(id.slice(8));
+        const segId = id.slice(8);
+        // 删片段：指向它的暂存线一并清（否则残留孤儿暂存线，同实体再装入
+        // 时旧线复活渲染）＋位置记忆一并清（残留会在重装同 id 片段时顶出
+        // 旧位置）。
+        deps.persistPendingLinks(deps.pendingLinks.filter((l) => l.toSegmentId !== segId));
+        dropOffsetOf(deps, id);
+        deps.removeSegment(segId);
         return;
       }
       if (id.startsWith("eph:")) {
         // 删占位/实例节点：它的暂存线与名下正式线（owner 记本节点）一并
         // 清——此前只删节点不清线，僵尸线会在同实体再次装入时复活渲染
-        // （用户实测「装入自动连出两条线」的根源之一）。
+        // （用户实测「装入自动连出两条线」的根源之一）；位置记忆同清。
         deps.persistPendingLinks(deps.pendingLinks.filter((l) => l.fromKey !== id));
         (deps.overview?.node_links ?? [])
           .filter((l) => l.owner_key === id)
           .forEach((l) => deps.unlinkNode(l.from_kind, l.from_id, l.to_segment, l.to_port, l.owner_key));
         deps.persistEntityPhs(deps.entityPhs.filter((p) => p.id !== id.slice(4)));
+        dropOffsetOf(deps, id);
         return;
       }
       if (id.startsWith("prompt:")) {
         deps.persistPromptPhs(deps.promptPhs.filter((p) => p.id !== id.slice(7)));
+        dropOffsetOf(deps, id);
         return;
       }
       if (id.startsWith("script:")) {
         deps.persistScriptPhs(deps.scriptPhs.filter((p) => p.id !== id.slice(7)));
+        dropOffsetOf(deps, id);
         return;
       }
       if (id === "script") {
