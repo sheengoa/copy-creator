@@ -418,6 +418,9 @@ function faceCardsOf(args: {
   setAvatar(path: string): void;
   /** 节点级移出（当前视角，头像除外——头像恒兜底显示不可移出）。 */
   nodeRemove?: (path: string) => void;
+  /** 隐藏库级「移除」（当前视角）：节点语境下放库级删图按钮极易误触，
+   *  库级删除统一在「全部」视角的实体分组里做。 */
+  hideRemove?: boolean;
 }) {
   return args.paths.map((path) => (
     <FaceCard
@@ -428,7 +431,7 @@ function faceCardsOf(args: {
       binding={args.bindingsMap[path] ?? null}
       defProfile={args.defProfile}
       entityName={args.entityName}
-      removable={args.refPaths.includes(path)}
+      removable={!args.hideRemove && args.refPaths.includes(path)}
       libraryRoot={args.libraryRoot}
       onSetAvatar={() => args.setAvatar(path)}
       onRemove={() => args.remove(path)}
@@ -738,6 +741,7 @@ function EntityDetail({ group, sourceKey, nodeKey, ops }: { group: EntityPhKind;
               commit: commitBinding, pickVoice: pickVoiceFor, clearVoice: clearVoiceFor, remove: removeRef,
               setAvatar: (p) => entity && ops.setAvatar(entity as ProjectCharacter, p),
               nodeRemove: nodeKey ? (p) => ops.removeNodeFace(nodeKey, p) : undefined,
+              hideRemove: true,
             })}
           </div>
         ) : (

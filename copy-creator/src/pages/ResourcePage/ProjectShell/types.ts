@@ -80,6 +80,17 @@ export const EMPTY_PENDING_LINKS: PendingLink[] = [];
 export const EMPTY_NODE_GROUPS: NodeGroup[] = [];
 // 节点选用形象集（nodeKey → 形象 path 列表，按集 localStorage）。
 export const EMPTY_NODE_FACES: Record<string, string[]> = {};
+// 节点挂载集形状防御：历史脏数据（非对象/值非字符串数组）不进画布，
+// 直接回退空——挂载集读取处直接 .filter，形状坏了会崩详情窗。
+export const parseNodeFaces = (raw: string): Record<string, string[]> => {
+  const parsed = JSON.parse(raw) as unknown;
+  if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return {};
+  const out: Record<string, string[]> = {};
+  for (const [k, v] of Object.entries(parsed)) {
+    if (Array.isArray(v) && v.every((x) => typeof x === "string")) out[k] = v as string[];
+  }
+  return out;
+};
 // 剧本纸片做形状防御：历史脏数据（非数组/缺字段）不进画布，直接回退空。
 export const parseScriptPhs = (raw: string): ScriptPh[] => {
   const list = JSON.parse(raw) as ScriptPh[];

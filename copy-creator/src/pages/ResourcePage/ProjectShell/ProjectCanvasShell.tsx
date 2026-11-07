@@ -9,6 +9,7 @@ import {
   EMPTY_NODE_FACES,
   EMPTY_PENDING_LINKS,
   EMPTY_NODE_GROUPS,
+  parseNodeFaces,
   parsePendingLinks,
   type CanvasLayout,
   type PendingLink,
@@ -162,7 +163,7 @@ export default function ProjectCanvasShell({
   // 节点选用形象集（nodeKey → 形象 path 列表，按集 localStorage）：实体
   // 详情窗「当前」视角的多选数据源，与库数据互不影响。
   const [nodeFaces, , persistNodeFaces] = usePerEpisodeStorage<Record<string, string[]>>(
-    episodeId, "nodefaces", EMPTY_NODE_FACES,
+    episodeId, "nodefaces", EMPTY_NODE_FACES, parseNodeFaces,
   );
   // 占位/纸片 → 片段口的暂存线（按集 localStorage——与旧画布同键）。
   const [pendingLinks, , persistPendingLinks] = usePerEpisodeStorage<PendingLink[]>(
@@ -183,6 +184,12 @@ export default function ProjectCanvasShell({
   // 返回栈：窗内点击输入卡跳转（ops.openDetail）时压入上一窗，头部返回
   // 键（ops.goBack）弹出跳回；画布双击/定位是全新意图，重置栈。
   const [detailBack, setDetailBack] = useState<DetailTarget[]>([]);
+  // 切集清窗：详情窗内容（实体/挂载集）都指向具体集，切集后旧窗残留会
+  // 显示上一集的实体资料（装入流自动切实体窗后此残留更显眼）。
+  useEffect(() => {
+    setDetailFor(null);
+    setDetailBack([]);
+  }, [episodeId]);
 
   const promptUntitled = t("project.canvas.promptUntitled");
   const ephTitle = t("project.canvas.ephTitle");
@@ -703,6 +710,10 @@ export default function ProjectCanvasShell({
           }
           persistPendingLinks(pendingLinks.filter((l) => l.fromKey !== phKey));
           data.persistEntityPhs(data.entityPhs.map((ph) => (ph.id === ephId ? { ...ph, entityId } : ph)));
+          // 切集竞争守卫（与工作流种子同款）：await 期间用户可能已切到
+          // 别的集——数据落库仍按旧集键写（persist 闭包绑旧键，正确），
+          // 但切窗是全局的，迟到切窗会在新集画布上打开旧集实体的窗。
+          if (useProjectStore.getState().currentEpisodeId !== episodeId) return;
           // 装入后窗不消失（用户定案「先进窗，再从窗里弹库选择框」）：
           // 直接切成本实体详情窗（当前视角），后续加形象都在窗里操作。
           setDetailFor({ kind: "info", group: kind, sourceKey: entityKey, nodeKey: phKey });
@@ -744,6 +755,8 @@ export default function ProjectCanvasShell({
         }
         persistPendingLinks(pendingLinks.filter((l) => l.fromKey !== phKey));
         data.persistEntityPhs(data.entityPhs.filter((ph) => ph.id !== ephId));
+        // 切集竞争守卫（与工作流种子同款）：切集后迟到切窗会打开旧集窗。
+        if (useProjectStore.getState().currentEpisodeId !== episodeId) return;
         // 首次装入：占位移除、实体以主节点出现（key=entityKey）——窗切成
         // 该实体详情（当前视角），nodeKey 指向主节点。
         setDetailFor({ kind: "info", group: kind, sourceKey: entityKey, nodeKey: entityKey });
