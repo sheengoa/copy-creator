@@ -90,7 +90,7 @@ export default function FreeCanvas({ canvasId, renderWires, onOpenNodeDetail, ov
 
   // ── 视口引擎 + 节点实测（engine/useViewport / useNodeMetrics；fork 自
   //    旧 ProjectCanvas，已退役） ──
-  const { vpRef, view, setView, vpSize, saveView, zoomAt, fitAll, fitAttemptedRef } = useViewport(nodes);
+  const { vpRef, view, viewRef, setView, vpSize, saveView, applyViewDirect, commitView, zoomAt, fitAll, fitAttemptedRef } = useViewport(nodes);
   const { nodeMetricsRef, boxOf, outPointOf, inPointOf } = useNodeMetrics(vpRef, view, nodes);
 
   // ── 撤销栈与删除（engine/useUndoStack） ──
@@ -238,9 +238,9 @@ export default function FreeCanvas({ canvasId, renderWires, onOpenNodeDetail, ov
     commitAddNode,
   } = useCanvasGestures({
     vpRef,
-    view,
-    setView,
-    saveView,
+    viewRef,
+    applyViewDirect,
+    commitView,
     nodesRef,
     connectionsRef,
     selRef,
@@ -381,7 +381,9 @@ export default function FreeCanvas({ canvasId, renderWires, onOpenNodeDetail, ov
       >
         <div
           className="pc-world"
-          style={{ transform: `translate(${view.x}px, ${view.y}px) scale(${view.scale})` }}
+          /* transform 由 useViewport 的提交 effect 与手势直写统一管理
+             （2026-11-08 平移架构改造）：React 渲染不再写它，手势期间的
+             直写值不会被本组件的任何重渲染覆盖回提交版。 */
         >
           {renderWires ? (
             renderWires({ view, vpSize, liftedWire, wireDraft, outPointOf, inPointOf })

@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import type { Dispatch, RefObject, SetStateAction } from "react";
+import type { RefObject } from "react";
 import type { CanvasConnection, CanvasGroup, CanvasLayoutEntry, CanvasNode } from "../../../stores/canvasStore";
 import { useCanvasData } from "../dataContext";
 import { resolveWireRelease } from "../../../utils/projectWireRelease";
@@ -32,10 +32,11 @@ export interface AddMenuState {
 
 export interface GestureDeps {
   vpRef: RefObject<HTMLDivElement | null>;
-  /** 视口状态：手势回调闭包随渲染刷新读取（重订阅惯例）。 */
-  view: ViewState;
-  setView: Dispatch<SetStateAction<ViewState>>;
-  saveView(next: ViewState): void;
+  /** 实时视口镜像：手势期间每帧直写 DOM 不进 React，事件闭包一律读它。
+   *  渲染消费层（连线剔除/迷你地图）用提交版 view，由 FreeCanvas 直取。 */
+  viewRef: RefObject<ViewState>;
+  applyViewDirect(next: ViewState): void;
+  commitView(): void;
   nodesRef: RefObject<CanvasNode[]>;
   connectionsRef: RefObject<CanvasConnection[]>;
   selRef: RefObject<string[]>;
@@ -57,7 +58,7 @@ export interface GestureDeps {
 }
 
 export function useCanvasGestures(deps: GestureDeps) {
-  const { vpRef, view, setView, saveView, nodesRef, connectionsRef, selRef, setSelection, groups, memberFrame, groupSnapshot, boxOf, outPointOf, inPointOf, nodeMetricsRef, canvasServices, pushUndo } = deps;
+  const { vpRef, viewRef, applyViewDirect, commitView, nodesRef, connectionsRef, selRef, setSelection, groups, memberFrame, groupSnapshot, boxOf, outPointOf, inPointOf, nodeMetricsRef, canvasServices, pushUndo } = deps;
   // 几何读写数据源（默认实现=canvasStore 转发；工程视图=工程 provider）。
   const data = useCanvasData();
 
@@ -160,8 +161,8 @@ export function useCanvasGestures(deps: GestureDeps) {
       const rect = vpRef.current?.getBoundingClientRect();
       const dropPos = moved && rect
         ? {
-            x: (clientX - rect.left - view.x) / view.scale,
-            y: (clientY - rect.top - view.y) / view.scale,
+            x: (clientX - rect.left - viewRef.current.x) / viewRef.current.scale,
+            y: (clientY - rect.top - viewRef.current.y) / viewRef.current.scale,
           }
         : { x: drag.fox, y: drag.foy };
       void (async () => {
@@ -194,7 +195,7 @@ export function useCanvasGestures(deps: GestureDeps) {
         setSelection([created.id]);
       })();
     },
-    [data, incomingPortFor, nodesRef, pulseNodes, setLiftedWire, setSelection, view, vpRef],
+    [data, incomingPortFor, nodesRef, pulseNodes, setLiftedWire, setSelection, viewRef, vpRef],
   );
 
   const onViewportPointerDown = useCallback(
@@ -235,7 +236,7 @@ export function useCanvasGestures(deps: GestureDeps) {
       const vp = vpRef.current;
       if (!vp) return;
       if (e.button === 1) {
-        dragRef.current = { kind: "pan", sx: e.clientX, sy: e.clientY, ox: view.x, oy: view.y, moved: false };
+        dragRef.current = { kind: "pan", sx: e.clientX, sy: e.clientY, ox: viewRef.current.x, oy: viewRef.current.y, moved: false };
         vp.classList.add("pc-panning");
         e.preventDefault();
         return;
@@ -388,7 +389,7 @@ export function useCanvasGestures(deps: GestureDeps) {
       dragRef.current = { kind: "marquee", sx: e.clientX, sy: e.clientY, mq, moved: false };
       e.preventDefault();
     },
-    [addMenu, buildCutTargets, connectionsRef, discardDetachedWire, groupSnapshot, groups, memberFrame, nodesRef, selRef, setSelection, view, vpRef],
+    [addMenu, buildCutTargets, connectionsRef, discardDetachedWire, groupSnapshot, groups, memberFrame, nodesRef, selRef, setSelection, viewRef, vpRef],
   );
 
   useEffect(() => {
@@ -408,7 +409,8 @@ export function useCanvasGestures(deps: GestureDeps) {
       const dy = e.clientY - drag.sy;
       if (Math.abs(dx) + Math.abs(dy) > 4) drag.moved = true;
       if (drag.kind === "pan") {
-        setView((prev) => ({ ...prev, x: drag.ox + dx, y: drag.oy + dy }));
+        // 手势路径直写实时视口（不逐帧 setState 全树渲染），松手 commitView 提交。
+        applyViewDirect({ ...viewRef.current, x: drag.ox + dx, y: drag.oy + dy });
       } else if (drag.kind === "marquee") {
         const el = vpRef.current;
         if (!el || !drag.mq) return;
@@ -424,10 +426,10 @@ export function useCanvasGestures(deps: GestureDeps) {
       } else if (drag.kind === "multidrag") {
         // 多选组拖：整组成员按同一位移移动。
         if (!drag.moved || !drag.members?.length) return;
-        moveGroupTo(data, nodesRef, drag.members.map((m) => ({ key: m.key, x: m.x + dx / view.scale, y: m.y + dy / view.scale })));
+        moveGroupTo(data, nodesRef, drag.members.map((m) => ({ key: m.key, x: m.x + dx / viewRef.current.scale, y: m.y + dy / viewRef.current.scale })));
       } else if (drag.kind === "node") {
         if (!drag.moved) return;
-        moveGroupTo(data, nodesRef, [{ key: drag.frameKey, x: drag.ox + dx / view.scale, y: drag.oy + dy / view.scale }]);
+        moveGroupTo(data, nodesRef, [{ key: drag.frameKey, x: drag.ox + dx / viewRef.current.scale, y: drag.oy + dy / viewRef.current.scale }]);
       } else if (drag.kind === "resize") {
         // 四角自由缩放：对角固定，实时预览；西/北角缩放联动挪动位置，
         // 松手才持久化尺寸与位置。
@@ -435,8 +437,8 @@ export function useCanvasGestures(deps: GestureDeps) {
         const node = nodesRef.current.find((n) => n.id === key);
         const min = NODE_MIN_SIZE[node?.type ?? "gen_image"];
         const corner = drag.corner;
-        const dxW = dx / view.scale;
-        const dyW = dy / view.scale;
+        const dxW = dx / viewRef.current.scale;
+        const dyW = dy / viewRef.current.scale;
         let w = drag.ox;
         let h = drag.oy;
         if (corner === "ne" || corner === "se") w = Math.max(min.w, w + dxW);
@@ -505,8 +507,8 @@ export function useCanvasGestures(deps: GestureDeps) {
         const el = vpRef.current;
         if (!el || !drag.fromKey) return;
         const rect = el.getBoundingClientRect();
-        const wx = (e.clientX - rect.left - view.x) / view.scale;
-        const wy = (e.clientY - rect.top - view.y) / view.scale;
+        const wx = (e.clientX - rect.left - viewRef.current.x) / viewRef.current.scale;
+        const wy = (e.clientY - rect.top - viewRef.current.y) / viewRef.current.scale;
         // 摘线拿着（rewire）时草稿线锚在「留在原地的另一端」——线的真实
         // 源头输出口，刚拔空的输入口不再有线的视觉残留。
         const startPoint = drag.fromDir === "out"
@@ -664,8 +666,8 @@ export function useCanvasGestures(deps: GestureDeps) {
                 openAddMenu(
                   e.clientX - rect.left,
                   e.clientY - rect.top,
-                  (e.clientX - rect.left - view.x) / view.scale,
-                  (e.clientY - rect.top - view.y) / view.scale,
+                  (e.clientX - rect.left - viewRef.current.x) / viewRef.current.scale,
+                  (e.clientY - rect.top - viewRef.current.y) / viewRef.current.scale,
                 );
               }
             } else {
@@ -681,7 +683,7 @@ export function useCanvasGestures(deps: GestureDeps) {
         dblRef.current = null;
       }
       if (drag.kind === "pan") {
-        if (drag.moved) saveView(view);
+        if (drag.moved) commitView();
       } else if (drag.kind === "wirecut") {
         vpRef.current?.classList.remove("pc-cutting");
         cutTargetsRef.current = null;
@@ -730,8 +732,8 @@ export function useCanvasGestures(deps: GestureDeps) {
               openAddMenu(
                 e.clientX - vpRect.left,
                 e.clientY - vpRect.top,
-                (e.clientX - vpRect.left - view.x) / view.scale,
-                (e.clientY - vpRect.top - view.y) / view.scale,
+                (e.clientX - vpRect.left - viewRef.current.x) / viewRef.current.scale,
+                (e.clientY - vpRect.top - viewRef.current.y) / viewRef.current.scale,
                 { detached: { connId: lifted.connId, fromKey: lifted.fromKey } },
               );
             } else {
@@ -762,8 +764,8 @@ export function useCanvasGestures(deps: GestureDeps) {
             openAddMenu(
               e.clientX - vpRect.left,
               e.clientY - vpRect.top,
-              (e.clientX - vpRect.left - view.x) / view.scale,
-              (e.clientY - vpRect.top - view.y) / view.scale,
+              (e.clientX - vpRect.left - viewRef.current.x) / viewRef.current.scale,
+              (e.clientY - vpRect.top - viewRef.current.y) / viewRef.current.scale,
               { wire: { fromKey: drag.fromKey, fromDir: drag.fromDir, fromPortId: drag.fromPortId } },
             );
           }
@@ -808,8 +810,8 @@ export function useCanvasGestures(deps: GestureDeps) {
       } else if (drag.kind === "multidrag") {
         // 组拖松手：按总位移算出整组最终位置，补记撤销（整组恢复）。
         if (drag.moved && drag.members?.length) {
-          const dxW = (e.clientX - drag.sx) / view.scale;
-          const dyW = (e.clientY - drag.sy) / view.scale;
+          const dxW = (e.clientX - drag.sx) / viewRef.current.scale;
+          const dyW = (e.clientY - drag.sy) / viewRef.current.scale;
           const byId = new Map(nodesRef.current.map((n) => [n.id, n]));
           const prev: CanvasLayoutEntry[] = [];
           const next: CanvasLayoutEntry[] = [];
@@ -832,10 +834,10 @@ export function useCanvasGestures(deps: GestureDeps) {
           const el = vpRef.current;
           if (el) {
             const rect = el.getBoundingClientRect();
-            const rx1 = (Math.min(drag.sx, e.clientX) - rect.left - view.x) / view.scale;
-            const ry1 = (Math.min(drag.sy, e.clientY) - rect.top - view.y) / view.scale;
-            const rx2 = (Math.max(drag.sx, e.clientX) - rect.left - view.x) / view.scale;
-            const ry2 = (Math.max(drag.sy, e.clientY) - rect.top - view.y) / view.scale;
+            const rx1 = (Math.min(drag.sx, e.clientX) - rect.left - viewRef.current.x) / viewRef.current.scale;
+            const ry1 = (Math.min(drag.sy, e.clientY) - rect.top - viewRef.current.y) / viewRef.current.scale;
+            const rx2 = (Math.max(drag.sx, e.clientX) - rect.left - viewRef.current.x) / viewRef.current.scale;
+            const ry2 = (Math.max(drag.sy, e.clientY) - rect.top - viewRef.current.y) / viewRef.current.scale;
             // 框选判定对齐工程画布：节点中心落入框内即选中。
             const inBox = (p: Pos, w: number, h: number) => {
               const cx = p.x + w / 2;

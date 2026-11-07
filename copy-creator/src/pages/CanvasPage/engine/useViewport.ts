@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import type { CanvasNode } from "../../../stores/canvasStore";
 import { useCanvasData } from "../dataContext";
 import type { Pos } from "./gestureTypes";
@@ -22,12 +22,51 @@ export function useViewport(nodes: CanvasNode[]) {
   });
   const [vpSize, setVpSize] = useState<{ w: number; h: number } | null>(null);
 
+  // 实时视口（手势每帧直写 DOM 不进 React）：平移/缩放手势若逐帧
+  // setState，整棵画布树（节点+连线+迷你地图）每帧全量重渲染，节点与
+  // 媒体一多必然掉帧（2026-11-08 执行后平移卡顿的架构级防御）。手势
+  // 期间 viewRef 持有真实视口并直写 pc-world transform（world 内的
+  // 连线/节点/组框随 transform 合成移动，无须渲染参与）；手势结束
+  // commitView 一次性提交 state，喂给渲染消费层（视口剔除/迷你地图），
+  // 滞后 300ms 内不可感知。
+  const viewRef = useRef<ViewState>(view);
+
   const saveView = useCallback(
     (next: ViewState) => {
       data.setViewport(next.x, next.y, next.scale);
     },
     [data],
   );
+
+  // 直写实时视口（手势路径）：只动 DOM 与 viewRef，不触发渲染。
+  const applyViewDirect = useCallback(
+    (next: ViewState) => {
+      viewRef.current = next;
+      const world = vpRef.current?.firstElementChild as HTMLElement | null;
+      world?.style.setProperty(
+        "transform",
+        `translate(${next.x}px, ${next.y}px) scale(${next.scale})`,
+      );
+    },
+    [vpRef],
+  );
+
+  // 提交实时视口（手势/滚轮结束）：一次 setState 喂渲染消费层 + 落库。
+  const commitView = useCallback(() => {
+    setView(viewRef.current);
+    saveView(viewRef.current);
+  }, [saveView]);
+
+  // 提交版 view 变化（fitAll/视口恢复/迷你地图/外部 setView）时同步 DOM。
+  // 手势直写的值与 viewRef 一致，此 effect 不会造成回跳。
+  useLayoutEffect(() => {
+    viewRef.current = view;
+    const world = vpRef.current?.firstElementChild as HTMLElement | null;
+    world?.style.setProperty(
+      "transform",
+      `translate(${view.x}px, ${view.y}px) scale(${view.scale})`,
+    );
+  }, [view, vpRef]);
 
   // 视口实测尺寸：迷你地图的视口矩形与连线层视口裁切都要用。
   useEffect(() => {
@@ -40,20 +79,25 @@ export function useViewport(nodes: CanvasNode[]) {
     return () => observer.disconnect();
   }, []);
 
+  // 滚轮缩放：直写实时视口 + 150ms 防抖提交（滚轮连发不逐帧渲染）。
+  const wheelCommitRef = useRef<number | null>(null);
   const zoomAt = useCallback(
     (mx: number, my: number, factor: number) => {
-      setView((prev) => {
-        const ns = Math.min(ZOOM_MAX, Math.max(ZOOM_MIN, prev.scale * factor));
-        const next = {
-          x: mx - (mx - prev.x) * (ns / prev.scale),
-          y: my - (my - prev.y) * (ns / prev.scale),
-          scale: ns,
-        };
-        saveView(next);
-        return next;
-      });
+      const prev = viewRef.current;
+      const ns = Math.min(ZOOM_MAX, Math.max(ZOOM_MIN, prev.scale * factor));
+      const next = {
+        x: mx - (mx - prev.x) * (ns / prev.scale),
+        y: my - (my - prev.y) * (ns / prev.scale),
+        scale: ns,
+      };
+      applyViewDirect(next);
+      if (wheelCommitRef.current !== null) clearTimeout(wheelCommitRef.current);
+      wheelCommitRef.current = window.setTimeout(() => {
+        wheelCommitRef.current = null;
+        commitView();
+      }, 150);
     },
-    [saveView],
+    [applyViewDirect, commitView],
   );
 
   // 滚轮缩放走原生非被动监听：React 合成 onWheel 是 passive 的，
@@ -140,7 +184,7 @@ export function useViewport(nodes: CanvasNode[]) {
     }
   }, [nodes, fitAll, view]);
 
-  return { vpRef, view, setView, vpSize, saveView, zoomAt, fitAll, fitAttemptedRef };
+  return { vpRef, view, viewRef, setView, vpSize, saveView, applyViewDirect, commitView, zoomAt, fitAll, fitAttemptedRef };
 }
 
 /** 迷你地图内容包围盒（世界坐标）——渲染层与手势共用的小工具。 */
