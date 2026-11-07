@@ -442,29 +442,73 @@ function faceCardsOf(args: {
   ));
 }
 
-/** 节点选用形象挑选浮层（当前视角「添加形象」）：列出该实体形象集中
- *  尚未加入本节点的图（头像恒显示不列），点选即加即关——用户定案
- *  「节点可多选形象，添加就显示在当前里」，不弹库条目、不切视角。 */
-function NodeFacePicker({ paths, libraryRoot, emptyText, title, onPick, onClose }: {
-  paths: string[];
-  libraryRoot: string;
-  emptyText: string;
-  title: string;
-  onPick(path: string): void;
+/** 节点选用形象挑选浮层（当前视角「添加形象」），两个来源一网打尽：
+ *  ① 该角色已有的形象中未加入本节点的——点选即加入节点集合；
+ *  ② 角色库条目——点选即把它的形象图收进该角色（实体级）并同步加入
+ *  本节点，一步到位（用户实测：只有头像的角色点添加曾得到死空态）。
+ *  无形象图的库条目禁点；自身条目不列（头像已恒显示，无需自加）。 */
+function NodeFacePicker({ group, entity, nodeKey, nodeFaceList, ops, onClose }: {
+  group: EntityPhKind;
+  entity: ProjectCharacter | ProjectLocation | ProjectProp;
+  nodeKey: string;
+  nodeFaceList: string[];
+  ops: DetailWindowOps;
   onClose(): void;
 }) {
   const { t } = useTranslation();
+  const fromEntity = entityRefPaths(group, entity).filter((p) => !nodeFaceList.includes(p));
+  const kindLabel = t(
+    group === "character" ? "project.canvas.typeCharacter"
+      : group === "location" ? "project.canvas.typeLocation"
+        : "project.canvas.typeProp",
+  );
+  const lib = group === "character" ? ops.characters : group === "location" ? ops.locations : ops.props;
+  const libRows = lib
+    .filter((e) => e.id !== entity.id)
+    .map((e) => ({
+      id: e.id,
+      name: e.name,
+      img: group === "character" ? (e as ProjectCharacter).avatar_path : (e as ProjectLocation | ProjectProp).ref_path,
+    }));
   return (
     <div className="pdetail-attach">
-      <p className="pdetail-note">{title}</p>
+      {fromEntity.length > 0 && (
+        <>
+          <p className="pdetail-note">{t("project.detail.nodeFacePickTitle")}</p>
+          <div className="pdetail-attach-list is-flat">
+            {fromEntity.map((p) => (
+              <button key={p} type="button" className="pdetail-attach-row" onClick={() => { ops.addNodeFace(nodeKey, p); onClose(); }}>
+                <ResourceFileImage path={joinLibraryPath(ops.libraryRoot, p)} alt="" className="pdetail-attach-thumb" />
+                <span>{p.split(/[\\/]/).pop() ?? p}</span>
+              </button>
+            ))}
+          </div>
+        </>
+      )}
+      <p className="pdetail-note">{t("project.detail.nodeFaceFromLibrary", { kind: kindLabel })}</p>
       <div className="pdetail-attach-list is-flat">
-        {paths.map((p) => (
-          <button key={p} type="button" className="pdetail-attach-row" onClick={() => onPick(p)}>
-            <ResourceFileImage path={joinLibraryPath(libraryRoot, p)} alt="" className="pdetail-attach-thumb" />
-            <span>{p.split(/[\\/]/).pop() ?? p}</span>
+        {libRows.map((r) => r.img ? (
+          <button
+            key={r.id}
+            type="button"
+            className="pdetail-attach-row"
+            onClick={() => {
+              const res = addPickedFace(group, entity, r.id, ops);
+              if (res.result === "added" && res.path) ops.addNodeFace(nodeKey, res.path);
+              onClose();
+            }}
+          >
+            <ResourceFileImage path={joinLibraryPath(ops.libraryRoot, r.img)} alt="" className="pdetail-attach-thumb" />
+            <span>{r.name}</span>
+          </button>
+        ) : (
+          <button key={r.id} type="button" className="pdetail-attach-row" disabled title={t("project.library.noFaceImage")}>
+            <span className="pdetail-attach-thumb" />
+            <span>{r.name}</span>
+            <span className="pdetail-attach-tag">{t("project.library.noFaceImage")}</span>
           </button>
         ))}
-        {paths.length === 0 && <div className="pdetail-empty">{emptyText}</div>}
+        {libRows.length === 0 && <div className="pdetail-empty">{t("project.detail.empty")}</div>}
       </div>
       <div className="pdetail-attach-ops">
         <button type="button" onClick={onClose}>{t("common.cancel")}</button>
@@ -640,12 +684,6 @@ function EntityDetail({ group, sourceKey, nodeKey, ops }: { group: EntityPhKind;
   const nodeViewPaths = scope === "current"
     ? (nodePath ? [nodePath, ...nodeFaceList.filter((p) => p !== nodePath)] : nodeFaceList)
     : [];
-  // 当前视角可挑选加入的形象 = 实体形象集中尚未加入本节点的（头像恒
-  // 兜底显示不列）。
-  const pickablePaths = useMemo(() => {
-    if (!entity) return [];
-    return entityRefPaths(group, entity).filter((p) => !nodeFaceList.includes(p));
-  }, [entity, group, nodeFaceList]);
   // 本集该类实体（全部视角数据源）：本集 node_links 收集去重；当前实体
   // 恒排首位（不在本集挂接里也兜底并入，自己的形象集始终可见）。
   const episodeEntities = useMemo(() => {
@@ -737,18 +775,13 @@ function EntityDetail({ group, sourceKey, nodeKey, ops }: { group: EntityPhKind;
           </div>
         )}
       </DetailSection>
-      {pickerOpen && nodeKey && (
+      {pickerOpen && nodeKey && entity && (
         <NodeFacePicker
-          paths={pickablePaths}
-          libraryRoot={ops.libraryRoot}
-          title={t("project.detail.nodeFacePickTitle")}
-          emptyText={t("project.detail.nodeFaceAllIn")}
-          onPick={(p) => {
-            // 点选即加即关：写入本节点选用集，当前视角立即多一张卡；
-            // 不切视角、不动库数据（用户定案「当前是当前的」）。
-            if (nodeKey) ops.addNodeFace(nodeKey, p);
-            setPickerOpen(false);
-          }}
+          group={group}
+          entity={entity as ProjectCharacter | ProjectLocation | ProjectProp}
+          nodeKey={nodeKey}
+          nodeFaceList={nodeFaceList}
+          ops={ops}
           onClose={() => setPickerOpen(false)}
         />
       )}
@@ -861,23 +894,22 @@ function entityBindings(entity: ProjectCharacter | ProjectLocation | ProjectProp
   return map;
 }
 
-/** 库面板选条目加入形象（添加形象钮共用）：该条目头像/主图成为新形象，
- *  名称/人设/提示词/音色（角色）自动带入为该形象的独立绑定。返回三态：
- *  added=新添加；exists=图已在图集（重复添加）；empty=条目无图。调用方
- *  据此前两者都切「全部」视角（用户实测：重复添加静默不动像失败）。 */
+/** 库条目加入形象（实体级）：该条目头像/主图成为新形象，名称/人设/提示
+ *  词/音色（角色）自动带入为该形象的独立绑定。返回 added 时带新图路径
+ *  （节点挑选浮层据此同步加入本节点选用集）。 */
 function addPickedFace(
   group: EntityPhKind,
   entity: ProjectCharacter | ProjectLocation | ProjectProp,
   id: string,
   ops: DetailWindowOps,
-): "added" | "exists" | "empty" {
+): { result: "added" | "exists" | "empty"; path?: string } {
   const lib = group === "character" ? ops.characters : group === "location" ? ops.locations : ops.props;
   const picked = lib.find((x) => x.id === id);
-  if (!picked) return "empty";
+  if (!picked) return { result: "empty" };
   const imgPath = group === "character"
     ? (picked as ProjectCharacter).avatar_path
     : (picked as ProjectLocation | ProjectProp).ref_path;
-  if (!imgPath) return "empty";
+  if (!imgPath) return { result: "empty" };
   const refPaths = entityRefPaths(group, entity);
   if (!refPaths.includes(imgPath)) {
     const gridPaths = entityFacePaths(group, entity);
@@ -894,9 +926,9 @@ function addPickedFace(
         time_hint: group === "location" ? ((picked as ProjectLocation).time_hint ?? "") : "",
       },
     ]);
-    return "added";
+    return { result: "added", path: imgPath };
   }
-  return "exists";
+  return { result: "exists", path: imgPath };
 }
 
 /** 无形象图条目 id（角色无头像 / 场景道具无主图）：添加形象面板里禁点
