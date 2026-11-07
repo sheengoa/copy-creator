@@ -443,22 +443,24 @@ function faceCardsOf(args: {
 }
 
 /** 库条目加入形象（实体级）：该条目头像/主图成为新形象，名称/人设/提示
- *  词/音色（角色）自动带入为该形象的独立绑定。仅供「全部」视角组头的
- *  实体级添加使用。 */
+ *  词/音色（角色）自动带入为该形象的独立绑定。返回 added 时带新图路径
+ *  （当前视角挂载据此同步 addNodeFace——挑一次，当前与全部两处都能看
+ *  到，用户定案「不能挑完就丢」）。 */
 function addPickedFace(
   group: EntityPhKind,
   entity: ProjectCharacter | ProjectLocation | ProjectProp,
   id: string,
   ops: DetailWindowOps,
-) {
+): { result: "added" | "exists" | "empty"; path?: string } {
   const lib = group === "character" ? ops.characters : group === "location" ? ops.locations : ops.props;
   const picked = lib.find((x) => x.id === id);
-  if (!picked) return;
+  if (!picked) return { result: "empty" };
   const imgPath = group === "character"
     ? (picked as ProjectCharacter).avatar_path
     : (picked as ProjectLocation | ProjectProp).ref_path;
+  if (!imgPath) return { result: "empty" };
   const refPaths = entityRefPaths(group, entity);
-  if (imgPath && !refPaths.includes(imgPath)) {
+  if (!refPaths.includes(imgPath)) {
     const gridPaths = entityFacePaths(group, entity);
     const bindingsMap = entityBindings(entity);
     ops.setReferences(group, entity.id, [...refPaths, imgPath]);
@@ -473,7 +475,9 @@ function addPickedFace(
         time_hint: group === "location" ? ((picked as ProjectLocation).time_hint ?? "") : "",
       },
     ]);
+    return { result: "added", path: imgPath };
   }
+  return { result: "exists", path: imgPath };
 }
 /** 实体形象组（全部视角的每实体分块，用户定案「本集分组·可直接编辑」）：
  *  组头 = 实体名 + 张数 + 该组自己的添加形象钮；组内形象卡与单实体窗完全
@@ -755,14 +759,16 @@ function EntityDetail({ group, sourceKey, nodeKey, ops }: { group: EntityPhKind;
           disabledLabel={t("project.library.noFaceImage")}
           onClose={() => setPickerOpen(false)}
           onPick={(id) => {
-            // 库条目点选 = 纯挂载到本节点（用户定案「库是全局的，节点只
-            // 是挂载」）：只记节点挂了哪些图，库里/角色资料一概不动。
-            const lib = group === "character" ? ops.characters : group === "location" ? ops.locations : ops.props;
-            const picked = lib.find((x) => x.id === id);
-            const imgPath = picked
-              ? (group === "character" ? (picked as ProjectCharacter).avatar_path : (picked as ProjectLocation | ProjectProp).ref_path)
-              : "";
-            if (imgPath && nodeKey) ops.addNodeFace(nodeKey, imgPath);
+            // 库条目点选 = 双写（用户定案「挑一次，两处都有，不能挑完就
+            // 丢」）：① 图收进该角色的形象列表（「全部」视角分组可见）；
+            // ② 同步挂上本节点（「当前」视角可见）。图已在角色列表时只
+            // 补挂载，不重复落库。
+            if (!entity) {
+              setPickerOpen(false);
+              return;
+            }
+            const res = addPickedFace(group, entity, id, ops);
+            if (res.path && nodeKey) ops.addNodeFace(nodeKey, res.path);
             setPickerOpen(false);
           }}
         />

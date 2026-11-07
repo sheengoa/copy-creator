@@ -158,7 +158,7 @@ describe("DetailWindow", () => {
     ]);
   });
 
-  it("当前视角添加形象：弹标准库面板，点条目纯挂载到本节点（不动库），留在当前", () => {
+  it("当前视角添加形象：弹标准库面板，点条目双写（收进该角色形象列表+挂上本节点），留在当前", () => {
     const addNodeFace = vi.fn();
     const setReferences = vi.fn();
     const setImageBindings = vi.fn();
@@ -183,12 +183,15 @@ describe("DetailWindow", () => {
       expect(selfRow?.querySelector(".project-library-tag")?.textContent).toBe("已关联");
       fireEvent.click(selfRow as HTMLElement);
       expect(addNodeFace).not.toHaveBeenCalled();
-      // 点库内其它条目「卡哇伊」→ 纯挂载：只 addNodeFace，库/角色数据零改动。
+      // 点库内其它条目「卡哇伊」→ 双写：图收进该角色形象列表（「全部」
+      // 视角分组可见）+ 同步挂上本节点（「当前」视角可见）——挑一次两处都有。
       const kwwRow = [...document.querySelectorAll(".project-library-card")].find((c) => c.textContent?.includes("卡哇伊"));
       fireEvent.click(kwwRow as HTMLElement);
+      expect(setReferences).toHaveBeenCalledWith("character", "char-2", ["avatars/kww.png"]);
+      expect(setImageBindings).toHaveBeenCalledWith("character", "char-2", [
+        { path: "avatars/kww.png", name: "卡哇伊", voice_path: "", bio: "", prompt: "", time_hint: "" },
+      ]);
       expect(addNodeFace).toHaveBeenCalledWith("eph:p1", "avatars/kww.png");
-      expect(setReferences).not.toHaveBeenCalled();
-      expect(setImageBindings).not.toHaveBeenCalled();
       // 面板关 + 视角仍「当前」（不切走）。
       expect(document.querySelector(".project-library-panel")).toBeNull();
       expect((screen.getByText("当前") as HTMLButtonElement).classList.contains("is-active")).toBe(true);
