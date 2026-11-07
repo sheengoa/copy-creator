@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useShallow } from "zustand/react/shallow";
 import { useTranslation } from "react-i18next";
-import { useProjectStore, type ProjectAsset } from "../../../stores/projectStore";
+import { useProjectStore, type ProjectAsset, type ProjectLocation, type ProjectProp } from "../../../stores/projectStore";
 import { CanvasDataContext } from "../../CanvasPage/dataContext";
 import FreeCanvas from "../../CanvasPage/FreeCanvas";
 import { ProjectCanvasContext, type ProjectCanvasContextValue } from "../../CanvasPage/nodes/project/projectContext";
@@ -650,7 +650,36 @@ export default function ProjectCanvasShell({
       persistNodeFaces({ ...nodeFaces, [nodeKey]: cur.filter((p) => p !== path) });
     },
     setVoice: (id, voicePath) => void setCharacterVoice(id, voicePath),
-    setReferences: (kind, id, paths) => void setReferences(kind, id, paths),
+    setReferences: (kind, id, paths) => {
+      // 级联清理（用户定案「从全部删掉 = 从这一集删掉，节点里也不该有」）：
+      // 库形象列表被移除的图，同步从本集所有节点的挂载集里撤下，否则
+      // 节点侧残留已删图（悬挂引用）。
+      const lib = kind === "character" ? characters : kind === "location" ? locations : props;
+      const row = lib.find((x) => x.id === id);
+      if (row) {
+        let old: string[] = [];
+        try {
+          const parsed = JSON.parse(row.reference_paths ?? "[]") as unknown;
+          if (Array.isArray(parsed)) old = parsed.filter((p): p is string => typeof p === "string");
+        } catch {
+          // 非法 JSON 按空处理。
+        }
+        const main = kind === "character" ? "" : (row as ProjectLocation | ProjectProp).ref_path ?? "";
+        if (main && !old.includes(main)) old.unshift(main);
+        const removed = old.filter((p) => !paths.includes(p));
+        if (removed.length > 0) {
+          const next: Record<string, string[]> = {};
+          let changed = false;
+          for (const [k, list] of Object.entries(nodeFaces)) {
+            const filtered = list.filter((p) => !removed.includes(p));
+            next[k] = filtered;
+            if (filtered.length !== list.length) changed = true;
+          }
+          if (changed) persistNodeFaces(next);
+        }
+      }
+      void setReferences(kind, id, paths);
+    },
     setImageBindings: (kind, id, bindings) => void setImageBindings(kind, id, bindings),
     saveProfile: (kind, id, bio, prompt) => {
       // 实体级默认人设/提示词（形象卡默认区）：按类分流保留各自其它字段。
