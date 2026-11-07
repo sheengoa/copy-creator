@@ -636,9 +636,11 @@ export function useCanvasGestures(deps: GestureDeps) {
         cleanupPointerVisuals(drag.moved ?? false);
         return;
       }
-      // 统一双击判定：两次「按下即松手」（未拖动）在 500ms 内落在同一
+      // 统一双击判定：两次「按下即松手」（未拖动）在 600ms 内落在同一
       // 目标（≤16px）上才算双击。不用原生 dblclick——它把拖拽轻抖的
-      // 松手也计成第二次点击，是「单击/拖完莫名弹窗」的根源。
+      // 松手也计成第二次点击，是「单击/拖完莫名弹窗」的根源。600ms
+      // 比系统默认 500ms 稍宽：实测慢双击（点得慢半拍）在 500ms 下
+      // 容易失手，600ms 仍远低于「两次独立单击」的节奏。
       const dblCountable = drag.kind === "marquee" || drag.kind === "node" || drag.kind === "multidrag";
       if (dblCountable && !drag.moved) {
         const hitEl = document.elementFromPoint(e.clientX, e.clientY);
@@ -652,7 +654,7 @@ export function useCanvasGestures(deps: GestureDeps) {
           const now = performance.now();
           const prev = dblRef.current;
           dblRef.current = { key, x: e.clientX, y: e.clientY, t: now };
-          if (prev && prev.key === key && now - prev.t < 500 &&
+          if (prev && prev.key === key && now - prev.t < 600 &&
               Math.hypot(e.clientX - prev.x, e.clientY - prev.y) < 16) {
             dblRef.current = null;
             if (!key) {
