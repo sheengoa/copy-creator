@@ -853,6 +853,7 @@ export default function ProjectCanvasShell({
             else if (/^(char|loc|prop|grp):/.test(key)) setDetailFor({ kind: "info", group: node.type as EntityPhKind, sourceKey: key });
             else if (key === "script" || key.startsWith("script:")) setDetailFor({ kind: "scriptPh", key });
             else if (key.startsWith("prompt:")) setDetailFor({ kind: "promptPh", id: key.slice(7) });
+            else if (key.startsWith("shot:")) onPickForShot(key.slice(5));
             else if (key === "output") setDetailFor({ kind: "output" });
           }}
         />

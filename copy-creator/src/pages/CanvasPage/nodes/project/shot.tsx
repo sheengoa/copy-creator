@@ -30,6 +30,11 @@ export const shotDef: NodeDefinition = {
   fallbackSize: { w: 240, h: 200 },
   ports: shotPorts(false),
   portsOf: (node) => shotPorts((node.metadata as { hasVideo?: boolean } | undefined)?.hasVideo === true),
+  // 双击＝挂靠素材（卡面空态文案「未挂素材 · 双击挂靠」承诺的动作）：
+  // 经 services.openNodeDetail 由工程壳分派到 onPickForShot（工具钮同款）。
+  onDoubleClick: (node, services) => {
+    services.openNodeDetail?.(node);
+  },
   Component: ShotBody,
   ToolsExtra: ShotTools,
 };
