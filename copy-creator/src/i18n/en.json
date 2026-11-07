@@ -1004,7 +1004,6 @@
     "frameHintLast": "Extracts the last frame of the video as an image",
     "frameFirstBadge": "First frame",
     "frameLastBadge": "Last frame",
-    "frameChangeVideo": "Change video",
     "toolEmpty": "Drop a video, or pick from library / local files",
     "toolRunning": "Working…",
     "toolDoneHint": "Connect to save / preview / reference ports; drag the timeline and run again to re-extract",

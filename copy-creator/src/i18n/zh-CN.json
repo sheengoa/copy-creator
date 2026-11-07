@@ -1000,7 +1000,6 @@
     "frameHintLast": "提取该视频的最后一帧，输出为图片",
     "frameFirstBadge": "首帧",
     "frameLastBadge": "尾帧",
-    "frameChangeVideo": "换一个视频",
     "toolEmpty": "拖入视频，或从资源库 / 本地文件选择",
     "toolRunning": "执行中…",
     "toolDoneHint": "产物可连保存 / 预览 / 参考口；拖动时间轴改参数后点按钮重抽",
