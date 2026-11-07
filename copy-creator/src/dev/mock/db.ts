@@ -318,6 +318,43 @@ export const db = {
   ] as MockAiChannel[],
 };
 
+// ── 自由画布域持久化：真实后端落 SQLite，浏览器 mock 是内存表——刷新
+// 即失，曾被用户侧误读为「自由画布不持久」。三张画布表镜像到
+// localStorage 对齐真实行为（工程域本就按集走 localStorage，不在此列）。
+const CANVAS_DB_KEY = "tauri_mock_canvas_db_v1";
+
+export function loadCanvasDbFromStorage(): void {
+  try {
+    const raw = window.localStorage.getItem(CANVAS_DB_KEY);
+    if (!raw) return;
+    const saved = JSON.parse(raw) as {
+      canvases?: MockCanvas[];
+      canvas_nodes?: MockCanvasNode[];
+      canvas_connections?: MockCanvasConnection[];
+    };
+    if (Array.isArray(saved.canvases)) db.canvases = saved.canvases;
+    if (Array.isArray(saved.canvas_nodes)) db.canvas_nodes = saved.canvas_nodes;
+    if (Array.isArray(saved.canvas_connections)) db.canvas_connections = saved.canvas_connections;
+  } catch {
+    // 存储损坏：退回内存种子，仅损失上次画布内容。
+  }
+}
+
+export function saveCanvasDbToStorage(): void {
+  try {
+    window.localStorage.setItem(
+      CANVAS_DB_KEY,
+      JSON.stringify({
+        canvases: db.canvases,
+        canvas_nodes: db.canvas_nodes,
+        canvas_connections: db.canvas_connections,
+      }),
+    );
+  } catch {
+    // 存储不可用：仅不持久。
+  }
+}
+
 /** 画布节点默认 metadata（对齐 Rust NodeMeta::default_for）。 */
 export function canvasDefaultMeta(type: MockCanvasNode["type"]): MockCanvasMeta {
   switch (type) {

@@ -10,11 +10,13 @@ import {
   clone,
   db,
   libraryRoot,
+  loadCanvasDbFromStorage,
   mockEmit,
   mockEventEntries,
   mockEventListeners,
   nextId,
   nextMockEventId,
+  saveCanvasDbToStorage,
   ts,
   type MockAsset,
   type MockCanvas,
@@ -484,6 +486,22 @@ function handleInvoke(cmd: string, args: Record<string, unknown>): unknown {
       return 10485760;
     case "get_setting":
       return "";
+    case "get_all_settings":
+      // 全量设置表（对齐 settingsStore.loadAll 的读取字段）：mock 返回空
+      // 会让 store 读 theme 报 TypeError 并每分钟重试刷屏，这里给一份
+      // 缺省值齐整的表（与真实后端的 SQLite settings 表同构）。
+      return {
+        theme: "system",
+        language: "zh-CN",
+        clipboard_retention: "1month",
+        shortcut_key: "",
+        shortcut_radial: "",
+        shortcut_clipboard_create: "",
+        radial_menu_enabled: "1",
+        radial_menu_scale: "1",
+        paste_left_click: "normal",
+        content_sort: "",
+      };
     case "project_search":
       return [];
     case "get_resource_groups":
@@ -834,7 +852,11 @@ export function installBrowserMock(): void {
           }
           return Promise.resolve(null);
         }
-        return Promise.resolve(handleInvoke(cmd, args ?? {}));
+        const result = handleInvoke(cmd, args ?? {});
+        // 画布域落 localStorage：真实后端写 SQLite，mock 内存表刷新即失
+        // （曾表现为「自由画布刷新全丢」）。所有 canvas_* 命令统一在此收口。
+        if (cmd.startsWith("canvas_")) saveCanvasDbToStorage();
+        return Promise.resolve(result);
       } catch (error) {
         return Promise.reject(error);
       }
@@ -858,5 +880,7 @@ export function installBrowserMock(): void {
   } catch {
     // 存储不可用：仅影响初始定位。
   }
+  // 自由画布域恢复：上一次会话的画布/节点/连线（真实后端在 SQLite 里）。
+  loadCanvasDbFromStorage();
   console.info("[tauriMock] 已注入浏览器内存后端（仅开发验证用）");
 }
