@@ -43,6 +43,10 @@ export interface ProjectCanvasContextValue {
   layout: Omit<CanvasLayout, "infoFramePos">;
   infoGroups: InfoGroup[];
   entityPhs: EntityPh[];
+  /** 节点挂载形象集（nodeKey → 形象 path 列表，按集 localStorage）：
+   *  节点预览图取首张（用户定案「节点预览图跟随挂的图走，只改这一个
+   *  节点，别的节点头像不变」），未挂载回退头像/主图。 */
+  nodeFaces: Record<string, string[]>;
   scriptPhs: ScriptPh[];
   promptPhs: PromptPh[];
   notes: CanvasNote[];

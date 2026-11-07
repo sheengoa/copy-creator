@@ -25,6 +25,12 @@ function entityOf(ctx: ReturnType<typeof useProjectCanvas>, kind: EntityPhKind, 
   return (episodeList.find((e) => e.id === id) ?? globalList.find((e) => e.id === id)) as EntityLike | undefined;
 }
 
+/** 节点预览图（用户定案「节点预览图跟随挂的图走，只改这一个节点，别
+ *  的节点头像不变」）：节点挂载集首张优先；没挂过回退头像/主图。 */
+function nodePreviewOf(ctx: ReturnType<typeof useProjectCanvas>, nodeKey: string, fallback: string): string {
+  return ctx.nodeFaces?.[nodeKey]?.[0] ?? fallback;
+}
+
 /** 实体参考图卡：定框 + 虚影 + 主图 contain（用户定案「节点里限制一个
  *  具体的框，保持比例完整展示，多余空间上下虚影」，头像/主图切换同规）。
  *  无图 = 类型色淡底首字占位（同一卡片形态）。 */
@@ -60,7 +66,7 @@ export function EntityBody({ node }: NodeProps) {
     const loadedId = ph?.entityId;
     if (loadedId) {
       const entity = entityOf(ctx, kind, loadedId);
-      const refPath = entity ? (kind === "character" ? entity.avatar_path : entity.ref_path) : "";
+      const refPath = nodePreviewOf(ctx, key, entity ? (kind === "character" ? entity.avatar_path : entity.ref_path) ?? "" : "");
       return (
         <div className="pc-info-body">
           <div className="pc-photo">
@@ -113,7 +119,7 @@ export function EntityBody({ node }: NodeProps) {
   // 单实体：集关联默认节点（参考图 = 角色头像 / 场景道具参考图）。
   const id = key.slice(key.indexOf(":") + 1);
   const entity = entityOf(ctx, kind, id);
-  const refPath = entity ? (kind === "character" ? entity.avatar_path : entity.ref_path) : "";
+  const refPath = nodePreviewOf(ctx, key, entity ? (kind === "character" ? entity.avatar_path : entity.ref_path) ?? "" : "");
   return (
     <div className="pc-info-body">
       <div className="pc-photo">
@@ -139,12 +145,12 @@ export function EntityViewTool({ node }: { node: CanvasNode }) {
             const loadedId = ctx.entityPhs.find((p) => p.id === node.id.slice(4))?.entityId;
             if (loadedId) {
               const k = node.type as EntityPhKind;
-              ctx.setDetailFor({ kind: "info", group: k, sourceKey: `${k === "character" ? "char" : k === "location" ? "loc" : "prop"}:${loadedId}` });
+              ctx.setDetailFor({ kind: "info", group: k, sourceKey: `${k === "character" ? "char" : k === "location" ? "loc" : "prop"}:${loadedId}`, nodeKey: node.id });
             } else {
               ctx.setDetailFor({ kind: "entityPh", id: node.id.slice(4), group: node.type as EntityPhKind });
             }
           } else {
-            ctx.setDetailFor({ kind: "info", group: node.type as EntityPhKind, sourceKey: node.id });
+            ctx.setDetailFor({ kind: "info", group: node.type as EntityPhKind, sourceKey: node.id, nodeKey: node.id.startsWith("grp:") ? undefined : node.id });
           }
         }}
       >

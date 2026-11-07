@@ -489,6 +489,7 @@ export default function ProjectCanvasShell({
     layout: data.layout,
     infoGroups: data.infoGroups,
     entityPhs: data.entityPhs,
+    nodeFaces,
     scriptPhs: data.scriptPhs,
     promptPhs: data.promptPhs,
     notes: data.notes,
