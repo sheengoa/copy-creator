@@ -59,7 +59,9 @@ export interface AiChannel {
   lastError: string;
   lastLatencyMs: number | null;
   lastTestedAt: string;
-  /** 限流/超时冷却截止（epoch ms），到期自动恢复参与调度。 */
+  /** 限流（429）冷却截止（epoch ms），到期自动恢复参与调度；手动恢复或
+   *  测速成功即清零。超时不冷却（2026-11-06：单次超时锁渠道 5 分钟是
+   *  把用户锁在门外，改为仅记录错误文案）。 */
   cooldownUntilMs: number;
   sortOrder: number;
 }
@@ -180,6 +182,8 @@ interface SettingsState {
   deleteAiChannel: (id: string) => Promise<void>;
   reorderAiChannels: (ids: string[]) => Promise<void>;
   setAiChannelEnabled: (id: string, enabled: boolean) => Promise<void>;
+  /** 手动恢复渠道故障状态（清自动停用/限流冷却，不动开关与测速记录）。 */
+  restoreAiChannel: (id: string) => Promise<void>;
   /** 单渠道测速：真实发一次最小生图请求，结果（延迟/错误）写回列表。 */
   testAiChannel: (id: string) => Promise<{ ok: boolean; latencyMs?: number; error?: string }>;
   /** 调度策略与故障处理：settings 批量落库 + 本地同步。 */
@@ -560,6 +564,24 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
       await invoke("set_ai_channel_enabled", { id, enabled });
     } catch (e) {
       console.error("Failed to toggle AI channel:", e);
+      void get().loadAiChannels();
+    }
+  },
+
+  // 手动恢复渠道故障状态（自动停用/限流冷却）：乐观清三态，失败回滚重载。
+  // 不动 enabled 与测速记录，与后端 restore_ai_channel 同语义。
+  restoreAiChannel: async (id) => {
+    set({
+      aiChannels: get().aiChannels.map((c) =>
+        c.id === id
+          ? { ...c, status: "normal" as const, lastError: "", cooldownUntilMs: 0 }
+          : c,
+      ),
+    });
+    try {
+      await invoke("restore_ai_channel", { id });
+    } catch (e) {
+      console.error("Failed to restore AI channel:", e);
       void get().loadAiChannels();
     }
   },

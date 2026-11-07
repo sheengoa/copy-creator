@@ -352,3 +352,25 @@ pub fn set_ai_channel_enabled(app: AppHandle, id: String, enabled: bool) -> Resu
     .map_err(|e| e.to_string())?;
     Ok(())
 }
+
+/// 手动恢复渠道故障状态（设置页渠道行「恢复」按钮）：清自动停用标记、
+/// 错误文案与限流冷却，不动启用开关与测速记录——语义与重新启用时的
+/// 清理一致，但开关保持原样（2026-11-06：此前冷却中的渠道在设置页
+/// 无状态展示也无恢复入口，用户只能靠关开开关碰运气）。
+#[tauri::command]
+pub fn restore_ai_channel(app: AppHandle, id: String) -> Result<(), String> {
+    let state = app.state::<DbState>();
+    let conn = state.conn.lock().map_err(|e| e.to_string())?;
+    restore_channel_internal(&conn, &id)
+}
+
+/// 恢复核心（命令层与测试共用，同 update_channel_row 惯例）。
+pub(crate) fn restore_channel_internal(conn: &Connection, id: &str) -> Result<(), String> {
+    conn.execute(
+        "UPDATE ai_channels SET status = 'normal', last_error = '', cooldown_until_ms = 0, \
+         updated_at = ?1 WHERE id = ?2",
+        params![canvas_now(), id],
+    )
+    .map(|_| ())
+    .map_err(|e| e.to_string())
+}

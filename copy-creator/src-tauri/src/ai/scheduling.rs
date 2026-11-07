@@ -3,7 +3,7 @@ use super::*;
 
 // ── 调度：策略排序 + 故障分类与标记（画布设置页配置，settings 通用键值） ──
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub(super) struct ChannelTarget {
     pub(super) id: String,
     pub(super) name: String,
@@ -75,8 +75,19 @@ pub(super) fn ordered_channel_targets(conn: &rusqlite::Connection, sched: &Sched
     let global_model = read_setting(conn, "ai_model");
     let mut targets: Vec<ChannelTarget> = Vec::new();
     let mut usable_rows = 0usize;
+    // 全被挡住时的报错细分计数：自动停用 / 限流冷却（含最长剩余，供
+    // 「约 N 分钟后自动恢复」估算；停用优先于冷却，与过滤条件同序）。
+    let mut disabled_rows = 0usize;
+    let mut cooldown_rows = 0usize;
+    let mut max_cooldown_remaining_ms = 0i64;
     for (id, name, protocol, base_url, api_key, model, price, currency, last_latency_ms, cooldown_until_ms, status) in &rows {
-        if status == "auto_disabled" || *cooldown_until_ms > now_ms {
+        if status == "auto_disabled" {
+            disabled_rows += 1;
+            continue;
+        }
+        if *cooldown_until_ms > now_ms {
+            cooldown_rows += 1;
+            max_cooldown_remaining_ms = max_cooldown_remaining_ms.max(*cooldown_until_ms - now_ms);
             continue;
         }
         usable_rows += 1;
@@ -100,6 +111,18 @@ pub(super) fn ordered_channel_targets(conn: &rusqlite::Connection, sched: &Sched
     if targets.is_empty() {
         return Err(if usable_rows > 0 {
             "渠道都没有可用模型：请在渠道或 设置 → 画布 → 生成默认值 里填写模型".to_string()
+        } else if disabled_rows == 0 && cooldown_rows > 0 {
+            // 单渠道超时/限流被冷却时最常见的现场：如实告知会自动恢复 +
+            // 手动恢复入口，不说「请添加或启用渠道」（渠道明明都启用了，
+            // 2026-11-06 用户反馈的误导文案）。
+            let mins = (max_cooldown_remaining_ms + 59_999) / 60_000;
+            format!("启用渠道都在限流冷却中：约 {mins} 分钟后自动恢复，也可到 设置 → 画布 对渠道点「恢复」")
+        } else if disabled_rows > 0 && cooldown_rows == 0 {
+            "渠道已被自动停用（鉴权/欠费类错误）：请到 设置 → 画布 检查 API Key 或对渠道点「恢复」".to_string()
+        } else if disabled_rows > 0 || cooldown_rows > 0 {
+            format!(
+                "启用渠道都暂不可用：{cooldown_rows} 条限流冷却中、{disabled_rows} 条已自动停用，可到 设置 → 画布 恢复"
+            )
         } else {
             "没有可用的生成渠道：请到 设置 → 画布 添加或启用渠道".to_string()
         });
@@ -109,7 +132,7 @@ pub(super) fn ordered_channel_targets(conn: &rusqlite::Connection, sched: &Sched
         "manual" => {
             let picked: Vec<ChannelTarget> = targets.into_iter().filter(|t| t.id == sched.manual_channel_id).collect();
             if picked.is_empty() {
-                return Err("手动指定的渠道不存在或已停用：请到 设置 → 画布 重新选择".to_string());
+                return Err("手动指定的渠道当前不可用（不存在、已停用或冷却中）：请到 设置 → 画布 检查或恢复".to_string());
             }
             Ok(picked)
         }
@@ -165,12 +188,14 @@ fn latency_map(conn: &rusqlite::Connection) -> std::collections::HashMap<String,
         .unwrap_or_default()
 }
 
-/// 生成失败分类：鉴权/欠费类（重试无意义）→ 自动停用；限流/超时类 →
-/// 冷却到期自动恢复；其余仅记录错误文案。
+/// 生成失败分类：鉴权/欠费类（重试无意义）→ 自动停用；限流类 →
+/// 冷却到期自动恢复；**超时不冷却**（2026-11-06 用户反馈：单次超时多
+/// 为网络抖动或本张生成超预算，渠道本身没坏——拉出调度 5 分钟等于把
+/// 用户锁在门外，重试点一下就好），与其余错误一样仅记录错误文案。
 pub(super) fn classify_failure(message: &str) -> &'static str {
     let m = message.to_lowercase();
     let auth_keys = ["认证失败", "401", "403", "invalid_api_key", "unauthorized", "insufficient", "quota", "欠费", "余额不足", "billing", "permission"];
-    let rate_keys = ["429", "限流", "rate limit", "too many requests", "超时", "timeout", "timed out"];
+    let rate_keys = ["429", "限流", "rate limit", "too many requests"];
     if auth_keys.iter().any(|k| m.contains(k)) {
         "auth"
     } else if rate_keys.iter().any(|k| m.contains(k)) {
@@ -225,10 +250,11 @@ mod tests {
         assert_eq!(classify_failure("认证失败，请检查 API Key"), "auth");
         assert_eq!(classify_failure("HTTP 401"), "auth");
         assert_eq!(classify_failure("insufficient_quota: 已欠费"), "auth");
-        // 限流/超时类：冷却后自动恢复
+        // 限流类：冷却后自动恢复；超时不再冷却（渠道没坏，不该锁 5 分钟）
         assert_eq!(classify_failure("请求过于频繁（限流），请稍后再试"), "rate");
         assert_eq!(classify_failure("HTTP 429"), "rate");
-        assert_eq!(classify_failure("请求失败：operation timed out"), "rate");
+        assert_eq!(classify_failure("请求失败：operation timed out"), "other");
+        assert_eq!(classify_failure("请求失败：timeout"), "other");
         // 其余（网络/参数/内容策略等）只记录不动作
         assert_eq!(classify_failure("接口没有返回任何图片"), "other");
         assert_eq!(classify_failure("图片尺寸无效"), "other");

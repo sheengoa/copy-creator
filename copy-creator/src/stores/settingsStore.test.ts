@@ -229,3 +229,55 @@ describe("testAiChannel 结果回写", () => {
     expect(channel?.lastTestedAt).toBe("2026-01-01T00:00:00.000Z");
   });
 });
+
+describe("restoreAiChannel 手动恢复", () => {
+  beforeEach(() => {
+    invokeMock.mockReset();
+    invokeMock.mockResolvedValue(undefined);
+  });
+
+  it("清自动停用/错误文案/限流冷却，不动启用开关与测速记录", async () => {
+    useSettingsStore.setState({
+      aiChannels: [
+        {
+          ...baseChannel,
+          enabled: true,
+          status: "auto_disabled" as const,
+          lastError: "认证失败",
+          cooldownUntilMs: Date.now() + 300_000,
+          lastLatencyMs: 888,
+          lastTestedAt: "2026-01-01T00:00:00.000Z",
+        },
+      ],
+    });
+
+    await useSettingsStore.getState().restoreAiChannel("ch-1");
+
+    expect(invokeMock).toHaveBeenCalledWith("restore_ai_channel", { id: "ch-1" });
+    const channel = useSettingsStore.getState().aiChannels.find((c) => c.id === "ch-1");
+    expect(channel?.status).toBe("normal");
+    expect(channel?.lastError).toBe("");
+    expect(channel?.cooldownUntilMs).toBe(0);
+    expect(channel?.enabled).toBe(true);
+    expect(channel?.lastLatencyMs).toBe(888);
+  });
+
+  it("命令级失败回滚重载（不留在乐观态）", async () => {
+    // 仅恢复命令失败；随后 loadAiChannels 的 list_ai_channels 正常返回
+    // 服务端状态（乐观态被回读覆盖）。
+    invokeMock.mockRejectedValueOnce("Command restore_ai_channel not found");
+    invokeMock.mockResolvedValue([{ ...baseChannel, lastError: "认证失败" }]);
+    useSettingsStore.setState({
+      aiChannels: [{ ...baseChannel, status: "auto_disabled" as const, lastError: "认证失败" }],
+    });
+
+    await useSettingsStore.getState().restoreAiChannel("ch-1");
+
+    expect(invokeMock).toHaveBeenCalledWith("restore_ai_channel", { id: "ch-1" });
+    expect(invokeMock).toHaveBeenCalledWith("list_ai_channels");
+    const channel = useSettingsStore.getState().aiChannels.find((c) => c.id === "ch-1");
+    expect(channel?.status).toBe("normal");
+    // 服务端 lastError 仍在 → 回滚生效（乐观清空被回读覆盖）
+    expect(channel?.lastError).toBe("认证失败");
+  });
+});

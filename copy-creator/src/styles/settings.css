@@ -613,6 +613,39 @@
   background: var(--text-tertiary);
 }
 
+/* 限流冷却中（会自动恢复，语义区别于停用的红）：橙点 + 倒计时胶囊 */
+.canvas-dot.cool {
+  background: var(--warning);
+  box-shadow: 0 0 0 3px var(--warning-bg);
+}
+
+.canvas-lat.cool {
+  background: var(--warning-bg);
+  color: var(--warning);
+}
+
+/* 渠道行「恢复」钮：清自动停用/限流冷却（不动开关与测速记录）。
+   小型轻量胶囊，与行内徽标/测速胶囊同高。 */
+.canvas-ch-restore {
+  flex-shrink: 0;
+  padding: 3px 9px;
+  border: 1px solid var(--separator);
+  border-radius: 999px;
+  background: var(--bg-card);
+  font-family: inherit;
+  font-size: 11px;
+  font-weight: var(--weight-semibold);
+  color: var(--text-secondary);
+  cursor: pointer;
+  transition: color 140ms ease, border-color 140ms ease, background-color 140ms ease;
+}
+
+.canvas-ch-restore:hover {
+  color: var(--accent);
+  border-color: var(--accent);
+  background: var(--accent-bg);
+}
+
 .canvas-ch-txt {
   flex: 1;
   min-width: 0;

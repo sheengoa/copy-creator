@@ -161,6 +161,8 @@ struct UpstreamInput {
 // 收完），与 new-api 的渠道测速同思路：只测真实生图链路，延迟才有调度
 // 意义；成功后丢弃响应体，不落产物。失败只记录错误文案，不自动停用——
 // 停用仅由真实生成的鉴权/欠费错误触发（见 generate 的故障处理）。
+// 测速成功同时清故障状态含限流冷却（「重新测速并恢复」路径此前漏清
+// cooldown_until_ms，2026-11-06 补齐）。
 
 struct AiChannelRow {
     id: String,
@@ -210,7 +212,7 @@ fn record_channel_test_result(
     let update = match result {
         Ok(latency_ms) => conn.execute(
             "UPDATE ai_channels SET last_latency_ms = ?1, last_tested_at = ?2, \
-             status = 'normal', last_error = '', updated_at = ?2 WHERE id = ?3",
+             status = 'normal', last_error = '', cooldown_until_ms = 0, updated_at = ?2 WHERE id = ?3",
             params![*latency_ms as i64, now, channel_id],
         ),
         Err(message) => conn.execute(
@@ -680,6 +682,60 @@ mod tests {
         assert_eq!(read_api_error_message(&nested), "inner");
         assert_eq!(status_error(401).unwrap().contains("认证"), true);
         assert_eq!(status_error(429).unwrap().contains("限流"), true);
+    }
+
+    /// 全部渠道被挡住时调度报错文案的细分：冷却中如实告知自动恢复时长
+    /// 与手动恢复入口，停用告知检查 Key 或恢复——不再一律说「请添加或
+    /// 启用渠道」（渠道明明都启用了，2026-11-06 用户反馈的误导文案）。
+    #[test]
+    fn scheduling_blocked_channel_messages() {
+        use crate::db::AI_CHANNEL_SCHEMA_SQL;
+        let conn = rusqlite::Connection::open_in_memory().unwrap();
+        conn.execute_batch(AI_CHANNEL_SCHEMA_SQL).unwrap();
+        let seed = |id: &str, status: &str, cooldown: i64| {
+            conn.execute(
+                "INSERT INTO ai_channels (id, name, protocol, base_url, api_key, model, enabled, status, cooldown_until_ms, sort_order, created_at, updated_at) \
+                 VALUES (?1, ?1, 'openai', 'https://x.example', 'k', 'm', 1, ?2, ?3, 0, '', '')",
+                rusqlite::params![id, status, cooldown],
+            )
+            .unwrap();
+        };
+        let sched = scheduling::Scheduling {
+            strategy: "balance".to_string(),
+            price_weight: 40,
+            failover: false,
+            auto_disable_auth: true,
+            cooldown_ms: 300_000,
+            manual_channel_id: String::new(),
+            concurrency: 4,
+        };
+        // 冷却场景：两条启用渠道全部冷却中 → Err 文案含「冷却」与「恢复」，
+        // 不含误导的「添加或启用」（渠道明明都启用了）
+        seed("c1", "normal", 4_102_444_800_000); // 2100-01-01
+        seed("c2", "normal", 4_102_444_800_000);
+        let err = scheduling::ordered_channel_targets(&conn, &sched).unwrap_err();
+        assert!(err.contains("冷却"), "{err}");
+        assert!(err.contains("恢复"), "{err}");
+        assert!(!err.contains("添加或启用"), "{err}");
+        // 恢复（清冷却）一条后重新可调度
+        conn.execute(
+            "UPDATE ai_channels SET cooldown_until_ms = ?1 WHERE id = 'c2'",
+            rusqlite::params![0i64],
+        )
+        .unwrap();
+        assert!(scheduling::ordered_channel_targets(&conn, &sched).is_ok());
+        // 全部自动停用：文案含「停用」
+        conn.execute("UPDATE ai_channels SET status = 'auto_disabled'", []).unwrap();
+        let err = scheduling::ordered_channel_targets(&conn, &sched).unwrap_err();
+        assert!(err.contains("停用"), "{err}");
+        // 混合（c1 冷却 + c2 停用）：合并计数文案
+        conn.execute(
+            "UPDATE ai_channels SET status = 'normal', cooldown_until_ms = ?1 WHERE id = 'c1'",
+            rusqlite::params![4_102_444_800_000i64],
+        )
+        .unwrap();
+        let err = scheduling::ordered_channel_targets(&conn, &sched).unwrap_err();
+        assert!(err.contains("1 条限流冷却中") && err.contains("1 条已自动停用"), "{err}");
     }
 
     #[test]

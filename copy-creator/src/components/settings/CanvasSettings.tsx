@@ -4,7 +4,7 @@
 // 生成默认值（默认模型 / 单次并发 / 请求超时）。全部自持久化：改动即
 // 落库，不走设置页统一保存按钮（与原 AI 生图分区同惯例）。
 // Key 不回传前端：列表只有掩码，编辑表单 Key 留空 = 保留原值。
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useLayoutEffect, useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
 import {
   DndContext,
@@ -29,6 +29,27 @@ import { IosSelect, Segmented, Toggle } from "../ui";
 
 // ── 渠道行（可拖拽排序） ──
 
+/** 冷却倒计时心跳：持有冷却截止值（>0）时每秒走针。渲染期不读时钟
+ *  （react-hooks/purity）：首帧 now=0，layout effect 对表一次后修正——
+ *  过期残留值同样对表后自然脱离冷却态，不会常驻定时器。 */
+function useCooldownNow(untilMs: number): number {
+  const [now, setNow] = useState(0);
+  useLayoutEffect(() => {
+    if (untilMs <= 0) return;
+    const t = Date.now();
+    setNow(t);
+    if (t >= untilMs) return;
+    const timer = window.setInterval(() => setNow(Date.now()), 1000);
+    return () => window.clearInterval(timer);
+  }, [untilMs]);
+  return now;
+}
+
+const formatRemaining = (ms: number): string => {
+  const total = Math.max(0, Math.ceil(ms / 1000));
+  return `${Math.floor(total / 60)}:${String(total % 60).padStart(2, "0")}`;
+};
+
 function ChannelRow({
   channel,
   open,
@@ -37,6 +58,7 @@ function ChannelRow({
   onEnabledChange,
   onDelete,
   onTest,
+  onRestore,
 }: {
   channel: AiChannel;
   open: boolean;
@@ -45,6 +67,7 @@ function ChannelRow({
   onEnabledChange: (enabled: boolean) => void;
   onDelete: () => void;
   onTest: () => void;
+  onRestore: () => void;
 }) {
   const { t } = useTranslation();
   const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({
@@ -62,28 +85,41 @@ function ChannelRow({
   const [currency, setCurrency] = useState(channel.currency);
   const [error, setError] = useState("");
   const updateAiChannel = useSettingsStore((s) => s.updateAiChannel);
-  const dimmed = !channel.enabled || channel.status === "auto_disabled";
 
-  // 行首状态：测速中 → 转圈；自动停用 → 红点；最近一次测速失败 → 红点
-  //（tooltip 见错误）；有延迟 → 绿点；从未测速 → 灰点。
-  const failed = !testing && channel.lastError !== "";
+  // 行首状态优先级：测速中 → 转圈；限流冷却中 → 橙点 + 倒计时（悬停
+  // 见触发原因）；自动停用 → 红点 +「已自动停用」徽标；最近一次测速
+  // 失败 → 红点「失败」；有延迟 → 绿点；从未测速 → 灰点。冷却此前在
+  // 设置页完全不可见（lastError 非空还被误显示成「测速失败」，2026-11-06
+  // 用户反馈即此），现于 latency 位显示剩余时间并配「恢复」按钮。
+  const nowMs = useCooldownNow(channel.cooldownUntilMs);
+  const cooling = !testing && channel.cooldownUntilMs > nowMs;
+  const disabled = channel.status === "auto_disabled";
+  const failed = !testing && !cooling && channel.lastError !== "";
+  // 冷却/停用同属暂不可用：行整体弱化（与手动停用 dim 同语言）。
+  const dimmed = !channel.enabled || disabled || cooling;
   const latencyText = testing
     ? t("settings.canvas.testing")
-    : failed
-      ? t("settings.canvas.testFailed")
-      : channel.lastLatencyMs == null
-        ? t("settings.canvas.untested")
-        : `${channel.lastLatencyMs} ms`;
+    : cooling
+      ? `${t("settings.canvas.cooling")} ${formatRemaining(channel.cooldownUntilMs - nowMs)}`
+      : failed
+        ? t("settings.canvas.testFailed")
+        : channel.lastLatencyMs == null
+          ? t("settings.canvas.untested")
+          : `${channel.lastLatencyMs} ms`;
   const latencyClass = testing
     ? " testing"
-    : channel.status === "auto_disabled" || failed
-      ? " off"
-      : channel.lastLatencyMs == null ? " none" : " ok";
+    : cooling
+      ? " cool"
+      : failed
+        ? " off"
+        : channel.lastLatencyMs == null ? " none" : " ok";
   const dotClass = testing
     ? " testing"
-    : channel.status === "auto_disabled" || failed
-      ? " bad"
-      : channel.lastLatencyMs == null ? " none" : " ok";
+    : cooling
+      ? " cool"
+      : failed
+        ? " bad"
+        : channel.lastLatencyMs == null ? " none" : " ok";
 
   const submit = async () => {
     setError("");
@@ -160,6 +196,19 @@ function ChannelRow({
           </span>
           {channel.status === "auto_disabled" && channel.lastError && (
             <span className="canvas-lat off" title={channel.lastError}>{t("settings.canvas.autoDisabled")}</span>
+          )}
+          {(cooling || disabled || failed) && (
+            <button
+              type="button"
+              className="canvas-ch-restore"
+              title={channel.lastError || undefined}
+              onClick={(e) => {
+                e.stopPropagation();
+                onRestore();
+              }}
+            >
+              {t("settings.canvas.restore")}
+            </button>
           )}
           <span className={`canvas-lat${latencyClass}`}>{latencyText}</span>
           <Toggle
@@ -431,8 +480,16 @@ function RoutePreview() {
       aiManualChannelId: s.aiManualChannelId,
     })),
   );
+  // 冷却倒计时心跳：有启用渠道持有冷却截止值时每秒走针，到期自动刷新
+  // 预览（纯数据取最大截止值，渲染期不读时钟）。
+  const maxCooldown = Math.max(0, ...channels.filter((c) => c.enabled).map((c) => c.cooldownUntilMs));
+  const nowMs = useCooldownNow(maxCooldown);
   const pick = useMemo<AiChannel | null>(() => {
-    const usable = channels.filter((c) => c.enabled && c.status !== "auto_disabled");
+    // 与后端调度同判（scheduling.rs ordered_channel_targets）：启用 +
+    // 非自动停用 + 不在限流冷却期；冷却到期经下方 tick 自动刷新预览。
+    const usable = channels.filter(
+      (c) => c.enabled && c.status !== "auto_disabled" && c.cooldownUntilMs <= nowMs,
+    );
     const candidates = usable.length > 0 ? usable : [];
     if (candidates.length === 0) return null;
     switch (aiStrategy) {
@@ -476,7 +533,7 @@ function RoutePreview() {
           .reduce((a, b) => (b.score < a.score ? b : a)).c;
       }
     }
-  }, [channels, aiStrategy, aiBalancePriceWeight, aiManualChannelId]);
+  }, [channels, aiStrategy, aiBalancePriceWeight, aiManualChannelId, nowMs]);
 
   const desc = (c: AiChannel): string => {
     const parts: string[] = [];
@@ -524,6 +581,7 @@ export function CanvasSettings() {
       loadAiChannels: s.loadAiChannels,
       reorderAiChannels: s.reorderAiChannels,
       setAiChannelEnabled: s.setAiChannelEnabled,
+      restoreAiChannel: s.restoreAiChannel,
       deleteAiChannel: s.deleteAiChannel,
       saveAiSettings: s.saveAiSettings,
     })),
@@ -669,6 +727,7 @@ export function CanvasSettings() {
                     onEnabledChange={(enabled) => void settings.setAiChannelEnabled(channel.id, enabled)}
                     onDelete={() => setPendingDelete(channel)}
                     onTest={() => void runTest(channel.id)}
+                    onRestore={() => void settings.restoreAiChannel(channel.id)}
                   />
                 ))}
               </SortableContext>
