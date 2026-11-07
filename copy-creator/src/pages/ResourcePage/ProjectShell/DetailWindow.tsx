@@ -498,6 +498,8 @@ function EntityFaceGroup({ group, entity, ops }: {
           kind={group === "character" ? "characters" : group === "location" ? "locations" : "props"}
           mode="pick"
           pickTitle={t("project.detail.facePickTitle", { kind: t(group === "character" ? "project.canvas.typeCharacter" : group === "location" ? "project.canvas.typeLocation" : "project.canvas.typeProp") })}
+          disabledIds={facelessIds(group, ops)}
+          disabledLabel={t("project.library.noFaceImage")}
           onClose={() => setPickerOpen(false)}
           onPick={(id) => {
             addPickedFace(group, entity, id, ops);
@@ -670,14 +672,17 @@ function EntityDetail({ group, sourceKey, ops }: { group: EntityPhKind; sourceKe
           kind={group === "character" ? "characters" : group === "location" ? "locations" : "props"}
           mode="pick"
           pickTitle={t("project.detail.facePickTitle", { kind: kindLabel })}
+          disabledIds={facelessIds(group, ops)}
+          disabledLabel={t("project.library.noFaceImage")}
           onClose={() => setPickerOpen(false)}
           onPick={(id) => {
             // 库条目选入即关（选一张加一张）：该条目的头像/主图成为新形象，
             // 名称/人设/提示词/音色（角色）自动带入为该形象的独立绑定。
             // 添加发生在「当前」视角时新形象不在节点显示那张里（用户实测
-            // 「添加了但没显示，全局里才有」）——成功即自动切「全部」让
-            // 结果立即可见；未添加（条目无图/图重复）保持原视角。
-            if (entity && addPickedFace(group, entity, id, ops)) setScope("all");
+            // 「添加了但没显示，全局里才有」）——成功与重复都切「全部」：
+            // 重复添加静默不动会被当成失败（用户实测二连），切过去即见
+            // 该形象已在；仅条目无图不切（结果无从展示）。
+            if (entity && addPickedFace(group, entity, id, ops) !== "empty") setScope("all");
             setPickerOpen(false);
           }}
         />
@@ -792,22 +797,24 @@ function entityBindings(entity: ProjectCharacter | ProjectLocation | ProjectProp
 }
 
 /** 库面板选条目加入形象（添加形象钮共用）：该条目头像/主图成为新形象，
- *  名称/人设/提示词/音色（角色）自动带入为该形象的独立绑定。返回是否
- *  真的添加了（条目无图或图已存在 = 未添加，调用方据此决定是否切视角）。 */
+ *  名称/人设/提示词/音色（角色）自动带入为该形象的独立绑定。返回三态：
+ *  added=新添加；exists=图已在图集（重复添加）；empty=条目无图。调用方
+ *  据此前两者都切「全部」视角（用户实测：重复添加静默不动像失败）。 */
 function addPickedFace(
   group: EntityPhKind,
   entity: ProjectCharacter | ProjectLocation | ProjectProp,
   id: string,
   ops: DetailWindowOps,
-): boolean {
+): "added" | "exists" | "empty" {
   const lib = group === "character" ? ops.characters : group === "location" ? ops.locations : ops.props;
   const picked = lib.find((x) => x.id === id);
-  if (!picked) return false;
+  if (!picked) return "empty";
   const imgPath = group === "character"
     ? (picked as ProjectCharacter).avatar_path
     : (picked as ProjectLocation | ProjectProp).ref_path;
+  if (!imgPath) return "empty";
   const refPaths = entityRefPaths(group, entity);
-  if (imgPath && !refPaths.includes(imgPath)) {
+  if (!refPaths.includes(imgPath)) {
     const gridPaths = entityFacePaths(group, entity);
     const bindingsMap = entityBindings(entity);
     ops.setReferences(group, entity.id, [...refPaths, imgPath]);
@@ -822,9 +829,18 @@ function addPickedFace(
         time_hint: group === "location" ? ((picked as ProjectLocation).time_hint ?? "") : "",
       },
     ]);
-    return true;
+    return "added";
   }
-  return false;
+  return "exists";
+}
+
+/** 无形象图条目 id（角色无头像 / 场景道具无主图）：添加形象面板里禁点
+ *  ——点了不会添加任何东西，静默无反应会被当成功能坏了。 */
+function facelessIds(group: EntityPhKind, ops: DetailWindowOps): string[] {
+  const lib = group === "character" ? ops.characters : group === "location" ? ops.locations : ops.props;
+  return lib
+    .filter((e) => !(group === "character" ? (e as ProjectCharacter).avatar_path : (e as ProjectLocation | ProjectProp).ref_path))
+    .map((e) => e.id);
 }
 
 /** 片段输入分组：按口聚合（角色/场景/道具/提示词/剧本/其他），组头计数

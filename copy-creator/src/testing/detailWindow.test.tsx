@@ -181,6 +181,57 @@ describe("DetailWindow", () => {
     }
   });
 
+  it("重复添加已存在形象：同样自动切「全部」（不静默装失败），且不再落库", () => {
+    useProjectStore.setState({ characters: [{ ...baseCharacter, reference_paths: "[]" }] });
+    const setReferences = vi.fn();
+    const setImageBindings = vi.fn();
+    try {
+      render(
+        <ProjectDetailWindow
+          target={{ kind: "info", group: "character", sourceKey: "char:char-2" }}
+          ops={makeOps({ setReferences, setImageBindings, characters: [{ ...baseCharacter, avatar_path: "avatars/k.png", reference_paths: JSON.stringify(["avatars/k.png"]) }] })}
+        />,
+      );
+      fireEvent.click(screen.getByText("添加形象"));
+      // 该条目头像已在参考图集 → exists：仍切「全部」让用户看到它已在，
+      // 但不重复落库。
+      fireEvent.click(document.querySelector(".project-library-card.pick") as HTMLElement);
+      expect((screen.getByText("全部") as HTMLButtonElement).classList.contains("is-active")).toBe(true);
+      expect(setReferences).not.toHaveBeenCalled();
+      expect(setImageBindings).not.toHaveBeenCalled();
+    } finally {
+      useProjectStore.setState({ characters: [] });
+    }
+  });
+
+  it("无形象图条目禁点：面板行显示「无形象图」，点击不触发添加", () => {
+    useProjectStore.setState({
+      characters: [
+        { ...baseCharacter, reference_paths: "[]" },
+        { ...baseCharacter, id: "char-empty", name: "无图角色", avatar_path: "", reference_paths: "[]" },
+      ],
+    });
+    const setReferences = vi.fn();
+    try {
+      render(
+        <ProjectDetailWindow
+          target={{ kind: "info", group: "character", sourceKey: "char:char-2" }}
+          ops={makeOps({ setReferences, characters: [{ ...baseCharacter, avatar_path: "avatars/k.png", reference_paths: "[]" }, { ...baseCharacter, id: "char-empty", name: "无图角色", avatar_path: "", reference_paths: "[]" }] })}
+        />,
+      );
+      fireEvent.click(screen.getByText("添加形象"));
+      // 无头像条目 tag = 「无形象图」且整卡禁点。
+      expect(screen.getByText("无形象图")).toBeTruthy();
+      const emptyCard = [...document.querySelectorAll(".project-library-card")].find((c) => c.textContent?.includes("无图角色"));
+      fireEvent.click(emptyCard as HTMLElement);
+      expect(setReferences).not.toHaveBeenCalled();
+      // 面板保持打开（无效点击不关闭，用户可继续选有图条目）。
+      expect(document.querySelector(".project-dialog-overlay")).toBeTruthy();
+    } finally {
+      useProjectStore.setState({ characters: [] });
+    }
+  });
+
   it("默认区音色两态：空态只给更换入口；有音色给播放件与清除", () => {
     const ops = makeOps({ characters: [{ ...baseCharacter, reference_paths: "[]" }] });
     const { rerender } = render(

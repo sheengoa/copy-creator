@@ -236,7 +236,9 @@ export default function ProjectLibraryPanel({
           )}
           {items.map(({ id, name, entity }) => {
             const isMarked = mode === "pick" && marked.has(id);
-            const isDisabled = mode === "pick" && multi && (disabledIds?.includes(id) ?? false);
+            // 禁点不限多选：单选挑选（如添加形象）同样需要挡掉无图条目
+            // 等无效项（点了静默无反应会被当成功能坏了）。
+            const isDisabled = mode === "pick" && (disabledIds?.includes(id) ?? false);
             const handleClick =
               mode === "pick"
                 ? isDisabled
