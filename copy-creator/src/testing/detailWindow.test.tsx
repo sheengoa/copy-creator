@@ -286,6 +286,32 @@ describe("DetailWindow", () => {
     expect(screen.queryByText("添加形象")).toBeNull();
   });
 
+  it("空白占位窗：空态+钉底「从库中装入」按钮，点按钮弹标准库面板，挑条目路由 loadEntity（用户定案「先进窗再弹框」）", () => {
+    const loadEntity = vi.fn();
+    const fixture = [{ ...baseCharacter, id: "char-9", name: "卡哇伊", avatar_path: "avatars/kww.png", reference_paths: "[]" }];
+    useProjectStore.setState({ characters: fixture });
+    try {
+      render(
+        <ProjectDetailWindow
+          target={{ kind: "entityPh", id: "eph:p9", group: "character" }}
+          ops={makeOps({ loadEntity, characters: fixture })}
+        />,
+      );
+      // 空态：不再直接铺库条目，只有提示 + 钉底按钮。
+      expect(screen.getByText(/尚未装入角色/)).toBeTruthy();
+      expect(document.querySelector(".project-library-panel")).toBeNull();
+      // 点钉底按钮 → 标准库面板。
+      fireEvent.click(screen.getByText("从库中装入实体"));
+      expect(document.querySelector(".project-library-panel")).toBeTruthy();
+      // 挑条目 → loadEntity 路由（Shell 装入后会把窗切成实体详情）。
+      const row = [...document.querySelectorAll(".project-library-card")].find((c) => c.textContent?.includes("卡哇伊"));
+      fireEvent.click(row as HTMLElement);
+      expect(loadEntity).toHaveBeenCalledWith("eph:p9", "character", "char-9");
+    } finally {
+      useProjectStore.setState({ characters: [] });
+    }
+  });
+
   it("无形象图条目禁点：面板行显示「无形象图」，点击不触发添加", () => {
     useProjectStore.setState({
       characters: [

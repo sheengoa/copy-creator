@@ -633,6 +633,7 @@
       "inOtherNode": "已在其他节点",
       "noFaceImage": "无形象图",
       "removeFromNode": "移出本节点",
+      "ephEmptyHint": "尚未装入{{kind}} · 点下方按钮从库中挑选",
       "newCharacter": "新建角色",
       "newLocation": "新建场景",
       "newProp": "新建道具",

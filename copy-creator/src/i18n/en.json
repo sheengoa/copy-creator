@@ -633,6 +633,7 @@
       "inOtherNode": "In another node",
       "noFaceImage": "No image",
       "removeFromNode": "Remove from node",
+      "ephEmptyHint": "No {{kind}} loaded yet · pick from the library below",
       "newCharacter": "New Character",
       "newLocation": "New Location",
       "newProp": "New Prop",

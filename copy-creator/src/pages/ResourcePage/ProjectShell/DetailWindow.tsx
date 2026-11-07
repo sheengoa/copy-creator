@@ -1184,10 +1184,12 @@ function SegmentDetail({ segmentId, ops }: { segmentId: string; ops: DetailWindo
   );
 }
 
-/** 空白占位详情：实体装入（选择即关联 + 暂存线转正 + 占位移除）。 */
+/** 空白占位详情（用户定案「双击永远先进窗，库选择框从窗里按钮弹出」）：
+ *  空态 + 钉底「从库中装入」按钮 → 弹标准库面板挑条目 → 装入后由 Shell
+ *  把本窗切换成该实体的详情窗（当前视角），后续操作与已装节点一致。 */
 function EntityPhDetail({ id, group, ops }: { id: string; group: EntityPhKind; ops: DetailWindowOps }) {
   const { t } = useTranslation();
-  const list = group === "character" ? ops.characters : group === "location" ? ops.locations : ops.props;
+  const [pickerOpen, setPickerOpen] = useState(false);
   const kindLabel = t(
     group === "character" ? "project.canvas.typeCharacter"
       : group === "location" ? "project.canvas.typeLocation"
@@ -1195,22 +1197,26 @@ function EntityPhDetail({ id, group, ops }: { id: string; group: EntityPhKind; o
   );
   return (
     <DetailWindow title={<><span className="pdetail-kind-label">{kindLabel}</span> · {t("project.canvas.ephTitle")}</>} accent="#94a3b8" onClose={ops.onClose}
-      back={ops.backTarget ? { onBack: ops.goBack } : undefined}>
-      <DetailSection label={t("project.detail.loadEntity")}>
-        <div className="pdetail-attach-list is-flat">
-          {list.map((e) => (
-            <button key={e.id} type="button" className="pdetail-attach-row" onClick={() => ops.loadEntity(id, group, e.id)}>
-              <ResourceFileImage
-                path={joinLibraryPath(ops.libraryRoot, (e as ProjectCharacter).avatar_path ?? (e as ProjectLocation | ProjectProp).ref_path ?? "")}
-                alt=""
-                className="pdetail-attach-thumb"
-              />
-              <span>{e.name}</span>
-            </button>
-          ))}
-          {list.length === 0 && <div className="pdetail-empty">{t("project.detail.empty")}</div>}
-        </div>
-      </DetailSection>
+      back={ops.backTarget ? { onBack: ops.goBack } : undefined}
+      foot={(
+        <button type="button" className="pdetail-foot-btn" onClick={() => setPickerOpen(true)}>
+          {t("project.detail.loadEntity")}
+        </button>
+      )}
+    >
+      <div className="pdetail-empty">{Icons.link}{t("project.detail.ephEmptyHint", { kind: kindLabel })}</div>
+      {pickerOpen && (
+        <ProjectLibraryPanel
+          kind={group === "character" ? "characters" : group === "location" ? "locations" : "props"}
+          mode="pick"
+          pickTitle={t("project.detail.loadEntity")}
+          onClose={() => setPickerOpen(false)}
+          onPick={(eid) => {
+            // 挑完即装入：Shell 装入完成后会把本窗切换成该实体的详情窗。
+            ops.loadEntity(id, group, eid);
+          }}
+        />
+      )}
     </DetailWindow>
   );
 }

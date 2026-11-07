@@ -680,7 +680,7 @@ export default function ProjectCanvasShell({
       // 数据，位置/线/key 全不动。 ──
       if (phRow?.entityId) {
         data.persistEntityPhs(data.entityPhs.map((ph) => (ph.id === ephId ? { ...ph, entityId } : ph)));
-        setDetailFor(null);
+        setDetailFor({ kind: "info", group: kind, sourceKey: entityKey, nodeKey: phKey });
         setDetailBack([]);
         return;
       }
@@ -703,7 +703,9 @@ export default function ProjectCanvasShell({
           }
           persistPendingLinks(pendingLinks.filter((l) => l.fromKey !== phKey));
           data.persistEntityPhs(data.entityPhs.map((ph) => (ph.id === ephId ? { ...ph, entityId } : ph)));
-          setDetailFor(null);
+          // 装入后窗不消失（用户定案「先进窗，再从窗里弹库选择框」）：
+          // 直接切成本实体详情窗（当前视角），后续加形象都在窗里操作。
+          setDetailFor({ kind: "info", group: kind, sourceKey: entityKey, nodeKey: phKey });
           setDetailBack([]);
         })();
         return;
@@ -742,7 +744,9 @@ export default function ProjectCanvasShell({
         }
         persistPendingLinks(pendingLinks.filter((l) => l.fromKey !== phKey));
         data.persistEntityPhs(data.entityPhs.filter((ph) => ph.id !== ephId));
-        setDetailFor(null);
+        // 首次装入：占位移除、实体以主节点出现（key=entityKey）——窗切成
+        // 该实体详情（当前视角），nodeKey 指向主节点。
+        setDetailFor({ kind: "info", group: kind, sourceKey: entityKey, nodeKey: entityKey });
         setDetailBack([]);
         if (posBefore) {
           const verify = () => {
