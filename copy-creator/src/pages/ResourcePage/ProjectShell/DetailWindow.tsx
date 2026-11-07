@@ -383,6 +383,132 @@ function DefaultProfileFields({ initialBio, initialPrompt, onCommit }: {
   );
 }
 
+/** 形象卡列表工厂：当前视角与全部视角的每实体分组共用同一套 FaceCard
+ *  装配（卡编辑路由到所属实体，写入该实体的库数据）。 */
+function faceCardsOf(args: {
+  paths: string[];
+  group: EntityPhKind;
+  avatarPath: string;
+  bindingsMap: Record<string, ImageBinding>;
+  defProfile: { voice_path: string; bio: string; prompt: string; time_hint: string };
+  entityName: string;
+  refPaths: string[];
+  libraryRoot: string;
+  entity: ProjectCharacter | ProjectLocation | ProjectProp;
+  commit(path: string, next: ImageBinding | null): void;
+  pickVoice(path: string, binding: ImageBinding | null): void;
+  clearVoice(path: string, binding: ImageBinding | null): void;
+  remove(path: string): void;
+  setAvatar(path: string): void;
+}) {
+  return args.paths.map((path) => (
+    <FaceCard
+      key={path}
+      path={path}
+      group={args.group}
+      isAvatar={args.group === "character" && path === args.avatarPath && args.avatarPath !== ""}
+      binding={args.bindingsMap[path] ?? null}
+      defProfile={args.defProfile}
+      entityName={args.entityName}
+      removable={args.refPaths.includes(path)}
+      libraryRoot={args.libraryRoot}
+      onSetAvatar={() => args.setAvatar(path)}
+      onRemove={() => args.remove(path)}
+      onCommit={(next) => args.commit(path, next)}
+      onPickVoiceFace={() => args.pickVoice(path, args.bindingsMap[path] ?? null)}
+      onClearVoiceFace={() => args.clearVoice(path, args.bindingsMap[path] ?? null)}
+    />
+  ));
+}
+/** 实体形象组（全部视角的每实体分块，用户定案「本集分组·可直接编辑」）：
+ *  组头 = 实体名 + 张数 + 该组自己的添加形象钮；组内形象卡与单实体窗完全
+ *  同构（编辑写入本组实体的库数据，跨集生效）。30/批分页按组独立（防单
+ *  实体巨集；key=实体 id，换实体自动重置）。 */
+function EntityFaceGroup({ group, entity, ops }: {
+  group: EntityPhKind;
+  entity: ProjectCharacter | ProjectLocation | ProjectProp;
+  ops: DetailWindowOps;
+}) {
+  const { t } = useTranslation();
+  const refPaths = useMemo(() => entityRefPaths(group, entity), [entity, group]);
+  const avatarPath = group === "character" ? ((entity as ProjectCharacter).avatar_path ?? "") : "";
+  const gridPaths = useMemo(() => entityFacePaths(group, entity), [entity, group]);
+  const bindingsMap = useMemo(() => entityBindings(entity), [entity]);
+  const commitBinding = (facePath: string, next: ImageBinding | null) => {
+    const list = gridPaths.flatMap((p) => {
+      if (p === facePath) return next ? [next] : [];
+      const b = bindingsMap[p];
+      return b ? [b] : [];
+    });
+    ops.setImageBindings(group, entity.id, list);
+  };
+  const pickVoiceFor = (facePath: string, binding: ImageBinding | null) => {
+    void (async () => {
+      try {
+        const { invoke } = await import("@tauri-apps/api/core");
+        const picked = await invoke<{ path: string }>("canvas_pick_media_file", { extensions: ["wav", "mp3", "flac", "ogg"] });
+        if (binding) commitBinding(facePath, { ...binding, voice_path: picked.path });
+        else ops.setVoice(entity.id, picked.path);
+      } catch {
+        // 用户取消或 mock 环境无后端：静默。
+      }
+    })();
+  };
+  const clearVoiceFor = (facePath: string, binding: ImageBinding | null) => {
+    if (binding) commitBinding(facePath, { ...binding, voice_path: "" });
+    else ops.setVoice(entity.id, "");
+  };
+  const defProfile = {
+    voice_path: group === "character" ? ((entity as ProjectCharacter).voice_path ?? "") : "",
+    bio: entity.bio ?? "",
+    prompt: (entity as { prompt?: string } | undefined)?.prompt ?? "",
+    time_hint: group === "location" ? ((entity as ProjectLocation).time_hint ?? "") : "",
+  };
+  const [pickerOpen, setPickerOpen] = useState(false);
+  // 30/批分页（每组独立；形象卡含编辑字段比纯图重，点「显示剩余」续载）。
+  const [faceLimit, setFaceLimit] = useState(REF_PAGE);
+  const removeRef = (refPath: string) => {
+    ops.setReferences(group, entity.id, refPaths.filter((p) => p !== refPath));
+  };
+  return (
+    <>
+      <div className="pdetail-facegroup-h">
+        <b className="pdetail-facegroup-name">{entity.name}</b>
+        <span className="pdetail-facegroup-c">{t("project.detail.refCount", { n: gridPaths.length })}</span>
+        <button type="button" className="pdetail-ref-add" onClick={() => setPickerOpen(true)}>
+          {Icons.add}{t("project.detail.refAdd")}
+        </button>
+      </div>
+      <div className="pdetail-facelist">
+        {gridPaths.length === 0 && <div className="pdetail-empty">{t("project.detail.empty")}</div>}
+        {faceCardsOf({
+          paths: gridPaths.slice(0, faceLimit), group, avatarPath, bindingsMap, defProfile,
+          entityName: entity.name, refPaths, libraryRoot: ops.libraryRoot, entity,
+          commit: commitBinding, pickVoice: pickVoiceFor, clearVoice: clearVoiceFor, remove: removeRef,
+          setAvatar: (p) => ops.setAvatar(entity as ProjectCharacter, p),
+        })}
+        {gridPaths.length > faceLimit && (
+          <button type="button" className="pdetail-more" onClick={() => setFaceLimit((n) => n + REF_PAGE)}>
+            {t("project.detail.loadMore", { rest: gridPaths.length - faceLimit })}
+          </button>
+        )}
+      </div>
+      {pickerOpen && (
+        <ProjectLibraryPanel
+          kind={group === "character" ? "characters" : group === "location" ? "locations" : "props"}
+          mode="pick"
+          pickTitle={t("project.detail.facePickTitle", { kind: t(group === "character" ? "project.canvas.typeCharacter" : group === "location" ? "project.canvas.typeLocation" : "project.canvas.typeProp") })}
+          onClose={() => setPickerOpen(false)}
+          onPick={(id) => {
+            addPickedFace(group, entity, id, ops);
+            setPickerOpen(false);
+          }}
+        />
+      )}
+    </>
+  );
+}
+
 /** 实体详情体（角色/场景/道具）：形象分组卡（一图 = 音色[角色]/人设/
  *  提示词同框，方案 A）+ 默认区（未绑定形象的兜底值）+ 统计。 */
 function EntityDetail({ group, sourceKey, ops }: { group: EntityPhKind; sourceKey: string; ops: DetailWindowOps }) {
@@ -399,51 +525,19 @@ function EntityDetail({ group, sourceKey, ops }: { group: EntityPhKind; sourceKe
   // 参考图集（三库统一）：reference_paths JSON 数组为主，场景/道具的旧
   // 单张 ref_path 并入展示（素材天然多张无上限，用户反馈）。头像排首位
   // 仅作形象展示（不可移除），计数与实际展示一致。
-  const refPaths = useMemo(() => {
-    let list: string[] = [];
-    try {
-      const parsed = JSON.parse(entity?.reference_paths ?? "[]") as unknown;
-      if (Array.isArray(parsed)) list = parsed.filter((p): p is string => typeof p === "string");
-    } catch {
-      // 旧数据非法 JSON：按空处理。
-    }
-    const mainRef = group !== "character" ? ((entity as ProjectLocation | ProjectProp | undefined)?.ref_path ?? "") : "";
-    if (mainRef && !list.includes(mainRef)) list.unshift(mainRef);
-    return list;
-  }, [entity, group]);
+  const refPaths = useMemo(() => (entity ? entityRefPaths(group, entity) : []), [entity, group]);
   const voice = group === "character" ? ((entity as ProjectCharacter | undefined)?.voice_path ?? "") : "";
   // 展示列表 = 参考图 + 形象头像（头像排首位）——详情窗是预览窗，已有
   // 形象必须直接可见，计数与实际展示一致（用户反馈「共 0 张」下却有图）。
   const avatarPath = group === "character" ? ((entity as ProjectCharacter | undefined)?.avatar_path ?? "") : "";
-  const gridPaths = useMemo(() => {
-    const list = [...refPaths];
-    if (avatarPath && !list.includes(avatarPath)) list.unshift(avatarPath);
-    return list;
-  }, [refPaths, avatarPath]);
   // 每图绑定（形象卡方案 A，用户定案「一张图片对应一份数据」）：path →
   // 独立值；未绑定 path 或字段为空 = 跟随实体级默认。
-  const bindingsMap = useMemo(() => {
-    const map: Record<string, ImageBinding> = {};
-    try {
-      const parsed = JSON.parse(entity?.image_bindings ?? "[]") as unknown;
-      if (Array.isArray(parsed)) {
-        for (const item of parsed) {
-          const p = (item as { path?: unknown } | null)?.path;
-          if (item && typeof item === "object" && typeof p === "string") {
-            const b = item as Partial<ImageBinding>;
-            map[p] = { path: p, name: b.name ?? "", voice_path: b.voice_path ?? "", bio: b.bio ?? "", prompt: b.prompt ?? "", time_hint: b.time_hint ?? "" };
-          }
-        }
-      }
-    } catch {
-      // 非法 JSON：按无绑定处理（全部跟随默认）。
-    }
-    return map;
-  }, [entity]);
-  // 绑定提交：以 gridPaths 顺序重建全量列表（该形象 null = 移除条目回跟
-  // 随），整体覆写 image_bindings。
+  const bindingsMap = useMemo(() => (entity ? entityBindings(entity) : {}), [entity]);
+  // 绑定提交：以全量图集顺序重建列表（该形象 null = 移除条目回跟随），
+  // 整体覆写 image_bindings（失焦时才走，图集解析开销可忽略）。
   const commitBinding = (facePath: string, next: ImageBinding | null) => {
-    const list = gridPaths.flatMap((p) => {
+    if (!entity) return;
+    const list = entityFacePaths(group, entity).flatMap((p) => {
       if (p === facePath) return next ? [next] : [];
       const b = bindingsMap[p];
       return b ? [b] : [];
@@ -474,15 +568,29 @@ function EntityDetail({ group, sourceKey, ops }: { group: EntityPhKind; sourceKe
     time_hint: group === "location" ? ((entity as ProjectLocation | undefined)?.time_hint ?? "") : "",
   };
   // 视角切换（恢复旧详情窗的 当前/全部 双钮，用户定案）：当前=画布节点
-  // 显示的那张形象（角色=头像、场景/道具=主图，与节点渲染同源），全部=
-  // 实体全量形象卡。默认当前——双击节点即看节点所用；换实体重置。
+  // 显示的那张形象（角色=头像、场景/道具=主图，与节点渲染同源）；全部=
+  // 本集挂接的该类全部实体分组陈列（「本集分组·可直接编辑」，可跨实体
+  // 直接改形象数据）。默认当前——双击节点即看节点所用；换实体重置。
   const [scope, setScope] = useState<"current" | "all">("current");
   useEffect(() => setScope("current"), [entityId, group]);
   const nodePath = group === "character" ? avatarPath : ((entity as ProjectLocation | ProjectProp | undefined)?.ref_path ?? "");
-  // 30/批分页（形象卡含编辑字段比纯图重，点「显示剩余」续载一批）。
-  const [faceLimit, setFaceLimit] = useState(REF_PAGE);
-  useEffect(() => setFaceLimit(REF_PAGE), [entityId, group]);
-  const shownPaths = scope === "current" ? (nodePath ? [nodePath] : []) : gridPaths;
+  const nodeViewPaths = scope === "current" ? (nodePath ? [nodePath] : []) : [];
+  // 本集该类实体（全部视角数据源）：本集 node_links 收集去重；当前实体
+  // 恒排首位（不在本集挂接里也兜底并入，自己的形象集始终可见）。
+  const episodeEntities = useMemo(() => {
+    const ids: string[] = [entityId];
+    for (const l of ops.nodeLinks ?? []) {
+      if (l.from_kind === group && l.from_id !== entityId && !ids.includes(l.from_id)) ids.push(l.from_id);
+    }
+    const lib = group === "character" ? ops.characters : group === "location" ? ops.locations : ops.props;
+    return ids
+      .map((id) => lib.find((e) => e.id === id))
+      .filter((e): e is ProjectCharacter | ProjectLocation | ProjectProp => !!e);
+  }, [ops.nodeLinks, ops.characters, ops.locations, ops.props, group, entityId]);
+  // 段头计数随视角：当前=本节点那张（1/0）；全部=本集各实体图集总数。
+  const shownCount = scope === "current"
+    ? nodeViewPaths.length
+    : episodeEntities.reduce((sum, e) => sum + entityFacePaths(group, e).length, 0);
   // 参考图管理：添加（弹对应库面板选条目，用户定案——库条目自带名称/人
   // 设/提示词/音色，选入即成该形象的独立绑定，不弹原始文件框）与逐张移
   // 除；参考图集整体覆写 reference_paths，选条目的绑定落 image_bindings。
@@ -507,8 +615,8 @@ function EntityDetail({ group, sourceKey, ops }: { group: EntityPhKind; sourceKe
       back={ops.backTarget ? { onBack: ops.goBack } : undefined}
     >
       <DetailSection
-        label={t("project.detail.faces")}
-        count={t("project.detail.refCount", { n: shownPaths.length })}
+        label={scope === "all" ? t("project.detail.episodeFaces", { kind: kindLabel }) : t("project.detail.faces")}
+        count={t("project.detail.refCount", { n: shownCount })}
         extra={(
           <span className="pdetail-sec-tools">
             <div className="pdetail-seg" role="group">
@@ -527,40 +635,35 @@ function EntityDetail({ group, sourceKey, ops }: { group: EntityPhKind; sourceKe
                 {t("project.detail.scopeAll")}
               </button>
             </div>
-            <button type="button" className="pdetail-ref-add" onClick={() => setPickerOpen(true)}>
-              {Icons.add}{t("project.detail.refAdd")}
-            </button>
+            {scope === "current" && (
+              <button type="button" className="pdetail-ref-add" onClick={() => setPickerOpen(true)}>
+                {Icons.add}{t("project.detail.refAdd")}
+              </button>
+            )}
           </span>
         )}
       >
-        <div className="pdetail-facelist">
-          {shownPaths.length === 0 && (
-            <div className="pdetail-empty">{t("project.detail.empty")}</div>
-          )}
-          {shownPaths.slice(0, faceLimit).map((path) => (
-            <FaceCard
-              key={path}
-              path={path}
-              group={group}
-              isAvatar={group === "character" && path === avatarPath && avatarPath !== ""}
-              binding={bindingsMap[path] ?? null}
-              defProfile={defProfile}
-              entityName={name}
-              removable={refPaths.includes(path)}
-              libraryRoot={ops.libraryRoot}
-              onSetAvatar={() => entity && ops.setAvatar(entity as ProjectCharacter, path)}
-              onRemove={() => removeRef(path)}
-              onCommit={(next) => commitBinding(path, next)}
-              onPickVoiceFace={() => pickVoiceFor(path, bindingsMap[path] ?? null)}
-              onClearVoiceFace={() => clearVoiceFor(path, bindingsMap[path] ?? null)}
-            />
-          ))}
-          {gridPaths.length > faceLimit && (
-            <button type="button" className="pdetail-more" onClick={() => setFaceLimit((n) => n + REF_PAGE)}>
-              {t("project.detail.loadMore", { rest: gridPaths.length - faceLimit })}
-            </button>
-          )}
-        </div>
+        {scope === "current" ? (
+          <div className="pdetail-facelist">
+            {nodeViewPaths.length === 0 && (
+              <div className="pdetail-empty">{t("project.detail.empty")}</div>
+            )}
+            {faceCardsOf({
+              paths: nodeViewPaths, group, avatarPath, bindingsMap, defProfile,
+              entityName: name, refPaths, libraryRoot: ops.libraryRoot,
+              entity: entity as ProjectCharacter | ProjectLocation | ProjectProp,
+              commit: commitBinding, pickVoice: pickVoiceFor, clearVoice: clearVoiceFor, remove: removeRef,
+              setAvatar: (p) => entity && ops.setAvatar(entity as ProjectCharacter, p),
+            })}
+          </div>
+        ) : (
+          <div className="pdetail-facegroups">
+            <p className="pdetail-note">{t("project.detail.episodeFacesHint")}</p>
+            {episodeEntities.map((e) => (
+              <EntityFaceGroup key={e.id} group={group} entity={e} ops={ops} />
+            ))}
+          </div>
+        )}
       </DetailSection>
       {pickerOpen && (
         <ProjectLibraryPanel
@@ -571,27 +674,7 @@ function EntityDetail({ group, sourceKey, ops }: { group: EntityPhKind; sourceKe
           onPick={(id) => {
             // 库条目选入即关（选一张加一张）：该条目的头像/主图成为新形象，
             // 名称/人设/提示词/音色（角色）自动带入为该形象的独立绑定。
-            const lib = group === "character" ? ops.characters : group === "location" ? ops.locations : ops.props;
-            const picked = lib.find((x) => x.id === id);
-            if (picked) {
-              const imgPath = group === "character"
-                ? (picked as ProjectCharacter).avatar_path
-                : (picked as ProjectLocation | ProjectProp).ref_path;
-              if (imgPath && !refPaths.includes(imgPath)) {
-                ops.setReferences(group, entityId, [...refPaths, imgPath]);
-                ops.setImageBindings(group, entityId, [
-                  ...gridPaths.map((p) => bindingsMap[p]).filter(Boolean),
-                  {
-                    path: imgPath,
-                    name: picked.name,
-                    voice_path: group === "character" ? ((picked as ProjectCharacter).voice_path ?? "") : "",
-                    bio: picked.bio,
-                    prompt: picked.prompt,
-                    time_hint: group === "location" ? ((picked as ProjectLocation).time_hint ?? "") : "",
-                  },
-                ]);
-              }
-            }
+            if (entity) addPickedFace(group, entity, id, ops);
             setPickerOpen(false);
           }}
         />
@@ -664,6 +747,77 @@ function parseRefs(raw: string | undefined): string[] {
     return Array.isArray(list) ? list.filter((p): p is string => typeof p === "string") : [];
   } catch {
     return [];
+  }
+}
+
+/** 实体参考图集（reference_paths 为主，场景/道具旧单张 ref_path 并入；
+ *  不含头像——头像不可移除）。 */
+function entityRefPaths(group: EntityPhKind, entity: ProjectCharacter | ProjectLocation | ProjectProp): string[] {
+  const list = parseRefs(entity.reference_paths);
+  const mainRef = group !== "character" ? ((entity as ProjectLocation | ProjectProp).ref_path ?? "") : "";
+  if (mainRef && !list.includes(mainRef)) list.unshift(mainRef);
+  return list;
+}
+
+/** 实体全量图集 = 参考图 + 形象头像（头像排首位，不重复入列）。 */
+function entityFacePaths(group: EntityPhKind, entity: ProjectCharacter | ProjectLocation | ProjectProp): string[] {
+  const list = entityRefPaths(group, entity);
+  const avatar = group === "character" ? ((entity as ProjectCharacter).avatar_path ?? "") : "";
+  if (avatar && !list.includes(avatar)) list.unshift(avatar);
+  return list;
+}
+
+/** 每图绑定（形象卡方案 A）：path → 独立值；未绑定 path 或字段为空 =
+ *  跟随实体级默认。 */
+function entityBindings(entity: ProjectCharacter | ProjectLocation | ProjectProp): Record<string, ImageBinding> {
+  const map: Record<string, ImageBinding> = {};
+  try {
+    const parsed = JSON.parse(entity.image_bindings ?? "[]") as unknown;
+    if (Array.isArray(parsed)) {
+      for (const item of parsed) {
+        const p = (item as { path?: unknown } | null)?.path;
+        if (item && typeof item === "object" && typeof p === "string") {
+          const b = item as Partial<ImageBinding>;
+          map[p] = { path: p, name: b.name ?? "", voice_path: b.voice_path ?? "", bio: b.bio ?? "", prompt: b.prompt ?? "", time_hint: b.time_hint ?? "" };
+        }
+      }
+    }
+  } catch {
+    // 非法 JSON：按无绑定处理（全部跟随默认）。
+  }
+  return map;
+}
+
+/** 库面板选条目加入形象（添加形象钮共用）：该条目头像/主图成为新形象，
+ *  名称/人设/提示词/音色（角色）自动带入为该形象的独立绑定。 */
+function addPickedFace(
+  group: EntityPhKind,
+  entity: ProjectCharacter | ProjectLocation | ProjectProp,
+  id: string,
+  ops: DetailWindowOps,
+) {
+  const lib = group === "character" ? ops.characters : group === "location" ? ops.locations : ops.props;
+  const picked = lib.find((x) => x.id === id);
+  if (!picked) return;
+  const imgPath = group === "character"
+    ? (picked as ProjectCharacter).avatar_path
+    : (picked as ProjectLocation | ProjectProp).ref_path;
+  const refPaths = entityRefPaths(group, entity);
+  if (imgPath && !refPaths.includes(imgPath)) {
+    const gridPaths = entityFacePaths(group, entity);
+    const bindingsMap = entityBindings(entity);
+    ops.setReferences(group, entity.id, [...refPaths, imgPath]);
+    ops.setImageBindings(group, entity.id, [
+      ...gridPaths.map((p) => bindingsMap[p]).filter(Boolean),
+      {
+        path: imgPath,
+        name: picked.name,
+        voice_path: group === "character" ? ((picked as ProjectCharacter).voice_path ?? "") : "",
+        bio: picked.bio,
+        prompt: picked.prompt,
+        time_hint: group === "location" ? ((picked as ProjectLocation).time_hint ?? "") : "",
+      },
+    ]);
   }
 }
 

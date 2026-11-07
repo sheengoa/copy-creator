@@ -767,6 +767,8 @@
       "refCount": "{{n}} total",
       "scopeCurrent": "Current",
       "scopeAll": "All",
+      "episodeFaces": "All {{kind}} in this episode",
+      "episodeFacesHint": "Grouped by entities linked in this episode, editable in place; edits write to each entity (library-wide)",
       "loadMore": "Show {{rest}} more",
       "voice": "Voice",
       "voiceEmpty": "No voice set",

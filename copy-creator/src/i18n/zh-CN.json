@@ -767,6 +767,8 @@
       "refCount": "共 {{n}} 张",
       "scopeCurrent": "当前",
       "scopeAll": "全部",
+      "episodeFaces": "本集全部{{kind}}",
+      "episodeFacesHint": "按本集挂接的实体分组陈列，可直接编辑；改动写入该实体的库数据（跨集生效）",
       "loadMore": "显示剩余 {{rest}} 张",
       "voice": "音色",
       "voiceEmpty": "未设置音色",

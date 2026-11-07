@@ -247,6 +247,18 @@
   gap: 7px;
 }
 .pdetail-sec-tools .pdetail-seg { margin-left: 0; }
+/* 「全部」视角的实体分组头：实体名 + 张数 + 该组的添加形象钮。 */
+.pdetail-facegroups { display: flex; flex-direction: column; gap: 4px; }
+.pdetail-facegroup-h {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  margin-top: 10px;
+}
+.pdetail-facegroup-h:first-of-type { margin-top: 2px; }
+.pdetail-facegroup-name { font-size: 12px; font-weight: 600; color: var(--text-primary); }
+.pdetail-facegroup-c { font-size: 11px; color: var(--text-secondary); }
+.pdetail-facegroup-h .pdetail-ref-add { margin-left: auto; }
 .pdetail-seg-btn {
   font-size: 11px;
   padding: 3px 10px;

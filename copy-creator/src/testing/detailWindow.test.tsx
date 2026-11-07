@@ -62,6 +62,8 @@ describe("DetailWindow", () => {
         ops={makeOps()}
       />,
     );
+    // 默认「当前」视角（本夹具无头像为空态），切「全部」验分页。
+    fireEvent.click(screen.getByText("全部"));
     expect(document.querySelectorAll(".pdetail-face").length).toBe(30);
     expect(screen.getByText(/显示剩余 74/)).toBeTruthy();
     // 点「显示剩余」续载一批。
@@ -81,6 +83,75 @@ describe("DetailWindow", () => {
     expect(screen.getByText("共 1 张")).toBeTruthy();
     // 头像卡不在 reference_paths 内：不提供移除。
     expect(screen.queryByText("移除")).toBeNull();
+  });
+
+  it("视角切换：默认「当前」只显示节点所用形象（头像/主图），切「全部」看全量，换实体重置", () => {
+    const { rerender } = render(
+      <ProjectDetailWindow
+        target={{ kind: "info", group: "character", sourceKey: "char:char-2" }}
+        ops={makeOps({ characters: [{ ...baseCharacter, avatar_path: "avatars/k.png", reference_paths: JSON.stringify(["refs/a.png", "refs/b.png"]) }] })}
+      />,
+    );
+    // 默认当前（恢复旧详情窗语义）：仅节点显示的头像 1 张，计数与实际一致。
+    expect((screen.getByText("当前") as HTMLButtonElement).classList.contains("is-active")).toBe(true);
+    expect(document.querySelectorAll(".pdetail-face").length).toBe(1);
+    expect(screen.getByText("共 1 张")).toBeTruthy();
+    // 切「全部」：头像排首位 + 2 张参考图 = 3 张（段头总数 + 组头计数各一次）。
+    fireEvent.click(screen.getByText("全部"));
+    expect((screen.getByText("全部") as HTMLButtonElement).classList.contains("is-active")).toBe(true);
+    expect(document.querySelectorAll(".pdetail-face").length).toBe(3);
+    expect(screen.getAllByText("共 3 张").length).toBe(2);
+    // 换实体重置回「当前」；新实体无头像 → 空态。
+    rerender(
+      <ProjectDetailWindow
+        target={{ kind: "info", group: "character", sourceKey: "char:char-3" }}
+        ops={makeOps({ characters: [{ ...baseCharacter, id: "char-3", reference_paths: JSON.stringify(["refs/a.png"]) }] })}
+      />,
+    );
+    expect((screen.getByText("当前") as HTMLButtonElement).classList.contains("is-active")).toBe(true);
+    expect(document.querySelectorAll(".pdetail-face").length).toBe(0);
+    expect(screen.getByText("共 0 张")).toBeTruthy();
+    expect(screen.getByText("暂无内容")).toBeTruthy();
+  });
+
+  it("全部视角=本集实体分组：当前实体排首，组头各自计数，跨实体编辑路由到所属实体", () => {
+    const setImageBindings = vi.fn();
+    const other: ProjectCharacter = {
+      ...baseCharacter,
+      id: "char-9",
+      name: "卡哇伊",
+      bio: "另一角色",
+      avatar_path: "avatars/kww.png",
+      reference_paths: JSON.stringify(["refs/k1.png"]),
+    };
+    render(
+      <ProjectDetailWindow
+        target={{ kind: "info", group: "character", sourceKey: "char:char-2" }}
+        ops={makeOps({
+          setImageBindings,
+          nodeLinks: [
+            { id: "nl-1", from_kind: "character", from_id: "char-2", to_segment: "seg-1", to_port: "character", owner_key: "" },
+            { id: "nl-2", from_kind: "character", from_id: "char-9", to_segment: "seg-1", to_port: "character", owner_key: "" },
+          ],
+          characters: [{ ...baseCharacter, reference_paths: JSON.stringify(["refs/a.png"]) }, other],
+        })}
+      />,
+    );
+    // 当前视角：仅本节点头像一张（char-2 无头像 → 空态）。切「全部」→
+    // 本集两实体各一组，当前实体排首；段头计数 = 两实体图集总数 3。
+    fireEvent.click(screen.getByText("全部"));
+    const headers = [...document.querySelectorAll(".pdetail-facegroup-name")].map((el) => el.textContent);
+    expect(headers).toEqual(["老周", "卡哇伊"]);
+    expect(screen.getByText("共 3 张")).toBeTruthy();
+    expect(screen.getAllByText("添加形象").length).toBe(2);
+    expect(document.querySelectorAll(".pdetail-face").length).toBe(3);
+    // 跨实体编辑：点卡哇伊组首卡「独立」→ 预填数据路由到 char-9（而非
+    // 当前窗口实体 char-2），证明每张卡写入各自实体的库数据。
+    const kwwSeg = document.querySelectorAll(".pdetail-face")[1].querySelectorAll(".pdetail-seg-btn");
+    fireEvent.click(kwwSeg[1]);
+    expect(setImageBindings).toHaveBeenCalledWith("character", "char-9", [
+      { path: "avatars/kww.png", name: "卡哇伊", voice_path: "", bio: "另一角色", prompt: "", time_hint: "" },
+    ]);
   });
 
   it("默认区音色两态：空态只给更换入口；有音色给播放件与清除", () => {
@@ -209,32 +280,40 @@ describe("DetailWindow", () => {
         ops={makeOps({ setReferences, setImageBindings, characters: [{ ...baseCharacter, reference_paths: JSON.stringify(refs) }] })}
       />,
     );
-    // 跟随默认态：形象卡字段禁用（镜像默认，不可编辑）；胶囊停在「跟随」。
+    // 默认「当前」视角无头像为空态，切「全部」验形象管理流。
+    fireEvent.click(screen.getByText("全部"));
+    // 跟随默认态：名称镜像实体名、人设镜像默认（禁用）；胶囊停在「跟随」。
     expect(document.querySelectorAll(".pdetail-face").length).toBe(2);
+    const firstName = document.querySelector(".pdetail-face .pdetail-f-input") as HTMLInputElement;
+    expect(firstName.disabled).toBe(true);
+    expect(firstName.value).toBe("老周");
     const firstBio = document.querySelector(".pdetail-face .pdetail-f textarea") as HTMLTextAreaElement;
     expect(firstBio.disabled).toBe(true);
     expect(firstBio.value).toBe("沉稳寡言的老周");
     const faceSeg = document.querySelectorAll(".pdetail-face")[0].querySelectorAll(".pdetail-seg-btn");
     expect(faceSeg[0].classList.contains("is-active")).toBe(true);
-    // 点「独立」→ setImageBindings 预填默认数据（仅该形象有条目）。
+    // 点「独立」→ setImageBindings 预填默认数据（名称带入实体名）。
     fireEvent.click(faceSeg[1]);
     expect(setImageBindings).toHaveBeenCalledWith("character", "char-2", [
-      { path: "refs/a.png", voice_path: "", bio: "沉稳寡言的老周", prompt: "", time_hint: "" },
+      { path: "refs/a.png", name: "老周", voice_path: "", bio: "沉稳寡言的老周", prompt: "", time_hint: "" },
     ]);
     // 逐张移除：整体覆写路由（首张 a.png 被过滤）。
     const removeButtons = screen.getAllByText("移除");
     expect(removeButtons.length).toBe(2);
     fireEvent.click(removeButtons[0]);
     expect(setReferences).toHaveBeenCalledWith("character", "char-2", ["refs/b.png"]);
-    // 添加浮层打开（jsdom 下 portal 渲染选择器遮罩）。
+    // 「添加形象」弹对应库面板（用户定案：条目自带名称/人设，不再弹文件框）。
     fireEvent.click(screen.getByText("添加形象"));
     expect(document.querySelector(".project-dialog-overlay")).toBeTruthy();
+    const panelTitle = document.querySelector(".project-library-panel h4")?.textContent ?? "";
+    expect(panelTitle).toContain("选择角色形象");
+    expect(screen.queryByText("添加参考图")).toBeNull();
   });
 
   it("独立形象：编辑失焦提交绑定；音色清除路由空 voice_path；关闭开关移除条目", () => {
     const setImageBindings = vi.fn();
     const setVoice = vi.fn();
-    const bindings = [{ path: "refs/a.png", voice_path: "v.wav", bio: "形象一人设", prompt: "", time_hint: "" }];
+    const bindings = [{ path: "refs/a.png", name: "睡衣", voice_path: "v.wav", bio: "形象一人设", prompt: "", time_hint: "" }];
     render(
       <ProjectDetailWindow
         target={{ kind: "info", group: "character", sourceKey: "char:char-2" }}
@@ -245,6 +324,8 @@ describe("DetailWindow", () => {
         })}
       />,
     );
+    // 默认「当前」视角无头像为空态，切「全部」验独立绑定流。
+    fireEvent.click(screen.getByText("全部"));
     // a 独立（可编辑、预载绑定值）；b 跟随默认（禁用）。
     const tas = [...document.querySelectorAll(".pdetail-face textarea")] as HTMLTextAreaElement[];
     expect(tas.length).toBe(4);
@@ -255,13 +336,13 @@ describe("DetailWindow", () => {
     fireEvent.change(tas[0], { target: { value: "改过的人设" } });
     fireEvent.blur(tas[0]);
     expect(setImageBindings).toHaveBeenCalledWith("character", "char-2", [
-      { path: "refs/a.png", voice_path: "v.wav", bio: "改过的人设", prompt: "", time_hint: "" },
+      { path: "refs/a.png", name: "睡衣", voice_path: "v.wav", bio: "改过的人设", prompt: "", time_hint: "" },
     ]);
     // 独立形象的音色清除 → 绑定条目 voice_path 置空（不动实体级默认）。
     const clears = screen.getAllByText("删除");
     fireEvent.click(clears[0]);
     expect(setImageBindings).toHaveBeenCalledWith("character", "char-2", [
-      { path: "refs/a.png", voice_path: "", bio: "形象一人设", prompt: "", time_hint: "" },
+      { path: "refs/a.png", name: "睡衣", voice_path: "", bio: "形象一人设", prompt: "", time_hint: "" },
     ]);
     // 点回「跟随」→ 条目移除（回跟随默认）。
     const aSeg = document.querySelectorAll(".pdetail-face")[0].querySelectorAll(".pdetail-seg-btn");
@@ -301,6 +382,8 @@ describe("DetailWindow", () => {
         })}
       />,
     );
+    // 默认「当前」视角=节点显示的旧主图 1 张，切「全部」验全量陈列。
+    fireEvent.click(screen.getByText("全部"));
     // 旧主图并入首 + 数组两张 = 3 张形象卡全展示（场景无音色行）。
     expect(document.querySelectorAll(".pdetail-face").length).toBe(3);
     expect(document.querySelectorAll(".pdetail-face .pdetail-voice").length).toBe(0);
