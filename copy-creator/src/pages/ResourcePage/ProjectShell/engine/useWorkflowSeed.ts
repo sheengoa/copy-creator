@@ -2,7 +2,7 @@
 // 2026-11-03 引擎拆分阶段 11d）：首次进入无工作流数据的集自动铺两个
 // 片段 + 各 5 个空白占位节点 + 暂存连线；标记落 localStorage 防重建。
 import { useEffect } from "react";
-import type { EpisodeOverview } from "../../../../stores/projectStore";
+import { useProjectStore, type EpisodeOverview } from "../../../../stores/projectStore";
 import { INFO_H, INFO_W, SCRIPT_W, SEG_W, WORLD_MARGIN } from "../layout";
 import type { CanvasLayout, EntityPh, PendingLink, Pos, PromptPh, ScriptPh } from "../types";
 
@@ -52,6 +52,18 @@ export function useWorkflowSeed(deps: {
         if (segment) created.push(segment.id);
       }
       if (created.length === 0) return;
+      // 切集竞争守卫：上面两次 await addSegment 期间用户可能已切到别的
+      // 集——迟到的续延若照常写状态，会与切集装载互相踩踏（实测他集的
+      // 剧本纸片位置写进本集 infonodes 键的污染来源）。非当前集直接放弃
+      // 本次播种并回滚模板标记，下次进入本集时重新铺。
+      if (useProjectStore.getState().currentEpisodeId !== episodeId) {
+        try {
+          window.localStorage.removeItem(templateFlagKey);
+        } catch {
+          // 存储不可用：仅可能多铺一次，无碍。
+        }
+        return;
+      }
       // 绕开加载时序竞争：切集首帧的 state 可能还是上一集的旧值（按集
       // 加载 effect 与本 effect 同批提交），直接读存储里本集的当前列表，
       // 模板内容拼在其后一次性落盘（同 tick 多次追加会互相覆盖）。
