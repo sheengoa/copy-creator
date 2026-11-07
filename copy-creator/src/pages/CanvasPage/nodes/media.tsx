@@ -66,6 +66,11 @@ export function ResourceThumb({ path, className, ratioFit = false }: { path: str
       src={url}
       alt=""
       draggable={false}
+      /* 异步解码（2026-11-08 执行后平移卡顿）：产物图是视频原分辨率帧
+         （1080p/4K PNG），首次挂载默认同步解码阻塞主线程数秒——用户实测
+         「刚执行完平移画布卡几秒后恢复」与之吻合；decoding="async" 把
+         解码挪到后台线程，平移/交互全程不被解码阻塞。 */
+      decoding="async"
       onError={() => setFailed(true)}
       onLoad={(e) => {
         const el = e.currentTarget;
