@@ -177,13 +177,13 @@ export function MediaPlayback({
 
   const ratioStyle: CSSProperties | undefined =
     ratioFit && ratio && ratio.w > 0 && ratio.h > 0
-      ? {
+      ? ({
           // 实测几何只进变量：具体盒形（自动高 330 帽 / pc-resized 等比
           // 精确盒）由 is-ratio-fit 类的规则按节点态消费（画布图像侧
           // ResourceThumb 同一套变量与公式）。
           "--media-fitw": `${Math.round(330 * (ratio.w / ratio.h))}px`,
           "--media-ar": `${ratio.w} / ${ratio.h}`,
-        }
+        } as CSSProperties)
       : undefined;
 
   const player = kind === "video" ? (
