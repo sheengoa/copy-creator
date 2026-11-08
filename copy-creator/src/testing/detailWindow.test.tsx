@@ -438,6 +438,29 @@ describe("DetailWindow", () => {
     expect(openOutputPick).toHaveBeenCalledTimes(2);
   });
 
+  it("目标失联守卫：库侧删除实体后已开的实体详情窗自动关窗（P2-3）", () => {
+    const onClose = vi.fn();
+    render(
+      <ProjectDetailWindow
+        target={{ kind: "info", group: "character", sourceKey: "char:deleted" }}
+        ops={makeOps({ onClose })}
+      />,
+    );
+    // 实体查不到（已删除）→ effect 直接关窗，不渲染「角色 ·」无名空壳。
+    expect(onClose).toHaveBeenCalled();
+  });
+
+  it("组来源不受失联守卫影响：grp: 窗按本集挂接解析成员，不因缺实体被误关", () => {
+    const onClose = vi.fn();
+    render(
+      <ProjectDetailWindow
+        target={{ kind: "info", group: "character", sourceKey: "grp:g1" }}
+        ops={makeOps({ onClose })}
+      />,
+    );
+    expect(onClose).not.toHaveBeenCalled();
+  });
+
   it("输入卡一图一卡：实体逐张参考图各成一卡，点击卡片路由 openDetail 展开实体窗", () => {
     const openDetail = vi.fn();
     render(

@@ -229,9 +229,11 @@ export function useCanvasView(deps: {
   //   所有已有片段的剧本口（linkNode 幂等，重复挂接不会写重）。
   // - 剧本纸片：本集还没剧本时该纸片「转正」为主剧本——位置/尺寸移交、
   //   暂存线由全量接入覆盖、纸片移除；已有剧本时纸片独立持自己的文件
-  //   （画布层记忆），不动本集剧本。
+  //   （画布层记忆），不动本集剧本。onPromote 只在转正路径落库成功后
+  //   回调（P2-2：详情窗开着跨过转正时，Shell 据此把窗从已消失的纸片
+  //   key 改指主剧本，不再停留「未挂接」假状态）。
   const handleScriptPick = useCallback(
-    (filePath: string) => {
+    (filePath: string, onPromote?: () => void) => {
       const episode = overview?.episode;
       const target = scriptPickTarget;
       setScriptPickTarget(null);
@@ -239,6 +241,7 @@ export function useCanvasView(deps: {
         setScriptPickOpen(false);
         return;
       }
+      let promoted = false;
       const attachEpisode = () => {
         void updateEpisode(episode.id, {
           title: episode.title,
@@ -249,6 +252,7 @@ export function useCanvasView(deps: {
             void linkNode(episode.id, "script", episode.id, segment.id, "script");
           });
           setScriptPickOpen(false);
+          if (promoted) onPromote?.();
         });
       };
       if (target === "script") {
@@ -279,6 +283,7 @@ export function useCanvasView(deps: {
       dropPendingLinksOf(target);
       // 清掉出生锚点：转正出的主剧本节点要留在纸片原位，不能被锚点挪走。
       spawnAnchorRef.current = null;
+      promoted = true;
       attachEpisode();
     },
     [

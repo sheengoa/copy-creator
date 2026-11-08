@@ -591,6 +591,14 @@ function EntityDetail({ group, sourceKey, nodeKey, ops }: { group: EntityPhKind;
     group === "character" ? characters.find((c) => c.id === entityId)
       : group === "location" ? locations.find((l) => l.id === entityId)
         : props.find((p) => p.id === entityId);
+  // 目标失联守卫（实测 P2-3）：库侧删除实体后，已打开的详情窗不再渲染
+  // 成「角色 ·」无名空壳（共 0 张 + 挂空态，钉底钮还在）——实体查不到
+  // 即自动关窗。组来源（grp:）例外：它按本集挂接解析成员，窗有效性不
+  // 系于单个实体。
+  const isGroupSource = sourceKey.startsWith("grp:");
+  useEffect(() => {
+    if (!isGroupSource && !entity) ops.onClose();
+  }, [isGroupSource, entity, ops.onClose]);
   const name = entity?.name ?? "";
   // 参考图集（三库统一）：reference_paths JSON 数组为主，场景/道具的旧
   // 单张 ref_path 并入展示（素材天然多张无上限，用户反馈）。头像排首位

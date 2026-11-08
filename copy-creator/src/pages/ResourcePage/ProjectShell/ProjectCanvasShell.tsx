@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useShallow } from "zustand/react/shallow";
 import { useTranslation } from "react-i18next";
 import { useProjectStore, type ProjectAsset, type ProjectLocation, type ProjectProp } from "../../../stores/projectStore";
@@ -310,6 +310,22 @@ export default function ProjectCanvasShell({
       await selectEpisode(episodeId);
     });
   };
+
+  // 剧本挂接回调（P2-2）：空纸片在本集无剧本时挂接会「转正」——节点
+  // key 从 script:<phid> 换成 script，纸片从 scriptPhs 消失。窗若正指着
+  // 那张纸片，转正落库完成后把窗改指主剧本（窗保持打开），不再停留
+  // 「剧本 · 未挂接」假状态误导用户反复点挂接。
+  const handleScriptPickShell = useCallback(
+    (filePath: string) =>
+      canvasView.handleScriptPick(filePath, () => {
+        setDetailFor((cur) =>
+          cur && cur.kind === "scriptPh" && cur.key.startsWith("script:")
+            ? { kind: "scriptPh", key: "script" }
+            : cur,
+        );
+      }),
+    [canvasView.handleScriptPick],
+  );
 
   // ── 场景框：位置（scenes.canvas 之外叠本地实时层）+ 标签牌整组拖动 ──
   const [scenePos, setScenePos] = useState<Record<string, Pos>>({});
@@ -910,7 +926,7 @@ export default function ProjectCanvasShell({
                 scriptPickOpen={scriptPickOpen}
                 setScriptPickTarget={setScriptPickTarget}
                 setScriptPickOpen={setScriptPickOpen}
-                handleScriptPick={canvasView.handleScriptPick}
+                handleScriptPick={handleScriptPickShell}
               />
               <PromptPickDialog
                 promptPickOpen={promptPickOpen}
