@@ -76,6 +76,10 @@ export interface DetailWindowOps {
   removeLink(row: { pending: boolean; fromKey: string; toSegment: string; toPort: string; ownerKey: string; rowId?: string }): void;
   /** 批量挂靠（多选实体逐条落 node_link）。 */
   attachEntities(segmentId: string, port: string, entities: Array<{ kind: EntityPhKind; id: string }>): void;
+  /** 片段产出挂接：开素材选择浮层（限视频），选完由 Shell 收库并落
+   *  setSegmentAsset——产出此前没有任何挂接入口（实测 P1-1，空态提示
+   *  指向的「批量挂靠」只能挂实体输入）。 */
+  openOutputPick(segmentId: string): void;
   /** 提示词纸片「选择/更换提示词」：开提示词库选浮层（详情窗保持打开，
    *  浮层叠加在其上，选完纸片内容经状态刷新）。 */
   openPromptPick(phKey: string): void;
@@ -1158,6 +1162,9 @@ function SegmentDetail({ segmentId, ops }: { segmentId: string; ops: DetailWindo
       back={ops.backTarget ? { onBack: ops.goBack } : undefined}
       foot={(
         <>
+          <button type="button" className="pdetail-foot-btn" onClick={() => ops.openOutputPick(segmentId)}>
+            {t(segment.asset ? "project.detail.outputReplace" : "project.detail.outputPick")}
+          </button>
           <button type="button" className="pdetail-foot-btn" onClick={() => setAttachOpen(true)}>
             {t("project.detail.attachPick")}
           </button>

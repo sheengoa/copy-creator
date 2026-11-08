@@ -33,6 +33,7 @@ import {
   ScriptPickDialog,
   ShotFormDialog,
 } from "./layers/Dialogs";
+import ProjectFilePickerDialog from "../ProjectFilePickerDialog";
 import { useGroupOps } from "./engine/useGroupOps";
 import { useCanvasView } from "./engine/useCanvasView";
 import { useWorkflowSeed } from "./engine/useWorkflowSeed";
@@ -239,6 +240,10 @@ export default function ProjectCanvasShell({
   // 剧本/提示词纸片的库选弹窗状态（双击纸片 → 选文件/选提示词）。
   const [scriptPickOpen, setScriptPickOpen] = useState(false);
   const [scriptPickTarget, setScriptPickTarget] = useState<string | null>(null);
+  // 片段产出挂接（详情窗钉底「挂产出」→ 素材选择浮层）：此前产出没有
+  // 任何挂接入口（实测 P1-1——空态提示指的「批量挂靠」只能挂实体输入，
+  // useCanvasView 的 attachSegmentFromLibrary 是无调用方的死代码）。
+  const [segOutputPickFor, setSegOutputPickFor] = useState<string | null>(null);
   const [promptPickOpen, setPromptPickOpen] = useState(false);
   const [promptPickTarget, setPromptPickTarget] = useState<string | null>(null);
   const [promptPickQuery, setPromptPickQuery] = useState("");
@@ -287,6 +292,24 @@ export default function ProjectCanvasShell({
     persistInfoOffsets: data.persistInfoOffsets,
     persistPendingLinks,
   });
+
+  // 片段产出挂接（选完浮层回调）：素材先收库（散件 linkAsset）再落
+  // setSegmentAsset，末尾重取概览让片段缩略图与成片汇总立即跟上；详情
+  // 窗保持打开（与挂剧本/提示词同款——动作收进窗，浮层叠加其上）。
+  const attachSegmentOutput = (segmentId: string, file: { filePath: string; kind: string; name: string }) => {
+    setSegOutputPickFor(null);
+    void linkAsset({
+      filePath: file.filePath,
+      kind: file.kind,
+      name: file.name,
+      episodeId,
+      shotId: "",
+    }).then(async (asset) => {
+      if (!asset) return;
+      await setSegmentAsset(segmentId, asset.id);
+      await selectEpisode(episodeId);
+    });
+  };
 
   // ── 场景框：位置（scenes.canvas 之外叠本地实时层）+ 标签牌整组拖动 ──
   const [scenePos, setScenePos] = useState<Record<string, Pos>>({});
@@ -827,6 +850,7 @@ export default function ProjectCanvasShell({
         linkNode(episodeId, e.kind, e.id, segmentId, port as Parameters<typeof linkNode>[4], "");
       });
     },
+    openOutputPick: (segmentId) => setSegOutputPickFor(segmentId),
     openPromptPick: (phKey) => {
       setPromptPickTarget(phKey);
       setPromptPickOpen(true);
@@ -896,6 +920,14 @@ export default function ProjectCanvasShell({
                 prompts={prompts}
                 handlePromptPick={handlePromptPick}
               />
+              {segOutputPickFor && (
+                <ProjectFilePickerDialog
+                  title={t("project.detail.outputPickTitle")}
+                  kindFilter={["video"]}
+                  onClose={() => setSegOutputPickFor(null)}
+                  onPick={(file) => attachSegmentOutput(segOutputPickFor, file)}
+                />
+              )}
               <LocationPickPanel
                 locationPickOpen={locationPickOpen}
                 setLocationPickOpen={setLocationPickOpen}

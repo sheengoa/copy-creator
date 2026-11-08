@@ -44,6 +44,7 @@ function makeOps(overrides: Partial<DetailWindowOps> = {}): DetailWindowOps {
     loadEntity: vi.fn(),
     removeLink: vi.fn(),
     attachEntities: vi.fn(),
+    openOutputPick: vi.fn(),
     openPromptPick: vi.fn(),
     openScriptPick: vi.fn(),
     nodeFaces: {},
@@ -397,6 +398,44 @@ describe("DetailWindow", () => {
     expect(removeLink).toHaveBeenCalledWith(
       expect.objectContaining({ pending: false, fromKey: "loc-1", toSegment: "seg-1", toPort: "location", ownerKey: "grp:g1", rowId: "nl-g1" }),
     );
+  });
+
+  it("片段产出挂接：钉底「挂产出」路由 openOutputPick，已挂产出变「更换产出」（P1-1）", () => {
+    const openOutputPick = vi.fn();
+    const segRow = { id: "seg-1", episode_id: "e1", asset_id: null, sort_order: 0, note: "", canvas_x: null, canvas_y: null, created_at: "", updated_at: "" };
+    const { rerender } = render(
+      <ProjectDetailWindow target={{ kind: "segment", id: "seg-1" }} ops={makeOps({ openOutputPick, segments: [segRow] })} />,
+    );
+    // 空产出：空态文案与钉底首钮都指向「挂产出」（此前产出无任何挂接入口）。
+    expect(screen.getByText(/尚未挂接产出/)).toBeTruthy();
+    const pickBtn = [...document.querySelectorAll(".pdetail-foot-btn")].find(
+      (b) => b.textContent === "挂产出",
+    ) as HTMLButtonElement;
+    expect(pickBtn).toBeTruthy();
+    fireEvent.click(pickBtn);
+    expect(openOutputPick).toHaveBeenCalledWith("seg-1");
+    // 已挂产出：同一钉底位变「更换产出」，可重挑（海报懒加载依赖
+    // IntersectionObserver，jsdom 无，桩掉）。
+    (globalThis as unknown as { IntersectionObserver?: unknown }).IntersectionObserver = class {
+      observe(): void {}
+      unobserve(): void {}
+      disconnect(): void {}
+    };
+    rerender(
+      <ProjectDetailWindow
+        target={{ kind: "segment", id: "seg-1" }}
+        ops={makeOps({
+          openOutputPick,
+          segments: [{ ...segRow, asset_id: "a1", asset: { id: "a1", file_path: "clips/seg1.mp4", kind: "video", name: "片段1", shot_id: "", episode_id: "e1", gen_from_asset: "", gen_from_prompt: "", gen_params: "", audio_role: "", missing: false, canvas_x: null, canvas_y: null, created_at: "", updated_at: "" } }],
+        })}
+      />,
+    );
+    const replaceBtn = [...document.querySelectorAll(".pdetail-foot-btn")].find(
+      (b) => b.textContent === "更换产出",
+    ) as HTMLButtonElement;
+    expect(replaceBtn).toBeTruthy();
+    fireEvent.click(replaceBtn);
+    expect(openOutputPick).toHaveBeenCalledTimes(2);
   });
 
   it("输入卡一图一卡：实体逐张参考图各成一卡，点击卡片路由 openDetail 展开实体窗", () => {
