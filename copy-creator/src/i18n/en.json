@@ -793,6 +793,7 @@
       "outputPick": "Attach output",
       "outputReplace": "Replace output",
       "outputPickTitle": "Choose output video",
+      "mainBadge": "Main image",
       "loadEntity": "Load entity from library",
       "empty": "Empty",
       "setAvatar": "Set as avatar",

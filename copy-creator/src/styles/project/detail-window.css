@@ -269,11 +269,14 @@
   white-space: nowrap;
 }
 .pdetail-seg-btn:hover:not(.is-active) { color: var(--text-primary); }
+/* 激活底用主题 token：light-dark() 走 color-scheme 属性（页面未声明 →
+   恒取 light 白底），与本应用 data-theme 变量系统脱节，深色主题下白底
+   配白字不可读（实测 P2-1）。--seg-item-active-bg 亮暗两套都有定义。 */
 .pdetail-seg-btn.is-active {
-  background: light-dark(#ffffff, #3d3d4a);
+  background: var(--seg-item-active-bg);
   color: var(--text-primary);
   font-weight: 500;
-  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.14);
+  box-shadow: var(--seg-item-active-shadow);
 }
 .pdetail-f { display: flex; flex-direction: column; gap: 4px; min-width: 0; }
 .pdetail-f-label { font-size: 11px; color: var(--text-tertiary); }

@@ -185,10 +185,13 @@ export function DetailSection({ label, count, extra, children, foldable, default
  *  跟随→实体级 setVoice，独立→绑定条目。图区=定框 16:10 + 保比例
  *  contain + 上下虚影（用户定案「窗口里规矩框，比例不裁」）。编辑本地
  *  镜像 + 失焦提交（防光标跳、防逐键落库）。 */
-function FaceCard({ path, group, isAvatar, binding, defProfile, entityName, removable, libraryRoot, onSetAvatar, onRemove, onCommit, onPickVoiceFace, onClearVoiceFace, nodeRemove }: {
+function FaceCard({ path, group, isAvatar, isMain, binding, defProfile, entityName, removable, libraryRoot, onSetAvatar, onRemove, onCommit, onPickVoiceFace, onClearVoiceFace, nodeRemove }: {
   path: string;
   group: EntityPhKind;
   isAvatar: boolean;
+  /** 兜底主图卡（场景/道具 ref_path 恒兜底显示）：标「已是主图」，与头
+   *  像卡同规不提供移出（实测 P3-1 移出可点但无效误导）。 */
+  isMain?: boolean;
   /** null = 跟随默认（无绑定条目）。 */
   binding: ImageBinding | null;
   defProfile: { voice_path: string; bio: string; prompt: string; time_hint: string };
@@ -248,6 +251,7 @@ function FaceCard({ path, group, isAvatar, binding, defProfile, entityName, remo
         <div className="pdetail-face-top">
           <b className="pdetail-face-name" title={fileName}>{fileName}</b>
           {isAvatar && <span className="pdetail-badge">{t("project.detail.avatarBadge")}</span>}
+          {isMain && <span className="pdetail-badge">{t("project.detail.mainBadge")}</span>}
           {/* 跟随/独立：白卡胶囊两段切换（用户指定样式） */}
           <div className="pdetail-seg" role="group" aria-label={t("project.detail.independentToggle")}>
             <button
@@ -360,10 +364,12 @@ function VoiceRow({ voicePath, onPick, onClear }: {
 }
 
 /** 默认区人设/提示词（实体级列编辑，方案 A 的兜底值）：本地镜像 + 失焦
- *  提交（saveProfile 保留各自其它字段落库）。 */
-function DefaultProfileFields({ initialBio, initialPrompt, onCommit }: {
+ *  提交（saveProfile 保留各自其它字段落库）。bioLabel 由调用方按实体类
+ *  传入（角色=人设、场景/道具=描述——实测 P3-2 场景窗误用角色文案）。 */
+function DefaultProfileFields({ initialBio, initialPrompt, bioLabel, onCommit }: {
   initialBio: string;
   initialPrompt: string;
+  bioLabel: string;
   onCommit(bio: string, prompt: string): void;
 }) {
   const { t } = useTranslation();
@@ -376,7 +382,7 @@ function DefaultProfileFields({ initialBio, initialPrompt, onCommit }: {
   return (
     <div className="pdetail-default">
       <div className="pdetail-f">
-        <span className="pdetail-f-label">{t("project.detail.bioLabel")}</span>
+        <span className="pdetail-f-label">{bioLabel}</span>
         <textarea
           rows={2}
           value={bio}
@@ -422,31 +428,37 @@ function faceCardsOf(args: {
   setAvatar(path: string): void;
   /** 节点级移出（当前视角，头像除外——头像恒兜底显示不可移出）。 */
   nodeRemove?: (path: string) => void;
+  /** 兜底首卡路径（角色头像 / 场景道具旧主图）：该卡恒兜底显示，「移出
+   *  本节点」禁用（实测 P3-1：场景主图卡移出可点但无效果，nodefaces 落
+   *  空条目）。 */
+  fallbackPath?: string;
   /** 隐藏库级「移除」（当前视角）：节点语境下放库级删图按钮极易误触，
    *  库级删除统一在「全部」视角的实体分组里做。 */
   hideRemove?: boolean;
 }) {
-  return args.paths.map((path) => (
-    <FaceCard
-      key={path}
-      path={path}
-      group={args.group}
-      isAvatar={args.group === "character" && path === args.avatarPath && args.avatarPath !== ""}
-      binding={args.bindingsMap[path] ?? null}
-      defProfile={args.defProfile}
-      entityName={args.entityName}
-      removable={!args.hideRemove && args.refPaths.includes(path)}
-      libraryRoot={args.libraryRoot}
-      onSetAvatar={() => args.setAvatar(path)}
-      onRemove={() => args.remove(path)}
-      onCommit={(next) => args.commit(path, next)}
-      onPickVoiceFace={() => args.pickVoice(path, args.bindingsMap[path] ?? null)}
-      onClearVoiceFace={() => args.clearVoice(path, args.bindingsMap[path] ?? null)}
-      nodeRemove={args.nodeRemove && !(args.group === "character" && path === args.avatarPath && args.avatarPath !== "")
-        ? () => args.nodeRemove!(path)
-        : undefined}
-    />
-  ));
+  return args.paths.map((path) => {
+    const isFallback = !!args.fallbackPath && path === args.fallbackPath;
+    return (
+      <FaceCard
+        key={path}
+        path={path}
+        group={args.group}
+        isAvatar={args.group === "character" && path === args.avatarPath && args.avatarPath !== ""}
+        isMain={isFallback && args.group !== "character"}
+        binding={args.bindingsMap[path] ?? null}
+        defProfile={args.defProfile}
+        entityName={args.entityName}
+        removable={!args.hideRemove && args.refPaths.includes(path)}
+        libraryRoot={args.libraryRoot}
+        onSetAvatar={() => args.setAvatar(path)}
+        onRemove={() => args.remove(path)}
+        onCommit={(next) => args.commit(path, next)}
+        onPickVoiceFace={() => args.pickVoice(path, args.bindingsMap[path] ?? null)}
+        onClearVoiceFace={() => args.clearVoice(path, args.bindingsMap[path] ?? null)}
+        nodeRemove={args.nodeRemove && !isFallback ? () => args.nodeRemove!(path) : undefined}
+      />
+    );
+  });
 }
 
 /** 库条目加入形象（实体级）：该条目头像/主图成为新形象，名称/人设/提示
@@ -749,6 +761,7 @@ function EntityDetail({ group, sourceKey, nodeKey, ops }: { group: EntityPhKind;
             {faceCardsOf({
               paths: nodeViewPaths, group, avatarPath, bindingsMap, defProfile,
               entityName: name, refPaths, libraryRoot: ops.libraryRoot,
+              fallbackPath: nodePath || undefined,
               entity: entity as ProjectCharacter | ProjectLocation | ProjectProp,
               commit: commitBinding, pickVoice: pickVoiceFor, clearVoice: clearVoiceFor, remove: removeRef,
               setAvatar: (p) => entity && ops.setAvatar(entity as ProjectCharacter, p),
@@ -814,6 +827,7 @@ function EntityDetail({ group, sourceKey, nodeKey, ops }: { group: EntityPhKind;
           key={`${group}-${entityId}`}
           initialBio={entity?.bio ?? ""}
           initialPrompt={(entity as { prompt?: string } | undefined)?.prompt ?? ""}
+          bioLabel={group === "character" ? t("project.detail.bioLabel") : t("project.detail.describeLabel")}
           onCommit={(bio, prompt) => ops.saveProfile(group, entityId, bio, prompt)}
         />
       </DetailSection>

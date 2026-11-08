@@ -438,6 +438,39 @@ describe("DetailWindow", () => {
     expect(openOutputPick).toHaveBeenCalledTimes(2);
   });
 
+  it("场景兜底主图卡：标「已是主图」且无「移出本节点」——移出无效不该可点（P3-1）", () => {
+    const removeNodeFace = vi.fn();
+    render(
+      <ProjectDetailWindow
+        target={{ kind: "info", group: "location", sourceKey: "loc:loc-1", nodeKey: "loc:loc-1" }}
+        ops={makeOps({
+          removeNodeFace,
+          locations: [
+            { id: "loc-1", name: "废弃地铁站", int_ext: "内景", time_hint: "夜", bio: "", prompt: "", ref_path: "scenes/station-main.png", created_at: "", updated_at: "" },
+          ],
+        })}
+      />,
+    );
+    // 主图恒兜底显示（没挂过回退主图）：徽标注明身份，不提供移出。
+    expect(screen.getByText("已是主图")).toBeTruthy();
+    expect(screen.queryByText("移出本节点")).toBeNull();
+  });
+
+  it("默认区标签按实体类区分：场景窗用「描述」，不再误用角色的「人设」（P3-2）", () => {
+    render(
+      <ProjectDetailWindow
+        target={{ kind: "info", group: "location", sourceKey: "loc:loc-1" }}
+        ops={makeOps({
+          locations: [
+            { id: "loc-1", name: "废弃地铁站", int_ext: "内景", time_hint: "夜", bio: "", prompt: "", ref_path: "", created_at: "", updated_at: "" },
+          ],
+        })}
+      />,
+    );
+    expect(screen.getByText("描述")).toBeTruthy();
+    expect(screen.queryByText("人设")).toBeNull();
+  });
+
   it("目标失联守卫：库侧删除实体后已开的实体详情窗自动关窗（P2-3）", () => {
     const onClose = vi.fn();
     render(
