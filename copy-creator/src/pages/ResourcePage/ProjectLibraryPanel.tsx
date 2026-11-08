@@ -687,8 +687,10 @@ function updateDraft(
 }
 
 function characterLibraryNote(character: ProjectCharacter, t: (key: string, options?: Record<string, unknown>) => string): string {
+  // 副标语义 = 全剧出场集数。0 集时直说「出场 0 集」——旧兜底「未关联」
+  // 被实测误读成「未关联素材/未关联本集」（它都不是），已删除该键。
   const count = character.episode_ref_count ?? 0;
-  const refs = count > 0 ? t("project.library.episodeRefs", { count }) : t("project.library.unlinked");
+  const refs = t("project.library.episodeRefs", { count });
   return character.bio ? `${character.bio} · ${refs}` : refs;
 }
 

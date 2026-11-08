@@ -643,7 +643,6 @@
       "deleteConfirm": "删除「{{name}}」？",
       "deleteConfirmHint": "该操作不可撤销；已关联的集会自动解除关联。",
       "episodeRefs": "出场 {{count}} 集",
-      "unlinked": "未关联",
       "noDescription": "暂无描述",
       "pathHint": "点输入框旁的按钮从资源库挑选（含预览）；也可手动粘贴相对路径，保存后在此预览",
       "pickFromLibrary": "从资源库选择",

@@ -643,7 +643,6 @@
       "deleteConfirm": "Delete \"{{name}}\"?",
       "deleteConfirmHint": "This cannot be undone; linked episodes will be unlinked automatically.",
       "episodeRefs": "In {{count}} episodes",
-      "unlinked": "Not linked",
       "noDescription": "No description",
       "pathHint": "Use the button next to the input to pick from the library (with previews); pasting a library-relative path also works, previews show after save",
       "pickFromLibrary": "Pick from library",
