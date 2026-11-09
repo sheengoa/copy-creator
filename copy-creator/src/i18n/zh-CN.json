@@ -452,7 +452,8 @@
     "versionRestored": "已还原到「{{time}}」，原内容已自动存为一版",
     "versionRestoreFailed": "还原失败",
     "versionClearDone": "已清空改动记录",
-    "editContent": "编辑内容"
+    "editContent": "编辑内容",
+    "refreshContent": "刷新"
   },
   "phrases": {
     "search": "搜索快捷输入...",

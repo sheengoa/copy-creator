@@ -143,6 +143,9 @@ export default function ResourceDetailPage({
   const [errorReason, setErrorReason] = useState<string | null>(null);
   // 「用系统应用打开」失败反馈（超长文本回退态的兜底动作）。
   const [openExternalFailed, setOpenExternalFailed] = useState(false);
+  // 手动刷新计数：顶栏「刷新」递增触发正文加载 effect 重跑——详情页正文
+  // 是打开时一次性读入的，本应用其他入口或外部程序改了文本后需手动重读。
+  const [textReloadKey, setTextReloadKey] = useState(0);
   // ── 文本标注（阅读态划选标记）──
   const [annotations, setAnnotations] = useState<ResourceAnnotation[]>([]);
   const [annSelection, setAnnSelection] = useState<
@@ -511,7 +514,7 @@ export default function ResourceDetailPage({
     return () => {
       cancelled = true;
     };
-  }, [externalTextPath, kind, mediaVersion, record, resourcePath]);
+  }, [externalTextPath, kind, mediaVersion, record, resourcePath, textReloadKey]);
 
   const title = getResourceTitle(record, kind, recordLocale);
 
@@ -1094,6 +1097,20 @@ export default function ResourceDetailPage({
           <span>{t("resources.backToLibrary")}</span>
         </button>
         <div className="resource-detail-actions">
+          {kind === "text" && !contentEditing && !previewEntry && (
+            <button
+              type="button"
+              className="resource-secondary-button"
+              onClick={() => {
+                // 旧正文的划选区间对新内容可能失效，刷新即清。
+                setAnnSelection(null);
+                setTextReloadKey((key) => key + 1);
+              }}
+            >
+              {Icons.refresh}
+              <span>{t("resources.refreshContent")}</span>
+            </button>
+          )}
           {contentEditable && !contentEditing && (
             <span
               className="text-history-anchor"

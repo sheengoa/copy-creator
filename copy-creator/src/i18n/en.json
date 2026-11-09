@@ -452,7 +452,8 @@
     "versionRestored": "Restored to {{time}}; previous content saved as a version",
     "versionRestoreFailed": "Restore failed",
     "versionClearDone": "History cleared",
-    "editContent": "Edit content"
+    "editContent": "Edit content",
+    "refreshContent": "Refresh"
   },
   "phrases": {
     "search": "Search quick input...",
