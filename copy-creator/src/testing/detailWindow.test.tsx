@@ -172,8 +172,11 @@ describe("DetailWindow", () => {
       <ProjectDetailWindow
         target={{ kind: "info", group: "character", sourceKey: "char:char-2" }}
         ops={makeOps({
+          // 节点 key 用真实运行时格式（画布节点 id：char: 实体承载节点 /
+          // eph: 片段占位口）；卡哇伊的节点（跨实体）也挂了 shared。
           nodeFaces: {
-            "character:char-2": ["refs/shared.png"],
+            "char:char-2": ["refs/shared.png"],
+            "char:char-9": ["refs/shared.png"],
             "eph:p1": ["refs/shared.png"],
           },
           nodeLinks: [
@@ -196,7 +199,7 @@ describe("DetailWindow", () => {
     expect(counts).toEqual(["共 3 张", "共 2 张"]);
     expect(screen.getByText("共 5 张")).toBeTruthy();
     expect(document.querySelectorAll(".pdetail-face").length).toBe(5);
-    // 全窗只有一张 shared 卡（老周组内），标注「也在 卡哇伊」+「挂载 2」
+    // 全窗只有一张 shared 卡（老周组内），标注「也在 卡哇伊」+「挂载 3」
     // （i18next 插值会把文本拆成多个节点，断言走 textContent 过滤）。
     const sharedCards = [...document.querySelectorAll(".pdetail-face")].filter(
       (c) => c.querySelector(".pdetail-face-name")?.textContent === "shared.png",
@@ -204,12 +207,14 @@ describe("DetailWindow", () => {
     expect(sharedCards.length).toBe(1);
     const badges = [...document.querySelectorAll(".pdetail-badge")].map((b) => b.textContent);
     expect(badges).toContain("也在 卡哇伊");
-    expect(badges).toContain("挂载 2");
+    expect(badges).toContain("挂载 3");
     const badge = [...document.querySelectorAll(".pdetail-badge")].find(
-      (b) => b.textContent === "挂载 2",
+      (b) => b.textContent === "挂载 3",
     ) as HTMLElement;
-    // 悬浮明细：可读名（实体承载节点显示实体名）+ 不可解析的原样 key。
+    // 悬浮明细：短前缀节点 key 解析出实体名（含跨实体 char:char-9 → 卡哇伊），
+    // 不可解析的占位口原样展示。
     expect(badge.getAttribute("title")).toContain("老周");
+    expect(badge.getAttribute("title")).toContain("卡哇伊");
     expect(badge.getAttribute("title")).toContain("eph:p1");
   });
 

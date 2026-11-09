@@ -456,6 +456,8 @@ function faceCardsOf(args: {
   hideRemove?: boolean;
   /** 图级标注（全部视角）：引用节点数与跨实体归属，null = 不标。 */
   faceMeta?: { owners: Map<string, string[]>; refs: Map<string, string[]> } | null;
+  /** 引用节点 key → 可读名（全部视角悬浮明细用）。 */
+  refLabel?: (key: string) => string;
 }) {
   return args.paths.map((path) => {
     const isFallback = !!args.fallbackPath && path === args.fallbackPath;
@@ -481,7 +483,7 @@ function faceCardsOf(args: {
         onClearVoiceFace={() => args.clearVoice(path, args.bindingsMap[path] ?? null)}
         nodeRemove={args.nodeRemove && !isFallback ? () => args.nodeRemove!(path) : undefined}
         refNodes={refKeys.length > 0
-          ? { count: refKeys.length, list: refKeys.map((k) => nodeRefLabel(k, args.group, args)).join("、") }
+          ? { count: refKeys.length, list: refKeys.map((k) => (args.refLabel ? args.refLabel(k) : k)).join("、") }
           : undefined}
         alsoIn={otherOwners.length > 0 ? { names: otherOwners.join("、") } : undefined}
       />
@@ -493,14 +495,23 @@ function faceCardsOf(args: {
  *  （eph: 占位口等）原样截短展示。悬浮明细用，仅查询不写入。 */
 function nodeRefLabel(
   key: string,
-  group: EntityPhKind,
-  args: { entity: ProjectCharacter | ProjectLocation | ProjectProp },
+  libs: { characters: ProjectCharacter[]; locations: ProjectLocation[]; props: ProjectProp[] },
 ): string {
   const sep = key.indexOf(":");
   if (sep > 0) {
+    // 画布节点 key 的前缀是短式（char:/loc:/prop: = 实体承载节点，
+    // eph: = 片段占位口），按前缀查三库解析实体名——挂载集与实体解耦，
+    // 同一张图可被任何实体的节点挂载，跨实体也要能解析。
     const prefix = key.slice(0, sep);
     const id = key.slice(sep + 1);
-    if (prefix === group && id === args.entity.id) return args.entity.name;
+    const name = prefix === "char"
+      ? libs.characters.find((c) => c.id === id)?.name
+      : prefix === "loc"
+        ? libs.locations.find((l) => l.id === id)?.name
+        : prefix === "prop"
+          ? libs.props.find((p) => p.id === id)?.name
+          : undefined;
+    if (name) return name;
   }
   return key.length > 18 ? `${key.slice(0, 18)}…` : key;
 }
@@ -616,6 +627,7 @@ function EntityFaceGroup({ group, entity, visiblePaths, faceMeta, ops }: {
           commit: commitBinding, pickVoice: pickVoiceFor, clearVoice: clearVoiceFor, remove: removeRef,
           setAvatar: (p) => ops.setAvatar(entity as ProjectCharacter, p),
           faceMeta,
+          refLabel: (k) => nodeRefLabel(k, ops),
         })}
         {visiblePaths.length > faceLimit && (
           <button type="button" className="pdetail-more" onClick={() => setFaceLimit((n) => n + REF_PAGE)}>
