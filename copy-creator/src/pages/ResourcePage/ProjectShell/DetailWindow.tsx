@@ -185,7 +185,7 @@ export function DetailSection({ label, count, extra, children, foldable, default
  *  跟随→实体级 setVoice，独立→绑定条目。图区=定框 16:10 + 保比例
  *  contain + 上下虚影（用户定案「窗口里规矩框，比例不裁」）。编辑本地
  *  镜像 + 失焦提交（防光标跳、防逐键落库）。 */
-function FaceCard({ path, group, isAvatar, isMain, binding, defProfile, entityName, removable, libraryRoot, onSetAvatar, onRemove, onCommit, onPickVoiceFace, onClearVoiceFace, nodeRemove }: {
+function FaceCard({ path, group, isAvatar, isMain, binding, defProfile, entityName, removable, libraryRoot, onSetAvatar, onRemove, onCommit, onPickVoiceFace, onClearVoiceFace, nodeRemove, refNodes, alsoIn }: {
   path: string;
   group: EntityPhKind;
   isAvatar: boolean;
@@ -210,6 +210,10 @@ function FaceCard({ path, group, isAvatar, isMain, binding, defProfile, entityNa
   onPickVoiceFace(): void;
   /** 音色清除（跟随→清实体级；独立→清绑定条目）。 */
   onClearVoiceFace(): void;
+  /** 引用节点标注（全部视角）：本集挂载此图的节点数与可读名清单。 */
+  refNodes?: { count: number; list: string };
+  /** 跨实体归属标注（全部视角）：除归并组外还有哪些实体的列表含此图。 */
+  alsoIn?: { names: string };
 }) {
   const { t } = useTranslation();
   const ind = !!binding;
@@ -252,6 +256,21 @@ function FaceCard({ path, group, isAvatar, isMain, binding, defProfile, entityNa
           <b className="pdetail-face-name" title={fileName}>{fileName}</b>
           {isAvatar && <span className="pdetail-badge">{t("project.detail.avatarBadge")}</span>}
           {isMain && <span className="pdetail-badge">{t("project.detail.mainBadge")}</span>}
+          {/* 引用节点徽标（全部视角，用户定案「标注好有哪些节点挂载它」）：
+              计数入卡、明细悬浮，引用再多也不撑长列表。 */}
+          {refNodes && (
+            <span
+              className="pdetail-badge pdetail-badge-refs"
+              title={t("project.detail.mountBadgeTitle", { n: refNodes.count, list: refNodes.list })}
+            >
+              {t("project.detail.mountBadge", { n: refNodes.count })}
+            </span>
+          )}
+          {alsoIn && (
+            <span className="pdetail-badge" title={t("project.detail.alsoInTitle", { names: alsoIn.names })}>
+              {t("project.detail.alsoIn", { names: alsoIn.names })}
+            </span>
+          )}
           {/* 跟随/独立：白卡胶囊两段切换（用户指定样式） */}
           <div className="pdetail-seg" role="group" aria-label={t("project.detail.independentToggle")}>
             <button
@@ -435,9 +454,14 @@ function faceCardsOf(args: {
   /** 隐藏库级「移除」（当前视角）：节点语境下放库级删图按钮极易误触，
    *  库级删除统一在「全部」视角的实体分组里做。 */
   hideRemove?: boolean;
+  /** 图级标注（全部视角）：引用节点数与跨实体归属，null = 不标。 */
+  faceMeta?: { owners: Map<string, string[]>; refs: Map<string, string[]> } | null;
 }) {
   return args.paths.map((path) => {
     const isFallback = !!args.fallbackPath && path === args.fallbackPath;
+    const meta = args.faceMeta ?? null;
+    const refKeys = meta?.refs.get(path) ?? [];
+    const otherOwners = (meta?.owners.get(path) ?? []).slice(1);
     return (
       <FaceCard
         key={path}
@@ -456,9 +480,29 @@ function faceCardsOf(args: {
         onPickVoiceFace={() => args.pickVoice(path, args.bindingsMap[path] ?? null)}
         onClearVoiceFace={() => args.clearVoice(path, args.bindingsMap[path] ?? null)}
         nodeRemove={args.nodeRemove && !isFallback ? () => args.nodeRemove!(path) : undefined}
+        refNodes={refKeys.length > 0
+          ? { count: refKeys.length, list: refKeys.map((k) => nodeRefLabel(k, args.group, args)).join("、") }
+          : undefined}
+        alsoIn={otherOwners.length > 0 ? { names: otherOwners.join("、") } : undefined}
       />
     );
   });
+}
+
+/** 引用节点 key → 可读名：实体承载节点（kind:id）显示实体名，其余
+ *  （eph: 占位口等）原样截短展示。悬浮明细用，仅查询不写入。 */
+function nodeRefLabel(
+  key: string,
+  group: EntityPhKind,
+  args: { entity: ProjectCharacter | ProjectLocation | ProjectProp },
+): string {
+  const sep = key.indexOf(":");
+  if (sep > 0) {
+    const prefix = key.slice(0, sep);
+    const id = key.slice(sep + 1);
+    if (prefix === group && id === args.entity.id) return args.entity.name;
+  }
+  return key.length > 18 ? `${key.slice(0, 18)}…` : key;
 }
 
 /** 库条目加入形象（实体级）：该条目头像/主图成为新形象，名称/人设/提示
@@ -500,16 +544,23 @@ function addPickedFace(
 }
 /** 实体形象组（全部视角的每实体分块，用户定案「本集分组·可直接编辑」）：
  *  组头 = 实体名 + 张数 + 该组自己的添加形象钮；组内形象卡与单实体窗完全
- *  同构（编辑写入本组实体的库数据，跨集生效）。30/批分页按组独立（防单
- *  实体巨集；key=实体 id，换实体自动重置）。 */
-function EntityFaceGroup({ group, entity, ops }: {
+ *  同构（编辑写入本组实体的库数据，跨集生效）。visiblePaths 是父级按
+ *  「全窗唯一」归并后的本组陈列列表（组内重复与跨组重复均已归并），库
+ *  数据仍按全量图集读写。30/批分页按组独立（防单实体巨集；key=实体 id，
+ *  换实体自动重置）。 */
+function EntityFaceGroup({ group, entity, visiblePaths, faceMeta, ops }: {
   group: EntityPhKind;
   entity: ProjectCharacter | ProjectLocation | ProjectProp;
+  /** 父级归并后本组实际陈列的图（已去重、已扣除前面组陈列过的）。 */
+  visiblePaths: string[];
+  /** 图级标注（引用节点 + 跨实体归属）；null = 当前视角不传。 */
+  faceMeta: { owners: Map<string, string[]>; refs: Map<string, string[]> } | null;
   ops: DetailWindowOps;
 }) {
   const { t } = useTranslation();
   const refPaths = useMemo(() => entityRefPaths(group, entity), [entity, group]);
   const avatarPath = group === "character" ? ((entity as ProjectCharacter).avatar_path ?? "") : "";
+  // 全量图集（绑定重建的基准，含被归并不陈列的图——归并只动展示层）。
   const gridPaths = useMemo(() => entityFacePaths(group, entity), [entity, group]);
   const bindingsMap = useMemo(() => entityBindings(entity), [entity]);
   const commitBinding = (facePath: string, next: ImageBinding | null) => {
@@ -552,22 +603,23 @@ function EntityFaceGroup({ group, entity, ops }: {
     <>
       <div className="pdetail-facegroup-h">
         <b className="pdetail-facegroup-name">{entity.name}</b>
-        <span className="pdetail-facegroup-c">{t("project.detail.refCount", { n: gridPaths.length })}</span>
+        <span className="pdetail-facegroup-c">{t("project.detail.refCount", { n: visiblePaths.length })}</span>
         <button type="button" className="pdetail-ref-add" onClick={() => setPickerOpen(true)}>
           {Icons.add}{t("project.detail.refAdd")}
         </button>
       </div>
       <div className="pdetail-facelist">
-        {gridPaths.length === 0 && <div className="pdetail-empty">{t("project.detail.empty")}</div>}
+        {visiblePaths.length === 0 && <div className="pdetail-empty">{t("project.detail.empty")}</div>}
         {faceCardsOf({
-          paths: gridPaths.slice(0, faceLimit), group, avatarPath, bindingsMap, defProfile,
+          paths: visiblePaths.slice(0, faceLimit), group, avatarPath, bindingsMap, defProfile,
           entityName: entity.name, refPaths, libraryRoot: ops.libraryRoot, entity,
           commit: commitBinding, pickVoice: pickVoiceFor, clearVoice: clearVoiceFor, remove: removeRef,
           setAvatar: (p) => ops.setAvatar(entity as ProjectCharacter, p),
+          faceMeta,
         })}
-        {gridPaths.length > faceLimit && (
+        {visiblePaths.length > faceLimit && (
           <button type="button" className="pdetail-more" onClick={() => setFaceLimit((n) => n + REF_PAGE)}>
-            {t("project.detail.loadMore", { rest: gridPaths.length - faceLimit })}
+            {t("project.detail.loadMore", { rest: visiblePaths.length - faceLimit })}
           </button>
         )}
       </div>
@@ -697,10 +749,53 @@ function EntityDetail({ group, sourceKey, nodeKey, ops }: { group: EntityPhKind;
       .map((id) => lib.find((e) => e.id === id))
       .filter((e): e is ProjectCharacter | ProjectLocation | ProjectProp => !!e);
   }, [ops.nodeLinks, ops.characters, ops.locations, ops.props, group, entityId]);
-  // 段头计数随视角：当前=本节点那张（1/0）；全部=本集各实体图集总数。
+  const { nodeFaces } = ops;
+  // 全窗唯一归并（用户定案「全部里不能存在重复，标注引用节点就行」）：
+  // 同一张图整个「全部」只在首个含它的实体组陈列一次（组内重复的脏数据
+  // 一并消除），后续组跳过；卡上标注引用节点数与跨实体归属。只动展示，
+  // 库数据（reference_paths）不重写。
+  const allScopeGroups = useMemo(() => {
+    if (scope !== "all") return [];
+    const claimed = new Set<string>();
+    return episodeEntities.map((entity) => {
+      const all = entityFacePaths(group, entity);
+      const visible = [...new Set(all)].filter((p) => !claimed.has(p));
+      for (const p of all) claimed.add(p);
+      return visible;
+    });
+  }, [scope, group, episodeEntities]);
+  // 图级标注数据：path → 含它的实体名（按组序，首个 = 归并组）；path →
+  // 本集挂载它的节点 key（nodeFaces 全集扫描，挂载与实体解耦——引用判定
+  // 只看图有没有挂在节点上）。
+  const faceMeta = useMemo(() => {
+    if (scope !== "all") return null;
+    const owners = new Map<string, string[]>();
+    for (const e of episodeEntities) {
+      // 同一实体的列表可能含重复条目（脏数据），归属名单一个实体只记一次。
+      const seen = new Set<string>();
+      for (const p of entityFacePaths(group, e)) {
+        if (seen.has(p)) continue;
+        seen.add(p);
+        const list = owners.get(p);
+        if (list) list.push(e.name);
+        else owners.set(p, [e.name]);
+      }
+    }
+    const refs = new Map<string, string[]>();
+    for (const [key, paths] of Object.entries(nodeFaces ?? {})) {
+      for (const p of paths) {
+        const list = refs.get(p);
+        if (list) list.push(key);
+        else refs.set(p, [key]);
+      }
+    }
+    return { owners, refs };
+  }, [scope, group, episodeEntities, nodeFaces]);
+  // 段头计数随视角：当前=本节点那张（1/0）；全部=归并去重后的陈列总数
+  // （与实际卡片数一致，不是各实体图集的原始累加）。
   const shownCount = scope === "current"
     ? nodeViewPaths.length
-    : episodeEntities.reduce((sum, e) => sum + entityFacePaths(group, e).length, 0);
+    : allScopeGroups.reduce((sum, paths) => sum + paths.length, 0);
   // 参考图管理：添加（弹对应库面板选条目，用户定案——库条目自带名称/人
   // 设/提示词/音色，选入即成该形象的独立绑定，不弹原始文件框）与逐张移
   // 除；参考图集整体覆写 reference_paths，选条目的绑定落 image_bindings。
@@ -772,8 +867,15 @@ function EntityDetail({ group, sourceKey, nodeKey, ops }: { group: EntityPhKind;
         ) : (
           <div className="pdetail-facegroups">
             <p className="pdetail-note">{t("project.detail.episodeFacesHint")}</p>
-            {episodeEntities.map((e) => (
-              <EntityFaceGroup key={e.id} group={group} entity={e} ops={ops} />
+            {episodeEntities.map((e, i) => (
+              <EntityFaceGroup
+                key={e.id}
+                group={group}
+                entity={e}
+                visiblePaths={allScopeGroups[i] ?? []}
+                faceMeta={faceMeta}
+                ops={ops}
+              />
             ))}
           </div>
         )}

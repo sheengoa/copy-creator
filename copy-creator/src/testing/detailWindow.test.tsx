@@ -159,6 +159,60 @@ describe("DetailWindow", () => {
     ]);
   });
 
+  it("全部视角全窗唯一归并：跨实体重复图只陈列一份、组内脏数据去重、标注归属与引用节点", () => {
+    const other: ProjectCharacter = {
+      ...baseCharacter,
+      id: "char-9",
+      name: "卡哇伊",
+      bio: "另一角色",
+      avatar_path: "avatars/kww.png",
+      reference_paths: JSON.stringify(["refs/shared.png", "refs/k1.png"]),
+    };
+    render(
+      <ProjectDetailWindow
+        target={{ kind: "info", group: "character", sourceKey: "char:char-2" }}
+        ops={makeOps({
+          nodeFaces: {
+            "character:char-2": ["refs/shared.png"],
+            "eph:p1": ["refs/shared.png"],
+          },
+          nodeLinks: [
+            { id: "nl-1", from_kind: "character", from_id: "char-2", to_segment: "seg-1", to_port: "character", owner_key: "" },
+            { id: "nl-2", from_kind: "character", from_id: "char-9", to_segment: "seg-1", to_port: "character", owner_key: "" },
+          ],
+          // 老周列表故意埋同一张图的重复条目（脏数据），卡哇伊列表也含
+          // shared（跨实体重复）——归并后全窗只陈列一份。
+          characters: [
+            { ...baseCharacter, avatar_path: "avatars/k.png", reference_paths: JSON.stringify(["refs/shared.png", "refs/a.png", "refs/shared.png"]) },
+            other,
+          ],
+        })}
+      />,
+    );
+    fireEvent.click(screen.getByText("全部"));
+    // 老周组可见 = 头像 + shared + a（组内脏数据重复归并）3 张；卡哇伊组
+    // = kww + k1（shared 归并到老周组）2 张；段头计数 = 归并后总数 5。
+    const counts = [...document.querySelectorAll(".pdetail-facegroup-c")].map((el) => el.textContent);
+    expect(counts).toEqual(["共 3 张", "共 2 张"]);
+    expect(screen.getByText("共 5 张")).toBeTruthy();
+    expect(document.querySelectorAll(".pdetail-face").length).toBe(5);
+    // 全窗只有一张 shared 卡（老周组内），标注「也在 卡哇伊」+「挂载 2」
+    // （i18next 插值会把文本拆成多个节点，断言走 textContent 过滤）。
+    const sharedCards = [...document.querySelectorAll(".pdetail-face")].filter(
+      (c) => c.querySelector(".pdetail-face-name")?.textContent === "shared.png",
+    );
+    expect(sharedCards.length).toBe(1);
+    const badges = [...document.querySelectorAll(".pdetail-badge")].map((b) => b.textContent);
+    expect(badges).toContain("也在 卡哇伊");
+    expect(badges).toContain("挂载 2");
+    const badge = [...document.querySelectorAll(".pdetail-badge")].find(
+      (b) => b.textContent === "挂载 2",
+    ) as HTMLElement;
+    // 悬浮明细：可读名（实体承载节点显示实体名）+ 不可解析的原样 key。
+    expect(badge.getAttribute("title")).toContain("老周");
+    expect(badge.getAttribute("title")).toContain("eph:p1");
+  });
+
   it("当前视角添加形象：弹标准库面板，点条目双写（收进该角色形象列表+挂上本节点），留在当前", () => {
     const addNodeFace = vi.fn();
     const setReferences = vi.fn();
