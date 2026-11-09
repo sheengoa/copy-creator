@@ -2775,6 +2775,9 @@
 
   .resource-detail-actions {
     width: 100%;
+    /* 五按钮（含「刷新」）在最窄 480px 窗口下超宽溢出，「删除」被推出
+       视口外；放不下时换行承接，gap 6px 同时提供行间距。 */
+    flex-wrap: wrap;
   }
 
   .resource-detail-actions > button {
