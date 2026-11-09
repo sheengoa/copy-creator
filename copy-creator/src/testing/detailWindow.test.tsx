@@ -426,7 +426,7 @@ describe("DetailWindow", () => {
         target={{ kind: "segment", id: "seg-1" }}
         ops={makeOps({
           openOutputPick,
-          segments: [{ ...segRow, asset_id: "a1", asset: { id: "a1", file_path: "clips/seg1.mp4", kind: "video", name: "片段1", shot_id: "", episode_id: "e1", gen_from_asset: "", gen_from_prompt: "", gen_params: "", audio_role: "", missing: false, canvas_x: null, canvas_y: null, created_at: "", updated_at: "" } }],
+          segments: [{ ...segRow, asset_id: "a1", asset: { id: "a1", file_path: "clips/seg1.mp4", kind: "video", name: "片段1", shot_id: "", episode_id: "e1", gen_from_asset: "", gen_from_prompt: "", gen_params: "", audio_role: "", missing: false, canvas_x: null, canvas_y: null, canvas_w: null, created_at: "", updated_at: "" } }],
         })}
       />,
     );
