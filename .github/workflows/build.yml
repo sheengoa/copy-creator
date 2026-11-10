@@ -22,6 +22,19 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      # 秒级防呆：tag 与 package.json 版本不一致（tag 打错 commit / 版本没
+      # 同步）在这里几秒拦下，不再等装完系统依赖才在别处失败。
+      # workflow_dispatch 无 tag，跳过。
+      - name: 校验 tag 与 package.json 版本一致
+        if: startsWith(github.ref, 'refs/tags/v')
+        run: |
+          TAG_VERSION="${GITHUB_REF_NAME#v}"
+          PKG_VERSION=$(node -p "require('./copy-creator/package.json').version")
+          if [ "$TAG_VERSION" != "$PKG_VERSION" ]; then
+            echo "::error::tag v${TAG_VERSION} 与 package.json 版本 ${PKG_VERSION} 不一致，请在发布提交上打 tag（pnpm release 已自动校验）"
+            exit 1
+          fi
+
       - name: 安装 pnpm
         uses: pnpm/action-setup@v4
         with:

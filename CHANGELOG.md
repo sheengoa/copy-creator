@@ -1,7 +1,7 @@
 # 更新日志
 
-本文件的人工可读变更记录。新版本段落由 `node scripts/release.mjs <版本号>`
-自动生成草稿（按提交类型归组），发布前请人工润色。
+本文件的人工可读变更记录。新版本段落由 `pnpm release <版本号>`
+自动生成草稿（按提交类型归组）；润色可在发布后补交，不影响已发产物。
 
 格式参照 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)，
 版本号遵循 [语义化版本](https://semver.org/lang/zh-CN/)。
