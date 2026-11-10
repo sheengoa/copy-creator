@@ -77,6 +77,11 @@ export default function FreeCanvas({ canvasId, renderWires, onOpenNodeDetail, ov
   /** 合集行定位请求（2026-11-04）：n 自增让同节点连点也能重触发；
    *  实际平移 + 脉冲在手势钩子构建后的效果里执行（那边才有 pulseNodes）。 */
   const [locate, setLocate] = useState<{ id: string; n: number } | null>(null);
+  // 节点内嵌面板展开后的视口守护（2026-11-10）：与 locate 同款一次性请
+  // 求模式，但不脉冲不居中——DOM 实测节点矩形，只在溢出视口时按最小
+  // 位移夹回（缩放不动、用户视角尽量不挪）。DOM 实测而非 memberFrame：
+  // 面板展开的节点高度只存在于 DOM，数据级包围盒读不到。
+  const [reveal, setReveal] = useState<{ id: string; n: number } | null>(null);
 
   // 渲染后同步镜像：窗口级手势回调读 ref 免闭包陈旧（react-hooks/refs
   // 禁止渲染期写 ref，统一在 effect 提交）。
@@ -209,6 +214,7 @@ export default function FreeCanvas({ canvasId, renderWires, onOpenNodeDetail, ov
   const canvasServices: NodeServices = {
     upstream: (nodeId) => upstreamMediaOf(nodeId),
     locateNode: (nodeId) => setLocate((p) => ({ id: nodeId, n: (p?.n ?? 0) + 1 })),
+    revealNode: (nodeId) => setReveal((p) => ({ id: nodeId, n: (p?.n ?? 0) + 1 })),
     ...(onOpenNodeDetail ? { openNodeDetail: (node: CanvasNode) => onOpenNodeDetail(node) } : {}),
     pickMedia: (node, source) => {
       if (source === "library") pickFromLibrary(node);
@@ -282,6 +288,32 @@ export default function FreeCanvas({ canvasId, renderWires, onOpenNodeDetail, ov
     setView(next);
     saveView(next);
   }, [locate, memberFrame, pulseNodes, saveView, setLocate, setView, view, vpRef]);
+
+  // reveal 执行：按节点 DOM 实测矩形判断溢出，x/y 各自最小位移夹回
+  // （先下/右溢出后上/左，常见贴底展开正好命中第一条）。一次性请求，
+  // 处理完立即清零（理由同 locate 的残留重放防御）。
+  useEffect(() => {
+    if (!reveal) return;
+    setReveal(null);
+    const vp = vpRef.current;
+    if (!vp) return;
+    const rect = vp.getBoundingClientRect();
+    const nodeEl = vp.querySelector(`.pc-node[data-key="${reveal.id}"]`);
+    if (!nodeEl) return;
+    const nodeRect = nodeEl.getBoundingClientRect();
+    if (rect.width === 0) return;
+    const pad = 12;
+    let dx = 0;
+    let dy = 0;
+    if (nodeRect.bottom > rect.bottom - pad) dy = rect.bottom - pad - nodeRect.bottom;
+    else if (nodeRect.top < rect.top + pad) dy = rect.top + pad - nodeRect.top;
+    if (nodeRect.right > rect.right - pad) dx = rect.right - pad - nodeRect.right;
+    else if (nodeRect.left < rect.left + pad) dx = rect.left + pad - nodeRect.left;
+    if (!dx && !dy) return;
+    const next = { x: view.x + dx, y: view.y + dy, scale: view.scale };
+    setView(next);
+    saveView(next);
+  }, [reveal, saveView, setView, view, vpRef]);
 
   // ── 键盘快捷键（engine/useKeyboardShortcuts）：删除/撤销重做/全选/复制粘贴/打组 ──
   useKeyboardShortcuts(

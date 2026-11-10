@@ -1,22 +1,33 @@
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Icons } from "../../../components/Icons";
 import { useNodeErrors } from "./nodeErrors";
 import { NodeHint } from "./NodeHint";
 import { SaveMediaBox } from "./SaveMediaBox";
-import { SaveTargetPopover } from "./SaveTargetPopover";
+import { SaveTargetPanel } from "./SaveTargetPanel";
 import { useSaveRuntime } from "./saveRuntimeCtx";
 import type { NodeProps } from "./types";
 
 // 保存三族内容层（三类型 100% 共享，差异仅产物形态）：断链图形 → 目标
 // 选择组（问号点明二选一）→ 等待产物（骑顶边状态点）/ 产物（SaveMediaBox，
-// 失败保留红叉点重试）→ 目标行（分组 · 名称预览，点开配置浮层）。
+// 失败保留红叉点重试）→ 目标行（分组 · 名称预览，点行在节点内展开配置
+// 面板，确定后收起，2026-11-10 用户定案「从节点扩展出来不显乱」）。
 // 自动保存管线见 saveRuntime.tsx。
-export function SaveMediaBody({ node, services, scale }: NodeProps) {
+export function SaveMediaBody({ node, services }: NodeProps) {
   const { t } = useTranslation();
   const nodeErrors = useNodeErrors((s) => s.errors);
   const runtime = useSaveRuntime();
-  const [popOpen, setPopOpen] = useState(false);
+  const [panelOpen, setPanelOpen] = useState(false);
+  const servicesRef = useRef(services);
+  useEffect(() => {
+    servicesRef.current = services;
+  });
+  // 展开（false→true）后守护视口：节点长高可能溢出画布视口（贴底节点
+  // 确定按钮会被推出可视区），revealNode 最小平移夹回。ref 取 services
+  // 避免父层每渲染新对象导致重复触发。
+  useEffect(() => {
+    if (panelOpen) servicesRef.current.revealNode(node.id);
+  }, [panelOpen, node.id]);
   const meta = node.metadata;
   if (meta.kind !== "save_image" && meta.kind !== "save_video" && meta.kind !== "save_audio") return null;
   const upstream = services.upstream(node.id);
@@ -122,28 +133,28 @@ export function SaveMediaBody({ node, services, scale }: NodeProps) {
               </div>
             )}
             {autoState === "error" && autoError && <div className="fc-gen-warn">{autoError}</div>}
-            {/* 目标行：分组 · 名称 一眼可见，点开浮层细改（2026-11-10） */}
+            {/* 目标行：分组 · 名称 一眼可见；点行节点内展开配置面板（toggle） */}
             <button
               type="button"
               className="fc-save-target"
               aria-label={t("canvas.savePopTitle")}
-              aria-haspopup="dialog"
+              aria-expanded={panelOpen}
               onPointerDown={(e) => e.stopPropagation()}
               onClick={(e) => {
                 e.stopPropagation();
-                setPopOpen((open) => !open);
+                setPanelOpen((open) => !open);
               }}
             >
               {autoTarget === "dir" ? Icons.saveTrayFine : Icons.folderFine}
               <span className="fc-save-target-text">{rowLabel}</span>
-              <span className="fc-save-target-edit">{Icons.edit}</span>
+              <span className="fc-save-target-edit">{panelOpen ? Icons.chevronDown : Icons.edit}</span>
             </button>
+            {/* 配置面板：节点内嵌展开（非悬浮层），确定/收起后节点恢复原状 */}
+            {panelOpen && <SaveTargetPanel node={node} onClose={() => setPanelOpen(false)} />}
           </>
         )}
         {nodeErrors[node.id] && <div className="fc-gen-warn">{nodeErrors[node.id]}</div>}
       </div>
-      {/* 浮层渲染在滚动容器外（fc-node-form 会裁剪溢出），以 pc-node 为锚；scale 供视口自适应换算 */}
-      {popOpen && <SaveTargetPopover node={node} scale={scale} onClose={() => setPopOpen(false)} />}
     </>
   );
 }

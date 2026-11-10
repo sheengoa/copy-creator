@@ -517,10 +517,12 @@
   filter: brightness(1.08);
 }
 
-/* ── 目标行 + 配置浮层（2026-11-10 库内分组/基名可配） ────────── */
+/* ── 目标行 + 内嵌配置面板（2026-11-10 库内分组/基名可配） ────── */
 
-/* 目标行：等待/产物区下方一行紧凑预览（图标 + 分组 · 名称 + 编辑笔），
-   点开浮层细改。弱存在感：次级文字色 + 细边，悬停点亮。 */
+/* 目标行：等待/产物区下方一行紧凑预览（图标 + 分组 · 名称 + 编辑笔/
+   收起箭头），点行在节点内展开配置面板（内嵌非浮层，用户定案「从节点
+   扩展出来，确定后收起，不显乱」）。弱存在感：次级文字色 + 细边，悬
+   停点亮。 */
 .fc-save-target {
   display: flex;
   align-items: center;
@@ -568,72 +570,31 @@
   height: 12px;
 }
 
-/* 配置浮层：锚在节点下方（渲染于 fc-node-form 滚动容器之外，以
-   pc-node 为定位锚）。玻璃配方与 .pc-node 同源（shared-chrome.css
-   单源定案：卡面 rgba(255,255,255,0.62) · blur24 · saturate1.8 ·
-   白细边 + 内高光 + 顶部反光，亮暗两套同步）；浮起在节点之上再叠
-   一层更重的外投影。 */
-.fc-save-pop {
-  position: absolute;
-  top: calc(100% + 8px);
-  left: 10px;
-  z-index: 60;
-  width: 240px;
-  box-sizing: border-box;
-  padding: 12px 12px 11px;
-  border-radius: 15px;
-  background: rgba(255, 255, 255, 0.62);
-  backdrop-filter: blur(24px) saturate(1.8);
-  -webkit-backdrop-filter: blur(24px) saturate(1.8);
-  border: 0.5px solid rgba(255, 255, 255, 0.78);
-  box-shadow:
-    0 1px 2px rgba(0, 0, 0, 0.04),
-    0 14px 40px rgba(31, 35, 65, 0.14),
-    0 26px 60px rgba(31, 35, 65, 0.2),
-    inset 0 0.5px 0 rgba(255, 255, 255, 0.85),
-    inset 0 -0.5px 0 rgba(255, 255, 255, 0.35);
+/* 内嵌配置面板：节点内展开的一层（节点玻璃已提供 blur 质感，面板只
+   做「内嵌层」——半透明底 + 细边 + 小圆角），展开/收起即节点高度变化，
+   画布永不被遮挡，无定位推算。入场与选择组滑回同语。 */
+.fc-save-panel {
+  border: 1px solid var(--separator);
+  border-radius: 10px;
+  background: color-mix(in srgb, var(--bg-card) 55%, transparent);
+  padding: 10px 10px 9px;
+  animation: fc-save-choose-in 0.4s cubic-bezier(0.22, 1, 0.36, 1) backwards;
 }
 
-/* 玻璃斜面反光：与 .pc-node::before 同款（盖在内容之上、不拦截命中）。 */
-.fc-save-pop::before {
-  content: "";
-  position: absolute;
-  inset: 0;
-  border-radius: inherit;
-  pointer-events: none;
-  background: linear-gradient(168deg, rgba(255, 255, 255, 0.5) 0%, rgba(255, 255, 255, 0.12) 22%, rgba(255, 255, 255, 0) 42%);
-  opacity: 0.85;
-}
-
-[data-theme="dark"] .fc-save-pop {
-  background: rgba(30, 30, 36, 0.66);
-  border-color: rgba(255, 255, 255, 0.12);
-  box-shadow:
-    0 1px 2px rgba(0, 0, 0, 0.3),
-    0 14px 40px rgba(0, 0, 0, 0.4),
-    0 26px 60px rgba(0, 0, 0, 0.45),
-    inset 0 0.5px 0 rgba(255, 255, 255, 0.14),
-    inset 0 -0.5px 0 rgba(255, 255, 255, 0.06);
-}
-
-[data-theme="dark"] .fc-save-pop::before {
-  background: linear-gradient(168deg, rgba(255, 255, 255, 0.09) 0%, rgba(255, 255, 255, 0.02) 22%, rgba(255, 255, 255, 0) 42%);
-}
-
-.fc-save-pop-head {
+.fc-save-panel-head {
   display: flex;
   align-items: center;
-  margin-bottom: 10px;
+  margin-bottom: 8px;
 }
 
-.fc-save-pop-title {
+.fc-save-panel-title {
   font-size: 12px;
   font-weight: 600;
   color: var(--text-primary);
 }
 
-/* 标题行右侧显式关闭钮（另有 Esc / 点外部关闭）。 */
-.fc-save-pop-close {
+/* 标题行右侧收起钮（另有 Esc / 点节点外 / 再点目标行）。 */
+.fc-save-panel-close {
   margin-left: auto;
   width: 20px;
   height: 20px;
@@ -647,28 +608,28 @@
   justify-content: center;
 }
 
-.fc-save-pop-close:hover {
+.fc-save-panel-close:hover {
   background: color-mix(in srgb, var(--text-primary) 8%, transparent);
   color: var(--text-primary);
 }
 
-.fc-save-pop-close svg {
+.fc-save-panel-close svg {
   width: 12px;
   height: 12px;
 }
 
-.fc-save-pop-label {
+.fc-save-panel-label {
   display: block;
   font-size: 11px;
   color: var(--text-tertiary);
-  margin-bottom: 5px;
+  margin-bottom: 4px;
 }
 
-.fc-save-pop-input {
+.fc-save-panel-input {
   width: 100%;
   box-sizing: border-box;
-  height: 30px;
-  padding: 0 9px;
+  height: 28px;
+  padding: 0 8px;
   border: 1px solid var(--separator);
   border-radius: 8px;
   background: transparent;
@@ -677,34 +638,33 @@
   outline: none;
 }
 
-.fc-save-pop-input:focus {
+.fc-save-panel-input:focus {
   border-color: var(--accent);
 }
 
-.fc-save-pop-hint {
+.fc-save-panel-hint {
   font-size: 11px;
   color: var(--text-tertiary);
-  margin: 5px 1px 10px;
+  margin: 4px 1px 8px;
 }
 
-.fc-save-pop-tree {
+.fc-save-panel-tree {
   border: 1px solid var(--separator);
   border-radius: 9px;
   overflow-y: auto;
-  /* 固定高（非 max-height）：浮层总高从首帧起恒定，分组数据异步到齐
-     不再改变浮层高度——位置推算一次成立，弹出点稳定不跳（用户反馈
-     「弹出位置一直在跳」的根源即树加载前矮/到齐后高两次定位）。 */
-  height: 168px;
+  /* 固定高：面板总高从首帧起恒定，分组数据异步到齐不改高度（弹出点
+     稳定不跳的同一约定，内嵌化后仍是面板高度稳定的前提）。 */
+  height: 132px;
   box-sizing: border-box;
-  margin-bottom: 12px;
+  margin-bottom: 9px;
 }
 
-.fc-save-pop-item {
+.fc-save-panel-item {
   display: flex;
   align-items: center;
-  gap: 7px;
+  gap: 6px;
   width: 100%;
-  padding: 7px 10px;
+  padding: 6px 8px;
   border: none;
   background: none;
   font-size: 12px;
@@ -713,24 +673,24 @@
   text-align: left;
 }
 
-.fc-save-pop-item + .fc-save-pop-item {
+.fc-save-panel-item + .fc-save-panel-item {
   border-top: 1px solid color-mix(in srgb, var(--separator) 55%, transparent);
 }
 
-.fc-save-pop-item > svg {
+.fc-save-panel-item > svg {
   width: 13px;
   height: 13px;
   flex-shrink: 0;
   opacity: 0.8;
 }
 
-.fc-save-pop-item.is-active {
+.fc-save-panel-item.is-active {
   background: var(--accent-bg);
   color: var(--accent);
   font-weight: 600;
 }
 
-.fc-save-pop-item-name {
+.fc-save-panel-item-name {
   flex: 1;
   min-width: 0;
   overflow: hidden;
@@ -738,14 +698,14 @@
   white-space: nowrap;
 }
 
-.fc-save-pop-item-count {
+.fc-save-panel-item-count {
   flex-shrink: 0;
   font-size: 11px;
   color: var(--text-tertiary);
 }
 
-.fc-save-pop-empty {
-  /* 树容器固定高下的空态：垂直居中占满，保证加载前后浮层高度一致 */
+.fc-save-panel-empty {
+  /* 树容器固定高下的空态：垂直居中占满，保证加载前后面板高度一致 */
   height: 100%;
   display: flex;
   align-items: center;
@@ -754,44 +714,46 @@
   color: var(--text-tertiary);
 }
 
-.fc-save-pop-dirhint {
+.fc-save-panel-dirhint {
   font-size: 11px;
   color: var(--text-tertiary);
   border: 1px dashed var(--separator);
   border-radius: 9px;
-  padding: 8px 10px;
-  margin-bottom: 12px;
+  padding: 7px 9px;
+  margin-bottom: 9px;
   word-break: break-all;
 }
 
-.fc-save-pop-foot {
+.fc-save-panel-foot {
   display: flex;
   align-items: center;
-  gap: 7px;
+  gap: 6px;
 }
 
-.fc-save-pop-link {
+.fc-save-panel-link {
   border: none;
   background: none;
-  padding: 4px 2px;
+  padding: 4px 0;
   font-size: 11px;
   color: var(--accent);
   cursor: pointer;
+  white-space: nowrap;
 }
 
-.fc-save-pop-ghost {
+.fc-save-panel-ghost {
   margin-left: auto;
-  padding: 5px 10px;
+  padding: 5px 8px;
   border: 1px solid var(--separator);
   border-radius: 8px;
   background: none;
   font-size: 11.5px;
   color: var(--text-secondary);
   cursor: pointer;
+  white-space: nowrap;
 }
 
-.fc-save-pop-ok {
-  padding: 5px 14px;
+.fc-save-panel-ok {
+  padding: 5px 12px;
   border: none;
   border-radius: 8px;
   background: var(--accent);
@@ -799,8 +761,9 @@
   font-size: 11.5px;
   font-weight: 600;
   cursor: pointer;
+  white-space: nowrap;
 }
 
-.fc-save-pop-ok:hover {
+.fc-save-panel-ok:hover {
   filter: brightness(1.08);
 }

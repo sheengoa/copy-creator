@@ -73,6 +73,9 @@ export interface NodeServices {
   /** 合集成员行点击定位（2026-11-04）：源节点不在视口内则平移居中，
    *  并做边缘脉冲闪烁（复用出生脉冲 pc-spawn 视觉）方便快速定位。 */
   locateNode(nodeId: string): void;
+  /** 平移画布使节点完整可见（缩放不动、不脉冲不居中，已可见则不动）——
+   *  节点内嵌面板展开后自身长高溢出视口时用（2026-11-10）。 */
+  revealNode(nodeId: string): void;
   /** 打开节点详情窗（工程作用域注入；自由画布无此能力）。 */
   openNodeDetail?(node: CanvasNode): void;
 }

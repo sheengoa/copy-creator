@@ -5,12 +5,12 @@ import "../../../i18n";
 import { type CanvasNode } from "../../../stores/canvasStore";
 import { SaveMediaBody } from "./SaveMediaBody";
 import { SaveRuntimeCtx, type SaveRuntime } from "./saveRuntimeCtx";
-import { SaveTargetPopover } from "./SaveTargetPopover";
+import { SaveTargetPanel } from "./SaveTargetPanel";
 import type { NodeProps } from "./types";
 
-// 保存目标配置浮层与节点目标行（2026-11-10 用户定案）：目标已设的
-// 保存节点显示「分组 · 名称」目标行，点开浮层可改库内分组与保存基名；
-// 确定写详情（setSaveTargetDetails），指定路径目标显示目录提示并可重选。
+// 保存目标内嵌配置面板（2026-11-10 用户定案「从节点扩展出来，确定后
+// 收起，不显乱」）：面板渲染在节点目标行下方（非悬浮层，无定位推算），
+// 收起走标题行 × / Esc / 点节点外；确定写详情（setSaveTargetDetails）。
 
 const { invokeMock } = vi.hoisted(() => ({
   invokeMock: vi.fn(),
@@ -78,6 +78,7 @@ const services = {
   clearMedia: vi.fn(),
   upstream: vi.fn(() => null),
   locateNode: vi.fn(),
+  revealNode: vi.fn(),
 } as unknown as NodeProps["services"];
 
 afterEach(() => {
@@ -85,12 +86,12 @@ afterEach(() => {
   invokeMock.mockClear();
 });
 
-describe("SaveTargetPopover", () => {
+describe("SaveTargetPanel", () => {
   it("库目标渲染分组树（未分组计数行 + 分组），名称初值取自节点", async () => {
     const onClose = vi.fn();
     render(
       <SaveRuntimeCtx.Provider value={makeRuntime()}>
-        <SaveTargetPopover scale={1} node={makeNode({ metadata: { kind: "save_image", status: "", error: "", target: "", saved_path: "", auto_target: "library", auto_name: "产品截图", auto_group: "" } })} onClose={onClose} />
+        <SaveTargetPanel node={makeNode({ metadata: { kind: "save_image", status: "", error: "", target: "", saved_path: "", auto_target: "library", auto_name: "产品截图", auto_group: "" } })} onClose={onClose} />
       </SaveRuntimeCtx.Provider>,
     );
     await waitFor(() => expect(screen.getByText("方案图")).toBeTruthy());
@@ -99,13 +100,13 @@ describe("SaveTargetPopover", () => {
     expect(onClose).not.toHaveBeenCalled();
   });
 
-  it("选分组后确定：写详情（组名 + 裁剪后的基名）并关闭", async () => {
+  it("选分组后确定：写详情（组名 + 裁剪后的基名）并收起", async () => {
     const setSaveTargetDetails = vi.fn();
     const onClose = vi.fn();
     const runtime = makeRuntime({ setSaveTargetDetails });
     render(
       <SaveRuntimeCtx.Provider value={runtime}>
-        <SaveTargetPopover scale={1} node={makeNode()} onClose={onClose} />
+        <SaveTargetPanel node={makeNode()} onClose={onClose} />
       </SaveRuntimeCtx.Provider>,
     );
     await waitFor(() => expect(screen.getByText("方案图")).toBeTruthy());
@@ -121,7 +122,7 @@ describe("SaveTargetPopover", () => {
     const runtime = makeRuntime();
     render(
       <SaveRuntimeCtx.Provider value={runtime}>
-        <SaveTargetPopover scale={1} node={makeNode({ metadata: { kind: "save_image", status: "", error: "", target: "", saved_path: "", auto_target: "library", auto_name: "旧名", auto_group: "方案图" } })} onClose={vi.fn()} />
+        <SaveTargetPanel node={makeNode({ metadata: { kind: "save_image", status: "", error: "", target: "", saved_path: "", auto_target: "library", auto_name: "旧名", auto_group: "方案图" } })} onClose={vi.fn()} />
       </SaveRuntimeCtx.Provider>,
     );
     await waitFor(() => expect(screen.getByText("方案图")).toBeTruthy());
@@ -138,8 +139,7 @@ describe("SaveTargetPopover", () => {
     const onClose = vi.fn();
     render(
       <SaveRuntimeCtx.Provider value={makeRuntime({ pickSaveAutoDir, setSaveTargetDetails })}>
-        <SaveTargetPopover
-          scale={1}
+        <SaveTargetPanel
           node={makeNode({ metadata: { kind: "save_video", status: "", error: "", target: "", saved_path: "", auto_target: "dir", auto_dir: "D:\\out", auto_name: "" } })}
           onClose={onClose}
         />
@@ -154,12 +154,12 @@ describe("SaveTargetPopover", () => {
     expect(setSaveTargetDetails).toHaveBeenCalledWith("sv1", "", "");
   });
 
-  it("标题行 × 显式关闭：只调用 onClose 不写详情", async () => {
+  it("标题行 × 收起：只调 onClose 不写详情", async () => {
     const setSaveTargetDetails = vi.fn();
     const onClose = vi.fn();
     render(
       <SaveRuntimeCtx.Provider value={makeRuntime({ setSaveTargetDetails })}>
-        <SaveTargetPopover scale={1} node={makeNode()} onClose={onClose} />
+        <SaveTargetPanel node={makeNode()} onClose={onClose} />
       </SaveRuntimeCtx.Provider>,
     );
     fireEvent.click(screen.getByRole("button", { name: "关闭" }));
@@ -167,69 +167,46 @@ describe("SaveTargetPopover", () => {
     expect(setSaveTargetDetails).not.toHaveBeenCalled();
   });
 
-  // jsdom 的 getBoundingClientRect 恒 0：翻转/clamp 用例按类名 mock 元素
-  // 几何（视口 inset 8、gap 8，坐标均为屏幕系）。
-  const makeRect = (x: number, y: number, w: number, h: number) => ({
-    x, y, width: w, height: h, top: y, left: x, right: x + w, bottom: y + h,
-    toJSON: () => ({}),
-  });
-  const mockRects = (main: DOMRect, node: DOMRect, pop: DOMRect) =>
-    vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockImplementation(function (this: HTMLElement) {
-      if (this.classList.contains("fc-save-pop")) return pop as DOMRect;
-      if (this.classList.contains("pc-node")) return node as DOMRect;
-      if (this.classList.contains("canvas-main")) return main as DOMRect;
-      return makeRect(0, 0, 0, 0) as DOMRect;
-    });
-
-  it("节点贴视口下缘：浮层翻到节点上方（top 让位 bottom）", async () => {
-    mockRects(
-      makeRect(0, 0, 1000, 760),
-      makeRect(100, 600, 250, 200), // bottom 800 越过视口底界 752
-      makeRect(110, 808, 240, 300),
-    );
+  it("Esc 收起且不写详情", () => {
     const onClose = vi.fn();
     render(
-      // 视口推算依赖宿主链（.pc-node 定位锚 + .canvas-main 裁剪视口）
-      <div className="canvas-main">
-        <div className="pc-node">
-          <SaveRuntimeCtx.Provider value={makeRuntime()}>
-            <SaveTargetPopover scale={1} node={makeNode()} onClose={onClose} />
-          </SaveRuntimeCtx.Provider>
-        </div>
-      </div>,
+      <SaveRuntimeCtx.Provider value={makeRuntime()}>
+        <SaveTargetPanel node={makeNode()} onClose={onClose} />
+      </SaveRuntimeCtx.Provider>,
     );
-    const pop = (await screen.findByRole("dialog")) as HTMLElement;
-    await waitFor(() => expect(pop.style.bottom).toBe("calc(100% + 8px)"));
-    expect(pop.style.top).toBe("auto");
+    fireEvent.keyDown(document, { key: "Escape" });
+    expect(onClose).toHaveBeenCalledTimes(1);
   });
 
-  it("上方空间也不足：clamp 上移溢出量贴视口底，不再遮挡视口外", async () => {
-    mockRects(
-      makeRect(0, 0, 1000, 760),
-      makeRect(100, 200, 250, 360), // bottom 560：下方溢出 116；上方 184 放不下 300
-      makeRect(110, 568, 240, 300),
-    );
-    render(
+  it("点节点外收起；面板内与宿主节点内的点击不收", () => {
+    const onClose = vi.fn();
+    const { container } = render(
       <div className="canvas-main">
         <div className="pc-node">
           <SaveRuntimeCtx.Provider value={makeRuntime()}>
-            <SaveTargetPopover scale={1} node={makeNode()} onClose={vi.fn()} />
+            <SaveTargetPanel node={makeNode()} onClose={onClose} />
           </SaveRuntimeCtx.Provider>
         </div>
+        <div className="outside-probe" />
       </div>,
     );
-    const pop = (await screen.findByRole("dialog")) as HTMLElement;
-    // top = calc(100% + gap + shiftY) = calc(100% + 8 - 116)（jsdom 规范化为 - 108px）
-    await waitFor(() => expect(pop.style.top).toBe("calc(100% - 108px)"));
-    expect(pop.style.bottom).toBe("");
+    // 面板内点击不收
+    fireEvent.mouseDown(screen.getByRole("region", { name: "保存目标" }));
+    expect(onClose).not.toHaveBeenCalled();
+    // 宿主节点内点击不收（目标行 toggle 自理）
+    fireEvent.mouseDown(container.querySelector(".pc-node")!);
+    expect(onClose).not.toHaveBeenCalled();
+    // 节点外点击收起
+    fireEvent.mouseDown(container.querySelector(".outside-probe")!);
+    expect(onClose).toHaveBeenCalledTimes(1);
   });
 });
 
-describe("SaveMediaBody 目标行", () => {
+describe("SaveMediaBody 目标行与面板展开", () => {
   // 目标行在「目标已设」分支：upstream 非空才渲染（空 paths=等待产物态）。
   const connectedServices = { ...services, upstream: vi.fn(() => ({ paths: ["cache/x.png"] })) } as unknown as NodeProps["services"];
 
-  it("目标已设时显示分组 · 名称（名称空=默认原名），点行开浮层", async () => {
+  it("目标已设时显示分组 · 名称（名称空=默认原名），点行展开面板再点收起（toggle）", async () => {
     const runtime = makeRuntime();
     render(
       <SaveRuntimeCtx.Provider value={runtime}>
@@ -245,8 +222,34 @@ describe("SaveMediaBody 目标行", () => {
     );
     const row = screen.getByRole("button", { name: "保存目标" });
     expect(row.textContent).toContain("方案图 · 产品截图");
+    expect(row.getAttribute("aria-expanded")).toBe("false");
     fireEvent.click(row);
-    await waitFor(() => expect(screen.getByRole("dialog")).toBeTruthy());
+    await waitFor(() => expect(screen.getByRole("region", { name: "保存目标" })).toBeTruthy());
+    expect(row.getAttribute("aria-expanded")).toBe("true");
+    fireEvent.click(row);
+    await waitFor(() => expect(screen.queryByRole("region", { name: "保存目标" })).toBeNull());
+    expect(row.getAttribute("aria-expanded")).toBe("false");
+  });
+
+  it("确定后面板收起且详情落库（节点恢复原状的完整闭环）", async () => {
+    const setSaveTargetDetails = vi.fn();
+    render(
+      <SaveRuntimeCtx.Provider value={makeRuntime({ setSaveTargetDetails })}>
+        <SaveMediaBody
+          node={makeNode()}
+          selected={false}
+          pulsing={false}
+          autoHeight={false}
+          scale={1}
+          services={connectedServices}
+        />
+      </SaveRuntimeCtx.Provider>,
+    );
+    fireEvent.click(screen.getByRole("button", { name: "保存目标" }));
+    await waitFor(() => expect(screen.getByRole("region", { name: "保存目标" })).toBeTruthy());
+    fireEvent.click(screen.getByText("确定"));
+    expect(setSaveTargetDetails).toHaveBeenCalledWith("sv1", "", "");
+    await waitFor(() => expect(screen.queryByRole("region", { name: "保存目标" })).toBeNull());
   });
 
   it("名称未设时目标行弱化显示默认原名", () => {
