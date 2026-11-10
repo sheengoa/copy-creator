@@ -2,7 +2,7 @@
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import "../../../i18n";
-import { type CanvasNode } from "../../../stores/canvasStore";
+import { type CanvasNode, useCanvasStore } from "../../../stores/canvasStore";
 import { SaveMediaBody } from "./SaveMediaBody";
 import { SaveRuntimeCtx, type SaveRuntime } from "./saveRuntimeCtx";
 import { SaveTargetPanel } from "./SaveTargetPanel";
@@ -199,6 +199,80 @@ describe("SaveTargetPanel", () => {
     // 节点外点击收起
     fireEvent.mouseDown(container.querySelector(".outside-probe")!);
     expect(onClose).toHaveBeenCalledTimes(1);
+  });
+
+  it("分组树上滚轮被 WheelGate 截留：不冒泡到画布（缩放不受扰动）", () => {
+    const { container } = render(
+      <div className="pc-node">
+        <SaveRuntimeCtx.Provider value={makeRuntime()}>
+          <SaveTargetPanel node={makeNode()} onClose={vi.fn()} />
+        </SaveRuntimeCtx.Provider>
+      </div>,
+    );
+    let bubbledToRoot = 0;
+    const rootListener = () => {
+      bubbledToRoot += 1;
+    };
+    container.addEventListener("wheel", rootListener);
+    const tree = container.querySelector(".fc-save-panel-tree")!;
+    // 树上滚轮：WheelGate stopPropagation 截留，不冒到容器
+    fireEvent.wheel(tree, { deltaY: 120 });
+    expect(bubbledToRoot).toBe(0);
+    // 对照：面板其他区域（如名称输入）滚轮照常冒泡（画布手势域自己裁决）
+    fireEvent.wheel(container.querySelector(".fc-save-panel-input")!, { deltaY: 120 });
+    expect(bubbledToRoot).toBe(1);
+    container.removeEventListener("wheel", rootListener);
+  });
+
+  it("节点窄于面板理想宽：展开时自动加宽到 246（commitLayout 只改 width）", () => {
+    const saveLayout = vi.fn();
+    const node = makeNode({ canvas_id: "c1" });
+    const prev = useCanvasStore.getState();
+    // 守护按 store 最新节点快照拼布局 entry：先注入节点
+    useCanvasStore.setState({ saveLayout, nodes: [node] });
+    try {
+      // jsdom offsetWidth 恒 0 < 246 → 必触发守护
+      render(
+        <div className="canvas-main">
+          <div className="pc-node">
+            <SaveRuntimeCtx.Provider value={makeRuntime()}>
+              <SaveTargetPanel node={node} onClose={vi.fn()} />
+            </SaveRuntimeCtx.Provider>
+          </div>
+        </div>,
+      );
+      expect(saveLayout).toHaveBeenCalledWith("c1", [
+        { id: "sv1", pos_x: 0, pos_y: 0, width: 246, height: null },
+      ]);
+    } finally {
+      useCanvasStore.setState(prev);
+    }
+  });
+
+  it("节点足够宽（280）：展开不动布局", () => {
+    const saveLayout = vi.fn();
+    const node = makeNode({ canvas_id: "c1" });
+    const prev = useCanvasStore.getState();
+    // 守护读 offsetWidth（布局像素，视图缩放下不误判）：mock 宿主 280 ≥ 250
+    useCanvasStore.setState({ saveLayout, nodes: [node] });
+    const offsetSpy = vi.spyOn(HTMLElement.prototype, "offsetWidth", "get").mockImplementation(function (this: HTMLElement) {
+      return this.classList.contains("pc-node") ? 280 : 0;
+    });
+    try {
+      render(
+        <div className="canvas-main">
+          <div className="pc-node">
+            <SaveRuntimeCtx.Provider value={makeRuntime()}>
+              <SaveTargetPanel node={node} onClose={vi.fn()} />
+            </SaveRuntimeCtx.Provider>
+          </div>
+        </div>,
+      );
+      expect(saveLayout).not.toHaveBeenCalled();
+    } finally {
+      offsetSpy.mockRestore();
+      useCanvasStore.setState(prev);
+    }
   });
 });
 
