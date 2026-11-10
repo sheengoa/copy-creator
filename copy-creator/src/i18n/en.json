@@ -1078,6 +1078,7 @@
     "saveAutoRetry": "Click to retry",
     "saveAutoMissing": "Save node has no target set",
     "savePopTitle": "Save target",
+    "savePopClose": "Close",
     "savePopNameLabel": "Name",
     "savePopNamePh": "Blank keeps the product's original name",
     "savePopNameHint": "Used as-is for one file · numbered -1/-2 for many · same name gets (1), never overwrites",

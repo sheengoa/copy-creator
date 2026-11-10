@@ -569,7 +569,10 @@
 }
 
 /* 配置浮层：锚在节点下方（渲染于 fc-node-form 滚动容器之外，以
-   pc-node 为定位锚），不透明卡面 + 柔和投影，画布暗色玻璃之上可读。 */
+   pc-node 为定位锚）。玻璃配方与 .pc-node 同源（shared-chrome.css
+   单源定案：卡面 rgba(255,255,255,0.62) · blur24 · saturate1.8 ·
+   白细边 + 内高光 + 顶部反光，亮暗两套同步）；浮起在节点之上再叠
+   一层更重的外投影。 */
 .fc-save-pop {
   position: absolute;
   top: calc(100% + 8px);
@@ -578,17 +581,80 @@
   width: 240px;
   box-sizing: border-box;
   padding: 12px 12px 11px;
-  border: 1px solid var(--separator);
-  border-radius: 12px;
-  background: var(--bg-card);
-  box-shadow: 0 12px 32px rgba(31, 35, 65, 0.22);
+  border-radius: 15px;
+  background: rgba(255, 255, 255, 0.62);
+  backdrop-filter: blur(24px) saturate(1.8);
+  -webkit-backdrop-filter: blur(24px) saturate(1.8);
+  border: 0.5px solid rgba(255, 255, 255, 0.78);
+  box-shadow:
+    0 1px 2px rgba(0, 0, 0, 0.04),
+    0 14px 40px rgba(31, 35, 65, 0.14),
+    0 26px 60px rgba(31, 35, 65, 0.2),
+    inset 0 0.5px 0 rgba(255, 255, 255, 0.85),
+    inset 0 -0.5px 0 rgba(255, 255, 255, 0.35);
+}
+
+/* 玻璃斜面反光：与 .pc-node::before 同款（盖在内容之上、不拦截命中）。 */
+.fc-save-pop::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  pointer-events: none;
+  background: linear-gradient(168deg, rgba(255, 255, 255, 0.5) 0%, rgba(255, 255, 255, 0.12) 22%, rgba(255, 255, 255, 0) 42%);
+  opacity: 0.85;
+}
+
+[data-theme="dark"] .fc-save-pop {
+  background: rgba(30, 30, 36, 0.66);
+  border-color: rgba(255, 255, 255, 0.12);
+  box-shadow:
+    0 1px 2px rgba(0, 0, 0, 0.3),
+    0 14px 40px rgba(0, 0, 0, 0.4),
+    0 26px 60px rgba(0, 0, 0, 0.45),
+    inset 0 0.5px 0 rgba(255, 255, 255, 0.14),
+    inset 0 -0.5px 0 rgba(255, 255, 255, 0.06);
+}
+
+[data-theme="dark"] .fc-save-pop::before {
+  background: linear-gradient(168deg, rgba(255, 255, 255, 0.09) 0%, rgba(255, 255, 255, 0.02) 22%, rgba(255, 255, 255, 0) 42%);
+}
+
+.fc-save-pop-head {
+  display: flex;
+  align-items: center;
+  margin-bottom: 10px;
 }
 
 .fc-save-pop-title {
   font-size: 12px;
   font-weight: 600;
   color: var(--text-primary);
-  margin-bottom: 10px;
+}
+
+/* 标题行右侧显式关闭钮（另有 Esc / 点外部关闭）。 */
+.fc-save-pop-close {
+  margin-left: auto;
+  width: 20px;
+  height: 20px;
+  border: none;
+  border-radius: 6px;
+  background: none;
+  color: var(--text-tertiary);
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.fc-save-pop-close:hover {
+  background: color-mix(in srgb, var(--text-primary) 8%, transparent);
+  color: var(--text-primary);
+}
+
+.fc-save-pop-close svg {
+  width: 12px;
+  height: 12px;
 }
 
 .fc-save-pop-label {

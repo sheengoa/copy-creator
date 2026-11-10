@@ -90,7 +90,7 @@ describe("SaveTargetPopover", () => {
     const onClose = vi.fn();
     render(
       <SaveRuntimeCtx.Provider value={makeRuntime()}>
-        <SaveTargetPopover node={makeNode({ metadata: { kind: "save_image", status: "", error: "", target: "", saved_path: "", auto_target: "library", auto_name: "产品截图", auto_group: "" } })} onClose={onClose} />
+        <SaveTargetPopover scale={1} node={makeNode({ metadata: { kind: "save_image", status: "", error: "", target: "", saved_path: "", auto_target: "library", auto_name: "产品截图", auto_group: "" } })} onClose={onClose} />
       </SaveRuntimeCtx.Provider>,
     );
     await waitFor(() => expect(screen.getByText("方案图")).toBeTruthy());
@@ -105,7 +105,7 @@ describe("SaveTargetPopover", () => {
     const runtime = makeRuntime({ setSaveTargetDetails });
     render(
       <SaveRuntimeCtx.Provider value={runtime}>
-        <SaveTargetPopover node={makeNode()} onClose={onClose} />
+        <SaveTargetPopover scale={1} node={makeNode()} onClose={onClose} />
       </SaveRuntimeCtx.Provider>,
     );
     await waitFor(() => expect(screen.getByText("方案图")).toBeTruthy());
@@ -121,7 +121,7 @@ describe("SaveTargetPopover", () => {
     const runtime = makeRuntime();
     render(
       <SaveRuntimeCtx.Provider value={runtime}>
-        <SaveTargetPopover node={makeNode({ metadata: { kind: "save_image", status: "", error: "", target: "", saved_path: "", auto_target: "library", auto_name: "旧名", auto_group: "方案图" } })} onClose={vi.fn()} />
+        <SaveTargetPopover scale={1} node={makeNode({ metadata: { kind: "save_image", status: "", error: "", target: "", saved_path: "", auto_target: "library", auto_name: "旧名", auto_group: "方案图" } })} onClose={vi.fn()} />
       </SaveRuntimeCtx.Provider>,
     );
     await waitFor(() => expect(screen.getByText("方案图")).toBeTruthy());
@@ -139,6 +139,7 @@ describe("SaveTargetPopover", () => {
     render(
       <SaveRuntimeCtx.Provider value={makeRuntime({ pickSaveAutoDir, setSaveTargetDetails })}>
         <SaveTargetPopover
+          scale={1}
           node={makeNode({ metadata: { kind: "save_video", status: "", error: "", target: "", saved_path: "", auto_target: "dir", auto_dir: "D:\\out", auto_name: "" } })}
           onClose={onClose}
         />
@@ -151,6 +152,76 @@ describe("SaveTargetPopover", () => {
     expect(onClose).toHaveBeenCalled();
     fireEvent.click(screen.getByText("确定"));
     expect(setSaveTargetDetails).toHaveBeenCalledWith("sv1", "", "");
+  });
+
+  it("标题行 × 显式关闭：只调用 onClose 不写详情", async () => {
+    const setSaveTargetDetails = vi.fn();
+    const onClose = vi.fn();
+    render(
+      <SaveRuntimeCtx.Provider value={makeRuntime({ setSaveTargetDetails })}>
+        <SaveTargetPopover scale={1} node={makeNode()} onClose={onClose} />
+      </SaveRuntimeCtx.Provider>,
+    );
+    fireEvent.click(screen.getByRole("button", { name: "关闭" }));
+    expect(onClose).toHaveBeenCalledTimes(1);
+    expect(setSaveTargetDetails).not.toHaveBeenCalled();
+  });
+
+  // jsdom 的 getBoundingClientRect 恒 0：翻转/clamp 用例按类名 mock 元素
+  // 几何（视口 inset 8、gap 8，坐标均为屏幕系）。
+  const makeRect = (x: number, y: number, w: number, h: number) => ({
+    x, y, width: w, height: h, top: y, left: x, right: x + w, bottom: y + h,
+    toJSON: () => ({}),
+  });
+  const mockRects = (main: DOMRect, node: DOMRect, pop: DOMRect) =>
+    vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockImplementation(function (this: HTMLElement) {
+      if (this.classList.contains("fc-save-pop")) return pop as DOMRect;
+      if (this.classList.contains("pc-node")) return node as DOMRect;
+      if (this.classList.contains("canvas-main")) return main as DOMRect;
+      return makeRect(0, 0, 0, 0) as DOMRect;
+    });
+
+  it("节点贴视口下缘：浮层翻到节点上方（top 让位 bottom）", async () => {
+    mockRects(
+      makeRect(0, 0, 1000, 760),
+      makeRect(100, 600, 250, 200), // bottom 800 越过视口底界 752
+      makeRect(110, 808, 240, 300),
+    );
+    const onClose = vi.fn();
+    render(
+      // 视口推算依赖宿主链（.pc-node 定位锚 + .canvas-main 裁剪视口）
+      <div className="canvas-main">
+        <div className="pc-node">
+          <SaveRuntimeCtx.Provider value={makeRuntime()}>
+            <SaveTargetPopover scale={1} node={makeNode()} onClose={onClose} />
+          </SaveRuntimeCtx.Provider>
+        </div>
+      </div>,
+    );
+    const pop = (await screen.findByRole("dialog")) as HTMLElement;
+    await waitFor(() => expect(pop.style.bottom).toBe("calc(100% + 8px)"));
+    expect(pop.style.top).toBe("auto");
+  });
+
+  it("上方空间也不足：clamp 上移溢出量贴视口底，不再遮挡视口外", async () => {
+    mockRects(
+      makeRect(0, 0, 1000, 760),
+      makeRect(100, 200, 250, 360), // bottom 560：下方溢出 116；上方 184 放不下 300
+      makeRect(110, 568, 240, 300),
+    );
+    render(
+      <div className="canvas-main">
+        <div className="pc-node">
+          <SaveRuntimeCtx.Provider value={makeRuntime()}>
+            <SaveTargetPopover scale={1} node={makeNode()} onClose={vi.fn()} />
+          </SaveRuntimeCtx.Provider>
+        </div>
+      </div>,
+    );
+    const pop = (await screen.findByRole("dialog")) as HTMLElement;
+    // top = calc(100% + gap + shiftY) = calc(100% + 8 - 116)（jsdom 规范化为 - 108px）
+    await waitFor(() => expect(pop.style.top).toBe("calc(100% - 108px)"));
+    expect(pop.style.bottom).toBe("");
   });
 });
 

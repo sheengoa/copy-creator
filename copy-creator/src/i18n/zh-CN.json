@@ -1074,6 +1074,7 @@
     "saveAutoRetry": "点按重试",
     "saveAutoMissing": "保存节点未设置保存位置",
     "savePopTitle": "保存目标",
+    "savePopClose": "关闭",
     "savePopNameLabel": "名称",
     "savePopNamePh": "留空使用产物原名",
     "savePopNameHint": "单张直接用 · 多张自动 -1/-2 · 同名加 (1) 不覆盖",

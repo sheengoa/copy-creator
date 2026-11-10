@@ -12,7 +12,7 @@ import type { NodeProps } from "./types";
 // 选择组（问号点明二选一）→ 等待产物（骑顶边状态点）/ 产物（SaveMediaBox，
 // 失败保留红叉点重试）→ 目标行（分组 · 名称预览，点开配置浮层）。
 // 自动保存管线见 saveRuntime.tsx。
-export function SaveMediaBody({ node, services }: NodeProps) {
+export function SaveMediaBody({ node, services, scale }: NodeProps) {
   const { t } = useTranslation();
   const nodeErrors = useNodeErrors((s) => s.errors);
   const runtime = useSaveRuntime();
@@ -142,8 +142,8 @@ export function SaveMediaBody({ node, services }: NodeProps) {
         )}
         {nodeErrors[node.id] && <div className="fc-gen-warn">{nodeErrors[node.id]}</div>}
       </div>
-      {/* 浮层渲染在滚动容器外（fc-node-form 会裁剪溢出），以 pc-node 为锚 */}
-      {popOpen && <SaveTargetPopover node={node} onClose={() => setPopOpen(false)} />}
+      {/* 浮层渲染在滚动容器外（fc-node-form 会裁剪溢出），以 pc-node 为锚；scale 供视口自适应换算 */}
+      {popOpen && <SaveTargetPopover node={node} scale={scale} onClose={() => setPopOpen(false)} />}
     </>
   );
 }
