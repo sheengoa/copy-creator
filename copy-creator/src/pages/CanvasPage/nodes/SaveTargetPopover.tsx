@@ -125,8 +125,9 @@ export function SaveTargetPopover({
     if (overflowLeft > 0) nextShiftX = -overflowLeft / view;
     else if (overflowRight > 0) nextShiftX = -overflowRight / view;
 
-    setPlacement(nextPlacement);
-    setShift({ x: nextShiftX, y: nextShiftY });
+    setPlacement((prev) => (prev === nextPlacement ? prev : nextPlacement));
+    // 同值保持引用：树到齐等重跑推算结果不变时不触发多余重渲染
+    setShift((prev) => (prev.x === nextShiftX && prev.y === nextShiftY ? prev : { x: nextShiftX, y: nextShiftY }));
   }, [rows, scale]);
 
   if (meta.kind !== "save_image" && meta.kind !== "save_video" && meta.kind !== "save_audio") return null;
