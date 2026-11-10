@@ -28,8 +28,13 @@ export function saveDirFileNameOf(sourcePath: string, base: string, count: numbe
 }
 
 /** 已保存产物指纹：上游路径 + 目标详情（分组/基名）拼接。详情变更即
- *  重存一份（旧文件保留，与换保存目标同语义）。 */
+ *  重存一份（旧文件保留，与换保存目标同语义）。
+ *  兼容约定：分组/基名双空时保持改版前的 join("\n") 格式逐字一致——
+ *  存量节点（指纹是旧格式）升级后首刷不触发冗余重存；设详情后走 JSON
+ *  格式，详情清除回双空则与最初无详情保存匹配（不再补存，旧文件保留
+ *  原则一致）。 */
 export function saveFingerprintOf(paths: string[], group: string, name: string): string {
+  if (!group && !name) return paths.join("\n");
   return JSON.stringify([paths, group, name]);
 }
 

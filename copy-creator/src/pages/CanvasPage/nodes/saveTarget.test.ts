@@ -51,6 +51,14 @@ describe("saveFingerprintOf", () => {
     expect(base).not.toBe(saveFingerprintOf(paths, "方案图", ""));
     expect(base).not.toBe(saveFingerprintOf(["b.png"], "方案图", "截图"));
   });
+
+  it("空详情指纹与改版前 join 格式逐字一致（存量节点升级零重存）", () => {
+    const paths = ["cache/gen/u1-0.png", "cache/gen/u1-1.png"];
+    expect(saveFingerprintOf(paths, "", "")).toBe(paths.join("\n"));
+    // 任一详情非空即走新格式（设详情仍触发重存）
+    expect(saveFingerprintOf(paths, "", "截图")).not.toBe(paths.join("\n"));
+    expect(saveFingerprintOf(paths, "方案图", "")).not.toBe(paths.join("\n"));
+  });
 });
 
 describe("flattenResourceGroups", () => {
