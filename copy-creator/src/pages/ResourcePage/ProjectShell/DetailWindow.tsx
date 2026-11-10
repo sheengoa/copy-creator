@@ -660,9 +660,9 @@ function EntityFaceGroup({ group, entity, visiblePaths, faceMeta, ops }: {
 function EntityDetail({ group, sourceKey, nodeKey, ops }: { group: EntityPhKind; sourceKey: string; nodeKey?: string; ops: DetailWindowOps }) {
   const { t } = useTranslation();
   const { overview, characters, locations, props } = ops;
-  const entityId = sourceKey.startsWith("grp:")
+  const entityId = useMemo(() => sourceKey.startsWith("grp:")
     ? (overview?.node_links ?? []).find((l) => l.owner_key === sourceKey)?.from_id ?? ""
-    : sourceKey.slice(sourceKey.indexOf(":") + 1);
+    : sourceKey.slice(sourceKey.indexOf(":") + 1), [sourceKey, overview]);
   const entity: ProjectCharacter | ProjectLocation | ProjectProp | undefined =
     group === "character" ? characters.find((c) => c.id === entityId)
       : group === "location" ? locations.find((l) => l.id === entityId)
