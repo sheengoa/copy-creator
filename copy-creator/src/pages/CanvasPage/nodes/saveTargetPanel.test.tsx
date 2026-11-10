@@ -133,7 +133,7 @@ describe("SaveTargetPanel", () => {
     expect(screen.getByText("方案图").closest("button")?.getAttribute("aria-pressed")).toBe("false");
   });
 
-  it("指定路径目标：显示目录提示，确定传空分组，可重选目录", async () => {
+  it("指定路径目标：目录提示行内联重选目录，确定传空分组", async () => {
     const pickSaveAutoDir = vi.fn(async () => {});
     const setSaveTargetDetails = vi.fn();
     const onClose = vi.fn();
@@ -147,11 +147,28 @@ describe("SaveTargetPanel", () => {
     );
     expect(screen.getByText("目录由系统选择器指定：D:\\out")).toBeTruthy();
     expect(screen.queryByText("保存到分组")).toBeNull();
-    fireEvent.click(screen.getByText("重新选择目录…"));
+    // 目录提示行内联「重选目录」→ 弹系统选目录并收起
+    fireEvent.click(screen.getByText("重选目录"));
     expect(pickSaveAutoDir).toHaveBeenCalledWith("sv1");
     expect(onClose).toHaveBeenCalled();
     fireEvent.click(screen.getByText("确定"));
     expect(setSaveTargetDetails).toHaveBeenCalledWith("sv1", "", "");
+  });
+
+  it("指定路径面板底部「改用保存到资源库…」：切回库目标并收起（模式互换对称入口）", () => {
+    const setSaveAutoTarget = vi.fn();
+    const onClose = vi.fn();
+    render(
+      <SaveRuntimeCtx.Provider value={makeRuntime({ setSaveAutoTarget })}>
+        <SaveTargetPanel
+          node={makeNode({ metadata: { kind: "save_video", status: "", error: "", target: "", saved_path: "", auto_target: "dir", auto_dir: "D:\\out", auto_name: "" } })}
+          onClose={onClose}
+        />
+      </SaveRuntimeCtx.Provider>,
+    );
+    fireEvent.click(screen.getByText("改用保存到资源库…"));
+    expect(setSaveAutoTarget).toHaveBeenCalledWith("sv1", "library", "");
+    expect(onClose).toHaveBeenCalled();
   });
 
   it("标题行 × 收起：只调 onClose 不写详情", async () => {

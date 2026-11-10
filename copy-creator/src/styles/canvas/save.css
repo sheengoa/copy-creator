@@ -728,6 +728,17 @@
   word-break: break-all;
 }
 
+/* 目录提示行尾的内联「重选目录」链接（模式互换占底部链接位后挪入） */
+.fc-save-panel-dirlink {
+  border: none;
+  background: none;
+  padding: 0;
+  font-size: 11px;
+  color: var(--accent);
+  cursor: pointer;
+  white-space: nowrap;
+}
+
 .fc-save-panel-foot {
   display: flex;
   align-items: center;

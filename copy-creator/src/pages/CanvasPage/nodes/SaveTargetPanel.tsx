@@ -160,18 +160,33 @@ export function SaveTargetPanel({ node, onClose }: { node: CanvasNode; onClose: 
           </WheelGate>
         </>
       ) : (
-        <div className="fc-save-panel-dirhint">{t("canvas.savePopDirHint", { dir: meta.auto_dir ?? "" })}</div>
+        <div className="fc-save-panel-dirhint">
+          {t("canvas.savePopDirHint", { dir: meta.auto_dir ?? "" })}{" "}
+          <button
+            type="button"
+            className="fc-save-panel-dirlink"
+            onClick={() => {
+              onClose();
+              void runtime.pickSaveAutoDir(node.id);
+            }}
+          >
+            {t("canvas.savePopRePickDirShort")}
+          </button>
+        </div>
       )}
       <div className="fc-save-panel-foot">
+        {/* 底部链接 = 模式互换：库目标切指定路径，指定路径切回资源库
+            （对称入口，用户定案方向后补齐反向切换） */}
         <button
           type="button"
           className="fc-save-panel-link"
           onClick={() => {
             onClose();
-            void runtime.pickSaveAutoDir(node.id);
+            if (isLibrary) void runtime.pickSaveAutoDir(node.id);
+            else runtime.setSaveAutoTarget(node.id, "library", "");
           }}
         >
-          {isLibrary ? t("canvas.savePopUseDir") : t("canvas.savePopRePickDir")}
+          {isLibrary ? t("canvas.savePopUseDir") : t("canvas.savePopUseLib")}
         </button>
         <button type="button" className="fc-save-panel-ghost" onClick={() => { setName(""); setGroup(""); }}>
           {t("canvas.savePopReset")}
