@@ -653,7 +653,9 @@ mod resource_command_tests {
         path.replace('\\', "/")
     }
 
-    fn test_app() -> (tauri::App<tauri::test::MockRuntime>, PathBuf) {
+    /// 供兄弟测试模块（project_tests 的入库目标详情用例）复用：库根指向
+    /// 临时目录且 DbState 已管理。
+    pub(super) fn test_app() -> (tauri::App<tauri::test::MockRuntime>, PathBuf) {
         let app = tauri::test::mock_app();
         let root = std::env::temp_dir().join(format!(
             "copy-creator-resource-command-test-{}",
@@ -7917,9 +7919,10 @@ mod project_tests {
     }
 
     #[test]
-    fn copy_into_library_root_dedupes_names() {
-        // 导入重名约定锚点：无冲突用原名；冲突加「 (1)」序号且不覆盖
-        // 已有文件；无扩展名文件同样处理；源文件保留（复制非移动）。
+    fn copy_into_library_at_root_matches_legacy_dedupe() {
+        // 库根路径（group/base 双空）与拆分前 copy_into_library_root 行为
+        // 一致：无冲突用原名；冲突加「 (1)」序号且不覆盖已有文件；无扩
+        // 展名文件同样处理；源文件保留（复制非移动）。
         let root = std::env::temp_dir().join(format!(
             "copy-creator-import-copy-{}",
             uuid::Uuid::new_v4()
@@ -7932,22 +7935,111 @@ mod project_tests {
         std::fs::write(&outside, b"png-bytes").unwrap();
 
         // 无冲突：原名落库
-        let first = crate::db::project::copy_into_library_root(&root, &outside).unwrap();
+        let first = crate::db::project::copy_into_library_at(&root, "", "", &outside).unwrap();
         assert_eq!(first.file_name().unwrap().to_string_lossy(), outside.file_name().unwrap().to_string_lossy());
         // 同名再导：加 (1) 序号，两份内容独立
-        let second = crate::db::project::copy_into_library_root(&root, &outside).unwrap();
+        let second = crate::db::project::copy_into_library_at(&root, "", "", &outside).unwrap();
         assert!(second.file_name().unwrap().to_string_lossy().ends_with(" (1).png"));
         assert!(first.exists() && second.exists() && outside.exists(), "复制不得覆盖或移动源文件");
 
         // 无扩展名文件：序号加在主干后
         let no_ext = std::env::temp_dir().join(format!("noext-{}", uuid::Uuid::new_v4()));
         std::fs::write(&no_ext, b"x").unwrap();
-        let placed = crate::db::project::copy_into_library_root(&root, &no_ext).unwrap();
+        let placed = crate::db::project::copy_into_library_at(&root, "", "", &no_ext).unwrap();
         assert!(!placed.to_string_lossy().contains('.'), "无扩展名文件不应凭空加扩展名");
 
         std::fs::remove_dir_all(&root).ok();
         std::fs::remove_file(&outside).ok();
         std::fs::remove_file(&no_ext).ok();
+    }
+
+    #[test]
+    fn copy_into_library_at_group_and_base_name() {
+        // 保存节点目标详情锚点：分组路径自动建层；基名替换产物原名（扩
+        // 展名取源）；基名带点号时序号名不被拆错；穿越路径被规范化拒绝。
+        let root = std::env::temp_dir().join(format!(
+            "copy-creator-save-target-{}",
+            uuid::Uuid::new_v4()
+        ));
+        std::fs::create_dir_all(&root).unwrap();
+        let source = std::env::temp_dir().join(format!(
+            "canvas-gen-{}-0.png",
+            uuid::Uuid::new_v4()
+        ));
+        std::fs::write(&source, b"png-bytes").unwrap();
+
+        // 分组不存在：多级一次建层并落盘
+        let placed = crate::db::project::copy_into_library_at(&root, "方案图/定稿", "产品截图", &source).unwrap();
+        let relative = placed.strip_prefix(&root).unwrap().to_string_lossy().to_string();
+        assert_eq!(relative.replace('\\', "/"), "方案图/定稿/产品截图.png");
+        assert!(placed.exists());
+
+        // 同组同名再存：加 (1) 序号不覆盖
+        let again = crate::db::project::copy_into_library_at(&root, "方案图/定稿", "产品截图", &source).unwrap();
+        assert!(again.file_name().unwrap().to_string_lossy().ends_with("产品截图 (1).png"));
+
+        // 基名自带点号：序号加在整名之后，不把「终版」当扩展名拆开
+        let dotted = crate::db::project::copy_into_library_at(&root, "方案图", "报告.终版", &source).unwrap();
+        assert!(dotted.file_name().unwrap().to_string_lossy().ends_with("报告.终版.png"));
+
+        // 穿越/非法基名：拒绝且不落盘
+        assert!(crate::db::project::copy_into_library_at(&root, "../溢出", "", &source).is_err());
+        assert!(crate::db::project::copy_into_library_at(&root, "", "../溢出", &source).is_err());
+        assert!(crate::db::project::copy_into_library_at(&root, "", "a/b", &source).is_err());
+        assert!(crate::db::project::copy_into_library_at(&root, "", "con", &source).is_err());
+
+        std::fs::remove_dir_all(&root).ok();
+        std::fs::remove_file(&source).ok();
+    }
+
+    #[test]
+    fn import_file_into_library_opts_target_details() {
+        // 入库带目标详情端到端：test_app 里把库根设到临时目录，产物按
+        // 分组+基名落库并登记；无详情时库内源保持原位不复制（旧路径）。
+        let (app, _dir) = super::resource_command_tests::test_app();
+        let root = crate::db::get_resource_library_dir(app.handle());
+        std::fs::create_dir_all(&root).unwrap();
+        let product = std::env::temp_dir().join(format!(
+            "opts-src-{}.jpg",
+            uuid::Uuid::new_v4()
+        ));
+        std::fs::write(&product, b"jpg-bytes").unwrap();
+
+        let (relative, kind, name) = crate::db::import_file_into_library_opts(
+            app.handle(),
+            product.to_string_lossy().as_ref(),
+            "输出/11月",
+            "成片",
+        )
+        .unwrap();
+        assert_eq!(relative, "输出/11月/成片.jpg");
+        assert_eq!(kind, "image");
+        assert_eq!(name, "成片.jpg");
+        assert!(root.join("输出").join("11月").join("成片.jpg").is_file());
+
+        // 无详情 + 库内源：原样返回不复制（导入/挂靠旧路径不回归）
+        let in_lib = root.join("成片.jpg");
+        let (relative2, _, _) = crate::db::import_file_into_library_opts(
+            app.handle(),
+            in_lib.to_string_lossy().as_ref(),
+            "",
+            "",
+        )
+        .unwrap();
+        assert_eq!(relative2, "成片.jpg");
+
+        // 有详情 + 库内源：另存一份到目标分组，原文件保留
+        let (relative3, _, _) = crate::db::import_file_into_library_opts(
+            app.handle(),
+            in_lib.to_string_lossy().as_ref(),
+            "归档",
+            "",
+        )
+        .unwrap();
+        assert_eq!(relative3, "归档/成片.jpg");
+        assert!(in_lib.is_file(), "另存不得移动库内源文件");
+
+        std::fs::remove_file(&product).ok();
     }
 
     #[test]
@@ -8723,6 +8815,8 @@ mod canvas_tests {
                 auto_state: "saved".into(),
                 auto_error: String::new(),
                 auto_fingerprint: "fp".into(),
+                auto_group: "方案图".into(),
+                auto_name: "截图".into(),
             },
             NodeMeta::PreviewVideo {},
             NodeMeta::CollectionImage { order: vec!["n-1".into(), "n-2".into()] },

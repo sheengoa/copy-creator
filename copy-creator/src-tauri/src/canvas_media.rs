@@ -147,15 +147,24 @@ fn resolve_source<R: Runtime>(app: &AppHandle<R>, source_path: &str) -> Result<s
 }
 
 /// 保存节点「保存到资源库」：产物复制入库并登记资源记录（幂等），
-/// 返回库内相对路径/媒体类型/文件名。
+/// 返回库内相对路径/媒体类型/文件名。group_path 空=库根「未分组」，
+/// 非空=库内分组（多级「a/b」自动建层，规范化拒绝穿越）；base_name
+/// 空=沿用产物原名，非空=按基名落盘（多张展开与冲突序号约定见
+/// saveRuntime）。指定任一详情时库内源也复制一份（另存语义）。
 #[tauri::command]
 pub fn canvas_save_to_library(
     app: AppHandle,
     source_path: String,
+    group_path: Option<String>,
+    base_name: Option<String>,
 ) -> Result<serde_json::Value, String> {
     let source = resolve_source(&app, &source_path)?;
-    let (relative, kind, name) =
-        crate::db::import_file_into_library(&app, source.to_string_lossy().as_ref())?;
+    let (relative, kind, name) = crate::db::import_file_into_library_opts(
+        &app,
+        source.to_string_lossy().as_ref(),
+        group_path.as_deref().unwrap_or(""),
+        base_name.as_deref().unwrap_or(""),
+    )?;
     Ok(json!({ "file_path": relative, "kind": kind, "name": name }))
 }
 

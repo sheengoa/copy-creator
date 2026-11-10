@@ -1701,26 +1701,72 @@ pub fn project_set_shot_props(
 
 // ── 素材档案 ────────────────────────────────────────────────
 
-/// 把库外文件复制进资源库根（「未分组」）：重名自动加「 (1)」序号，与
-/// 追溯重链/回收站恢复同一约定。纯文件操作不持锁，大文件复制不阻塞
-/// 其他命令；复制非移动，原文件保留。返回库内目标路径。
-pub(crate) fn copy_into_library_root(
+/// 保存节点基名的文件名合法性：禁路径分隔符/Windows 非法字符/保留名，
+/// 禁点号开头（隐藏文件），字节上限与资源文件一致。分组名规范化
+/// （normalize_resource_group_name）管不到纯文件名，这里单独守。
+fn validate_file_base_name(base: &str) -> Result<(), String> {
+    if base == "." || base == ".." || base.starts_with('.') {
+        return Err("文件名不能以点号开头".to_string());
+    }
+    if base.contains(['/', '\\']) {
+        return Err("文件名不能包含路径分隔符".to_string());
+    }
+    if base.contains(['<', '>', ':', '"', '|', '?', '*']) {
+        return Err("文件名包含非法字符".to_string());
+    }
+    if base.len() > RESOURCE_FILE_NAME_MAX_BYTES {
+        return Err("文件名过长（文件系统按字节限制，请减少多字节字符）".to_string());
+    }
+    if is_windows_reserved_stem(base) {
+        return Err("该文件名是系统保留名称".to_string());
+    }
+    Ok(())
+}
+
+/// 库内落盘通用：group_path 空=库根「未分组」，多级「a/b」自动建层
+/// （规范化拒绝穿越与非法字符）；base_name 空=沿用源文件名。同名冲突
+/// 加「 (1)」序号不覆盖，与追溯重链/回收站恢复同一约定。纯文件操作
+/// 不持锁，大文件复制不阻塞其他命令；复制非移动，原文件保留。返回
+/// 库内目标路径。
+pub(crate) fn copy_into_library_at(
     root: &std::path::Path,
+    group_path: &str,
+    base_name: &str,
     source: &std::path::Path,
-) -> std::io::Result<std::path::PathBuf> {
-    let file_name = source
-        .file_name()
-        .ok_or_else(|| std::io::Error::new(std::io::ErrorKind::InvalidInput, "源路径没有文件名"))?;
-    let mut dest = root.join(file_name);
-    if dest.exists() {
-        let stem = source
+) -> Result<std::path::PathBuf, String> {
+    let normalized = normalize_resource_folder_path(Some(group_path))?;
+    let mut dir = root.to_path_buf();
+    for segment in normalized.split('/') {
+        dir.push(segment);
+    }
+    if !normalized.is_empty() {
+        std::fs::create_dir_all(&dir).map_err(|error| format!("创建资源分组失败: {error}"))?;
+    }
+    let base = base_name.trim();
+    if !base.is_empty() {
+        validate_file_base_name(base)?;
+    }
+    // stem/ext 分开记，避免基名自带点号时（如「报告.终版」）按 Path::stem
+    // 拆出错误序号名；库根旧路径（base 空）行为与拆分前完全一致。
+    let stem = if base.is_empty() {
+        source
             .file_stem()
             .map(|stem| stem.to_string_lossy().to_string())
-            .unwrap_or_default();
-        let extension = source
-            .extension()
-            .map(|ext| ext.to_string_lossy().to_string())
-            .unwrap_or_default();
+            .ok_or_else(|| "源路径没有文件名".to_string())?
+    } else {
+        base.to_string()
+    };
+    let extension = source
+        .extension()
+        .map(|ext| ext.to_string_lossy().to_string())
+        .unwrap_or_default();
+    let desired = if extension.is_empty() {
+        stem.clone()
+    } else {
+        format!("{stem}.{extension}")
+    };
+    let mut dest = dir.join(&desired);
+    if dest.exists() {
         let mut placed = false;
         for index in 1..=999u32 {
             let candidate_name = if extension.is_empty() {
@@ -1728,7 +1774,7 @@ pub(crate) fn copy_into_library_root(
             } else {
                 format!("{stem} ({index}).{extension}")
             };
-            let candidate = root.join(candidate_name);
+            let candidate = dir.join(candidate_name);
             if !candidate.exists() {
                 dest = candidate;
                 placed = true;
@@ -1736,13 +1782,10 @@ pub(crate) fn copy_into_library_root(
             }
         }
         if !placed {
-            return Err(std::io::Error::new(
-                std::io::ErrorKind::AlreadyExists,
-                "库内存在大量同名文件，无法自动命名",
-            ));
+            return Err("库内存在大量同名文件，无法自动命名".to_string());
         }
     }
-    std::fs::copy(source, &dest)?;
+    std::fs::copy(source, &dest).map_err(|error| format!("复制文件失败: {error}"))?;
     Ok(dest)
 }
 
@@ -1755,6 +1798,19 @@ pub(crate) fn import_file_into_library<R: Runtime>(
     app: &AppHandle<R>,
     source_path: &str,
 ) -> Result<(String, String, String), String> {
+    import_file_into_library_opts(app, source_path, "", "")
+}
+
+/// 带目标详情的入库：group_path 空=库根，非空=库内分组（多级自动建层，
+/// 规范化拒绝穿越）；base_name 空=沿用源文件名。指定了任一详情时库内
+/// 源也复制（保存节点「按名称/分组另存一份」语义），两者皆空保持旧
+/// 路径——库内源不复制不登记。登记与修订号逻辑与无详情版一致。
+pub(crate) fn import_file_into_library_opts<R: Runtime>(
+    app: &AppHandle<R>,
+    source_path: &str,
+    group_path: &str,
+    base_name: &str,
+) -> Result<(String, String, String), String> {
     let source = std::path::PathBuf::from(source_path.trim());
     if !source.is_file() {
         return Err("请选择一个文件".to_string());
@@ -1766,10 +1822,12 @@ pub(crate) fn import_file_into_library<R: Runtime>(
         .to_string_lossy()
         .to_lowercase()
         .starts_with(&(root.to_string_lossy().to_lowercase() + "/"));
-    let dest = if in_library {
+    let keep_in_place = in_library && group_path.trim().is_empty() && base_name.trim().is_empty();
+    let dest = if keep_in_place {
         source.clone()
     } else {
-        copy_into_library_root(&root, &source).map_err(|error| format!("导入文件失败: {error}"))?
+        copy_into_library_at(&root, group_path, base_name, &source)
+            .map_err(|error| format!("导入文件失败: {error}"))?
     };
     // watcher 同款登记：为新文件补建资源记录（幂等，已有记录跳过）；
     // 再 bump 修订号让文件视图的心跳立刻感知，不必等监听器。
