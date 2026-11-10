@@ -50,8 +50,9 @@ export interface GeneratedImage {
 /** 保存节点状态：target = "library"（入库）或 "path"（外部另存）。
  *  自动保存管线（2026-11-01）：auto_target = "" | "library" | "dir" 预设
  *  目标；auto_dir 记文件夹目标；auto_state = "" | "saving" | "saved" |
- *  "error"；auto_fingerprint 为已保存产物指纹；旧节点读出时由后端
- *  serde default 补齐。 */
+ *  "error"；auto_fingerprint 为已保存产物指纹（含目标详情，详情变更即
+ *  重存）；auto_group 记库内分组（空=未分组）、auto_name 记保存基名
+ *  （空=沿用产物原名），旧节点读出时由后端 serde default 补齐。 */
 export type SaveMediaMeta = {
   status: "" | "saved" | "error" | string;
   error: string;
@@ -62,6 +63,8 @@ export type SaveMediaMeta = {
   auto_state?: string;
   auto_error?: string;
   auto_fingerprint?: string;
+  auto_group?: string;
+  auto_name?: string;
 };
 
 /** 视频抽帧节点（2026-11-01）：video_path 记节点持有的视频；提取出的

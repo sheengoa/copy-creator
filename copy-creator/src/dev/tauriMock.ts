@@ -671,6 +671,21 @@ function handleInvoke(cmd: string, args: Record<string, unknown>): unknown {
     case "canvas_pick_save_dir":
       // 浏览器环境没有系统对话框：返回空串＝用户取消（前端静默）。
       return "";
+    case "canvas_save_to_library":
+      // 保存节点入库模拟：按分组/基名拼库内相对路径（与真实现同构，
+      // 便于联调目标行/浮层与重存反馈）。
+      return (() => {
+        const source = String(args.sourcePath ?? "");
+        const raw = source.split(/[\\/]/).pop() ?? "产物.png";
+        const base = String(args.baseName ?? "").trim();
+        const group = String(args.groupPath ?? "").trim();
+        const name = base || raw;
+        return {
+          file_path: group ? `${group}/${name}` : name,
+          kind: "image",
+          name,
+        };
+      })();
     case "ai_generate_image":
       // 完整生成模拟：事件逐张回传 + 阻塞到完成（对齐后端时序）。
       return simulateAiGenerateImage(args);

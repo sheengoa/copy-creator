@@ -6,6 +6,8 @@ import { createContext, useContext } from "react";
 export interface SaveRuntime {
   /** 设置自动保存目标：清指纹让管线对现有产物立即（重）存一次。 */
   setSaveAutoTarget(nodeId: string, target: "library" | "dir", dir: string): void;
+  /** 更新库内目标详情（分组 + 基名）：详情纳入指纹，变更即自动重存。 */
+  setSaveTargetDetails(nodeId: string, group: string, name: string): void;
   /** 清除目标回到选择态。 */
   clearSaveAutoTarget(nodeId: string): void;
   /** 弹系统选目录并设为指定路径目标。 */

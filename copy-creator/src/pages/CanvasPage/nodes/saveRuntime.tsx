@@ -3,12 +3,15 @@ import type { ReactNode } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { useCanvasStore, type SaveMediaMeta } from "../../../stores/canvasStore";
 import { SaveRuntimeCtx, type SaveRuntime } from "./saveRuntimeCtx";
+import { saveBaseNameOf, saveDirFileNameOf, saveFingerprintOf } from "./saveTarget";
 import { upstreamMediaOf } from "./upstream";
 
 // 自动保存管线运行时 Provider（决策 19：连线后的下一步是选保存位置，
 // 产物一出现即自动落盘）。挂画布节点层外圈，SaveMediaBody 经
-// useSaveRuntime（saveRuntimeCtx）取四个用户操作；触发 effect 在此
-// 自驱动（依赖 store 订阅）。
+// useSaveRuntime（saveRuntimeCtx）取用户操作；触发 effect 在此
+// 自驱动（依赖 store 订阅）。目标详情（库内分组 auto_group + 基名
+// auto_name）纳入指纹：详情变更即对现有产物自动重存一份，旧文件保留
+// （2026-11-10 用户定案：分组/基名可配 + 冲突加 (1) 不覆盖）。
 
 export function SaveRuntimeProvider({ children }: { children: ReactNode }) {
   const nodes = useCanvasStore((s) => s.nodes);
@@ -33,6 +36,21 @@ export function SaveRuntimeProvider({ children }: { children: ReactNode }) {
       writeSaveMeta(nodeId, {
         auto_target: target,
         auto_dir: dir,
+        auto_group: "",
+        auto_name: "",
+        auto_state: "",
+        auto_error: "",
+        auto_fingerprint: "",
+      });
+    },
+    [writeSaveMeta],
+  );
+
+  const setSaveTargetDetails = useCallback(
+    (nodeId: string, group: string, name: string) => {
+      writeSaveMeta(nodeId, {
+        auto_group: group,
+        auto_name: name,
         auto_state: "",
         auto_error: "",
         auto_fingerprint: "",
@@ -46,6 +64,8 @@ export function SaveRuntimeProvider({ children }: { children: ReactNode }) {
       writeSaveMeta(nodeId, {
         auto_target: "",
         auto_dir: "",
+        auto_group: "",
+        auto_name: "",
         auto_state: "",
         auto_error: "",
         auto_fingerprint: "",
@@ -71,7 +91,7 @@ export function SaveRuntimeProvider({ children }: { children: ReactNode }) {
   const autoSaveInFlightRef = useRef<Set<string>>(new Set());
 
   const runAutoSave = useCallback(
-    async (nodeId: string, target: "library" | "dir", dir: string, paths: string[], fingerprint: string) => {
+    async (nodeId: string, target: "library" | "dir", dir: string, paths: string[], fingerprint: string, group: string, name: string) => {
       // 在飞锁（ref 级，同拍即生效）：StrictMode 下 effect 双跑共用同一
       // 快照，auto_state 检查拦不住同一拍的重入，这里保证单节点不并发
       // 导出（开发模式防双份入库，生产同样受益）。
@@ -80,12 +100,16 @@ export function SaveRuntimeProvider({ children }: { children: ReactNode }) {
       writeSaveMeta(nodeId, { auto_state: "saving", auto_error: "" });
       try {
         const base = dir.replace(/[\\/]+$/, "");
-        for (const path of paths) {
+        for (const [index, path] of paths.entries()) {
           if (target === "library") {
-            await invoke("canvas_save_to_library", { sourcePath: path });
+            await invoke("canvas_save_to_library", {
+              sourcePath: path,
+              groupPath: group,
+              baseName: saveBaseNameOf(name, paths.length, index),
+            });
           } else {
-            const name = path.split(/[\\/]/).pop() ?? "产物";
-            await invoke("canvas_export_to_path", { sourcePath: path, target: `${base}/${name}` });
+            const fileName = saveDirFileNameOf(path, name, paths.length, index);
+            await invoke("canvas_export_to_path", { sourcePath: path, target: `${base}/${fileName}` });
           }
         }
         writeSaveMeta(nodeId, {
@@ -106,8 +130,8 @@ export function SaveRuntimeProvider({ children }: { children: ReactNode }) {
     [writeSaveMeta],
   );
 
-  /** 自动保存管线：目标已设的保存节点，上游产物指纹变化即自动导出。
-   *  error 态停自动重试（等用户点徽章），saving 态防并发。 */
+  /** 自动保存管线：目标已设的保存节点，上游产物 + 目标详情指纹变化即
+   *  自动导出。error 态停自动重试（等用户点徽章），saving 态防并发。 */
   useEffect(() => {
     for (const node of nodes) {
       const meta = node.metadata;
@@ -117,14 +141,17 @@ export function SaveRuntimeProvider({ children }: { children: ReactNode }) {
       if (meta.auto_state === "saving" || meta.auto_state === "error") continue;
       const paths = upstreamMediaOf(nodes, connections, node.id)?.paths ?? [];
       if (!paths.length) continue;
-      const fingerprint = paths.join("\n");
+      const group = meta.auto_group ?? "";
+      const name = meta.auto_name ?? "";
+      const fingerprint = saveFingerprintOf(paths, group, name);
       if (meta.auto_fingerprint === fingerprint) continue;
-      void runAutoSave(node.id, target === "dir" ? "dir" : "library", meta.auto_dir ?? "", paths, fingerprint);
+      void runAutoSave(node.id, target === "dir" ? "dir" : "library", meta.auto_dir ?? "", paths, fingerprint, group, name);
     }
   }, [nodes, connections, runAutoSave]);
 
   const runtime: SaveRuntime = {
     setSaveAutoTarget,
+    setSaveTargetDetails,
     clearSaveAutoTarget,
     pickSaveAutoDir,
     retrySaveAuto: (nodeId) => writeSaveMeta(nodeId, { auto_state: "", auto_error: "" }),
