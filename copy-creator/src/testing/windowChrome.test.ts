@@ -184,6 +184,9 @@ describe("standalone window chrome", () => {
     expect(createWindowBlock).toContain(".decorations(false)");
     expect(createWindowBlock).toContain(".transparent(true)");
     expect(createWindowBlock).toContain(".resizable(true)");
+    // 任务栏可见：最小化后可从任务栏还原（skip_taskbar(true) 会造出无入口
+    // 的孤儿窗口，径向菜单仍是 true，勿全局替换）。
+    expect(createWindowBlock).toContain(".skip_taskbar(false)");
     expect(createWindowBlock).toContain("480.0 + 2.0 * WINDOW_SHADOW_MARGIN");
     expect(createWindowBlock).toContain("380.0 + 2.0 * WINDOW_SHADOW_MARGIN");
     expect(componentSource).toContain('className="clipboard-create-header" data-tauri-drag-region');

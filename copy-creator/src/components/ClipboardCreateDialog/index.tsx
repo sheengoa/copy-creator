@@ -64,6 +64,12 @@ export default function ClipboardCreateDialog() {
   const editorRef = useRef<StashEditorHandle>(null);
   const resourceNameInputRef = useRef<HTMLInputElement>(null);
   const lastEnterAtRef = useRef(0);
+  // 保存位置/分组的镜像 ref：裸唤起（无上下文）保留草稿路径在 mount 期
+  // 注册的监听闭包里读当前值，不随 setStorageMode 等重挂监听。
+  const storageModeRef = useRef(storageMode);
+  const resourceGroupRef = useRef(resourceGroupName);
+  useEffect(() => { storageModeRef.current = storageMode; }, [storageMode]);
+  useEffect(() => { resourceGroupRef.current = resourceGroupName; }, [resourceGroupName]);
   // ── 查找替换（Ctrl+F）──
   const [findOpen, setFindOpen] = useState(false);
   const [findQuery, setFindQuery] = useState("");
@@ -178,7 +184,12 @@ export default function ClipboardCreateDialog() {
       if (e.payload.language) i18n.changeLanguage(e.payload.language);
     }).then((fn) => { unlistenLang = fn; });
 
-    // 监听后端 clipboard-create-show 事件（快捷键触发时）
+    // 监听后端 clipboard-create-show 事件（快捷键触发时）。按是否携带
+    // 保存上下文分两路：
+    // - 裸唤起（storage_mode 为空：全局快捷键 / ctl 脚本 / 最小化还原）：
+    //   草稿与编辑态原样保留，用户续写半截内容不被洗掉；
+    // - 带上下文唤起（剪切板页新建=database、资源分组新建=resource+分组）：
+    //   以新上下文为准清空重来，防止旧草稿误存进指定分组。
     let unlistenShow: UnlistenFn | undefined;
     listen<{
       theme: string;
@@ -187,15 +198,24 @@ export default function ClipboardCreateDialog() {
     }>("clipboard-create-show", (e) => {
       cancelResizeSave();
       syncTheme(parseThemePreference(e.payload.theme));
-      resetDraft();
-      setEditingId(null);
-      const mode: ClipboardStorageMode = e.payload.storage_mode === "resource" ? "resource" : "database";
-      setStorageMode(mode);
-      setResourceGroupName(mode === "resource" ? e.payload.group_name || "" : "");
       setError(null);
       setDropdownOpen(false);
       setGroupMenuOpen(false);
-      loadStashRecords(mode, false, mode === "resource" ? e.payload.group_name || "" : "");
+      const mode: ClipboardStorageMode = e.payload.storage_mode === "resource" ? "resource" : "database";
+      if (e.payload.storage_mode != null) {
+        resetDraft();
+        setEditingId(null);
+        setStorageMode(mode);
+        setResourceGroupName(mode === "resource" ? e.payload.group_name || "" : "");
+        loadStashRecords(mode, false, mode === "resource" ? e.payload.group_name || "" : "");
+      } else {
+        // 保留草稿：「已有内容」列表按当前保存位置刷新（镜像 ref 读当前态）。
+        loadStashRecords(
+          storageModeRef.current,
+          false,
+          storageModeRef.current === "resource" ? resourceGroupRef.current : "",
+        );
+      }
       void loadResourceGroups();
       setTimeout(() => editorRef.current?.focus(), 50);
     }).then((fn) => { unlistenShow = fn; });

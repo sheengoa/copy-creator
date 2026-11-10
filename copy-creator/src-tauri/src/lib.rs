@@ -429,6 +429,8 @@ pub fn run() {
             }
 
             // Create hidden standalone clipboard-create popup window.
+            // skip_taskbar(false)：新建窗口需要任务栏入口——最小化后可从
+            // 任务栏点击还原（此前 true 使最小化即孤儿窗口，无入口可寻）。
             {
                 use tauri::WebviewUrl;
                 use tauri::WebviewWindowBuilder;
@@ -447,7 +449,7 @@ pub fn run() {
                 .always_on_top(true)
                 .visible(false)
                 .shadow(false)
-                .skip_taskbar(true)
+                .skip_taskbar(false)
                 .resizable(true)
                 .min_inner_size(
                     480.0 + 2.0 * WINDOW_SHADOW_MARGIN,

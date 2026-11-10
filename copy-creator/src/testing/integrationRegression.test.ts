@@ -180,6 +180,19 @@ describe("integration regressions", () => {
     expect(componentSource).toContain("i18n.changeLanguage");
   });
 
+  it("preserves the create-window draft on bare wake, resets on contextual wake", () => {
+    const componentSource = readSource("../components/ClipboardCreateDialog/index.tsx");
+
+    // clipboard-create-show 监听必须按上下文分流：裸唤起（storage_mode
+    // 为空的快捷键/最小化还原）保留草稿续写，只有带上下文的唤起才清空。
+    expect(componentSource).toContain("if (e.payload.storage_mode != null)");
+    // 保留路径按镜像 ref 读当前保存位置刷新列表（mount 期闭包防过期）。
+    expect(componentSource).toContain("storageModeRef.current");
+    expect(componentSource).toContain("resourceGroupRef.current");
+    // 清空路径依旧重置草稿与编辑态。
+    expect(componentSource).toContain("resetDraft();\n        setEditingId(null);");
+  });
+
   it("supports resource groups through library subfolders", () => {
     const dbSource = readDbSource();
     const clipboardSource = readSource("../../src-tauri/src/clipboard.rs");

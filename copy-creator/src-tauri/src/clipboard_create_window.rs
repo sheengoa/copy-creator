@@ -164,7 +164,8 @@ pub fn show_clipboard_create(
     let theme = crate::db::get_setting_sync(app, "theme").unwrap_or_else(|| "light".to_string());
 
     // 最小化/隐藏态的还原由 raise_always_on_top_without_focus 统一处理
-    // （先 unminimize 再 show），径向菜单与新建窗口共用同一实现。
+    // （先 unminimize 再 show），径向菜单与新建窗口共用同一实现；新建窗口
+    // 任务栏可见后，最小化另有任务栏图标手动还原一路，快捷键唤回仍是兜底。
 
     // 抬升并激活（含 X11 pager 激活），确保新建窗口位于主窗口之上；
     // 主窗口持有焦点时普通抬升会被 mutter 焦点约束压制。
