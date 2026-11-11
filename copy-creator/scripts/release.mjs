@@ -181,12 +181,17 @@ function checkCiGreen(sha) {
 
 // ---- 盯构建 ----
 // 轮询等待 tag 触发的 Build run 出现（约 60s），找到后前台直播到结束。
-function watchBuild(version) {
+// 必须按 head_sha 对准本次 tag 指向的提交：repair 移过 tag 的分支名上
+// 还挂着上一轮失败 run，只按分支名找会盯到陈年尸体（0.3.26 实翻车）。
+function watchBuild(version, headSha) {
   const branch = `v${version}`;
   let buildRun = null;
   for (let i = 0; i < 12; i++) {
     const data = ghJson(`repos/${repoSlug}/actions/runs?event=push&per_page=20`);
-    buildRun = (data?.workflow_runs ?? []).find((r) => r.name === "Build" && r.head_branch === branch) ?? null;
+    buildRun =
+      (data?.workflow_runs ?? []).find(
+        (r) => r.name === "Build" && r.head_branch === branch && r.head_sha === headSha,
+      ) ?? null;
     if (buildRun) break;
     sleep(5000);
   }
@@ -248,7 +253,7 @@ if (isRepair) {
     console.error("tag 推送失败——检查网络后重跑 pnpm release --repair。");
     process.exit(1);
   }
-  if (OPT.watch) watchBuild(version);
+  if (OPT.watch) watchBuild(version, run("git rev-parse HEAD"));
   console.log(`已推送 v${version}，构建进度：https://github.com/${repoSlug}/actions/workflows/build.yml`);
   process.exit(0);
 }
@@ -354,4 +359,4 @@ if (!OPT.watch) {
   console.log(`已推送。构建进度：https://github.com/${repoSlug}/actions/workflows/build.yml`);
   process.exit(0);
 }
-watchBuild(version);
+watchBuild(version, run("git rev-parse HEAD"));
