@@ -8019,6 +8019,7 @@ mod project_tests {
 
         // 无详情 + 库内源：原样返回不复制（导入/挂靠旧路径不回归）
         let in_lib = root.join("成片.jpg");
+        std::fs::write(&in_lib, b"jpg-bytes").unwrap();
         let (relative2, _, _) = crate::db::import_file_into_library_opts(
             app.handle(),
             in_lib.to_string_lossy().as_ref(),

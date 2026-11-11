@@ -1817,11 +1817,21 @@ pub(crate) fn import_file_into_library_opts<R: Runtime>(
     }
     let root = get_resource_library_dir(app);
     // 库内判断用小写前缀（Windows 大小写不敏感口径，与前端
-    // relativeLibraryPath 一致）；dest 由 root.join 构造，strip_prefix 必成。
+    // relativeLibraryPath 一致），分隔符归一成「/」——Windows 路径是
+    // 反斜杠，此前根串拼「/」永远前缀不上，库内源全被误判成库外重复
+    // 复制；dest 由 root.join 构造，strip_prefix 必成。
+    let library_prefix = format!(
+        "{}/",
+        root.to_string_lossy()
+            .to_lowercase()
+            .replace('\\', "/")
+            .trim_end_matches('/')
+    );
     let in_library = source
         .to_string_lossy()
         .to_lowercase()
-        .starts_with(&(root.to_string_lossy().to_lowercase() + "/"));
+        .replace('\\', "/")
+        .starts_with(&library_prefix);
     let keep_in_place = in_library && group_path.trim().is_empty() && base_name.trim().is_empty();
     let dest = if keep_in_place {
         source.clone()
