@@ -609,12 +609,17 @@ fn insert_external_resource_file(
         return;
     }
     let id = resource_file_id(path);
+    // group_name 与扫描补录（sync）同口径：按路径推导的顶层分组落库。
+    // 此前缺失恒为空串——列表显示与过滤按 resource_path 动态推导不受
+    // 影响，但分组改名/移动按 group_name 匹配更新记录，空值会让 watch
+    // 收录的记录不跟随分组改名。
+    let group_name = resource_group_for_path(root, path_text.as_str()).unwrap_or_default();
     match conn.execute(
         "INSERT OR IGNORE INTO clipboard_records
          (id, type, content, source_app, created_at, storage_mode, resource_path,
-          sort_order, use_count, resource_external)
-         VALUES (?1, 'file', ?2, '', ?3, 'resource', ?2, ?4, 0, 1)",
-        params![id, path_text, now, now_ms],
+          sort_order, use_count, resource_external, group_name)
+         VALUES (?1, 'file', ?2, '', ?3, 'resource', ?2, ?4, 0, 1, ?5)",
+        params![id, path_text, now, now_ms, group_name],
     ) {
         Err(error) => {
             log::warn!("外部移入文件补建入库失败 {}: {error}", path.display());
