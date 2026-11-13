@@ -38,6 +38,9 @@ import { WheelGate } from "./WheelGate";
 // getBoundingClientRect（屏幕系，视图缩放 ≠100% 时会误判）。
 const PANEL_MIN_WIDTH = 222;
 const NODE_FORM_PADDING = 24;
+/** 分组树滚轮降速系数（用户 2026-11-14 反馈：浏览分组是「看」的过程，
+ *  原生滚轮步长太快看不清层级）：一格滚轮 100px → 50px。 */
+const TREE_SCROLL_FACTOR = 0.5;
 
 /** 命中段名高亮：不区分大小写定位首个命中子串，mark 包裹。 */
 function HitName({ name, query }: { name: string; query: string }) {
@@ -68,6 +71,7 @@ export function SaveTargetPanel({ node, onClose }: { node: CanvasNode; onClose: 
   );
   const [query, setQuery] = useState("");
   const panelRef = useRef<HTMLDivElement>(null);
+  const treeScrollRef = useRef<HTMLDivElement | null>(null);
 
   useEffect(() => {
     let alive = true;
@@ -81,6 +85,22 @@ export function SaveTargetPanel({ node, onClose }: { node: CanvasNode; onClose: 
     return () => {
       alive = false;
     };
+  }, []);
+
+  // 分组树滚轮降速：拦截原生滚动按系数缩放步长（line 模式按行高 16px
+  // 归一），浏览层级是「看」的过程不需要原生快滚。降速监听落在树容器
+  // 自身，WheelGate 只管截留不冒泡（职责分离）；指定路径目标无树，ref
+  // 为空即跳过。搜索态与树态共用同一容器，一并生效。
+  useEffect(() => {
+    const tree = treeScrollRef.current;
+    if (!tree) return;
+    const onWheel = (e: WheelEvent) => {
+      e.preventDefault();
+      const dy = e.deltaMode === 1 ? e.deltaY * 16 : e.deltaY;
+      tree.scrollTop += dy * TREE_SCROLL_FACTOR;
+    };
+    tree.addEventListener("wheel", onWheel, { passive: false });
+    return () => tree.removeEventListener("wheel", onWheel);
   }, []);
 
   useEffect(() => {
@@ -215,7 +235,7 @@ export function SaveTargetPanel({ node, onClose }: { node: CanvasNode; onClose: 
           />
           {/* WheelGate：悬浮树上的滚轮只滚列表，不惊动画布缩放 */}
           <WheelGate>
-            <div className="fc-save-panel-tree">
+            <div className="fc-save-panel-tree" ref={treeScrollRef}>
               {searching ? (
                 hits.length > 0 ? (
                   hits.map((hit) => (

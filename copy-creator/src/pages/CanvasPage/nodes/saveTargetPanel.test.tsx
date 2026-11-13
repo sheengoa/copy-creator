@@ -465,4 +465,23 @@ describe("SaveTargetPanel 分组折叠树与搜索（2026-11-14 定案）", () =
     expect(screen.getByText("未找到包含「不存在」的分组")).toBeTruthy();
     expect(screen.queryByText("参考素材")).toBeNull();
   });
+
+  it("分组树滚轮降速：步长按 0.5 缩放（浏览是看的过程），line 模式按行高归一", async () => {
+    const { container } = render(
+      <SaveRuntimeCtx.Provider value={makeRuntime()}>
+        <SaveTargetPanel node={libNode()} onClose={vi.fn()} />
+      </SaveRuntimeCtx.Provider>,
+    );
+    await waitFor(() => expect(screen.getByText("参考素材")).toBeTruthy());
+    const tree = container.querySelector(".fc-save-panel-tree") as HTMLElement;
+    // pixel 模式：一格 100px → 50px
+    fireEvent.wheel(tree, { deltaY: 100 });
+    expect(tree.scrollTop).toBe(50);
+    // 连滚累计：原生会被拦截，只走缩放步长
+    fireEvent.wheel(tree, { deltaY: 120 });
+    expect(tree.scrollTop).toBe(110);
+    // line 模式：3 行 × 16px 行高 × 0.5 = 24
+    fireEvent.wheel(tree, { deltaY: 3, deltaMode: 1 });
+    expect(tree.scrollTop).toBe(134);
+  });
 });
