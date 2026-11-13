@@ -39,8 +39,9 @@ import { WheelGate } from "./WheelGate";
 const PANEL_MIN_WIDTH = 222;
 const NODE_FORM_PADDING = 24;
 /** 分组树滚轮降速系数（用户 2026-11-14 反馈：浏览分组是「看」的过程，
- *  原生滚轮步长太快看不清层级）：一格滚轮 100px → 50px。 */
-const TREE_SCROLL_FACTOR = 0.5;
+ *  原生滚轮步长太快看不清层级）：一格滚轮 100px → 25px（0.5 仍嫌快，
+ *  二轮反馈再降一档）。 */
+const TREE_SCROLL_FACTOR = 0.25;
 
 /** 命中段名高亮：不区分大小写定位首个命中子串，mark 包裹。 */
 function HitName({ name, query }: { name: string; query: string }) {
