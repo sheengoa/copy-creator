@@ -628,6 +628,7 @@ mod resource_command_tests {
     use crate::db::{
         create_resource_group_inner, delete_resource_group_inner,
         forget_resource_records, get_clipboard_records_inner, get_resource_groups_inner,
+        is_collectable_resource_file,
         move_resource_group_inner, move_resource_records_inner, normalize_file_backed_text_records,
         read_resource_text_preview_file, ResourceTextPreview,
         RESOURCE_TEXT_DETAIL_LIMIT_BYTES, RESOURCE_TEXT_PREVIEW_TRUNCATE_BYTES,
@@ -918,6 +919,140 @@ mod resource_command_tests {
         assert!(records
             .iter()
             .all(|record| record["resource_group"] == "References"));
+        cleanup(&root);
+    }
+
+    /// 收录判定矩阵：应用自身目录整树全忽略；第三方点前缀目录只放行
+    /// 音视频扩展名（图片/文本/其他文件仍忽略，防元数据缓存涌入）；
+    /// 正常目录维持原语义。用户兜底诉求「文件管理器可见可播放的媒体
+    /// 必须收录」的判定层锚点。
+    #[test]
+    fn collectable_rules_ignore_app_dirs_and_allow_media_in_third_party_hidden_dirs() {
+        // 应用自身目录：任何文件类型全忽略（含音视频）。
+        assert!(!is_collectable_resource_file(Path::new(
+            r"D:\lib\.copy-creator\attachments\x.mp4"
+        )));
+        assert!(!is_collectable_resource_file(Path::new(
+            r"D:\lib\.trash\x.mp4"
+        )));
+        assert!(!is_collectable_resource_file(Path::new(
+            r"D:\lib\thumbs\x.mp4"
+        )));
+        // 第三方点前缀目录：音视频放行。
+        assert!(is_collectable_resource_file(Path::new(
+            r"D:\lib\.bf\.recycle\video.mp4"
+        )));
+        assert!(is_collectable_resource_file(Path::new(
+            r"D:\lib\.bf\audio.mp3"
+        )));
+        // 第三方点前缀目录：图片/文本/其他文件仍忽略（元数据与预览缓存
+        // 不得涌入列表）。
+        assert!(!is_collectable_resource_file(Path::new(
+            r"D:\lib\.bf\.preview\thumb.webp"
+        )));
+        assert!(!is_collectable_resource_file(Path::new(
+            r"D:\lib\.bf\.backup\lib.db"
+        )));
+        // 无扩展名文件不进点目录（判定零 IO，嗅探只在列表组装做）。
+        assert!(!is_collectable_resource_file(Path::new(r"D:\lib\.bf\noext")));
+        // 正常目录不受影响；临时/锁文件照旧忽略。
+        assert!(is_collectable_resource_file(Path::new(r"D:\lib\group\video.mp4")));
+        assert!(is_collectable_resource_file(Path::new(r"D:\lib\.mp4")));
+        assert!(!is_collectable_resource_file(Path::new(r"D:\lib\group\dl.crdownload")));
+        assert!(!is_collectable_resource_file(Path::new(r"D:\lib\group\~$doc.mp4")));
+    }
+
+    /// 端到端：第三方点前缀目录里的视频经启动/周期对账收录，可在资源
+    /// 列表查询到；同目录下的缓存文件（webp/db）不收录。
+    #[test]
+    fn sync_collects_video_files_from_third_party_hidden_dirs() {
+        let (app, root) = test_app();
+        let recycle = root.join(".bf").join(".recycle");
+        let backup = root.join(".bf").join(".backup");
+        std::fs::create_dir_all(&recycle).unwrap();
+        std::fs::create_dir_all(&backup).unwrap();
+        let video = recycle.join("WanVideoWrapper_probe.mp4");
+        std::fs::write(&video, b"\x00\x00\x00\x20ftypisom\x00\x00\x02\x00isomiso2avc1mp41pad").unwrap();
+        std::fs::write(backup.join("billfish_backup.db"), b"sqlite-bytes").unwrap();
+        std::fs::write(recycle.join("thumb.webp"), b"webp-bytes").unwrap();
+
+        // 扫描层探针：scan 是否按新口径收录点目录视频
+        let scanned = crate::db::scan_resource_files_under(&root, &root);
+        assert!(
+            scanned
+                .iter()
+                .any(|entry| entry.path.file_name().and_then(|n| n.to_str()) == Some("WanVideoWrapper_probe.mp4")),
+            "scan 应收录点目录视频，实际 {:?}",
+            scanned.iter().map(|e| e.path.to_string_lossy()).collect::<Vec<_>>()
+        );
+
+        let (added, removed) = crate::db::sync_resource_library(app.handle());
+        assert!(added >= 1, "点前缀目录里的视频应被收录补录 (added={added}, removed={removed})");
+
+        let records = get_clipboard_records_inner(
+            &app.handle().clone(),
+            Some("WanVideoWrapper".to_string()),
+            Some(120),
+            Some(0),
+            Some("resources".to_string()),
+            None,
+            None,
+        )
+        .unwrap();
+        assert_eq!(records.len(), 1, "只有音视频被收录，缓存文件不进列表");
+        assert_eq!(records[0]["resource_kind"], "video");
+        assert_eq!(records[0]["resource_group"], ".bf");
+        let _ = (removed, &backup);
+        cleanup(&root);
+    }
+
+    /// 分组列表：第三方点前缀目录只在其子树确有收录文件时出现；纯
+    /// 缓存/备份区不进列表。正常目录空组维持原有显示语义。
+    #[test]
+    fn resource_groups_show_third_party_hidden_dirs_only_with_collectable_files() {
+        let (app, root) = test_app();
+        let recycle = root.join(".bf").join(".recycle");
+        let backup = root.join(".bf").join(".backup");
+        std::fs::create_dir_all(&recycle).unwrap();
+        std::fs::create_dir_all(&backup).unwrap();
+        std::fs::write(
+            recycle.join("clip.mp4"),
+            b"\x00\x00\x00\x20ftypisom\x00\x00\x02\x00isomiso2avc1mp41pad",
+        )
+        .unwrap();
+        std::fs::write(backup.join("cache.db"), b"bytes").unwrap();
+
+        let counts = resource_group_count_map(app.handle()).unwrap();
+        assert!(
+            counts.keys().any(|key| key.starts_with(".bf")),
+            "counts 应含点前缀分组，实际 {:?}",
+            counts
+        );
+        let tree = resource_folder_tree(&root, &root.join(".bf"), &counts, &std::collections::HashMap::new());
+        assert!(
+            tree.is_some(),
+            "resource_folder_tree(.bf) 不应返回 None（counts={counts:?}）"
+        );
+        let groups = get_resource_groups_inner(app.handle()).unwrap();
+        let bf = groups
+            .iter()
+            .find(|group| group["path"] == ".bf")
+            .unwrap_or_else(|| {
+                panic!(
+                    "含收录文件的点前缀目录应出现在分组列表，实际 {:?}",
+                    groups.iter().map(|g| g["path"].to_string()).collect::<Vec<_>>()
+                )
+            });
+        assert!(bf["count"].as_u64().unwrap() >= 1);
+        let bf_children = bf["children"].as_array().unwrap();
+        assert!(
+            bf_children.iter().any(|child| child["path"] == ".bf/.recycle"),
+            "收录文件所在子目录应在树中"
+        );
+        assert!(
+            !bf_children.iter().any(|child| child["path"] == ".bf/.backup"),
+            "纯备份缓存区不进分组树"
+        );
         cleanup(&root);
     }
 

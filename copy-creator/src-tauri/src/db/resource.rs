@@ -589,10 +589,11 @@ fn insert_external_resource_file(
     if !path.is_file() || !path.starts_with(root) {
         return;
     }
-    // 与扫描同一套忽略规则：应用自身的附件、临时文件与 thumbs/ 派生
-    // 缓存不是内容，否则保存图文暂存或缩略图生成时会被当作新放入
-    // 置顶成独立资源条目。
-    if path_inside_ignored_dir(path) || is_ignored_resource_file(path) {
+    // 与扫描同一套收录规则（is_collectable_resource_file 单源）：应用自身
+    // 的附件、临时文件与 thumbs/ 派生缓存不是内容；第三方点前缀目录只
+    // 放行音视频。否则保存图文暂存或缩略图生成时会被当作新放入置顶成
+    // 独立资源条目。
+    if !is_collectable_resource_file(path) {
         return;
     }
     let path_text = path.to_string_lossy().to_string();
@@ -625,9 +626,10 @@ fn insert_external_resource_file(
     }
 }
 
-/// 递归收集目录下的资源文件路径（对齐扫描语义：跳过 `.copy-creator`、
-/// `thumbs` 派生目录与临时/隐藏文件）。只回路径不取元数据——补建走
-/// 发现时间，排序结果做稳定处理便于测试断言。
+/// 递归收集目录下的资源文件路径（对齐扫描语义：应用自身目录整树跳过，
+/// 第三方点前缀目录内按 is_collectable_resource_file 放行音视频，临时/
+/// 锁文件一律跳过）。只回路径不取元数据——补建走发现时间，排序结果做
+/// 稳定处理便于测试断言。
 fn collect_resource_files_under(directory: &Path) -> Vec<PathBuf> {
     let mut files: Vec<PathBuf> = Vec::new();
     let mut stack = vec![directory.to_path_buf()];
@@ -641,11 +643,11 @@ fn collect_resource_files_under(directory: &Path) -> Vec<PathBuf> {
                 continue;
             };
             if file_type.is_dir() {
-                if is_ignored_resource_dir(&entry.file_name()) {
+                if is_app_owned_resource_dir_name(&entry.file_name()) {
                     continue;
                 }
                 stack.push(path);
-            } else if file_type.is_file() && !is_ignored_resource_file(&path) {
+            } else if file_type.is_file() && is_collectable_resource_file(&path) {
                 files.push(path);
             }
         }
@@ -1659,12 +1661,6 @@ pub(crate) fn resource_group_total_under(counts: &HashMap<String, u64>, folder: 
         .sum()
 }
 
-pub(crate) fn is_ignored_resource_directory(path: &Path) -> bool {
-    path.file_name()
-        .and_then(OsStr::to_str)
-        .is_some_and(|name| name == ".copy-creator" || name.starts_with('.'))
-}
-
 pub(crate) fn resource_directory_relative_path(root: &Path, directory: &Path) -> Option<String> {
     let relative = directory.strip_prefix(root).ok()?;
     let path = relative
@@ -1675,7 +1671,16 @@ pub(crate) fn resource_directory_relative_path(root: &Path, directory: &Path) ->
         })
         .collect::<Option<Vec<_>>>()?
         .join("/");
-    normalize_resource_folder_path(Some(&path)).ok()
+    if path.is_empty() {
+        return Some(String::new());
+    }
+    // 磁盘推导不走 normalize_resource_folder_path（用户输入校验）：第三方
+    // 点前缀目录（.bf 等）是真实分组，用户校验会拒绝点前缀名，分组树
+    // 随之丢失整个分支。层数与字节上限与 normalize 保持同一约束。
+    if path.split('/').count() > 16 || path.len() > 2000 {
+        return None;
+    }
+    Some(path)
 }
 
 pub(crate) fn resource_folder_tree(
@@ -1692,7 +1697,11 @@ pub(crate) fn resource_folder_tree(
         .flatten()
         .filter_map(|entry| {
             let file_type = entry.file_type().ok()?;
-            if !file_type.is_dir() || is_ignored_resource_directory(&entry.path()) {
+            if !file_type.is_dir() {
+                return None;
+            }
+            // 应用自身目录（元数据/回收站/派生缓存）永不出现在分组树。
+            if is_app_owned_resource_dir_name(&entry.file_name()) {
                 return None;
             }
             Some(entry.path())
@@ -1703,6 +1712,18 @@ pub(crate) fn resource_folder_tree(
         .into_iter()
         .filter_map(|child| resource_folder_tree(root, &child, counts, order))
         .collect::<Vec<_>>();
+    // 第三方点前缀目录（如 Billfish 的 .bf）只在其子树确有收录文件时
+    // 显示：纯缓存/备份区（.preview/.backup 等）不进分组树，避免树被
+    // 工具内部结构污染；正常目录维持原有语义（空组也显示）。
+    if directory
+        .file_name()
+        .and_then(OsStr::to_str)
+        .is_some_and(|name| name.starts_with('.'))
+        && count == 0
+        && children.is_empty()
+    {
+        return None;
+    }
 
     Some(serde_json::json!({
         "name": name,
@@ -1836,8 +1857,22 @@ pub(crate) fn get_resource_groups_inner<R: Runtime>(
         .flatten()
         .filter_map(|entry| {
             let file_type = entry.file_type().ok()?;
-            if !file_type.is_dir() || is_ignored_resource_directory(&entry.path()) {
+            if !file_type.is_dir() {
                 return None;
+            }
+            // 应用自身目录永不出现在分组列表；第三方点前缀目录（如
+            // Billfish 的 .bf）跳过用户分组命名校验——其内收录文件所属
+            // 分组由 resource_folder_tree 的「含收录文件才显示」条件裁决，
+            // 纯缓存区不会出现在列表里。
+            if is_app_owned_resource_dir_name(&entry.file_name()) {
+                return None;
+            }
+            if entry
+                .file_name()
+                .to_str()
+                .is_some_and(|name| name.starts_with('.'))
+            {
+                return Some(entry.path());
             }
             normalize_resource_group_name(entry.file_name().to_str()).ok()?;
             Some(entry.path())
@@ -1851,8 +1886,8 @@ pub(crate) fn get_resource_groups_inner<R: Runtime>(
         "count": counts.get("").copied().unwrap_or(0),
         "children": [],
     })];
-    for directory in directories {
-        if let Some(group) = resource_folder_tree(&root, &directory, &counts, &order) {
+    for directory in &directories {
+        if let Some(group) = resource_folder_tree(&root, directory, &counts, &order) {
             groups.push(group);
         }
     }

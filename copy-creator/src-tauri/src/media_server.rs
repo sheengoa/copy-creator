@@ -423,8 +423,50 @@ fn media_content_type(path: &Path) -> &'static str {
         "avif" => "image/avif",
         "bmp" => "image/bmp",
         "pdf" => "application/pdf",
-        _ => "application/octet-stream",
+        // 无扩展名/清单外扩展名的媒体（如「.mp4」无主名文件）按魔数给
+        // 出精确类型：浏览器 <video>/<audio> 对 octet-stream 虽常能嗅探
+        // 播放，显式类型让 Range 预检与播放器行为保持确定。
+        _ => sniff_content_type(path),
     }
+}
+
+/// 文件头魔数 → 精确 content type（与 media_kind::sniff_media_kind 同一批
+/// 魔数；此处需要细分到具体容器，不直接复用其 MediaKind 粗分类）。
+fn sniff_content_type(path: &Path) -> &'static str {
+    use std::io::Read;
+    let Ok(mut file) = std::fs::File::open(path) else {
+        return "application/octet-stream";
+    };
+    let mut head = [0_u8; 12];
+    let Ok(bytes_read) = file.read(&mut head) else {
+        return "application/octet-stream";
+    };
+    let head = &head[..bytes_read];
+    if head.len() < 12 {
+        return "application/octet-stream";
+    }
+    if &head[4..8] == b"ftyp" {
+        return "video/mp4";
+    }
+    if head[..4] == [0x1A, 0x45, 0xDF, 0xA3] {
+        return "video/x-matroska";
+    }
+    if &head[..4] == b"RIFF" {
+        if &head[8..12] == b"AVI " {
+            return "video/x-msvideo";
+        }
+        if &head[8..12] == b"WAVE" {
+            return "audio/wav";
+        }
+        return "application/octet-stream";
+    }
+    if &head[..4] == b"OggS" {
+        return "video/ogg";
+    }
+    if &head[..3] == b"ID3" {
+        return "audio/mpeg";
+    }
+    "application/octet-stream"
 }
 
 #[cfg(test)]
@@ -495,6 +537,35 @@ mod media_server_tests {
             params.get("path").map(String::as_str),
             Some("/home/a b.mp4")
         );
+    }
+
+    #[test]
+    fn content_type_sniffs_media_magic_for_extensionless_files() {
+        // 无主名「.mp4」与清单外扩展名按魔数给精确类型（与收录嗅探同源）。
+        let dir = std::env::temp_dir().join(format!("copy-creator-mime-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let write = |name: &str, bytes: &[u8]| {
+            let path = dir.join(name);
+            std::fs::write(&path, bytes).unwrap();
+            path
+        };
+        assert_eq!(
+            media_content_type(&write(".mp4", b"\x00\x00\x00\x20ftypisom\x00\x00\x02\x00isomiso2avc1mp41pad")),
+            "video/mp4"
+        );
+        assert_eq!(
+            media_content_type(&write("clip.bin", &[0x1A, 0x45, 0xDF, 0xA3, 1, 2, 3, 4, 5, 6, 7, 8])),
+            "video/x-matroska"
+        );
+        assert_eq!(
+            media_content_type(&write("snd.bin", b"RIFF\x24\x00\x00\x00WAVEfmt ")),
+            "audio/wav"
+        );
+        assert_eq!(
+            media_content_type(&write("data.bin", [0x50, 0x4B, 0x03, 0x04, 0, 1, 2, 3, 4, 5, 6, 7].as_slice())),
+            "application/octet-stream"
+        );
+        std::fs::remove_dir_all(&dir).ok();
     }
 
     #[test]

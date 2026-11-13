@@ -617,17 +617,56 @@ fn is_temporary_resource_file_name(name: &str) -> bool {
 /// 生成缩略图衍生出 thumbs/thumbs 嵌套污染。`.copy-creator` 是应用元数据；
 /// `.trash` 是资源回收站目录，删除资源会把文件移进去——若不排除，监听
 /// 结算会把回收站内文件当「新到达」重新入库，列表顶部立刻出现指向回收
-/// 站的幽灵重复卡片。分组树扫描（is_ignored_resource_directory）与文件
-/// 发现（本函数 + path_inside_ignored_dir）必须覆盖同一组应用目录。
-fn is_ignored_resource_dir(name: &OsStr) -> bool {
+/// 站的幽灵重复卡片。应用自身目录整树全忽略：分组树、文件扫描、监听
+/// 发现（is_collectable_resource_file / path_inside_ignored_dir）共用本
+/// 清单，口径必须一致。
+/// 应用自身目录名：元数据（.copy-creator）、缩略图派生缓存（thumbs）、
+/// 回收站（.trash）。这三类整树全忽略——任何文件类型都不收录。
+fn is_app_owned_resource_dir_name(name: &OsStr) -> bool {
     name == OsStr::new(".copy-creator")
         || name == OsStr::new("thumbs")
         || name == OsStr::new(TRASH_DIR_NAME)
 }
 
+fn is_ignored_resource_dir(name: &OsStr) -> bool {
+    is_app_owned_resource_dir_name(name)
+}
+
 fn path_inside_ignored_dir(path: &Path) -> bool {
     path.components()
         .any(|component| is_ignored_resource_dir(component.as_os_str()))
+}
+
+/// 资源收录唯一判定（扫描/监听发现/清退共用口径）。用户兜底诉求：文件
+/// 管理器可见且系统可播放的媒体，软件资源库必须可见可用——库根常被
+/// 第三方素材工具（如 Billfish）直接管理，其点前缀数据区（.bf 等）里
+/// 的音视频同样可见可播放，此前被「所有点前缀目录整体忽略」一刀切
+/// 排除，永不收录。现拆分两层：
+/// - 应用自身目录整树全忽略（元数据/派生缓存/回收站不是内容）；
+/// - 其他点前缀目录只放行音视频扩展名（图片/文本/其他文件仍忽略，
+///   防止第三方工具成千上万的元数据与预览缓存涌入列表；判定零 IO）。
+pub(crate) fn is_collectable_resource_file(path: &Path) -> bool {
+    if is_ignored_resource_file(path) {
+        return false;
+    }
+    let components: Vec<_> = path.components().collect();
+    let mut inside_hidden_dir = false;
+    // 最后一个组件是文件名本身，只判祖先目录。
+    for component in &components[..components.len().saturating_sub(1)] {
+        let name = component.as_os_str();
+        if is_app_owned_resource_dir_name(name) {
+            return false;
+        }
+        if matches!(component, std::path::Component::Normal(_))
+            && name.to_str().is_some_and(|name| name.starts_with('.'))
+        {
+            inside_hidden_dir = true;
+        }
+    }
+    if inside_hidden_dir {
+        return crate::media_kind::is_audio_or_video_extension(path);
+    }
+    true
 }
 
 /// 清退历史误入库的 thumbs 派生缓存记录：旧版本的缩略图命令会把
@@ -689,13 +728,15 @@ fn scan_resource_files_under(root: &Path, directory: &Path) -> Vec<ResourceFileE
                 continue;
             };
             if file_type.is_dir() {
-                if is_ignored_resource_dir(&entry.file_name()) {
+                if is_app_owned_resource_dir_name(&entry.file_name()) {
                     continue;
                 }
+                // 第三方点前缀目录不整树跳过：里面的音视频文件按文件级
+                // 判定放行收录（is_collectable_resource_file）。
                 visit(root, &path, entries);
                 continue;
             }
-            if !file_type.is_file() || is_ignored_resource_file(&path) {
+            if !file_type.is_file() || !is_collectable_resource_file(&path) {
                 continue;
             }
 
@@ -788,7 +829,17 @@ pub(crate) fn resource_folder_for_path(root: &Path, resource_path: &str) -> Opti
         })
         .collect::<Option<Vec<_>>>()?
         .join("/");
-    normalize_resource_folder_path(Some(&folder)).ok()
+    if folder.is_empty() {
+        return Some(String::new());
+    }
+    // 磁盘推导的分组路径不经过 normalize_resource_folder_path（用户输入
+    // 校验）：第三方点前缀目录（如 Billfish 的 .bf）是真实存在的分组，
+    // 用户校验会拒绝点前缀名，导致其下收录文件被扫描丢弃。层数与字节
+    // 上限仍约束，防异常深层目录撑爆完整路径。
+    if folder.split('/').count() > 16 || folder.len() > 2000 {
+        return None;
+    }
+    Some(folder)
 }
 
 pub(crate) fn resource_group_for_path(root: &Path, resource_path: &str) -> Option<String> {
