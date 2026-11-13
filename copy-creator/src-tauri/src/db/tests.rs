@@ -1006,6 +1006,132 @@ mod resource_command_tests {
         cleanup(&root);
     }
 
+    /// 搜索并返回命中的记录 id 列表（资源分类，全量页）。
+    fn search_resource_ids(
+        app: &tauri::App<tauri::test::MockRuntime>,
+        query: &str,
+    ) -> Vec<String> {
+        get_clipboard_records_inner(
+            &app.handle().clone(),
+            Some(query.to_string()),
+            Some(120),
+            Some(0),
+            Some("resources".to_string()),
+            None,
+            None,
+        )
+        .unwrap()
+        .iter()
+        .map(|record| record["id"].as_str().unwrap().to_string())
+        .collect()
+    }
+
+    #[test]
+    fn resource_search_matches_file_backed_text_content() {
+        // 文件承载文本（启动归一/详情页编辑后的形态：type=file、
+        // content=路径）正文句中关键词必须命中——此前搜索只匹配 DB
+        // 字段，正文搬进文件即失联，正是「有时搜得到、有时搜不到」的
+        // 根因。刚入库形态（type=text、content 暂存全文）为回归对照。
+        let (app, root) = test_app();
+        let file = root.join("copy-creator-zhangsan.txt");
+        std::fs::write(&file, "第一行铺垫\n这一段由张三负责收尾\n第三行无关").unwrap();
+        insert_typed_resource(
+            &app,
+            "zhangsan",
+            "file",
+            file.to_str().unwrap(),
+            file.to_str().unwrap(),
+        );
+        let fresh = root.join("copy-creator-fresh.txt");
+        std::fs::write(&fresh, "占位").unwrap();
+        insert_typed_resource(
+            &app,
+            "fresh",
+            "text",
+            "这一段由李四负责收尾",
+            fresh.to_str().unwrap(),
+        );
+
+        assert_eq!(search_resource_ids(&app, "张三"), vec!["zhangsan"]);
+        assert_eq!(search_resource_ids(&app, "李四"), vec!["fresh"]);
+        assert!(search_resource_ids(&app, "王五").is_empty());
+        cleanup(&root);
+    }
+
+    #[test]
+    fn resource_search_rereads_file_after_external_rewrite() {
+        // 正文缓存键含大小+修改毫秒：外部程序改写文件后新词立即可搜，
+        // 不存在「索引过期漏命中」。
+        let (app, root) = test_app();
+        let file = root.join("copy-creator-rewrite.txt");
+        std::fs::write(&file, "初始内容没有关键词").unwrap();
+        insert_typed_resource(
+            &app,
+            "rewrite",
+            "file",
+            file.to_str().unwrap(),
+            file.to_str().unwrap(),
+        );
+        assert!(search_resource_ids(&app, "王五").is_empty());
+
+        // 外部改写：长度变化让缓存键必然失效。
+        std::fs::write(&file, "外部更新后的内容出现了王五这个词").unwrap();
+        assert_eq!(search_resource_ids(&app, "王五"), vec!["rewrite"]);
+        cleanup(&root);
+    }
+
+    #[test]
+    fn resource_search_skips_oversize_text_content() {
+        // 超过 1 MB 上限的文本正文不参与匹配（路径字段仍可命中）；不
+        // 做截断匹配，杜绝「后文存在却搜不到」的假阴性。
+        let (app, root) = test_app();
+        let file = root.join("copy-creator-oversize.txt");
+        let mut body = "x".repeat(1024 * 1024);
+        body.push_str("张三在超限文件末尾");
+        std::fs::write(&file, &body).unwrap();
+        insert_typed_resource(
+            &app,
+            "oversize",
+            "file",
+            file.to_str().unwrap(),
+            file.to_str().unwrap(),
+        );
+
+        assert!(search_resource_ids(&app, "张三").is_empty());
+        assert_eq!(search_resource_ids(&app, "oversize"), vec!["oversize"]);
+        cleanup(&root);
+    }
+
+    #[test]
+    fn resource_search_ignores_non_text_files_and_invalid_utf8() {
+        // 图片（非文本扩展名）不读正文；GBK 等非 UTF-8 文本读失败按无
+        // 正文处理，不 panic、路径字段照常可命中。
+        let (app, root) = test_app();
+        let image = root.join("copy-creator-picture.png");
+        std::fs::write(&image, [0u8, 1, 2, 3]).unwrap();
+        insert_typed_resource(
+            &app,
+            "picture",
+            "file",
+            image.to_str().unwrap(),
+            image.to_str().unwrap(),
+        );
+        let gbk = root.join("copy-creator-gbk.txt");
+        // 「张三」的 GBK 编码字节，非法 UTF-8。
+        std::fs::write(&gbk, [0xD5u8, 0xC5, 0xC8, 0xFD]).unwrap();
+        insert_typed_resource(
+            &app,
+            "gbk",
+            "file",
+            gbk.to_str().unwrap(),
+            gbk.to_str().unwrap(),
+        );
+
+        assert!(search_resource_ids(&app, "张三").is_empty());
+        assert_eq!(search_resource_ids(&app, "gbk"), vec!["gbk"]);
+        cleanup(&root);
+    }
+
     #[test]
     fn resource_groups_return_a_nested_folder_tree() {
         let (_app, root) = test_app();

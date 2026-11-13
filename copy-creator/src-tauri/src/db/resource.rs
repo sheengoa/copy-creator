@@ -1076,6 +1076,95 @@ pub(crate) fn resource_record_value(
     value
 }
 
+// ── 资源搜索正文匹配 ──
+
+/// 搜索正文的单文件读取上限，与文本预览同档（1 MB）。搜索是高频交互，
+/// 超限文件正文不参与匹配（路径/备注仍可命中）。不采用「读前 N 字节」
+/// 的截断——截断会让后文实际存在却搜不到，正是本功能要根除的假阴性。
+const RESOURCE_SEARCH_TEXT_LIMIT_BYTES: u64 = QUICK_INPUT_TEXT_PREVIEW_LIMIT_BYTES;
+
+/// 正文缓存条目上限：超出整表清空。缓存只做加速，重建是一次性读盘，
+/// 不值得为此维护精确 LRU。
+const RESOURCE_SEARCH_TEXT_CACHE_LIMIT: usize = 4096;
+
+/// 正文缓存键：路径 + 大小 + 修改毫秒（与缩略图缓存「路径+大小+修改
+/// 时间」同口径）。外部程序改写文件后旧键自然失效——不存在索引漂移，
+/// 搜索永远对当前文件内容负责（用户诉求：内容实际存在必须能搜到）。
+#[derive(PartialEq, Eq, Hash)]
+struct ResourceSearchTextKey {
+    path: String,
+    size: u64,
+    modified_ms: i64,
+}
+
+static RESOURCE_SEARCH_TEXT_CACHE: OnceLock<Mutex<HashMap<ResourceSearchTextKey, Option<String>>>> =
+    OnceLock::new();
+
+/// 读文件承载文本的搜索正文（小写化，调用方的查询词已小写）。None 为
+/// 负缓存（超限/读失败/非 UTF-8），避免坏文件每次搜索都重读。
+fn resource_search_text_lower(path: &Path) -> Option<String> {
+    let metadata = std::fs::metadata(path).ok()?;
+    let size = metadata.len();
+    if size > RESOURCE_SEARCH_TEXT_LIMIT_BYTES {
+        return None;
+    }
+    let modified_ms = metadata
+        .modified()
+        .ok()
+        .and_then(|modified| modified.duration_since(std::time::UNIX_EPOCH).ok())
+        .map(|duration| duration.as_millis() as i64)
+        .unwrap_or_default();
+    let key = ResourceSearchTextKey {
+        path: path.to_string_lossy().into_owned(),
+        size,
+        modified_ms,
+    };
+    let cache = RESOURCE_SEARCH_TEXT_CACHE.get_or_init(|| Mutex::new(HashMap::new()));
+    let Ok(mut guard) = cache.lock() else {
+        return None;
+    };
+    if let Some(cached) = guard.get(&key) {
+        return cached.clone();
+    }
+    let content = std::fs::read_to_string(path)
+        .ok()
+        .map(|text| text.to_lowercase());
+    if guard.len() >= RESOURCE_SEARCH_TEXT_CACHE_LIMIT {
+        guard.clear();
+    }
+    guard.insert(key, content.clone());
+    content
+}
+
+/// 单条资源记录的搜索匹配：content/路径/备注四字段之外，文件承载文本
+/// 的磁盘正文也参与匹配。数据库 content 对文件承载记录只存路径（文件
+/// 是唯一事实来源，启动归一与详情页编辑都会把 content 归一为路径），
+/// 正文唯一存在于磁盘——此前不读文件，正文句中关键词搜不到，且「刚
+/// 入库能搜到（content 暂存全文）、重启归一或编辑后搜不到」，即搜索
+/// 时灵时不灵的根因。
+pub(crate) fn resource_row_matches_query(record: &ResourceRow, query: &str) -> bool {
+    if [
+        record.content.as_str(),
+        record.resource_path.as_str(),
+        record.relative_path.as_deref().unwrap_or_default(),
+        record.resource_note.as_str(),
+    ]
+    .iter()
+    .any(|value| value.to_lowercase().contains(query))
+    {
+        return true;
+    }
+    // 四字段未命中才读正文：已命中的记录不付 IO。仅文本扩展名文件参与
+    // （图片/音视频没有可搜正文）；正文按当前文件内容实时匹配，检索结果
+    // 不存在索引过期问题。
+    record
+        .path
+        .as_deref()
+        .filter(|path| crate::media_kind::is_text_extension(path))
+        .and_then(resource_search_text_lower)
+        .is_some_and(|content| content.contains(query))
+}
+
 pub(crate) fn get_resource_records_inner<R: Runtime>(
     app: &AppHandle<R>,
     search: Option<String>,
@@ -1200,16 +1289,9 @@ pub(crate) fn get_resource_records_inner<R: Runtime>(
             if !matches_folder {
                 return false;
             }
-            query.as_deref().map_or(true, |query| {
-                [
-                    record.content.as_str(),
-                    record.resource_path.as_str(),
-                    record.relative_path.as_deref().unwrap_or_default(),
-                    record.resource_note.as_str(),
-                ]
-                .iter()
-                .any(|value| value.to_lowercase().contains(query))
-            })
+            query
+                .as_deref()
+                .map_or(true, |query| resource_row_matches_query(record, query))
         })
         .collect();
 
