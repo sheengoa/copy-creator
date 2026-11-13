@@ -342,12 +342,23 @@ export default function ResourcePage() {
     if (feedbackTimerRef.current !== null) window.clearTimeout(feedbackTimerRef.current);
   }, []);
 
+  // 分组数据对应的库修订号基准：轮询以此判断数据是否落后。启动对账是
+  // 后台线程，前端挂载加载分组时对账可能尚未完成——对账完成的事件存在
+  // WebView 丢弃竞态（resource-groups-changed 是单次事件），修订号比对
+  // 是唯一可靠信号；基准必须在每次分组数据落定后锚定，否则首轮轮询把
+  // 对账后的新修订号当基线，之后永远判定「未落后」，列表停留旧数据。
+  const libraryRevisionRef = useRef(-1);
   const loadResourceGroups = useCallback(async () => {
     setResourceGroupsLoading(true);
     try {
       const groups = await invoke<ResourceFolder[]>("get_resource_groups");
       setResourceGroups(groups);
       setResourceGroupsError(null);
+      try {
+        libraryRevisionRef.current = await invoke<number>("get_resource_library_revision");
+      } catch {
+        // 修订号拉取失败不影响分组数据本身，轮询沿用旧基线。
+      }
       return groups;
     } catch (error) {
       console.error("Failed to load resource groups:", error);
@@ -393,7 +404,6 @@ export default function ResourcePage() {
   // 间不刷新）。挂载期间每 10s 拉取库修订号比对，发现落后即重载分组与
   // 记录——事件为主路径，轮询只做对账补漏；窗口隐藏到托盘时定时器被
   // WebView 节流，恢复显示另有 useRefreshOnShow 全量重载。
-  const libraryRevisionRef = useRef(-1);
   useEffect(() => {
     const timer = window.setInterval(() => {
       // 面板隐藏（display:none）时对账无意义：offsetParent 为 null 的
