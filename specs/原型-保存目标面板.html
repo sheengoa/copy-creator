@@ -1,0 +1,499 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>保存目标面板 · 交互原型（低保真）</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  html, body { height: 100%; }
+  body {
+    font-family: "Microsoft YaHei", "PingFang SC", system-ui, sans-serif;
+    font-size: 13px; color: #2b2f36; background: #f2f3f5;
+    display: flex; flex-direction: column;
+  }
+  header {
+    padding: 10px 20px; background: #fff; border-bottom: 1px solid #dfe1e5;
+    display: flex; align-items: baseline; gap: 12px; flex: none;
+  }
+  header h1 { font-size: 15px; }
+  header .sub { color: #8a8f99; font-size: 12px; }
+
+  main { flex: 1; display: flex; min-height: 0; }
+
+  /* ── 左：画布模拟区 ─────────────────────────────── */
+  .stage {
+    flex: 1; position: relative; overflow: auto;
+    background: #33373f;
+    background-image: radial-gradient(circle, #3d424b 1px, transparent 1px);
+    background-size: 22px 22px;
+    padding: 48px 40px;
+  }
+  /* 模拟节点卡片（对应 pc-node） */
+  .pc-node {
+    width: 280px; background: #fafbfc; border: 1px solid #cfd3da;
+    border-radius: 14px; padding: 12px;
+    box-shadow: 0 4px 14px rgba(0,0,0,.28);
+    position: relative; user-select: none;
+  }
+  .node-title { font-size: 12px; font-weight: 600; color: #555b64; margin-bottom: 8px; display: flex; align-items: center; gap: 6px; }
+  .node-title .dot { width: 8px; height: 8px; border-radius: 50%; background: #7c9cd6; }
+  /* 产物网格占位 */
+  .prod-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 5px; margin-bottom: 8px; }
+  .prod-cell {
+    aspect-ratio: 1; background: #e8eaee; border: 1px solid #d6d9df; border-radius: 6px;
+    display: flex; align-items: center; justify-content: center; font-size: 15px; color: #a7adb8;
+  }
+  /* 目标行 */
+  .target-row {
+    display: flex; align-items: center; gap: 6px;
+    border: 1px solid #d6d9df; background: #f1f2f5; border-radius: 8px;
+    padding: 6px 9px; cursor: pointer; font-size: 12px; min-height: 30px;
+  }
+  .target-row:hover { background: #e9ebef; }
+  .target-row .t-group { color: #3a6db5; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 62%; }
+  .target-row .t-sep { color: #b0b5bf; }
+  .target-row .t-name { color: #2b2f36; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .target-row .t-name.is-default { color: #9aa0ab; font-style: italic; }
+  .target-row .t-caret { margin-left: auto; color: #9aa0ab; font-size: 10px; }
+
+  /* ── 内嵌面板（对应 fc-save-panel） ────────────── */
+  .panel {
+    margin-top: 8px; background: #ffffff; border: 1px solid #d0d4db;
+    border-radius: 10px; padding: 10px; display: none;
+  }
+  .panel.open { display: block; }
+  .panel-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 8px; }
+  .panel-head .p-title { font-size: 12px; font-weight: 600; color: #555b64; }
+  .panel-head .p-close {
+    border: none; background: none; cursor: pointer; font-size: 13px; color: #9aa0ab; padding: 2px 6px; border-radius: 6px;
+  }
+  .panel-head .p-close:hover { background: #eef0f3; color: #444; }
+
+  .p-label { font-size: 11px; color: #7c828c; margin: 6px 0 4px; }
+  .p-search {
+    width: 100%; border: 1px solid #d0d4db; border-radius: 7px; padding: 6px 8px;
+    font-size: 12px; outline: none; background: #f7f8fa;
+  }
+  .p-search:focus { border-color: #7c9cd6; background: #fff; }
+
+  /* 分组树 / 搜索结果（滚动区） */
+  .p-tree {
+    height: 190px; overflow: auto; border: 1px solid #dde0e6; border-radius: 8px;
+    background: #fafbfc; margin-top: 4px;
+  }
+  .p-row {
+    display: flex; align-items: center; gap: 5px; width: 100%;
+    border: none; background: none; text-align: left; cursor: pointer;
+    font-size: 12px; color: #2b2f36; padding: 5px 8px; line-height: 1.3;
+  }
+  .p-row:hover { background: #eceef2; }
+  .p-row.is-active { background: #dbe7f8; }
+  .p-row .arrow { width: 11px; flex: none; color: #9aa0ab; font-size: 9px; text-align: center; }
+  .p-row .arrow.leaf { visibility: hidden; }
+  .p-row .ficon { flex: none; font-size: 11px; }
+  .p-row .fname { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .p-row .fcount { flex: none; font-size: 10px; color: #a2a8b2; background: #eceef2; border-radius: 8px; padding: 1px 6px; }
+  .p-row .ftwo { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 1px; }
+  .p-row .fmain { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 600; color: #2b2f36; }
+  .p-row .fmain mark { background: #ffe9a8; padding: 0 1px; border-radius: 2px; }
+  .p-row .fsub { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 10px; color: #9aa0ab; }
+  .p-row.is-active .fsub { color: #45688f; }
+  .p-empty { padding: 24px 10px; text-align: center; color: #a2a8b2; font-size: 12px; }
+
+  /* 名称 */
+  .p-input {
+    width: 100%; border: 1px solid #d0d4db; border-radius: 7px; padding: 6px 8px;
+    font-size: 12px; outline: none;
+  }
+  .p-input:focus { border-color: #7c9cd6; }
+  .p-input.flash { animation: flashBg 1.2s; }
+  @keyframes flashBg { 0% { background: #fff3c2; } 100% { background: #fff; } }
+  .p-hint { font-size: 10.5px; color: #a2a8b2; margin-top: 3px; }
+  .p-foot { display: flex; align-items: center; justify-content: space-between; margin-top: 10px; gap: 6px; }
+  .p-link { border: none; background: none; color: #6a90c4; font-size: 11px; cursor: pointer; padding: 0; }
+  .p-link:hover { text-decoration: underline; }
+  .btn-ghost, .btn-ok {
+    border-radius: 8px; font-size: 12px; padding: 5px 12px; cursor: pointer;
+  }
+  .btn-ghost { border: 1px solid #d0d4db; background: #fff; color: #555b64; }
+  .btn-ghost:hover { background: #f1f2f5; }
+  .btn-ok { border: 1px solid #5a83c0; background: #6a94d2; color: #fff; }
+  .btn-ok:hover { background: #5a83c0; }
+
+  /* 模拟操作区 */
+  .sim {
+    position: absolute; right: 40px; top: 48px; width: 210px;
+    display: flex; flex-direction: column; gap: 8px;
+  }
+  .sim button {
+    border: 1px dashed #8a93a3; background: rgba(255,255,255,.08); color: #cdd3dd;
+    border-radius: 8px; padding: 7px 10px; font-size: 12px; cursor: pointer; text-align: left;
+  }
+  .sim button:hover { background: rgba(255,255,255,.16); }
+  .sim-log {
+    background: rgba(0,0,0,.4); border: 1px solid #4a4f58; border-radius: 8px;
+    color: #b9c0cb; font-size: 11px; padding: 8px 10px; min-height: 60px; line-height: 1.7;
+  }
+  .sim-log .ok { color: #9fd6a0; }
+  .sim-log .warn { color: #ffd98a; }
+
+  /* ── 右：设计点注解 ─────────────────────────────── */
+  .notes {
+    width: 288px; flex: none; background: #fff; border-left: 1px solid #dfe1e5;
+    padding: 16px 18px; overflow: auto;
+  }
+  .notes h2 { font-size: 13px; margin-bottom: 10px; }
+  .notes ol { list-style: none; display: flex; flex-direction: column; gap: 10px; }
+  .notes li { border: 1px solid #e4e6ea; border-radius: 10px; padding: 10px 12px; background: #fafbfc; font-size: 12px; line-height: 1.75; color: #4a4f58; }
+  .notes li b { color: #2b2f36; display: block; margin-bottom: 2px; }
+  .notes li .tag { display: inline-block; font-size: 10px; background: #e8eef8; color: #3a6db5; border-radius: 6px; padding: 1px 6px; margin-left: 6px; vertical-align: 1px; }
+  .notes .todo { margin-top: 12px; font-size: 11.5px; color: #8a8f99; line-height: 1.8; border-top: 1px dashed #dfe1e5; padding-top: 10px; }
+</style>
+</head>
+<body>
+
+<header>
+  <h1>保存目标面板 · 交互原型</h1>
+  <span class="sub">低保真 · 只验证交互流程，不代表最终视觉 — 直接在左侧节点上操作体验</span>
+</header>
+
+<main>
+  <section class="stage" id="stage">
+    <!-- 模拟保存节点 -->
+    <div class="pc-node" id="node">
+      <div class="node-title"><span class="dot"></span>保存</div>
+      <div class="prod-grid">
+        <div class="prod-cell">🖼</div><div class="prod-cell">🖼</div>
+        <div class="prod-cell">🖼</div><div class="prod-cell">🖼</div>
+      </div>
+      <div class="target-row" id="targetRow" title="点击展开 / 收起保存目标面板">
+        <span>📁</span>
+        <span class="t-group" id="tGroup">素材库/人像/商务</span>
+        <span class="t-sep" id="tSep">·</span>
+        <span class="t-name" id="tName">提案图-v2</span>
+        <span class="t-caret" id="tCaret">▲</span>
+      </div>
+
+      <!-- 内嵌面板 -->
+      <div class="panel" id="panel">
+        <div class="panel-head">
+          <span class="p-title">保存目标</span>
+          <button class="p-close" id="btnClose" title="收起 (Esc)">✕</button>
+        </div>
+
+        <div class="p-label">分组 <span style="color:#a2a8b2">— 上次选择已保留，可直接确定</span></div>
+        <input class="p-search" id="search" type="text" placeholder="搜索分组名，快速定位…" autocomplete="off">
+        <div class="p-tree" id="tree"></div>
+
+        <div class="p-label">名称</div>
+        <input class="p-input" id="nameInput" type="text" placeholder="留空则用产物原名">
+        <div class="p-hint">多张按「名称-1 / 名称-2」展开；保存成功后自动清空，不带入下一批</div>
+
+        <div class="p-foot">
+          <button class="p-link">改用指定路径…</button>
+          <span style="flex:1"></span>
+          <button class="btn-ghost" id="btnReset">恢复默认</button>
+          <button class="btn-ok" id="btnOk">确定</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- 模拟操作 -->
+    <div class="sim">
+      <button id="btnSimSave">▶ 模拟：本批产物保存成功<br><span style="font-size:10px;opacity:.75">演示「名称自动清空、分组保留」</span></button>
+      <button id="btnSimRegen">▶ 模拟：生成下一批产物<br><span style="font-size:10px;opacity:.75">演示无记忆命名，直接落原名</span></button>
+      <button id="btnSimReset">↺ 重置演示</button>
+      <div class="sim-log" id="log">模拟日志…</div>
+    </div>
+  </section>
+
+  <!-- 设计点注解 -->
+  <aside class="notes">
+    <h2>本次改动的四个设计点</h2>
+    <ol>
+      <li><b>① 搜索定位分组</b><span class="tag">新能力</span>
+        分组多、嵌套深时输入关键词即过滤：命中项平铺，每项带完整路径（客户项目 / 律所A / 形象图），命中段高亮——不用再逐级找位置，点击即选。</li>
+      <li><b>② 折叠树代替全量拍平</b>
+        默认只列顶级分组，点 ▸ 逐层展开，列表首屏一眼扫完；<b>上次选中的分组所在链路自动展开并高亮</b>——路径复用 0 次点击，直接确定。</li>
+      <li><b>③ 命名一次性</b>
+        名称保存成功后自动清空：名字属于上一批产物，下一批不继承（现状会记忆并叠加 (1) 序号）。留空 = 沿用产物原名，多张按「基名-1/-2」展开，约定不变。</li>
+      <li><b>④ 分组路径保留记忆</b>
+        与命名相反：上次选的分组下次仍在（可复用可再改），且打开面板时该链路自动展开——最高频路径「沿用上次分组」只需点确定。</li>
+    </ol>
+    <div class="todo">
+      体验要点：① 点目标行展开面板，观察上次分组已展开高亮；② 搜索「形象」看路径面包屑；③ 点「模拟保存成功」后重开面板，名称已空、分组还在。<br><br>
+      实现注意（确认设计后展开）：保存成功清空名称须同步对齐保存指纹，避免「清空即变更」误触发对现有产物的重复保存。
+    </div>
+  </aside>
+</main>
+
+<script>
+"use strict";
+
+/* ── 分组数据：模拟「多分组 + 深嵌套」的真实库 ── */
+const TREE = [
+  { name: "客户项目", children: [
+    { name: "律所A-品牌升级", children: [
+      { name: "脚本参考", children: [] },
+      { name: "形象图", children: [
+        { name: "律师人设", children: [] },
+        { name: "场景实拍", children: [] },
+        { name: "定妆照", children: [] },
+      ]},
+      { name: "成片", children: [] },
+    ]},
+    { name: "餐饮B-门店开业", children: [
+      { name: "脚本参考", children: [] },
+      { name: "形象图", children: [
+        { name: "主厨人设", children: [] },
+        { name: "门店环境", children: [] },
+      ]},
+      { name: "成片", children: [] },
+    ]},
+    { name: "电商C-新品首发", children: [
+      { name: "产品图", children: [
+        { name: "白底图", children: [] },
+        { name: "场景图", children: [] },
+      ]},
+      { name: "口播图", children: [] },
+    ]},
+    { name: "文旅D-古镇宣传", children: [
+      { name: "风景参考", children: [
+        { name: "白天", children: [] },
+        { name: "夜景", children: [] },
+      ]},
+      { name: "人物形象", children: [] },
+    ]},
+  ]},
+  { name: "素材库", children: [
+    { name: "人像", children: [
+      { name: "商务", children: [
+        { name: "律师", children: [] },
+        { name: "白领", children: [] },
+        { name: "会议场景", children: [] },
+      ]},
+      { name: "生活", children: [] },
+      { name: "古风", children: [] },
+      { name: "儿童", children: [] },
+    ]},
+    { name: "风景", children: [
+      { name: "山川", children: [] },
+      { name: "海边", children: [] },
+    ]},
+    { name: "静物", children: [
+      { name: "美食", children: [] },
+      { name: "器物", children: [] },
+    ]},
+    { name: "参考风格", children: [
+      { name: "胶片感", children: [] },
+      { name: "国潮插画", children: [] },
+    ]},
+  ]},
+  { name: "提示词", children: [
+    { name: "人像提示词", children: [
+      { name: "光线", children: [] },
+      { name: "构图", children: [] },
+    ]},
+    { name: "视频提示词", children: [] },
+  ]},
+  { name: "临时产出", children: [
+    { name: "待筛选", children: [
+      { name: "11月", children: [] },
+      { name: "12月", children: [] },
+    ]},
+  ]},
+];
+
+const ROOT = { name: "", children: TREE }; // 根下的「未分组」
+
+/* 计数：叶子从 1 起，父级 = 子级之和 + 自身零头 */
+function assignCount(node) {
+  if (node.children.length === 0) { node.count = 3 + (node.name.length * 7) % 40; return node.count; }
+  node.count = node.children.reduce((s, c) => s + assignCount(c), 0);
+  return node.count;
+}
+assignCount(ROOT);
+
+/* ── 状态 ── */
+const state = {
+  expanded: new Set(),          // 已展开的分组 path（"" 为根，不入集）
+  selected: "素材库/人像/商务",  // 上次保存遗留的分组（记忆复用）
+  name: "提案图-v2",            // 上次保存遗留的名称（待演示清空）
+  query: "",
+  panelOpen: false,
+};
+
+/* 展开选中分组的全部祖先（记忆路径自动可见） */
+function expandAncestorsOf(path) {
+  const segs = path.split("/").filter(Boolean);
+  for (let i = 1; i < segs.length; i++) state.expanded.add(segs.slice(0, i).join("/"));
+}
+
+/* ── 渲染：树（无搜索）/ 搜索平铺 ── */
+const treeEl = document.getElementById("tree");
+
+function rowHtml({ path, depth, label, count, arrow, active, extraHtml }) {
+  return `<button class="p-row${active ? " is-active" : ""}" data-path="${path}" style="padding-left:${8 + depth * 14}px">
+    <span class="arrow${arrow ? "" : " leaf"}">${arrow || "▸"}</span>
+    <span class="ficon">📁</span>${extraHtml}
+    <span class="fcount">${count}</span>
+  </button>`;
+}
+
+function renderTree() {
+  if (state.query.trim()) return renderSearch();
+  const parts = [];
+  parts.push(rowHtml({
+    path: "", depth: 0, label: "未分组", count: 12,
+    arrow: false, active: state.selected === "",
+    extraHtml: `<span class="fname">未分组</span>`,
+  }));
+  const walk = (node, path, depth) => {
+    const isOpen = state.expanded.has(path);
+    const active = state.selected === path;
+    parts.push(rowHtml({
+      path, depth, label: node.name, count: node.count,
+      arrow: node.children.length ? (isOpen ? "▾" : "▸") : false,
+      active,
+      extraHtml: `<span class="fname">${node.name}</span>`,
+    }));
+    if (isOpen) for (const c of node.children) walk(c, path ? `${path}/${c.name}` : c.name, depth + 1);
+  };
+  for (const c of TREE) walk(c, c.name, 0);
+  treeEl.innerHTML = parts.join("");
+}
+
+function renderSearch() {
+  const q = state.query.trim().toLowerCase();
+  const hits = [];
+  const walk = (node, path) => {
+    if (path && node.name.toLowerCase().includes(q)) hits.push({ name: node.name, path, count: node.count });
+    for (const c of node.children) walk(c, path ? `${path}/${c.name}` : c.name);
+  };
+  walk(ROOT, "");
+  if (!hits.length) { treeEl.innerHTML = `<div class="p-empty">未找到包含「${state.query.trim()}」的分组</div>`; return; }
+  treeEl.innerHTML = hits.map(h => {
+    const segs = h.path.split("/");
+    const hitName = segs[segs.length - 1];
+    const parent = segs.slice(0, -1).join(" / ") || "库根";
+    // 末级段名内子串高亮（搜「形象」命中「人物形象」只亮命中部分）
+    const idx = hitName.toLowerCase().indexOf(q);
+    const mainHtml = idx >= 0
+      ? `${hitName.slice(0, idx)}<mark>${hitName.slice(idx, idx + q.length)}</mark>${hitName.slice(idx + q.length)}`
+      : hitName;
+    return `<button class="p-row${h.path === state.selected ? " is-active" : ""}" data-path="${h.path}">
+      <span class="arrow leaf">▸</span><span class="ficon">📁</span>
+      <span class="ftwo"><span class="fmain">${mainHtml}</span><span class="fsub">${parent}</span></span>
+      <span class="fcount">${h.count}</span>
+    </button>`;
+  }).join("");
+}
+
+/* 事件委托：树行点击（选中 / 展开切换） */
+treeEl.addEventListener("click", (e) => {
+  const btn = e.target.closest(".p-row");
+  if (!btn) return;
+  const path = btn.dataset.path;
+  state.selected = path;
+  if (state.query.trim()) {
+    expandAncestorsOf(path); state.query = ""; document.getElementById("search").value = "";
+    renderTree();
+  } else if (path) {
+    // 点中已展开的分组行 = 折叠切换；未展开 = 展开并保持选中
+    if (state.expanded.has(path)) state.expanded.delete(path);
+    else state.expanded.add(path);
+    renderTree();
+  } else renderTree();
+});
+
+/* 搜索输入 */
+document.getElementById("search").addEventListener("input", (e) => {
+  state.query = e.target.value;
+  renderTree();
+});
+
+/* ── 面板开合 + 目标行 ── */
+const panelEl = document.getElementById("panel");
+const caretEl = document.getElementById("tCaret");
+function setPanel(open) {
+  state.panelOpen = open;
+  panelEl.classList.toggle("open", open);
+  caretEl.textContent = open ? "▲" : "▼";
+  if (open) {
+    expandAncestorsOf(state.selected);
+    renderTree();
+    document.getElementById("nameInput").value = state.name;
+  }
+}
+document.getElementById("targetRow").addEventListener("click", () => setPanel(!state.panelOpen));
+document.getElementById("btnClose").addEventListener("click", () => setPanel(false));
+document.getElementById("stage").addEventListener("mousedown", (e) => {
+  if (!state.panelOpen) return;
+  if (document.getElementById("node").contains(e.target)) return;
+  setPanel(false);
+});
+document.addEventListener("keydown", (e) => { if (e.key === "Escape" && state.panelOpen) setPanel(false); });
+
+/* 名称输入 */
+document.getElementById("nameInput").addEventListener("input", (e) => { state.name = e.target.value; });
+
+/* 确定按钮：写详情 + 收起 */
+document.getElementById("btnOk").addEventListener("click", () => {
+  state.name = state.name.trim();
+  updateTargetRow();
+  log(`确定：分组=<b>${state.selected || "未分组"}</b>　名称=<b>${state.name || "（空 → 用产物原名）"}</b>`);
+  setPanel(false);
+});
+
+/* 恢复默认 */
+document.getElementById("btnReset").addEventListener("click", () => {
+  state.selected = ""; state.name = "";
+  document.getElementById("nameInput").value = "";
+  renderTree(); updateTargetRow();
+  log("恢复默认：未分组 · 用产物原名");
+});
+
+/* 目标行渲染（名称空时弱化显示「用产物原名」） */
+function updateTargetRow() {
+  document.getElementById("tGroup").textContent = state.selected || "未分组";
+  const nameEl = document.getElementById("tName");
+  nameEl.textContent = state.name || "用产物原名";
+  nameEl.classList.toggle("is-default", !state.name);
+  document.getElementById("tSep").textContent = "·";
+}
+
+/* ── 模拟按钮 ── */
+const logEl = document.getElementById("log");
+function log(html) { logEl.innerHTML = `<div>› ${html}</div>` + logEl.innerHTML.replace("模拟日志…", ""); }
+
+document.getElementById("btnSimSave").addEventListener("click", () => {
+  const oldName = state.name;
+  state.name = ""; // 关键行为：保存成功即清空命名
+  if (state.panelOpen) {
+    const input = document.getElementById("nameInput");
+    input.value = ""; input.classList.remove("flash"); void input.offsetWidth; input.classList.add("flash");
+  }
+  updateTargetRow();
+  log(`<span class="ok">✔ 保存成功</span>　名称「${oldName || "（原名）"}」已自动清空 — 命名不带入下一批；分组 <b>${state.selected || "未分组"}</b> 保留`);
+});
+
+document.getElementById("btnSimRegen").addEventListener("click", () => {
+  updateTargetRow();
+  log(`生成下一批产物 → 自动保存：<span class="warn">无遗留命名</span>，直接落产物原名；分组沿用 <b>${state.selected || "未分组"}</b>（可再改）`);
+});
+
+document.getElementById("btnSimReset").addEventListener("click", () => {
+  state.selected = "素材库/人像/商务"; state.name = "提案图-v2";
+  state.expanded = new Set(); state.query = "";
+  document.getElementById("search").value = "";
+  logEl.innerHTML = "模拟日志…";
+  setPanel(false); updateTargetRow();
+});
+
+/* 初始渲染 */
+updateTargetRow();
+renderTree();
+</script>
+</body>
+</html>
