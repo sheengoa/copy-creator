@@ -782,3 +782,89 @@
 .fc-save-panel-ok:hover {
   filter: brightness(1.08);
 }
+
+/* ── 分组选择（2026-11-14 用户定案，原型 specs/原型-保存目标面板.html）：
+   折叠树代替全量拍平 + 搜索定位 + 记忆链路自动展开 ────────────────── */
+
+/* 标签行内联提示（上次选择已保留，可直接确定） */
+.fc-save-panel-label-hint {
+  color: color-mix(in srgb, var(--text-tertiary) 78%, transparent);
+}
+
+/* 分组搜索框：紧凑输入，与名称输入同视觉语言 */
+.fc-save-panel-search {
+  width: 100%;
+  box-sizing: border-box;
+  height: 26px;
+  padding: 0 8px;
+  border: 1px solid var(--separator);
+  border-radius: 8px;
+  background: transparent;
+  color: var(--text-primary);
+  font-size: 11.5px;
+  outline: none;
+  margin-bottom: 6px;
+}
+
+.fc-save-panel-search:focus {
+  border-color: var(--accent);
+}
+
+/* 树行折叠箭头列：固定宽对齐图标；叶子行透明占位（图标列不错位） */
+.fc-save-panel-caret {
+  width: 11px;
+  height: 11px;
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--text-tertiary);
+}
+
+.fc-save-panel-caret svg {
+  width: 9px;
+  height: 9px;
+}
+
+.fc-save-panel-caret.is-leaf {
+  visibility: hidden;
+}
+
+/* 搜索命中两行式：主行命中段名（mark 高亮）+ 次行父路径（嵌套位置
+   一眼可见，末级名不受长路径截断影响） */
+.fc-save-panel-hit-text {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+
+.fc-save-panel-hit-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-weight: 600;
+}
+
+.fc-save-panel-hit-name mark {
+  background: color-mix(in srgb, #f5c542 38%, transparent);
+  color: inherit;
+  padding: 0 1px;
+  border-radius: 2px;
+}
+
+.fc-save-panel-hit-parent {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 10px;
+  color: var(--text-tertiary);
+}
+
+/* 目标行：名称空=「用产物原名」弱化（保存成功清名后一眼可辨） */
+.fc-save-target-default {
+  color: var(--text-tertiary);
+  font-style: italic;
+  font-weight: 400;
+}

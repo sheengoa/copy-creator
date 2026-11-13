@@ -3,7 +3,7 @@ import type { ReactNode } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { useCanvasStore, type SaveMediaMeta } from "../../../stores/canvasStore";
 import { SaveRuntimeCtx, type SaveRuntime } from "./saveRuntimeCtx";
-import { saveBaseNameOf, saveDirFileNameOf, saveFingerprintOf } from "./saveTarget";
+import { saveBaseNameOf, savedFingerprintAfter, saveDirFileNameOf, saveFingerprintOf } from "./saveTarget";
 import { upstreamMediaOf } from "./upstream";
 
 // 自动保存管线运行时 Provider（决策 19：连线后的下一步是选保存位置，
@@ -12,6 +12,11 @@ import { upstreamMediaOf } from "./upstream";
 // 自驱动（依赖 store 订阅）。目标详情（库内分组 auto_group + 基名
 // auto_name）纳入指纹：详情变更即对现有产物自动重存一份，旧文件保留
 // （2026-11-10 用户定案：分组/基名可配 + 冲突加 (1) 不覆盖）。
+//
+// 命名一次性（2026-11-14 用户定案：名字属于上一批产物，下一批不继承）
+// ——保存成功即清 auto_name；指纹同步按空名重算落库（savedFingerprint-
+// After），否则管线下一拍因指纹不符把现有产物冗余重存一份。分组路径
+// 保留记忆（下次保存沿用上次分组，可再改）。
 
 export function SaveRuntimeProvider({ children }: { children: ReactNode }) {
   const nodes = useCanvasStore((s) => s.nodes);
@@ -91,7 +96,7 @@ export function SaveRuntimeProvider({ children }: { children: ReactNode }) {
   const autoSaveInFlightRef = useRef<Set<string>>(new Set());
 
   const runAutoSave = useCallback(
-    async (nodeId: string, target: "library" | "dir", dir: string, paths: string[], fingerprint: string, group: string, name: string) => {
+    async (nodeId: string, target: "library" | "dir", dir: string, paths: string[], group: string, name: string) => {
       // 在飞锁（ref 级，同拍即生效）：StrictMode 下 effect 双跑共用同一
       // 快照，auto_state 检查拦不住同一拍的重入，这里保证单节点不并发
       // 导出（开发模式防双份入库，生产同样受益）。
@@ -112,10 +117,14 @@ export function SaveRuntimeProvider({ children }: { children: ReactNode }) {
             await invoke("canvas_export_to_path", { sourcePath: path, target: `${base}/${fileName}` });
           }
         }
+        // 成功即清命名（命名一次性，不带入下一批）+ 指纹按空名对齐：
+        // 下一拍 paths 不变时指纹匹配不再重存；用户再设新名走详情变更
+        // 语义照常触发重存。
         writeSaveMeta(nodeId, {
           auto_state: "saved",
           auto_error: "",
-          auto_fingerprint: fingerprint,
+          auto_fingerprint: savedFingerprintAfter(paths, group),
+          auto_name: "",
           status: "saved",
           target: target === "library" ? "library" : "path",
           saved_path: target === "dir" ? base : "",
@@ -145,7 +154,7 @@ export function SaveRuntimeProvider({ children }: { children: ReactNode }) {
       const name = meta.auto_name ?? "";
       const fingerprint = saveFingerprintOf(paths, group, name);
       if (meta.auto_fingerprint === fingerprint) continue;
-      void runAutoSave(node.id, target === "dir" ? "dir" : "library", meta.auto_dir ?? "", paths, fingerprint, group, name);
+      void runAutoSave(node.id, target === "dir" ? "dir" : "library", meta.auto_dir ?? "", paths, group, name);
     }
   }, [nodes, connections, runAutoSave]);
 

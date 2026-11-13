@@ -38,6 +38,14 @@ export function saveFingerprintOf(paths: string[], group: string, name: string):
   return JSON.stringify([paths, group, name]);
 }
 
+/** 保存成功后应落的指纹（2026-11-14 用户定案：命名一次性——名字属于
+ *  上一批产物，保存成功即清空，不带入下一批；分组路径保留记忆）。指纹
+ *  必须同步按空名计算：只清 auto_name 不动指纹，管线下一拍会因指纹不
+ *  符把现有产物冗余重存一份。 */
+export function savedFingerprintAfter(paths: string[], group: string): string {
+  return saveFingerprintOf(paths, group, "");
+}
+
 export interface SaveGroupRow {
   /** 库内相对路径（空=未分组）。 */
   path: string;
@@ -46,6 +54,8 @@ export interface SaveGroupRow {
   count: number;
   /** 树深度（未分组=0，顶级分组=0，子级递增）。 */
   depth: number;
+  /** 是否有子分组（折叠树箭头与点击展开切换判定）。 */
+  hasChildren: boolean;
 }
 
 /** 分组树拍平成浮层列表：首行固定「未分组」（根节点 name/path 均空），
@@ -59,9 +69,54 @@ export function flattenResourceGroups(folders: ResourceFolder[]): SaveGroupRow[]
       label: isRoot ? "" : (folder.path.split("/").pop() ?? folder.name),
       count: folder.count,
       depth: isRoot ? 0 : depth,
+      hasChildren: folder.children.length > 0,
     });
     for (const child of folder.children) walk(child, isRoot ? 0 : depth + 1);
   };
   for (const folder of folders) walk(folder, 0);
   return rows;
+}
+
+/** 折叠树可见性（2026-11-14 用户定案：默认只列顶级分组，不再全量拍平）：
+ *  未分组行与顶级分组恒可见，子级要求其全部祖先段已展开。 */
+export function isGroupRowVisible(path: string, expanded: Set<string>): boolean {
+  if (!path) return true;
+  const segs = path.split("/");
+  for (let i = 1; i < segs.length; i++) {
+    if (!expanded.has(segs.slice(0, i).join("/"))) return false;
+  }
+  return true;
+}
+
+/** 选中分组的全部祖先段（记忆链路自动展开：上次选到多深层，打开面板
+ *  即展开到该层并高亮，复用路径零点击）。 */
+export function groupAncestors(path: string): string[] {
+  const segs = path.split("/").filter(Boolean);
+  const out: string[] = [];
+  for (let i = 1; i < segs.length; i++) out.push(segs.slice(0, i).join("/"));
+  return out;
+}
+
+export interface SaveGroupHit {
+  path: string;
+  /** 命中的末级段名（高亮渲染用）。 */
+  name: string;
+  /** 父路径段已 join（空=顶级分组，显示层补「库根」）。 */
+  parent: string;
+  count: number;
+}
+
+/** 分组搜索（2026-11-14 用户定案：多分组深嵌套时快速定位）：末级段名
+ *  不区分大小写包含匹配，按树序平铺返回；命中项带父路径看清嵌套位置。 */
+export function searchGroupRows(rows: SaveGroupRow[], query: string): SaveGroupHit[] {
+  const q = query.trim().toLowerCase();
+  if (!q) return [];
+  const hits: SaveGroupHit[] = [];
+  for (const row of rows) {
+    if (!row.path) continue; // 未分组无名字不参与搜索
+    if (!row.label.toLowerCase().includes(q)) continue;
+    const segs = row.path.split("/");
+    hits.push({ path: row.path, name: row.label, parent: segs.slice(0, -1).join("/"), count: row.count });
+  }
+  return hits;
 }

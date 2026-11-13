@@ -2,7 +2,7 @@
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import "../../../i18n";
-import { type CanvasNode, useCanvasStore } from "../../../stores/canvasStore";
+import { type CanvasNode, type SaveMediaMeta, useCanvasStore } from "../../../stores/canvasStore";
 import { SaveMediaBody } from "./SaveMediaBody";
 import { SaveRuntimeCtx, type SaveRuntime } from "./saveRuntimeCtx";
 import { SaveTargetPanel } from "./SaveTargetPanel";
@@ -29,7 +29,12 @@ invokeMock.mockImplementation(async (cmd: string) => {
         count: 3,
         children: [
           { name: "方案图", path: "方案图", count: 8, children: [] },
-          { name: "参考素材", path: "参考素材", count: 5, children: [] },
+          {
+            name: "参考素材",
+            path: "参考素材",
+            count: 5,
+            children: [{ name: "胶片感", path: "参考素材/胶片感", count: 2, children: [] }],
+          },
         ],
       },
     ];
@@ -343,7 +348,7 @@ describe("SaveMediaBody 目标行与面板展开", () => {
     await waitFor(() => expect(screen.queryByRole("region", { name: "保存目标" })).toBeNull());
   });
 
-  it("名称未设时目标行弱化显示默认原名", () => {
+  it("名称未设时目标行弱化显示用产物原名（保存成功清名后一眼可辨）", () => {
     render(
       <SaveRuntimeCtx.Provider value={makeRuntime()}>
         <SaveMediaBody
@@ -357,7 +362,8 @@ describe("SaveMediaBody 目标行与面板展开", () => {
       </SaveRuntimeCtx.Provider>,
     );
     const row = screen.getByRole("button", { name: "保存目标" });
-    expect(row.textContent).toContain("未分组 · 默认原名");
+    expect(row.textContent).toContain("未分组 · 用产物原名");
+    expect(row.querySelector(".fc-save-target-default")).toBeTruthy();
   });
 
   it("指定路径目标行显示目录路径", () => {
@@ -375,5 +381,88 @@ describe("SaveMediaBody 目标行与面板展开", () => {
     );
     const row = screen.getByRole("button", { name: "保存目标" });
     expect(row.textContent).toContain("D:\\out\\成片");
+  });
+});
+
+describe("SaveTargetPanel 分组折叠树与搜索（2026-11-14 定案）", () => {
+  // overrides 只覆盖 SaveMediaMeta 公共字段（auto_group/auto_name 等），
+  // kind 固定 save_image——联合 metadata 的 Partial 展开会让 kind 推断歧义
+  const libNode = (overrides: Partial<SaveMediaMeta> = {}): CanvasNode =>
+    makeNode({
+      metadata: {
+        kind: "save_image", status: "", error: "", target: "", saved_path: "",
+        auto_target: "library", auto_dir: "", auto_state: "", auto_error: "", auto_fingerprint: "",
+        ...overrides,
+      },
+    });
+
+  it("折叠树默认只列顶级分组：子级不渲染，点父级展开、再点折叠（选中保持）", async () => {
+    render(
+      <SaveRuntimeCtx.Provider value={makeRuntime()}>
+        <SaveTargetPanel node={libNode()} onClose={vi.fn()} />
+      </SaveRuntimeCtx.Provider>,
+    );
+    await waitFor(() => expect(screen.getByText("参考素材")).toBeTruthy());
+    // 默认折叠：子级「胶片感」不渲染（全量拍平是旧行为，这里必须不可见）
+    expect(screen.queryByText("胶片感")).toBeNull();
+    // 点父级：选中 + 展开
+    fireEvent.click(screen.getByText("参考素材"));
+    expect(screen.getByText("胶片感")).toBeTruthy();
+    expect(screen.getByText("参考素材").closest("button")?.getAttribute("aria-pressed")).toBe("true");
+    // 再点父级：折叠切换，选中保持
+    fireEvent.click(screen.getByText("参考素材"));
+    expect(screen.queryByText("胶片感")).toBeNull();
+    expect(screen.getByText("参考素材").closest("button")?.getAttribute("aria-pressed")).toBe("true");
+  });
+
+  it("记忆链路自动展开：上次选中的深层分组打开面板即可见并高亮（复用零点击）", async () => {
+    const { container } = render(
+      <SaveRuntimeCtx.Provider value={makeRuntime()}>
+        <SaveTargetPanel node={libNode({ auto_group: "参考素材/胶片感", auto_name: "" })} onClose={vi.fn()} />
+      </SaveRuntimeCtx.Provider>,
+    );
+    await waitFor(() => expect(screen.getByText("胶片感")).toBeTruthy());
+    const active = screen.getByText("胶片感").closest("button");
+    expect(active?.classList.contains("is-active")).toBe(true);
+    expect(active?.getAttribute("aria-pressed")).toBe("true");
+    // 有记忆时分组标签行显示保留提示
+    expect(container.querySelector(".fc-save-panel-label-hint")?.textContent).toContain(
+      "上次选择已保留，可直接确定",
+    );
+  });
+
+  it("搜索命中平铺：主行命中段名 + 次行父路径；点击命中即选、清搜索回树视图并展开链路", async () => {
+    const { container } = render(
+      <SaveRuntimeCtx.Provider value={makeRuntime()}>
+        <SaveTargetPanel node={libNode()} onClose={vi.fn()} />
+      </SaveRuntimeCtx.Provider>,
+    );
+    await waitFor(() => expect(screen.getByText("参考素材")).toBeTruthy());
+    const search = screen.getByPlaceholderText("搜索分组名，快速定位…") as HTMLInputElement;
+    fireEvent.change(search, { target: { value: "胶片" } });
+    // 搜索态：树视图（未分组行等）隐藏，命中项平铺（命中段名被 mark 拆分，
+    // 按容器断言），父路径次行可见
+    expect(screen.queryByText("未分组")).toBeNull();
+    const hitName = container.querySelector(".fc-save-panel-hit-name")!;
+    expect(hitName.textContent).toBe("胶片感");
+    expect(hitName.querySelector("mark")?.textContent).toBe("胶片");
+    expect(container.querySelector(".fc-save-panel-hit-parent")?.textContent).toBe("参考素材");
+    fireEvent.click(hitName);
+    // 回树视图：搜索清空、选中命中项、链路展开（子级仍可见）
+    expect(search.value).toBe("");
+    expect(screen.getByText("胶片感").closest("button")?.getAttribute("aria-pressed")).toBe("true");
+    expect(screen.getByText("胶片感")).toBeTruthy();
+  });
+
+  it("搜索无结果显示空态提示，不渲染任何分组行", async () => {
+    render(
+      <SaveRuntimeCtx.Provider value={makeRuntime()}>
+        <SaveTargetPanel node={libNode()} onClose={vi.fn()} />
+      </SaveRuntimeCtx.Provider>,
+    );
+    await waitFor(() => expect(screen.getByText("参考素材")).toBeTruthy());
+    fireEvent.change(screen.getByPlaceholderText("搜索分组名，快速定位…"), { target: { value: "不存在" } });
+    expect(screen.getByText("未找到包含「不存在」的分组")).toBeTruthy();
+    expect(screen.queryByText("参考素材")).toBeNull();
   });
 });

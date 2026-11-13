@@ -36,13 +36,22 @@ export function SaveMediaBody({ node, services }: NodeProps) {
   const autoState = meta.auto_state ?? "";
   const autoError = meta.auto_error ?? "";
   // 目标行文案：库目标=分组名（空=未分组），指定路径=目录路径；名称空=
-  // 「默认原名」弱化显示。点击开浮层改分组/基名（详情变更自动重存）。
+  // 「用产物原名」弱化显示（2026-11-14 命名一次性：保存成功清名后目标
+  // 行一眼可辨「名字已清」）。点击开浮层改分组/基名（详情变更自动重存）。
   const groupName = (meta.auto_group ?? "").trim() || t("canvas.savePopUngrouped");
   const nameText = (meta.auto_name ?? "").trim();
-  const rowLabel =
-    autoTarget === "dir"
-      ? (meta.auto_dir ?? "")
-      : `${groupName} · ${nameText || t("canvas.savePopDefaultName")}`;
+  const targetLabel =
+    autoTarget === "dir" ? (
+      <span className="fc-save-target-text">{meta.auto_dir ?? ""}</span>
+    ) : (
+      <span className="fc-save-target-text">
+        {groupName}
+        <span className="fc-save-target-sep">{" · "}</span>
+        <span className={nameText ? undefined : "fc-save-target-default"}>
+          {nameText || t("canvas.savePopDefaultName")}
+        </span>
+      </span>
+    );
   // 目标状态点：骑在等待产物区顶边中央（与选择组问号同一位置
   // 语言）。中心为对应目标的精致小版图标（资源库=文件夹、
   // 指定路径=下载），笔画重与问号一致；红叉=失败，点重试；
@@ -146,7 +155,7 @@ export function SaveMediaBody({ node, services }: NodeProps) {
               }}
             >
               {autoTarget === "dir" ? Icons.saveTrayFine : Icons.folderFine}
-              <span className="fc-save-target-text">{rowLabel}</span>
+              {targetLabel}
               <span className="fc-save-target-edit">{panelOpen ? Icons.chevronDown : Icons.edit}</span>
             </button>
             {/* 配置面板：节点内嵌展开（非悬浮层），确定/收起后节点恢复原状 */}

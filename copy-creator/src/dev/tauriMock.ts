@@ -506,12 +506,18 @@ function handleInvoke(cmd: string, args: Record<string, unknown>): unknown {
       return [];
     case "get_resource_groups":
       // 「从资源库选文件」浮层的分组树：mock 库里 scripts/、segments/ 两个
-      // 顶级分组（与上方资源路径对应），根下另有三个直放文件（视频/图片/
-      // 音频），首项固定为「未分组」空路径根。
+      // 顶级分组（与上方资源路径对应，segments 带一层子级供折叠树/记忆
+      // 链路验证），根下另有三个直放文件（视频/图片/音频），首项固定为
+      // 「未分组」空路径根。
       return [
         { name: "", path: "", count: 3, children: [] },
         { name: "scripts", path: "scripts", count: 1, children: [] },
-        { name: "segments", path: "segments", count: 1, children: [] },
+        {
+          name: "segments",
+          path: "segments",
+          count: 2,
+          children: [{ name: "第一集", path: "segments/第一集", count: 1, children: [] }],
+        },
       ];
 
     // ── 上传链路（详情窗口「上传文件」）：选本机文件 → 复制入库 ──
