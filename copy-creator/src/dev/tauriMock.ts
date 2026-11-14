@@ -18,12 +18,30 @@ import { handleCanvasAiCommands } from "./mock/commandsCanvasAi";
 import { handleClipboardCommands } from "./mock/commandsClipboard";
 import { handleProjectCommands } from "./mock/commandsProject";
 
+// fail-loud 开关：URL 带 ?mockStrict=1 或 localStorage["mockStrict"]="1"
+// 时，未模拟的应用命令不再静默兜底而是直接 reject——前端验证会话当场
+// 暴露 mock 覆盖缺口，而不是页面静默空白后靠肉眼找差异。缺省保持静默
+// 兜底（宽容模式，供随手浏览）。plugin: 前缀是 @tauri-apps/api 内部命令
+// （窗口/事件基础设施，mock 不打算覆盖），strict 下同样放行静默。
+const mockStrict = (() => {
+  try {
+    if (new URLSearchParams(window.location.search).has("mockStrict")) return true;
+    return window.localStorage.getItem("mockStrict") === "1";
+  } catch {
+    return false;
+  }
+})();
+
 function handleInvoke(cmd: string, args: Record<string, unknown>): unknown {
   // 三个域模块依次认领（命令名互不重叠，先后无语义）；全部未认领走
-  // 兜底——plugin: 命令静默、list_/get_ 前缀回空数组、其余提示后回 null。
+  // 兜底——strict 开关直接 reject 暴露覆盖缺口，宽容模式下 plugin: 静默、
+  // list_/get_ 前缀回空数组、其余提示后回 null。
   for (const handler of [handleProjectCommands, handleClipboardCommands, handleCanvasAiCommands]) {
     const result = handler(cmd, args);
     if (result !== MOCK_NOT_HANDLED) return result;
+  }
+  if (mockStrict && !cmd.startsWith("plugin:")) {
+    throw new Error(`[tauriMock][strict] 未模拟的命令: ${cmd}（?mockStrict=1 关闭见注释）`);
   }
   if (cmd.startsWith("plugin:")) return null;
   if (/^(list_|get_[a-z_]*groups|get_[a-z_]*records|get_[a-z_]*phrases)/.test(cmd)) return [];
