@@ -10,6 +10,7 @@ import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { invoke } from "@tauri-apps/api/core";
 import { Icons } from "../Icons";
+import { GroupTwistButton } from "../GroupTwistButton";
 import { useClipboardStore, type ClipType } from "../../stores/clipboardStore";
 import {
   usePhraseStore,
@@ -1889,20 +1890,12 @@ export default function RadialMenu() {
               className="resource-group-menu-entry"
               style={{ paddingLeft: `${8 + depth * 14}px` }}
             >
-              <button
-                type="button"
-                className={`resource-group-twist${collapsed ? " collapsed" : ""}`}
-                disabled={!hasChildren}
+              <GroupTwistButton
+                hasChildren={hasChildren}
+                collapsed={collapsed}
                 tabIndex={hasChildren ? 0 : -1}
-                aria-label={
-                  hasChildren
-                    ? (collapsed ? t("resources.expandGroup") : t("resources.collapseGroup"))
-                    : undefined
-                }
-                onClick={() => hasChildren && toggleResourceGroupCollapsed(folder.path)}
-              >
-                {hasChildren ? Icons.chevronDown : null}
-              </button>
+                onToggle={() => toggleResourceGroupCollapsed(folder.path)}
+              />
               <button
                 type="button"
                 className={`radial-menu-resource-group-menu-item${resourceGroup === folder.path ? " selected" : ""}`}

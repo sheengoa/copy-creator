@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
 import type { ResourceFolder } from "../../types";
 import { Icons } from "../../components/Icons";
+import { GroupTwistButton } from "../../components/GroupTwistButton";
 import { flattenResourceFoldersVisible } from "../../domain/groups";
 
 interface ResourceMoveDialogProps {
@@ -93,19 +94,11 @@ export default function ResourceMoveDialog({
                 className="resource-move-entry"
                 style={{ paddingLeft: `${depth * 16}px` }}
               >
-                <button
-                  type="button"
-                  className={`resource-group-twist${collapsedPaths.includes(folder.path) ? " collapsed" : ""}`}
-                  disabled={(folder.children ?? []).length === 0}
-                  aria-label={(folder.children ?? []).length > 0
-                    ? (collapsedPaths.includes(folder.path)
-                      ? t("resources.expandGroup")
-                      : t("resources.collapseGroup"))
-                    : undefined}
-                  onClick={() => (folder.children ?? []).length > 0 && toggleCollapsed(folder.path)}
-                >
-                  {(folder.children ?? []).length > 0 ? Icons.chevronDown : null}
-                </button>
+                <GroupTwistButton
+                  hasChildren={(folder.children ?? []).length > 0}
+                  collapsed={collapsedPaths.includes(folder.path)}
+                  onToggle={() => toggleCollapsed(folder.path)}
+                />
                 <button
                   type="button"
                   className={`resource-move-row${target === folder.path ? " selected" : ""}${isCurrentFolder(folder.path) ? " current" : ""}`}

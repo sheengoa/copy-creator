@@ -10,6 +10,7 @@ import { WindowControlButtons } from "../WindowControlButtons";
 import { useWindowMaximized } from "../../hooks/useWindowMaximized";
 import { resolveDoubleEnterSave } from "../../utils/doubleEnterShortcut";
 import FindReplaceBar from "../../components/FindReplaceBar";
+import { GroupTwistButton } from "../GroupTwistButton";
 import i18n from "../../i18n";
 import StashEditor, { type StashEditorHandle, type StashImage } from "./StashEditor";
 import { WindowResizeHandles } from "../WindowResizeHandles";
@@ -25,7 +26,6 @@ import {
   resolveTheme,
   type ThemePreference,
 } from "../../utils/theme";
-import { Icons } from "../Icons";
 
 interface StashRecord {
   id: string;
@@ -601,21 +601,11 @@ export default function ClipboardCreateDialog() {
                         className="resource-group-menu-entry"
                         style={row.depth > 0 ? { paddingLeft: row.depth * 14 } : undefined}
                       >
-                        <button
-                          type="button"
-                          className={`resource-group-twist${collapsedGroupPaths.includes(row.folder.path) ? " collapsed" : ""}`}
-                          disabled={(row.folder.children ?? []).length === 0}
-                          aria-label={(row.folder.children ?? []).length > 0
-                            ? (collapsedGroupPaths.includes(row.folder.path)
-                              ? t("resources.expandGroup")
-                              : t("resources.collapseGroup"))
-                            : undefined}
-                          onClick={() =>
-                            (row.folder.children ?? []).length > 0
-                            && toggleGroupCollapsed(row.folder.path)}
-                        >
-                          {(row.folder.children ?? []).length > 0 ? Icons.chevronDown : null}
-                        </button>
+                        <GroupTwistButton
+                          hasChildren={(row.folder.children ?? []).length > 0}
+                          collapsed={collapsedGroupPaths.includes(row.folder.path)}
+                          onToggle={() => toggleGroupCollapsed(row.folder.path)}
+                        />
                         <button
                           type="button"
                           className={`clipboard-create-stash-option${resourceGroupName === row.folder.path ? " selected" : ""}`}

@@ -10,6 +10,7 @@ import {
 import { CSS } from "@dnd-kit/utilities";
 import { restrictToHorizontalAxis } from "@dnd-kit/modifiers";
 import { Icons } from "../../components/Icons";
+import { GroupTwistButton } from "../../components/GroupTwistButton";
 import { ChipDragOverlay } from "../../components/ChipDragOverlay";
 import type { ResourceFolder } from "../../types";
 import { findResourceFolder, flattenResourceFoldersVisible, formatResourceFolderPath, isResourceFolderPath } from "../../domain/groups";
@@ -306,20 +307,12 @@ export default function ResourceGroupChips({
                 className="resource-group-menu-entry"
                 style={{ paddingLeft: `${8 + depth * 14}px` }}
               >
-                <button
-                  type="button"
-                  className={`resource-group-twist${collapsed ? " collapsed" : ""}`}
-                  disabled={!hasChildren}
+                <GroupTwistButton
+                  hasChildren={hasChildren}
+                  collapsed={collapsed}
                   tabIndex={hasChildren ? 0 : -1}
-                  aria-label={
-                    hasChildren
-                      ? (collapsed ? t("resources.expandGroup") : t("resources.collapseGroup"))
-                      : undefined
-                  }
-                  onClick={() => hasChildren && toggleCollapsed(folder.path)}
-                >
-                  {hasChildren ? Icons.chevronDown : null}
-                </button>
+                  onToggle={() => toggleCollapsed(folder.path)}
+                />
                 <button
                   type="button"
                   className={`resource-group-menu-item${depth > 0 ? " nested" : ""}${selectedGroup === folder.path ? " selected" : ""}`}

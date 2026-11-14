@@ -45,6 +45,7 @@ import ResourceCleanupDialog, {
 import type { ResourceMediaKind as ResourceMediaKindLabel } from "../domain/mediaKind";
 import { RESOURCE_MEDIA_KIND_LABEL_KEYS } from "../domain/mediaKind";
 import { ResourceCard } from "./ResourcePage/ResourceCard";
+import { GroupTwistButton } from "../components/GroupTwistButton";
 import { buildRecordView, type RecordView } from "../domain/recordView";
 import { type ResourceTypeFilter } from "../domain/mediaKind";
 import { resourceCardScale, splitResourceColumns } from "../utils/cardGrid";
@@ -1624,19 +1625,11 @@ export default function ResourcePage() {
                     className="resource-move-entry"
                     style={{ paddingLeft: `${depth * 16}px` }}
                   >
-                    <button
-                      type="button"
-                      className={`resource-group-twist${collapsed ? " collapsed" : ""}`}
-                      disabled={!hasChildren}
-                      aria-label={
-                        hasChildren
-                          ? (collapsed ? t("resources.expandGroup") : t("resources.collapseGroup"))
-                          : undefined
-                      }
-                      onClick={() => hasChildren && toggleGroupCollapsed(folder.path)}
-                    >
-                      {hasChildren ? Icons.chevronDown : null}
-                    </button>
+                    <GroupTwistButton
+                      hasChildren={hasChildren}
+                      collapsed={collapsed}
+                      onToggle={() => toggleGroupCollapsed(folder.path)}
+                    />
                     <button
                       type="button"
                       className={`resource-move-row${resourceGroupMove.target === folder.path ? " selected" : ""}${disabled ? " current" : ""}`}
@@ -1898,19 +1891,11 @@ function SortableManageRow({
           {Icons.drag}
         </button>
       )}
-      <button
-        type="button"
-        className={`resource-group-twist${collapsed ? " collapsed" : ""}`}
-        disabled={!hasChildren}
-        aria-label={
-          hasChildren
-            ? (collapsed ? t("resources.expandGroup") : t("resources.collapseGroup"))
-            : undefined
-        }
-        onClick={() => hasChildren && onToggleCollapsed()}
-      >
-        {hasChildren && Icons.chevronDown}
-      </button>
+      <GroupTwistButton
+        hasChildren={hasChildren}
+        collapsed={collapsed}
+        onToggle={onToggleCollapsed}
+      />
       <div className="resource-group-manage-name" title={folder.path}>
         <span>{label}</span>
       </div>
