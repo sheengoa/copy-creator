@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { invoke } from "@tauri-apps/api/core";
 import type { CanvasNode, CanvasNodeType } from "../../stores/canvasStore";
@@ -51,7 +51,16 @@ import type { ViewState } from "./engine/useViewport";
 
 // ── 手势状态类型与连线几何已上移 engine/（gestureTypes.ts / wireGeom.ts）──
 
-export default function FreeCanvas({ canvasId, renderWires, onOpenNodeDetail, overlays }: { canvasId: string; /** 工程作用域注入：双击节点开详情（自由画布不传，无此能力）。 */ onOpenNodeDetail?: (node: CanvasNode) => void; /** 作用域外围件槽位（工程壳的缺项条/集信息卡/新建栏/弹窗）：渲染为 .pc-root 内视口的兄弟层。 */ overlays?: React.ReactNode; /** 连线渲染插槽（工程视图节点化阶段 C）：提供时替代内置连线层，工程作用域经此接入旧 WiresLayer（gen 链/端口线/暂存线/成片线）。 */ renderWires?: (ctx: { view: ViewState; vpSize: { w: number; h: number } | null; liftedWire: { connId: string; fromKey: string } | null; wireDraft: { d: string; invalid: boolean; color?: string } | null; outPointOf(key: string): { x: number; y: number } | null; inPointOf(key: string, portId?: string): { x: number; y: number } | null }) => React.ReactNode }) {
+/** 覆盖件槽位的视口助手（overlays 传函数形态时注入）：让作用域外围件
+ *  （工程壳缺项条等）借用本组件的实况视口，不再各自维护平行引擎。 */
+export interface FreeOverlayHelpers {
+  /** 世界坐标点 → 视口居中（缩放不变）。 */
+  centerOnWorld(wx: number, wy: number): void;
+  /** 屏幕坐标 → 世界坐标；视口未挂载返回 null。 */
+  clientToCanvas(clientX: number, clientY: number): { x: number; y: number } | null;
+}
+
+export default function FreeCanvas({ canvasId, renderWires, onOpenNodeDetail, overlays }: { canvasId: string; /** 工程作用域注入：双击节点开详情（自由画布不传，无此能力）。 */ onOpenNodeDetail?: (node: CanvasNode) => void; /** 作用域外围件槽位（工程壳的缺项条/集信息卡/新建栏/弹窗）：渲染为 .pc-root 内视口的兄弟层；传函数形态时注入实况视口助手（FreeOverlayHelpers）。 */ overlays?: React.ReactNode | ((helpers: FreeOverlayHelpers) => React.ReactNode); /** 连线渲染插槽（工程视图节点化阶段 C）：提供时替代内置连线层，工程作用域经此接入旧 WiresLayer（gen 链/端口线/暂存线/成片线）。 */ renderWires?: (ctx: { view: ViewState; vpSize: { w: number; h: number } | null; liftedWire: { connId: string; fromKey: string } | null; wireDraft: { d: string; invalid: boolean; color?: string } | null; outPointOf(key: string): { x: number; y: number } | null; inPointOf(key: string, portId?: string): { x: number; y: number } | null }) => React.ReactNode }) {
   const { t } = useTranslation();
   // 几何层数据源（dataContext）：默认实现转发 canvasStore；工程视图
   // （ProjectShell）注入工程 provider 后本组件与其引擎链零改动复用。
@@ -97,6 +106,40 @@ export default function FreeCanvas({ canvasId, renderWires, onOpenNodeDetail, ov
   //    旧 ProjectCanvas，已退役） ──
   const { vpRef, view, viewRef, setView, vpSize, saveView, applyViewDirect, commitView, zoomAt, fitAll, fitAttemptedRef } = useViewport(nodes);
   const { nodeMetricsRef, boxOf, outPointOf, inPointOf } = useNodeMetrics(vpRef, view, nodes);
+
+  // 覆盖件槽位的视口助手：工程壳缺项条的定位/出生按钮需要把世界坐标
+  // 居中、屏幕坐标换算进画布——旧 useCanvasView 自带平行视口引擎（vpRef
+  // 从未绑定，四个按钮静默无效），现统一走本组件的实况引擎（2026-11-14）。
+  const centerOnWorld = useCallback(
+    (wx: number, wy: number) => {
+      const el = vpRef.current;
+      if (!el) return;
+      const next = {
+        x: el.clientWidth / 2 - wx * view.scale,
+        y: el.clientHeight / 2 - wy * view.scale,
+        scale: view.scale,
+      };
+      setView(next);
+      saveView(next);
+    },
+    [vpRef, view.scale, setView, saveView],
+  );
+  const clientToCanvas = useCallback(
+    (clientX: number, clientY: number) => {
+      const rect = vpRef.current?.getBoundingClientRect();
+      if (!rect) return null;
+      const v = viewRef.current;
+      return {
+        x: (clientX - rect.left - v.x) / v.scale,
+        y: (clientY - rect.top - v.y) / v.scale,
+      };
+    },
+    [vpRef, viewRef],
+  );
+  const freeOverlayHelpers: FreeOverlayHelpers = useMemo(
+    () => ({ centerOnWorld, clientToCanvas }),
+    [centerOnWorld, clientToCanvas],
+  );
 
   // ── 撤销栈与删除（engine/useUndoStack） ──
   const { pushUndo, runUndo, runRedo, deleteNodes } = useUndoStack(setSelection, nodesRef, connectionsRef);
@@ -504,7 +547,11 @@ export default function FreeCanvas({ canvasId, renderWires, onOpenNodeDetail, ov
           vpSize={vpSize}
           vpRef={vpRef}
         />
-        {overlays}
+        {/* helpers 内的 clientToCanvas/centerOnWorld 只在覆盖件的后续事件
+         *  回调里读 ref（此处仅传入对象不执行），定点豁免 react-hooks/refs
+         *  ——引擎既有惯例（AddMenu 视口实测直读同款）。 */}
+        {/* eslint-disable-next-line react-hooks/refs -- 见上：helpers 仅传递，ref 读取发生在覆盖件事件回调 */}
+        {typeof overlays === "function" ? overlays(freeOverlayHelpers) : overlays}
       </div>
     </div>
     </GenRuntimeProvider>

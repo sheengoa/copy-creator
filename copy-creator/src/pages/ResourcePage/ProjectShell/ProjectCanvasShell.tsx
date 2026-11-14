@@ -39,7 +39,7 @@ import { useCanvasView } from "./engine/useCanvasView";
 import { useWorkflowSeed } from "./engine/useWorkflowSeed";
 import type { ProjectScene } from "../../../stores/projectStore";
 import type { Pos } from "./types";
-import { WORLD_MARGIN } from "./layout";
+import { INFO_H, SCRIPT_W, SEG_H, SEG_W, WORLD_MARGIN } from "./layout";
 import type { EntityPhKind } from "./types";
 
 /** updateEpisode 补丁的状态字段（store 的 ProjectEpisodeStatus）。 */
@@ -250,14 +250,6 @@ export default function ProjectCanvasShell({
     scenes,
     segments,
     looseAssets: overview?.loose_assets ?? [],
-    segPos: data.segPos,
-    entityPhs: data.entityPhs,
-    infoPos: data.infoPos,
-    infoNodes: data.infoNodes,
-    outputBox: data.outputBox,
-    layout: data.layout,
-    sizeOfNode: data.sizeOfNode,
-    infoNodePos: data.infoNodePos,
     updateEpisode: storeUpdateEpisode,
     linkNode,
     scriptPhs: data.scriptPhs,
@@ -272,7 +264,6 @@ export default function ProjectCanvasShell({
     setScriptPickTarget,
     setPulseKeys: groupOps.setPulseKeys,
     spawnAnchorRef: groupOps.spawnAnchorRef,
-    armSpawnAt: groupOps.armSpawnAt,
   });
   // 空集默认工作流种子（首次进入自动铺片段+占位骨架）。
   useWorkflowSeed({
@@ -344,13 +335,17 @@ export default function ProjectCanvasShell({
     const base = scenePos[sceneId];
     if (!base) return;
     e.preventDefault();
+    // 缩放取实况视口的已提交值（活引擎在 FreeCanvas/useViewport，经
+    // provider 的 viewport() 读回；旧 useCanvasView 平行视口已删——此前
+    // 读影子 state，用户缩放后拖拽换算错位）。
+    const scale = api.viewport()?.k || 1;
     const members = data.layout.cards.filter((c) => c.sceneId === sceneId).map((c) => c.shot.id);
     sceneDragRef.current = { id: sceneId, sx: e.clientX, sy: e.clientY, ox: base.x, oy: base.y, members };
     const onMove = (ev: PointerEvent) => {
       const drag = sceneDragRef.current;
       if (!drag) return;
-      const dx = (ev.clientX - drag.sx) / (canvasView.view.scale || 1);
-      const dy = (ev.clientY - drag.sy) / (canvasView.view.scale || 1);
+      const dx = (ev.clientX - drag.sx) / scale;
+      const dy = (ev.clientY - drag.sy) / scale;
       setScenePos((prev) => ({ ...prev, [drag.id]: { x: drag.ox + dx, y: drag.oy + dy } }));
       data.setPos((prev) => {
         const cards = { ...prev.cards };
@@ -367,8 +362,8 @@ export default function ProjectCanvasShell({
       window.removeEventListener("pointermove", onMove);
       window.removeEventListener("pointerup", onUp);
       if (!drag) return;
-      const dx = (dragLastX - drag.sx) / (canvasView.view.scale || 1);
-      const dy = (dragLastY - drag.sy) / (canvasView.view.scale || 1);
+      const dx = (dragLastX - drag.sx) / scale;
+      const dy = (dragLastY - drag.sy) / scale;
       void saveCanvasLayout({
         assets: [],
         shots: drag.members.map((shotId) => {
@@ -893,17 +888,36 @@ export default function ProjectCanvasShell({
         <FreeCanvas
           canvasId={episodeId}
           renderWires={renderWires}
-          overlays={(
+          overlays={(freeHelpers) => (
             <>
               <IssueBar
                 issues={canvasView.issues}
                 scriptPhs={data.scriptPhs}
                 segments={segments}
-                locateOutput={() => canvasView.locateOutput()}
-                locateScript={(key) => canvasView.locateScript(key)}
-                armSpawnFromEvent={(x, y) => canvasView.armSpawnFromEvent(x, y)}
+                /* 缺项条四个动作改走 FreeCanvas 实况视口助手（freeHelpers）：
+                 * 旧 useCanvasView 平行视口的 vpRef 从未绑定，四个按钮全部
+                 * 静默无效（节点化迁移漏接）。 */
+                locateOutput={() => {
+                  const box = data.outputBox;
+                  if (box) freeHelpers.centerOnWorld(box.x + box.w / 2, box.y + box.h / 2);
+                }}
+                locateScript={(key) => {
+                  const k = key ?? "script";
+                  const p = data.infoNodePos(k);
+                  if (!p) return;
+                  const size = data.sizeOfNode(k) ?? { w: SCRIPT_W, h: INFO_H + 40 };
+                  freeHelpers.centerOnWorld(p.x + size.w / 2, p.y + size.h / 2);
+                }}
+                armSpawnFromEvent={(x, y) => {
+                  const p = freeHelpers.clientToCanvas(x, y);
+                  if (p) groupOps.armSpawnAt(p.x, p.y);
+                }}
                 addScriptPh={data.addScriptPh}
-                locateEmptySegment={() => canvasView.locateEmptySegment()}
+                locateEmptySegment={() => {
+                  const target = segments.find((item) => !item.asset);
+                  const p = target ? data.segPos[target.id] : null;
+                  if (p) freeHelpers.centerOnWorld(p.x + SEG_W / 2, p.y + SEG_H / 2);
+                }}
                 setDetailFor={(v) => {
                   const target = typeof v === "function" ? null : v;
                   if (target && target.kind === "segment") {
