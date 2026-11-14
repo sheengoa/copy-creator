@@ -1,6 +1,7 @@
 import { useEffect, useRef } from "react";
 import { createPortal } from "react-dom";
 import { useTranslation } from "react-i18next";
+import { useEscapeKey } from "../hooks/useEscapeKey";
 
 export interface ConfirmDialogState {
   message: string;
@@ -24,14 +25,12 @@ export function ConfirmDialog({ message, hint, onConfirm, onCancel, onDismiss }:
   const dismiss = onDismiss ?? onCancel;
   const cancelButtonRef = useRef<HTMLButtonElement | null>(null);
 
+  // Esc = 取消，收口在 useEscapeKey（原手写挂 window 层，换 document 层后
+  // 与其余 Esc 弹层同层门控；window 层已无其他 Escape 消费方）。焦点默认
+  // 落在取消按钮上（回车误触时执行的是非破坏操作）。
+  useEscapeKey(onCancel);
   useEffect(() => {
-    // Esc = 取消；焦点默认落在取消按钮上（回车误触时执行的是非破坏操作）。
-    const onKeyDown = (event: KeyboardEvent) => {
-      if (event.key === "Escape") onCancel();
-    };
-    window.addEventListener("keydown", onKeyDown);
     cancelButtonRef.current?.focus();
-    return () => window.removeEventListener("keydown", onKeyDown);
   }, [onCancel]);
   // portal 到 body：画布/面板祖先链的 transform 容器会困住 fixed 层级
   // （z1000 也压不过 portal 的详情窗），顶层挂载后与本项目全部浮层同域

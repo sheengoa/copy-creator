@@ -1,5 +1,6 @@
 import { useEffect, useRef } from "react";
 import { useTranslation } from "react-i18next";
+import { useEscapeKey } from "../hooks/useEscapeKey";
 
 interface ImageLightboxProps {
   src: string;
@@ -16,16 +17,12 @@ export function ImageLightbox({ src, alt, onClose }: ImageLightboxProps) {
   const { t } = useTranslation();
   const containerRef = useRef<HTMLDivElement>(null);
 
+  // Esc 关闭收口在 useEscapeKey：stopPropagation 保留原语义——灯箱压在
+  // 确认框等 window 层之上时 Esc 只关灯箱，不再向下层传播。
+  useEscapeKey(onClose, true, { stopPropagation: true });
+
   useEffect(() => {
     containerRef.current?.focus();
-    const handleKeyDown = (event: KeyboardEvent) => {
-      if (event.key === "Escape") {
-        event.stopPropagation();
-        onClose();
-      }
-    };
-    document.addEventListener("keydown", handleKeyDown);
-    return () => document.removeEventListener("keydown", handleKeyDown);
   }, [onClose]);
 
   return (

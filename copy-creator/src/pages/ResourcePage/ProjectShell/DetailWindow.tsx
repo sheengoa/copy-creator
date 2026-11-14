@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { useTranslation } from "react-i18next";
 import { Icons } from "../../../components/Icons";
+import { useEscapeKey } from "../../../hooks/useEscapeKey";
 import type {
   EpisodeOverview,
   ImageBinding,
@@ -114,14 +115,10 @@ export function DetailWindow({ title, accent, children, foot, onClose, back }: {
   back?: { onBack(): void };
 }) {
   const { t } = useTranslation();
-  // Esc 关最上层（无二级面板，直接关）。
-  useEffect(() => {
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") onClose();
-    };
-    window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
-  }, [onClose]);
+  // Esc 关最上层（无二级面板，直接关）。收口在 useEscapeKey：原手写挂在
+  // window 层，换 document 层后先于 window 快捷键触发；window 层无其他
+  // Escape 消费方（Delete 专用），分层结果不变。
+  useEscapeKey(onClose);
   return createPortal(
     <div className="pdetail-overlay" onPointerDown={(e) => { if (e.target === e.currentTarget) onClose(); }}>
       <div className="pdetail" style={{ "--pdetail-accent": accent } as React.CSSProperties}>

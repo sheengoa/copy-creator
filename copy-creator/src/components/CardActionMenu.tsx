@@ -9,6 +9,7 @@ import {
   type ReactNode,
 } from "react";
 import { createPortal } from "react-dom";
+import { useEscapeKey } from "../hooks/useEscapeKey";
 
 // 卡片操作菜单的统一实现：挂载到文档根节点、fixed 定位、视口内自动收拢、
 // 外点/ESC 关闭、视口尺寸变化时跟随重算。此前剪贴板卡片与资源卡片各有一份
@@ -94,6 +95,9 @@ export function CardActionMenu({
     };
   }, [open, updatePosition]);
 
+  // Esc 关闭收口在 useEscapeKey（open 门控）；外点关闭仍归本组件。
+  useEscapeKey(onClose, open);
+
   useEffect(() => {
     if (!open) return;
     const handlePointerDown = (event: MouseEvent) => {
@@ -102,14 +106,9 @@ export function CardActionMenu({
       if (anchorEl?.current?.contains(target)) return;
       onClose();
     };
-    const handleKeyDown = (event: KeyboardEvent) => {
-      if (event.key === "Escape") onClose();
-    };
     document.addEventListener("mousedown", handlePointerDown);
-    document.addEventListener("keydown", handleKeyDown);
     return () => {
       document.removeEventListener("mousedown", handlePointerDown);
-      document.removeEventListener("keydown", handleKeyDown);
     };
   }, [open, anchorEl, onClose]);
 

@@ -2,6 +2,7 @@ import { Fragment, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { invoke } from "@tauri-apps/api/core";
 import { Icons } from "../../../components/Icons";
+import { useEscapeKey } from "../../../hooks/useEscapeKey";
 import type { ResourceFolder } from "../../../types";
 import { useCanvasStore, type CanvasNode } from "../../../stores/canvasStore";
 import {
@@ -113,10 +114,10 @@ export function SaveTargetPanel({ node, onClose }: { node: CanvasNode; onClose: 
     return () => tree.removeEventListener("wheel", onWheel);
   }, []);
 
+  // Esc 收起收口在 useEscapeKey；点节点外收起仍归本组件。
+  useEscapeKey(onClose);
+
   useEffect(() => {
-    const onKey = (event: KeyboardEvent) => {
-      if (event.key === "Escape") onClose();
-    };
     // 点节点外收起：面板与宿主节点内的点击不收（目标行 toggle 自理）。
     const onOutside = (event: MouseEvent) => {
       const target = event.target as globalThis.Node;
@@ -124,10 +125,8 @@ export function SaveTargetPanel({ node, onClose }: { node: CanvasNode; onClose: 
       if (panelRef.current?.closest(".pc-node")?.contains(target)) return;
       onClose();
     };
-    document.addEventListener("keydown", onKey);
     document.addEventListener("mousedown", onOutside);
     return () => {
-      document.removeEventListener("keydown", onKey);
       document.removeEventListener("mousedown", onOutside);
     };
   }, [onClose]);

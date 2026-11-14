@@ -1,4 +1,5 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useMemo, useState } from "react";
+import { useEscapeKey } from "./useEscapeKey";
 
 export function useMultiSelect(visibleIds: string[]) {
   const [isSelecting, setIsSelecting] = useState(false);
@@ -48,14 +49,8 @@ export function useMultiSelect(visibleIds: string[]) {
     setSelectedIds(new Set(ids));
   }, []);
 
-  useEffect(() => {
-    if (!isSelecting) return;
-    const handleKeyDown = (event: KeyboardEvent) => {
-      if (event.key === "Escape") exitSelection();
-    };
-    document.addEventListener("keydown", handleKeyDown);
-    return () => document.removeEventListener("keydown", handleKeyDown);
-  }, [exitSelection, isSelecting]);
+  // Esc 退出多选收口在 useEscapeKey（isSelecting 门控）。
+  useEscapeKey(exitSelection, isSelecting);
 
   return {
     isSelecting,
