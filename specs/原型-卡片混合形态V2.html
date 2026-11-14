@@ -1,0 +1,177 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>混合形态 V2 · 瀑布流压实（媒体矮横幅 + 文本紧凑条）</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  html { color-scheme: dark; }
+  body {
+    font-family: "Microsoft YaHei", "PingFang SC", system-ui, sans-serif;
+    font-size: 13px; color: #e8eaed; background: #17181c;
+    min-height: 100vh; display: flex; flex-direction: column;
+  }
+  header {
+    padding: 16px 28px 12px; background: #1d1f24; border-bottom: 1px solid #2a2d34;
+    display: flex; align-items: baseline; gap: 14px; flex: none; position: sticky; top: 0; z-index: 10;
+  }
+  header h1 { font-size: 16px; }
+  header .sub { color: #9aa0ab; font-size: 12px; }
+  header .legend { margin-left: auto; display: flex; gap: 14px; font-size: 12px; color: #9aa0ab; }
+  header .legend b { color: #c9cdd6; font-weight: 600; }
+
+  main { flex: 1; display: flex; min-height: 0; }
+  .pane { flex: 1; overflow-y: auto; padding: 18px 22px 40px; }
+  .pane + .pane { border-left: 1px solid #2a2d34; }
+  .pane h2 { font-size: 14px; margin-bottom: 4px; }
+  .pane .desc { color: #8a909c; font-size: 12px; margin-bottom: 14px; line-height: 1.6; }
+  .pane.v1 h2 { color: #d8dade; }
+  .pane.v2 h2 { color: #7fb0ff; }
+
+  /* ── 瀑布流：JS 轮转分列，列内 flex 紧贴（无 grid 行空洞） ── */
+  .masonry { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 10px; align-items: start; }
+  .col { display: flex; flex-direction: column; gap: 10px; min-width: 0; }
+
+  .card {
+    position: relative; overflow: hidden; border: 1px solid #33363e; border-radius: 12px;
+    background: #22242a; cursor: pointer; transition: border-color .15s, transform .15s;
+  }
+  .card:hover { border-color: #565b66; transform: translateY(-1px); }
+
+  /* 媒体矮横幅：固定 84px 高（≈16:6），不再 16:10 大框 */
+  .ribbon { position: relative; height: 84px; display: grid; place-items: center;
+            background: #1a1c21; border-bottom: 1px solid #33363e; overflow: hidden; }
+  .ribbon.img-full { background: linear-gradient(120deg, #2b6bff, #b537f2 55%, #ff4fa0); }
+  .ribbon.audio { background: #2e2818; color: #e8b45a; font-size: 20px; }
+  .ribbon .play {
+    width: 26px; height: 26px; border-radius: 50%; background: rgba(0,0,0,.5); border: 1px solid #444a55;
+    display: grid; place-items: center; color: #fff; font-size: 10px;
+  }
+  .kind {
+    position: absolute; right: 6px; bottom: 6px; padding: 2px 6px; border-radius: 4px;
+    background: rgba(20,22,26,.85); border: 1px solid #3a3e47; color: #c2c7d1; font-size: 11px;
+  }
+  .more {
+    position: absolute; top: 5px; right: 5px; width: 21px; height: 21px; border-radius: 6px;
+    background: rgba(255,255,255,.12); border: 1px solid #454a55; color: #dfe3ea;
+    display: grid; place-items: center; font-size: 12px; letter-spacing: 1px;
+  }
+  .body { padding: 8px 10px; display: flex; flex-direction: column; gap: 5px; }
+  .title { font-weight: 600; font-size: 12.5px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .meta { display: flex; align-items: center; gap: 5px; color: #8a909c; font-size: 11px; }
+
+  /* 文本/链接紧凑条：正文直排 1-5 行，高度自适应 */
+  .card.slim .body { padding: 9px 11px 7px; gap: 6px; }
+  .card.slim .content {
+    color: #dfe3ea; font-size: 12.5px; line-height: 1.6; white-space: pre-wrap; word-break: break-word;
+    display: -webkit-box; -webkit-line-clamp: 5; -webkit-box-orient: vertical; overflow: hidden;
+    position: relative;
+  }
+  .card.slim .content.is-link { color: #7fb0ff; font-family: Consolas, monospace; font-size: 12px; }
+  .card.slim .content .fade { position: absolute; left: 0; right: 0; bottom: 0; height: 22px;
+    background: linear-gradient(to bottom, transparent, #22242a 88%); }
+  .card.slim .topline { display: flex; align-items: center; gap: 6px; color: #8a909c; font-size: 11px; }
+  .card.slim .topline .mini { width: 5px; height: 5px; border-radius: 50%; background: #4d5361; }
+  .card.slim:hover .topline .mini { background: #7fb0ff; }
+  .card.slim .meta { margin-top: 1px; padding-top: 5px; border-top: 1px dashed #2e3139; }
+  /* 媒体卡的正文行（文件名 / 图片说明）与 meta 融合为一行 */
+  .card.media .body { padding: 7px 10px; gap: 3px; }
+
+  .note { margin: 22px 0 12px; color: #8a909c; font-size: 12px; line-height: 1.7;
+          border-left: 3px solid #3a4358; padding: 6px 12px; background: #1d1f24; border-radius: 0 8px 8px 0; }
+  .note b { color: #c9cdd6; }
+</style>
+</head>
+<body>
+<header>
+  <h1>混合形态 V2 · 瀑布流压实</h1>
+  <span class="sub">左 = 上一版（CSS grid 行空洞 + 16:10 大框）· 右 = V2 提案（真瀑布流 + 媒体矮横幅 84px）</span>
+  <div class="legend">
+    <span><b>媒体</b> = 矮横幅预览（~84px，视觉锚点保留）</span>
+    <span><b>文本/链接</b> = 正文直排 1-5 行，高度自适应</span>
+    <span><b>列内紧贴</b> = 无行间空洞</span>
+  </div>
+</header>
+
+<main>
+  <!-- ══════════ 左：V1（上一版，问题所在） ══════════ -->
+  <section class="pane v1">
+    <h2>V1 · 上一版混合</h2>
+    <p class="desc">CSS grid 按行对齐：矮条旁边的格子被行高撑出空洞；媒体 16:10 大框（~190px）与 60px 文本条错落，参差剧烈。</p>
+    <div class="masonry-static" style="display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:10px;align-items:start">
+      <div class="col" style="display:contents"></div>
+      <!-- grid 直排制造行空洞（V1 问题演示） -->
+      <div class="card media"><div class="ribbon img-full" style="height:180px"></div><span class="kind">图片</span><div class="more">⋯</div><div class="body"><div class="title">[图片]</div><div class="meta"><span>图片</span>·<span>2 小时前</span></div></div></div>
+      <div class="card slim"><div class="body"><div class="topline"><span class="mini"></span><span>文本</span></div><div class="content">您好，我是验证助手，这条话术用于卡片文本预览。</div><div class="meta"><span>文本</span>·<span>昨天</span></div></div></div>
+      <div class="card media"><div class="ribbon img-full" style="height:180px;background:linear-gradient(160deg,#0a1e3f,#153a6e)"><div class="play">▶</div></div><span class="kind">视频</span><div class="more">⋯</div><div class="body"><div class="title">mock-clip.mp4</div><div class="meta"><span>视频</span>·<span>昨天</span></div></div></div>
+      <div class="card slim"><div class="body"><div class="topline"><span class="mini"></span><span>文本</span></div><div class="content">本批交付时间：{{date}} {{time}}。</div><div class="meta"><span>文本</span>·<span>3 天前</span></div></div></div>
+      <div class="card slim"><div class="body"><div class="topline"><span class="mini"></span><span>链接</span></div><div class="content is-link">https://example.com/articles/卡片化验证</div><div class="meta"><span>链接</span>·<span>3 小时前</span></div></div></div>
+      <div class="card media"><div class="ribbon audio" style="height:180px">♪</div><span class="kind">音频</span><div class="more">⋯</div><div class="body"><div class="title">mock-tone.wav</div><div class="meta"><span>音频</span>·<span>3 小时前</span></div></div></div>
+      <div class="card slim"><div class="body"><div class="topline"><span class="mini"></span><span>文本</span></div><div class="content">写实生活化市井短视频风格，视频从雨后湿润的城市临街人行道场景开始，两位中年女性并肩行走，画面左侧是穿着紧身的中年女性…</div><div class="meta"><span>文本</span>·<span>2 小时前</span></div></div></div>
+    </div>
+    <div class="note"><b>V1 的问题</b>：grid 行内对齐 → 矮条下方整格空洞；16:10 媒体框太高 → 与文本条参差过大。</div>
+  </section>
+
+  <!-- ══════════ 右：V2 提案 ══════════ -->
+  <section class="pane v2">
+    <h2>V2 提案 · 真瀑布流 + 媒体矮横幅</h2>
+    <p class="desc">所有条目落进 60-150px 高度带：媒体预览压成 <b>84px 矮横幅</b>（缩略图/封面帧仍在，视觉锚点不丢）；文本条正文直排 1-5 行；真瀑布流列内紧贴，无空洞。</p>
+    <div class="masonry" id="masonry"></div>
+    <div class="note">
+      <b>要点</b>：① 列内紧贴（JS 分列瀑布流，剪切板页已有同款几何）无行洞；② 媒体 84px 横幅——图片 contain 完整展示、视频封面帧 + 播放角标仍在；③ 文本条 1-5 行自适应，短句两行即止；④ 一屏可扫条目数再翻一倍。<br>
+      <b>交互不变</b>：点击 → 资源库同款详情视图（页内编辑）；操作在 ⋯ 菜单；粘贴只在径向菜单。
+    </div>
+  </section>
+</main>
+
+<script>
+  // V2 数据（与 V1 同一批），按真实时间序轮转分列
+  const items = [
+    { t: "img",   title: "[图片]",        meta: "图片 · 2 小时前" },
+    { t: "text",  content: "写实生活化市井短视频风格，视频从雨后湿润的城市临街人行道场景开始，两位中年女性并肩边步行走，画面左侧是穿着紧身的中年女性，身穿黑色羽绒服和米色裙，右手拎着带有粉色毛绒保护的透明手提袋…", meta: "文本 · 2 小时前" },
+    { t: "link",  content: "https://example.com/articles/卡片化验证", meta: "链接 · 3 小时前" },
+    { t: "audio", title: "mock-tone.wav", meta: "音频 · 3 小时前" },
+    { t: "text",  content: "您好，我是验证助手，这条话术用于卡片文本预览。", meta: "文本 · 昨天" },
+    { t: "video", title: "mock-clip.mp4", meta: "视频 · 昨天" },
+    { t: "text",  content: "使用 /seedance-prompt 按官方口径撰写提示词。\n上传视频时先确认视频角色，需要用到视频内容时先实际尝试直看视频文件，直看失败才回退脚本抽帧解析。", meta: "文本 · 昨天" },
+    { t: "text",  content: "每期视频的标题台词：“你懂什么？是春节档前期，全场半价，多划算。”\n你也可以改成：「这价格，闭眼冲都不亏。」\n实拍生活化市井开局：雨后城市临街，两位中年女性并肩走进菜市场，透明手提袋里的粉色袋状产品外观全程没有变化，镜头 0 到 2 秒采用平视拍摄，镜头随两人向前移动…", meta: "文本 · 2 天前" },
+    { t: "text",  content: "本批交付时间：{{date}} {{time}}；占位符在粘贴时由后端展开。", meta: "文本 · 3 天前" },
+    { t: "img",   title: "参考图_03.png",  meta: "图片 · 3 天前" },
+  ];
+  const COLS = 4;
+  const root = document.getElementById("masonry");
+  const cols = Array.from({ length: COLS }, () => {
+    const c = document.createElement("div");
+    c.className = "col";
+    root.appendChild(c);
+    return c;
+  });
+  items.forEach((item, i) => {
+    const card = document.createElement("div");
+    if (item.t === "text" || item.t === "link") {
+      card.className = "card slim";
+      card.innerHTML = `
+        <div class="body">
+          <div class="topline"><span class="mini"></span><span>${item.t === "link" ? "链接" : "文本"}</span></div>
+          <div class="content${item.t === "link" ? " is-link" : ""}">${item.content}<span class="fade"></span></div>
+          <div class="meta">${item.meta}</div>
+        </div>`;
+    } else {
+      const ribbon =
+        item.t === "img"   ? `<div class="ribbon img-full"></div>` :
+        item.t === "video" ? `<div class="ribbon" style="background:linear-gradient(160deg,#0a1e3f,#153a6e)"><div class="play">▶</div></div>` :
+                             `<div class="ribbon audio">♪</div>`;
+      const label = item.t === "img" ? "图片" : item.t === "video" ? "视频" : "音频";
+      card.className = "card media";
+      card.innerHTML = `
+        ${ribbon}
+        <span class="kind">${label}</span>
+        <div class="more">⋯</div>
+        <div class="body"><div class="title">${item.title}</div><div class="meta">${item.meta}</div></div>`;
+    }
+    cols[i % COLS].appendChild(card);
+  });
+</script>
+</body>
+</html>
