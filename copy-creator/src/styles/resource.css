@@ -1178,12 +1178,8 @@
   color: var(--danger, #dc2626);
 }
 
-.resource-card-title mark {
-  padding: 0 1px;
-  border-radius: 2px;
-  background: #ffe9a8;
-  color: inherit;
-}
+/* 卡片标题命中标记样式收敛到全局 mark.search-highlight（components.css，
+   亮暗两套主题自适应），此处不再重复定义。 */
 
 /* 「全部分组」视图的所属分组标签（来源标签，与快捷输入全部视图同形态）。 */
 .resource-card-group-tag {

@@ -63,6 +63,21 @@
   fill: var(--text-secondary);
 }
 
+/* 搜索命中高亮（HighlightText 全局唯一出口，亮暗两套）：亮色浅黄底 +
+   继承深字；暗色改半透明黄底透出深底、继承白字可读——此前不透明浅黄
+   直接配暗色继承白字，命中标记形同消失（0.3.27 用户报告「点亮没了」
+   的根因）。 */
+mark.search-highlight {
+  padding: 0 1px;
+  border-radius: 2px;
+  background: #ffe9a8;
+  color: inherit;
+}
+
+[data-theme="dark"] mark.search-highlight {
+  background: color-mix(in srgb, #f5c542 38%, transparent);
+}
+
 .page-empty-compact {
   display: flex;
   flex-direction: column;

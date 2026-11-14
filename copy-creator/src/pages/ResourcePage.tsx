@@ -1295,6 +1295,7 @@ export default function ResourcePage() {
 
       {!trashOpen && projectView === "project" && search.trim() !== "" && (
         <ProjectSearchResults
+          search={search}
           onJumped={() => {
             setSearch("");
           }}

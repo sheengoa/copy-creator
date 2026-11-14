@@ -5,14 +5,16 @@ import {
   type ProjectSearchItem,
 } from "../../stores/projectStore";
 import { Icons } from "../../components/Icons";
+import { HighlightText } from "../../components/HighlightText";
 
 function searchKindKey(kind: ProjectSearchItem["kind"]): string {
   return `project.search.kind.${kind}`;
 }
 
 /** 工程视图的跨实体搜索结果：剧/集直接跳转，库实体跳到对应面板。
- *  由资源页工具行在工程视图下渲染（与文件视图共用同一个搜索框）。 */
-export default function ProjectSearchResults({ onJumped }: { onJumped: () => void }) {
+ *  由资源页工具行在工程视图下渲染（与文件视图共用同一个搜索框）。
+ *  命中段高亮与文件视图卡片同源（HighlightText → mark.search-highlight）。 */
+export default function ProjectSearchResults({ search, onJumped }: { search: string; onJumped: () => void }) {
   const { t } = useTranslation();
   const { searchResults, searchLoading, selectShow, selectEpisode, openLibraryPanel } =
     useProjectStore(
@@ -60,9 +62,13 @@ export default function ProjectSearchResults({ onJumped }: { onJumped: () => voi
           onClick={() => handleJump(item)}
         >
           <span className="project-search-kind">{t(searchKindKey(item.kind))}</span>
-          <span className="project-search-title">{item.title}</span>
+          <span className="project-search-title">
+            <HighlightText text={item.title ?? ""} search={search} />
+          </span>
           {item.kind === "prompt" && item.content && (
-            <span className="project-search-sub">{item.content}</span>
+            <span className="project-search-sub">
+              <HighlightText text={item.content} search={search} />
+            </span>
           )}
           <span className="project-title-spacer" />
           {Icons.arrowRight}
