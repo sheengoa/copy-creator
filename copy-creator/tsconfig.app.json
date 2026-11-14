@@ -16,6 +16,8 @@
     "jsx": "react-jsx",
 
     /* Linting */
+    /* 全量 strict：实测 tsc --force 零错误（渐进无需分步，一步到位）。 */
+    "strict": true,
     "noUnusedLocals": true,
     "noUnusedParameters": true,
     "erasableSyntaxOnly": true,
