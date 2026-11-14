@@ -180,9 +180,11 @@ export function MediaPlayback({
       ? ({
           // 实测几何只进变量：具体盒形（自动高 330 帽 / pc-resized 等比
           // 精确盒）由 is-ratio-fit 类的规则按节点态消费（画布图像侧
-          // ResourceThumb 同一套变量与公式）。
+          // ResourceThumb 同一套变量与公式）。--media-arw 纯数字宽高比
+          // 供固定高路径两轴最大等比盒的 calc 乘法。
           "--media-fitw": `${Math.round(330 * (ratio.w / ratio.h))}px`,
           "--media-ar": `${ratio.w} / ${ratio.h}`,
+          "--media-arw": String(ratio.w / ratio.h),
         } as CSSProperties)
       : undefined;
 

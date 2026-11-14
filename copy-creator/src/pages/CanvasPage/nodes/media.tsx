@@ -41,13 +41,17 @@ export function ResourceThumb({ path, className, ratioFit = false }: { path: str
       alive = false;
     };
   }, [path]);
-  // 实测几何只进变量，不直接落样式：is-ratio-fit 类的规则消费这两个
+  // 实测几何只进变量，不直接落样式：is-ratio-fit 类的规则消费这些
   // 变量（自动高 330 帽 / 固定高等比精确盒两态各有各的用法）。
+  // --media-arw 是宽高比纯数字（w/h），供固定高路径 min(100cqw,
+  // 100cqh×arw) 算两轴最大等比盒——<ratio> 值进不了 calc 乘法，
+  // 必须与 --media-ar 分开各写一份。
   const fitStyle =
     ratioFit && ratio && ratio.w > 0 && ratio.h > 0
       ? ({
           "--media-fitw": `${Math.round(330 * (ratio.w / ratio.h))}px`,
           "--media-ar": `${ratio.w} / ${ratio.h}`,
+          "--media-arw": String(ratio.w / ratio.h),
         } as CSSProperties)
       : undefined;
   if (!url) return null;

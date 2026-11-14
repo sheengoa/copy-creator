@@ -346,18 +346,32 @@
   display: flex;
   flex-direction: column;
   overflow: hidden;
+  /* 尺寸容器：媒体盒的 cq 单位取舞台填充区（2026-11-14 最大等比盒
+     补全，语义见下方图像盒规则）。 */
+  container-type: size;
 }
 
-/* 图像/产物帧等比盒（加载媒体外框直接子项 / 预览节点表单直接子项）。 */
+/* 预览节点表单即舞台（媒体盒/播放器是表单直接子项），同样供 cq 取
+   填充区；表单在固定高节点下 flex 撑满有确定高，尺寸包含不损滚动。 */
+.fc-root .pc-node.pc-resized .fc-node-form {
+  container-type: size;
+}
+
+/* 图像/产物帧等比盒（加载媒体外框直接子项 / 预览节点表单直接子项）。
+   2026-11-14 最大等比盒补全：旧公式 width/height:auto 对 img 是内在
+   尺寸、max 只缩不放——小图（mock 产物/小尺寸生成）拉大节点反而
+   悬空更小，与自动高路径「按比例盒放大」倒挂。现以舞台为尺寸容器，
+   宽取 min(100cqw, 100cqh×宽高比) 精确命中两轴都贴边的最大等比盒，
+   放大缩小两可，元素盒恒等于画面盒的铁律不变。 */
 .fc-root .pc-node.pc-resized .fc-load-media .fc-media-box,
 .fc-root .pc-node.pc-resized .fc-node-form > .fc-media-box {
   flex: none;
-  width: auto;
+  width: min(100cqw, calc(100cqh * var(--media-arw, 1)));
   height: auto;
+  aspect-ratio: var(--media-ar, auto);
   max-width: 100%;
   max-height: 100%;
   margin: auto;
-  aspect-ratio: auto;
   background: none;
 }
 
@@ -395,16 +409,24 @@
   grid-template-rows: minmax(0, 1fr) auto;
 }
 
+/* 视频盒与图像盒语义同（最大等比盒）但公式不同构：播放器网格第二行
+   是播放条，容器取 cqh 会把条算进可用高——照监视器段先例（2026-11-07
+   实测定案）高度吃满画面轨、宽度随 --media-ar 推导；横版超限 max-width
+   保底，contain 居中留白不变形（黑底已移除，留白透节点表面）。 */
 .fc-root .pc-node.pc-resized .fc-load-media .media-playback-video,
 .fc-root .pc-node.pc-resized .fc-node-form > .media-playback .media-playback-video {
+  height: 100%;
   width: auto;
-  height: auto;
+  aspect-ratio: var(--media-ar, auto);
   max-width: 100%;
-  max-height: 100%;
   margin: auto;
-  min-height: 0;
-  aspect-ratio: auto;
   background: none;
+}
+
+/* 预览音频（无画面轨）：播放器条表单内垂直居中，横向保持满行。 */
+.fc-root .pc-node.pc-resized .fc-node-form > .media-playback:not(.has-video) {
+  margin-top: auto;
+  margin-bottom: auto;
 }
 
 /* 生成节点（固定高）：主图大图吃掉剩余空间，胶片条与动作行留在可视区。
@@ -418,6 +440,31 @@
   flex: 1 1 auto;
   min-height: 0;
   aspect-ratio: auto;
+}
+
+/* 固定高节点空态居中舞台（2026-11-14 用户定案，居中舞台标准的空态
+   补全）：无产物可让位时空态控件成为舞台内容——吃掉剩余空间、行
+   内容垂直居中，动作行/目标行贴底随动。三重守卫各自圈定空态：
+   :has(> .fc-gen-result) 反选——完成态有产物区让位时参数回归自然高；
+   :not(.is-loaded)——生成等待期参数收合（0fr）不生长，流光独占舞台。
+   流光位移用 cqw/cqh 容器单位（gen.css），舞台变大自动适配。 */
+.fc-root .pc-node.pc-resized .fc-node-form:not(:has(> .fc-gen-result)) > .fc-gen-params:not(.is-loaded) {
+  flex: 1 1 auto;
+  min-height: 0;
+}
+
+/* 参数行在生长后的组内垂直居中（clip 是 flex 列容器）。只圈生成
+   节点（.fc-gen-params 专属），不碰加载节点同名 clip 的贴顶语义；
+   参数自然高（完成态/自动高节点）时无多余空间，居中是空操作。 */
+.fc-root .pc-node.pc-resized .fc-gen-params .fc-load-entry-clip {
+  justify-content: center;
+}
+
+/* 生成等待期：流光从恒定 152px 改为吃满剩余空间（与产物区同一
+   让位语义），动作行仍钉底。 */
+.fc-root .pc-node.pc-resized .fc-aurora {
+  flex: 1 1 auto;
+  min-height: 0;
 }
 
 /* 参数组合框：白卡输入件 + 右侧箭头展开预设清单（portal 到 body，

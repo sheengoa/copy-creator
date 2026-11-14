@@ -244,22 +244,27 @@
 /* 固定高节点（pc-resized）：产物舞台吃掉表单剩余空间做居中舞台，媒体
    等比精确盒（2026-11-06 与加载/预览节点同一语言，规则详解见
    canvas/inputs.css）——拉伸保存节点产物只放大、永无黑边；多图格子态
-   不参与（330px 限高内部滚动是既定行为）。 */
+   不参与（330px 限高内部滚动是既定行为）。2026-11-14 最大等比盒补全：
+   旧公式 width/height:auto 对 img/video 是内在尺寸、max 只缩不放，小图
+   拉大节点反而悬空更小——舞台挂尺寸容器，媒体盒宽取 min(100cqw,
+   100cqh×宽高比) 两轴贴边，元素盒恒等于画面盒不变（公式推导见
+   canvas/inputs.css 图像盒段）。 */
 .fc-root .pc-node.pc-resized .fc-save-stage.filled {
   flex: 1 1 auto;
   min-height: 0;
   display: flex;
   flex-direction: column;
+  container-type: size;
 }
 
 .fc-root .pc-node.pc-resized .fc-save-stage.filled .fc-media-box {
   flex: none;
-  width: auto;
+  width: min(100cqw, calc(100cqh * var(--media-arw, 1)));
   height: auto;
+  aspect-ratio: var(--media-ar, auto);
   max-width: 100%;
   max-height: 100%;
   margin: auto;
-  aspect-ratio: auto;
   background: none;
 }
 
@@ -270,14 +275,54 @@
   grid-template-rows: minmax(0, 1fr) auto;
 }
 
+/* 视频盒同 inputs.css 视频段：播放条占网格第二行，高度吃满画面轨、
+   宽度随比例推导，横版超限 max-width 保底 contain 留白不变形。 */
 .fc-root .pc-node.pc-resized .fc-save-stage.filled .media-playback-video {
+  height: 100%;
   width: auto;
-  height: auto;
+  aspect-ratio: var(--media-ar, auto);
   max-width: 100%;
-  max-height: 100%;
   margin: auto;
-  aspect-ratio: auto;
   background: none;
+}
+
+/* 音频产物（无画面轨）：播放器条舞台内垂直居中——只吃纵向 auto
+   margin，横向留给交叉轴伸展保持满行。 */
+.fc-root .pc-node.pc-resized .fc-save-stage.filled > .media-playback:not(.has-video) {
+  margin-top: auto;
+  margin-bottom: auto;
+}
+
+/* 固定高节点空态居中舞台（2026-11-14 用户定案，与 canvas/inputs.css
+   空态段同语）：无产物时空态占位吃掉表单剩余空间、内容居中，目标行
+   贴底随动。三个空态各自圈定，产物态（.filled）的让位规则不受影响：
+   断链图形/等待沙漏本身已是 flex 居中盒，长高即图标居中于整个节点体；
+   选择组吃满后两张定高卡组内垂直居中（align-items 默认 stretch 会把
+   定高卡顶到组顶），不随高度拉伸变形，问号徽章仍骑组顶边。 */
+.fc-root .pc-node.pc-resized .fc-node-form > .fc-save-wait {
+  flex: 1 1 auto;
+  min-height: 0;
+}
+
+.fc-root .pc-node.pc-resized .fc-node-form > .fc-save-choose {
+  flex: 1 1 auto;
+  min-height: 0;
+  align-items: center;
+}
+
+/* 选择卡的 74px 定高从来就没生效过：卡片在 .fc-hint-anchor（column
+   flex）里，flex:1 主轴是纵向、basis 0% 恒压成内容高 26px——自动高
+   节点组矮看不出，拉大后细条悬在大组里很突兀。flex:none 让 height
+   重新接管（横向伸展来自 column 交叉轴 stretch，不受影响）。 */
+.fc-root .pc-node.pc-resized .fc-save-opt {
+  flex: none;
+  height: 74px;
+}
+
+.fc-root .pc-node.pc-resized .fc-node-form > .fc-save-stage:not(.filled) {
+  flex: 1 1 auto;
+  min-height: 0;
+  height: auto;
 }
 
 /* 保存格子内件（音/视频无画面帧）：类型图标居中占位，点击切单件态
