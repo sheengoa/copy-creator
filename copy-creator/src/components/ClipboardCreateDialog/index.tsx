@@ -100,7 +100,7 @@ export default function ClipboardCreateDialog() {
     if (showLoading) setLoadingRecords(true);
     try {
       const isResource = mode === "resource";
-      const records = await invoke<StashRecord[]>("get_clipboard_records", {
+      const records = await invoke<StashRecord[]>("list_clipboard_records", {
         limit: 120,
         offset: 0,
         category: isResource ? "resources" : "all",
@@ -121,7 +121,7 @@ export default function ClipboardCreateDialog() {
   // 目标分组列表（后端首个节点为未分组），失败时保底仅剩「未分组」可选。
   const loadResourceGroups = useCallback(async () => {
     try {
-      const groups = await invoke<ResourceFolder[]>("get_resource_groups");
+      const groups = await invoke<ResourceFolder[]>("list_resource_groups");
       setResourceGroups(groups);
     } catch (e) {
       console.error("Failed to load resource groups:", e);

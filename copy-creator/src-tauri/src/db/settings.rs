@@ -29,7 +29,7 @@ pub fn get_setting_sync<R: Runtime>(app: &AppHandle<R>, key: &str) -> Option<Str
 }
 
 #[tauri::command]
-pub fn get_all_settings(
+pub fn list_all_settings(
     app: AppHandle,
 ) -> Result<std::collections::HashMap<String, String>, String> {
     let state = app.state::<DbState>();

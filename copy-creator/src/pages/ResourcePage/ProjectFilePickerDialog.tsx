@@ -43,7 +43,7 @@ export interface ProjectFilePickerDialogProps {
 /** 单页条数：后端按关键词搜索 + 偏移分页，大库不再只有最新 200 条可选。 */
 const PAGE_SIZE = 500;
 
-/** get_resource_groups 的树节点：path 为相对库根的分组路径（"" 即库根
+/** list_resource_groups 的树节点：path 为相对库根的分组路径（"" 即库根
  *  「未分组」，首项固定是它），count 为含全部子级的文件数。 */
 interface PickerFolder {
   name: string;
@@ -191,7 +191,7 @@ export default function ProjectFilePickerDialog({
 
   useEffect(() => {
     let cancelled = false;
-    invoke<PickerFolder[]>("get_resource_groups")
+    invoke<PickerFolder[]>("list_resource_groups")
       .then((tree) => {
         if (cancelled || !Array.isArray(tree)) return;
         setGroups(tree);
@@ -213,7 +213,7 @@ export default function ProjectFilePickerDialog({
     setLoading(true);
     Promise.all([
       invoke<string>("get_resource_library_path"),
-      invoke<ClipboardRecord[]>("get_clipboard_records", {
+      invoke<ClipboardRecord[]>("list_clipboard_records", {
         limit: PAGE_SIZE,
         offset: 0,
         category: "resources",
@@ -241,7 +241,7 @@ export default function ProjectFilePickerDialog({
   const loadMore = () => {
     if (loadingMore) return;
     setLoadingMore(true);
-    invoke<ClipboardRecord[]>("get_clipboard_records", {
+    invoke<ClipboardRecord[]>("list_clipboard_records", {
       limit: PAGE_SIZE,
       offset: offset + PAGE_SIZE,
       category: "resources",

@@ -35,7 +35,7 @@ const invokeMock = vi.fn(async (cmd: string, args?: Record<string, unknown>) => 
   if (cmd === "read_resource_text_preview") {
     return { content: "1MB截断预览收尾", truncated: true };
   }
-  if (cmd === "get_resource_annotations") return [];
+  if (cmd === "list_resource_annotations") return [];
   if (cmd === "list_resource_text_versions") return versionRows;
   if (cmd === "get_resource_text_version_content") return "入库时的旧内容";
   return null;

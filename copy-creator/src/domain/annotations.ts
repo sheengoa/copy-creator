@@ -56,7 +56,7 @@ function fromRaw(raw: RawAnnotation): ResourceAnnotation {
 }
 
 export function fetchResourceAnnotations(recordId: string): Promise<ResourceAnnotation[]> {
-  return invoke<RawAnnotation[]>("get_resource_annotations", { recordId }).then((list) =>
+  return invoke<RawAnnotation[]>("list_resource_annotations", { recordId }).then((list) =>
     list.map(fromRaw),
   );
 }

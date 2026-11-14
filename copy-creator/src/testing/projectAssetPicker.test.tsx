@@ -18,9 +18,9 @@ const invokeMock = vi.fn(async (cmd: string, args?: Record<string, unknown>) => 
   switch (cmd) {
     case "get_resource_library_path":
       return "/lib";
-    case "get_resource_groups": {
+    case "list_resource_groups": {
       // 分组树 mock：与 allRecords 里 /lib/<组>/ 的目录对应，首项固定为
-      // 「未分组」空路径根（后端 get_resource_groups 同约定）。
+      // 「未分组」空路径根（后端 list_resource_groups 同约定）。
       const topPaths = new Set(
         allRecords
           .map((record) => String(record.resource_path).replace(/^\/lib\//, ""))
@@ -39,7 +39,7 @@ const invokeMock = vi.fn(async (cmd: string, args?: Record<string, unknown>) => 
         })),
       ];
     }
-    case "get_clipboard_records": {
+    case "list_clipboard_records": {
       const offset = Number(args?.offset ?? 0);
       const limit = Number(args?.limit ?? 200);
       const search = typeof args?.search === "string" ? args.search.trim().toLowerCase() : "";
@@ -121,7 +121,7 @@ describe("ProjectAssetPicker", () => {
     await waitFor(() => {
       expect(screen.getByText("500", { selector: ".project-library-count" })).toBeTruthy();
     });
-    const searchCall = invokeMock.mock.calls.find(([cmd]) => cmd === "get_clipboard_records");
+    const searchCall = invokeMock.mock.calls.find(([cmd]) => cmd === "list_clipboard_records");
     expect(searchCall?.[1]).toMatchObject({ limit: PAGE, offset: 0 });
     fireEvent.click(screen.getByText("显示更多"));
     await waitFor(() => {
@@ -147,7 +147,7 @@ describe("ProjectAssetPicker", () => {
     await waitFor(() => {
       expect(screen.getByText("1", { selector: ".project-library-count" })).toBeTruthy();
     });
-    const searched = invokeMock.mock.calls.filter(([cmd, args]) => cmd === "get_clipboard_records" && args?.search === "补位");
+    const searched = invokeMock.mock.calls.filter(([cmd, args]) => cmd === "list_clipboard_records" && args?.search === "补位");
     expect(searched.length).toBeGreaterThan(0);
     expect(searched[0][1]).toMatchObject({ offset: 0, limit: PAGE });
     expect(screen.getByText("补位目标.png")).toBeTruthy();
@@ -262,7 +262,7 @@ describe("ProjectAssetPicker", () => {
     });
     expect(screen.getByText("文件0.png")).toBeTruthy();
     const grouped = invokeMock.mock.calls.filter(
-      ([cmd, args]) => cmd === "get_clipboard_records" && args?.resourceGroup === "组A",
+      ([cmd, args]) => cmd === "list_clipboard_records" && args?.resourceGroup === "组A",
     );
     expect(grouped.length).toBeGreaterThan(0);
     // 回到全部文件：不带 resourceGroup 参数（null 即全库）
@@ -272,7 +272,7 @@ describe("ProjectAssetPicker", () => {
     });
     expect(
       invokeMock.mock.calls.some(
-        ([cmd, args]) => cmd === "get_clipboard_records" && args?.resourceGroup === undefined,
+        ([cmd, args]) => cmd === "list_clipboard_records" && args?.resourceGroup === undefined,
       ),
     ).toBe(true);
   });
@@ -303,7 +303,7 @@ describe("ProjectAssetPicker", () => {
     expect(
       invokeMock.mock.calls.some(
         ([cmd, args]) =>
-          cmd === "get_clipboard_records" && args?.search === "目标" && args?.resourceGroup === undefined,
+          cmd === "list_clipboard_records" && args?.search === "目标" && args?.resourceGroup === undefined,
       ),
     ).toBe(true);
   });

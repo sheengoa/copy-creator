@@ -21,9 +21,9 @@ const missingRecord = {
 let recheckCalls = 0;
 const invokeMock = vi.fn(async (cmd: string) => {
   switch (cmd) {
-    case "get_clipboard_records":
+    case "list_clipboard_records":
       return [missingRecord];
-    case "get_resource_groups":
+    case "list_resource_groups":
       return [];
     case "trash_items_count":
       return 0;
@@ -31,7 +31,7 @@ const invokeMock = vi.fn(async (cmd: string) => {
       return "/lib";
     case "get_resource_library_revision":
       return 1;
-    case "get_all_settings":
+    case "list_all_settings":
       return {};
     case "recheck_missing_resources":
       // 与后端 serde 命名一致：snake_case 由 Tauri 转驼峰后送达。

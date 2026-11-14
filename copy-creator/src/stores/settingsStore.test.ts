@@ -126,7 +126,7 @@ describe("settingsStore 主题与隐私设置 wiring", () => {
   it("doLoadSettings 解析 find_replace_history 存储串", async () => {
     const entries = [{ query: "x", replacement: "y", replaced: true }];
     invokeMock.mockImplementation((cmd: string) => {
-      if (cmd === "get_all_settings") {
+      if (cmd === "list_all_settings") {
         return Promise.resolve({ find_replace_history: JSON.stringify(entries) });
       }
       if (cmd === "is_autostart_enabled") return Promise.resolve(false);
@@ -140,7 +140,7 @@ describe("settingsStore 主题与隐私设置 wiring", () => {
 
   it("doLoadSettings 对畸形的 find_replace_history 存储串回退空历史", async () => {
     invokeMock.mockImplementation((cmd: string) => {
-      if (cmd === "get_all_settings") {
+      if (cmd === "list_all_settings") {
         return Promise.resolve({ find_replace_history: "{oops" });
       }
       if (cmd === "is_autostart_enabled") return Promise.resolve(false);

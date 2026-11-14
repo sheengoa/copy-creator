@@ -276,7 +276,7 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
 
   doLoadSettings: async () => {
     try {
-      const settings = await invoke<Record<string, string>>("get_all_settings");
+      const settings = await invoke<Record<string, string>>("list_all_settings");
       const themePref = parseThemePreference(settings.theme);
 
       set({

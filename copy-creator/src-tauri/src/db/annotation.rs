@@ -169,7 +169,7 @@ pub(crate) fn clear_resource_annotations_inner<R: Runtime>(
 }
 
 #[tauri::command]
-pub fn get_resource_annotations(
+pub fn list_resource_annotations(
     app: AppHandle,
     record_id: String,
 ) -> Result<Vec<ResourceAnnotation>, String> {

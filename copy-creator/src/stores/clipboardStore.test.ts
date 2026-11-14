@@ -123,7 +123,7 @@ describe("clipboardStore pinning", () => {
       ids: ["clip-1"],
       pinned: true,
     });
-    expect(invokeMock).toHaveBeenCalledWith("get_clipboard_records", expect.anything());
+    expect(invokeMock).toHaveBeenCalledWith("list_clipboard_records", expect.anything());
     expect(useClipboardStore.getState().records.map((record) => record.pinned)).toEqual([
       true,
       undefined,
@@ -367,14 +367,14 @@ describe("clipboardStore full record loading", () => {
     expect(loaded).toHaveLength(121);
     expect(useClipboardStore.getState().records).toHaveLength(121);
     expect(useClipboardStore.getState().hasMore).toBe(false);
-    expect(invokeMock).toHaveBeenNthCalledWith(1, "get_clipboard_records", {
+    expect(invokeMock).toHaveBeenNthCalledWith(1, "list_clipboard_records", {
       search: undefined,
       limit: 120,
       offset: 0,
       category: undefined,
       sortBy: "recent",
     });
-    expect(invokeMock).toHaveBeenNthCalledWith(2, "get_clipboard_records", {
+    expect(invokeMock).toHaveBeenNthCalledWith(2, "list_clipboard_records", {
       search: undefined,
       limit: 120,
       offset: 120,
@@ -415,7 +415,7 @@ describe("clipboardStore full record loading", () => {
 
     await useClipboardStore.getState().loadRecords(true, "resources");
 
-    expect(invokeMock).toHaveBeenCalledWith("get_clipboard_records", {
+    expect(invokeMock).toHaveBeenCalledWith("list_clipboard_records", {
       search: undefined,
       limit: 120,
       offset: 1,
@@ -442,7 +442,7 @@ describe("clipboardStore full record loading", () => {
 
     await useClipboardStore.getState().loadAllRecords("resources");
 
-    expect(invokeMock).toHaveBeenCalledWith("get_clipboard_records", {
+    expect(invokeMock).toHaveBeenCalledWith("list_clipboard_records", {
       search: undefined,
       limit: 120,
       offset: 0,
@@ -487,7 +487,7 @@ describe("clipboardStore full record loading", () => {
 
     // 剪切板「全部」（含类型筛选）：带排序偏好。
     await useClipboardStore.getState().loadRecords(false, "all");
-    expect(invokeMock).toHaveBeenLastCalledWith("get_clipboard_records", {
+    expect(invokeMock).toHaveBeenLastCalledWith("list_clipboard_records", {
       search: undefined,
       limit: 120,
       offset: 0,
@@ -497,7 +497,7 @@ describe("clipboardStore full record loading", () => {
 
     // 资源「全部分组」：带排序偏好。
     await useClipboardStore.getState().loadRecords(false, "resources", null);
-    expect(invokeMock).toHaveBeenLastCalledWith("get_clipboard_records", {
+    expect(invokeMock).toHaveBeenLastCalledWith("list_clipboard_records", {
       search: undefined,
       limit: 120,
       offset: 0,
@@ -507,7 +507,7 @@ describe("clipboardStore full record loading", () => {
 
     // 资源分组浏览（含未分组）：回到时间排序，不带偏好。
     await useClipboardStore.getState().loadRecords(false, "resources", "References");
-    expect(invokeMock).toHaveBeenLastCalledWith("get_clipboard_records", {
+    expect(invokeMock).toHaveBeenLastCalledWith("list_clipboard_records", {
       search: undefined,
       limit: 120,
       offset: 0,
@@ -515,7 +515,7 @@ describe("clipboardStore full record loading", () => {
       resourceGroup: "References",
     });
     await useClipboardStore.getState().loadRecords(false, "resources", "");
-    expect(invokeMock).toHaveBeenLastCalledWith("get_clipboard_records", {
+    expect(invokeMock).toHaveBeenLastCalledWith("list_clipboard_records", {
       search: undefined,
       limit: 120,
       offset: 0,
@@ -533,7 +533,7 @@ describe("clipboardStore full record loading", () => {
 
     await useClipboardStore.getState().loadRecords(false, "resources");
 
-    expect(invokeMock).toHaveBeenCalledWith("get_clipboard_records", {
+    expect(invokeMock).toHaveBeenCalledWith("list_clipboard_records", {
       search: undefined,
       limit: 120,
       offset: 0,

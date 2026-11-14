@@ -207,7 +207,7 @@ describe("integration regressions", () => {
     const componentSource = readSource("../components/ClipboardCreateDialog/index.tsx");
 
     expect(dbSource).toContain("DROP TABLE IF EXISTS resource_groups");
-    expect(dbSource).toContain("pub fn get_resource_groups");
+    expect(dbSource).toContain("pub fn list_resource_groups");
     expect(dbSource).toContain("pub fn create_resource_group");
     expect(dbSource).toContain("pub fn update_resource_group");
     expect(dbSource).toContain("pub fn delete_resource_group");
@@ -225,7 +225,7 @@ describe("integration regressions", () => {
     expect(pageSource).not.toContain("isTempRecord");
     expect(pageSource).not.toContain("resource-mode-tab");
     expect(pageSource).toContain('storageMode: "resource"');
-    expect(pageSource).toContain("get_resource_groups");
+    expect(pageSource).toContain("list_resource_groups");
     // 分组栏（含拖拽排序与子分组菜单）内聚在 ResourceGroupChips 中。
     expect(pageSource).toContain("<ResourceGroupChips");
     expect(groupChipsSource).toContain("resource-group-section");
@@ -364,7 +364,7 @@ describe("integration regressions", () => {
     const dbSource = readDbSource();
     const deleteBlock = dbSource.slice(
       dbSource.indexOf("fn delete_clipboard_records_internal"),
-      dbSource.indexOf("pub fn get_phrase_groups"),
+      dbSource.indexOf("pub fn list_phrase_groups"),
     );
 
     expect(deleteBlock).toContain("DELETE FROM api_key_labels");
@@ -435,7 +435,7 @@ describe("integration regressions", () => {
     expect(radialMenu).toContain('key: RADIAL_LAST_TAB_SETTING');
     expect(radialMenu).toContain("restoreLastTab");
     expect(radialMenu).toContain("if (tabTouchedRef.current) return;");
-    // 快捷输入 tab 激活即回到「全部」并重载（聚合查询 get_all_phrases）。
+    // 快捷输入 tab 激活即回到「全部」并重载（聚合查询 list_all_phrases）。
     expect(radialMenu).toContain("buildAllPhraseItems");
     expect(radialMenu).toContain("loadPhrases(ALL_PHRASES_GROUP_ID)");
     // 资源 tab 依据记忆的分组位置加载（跨重启持久化），不再强制重置为"全部"。
@@ -594,7 +594,7 @@ describe("integration regressions", () => {
     const createDialog = readSource("../components/ClipboardCreateDialog/index.tsx");
     const pruneBlock = dbSource.slice(
       dbSource.indexOf("pub fn prune_old_records"),
-      dbSource.indexOf("pub fn get_clipboard_records"),
+      dbSource.indexOf("pub fn list_clipboard_records"),
     );
 
     expect(dbSource).toContain("resource_library_path");

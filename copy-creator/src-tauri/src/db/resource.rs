@@ -1841,7 +1841,7 @@ pub(crate) fn reorder_resource_groups_inner<R: Runtime>(
 }
 
 #[tauri::command]
-pub fn get_resource_groups(app: AppHandle) -> Result<Vec<serde_json::Value>, String> {
+pub fn list_resource_groups(app: AppHandle) -> Result<Vec<serde_json::Value>, String> {
     get_resource_groups_inner(&app)
 }
 

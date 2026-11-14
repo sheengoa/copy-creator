@@ -86,7 +86,7 @@ export function SaveTargetPanel({ node, onClose }: { node: CanvasNode; onClose: 
 
   useEffect(() => {
     let alive = true;
-    void invoke<ResourceFolder[]>("get_resource_groups")
+    void invoke<ResourceFolder[]>("list_resource_groups")
       .then((folders) => {
         if (alive) setRows(flattenResourceGroups(folders));
       })
@@ -246,7 +246,7 @@ export function SaveTargetPanel({ node, onClose }: { node: CanvasNode; onClose: 
     creatingBusyRef.current = true;
     try {
       await invoke("create_resource_group", { name: createGroupPathOf(parentPath, name) });
-      const folders = await invoke<ResourceFolder[]>("get_resource_groups");
+      const folders = await invoke<ResourceFolder[]>("list_resource_groups");
       setRows(flattenResourceGroups(folders));
       const newPath = createGroupPathOf(parentPath, name);
       setGroup(newPath);

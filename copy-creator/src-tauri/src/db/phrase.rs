@@ -455,7 +455,7 @@ pub(crate) fn all_phrase_rows(
 /// 快捷输入「全部」视图：聚合全部分组的短语，径向菜单与主窗口共用。
 /// limit 仅径向菜单使用（首屏条数）；主窗口不传即全量加载。
 #[tauri::command]
-pub fn get_all_phrases<R: Runtime>(
+pub fn list_all_phrases<R: Runtime>(
     app: AppHandle<R>,
     limit: Option<u32>,
     sort_by: Option<String>,
@@ -483,7 +483,7 @@ pub(crate) fn touch_phrase_usage_internal<R: Runtime>(
 }
 
 #[tauri::command]
-pub fn get_phrase_groups(app: AppHandle) -> Result<Vec<serde_json::Value>, String> {
+pub fn list_phrase_groups(app: AppHandle) -> Result<Vec<serde_json::Value>, String> {
     let state = app.state::<DbState>();
     let conn = state.conn.lock().map_err(|e| e.to_string())?;
     let mut stmt = conn
@@ -568,7 +568,7 @@ pub fn delete_phrase_group(app: AppHandle, id: String) -> Result<(), String> {
 }
 
 #[tauri::command]
-pub fn get_phrases(app: AppHandle, group_id: String) -> Result<Vec<serde_json::Value>, String> {
+pub fn list_phrases(app: AppHandle, group_id: String) -> Result<Vec<serde_json::Value>, String> {
     let state = app.state::<DbState>();
     let conn = state.conn.lock().map_err(|e| e.to_string())?;
     let mut stmt = conn

@@ -223,7 +223,7 @@ pub fn prune_old_records<R: Runtime>(
 }
 
 #[tauri::command]
-pub fn get_clipboard_records(
+pub fn list_clipboard_records(
     app: AppHandle,
     search: Option<String>,
     limit: Option<u32>,

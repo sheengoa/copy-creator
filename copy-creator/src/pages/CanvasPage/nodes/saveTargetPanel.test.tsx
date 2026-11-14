@@ -24,7 +24,7 @@ vi.mock("@tauri-apps/api/core", () => ({
 }));
 
 invokeMock.mockImplementation(async (cmd: string) => {
-  if (cmd === "get_resource_groups") {
+  if (cmd === "list_resource_groups") {
     return [
       {
         name: "",
@@ -499,7 +499,7 @@ describe("SaveTargetPanel 面板内新建分组（2026-11-14 用户定案，原�
       },
     });
 
-  // 动态分组树：create_resource_group 落盘（内存账本），get_resource_groups
+  // 动态分组树：create_resource_group 落盘（内存账本），list_resource_groups
   // 重拉含新建分组——创建成功后的「重拉 + 自动选中」链路可断言。
   const staticFolders = () => [
     {
@@ -534,7 +534,7 @@ describe("SaveTargetPanel 面板内新建分组（2026-11-14 用户定案，原�
         createdPaths.push(String(args?.name ?? ""));
         return { name: String(args?.name ?? ""), count: 0 };
       }
-      if (cmd === "get_resource_groups") {
+      if (cmd === "list_resource_groups") {
         const folders = staticFolders();
         for (const p of createdPaths) insertCreated(folders, p);
         return folders;

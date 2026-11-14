@@ -58,7 +58,7 @@ const mockGroupsTree = () => [
 ];
 
 // 详情页内联编辑的内存补丁：update_clipboard_record_content 写这里，
-// get_clipboard_records / get_clipboard_record_content 读取时应用。
+// list_clipboard_records / get_clipboard_record_content 读取时应用。
 const clipboardContentPatches = new Map<string, string>();
 // 快捷输入文本短语的正文补丁（详情页内联编辑 → update_phrase）。
 const phraseContentPatches = new Map<string, string>();
@@ -88,7 +88,7 @@ export function handleClipboardCommands(cmd: string, args: Record<string, unknow
     case "read_quick_input_text_preview":
       // 文件承载文本的正文预览（卡片文本预览与查看弹窗共用管线）。
       return "文件承载的 mock 正文：\n第一场：地铁站——小雨在末班车驶离后奔下台阶。\n第二场：天台——回声渐弱，只剩风。";
-    case "get_clipboard_records": {
+    case "list_clipboard_records": {
       // 供「从资源库选文件」浮层挑选：剧本文件（挂剧本链路验证）、视频
       // （视频首帧/尾帧节点选片，2026-11-01）、图片与音频（类型过滤与
       // 音频保存/预览链路验证，2026-11-02——浮层按节点类型白名单过滤后
@@ -254,7 +254,7 @@ export function handleClipboardCommands(cmd: string, args: Record<string, unknow
       return 10485760;
     case "get_setting":
       return "";
-    case "get_all_settings":
+    case "list_all_settings":
       // 全量设置表（对齐 settingsStore.loadAll 的读取字段）：mock 返回空
       // 会让 store 读 theme 报 TypeError 并每分钟重试刷屏，这里给一份
       // 缺省值齐整的表（与真实后端的 SQLite settings 表同构）。
@@ -273,7 +273,7 @@ export function handleClipboardCommands(cmd: string, args: Record<string, unknow
       };
     case "project_search":
       return [];
-    case "get_resource_groups":
+    case "list_resource_groups":
       // 「从资源库选文件」浮层与保存面板的分组树：mock 库里 scripts/、
       // segments/ 两个顶级分组（与上方资源路径对应，segments 带一层子级
       // 供折叠树/记忆链路验证），根下另有三个直放文件（视频/图片/音频），
@@ -291,15 +291,15 @@ export function handleClipboardCommands(cmd: string, args: Record<string, unknow
     }
 
     // ── 快捷输入（卡片化可视化验证的最小数据集） ──
-    case "get_phrase_groups":
+    case "list_phrase_groups":
       return [
         { id: "pg-1", name: "日常话术", sort_order: 0, created_at: ts(), updated_at: ts() },
         { id: "pg-2", name: "素材引用", sort_order: 1, created_at: ts(), updated_at: ts() },
       ];
-    case "get_all_phrases":
-    case "get_phrases": {
+    case "list_all_phrases":
+    case "list_phrases": {
       // 覆盖卡片各预览分支：纯文本 / 多行话术（占位符）/ 图片文件 /
-      // 文本文件。get_phrases 按 group_id 过滤（空数组兜底其它分组）。
+      // 文本文件。list_phrases 按 group_id 过滤（空数组兜底其它分组）。
       const phrases = [
         {
           id: "ph-1", group_id: "pg-1", title: "开场白",
@@ -333,7 +333,7 @@ export function handleClipboardCommands(cmd: string, args: Record<string, unknow
       const patchedPhrases = phrases.map((p) =>
         phraseContentPatches.has(p.id) ? { ...p, content: phraseContentPatches.get(p.id)! } : p,
       );
-      if (cmd === "get_phrases") {
+      if (cmd === "list_phrases") {
         const groupId = String(args?.groupId ?? "");
         return patchedPhrases.filter((p) => p.group_id === groupId);
       }

@@ -200,7 +200,7 @@ describe("phraseStore all-phrases view", () => {
     file_size: 0,
   });
 
-  it("loads cross-group phrases via get_all_phrases for the all view", async () => {
+  it("loads cross-group phrases via list_all_phrases for the all view", async () => {
     const allPhrases = [
       { ...textPhrase("phrase-1"), group_name: "客服话术", last_used_at: "2026-09-11T00:00:00Z" },
     ];
@@ -208,14 +208,14 @@ describe("phraseStore all-phrases view", () => {
 
     await usePhraseStore.getState().loadPhrases(ALL_PHRASES_GROUP_ID);
 
-    expect(invokeMock).toHaveBeenCalledWith("get_all_phrases", { sortBy: "recent" });
+    expect(invokeMock).toHaveBeenCalledWith("list_all_phrases", { sortBy: "recent" });
     expect(usePhraseStore.getState().phrases).toEqual(allPhrases);
     expect(usePhraseStore.getState().selectedGroupId).toBe(ALL_PHRASES_GROUP_ID);
   });
 
   it("defaults group loading to the all view when nothing is selected", async () => {
     invokeMock.mockImplementation(async (command: string) => {
-      if (command === "get_phrase_groups") {
+      if (command === "list_phrase_groups") {
         return [{ id: "group-1", name: "客服话术" }];
       }
       return [];
@@ -223,7 +223,7 @@ describe("phraseStore all-phrases view", () => {
 
     await usePhraseStore.getState().loadGroups();
 
-    expect(invokeMock).toHaveBeenCalledWith("get_all_phrases", { sortBy: "recent" });
+    expect(invokeMock).toHaveBeenCalledWith("list_all_phrases", { sortBy: "recent" });
     expect(usePhraseStore.getState().selectedGroupId).toBe(ALL_PHRASES_GROUP_ID);
   });
 

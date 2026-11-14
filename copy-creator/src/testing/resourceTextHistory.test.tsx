@@ -36,7 +36,7 @@ const invokeMock = vi.fn(async (cmd: string, args?: Record<string, unknown>) => 
   if (cmd === "read_resource_text_detail") {
     return { content: TEXT, truncated: false };
   }
-  if (cmd === "get_resource_annotations") return [];
+  if (cmd === "list_resource_annotations") return [];
   if (cmd === "list_resource_text_versions") {
     expect(args?.recordId).toBe(record.id);
     return emptyHistory ? [] : VERSIONS;

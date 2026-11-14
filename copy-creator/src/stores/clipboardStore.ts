@@ -344,7 +344,7 @@ export function createRecordsStore() {
             ? { resourceGroup: activeResourceGroup }
             : {}),
         };
-        const records = await invoke<ClipboardRecord[]>("get_clipboard_records", requestArgs);
+        const records = await invoke<ClipboardRecord[]>("list_clipboard_records", requestArgs);
         if (request !== recordsLoadGeneration) return;
         if (append) {
           set((prev) => ({
@@ -388,7 +388,7 @@ export function createRecordsStore() {
         const cat = activeCategory !== "all" ? activeCategory : undefined;
         const activeResourceGroup =
           activeCategory === "resources" ? state.resourceGroup : null;
-        const records = await invoke<ClipboardRecord[]>("get_clipboard_records", {
+        const records = await invoke<ClipboardRecord[]>("list_clipboard_records", {
           search: state.search || undefined,
           limit: loaded,
           offset: 0,
@@ -442,7 +442,7 @@ export function createRecordsStore() {
               ? { resourceGroup: activeResourceGroup }
               : {}),
           };
-          const page = await invoke<ClipboardRecord[]>("get_clipboard_records", requestArgs);
+          const page = await invoke<ClipboardRecord[]>("list_clipboard_records", requestArgs);
           allRecords.push(...page);
           if (page.length < PAGE_SIZE) break;
           offset += page.length;
@@ -475,7 +475,7 @@ export function createRecordsStore() {
               ? { resourceGroup: activeResourceGroup }
               : {}),
           };
-          const page = await invoke<ClipboardRecord[]>("get_clipboard_records", requestArgs);
+          const page = await invoke<ClipboardRecord[]>("list_clipboard_records", requestArgs);
           if (request !== recordsLoadGeneration) return null;
           allRecords.push(...page);
           if (page.length < PAGE_SIZE) break;

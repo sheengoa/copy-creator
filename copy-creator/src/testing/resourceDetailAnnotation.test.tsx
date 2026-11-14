@@ -16,7 +16,7 @@ const invokeMock = vi.fn(async (cmd: string) => {
   if (cmd === "read_resource_text_detail") {
     return { content: TEXT, truncated: false };
   }
-  if (cmd === "get_resource_annotations") return [];
+  if (cmd === "list_resource_annotations") return [];
   return null;
 });
 

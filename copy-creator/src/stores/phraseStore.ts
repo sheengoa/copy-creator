@@ -168,7 +168,7 @@ export const usePhraseStore = create<PhraseState>()((set, get) => {
 
   loadGroups: async () => {
     try {
-      const groups = await invoke<PhraseGroup[]>("get_phrase_groups");
+      const groups = await invoke<PhraseGroup[]>("list_phrase_groups");
       set({ groups });
       // 无已选分组时默认落「全部」视图：跨分组按最近使用排序，省去先选分组。
       if (!get().selectedGroupId) {
@@ -244,10 +244,10 @@ export const usePhraseStore = create<PhraseState>()((set, get) => {
     try {
       // 「全部」走跨分组聚合查询：附带分组名与最近使用时间，供来源标签展示。
       const phrases = groupId === ALL_PHRASES_GROUP_ID
-        ? await invoke<Phrase[]>("get_all_phrases", {
+        ? await invoke<Phrase[]>("list_all_phrases", {
             sortBy: useSettingsStore.getState().contentSort,
           })
-        : await invoke<Phrase[]>("get_phrases", { groupId });
+        : await invoke<Phrase[]>("list_phrases", { groupId });
       set({ phrases, selectedGroupId: groupId });
     } catch (e) {
       console.error("Failed to load phrases:", e);

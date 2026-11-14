@@ -2856,7 +2856,7 @@ mod resource_command_tests {
         crate::db::touch_phrase_usage_internal(&handle, "p2").unwrap();
         crate::db::touch_phrase_usage_internal(&handle, "p2").unwrap();
         let phrases_recent =
-            crate::db::get_all_phrases(handle.clone(), None, Some("recent".into())).unwrap();
+            crate::db::list_all_phrases(handle.clone(), None, Some("recent".into())).unwrap();
         assert_eq!(
             phrases_recent
                 .iter()
@@ -2865,7 +2865,7 @@ mod resource_command_tests {
             vec!["p2", "p1"]
         );
         let phrases_count =
-            crate::db::get_all_phrases(handle.clone(), None, Some("count".into())).unwrap();
+            crate::db::list_all_phrases(handle.clone(), None, Some("count".into())).unwrap();
         assert_eq!(
             phrases_count
                 .iter()
@@ -2985,9 +2985,9 @@ mod resource_command_tests {
         assert_eq!(ids(&resources_recent), vec!["res-fresh", "res-used"]);
 
         // 快捷输入「全部」：最多使用 → 次数倒序、未使用垫底。
-        let phrases_count = crate::db::get_all_phrases(handle.clone(), None, Some("count".into())).unwrap();
+        let phrases_count = crate::db::list_all_phrases(handle.clone(), None, Some("count".into())).unwrap();
         assert_eq!(ids(&phrases_count), vec!["phrase-hot", "phrase-fresh"]);
-        let phrases_recent = crate::db::get_all_phrases(handle, None, Some("recent".into())).unwrap();
+        let phrases_recent = crate::db::list_all_phrases(handle, None, Some("recent".into())).unwrap();
         assert_eq!(ids(&phrases_recent), vec!["phrase-hot", "phrase-fresh"]);
 
         cleanup(&root);

@@ -300,7 +300,7 @@ export default function RadialMenu() {
 
   const loadResourceGroups = useCallback(async () => {
     try {
-      const groups = await invoke<ResourceFolder[]>("get_resource_groups");
+      const groups = await invoke<ResourceFolder[]>("list_resource_groups");
       setResourceGroups(groups);
     } catch (error) {
       console.error("Failed to load radial resource groups:", error);

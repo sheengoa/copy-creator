@@ -347,7 +347,7 @@ export default function ResourcePage() {
   const loadResourceGroups = useCallback(async () => {
     setResourceGroupsLoading(true);
     try {
-      const groups = await invoke<ResourceFolder[]>("get_resource_groups");
+      const groups = await invoke<ResourceFolder[]>("list_resource_groups");
       setResourceGroups(groups);
       setResourceGroupsError(null);
       try {
