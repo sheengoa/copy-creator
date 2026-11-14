@@ -470,18 +470,6 @@ pub(crate) fn query_all_params(
     Ok(rows)
 }
 
-/// 按 ids 顺序重写 sort_order（0,1,2…）；列表稳定按序号+创建时间排序。
-fn write_order(conn: &Connection, table: &str, ids: &[String]) -> Result<(), String> {
-    let mut stmt = conn
-        .prepare(&format!("UPDATE {table} SET sort_order = ?1 WHERE id = ?2"))
-        .map_err(|e| e.to_string())?;
-    for (index, id) in ids.iter().enumerate() {
-        stmt.execute(params![index as f64, id])
-            .map_err(|e| e.to_string())?;
-    }
-    Ok(())
-}
-
 /// 关联表整组替换：前端保存的即最终名单（与原型「关联角色」的挑选
 /// 交互一致），DELETE + 批量 INSERT 比增量 diff 简单且无残留。
 fn replace_links(
@@ -922,7 +910,8 @@ pub fn project_reorder_episodes(
     {
         let state = app.state::<DbState>();
         let conn = state.conn.lock().map_err(|e| e.to_string())?;
-        write_order(&conn, "project_episodes", &ids)?;
+        // 写序收口于 db::write_id_order（序号 0,1,2…；列表稳定按序号+创建时间排序）。
+        write_id_order(&conn, "project_episodes", &ids, |i, _| i as f64)?;
     }
     emit_project_changed(&app);
     Ok(())
@@ -1514,7 +1503,7 @@ pub fn project_reorder_scenes(
     {
         let state = app.state::<DbState>();
         let conn = state.conn.lock().map_err(|e| e.to_string())?;
-        write_order(&conn, "project_scenes", &ids)?;
+        write_id_order(&conn, "project_scenes", &ids, |i, _| i as f64)?;
     }
     emit_project_changed(&app);
     Ok(())
@@ -1631,7 +1620,7 @@ pub fn project_reorder_shots(
     {
         let state = app.state::<DbState>();
         let conn = state.conn.lock().map_err(|e| e.to_string())?;
-        write_order(&conn, "project_shots", &ids)?;
+        write_id_order(&conn, "project_shots", &ids, |i, _| i as f64)?;
     }
     emit_project_changed(&app);
     Ok(())

@@ -348,20 +348,16 @@ pub fn delete_ai_channel(app: AppHandle, id: String) -> Result<(), String> {
     Ok(())
 }
 
-/// 渠道排序：按前端传入的 id 顺序重写 sort_order（拖拽排序）。
+/// 渠道排序：按前端传入的 id 顺序重写 sort_order（拖拽排序）。写序收口
+/// 于 db::write_id_order（单条 CASE UPDATE 自原子，替代此前手搓事务循环；
+/// INTEGER 列收整数 f64 无损）。updated_at 此前随排序触碰，但它是只写
+/// 元数据且无任何读取方（CHANNEL_COLS 不含该列），收口后不再刷新。
 #[tauri::command]
 pub fn reorder_ai_channels(app: AppHandle, ids: Vec<String>) -> Result<(), String> {
     let state = app.state::<DbState>();
-    let mut conn = state.conn.lock().map_err(|e| e.to_string())?;
-    let tx = conn.transaction().map_err(|e| e.to_string())?;
-    for (index, id) in ids.iter().enumerate() {
-        tx.execute(
-            "UPDATE ai_channels SET sort_order = ?1, updated_at = ?2 WHERE id = ?3",
-            params![index as i64, canvas_now(), id],
-        )
-        .map_err(|e| e.to_string())?;
-    }
-    tx.commit().map_err(|e| e.to_string())
+    let conn = state.conn.lock().map_err(|e| e.to_string())?;
+    write_id_order(&conn, "ai_channels", &ids, |i, _| i as f64)?;
+    Ok(())
 }
 
 #[tauri::command]
