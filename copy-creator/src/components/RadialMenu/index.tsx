@@ -1,7 +1,7 @@
 import { RadialImageBanner, ResourceItemVisual } from "./ResourceItemVisual";
 // 径向菜单窗口专属样式：随动态 import 的 root 分包，主窗口不加载。
 import "../../styles/radial-menu.css";
-import { readResourceTextPreview, readTextFileContent, readQuickInputTextPreview } from "../../domain/mediaAssets";
+import { readTextFileContent } from "../../domain/mediaAssets";
 import { resolveAbsoluteResourcePath } from "../../domain/mediaUrl";
 import { useEffect, useLayoutEffect, useRef, useState, useCallback, useMemo, type CSSProperties } from "react";
 import { createPortal } from "react-dom";
@@ -11,6 +11,7 @@ import { getCurrentWindow } from "@tauri-apps/api/window";
 import { invoke } from "@tauri-apps/api/core";
 import { Icons } from "../Icons";
 import { GroupTwistButton } from "../GroupTwistButton";
+import { useRadialPreview } from "./useRadialPreview";
 import { useClipboardStore, type ClipType } from "../../stores/clipboardStore";
 import {
   usePhraseStore,
@@ -40,10 +41,8 @@ import { useHorizontalWheelScroll } from "../../hooks/useHorizontalWheelScroll";
 import { useRecordLocale } from "../../hooks/useRecordLocale";
 import {
   isContentPreviewAvailable,
-  loadRecordPreviewSegments,
   RADIAL_PREVIEW_WIDTH,
   type RadialPreviewDirection,
-  type RadialPreviewSegment,
 } from "../../domain/preview";
 import { buildRecordView } from "../../domain/recordView";
 import RadialItemAction from "./RadialItemAction";
@@ -78,8 +77,6 @@ import {
   flog,
   loadPasteLeftClickSetting,
   type PendingNativeDrag,
-  type PreviewLayout,
-  type PreviewState,
   type RadialDragEvent,
   type RadialItem,
   type TabKey,
@@ -103,14 +100,8 @@ export default function RadialMenu() {
   // 资源分组下拉的子分组折叠状态：菜单存活期内记忆。
   const [collapsedGroupPaths, setCollapsedGroupPaths] = useState<string[]>([]);
   const [phraseGroupId, setPhraseGroupId] = useState<string | null>(ALL_PHRASES_GROUP_ID);
-  const [preview, setPreview] = useState<PreviewState | null>(null);
-  // 收起动画播放中：预览保持挂载滑出，动画结束才真正卸载并恢复穿透。
-  const [previewClosing, setPreviewClosing] = useState(false);
   // 菜单收起动画播放中（后端已发出 radial-menu-hide，窗口尚未停泊）。
   const [menuClosing, setMenuClosing] = useState(false);
-  // 条带方向决定主面板贴窗口哪一侧（几何固定，会话内不变）：state 供
-  // 渲染取类名，ref 供异步展开逻辑读取。
-  const [previewSide, setPreviewSide] = useState<RadialPreviewDirection>("right");
   const [dragSessionItemId, setDragSessionItemId] = useState<string | null>(null);
   const [draggingItemId, setDraggingItemId] = useState<string | null>(null);
 
@@ -141,15 +132,7 @@ export default function RadialMenu() {
   // 滚动持续记住「视口顶条目 + 偏移」，同视图内容更新后重新对位。
   const scrollAnchorRef = useRef<ListScrollAnchor | null>(null);
   const phraseGroupIdRef = useRef<string | null>(ALL_PHRASES_GROUP_ID);
-  const previewRequestRef = useRef(0);
-  const previewRef = useRef<PreviewState | null>(null);
-  const previewCloseTimerRef = useRef<number | null>(null);
   const blurHideTimerRef = useRef<number | null>(null);
-  // 扩展条带的方向与宽度：后端打开窗口时按光标所在显示器一次性决定
-  // （预留好条带，展开期不再改动窗口几何），随 radial-menu-show 事件下发。
-  const previewSideRef = useRef<RadialPreviewDirection>("right");
-  const previewWidthRef = useRef(RADIAL_PREVIEW_WIDTH);
-  const previewCacheRef = useRef(new Map<string, RadialPreviewSegment[]>());
   const dragActiveRef = useRef(false);
   const shiftClickSelectionModeRef = useRef(false);
   const suppressClickRef = useRef(false);
@@ -168,7 +151,6 @@ export default function RadialMenu() {
   useEffect(() => { clipboardCategoryRef.current = clipboardCategory; }, [clipboardCategory]);
   useEffect(() => { resourceGroupRef.current = resourceGroup; }, [resourceGroup]);
   useEffect(() => { phraseGroupIdRef.current = phraseGroupId; }, [phraseGroupId]);
-  useEffect(() => { previewRef.current = preview; }, [preview]);
 
   const applyUiScale = useCallback((scale: number) => {
     const next = Math.min(2, Math.max(0.5, Number.isFinite(scale) ? scale : 1));
@@ -265,46 +247,22 @@ export default function RadialMenu() {
     };
   }, [closeResourceGroupMenu, resourceGroupMenuPath, resourceGroupMenuItems.length, updateResourceGroupMenuPosition]);
 
-  const invalidatePreviewRequest = useCallback(() => {
-    previewRequestRef.current += 1;
-  }, []);
-
-  // 展开/收起只做两件事：挂载/卸载预览面板 + 通知后端扩放输入区域。
-  // 窗口几何自打开时按"面板 + 预留条带"分配后就固定不变——X11 上任何
-  // resize/move 都会被合成器画出一帧"旧内容按左上锚定 + 新区域未绘制"
-  // 的闪烁帧（实测帧证据），这是扩展闪烁的物理根源，必须整体绕开。
-  // 收起因此也在 web 层做：预览滑出动画播放完毕才卸载并恢复条带穿透，
-  // 动画期间输入区域保持展开（用户看到的预览仍可点击）。animated=false
-  // 用于窗口隐藏等无需动效的路径，立即复位。
-  const cancelPreviewClose = useCallback(() => {
-    if (previewCloseTimerRef.current !== null) {
-      window.clearTimeout(previewCloseTimerRef.current);
-      previewCloseTimerRef.current = null;
-    }
-    setPreviewClosing(false);
-  }, []);
-
-  const collapsePreview = useCallback((animated = true) => {
-    invalidatePreviewRequest();
-    previewRef.current = null;
-    cancelPreviewClose();
-    if (!animated) {
-      setPreview(null);
-      void invoke("set_radial_hit_area", { expanded: false }).catch(() => {});
-      return;
-    }
-    setPreviewClosing(true);
-    previewCloseTimerRef.current = window.setTimeout(() => {
-      previewCloseTimerRef.current = null;
-      setPreviewClosing(false);
-      setPreview(null);
-      void invoke("set_radial_hit_area", { expanded: false }).catch(() => {});
-    }, 160);
-  }, [invalidatePreviewRequest, cancelPreviewClose]);
-
-  const dismissPreviewForDrag = useCallback(() => {
-    collapsePreview();
-  }, [collapsePreview]);
+  // 预览子系统（展开/收起动画、分段加载与缓存、输入区扩放）收口于
+  // useRadialPreview；拖拽会话 ref 注入使预览为拖拽让路。
+  const {
+    preview,
+    previewClosing,
+    previewSide,
+    setPreviewSide,
+    previewSideRef,
+    previewWidthRef,
+    previewCacheRef,
+    previewRef,
+    collapsePreview,
+    dismissPreviewForDrag,
+    togglePreview,
+    handlePreviewLeave,
+  } = useRadialPreview({ dragActiveRef, nativeDragRef });
 
   const cancelPendingNativeDrag = useCallback((pending: PendingNativeDrag | null) => {
     if (!pending || !pending.armRequested || pending.nativeStarted) return;
@@ -321,160 +279,6 @@ export default function RadialMenu() {
     else void cancelTask.catch(() => {});
   }, []);
 
-  const expandPreviewWindow = useCallback(async (
-    request: number,
-    item: RadialItem,
-  ): Promise<PreviewLayout | null> => {
-    if (dragActiveRef.current || nativeDragRef.current) return null;
-    if (request !== previewRequestRef.current) return null;
-    if (previewRef.current) return previewRef.current.layout;
-    // 收起动画尚在播放时重新展开：取消待执行的卸载，面板直接续用。
-    cancelPreviewClose();
-    // 条带方向与宽度由后端在打开窗口时一次性决定并随事件下发，
-    // 前端不再查询显示器/计算窗口几何。
-    const layout = { direction: previewSideRef.current, width: previewWidthRef.current };
-    if (layout.width <= 0) return null;
-    try {
-      // 先扩输入区再挂载面板：面板出现的同一帧即可接收指针事件。
-      await invoke("set_radial_hit_area", { expanded: true });
-    } catch (error) {
-      flog(`[preview] expand hit-area failed: ${String(error)}`);
-    }
-    if (
-      request !== previewRequestRef.current
-      || dragActiveRef.current
-      || nativeDragRef.current
-    ) {
-      return null;
-    }
-    const loadingState = {
-      itemId: item.id,
-      segments: null,
-      layout,
-    };
-    previewRef.current = loadingState;
-    setPreview(loadingState);
-    return layout;
-  }, [cancelPreviewClose]);
-
-  const loadPreviewSegments = useCallback(async (item: RadialItem) => {
-    const cached = previewCacheRef.current.get(item.id);
-    if (cached) return cached;
-
-    const record = useClipboardStore.getState().records.find((entry) => entry.id === item.id);
-    let segments: RadialPreviewSegment[];
-    if (record) {
-      if (isResourceRecord(record)) {
-        const kind = inferResourceMediaKind(record);
-        const resourcePath = getResourcePath(record);
-        if (kind === "image") {
-          segments = [{ type: "image", path: resourcePath, version: item.resourceVersion }];
-        } else if (kind === "video" || kind === "audio") {
-          segments = [{ type: kind, path: resourcePath, version: item.resourceVersion }];
-        } else if (item.textPreviewPath) {
-          // 文本取材经 domain 判定读文件内容（含编辑后 type 为 text 的记录），
-          // 不依赖 resource_kind 与 type；大文件由后端截断返回，读取失败时
-          // 回退为路径展示。
-          try {
-            const preview = await readResourceTextPreview(item.textPreviewPath);
-            segments = [{ type: "text", content: preview.content }];
-          } catch {
-            segments = [{ type: "text", content: item.textPreviewPath }];
-          }
-        } else {
-          const content = kind === "text"
-            ? await useClipboardStore.getState().getRecordContent(record)
-            : item.resourceTitle || item.content;
-          segments = [{ type: "text", content }];
-        }
-      } else {
-        segments = await loadRecordPreviewSegments({
-          id: record.id,
-          recordType: record.type,
-          content: record.content,
-          contentTruncated: Boolean(record.content_truncated),
-          hasImages: Boolean(record.has_images),
-        });
-      }
-    } else {
-      const phrase = usePhraseStore.getState().phrases.find((entry) => entry.id === item.id);
-      if (phrase && phrase.input_type === "file" && isImageFilePath(phrase.content)) {
-        segments = [{ type: "image", path: phrase.content }];
-      } else if (phrase && phrase.input_type === "file") {
-        // 文件短语：常见文本格式读取内容预览，与主窗口一致。
-        try {
-          const text = await readQuickInputTextPreview(phrase.content);
-          segments = [{ type: "text", content: text }];
-        } catch {
-          segments = [{ type: "text", content: phrase.content }];
-        }
-      } else {
-        segments = [{ type: "text", content: phrase?.content ?? item.content }];
-      }
-    }
-    previewCacheRef.current.set(item.id, segments);
-    return segments;
-  }, []);
-
-  const showPreview = useCallback(async (item: RadialItem) => {
-    if (dragActiveRef.current || nativeDragRef.current) return;
-    const request = ++previewRequestRef.current;
-    const layout = await expandPreviewWindow(request, item);
-    if (
-      !layout
-      || request !== previewRequestRef.current
-      || dragActiveRef.current
-      || nativeDragRef.current
-    ) return;
-    try {
-      const segments = await loadPreviewSegments(item);
-      if (
-        request !== previewRequestRef.current
-        || dragActiveRef.current
-        || nativeDragRef.current
-      ) return;
-      const loadedState = {
-        itemId: item.id,
-        segments,
-        layout,
-      };
-      previewRef.current = loadedState;
-      setPreview(loadedState);
-    } catch {
-      if (
-        request !== previewRequestRef.current
-        || dragActiveRef.current
-        || nativeDragRef.current
-      ) return;
-      const failedState = {
-        itemId: item.id,
-        segments: [{ type: "text" as const, content: item.content }],
-        layout,
-      };
-      previewRef.current = failedState;
-      setPreview(failedState);
-    }
-  }, [expandPreviewWindow, loadPreviewSegments]);
-
-  const togglePreview = useCallback((item: RadialItem) => {
-    if (previewRef.current?.itemId === item.id) {
-      collapsePreview();
-      return;
-    }
-    void showPreview(item);
-  }, [collapsePreview, showPreview]);
-
-  const handlePreviewLeave = useCallback((event: React.MouseEvent<HTMLElement>) => {
-    if (
-      !previewRef.current
-      || dragActiveRef.current
-      || nativeDragRef.current
-    ) return;
-
-    const relatedTarget = event.relatedTarget;
-    if (relatedTarget instanceof Node && event.currentTarget.contains(relatedTarget)) return;
-    collapsePreview();
-  }, [collapsePreview]);
 
   useEffect(() => {
     // Initial theme load（偏好可为 "system"，本地解析后再应用）
@@ -1089,7 +893,7 @@ export default function RadialMenu() {
     setDragSessionItemId(null);
     setDraggingItemId(null);
     if (previewRef.current) collapsePreview();
-  }, [cancelPendingNativeDrag, collapsePreview]);
+  }, [cancelPendingNativeDrag, collapsePreview, previewRef]);
 
   const handleItemPointerDown = useCallback((
     e: PointerEvent,
@@ -1490,6 +1294,11 @@ export default function RadialMenu() {
     restoreLastTab,
     restoreResourceGroup,
     updateHoverFromPoint,
+    previewCacheRef,
+    previewRef,
+    previewSideRef,
+    previewWidthRef,
+    setPreviewSide,
   ]);
 
   const records = useClipboardStore((s) => s.records);

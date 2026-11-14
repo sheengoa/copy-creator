@@ -645,7 +645,8 @@ describe("integration regressions", () => {
   // 输入区域（XShape），收起反向；条带收起时点击穿透，不吞下层点击。
   it("expands the radial preview without any window geometry change", () => {
     const radialStyles = readSource("../styles/radial-menu.css");
-    const radialMenu = readSource("../components/RadialMenu/index.tsx");
+    // 预览展开/收起流程收口在 useRadialPreview（2026-11-14 拆分）。
+    const radialMenu = readSource("../components/RadialMenu/useRadialPreview.ts");
     const shortcutSource = readShortcutSource();
     const libSource = readSource("../../src-tauri/src/lib.rs");
 
@@ -873,7 +874,10 @@ describe("integration regressions", () => {
     expect(radialMenu).not.toContain("(e.buttons & 1)");
     expect(radialMenu).not.toContain("setPointerCapture");
     expect(radialMenu).not.toContain("releasePointerCapture");
-    expect(radialMenu).toContain("if (dragActiveRef.current || nativeDragRef.current)");
+    // 拖拽让路守卫（dragActive/nativeDrag 即退）随预览拆分收口在 useRadialPreview。
+    expect(readSource("../components/RadialMenu/useRadialPreview.ts")).toContain(
+      "if (dragActiveRef.current || nativeDragRef.current)",
+    );
     expect(radialMenu).toContain("data-radial-drag-source={item.dragSource}");
     expect(radialMenu).toContain("data-radial-drag-path={item.dragPath}");
     expect(radialMenu).toContain('className={`radial-menu-preview${previewClosing ? " preview-closing" : ""}`}');
@@ -881,7 +885,10 @@ describe("integration regressions", () => {
     expect(radialMenu).toContain("data-radial-preview-trigger");
     expect(radialMenu).toContain('closest("[data-radial-preview-trigger]")');
     expect(radialMenu).toContain("{preview && (");
-    expect(radialMenu).toContain("const togglePreview = useCallback");
+    // togglePreview 实现随预览拆分收口在 useRadialPreview，index 消费 hook 返回值。
+    expect(readSource("../components/RadialMenu/useRadialPreview.ts")).toContain(
+      "const togglePreview = useCallback",
+    );
     expect(radialMenu).toContain("aria-expanded={preview?.itemId === item.id}");
     expect(radialMenu).not.toContain("schedulePreview");
     expect(radialMenu).not.toContain("onMouseEnter={(e) =>");
