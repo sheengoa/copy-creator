@@ -205,7 +205,7 @@ describe("standalone window chrome", () => {
 
   it("shares resizable window handles across borderless windows", () => {
     const handlesSource = readSource("../components/WindowResizeHandles.tsx");
-    const componentsCss = readStyle("components.css");
+    const componentsCss = readStyle("components/chrome.css");
 
     expect(handlesSource).toContain("startResizeDragging");
     expect(handlesSource).toContain('data-resize-direction={direction}');
@@ -249,7 +249,7 @@ describe("standalone window chrome", () => {
     const controlSource = readSource("../components/WindowControlButtons.tsx");
     const appSource = readSource("../App.tsx");
     const dialogSource = readSource("../components/ClipboardCreateDialog/index.tsx");
-    const componentsCss = readStyle("components.css");
+    const componentsCss = readStyle("components/chrome.css");
     const persistHookSource = readSource("../hooks/usePersistWindowSize.ts");
     const capabilities = JSON.parse(
       readFileSync(new URL("../../src-tauri/capabilities/default.json", import.meta.url), "utf8"),
@@ -289,7 +289,7 @@ describe("standalone window chrome", () => {
     const hookSource = readSource("../hooks/useWindowMaximized.ts");
     const appSource = readSource("../App.tsx");
     const dialogSource = readSource("../components/ClipboardCreateDialog/index.tsx");
-    const componentsCss = readStyle("components.css");
+    const componentsCss = readStyle("components/chrome.css");
 
     expect(hookSource).toContain("onResized");
     expect(hookSource).toContain("isMaximized");

@@ -109,7 +109,7 @@ describe("integration regressions", () => {
     const clipboardSource = readSource("../pages/ClipboardPage/ClipboardCard.tsx");
     const phraseSource = readSource("../pages/PhrasePage/PhraseList.tsx");
     const resourceSource = readSource("../pages/ResourcePage/ResourceCard.tsx");
-    const sharedStyles = readSource("../styles/components.css");
+    const sharedStyles = readSource("../styles/components/cards.css");
 
     expect(clipboardSource).toContain("resource-card clipboard-card");
     expect(phraseSource).toContain("resource-card phrase-card");
@@ -138,7 +138,7 @@ describe("integration regressions", () => {
 
   it("sizes the quick input editor dialog relative to the main window", () => {
     const dialogSource = readSource("../pages/PhrasePage/PhraseDialog.tsx");
-    const componentsStyles = readSource("../styles/components.css");
+    const componentsStyles = readSource("../styles/components/dialog.css");
 
     expect(dialogSource).toContain('className="dialog-content large phrase-dialog-content"');
     expect(componentsStyles).toContain(".dialog-content.large.phrase-dialog-content");
@@ -523,10 +523,12 @@ describe("integration regressions", () => {
     expect(mediaServerSource).toContain("get_media_server_origin");
     expect(dbSource).toContain("ADD COLUMN resource_note TEXT DEFAULT ''");
     expect(dbSource).toContain("fn set_resource_note");
-    // resource-media-* 预览样式已随跨窗口共享迁移到 components.css。
-    const sharedStyles = readSource("../styles/components.css");
-    expect(sharedStyles).toContain(".resource-detail-stage-audio .resource-media-player");
-    expect(sharedStyles).toContain("height: 40px");
+    // resource-media-* 预览样式已随跨窗口共享迁移到 components/：基座高度
+    // 在 shared.css（跨窗口媒体预览段），详情舞台变体在 media.css（播放条段）。
+    expect(readSource("../styles/components/shared.css")).toContain("height: 40px");
+    expect(readSource("../styles/components/media.css")).toContain(
+      ".resource-detail-stage-audio .resource-media-player",
+    );
     // CSP 收紧（E7）：不再放行任意 https 外联；asset 协议已停用，
     // 媒体一律经本机 media server（127.0.0.1）或 data/blob URL 加载。
     expect(config.app.security.csp).not.toContain("https:");
@@ -584,7 +586,7 @@ describe("integration regressions", () => {
     // 屏幕外卡片跳过渲染，配合图片懒加载保持长列表滚动流畅。
     expect(radialStyles).toContain("content-visibility: auto");
     // .resource-card 骨架已沉到 components.css（三页共用），content-visibility 随迁。
-    expect(readSource("../styles/components.css")).toContain("content-visibility: auto");
+    expect(readSource("../styles/components/cards.css")).toContain("content-visibility: auto");
   });
 
   it("keeps resource-library storage separate from the app database", () => {

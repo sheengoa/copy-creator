@@ -1,4 +1,11 @@
 @import './base.css';
 @import './layout.css';
-@import './components.css';
+/* components/ 七片按原 components.css 块序导入——级联顺序与拆分前逐块一致。 */
+@import './components/base.css';
+@import './components/find-replace.css';
+@import './components/dialog.css';
+@import './components/chrome.css';
+@import './components/shared.css';
+@import './components/media.css';
+@import './components/cards.css';
 @import './ui.css';

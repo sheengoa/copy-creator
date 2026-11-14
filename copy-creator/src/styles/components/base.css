@@ -1,0 +1,370 @@
+/* components/base.css —— 共享页面样式（搜索框/高亮）/骨架屏 / 批量选择条 / 卡片动作按钮。
+   原 components.css 按域拆分（2026-11-14）：index.css 按原块序导入，级联顺序不变。
+   行数守卫见架构守卫规则 27（styles/components 上限 1000）。 */
+
+/* === Shared Page Styles === */
+.page-search {
+  position: relative;
+  display: flex;
+  align-items: center;
+}
+
+/* 搜索框与 chip 同一灰色源（--chip-bg）：无边框软底，聚焦时灰底加深并
+   出现柔和 accent 光圈。高度 32px 与分段槽、按钮行对齐。 */
+.search-input-container {
+  width: 100%;
+  height: 32px;
+  display: flex;
+  align-items: center;
+  background: var(--chip-bg);
+  border-radius: 8px;
+  overflow: hidden;
+  transition: box-shadow 0.2s, background 0.2s;
+}
+
+.search-input-container:focus-within {
+  background: var(--chip-hover-bg);
+  box-shadow: 0 0 0 3px var(--accent-bg);
+}
+
+.search-input-field {
+  flex: 1;
+  height: 100%;
+  border: none;
+  outline: none;
+  padding: 0 0 0 12px;
+  font-size: 0.9em;
+  font-family: var(--font);
+  color: var(--text-primary);
+  background: transparent;
+  caret-color: var(--accent);
+}
+
+.search-input-field::placeholder {
+  color: var(--text-secondary);
+}
+
+[data-theme="dark"] .search-input-field::placeholder {
+  color: #a1a1a6;
+}
+
+.search-input-label {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 36px;
+  height: 100%;
+  flex-shrink: 0;
+  cursor: pointer;
+}
+
+.search-input-icon {
+  width: 14px;
+  height: 14px;
+}
+
+.search-input-icon path {
+  fill: var(--text-secondary);
+}
+
+/* 搜索命中高亮（HighlightText 全局唯一出口，亮暗两套）：亮色浅黄底 +
+   继承深字；暗色改半透明黄底透出深底、继承白字可读——此前不透明浅黄
+   直接配暗色继承白字，命中标记形同消失（0.3.27 用户报告「点亮没了」
+   的根因）。 */
+mark.search-highlight {
+  padding: 0 1px;
+  border-radius: 2px;
+  background: #ffe9a8;
+  color: inherit;
+}
+
+[data-theme="dark"] mark.search-highlight {
+  background: color-mix(in srgb, #f5c542 38%, transparent);
+}
+
+.page-empty-compact {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  padding: 60px 0;
+  color: var(--text-tertiary);
+  font-size: var(--text-sm);
+}
+
+[data-theme="dark"] .page-empty-compact {
+  color: rgba(255, 255, 255, 0.35);
+}
+
+.empty-icon-compact {
+  width: 44px;
+  height: 44px;
+  border-radius: 12px;
+  background: var(--card-inner-bg);
+  border: 1px solid var(--separator);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--text-tertiary);
+  box-shadow: 0 0.5px 0 0 rgba(255,255,255,0.25) inset;
+}
+
+[data-theme="dark"] .empty-icon-compact {
+  box-shadow: 0 0.5px 0 0 rgba(255,255,255,0.03) inset;
+  color: rgba(255, 255, 255, 0.35);
+  background: rgba(255, 255, 255, 0.04);
+  border-color: rgba(255, 255, 255, 0.06);
+}
+
+.empty-icon-compact svg {
+  width: 20px;
+  height: 20px;
+}
+
+/* === Skeleton / Shimmer Loading === */
+.skeleton-line {
+  height: 10px;
+  border-radius: 5px;
+  background: linear-gradient(90deg, var(--separator) 25%, var(--chip-hover-bg) 50%, var(--separator) 75%);
+  background-size: 200% 100%;
+  animation: shimmer 1.5s ease-in-out infinite;
+}
+
+.skeleton-line.short {
+  width: 32px;
+  height: 8px;
+}
+
+.batch-selection-bar {
+  min-height: 36px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 3px 2px 6px;
+  border-bottom: 1px solid color-mix(in srgb, var(--separator) 75%, transparent);
+  background: transparent;
+}
+
+.batch-select-all {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--text-primary);
+  font-size: var(--text-sm);
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.batch-select-all input,
+.trash-row-check input {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: 0;
+  opacity: 0;
+  pointer-events: none;
+}
+
+.selection-checkbox {
+  --batch-check-fill: #333;
+  --batch-check-mark: #fff;
+  position: relative;
+  width: 16px;
+  height: 16px;
+  flex-shrink: 0;
+  border: 1px solid color-mix(in srgb, var(--text-primary) 24%, transparent);
+  border-radius: 5px;
+  background: var(--input-bg);
+  transition: background 0.15s ease-out, border-color 0.15s ease-out;
+}
+
+[data-theme="dark"] .selection-checkbox {
+  --batch-check-fill: rgba(255, 255, 255, 0.86);
+  --batch-check-mark: #1c1c1e;
+}
+
+.selection-checkbox::after {
+  content: "";
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  width: 4px;
+  height: 7px;
+  border-right: 2px solid var(--batch-check-mark);
+  border-bottom: 2px solid var(--batch-check-mark);
+  opacity: 0;
+  transform: translate(-50%, -60%) rotate(45deg);
+}
+
+input:checked + .selection-checkbox,
+input:indeterminate + .selection-checkbox {
+  border-color: var(--batch-check-fill);
+  background: var(--batch-check-fill);
+}
+
+input:checked + .selection-checkbox::after {
+  opacity: 1;
+}
+
+input:indeterminate + .selection-checkbox::after {
+  width: 8px;
+  height: 2px;
+  border: 0;
+  border-radius: 1px;
+  background: var(--batch-check-mark);
+  opacity: 1;
+  transform: translate(-50%, -50%);
+}
+
+input:focus-visible + .selection-checkbox {
+  outline: 2px solid color-mix(in srgb, var(--text-primary) 30%, transparent);
+  outline-offset: 2px;
+}
+
+.batch-select-all:hover .selection-checkbox,
+.trash-row-check:hover .selection-checkbox {
+  border-color: color-mix(in srgb, var(--text-primary) 42%, transparent);
+}
+
+.batch-select-all:has(input:disabled) {
+  opacity: 0.45;
+  cursor: default;
+}
+
+.batch-selection-count {
+  flex: 1;
+  min-width: 0;
+  color: var(--text-secondary);
+  font-size: var(--text-sm);
+  white-space: nowrap;
+}
+
+.batch-selection-actions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+/* 批量选择条动作按钮：浮起白卡——与其他动作按钮同语言；
+   删除以红字保留危险语义，转圈按白卡底取色。 */
+.batch-delete-btn,
+.batch-move-btn,
+.batch-cancel-btn {
+  height: 27px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  padding: 0 8px;
+  border-radius: 7px;
+  border: 0;
+  background: var(--btn-card-bg);
+  color: var(--text-primary);
+  box-shadow: var(--btn-card-shadow);
+  font-family: var(--font);
+  font-size: var(--text-sm);
+  cursor: pointer;
+  white-space: nowrap;
+  transition: box-shadow 0.15s ease;
+}
+
+.batch-delete-btn:hover,
+.batch-move-btn:hover,
+.batch-cancel-btn:hover {
+  box-shadow: var(--btn-card-shadow-hover);
+}
+
+.batch-move-btn {
+  color: var(--text-primary);
+}
+
+.batch-move-btn:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+
+.batch-move-btn svg {
+  width: 13px;
+  height: 13px;
+}
+
+.batch-delete-btn {
+  color: var(--danger);
+}
+
+.batch-delete-btn:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+
+.batch-delete-btn svg {
+  width: 13px;
+  height: 13px;
+}
+
+.batch-selection-spinner {
+  width: 13px;
+  height: 13px;
+  flex: 0 0 auto;
+  border: 2px solid color-mix(in srgb, var(--danger) 35%, transparent);
+  border-top-color: var(--danger);
+  border-radius: 50%;
+  animation: spin 0.7s linear infinite;
+}
+
+.batch-cancel-btn:disabled {
+  opacity: 0.55;
+  cursor: default;
+}
+
+
+/* Card Action Buttons */
+/* card-edit-btn：分组管理对话框行内编辑（守卫规则 18 保留的唯一消费方）；
+   card-pin-btn：剪切板收藏星标 */
+.card-delete-btn,
+.card-edit-btn,
+.card-pin-btn {
+  background: transparent;
+  position: relative;
+  border: none;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  cursor: pointer;
+  opacity: 0;
+  transition: opacity 0.15s;
+  flex-shrink: 0;
+  color: inherit;
+}
+
+.card-delete-btn:hover,
+.card-edit-btn:hover,
+.card-pin-btn:hover {
+  opacity: 1 !important;
+}
+
+.card-delete-btn svg,
+.card-edit-btn svg,
+.card-pin-btn svg {
+  width: 15px;
+  height: 15px;
+  transition: transform 0.2s linear;
+}
+
+.card-delete-btn:hover svg {
+  transform: scale(1.3);
+  color: rgb(220, 38, 38);
+}
+
+.card-edit-btn:hover svg {
+  transform: scale(1.3);
+  color: var(--accent);
+}
+
+.card-edit-btn + .card-delete-btn {
+  margin-left: -4px;
+}

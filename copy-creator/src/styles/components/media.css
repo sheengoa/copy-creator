@@ -1,0 +1,236 @@
+/* components/media.css —— 统一媒体播放条（MediaPlayback）。
+   原 components.css 按域拆分（2026-11-14）：index.css 按原块序导入，级联顺序不变。
+   行数守卫见架构守卫规则 27（styles/components 上限 1000）。 */
+
+/* ── 统一媒体播放条（MediaPlayback，2026-11-02）──
+   黑玻璃条：紫色播放钮 + 可拖进度 + 时间码 + 音量。画布全部媒体预览
+   （预览/保存盒/加载节点/视频工具监视器/抽音轨试听）共用，替代 WebView
+   原生控件——原生样式不可控、暗色主题不跟随、与玻璃节点视觉不统一。
+   视频形态 = 裸画面（media-playback-video）+ 下方本条；音频 = 仅本条。
+   进度/音量滑轨的填充与把共用 pointer-events:none，拖动手势整条承载。 */
+.media-playback {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  width: 100%;
+  min-width: 0;
+}
+
+.media-playback-video {
+  display: block;
+  width: 100%;
+  max-height: 330px;
+  border-radius: 10px;
+  background: #090909;
+  object-fit: contain;
+}
+
+/* 比例贴合默认态（is-ratio-fit，2026-11-06 几何交接样式层）：组件按实测
+   宽高写 --media-fitw/--media-ar，画面收敛为 330 帽等比盒——元素盒恒等
+   于视频盒，contain 留白无处产生；黑底移除（窗口期露承载面而非黑块，
+   与画布图像侧同一准则）。仅画布预览挂 ratioFit；监视器/保存盒等自行
+   控制比例的用法不挂，不受影响。固定高节点（pc-resized）的等比精确盒
+   由画布样式以更高特异性接管（canvas/inputs.css、canvas-video-tools.css）。 */
+.media-playback-video.is-ratio-fit {
+  width: min(100%, var(--media-fitw, 100%));
+  aspect-ratio: var(--media-ar);
+  margin-inline: auto;
+  background: none;
+}
+
+.media-playback-bar {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  height: 36px;
+  padding: 0 10px;
+  border-radius: 9px;
+  background: #141416;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+.media-playback-play {
+  flex: none;
+  width: 24px;
+  height: 24px;
+  padding: 0;
+  border: none;
+  border-radius: 50%;
+  background: #af52de;
+  color: #fff;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+}
+
+.media-playback-play svg {
+  width: 12px;
+  height: 12px;
+}
+
+.media-playback-play:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+
+.media-playback-track {
+  position: relative;
+  flex: 1;
+  min-width: 0;
+  height: 16px;
+  padding: 0;
+  border: none;
+  background: transparent;
+  cursor: pointer;
+}
+
+.media-playback-track::before {
+  content: "";
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: 50%;
+  transform: translateY(-50%);
+  height: 3px;
+  border-radius: 2px;
+  background: rgba(255, 255, 255, 0.22);
+}
+
+.media-playback-fill {
+  position: absolute;
+  left: 0;
+  top: 50%;
+  transform: translateY(-50%);
+  height: 3px;
+  border-radius: 2px;
+  background: rgba(255, 255, 255, 0.92);
+  pointer-events: none;
+}
+
+.media-playback-knob {
+  position: absolute;
+  top: 50%;
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+  background: #fff;
+  transform: translate(-50%, -50%);
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.4);
+  opacity: 0;
+  transition: opacity 0.12s;
+  pointer-events: none;
+}
+
+.media-playback-track:hover .media-playback-knob {
+  opacity: 1;
+}
+
+.media-playback-time {
+  flex: none;
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+  color: rgba(255, 255, 255, 0.88);
+  white-space: nowrap;
+}
+
+.media-playback-vol {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: 5px;
+}
+
+.media-playback-vol-btn {
+  flex: none;
+  padding: 0;
+  border: none;
+  background: transparent;
+  color: rgba(255, 255, 255, 0.72);
+  display: flex;
+  cursor: pointer;
+}
+
+.media-playback-vol-btn:hover {
+  color: rgba(255, 255, 255, 0.95);
+}
+
+.media-playback-vol-btn svg {
+  width: 13px;
+  height: 13px;
+}
+
+.media-playback-vol-bar {
+  position: relative;
+  width: 34px;
+  height: 12px;
+  padding: 0;
+  border: none;
+  background: transparent;
+  cursor: pointer;
+}
+
+.media-playback-vol-bar::before {
+  content: "";
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: 50%;
+  transform: translateY(-50%);
+  height: 3px;
+  border-radius: 2px;
+  background: rgba(255, 255, 255, 0.22);
+}
+
+.media-playback-vol-fill {
+  position: absolute;
+  left: 0;
+  top: 50%;
+  transform: translateY(-50%);
+  height: 3px;
+  border-radius: 2px;
+  background: rgba(255, 255, 255, 0.85);
+  pointer-events: none;
+}
+
+.resource-empty-state .resource-secondary-button {
+  margin-top: 4px;
+}
+
+.resource-detail-stage-text .resource-segments,
+.resource-detail-stage-image .resource-segments {
+  width: 100%;
+}
+
+.resource-detail-stage-text .resource-segment-text {
+  padding: 22px;
+  font-family: var(--font);
+  font-size: var(--text-md);
+  line-height: 1.9;
+  letter-spacing: 0.01em;
+}
+
+.resource-detail-stage-image .resource-segment-image {
+  max-width: 100%;
+  max-height: 62vh;
+  margin: 0 auto;
+  border-radius: 8px;
+  object-fit: contain;
+}
+
+.resource-detail-stage-video .resource-media-player {
+  width: 100%;
+}
+
+.resource-detail-stage-video .resource-media-video {
+  max-height: 62vh;
+}
+
+.resource-detail-stage-audio .resource-media-player {
+  width: 100%;
+}
+
+.resource-detail-stage .resource-media-fallback,
+.resource-detail-stage .resource-preview-loading {
+  width: 100%;
+}

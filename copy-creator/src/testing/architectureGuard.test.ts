@@ -683,6 +683,7 @@ describe("架构守卫：领域规则必须全局共享", () => {
       ["pages/CanvasPage", 1000],
       ["styles/canvas", 1000],
       ["styles/project", 1000],
+      ["styles/components", 1000],
       ["dev/mock", 1000],
       ["dev/tauriMock.ts", 1000],
     ];

@@ -1,0 +1,463 @@
+/* components/shared.css —— 跨窗口共享控件：分组下拉/折叠箭头/视频封面帧、资源媒体预览、分段槽与主次按钮。
+   原 components.css 按域拆分（2026-11-14）：index.css 按原块序导入，级联顺序不变。
+   行数守卫见架构守卫规则 27（styles/components 上限 1000）。 */
+
+/* ── 跨窗口共享：分组下拉 / 折叠箭头 / 视频封面帧 ──
+   三个窗口都会用到（主窗口 + 径向菜单 + 粘贴创建对话框），
+   随共享 components.css 分发，保证 CSS 按窗口分包后仍完整。 */
+
+.resource-group-dropdown {
+  position: fixed;
+  z-index: 9000;
+  display: flex;
+  width: min(220px, calc(100vw - 16px));
+  max-height: min(360px, calc(100vh - 16px));
+  flex-direction: column;
+  gap: 1px;
+  overflow-y: auto;
+  padding: 6px;
+  border: 1px solid color-mix(in srgb, var(--text-primary) 16%, var(--separator));
+  border-radius: 8px;
+  background: var(--bg-card);
+  box-shadow: 0 8px 22px rgba(0, 0, 0, 0.14), 0 0 0 0.5px rgba(0, 0, 0, 0.04);
+}
+
+.resource-group-menu-item {
+  display: flex;
+  width: 100%;
+  min-height: 29px;
+  flex: 0 0 auto;
+  align-items: center;
+  gap: 6px;
+  border: 0;
+  border-radius: 5px;
+  background: transparent;
+  color: var(--text-primary);
+  font-family: var(--font);
+  font-size: var(--text-xs);
+  text-align: left;
+  cursor: pointer;
+}
+
+.resource-group-menu-item:hover {
+  background: var(--chip-hover-bg);
+}
+
+.resource-group-menu-item.selected {
+  background: var(--accent-bg);
+  color: var(--accent);
+}
+
+/* 分组树折叠条目容器（下拉、移动对话框、新建对话框共用）：
+   左侧折叠箭头 + 右侧行主体；无子分组的行渲染禁用空箭头对齐。 */
+.resource-group-menu-entry,
+.resource-move-entry {
+  display: flex;
+  width: 100%;
+  flex: 0 0 auto;
+  align-items: center;
+  gap: 2px;
+}
+
+.resource-group-menu-entry .resource-group-twist,
+.resource-move-entry .resource-group-twist {
+  flex: 0 0 auto;
+  align-self: center;
+  margin-left: 2px;
+}
+
+.resource-group-menu-entry > .resource-group-menu-item,
+.resource-group-menu-entry > .radial-menu-resource-group-menu-item,
+.resource-group-menu-entry > .clipboard-create-stash-option,
+.resource-move-entry > .resource-move-row {
+  flex: 1 1 auto;
+  width: auto;
+  min-width: 0;
+}
+
+.resource-group-menu-item.nested {
+  font-size: var(--text-xs);
+}
+
+.resource-group-menu-item svg {
+  width: 14px;
+  height: 14px;
+  flex: 0 0 auto;
+}
+
+.resource-group-menu-item span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.resource-group-twist {
+  display: inline-flex;
+  flex-shrink: 0;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  height: 20px;
+  padding: 0;
+  border: none;
+  border-radius: 5px;
+  background: none;
+  color: var(--text-secondary);
+  cursor: pointer;
+}
+
+.resource-group-twist:disabled {
+  cursor: default;
+}
+
+.resource-group-twist svg {
+  width: 13px;
+  height: 13px;
+  transition: transform 140ms ease;
+}
+
+.resource-group-twist.collapsed svg {
+  transform: rotate(-90deg);
+}
+
+.resource-video-poster {
+  position: absolute;
+  inset: 0;
+  background: color-mix(in srgb, #5e5ce6 10%, var(--input-bg));
+}
+
+/* 视频代表帧画布：放大模糊铺底，与图片卡片的原图虚影一致。 */
+.resource-video-poster-bg {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  filter: blur(14px) saturate(1.15);
+  transform: scale(1.15);
+}
+
+.resource-video-poster-frame {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+  opacity: 0;
+  transition: opacity 0.2s ease;
+}
+
+.resource-video-poster-frame.is-ready {
+  opacity: 1;
+}
+
+.resource-video-poster-placeholder {
+  display: flex;
+  width: 100%;
+  height: 100%;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  color: var(--text-secondary);
+  font-size: var(--text-sm);
+}
+
+/* ── 跨窗口共享：资源/文件媒体预览（径向菜单经共享组件复用） ── */
+
+.clipboard-file-media {
+  position: relative;
+  width: 100%;
+  height: 110px;
+  margin-bottom: 8px;
+  border-radius: 10px;
+  overflow: hidden;
+  background: color-mix(in srgb, #5e5ce6 10%, var(--input-bg));
+}
+
+.clipboard-file-media.is-audio {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  background: color-mix(in srgb, #ff9500 10%, var(--input-bg));
+  color: var(--text-secondary);
+  font-size: var(--text-sm);
+}
+
+.clipboard-file-media.is-image {
+  background: var(--input-bg);
+}
+
+.clipboard-file-media-image {
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+}
+
+.clipboard-file-media-icon svg {
+  width: 16px;
+  height: 16px;
+}
+
+.clipboard-file-media .clipboard-file-media-play {
+  position: absolute;
+  z-index: 1;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  background: rgba(0, 0, 0, 0.45);
+  color: #fff;
+  box-shadow: 0 2px 10px rgba(0, 0, 0, 0.35);
+  pointer-events: none;
+}
+
+.clipboard-file-media .clipboard-file-media-play svg {
+  width: 14px;
+  height: 14px;
+  margin-left: 1px;
+}
+
+/* ── 分段槽容器：chip 行统一为 iOS 分段控件语言（浅灰槽 + 选中白卡，
+   配色走 base.css 的 --seg-* 令牌）。四个主窗口的分组/类型筛选 chip 行
+   共用；槽内条目样式在各页面文件，径向菜单（radial-menu.css）因自带
+   页边距与分隔线单独成段。 ── */
+.resource-group-scroll,
+.resource-filter-options,
+.clipboard-categories-scroll,
+.groups-scroll {
+  gap: 2px;
+  padding: 2px;
+  border-radius: 9px;
+  background: var(--seg-track-bg);
+}
+
+.resource-new-button,
+.resource-secondary-button {
+  min-height: 32px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 5px;
+  padding: 0 12px;
+  border: 0;
+  border-radius: 8px;
+  font-family: var(--font);
+  font-size: var(--text-sm);
+  font-weight: var(--weight-medium);
+  white-space: nowrap;
+  cursor: pointer;
+  transition: background 0.15s ease, box-shadow 0.15s ease, color 0.15s ease, transform 0.15s ease;
+}
+
+.resource-settings-popover .resource-secondary-button {
+  align-self: flex-start;
+}
+
+.resource-settings-popover .resource-secondary-button:disabled {
+  cursor: wait;
+  opacity: 0.65;
+}
+
+.resource-new-button:active,
+.resource-secondary-button:active {
+  transform: scale(0.97);
+}
+
+.resource-new-button svg,
+.resource-secondary-button svg {
+  width: 14px;
+  height: 14px;
+}
+
+.resource-card-preview > .resource-thumb-blur,
+.resource-card-preview > img.resource-card-file-image {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  border-radius: 0;
+  /* 完整展示图片内容，不做封面式裁切（虚影前景同样 contain）。 */
+  object-fit: contain;
+  transition: transform 0.2s ease;
+}
+
+.resource-card:hover .resource-card-preview > .resource-thumb-blur .resource-thumb-blur-fg {
+  transform: scale(1.03);
+}
+
+.resource-thumb-blur {
+  position: relative;
+  overflow: hidden;
+}
+
+.resource-thumb-blur-bg {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  filter: blur(14px) saturate(1.15);
+  transform: scale(1.15);
+}
+
+.resource-thumb-blur-fg {
+  position: relative;
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+  /* 卡片 hover 的前景缩放过渡：容器化后原 img 上的 transition 需在此补回。 */
+  transition: transform 0.2s ease;
+}
+
+.resource-card-file-image.resource-media-loading {
+  min-height: 0;
+}
+
+.resource-card-file-image.resource-media-fallback {
+  min-height: 0;
+  flex-direction: column;
+}
+
+/* 页面级次级按钮（回收站/资源库设置/详情页动作等）：与主按钮同为浮起白卡；
+   对话框内「取消」保留软灰以区分主次（.dialog-btn.secondary）。 */
+.resource-secondary-button {
+  background: var(--btn-card-bg);
+  color: var(--text-primary);
+  box-shadow: var(--btn-card-shadow);
+}
+
+.resource-secondary-button:hover {
+  box-shadow: var(--btn-card-shadow-hover);
+}
+
+/* 主按钮（新建等）：浮起白卡——与分段槽选中态同语言的唯一强调 */
+.resource-new-button {
+  background: var(--btn-card-bg);
+  color: var(--text-primary);
+  box-shadow: var(--btn-card-shadow);
+}
+
+.resource-new-button:hover {
+  box-shadow: var(--btn-card-shadow-hover);
+}
+
+.resource-segments {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.resource-segments.compact {
+  max-height: 360px;
+  overflow: auto;
+}
+
+.resource-segment-text {
+  margin: 0;
+  padding: 11px;
+  border: 1px solid var(--separator);
+  border-radius: 7px;
+  background: var(--input-bg);
+  color: var(--text-primary);
+  font-family: var(--font-mono);
+  font-size: var(--text-sm);
+  line-height: 1.65;
+  overflow-wrap: anywhere;
+  user-select: text;
+  white-space: pre-wrap;
+}
+
+.resource-segment-image {
+  display: block;
+  width: 100%;
+  max-height: 330px;
+  border: 1px solid var(--separator);
+  border-radius: 7px;
+  background: var(--input-bg);
+  object-fit: contain;
+}
+
+.resource-media-loading {
+  width: 100%;
+  min-height: 120px;
+  border-radius: 7px;
+  background: linear-gradient(90deg, var(--separator) 25%, var(--chip-hover-bg) 50%, var(--separator) 75%);
+  background-size: 200% 100%;
+  animation: shimmer 1.5s ease-in-out infinite;
+}
+
+.resource-media-fallback,
+.resource-preview-loading {
+  display: flex;
+  min-height: 110px;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  padding: 18px;
+  border: 1px dashed var(--separator);
+  border-radius: 7px;
+  color: var(--text-secondary);
+  font-size: var(--text-sm);
+  text-align: center;
+}
+
+.resource-media-fallback svg {
+  width: 24px;
+  height: 24px;
+  flex-shrink: 0;
+}
+
+.resource-media-player-fallback {
+  flex-direction: column;
+}
+
+.resource-media-open-button {
+  min-height: 29px;
+}
+
+.resource-media-open-button svg {
+  width: 14px;
+  height: 14px;
+}
+
+.resource-media-player {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: 7px;
+}
+
+.resource-media-player.compact {
+  max-width: 100%;
+}
+
+.resource-media-video {
+  display: block;
+  width: 100%;
+  max-height: 330px;
+  border-radius: 7px;
+  background: #090909;
+  object-fit: contain;
+}
+
+.resource-media-audio {
+  display: block;
+  width: 100%;
+  height: 40px;
+}
+
+.resource-media-note {
+  color: var(--text-secondary);
+  font-size: var(--text-xs);
+  line-height: 1.45;
+  text-align: center;
+}
