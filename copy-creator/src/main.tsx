@@ -15,9 +15,12 @@ const loadRoot = async () => {
 };
 
 // 浏览器直开 dev 页面（无 Tauri 环境）时注入内存后端，供前端验证与模拟；
-// Tauri 应用存在 __TAURI_INTERNALS__，本分支不会执行。
+// Tauri 应用存在 __TAURI_INTERNALS__，本分支不会执行。import.meta.env.DEV
+// 是构建期条件：生产构建中 Vite 将其替换为 false，整个 mock 层（tauriMock
+// chunk 连同 mock 媒体资产）成为死代码被摇树剔除，不进发布产物；dev 下
+// 运行时判断照常生效。
 const boot = async () => {
-  if (!("__TAURI_INTERNALS__" in window)) {
+  if (import.meta.env.DEV && !("__TAURI_INTERNALS__" in window)) {
     const { installBrowserMock } = await import("./dev/tauriMock");
     installBrowserMock();
   }
