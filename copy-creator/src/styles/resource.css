@@ -1939,7 +1939,9 @@
   transition: background 0.14s ease, color 0.14s ease;
 }
 
-.marker-clear-all:hover { background: var(--danger-bg); color: var(--danger); }
+/* hover 红底用 rgba 直写：--danger-bg 变量不存在、声明此前静默失效，
+ * 对齐 ui.css 半透明红底惯例（--danger 亮暗同值，底色无需主题分支） */
+.marker-clear-all:hover { background: rgba(255, 59, 48, 0.12); color: var(--danger); }
 
 .marker-list {
   display: flex;
@@ -2020,7 +2022,7 @@
 
 .marker-del svg { width: 12px; height: 12px; }
 .marker-item:hover .marker-del { opacity: 1; }
-.marker-del:hover { background: var(--danger-bg); color: var(--danger); }
+.marker-del:hover { background: rgba(255, 59, 48, 0.12); color: var(--danger); }
 .marker-del:focus-visible { opacity: 1; outline: 2px solid var(--accent-border); }
 
 .marker-empty {

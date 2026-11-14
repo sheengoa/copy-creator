@@ -645,7 +645,8 @@ html {
   font-weight: var(--weight-normal);
   margin-top: 4px;
   padding: 0 6px;
-  border: 1px solid var(--border-color);
+  /* --border-color 变量不存在、描边此前静默失效，走同文件既有 --separator */
+  border: 1px solid var(--separator);
   border-radius: 8px;
   line-height: 1.5;
   max-width: 100%;
