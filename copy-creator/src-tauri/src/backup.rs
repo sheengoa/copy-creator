@@ -596,47 +596,28 @@ pub fn cancel_backup_export(app: AppHandle) -> bool {
 /// 选择备份导出位置（保存对话框，默认文件名带时间戳）。
 #[tauri::command]
 pub async fn select_backup_save_path(app: AppHandle) -> Result<String, String> {
-    use tauri_plugin_dialog::DialogExt;
-    let (tx, rx) = std::sync::mpsc::channel();
-    app.dialog()
-        .file()
-        .add_filter("Zip", &["zip"])
-        .set_file_name(
-            chrono::Local::now().format("copy-creator-backup-%Y%m%d-%H%M%S.zip").to_string(),
-        )
-        .save_file(move |path| {
-            let _ = tx.send(path);
-        });
-    dialog_path(rx).await
+    crate::dialog::dialog_path(&app, |dialog, tx| {
+        dialog
+            .add_filter("Zip", &["zip"])
+            .set_file_name(
+                chrono::Local::now().format("copy-creator-backup-%Y%m%d-%H%M%S.zip").to_string(),
+            )
+            .save_file(move |path| {
+                let _ = tx.send(path);
+            });
+    })
+    .await
 }
 
 /// 选择要导入的备份 zip 文件。
 #[tauri::command]
 pub async fn select_backup_zip_path(app: AppHandle) -> Result<String, String> {
-    use tauri_plugin_dialog::DialogExt;
-    let (tx, rx) = std::sync::mpsc::channel();
-    app.dialog()
-        .file()
-        .add_filter("Zip", &["zip"])
-        .pick_file(move |path| {
+    crate::dialog::dialog_path(&app, |dialog, tx| {
+        dialog.add_filter("Zip", &["zip"]).pick_file(move |path| {
             let _ = tx.send(path);
         });
-    dialog_path(rx).await
-}
-
-async fn dialog_path(
-    rx: std::sync::mpsc::Receiver<Option<tauri_plugin_dialog::FilePath>>,
-) -> Result<String, String> {
-    let result =
-        tokio::task::spawn_blocking(move || rx.recv_timeout(std::time::Duration::from_secs(120)))
-            .await
-            .map_err(|e| format!("task error: {e}"))?;
-    match result {
-        Ok(Some(path)) => Ok(path.to_string()),
-        Ok(None) => Err("cancelled".to_string()),
-        Err(std::sync::mpsc::RecvTimeoutError::Timeout) => Err("timeout".to_string()),
-        Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => Err("cancelled".to_string()),
-    }
+    })
+    .await
 }
 
 #[tauri::command]

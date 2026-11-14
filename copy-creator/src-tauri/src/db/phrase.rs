@@ -181,39 +181,27 @@ pub(crate) fn migrate_legacy_quick_input_file_names(app: &AppHandle) {
 
 #[tauri::command]
 pub async fn select_quick_input_file(app: AppHandle) -> Result<serde_json::Value, String> {
-    use tauri_plugin_dialog::DialogExt;
-    let (tx, rx) = std::sync::mpsc::channel();
-    app.dialog().file().pick_file(move |path| {
-        let _ = tx.send(path);
-    });
-    let result =
-        tokio::task::spawn_blocking(move || rx.recv_timeout(std::time::Duration::from_secs(60)))
-            .await
-            .map_err(|e| format!("task error: {}", e))?;
-
-    match result {
-        Ok(Some(path)) => {
-            let path_string = path.to_string();
-            let meta = std::fs::metadata(PathBuf::from(&path_string))
-                .map_err(|e| format!("读取文件失败: {}", e))?;
-            if !meta.is_file() {
-                return Err("请选择一个文件".to_string());
-            }
-            if meta.len() > QUICK_INPUT_FILE_LIMIT_BYTES {
-                return Err(format!(
-                    "文件不能超过 {} MB",
-                    QUICK_INPUT_FILE_LIMIT_BYTES / 1024 / 1024
-                ));
-            }
-            Ok(serde_json::json!({
-                "path": path_string,
-                "file_size": meta.len(),
-            }))
-        }
-        Ok(None) => Err("cancelled".to_string()),
-        Err(std::sync::mpsc::RecvTimeoutError::Timeout) => Err("timeout".to_string()),
-        Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => Err("cancelled".to_string()),
+    let path_string = crate::dialog::dialog_path(&app, |dialog, tx| {
+        dialog.pick_file(move |path| {
+            let _ = tx.send(path);
+        });
+    })
+    .await?;
+    let meta = std::fs::metadata(PathBuf::from(&path_string))
+        .map_err(|e| format!("读取文件失败: {}", e))?;
+    if !meta.is_file() {
+        return Err("请选择一个文件".to_string());
     }
+    if meta.len() > QUICK_INPUT_FILE_LIMIT_BYTES {
+        return Err(format!(
+            "文件不能超过 {} MB",
+            QUICK_INPUT_FILE_LIMIT_BYTES / 1024 / 1024
+        ));
+    }
+    Ok(serde_json::json!({
+        "path": path_string,
+        "file_size": meta.len(),
+    }))
 }
 
 #[tauri::command]

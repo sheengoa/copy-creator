@@ -3015,32 +3015,21 @@ pub(crate) fn trace_relink_resource_internal<R: Runtime>(
 }
 
 /// 追溯手动选文件的系统对话框：与快捷输入选文件同一实现通道
-/// （tauri-plugin-dialog + 通道转发），但无体积上限——资源文件不受
-/// 快捷输入的大小约束。
+/// （db::dialog 骨架），但无体积上限——资源文件不受快捷输入的大小约束。
 #[tauri::command]
 pub async fn select_resource_trace_file(app: AppHandle) -> Result<serde_json::Value, String> {
-    use tauri_plugin_dialog::DialogExt;
-    let (tx, rx) = std::sync::mpsc::channel();
-    app.dialog().file().pick_file(move |path| {
-        let _ = tx.send(path);
-    });
-    let result =
-        tokio::task::spawn_blocking(move || rx.recv_timeout(std::time::Duration::from_secs(60)))
-            .await
-            .map_err(|e| format!("task error: {}", e))?;
-    match result {
-        Ok(Some(path)) => {
-            let path_string = path.to_string();
-            let meta = std::fs::metadata(PathBuf::from(&path_string))
-                .map_err(|e| format!("读取文件失败: {}", e))?;
-            if !meta.is_file() {
-                return Err("请选择一个文件".to_string());
-            }
-            Ok(serde_json::json!({ "path": path_string }))
-        }
-        Ok(None) => Err("cancelled".to_string()),
-        Err(error) => Err(format!("选择文件失败: {error}")),
+    let path_string = crate::dialog::dialog_path(&app, |dialog, tx| {
+        dialog.pick_file(move |path| {
+            let _ = tx.send(path);
+        });
+    })
+    .await?;
+    let meta = std::fs::metadata(PathBuf::from(&path_string))
+        .map_err(|e| format!("读取文件失败: {}", e))?;
+    if !meta.is_file() {
+        return Err("请选择一个文件".to_string());
     }
+    Ok(serde_json::json!({ "path": path_string }))
 }
 
 #[tauri::command]
@@ -3323,42 +3312,22 @@ pub fn reveal_resource_file(app: AppHandle, path: String) -> Result<(), String> 
 
 #[tauri::command]
 pub async fn select_storage_folder(app: AppHandle) -> Result<String, String> {
-    use tauri_plugin_dialog::DialogExt;
-    let (tx, rx) = std::sync::mpsc::channel();
-    app.dialog().file().pick_folder(move |path| {
-        let _ = tx.send(path);
-    });
-    let result =
-        tokio::task::spawn_blocking(move || rx.recv_timeout(std::time::Duration::from_secs(60)))
-            .await
-            .map_err(|e| format!("task error: {}", e))?;
-
-    match result {
-        Ok(Some(path)) => Ok(path.to_string()),
-        Ok(None) => Err("cancelled".to_string()),
-        Err(std::sync::mpsc::RecvTimeoutError::Timeout) => Err("timeout".to_string()),
-        Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => Err("cancelled".to_string()),
-    }
+    crate::dialog::dialog_path(&app, |dialog, tx| {
+        dialog.pick_folder(move |path| {
+            let _ = tx.send(path);
+        });
+    })
+    .await
 }
 
 #[tauri::command]
 pub async fn select_resource_library_folder(app: AppHandle) -> Result<String, String> {
-    use tauri_plugin_dialog::DialogExt;
-    let (tx, rx) = std::sync::mpsc::channel();
-    app.dialog().file().pick_folder(move |path| {
-        let _ = tx.send(path);
-    });
-    let result =
-        tokio::task::spawn_blocking(move || rx.recv_timeout(std::time::Duration::from_secs(60)))
-            .await
-            .map_err(|e| format!("task error: {}", e))?;
-
-    match result {
-        Ok(Some(path)) => Ok(path.to_string()),
-        Ok(None) => Err("cancelled".to_string()),
-        Err(std::sync::mpsc::RecvTimeoutError::Timeout) => Err("timeout".to_string()),
-        Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => Err("cancelled".to_string()),
-    }
+    crate::dialog::dialog_path(&app, |dialog, tx| {
+        dialog.pick_folder(move |path| {
+            let _ = tx.send(path);
+        });
+    })
+    .await
 }
 
 // === API Key Label Commands ===

@@ -6,6 +6,7 @@ mod clipboard;
 mod clipboard_create_window;
 mod clipboard_wake;
 mod db;
+mod dialog;
 #[cfg(target_os = "linux")]
 mod ipc;
 mod media_kind;

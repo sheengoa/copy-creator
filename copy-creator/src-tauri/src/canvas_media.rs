@@ -12,20 +12,6 @@ use std::hash::{Hash, Hasher};
 use tauri::AppHandle;
 use tauri::Manager;
 use tauri::Runtime;
-use tauri_plugin_dialog::DialogExt;
-
-/// 对话框回调 → 通道 → 阻塞等待的通用骨架（对齐 select_resource_trace_file：
-/// 命令为 async，避免在主线程阻塞等待用户操作）。
-async fn await_dialog<T: Send + 'static>(
-    receiver: std::sync::mpsc::Receiver<T>,
-) -> Result<T, String> {
-    tokio::task::spawn_blocking(move || {
-        receiver.recv_timeout(std::time::Duration::from_secs(120))
-    })
-    .await
-    .map_err(|e| format!("task error: {e}"))?
-    .map_err(|e| format!("对话框等待失败: {e}"))
-}
 
 /// 选片对话框过滤器的显示名（Windows 下拉里的唯一一项）：按传入扩展名
 /// 全员归属给「图片/视频/音频」，混合或陌生扩展名统称「文件」。
@@ -55,35 +41,33 @@ pub async fn canvas_pick_media_file(
     app: AppHandle,
     extensions: Option<Vec<String>>,
 ) -> Result<serde_json::Value, String> {
-    let (tx, rx) = std::sync::mpsc::channel();
-    let mut dialog = app.dialog().file();
-    if let Some(raw) = extensions.as_ref() {
-        let exts: Vec<String> = raw
-            .iter()
-            .map(|e| e.trim().trim_start_matches('.').to_ascii_lowercase())
-            .filter(|e| !e.is_empty())
-            .collect();
-        if !exts.is_empty() {
-            let names: Vec<&str> = exts.iter().map(String::as_str).collect();
-            dialog = dialog.add_filter(pick_filter_name(&exts), &names);
-        }
-    }
-    dialog.pick_file(move |path| {
-        let _ = tx.send(path);
-    });
-    match await_dialog(rx).await? {
-        Some(path) => {
-            let path_string = path.to_string();
-            let meta = std::fs::metadata(std::path::PathBuf::from(&path_string))
-                .map_err(|e| format!("读取文件失败: {e}"))?;
-            if !meta.is_file() {
-                return Err("请选择一个文件".to_string());
+    let path_string = crate::dialog::dialog_path(&app, |mut dialog, tx| {
+        // extensions 非空时对话框限定可选类型（前端按节点类型传图像/视频/
+        // 音频扩展名，与资源库浮层的类型白名单同语义——图像节点选到视频
+        // 只会得到一块空白格）；前端对返回路径仍做一次扩展名校验兜底。
+        if let Some(raw) = extensions.as_ref() {
+            let exts: Vec<String> = raw
+                .iter()
+                .map(|e| e.trim().trim_start_matches('.').to_ascii_lowercase())
+                .filter(|e| !e.is_empty())
+                .collect();
+            if !exts.is_empty() {
+                let names: Vec<&str> = exts.iter().map(String::as_str).collect();
+                dialog = dialog.add_filter(pick_filter_name(&exts), &names);
             }
-            crate::media_server::authorize_external_file(&app, &path_string);
-            Ok(json!({ "path": path_string }))
         }
-        None => Err("cancelled".to_string()),
+        dialog.pick_file(move |path| {
+            let _ = tx.send(path);
+        });
+    })
+    .await?;
+    let meta = std::fs::metadata(std::path::PathBuf::from(&path_string))
+        .map_err(|e| format!("读取文件失败: {e}"))?;
+    if !meta.is_file() {
+        return Err("请选择一个文件".to_string());
     }
+    crate::media_server::authorize_external_file(&app, &path_string);
+    Ok(json!({ "path": path_string }))
 }
 
 /// 加载节点拖入文件：与系统对话框选择同语义（明确来源），登记媒体
@@ -102,13 +86,17 @@ pub fn canvas_authorize_media(app: AppHandle, path: String) -> Result<(), String
 
 #[tauri::command]
 pub async fn canvas_pick_save_dir(app: AppHandle) -> Result<String, String> {
-    let (tx, rx) = std::sync::mpsc::channel();
-    app.dialog().file().pick_folder(move |path| {
-        let _ = tx.send(path);
-    });
-    match await_dialog(rx).await? {
-        Some(path) => Ok(path.to_string()),
-        None => Ok(String::new()),
+    // 取消返回空串（前端静默跳过），与对话框骨架的 cancelled 约定互译。
+    match crate::dialog::dialog_path(&app, |dialog, tx| {
+        dialog.pick_folder(move |path| {
+            let _ = tx.send(path);
+        });
+    })
+    .await
+    {
+        Ok(path) => Ok(path),
+        Err(e) if e == "cancelled" => Ok(String::new()),
+        Err(e) => Err(e),
     }
 }
 
