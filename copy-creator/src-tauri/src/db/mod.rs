@@ -780,6 +780,13 @@ fn resource_file_is_inside_meta_directory(root: &Path, path: &Path) -> bool {
     })
 }
 
+/// path 是否为 root 的严格后代（排除 root 本身）：资源文件安全校验用——
+/// 库根目录自身不是资源文件。starts_with 对相等路径恒真，排除自身必须
+/// 显式比较；canonicalize 前置归一由调用方各自完成，不进本判定。
+fn is_strictly_inside(path: &Path, root: &Path) -> bool {
+    path != root && path.starts_with(root)
+}
+
 fn resolve_resource_file_path<R: Runtime>(
     app: &AppHandle<R>,
     path: &str,
@@ -794,8 +801,7 @@ fn resolve_resource_file_path<R: Runtime>(
     let candidate = candidate
         .canonicalize()
         .map_err(|error| format!("读取资源文件失败: {error}"))?;
-    if !candidate.starts_with(&root)
-        || candidate == root
+    if !is_strictly_inside(&candidate, &root)
         || resource_file_is_inside_meta_directory(&root, &candidate)
     {
         return Err("资源文件路径无效".to_string());
@@ -917,8 +923,7 @@ fn is_safe_managed_resource_file(root: &Path, path: &Path) -> bool {
     let Ok(canonical_path) = path.canonicalize() else {
         return false;
     };
-    canonical_path != canonical_root
-        && canonical_path.starts_with(&canonical_root)
+    is_strictly_inside(&canonical_path, &canonical_root)
         && !resource_file_is_inside_meta_directory(&canonical_root, &canonical_path)
 }
 
