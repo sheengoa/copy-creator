@@ -436,7 +436,8 @@ describe("integration regressions", () => {
     expect(radialMenu).toContain("restoreLastTab");
     expect(radialMenu).toContain("if (tabTouchedRef.current) return;");
     // 快捷输入 tab 激活即回到「全部」并重载（聚合查询 list_all_phrases）。
-    expect(radialMenu).toContain("buildAllPhraseItems");
+    // 条目映射随拆分收口在 radialItems.ts。
+    expect(readSource("../components/RadialMenu/radialItems.ts")).toContain("buildAllPhraseItems");
     expect(radialMenu).toContain("loadPhrases(ALL_PHRASES_GROUP_ID)");
     // 资源 tab 依据记忆的分组位置加载（跨重启持久化），不再强制重置为"全部"。
     expect(radialMenu).toContain('useClipboardStore.getState().loadRecords(false, "resources", remembered)');
@@ -449,10 +450,12 @@ describe("integration regressions", () => {
     expect(radialMenu).toContain('useClipboardStore.getState().setCategory("resources")');
     // 类别过滤已收进 domain/records（recordMatchesCategory 含收藏语义，
     // 与主窗口共用；内联的 resources 分支不再存在——架构守卫规则 16）。
-    expect(radialMenu).toContain("recordMatchesCategory(r, clipboardCategory)");
+    // recordMatchesCategory 消费随映射拆分收口在 radialItems.ts（守卫规则 16）。
+    expect(readSource("../components/RadialMenu/radialItems.ts")).toContain("recordMatchesCategory(r, clipboardCategory)");
     expect(radialMenu).toContain("RECORD_CATEGORY_KEYS.map");
-    expect(radialMenu).toContain(".filter((r) => isResourceRecord(r))");
-    expect(radialMenu).toContain("isContentPreviewAvailable");
+    // isResourceRecord 过滤与 isContentPreviewAvailable 判定随映射收口在 radialItems.ts。
+    expect(readSource("../components/RadialMenu/radialItems.ts")).toContain(".filter((r) => isResourceRecord(r))");
+    expect(readSource("../components/RadialMenu/radialItems.ts")).toContain("isContentPreviewAvailable");
     expect(radialMenu).not.toContain("previewAvailable: true");
   });
 

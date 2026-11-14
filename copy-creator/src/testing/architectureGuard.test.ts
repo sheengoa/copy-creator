@@ -297,7 +297,7 @@ describe("架构守卫：领域规则必须全局共享", () => {
     // 消费方必须经 domain 判定，不得内联「type === 类别」过滤副本。
     for (const consumer of [
       "pages/ClipboardPage/index.tsx",
-      "components/RadialMenu/index.tsx",
+      "components/RadialMenu/radialItems.ts",
       "stores/clipboardStore.ts",
     ]) {
       expect(
@@ -432,7 +432,9 @@ describe("架构守卫：领域规则必须全局共享", () => {
       detail.includes("resourceTextPreviewPath"),
       "详情页文本展示与编辑目标必须经 domain resourceTextPreviewPath 取材",
     ).toBe(true);
-    const radialContainer = readSource("components/RadialMenu/index.tsx");
+    // 条目映射随拆分收口在 radialItems.ts，预览取材在 useRadialPreview.ts。
+    const radialContainer = readSource("components/RadialMenu/radialItems.ts")
+      + readSource("components/RadialMenu/useRadialPreview.ts");
     expect(
       radialContainer.includes("item.textPreviewPath"),
       "径向菜单预览面板与文件拖出必须消费 textPreviewPath 判定字段",
