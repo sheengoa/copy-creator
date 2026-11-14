@@ -3,10 +3,11 @@
 // localStorage，重开窗口回到上次的视图与位置。
 import { create } from "zustand";
 import { invoke } from "@tauri-apps/api/core";
+// 集状态机是领域事实：权威定义在 domain/projectView（含展示键映射），
+// store 只消费（此前 store 自持定义、domain 反向 import，已归位）。
+import type { ProjectEpisodeStatus } from "../domain/projectView";
 
 export type ResourceViewMode = "file" | "project";
-
-export type ProjectEpisodeStatus = "none" | "script" | "storyboard" | "generating" | "done";
 
 // ── 刚建连线行的「乐观 id → 行参数」旁路缓存 ──
 // linkNode 先乐观追加一行（id=local-*），落库重取后后端行的 id 会换代；

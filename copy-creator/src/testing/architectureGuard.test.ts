@@ -762,4 +762,20 @@ describe("架构守卫：领域规则必须全局共享", () => {
       .map((m) => `mock case "${m[1]}" 未注册（后端不存在或已改名，浏览器模式静默走兜底）`);
     expect(mockOffenders, "tauriMock 覆盖了不存在的命令").toEqual([]);
   });
+
+  it("规则 29：domain 层禁止依赖 stores——依赖方向必须自上而下", () => {
+    // 回归锚点：projectView.ts 曾 import type projectStore 的
+    // ProjectEpisodeStatus（2026-11-14 归位：类型上移 domain，store 反向
+    // 取）。domain 是被 stores/pages/components 消费的唯一事实源，反向
+    // 依赖会让领域规则跟着数据层漂移；import type 同拦（类型依赖也是
+    // 依赖，且正是实际发生过的形态）。
+    const offenders = allSources
+      .filter((file) => toPosix(file).includes("/domain/"))
+      .filter((file) => /from\s+"[^"]*\/stores\/[^"]*"/.test(sourceOf(file)))
+      .map((file) => toPosix(file.replace(frontRoot, "")));
+    expect(
+      offenders,
+      "domain 不得 import stores（依赖方向自上而下）：类型上移 domain，store 反向 import",
+    ).toEqual([]);
+  });
 });

@@ -1,6 +1,6 @@
 # domain/ 领域层
 
-全项目领域规则的**唯一事实源**。三个窗口（主窗口/径向菜单/新建窗口）的组件只做布局与交互，一切"这条记录是什么、能做什么、怎么显示"的判定都在本目录。守卫规则的编号清单见 `src/architectureGuard.test.ts`。
+全项目领域规则的**唯一事实源**。三个窗口（主窗口/径向菜单/新建窗口）的组件只做布局与交互，一切"这条记录是什么、能做什么、怎么显示"的判定都在本目录。守卫规则的编号清单见 `src/testing/architectureGuard.test.ts`。
 
 ## 新规则归属决策表
 
@@ -20,13 +20,13 @@
 硬性约束：
 - **禁止**在 `components/`、`pages/` 中新写扩展名判断、媒体类型分支、能力判定——一律 import domain；
 - `recordView.ts` 内禁止扩展名字面量、`record.type === "…"` 判定、`endsWith/startsWith` 推断（架构守卫规则 6）；
-- `domain/**` 禁止 import `stores/*` 与组件（规则 12）；叶子组件禁止 import `stores/*`（规则 10）；
+- `domain/**` 禁止 import `stores/*`（含 `import type`——类型同样自上而下，规则 29）；叶子组件不得 import `stores/*`（团队惯例，判定经 props/视图模型下传，无独立守卫）；
 - 拆分触发条件：单一文件出现第二个不相关主题，或超过约 400 行。
 
 ## 缺陷 → 守卫闭环
 
 今后每出现"功能在某界面有、另一界面没有"或重复实现类缺陷，修复时必须：
 1. 把根因规则收进 domain；
-2. 若 `src/architectureGuard.test.ts` 尚不能拦住该模式，补一条对应断言。
+2. 若 `src/testing/architectureGuard.test.ts` 尚不能拦住该模式，补一条对应断言。
 
 守卫失败信息会指向本 README 对应章节；新增豁免必须修改守卫测试（= 强制过评审）。

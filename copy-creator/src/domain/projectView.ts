@@ -1,6 +1,10 @@
 // 工程域展示规则：集状态呈现、文件名展示与角色头像兜底的唯一来源。
 // 组件不得自行散落这些判定（与 domain/records.ts 同一约束精神）。
-import type { ProjectEpisodeStatus } from "../stores/projectStore";
+
+/** 集状态机（新建/剧本/分镜中/生成中/已完成）：领域事实，store 与展示
+ *  层都从这里取。此前定义在 projectStore、domain 反向 import 属依赖
+ *  倒置（守卫规则 29 拦截），2026-11-14 归位。 */
+export type ProjectEpisodeStatus = "none" | "script" | "storyboard" | "generating" | "done";
 
 export const EPISODE_STATUSES: readonly ProjectEpisodeStatus[] = [
   "none",
@@ -162,5 +166,3 @@ export type LibraryKind = (typeof LIBRARY_KINDS)[number];
 export function isLibraryKind(value: string): value is LibraryKind {
   return (LIBRARY_KINDS as readonly string[]).includes(value);
 }
-
-export type { ProjectEpisodeStatus };
