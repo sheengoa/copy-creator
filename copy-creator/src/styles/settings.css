@@ -54,12 +54,6 @@
   white-space: nowrap;
 }
 
-.settings-row-value {
-  font-size: var(--text-sm);
-  color: var(--text-secondary);
-  white-space: nowrap;
-}
-
 .settings-input {
   width: 100%;
   height: 32px;
@@ -221,20 +215,6 @@
   flex-direction: column;
   gap: 6px;
   align-items: flex-end;
-}
-
-.shortcut-mouse-hint {
-  display: inline-flex;
-  align-items: center;
-  gap: 4px;
-  padding: 3px 8px;
-  border-radius: 6px;
-  background: var(--chip-bg);
-  color: var(--text-secondary);
-  font-size: var(--text-xs);
-  font-weight: var(--weight-medium);
-  font-family: var(--font-mono);
-  letter-spacing: 0.3px;
 }
 
 .shortcut-keyboard-row {

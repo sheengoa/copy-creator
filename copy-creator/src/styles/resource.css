@@ -907,8 +907,7 @@
 }
 
 .resource-icon-button,
-.resource-delete-button,
-.resource-drag-handle {
+.resource-delete-button {
   display: inline-flex;
   width: 27px;
   height: 27px;
@@ -925,39 +924,26 @@
 }
 
 .resource-icon-button:hover,
-.resource-delete-button:hover,
-.resource-drag-handle:hover {
+.resource-delete-button:hover {
   border-color: var(--separator);
   background: var(--chip-hover-bg);
   color: var(--text-primary);
 }
 
 .resource-icon-button:focus-visible,
-.resource-delete-button:focus-visible,
-.resource-drag-handle:focus-visible {
+.resource-delete-button:focus-visible {
   outline: 2px solid var(--accent);
   outline-offset: 1px;
 }
 
 .resource-icon-button svg,
-.resource-delete-button svg,
-.resource-drag-handle svg {
+.resource-delete-button svg {
   width: 14px;
   height: 14px;
 }
 
 .resource-delete-button:hover {
   color: var(--danger);
-}
-
-.resource-drag-handle {
-  color: var(--text-tertiary);
-  cursor: grab;
-  touch-action: none;
-}
-
-.resource-drag-handle:active {
-  cursor: grabbing;
 }
 
 .resource-load-error {
@@ -2227,19 +2213,6 @@
 }
 
 @media (max-width: 560px) {
-  .resource-library-location {
-    flex-wrap: wrap;
-  }
-
-  .resource-library-location-copy {
-    flex-basis: calc(100% - 37px);
-  }
-
-  .resource-library-location-button {
-    width: 100%;
-    margin-left: 37px;
-  }
-
   .resource-filter-row {
     align-items: flex-start;
     flex-wrap: wrap;
@@ -2299,7 +2272,6 @@
 
 @media (prefers-reduced-motion: reduce) {
   .resource-library-page,
-  .resource-quick-preview,
   .resource-feedback,
   .resource-settings-popover {
     animation: none;

@@ -99,19 +99,6 @@
   height: 15px;
 }
 
-.fc-node-btn.is-tiny.is-icon {
-  flex: none;
-  width: 24px;
-  height: 24px;
-  padding: 0;
-  border-radius: 7px;
-}
-
-.fc-node-btn.is-tiny.is-icon svg {
-  width: 13px;
-  height: 13px;
-}
-
 .fc-root .fc-node-btn.ghost:disabled {
   opacity: 0.45;
   cursor: not-allowed;
@@ -242,11 +229,6 @@
 
 [data-theme="dark"] .fc-stepper-btn:hover {
   background: rgba(255, 255, 255, 0.08);
-}
-
-.fc-root .fc-audio {
-  width: 100%;
-  height: 36px;
 }
 
 /* 合集节点：多线汇入的有序成员列表——序号 + 缩略/内容 + 拖拽把手 +

@@ -537,7 +537,6 @@
   flex-direction: column;
   gap: 3px;
 }
-.pdetail-attach-list.is-flat { max-height: 280px; }
 .pdetail-attach-row {
   display: flex;
   align-items: center;
@@ -553,13 +552,6 @@
 }
 .pdetail-attach-row:hover { background: var(--chip-hover-bg); border-color: var(--accent-border-soft); color: var(--text-primary); }
 .pdetail-attach-row input { accent-color: var(--accent); }
-.pdetail-attach-thumb {
-  width: 30px;
-  height: 22px;
-  border-radius: 5px;
-  object-fit: cover;
-  background: var(--chip-bg);
-}
 .pdetail-attach-ops {
   display: flex;
   justify-content: flex-end;

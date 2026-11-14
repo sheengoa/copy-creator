@@ -132,28 +132,6 @@ mark.search-highlight {
   height: 8px;
 }
 
-.skeleton-indicator {
-  width: 3px;
-  height: 24px;
-  border-radius: 2px;
-  background: var(--separator);
-  flex-shrink: 0;
-}
-
-.skeleton-body {
-  flex: 1;
-  min-width: 0;
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-}
-
-.skeleton-meta {
-  flex-shrink: 0;
-  display: flex;
-  align-items: center;
-}
-
 .batch-selection-bar {
   min-height: 36px;
   display: flex;
@@ -242,7 +220,6 @@ input:focus-visible + .selection-checkbox {
 }
 
 .batch-select-all:hover .selection-checkbox,
-.card-selection-control:hover .selection-checkbox,
 .trash-row-check:hover .selection-checkbox {
   border-color: color-mix(in srgb, var(--text-primary) 42%, transparent);
 }
@@ -340,10 +317,10 @@ input:focus-visible + .selection-checkbox {
 
 
 /* Card Action Buttons */
-/* card-move-top-btn：快捷输入短语置顶仍在用；card-pin-btn：剪切板收藏星标 */
+/* card-edit-btn：分组管理对话框行内编辑（守卫规则 18 保留的唯一消费方）；
+   card-pin-btn：剪切板收藏星标 */
 .card-delete-btn,
 .card-edit-btn,
-.card-move-top-btn,
 .card-pin-btn {
   background: transparent;
   position: relative;
@@ -362,14 +339,12 @@ input:focus-visible + .selection-checkbox {
 
 .card-delete-btn:hover,
 .card-edit-btn:hover,
-.card-move-top-btn:hover,
 .card-pin-btn:hover {
   opacity: 1 !important;
 }
 
 .card-delete-btn svg,
 .card-edit-btn svg,
-.card-move-top-btn svg,
 .card-pin-btn svg {
   width: 15px;
   height: 15px;
@@ -1708,17 +1683,6 @@ input:focus-visible + .selection-checkbox {
   margin-left: 1px;
 }
 
-.clipboard-media-slot {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  animation: clipboard-media-fade-in 0.25s ease;
-}
-
-.clipboard-media-slot.is-video {
-  min-height: 240px;
-}
-
 /* ── 分段槽容器：chip 行统一为 iOS 分段控件语言（浅灰槽 + 选中白卡，
    配色走 base.css 的 --seg-* 令牌）。四个主窗口的分组/类型筛选 chip 行
    共用；槽内条目样式在各页面文件，径向菜单（radial-menu.css）因自带
@@ -1891,7 +1855,6 @@ input:focus-visible + .selection-checkbox {
 }
 
 .resource-media-fallback,
-.resource-preview-error,
 .resource-preview-loading {
   display: flex;
   min-height: 110px;
@@ -2317,8 +2280,7 @@ input:focus-visible + .selection-checkbox {
   background: color-mix(in srgb, #ff9500 10%, var(--input-bg));
 }
 
-.resource-card-file,
-.resource-card-image-file {
+.resource-card-file {
   background: color-mix(in srgb, #af52de 8%, var(--input-bg));
 }
 

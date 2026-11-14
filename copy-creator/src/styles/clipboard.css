@@ -129,27 +129,6 @@
   flex-shrink: 0;
 }
 
-.category-chip-danger {
-  background: transparent;
-  color: var(--danger);
-  border-color: transparent;
-}
-
-.category-chip-danger:hover {
-  background: rgba(255, 59, 48, 0.08);
-  border-color: rgba(255, 59, 48, 0.2);
-  color: var(--danger);
-}
-
-[data-theme="dark"] .category-chip-danger {
-  color: #FF453A;
-}
-
-[data-theme="dark"] .category-chip-danger:hover {
-  background: rgba(255, 69, 58, 0.12);
-  border-color: rgba(255, 69, 58, 0.25);
-}
-
 .clipboard-categories-scroll::-webkit-scrollbar {
   display: none;
 }
@@ -545,15 +524,6 @@
 .phrase-card.is-dragging {
   opacity: 0.35;
   z-index: 999;
-}
-
-/* Sortable item occupying target position */
-.sortable-chosen {
-  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
-}
-
-[data-theme="dark"] .sortable-chosen {
-  box-shadow: 0 4px 12px rgba(255, 255, 255, 0.08);
 }
 /* ── Confirm Dialog Message ───────────────────────── */
 .dialog-message {
@@ -1125,26 +1095,6 @@
 
 
 
-
-
-
-
-
-
-
-
-/* 展开的媒体槽位：固定占位高度消除"封面卸载→播放器加载"间的高度塌缩闪烁，
-   淡入软化切换。视频定高（与播放器 max-height 匹配的观感），音频随内容。 */
-
-
-
-
-@keyframes clipboard-media-fade-in {
-  from { opacity: 0; }
-  to { opacity: 1; }
-}
-
-/* 采集暂停提示条：设置页/托盘切换后即时可见，琥珀警示色两主题通用。 */
 .clipboard-paused-notice {
   display: flex;
   align-items: center;
@@ -1168,37 +1118,4 @@
 
 [data-theme="dark"] .clipboard-paused-notice svg {
   color: #fbbf24;
-}
-
-/* 记录编辑对话框：复用 dialog 弹层视觉，textarea 纵向可拉伸。
- * 类名刻意不叫 dialog-textarea——那是 components.css 的共享类
- * （短语编辑器等在用），主窗口内同特异性规则会后加载者胜。 */
-.dialog-edit-content {
-  width: min(560px, calc(100vw - 48px));
-}
-
-.record-edit-textarea {
-  width: 100%;
-  min-height: 200px;
-  margin-top: 8px;
-  border-radius: 8px;
-  border: 1px solid var(--card-border);
-  background: var(--input-bg);
-  color: var(--text-primary);
-  font-family: var(--font);
-  font-size: var(--text-sm);
-  line-height: 1.5;
-  padding: 8px 10px;
-  outline: none;
-  resize: vertical;
-  transition: all 0.2s;
-}
-
-.record-edit-textarea:focus {
-  border-color: rgba(0, 0, 0, 0.25);
-  background: var(--input-focus-bg);
-}
-
-[data-theme="dark"] .record-edit-textarea:focus {
-  border-color: rgba(255, 255, 255, 0.4);
 }
