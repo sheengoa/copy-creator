@@ -677,6 +677,7 @@ pub fn run() {
             db::project_unlink_assets,
             db::project_set_episode_output,
             db::project_set_episode_locations,
+            db::project_set_episode_props,
             db::project_add_segment,
             db::project_remove_segment,
             db::project_move_segment,
