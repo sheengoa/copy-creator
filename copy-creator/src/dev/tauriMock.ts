@@ -450,9 +450,6 @@ function handleInvoke(cmd: string, args: Record<string, unknown>): unknown {
     case "read_quick_input_text_preview":
       // 文件承载文本的正文预览（卡片文本预览与查看弹窗共用管线）。
       return "文件承载的 mock 正文：\n第一场：地铁站——小雨在末班车驶离后奔下台阶。\n第二场：天台——回声渐弱，只剩风。";
-    case "get_stash_images":
-      // 暂存图文记录的图片附件：mock 无附件，查看弹窗只渲染文本段。
-      return [];
     case "get_clipboard_records": {
       // 供「从资源库选文件」浮层挑选：剧本文件（挂剧本链路验证）、视频
       // （视频首帧/尾帧节点选片，2026-11-01）、图片与音频（类型过滤与
@@ -609,7 +606,6 @@ function handleInvoke(cmd: string, args: Record<string, unknown>): unknown {
     case "save_resource_video_poster":
     case "set_setting":
     case "set_settings_batch":
-    case "validate_autostart_ok":
       return null;
     case "validate_autostart":
       return { enabled: false, file_exists: false, path_correct: true, message: "" };

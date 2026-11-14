@@ -690,4 +690,43 @@ describe("架构守卫：领域规则必须全局共享", () => {
     }
     expect(offenders, "画布域文件不得超过 1000 行（拆分目标 700-800）：超限文件继续按既有模式拆 engine/layers 子模块").toEqual([]);
   });
+
+  it("规则 28：命令面三方对齐——前端 invoke 与 mock case 必须落在 lib.rs 注册清单内", () => {
+    // 回归锚点：project_set_episode_props 实现与前端调用俱全却漏在
+    // generate_handler! 清单外，真实环境 unknown command 被 catch 吞成
+    // console.error 静默失效（mock 有实现，开发态测不出）。注册清单是
+    // 命令面的唯一事实源：前端 invoke 字面量与 tauriMock case 都必须
+    // 落在其中，改名漂移（如 get_stash_images→get_stash_record_images）
+    // 在哪一侧发生都当场红。反向（注册但前端未用=死命令）属清理策略，
+    // 不在本规则。
+    const libRs = readFileSync(join(repoRoot, "copy-creator", "src-tauri", "src", "lib.rs"), "utf8");
+    const start = libRs.indexOf("generate_handler!");
+    const end = libRs.indexOf("])", start);
+    expect(start, "lib.rs 应包含 generate_handler! 注册清单").toBeGreaterThan(-1);
+    const block = libRs.slice(start, end);
+    // 条目形如 `db::project_set_episode_output,` 或裸 `toggle_always_on_top,`
+    // ——取逗号前的末段标识符（标识符首字符后可含数字，如 get_image_base64）。
+    const registered = new Set(
+      Array.from(block.matchAll(/([a-z_][a-z0-9_]*)\s*,/g), (m) => m[1]),
+    );
+    expect(registered.size, "generate_handler! 清单应解析出命令集合").toBeGreaterThan(150);
+
+    const missing = (name: string, file: string) =>
+      `invoke("${name}") 未注册 @ ${toPosix(file.replace(frontRoot, ""))}`;
+    const invokeOffenders: string[] = [];
+    for (const file of allSources) {
+      const source = sourceOf(file);
+      // invoke 支持泛型（invoke<string>(...)），命令名必须是字符串字面量。
+      for (const m of source.matchAll(/invoke(?:<[^>(]*>)?\(\s*"([a-z0-9_]+)"/g)) {
+        if (!registered.has(m[1])) invokeOffenders.push(missing(m[1], file));
+      }
+    }
+    expect(invokeOffenders, "前端 invoke 了未注册命令（真实环境 unknown command）").toEqual([]);
+
+    const mockSource = readSource("dev/tauriMock.ts");
+    const mockOffenders = Array.from(mockSource.matchAll(/case "([a-z0-9_]+)"/g))
+      .filter((m) => !registered.has(m[1]))
+      .map((m) => `mock case "${m[1]}" 未注册（后端不存在或已改名，浏览器模式静默走兜底）`);
+    expect(mockOffenders, "tauriMock 覆盖了不存在的命令").toEqual([]);
+  });
 });
