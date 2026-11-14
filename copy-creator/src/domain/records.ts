@@ -9,9 +9,6 @@ import {
   isTextPreviewableFile,
 } from "./mediaKind";
 
-export type ExpandPreviewKind = "video" | "audio" | "image" | "text" | null;
-export type PasteStrategy = "text" | "file" | "stash";
-
 /** 多选批量粘贴的单条归类：文本类条目按选择顺序合并为一段文本，
  * 文件类条目（含图片/视频/音频，以其文件路径进列表）进文件列表，
  * 一次剪贴板事务同时提供两种格式由目标应用自取。图文暂存记录
@@ -179,39 +176,6 @@ export function getResourceSummary(
 }
 
 // 文本记录展开预览的判定：后端截断标记、超长正文、超过行数阈值任一命中。
-const INLINE_PREVIEW_MAX_LINES = 6;
-const INLINE_PREVIEW_TEXT_LENGTH = 160;
-
-export function countTextLines(content: string): number {
-  return content.split(/\r\n|\r|\n/).length;
-}
-
-export function shouldShowInlineTextToggle(
-  content: string,
-  contentTruncated = false,
-): boolean {
-  return (
-    contentTruncated
-    || content.length > INLINE_PREVIEW_TEXT_LENGTH
-    || countTextLines(content) > INLINE_PREVIEW_MAX_LINES
-  );
-}
-
-// 与资源区共用同一份文本扩展名清单（md/json/代码等常见格式均可预览）。
-export function hasInlineTextPreviewExtension(path: string): boolean {
-  return isTextPreviewableFile(path);
-}
-
-// 快捷输入的文件路径形态（quick-input-files/ 前缀的相对路径）。
-export function isQuickInputFilePath(path: string): boolean {
-  const normalized = path.replace(/\\/g, "/").replace(/^\.\/+/, "");
-  return normalized.startsWith("quick-input-files/");
-}
-
-export function isInlineTextPreviewFilePath(path: string): boolean {
-  return isQuickInputFilePath(path) && hasInlineTextPreviewExtension(path);
-}
-
 /** file 记录的媒体视觉细分；非 file 记录返回 null（type 判定留在 records，recordView 禁止）。 */
 export function recordFileMediaKind(
   record: Pick<ClipboardRecord, "type" | "content">,
@@ -229,40 +193,6 @@ export function recordDisplayName(
   if (record.type === "file") return fileNameFromPath(record.content);
   if (record.is_api_key) return record.key_preview || record.content;
   return record.content;
-}
-
-/** 展开预览类型：决定展开区渲染哪个共享组件（ResourceMediaPlayer /
- *  InlineImagePreview / 文本预览）。null 表示不可展开。 */
-export function recordExpandPreview(
-  record: Pick<
-    ClipboardRecord,
-    "type" | "content" | "content_truncated" | "has_images" | "resource_kind"
-  >,
-): ExpandPreviewKind {
-  if (record.type === "image") return "image";
-  if (record.type === "file") {
-    const mediaKind = fileMediaKindFromPath(record.content);
-    if (mediaKind) return mediaKind;
-    return isTextPreviewableFile(record.content) ? "text" : null;
-  }
-  return record.has_images || shouldShowInlineTextToggle(record.content, record.content_truncated)
-    ? "text"
-    : null;
-}
-
-/** 粘贴路由描述（与 clipboardStore.pasteRecord 的分支一一对应，执行仍在 store）。 */
-export function recordPasteStrategy(
-  record: Pick<
-    ClipboardRecord,
-    "type" | "content" | "has_images" | "resource_kind" | "storage_mode" | "group_name"
-  >,
-): PasteStrategy {
-  if (record.has_images) return "stash";
-  if (record.type === "image") return "stash";
-  if (record.type === "file") {
-    return isFileBackedTextResource(record) ? "text" : "file";
-  }
-  return "text";
 }
 
 // ── 类别过滤（全项目唯一实现：主窗口 / 径向菜单 / store 共用）──

@@ -9,22 +9,14 @@ import { inferResourceMediaKind, type ResourceMediaKind } from "./mediaKind";
 import {
   getResourcePath,
   getResourceTitle,
-  isFileBackedTextResource,
   isResourceRecord,
   recordDisplayName,
-  recordExpandPreview,
   recordFileMediaKind,
-  recordPasteStrategy,
-  recordTextEditable,
   resourceMediaVersion,
   resourceTextPreviewPath,
   getResourceSummary,
-  type ExpandPreviewKind,
-  type PasteStrategy,
   type RecordLocaleText,
 } from "./records";
-
-export type { ExpandPreviewKind, PasteStrategy };
 
 export interface RecordView {
   // —— 事实字段（透传：展示与操作传参；禁止派生领域判定）——
@@ -48,20 +40,13 @@ export interface RecordView {
   kind: ResourceMediaKind; // 统一内容类型（text/image/video/audio/file；link 折叠为 text）
   fileMediaKind: "video" | "audio" | "image" | null; // file 记录的媒体细分
   isResource: boolean;
-  isFileBackedText: boolean;
   /** 文本预览取材路径：有文本文件承载时为文件路径（读全文），纯文本资源
    * 为 null（展示用 summary）。资源卡与径向条目的文本预览分支统一消费。 */
   textPreviewPath: string | null;
-  expandable: boolean; // 能否展开/预览
-  expandPreview: ExpandPreviewKind; // 展开后渲染什么
-  pasteStrategy: PasteStrategy; // 粘贴路由描述（执行仍在 clipboardStore.pasteRecord）
-  /** 能否直接编辑正文（记录编辑对话框入口）：仅数据库承载的文本/链接。 */
-  editableText: boolean;
   dragPath: string | null; // 拖出路径
   resourcePath: string | null; // 预览/播放用的本地路径
   mediaVersion: string | null; // 资源文件版本（修改毫秒）：媒体 URL/缓存键随覆盖保存失效
   displayName: string; // 条目显示文本（三窗口统一规则）
-  displayTruncated: boolean; // displayName 是否被渲染参数截断（区别于 contentTruncated）
   title: string; // 标题（资源标题或文件名）
   summary: string; // 摘要（正文首段/图片占位；资源卡片与径向条目共用）
   // —— API Key 场景（isApiKey 为 true 时有值）——
@@ -89,12 +74,9 @@ export function buildRecordView(
   const imagePlaceholder = locale?.imagePlaceholder ?? "图片";
   const kind = inferResourceMediaKind(record);
   const fileMediaKind = recordFileMediaKind(record);
-  const expandPreview = recordExpandPreview(record);
   let displayName = recordDisplayName(record, imagePlaceholder);
-  let displayTruncated = false;
   if (options.displayNameTruncateAt !== undefined && displayName.length > options.displayNameTruncateAt) {
     displayName = `${displayName.slice(0, options.displayNameTruncateAt)}…`;
-    displayTruncated = true;
   }
 
   return {
@@ -115,17 +97,11 @@ export function buildRecordView(
     kind,
     fileMediaKind,
     isResource: isResourceRecord(record),
-    isFileBackedText: isFileBackedTextResource(record),
     textPreviewPath: resourceTextPreviewPath(record),
-    expandable: expandPreview !== null,
-    expandPreview,
-    pasteStrategy: recordPasteStrategy(record),
-    editableText: recordTextEditable(record),
     dragPath: record.drag_path ?? null,
     resourcePath: getResourcePath(record),
     mediaVersion: resourceMediaVersion(record) ?? null,
     displayName,
-    displayTruncated,
     title: getResourceTitle(record, kind, locale),
     summary: getResourceSummary(record, imagePlaceholder),
 

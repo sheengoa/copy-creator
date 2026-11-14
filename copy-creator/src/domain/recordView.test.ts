@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { recordTextEditable } from "./records";
 import { buildRecordView } from "./recordView";
 import type { ClipboardRecord } from "../types";
 
@@ -65,52 +66,33 @@ describe("buildRecordView textPreviewPath", () => {
   });
 });
 
-describe("buildRecordView editableText", () => {
+// editableText 曾是 RecordView 的判定字段，零消费后删除（2026-11-14）；
+// 判定函数本身仍被 ResourceDetailPage 的编辑目标分派消费，覆盖转直测。
+describe("recordTextEditable（原 RecordView.editableText 判定）", () => {
+  const asRecord = (patch: Partial<ClipboardRecord>): ClipboardRecord => ({ ...baseRecord, ...patch });
+
   it("数据库承载的文本记录可编辑", () => {
-    const view = buildRecordView({
-      ...baseRecord,
-      type: "text",
-      content: "普通复制的文本",
-    });
-    expect(view.editableText).toBe(true);
+    expect(recordTextEditable(asRecord({ type: "text", content: "普通复制的文本" }))).toBe(true);
   });
 
   it("链接记录可编辑", () => {
-    const view = buildRecordView({
-      ...baseRecord,
-      type: "link",
-      content: "https://example.com",
-    });
-    expect(view.editableText).toBe(true);
+    expect(recordTextEditable(asRecord({ type: "link", content: "https://example.com" }))).toBe(true);
   });
 
   it("资源承载文本不可编辑（正文在文件里，走资源详情页）", () => {
-    const view = buildRecordView({
-      ...baseRecord,
-      type: "text",
-      content: "编辑后的全文内容",
-      storage_mode: "resource",
-      resource_path: "C:/库/分组/厂里传疯了.txt",
-    });
-    expect(view.editableText).toBe(false);
+    expect(
+      recordTextEditable(
+        asRecord({ type: "text", content: "编辑后的全文内容", storage_mode: "resource", resource_path: "C:/库/分组/厂里传疯了.txt" }),
+      ),
+    ).toBe(false);
   });
 
   it("图文暂存记录不可编辑（正文占位符须由图文编辑器维护）", () => {
-    const view = buildRecordView({
-      ...baseRecord,
-      type: "text",
-      content: "说明文字 [Image #1]",
-      has_images: true,
-    });
-    expect(view.editableText).toBe(false);
+    expect(recordTextEditable(asRecord({ type: "text", content: "说明文字 [Image #1]", has_images: true }))).toBe(false);
   });
 
   it("图片与文件记录不可编辑", () => {
-    expect(
-      buildRecordView({ ...baseRecord, type: "image", content: "images/x.png" }).editableText,
-    ).toBe(false);
-    expect(
-      buildRecordView({ ...baseRecord, type: "file", content: "/tmp/a.pdf" }).editableText,
-    ).toBe(false);
+    expect(recordTextEditable(asRecord({ type: "image", content: "images/x.png" }))).toBe(false);
+    expect(recordTextEditable(asRecord({ type: "file", content: "/tmp/a.pdf" }))).toBe(false);
   });
 });
