@@ -1547,8 +1547,10 @@ pub(crate) fn set_resource_library_path_blocking(app: AppHandle, path: String) -
     set_setting_inner(&app, RESOURCE_LIBRARY_HISTORY_SETTING, &history_value)?;
     // 库路径切换后立即对新库全量对账：这是用户主动的低频操作，同步执行
     // 换取切换完成即是完整索引（查询路径已不做扫描，缺这步新库不显示）。
+    // （曾在此 emit「resource-library-path-changed」——前端零监听的孤儿
+    // 事件，唯一调用方 ResourcePage 设置流程在返回后显式重载分组与列表，
+    // 径向菜单按次唤起拉取，2026-11-14 删除。）
     sync_resource_library(&app);
-    let _ = app.emit("resource-library-path-changed", &path_string);
     Ok(path_string)
 }
 
