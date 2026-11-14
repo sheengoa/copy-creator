@@ -6,6 +6,7 @@ import type { Phrase, PhraseGroup } from "../types";
 import { sortByIdOrder } from "../utils/reorder";
 import { DECODABLE_IMAGE_EXTENSIONS, getResourceExtension } from "../domain/mediaKind";
 import { resolveAbsoluteResourcePath } from "../domain/mediaUrl";
+import { getImageThumbnail } from "../domain/mediaAssets";
 
 /** 「全部」跨分组视图的选择哨兵：真实分组 id 由后端生成，不会与之冲突。 */
 export const ALL_PHRASES_GROUP_ID = "__all__";
@@ -182,20 +183,39 @@ export const usePhraseStore = create<PhraseState>()((set, get) => {
     if (initialized) return;
     initialized = true;
 
-    listen("phrase-groups-changed", () => {
+    // 监听统一收集并在窗口卸载时清理（照 clipboardStore 的 beforeunload
+    // 模式）：径向菜单窗口常驻重建列表，悬挂的 unlisten 会重复触发重载。
+    const unlisteners: Array<() => void> = [];
+    void listen("phrase-groups-changed", () => {
       get().loadGroups();
+    }).then((fn) => {
+      unlisteners.push(fn);
     });
 
-    listen<{ sortBy: string }>("content-sort-changed", (event) => {
+    void listen<{ sortBy: string }>("content-sort-changed", (event) => {
       // 与剪切板同口径：先用事件负载更新本窗口设置值再重载。
       useSettingsStore.setState({ contentSort: parseContentSort(event.payload.sortBy) });
       if (get().selectedGroupId === ALL_PHRASES_GROUP_ID) {
         void get().loadPhrases(ALL_PHRASES_GROUP_ID);
       }
+    }).then((fn) => {
+      unlisteners.push(fn);
     });
 
+    if (typeof window !== "undefined") {
+      window.addEventListener("beforeunload", () => {
+        unlisteners.forEach((fn) => fn());
+        unlisteners.length = 0;
+      });
+    }
+
     // 与剪切板同口径：首次加载前先装载设置（径向菜单窗口无 App 层装载）。
-    void useSettingsStore.getState().loadSettings().then(() => {
+    // 设置装载若因 IPC 异常迟迟不返回，1.5s 后仍放行首载（排序偏好晚到
+    // 时会经 content-sort-changed 触发重载纠正），避免列表因一次悬挂永久空白。
+    void Promise.race([
+      useSettingsStore.getState().loadSettings(),
+      new Promise<void>((resolve) => window.setTimeout(resolve, 1500)),
+    ]).then(() => {
       get().loadGroups();
     });
   },
@@ -208,7 +228,9 @@ export const usePhraseStore = create<PhraseState>()((set, get) => {
       phraseThumbCache.set(path, cached);
       return cached;
     }
-    const base64 = await invoke<string>("get_image_thumbnail", { path, maxSize: 96 });
+    // 经 domain/mediaAssets 的限流封装：大库首次滚动时并发解码受并发
+    // 上限约束（此前直连 invoke 绕过了限流，正是该封装要防的场景）。
+    const base64 = await getImageThumbnail(path, 96);
     phraseThumbCache.set(path, base64);
     if (phraseThumbCache.size > MAX_PHRASE_THUMBS) {
       const oldest = phraseThumbCache.keys().next().value;
