@@ -418,3 +418,8 @@ export function mockEmit(event: string, payload: unknown): void {
     if (l.event === event) l.cb({ event, id: mockEventSeq++, payload });
   }
 }
+
+// 命令模块的「未处理」哨兵：commands*.ts 的 switch 对非本域命令返回它，
+// tauriMock 的分派器据此流转到下一模块/兜底（区别于合法的 null/undefined
+// 返回——case 显式 return null 也是已处理）。
+export const MOCK_NOT_HANDLED = Symbol("mock-not-handled");
