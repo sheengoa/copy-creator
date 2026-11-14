@@ -1457,8 +1457,15 @@ input:focus-visible + .selection-checkbox {
   cursor: pointer;
 }
 
-.image-lightbox-close:hover {
+.image-lightbox-close:hover,
+.image-lightbox-close:focus-visible {
   background: rgba(255, 255, 255, 0.24);
+}
+
+/* 键盘可达：聚焦时白描边（剪藏建档灯箱此前有、详情页灯箱漏，收敛后共有）。 */
+.image-lightbox-close:focus-visible {
+  outline: 2px solid rgba(255, 255, 255, 0.8);
+  outline-offset: 2px;
 }
 
 /* ── 跨窗口共享：分组下拉 / 折叠箭头 / 视频封面帧 ──

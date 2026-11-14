@@ -696,51 +696,17 @@
   outline: none;
 }
 
-.clipboard-create-image-preview {
-  position: fixed;
-  inset: 0;
-  z-index: 50;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  padding: 42px 24px 24px;
-  background: rgba(0, 0, 0, 0.72);
-  outline: none;
-}
-
-.clipboard-create-image-preview img {
+/* 剪藏建档的图片预览灯箱与资源详情灯箱（components.css .image-lightbox）
+   逐行同构，容器与关闭钮直接复用其类（StashEditor 内行为保持各自版本：
+   图本体点击不关闭、Esc 为元素级分层）；图本体独此一份——粘贴小图保持
+   「原生尺寸封顶」而非灯箱的填充式 contain（放大到全屏会糊）。 */
+.clipboard-create-preview-img {
   display: block;
   max-width: 100%;
   max-height: 100%;
   object-fit: contain;
   border-radius: 8px;
   box-shadow: 0 12px 36px rgba(0, 0, 0, 0.3);
-}
-
-.clipboard-create-preview-close {
-  position: absolute;
-  top: 12px;
-  right: 14px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  width: 30px;
-  height: 30px;
-  padding: 0;
-  border: 0;
-  border-radius: 6px;
-  background: rgba(255, 255, 255, 0.14);
-  color: #fff;
-  font: inherit;
-  font-size: 22px;
-  cursor: pointer;
-}
-
-.clipboard-create-preview-close:hover,
-.clipboard-create-preview-close:focus-visible {
-  background: rgba(255, 255, 255, 0.24);
-  outline: 2px solid rgba(255, 255, 255, 0.8);
-  outline-offset: 2px;
 }
 
 .clipboard-create-action-bar {

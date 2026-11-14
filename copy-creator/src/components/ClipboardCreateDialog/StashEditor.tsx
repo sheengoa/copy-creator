@@ -857,7 +857,7 @@ const StashEditor = forwardRef<StashEditorHandle, Props>(function StashEditor({
       {previewImage ? (
         <div
           ref={previewRef}
-          className="clipboard-create-image-preview"
+          className="image-lightbox"
           role="dialog"
           aria-modal="true"
           aria-label={previewAlt}
@@ -872,7 +872,7 @@ const StashEditor = forwardRef<StashEditorHandle, Props>(function StashEditor({
         >
           <button
             type="button"
-            className="clipboard-create-preview-close"
+            className="image-lightbox-close"
             onClick={(event) => {
               event.stopPropagation();
               closePreview();
@@ -882,6 +882,7 @@ const StashEditor = forwardRef<StashEditorHandle, Props>(function StashEditor({
             ×
           </button>
           <img
+            className="clipboard-create-preview-img"
             src={previewImage.dataUrl}
             alt={previewAlt}
             onClick={(event) => event.stopPropagation()}
