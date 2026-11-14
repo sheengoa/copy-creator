@@ -23,6 +23,7 @@ import { useShallow } from "zustand/react/shallow";
 import { useSettingsStore, RESOURCE_CARD_SIZE_MAX, RESOURCE_CARD_SIZE_MIN } from "../stores/settingsStore";
 import { useMultiSelect } from "../hooks/useMultiSelect";
 import { useArrowKeyNav } from "../hooks/useArrowKeyNav";
+import { useCardColumns } from "../hooks/useCardColumns";
 import { Icons } from "../components/Icons";
 import { IosSelect } from "../components/ui";
 import SearchInput from "../components/SearchInput";
@@ -45,7 +46,7 @@ import type { ResourceMediaKind as ResourceMediaKindLabel } from "../domain/medi
 import { ResourceCard } from "./ResourcePage/ResourceCard";
 import { buildRecordView, type RecordView } from "../domain/recordView";
 import { type ResourceTypeFilter } from "../domain/mediaKind";
-import { computeResourceColumnCount, resourceCardScale, splitResourceColumns } from "./ResourcePage/resourceUtils";
+import { resourceCardScale, splitResourceColumns } from "../utils/cardGrid";
 import { buildResourceFolderParentMap, findResourceFolder, flattenResourceFolderPaths, flattenResourceFoldersVisible, formatResourceFolderPath, getResourceFolderRoot, getResourceFolderSiblings, isResourceFolderPath, reorderResourceFolderSiblings } from "../domain/groups";
 import { inferResourceMediaKind, matchesResourceType } from "../domain/mediaKind";
 import { getResourceTitle } from "../domain/records";
@@ -150,7 +151,6 @@ export default function ResourcePage() {
   const pendingScrollTopRef = useRef<number | null>(null);
   const resourceListRef = useRef<HTMLDivElement>(null);
   const [listElement, setListElement] = useState<HTMLDivElement | null>(null);
-  const [columnCount, setColumnCount] = useState(2);
   const [feedback, setFeedback] = useState<"deleteFailed" | "deletedWithMissing" | "openFailed" | null>(null);
   // deletedWithMissing 消息的动态计数：文件在删除前就已不在磁盘、仅删除
   // 了记录的条目数（后端删除统计如实带回）。
@@ -538,22 +538,13 @@ export default function ResourcePage() {
     }
     return views;
   }, [filteredRecords, recordLocale]);
+  // 列数随列表宽度动态变化（最少两列）；卡片大小设置改变最小列宽槽位，
+  // 紧凑档同宽容纳更多列。三页共用 hook，观察与钳制集中在其中。
+  const columnCount = useCardColumns(listElement, cardSize);
   const columns = useMemo(
     () => splitResourceColumns(filteredRecords, columnCount),
     [filteredRecords, columnCount],
   );
-
-  // 列数随列表宽度动态变化，窗口缩放时实时跟随（最少两列）；卡片大小
-  // 设置改变最小列宽槽位，紧凑档同宽容纳更多列。
-  useEffect(() => {
-    if (!listElement) return;
-    const update = () =>
-      setColumnCount(computeResourceColumnCount(listElement.clientWidth, cardSize));
-    update();
-    const observer = new ResizeObserver(update);
-    observer.observe(listElement);
-    return () => observer.disconnect();
-  }, [listElement, cardSize]);
 
   // 统一的「回到顶部」：批量选择模式下隐藏。
   const backToTop = useBackToTop({ enabled: !isSelecting });

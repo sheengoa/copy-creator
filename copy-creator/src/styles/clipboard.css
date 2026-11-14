@@ -60,7 +60,8 @@
   transform: scale(0.96);
 }
 
-/* Clipboard Card */
+/* Clipboard Card（卡片骨架与预览来自 components.css 三页共用 resource-card 族，
+   此处只放剪切板特有件）。type-xxx 的类型色保留：收藏星沿用类型色。 */
 .clipboard-card.type-text {
   --color: #007AFF;
 }
@@ -77,14 +78,27 @@
   --color: #AF52DE;
 }
 
-.clipboard-card.has-api-key .notibar {
-  background: #FF3B30;
-  box-shadow: 0 0 3px rgba(255, 59, 48, 0.2);
+.clipboard-card.has-api-key {
+  --color: #FF3B30;
 }
 
-[data-theme="dark"] .clipboard-card.has-api-key .notibar {
-  background: #FF453A;
-  box-shadow: 0 0 3px rgba(255, 69, 58, 0.2);
+/* 收藏标识角标：标题行星星（操作在菜单，角标只读）。 */
+.clipboard-card-pinned {
+  display: inline-flex;
+  align-items: center;
+  flex-shrink: 0;
+  color: var(--color);
+}
+
+.clipboard-card-pinned svg {
+  width: 13px;
+  height: 13px;
+}
+
+/* API Key 标注面板：卡片内嵌在标题行下方，点击面板不触发查看弹窗。 */
+.clipboard-card-label-panel {
+  position: relative;
+  z-index: 1;
 }
 
 .clipboard-categories {
@@ -170,279 +184,6 @@
   box-shadow: var(--seg-item-active-shadow);
 }
 
-.noti-type-label {
-  display: flex;
-  align-items: center;
-  gap: 4px;
-}
-
-.noti-type-text {
-  font-size: var(--text-sm);
-  font-weight: var(--weight-medium);
-  color: var(--text-secondary);
-}
-
-.clipboard-card .notititle {
-  color: var(--text-secondary);
-  font-weight: var(--weight-normal);
-  font-size: var(--text-sm);
-}
-
-.noti-type-icon {
-  display: flex;
-  align-items: center;
-  color: var(--text-secondary);
-}
-
-.noti-type-icon svg {
-  width: 14px;
-  height: 14px;
-}
-
-.clipboard-link-content {
-  color: var(--accent);
-  word-break: break-all;
-  font-size: var(--text-sm);
-}
-
-.clipboard-file-content {
-  color: var(--text-primary);
-  font-size: var(--text-sm);
-}
-
-.clipboard-text-content {
-  display: block;
-  white-space: pre-wrap;
-  word-break: break-word;
-}
-
-.clipboard-card-thumb {
-  width: 48px;
-  height: 36px;
-  border-radius: 5px;
-  background: var(--input-bg);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  position: relative;
-}
-
-.clipboard-card-thumb img {
-  width: 100%;
-  height: 100%;
-  object-fit: cover;
-  border-radius: 5px;
-}
-
-.thumb-spinner {
-  width: 14px;
-  height: 14px;
-  border: 2px solid var(--separator);
-  border-top-color: var(--accent);
-  border-radius: 50%;
-  animation: spin 0.6s linear infinite;
-}
-
-.clipboard-card-header {
-  padding: 0.65rem 0.5rem 0.3rem 1rem;
-}
-
-.clipboard-card.is-selection-mode .clipboard-card-header {
-  padding-inline-start: 42px;
-}
-
-.clipboard-card-body {
-  padding: 0 1rem 0;
-  min-height: calc(1 * 1.5 * 14px);
-}
-
-.clipboard-card-body.is-content-summary {
-  max-height: calc(1.5em * 6);
-  overflow: hidden;
-}
-
-.clipboard-card-body.is-toggleable {
-  position: relative;
-  overflow: hidden;
-}
-
-.clipboard-card-body.is-collapsed {
-  max-height: calc(1.5em * 6);
-}
-
-.clipboard-card-body.is-collapsed::after {
-  content: "";
-  position: absolute;
-  right: 0.75rem;
-  bottom: 0;
-  left: 0.75rem;
-  height: 1.5em;
-  pointer-events: none;
-  background: linear-gradient(to bottom, transparent, var(--card-inner-bg) 86%);
-}
-
-.clipboard-card-body.is-expanded {
-  max-height: min(320px, 42vh);
-  overflow-y: auto;
-  padding-right: 0.75rem;
-}
-
-.clipboard-card-body.is-expanded::-webkit-scrollbar {
-  width: 4px;
-}
-
-.clipboard-card-body.is-expanded::-webkit-scrollbar-track {
-  background: transparent;
-}
-
-.clipboard-card-body.is-expanded::-webkit-scrollbar-thumb {
-  background: rgba(0, 0, 0, 0.15);
-  border-radius: 2px;
-}
-
-[data-theme="dark"] .clipboard-card-body.is-expanded::-webkit-scrollbar-thumb {
-  background: rgba(255, 255, 255, 0.18);
-}
-
-/* 展开媒体（图片/视频）必须完整展示：容器不限高、不出卡内滚动条，
-   高度由媒体自身上限决定（展开图 480px / 视频 330px），超出部分交给列表滚动。
-   根因教训：媒体上限放宽时容器仍保留 320px 滚动上限，展开图被裁切、
-   必须卡内上下滑动才能看全。文本展开不受本规则影响，保留卡内滚动。 */
-.clipboard-card-body.is-expanded.is-media-expanded {
-  max-height: none;
-  padding-right: 1rem;
-  overflow-y: visible;
-}
-
-.clipboard-card-expanded-content {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-  padding-bottom: 4px;
-}
-
-.clipboard-card-expanded-text {
-  white-space: pre-wrap;
-  overflow-wrap: anywhere;
-}
-
-.clipboard-card-expanded-image {
-  display: block;
-  width: 100%;
-  /* 展开图适度放大（原 320px 压竖图）；要看原图点击全屏灯箱查看。 */
-  max-height: 480px;
-  border-radius: 8px;
-  object-fit: contain;
-}
-
-.clipboard-card-footer {
-  padding: 0 0.5rem 0.5rem 1rem;
-  color: var(--text-secondary);
-  font-weight: var(--weight-normal);
-  font-size: var(--text-xs);
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-}
-
-.clipboard-card-time {
-  flex: 1;
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  font-size: var(--text-sm);
-  font-weight: var(--weight-normal);
-  color: var(--text-secondary);
-}
-
-.clipboard-card-actions {
-  display: flex;
-  align-items: center;
-  flex-shrink: 0;
-  gap: 2px;
-}
-
-.clipboard-card-actions > .card-toggle-text-btn,
-.clipboard-card-actions > .drag-handle,
-.clipboard-card-actions > .card-delete-btn,
-.clipboard-card-actions > .card-pin-btn,
-.clipboard-card-actions > .card-edit-btn {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  box-sizing: border-box;
-  flex: 0 0 28px;
-  width: 28px !important;
-  height: 28px;
-  margin: 0;
-  padding: 0;
-  border: 0;
-  border-radius: 6px;
-  background: transparent !important;
-  color: var(--text-tertiary);
-  cursor: pointer;
-  opacity: 0;
-  transition:
-    opacity 140ms ease-out,
-    transform 140ms cubic-bezier(0.16, 1, 0.3, 1),
-    background 120ms ease-out,
-    color 120ms ease-out;
-}
-
-.clipboard-card:hover .clipboard-card-actions > .card-toggle-text-btn,
-.clipboard-card:hover .clipboard-card-actions > .drag-handle,
-.clipboard-card:hover .clipboard-card-actions > .card-delete-btn,
-.clipboard-card:hover .clipboard-card-actions > .card-pin-btn,
-.clipboard-card:hover .clipboard-card-actions > .card-edit-btn,
-.clipboard-card:focus-within .clipboard-card-actions > .card-toggle-text-btn,
-.clipboard-card:focus-within .clipboard-card-actions > .drag-handle,
-.clipboard-card:focus-within .clipboard-card-actions > .card-delete-btn,
-.clipboard-card:focus-within .clipboard-card-actions > .card-pin-btn,
-.clipboard-card:focus-within .clipboard-card-actions > .card-edit-btn {
-  opacity: 0.5;
-}
-
-.clipboard-card-actions > .card-toggle-text-btn:hover,
-.clipboard-card-actions > .drag-handle:hover,
-.clipboard-card-actions > .card-delete-btn:hover,
-.clipboard-card-actions > .card-edit-btn:hover {
-  opacity: 1;
-  background: var(--chip-hover-bg) !important;
-  color: var(--text-primary);
-}
-
-/* 收藏星 hover 不跟随变近黑：反馈交给底色与不透明度 */
-.clipboard-card-actions > .card-pin-btn:hover {
-  opacity: 1;
-  background: var(--chip-hover-bg) !important;
-}
-
-/* 已收藏（aria-pressed）：星标本体常显为实心中灰（不随卡片悬停消失、
- * 不跳黑），与径向菜单的收藏态语义一致；选择器带上 .clipboard-card
- * 与上方卡片 hover/focus-within 同权重，才能压住基础规则的 opacity: 0 */
-.clipboard-card .clipboard-card-actions > .card-pin-btn[aria-pressed="true"] {
-  opacity: 1;
-  color: var(--text-secondary);
-}
-
-.clipboard-card .clipboard-card-actions > .card-pin-btn[aria-pressed="true"] svg {
-  fill: currentColor;
-}
-
-.clipboard-card-actions > .card-delete-btn:hover {
-  color: rgb(220, 38, 38);
-}
-
-.clipboard-card-actions > .card-toggle-text-btn svg,
-.clipboard-card-actions > .drag-handle svg,
-.clipboard-card-actions > .card-delete-btn svg,
-.clipboard-card-actions > .card-pin-btn svg,
-.clipboard-card-actions > .card-edit-btn svg {
-  width: 15px;
-  height: 15px;
-}
-
 /* === API Key Badge === */
 .api-key-badge {
   display: inline-flex;
@@ -469,17 +210,6 @@
 
 [data-theme="dark"] .api-key-badge:hover {
   background: rgba(255, 255, 255, 0.12);
-}
-
-/* Guess hint */
-.api-key-guess-hint {
-  padding: 0 1rem 0.4rem;
-  font-size: 11px;
-  color: var(--text-tertiary);
-}
-
-.api-key-guess-hint span {
-  font-weight: var(--weight-medium);
 }
 
 /* === Inline Label Panel === */
@@ -799,21 +529,6 @@
   height: 12px;
 }
 
-/* ── Drag Overlay ────────────────────────────────────── */
-.drag-overlay-card {
-  cursor: grabbing;
-  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.2);
-  transform: scale(1.02);
-  animation: none !important;
-}
-
-.drag-overlay-card .notibody {
-  transform: none !important;
-}
-
-[data-theme="dark"] .drag-overlay-card {
-  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.5);
-}
 
 .drag-overlay-chip {
   cursor: grabbing;
@@ -827,14 +542,9 @@
 }
 
 /* ── Dragging State ──────────────────────────────────── */
-.clipboard-card.is-dragging,
 .phrase-card.is-dragging {
   opacity: 0.35;
   z-index: 999;
-}
-
-.is-dragging .notibody {
-  transform: none !important;
 }
 
 /* Sortable item occupying target position */

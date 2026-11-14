@@ -47,6 +47,14 @@ export function inferResourceMediaKind(
   return "file";
 }
 
+/** 混合形态判定（V2 原型定案 2026-11-14）：kind=text 涵盖纯文本/链接/
+ *  文本文件——文本没有视觉形态，16:10 大框只会制造留白，主窗口列表
+ *  一律紧凑条；image/video/audio/file（非文本文件）保留媒体卡矮横幅。
+ *  资源库卡片不消费本判定（保持 16:10 全卡片）。 */
+export function isSlimCardKind(kind: ResourceMediaKind): boolean {
+  return kind === "text";
+}
+
 /** 文件路径按扩展名推断的媒体视觉类型；普通文件/文本返回 null，维持文件名展示。 */
 export function fileMediaKindFromPath(path: string): FileMediaKind | null {
   const kind = inferResourceMediaKind({ type: "file", content: path });

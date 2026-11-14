@@ -9,8 +9,7 @@ import { Icons } from "../../components/Icons";
 import { ConfirmDialog } from "../../components/ConfirmDialog";
 import SearchInput from "../../components/SearchInput";
 import { ClipboardCard } from "./ClipboardCard";
-import { EditRecordDialog } from "./EditRecordDialog";
-import { TYPE_META } from "./utils";
+import ResourceDetailPage from "../ResourcePage/ResourceDetailPage";
 import BatchSelectionBar from "../../components/BatchSelectionBar";
 import { BackToTopButton } from "../../components/BackToTop";
 import { useBackToTop } from "../../hooks/useBackToTop";
@@ -19,15 +18,14 @@ import { useMultiSelect } from "../../hooks/useMultiSelect";
 import { useRefreshOnShow } from "../../hooks/useRefreshOnShow";
 import { useRecordLocale } from "../../hooks/useRecordLocale";
 import { useArrowKeyNav } from "../../hooks/useArrowKeyNav";
+import { useCardColumns } from "../../hooks/useCardColumns";
+import { COMPACT_CARD_MIN_WIDTH, splitResourceColumns } from "../../utils/cardGrid";
 import { buildRecordView, type RecordView } from "../../domain/recordView";
+import type { ClipboardRecord } from "../../types";
+import { type ResourceMediaKind } from "../../domain/mediaKind";
 import { isResourceRecord, recordMatchesCategory, RECORD_CATEGORY_KEYS } from "../../domain/records";
 
 type ClipType = ClipboardFilter;
-
-TYPE_META.text.icon = Icons.clipboard;
-TYPE_META.image.icon = Icons.image;
-TYPE_META.link.icon = Icons.link;
-TYPE_META.file.icon = Icons.file;
 
 export default function ClipboardPage() {
   const { t } = useTranslation();
@@ -46,8 +44,6 @@ export default function ClipboardPage() {
     loadAllRecords,
     deleteRecords,
     deleteRecord,
-    pasteRecord,
-    pasteRecordTerminal,
     setRecordsPinned,
   } = useClipboardStore(
     useShallow((s) => ({
@@ -64,37 +60,15 @@ export default function ClipboardPage() {
       loadAllRecords: s.loadAllRecords,
       deleteRecords: s.deleteRecords,
       deleteRecord: s.deleteRecord,
-      pasteRecord: s.pasteRecord,
-      pasteRecordTerminal: s.pasteRecordTerminal,
       setRecordsPinned: s.setRecordsPinned,
     })),
   );
-  const pasteLeftClick = useSettingsStore((s) => s.pasteLeftClick);
   const [confirmState, setConfirmState] = useState<{
     message: string;
     hint?: string;
     onConfirm: () => void | Promise<void>;
   } | null>(null);
   const [deletingSelected, setDeletingSelected] = useState(false);
-  // 记录正文编辑：打开时先取全文（列表载荷是截断预览）。
-  const [editingRecord, setEditingRecord] = useState<{ id: string; content: string } | null>(null);
-
-  // 粘贴结果反馈：粘贴失败此前被静默吞掉，用户会去目标应用贴出旧内容。
-  // 与资源页同款 showFeedback 模式与样式（resource-feedback）。
-  const [pasteFeedback, setPasteFeedback] = useState<"copied" | "copyFailed" | null>(null);
-  const feedbackTimerRef = useRef<number | null>(null);
-  const showPasteFeedback = useCallback((next: "copied" | "copyFailed") => {
-    if (feedbackTimerRef.current !== null) window.clearTimeout(feedbackTimerRef.current);
-    setPasteFeedback(next);
-    feedbackTimerRef.current = window.setTimeout(() => {
-      setPasteFeedback(null);
-      feedbackTimerRef.current = null;
-    }, 2200);
-  }, []);
-  useEffect(() => () => {
-    if (feedbackTimerRef.current !== null) window.clearTimeout(feedbackTimerRef.current);
-  }, []);
-
   const categoriesScrollRef = useRef<HTMLDivElement>(null);
   const searchEffectInitializedRef = useRef(false);
 
@@ -120,24 +94,17 @@ export default function ClipboardPage() {
     [labels],
   );
 
-  const handlePaste = useCallback(
-    async (view: RecordView) => {
-      const record = records.find((r) => r.id === view.id);
-      if (!record) return;
-      const copied = await pasteRecord(record);
-      showPasteFeedback(copied ? "copied" : "copyFailed");
-    },
-    [pasteRecord, records, showPasteFeedback],
-  );
-
-  const handlePasteTerminal = useCallback(
-    async (view: RecordView) => {
-      const record = records.find((r) => r.id === view.id);
-      if (!record) return;
-      const copied = await pasteRecordTerminal(record);
-      showPasteFeedback(copied ? "copied" : "copyFailed");
-    },
-    [pasteRecordTerminal, records, showPasteFeedback],
+  // 媒体 kind 文案（video/audio 等）：与资源卡同一组 resources.type* 键。
+  const getKindLabel = useCallback(
+    (kind: ResourceMediaKind): string =>
+      t(
+        kind === "text" ? "resources.typeText"
+          : kind === "image" ? "resources.typeImage"
+            : kind === "video" ? "resources.typeVideo"
+              : kind === "audio" ? "resources.typeAudio"
+                : "resources.typeFile",
+      ),
+    [t],
   );
 
   const getRecordContent = useCallback(
@@ -163,14 +130,14 @@ export default function ClipboardPage() {
     [loadRecords, records],
   );
 
-  // 编辑正文：读全文打开对话框，保存成功后重载当前视图拿新预览。
-  const handleEditRecord = useCallback(
-    (view: RecordView) => {
-      void getRecordContent(view)
-        .then((content) => setEditingRecord({ id: view.id, content }))
-        .catch((error) => console.error("Failed to load record content:", error));
-    },
-    [getRecordContent],
+  // 详情页内联编辑的保存通道（2026-11-14 定案：与资源库同交互——双击
+  // 正文进编辑态、页内保存，无弹窗）：数据库文本/链接写
+  // update_clipboard_record_content，成功后详情页经 onRecordUpdated
+  // 刷新列表拿新预览。
+  const handleSaveDetailContent = useCallback(
+    (record: ClipboardRecord, content: string): Promise<void> =>
+      invoke("update_clipboard_record_content", { id: record.id, content }).then(() => undefined),
+    [],
   );
 
   const handleSetPinned = useCallback(
@@ -217,8 +184,34 @@ export default function ClipboardPage() {
   // 统一的「回到顶部」：监视剪贴板列表滚动容器，批量选择模式下隐藏。
   const backToTop = useBackToTop({ enabled: !isSelecting });
   const listRef = useRef<HTMLDivElement>(null);
-  const arrowNav = useArrowKeyNav({ containerRef: listRef, itemSelector: ".clipboard-card" });
+  const [listElement, setListElement] = useState<HTMLDivElement | null>(null);
+  // 卡片网格：列数随列表宽度动态变化（与资源页同一 hook），交错分配
+  // 保证双列按行阅读时间序正确。
+  const columnCount = useCardColumns(listElement, COMPACT_CARD_MIN_WIDTH);
+  const columns = useMemo(
+    () => splitResourceColumns(views, columnCount),
+    [views, columnCount],
+  );
+  const columnsRef = useRef<HTMLDivElement>(null);
+  const arrowNav = useArrowKeyNav({
+    containerRef: columnsRef,
+    itemSelector: ".clipboard-card",
+    columnar: true,
+    columnSelector: ".resource-column",
+  });
   const selectAllRequestRef = useRef(0);
+
+  // 详情视图：存 id 而非记录对象，records 重载（编辑/收藏变更）后按 id
+  // 从最新数据解析，详情页内容保持新鲜。点击卡片 = 页内详情（资源库
+  // 同款形态），主窗口纯展示预览，粘贴只在径向菜单。
+  const [viewingRecordId, setViewingRecordId] = useState<string | null>(null);
+  const viewingRecord = useMemo(
+    () => (viewingRecordId ? records.find((record) => record.id === viewingRecordId) ?? null : null),
+    [records, viewingRecordId],
+  );
+  const openViewer = useCallback((view: RecordView) => {
+    setViewingRecordId(view.id);
+  }, [setViewingRecordId]);
 
   const startClipboardSelection = useCallback(() => {
     selectAllRequestRef.current += 1;
@@ -349,6 +342,34 @@ export default function ClipboardPage() {
 
   // 手动拖拽排序已移除：列表顺序由内容排序偏好（最近使用 / 最多使用）决定。
 
+  // 详情视图：完全复用资源库详情页形态（hideResourceOps 隐藏备注/重命名/
+  // 版本记录/标注/文件内联编辑），正文编辑走双击页内编辑（onSaveContent
+  // 通道），文件类记录保持只读。
+  if (viewingRecord) {
+    return (
+      <div className="clipboard-page">
+        <ResourceDetailPage
+          record={viewingRecord}
+          typeLabel={getKindLabel}
+          onBack={() => setViewingRecordId(null)}
+          onDelete={handleDelete}
+          onRecordUpdated={() => void loadRecords(false)}
+          hideResourceOps
+          onSaveContent={handleSaveDetailContent}
+          backLabel={t("common.backToList")}
+        />
+        {confirmState && (
+          <ConfirmDialog
+            message={confirmState.message}
+            hint={confirmState.hint}
+            onConfirm={confirmState.onConfirm}
+            onCancel={() => setConfirmState(null)}
+          />
+        )}
+      </div>
+    );
+  }
+
   return (
     <>
     <div className="clipboard-page">
@@ -417,15 +438,6 @@ export default function ClipboardPage() {
         />
       )}
 
-      {editingRecord && (
-        <EditRecordDialog
-          recordId={editingRecord.id}
-          initialContent={editingRecord.content}
-          onClose={() => setEditingRecord(null)}
-          onSaved={() => void loadRecords(false)}
-        />
-      )}
-
       {clipboardPaused && (
         <div className="clipboard-paused-notice" role="status">
           {Icons.pause}
@@ -435,22 +447,15 @@ export default function ClipboardPage() {
 
       {loading && records.length === 0 && !loadedOnce ? (
         <div className="clipboard-list">
-          {[1, 2, 3, 4].map((i) => (
-            <div key={i} className="notification skeleton">
-              <div className="notibar" />
-              <div className="noticontent">
-                <div className="notititle">
-                  <div className="skeleton-line short" />
-                </div>
-                <div className="notibody">
-                  <div
-                    className="skeleton-line"
-                    style={{ width: `${55 + ((i * 17) % 35)}%` }}
-                  />
-                </div>
+          <div className="resource-list-skeleton" aria-busy="true">
+            {[1, 2, 3, 4, 5, 6].map((i) => (
+              <div className="resource-card-skeleton" key={i}>
+                <div className="resource-skeleton-preview" />
+                <div className="resource-skeleton-line long" />
+                <div className="resource-skeleton-line short" />
               </div>
-            </div>
-          ))}
+            ))}
+          </div>
         </div>
       ) : filtered.length === 0 ? (
         <>
@@ -464,30 +469,41 @@ export default function ClipboardPage() {
           className="clipboard-list"
           ref={(el) => {
             listRef.current = el;
+            setListElement(el);
             backToTop.containerRef(el);
           }}
-          onKeyDown={arrowNav}
         >
-          {views.map((view, i) => (
-            <ClipboardCard
-              key={view.id}
-              view={view}
-              index={i}
-              getTypeLabel={getTypeLabel}
-              pasteLeftClick={pasteLeftClick}
-              search={search}
-              onPasteNormal={handlePaste}
-              onPasteTerminal={handlePasteTerminal}
-              onDelete={handleDelete}
-              onSetPinned={handleSetPinned}
-              onEditRecord={handleEditRecord}
-              getRecordContent={getRecordContent}
-              onToggleUserApiKey={handleToggleUserApiKey}
-              selectionMode={isSelecting}
-              selected={isSelected(view.id)}
-              onToggleSelected={toggleSelected}
-            />
-          ))}
+          <div
+            className="resource-columns"
+            ref={columnsRef}
+            onKeyDown={arrowNav}
+            style={{
+              gridTemplateColumns: `repeat(${columnCount}, minmax(0, 1fr))`,
+            }}
+          >
+            {columns.map((column, columnIndex) => (
+              <div className="resource-column" key={`column-${columnIndex}`}>
+                {column.map((view) => (
+                  <div className="resource-item" key={view.id}>
+                    <ClipboardCard
+                      view={view}
+                      getTypeLabel={getTypeLabel}
+                      getKindLabel={getKindLabel}
+                      search={search}
+                      onOpenView={openViewer}
+                      onDelete={handleDelete}
+                      onSetPinned={handleSetPinned}
+                      getRecordContent={getRecordContent}
+                      onToggleUserApiKey={handleToggleUserApiKey}
+                      selectionMode={isSelecting}
+                      selected={isSelected(view.id)}
+                      onToggleSelected={toggleSelected}
+                    />
+                  </div>
+                ))}
+              </div>
+            ))}
+          </div>
           {hasMore && filtered.length > 0 && (
             <button
               className="clipboard-load-more"
@@ -500,15 +516,6 @@ export default function ClipboardPage() {
         </div>
       )}
 
-      {pasteFeedback && (
-        <div
-          className={`resource-feedback ${pasteFeedback === "copied" ? "success" : "error"}`}
-          role="status"
-          aria-live="polite"
-        >
-          {pasteFeedback === "copied" ? t("resources.copied") : t("resources.copyFailed")}
-        </div>
-      )}
 
       <BackToTopButton
         visible={backToTop.visible}

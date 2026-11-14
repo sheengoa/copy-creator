@@ -11,17 +11,17 @@ import {
 } from "../../stores/phraseStore";
 import type { QuickInputFileSelection } from "../../stores/phraseStore";
 import { fileNameFromPath } from "../../domain/fileName";
+import { type ResourceMediaKind } from "../../domain/mediaKind";
 
-import { useSettingsStore } from "../../stores/settingsStore";
 import { ConfirmDialog } from "../../components/ConfirmDialog";
 import SearchInput from "../../components/SearchInput";
 import { GroupChips } from "./GroupChips";
 import { PhraseList } from "./PhraseList";
+import ResourceDetailPage from "../ResourcePage/ResourceDetailPage";
 import { GroupDialog } from "./GroupDialog";
 import { PhraseDialog } from "./PhraseDialog";
 import { ManageGroupsDialog } from "./ManageGroupsDialog";
 import type { Phrase } from "../../types";
-import { shouldUseTerminalPasteForMouseTrigger } from "../../utils/pasteMode";
 import {
   DndContext,
   PointerSensor,
@@ -29,16 +29,19 @@ import {
   useSensors,
   useSensor,
   DragOverlay,
+  closestCenter,
 } from "@dnd-kit/core";
 import type { DragOverEvent, DragStartEvent } from "@dnd-kit/core";
 import {
   SortableContext,
-  verticalListSortingStrategy,
+  rectSortingStrategy,
+  sortableKeyboardCoordinates,
 } from "@dnd-kit/sortable";
-import { restrictToVerticalAxis } from "@dnd-kit/modifiers";
 import { getChangedOrderIds, getDragPreviewOrder } from "../../utils/reorderPreview";
 import BatchSelectionBar from "../../components/BatchSelectionBar";
 import { useMultiSelect } from "../../hooks/useMultiSelect";
+import { useCardColumns } from "../../hooks/useCardColumns";
+import { COMPACT_CARD_MIN_WIDTH, restoreInterleavedOrder, splitResourceColumns } from "../../utils/cardGrid";
 import { BackToTopButton } from "../../components/BackToTop";
 import { useBackToTop } from "../../hooks/useBackToTop";
 
@@ -90,8 +93,6 @@ export default function PhrasePage() {
     deletePhrases,
     deletePhrase,
     deleteGroup,
-    pastePhrase,
-    pastePhraseTerminal,
     selectQuickInputFile,
     getQuickInputFileInfo,
     getQuickInputFileLimit,
@@ -118,15 +119,56 @@ export default function PhrasePage() {
       deletePhrases: s.deletePhrases,
       deletePhrase: s.deletePhrase,
       deleteGroup: s.deleteGroup,
-      pastePhrase: s.pastePhrase,
-      pastePhraseTerminal: s.pastePhraseTerminal,
       selectQuickInputFile: s.selectQuickInputFile,
       getQuickInputFileInfo: s.getQuickInputFileInfo,
       getQuickInputFileLimit: s.getQuickInputFileLimit,
       movePhrasesToTop: s.movePhrasesToTop,
     })),
   );
-  const pasteLeftClick = useSettingsStore((s) => s.pasteLeftClick);
+  // 媒体 kind 文案（video/audio 等）：与资源卡同一组 resources.type* 键。
+  const getKindLabel = useCallback(
+    (kind: ResourceMediaKind): string =>
+      t(
+        kind === "text" ? "resources.typeText"
+          : kind === "image" ? "resources.typeImage"
+            : kind === "video" ? "resources.typeVideo"
+              : kind === "audio" ? "resources.typeAudio"
+                : "resources.typeFile",
+      ),
+    [t],
+  );
+
+  // 详情视图：存 id 而非短语对象，列表重载（拖拽/置顶）后按 id 从最新
+  // 数据解析。快捷输入复用资源库详情页形态（hideResourceOps），短语
+  // 适配成 ClipboardRecord：文本短语走 segments 全文，文件短语按扩展名
+  // 渲染媒体/文本文件（受管副本在存储目录下，命令链同资源文件）。
+  const [viewingPhraseId, setViewingPhraseId] = useState<string | null>(null);
+  const viewingPhrase = useMemo(
+    () => (viewingPhraseId ? phrases.find((p) => p.id === viewingPhraseId) ?? null : null),
+    [phrases, viewingPhraseId],
+  );
+  const viewingRecord = useMemo(() => {
+    if (!viewingPhrase) return null;
+    return viewingPhrase.input_type === "file"
+      ? {
+          id: viewingPhrase.id,
+          type: "file" as const,
+          content: viewingPhrase.content,
+          source_app: "",
+          created_at: viewingPhrase.created_at,
+        }
+      : {
+          id: viewingPhrase.id,
+          type: "text" as const,
+          content: viewingPhrase.content,
+          content_length: viewingPhrase.content.length,
+          source_app: "",
+          created_at: viewingPhrase.created_at,
+        };
+  }, [viewingPhrase]);
+  const openViewer = useCallback((p: Phrase) => {
+    setViewingPhraseId(p.id);
+  }, [setViewingPhraseId]);
 
   useEffect(() => {
     // zustand action 引用恒定，加入依赖仅为满足 exhaustive-deps。
@@ -159,20 +201,66 @@ export default function PhrasePage() {
 
   const sensors = useSensors(
     useSensor(PointerSensor, { activationConstraint: { distance: 4 } }),
-    useSensor(KeyboardSensor)
+    // 键盘拖拽用 sortable 官方 getter：一次方向键直接跳到目标槽位矩形。
+    // 默认 getter 每按挪 25px——旧纵向列表行行紧贴尚可达成，瀑布流网格
+    // 跨列 300+px 永远走不到，键盘排序形同虚设。
+    useSensor(KeyboardSensor, { coordinateGetter: sortableKeyboardCoordinates }),
   );
   // 「全部」视图按最近使用排序，拖拽排序仅分组视图可用：以无传感器禁用拖拽。
   const noDragSensors = useSensors();
 
   const [activePhraseId, setActivePhraseId] = useState<string | null>(null);
-  const [previewPhrases, setPreviewPhrases] = useState<typeof phrases | null>(null);
+  const [previewPhrases, setPreviewPhrases] = useState<Phrase[] | null>(null);
   const lastPhrasePreviewMoveRef = useRef<string | null>(null);
 
+  const searchedPhrases = useMemo(() => {
+    if (!search.trim()) return phrases;
+    const q = search.toLowerCase();
+    return phrases.filter(p =>
+      p.content.toLowerCase().includes(q) ||
+      (p.title && p.title.toLowerCase().includes(q))
+    );
+  }, [phrases, search]);
+  const visiblePhraseIds = useMemo(
+    () => searchedPhrases.map((phrase) => phrase.id),
+    [searchedPhrases],
+  );
+  const {
+    isSelecting,
+    selectedIds,
+    selectedCount,
+    allVisibleSelected,
+    startSelection,
+    exitSelection,
+    toggleSelected,
+    isSelected,
+    toggleAllVisible,
+  } = useMultiSelect(visiblePhraseIds);
+  // 统一的「回到顶部」：监视快捷输入列表滚动容器，批量选择模式下隐藏。
+  const backToTop = useBackToTop({ enabled: !isSelecting });
+  const [phraseListElement, setPhraseListElement] = useState<HTMLElement | null>(null);
+  // 卡片网格列数：随列表宽度动态变化（与资源库/剪切板同一 hook 同几何）。
+  const columnCount = useCardColumns(phraseListElement, COMPACT_CARD_MIN_WIDTH);
+  const handlePhraseListScrollRef = useCallback((el: HTMLElement | null) => {
+    backToTop.containerRef(el);
+    setPhraseListElement(el);
+  }, [backToTop]);
+  // 分列瀑布流的 DOM 序（列主序）：渲染序 = SortableContext items 序，
+  // 拖拽在此域计算，提交时还原逻辑序（见 handlePhraseDragEnd）。
+  const domPhrases = useMemo(
+    () => splitResourceColumns(searchedPhrases, columnCount).flat(),
+    [searchedPhrases, columnCount],
+  );
+  const renderedPhrases = previewPhrases ?? domPhrases;
+
+  // 拖拽预览与提交都在「DOM 序」域操作（分列瀑布流的列主序，与
+  // SortableContext items / 渲染序一致，rectSorting 才能正确移动）；
+  // 结束提交时经 restoreInterleavedOrder 还原回列表逻辑序。
   const handlePhraseDragStart = useCallback((event: DragStartEvent) => {
     setActivePhraseId(String(event.active.id));
     lastPhrasePreviewMoveRef.current = null;
-    setPreviewPhrases(phrases);
-  }, [phrases]);
+    setPreviewPhrases(domPhrases);
+  }, [domPhrases]);
 
   const handlePhraseDragCancel = useCallback(() => {
     setActivePhraseId(null);
@@ -192,12 +280,12 @@ export default function PhrasePage() {
       lastPhrasePreviewMoveRef.current = previewMoveKey;
 
       setPreviewPhrases((current) => {
-        const base = current ?? phrases;
+        const base = current ?? domPhrases;
         const next = getDragPreviewOrder(base, active, over);
         return next === base ? current : next;
       });
     },
-    [phrases],
+    [domPhrases],
   );
 
   const handlePhraseDragEnd = useCallback(
@@ -207,70 +295,35 @@ export default function PhrasePage() {
       setPreviewPhrases(null);
       lastPhrasePreviewMoveRef.current = null;
 
-      const nextIds = getChangedOrderIds(phrases, finalPreview);
-      if (!nextIds) return;
+      const nextDomIds = getChangedOrderIds(domPhrases, finalPreview);
+      if (!nextDomIds) return;
 
-      usePhraseStore.getState().reorderPhrases(nextIds);
+      const logicalIds = restoreInterleavedOrder(
+        searchedPhrases.map((p) => p.id),
+        nextDomIds,
+        columnCount,
+      );
+      usePhraseStore.getState().reorderPhrases(logicalIds);
     },
-    [phrases, previewPhrases],
+    [columnCount, domPhrases, searchedPhrases, previewPhrases],
   );
 
-  const handlePaste = useCallback(
-    (p: Phrase) => {
-      if (shouldUseTerminalPasteForMouseTrigger(pasteLeftClick, "left")) pastePhraseTerminal(p);
-      else pastePhrase(p);
-    },
-    [pasteLeftClick, pastePhrase, pastePhraseTerminal],
-  );
 
-  const handleSecondaryPaste = useCallback(
-    (p: Phrase) => {
-      if (shouldUseTerminalPasteForMouseTrigger(pasteLeftClick, "right")) pastePhraseTerminal(p);
-      else pastePhrase(p);
-    },
-    [pasteLeftClick, pastePhrase, pastePhraseTerminal],
-  );
 
-  const renderedPhrases = previewPhrases ?? phrases;
-  const searchedPhrases = useMemo(() => {
-    if (!search.trim()) return renderedPhrases;
-    const q = search.toLowerCase();
-    return renderedPhrases.filter(p =>
-      p.content.toLowerCase().includes(q) ||
-      (p.title && p.title.toLowerCase().includes(q))
-    );
-  }, [renderedPhrases, search]);
-  const visiblePhraseIds = useMemo(
-    () => searchedPhrases.map((phrase) => phrase.id),
-    [searchedPhrases],
-  );
-  const {
-    isSelecting,
-    selectedIds,
-    selectedCount,
-    allVisibleSelected,
-    startSelection,
-    exitSelection,
-    toggleSelected,
-    isSelected,
-    toggleAllVisible,
-  } = useMultiSelect(visiblePhraseIds);
-
-  // 统一的「回到顶部」：监视快捷输入列表滚动容器，批量选择模式下隐藏。
-  const backToTop = useBackToTop({ enabled: !isSelecting });
-  const activePhrase = activePhraseId ? renderedPhrases.find(p => p.id === activePhraseId) : null;
+  const activePhrase = activePhraseId ? domPhrases.find(p => p.id === activePhraseId) : null;
   const activePhraseBody = activePhrase?.input_type === "file"
     ? fileNameFromPath(activePhrase.source_path || activePhrase.content)
     : activePhrase?.content.slice(0, 80);
   const phraseDragOverlay = (
     <DragOverlay dropAnimation={null}>
       {activePhrase ? (
-        <div className="notification phrase-card drag-overlay-card">
-          <div className="notibar" />
-          <div className="noticontent">
-            <div className="notibody phrase-card-body">{activePhraseBody}</div>
-            <div className="notititle phrase-card-footer">
-              <span className="phrase-card-remark">{activePhrase.title}</span>
+        <div className="resource-card phrase-card is-drag-overlay">
+          <div className="resource-card-preview">
+            <div className="resource-card-text-preview">{activePhraseBody}</div>
+          </div>
+          <div className="resource-card-body">
+            <div className="resource-card-title-row">
+              <strong className="resource-card-title">{activePhrase.title}</strong>
             </div>
           </div>
         </div>
@@ -305,30 +358,6 @@ export default function PhrasePage() {
     setPhraseFileName("");
     setPhraseFileSize(0);
     setPhraseFilePreviewSrc(null);
-    setPhraseError(false);
-    setPhraseErrorMessage("");
-    setPhraseDialogOpen(true);
-  };
-
-  const openEditPhrase = (p: Phrase) => {
-    setEditingId(p.id);
-    setEditingFilePhrase(p.input_type === "file");
-    setPhraseRemark(p.title);
-    setPhraseContent(p.input_type === "file" ? "" : p.content);
-    setPhraseFilePath("");
-    setPhraseFileName(p.input_type === "file" ? fileNameFromPath(p.source_path || p.content) : "");
-    setPhraseFileSize(p.input_type === "file" ? p.file_size : 0);
-    // 编辑时仅预览原文件（source_path 为原始绝对路径）；不写入 phraseFilePath，
-    // 避免保存时被误当作"更换文件"。48px 小预览直接走缩略图命令（用户自选
-    // 路径属该命令的设计范围），无需为小图加载原图。
-    const sourcePath = p.source_path || p.content;
-    if (p.input_type === "file" && isImageFilePath(sourcePath)) {
-      void getResourceFileThumbnail(sourcePath, 256)
-        .then((base64) => setPhraseFilePreviewSrc(`data:image/png;base64,${base64}`))
-        .catch(() => setPhraseFilePreviewSrc(null));
-    } else {
-      setPhraseFilePreviewSrc(null);
-    }
     setPhraseError(false);
     setPhraseErrorMessage("");
     setPhraseDialogOpen(true);
@@ -489,6 +518,43 @@ export default function PhrasePage() {
   // 拖拽排序与置顶（使用时间的排序语义）不适用，新建需先落到具体分组。
   const isAllView = selectedGroupId === ALL_PHRASES_GROUP_ID;
 
+  // 详情视图：完全复用资源库详情页形态（hideResourceOps），编辑走本页
+  // PhraseDialog（文件短语在详情页只读，备注经编辑弹窗变更）。
+  if (viewingPhrase && viewingRecord) {
+    return (
+      <div className="phrase-page">
+        <ResourceDetailPage
+          record={viewingRecord}
+          typeLabel={getKindLabel}
+          onBack={() => setViewingPhraseId(null)}
+          onDelete={handleDeletePhrase}
+          onRecordUpdated={() => {
+            if (selectedGroupId) void loadPhrases(selectedGroupId);
+          }}
+          hideResourceOps
+          onSaveContent={
+            viewingPhrase.input_type === "text"
+              ? (record, content) => {
+                  const phrase = phrases.find((p) => p.id === record.id);
+                  if (!phrase) return Promise.reject(new Error("phrase not found"));
+                  return updatePhrase(phrase.id, phrase.title, content);
+                }
+              : undefined
+          }
+          backLabel={t("common.backToList")}
+        />
+        {confirmState && (
+          <ConfirmDialog
+            message={confirmState.message}
+            hint={confirmState.hint}
+            onConfirm={confirmState.onConfirm}
+            onCancel={() => setConfirmState(null)}
+          />
+        )}
+      </div>
+    );
+  }
+
   return (
     <div className="phrase-page">
       <div className="page-search">
@@ -526,22 +592,27 @@ export default function PhrasePage() {
         />
       )}
 
-      <DndContext sensors={isAllView ? noDragSensors : sensors} onDragStart={handlePhraseDragStart} onDragOver={handlePhraseDragOver} onDragEnd={handlePhraseDragEnd} onDragCancel={handlePhraseDragCancel} modifiers={[restrictToVerticalAxis]}>
-        <SortableContext items={renderedPhrases.map(p => p.id)} strategy={verticalListSortingStrategy}>
+      {/* 平铺网格拖拽：rectSortingStrategy + 无轴限制（网格内自由换位）；
+          collisionDetection=closestCenter——瀑布流卡片互不重叠，默认
+          rectIntersection 永远找不到落点（键盘方向键只挪 25px 即停，
+          鼠标拖进列间隙也无预览），网格配方的标准选择是最近中心。
+          「全部」视图仍无传感器禁拖。 */}
+      <DndContext sensors={isAllView ? noDragSensors : sensors} collisionDetection={closestCenter} onDragStart={handlePhraseDragStart} onDragOver={handlePhraseDragOver} onDragEnd={handlePhraseDragEnd} onDragCancel={handlePhraseDragCancel}>
+        <SortableContext items={renderedPhrases.map(p => p.id)} strategy={rectSortingStrategy}>
           <PhraseList
             phrases={searchedPhrases}
             loading={loading}
             loadedOnce={loadedOnce}
             selectedGroupId={selectedGroupId}
             search={search}
-            scrollRef={backToTop.containerRef}
+            columnCount={columnCount}
+            scrollRef={handlePhraseListScrollRef}
             navDisabled={activePhraseId !== null}
-            onPaste={handlePaste}
-            onSecondaryPaste={handleSecondaryPaste}
-            onEdit={openEditPhrase}
+            onOpenView={openViewer}
             onDelete={handleDeletePhrase}
             onMoveToTop={isAllView ? undefined : (id) => void movePhrasesToTop([id])}
             showGroupTag={isAllView}
+            getKindLabel={getKindLabel}
             selectionMode={isSelecting}
             isSelected={isSelected}
             onToggleSelected={toggleSelected}
@@ -549,6 +620,7 @@ export default function PhrasePage() {
         </SortableContext>
         {createPortal(phraseDragOverlay, document.body)}
       </DndContext>
+
 
       <BackToTopButton
         visible={backToTop.visible}

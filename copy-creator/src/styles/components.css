@@ -154,117 +154,6 @@ mark.search-highlight {
   align-items: center;
 }
 
-/* === Notification Card (shared) === */
-.notification {
-  display: flex;
-  flex-direction: row;
-  position: relative;
-  width: 100%;
-  background: var(--card-inner-bg);
-  border: 1px solid var(--separator);
-  border-radius: 1rem;
-  cursor: pointer;
-  --color: #32a6ff;
-  box-shadow: 0 0.5px 0 0 rgba(255,255,255,0.35) inset;
-  animation: cardEnter 0.45s cubic-bezier(0.22, 1, 0.36, 1) both;
-  animation-delay: calc(var(--enter-delay, 0) * 55ms);
-}
-
-.notification:hover {
-  box-shadow:
-    0 8px 30px rgba(0, 0, 0, 0.08),
-    0 0.5px 0 0 rgba(255,255,255,0.5) inset;
-  border-color: rgba(0, 0, 0, 0.1);
-}
-
-[data-theme="dark"] .notification {
-  box-shadow: 0 0.5px 0 0 rgba(255,255,255,0.05) inset;
-}
-
-[data-theme="dark"] .notification:hover {
-  box-shadow:
-    0 8px 30px rgba(0, 0, 0, 0.35),
-    0 0.5px 0 0 rgba(255,255,255,0.08) inset;
-  border-color: rgba(255, 255, 255, 0.12);
-}
-
-.notibar {
-  width: 1.5px;
-  margin: 10px 0 10px 8px;
-  border-radius: 1px;
-  background: var(--color);
-  flex-shrink: 0;
-  transition: transform 300ms ease, box-shadow 300ms ease;
-  box-shadow: 0 0 3px color-mix(in srgb, var(--color) 20%, transparent);
-}
-
-.notification:hover .notibar {
-  transform: translateX(2px);
-  box-shadow: 0 0 12px color-mix(in srgb, var(--color) 50%, transparent);
-}
-
-.notification .noticontent {
-  flex: 1;
-  min-width: 0;
-  display: flex;
-  flex-direction: column;
-}
-
-.notititle {
-  color: var(--color);
-  padding: 0.65rem 0.5rem 0.4rem 1rem;
-  font-weight: var(--weight-medium);
-  font-size: var(--text-sm);
-  transition: transform 300ms ease;
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-}
-
-.notification:hover .notititle {
-  transform: translateX(0.15rem);
-}
-
-.notibody {
-  color: var(--text-primary);
-  padding: 0 1rem 0.65rem;
-  transition: transform 300ms ease;
-  font-size: var(--text-base);
-  line-height: 1.5;
-  min-height: calc(2 * 1.5 * 14px);
-  word-break: break-all;
-}
-
-.notification:hover .notibody {
-  transform: translateX(0.25rem);
-}
-
-.notification.is-selection-mode:hover .notititle,
-.notification.is-selection-mode:hover .notibody,
-.notification.is-selection-mode:hover .notibar {
-  transform: none;
-}
-
-.notification.is-selected {
-  border-color: color-mix(in srgb, var(--accent) 36%, var(--separator));
-  background: color-mix(in srgb, var(--accent) 3%, var(--card-inner-bg));
-}
-
-[data-theme="dark"] .notification.is-selected {
-  background: color-mix(in srgb, var(--accent) 7%, var(--card-inner-bg));
-}
-
-.card-selection-control {
-  position: absolute;
-  top: 12px;
-  left: 16px;
-  z-index: 1;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  cursor: pointer;
-}
-
 .batch-selection-bar {
   min-height: 36px;
   display: flex;
@@ -287,7 +176,6 @@ mark.search-highlight {
 }
 
 .batch-select-all input,
-.card-selection-control input,
 .trash-row-check input {
   position: absolute;
   width: 1px;
@@ -450,26 +338,6 @@ input:focus-visible + .selection-checkbox {
   cursor: default;
 }
 
-.notification.skeleton {
-  cursor: default;
-  pointer-events: none;
-  animation: none;
-  box-shadow: none;
-}
-
-.notification.skeleton .notibar {
-  background: var(--separator);
-}
-
-.notification.skeleton:hover {
-  box-shadow: none;
-}
-
-.notification.skeleton:hover .notititle,
-.notification.skeleton:hover .notibody,
-.notification.skeleton:hover .notibar {
-  transform: none;
-}
 
 /* Card Action Buttons */
 /* card-move-top-btn：快捷输入短语置顶仍在用；card-pin-btn：剪切板收藏星标 */
@@ -490,13 +358,6 @@ input:focus-visible + .selection-checkbox {
   transition: opacity 0.15s;
   flex-shrink: 0;
   color: inherit;
-}
-
-.notification:hover .card-delete-btn,
-.notification:hover .card-edit-btn,
-.notification:hover .card-move-top-btn,
-.notification:hover .card-pin-btn {
-  opacity: 0.5;
 }
 
 .card-delete-btn:hover,
@@ -1911,8 +1772,7 @@ input:focus-visible + .selection-checkbox {
 }
 
 .resource-card-preview > .resource-thumb-blur,
-.resource-card-preview > img.resource-card-file-image,
-.resource-card-preview .clipboard-card-thumb img {
+.resource-card-preview > img.resource-card-file-image {
   position: absolute;
   inset: 0;
   width: 100%;
@@ -1923,7 +1783,6 @@ input:focus-visible + .selection-checkbox {
   transition: transform 0.2s ease;
 }
 
-.resource-card:hover .resource-card-preview .clipboard-card-thumb img,
 .resource-card:hover .resource-card-preview > .resource-thumb-blur .resource-thumb-blur-fg {
   transform: scale(1.03);
 }
@@ -2331,3 +2190,554 @@ input:focus-visible + .selection-checkbox {
 .resource-detail-stage .resource-preview-loading {
   width: 100%;
 }
+
+/* === 多列卡片网格与卡片骨架（资源库 / 剪切板 / 快捷输入三页共用） ===
+   类名沿用历史 resource-card-* 标识（同 quick_input / phrases 惯例）。
+   网格列数由 JS 计算（hooks/useCardColumns + utils/cardGrid），非 CSS
+   auto-fit；滚动容器（.resource-list / .clipboard-list / .phrase-list）
+   与业务角标（分组标签/文件缺失）仍留在各页样式文件。 */
+
+.resource-columns {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  align-items: start;
+  gap: 10px;
+  /* 卡片整体缩放因子：由调用页按卡片大小设置注入（标准 460px = 1）。 */
+  --card-scale: 1;
+}
+
+.resource-column {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.resource-item {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.resource-card {
+  position: relative;
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  overflow: hidden;
+  border: 1px solid var(--separator);
+  border-radius: 12px;
+  background: var(--card-inner-bg);
+  /* 静态轻投影：三页卡片统一的一点立体感（hover/选中态在其上加重）。 */
+  box-shadow: 0 0.5px 0 0 rgba(255, 255, 255, 0.35) inset, 0 2px 8px rgba(0, 0, 0, 0.14);
+  cursor: pointer;
+  transition: border-color 0.15s ease, box-shadow 0.15s ease, transform 0.15s ease, opacity 0.15s ease;
+  /* 卡片含图片预览：屏幕外跳过渲染，配合图片懒加载保证滚动流畅 */
+  content-visibility: auto;
+  contain-intrinsic-size: auto 220px;
+}
+
+.resource-card:hover,
+.resource-card:focus-visible,
+.resource-card.is-selected {
+  border-color: color-mix(in srgb, var(--text-primary) 22%, var(--separator));
+  box-shadow: 0 7px 22px rgba(0, 0, 0, 0.08);
+  outline: none;
+}
+
+.resource-card:hover {
+  transform: translateY(-1px);
+}
+
+.resource-card.is-selected {
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent) 20%, transparent), 0 2px 8px rgba(0, 0, 0, 0.14);
+}
+
+.resource-card.is-dragging {
+  opacity: 0.35;
+}
+
+.resource-card.is-drag-overlay {
+  width: min(320px, calc(100vw - 36px));
+  box-shadow: 0 16px 36px rgba(0, 0, 0, 0.2);
+  cursor: grabbing;
+  transform: rotate(1deg);
+  animation: none;
+}
+
+[data-theme="dark"] .resource-card {
+  box-shadow: 0 0.5px 0 0 rgba(255, 255, 255, 0.05) inset, 0 2px 8px rgba(0, 0, 0, 0.45);
+}
+
+[data-theme="dark"] .resource-card:hover,
+[data-theme="dark"] .resource-card:focus-visible,
+[data-theme="dark"] .resource-card.is-selected {
+  border-color: rgba(255, 255, 255, 0.18);
+  box-shadow: 0 7px 22px rgba(0, 0, 0, 0.35);
+}
+
+.resource-card-preview {
+  position: relative;
+  display: grid;
+  min-height: 102px;
+  place-items: center;
+  overflow: hidden;
+  border-bottom: 1px solid var(--separator);
+  background: var(--input-bg);
+  color: var(--text-secondary);
+  aspect-ratio: 16 / 10;
+}
+
+.resource-card-file-image {
+  display: block;
+  width: 100%;
+  height: 100%;
+  /* 完整展示图片内容，不做封面式裁切。 */
+  object-fit: contain;
+}
+
+.resource-card-visual {
+  display: flex;
+  width: 100%;
+  height: 100%;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  background: color-mix(in srgb, var(--accent) 6%, var(--input-bg));
+  color: var(--text-secondary);
+  font-size: var(--text-sm);
+}
+
+.resource-card-video {
+  background: color-mix(in srgb, #5e5ce6 10%, var(--input-bg));
+}
+
+.resource-card-audio {
+  background: color-mix(in srgb, #ff9500 10%, var(--input-bg));
+}
+
+.resource-card-file,
+.resource-card-image-file {
+  background: color-mix(in srgb, #af52de 8%, var(--input-bg));
+}
+
+.resource-card-visual > svg {
+  width: 24px;
+  height: 24px;
+}
+
+.resource-card-visual-icon {
+  display: inline-flex;
+  width: 28px;
+  height: 28px;
+  align-items: center;
+  justify-content: center;
+  border-radius: 50%;
+  background: var(--card-inner-bg);
+  color: var(--text-primary);
+}
+
+.resource-card-visual-icon svg {
+  width: 16px;
+  height: 16px;
+}
+
+.resource-card-play {
+  display: inline-flex;
+  width: 28px;
+  height: 28px;
+  align-items: center;
+  justify-content: center;
+  margin-left: 4px;
+  border: 1px solid var(--separator);
+  border-radius: 50%;
+  background: rgba(0, 0, 0, 0.48);
+  color: #fff;
+}
+
+/* 视频卡片封面：封面帧绝对定位铺满 16:10 预览框（contain 完整展示），
+   占位图标与封面帧同容器切换，播放按钮悬浮在封面之上。 */
+.resource-card-video {
+  position: relative;
+}
+
+.resource-card-video .resource-card-play {
+  position: absolute;
+  z-index: 1;
+  top: 50%;
+  left: 50%;
+  margin: 0;
+  transform: translate(-50%, -50%);
+  box-shadow: 0 2px 10px rgba(0, 0, 0, 0.35);
+}
+
+.resource-card-play svg {
+  width: 13px;
+  height: 13px;
+  margin-left: 1px;
+}
+
+.resource-card-text-preview {
+  display: flex;
+  width: 100%;
+  height: 100%;
+  min-height: 102px;
+  align-items: flex-start;
+  padding: calc(12px * var(--card-scale, 1));
+  background: color-mix(in srgb, var(--accent) 5%, var(--input-bg));
+  color: var(--text-primary);
+  font-family: var(--font-mono);
+  font-size: calc(var(--text-sm) * var(--card-scale, 1));
+  line-height: 1.55;
+  overflow: hidden;
+  text-align: left;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.resource-card-text-preview.is-link {
+  color: var(--accent);
+}
+
+.resource-card-text-preview > .inline-text-file-preview,
+.resource-card-text-preview > .inline-preview-loading,
+.resource-card-text-preview > .inline-preview-error {
+  width: 100%;
+  min-height: 0;
+  margin: 0;
+}
+
+.resource-card-text-preview > .inline-text-file-preview {
+  max-height: 100%;
+  overflow: hidden;
+}
+
+.resource-card-kind {
+  position: absolute;
+  right: 8px;
+  bottom: 8px;
+  padding: 3px 6px;
+  border: 1px solid rgba(0, 0, 0, 0.14);
+  border-radius: 4px;
+  background: rgba(255, 255, 255, 0.84);
+  color: #555;
+  font-size: calc(var(--text-xs) * var(--card-scale, 1));
+}
+
+[data-theme="dark"] .resource-card-kind {
+  border-color: rgba(255, 255, 255, 0.16);
+  background: rgba(0, 0, 0, 0.52);
+  color: rgba(255, 255, 255, 0.76);
+}
+
+.resource-card-body {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: calc(7px * var(--card-scale, 1));
+  padding: calc(10px * var(--card-scale, 1));
+}
+
+.resource-card-title-row,
+.resource-card-meta {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  justify-content: space-between;
+  gap: 7px;
+}
+
+.resource-card-title {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--text-primary);
+  font-size: calc(var(--text-sm) * var(--card-scale, 1));
+  font-weight: var(--weight-semibold);
+  line-height: 1.4;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.resource-card-meta {
+  justify-content: flex-start;
+  color: var(--text-secondary);
+  font-size: calc(var(--text-xs) * var(--card-scale, 1));
+}
+
+.resource-card-selection {
+  position: absolute;
+  top: 10px;
+  left: 10px;
+  z-index: 2;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.resource-card-selection input {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  opacity: 0;
+  pointer-events: none;
+}
+
+.resource-card-selection .selection-checkbox {
+  border-color: rgba(255, 255, 255, 0.78);
+  background: rgba(0, 0, 0, 0.3);
+}
+
+/* ---------- 卡片「⋯」操作菜单 ---------- */
+.resource-card-more {
+  position: absolute;
+  top: 6px;
+  right: 6px;
+  z-index: 3;
+}
+
+.resource-card-more-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  padding: 0;
+  border: 1px solid var(--separator);
+  border-radius: 7px;
+  background: rgba(255, 255, 255, 0.9);
+  color: var(--text-primary);
+  cursor: pointer;
+}
+
+.resource-card-more-button svg {
+  width: 14px;
+  height: 14px;
+}
+
+/* 菜单通过 portal 挂在文档根节点，按触发按钮定位（卡片有 overflow 裁剪）。 */
+.resource-card-menu {
+  position: fixed;
+  z-index: 9000;
+  display: flex;
+  flex-direction: column;
+  min-width: 158px;
+  padding: 4px;
+  border: 1px solid var(--separator);
+  border-radius: 10px;
+  background: rgba(255, 255, 255, 0.97);
+  box-shadow: 0 10px 24px rgba(0, 0, 0, 0.16);
+}
+
+[data-theme="dark"] .resource-card-menu {
+  border-color: rgba(255, 255, 255, 0.14);
+  background: rgba(38, 38, 38, 0.97);
+}
+
+.resource-card-menu button {
+  display: flex;
+  width: 100%;
+  align-items: center;
+  gap: 7px;
+  padding: 6px 8px;
+  border: none;
+  border-radius: 7px;
+  background: none;
+  color: var(--text-primary);
+  font-size: var(--text-xs);
+  text-align: left;
+  cursor: pointer;
+}
+
+.resource-card-menu button:hover {
+  background: rgba(0, 0, 0, 0.05);
+}
+
+.resource-card-menu button svg {
+  width: 13px;
+  height: 13px;
+  flex: 0 0 auto;
+  color: var(--text-secondary);
+}
+
+.resource-card-menu button.is-primary {
+  font-weight: var(--weight-semibold);
+}
+
+.resource-card-menu button.is-primary svg {
+  color: var(--text-primary);
+}
+
+.resource-card-menu button.is-danger {
+  color: var(--danger);
+}
+
+.resource-card-menu button.is-danger svg {
+  color: var(--danger);
+}
+
+/* ---------- 混合形态 V2（主窗口剪切板/快捷输入专用；资源库卡片保持 16:10） ----------
+   card-media：媒体卡的预览区压成 160px 矮横幅（缩略图/封面帧仍在，
+   比纯卡片的 16:10 矮、比初版 84px 高——图片要看得清，用户反馈调档）；
+   card-slim：纯文本/链接紧凑条——无预览大框，正文直排 1-5 行自适应。
+   文本没有视觉形态，16:10 大框只会制造留白（用户定案 2026-11-14）。 */
+
+.card-media .resource-card-preview {
+  aspect-ratio: auto;
+  height: 160px;
+  min-height: 0;
+}
+
+.card-slim .resource-card-body {
+  padding: 9px 11px 7px;
+  gap: 6px;
+}
+
+.card-slim .card-slim-topline {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--text-secondary);
+  font-size: calc(var(--text-xs) * var(--card-scale, 1));
+}
+
+.card-slim .card-slim-dot {
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  background: var(--text-tertiary);
+  transition: background 0.15s;
+}
+
+.card-slim:hover .card-slim-dot {
+  background: var(--accent);
+}
+
+/* ⋯按钮在紧凑条里随 topline 行内排布（媒体卡仍是右上角悬浮）。 */
+.card-slim .resource-card-more {
+  position: static;
+  margin-left: auto;
+}
+
+.card-slim .card-slim-content {
+  position: relative;
+  display: -webkit-box;
+  -webkit-line-clamp: 5;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+  color: var(--text-primary);
+  font-size: calc(var(--text-sm) * var(--card-scale, 1));
+  line-height: 1.6;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.card-slim .card-slim-content.is-link {
+  color: var(--accent);
+  font-family: var(--font-mono);
+  font-size: calc(var(--text-xs) * var(--card-scale, 1));
+}
+
+.card-slim .card-slim-content::after {
+  content: "";
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  height: 22px;
+  pointer-events: none;
+  background: linear-gradient(to bottom, transparent, var(--card-inner-bg) 88%);
+  opacity: 0;
+}
+
+/* 行数吃满才显示渐隐（-webkit-line-clamp 截断时 scrollHeight > clientHeight）。 */
+.card-slim .card-slim-content.is-clamped::after {
+  opacity: 1;
+}
+
+.card-slim .card-slim-content .inline-text-file-preview {
+  margin: 0;
+  font-family: var(--font-mono);
+}
+
+.card-slim .resource-card-meta {
+  margin-top: 1px;
+  padding-top: 5px;
+  border-top: 1px dashed color-mix(in srgb, var(--separator) 70%, transparent);
+}
+
+/* 多选态：紧凑条高度小，checkbox 让位 topline。 */
+.card-slim .resource-card-selection {
+  top: 8px;
+}
+
+.card-slim.is-selection-mode .card-slim-topline {
+  padding-left: 24px;
+}
+
+/* ---------- 网格卡片加载骨架（资源页同款，三页共用） ---------- */
+
+.resource-list-skeleton {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  align-content: start;
+  gap: 10px;
+}
+
+.resource-card-skeleton {
+  display: flex;
+  min-height: 160px;
+  flex-direction: column;
+  gap: 9px;
+  padding-bottom: 10px;
+  overflow: hidden;
+  border: 1px solid var(--separator);
+  border-radius: 12px;
+  background: var(--card-inner-bg);
+}
+
+.resource-skeleton-preview {
+  min-height: 100px;
+  background: var(--separator);
+}
+
+.resource-skeleton-line {
+  height: 9px;
+  margin: 0 10px;
+  border-radius: 5px;
+  background: linear-gradient(90deg, var(--separator) 25%, var(--chip-hover-bg) 50%, var(--separator) 75%);
+  background-size: 200% 100%;
+  animation: shimmer 1.5s ease-in-out infinite;
+}
+
+.resource-skeleton-line.long {
+  width: 68%;
+}
+
+.resource-skeleton-line.short {
+  width: 42%;
+}
+
+/* 窄窗口下网格降为单列（与各页滚动容器的小屏规则同档触发）。 */
+@media (max-width: 560px) {
+  .resource-columns,
+  .resource-list-skeleton {
+    grid-template-columns: 1fr;
+  }
+
+  .resource-card-preview {
+    min-height: 136px;
+  }
+
+  .resource-card-text-preview {
+    min-height: 136px;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .resource-card {
+    animation: none;
+    transition: none;
+  }
+}
+

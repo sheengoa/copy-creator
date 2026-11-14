@@ -194,6 +194,7 @@
     "textContent": "文本内容",
     "linkContent": "链接内容",
     "create": "新建",
+    "viewContent": "查看内容",
     "pasteNormal": "普通粘贴",
     "pasteToTerminal": "粘贴到终端",
     "confirmDelete": "确定要删除此记录吗？",
@@ -457,6 +458,7 @@
   },
   "phrases": {
     "search": "搜索快捷输入...",
+    "dragReorder": "拖拽排序",
     "newGroup": "新建场景组",
     "groupName": "场景组名称",
     "newPhrase": "新建输入",
@@ -869,6 +871,7 @@
     "off": "已关闭",
     "pinWindow": "固定窗口",
     "unpinWindow": "取消固定",
+    "backToList": "返回列表",
     "backToTop": "回到顶部",
     "moveToTop": "移到顶部",
     "favorite": "收藏",

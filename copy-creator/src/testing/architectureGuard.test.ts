@@ -138,50 +138,57 @@ describe("架构守卫：领域规则必须全局共享", () => {
     ).toEqual([]);
   });
 
-  it("规则 11：主窗口展开媒体容器必须放开限高（防卡内滚动裁切回归）", () => {
-    // 展开图/视频自身上限（480px/330px）曾高于容器滚动上限（320px），
-    // 媒体被裁切、必须卡内滑动才能看全；剪切板与短语两份样式同规同源，缺一不可。
-    for (const cssFile of ["styles/clipboard.css", "styles/phrases.css"]) {
+  it("规则 11：主窗口详情复用资源库详情页（record 形态隐藏资源特有件）", () => {
+    // 用户定案（2026-11-14）：主窗口纯展示预览、粘贴只在径向菜单，点击
+    // 卡片进入资源库同款详情视图——组件本体复用（ResourceDetailPage 的
+    // record 形态），资源特有件（备注/重命名/版本记录/标注/文件内联编辑）
+    // 必须经 hideResourceOps 收敛，禁止复制一份详情页。
+    const detail = readSource("pages/ResourcePage/ResourceDetailPage.tsx");
+    expect(
+      detail,
+      "编辑目标形态分派：资源形态编辑文件，record 形态经 onSaveContent 编辑记录正文（双击进编辑，无弹窗）",
+    ).toMatch(/const contentEditable = !record\.has_images\s*&& fullTextContent !== null[\s\S]*&& \(hideResourceOps\s*\? onSaveContent !== undefined && recordTextEditable\(record\)\s*: Boolean\(textEditPath\)\)/);
+    expect(
+      detail,
+      "record 形态必须隐藏备注编辑块",
+    ).toContain('{!hideResourceOps && (');
+    expect(
+      detail,
+      "record 形态必须隐藏文本标注与版本记录",
+    ).toContain("&& !hideResourceOps;");
+    for (const page of ["pages/ClipboardPage/index.tsx", "pages/PhrasePage/index.tsx"]) {
       expect(
-        readSource(cssFile),
-        `${cssFile} 缺少 is-media-expanded 放开规则：展开媒体容器不得保留 320px 滚动上限`,
-      ).toMatch(/\.is-expanded\.is-media-expanded\s*\{[^}]*max-height:\s*none[^}]*overflow-y:\s*visible/s);
+        readSource(page),
+        `${page} 详情必须复用 ResourceDetailPage（record 形态），禁止私有详情实现`,
+      ).toContain("hideResourceOps");
     }
-    expect(
-      readSource("pages/ClipboardPage/ClipboardCard.tsx"),
-      "剪切板卡片展开媒体（图片/视频）时必须输出 is-media-expanded（判定读 domain 字段 expandPreview）",
-    ).toContain('view.expandPreview === "image" || view.expandPreview === "video"');
-    expect(
-      readSource("pages/PhrasePage/PhraseList.tsx"),
-      "短语卡片展开图片时必须输出 is-media-expanded",
-    ).toContain('isTextExpanded && imageFile ? " is-media-expanded"');
-  });
-
-  it("规则 12：卡内展开必须经共享 useExpandReveal 完整滚入可视区", () => {
-    // 展开内容超出列表可视区时必须自动滚动展示完全；逻辑集中在共享 hook
-    // （最小滚动 + 媒体异步加载后的高度校正），新增可展开列表同样必须复用。
-    expect(
-      readSource("hooks/useExpandReveal.ts"),
-      "展开揭示必须集中在共享 hook：手动定位滚动容器并写 scrollTop（不依赖 scrollIntoView smooth，WebKitGTK 上不生效）",
-    ).toContain("findScrollParent");
-    for (const cardFile of [
-      "pages/ClipboardPage/ClipboardCard.tsx",
-      "pages/PhrasePage/PhraseList.tsx",
-    ]) {
+    for (const cardFile of ["pages/ClipboardPage/ClipboardCard.tsx", "pages/PhrasePage/PhraseList.tsx"]) {
       expect(
         readSource(cardFile),
-        `${cardFile} 展开时必须消费 useExpandReveal，禁止手写滚动或遗漏`,
-      ).toContain("useExpandReveal");
+        `${cardFile} 卡片内不得再有展开体系残留（is-media-expanded/useExpandReveal）`,
+      ).not.toMatch(/useExpandReveal|is-media-expanded/);
     }
   });
 
-  it("规则 13：图片列表态一律全宽媒体横幅，横幅原图直出不走缩略图管线", () => {
-    // 同一张图片曾因进入方式不同（图片数据 vs 图片文件）呈现缩略图/全宽横幅
-    // 两副面孔；统一为横幅形态并固化在共享组件 FileMediaVisual。
-    // 横幅可视数量少，直接流式原图保证清晰度；256px 缩略图仅限密集网格卡片。
+  it("规则 12：卡内展开体系退役——展开揭示 hook 零残留", () => {
+    // 展开体系随卡片化整体退役（useExpandReveal hook 已删除）：若未来
+    // 重新引入可展开列表，必须恢复「揭示滚动集中共享 hook」的约束并
+    // 复活本规则，禁止手写 scrollTop 定位（WebKitGTK smooth 失效教训）。
+    const offenders = allSources.filter((file) => sourceOf(file).includes("useExpandReveal"));
+    expect(
+      offenders,
+      "useExpandReveal 已随卡内展开退役，全仓零残留（复活前先恢复共享 hook）",
+    ).toEqual([]);
+  });
+
+  it("规则 13：密集网格卡片图片一律 256px 缩略图管线，横幅仅剩径向菜单消费", () => {
+    // 图片曾因进入方式不同（图片数据 vs 图片文件）呈现缩略图/全宽横幅
+    // 两副面孔。卡片化后剪切板/快捷输入/资源三页都是密集网格，卡片图
+    // 一律走 ResourceFileImage 缩略图管线（LRU + inView 懒加载）；全宽
+    // 横幅（原图直出）仅剩径向菜单条目一个消费方，固化在 FileMediaVisual。
     expect(
       readSource("components/FileMediaPreview.tsx"),
-      "FileMediaVisual 必须保留图片横幅分支（图片列表态统一全宽横幅，见组件注释）",
+      "FileMediaVisual 必须保留图片横幅分支（径向菜单图片条目统一全宽横幅）",
     ).toContain('kind === "image"');
     expect(
       readSource("components/FileMediaPreview.tsx"),
@@ -192,16 +199,20 @@ describe("架构守卫：领域规则必须全局共享", () => {
       "横幅禁止使用小网格缩略图组件 ResourceFileImage",
     ).not.toContain("<ResourceFileImage");
     expect(
-      readSource("pages/ClipboardPage/ClipboardCard.tsx"),
-      "剪切板图片记录折叠态必须用 FileMediaVisual 横幅，不得回退 48×36 小缩略图",
-    ).toContain("<FileMediaVisual path={view.content} />");
+      readSource("components/CardVisual.tsx"),
+      "三页共用卡片预览的图片分支必须走 ResourceFileImage 缩略图管线",
+    ).toContain("<ResourceFileImage");
+    expect(
+      readSource("components/CardVisual.tsx"),
+      "卡片图片必须携带文件版本（mediaVersion），覆盖保存后 WebView 不再命中旧缓存",
+    ).toContain("version={view.mediaVersion ?? undefined}");
   });
 
-  it("规则 14：可展开卡片展开态点击必须收起，不得落回粘贴", () => {
-    // 展开内容是大面积点击热区，点击冒泡到根元素的粘贴动作会写入剪贴板、
-    // 失焦隐藏窗口并按「最近使用」重排（用户实测卡片「跑到最上面」）。
-    // 两处可展开卡片（剪切板/快捷输入）都必须在根元素拦截：展开态点击
-    // 一律收起，且放行拖选文本结束的 click（selection 为 Range）。
+  it("规则 14：卡片点击一律查看内容，粘贴不得挂在卡片根元素", () => {
+    // 历史教训（保留）：点击冒泡到根元素的粘贴动作会写入剪贴板、失焦
+    // 隐藏窗口并按「最近使用」重排（用户实测卡片「跑到最上面」）。
+    // 卡片化后卡片根的点击语义只有一个：打开内容查看弹窗（onOpenView），
+    // 粘贴只能出现在查看弹窗操作行与 ⋯菜单里。
     for (const cardFile of [
       "pages/ClipboardPage/ClipboardCard.tsx",
       "pages/PhrasePage/PhraseList.tsx",
@@ -209,12 +220,12 @@ describe("架构守卫：领域规则必须全局共享", () => {
       const source = readSource(cardFile);
       expect(
         source,
-        `${cardFile} 根元素必须用 handleCardClick 统一处理点击（展开态收起/收起态粘贴）`,
-      ).toContain("onClick={handleCardClick}");
+        `${cardFile} 卡片根点击必须调用 onOpenView（查看内容）`,
+      ).toContain("onOpenView(");
       expect(
         source,
-        `${cardFile} 展开态收起必须放行拖选文本（selection.type === "Range" 不收起）`,
-      ).toContain('selection.type === "Range"');
+        `${cardFile} 禁止在卡片根元素直接触发粘贴（写入剪切板 + 失焦隐藏 + 重排三重副作用）`,
+      ).not.toMatch(/onClick=\{[^}]*onPaste(Normal)?\(view\)/);
     }
   });
 
@@ -293,20 +304,11 @@ describe("架构守卫：领域规则必须全局共享", () => {
       "焦点环不得再挂在单个按钮的修饰类上",
     ).not.toMatch(/\.radial-menu-(preview-trigger|item-pin):focus-visible/);
     // hover 底色同属共享机制：曾漏掉导致星标 hover 无底色反馈而预览
-    // 按钮有（主窗口剪切板卡片动作组同理，星标必须与删除/展开同组）。
+    // 按钮有。
     expect(
       css,
       "径向动作按钮的 hover 底色必须定义在共享基类上",
     ).toMatch(/\.radial-menu-item \.radial-menu-item-action:hover\s*\{[^}]*background:\s*var\(--chip-hover-bg\)/);
-    const clipboardStyles = readSource("styles/clipboard.css");
-    expect(
-      clipboardStyles.includes(".clipboard-card-actions > .card-pin-btn"),
-      "主窗口剪切板卡片动作组必须包含收藏星标（与删除/展开/拖拽柄同组共享 hover 底色）",
-    ).toBe(true);
-    expect(
-      clipboardStyles.match(/\.clipboard-card-actions > \.card-pin-btn/g)?.length,
-      "星标必须加入动作组的基础/hover 显现/底色/svg 尺寸全部分组",
-    ).toBeGreaterThanOrEqual(4);
     const radialMenu = readSource("components/RadialMenu/index.tsx");
     // 动作区唯一出口是 RadialItemAction 组件（基类挂载 + 冒泡拦截不可
     // 遗漏）：动作区块内禁止裸 <button>，两个既有按钮必须经组件渲染。
@@ -333,31 +335,27 @@ describe("架构守卫：领域规则必须全局共享", () => {
     ).toBe(false);
   });
 
-  it("规则 18：剪切板卡片动作区按钮必须被 clipboard.css 动作组覆盖", () => {
-    // 回归锚点：收藏星标上线时只写了 components.css 的基础样式（token
-    // 存在），未加入 clipboard.css 的卡片动作组——hover 无底色反馈而
-    // 相邻按钮有。「类名存在于某处」是 token 级核对；动作区按钮的交互
-    // 反馈必须整组覆盖，新增按钮时本守卫的清单自动跟随。
-    const cardSource = readSource("pages/ClipboardPage/ClipboardCard.tsx");
-    const actionButtons = [
-      ...new Set(
-        (cardSource.match(/className="card-[a-z-]+-btn"/g) ?? []).map((match) =>
-          match.slice('className="'.length, -1),
-        ),
-      ),
-    ].sort();
-    expect(
-      actionButtons,
-      "ClipboardCard 动作按钮清单（正则失效即守卫空转）",
-    ).toEqual(["card-delete-btn", "card-edit-btn", "card-pin-btn", "card-toggle-text-btn"]);
-    const clipboardStyles = readSource("styles/clipboard.css");
-    const uncovered = actionButtons.filter(
-      (name) => !clipboardStyles.includes(`.clipboard-card-actions > .${name}`),
-    );
-    expect(
-      uncovered,
-      "动作区按钮必须加入 clipboard.css 动作组（基础/hover 显现/底色/svg 尺寸），不得只有孤立的 token 样式",
-    ).toEqual([]);
+  it("规则 18：卡片动作收敛进「⋯」菜单——卡片根禁止 hover 动作按钮组回潮", () => {
+    // 卡片化定案（2026-11-14）：剪切板/快捷输入卡片对齐资源卡范式，操作
+    // 全部收进右上「⋯」菜单（CardActionMenu portal）与右键菜单，原列表
+    // 形态的 hover 显隐动作按钮组（card-toggle-text-btn/card-pin-btn/
+    // card-edit-btn/card-delete-btn）退役。card-*-btn 类仅剩分组管理
+    // 对话框行内按钮一个消费方（ManageGroupsDialog）。
+    for (const cardFile of ["pages/ClipboardPage/ClipboardCard.tsx", "pages/PhrasePage/PhraseList.tsx"]) {
+      const source = readSource(cardFile);
+      expect(
+        source,
+        `${cardFile} 必须提供「⋯」菜单按钮（resource-card-more-button）`,
+      ).toContain("resource-card-more-button");
+      expect(
+        source,
+        `${cardFile} 菜单必须经共享 CardActionMenu 渲染（portal 定位，防卡片 transform 裁剪）`,
+      ).toContain("<CardActionMenu");
+      expect(
+        (source.match(/className="card-[a-z-]+-btn"/g) ?? []),
+        `${cardFile} 卡片根禁止回潮 hover 动作按钮组（操作收敛进菜单）`,
+      ).toEqual([]);
+    }
   });
 
   it("规则 19：资源文本预览必须消费 textPreviewPath 判定字段，禁止按 type 自行判定", () => {
@@ -366,15 +364,19 @@ describe("架构守卫：领域规则必须全局共享", () => {
     // 判定是否读文件预览，编辑过的 .txt 由此退化为 180 字摘要。取材判定
     // 唯一来源是 domain/records 的 resourceTextPreviewPath（经 RecordView
     // 的 textPreviewPath 暴露），消费方只允许读该字段。
-    const card = readSource("pages/ResourcePage/ResourceCard.tsx");
+    const card = readSource("components/CardVisual.tsx");
     expect(
       card.includes("view.textPreviewPath"),
-      "资源卡文本预览分支必须消费 view.textPreviewPath 判定字段",
+      "三页共用卡片预览的文本分支必须消费 view.textPreviewPath 判定字段",
     ).toBe(true);
     expect(
       card.includes('view.recordType === "file" && view.resourcePath'),
-      "资源卡禁止以 recordType === \"file\" 自行判定文本预览取材（编辑后 type 已是 text）",
+      "卡片预览禁止以 recordType === \"file\" 自行判定文本预览取材（编辑后 type 已是 text）",
     ).toBe(false);
+    expect(
+      readSource("pages/ResourcePage/ResourceCard.tsx"),
+      "资源卡必须经共享 CardVisual 渲染预览分支（禁止私有文本预览副本）",
+    ).toContain("<CardVisual");
     const radialItem = readSource("components/RadialMenu/ResourceItemVisual.tsx");
     expect(
       radialItem.includes("item.textPreviewPath"),

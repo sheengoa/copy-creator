@@ -9,7 +9,8 @@ vi.mock("@tauri-apps/api/core", () => ({
   invoke: invokeMock,
 }));
 
-import { buildResourceGroupCrumbs, computeResourceColumnCount, formatResourceBitrate, formatResourceDuration, formatResourceFileSize, resourceCardScale, splitResourceColumns } from "./resourceUtils";
+import { buildResourceGroupCrumbs, formatResourceBitrate, formatResourceDuration, formatResourceFileSize } from "./resourceUtils";
+import { computeResourceColumnCount, resourceCardScale, splitResourceColumns } from "../../utils/cardGrid";
 import { resolveResourceMediaUrl } from "../../domain/mediaUrl";
 import { findResourceFolder, flattenResourceFolders } from "../../domain/groups";
 import { getResourceFileName, hasCustomResourceFileName, isResourceTitleRenameable, splitResourceFileName } from "../../domain/fileName";
@@ -132,9 +133,9 @@ describe("resourceUtils", () => {
     expect(formatResourceFileSize(undefined)).toBe("");
   });
 
-  it("keeps at least two resource columns and grows with window width", () => {
+  it("drops to a single column when too narrow, grows with width, caps at five", () => {
     expect(computeResourceColumnCount(0)).toBe(2);
-    expect(computeResourceColumnCount(440)).toBe(2);
+    expect(computeResourceColumnCount(440)).toBe(1);
     expect(computeResourceColumnCount(1326)).toBe(2);
     expect(computeResourceColumnCount(1420)).toBe(3);
     expect(computeResourceColumnCount(2400)).toBe(5);

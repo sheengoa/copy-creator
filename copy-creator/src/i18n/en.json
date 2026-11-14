@@ -194,6 +194,7 @@
     "textContent": "Text content",
     "linkContent": "Link content",
     "create": "Create",
+    "viewContent": "View content",
     "pasteNormal": "Normal paste",
     "pasteToTerminal": "Paste to terminal",
     "confirmDelete": "Delete this record?",
@@ -457,6 +458,7 @@
   },
   "phrases": {
     "search": "Search quick input...",
+    "dragReorder": "Drag to reorder",
     "newGroup": "New Group",
     "groupName": "Group name",
     "newPhrase": "New Input",
@@ -869,6 +871,7 @@
     "off": "OFF",
     "pinWindow": "Pin Window",
     "unpinWindow": "Unpin Window",
+    "backToList": "Back to list",
     "backToTop": "Back to top",
     "moveToTop": "Move to top",
     "favorite": "Favorite",

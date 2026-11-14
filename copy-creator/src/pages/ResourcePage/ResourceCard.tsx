@@ -6,12 +6,11 @@ import {
   CardActionMenuItem,
 } from "../../components/CardActionMenu";
 import { HighlightText } from "../../components/HighlightText";
-import { InlineTextFilePreview } from "../../components/InlinePreview";
+import { CardVisual } from "../../components/CardVisual";
 import { formatTime, formatRelativeTime } from "../../utils/formatTime";
 import { recordUsageTime, resourceGroupLeafLabel } from "../../domain/records";
 import { revealResourceFile } from "../../domain/mediaAssets";
 import { UsageCountBadge } from "../../components/UsageCountBadge";
-import { ResourceFileImage, ResourceVideoPoster } from "./ResourceMedia";
 import { type ResourceMediaKind } from "../../domain/mediaKind";
 import type { RecordView } from "../../domain/recordView";
 
@@ -32,76 +31,6 @@ interface ResourceCardProps {
   onMove?: (view: RecordView) => void;
   /** 追溯文件（缺失记录的菜单项）；与详情页共用同一入口语义（守卫规则 23）。 */
   onTrace?: (view: RecordView) => void;
-}
-
-function ResourceCardVisual({
-  view,
-  search,
-  typeLabel,
-}: Pick<ResourceCardProps, "view" | "search" | "typeLabel">) {
-  const kind = view.kind;
-  const summary = view.summary;
-  const resourcePath = view.resourcePath ?? view.content;
-
-  if (kind === "video") {
-    return (
-      <div className={`resource-card-visual resource-card-${kind}`}>
-        <ResourceVideoPoster
-          path={resourcePath}
-          version={view.mediaVersion ?? undefined}
-          fallbackLabel={typeLabel(kind)}
-        />
-        <span className="resource-card-play">{Icons.play}</span>
-      </div>
-    );
-  }
-
-  if (kind === "audio") {
-    return (
-      <div className={`resource-card-visual resource-card-${kind}`}>
-        <span className="resource-card-visual-icon">{Icons.audio}</span>
-        <span>{typeLabel(kind)}</span>
-      </div>
-    );
-  }
-
-  if (kind === "image") {
-    return (
-      <ResourceFileImage
-        path={resourcePath}
-        alt={view.title}
-        className="resource-card-file-image"
-        version={view.mediaVersion ?? undefined}
-      />
-    );
-  }
-
-  if (kind === "file") {
-    return (
-      <div className="resource-card-visual resource-card-file">
-        {Icons.file}
-        <span>{typeLabel(kind)}</span>
-      </div>
-    );
-  }
-
-  if (view.textPreviewPath) {
-    return (
-      <div className="resource-card-text-preview">
-        <InlineTextFilePreview
-          resourcePath={view.textPreviewPath}
-          resourceVersion={view.mediaVersion ?? view.createdAt}
-          search={search}
-        />
-      </div>
-    );
-  }
-
-  return (
-    <div className={`resource-card-text-preview${view.recordType === "link" ? " is-link" : ""}`}>
-      <HighlightText text={summary || " "} search={search} />
-    </div>
-  );
 }
 
 function ResourceCardInner({
@@ -163,7 +92,7 @@ function ResourceCardInner({
         </label>
       )}
       <div className="resource-card-preview">
-        <ResourceCardVisual
+        <CardVisual
           view={view}
           search={search}
           typeLabel={typeLabel}

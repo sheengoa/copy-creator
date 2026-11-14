@@ -44,7 +44,7 @@ import { getResourceFileName, isResourceTitleRenameable, splitResourceFileName }
 import { formatResourceFolderPath } from "../../domain/groups";
 import { inferResourceMediaKind } from "../../domain/mediaKind";
 import { resolveResourceMediaUrl } from "../../domain/mediaUrl";
-import { getResourcePath, getResourceTitle, resourceMediaVersion, resourceTextPreviewPath } from "../../domain/records";
+import { getResourcePath, getResourceTitle, recordTextEditable, resourceMediaVersion, resourceTextPreviewPath } from "../../domain/records";
 import { useRecordLocale } from "../../hooks/useRecordLocale";
 import {
   ResourceImageOriginal,
@@ -62,6 +62,16 @@ interface ResourceDetailPageProps {
   onMoveRecord?: (record: ClipboardRecord) => void;
   /** 追溯文件（缺失记录的操作入口）；与列表卡片共用同一语义（守卫规则 23）。 */
   onTrace?: (record: ClipboardRecord) => void;
+  /** 主窗口复用形态（剪切板/快捷输入详情）：隐藏资源特有件——备注、
+   *  重命名、版本记录、文本标注；编辑与资源库同交互（双击正文进入页内
+   *  编辑态，不弹窗），保存经 onSaveContent 注入各页自己的通道。 */
+  hideResourceOps?: boolean;
+  /** record 形态的内联编辑保存通道：数据库文本 → update_clipboard_record_
+   *  content，快捷输入文本短语 → update_phrase。保存成功后由详情页回调
+   *  onRecordUpdated 刷新列表。 */
+  onSaveContent?: (record: ClipboardRecord, content: string) => Promise<void>;
+  /** 返回按钮文案（默认「返回资源库」）。 */
+  backLabel?: string;
 }
 
 /* 自绘滚动进度条 thumb 在滚动视口上下的留白（px） */
@@ -127,6 +137,9 @@ export default function ResourceDetailPage({
   onRecordUpdated,
   onMoveRecord,
   onTrace,
+  hideResourceOps = false,
+  onSaveContent,
+  backLabel,
 }: ResourceDetailPageProps) {
   const { t } = useTranslation();
   const recordLocale = useRecordLocale();
@@ -518,7 +531,7 @@ export default function ResourceDetailPage({
 
   const title = getResourceTitle(record, kind, recordLocale);
 
-  const renameable = isResourceTitleRenameable(record);
+  const renameable = isResourceTitleRenameable(record) && !hideResourceOps;
   // 标题编辑基于文件名：文件记录的路径在 content/resource_path，文本资源记录的
   // 路径只在 resource_path（content 是正文）。
   const titlePath = record.type === "file" || record.type === "image"
@@ -591,7 +604,8 @@ export default function ResourceDetailPage({
   // 与版本预览态暂离（预览的是历史快照，偏移对当前文件无意义），退出后
   // 随文本重载重新校验。
   const annotationsActive =
-    Boolean(externalTextPath) && !textDetailTruncated && !contentEditing && !previewEntry;
+    Boolean(externalTextPath) && !textDetailTruncated && !contentEditing && !previewEntry
+    && !hideResourceOps;
   useEffect(() => {
     if (!annotationsActive || textContent === null) {
       setAnnotations([]);
@@ -914,9 +928,18 @@ export default function ResourceDetailPage({
   // 1024 × 1024 字节）同值同口径——字符数口径对中文会放宽约 3 倍，
   // 1～3 MB 的中文文件会「进得去编辑、存不回去」。文件大小缺失时退回
   // 字符数估算。
-  const contentEditable = Boolean(textEditPath) && !record.has_images && fullTextContent !== null
+  // 编辑目标的形态分派（2026-11-14 用户定案：编辑完全复用资源库详情页
+  // 交互，双击进入页内编辑态、不弹窗）：资源形态取材与保存都是 backing
+  // 文件；record 形态（主窗口剪切板/快捷输入）编辑目标是记录正文本身
+  // （数据库文本/链接），保存经 onSaveContent 注入，文件类记录保持只读
+  // （文件语义归资源库，主窗口纯展示预览）。
+  const contentEditable = !record.has_images
+    && fullTextContent !== null
     && !textDetailTruncated
-    && (record.resource_file_size ?? fullTextContent.length) <= 1024 * 1024;
+    && (record.resource_file_size ?? fullTextContent.length) <= 1024 * 1024
+    && (hideResourceOps
+      ? onSaveContent !== undefined && recordTextEditable(record)
+      : Boolean(textEditPath));
   // 正文加载完成后把当前内容作为「已保存」基准，进入编辑态时以此为草稿初值。
   useEffect(() => {
     if (fullTextContent === null) return;
@@ -1049,7 +1072,35 @@ export default function ResourceDetailPage({
   };
 
   const handleSaveContent = async () => {
-    if (!textEditPath || contentSaving || !contentDirty) return;
+    if (contentSaving || !contentDirty) return;
+    // record 形态：保存经调用方注入的通道（剪切板 update_clipboard_record_
+    // content / 快捷输入 update_phrase），成功后按资源库同节奏反馈
+    // （「已保存」toast + onRecordUpdated 刷新列表，列表重载触发正文
+    // 重新取材，savedContent 随新全文刷新）。
+    if (hideResourceOps) {
+      if (!onSaveContent) return;
+      setContentSaving(true);
+      setContentSaveError(null);
+      try {
+        await onSaveContent(record, contentDraft);
+        setContentEditing(false);
+        setContentDraft("");
+        setSavedContent(contentDraft);
+        setContentSaved(true);
+        if (contentSavedTimerRef.current !== null) window.clearTimeout(contentSavedTimerRef.current);
+        contentSavedTimerRef.current = window.setTimeout(() => {
+          setContentSaved(false);
+          contentSavedTimerRef.current = null;
+        }, 2200);
+        onRecordUpdated(record);
+      } catch (error) {
+        setContentSaveError(typeof error === "string" ? error : "");
+      } finally {
+        setContentSaving(false);
+      }
+      return;
+    }
+    if (!textEditPath) return;
     setContentSaving(true);
     setContentSaveError(null);
     try {
@@ -1094,7 +1145,7 @@ export default function ResourceDetailPage({
       <header className="resource-detail-header">
         <button type="button" className="resource-back-button" onClick={onBack}>
           {Icons.arrowLeft}
-          <span>{t("resources.backToLibrary")}</span>
+          <span>{backLabel ?? t("resources.backToLibrary")}</span>
         </button>
         <div className="resource-detail-actions">
           {kind === "text" && !contentEditing && !previewEntry && (
@@ -1111,7 +1162,7 @@ export default function ResourceDetailPage({
               <span>{t("resources.refreshContent")}</span>
             </button>
           )}
-          {contentEditable && !contentEditing && (
+          {contentEditable && !hideResourceOps && !contentEditing && (
             <span
               className="text-history-anchor"
               ref={historyAnchorRef}
@@ -1315,53 +1366,60 @@ export default function ResourceDetailPage({
           >
             <div className="resource-main-scrollbar-thumb" ref={scrollThumbRef} />
           </div>
+          {/* record 形态（主窗口剪切板/快捷输入）不渲染标题块：标题是
+              正文首行的重复展示，正文区直接开始（信息面板保留元数据）。 */}
+          {!hideResourceOps && (
           <span className="resource-detail-kind">{typeLabel(kind)}</span>
-          {renameDraft === null ? (
-            <h1
-              className={renameable ? "resource-detail-title" : undefined}
-              title={renameable ? t("resources.renameTitleHint") : undefined}
-              onDoubleClick={renameable ? () => {
-                setRenameDraft(currentStem);
-                setRenameError(null);
-              } : undefined}
-            >
-              {title}
-            </h1>
-          ) : (
-            <div className="resource-detail-title-editor">
-              <input
-                className="resource-detail-title-input"
-                autoFocus
-                value={renameDraft}
-                maxLength={120}
-                disabled={renameSaving}
-                aria-label={t("resources.renameTitleHint")}
-                onChange={(event) => {
-                  setRenameDraft(event.target.value);
-                  setRenameError(null);
-                }}
-                onKeyDown={(event) => {
-                  if (event.key === "Enter") {
-                    event.preventDefault();
-                    void commitRename();
-                  } else if (event.key === "Escape") {
-                    event.preventDefault();
-                    cancelRename();
-                  }
-                }}
-                onBlur={() => void commitRename()}
-              />
-              {titleExtension && (
-                <span className="resource-detail-title-extension">{titleExtension}</span>
-              )}
-              {renameError && (
-                <span className="resource-detail-title-error" role="alert">{renameError}</span>
-              )}
-            </div>
           )}
-          <p className="resource-detail-subtitle">
-            {typeLabel(kind)} · {record.source_app || t("resources.localSource")}
-          </p>
+          {!hideResourceOps &&
+            (renameDraft === null ? (
+              <h1
+                className={renameable ? "resource-detail-title" : undefined}
+                title={renameable ? t("resources.renameTitleHint") : undefined}
+                onDoubleClick={renameable ? () => {
+                  setRenameDraft(currentStem);
+                  setRenameError(null);
+                } : undefined}
+              >
+                {title}
+              </h1>
+            ) : (
+              <div className="resource-detail-title-editor">
+                <input
+                  className="resource-detail-title-input"
+                  autoFocus
+                  value={renameDraft}
+                  maxLength={120}
+                  disabled={renameSaving}
+                  aria-label={t("resources.renameTitleHint")}
+                  onChange={(event) => {
+                    setRenameDraft(event.target.value);
+                    setRenameError(null);
+                  }}
+                  onKeyDown={(event) => {
+                    if (event.key === "Enter") {
+                      event.preventDefault();
+                      void commitRename();
+                    } else if (event.key === "Escape") {
+                      event.preventDefault();
+                      cancelRename();
+                    }
+                  }}
+                  onBlur={() => void commitRename()}
+                />
+                {titleExtension && (
+                  <span className="resource-detail-title-extension">{titleExtension}</span>
+                )}
+                {renameError && (
+                  <span className="resource-detail-title-error" role="alert">{renameError}</span>
+                )}
+              </div>
+            ))}
+          {!hideResourceOps && (
+            <p className="resource-detail-subtitle">
+              {typeLabel(kind)} · {record.source_app || t("resources.localSource")}
+            </p>
+          )}
           <div
             ref={stageRef}
             className={`resource-detail-stage resource-detail-stage-${kind}`}
@@ -1779,6 +1837,7 @@ export default function ResourceDetailPage({
               </span>
             </div>
           )}
+          {!hideResourceOps && (
           <div className="resource-note-block">
             <label className="resource-note-label" htmlFor="resource-note-input">
               {t("resources.note")}
@@ -1810,6 +1869,7 @@ export default function ResourceDetailPage({
               )}
             </div>
           </div>
+          )}
         </aside>
       </main>
       {historyToast && (

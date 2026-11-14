@@ -1,4 +1,5 @@
-import { useEffect, useState, useRef } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
+import { splitResourceColumns } from "../../utils/cardGrid";
 import { Icons } from "../../components/Icons";
 import { useArrowKeyNav } from "../../hooks/useArrowKeyNav";
 import { useSortable } from "@dnd-kit/sortable";
@@ -6,13 +7,20 @@ import { CSS } from "@dnd-kit/utilities";
 import { useTranslation } from "react-i18next";
 import type { Phrase } from "../../types";
 import { HighlightText } from "../../components/HighlightText";
-import { InlineImagePreview, InlineTextFilePreview } from "../../components/InlinePreview";
-import { usePhraseStore, isImageFilePath } from "../../stores/phraseStore";
+import { InlineTextFilePreview } from "../../components/InlinePreview";
+import { CardVisual, type CardVisualData } from "../../components/CardVisual";
+import {
+  CardActionMenu,
+  CardActionMenuItem,
+  CardActionMenuSeparator,
+} from "../../components/CardActionMenu";
 import { useSettingsStore } from "../../stores/settingsStore";
 import { UsageCountBadge } from "../../components/UsageCountBadge";
 import { fileNameFromPath } from "../../domain/fileName";
-import { isInlineTextPreviewFilePath, shouldShowInlineTextToggle } from "../../domain/records";
-import { useExpandReveal } from "../../hooks/useExpandReveal";
+import { getResourceSummary, recordUsageTime } from "../../domain/records";
+import { inferResourceMediaKind, isSlimCardKind, type ResourceMediaKind } from "../../domain/mediaKind";
+import { useIsClamped } from "../../hooks/useIsClamped";
+import { formatRelativeTime } from "../../utils/formatTime";
 
 interface PhraseListProps {
   phrases: Phrase[];
@@ -21,16 +29,18 @@ interface PhraseListProps {
   loadedOnce: boolean;
   selectedGroupId: string | null;
   search?: string;
+  /** 卡片网格列数（页面级 useCardColumns 计算，与资源库/剪切板同几何）。 */
+  columnCount: number;
   /** 列表滚动容器回调 ref，供页面级「回到顶部」监视滚动。 */
   scrollRef?: (node: HTMLElement | null) => void;
-  onPaste: (phrase: Phrase) => void;
-  onSecondaryPaste: (phrase: Phrase) => void;
-  onEdit: (phrase: Phrase) => void;
+  onOpenView: (phrase: Phrase) => void;
   onDelete: (id: string) => void;
   /** 卡片「移到顶部」：组内置顶，径向菜单同步可见。 */
   onMoveToTop?: (id: string) => void;
-  /** 「全部」跨分组视图：卡片尾部显示所属分组标签。 */
+  /** 「全部」跨分组视图：卡片 meta 显示所属分组标签。 */
   showGroupTag?: boolean;
+  /** 媒体 kind 文案（video/audio 等，预览角标与 meta 共用）。 */
+  getKindLabel: (kind: ResourceMediaKind) => string;
   selectionMode: boolean;
   isSelected: (id: string) => boolean;
   onToggleSelected: (id: string) => void;
@@ -38,58 +48,48 @@ interface PhraseListProps {
   navDisabled?: boolean;
 }
 
-
-function formatBytes(bytes: number) {
-  if (!bytes) return "";
-  const units = ["B", "KB", "MB", "GB"];
-  const index = Math.min(Math.floor(Math.log(bytes) / Math.log(1024)), units.length - 1);
-  return `${(bytes / 1024 ** index).toFixed(index === 0 ? 0 : 1)} ${units[index]}`;
-}
-
-/** 图像文件短语的缩略图：content 为相对存储目录的路径，加载失败回退图标。 */
-function PhraseFileImage({ content }: { content: string }) {
-  const getImageThumbnail = usePhraseStore((s) => s.getImageThumbnail);
-  const [src, setSrc] = useState<string | null>(null);
-  const [failed, setFailed] = useState(false);
-
-  useEffect(() => {
-    let cancelled = false;
-    getImageThumbnail(content)
-      .then((base64) => {
-        if (!cancelled) setSrc(`data:image/png;base64,${base64}`);
-      })
-      .catch(() => {
-        if (!cancelled) setFailed(true);
-      });
-    return () => { cancelled = true; };
-  }, [content, getImageThumbnail]);
-
-  if (failed) return <span className="phrase-card-file-icon">{Icons.image}</span>;
-  if (!src) return <span className="phrase-card-file-icon">{Icons.file}</span>;
-  return <img className="phrase-card-file-thumb" src={src} alt="" loading="lazy" />;
+/** 短语 → 卡片预览窄接口（CardVisualData）：kind 按扩展名推断，文本文件
+ *  走快捷输入受管副本预览命令，摘要复用 domain 摘要函数（与资源卡同形态）。 */
+function phraseCardVisual(phrase: Phrase): CardVisualData {
+  const isFile = phrase.input_type === "file";
+  const path = phrase.content;
+  const kind: ResourceMediaKind = isFile
+    ? inferResourceMediaKind({ type: "file", content: path })
+    : "text";
+  const isTextFile = isFile && kind === "text";
+  return {
+    kind,
+    recordType: isFile ? "file" : "text",
+    title: phrase.title || fileNameFromPath(phrase.source_path || path),
+    summary: getResourceSummary({ type: "text", content: phrase.content }),
+    content: path,
+    textPreviewPath: isTextFile ? path : null,
+    textPreviewVariant: isTextFile ? "quickInput" : undefined,
+    resourcePath: null,
+    mediaVersion: null,
+    createdAt: phrase.updated_at,
+  };
 }
 
 function PhraseCard({
   phrase,
   search,
-  onPaste,
-  onSecondaryPaste,
-  onEdit,
+  onOpenView,
   onDelete,
   onMoveToTop,
   showGroupTag,
+  getKindLabel,
   selectionMode,
   selected,
   onToggleSelected,
 }: {
   phrase: Phrase;
   search?: string;
-  onPaste: (p: Phrase) => void;
-  onSecondaryPaste: (p: Phrase) => void;
-  onEdit: (p: Phrase) => void;
+  onOpenView: (p: Phrase) => void;
   onDelete: (id: string) => void;
   onMoveToTop?: (id: string) => void;
   showGroupTag?: boolean;
+  getKindLabel: (kind: ResourceMediaKind) => string;
   selectionMode: boolean;
   selected: boolean;
   onToggleSelected: (id: string) => void;
@@ -104,79 +104,89 @@ function PhraseCard({
     transform: CSS.Transform.toString(transform),
     transition: transition || "transform 200ms ease",
   };
-  const isFile = phrase.input_type === "file";
-  const fileName = fileNameFromPath(phrase.source_path || phrase.content);
-  const [textExpanded, setTextExpanded] = useState(false);
-  const imageFile = isFile && isImageFilePath(phrase.source_path || phrase.content);
-  const textFile = isFile && isInlineTextPreviewFilePath(phrase.content);
-  const canToggleText = isFile
-    ? imageFile || textFile
-    : shouldShowInlineTextToggle(phrase.content);
-  const canCollapseText = !isFile && shouldShowInlineTextToggle(phrase.content);
-  const isTextExpanded = canToggleText && textExpanded;
-  // 展开后若超出列表可视区，自动滚入完整展示（含图片异步加载后的高度校正）。
-  const expandedBodyRef = useExpandReveal<HTMLDivElement>(isTextExpanded);
+
+  const visual = useMemo(() => phraseCardVisual(phrase), [phrase]);
+  const contentLabel = getKindLabel(visual.kind);
+  const [moreOpen, setMoreOpen] = useState(false);
+  const moreButtonRef = useRef<HTMLButtonElement | null>(null);
 
   useEffect(() => {
-    setTextExpanded(false);
-  }, [phrase.id, phrase.content]);
+    if (!selectionMode) return;
+    setMoreOpen(false);
+  }, [selectionMode]);
 
-  const handleToggleText = (e: React.MouseEvent) => {
-    e.stopPropagation();
-    setTextExpanded((expanded) => !expanded);
-  };
-
-  // 展开态点击卡片任何位置 = 收起，不落回粘贴（与剪切板卡片同语义）。
-  // 收起豁免仅限「拖选了文本且点在文本上」；WebKit 点击图片不会清除残留
-  // 选区，只看 selection.type === "Range" 会把普通点击误拦。
-  const handleCardClick = (e: React.MouseEvent) => {
+  // 卡片化主交互：点击 = 查看内容（占位符在粘贴时才展开，弹窗内提示）。
+  const handleCardClick = () => {
     if (selectionMode) {
       onToggleSelected(phrase.id);
       return;
     }
-    if (!isTextExpanded) {
-      onPaste(phrase);
-      return;
-    }
-    const selection = window.getSelection();
-    const hasTextSelection = Boolean(
-      selection && selection.type === "Range" && selection.toString().length > 0,
-    );
-    const clickedText = Boolean(
-      (e.target as HTMLElement | null)?.closest("span, pre"),
-    );
-    if (hasTextSelection && clickedText) return;
-    handleToggleText(e);
+    onOpenView(phrase);
   };
 
-  return (
-    <div
+  // 混合形态 V2：文本短语（含文本文件）紧凑条，文件短语矮横幅媒体卡。
+  const slim = isSlimCardKind(visual.kind);
+  const slimContent = phrase.content.length > 600 ? `${phrase.content.slice(0, 600)}…` : phrase.content;
+  // 5 行截断渐隐提示（scrollHeight 超出 clientHeight 才点亮）。
+  const [slimContentRef, slimClamped] = useIsClamped();
+  const metaRow = (
+      <div className="resource-card-meta">
+        {showGroupTag && phrase.group_name && (
+          <span className="phrase-card-group-tag" title={phrase.group_name}>
+            {phrase.group_name}
+          </span>
+        )}
+        {showGroupTag && isCountSort && (
+          <UsageCountBadge count={phrase.use_count ?? 0} />
+        )}
+        <span>{contentLabel}</span>
+        <span aria-hidden="true">·</span>
+        <time dateTime={phrase.updated_at}>
+          {formatRelativeTime(recordUsageTime(phrase.last_used_at ?? null, phrase.created_at))}
+        </time>
+        {!selectionMode && (
+          <span
+            ref={setActivatorNodeRef}
+            className="drag-handle"
+            aria-label={t("phrases.dragReorder")}
+            {...attributes}
+            {...listeners}
+            onClick={(e) => e.stopPropagation()}
+          >
+            {Icons.drag}
+          </span>
+        )}
+      </div>
+    );
+    return (
+      <article
       ref={setNodeRef}
       style={style}
-      className={`notification phrase-card${isDragging ? " is-dragging" : ""}${selectionMode ? " is-selection-mode" : ""}${selected ? " is-selected" : ""}`}
+      className={`resource-card phrase-card${slim ? " card-slim" : " card-media"}${isDragging ? " is-dragging" : ""}${selectionMode ? " is-selection-mode" : ""}${selected ? " is-selected" : ""}`}
       onClick={handleCardClick}
       onKeyDown={(e) => {
-        // 键盘可达性：Enter/Space 与单击同义（选择模式切换选中；浏览模式
-        // 未展开文本时粘贴）。
+        // 键盘可达性：Enter/Space 与单击同义（选择模式切换选中；浏览模式查看内容）。
+        // 排序把手的 Space/Enter 是 dnd-kit 键盘拖拽语义，不冒泡到此
+        // （否则键盘拖拽永远启动不了，反而误开详情页）。
+        if (e.target instanceof HTMLElement && e.target.closest(".drag-handle")) return;
         if (e.key !== "Enter" && e.key !== " ") return;
         e.preventDefault();
         if (selectionMode) {
           onToggleSelected(phrase.id);
           return;
         }
-        if (!isTextExpanded) onPaste(phrase);
+        onOpenView(phrase);
       }}
-      role="button"
       tabIndex={0}
+      aria-label={t("clipboard.viewContent")}
       onContextMenu={(e) => {
         e.preventDefault();
         e.stopPropagation();
-        if (!selectionMode) onSecondaryPaste(phrase);
+        if (!selectionMode) setMoreOpen(true);
       }}
     >
-      <div className="notibar" />
       {selectionMode && (
-        <label className="card-selection-control" onClick={(e) => e.stopPropagation()}>
+        <label className="resource-card-selection" onClick={(e) => e.stopPropagation()}>
           <input
             type="checkbox"
             checked={selected}
@@ -186,91 +196,119 @@ function PhraseCard({
           <span className="selection-checkbox" aria-hidden="true" />
         </label>
       )}
-      <div className="noticontent">
-        <div
-          ref={expandedBodyRef}
-          className={`notibody phrase-card-body${isFile ? " phrase-card-file-body" : ""}${canToggleText ? " is-toggleable" : ""}${canCollapseText && !isTextExpanded ? " is-collapsed" : ""}${isTextExpanded ? " is-expanded" : ""}${isFile && isTextExpanded ? " is-file-expanded" : ""}${isTextExpanded && imageFile ? " is-media-expanded" : ""}`}
-        >
-          {isFile ? (
-            <>
-              <div className="phrase-card-file-summary">
-                {imageFile && isTextExpanded ? (
-                  <span className="phrase-card-file-icon">{Icons.image}</span>
-                ) : imageFile ? (
-                  <PhraseFileImage content={phrase.content} />
-                ) : (
-                  <span className="phrase-card-file-icon">{Icons.file}</span>
-                )}
-                <span className="phrase-card-file-name"><HighlightText text={fileName} search={search} /></span>
-                <span className="phrase-card-file-size">{formatBytes(phrase.file_size)}</span>
-              </div>
-              {isTextExpanded && imageFile && (
-                <InlineImagePreview
-                  path={phrase.content}
-                  alt={t("resources.imagePreview")}
-                  className="phrase-card-expanded-image"
-                />
-              )}
-              {isTextExpanded && textFile && (
-                <InlineTextFilePreview path={phrase.content} search={search} />
-              )}
-            </>
-          ) : (
-            <HighlightText text={phrase.content} search={search} />
-          )}
-        </div>
-        <div className="notititle phrase-card-footer">
-          {showGroupTag && phrase.group_name && (
-            <span className="phrase-card-group-tag" title={phrase.group_name}>
-              {phrase.group_name}
-            </span>
-          )}
-          {showGroupTag && isCountSort && (
-            <UsageCountBadge count={phrase.use_count ?? 0} />
-          )}
-          <span className="phrase-card-remark"><HighlightText text={phrase.title || ""} search={search} /></span>
-          {!selectionMode && (
-            <div className="phrase-card-actions">
-              {canToggleText && (
+      {slim ? (
+        <div className="resource-card-body">
+          <div className="card-slim-topline">
+            <span className="card-slim-dot" aria-hidden="true" />
+            <span>{contentLabel}</span>
+            {!selectionMode && (
+              <div className="resource-card-more">
                 <button
-                  className="card-toggle-text-btn"
                   type="button"
-                  aria-expanded={isTextExpanded}
-                  aria-label={t(isTextExpanded ? "phrases.collapseText" : "phrases.expandText")}
-                  title={t(isTextExpanded ? "phrases.collapseText" : "phrases.expandText")}
-                  onClick={handleToggleText}
-                >
-                  {isTextExpanded ? Icons.collapse : Icons.expand}
-                </button>
-              )}
-              <span ref={setActivatorNodeRef} className="drag-handle" {...attributes} {...listeners}>
-                {Icons.drag}
-              </span>
-              {onMoveToTop && (
-                <button
-                  className="card-move-top-btn"
-                  type="button"
-                  aria-label={t("common.moveToTop")}
-                  title={t("common.moveToTop")}
+                  ref={moreButtonRef}
+                  className="resource-card-more-button"
+                  aria-label={t("resources.moreActions")}
+                  aria-haspopup="menu"
+                  aria-expanded={moreOpen}
+                  title={t("resources.moreActions")}
                   onClick={(e) => {
                     e.stopPropagation();
-                    onMoveToTop(phrase.id);
+                    setMoreOpen((open) => !open);
                   }}
                 >
-                  {Icons.arrowUp}
+                  {Icons.more}
                 </button>
-              )}
-              <button className="card-edit-btn" onClick={(e) => { e.stopPropagation(); onEdit(phrase); }}>
-                {Icons.edit}
-              </button>
-              <button className="card-delete-btn" onClick={(e) => { e.stopPropagation(); onDelete(phrase.id); }}>
-                {Icons.delete}
-              </button>
-            </div>
-          )}
+              </div>
+            )}
+          </div>
+          <div
+            ref={slimContentRef}
+            className={`card-slim-content${slimClamped ? " is-clamped" : ""}`}
+          >
+            {visual.textPreviewPath ? (
+              <InlineTextFilePreview path={visual.textPreviewPath} search={search} />
+            ) : (
+              <HighlightText text={slimContent} search={search} />
+            )}
+          </div>
+          {metaRow}
         </div>
-      </div>
-    </div>
+      ) : (
+        <>
+          <div className="resource-card-preview">
+            <CardVisual view={visual} search={search} typeLabel={getKindLabel} />
+            <span className="resource-card-kind">{contentLabel}</span>
+            {!selectionMode && (
+              <div className="resource-card-more">
+                <button
+                  type="button"
+                  ref={moreButtonRef}
+                  className="resource-card-more-button"
+                  aria-label={t("resources.moreActions")}
+                  aria-haspopup="menu"
+                  aria-expanded={moreOpen}
+                  title={t("resources.moreActions")}
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    setMoreOpen((open) => !open);
+                  }}
+                >
+                  {Icons.more}
+                </button>
+              </div>
+            )}
+          </div>
+          <div className="resource-card-body">
+            <div className="resource-card-title-row">
+              <strong className="resource-card-title">
+                <HighlightText text={phrase.title || ""} search={search} />
+              </strong>
+            </div>
+            {metaRow}
+          </div>
+        </>
+      )}
+      <CardActionMenu
+        open={moreOpen}
+        align="end"
+        className="resource-card-menu"
+        ariaLabel={t("resources.moreActions")}
+        anchorEl={moreButtonRef}
+        getAnchor={() => {
+          const rect = moreButtonRef.current?.getBoundingClientRect();
+          if (!rect) return null;
+          return { left: rect.left, top: rect.top, right: rect.right, bottom: rect.bottom };
+        }}
+        onClose={() => setMoreOpen(false)}
+      >
+        {onMoveToTop && (
+          <CardActionMenuItem
+            className="ctx-menu-item"
+            icon={Icons.arrowUp}
+            label={t("common.moveToTop")}
+            onClick={() => {
+              setMoreOpen(false);
+              onMoveToTop(phrase.id);
+            }}
+          />
+        )}
+        <CardActionMenuSeparator />
+        <CardActionMenuItem
+          className="ctx-menu-item danger"
+          icon={
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <polyline points="3 6 5 6 21 6" />
+              <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2" />
+            </svg>
+          }
+          label={t("common.delete")}
+          onClick={() => {
+            setMoreOpen(false);
+            onDelete(phrase.id);
+          }}
+        />
+      </CardActionMenu>
+    </article>
   );
 }
 
@@ -280,13 +318,13 @@ export function PhraseList({
   loadedOnce,
   selectedGroupId,
   search,
+  columnCount,
   scrollRef,
-  onPaste,
-  onSecondaryPaste,
-  onEdit,
+  onOpenView,
   onDelete,
   onMoveToTop,
   showGroupTag,
+  getKindLabel,
   selectionMode,
   isSelected,
   onToggleSelected,
@@ -294,10 +332,14 @@ export function PhraseList({
 }: PhraseListProps) {
   const { t } = useTranslation();
   // 方向键导航：容器节点同时供「回到顶部」回调用，这里用本地 ref 桥接。
+  // 平铺网格按 DOM 序（行主序）前后移动，与时间序一致。
   const listRef = useRef<HTMLDivElement>(null);
+  // 分列瀑布流按列分组（上下列内移动、左右跨列同位），与剪切板页同款。
   const arrowNav = useArrowKeyNav({
     containerRef: listRef,
     itemSelector: ".phrase-card",
+    columnar: true,
+    columnSelector: ".resource-column",
     disabled: navDisabled,
   });
 
@@ -306,19 +348,15 @@ export function PhraseList({
   if (loading && phrases.length === 0 && !loadedOnce) {
     return (
       <div className="phrase-list">
-        {[1, 2, 3, 4].map((i) => (
-          <div key={i} className="notification skeleton">
-            <div className="notibar" />
-            <div className="noticontent">
-              <div className="notibody">
-                <div className="skeleton-line" style={{ width: `${40 + ((i * 13) % 30)}%` }} />
-              </div>
-              <div className="notititle">
-                <div className="skeleton-line short" />
-              </div>
+        <div className="resource-list-skeleton" aria-busy="true">
+          {[1, 2, 3, 4, 5, 6].map((i) => (
+            <div className="resource-card-skeleton" key={i}>
+              <div className="resource-skeleton-preview" />
+              <div className="resource-skeleton-line long" />
+              <div className="resource-skeleton-line short" />
             </div>
-          </div>
-        ))}
+          ))}
+        </div>
       </div>
     );
   }
@@ -353,22 +391,34 @@ export function PhraseList({
       }}
       onKeyDown={arrowNav}
     >
-      {phrases.map((p) => (
-        <PhraseCard
-          key={p.id}
-          phrase={p}
-          search={search}
-          onPaste={onPaste}
-          onSecondaryPaste={onSecondaryPaste}
-          onEdit={onEdit}
-          onDelete={onDelete}
-          onMoveToTop={onMoveToTop}
-          showGroupTag={showGroupTag}
-          selectionMode={selectionMode}
-          selected={isSelected(p.id)}
-          onToggleSelected={onToggleSelected}
-        />
-      ))}
+      {/* 分列瀑布流（列内紧贴）：phrases 已是 DOM 序（列主序，由页面
+          splitResourceColumns 生成，与 SortableContext items 一致），
+          拖拽 rectSorting 与方向键列导航都在此域工作。 */}
+      <div
+        className="resource-columns"
+        style={{ gridTemplateColumns: `repeat(${columnCount}, minmax(0, 1fr))` }}
+      >
+        {splitResourceColumns(phrases, columnCount).map((column, columnIndex) => (
+          <div className="resource-column" key={`column-${columnIndex}`}>
+            {column.map((p) => (
+              <div className="resource-item" key={p.id}>
+                <PhraseCard
+                  phrase={p}
+                  search={search}
+                  onOpenView={onOpenView}
+                  onDelete={onDelete}
+                  onMoveToTop={onMoveToTop}
+                  showGroupTag={showGroupTag}
+                  getKindLabel={getKindLabel}
+                  selectionMode={selectionMode}
+                  selected={isSelected(p.id)}
+                  onToggleSelected={onToggleSelected}
+                />
+              </div>
+            ))}
+          </div>
+        ))}
+      </div>
     </div>
   );
 }

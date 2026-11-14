@@ -102,32 +102,38 @@ describe("integration regressions", () => {
     expect(ipcSource).not.toContain("set_always_on_top(true)");
   });
 
-  it("uses the same six-line card folding for quick input and clipboard cards", () => {
-    const phraseSource = readSource("../pages/PhrasePage/PhraseList.tsx");
+  it("uses the shared resource-card skeleton for clipboard, phrase and resource cards", () => {
+    // 卡片化定案（2026-11-14）：剪切板/快捷输入两页对齐资源库卡片形态，
+    // 三页共用同一卡片骨架类（resource-card 族沉到 components.css）与
+    // 同一预览分支组件 CardVisual；旧的通知行皮肤与卡内展开体系退役。
     const clipboardSource = readSource("../pages/ClipboardPage/ClipboardCard.tsx");
-    const phraseStyles = readSource("../styles/phrases.css");
-    const clipboardStyles = readSource("../styles/clipboard.css");
-    const recordsDomain = readSource("../domain/records.ts");
+    const phraseSource = readSource("../pages/PhrasePage/PhraseList.tsx");
+    const resourceSource = readSource("../pages/ResourcePage/ResourceCard.tsx");
+    const sharedStyles = readSource("../styles/components.css");
 
-    expect(phraseSource).toContain('className="card-toggle-text-btn"');
-    expect(phraseSource).toContain("e.stopPropagation()");
-    expect(phraseSource).toContain('t(isTextExpanded ? "phrases.collapseText" : "phrases.expandText")');
-    expect(phraseSource).toContain("Icons.expand");
-    expect(phraseSource).toContain("Icons.collapse");
-    expect(phraseStyles).toContain(".phrase-card-body.is-toggleable");
-    expect(phraseStyles).toContain(".phrase-card-body.is-collapsed");
-    expect(phraseStyles).toContain(".phrase-card-body.is-expanded");
-    expect(phraseStyles).toContain("white-space: pre-wrap");
-    expect(phraseStyles).toContain(".phrase-card-actions > .card-toggle-text-btn");
-    expect(clipboardSource).toContain('className="card-toggle-text-btn"');
-    // 折叠判定收口 domain/records.ts，卡片只读视图模型的判定字段。
-    expect(clipboardSource).toContain("view.expandable");
-    expect(clipboardSource).toContain('view.recordType === "file"');
-    expect(clipboardSource).toContain("view.expandPreview");
-    expect(recordsDomain).toContain("shouldShowInlineTextToggle");
-    expect(recordsDomain).toContain("INLINE_PREVIEW_MAX_LINES = 6");
-    expect(clipboardStyles).toContain(".clipboard-card-body.is-collapsed");
-    expect(clipboardStyles).toContain("calc(1.5em * 6)");
+    expect(clipboardSource).toContain("resource-card clipboard-card");
+    expect(phraseSource).toContain("resource-card phrase-card");
+    expect(resourceSource).toContain("resource-card");
+    expect(clipboardSource).toContain("<CardVisual");
+    expect(phraseSource).toContain("<CardVisual");
+    expect(resourceSource).toContain("<CardVisual");
+    expect(sharedStyles).toContain(".resource-card {");
+    expect(sharedStyles).toContain(".resource-columns {");
+    // 网格几何唯一实现：三页共用 hooks/useCardColumns + utils/cardGrid。
+    for (const page of [
+      "../pages/ClipboardPage/index.tsx",
+      "../pages/PhrasePage/index.tsx",
+      "../pages/ResourcePage.tsx",
+    ]) {
+      expect(readSource(page), `${page} 必须消费共享 useCardColumns`).toContain("useCardColumns(");
+    }
+    expect(readSource("../utils/cardGrid.ts")).toContain("export function computeResourceColumnCount");
+    // 点击 = 查看内容（粘贴走查看弹窗操作行与 ⋯菜单），卡片根不再有
+    // 展开态「收起落回粘贴」的二段语义。
+    expect(clipboardSource).toContain("onOpenView(view)");
+    expect(phraseSource).toContain("onOpenView(phrase)");
+    expect(clipboardSource).not.toContain("handleToggleExpanded");
+    expect(phraseSource).not.toContain("setTextExpanded");
   });
 
   it("sizes the quick input editor dialog relative to the main window", () => {
@@ -492,7 +498,9 @@ describe("integration regressions", () => {
     expect(detailPageSource).toContain("set_resource_note");
     expect(detailPageSource).toContain("resource-note-input");
     expect(detailPageSource).toContain("metaResolution");
-    expect(pageSource).toContain("computeResourceColumnCount");
+    // 列数计算收口共享 hook（三页同几何），页面不再自带 ResizeObserver 副本。
+    expect(pageSource).toContain("useCardColumns(");
+    expect(readSource("../hooks/useCardColumns.ts")).toContain("computeResourceColumnCount");
     // 管理分组对话框的拖拽虚影必须 portal 到 body：对话框的
     // backdrop-filter/transform 会把 fixed 虚影的包含块劫持到对话框上。
     expect(pageSource).toContain("activeGroupRow && createPortal(");
@@ -549,14 +557,15 @@ describe("integration regressions", () => {
       // 径向图片条目的横幅经共享 FileMediaVisual 渲染（内含 ResourceFileImage 缩略图管线）。
       + readSource("../components/FileMediaPreview.tsx");
     const radialStyles = readSource("../styles/radial-menu.css");
-    const resourceStyles = readSource("../styles/resource.css");
     const libSource = readSource("../../src-tauri/src/lib.rs");
     const dbSource = readDbSource();
 
     // 密集网格卡片必须走缩略图：原图直出会在滚动时全尺寸解码造成卡顿。
-    // 全宽横幅（剪切板/径向，经 FileMediaVisual）可视数量少，直接流式
-    // 原图保证清晰度，不生成任何缩略图文件；详情页保持 ResourceImage 原图。
-    expect(cardSource).toContain("<ResourceFileImage");
+    // 全宽横幅（径向，经 FileMediaVisual）可视数量少，直接流式原图保证
+    // 清晰度，不生成任何缩略图文件；详情页保持 ResourceImage 原图。
+    // 卡片图片分支在共享 CardVisual（三页同源），ResourceCard 只委托。
+    expect(cardSource).toContain("<CardVisual");
+    expect(readSource("../components/CardVisual.tsx")).toContain("<ResourceFileImage");
     expect(radialSource).toContain("<ResourceImage");
     expect(mediaSource).toContain('getResourceFileThumbnail(path, 256)');
     expect(mediaSource).toContain('loading="lazy"');
@@ -573,7 +582,8 @@ describe("integration regressions", () => {
     expect(dbSource).toContain('join("resource-thumbs")');
     // 屏幕外卡片跳过渲染，配合图片懒加载保持长列表滚动流畅。
     expect(radialStyles).toContain("content-visibility: auto");
-    expect(resourceStyles).toContain("content-visibility: auto");
+    // .resource-card 骨架已沉到 components.css（三页共用），content-visibility 随迁。
+    expect(readSource("../styles/components.css")).toContain("content-visibility: auto");
   });
 
   it("keeps resource-library storage separate from the app database", () => {
@@ -714,10 +724,17 @@ describe("integration regressions", () => {
     expect(previewPanel).toContain("onClose?: () => void;");
     expect(previewPanel).toContain("content-preview-close");
     expect(previewPanel).not.toContain("onDelete");
-    expect(cardSource).toContain("ClipboardExpandedPreview");
-    expect(cardSource).toContain("InlineImagePreview");
-    expect(cardSource).toContain("InlineTextFilePreview");
-    expect(cardSource).toContain("view.expandPreview");
+    // 主窗口纯展示预览（2026-11-14 用户定案）：卡片只留预览摘要
+    // （CardVisual），全文/媒体在资源库同款详情视图（ResourceDetailPage
+    // record 形态）渲染，正文经同一 segments 管线取全文。
+    expect(cardSource).toContain("<CardVisual");
+    expect(cardSource).not.toContain("ClipboardExpandedPreview");
+    const pageFullSource = pageSource;
+    expect(pageFullSource).toContain("hideResourceOps");
+    expect(pageFullSource).not.toContain("pasteRecord");
+    const detailSource = readSource("../pages/ResourcePage/ResourceDetailPage.tsx");
+    expect(detailSource).toContain("loadRecordPreviewSegments");
+    expect(detailSource).toContain("ResourceMediaPlayer");
     expect(clipboardStyles).not.toContain(".main-window-content-preview");
     expect(persistWindowSize).not.toContain("data-main-content-preview");
     expect(readSource('../domain/mediaAssets.ts')).toContain('read_quick_input_text_preview');
@@ -880,12 +897,10 @@ describe("integration regressions", () => {
     expect(pageSource).not.toContain("ContentPreviewPanel");
     expect(pageSource).not.toContain("onPreviewToggle");
     expect(pageSource).not.toContain("schedulePreview");
-    expect(cardSource).toContain("aria-expanded={expanded}");
-    expect(cardSource).toContain('className="card-toggle-text-btn"');
-    expect(cardSource).toContain('className="notititle clipboard-card-footer"');
-    expect(cardSource.lastIndexOf('className="card-toggle-text-btn"')).toBeGreaterThan(
-      cardSource.indexOf('className="notititle clipboard-card-footer"'),
-    );
+    // 卡片化：卡片根无展开态按钮（展开体系退役），操作收敛进 ⋯菜单。
+    expect(cardSource).not.toContain("aria-expanded={expanded}");
+    expect(cardSource).not.toContain('className="card-toggle-text-btn"');
+    expect(cardSource).toContain("resource-card-more-button");
     expect(previewPanel).toContain("draggable={false}");
     expect(radialStyles).toContain("cursor: default");
     expect(radialStyles).toContain("touch-action: none");

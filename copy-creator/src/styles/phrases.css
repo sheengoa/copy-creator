@@ -140,222 +140,28 @@
   background: rgba(255, 255, 255, 0.15);
 }
 
-/* Phrase Card */
-.phrase-card {
-  --color: #8e8e93;
-}
 
-[data-theme="dark"] .phrase-card {
-  --color: #8e8e93;
-}
+/* Phrase Card（卡片骨架与预览来自 components.css 三页共用 resource-card 族，
+   此处只放快捷输入特有件：分组标签与排序把手。） */
 
-.phrase-card .notibody.phrase-card-body {
-  font-size: var(--text-base);
-  color: var(--text-primary);
-  line-height: 1.5;
-  white-space: pre-wrap;
-  padding: 0.65rem 1rem 0.15rem;
-  min-height: calc(1 * 1.5 * 14px);
-}
-
-.phrase-card-body.is-toggleable {
-  position: relative;
-  overflow: hidden;
-}
-
-.phrase-card-body.is-collapsed {
-  max-height: calc(1.5em * 6);
-}
-
-.phrase-card-body.is-collapsed::after {
-  content: "";
-  position: absolute;
-  right: 0.75rem;
-  bottom: 0;
-  left: 0.75rem;
-  height: 1.5em;
-  pointer-events: none;
-  background: linear-gradient(to bottom, transparent, var(--card-inner-bg) 86%);
-}
-
-.phrase-card-body.is-expanded {
-  max-height: min(320px, 42vh);
-  overflow-y: auto;
-  padding-right: 0.75rem;
-}
-
-.phrase-card-body.is-expanded::-webkit-scrollbar {
-  width: 4px;
-}
-
-.phrase-card-body.is-expanded::-webkit-scrollbar-track {
-  background: transparent;
-}
-
-.phrase-card-body.is-expanded::-webkit-scrollbar-thumb {
-  background: rgba(0, 0, 0, 0.15);
-  border-radius: 2px;
-}
-
-[data-theme="dark"] .phrase-card-body.is-expanded::-webkit-scrollbar-thumb {
-  background: rgba(255, 255, 255, 0.18);
-}
-
-/* 展开图片必须完整展示：容器不限高、不出卡内滚动条，
-   高度由展开图自身上限（480px）决定，超出部分交给列表滚动。
-   与 clipboard.css 的 is-media-expanded 同规同源，改动需两处同步（守卫规则 11）。 */
-.phrase-card-body.is-expanded.is-media-expanded {
-  max-height: none;
-  padding-right: 1rem;
-  overflow-y: visible;
-}
-
-.phrase-card.is-selection-mode .phrase-card-body {
-  padding-inline-start: 1rem;
-}
-
-.phrase-card.is-selection-mode .phrase-card-body:not(.phrase-card-file-body) {
-  text-indent: 26px;
-}
-
-.phrase-card.is-selection-mode .phrase-card-file-body {
-  padding-inline-start: 42px;
-}
-
-.phrase-card .notibody.phrase-card-file-body {
-  display: block;
-}
-
-.phrase-card-file-summary {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  min-width: 0;
-}
-
-.phrase-card-file-icon {
-  width: 16px;
-  height: 16px;
-  color: var(--text-secondary);
-  flex-shrink: 0;
-  display: inline-flex;
-}
-
-/* 图像文件短语的缩略图预览 */
-.phrase-card-file-thumb {
-  width: 28px;
-  height: 28px;
-  object-fit: cover;
-  border-radius: 6px;
-  border: 1px solid var(--card-border);
-  flex-shrink: 0;
-}
-
-.phrase-card-file-name {
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.phrase-card-file-size {
-  color: var(--text-secondary);
-  font-size: var(--text-xs);
-  flex-shrink: 0;
-}
-
-.phrase-card-expanded-image {
-  display: block;
-  width: 100%;
-  /* 展开图适度放大（原 320px 压竖图）；要看原图点击全屏灯箱查看。 */
-  max-height: 480px;
-  margin-top: 10px;
-  border-radius: 8px;
-  object-fit: contain;
-}
-
-.phrase-card .notititle.phrase-card-footer {
-  padding: 0.15rem 0.5rem 0.5rem 1rem;
-  color: var(--text-secondary);
-  font-weight: var(--weight-normal);
-  font-size: var(--text-xs);
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-}
-
-/* 「全部」视图卡片尾部的所属分组标签。 */
+/* 「全部」视图卡片 meta 的所属分组标签（与资源卡分组标签同形态）。 */
 .phrase-card-group-tag {
   flex-shrink: 0;
   max-width: 40%;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  font-size: var(--text-xs);
+  font-size: calc(var(--text-xs) * var(--card-scale, 1));
   color: var(--text-secondary);
   background: var(--chip-hover-bg);
   border-radius: 6px;
   padding: 0 6px;
-  margin-right: 6px;
 }
 
-.phrase-card-remark {
-  flex: 1;
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  font-size: var(--text-sm);
-  font-weight: var(--weight-normal);
-  color: var(--text-secondary);
-}
-
-.phrase-card-actions {
-  display: flex;
-  align-items: center;
+/* 排序拖拽把手：meta 行尾随图标（dnd-kit 激活器，点击不触发查看弹窗）。 */
+.phrase-card .drag-handle {
+  margin-left: auto;
   flex-shrink: 0;
-  gap: 2px;
-}
-
-.phrase-card-actions > .card-toggle-text-btn {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  box-sizing: border-box;
-  width: 28px;
-  height: 28px;
-  padding: 0;
-  border: none;
-  border-radius: 6px;
-  background: transparent;
-  color: var(--text-secondary);
-  font-family: var(--font);
-  font-size: var(--text-xs);
-  font-weight: var(--weight-medium);
-  cursor: pointer;
-  transition: background 0.15s, color 0.15s, transform 0.15s;
-  flex-shrink: 0;
-  opacity: 0;
-}
-
-.phrase-card-actions > .card-toggle-text-btn svg {
-  width: 15px;
-  height: 15px;
-}
-
-.phrase-card:hover .phrase-card-actions > .card-toggle-text-btn,
-.phrase-card:focus-within .phrase-card-actions > .card-toggle-text-btn {
-  opacity: 0.5;
-}
-
-.phrase-card-actions > .card-toggle-text-btn:hover {
-  opacity: 1;
-  background: var(--chip-bg);
-  color: var(--text-primary);
-}
-
-.phrase-card-actions > .card-toggle-text-btn:active {
-  transform: scale(0.96);
 }
 
 /* 主按钮（新建/选择）：浮起白卡——与分段槽选中态同语言。
