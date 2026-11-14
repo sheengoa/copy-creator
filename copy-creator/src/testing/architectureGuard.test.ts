@@ -6,6 +6,12 @@ import { execSync } from "node:child_process";
 import { describe, expect, it } from "vitest";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+// 生成物媒体清单（规则 1 的命中判定基准，与 config/media-types.json 同源）。
+import {
+  IMAGE_EXTENSIONS as IMAGE_EXTENSIONS_LIST,
+  VIDEO_EXTENSIONS as VIDEO_EXTENSIONS_LIST,
+  AUDIO_EXTENSIONS as AUDIO_EXTENSIONS_LIST,
+} from "../domain/mediaTypes.generated";
 
 const frontRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const repoRoot = resolve(frontRoot, "..", "..");
@@ -33,16 +39,31 @@ const toPosix = (path: string) => path.replace(/\\/g, "/");
 
 describe("架构守卫：领域规则必须全局共享", () => {
   it("规则 1：扩展名集合定义仅存在于生成物与显式豁免（语言特有清单）", () => {
+    // 数组形态也在射程内（此前只认 new Set([ 形态，画布 exts.ts 的数组
+    // 字面量曾从缝隙里重建第二份扩展名知识）：数组内 ≥2 个元素命中生成
+    // 物媒体扩展名即判手写清单——阈值与媒体域限定避免误伤普通字符串
+    // 数组（["int","ext","both"]、["voice","bgm","sfx"] 等不含媒体扩展）。
+    // TEXT 扩展名不参与命中（"ts"/"js" 类短码与普通数组碰撞面太大）。
+    const knownMediaExts = new Set([
+      ...IMAGE_EXTENSIONS_LIST,
+      ...VIDEO_EXTENSIONS_LIST,
+      ...AUDIO_EXTENSIONS_LIST,
+    ]);
     const offenders = allSources
       .filter((file) => !toPosix(file).includes("domain/mediaTypes.generated.ts"))
       .filter((file) => !toPosix(file).includes("domain/mediaKind.ts")) // DECODABLE 豁免
-            .filter((file) => {
+      .filter((file) => !toPosix(file).includes("pages/CanvasPage/nodes/exts.ts")) // WebView 播放能力白名单豁免
+      .flatMap((file) => {
         const source = sourceOf(file);
-        // 手写扩展名集合模式：new Set([  后跟引号包裹的扩展名字面量
-        return /new Set\(\[\s*"[a-z0-9]{2,5}"/.test(source.replace(/\n/g, " "));
+        return Array.from(
+          source.matchAll(/\[\s*("[a-z0-9]{1,8}"(?:\s*,\s*"[a-z0-9]{1,8}")+)\s*,?\s*\]/g),
+        ).filter((m) => {
+          const items = Array.from(m[1].matchAll(/"([a-z0-9]{1,8})"/g), (x) => x[1]);
+          return items.filter((ext) => knownMediaExts.has(ext)).length >= 2;
+        }).map(() => toPosix(file.replace(frontRoot, "")));
       });
     expect(
-      offenders.map((file) => toPosix(file.replace(frontRoot, ""))),
+      offenders,
       "发现手写扩展名集合，请改用 domain/mediaKind.ts 的共享集合（见 domain/README.md）",
     ).toEqual([]);
   });

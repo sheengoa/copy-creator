@@ -14,6 +14,9 @@ import type {
 } from "../../../stores/projectStore";
 import { joinLibraryPath } from "../../../domain/projectView";
 import { readResourceTextPreview } from "../../../domain/mediaAssets";
+// 音频选取白名单与画布媒体节点同源（此前手写 wav/mp3/flac/ogg 四项，
+// 已与共享清单漂移——m4a/aac/opus 在画布可载、此处对话框却筛掉）。
+import { AUDIO_EXTS } from "../../CanvasPage/nodes/exts";
 import { ResourceFileImage, ResourceImage, ResourceVideoPoster } from "../ResourceMedia";
 import type { EntityPhKind, PendingLink, PromptPh, ScriptPh } from "./types";
 import { MediaPlayback } from "../../../components/MediaPlayback";
@@ -586,7 +589,7 @@ function EntityFaceGroup({ group, entity, visiblePaths, faceMeta, ops }: {
     void (async () => {
       try {
         const { invoke } = await import("@tauri-apps/api/core");
-        const picked = await invoke<{ path: string }>("canvas_pick_media_file", { extensions: ["wav", "mp3", "flac", "ogg"] });
+        const picked = await invoke<{ path: string }>("canvas_pick_media_file", { extensions: [...AUDIO_EXTS] });
         if (binding) commitBinding(facePath, { ...binding, voice_path: picked.path });
         else ops.setVoice(entity.id, picked.path);
       } catch {
@@ -703,7 +706,7 @@ function EntityDetail({ group, sourceKey, nodeKey, ops }: { group: EntityPhKind;
     void (async () => {
       try {
         const { invoke } = await import("@tauri-apps/api/core");
-        const picked = await invoke<{ path: string }>("canvas_pick_media_file", { extensions: ["wav", "mp3", "flac", "ogg"] });
+        const picked = await invoke<{ path: string }>("canvas_pick_media_file", { extensions: [...AUDIO_EXTS] });
         if (binding) commitBinding(facePath, { ...binding, voice_path: picked.path });
         else ops.setVoice(entityId, picked.path);
       } catch {
@@ -926,7 +929,7 @@ function EntityDetail({ group, sourceKey, nodeKey, ops }: { group: EntityPhKind;
                 void (async () => {
                   try {
                     const { invoke } = await import("@tauri-apps/api/core");
-                    const picked = await invoke<{ path: string }>("canvas_pick_media_file", { extensions: ["wav", "mp3", "flac", "ogg"] });
+                    const picked = await invoke<{ path: string }>("canvas_pick_media_file", { extensions: [...AUDIO_EXTS] });
                     ops.setVoice(entityId, picked.path);
                   } catch {
                     // 用户取消或 mock 环境无后端：静默。
