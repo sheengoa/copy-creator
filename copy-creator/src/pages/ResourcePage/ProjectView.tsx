@@ -11,7 +11,6 @@ import ProjectLibraryPanel from "./ProjectLibraryPanel";
 import ProjectCanvasShell from "./ProjectShell/ProjectCanvasShell";
 import ProjectAssetPicker from "./ProjectAssetPicker";
 import ProjectPromptPanel from "./ProjectPromptPanel";
-import ProjectAssetSheet from "./ProjectAssetSheet";
 import type { ProjectAsset } from "../../stores/projectStore";
 import { Icons } from "../../components/Icons";
 import { openResourceFile } from "../../domain/mediaAssets";
@@ -78,7 +77,6 @@ export default function ProjectView() {
   const [numberEditingId, setNumberEditingId] = useState<string | null>(null);
   const [numberDraft, setNumberDraft] = useState("");
   const [assetPickerShotId, setAssetPickerShotId] = useState<string | null>(null);
-  const [sheetAsset, setSheetAsset] = useState<ProjectAsset | null>(null);
   // 「重新挂靠」替换流：详情浮层对缺失档案发起时记录旧档案，选择器
   // 挂上新文件成功后把旧档案取消挂靠（两步都走既有命令）。
   const [replaceAsset, setReplaceAsset] = useState<ProjectAsset | null>(null);
@@ -397,7 +395,6 @@ export default function ProjectView() {
             <ProjectCanvasShell
               libraryRoot={libraryRoot}
               overlay={epOverlay}
-              onOpenAsset={setSheetAsset}
               onPickForShot={setAssetPickerShotId}
             />
           </div>
@@ -416,22 +413,6 @@ export default function ProjectView() {
               ? () => {
                   void unlinkAsset(replaceAsset.id);
                   setReplaceAsset(null);
-                }
-              : undefined
-          }
-        />
-      )}
-
-      {sheetAsset && (
-        <ProjectAssetSheet
-          asset={sheetAsset}
-          onClose={() => setSheetAsset(null)}
-          onRelink={
-            sheetAsset.missing
-              ? () => {
-                  setReplaceAsset(sheetAsset);
-                  setSheetAsset(null);
-                  setAssetPickerShotId(sheetAsset.shot_id);
                 }
               : undefined
           }

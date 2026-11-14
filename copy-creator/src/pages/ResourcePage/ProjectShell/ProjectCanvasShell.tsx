@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useShallow } from "zustand/react/shallow";
 import { useTranslation } from "react-i18next";
-import { useProjectStore, type ProjectAsset, type ProjectLocation, type ProjectProp } from "../../../stores/projectStore";
+import { useProjectStore, type ProjectLocation, type ProjectProp } from "../../../stores/projectStore";
 import { CanvasDataContext } from "../../CanvasPage/dataContext";
 import FreeCanvas from "../../CanvasPage/FreeCanvas";
 import { ProjectCanvasContext, type ProjectCanvasContextValue } from "../../CanvasPage/nodes/project/projectContext";
@@ -55,17 +55,14 @@ type ProjectEpisodeStatusLike = Parameters<ReturnType<typeof useProjectStore.get
 export default function ProjectCanvasShell({
   libraryRoot,
   overlay,
-  onOpenAsset,
   onPickForShot,
 }: {
   libraryRoot: string;
   /** 集信息玻璃卡（阶段 E1 接回 EpisodeCard 时启用）。 */
   overlay?: React.ReactNode;
-  onOpenAsset: (asset: ProjectAsset) => void;
   onPickForShot: (shotId: string) => void;
 }) {
   void overlay;
-  void onOpenAsset;
   const { t } = useTranslation();
   const {
     overview,
@@ -263,9 +260,6 @@ export default function ProjectCanvasShell({
     infoNodePos: data.infoNodePos,
     updateEpisode: storeUpdateEpisode,
     linkNode,
-    linkAsset,
-    setSegmentAsset,
-    selectEpisode,
     scriptPhs: data.scriptPhs,
     persistScriptPhs: data.persistScriptPhs,
     infoOffsets: data.infoOffsets,
@@ -586,7 +580,9 @@ export default function ProjectCanvasShell({
     setPromptPickOpen: setPromptPickOpen,
     moveSegment: (id, dir) => void moveSegment(id, dir < 0 ? -1 : 1),
     removeSegment: (id) => void removeSegment(id),
-    outputSourceLabel: null,
+    // 成片来源显示名：接 useCanvasView 的实况计算（此前硬编码 null——
+    // 节点化迁移时的漏接线，成片节点在直挂镜头/素材时恒显「未挂产出」占位）。
+    outputSourceLabel: canvasView.outputSourceLabel,
     setEpisodeOutput,
   };
 

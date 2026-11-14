@@ -1,13 +1,13 @@
-// 工程画布视口与详情窗口状态（自 ProjectCanvas.tsx 组件体零改动搬移，
-// 2026-11-03 引擎拆分阶段 11d）：detailFor/memberPick/pickerFor 详情
-// states、片段挂产出、成片来源显示、卡片默认尺寸、视口按集记忆、滚轮
-// 缩放（原生非被动监听）、聚焦滚动归零、适配全部、缺项提醒与定位。
+// 工程画布视口与成片来源派生（自 ProjectCanvas.tsx 组件体搬移，2026-11-03
+// 引擎拆分阶段 11d）。旧画布的详情窗口体系（detailFor/memberPick/pickerFor
+// 死状态与 SegmentAttachPicker/MemberPickPanel 死组件）已随节点化退役删除；
+// 视口区为旧引擎遗留，与 FreeCanvas 内置 useViewport 平行（见 2026-11-14
+// 视口合一提交）。
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import type { EpisodeOverview, ProjectScene, ProjectSegment } from "../../../../stores/projectStore";
-import { allAssetsOf, CARD_GAP, CARD_W, FRAME_MIN_W, FRAME_PAD_TOP, INFO_H, INFO_W, SCRIPT_W, SEG_H, SEG_W } from "../layout";
+import { allAssetsOf, CARD_GAP, FRAME_MIN_W, FRAME_PAD_TOP, INFO_H, INFO_W, SCRIPT_W, SEG_H, SEG_W } from "../layout";
 import type { CanvasLayout, EntityPhKind, Pos, ScriptPh, WireBox } from "../types";
-import type { DetailForArg } from "../layers/NodeExtras";
 
 type LooseAsset = { id: string; name?: string };
 
@@ -30,9 +30,6 @@ export function useCanvasView(deps: {
     episodeId: string, kind: string, id: string,
     segmentId: string, port: string, ownerKey?: string,
   ): unknown;
-  linkAsset(input: { filePath: string; kind: string; name: string; episodeId: string; shotId: string }): Promise<{ id: string } | null>;
-  setSegmentAsset(segmentId: string, assetId: string): unknown;
-  selectEpisode(id: string): unknown;
   scriptPhs: ScriptPh[];
   persistScriptPhs(next: ScriptPh[]): void;
   infoOffsets: Record<string, Pos>;
@@ -50,68 +47,26 @@ export function useCanvasView(deps: {
   const {
     episodeId, overview, scenes, segments, looseAssets, segPos, entityPhs,
     infoPos, infoNodes, outputBox, layout, sizeOfNode, infoNodePos,
-    updateEpisode, linkNode, linkAsset, setSegmentAsset, selectEpisode,
+    updateEpisode, linkNode,
     scriptPhs, persistScriptPhs, infoOffsets, persistInfoOffsets, nodeSizes,
     persistSizes, dropPendingLinksOf, setScriptPickOpen, setScriptPickTarget,
     setPulseKeys, spawnAnchorRef, armSpawnAt, scriptPickTarget,
   } = deps;
   const { t } = useTranslation();
 
-  // ── 节点详情窗口：双击节点弹出的独立预览窗口（预览 + 信息 + 上传/
-  // 库选）。资料类带 当前/全部 切换；片段窗口按 角色/场景/道具 三区块
-  // 各自独立切换。 ──
-  const [detailFor, setDetailFor] = useState<DetailForArg | null>(null);
-  // 成员装入面板（多选 + 装入确认）：eph 加载 / 组追加裁剪 / 默认节点转组。
-  // （pending 只是面板内的勾选草稿，点「装入」才由 applyMemberPick 落地。）
-  const [memberPick, setMemberPick] = useState<
-    | { mode: "eph"; ephId: string; kind: EntityPhKind; pending: string[] }
-    | { mode: "grp"; groupId: string; kind: EntityPhKind; pending: string[] }
-    | { mode: "convert"; sourceKey: string; kind: EntityPhKind; pending: string[] }
-    | null
-  >(null);
-  // 详情窗口内「从资源库选择」的二级选择器目标（片段挂产出）。
-  const [pickerFor, setPickerFor] = useState<`segment:${string}` | null>(null);
-  const [detailError, setDetailError] = useState("");
-  // 真切集（两个非空集 id 之间切换）才关闭详情窗口与其二级选择器，并
-  // 丢弃未消费的出生锚点与脉冲。episodeId 为空串是 selectEpisode 刷新
-  // 途中的瞬态（概览先置空再取回）；空档与随后的「回到原集」都不算切
-  // 集——否则每次刷新都会把打开中的窗口、出生锚点误杀。
+  // 真切集（两个非空集 id 之间切换）丢弃未消费的出生锚点与脉冲。
+  // episodeId 为空串是 selectEpisode 刷新途中的瞬态（概览先置空再取回）；
+  // 空档与随后的「回到原集」都不算切集——否则每次刷新都会把出生锚点误杀。
+  // （原同段还清理 detailFor/memberPick/pickerFor 详情窗口状态：旧画布
+  // 详情体系已随节点化退役，死状态于 2026-11-14 删除。）
   const prevRealEpisodeRef = useRef(episodeId);
   useEffect(() => {
     if (!episodeId) return;
     if (prevRealEpisodeRef.current === episodeId) return;
     prevRealEpisodeRef.current = episodeId;
-    setDetailFor(null);
-    setPickerFor(null);
-    setMemberPick(null);
-    setDetailError("");
     setPulseKeys([]);
     spawnAnchorRef.current = null;
   }, [episodeId, setPulseKeys, spawnAnchorRef]);
-  useEffect(() => {
-    setDetailError("");
-  }, [detailFor]);
-
-  // 详情窗口 → 从资源库选择：片段挂产出。
-  const attachSegmentFromLibrary = (segmentId: string, file: { filePath: string; kind: string; name: string }) => {
-    // linkAsset 内部会整刷概览（画布随之重挂、UI 状态清空），窗口主动关；
-    // setSegmentAsset 只落库且发生在重取快照之后，末尾再刷一次让片段
-    // 缩略图立即出现，否则要等下次刷新。
-    setPickerFor(null);
-    setDetailFor(null);
-    void linkAsset({
-      filePath: file.filePath,
-      kind: file.kind,
-      name: file.name,
-      episodeId,
-      shotId: "",
-    }).then(async (asset) => {
-      if (!asset) return;
-      await setSegmentAsset(segmentId, asset.id);
-      await selectEpisode(episodeId);
-    });
-  };
-  // 空白资料节点的「加载」已并入成员装入面板（applyMemberPick 的 eph 分支）：
 
   const outputKey = overview?.episode.output_asset_id ?? null;
 
@@ -128,14 +83,6 @@ export function useCanvasView(deps: {
       null
     );
   }, [outputKey, scenes, looseAssets]);
-
-  const cardSizeOf = useCallback(
-    (shotId: string) => {
-      const card = layout.cards.find((c) => c.shot.id === shotId);
-      return { w: card?.w ?? CARD_W, h: card?.h ?? 120 };
-    },
-    [layout],
-  );
 
   // ── 视口：按集记 localStorage ──
   const vpRef = useRef<HTMLDivElement | null>(null);
@@ -408,12 +355,7 @@ export function useCanvasView(deps: {
 
 
   return {
-    detailFor, setDetailFor,
-    memberPick, setMemberPick,
-    pickerFor, setPickerFor,
-    detailError, setDetailError,
-    attachSegmentFromLibrary,
-    outputKey, outputSourceLabel, cardSizeOf,
+    outputSourceLabel,
     vpRef, view, setView, vpSize, setVpSize, saveView,
     armSpawnFromEvent,
     issues,

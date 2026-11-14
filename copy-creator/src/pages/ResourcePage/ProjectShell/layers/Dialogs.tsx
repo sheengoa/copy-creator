@@ -1,6 +1,7 @@
 // 工程画布对话框区（自 ProjectCanvas.tsx 渲染区零改动搬运，2026-11-03
 // 引擎拆分阶段 11c；fork 对齐点按原注释保持）：场景/镜头快速编辑、删场景
-// 确认、片段挂产出选择器、挂剧本选择器、提示词挑选、关联场景与成员装入。
+// 确认、挂剧本选择器、提示词挑选、关联场景。（成员装入面板与片段挂产出
+// 选择器为旧画布交互，随节点化退役删除——2026-11-14。）
 import { useTranslation } from "react-i18next";
 import type { Dispatch, SetStateAction } from "react";
 import { createPortal } from "react-dom";
@@ -10,8 +11,7 @@ import { ConfirmDialog } from "../../../../components/ConfirmDialog";
 import { Icons } from "../../../../components/Icons";
 import ProjectFilePickerDialog from "../../ProjectFilePickerDialog";
 import ProjectLibraryPanel from "../../ProjectLibraryPanel";
-import type { EntityPhKind } from "../types";
-import type { MemberPickT, ProjectPromptT, SceneFormT, ShotFormT } from "./dialogTypes";
+import type { ProjectPromptT, SceneFormT, ShotFormT } from "./dialogTypes";
 
 /** 场景快速编辑（新建/改名/挂地点）。 */
 export function SceneFormDialog({
@@ -136,31 +136,6 @@ export function DeleteSceneConfirm({
       void deleteScene(target.id);
     }}
     onCancel={() => setDeleteSceneTarget(null)}
-  />
-)}
-    </>
-  );
-}
-
-/** 详情窗口内的「从资源库选择」二级选择器（片段挂产出）。 */
-export function SegmentAttachPicker({
-  pickerFor, setPickerFor, attachSegmentFromLibrary,
-}: {
-  pickerFor: `segment:${string}` | null;
-  setPickerFor: Dispatch<SetStateAction<`segment:${string}` | null>>;
-  attachSegmentFromLibrary(segmentId: string, file: { filePath: string; kind: string; name: string }): void;
-}) {
-  const { t } = useTranslation();
-  return (
-    <>
-{/* 详情窗口内的「从资源库选择」二级选择器（片段挂产出） */}
-{pickerFor?.startsWith("segment:") && (
-  <ProjectFilePickerDialog
-    title={t("project.canvas.segAttach")}
-    takenPaths={new Set()}
-    takenLabel=""
-    onClose={() => setPickerFor(null)}
-    onPick={(file) => attachSegmentFromLibrary(pickerFor.slice(8), file)}
   />
 )}
     </>
@@ -328,59 +303,6 @@ export function LocationPickPanel({
     }}
   />
 )}
-    </>
-  );
-}
-
-/** 成员装入面板（多选勾选 + 装入确认）：空白节点加载 / 组追加裁剪 /
-    默认节点转组共用；勾选只是草稿，点「装入 N 项」一次性落地。 */
-export function MemberPickPanel({
-  memberPick, setMemberPick, kindTextOf, applyMemberPick,
-}: {
-  memberPick: MemberPickT | null;
-  setMemberPick: Dispatch<SetStateAction<MemberPickT | null>>;
-  kindTextOf(kind: EntityPhKind): string;
-  applyMemberPick(): unknown;
-}) {
-  const { t } = useTranslation();
-  return (
-    <>
-{/* 成员装入面板（多选勾选 + 装入确认）：空白节点加载 / 组追加裁剪 /
-    默认节点转组共用；勾选只是草稿，点「装入 N 项」一次性落地。
-    成员可被多个组复用（同一角色可出场于多个片段），不做组间互斥。 */}
-{memberPick && (() => {
-  const kindLabel = kindTextOf(memberPick.kind);
-  const libKind = memberPick.kind === "character" ? "characters" : memberPick.kind === "location" ? "locations" : "props";
-  return (
-    <ProjectLibraryPanel
-      kind={libKind}
-      mode="pick"
-      multi
-      selectedIds={memberPick.pending}
-      onClose={() => setMemberPick(null)}
-      pickTitle={t("project.canvas.memberPickTitle", { kind: kindLabel })}
-      onTogglePick={(id) => {
-        setMemberPick((prev) =>
-          prev
-            ? {
-                ...prev,
-                pending: prev.pending.includes(id)
-                  ? prev.pending.filter((item) => item !== id)
-                  : [...prev.pending, id],
-              }
-            : prev,
-        );
-      }}
-      confirm={{
-        count: memberPick.pending.length,
-        label: t("project.canvas.memberPickConfirm", { count: memberPick.pending.length }),
-        onConfirm: () => {
-          void applyMemberPick();
-        },
-      }}
-    />
-  );
-})()}
     </>
   );
 }
