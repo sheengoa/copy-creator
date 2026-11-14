@@ -614,7 +614,7 @@ export const useProjectStore = create<ProjectStoreState>((set, get) => ({
     // 本地先行换位（树的即时反馈），后端按新顺序重写 sort_order，失败回滚。
     set({ episodes: reordered });
     try {
-      await invoke("project_reorder_episodes", { showId: get().currentShowId ?? "", ids });
+      await invoke("project_reorder_episodes", { ids });
     } catch (error) {
       console.error("project_reorder_episodes failed:", error);
       set({ episodes });

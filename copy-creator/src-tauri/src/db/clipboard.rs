@@ -702,55 +702,6 @@ pub(crate) fn is_recorded_file_path<R: Runtime>(app: &AppHandle<R>, path: &str) 
     })
 }
 
-#[tauri::command]
-pub fn delete_all_clipboard_records(app: AppHandle) -> Result<(), String> {
-    let ids = {
-        let state = app.state::<DbState>();
-        let conn = state.conn.lock().map_err(|e| e.to_string())?;
-        let mut stmt = conn
-            .prepare(&format!(
-                "SELECT id FROM clipboard_records WHERE NOT ({RESOURCE_RECORD_CONDITION})"
-            ))
-            .map_err(|e| e.to_string())?;
-        let rows = stmt
-            .query_map([], |row| row.get::<_, String>(0))
-            .map_err(|e| e.to_string())?;
-        rows.collect::<Result<Vec<_>, _>>()
-            .map_err(|e| e.to_string())?
-    };
-
-    delete_clipboard_records_internal(&app, &ids)?;
-
-    // Remove labels left behind by databases created before label cleanup
-    // was part of the clipboard deletion path.
-    let state = app.state::<DbState>();
-    let conn = state.conn.lock().map_err(|e| e.to_string())?;
-    conn.execute("DELETE FROM api_key_labels", [])
-        .map_err(|e| e.to_string())?;
-    let _ = app.emit("clipboard-cleared", ());
-    Ok(())
-}
-
-#[tauri::command]
-pub fn delete_records_by_type(app: AppHandle, record_type: String) -> Result<(), String> {
-    let ids = {
-        let state = app.state::<DbState>();
-        let conn = state.conn.lock().map_err(|e| e.to_string())?;
-        let mut stmt = conn
-            .prepare(&format!(
-                "SELECT id FROM clipboard_records WHERE type = ?1 AND NOT ({RESOURCE_RECORD_CONDITION})"
-            ))
-            .map_err(|e| e.to_string())?;
-        let rows = stmt
-            .query_map(params![record_type], |row| row.get::<_, String>(0))
-            .map_err(|e| e.to_string())?;
-        rows.collect::<Result<Vec<_>, _>>()
-            .map_err(|e| e.to_string())?
-    };
-
-    delete_clipboard_records_internal(&app, &ids).map(|_| ())
-}
-
 /// 删除结果统计：deleted 为实际删除的记录行数；files_already_missing 为
 /// 「文件在删除之前就已不在磁盘、仅记录行入回收站」的资源条目数——如实
 /// 告知用户这批条目恢复时无文件可还原，而非等到恢复时才报丢失。
@@ -936,11 +887,6 @@ pub(crate) fn delete_clipboard_records_internal<R: Runtime>(
 #[tauri::command]
 pub fn delete_clipboard_records(app: AppHandle, ids: Vec<String>) -> Result<DeleteRecordsSummary, String> {
     delete_clipboard_records_internal(&app, &ids)
-}
-
-#[tauri::command]
-pub fn delete_clipboard_record(app: AppHandle, id: String) -> Result<DeleteRecordsSummary, String> {
-    delete_clipboard_records_internal(&app, &[id])
 }
 
 /// 收藏/取消收藏剪切板记录（单条与批量共用，ids 传一个也走这里）。

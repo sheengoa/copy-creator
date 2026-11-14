@@ -917,7 +917,6 @@ pub fn project_update_episode(
 #[tauri::command]
 pub fn project_reorder_episodes(
     app: AppHandle,
-    _show_id: String,
     ids: Vec<String>,
 ) -> Result<(), String> {
     {
@@ -2364,24 +2363,6 @@ pub(crate) fn set_segment_asset_inner(
         params![if value.is_empty() { None } else { Some(value) }, project_now(), id],
     )
     .map_err(|e| e.to_string())?;
-    Ok(())
-}
-
-/// 片段备注（卡头名称；空串回落为默认名）。
-#[tauri::command]
-pub fn project_set_segment_note(
-    app: AppHandle,
-    id: String,
-    note: String,
-) -> Result<(), String> {
-    let state = app.state::<DbState>();
-    let conn = state.conn.lock().map_err(|e| e.to_string())?;
-    conn.execute(
-        "UPDATE project_segments SET note = ?1, updated_at = ?2 WHERE id = ?3",
-        params![note.trim(), project_now(), &id],
-    )
-    .map_err(|e| e.to_string())?;
-    emit_project_changed(&app);
     Ok(())
 }
 

@@ -32,22 +32,6 @@ pub fn mark_toast_shown_internal(app: &AppHandle, key_preview: &str) {
 }
 
 #[tauri::command]
-pub fn check_api_key(content: String) -> serde_json::Value {
-    let is_key = is_api_key(&content);
-    let preview = if is_key {
-        make_key_preview(&content)
-    } else {
-        String::new()
-    };
-    let guess = if is_key {
-        guess_service(&content).map(|s| s.to_string())
-    } else {
-        None
-    };
-    serde_json::json!({ "is_key": is_key, "preview": preview, "guess": guess })
-}
-
-#[tauri::command]
 pub fn save_api_key_label(
     app: AppHandle,
     record_id: String,
@@ -89,89 +73,6 @@ pub fn get_api_key_label(app: AppHandle, record_id: String) -> Option<serde_json
         },
     )
     .ok()
-}
-
-#[tauri::command]
-pub fn delete_api_key_label(app: AppHandle, record_id: String) -> Result<(), String> {
-    let state = app.state::<DbState>();
-    let conn = state.conn.lock().map_err(|e| e.to_string())?;
-    conn.execute(
-        "DELETE FROM api_key_labels WHERE record_id = ?1",
-        params![record_id],
-    )
-    .map_err(|e| e.to_string())?;
-    Ok(())
-}
-
-pub(crate) fn list_labels_internal(conn: &Connection) -> Result<Vec<serde_json::Value>, String> {
-    let mut stmt = conn
-        .prepare(
-            "SELECT record_id, key_preview, service, api_base, note, is_expired, created_at \
-             FROM api_key_labels ORDER BY created_at DESC",
-        )
-        .map_err(|e| e.to_string())?;
-    let rows = stmt
-        .query_map([], |row| {
-            Ok(serde_json::json!({
-                "record_id": row.get::<_, String>(0)?,
-                "key_preview": row.get::<_, String>(1)?,
-                "service": row.get::<_, String>(2)?,
-                "api_base": row.get::<_, String>(3)?,
-                "note": row.get::<_, String>(4)?,
-                "is_expired": row.get::<_, i64>(5)? != 0,
-                "created_at": row.get::<_, String>(6)?,
-            }))
-        })
-        .map_err(|e| e.to_string())?;
-    let mut labels = Vec::new();
-    for row in rows {
-        labels.push(row.map_err(|e| e.to_string())?);
-    }
-    Ok(labels)
-}
-
-#[tauri::command]
-pub fn list_api_key_labels(app: AppHandle) -> Result<Vec<serde_json::Value>, String> {
-    let state = app.state::<DbState>();
-    let conn = state.conn.lock().map_err(|e| e.to_string())?;
-    list_labels_internal(&conn)
-}
-
-#[tauri::command]
-pub fn mark_expired(app: AppHandle, record_id: String, expired: bool) -> Result<(), String> {
-    let state = app.state::<DbState>();
-    let conn = state.conn.lock().map_err(|e| e.to_string())?;
-    conn.execute(
-        "UPDATE api_key_labels SET is_expired = ?1 WHERE record_id = ?2",
-        params![expired as i64, record_id],
-    )
-    .map_err(|e| e.to_string())?;
-    Ok(())
-}
-
-#[tauri::command]
-pub fn export_labels_json(app: AppHandle) -> Result<String, String> {
-    let state = app.state::<DbState>();
-    let conn = state.conn.lock().map_err(|e| e.to_string())?;
-    let labels = list_labels_internal(&conn)?;
-    serde_json::to_string_pretty(&labels).map_err(|e| e.to_string())
-}
-
-#[tauri::command]
-pub fn mark_toast_shown(app: AppHandle, key_preview: String) -> Result<(), String> {
-    let state = app.state::<DbState>();
-    let conn = state.conn.lock().map_err(|e| e.to_string())?;
-    conn.execute(
-        "INSERT OR IGNORE INTO toast_shown (key_preview) VALUES (?1)",
-        params![key_preview],
-    )
-    .map_err(|e| e.to_string())?;
-    Ok(())
-}
-
-#[tauri::command]
-pub fn is_toast_shown(app: AppHandle, key_preview: String) -> bool {
-    is_toast_shown_internal(&app, &key_preview)
 }
 
 #[tauri::command]

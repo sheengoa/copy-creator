@@ -99,27 +99,7 @@ pub fn canvas_authorize_media(app: AppHandle, path: String) -> Result<(), String
     Ok(())
 }
 
-/// 保存节点「另存为…」：系统保存对话框，返回目标路径（用户取消返回
-/// 空串——另存是显式动作，取消不算错误）。
-#[tauri::command]
-pub async fn canvas_pick_save_path(
-    app: AppHandle,
-    default_name: String,
-) -> Result<String, String> {
-    let (tx, rx) = std::sync::mpsc::channel();
-    app.dialog()
-        .file()
-        .set_file_name(default_name.trim())
-        .save_file(move |path| {
-            let _ = tx.send(path);
-        });
-    match await_dialog(rx).await? {
-        Some(path) => Ok(path.to_string()),
-        None => Ok(String::new()),
-    }
-}
 
-/// 保存节点多产物「另存到…」：系统文件夹选择对话框（取消返回空串）。
 #[tauri::command]
 pub async fn canvas_pick_save_dir(app: AppHandle) -> Result<String, String> {
     let (tx, rx) = std::sync::mpsc::channel();

@@ -69,7 +69,6 @@
   "plugins": {
     "clipboard-manager": null,
     "global-shortcut": null,
-    "autostart": null,
     "updater": {
       "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IDMyQjhEQkQyQzBCODM2RjgKUldUNE5yakEwdHU0TXB0bUtzOGY5Y3BaejF1bTEraFZJd1pVYmVpTnNDT3VKSWdPS2EwM01oMlYK",
       "endpoints": [

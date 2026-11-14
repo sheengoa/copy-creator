@@ -609,7 +609,8 @@ describe("integration regressions", () => {
     expect(pruneBlock).not.toContain("TRIM(COALESCE(group_name, '')) <> ''");
     expect(pruneBlock).not.toContain("resource_files");
     expect(dbSource).toContain("WHERE NOT ({RESOURCE_RECORD_CONDITION})");
-    expect(dbSource).toContain("type = ?1 AND NOT ({RESOURCE_RECORD_CONDITION})");
+    // （曾断言按类型删除命令的 type 过滤排除资源记录——该死命令
+    // delete_records_by_type 已于 2026-11-14 下线，断言随之撤销。）
     expect(dbSource).toContain("is_resource_record(&storage_mode)");
     expect(clipboardSource).toContain("let extension = if images.is_empty()");
     expect(clipboardSource).toContain('"txt"');
