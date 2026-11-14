@@ -327,18 +327,19 @@ export default function ProjectCanvasShell({
   }, [scenes, data.layout.framePos]);
   // 标签牌拖动 = 整组移动（框 + 场景内全部镜头卡），松手落工程表。
   const sceneDragRef = useRef<{ id: string; sx: number; sy: number; ox: number; oy: number; members: string[] } | null>(null);
-  const handleSceneLabelPointerDown = (e: React.PointerEvent) => {
+  // scale 由调用方传入：包装层挂在 renderWires 插槽内，slot.view 就是
+  // FreeCanvas 实况引擎的已提交视口（读 provider 的 localStorage 会命中
+  // 挂载期 fitAll 落盘但实况未应用的值，实测拖拽换算错位 41.66/60）。
+  const handleSceneLabelPointerDown = (e: React.PointerEvent, scale: number) => {
     const label = (e.target as Element).closest(".pc-frame-label");
     if (!label || e.button !== 0) return;
     const frame = label.closest(".pc-frame");
-    const sceneId = frame?.getAttribute("data-scene") ?? "";
+    // SceneFrames 渲染的属性名是 data-frame（此前误读 data-scene——该属性
+    // 名从未存在于任何提交，标签牌拖拽自节点化迁移起静默无效）。
+    const sceneId = frame?.getAttribute("data-frame") ?? "";
     const base = scenePos[sceneId];
     if (!base) return;
     e.preventDefault();
-    // 缩放取实况视口的已提交值（活引擎在 FreeCanvas/useViewport，经
-    // provider 的 viewport() 读回；旧 useCanvasView 平行视口已删——此前
-    // 读影子 state，用户缩放后拖拽换算错位）。
-    const scale = api.viewport()?.k || 1;
     const members = data.layout.cards.filter((c) => c.sceneId === sceneId).map((c) => c.shot.id);
     sceneDragRef.current = { id: sceneId, sx: e.clientX, sy: e.clientY, ox: base.x, oy: base.y, members };
     const onMove = (ev: PointerEvent) => {
@@ -608,7 +609,7 @@ export default function ProjectCanvasShell({
     }
     return (
       <>
-      <div onPointerDown={handleSceneLabelPointerDown}>
+      <div onPointerDown={(e) => handleSceneLabelPointerDown(e, slot.view.scale || 1)}>
       <SceneFrames
         scenes={scenes}
         scenePos={scenePos}
