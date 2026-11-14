@@ -491,7 +491,8 @@ describe("integration regressions", () => {
     expect(mediaSource).toContain("event.currentTarget !== mediaRef.current");
     expect(mediaSource).toContain("onMediaMetadata");
     expect(mediaSource).toContain("onMetadata");
-    expect(mediaSource).toContain("resolveResourceMediaUrl");
+    // 媒体 URL 解析收口在 hooks/useResourceMediaSrc（内部经 domain/mediaUrl）。
+    expect(mediaSource).toContain("useResourceMediaSrc");
     // 媒体 URL 必须携带文件版本（mediaVersion）：地址只由路径决定时，
     // 覆盖保存的文件会命中 WebView 旧缓存，预览停留在旧图。
     expect(detailPageSource).toContain("resolveResourceMediaUrl(resourcePath, mediaVersion)");
@@ -740,7 +741,8 @@ describe("integration regressions", () => {
     expect(persistWindowSize).not.toContain("data-main-content-preview");
     expect(readSource('../domain/mediaAssets.ts')).toContain('read_quick_input_text_preview');
     expect(inlinePreview).toContain('readClipboardTextPreviewById');
-    expect(inlinePreview).toContain("resolveResourceMediaUrl");
+    // 媒体 URL 解析收口在 hooks/useResourceMediaSrc（内部经 domain/mediaUrl）。
+    expect(inlinePreview).toContain("useResourceMediaSrc");
     expect(dbSource).toContain("read_quick_input_text_preview");
     expect(dbSource).toContain("read_clipboard_text_preview");
     // 后端文本预览与资源区共用同一份扩展名白名单（md 等常见格式均可预览）。

@@ -1,43 +1,11 @@
 import { getResourceFileThumbnail, openResourceFile } from "../../domain/mediaAssets";
 import { useEffect, useRef, useState } from "react";
 import { useInViewOnce } from "../../hooks/useInViewOnce";
+import { useResourceMediaSrc } from "../../hooks/useResourceMediaSrc";
 import { useTranslation } from "react-i18next";
 import type { RadialPreviewSegment } from "../../domain/preview";
 import { Icons } from "../../components/Icons";
-import { resolveResourceMediaUrl } from "../../domain/mediaUrl";
 import { VideoPoster, type VideoPosterProps } from "../../components/VideoPoster";
-
-function useResourceMediaUrl(
-  path: string,
-  resolvedSrc?: string,
-  version?: string,
-) {
-  const [src, setSrc] = useState(resolvedSrc ?? "");
-  const [failed, setFailed] = useState(false);
-
-  useEffect(() => {
-    let cancelled = false;
-    setSrc(resolvedSrc ?? "");
-    setFailed(false);
-    if (resolvedSrc) {
-      return () => {
-        cancelled = true;
-      };
-    }
-    resolveResourceMediaUrl(path, version)
-      .then((url) => {
-        if (!cancelled) setSrc(url);
-      })
-      .catch(() => {
-        if (!cancelled) setFailed(true);
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [path, resolvedSrc, version]);
-
-  return { src, failed };
-}
 
 export interface ResourceImageMetadata {
   width: number;
@@ -169,7 +137,7 @@ export function ResourceImage({
   version?: string;
 }) {
   const { t } = useTranslation();
-  const { src, failed } = useResourceMediaUrl(path, undefined, version);
+  const { src, failed } = useResourceMediaSrc(path, version);
   const [imageFailed, setImageFailed] = useState(false);
   const reportedSizeRef = useRef("");
 
@@ -229,7 +197,7 @@ export function ResourceImageOriginal({
   onZoom?: (src: string) => void;
   version?: string;
 }) {
-  const { src, failed } = useResourceMediaUrl(path, undefined, version);
+  const { src, failed } = useResourceMediaSrc(path, version);
   const [imageFailed, setImageFailed] = useState(false);
   const reportedSizeRef = useRef("");
 
@@ -339,7 +307,7 @@ export function ResourceMediaPlayer({
   onTimeUpdate?: (t: number) => void;
 }) {
   const { t } = useTranslation();
-  const { src, failed } = useResourceMediaUrl(path, resolvedSrc, version);
+  const { src, failed } = useResourceMediaSrc(path, version, resolvedSrc);
   const mediaRef = useRef<HTMLVideoElement | HTMLAudioElement | null>(null);
   const [autoplayBlocked, setAutoplayBlocked] = useState(false);
   const [mediaFailed, setMediaFailed] = useState(false);

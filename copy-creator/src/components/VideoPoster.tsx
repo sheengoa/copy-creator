@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { loadResourceVideoPoster, saveResourceVideoPoster } from "../domain/mediaAssets";
-import { resolveResourceMediaUrl } from "../domain/mediaUrl";
+import { useResourceMediaSrc } from "../hooks/useResourceMediaSrc";
 import { Icons } from "./Icons";
 
 /**
@@ -28,8 +28,9 @@ export function VideoPoster({
   const containerRef = useRef<HTMLDivElement | null>(null);
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const [inView, setInView] = useState(false);
-  const [src, setSrc] = useState("");
-  const [resolveFailed, setResolveFailed] = useState(false);
+  // URL 解析收口在 useResourceMediaSrc（src/resolveFailed 随路径/版本自动
+  // 重置）；视频元素自身的失败与寻帧状态仍归本组件。
+  const { src, failed: resolveFailed } = useResourceMediaSrc(path, version);
   const [videoFailed, setVideoFailed] = useState(false);
   const [hasFrame, setHasFrame] = useState(false);
   // 已持久化的海报：命中后只渲染这张图，不再挂 <video> 加载元数据与寻帧。
@@ -53,22 +54,9 @@ export function VideoPoster({
   }, []);
 
   useEffect(() => {
-    let cancelled = false;
-    setSrc("");
-    setResolveFailed(false);
     setVideoFailed(false);
     setHasFrame(false);
     posterSaveAttemptedRef.current = false;
-    resolveResourceMediaUrl(path, version)
-      .then((url) => {
-        if (!cancelled) setSrc(url);
-      })
-      .catch(() => {
-        if (!cancelled) setResolveFailed(true);
-      });
-    return () => {
-      cancelled = true;
-    };
   }, [path, version]);
 
   // 持久化海报按需加载：进入视口才读取（老库批量浏览时避免一次性解码）。

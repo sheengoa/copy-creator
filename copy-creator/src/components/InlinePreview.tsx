@@ -3,7 +3,7 @@ import { useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { HighlightText } from "./HighlightText";
 import { Icons } from "./Icons";
-import { resolveResourceMediaUrl } from "../domain/mediaUrl";
+import { useResourceMediaSrc } from "../hooks/useResourceMediaSrc";
 
 interface InlineImagePreviewProps {
   path: string;
@@ -20,24 +20,8 @@ export function InlineImagePreview({
   version,
 }: InlineImagePreviewProps) {
   const { t } = useTranslation();
-  const [src, setSrc] = useState("");
-  const [failed, setFailed] = useState(false);
-
-  useEffect(() => {
-    let cancelled = false;
-    setSrc("");
-    setFailed(false);
-    resolveResourceMediaUrl(path, version)
-      .then((url) => {
-        if (!cancelled) setSrc(url);
-      })
-      .catch(() => {
-        if (!cancelled) setFailed(true);
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [path, version]);
+  // 解析/加载失败统一收口在 useResourceMediaSrc（含 <img> onError 上报）。
+  const { src, failed, reportFailed } = useResourceMediaSrc(path, version);
 
   if (failed) {
     return (
@@ -54,7 +38,7 @@ export function InlineImagePreview({
       src={src}
       alt={alt}
       draggable={false}
-      onError={() => setFailed(true)}
+      onError={reportFailed}
     />
   );
 }

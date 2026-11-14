@@ -12,7 +12,7 @@
 import { useEffect, useRef, useState, type CSSProperties } from "react";
 import { useTranslation } from "react-i18next";
 import { Icons } from "./Icons";
-import { resolveResourceMediaUrl } from "../domain/mediaUrl";
+import { useResourceMediaSrc } from "../hooks/useResourceMediaSrc";
 import { openResourceFile } from "../domain/mediaAssets";
 
 /** m:ss 短时间码（进度行专用，厘秒在这里没有意义）。 */
@@ -56,8 +56,10 @@ export function MediaPlayback({
 }) {
   const { t } = useTranslation();
   const mediaRef = useRef<HTMLVideoElement | HTMLAudioElement | null>(null);
-  const [url, setUrl] = useState("");
-  const [failed, setFailed] = useState(false);
+  // URL 解析收口在 useResourceMediaSrc（url/failed 随 path 自动重置）；
+  // 播放器自身的交互状态换源时归零。failed 含解析失败与元素加载失败
+  // （onError 经 reportFailed 上报）。
+  const { src: url, failed, reportFailed } = useResourceMediaSrc(path);
   const [openFailed, setOpenFailed] = useState(false);
   const [pos, setPos] = useState({ t: 0, dur: 0, playing: false });
   const [blocked, setBlocked] = useState(false);
@@ -69,24 +71,11 @@ export function MediaPlayback({
   const [vol, setVol] = useState({ v: 1, muted: false });
 
   useEffect(() => {
-    let alive = true;
-    setUrl("");
-    setFailed(false);
     setOpenFailed(false);
     setBlocked(false);
     setPos({ t: 0, dur: 0, playing: false });
     setVol({ v: 1, muted: false });
     setRatio(null);
-    resolveResourceMediaUrl(path)
-      .then((u) => {
-        if (alive) setUrl(u);
-      })
-      .catch(() => {
-        if (alive) setFailed(true);
-      });
-    return () => {
-      alive = false;
-    };
   }, [path]);
 
   useEffect(() => {
@@ -216,7 +205,7 @@ export function MediaPlayback({
         }
       }}
       onError={(e) => {
-        if (e.currentTarget === mediaRef.current) setFailed(true);
+        if (e.currentTarget === mediaRef.current) reportFailed();
       }}
     />
   ) : (
@@ -239,7 +228,7 @@ export function MediaPlayback({
         }
       }}
       onError={(e) => {
-        if (e.currentTarget === mediaRef.current) setFailed(true);
+        if (e.currentTarget === mediaRef.current) reportFailed();
       }}
     />
   );

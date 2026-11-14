@@ -1,7 +1,6 @@
-import { useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
 import type { RadialPreviewSegment } from "../domain/preview";
-import { resolveResourceMediaUrl } from "../domain/mediaUrl";
+import { useResourceMediaSrc } from "../hooks/useResourceMediaSrc";
 import { ResourceMediaPlayer } from "../pages/ResourcePage/ResourceMedia";
 import { Icons } from "./Icons";
 
@@ -15,22 +14,8 @@ interface ContentPreviewPanelProps {
 
 function PreviewImage({ path, version }: { path: string; version?: string }) {
   const { t } = useTranslation();
-  const [src, setSrc] = useState("");
-  const [failed, setFailed] = useState(false);
-
-  useEffect(() => {
-    let cancelled = false;
-    setSrc("");
-    setFailed(false);
-    resolveResourceMediaUrl(path, version)
-      .then((url) => {
-        if (!cancelled) setSrc(url);
-      })
-      .catch(() => {
-        if (!cancelled) setFailed(true);
-      });
-    return () => { cancelled = true; };
-  }, [path, version]);
+  // 解析/加载失败统一收口在 useResourceMediaSrc（含 <img> onError 上报）。
+  const { src, failed, reportFailed } = useResourceMediaSrc(path, version);
 
   if (failed) {
     return (
@@ -46,7 +31,7 @@ function PreviewImage({ path, version }: { path: string; version?: string }) {
       src={src}
       alt={t("radialMenu.previewImage")}
       draggable={false}
-      onError={() => setFailed(true)}
+      onError={reportFailed}
     />
   );
 }
