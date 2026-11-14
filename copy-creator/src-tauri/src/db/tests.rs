@@ -930,36 +930,36 @@ mod resource_command_tests {
     fn collectable_rules_ignore_app_dirs_and_allow_media_in_third_party_hidden_dirs() {
         // 应用自身目录：任何文件类型全忽略（含音视频）。
         assert!(!is_collectable_resource_file(Path::new(
-            r"D:/lib\.copy-creator\attachments\x.mp4"
+            r"D:/lib/.copy-creator/attachments/x.mp4"
         )));
         assert!(!is_collectable_resource_file(Path::new(
-            r"D:/lib\.trash\x.mp4"
+            r"D:/lib/.trash/x.mp4"
         )));
         assert!(!is_collectable_resource_file(Path::new(
-            r"D:/lib\thumbs\x.mp4"
+            r"D:/lib/thumbs/x.mp4"
         )));
         // 第三方点前缀目录：音视频放行。
         assert!(is_collectable_resource_file(Path::new(
-            r"D:/lib\.bf\.recycle\video.mp4"
+            r"D:/lib/.bf/.recycle/video.mp4"
         )));
         assert!(is_collectable_resource_file(Path::new(
-            r"D:/lib\.bf\audio.mp3"
+            r"D:/lib/.bf/audio.mp3"
         )));
         // 第三方点前缀目录：图片/文本/其他文件仍忽略（元数据与预览缓存
         // 不得涌入列表）。
         assert!(!is_collectable_resource_file(Path::new(
-            r"D:/lib\.bf\.preview\thumb.webp"
+            r"D:/lib/.bf/.preview/thumb.webp"
         )));
         assert!(!is_collectable_resource_file(Path::new(
-            r"D:/lib\.bf\.backup\lib.db"
+            r"D:/lib/.bf/.backup/lib.db"
         )));
         // 无扩展名文件不进点目录（判定零 IO，嗅探只在列表组装做）。
-        assert!(!is_collectable_resource_file(Path::new(r"D:/lib\.bf\noext")));
+        assert!(!is_collectable_resource_file(Path::new(r"D:/lib/.bf/noext")));
         // 正常目录不受影响；临时/锁文件照旧忽略。
-        assert!(is_collectable_resource_file(Path::new(r"D:/lib\group\video.mp4")));
-        assert!(is_collectable_resource_file(Path::new(r"D:/lib\.mp4")));
-        assert!(!is_collectable_resource_file(Path::new(r"D:/lib\group\dl.crdownload")));
-        assert!(!is_collectable_resource_file(Path::new(r"D:/lib\group\~$doc.mp4")));
+        assert!(is_collectable_resource_file(Path::new(r"D:/lib/group/video.mp4")));
+        assert!(is_collectable_resource_file(Path::new(r"D:/lib/.mp4")));
+        assert!(!is_collectable_resource_file(Path::new(r"D:/lib/group/dl.crdownload")));
+        assert!(!is_collectable_resource_file(Path::new(r"D:/lib/group/~$doc.mp4")));
     }
 
     /// 端到端：第三方点前缀目录里的视频经启动/周期对账收录，可在资源
