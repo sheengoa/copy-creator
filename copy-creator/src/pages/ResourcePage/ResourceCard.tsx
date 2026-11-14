@@ -11,6 +11,8 @@ import { formatTime, formatRelativeTime } from "../../utils/formatTime";
 import { recordUsageTime, resourceGroupLeafLabel } from "../../domain/records";
 import { revealResourceFile } from "../../domain/mediaAssets";
 import { UsageCountBadge } from "../../components/UsageCountBadge";
+import { CardMoreTrigger, CardSelectionCheckbox } from "../../components/CardShell";
+import { cardActionMenuAnchor } from "../../utils/cardShell";
 import { type ResourceMediaKind } from "../../domain/mediaKind";
 import type { RecordView } from "../../domain/recordView";
 
@@ -81,15 +83,10 @@ function ResourceCardInner({
       }}
     >
       {selectionMode && (
-        <label className="resource-card-selection" onClick={(event) => event.stopPropagation()}>
-          <input
-            type="checkbox"
-            checked={selected}
-            aria-label={t("common.selectItem")}
-            onChange={() => onToggleSelected(view.id)}
-          />
-          <span className="selection-checkbox" aria-hidden="true" />
-        </label>
+        <CardSelectionCheckbox
+          checked={selected}
+          onToggle={() => onToggleSelected(view.id)}
+        />
       )}
       <div className="resource-card-preview">
         <CardVisual
@@ -99,23 +96,12 @@ function ResourceCardInner({
         />
         <span className="resource-card-kind">{typeLabel(kind)}</span>
         {onMove && !selectionMode && (
-          <div className="resource-card-more">
-            <button
-              type="button"
-              ref={moreButtonRef}
-              className="resource-card-more-button"
-              aria-label={t("resources.moreActions")}
-              aria-haspopup="menu"
-              aria-expanded={menuOpen}
-              title={t("resources.moreActions")}
-              onClick={(event) => {
-                event.stopPropagation();
-                setMenuOpen((open) => !open);
-              }}
-            >
-              {Icons.more}
-            </button>
-          </div>
+          <CardMoreTrigger
+            open={menuOpen}
+            onToggle={() => setMenuOpen((open) => !open)}
+            buttonRef={moreButtonRef}
+            label={t("resources.moreActions")}
+          />
         )}
       </div>
       {onMove && !selectionMode && (
@@ -125,11 +111,7 @@ function ResourceCardInner({
           className="resource-card-menu"
           ariaLabel={t("resources.moreActions")}
           anchorEl={moreButtonRef}
-          getAnchor={() => {
-            const rect = moreButtonRef.current?.getBoundingClientRect();
-            if (!rect) return null;
-            return { left: rect.left, top: rect.top, right: rect.right, bottom: rect.bottom };
-          }}
+          getAnchor={() => cardActionMenuAnchor(moreButtonRef)}
           onClose={() => setMenuOpen(false)}
         >
           {revealPath && (

@@ -903,7 +903,9 @@ describe("integration regressions", () => {
     // 卡片化：卡片根无展开态按钮（展开体系退役），操作收敛进 ⋯菜单。
     expect(cardSource).not.toContain("aria-expanded={expanded}");
     expect(cardSource).not.toContain('className="card-toggle-text-btn"');
-    expect(cardSource).toContain("resource-card-more-button");
+    // 「⋯」按钮实现收口在 CardShell（三卡共用），卡片只经 CardMoreTrigger 消费。
+    expect(cardSource).toContain("<CardMoreTrigger");
+    expect(readSource("../components/CardShell.tsx")).toContain("resource-card-more-button");
     expect(previewPanel).toContain("draggable={false}");
     expect(radialStyles).toContain("cursor: default");
     expect(radialStyles).toContain("touch-action: none");

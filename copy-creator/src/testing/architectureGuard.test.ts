@@ -383,8 +383,8 @@ describe("架构守卫：领域规则必须全局共享", () => {
       const source = readSource(cardFile);
       expect(
         source,
-        `${cardFile} 必须提供「⋯」菜单按钮（resource-card-more-button）`,
-      ).toContain("resource-card-more-button");
+        `${cardFile} 必须经共享 CardMoreTrigger 渲染「⋯」菜单按钮（实现收口在 CardShell）`,
+      ).toContain("<CardMoreTrigger");
       expect(
         source,
         `${cardFile} 菜单必须经共享 CardActionMenu 渲染（portal 定位，防卡片 transform 裁剪）`,

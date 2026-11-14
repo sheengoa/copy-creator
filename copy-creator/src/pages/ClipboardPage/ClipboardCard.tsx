@@ -12,6 +12,8 @@ import { CardVisual } from "../../components/CardVisual";
 import { formatRelativeTime } from "../../utils/formatTime";
 import { recordUsageTime } from "../../domain/records";
 import { UsageCountBadge } from "../../components/UsageCountBadge";
+import { CardMoreTrigger, CardSelectionCheckbox } from "../../components/CardShell";
+import { cardActionMenuAnchor } from "../../utils/cardShell";
 import { useSettingsStore } from "../../stores/settingsStore";
 import ApiKeyLabelPanel from "./ApiKeyLabelPanel";
 import { isSlimCardKind, type ResourceMediaKind } from "../../domain/mediaKind";
@@ -90,8 +92,8 @@ function ClipboardCardInner({
     setCtxMenu({ x: e.clientX, y: e.clientY });
   }, []);
 
-  const openMoreMenu = useCallback((e: React.MouseEvent) => {
-    e.stopPropagation();
+  // 「⋯」开菜单：顺带关掉可能开着的右键菜单（同一组项，避免双开）。
+  const openMoreMenu = useCallback(() => {
     setCtxMenu(null);
     setMoreOpen((open) => !open);
   }, []);
@@ -262,15 +264,10 @@ function ClipboardCardInner({
       onContextMenu={selectionMode ? (e) => { e.preventDefault(); e.stopPropagation(); } : handleContextMenu}
     >
       {selectionMode && (
-        <label className="resource-card-selection" onClick={(e) => e.stopPropagation()}>
-          <input
-            type="checkbox"
-            checked={selected}
-            aria-label={t("common.selectItem")}
-            onChange={() => onToggleSelected(view.id)}
-          />
-          <span className="selection-checkbox" aria-hidden="true" />
-        </label>
+        <CardSelectionCheckbox
+          checked={selected}
+          onToggle={() => onToggleSelected(view.id)}
+        />
       )}
       {slim ? (
         <div className="resource-card-body">
@@ -295,20 +292,12 @@ function ClipboardCardInner({
               </span>
             )}
             {!selectionMode && (
-              <div className="resource-card-more">
-                <button
-                  type="button"
-                  ref={moreButtonRef}
-                  className="resource-card-more-button"
-                  aria-label={t("resources.moreActions")}
-                  aria-haspopup="menu"
-                  aria-expanded={moreOpen}
-                  title={t("resources.moreActions")}
-                  onClick={openMoreMenu}
-                >
-                  {Icons.more}
-                </button>
-              </div>
+              <CardMoreTrigger
+                open={moreOpen}
+                onToggle={openMoreMenu}
+                buttonRef={moreButtonRef}
+                label={t("resources.moreActions")}
+              />
             )}
           </div>
           <div
@@ -347,20 +336,12 @@ function ClipboardCardInner({
         <CardVisual view={view} search={search} typeLabel={getKindLabel} />
         <span className="resource-card-kind">{contentLabel}</span>
         {!selectionMode && (
-          <div className="resource-card-more">
-            <button
-              type="button"
-              ref={moreButtonRef}
-              className="resource-card-more-button"
-              aria-label={t("resources.moreActions")}
-              aria-haspopup="menu"
-              aria-expanded={moreOpen}
-              title={t("resources.moreActions")}
-              onClick={openMoreMenu}
-            >
-              {Icons.more}
-            </button>
-          </div>
+          <CardMoreTrigger
+            open={moreOpen}
+            onToggle={openMoreMenu}
+            buttonRef={moreButtonRef}
+            label={t("resources.moreActions")}
+          />
         )}
       </div>
       )}
@@ -370,11 +351,7 @@ function ClipboardCardInner({
         className="resource-card-menu"
         ariaLabel={t("resources.moreActions")}
         anchorEl={moreButtonRef}
-        getAnchor={() => {
-          const rect = moreButtonRef.current?.getBoundingClientRect();
-          if (!rect) return null;
-          return { left: rect.left, top: rect.top, right: rect.right, bottom: rect.bottom };
-        }}
+        getAnchor={() => cardActionMenuAnchor(moreButtonRef)}
         onClose={() => setMoreOpen(false)}
       >
         {menuItems}

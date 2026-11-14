@@ -16,6 +16,8 @@ import {
 } from "../../components/CardActionMenu";
 import { useSettingsStore } from "../../stores/settingsStore";
 import { UsageCountBadge } from "../../components/UsageCountBadge";
+import { CardMoreTrigger, CardSelectionCheckbox } from "../../components/CardShell";
+import { cardActionMenuAnchor } from "../../utils/cardShell";
 import { fileNameFromPath } from "../../domain/fileName";
 import { getResourceSummary, recordUsageTime } from "../../domain/records";
 import { inferResourceMediaKind, isSlimCardKind, type ResourceMediaKind } from "../../domain/mediaKind";
@@ -186,15 +188,10 @@ function PhraseCard({
       }}
     >
       {selectionMode && (
-        <label className="resource-card-selection" onClick={(e) => e.stopPropagation()}>
-          <input
-            type="checkbox"
-            checked={selected}
-            aria-label={t("common.selectItem")}
-            onChange={() => onToggleSelected(phrase.id)}
-          />
-          <span className="selection-checkbox" aria-hidden="true" />
-        </label>
+        <CardSelectionCheckbox
+          checked={selected}
+          onToggle={() => onToggleSelected(phrase.id)}
+        />
       )}
       {slim ? (
         <div className="resource-card-body">
@@ -202,23 +199,12 @@ function PhraseCard({
             <span className="card-slim-dot" aria-hidden="true" />
             <span>{contentLabel}</span>
             {!selectionMode && (
-              <div className="resource-card-more">
-                <button
-                  type="button"
-                  ref={moreButtonRef}
-                  className="resource-card-more-button"
-                  aria-label={t("resources.moreActions")}
-                  aria-haspopup="menu"
-                  aria-expanded={moreOpen}
-                  title={t("resources.moreActions")}
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    setMoreOpen((open) => !open);
-                  }}
-                >
-                  {Icons.more}
-                </button>
-              </div>
+              <CardMoreTrigger
+                open={moreOpen}
+                onToggle={() => setMoreOpen((open) => !open)}
+                buttonRef={moreButtonRef}
+                label={t("resources.moreActions")}
+              />
             )}
           </div>
           <div
@@ -239,23 +225,12 @@ function PhraseCard({
             <CardVisual view={visual} search={search} typeLabel={getKindLabel} />
             <span className="resource-card-kind">{contentLabel}</span>
             {!selectionMode && (
-              <div className="resource-card-more">
-                <button
-                  type="button"
-                  ref={moreButtonRef}
-                  className="resource-card-more-button"
-                  aria-label={t("resources.moreActions")}
-                  aria-haspopup="menu"
-                  aria-expanded={moreOpen}
-                  title={t("resources.moreActions")}
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    setMoreOpen((open) => !open);
-                  }}
-                >
-                  {Icons.more}
-                </button>
-              </div>
+              <CardMoreTrigger
+                open={moreOpen}
+                onToggle={() => setMoreOpen((open) => !open)}
+                buttonRef={moreButtonRef}
+                label={t("resources.moreActions")}
+              />
             )}
           </div>
           <div className="resource-card-body">
@@ -274,11 +249,7 @@ function PhraseCard({
         className="resource-card-menu"
         ariaLabel={t("resources.moreActions")}
         anchorEl={moreButtonRef}
-        getAnchor={() => {
-          const rect = moreButtonRef.current?.getBoundingClientRect();
-          if (!rect) return null;
-          return { left: rect.left, top: rect.top, right: rect.right, bottom: rect.bottom };
-        }}
+        getAnchor={() => cardActionMenuAnchor(moreButtonRef)}
         onClose={() => setMoreOpen(false)}
       >
         {onMoveToTop && (
