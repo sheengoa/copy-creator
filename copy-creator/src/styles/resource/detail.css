@@ -1,0 +1,853 @@
+/* resource/detail.css —— 资源详情主体：阅读版式正文/大文本分块/文本标注与划选工具条/舞台与 toast。
+   原 resource.css 按域拆分（2026-11-14）：App.tsx 按原块序导入，级联顺序不变。
+   行数守卫见架构守卫规则 27（styles/resource 上限 1000）。 */
+
+/* === Resource Detail === */
+.resource-detail-page {
+  display: flex;
+  /* 负外边距让页面铺满 panel-window-body（padding: 14px 16px）的可见边缘；
+     高度同步加 28px 抵消其上下内边距——只留 body 自己的底部内边距，
+     长正文不再在页面底部残留一条空白带（也不会引发外层滚动）。 */
+  min-height: calc(100% + 28px);
+  max-height: calc(100% + 28px);
+  flex-direction: column;
+  margin: -14px -16px;
+  background: var(--panel-bg);
+}
+
+.resource-detail-header {
+  display: flex;
+  flex-shrink: 0;
+  min-width: 0;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  min-height: 52px;
+  padding: 9px 14px;
+  border-bottom: 1px solid var(--separator);
+  background: var(--card-inner-bg);
+}
+
+.resource-back-button {
+  display: inline-flex;
+  min-width: 0;
+  align-items: center;
+  gap: 6px;
+  padding: 5px 7px;
+  border: 1px solid transparent;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--text-secondary);
+  font-family: var(--font);
+  font-size: var(--text-sm);
+  cursor: pointer;
+}
+
+.resource-back-button:hover {
+  border-color: var(--separator);
+  background: var(--chip-hover-bg);
+  color: var(--text-primary);
+}
+
+.resource-back-button svg {
+  width: 15px;
+  height: 15px;
+  flex-shrink: 0;
+}
+
+.resource-detail-actions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-shrink: 0;
+}
+
+.resource-detail-delete {
+  width: auto;
+  gap: 5px;
+  padding: 0 8px;
+  border: 0;
+  background: var(--btn-card-bg);
+  color: var(--danger);
+  box-shadow: var(--btn-card-shadow);
+  transition: box-shadow 0.15s ease;
+}
+
+.resource-detail-delete:hover {
+  background: var(--btn-card-bg);
+  border-color: transparent;
+  color: var(--danger);
+  box-shadow: var(--btn-card-shadow-hover);
+}
+
+/* 正文编辑保存按钮：强调色主按钮，与次要按钮（放弃）形成主次区分。 */
+/* 正文编辑保存按钮：白卡 + accent 文字，与对话框主按钮同语言。 */
+.resource-primary-button {
+  min-height: 30px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 5px;
+  padding: 0 10px;
+  border: 0;
+  border-radius: 7px;
+  background: var(--btn-card-bg);
+  color: var(--accent);
+  font-family: var(--font);
+  font-size: var(--text-sm);
+  font-weight: var(--weight-medium);
+  white-space: nowrap;
+  cursor: pointer;
+  transition: box-shadow 0.15s ease, opacity 0.15s ease;
+  box-shadow: var(--btn-card-shadow);
+}
+
+.resource-primary-button:hover:not(:disabled) {
+  box-shadow: var(--btn-card-shadow-hover);
+}
+
+.resource-primary-button:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+
+.resource-content-saved {
+  color: var(--accent);
+  font-size: var(--text-xs);
+  white-space: nowrap;
+}
+
+.resource-content-error {
+  color: var(--danger);
+  font-size: var(--text-xs);
+  white-space: nowrap;
+}
+
+.resource-detail-body {
+  display: grid;
+  min-width: 0;
+  flex: 1;
+  min-height: 0;
+  grid-template-columns: minmax(0, 1fr) 190px;
+  align-items: start;
+  gap: 16px;
+  /* 底部内边距是正文列与窗口底缘之间唯一的留白，保持紧凑 */
+  padding: 18px 18px 10px;
+  /* 容器自身不滚动：滚动收敛到正文列（.resource-detail-main），
+     滚动条因此出现在正文与信息侧栏之间，而非窗口最外缘；
+     侧栏列不参与滚动，天然固定。 */
+}
+
+.resource-detail-body::-webkit-scrollbar {
+  width: 8px;
+}
+
+.resource-detail-body::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.resource-detail-body::-webkit-scrollbar-thumb {
+  background: rgba(0, 0, 0, 0.22);
+  border-radius: 4px;
+}
+
+[data-theme="dark"] .resource-detail-body::-webkit-scrollbar-thumb {
+  background: rgba(255, 255, 255, 0.26);
+}
+
+.resource-detail-main {
+  min-width: 0;
+  max-height: 100%;
+  overflow-y: auto;
+  scrollbar-width: none;
+  /* 正文列是滚动容器：滚动条出现在正文与信息侧栏之间。
+     原生滚动条在 WebKitGTK 不可见（overlay 且忽略 ::-webkit-scrollbar
+     自定义样式），改用自绘进度条（见 .resource-main-scrollbar-*），
+     跨引擎观感一致。 */
+}
+
+/* 正文列滚动进度条：sticky 轨道钉在滚动视口内不随内容滚动，
+   thumb 由页面按滚动进度定位（height/translateY 内联样式）。 */
+.resource-main-scrollbar-track {
+  position: sticky;
+  top: 0;
+  height: 0;
+  width: 100%;
+  z-index: 15;
+  pointer-events: none;
+}
+
+.resource-main-scrollbar-thumb {
+  position: absolute;
+  top: 14px;
+  right: 3px;
+  width: 4px;
+  border-radius: 2px;
+  background: rgba(0, 0, 0, 0.22);
+  /* 轨道整体不接收指针（不挡正文选择），只有 thumb 可交互；
+     拖动由页面挂在 window 上的原生监听接管（见 ResourceDetailPage）。 */
+  pointer-events: auto;
+  cursor: grab;
+}
+
+.resource-main-scrollbar-thumb:active {
+  cursor: grabbing;
+}
+
+/* 扩大命中区：视觉 4px 太窄难以点中，伪元素外扩一圈不改变外观。
+   左侧外扩收到 6px：再宽会压到正文行尾字符的划选边界。 */
+.resource-main-scrollbar-thumb::before {
+  content: "";
+  position: absolute;
+  top: -8px;
+  right: -7px;
+  bottom: -8px;
+  left: -6px;
+}
+
+[data-theme="dark"] .resource-main-scrollbar-thumb {
+  background: rgba(255, 255, 255, 0.26);
+}
+
+.resource-detail-kind {
+  display: block;
+  margin-bottom: 5px;
+  color: var(--text-secondary);
+  font-size: var(--text-xs);
+  font-weight: var(--weight-semibold);
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.resource-detail-main h1 {
+  overflow-wrap: anywhere;
+  color: var(--text-primary);
+  font-size: 21px;
+  font-weight: var(--weight-semibold);
+  line-height: 1.3;
+}
+
+.resource-detail-main h1.resource-detail-title {
+  cursor: text;
+  border-radius: 6px;
+}
+
+.resource-detail-title-editor {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+}
+
+.resource-detail-title-input {
+  min-width: 0;
+  flex: 1;
+  max-width: 420px;
+  padding: 4px 10px;
+  border: 1px solid var(--separator);
+  border-radius: 8px;
+  background: var(--bg-secondary, rgba(0, 0, 0, 0.03));
+  color: var(--text-primary);
+  font-family: var(--font);
+  font-size: 17px;
+  font-weight: var(--weight-semibold);
+  line-height: 1.3;
+}
+
+.resource-detail-title-input:focus {
+  outline: none;
+  border-color: var(--accent-border-strong);
+}
+
+.resource-detail-title-input:disabled {
+  opacity: 0.6;
+}
+
+.resource-detail-title-extension {
+  color: var(--text-secondary);
+  font-size: 13px;
+  font-weight: var(--weight-semibold);
+}
+
+.resource-detail-title-error {
+  width: 100%;
+  color: var(--danger);
+  font-size: var(--text-xs);
+}
+
+/* ---------- 移动到分组对话框 ---------- */
+.resource-move-dialog {
+  /* 卡片移动与分组移动共用：宽度随窗口伸缩，长分组路径不再截断。 */
+  width: clamp(330px, 40vw, 520px);
+  max-width: calc(100vw - 40px);
+}
+
+.resource-move-source {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 10px 0;
+  padding: 8px 10px;
+  border: 1px solid var(--separator);
+  border-radius: 9px;
+  background: var(--bg-secondary, rgba(0, 0, 0, 0.03));
+}
+
+.resource-move-source-icon {
+  display: inline-flex;
+  color: var(--text-secondary);
+}
+
+.resource-move-source-icon svg {
+  width: 15px;
+  height: 15px;
+}
+
+.resource-move-source-names {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.resource-move-source-names strong {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: var(--text-sm);
+}
+
+.resource-move-source-names span {
+  color: var(--text-secondary);
+  font-size: var(--text-xs);
+  /* 路径无空格长串，防横向溢出。 */
+  overflow-wrap: anywhere;
+}
+
+.resource-move-tree {
+  /* 分组树随视口高度伸缩，层级多时无需在固定小盒内滚动。 */
+  max-height: clamp(216px, 40vh, 420px);
+  overflow-y: auto;
+  border: 1px solid var(--separator);
+  border-radius: 9px;
+  padding: 4px;
+}
+
+.resource-move-row {
+  display: flex;
+  width: 100%;
+  align-items: center;
+  gap: 7px;
+  padding: 6px 8px;
+  border: none;
+  border-radius: 7px;
+  background: none;
+  color: var(--text-primary);
+  font-size: var(--text-xs);
+  text-align: left;
+  cursor: pointer;
+}
+
+.resource-move-row:hover:not(:disabled) {
+  background: rgba(0, 0, 0, 0.05);
+}
+
+.resource-move-row.selected {
+  background: var(--accent-bg, rgba(0, 0, 0, 0.08));
+  font-weight: var(--weight-semibold);
+}
+
+.resource-move-row:disabled {
+  color: var(--text-tertiary);
+  cursor: default;
+}
+
+.resource-move-row .resource-move-icon {
+  display: inline-flex;
+  color: var(--text-secondary);
+}
+
+.resource-move-row .resource-move-icon svg {
+  width: 13px;
+  height: 13px;
+}
+
+.resource-move-current-tag {
+  margin-left: auto;
+  padding: 1px 6px;
+  border: 1px solid var(--separator);
+  border-radius: 5px;
+  color: var(--text-tertiary);
+  font-size: 10px;
+  white-space: nowrap;
+}
+
+.resource-move-hint {
+  margin: 8px 0 0;
+  color: var(--text-secondary);
+  font-size: 11px;
+  line-height: 1.6;
+}
+
+/* ---------- 详情页所属分组行 ---------- */
+.resource-group-line {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-top: 14px;
+  padding-top: 14px;
+  border-top: 1px solid var(--separator);
+}
+
+.resource-group-line-label {
+  color: var(--text-secondary);
+  font-size: var(--text-xs);
+}
+
+.resource-group-pill {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  width: 100%;
+  min-width: 0;
+  padding: 5px 10px;
+  border: 1px solid var(--separator);
+  border-radius: 999px;
+  font-size: var(--text-sm);
+}
+
+/* 嵌套分组路径按层级拆段展示（结构见 ResourceDetailPage）：空间不足时
+   前面的层级以 10 倍收缩权重先被压缩成省略号，最深一层（分组身份）
+   最后才截断；完整路径悬停可见（title）。 */
+.resource-group-pill-name {
+  display: flex;
+  align-items: baseline;
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+}
+
+.resource-group-crumb {
+  min-width: 16px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  flex: 10 1 auto;
+}
+
+/* 最深一层是分组身份：收缩权重降到 0.1，前面的层级压到下限才轮到它。 */
+.resource-group-crumb:last-child {
+  flex: 1 0.1 auto;
+}
+
+/* 嵌套超过 4 层时中段收起的「…」占位（结构见 ResourceDetailPage）。 */
+.resource-group-crumb-more {
+  flex-shrink: 0;
+}
+
+.resource-group-crumb-sep {
+  flex-shrink: 0;
+  margin: 0 2px;
+  color: var(--text-tertiary);
+}
+
+/* 「移动」链接对齐色彩边界：静态中性灰、悬停加深并出现下划线，
+   不再使用硬编码蓝色（蓝 = 交互反馈色）。 */
+.resource-group-pill button {
+  flex-shrink: 0;
+  white-space: nowrap;
+  border: none;
+  background: none;
+  padding: 0;
+  color: var(--text-secondary);
+  font-size: inherit;
+  cursor: pointer;
+}
+
+.resource-group-pill button:hover {
+  color: var(--text-primary);
+  text-decoration: underline;
+}
+
+.resource-detail-subtitle {
+  margin-top: 6px;
+  color: var(--text-secondary);
+  font-size: var(--text-xs);
+  line-height: 1.45;
+}
+
+.resource-detail-stage {
+  position: relative;
+  display: flex;
+  min-height: 300px;
+  align-items: center;
+  justify-content: center;
+  margin-top: 16px;
+  padding: 14px;
+  overflow: auto;
+  border: 1px solid var(--separator);
+  border-radius: 10px;
+  background: var(--card-inner-bg);
+}
+
+.resource-detail-stage-text,
+.resource-detail-stage-image {
+  align-items: flex-start;
+}
+
+
+
+/* 详情页长文正文按「阅读版式」呈现：正文字体 + 舒适行高，
+   宽度撑满内容卡片、高度随内容伸缩；等宽字体只保留在列表卡片等紧凑预览场景。 */
+
+
+.resource-detail-stage-image {
+  padding: 20px;
+  background: var(--input-bg);
+}
+
+/* 详情页原图干净展示：contain 完整呈现、水平居中，不超出可视高度。 */
+
+
+.resource-detail-stage-video {
+  padding: 18px;
+  background: #111;
+}
+
+
+
+
+
+
+
+.resource-detail-stage-audio,
+.resource-detail-stage-file {
+  background: var(--input-bg);
+}
+
+
+
+.resource-detail-error {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+  width: 100%;
+  flex-direction: column;
+  color: var(--danger);
+  font-size: var(--text-sm);
+  text-align: center;
+}
+
+.resource-detail-file {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  width: min(440px, 100%);
+  flex-direction: column;
+  padding: 28px 18px;
+  color: var(--text-secondary);
+  text-align: center;
+}
+
+.resource-detail-file svg {
+  width: 32px;
+  height: 32px;
+}
+
+.resource-detail-file strong {
+  max-width: 100%;
+  overflow-wrap: anywhere;
+  color: var(--text-primary);
+  font-size: var(--text-md);
+}
+
+.resource-detail-file span {
+  color: var(--text-secondary);
+  font-size: var(--text-xs);
+  line-height: 1.5;
+}
+
+.resource-detail-file code {
+  max-width: 100%;
+  overflow-wrap: anywhere;
+  color: var(--text-tertiary);
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
+  line-height: 1.45;
+  user-select: text;
+  -webkit-user-select: text;
+}
+
+/* 大文本截断展示：提示条钉在正文上方，正文区照常滚动浏览。 */
+.resource-detail-text-body {
+  display: flex;
+  flex-direction: column;
+  width: 100%;
+  min-width: 0;
+}
+
+.resource-detail-truncated-hint {
+  display: flex;
+  flex-shrink: 0;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 10px;
+  padding: 8px 12px;
+  border: 1px solid color-mix(in srgb, var(--warning, #ff9f0a) 35%, var(--separator));
+  border-radius: 7px;
+  background: color-mix(in srgb, var(--warning, #ff9f0a) 10%, transparent);
+  color: var(--text-secondary);
+  font-size: var(--text-xs);
+  line-height: 1.5;
+}
+
+.resource-detail-truncated-hint > span:first-of-type {
+  flex: 1;
+}
+
+.resource-detail-truncated-hint .resource-text-external-open {
+  flex-shrink: 0;
+  padding: 4px 10px;
+  font-size: var(--text-xs);
+}
+
+.resource-text-external-failed {
+  flex-shrink: 0;
+  color: var(--danger);
+  font-size: var(--text-xs);
+}
+
+/* 大文本全文分块渲染：容器统一承载「阅读版式」表面（边框/底色/字体/
+   行高，与旧单块正文同款），块级 content-visibility: auto 让浏览器只
+   排版视口内的块——数据全在内存、DOM 只画可视区，超长文本完整展示且
+   滚动不卡。块间必须无任何视觉接缝，故块级清空 <pre> 默认样式并继承
+   容器字体；contain-intrinsic-size 给初始高度估算保滚动条大致准确，
+   auto 前缀让浏览器记住块的真实渲染高度，滚动越深估算越准。 */
+.resource-detail-text-chunks {
+  width: 100%;
+  padding: 22px;
+  border: 1px solid var(--separator);
+  border-radius: 7px;
+  background: var(--input-bg);
+  color: var(--text-primary);
+  font-family: var(--font);
+  font-size: var(--text-md);
+  line-height: 1.9;
+  letter-spacing: 0.01em;
+}
+
+.resource-detail-text-chunk {
+  margin: 0;
+  border: none;
+  background: none;
+  color: inherit;
+  font: inherit;
+  line-height: inherit;
+  letter-spacing: inherit;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  user-select: text;
+  -webkit-user-select: text;
+  content-visibility: auto;
+  /* 回退估算：组件渲染时按块字符数以内联 style 覆盖（动态行数估算）。
+     此值只兜底首帧，保持单屏量级即可——硬编码大值会在小文本/无有效
+     视口（窗口隐藏）时把滚动行程撑到严重失真。 */
+  contain-intrinsic-size: auto 2000px;
+}
+
+/* 划选选区：WebKitGTK 与暗色偏好下默认选区呈灰色，显式定义为
+   accent 蓝底白字，与原型（Chromium 默认亮色选区）观感一致。 */
+.resource-detail-stage ::selection {
+  background: rgba(0, 122, 255, 0.8);
+  color: #fff;
+}
+
+/* ═══ 文本标注（阅读态划选标记）═══
+   色板挂在 stage 作用域：荧光下半铺色 + 亮暗主题两档。 */
+.resource-detail-stage {
+  --ann-y: rgba(255, 214, 10, 0.38);
+  --ann-g: rgba(52, 199, 89, 0.28);
+  --ann-b: rgba(0, 122, 255, 0.22);
+  --ann-o: rgba(255, 149, 0, 0.3);
+  --ann-p: rgba(255, 45, 85, 0.24);
+  --ann-float-bg: rgba(250, 250, 252, 0.82);
+  --ann-float-border: rgba(0, 0, 0, 0.1);
+  --ann-float-shadow: 0 10px 34px rgba(0, 0, 0, 0.16), 0 2px 8px rgba(0, 0, 0, 0.08);
+  --ann-float-hover: rgba(0, 0, 0, 0.06);
+}
+
+[data-theme="dark"] .resource-detail-stage {
+  --ann-y: rgba(255, 214, 10, 0.32);
+  --ann-g: rgba(48, 209, 88, 0.3);
+  --ann-b: rgba(100, 210, 255, 0.3);
+  --ann-o: rgba(255, 159, 10, 0.34);
+  --ann-p: rgba(255, 55, 95, 0.32);
+  --ann-float-bg: rgba(44, 44, 46, 0.88);
+  --ann-float-border: rgba(255, 255, 255, 0.12);
+  --ann-float-shadow: 0 12px 38px rgba(0, 0, 0, 0.55), 0 2px 8px rgba(0, 0, 0, 0.4);
+  --ann-float-hover: rgba(255, 255, 255, 0.1);
+}
+
+/* 标注正文渲染：荧光笔质感（渐变只铺文字下半部），换行逐行贴合。 */
+.ann {
+  border-radius: 4px;
+  padding: 1px 0;
+  box-decoration-break: clone;
+  -webkit-box-decoration-break: clone;
+}
+.ann.hl-y { background: linear-gradient(to top, var(--ann-y) 62%, transparent 62%); }
+.ann.hl-g { background: linear-gradient(to top, var(--ann-g) 62%, transparent 62%); }
+.ann.hl-b { background: linear-gradient(to top, var(--ann-b) 62%, transparent 62%); }
+.ann.hl-o { background: linear-gradient(to top, var(--ann-o) 62%, transparent 62%); }
+.ann.hl-p { background: linear-gradient(to top, var(--ann-p) 62%, transparent 62%); }
+.ann.bold { font-weight: 700; }
+.ann.underline {
+  text-decoration: underline;
+  text-decoration-color: var(--accent);
+  text-decoration-thickness: 1.5px;
+  text-underline-offset: 4px;
+}
+
+/* 跳转定位：accent 柔光脉冲两次。 */
+@keyframes ann-glow {
+  0% { box-shadow: 0 0 0 0 var(--accent-bg-strong); background-color: var(--accent-bg); }
+  70% { box-shadow: 0 0 0 10px transparent; }
+  100% { box-shadow: 0 0 0 0 transparent; background-color: transparent; }
+}
+.ann-jump {
+  animation: ann-glow 1s ease-out 2;
+  border-radius: 6px;
+}
+
+/* 划选浮动工具条：真·磨砂玻璃（blur + 半透明底），与原型逐字一致。
+   运行环境 WebKitGTK ≥ 2.42 原生支持 backdrop-filter。 */
+.annotation-toolbar {
+  position: absolute;
+  z-index: 30;
+  display: flex;
+  align-items: center;
+  gap: 1px;
+  padding: 4px;
+  border: 1px solid var(--ann-float-border);
+  border-radius: 11px;
+  background: var(--ann-float-bg);
+  backdrop-filter: blur(24px) saturate(1.6);
+  -webkit-backdrop-filter: blur(24px) saturate(1.6);
+  box-shadow: var(--ann-float-shadow), inset 0 1px 0 rgba(255, 255, 255, 0.25);
+  animation: ann-toolbar-in 0.2s cubic-bezier(0.2, 0.9, 0.3, 1.2);
+}
+
+@keyframes ann-toolbar-in {
+  from { opacity: 0; transform: translateY(5px) scale(0.96); }
+  to { opacity: 1; transform: none; }
+}
+
+.annotation-toolbar::after {
+  content: "";
+  position: absolute;
+  left: var(--arrow-x, 50%);
+  bottom: -5.5px;
+  width: 10px;
+  height: 10px;
+  margin-left: -5px;
+  background: var(--ann-float-bg);
+  border-right: 1px solid var(--ann-float-border);
+  border-bottom: 1px solid var(--ann-float-border);
+  transform: rotate(45deg);
+}
+
+.annotation-toolbar .tb-btn {
+  position: relative;
+  display: grid;
+  place-items: center;
+  width: 30px;
+  height: 30px;
+  /* 裸 button 的 UA 默认样式是 buttonface 灰底 + outset 边框，必须显式
+     清除——否则工具条上每个图标都会带一块灰色按钮底（原型为透明）。 */
+  background: transparent;
+  border: none;
+  border-radius: 8px;
+  color: var(--text-primary);
+  transition: background 0.14s ease, transform 0.14s ease;
+}
+
+.annotation-toolbar .tb-btn:hover { background: var(--ann-float-hover); }
+.annotation-toolbar .tb-btn:active { transform: scale(0.9); }
+.annotation-toolbar .tb-btn:focus-visible {
+  outline: 2px solid var(--accent-border);
+  outline-offset: 1px;
+}
+.annotation-toolbar .tb-btn svg { width: 16px; height: 16px; }
+.annotation-toolbar .tb-btn.danger { color: var(--danger); }
+
+/* 悬停说明：玻璃小气泡（data-tip），延迟浮现不打扰连续点选。 */
+.annotation-toolbar .tb-btn::before {
+  content: attr(data-tip);
+  position: absolute;
+  top: -34px;
+  left: 50%;
+  transform: translateX(-50%) translateY(3px);
+  padding: 4px 9px;
+  border: 1px solid var(--ann-float-border);
+  border-radius: 6px;
+  background: var(--ann-float-bg);
+  backdrop-filter: blur(20px);
+  -webkit-backdrop-filter: blur(20px);
+  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.18);
+  color: var(--text-primary);
+  font-size: var(--text-xs);
+  white-space: nowrap;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.15s ease 0.25s, transform 0.15s ease 0.25s;
+}
+
+.annotation-toolbar .tb-btn:hover::before {
+  opacity: 1;
+  transform: translateX(-50%) translateY(0);
+}
+
+.annotation-toolbar .tb-swatch {
+  width: 15px;
+  height: 15px;
+  border-radius: 50%;
+  border: 1px solid rgba(0, 0, 0, 0.12);
+  box-shadow: inset 0 0 0 1.5px rgba(255, 255, 255, 0.45);
+  transition: transform 0.14s ease;
+}
+
+.annotation-toolbar .tb-btn:hover .tb-swatch { transform: scale(1.15); }
+.annotation-toolbar .tb-swatch-y { background: #ffd60a; }
+.annotation-toolbar .tb-swatch-g { background: #30d158; }
+.annotation-toolbar .tb-swatch-b { background: #64d2ff; }
+.annotation-toolbar .tb-swatch-o { background: #ff9f0a; }
+.annotation-toolbar .tb-swatch-p { background: #ff375f; }
+
+.annotation-toolbar .tb-divider {
+  width: 1px;
+  height: 16px;
+  margin: 0 3px;
+  background: var(--separator);
+}
+
+/* 操作反馈 toast（复制/清除/失败），stage 底部居中悬浮。 */
+.annotation-toast {
+  position: absolute;
+  left: 50%;
+  bottom: 18px;
+  transform: translateX(-50%);
+  z-index: 31;
+  padding: 7px 16px;
+  border: 1px solid var(--ann-float-border);
+  border-radius: 999px;
+  background: var(--ann-float-bg);
+  backdrop-filter: blur(24px) saturate(1.6);
+  -webkit-backdrop-filter: blur(24px) saturate(1.6);
+  box-shadow: var(--ann-float-shadow);
+  color: var(--text-primary);
+  font-size: var(--text-sm);
+  pointer-events: none;
+  animation: ann-toolbar-in 0.2s ease;
+}

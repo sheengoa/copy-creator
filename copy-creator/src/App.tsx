@@ -20,7 +20,13 @@ import i18n from "./i18n";
 // 主窗口专属样式：径向菜单与粘贴创建对话框窗口不加载这些文件
 // （共享的 base/layout/components 由 main.tsx 的 index.css 分发）。
 import "./styles/clipboard.css";
-import "./styles/resource.css";
+/* resource/ 六片按原 resource.css 块序导入——级联顺序与拆分前逐块一致。 */
+import "./styles/resource/library.css";
+import "./styles/resource/missing.css";
+import "./styles/resource/detail.css";
+import "./styles/resource/inspector.css";
+import "./styles/resource/trash.css";
+import "./styles/resource/history.css";
 import "./styles/project/shell.css";
 import "./styles/project/library.css";
 import "./styles/project/panels.css";

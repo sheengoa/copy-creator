@@ -119,7 +119,7 @@ describe("standalone window chrome", () => {
 
   it("keeps resource selection beside the resource heading", () => {
     const pageSource = readSource("../pages/ResourcePage.tsx");
-    const resourceCss = readStyle("resource.css");
+    const resourceCss = readStyle("resource/library.css");
 
     expect(pageSource).not.toContain('className="resource-mode-row"');
     expect(pageSource).toContain('className="resource-list-heading-actions"');

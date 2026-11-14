@@ -1,0 +1,369 @@
+/* resource/missing.css —— 资源缺失：筛选 chip、操作条、追溯与清理对话框。
+   原 resource.css 按域拆分（2026-11-14）：App.tsx 按原块序导入，级联顺序不变。
+   行数守卫见架构守卫规则 27（styles/resource 上限 1000）。 */
+
+/* === 资源缺失：筛选 chip / 操作条 === */
+.resource-filter-chip.is-missing {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  border-color: rgba(255, 59, 48, 0.3);
+  background: color-mix(in srgb, var(--danger) 6%, transparent);
+  color: var(--danger);
+}
+
+.resource-filter-chip.is-missing:hover {
+  border-color: rgba(255, 59, 48, 0.45);
+  background: color-mix(in srgb, var(--danger) 10%, transparent);
+  color: var(--danger);
+}
+
+/* 缺失筛选激活：白卡 + 红字——危险筛选语义靠色不靠实底 */
+.resource-filter-chip.is-missing.active {
+  color: var(--danger);
+}
+
+.resource-missing-bar {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 9px 13px;
+  border-radius: 10px;
+  background: rgba(255, 149, 0, 0.09);
+  border: 1px solid rgba(255, 149, 0, 0.28);
+  font-size: var(--text-sm);
+  color: #8a5300;
+  animation: resource-missing-bar-in 0.22s ease-out;
+}
+
+.resource-missing-bar-mark {
+  display: inline-grid;
+  place-items: center;
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  flex-shrink: 0;
+  background: rgba(255, 149, 0, 0.18);
+  color: #c46a00;
+  font-size: 11px;
+  font-weight: 700;
+}
+
+.resource-missing-bar-mark::before {
+  content: "!";
+}
+
+.resource-missing-bar-grow {
+  flex: 1;
+}
+
+.resource-missing-bar-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  min-height: 28px;
+  padding: 0 11px;
+  border-radius: 8px;
+  font-size: var(--text-sm);
+  background: var(--btn-card-bg);
+  border: 0;
+  color: var(--text-primary);
+  box-shadow: var(--btn-card-shadow);
+  transition: box-shadow 0.15s ease;
+}
+
+.resource-missing-bar-btn:hover {
+  box-shadow: var(--btn-card-shadow-hover);
+}
+
+.resource-missing-bar-btn svg {
+  width: 12px;
+  height: 12px;
+}
+
+.resource-missing-bar-btn:active {
+  transform: scale(0.96);
+}
+
+/* 全部删除：白卡 + 红字——危险语义靠色不靠实底 */
+.resource-missing-bar-btn.is-danger {
+  color: var(--danger);
+}
+
+[data-theme="dark"] .resource-missing-bar {
+  background: rgba(255, 149, 0, 0.12);
+  color: #ffb340;
+}
+
+@keyframes resource-missing-bar-in {
+  from { opacity: 0; transform: translateY(-4px); }
+  to { opacity: 1; transform: none; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .resource-missing-bar {
+    animation: none;
+  }
+
+  .resource-missing-bar-btn:active {
+    transform: none;
+  }
+}
+
+/* === 缺失追溯 / 清理对话框（信息层次构件见 components.css 的 dialog-callout 等） === */
+.resource-trace-dialog,
+.resource-cleanup-dialog {
+  width: 360px;
+}
+
+.resource-trace-record-sub {
+  margin: -6px 0 12px;
+  text-align: center;
+  color: var(--text-secondary);
+  font-size: var(--text-xs);
+}
+
+.resource-trace-searching {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 14px 4px;
+  color: var(--text-secondary);
+  font-size: var(--text-sm);
+}
+
+.resource-trace-spinner {
+  width: 17px;
+  height: 17px;
+  border-radius: 50%;
+  flex-shrink: 0;
+  border: 2px solid var(--separator);
+  border-top-color: var(--accent);
+  animation: resource-trace-spin 0.8s linear infinite;
+}
+
+@keyframes resource-trace-spin {
+  to { transform: rotate(360deg); }
+}
+
+.resource-trace-warn-mark {
+  display: inline-grid;
+  place-items: center;
+  width: 15px;
+  height: 15px;
+  border-radius: 50%;
+  flex-shrink: 0;
+  margin-top: 2px;
+  background: currentColor;
+}
+
+.resource-trace-warn-mark::before {
+  content: "!";
+  color: #fff;
+  font-size: 10px;
+  font-weight: 700;
+}
+
+.resource-trace-field {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 9px 12px;
+  border-radius: 10px;
+  background: var(--input-bg);
+  font-size: var(--text-sm);
+  line-height: 1.6;
+  color: var(--text-primary);
+}
+
+.resource-trace-field code {
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
+  word-break: break-all;
+  color: var(--text-primary);
+}
+
+.resource-trace-candidates {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.resource-trace-candidate {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  padding: 9px 12px;
+  border: 1px solid var(--separator);
+  border-radius: 10px;
+  background: var(--bg-card);
+  font-size: var(--text-xs);
+  cursor: pointer;
+}
+
+.resource-trace-candidate:has(input:checked) {
+  border-color: var(--accent);
+  background: var(--accent-bg);
+}
+
+.resource-trace-candidate-path {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  word-break: break-all;
+  color: var(--text-secondary);
+}
+
+.resource-cleanup-offline-path {
+  font-family: var(--font-mono);
+  word-break: break-all;
+}
+
+/* 文件缺失角标：随标题行展示，警示色但弱于操作按钮强调；字号随卡片缩放。 */
+.resource-card-missing {
+  flex-shrink: 0;
+  padding: 1px 6px;
+  border-radius: 4px;
+  font-size: calc(var(--text-xs) * var(--card-scale, 1));
+  background: color-mix(in srgb, var(--danger, #dc2626) 12%, transparent);
+  color: var(--danger, #dc2626);
+}
+
+/* 卡片标题命中标记样式收敛到全局 mark.search-highlight（components.css，
+   亮暗两套主题自适应），此处不再重复定义。 */
+
+/* 「全部分组」视图的所属分组标签（来源标签，与快捷输入全部视图同形态）。 */
+.resource-card-group-tag {
+  flex-shrink: 0;
+  max-width: 45%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: calc(var(--text-xs) * var(--card-scale, 1));
+  color: var(--text-secondary);
+  background: var(--chip-hover-bg);
+  border-radius: 6px;
+  padding: 0 6px;
+}
+
+.resource-icon-button,
+.resource-delete-button {
+  display: inline-flex;
+  width: 27px;
+  height: 27px;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  border: 1px solid transparent;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--text-tertiary);
+  font: inherit;
+  cursor: pointer;
+  transition: background 0.14s ease, border-color 0.14s ease, color 0.14s ease;
+}
+
+.resource-icon-button:hover,
+.resource-delete-button:hover {
+  border-color: var(--separator);
+  background: var(--chip-hover-bg);
+  color: var(--text-primary);
+}
+
+.resource-icon-button:focus-visible,
+.resource-delete-button:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+
+.resource-icon-button svg,
+.resource-delete-button svg {
+  width: 14px;
+  height: 14px;
+}
+
+.resource-delete-button:hover {
+  color: var(--danger);
+}
+
+.resource-load-error {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin: 0 2px 8px;
+  padding: 7px 9px;
+  border: 1px solid color-mix(in srgb, var(--danger) 28%, var(--separator));
+  border-radius: 7px;
+  background: color-mix(in srgb, var(--danger) 5%, transparent);
+  color: var(--danger);
+  font-size: var(--text-xs);
+}
+
+.resource-load-error button {
+  border: 0;
+  background: transparent;
+  color: inherit;
+  font-family: var(--font);
+  font-size: inherit;
+  cursor: pointer;
+  text-decoration: underline;
+}
+
+.resource-empty-state {
+  display: flex;
+  min-height: 220px;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  padding: 30px 12px;
+  flex-direction: column;
+  color: var(--text-secondary);
+  font-size: var(--text-sm);
+  text-align: center;
+}
+
+.resource-empty-state strong {
+  color: var(--text-primary);
+  font-size: var(--text-sm);
+  font-weight: var(--weight-medium);
+}
+
+.resource-empty-state > span {
+  max-width: 100%;
+  overflow-wrap: anywhere;
+  font-size: var(--text-xs);
+}
+
+
+
+.resource-feedback {
+  position: fixed;
+  right: 16px;
+  bottom: 16px;
+  z-index: 8000;
+  max-width: min(260px, calc(100vw - 32px));
+  padding: 9px 12px;
+  border: 1px solid var(--separator);
+  border-radius: 8px;
+  background: var(--card-inner-bg);
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.12);
+  color: var(--text-primary);
+  font-size: var(--text-sm);
+  pointer-events: none;
+  animation: toastIn 0.22s ease-out both;
+}
+
+.resource-feedback.success {
+  border-color: color-mix(in srgb, #34c759 38%, var(--separator));
+}
+
+/* 警示反馈（如「已删除，其中 N 条文件本已缺失」）：操作成功但需如实告知。 */
+.resource-feedback.warn {
+  border-color: color-mix(in srgb, var(--warning, #ff9f0a) 45%, var(--separator));
+  color: var(--warning, #ff9f0a);
+}
+
+.resource-feedback.error {
+  border-color: color-mix(in srgb, var(--danger) 38%, var(--separator));
+  color: var(--danger);
+}
