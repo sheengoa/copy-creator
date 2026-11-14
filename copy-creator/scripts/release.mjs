@@ -115,6 +115,28 @@ function preflight({ requireTagAbsent = true } = {}) {
   report(!run("git status --porcelain"), "工作区干净", "有未提交改动，先提交或暂存");
   report(run("git branch --show-current") === "main", "当前在 main 分支");
 
+  // 本地三件套（lint/typecheck/vitest）：CI 绿灯兜远端，这里兜本地——
+  // --force 跳过 CI 校验、或 HEAD 刚推送 CI 尚未跑完的窗口期，发布不裸奔。
+  // 顺序失败即中止（首项红了后面项无意义）；失败输出原样透传便于定位。
+  for (const [cmd, label] of [
+    ["pnpm lint", "lint"],
+    ["pnpm typecheck", "typecheck"],
+    ["pnpm test", "vitest"],
+  ]) {
+    let failed = null;
+    try {
+      execSync(cmd, { cwd: root, stdio: "pipe" });
+    } catch (error) {
+      failed = error;
+    }
+    if (failed) {
+      if (failed.stdout) process.stdout.write(String(failed.stdout));
+      if (failed.stderr) process.stderr.write(String(failed.stderr));
+    }
+    report(!failed, `本地 ${label}`, failed ? `失败——${cmd}` : "");
+    if (failed) return problems;
+  }
+
   // 与 origin/main 同步（fetch 失败视作离线，降级为跳过，推送阶段自然会拦）。
   try {
     run("git fetch origin main");
