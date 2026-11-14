@@ -2070,8 +2070,10 @@ pub(crate) fn delete_resource_group_inner<R: Runtime>(app: &AppHandle<R>, name: 
             .map_err(|_| "资源文件路径无效".to_string())?;
         let destination = root.join(relative_path);
         if destination.exists() {
+            // 文案前缀是前端 parseResourceSaveError 的契约（resourceSaveError.ts）：
+            // 变体绕过前缀会被吞成「请重试」，重试对重名永远无效。
             return Err(format!(
-                "资源库根目录已存在同名文件：{}",
+                "已存在同名文件：{}",
                 relative_path.to_string_lossy()
             ));
         }
@@ -2430,8 +2432,9 @@ pub(crate) fn move_resource_records_inner<R: Runtime>(
         let new_path = target_dir.join(&file_name);
         let unchanged = old_path.parent() == Some(target_dir.as_path());
         if !unchanged && !seen_targets.insert(resource_path_key(&new_path)) {
+            // 契约前缀同上：前端据此把重名识别为可行动错误而非「请重试」。
             return Err(format!(
-                "选择的内容中存在同名文件：{}",
+                "已存在同名文件：{}",
                 file_name.to_string_lossy()
             ));
         }
@@ -2450,8 +2453,9 @@ pub(crate) fn move_resource_records_inner<R: Runtime>(
             continue;
         }
         if new_path.exists() {
+            // 契约前缀同上：前端据此把重名识别为可行动错误而非「请重试」。
             return Err(format!(
-                "目标分组已存在同名文件：{}",
+                "已存在同名文件：{}",
                 new_path
                     .file_name()
                     .map(|name| name.to_string_lossy().to_string())

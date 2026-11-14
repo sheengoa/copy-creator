@@ -2048,7 +2048,9 @@ mod resource_command_tests {
             "林黛玉.png".to_string(),
         )
         .unwrap_err();
-        assert!(error.contains("已存在同名文件"));
+        // starts_with 锁定契约前缀：前端 parseResourceSaveError 靠
+        // 「已存在同名文件：」开头提取文件名并转可行动提示（resourceSaveError.ts）。
+        assert!(error.starts_with("已存在同名文件："));
         assert!(second.is_file());
         cleanup(&root);
     }
@@ -2278,7 +2280,8 @@ mod resource_command_tests {
             "项目资料".to_string(),
         )
         .unwrap_err();
-        assert!(error.contains("已存在同名文件"));
+        // 契约前缀锁定（同 rename 处注释）：目标分组重名必须可被前端解析。
+        assert!(error.starts_with("已存在同名文件："));
         assert!(first.is_file());
         assert!(second.is_file());
         assert!(!root.join("项目资料/b.txt").exists());
@@ -2383,7 +2386,8 @@ mod resource_command_tests {
             "归档".to_string(),
         )
         .unwrap_err();
-        assert!(error.contains("同名文件"));
+        // 契约前缀锁定（同 rename 处注释）：待移内容互相撞名也走同一前缀。
+        assert!(error.starts_with("已存在同名文件："));
         assert!(first.is_file());
         assert!(second.is_file());
         cleanup(&root);
@@ -2474,6 +2478,30 @@ mod resource_command_tests {
         assert!(first.is_file());
         assert!(unreadable_markdown.is_file());
         assert!(!root.join("01-resource.txt").exists());
+        assert!(root.join("References").is_dir());
+        cleanup(&root);
+    }
+
+    #[test]
+    fn deleting_resource_group_fails_with_contract_prefix_when_root_has_same_name_file() {
+        // 删除分组会把内容移入未分组：根目录已有同名文件时必须以契约前缀
+        // 「已存在同名文件：」拒绝（前端 parseResourceSaveError 据此提取
+        // 文件名转可行动提示，resourceSaveError.ts 锁定 startsWith），
+        // 分组内容保持原位。
+        let (app, root) = test_app();
+        let group_path = root.join("References");
+        std::fs::create_dir_all(&group_path).unwrap();
+        let in_group = group_path.join("clash.txt");
+        let at_root = root.join("clash.txt");
+        std::fs::write(&in_group, "group").unwrap();
+        std::fs::write(&at_root, "root").unwrap();
+
+        let error = delete_resource_group_inner(app.handle(), "References".to_string())
+            .expect_err("根目录同名文件应使分组删除失败");
+        assert!(error.starts_with("已存在同名文件："), "实际文案: {error}");
+        assert_eq!(error.trim_start_matches("已存在同名文件："), "clash.txt");
+        assert!(in_group.is_file());
+        assert_eq!(std::fs::read_to_string(&at_root).unwrap(), "root");
         assert!(root.join("References").is_dir());
         cleanup(&root);
     }
