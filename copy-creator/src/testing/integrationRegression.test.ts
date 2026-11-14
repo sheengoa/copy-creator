@@ -764,17 +764,19 @@ describe("integration regressions", () => {
     const previewPanel = readSource("../components/ContentPreviewPanel.tsx");
     const radialStyles = readSource("../styles/radial-menu.css");
     const radialDrag = readSource("../utils/radialDrag.ts");
-    const pointerDownBlock = radialMenu.slice(
-      radialMenu.indexOf("const handleItemPointerDown"),
-      radialMenu.indexOf("const handleItemPointerMove"),
+    // 拖拽子系统随拆分收口在 useRadialDrag（2026-11-14），index 只消费 hook 出口。
+    const radialDragHook = readSource("../components/RadialMenu/useRadialDrag.ts");
+    const pointerDownBlock = radialDragHook.slice(
+      radialDragHook.indexOf("const handleItemPointerDown"),
+      radialDragHook.indexOf("const handleItemPointerMove"),
     );
-    const pointerMoveBlock = radialMenu.slice(
-      radialMenu.indexOf("const handleItemPointerMove"),
-      radialMenu.indexOf("const handleItemPointerUp"),
+    const pointerMoveBlock = radialDragHook.slice(
+      radialDragHook.indexOf("const handleItemPointerMove"),
+      radialDragHook.indexOf("const handleItemPointerUp"),
     );
-    const pointerUpBlock = radialMenu.slice(
-      radialMenu.indexOf("const handleItemPointerUp"),
-      radialMenu.indexOf("const handleRadialDragStarted"),
+    const pointerUpBlock = radialDragHook.slice(
+      radialDragHook.indexOf("const handleItemPointerUp"),
+      radialDragHook.indexOf("const handleRadialDragStarted"),
     );
     const listenerBlock = radialMenu.slice(
       radialMenu.indexOf("const setup = async () =>"),
@@ -827,11 +829,11 @@ describe("integration regressions", () => {
     expect(radialMenu).not.toContain("onDragEnd");
     expect(radialMenu).not.toContain('draggable={item.dragKind === "text"}');
     expect(radialMenu).not.toContain("getRadialDragTarget");
-    expect(radialMenu).toContain("handleItemPointerDown");
-    expect(radialMenu).toContain("handleItemPointerMove");
-    expect(radialMenu).toContain("document.addEventListener(\"pointerdown\"");
-    expect(radialMenu).toContain("document.addEventListener(\"pointermove\"");
-    expect(radialMenu).toContain("document.addEventListener(\"pointerup\"");
+    expect(radialDragHook).toContain("handleItemPointerDown");
+    expect(radialDragHook).toContain("handleItemPointerMove");
+    expect(radialDragHook).toContain("document.addEventListener(\"pointerdown\"");
+    expect(radialDragHook).toContain("document.addEventListener(\"pointermove\"");
+    expect(radialDragHook).toContain("document.addEventListener(\"pointerup\"");
     expect(radialMenu).not.toContain("const handleWheel");
     expect(radialMenu).not.toContain('document.addEventListener("wheel"');
     // 禁止劫持滚动导致闪烁：不允许直接赋值 scrollTop；读取（回顶按钮可见性）不受限
@@ -840,22 +842,22 @@ describe("integration regressions", () => {
     expect(pointerMoveBlock.indexOf("e.preventDefault();")).toBeLessThan(
       pointerMoveBlock.indexOf("if (pending.nativeStarted) return;"),
     );
-    expect(radialMenu).toContain("dismissPreviewForDrag");
-    expect(radialMenu).toContain("startRadialFileDrag");
-    expect(radialMenu).toContain("nativeStarted");
+    expect(radialDragHook).toContain("dismissPreviewForDrag");
+    expect(radialDragHook).toContain("startRadialFileDrag");
+    expect(radialDragHook).toContain("nativeStarted");
     expect(pointerMoveBlock).toContain("startRadialFileDrag(crossed)");
     expect(pointerDownBlock).not.toContain("start_radial_file_drag");
     expect(pointerDownBlock).toContain("sessionId:");
     expect(pointerDownBlock).toContain("startScreenX:");
     expect(pointerDownBlock).toContain("startScreenY:");
     expect(pointerDownBlock).toContain("devicePixelRatio:");
-    expect(radialMenu).toContain("screenX: next.startScreenX");
-    expect(radialMenu).toContain("screenY: next.startScreenY");
+    expect(radialDragHook).toContain("screenX: next.startScreenX");
+    expect(radialDragHook).toContain("screenY: next.startScreenY");
     expect(radialMenu).not.toContain("pendingReleaseTimerRef");
     expect(pointerUpBlock).not.toContain("setTimeout");
     expect(pointerMoveBlock).toContain("dragActiveRef.current = true");
-    expect(radialMenu).toContain("markRadialDragStarted");
-    expect(radialMenu).not.toContain("markRadialDragStarted(current)");
+    expect(radialDragHook).toContain("markRadialDragStarted");
+    expect(radialDragHook).not.toContain("markRadialDragStarted(current)");
     expect(listenerBlock).toContain("Promise.all");
     expect(listenerBlock).toContain('"radial-drag-started"');
     expect(listenerBlock).toContain('"radial-drag-finished"');
@@ -883,7 +885,7 @@ describe("integration regressions", () => {
     expect(radialMenu).toContain('className={`radial-menu-preview${previewClosing ? " preview-closing" : ""}`}');
     expect(radialMenu).toContain("previewAvailable");
     expect(radialMenu).toContain("data-radial-preview-trigger");
-    expect(radialMenu).toContain('closest("[data-radial-preview-trigger]")');
+    expect(radialDragHook).toContain('closest("[data-radial-preview-trigger]")');
     expect(radialMenu).toContain("{preview && (");
     // togglePreview 实现随预览拆分收口在 useRadialPreview，index 消费 hook 返回值。
     expect(readSource("../components/RadialMenu/useRadialPreview.ts")).toContain(
@@ -895,12 +897,13 @@ describe("integration regressions", () => {
     // 预览展开/收起不再触碰窗口几何（几何固定是防闪烁方案的前提）。
     expect(radialMenu).not.toContain("windowRestoreRef");
     expect(radialMenu).toContain("onMouseLeave={handlePreviewLeave}");
-    const armDragCatchBlock = radialMenu.slice(
-      radialMenu.indexOf("const armRadialFileDrag"),
-      radialMenu.indexOf("const finishPendingPointerDrag"),
+    const armDragCatchBlock = radialDragHook.slice(
+      radialDragHook.indexOf("const armRadialFileDrag"),
+      radialDragHook.indexOf("const finishPendingPointerDrag"),
     );
     expect(armDragCatchBlock).toContain("if (current.thresholdCrossed)");
-    expect(armDragCatchBlock).toContain("collapsePreview();");
+    // arm 失败回滚经 dismissPreviewForDrag 收预览（= collapsePreview 的注入收口）。
+    expect(armDragCatchBlock).toContain("dismissPreviewForDrag();");
     const radialItemBlock = radialMenu.slice(
       radialMenu.indexOf('data-radial-item-id={item.id}'),
       radialMenu.indexOf("onClick={(e) => {", radialMenu.indexOf('data-radial-item-id={item.id}')),
