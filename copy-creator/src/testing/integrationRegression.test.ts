@@ -432,22 +432,25 @@ describe("integration regressions", () => {
     expect(radialMenu).toContain('aria-label={t(`tabs.${tab}`)}');
     // 「记住上次模式」：手动切换即持久化，打开菜单恢复；用户先一步
     // 手动切换时，异步返回的记忆 tab 不得覆盖用户选择。
-    expect(radialMenu).toContain('key: RADIAL_LAST_TAB_SETTING');
-    expect(radialMenu).toContain("restoreLastTab");
-    expect(radialMenu).toContain("if (tabTouchedRef.current) return;");
+    // 切换与记忆实现随拆分收口在 useRadialTabs。
+    const radialTabs = readSource("../components/RadialMenu/useRadialTabs.ts");
+    expect(radialTabs).toContain('key: RADIAL_LAST_TAB_SETTING');
+    expect(radialTabs).toContain("restoreLastTab");
+    expect(radialTabs).toContain("if (tabTouchedRef.current) return;");
     // 快捷输入 tab 激活即回到「全部」并重载（聚合查询 list_all_phrases）。
     // 条目映射随拆分收口在 radialItems.ts。
     expect(readSource("../components/RadialMenu/radialItems.ts")).toContain("buildAllPhraseItems");
-    expect(radialMenu).toContain("loadPhrases(ALL_PHRASES_GROUP_ID)");
+    expect(radialTabs).toContain("loadPhrases(ALL_PHRASES_GROUP_ID)");
     // 资源 tab 依据记忆的分组位置加载（跨重启持久化），不再强制重置为"全部"。
-    expect(radialMenu).toContain('useClipboardStore.getState().loadRecords(false, "resources", remembered)');
+    expect(radialTabs).toContain('useClipboardStore.getState().loadRecords(false, "resources", remembered)');
     expect(radialMenu).not.toContain('loadRecords(false, "resources", null)');
-    expect(radialMenu).toContain('invoke("set_setting", {');
-    expect(radialMenu).toContain('key: "radial_resource_group"');
+    expect(radialTabs).toContain('invoke("set_setting", {');
+    expect(radialTabs).toContain('key: "radial_resource_group"');
     // 恢复期间用户已手动切换过分组时，记忆值不得覆盖用户选择。
+    // touched 标记复位在 show 事件编排（index 大 effect）；拒绝覆盖判定在 useRadialTabs。
     expect(radialMenu).toContain("resourceGroupTouchedRef.current = false");
-    expect(radialMenu).toContain("if (resourceGroupTouchedRef.current) return;");
-    expect(radialMenu).toContain('useClipboardStore.getState().setCategory("resources")');
+    expect(radialTabs).toContain("if (resourceGroupTouchedRef.current) return;");
+    expect(radialTabs).toContain('useClipboardStore.getState().setCategory("resources")');
     // 类别过滤已收进 domain/records（recordMatchesCategory 含收藏语义，
     // 与主窗口共用；内联的 resources 分支不再存在——架构守卫规则 16）。
     // recordMatchesCategory 消费随映射拆分收口在 radialItems.ts（守卫规则 16）。

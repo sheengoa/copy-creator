@@ -483,7 +483,8 @@ describe("架构守卫：领域规则必须全局共享", () => {
         && anchorUtil.includes("applyListScrollAnchor"),
       "滚动锚点捕获/恢复逻辑必须集中在 utils/scrollAnchor.ts",
     ).toBe(true);
-    const radial = readSource("components/RadialMenu/index.tsx");
+    // 滚动锚点消费随拆分收口在 useRadialScrollAnchor。
+    const radial = readSource("components/RadialMenu/useRadialScrollAnchor.ts");
     expect(
       radial.includes("applyListScrollAnchor") && radial.includes("captureListScrollAnchor"),
       "径向列表必须在 items 更新后恢复同视图滚动停留位置（后台重排不得顶走视口）",
@@ -687,6 +688,7 @@ describe("架构守卫：领域规则必须全局共享", () => {
       ["styles/project", 1000],
       ["styles/components", 1000],
       ["styles/resource", 1000],
+      ["components/RadialMenu", 1000],
       ["dev/mock", 1000],
       ["dev/tauriMock.ts", 1000],
     ];

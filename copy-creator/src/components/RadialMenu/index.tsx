@@ -1,7 +1,7 @@
 import { RadialImageBanner, ResourceItemVisual } from "./ResourceItemVisual";
 // 径向菜单窗口专属样式：随动态 import 的 root 分包，主窗口不加载。
 import "../../styles/radial-menu.css";
-import { useEffect, useLayoutEffect, useRef, useState, useCallback, useMemo, type CSSProperties } from "react";
+import { useEffect, useRef, useState, useCallback, useMemo, type CSSProperties } from "react";
 import { createPortal } from "react-dom";
 import { useTranslation } from "react-i18next";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
@@ -13,18 +13,21 @@ import { useRadialPreview } from "./useRadialPreview";
 import { useRadialPaste } from "./useRadialPaste";
 import { useRadialDrag } from "./useRadialDrag";
 import { buildRadialItems, filterRecordsByCategory } from "./radialItems";
+import { useRadialBootstrap } from "./useRadialBootstrap";
+import { useRadialTabs } from "./useRadialTabs";
+import { useRadialSelection } from "./useRadialSelection";
+import { useRadialScrollAnchor } from "./useRadialScrollAnchor";
+import { useRadialGroupMenu } from "./useRadialGroupMenu";
 import { useClipboardStore, type ClipType } from "../../stores/clipboardStore";
 import { usePhraseStore, ALL_PHRASES_GROUP_ID } from "../../stores/phraseStore";
 import { useSettingsStore } from "../../stores/settingsStore";
 import { shouldUseTerminalPasteForMouseTrigger } from "../../utils/pasteMode";
 import {
   applyThemeAttribute,
-  onSystemThemeChange,
   parseThemePreference,
   resolveTheme,
   type ThemePreference,
 } from "../../utils/theme";
-import { applyListScrollAnchor, captureListScrollAnchor, type ListScrollAnchor } from "../../utils/scrollAnchor";
 import { ContentPreviewPanel } from "../ContentPreviewPanel";
 import { FileMediaVisual } from "../FileMediaPreview";
 import { BackToTopButton } from "../BackToTop";
@@ -35,15 +38,13 @@ import { RADIAL_PREVIEW_WIDTH, type RadialPreviewDirection } from "../../domain/
 import RadialItemAction from "./RadialItemAction";
 import { formatTime } from "../../utils/formatTime";
 import type { ResourceFolder } from "../../types";
-import { findResourceFolder, flattenResourceFoldersVisible, formatResourceFolderPath, isResourceFolderPath } from "../../domain/groups";
+import { findResourceFolder, formatResourceFolderPath, isResourceFolderPath } from "../../domain/groups";
 import {
   RECORD_CATEGORY_KEYS,
 } from "../../domain/records";
 import { UsageCountBadge } from "../UsageCountBadge";
-import i18n from "../../i18n";
 import {
   NAV_TAB_ICONS,
-  RADIAL_LAST_TAB_SETTING,
   RADIAL_TAB_KEYS,
   flog,
   loadPasteLeftClickSetting,
@@ -100,7 +101,6 @@ export default function RadialMenu() {
   // 列表滚动锚点：后台整窗替换 records 时（粘贴使用重排/资源增删/打开
   // 菜单刷新），WebKitGTK 无 scroll anchoring，停留位置会被顶走。随
   // 滚动持续记住「视口顶条目 + 偏移」，同视图内容更新后重新对位。
-  const scrollAnchorRef = useRef<ListScrollAnchor | null>(null);
   const phraseGroupIdRef = useRef<string | null>(ALL_PHRASES_GROUP_ID);
   const blurHideTimerRef = useRef<number | null>(null);
   const dragActiveRef = useRef(false);
@@ -110,10 +110,6 @@ export default function RadialMenu() {
   const dragSessionIdRef = useRef(0);
   const activeDragSessionIdRef = useRef<number | null>(null);
   const cancelledDragSessionsRef = useRef(new Set<number>());
-  // 径向菜单 UI 缩放比（设置项，默认 1）。CSS 侧通过 --radial-ui-scale
-  // 对整窗 zoom，窗口尺寸与物理换算在这里同步乘同一系数。
-  const uiScaleRef = useRef(1);
-
   useEffect(() => { visibleRef.current = visible; }, [visible]);
   useEffect(() => { selectedItemIdRef.current = selectedItemId; }, [selectedItemId]);
   useEffect(() => { selectedItemIdsRef.current = selectedItemIds; }, [selectedItemIds]);
@@ -122,11 +118,6 @@ export default function RadialMenu() {
   useEffect(() => { resourceGroupRef.current = resourceGroup; }, [resourceGroup]);
   useEffect(() => { phraseGroupIdRef.current = phraseGroupId; }, [phraseGroupId]);
 
-  const applyUiScale = useCallback((scale: number) => {
-    const next = Math.min(2, Math.max(0.5, Number.isFinite(scale) ? scale : 1));
-    uiScaleRef.current = next;
-    document.documentElement.style.setProperty("--radial-ui-scale", String(next));
-  }, [activeDragSessionIdRef, cancelledDragSessionsRef]);
 
   const loadResourceGroups = useCallback(async () => {
     try {
@@ -135,87 +126,24 @@ export default function RadialMenu() {
     } catch (error) {
       console.error("Failed to load radial resource groups:", error);
     }
-  }, [activeDragSessionIdRef, cancelledDragSessionsRef]);
+  }, []);
 
   // 快捷输入数据在挂载时由 phraseStore.init() 预取（默认「全部」视图）；
   // 每次切到该 tab / 打开菜单时由 activateTab 重新加载，保证使用记录新鲜。
 
   useHorizontalWheelScroll(categoriesScrollRef, activeTab);
 
-  const resourceFolderGroups = resourceGroups.filter((group) => group.name !== "");
-  const resourceGroupMenuFolder = resourceGroupMenuPath
-    ? findResourceFolder(resourceFolderGroups, resourceGroupMenuPath)
-    : null;
-  // 折叠展平：根行（全部文件）不参与折叠，其下各行可收起后代。
-  const collapsedGroupSet = useMemo(() => new Set(collapsedGroupPaths), [collapsedGroupPaths]);
-  const resourceGroupMenuItems = resourceGroupMenuFolder
-    ? [
-        { folder: resourceGroupMenuFolder, depth: 0 },
-        ...flattenResourceFoldersVisible(resourceGroupMenuFolder.children ?? [], collapsedGroupSet, 1),
-      ]
-    : [];
-
-  const toggleResourceGroupCollapsed = useCallback((path: string) => {
-    setCollapsedGroupPaths((current) => (
-      current.includes(path)
-        ? current.filter((path2) => path2 !== path)
-        : [...current, path]
-    ));
-  }, [activeDragSessionIdRef, cancelledDragSessionsRef]);
-
-  const closeResourceGroupMenu = useCallback(() => {
-    setResourceGroupMenuPath(null);
-    setResourceGroupMenuPosition(null);
-  }, [activeDragSessionIdRef, cancelledDragSessionsRef]);
-
-  const updateResourceGroupMenuPosition = useCallback(() => {
-    const anchor = resourceGroupMenuAnchorRef.current;
-    if (!anchor) return;
-    const anchorRect = anchor.getBoundingClientRect();
-    const menuRect = resourceGroupMenuRef.current?.getBoundingClientRect();
-    const menuWidth = menuRect?.width ?? 220;
-    const menuHeight = menuRect?.height ?? 0;
-    const viewportPadding = 8;
-    const left = Math.max(
-      viewportPadding,
-      Math.min(anchorRect.left, window.innerWidth - menuWidth - viewportPadding),
-    );
-    const top = anchorRect.bottom + 6 + menuHeight <= window.innerHeight - viewportPadding
-      ? anchorRect.bottom + 6
-      : Math.max(viewportPadding, anchorRect.top - menuHeight - 6);
-    setResourceGroupMenuPosition({ left, top });
-  }, [activeDragSessionIdRef, cancelledDragSessionsRef]);
-
-  useEffect(() => {
-    if (!resourceGroupMenuPath) return;
-
-    let frame: number | null = null;
-    const schedulePositionUpdate = () => {
-      if (frame !== null) window.cancelAnimationFrame(frame);
-      frame = window.requestAnimationFrame(() => {
-        frame = null;
-        updateResourceGroupMenuPosition();
-      });
-    };
-    const handlePointerDown = (event: MouseEvent) => {
-      const target = event.target as Node;
-      if (resourceGroupMenuRef.current?.contains(target)) return;
-      if (resourceGroupMenuAnchorRef.current?.contains(target)) return;
-      closeResourceGroupMenu();
-    };
-
-    document.addEventListener("mousedown", handlePointerDown);
-    window.addEventListener("resize", schedulePositionUpdate);
-    window.addEventListener("scroll", schedulePositionUpdate, true);
-    schedulePositionUpdate();
-
-    return () => {
-      document.removeEventListener("mousedown", handlePointerDown);
-      window.removeEventListener("resize", schedulePositionUpdate);
-      window.removeEventListener("scroll", schedulePositionUpdate, true);
-      if (frame !== null) window.cancelAnimationFrame(frame);
-    };
-  }, [closeResourceGroupMenu, resourceGroupMenuPath, resourceGroupMenuItems.length, updateResourceGroupMenuPosition]);
+  // 资源分组下拉（折叠展平/定位/外点关闭）收口于 useRadialGroupMenu。
+  const { resourceFolderGroups, resourceGroupMenuFolder, resourceGroupMenuItems, toggleResourceGroupCollapsed, closeResourceGroupMenu } = useRadialGroupMenu({
+    resourceGroups,
+    resourceGroupMenuPath,
+    collapsedGroupPaths,
+    setCollapsedGroupPaths,
+    setResourceGroupMenuPath,
+    setResourceGroupMenuPosition,
+    resourceGroupMenuRef,
+    resourceGroupMenuAnchorRef,
+  });
 
   // 预览子系统（展开/收起动画、分段加载与缓存、输入区扩放）收口于
   // useRadialPreview；拖拽会话 ref 注入使预览为拖拽让路。
@@ -247,212 +175,42 @@ export default function RadialMenu() {
       );
     }
     else void cancelTask.catch(() => {});
-  }, [activeDragSessionIdRef, cancelledDragSessionsRef]);
+  }, [cancelledDragSessionsRef]);
 
 
-  useEffect(() => {
-    // Initial theme load（偏好可为 "system"，本地解析后再应用）
-    invoke<string>("get_setting", { key: "theme" }).then((theme) => {
-      themePrefRef.current = parseThemePreference(theme);
-      applyThemeAttribute(resolveTheme(themePrefRef.current));
-    }).catch(() => {});
+  // 启动预载与缩放收口于 useRadialBootstrap（show/scale 事件继续消费 applyUiScale）。
+  const { applyUiScale } = useRadialBootstrap({ themePrefRef, loadResourceGroups, activeTabRef, resourceGroupRef });
 
-    // 系统深浅色切换时按当前偏好重解析（跟随系统模式即时生效）
-    const offSystemTheme = onSystemThemeChange(() => {
-      applyThemeAttribute(resolveTheme(themePrefRef.current));
-    });
+  // tab/分类/分组切换与跨重启记忆收口于 useRadialTabs。
+  const {
+    applyResourceGroupSwitch,
+    restoreResourceGroup,
+    restoreLastTab,
+    handleTabClick,
+    handleCategoryClick,
+  } = useRadialTabs({
+    collapsePreview,
+    closeResourceGroupMenu,
+    loadResourceGroups,
+    setActiveTab,
+    activeTabRef,
+    setClipboardCategory,
+    clipboardCategoryRef,
+    setResourceGroup,
+    resourceGroupRef,
+    resourceGroupTouchedRef,
+    tabTouchedRef,
+    setSelectedItemId,
+    selectedItemIdRef,
+    setSelectedItemIds,
+    selectedItemIdsRef,
+    shiftSelectionPointerItemIdRef,
+    shiftToggleItemIdRef,
+    shiftClickSelectionModeRef,
+    setPhraseGroupId,
+    phraseGroupIdRef,
+  });
 
-    // Initial language load
-    invoke<string>("get_setting", { key: "language" }).then((lang) => {
-      if (lang && lang !== i18n.language) {
-        i18n.changeLanguage(lang);
-      }
-    }).catch(() => {});
-
-    // Initial radial UI scale load (kept in sync afterwards via events)
-    invoke<string>("get_setting", { key: "radial_menu_scale" }).then((raw) => {
-      const percent = Number.parseFloat(raw);
-      if (Number.isFinite(percent)) applyUiScale(percent / 100);
-    }).catch(() => {});
-
-    // Pre-load data so it's ready when the menu first shows
-    loadPasteLeftClickSetting();
-    useClipboardStore.getState().init();
-    usePhraseStore.getState().init();
-    void loadResourceGroups();
-
-    // Listen for theme changes from the main window
-    let unlistenTheme: UnlistenFn | undefined;
-    listen<{ theme: string }>("theme-changed", (e) => {
-      themePrefRef.current = parseThemePreference(e.payload.theme);
-      applyThemeAttribute(resolveTheme(themePrefRef.current));
-    }).then((fn) => { unlistenTheme = fn; });
-
-    // Listen for language changes from the main window
-    let unlistenLang: UnlistenFn | undefined;
-    listen<{ language: string }>("language-changed", (e) => {
-      if (e.payload.language !== i18n.language) {
-        i18n.changeLanguage(e.payload.language);
-      }
-    }).then((fn) => { unlistenLang = fn; });
-
-    let unlistenResourceGroups: UnlistenFn | undefined;
-    listen("resource-groups-changed", () => {
-      void loadResourceGroups();
-      if (activeTabRef.current === "resources") {
-        void useClipboardStore.getState().loadRecords(
-          false,
-          "resources",
-          resourceGroupRef.current,
-        );
-      }
-    }).then((fn) => { unlistenResourceGroups = fn; });
-
-    return () => {
-      offSystemTheme();
-      if (unlistenTheme) unlistenTheme();
-      if (unlistenLang) unlistenLang();
-      if (unlistenResourceGroups) unlistenResourceGroups();
-    };
-  }, [applyUiScale, loadResourceGroups]);
-
-  const applyResourceGroupSwitch = useCallback((nextGroup: string | null) => {
-    collapsePreview();
-    closeResourceGroupMenu();
-    resourceGroupTouchedRef.current = true;
-    setResourceGroup(nextGroup);
-    resourceGroupRef.current = nextGroup;
-    useClipboardStore.getState().setResourceGroup(nextGroup);
-    useClipboardStore.getState().loadRecords(false, "resources", nextGroup);
-    setSelectedItemId(null);
-    selectedItemIdRef.current = null;
-    setSelectedItemIds([]);
-    selectedItemIdsRef.current = [];
-    shiftSelectionPointerItemIdRef.current = null;
-    shiftToggleItemIdRef.current = null;
-    shiftClickSelectionModeRef.current = false;
-    // 分组浏览位置跨重启记忆。null（"全部"视图）与 ""（未分组）语义不同，
-    // 设置表只存字符串，故以 JSON 编码区分三种状态。
-    void invoke("set_setting", {
-      key: "radial_resource_group",
-      value: JSON.stringify(nextGroup),
-    }).catch((error) => console.error("Failed to persist radial resource group:", error));
-  }, [closeResourceGroupMenu, collapsePreview]);
-
-  // 恢复上次资源分组浏览位置：打开菜单时从设置读取（跨重启记忆），
-  // 仅同步内存状态，列表加载推迟到真正切到资源 tab 时进行。
-  // 无记录或读取失败时保持当前内存值（本次运行内的上次位置或默认"全部"）。
-  const restoreResourceGroup = useCallback(async () => {
-    try {
-      const saved = await invoke<string>("get_setting", { key: "radial_resource_group" });
-      // 等待期间用户已手动切换过分组：尊重用户选择，不用记忆值覆盖。
-      if (resourceGroupTouchedRef.current) return;
-      const parsed: unknown = JSON.parse(saved);
-      const next = typeof parsed === "string" ? parsed : null;
-      setResourceGroup(next);
-      resourceGroupRef.current = next;
-      // 用户在读取返回前已切到资源 tab：补同步 store 并按恢复值重载，
-      // 避免组件状态与列表内容不一致。
-      if (activeTabRef.current === "resources") {
-        useClipboardStore.getState().setResourceGroup(next);
-        useClipboardStore.getState().loadRecords(false, "resources", next);
-      }
-    } catch {
-      // 尚无记录或解析失败属正常情况，保持现状即可。
-    }
-  }, [activeDragSessionIdRef, cancelledDragSessionsRef]);
-
-  // 激活一个 tab 并保证对应数据就绪：手动切换与打开菜单恢复记忆共用。
-  // 快捷输入每次激活都回到「全部」并重载，保证最近使用排序新鲜。
-  const activateTab = useCallback((key: string) => {
-    collapsePreview();
-    const tab = key as TabKey;
-    setActiveTab(tab);
-    activeTabRef.current = tab;
-    setSelectedItemId(null);
-    selectedItemIdRef.current = null;
-    setSelectedItemIds([]);
-    selectedItemIdsRef.current = [];
-    shiftClickSelectionModeRef.current = false;
-    if (tab === "clipboard") {
-      setClipboardCategory("all");
-      clipboardCategoryRef.current = "all";
-      useClipboardStore.getState().setCategory("all");
-      useClipboardStore.getState().loadRecords(false, "all");
-    } else if (tab === "resources") {
-      // 回到资源 tab 时恢复记忆的分组浏览位置（打开菜单时已由
-      // restoreResourceGroup 填充，这里直接沿用内存值）。
-      const remembered = resourceGroupRef.current;
-      setClipboardCategory("resources");
-      clipboardCategoryRef.current = "resources";
-      closeResourceGroupMenu();
-      useClipboardStore.getState().setCategory("resources");
-      useClipboardStore.getState().setResourceGroup(remembered);
-      useClipboardStore.getState().loadRecords(false, "resources", remembered);
-      void loadResourceGroups();
-    } else if (tab === "phrases") {
-      setPhraseGroupId(ALL_PHRASES_GROUP_ID);
-      phraseGroupIdRef.current = ALL_PHRASES_GROUP_ID;
-      usePhraseStore.getState().loadPhrases(ALL_PHRASES_GROUP_ID);
-    }
-  }, [closeResourceGroupMenu, collapsePreview, loadResourceGroups]);
-
-  const handleTabSwitch = useCallback((key: string) => {
-    activateTab(key);
-    // 手动切换即记住该模式：下次打开菜单（含跨重启）恢复到这里。
-    tabTouchedRef.current = true;
-    void invoke("set_setting", {
-      key: RADIAL_LAST_TAB_SETTING,
-      value: key,
-    }).catch((error) => console.error("Failed to persist radial last tab:", error));
-  }, [activateTab]);
-
-  // 恢复记住的上次 tab：打开菜单时从设置读取（跨重启记忆）。
-  // 无记忆或值非法（含已移除的「recent」）时保持当前 tab（首次使用为「快捷输入」）；
-  // 返回前用户已手动切换 tab 时尊重用户选择。
-  const restoreLastTab = useCallback(async () => {
-    try {
-      const saved = await invoke<string>("get_setting", { key: RADIAL_LAST_TAB_SETTING });
-      if (tabTouchedRef.current) return;
-      if ((RADIAL_TAB_KEYS as string[]).includes(saved)) {
-        activateTab(saved);
-      }
-    } catch {
-      // 尚无记录属正常情况（首次使用），保持初始「最近」。
-    }
-  }, [activateTab]);
-
-  const handleTabClick = useCallback((e: React.MouseEvent, key: string) => {
-    e.preventDefault();
-    e.stopPropagation();
-    handleTabSwitch(key);
-  }, [handleTabSwitch]);
-
-  const applyCategorySwitch = useCallback((key: string) => {
-    collapsePreview();
-    if (activeTabRef.current === "clipboard") {
-      setClipboardCategory(key as ClipType);
-      clipboardCategoryRef.current = key as ClipType;
-      useClipboardStore.getState().setCategory(key as ClipType);
-      useClipboardStore.getState().loadRecords(false, key as ClipType);
-    } else if (activeTabRef.current === "phrases") {
-      setPhraseGroupId(key);
-      phraseGroupIdRef.current = key;
-      usePhraseStore.getState().loadPhrases(key);
-    }
-    setSelectedItemId(null);
-    selectedItemIdRef.current = null;
-    setSelectedItemIds([]);
-    selectedItemIdsRef.current = [];
-    shiftToggleItemIdRef.current = null;
-    shiftClickSelectionModeRef.current = false;
-  }, [collapsePreview]);
-
-  const handleCategoryClick = useCallback((e: React.MouseEvent, key: string) => {
-    e.preventDefault();
-    e.stopPropagation();
-    applyCategorySwitch(key);
-  }, [applyCategorySwitch]);
 
   const resetState = useCallback((preserveClickSuppression = false) => {
     cancelPendingNativeDrag(nativeDragRef.current);
@@ -475,8 +233,7 @@ export default function RadialMenu() {
     activeDragSessionIdRef.current = null;
   }, [cancelPendingNativeDrag, closeResourceGroupMenu, collapsePreview]);
 
-  // 拖拽子系统（会话武装/阈值/原生启动/收尾与 pointer 装配）收口于
-  // useRadialDrag；会话与选择态 ref 注入，预览经 dismissPreviewForDrag 收口。
+  // 拖拽子系统（武装/阈值/原生启动/收尾与 pointer 装配）收口于 useRadialDrag。
   const {
     finishPendingPointerDrag,
     handleRadialDragStarted,
@@ -500,58 +257,16 @@ export default function RadialMenu() {
     previewRef,
   });
 
-  const resetStateForNativeHide = useCallback(() => {
-    // 原生窗口已被后端隐藏，下次显示会重新定位并重置输入区域。
-    resetState();
-  }, [resetState]);
-
-  const updateHoverFromPoint = useCallback((cssX: number, cssY: number) => {
-    if (
-      dragActiveRef.current
-      || nativeDragRef.current
-      || shiftClickSelectionModeRef.current
-    ) return;
-    const el = document.elementFromPoint(cssX, cssY);
-    if (!el) {
-      selectedItemIdRef.current = null;
-      setSelectedItemId(null);
-      return;
-    }
-    if ((el as HTMLElement).closest("[data-content-preview]")) {
-      return;
-    }
-    const itemEl = (el as HTMLElement).closest("[data-radial-item-id]");
-    if (itemEl) {
-      const id = itemEl.getAttribute("data-radial-item-id");
-      selectedItemIdRef.current = id;
-      setSelectedItemId(id);
-    } else {
-      selectedItemIdRef.current = null;
-      setSelectedItemId(null);
-    }
-  }, [activeDragSessionIdRef, cancelledDragSessionsRef]);
-
-  const selectItemWithShift = useCallback((itemId: string) => {
-    shiftClickSelectionModeRef.current = true;
-    const nextIds = selectedItemIdsRef.current.includes(itemId)
-      ? selectedItemIdsRef.current
-      : [...selectedItemIdsRef.current, itemId];
-    selectedItemIdsRef.current = nextIds;
-    setSelectedItemIds(nextIds);
-    selectedItemIdRef.current = itemId;
-    setSelectedItemId(itemId);
-  }, [activeDragSessionIdRef, cancelledDragSessionsRef]);
-
-  const deselectItemWithShift = useCallback((itemId: string) => {
-    shiftClickSelectionModeRef.current = true;
-    const nextIds = selectedItemIdsRef.current.filter((id) => id !== itemId);
-    selectedItemIdsRef.current = nextIds;
-    setSelectedItemIds(nextIds);
-    if (selectedItemIdRef.current === itemId) {
-      selectedItemIdRef.current = null;
-      setSelectedItemId(null);
-    }
-  }, [activeDragSessionIdRef, cancelledDragSessionsRef]);
+  // 悬停定位与 Shift 加减选收口于 useRadialSelection。
+  const { updateHoverFromPoint, selectItemWithShift, deselectItemWithShift } = useRadialSelection({
+    dragActiveRef,
+    nativeDragRef,
+    shiftClickSelectionModeRef,
+    selectedItemIdsRef,
+    selectedItemIdRef,
+    setSelectedItemId,
+    setSelectedItemIds,
+  });
 
   // 粘贴子系统（多条合并/整组粘贴/收藏切换）收口于 useRadialPaste；
   // resetState 与 resourceGroupRef 注入：粘贴前收起菜单、组粘贴作用当前分组。
@@ -655,7 +370,8 @@ export default function RadialMenu() {
           // 窗管的偏心退场动画永不出现），期间播放居中缩小退场动画。
           setMenuClosing(true);
           window.setTimeout(() => setMenuClosing(false), 150);
-          resetStateForNativeHide();
+          // 原生窗口已被后端隐藏，下次显示会重新定位并重置输入区域。
+          resetState();
         }),
         listen("radial-drag-started", handleRadialDragStarted),
         listen("radial-drag-finished", handleRadialDragFinished),
@@ -768,7 +484,6 @@ export default function RadialMenu() {
     handleRadialDragStarted,
     finishPendingPointerDrag,
     loadResourceGroups,
-    resetStateForNativeHide,
     resetState,
     restoreLastTab,
     restoreResourceGroup,
@@ -821,36 +536,8 @@ export default function RadialMenu() {
   // 只有 tab/类别/分组本身切换（视图换内容）才放弃旧锚点。
   const listViewKey = `${activeTab}|${clipboardCategory}|${phraseGroupId}|${resourceGroup ?? ""}`;
 
-  // items 每次变化（后台重载/重排）后重对位，再按新位置刷新锚点。
-  // useLayoutEffect 在绘制前完成，用户看不到跳动帧。
-  useLayoutEffect(() => {
-    const list = listRef.current;
-    if (!list) return;
-    const previous = scrollAnchorRef.current;
-    if (previous && previous.viewKey === listViewKey) {
-      applyListScrollAnchor(list, previous, listViewKey);
-    }
-    const captured = captureListScrollAnchor(list, listViewKey);
-    // 空态（无条目）不覆盖旧锚点：列表短暂清空又填充（如打开菜单的
-    // 重载序列）时，旧锚点仍能把位置找回来。
-    if (captured && (captured.itemId !== null || previous?.viewKey !== listViewKey)) {
-      scrollAnchorRef.current = captured;
-    }
-  }, [items, listViewKey]);
-
-  // 用户滚动期间持续刷新锚点，保证下一次内容替换用的是最新停留位置。
-  useEffect(() => {
-    const list = listRef.current;
-    if (!list) return;
-    const onScroll = () => {
-      const captured = captureListScrollAnchor(list, listViewKey);
-      if (captured && captured.itemId !== null) {
-        scrollAnchorRef.current = captured;
-      }
-    };
-    list.addEventListener("scroll", onScroll, { passive: true });
-    return () => list.removeEventListener("scroll", onScroll);
-  }, [listViewKey]);
+  // 滚动锚点收口于 useRadialScrollAnchor（items 变化重对位 + 滚动刷新）。
+  useRadialScrollAnchor(listRef, listViewKey, items);
 
   const categories = activeTab === "clipboard"
     ? RECORD_CATEGORY_KEYS.map((key) => ({ key, label: t(`clipboard.${key}`) }))

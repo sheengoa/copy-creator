@@ -261,6 +261,7 @@ export function useRadialDrag({
     dismissPreviewForDrag();
     armRadialFileDrag(pending);
   }, [
+    activeDragSessionIdRef,
     armRadialFileDrag,
     dismissPreviewForDrag,
     dragActiveRef,
