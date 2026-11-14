@@ -103,13 +103,30 @@ describe("架构守卫：领域规则必须全局共享", () => {
 
   it("规则 8：Rust 扩展名判定仅存在于 media_kind.rs 与生成物", () => {
     const rustRoot = join(repoRoot, "copy-creator", "src-tauri", "src");
-    const offenders = readdirSync(rustRoot)
-      .filter((entry) => entry.endsWith(".rs"))
-      .filter((entry) => !["media_kind.rs", "media_types_generated.rs"].includes(entry))
-      .filter((entry) =>
-        /ends_with\("\.[a-z]/i.test(readFileSync(join(rustRoot, entry), "utf8")))
-      // .tmp 是应用内部临时后缀（§5.2 规则 8 豁免清单），非媒体扩展名
-      .filter((entry) => !(entry === "db.rs" && !/ends_with\("\.(?!tmp")[a-z]/i.test(readFileSync(join(rustRoot, entry), "utf8"))));
+    // 递归收集：db/、ai/ 等子目录的域模块同样受约束（此前只扫顶层，
+    // 子目录完全在守卫之外；豁免引用的 db.rs 顶层不存在——真身是
+    // db/mod.rs 的 .tmp 临时后缀——该豁免分支从未生效过）。
+    const rustFiles: string[] = [];
+    const walkRs = (dir: string) => {
+      for (const entry of readdirSync(dir)) {
+        const full = join(dir, entry);
+        if (statSync(full).isDirectory()) {
+          walkRs(full);
+        } else if (entry.endsWith(".rs")) {
+          rustFiles.push(full);
+        }
+      }
+    };
+    walkRs(rustRoot);
+    const offenders = rustFiles
+      .filter((file) => !file.endsWith("media_kind.rs") && !file.endsWith("media_types_generated.rs"))
+      .flatMap((file) => {
+        const source = readFileSync(file, "utf8");
+        // .tmp 是应用内部临时后缀（§5.2 规则 8 豁免清单），非媒体扩展名
+        return Array.from(source.matchAll(/ends_with\("(\.[a-z][a-z0-9]*)"/gi))
+          .filter((m) => m[1].toLowerCase() !== ".tmp")
+          .map(() => toPosix(file.replace(repoRoot, "")));
+      });
     expect(
       offenders,
       "Rust 扩展名判定必须走 media_kind.rs（清单来自生成物，见 domain/README.md）",
@@ -649,8 +666,29 @@ describe("架构守卫：领域规则必须全局共享", () => {
       ["dev/tauriMock.ts", 1000],
     ];
     const offenders: string[] = [];
+    const checkFile = (rel: string, abs: string, limit: number) => {
+      const isStyle = rel.endsWith(".css");
+      const isTest = rel.endsWith(".test.ts") || rel.endsWith(".test.tsx");
+      if (!rel.endsWith(".ts") && !rel.endsWith(".tsx") && !isStyle) return;
+      if (isTest) return;
+      const lines = readFileSync(abs, "utf8").split("\n").length;
+      if (lines > limit) offenders.push(`${rel} = ${lines} 行`);
+    };
     const walk = (dir: string, limit: number) => {
       const full = join(frontRoot, dir);
+      // dir 允许直接指到文件（如 dev/tauriMock.ts）：此前对文件 readdirSync
+      // 抛 ENOTDIR 被 catch 静默吞掉，limits 里的文件条目永不生效（空转，
+      // tauriMock.ts 曾超限而测试全绿）。
+      let stat: ReturnType<typeof statSync>;
+      try {
+        stat = statSync(full);
+      } catch {
+        return; // 路径不存在（如前端仓单独检出）
+      }
+      if (!stat.isDirectory()) {
+        checkFile(dir, full, limit);
+        return;
+      }
       let entries: string[];
       try {
         entries = readdirSync(full);
@@ -664,12 +702,7 @@ describe("架构守卫：领域规则必须全局共享", () => {
           walk(rel, limit);
           continue;
         }
-        const isStyle = entry.endsWith(".css");
-        const isTest = entry.endsWith(".test.ts") || entry.endsWith(".test.tsx");
-        if (!entry.endsWith(".ts") && !entry.endsWith(".tsx") && !isStyle) continue;
-        if (isTest) continue;
-        const lines = readFileSync(abs, "utf8").split("\n").length;
-        if (lines > limit) offenders.push(`${rel} = ${lines} 行`);
+        checkFile(rel, abs, limit);
       }
     };
     for (const [dir, limit] of limits) walk(dir, limit);
