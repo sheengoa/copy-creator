@@ -15,6 +15,17 @@ export type ResourceMediaKind = "text" | "image" | "video" | "audio" | "file";
 export type ResourceTypeFilter = "all" | ResourceMediaKind;
 export type FileMediaKind = "video" | "audio" | "image";
 
+// kind → 文案 i18n 键路径的唯一映射：键路径是常量契约而非翻译本身，
+// 不引入 i18n 依赖，UI 层取值后交 t()。此前剪藏页/短语页三元链与资源页
+// 对象表三处各写一份，口径漂移时需三次同步，收口于此。
+export const RESOURCE_MEDIA_KIND_LABEL_KEYS: Record<ResourceMediaKind, string> = {
+  text: "resources.typeText",
+  image: "resources.typeImage",
+  video: "resources.typeVideo",
+  audio: "resources.typeAudio",
+  file: "resources.typeFile",
+};
+
 export const IMAGE_EXTENSIONS = new Set(IMAGE_EXTENSIONS_LIST);
 export const VIDEO_EXTENSIONS = new Set(VIDEO_EXTENSIONS_LIST);
 export const AUDIO_EXTENSIONS = new Set(AUDIO_EXTENSIONS_LIST);

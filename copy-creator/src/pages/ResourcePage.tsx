@@ -43,6 +43,7 @@ import ResourceCleanupDialog, {
   type CleanupMissingEntry,
 } from "./ResourcePage/ResourceCleanupDialog";
 import type { ResourceMediaKind as ResourceMediaKindLabel } from "../domain/mediaKind";
+import { RESOURCE_MEDIA_KIND_LABEL_KEYS } from "../domain/mediaKind";
 import { ResourceCard } from "./ResourcePage/ResourceCard";
 import { buildRecordView, type RecordView } from "../domain/recordView";
 import { type ResourceTypeFilter } from "../domain/mediaKind";
@@ -306,22 +307,16 @@ export default function ResourcePage() {
   const searchEffectInitializedRef = useRef(false);
   const selectAllRequestRef = useRef(0);
 
-  const typeLabels = useMemo<Record<ResourceMediaKindLabel, string>>(
-    () => ({
-      text: t("resources.typeText"),
-      image: t("resources.typeImage"),
-      video: t("resources.typeVideo"),
-      audio: t("resources.typeAudio"),
-      file: t("resources.typeFile"),
-    }),
+  // kind→文案键映射收口在 domain/mediaKind.ts，本页只负责 t() 取值。
+  const typeFilterLabel = useCallback(
+    (kind: ResourceTypeFilter) => kind === "all" ? t("resources.typeAll") : t(RESOURCE_MEDIA_KIND_LABEL_KEYS[kind]),
     [t],
   );
-  const typeFilterLabel = useCallback(
-    (kind: ResourceTypeFilter) => kind === "all" ? t("resources.typeAll") : typeLabels[kind],
-    [t, typeLabels],
-  );
   // 卡片回调保持引用稳定：ResourceCard 已 memo，内联箭头函数会让 memo 失效。
-  const cardTypeLabel = useCallback((kind: ResourceMediaKindLabel) => typeLabels[kind], [typeLabels]);
+  const cardTypeLabel = useCallback(
+    (kind: ResourceMediaKindLabel) => t(RESOURCE_MEDIA_KIND_LABEL_KEYS[kind]),
+    [t],
+  );
   // 分组浏览的本地排序（最新/最旧）。「全部」视图按内容排序偏好展示，控件隐藏。
   const [sortOrderLocal, setSortOrderLocal] = useState<"newest" | "oldest">("newest");
   const sortOptions = useMemo(() => ([
@@ -1208,7 +1203,7 @@ export default function ResourcePage() {
       <>
         <ResourceDetailPage
           record={detailRecord}
-          typeLabel={(kind) => typeLabels[kind]}
+          typeLabel={cardTypeLabel}
           onBack={closeDetail}
           onDelete={handleDeleteRecord}
           onRecordUpdated={setDetailRecord}

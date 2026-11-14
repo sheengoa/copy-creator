@@ -22,7 +22,7 @@ import { useCardColumns } from "../../hooks/useCardColumns";
 import { COMPACT_CARD_MIN_WIDTH, splitResourceColumns } from "../../utils/cardGrid";
 import { buildRecordView, type RecordView } from "../../domain/recordView";
 import type { ClipboardRecord } from "../../types";
-import { type ResourceMediaKind } from "../../domain/mediaKind";
+import { RESOURCE_MEDIA_KIND_LABEL_KEYS, type ResourceMediaKind } from "../../domain/mediaKind";
 import { isResourceRecord, recordMatchesCategory, RECORD_CATEGORY_KEYS } from "../../domain/records";
 
 type ClipType = ClipboardFilter;
@@ -94,16 +94,9 @@ export default function ClipboardPage() {
     [labels],
   );
 
-  // 媒体 kind 文案（video/audio 等）：与资源卡同一组 resources.type* 键。
+  // 媒体 kind 文案（video/audio 等）：kind→文案键映射收口在 domain/mediaKind.ts。
   const getKindLabel = useCallback(
-    (kind: ResourceMediaKind): string =>
-      t(
-        kind === "text" ? "resources.typeText"
-          : kind === "image" ? "resources.typeImage"
-            : kind === "video" ? "resources.typeVideo"
-              : kind === "audio" ? "resources.typeAudio"
-                : "resources.typeFile",
-      ),
+    (kind: ResourceMediaKind): string => t(RESOURCE_MEDIA_KIND_LABEL_KEYS[kind]),
     [t],
   );
 
