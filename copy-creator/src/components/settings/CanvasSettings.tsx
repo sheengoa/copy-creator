@@ -22,6 +22,7 @@ import {
 } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
 import { useShallow } from "zustand/react/shallow";
+import { isValidProxy } from "../../utils/proxyUrl";
 import { useSettingsStore, type AiChannel, type AiChannelInput, type AiStrategy } from "../../stores/settingsStore";
 import { ConfirmDialog } from "../ConfirmDialog";
 import { Icons } from "../Icons";
@@ -83,6 +84,7 @@ function ChannelRow({
   const [model, setModel] = useState(channel.model);
   const [priceText, setPriceText] = useState(channel.price == null ? "" : String(channel.price));
   const [currency, setCurrency] = useState(channel.currency);
+  const [proxy, setProxy] = useState(channel.proxy);
   const [error, setError] = useState("");
   const updateAiChannel = useSettingsStore((s) => s.updateAiChannel);
 
@@ -129,6 +131,7 @@ function ChannelRow({
     const priceDirty = priceText.trim() === ""
       ? channel.price != null
       : !Number.isFinite(price) || (price as number) !== channel.price;
+    const proxyTrimmed = proxy.trim();
     if (
       name === channel.name &&
       protocol === channel.protocol &&
@@ -136,12 +139,17 @@ function ChannelRow({
       apiKey.trim() === "" &&
       model === channel.model &&
       currency === channel.currency &&
+      proxyTrimmed === channel.proxy &&
       !priceDirty
     ) {
       return;
     }
     if (priceText.trim() !== "" && (!Number.isFinite(price) || (price as number) < 0)) {
       setError(t("settings.canvas.priceInvalid"));
+      return;
+    }
+    if (!isValidProxy(proxyTrimmed)) {
+      setError(t("settings.canvas.proxyInvalid"));
       return;
     }
     try {
@@ -153,6 +161,7 @@ function ChannelRow({
         model,
         price,
         currency,
+        proxy: proxyTrimmed,
       });
     } catch (e) {
       setError(String(e));
@@ -248,6 +257,20 @@ function ChannelRow({
                 className="settings-input canvas-mono"
                 value={baseUrl}
                 onChange={(e) => setBaseUrl(e.target.value)}
+                onBlur={() => void submit()}
+                spellCheck={false}
+              />
+            </div>
+            <div className="canvas-field full">
+              <span className="canvas-field-label">
+                {t("settings.canvas.fieldProxy")}
+                <em> · {t("settings.canvas.proxyHint")}</em>
+              </span>
+              <input
+                className="settings-input canvas-mono"
+                value={proxy}
+                placeholder={t("settings.canvas.proxyPlaceholder")}
+                onChange={(e) => setProxy(e.target.value)}
                 onBlur={() => void submit()}
                 spellCheck={false}
               />
@@ -351,6 +374,7 @@ function ChannelCreateForm({ onCancel }: { onCancel: () => void }) {
   const [model, setModel] = useState("");
   const [priceText, setPriceText] = useState("");
   const [currency, setCurrency] = useState("$");
+  const [proxy, setProxy] = useState("");
   const [error, setError] = useState("");
   const [saving, setSaving] = useState(false);
 
@@ -369,6 +393,11 @@ function ChannelCreateForm({ onCancel }: { onCancel: () => void }) {
       setError(t("settings.canvas.priceInvalid"));
       return;
     }
+    const proxyTrimmed = proxy.trim();
+    if (!isValidProxy(proxyTrimmed)) {
+      setError(t("settings.canvas.proxyInvalid"));
+      return;
+    }
     setSaving(true);
     try {
       const input: AiChannelInput = {
@@ -379,6 +408,7 @@ function ChannelCreateForm({ onCancel }: { onCancel: () => void }) {
         model,
         price,
         currency,
+        proxy: proxyTrimmed,
       };
       await createAiChannel(input);
       onCancel();
@@ -415,6 +445,19 @@ function ChannelCreateForm({ onCancel }: { onCancel: () => void }) {
               <em> · {t("settings.canvas.baseUrlHint")}</em>
             </span>
             <input className="settings-input canvas-mono" value={baseUrl} onChange={(e) => setBaseUrl(e.target.value)} spellCheck={false} />
+          </div>
+          <div className="canvas-field full">
+            <span className="canvas-field-label">
+              {t("settings.canvas.fieldProxy")}
+              <em> · {t("settings.canvas.proxyHint")}</em>
+            </span>
+            <input
+              className="settings-input canvas-mono"
+              value={proxy}
+              placeholder={t("settings.canvas.proxyPlaceholder")}
+              onChange={(e) => setProxy(e.target.value)}
+              spellCheck={false}
+            />
           </div>
           <div className="canvas-field full">
             <span className="canvas-field-label">{t("settings.canvas.fieldApiKey")}</span>
@@ -575,6 +618,7 @@ export function CanvasSettings() {
       aiConcurrency: s.aiConcurrency,
       aiManualChannelId: s.aiManualChannelId,
       aiModel: s.aiModel,
+      aiProxy: s.aiProxy,
       aiTimeout: s.aiTimeout,
       saveAiScheduling: s.saveAiScheduling,
       testAiChannel: s.testAiChannel,
@@ -596,6 +640,7 @@ export function CanvasSettings() {
     aiConcurrency,
     aiManualChannelId,
     aiModel,
+    aiProxy,
     aiTimeout,
   } = settings;
   // 互斥手风琴：同一时间只展开一条渠道（null = 全部收起；"__new__" = 新建表单）。
@@ -679,10 +724,26 @@ export function CanvasSettings() {
   const [concurrencyText, setConcurrencyText] = useState(String(aiConcurrency));
   const [timeoutText, setTimeoutText] = useState(String(aiTimeout));
   const [modelText, setModelText] = useState(aiModel);
+  const [proxyText, setProxyText] = useState(aiProxy);
+  // 全局默认代理的行内校验错误（ui-error 显示，不弹对话框）。
+  const [proxyError, setProxyError] = useState(false);
   useEffect(() => setCooldownText(String(aiRateLimitCooldown)), [aiRateLimitCooldown]);
   useEffect(() => setConcurrencyText(String(aiConcurrency)), [aiConcurrency]);
   useEffect(() => setTimeoutText(String(aiTimeout)), [aiTimeout]);
   useEffect(() => setModelText(aiModel), [aiModel]);
+  useEffect(() => setProxyText(aiProxy), [aiProxy]);
+
+  /** 全局默认代理失焦提交：非法不落库（红边提示，词保留可改）。 */
+  const submitGlobalProxy = () => {
+    const value = proxyText.trim();
+    if (!isValidProxy(value)) {
+      setProxyError(true);
+      return;
+    }
+    setProxyError(false);
+    setProxyText(value);
+    void settings.saveAiSettings({ aiProxy: value });
+  };
 
   const enabledChannels = channels.filter((c) => c.enabled);
 
@@ -895,6 +956,26 @@ export function CanvasSettings() {
               spellCheck={false}
             />
           </div>
+          <div className="canvas-row">
+            <div className="canvas-row-main">
+              <div className="canvas-row-label">{t("settings.canvas.defaultProxy")}</div>
+              <div className="ui-sub">{t("settings.canvas.defaultProxyHint")}</div>
+            </div>
+            <input
+              className={`settings-input canvas-mono canvas-w-lg${proxyError ? " is-error" : ""}`}
+              value={proxyText}
+              placeholder={t("settings.canvas.proxyPlaceholder")}
+              onChange={(e) => {
+                setProxyText(e.target.value);
+                if (proxyError) setProxyError(false);
+              }}
+              onBlur={submitGlobalProxy}
+              spellCheck={false}
+            />
+          </div>
+          {proxyError && (
+            <div className="ui-error" role="alert">{t("settings.canvas.proxyInvalid")}</div>
+          )}
           <div className="canvas-row">
             <div className="canvas-row-main">
               <div className="canvas-row-label">{t("settings.canvas.concurrency")}</div>

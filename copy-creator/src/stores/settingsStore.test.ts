@@ -176,6 +176,7 @@ const baseChannel = {
   lastTestedAt: "",
   cooldownUntilMs: 0,
   sortOrder: 0,
+  proxy: "",
 };
 
 describe("testAiChannel 结果回写", () => {
@@ -279,5 +280,67 @@ describe("restoreAiChannel 手动恢复", () => {
     expect(channel?.status).toBe("normal");
     // 服务端 lastError 仍在 → 回滚生效（乐观清空被回读覆盖）
     expect(channel?.lastError).toBe("认证失败");
+  });
+});
+
+describe("渠道代理字段透传", () => {
+  beforeEach(() => {
+    invokeMock.mockReset();
+    invokeMock.mockResolvedValue([{ ...baseChannel, proxy: "http://127.0.0.1:7890" }]);
+  });
+
+  it("createAiChannel 把 proxy 原样传给命令，返回列表回填 state", async () => {
+    await useSettingsStore.getState().createAiChannel({
+      name: "官方",
+      protocol: "openai",
+      baseUrl: "https://api.openai.com",
+      apiKey: "sk-new",
+      model: "gpt-image-1",
+      price: null,
+      currency: "$",
+      proxy: "http://127.0.0.1:7890",
+    });
+
+    expect(invokeMock).toHaveBeenCalledWith("create_ai_channel", {
+      name: "官方",
+      protocol: "openai",
+      baseUrl: "https://api.openai.com",
+      apiKey: "sk-new",
+      model: "gpt-image-1",
+      price: null,
+      currency: "$",
+      proxy: "http://127.0.0.1:7890",
+    });
+    expect(useSettingsStore.getState().aiChannels[0]?.proxy).toBe("http://127.0.0.1:7890");
+  });
+
+  it("updateAiChannel 空串 = 清除渠道级代理（回退全局默认）", async () => {
+    invokeMock.mockResolvedValue([{ ...baseChannel, proxy: "" }]);
+    useSettingsStore.setState({ aiChannels: [{ ...baseChannel, proxy: "http://old:1" }] });
+
+    await useSettingsStore.getState().updateAiChannel("ch-1", {
+      name: baseChannel.name,
+      protocol: "openai",
+      baseUrl: baseChannel.baseUrl,
+      apiKey: null,
+      model: baseChannel.model,
+      price: 0.07,
+      currency: "$",
+      proxy: "",
+    });
+
+    expect(invokeMock).toHaveBeenCalledWith("update_ai_channel", expect.objectContaining({ id: "ch-1", proxy: "" }));
+    expect(useSettingsStore.getState().aiChannels[0]?.proxy).toBe("");
+  });
+
+  it("saveAiSettings 以 ai_proxy 键走 set_settings_batch 并同步本地", async () => {
+    invokeMock.mockResolvedValue(undefined);
+
+    await useSettingsStore.getState().saveAiSettings({ aiProxy: "socks5://127.0.0.1:7891" });
+
+    expect(invokeMock).toHaveBeenCalledWith("set_settings_batch", {
+      settings: { ai_proxy: "socks5://127.0.0.1:7891" },
+    });
+    expect(useSettingsStore.getState().aiProxy).toBe("socks5://127.0.0.1:7891");
   });
 });

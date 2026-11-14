@@ -124,10 +124,12 @@ fn build_reference_prompt(prompt: &str, count: usize) -> String {
 // ── 配置与上游收集 ──
 
 /// 生成请求的通用设置。渠道化之后（画布设置页）供应商/密钥都挂在
-/// ai_channels 上，这里只剩超时；旧 ai_provider/ai_openai_* 键仅由
-/// 迁移逻辑读取一次，不再参与运行时。
+/// ai_channels 上，这里只剩超时与全局默认代理；旧 ai_provider/ai_openai_*
+/// 键仅由迁移逻辑读取一次，不再参与运行时。
 struct AiSettings {
     timeout_secs: u64,
+    /// 全局默认代理（空 = 不设；渠道级 proxy 优先于此）。
+    proxy: String,
 }
 
 /// 持锁直读 settings（get_setting_sync 会自己拿锁，持锁调用会死锁——
@@ -141,6 +143,33 @@ fn read_setting(conn: &rusqlite::Connection, key: &str) -> String {
     .unwrap_or_default()
 }
 
+/// 渠道最终代理：渠道级非空优先，留空回退全局默认，两者都空 = None
+/// （直连，保持 reqwest 默认行为——环境变量代理探测不受影响）。
+fn resolve_channel_proxy(channel_proxy: &str, global_proxy: &str) -> Option<String> {
+    let channel = channel_proxy.trim();
+    if !channel.is_empty() {
+        return Some(channel.to_string());
+    }
+    let global = global_proxy.trim();
+    if !global.is_empty() {
+        return Some(global.to_string());
+    }
+    None
+}
+
+/// AI 请求共用 Client 构造（生成/测速同源）：超时 + 可选代理。reqwest
+/// 代理是 Client 级配置（无法按请求覆盖），且显式代理会关闭默认的系统/
+/// 环境变量代理探测——配置了代理的渠道以代理为唯一通道，未配置的渠道
+/// 行为与旧版完全一致。
+fn build_ai_client(timeout_secs: u64, proxy: Option<&str>) -> Result<reqwest::Client, String> {
+    let mut builder = reqwest::Client::builder().timeout(Duration::from_secs(timeout_secs));
+    if let Some(url) = proxy {
+        let proxy = reqwest::Proxy::all(url).map_err(|e| format!("代理地址无效（{url}）：{e}"))?;
+        builder = builder.proxy(proxy);
+    }
+    builder.build().map_err(|e| format!("HTTP 客户端初始化失败：{e}"))
+}
+
 fn load_ai_settings(conn: &rusqlite::Connection) -> AiSettings {
     // 默认 300s（2026-11-04）：生图接口单张常需 30–90s，多张并发经同一
     // 代理渠道还会被排队（第二张总时长 = 排队 + 生成），旧默认 60s 是
@@ -148,7 +177,8 @@ fn load_ai_settings(conn: &rusqlite::Connection) -> AiSettings {
     // 张成功）；reqwest 总超时无法区分「还在生成」与「连接挂死」，只能
     // 给足量级，显式设置仍以其为准。
     let timeout = read_setting(conn, "ai_timeout").parse::<u64>().unwrap_or(300).clamp(5, 600);
-    AiSettings { timeout_secs: timeout }
+    let proxy = read_setting(conn, "ai_proxy");
+    AiSettings { timeout_secs: timeout, proxy }
 }
 
 struct UpstreamInput {
@@ -172,11 +202,12 @@ struct AiChannelRow {
     model: String,
     enabled: bool,
     status: String,
+    proxy: String,
 }
 
 fn load_channel(conn: &rusqlite::Connection, channel_id: &str) -> Result<AiChannelRow, String> {
     conn.query_row(
-        "SELECT id, protocol, base_url, api_key, model, enabled, status \
+        "SELECT id, protocol, base_url, api_key, model, enabled, status, proxy \
          FROM ai_channels WHERE id = ?1",
         params![channel_id],
         |row| {
@@ -188,6 +219,7 @@ fn load_channel(conn: &rusqlite::Connection, channel_id: &str) -> Result<AiChann
                 model: row.get(4)?,
                 enabled: row.get::<_, i64>(5)? != 0,
                 status: row.get(6)?,
+                proxy: row.get(7)?,
             })
         },
     )
@@ -232,7 +264,7 @@ fn record_channel_test_result(
 #[tauri::command]
 pub async fn ai_test_channel(app: AppHandle, channel_id: String) -> Result<Value, String> {
     // 配置读取（短锁），网络阶段不持锁。
-    let (channel, model, timeout_secs) = {
+    let (channel, model, timeout_secs, global_proxy) = {
         let state = app.state::<DbState>();
         let conn = state.conn.lock().map_err(|e| e.to_string())?;
         let channel = load_channel(&conn, &channel_id)?;
@@ -240,13 +272,13 @@ pub async fn ai_test_channel(app: AppHandle, channel_id: String) -> Result<Value
         let model = channel_model_or_global(&channel.model, &global_model)?;
         // 与生成同一默认（测速发的是真实最小生图请求，排队时同样超 60s）。
         let timeout = read_setting(&conn, "ai_timeout").parse::<u64>().unwrap_or(300).clamp(5, 600);
-        (channel, model, timeout)
+        let global_proxy = read_setting(&conn, "ai_proxy");
+        (channel, model, timeout, global_proxy)
     };
 
-    let client = reqwest::Client::builder()
-        .timeout(Duration::from_secs(timeout_secs))
-        .build()
-        .map_err(|e| format!("HTTP 客户端初始化失败：{e}"))?;
+    // 测速走渠道的最终代理（渠道级 > 全局默认），与生成链路同构——
+    // 延迟数据才有调度意义。
+    let client = build_ai_client(timeout_secs, resolve_channel_proxy(&channel.proxy, &global_proxy).as_deref())?;
 
     let result: Result<u64, String> = if channel.protocol == "gemini" {
         let parts = vec![json!({ "text": "a cute cat" })];
@@ -445,10 +477,16 @@ pub async fn ai_generate_image(app: AppHandle, canvas_id: String, node_id: Strin
         build_reference_prompt(&upstream.prompt, reference_paths.len())
     };
 
-    let client = reqwest::Client::builder()
-        .timeout(Duration::from_secs(settings.timeout_secs))
-        .build()
-        .map_err(|e| format!("HTTP 客户端初始化失败：{e}"))?;
+    // 代理是 Client 级配置（reqwest 无法按请求覆盖），failover 会换渠道：
+    // 按渠道的最终代理（渠道级 > 全局默认 > 直连）各建一份 Client，槽位
+    // 循环按 target.id 取用——换渠道即换代理，超时配置保持全局一份。
+    let mut clients: HashMap<String, reqwest::Client> = HashMap::new();
+    for target in &targets {
+        let proxy = resolve_channel_proxy(&target.proxy, &settings.proxy);
+        let client = build_ai_client(settings.timeout_secs, proxy.as_deref())
+            .map_err(|e| format!("渠道「{}」{e}", target.name))?;
+        clients.insert(target.id.clone(), client);
+    }
 
     let prompt_for_task = prompt.clone();
     let size_raw_for_task = size_raw.clone();
@@ -456,12 +494,13 @@ pub async fn ai_generate_image(app: AppHandle, canvas_id: String, node_id: Strin
     let refs_data_for_task = reference_data_urls.clone();
     let request_size_for_task = request_size.clone();
     let targets_for_task = Arc::new(targets);
+    let clients_for_task = Arc::new(clients);
     let sched_for_task = Arc::new(sched);
 
     let semaphore = Arc::new(Semaphore::new(sched_for_task.concurrency.max(1) as usize));
     let mut handles = Vec::new();
     for slot in 0..count as usize {
-        let client = client.clone();
+        let clients = clients_for_task.clone();
         let targets = targets_for_task.clone();
         let sched = sched_for_task.clone();
         let prompt = prompt_for_task.clone();
@@ -487,10 +526,15 @@ pub async fn ai_generate_image(app: AppHandle, canvas_id: String, node_id: Strin
             let mut used_channel: Option<String> = None;
             while attempt < targets.len() {
                 let target = &targets[attempt];
+                // clients 与 targets 同源构建，缺项只可能是实现疏漏，panic
+                // 比静默直连安全（直连会把 Key 发给本应走代理的渠道）。
+                let client = clients
+                    .get(&target.id)
+                    .expect("生成渠道 Client 缺失：构建循环与调度目标不同步");
                 let result = if target.protocol == "gemini" {
-                    request_gemini(&client, &target.base_url, &target.api_key, &target.model, &prompt, &reference_data_urls, &size_raw, notify.clone()).await
+                    request_gemini(client, &target.base_url, &target.api_key, &target.model, &prompt, &reference_data_urls, &size_raw, notify.clone()).await
                 } else {
-                    request_openai(&client, &target.base_url, &target.api_key, &target.model, &prompt, &reference_paths, 1, None, request_size.as_deref(), notify.clone()).await
+                    request_openai(client, &target.base_url, &target.api_key, &target.model, &prompt, &reference_paths, 1, None, request_size.as_deref(), notify.clone()).await
                 };
                 match result {
                     Ok(mut images) => {
@@ -767,6 +811,31 @@ mod tests {
         assert_eq!(gemini_base_url("https://generativelanguage.googleapis.com"), "https://generativelanguage.googleapis.com/v1beta");
         assert_eq!(gemini_base_url("https://proxy.example.com/v1beta"), "https://proxy.example.com/v1beta");
         assert_eq!(gemini_model_name("models/gemini-2.5-flash"), "gemini-2.5-flash");
+    }
+
+    #[test]
+    fn channel_proxy_resolution_rules() {
+        // 渠道级优先（含 trim）。
+        assert_eq!(resolve_channel_proxy(" http://127.0.0.1:7890 ", "http://global:1"), Some("http://127.0.0.1:7890".to_string()));
+        // 渠道留空回退全局（含 trim 与纯空白等价空）。
+        assert_eq!(resolve_channel_proxy("", " http://global:1 "), Some("http://global:1".to_string()));
+        assert_eq!(resolve_channel_proxy("   ", "http://global:1"), Some("http://global:1".to_string()));
+        // 都空 = 直连（None，保持 reqwest 默认探测行为不变）。
+        assert_eq!(resolve_channel_proxy("", ""), None);
+        assert_eq!(resolve_channel_proxy("  ", "   "), None);
+    }
+
+    #[test]
+    fn ai_client_proxy_build_rules() {
+        // 无代理：与旧版同构，构造成功。
+        assert!(build_ai_client(300, None).is_ok());
+        // 显式代理：http 与 socks5 都应可构造（socks 由 reqwest socks feature 接线）。
+        assert!(build_ai_client(300, Some("http://127.0.0.1:7890")).is_ok());
+        assert!(build_ai_client(300, Some("socks5://127.0.0.1:7891")).is_ok());
+        // 非法地址：构造期报错且文案带原地址（normalize_proxy 已拦大多数，这里是最后防线）。
+        let err = build_ai_client(300, Some("http://"));
+        assert!(err.is_err());
+        assert!(err.unwrap_err().contains("代理地址无效"));
     }
 }
 

@@ -28,6 +28,7 @@ CREATE TABLE IF NOT EXISTS ai_channels (
     last_tested_at TEXT DEFAULT '',
     cooldown_until_ms INTEGER NOT NULL DEFAULT 0,
     sort_order INTEGER NOT NULL DEFAULT 0,
+    proxy TEXT DEFAULT '',
     created_at TEXT NOT NULL,
     updated_at TEXT NOT NULL
 );
@@ -43,6 +44,7 @@ INSERT OR IGNORE INTO settings (key, value) VALUES ('ai_auto_disable_auth', '1')
 INSERT OR IGNORE INTO settings (key, value) VALUES ('ai_rate_limit_cooldown', '300');
 INSERT OR IGNORE INTO settings (key, value) VALUES ('ai_concurrency', '4');
 INSERT OR IGNORE INTO settings (key, value) VALUES ('ai_manual_channel_id', '');
+INSERT OR IGNORE INTO settings (key, value) VALUES ('ai_proxy', '');
 ";
 
 /// 旧单渠道配置迁移（幂等：ai_channels 非空即跳过）：把 ai_openai_* /
@@ -127,12 +129,13 @@ fn row_to_channel(row: &rusqlite::Row) -> rusqlite::Result<Value> {
         "lastTestedAt": row.get::<_, String>(12)?,
         "cooldownUntilMs": row.get::<_, i64>(13)?,
         "sortOrder": row.get::<_, i64>(14)?,
+        "proxy": row.get::<_, String>(15)?,
     }))
 }
 
 const CHANNEL_COLS: &str =
     "id, name, protocol, base_url, api_key, model, price, currency, enabled, status, \
-     last_error, last_latency_ms, last_tested_at, cooldown_until_ms, sort_order";
+     last_error, last_latency_ms, last_tested_at, cooldown_until_ms, sort_order, proxy";
 
 fn list_channels_internal(conn: &Connection) -> Result<Vec<Value>, String> {
     let mut stmt = conn
@@ -166,6 +169,26 @@ fn normalize_price(price: Option<f64>) -> Result<Option<f64>, String> {
     }
 }
 
+/// 代理地址归一：留空 = 不走代理（回退全局默认 ai_proxy）；非空必须是
+/// http(s):// 或 socks5(h):// 且能被 reqwest 解析为代理 URL——存前先拦，
+/// 免得生成/测速时才报「HTTP 客户端初始化失败」这种不指因的错误。
+pub(crate) fn normalize_proxy(proxy: &str) -> Result<String, String> {
+    let trimmed = proxy.trim().to_string();
+    if trimmed.is_empty() {
+        return Ok(String::new());
+    }
+    let ok_scheme = ["http://", "https://", "socks5://", "socks5h://"]
+        .iter()
+        .any(|prefix| trimmed.starts_with(prefix));
+    if !ok_scheme {
+        return Err("代理地址无效：需以 http://、https:// 或 socks5:// 开头".to_string());
+    }
+    match reqwest::Proxy::all(&trimmed) {
+        Ok(_) => Ok(trimmed),
+        Err(e) => Err(format!("代理地址无效（{trimmed}）：{e}")),
+    }
+}
+
 // ── CRUD 命令 ──
 
 #[tauri::command]
@@ -185,6 +208,7 @@ pub fn create_ai_channel(
     model: String,
     price: Option<f64>,
     currency: String,
+    proxy: String,
 ) -> Result<Value, String> {
     let protocol = normalize_protocol(&protocol)?;
     let name = name.trim().to_string();
@@ -204,15 +228,16 @@ pub fn create_ai_channel(
     let price = normalize_price(price)?;
     let currency = currency.trim().to_string();
     let currency = if currency.is_empty() { "$".to_string() } else { currency };
+    let proxy = normalize_proxy(&proxy)?;
     let state = app.state::<DbState>();
     let conn = state.conn.lock().map_err(|e| e.to_string())?;
     let id = uuid::Uuid::new_v4().to_string();
     let now = canvas_now();
     conn.execute(
-        "INSERT INTO ai_channels (id, name, protocol, base_url, api_key, model, price, currency, enabled, status, sort_order, created_at, updated_at)
+        "INSERT INTO ai_channels (id, name, protocol, base_url, api_key, model, price, currency, enabled, status, sort_order, proxy, created_at, updated_at)
          VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, 1, 'normal',
-                 COALESCE((SELECT MAX(sort_order) FROM ai_channels), -1) + 1, ?9, ?9)",
-        params![id, name, protocol, base_url, api_key, model.trim(), price, currency, now],
+                 COALESCE((SELECT MAX(sort_order) FROM ai_channels), -1) + 1, ?9, ?10, ?10)",
+        params![id, name, protocol, base_url, api_key, model.trim(), price, currency, proxy, now],
     )
     .map_err(|e| e.to_string())?;
     list_channels_internal(&conn)?.into_iter().find(|c| c["id"] == json!(id)).ok_or_else(|| "渠道创建后读取失败".to_string())
@@ -229,6 +254,7 @@ pub fn update_ai_channel(
     model: String,
     price: Option<f64>,
     currency: String,
+    proxy: String,
 ) -> Result<Value, String> {
     let protocol = normalize_protocol(&protocol)?;
     let name = name.trim().to_string();
@@ -242,6 +268,7 @@ pub fn update_ai_channel(
     let price = normalize_price(price)?;
     let currency = currency.trim().to_string();
     let currency = if currency.is_empty() { "$".to_string() } else { currency };
+    let proxy = normalize_proxy(&proxy)?;
     let state = app.state::<DbState>();
     let conn = state.conn.lock().map_err(|e| e.to_string())?;
     update_channel_row(
@@ -255,6 +282,7 @@ pub fn update_ai_channel(
             model: &model,
             price,
             currency: &currency,
+            proxy: &proxy,
         },
     )?;
     list_channels_internal(&conn)?.into_iter().find(|c| c["id"] == json!(id)).ok_or_else(|| "渠道更新后读取失败".to_string())
@@ -269,20 +297,22 @@ pub(crate) struct ChannelUpdate<'a> {
     pub model: &'a str,
     pub price: Option<f64>,
     pub currency: &'a str,
+    pub proxy: &'a str,
 }
 
-/// 渠道更新核心（命令层与测试共用）：Key 留空 = 不修改；协议或 Base URL
-/// 变更 = 旧测速/故障状态失效重置。两条 SQL 的占位符各自连续编号
-/// （rusqlite 按序绑定，跳号占位符会参数错位/数量不符——历史 bug）。
+/// 渠道更新核心（命令层与测试共用）：Key 留空 = 不修改；协议、Base URL
+/// 或代理变更 = 连接方式变了，旧测速/故障状态失效重置。两条 SQL 的占位符
+/// 各自连续编号（rusqlite 按序绑定，跳号占位符会参数错位/数量不符——历史 bug）。
 pub(crate) fn update_channel_row(conn: &Connection, id: &str, input: &ChannelUpdate) -> Result<(), String> {
-    let (old_protocol, old_base_url): (String, String) = conn
+    let (old_protocol, old_base_url, old_proxy): (String, String, String) = conn
         .query_row(
-            "SELECT protocol, base_url FROM ai_channels WHERE id = ?1",
+            "SELECT protocol, base_url, proxy FROM ai_channels WHERE id = ?1",
             params![id],
-            |row| Ok((row.get(0)?, row.get(1)?)),
+            |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
         )
         .map_err(|_| format!("渠道不存在：{id}"))?;
-    let endpoint_changed = old_protocol != input.protocol || old_base_url != input.base_url;
+    let endpoint_changed =
+        old_protocol != input.protocol || old_base_url != input.base_url || old_proxy != input.proxy;
     let reset_latency = if endpoint_changed { "NULL" } else { "last_latency_ms" };
     let reset_tested = if endpoint_changed { "''" } else { "last_tested_at" };
     let now = canvas_now();
@@ -290,20 +320,20 @@ pub(crate) fn update_channel_row(conn: &Connection, id: &str, input: &ChannelUpd
     let affected = if key_value.is_empty() {
         conn.execute(
             &format!(
-                "UPDATE ai_channels SET name = ?1, protocol = ?2, base_url = ?3, model = ?4, price = ?5, currency = ?6,
+                "UPDATE ai_channels SET name = ?1, protocol = ?2, base_url = ?3, model = ?4, price = ?5, currency = ?6, proxy = ?7,
                  last_latency_ms = {reset_latency}, last_tested_at = {reset_tested}, status = 'normal', last_error = '', cooldown_until_ms = 0,
-                 updated_at = ?7 WHERE id = ?8"
+                 updated_at = ?8 WHERE id = ?9"
             ),
-            params![input.name, input.protocol, input.base_url, input.model.trim(), input.price, input.currency, now, id],
+            params![input.name, input.protocol, input.base_url, input.model.trim(), input.price, input.currency, input.proxy, now, id],
         )
     } else {
         conn.execute(
             &format!(
-                "UPDATE ai_channels SET name = ?1, protocol = ?2, base_url = ?3, model = ?4, price = ?5, currency = ?6, api_key = ?7,
+                "UPDATE ai_channels SET name = ?1, protocol = ?2, base_url = ?3, model = ?4, price = ?5, currency = ?6, api_key = ?7, proxy = ?8,
                  last_latency_ms = {reset_latency}, last_tested_at = {reset_tested}, status = 'normal', last_error = '', cooldown_until_ms = 0,
-                 updated_at = ?8 WHERE id = ?9"
+                 updated_at = ?9 WHERE id = ?10"
             ),
-            params![input.name, input.protocol, input.base_url, input.model.trim(), input.price, input.currency, key_value, now, id],
+            params![input.name, input.protocol, input.base_url, input.model.trim(), input.price, input.currency, key_value, input.proxy, now, id],
         )
     };
     affected.map(|_| ()).map_err(|e| e.to_string())

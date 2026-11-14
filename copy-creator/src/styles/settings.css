@@ -83,6 +83,12 @@
   border-color: rgba(255, 255, 255, 0.4);
 }
 
+/* 校验失败红边（保存面板 fc-save-panel-create-input.is-error 同语言，画布 AI
+   代理等通用输入复用）；--danger 亮暗同值，无需主题分支。 */
+.settings-input.is-error {
+  border-color: var(--danger);
+}
+
 .settings-actions {
   display: flex;
   padding: 12px 0 4px;

@@ -98,6 +98,8 @@ export interface MockAiChannel {
   lastTestedAt: string;
   cooldownUntilMs: number;
   sortOrder: number;
+  /** 渠道级代理（空 = 回退全局 ai_proxy）。 */
+  proxy: string;
 }
 
 export interface MockScene {
@@ -307,13 +309,13 @@ export const db = {
       id: "ch-1", name: "示例渠道 A", protocol: "openai", baseUrl: "https://api.openai.com",
       apiKeyPreview: "sk-mock1...abcd", apiKeySet: true, model: "gpt-image-1",
       price: 0.04, currency: "$", enabled: true, status: "normal", lastError: "",
-      lastLatencyMs: 980, lastTestedAt: ts(), cooldownUntilMs: 0, sortOrder: 0,
+      lastLatencyMs: 980, lastTestedAt: ts(), cooldownUntilMs: 0, sortOrder: 0, proxy: "",
     },
     {
       id: "ch-2", name: "示例渠道 B", protocol: "gemini", baseUrl: "https://generativelanguage.googleapis.com",
       apiKeyPreview: "AIza-mock...wxyz", apiKeySet: true, model: "",
       price: null, currency: "$", enabled: true, status: "normal", lastError: "",
-      lastLatencyMs: null, lastTestedAt: "", cooldownUntilMs: 0, sortOrder: 1,
+      lastLatencyMs: null, lastTestedAt: "", cooldownUntilMs: 0, sortOrder: 1, proxy: "",
     },
   ] as MockAiChannel[],
 };

@@ -635,6 +635,7 @@ function handleInvoke(cmd: string, args: Record<string, unknown>): unknown {
         radial_menu_scale: "1",
         paste_left_click: "normal",
         content_sort: "",
+        ai_proxy: "",
       };
     case "project_search":
       return [];
@@ -955,6 +956,7 @@ function handleInvoke(cmd: string, args: Record<string, unknown>): unknown {
         lastTestedAt: "",
         cooldownUntilMs: 0,
         sortOrder: db.ai_channels.length,
+        proxy: String(args.proxy ?? ""),
       };
       db.ai_channels.push(row);
       return clone(db.ai_channels);
@@ -970,6 +972,8 @@ function handleInvoke(cmd: string, args: Record<string, unknown>): unknown {
       row.model = String(args.model ?? "");
       row.price = (args.price ?? null) as number | null;
       row.currency = String(args.currency ?? "$");
+      // 空串 = 清除渠道级代理（与后端语义一致），有值即覆盖。
+      row.proxy = String(args.proxy ?? "");
       return clone([...db.ai_channels].sort((a, b) => a.sortOrder - b.sortOrder));
     }
     case "delete_ai_channel":

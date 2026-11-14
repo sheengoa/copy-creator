@@ -9302,8 +9302,9 @@ mod canvas_tests {
 #[cfg(test)]
 mod ai_channel_tests {
     use crate::db::{
-        ensure_schema, migrate_legacy_ai_channels, restore_channel_internal, update_channel_row,
-        AI_CHANNEL_SCHEMA_SQL, AI_SCHEDULING_SETTING_SEED_SQL, ChannelUpdate, Connection,
+        ensure_schema, migrate_legacy_ai_channels, normalize_proxy, restore_channel_internal,
+        update_channel_row, AI_CHANNEL_SCHEMA_SQL, AI_SCHEDULING_SETTING_SEED_SQL, ChannelUpdate,
+        Connection,
     };
 
     fn conn_with_legacy(provider: &str, openai_key: &str, gemini_key: &str) -> Connection {
@@ -9387,6 +9388,11 @@ mod ai_channel_tests {
             .query_row("SELECT value FROM settings WHERE key = 'ai_concurrency'", [], |r| r.get(0))
             .unwrap();
         assert_eq!(concurrency, "4");
+        // 全局默认代理种子：空 = 默认直连（渠道级 proxy 优先于此）。
+        let ai_proxy: String = conn
+            .query_row("SELECT value FROM settings WHERE key = 'ai_proxy'", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(ai_proxy, "");
     }
 
     /// 钉住 update_channel_row 两条 SQL（不改 Key / 改 Key）的绑定正确性：
@@ -9427,6 +9433,7 @@ mod ai_channel_tests {
                 model: "new-model",
                 price: Some(0.25),
                 currency: "¥",
+                proxy: "",
             },
         )
         .unwrap();
@@ -9458,6 +9465,7 @@ mod ai_channel_tests {
                 model: "new-model",
                 price: None,
                 currency: "$",
+                proxy: "",
             },
         )
         .unwrap();
@@ -9488,6 +9496,7 @@ mod ai_channel_tests {
                 model: "",
                 price: None,
                 currency: "$",
+                proxy: "",
             },
         )
         .unwrap_err();
@@ -9516,5 +9525,100 @@ mod ai_channel_tests {
         assert_eq!(cooldown, 0);
         assert_eq!(enabled, 0, "恢复不动启用开关");
         assert_eq!(latency, Some(1234), "测速记录保留，仍按历史延迟参与调度");
+    }
+
+    /// 渠道级代理：UPDATE 落库、改代理与改 Base URL 同语义重置测速记录、
+    /// 不改代理保留测速记录（endpoint_changed 判定纳入 proxy 的钉子）。
+    #[test]
+    fn update_channel_row_writes_proxy_and_change_resets_latency() {
+        let conn = Connection::open_in_memory().unwrap();
+        conn.execute_batch(AI_CHANNEL_SCHEMA_SQL).unwrap();
+        seed_channel(&conn); // auto_disabled + latency=1234
+        let proxy_of = |conn: &Connection| -> String {
+            conn.query_row("SELECT proxy FROM ai_channels WHERE id = 'ch-1'", [], |r| r.get(0))
+                .unwrap()
+        };
+        // 写入代理：落库 + endpoint 变更重置故障与测速状态。
+        update_channel_row(
+            &conn,
+            "ch-1",
+            &ChannelUpdate {
+                name: "旧名",
+                protocol: "openai",
+                base_url: "https://old.example.com",
+                api_key: Some(""),
+                model: "old-model",
+                price: Some(0.5),
+                currency: "$",
+                proxy: "http://127.0.0.1:7890",
+            },
+        )
+        .unwrap();
+        assert_eq!(proxy_of(&conn), "http://127.0.0.1:7890");
+        let latency: Option<i64> = conn
+            .query_row("SELECT last_latency_ms FROM ai_channels WHERE id = 'ch-1'", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(latency, None, "代理变更 = 连接方式变了，旧测速记录失效");
+        // 代理不变（空串保存即清除，但本次重置后无延迟可保）：直接再造一条
+        // 测速记录后按同代理保存，测速记录应保留。
+        conn.execute(
+            "UPDATE ai_channels SET last_latency_ms = 567 WHERE id = 'ch-1'",
+            [],
+        )
+        .unwrap();
+        update_channel_row(
+            &conn,
+            "ch-1",
+            &ChannelUpdate {
+                name: "旧名",
+                protocol: "openai",
+                base_url: "https://old.example.com",
+                api_key: Some(""),
+                model: "old-model",
+                price: Some(0.5),
+                currency: "$",
+                proxy: "http://127.0.0.1:7890",
+            },
+        )
+        .unwrap();
+        let latency: Option<i64> = conn
+            .query_row("SELECT last_latency_ms FROM ai_channels WHERE id = 'ch-1'", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(latency, Some(567), "代理未变：测速记录保留");
+        // 空串清除代理：同样视为 endpoint 变更。
+        update_channel_row(
+            &conn,
+            "ch-1",
+            &ChannelUpdate {
+                name: "旧名",
+                protocol: "openai",
+                base_url: "https://old.example.com",
+                api_key: Some(""),
+                model: "old-model",
+                price: Some(0.5),
+                currency: "$",
+                proxy: "",
+            },
+        )
+        .unwrap();
+        assert_eq!(proxy_of(&conn), "", "空串 = 清除渠道级代理");
+    }
+
+    /// 代理地址归一：白名单前缀 + reqwest 可解析双重校验，存前先拦。
+    #[test]
+    fn normalize_proxy_accepts_supported_schemes_and_rejects_others() {
+        // 留空/纯空白 = 不走代理。
+        assert_eq!(normalize_proxy("").unwrap(), "");
+        assert_eq!(normalize_proxy("   ").unwrap(), "");
+        // 四种合法协议（trim 归一）。
+        assert_eq!(normalize_proxy(" http://127.0.0.1:7890 ").unwrap(), "http://127.0.0.1:7890");
+        assert_eq!(normalize_proxy("https://proxy.example.com").unwrap(), "https://proxy.example.com");
+        assert_eq!(normalize_proxy("socks5://127.0.0.1:7891").unwrap(), "socks5://127.0.0.1:7891");
+        assert_eq!(normalize_proxy("socks5h://127.0.0.1:7891").unwrap(), "socks5h://127.0.0.1:7891");
+        // 非法前缀 / 缺 host：报错文案可指因。
+        for bad in ["ftp://127.0.0.1:21", "127.0.0.1:7890", "http://", "socks4://127.0.0.1:1080"] {
+            let err = normalize_proxy(bad).unwrap_err();
+            assert!(err.contains("代理地址无效"), "非法地址 {bad} 应报「代理地址无效」，实际：{err}");
+        }
     }
 }

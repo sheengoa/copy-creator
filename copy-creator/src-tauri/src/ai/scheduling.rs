@@ -16,6 +16,8 @@ pub(super) struct ChannelTarget {
     pub(super) price_norm: Option<f64>,
     /// 最近延迟（主动测速 + 被动 EMA；None = 从未测速）。
     pub(super) latency_ms: Option<i64>,
+    /// 渠道级代理原文（空 = 无渠道代理，生成时回退全局 ai_proxy）。
+    pub(super) proxy: String,
 }
 
 pub(super) struct Scheduling {
@@ -56,15 +58,16 @@ pub(super) fn ordered_channel_targets(conn: &rusqlite::Connection, sched: &Sched
     let mut stmt = conn
         .prepare(
             "SELECT id, name, protocol, base_url, api_key, model, price, currency, \
-             last_latency_ms, cooldown_until_ms, status FROM ai_channels \
+             last_latency_ms, cooldown_until_ms, status, proxy FROM ai_channels \
              WHERE enabled = 1 ORDER BY sort_order ASC",
         )
         .map_err(|e| e.to_string())?;
-    let rows: Vec<(String, String, String, String, String, String, Option<f64>, String, Option<i64>, i64, String)> = stmt
+    let rows: Vec<(String, String, String, String, String, String, Option<f64>, String, Option<i64>, i64, String, String)> = stmt
         .query_map([], |row| {
             Ok((
                 row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?, row.get(4)?,
                 row.get(5)?, row.get(6)?, row.get(7)?, row.get(8)?, row.get(9)?, row.get(10)?,
+                row.get(11)?,
             ))
         })
         .map_err(|e| e.to_string())?
@@ -80,7 +83,7 @@ pub(super) fn ordered_channel_targets(conn: &rusqlite::Connection, sched: &Sched
     let mut disabled_rows = 0usize;
     let mut cooldown_rows = 0usize;
     let mut max_cooldown_remaining_ms = 0i64;
-    for (id, name, protocol, base_url, api_key, model, price, currency, last_latency_ms, cooldown_until_ms, status) in &rows {
+    for (id, name, protocol, base_url, api_key, model, price, currency, last_latency_ms, cooldown_until_ms, status, proxy) in &rows {
         if status == "auto_disabled" {
             disabled_rows += 1;
             continue;
@@ -106,6 +109,7 @@ pub(super) fn ordered_channel_targets(conn: &rusqlite::Connection, sched: &Sched
             model: resolved,
             price_norm,
             latency_ms: *last_latency_ms,
+            proxy: proxy.clone(),
         });
     }
     if targets.is_empty() {

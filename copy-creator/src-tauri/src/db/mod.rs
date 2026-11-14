@@ -1230,6 +1230,9 @@ pub(crate) fn ensure_schema(conn: &Connection) -> Result<(), Box<dyn std::error:
     // （ai_openai_* / ai_gemini_*）迁移为渠道条目（幂等，失败不阻断启动）。
     conn.execute_batch(AI_CHANNEL_SCHEMA_SQL)?;
     conn.execute_batch(AI_SCHEDULING_SETTING_SEED_SQL)?;
+    // 渠道级代理（http(s)/socks5，留空回退全局 ai_proxy；0.3.28 加列）：
+    // 旧库幂等补列，存量行回填空串（直连，行为与旧版一致）。
+    ensure_column(conn, "ai_channels", "proxy", "TEXT DEFAULT ''");
     migrate_legacy_ai_channels(conn);
 
     // 一致性工作流扩展列：新库随建表语句带全列，这里只为旧库幂等补齐

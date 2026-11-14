@@ -64,6 +64,8 @@ export interface AiChannel {
    *  把用户锁在门外，改为仅记录错误文案）。 */
   cooldownUntilMs: number;
   sortOrder: number;
+  /** 渠道级代理（http(s):// 或 socks5://）；空 = 回退全局 ai_proxy，两级都空 = 直连。 */
+  proxy: string;
 }
 
 export type AiStrategy = "manual" | "latency" | "price" | "balance";
@@ -77,6 +79,8 @@ export interface AiChannelInput {
   model: string;
   price: number | null;
   currency: string;
+  /** 渠道级代理地址（空串 = 清除，回退全局默认）。 */
+  proxy: string;
 }
 
 export const parseAiStrategy = (raw: string | undefined): AiStrategy =>
@@ -144,6 +148,8 @@ interface SettingsState {
   /** 画布 AI 默认模型与超时（画布设置页「生成默认值」，节点参数可覆盖）。 */
   aiModel: string;
   aiTimeout: number;
+  /** 画布 AI 全局默认代理：渠道未配 proxy 时回退到此；空 = 直连。 */
+  aiProxy: string;
   /** 画布 AI 渠道与调度（画布设置页，自持久化）。 */
   aiChannels: AiChannel[];
   aiStrategy: AiStrategy;
@@ -173,6 +179,7 @@ interface SettingsState {
   /** AI 生图配置：批量落库并同步本 store 字段（自持久化分区，不走统一保存按钮）。 */
   saveAiSettings: (patch: {
     aiModel?: string;
+    aiProxy?: string;
     aiTimeout?: number;
   }) => Promise<void>;
   /** 画布 AI 渠道：重取列表（画布设置页挂载时调用）。 */
@@ -226,6 +233,7 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
   clipboardExclusions: "",
   findReplaceHistory: [],
   aiModel: "",
+  aiProxy: "",
   // 与后端默认一致（生图请求分钟级量级，60s 是文本对话量级会掐断多张生成）。
   aiTimeout: 300,
   aiChannels: [],
@@ -289,6 +297,7 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
         clipboardExclusions: settings.clipboard_exclusions || "",
         findReplaceHistory: parseFindHistory(settings.find_replace_history),
         aiModel: settings.ai_model || "",
+        aiProxy: settings.ai_proxy || "",
         aiTimeout: Number.parseInt(settings.ai_timeout || "300", 10) || 300,
         aiStrategy: parseAiStrategy(settings.ai_strategy),
         aiBalancePriceWeight: clampWeight(settings.ai_balance_price_weight),
@@ -480,11 +489,13 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
   saveAiSettings: async (patch) => {
     const payload: Record<string, string> = {};
     if (patch.aiModel !== undefined) payload.ai_model = patch.aiModel;
+    if (patch.aiProxy !== undefined) payload.ai_proxy = patch.aiProxy;
     if (patch.aiTimeout !== undefined) payload.ai_timeout = String(patch.aiTimeout);
     try {
       await invoke("set_settings_batch", { settings: payload });
       const next: Partial<SettingsState> = {};
       if (patch.aiModel !== undefined) next.aiModel = patch.aiModel;
+      if (patch.aiProxy !== undefined) next.aiProxy = patch.aiProxy;
       if (patch.aiTimeout !== undefined) next.aiTimeout = patch.aiTimeout;
       if (Object.keys(next).length > 0) set(next);
     } catch (e) {
@@ -513,6 +524,7 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
       model: input.model,
       price: input.price,
       currency: input.currency,
+      proxy: input.proxy,
     });
     set({ aiChannels: channels });
   },
@@ -527,6 +539,7 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
       model: input.model,
       price: input.price,
       currency: input.currency,
+      proxy: input.proxy,
     });
     set({ aiChannels: channels });
   },
