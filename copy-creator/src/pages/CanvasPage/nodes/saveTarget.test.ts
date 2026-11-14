@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  createGroupPathOf,
   flattenResourceGroups,
   groupAncestors,
   isGroupRowVisible,
@@ -8,6 +9,7 @@ import {
   saveDirFileNameOf,
   saveFingerprintOf,
   searchGroupRows,
+  siblingGroupNames,
 } from "./saveTarget";
 
 // 保存目标详情纯逻辑（2026-11-10 用户定案）：基名留空=产物原名；单张
@@ -15,6 +17,8 @@ import {
 // 详情变更即重存；分组树拍平首行固定未分组、子级带深度。
 // 2026-11-14 用户定案（原型 specs/原型-保存目标面板.html）：折叠树默认
 // 只列顶级分组、搜索平铺命中带父路径、保存成功清名指纹按空名对齐。
+// 2026-11-14 用户定案（原型 specs/原型-保存目标面板-新建分组.html）：
+// 面板内新建分组——父路径拼段名入库、同级同名先拦不丢词。
 
 describe("saveBaseNameOf", () => {
   it("空基名返回空串（Rust 端留空沿用产物原名）", () => {
@@ -177,5 +181,59 @@ describe("savedFingerprintAfter（保存成功清名后的指纹对齐）", () =
     expect(savedFingerprintAfter(paths, "")).toBe(paths.join("\n"));
     // 与保存时（带名）指纹不同：清名本身不靠它触发重存（落库即对齐）
     expect(savedFingerprintAfter(paths, "方案图")).not.toBe(saveFingerprintOf(paths, "方案图", "旧名"));
+  });
+});
+
+describe("createGroupPathOf（新建分组的入库路径）", () => {
+  it("父路径拼段名；父空=顶级直接段名；段名 trim", () => {
+    expect(createGroupPathOf("素材库/人像", "商务写真")).toBe("素材库/人像/商务写真");
+    expect(createGroupPathOf("", "工作资料")).toBe("工作资料");
+    expect(createGroupPathOf("素材库", "  军旅  ")).toBe("素材库/军旅");
+  });
+
+  it("空段名返回空串（调用层先拦，不发起创建）", () => {
+    expect(createGroupPathOf("素材库", "   ")).toBe("");
+    expect(createGroupPathOf("", "")).toBe("");
+  });
+});
+
+describe("siblingGroupNames（同级同名拦截）", () => {
+  const rows = flattenResourceGroups([
+    {
+      name: "",
+      path: "",
+      count: 0,
+      children: [
+        { name: "素材库", path: "素材库", count: 0, children: [
+          { name: "人像", path: "素材库/人像", count: 0, children: [] },
+          { name: "风景", path: "素材库/风景", count: 0, children: [] },
+        ] },
+        { name: "参考素材", path: "参考素材", count: 0, children: [] },
+      ],
+    },
+  ]);
+
+  it("顶级：返回全部顶级分组名（不含未分组）", () => {
+    expect(siblingGroupNames(rows, "")).toEqual(["素材库", "参考素材"]);
+  });
+
+  it("子级：只返回该父分组的直接子级名，深层同名不误拦", () => {
+    expect(siblingGroupNames(rows, "素材库")).toEqual(["人像", "风景"]);
+    // 「风景」只与「素材库」同级同级比对：在参考素材下建同名不拦
+    expect(siblingGroupNames(rows, "参考素材")).toEqual([]);
+  });
+
+  it("同名判定大小写敏感（与文件系统一致）", () => {
+    const rows2 = flattenResourceGroups([
+      { name: "", path: "", count: 0, children: [
+        { name: "Photos", path: "Photos", count: 0, children: [] },
+      ] },
+    ]);
+    expect(siblingGroupNames(rows2, "")).toEqual(["Photos"]);
+    expect(siblingGroupNames(rows2, "")).not.toContain("photos");
+  });
+
+  it("父路径不存在时回退顶级集合（不含任何前缀命中）", () => {
+    expect(siblingGroupNames(rows, "不存在")).toEqual([]);
   });
 });

@@ -1,12 +1,15 @@
 // @vitest-environment jsdom
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import "../../../i18n";
 import { type CanvasNode, type SaveMediaMeta, useCanvasStore } from "../../../stores/canvasStore";
 import { SaveMediaBody } from "./SaveMediaBody";
 import { SaveRuntimeCtx, type SaveRuntime } from "./saveRuntimeCtx";
 import { SaveTargetPanel } from "./SaveTargetPanel";
 import type { NodeProps } from "./types";
+
+// jsdom 未实现 scrollIntoView（面板内新建分组的输入行滚到可见兜底会调用）。
+Element.prototype.scrollIntoView = () => {};
 
 // 保存目标内嵌配置面板（2026-11-10 用户定案「从节点扩展出来，确定后
 // 收起，不显乱」）：面板渲染在节点目标行下方（非悬浮层，无定位推算），
@@ -483,5 +486,199 @@ describe("SaveTargetPanel 分组折叠树与搜索（2026-11-14 定案）", () =
     // line 模式：3 行 × 16px 行高 × 0.25 = 12
     fireEvent.wheel(tree, { deltaY: 3, deltaMode: 1 });
     expect(tree.scrollTop).toBe(67);
+  });
+});
+
+describe("SaveTargetPanel 面板内新建分组（2026-11-14 用户定案，原型 specs/原型-保存目标面板-新建分组.html）", () => {
+  const libNode2 = (overrides: Partial<SaveMediaMeta> = {}): CanvasNode =>
+    makeNode({
+      metadata: {
+        kind: "save_image", status: "", error: "", target: "", saved_path: "",
+        auto_target: "library", auto_dir: "", auto_state: "", auto_error: "", auto_fingerprint: "",
+        ...overrides,
+      },
+    });
+
+  // 动态分组树：create_resource_group 落盘（内存账本），get_resource_groups
+  // 重拉含新建分组——创建成功后的「重拉 + 自动选中」链路可断言。
+  const staticFolders = () => [
+    {
+      name: "", path: "", count: 3, children: [
+        { name: "方案图", path: "方案图", count: 8, children: [] },
+        {
+          name: "参考素材", path: "参考素材", count: 5,
+          children: [{ name: "胶片感", path: "参考素材/胶片感", count: 2, children: [] }],
+        },
+      ],
+    },
+  ];
+  const createdPaths: string[] = [];
+  const insertCreated = (folders: ReturnType<typeof staticFolders>, path: string) => {
+    const segs = path.split("/").filter(Boolean);
+    let level = folders;
+    let prefix = "";
+    for (const seg of segs) {
+      prefix = prefix ? `${prefix}/${seg}` : seg;
+      let node = level.find((f) => f.path === prefix);
+      if (!node) {
+        node = { name: seg, path: prefix, count: 0, children: [] };
+        level.push(node);
+      }
+      level = node.children;
+    }
+  };
+  beforeEach(() => {
+    createdPaths.length = 0;
+    invokeMock.mockImplementation(async (cmd: string, args?: { name?: string }) => {
+      if (cmd === "create_resource_group") {
+        createdPaths.push(String(args?.name ?? ""));
+        return { name: String(args?.name ?? ""), count: 0 };
+      }
+      if (cmd === "get_resource_groups") {
+        const folders = staticFolders();
+        for (const p of createdPaths) insertCreated(folders, p);
+        return folders;
+      }
+      return null;
+    });
+  });
+
+  /** 树里某分组行壳的悬停「＋」钮。 */
+  const rowFadd = (container: HTMLElement, label: string) => {
+    const wrap = Array.from(container.querySelectorAll(".fc-save-panel-rowwrap"))
+      .find((w) => w.textContent?.includes(label));
+    return (wrap?.querySelector(".fc-save-panel-fadd") as HTMLButtonElement | null) ?? null;
+  };
+  const createInput = () => screen.getByLabelText("新建分组名") as HTMLInputElement;
+
+  it("行悬停「＋」就地开输入行（placeholder 带父分组），Enter 创建后重拉树并自动选中", async () => {
+    const { container } = render(
+      <SaveRuntimeCtx.Provider value={makeRuntime()}>
+        <SaveTargetPanel node={libNode2()} onClose={vi.fn()} />
+      </SaveRuntimeCtx.Provider>,
+    );
+    await waitFor(() => expect(screen.getByText("参考素材")).toBeTruthy());
+    fireEvent.click(rowFadd(container, "参考素材")!);
+    const input = createInput();
+    expect(input.placeholder).toContain("建在「参考素材」下");
+    fireEvent.change(input, { target: { value: "新参考" } });
+    fireEvent.keyDown(input, { key: "Enter" });
+    await waitFor(() => expect(screen.queryByText("新建分组名")).toBeNull());
+    expect(invokeMock).toHaveBeenCalledWith("create_resource_group", { name: "参考素材/新参考" });
+    // 重拉的树含新分组且自动选中（建完接着「确定」就存）
+    await waitFor(() => expect(screen.getByText("新参考")).toBeTruthy());
+    expect(screen.getByText("新参考").closest("button")?.getAttribute("aria-pressed")).toBe("true");
+    expect(container.querySelector(".fc-save-panel-create")).toBeNull();
+  });
+
+  it("同级同名拦截：红边提示、词保留、不发起创建", async () => {
+    const { container } = render(
+      <SaveRuntimeCtx.Provider value={makeRuntime()}>
+        <SaveTargetPanel node={libNode2()} onClose={vi.fn()} />
+      </SaveRuntimeCtx.Provider>,
+    );
+    await waitFor(() => expect(screen.getByText("参考素材")).toBeTruthy());
+    fireEvent.click(rowFadd(container, "参考素材")!);
+    const input = createInput();
+    fireEvent.change(input, { target: { value: "胶片感" } });
+    fireEvent.keyDown(input, { key: "Enter" });
+    expect(container.querySelector(".fc-save-panel-create-error")?.textContent).toContain(
+      "「参考素材」下已有同名分组「胶片感」",
+    );
+    expect(input.value).toBe("胶片感");
+    expect(container.querySelector(".fc-save-panel-create-input")?.classList.contains("is-error")).toBe(true);
+    expect(invokeMock).not.toHaveBeenCalledWith("create_resource_group", expect.anything());
+  });
+
+  it("Esc 取消新建（不冒泡收面板），输入行消失面板仍在", async () => {
+    const { container } = render(
+      <SaveRuntimeCtx.Provider value={makeRuntime()}>
+        <SaveTargetPanel node={libNode2()} onClose={vi.fn()} />
+      </SaveRuntimeCtx.Provider>,
+    );
+    await waitFor(() => expect(screen.getByText("参考素材")).toBeTruthy());
+    fireEvent.click(rowFadd(container, "参考素材")!);
+    fireEvent.keyDown(createInput(), { key: "Escape" });
+    expect(container.querySelector(".fc-save-panel-create")).toBeNull();
+    expect(container.querySelector(".fc-save-panel")).not.toBeNull();
+    expect(invokeMock).not.toHaveBeenCalledWith("create_resource_group", expect.anything());
+  });
+
+  it("树底「新建顶级分组」：不选分组也能建顶级，Enter 直接以段名入库", async () => {
+    const { container } = render(
+      <SaveRuntimeCtx.Provider value={makeRuntime()}>
+        <SaveTargetPanel node={libNode2()} onClose={vi.fn()} />
+      </SaveRuntimeCtx.Provider>,
+    );
+    await waitFor(() => expect(screen.getByText("参考素材")).toBeTruthy());
+    fireEvent.click(screen.getByText("新建顶级分组"));
+    const input = createInput();
+    expect(input.placeholder).toContain("建在顶级");
+    fireEvent.change(input, { target: { value: "工作资料" } });
+    fireEvent.keyDown(input, { key: "Enter" });
+    await waitFor(() => expect(screen.getByText("工作资料")).toBeTruthy());
+    expect(invokeMock).toHaveBeenCalledWith("create_resource_group", { name: "工作资料" });
+    expect(screen.getByText("工作资料").closest("button")?.getAttribute("aria-pressed")).toBe("true");
+    expect(container.querySelector(".fc-save-panel-create")).toBeNull();
+  });
+
+  it("搜索空态一键建：搜索词预填为分组名，建在当前选中分组下", async () => {
+    const { container } = render(
+      <SaveRuntimeCtx.Provider value={makeRuntime()}>
+        <SaveTargetPanel node={libNode2()} onClose={vi.fn()} />
+      </SaveRuntimeCtx.Provider>,
+    );
+    await waitFor(() => expect(screen.getByText("参考素材")).toBeTruthy());
+    // 先选中「参考素材」（空态建分组落在当前选中分组下）
+    fireEvent.click(screen.getByText("参考素材"));
+    fireEvent.change(screen.getByPlaceholderText("搜索分组名，快速定位…"), { target: { value: "不存在" } });
+    const emptyBtn = container.querySelector(".fc-save-panel-empty-create")!;
+    expect(emptyBtn.textContent).toContain("新建名为「不存在」的分组");
+    expect(emptyBtn.textContent).toContain("建在「参考素材」下");
+    fireEvent.click(emptyBtn);
+    // 清搜索回树视图，输入行预填搜索词
+    expect((screen.getByPlaceholderText("搜索分组名，快速定位…") as HTMLInputElement).value).toBe("");
+    expect(createInput().value).toBe("不存在");
+    fireEvent.keyDown(createInput(), { key: "Enter" });
+    await waitFor(() => expect(screen.queryByText("新建分组名")).toBeNull());
+    expect(invokeMock).toHaveBeenCalledWith("create_resource_group", { name: "参考素材/不存在" });
+    await waitFor(() => expect(screen.getByText("不存在")).toBeTruthy());
+    expect(screen.getByText("不存在").closest("button")?.getAttribute("aria-pressed")).toBe("true");
+  });
+
+  it("搜索命中行悬停「＋」：清搜索回树视图、输入行就地出现在命中分组下", async () => {
+    const { container } = render(
+      <SaveRuntimeCtx.Provider value={makeRuntime()}>
+        <SaveTargetPanel node={libNode2()} onClose={vi.fn()} />
+      </SaveRuntimeCtx.Provider>,
+    );
+    await waitFor(() => expect(screen.getByText("参考素材")).toBeTruthy());
+    fireEvent.change(screen.getByPlaceholderText("搜索分组名，快速定位…"), { target: { value: "胶片" } });
+    const hitFadd = rowFadd(container, "胶片感");
+    expect(hitFadd).not.toBeNull();
+    fireEvent.click(hitFadd!);
+    expect((screen.getByPlaceholderText("搜索分组名，快速定位…") as HTMLInputElement).value).toBe("");
+    expect(createInput().placeholder).toContain("建在「参考素材/胶片感」下");
+    // 命中分组链路已展开（其父级行可见）
+    expect(screen.getByText("参考素材")).toBeTruthy();
+  });
+
+  it("搜索输入即放弃行内新建：搜索态不渲染输入行，清搜索后旧词不复发", async () => {
+    const { container } = render(
+      <SaveRuntimeCtx.Provider value={makeRuntime()}>
+        <SaveTargetPanel node={libNode2()} onClose={vi.fn()} />
+      </SaveRuntimeCtx.Provider>,
+    );
+    await waitFor(() => expect(screen.getByText("参考素材")).toBeTruthy());
+    fireEvent.click(rowFadd(container, "参考素材")!);
+    expect(createInput()).toBeTruthy();
+    const search = screen.getByPlaceholderText("搜索分组名，快速定位…") as HTMLInputElement;
+    fireEvent.change(search, { target: { value: "胶片" } });
+    // 搜索态：输入行退场（只在树态有意义）
+    expect(container.querySelector(".fc-save-panel-create")).toBeNull();
+    // 清搜索回树态：不带着旧词复发
+    fireEvent.change(search, { target: { value: "" } });
+    expect(container.querySelector(".fc-save-panel-create")).toBeNull();
+    expect(container.querySelector(".fc-save-panel")).not.toBeNull();
   });
 });

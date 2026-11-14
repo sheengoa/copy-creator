@@ -1,14 +1,16 @@
-import { useEffect, useLayoutEffect, useRef, useState } from "react";
+import { Fragment, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { invoke } from "@tauri-apps/api/core";
 import { Icons } from "../../../components/Icons";
 import type { ResourceFolder } from "../../../types";
 import { useCanvasStore, type CanvasNode } from "../../../stores/canvasStore";
 import {
+  createGroupPathOf,
   flattenResourceGroups,
   groupAncestors,
   isGroupRowVisible,
   searchGroupRows,
+  siblingGroupNames,
   type SaveGroupHit,
   type SaveGroupRow,
 } from "./saveTarget";
@@ -71,6 +73,13 @@ export function SaveTargetPanel({ node, onClose }: { node: CanvasNode; onClose: 
     () => new Set(isSaveMeta ? groupAncestors(meta.auto_group ?? "") : []),
   );
   const [query, setQuery] = useState("");
+  // 面板内新建分组（2026-11-14 用户定案，原型 specs/原型-保存目标面板-新建分组.html）：
+  // creating=正在建子分组的父路径（""=顶级，null=无）；行内输入行 Enter 创建、
+  // Esc/失焦取消；创建成功自动选中并展开链路（建完接着确定就存）。
+  const [creating, setCreating] = useState<string | null>(null);
+  const [creatingName, setCreatingName] = useState("");
+  const [creatingError, setCreatingError] = useState("");
+  const creatingBusyRef = useRef(false);
   const panelRef = useRef<HTMLDivElement>(null);
   const treeScrollRef = useRef<HTMLDivElement | null>(null);
 
@@ -151,6 +160,20 @@ export function SaveTargetPanel({ node, onClose }: { node: CanvasNode; onClose: 
     // eslint-disable-next-line react-hooks/exhaustive-deps -- 仅展开挂载时守护一次
   }, []);
 
+  // 输入行/错误行超出固定树高时最小位移滚到可见（树高首帧恒定约定下的
+  // 兜底：错误行出现在输入行下方，错误态不改树高，只滚）。错误行优先
+  // ——输入行可见时 nearest 不会为它下面的错误行滚动。放在条件
+  // early return 之前——hooks 不可条件化。
+  useEffect(() => {
+    if (creating === null) return;
+    const tree = treeScrollRef.current;
+    if (!tree) return;
+    const target =
+      tree.querySelector(".fc-save-panel-create-error") ??
+      tree.querySelector(".fc-save-panel-create");
+    target?.scrollIntoView({ block: "nearest" });
+  }, [creating, creatingError]);
+
   if (meta.kind !== "save_image" && meta.kind !== "save_video" && meta.kind !== "save_audio") return null;
   const isLibrary = meta.auto_target === "library";
 
@@ -180,6 +203,131 @@ export function SaveTargetPanel({ node, onClose }: { node: CanvasNode; onClose: 
       return next;
     });
     setQuery("");
+  };
+
+  // ── 面板内新建分组 ──────────────────────────────────────────────
+  /** 开始新建：parentPath=父分组（""=顶级）。搜索入口先清搜索回树视图
+   *  （与 pickHit 衔接语义一致），深层父分组展开祖先链让输入行可见。 */
+  const startCreate = (parentPath: string, presetName = "") => {
+    setCreating(parentPath);
+    setCreatingName(presetName);
+    setCreatingError("");
+    if (query.trim()) setQuery("");
+    if (parentPath) {
+      setExpanded((prev) => {
+        const next = new Set(prev);
+        for (const a of groupAncestors(parentPath)) next.add(a);
+        return next;
+      });
+    }
+  };
+
+  const cancelCreate = () => {
+    setCreating(null);
+    setCreatingName("");
+    setCreatingError("");
+  };
+
+  /** 提交创建：同名先拦（文案更明确），再走后端（多级路径自动补建父级），
+   *  成功即重拉分组树 + 自动选中新分组 + 展开链路；失败词保留可改续建。 */
+  const commitCreate = async () => {
+    if (creatingBusyRef.current) return;
+    const name = creatingName.trim();
+    if (!name) {
+      setCreatingError(t("canvas.savePopCreateEmpty"));
+      return;
+    }
+    const parentPath = creating ?? "";
+    if (siblingGroupNames(rows, parentPath).includes(name)) {
+      setCreatingError(
+        t("canvas.savePopCreateDup", { parent: parentPath || t("canvas.savePopCreateTop"), name }),
+      );
+      return;
+    }
+    creatingBusyRef.current = true;
+    try {
+      await invoke("create_resource_group", { name: createGroupPathOf(parentPath, name) });
+      const folders = await invoke<ResourceFolder[]>("get_resource_groups");
+      setRows(flattenResourceGroups(folders));
+      const newPath = createGroupPathOf(parentPath, name);
+      setGroup(newPath);
+      setExpanded((prev) => {
+        const next = new Set(prev);
+        for (const a of groupAncestors(newPath)) next.add(a);
+        return next;
+      });
+      setCreating(null);
+      setCreatingName("");
+      setCreatingError("");
+    } catch (error) {
+      // 后端报错原样透出（非法字符/并发创建同名等），不关闭不丢词
+      setCreatingError(String(error));
+    } finally {
+      creatingBusyRef.current = false;
+    }
+  };
+
+  /** 行内新建输入行：缩进=父级下一层；Enter 创建，Esc 不冒泡（面板不收），
+   *  失焦取消但焦点留在新建行内（点 ✓/✕）不取消——按钮 mousedown 先
+   *  preventDefault 保住焦点。 */
+  const renderCreateRow = (depth: number, key: string) => {
+    const where = creating === ""
+      ? t("canvas.savePopCreateAtTop")
+      : t("canvas.savePopCreateUnderShort", { group: creating ?? "" });
+    return (
+      <Fragment key={key}>
+        <div className="fc-save-panel-create" style={{ paddingLeft: 8 + depth * 14 }}>
+          <span className="fc-save-panel-create-arrow" aria-hidden="true">↳</span>
+          {Icons.folderFine}
+          <input
+            className={`fc-save-panel-create-input${creatingError ? " is-error" : ""}`}
+            type="text"
+            value={creatingName}
+            placeholder={t("canvas.savePopCreatePh", { where })}
+            autoFocus
+            aria-label={t("canvas.savePopCreateAria")}
+            onChange={(e) => {
+              setCreatingName(e.target.value);
+              if (creatingError) setCreatingError("");
+            }}
+            onKeyDown={(e) => {
+              if (e.key === "Enter") {
+                e.preventDefault();
+                void commitCreate();
+              } else if (e.key === "Escape") {
+                e.stopPropagation(); // 取消新建，不冒泡到面板的 Esc 收起
+                cancelCreate();
+              }
+            }}
+            onBlur={(e) => {
+              if (e.relatedTarget instanceof Element && e.relatedTarget.closest(".fc-save-panel-create")) return;
+              cancelCreate();
+            }}
+          />
+          <button
+            type="button"
+            className="fc-save-panel-create-btn is-ok"
+            title={t("canvas.savePopCreateOk")}
+            aria-label={t("canvas.savePopCreateOk")}
+            onMouseDown={(e) => e.preventDefault()}
+            onClick={() => void commitCreate()}
+          >
+            {Icons.check}
+          </button>
+          <button
+            type="button"
+            className="fc-save-panel-create-btn is-cancel"
+            title={t("canvas.savePopClose")}
+            aria-label={t("canvas.savePopClose")}
+            onMouseDown={(e) => e.preventDefault()}
+            onClick={cancelCreate}
+          >
+            {Icons.close}
+          </button>
+        </div>
+        {creatingError && <div className="fc-save-panel-create-error">{creatingError}</div>}
+      </Fragment>
+    );
   };
 
   const searching = query.trim().length > 0;
@@ -232,63 +380,130 @@ export function SaveTargetPanel({ node, onClose }: { node: CanvasNode; onClose: 
             value={query}
             placeholder={t("canvas.savePopSearchPh")}
             aria-label={t("canvas.savePopSearchPh")}
-            onChange={(e) => setQuery(e.target.value)}
+            onChange={(e) => {
+              setQuery(e.target.value);
+              // 搜索即放弃行内新建（原型同语义）：输入行只在树态有意义，
+              // 留着会在清搜索后带旧词复现，反而困惑
+              if (creating !== null) cancelCreate();
+            }}
           />
-          {/* WheelGate：悬浮树上的滚轮只滚列表，不惊动画布缩放 */}
+          {/* WheelGate：悬浮树上的滚轮只滚列表，不惊动画布缩放。
+              树滚动区 + 底部「新建顶级分组」固定钮同区（面板高度首帧恒定）。 */}
           <WheelGate>
-            <div className="fc-save-panel-tree" ref={treeScrollRef}>
-              {searching ? (
-                hits.length > 0 ? (
-                  hits.map((hit) => (
-                    <button
-                      key={hit.path}
-                      type="button"
-                      className={`fc-save-panel-item${hit.path === group ? " is-active" : ""}`}
-                      aria-pressed={hit.path === group}
-                      onClick={() => pickHit(hit)}
-                    >
-                      <span className="fc-save-panel-caret is-leaf" />
-                      {Icons.folderFine}
-                      <span className="fc-save-panel-hit-text">
-                        <span className="fc-save-panel-hit-name">
-                          <HitName name={hit.name} query={query} />
+            <div className="fc-save-panel-treezone">
+              <div className="fc-save-panel-tree" ref={treeScrollRef}>
+                {searching ? (
+                  hits.length > 0 ? (
+                    hits.map((hit) => (
+                      <div
+                        key={hit.path}
+                        className={`fc-save-panel-rowwrap${hit.path === group ? " is-active" : ""}`}
+                      >
+                        <button
+                          type="button"
+                          className={`fc-save-panel-item${hit.path === group ? " is-active" : ""}`}
+                          aria-pressed={hit.path === group}
+                          onClick={() => pickHit(hit)}
+                        >
+                          <span className="fc-save-panel-caret is-leaf" />
+                          {Icons.folderFine}
+                          <span className="fc-save-panel-hit-text">
+                            <span className="fc-save-panel-hit-name">
+                              <HitName name={hit.name} query={query} />
+                            </span>
+                            <span className="fc-save-panel-hit-parent">
+                              {hit.parent || t("canvas.savePopRootPath")}
+                            </span>
+                          </span>
+                          <span className="fc-save-panel-item-count">{hit.count}</span>
+                        </button>
+                        <button
+                          type="button"
+                          className="fc-save-panel-fadd"
+                          title={t("canvas.savePopCreateUnder", { group: hit.name })}
+                          aria-label={t("canvas.savePopCreateUnder", { group: hit.name })}
+                          onClick={() => startCreate(hit.path)}
+                        >
+                          {Icons.add}
+                        </button>
+                      </div>
+                    ))
+                  ) : (
+                    <div className="fc-save-panel-empty is-column">
+                      <div>{t("canvas.savePopSearchEmpty", { query: query.trim() })}</div>
+                      {/* 搜不到=直接建：搜索词预填为分组名，落在当前选中
+                          分组下（未选中=顶级），一步到位 */}
+                      <button
+                        type="button"
+                        className="fc-save-panel-empty-create"
+                        onClick={() => startCreate(group || "", query.trim())}
+                      >
+                        {Icons.add}
+                        <span>{t("canvas.savePopSearchEmptyCreate", { query: query.trim() })}</span>
+                        <span className="fc-save-panel-empty-create-where">
+                          {group
+                            ? t("canvas.savePopCreateUnderShort", { group })
+                            : t("canvas.savePopCreateAtTop")}
                         </span>
-                        <span className="fc-save-panel-hit-parent">
-                          {hit.parent || t("canvas.savePopRootPath")}
-                        </span>
-                      </span>
-                      <span className="fc-save-panel-item-count">{hit.count}</span>
-                    </button>
-                  ))
+                      </button>
+                    </div>
+                  )
                 ) : (
-                  <div className="fc-save-panel-empty">
-                    {t("canvas.savePopSearchEmpty", { query: query.trim() })}
-                  </div>
-                )
-              ) : (
-                visibleRows.map((row) => (
-                  <button
-                    key={row.path}
-                    type="button"
-                    className={`fc-save-panel-item${row.path === group ? " is-active" : ""}`}
-                    style={{ paddingLeft: 8 + row.depth * 14 }}
-                    aria-pressed={row.path === group}
-                    onClick={() => pickRow(row)}
-                  >
-                    <span className={`fc-save-panel-caret${row.hasChildren ? "" : " is-leaf"}`}>
-                      {expanded.has(row.path) ? Icons.chevronDown : Icons.chevronRight}
-                    </span>
-                    {Icons.folderFine}
-                    <span className="fc-save-panel-item-name">
-                      {row.path === "" ? t("canvas.savePopUngrouped") : row.label}
-                    </span>
-                    <span className="fc-save-panel-item-count">{row.count}</span>
-                  </button>
-                ))
-              )}
-              {!searching && rows.length === 0 && (
-                <div className="fc-save-panel-empty">{t("canvas.savePopGroupEmpty")}</div>
-              )}
+                  visibleRows.map((row) => (
+                    <Fragment key={row.path || "__ungrouped__"}>
+                      <div
+                        className={`fc-save-panel-rowwrap${row.path === group ? " is-active" : ""}`}
+                        style={{ paddingLeft: 8 + row.depth * 14 }}
+                      >
+                        <button
+                          type="button"
+                          className={`fc-save-panel-item${row.path === group ? " is-active" : ""}`}
+                          aria-pressed={row.path === group}
+                          onClick={() => pickRow(row)}
+                        >
+                          <span className={`fc-save-panel-caret${row.hasChildren ? "" : " is-leaf"}`}>
+                            {expanded.has(row.path) ? Icons.chevronDown : Icons.chevronRight}
+                          </span>
+                          {Icons.folderFine}
+                          <span className="fc-save-panel-item-name">
+                            {row.path === "" ? t("canvas.savePopUngrouped") : row.label}
+                          </span>
+                          <span className="fc-save-panel-item-count">{row.count}</span>
+                        </button>
+                        {/* 行悬停「＋」：在该分组下建子分组；未分组行（库根
+                            直属文件区）不提供——顶级新建走树底固定钮 */}
+                        {row.path !== "" && (
+                          <button
+                            type="button"
+                            className="fc-save-panel-fadd"
+                            title={t("canvas.savePopCreateUnder", { group: row.label })}
+                            aria-label={t("canvas.savePopCreateUnder", { group: row.label })}
+                            onClick={() => startCreate(row.path)}
+                          >
+                            {Icons.add}
+                          </button>
+                        )}
+                      </div>
+                      {/* 行内新建输入行：插在父分组子级末尾（父折叠时紧跟
+                          父行），层级位置所见即所得；未分组行 path 也是
+                          空串，顶级新建由树尾单独渲染（不在此重复插入） */}
+                      {creating !== "" && creating === row.path && renderCreateRow(row.depth + 1, `create-${row.path}`)}
+                    </Fragment>
+                  ))
+                )}
+                {!searching && rows.length === 0 && (
+                  <div className="fc-save-panel-empty">{t("canvas.savePopGroupEmpty")}</div>
+                )}
+                {!searching && creating === "" && renderCreateRow(0, "create-root")}
+              </div>
+              <button
+                type="button"
+                className="fc-save-panel-newgroup"
+                onClick={() => startCreate("")}
+              >
+                {Icons.add}
+                <span>{t("canvas.savePopCreateRoot")}</span>
+              </button>
             </div>
           </WheelGate>
         </>

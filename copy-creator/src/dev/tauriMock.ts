@@ -29,6 +29,59 @@ import {
 } from "./mock/db";
 import { makeMockWav, mockGenRuns, MOCK_THUMBS, overviewOf, simulateAiGenerateImage } from "./mock/media";
 
+// ── 分组树（浏览器内存账本）：保存面板「面板内新建分组」链路的创建
+// 后重拉可断言；与资源记录无联动（mock 资源记录的 resource_group 静态）。 ──
+interface MockFolder {
+  name: string;
+  path: string;
+  count: number;
+  children: MockFolder[];
+}
+const mockGroupRoots: MockFolder[] = [
+  { name: "scripts", path: "scripts", count: 1, children: [] },
+  {
+    name: "segments",
+    path: "segments",
+    count: 2,
+    children: [{ name: "第一集", path: "segments/第一集", count: 1, children: [] }],
+  },
+];
+const mockGroupsFind = (path: string): MockFolder | null => {
+  let level = mockGroupRoots;
+  let prefix = "";
+  let found: MockFolder | null = null;
+  for (const seg of path.split("/")) {
+    prefix = prefix ? `${prefix}/${seg}` : seg;
+    found = level.find((f) => f.path === prefix) ?? null;
+    if (!found) return null;
+    level = found.children;
+  }
+  return found;
+};
+const mockGroupsInsert = (path: string) => {
+  let level = mockGroupRoots;
+  let prefix = "";
+  for (const seg of path.split("/")) {
+    prefix = prefix ? `${prefix}/${seg}` : seg;
+    let node = level.find((f) => f.path === prefix) ?? null;
+    if (!node) {
+      node = { name: seg, path: prefix, count: 0, children: [] };
+      level.push(node);
+    }
+    level = node.children;
+  }
+};
+const mockGroupsTree = () => [
+  // 未分组根（库根直放文件区）与顶级分组同层数组——与真实后端结构一致
+  {
+    name: "",
+    path: "",
+    count: 3,
+    children: [] as MockFolder[],
+  },
+  ...mockGroupRoots.map((root) => clone(root)),
+];
+
 function handleInvoke(cmd: string, args: Record<string, unknown>): unknown {
   switch (cmd) {
     // ── 剧/集 ──
@@ -505,20 +558,21 @@ function handleInvoke(cmd: string, args: Record<string, unknown>): unknown {
     case "project_search":
       return [];
     case "get_resource_groups":
-      // 「从资源库选文件」浮层的分组树：mock 库里 scripts/、segments/ 两个
-      // 顶级分组（与上方资源路径对应，segments 带一层子级供折叠树/记忆
-      // 链路验证），根下另有三个直放文件（视频/图片/音频），首项固定为
-      // 「未分组」空路径根。
-      return [
-        { name: "", path: "", count: 3, children: [] },
-        { name: "scripts", path: "scripts", count: 1, children: [] },
-        {
-          name: "segments",
-          path: "segments",
-          count: 2,
-          children: [{ name: "第一集", path: "segments/第一集", count: 1, children: [] }],
-        },
-      ];
+      // 「从资源库选文件」浮层与保存面板的分组树：mock 库里 scripts/、
+      // segments/ 两个顶级分组（与上方资源路径对应，segments 带一层子级
+      // 供折叠树/记忆链路验证），根下另有三个直放文件（视频/图片/音频），
+      // 首项固定为「未分组」空路径根；面板内新建分组经 mockGroupsInsert
+      // 落进同一棵树（创建后重拉即可见）。
+      return mockGroupsTree();
+    case "create_resource_group": {
+      // 面板内新建分组（保存目标面板）：多级路径自动补建父级，重名报错
+      // 与后端同语义。
+      const path = String(args?.name ?? "").replace(/[\\/]+/g, "/").replace(/^\/|\/$/g, "");
+      if (!path) throw new Error("分组名称不能为空");
+      if (mockGroupsFind(path)) throw new Error("分组已存在");
+      mockGroupsInsert(path);
+      return { name: path, count: 0 };
+    }
 
     // ── 上传链路（详情窗口「上传文件」）：选本机文件 → 复制入库 ──
     case "select_resource_trace_file":

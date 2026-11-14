@@ -120,3 +120,24 @@ export function searchGroupRows(rows: SaveGroupRow[], query: string): SaveGroupH
   }
   return hits;
 }
+
+// ── 面板内新建分组（2026-11-14 用户定案，原型 specs/原型-保存目标面板-新建分组.html）──
+
+/** 新建分组的入库路径：父路径拼段名（父空=顶级，直接段名）；后端
+ *  create_resource_group 对多级路径自动补建缺失父级。 */
+export function createGroupPathOf(parentPath: string, name: string): string {
+  const clean = name.trim();
+  if (!clean) return "";
+  return parentPath ? `${parentPath}/${clean}` : clean;
+}
+
+/** 同级已有分组名（同名拦截，先于后端给出更明确的文案）：parentPath=""
+ *  为库根顶级。rows 是全量拍平（折叠树只影响渲染不影响判定）。 */
+export function siblingGroupNames(rows: SaveGroupRow[], parentPath: string): string[] {
+  const parent = parentPath === "" ? undefined : rows.find((row) => row.path === parentPath);
+  const parentDepth = parent ? parent.depth : -1;
+  const prefix = parentPath === "" ? "" : `${parentPath}/`;
+  return rows
+    .filter((row) => row.path !== "" && row.depth === parentDepth + 1 && row.path.startsWith(prefix))
+    .map((row) => row.path.split("/").pop() ?? row.label);
+}
