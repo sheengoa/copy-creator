@@ -81,7 +81,7 @@ pub(crate) fn migrate_legacy_ai_channels(conn: &Connection) {
     } else {
         vec![(&legacy[0], 0), (&legacy[1], 1)]
     };
-    let now = canvas_now();
+    let now = now_rfc3339();
     let mut migrated = 0usize;
     for ((protocol, name, default_base, key_setting, base_setting), order) in ordered {
         let key = read(key_setting);
@@ -232,7 +232,7 @@ pub fn create_ai_channel(
     let state = app.state::<DbState>();
     let conn = state.conn.lock().map_err(|e| e.to_string())?;
     let id = uuid::Uuid::new_v4().to_string();
-    let now = canvas_now();
+    let now = now_rfc3339();
     conn.execute(
         "INSERT INTO ai_channels (id, name, protocol, base_url, api_key, model, price, currency, enabled, status, sort_order, proxy, created_at, updated_at)
          VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, 1, 'normal',
@@ -315,7 +315,7 @@ pub(crate) fn update_channel_row(conn: &Connection, id: &str, input: &ChannelUpd
         old_protocol != input.protocol || old_base_url != input.base_url || old_proxy != input.proxy;
     let reset_latency = if endpoint_changed { "NULL" } else { "last_latency_ms" };
     let reset_tested = if endpoint_changed { "''" } else { "last_tested_at" };
-    let now = canvas_now();
+    let now = now_rfc3339();
     let key_value = input.api_key.unwrap_or_default().trim().to_string();
     let affected = if key_value.is_empty() {
         conn.execute(
@@ -373,7 +373,7 @@ pub fn set_ai_channel_enabled(app: AppHandle, id: String, enabled: bool) -> Resu
          last_error = CASE WHEN ?1 = 1 THEN '' ELSE last_error END,
          cooldown_until_ms = CASE WHEN ?1 = 1 THEN 0 ELSE cooldown_until_ms END,
          updated_at = ?2 WHERE id = ?3",
-        params![enabled as i64, canvas_now(), id],
+        params![enabled as i64, now_rfc3339(), id],
     )
     .map_err(|e| e.to_string())?;
     Ok(())
@@ -395,7 +395,7 @@ pub(crate) fn restore_channel_internal(conn: &Connection, id: &str) -> Result<()
     conn.execute(
         "UPDATE ai_channels SET status = 'normal', last_error = '', cooldown_until_ms = 0, \
          updated_at = ?1 WHERE id = ?2",
-        params![canvas_now(), id],
+        params![now_rfc3339(), id],
     )
     .map(|_| ())
     .map_err(|e| e.to_string())

@@ -6,6 +6,7 @@ use std::io::Write;
 use std::path::{Path, PathBuf};
 use tauri::{AppHandle, Emitter, Manager, Runtime};
 use tauri_plugin_clipboard_manager::ClipboardExt;
+use crate::clock::{now_ms, now_rfc3339};
 
 fn is_url(text: &str) -> bool {
     let lower = text.trim().to_lowercase();
@@ -515,8 +516,8 @@ pub(crate) fn save_stash_record_inner<R: Runtime>(
 
     let record_type = classify_text_record(&content);
     let record_id = id.unwrap_or_else(|| uuid::Uuid::new_v4().to_string());
-    let now = chrono::Utc::now().to_rfc3339();
-    let sort_order = chrono::Utc::now().timestamp_millis();
+    let now = now_rfc3339();
+    let sort_order = now_ms();
     let existing = {
         let state = app.state::<crate::db::DbState>();
         let conn = state.conn.lock().map_err(|e| e.to_string())?;
@@ -952,7 +953,7 @@ fn import_image_file(app: &AppHandle, file_path: &str) -> bool {
 fn insert_and_emit(app: &AppHandle, record_type: &str, content: &str) {
     // 去重窗口按毫秒整数比较：RFC3339 秒内小数位数不固定，字符串比较
     // 在不同精度之间会误判。
-    let cutoff_ms = (chrono::Utc::now() - chrono::Duration::seconds(2)).timestamp_millis();
+    let cutoff_ms = now_ms() - 2_000;
 
     // Check ANY recent record with same type+content (not just the last one)
     // so that batches of files/images don't circumvent deduplication.
@@ -977,8 +978,8 @@ fn insert_and_emit(app: &AppHandle, record_type: &str, content: &str) {
     }
 
     let id = uuid::Uuid::new_v4().to_string();
-    let now = chrono::Utc::now().to_rfc3339();
-    let sort_order = chrono::Utc::now().timestamp_millis();
+    let now = now_rfc3339();
+    let sort_order = now_ms();
     {
         let state = app.state::<crate::db::DbState>();
         let _x = match state.conn.lock() {

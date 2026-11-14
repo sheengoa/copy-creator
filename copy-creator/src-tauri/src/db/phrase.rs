@@ -473,7 +473,7 @@ pub(crate) fn touch_phrase_usage_internal<R: Runtime>(
 ) -> Result<(), String> {
     let state = app.state::<DbState>();
     let conn = state.conn.lock().map_err(|e| e.to_string())?;
-    let now = chrono::Utc::now().to_rfc3339();
+    let now = now_rfc3339();
     conn.execute(
         "UPDATE phrases SET last_used_at = ?1, use_count = COALESCE(use_count, 0) + 1 WHERE id = ?2",
         params![now, id],
@@ -512,7 +512,7 @@ pub fn create_phrase_group(app: AppHandle, name: String) -> Result<serde_json::V
     let state = app.state::<DbState>();
     let conn = state.conn.lock().map_err(|e| e.to_string())?;
     let id = uuid::Uuid::new_v4().to_string();
-    let now = chrono::Utc::now().to_rfc3339();
+    let now = now_rfc3339();
     conn.execute(
         "INSERT INTO phrase_groups (id, name, sort_order, created_at, updated_at) VALUES (?1, ?2, 0, ?3, ?4)",
         params![id, name, &now, &now],
@@ -532,7 +532,7 @@ pub fn create_phrase_group(app: AppHandle, name: String) -> Result<serde_json::V
 pub fn update_phrase_group(app: AppHandle, id: String, name: String) -> Result<(), String> {
     let state = app.state::<DbState>();
     let conn = state.conn.lock().map_err(|e| e.to_string())?;
-    let now = chrono::Utc::now().to_rfc3339();
+    let now = now_rfc3339();
     conn.execute(
         "UPDATE phrase_groups SET name = ?1, updated_at = ?2 WHERE id = ?3",
         params![name, &now, id],
@@ -607,7 +607,7 @@ pub fn create_phrase(
     let state = app.state::<DbState>();
     let conn = state.conn.lock().map_err(|e| e.to_string())?;
     let id = uuid::Uuid::new_v4().to_string();
-    let now = chrono::Utc::now().to_rfc3339();
+    let now = now_rfc3339();
     conn.execute(
         "INSERT INTO phrases (id, group_id, title, content, input_type, source_path, file_size, sort_order, created_at, updated_at) VALUES (?1, ?2, ?3, ?4, 'text', '', 0, 0, ?5, ?6)",
         params![id, group_id, title, content, &now, &now],
@@ -638,7 +638,7 @@ pub fn create_file_phrase(
     let state = app.state::<DbState>();
     let conn = state.conn.lock().map_err(|e| e.to_string())?;
     let id = uuid::Uuid::new_v4().to_string();
-    let now = chrono::Utc::now().to_rfc3339();
+    let now = now_rfc3339();
     if let Err(e) = conn.execute(
         "INSERT INTO phrases (id, group_id, title, content, input_type, source_path, file_size, sort_order, created_at, updated_at) VALUES (?1, ?2, ?3, ?4, 'file', ?5, ?6, 0, ?7, ?8)",
         params![&id, &group_id, &title, &content, &source_path, file_size as i64, &now, &now],
@@ -670,7 +670,7 @@ pub fn update_phrase(
 ) -> Result<(), String> {
     let state = app.state::<DbState>();
     let conn = state.conn.lock().map_err(|e| e.to_string())?;
-    let now = chrono::Utc::now().to_rfc3339();
+    let now = now_rfc3339();
     let old_file: Option<String> = conn
         .query_row(
             "SELECT content FROM phrases WHERE id = ?1 AND input_type = 'file'",
@@ -700,7 +700,7 @@ pub fn update_file_phrase(
     if source_path.trim().is_empty() {
         let state = app.state::<DbState>();
         let conn = state.conn.lock().map_err(|e| e.to_string())?;
-        let now = chrono::Utc::now().to_rfc3339();
+        let now = now_rfc3339();
         conn.execute(
             "UPDATE phrases SET title = ?1, updated_at = ?2 WHERE id = ?3 AND input_type = 'file'",
             params![&title, &now, &id],
@@ -750,7 +750,7 @@ pub fn update_file_phrase(
             return Err(e.to_string());
         }
     };
-    let now = chrono::Utc::now().to_rfc3339();
+    let now = now_rfc3339();
     if let Err(e) = conn.execute(
         "UPDATE phrases SET title = ?1, content = ?2, input_type = 'file', source_path = ?3, file_size = ?4, updated_at = ?5 WHERE id = ?6",
         params![&title, &content, &source_path, file_size as i64, &now, &id],

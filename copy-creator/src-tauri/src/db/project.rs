@@ -238,10 +238,6 @@ CREATE TABLE IF NOT EXISTS project_shot_props (
 );
 ";
 
-fn project_now() -> String {
-    chrono::Utc::now().to_rfc3339()
-}
-
 /// 文件引用统一为相对库根的正斜杠路径；Windows 下拖入/复制得到的反斜杠
 /// 路径归一后才能与唯一约束、文件视图定位一致。
 pub(crate) fn normalize_project_path(path: &str) -> String {
@@ -532,7 +528,7 @@ pub fn project_create_show(app: AppHandle, name: String) -> Result<serde_json::V
         return Err("剧名不能为空".to_string());
     }
     let id = uuid::Uuid::new_v4().to_string();
-    let now = project_now();
+    let now = now_rfc3339();
     {
         let state = app.state::<DbState>();
         let conn = state.conn.lock().map_err(|e| e.to_string())?;
@@ -560,7 +556,7 @@ pub fn project_rename_show(app: AppHandle, id: String, name: String) -> Result<(
         let conn = state.conn.lock().map_err(|e| e.to_string())?;
         conn.execute(
             "UPDATE project_shows SET name = ?1, updated_at = ?2 WHERE id = ?3",
-            params![name, project_now(), id],
+            params![name, now_rfc3339(), id],
         )
         .map_err(|e| e.to_string())?;
     }
@@ -588,7 +584,7 @@ pub(crate) fn sync_project_asset_renamed<R: Runtime>(
     let conn = state.conn.lock().map_err(|e| e.to_string())?;
     conn.execute(
         "UPDATE project_assets SET file_path = ?1, updated_at = ?2 WHERE file_path = ?3",
-        params![&new, project_now(), &old],
+        params![&new, now_rfc3339(), &old],
     )
     .map_err(|e| e.to_string())
 }
@@ -623,7 +619,7 @@ pub(crate) fn sync_project_assets_prefix_moved<R: Runtime>(
             .collect();
         rows
     };
-    let now = project_now();
+    let now = now_rfc3339();
     let mut changed = 0;
     let mut stmt = conn
         .prepare("UPDATE project_assets SET file_path = ?1, updated_at = ?2 WHERE file_path = ?3")
@@ -645,7 +641,7 @@ pub(crate) fn detach_assets_before_delete(    conn: &Connection,
     sql: &str,
     id: &str,
 ) -> Result<(), String> {
-    conn.execute(sql, params![project_now(), id])
+    conn.execute(sql, params![now_rfc3339(), id])
         .map_err(|e| e.to_string())?;
     Ok(())
 }
@@ -809,7 +805,7 @@ pub fn project_create_episode(
     title: String,
 ) -> Result<serde_json::Value, String> {
     let id = uuid::Uuid::new_v4().to_string();
-    let now = project_now();
+    let now = now_rfc3339();
     {
         let state = app.state::<DbState>();
         let conn = state.conn.lock().map_err(|e| e.to_string())?;
@@ -894,7 +890,7 @@ pub fn project_update_episode(
         }
         conn.execute(
             "UPDATE project_episodes SET title = ?1, status = ?2, script_path = ?3, updated_at = ?4 WHERE id = ?5",
-            params![title, status, normalize_project_path(&script_path), project_now(), id],
+            params![title, status, normalize_project_path(&script_path), now_rfc3339(), id],
         )
         .map_err(|e| e.to_string())?;
     }
@@ -1044,7 +1040,7 @@ pub fn project_create_character(
         return Err("角色名不能为空".to_string());
     }
     let id = uuid::Uuid::new_v4().to_string();
-    let now = project_now();
+    let now = now_rfc3339();
     let avatar_path = normalize_project_path(&avatar_path);
     let voice_path = normalize_project_path(&voice_path);
     {
@@ -1088,7 +1084,7 @@ pub fn project_update_character(
         let conn = state.conn.lock().map_err(|e| e.to_string())?;
         conn.execute(
             "UPDATE project_characters SET name = ?1, role_tag = ?2, bio = ?3, prompt = ?4, avatar_path = ?5, reference_paths = ?6, voice_path = ?7, updated_at = ?8 WHERE id = ?9",
-            params![name, role_tag, bio, prompt, normalize_project_path(&avatar_path), reference_paths, normalize_project_path(&voice_path), project_now(), id],
+            params![name, role_tag, bio, prompt, normalize_project_path(&avatar_path), reference_paths, normalize_project_path(&voice_path), now_rfc3339(), id],
         )
         .map_err(|e| e.to_string())?;
     }
@@ -1116,7 +1112,7 @@ pub(crate) fn project_set_character_voice_conn(
 ) -> Result<(), String> {
     conn.execute(
         "UPDATE project_characters SET voice_path = ?1, updated_at = ?2 WHERE id = ?3",
-        params![normalize_project_path(voice_path), project_now(), id],
+        params![normalize_project_path(voice_path), now_rfc3339(), id],
     )
     .map_err(|e| e.to_string())?;
     Ok(())
@@ -1175,7 +1171,7 @@ pub(crate) fn project_set_image_bindings_conn(
     bindings: &[serde_json::Value],
 ) -> Result<(), String> {
     let serialized = serialize_image_bindings(bindings);
-    let now = project_now();
+    let now = now_rfc3339();
     let (table, kind_label) = match kind {
         "character" => ("project_characters", "角色"),
         "location" => ("project_locations", "场景"),
@@ -1221,7 +1217,7 @@ pub(crate) fn project_set_references_conn(
     paths: &[String],
 ) -> Result<(), String> {
     let serialized = serialize_reference_paths(paths);
-    let now = project_now();
+    let now = now_rfc3339();
     let (table, kind_label) = match kind {
         "character" => ("project_characters", "角色"),
         "location" => ("project_locations", "场景"),
@@ -1295,7 +1291,7 @@ pub fn project_create_location(
         return Err("场景名不能为空".to_string());
     }
     let id = uuid::Uuid::new_v4().to_string();
-    let now = project_now();
+    let now = now_rfc3339();
     let ref_path = normalize_project_path(&ref_path);
     {
         let state = app.state::<DbState>();
@@ -1336,7 +1332,7 @@ pub fn project_update_location(
         let conn = state.conn.lock().map_err(|e| e.to_string())?;
         conn.execute(
             "UPDATE project_locations SET name = ?1, int_ext = ?2, time_hint = ?3, bio = ?4, prompt = ?5, ref_path = ?6, updated_at = ?7 WHERE id = ?8",
-            params![name, int_ext, time_hint, bio, prompt, normalize_project_path(&ref_path), project_now(), id],
+            params![name, int_ext, time_hint, bio, prompt, normalize_project_path(&ref_path), now_rfc3339(), id],
         )
         .map_err(|e| e.to_string())?;
     }
@@ -1380,7 +1376,7 @@ pub fn project_create_prop(
         return Err("道具名不能为空".to_string());
     }
     let id = uuid::Uuid::new_v4().to_string();
-    let now = project_now();
+    let now = now_rfc3339();
     let ref_path = normalize_project_path(&ref_path);
     {
         let state = app.state::<DbState>();
@@ -1418,7 +1414,7 @@ pub fn project_update_prop(
         let conn = state.conn.lock().map_err(|e| e.to_string())?;
         conn.execute(
             "UPDATE project_props SET name = ?1, bio = ?2, prompt = ?3, ref_path = ?4, updated_at = ?5 WHERE id = ?6",
-            params![name, bio, prompt, normalize_project_path(&ref_path), project_now(), id],
+            params![name, bio, prompt, normalize_project_path(&ref_path), now_rfc3339(), id],
         )
         .map_err(|e| e.to_string())?;
     }
@@ -1448,7 +1444,7 @@ pub fn project_create_scene(
     location_id: String,
 ) -> Result<serde_json::Value, String> {
     let id = uuid::Uuid::new_v4().to_string();
-    let now = project_now();
+    let now = now_rfc3339();
     {
         let state = app.state::<DbState>();
         let conn = state.conn.lock().map_err(|e| e.to_string())?;
@@ -1486,7 +1482,7 @@ pub fn project_update_scene(
         let conn = state.conn.lock().map_err(|e| e.to_string())?;
         conn.execute(
             "UPDATE project_scenes SET heading = ?1, location_id = ?2, note = ?3, updated_at = ?4 WHERE id = ?5",
-            params![heading, location_id, note, project_now(), id],
+            params![heading, location_id, note, now_rfc3339(), id],
         )
         .map_err(|e| e.to_string())?;
     }
@@ -1560,7 +1556,7 @@ pub fn project_create_shot(
     dialogue: String,
 ) -> Result<serde_json::Value, String> {
     let id = uuid::Uuid::new_v4().to_string();
-    let now = project_now();
+    let now = now_rfc3339();
     {
         let state = app.state::<DbState>();
         let conn = state.conn.lock().map_err(|e| e.to_string())?;
@@ -1603,7 +1599,7 @@ pub fn project_update_shot(
         let conn = state.conn.lock().map_err(|e| e.to_string())?;
         conn.execute(
             "UPDATE project_shots SET description = ?1, dialogue = ?2, status = ?3, camera = ?4, duration = ?5, updated_at = ?6 WHERE id = ?7",
-            params![description, dialogue, status, camera, duration, project_now(), id],
+            params![description, dialogue, status, camera, duration, now_rfc3339(), id],
         )
         .map_err(|e| e.to_string())?;
     }
@@ -1873,7 +1869,7 @@ pub fn project_import_asset(
 ) -> Result<serde_json::Value, String> {
     let (relative, kind, name) = import_file_into_library(&app, &source_path)?;
     let id = uuid::Uuid::new_v4().to_string();
-    let now = project_now();
+    let now = now_rfc3339();
     {
         let state = app.state::<DbState>();
         let conn = state.conn.lock().map_err(|e| e.to_string())?;
@@ -1921,7 +1917,7 @@ pub fn project_link_asset(
         return Err("文件路径不能为空".to_string());
     }
     let id = uuid::Uuid::new_v4().to_string();
-    let now = project_now();
+    let now = now_rfc3339();
     {
         let state = app.state::<DbState>();
         let conn = state.conn.lock().map_err(|e| e.to_string())?;
@@ -1982,7 +1978,7 @@ pub fn project_update_asset(
                 gen_from_prompt,
                 gen_params,
                 audio_role,
-                project_now(),
+                now_rfc3339(),
                 id
             ],
         )
@@ -2032,7 +2028,7 @@ pub(crate) fn canvas_layout_inner(
     conn: &Connection,
     payload: &serde_json::Value,
 ) -> Result<(), String> {
-    let now = project_now();
+    let now = now_rfc3339();
     let tx = conn.unchecked_transaction().map_err(|e| e.to_string())?;
     if let Some(assets) = payload.get("assets").and_then(|v| v.as_array()) {
         for item in assets {
@@ -2174,7 +2170,7 @@ pub(crate) fn set_episode_output_inner(
     }
     conn.execute(
         "UPDATE project_episodes SET output_asset_id = ?1, updated_at = ?2 WHERE id = ?3",
-        params![if value.is_empty() { None } else { Some(value) }, project_now(), id],
+        params![if value.is_empty() { None } else { Some(value) }, now_rfc3339(), id],
     )
     .map_err(|e| e.to_string())?;
     Ok(())
@@ -2217,7 +2213,7 @@ pub(crate) fn add_segment_inner(
         )
         .map_err(|e| e.to_string())?;
     let id = uuid::Uuid::new_v4().to_string();
-    let now = project_now();
+    let now = now_rfc3339();
     conn.execute(
         "INSERT INTO project_segments (id, episode_id, asset_id, sort_order, note, canvas_x, canvas_y, created_at, updated_at) \
          VALUES (?1, ?2, NULL, ?3, '', NULL, NULL, ?4, ?4)",
@@ -2304,12 +2300,12 @@ pub(crate) fn move_segment_inner(
         .map_err(|e| e.to_string())?;
     conn.execute(
         "UPDATE project_segments SET sort_order = ?1, updated_at = ?2 WHERE id = ?3",
-        params![neighbor_order, project_now(), id],
+        params![neighbor_order, now_rfc3339(), id],
     )
     .map_err(|e| e.to_string())?;
     conn.execute(
         "UPDATE project_segments SET sort_order = ?1, updated_at = ?2 WHERE id = ?3",
-        params![sort_order, project_now(), &neighbor_id],
+        params![sort_order, now_rfc3339(), &neighbor_id],
     )
     .map_err(|e| e.to_string())?;
     Ok(())
@@ -2349,7 +2345,7 @@ pub(crate) fn set_segment_asset_inner(
     }
     conn.execute(
         "UPDATE project_segments SET asset_id = ?1, updated_at = ?2 WHERE id = ?3",
-        params![if value.is_empty() { None } else { Some(value) }, project_now(), id],
+        params![if value.is_empty() { None } else { Some(value) }, now_rfc3339(), id],
     )
     .map_err(|e| e.to_string())?;
     Ok(())
@@ -2455,7 +2451,7 @@ pub(crate) fn link_node_inner(
         "INSERT OR IGNORE INTO project_node_links \
          (id, episode_id, from_kind, from_id, to_segment, to_port, created_at, owner_key) \
          VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
-        params![id, episode_id, from_kind, from_id, to_segment, to_port, project_now(), owner_key],
+        params![id, episode_id, from_kind, from_id, to_segment, to_port, now_rfc3339(), owner_key],
     )
     .map_err(|e| e.to_string())?;
     Ok(serde_json::json!({
@@ -2546,7 +2542,7 @@ pub(crate) fn link_assets_inner(
         return Err("素材档案不存在".to_string());
     }
     let id = uuid::Uuid::new_v4().to_string();
-    let now = project_now();
+    let now = now_rfc3339();
     conn.execute(
         "INSERT OR IGNORE INTO project_asset_links (id, from_asset, to_asset, label, created_at) \
          VALUES (?1, ?2, ?3, ?4, ?5)",
@@ -2626,7 +2622,7 @@ pub fn project_create_prompt(
         return Err("提示词标题不能为空".to_string());
     }
     let id = uuid::Uuid::new_v4().to_string();
-    let now = project_now();
+    let now = now_rfc3339();
     {
         let state = app.state::<DbState>();
         let conn = state.conn.lock().map_err(|e| e.to_string())?;
@@ -2661,7 +2657,7 @@ pub fn project_update_prompt(
         let conn = state.conn.lock().map_err(|e| e.to_string())?;
         conn.execute(
             "UPDATE project_prompts SET title = ?1, content = ?2, category = ?3, updated_at = ?4 WHERE id = ?5",
-            params![title, content, category, project_now(), id],
+            params![title, content, category, now_rfc3339(), id],
         )
         .map_err(|e| e.to_string())?;
     }

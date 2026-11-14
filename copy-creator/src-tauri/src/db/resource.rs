@@ -492,8 +492,8 @@ pub fn discover_external_resource_files<R: Runtime>(
     }
     let root = get_resource_library_dir(app);
     let roots = resource_library_roots(app);
-    let now = chrono::Utc::now().to_rfc3339();
-    let now_ms = chrono::Utc::now().timestamp_millis();
+    let now = now_rfc3339();
+    let now_ms = now_ms();
     let state = app.state::<DbState>();
     let Ok(conn) = state.conn.lock() else {
         return;
@@ -1443,7 +1443,7 @@ pub(crate) fn touch_resource_group_usage_internal<R: Runtime>(
         }
     }
     drop(stmt);
-    let now = chrono::Utc::now().to_rfc3339();
+    let now = now_rfc3339();
     let mut touched = false;
     for id in &ids {
         let changed = conn
@@ -3215,7 +3215,7 @@ pub(crate) fn set_resource_note_inner<R: Runtime>(
     if updated == 0 {
         let path = discovered_path.ok_or("资源不存在")?;
         let path_text = path.to_string_lossy().to_string();
-        let now = chrono::Utc::now().to_rfc3339();
+        let now = now_rfc3339();
         conn.execute(
             "INSERT INTO clipboard_records
              (id, type, content, source_app, created_at, storage_mode, resource_path, resource_note)

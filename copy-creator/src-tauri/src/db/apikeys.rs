@@ -42,7 +42,7 @@ pub fn save_api_key_label(
 ) -> Result<(), String> {
     let state = app.state::<DbState>();
     let conn = state.conn.lock().map_err(|e| e.to_string())?;
-    let now = chrono::Utc::now().to_rfc3339();
+    let now = now_rfc3339();
     conn.execute(
         "INSERT INTO api_key_labels (record_id, key_preview, service, api_base, note, created_at, updated_at)
          VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)

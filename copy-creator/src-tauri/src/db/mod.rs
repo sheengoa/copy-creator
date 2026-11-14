@@ -6,6 +6,10 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Mutex, OnceLock};
 use tauri::{AppHandle, Manager, Runtime};
 
+// 时间戳产出收口于 crate::clock（UTC RFC3339 / Unix 毫秒），私有导入经
+// use super::* 覆盖全部 db 子模块。
+use crate::clock::{now_ms, now_rfc3339};
+
 /// 资源库修订号：外部变更（监听防抖冲刷/启动对账）时自增。前端定时拉取
 /// 比对，作为 resource-groups-changed 单次事件被 WebView 丢弃或延迟时的
 /// 兜底自愈信号——事件是主路径，轮询对账只补漏。

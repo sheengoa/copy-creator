@@ -91,7 +91,7 @@ pub fn prune_old_records<R: Runtime>(
             _ => 30,
         };
 
-        let cutoff_ms = chrono::Utc::now().timestamp_millis() - days as i64 * 86_400_000;
+        let cutoff_ms = now_ms() - days as i64 * 86_400_000;
 
         // 一条语句完成筛选与删除（RETURNING 拿回被删行）；created_ms 走
         // idx_clipboard_created_ms，替代 datetime(created_at) 的全表扫描。
@@ -504,8 +504,8 @@ pub(crate) fn touch_clipboard_usage_internal<R: Runtime>(
     app: &AppHandle<R>,
     ids: &[String],
 ) -> Result<(), String> {
-    let now = chrono::Utc::now().to_rfc3339();
-    let now_ms = chrono::Utc::now().timestamp_millis();
+    let now = now_rfc3339();
+    let now_ms = now_ms();
     let mut discovered: HashMap<&str, PathBuf> = HashMap::new();
     for id in ids {
         if !id.starts_with(RESOURCE_FILE_ID_PREFIX) {

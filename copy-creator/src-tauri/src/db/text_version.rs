@@ -84,7 +84,7 @@ pub(crate) fn add_text_version(
             content,
             content.len() as i64,
             source,
-            chrono::Utc::now().to_rfc3339(),
+            now_rfc3339(),
         ],
     )
     .map_err(|e| format!("记录改动版本失败: {e}"))?;

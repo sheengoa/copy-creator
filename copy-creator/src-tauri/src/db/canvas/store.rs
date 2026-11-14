@@ -60,10 +60,6 @@ fn connection_row(row: &rusqlite::Row) -> rusqlite::Result<serde_json::Value> {
     }))
 }
 
-pub(crate) fn canvas_now() -> String {
-    chrono::Utc::now().to_rfc3339()
-}
-
 pub(super) fn emit_canvas_changed<R: Runtime>(app: &AppHandle<R>) {
     // 对齐 project-changed：画布数据前端整体订阅、统一重取，粗粒度事件
     // 即可；视口/批量布局落盘不 emit（见各命令注释）。
@@ -73,7 +69,7 @@ pub(super) fn emit_canvas_changed<R: Runtime>(app: &AppHandle<R>) {
 pub(crate) fn bump_canvas_updated_at(conn: &Connection, canvas_id: &str) -> Result<(), String> {
     conn.execute(
         "UPDATE canvases SET updated_at = ?1 WHERE id = ?2",
-        params![canvas_now(), canvas_id],
+        params![now_rfc3339(), canvas_id],
     )
     .map_err(|e| e.to_string())?;
     Ok(())
@@ -127,7 +123,7 @@ pub(crate) fn create_canvas(conn: &Connection, name: &str) -> Result<serde_json:
     let name = name.trim().to_string();
     let name = if name.is_empty() { "未命名画布".to_string() } else { name };
     let id = uuid::Uuid::new_v4().to_string();
-    let now = canvas_now();
+    let now = now_rfc3339();
     conn.execute(
         "INSERT INTO canvases (id, name, viewport_x, viewport_y, viewport_k, created_at, updated_at) \
          VALUES (?1, ?2, 0, 0, 1, ?3, ?4)",
@@ -152,7 +148,7 @@ pub(crate) fn rename_canvas(conn: &Connection, id: &str, name: &str) -> Result<(
     let changed = conn
         .execute(
             "UPDATE canvases SET name = ?1, updated_at = ?2 WHERE id = ?3",
-            params![name, canvas_now(), id],
+            params![name, now_rfc3339(), id],
         )
         .map_err(|e| e.to_string())?;
     if changed == 0 {
@@ -214,7 +210,7 @@ pub(crate) fn create_node(
     }
     let meta = parse_node_meta_strict(node_type, metadata_raw)?;
     let id = uuid::Uuid::new_v4().to_string();
-    let now = canvas_now();
+    let now = now_rfc3339();
     let resource_path = normalize_project_path(resource_path);
     conn.execute(
         "INSERT INTO canvas_nodes \
@@ -394,7 +390,7 @@ pub(crate) fn connect(
     conn.execute(
         "INSERT OR IGNORE INTO canvas_connections (id, canvas_id, from_node, to_node, to_port, created_at) \
          VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
-        params![id, canvas_id, from_node, to_node, to_port, canvas_now()],
+        params![id, canvas_id, from_node, to_node, to_port, now_rfc3339()],
     )
     .map_err(|e| e.to_string())?;
     bump_canvas_updated_at(conn, canvas_id)?;
@@ -522,7 +518,7 @@ pub(crate) fn set_groups(
     let changed = conn
         .execute(
             "UPDATE canvases SET groups = ?1, updated_at = ?2 WHERE id = ?3",
-            params![normalized, canvas_now(), id],
+            params![normalized, now_rfc3339(), id],
         )
         .map_err(|e| e.to_string())?;
     if changed == 0 {

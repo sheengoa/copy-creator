@@ -5,6 +5,7 @@ mod backup;
 mod clipboard;
 mod clipboard_create_window;
 mod clipboard_wake;
+mod clock;
 mod db;
 mod dialog;
 #[cfg(target_os = "linux")]
@@ -21,7 +22,7 @@ mod tray;
 #[cfg(target_os = "windows")]
 mod win_hook;
 
-use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicI64, Ordering};
 use tauri::{Emitter, Manager};
 
 /// 用户置顶的唯一事实源。不能用 tao 的 `is_always_on_top()`：它读的是
@@ -46,19 +47,12 @@ pub(crate) const WINDOW_SHADOW_MARGIN: f64 = 20.0;
 
 /// 主窗口前端心跳时间戳（Unix 毫秒）。看门狗据此判定 WebView 渲染层是否
 /// 存活，见 run() setup 里的看门狗注释。
-static LAST_HEARTBEAT_MS: AtomicU64 = AtomicU64::new(0);
-
-fn now_millis() -> u64 {
-  std::time::SystemTime::now()
-    .duration_since(std::time::UNIX_EPOCH)
-    .map(|d| d.as_millis() as u64)
-    .unwrap_or(0)
-}
+static LAST_HEARTBEAT_MS: AtomicI64 = AtomicI64::new(0);
 
 /// 前端主窗口心跳：空实现，仅刷新心跳时间戳。
 #[tauri::command]
 fn main_window_heartbeat() {
-  LAST_HEARTBEAT_MS.store(now_millis(), Ordering::Release);
+  LAST_HEARTBEAT_MS.store(clock::now_ms(), Ordering::Release);
 }
 
 pub(crate) fn show_main_window(app: &tauri::AppHandle, reason: &str, center: bool) {
@@ -291,7 +285,7 @@ pub fn run() {
             // 看门狗据此判定渲染层是否存活：超时先 hide/show 强制重合成，
             // 仍无心跳则由 Rust 侧触发 location.reload()——JS 已死时前端
             // 无法自救，必须由原生侧兜底。窗口隐藏（启动器常态）期间不判定。
-            LAST_HEARTBEAT_MS.store(now_millis(), Ordering::Release);
+            LAST_HEARTBEAT_MS.store(clock::now_ms(), Ordering::Release);
             let watchdog_handle = app.handle().clone();
             std::thread::spawn(move || {
                 let mut miss: u32 = 0;
@@ -304,7 +298,7 @@ pub fn run() {
                         continue;
                     }
                     let last = LAST_HEARTBEAT_MS.load(Ordering::Acquire);
-                    let now = now_millis();
+                    let now = clock::now_ms();
                     if now.saturating_sub(last) < 15_000 {
                         if miss > 0 {
                             log::info!("[watchdog] main window heartbeat recovered");

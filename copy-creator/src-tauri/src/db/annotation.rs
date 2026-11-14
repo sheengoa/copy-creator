@@ -99,7 +99,7 @@ pub(crate) fn add_resource_annotation_inner<R: Runtime>(
         length,
         kind: kind.to_string(),
         anchor_text: anchor_text.to_string(),
-        created_at: chrono::Utc::now().to_rfc3339(),
+        created_at: now_rfc3339(),
     };
     conn.execute(
         "INSERT INTO resource_annotations

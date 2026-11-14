@@ -86,7 +86,7 @@ pub(crate) fn insert_trash_item_in_tx(
     resource_path: &str,
     library_root: &Path,
 ) -> Result<TrashedResourceFile, String> {
-    let now_ms = chrono::Utc::now().timestamp_millis();
+    let now_ms = now_ms();
     let trash_id = uuid::Uuid::new_v4().to_string();
     let trash_dir = format!(
         "{}/{}-{}",
@@ -111,7 +111,7 @@ pub(crate) fn insert_trash_item_in_tx(
             original_group,
             resource_path,
             trash_dir,
-            chrono::Utc::now().to_rfc3339(),
+            now_rfc3339(),
             now_ms,
         ],
     )
@@ -374,7 +374,7 @@ pub(crate) fn archive_resource_record_to_trash(
     resource_path: &str,
 ) -> Result<(), String> {
     let record_json = serialize_resource_record(conn, record_id)?;
-    let now_ms = chrono::Utc::now().timestamp_millis();
+    let now_ms = now_ms();
     let trash_id = uuid::Uuid::new_v4().to_string();
     let trash_dir = format!(
         "{}/{}-{}",
@@ -398,7 +398,7 @@ pub(crate) fn archive_resource_record_to_trash(
             original_group,
             resource_path,
             trash_dir,
-            chrono::Utc::now().to_rfc3339(),
+            now_rfc3339(),
             now_ms,
         ],
     )
@@ -1021,7 +1021,7 @@ fn trash_cutoff_ms(now_ms: i64, days: i64) -> i64 {
 /// 过期清理：随保留期清理任务（启动 + 每小时）执行。
 pub(crate) fn purge_expired_trash<R: Runtime>(app: &AppHandle<R>) {
     let days = trash_retention_days(app);
-    let cutoff_ms = trash_cutoff_ms(chrono::Utc::now().timestamp_millis(), days);
+    let cutoff_ms = trash_cutoff_ms(now_ms(), days);
     if let Err(error) = purge_trash_expired_before(app, cutoff_ms) {
         log::warn!("回收站过期清理失败: {error}");
     }

@@ -240,7 +240,7 @@ fn record_channel_test_result(
     channel_id: &str,
     result: &Result<u64, String>,
 ) {
-    let now = crate::db::canvas_now();
+    let now = crate::clock::now_rfc3339();
     let update = match result {
         Ok(latency_ms) => conn.execute(
             "UPDATE ai_channels SET last_latency_ms = ?1, last_tested_at = ?2, \
@@ -439,7 +439,7 @@ pub async fn ai_generate_image(app: AppHandle, canvas_id: String, node_id: Strin
         });
         conn.execute(
             "UPDATE canvas_nodes SET metadata = ?1, updated_at = ?2 WHERE id = ?3",
-            params![serde_json::to_string(&meta).map_err(|e| e.to_string())?, crate::db::canvas_now(), node_id],
+            params![serde_json::to_string(&meta).map_err(|e| e.to_string())?, crate::clock::now_rfc3339(), node_id],
         )
         .map_err(|e| e.to_string())?;
     }
@@ -688,7 +688,7 @@ pub async fn ai_generate_image(app: AppHandle, canvas_id: String, node_id: Strin
         let conn = state.conn.lock().map_err(|e| e.to_string())?;
         conn.execute(
             "UPDATE canvas_nodes SET metadata = ?1, updated_at = ?2 WHERE id = ?3",
-            params![serde_json::to_string(&final_meta).map_err(|e| e.to_string())?, crate::db::canvas_now(), node_id],
+            params![serde_json::to_string(&final_meta).map_err(|e| e.to_string())?, crate::clock::now_rfc3339(), node_id],
         )
         .map_err(|e| e.to_string())?;
         crate::db::bump_canvas_updated_at(&conn, &canvas_id)?;

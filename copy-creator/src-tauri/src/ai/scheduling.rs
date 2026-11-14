@@ -42,13 +42,6 @@ pub(super) fn load_scheduling(conn: &rusqlite::Connection) -> Scheduling {
     }
 }
 
-fn now_epoch_ms() -> i64 {
-    std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .map(|d| d.as_millis() as i64)
-        .unwrap_or(0)
-}
-
 /// 按调度策略排出本次生成的渠道尝试顺序：可用 = 启用 + 未自动停用 +
 /// 不在限流冷却期。manual 只取指定渠道；latency 按（主动测速 + 被动
 /// EMA）延迟升序；price 按归一化价格（¥ 简化按 7.2 折算）升序、同价比
@@ -74,7 +67,7 @@ pub(super) fn ordered_channel_targets(conn: &rusqlite::Connection, sched: &Sched
         .collect::<Result<Vec<_>, _>>()
         .map_err(|e| e.to_string())?;
 
-    let now_ms = now_epoch_ms();
+    let now_ms = crate::clock::now_ms();
     let global_model = read_setting(conn, "ai_model");
     let mut targets: Vec<ChannelTarget> = Vec::new();
     let mut usable_rows = 0usize;
@@ -210,7 +203,7 @@ pub(super) fn classify_failure(message: &str) -> &'static str {
 }
 
 pub(super) fn mark_channel_failure(conn: &rusqlite::Connection, channel_id: &str, kind: &str, sched: &Scheduling, message: &str) {
-    let now = crate::db::canvas_now();
+    let now = crate::clock::now_rfc3339();
     let update = match kind {
         "auth" if sched.auto_disable_auth => conn.execute(
             "UPDATE ai_channels SET status = 'auto_disabled', last_error = ?1, updated_at = ?2 WHERE id = ?3",
@@ -218,7 +211,7 @@ pub(super) fn mark_channel_failure(conn: &rusqlite::Connection, channel_id: &str
         ),
         "rate" => conn.execute(
             "UPDATE ai_channels SET cooldown_until_ms = ?1, last_error = ?2, updated_at = ?3 WHERE id = ?4",
-            params![now_epoch_ms() + sched.cooldown_ms, message, now, channel_id],
+            params![crate::clock::now_ms() + sched.cooldown_ms, message, now, channel_id],
         ),
         _ => conn.execute(
             "UPDATE ai_channels SET last_error = ?1, updated_at = ?2 WHERE id = ?3",
@@ -233,7 +226,7 @@ pub(super) fn mark_channel_failure(conn: &rusqlite::Connection, channel_id: &str
 /// 真实生成的耗时按渠道做 EMA（旧值 70% + 新值 30%）：让「延迟优先 /
 /// 综合最优」随真实使用自校准，主动测速只做初始标定。
 pub(super) fn record_channel_latency(conn: &rusqlite::Connection, channel_id: &str, latency_ms: u64) {
-    let now = crate::db::canvas_now();
+    let now = crate::clock::now_rfc3339();
     if let Err(error) = conn.execute(
         "UPDATE ai_channels SET last_latency_ms = \
          CASE WHEN last_latency_ms IS NULL THEN ?1 ELSE (last_latency_ms * 7 + ?1 * 3) / 10 END, \

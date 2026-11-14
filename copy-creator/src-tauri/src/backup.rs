@@ -7,6 +7,7 @@
 use crate::db::{
     get_resource_library_dir, get_storage_dir, paths_overlap, DbState, MIGRATED_BUSINESS_TABLES,
 };
+use crate::clock::{now_ms, now_rfc3339};
 use serde::{Deserialize, Serialize};
 use std::fs::File;
 use std::io::{BufReader, Read, Write};
@@ -219,7 +220,7 @@ pub fn export_backup_internal<R: Runtime>(
         let manifest = BackupManifest {
             format_version: FORMAT_VERSION,
             app_version: env!("CARGO_PKG_VERSION").to_string(),
-            exported_at: chrono::Utc::now().to_rfc3339(),
+            exported_at: now_rfc3339(),
             includes_library: include_library,
             library_path: library_dir.to_string_lossy().to_string(),
             table_counts,
@@ -308,7 +309,7 @@ pub fn import_backup_internal<R: Runtime>(
     // 与程序化连续导入下可能撞名，互相覆盖/清理对方的暂存库。
     let restore_dir = data_dir.join(format!(
         "restore-{}-{}",
-        chrono::Utc::now().timestamp_millis(),
+        now_ms(),
         uuid::Uuid::new_v4().simple()
     ));
     // 库恢复位置在落盘前校验：与当前存储目录或本轮流暂存目录（重启后
