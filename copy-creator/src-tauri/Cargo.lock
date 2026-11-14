@@ -691,7 +691,7 @@ dependencies = [
 
 [[package]]
 name = "copy-creator"
-version = "0.3.27"
+version = "0.3.28"
 dependencies = [
  "arboard",
  "base64 0.22.1",
