@@ -62,6 +62,18 @@ describe("settingsStore 主题与隐私设置 wiring", () => {
     expect(emitMock).toHaveBeenCalledWith("clipboard-pause-changed", { paused: true });
   });
 
+  it("setLanguage patch store、持久化、广播 language-changed 并更新托盘语言", async () => {
+    await useSettingsStore.getState().setLanguage("en");
+
+    expect(useSettingsStore.getState().language).toBe("en");
+    expect(invokeMock).toHaveBeenCalledWith("set_setting", {
+      key: "language",
+      value: "en",
+    });
+    expect(emitMock).toHaveBeenCalledWith("language-changed", { language: "en" });
+    expect(invokeMock).toHaveBeenCalledWith("update_tray_language");
+  });
+
   it("setClipboardMaxRecords 持久化为字符串档位", async () => {
     await useSettingsStore.getState().setClipboardMaxRecords(2000);
 

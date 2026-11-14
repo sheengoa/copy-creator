@@ -21,7 +21,7 @@ export function GeneralSection({
   setLocalContentSort,
 }: GeneralSectionProps) {
   const { t, i18n } = useTranslation();
-  const setSetting = useSettingsStore((s) => s.setSetting);
+  const setLanguage = useSettingsStore((s) => s.setLanguage);
   const themeMode = useSettingsStore((s) => s.themeMode);
   const setThemeMode = useSettingsStore((s) => s.setThemeMode);
   const autoHideOnBlur = useSettingsStore((s) => s.autoHideOnBlur);
@@ -30,7 +30,9 @@ export function GeneralSection({
   const handleChangeLang = (lang: string) => {
     setLocalLang(lang);
     i18n.changeLanguage(lang);
-    setSetting("language", lang);
+    // 即时切换走 setLanguage：持久化 + patch store + 广播 language-changed
+    // （径向菜单/新建窗口跟手）+ 托盘文案跟随，语义对齐保存按钮流程。
+    void setLanguage(lang);
   };
 
   const themeOptions: { value: ThemePreference; label: string }[] = [

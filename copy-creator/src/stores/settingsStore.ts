@@ -171,6 +171,7 @@ interface SettingsState {
   setResourceCardSize: (size: number) => Promise<void>;
   setAutoHideOnBlur: (enabled: boolean) => Promise<void>;
   setClipboardPaused: (enabled: boolean) => Promise<void>;
+  setLanguage: (lang: string) => Promise<void>;
   setClipboardMaxRecords: (max: number) => Promise<void>;
   setClipboardExclusions: (raw: string) => Promise<void>;
   /** 函数式更新查找替换历史：持久化并广播跨窗口同步事件。 */
@@ -432,6 +433,23 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
       await emit("clipboard-pause-changed", { paused: enabled });
     } catch (e) {
       console.error("Failed to save capture pause:", e);
+    }
+  },
+
+  // 语言切换：持久化 + patch 本窗口 store.language + 广播 language-changed
+  // （径向菜单/新建窗口监听后各自 changeLanguage）+ 托盘菜单文案跟随。
+  // 语义对齐 SettingsContent 保存按钮流程（i18n.changeLanguage 由调用方
+  // 组件负责，store 不管 i18n 实例）。此前 GeneralSection 即时切换走
+  // setSetting("language")，只落库不 patch 不广播——本窗口 store 过期、
+  // 其他窗口与托盘语言不跟手。
+  setLanguage: async (lang) => {
+    set({ language: lang });
+    try {
+      await invoke("set_setting", { key: "language", value: lang });
+      await emit("language-changed", { language: lang });
+      await invoke("update_tray_language");
+    } catch (e) {
+      console.error("Failed to save language setting:", e);
     }
   },
 
