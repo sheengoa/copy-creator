@@ -25,7 +25,10 @@ import { handleProjectCommands } from "./mock/commandsProject";
 // （窗口/事件基础设施，mock 不打算覆盖），strict 下同样放行静默。
 const mockStrict = (() => {
   try {
-    if (new URLSearchParams(window.location.search).has("mockStrict")) return true;
+    // URL 参数优先于 localStorage（?mockStrict=0 可临时压掉会话常开）：
+    // 值按开关语义解读，"0"/"false" 关、其余（含裸 ?mockStrict）开。
+    const url = new URLSearchParams(window.location.search).get("mockStrict");
+    if (url !== null) return url !== "0" && url !== "false";
     return window.localStorage.getItem("mockStrict") === "1";
   } catch {
     return false;

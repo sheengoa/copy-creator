@@ -44,12 +44,13 @@ export function useResourceDetailContentEdit({
   const contentSavedTimerRef = useRef<number | null>(null);
   const contentEditorRef = useRef<HTMLTextAreaElement | null>(null);
 
-  // 记录切换重置编辑态。
+  // 记录切换重置编辑态（与其他拆出 hook 的重置 effect 同键：跟随
+  // record.resource_note——记录快照原地修补备注时编辑态一并复位）。
   useEffect(() => {
     setContentEditing(false);
     setContentSaved(false);
     setContentSaveError(null);
-  }, [record.id, setContentSaveError]);
+  }, [record.id, record.resource_note, setContentSaveError]);
 
   useEffect(() => () => {
     if (contentSavedTimerRef.current !== null) window.clearTimeout(contentSavedTimerRef.current);

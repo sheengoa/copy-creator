@@ -786,8 +786,19 @@ describe("架构守卫：领域规则必须全局共享", () => {
     }
     expect(invokeOffenders, "前端 invoke 了未注册命令（真实环境 unknown command）").toEqual([]);
 
-    const mockSource = readSource("dev/tauriMock.ts");
-    const mockOffenders = Array.from(mockSource.matchAll(/case "([a-z0-9_]+)"/g))
+    // mock 分派表已按域拆入 dev/mock/commands*.ts（tauriMock.ts 只剩分派
+    // 器骨架，自身不再含 case）——mock 侧检查聚合 commands*.ts 三域模块；
+    // 不能只读 tauriMock.ts（改名漂移如 get_stash_images 型缺陷会静默漏
+    // 拦），也不能整个 dev/mock/ 都扫（media.ts 的 record 模板 switch 也
+    // 是 case "..."，与命令面无关，会误报）。
+    const mockSources = [
+      readSource("dev/tauriMock.ts"),
+      ...collectSources(join(frontRoot, "dev", "mock"))
+        .filter((file) => /[/\\]commands[^/\\]*\.ts$/.test(toPosix(file)))
+        .map(sourceOf),
+    ];
+    const mockOffenders = mockSources
+      .flatMap((source) => Array.from(source.matchAll(/case "([a-z0-9_]+)"/g)))
       .filter((m) => !registered.has(m[1]))
       .map((m) => `mock case "${m[1]}" 未注册（后端不存在或已改名，浏览器模式静默走兜底）`);
     expect(mockOffenders, "tauriMock 覆盖了不存在的命令").toEqual([]);

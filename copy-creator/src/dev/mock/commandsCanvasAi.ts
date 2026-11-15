@@ -167,7 +167,6 @@ export function handleCanvasAiCommands(cmd: string, args: Record<string, unknown
       canvas.updated_at = ts();
       return { id: canvas.id, groups: clone(canvas.groups) };
     }
-    case "canvas_pick_save_path":
     case "canvas_pick_save_dir":
       // 浏览器环境没有系统对话框：返回空串＝用户取消（前端静默）。
       return "";
