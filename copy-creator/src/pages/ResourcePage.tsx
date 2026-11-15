@@ -23,13 +23,7 @@ import { useResourceDetail } from "./ResourcePage/useResourceDetail";
 import { useResourceMissingTrace } from "./ResourcePage/useResourceMissingTrace";
 import { useResourceGroupAdmin } from "./ResourcePage/useResourceGroupAdmin";
 import { ResourceGroupDialogs } from "./ResourcePage/ResourceGroupDialogs";
-
-type ResourceMoveDialogState = {
-  ids: string[];
-  label: string;
-  meta: string;
-  folders: string[];
-} | null;
+import { useResourceMove } from "./ResourcePage/useResourceMove";
 import ResourceGroupChips from "./ResourcePage/ResourceGroupChips";
 import { TrashPanel } from "./ResourcePage/TrashPanel";
 import type { ResourceMediaKind as ResourceMediaKindLabel } from "../domain/mediaKind";
@@ -38,10 +32,8 @@ import { ResourceCard } from "./ResourcePage/ResourceCard";
 import { buildRecordView, type RecordView } from "../domain/recordView";
 import { type ResourceTypeFilter } from "../domain/mediaKind";
 import { resourceCardScale, splitResourceColumns } from "../utils/cardGrid";
-import { findResourceFolder, formatResourceFolderPath, getResourceFolderRoot } from "../domain/groups";
-import { inferResourceMediaKind, matchesResourceType } from "../domain/mediaKind";
-import { getResourceTitle } from "../domain/records";
-import ResourceMoveDialog from "./ResourcePage/ResourceMoveDialog";
+import { findResourceFolder, getResourceFolderRoot } from "../domain/groups";
+import { matchesResourceType } from "../domain/mediaKind";
 import ProjectView from "./ResourcePage/ProjectView";
 import ProjectViewSwitch from "./ResourcePage/ProjectViewSwitch";
 import ProjectSearchResults from "./ResourcePage/ProjectSearchResults";
@@ -130,10 +122,6 @@ export default function ResourcePage() {
 
   const [deletingSelected, setDeletingSelected] = useState(false);
   const [selectingAll, setSelectingAll] = useState(false);
-  const [moveDialog, setMoveDialog] = useState<ResourceMoveDialogState>(null);
-  const [movingResource, setMovingResource] = useState(false);
-  const [moveError, setMoveError] = useState<string | null>(null);
-  const [moveFeedback, setMoveFeedback] = useState<string | null>(null);
   const [resourceSettingsOpen, setResourceSettingsOpen] = useState(false);
   // 分组选中态以 store 为单一来源：store 字段同时驱动 record-updated 事件
   // 的过滤（recordMatchesCategory），页面只读写 store，不再维护本地副本。
@@ -356,6 +344,23 @@ export default function ResourcePage() {
     }
   }, [typeFilter, loading, missingAllCount]);
 
+  // 移动子系统：移动入口（卡片/批量/详情）、对话框状态机、确认修补
+  // 详情记录、成功反馈条与对话框 JSX 收口于 useResourceMove。
+  const {
+    moveDialog,
+    openResourceMove,
+    handleMoveCard,
+    moveDialogElement,
+    moveFeedbackElement,
+  } = useResourceMove({
+    filteredRecords,
+    detailRecord,
+    setDetailRecord,
+    cancelResourceSelection,
+    feedbackTimerRef,
+    resourceGroups,
+  });
+
   // 视图模型与分列都 memo 化：避免任意一次无关 state 变化触发全量重建
   // （buildRecordView 每卡一次）导致整页卡片级重渲。
   const recordLocale = useRecordLocale();
@@ -502,85 +507,6 @@ export default function ResourcePage() {
     setResourceGroupsError,
   });
 
-  const openResourceMove = useCallback((ids: string[]) => {
-    if (ids.length === 0) return;
-    const selected = filteredRecords.filter((record) => ids.includes(record.id));
-    // 详情页记录可能尚未出现在已加载的列表里（如刚改名/移动完），用详情记录兜底。
-    if (selected.length === 0 && detailRecord && ids.includes(detailRecord.id)) {
-      selected.push(detailRecord);
-    }
-    if (selected.length === 0) return;
-    const folders = [...new Set(selected.map((record) => record.resource_folder ?? ""))];
-    const label = selected.length === 1
-      ? getResourceTitle(selected[0], inferResourceMediaKind(selected[0]), recordLocale)
-      : t("resources.moveSelectedCount", { count: selected.length });
-    const meta = folders.length === 1
-      ? t("resources.moveCurrentLocation", {
-        name: folders[0] === "" ? t("resources.ungrouped") : formatResourceFolderPath(folders[0]),
-      })
-      : t("resources.moveMultipleLocations");
-    setMoveError(null);
-    setMoveDialog({ ids, label, meta, folders });
-  }, [detailRecord, filteredRecords, recordLocale, t]);
-
-  const handleMoveCard = useCallback(
-    (moveView: RecordView) => openResourceMove([moveView.id]),
-    [openResourceMove],
-  );
-
-  const handleMoveConfirm = useCallback(async (targetFolder: string) => {
-    if (!moveDialog || movingResource) return;
-    setMovingResource(true);
-    setMoveError(null);
-    try {
-      const results = await invoke<
-        Array<{
-          id: string;
-          resource_path?: string;
-          resource_relative_path?: string | null;
-          resource_folder?: string | null;
-          content?: string;
-        }>
-      >("move_resource_records", {
-        ids: moveDialog.ids,
-        targetFolder,
-      });
-      const targetLabel = targetFolder === ""
-        ? t("resources.ungrouped")
-        : formatResourceFolderPath(targetFolder);
-      setMoveFeedback(t("resources.moveSuccess", { count: moveDialog.ids.length, name: targetLabel }));
-      if (feedbackTimerRef.current !== null) window.clearTimeout(feedbackTimerRef.current);
-      feedbackTimerRef.current = window.setTimeout(() => {
-        setMoveFeedback(null);
-        feedbackTimerRef.current = null;
-      }, 2600);
-      setDetailRecord((current) => {
-        if (!current) return null;
-        // 自动发现记录的 id 随路径变化，结果按请求下标对齐后整条修补。
-        const index = moveDialog.ids.indexOf(current.id);
-        if (index < 0 || index >= results.length) return current;
-        const updated = results[index];
-        return {
-          ...current,
-          ...(updated.id ? { id: updated.id } : null),
-          ...(updated.resource_path ? { resource_path: updated.resource_path } : null),
-          ...(updated.resource_relative_path
-            ? { resource_relative_path: updated.resource_relative_path }
-            : null),
-          ...(updated.resource_folder !== undefined ? { resource_folder: updated.resource_folder } : null),
-          ...(updated.content ? { content: updated.content } : null),
-        };
-      });
-      setMoveDialog(null);
-      cancelResourceSelection();
-    } catch (error) {
-      console.error("Failed to move resource records:", error);
-      setMoveError(String(error));
-    } finally {
-      setMovingResource(false);
-    }
-  }, [cancelResourceSelection, moveDialog, movingResource, setDetailRecord, t]);
-
   const handleToggleAll = useCallback(async () => {
     if (selectingAll) return;
     if (allVisibleSelected && !hasMore) {
@@ -696,29 +622,6 @@ export default function ResourcePage() {
       onConfirm={confirmState.onConfirm}
       onCancel={() => setConfirmState(null)}
     />
-  ) : null;
-
-  const moveDialogElement = (
-    <ResourceMoveDialog
-      open={moveDialog !== null}
-      itemsLabel={moveDialog?.label ?? ""}
-      itemsMeta={moveDialog?.meta ?? ""}
-      currentFolders={moveDialog?.folders ?? []}
-      groups={resourceGroups}
-      moving={movingResource}
-      error={moveError}
-      onClose={() => {
-        setMoveDialog(null);
-        setMoveError(null);
-      }}
-      onConfirm={(target) => void handleMoveConfirm(target)}
-    />
-  );
-
-  const moveFeedbackElement = moveFeedback ? (
-    <div className="resource-feedback success" role="status" aria-live="polite">
-      {moveFeedback}
-    </div>
   ) : null;
 
   if (detailRecord) {
