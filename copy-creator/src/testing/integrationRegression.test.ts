@@ -203,6 +203,8 @@ describe("integration regressions", () => {
     const dbSource = readDbSource();
     const clipboardSource = readSource("../../src-tauri/src/clipboard.rs");
     const pageSource = readSource("../pages/ResourcePage.tsx");
+    // 分组加载与库同步随收口在 useResourceGroupSync。
+    const groupSyncSource = readSource("../pages/ResourcePage/useResourceGroupSync.ts");
     const groupChipsSource = readSource("../pages/ResourcePage/ResourceGroupChips.tsx");
     const componentSource = readSource("../components/ClipboardCreateDialog/index.tsx");
 
@@ -225,13 +227,13 @@ describe("integration regressions", () => {
     expect(pageSource).not.toContain("isTempRecord");
     expect(pageSource).not.toContain("resource-mode-tab");
     expect(pageSource).toContain('storageMode: "resource"');
-    expect(pageSource).toContain("list_resource_groups");
+    expect(groupSyncSource).toContain("list_resource_groups");
     // 分组栏（含拖拽排序与子分组菜单）内聚在 ResourceGroupChips 中。
     expect(pageSource).toContain("<ResourceGroupChips");
     expect(groupChipsSource).toContain("resource-group-section");
     expect(groupChipsSource).toContain("resource-group-scroll");
     expect(groupChipsSource).toContain("horizontalListSortingStrategy");
-    expect(pageSource).toContain('listen("resource-groups-changed"');
+    expect(groupSyncSource).toContain('listen("resource-groups-changed"');
     expect(pageSource).toContain("resourceGroup");
     expect(pageSource).not.toContain("useResourceGroupStore");
     expect(pageSource).not.toContain("<GroupChips");
@@ -248,6 +250,8 @@ describe("integration regressions", () => {
     const dbSource = readDbSource();
     const clipboardPageSource = readSource("../pages/ClipboardPage/index.tsx");
     const pageSource = readSource("../pages/ResourcePage.tsx");
+    // 分组同步（事件监听/对账轮询/恢复显示重载）随收口在 useResourceGroupSync。
+    const groupSyncSource = readSource("../pages/ResourcePage/useResourceGroupSync.ts");
 
     // 目录监听必须把删除/内容修改也转发进防抖汇聚（不只是新建/改名），
     // 否则文件管理器里删除内容后界面永远不会刷新（修复前的根因）。
@@ -280,7 +284,7 @@ describe("integration regressions", () => {
     // 不触发 visibilitychange（实测），重载必须挂后端 main-window-shown
     // 广播；后端在 show_main_window（全部显示路径的汇聚点）发射该事件。
     expect(clipboardPageSource).toContain("useRefreshOnShow");
-    expect(pageSource).toContain("useRefreshOnShow");
+    expect(groupSyncSource).toContain("useRefreshOnShow");
     const hookSource = readSource("../hooks/useRefreshOnShow.ts");
     expect(hookSource).toContain('listen("main-window-shown"');
     const libSource = readSource("../../src-tauri/src/lib.rs");
@@ -289,7 +293,7 @@ describe("integration regressions", () => {
     // 兜底自愈：resource-groups-changed 是单次事件，被 WebView 丢弃时
     // 列表停留旧数据且无重试。资源页挂载期间必须定时拉取库修订号对账
     // （事件为主路径，轮询只补漏）；后端在监听冲刷与启动对账时自增。
-    expect(pageSource).toContain("get_resource_library_revision");
+    expect(groupSyncSource).toContain("get_resource_library_revision");
     expect(dbSource).toContain("fn get_resource_library_revision");
     expect(dbSource).toContain("bump_resource_library_revision");
     expect(watchSource).toContain("bump_resource_library_revision");
@@ -602,6 +606,8 @@ describe("integration regressions", () => {
     const dbSource = readDbSource();
     const clipboardSource = readSource("../../src-tauri/src/clipboard.rs");
     const resourcePage = readSource("../pages/ResourcePage.tsx");
+    // 库路径加载与切换随收口在 useResourceGroupSync。
+    const groupSyncSource = readSource("../pages/ResourcePage/useResourceGroupSync.ts");
     const createDialog = readSource("../components/ClipboardCreateDialog/index.tsx");
     const pruneBlock = dbSource.slice(
       dbSource.indexOf("pub fn prune_old_records"),
@@ -628,9 +634,9 @@ describe("integration regressions", () => {
     expect(clipboardSource).toContain('"txt"');
     expect(clipboardSource).toContain('"md"');
     expect(clipboardSource).toContain(".copy-creator/attachments/");
-    expect(resourcePage).toContain('get_resource_library_path"');
-    expect(resourcePage).toContain('select_resource_library_folder"');
-    expect(resourcePage).toContain('set_resource_library_path"');
+    expect(groupSyncSource).toContain('get_resource_library_path"');
+    expect(groupSyncSource).toContain('select_resource_library_folder"');
+    expect(groupSyncSource).toContain('set_resource_library_path"');
     expect(resourcePage).toContain('storageMode: "resource"');
     expect(createDialog).toContain("storageMode");
     expect(createDialog).toContain("handleDestChange");
