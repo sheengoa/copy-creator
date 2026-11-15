@@ -1,5 +1,5 @@
 import { openResourceFile, revealResourceFile } from "../../domain/mediaAssets";
-import { Fragment, useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { useTranslation } from "react-i18next";
 import type { ClipboardRecord } from "../../types";
@@ -19,10 +19,11 @@ import { buildResourceGroupCrumbs, formatResourceBitrate, formatResourceDuration
 import { textVersionSourceKey } from "../../domain/textVersions";
 import { useResourceVersionHistory } from "./useResourceVersionHistory";
 import { useResourceDetailNoteRename } from "./useResourceDetailNoteRename";
+import { DetailInfoPanel } from "./DetailInfoPanel";
+import { ANN_ICONS } from "./annotationIcons";
 import { useResourceDetailContentEdit } from "./useResourceDetailContentEdit";
 import { type ResourceMediaKind } from "../../domain/mediaKind";
 import { getResourceFileName, isResourceTitleRenameable, splitResourceFileName } from "../../domain/fileName";
-import { formatResourceFolderPath } from "../../domain/groups";
 import { inferResourceMediaKind } from "../../domain/mediaKind";
 import { getResourcePath, getResourceTitle, recordTextEditable, resourceMediaVersion, resourceTextPreviewPath } from "../../domain/records";
 import { useRecordLocale } from "../../hooks/useRecordLocale";
@@ -69,44 +70,6 @@ const ANN_HL_KINDS: { kind: AnnotationKind; tipKey: string; swatchClass: string 
   { kind: "hl-o", tipKey: "resources.annHlO", swatchClass: "tb-swatch-o" },
   { kind: "hl-p", tipKey: "resources.annHlP", swatchClass: "tb-swatch-p" },
 ];
-
-const ANN_ICONS = {
-  bold: (
-    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
-      <path d="M7 4h6.5a3.5 3.5 0 0 1 0 7H7z" />
-      <path d="M7 11h7.5a3.5 3.5 0 0 1 0 7H7z" />
-    </svg>
-  ),
-  underline: (
-    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round">
-      <path d="M7 4v6.5a5 5 0 0 0 10 0V4" />
-      <path d="M5 20h14" />
-    </svg>
-  ),
-  copy: (
-    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.9" strokeLinecap="round" strokeLinejoin="round">
-      <rect x="9" y="9" width="11" height="11" rx="2.5" />
-      <path d="M5 15V6a2 2 0 0 1 2-2h9" />
-    </svg>
-  ),
-  eraser: (
-    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.9" strokeLinecap="round" strokeLinejoin="round">
-      <path d="m5 16 8.5-8.5a2 2 0 0 1 2.8 0l3.2 3.2a2 2 0 0 1 0 2.8L13 20H8z" />
-      <path d="M6 20h13" />
-    </svg>
-  ),
-  pen: (
-    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round">
-      <path d="M12 19l7-7a4.95 4.95 0 1 0-7-7l-7 7v7h7z" />
-      <path d="M16 5l3 3" />
-    </svg>
-  ),
-  close: (
-    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round">
-      <path d="M6 6l12 12M18 6 6 18" />
-    </svg>
-  ),
-};
 
 export default function ResourceDetailPage({
   record,
@@ -967,186 +930,30 @@ export default function ResourceDetailPage({
           </div>
         </section>
 
-        <aside className="resource-detail-aside" aria-label={t("resources.info")}>
-          <h2>{t("resources.info")}</h2>
-          <dl>
-            <div>
-              <dt>{t("resources.type")}</dt>
-              <dd>{typeLabel(kind)}</dd>
-            </div>
-            <div>
-              <dt>{t("resources.createdAt")}</dt>
-              <dd>{new Date(record.created_at).toLocaleString()}</dd>
-            </div>
-            {record.resource_file_size !== undefined && (
-              <div>
-                <dt>{t("resources.fileSize")}</dt>
-                <dd>{formatResourceFileSize(record.resource_file_size)}</dd>
-              </div>
-            )}
-            {mediaMetaRows.map((row) => (
-              <div key={row.label}>
-                <dt>{row.label}</dt>
-                <dd>{row.value}</dd>
-              </div>
-            ))}
-            {record.source_app && (
-              <div>
-                <dt>{t("resources.sourceApp")}</dt>
-                <dd>{record.source_app}</dd>
-              </div>
-            )}
-          </dl>
-          {annotationsActive && (
-            <section className="marker-panel" aria-label={t("resources.markerPanelTitle")}>
-              <div className="marker-head">
-                <h2 className="marker-title">
-                  {t("resources.markerPanelTitle")}
-                  <span className="marker-count">{annotations.length}</span>
-                </h2>
-                {annotations.length > 0 && (
-                  <button
-                    type="button"
-                    className="marker-clear-all"
-                    onClick={clearAllAnnotations}
-                  >
-                    {t("resources.markerClearAll")}
-                  </button>
-                )}
-              </div>
-              {annotations.length === 0 ? (
-                <div className="marker-empty">
-                  {ANN_ICONS.pen}
-                  <p>{t("resources.markerEmpty")}</p>
-                </div>
-              ) : (
-                <ul className="marker-list">
-                  {[...annotations]
-                    .sort((a, b) => a.start - b.start)
-                    .map((annotation) => {
-                      const percent = fullTextContent === null || fullTextContent.length === 0
-                        ? 0
-                        : Math.min(100, Math.round((annotation.start / fullTextContent.length) * 100));
-                      const excerpt = annotation.anchorText
-                        .slice(0, 48)
-                        .replace(/\n/g, " ");
-                      const kindLabel = annotation.kind.startsWith("hl-")
-                        ? t("resources.markerKindHighlight", {
-                            color: t(`resources.annHl${annotation.kind.slice(3).toUpperCase()}`),
-                          })
-                        : annotation.kind === "bold"
-                          ? t("resources.markerKindBold")
-                          : t("resources.markerKindUnderline");
-                      return (
-                        <li
-                          key={annotation.id}
-                          className={annotation.stale
-                            ? `marker-item kind-${annotation.kind} stale`
-                            : `marker-item kind-${annotation.kind}`}
-                          title={annotation.stale
-                            ? t("resources.annStaleHint")
-                            : t("resources.markerJumpHint")}
-                          onClick={() => {
-                            if (!annotation.stale) jumpToAnnotation(annotation.id);
-                          }}
-                        >
-                          <span className="marker-body">
-                            <span className="marker-excerpt">{excerpt}</span>
-                            <span className="marker-meta">
-                              {kindLabel}
-                              {" · "}
-                              {annotation.stale
-                                ? t("resources.annStale")
-                                : t("resources.markerPosition", { percent })}
-                            </span>
-                          </span>
-                          <button
-                            type="button"
-                            className="marker-del"
-                            title={t("resources.markerDelete")}
-                            onClick={(event) => {
-                              event.stopPropagation();
-                              removeOneAnnotation(annotation.id);
-                            }}
-                          >
-                            {ANN_ICONS.close}
-                          </button>
-                        </li>
-                      );
-                    })}
-                </ul>
-              )}
-            </section>
-          )}
-          {onMoveRecord && (
-            <div className="resource-group-line">
-              <span className="resource-group-line-label">{t("resources.currentGroup")}</span>
-              <span className="resource-group-pill">
-                {/* 嵌套路径按层级拆成可收缩的面包屑小段：空间不足时前面
-                    的层级先压缩成省略号，最深一层（分组身份）最后才截断；
-                    嵌套超过 4 层时中段收起为一个「…」，完整路径悬停可见。 */}
-                <span
-                  className="resource-group-pill-name"
-                  title={record.resource_folder
-                    ? formatResourceFolderPath(record.resource_folder)
-                    : undefined}
-                >
-                  {groupCrumbItems
-                    ? groupCrumbItems.map((crumb, index) => (
-                        <Fragment key={`${index}-${crumb.text}`}>
-                          {index > 0 && (
-                            <span className="resource-group-crumb-sep" aria-hidden="true">/</span>
-                          )}
-                          <span className={crumb.more ? "resource-group-crumb-more" : "resource-group-crumb"}>
-                            {crumb.text}
-                          </span>
-                        </Fragment>
-                      ))
-                    : (
-                      <span className="resource-group-crumb">{t("resources.ungrouped")}</span>
-                    )}
-                </span>
-                <button type="button" onClick={() => onMoveRecord(record)}>
-                  {t("resources.move")}
-                </button>
-              </span>
-            </div>
-          )}
-          {!hideResourceOps && (
-          <div className="resource-note-block">
-            <label className="resource-note-label" htmlFor="resource-note-input">
-              {t("resources.note")}
-            </label>
-            <textarea
-              id="resource-note-input"
-              ref={noteInputRef}
-              className="resource-note-input"
-              maxLength={1000}
-              value={noteDraft}
-              placeholder={t("resources.notePlaceholder")}
-              onChange={(event) => {
-                setNoteDraft(event.target.value);
-                setNoteError(false);
-              }}
-            />
-            <div className="resource-note-actions">
-              {noteSaved && <span className="resource-note-saved" role="status">{t("resources.noteSaved")}</span>}
-              {noteError && <span className="resource-note-error" role="alert">{t("resources.noteSaveFailed")}</span>}
-              {noteDirty && (
-                <button
-                  type="button"
-                  className="ui-btn"
-                  onClick={() => void handleSaveNote()}
-                  disabled={noteSaving}
-                >
-                  {noteSaving ? t("common.saving") : t("common.save")}
-                </button>
-              )}
-            </div>
-          </div>
-          )}
-        </aside>
-      </main>
+        <DetailInfoPanel
+          kind={kind}
+          record={record}
+          typeLabel={typeLabel}
+          mediaMetaRows={mediaMetaRows}
+          groupCrumbItems={groupCrumbItems}
+          annotationsActive={annotationsActive}
+          annotations={annotations}
+          fullTextContent={fullTextContent}
+          jumpToAnnotation={jumpToAnnotation}
+          removeOneAnnotation={removeOneAnnotation}
+          clearAllAnnotations={clearAllAnnotations}
+          onMoveRecord={onMoveRecord}
+          hideResourceOps={hideResourceOps}
+          noteDraft={noteDraft}
+          setNoteDraft={setNoteDraft}
+          noteDirty={noteDirty}
+          noteSaving={noteSaving}
+          noteSaved={noteSaved}
+          noteError={noteError}
+          setNoteError={setNoteError}
+          noteInputRef={noteInputRef}
+          handleSaveNote={handleSaveNote}
+        />      </main>
       {historyToast && (
         <div className="resource-history-toast" role="status">
           {historyToast}

@@ -479,6 +479,7 @@ describe("integration regressions", () => {
     // 详情页正文取材分派随收口在 useDetailContentSource。
     const detailMediaSource = readSource("../pages/ResourcePage/useDetailContentSource.ts");
     const noteRenameSource = readSource("../pages/ResourcePage/useResourceDetailNoteRename.ts");
+    const infoPanelSource = readSource("../pages/ResourcePage/DetailInfoPanel.tsx");
     const detailLoaderBlock = detailMediaSource.slice(
       detailMediaSource.indexOf("useEffect(() =>"),
       detailMediaSource.indexOf("const fullTextContent"),
@@ -513,7 +514,8 @@ describe("integration regressions", () => {
     expect(detailMediaSource).toContain("resolveResourceMediaUrl(resourcePath, mediaVersion)");
     // 备注保存随备注子系统收口在 useResourceDetailNoteRename。
     expect(noteRenameSource).toContain("set_resource_note");
-    expect(detailPageSource).toContain("resource-note-input");
+    // 备注输入框随信息侧栏收口在 DetailInfoPanel。
+    expect(infoPanelSource).toContain("resource-note-input");
     expect(detailPageSource).toContain("metaResolution");
     // 列数计算收口共享 hook（三页同几何），页面不再自带 ResizeObserver 副本。
     expect(pageSource).toContain("useCardColumns(");
