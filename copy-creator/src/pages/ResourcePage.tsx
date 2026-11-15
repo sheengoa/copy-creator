@@ -13,13 +13,13 @@ import { Icons } from "../components/Icons";
 import { IosSelect } from "../components/ui";
 import SearchInput from "../components/SearchInput";
 import BatchSelectionBar from "../components/BatchSelectionBar";
-import type { ClipboardRecord } from "../types";
 import { BackToTopButton } from "../components/BackToTop";
 import { useBackToTop } from "../hooks/useBackToTop";
 import { useRecordLocale } from "../hooks/useRecordLocale";
 import { useEscapeKey } from "../hooks/useEscapeKey";
 import ResourceDetailPage from "./ResourcePage/ResourceDetailPage";
 import { useResourceGroupSync } from "./ResourcePage/useResourceGroupSync";
+import { useResourceDetail } from "./ResourcePage/useResourceDetail";
 import { useResourceMissingTrace } from "./ResourcePage/useResourceMissingTrace";
 import { useResourceGroupAdmin } from "./ResourcePage/useResourceGroupAdmin";
 import { ResourceGroupDialogs } from "./ResourcePage/ResourceGroupDialogs";
@@ -120,10 +120,6 @@ export default function ResourcePage() {
   );
 
   const [typeFilter, setTypeFilter] = useState<ResourcePageTypeFilter>("all");
-  const [detailRecordId, setDetailRecordId] = useState<string | null>(null);
-  const [detailRecord, setDetailRecord] = useState<ClipboardRecord | null>(null);
-  const detailHistoryRef = useRef(false);
-  const pendingScrollTopRef = useRef<number | null>(null);
   const resourceListRef = useRef<HTMLDivElement>(null);
   const [listElement, setListElement] = useState<HTMLDivElement | null>(null);
   const [feedback, setFeedback] = useState<"deleteFailed" | "deletedWithMissing" | "openFailed" | null>(null);
@@ -202,6 +198,25 @@ export default function ResourcePage() {
   useEffect(() => () => {
     if (feedbackTimerRef.current !== null) window.clearTimeout(feedbackTimerRef.current);
   }, []);
+
+  // 详情子系统：详情记录状态与打开/关闭（history 联动）、滚动记忆恢复、
+  // Esc 关闭、单条删除确认收口于 useResourceDetail；删除通道、确认框、
+  // 反馈与列表滚动容器经参数注入。
+  const {
+    detailRecord,
+    setDetailRecord,
+    detailRecordId,
+    closeDetail,
+    openDetail,
+    handleDeleteRecord,
+  } = useResourceDetail({
+    records,
+    deleteRecord,
+    setConfirmState,
+    showFeedback,
+    setMissingCount,
+    resourceListRef,
+  });
 
   // 分组列表加载/库修订号对账/资源库路径子系统收口于 useResourceGroupSync；
   // 分组数据与库路径状态自持，浏览态（resourceGroup）与列表重载经参数注入。
@@ -487,45 +502,6 @@ export default function ResourcePage() {
     setResourceGroupsError,
   });
 
-  const closeDetail = useCallback(() => {
-    if (!detailRecordId) return;
-    if (detailHistoryRef.current) {
-      window.history.back();
-      return;
-    }
-    setDetailRecord(null);
-    setDetailRecordId(null);
-  }, [detailRecordId]);
-
-  const handleDeleteRecord = useCallback((id: string) => {
-    setConfirmState({
-      message: t("resources.confirmDelete"),
-      hint: t("resources.confirmDeleteHint"),
-      onConfirm: async () => {
-        try {
-          const summary = await deleteRecord(id);
-          if (detailRecordId === id) closeDetail();
-          if (summary && summary.filesAlreadyMissing > 0) {
-            setMissingCount(summary.filesAlreadyMissing);
-            showFeedback("deletedWithMissing");
-          }
-        } catch {
-          showFeedback("deleteFailed");
-        }
-      },
-    });
-  }, [closeDetail, deleteRecord, detailRecordId, showFeedback, t]);
-
-  const openDetail = useCallback((view: RecordView) => {
-    const record = records.find((r) => r.id === view.id);
-    if (!record) return;
-    pendingScrollTopRef.current = resourceListRef.current?.scrollTop ?? 0;
-    setDetailRecord(record);
-    detailHistoryRef.current = true;
-    setDetailRecordId(record.id);
-    window.history.pushState({ resourceDetailId: record.id }, "", `#resource/${record.id}`);
-  }, [records]);
-
   const openResourceMove = useCallback((ids: string[]) => {
     if (ids.length === 0) return;
     const selected = filteredRecords.filter((record) => ids.includes(record.id));
@@ -603,35 +579,7 @@ export default function ResourcePage() {
     } finally {
       setMovingResource(false);
     }
-  }, [cancelResourceSelection, moveDialog, movingResource, t]);
-
-  useEffect(() => {
-    const handlePopState = () => {
-      if (!detailRecordId) return;
-      detailHistoryRef.current = false;
-      setDetailRecord(null);
-      setDetailRecordId(null);
-    };
-    window.addEventListener("popstate", handlePopState);
-    return () => window.removeEventListener("popstate", handlePopState);
-  }, [detailRecordId]);
-
-  useEffect(() => {
-    if (detailRecordId || pendingScrollTopRef.current === null) return;
-    const top = pendingScrollTopRef.current;
-    pendingScrollTopRef.current = null;
-    const frame = requestAnimationFrame(() => {
-      resourceListRef.current?.scrollTo({ top, behavior: "auto" });
-    });
-    return () => cancelAnimationFrame(frame);
-  }, [detailRecordId]);
-
-  useEscapeKey((event) => {
-    const target = event.target as HTMLElement | null;
-    if (target && (target.tagName === "TEXTAREA" || target.tagName === "INPUT")) return;
-    event.preventDefault();
-    closeDetail();
-  }, Boolean(detailRecordId));
+  }, [cancelResourceSelection, moveDialog, movingResource, setDetailRecord, t]);
 
   const handleToggleAll = useCallback(async () => {
     if (selectingAll) return;

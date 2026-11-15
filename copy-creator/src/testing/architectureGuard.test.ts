@@ -489,9 +489,10 @@ describe("架构守卫：领域规则必须全局共享", () => {
       radial.includes("applyListScrollAnchor") && radial.includes("captureListScrollAnchor"),
       "径向列表必须在 items 更新后恢复同视图滚动停留位置（后台重排不得顶走视口）",
     ).toBe(true);
-    const resourcePage = readSource("pages/ResourcePage.tsx");
+    // 详情关闭后的像素兜底恢复随详情子系统收口在 useResourceDetail。
+    const resourceDetail = readSource("pages/ResourcePage/useResourceDetail.ts");
     expect(
-      resourcePage.includes("pendingScrollTopRef"),
+      resourceDetail.includes("pendingScrollTopRef"),
       "主窗口资源页的滚动位置保持机制不得移除",
     ).toBe(true);
   });
