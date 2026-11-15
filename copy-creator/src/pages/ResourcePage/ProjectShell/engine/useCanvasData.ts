@@ -488,7 +488,7 @@ export function useCanvasData(deps: {
         // 存储不可用：仅不落盘，state 仍更新。
       }
     },
-    [episodeId, infoOffsets],
+    [episodeId, infoOffsets, setInfoOffsets],
   );
 
   // 节点首次出现的位置永久钉住（用户定案「只要不是我拖动的，节点位置

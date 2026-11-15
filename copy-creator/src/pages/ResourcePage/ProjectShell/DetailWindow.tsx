@@ -659,7 +659,7 @@ function EntityFaceGroup({ group, entity, visiblePaths, faceMeta, ops }: {
  *  与库互不影响），无则退化为头像单卡只读。 */
 function EntityDetail({ group, sourceKey, nodeKey, ops }: { group: EntityPhKind; sourceKey: string; nodeKey?: string; ops: DetailWindowOps }) {
   const { t } = useTranslation();
-  const { overview, characters, locations, props } = ops;
+  const { overview, characters, locations, props, onClose } = ops;
   const entityId = useMemo(() => sourceKey.startsWith("grp:")
     ? (overview?.node_links ?? []).find((l) => l.owner_key === sourceKey)?.from_id ?? ""
     : sourceKey.slice(sourceKey.indexOf(":") + 1), [sourceKey, overview]);
@@ -673,8 +673,8 @@ function EntityDetail({ group, sourceKey, nodeKey, ops }: { group: EntityPhKind;
   // 系于单个实体。
   const isGroupSource = sourceKey.startsWith("grp:");
   useEffect(() => {
-    if (!isGroupSource && !entity) ops.onClose();
-  }, [isGroupSource, entity, ops.onClose]);
+    if (!isGroupSource && !entity) onClose();
+  }, [isGroupSource, entity, onClose]);
   const name = entity?.name ?? "";
   // 参考图集（三库统一）：reference_paths JSON 数组为主，场景/道具的旧
   // 单张 ref_path 并入展示（素材天然多张无上限，用户反馈）。头像排首位
@@ -828,7 +828,7 @@ function EntityDetail({ group, sourceKey, nodeKey, ops }: { group: EntityPhKind;
     <DetailWindow
       title={<><span className="pdetail-kind-label">{kindLabel}</span> · {name}</>}
       accent={accent}
-      onClose={ops.onClose}
+      onClose={onClose}
       back={ops.backTarget ? { onBack: ops.goBack } : undefined}
     >
       <DetailSection

@@ -300,16 +300,17 @@ export default function ProjectCanvasShell({
   // key 从 script:<phid> 换成 script，纸片从 scriptPhs 消失。窗若正指着
   // 那张纸片，转正落库完成后把窗改指主剧本（窗保持打开），不再停留
   // 「剧本 · 未挂接」假状态误导用户反复点挂接。
+  const { handleScriptPick } = canvasView;
   const handleScriptPickShell = useCallback(
     (filePath: string) =>
-      canvasView.handleScriptPick(filePath, () => {
+      handleScriptPick(filePath, () => {
         setDetailFor((cur) =>
           cur && cur.kind === "scriptPh" && cur.key.startsWith("script:")
             ? { kind: "scriptPh", key: "script" }
             : cur,
         );
       }),
-    [canvasView.handleScriptPick],
+    [handleScriptPick],
   );
 
   // ── 场景框：位置（scenes.canvas 之外叠本地实时层）+ 标签牌整组拖动 ──
