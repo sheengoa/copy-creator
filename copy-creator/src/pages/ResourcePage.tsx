@@ -1,22 +1,9 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties } from "react";
 import { ConfirmDialog } from "../components/ConfirmDialog";
-import { createPortal } from "react-dom";
 import { invoke } from "@tauri-apps/api/core";
 import { invokeNativeDialog } from "../utils/nativeDialogGuard";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import { useTranslation } from "react-i18next";
-import {
-  DndContext,
-  DragOverlay,
-  PointerSensor,
-  closestCenter,
-  useSensor,
-  useSensors,
-} from "@dnd-kit/core";
-import type { DragEndEvent, DragStartEvent } from "@dnd-kit/core";
-import { SortableContext, arrayMove, useSortable, verticalListSortingStrategy } from "@dnd-kit/sortable";
-import { CSS } from "@dnd-kit/utilities";
-import { restrictToVerticalAxis } from "@dnd-kit/modifiers";
 import { useResourceStore } from "../stores/clipboardStore";
 import { useProjectStore } from "../stores/projectStore";
 import { useShallow } from "zustand/react/shallow";
@@ -35,6 +22,15 @@ import { useRefreshOnShow } from "../hooks/useRefreshOnShow";
 import { useRecordLocale } from "../hooks/useRecordLocale";
 import { useEscapeKey } from "../hooks/useEscapeKey";
 import ResourceDetailPage from "./ResourcePage/ResourceDetailPage";
+import { useResourceGroupAdmin } from "./ResourcePage/useResourceGroupAdmin";
+import { ResourceGroupDialogs } from "./ResourcePage/ResourceGroupDialogs";
+
+type ResourceMoveDialogState = {
+  ids: string[];
+  label: string;
+  meta: string;
+  folders: string[];
+} | null;
 import ResourceGroupChips from "./ResourcePage/ResourceGroupChips";
 import { TrashPanel } from "./ResourcePage/TrashPanel";
 import ResourceTraceDialog, { type TraceRelinkResult } from "./ResourcePage/ResourceTraceDialog";
@@ -45,11 +41,10 @@ import ResourceCleanupDialog, {
 import type { ResourceMediaKind as ResourceMediaKindLabel } from "../domain/mediaKind";
 import { RESOURCE_MEDIA_KIND_LABEL_KEYS } from "../domain/mediaKind";
 import { ResourceCard } from "./ResourcePage/ResourceCard";
-import { GroupTwistButton } from "../components/GroupTwistButton";
 import { buildRecordView, type RecordView } from "../domain/recordView";
 import { type ResourceTypeFilter } from "../domain/mediaKind";
 import { resourceCardScale, splitResourceColumns } from "../utils/cardGrid";
-import { buildResourceFolderParentMap, findResourceFolder, flattenResourceFolderPaths, flattenResourceFoldersVisible, formatResourceFolderPath, getResourceFolderRoot, getResourceFolderSiblings, isResourceFolderPath, reorderResourceFolderSiblings } from "../domain/groups";
+import { findResourceFolder, formatResourceFolderPath, getResourceFolderRoot } from "../domain/groups";
 import { inferResourceMediaKind, matchesResourceType } from "../domain/mediaKind";
 import { getResourceTitle } from "../domain/records";
 import ResourceMoveDialog from "./ResourcePage/ResourceMoveDialog";
@@ -57,22 +52,6 @@ import ProjectView from "./ResourcePage/ProjectView";
 import ProjectViewSwitch from "./ResourcePage/ProjectViewSwitch";
 import ProjectSearchResults from "./ResourcePage/ProjectSearchResults";
 import { isResourceRecord } from "../domain/records";
-
-type ResourceGroupDialogState = {
-  mode: "create" | "rename";
-  parentPath?: string;
-  oldName?: string;
-} | null;
-type ResourceMoveDialogState = {
-  ids: string[];
-  label: string;
-  meta: string;
-  folders: string[];
-} | null;
-type ResourceGroupMoveState = {
-  path: string;
-  target: string | null;
-} | null;
 
 const RESOURCE_TYPE_FILTERS: ResourceTypeFilter[] = [
   "all",
@@ -175,14 +154,6 @@ export default function ResourcePage() {
   // 的过滤（recordMatchesCategory），页面只读写 store，不再维护本地副本。
   const [resourceGroupsLoading, setResourceGroupsLoading] = useState(true);
   const [resourceGroupsError, setResourceGroupsError] = useState<string | null>(null);
-  const [resourceGroupManageOpen, setResourceGroupManageOpen] = useState(false);
-  const [resourceGroupDialog, setResourceGroupDialog] = useState<ResourceGroupDialogState>(null);
-  const [resourceGroupName, setResourceGroupName] = useState("");
-  const [resourceGroupSaving, setResourceGroupSaving] = useState(false);
-  const [collapsedGroupPaths, setCollapsedGroupPaths] = useState<string[]>([]);
-  const [resourceGroupMove, setResourceGroupMove] = useState<ResourceGroupMoveState>(null);
-  const [movingGroup, setMovingGroup] = useState(false);
-  const [movingGroupError, setMovingGroupError] = useState<string | null>(null);
   const resourceSettingsButtonRef = useRef<HTMLButtonElement>(null);
   const resourceSettingsPopoverRef = useRef<HTMLElement>(null);
   const [confirmState, setConfirmState] = useState<{
@@ -554,10 +525,6 @@ export default function ResourcePage() {
     columnSelector: ".resource-column",
   });
 
-  const manageRowSensors = useSensors(
-    useSensor(PointerSensor, { activationConstraint: { distance: 4 } }),
-  );
-
   const handleSearchChange = useCallback((value: string) => {
     cancelResourceSelection();
     setSearch(value);
@@ -586,39 +553,6 @@ export default function ResourcePage() {
       : null,
     [resourceFolderGroups, resourceGroup],
   );
-  // 管理对话框的树形行：折叠的分组不展示其后代；计数为含子级的总量（后端提供）。
-  const manageRows = useMemo(
-    () => flattenResourceFoldersVisible(resourceGroups, new Set(collapsedGroupPaths)),
-    [collapsedGroupPaths, resourceGroups],
-  );
-  // 「移动分组」目标树与管理对话框共用同一折叠集合：同一棵树在两个
-  // 对话框间来回打开时保持一致的浏览状态。
-  const groupMoveRows = useMemo(
-    () => flattenResourceFoldersVisible(
-      resourceGroups.filter((group) => group.name !== ""),
-      new Set(collapsedGroupPaths),
-    ),
-    [collapsedGroupPaths, resourceGroups],
-  );
-  // 管理对话框拖拽用：分组路径 → 父分组路径（顶层为 null）。
-  const groupParentMap = useMemo(
-    () => buildResourceFolderParentMap(resourceGroups),
-    [resourceGroups],
-  );
-  const [activeGroupRowId, setActiveGroupRowId] = useState<string | null>(null);
-  // 拖动虚影与被拖行等宽：fixed 定位的 DragOverlay 默认按内容收缩，
-  // 文字短时会缩成一小条（与剪贴板区 activeOverlayWidth 同一做法）。
-  const [activeGroupRowWidth, setActiveGroupRowWidth] = useState<number | null>(null);
-  const handleManageRowDragStart = useCallback((event: DragStartEvent) => {
-    setActiveGroupRowId(String(event.active.id));
-    setActiveGroupRowWidth(event.active.rect.current.initial?.width ?? null);
-  }, []);
-  const activeGroupRow = activeGroupRowId
-    ? manageRows.find(({ folder }) => folder.path === activeGroupRowId)?.folder ?? null
-    : null;
-  const getResourceGroupLabel = useCallback((name: string) => (
-    name === "" ? t("resources.ungrouped") : name
-  ), [t]);
 
   useEffect(() => {
     if (
@@ -670,176 +604,50 @@ export default function ResourcePage() {
     if (stem) setSearch(stem);
   }, [locateRequest, handleSelectResourceGroup, setSearch]);
 
-  const openNewResourceGroup = useCallback((parentPath?: string) => {
-    setResourceGroupName("");
-    setResourceGroupsError(null);
-    setResourceGroupDialog({ mode: "create", parentPath });
-  }, []);
-
-  const openRenameResourceGroup = useCallback((name: string) => {
-    const segments = name.split("/");
-    setResourceGroupName(segments[segments.length - 1] ?? name);
-    setResourceGroupsError(null);
-    setResourceGroupDialog({ mode: "rename", oldName: name });
-  }, []);
-
-  const toggleGroupCollapsed = useCallback((path: string) => {
-    setCollapsedGroupPaths((current) => (
-      current.includes(path)
-        ? current.filter((path2) => path2 !== path)
-        : [...current, path]
-    ));
-  }, []);
-
-  const openGroupMove = useCallback((path: string) => {
-    setResourceGroupManageOpen(false);
-    setMovingGroupError(null);
-    setResourceGroupMove({ path, target: null });
-  }, []);
-
-  const handleMoveGroupConfirm = useCallback(async () => {
-    if (!resourceGroupMove || resourceGroupMove.target === null || movingGroup) return;
-    const movedPath = resourceGroupMove.path;
-    const target = resourceGroupMove.target;
-    setMovingGroup(true);
-    setMovingGroupError(null);
-    try {
-      await invoke("move_resource_group", { path: movedPath, newParent: target });
-      await loadResourceGroups();
-      const baseName = movedPath.split("/").pop() ?? movedPath;
-      const nextMovedPath = target === "" ? baseName : `${target}/${baseName}`;
-      let nextGroup: string | null = resourceGroup;
-      if (resourceGroup !== null) {
-        if (resourceGroup === movedPath) {
-          nextGroup = nextMovedPath;
-        } else if (resourceGroup.startsWith(`${movedPath}/`)) {
-          const rest = resourceGroup.slice(movedPath.length + 1);
-          nextGroup = target === "" ? rest : `${target}/${rest}`;
-        }
-      }
-      setStoreResourceGroup(nextGroup);
-      setResourceGroupMove(null);
-      await loadRecords(false, "resources", nextGroup);
-    } catch (error) {
-      console.error("Failed to move resource group:", error);
-      setMovingGroupError(String(error));
-    } finally {
-      setMovingGroup(false);
-    }
-  }, [
-    loadRecords,
-    loadResourceGroups,
-    movingGroup,
-    resourceGroup,
-    resourceGroupMove,
-    setStoreResourceGroup,
-  ]);
-
-  const handleSaveResourceGroup = useCallback(async () => {
-    const name = resourceGroupName.trim();
-    if (!name || resourceGroupSaving) return;
-    setResourceGroupSaving(true);
-    setResourceGroupsError(null);
-    try {
-      if (resourceGroupDialog?.mode === "rename" && resourceGroupDialog.oldName) {
-        const segments = resourceGroupDialog.oldName.split("/");
-        segments[segments.length - 1] = name;
-        const newPath = segments.join("/");
-        await invoke("update_resource_group", {
-          oldName: resourceGroupDialog.oldName,
-          newName: newPath,
-        });
-        await loadResourceGroups();
-        setStoreResourceGroup(newPath);
-      } else {
-        const parentPath = resourceGroupDialog?.parentPath;
-        const fullPath = parentPath ? `${parentPath}/${name}` : name;
-        await invoke("create_resource_group", { name: fullPath });
-        await loadResourceGroups();
-        setStoreResourceGroup(fullPath);
-      }
-      setResourceGroupDialog(null);
-    } catch (error) {
-      console.error("Failed to save resource group:", error);
-      setResourceGroupsError(String(error));
-    } finally {
-      setResourceGroupSaving(false);
-    }
-  }, [
-    loadResourceGroups,
+  // 分组管理子系统（对话框状态机/树形派生/CRUD/排序持久化）收口于
+  // useResourceGroupAdmin；浏览态与加载通道由主组件注入。
+  const {
+    resourceGroupManageOpen,
+    setResourceGroupManageOpen,
     resourceGroupDialog,
+    setResourceGroupDialog,
     resourceGroupName,
+    setResourceGroupName,
     resourceGroupSaving,
+    resourceGroupMove,
+    setResourceGroupMove,
+    movingGroup,
+    movingGroupError,
+    setMovingGroupError,
+    groupParentMap,
+    manageRows,
+    groupMoveRows,
+    activeGroupRow,
+    activeGroupRowWidth,
+    handleManageRowDragStart,
+    setActiveGroupRowId,
+    setActiveGroupRowWidth,
+    openNewResourceGroup,
+    openRenameResourceGroup,
+    toggleGroupCollapsed,
+    collapsedGroupPaths,
+    openGroupMove,
+    handleMoveGroupConfirm,
+    handleSaveResourceGroup,
+    handleOpenResourceGroup,
+    handleReorderTopGroups,
+    handleReorderManageRows,
+    handleDeleteResourceGroup,
+  } = useResourceGroupAdmin({
+    resourceGroups,
+    setResourceGroups,
+    resourceGroup,
     setStoreResourceGroup,
-  ]);
-
-  const handleOpenResourceGroup = useCallback(async (name: string) => {
-    try {
-      await invoke("open_resource_group", { name });
-    } catch (error) {
-      console.error("Failed to open resource group:", error);
-      setResourceGroupsError(String(error));
-    }
-  }, []);
-
-  // 按新兄弟顺序重排分组树并持久化（扁平全路径列表）；失败时回退为后端顺序。
-  const commitGroupOrder = useCallback(async (nextGroups: ResourceFolder[]) => {
-    const ungrouped = nextGroups.find((group) => group.name === "");
-    setResourceGroups(nextGroups);
-    const ordered = nextGroups.filter((group) => group.name !== "");
-    try {
-      await invoke("reorder_resource_groups", {
-        ids: flattenResourceFolderPaths(ordered),
-      });
-    } catch (error) {
-      console.error("Failed to reorder resource groups:", error);
-      void loadResourceGroups();
-    }
-    return ungrouped ? [ungrouped, ...ordered] : ordered;
-  }, [loadResourceGroups]);
-
-  const handleReorderTopGroups = useCallback((orderedPaths: string[]) => {
-    void commitGroupOrder(reorderResourceFolderSiblings(resourceGroups, null, orderedPaths));
-  }, [commitGroupOrder, resourceGroups]);
-
-  const handleReorderManageRows = useCallback((event: DragEndEvent) => {
-    setActiveGroupRowId(null);
-    setActiveGroupRowWidth(null);
-    const { active, over } = event;
-    if (!over || active.id === over.id) return;
-    const activeParent = groupParentMap.get(String(active.id)) ?? null;
-    const overParent = groupParentMap.get(String(over.id)) ?? null;
-    // 只允许在同一父分组内排序，跨层级移动仍走「移动分组」对话框。
-    if (activeParent !== overParent) return;
-    const siblings = getResourceFolderSiblings(resourceGroups, activeParent);
-    const oldIndex = siblings.findIndex((group) => group.path === active.id);
-    const newIndex = siblings.findIndex((group) => group.path === over.id);
-    if (oldIndex === -1 || newIndex === -1) return;
-    const orderedPaths = arrayMove(siblings, oldIndex, newIndex).map((group) => group.path);
-    void commitGroupOrder(reorderResourceFolderSiblings(resourceGroups, activeParent, orderedPaths));
-  }, [commitGroupOrder, groupParentMap, resourceGroups]);
-
-  const handleDeleteResourceGroup = useCallback((name: string) => {
-    setConfirmState({
-      message: t("resources.confirmDeleteGroup", { name }),
-      hint: t("resources.confirmDeleteGroupHint"),
-      onConfirm: async () => {
-        try {
-          await invoke("delete_resource_group", { name });
-          await loadResourceGroups();
-          const nextGroup = resourceGroup !== null && isResourceFolderPath(resourceGroup, name)
-            ? null
-            : resourceGroup;
-          setStoreResourceGroup(nextGroup);
-          await loadRecords(false, "resources", nextGroup);
-          setResourceGroupManageOpen(false);
-        } catch (error) {
-          console.error("Failed to delete resource group:", error);
-          setResourceGroupsError(String(error));
-        }
-      },
-    });
-  }, [loadRecords, loadResourceGroups, resourceGroup, setStoreResourceGroup, t]);
+    loadResourceGroups,
+    loadRecords,
+    setConfirmState,
+    setResourceGroupsError,
+  });
 
   const closeDetail = useCallback(() => {
     if (!detailRecordId) return;
@@ -1439,244 +1247,43 @@ export default function ResourcePage() {
         </>
       )}
 
-      {resourceGroupManageOpen && (
-        <div className="dialog-overlay" onClick={() => setResourceGroupManageOpen(false)}>
-          <div
-            className="dialog-content large resource-group-manage-dialog"
-            onClick={(event) => event.stopPropagation()}
-          >
-            <div className="dialog-title-row">
-              <h3 className="dialog-title">{t("resources.manageGroups")}</h3>
-              <button
-                type="button"
-                className="group-add-btn group-manage-add-btn"
-                onClick={() => openNewResourceGroup()}
-                aria-label={t("resources.newGroup")}
-                title={t("resources.newGroup")}
-              >
-                {Icons.add}
-              </button>
-            </div>
-            {resourceGroupsError && (
-              <span className="dialog-error-text" role="alert">{resourceGroupsError}</span>
-            )}
-            <div className="resource-group-manage-list">
-              <DndContext
-                sensors={manageRowSensors}
-                collisionDetection={closestCenter}
-                modifiers={[restrictToVerticalAxis]}
-                onDragStart={handleManageRowDragStart}
-                onDragEnd={handleReorderManageRows}
-                onDragCancel={() => {
-                  setActiveGroupRowId(null);
-                  setActiveGroupRowWidth(null);
-                }}
-              >
-                <SortableContext
-                  items={manageRows.map(({ folder }) => folder.path)}
-                  strategy={verticalListSortingStrategy}
-                >
-                  {manageRows.map(({ folder, depth }) => {
-                    const isRoot = folder.name === "";
-                    const hasChildren = (folder.children ?? []).length > 0;
-                    const collapsed = collapsedGroupPaths.includes(folder.path);
-                    return (
-                      <SortableManageRow
-                        key={folder.path || "ungrouped"}
-                        folder={folder}
-                        depth={depth}
-                        label={getResourceGroupLabel(folder.name)}
-                        collapsed={collapsed}
-                        hasChildren={hasChildren}
-                        onToggleCollapsed={() => hasChildren && toggleGroupCollapsed(folder.path)}
-                        onOpen={() => void handleOpenResourceGroup(folder.path)}
-                        onNewSubgroup={() => openNewResourceGroup(folder.path)}
-                        onRename={() => openRenameResourceGroup(folder.path)}
-                        onMove={() => openGroupMove(folder.path)}
-                        onDelete={() => handleDeleteResourceGroup(folder.path)}
-                        hideRootControls={isRoot}
-                      />
-                    );
-                  })}
-                </SortableContext>
-                {/* 对话框带 backdrop-filter/transform 会让 fixed 以它为包含块，
-                    虚影飘出对话框；portal 到 body 才能跟随指针。 */}
-                {activeGroupRow && createPortal(
-                  <DragOverlay
-                    dropAnimation={null}
-                    style={activeGroupRowWidth ? { width: activeGroupRowWidth } : undefined}
-                  >
-                    <div className="resource-group-manage-row is-drag-overlay">
-                      <span className="resource-group-drag-handle is-static">{Icons.drag}</span>
-                      <span className="resource-group-manage-name">
-                        {getResourceGroupLabel(activeGroupRow.name)}
-                      </span>
-                    </div>
-                  </DragOverlay>,
-                  document.body,
-                )}
-              </DndContext>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {resourceGroupDialog && (
-        <div className="dialog-overlay" onClick={() => setResourceGroupDialog(null)}>
-          <div className="dialog-content" onClick={(event) => event.stopPropagation()}>
-            <h3 className="dialog-title">
-              {resourceGroupDialog.mode === "rename"
-                ? t("resources.renameGroup")
-                : t("resources.newGroup")}
-            </h3>
-            {resourceGroupDialog.mode === "create" && resourceGroupDialog.parentPath && (
-              <p className="resource-group-path-hint">
-                {t("resources.groupCreateAt", {
-                  path: formatResourceFolderPath(resourceGroupDialog.parentPath),
-                })}
-              </p>
-            )}
-            {resourceGroupDialog.mode === "rename" && resourceGroupDialog.oldName && (
-              <p className="resource-group-path-hint">
-                {t("resources.groupLocationAt", {
-                  path: formatResourceFolderPath(
-                    resourceGroupDialog.oldName.split("/").slice(0, -1).join("/"),
-                  ),
-                })}
-              </p>
-            )}
-            <input
-              className="dialog-input"
-              autoFocus
-              value={resourceGroupName}
-              placeholder={t("resources.groupName")}
-              onChange={(event) => setResourceGroupName(event.target.value)}
-              onKeyDown={(event) => {
-                if (event.key === "Enter") void handleSaveResourceGroup();
-              }}
-            />
-            {resourceGroupsError && (
-              <span className="dialog-error-text" role="alert">{resourceGroupsError}</span>
-            )}
-            <div className="dialog-actions">
-              <button
-                type="button"
-                className="dialog-btn secondary"
-                onClick={() => setResourceGroupDialog(null)}
-              >
-                {t("common.cancel")}
-              </button>
-              <button
-                type="button"
-                className="dialog-btn save"
-                onClick={() => void handleSaveResourceGroup()}
-                disabled={!resourceGroupName.trim() || resourceGroupSaving}
-              >
-                {resourceGroupSaving ? t("common.saving") : t("common.save")}
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {resourceGroupMove && (
-        <div className="dialog-overlay" onClick={() => !movingGroup && setResourceGroupMove(null)}>
-          <div
-            className="dialog-content resource-move-dialog"
-            onClick={(event) => event.stopPropagation()}
-          >
-            <h3 className="dialog-title">
-              {t("resources.moveGroupTitle", {
-                name: resourceGroupMove.path.split("/").pop() ?? resourceGroupMove.path,
-              })}
-            </h3>
-            <div className="resource-move-tree" role="listbox" aria-label={t("resources.moveGroup")}>
-              <div className="resource-move-entry">
-                <button
-                  type="button"
-                  className="resource-group-twist"
-                  disabled
-                  tabIndex={-1}
-                />
-                <button
-                  type="button"
-                  className={`resource-move-row${resourceGroupMove.target === "" ? " selected" : ""}`}
-                  role="option"
-                  aria-selected={resourceGroupMove.target === ""}
-                  onClick={() => setResourceGroupMove({ ...resourceGroupMove, target: "" })}
-                >
-                  <span className="resource-move-icon">{Icons.resources}</span>
-                  <span>{t("resources.topLevel")}</span>
-                </button>
-              </div>
-              {groupMoveRows.map(({ folder, depth }) => {
-                const currentParent = resourceGroupMove.path
-                  .split("/")
-                  .slice(0, -1)
-                  .join("/");
-                const inSubtree = folder.path === resourceGroupMove.path
-                  || folder.path.startsWith(`${resourceGroupMove.path}/`);
-                const disabled = inSubtree || folder.path === currentParent;
-                const hasChildren = (folder.children ?? []).length > 0;
-                const collapsed = collapsedGroupPaths.includes(folder.path);
-                return (
-                  <div
-                    key={folder.path}
-                    className="resource-move-entry"
-                    style={{ paddingLeft: `${depth * 16}px` }}
-                  >
-                    <GroupTwistButton
-                      hasChildren={hasChildren}
-                      collapsed={collapsed}
-                      onToggle={() => toggleGroupCollapsed(folder.path)}
-                    />
-                    <button
-                      type="button"
-                      className={`resource-move-row${resourceGroupMove.target === folder.path ? " selected" : ""}${disabled ? " current" : ""}`}
-                      role="option"
-                      aria-selected={resourceGroupMove.target === folder.path}
-                      disabled={disabled}
-                      title={folder.path}
-                      onClick={() => !disabled && setResourceGroupMove({ ...resourceGroupMove, target: folder.path })}
-                    >
-                      <span className="resource-move-icon">{Icons.resources}</span>
-                      <span>{folder.name}</span>
-                      {folder.path === currentParent && (
-                        <span className="resource-move-current-tag">{t("resources.currentParentTag")}</span>
-                      )}
-                      {inSubtree && (
-                        <span className="resource-move-current-tag">{t("resources.selfTag")}</span>
-                      )}
-                    </button>
-                  </div>
-                );
-              })}
-            </div>
-            <p className="resource-move-hint">{t("resources.moveGroupHint")}</p>
-            {movingGroupError && (
-              <span className="dialog-error-text" role="alert">{movingGroupError}</span>
-            )}
-            <div className="dialog-actions">
-              <button
-                type="button"
-                className="dialog-btn secondary"
-                onClick={() => setResourceGroupMove(null)}
-                disabled={movingGroup}
-              >
-                {t("common.cancel")}
-              </button>
-              <button
-                type="button"
-                className="dialog-btn save"
-                disabled={resourceGroupMove.target === null || movingGroup}
-                onClick={() => void handleMoveGroupConfirm()}
-              >
-                {movingGroup ? t("common.saving") : t("resources.move")}
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
+      {/* 分组三对话框（管理/新建改名/移动目标树）收口于 ResourceGroupDialogs。 */}
+      <ResourceGroupDialogs
+        admin={{
+          resourceGroupManageOpen,
+          setResourceGroupManageOpen,
+          resourceGroupDialog,
+          setResourceGroupDialog,
+          resourceGroupName,
+          setResourceGroupName,
+          resourceGroupSaving,
+          resourceGroupMove,
+          setResourceGroupMove,
+          movingGroup,
+          movingGroupError,
+          setMovingGroupError,
+          groupParentMap,
+          manageRows,
+          groupMoveRows,
+          collapsedGroupPaths,
+          activeGroupRow,
+          activeGroupRowWidth,
+          handleManageRowDragStart,
+          setActiveGroupRowId,
+          setActiveGroupRowWidth,
+          openNewResourceGroup,
+          openRenameResourceGroup,
+          toggleGroupCollapsed,
+          openGroupMove,
+          handleMoveGroupConfirm,
+          handleSaveResourceGroup,
+          handleOpenResourceGroup,
+          handleReorderTopGroups,
+          handleReorderManageRows,
+          handleDeleteResourceGroup,
+        }}
+        resourceGroupsError={resourceGroupsError}
+      />
 
       {confirmDialog}
 
@@ -1825,134 +1432,6 @@ export default function ResourcePage() {
       )}
       {traceDialogElement}
       {cleanupDialogElement}
-    </div>
-  );
-}
-
-function SortableManageRow({
-  folder,
-  depth,
-  label,
-  collapsed,
-  hasChildren,
-  onToggleCollapsed,
-  onOpen,
-  onNewSubgroup,
-  onRename,
-  onMove,
-  onDelete,
-  hideRootControls,
-}: {
-  folder: ResourceFolder;
-  depth: number;
-  label: string;
-  collapsed: boolean;
-  hasChildren: boolean;
-  onToggleCollapsed: () => void;
-  onOpen: () => void;
-  onNewSubgroup: () => void;
-  onRename: () => void;
-  onMove: () => void;
-  onDelete: () => void;
-  hideRootControls: boolean;
-}) {
-  const { t } = useTranslation();
-  const {
-    attributes,
-    listeners,
-    setNodeRef,
-    setActivatorNodeRef,
-    transform,
-    transition,
-    isDragging,
-  } = useSortable({ id: folder.path, disabled: hideRootControls });
-
-  return (
-    <div
-      ref={setNodeRef}
-      className={`resource-group-manage-row${isDragging ? " is-dragging" : ""}`}
-      style={{
-        paddingLeft: `${depth * 16}px`,
-        transform: CSS.Transform.toString(transform),
-        transition: transition || "transform 180ms ease",
-      } as React.CSSProperties}
-    >
-      {!hideRootControls && (
-        <button
-          type="button"
-          ref={setActivatorNodeRef}
-          className="resource-group-drag-handle"
-          {...attributes}
-          {...listeners}
-          aria-label={t("resources.reorder")}
-          title={t("resources.reorder")}
-          onClick={(event) => event.stopPropagation()}
-        >
-          {Icons.drag}
-        </button>
-      )}
-      <GroupTwistButton
-        hasChildren={hasChildren}
-        collapsed={collapsed}
-        onToggle={onToggleCollapsed}
-      />
-      <div className="resource-group-manage-name" title={folder.path}>
-        <span>{label}</span>
-      </div>
-      <span className="resource-group-manage-count">
-        {t("resources.itemCount", { count: folder.count })}
-      </span>
-      <div className="resource-group-manage-actions">
-        <button
-          type="button"
-          className="resource-icon-button"
-          onClick={onOpen}
-          aria-label={t("resources.openGroup")}
-          title={t("resources.openGroup")}
-        >
-          {Icons.resources}
-        </button>
-        {!hideRootControls && (
-          <>
-            <button
-              type="button"
-              className="resource-icon-button"
-              onClick={onNewSubgroup}
-              aria-label={t("resources.newSubgroup")}
-              title={t("resources.newSubgroup")}
-            >
-              {Icons.add}
-            </button>
-            <button
-              type="button"
-              className="resource-icon-button"
-              onClick={onRename}
-              aria-label={t("resources.renameGroup")}
-              title={t("resources.renameGroup")}
-            >
-              {Icons.edit}
-            </button>
-            <button
-              type="button"
-              className="resource-icon-button"
-              onClick={onMove}
-              aria-label={t("resources.moveGroup")}
-              title={t("resources.moveGroup")}
-            >
-              {Icons.arrowRight}
-            </button>
-            <button
-              type="button"
-              className="resource-delete-button"
-              onClick={onDelete}
-              aria-label={t("common.delete")}
-              title={t("common.delete")}
-            >
-              {Icons.delete}
-            </button>
-          </>
-        )}
-      </div>
     </div>
   );
 }
