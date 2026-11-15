@@ -1,7 +1,6 @@
 import { openResourceFile, revealResourceFile } from "../../domain/mediaAssets";
 import { Fragment, useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
-import { invoke } from "@tauri-apps/api/core";
 import { useTranslation } from "react-i18next";
 import type { ClipboardRecord } from "../../types";
 import { useResourceStore } from "../../stores/clipboardStore";
@@ -20,6 +19,7 @@ import { buildResourceGroupCrumbs, formatResourceBitrate, formatResourceDuration
 import { textVersionSourceKey } from "../../domain/textVersions";
 import { useResourceVersionHistory } from "./useResourceVersionHistory";
 import { useResourceDetailNoteRename } from "./useResourceDetailNoteRename";
+import { useResourceDetailContentEdit } from "./useResourceDetailContentEdit";
 import { type ResourceMediaKind } from "../../domain/mediaKind";
 import { getResourceFileName, isResourceTitleRenameable, splitResourceFileName } from "../../domain/fileName";
 import { formatResourceFolderPath } from "../../domain/groups";
@@ -155,52 +155,27 @@ export default function ResourceDetailPage({
     renameError,
     cancelRename,
     commitRename,
-  } = useResourceDetailNoteRename({ record, onRecordUpdated, updateResourceNote });  const [contentEditing, setContentEditing] = useState(false);
-  const [contentDraft, setContentDraft] = useState("");
+  } = useResourceDetailNoteRename({ record, onRecordUpdated, updateResourceNote });
   const [savedContent, setSavedContent] = useState("");
-  const [contentSaving, setContentSaving] = useState(false);
-  const [contentSaved, setContentSaved] = useState(false);
   // 正文保存失败的后端原因（超 1 MB、文件被外部替换等），null=无错误；
-  // 空串表示拿不到具体原因，展示时回退泛化文案。
-  const [contentSaveError, setContentSaveError] = useState<string | null>(null);
-  const contentSavedTimerRef = useRef<number | null>(null);
-  const contentEditorRef = useRef<HTMLTextAreaElement | null>(null);
+  // 空串表示拿不到具体原因，展示时回退泛化文案。版本还原与正文保存共享置空。
+  const [contentSaveError, setContentSaveError] = useState<string | null>(null);  // 正文编辑子系统（编辑态/保存双通道/高度自伸缩）收口于
+  // useResourceDetailContentEdit（在正文取材之后调用，见下方）。
   const stageRef = useRef<HTMLDivElement | null>(null);
   // 文本取材唯一入口（domain 判定）：有文件承载一律读文件全文——含详情页
   // 编辑后 type 已转为 text 的记录；无文件承载的纯文本资源走 segments。
   const externalTextPath = kind === "text" ? resourceTextPreviewPath(record) : null;
+  const textEditPath = kind === "text" ? externalTextPath : null;
 
   useEffect(() => {
     setMediaMeta({});
     setLightboxSrc(null);
     // （备注/重命名/正文的记录切换重置随各自子系统收口。）
-    setContentEditing(false);
-    setContentSaved(false);
-    setContentSaveError(null);
     setOpenExternalFailed(false);
-    // （划选态/改动记录/版本预览的记录切换重置随各自子系统收口。）
+    // （划选态/备注/重命名/改动记录/版本预览/正文的记录切换重置随各自子系统收口。）
   }, [record.id, record.resource_note]);
 
-  useEffect(() => () => {
-    if (contentSavedTimerRef.current !== null) window.clearTimeout(contentSavedTimerRef.current);
-  }, []);
 
-  // 编辑器高度跟随内容伸缩，避免固定高度出现内部滚动条截断正文。
-  // 加 2px 余量：分数缩放下 scrollHeight 取整可能略小于实际内容，
-  // 否则会浮现一条内部滚动条（滚动统一交给主窗口页面层级）。
-  useEffect(() => {
-    const el = contentEditorRef.current;
-    if (!el) return;
-    const syncHeight = () => {
-      // 同备注输入框：面板隐藏时 scrollHeight 为 0，跳过防止压扁。
-      if (el.clientWidth === 0) return;
-      el.style.height = "auto";
-      el.style.height = `${el.scrollHeight + 2}px`;
-    };
-    syncHeight();
-    window.addEventListener("resize", syncHeight);
-    return () => window.removeEventListener("resize", syncHeight);
-  }, [contentDraft, contentEditing]);
 
 
 
@@ -282,7 +257,31 @@ export default function ResourceDetailPage({
     externalTextPath,
     textReloadKey,
   });
-  const title = getResourceTitle(record, kind, recordLocale);
+
+  // 正文编辑子系统收口于 useResourceDetailContentEdit。
+  const {
+    contentEditing,
+    contentDraft,
+    setContentDraft,
+    contentDirty,
+    contentSaving,
+    contentSaved,
+    contentEditorRef,
+    startContentEdit,
+    cancelContentEdit,
+    handleSaveContent,
+  } = useResourceDetailContentEdit({
+    savedContent,
+    setSavedContent,
+    setContentSaveError,
+    fullTextContent,
+    textEditPath,
+    hideResourceOps,
+    record,
+    onSaveContent,
+    onRecordUpdated,
+    setPreviewEntry,
+  });  const title = getResourceTitle(record, kind, recordLocale);
 
   const renameable = isResourceTitleRenameable(record) && !hideResourceOps;
   // 标题编辑基于文件名：文件记录的路径在 content/resource_path，文本资源记录的
@@ -364,7 +363,6 @@ export default function ResourceDetailPage({
   // 正文编辑面向有文件承载的文本资源（不含内嵌图片）：取材与保存目标
   // 都是文件本身，文件是全文的唯一事实来源。
   // 编辑目标与取材同源：一律指向 backing 文件（domain 判定已校验文本扩展名）。
-  const textEditPath = kind === "text" ? externalTextPath : null;
   // 全文加载后截断不再是唯一编辑门槛：正文过大同样不适合应用内编辑，
   // 用系统应用修改文件，改动经监听与媒体版本机制同步回来。闸门与写入
   // 侧（write_resource_text_content 的 ensure_capped_file，1 MiB =
@@ -388,7 +386,6 @@ export default function ResourceDetailPage({
     if (fullTextContent === null) return;
     setSavedContent(fullTextContent);
   }, [fullTextContent]);
-  const contentDirty = contentDraft.trim() !== savedContent.trim();
 
   // 查找替换子系统（匹配定位/查找条跟随/逐个与全部替换）收口于
   // useResourceFindReplace；编辑态与 refs 经参数注入。
@@ -417,88 +414,6 @@ export default function ResourceDetailPage({
     findPageScroller,
   });
 
-  const startContentEdit = () => {
-    setContentDraft(fullTextContent ?? "");
-    setContentSaved(false);
-    setContentSaveError(null);
-    setPreviewEntry(null);
-    setContentEditing(true);
-  };
-
-  const cancelContentEdit = () => {
-    setContentEditing(false);
-    setContentDraft("");
-    setContentSaveError(null);
-  };
-
-  const handleSaveContent = async () => {
-    if (contentSaving || !contentDirty) return;
-    // record 形态：保存经调用方注入的通道（剪切板 update_clipboard_record_
-    // content / 快捷输入 update_phrase），成功后按资源库同节奏反馈
-    // （「已保存」toast + onRecordUpdated 刷新列表，列表重载触发正文
-    // 重新取材，savedContent 随新全文刷新）。
-    if (hideResourceOps) {
-      if (!onSaveContent) return;
-      setContentSaving(true);
-      setContentSaveError(null);
-      try {
-        await onSaveContent(record, contentDraft);
-        setContentEditing(false);
-        setContentDraft("");
-        setSavedContent(contentDraft);
-        setContentSaved(true);
-        if (contentSavedTimerRef.current !== null) window.clearTimeout(contentSavedTimerRef.current);
-        contentSavedTimerRef.current = window.setTimeout(() => {
-          setContentSaved(false);
-          contentSavedTimerRef.current = null;
-        }, 2200);
-        onRecordUpdated(record);
-      } catch (error) {
-        setContentSaveError(typeof error === "string" ? error : "");
-      } finally {
-        setContentSaving(false);
-      }
-      return;
-    }
-    if (!textEditPath) return;
-    setContentSaving(true);
-    setContentSaveError(null);
-    try {
-      const saved = await invoke<{ content: string; record_type?: string }>(
-        "write_resource_text_content",
-        {
-          path: textEditPath,
-          content: contentDraft,
-          // 外部发现的记录（resource_managed=false）也传 id：改动记录按
-          // record_id 记版，外部资源编辑后历史面板才有版本可看；后端归一
-          // UPDATE 对已是文件承载形态的外部记录是幂等空操作。
-          id: record.id,
-        },
-      );
-      setContentEditing(false);
-      setContentDraft("");
-      setSavedContent(saved.content);
-      setContentSaved(true);
-      if (contentSavedTimerRef.current !== null) window.clearTimeout(contentSavedTimerRef.current);
-      contentSavedTimerRef.current = window.setTimeout(() => {
-        setContentSaved(false);
-        contentSavedTimerRef.current = null;
-      }, 2200);
-      onRecordUpdated({
-        ...record,
-        // 保存后记录归一为文件承载形态（与 write_resource_text_content 的
-        // 归一更新一致）：type=file、content=文件路径，全文以文件为唯一事实来源。
-        type: "file",
-        content: saved.content,
-      });
-    } catch (error) {
-      // 超长、文件被外部替换等失败重试无效，后端原因必须可见；拿不到
-      // 原因时展示层回退泛化文案。
-      setContentSaveError(typeof error === "string" ? error : "");
-    } finally {
-      setContentSaving(false);
-    }
-  };
 
   return (
     <div className="resource-detail-page" ref={pageRef}>
