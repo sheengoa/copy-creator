@@ -325,6 +325,14 @@
   height: 14px;
 }
 
+/* 触发钮亮色主题是白底芯片 + 深色圆点；暗主题下 text-primary 翻成近白，
+   白底白点看不清——照 resource-card-menu 的暗色家族配色换深底浅点。 */
+[data-theme="dark"] .resource-card-more-button {
+  border-color: rgba(255, 255, 255, 0.14);
+  background: rgba(38, 38, 38, 0.92);
+  color: var(--text-primary);
+}
+
 /* 菜单通过 portal 挂在文档根节点，按触发按钮定位（卡片有 overflow 裁剪）。 */
 .resource-card-menu {
   position: fixed;
