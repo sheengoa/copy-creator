@@ -724,7 +724,6 @@ pub fn run() {
             db::set_ai_channel_enabled,
             db::restore_ai_channel,
             db::save_api_key_label,
-            db::get_api_key_label,
             db::set_user_api_key,
             db::reorder_phrase_groups,
             db::reorder_phrases,

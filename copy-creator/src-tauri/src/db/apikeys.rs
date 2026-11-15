@@ -54,28 +54,6 @@ pub fn save_api_key_label(
 }
 
 #[tauri::command]
-pub fn get_api_key_label(app: AppHandle, record_id: String) -> Option<serde_json::Value> {
-    let state = app.state::<DbState>();
-    let conn = state.conn.lock().ok()?;
-    conn.query_row(
-        "SELECT key_preview, service, api_base, note, is_expired, created_at FROM api_key_labels WHERE record_id = ?1",
-        params![record_id],
-        |row| {
-            Ok(serde_json::json!({
-                "record_id": record_id,
-                "key_preview": row.get::<_, String>(0)?,
-                "service": row.get::<_, String>(1)?,
-                "api_base": row.get::<_, String>(2)?,
-                "note": row.get::<_, String>(3)?,
-                "is_expired": row.get::<_, i64>(4)? != 0,
-                "created_at": row.get::<_, String>(5)?,
-            }))
-        },
-    )
-    .ok()
-}
-
-#[tauri::command]
 pub fn set_user_api_key(app: AppHandle, id: String, value: bool) -> Result<(), String> {
     let state = app.state::<DbState>();
     let conn = state.conn.lock().map_err(|e| e.to_string())?;
