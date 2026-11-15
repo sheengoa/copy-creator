@@ -468,6 +468,8 @@ describe("integration regressions", () => {
 
   it("keeps resource detail flow and batch selection aligned with current records", () => {
     const pageSource = readSource("../pages/ResourcePage.tsx");
+    // 批量选择（全量加载选中的请求序号竞态防护）随收口在 useResourceBatchSelection。
+    const batchSelectionSource = readSource("../pages/ResourcePage/useResourceBatchSelection.ts");
     const cardSource = readSource("../pages/ResourcePage/ResourceCard.tsx");
     const detailPageSource = readSource("../pages/ResourcePage/ResourceDetailPage.tsx");
     const config = JSON.parse(readSource("../../src-tauri/tauri.conf.json")) as {
@@ -479,9 +481,9 @@ describe("integration regressions", () => {
       detailPageSource.indexOf("const title"),
     );
 
-    expect(pageSource).toContain("const selectAllRequestRef = useRef(0);");
-    expect(pageSource).toContain("if (selectingAll) return;");
-    expect(pageSource).toContain("request !== selectAllRequestRef.current");
+    expect(batchSelectionSource).toContain("const selectAllRequestRef = useRef(0);");
+    expect(batchSelectionSource).toContain("if (selectingAll) return;");
+    expect(batchSelectionSource).toContain("request !== selectAllRequestRef.current");
     expect(pageSource).toContain("cancelResourceSelection();");
     expect(pageSource).toContain("busy={selectingAll || deletingSelected}");
     expect(pageSource).toContain("{confirmDialog}");

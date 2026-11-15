@@ -22,6 +22,7 @@ import { useResourceGroupSync } from "./ResourcePage/useResourceGroupSync";
 import { useResourceDetail } from "./ResourcePage/useResourceDetail";
 import { useResourceMissingTrace } from "./ResourcePage/useResourceMissingTrace";
 import { useResourceGroupAdmin } from "./ResourcePage/useResourceGroupAdmin";
+import { useResourceBatchSelection } from "./ResourcePage/useResourceBatchSelection";
 import { ResourceGroupDialogs } from "./ResourcePage/ResourceGroupDialogs";
 import { useResourceMove } from "./ResourcePage/useResourceMove";
 import ResourceGroupChips from "./ResourcePage/ResourceGroupChips";
@@ -120,8 +121,6 @@ export default function ResourcePage() {
   const [missingCount, setMissingCount] = useState(0);
   const feedbackTimerRef = useRef<number | null>(null);
 
-  const [deletingSelected, setDeletingSelected] = useState(false);
-  const [selectingAll, setSelectingAll] = useState(false);
   const [resourceSettingsOpen, setResourceSettingsOpen] = useState(false);
   // 分组选中态以 store 为单一来源：store 字段同时驱动 record-updated 事件
   // 的过滤（recordMatchesCategory），页面只读写 store，不再维护本地副本。
@@ -155,7 +154,6 @@ export default function ResourcePage() {
   }, [refreshTrashCount]);
 
   const searchEffectInitializedRef = useRef(false);
-  const selectAllRequestRef = useRef(0);
 
   // kind→文案键映射收口在 domain/mediaKind.ts，本页只负责 t() 取值。
   const typeFilterLabel = useCallback(
@@ -293,22 +291,33 @@ export default function ResourcePage() {
     selectIds,
   } = useMultiSelect(visibleIds);
 
-  const startResourceSelection = useCallback(() => {
-    selectAllRequestRef.current += 1;
-    startSelection();
-  }, [startSelection]);
-
-  const cancelResourceSelection = useCallback(() => {
-    selectAllRequestRef.current += 1;
-    setSelectingAll(false);
-    exitSelection();
-  }, [exitSelection]);
-
-  useEffect(() => {
-    if (isSelecting || !selectingAll) return;
-    selectAllRequestRef.current += 1;
-    setSelectingAll(false);
-  }, [isSelecting, selectingAll]);
+  // 批量选择子系统：批量开关（请求序号竞态防护）/选中删除确认/批量态
+  // 取消收口于 useResourceBatchSelection。
+  const {
+    selectingAll,
+    deletingSelected,
+    startResourceSelection,
+    cancelResourceSelection,
+    handleToggleAll,
+    handleDeleteSelected,
+  } = useResourceBatchSelection({
+    isSelecting,
+    allVisibleSelected,
+    startSelection,
+    exitSelection,
+    selectIds,
+    toggleAllVisible,
+    selectedCount,
+    selectedIds,
+    typeFilter,
+    resourceGroup,
+    hasMore,
+    loadAllRecords,
+    deleteRecords,
+    setConfirmState,
+    setMissingCount,
+    showFeedback,
+  });
 
   // 缺失追溯与清理子系统：缺失计数/追溯对话框/清理确认/复查通知自持；
   // 记录列表、详情修补、删除通道、批量选择取消与反馈、库路径与设置
@@ -507,73 +516,6 @@ export default function ResourcePage() {
     setResourceGroupsError,
   });
 
-  const handleToggleAll = useCallback(async () => {
-    if (selectingAll) return;
-    if (allVisibleSelected && !hasMore) {
-      toggleAllVisible();
-      return;
-    }
-    const request = ++selectAllRequestRef.current;
-    setSelectingAll(true);
-    try {
-      const allRecords = await loadAllRecords("resources", resourceGroup);
-      if (!allRecords || request !== selectAllRequestRef.current) return;
-      selectIds(
-        allRecords
-          .filter((record) => (
-            isResourceRecord(record)
-            && (typeFilter === "missing"
-              ? Boolean(record.resource_missing)
-              : matchesResourceType(record, typeFilter))
-          ))
-          .map((record) => record.id),
-      );
-    } finally {
-      if (request === selectAllRequestRef.current) setSelectingAll(false);
-    }
-  }, [
-    allVisibleSelected,
-    hasMore,
-    loadAllRecords,
-    resourceGroup,
-    selectIds,
-    selectingAll,
-    toggleAllVisible,
-    typeFilter,
-  ]);
-
-  const handleDeleteSelected = useCallback(() => {
-    if (selectedCount === 0 || selectingAll || deletingSelected) return;
-    const ids = [...selectedIds];
-    setConfirmState({
-      message: t("resources.confirmDeleteSelected", { count: ids.length }),
-      hint: t("resources.confirmDeleteHint"),
-      onConfirm: async () => {
-        setDeletingSelected(true);
-        try {
-          const summary = await deleteRecords(ids);
-          cancelResourceSelection();
-          if (summary && summary.filesAlreadyMissing > 0) {
-            setMissingCount(summary.filesAlreadyMissing);
-            showFeedback("deletedWithMissing");
-          }
-        } catch {
-          showFeedback("deleteFailed");
-        } finally {
-          setDeletingSelected(false);
-        }
-      },
-    });
-  }, [
-    cancelResourceSelection,
-    deleteRecords,
-    deletingSelected,
-    selectingAll,
-    selectedCount,
-    selectedIds,
-    showFeedback,
-    t,
-  ]);
 
   // 批量选择模式下按 Delete 键等同操作条删除按钮：复用同一确认流程；
   // 焦点在输入框、详情页或任一对话框打开时不响应。
