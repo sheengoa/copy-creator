@@ -478,6 +478,7 @@ describe("integration regressions", () => {
     };
     // 详情页正文取材分派随收口在 useDetailContentSource。
     const detailMediaSource = readSource("../pages/ResourcePage/useDetailContentSource.ts");
+    const noteRenameSource = readSource("../pages/ResourcePage/useResourceDetailNoteRename.ts");
     const detailLoaderBlock = detailMediaSource.slice(
       detailMediaSource.indexOf("useEffect(() =>"),
       detailMediaSource.indexOf("const fullTextContent"),
@@ -510,7 +511,8 @@ describe("integration regressions", () => {
     // 媒体 URL 必须携带文件版本（mediaVersion）：地址只由路径决定时，
     // 覆盖保存的文件会命中 WebView 旧缓存，预览停留在旧图。
     expect(detailMediaSource).toContain("resolveResourceMediaUrl(resourcePath, mediaVersion)");
-    expect(detailPageSource).toContain("set_resource_note");
+    // 备注保存随备注子系统收口在 useResourceDetailNoteRename。
+    expect(noteRenameSource).toContain("set_resource_note");
     expect(detailPageSource).toContain("resource-note-input");
     expect(detailPageSource).toContain("metaResolution");
     // 列数计算收口共享 hook（三页同几何），页面不再自带 ResizeObserver 副本。

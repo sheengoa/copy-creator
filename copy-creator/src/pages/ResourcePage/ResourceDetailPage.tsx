@@ -19,6 +19,7 @@ import { useResourceAnnotations } from "./useResourceAnnotations";
 import { buildResourceGroupCrumbs, formatResourceBitrate, formatResourceDuration, formatResourceFileSize } from "./resourceUtils";
 import { textVersionSourceKey } from "../../domain/textVersions";
 import { useResourceVersionHistory } from "./useResourceVersionHistory";
+import { useResourceDetailNoteRename } from "./useResourceDetailNoteRename";
 import { type ResourceMediaKind } from "../../domain/mediaKind";
 import { getResourceFileName, isResourceTitleRenameable, splitResourceFileName } from "../../domain/fileName";
 import { formatResourceFolderPath } from "../../domain/groups";
@@ -136,17 +137,25 @@ export default function ResourceDetailPage({
   // 正文列自绘滚动进度条与页面滚动容器解析收口于 useDetailScrollThumb。
   const [lightboxSrc, setLightboxSrc] = useState<string | null>(null);
   const [mediaMeta, setMediaMeta] = useState<ResourceMediaMetadata>({});
-  const [noteDraft, setNoteDraft] = useState(record.resource_note ?? "");
-  const [savedNote, setSavedNote] = useState(record.resource_note ?? "");
-  const [noteSaving, setNoteSaving] = useState(false);
-  const [noteSaved, setNoteSaved] = useState(false);
-  const [noteError, setNoteError] = useState(false);
-  const noteSavedTimerRef = useRef<number | null>(null);
-  const noteInputRef = useRef<HTMLTextAreaElement | null>(null);
-  const [renameDraft, setRenameDraft] = useState<string | null>(null);
-  const [renameSaving, setRenameSaving] = useState(false);
-  const [renameError, setRenameError] = useState<string | null>(null);
-  const [contentEditing, setContentEditing] = useState(false);
+  // 备注/标题重命名子系统收口于 useResourceDetailNoteRename。
+  const {
+    noteDraft,
+    setNoteDraft,
+    noteDirty,
+    noteSaving,
+    noteSaved,
+    noteError,
+    setNoteError,
+    noteInputRef,
+    handleSaveNote,
+    renameDraft,
+    setRenameDraft,
+    setRenameError,
+    renameSaving,
+    renameError,
+    cancelRename,
+    commitRename,
+  } = useResourceDetailNoteRename({ record, onRecordUpdated, updateResourceNote });  const [contentEditing, setContentEditing] = useState(false);
   const [contentDraft, setContentDraft] = useState("");
   const [savedContent, setSavedContent] = useState("");
   const [contentSaving, setContentSaving] = useState(false);
@@ -160,17 +169,11 @@ export default function ResourceDetailPage({
   // 文本取材唯一入口（domain 判定）：有文件承载一律读文件全文——含详情页
   // 编辑后 type 已转为 text 的记录；无文件承载的纯文本资源走 segments。
   const externalTextPath = kind === "text" ? resourceTextPreviewPath(record) : null;
-  const noteDirty = noteDraft.trim() !== savedNote;
 
   useEffect(() => {
     setMediaMeta({});
     setLightboxSrc(null);
-    setNoteDraft(record.resource_note ?? "");
-    setSavedNote(record.resource_note ?? "");
-    setNoteSaved(false);
-    setNoteError(false);
-    setRenameDraft(null);
-    setRenameError(null);
+    // （备注/重命名/正文的记录切换重置随各自子系统收口。）
     setContentEditing(false);
     setContentSaved(false);
     setContentSaveError(null);
@@ -179,7 +182,6 @@ export default function ResourceDetailPage({
   }, [record.id, record.resource_note]);
 
   useEffect(() => () => {
-    if (noteSavedTimerRef.current !== null) window.clearTimeout(noteSavedTimerRef.current);
     if (contentSavedTimerRef.current !== null) window.clearTimeout(contentSavedTimerRef.current);
   }, []);
 
@@ -200,51 +202,8 @@ export default function ResourceDetailPage({
     return () => window.removeEventListener("resize", syncHeight);
   }, [contentDraft, contentEditing]);
 
-  // 备注输入框与正文编辑器同款：高度随内容自动伸缩（含分数缩放下
-  // scrollHeight 取整的 2px 余量），右下角不再提供手动拉伸把手；
-  // CSS 侧用 max-height 封顶（粘性侧栏不随页面滚动，不封顶时长备注
-  // 会把底部的保存按钮顶出视口外），封顶后由输入框内部滚动承接。
-  useEffect(() => {
-    const el = noteInputRef.current;
-    if (!el) return;
-    const syncHeight = () => {
-      // 所在面板 display:none 时 scrollHeight 恒为 0，会把高度压成 2px
-      // 且切回时依赖不变不会重算——此时跳过，等下次内容变化再校准。
-      if (el.clientWidth === 0) return;
-      el.style.height = "auto";
-      el.style.height = `${el.scrollHeight + 2}px`;
-    };
-    syncHeight();
-    window.addEventListener("resize", syncHeight);
-    return () => window.removeEventListener("resize", syncHeight);
-  }, [noteDraft, record.id]);
 
 
-  const handleSaveNote = async () => {
-    const note = noteDraft.trim();
-    if (noteSaving || note === savedNote) return;
-    setNoteSaving(true);
-    setNoteError(false);
-    try {
-      const saved = await invoke<string>("set_resource_note", {
-        id: record.id,
-        note,
-      });
-      setSavedNote(saved);
-      setNoteDraft(saved);
-      updateResourceNote(record.id, saved);
-      setNoteSaved(true);
-      if (noteSavedTimerRef.current !== null) window.clearTimeout(noteSavedTimerRef.current);
-      noteSavedTimerRef.current = window.setTimeout(() => {
-        setNoteSaved(false);
-        noteSavedTimerRef.current = null;
-      }, 2200);
-    } catch {
-      setNoteError(true);
-    } finally {
-      setNoteSaving(false);
-    }
-  };
 
   // 超长文本回退态的兜底动作：用系统默认程序打开文件（阅读/编辑皆宜）。
   const handleOpenExternal = () => {
@@ -335,49 +294,6 @@ export default function ResourceDetailPage({
     getResourceFileName(titlePath),
   );
 
-  const cancelRename = () => {
-    setRenameDraft(null);
-    setRenameError(null);
-  };
-
-  const commitRename = async () => {
-    if (renameDraft === null || renameSaving) return;
-    const stem = renameDraft.trim();
-    if (!stem) {
-      setRenameError(t("resources.nameRequired"));
-      return;
-    }
-    if (stem === currentStem) {
-      cancelRename();
-      return;
-    }
-    setRenameSaving(true);
-    setRenameError(null);
-    try {
-      const updated = await invoke<{
-        id: string;
-        resource_path?: string;
-        resource_relative_path?: string | null;
-        content?: string;
-      }>("rename_resource_file", { id: record.id, newName: stem });
-      onRecordUpdated({
-        ...record,
-        ...(updated.id ? { id: updated.id } : null),
-        ...(updated.resource_path !== undefined
-          ? { resource_path: updated.resource_path }
-          : null),
-        ...(updated.content !== undefined ? { content: updated.content } : null),
-        ...(updated.resource_relative_path
-          ? { resource_relative_path: updated.resource_relative_path }
-          : null),
-      });
-      setRenameDraft(null);
-    } catch (error) {
-      setRenameError(String(error));
-    } finally {
-      setRenameSaving(false);
-    }
-  };
 
   const detailReady = kind === "video" || kind === "audio"
     ? Boolean(mediaSource)
@@ -843,13 +759,13 @@ export default function ResourceDetailPage({
                   onKeyDown={(event) => {
                     if (event.key === "Enter") {
                       event.preventDefault();
-                      void commitRename();
+                      void commitRename(currentStem);
                     } else if (event.key === "Escape") {
                       event.preventDefault();
                       cancelRename();
                     }
                   }}
-                  onBlur={() => void commitRename()}
+                  onBlur={() => void commitRename(currentStem)}
                 />
                 {titleExtension && (
                   <span className="resource-detail-title-extension">{titleExtension}</span>
