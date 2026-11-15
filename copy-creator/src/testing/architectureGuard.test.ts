@@ -690,6 +690,7 @@ describe("架构守卫：领域规则必须全局共享", () => {
       ["styles/components", 1000],
       ["styles/resource", 1000],
       ["components/RadialMenu", 1000],
+      ["pages/ResourcePage.tsx", 1000],
       ["dev/mock", 1000],
       ["dev/tauriMock.ts", 1000],
     ];
