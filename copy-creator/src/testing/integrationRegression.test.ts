@@ -476,9 +476,11 @@ describe("integration regressions", () => {
       app: { security: { csp: string; assetProtocol: { enable: boolean } } };
       bundle: { targets: string[]; resources: Record<string, string> };
     };
-    const detailLoaderBlock = detailPageSource.slice(
-      detailPageSource.indexOf("useEffect(() =>"),
-      detailPageSource.indexOf("const title"),
+    // 详情页正文取材分派随收口在 useDetailContentSource。
+    const detailMediaSource = readSource("../pages/ResourcePage/useDetailContentSource.ts");
+    const detailLoaderBlock = detailMediaSource.slice(
+      detailMediaSource.indexOf("useEffect(() =>"),
+      detailMediaSource.indexOf("const fullTextContent"),
     );
 
     expect(batchSelectionSource).toContain("const selectAllRequestRef = useRef(0);");
@@ -507,7 +509,7 @@ describe("integration regressions", () => {
     expect(mediaSource).toContain("useResourceMediaSrc");
     // 媒体 URL 必须携带文件版本（mediaVersion）：地址只由路径决定时，
     // 覆盖保存的文件会命中 WebView 旧缓存，预览停留在旧图。
-    expect(detailPageSource).toContain("resolveResourceMediaUrl(resourcePath, mediaVersion)");
+    expect(detailMediaSource).toContain("resolveResourceMediaUrl(resourcePath, mediaVersion)");
     expect(detailPageSource).toContain("set_resource_note");
     expect(detailPageSource).toContain("resource-note-input");
     expect(detailPageSource).toContain("metaResolution");
@@ -755,7 +757,9 @@ describe("integration regressions", () => {
     expect(pageFullSource).toContain("hideResourceOps");
     expect(pageFullSource).not.toContain("pasteRecord");
     const detailSource = readSource("../pages/ResourcePage/ResourceDetailPage.tsx");
-    expect(detailSource).toContain("loadRecordPreviewSegments");
+    const detailMediaSource = readSource("../pages/ResourcePage/useDetailContentSource.ts");
+    // 取材分派（分段预览管线）随收口在 useDetailContentSource。
+    expect(detailMediaSource).toContain("loadRecordPreviewSegments");
     expect(detailSource).toContain("ResourceMediaPlayer");
     expect(clipboardStyles).not.toContain(".main-window-content-preview");
     expect(persistWindowSize).not.toContain("data-main-content-preview");

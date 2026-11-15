@@ -1,10 +1,4 @@
-import {
-  openResourceFile,
-  readResourceTextDetail,
-  readResourceTextPreview,
-  revealResourceFile,
-  type ResourceTextPreview,
-} from "../../domain/mediaAssets";
+import { openResourceFile, revealResourceFile } from "../../domain/mediaAssets";
 import { Fragment, useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { invoke } from "@tauri-apps/api/core";
@@ -18,7 +12,8 @@ import { useDetailScrollThumb } from "./useDetailScrollThumb";
 import { ImageLightbox } from "../../components/ImageLightbox";
 import FindReplaceBar from "../../components/FindReplaceBar";
 import { useResourceFindReplace } from "./useResourceFindReplace";
-import { loadRecordPreviewSegments, splitTextChunks, type RadialPreviewSegment } from "../../domain/preview";
+import { splitTextChunks } from "../../domain/preview";
+import { useDetailContentSource } from "./useDetailContentSource";
 import { type AnnotationKind } from "../../domain/annotations";
 import { useResourceAnnotations } from "./useResourceAnnotations";
 import { buildResourceGroupCrumbs, formatResourceBitrate, formatResourceDuration, formatResourceFileSize } from "./resourceUtils";
@@ -28,7 +23,6 @@ import { type ResourceMediaKind } from "../../domain/mediaKind";
 import { getResourceFileName, isResourceTitleRenameable, splitResourceFileName } from "../../domain/fileName";
 import { formatResourceFolderPath } from "../../domain/groups";
 import { inferResourceMediaKind } from "../../domain/mediaKind";
-import { resolveResourceMediaUrl } from "../../domain/mediaUrl";
 import { getResourcePath, getResourceTitle, recordTextEditable, resourceMediaVersion, resourceTextPreviewPath } from "../../domain/records";
 import { useRecordLocale } from "../../hooks/useRecordLocale";
 import {
@@ -133,11 +127,6 @@ export default function ResourceDetailPage({
   // 打开所在位置：仅文件承载记录可用（数据库承载的文本无文件可定位）。
   const revealPath = record.resource_path || (record.type === "file" ? record.content : null);
   const mediaVersion = resourceMediaVersion(record);
-  const [segments, setSegments] = useState<RadialPreviewSegment[] | null>(null);
-  const [textContent, setTextContent] = useState<ResourceTextPreview | null>(null);
-  // 加载失败的后端原因（文件丢失/非文本等），null=无错误；空串表示拿不到
-  // 具体原因，展示时回退泛化文案。超限不属于失败——后端截断返回。
-  const [errorReason, setErrorReason] = useState<string | null>(null);
   // 「用系统应用打开」失败反馈（超长文本回退态的兜底动作）。
   const [openExternalFailed, setOpenExternalFailed] = useState(false);
   // 手动刷新计数：顶栏「刷新」递增触发正文加载 effect 重跑——详情页正文
@@ -146,7 +135,6 @@ export default function ResourceDetailPage({
   // ── 文本标注（阅读态划选标记）子系统收口于 useResourceAnnotations ──
   // 正文列自绘滚动进度条与页面滚动容器解析收口于 useDetailScrollThumb。
   const [lightboxSrc, setLightboxSrc] = useState<string | null>(null);
-  const [mediaSource, setMediaSource] = useState<string | null>(null);
   const [mediaMeta, setMediaMeta] = useState<ResourceMediaMetadata>({});
   const [noteDraft, setNoteDraft] = useState(record.resource_note ?? "");
   const [savedNote, setSavedNote] = useState(record.resource_note ?? "");
@@ -319,64 +307,22 @@ export default function ResourceDetailPage({
     [record.resource_folder],
   );
 
-  useEffect(() => {
-    let cancelled = false;
-    const fail = (reason: unknown) => {
-      if (!cancelled) setErrorReason(typeof reason === "string" ? reason : "");
-    };
-    setSegments(null);
-    setTextContent(null);
-    setErrorReason(null);
-    setMediaSource(null);
-    if (kind === "video" || kind === "audio" || kind === "file" || kind === "image") {
-      if (kind === "video" || kind === "audio") {
-        resolveResourceMediaUrl(resourcePath, mediaVersion)
-          .then((url) => {
-            if (!cancelled) setMediaSource(url);
-          })
-          .catch(fail);
-      }
-      return () => {
-        cancelled = true;
-      };
-    }
-
-    if (externalTextPath) {
-      // 详情页优先全文（64 MB 上限内整读，前端分块虚拟渲染）；超上限
-      // 或读取失败回退 1 MB 截断预览，预览也失败才是真错误（文件缺失、
-      // 非文本、非 UTF-8），由 fail 透传原因。
-      readResourceTextDetail(externalTextPath)
-        .then((preview) => {
-          if (!cancelled) setTextContent(preview);
-        })
-        .catch(() => {
-          readResourceTextPreview(externalTextPath)
-            .then((preview) => {
-              if (!cancelled) setTextContent(preview);
-            })
-            .catch(fail);
-        });
-      return () => {
-        cancelled = true;
-      };
-    }
-
-    loadRecordPreviewSegments({
-      id: record.id,
-      recordType: record.type,
-      content: record.content,
-      contentTruncated: Boolean(record.content_truncated),
-      hasImages: Boolean(record.has_images),
-    })
-      .then((next: RadialPreviewSegment[]) => {
-        if (!cancelled) setSegments(next);
-      })
-      .catch(fail);
-    return () => {
-      cancelled = true;
-    };
-  }, [externalTextPath, kind, mediaVersion, record, resourcePath, textReloadKey]);
-
+  // 正文取材子系统（媒体 URL 解析/全文整读与截断回退/分段预览）
+  // 收口于 useDetailContentSource。
+  const {
+    segments,
+    textContent,
+    errorReason,
+    mediaSource,
+    fullTextContent,
+  } = useDetailContentSource({
+    kind,
+    record,
+    resourcePath,
+    mediaVersion,
+    externalTextPath,
+    textReloadKey,
+  });
   const title = getResourceTitle(record, kind, recordLocale);
 
   const renameable = isResourceTitleRenameable(record) && !hideResourceOps;
@@ -503,15 +449,6 @@ export default function ResourceDetailPage({
   // 都是文件本身，文件是全文的唯一事实来源。
   // 编辑目标与取材同源：一律指向 backing 文件（domain 判定已校验文本扩展名）。
   const textEditPath = kind === "text" ? externalTextPath : null;
-  const fullTextContent = useMemo(() => {
-    if (externalTextPath) return textContent?.content ?? null;
-    if (!segments) return null;
-    return segments
-      .filter((segment): segment is Extract<RadialPreviewSegment, { type: "text" }> =>
-        segment.type === "text")
-      .map((segment) => segment.content)
-      .join("\n");
-  }, [externalTextPath, segments, textContent]);
   // 全文加载后截断不再是唯一编辑门槛：正文过大同样不适合应用内编辑，
   // 用系统应用修改文件，改动经监听与媒体版本机制同步回来。闸门与写入
   // 侧（write_resource_text_content 的 ensure_capped_file，1 MiB =
